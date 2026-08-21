@@ -279,6 +279,10 @@ the same state again at 07:00" is preserved without duplicating storage.
 
 ## Technology
 
+None of this infrastructure exists at the start: collection begins with
+local Kuebiko captures only, and the stack below is introduced once real
+captures have been analyzed (see `docs/roadmap.md`).
+
 ```text
 Cloudflare Workers   HTTP ingestion API, later MCP
 Cloudflare D1        structured data (metadata, observations, …)

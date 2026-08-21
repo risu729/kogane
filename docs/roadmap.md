@@ -1,19 +1,44 @@
 # Roadmap
 
-Phases are ordered so that evidence collection runs long before any
-financial modeling is committed to. The single most important sequencing
-rule: **use phases 1–3 with real data for a while before freezing any schema
-from phase 4 onward.**
+Phases are ordered so that evidence collection runs long before any schema
+is committed to — including the raw layer's own schema. The single most
+important sequencing rule: **collect and analyze real captures (phases 0–1)
+before building any storage or freezing any schema (phase 2 onward).**
 
-## Phase 0 — Infrastructure
+## Phase 0 — Collect (no code)
 
-- Cloudflare Worker, D1 database, private R2 bucket.
-- Wrangler config, D1 migrations, CI.
+No server, no database, no custom code.
+
+- Periodic (e.g. weekly) Kuebiko sessions across all accounts: banks,
+  cards, brokers, crypto exchanges, aggregators, reward programs.
+- CSV/OFX/PDF exports saved into a designated local folder.
+- Capture root and exports folder backed up to private Google Drive
+  storage.
+
+This phase also surfaces the real-world cases the later layers must handle:
+pending → posted, amount/date/description changes, unstable external IDs,
+duplicates, refunds and partial refunds, card settlement debits,
+inter-account and cross-currency transfers, FX and foreign transaction fees,
+broker-reported valuations, reward expiry displays.
+
+## Phase 1 — Capture Analysis
+
+With a few weeks of real captures accumulated, characterize each source
+from `metadata.ndjson` and the saved bodies: internal JSON APIs vs HTML,
+payload shapes and sizes, noise ratio, how often data actually changes,
+observed pending → posted behavior. From that evidence, design the raw
+layer: which artifact metadata to keep, the source allowlist structure, and
+the ingestion tables.
+
+## Phase 2 — Infrastructure + Raw Evidence Collector
+
+Built only after phase 1, then backfilled with all accumulated captures.
+
+- Cloudflare Worker, D1 database, private R2 bucket, CI.
 - Bearer-token auth for the ingestion API.
+- Importer CLI (`import-kuebiko`, `ingest-file`).
 
-## Phase 1 — Raw Evidence Collector
-
-The only tables:
+Expected shape of the tables (to be finalized in phase 1):
 
 ```sql
 sources          -- registry: provider, ingestion type, domain allowlist
@@ -26,19 +51,6 @@ fetch_artifacts  -- run, source, url, method, status, mime,
 Blobs are content-addressed in R2 (dedupe); fetch history is append-only.
 `fetch_artifacts` keeps HTTP-level fields (URL, status) because they are the
 most useful signal for later parser development.
-
-Deliverables: ingestion API, `import-kuebiko`, `ingest-file`.
-
-## Phase 2 — Source Coverage
-
-No new schema. Get 10+ real sources flowing: banks, cards, brokers, crypto
-exchanges, aggregators, reward programs. Collect enough history to see the
-real-world cases the later layers must handle:
-
-pending → posted, amount/date/description changes, unstable external IDs,
-duplicates, refunds and partial refunds, card settlement debits,
-inter-account and cross-currency transfers, FX and foreign transaction fees,
-broker-reported valuations, reward expiry displays.
 
 ## Phase 3 — Observation Layer
 
@@ -131,9 +143,11 @@ evidence or observations.
 The first milestone is phases 0–3 only:
 
 ```text
-several real sources (bank / card / broker / aggregator)
+several real sources captured (bank / card / broker / aggregator)
       ↓
-everything stored as raw evidence, re-parseable
+raw schema designed from the actual captures
+      ↓
+everything backfilled into the raw store, re-parseable
       ↓
 typed balance / transaction / position observations extracted
 ```

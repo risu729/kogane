@@ -11,6 +11,21 @@ enough messy reality has been seen (pending → posted changes, amount/date/ID
 changes, duplicates, refunds, card settlements, FX and fees, broker
 valuations, reward expiry).
 
+## No Infrastructure Yet
+
+The "see real data before freezing a schema" principle applies to the raw
+layer itself. Which artifact metadata is worth keeping, how the source
+allowlist should be structured, and what the ingestion tables look like are
+all modeling decisions — so they are made *after* real captures have been
+inspected, not before.
+
+This is possible because a Kuebiko capture directory is already a complete
+raw archive: content-addressed bodies plus append-only NDJSON metadata.
+Collection therefore starts with no server, no database, and no custom code
+at all. Captures live on local disk (backed up, see below) and lose no value
+by waiting — importing them into cloud storage later is a retroactive,
+idempotent batch operation.
+
 ## Capture with Kuebiko
 
 [Kuebiko](https://github.com/risu729/kuebiko) is a passive Chrome CDP capture
@@ -38,9 +53,18 @@ of parsing HTML, and the request shapes come from captured reality instead of
 guesswork. The observation period is not throwaway work — the captures are
 already evidence.
 
-## Importer
+## Backup
 
-A local CLI imports a finished capture run:
+Captures contain credentials and full financial pages, and they exist only
+on one local disk. Until cloud ingestion exists, the capture root (and the
+exports folder) is synced to private Google Drive storage as a whole
+directory — a schema-free backup that commits to nothing about the data's
+structure. R2 is not needed while nothing on Cloudflare reads the data.
+
+## Importer (later)
+
+Once the raw layer schema has been designed from real captures, a local CLI
+imports a finished capture run:
 
 ```text
 kogane import-kuebiko <run-dir>
@@ -75,9 +99,10 @@ Captures contain credentials. The importer enforces:
 The R2 bucket is private; the ingestion API requires a bearer token stored as
 a Worker secret.
 
-## Other Ingestion Paths
+## Other Ingestion Paths (later)
 
-Not everything flows through the browser capture:
+Not everything flows through the browser capture. Until the ingestion API
+exists, exports are simply collected into the backed-up folder; afterwards:
 
 ```text
 kogane ingest-file <path> --source <source-id>
@@ -96,7 +121,9 @@ Preferred order when adding a source, cheapest first:
 4. Browser automation
 5. Manual entry
 
-## Ingestion API
+## Ingestion API (later)
+
+A sketch, to be finalized together with the raw schema:
 
 ```text
 POST /ingest/artifact     one raw object + artifact metadata
@@ -110,11 +137,13 @@ email handler, manual upload) can use it unchanged.
 
 ## Automation Phases
 
-1. **Now — manual.** Weekly Kuebiko session across all accounts; exports via
-   `ingest-file`. Data accumulates with zero scraper maintenance.
-2. **Next — analyze captures.** Query the accumulated artifacts per source
-   to identify stable internal API endpoints worth replaying, and which
-   sources actually change often enough to justify automation.
+1. **Now — manual, no code.** Weekly Kuebiko session across all accounts;
+   CSV/PDF exports saved into a designated folder; everything backed up to
+   Google Drive. Data accumulates with zero maintenance.
+2. **Next — analyze captures.** Aggregate the accumulated metadata per
+   source to characterize each site (internal JSON APIs vs HTML, noise
+   ratio, change frequency), design the raw layer schema and allowlist from
+   that evidence, and identify stable endpoints worth replaying.
 3. **Later — automate per source, selectively.** Replay internal APIs where
    possible (reusing the dedicated profile's session initially), browser
    automation only where necessary, on Cron triggers where feasible.
