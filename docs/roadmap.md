@@ -30,6 +30,12 @@ observed pending → posted behavior. From that evidence, design the raw
 layer: which artifact metadata to keep, the source allowlist structure, and
 the ingestion tables.
 
+For SBI Securities, SMBC, Mobile Suica, and PayPay this analysis is largely
+pre-done: `pnsk-lab/mnie` already identified the internal endpoints, request
+shapes, and encodings (see `docs/tooling.md`). Those sources can skip
+straight to endpoint replay; the capture-analysis effort concentrates on the
+long tail.
+
 ## Phase 2 — Infrastructure + Raw Evidence Collector
 
 Built only after phase 1, then backfilled with all accumulated captures.
@@ -68,6 +74,12 @@ Every observation records `parser_name` / `parser_version` and its raw
 provenance (`raw_object`, locator within it). Re-parsing all historical
 evidence with a newer parser, superseding prior observations, is a
 first-class operation from day one.
+
+The first parsers do not need to be written from scratch: `smcc-meisai-
+scraper`'s `parser.ts` (Vpass card) and `pnsk-lab/mnie`'s provider parse
+code already produce close-to-correct typed output. Both need the same two
+changes — emit parser name/version and raw locators, and stop dropping
+unrecognized fields — before adoption. See `docs/tooling.md`.
 
 ## Phase 4 — Identity
 
