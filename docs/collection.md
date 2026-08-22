@@ -121,6 +121,12 @@ Preferred order when adding a source, cheapest first:
 4. Browser automation
 5. Manual entry
 
+For several sources this work is already done by existing tools:
+`smcc-meisai-scraper` parses the Vpass card CSV, and `pnsk-lab/mnie` has
+`fetch`-based internal-API clients for SBI Securities, SMBC, Mobile Suica,
+and PayPay. See `docs/tooling.md` for the full catalog, the raw-evidence
+adaptation each needs, and the local-auth / cloud-ingestion split.
+
 ## Ingestion API (later)
 
 A sketch, to be finalized together with the raw schema:

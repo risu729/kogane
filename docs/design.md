@@ -335,3 +335,19 @@ though several inform the design:
   materialized onto transactions (with a documented 1:1-fallback persistence
   bug), aggregated positions without lots. Useful as a reference and a
   possible read model, not as the store of record.
+- **pnsk-lab/mnie** (MIT) — a self-hosted MoneyForward-style app. Same
+  "finished ledger" shape, so not a store of record, but its provider
+  clients are pure `fetch` (replayable internal APIs for SBI Securities,
+  SMBC, Mobile Suica, PayPay), its `auth-bitwarden` package logs in from a
+  local Bitwarden vault, and its type model (`TransactionObservation`,
+  `EconomicEvent`/`Posting`, `MatchEvidence`) independently mirrors this
+  design. Reused at the provider and auth level — see `docs/tooling.md`.
+- **hirano00o/acctf** (MIT) — Go + Playwright scraper that captures cost
+  basis and covers Sumishin SBI Net Bank. Kept as a scraping reference for
+  what to extract, not adopted (browser automation, not serverless).
+
+Owned components that already implement parts of this design —
+[kuebiko](https://github.com/risu729/kuebiko) as the raw layer and
+[smcc-meisai-scraper](https://github.com/risu729/smcc-meisai-scraper) as a
+card-statement parser — and how all of the above map onto the four layers,
+are cataloged in `docs/tooling.md`.

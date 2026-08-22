@@ -7,4 +7,5 @@ different rules.
 
 - [Design](docs/design.md)
 - [Evidence collection](docs/collection.md)
+- [Existing tools and reuse](docs/tooling.md)
 - [Roadmap](docs/roadmap.md)
