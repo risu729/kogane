@@ -27,7 +27,7 @@ Cost is 1 (small wrapper) through 5 (device-bound or adversarial automation).
 | Mizuho Bank | P1 | Mizuho Direct/app | [#14](https://github.com/risu729/kogane/pull/14) | D | 3-4 | draft complete |
 | Japan Post Bank | P1 | Yucho Direct/app | [#15](https://github.com/risu729/kogane/pull/15) | D | 3 (manual CSV: 2) | draft complete |
 | Sony Bank | P1 | Sony Bank web/app | pending | — | — | queued |
-| Minna Bank | P1 | mobile app | pending | — | — | queued |
+| Minna Bank | P1 | mobile app | [#16](https://github.com/risu729/kogane/pull/16) | E | 1-2 (device UI: 5) | draft complete |
 | Bank of Kyoto | P1 | Kyogin Direct/app | pending | — | — | queued |
 | Westpac | P1 | web/app | pending | — | — | queued |
 | St.George Bank | P1 | web/app | pending | — | — | queued |
