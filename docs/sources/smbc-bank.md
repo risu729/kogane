@@ -8,6 +8,7 @@
 - **Oliveは別の銀行APIではない**。銀行口座側はSMBCダイレクトとWeb通帳を含むパッケージであり、Olive専用画面よりもSMBCダイレクトの口座一覧・明細を正本とする。
 - `pnsk-lab/mnie` の `provider-smbc-direct` は、普通預金1口座について、アプリ承認付きログイン、残高、期間指定の入出金明細、セッション再利用まで実装している。ブラウザを起動せず通常のHTTPリクエストで動くため、MVPの有力な土台になる。
 - SMBCセーフティパス登録済みの契約では、登録端末での生体認証が**ログインの都度**必要になる。したがって現時点の自動化見込みは、**人がQR/アプリ承認した後の収集は自動化可能、期限切れ後の再ログインは有人**である。
+- Safety Passは銀行側の登録受理、契約者番号と登録端末の紐付け、解除・失効状態を含む。完全再現/回避は対象外かつ見込みが低く、未改変の公式アプリによる有人承認を支援して正規sessionを受け取る構成を推奨する。
 - ログイン側の `direct.smbc.co.jp` と取引側の `direct3.smbc.co.jp` がAkamai edgeを使うことは確認できた。Bot Manager系の保護も有力だが、具体的なWAFポリシーと認証後エンドポイントでの判定条件は未確認である。
 - 個人口座向け公式APIは存在するが、契約済みの電子決済等代行業者向けであり、個人開発者が自己口座用トークンを直接発行する公開経路は確認できなかった。本プロジェクトではaggregatorを避けるため採用しない。
 
@@ -83,6 +84,67 @@ SMBCダイレクトではOliveの対象普通預金が「残高別普通」「�
 - 機種変更や端末生体情報の変更では解除・再登録が必要になる。[公式機種変更手順](https://www.smbc.co.jp/kojin/direct/securi/safetypass/kishuhenko/)
 
 従来のワンタイムパスワードはSMBCセーフティパスと併用できず、主に振込等の重要取引用である。セーフティパスを解除して資格情報だけの読み取りログインに寄せる案は、セキュリティを落とし、現行仕様で継続利用できる保証もないため推奨しない。
+
+### Safety Passの登録・失効に関する公式仕様
+
+公式手順と[SMBCダイレクト利用規定](https://www.smbc.co.jp/kojin/direct/pdf/directkitei.pdf?version=260401)から確認できる範囲は次のとおりである。
+
+- 登録は三井住友銀行アプリから申し込み、利用規定への同意、端末上の生体認証、本人確認を経て完了する。本人確認はSMS（目安約2分）、またはマイナンバーカード/運転免許証のIC読取と顔撮影（目安約5分）を選べる。[公式登録手順](https://www.smbc.co.jp/kojin/direct/securi/safetypass/touroku/)
+- 銀行が申し込みを受け付け、SMBCダイレクトの契約者番号と、登録操作に用いた端末を紐付ける。生体情報は銀行へ送信されず、銀行サーバーにも保存されない。照合は端末の生体認証機能で行われる。
+- 登録端末上のログインでは端末の生体認証を行う。PC/別端末では、ブラウザに表示されたQRまたはアプリへのリンクを登録端末で開き、登録端末に表示された内容を利用者本人が確認・承認し、生体認証を行った後、元のブラウザでログインを完了する。[公式ログイン手順](https://www.smbc.co.jp/kojin/direct/securi/safetypass/login/)
+- 機種変更は旧端末で解除して新端末で再登録する。旧端末を利用できない場合は、新端末から公式の本人確認を伴う解除手続きを行う。[公式機種変更手順](https://www.smbc.co.jp/kojin/direct/securi/safetypass/kishuhenko/)
+- Face ID/Touch ID等、端末の生体情報を変更した場合も解除・再登録が必要になる。[公式生体情報変更手順](https://www.smbc.co.jp/kojin/direct/securi/safetypass/seitaihenko/)
+- 登録端末が使える場合はアプリ内で解除し、強制ログアウトされる。使えない場合は、本人確認書類のIC読取と顔撮影（目安約5分）、書類画像・SMS・顔撮影（目安約5営業日）、またはSMS（目安約5分）による解除経路がある。SMS解除後は振込等の一部機能が約1週間制限される。[公式解除手順](https://www.smbc.co.jp/kojin/direct/securi/safetypass/kaijyo/)
+
+以上から、Safety Passは単なるローカル生体認証画面ではなく、少なくとも**銀行側が受理する登録、契約者番号と登録端末の紐付け、解除・失効状態**を含む認証機構である。なお、解除・再登録は設定変更に当たるため、本調査および読み取り専用の実装検証では実行しない。
+
+### Safety Pass内部機構: 確認事実と推測
+
+#### 確認できた事実
+
+- 利用規定は、生体情報の照合が端末内で行われ、生体情報自体は銀行に送信・保存されないと明記している。
+- 銀行側には、申し込みの受理、契約者番号と登録端末の対応、解除・失効を管理する状態がある。
+- PC/別端末ログインでは、登録端末に表示された情報を利用者が確認し、銀行所定の手続きと生体認証で承認する。
+- `mnie` の公開コードでは、Web側が生成した `userId`、`confirmationNumber`、`createdTime` を `smbcdirectapp:///biometrics/ADBA` deep linkへ渡し、公式アプリ承認後にWebの完了処理を行う。これは短寿命challengeとサーバー側session issuanceを伴う構成と整合するが、アプリ内部の署名方式までは示さない。
+- 公式掲載は、root化履歴のある端末で正常動作しない場合があること、AndroidでUSBデバッグが有効だと起動しないことを明記している。
+
+#### 推測・未確認
+
+- 登録端末の秘密鍵または同等のcredentialをAndroid Keystore、iOS Keychain/Secure Enclave等に保存し、対応する公開鍵またはcredential IDを銀行側登録に結び付けている可能性が高い。ただし鍵形式、alias、hardware-backed要件は未確認である。
+- QR/deep linkは短寿命のchallengeを指し、アプリが登録credentialに束縛されたresponseを返すchallenge-response方式である可能性が高い。ただしnonce、署名対象、アルゴリズム、リプレイ防止方式は未確認である。
+- root/USBデバッグ制限から端末integrityを検査していることは推定できるが、Google Play Integrity、Apple App Attest/DeviceCheck、独自attestationの利用は確認できていない。
+- 証明書ピンニングが実装されている可能性はあるが未確認である。通常のOS trust storeだけを使う構成も排除できない。
+
+銀行側に登録credential、端末状態、失効状態がある場合、APKから画面遷移やリクエストschemaを判明させてもSafety Passの完全再現には足りない。登録済み秘密鍵を安全領域から複製できず、銀行側の登録済み公開鍵/credentialとの対応を作れないためである。さらに銀行はchallengeの期限・一回性、アプリ版、risk scoring、端末integrity/attestation、鍵rotation、解除状態をサーバー側で検証できる。したがって、正規登録のないclientがpayloadだけを模倣しても受理されない可能性が高く、完全再現の成功見込みは低い。
+
+### Future work: 正規承認の支援と再現調査の境界
+
+推奨する将来実装はSafety Passそのもののclone/bypassではなく、**未改変の公式アプリと利用者本人の承認を使った正規のsession issuanceを支援するorchestrator**である。
+
+1. 公式Webへ通常のログイン要求を開始する。
+2. 銀行が発行したQR/deep link、期限、対象ログインを利用者へそのまま表示する。
+3. 利用者が登録端末の公式アプリで表示内容を確認し、生体認証して承認する。
+4. 銀行指定の間隔で完了状態をpollし、承認後に正規発行されたWeb sessionだけを受領する。
+5. sessionを暗号化保存し、許可リスト化した残高・明細のread endpointだけに使う。期限切れ時は再度有人承認を要求する。
+
+この案は、生体認証の自動入力、登録端末credentialの抽出、challengeの偽造/再送、端末attestationの回避、Safety Passの登録・解除を行わない。Safety Passのclone/bypassは実装対象外であり、将来調査でも実行しない。
+
+#### 段階的な検証計画
+
+| 段階 | 内容 | 予想コスト | リスク | 成功判定 | 中止・後退条件 |
+| --- | --- | ---: | --- | --- | --- |
+| 0. 文書・公開コードの状態機械化 | 公式手順、利用規定、`mnie`から登録済み/未登録、challenge発行、承認待ち、session発行、失効を図式化 | 1/5 | 低 | Webとアプリの責務、未確認事項、読み取り専用境界を説明できる | なし。個人情報を使わない |
+| 1. 署名確認済みAPKの静的解析 | manifest、deep link、exported component、host、network security config、難読化/native library、Keystore API、Play Integrity/App Attest系SDKの参照を棚卸し | 2–3/5 | 低～中 | componentと保護機構の「候補」を特定し、事実/推測を更新できる | Play配布物との署名・来歴を確認できない場合。秘密鍵やtoken抽出が必要になった場合 |
+| 2. 正常な実機でのblack-box観測 | 本人が未改変公式アプリを操作し、本人名義口座のログインだけを行う。deep link遷移、表示、時刻、期限、retry、session発行前後を記録 | 3/5 | 中 | challengeの寿命、承認待ち状態、session切替を、設定変更や取引なしで再現できる | 登録/解除、生体設定変更、振込・設定画面への遷移が必要になった場合 |
+| 3. Kuebiko/受動proxy観測 | DNS/TLSの接続先、要求時刻等を観測し、アプリが通常のユーザーCAを受け入れる場合に限ってHTTP sequenceを確認 | 3–4/5 | 中 | login challengeからsession issuanceまでの要求順序を把握できる | pinning/integrity/anti-debugに阻止された時点。pinning解除、hook、root、Frida、trust manager改変、attestation回避へ進まない |
+| 4. 正規承認orchestrator | QR/deep link表示、利用者通知、期限付きpoll、承認後sessionの暗号化保存、read endpoint実行 | 3/5 | 低～中 | 未改変公式アプリで本人承認した場合だけsessionを取得し、残高・明細だけ読める | 無人化にcredential抽出、challenge replay/forge、保護機構回避が必要と判明した場合 |
+| Safety Pass完全再現/回避 | 登録credential、署名、attestation等を独自clientで代替 | 5/5以上 | 高 | **評価・実装しない** | 常に対象外。正規承認orchestratorへ戻す |
+
+APK静的解析で分かるのは、宣言されたcomponent、文字列/host、SDK参照、network security設定、Keystore API使用箇所等であり、hardware-backed秘密鍵、実際の銀行側登録状態、サーバーのrisk ruleは分からない。難読化されていれば、参照の存在だけで採用方式を確定してはならない。
+
+実機観測とKuebiko/受動proxyでは、アプリlifecycle、deep link routing、接続先、要求順序、承認前後のsession変化を調べられる。ただし、通常の端末・未改変アプリ・本人操作・読み取りログインの範囲に限る。証明書ピンニングで内容を見られない場合は、それ自体を確認結果として記録して中止する。利用規定が禁じる端末の偽造・改変、第三者による承認、表示内容を確認しない承認に当たる方法は採用しない。
+
+調査全体の成功判定は「Safety Passを再実装できたこと」ではなく、**公式アプリの有人承認を維持したまま、正規発行sessionを安定して受け取り、読み取り処理へ安全に引き渡せること**とする。server-bound key、attestation、pinningのいずれかが確認された場合は、完全再現を断念する追加根拠とし、有人承認経路に固定する。
 
 ### セッション再利用
 
@@ -195,10 +257,12 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 | 案 | 実装コスト | 自動化レベル | データ範囲 | 判断 |
 | --- | ---: | --- | --- | --- |
 | `mnie`を安全化して普通預金を取得 | 3/5 | 初回/再ログインは有人、認証後は自動 | 普通預金残高・期間明細 | **採用候補** |
+| Safety Pass正規承認orchestrator | 3/5 | QR提示・完了pollは自動、生体承認は常に有人 | 認証済みWeb session | **推奨**。公式アプリを変更しない |
 | Webブラウザで公式CSVを取得 | 3/5 | アプリ承認は有人、その後は自動 | Web通帳普通・外貨等、画面が対応する科目 | 検算・fallbackとして有用 |
 | Web内部プロトコルを複数口座・外貨・定期へ拡張 | 4/5 | 認証後は自動 | 口座一覧、複数科目、預入ロット | 普通預金MVP後に実施 |
 | 公式アプリをUI自動化 | 5/5 | 生体認証で有人、端末保守も必要 | アプリ表示全般 | 非推奨 |
-| APKからネイティブAPIを再実装 | 5/5 | 未知 | アプリ固有機能まで拡張可能性 | Webで不足した場合のみ |
+| APKからread API候補を調査 | 3–4/5 | 調査のみ | アプリ固有機能まで拡張可能性 | Webで不足した場合のみ。pinning/integrity回避はしない |
+| Safety Passをclone/bypass | 5/5以上 | 見込みは低い | 認証機構 | **対象外・実装しない** |
 | 契約済みaggregator API | Kogane側1/5 | 高い | 広い | 方針により不採用 |
 
 ## 推奨方針
@@ -235,3 +299,6 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 - 外貨CSV/内部JSONの通貨、小数桁、適用レート、取引後残高の正確なschema
 - Web通帳の貯蓄預金について、現行FAQと旧ヘルプで異なる履歴期間の実挙動
 - 公式Play配布物の分割APK構成、難読化、証明書ピンニング、アプリ用anti-bot SDK
+- Safety Passの登録credentialが端末secure storageにどう保存され、銀行側登録と何で対応付けられるか
+- challenge-responseの署名方式、有効期限、一回性、リプレイ防止、鍵rotation
+- Google Play Integrity、Apple App Attest/DeviceCheck、独自attestationの採否
