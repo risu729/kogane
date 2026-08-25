@@ -51,6 +51,52 @@ fix.
   Playwright or bare CDP over a fresh profile is insufficient on both Windows
   and Linux.
 
+## Fresh-profile traffic forensics
+
+A second manual bootstrap in a new persistent Windows/Kuebiko profile produced
+two native HTML form submissions to `/memapi/jaxrs/xt_login/agree/v1`. Both were
+rejected with an HTML `403` from `AkamaiGHost`; no authenticated Vpass API call
+followed. An older successful established-profile capture used the same native
+form encoding and endpoint, so form encoding by itself does not explain the
+difference. A separate successful JSON request seen in another capture was an
+internal API-style call and is not the right control for the native login form.
+
+The failed run did collect and transmit substantial Akamai telemetry:
+
+- the page loaded `/akam/13/1129fc33` and posted the 24 named fields
+  `ap,av,bp,br,bt,crc,cv,dp,fh,fonts,fp,ieps,jsv,lt,nap,nav,ps,sp,sr,t,timing,u,z,zh`
+  to `/akam/13/pixel_1129fc33`;
+- it loaded a rotating, obfuscated first-party Bot Manager script and made 24
+  unique posts whose JSON body had the sole top-level key `sensor_data`;
+- every sensor post was accepted with `201`, including bursts immediately
+  before both rejected login requests. Sensor ingestion and authorization of a
+  protected endpoint are therefore separate decisions;
+- the current script directly references the active element, its `id`, `name`,
+  `for`, `placeholder`, ARIA labels and input type. This proves field identity
+  and field-type collection, not collection of the entered value;
+- the script and pixel probes inspect browser, navigator, display, storage,
+  capability, font, canvas and timing surfaces. Akamai's published material
+  additionally describes mouse, click, scroll, key, touch and session-flow
+  telemetry. The opaque `sensor_data` value prevents a field-by-field decode of
+  the current payload without reversing that script build.
+
+The page also called Vpass's own `UAService/getDevice/v1`, independently of the
+Akamai collector, and Adobe Experience Edge received ordinary analytics and
+screen/browser fields. Those calls should not be conflated with the Akamai
+decision.
+
+Both the successful candidate and failed profile used cookie names including
+`_abck`, `bm_sz`, `ak_bmsc`, `bm_sv` and `bm_mi`. Values were intentionally not
+captured or compared, and the failed run had not yet emitted its shutdown-time
+storage snapshot. Cookie-name presence alone therefore says nothing about the
+validity of the state. The evidence remains consistent with differences in
+cookie value/age/update order, server-side score, rotating sensor build, profile
+continuity or a combination of those factors. It is not consistent with the
+simple explanation that the manual run generated too few events.
+
+For future probes, stop after the first login `403`. Repeating a rejected login
+in the same profile adds no useful control and may change server-side state.
+
 ## Architecture consequence
 
 The OCI Kubernetes collector remains a reasonable runtime for providers that
