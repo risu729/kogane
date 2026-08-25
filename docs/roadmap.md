@@ -9,8 +9,10 @@ before building any storage or freezing any schema (phase 2 onward).**
 
 No server, no database, no custom code.
 
-- Periodic (e.g. weekly) Kuebiko sessions across all accounts: banks,
-  cards, brokers, crypto exchanges, aggregators, reward programs.
+- Periodic (e.g. weekly) Kuebiko sessions across direct account surfaces:
+  banks, cards, brokers, crypto exchanges, stored-value services, and reward
+  programs. Aggregators are optional reconciliation inputs, not required
+  collection targets.
 - CSV/OFX/PDF exports saved into a designated local folder.
 - Capture root and exports folder backed up to private Google Drive
   storage.
@@ -163,7 +165,7 @@ evidence or observations.
 The first milestone is phases 0–3 only:
 
 ```text
-several real sources captured (bank / card / broker / aggregator)
+several direct real sources captured (bank / card / broker / stored value or rewards)
       ↓
 raw schema designed from the actual captures
       ↓

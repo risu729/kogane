@@ -1,0 +1,100 @@
+category,provider_or_service,asset_or_reward_type,unit,official_surface,ownership,holding_evidence,research_priority,collection_policy
+デビットカード,住信SBIネット銀行デビット,スマプロポイント / dポイント,pt,アプリ,個人,account-indicated-product-unconfirmed,P0,direct-official-source
+プリペイド・コード決済,PayPay,PayPayマネー / マネーライト,JPY,PayPayアプリ,個人,confirmed-in-source-sheet,P0,direct-official-source
+プリペイド・コード決済,PayPay,PayPayポイント（通常・期間限定）,pt,PayPayアプリ,個人,account-confirmed-product-unconfirmed,P0,direct-official-source
+交通,モバイルSuica,SF残高,JPY,モバイルSuica,個人,confirmed-in-source-sheet,P0,direct-official-source
+証券・暗号資産,SBI証券,預り金,JPY/USD,SBI証券サイト,個人,confirmed-in-source-sheet,P0,direct-official-source
+証券・暗号資産,SBI証券,株式・投信の評価額,JPY/USD,SBI証券サイト,個人,confirmed-in-source-sheet,P0,direct-official-source
+銀行(日本),三井住友銀行,残高別金利型普通預金,JPY,SMBCダイレクト / Olive,個人,confirmed-in-source-sheet,P0,direct-official-source
+銀行(日本),三井住友銀行,外貨普通預金（AUD）,AUD,SMBCダイレクト,個人,confirmed-in-source-sheet,P0,direct-official-source
+銀行(日本),三井住友銀行 Olive,Vポイント（Vポイントアッププログラム）,pt,Vpass,個人,confirmed-in-source-sheet,P0,direct-official-source
+銀行(日本),住信SBIネット銀行（ドコモSMTBネット銀行）,代表口座 円普通預金,JPY,アプリ,個人,confirmed-in-source-sheet,P0,direct-official-source
+銀行(日本),住信SBIネット銀行（ドコモSMTBネット銀行）,目的別口座（最大10・円普通のサブ口座）,JPY,アプリ,個人,account-confirmed-product-unconfirmed,P0,direct-official-source
+銀行(日本),住信SBIネット銀行（ドコモSMTBネット銀行）,SBIハイブリッド預金,JPY,アプリ / SBI証券,個人,account-confirmed-product-unconfirmed,P0,direct-official-source
+銀行(日本),住信SBIネット銀行（ドコモSMTBネット銀行）,円定期 / 積立 / 仕組預金 / 外貨普通 / 外貨定期9通貨 / 外貨積立,多通貨,アプリ,個人,account-confirmed-product-unconfirmed,P0,direct-official-source
+銀行(日本),住信SBIネット銀行（ドコモSMTBネット銀行）,スマプロポイント（d連携後は dポイント）,pt,アプリ,個人,account-confirmed-product-unconfirmed,P0,direct-official-source
+証券・暗号資産,SBI VCトレード,暗号資産残高,各種,VCTRADE,個人,confirmed-in-source-sheet,P1,direct-official-source
+証券・暗号資産,メルコイン,ビットコイン,BTC,メルカリアプリ,個人,confirmed-in-source-sheet,P1,direct-official-source
+銀行(日本),SBI新生銀行,パワーフレックス 円普通預金,JPY,SBI新生アプリ,個人,confirmed-in-source-sheet,P1,direct-official-source
+銀行(日本),SBI新生銀行,2週間満期預金,JPY,SBI新生アプリ,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),SBI新生銀行,円定期 / 外貨普通 / 外貨定期 / パワード定期,多通貨,SBI新生アプリ,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),SMBC信託銀行プレスティア,円普通預金（7桁口座）,JPY,プレスティア オンライン,個人,confirmed-in-source-sheet,P1,direct-official-source
+銀行(日本),SMBC信託銀行プレスティア,マルチマネー口座 円普通預金（8桁口座）,JPY,プレスティア オンライン,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),SMBC信託銀行プレスティア,マルチマネー口座 外貨普通預金（AUD）,AUD,プレスティア オンライン,個人,confirmed-in-source-sheet,P1,direct-official-source
+銀行(日本),SMBC信託銀行プレスティア,マルチマネー口座 外貨普通預金（他16通貨）,多通貨,プレスティア オンライン,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),SMBC信託銀行プレスティア,円定期 / 外貨定期 / 外貨積立 / プレミアム・デポジット,多通貨,プレスティア オンライン,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),ソニー銀行,円普通預金,JPY,ソニー銀行アプリ,個人,confirmed-in-source-sheet,P1,direct-official-source
+銀行(日本),ソニー銀行,円定期 / 外貨普通 / 外貨定期 / 外貨積立,多通貨,ソニー銀行アプリ,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),みずほ銀行,総合口座 普通預金,JPY,みずほダイレクト,個人,confirmed-in-source-sheet,P1,direct-official-source
+銀行(日本),みずほ銀行,みずほグローバル口座（ネット専用）円定期 / 外貨定期6通貨,多通貨,みずほダイレクト,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),みずほ銀行,みずほ外貨普通預金（6通貨）/ 円定期 / 積立定期 / 貯蓄預金,多通貨,みずほダイレクト,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),みずほ銀行,みずほポイント,pt,みずほポイントモール,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),みんなの銀行,Wallet（普通預金）,JPY,みんなの銀行アプリ,個人,confirmed-in-source-sheet,P1,direct-official-source
+銀行(日本),みんなの銀行,Saving（貯蓄預金）/ Box（最大20個の仮想口座）,JPY,みんなの銀行アプリ,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),ゆうちょ銀行,通常貯金,JPY,ゆうちょダイレクト,個人,confirmed-in-source-sheet,P1,direct-official-source
+銀行(日本),ゆうちょ銀行,定額貯金 / 定期貯金 / 通常貯蓄貯金,JPY,ゆうちょダイレクト,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),三菱UFJ銀行,普通預金 / スーパー普通預金,JPY,三菱UFJダイレクト,個人,confirmed-in-source-sheet,P1,direct-official-source
+銀行(日本),三菱UFJ銀行,つかいわけ口座（独立した普通預金）,JPY,Mableアプリ,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),三菱UFJ銀行,外貨貯蓄預金,多通貨,三菱UFJダイレクト,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),三菱UFJ銀行,外貨普通 / 外貨定期（ホット定期）/ 円定期,多通貨,三菱UFJダイレクト,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),三菱UFJ銀行,グローバルポイント（メインバンク プラス）,pt,三菱UFJダイレクト,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(日本),京都銀行,普通預金,JPY,京銀アプリ,個人,confirmed-in-source-sheet,P1,direct-official-source
+銀行(日本),京都銀行,円定期 / 外貨普通 / 外貨定期 / 洛楽外貨,多通貨,京銀ダイレクト,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(豪州),St.George Bank,Transaction account 残高,AUD,St.George app,個人,confirmed-in-source-sheet,P1,direct-official-source
+銀行(豪州),St.George Bank,Savings（Incentive Saver / Maxi Saver）/ Term Deposit / Foreign Currency Account / Worldwide Wallet,多通貨,St.George app,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+銀行(豪州),Westpac Bank,Transaction account 残高,AUD,Westpac app,個人,confirmed-in-source-sheet,P1,direct-official-source
+銀行(豪州),Westpac Bank,Savings（Westpac Life / eSaver）/ Term Deposit / Foreign Currency Account,多通貨,Westpac app,個人,account-confirmed-product-unconfirmed,P1,direct-official-source
+クレジットカード,Amazon Mastercard,Amazonポイント,pt,Amazon,個人,confirmed-in-source-sheet,P2,direct-official-source
+クレジットカード,J-WESTカード（MUFG発行）,WESTERポイント,pt,WESTER,個人,confirmed-in-source-sheet,P2,direct-official-source
+クレジットカード,JALカード（MUFG発行）,JALマイル,マイル,JMB / My Digital Connect,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+クレジットカード,JCBカードW NL,J-POINT,pt,MyJCB,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+クレジットカード,JP BANK VISA ALente,JPバンクカードポイント,pt,JP BANKカードWEB,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+クレジットカード,Olive Gold Credit,Vポイント,pt,Vpass / Olive,個人,confirmed-in-source-sheet,P2,direct-official-source
+クレジットカード,エポスカード,エポスポイント,pt,エポスNet,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+クレジットカード,メルカード,メルカリポイント,pt,メルカリアプリ,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+クレジットカード,リクルートカード（JCB）,リクルートポイント → Pontaポイント,pt,リクルートID / MyJCB,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+クレジットカード,三井住友カード Master(NL),Vポイント,pt,Vpass,個人,confirmed-in-source-sheet,P2,direct-official-source
+クレジットカード,三井住友カード VISA(NL),Vポイント,pt,Vpass,個人,confirmed-in-source-sheet,P2,direct-official-source
+クレジットカード,三井住友カード ゴールドマスター(NL),Vポイント,pt,Vpass,個人,confirmed-in-source-sheet,P2,direct-official-source
+クレジットカード,三井住友カード ゴールドマスター(NL) 家族カード ×2,Vポイント（本人に集約）,pt,Vpass,家族カード（本人請求）,confirmed-in-source-sheet,P2,direct-official-source
+クレジットカード,三菱UFJカード,グローバルポイント,pt,My Digital Connect,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+クレジットカード,楽天カード,楽天ポイント,pt,楽天e-NAVI / 楽天PointClub,個人,confirmed-in-source-sheet,P2,direct-official-source
+デビットカード,MUFG Debit,グローバルポイント,pt,三菱UFJダイレクト,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+デビットカード,Sony Bank WALLET,現金キャッシュバック（最大2%）,JPY,ソニー銀行アプリ,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+デビットカード,みずほJCBデビット,J-POINT,pt,MyJCB,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+デビットカード,みんなの銀行デビット（JCB）,現金キャッシュバック（0.2% / 1.0%）,JPY,みんなの銀行アプリ,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+デビットカード,京銀JCBデビット,J-POINT,pt,MyJCB,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+プリペイド・コード決済,AirWallet,チャージ残高,JPY,AirWalletアプリ,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+プリペイド・コード決済,ANA Pay,チャージ残高,JPY,ANAアプリ,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+プリペイド・コード決済,au PAY,au PAY残高,JPY,au PAYアプリ,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+プリペイド・コード決済,J-Coin Pay,チャージ残高,JPY,J-Coin Payアプリ,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+プリペイド・コード決済,JAL Pay,JAL Payポイント（残高）,JPY,JAL Payアプリ,個人,confirmed-in-source-sheet,P2,direct-official-source
+プリペイド・コード決済,VポイントPay,チャージ残高,JPY,VポイントPayアプリ,個人,confirmed-in-source-sheet,P2,direct-official-source
+プリペイド・コード決済,エポスVisaプリペイド,チャージ残高,JPY,エポスアプリ,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+プリペイド・コード決済,メルカリ,メルカリポイント,pt,メルカリアプリ,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+プリペイド・コード決済,メルペイ,売上金 / メルペイ残高,JPY,メルカリアプリ,個人,confirmed-in-source-sheet,P2,direct-official-source
+交通,JRE POINT,ポイント,pt,JRE POINT,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+交通,Opal,残高,AUD,Opal,個人,confirmed-in-source-sheet,P2,direct-official-source
+交通,wesmo!,残高（出金可 / 出金不可の2種）,JPY,WESTERアプリ,個人,confirmed-in-source-sheet,P2,direct-official-source
+交通,スマートEX,グリーンプログラムポイント,pt,スマートEX,個人,account-indicated-product-unconfirmed,P2,direct-official-source
+ポイント・マイル,Amazonギフトカード残高,残高,JPY,Amazon,個人,confirmed-in-source-sheet,P3,direct-official-source
+ポイント・マイル,Amazonポイント,ポイント,pt,Amazon,個人,confirmed-in-source-sheet,P3,direct-official-source
+ポイント・マイル,ANAマイレージクラブ,ANAマイル,マイル,ANAアプリ,個人,account-indicated-product-unconfirmed,P3,direct-official-source
+ポイント・マイル,JALマイレージバンク（JMB）,JALマイル,マイル,JAL,個人,confirmed-in-source-sheet,P3,direct-official-source
+ポイント・マイル,KrisFlyer,マイル,マイル,Singapore Airlines,個人,account-indicated-product-unconfirmed,P3,direct-official-source
+ポイント・マイル,My AIRDO,ポイント,pt,AIRDO,個人,account-indicated-product-unconfirmed,P3,direct-official-source
+ポイント・マイル,Pontaポイント / リクルートポイント,ポイント,pt,リクルートID,個人,account-indicated-product-unconfirmed,P3,direct-official-source
+ポイント・マイル,Qantas Frequent Flyer,Qantas Points,pt,Qantas,個人,account-indicated-product-unconfirmed,P3,direct-official-source
+ポイント・マイル,United MileagePlus,マイル,マイル,United,個人,account-indicated-product-unconfirmed,P3,direct-official-source
+ポイント・マイル,Vポイント,ポイント残高,pt,Vポイントサイト / Vpass,個人,confirmed-in-source-sheet,P3,direct-official-source
+ポイント・マイル,WESTERポイント,ポイント,pt,WESTER,個人,confirmed-in-source-sheet,P3,direct-official-source
+ポイント・マイル,Yahoo! JAPAN / PayPayポイント,ポイント,pt,Yahoo! JAPAN,個人,account-indicated-product-unconfirmed,P3,direct-official-source
+ポイント・マイル,グローバルポイント Wallet,チャージ残高,JPY,グローバルポイントWalletアプリ,個人,confirmed-in-source-sheet,P3,direct-official-source
+ポイント・マイル,クロネコメンバーズ,クロネコメンバー割 チャージ残高,JPY,クロネコメンバーズ,個人,account-indicated-product-unconfirmed,P3,direct-official-source
+ポイント・マイル,ポイントインカム,ポイント,pt,ポイントインカム,個人,account-indicated-product-unconfirmed,P3,direct-official-source
+ポイント・マイル,モッピー,ポイント,pt,モッピー,個人,confirmed-in-source-sheet,P3,direct-official-source
+ポイント・マイル,ヨドバシ ゴールドポイント,ポイント,pt,ヨドバシ.com,個人,account-indicated-product-unconfirmed,P3,direct-official-source
+ポイント・マイル,一休.com ポイント,ポイント,pt,一休.com,個人,account-indicated-product-unconfirmed,P3,direct-official-source
+ポイント・マイル,楽天ポイント / 楽天キャッシュ,ポイント / 残高,pt/JPY,楽天PointClub,個人,confirmed-in-source-sheet,P3,direct-official-source
+収入,Stripe Connect,売上残高（GitHub Sponsors の受取）,JPY/USD,Stripe ダッシュボード,個人,account-indicated-product-unconfirmed,P3,direct-official-source
+海外送金,Wise,マルチカレンシー残高（通貨別）+ Jars,多通貨,Wise app,個人,account-indicated-product-unconfirmed,P3,direct-official-source
