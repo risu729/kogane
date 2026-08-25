@@ -31,7 +31,7 @@ Live validation on 2026-08-25 and 2026-08-26 established the following:
 
 | Test | Result |
 | --- | --- |
-| Established Windows Kuebiko profile, password login | Passed, including re-login after its previous Vpass session expired. |
+| Established Windows Kuebiko profile, visible UI password login | Passed, including re-login after its previous Vpass session expired. |
 | Fresh Windows Kuebiko profiles | Reached login, but password submission returned to the login form; no reliable fresh-profile bootstrap was established. |
 | Fresh WSL official Chrome 151, with or without copied Akamai-only cookies | Akamai Access Denied at `xt_login/agree/v1`. |
 | Previously session-seeded persistent WSL profile, after expiry | Password re-login still received Access Denied. |
@@ -42,11 +42,14 @@ Live validation on 2026-08-25 and 2026-08-26 established the following:
 | Cookies captured when the Kuebiko browser closed, then imported into OCI | Passed; closing the source browser did not itself kill the server session. |
 | Two different imported sessions used concurrently | Both passed; a later login did not immediately revoke the older session. |
 | Expired session imported into OCI | Returned to login, matching the expired source profile. |
+| Fresh WSL Chrome through AU direct vs Japanese `tamia` exit | Both reached the login page; password login remained 403 through `tamia`. |
+| Previously successful Windows profile, identical CDP text/mouse automation through AU vs `tamia` | Both returned to the login form without Access Denied or credential error. |
 
 These results split the source into two explicit gates:
 
 - **Bootstrap gate:** create or refresh a Vpass session from ID/password. This
-  currently passes only in the established Windows browser profile.
+  currently passes only through the visible UI path in the established Windows
+  browser profile. CDP text insertion did not reproduce that success.
 - **Replay gate:** import a valid session and call authenticated pages/APIs.
   This is proven on Windows, WSL Linux, and OCI Linux, but has not yet been
   tested in a deployed Cloudflare Container.
@@ -56,6 +59,12 @@ used Cloudflare Sydney/Australian egress, while failures also occurred with
 browser-like clients. Akamai cookies without the authenticated Vpass session
 were insufficient, and having once imported a good session did not make later
 Linux password login pass.
+
+A controlled exit-node test confirmed the same conclusion: fresh WSL Chrome
+reached the login page through both AU direct and the Japanese `tamia` exit,
+but the `tamia` password POST still received 403. The same established Windows
+profile driven by identical CDP text/mouse events returned to the login form
+through both routes. `tamia` is therefore not the next bootstrap fix.
 
 `impit` is a native Node addon backed by Rust. It cannot run inside the
 Workers JavaScript isolate, but it can run in a Linux
@@ -89,6 +98,12 @@ publishes an encrypted, source-scoped session envelope with a generation ID
 and expiry metadata. A short-lived Linux collector imports that envelope,
 validates it, calls the authenticated JSON APIs, stores raw evidence, and
 exits. It never receives the Vpass ID/password and never attempts login.
+
+The next issuer gate is unattended **OS-level** Windows input: generate real
+keyboard and pointer input with a `SendInput`-class mechanism on a visible
+desktop, while Kuebiko/CDP remains passive observation. DOM filling, CDP
+`Input.insertText`, and page-script event synthesis are not accepted substitutes
+for this gate because the CDP control failed in both the AU and `tamia` arms.
 
 The issuer currently proven by testing is the existing Windows profile. If a
 personal laptop or Hiroshima mini PC must not run scheduled work, the
@@ -322,6 +337,9 @@ stream as expected.
 - [ ] Implement an issuer that retains the established Windows profile. If it
       is remote, use a persistent encrypted profile disk and validate that its
       password bootstrap passes before enabling automatic refresh.
+- [ ] After cooldown, test one OS-level Windows keyboard/pointer automation run
+      in the established profile. If it passes repeatedly, reproduce the same
+      visible-desktop automation on the persistent remote Windows issuer.
 - [x] Verify `tunnel_id` raw public egress with an IP-echo endpoint: three
       successful `connect()` calls with a stable IP hash.
 - [ ] Add separate destination allowlists in Worker code for each scraper;
