@@ -166,13 +166,30 @@ This does not turn the Container's network namespace into a Hiroshima egress
 network. Only connections explicitly carried through `TAMIA.connect()` use the
 Tunnel path. All other Container traffic keeps its normal Cloudflare egress.
 
-For a public destination, announce the required public hostname or domain as a
-hostname route on `tamia`. Cloudflare documents public hostname routes as
-egressing through the selected Tunnel with the connector host's public source
-IP. A domain route such as `*.example.com` covers its subdomains; add the apex
-separately when it is also used. Do not add a catch-all route. Discover the
-actual Vpass dependency hosts from a successful browser capture, register only
-those routes, and repeat that same finite set in the Worker allowlist.
+Do not add Vpass public-hostname or domain routes to the account-wide Zero
+Trust routing table. Those routes also affect personal devices connected
+through WARP, including a laptop used normally while in Japan. Kogane selects
+the Hiroshima path only when its Worker calls the VPC binding that is directly
+bound to the `tamia` Tunnel; ordinary WARP clients and all other Container
+traffic remain unchanged.
+
+Enforce destinations in Worker code with a separate allowlist for each
+scraper. The coordinator derives the scraper identity from the active run and
+selects its policy server-side. A bridge request may contain a destination
+hostname, but the Worker opens it only when the exact hostname and port appear
+in that scraper's allowlist. Do not accept a client-provided scraper identity,
+share one combined allowlist across collectors, or fall back to an unrestricted
+destination.
+
+```ts
+const SCRAPER_EGRESS = {
+  vpass: {
+    binding: "TAMIA",
+    port: 443,
+    hosts: new Set([/* hosts confirmed by a successful Vpass capture */]),
+  },
+} as const;
+```
 
 The retained 2026-08-25 runtime probe established two narrower facts. Three
 `TAMIA.connect()` calls to a plaintext IP-echo endpoint succeeded with the same
@@ -189,9 +206,10 @@ The minimum experiment is:
    [`connect()`](https://developers.cloudflare.com/workers-vpc/api/) to send
    plain HTTP to an IP-echo service and compare the reported address with the
    Hiroshima address.
-2. Add an allowlisted public-hostname route for a diagnostic endpoint, carry a
-   Chrome or `impit` TLS stream through it, and confirm both the tamia source IP
-   and the original client TLS fingerprint at the endpoint.
+2. Add the diagnostic endpoint only to a test scraper's Worker allowlist,
+   carry a Chrome or `impit` TLS stream through the direct `TAMIA.connect()`
+   binding, and confirm both the tamia source IP and the original client TLS
+   fingerprint at the endpoint.
 3. Test repeated authenticated collection from a fresh session before
    scheduling it.
 
@@ -243,11 +261,12 @@ general-purpose proxy. The bridge also needs explicit stream semantics:
 - cap per-run bytes and duration; overflow or protocol error fails the run
   without a login retry.
 
-No Kogane-specific process is required on the Hiroshima mini PC for the
-public-hostname-route design: the existing `cloudflared` connector performs
-the public egress. A localhost-only CONNECT/SOCKS service on that host remains
-a fallback only if the documented hostname-route path cannot carry the raw
-VPC socket as expected.
+No Kogane-specific process or Vpass hostname route is required on the
+Hiroshima mini PC for the direct-Tunnel-binding design: the retained plaintext
+probe already showed the existing `cloudflared` connector performing stable
+public egress for `TAMIA.connect()`. A localhost-only CONNECT/SOCKS service on
+that host remains a fallback only if the same path cannot carry the opaque TLS
+stream as expected.
 
 ## Rejected paths
 
@@ -270,8 +289,9 @@ VPC socket as expected.
       client profile is available and Workers Paid is otherwise justified.
 - [x] Verify `tunnel_id` raw public egress with an IP-echo endpoint: three
       successful `connect()` calls with a stable IP hash.
-- [ ] Add only the captured Vpass public-hostname/domain routes to `tamia` and
-      mirror the resulting host set in the Worker allowlist.
+- [ ] Add separate destination allowlists in Worker code for each scraper;
+      derive the scraper from the active run and never create a shared Vpass
+      hostname route in the account-wide Zero Trust configuration.
 - [ ] Verify that the allowlisted SOCKS5/WebSocket/raw-TCP bridge carries a
       Chrome or `impit` TLS stream with both the tamia IP and the original
       client fingerprint; the IP-echo test used plaintext HTTP only.
@@ -279,7 +299,7 @@ VPC socket as expected.
       before any scheduled or manual cloud login.
 - [ ] Implement the allowlisted WebSocket/raw-TCP bridge only if direct egress
       is rejected, including one-run authorization and bounded flow control.
-- [ ] Add a mini-PC proxy only if the public-hostname-route experiment fails.
+- [ ] Add a mini-PC proxy only if the direct-Tunnel raw TLS experiment fails.
 - [ ] Deliver credentials according to `docs/credentials.md` before enabling
       Cron.
 
@@ -288,7 +308,6 @@ VPC socket as expected.
 - [Workers VPC network bindings](https://developers.cloudflare.com/workers-vpc/configuration/vpc-networks/)
 - [Workers VPC tunnel requirements](https://developers.cloudflare.com/workers-vpc/configuration/tunnel/)
 - [Workers VPC binding API](https://developers.cloudflare.com/workers-vpc/api/)
-- [Tunnel hostname routes](https://developers.cloudflare.com/cloudflare-one/networks/routes/add-routes/)
 - [Cloudflared source-IP anchoring](https://developers.cloudflare.com/cloudflare-one/traffic-policies/egress-policies/egress-cloudflared/)
 - [Container outbound traffic](https://developers.cloudflare.com/containers/platform-details/outbound-traffic/)
 - [Container Cron example](https://developers.cloudflare.com/containers/examples/cron/)
