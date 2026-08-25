@@ -60,15 +60,14 @@ the trials.
 | Completely fresh headed WSL Chrome 151, initial Vpass GET | HTTP 200 login page | HTTP 200 login page | Neither IP was unconditionally blocked. |
 | Previously rejected persistent WSL profile, initial Vpass GET | HTTP 403 | HTTP 403 | That profile/cookie state remained rejected across the IP change. |
 | Completely fresh headed WSL Chrome 151, password login | Previously HTTP 403 at login POST | HTTP 403 at the same login POST | Japanese home egress did not make Linux password login pass. |
+| Completely fresh visible WSL Chrome 151, user typed and clicked manually | Not repeated | Access Denied | Removing CDP/automation input did not make Linux login pass. |
 | Previously successful Windows profile, CDP `Input.insertText` plus dispatched mouse events | Returned to login form | Returned to login form | Changing only the exit IP did not change this automation result. |
 
 The Windows CDP trials were not explicit Access Denied pages and did not show a
 credential-error message. Cookies rotated in both cases, but authentication was
-not issued. This differs from the earlier successful visible Windows UI path.
-The remaining controlled variable worth testing is therefore the input path:
-OS-level keyboard and pointer injection in the same established Windows
-profile, with CDP/Kuebiko used only for observation. This is an inference about
-client interaction telemetry, not proof of the exact Akamai rule.
+not issued. The later manual WSL trial removes synthetic input as the explanation
+for the Linux 403. The remaining difference is a broader coherent platform and
+profile context; the captured evidence does not identify one exact Akamai rule.
 
 The test ended with `tamia` selected as the local exit node. Temporary fresh
 profiles were removed, and the two test-only Kuebiko captures that included
@@ -130,14 +129,17 @@ session flow, and the protected login request can be correlated at the edge.
   is not a demonstrated remedy, and the AU address was not a universal block.
 - CDP text insertion plus dispatched mouse events did not reproduce the earlier
   successful visible Windows interaction, even in the previously accepted
-  profile. OS-level input automation remains untested.
+  profile.
+- A completely fresh visible WSL Chrome profile also received Access Denied
+  when the user typed and clicked manually. Linux rejection is therefore not a
+  Playwright/CDP-input artifact in this control.
 
 ## Recommended boundary
 
 Treat Vpass authentication as two components:
 
 ```text
-persistent Windows authentication runner
+accepted persistent browser runner (Windows proven; real Android next)
   -> validate existing session
   -> if needed, perform one bounded OS-level UI login in the established profile
   -> export a minimal point-in-time session envelope
@@ -153,21 +155,21 @@ Cloudflare Container or OCI Kubernetes collector
   -> stop on redirect, 401, or 403; never retry password login
 ```
 
-The Windows runner is the current **session issuer**. Linux is a proven
-**session consumer**, not a proven issuer. Cloudflare Containers cannot replace
-the Windows issuer because they run Linux. A persistent remote Windows VM that
-is started only for validation/refresh is the non-home, non-laptop fallback;
-Cloudflare can remain the scheduler and evidence store. The runner needs a
-persistent profile disk, not an ephemeral CI image.
+The Windows profile is the only currently proven **session issuer**, but the
+operator does not want Windows automation as a deployed dependency. Linux is a
+proven **session consumer**, not a proven issuer. The next candidate issuer is
+real Android Chrome; real macOS follows only if Android fails. Cloudflare can
+remain the scheduler and evidence store, but it cannot replace an issuer until
+one of those accepted platform controls passes.
 
-To remove manual interaction, first prove the issuer locally with Windows
-`SendInput`-class keyboard/pointer automation against the established profile.
-Do not use DOM `.fill()`, CDP `Input.insertText`, or synthetic page JavaScript
-for this gate. If the local OS-level run succeeds repeatedly, reproduce that
-exact visible-desktop setup on an on-demand Windows VM and keep its profile disk
-persistent. If it fails, the evidence does not support a fully unattended
-password bootstrap yet; session preservation can reduce refresh frequency but
-cannot eliminate an unmeasured absolute expiry.
+The operator does not want a Windows automation dependency. The next platform
+gate is therefore a real physical Android device running Chrome, followed by a
+real macOS host only if Android fails. Start with a manual login on the real
+device; only after that passes should ADB/CDP automation and session export be
+tested. Do not spend more credentialed trials on Linux UA/platform overrides:
+the manual Linux control failed, and earlier custom-UA/browser-impersonation
+trials did not produce a coherent accepted client. Session preservation can
+reduce refresh frequency but cannot eliminate an unmeasured absolute expiry.
 
 Keep-alive collection may extend an idle session, but an absolute Vpass expiry
 has not been measured and must not be assumed away. Every scheduled run starts

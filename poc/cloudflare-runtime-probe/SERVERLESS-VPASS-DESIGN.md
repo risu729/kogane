@@ -7,7 +7,7 @@ Chrome has passed authenticated-session consumption but not password login.
 
 Use a Worker or scheduled Workflow only as the orchestrator. Run full headed
 Chrome inside one named Cloudflare Container, import a newly validated session
-from an established Windows authentication runner, and perform Vpass API calls
+from an accepted persistent browser issuer, and perform Vpass API calls
 with same-origin `fetch()` inside that Chrome page.
 
 ```text
@@ -22,8 +22,8 @@ Workflow schedule
       -> encrypt and publish any valid rotated session generation
       -> discard the local Chrome context before shutdown
 
-on-demand persistent Windows authentication runner
-  -> validate established Windows profile
+accepted persistent browser issuer (real Android is next candidate)
+  -> validate the accepted persistent profile
   -> perform at most one password login when required
   -> publish a new source-scoped encrypted session generation
 ```
@@ -72,18 +72,20 @@ checkpoints.
 ## Credentials
 
 Do not run `bw serve` in Cloudflare and do not store a Bitwarden master
-password. Keep Bitwarden as the source of truth for the persistent Windows
-authentication runner. After a password change, sync only the selected Vpass
+password. Keep Bitwarden as the source of truth for the accepted browser
+issuer. After a password change, sync only the selected Vpass
 fields to that runner's protected credential store. Do not copy the ID/password
 to Cloudflare while Linux password login remains rejected.
 
-The Windows runner publishes only a newly validated, encrypted, source-scoped
+The accepted issuer publishes only a newly validated, encrypted, source-scoped
 session envelope. Cloudflare receives that envelope and its generation metadata,
 not a Bitwarden vault export, master password, unlock session, or broad cache.
 
 ## Go/no-go rollout
 
-1. Prepare a Windows session-export command that validates the source immediately
+1. Select an issuer platform that passes manual login. Real Android Chrome is
+   next; use real macOS only if Android fails. Prepare a session-export command
+   that validates the source immediately
    before and after capture, encrypts for one collector, and publishes a monotonic
    auth generation without logging cookie values.
 2. Enable Workers Paid; remote Container creation is unavailable on Workers
