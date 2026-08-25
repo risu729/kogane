@@ -29,9 +29,9 @@ Cost is 1 (small wrapper) through 5 (device-bound or adversarial automation).
 | Sony Bank | P1 | Sony Bank web/app | [#17](https://github.com/risu729/kogane/pull/17) | C | 4 (manual CSV: 1) | draft complete |
 | Minna Bank | P1 | mobile app | [#16](https://github.com/risu729/kogane/pull/16) | E | 1-2 (device UI: 5) | draft complete |
 | Bank of Kyoto | P1 | Kyogin Direct/app | [#18](https://github.com/risu729/kogane/pull/18) | E (C candidate) | 1 (replay: 4) | draft complete |
-| Westpac | P1 | web/app | pending | — | — | queued |
-| St.George Bank | P1 | web/app | pending | — | — | queued |
-| Wise | P1 | first-party API/web/app | pending | — | — | queued |
+| Westpac | P1 | web/app | [#19](https://github.com/risu729/kogane/pull/19) | E (CDR: A) | 1 (CDR: 5) | draft complete |
+| St.George Bank | P1 | web/app | [#21](https://github.com/risu729/kogane/pull/21) | C | 4 (manual PDF: 1) | draft complete |
+| Wise | P1 | first-party API/web/app | [#20](https://github.com/risu729/kogane/pull/20) | E | 1 (partner API: 3-5) | draft complete |
 | SBI VC Trade | P1 | VCTRADE web/app | pending | — | — | queued |
 | Mercari / Merpay / Mercoin | P1 | Mercari app/web | pending | — | — | queued |
 | MyJCB card family | P2 | MyJCB web/app | pending | — | — | queued |
