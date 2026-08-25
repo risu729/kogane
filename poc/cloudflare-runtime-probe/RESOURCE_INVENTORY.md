@@ -1,17 +1,17 @@
 # Cloudflare Runtime Probe Inventory
 
 This file is the deletion ledger for the temporary resources created by the
-Vpass runtime experiment. Keep the probe deployed for follow-up comparisons,
-but update this file whenever a resource is added, replaced, or deleted.
+Vpass runtime experiment. The temporary resources were removed on
+`2026-08-26 AEST` after the experiment.
 
 ## Owned by this probe
 
 | Kind | Name | ID / digest | Created | Status | Delete command |
 | --- | --- | --- | --- | --- | --- |
-| Worker | `kogane-vpass-runtime-probe-20260825` | version `99fea156-df18-4b3c-83e3-58113a298b8a` | `2026-08-25T08:59:21.377Z` | deployed; workers.dev enabled | `bunx wrangler delete kogane-vpass-runtime-probe-20260825` |
-| Durable Object namespace | `RuntimeProbeContainer` migration `v1` | `eeaa4940178541ab95d64100fdaedf6f` | `2026-08-25` | binding exists; no Container application assigned | removed with the Worker; verify after deletion |
+| Worker | `kogane-vpass-runtime-probe-20260825` | version `99fea156-df18-4b3c-83e3-58113a298b8a` | `2026-08-25T08:59:21.377Z` | deleted; API now reports code `10007` | completed |
+| Durable Object namespace | `RuntimeProbeContainer` migration `v1` | `eeaa4940178541ab95d64100fdaedf6f` | `2026-08-25` | deleted with the Worker; account inventory verified empty | completed |
 | Container application | `RuntimeProbeContainer` | none | `2026-08-25` | not created: Workers Paid is required | no Cloudflare cleanup required |
-| Container image | deployment-generated | none | `2026-08-25` | local build only; Cloudflare upload rejected | no Cloudflare cleanup required |
+| Container image | deployment-generated | none | `2026-08-25` | local build only; Cloudflare upload rejected, so no registry artifact ever existed | no Cloudflare cleanup required |
 
 ## Referenced but not owned
 
@@ -23,8 +23,7 @@ but update this file whenever a resource is added, replaced, or deleted.
 
 `https://kogane-vpass-runtime-probe-20260825.takuanimal.workers.dev`
 
-The public endpoints expose only network fingerprints and SHA-256 IP hashes.
-They accept no credentials and store no data.
+The URL now returns `404`; no Worker deployment remains.
 
 ## Worker version history
 
@@ -63,8 +62,8 @@ After deleting the Worker, repeat the inventory commands and delete only the
 remaining resources whose exact names/IDs are recorded in **Owned by this
 probe**. Never delete `tamia` or any other pre-existing Tunnel.
 
-The local Docker image is not a Cloudflare resource. If it is no longer useful,
-it can be removed independently with:
+The four local tags for the shared runtime-probe image were deleted on
+`2026-08-26 AEST`:
 
 ```bash
 docker image rm kogane-vpass-runtime-probe-20260825-runtimeprobecontainer:worker

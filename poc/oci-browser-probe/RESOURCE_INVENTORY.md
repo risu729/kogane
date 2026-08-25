@@ -4,17 +4,18 @@ This ledger covers only resources created for the 2026-08-25 probe. The OCI
 host `bots`, its SSH configuration, network, and future Kubernetes cluster are
 pre-existing infrastructure and must not be deleted as probe cleanup.
 
-## Retained on `bots`
+## Cleanup completed on `bots`
 
 | Kind | Path or package | Status | Removal |
 | --- | --- | --- | --- |
-| Probe root | `/opt/kogane-browser-probe` | retained for follow-up; Node 24.19.0, Playwright 1.62.0, bundled Chromium 151 and probe code | `sudo rm -rf -- /opt/kogane-browser-probe` |
-| Google Chrome | `google-chrome-stable` 151.0.7922.173 | retained | `sudo apt-get purge -y google-chrome-stable` |
-| Display/font packages | `xvfb`, `fonts-noto-cjk` | retained | `sudo apt-get purge -y xvfb fonts-noto-cjk` |
-| Chrome apt source | `/etc/apt/sources.list.d/google-chrome.sources` | retained with the Chrome package installation | `sudo rm -f -- /etc/apt/sources.list.d/google-chrome.sources` |
+| Probe root | `/opt/kogane-browser-probe` | deleted `2026-08-26 AEST` | completed |
+| Google Chrome | `google-chrome-stable` 151.0.7922.173 | purged `2026-08-26 AEST` | completed |
+| Display/font packages | `xvfb`, `fonts-noto-cjk` | purged `2026-08-26 AEST` | completed |
+| Chrome apt source | `/etc/apt/sources.list.d/google-chrome.sources` | deleted `2026-08-26 AEST` | completed |
 
-Do not run `apt autoremove` as probe cleanup: other services on `bots` may use
-packages that apt now considers automatic.
+`apt autoremove` was not run: other services on `bots` may use packages that
+apt now considers automatic. The host, SSH configuration, network, and future
+Kubernetes infrastructure were not changed.
 
 ## Cleanup verification
 

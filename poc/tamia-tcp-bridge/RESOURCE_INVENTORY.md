@@ -1,22 +1,21 @@
 # TAMIA TCP bridge resource inventory
 
 This is the deletion ledger for the temporary resources created by the raw TCP
-bridge experiment. The Worker is intentionally retained for follow-up tests,
-but its temporary secret has been deleted, so all bridge destinations are
-disabled.
+bridge experiment. The temporary Worker and its already-disabled secret were
+removed on `2026-08-26 AEST`.
 
 ## Owned by this probe
 
 | Kind | Name | ID | Status | Delete command |
 | --- | --- | --- | --- | --- |
-| Worker | `kogane-tamia-tcp-bridge-20260825` | active version `a700afb3-4de3-4e0e-b36f-3a18a487816d` | deployed; workers.dev enabled; bridge disabled because no secret exists | `bunx wrangler delete kogane-tamia-tcp-bridge-20260825` |
+| Worker | `kogane-tamia-tcp-bridge-20260825` | active version `a700afb3-4de3-4e0e-b36f-3a18a487816d` | deleted; API now reports code `10007` | completed |
 | Worker secret | `BRIDGE_TOKEN` | none retained | deleted and verified with `wrangler secret list` | no action required |
 
 Public URL:
 
 `https://kogane-tamia-tcp-bridge-20260825.takuanimal.workers.dev`
 
-The disabled root currently reports `enabled: false`. Re-running
+The former URL now returns `404`. Re-running
 `scripts/bridge_proxy.py` creates a random temporary secret and deletes it on a
 normal SIGINT/SIGTERM shutdown. If the process is killed uncleanly, verify and
 delete only this exact secret:
@@ -52,3 +51,4 @@ resources:
 - `/tmp/kogane-curl-cffi-20260825`: Python environment for `curl_cffi 0.16.1`.
 
 No Vpass credentials or session cookies were written to those directories.
+All three directories were removed on `2026-08-26 AEST`.
