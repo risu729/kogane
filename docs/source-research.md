@@ -34,7 +34,7 @@ Cost is 1 (small wrapper) through 5 (device-bound or adversarial automation).
 | Wise | P1 | first-party API/web/app | [#20](https://github.com/risu729/kogane/pull/20) | E | 1 (partner API: 3-5) | draft complete |
 | SBI VC Trade | P1 | VCTRADE web/app | [#23](https://github.com/risu729/kogane/pull/23) | E (C candidate) | 1 (replay: 4) | draft complete |
 | Mercari / Merpay / Mercoin | P1 | Mercari app/web | [#22](https://github.com/risu729/kogane/pull/22) | E | 1-2 (full automation: 5) | draft complete |
-| MyJCB card family | P2 | MyJCB web/app | pending | — | — | queued |
+| MyJCB card family | P2 | MyJCB web/app | [#24](https://github.com/risu729/kogane/pull/24) | C | 4 (manual export: 1) | draft complete |
 | MUFG card family | P2 | My Digital Connect | pending | — | — | queued |
 | Epos / Epos Visa Prepaid | P2 | EposNet/app | pending | — | — | queued |
 | JP BANK Card | P2 | JP BANK Card WEB | pending | — | — | queued |
@@ -52,3 +52,26 @@ Cost is 1 (small wrapper) through 5 (device-bound or adversarial automation).
 
 Long-tail reward-only services stay in `data/account-inventory.csv`. Add them
 to this board when expiry risk or material value makes collection worthwhile.
+
+## Reverse-engineering follow-up audit
+
+An official export being usable does not close the implementation-feasibility
+research. The following source PRs either made reverse engineering a non-goal,
+deferred it without enough transport evidence, or left the private Web/app
+protocol unknown. They require a source-isolated follow-up before their
+automation rating is treated as final.
+
+| Source PR | Audit finding | Required follow-up |
+| --- | --- | --- |
+| [#8 Mobile Suica](https://github.com/risu729/kogane/pull/8) | Detailed reverse engineering was incorrectly listed as a non-goal | Reconcile the existing decompilation artifacts and procedure with current JRE ID/app transports; identify read hosts, schemas, token renewal, integrity metadata, and Wallet boundary |
+| [#13 MUFG Bank](https://github.com/risu729/kogane/pull/13) | Dynamic analysis was deferred because the Web route looked sufficient | Inspect the current Play-delivered app and compare app/Web read coverage and session issuance |
+| [#14 Mizuho Bank](https://github.com/risu729/kogane/pull/14) | Detailed app analysis was deferred | Resolve app transport, long-history local storage, point route, and device/session binding |
+| [#15 Japan Post Bank](https://github.com/risu729/kogane/pull/15) | Only an analysis plan was recorded | Execute the static inventory and identify the Direct/app read transport and FIDO boundary |
+| [#17 Sony Bank](https://github.com/risu729/kogane/pull/17) | WALLET app analysis was postponed until a Web gap appeared | Analyze the app transport now so the gap decision is evidence-based |
+| [#18 Bank of Kyoto](https://github.com/risu729/kogane/pull/18) | App reverse engineering was marked as not adopted | Replace the blanket rejection with a bounded static/dynamic transport study |
+| [#19 Westpac](https://github.com/risu729/kogane/pull/19) | Private Web/app transport remains unknown | Inspect current Web JavaScript and app metadata/transport rather than stopping at CDR/export |
+| [#20 Wise](https://github.com/risu729/kogane/pull/20) | Personal internal transport remains unknown | Trace current Web/app read requests, token/session renewal, and pending/posted models without assuming Business API equivalence |
+| [#21 St.George](https://github.com/risu729/kogane/pull/21) | Current Web clients exist, but app transport was left unknown | Extend the current Web implementation evidence and inspect the app read transport |
+| [#22 Mercari family](https://github.com/risu729/kogane/pull/22) | Financial app transports remain unknown | Analyze Mercari/Merpay/Mercoin packages separately and map common auth versus the three ledgers |
+| [#23 SBI VC Trade](https://github.com/risu729/kogane/pull/23) | APK decompilation/instrumentation was explicitly excluded | Perform a bounded app/Web transport study and update the C/D evidence |
+| [#24 MyJCB](https://github.com/risu729/kogane/pull/24) | Deobfuscation, runtime tracing, and traffic observation were rejected too broadly | Trace the protection JavaScript and current credit/debit read/export paths; keep write actions out of scope, not analysis |
