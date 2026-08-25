@@ -162,11 +162,17 @@ Workers VPC is currently beta. Creating a direct Tunnel binding requires the
 deployment identity; the collector runtime receives only the configured
 binding and cannot create or edit network resources.
 
-Cloudflare documents a tunnel binding as reaching a hostname/IP through that
-tunnel, but does not give an explicit guarantee or example that an arbitrary
-public destination will always leave with the `cloudflared` host's public IP.
-Treat public egress over a direct `tunnel_id` as an experiment, not an
-assumption.
+This does not turn the Container's network namespace into a Hiroshima egress
+network. Only connections explicitly carried through `TAMIA.connect()` use the
+Tunnel path. All other Container traffic keeps its normal Cloudflare egress.
+
+For a public destination, announce the required public hostname or domain as a
+hostname route on `tamia`. Cloudflare documents public hostname routes as
+egressing through the selected Tunnel with the connector host's public source
+IP. A domain route such as `*.example.com` covers its subdomains; add the apex
+separately when it is also used. Do not add a catch-all route. Discover the
+actual Vpass dependency hosts from a successful browser capture, register only
+those routes, and repeat that same finite set in the Worker allowlist.
 
 The retained 2026-08-25 runtime probe established two narrower facts. Three
 `TAMIA.connect()` calls to a plaintext IP-echo endpoint succeeded with the same
@@ -183,10 +189,19 @@ The minimum experiment is:
    [`connect()`](https://developers.cloudflare.com/workers-vpc/api/) to send
    plain HTTP to an IP-echo service and compare the reported address with the
    Hiroshima address.
-2. If it matches, carry an opaque TLS stream to an allowlisted Vpass host and
-   confirm that the `impit` handshake still reaches the provider.
+2. Add an allowlisted public-hostname route for a diagnostic endpoint, carry a
+   Chrome or `impit` TLS stream through it, and confirm both the tamia source IP
+   and the original client TLS fingerprint at the endpoint.
 3. Test repeated authenticated collection from a fresh session before
    scheduling it.
+
+The API note that VPC `connect()` currently supports "plaintext TCP only"
+means that the binding does not initiate or terminate TLS. It still exposes an
+ordered raw TCP byte stream. The bridge therefore must not ask the Worker to
+perform TLS: Chrome or `impit` creates the TLS session inside that stream, and
+the Worker forwards the resulting opaque bytes. Preserving the ClientHello in
+this arrangement is an architectural inference from the raw-stream API and
+must be verified by the diagnostic test above.
 
 ### Opaque bridge without another mini-PC service
 
@@ -194,22 +209,27 @@ A Container cannot directly use a Worker's VPC binding. The experiment can
 bridge bytes as follows:
 
 ```text
-impit
-  -> localhost CONNECT adapter in the Container
+Chrome or impit
+  -> localhost SOCKS5/CONNECT adapter in the Container
   -> run-authenticated WebSocket to the coordinator Worker
   -> env.TAMIA.connect("allowlisted-vpass-host:443")
   -> tamia/cloudflared
   -> Vpass
 ```
 
-The outer WebSocket TLS terminates at Cloudflare, but the inner TLS bytes are
-payload and remain untouched. Prefer the Container's same-machine outbound
-Worker path so the bridge need not be a public endpoint; WebSocket upgrade
-support on that exact path is a PoC gate. If a public endpoint is required,
-the coordinator issues a one-run capability containing the run ID, expiry,
-and nonce. It is single-use and bound to the active Durable Object lease. Do
-not put the destination hostname in a client-controlled field or add a fixed
-general proxy secret to the Container.
+The outer WebSocket TLS terminates at Cloudflare, but the inner provider TLS
+bytes are WebSocket payload and remain untouched. The VPC binding exists only
+in the Worker runtime, so the Container cannot call `TAMIA.connect()` directly.
+Container outbound interception is also HTTP-semantic and cannot substitute
+for this byte bridge without replacing the provider-facing TLS handshake.
+
+Prefer the Container's same-machine outbound Worker path so the bridge need
+not be a public endpoint; WebSocket upgrade support on that exact path is a
+PoC gate. If a public endpoint is required, the coordinator issues a one-run
+capability containing the run ID, expiry, and nonce. It is single-use and
+bound to the active Durable Object lease. Do not put the destination hostname
+in a client-controlled field or add a fixed general proxy secret to the
+Container.
 
 The Worker selects fixed Vpass hostnames on port 443 and never becomes a
 general-purpose proxy. The bridge also needs explicit stream semantics:
@@ -223,10 +243,11 @@ general-purpose proxy. The bridge also needs explicit stream semantics:
 - cap per-run bytes and duration; overflow or protocol error fails the run
   without a login retry.
 
-If direct public egress through `tunnel_id` does not work, the fallback is a
-localhost-only CONNECT/SOCKS service on the Hiroshima mini PC, reachable only
-through `tamia`. This is the only design that adds a process beside the
-existing `cloudflared`.
+No Kogane-specific process is required on the Hiroshima mini PC for the
+public-hostname-route design: the existing `cloudflared` connector performs
+the public egress. A localhost-only CONNECT/SOCKS service on that host remains
+a fallback only if the documented hostname-route path cannot carry the raw
+VPC socket as expected.
 
 ## Rejected paths
 
@@ -235,6 +256,8 @@ existing `cloudflared`.
 | Normal Worker `fetch()` | Cannot run native `impit`; the provider sees Cloudflare's TLS/HTTP behavior. |
 | Container `interceptHttps` | Re-terminates TLS and replaces the `impit` fingerprint. |
 | VPC binding `fetch()` | Selects a network path but still acts as an HTTP semantic proxy. |
+| Calling `TAMIA.connect()` inside the Container | VPC bindings are Worker bindings and are not injected into the Container process. |
+| Treating `TAMIA.connect()` as the Container default route | It affects only explicitly bridged TCP flows, not the Container network namespace. |
 | Laptop/local scheduled job | Conflicts with the always-on requirement. |
 | General open proxy on the mini PC | Unnecessary attack surface; any fallback is localhost-only and destination-allowlisted. |
 
@@ -247,13 +270,16 @@ existing `cloudflared`.
       client profile is available and Workers Paid is otherwise justified.
 - [x] Verify `tunnel_id` raw public egress with an IP-echo endpoint: three
       successful `connect()` calls with a stable IP hash.
-- [ ] Verify that the allowlisted opaque bridge carries an `impit` TLS stream;
-      the IP-echo test used plaintext TCP only.
+- [ ] Add only the captured Vpass public-hostname/domain routes to `tamia` and
+      mirror the resulting host set in the Worker allowlist.
+- [ ] Verify that the allowlisted SOCKS5/WebSocket/raw-TCP bridge carries a
+      Chrome or `impit` TLS stream with both the tamia IP and the original
+      client fingerprint; the IP-echo test used plaintext HTTP only.
 - [ ] Add the per-source Durable Object lease, unique run IDs, and cooldown
       before any scheduled or manual cloud login.
 - [ ] Implement the allowlisted WebSocket/raw-TCP bridge only if direct egress
       is rejected, including one-run authorization and bounded flow control.
-- [ ] Add a mini-PC proxy only if the direct tunnel experiment fails.
+- [ ] Add a mini-PC proxy only if the public-hostname-route experiment fails.
 - [ ] Deliver credentials according to `docs/credentials.md` before enabling
       Cron.
 
@@ -262,6 +288,7 @@ existing `cloudflared`.
 - [Workers VPC network bindings](https://developers.cloudflare.com/workers-vpc/configuration/vpc-networks/)
 - [Workers VPC tunnel requirements](https://developers.cloudflare.com/workers-vpc/configuration/tunnel/)
 - [Workers VPC binding API](https://developers.cloudflare.com/workers-vpc/api/)
+- [Tunnel hostname routes](https://developers.cloudflare.com/cloudflare-one/networks/routes/add-routes/)
 - [Cloudflared source-IP anchoring](https://developers.cloudflare.com/cloudflare-one/traffic-policies/egress-policies/egress-cloudflared/)
 - [Container outbound traffic](https://developers.cloudflare.com/containers/platform-details/outbound-traffic/)
 - [Container Cron example](https://developers.cloudflare.com/containers/examples/cron/)
