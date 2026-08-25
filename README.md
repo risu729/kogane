@@ -14,6 +14,7 @@ different rules.
 - [Vpass Android app API](docs/vpass-android-api.md)
 - [Account and source inventory](docs/account-inventory.md)
 - [Direct source policy](docs/source-policy.md)
+- [Source research board](docs/source-research.md)
 - [Per-source research records](docs/sources/README.md)
 - [Roadmap](docs/roadmap.md)
 
