@@ -14,9 +14,10 @@ The experiments separate two capabilities that earlier notes treated as one:
 2. **Consume an already authenticated session** in another browser, OS, host,
    or network.
 
-The observed answer is asymmetric: an established Windows profile can refresh
-authentication, while Linux Chrome can consume a transported session but has
-not been able to refresh it after expiry.
+The observed answer is asymmetric but not deterministic: visible Windows Chrome
+has produced successful bootstraps and failures under closely related
+conditions, while Linux Chrome can consume a transported session but has not
+been able to refresh it after expiry.
 
 ## Result matrix
 
@@ -34,6 +35,10 @@ not been able to refresh it after expiry.
 | Completely fresh Linux context | WSL, headed official Chrome 151 | Password login | Access Denied at `/memapi/jaxrs/xt_login/agree/v1` |
 | Fresh Linux context plus only captured Akamai-named cookies | WSL, headed official Chrome 151 | Password login | Same Access Denied result |
 | Persistent WSL profile previously seeded with a valid transported session | WSL, headed official Chrome 151 | Password login after that session expired | Access Denied at the same login endpoint |
+| Camoufox 0.5.5, coherent Windows Firefox 152 fingerprint | Linux Docker, AU/SYD WARP egress | Password login | Login page 200; login POST 403 / Access Denied |
+| Camoufox 0.5.5, coherent macOS Firefox 152 fingerprint | Linux Docker, AU/SYD WARP egress | Password login | No expected login POST; inconclusive |
+| Kameleo 5.1 Chroma, coherent Windows Chrome 152 fingerprint | Linux Docker, AU/SYD WARP egress | Password login | Login page 200; login POST 403 / Access Denied |
+| Persistent Kameleo Windows Chrome, public-site warm-up and human-like input | Same Linux Docker runtime | Password login | Test click did not submit the form; inconclusive |
 
 The Akamai-only arms used two captured Akamai-named cookies; one was already
 expired and was not retained by a fresh browser. The browser generated and
@@ -139,7 +144,7 @@ session flow, and the protected login request can be correlated at the edge.
 Treat Vpass authentication as two components:
 
 ```text
-accepted persistent browser runner (Windows proven; real Android next)
+repeatedly validated persistent browser runner (not selected)
   -> validate existing session
   -> if needed, perform one bounded OS-level UI login in the established profile
   -> export a minimal point-in-time session envelope
@@ -155,36 +160,34 @@ Cloudflare Container or OCI Kubernetes collector
   -> stop on redirect, 401, or 403; never retry password login
 ```
 
-The Windows profile is the only currently proven **session issuer**, but the
-operator does not want Windows automation as a deployed dependency. Linux is a
-proven **session consumer**, not a proven issuer. The next candidate issuer is
-real Android Chrome; real macOS follows only if Android fails. Cloudflare can
-remain the scheduler and evidence store, but it cannot replace an issuer until
-one of those accepted platform controls passes.
+Visible Windows Chrome is the only platform that has issued a session, but it
+is not yet a stable control: an established profile and several fresh profiles
+succeeded, while closely related fresh trials failed. The operator does not
+want physical Windows automation as a deployed dependency. Linux is a proven
+**session consumer**, not a proven issuer.
 
-The operator does not want a Windows automation dependency. The next platform
-gate is therefore a real physical Android device running Chrome, followed by a
-real macOS host only if Android fails. Start with a manual login on the real
-device; only after that passes should ADB/CDP automation and session export be
-tested. Do not spend more credentialed trials on Linux UA/platform overrides:
-the manual Linux control failed, and earlier custom-UA/browser-impersonation
-trials did not produce a coherent accepted client. Session preservation can
-reduce refresh frequency but cannot eliminate an unmeasured absolute expiry.
+Establish at least two manual Windows successes after separate restarts with
+IP, profile, language and window state fixed. Then compare fresh Windows and
+automation in that same established profile. Only after that control is stable
+should the retained persistent Kameleo Windows Chrome profile be retried. A
+coherent Windows/macOS implementation inside Cloudflare Containers is an
+acceptable deployment candidate. Real Android Chrome and persistent macOS are
+fallback controls if the Container candidate fails. Do not spend more
+credentialed trials on simple Linux UA/platform overrides.
 
 Keep-alive collection may extend an idle session, but an absolute Vpass expiry
 has not been measured and must not be assumed away. Every scheduled run starts
 with a positive session check. A failed check emits a refresh request and does
 not submit credentials from Linux.
 
-Until a Linux password-login control succeeds repeatedly, do not copy the
-Vpass ID/password into Cloudflare. Keep Bitwarden as the source for the Windows
-runner and deliver only the encrypted, source-scoped session envelope to the
-collector. Treat that envelope as a credential: no logs, D1 rows, build layers,
-or broad vault export.
+Until a selected issuer passes password login repeatedly, do not copy the Vpass
+ID/password into Cloudflare. Keep Bitwarden as the source and deliver only the
+encrypted, source-scoped session envelope to a replay consumer. Treat that
+envelope as a credential: no logs, D1 rows, build layers, or broad vault export.
 
 ## Cloudflare Container gate
 
-Workers Paid is now justified only for testing the **consumer** path:
+Workers Paid is immediately justified for testing the **consumer** path:
 
 1. Start official headed Chrome in a Container with direct TLS egress.
 2. Import a newly validated encrypted session envelope before navigation.
@@ -198,3 +201,8 @@ Do not spend credentialed trials on fresh Linux password login unless a
 material browser/platform condition changes. Do not add the Hiroshima Tunnel
 until direct Container egress fails with a simultaneously valid transported
 session; the portability trials do not support IP-only routing as the remedy.
+
+A remote password-bootstrap Container test is useful only after the Windows
+control is repeatable and the local persistent engine-level browser arm is
+ready. Otherwise another 403 cannot be attributed to Cloudflare egress, browser
+implementation, profile history, or temporary Akamai state.

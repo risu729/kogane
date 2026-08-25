@@ -22,7 +22,7 @@ Workflow schedule
       -> encrypt and publish any valid rotated session generation
       -> discard the local Chrome context before shutdown
 
-accepted persistent browser issuer (real Android is next candidate)
+repeatedly validated persistent browser issuer (not selected)
   -> validate the accepted persistent profile
   -> perform at most one password login when required
   -> publish a new source-scoped encrypted session generation
@@ -43,11 +43,15 @@ User-Agent, but JavaScript still observed `Cloudflare-Workers`, Linux, and
 have a short keep-alive limit and are not a durable profile store.
 
 A Container can package official Chrome, Xvfb, fonts, Kuebiko, and the collector
-service. It is still Linux, so it does not inherit the successful Windows
-fingerprint. Existing OCI and WSL headed Linux Chrome probes were rejected.
-Later trials showed that both live and closed-capture sessions could be consumed
-by Linux Chrome on WSL and OCI. Containerization is therefore a viable session
-consumer candidate, not a known password-login fix.
+service. It can also run an engine-level anti-detect browser: the local Kameleo
+Chroma control presented coherent Windows Chrome 152 navigator, Direct3D WebGL,
+language, screen and hardware values from Linux Docker. Its fresh-profile login
+POST still returned 403, as did Camoufox's Windows Firefox control. Existing OCI
+and WSL headed Linux Chrome probes were also rejected. Later trials showed that
+both live and closed-capture sessions could be consumed by Linux Chrome on WSL
+and OCI. Containerization is therefore a viable session consumer and a
+bootstrap candidate only after the Windows control is repeatable; it is not a
+known password-login fix.
 
 ## Container lifecycle and state
 
@@ -73,9 +77,9 @@ checkpoints.
 
 Do not run `bw serve` in Cloudflare and do not store a Bitwarden master
 password. Keep Bitwarden as the source of truth for the accepted browser
-issuer. After a password change, sync only the selected Vpass
-fields to that runner's protected credential store. Do not copy the ID/password
-to Cloudflare while Linux password login remains rejected.
+issuer. After a password change, sync only the selected Vpass fields to that
+runner's protected credential store. Do not copy the ID/password to Cloudflare
+until a selected issuer passes password bootstrap repeatedly.
 
 The accepted issuer publishes only a newly validated, encrypted, source-scoped
 session envelope. Cloudflare receives that envelope and its generation metadata,
@@ -83,23 +87,26 @@ not a Bitwarden vault export, master password, unlock session, or broad cache.
 
 ## Go/no-go rollout
 
-1. Select an issuer platform that passes manual login. Real Android Chrome is
-   next; use real macOS only if Android fails. Prepare a session-export command
-   that validates the source immediately
-   before and after capture, encrypts for one collector, and publishes a monotonic
-   auth generation without logging cookie values.
-2. Enable Workers Paid; remote Container creation is unavailable on Workers
+1. Establish at least two visible Windows Chrome successes after separate
+   restarts with IP, profile, language and window state fixed. Compare fresh
+   Windows and automation only against that stable control.
+2. Select an issuer only after repeated bootstrap. A persistent engine-level
+   Windows Chrome Container profile is acceptable; real Android and persistent
+   macOS are fallback controls. Prepare a session-export command that validates
+   the source immediately before and after capture, encrypts for one collector,
+   and publishes a monotonic auth generation without logging cookie values.
+3. Enable Workers Paid; remote Container creation is unavailable on Workers
    Free.
-3. Deploy a non-password Container probe with official Chrome, headed Xvfb, a
+4. Deploy a non-password Container probe with official Chrome, headed Xvfb, a
    normal viewport, fonts, `webdriver=false`, and passive Kuebiko capture.
-4. Import one newly validated session generation before first navigation and
+5. Import one newly validated session generation before first navigation and
    confirm My Page plus page-local JSON access through direct Container egress.
-5. Validate encrypted session-envelope checkpoint/restore across Container
+6. Validate encrypted session-envelope checkpoint/restore across Container
    sleep, single-run leasing, and source-session rotation behavior.
-6. Measure session lifetime under the intended schedule. Redirect, 401, or 403
-   stops the run and requests a Windows refresh; the Container never submits the
+7. Measure session lifetime under the intended schedule. Redirect, 401, or 403
+   stops the run and requests an issuer refresh; the consumer never submits the
    password.
-7. Only then add a Workflow schedule, failure notification, and normalized
+8. Only then add a Workflow schedule, failure notification, and normalized
    statement persistence.
 
 Cloudflare may place a newly restarted Container in a different location. Do

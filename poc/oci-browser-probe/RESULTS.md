@@ -16,6 +16,10 @@ repository or probe output.
 | OCI Playwright launch | bundled Chromium 151, headless, `Linux x86_64`, `webdriver=true` | `138.2.53.208`, JP | 403 | not attempted |
 | OCI headed CDP | bundled Chromium 151, `Linux x86_64`, `webdriver=false` | `138.2.53.208`, JP | 200 | 403 from `/memapi/jaxrs/xt_login/agree/v1` |
 | local WSL headed CDP | official Chrome 151, `Linux x86_64`, `webdriver=false` | `104.28.196.200`, Cloudflare WARP/Gateway, AU | 200 | 403 from `/memapi/jaxrs/xt_login/agree/v1` |
+| local Linux Docker | Camoufox Firefox 152 with coherent Windows fingerprint, `Win32`, Direct3D-style WebGL, `webdriver=false` | Cloudflare WARP/Gateway, AU/SYD | 200 | 403 from `/memapi/jaxrs/xt_login/agree/v1` |
+| local Linux Docker | Camoufox Firefox 152 with coherent macOS fingerprint, `MacIntel`, Apple M1-style WebGL, `webdriver=false` | Cloudflare WARP/Gateway, AU/SYD | 200 | no expected login POST; inconclusive |
+| local Linux Docker | Kameleo Chroma 152 with coherent Windows Chrome fingerprint, `Win32`, Direct3D 11 WebGL, `webdriver=false` | Cloudflare WARP/Gateway, AU/SYD | 200 | 403 from `/memapi/jaxrs/xt_login/agree/v1` |
+| local Linux Docker, persistent profile | same Kameleo Windows Chrome family, public-site warm-up and human-like input | Cloudflare WARP/Gateway, AU/SYD | 200 | test click did not submit; inconclusive |
 
 The Windows host and WSL shared the same Cloudflare WARP/Gateway route and AU
 country classification at test time. A Japanese residential egress is therefore
@@ -196,20 +200,25 @@ live session transported from Windows, but fresh Linux login, Akamai-cookie-only
 login, and password re-login from a previously seeded persistent Linux profile
 were all rejected.
 
-The next implementation should therefore retain one established Windows
-authentication profile as the session issuer. It exports a minimal encrypted
-session generation only after a positive source check. OCI or a Cloudflare
-Container imports that generation before its first Vpass navigation, validates
-it, and calls the internal JSON APIs through `fetch()` inside the Chrome page.
-The Linux collector stops on redirect, 401, or 403 and never retries the
-password login.
+No password-session issuer is selected yet. First make the visible Windows
+Chrome result repeatable after restart under fixed conditions; current fresh
+Windows controls contain both 302 successes and Akamai 403 failures. After that,
+compare automation in the same established profile and the retained persistent
+Kameleo Windows Chrome Container profile. Whichever issuer passes repeatedly
+exports a minimal encrypted session generation only after a positive source
+check. OCI or a Cloudflare Container imports that generation before its first
+Vpass navigation, validates it, and calls the internal JSON APIs through
+`fetch()` inside the Chrome page. The Linux collector stops on redirect, 401,
+or 403 and never retries the password login.
 
 This avoids repeatedly gambling on a new Akamai score while preserving a
-serverless collection and evidence pipeline. A persistent, on-demand remote
-Windows VM is the fallback issuer when a local Windows profile is unacceptable;
-an ephemeral CI runner is not equivalent. Route through the home Tunnel only
-after a simultaneously valid transported session fails through direct egress,
-because the evidence does not support IP-only routing as the remedy.
+serverless collection and evidence pipeline. Physical Windows remains a
+diagnostic control, not a deployment dependency. A coherent Windows/macOS
+fingerprint inside a Cloudflare Container is acceptable but must pass the same
+repeated bootstrap gate; real Android/macOS are fallbacks. Route through the
+home Tunnel only after a simultaneously valid transported session fails through
+direct egress, because the evidence does not support IP-only routing as the
+remedy.
 
 See `AUTH-SESSION-EXPERIMENTS-2026-08-26.md` for the transfer matrix, login
 traffic fields, stale-session controls, and Cloudflare Container gate.
