@@ -24,6 +24,38 @@ home route is not a sufficient fix. The later fresh-profile success also shows
 that prior cookie/profile continuity is not strictly required when the initial
 browser surface and page interaction are accepted.
 
+## Controlled fresh-profile matrix
+
+The operator later noticed that the Tailscale `tamia` exit node had been marked
+active during part of the work. Both before and after disabling that exit node,
+independent IPv4 and IPv6 checks reported Cloudflare Sydney/AU egress. Tailscale
+was left running without an exit node and WARP remained connected. The observed
+Vpass success therefore did not require Japanese residential egress.
+
+Each row below used a distinct profile and exactly one real login POST. Aborted
+runs with no login POST are excluded. Dwell is measured from the saved login-page
+response to the saved form request.
+
+| Capture | Locale | Initial window | Dwell | Result |
+| --- | --- | --- | ---: | --- |
+| `11-23-06` | `ja-JP,ja,en-US,en` | normal | 157.3 s | 302 success |
+| `12-02-09` | `ja-JP,ja,en-US,en` | normal | 203.8 s | 302 success |
+| `12-07-07` | `en-US,en` | normal | 490.5 s | 302 success |
+| `12-19-53` | `en-US,en` | normal | 30.1 s | Akamai 403 |
+| `12-22-45` | `en-US,en` | minimized, `outer=0x0` | 210.7 s | 302 success |
+| `12-27-24` | `en-US,en` | normal | 94.5 s | Akamai 403 |
+| `12-31-27` | `en-US,en` | normal | 139.4 s | Akamai 403 |
+| `12-34-58` | `en-US,en` | normal | 171.1 s | Akamai 403 |
+
+This rules out Japanese locale, normal initial geometry and the Tailscale exit
+node as individually necessary conditions. Longer dwell strongly improves the
+result, and elapsed time is part of the sensor input, but it is not a sufficient
+fixed threshold: 157 seconds succeeded while a later 171-second fresh run
+failed. Script build is also not decisive. The same helper and main-script
+hashes occurred in both successful and rejected runs. The remaining result is a
+probabilistic/session-level Akamai score involving warm-up, generated cookie
+state, interaction timing, rotating configuration and recent server-side state.
+
 ## What this isolates
 
 - Headless Playwright launch signals are enough for Akamai to reject even the
@@ -42,8 +74,10 @@ browser surface and page interaction are accepted.
   conditions.
 - A later fresh profile succeeded after changing the initial browser surface:
   Japanese locale and language headers, a normal 1920x1080 outer window from the
-  first page load, 1.0 device scale, and Windows OS-level input. The successful
-  request was the same native form encoding as the failed requests.
+  first page load, 1.0 device scale, and Windows OS-level input. Subsequent
+  one-variable runs showed that locale and normal geometry are helpful controls,
+  not strict requirements. The successful request was the same native form
+  encoding as the failed requests.
 - The failed fresh captures' first Akamai pixel reported a minimized Windows
   geometry: outer size 160x28 and screen position -25600,-25600. The successful
   fresh run reported outer size 1920x1080 and position 10,10 from its first
@@ -56,6 +90,9 @@ browser surface and page interaction are accepted.
 - Successful and failed runs each made nine sensor posts before the login. Event
   count alone is not the explanation. The experiment deliberately did not
   extract or compare cookie/storage values.
+- A 30-second normal-window control failed, as did 94-, 139- and 171-second
+  fresh controls. Successful controls ranged from 157 to 490 seconds. The
+  collector must not interpret a fixed sleep as an authorization guarantee.
 
 ## Fresh-profile traffic forensics
 
@@ -158,14 +195,14 @@ probe is still not schedulable, but a one-time human bootstrap is no longer a
 proven requirement: a new Windows profile succeeded with a coherent locale and
 normal initial window state.
 
-The next implementation should retain this successful collector-owned profile,
-repeat an automated login later, and call the internal JSON APIs through
-`fetch()` inside that Chrome page. The next isolation experiment is a separate
-fresh `en-US` profile with the same normal geometry and dwell time; add `ja-JP`
-only if that control fails. OCI should then repeat the same locale, geometry and
-timing controls under headed Chrome. Route through the home Tunnel only after a
-browser configuration works, because the evidence still does not support
-IP-only routing as the remedy.
+The next implementation should retain one successful collector-owned profile,
+wait at least three minutes before its first login attempt, stop on the first
+403, and call the internal JSON APIs through `fetch()` inside that Chrome page.
+Three minutes is an engineering safety margin, not a proven threshold. Reusing
+the profile avoids repeatedly gambling on a new Akamai score. OCI should repeat
+the same full-browser warm-up and page-local fetch pattern under headed Chrome.
+Route through the home Tunnel only after that browser configuration works,
+because the evidence does not support IP-only routing as the remedy.
 
 ## References
 
