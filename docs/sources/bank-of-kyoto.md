@@ -9,6 +9,7 @@
 - 認証済み HTML の非公式再生と Android UI 自動化は、認証状態、OTP の端末移行、動的 hidden state、追加認証、サイト変更の影響が大きい。公式 API や手動 export より先に採用しない。
 - `www.kyotobank.co.jp` は Akamai 配信である。一方、個人 Web バンキングの `www.parasol.anser.ne.jp` の未認証ログイン画面では CAPTCHA や明示的な bot challenge は観測しなかった。これはログイン後にも anti-bot がないことを意味しない。
 - **京銀 JCB デビット、京都カードネオ等のカード利用明細は本資料の対象外で、別の MyJCB family PR の対象である。** 銀行口座に表示されるデビット利用・カード代金等の「口座引落明細」は銀行取引の観測として保持し得るが、加盟店別カード明細と同一視しない。
+- 共通評価では、現在利用できる手動 CSV 経路は **E / cost 1**、認証済み browser bootstrap 後の read replay は未検証の **C / cost 4**、直接契約 API は **A / cost 5** である。
 
 ## 調査上の安全境界
 
@@ -136,16 +137,16 @@ OCI/Kubernetes は長時間 browser/emulator と persistent volume を動かせ�
 
 ## 8. 自動化評価 A–E / コスト 1–5
 
-評価: A=安定した完全自動、B=ほぼ自動、C=人手を含むが実用的、D=fragile、高保守、E=採用不可。コスト: 1=小、5=契約/高保守/高リスク。
+共通評価は、A=documented/export API による scheduled headless、B=renewable/reusable session を使う安定した read-only internal API、C=browser/app bootstrap 後の headless replay、D=full browser/device UI automation、E=manual capture を安全な既定とする。コストは 1=小、5=契約/高保守/高リスク。
 
 | 候補 | 自動化 | コスト | 判断 |
 | --- | --- | --- | --- |
-| スマート通帳 CSV を手動出力し local importer へ渡す | C | 1 | 今すぐの推奨。最大 1,000 明細を定期保存 |
-| 利用者の手動 Web 閲覧を Kuebiko で受動 capture（認証 request/headers 除外） | C | 2 | endpoint/schema discovery 用。raw に PII を残さない今回の検証には使わない |
-| 契約済み事業者が提供する公式 API を Kogane が正規利用 | A〜B | 3 | vendor の再提供 API、費用、規約次第。aggregator を初期経路にはしない |
+| スマート通帳 CSV を手動出力し local importer へ渡す | E | 1 | 今すぐの推奨。最大 1,000 明細を定期保存 |
+| 利用者の手動 Web 閲覧を Kuebiko で受動 capture（認証 request/headers 除外） | E | 2 | endpoint/schema discovery 用。raw に PII を残さない今回の検証には使わない |
+| 契約済み事業者が提供する公式 API を Kogane が正規利用 | A | 3 | vendor の再提供 API、費用、規約次第。aggregator を初期経路にはしない |
 | 京都銀行と直接契約する AnserParaSOL API | A | 5 | transport は最良だが、電子決済等代行業者登録・審査・契約が個人プロジェクトの障壁 |
-| 認証済み AnserParaSOL HTML replay / browser bot | D | 4 | dynamic state、合言葉、OTP、UI 変更、利用規約確認が必要 |
-| Android app reverse engineering / UI automation | E | 5 | 端末 binding、NFC/生体、OTP、ストア更新、規約/セキュリティ上の問題。採用しない |
+| 認証済み AnserParaSOL read replay | C | 4 | dynamic state、合言葉、OTP、UI 変更、利用規約確認が必要。full browser 操作が残るなら D |
+| Android app reverse engineering / UI automation | D | 5 | 端末 binding、NFC/生体、OTP、ストア更新、規約/セキュリティ上の問題。採用しない |
 
 ## 9. read-only live 検証計画と stop 条件
 
