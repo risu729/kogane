@@ -71,9 +71,10 @@ including the TLS probe and the single Vpass login attempt described above.
    fingerprint, even when the User-Agent string is fixed.
 3. A Cloudflare Container could run `impit`, but it is unavailable on the
    current plan and the tested `chrome142` profile was still rejected locally.
-4. A fully browserless collector therefore remains unproven. The next useful
-   experiment is a newer, Windows-like impersonation profile or a minimal
-   browser bootstrap; repeating the same `impit@0.14.3` login is not useful.
+4. A follow-up test in `../tamia-tcp-bridge/RESULTS.md` used a verified Japanese
+   home egress and an unreleased Windows Chrome 151 `impit` profile. The raw
+   bridge preserved its TLS/HTTP2 fingerprint, but Akamai still rejected the
+   single login POST before Vpass returned an application login result.
 
 See `RESOURCE_INVENTORY.md` for the retained deployment and exact cleanup scope.
 

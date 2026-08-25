@@ -1,0 +1,17 @@
+{
+  "name": "@kogane/tamia-tcp-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typegen": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "deploy:bootstrap": "wrangler deploy -c wrangler.bootstrap.jsonc",
+    "deploy:dry": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@types/node": "26.3.0",
+    "typescript": "5.9.3",
+    "wrangler": "4.125.0"
+  }
+}

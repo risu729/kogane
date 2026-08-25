@@ -1,0 +1,8 @@
+node_modules/
+.wrangler/
+__pycache__/
+*.pyc
+.venv/
+.dev.vars*
+.env*
+worker-configuration.d.ts
