@@ -17,10 +17,10 @@ import {
 } from "../src/mobile-auth";
 
 describe("Vpass mobile auth crypto", () => {
-  test("builds the protected Config plaintext with milliseconds and null global ID", () => {
+  test("builds the protected Config plaintext with milliseconds and an empty device token", () => {
     const plaintext = buildConfigPlaintext({
       deviceId: "00000000-0000-0000-0000-000000000001",
-      globalId: null,
+      deviceToken: "",
       timestampMilliseconds: 1_700_000_000_123,
     });
     const fields = plaintext.split("|");
@@ -29,7 +29,7 @@ describe("Vpass mobile auth crypto", () => {
       "",
       "",
       "00000000-0000-0000-0000-000000000001",
-      "null",
+      "",
       "OTdhYzY0NThmYTQyMmJhOGVjNTQ1ZjM1MGQyNGU3NTcyMGYzNGRmOTk0ZWIzZDZjMWFjODk5YjU3YmM3MGQzNjZlZTQxYTVlODVhNjI5OTM1ZTk1MGFkODM3ZDdmNDMy",
       "001",
       "1700000000123",
@@ -52,7 +52,7 @@ describe("Vpass mobile auth crypto", () => {
     });
     expect(plaintext.split("|")).toHaveLength(8);
     expect(plaintext).toStartWith(
-      "DUMMY_USER|DUMMY_PASSWORD|000000000000-0000-0000-0000000009001|null||001|1700000000|",
+      "DUMMY_USER|DUMMY_PASSWORD|000000000000-0000-0000-0000000009001|||001|1700000000|",
     );
   });
 
@@ -87,7 +87,7 @@ describe("Vpass mobile auth crypto", () => {
     ).toBe(plaintext);
   });
 
-  test("decrypts the response envelope with the public response key", () => {
+  test("decrypts the response envelope with the auth public key", () => {
     const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
     const aesKey = Buffer.from("0123456789abcdef");
     const iv = Buffer.from("fedcba9876543210");

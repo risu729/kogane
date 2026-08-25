@@ -348,24 +348,27 @@ HTTP status plus a small allow-listed set of non-sensitive response fields.
 The test must call `common/Config` first, retain every `Set-Cookie` internally,
 normalize host-only cookies to `smbc-card.com`, and copy the returned
 `X-VappSessionTime` onto `Fauth`, but must never serialize any value. For a
-fresh client, both protected plaintexts append a missing `LoginInfoRO.globalId`
-as the literal string `null` because the original implementation uses Java
-`StringBuilder.append(String)`.
+fresh client, both protected plaintexts use the persisted device UUID and an
+empty `VpassPreference.DEVICE_TOKEN`.
 
 The public PoC includes a guarded runner. Its Config-only mode requests no
 credentials and prints only allow-listed status booleans:
 
 ```bash
 bun run src/mobile-auth-probe.ts \
-  --request-key /private/path/f2hKiZCtFQdbfuiVGduZ.pem \
-  --response-key /private/path/pubkey_relese.pem \
+  --auth-key /private/path/f2hKiZCtFQdbfuiVGduZ.pem \
+  --config-key /private/path/pubkey_relese.pem \
   --config-only
 ```
 
 Remove `--config-only` for the single credential test, and add
-`--check-statements` only when the read-only month-list check is intended. Both
-the ID and password prompts are masked. The runner performs no retry and writes
-no credential, response body, token, cookie, or financial record to disk.
+`--check-statements` only when the read-only month-list check is intended. The
+runner defaults to `--push 0`, matching a fresh official-app flow in which the
+notification tutorial was declined; `--push 1` represents acceptance. Do not
+use `-1`: although it is an internal missing-setting value, the official app
+normally stores `0` or `1` before the login screen is reachable. Both the ID
+and password prompts are masked. The runner performs no retry and writes no
+credential, response body, token, cookie, or financial record to disk.
 
 A successful `Fauth`/`Vauth` response is only the first gate. Confirm that the
 same in-memory session can call `web_meisai_top/v1`, extract the server-provided
@@ -381,12 +384,15 @@ Confirmed by offline artifact inspection and cryptographic integrity checks:
 - the recovered DEX defines the four missing classes;
 - the plaintext, request envelope, and response-envelope algorithms documented
   in the API investigation; and
-- the protocol differences between 5.1.1 and 5.12.0.
+- the protocol differences between 5.1.1 and 5.12.0; and
+- a guarded live Config, Fauth, token-decryption, and statement-month-list flow
+  from Sydney Cloudflare egress, returning 16 available months without a
+  browser or Android runtime.
 
 Still inference or requiring a live validation:
 
 - the exact commercial protection product behind `libjnleeeqeor.so`;
 - whether a future release preserves any obfuscated class or asset name;
-- whether current server-side policy accepts the independent client from every
-  network/runtime; and
+- whether current server-side policy accepts the independent client from other
+  networks and the intended container runtime; and
 - whether undocumented API behavior remains stable enough for production use.

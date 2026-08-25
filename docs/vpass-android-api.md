@@ -85,16 +85,21 @@ The two credential-authentication request shapes are:
 {
   "auth": "<encrypted application payload>",
   "is_first_login": 1,
-  "push": -1,
+  "push": 0,
   "auto_login": 0,
   "os_type": 2,
   "id_type": 2
 }
 ```
 
-These are the fresh default-app Vpass values: the app starts with no push
-setting (`-1`), reports its Android OS type as `2`, and maps its internal
-Vpass-ID type `1` to `Fauth` `id_type=2`. `id_type` does not exist on `Vauth`.
+These are the reachable fresh-app Vpass values when notifications are declined.
+Although `VpassPreference` returns `-1` while no notification setting exists,
+the official tutorial persists either `0` or `1` before the user can reach the
+first login. Sending the internally possible but normally unreachable `-1`
+caused `parameters_invalid`; changing only this field to `0` made the live
+`Fauth` request succeed. The app reports Android OS type `2` and maps its
+internal Vpass-ID type `1` to `Fauth` `id_type=2`. `id_type` does not exist on
+`Vauth`.
 
 ### Recovered `Fauth`/`Vauth` plaintext and envelope
 
@@ -102,14 +107,13 @@ The protected 5.12.0 implementation confirms that the delimiter is `|`. For a
 first Vpass login, `auth` is built from this eight-field plaintext:
 
 ```text
-login_id|password|device_id_with_check_digit|global_id||company_code|unix_seconds|sha256
+login_id|password|device_id_with_check_digit|device_token||company_code|unix_seconds|sha256
 ```
 
-`company_code` is initialized to `001`. Field 4 is not a push token: the
-builder calls `LoginRepository`, which returns the saved `LoginInfoRO.globalId`.
-On a fresh client there is no `LoginInfoRO`; Java `StringBuilder.append(null)`
-therefore emits the literal string `null`. The final value is lowercase
-SHA-256 over UTF-8:
+`company_code` is initialized to `001`. Field 4 is the Firebase device token
+from `VpassPreference.DEVICE_TOKEN`; it is an empty string on a fresh client.
+It is distinct from the outer integer `push` notification preference. The final
+value is lowercase SHA-256 over UTF-8:
 
 ```text
 password + unix_seconds + login_id + company_code
@@ -128,7 +132,8 @@ The 5.12.0 request envelope is:
    `SecureRandom` from the app's fixed 72-character alphabet.
 2. Encrypt the UTF-8 plaintext with `AES/CBC/PKCS5Padding` and form
    `IV || ciphertext`.
-3. Encrypt the AES key with the release RSA-2048 public key using OAEP with
+3. Encrypt the AES key with the production auth RSA-2048 public key (the
+   protected code's `true` branch, `f2hKiZCtFQdbfuiVGduZ.pem`) using OAEP with
    SHA-256, MGF1-SHA-256, and an empty label.
 4. Form `(IV || ciphertext) || 256-byte RSA block` and encode with standard
    Base64 without wrapping or `=` padding.
@@ -142,11 +147,11 @@ The normal login call site invokes `ConfigAPI` before `Fauth`. The protected
 Config plaintext is also eight pipe-delimited fields:
 
 ```text
-empty_id|empty_password|device_uuid|global_id|constant|company_code|unix_milliseconds|sha256
+empty_id|empty_password|device_uuid|device_token|constant|company_code|unix_milliseconds|sha256
 ```
 
-For a fresh client, `global_id` is again the literal `null`, `company_code` is
-`001`, and the digest input is
+For a fresh client, `device_token` is empty, `company_code` is `001`, and the
+digest input is
 `empty_id + empty_password + company_code + constant + unix_milliseconds`.
 Unlike the credential plaintext, Config uses milliseconds. Its envelope uses
 the production **false-key** branch (`pubkey_relese.pem`) and the same 5.12.0
@@ -159,19 +164,31 @@ to `smbc-card.com` as in `ReceivedCookiesInterceptor`, and the returned
 Sydney Cloudflare egress returned HTTP 200, application status 200, and the
 session-time header. No response body or header value was persisted.
 
-The guarded credential probe was then run once in that same in-memory flow.
-`Fauth` returned HTTP 400, application status 400, and
-`type=parameters_invalid`; no `login_token` was returned, so the statement
-endpoint was not called. This was an application JSON response rather than an
-Akamai HTML denial. It confirms that Config and transport/session setup work,
-but it does **not** yet validate the reconstructed credential payload. The
-runner deliberately stopped without retrying and persisted no credential,
-cookie, token, or response body.
+The first guarded credential probe used `push=-1` and received HTTP/application
+400 with `type=parameters_invalid`. Static review then found that the official
+notification tutorial always persists `0` or `1` before first login. With
+`push=0` as the only request change, `Fauth` returned HTTP/application 200,
+`type=success`, a `login_token`, and eight session cookies. This identifies the
+outer `push` value—not Akamai, TLS, the credentials, or the encrypted
+plaintext—as the cause of the earlier 400.
+
+A final fidelity correction changed plaintext field 4 from the server-tolerated
+literal `null` to the official fresh-app empty `DEVICE_TOKEN`. The complete
+Config→Fauth→token→statement check was rerun and produced the same successful
+result.
+
+After correcting token decryption to use the same production auth public key
+selected by `BaseAuthAPI`'s `true` branch, the token decoded to ten fields with
+a plausible timestamp. The same in-memory cookies then called
+`web_meisai_top/v1` successfully: HTTP 200, `resultCode=0`, and 16 available
+billing months. Only counts and allow-listed statuses were printed; no
+credential, cookie, token, response body, or financial record was persisted.
 
 The JSON response field `login_token` uses the reverse-shaped envelope in both
 versions. After Base64 decoding, the app takes the final 256 bytes as a PKCS#1
-v1.5 RSA block and applies the release public key in decrypt mode to recover
-the AES key. The prefix is `16-byte IV || AES ciphertext`, decrypted with
+v1.5 RSA block and applies the production auth public key (`true` branch) in
+decrypt mode to recover the AES key. The prefix is
+`16-byte IV || AES ciphertext`, decrypted with
 `AES/CBC/PKCS5Padding`, then split on `|`. The unusual public-key decrypt means
 the server produced a PKCS#1 type-1/private-key block; it is not OAEP response
 decryption.
@@ -250,29 +267,25 @@ can be implemented without Android, a browser, the APK loader, or
 `libjnleeeqeor.so`. Dynamic Android instrumentation is now optional validation,
 not a prerequisite for a pure HTTP client.
 
-That does not yet prove production login. A browserless implementation still
-needs to reproduce current app headers and flags, retain all `Set-Cookie`
-values in one cookie jar, carry `X-VappSessionTime`, handle the decrypted token
-fields, and demonstrate a real login without triggering current server or
-Akamai policy. The app's public-key files should be hash-pinned and the crypto
-versioned because request padding changed between releases. Plaintext auth,
-passwords, tokens, and cookie values must never be logged.
+The independent client has now demonstrated a production login and a read-only
+statement-month-list request from Sydney Cloudflare egress without Android or a
+browser. It must still retain all `Set-Cookie` values in one cookie jar, carry
+`X-VappSessionTime`, use a reachable `push` value, and keep the auth and Config
+key branches distinct. The public-key files should be hash-pinned and the
+crypto versioned because request padding changed between releases. Plaintext
+auth, passwords, tokens, and cookie values must never be logged.
 
 ## Next validation gates
 
-1. Compare a redacted official-app `Fauth` request with the independent
-   runner, focusing on the encrypted plaintext and outer integer flags. The
-   Config step, key selection, OAEP envelope, cookies, and session-time header
-   are already live-validated and are therefore lower-priority suspects.
-2. Determine whether `parameters_invalid` is a generic authentication failure
-   or a structural request failure without repeatedly submitting credentials.
-3. After resolving that mismatch, perform one guarded login and only then
-   enumerate cards and available months and compare statement JSON with the
-   existing PoC.
-4. Repeat the proven pure HTTP client in the intended Cloudflare Container or
-   Kubernetes runtime.
+1. Move the guarded flow behind the project's credential-provider interface;
+   keep both prompts only as a local diagnostic fallback.
+2. Parse the authenticated card list and fetch one selected statement page,
+   without persisting raw responses in the PoC.
+3. Repeat the proven pure HTTP client in the intended Cloudflare Container or
+   Kubernetes runtime and compare only status/count summaries.
+4. Add version gates for future app releases and fail closed if a pinned key,
+   APK version, plaintext layout, or RSA padding changes.
 
-Until the guarded real-login test passes, this is a complete static protocol
-reconstruction rather than a proven production authentication path. It is now
-the highest-value browserless route to implement before more browser
-fingerprint work.
+This is now a live-validated browserless authentication path, not only a static
+protocol reconstruction. It remains an undocumented third-party integration
+and may change without notice.

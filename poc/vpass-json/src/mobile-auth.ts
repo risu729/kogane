@@ -11,23 +11,23 @@ import {
 const RANDOM_ALPHABET =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@+*<>?!#$%&'()=~|_-^";
 
-export const REQUEST_KEY_SHA256 =
+export const AUTH_KEY_SHA256 =
   "6519fb233bf377b097ac4577d43db7782920ae649bb449db8daae9b6b1d0099e";
-export const RESPONSE_KEY_SHA256 =
+export const CONFIG_KEY_SHA256 =
   "43a1c7611ed69ceb1bcdedcb1c8093b0e411411adb31aaecbb12ca0a006c41ef";
 
 export interface FirstLoginAuthInput {
   loginId: string;
   password: string;
   deviceId: string;
-  globalId?: string | null;
+  deviceToken?: string;
   companyCode?: string;
   timestamp?: number;
 }
 
 export interface ConfigAuthInput {
   deviceId: string;
-  globalId?: string | null;
+  deviceToken?: string;
   companyCode?: string;
   timestampMilliseconds?: number;
 }
@@ -73,7 +73,7 @@ export function buildFirstLoginPlaintext(input: FirstLoginAuthInput): string {
     input.loginId,
     input.password,
     transformDeviceId(input.deviceId),
-    input.globalId ?? "null",
+    input.deviceToken ?? "",
     "",
     companyCode,
     String(timestamp),
@@ -84,14 +84,13 @@ export function buildFirstLoginPlaintext(input: FirstLoginAuthInput): string {
 export function buildConfigPlaintext(input: ConfigAuthInput): string {
   const timestamp = input.timestampMilliseconds ?? Date.now();
   const companyCode = input.companyCode ?? "001";
-  // StringBuilder.append(null) in the fresh official-app path emits the literal "null".
-  const globalId = input.globalId ?? "null";
+  const deviceToken = input.deviceToken ?? "";
   const digest = sha256Hex("" + "" + companyCode + CONFIG_AUTH_CONSTANT + timestamp);
   return [
     "",
     "",
     input.deviceId,
-    globalId,
+    deviceToken,
     CONFIG_AUTH_CONSTANT,
     companyCode,
     String(timestamp),
@@ -139,14 +138,14 @@ export function buildConfigAuth(
   return encryptAuthPlaintext(buildConfigPlaintext(input), configPublicKey);
 }
 
-export function decryptLoginToken(token: string, responsePublicKey: string | Uint8Array): string {
+export function decryptLoginToken(token: string, authPublicKey: string | Uint8Array): string {
   const decoded = Buffer.from(token, "base64");
   const rsaWidth = 256;
   if (decoded.length <= rsaWidth + 16) throw new Error("login_token envelope is too short");
   const aesPart = decoded.subarray(0, decoded.length - rsaWidth);
   const wrappedKey = decoded.subarray(decoded.length - rsaWidth);
   const aesKey = publicDecrypt(
-    { key: responsePublicKey, padding: constants.RSA_PKCS1_PADDING },
+    { key: authPublicKey, padding: constants.RSA_PKCS1_PADDING },
     wrappedKey,
   );
   const iv = aesPart.subarray(0, 16);

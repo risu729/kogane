@@ -5,8 +5,8 @@ import { randomUUID } from "node:crypto";
 import { password, isCancel, intro, outro, log } from "@clack/prompts";
 import { CookieJar } from "tough-cookie";
 import {
-  REQUEST_KEY_SHA256,
-  RESPONSE_KEY_SHA256,
+  AUTH_KEY_SHA256,
+  CONFIG_KEY_SHA256,
   assertPublicKeyHash,
   buildConfigAuth,
   buildFirstLoginAuth,
@@ -44,13 +44,24 @@ function setCookieHeaders(headers: Headers): string[] {
   return combined ? [combined] : [];
 }
 
-async function bridgeCookies(jar: CookieJar, response: Response): Promise<void> {
-  for (const source of setCookieHeaders(response.headers)) {
-    const normalized = /;\s*domain=/i.test(source)
-      ? source
-      : `${source}; Domain=smbc-card.com`;
+async function bridgeCookies(
+  jar: CookieJar,
+  response: Response,
+): Promise<{ received: number; defaultedPath: number }> {
+  const sources = setCookieHeaders(response.headers);
+  let defaultedPath = 0;
+  for (const source of sources) {
+    // ReceivedCookiesInterceptor rebuilds every cookie for smbc-card.com and
+    // Cookie.Builder defaults a missing Path attribute to `/`. tough-cookie's
+    // RFC default would instead scope a Config cookie to `/api/v3/common`.
+    let normalized = `${source.replace(/;\s*domain=[^;]*/gi, "")}; Domain=smbc-card.com`;
+    if (!/;\s*path=/i.test(normalized)) {
+      normalized += "; Path=/";
+      defaultedPath += 1;
+    }
     await jar.setCookie(normalized, AUTH_URL);
   }
+  return { received: sources.length, defaultedPath };
 }
 
 function safeAuthSummary(response: Response, json: unknown, jar: CookieJar) {
@@ -76,17 +87,42 @@ function wrappedBody(path: string): object {
 
 async function main(): Promise<void> {
   intro("Vpass Android API read-only probe");
-  const requestKeyPath = argument("--request-key", "VPASS_REQUEST_PUBLIC_KEY_PATH");
-  const responseKeyPath = argument("--response-key", "VPASS_RESPONSE_PUBLIC_KEY_PATH");
-  if (!requestKeyPath || !responseKeyPath) {
-    throw new Error("--request-key and --response-key are required");
+  const authKeyPath =
+    argument("--auth-key", "VPASS_AUTH_PUBLIC_KEY_PATH") ||
+    argument("--request-key", "VPASS_REQUEST_PUBLIC_KEY_PATH");
+  const configKeyPath =
+    argument("--config-key", "VPASS_CONFIG_PUBLIC_KEY_PATH") ||
+    argument("--response-key", "VPASS_RESPONSE_PUBLIC_KEY_PATH");
+  if (!authKeyPath || !configKeyPath) {
+    throw new Error("--auth-key and --config-key are required");
   }
-  const requestKey = new Uint8Array(await readFile(requestKeyPath));
-  const responseKey = new Uint8Array(await readFile(responseKeyPath));
-  assertPublicKeyHash(requestKey, REQUEST_KEY_SHA256, "request public key");
-  assertPublicKeyHash(responseKey, RESPONSE_KEY_SHA256, "response public key");
+  const authKey = new Uint8Array(await readFile(authKeyPath));
+  const configKey = new Uint8Array(await readFile(configKeyPath));
+  assertPublicKeyHash(authKey, AUTH_KEY_SHA256, "auth public key");
+  assertPublicKeyHash(configKey, CONFIG_KEY_SHA256, "Config public key");
 
   const deviceId = randomUUID();
+  const pushSetting = Number(argument("--push", "VPASS_PUSH_SETTING") || "0");
+  if (pushSetting !== 0 && pushSetting !== 1) {
+    throw new Error("--push must be 0 (disabled) or 1 (enabled)");
+  }
+  const configOnly = Bun.argv.includes("--config-only");
+  let loginId = "";
+  let secret = "";
+  if (!configOnly) {
+    const idResult = await password({
+      message: "Vpass ID",
+      validate: (value) => (value?.trim() ? undefined : "Vpass ID is required"),
+    });
+    if (isCancel(idResult)) return;
+    const passwordResult = await password({
+      message: "Vpass password",
+      validate: (value) => (value ? undefined : "Password is required"),
+    });
+    if (isCancel(passwordResult)) return;
+    loginId = idResult.trim();
+    secret = passwordResult;
+  }
   const jar = new CookieJar();
   const commonHeaders = {
     accept: "application/json",
@@ -104,51 +140,42 @@ async function main(): Promise<void> {
     redirect: "manual",
     headers: commonHeaders,
     body: JSON.stringify({
-      auth: buildConfigAuth({ deviceId, globalId: null }, responseKey),
+      auth: buildConfigAuth({ deviceId }, configKey),
       appVersion: APP_VERSION,
       osType: "Android",
       osVersion: "35",
     }),
   });
-  await bridgeCookies(jar, configResponse);
+  const configCookieBridge = await bridgeCookies(jar, configResponse);
   const configJson: unknown = await configResponse.json();
   const configStatus =
     isObject(configJson) && typeof configJson["status"] === "number" ? configJson["status"] : null;
   const sessionTime = configResponse.headers.get("x-vappsessiontime");
+  const authCookieCount = (await jar.getCookies(AUTH_URL)).length;
   log.info(
-    `Config result: ${JSON.stringify({ httpStatus: configResponse.status, appStatus: configStatus, sessionTimePresent: Boolean(sessionTime) })}`,
+    `Config result: ${JSON.stringify({ httpStatus: configResponse.status, appStatus: configStatus, sessionTimePresent: Boolean(sessionTime), authCookieCount, configCookieBridge })}`,
   );
   if (configResponse.status !== 200 || configStatus !== 200 || !sessionTime) {
+    loginId = "";
+    secret = "";
     throw new Error("Config did not establish a session; stopping without retry");
   }
-  if (Bun.argv.includes("--config-only")) {
+  if (configOnly) {
     outro("Config probe succeeded; no credential was requested and no response was saved");
     return;
   }
 
-  const idResult = await password({
-    message: "Vpass ID",
-    validate: (value) => (value?.trim() ? undefined : "Vpass ID is required"),
-  });
-  if (isCancel(idResult)) return;
-  const passwordResult = await password({
-    message: "Vpass password",
-    validate: (value) => (value ? undefined : "Password is required"),
-  });
-  if (isCancel(passwordResult)) return;
-
-  let secret = passwordResult;
-
   const auth = buildFirstLoginAuth(
     {
-      loginId: idResult.trim(),
+      loginId,
       password: secret,
       deviceId,
-      // Fresh LoginRepository has no LoginInfoRO; StringBuilder renders null literally.
-      globalId: null,
+      // A fresh VpassPreference has no Firebase device token yet.
+      deviceToken: "",
     },
-    requestKey,
+    authKey,
   );
+  loginId = "";
   secret = "";
   const authCookie = await jar.getCookieString(AUTH_URL);
   const authResponse = await fetch(AUTH_URL, {
@@ -158,8 +185,8 @@ async function main(): Promise<void> {
     body: JSON.stringify({
       auth,
       is_first_login: 1,
-      // VpassPreference.notificationSetting is -1 when no setting exists on a fresh install.
-      push: -1,
+      // The official tutorial persists 0/1 before its first reachable login.
+      push: pushSetting,
       auto_login: 0,
       os_type: 2,
       id_type: 2,
@@ -175,7 +202,7 @@ async function main(): Promise<void> {
 
   const token = objectAt(authJson, "data")?.["login_token"];
   if (typeof token !== "string") throw new Error("Fauth response has no login_token");
-  const tokenShape = validateLoginTokenShape(decryptLoginToken(token, responseKey));
+  const tokenShape = validateLoginTokenShape(decryptLoginToken(token, authKey));
   log.info(`Token crypto: ${JSON.stringify(tokenShape)}`);
   if (tokenShape.fieldCount < 10 || !tokenShape.timestampPlausible) {
     throw new Error("Decrypted login_token failed structural validation");
