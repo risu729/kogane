@@ -43,6 +43,7 @@ Live validation on 2026-08-25 and 2026-08-26 established the following:
 | Two different imported sessions used concurrently | Both passed; a later login did not immediately revoke the older session. |
 | Expired session imported into OCI | Returned to login, matching the expired source profile. |
 | Fresh WSL Chrome through AU direct vs Japanese `tamia` exit | Both reached the login page; password login remained 403 through `tamia`. |
+| Fresh visible WSL Chrome through `tamia`, user typed and clicked manually | Access Denied; Linux rejection was not caused by CDP/Playwright input. |
 | Previously successful Windows profile, identical CDP text/mouse automation through AU vs `tamia` | Both returned to the login form without Access Denied or credential error. |
 
 These results split the source into two explicit gates:
@@ -64,7 +65,10 @@ A controlled exit-node test confirmed the same conclusion: fresh WSL Chrome
 reached the login page through both AU direct and the Japanese `tamia` exit,
 but the `tamia` password POST still received 403. The same established Windows
 profile driven by identical CDP text/mouse events returned to the login form
-through both routes. `tamia` is therefore not the next bootstrap fix.
+through both routes. A further fresh visible WSL trial also received Access
+Denied after the user entered the credentials manually. `tamia`, CDP-input
+changes, and further Linux UA overrides are therefore not the next bootstrap
+fixes.
 
 `impit` is a native Node addon backed by Rust. It cannot run inside the
 Workers JavaScript isolate, but it can run in a Linux
@@ -92,25 +96,27 @@ manual.
 
 ## Execution decision
 
-Use an established persistent Windows Chrome profile as the session issuer.
+Use an accepted persistent browser profile as the session issuer.
 It logs in or refreshes only when needed, validates an authenticated page, and
 publishes an encrypted, source-scoped session envelope with a generation ID
 and expiry metadata. A short-lived Linux collector imports that envelope,
 validates it, calls the authenticated JSON APIs, stores raw evidence, and
 exits. It never receives the Vpass ID/password and never attempts login.
 
-The next issuer gate is unattended **OS-level** Windows input: generate real
-keyboard and pointer input with a `SendInput`-class mechanism on a visible
-desktop, while Kuebiko/CDP remains passive observation. DOM filling, CDP
-`Input.insertText`, and page-script event synthesis are not accepted substitutes
-for this gate because the CDP control failed in both the AU and `tamia` arms.
+The operator does not want a Windows automation dependency. Test a real
+physical Android device running Chrome next, first with one manual login and
+then, only if it passes, with ADB/CDP automation and minimal session export.
+Test a real macOS host only if Android fails and a persistent Mac is available.
+Linux UA/platform overrides are low value because the manual visible Linux
+control failed and DevTools overrides cover only a subset of the observable
+platform.
 
-The issuer currently proven by testing is the existing Windows profile. If a
-personal laptop or Hiroshima mini PC must not run scheduled work, the
-deployment candidate is an on-demand remote Windows VM with an encrypted
-persistent profile disk. An ephemeral CI runner or a newly-created browser
-profile is not equivalent to the tested issuer and must pass the bootstrap
-gate independently.
+The only issuer currently proven by testing is the existing Windows profile,
+but Windows automation is not an accepted deployment dependency. The next
+candidate is real Android Chrome, followed by a real persistent macOS host only
+if Android fails. An emulator, ephemeral device farm, or newly-created browser
+profile is not equivalent to a passing persistent issuer and must pass the
+bootstrap gate independently.
 
 The current `risu` account was on Workers Free during the probe. Wrangler could
 build the image and upload the Worker, but Cloudflare refused to create the
@@ -119,7 +125,7 @@ test is useful only for the replay gate using a known-good session, not for
 repeating the already-failing Linux password login.
 
 ```text
-Bitwarden -- selected ID/password only --> persistent Windows session issuer
+Bitwarden -- selected ID/password only --> accepted browser session issuer
                                                |
                                                | encrypted session envelope
                                                v
@@ -319,7 +325,7 @@ stream as expected.
 | VPC binding `fetch()` | Selects a network path but still acts as an HTTP semantic proxy. |
 | Calling `TAMIA.connect()` inside the Container | VPC bindings are Worker bindings and are not injected into the Container process. |
 | Treating `TAMIA.connect()` as the Container default route | It affects only explicitly bridged TCP flows, not the Container network namespace. |
-| Laptop/local scheduled collector | Conflicts with the always-on requirement. A local established profile remains a proven manual issuer until a remote Windows issuer passes. |
+| Laptop/local scheduled collector | Conflicts with the always-on requirement. The accepted issuer platform remains unresolved. |
 | General open proxy on the mini PC | Unnecessary attack surface; any fallback is localhost-only and destination-allowlisted. |
 
 ## Implementation gates
@@ -334,12 +340,13 @@ stream as expected.
       Workers Paid is otherwise justified; do not attempt password login.
 - [ ] Test post-auth same-origin JSON `fetch` in Chrome and normal Worker
       `fetch()` before requiring native `impit` in the consumer.
-- [ ] Implement an issuer that retains the established Windows profile. If it
-      is remote, use a persistent encrypted profile disk and validate that its
-      password bootstrap passes before enabling automatic refresh.
-- [ ] After cooldown, test one OS-level Windows keyboard/pointer automation run
-      in the established profile. If it passes repeatedly, reproduce the same
-      visible-desktop automation on the persistent remote Windows issuer.
+- [ ] Select a non-Windows issuer only after manual and automated bootstrap
+      both pass in a persistent real-platform profile.
+- [ ] After cooldown, test one manual login in real Android Chrome. If it
+      passes, test Playwright's experimental Android/ADB control and session
+      export without switching to the Vpass native app.
+- [ ] If Android fails, test a real persistent macOS Chrome host. Do not treat a
+      Linux UA override or ephemeral cloud browser as a macOS control.
 - [x] Verify `tunnel_id` raw public egress with an IP-echo endpoint: three
       successful `connect()` calls with a stable IP hash.
 - [ ] Add separate destination allowlists in Worker code for each scraper;

@@ -1,6 +1,6 @@
 # Credential Delivery
 
-Vpass now has two different secret boundaries. The Windows session issuer
+Vpass now has two different secret boundaries. The accepted browser issuer
 needs the Vpass ID/password when a login or refresh is required. A cloud replay
 collector needs only a currently valid authenticated session and must not
 receive the ID/password. Kogane must not place a Bitwarden master password,
@@ -9,7 +9,7 @@ session key, personal API key, or whole vault cache in Cloudflare.
 ## Decision
 
 Use a local, explicit sync command to copy only the two Vpass fields from an
-already-unlocked Bitwarden CLI into the Windows issuer's source-scoped secret
+already-unlocked Bitwarden CLI into the browser issuer's source-scoped secret
 store. After the issuer authenticates and validates My Page, publish only an
 encrypted session envelope for the Linux/cloud consumer:
 
@@ -17,7 +17,7 @@ encrypted session envelope for the Linux/cloud consumer:
 Bitwarden Password Manager
   -> local `bw` (interactive unlock; no stored master password)
   -> `kogane credentials sync vpass`
-  -> VPASS_ID + VPASS_PASSWORD for the persistent Windows issuer only
+  -> VPASS_ID + VPASS_PASSWORD for the accepted persistent issuer only
   -> established Chrome profile authenticates and validates the session
   -> encrypted, source-scoped session envelope
   -> short-lived Linux/Cloudflare consumer (no password-login capability)
@@ -25,14 +25,15 @@ Bitwarden Password Manager
 
 Run the command after changing the Vpass login item in Bitwarden. This is
 deliberately push-on-change rather than a cloud process that can continuously
-decrypt the personal vault. Until a remote Windows issuer is implemented, the
-existing established Windows profile is the proven manual issuer.
+decrypt the personal vault. The existing Windows profile is the only proven
+manual issuer, but it is not the intended deployment dependency; real Android
+Chrome is the next candidate.
 
 Do not sync `VPASS_ID` or `VPASS_PASSWORD` to Worker secrets while the Linux
 bootstrap gate is failing. If a future cloud runtime independently passes that
 gate, per-Worker secrets can be reconsidered; that is not the current design.
 
-## Windows issuer sync contract
+## Browser issuer sync contract
 
 The implementation should:
 
@@ -48,7 +49,7 @@ The implementation should:
 4. Validate the item type, non-empty username/password, and an allowlisted
    Vpass URI before extracting anything.
 5. Transfer both fields over a local authenticated IPC channel into the
-   source-scoped Windows issuer secret store. Never use command-line values, a
+   source-scoped browser issuer secret store. Never use command-line values, a
    temporary `.env`/JSON file, shell tracing, or stdout logging. If the chosen
    Windows secret store cannot atomically update both fields, keep the previous
    generation active until the new pair has been validated.
@@ -140,7 +141,7 @@ vault-reading commands still require `bw unlock` and a decryption session.
 
 | Option | Cloud credential | Scope | Decision |
 | --- | --- | --- | --- |
-| Local `bw` -> persistent Windows issuer | Only Vpass ID/password | One source issuer | **Use now.** This is the only tested bootstrap environment and stores no master password. |
+| Local `bw` -> accepted persistent browser issuer | Only Vpass ID/password | One source issuer | Use only after the selected Android/macOS issuer passes; store no master password. |
 | Encrypted issuer -> consumer envelope | One Vpass bearer session | One source and generation | **Use for replay PoC.** Rotate on refresh and validate before every run. |
 | Local `bw` -> Worker secrets | Only Vpass ID/password | One Worker | Do not use now; reconsider only if a cloud password bootstrap passes independently. |
 | Local `bw` -> Secrets Store | Only selected fields | Account-level bindings | Same bootstrap gate applies; beta today. |
@@ -160,7 +161,7 @@ Kogane-owned publisher/sync step.
 
 ## Runtime rules
 
-- Only the Windows issuer may read `VPASS_ID` and `VPASS_PASSWORD`. The
+- Only the accepted browser issuer may read `VPASS_ID` and `VPASS_PASSWORD`. The
   coordinator and consumer must not receive them.
 - Do not store credentials or plaintext session envelopes in D1, KV, R2,
   Durable Object state, build arguments, images, artifacts, or logs.

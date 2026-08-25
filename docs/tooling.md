@@ -211,8 +211,8 @@ consumer have separate trust boundaries.
 ```text
 Issuer (after a credential change or session expiry)
   - interactively unlock Bitwarden CLI
-  - copy only the selected item's username/password to the persistent Windows
-    issuer
+  - copy only the selected item's username/password to the accepted persistent
+    browser issuer
   - log in with the established Chrome profile and publish an encrypted,
     source-scoped session generation
 
