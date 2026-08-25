@@ -16,12 +16,12 @@ Cost is 1 (small wrapper) through 5 (device-bound or adversarial automation).
 
 | Research unit | Priority | Official route family | Source PR | Level | Cost | Status |
 | --- | --- | --- | --- | --- | ---: | --- |
-| Mobile Suica / JRE ID / JRE POINT | P0 | JR East web/app | [#8](https://github.com/risu729/kogane/pull/8) | B / D | 2 / 4 | draft complete |
+| Mobile Suica / JRE ID / JRE POINT | P0 | JR East web/app | [#8](https://github.com/risu729/kogane/pull/8) | C / D | 4 (Wallet spot-check: 2) | updated for JRE ID |
 | SMBC bank / Olive bank account | P0 | SMBC Direct / Olive | [#7](https://github.com/risu729/kogane/pull/7) | C | 3-4 | draft complete |
 | SBI Securities | P0 | SBI Securities web/app | [#6](https://github.com/risu729/kogane/pull/6) | B | 4 | draft complete |
 | PayPay | P0 | PayPay app | [#9](https://github.com/risu729/kogane/pull/9) | D | 4 | draft complete (manual CSV: cost 2) |
 | Sumishin SBI / DOCOMO SMTB Net Bank | P0 | bank app/web | [#10](https://github.com/risu729/kogane/pull/10) | D | 3-5 | draft complete |
-| SMBC Trust PRESTIA / GLOBAL PASS | P1 | PRESTIA Online | pending | — | — | queued |
+| SMBC Trust PRESTIA / GLOBAL PASS | P1 | PRESTIA Online | [#11](https://github.com/risu729/kogane/pull/11) | D | 3-4 | draft complete |
 | SBI Shinsei Bank | P1 | PowerDirect/app | pending | — | — | queued |
 | MUFG Bank | P1 | MUFG Direct/app | pending | — | — | queued |
 | Mizuho Bank | P1 | Mizuho Direct/app | pending | — | — | queued |
