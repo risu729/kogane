@@ -4,8 +4,11 @@
   "type": "module",
   "scripts": {
     "scrape": "bun run src/cli.ts",
+    "scrape:mobile": "bun run src/mobile-cli.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "cf:types": "wrangler types",
+    "cf:deploy": "wrangler deploy"
   },
   "dependencies": {
     "@clack/prompts": "1.0.0",
@@ -13,7 +16,9 @@
     "tough-cookie": "6.0.2"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260825.1",
     "@types/bun": "1.3.8",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "wrangler": "4.126.0"
   }
 }

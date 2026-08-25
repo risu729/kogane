@@ -64,10 +64,6 @@ function toInteger(value: unknown): number | null {
   return null;
 }
 
-function isTrue(value: unknown): boolean {
-  return value === true || value === "true" || value === "1" || value === 1;
-}
-
 function pairList(value: unknown): VpassCard[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
@@ -234,7 +230,7 @@ export class VpassClient {
   async fetchStatementMonth(yyyymm: string): Promise<StatementMonth> {
     if (!/^\d{6}$/.test(yyyymm)) throw new Error(`Invalid statement month: ${yyyymm}`);
 
-    const first = await this.#apiPost(MEISAI_TOP_PATH, { p01: yyyymm });
+    const first = await this.#apiPost(MEISAI_TOP_PATH, { p01: yyyymm, p03: "1" });
     const content = objectAt(first.json, "body", "content");
     if (!content) throw new Error("Vpass statement response has no content");
 
@@ -272,12 +268,17 @@ export class VpassClient {
         "WebMeisaiTopDisplayServiceBean",
       );
       const detail = objectAt(bean, "webMeisaiTopK3Vo");
-      if (!isTrue(bean?.["nextPageDispFlg"])) {
+      const allCount = toInteger(detail?.["allCnt"]);
+      const nextPageRow = toInteger(detail?.["nextPageRow"]);
+      if (
+        (allCount !== null && nextPageRow !== null && allCount < nextPageRow) ||
+        (transactions.length === 0 && pageIndex > 0)
+      ) {
         complete = true;
         break;
       }
 
-      const cursorCandidate = detail?.["nextPageRow"] ?? bean?.["nextFirstRow"];
+      const cursorCandidate = detail?.["nextPageRow"];
       const cursor =
         typeof cursorCandidate === "string" || typeof cursorCandidate === "number"
           ? String(cursorCandidate)
@@ -323,12 +324,9 @@ export class VpassClient {
 
     while (start < total) {
       const current = await this.#apiPost(MEISAI_ANSWER_PATH, {
-        conditionList: [
-          { name: "seikyuYM", value: yyyymm },
-          { name: "ktmktKbn", value: "0" },
-        ],
-        start,
-        end: start + pageSize - 1,
+        seikyuYM: yyyymm,
+        start: String(start),
+        end: String(start + pageSize - 1),
       });
       const transactions = customizedTransactions(current.json);
       if (transactions.length === 0) {
