@@ -45,9 +45,11 @@ result was:
 - no `x-loginresult`, and
 - no redirect location.
 
-The test stopped without retry. No `curl_cffi` credential login was attempted;
-its fingerprint and Vpass bootstrap paths were tested without exposing the
-account to another login POST.
+The test stopped without retry. In a later explicitly requested comparison,
+one `curl_cffi 0.16.1` Chrome 150 credential login was sent through the same
+verified Japanese route. Its bootstrap succeeded, but the login result was the
+same: HTTP 403, HTML, no `x-loginresult`, and no redirect. The attempts were not
+looped across the other `curl_cffi` profiles.
 
 This establishes that moving the request to the Japanese home IP is not enough,
 even when the native client presents a current Windows Chrome-like TLS and
@@ -57,6 +59,12 @@ basic transport impersonation. JavaScript-executed Akamai telemetry, the
 resulting cookie state, browser storage/history, request timing, or another
 browser-only signal remain plausible; this experiment does not isolate which
 one Akamai used.
+
+The follow-up `../cloudflare-browser-run/RESULTS.md` allowed JavaScript to run
+in a real remote Chromium instance, but Cloudflare's identifiable automated
+browser and Cloudflare egress were also rejected. Taken together, the tests
+suggest that a usable design needs both a sufficiently normal browser
+environment and the acceptable home egress; neither half passed alone.
 
 ## Design implication
 
