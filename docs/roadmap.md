@@ -43,6 +43,10 @@ Built only after phase 1, then backfilled with all accumulated captures.
 - Cloudflare Worker, D1 database, private R2 bucket, CI.
 - Bearer-token auth for the ingestion API.
 - Importer CLI (`import-kuebiko`, `ingest-file`).
+- Per-source collector coordinator and short-lived Container only for a
+  browserless client already validated in phase 1. Source credentials are
+  copied selectively from an unlocked local Bitwarden CLI into Worker secrets;
+  the vault and master password never enter Cloudflare.
 
 Expected shape of the tables (to be finalized in phase 1):
 

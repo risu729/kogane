@@ -141,11 +141,13 @@ password (PBKDF2 or Argon2id), and can mint WebAuthn assertions from
 vault-stored passkeys (`node:crypto` only) — used to log into SBI
 Securities headlessly.
 
-This fits our environment (Bitwarden + SBI Securities) and removes the need
-for a second secret store. Its API is already scoped for least privilege:
-`credentials(userKey, origin?)` and `passkeys(userKey, rpId?)` filter by
-site, and the cookie jar has `export()` / `import()`, so a single
-authenticated session can be handed out without exposing the whole vault.
+This fits local experiments (Bitwarden + SBI Securities), especially where a
+stored passkey is required. It is not the deployed collector's credential
+source: `credentials(userKey, origin?)` and `passkeys(userKey, rpId?)` filter
+what they return, but the process still holds a key capable of decrypting the
+whole vault. Its cookie jar `export()` / `import()` can support an explicitly
+local session handoff; it must not be used to copy a vault key or broad cache
+into Cloudflare.
 
 The auth architecture that follows from this is important enough to have its
 own section below.
@@ -193,55 +195,42 @@ completeness: partial | complete         events not forced to balance
 These are interface definitions only (no storage, no raw layer), so they
 inform the schema without constraining it.
 
-## Auth and execution: local auth, cloud ingestion
+## Auth and execution: cloud fetch with selectively synced secrets
 
 Reusing `auth-bitwarden` raises the question of where credentials and
-scraping live. The decision: **authenticated fetching runs locally;
-Cloudflare only ingests, stores, parses, and computes.** Credentials never
-leave the local machine.
+scraping live. `auth-bitwarden` remains useful prior art for local passkey
+access, but copying the desktop vault or its derived user key into the cloud
+would give a collector far more authority than it needs.
+
+For sources that pass a browserless live test, authenticated fetching may run
+in a short-lived Cloudflare Container. Only the required per-source fields
+are copied from an already-unlocked local `bw` session into Worker secrets;
+the Bitwarden master password, session key, API key, `data.json`, and unrelated
+vault items never leave the local machine.
 
 ```text
-Local (always-on machine / scheduled task)
-  - open Bitwarden vault, extract only the needed site credential
-    or cookie jar (never the whole vault)
-  - run authenticated providers (mnie clients, smcc downloader)
-  - POST raw bytes + SHA-256 to the ingestion API
+Local (manual, after a credential change)
+  - interactively unlock Bitwarden CLI
+  - copy only the selected item's username/password to Worker secrets in one
+    stdin-fed bulk update
 
-Cloudflare (holds no credentials, only a bearer token)
-  - ingestion API / R2 / D1 / parsers (A->B) / derived calc
+Cloudflare (scheduled)
+  - start a source-specific Container with only those secrets
+  - fetch through impit or fetch, depending on the provider
+  - ingest raw bytes, then stop the instance
 ```
 
-This matches `docs/collection.md` ("the importer is a local CLI",
-"ingestion must stay dumb") and keeps the blast radius small: a compromised
-Worker exposes ingested financial evidence, not the Bitwarden vault (which
-holds far more than finance — identity, government, university accounts).
-
-Reasons not to run authenticated scraping on Workers/Containers, even though
-it is *technically* close to possible:
-
-- **Egress IP and geolocation.** Worker fetches originate from Cloudflare
-  data-center IPs. Japanese financial sites treat unfamiliar IPs and
-  overseas locations as anomalies (extra auth, temporary lock). Running
-  from a stable local IP avoids this; it is a functional blocker, not only
-  a security one. Containers give a real runtime (custom TLS/HTTP client)
-  but share the same Cloudflare egress.
-- **TLS/HTTP fingerprint.** Workers normalize header order and HTTP/2
-  behavior, so requests cannot be shaped to resemble a browser; WAFs that
-  fingerprint clients may reject them.
-- **Argon2id.** `auth-bitwarden` uses a native Rust addon
-  (`@node-rs/argon2`) for Argon2id KDF, which does not run on Workers.
-  PBKDF2 vaults derive fine with `node:crypto`; an Argon2id vault would
-  have to derive the user key locally and pass 32/64 raw bytes instead.
-  Moot once auth is local-only.
-
-If no always-on local machine is available, a Container is an acceptable
-compromise for the *fetch* step — but it must receive a per-site credential
-or cookie jar, never the whole vault, and the geolocation limitation still
-applies.
+Normal Workers still cannot provide native `impit` TLS/HTTP impersonation.
+Containers can. If a provider also requires a residential/Japanese egress,
+the collector may carry the `impit` TLS stream as opaque bytes through an
+allowlisted Workers VPC Tunnel path. An HTTPS MITM or binding `fetch()` would
+replace the fingerprint and therefore does not solve that case.
 
 `kuebiko` capture and any APK/endpoint reverse-engineering also stay local
-by nature; only the dumb ingestion API and the re-derivable layers above it
-belong on Cloudflare.
+by nature. Sources that fail the browserless validation gates stay manual.
+
+See `docs/authenticated-collectors.md` for the runtime, egress, and TLS design,
+and `docs/credentials.md` for the Bitwarden-to-Cloudflare sync decision.
 
 ## Preference order, revised
 

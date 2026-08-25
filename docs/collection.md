@@ -151,6 +151,8 @@ email handler, manual upload) can use it unchanged.
    ratio, change frequency), design the raw layer schema and allowlist from
    that evidence, and identify stable endpoints worth replaying.
 3. **Later — automate per source, selectively.** Replay internal APIs where
-   possible (reusing the dedicated profile's session initially), browser
-   automation only where necessary, on Cron triggers where feasible.
-   Sources that rarely change can stay manual forever.
+   possible, browser automation only where necessary, on Cron triggers where
+   feasible. A source that needs a native impersonating client may run in a
+   short-lived Container with only source-scoped credentials; see
+   `docs/authenticated-collectors.md` and `docs/credentials.md`. Sources that
+   rarely change can stay manual forever.

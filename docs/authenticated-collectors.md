@@ -1,0 +1,241 @@
+# Authenticated Collectors
+
+This document records the execution and network design for sources that can
+be collected without a browser but cannot run in a normal Worker. Vpass is the
+first example: its private JSON API can be replayed from an ID/password and a
+fresh cookie jar, while its Akamai edge may reject a generic TLS/HTTP client.
+
+This is a design and proof-of-concept track, not a promise that an unofficial
+provider API will remain stable. A collector must stop on authentication or
+anti-bot errors and must never retry a login rapidly.
+
+## Vpass baseline
+
+The browserless JSON PoC is tracked in
+[PR #3](https://github.com/risu729/kogane/pull/3). Its intended flow is:
+
+1. Create a fresh, in-memory cookie jar and an `impit` client using a Chrome
+   TLS/HTTP profile.
+2. Bootstrap the Vpass session, then authenticate with Vpass ID/password.
+3. Enumerate cards with `dropdownlist_init/v1` and select one with
+   `operation_card_update/v1`.
+4. Call `web_meisai_top/v1` with empty content and read
+   `seikyuYMList` / `comSeikyuYMList`. These are the available months; do not
+   probe a guessed range.
+5. Call `web_meisai_top/v1` for every returned month, following the pagination
+   family returned by the API, and retain every original JSON response as raw
+   evidence.
+
+`impit` is a native Node addon backed by Rust. It cannot run inside the
+Workers JavaScript isolate, but it can run in a Linux
+[Cloudflare Container](https://developers.cloudflare.com/containers/).
+
+Passing a public-page GET is not the success condition. A source is eligible
+for scheduled collection only after login and authenticated JSON requests
+succeed repeatedly from fresh sessions. A 401/403 stops the run without a
+login retry.
+
+### Akamai is more than a TLS fingerprint
+
+Akamai's published Bot Manager telemetry includes web-client signals, JA4,
+and Akamai TLS fingerprint versions in addition to bot scores. Transactional
+endpoints such as login can be protected separately. A browser-like TLS/HTTP2
+profile is therefore a possible prerequisite, not proof that the client is
+accepted.
+
+An HTTP cookie jar only retains `Set-Cookie` values. It cannot execute the
+page JavaScript that may produce or refresh web telemetry. If a fresh `impit`
+session can load public pages but authenticated POSTs repeatedly fail, do not
+try to synthesize Akamai cookies or buy tokens from a third party. Record the
+failure as evidence that this source needs a browser bootstrap or must remain
+manual.
+
+## Execution decision
+
+Start the source collector in a short-lived Container from a Cron-triggered
+Worker. Pass only that source's credentials into the new Container instance,
+collect the provider's raw response bytes, ingest them, and let the instance
+sleep/exit. The Worker remains the scheduler and policy boundary; native
+network code stays in the Container.
+
+```text
+Cron Trigger
+    |
+    v
+Worker coordinator -- read source-scoped secrets
+    |
+    v
+short-lived Container -- impit + cookie jar + Vpass JSON client
+    |
+    +-- direct Internet first
+    |
+    +-- optional opaque byte bridge to tamia when home egress is required
+    |
+    v
+R2 raw evidence + D1 fetch metadata
+```
+
+The first deployment gate is a direct-Internet Container run. This separates
+two possible rejection causes:
+
+- If `impit` succeeds from a Cloudflare address, no Hiroshima dependency is
+  needed.
+- If the TLS/HTTP fingerprint is accepted but the Cloudflare address is not,
+  add the opaque tunnel path below.
+- If authenticated requests still fail from both networks, JavaScript
+  telemetry or another browser-only signal may be required. Keep that source
+  manual rather than adding blind retries or third-party anti-bot services.
+
+### One source, one active run
+
+Cron, a manual smoke test, and a delayed previous invocation must not log into
+the same source concurrently. Route every start request through one Durable
+Object named for the source. It owns a durable lease and a unique run ID,
+starts the correspondingly named Container instance, and rejects a start while
+the lease is active. Evidence writes use the run ID and content hash so that
+delivery remains idempotent.
+
+A timeout, Container failure, WebSocket close, or raw-socket error ends the run
+as failed and destroys the cookie jar. It must not reconnect, resume, or log in
+again automatically. A later scheduled or explicit manual run may start only
+after the failed run has been reconciled and its cooldown has elapsed.
+
+## Why an HTTPS proxy loses the fingerprint
+
+A TLS fingerprint is made by the client handshake: TLS version and cipher
+ordering, extensions, curves, ALPN, and related details. `impit` is useful
+because the provider sees a browser-like ClientHello and HTTP behavior.
+
+An HTTPS-intercepting proxy terminates that connection and creates a second
+one:
+
+```text
+impit -- TLS A --> MITM -- TLS B --> Vpass
+```
+
+Vpass sees TLS B, which belongs to the proxy, not TLS A from `impit`.
+Cloudflare Container
+[`interceptHttps`](https://developers.cloudflare.com/containers/platform-details/outbound-traffic/)
+and a VPC binding's HTTP `fetch()` path have this property. They may preserve
+the source IP choice, but they do not preserve the fingerprint that motivated
+using `impit`.
+
+An HTTP `CONNECT` proxy or any other raw TCP relay is different. It forwards
+opaque bytes after the tunnel is established, so the inner TLS handshake is
+still between `impit` and Vpass. The relay can see destination/traffic shape,
+but not the inner plaintext.
+
+## Reusing the `tamia` Tunnel
+
+Workers VPC has three different selectors that must not be conflated:
+
+- `network_id: "cf1:network"` connects to the account-wide Cloudflare One
+  network. Public traffic uses Gateway; hostname/subnet routes select the
+  configured connector.
+- `tunnel_id` binds directly to one Cloudflare Tunnel.
+- `service_id` binds to a VPC Service.
+
+For Kogane, configure a dedicated binding with the existing `tamia`
+`tunnel_id` and call that binding only for sources that need the Hiroshima
+path. This does not require changing the personal ABEMA/TVer hostname routes,
+and the same sufficiently recent `cloudflared` process can serve both Zero
+Trust and Workers VPC. Workers VPC requires `cloudflared` 2025.7.0 or later
+and a QUIC-capable (`auto` or `quic`) tunnel connection.
+
+Workers VPC is currently beta. Creating a direct Tunnel binding requires the
+`Connectivity Directory Admin` role, so provisioning uses a separately scoped
+deployment identity; the collector runtime receives only the configured
+binding and cannot create or edit network resources.
+
+Cloudflare documents a tunnel binding as reaching a hostname/IP through that
+tunnel, but does not give an explicit guarantee or example that an arbitrary
+public destination will always leave with the `cloudflared` host's public IP.
+Treat public egress over a direct `tunnel_id` as an experiment, not an
+assumption.
+
+The minimum experiment is:
+
+1. Use the binding's raw
+   [`connect()`](https://developers.cloudflare.com/workers-vpc/api/) to send
+   plain HTTP to an IP-echo service and compare the reported address with the
+   Hiroshima address.
+2. If it matches, carry an opaque TLS stream to an allowlisted Vpass host and
+   confirm that the `impit` handshake still reaches the provider.
+3. Test repeated authenticated collection from a fresh session before
+   scheduling it.
+
+### Opaque bridge without another mini-PC service
+
+A Container cannot directly use a Worker's VPC binding. The experiment can
+bridge bytes as follows:
+
+```text
+impit
+  -> localhost CONNECT adapter in the Container
+  -> run-authenticated WebSocket to the coordinator Worker
+  -> env.TAMIA.connect("allowlisted-vpass-host:443")
+  -> tamia/cloudflared
+  -> Vpass
+```
+
+The outer WebSocket TLS terminates at Cloudflare, but the inner TLS bytes are
+payload and remain untouched. Prefer the Container's same-machine outbound
+Worker path so the bridge need not be a public endpoint; WebSocket upgrade
+support on that exact path is a PoC gate. If a public endpoint is required,
+the coordinator issues a one-run capability containing the run ID, expiry,
+and nonce. It is single-use and bound to the active Durable Object lease. Do
+not put the destination hostname in a client-controlled field or add a fixed
+general proxy secret to the Container.
+
+The Worker selects fixed Vpass hostnames on port 443 and never becomes a
+general-purpose proxy. The bridge also needs explicit stream semantics:
+
+- preserve byte order but never rely on WebSocket message boundaries matching
+  TCP reads,
+- use application-level credits/acknowledgements and a bounded high-water mark
+  because WebSocket `send()` does not provide an awaitable stream writer,
+- pause the producing side when the peer has no credit,
+- map half-close, error, timeout, and cancellation in both directions, and
+- cap per-run bytes and duration; overflow or protocol error fails the run
+  without a login retry.
+
+If direct public egress through `tunnel_id` does not work, the fallback is a
+localhost-only CONNECT/SOCKS service on the Hiroshima mini PC, reachable only
+through `tamia`. This is the only design that adds a process beside the
+existing `cloudflared`.
+
+## Rejected paths
+
+| Path | Reason |
+| --- | --- |
+| Normal Worker `fetch()` | Cannot run native `impit`; the provider sees Cloudflare's TLS/HTTP behavior. |
+| Container `interceptHttps` | Re-terminates TLS and replaces the `impit` fingerprint. |
+| VPC binding `fetch()` | Selects a network path but still acts as an HTTP semantic proxy. |
+| Laptop/local scheduled job | Conflicts with the always-on requirement. |
+| General open proxy on the mini PC | Unnecessary attack surface; any fallback is localhost-only and destination-allowlisted. |
+
+## Implementation gates
+
+- [ ] Merge and live-validate the browserless Vpass JSON PoC.
+- [ ] Run the same client in a Container with direct Cloudflare egress.
+- [ ] Verify `tunnel_id` raw public egress with an IP-echo endpoint.
+- [ ] Add the per-source Durable Object lease, unique run IDs, and cooldown
+      before any scheduled or manual cloud login.
+- [ ] Implement the allowlisted WebSocket/raw-TCP bridge only if direct egress
+      is rejected, including one-run authorization and bounded flow control.
+- [ ] Add a mini-PC proxy only if the direct tunnel experiment fails.
+- [ ] Deliver credentials according to `docs/credentials.md` before enabling
+      Cron.
+
+## References
+
+- [Workers VPC network bindings](https://developers.cloudflare.com/workers-vpc/configuration/vpc-networks/)
+- [Workers VPC tunnel requirements](https://developers.cloudflare.com/workers-vpc/configuration/tunnel/)
+- [Workers VPC binding API](https://developers.cloudflare.com/workers-vpc/api/)
+- [Cloudflared source-IP anchoring](https://developers.cloudflare.com/cloudflare-one/traffic-policies/egress-policies/egress-cloudflared/)
+- [Container outbound traffic](https://developers.cloudflare.com/containers/platform-details/outbound-traffic/)
+- [Container Cron example](https://developers.cloudflare.com/containers/examples/cron/)
+- [Workers WebSockets](https://developers.cloudflare.com/workers/runtime-apis/websockets/)
+- [Container-to-Worker connections](https://developers.cloudflare.com/containers/platform-details/workers-connections/)
+- [Akamai SIEM fields](https://techdocs.akamai.com/siem-integration/docs/siem-splunk-connector)
+- [Akamai protection operation purposes](https://techdocs.akamai.com/api-definitions/reference/operation-purposes)
