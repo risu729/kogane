@@ -32,8 +32,8 @@ Cost is 1 (small wrapper) through 5 (device-bound or adversarial automation).
 | Westpac | P1 | web/app | [#19](https://github.com/risu729/kogane/pull/19) | E (CDR: A) | 1 (CDR: 5) | draft complete |
 | St.George Bank | P1 | web/app | [#21](https://github.com/risu729/kogane/pull/21) | C | 4 (manual PDF: 1) | draft complete |
 | Wise | P1 | first-party API/web/app | [#20](https://github.com/risu729/kogane/pull/20) | E | 1 (partner API: 3-5) | draft complete |
-| SBI VC Trade | P1 | VCTRADE web/app | pending | — | — | queued |
-| Mercari / Merpay / Mercoin | P1 | Mercari app/web | pending | — | — | queued |
+| SBI VC Trade | P1 | VCTRADE web/app | [#23](https://github.com/risu729/kogane/pull/23) | E (C candidate) | 1 (replay: 4) | draft complete |
+| Mercari / Merpay / Mercoin | P1 | Mercari app/web | [#22](https://github.com/risu729/kogane/pull/22) | E | 1-2 (full automation: 5) | draft complete |
 | MyJCB card family | P2 | MyJCB web/app | pending | — | — | queued |
 | MUFG card family | P2 | My Digital Connect | pending | — | — | queued |
 | Epos / Epos Visa Prepaid | P2 | EposNet/app | pending | — | — | queued |
