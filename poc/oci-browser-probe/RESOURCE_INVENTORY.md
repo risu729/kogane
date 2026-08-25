@@ -33,3 +33,14 @@ the working cleanup waits for browser termination before deleting them.
 No Vpass credential or cookie value was stored on `bots`. No Worker, Container,
 Tunnel, VPC network, Kubernetes resource, DNS record, firewall rule, or OCI
 resource was created or modified by this probe.
+
+## Local Windows fresh-profile control
+
+The Kuebiko run labeled `kogane-fresh-profile-test` is retained only in the
+normal private Kuebiko capture root. It contains sensitive Vpass network and
+storage evidence and is not committed. The dedicated test profile
+`browser-profile-clean-test-20260825` was closed and sent to the Windows Recycle
+Bin, so it is recoverable if the profile itself is unexpectedly needed. The
+temporary launcher, automation script and cleanup script were deleted. The
+existing `browser-profile-beta` was not used or removed by this fresh-profile
+control.
