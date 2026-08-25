@@ -10,6 +10,7 @@ repository or probe output.
 | --- | --- | --- | --- | --- |
 | Windows Kuebiko, existing dedicated profile | Chrome 153, `Win32`, `webdriver=false`, five configured languages | host route was Cloudflare WARP/Gateway, AU; the capture tab's exact egress could not be queried because Kuebiko blocked the test endpoint | 200 | success; authenticated statement page rendered |
 | Windows Kuebiko, completely new profile | same Chrome 153, `Win32`, `webdriver=false`, default `en-US` language | same host and route class as the successful run | 200 | 403 from `/memapi/jaxrs/xt_login/agree/v1` |
+| Windows Kuebiko, new `ja-JP` profile, normal 1920x1080 window | same Chrome 153, `Win32`, `webdriver=false`; OS-level input | same Windows host and route class | 200 | success; native form returned 302 and the authenticated My Page loaded |
 | OCI Playwright launch | official Chrome 151, headless, `Linux x86_64`, `webdriver=true` | `138.2.53.208`, JP | 403 | not attempted |
 | OCI headed CDP | official Chrome 151, `Linux x86_64`, `webdriver=false` | `138.2.53.208`, JP | 200 | 403 from `/memapi/jaxrs/xt_login/agree/v1` |
 | OCI Playwright launch | bundled Chromium 151, headless, `Linux x86_64`, `webdriver=true` | `138.2.53.208`, JP | 403 | not attempted |
@@ -17,12 +18,11 @@ repository or probe output.
 | local WSL headed CDP | official Chrome 151, `Linux x86_64`, `webdriver=false` | `104.28.196.200`, Cloudflare WARP/Gateway, AU | 200 | 403 from `/memapi/jaxrs/xt_login/agree/v1` |
 
 The Windows host and WSL shared the same Cloudflare WARP/Gateway route and AU
-country classification at test time. More importantly, the successful and
-failed Windows runs used the same Chrome Beta binary and launch flags on the
-same host; only the browser profile and its prior interaction/state differed.
-A Japanese residential egress is therefore not required for the observed
-success, and changing only OCI's source IP to the home route is not a sufficient
-fix.
+country classification at test time. A Japanese residential egress is therefore
+not required for the observed success, and changing only OCI's source IP to the
+home route is not a sufficient fix. The later fresh-profile success also shows
+that prior cookie/profile continuity is not strictly required when the initial
+browser surface and page interaction are accepted.
 
 ## What this isolates
 
@@ -40,16 +40,22 @@ fix.
   153 binary, `Win32`, `webdriver=false`, host and route as the successful
   profile. This rules out Windows, Chrome 153 and bare Kuebiko/CDP as sufficient
   conditions.
-- The strongest remaining explanation is continuity in the existing profile:
-  previously validated Akamai cookies, local/session storage, service worker or
-  cache state, browser preferences, and prior human interaction history. The
-  language list also differed (`en-US` only in the fresh profile versus five
-  configured languages in the existing profile), so that profile-level
-  fingerprint is not perfectly controlled.
-- The experiment does not identify one decisive persisted value. It deliberately
-  did not extract or compare cookie/storage values. It does show that ordinary
-  Playwright or bare CDP over a fresh profile is insufficient on both Windows
-  and Linux.
+- A later fresh profile succeeded after changing the initial browser surface:
+  Japanese locale and language headers, a normal 1920x1080 outer window from the
+  first page load, 1.0 device scale, and Windows OS-level input. The successful
+  request was the same native form encoding as the failed requests.
+- The failed fresh captures' first Akamai pixel reported a minimized Windows
+  geometry: outer size 160x28 and screen position -25600,-25600. The successful
+  fresh run reported outer size 1920x1080 and position 10,10 from its first
+  pixel. Both physical screens were 16:10, so aspect ratio itself is not the
+  observed difference; initial minimized state is the stronger geometry signal.
+- Locale also changed from `en-US` only to `ja-JP,ja,en-US,en`, consistently in
+  both `Accept-Language` and the Navigator surface. Login dwell time changed
+  from about 30 seconds to about 157 seconds. These variables were changed
+  together, so the capture cannot assign causality to only one of them.
+- Successful and failed runs each made nine sensor posts before the login. Event
+  count alone is not the explanation. The experiment deliberately did not
+  extract or compare cookie/storage values.
 
 ## Fresh-profile traffic forensics
 
@@ -97,24 +103,77 @@ simple explanation that the manual run generated too few events.
 For future probes, stop after the first login `403`. Repeating a rejected login
 in the same profile adds no useful control and may change server-side state.
 
+## Current-script deobfuscation notes
+
+Static expansion of the 26 KiB `/akam/13` helper recovered its navigator,
+screen, plugin, capability, canvas, storage, permission, automation-artifact,
+battery, timezone and timing probes. It URL-encodes those results into the
+named pixel fields and posts them after page load, retrying automation probes
+for roughly 500 ms first.
+
+The 564 KiB Bot Manager build uses a control-flow VM and runtime string
+decryption, so its complete schema was not recovered. Running the saved script
+only in an isolated blank page with networking replaced by a local sink showed
+capture-phase listeners for:
+
+- autofill, focus, blur, input, paste and keyboard events;
+- click, mouse move/down/up and pointer down/up;
+- touch start/move/end/cancel;
+- device motion and orientation.
+
+No scroll listener appeared in that isolated run, although Akamai describes
+scroll telemetry as a platform capability. The script classifies password
+inputs separately from text/search/URL/email/telephone/number inputs. It reads
+input attributes and invokes the input value getter. Controlled dummy values of
+different lengths did not appear verbatim in the emitted payload and did not
+change its length, but that does not rule out fixed-size or transformed value
+features.
+
+The emitted request remains JSON with only `sensor_data` at the top level. The
+observed generation path uses custom transforms followed by `TextEncoder` and
+Base64; WebCrypto was not invoked in the isolated probe. Treat the payload as an
+opaque versioned format rather than a stable public API.
+
+## Public automation precedents
+
+- `braineo/smbcCardSpider` used `requests.Session` and the same internal login,
+  statement and card-selection JSON endpoints in 2016. It predates the current
+  Akamai client telemetry and is evidence for endpoint continuity, not a current
+  bypass.
+- `hdemon/vpass-scraper` used ordinary Chrome, Selenium, Xvfb and a maximized
+  1366x768 display in 2017.
+- the archived 2026 `risu729/smcc-meisai-scraper` did not automate password
+  login. It reused an established Windows Chrome profile after manual login.
+- no reproducible 2024-2026 public implementation was found that performs a new
+  Vpass password login using only Playwright, curl-cffi or impit. A contemporary
+  Akamai case study for another site found that the same cookies failed through
+  Playwright's HTTP client but succeeded through `fetch()` in the browser page,
+  showing why cookie transplant alone is not a sufficient design assumption.
+
 ## Architecture consequence
 
 The OCI Kubernetes collector remains a reasonable runtime for providers that
-accept normal HTTP clients or Linux browser automation. Vpass is not ready to
-move there. Do not schedule the current PoC: it would repeatedly send rejected
-login requests.
+accept normal HTTP clients or Linux browser automation. The current OCI Vpass
+probe is still not schedulable, but a one-time human bootstrap is no longer a
+proven requirement: a new Windows profile succeeded with a coherent locale and
+normal initial window state.
 
-The next bounded Vpass experiment should create a persistent, collector-owned
-profile from ID/password, perform a one-time human bootstrap in that profile,
-and then test a later automated login without copying any personal browser
-cookie. If that continuity works, only the Windows browser runner must persist;
-the user need not remain involved in scheduled runs. If it does not, Vpass stays
-on the already validated dedicated Windows/Kuebiko profile. Route through the
-home Tunnel only after a browser configuration works, because the current
-evidence does not support IP-only routing as the remedy.
+The next implementation should retain this successful collector-owned profile,
+repeat an automated login later, and call the internal JSON APIs through
+`fetch()` inside that Chrome page. The next isolation experiment is a separate
+fresh `en-US` profile with the same normal geometry and dwell time; add `ja-JP`
+only if that control fails. OCI should then repeat the same locale, geometry and
+timing controls under headed Chrome. Route through the home Tunnel only after a
+browser configuration works, because the evidence still does not support
+IP-only routing as the remedy.
 
 ## References
 
 - [Playwright browser installation and Chrome channels](https://playwright.dev/docs/browsers)
 - [Playwright system requirements](https://playwright.dev/docs/intro)
 - [Google Chrome for Linux](https://support.google.com/chrome/answer/95346?hl=en-GB)
+- [braineo/smbcCardSpider](https://github.com/braineo/smbcCardSpider)
+- [hdemon/vpass-scraper](https://github.com/hdemon/vpass-scraper)
+- [risu729/smcc-meisai-scraper](https://github.com/risu729/smcc-meisai-scraper)
+- [Akamai detection methods](https://techdocs.akamai.com/cloud-security/docs/detection-methods)
+- [Akamai cookie-versus-page-fetch case study](https://github.com/imoonkey/openweb/blob/ccd701290930045fd1a5746a7a6820548d09e1e5/src/sites/costco/DOC.md)
