@@ -1,0 +1,11 @@
+{
+  "name": "@kogane/oci-browser-probe",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "probe": "node probe.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.62.0"
+  }
+}

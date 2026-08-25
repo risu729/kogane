@@ -15,3 +15,4 @@ different rules.
 ## Proofs of concept
 
 - [Browserless Vpass JSON collector](poc/vpass-json/README.md)
+- [OCI/WSL Vpass browser comparison](poc/oci-browser-probe/README.md)

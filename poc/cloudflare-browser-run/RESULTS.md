@@ -25,8 +25,7 @@ values were neither returned nor logged.
 Browser Run still reported `Cloudflare-Workers`, Linux, and `webdriver=true` to
 page JavaScript. Cloudflare also documents that rendering traffic comes from
 Cloudflare IP ranges and includes automatic identification headers. This was
-therefore not equivalent to the successful Windows Chrome 153 session through
-the Japanese home IP.
+therefore not equivalent to the successful Windows Chrome 153 session.
 
 ## Login result
 
@@ -48,16 +47,18 @@ above captured the definitive 403 response; no further login was attempted.
 
 | Client | Egress | JavaScript | Vpass login result |
 | --- | --- | --- | --- |
-| Real Chrome 153 on Windows | same public egress as the original local test | yes | success: 302 and `x-loginresult: 0` |
+| Real Chrome 153 on Windows | host route observed as Cloudflare WARP/Gateway, AU | yes | success: 302 and `x-loginresult: 0` |
 | upstream `impit` Chrome 151 Windows | Japanese home via `tamia` | no | Akamai 403 before Vpass result |
 | `curl_cffi 0.16.1` Chrome 150 | Japanese home via `tamia` | no | Akamai 403 before Vpass result |
 | Cloudflare Browser Run + Windows Chrome 153 network UA | Cloudflare | yes | Akamai 403 before Vpass result |
 
-The combined evidence shows that neither the Japanese source IP, transport
+The combined evidence shows that neither a Japanese source IP, transport
 impersonation, nor JavaScript execution in Cloudflare's identifiable automated
-browser is sufficient on its own. It does not prove one individual Akamai
-signal is decisive. A successful design would need the attributes together:
-a sufficiently normal browser environment and the acceptable home egress.
+browser is sufficient on its own. The later OCI/WSL comparison in
+`../oci-browser-probe/RESULTS.md` also reproduced the rejection in Linux Chrome
+over the same Cloudflare WARP route used by the Windows host. The evidence does
+not support treating home egress as the missing requirement; browser/OS/profile
+state remains material.
 
 ## References
 
