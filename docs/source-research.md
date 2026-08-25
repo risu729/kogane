@@ -22,9 +22,9 @@ Cost is 1 (small wrapper) through 5 (device-bound or adversarial automation).
 | PayPay | P0 | PayPay app | [#9](https://github.com/risu729/kogane/pull/9) | D | 4 | draft complete (manual CSV: cost 2) |
 | Sumishin SBI / DOCOMO SMTB Net Bank | P0 | bank app/web | [#10](https://github.com/risu729/kogane/pull/10) | D | 3-5 | draft complete |
 | SMBC Trust PRESTIA / GLOBAL PASS | P1 | PRESTIA Online | [#11](https://github.com/risu729/kogane/pull/11) | D | 3-4 | draft complete |
-| SBI Shinsei Bank | P1 | PowerDirect/app | pending | — | — | queued |
-| MUFG Bank | P1 | MUFG Direct/app | pending | — | — | queued |
-| Mizuho Bank | P1 | Mizuho Direct/app | pending | — | — | queued |
+| SBI Shinsei Bank | P1 | PowerDirect/app | [#12](https://github.com/risu729/kogane/pull/12) | D | 3-4 | draft complete |
+| MUFG Bank | P1 | MUFG Direct/app | [#13](https://github.com/risu729/kogane/pull/13) | D | 4 | draft complete |
+| Mizuho Bank | P1 | Mizuho Direct/app | [#14](https://github.com/risu729/kogane/pull/14) | D | 3-4 | draft complete |
 | Japan Post Bank | P1 | Yucho Direct/app | pending | — | — | queued |
 | Sony Bank | P1 | Sony Bank web/app | pending | — | — | queued |
 | Minna Bank | P1 | mobile app | pending | — | — | queued |
