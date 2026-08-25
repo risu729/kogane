@@ -195,42 +195,49 @@ completeness: partial | complete         events not forced to balance
 These are interface definitions only (no storage, no raw layer), so they
 inform the schema without constraining it.
 
-## Auth and execution: cloud fetch with selectively synced secrets
+## Auth and execution: browser session issuer plus cloud replay
 
 Reusing `auth-bitwarden` raises the question of where credentials and
 scraping live. `auth-bitwarden` remains useful prior art for local passkey
 access, but copying the desktop vault or its derived user key into the cloud
 would give a collector far more authority than it needs.
 
-For sources that pass a browserless live test, authenticated fetching may run
-in a short-lived Cloudflare Container. Only the required per-source fields
-are copied from an already-unlocked local `bw` session into Worker secrets;
-the Bitwarden master password, session key, API key, `data.json`, and unrelated
-vault items never leave the local machine.
+For sources that pass both bootstrap and replay tests, authenticated fetching
+may run in a short-lived Cloudflare Container. Vpass currently passes replay
+on Linux after importing a valid session, but password bootstrap passes only
+in an established Windows Chrome profile. Therefore the password and session
+consumer have separate trust boundaries.
 
 ```text
-Local (manual, after a credential change)
+Issuer (after a credential change or session expiry)
   - interactively unlock Bitwarden CLI
-  - copy only the selected item's username/password to Worker secrets in one
-    stdin-fed bulk update
+  - copy only the selected item's username/password to the persistent Windows
+    issuer
+  - log in with the established Chrome profile and publish an encrypted,
+    source-scoped session generation
 
-Cloudflare (scheduled)
-  - start a source-specific Container with only those secrets
-  - fetch through impit or fetch, depending on the provider
+Linux/Cloudflare consumer (scheduled)
+  - start a source-specific consumer with only the encrypted session envelope
+  - validate the session and fetch authenticated JSON without password login
   - ingest raw bytes, then stop the instance
 ```
 
-Normal Workers still cannot provide native `impit` TLS/HTTP impersonation.
-Containers can. If a provider also requires a residential/Japanese egress,
-the collector may carry the `impit` TLS stream as opaque bytes through an
-allowlisted Workers VPC Tunnel path. An HTTPS MITM or binding `fetch()` would
-replace the fingerprint and therefore does not solve that case.
+Normal Workers still cannot provide native `impit` TLS/HTTP impersonation,
+while Containers can. For Vpass, test ordinary post-auth Worker/Chrome fetch
+before requiring `impit`: the experiments prove that Linux can consume a
+valid session, not that native impersonation is required after authentication.
+If a valid session works from OCI but fails from Cloudflare, the collector may
+then carry its TLS stream as opaque bytes through an allowlisted Workers VPC
+Tunnel path. An HTTPS MITM or binding `fetch()` replaces the client-side TLS
+fingerprint and is not equivalent to an opaque bridge.
 
-`kuebiko` capture and any APK/endpoint reverse-engineering also stay local
-by nature. Sources that fail the browserless validation gates stay manual.
+`kuebiko` capture and any APK/endpoint reverse-engineering also stay local by
+nature. A source that fails bootstrap but passes replay may use the split
+issuer/consumer design; a source that fails replay stays manual.
 
 See `docs/authenticated-collectors.md` for the runtime, egress, and TLS design,
-and `docs/credentials.md` for the Bitwarden-to-Cloudflare sync decision.
+and `docs/credentials.md` for the Bitwarden-to-issuer and encrypted-session
+handoff decisions.
 
 ## Preference order, revised
 

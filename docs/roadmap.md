@@ -43,10 +43,12 @@ Built only after phase 1, then backfilled with all accumulated captures.
 - Cloudflare Worker, D1 database, private R2 bucket, CI.
 - Bearer-token auth for the ingestion API.
 - Importer CLI (`import-kuebiko`, `ingest-file`).
-- Per-source collector coordinator and short-lived Container only for a
-  browserless client already validated in phase 1. Source credentials are
-  copied selectively from an unlocked local Bitwarden CLI into Worker secrets;
-  the vault and master password never enter Cloudflare.
+- Per-source collector coordinator and short-lived consumer only after its
+  replay path is validated in phase 1. Treat password bootstrap as a separate
+  gate: Vpass currently uses an established persistent Windows Chrome issuer,
+  while the Linux/cloud consumer receives only an encrypted source-scoped
+  session envelope. The vault, master password, and Vpass password never enter
+  Cloudflare for this flow.
 
 Expected shape of the tables (to be finalized in phase 1):
 

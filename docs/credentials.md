@@ -1,41 +1,44 @@
 # Credential Delivery
 
-Authenticated collectors need a Vpass ID/password at runtime. Kogane should
-not place a Bitwarden master password, session key, personal API key, whole
-vault cache, or long-lived browser cookie jar in Cloudflare.
+Vpass now has two different secret boundaries. The Windows session issuer
+needs the Vpass ID/password when a login or refresh is required. A cloud replay
+collector needs only a currently valid authenticated session and must not
+receive the ID/password. Kogane must not place a Bitwarden master password,
+session key, personal API key, or whole vault cache in Cloudflare.
 
 ## Decision
 
-Use a local, explicit sync command to copy only the fields required by one
-collector from an already-unlocked Bitwarden CLI into Cloudflare Worker
-secrets:
+Use a local, explicit sync command to copy only the two Vpass fields from an
+already-unlocked Bitwarden CLI into the Windows issuer's source-scoped secret
+store. After the issuer authenticates and validates My Page, publish only an
+encrypted session envelope for the Linux/cloud consumer:
 
 ```text
 Bitwarden Password Manager
   -> local `bw` (interactive unlock; no stored master password)
   -> `kogane credentials sync vpass`
-  -> VPASS_ID + VPASS_PASSWORD Worker secrets
-  -> passed to one short-lived collector Container at start
+  -> VPASS_ID + VPASS_PASSWORD for the persistent Windows issuer only
+  -> established Chrome profile authenticates and validates the session
+  -> encrypted, source-scoped session envelope
+  -> short-lived Linux/Cloudflare consumer (no password-login capability)
 ```
 
 Run the command after changing the Vpass login item in Bitwarden. This is
 deliberately push-on-change rather than a cloud process that can continuously
-decrypt the personal vault.
+decrypt the personal vault. Until a remote Windows issuer is implemented, the
+existing established Windows profile is the proven manual issuer.
 
-Use per-Worker secrets first. They are stable, scoped to the collector, and do
-not expose the credentials to unrelated Workers. Cloudflare
-[Secrets Store](https://developers.cloudflare.com/secrets-store/integrations/workers/)
-is a reasonable later move when several deployed components need the same
-secret, but it is account-level and currently beta. Both can be passed to a
-[Container as environment variables](https://developers.cloudflare.com/containers/examples/env-vars-and-secrets/).
+Do not sync `VPASS_ID` or `VPASS_PASSWORD` to Worker secrets while the Linux
+bootstrap gate is failing. If a future cloud runtime independently passes that
+gate, per-Worker secrets can be reconsidered; that is not the current design.
 
-## Local sync command contract
+## Windows issuer sync contract
 
 The implementation should:
 
-1. Require pinned, locally installed `bw`, `jq`, and `wrangler` versions plus
-   the Kogane deployment config. The command must never download or execute a
-   package after secret material enters the pipeline.
+1. Require pinned, locally installed `bw` and issuer-helper versions plus the
+   Kogane issuer config. The command must never download or execute a package
+   after secret material enters the pipeline.
 2. Run `bw status` and refuse `unauthenticated`. If it is locked, invoke
    `bw unlock --raw` so `bw` prompts interactively; Kogane must not accept or
    store the master password. Keep `BW_SESSION` only for the command's
@@ -44,12 +47,13 @@ The implementation should:
    by a human-readable search string.
 4. Validate the item type, non-empty username/password, and an allowlisted
    Vpass URI before extracting anything.
-5. Build a two-key JSON object in process memory and send it to
-   `wrangler secret bulk` through stdin. This updates both fields in one
-   request. Never use a command-line `--value`, a temporary `.env`/JSON file,
-   shell tracing, or stdout logging.
+5. Transfer both fields over a local authenticated IPC channel into the
+   source-scoped Windows issuer secret store. Never use command-line values, a
+   temporary `.env`/JSON file, shell tracing, or stdout logging. If the chosen
+   Windows secret store cannot atomically update both fields, keep the previous
+   generation active until the new pair has been validated.
 6. Record only non-secret sync metadata locally: Bitwarden item UUID,
-   `revisionDate`, target Worker/environment, time, and success/failure. This
+   `revisionDate`, target issuer/environment, time, and success/failure. This
    allows `credentials status vpass` to warn that Bitwarden changed after the
    last successful push.
 7. Drop references to the item JSON and secret strings immediately after the
@@ -62,7 +66,7 @@ Non-secret configuration may name the mapping:
 ```text
 source: vpass
 bitwarden_item_id: <fixed UUID, local config only>
-target_worker: kogane-collector-vpass
+target_issuer: kogane-session-issuer-vpass
 fields:
   login.username -> VPASS_ID
   login.password -> VPASS_PASSWORD
@@ -70,47 +74,38 @@ fields:
 
 The item UUID is not a credential, but keeping it in a local config rather
 than the public repository avoids leaking vault organization details. The
-Cloudflare account ID, store ID, and secret IDs are also identifiers rather
-than secret values; they may be configuration, although there is no need to
-commit personal deployment identifiers for the PoC.
-
-An equivalent one-shot shell prototype is shown below. The real CLI should
-spawn these programs directly and perform the same validation without a
-shell. It should lock Bitwarden on exit only when it created the unlock
+real CLI should spawn programs directly, validate the allowlisted URI before
+extracting fields, and lock Bitwarden on exit only when it created the unlock
 session itself.
 
-```bash
-(
-  set -euo pipefail
-  set +x
-  umask 077
+## Authenticated session handoff
 
-  export BW_SESSION
-  BW_SESSION="$(bw unlock --raw)"
-  trap 'bw lock >/dev/null 2>&1 || true; unset BW_SESSION' EXIT
+The session envelope is a bearer credential even though it does not contain
+the password. It must contain only what the Vpass consumer needs, for example:
 
-  bw sync
-  bw get item "$VPASS_BW_ITEM_ID" --session "$BW_SESSION" |
-    jq -ce '
-      if (.login.username | type) != "string"
-         or (.login.password | type) != "string"
-      then error("Bitwarden item has no login credentials")
-      else {
-        VPASS_ID: .login.username,
-        VPASS_PASSWORD: .login.password
-      }
-      end
-    ' |
-    wrangler secret bulk --name kogane-collector-vpass
-)
+```text
+source = vpass
+generation_id = random unique value
+issued_at / observed_cookie_expiry
+cookie records scoped by domain, path, Secure, HttpOnly, SameSite, expiry
+optional non-secret browser compatibility metadata
+authenticated_health_check = endpoint + validation rule, not response data
 ```
 
-The production wrapper must additionally validate the item's allowlisted URI
-before sending the JSON. `secret bulk` reads stdin and updates both fields in
-a single request, avoiding the inconsistent state caused by two sequential
-`secret put` deployments. Install and pin Wrangler before running the
-prototype; do not replace this command with an unpinned `npx wrangler` at the
-secret-bearing end of the pipe.
+The issuer encrypts the envelope to a consumer-specific key before it leaves
+the issuer. Store the ciphertext in private object storage only if needed for
+handoff; keep the decryption key in a source-specific Worker/Container secret.
+Never put plaintext cookies in D1, KV, R2, Durable Object state, build layers,
+environment dumps, logs, or crash reports. Do not reuse one envelope across
+unrelated scrapers or concurrent runs.
+
+The consumer imports one generation immediately before navigation, validates
+an authenticated page, performs the read-only JSON calls, and discards its
+local profile/cookie jar. A login redirect, 401, or 403 marks the generation
+unusable and asks the issuer for refresh; the consumer never falls back to
+password login. Cookie expiry is only a hint, so every run needs the health
+check. Idle keep-alive may extend a session, but absolute lifetime remains
+unmeasured and must not be assumed.
 
 ## Why not copy `data.json`
 
@@ -145,8 +140,10 @@ vault-reading commands still require `bw unlock` and a decryption session.
 
 | Option | Cloud credential | Scope | Decision |
 | --- | --- | --- | --- |
-| Local `bw` -> Worker secrets | Only Vpass ID/password | One Worker | **Use now.** Smallest blast radius and no stored master password. |
-| Local `bw` -> Secrets Store | Only selected fields | Account-level bindings | Use when multiple Workers need the same value; beta today. |
+| Local `bw` -> persistent Windows issuer | Only Vpass ID/password | One source issuer | **Use now.** This is the only tested bootstrap environment and stores no master password. |
+| Encrypted issuer -> consumer envelope | One Vpass bearer session | One source and generation | **Use for replay PoC.** Rotate on refresh and validate before every run. |
+| Local `bw` -> Worker secrets | Only Vpass ID/password | One Worker | Do not use now; reconsider only if a cloud password bootstrap passes independently. |
+| Local `bw` -> Secrets Store | Only selected fields | Account-level bindings | Same bootstrap gate applies; beta today. |
 | Bitwarden Secrets Manager | Machine access token | Selected Secrets Manager project | Revisit for project-scoped runtime reads, revocation, or multiple consumers; Password Manager values still need a separate sync. |
 | Password Manager API key + unlock | API key plus master/decryption secret | Personal vault | Reject for runtime use. |
 | Copied `data.json` / encrypted export | Master/export password or equivalent | Whole vault | Reject. |
@@ -163,21 +160,22 @@ Kogane-owned publisher/sync step.
 
 ## Runtime rules
 
-- The coordinator reads only `VPASS_ID` and `VPASS_PASSWORD` and passes
-  them only to the named Vpass Container instance.
-- Do not store credentials in D1, KV, R2, Durable Object state, build arguments,
-  images, artifacts, or logs.
-- Keep cookies in memory for one run; never log `Cookie`, `Set-Cookie`, card
-  identifiers, request bodies, or authentication responses.
+- Only the Windows issuer may read `VPASS_ID` and `VPASS_PASSWORD`. The
+  coordinator and consumer must not receive them.
+- Do not store credentials or plaintext session envelopes in D1, KV, R2,
+  Durable Object state, build arguments, images, artifacts, or logs.
+- Never log `Cookie`, `Set-Cookie`, card identifiers, authentication request
+  bodies, or authentication responses. Captured Akamai/sensor payloads are
+  diagnostics, not financial evidence, and must not enter normal ingestion.
 - Before normal ingestion, scan response classes known to contain
   authentication material. If a response unexpectedly contains a credential
   or session token, refuse normal ingestion and record only non-sensitive run
   metadata plus a hash for investigation. Never redact a payload and label the
   result as byte-exact raw evidence.
-- On 401/403, stop without retrying and alert for a manual credential/status
-  check.
-- After a credential sync, run one read-only smoke collection before enabling
-  or resuming Cron.
+- On a login redirect or 401/403, stop without retrying and request an issuer
+  refresh/manual status check.
+- After a credential sync or session refresh, run one read-only replay smoke
+  collection before enabling or resuming Cron.
 
 ## References
 

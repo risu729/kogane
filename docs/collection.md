@@ -90,8 +90,11 @@ Captures contain credentials. The importer enforces:
 
 - Request headers are never uploaded (they contain `Cookie` /
   `Authorization`).
-- Request bodies are not uploaded initially (they can contain login forms);
-  only their hashes are recorded.
+- Authentication request bodies are never uploaded or retained as evidence;
+  they can contain IDs, passwords, OTPs, and anti-bot tokens. Only a keyed or
+  access-controlled diagnostic hash may be recorded when operationally needed.
+- Akamai/browser sensor telemetry is excluded from normal evidence ingestion.
+  Its payload can fingerprint the browser and is not financial source data.
 - Only allowlisted sources are uploaded at all.
 - Uploaded metadata per artifact: URL, method, status, MIME type,
   timestamps, response body hash.
