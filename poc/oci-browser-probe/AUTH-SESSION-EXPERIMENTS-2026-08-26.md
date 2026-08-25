@@ -22,7 +22,7 @@ not been able to refresh it after expiry.
 
 | Source or test profile | Target/runtime | Operation | Result |
 | --- | --- | --- | --- |
-| Established Windows Kuebiko profile, current auth already invalid | Same Windows Chrome 153 profile | New password login | Success; My Page loaded without Access Denied |
+| Established Windows Kuebiko profile, current auth already invalid | Same Windows Chrome 153 profile, visible UI interaction | New password login | Success; My Page loaded without Access Denied |
 | Same successful login, 33 live cookies | Completely new Windows profile | Open My Page | Success |
 | Same successful login, 33 live cookies | WSL, headed official Chrome 151 | Open My Page | Success |
 | Same successful login, 33 live cookies | OCI ARM64, headed official Chrome 151 | Open My Page | Success |
@@ -47,6 +47,33 @@ same value. Akamai state was updated rather than cleared wholesale. Immediately
 after that login, both the new session and the older closed-capture session
 still worked from OCI. Vpass did not enforce a single globally active session
 in this trial.
+
+## TAMIA exit-node and input-path control
+
+A later same-day control changed the local Windows and WSL default route from
+the Australian address `129.94.128.25` to the `tamia` exit node address
+`223.223.22.214` in Japan. The route was verified in both Windows and WSL before
+the trials.
+
+| Profile and operation | AU direct | JP via `tamia` | Interpretation |
+| --- | --- | --- | --- |
+| Completely fresh headed WSL Chrome 151, initial Vpass GET | HTTP 200 login page | HTTP 200 login page | Neither IP was unconditionally blocked. |
+| Previously rejected persistent WSL profile, initial Vpass GET | HTTP 403 | HTTP 403 | That profile/cookie state remained rejected across the IP change. |
+| Completely fresh headed WSL Chrome 151, password login | Previously HTTP 403 at login POST | HTTP 403 at the same login POST | Japanese home egress did not make Linux password login pass. |
+| Previously successful Windows profile, CDP `Input.insertText` plus dispatched mouse events | Returned to login form | Returned to login form | Changing only the exit IP did not change this automation result. |
+
+The Windows CDP trials were not explicit Access Denied pages and did not show a
+credential-error message. Cookies rotated in both cases, but authentication was
+not issued. This differs from the earlier successful visible Windows UI path.
+The remaining controlled variable worth testing is therefore the input path:
+OS-level keyboard and pointer injection in the same established Windows
+profile, with CDP/Kuebiko used only for observation. This is an inference about
+client interaction telemetry, not proof of the exact Akamai rule.
+
+The test ended with `tamia` selected as the local exit node. Temporary fresh
+profiles were removed, and the two test-only Kuebiko captures that included
+unrelated extension/startup traffic were sent to the Recycle Bin. No existing
+profile or earlier retained evidence was removed.
 
 ## What the wire showed
 
@@ -99,6 +126,11 @@ session flow, and the protected login request can be correlated at the edge.
   server-side score.
 - Repeating a rejected login in the same Windows profile did not improve it.
   Linux returned an explicit edge denial on the first attempt.
+- A controlled AU/JP exit-node change did not change the login outcome. `tamia`
+  is not a demonstrated remedy, and the AU address was not a universal block.
+- CDP text insertion plus dispatched mouse events did not reproduce the earlier
+  successful visible Windows interaction, even in the previously accepted
+  profile. OS-level input automation remains untested.
 
 ## Recommended boundary
 
@@ -107,7 +139,7 @@ Treat Vpass authentication as two components:
 ```text
 persistent Windows authentication runner
   -> validate existing session
-  -> if needed, perform one bounded password login in the established profile
+  -> if needed, perform one bounded OS-level UI login in the established profile
   -> export a minimal point-in-time session envelope
   -> encrypt for the named collector and publish a new auth generation
 
@@ -127,6 +159,15 @@ the Windows issuer because they run Linux. A persistent remote Windows VM that
 is started only for validation/refresh is the non-home, non-laptop fallback;
 Cloudflare can remain the scheduler and evidence store. The runner needs a
 persistent profile disk, not an ephemeral CI image.
+
+To remove manual interaction, first prove the issuer locally with Windows
+`SendInput`-class keyboard/pointer automation against the established profile.
+Do not use DOM `.fill()`, CDP `Input.insertText`, or synthetic page JavaScript
+for this gate. If the local OS-level run succeeds repeatedly, reproduce that
+exact visible-desktop setup on an on-demand Windows VM and keep its profile disk
+persistent. If it fails, the evidence does not support a fully unattended
+password bootstrap yet; session preservation can reduce refresh frequency but
+cannot eliminate an unmeasured absolute expiry.
 
 Keep-alive collection may extend an idle session, but an absolute Vpass expiry
 has not been measured and must not be assumed away. Every scheduled run starts
