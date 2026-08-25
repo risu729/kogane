@@ -25,9 +25,11 @@ Bitwarden Password Manager
 
 Run the command after changing the Vpass login item in Bitwarden. This is
 deliberately push-on-change rather than a cloud process that can continuously
-decrypt the personal vault. The existing Windows profile has produced the only
-observed successful bootstrap, but it is not yet a repeatable baseline and is
-not the intended deployment dependency. The eventual issuer may be a coherent
+decrypt the personal vault. Visible Windows Chrome has produced the only
+observed successful bootstraps, in both established and fresh profiles, but it
+has also produced fresh-profile failures under closely related conditions and
+is not yet a repeatable baseline. The physical Windows machine is not the
+intended deployment dependency. The eventual issuer may be a coherent
 Windows/macOS browser implementation in a Cloudflare Container, or a real
 non-Windows platform, but no candidate receives credentials until it passes the
 bootstrap gate repeatedly.

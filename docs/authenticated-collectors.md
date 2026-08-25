@@ -3,10 +3,10 @@
 This document records the execution and network design for sources whose
 authenticated JSON APIs can be replayed without rendering their UI. Vpass is
 the first example. Its login bootstrap and its post-login JSON collection are
-separate capabilities: the former currently requires an established Windows
-Chrome profile and has not yet produced a stable repeated baseline, while the
-latter has been replayed successfully from Linux Chrome after importing a
-valid session.
+separate capabilities: the former has succeeded only intermittently in visible
+Windows Chrome and has not yet produced a stable repeated baseline, while the
+latter has been replayed successfully from Linux Chrome after importing a valid
+session.
 
 This is a design and proof-of-concept track, not a promise that an unofficial
 provider API will remain stable. A collector must stop on authentication or
@@ -33,7 +33,7 @@ Live validation on 2026-08-25 and 2026-08-26 established the following:
 | Test | Result |
 | --- | --- |
 | Established Windows Kuebiko profile, visible UI password login | At least one login and one re-login after session expiry passed, but repeated success under fixed conditions has not yet been established. |
-| Fresh Windows Kuebiko profiles | Reached login, but password submission returned to the login form; no reliable fresh-profile bootstrap was established. |
+| Fresh Windows Kuebiko profiles, visible UI | Produced both 302/My Page successes and Akamai 403 failures under closely related conditions; locale, window geometry and dwell were not individually sufficient. |
 | Fresh WSL official Chrome 151, with or without copied Akamai-only cookies | Akamai Access Denied at `xt_login/agree/v1`. |
 | Previously session-seeded persistent WSL profile, after expiry | Password re-login still received Access Denied. |
 | `impit@0.14.3` and `curl_cffi`-style impersonation | Did not establish a Vpass login session. |
@@ -54,9 +54,10 @@ Live validation on 2026-08-25 and 2026-08-26 established the following:
 These results split the source into two explicit gates:
 
 - **Bootstrap gate:** create or refresh a Vpass session from ID/password. This
-  has only been observed to pass through the visible UI path in one established
-  Windows browser profile. That path is not yet a stable control: fresh Windows
-  profiles failed, and CDP text insertion did not reproduce the success.
+  has only been observed to pass through visible Windows browser interaction.
+  One established profile and multiple fresh profiles succeeded, but other
+  fresh profiles failed under closely related conditions. CDP text insertion
+  did not reproduce authenticated success. There is no stable control yet.
 - **Replay gate:** import a valid session and call authenticated pages/APIs.
   This is proven on Windows, WSL Linux, and OCI Linux, but has not yet been
   tested in a deployed Cloudflare Container.
@@ -131,8 +132,9 @@ the control in this order:
 1. Hold IP, profile, language, window state and manual interaction constant and
    reproduce password login at least twice after separate Chrome restarts in
    the established Windows Kuebiko profile.
-2. Repeat the same manual sequence in one fresh Windows profile. This separates
-   platform from persistent-profile history.
+2. Repeat the same manual sequence in fresh Windows profiles. Compare the known
+   mix of 302 successes and 403 failures rather than assuming that fresh state
+   always fails; this separates platform from persistent-profile history.
 3. Only after the manual control is repeatable, compare automation in that same
    established profile. A deployment candidate must pass more than once and
    after a restart.
@@ -366,10 +368,10 @@ stream as expected.
 - [ ] Establish a stable password-bootstrap control: repeat manual login at
       least twice after separate restarts in the same established Windows
       profile, with IP, language and window state held fixed.
-- [x] Record the current bootstrap boundary: an established Windows profile has
-      passed, while fresh Windows, fresh/persistent WSL, Akamai-cookie-only WSL,
-      `impit@0.14.3`, Camoufox Windows Firefox, and Kameleo Windows Chrome have
-      not established a fresh session.
+- [x] Record the current bootstrap boundary: visible Windows Chrome has produced
+      both fresh-profile successes and failures, while fresh/persistent WSL,
+      Akamai-cookie-only WSL, `impit@0.14.3`, Camoufox Windows Firefox, and
+      Kameleo Windows Chrome have not established a fresh session.
 - [x] Validate session replay: a valid Windows session passes in fresh Windows,
       WSL Chrome, and OCI ARM64 Linux Chrome; expired sessions fail normally.
 - [x] Run the same client in the Wrangler-built image locally: same 403.
