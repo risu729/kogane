@@ -7,11 +7,11 @@
 
 ## 結論
 
-SBI証券は **実装コスト4/5、条件付きで定期自動化可能（初期評価B、検証後Aを狙える）** と評価する。
+SBI証券は **実装コスト4/5、条件付きで定期自動化可能（初期評価B、検証後Aを狙える）** と評価する。現口座でパスキー利用とBitwarden保管が確認できたため、credential準備の不確実性は下がった。一方、ローカルissuer、WebAuthn互換性、session寿命の検証は残るため、総合コストは据え置く。
 
 推奨経路は、公式Webの `My資産` をデータ源とし、公式のパスキー認証でログインしたセッションから、資産管理画面が呼ぶ読取専用JSONを取得する方式である。最初の検証ではブラウザを使って正しい画面・通信・値を突合し、取得経路が固まったらHTTPクライアントへ縮退する。公式アプリの非公開通信は、Web経路だけで不足する買付余力・国内株式の詳細・米国株式詳細を補完する第2段階とする。
 
-既存実装により、保存したパスキーを用いた無人ログインと、Web／アプリ内部通信の直接呼出しは技術的に実現済みである。一方で、2026年6月に認証方式が変更され、ログイン入口にはEverspin系の防御があり、HeadlessChromeを示すアクセスが保守ページへ送られるとの第三者実装上の観測もある。安定運用には、日本国内の固定的な実行元、ブラウザ同等の通信、セッション失効検知、公式画面との継続的な値照合が必要になる。
+既存実装により、保存したパスキーを用いた無人ログインと、Web／アプリ内部通信の直接呼出しは技術的に実現済みである。さらに現口座のパスキーはBitwarden vaultに保存済みで、`mnie` の `auth-bitwarden` はローカルvaultからWebAuthn assertionを生成する実装を持つ。これは実現可能性を上げるが、SBI証券の実credentialでの互換性は未検証である。一方で、2026年6月に認証方式が変更され、ログイン入口にはEverspin系の防御があり、HeadlessChromeを示すアクセスが保守ページへ送られるとの第三者実装上の観測もある。安定運用には、日本国内の固定的な実行元、ブラウザ同等の通信、セッション失効検知、公式画面との継続的な値照合が必要になる。
 
 Koganeでは、取引機能を絶対に有効化しない。`pnsk-lab/mnie` のSBI providerは有用な仕様資料だが、注文発注・訂正・取消まで公開するため、そのまま依存・登録してはならない。読取部分だけを別パッケージへ抽出し、取引パスワードを設定・保管せず、注文系コードと宛先をビルドに含めない方針とする。
 
@@ -24,7 +24,7 @@ Koganeでは、取引機能を絶対に有効化しない。`pnsk-lab/mnie` のS
 - C: 毎回または頻繁に利用者操作が必要
 - D: 現時点では実用的でない
 
-SBI証券は現時点でB。国内固定IP、保存パスキーの安全な運用、複数日の連続試験に合格すればA相当まで上げられる可能性がある。
+SBI証券は現時点でB。現口座でパスキー利用とBitwarden保管が確認できたため、A相当へ到達する見込みは初回評価より上がった。国内固定IP、ローカルissuerによる安全な利用、複数日の連続試験に合格すればA相当まで上げられる可能性がある。
 
 ## 公式の入口と取得できる情報
 
@@ -110,13 +110,48 @@ PCサイトとスマートフォンサイトのMy資産は公式上同じ対象�
 - 取引時には別のリスク判定があり、電話認証を求められる可能性がある。Koganeは取引を行わないため、この経路を起動しない。
 - アプリの旧「自動ログイン」は継続可能だが、電話番号認証またはFIDOの追加認証が必要。定期収集には、パスキーによる新規セッション作成の方が構造が明確である。
 
+### 現口座で確定したこと
+
+- 利用者はSBI証券へのログインにパスキーを利用している。
+- そのパスキーは利用者のBitwarden vaultに保存済みである。
+- 本調査ではvault、master password、derived key、private key、credential ID、user handle等の秘密・識別子を読み取っていない。
+
+既存credentialをローカルで利用できる見込みは高まったが、exportability、credential metadata、正確なRP ID／origin、discoverable credentialか、user verificationの方式、signature counter、同一RPのcredential数は未確認である。これらは値をrepoやログへ残さず、利用者端末内の疎通試験で判定する。
+
 ### 公開実装から確認したセッション方式
 
 `pnsk-lab/mnie` は、保存済みWebAuthn credentialから署名を生成し、FIDO challenge／assertion、アプリチャネルのSSO token取得、株アプリ系session確立までをブラウザなしで実装する。session export/importもあるが、メインサイトSSOの認証キャッシュは20分としている。長期間同じcookieを再利用する設計ではなく、必要時にパスキーから再認証できることを前提にするのが安全である。
 
+同repoの `auth-bitwarden` は、Bitwarden Desktopのローカル `data.json` をmaster passwordで復号し、PBKDF2-SHA256／Argon2idのKDF、item key、FIDO2 credentialを処理する。`createBitwardenPasskeyProvider` は、取得したchallengeに対し、完全一致するRP IDのcredentialを選び、指定originを含む `clientDataJSON` と `authenticatorData` を組み立て、秘密鍵で署名する。SBI providerは汎用 `PasskeyAssertionProvider` を受け取るため、このproviderを直接接続できる構造である。秘密鍵を可搬形式へexportせず、復号と署名をローカルprocess内で完結できる点はKoganeに適する。
+
+ただし実装上の注意がある。
+
+- 同一RP IDに複数credentialがある場合は明示選択が必要で、曖昧な選択は拒否する。credential IDはローカル設定に閉じ、cloud、repo、通常ログへ送らない。
+- `userVerification` optionはauthenticator dataのUV flagを設定するが、OSやBitwarden UIによる生体認証・利用者確認を実行するものではない。SBI証券がこのassertionを受理するか、実際のUV要件を満たすかは検証が必要である。
+- counterは保存値が正なら既定で1増やして署名するが、更新値をvaultへ書き戻さない。連続ログインで同じ値になる可能性、保存値が0の場合の挙動、SBI証券側の判定を確認する必要がある。実値は記録しない。
+- 現行のdefault `data.json` pathはmacOS向けである。利用者のWindows／WSL環境でBitwardenの現行保管形式・path・ファイルアクセスに対応するかは別途確認する。
+- テストは合成vault／credentialに対するunit testであり、SBI証券の実credentialでの動作保証ではない。
+
+`createBitwardenAuthManager().credentials()` はusername／passwordに加え、FIDO2秘密鍵をprivate JWKとして含む `portableCredential` を返せる。この汎用export経路はKoganeでは使用禁止とする。使うのは狭いassertion provider、またはそれを内包するSBI証券専用ローカルissuerだけであり、vault全体、master password、derived key、秘密鍵JWKをcloudへ置かない。
+
 `azuki774/myscrapers` は、保存済みpasskey private keyをChromiumの仮想WebAuthn authenticatorへ復元し、Playwrightで公式ログイン画面を通す。利用者操作なしでログインする実例ではあるが、passkey秘密鍵をサーバーへ持ち出す設計になるため、Koganeでは通常のパスワード以上に強い秘密として扱う必要がある。
 
-サーバー用のpasskeyを新規登録するか、既存passkeyをエクスポートするかは未決定。口座設定を変更する操作なので、実装検証時に利用者が明示的に選択・実行する。credential ID、private key、user handle、session ID、cookie、口座番号、金融データをrepo、ログ、PRへ記録しない。
+現時点の第一候補は、Bitwardenに保存済みの既存passkeyを利用者端末内で使う方式である。新しいサーバー用passkeyの登録や既存秘密鍵のcloud exportは前提にしない。credential ID、private key、user handle、session ID、cookie、口座番号、金融データをrepo、ログ、PRへ記録しない。
+
+### ローカルissuerとsource-scoped envelope
+
+最も安全な構成は、スケジューラが利用者端末上のローカルagentへ収集要求を渡し、agentがBitwardenの復号、WebAuthn署名、SBI証券ログイン、read-only取得までを同じtrust boundary内で完結し、cloudへは暗号化した公式raw evidenceまたは正規化済み結果だけを送る方式である。この場合、vaultとSBI sessionはcloudへ出ない。
+
+認証処理を分離する必要がある場合も、issuerをSBI証券専用にし、次を満たす。
+
+1. 要求を `source=sbi-sec`、`purpose=read-only`、1回限りのnonce、短い有効期限、許可したRP ID／originへ固定する。
+2. RP ID／originはSBI証券が返した実challengeと公式ログイン画面からローカルで検証し、推測値を固定しない。
+3. assertionはchallengeへの応答としてローカルSBI auth componentだけへ渡し、永続化、cloud relay、通常ログ出力をしない。
+4. sessionを渡す場合はcookieそのものではなく、ローカルagent内のopaque handleを参照する短寿命の `source-scoped session envelope` とする。envelopeはsource、read-only purpose、audience、発行／失効時刻、許可host／path／TR codeだけを持ち、取引routeを含めない。
+5. cloud schedulerからローカルagentへの常時公開inboundを避け、agentが署名済みの短寿命jobをpullする。rate limit、単一実行、再利用拒否を設ける。
+6. audit logには成功／失敗、source、時刻、失敗分類だけを残し、credential ID、user handle、challenge、assertion、cookie、金融データを残さない。
+
+cloud側にassertionやsession cookieを渡す方式はfallbackにも推奨しない。Cloudflare Workers／Containers／OCI k8sはスケジュール、暗号化保管、正規化処理には使えるが、Bitwarden vault／derived keyの置き場所にはしない。
 
 ## WAF・anti-bot・配信基盤
 
@@ -165,6 +200,14 @@ TLS pinning、root／emulator検知、PlusアプリへのEVERSPIN適用範囲は
 - `member.c.sbisec.co.jp` の円貨入出金明細JSONを取得
 - 外国株式系はREST／GraphQL、`Set-Session`、`Account-Id`等を利用
 - browser cookie jar、session export/import、メインサイト認証の20分cache
+
+`auth-bitwarden` のコードレベル評価:
+
+- `vault.ts`／`crypto.ts` がBitwarden Desktopのローカルvaultを復号し、FIDO2 credentialをprocess内へ展開する。
+- `provider.ts` がRP IDでcredentialを絞り込み、SBI providerが要求したchallengeへローカル署名する。複数候補を暗黙選択しない。
+- `fido2.ts` がRP ID hash、UV／UP／BE／BS flags、counter、origin入りclient dataを生成する。
+- `auth-manager.ts` は可搬private JWKを返す汎用機能を持つため採用しない。SBI証券専用のprovider／issuerだけを境界にする。
+- 実装はassertion生成の技術的可能性を示すが、Bitwarden公式SDKではなく、現行vault形式への追随、master passwordの安全な入力、SBI証券側の受理はKogane側の責任で検証する。
 
 問題点:
 
@@ -225,37 +268,46 @@ KoganeのSBI証券collectorは、次の条件をすべて満たすまで実装�
 
 | 環境 | 適性 | 理由 |
 | --- | --- | --- |
-| OCI Tokyo等のk8s CronJob／小型VM | 高 | 日本国内固定IP、Chromiumまたは直接HTTP、永続secret／session、時刻制御が容易。最初の本番候補 |
-| 一般OCI container | 高 | `mnie`型HTTP clientも`myscrapers`型Playwrightも動かせる。egress allowlistを付けやすい |
-| Cloudflare Containers | 中 | Linux imageとoutbound制御が使え、Playwright経路も理論上可能。新しい基盤であり、固定的な日本egress、passkey秘密、起動／永続性を実機確認する必要がある |
-| Cloudflare Workers | 低～中 | 純粋な`fetch`実装へ縮退できれば定期実行可能。ただしPlaywright不可。`mnie`の`child_process` fallbackはWorkersで実行できず、Web Crypto向け移植が必要。egress位置・リスク判定も不利 |
+| 利用者端末上のローカルagent | 高 | Bitwarden vault、derived key、assertion、SBI sessionを端末外へ出さずに署名・取得できる。第一候補 |
+| OCI Tokyo等のk8s CronJob／小型VM | 中～高 | 日本国内固定IP、Chromiumまたは直接HTTP、時刻制御が容易。ただしvaultを配置せず、ローカルagentから暗号化済み結果を受けるscheduler／processorに限定する |
+| 一般OCI container | 中 | `mnie`型HTTP clientも`myscrapers`型Playwrightも動かせるが、Bitwarden秘密を置かない。ローカルagentからsessionを渡す構成も原則避ける |
+| Cloudflare Containers | 低～中 | Linux imageとoutbound制御が使えるが、固定的な日本egressと永続性を実機確認する必要がある。vault／derived key／passkeyを置かない |
+| Cloudflare Workers | 低～中 | scheduler、署名済みjob、結果取込には使える。Playwright不可で、`mnie`の`child_process` fallbackも実行できない。Web Crypto移植以前に、認証をローカルへ閉じる |
 | Cloudflare Browser Rendering | 低～中 | CDP endpointはあるが、仮想WebAuthn credentialの利用可否と永続的な秘密管理を未確認。最初の実装先にはしない |
 
-Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_process`は非機能stubである。`mnie`のOpenSSL subprocessを外し、Web Crypto／対応するNode cryptoだけでassertionとtoken復号を実装する必要がある。ブラウザ方式から始めるならOCI Tokyo、HTTP方式が十分に安定してからWorkers／Containersを比較する。
+Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_process`は非機能stubである。仮に `mnie` の暗号処理をWeb Cryptoへ移植できても、vaultをcloudへ置く構成は採用しない。まず利用者端末上のローカルagentでブラウザ方式／HTTP方式を検証し、安定後にWorkers／Containersをscheduler・結果処理層として比較する。
 
 ## 推奨アーキテクチャ
 
-1. **公式Webを主データ源**: My資産の現在評価、週次資産推移、実現損益、配当・分配金を取得。
-2. **公式WebのCSV／書面で補完**: 2年の取引・入出金CSV、5年の電子交付書面を初期バックフィルと監査証跡に利用。
-3. **株アプリ系read-only通信で補完**: 買付余力、国内保有詳細などWebの横断JSONにない項目だけ取得。
-4. **外国株式は別adapter**: REST／GraphQL sessionを国内adapterと混ぜず、米国株保有・約定を別sourceとして保存。
-5. **公式値をそのままraw evidence化**: 取得単価、参考単価、評価額、損益の意味を出典とtimestamp付きで保存し、後段の正規化で統合。
-6. **aggregatorは不使用**: Money Forward、Moneytree等をログイン・取得・fallbackに使わない。
+1. **認証・sessionはローカルに閉じる**: Bitwarden保存済みpasskeyはSBI証券専用ローカルissuerで使い、vault、derived key、assertion、cookieをcloudへ置かない。
+2. **公式Webを主データ源**: My資産の現在評価、週次資産推移、実現損益、配当・分配金を取得。
+3. **公式WebのCSV／書面で補完**: 2年の取引・入出金CSV、5年の電子交付書面を初期バックフィルと監査証跡に利用。
+4. **株アプリ系read-only通信で補完**: 買付余力、国内保有詳細などWebの横断JSONにない項目だけ取得。
+5. **外国株式は別adapter**: REST／GraphQL sessionを国内adapterと混ぜず、米国株保有・約定を別sourceとして保存。
+6. **公式値をそのままraw evidence化**: 取得単価、参考単価、評価額、損益の意味を出典とtimestamp付きで保存し、後段の正規化で統合。
+7. **aggregatorは不使用**: Money Forward、Moneytree等をログイン・取得・fallbackに使わない。
 
 ## 次の検証手順
 
 1. 利用者の通常ブラウザでSBI証券へ公式パスキー認証し、My資産、保有一覧、実現損益、配当・分配金、取引履歴、円貨入出金明細を順に開く。Network logはhost、path、method、status、schemaだけを記録し、token・cookie・口座番号・実データを保存しない。
-2. SBI証券Plusを正規にGoogle Playから取得し、manifest、host名、network security config、My資産相当のread endpointだけを静的に確認する。株アプリは第2優先。
-3. `myscrapers`方式でローカルの1回限りのread-only疎通試験を行い、公式画面の合計・銘柄数・取得時刻と一致するか確認する。passkey登録・exportは利用者操作で行い、秘密はOS keyringまたは専用secret storeに置く。
-4. `mnie`から注文コードを完全に除いた最小prototypeを作り、My資産current JSON、買付余力、現物保有、円貨入出金だけをallowlistする。
-5. 同一国内IP・同一UAで、日中／夜間／週末を含む7日以上の定期実行を試す。session寿命、パスキー再認証、メンテナンス判定、429／403／302、メール・電話追加認証の有無を記録する。
-6. OCI Tokyoの固定egressでCronJob化し、重複実行禁止、指数backoff、失敗時のみ通知、raw暗号化、redacted schema logを実装する。
-7. 安定後にCloudflare Containers、次にpure fetch化したWorkersを比較する。海外／可変egressで認証追加が増えるなら採用しない。
-8. 2年CSV、5年電子交付、My資産の2021-08以降履歴を一度だけ取得し、重複と期間の穴を可視化する。
+2. 利用者端末内だけで、`auth-bitwarden` が現行Bitwarden vaultを読めるか確認する。master passwordは対話入力またはOS credential brokerからprocess memoryへ渡し、環境変数、file、shell history、logへ残さない。credentialの内容・識別子は表示しない。
+3. 公式challengeからRP ID／origin／`allowCredentials`／user verification要件をローカルで検証し、完全一致allowlistを作る。actual valueやcredential ID／user handleはrepoへ記録しない。
+4. `createBitwardenPasskeyProvider` をSBI providerへ直接接続し、1回限りのheadless HTTP assertion試験を行う。UV flagの有無、stored counterが0／正の場合と連続assertion、同一RPに複数credentialがある場合の拒否、assertion再利用拒否を確認する。実値は残さない。
+5. HTTP assertionが受理されない場合のみ、Playwright／CDPのvirtual authenticatorをローカルで試す。resident／discoverable credential、user verification、conditional UI、`allowCredentials`指定、パスキーボタン経路の差を比較し、秘密鍵を平文fixtureへexportしない。
+6. ログイン成功後、sessionのidle／absolute寿命、同時session、再起動後の再利用、IP／UA変更、日中／夜間／週末、429／403／302、メール・電話追加認証を7日以上観測する。session cookieや識別子は保存せず、寿命と失敗分類だけを記録する。
+7. SBI証券Plusを正規にGoogle Playから取得し、manifest、host名、network security config、My資産相当のread endpointだけを静的に確認する。株アプリは第2優先。
+8. `mnie`から注文コードと汎用 `credentials()`／`portableCredential` exportを完全に除いた最小prototypeを作り、My資産current JSON、買付余力、現物保有、円貨入出金だけをallowlistする。
+9. ローカルagentのpull型job、1回限りnonce、短寿命envelope、egress allowlist、重複実行禁止、指数backoff、失敗時のみ通知、raw暗号化、redacted schema logを実装する。OCI／Cloudflareへは暗号化済み結果だけを送る。
+10. 安定後にCloudflare Containers、次にpure fetch化したWorkersをscheduler・結果処理層として比較する。海外／可変egressで認証追加が増えるなら採用しない。
+11. 2年CSV、5年電子交付、My資産の2021-08以降履歴を一度だけ取得し、重複と期間の穴を可視化する。
 
 ## 未確認事項
 
-- 利用者の現口座で有効な認証設定（パスワード無効、電話番号認証、登録済みpasskey数）
+- Bitwarden保存済みpasskeyのexportabilityとcredential metadata（秘密を読まずに判定する）
+- 正確なRP ID／origin、discoverable／resident属性、user verification要件、signature counterのサーバー側判定、同一RPの登録passkey数
+- Windows／WSL上のBitwarden現行vault path／形式と `auth-bitwarden` の互換性
+- パスワード無効化の有無、電話番号認証、conditional UIとパスキーボタン経路の差
+- 現行sessionのidle／absolute寿命、再利用条件、IP／UA変更時の追加認証
 - 現行My資産の全endpoint、ページング、rate limit、session寿命
 - 円貨入出金内部APIがUI上の2年分を全件返す条件
 - 外国株式の注文／約定／入出金履歴の正確なオンライン保持期間
@@ -296,6 +348,10 @@ Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_p
 - [`pnsk-lab/mnie` SBI provider](https://github.com/pnsk-lab/mnie/tree/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/provider-sbi-sec)
 - [`mnie` passkey session](https://github.com/pnsk-lab/mnie/blob/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/provider-sbi-sec/src/session/index.ts)
 - [`mnie` read/write operations](https://github.com/pnsk-lab/mnie/blob/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/provider-sbi-sec/src/provider.ts)
+- [`mnie` Bitwarden passkey provider](https://github.com/pnsk-lab/mnie/blob/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/auth-bitwarden/src/provider.ts)
+- [`mnie` Bitwarden WebAuthn assertion generation](https://github.com/pnsk-lab/mnie/blob/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/auth-bitwarden/src/fido2.ts)
+- [`mnie` Bitwarden vault decryption](https://github.com/pnsk-lab/mnie/blob/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/auth-bitwarden/src/vault.ts)
+- [`mnie` portable credential export path (Koganeでは不使用)](https://github.com/pnsk-lab/mnie/blob/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/auth-bitwarden/src/auth-manager.ts)
 - [`azuki774/myscrapers` SBI implementation](https://github.com/azuki774/myscrapers/tree/e58339122eef9273fb2566f0a867057d3219b2f6/myscraper/internal/sbi)
 - [`myscrapers` Playwright passkey session](https://github.com/azuki774/myscrapers/blob/e58339122eef9273fb2566f0a867057d3219b2f6/myscraper/internal/sbi/session_playwright.go)
 - [`myscrapers` fixed-page collector](https://github.com/azuki774/myscrapers/blob/e58339122eef9273fb2566f0a867057d3219b2f6/myscraper/internal/sbi/fetch.go)
