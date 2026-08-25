@@ -9,6 +9,12 @@ This is not an official SMCC integration. Endpoint and anti-bot behavior can
 change without notice. Do not turn this into a hosted service or send Vpass
 credentials, cookies, or card identifiers to a third party.
 
+Before maintaining a private Vpass client, see the
+[aggregator alternatives](../../docs/vpass-aggregators.md). In particular,
+freee offers a self-service official JSON API for synchronized credit-card
+statements, and Zaim has a cheap validation path whose one remaining question
+is whether its public API exposes auto-imported rows.
+
 ## What it does
 
 1. Creates a fresh in-memory cookie jar and uses `impit`'s Chrome TLS/HTTP
