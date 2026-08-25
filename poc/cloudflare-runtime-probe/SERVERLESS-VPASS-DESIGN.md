@@ -1,23 +1,31 @@
 # Serverless Vpass collector design
 
-Updated on 2026-08-25. This is a go/no-go design: the Linux Chrome login gate
-must pass before profile persistence or scheduled collection is implemented.
+Updated on 2026-08-26. This is a split authentication/collection design. Linux
+Chrome has passed authenticated-session consumption but not password login.
 
 ## Recommendation
 
 Use a Worker or scheduled Workflow only as the orchestrator. Run full headed
-Chrome inside one named Cloudflare Container, and perform Vpass API calls with
-same-origin `fetch()` inside that Chrome page.
+Chrome inside one named Cloudflare Container, import a newly validated session
+from an established Windows authentication runner, and perform Vpass API calls
+with same-origin `fetch()` inside that Chrome page.
 
 ```text
 Workflow schedule
   -> named Container instance (max one active collector)
-      -> restore encrypted collector-owned Chrome profile
+      -> start an isolated Chrome context
+      -> import newest encrypted session generation before navigation
       -> Chrome + Xvfb + Japanese fonts + passive CDP/Kuebiko capture
-      -> bounded login or existing-session validation
+      -> read-only existing-session validation; no password login
       -> page-local internal JSON fetches, serially per card
       -> normalized results to D1/R2
-      -> encrypt and checkpoint profile before shutdown
+      -> encrypt and publish any valid rotated session generation
+      -> discard the local Chrome context before shutdown
+
+on-demand persistent Windows authentication runner
+  -> validate established Windows profile
+  -> perform at most one password login when required
+  -> publish a new source-scoped encrypted session generation
 ```
 
 Do not use Worker `fetch()`, a VPC `fetch()` binding, or an HTTPS-intercepting
@@ -37,7 +45,9 @@ have a short keep-alive limit and are not a durable profile store.
 A Container can package official Chrome, Xvfb, fonts, Kuebiko, and the collector
 service. It is still Linux, so it does not inherit the successful Windows
 fingerprint. Existing OCI and WSL headed Linux Chrome probes were rejected.
-Containerization is therefore a testable runtime candidate, not a known fix.
+Later trials showed that both live and closed-capture sessions could be consumed
+by Linux Chrome on WSL and OCI. Containerization is therefore a viable session
+consumer candidate, not a known password-login fix.
 
 ## Container lifecycle and state
 
@@ -46,11 +56,13 @@ lease so two runs cannot mutate the same profile. Container disk is fresh after
 the instance sleeps and the platform may stop or relocate an instance, so
 local profile continuity alone is not durable.
 
-Checkpoint the collector-owned profile as an encrypted archive in R2. Store
-only metadata such as archive version, ETag, last successful validation, and
-lease state in Durable Object storage. Treat the archive as account credentials:
-never log it, expose it through a public Worker route, or include it in build
-artifacts.
+Checkpoint only the minimal source-scoped session envelope as an encrypted
+object in R2. The transfer trials passed in fresh profiles, so persisting a full
+Linux browser profile is not currently justified. Store only metadata such as
+envelope version, auth generation, ETag, last successful validation, and lease
+state in Durable Object storage. Treat the encrypted object as account
+credentials: never log it, expose it through a public Worker route, or include
+it in build artifacts.
 
 Use an envelope key from Worker Secrets or Secrets Store and pass it only to
 the job that restores/checkpoints the archive. The application should handle
@@ -60,31 +72,32 @@ checkpoints.
 ## Credentials
 
 Do not run `bw serve` in Cloudflare and do not store a Bitwarden master
-password. Keep Bitwarden as the source of truth on a trusted local machine.
-After a password change, run a small local sync command that reads only the
-selected Vpass fields and updates two Cloudflare secrets. The Worker can pass
-those secrets to the Container at start. Prefer one-time job delivery over
-writing them to disk, and redact process errors and environment dumps.
+password. Keep Bitwarden as the source of truth for the persistent Windows
+authentication runner. After a password change, sync only the selected Vpass
+fields to that runner's protected credential store. Do not copy the ID/password
+to Cloudflare while Linux password login remains rejected.
 
-This intentionally duplicates only the minimum selected credentials into
-Cloudflare. It avoids uploading a Bitwarden vault export or keeping an unlocked
-vault service online.
+The Windows runner publishes only a newly validated, encrypted, source-scoped
+session envelope. Cloudflare receives that envelope and its generation metadata,
+not a Bitwarden vault export, master password, unlock session, or broad cache.
 
 ## Go/no-go rollout
 
-1. Enable Workers Paid; the same-day remote deployment was rejected because
-   Containers were unavailable on the account's Free plan.
-2. Deploy a non-credential probe with official Chrome, headed Xvfb, a normal
-   viewport, fonts, `webdriver=false`, and passive Kuebiko capture.
-3. Run at most three credentialed login trials, each from a fresh Container
-   profile, with no blind retry after 403. Use the same bounded capture fields
-   as the Windows/OCI probes.
-4. If no Linux Container trial succeeds, stop. Pure Cloudflare serverless is
-   not supported by the current evidence; the fallback needs a remote Windows
-   browser runner, with Cloudflare retaining scheduling and storage only.
-5. If a trial succeeds, validate a named persistent profile, same-page JSON
-   fetch, encrypted R2 checkpoint/restore, and source-session rotation behavior.
-6. Only then add a Workflow schedule, failure notification, and normalized
+1. Prepare a Windows session-export command that validates the source immediately
+   before and after capture, encrypts for one collector, and publishes a monotonic
+   auth generation without logging cookie values.
+2. Enable Workers Paid; remote Container creation is unavailable on Workers
+   Free.
+3. Deploy a non-password Container probe with official Chrome, headed Xvfb, a
+   normal viewport, fonts, `webdriver=false`, and passive Kuebiko capture.
+4. Import one newly validated session generation before first navigation and
+   confirm My Page plus page-local JSON access through direct Container egress.
+5. Validate encrypted session-envelope checkpoint/restore across Container
+   sleep, single-run leasing, and source-session rotation behavior.
+6. Measure session lifetime under the intended schedule. Redirect, 401, or 403
+   stops the run and requests a Windows refresh; the Container never submits the
+   password.
+7. Only then add a Workflow schedule, failure notification, and normalized
    statement persistence.
 
 Cloudflare may place a newly restarted Container in a different location. Do

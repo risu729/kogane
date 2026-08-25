@@ -190,19 +190,29 @@ opaque versioned format rather than a stable public API.
 ## Architecture consequence
 
 The OCI Kubernetes collector remains a reasonable runtime for providers that
-accept normal HTTP clients or Linux browser automation. The current OCI Vpass
-probe is still not schedulable, but a one-time human bootstrap is no longer a
-proven requirement: a new Windows profile succeeded with a coherent locale and
-normal initial window state.
+accept normal HTTP clients or Linux browser automation. For Vpass, later
+2026-08-26 controls established a narrower boundary: Linux Chrome can consume a
+live session transported from Windows, but fresh Linux login, Akamai-cookie-only
+login, and password re-login from a previously seeded persistent Linux profile
+were all rejected.
 
-The next implementation should retain one successful collector-owned profile,
-wait at least three minutes before its first login attempt, stop on the first
-403, and call the internal JSON APIs through `fetch()` inside that Chrome page.
-Three minutes is an engineering safety margin, not a proven threshold. Reusing
-the profile avoids repeatedly gambling on a new Akamai score. OCI should repeat
-the same full-browser warm-up and page-local fetch pattern under headed Chrome.
-Route through the home Tunnel only after that browser configuration works,
+The next implementation should therefore retain one established Windows
+authentication profile as the session issuer. It exports a minimal encrypted
+session generation only after a positive source check. OCI or a Cloudflare
+Container imports that generation before its first Vpass navigation, validates
+it, and calls the internal JSON APIs through `fetch()` inside the Chrome page.
+The Linux collector stops on redirect, 401, or 403 and never retries the
+password login.
+
+This avoids repeatedly gambling on a new Akamai score while preserving a
+serverless collection and evidence pipeline. A persistent, on-demand remote
+Windows VM is the fallback issuer when a local Windows profile is unacceptable;
+an ephemeral CI runner is not equivalent. Route through the home Tunnel only
+after a simultaneously valid transported session fails through direct egress,
 because the evidence does not support IP-only routing as the remedy.
+
+See `AUTH-SESSION-EXPERIMENTS-2026-08-26.md` for the transfer matrix, login
+traffic fields, stale-session controls, and Cloudflare Container gate.
 
 ## References
 

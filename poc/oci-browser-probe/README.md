@@ -28,5 +28,7 @@ Add `--auth` to one command and provide the ID and password on separate standard
 input lines for a single authentication attempt. Stop after a 403, 429, or
 post-submit timeout instead of retrying the same configuration.
 
-See `RESULTS.md` for the live comparison and `RESOURCE_INVENTORY.md` for all
-retained host changes and exact cleanup commands.
+See `RESULTS.md` for the live comparison,
+`AUTH-SESSION-EXPERIMENTS-2026-08-26.md` for the authentication/session
+portability matrix and current runtime boundary, and `RESOURCE_INVENTORY.md`
+for all retained host changes and exact cleanup commands.
