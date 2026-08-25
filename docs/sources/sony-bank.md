@@ -36,7 +36,7 @@
   `Sony Bank WALLET アプリ` は円/外貨普通預金と Visa debit 履歴・カード設定が
   中心。cloud collector の primary にせず、Web 認証補助と公式値の照合に使う。
   銀行公式の直接 APK 配布は確認できず、第三者 APK mirror は使わない。
-- 現段階の総合評価は **実装コスト 4/5、自動化レベル B**。最初は通常 Chrome で
+- 現段階の総合評価は **実装コスト 4/5、自動化レベル C**。最初は通常 Chrome で
   login と公式 CSV download を低頻度で自動化し、現行 BFF の read endpoint が
   capture で確定した後だけ JSON replay を検討する。Workers 単体より、永続 profile
   を持つ local/OCI/Cloudflare Container が適する。
@@ -376,28 +376,28 @@ browser profile、1 source 1 active run、固定的な egress、secret 非出力
 
 ### 評価尺度
 
-- **A**: 初回登録後は原則無人で定期実行できる
-- **B**: 通常は無人だが、risk 判定、session 失効、画面更新時に手動復旧があり得る
-- **C**: 毎回または頻繁に password manager / app / OTP 等の利用者操作が必要
-- **D**: 利用者が公式 CSV/PDF を手動取得し、Kogane は import だけ行う
-- **E**: 技術的/契約的に利用不能、または安全境界上実装しない
+- **A**: documented/export API を直接利用でき、scheduled headless 実行に適する
+- **B**: renewable/reusable session で安定した read-only internal API を利用できる
+- **C**: browser/app bootstrap 後の headless read replay が成立しそうである
+- **D**: full browser/device UI automation が必要になる
+- **E**: manual capture を安全な既定とする
 
 実装コストは 1=保存/import のみ、5=契約・複数 runtime・mobile/reverse engineering 等を
 要するものとする。
 
 | 案 | cost | level | 範囲 | 判断 |
 | --- | ---: | --- | --- | --- |
-| 利用者が円/外貨 CSV を公式 Web から取得 | 1/5 | D | 円普通、外貨横断 | **即時採用**。最も安全な backfill |
-| local Chrome で password fill + CSV download | 3/5 | B | 円/外貨 CSV、残高画面 | **MVP 推奨**。更新/step-up 時だけ handoff |
-| 現行 BFF の認証後 read replay | 4/5 | B、検証後A候補 | 口座列挙、残高、明細、lot | Kuebiko capture 後。login は browser のままでもよい |
-| password login も pure HTTP/Worker で再現 | 4/5 | 未検証B | 同上 | telemetry/session 要件不明。最初に選ばない |
+| 利用者が円/外貨 CSV を公式 Web から取得 | 1/5 | E | 円普通、外貨横断 | **即時採用**。最も安全な backfill |
+| local Chrome で password fill + CSV download | 3/5 | D | 円/外貨 CSV、残高画面 | **MVP 推奨**。更新/step-up 時だけ handoff |
+| 現行 BFF の認証後 read replay | 4/5 | C、検証後B候補 | 口座列挙、残高、明細、lot | Kuebiko capture 後。login は browser のままでもよい |
+| password login も pure HTTP/Worker で再現 | 4/5 | 未検証C | 同上 | telemetry/session 要件不明。最初に選ばない |
 | 公式契約済み参照系 API | 5/5 | A | 公式一覧の広範な残高/通帳 | 適格企業との契約が必要。個人 MVP はE相当 |
-| ソニー銀行 アプリ UI automation | 5/5 | C | 全商品表示、認証 | 1端末制限・SMS/生体・write UI 混在のため非推奨 |
-| WALLET app UI automation/APK reverse engineering | 5/5 | C/E | debit/普通預金 | Web/CSV で不足する根拠が出るまで行わない |
+| ソニー銀行 アプリ UI automation | 5/5 | D | 全商品表示、認証 | 1端末制限・SMS/生体・write UI 混在のため非推奨 |
+| WALLET app UI automation/APK reverse engineering | 5/5 | D | debit/普通預金 | Web/CSV で不足する根拠が出るまで行わない |
 | aggregator 情報連携 | 1–2/5 | A | 残高/明細等 | 公式 OAuth-like 同意だが初期経路から除外 |
 
-総合判定は **cost 4/5、level B**。円/外貨 CSV だけの MVP は cost 3/5 まで下げられる。
-次の条件を複数日、再起動後も満たせれば、認証後 read replay を A と再評価できる。
+総合判定は **cost 4/5、level C**。円/外貨 CSV だけの MVP は cost 3/5 まで下げられる。
+次の条件を複数日、再起動後も満たせれば、認証後 read replay を B と再評価できる。
 
 - 通常 login が追加認証なしで低頻度に成功する
 - session/profile を encrypted storage から復元できる
