@@ -90,8 +90,11 @@ Captures contain credentials. The importer enforces:
 
 - Request headers are never uploaded (they contain `Cookie` /
   `Authorization`).
-- Request bodies are not uploaded initially (they can contain login forms);
-  only their hashes are recorded.
+- Authentication request bodies are never uploaded or retained as evidence;
+  they can contain IDs, passwords, OTPs, and anti-bot tokens. Only a keyed or
+  access-controlled diagnostic hash may be recorded when operationally needed.
+- Akamai/browser sensor telemetry is excluded from normal evidence ingestion.
+  Its payload can fingerprint the browser and is not financial source data.
 - Only allowlisted sources are uploaded at all.
 - Uploaded metadata per artifact: URL, method, status, MIME type,
   timestamps, response body hash.
@@ -151,6 +154,8 @@ email handler, manual upload) can use it unchanged.
    ratio, change frequency), design the raw layer schema and allowlist from
    that evidence, and identify stable endpoints worth replaying.
 3. **Later — automate per source, selectively.** Replay internal APIs where
-   possible (reusing the dedicated profile's session initially), browser
-   automation only where necessary, on Cron triggers where feasible.
-   Sources that rarely change can stay manual forever.
+   possible, browser automation only where necessary, on Cron triggers where
+   feasible. A source that needs a native impersonating client may run in a
+   short-lived Container with only source-scoped credentials; see
+   `docs/authenticated-collectors.md` and `docs/credentials.md`. Sources that
+   rarely change can stay manual forever.

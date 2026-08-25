@@ -285,11 +285,20 @@ captures have been analyzed (see `docs/roadmap.md`).
 
 ```text
 Cloudflare Workers   HTTP ingestion API, later MCP
+Cloudflare Containers short-lived authenticated-session consumers when required
+Workers VPC / Tunnel optional source-specific home egress
 Cloudflare D1        structured data (metadata, observations, …)
 Cloudflare R2        raw evidence blobs, content-addressed
 Cloudflare Queues    ingestion / normalization jobs (when needed)
 Cron Triggers        scheduled fetches (when automated)
 ```
+
+Authenticated collectors and their credential boundary are described in
+`docs/authenticated-collectors.md` and `docs/credentials.md`. Password
+bootstrap and authenticated-session replay are separate validation gates. A
+source may use a persistent browser issuer plus a short-lived cloud consumer
+only after each selected runtime has passed its own gate; this does not change
+the evidence-first sequencing.
 
 ### Why D1 (for now)
 

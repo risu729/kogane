@@ -43,6 +43,14 @@ Built only after phase 1, then backfilled with all accumulated captures.
 - Cloudflare Worker, D1 database, private R2 bucket, CI.
 - Bearer-token auth for the ingestion API.
 - Importer CLI (`import-kuebiko`, `ingest-file`).
+- Per-source collector coordinator and short-lived consumer only after its
+  replay path is validated in phase 1. Treat password bootstrap as a separate
+  gate: visible Windows Chrome has produced both successes and failures, so it
+  is not yet a stable repeated control. The deployed issuer remains gated on a
+  repeatable Windows baseline and then a persistent Container-based coherent
+  browser or real Android/macOS testing. The Linux/cloud consumer receives only
+  an encrypted source-scoped session envelope. The vault, master password, and
+  Vpass password never enter Cloudflare for the replay-only flow.
 
 Expected shape of the tables (to be finalized in phase 1):
 
