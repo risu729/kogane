@@ -25,9 +25,12 @@ Bitwarden Password Manager
 
 Run the command after changing the Vpass login item in Bitwarden. This is
 deliberately push-on-change rather than a cloud process that can continuously
-decrypt the personal vault. The existing Windows profile is the only proven
-manual issuer, but it is not the intended deployment dependency; real Android
-Chrome is the next candidate.
+decrypt the personal vault. The existing Windows profile has produced the only
+observed successful bootstrap, but it is not yet a repeatable baseline and is
+not the intended deployment dependency. The eventual issuer may be a coherent
+Windows/macOS browser implementation in a Cloudflare Container, or a real
+non-Windows platform, but no candidate receives credentials until it passes the
+bootstrap gate repeatedly.
 
 Do not sync `VPASS_ID` or `VPASS_PASSWORD` to Worker secrets while the Linux
 bootstrap gate is failing. If a future cloud runtime independently passes that
@@ -141,7 +144,7 @@ vault-reading commands still require `bw unlock` and a decryption session.
 
 | Option | Cloud credential | Scope | Decision |
 | --- | --- | --- | --- |
-| Local `bw` -> accepted persistent browser issuer | Only Vpass ID/password | One source issuer | Use only after the selected Android/macOS issuer passes; store no master password. |
+| Local `bw` -> accepted persistent browser issuer | Only Vpass ID/password | One source issuer | Use only after the selected issuer passes repeated bootstrap; store no master password. |
 | Encrypted issuer -> consumer envelope | One Vpass bearer session | One source and generation | **Use for replay PoC.** Rotate on refresh and validate before every run. |
 | Local `bw` -> Worker secrets | Only Vpass ID/password | One Worker | Do not use now; reconsider only if a cloud password bootstrap passes independently. |
 | Local `bw` -> Secrets Store | Only selected fields | Account-level bindings | Same bootstrap gate applies; beta today. |

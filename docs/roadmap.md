@@ -45,11 +45,12 @@ Built only after phase 1, then backfilled with all accumulated captures.
 - Importer CLI (`import-kuebiko`, `ingest-file`).
 - Per-source collector coordinator and short-lived consumer only after its
   replay path is validated in phase 1. Treat password bootstrap as a separate
-  gate: the existing Windows profile proves that a separate issuer can work,
-  but the deployed non-Windows issuer remains gated on real Android Chrome and
-  then real macOS testing. The Linux/cloud consumer receives only an encrypted
-  source-scoped session envelope. The vault, master password, and Vpass
-  password never enter Cloudflare for this flow.
+  gate: the existing Windows profile shows that a separate issuer may work but
+  is not yet a stable repeated control. The deployed issuer remains gated on a
+  repeatable Windows baseline and then a persistent Container-based coherent
+  browser or real Android/macOS testing. The Linux/cloud consumer receives only
+  an encrypted source-scoped session envelope. The vault, master password, and
+  Vpass password never enter Cloudflare for the replay-only flow.
 
 Expected shape of the tables (to be finalized in phase 1):
 

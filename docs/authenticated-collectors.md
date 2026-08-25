@@ -4,8 +4,9 @@ This document records the execution and network design for sources whose
 authenticated JSON APIs can be replayed without rendering their UI. Vpass is
 the first example. Its login bootstrap and its post-login JSON collection are
 separate capabilities: the former currently requires an established Windows
-Chrome profile, while the latter has been replayed successfully from Linux
-Chrome after importing a valid session.
+Chrome profile and has not yet produced a stable repeated baseline, while the
+latter has been replayed successfully from Linux Chrome after importing a
+valid session.
 
 This is a design and proof-of-concept track, not a promise that an unofficial
 provider API will remain stable. A collector must stop on authentication or
@@ -31,7 +32,7 @@ Live validation on 2026-08-25 and 2026-08-26 established the following:
 
 | Test | Result |
 | --- | --- |
-| Established Windows Kuebiko profile, visible UI password login | Passed, including re-login after its previous Vpass session expired. |
+| Established Windows Kuebiko profile, visible UI password login | At least one login and one re-login after session expiry passed, but repeated success under fixed conditions has not yet been established. |
 | Fresh Windows Kuebiko profiles | Reached login, but password submission returned to the login form; no reliable fresh-profile bootstrap was established. |
 | Fresh WSL official Chrome 151, with or without copied Akamai-only cookies | Akamai Access Denied at `xt_login/agree/v1`. |
 | Previously session-seeded persistent WSL profile, after expiry | Password re-login still received Access Denied. |
@@ -45,21 +46,28 @@ Live validation on 2026-08-25 and 2026-08-26 established the following:
 | Fresh WSL Chrome through AU direct vs Japanese `tamia` exit | Both reached the login page; password login remained 403 through `tamia`. |
 | Fresh visible WSL Chrome through `tamia`, user typed and clicked manually | Access Denied; Linux rejection was not caused by CDP/Playwright input. |
 | Previously successful Windows profile, identical CDP text/mouse automation through AU vs `tamia` | Both returned to the login form without Access Denied or credential error. |
+| Camoufox 0.5.5 in Linux Docker, coherent Windows Firefox 152 fingerprint | Login page passed; password POST returned 403. |
+| Camoufox 0.5.5 in Linux Docker, coherent macOS Firefox 152 fingerprint | Login page passed; the bounded auth trial did not emit the expected login POST, so the result is inconclusive. |
+| Kameleo 5.1 Chroma in Linux Docker, coherent Windows Chrome 152 fingerprint | Login page passed with `Win32`, Direct3D WebGL and `webdriver=false`; password POST returned 403 through AU/SYD WARP egress. |
+| Persistent Kameleo Windows Chrome profile with public-site warm-up and per-character/mouse input | The bounded trial did not emit the login POST because the test click did not reach the control; stopped without treating it as a pass or rejection. |
 
 These results split the source into two explicit gates:
 
 - **Bootstrap gate:** create or refresh a Vpass session from ID/password. This
-  currently passes only through the visible UI path in the established Windows
-  browser profile. CDP text insertion did not reproduce that success.
+  has only been observed to pass through the visible UI path in one established
+  Windows browser profile. That path is not yet a stable control: fresh Windows
+  profiles failed, and CDP text insertion did not reproduce the success.
 - **Replay gate:** import a valid session and call authenticated pages/APIs.
   This is proven on Windows, WSL Linux, and OCI Linux, but has not yet been
   tested in a deployed Cloudflare Container.
 
 IP alone was not the observed deciding factor. Successful browser operations
 used Cloudflare Sydney/Australian egress, while failures also occurred with
-browser-like clients. Akamai cookies without the authenticated Vpass session
-were insufficient, and having once imported a good session did not make later
-Linux password login pass.
+that route and with Japanese home egress. Akamai cookies without the
+authenticated Vpass session were insufficient, and having once imported a good
+session did not make later Linux password login pass. The engine-level
+Camoufox/Kameleo trials also show that a coherent Windows/macOS-looking
+fingerprint is not by itself sufficient for a fresh profile.
 
 A controlled exit-node test confirmed the same conclusion: fresh WSL Chrome
 reached the login page through both AU direct and the Japanese `tamia` exit,
@@ -73,6 +81,17 @@ fixes.
 `impit` is a native Node addon backed by Rust. It cannot run inside the
 Workers JavaScript isolate, but it can run in a Linux
 [Cloudflare Container](https://developers.cloudflare.com/containers/).
+
+The 2026-08-26 Docker controls were deliberately different from simple
+JavaScript or CDP overrides. Camoufox changed the Firefox fingerprint at engine
+level; Kameleo Chroma presented a coherent Windows Chrome 152 profile including
+Windows platform, Direct3D WebGL, language, screen, memory, CPU and
+`webdriver=false`. Both reached the public login page, but the completed
+password POSTs still received 403. These results do not prove that the products
+can never work: the established Windows control itself is not yet repeatable,
+and the remaining variable may be persistent profile reputation, cookie state,
+interaction history, or a temporary Akamai decision. Stop credentialed
+Container trials until the Windows baseline is repeatable.
 
 Passing a public-page GET is not the success condition. Bootstrap is eligible
 only where password login succeeds repeatedly; replay is eligible only where
@@ -96,33 +115,46 @@ manual.
 
 ## Execution decision
 
-Use an accepted persistent browser profile as the session issuer.
-It logs in or refreshes only when needed, validates an authenticated page, and
-publishes an encrypted, source-scoped session envelope with a generation ID
-and expiry metadata. A short-lived Linux collector imports that envelope,
-validates it, calls the authenticated JSON APIs, stores raw evidence, and
-exits. It never receives the Vpass ID/password and never attempts login.
+After an issuer passes the bootstrap gate repeatedly, use its persistent
+browser profile as the session issuer. It logs in or refreshes only when
+needed, validates an authenticated page, and publishes an encrypted,
+source-scoped session envelope with a generation ID and expiry metadata. A
+short-lived Linux collector imports that envelope, validates it, calls the
+authenticated JSON APIs, stores raw evidence, and exits. It never receives the
+Vpass ID/password and never attempts login.
 
-The operator does not want a Windows automation dependency. Test a real
-physical Android device running Chrome next, first with one manual login and
-then, only if it passes, with ADB/CDP automation and minimal session export.
-Test a real macOS host only if Android fails and a persistent Mac is available.
-Linux UA/platform overrides are low value because the manual visible Linux
-control failed and DevTools overrides cover only a subset of the observable
-platform.
+The operator does not want a production dependency on the physical Windows
+machine, but a Windows or macOS fingerprint implemented coherently inside a
+Cloudflare Container is acceptable. Do not select a platform yet. Establish
+the control in this order:
 
-The only issuer currently proven by testing is the existing Windows profile,
-but Windows automation is not an accepted deployment dependency. The next
-candidate is real Android Chrome, followed by a real persistent macOS host only
-if Android fails. An emulator, ephemeral device farm, or newly-created browser
-profile is not equivalent to a passing persistent issuer and must pass the
-bootstrap gate independently.
+1. Hold IP, profile, language, window state and manual interaction constant and
+   reproduce password login at least twice after separate Chrome restarts in
+   the established Windows Kuebiko profile.
+2. Repeat the same manual sequence in one fresh Windows profile. This separates
+   platform from persistent-profile history.
+3. Only after the manual control is repeatable, compare automation in that same
+   established profile. A deployment candidate must pass more than once and
+   after a restart.
+4. Re-test one persistent Container profile using an engine-level Windows
+   Chrome implementation such as Kameleo Chroma. Camoufox remains a Firefox
+   control rather than Chrome impersonation.
+5. Test a real physical Android or persistent macOS host only if the Container
+   candidate fails against a stable Windows control.
+
+An emulator, ephemeral device farm, or newly-created browser profile is not
+equivalent to a passing persistent issuer and must pass the bootstrap gate
+independently. Simple Linux UA/platform overrides remain low value because the
+manual visible Linux control failed and DevTools overrides cover only a subset
+of the observable platform.
 
 The current `risu` account was on Workers Free during the probe. Wrangler could
 build the image and upload the Worker, but Cloudflare refused to create the
 remote Container application because Containers require Workers Paid. A paid
-test is useful only for the replay gate using a known-good session, not for
-repeating the already-failing Linux password login.
+test is immediately useful for the replay gate using a known-good session. A
+remote password-bootstrap test is useful only after the fixed Windows control
+is repeatable and the local persistent Container arm is ready; otherwise a 403
+cannot be attributed to Cloudflare egress or the browser implementation.
 
 ```text
 Bitwarden -- selected ID/password only --> accepted browser session issuer
@@ -325,14 +357,19 @@ stream as expected.
 | VPC binding `fetch()` | Selects a network path but still acts as an HTTP semantic proxy. |
 | Calling `TAMIA.connect()` inside the Container | VPC bindings are Worker bindings and are not injected into the Container process. |
 | Treating `TAMIA.connect()` as the Container default route | It affects only explicitly bridged TCP flows, not the Container network namespace. |
+| Physical Windows scheduled collector | Conflicts with the deployment requirement. The machine remains a diagnostic control only. |
 | Laptop/local scheduled collector | Conflicts with the always-on requirement. The accepted issuer platform remains unresolved. |
 | General open proxy on the mini PC | Unnecessary attack surface; any fallback is localhost-only and destination-allowlisted. |
 
 ## Implementation gates
 
-- [x] Validate password bootstrap: established Windows profile passes; fresh
-      WSL Chrome, Akamai-cookie-only WSL Chrome, a previously seeded WSL
-      profile, and `impit@0.14.3` fail at the login gate.
+- [ ] Establish a stable password-bootstrap control: repeat manual login at
+      least twice after separate restarts in the same established Windows
+      profile, with IP, language and window state held fixed.
+- [x] Record the current bootstrap boundary: an established Windows profile has
+      passed, while fresh Windows, fresh/persistent WSL, Akamai-cookie-only WSL,
+      `impit@0.14.3`, Camoufox Windows Firefox, and Kameleo Windows Chrome have
+      not established a fresh session.
 - [x] Validate session replay: a valid Windows session passes in fresh Windows,
       WSL Chrome, and OCI ARM64 Linux Chrome; expired sessions fail normally.
 - [x] Run the same client in the Wrangler-built image locally: same 403.
@@ -340,13 +377,13 @@ stream as expected.
       Workers Paid is otherwise justified; do not attempt password login.
 - [ ] Test post-auth same-origin JSON `fetch` in Chrome and normal Worker
       `fetch()` before requiring native `impit` in the consumer.
-- [ ] Select a non-Windows issuer only after manual and automated bootstrap
-      both pass in a persistent real-platform profile.
-- [ ] After cooldown, test one manual login in real Android Chrome. If it
-      passes, test Playwright's experimental Android/ADB control and session
-      export without switching to the Vpass native app.
-- [ ] If Android fails, test a real persistent macOS Chrome host. Do not treat a
-      Linux UA override or ephemeral cloud browser as a macOS control.
+- [ ] Compare one fresh Windows manual profile with the stable established
+      Windows control before attributing failures to OS or automation.
+- [ ] Re-test a persistent engine-level Windows Chrome Container profile only
+      after that control exists; require repeated success after restart.
+- [ ] If that fails against the stable control, test real Android Chrome and
+      then a real persistent macOS host. Do not treat a simple Linux UA override
+      or ephemeral cloud browser as a real-platform control.
 - [x] Verify `tunnel_id` raw public egress with an IP-echo endpoint: three
       successful `connect()` calls with a stable IP hash.
 - [ ] Add separate destination allowlists in Worker code for each scraper;

@@ -204,17 +204,19 @@ would give a collector far more authority than it needs.
 
 For sources that pass both bootstrap and replay tests, authenticated fetching
 may run in a short-lived Cloudflare Container. Vpass currently passes replay
-on Linux after importing a valid session, but password bootstrap passes only
-in an established Windows Chrome profile. Therefore the password and session
-consumer have separate trust boundaries.
+on Linux after importing a valid session. Password bootstrap has been observed
+to pass only in an established Windows Chrome profile, but that result is not
+yet a stable repeated baseline. Therefore the password issuer is still
+unselected and the password and session consumer have separate trust
+boundaries.
 
 ```text
 Issuer (after a credential change or session expiry)
   - interactively unlock Bitwarden CLI
   - copy only the selected item's username/password to the accepted persistent
     browser issuer
-  - log in with the established Chrome profile and publish an encrypted,
-    source-scoped session generation
+  - log in with a repeatedly validated persistent profile and publish an
+    encrypted, source-scoped session generation
 
 Linux/Cloudflare consumer (scheduled)
   - start a source-specific consumer with only the encrypted session envelope
