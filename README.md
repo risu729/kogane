@@ -11,6 +11,7 @@ different rules.
 - [Credential delivery](docs/credentials.md)
 - [Existing tools and reuse](docs/tooling.md)
 - [Vpass aggregator alternatives](docs/vpass-aggregators.md)
+- [Vpass Android app API](docs/vpass-android-api.md)
 - [Roadmap](docs/roadmap.md)
 
 ## Proofs of concept
