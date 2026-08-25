@@ -5,9 +5,9 @@ Android app. It is distinct from replaying the website login form. The app
 creates a session through a native JSON API and then calls the same statement
 JSON endpoints that the website uses.
 
-The decompiled snapshot is preserved separately in the private repository
-[`risu729/vpass-android-decompiled`](https://github.com/risu729/vpass-android-decompiled).
-The APK itself and all acquisition credentials are excluded from that repository.
+Application artifacts and full decompiler output are intentionally not
+published in this repository. The secret-free, offline procedure is documented
+in [Reproducing the Vpass Android static analysis](vpass-android-reproduction.md).
 
 ## Artifact
 
@@ -58,7 +58,11 @@ protocol change is the request-side RSA padding shown above.
 ## Confirmed request path
 
 ```text
-ID/password
+ephemeral persisted device UUID
+  -> POST https://spap.smbc-card.com/api/v3/common/Config
+     (protected Config plaintext, production false-key branch)
+  -> cookies and X-VappSessionTime
+ID/password + the same device UUID
   -> protected app-side plaintext builder and encryption
   -> POST https://spap.smbc-card.com/api/v3/Fauth
      (Vauth is the corresponding VJA-mode route)
@@ -70,8 +74,10 @@ ID/password
 
 `AppClient` uses the `spap.smbc-card.com/api/v3/` base URL. Its request headers
 include `X-App-Version`, `X-OS-Version`, an app `User-Agent`, JSON content type,
-and `Authorization` when a token is available. Except on authentication and
-configuration routes it also sends `X-VappSessionTime` returned by the server.
+and `Authorization` when a token is available. It omits `X-VappSessionTime`
+only for the literal `/api/v3/Auth`, `common/Config`, and `common/Vjaconfig`
+routes. `Fauth` is not excluded, so the value established by `common/Config`
+must be sent on the credential request.
 
 The two credential-authentication request shapes are:
 
@@ -79,27 +85,31 @@ The two credential-authentication request shapes are:
 {
   "auth": "<encrypted application payload>",
   "is_first_login": 1,
-  "push": 0,
+  "push": -1,
   "auto_login": 0,
-  "os_type": 1,
+  "os_type": 2,
   "id_type": 2
 }
 ```
 
-`id_type` exists on `Fauth` but not on `Vauth`. The exact integer values depend
-on the selected account/login mode and must not be hard-coded from this example.
+These are the fresh default-app Vpass values: the app starts with no push
+setting (`-1`), reports its Android OS type as `2`, and maps its internal
+Vpass-ID type `1` to `Fauth` `id_type=2`. `id_type` does not exist on `Vauth`.
 
-### Recovered `Vauth` plaintext and envelope
+### Recovered `Fauth`/`Vauth` plaintext and envelope
 
 The protected 5.12.0 implementation confirms that the delimiter is `|`. For a
 first Vpass login, `auth` is built from this eight-field plaintext:
 
 ```text
-login_id|password|device_id_with_check_digit|device_token||company_code|unix_seconds|sha256
+login_id|password|device_id_with_check_digit|global_id||company_code|unix_seconds|sha256
 ```
 
-`company_code` is initialized to `001`; `device_token` is the locally stored
-push token and may be empty. The final value is lowercase SHA-256 over UTF-8:
+`company_code` is initialized to `001`. Field 4 is not a push token: the
+builder calls `LoginRepository`, which returns the saved `LoginInfoRO.globalId`.
+On a fresh client there is no `LoginInfoRO`; Java `StringBuilder.append(null)`
+therefore emits the literal string `null`. The final value is lowercase
+SHA-256 over UTF-8:
 
 ```text
 password + unix_seconds + login_id + company_code
@@ -126,6 +136,38 @@ The 5.12.0 request envelope is:
 Version 5.1.1 uses the same construction except that its request RSA operation
 is PKCS#1 v1.5 and its ASCII key/IV generator uses `java.util.Random`.
 
+### Required `common/Config` preflight
+
+The normal login call site invokes `ConfigAPI` before `Fauth`. The protected
+Config plaintext is also eight pipe-delimited fields:
+
+```text
+empty_id|empty_password|device_uuid|global_id|constant|company_code|unix_milliseconds|sha256
+```
+
+For a fresh client, `global_id` is again the literal `null`, `company_code` is
+`001`, and the digest input is
+`empty_id + empty_password + company_code + constant + unix_milliseconds`.
+Unlike the credential plaintext, Config uses milliseconds. Its envelope uses
+the production **false-key** branch (`pubkey_relese.pem`) and the same 5.12.0
+OAEP-SHA-256/MGF1-SHA-256 construction. The JSON body additionally sends
+`appVersion`, `osType: "Android"`, and the Android SDK integer as `osVersion`.
+
+The Config response's cookies are retained, host-only cookies are normalized
+to `smbc-card.com` as in `ReceivedCookiesInterceptor`, and the returned
+`X-VappSessionTime` is copied onto `Fauth`. A secret-free Config-only probe from
+Sydney Cloudflare egress returned HTTP 200, application status 200, and the
+session-time header. No response body or header value was persisted.
+
+The guarded credential probe was then run once in that same in-memory flow.
+`Fauth` returned HTTP 400, application status 400, and
+`type=parameters_invalid`; no `login_token` was returned, so the statement
+endpoint was not called. This was an application JSON response rather than an
+Akamai HTML denial. It confirms that Config and transport/session setup work,
+but it does **not** yet validate the reconstructed credential payload. The
+runner deliberately stopped without retrying and persisted no credential,
+cookie, token, or response body.
+
 The JSON response field `login_token` uses the reverse-shaped envelope in both
 versions. After Base64 decoding, the app takes the final 256 bytes as a PKCS#1
 v1.5 RSA block and applies the release public key in decrypt mode to recover
@@ -134,10 +176,10 @@ the AES key. The prefix is `16-byte IV || AES ciphertext`, decrypted with
 the server produced a PKCS#1 type-1/private-key block; it is not OAEP response
 decryption.
 
-The private decompilation archive contains both recovered DEX files, their JADX
+The retained working archive contains both recovered DEX files, their JADX
 output and integrity metadata, and secret-free Python reference implementations
-for asset recovery and both auth-envelope directions. Public-key bodies and
-all account data remain outside this repository.
+for asset recovery and both auth-envelope directions. Application artifacts,
+public-key bodies, and all account data remain outside this public repository.
 
 `ReceivedCookiesInterceptor` collects every `Set-Cookie`, normalizes it to the
 configured `smbc-card.com` domain, and saves it into a process-wide in-memory
@@ -218,20 +260,17 @@ passwords, tokens, and cookie values must never be logged.
 
 ## Next validation gates
 
-1. Add the recovered 5.12.0 Vauth builder and OAEP envelope behind a small,
-   testable crypto interface, using only the public-key asset and no APK/native
-   code at runtime.
-2. Unit-test fixed dummy plaintext construction, device-ID transformation,
-   envelope length/Base64 properties, and response-token parsing. Keep 5.1.1
-   only as a regression fixture for the padding transition.
-3. Perform one guarded real-login test from a local pure HTTP client, then
+1. Compare a redacted official-app `Fauth` request with the independent
+   runner, focusing on the encrypted plaintext and outer integer flags. The
+   Config step, key selection, OAEP envelope, cookies, and session-time header
+   are already live-validated and are therefore lower-priority suspects.
+2. Determine whether `parameters_invalid` is a generic authentication failure
+   or a structural request failure without repeatedly submitting credentials.
+3. After resolving that mismatch, perform one guarded login and only then
    enumerate cards and available months and compare statement JSON with the
    existing PoC.
-4. Repeat the same pure HTTP client in the intended Cloudflare Container or
-   Kubernetes runtime. A browser Container is unnecessary if this succeeds.
-5. Optionally instrument the official Android app only to cross-check a dummy
-   field ordering or investigate a server mismatch. Runtime hooks are no longer
-   needed to discover the algorithm.
+4. Repeat the proven pure HTTP client in the intended Cloudflare Container or
+   Kubernetes runtime.
 
 Until the guarded real-login test passes, this is a complete static protocol
 reconstruction rather than a proven production authentication path. It is now
