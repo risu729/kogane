@@ -18,6 +18,8 @@ The APK itself and all acquisition credentials are excluded from that repository
 | APK SHA-256 | `6b9df70c5f3a40c840fd45573385690bd777e6b341134f1e585ad3b87ba95a9a` |
 | Signing certificate SHA-256 | `10:18:A2:EB:10:EF:51:1F:52:F8:48:4B:11:39:42:FE:99:12:41:26:C0:E1:AF:16:D9:95:3E:AC:5B:84:76:2C` |
 | Decompiled with | JADX 1.5.6; 106 reported errors |
+| Protected asset | `assets/fjcnwlye`; 29,664 bytes |
+| Recovered DEX | DEX 037; 29,652 bytes; SHA-256 `f0b8817b4107698cb79f9803646a1048b87cd117e9da8bd151ad7bc1970ffada` |
 
 The package, version, and signing certificate were checked locally before
 analysis. This is an unofficial reverse-engineering snapshot, not an SMCC API
@@ -40,17 +42,18 @@ certificate as the Google Play artifact.
 | JADX errors | 26 | 106 |
 | Signing certificate | Same SMCC certificate | Same SMCC certificate |
 | Protected login classes present in ordinary DEX | No | No |
+| Encrypted asset size | 18,784 bytes | 29,664 bytes |
+| Recovered DEX | DEX 035; 18,776 bytes | DEX 037; 29,652 bytes |
+| Request RSA padding | PKCS#1 v1.5 | OAEP SHA-256 / MGF1-SHA-256 |
+| Auth key / IV randomness | `java.util.Random` | `java.security.SecureRandom` |
 
-Both releases use the same `Fauth`/`Vauth` request model and the same call from
-the protected plaintext builder to `EncryptedMethods`. They also contain four
-byte-identical RSA-2048 public-key PEM files and the same opaque asset and
-native-library names. The opaque asset and native library themselves changed
-between releases, as expected for different protected builds.
-
-The older release is easier for JADX to read around the cookie jar and WebView
-handoff, but it does not reveal the login plaintext order, delimiter, RSA
-padding, or response-token decryption. The comparison therefore establishes
-protocol and key continuity; it does not remove the dynamic-analysis blocker.
+Both releases use the same `Fauth`/`Vauth` request model and contain the same
+four byte-identical RSA-2048 public-key PEM files. The protected asset and
+native library changed between builds, but the asset loader's derivation scheme
+and embedded base material did not. Static recovery confirms that the business
+plaintext format, delimiter, device-ID transformation, SHA-256 input,
+AES-CBC envelope, and response-token decryption are unchanged. The material
+protocol change is the request-side RSA padding shown above.
 
 ## Confirmed request path
 
@@ -85,6 +88,56 @@ The two credential-authentication request shapes are:
 
 `id_type` exists on `Fauth` but not on `Vauth`. The exact integer values depend
 on the selected account/login mode and must not be hard-coded from this example.
+
+### Recovered `Vauth` plaintext and envelope
+
+The protected 5.12.0 implementation confirms that the delimiter is `|`. For a
+first Vpass login, `auth` is built from this eight-field plaintext:
+
+```text
+login_id|password|device_id_with_check_digit|device_token||company_code|unix_seconds|sha256
+```
+
+`company_code` is initialized to `001`; `device_token` is the locally stored
+push token and may be empty. The final value is lowercase SHA-256 over UTF-8:
+
+```text
+password + unix_seconds + login_id + company_code
+```
+
+For saved-ID-token login, field 1 is the saved ID token and the hash input is
+`company_code + unix_seconds + saved_id_token`. The timestamp is integer Unix
+seconds. The device ID starts as a persisted UUID. The app removes its hyphens,
+converts the hex value to a 39-digit zero-padded decimal value, applies a
+right-to-left repeating 2-through-7 mod-11 check digit, removes the UUID
+character at index 8, and inserts the digit at `original length - 4`.
+
+The 5.12.0 request envelope is:
+
+1. Generate independent 16-character ASCII AES key and IV values with
+   `SecureRandom` from the app's fixed 72-character alphabet.
+2. Encrypt the UTF-8 plaintext with `AES/CBC/PKCS5Padding` and form
+   `IV || ciphertext`.
+3. Encrypt the AES key with the release RSA-2048 public key using OAEP with
+   SHA-256, MGF1-SHA-256, and an empty label.
+4. Form `(IV || ciphertext) || 256-byte RSA block` and encode with standard
+   Base64 without wrapping or `=` padding.
+
+Version 5.1.1 uses the same construction except that its request RSA operation
+is PKCS#1 v1.5 and its ASCII key/IV generator uses `java.util.Random`.
+
+The JSON response field `login_token` uses the reverse-shaped envelope in both
+versions. After Base64 decoding, the app takes the final 256 bytes as a PKCS#1
+v1.5 RSA block and applies the release public key in decrypt mode to recover
+the AES key. The prefix is `16-byte IV || AES ciphertext`, decrypted with
+`AES/CBC/PKCS5Padding`, then split on `|`. The unusual public-key decrypt means
+the server produced a PKCS#1 type-1/private-key block; it is not OAEP response
+decryption.
+
+The private decompilation archive contains both recovered DEX files, their JADX
+output and integrity metadata, and secret-free Python reference implementations
+for asset recovery and both auth-envelope directions. Public-key bodies and
+all account data remain outside this repository.
 
 `ReceivedCookiesInterceptor` collects every `Set-Cookie`, normalizes it to the
 configured `smbc-card.com` domain, and saves it into a process-wide in-memory
@@ -123,43 +176,64 @@ parsing. It does not yet prove that a real encrypted login succeeds from every
 cloud network. It does show that these native app endpoints do not require a
 browser merely to reach the Vpass application layer.
 
-## Remaining blocker
+## Static recovery of the protected DEX
 
 The login plaintext builder (`BaseAuthAPI`) and cryptographic methods
-(`EncryptedMethods`) are referenced by normal DEX code but their definitions
-are absent from the extracted DEX files. The APK instead contains:
+(`EncryptedMethods`) are absent from the APK's ordinary DEX files, which is why
+the first JADX pass could only show their call sites. The APK instead contains:
 
 - one stripped `libjnleeeqeor.so` per supported ABI, exporting `JNI_OnLoad`;
 - high-entropy `assets/fjcnwlye` (29,664 bytes); and
 - an obfuscated `kh.*` runtime which loads the native library.
 
-Static inspection indicates that the `kh.*` runtime decrypts the asset and
-injects its DEX elements through Android's class loader. APKiD labels the native
-library as a possible IBM Trusteer Mobile SDK/TSO artifact, and its unusual ELF
-version sections support that inference, but the product attribution is not
-confirmed. Static JADX output alone is therefore insufficient to
-construct a valid `auth` value. The app also decrypts the returned
-`login_token`, so a complete pure-HTTP client needs both directions or a way to
-avoid consuming the decrypted fields.
+Static inspection confirmed that the `kh.*` runtime derives an AES-CBC key and
+IV from embedded base material plus the Java hash of the asset name, decrypts
+`fjcnwlye`, validates it as `classes.dex`, and injects its elements into the
+Android class loader. Reproducing that derivation offline recovered valid DEX
+035 and DEX 037 files for 5.1.1 and 5.12.0 respectively. Their header size,
+declared file size, SHA-1 signature, and Adler-32 checksum all validate. Each
+contains exactly four classes: `AesEncryption`, `EncryptedMethods`,
+`RsaEncryption`, and `BaseAuthAPI`.
+
+APKiD labels the native library as a possible IBM Trusteer Mobile SDK/TSO
+artifact, and its unusual ELF version sections support that attribution, but
+the label itself says "to be verified". This product-name attribution remains
+an inference. It does not affect the recovered Java/Kotlin crypto semantics.
+
+## Browserless implementation implications
+
+The earlier dynamic-analysis blocker is removed. The Vauth plaintext builder,
+request encryption, and `login_token` decryption use standard algorithms and
+can be implemented without Android, a browser, the APK loader, or
+`libjnleeeqeor.so`. Dynamic Android instrumentation is now optional validation,
+not a prerequisite for a pure HTTP client.
+
+That does not yet prove production login. A browserless implementation still
+needs to reproduce current app headers and flags, retain all `Set-Cookie`
+values in one cookie jar, carry `X-VappSessionTime`, handle the decrypted token
+fields, and demonstrate a real login without triggering current server or
+Akamai policy. The app's public-key files should be hash-pinned and the crypto
+versioned because request padding changed between releases. Plaintext auth,
+passwords, tokens, and cookie values must never be logged.
 
 ## Next validation gates
 
-1. If useful, compare a substantially older correctly signed release. Version
-   5.1.1 confirms that the protection was already present in April 2024, so
-   adjacent versions are low-value targets.
-2. Observe the official app on a test Android device:
-   hook immediately before `EncryptedMethods` and at the OkHttp interceptor,
-   recording field names and shapes but never committing credentials or tokens.
-3. Reimplement only the required plaintext builder and cryptographic envelope
-   in a local test client. Do not reuse the app's APK, native library, or a live
-   browser profile in the deployed collector.
-4. Perform one guarded real-login test, then enumerate cards and months and
-   compare statement JSON with the current PoC.
-5. Only after that succeeds, test the pure HTTP implementation in a Worker and
-   in a Cloudflare Container. A browser Container is unnecessary if the same
-   request succeeds with standards-based `fetch`.
+1. Add the recovered 5.12.0 Vauth builder and OAEP envelope behind a small,
+   testable crypto interface, using only the public-key asset and no APK/native
+   code at runtime.
+2. Unit-test fixed dummy plaintext construction, device-ID transformation,
+   envelope length/Base64 properties, and response-token parsing. Keep 5.1.1
+   only as a regression fixture for the padding transition.
+3. Perform one guarded real-login test from a local pure HTTP client, then
+   enumerate cards and available months and compare statement JSON with the
+   existing PoC.
+4. Repeat the same pure HTTP client in the intended Cloudflare Container or
+   Kubernetes runtime. A browser Container is unnecessary if this succeeds.
+5. Optionally instrument the official Android app only to cross-check a dummy
+   field ordering or investigate a server mismatch. Runtime hooks are no longer
+   needed to discover the algorithm.
 
-Until gate 4 passes, the Android path is a promising alternative, not the
-production authentication design. It should be preferred over further browser
-fingerprint tuning for the next experiment because the unauthenticated native
-API already reaches normal JSON application responses from cloud egress.
+Until the guarded real-login test passes, this is a complete static protocol
+reconstruction rather than a proven production authentication path. It is now
+the highest-value browserless route to implement before more browser
+fingerprint work.
