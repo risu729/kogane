@@ -143,7 +143,7 @@ function customizedTransactions(response: unknown): unknown[] {
 export class VpassClient {
   readonly #cookies = new CookieJar();
   readonly #http = new Impit({
-    browser: "chrome",
+    browser: "chrome142",
     cookieJar: this.#cookies,
     headers: { "accept-language": "ja,en-US;q=0.9,en;q=0.8" },
   });
@@ -180,7 +180,19 @@ export class VpassClient {
       response.status >= 400 ||
       response.headers.get("x-loginresult") !== "0"
     ) {
-      throw new Error("Vpass login failed; credentials or additional authentication may be required");
+      const location = response.headers.get("location");
+      const safeLocation = location
+        ? `${new URL(location, BASE_URL).origin}${new URL(location, BASE_URL).pathname}`
+        : null;
+      throw new Error(
+        `Vpass login failed (${JSON.stringify({
+          status: response.status,
+          loginResult: response.headers.get("x-loginresult"),
+          location: safeLocation,
+          contentType: response.headers.get("content-type"),
+          serverTiming: response.headers.get("server-timing"),
+        })})`,
+      );
     }
 
     const location = response.headers.get("location");

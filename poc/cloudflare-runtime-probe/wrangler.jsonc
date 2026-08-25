@@ -1,0 +1,49 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "kogane-vpass-runtime-probe-20260825",
+  "main": "src/index.ts",
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "compatibility_date": "2026-08-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "upload_source_maps": true,
+  "containers": [
+    {
+      "class_name": "RuntimeProbeContainer",
+      "image": "./Dockerfile",
+      "max_instances": 1,
+      "instance_type": "lite",
+      "constraints": {
+        "regions": ["APAC"]
+      }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PROBE_CONTAINER",
+        "class_name": "RuntimeProbeContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RuntimeProbeContainer"]
+    }
+  ],
+  "vpc_networks": [
+    {
+      "binding": "TAMIA",
+      "tunnel_id": "6b0ccf30-68b2-494e-baa8-f4f9f3e46b33",
+      "remote": true
+    }
+  ]
+}
