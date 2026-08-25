@@ -26,6 +26,14 @@ The browserless JSON PoC is tracked in
    family returned by the API, and retain every original JSON response as raw
    evidence.
 
+Live validation on 2026-08-25 did not pass the authentication gate. A saved
+Chrome 153 session logged in successfully, while `impit@0.14.3` with its newest
+`chrome142` profile received an Akamai HTTP 403 before Vpass returned
+`x-loginresult`. Windows Chrome and WSL had the same public egress IP at the
+time, so changing only the source IP does not explain or fix this result. The
+PoC remains useful as a JSON contract and parser, but is not eligible for
+scheduling with this impersonation profile.
+
 `impit` is a native Node addon backed by Rust. It cannot run inside the
 Workers JavaScript isolate, but it can run in a Linux
 [Cloudflare Container](https://developers.cloudflare.com/containers/).
@@ -52,11 +60,18 @@ manual.
 
 ## Execution decision
 
-Start the source collector in a short-lived Container from a Cron-triggered
-Worker. Pass only that source's credentials into the new Container instance,
-collect the provider's raw response bytes, ingest them, and let the instance
-sleep/exit. The Worker remains the scheduler and policy boundary; native
-network code stays in the Container.
+If a browserless client passes the authentication gate, start the source
+collector in a short-lived Container from a Cron-triggered Worker. Pass only
+that source's credentials into the new Container instance, collect the
+provider's raw response bytes, ingest them, and let the instance sleep/exit.
+The Worker remains the scheduler and policy boundary; native network code
+stays in the Container.
+
+The current `risu` account is on Workers Free. Wrangler can build the image and
+upload the Worker, but Cloudflare refuses to create the remote Container
+application because Containers require Workers Paid. The exact image runs in
+local Docker and reproduced the same Vpass 403. Do not change the plan merely
+to repeat the same `impit@0.14.3` login.
 
 ```text
 Cron Trigger
@@ -153,6 +168,15 @@ public destination will always leave with the `cloudflared` host's public IP.
 Treat public egress over a direct `tunnel_id` as an experiment, not an
 assumption.
 
+The retained 2026-08-25 runtime probe established two narrower facts. Three
+`TAMIA.connect()` calls to a plaintext IP-echo endpoint succeeded with the same
+observed IP hash, so raw TCP through the selected Tunnel works. Three
+`TAMIA.fetch()` calls succeeded but used a different TLS/HTTP fingerprint and
+their observed IP hash changed on every request. Thus `fetch()` is not an
+opaque substitute for the `impit` transport; use raw `connect()` for the bridge
+experiment. Full measurements and the cleanup ledger are in
+[PR #3](https://github.com/risu729/kogane/pull/3).
+
 The minimum experiment is:
 
 1. Use the binding's raw
@@ -216,9 +240,15 @@ existing `cloudflared`.
 
 ## Implementation gates
 
-- [ ] Merge and live-validate the browserless Vpass JSON PoC.
-- [ ] Run the same client in a Container with direct Cloudflare egress.
-- [ ] Verify `tunnel_id` raw public egress with an IP-echo endpoint.
+- [x] Live-validate the browserless Vpass JSON PoC: rejected by Akamai 403 with
+      `impit@0.14.3`; authenticated JSON collection remains unvalidated.
+- [x] Run the same client in the Wrangler-built image locally: same 403.
+- [ ] Run it in a remote Cloudflare Container only after a materially newer
+      client profile is available and Workers Paid is otherwise justified.
+- [x] Verify `tunnel_id` raw public egress with an IP-echo endpoint: three
+      successful `connect()` calls with a stable IP hash.
+- [ ] Verify that the allowlisted opaque bridge carries an `impit` TLS stream;
+      the IP-echo test used plaintext TCP only.
 - [ ] Add the per-source Durable Object lease, unique run IDs, and cooldown
       before any scheduled or manual cloud login.
 - [ ] Implement the allowlisted WebSocket/raw-TCP bridge only if direct egress
