@@ -7,11 +7,11 @@
 
 ## 結論
 
-SBI証券は **実装コスト4/5、条件付きで定期自動化可能（初期評価B、検証後Aを狙える）** と評価する。現口座でパスキー利用とBitwarden保管が確認できたため、credential準備の不確実性は下がった。一方、ローカルissuer、WebAuthn互換性、session寿命の検証は残るため、総合コストは据え置く。
+SBI証券は **実装コスト4/5、条件付きで定期自動化可能（初期評価B、検証後Aを狙える）** と評価する。現口座の実credentialでブラウザなしのWebAuthn challenge、assertion、SSO callback、access token復号まで成功したため、credentialとWebAuthn互換性の不確実性は解消した。一方、MTS session確立、read-onlyデータ取得、session寿命、連続実行の検証は残るため、総合コストは据え置く。
 
 推奨経路は、公式Webの `My資産` をデータ源とし、公式のパスキー認証でログインしたセッションから、資産管理画面が呼ぶ読取専用JSONを取得する方式である。最初の検証ではブラウザを使って正しい画面・通信・値を突合し、取得経路が固まったらHTTPクライアントへ縮退する。公式アプリの非公開通信は、Web経路だけで不足する買付余力・国内株式の詳細・米国株式詳細を補完する第2段階とする。
 
-既存実装により、保存したパスキーを用いた無人ログインと、Web／アプリ内部通信の直接呼出しは技術的に実現済みである。さらに現口座のパスキーはBitwarden vaultに保存済みで、`mnie` の `auth-bitwarden` はローカルvaultからWebAuthn assertionを生成する実装を持つ。これは実現可能性を上げるが、SBI証券の実credentialでの互換性は未検証である。一方で、2026年6月に認証方式が変更され、ログイン入口にはEverspin系の防御があり、HeadlessChromeを示すアクセスが保守ページへ送られるとの第三者実装上の観測もある。安定運用には、日本国内の固定的な実行元、ブラウザ同等の通信、セッション失効検知、公式画面との継続的な値照合が必要になる。
+既存実装により、保存したパスキーを用いた無人ログインと、Web／アプリ内部通信の直接呼出しは技術的に実現済みである。2026-08-26の実口座試験では、Bitwarden CLIからSBI証券に必要な最小credentialだけをprocess内へ渡し、`mnie` の既存署名関数とpasskey sessionを接続した。entry 200、challenge 200、assertion 302、callback 200を確認し、復号済みaccess tokenをMTSへ渡す直前で意図的に停止した。一方で、2026年6月に認証方式が変更され、ログイン入口にはEverspin系の防御があり、HeadlessChromeを示すアクセスが保守ページへ送られるとの第三者実装上の観測もある。安定運用には、日本国内の固定的な実行元、session失効検知、公式画面との継続的な値照合が必要になる。
 
 Koganeでは、取引機能を絶対に有効化しない。`pnsk-lab/mnie` のSBI providerは有用な仕様資料だが、注文発注・訂正・取消まで公開するため、そのまま依存・登録してはならない。読取部分だけを別パッケージへ抽出し、取引パスワードを設定・保管せず、注文系コードと宛先をビルドに含めない方針とする。
 
@@ -114,29 +114,32 @@ PCサイトとスマートフォンサイトのMy資産は公式上同じ対象�
 
 - 利用者はSBI証券へのログインにパスキーを利用している。
 - そのパスキーは利用者のBitwarden vaultに保存済みである。
-- 本調査ではvault、master password、derived key、private key、credential ID、user handle等の秘密・識別子を読み取っていない。
+- Bitwarden CLIは該当itemのFIDO2 credential metadataと秘密鍵を復号済みJSONとして返す。実値はログ、repo、PRへ出していない。
+- 該当passkeyはECDSA P-256でdiscoverable属性を持ち、同一RPの候補は1件だった。RP ID、credential ID、user handle、counterの実値は記録しない。
+- `mnie` の既存 `createBitwardenAssertion` が生成したassertionをSBI証券が受理し、SSO callbackと復号可能なaccess tokenを返した。
+- ローカルPoC用に、ログインID、ログインパスワード、RP一致URI、単一passkeyだけをWSLのGit管理外へ保存した。取引パスワードとBitwarden custom fieldsは保存していない。ディレクトリは `0700`、fileは `0600` である。
 
-既存credentialをローカルで利用できる見込みは高まったが、exportability、credential metadata、正確なRP ID／origin、discoverable credentialか、user verificationの方式、signature counter、同一RPのcredential数は未確認である。これらは値をrepoやログへ残さず、利用者端末内の疎通試験で判定する。
+従って、既存credentialのCLI exportability、ローカル署名、SBI証券とのWebAuthn互換性は確認済みである。未確認なのは、counterの連続利用時判定、assertion再利用拒否、session寿命、IP／UA変更、MTS以降のread-only通信である。
 
 ### 公開実装から確認したセッション方式
 
 `pnsk-lab/mnie` は、保存済みWebAuthn credentialから署名を生成し、FIDO challenge／assertion、アプリチャネルのSSO token取得、株アプリ系session確立までをブラウザなしで実装する。session export/importもあるが、メインサイトSSOの認証キャッシュは20分としている。長期間同じcookieを再利用する設計ではなく、必要時にパスキーから再認証できることを前提にするのが安全である。
 
-同repoの `auth-bitwarden` は、Bitwarden Desktopのローカル `data.json` をmaster passwordで復号し、PBKDF2-SHA256／Argon2idのKDF、item key、FIDO2 credentialを処理する。`createBitwardenPasskeyProvider` は、取得したchallengeに対し、完全一致するRP IDのcredentialを選び、指定originを含む `clientDataJSON` と `authenticatorData` を組み立て、秘密鍵で署名する。SBI providerは汎用 `PasskeyAssertionProvider` を受け取るため、このproviderを直接接続できる構造である。秘密鍵を可搬形式へexportせず、復号と署名をローカルprocess内で完結できる点はKoganeに適する。
+同repoの `auth-bitwarden` は、Bitwarden Desktopのローカル `data.json` をmaster passwordで復号し、PBKDF2-SHA256／Argon2idのKDF、item key、FIDO2 credentialを処理する。`createBitwardenPasskeyProvider` は、取得したchallengeに対し、完全一致するRP IDのcredentialを選び、指定originを含む `clientDataJSON` と `authenticatorData` を組み立て、秘密鍵で署名する。SBI providerは汎用 `PasskeyAssertionProvider` を受け取るため、このproviderを直接接続できる構造である。実口座PoCでは `data.json` を直接復号せず、公式Bitwarden CLIが返す復号済みitemを最小化して同じ署名関数へ渡した。
 
 ただし実装上の注意がある。
 
 - 同一RP IDに複数credentialがある場合は明示選択が必要で、曖昧な選択は拒否する。credential IDはローカル設定に閉じ、cloud、repo、通常ログへ送らない。
-- `userVerification` optionはauthenticator dataのUV flagを設定するが、OSやBitwarden UIによる生体認証・利用者確認を実行するものではない。SBI証券がこのassertionを受理するか、実際のUV要件を満たすかは検証が必要である。
+- `userVerification` optionはauthenticator dataのUV flagを設定するが、OSやBitwarden UIによる生体認証・利用者確認を実行するものではない。実口座ではこのassertionを1回受理したが、サーバー側がUVの実体をどう評価するか、連続利用や認証変更後も通るかは未確認である。
 - counterは保存値が正なら既定で1増やして署名するが、更新値をvaultへ書き戻さない。連続ログインで同じ値になる可能性、保存値が0の場合の挙動、SBI証券側の判定を確認する必要がある。実値は記録しない。
-- 現行のdefault `data.json` pathはmacOS向けである。利用者のWindows／WSL環境でBitwardenの現行保管形式・path・ファイルアクセスに対応するかは別途確認する。
-- テストは合成vault／credentialに対するunit testであり、SBI証券の実credentialでの動作保証ではない。
+- 現行のdefault `data.json` pathはmacOS向けである。WSL PoCはBitwarden CLI 2026.8.0を使うことで、このpathとvault形式への直接依存を回避した。
+- 合成credential testに加え、SBI証券の実credentialでpasskey callbackとaccess token復号まで確認した。MTS sessionと口座データ取得はまだ保証しない。
 
 `createBitwardenAuthManager().credentials()` はusername／passwordに加え、FIDO2秘密鍵をprivate JWKとして含む `portableCredential` を返せる。この汎用export経路はKoganeでは使用禁止とする。使うのは狭いassertion provider、またはそれを内包するSBI証券専用ローカルissuerだけであり、vault全体、master password、derived key、秘密鍵JWKをcloudへ置かない。
 
 `azuki774/myscrapers` は、保存済みpasskey private keyをChromiumの仮想WebAuthn authenticatorへ復元し、Playwrightで公式ログイン画面を通す。利用者操作なしでログインする実例ではあるが、passkey秘密鍵をサーバーへ持ち出す設計になるため、Koganeでは通常のパスワード以上に強い秘密として扱う必要がある。
 
-現時点の第一候補は、Bitwardenに保存済みの既存passkeyを利用者端末内で使う方式である。新しいサーバー用passkeyの登録や既存秘密鍵のcloud exportは前提にしない。credential ID、private key、user handle、session ID、cookie、口座番号、金融データをrepo、ログ、PRへ記録しない。
+現時点の第一候補は、Bitwardenに保存済みの既存passkeyを利用者端末内で使う方式である。PoCでは利用者の明示許可によりSBI専用の最小credentialをWSLへ平文保存したが、cloud、container image、repo、CI artifactへは出さない。新しいサーバー用passkeyの登録や既存秘密鍵のcloud exportは前提にしない。credential ID、private key、user handle、session ID、cookie、口座番号、金融データを通常ログ、repo、PRへ記録しない。
 
 ### ローカルissuerとsource-scoped envelope
 
@@ -224,6 +227,8 @@ TLS pinning、root／emulator検知、PlusアプリへのEVERSPIN適用範囲は
 - `tradePassword`、取引認証callback、device registration、order payload builders、発注endpointを依存グラフと配布物から除外する。
 - runtimeのegress allowlistとmethod allowlistで、既知のread-only宛先・操作だけを許可する。
 
+実口座試験の再現用overlay、合成test、秘密管理境界は [`poc/sbi-securities/`](../../poc/sbi-securities/) に保存した。これは対象commitの `mnie/scripts/` へ配置して使うPoCであり、Koganeのproduction collectorではない。
+
 ### `azuki774/myscrapers` (`e58339122eef9273fb2566f0a867057d3219b2f6`)
 
 2026-08-23時点のGo／Playwright実装。aggregatorを使わず、SBI証券の公式ログイン画面と5つの固定ページを読む。
@@ -290,9 +295,9 @@ Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_p
 ## 次の検証手順
 
 1. 利用者の通常ブラウザでSBI証券へ公式パスキー認証し、My資産、保有一覧、実現損益、配当・分配金、取引履歴、円貨入出金明細を順に開く。Network logはhost、path、method、status、schemaだけを記録し、token・cookie・口座番号・実データを保存しない。
-2. 利用者端末内だけで、`auth-bitwarden` が現行Bitwarden vaultを読めるか確認する。master passwordは対話入力またはOS credential brokerからprocess memoryへ渡し、環境変数、file、shell history、logへ残さない。credentialの内容・識別子は表示しない。
-3. 公式challengeからRP ID／origin／`allowCredentials`／user verification要件をローカルで検証し、完全一致allowlistを作る。actual valueやcredential ID／user handleはrepoへ記録しない。
-4. `createBitwardenPasskeyProvider` をSBI providerへ直接接続し、1回限りのheadless HTTP assertion試験を行う。UV flagの有無、stored counterが0／正の場合と連続assertion、同一RPに複数credentialがある場合の拒否、assertion再利用拒否を確認する。実値は残さない。
+2. **完了**: 利用者端末内だけでBitwarden CLI 2026.8.0からSBI証券itemを取得し、秘密値を表示せず、RP一致・候補一意性・passkey metadataを検証した。
+3. **完了**: 公式challengeから返るRP IDとBitwarden credentialを照合し、origin入りassertionを生成した。actual valueやcredential ID／user handleはrepoへ記録していない。
+4. **一部完了**: 既存 `createBitwardenAssertion` とSBI providerを接続した1回限りのHTTP試験は成功した。残りはstored counterの連続利用、assertion再利用拒否、複数credential拒否の実サーバー試験である。
 5. HTTP assertionが受理されない場合のみ、Playwright／CDPのvirtual authenticatorをローカルで試す。resident／discoverable credential、user verification、conditional UI、`allowCredentials`指定、パスキーボタン経路の差を比較し、秘密鍵を平文fixtureへexportしない。
 6. ログイン成功後、sessionのidle／absolute寿命、同時session、再起動後の再利用、IP／UA変更、日中／夜間／週末、429／403／302、メール・電話追加認証を7日以上観測する。session cookieや識別子は保存せず、寿命と失敗分類だけを記録する。
 7. SBI証券Plusを正規にGoogle Playから取得し、manifest、host名、network security config、My資産相当のread endpointだけを静的に確認する。株アプリは第2優先。
@@ -303,9 +308,8 @@ Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_p
 
 ## 未確認事項
 
-- Bitwarden保存済みpasskeyのexportabilityとcredential metadata（秘密を読まずに判定する）
-- 正確なRP ID／origin、discoverable／resident属性、user verification要件、signature counterのサーバー側判定、同一RPの登録passkey数
-- Windows／WSL上のBitwarden現行vault path／形式と `auth-bitwarden` の互換性
+- signature counterの連続利用時のサーバー側判定、assertion再利用拒否、認証方式変更後の互換性
+- Bitwarden CLI更新時のFIDO2 credential JSON schema互換性
 - パスワード無効化の有無、電話番号認証、conditional UIとパスキーボタン経路の差
 - 現行sessionのidle／absolute寿命、再利用条件、IP／UA変更時の追加認証
 - 現行My資産の全endpoint、ページング、rate limit、session寿命
