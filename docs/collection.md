@@ -124,6 +124,11 @@ Preferred order when adding a source, cheapest first:
 4. Browser automation
 5. Manual entry
 
+These are direct-source paths: Kogane prefers the institution's own export,
+API, website/app, or statement. An aggregator is optional reconciliation
+evidence only, not the default collector and not the sole raw source. See
+`docs/source-policy.md`.
+
 For several sources this work is already done by existing tools:
 `smcc-meisai-scraper` parses the Vpass card CSV, and `pnsk-lab/mnie` has
 `fetch`-based internal-API clients for SBI Securities, SMBC, Mobile Suica,
