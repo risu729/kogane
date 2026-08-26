@@ -47,12 +47,6 @@ export default {
         url.searchParams.get("from"),
         url.searchParams.get("to"),
       );
-      if (scope === "all") {
-        return Response.json(
-          { error: "Use the dispatcher /enqueue endpoint for scope=all" },
-          { status: 400 },
-        );
-      }
       const result = await runCollection(env, scope, window);
       return Response.json(result, {
         status: result.status === "failed" ? 502 : 200,
@@ -70,6 +64,9 @@ export default {
     }
   },
 
+  async scheduled(_controller, env): Promise<void> {
+    await runCollection(env, "all");
+  },
 } satisfies ExportedHandler<Env>;
 
 async function runCollection(

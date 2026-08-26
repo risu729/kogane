@@ -15,15 +15,8 @@ if [[ ! -s $admin_token_file ]]; then
 fi
 
 IFS= read -r admin_token < "$admin_token_file"
-if [[ $scope == all ]]; then
-  scopes=(domestic foreign)
-else
-  scopes=("$scope")
-fi
-for current_scope in "${scopes[@]}"; do
-  curl --fail-with-body --silent --show-error --max-time 180 \
-    --request POST \
-    --header "Authorization: Bearer ${admin_token}" \
-    "${collector_url}/trigger?scope=${current_scope}"
-  printf '\n'
-done
+curl --fail-with-body --silent --show-error --max-time 180 \
+  --request POST \
+  --header "Authorization: Bearer ${admin_token}" \
+  "${collector_url}/trigger?scope=${scope}"
+printf '\n'

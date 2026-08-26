@@ -27,21 +27,19 @@ while [[ $window_from < $to || $window_from == $to ]]; do
   window_to=$(date --date="${window_from} +89 days" +%F)
   if [[ $window_to > $to ]]; then window_to=$to; fi
 
-  for scope in domestic foreign; do
-    response=$(curl --fail-with-body --silent --show-error --max-time 180 \
-      --retry 3 --retry-all-errors --retry-delay 5 \
-      --request POST \
-      --header "Authorization: Bearer ${admin_token}" \
-      "${collector_url}/trigger?scope=${scope}&from=${window_from}&to=${window_to}")
-    jq -n --arg scope "$scope" --argjson result "$response" '{
-      scope: $scope,
-      status: $result.status,
-      window: [$result.artifacts[] | select(.window != null) | .window][0],
-      artifactCount: ($result.artifacts | length),
-      failureCount: ($result.failures | length),
-      manifestKey: $result.manifestKey
-    }'
-  done
+  response=$(curl --fail-with-body --silent --show-error --max-time 180 \
+    --retry 3 --retry-all-errors --retry-delay 5 \
+    --request POST \
+    --header "Authorization: Bearer ${admin_token}" \
+    "${collector_url}/trigger?scope=all&from=${window_from}&to=${window_to}")
+  jq -n --argjson result "$response" '{
+    scope: $result.scope,
+    status: $result.status,
+    window: [$result.artifacts[] | select(.window != null) | .window][0],
+    artifactCount: ($result.artifacts | length),
+    failureCount: ($result.failures | length),
+    manifestKey: $result.manifestKey
+  }'
 
   window_from=$(date --date="${window_to} +1 day" +%F)
 done

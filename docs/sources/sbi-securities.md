@@ -21,7 +21,7 @@ Koganeでは、取引機能を絶対に有効化しない。`pnsk-lab/mnie` のS
 
 このPoCでは、Cloudflare secretにSBI専用passkeyの最小6項目と、token復号用の固定RSA transport鍵だけを置き、ログインID／パスワード、取引パスワード、Bitwarden item全体は置かない。access token、SID、Cookie、MTS session header、口座番号をR2や通常ログへ保存せず、データartifactとredacted manifestだけをprivate R2へ保存する。D1は使わない。実Cloudflareで外国scopeは約7秒、国内scopeは約15秒で成功したが、両方を同じinvocationで実行するとError 1102になった。
 
-Queue分割も実測したが、Free planのconsumerおよびservice-binding先に適用されるCPU制限を認証・収集処理が超えた。RSA-4096鍵生成を実行時から外しても、外国scopeの通常requestで約0.94秒のCPU timeが観測され、公式のFree上限10msへ最適化だけで収めるのは現実的でない。`cpu_ms`引上げはWorkers Paid限定であり、WorkflowもFreeでは同じ10ms CPU枠を使う。月額課金を開始しない現在は、GitHub Actionsが毎日06:00 JSTに国内・外国の成功済み個別HTTP endpointを順番に呼ぶ。GitHubへ置くのは管理用Bearer tokenだけで、passkeyと金融データはCloudflareから出さない。Paidへ移行する場合は、Cloudflare Cron + Queue（batch 1、concurrency 1、CPU 30秒以上）へ置換できる。
+Queue分割も実測したが、Free planのconsumerおよびservice-binding先に適用されるCPU制限を認証・収集処理が超えた。RSA-4096鍵生成を実行時から外しても、外国scopeの通常requestで約0.94秒のCPU timeが観測され、公式のFree上限10msへ最適化だけで収めるのは現実的でなかった。2026-08-27にWorkers Paidへ移行したため、現在はGitHub ActionsやQueueを介さず、Cloudflare Cron Triggerが毎日06:00 JSTに`scope=all`を1回起動し、国内・外国を直列収集する。日次Cronの最大CPU time／wall timeはともに15分で、実測約7秒＋約15秒の処理に十分である。
 
 初期バックフィルとして、2024-08-28〜2026-05-29を重複のない90日以下の8区間へ分割し、国内8/8、外国8/8の全runが成功、failure 0でprivate R2へ保存された。直近2026-05-30〜2026-08-27も国内・外国それぞれ成功している。これにより現時点で約2年の国内・米国株取引履歴と、各run時点の国内／米国株保有、円／USD預り金、My資産、円貨入出金明細のraw snapshotがR2にある。
 
@@ -299,10 +299,10 @@ KoganeのSBI証券collectorは、次の条件をすべて満たすまで実装�
 | OCI Tokyo等のk8s CronJob／小型VM | 中～高 | 日本国内固定IP、Chromiumまたは直接HTTP、時刻制御が容易。ただしvaultを配置せず、ローカルagentから暗号化済み結果を受けるscheduler／processorに限定する |
 | 一般OCI container | 中 | `mnie`型HTTP clientも`myscrapers`型Playwrightも動かせるが、Bitwarden秘密を置かない。ローカルagentからsessionを渡す構成も原則避ける |
 | Cloudflare Containers | 低～中 | Linux imageとoutbound制御が使えるが、固定的な日本egressと永続性を実機確認する必要がある。vault／derived key／passkeyを置かない |
-| Cloudflare Workers | 中～高 | 独立HTTP実装、encrypted secret、private R2で国内・外国とも実口座取得に成功。Freeの10ms CPU枠を大幅に超えるため通常requestの猶予に依存し、安定運用はPaidが望ましい |
+| Cloudflare Workers | 高 | 独立HTTP実装、encrypted secret、private R2で国内・外国とも実口座取得に成功。Paidの日次Cronから1 invocationで直列収集できる |
 | Cloudflare Browser Rendering | 低～中 | CDP endpointはあるが、仮想WebAuthn credentialの利用可否と永続的な秘密管理を未確認。最初の実装先にはしない |
 
-Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_process`は非機能stubである。このためMnieをそのまま使わず、RSA混合OAEPを含む必要部分を`node:crypto`だけで独立実装した。vault全体はcloudへ置かず、SBI専用passkey最小項目だけをencrypted secretへ置く。FreeのCPU制限はQueueやWorkflowでは解消しないため、現状の日次起動はGitHub Actions、安定したCloudflare内完結はWorkers Paidを前提にする。
+Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_process`は非機能stubである。このためMnieをそのまま使わず、RSA混合OAEPを含む必要部分を`node:crypto`だけで独立実装した。vault全体はcloudへ置かず、SBI専用passkey最小項目だけをencrypted secretへ置く。Workers Paid移行後は、日次起動からR2保存までCloudflare Cron内で完結する。Free検証用のGitHub Actions、Queue、dispatcherは採用しない。
 
 ## 推奨アーキテクチャ
 

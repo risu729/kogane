@@ -25,6 +25,6 @@
     "COLLECTOR_SCHEMA_VERSION": "sbi-worker-poc-v1"
   },
   "triggers": {
-    "crons": []
+    "crons": ["0 21 * * *"]
   }
 }
