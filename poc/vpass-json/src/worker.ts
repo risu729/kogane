@@ -23,7 +23,6 @@ const MOBILE_UA =
 
 interface Env {
   SNAPSHOTS: R2Bucket;
-  CARD_JOBS: Queue<{ card: number }>;
   VPASS_ID: string;
   VPASS_PASSWORD: string;
   VPASS_DEVICE_ID: string;
@@ -49,6 +48,25 @@ interface RunSummary {
   pageCount: number;
   transactionCount: number;
   objectCount: number;
+}
+
+interface AllCardsRunSummary {
+  runId: string;
+  startedAt: string;
+  completedAt: string;
+  cardCount: number;
+  successCount: number;
+  failureCount: number;
+  monthCount: number;
+  pageCount: number;
+  transactionCount: number;
+  objectCount: number;
+}
+
+interface VpassSession {
+  cookies: CookieBag;
+  cardList: RawJsonResponse;
+  cards: string[];
 }
 
 interface MonthCapture {
@@ -279,10 +297,48 @@ async function memberPost(cookies: CookieBag, path: string, content: JsonObject)
   return result;
 }
 
+async function openSession(env: Env): Promise<VpassSession> {
+  const cookies = new CookieBag();
+  await authenticate(env, cookies);
+  const cardList = await memberPost(cookies, CARD_LIST_PATH, {
+    displayDropdownList: "enable",
+  });
+  const cards = cardKeys(cardList.json);
+  if (cards.length === 0) throw new Error("Vpass returned no selectable cards");
+  return { cookies, cardList, cards };
+}
+
 async function putJson(env: Env, key: string, rawText: string): Promise<void> {
   await env.SNAPSHOTS.put(key, rawText, {
     httpMetadata: { contentType: "application/json; charset=utf-8" },
   });
+}
+
+async function putCardError(
+  env: Env,
+  prefix: string,
+  runId: string,
+  started: Date,
+  selectedCardZeroBased: number,
+  error: unknown,
+): Promise<void> {
+  await putJson(
+    env,
+    `${prefix}/error.json`,
+    JSON.stringify(
+      {
+        runId,
+        startedAt: started.toISOString(),
+        failedAt: new Date().toISOString(),
+        status: "error",
+        message: errorMessage(error),
+        selectedCardIndex: selectedCardZeroBased + 1,
+        objectCount: 1,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 async function collectMonth(
@@ -360,24 +416,18 @@ async function collectMonth(
   return { pages, transactionCount: transactions };
 }
 
-async function collect(
+async function captureCard(
   env: Env,
+  session: VpassSession,
   selectedCardZeroBased: number,
-  scheduledTime = Date.now(),
+  started: Date,
+  runId: string,
 ): Promise<RunSummary> {
-  const started = new Date(scheduledTime);
-  const runId = safeRunId(started);
   const cardLabel = `card-${String(selectedCardZeroBased + 1).padStart(3, "0")}`;
   const prefix =
     `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}/${cardLabel}`;
-  const cookies = new CookieBag();
+  const { cookies, cardList, cards } = session;
   try {
-    await authenticate(env, cookies);
-    const cardList = await memberPost(cookies, CARD_LIST_PATH, {
-      displayDropdownList: "enable",
-    });
-    const cards = cardKeys(cardList.json);
-    if (cards.length === 0) throw new Error("Vpass returned no selectable cards");
     const selectedCard = cards[selectedCardZeroBased];
     if (!selectedCard) {
       throw new Error(
@@ -438,9 +488,43 @@ async function collect(
     );
     return summary;
   } catch (error) {
+    await putCardError(env, prefix, runId, started, selectedCardZeroBased, error);
+    throw error;
+  }
+}
+
+async function collectOneCard(
+  env: Env,
+  selectedCardZeroBased: number,
+  scheduledTime = Date.now(),
+): Promise<RunSummary> {
+  const started = new Date(scheduledTime);
+  const runId = safeRunId(started);
+  const cardLabel = `card-${String(selectedCardZeroBased + 1).padStart(3, "0")}`;
+  const prefix =
+    `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}/${cardLabel}`;
+  let session: VpassSession;
+  try {
+    session = await openSession(env);
+  } catch (error) {
+    await putCardError(env, prefix, runId, started, selectedCardZeroBased, error);
+    throw error;
+  }
+  return captureCard(env, session, selectedCardZeroBased, started, runId);
+}
+
+async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCardsRunSummary> {
+  const started = new Date(scheduledTime);
+  const runId = safeRunId(started);
+  const runPrefix =
+    `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}`;
+  let session: VpassSession;
+  try {
+    session = await openSession(env);
+  } catch (error) {
     await putJson(
       env,
-      `${prefix}/error.json`,
+      `${runPrefix}/error.json`,
       JSON.stringify(
         {
           runId,
@@ -448,7 +532,6 @@ async function collect(
           failedAt: new Date().toISOString(),
           status: "error",
           message: errorMessage(error),
-          selectedCardIndex: selectedCardZeroBased + 1,
           objectCount: 1,
         },
         null,
@@ -457,37 +540,39 @@ async function collect(
     );
     throw error;
   }
-}
 
-async function enqueueAllCards(env: Env): Promise<void> {
-  await env.CARD_JOBS.sendBatch(
-    Array.from({ length: 6 }, (_, index) => ({ body: { card: index + 1 } })),
-  );
+  const summaries: RunSummary[] = [];
+  const failures: number[] = [];
+  for (let index = 0; index < session.cards.length; index += 1) {
+    try {
+      summaries.push(await captureCard(env, session, index, started, runId));
+    } catch {
+      failures.push(index + 1);
+    }
+  }
+
+  const summary: AllCardsRunSummary = {
+    runId,
+    startedAt: started.toISOString(),
+    completedAt: new Date().toISOString(),
+    cardCount: session.cards.length,
+    successCount: summaries.length,
+    failureCount: failures.length,
+    monthCount: summaries.reduce((total, item) => total + item.monthCount, 0),
+    pageCount: summaries.reduce((total, item) => total + item.pageCount, 0),
+    transactionCount: summaries.reduce((total, item) => total + item.transactionCount, 0),
+    objectCount: summaries.reduce((total, item) => total + item.objectCount, 0) + failures.length,
+  };
+  console.log(JSON.stringify({ event: "vpass-daily-collection-complete", ...summary }));
+  if (failures.length > 0) {
+    throw new Error(`${failures.length} of ${session.cards.length} card collections failed`);
+  }
+  return summary;
 }
 
 export default {
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
-    await enqueueAllCards(env);
-    console.log(
-      JSON.stringify({
-        event: "vpass-daily-collection-enqueued",
-        scheduledTime: controller.scheduledTime,
-        cardCount: 6,
-      }),
-    );
-  },
-
-  async queue(batch: MessageBatch<{ card: number }>, env: Env): Promise<void> {
-    for (const message of batch.messages) {
-      const card = message.body.card;
-      if (!Number.isInteger(card) || card < 1 || card > 6) {
-        message.ack();
-        throw new Error("Queue message card must be an integer from 1 through 6");
-      }
-      const summary = await collect(env, card - 1);
-      console.log(JSON.stringify({ event: "vpass-card-collection-complete", ...summary }));
-      message.ack();
-    }
+    await collectAllCards(env, controller.scheduledTime);
   },
 
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -497,7 +582,7 @@ export default {
     }
     if (
       request.method !== "POST" ||
-      (url.pathname !== "/__collect" && url.pathname !== "/__enqueue-all")
+      url.pathname !== "/__collect"
     ) {
       return new Response("Not found", { status: 404 });
     }
@@ -505,15 +590,11 @@ export default {
     if (request.headers.get("authorization") !== `Bearer ${expected}`) {
       return new Response("Unauthorized", { status: 401 });
     }
-    if (url.pathname === "/__enqueue-all") {
-      await enqueueAllCards(env);
-      return Response.json({ enqueuedCards: 6 }, { status: 202 });
-    }
     const requestedCard = Number(url.searchParams.get("card"));
     if (!Number.isInteger(requestedCard) || requestedCard < 1 || requestedCard > 6) {
       return Response.json({ error: "card must be an integer from 1 through 6" }, { status: 400 });
     }
-    const summary = await collect(env, requestedCard - 1);
+    const summary = await collectOneCard(env, requestedCard - 1);
     return Response.json(summary);
   },
-} satisfies ExportedHandler<Env, { card: number }>;
+} satisfies ExportedHandler<Env>;

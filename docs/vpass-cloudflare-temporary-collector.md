@@ -11,7 +11,6 @@ All disposable resources use the same prefix:
 
 - Worker: `kogane-vpass-collector-poc`
 - R2 bucket: `kogane-vpass-collector-poc`
-- Queue: `kogane-vpass-collector-poc`
 - Cron: `0 21 * * *` (daily at 21:00 UTC / 06:00 JST)
 - Worker secrets: `VPASS_ID`, `VPASS_PASSWORD`, `VPASS_DEVICE_ID`,
   `VPASS_AUTH_PUBLIC_KEY_B64`, `VPASS_CONFIG_PUBLIC_KEY_B64`, and
@@ -30,12 +29,25 @@ vpass/YYYY/MM/DD/<run-id>/card-NNN/
 
 `snapshot.json` contains the exact raw JSON text for the card list, card
 selection, month list, and all statement pages. Keeping one card in one Worker
-invocation and bundling its raw responses into one R2 object stays below the
-per-invocation subrequest limit. The one daily Cron enqueues six card jobs. The
-Queue consumer uses `max_batch_size: 1`, giving every card an independent Worker
-invocation and subrequest budget. This also stays within the Workers Free
-account limit of five Cron Triggers. An interrupted card run has `error.json`
-instead of the two success objects.
+run and bundling its raw responses into one R2 object keeps memory bounded. The
+daily Cloudflare Cron Trigger opens one authenticated session, enumerates the
+cards returned by Vpass, and captures them sequentially in the same
+`scheduled()` invocation. All cards in a daily run therefore share one
+`<run-id>` directory. An interrupted card has `error.json` instead of the two
+success objects; the handler still attempts the remaining cards and reports the
+Cron invocation as failed after it has written all available evidence.
+
+This deliberately targets Workers Paid. The previous Queue fan-out existed to
+stay below the Workers Free limit of 50 external subrequests per invocation. A
+Paid Worker now receives 10,000 subrequests by default, while a daily Cron
+Trigger has a 15-minute execution window. The live six-card capture was measured
+well below both limits, so Queue fan-out and six independent logins add cost and
+failure surface without providing useful isolation. See Cloudflare's current
+[Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
+and [Cron Trigger documentation](https://developers.cloudflare.com/workers/configuration/cron-triggers/).
+
+Cloudflare Cron Trigger is the only periodic scheduler. Do not add a scheduled
+GitHub Actions workflow for this collector.
 
 ## Deploy and inspect
 
@@ -54,8 +66,8 @@ bun run cf:deploy
 Inspect objects in the private R2 dashboard, or fetch a known manifest key with
 `npx wrangler r2 object get <bucket>/<key> --remote --pipe`.
 
-`POST /__collect?card=N` and `POST /__enqueue-all` exist only for protected
-first-run/diagnostic collection and require
+`POST /__collect?card=N` exists only for protected first-run/diagnostic
+collection and requires
 `Authorization: Bearer <ADMIN_TRIGGER_TOKEN>`.
 `GET /health` does not initiate a login. The scheduled handler is the ordinary
 execution path.
@@ -69,13 +81,21 @@ The complete path was verified on 2026-08-26:
    rows from both response families.
 2. A direct Worker card invocation produced the same page and row counts as the
    local run, then its R2 manifest was read back and compared.
-3. The protected enqueue endpoint published one job per card. With
-   `max_batch_size: 1` and `max_concurrency: 1`, every Queue consumer completed
-   independently and stored its two R2 objects.
+3. The protected enqueue endpoint then published one job per card and every
+   Queue consumer stored its two R2 objects. That Free-plan validation is the
+   historical baseline; the Paid-plan code removes the Queue and processes the
+   same card sequence directly from `scheduled()`.
 
 Only structural counts were logged during verification. Credentials, cookies,
 card identifiers, public-key bodies, and financial response bodies were not
 printed or committed.
+
+## Paid-plan migration
+
+The repository change does not mutate the live deployment. Deploy the updated
+Worker first, verify one complete Cron run in R2, and only then delete the
+legacy `kogane-vpass-collector-poc` Queue. Removing the Queue before deploying
+would break the currently deployed Free-plan version.
 
 ## Remove everything
 
@@ -84,9 +104,10 @@ deletes all collected statement data.
 
 ```sh
 npx wrangler delete --name kogane-vpass-collector-poc
-npx wrangler queues delete kogane-vpass-collector-poc
 npx wrangler r2 bucket delete kogane-vpass-collector-poc
 ```
 
 The Worker deletion removes its Cron Trigger and secrets with the Worker. The
-R2 deletion is intentionally separate and destructive.
+R2 deletion is intentionally separate and destructive. If the legacy Free-plan
+Queue still exists, remove it separately with
+`npx wrangler queues delete kogane-vpass-collector-poc`.
