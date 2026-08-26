@@ -19,10 +19,13 @@
 11. 外国株式アプリ用の別passkey channelとSSO sessionを作成し、米国株現物を3市場別に照会
 12. 外国株式GraphQLの取引履歴を90日範囲で照会
 13. メインサイトへSSOし、My資産の現在評価JSONと円貨入出金明細JSONを照会
+14. 国内・米国株の個別現在値と日足チャート、USD外貨交換レートを任意probeで照会
 
 ブラウザを使わないpasskey認証、国内MTS session、外国株式session、メインサイトSSOと、国内・米国現物保有、My資産現在評価、円貨入出金明細、米国株取引履歴のread-only取得まで実口座で確認済みである。注文系method、取引パスワード、device registration、session再利用は使用・検証していない。通常ログへtoken、SID、口座番号、銘柄、数量、金額、入出金摘要を出さず、検証記録にはHTTP status、operation名、件数、日付範囲、残高のpositive／zero／missing状態、エラー型だけを残した。
 
 現時点の履歴範囲には差がある。外国株式の取引履歴は90日指定で成功したが、2021年から現在までを1リクエストで要求すると拒否された。アプリが先に呼ぶ検索可能期間queryを実装し、その範囲を短いwindowへ分割する必要がある。国内株は当日約定と未約定・直近注文だけが現行clientにあり、過去約定全体は未実装である。円貨入出金は初期一覧を取得できたが、公式上の保持期間を全件ページングできるかは未確認である。
+
+市場データprobeでは、国内現物の保有一覧に全件の現在値があり、個別の板／現在値と日足チャートも成功した。米国株は照会時点で全保有銘柄の前日終値と日足チャートを取得できた一方、`last` は空で、保有一覧にも現在値は入らなかった。市場時間帯と配信条件による挙動を連続観測する必要がある。メインサイトのUSD外貨交換レート照会は同じ試験で失敗したため、現時点ではUI用FXレートの安定したsourceと見なさない。
 
 ## 再現手順
 
@@ -68,6 +71,7 @@
    SBI_MAIN_SITE_BASE_URL='<公式メインサイトのHTTPS origin>' \
    SBI_US_HISTORY_FROM='<YYYY-MM-DD>' \
    SBI_US_HISTORY_TO='<YYYY-MM-DD>' \
+   SBI_VERIFY_MARKET_DATA=true \
      bun scripts/verify-sbi-bitwarden-cli-passkey.ts \
      < ~/.local/share/kogane/secrets/sbi-securities.json
    ```

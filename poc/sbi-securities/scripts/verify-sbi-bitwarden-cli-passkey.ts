@@ -259,12 +259,70 @@ const main = async () => {
           )
         : undefined
 
+      const verifyMarketData = process.env.SBI_VERIFY_MARKET_DATA === 'true'
+      const domesticSample = cashResult.ok ? cashResult.value.positions[0] : undefined
+      const domesticQuoteResult =
+        verifyMarketData && domesticSample?.issue.market
+          ? await readOnlyResult(() =>
+              client.market.issue.board({
+                issueCode: domesticSample.issue.code,
+                market: domesticSample.issue.market,
+              }),
+            )
+          : undefined
+      const domesticChartResult =
+        verifyMarketData && domesticSample?.issue.market
+          ? await readOnlyResult(() =>
+              client.market.issue.chart({
+                issueCode: domesticSample.issue.code,
+                market: domesticSample.issue.market,
+                period: 'day',
+                count: 5,
+              }),
+            )
+          : undefined
+      const usSample = usPositionResults
+        .flatMap(({ result }) => (result.ok ? result.value.positions : []))
+        .at(0)
+      const usQuoteResults = verifyMarketData
+        ? await Promise.all(
+            usPositionResults
+              .flatMap(({ result }) => (result.ok ? result.value.positions : []))
+              .filter((position) => Boolean(position.issue.market))
+              .map((position) =>
+                readOnlyResult(() =>
+                  client.market.issue.board({
+                    issueCode: position.issue.code,
+                    market: position.issue.market!,
+                  }),
+                ),
+              ),
+          )
+        : []
+      const usChartResult =
+        verifyMarketData && usSample?.issue.market
+          ? await readOnlyResult(() =>
+              client.market.issue.chart({
+                issueCode: usSample.issue.code,
+                market: usSample.issue.market,
+                period: 'day',
+                count: 5,
+              }),
+            )
+          : undefined
+
       const assetsResult = liveMainSiteBaseUrl
         ? await readOnlyResult(() => client.account.assets.current())
         : undefined
       const yenHistoryResult = liveMainSiteBaseUrl
         ? await readOnlyResult(() => client.banking.detailHistory())
         : undefined
+      const exchangeRateResult =
+        verifyMarketData && liveMainSiteBaseUrl
+          ? await readOnlyResult(() =>
+              client.orders.exchange.rate({ currencyCode: 'USD', side: 'buy' }),
+            )
+          : undefined
       const methodErrors = [
         cashResult.ok ? cashResult.value.error : undefined,
         powerResult.ok ? powerResult.value.error : undefined,
@@ -369,6 +427,54 @@ const main = async () => {
                 errorType: result.ok ? undefined : result.errorType,
                 errorCode: result.ok ? undefined : result.errorCode,
               })),
+            domesticPositionsWithCurrentPrice: cashResult.ok
+              ? cashResult.value.positions.filter(
+                  (position) => typeof position.currentPrice?.value === 'number',
+                ).length
+              : undefined,
+            usPositionsWithCurrentPrice: usPositionResults.reduce(
+              (total, { result }) =>
+                total +
+                (result.ok
+                  ? result.value.positions.filter(
+                      (position) => typeof position.currentPrice?.value === 'number',
+                    ).length
+                  : 0),
+              0,
+            ),
+            marketDataProbeEnabled: verifyMarketData,
+            domesticQuoteReadSucceeded: domesticQuoteResult?.ok,
+            domesticQuoteHasPrice: domesticQuoteResult?.ok
+              ? typeof domesticQuoteResult.value.quote?.price?.value === 'number'
+              : undefined,
+            domesticChartReadSucceeded: domesticChartResult?.ok,
+            domesticChartPointCount: domesticChartResult?.ok
+              ? domesticChartResult.value.prices.length
+              : undefined,
+            usQuoteReadSuccessCount: usQuoteResults.filter((result) => result.ok).length,
+            usQuoteWithLastPriceCount: usQuoteResults.filter(
+              (result) => result.ok && typeof result.value.quote?.price?.value === 'number',
+            ).length,
+            usQuoteWithPreviousCloseCount: usQuoteResults.filter(
+              (result) => result.ok && typeof result.value.quote?.previousClose?.value === 'number',
+            ).length,
+            usChartReadSucceeded: usChartResult?.ok,
+            usChartPointCount: usChartResult?.ok ? usChartResult.value.prices.length : undefined,
+            exchangeRateReadSucceeded: exchangeRateResult?.ok,
+            exchangeRateHasReferenceRate: exchangeRateResult?.ok
+              ? Boolean(exchangeRateResult.value.referenceExchangeRate)
+              : undefined,
+            exchangeRateHasComputedRate: exchangeRateResult?.ok
+              ? Boolean(exchangeRateResult.value.computeExchangeRate)
+              : undefined,
+            exchangeRateErrorType:
+              exchangeRateResult && !exchangeRateResult.ok
+                ? exchangeRateResult.errorType
+                : undefined,
+            exchangeRateErrorCode:
+              exchangeRateResult && !exchangeRateResult.ok
+                ? exchangeRateResult.errorCode
+                : undefined,
             usTradeHistoryConfigured: Boolean(liveForeignStockBaseUrl),
             usTradeHistoryReadSucceeded: usTradeHistoryResult?.ok,
             usTradeHistoryQueryFrom: liveForeignStockBaseUrl ? usHistoryFrom : undefined,
