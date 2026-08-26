@@ -15,6 +15,16 @@ SBI証券は **実装コスト3/5、条件付きで定期自動化可能（現�
 
 Koganeでは、取引機能を絶対に有効化しない。`pnsk-lab/mnie` のSBI providerは有用な仕様資料だが、注文発注・訂正・取消まで公開するため、そのまま依存・登録してはならない。読取部分だけを別パッケージへ抽出し、取引パスワードを設定・保管せず、注文系コードと宛先をビルドに含めない方針とする。
 
+### 2026-08-27: 独立Cloudflare Worker PoC
+
+上記方針を具体化し、[`poc/sbi-securities-worker`](../../poc/sbi-securities-worker/) にWorkers専用の独立実装を追加した。Mnieをruntime dependency、submodule、設定源として再利用せず、必要なpasskey署名、SBI固有のRSA token復号、国内MTS、外国株式REST／GraphQL、メインサイトSSOのread-only部分だけを移植した。公開接続先はKogane側へhardcodeし、Mnieの「base URLを実行時変数にする」というrepo ruleは持ち込んでいない。
+
+このPoCでは、Cloudflare secretにSBI専用passkeyの最小6項目と、token復号用の固定RSA transport鍵だけを置き、ログインID／パスワード、取引パスワード、Bitwarden item全体は置かない。access token、SID、Cookie、MTS session header、口座番号をR2や通常ログへ保存せず、データartifactとredacted manifestだけをprivate R2へ保存する。D1は使わない。実Cloudflareで外国scopeは約7秒、国内scopeは約15秒で成功したが、両方を同じinvocationで実行するとError 1102になった。
+
+Queue分割も実測したが、Free planのconsumerおよびservice-binding先に適用されるCPU制限を認証・収集処理が超えた。RSA-4096鍵生成を実行時から外しても、外国scopeの通常requestで約0.94秒のCPU timeが観測され、公式のFree上限10msへ最適化だけで収めるのは現実的でない。`cpu_ms`引上げはWorkers Paid限定であり、WorkflowもFreeでは同じ10ms CPU枠を使う。月額課金を開始しない現在は、GitHub Actionsが毎日06:00 JSTに国内・外国の成功済み個別HTTP endpointを順番に呼ぶ。GitHubへ置くのは管理用Bearer tokenだけで、passkeyと金融データはCloudflareから出さない。Paidへ移行する場合は、Cloudflare Cron + Queue（batch 1、concurrency 1、CPU 30秒以上）へ置換できる。
+
+初期バックフィルとして、2024-08-28〜2026-05-29を重複のない90日以下の8区間へ分割し、国内8/8、外国8/8の全runが成功、failure 0でprivate R2へ保存された。直近2026-05-30〜2026-08-27も国内・外国それぞれ成功している。これにより現時点で約2年の国内・米国株取引履歴と、各run時点の国内／米国株保有、円／USD預り金、My資産、円貨入出金明細のraw snapshotがR2にある。
+
 ## 評価尺度
 
 自動化レベルは次のように定義する。
@@ -137,19 +147,19 @@ PCサイトとスマートフォンサイトのMy資産は公式上同じ対象�
 
 ただし実装上の注意がある。
 
-- 同一RP IDに複数credentialがある場合は明示選択が必要で、曖昧な選択は拒否する。credential IDはローカル設定に閉じ、cloud、repo、通常ログへ送らない。
+- 同一RP IDに複数credentialがある場合は明示選択が必要で、曖昧な選択は拒否する。credential IDと秘密鍵はSBI専用のCloudflare secret以外へ出さず、repo、GitHub Actions、R2、通常ログへ送らない。
 - `userVerification` optionはauthenticator dataのUV flagを設定するが、OSやBitwarden UIによる生体認証・利用者確認を実行するものではない。実口座ではこのassertionを1回受理したが、サーバー側がUVの実体をどう評価するか、連続利用や認証変更後も通るかは未確認である。
 - counterは保存値が正なら既定で1増やして署名するが、更新値をvaultへ書き戻さない。連続ログインで同じ値になる可能性、保存値が0の場合の挙動、SBI証券側の判定を確認する必要がある。実値は記録しない。
 - 現行のdefault `data.json` pathはmacOS向けである。WSL PoCはBitwarden CLI 2026.8.0を使うことで、このpathとvault形式への直接依存を回避した。
 - 合成credential testに加え、SBI証券の実credentialでpasskey callback、access token復号、MTS session、国内現物保有取得まで確認した。注文、端末登録、取引passwordは呼んでいない。
 
-`createBitwardenAuthManager().credentials()` はusername／passwordに加え、FIDO2秘密鍵をprivate JWKとして含む `portableCredential` を返せる。この汎用export経路はKoganeでは使用禁止とする。使うのは狭いassertion provider、またはそれを内包するSBI証券専用ローカルissuerだけであり、vault全体、master password、derived key、秘密鍵JWKをcloudへ置かない。
+`createBitwardenAuthManager().credentials()` はusername／passwordに加え、FIDO2秘密鍵をprivate JWKとして含む `portableCredential` を返せる。この汎用export経路はKoganeでは使用禁止とする。Workerへ同期するのは、Bitwarden CLIが復号したitemから抽出したSBI証券用passkeyの最小項目だけであり、vault全体、master password、derived key、ログインpasswordはcloudへ置かない。
 
 `azuki774/myscrapers` は、保存済みpasskey private keyをChromiumの仮想WebAuthn authenticatorへ復元し、Playwrightで公式ログイン画面を通す。利用者操作なしでログインする実例ではあるが、passkey秘密鍵をサーバーへ持ち出す設計になるため、Koganeでは通常のパスワード以上に強い秘密として扱う必要がある。
 
-現時点の第一候補は、Bitwardenに保存済みの既存passkeyを利用者端末内で使う方式である。PoCでは利用者の明示許可によりSBI専用の最小credentialをWSLへ平文保存したが、cloud、container image、repo、CI artifactへは出さない。新しいサーバー用passkeyの登録や既存秘密鍵のcloud exportは前提にしない。credential ID、private key、user handle、session ID、cookie、口座番号、金融データを通常ログ、repo、PRへ記録しない。
+現時点の採用PoCは、Bitwardenに保存済みの既存passkeyからSBI専用の最小credentialをWSLへ抽出し、Cloudflare encrypted secretへ同期する方式である。container image、repo、GitHub Actions、CI artifactへは出さない。credential ID、private key、user handle、session ID、cookie、口座番号、金融データを通常ログ、repo、PRへ記録しない。passkeyをcloudへ複製しない構成が必要になった場合は、次節のローカルissuerへ戻す。
 
-### ローカルissuerとsource-scoped envelope
+### 安全性を優先する代替: ローカルissuerとsource-scoped envelope
 
 最も安全な構成は、スケジューラが利用者端末上のローカルagentへ収集要求を渡し、agentがBitwardenの復号、WebAuthn署名、SBI証券ログイン、read-only取得までを同じtrust boundary内で完結し、cloudへは暗号化した公式raw evidenceまたは正規化済み結果だけを送る方式である。この場合、vaultとSBI sessionはcloudへ出ない。
 
@@ -162,7 +172,7 @@ PCサイトとスマートフォンサイトのMy資産は公式上同じ対象�
 5. cloud schedulerからローカルagentへの常時公開inboundを避け、agentが署名済みの短寿命jobをpullする。rate limit、単一実行、再利用拒否を設ける。
 6. audit logには成功／失敗、source、時刻、失敗分類だけを残し、credential ID、user handle、challenge、assertion、cookie、金融データを残さない。
 
-cloud側にassertionやsession cookieを渡す方式はfallbackにも推奨しない。Cloudflare Workers／Containers／OCI k8sはスケジュール、暗号化保管、正規化処理には使えるが、Bitwarden vault／derived keyの置き場所にはしない。
+この代替ではcloud側にassertionやsession cookieを渡さない。現在のWorker PoCは運用簡素化を優先してSBI専用passkeyの最小秘密だけをCloudflare secretへ置くが、Bitwarden vault／master password／derived keyは置かない。
 
 ## WAF・anti-bot・配信基盤
 
@@ -289,14 +299,14 @@ KoganeのSBI証券collectorは、次の条件をすべて満たすまで実装�
 | OCI Tokyo等のk8s CronJob／小型VM | 中～高 | 日本国内固定IP、Chromiumまたは直接HTTP、時刻制御が容易。ただしvaultを配置せず、ローカルagentから暗号化済み結果を受けるscheduler／processorに限定する |
 | 一般OCI container | 中 | `mnie`型HTTP clientも`myscrapers`型Playwrightも動かせるが、Bitwarden秘密を置かない。ローカルagentからsessionを渡す構成も原則避ける |
 | Cloudflare Containers | 低～中 | Linux imageとoutbound制御が使えるが、固定的な日本egressと永続性を実機確認する必要がある。vault／derived key／passkeyを置かない |
-| Cloudflare Workers | 低～中 | scheduler、署名済みjob、結果取込には使える。Playwright不可で、`mnie`の`child_process` fallbackも実行できない。Web Crypto移植以前に、認証をローカルへ閉じる |
+| Cloudflare Workers | 中～高 | 独立HTTP実装、encrypted secret、private R2で国内・外国とも実口座取得に成功。Freeの10ms CPU枠を大幅に超えるため通常requestの猶予に依存し、安定運用はPaidが望ましい |
 | Cloudflare Browser Rendering | 低～中 | CDP endpointはあるが、仮想WebAuthn credentialの利用可否と永続的な秘密管理を未確認。最初の実装先にはしない |
 
-Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_process`は非機能stubである。仮に `mnie` の暗号処理をWeb Cryptoへ移植できても、vaultをcloudへ置く構成は採用しない。まず利用者端末上のローカルagentでブラウザ方式／HTTP方式を検証し、安定後にWorkers／Containersをscheduler・結果処理層として比較する。
+Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_process`は非機能stubである。このためMnieをそのまま使わず、RSA混合OAEPを含む必要部分を`node:crypto`だけで独立実装した。vault全体はcloudへ置かず、SBI専用passkey最小項目だけをencrypted secretへ置く。FreeのCPU制限はQueueやWorkflowでは解消しないため、現状の日次起動はGitHub Actions、安定したCloudflare内完結はWorkers Paidを前提にする。
 
 ## 推奨アーキテクチャ
 
-1. **認証・sessionはローカルに閉じる**: Bitwarden保存済みpasskeyはSBI証券専用ローカルissuerで使い、vault、derived key、assertion、cookieをcloudへ置かない。
+1. **SBI専用secretへ最小化**: Bitwarden保存済みpasskeyからRP ID、origin、credential ID、秘密鍵、user handle、counterだけをCloudflare secretへ同期する。vault、master password、derived key、ログイン／取引passwordは置かず、sessionは毎run作り直して永続化しない。
 2. **公式Webを主データ源**: My資産の現在評価、週次資産推移、実現損益、配当・分配金を取得。
 3. **公式WebのCSV／書面で補完**: 2年の取引・入出金CSV、5年の電子交付書面を初期バックフィルと監査証跡に利用。
 4. **株アプリ系read-only通信で補完**: 買付余力、国内保有詳細などWebの横断JSONにない項目だけ取得。
