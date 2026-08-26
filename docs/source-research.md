@@ -35,9 +35,9 @@ Cost is 1 (small wrapper) through 5 (device-bound or adversarial automation).
 | SBI VC Trade | P1 | VCTRADE web/app | [#23](https://github.com/risu729/kogane/pull/23) | E (C candidate) | 1 (replay: 4) | draft complete |
 | Mercari / Merpay / Mercoin | P1 | Mercari app/web | [#22](https://github.com/risu729/kogane/pull/22) | E | 1-2 (full automation: 5) | draft complete |
 | MyJCB card family | P2 | MyJCB web/app | [#24](https://github.com/risu729/kogane/pull/24) | C | 4 (manual export: 1) | draft complete |
-| MUFG card family | P2 | My Digital Connect | pending | — | — | queued |
-| Epos / Epos Visa Prepaid | P2 | EposNet/app | pending | — | — | queued |
-| JP BANK Card | P2 | JP BANK Card WEB | pending | — | — | queued |
+| MUFG card family | P2 | My Digital Connect | [#26](https://github.com/risu729/kogane/pull/26) | D (C candidate) | 4 (manual export: 1-2) | draft complete |
+| Epos / Epos Visa Prepaid | P2 | EposNet/app | [#25](https://github.com/risu729/kogane/pull/25) | E (C candidate) | 1-2 (analysis: 3-4) | draft complete |
+| JP BANK Card | P2 | JP BANK Card WEB | [#27](https://github.com/risu729/kogane/pull/27) | D (C candidate) | 4 (manual CSV: 1) | draft complete |
 | Rakuten Card / Point / Cash | P2 | e-NAVI / PointClub | pending | — | — | queued |
 | Amazon card / gift balance / points | P2 | Amazon account | pending | — | — | queued |
 | au PAY | P2 | au PAY app/web | pending | — | — | queued |
