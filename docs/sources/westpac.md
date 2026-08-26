@@ -2,20 +2,20 @@
 
 - 調査日: 2026-08-26 (Australia/Sydney)
 - 対象: **Westpac Australia (`Westpac` brand) のみ**
-- 調査方法: 公式公開 Web、公式ログイン画面、公式 app 配布リンク、Westpac の公開 CDR Product API、豪州政府 CDR サイト、Consumer Data Standards、公開 DNS/HTTP 応答を read-only で確認した。口座ログイン、consent、OTP 送信、取引、設定変更、個人向け帳票の取得は行っていない。
+- 調査方法: 公式公開 Web、公式ログイン画面とhash付きJavaScriptの整形・静的解析、未認証Chrome runtime metadata、公式 app/Play配布情報とDigital Asset Links、Westpac の公開 CDR Product API、豪州政府 CDR サイト、Consumer Data Standards、公開 DNS/HTTP 応答を read-only で確認した。口座ログイン、consent、OTP 送信、取引、設定変更、個人向け帳票の取得は行っていない。
 
 ## スコープと安全境界
 
 この文書は Westpac Australia 専用である。Westpac Group 内の別ブランド、別ブランド用 app / Online Banking / CDR endpoint を Westpac の実装として扱わない。公開 Product API の結果を利用する場合も `brand == "Westpac"` を検証し、別ブランドを取り込まない。
 
-口座番号、Customer ID、氏名、住所、残高、取引内容、account/transaction ID、cookie、access/refresh token、password、OTP、秘密鍵、証明書を取得・記録しない。支払、振込、PayID、card control、term deposit の更新・解約、loan/card/account の変更、CDR consent の作成・変更・取消は対象外である。
+口座番号、Customer ID、氏名、住所、残高、取引内容、account/transaction ID、cookie、access/refresh token、password、OTP、秘密鍵、証明書を取得・記録しない。支払、振込、PayID、card control、term deposit の更新・解約、loan/card/account の変更、CDR consent の作成・変更・取消は対象外である。公開 JavaScript/APK の静的解析と、本人が通常操作する際の method/host/path/status/content-type/schema key 等の read-only metadata 観測は調査対象であるが、security control の回避は行わない。
 
 ## 結論
 
 1. **現時点の安全な既定路線は手動 export (E / Cost 1)**。Online Banking は最大 3 年の transaction history を CSV / QBO / QIF / OFX に export でき、eligible statement は最大 7 年の PDF を取得できる。自動 collector は、利用者がローカルに保存したファイルだけを ingest するのが安全である。
 2. **顧客データの公式 machine-to-machine 経路は CDR (A / Cost 5)**。ただし personal script が Customer ID/password で直接利用する API ではない。ADR accreditation、Register onboarding、conformance testing、PKI/mTLS、OAuth/OIDC consent flow が必要で、制度面が最大の障壁である。
 3. **公開 Product API は A / Cost 1** で Workers に向くが、得られるのは商品参照情報だけで、口座、残高、取引は得られない。
-4. 認証済み Web/app の private transport は未確認であり、安定 API や再利用可能 session を仮定できない。Akamai 配下のログイン、条件付き Security Code、app notification/端末内 biometric があるため、private replay や browser automation は本番経路にしない。
+4. **private transport の調査を CDR/export の存在を理由に先送りしない**。今回、現行の公開 login JavaScript と未認証 runtime から EAM bootstrap、匿名 session、認証 POST、anti-forgery/device telemetry、pending/posted UI model までは確認した。認証後の account/transaction route と JSON schema は未確認なので B とはせず、次の本人操作 read-only 観測へ明確に分離する。
 
 ## 1. product / account 列挙と balance / transaction 状態
 
@@ -92,7 +92,7 @@ OFX/QIF は user-directed file export であり、Westpac が personal OFX Direc
 
 ## 4. CDN / WAF / Akamai / anti-bot
 
-2026-08-26 に未認証の DNS と HTTP headers だけを read-only で観測した。
+2026-08-26 に未認証の DNS、HTTP headers、公開 login HTML/JavaScript と runtime の request metadata を read-only で観測した。login submit、credential入力、OTP送信は行っていない。
 
 | host | 観測 | 判定限界 |
 | --- | --- | --- |
@@ -100,17 +100,31 @@ OFX/QIF は user-directed file export であり、Westpac が personal OFX Direc
 | `banking.westpac.com.au` | DNS canonical name は `*.akamaiedge.net`、response に `x-aka-grn`、login handler へ redirect | Akamai edge 利用は確認。Akamai WAF/Bot Manager の具体構成は未確認 |
 | `digital-api.westpac.com.au` | CloudFront、Amazon API Gateway headers。root は 403 `MissingAuthenticationToken`; product route は GET 成功 | API front door を確認。WAF 製品は不明 |
 
-CDN が Akamai であることだけから WAF/anti-bot を断定しない。未認証 login HTML では CAPTCHA を確認していないが、adaptive challenge/rate limit/bot detection がないことを意味しない。challenge、403/429、CAPTCHA、異常 redirect、lockout warning が現れたら replay/automation を停止し、bypass を試みない。
+公開 login は `https://banking.westpac.com.au/wbc/banking/handler?TAM_OP=login` に着地し、IBM Security Verify Access/WebSEAL 系の `TAM_OP` と `PD-S-SESSION-ID` (`Secure; HttpOnly`)、load-balancer cookie を使う。ページは AppDynamics beacon、BioCatch facade (`wup-2ffe60ee.westpac.com.au/client/v3.1/web/wup`, `log-2ffe60ee.westpac.com.au/api/v1/sendLogs`)、browser/device fingerprint code をロードする。BioCatch facade は `setCustomerSessionId`, `changeContext`, `flush` と Native bridge を公開しており、単純な credential POST だけでは session/device context を再現できない。
+
+CDN が Akamai であることだけから WAF/Bot Manager を断定しない。未認証画面で CAPTCHA は観測しなかったが、BioCatch と device fingerprint の存在は明確であり、adaptive challenge/rate limit がない証拠ではない。challenge、403/429、CAPTCHA、異常 redirect、lockout warning が現れたら観測を停止し、bypass を試みない。
 
 ## 5. 公式 app / Web の役割
 
 - 公式 app は Android package `org.westpac.bank`、iOS app id `299111811` と公式 Web から案内される。[Westpac App](https://www.westpac.com.au/personal-banking/online-banking/mobile-app/) / [Google Play](https://play.google.com/store/apps/details?id=org.westpac.bank) / [Apple App Store](https://apps.apple.com/au/app/westpac/id299111811)
+- Google Play 公開ページは developer `Westpac Banking Corporation`、更新日 2026-08-19 を表示したが、現行 `versionName`/`versionCode` は未認証 HTML から取得できなかった。レビューに現れる version 文字列は配布最新版の証拠にしない。
+- `banking.westpac.com.au/.well-known/assetlinks.json` は package `org.westpac.bank` と SHA-256 signing certificate fingerprint `C7:BB:40:3D:21:49:4E:70:2D:27:C1:18:4D:91:74:1E:2E:5B:50:A5:2E:7A:9A:B3:34:B4:1A:A3:D2:D7:65:D6` を `handle_all_urls` / `get_login_creds` の委任先として公開する。これは公式 domain と signer の一次資料だが、手元 APK 自体の同一性検証を代替しない。[Digital Asset Links](https://banking.westpac.com.au/.well-known/assetlinks.json)
 - Web と app は account balance、transaction history/search、statement、proof report、card/term deposit 管理を共有する。書込み機能が多いため、collector は read-only route だけを allowlist する。
 - desktop Web は CSV/QBO/QIF/OFX export の format/date/account 選択が明記され、手動取得 surface として最も明確。
 - app は Smart Search、biometric/passcode sign-in、Security Code notification、Digital Card、device-local features を持つ。app-only security enrolment や Digital Card は collector の対象外。
-- APK/IPA の取得、decompile、dynamic instrumentation、TLS interception は今回行っていない。公式 app store binary があることは、private transport が third-party に安定提供されることを意味しない。
+- 公開 `NativeJSInterface.min.js` は `/app/native/connect`, `/app/native/settings/signIn`, `/app/native/addressbook`, `/app/native/atmLocator` のほか payment/funds-transfer route も列挙する。これは app が native shell と Web surface を橋渡しする証拠であり、後二者を含む write route は呼ばない。
+- 既存workspaceに公式 Play split artifactがなく、接続済みAndroid/ADB環境もなかったため、Play が device/account に生成する split set を第三者 mirror なしに取得できなかった。このため manifest、split別DEX、埋込host/schema、network security config、pinning/integrity library は未確認である。取得不能を RE の非目標にはせず、下記の正規取得手順を次実験にする。
 
 ## 6. third-party client の具体的 transport / auth
+
+### First-party private Web transport（公開面で確認済み）
+
+- `GET /wbc/banking/handler?TAM_OP=login` が login HTML と匿名 session を発行する。
+- page load 後の `GET /eam/servlet/getEamInterfaceData` は `inputRestrictions`, `reference`, `operations`, `keymap` を返す。key names から、expiryを伴う `reference.token`/GUID、公開鍵map/algorithm、許可 operation と submit URI を bootstrap する構造を確認した。値は保存していない。
+- login form は `POST /eam/servlet/AuthenticateHttpServlet`。入力 model は `username`, `password`, `token`, `halgm`, `brand` を持つ。POST、失敗試行、OTP開始は行っていない。
+- hash付き current JS (`core` SHA-256 `0d78dd24f17888c09cfa8cbb6381cc4a4c1581382037ee969f88aa2265d2c2cf`) を Prettier で整形して調べると、`RequestVerificationToken`, `LtpaToken`, browser/device fingerprint、`/secure/banking/accounts/getsummarystartpage` がある。これらは bearer cookie replay だけの設計を支持しない。
+- transaction UI は posted detail の SSO parameter に `AccountGlobalId`, `TransactionPostedDate`, `TransactionPostedId` を使い、pending detail は別 event `lwc_pending_transaction_detail_settings` で扱う。共通 load-more widget は `state`, `pageSize`, current row offset, `newResults`, `totalRecordsCount`, `moreResultsAvailable` を model 化する。ただし、これを transaction JSON endpoint の pagination schema と断定しない。
+- 認証後の account/transaction host/path、HTTP method、JSON field、session renewal/expiry、pending-to-posted stable key は未確認。公開資産から確認できた UI model と、認証済み private API contract を分離する。
 
 ### Public Product API
 
@@ -126,7 +140,7 @@ CDN が Akamai であることだけから WAF/anti-bot を断定しない。未
 - Consumer authorisation: OAuth 2.0 / OIDC authorization-code based flow、PAR、PKCE (`S256`)、JARM/FAPI profile。Westpac 側では Customer Number + SMS OTP を用いる。
 - Resource scopes: accounts は `bank:accounts.basic:read`、balances/accounts details は対応 account scopes、transactions は `bank:transactions:read`。access/refresh tokens、account IDs は secrets/PII として保存範囲を最小化する。[Consumer Data Standards](https://consumerdatastandardsaustralia.github.io/standards/)
 
-公開 GitHub 検索では Westpac product catalogs/demo は確認できたが、Westpac personal Online Banking の current private transport/auth を安全に再現する maintained third-party client は確認できなかった。したがって Customer ID/password の scripted POST、cookie replay、app API の推測 endpoint を設計根拠にしない。
+公開 GitHub 検索では Westpac product catalogs/demo は確認できたが、Westpac personal Online Banking の current private transport/auth を安全に再現する maintained third-party client は確認できなかった。この不在は reverse engineering を止める理由ではないが、Customer ID/password の scripted POST や cookie replay を動作確認済みclientとして扱わない。
 
 ### File import
 
@@ -135,6 +149,8 @@ CDN が Akamai であることだけから WAF/anti-bot を断定しない。未
 ## 7. CDR consumer access と accreditation
 
 Westpac は Data Holder かつ ADR と説明しているが、第三者 collector が Westpac customer data を取得するには、その collector 側の CDR participant status が別途必要である。[Westpac Open Banking](https://www.westpac.com.au/about-westpac/innovation/open-banking/)
+
+これは個人が Westpac Online Banking/App へ sign in する first-party access と別物である。first-party Customer ID/passwordやWeb sessionを CDR bearer tokenに交換する手段ではなく、CDR側の software product、redirect URI、PKI、consent/authorisation lifecycleを用意する必要がある。逆に、Westpac自身がADRであることも第三者personal scriptにaccreditationを継承させない。
 
 ACCC の現行案内によれば、ADR accreditation には少なくとも以下が必要である。
 
@@ -149,7 +165,9 @@ ACCC の現行案内によれば、ADR accreditation には少なくとも以下
 
 技術・運用面では consent dashboard/withdrawal、consent receipt、CDR policy、data minimisation、record keeping/reporting、security controls、PKI certificate arrangements、software product registration、CTS、production endpoints/CSR/register activation が必要になる。[IT requirements](https://www.cdr.gov.au/for-providers/it-requirements-data-recipients) / [Legal obligations](https://www.cdr.gov.au/for-providers/legal-obligations-data-recipients) / [Onboarding](https://www.cdr.gov.au/for-providers/on-boarding-for-data-recipients) / [Data recipient user journey](https://www.cdr.gov.au/for-providers/data-recipient-user-journey)
 
-したがって「自分自身のデータだけ」という理由で accreditation を省略できるとは読めない。ADR/sponsored arrangement 等を利用する場合も、契約、責任分界、data handling、Westpac support、ongoing obligation を別途確認する。未認定の personal script から customer CDR endpoint を直接呼ばない。
+費用は二層に分ける。政府の accreditation checklist は **accreditation application fee は現在ない** とする。また hosted sandbox と mock tooling は無料である。一方、第三者 assurance、security controls、insurance、AFCA/紛争処理、法務、production infrastructure、証明書/鍵運用、継続報告の実費は残り、政府資料は総額を提示しない。sponsor/CDR representative の commercial fee も契約依存で公開定価ではない。[Accreditation checklist](https://www.cdr.gov.au/sites/default/files/2024-12/CDR-accreditation-checklist-published-28-April-2023.pdf) / [Participant tooling](https://www.cdr.gov.au/for-providers/participant-tooling)
+
+したがって「自分自身のデータだけ」という理由で accreditation を省略できるとは読めない。sponsored accreditation は unrestricted sponsor との arrangement が必要で、affiliate は data holder から直接収集できない。CDR representative は unrestricted principal との契約と同principalの責任下で参加する。いずれも通常の個人口座sign-inとは異なる。[CDR accreditation guidelines](https://www.cdr.gov.au/sites/default/files/2025-08/CDR-accreditation-guidelines-version-6-published-26-August-2025.pdf) / [CDR representatives](https://www.cdr.gov.au/sites/default/files/2024-12/CDR-representatives-fact-sheet-published-20-December-2024.pdf)
 
 ## 8. Workers / Containers / OCI / Kubernetes 適性
 
@@ -180,21 +198,23 @@ CDRで Workers を採用できるという記述は **platform capability から
 | Public Product API | A | 1 | documented unauthenticated GET。ただし商品参照のみ |
 | user-exported CSV/QBO/QIF/OFX/PDF ingest | E | 1 | capture 自体は手動、parser は小さい wrapper |
 | accredited CDR | A | 5 | documented headless API だが accreditation/PKI/consent/compliance が必要 |
-| authenticated private API replay | C | 4 | bootstrap/replay の可能性だけ。stable read-only API/session は未確認 |
+| authenticated private API replay | C | 4 | EAM bootstrap、匿名session、secure start route、pending/posted UI model は確認。認証後 read route/schema/renewal は未確認 |
 | full Web automation | D | 4 | interactive login/MFA/Akamai、write controls との隣接 |
 | official app/device automation | D | 5 | biometric/passcode/push/device state、app-only enrolment、更新追従 |
 
-`B` を付けられる経路は現時点でない。private transport/session の live evidence がないためである。主要 recommendation は E/Cost 1 の手動 export ingest、制度投資が正当化できる組織だけ A/Cost 5 の CDR である。[kogane PR #5](https://github.com/risu729/kogane/pull/5)
+`B` を付けられる経路は現時点でない。公開面の private transport evidence は得たが、認証後 read API と renewable/reusable session の実証がないためである。主要 recommendation は E/Cost 1 の手動 export ingest、制度投資が正当化できる組織だけ A/Cost 5 の CDR である。ただし、この運用上の推奨は first-party transport RE の打切りを意味しない。CDRの存在は private Web/app 経路のlevel/cost評価を変えない。[kogane PR #5](https://github.com/risu729/kogane/pull/5)
 
 ## 10. read-only live verification plan / stop conditions
 
 ### 段階的 plan
 
-1. **公開面**: Product API の `GET`、version、pagination、Westpac brand/category だけを synthetic test で確認する。customer endpoint、consent、login を呼ばない。
-2. **manual export の UI確認**: 利用者自身が通常 browser/app で sign in し、agent は menu labels、date range、format choices だけを確認する。口座一覧、残高、取引 body、Customer ID、cookie を capture/log しない。
-3. **synthetic fixture**: Westpac の実データを使わず、公開形式の確認結果を基に手作りの架空 CSV/QIF/OFX fixture で parser を試す。PDF は layout/PII risk が高いため後回し。
-4. **local one-file dry run**: 利用者が明示的に export した 1 file を Git 外の一時領域で読み、件数・期間・重複/pending reconciliation の集計だけ確認する。raw row/value は保存・表示しない。
-5. **CDR**: ADR status、legal basis、Westpac registration/onboarding、certificate lifecycle が揃うまで実接続しない。揃った場合も test/sandbox、最小 scopes、短い consent、read endpoints だけから始める。
+1. **完了: 公開 Web static/runtime**: Product API に加え、login画面を未認証で1回ロードし、URL/hash付きJSを一時領域に取得、Prettier整形、route/token/device/pending/page modelを文字列とcall-siteで照合した。runtimeはmethod/host/path/status/content-typeだけを取得し、cookie/token/body値は出力・保存していない。
+2. **次: 公式 Play split の正規取得**: 利用者所有AndroidでPlayから `org.westpac.bank` を通常install後、隔離したローカル一時領域で `adb shell pm path org.westpac.bank` により全split pathを列挙し、各pathを `adb pull` する。同時に `adb shell dumpsys package org.westpac.bank` の `versionName`/`versionCode` だけを記録する。APKに利用者データは含まれないが、pull先はGit外とする。
+3. **次: APK provenance/static**: `apksigner verify --print-certs base.apk` を公式 assetlinks fingerprint と照合し、全splitのSHA-256を記録する。`apkanalyzer manifest print`/`apktool d` でmanifest、component、permission、deep link、`networkSecurityConfig`を確認し、`jadx --deobf` に全splitを同時入力する。host/path/schema候補、token storage/renewal、device binding、`CertificatePinner`/TrustManager/network config、Play Integrity/SafetyNet/App Check/root/emulator検知を検索する。見つからないことを「不存在」とせず、reflection/native libraryも別に確認する。
+4. **次: 本人操作 Web read-only metadata**: 利用者がcredential/OTPを自分で入力し、観測者へ値を見せない。Overview と transaction history の表示だけで、DevTools/CDPのrequest/responseから method、host、値を除いたpath template、status、content-type、JSON key/type、pagination key、session refresh event名を抽出する。headers、cookies、query値、request/response body値、account/transaction IDは即時破棄する。pending/postedは既存行が自然に存在する場合のみそれぞれのschema key/status/linkageを比較し、取引を作ってfixtureにしない。
+5. **次: 本人操作 app read-only metadata**: 通常端末で残高/履歴画面を開く間だけ、OS提供のNetwork InspectorまたはローカルVPN型metadata observerでDNS/SNI、method、host/path、status、content-typeを記録する。CA追加、pinning解除、root化、hookによるintegrity回避はしない。TLSでschemaが見えなければ、それ自体を観測障壁として記録し、static call-siteとの照合までで止める。
+6. **manual export**: 利用者自身が通常UIでformat/date rangeだけを確認し、架空fixtureでparserを作る。実fileのdry runが必要ならGit外で件数/期間/重複集計のみ行い、raw row/valueを保存・表示しない。
+7. **CDR**: ADR status、legal basis、Westpac registration/onboarding、certificate lifecycle が揃うまで実接続しない。揃った場合も無料sandbox/mock、最小 scopes、短い consent、read endpoints だけから始める。
 
 ### 即時停止条件
 
@@ -218,6 +238,10 @@ CDRで Workers を採用できるという記述は **platform capability から
 - normal login は Customer ID/password、Security Code が追加要求される場合がある。
 - app biometric/passcode は端末内保存。
 - public content は CloudFront、login host は Akamai edge、digital API は CloudFront/API Gateway を観測。
+- public login は EAM config GET と authentication POST を分離し、匿名session、bootstrap token/keymap、anti-forgery、device/BioCatch contextを持つ。
+- current public JS は posted detail identifierとpending専用UI event、およびstate/page-size/offset型load-more modelを別々に持つ。
+- official domainのassetlinksはAndroid packageとsigning certificate fingerprintを公開している。
+- CDR accreditation application fee は現在なく、sandbox/toolingも無料だが、assurance/insurance/compliance/infrastructure等の総費用は別途必要である。
 
 ### 推測
 
@@ -228,7 +252,8 @@ CDRで Workers を採用できるという記述は **platform capability から
 
 - authenticated account/product の実際の列挙、loan の表示範囲、closed/dormant account の扱い
 - CSV column schema/encoding/timezone、export row limit、pending の export 有無、stable transaction ID
-- Web/app private endpoint、session TTL/renewal、device binding/attestation/certificate pinning
+- 認証後Webのaccount/transaction host/path/schema、transaction固有pagination、session TTL/renewal、pending-to-posted stable key
+- official Play splitの現行version、APK signer実測、manifest、app API host/schema、device binding/attestation/certificate pinning/integrity実装
 - passkey/WebAuthn、Bitwarden 固有互換性
 - login/CDR host の具体的 WAF/Bot Manager policy と challenge trigger
 - app recent transaction download の format、bank feed provider/protocol
@@ -240,8 +265,15 @@ CDRで Workers を採用できるという記述は **platform capability から
 - [Online Banking Terms and Conditions](https://www.westpac.com.au/personal-banking/online-banking/support-faqs/terms-conditions/)
 - [Transaction history](https://www.westpac.com.au/personal-banking/online-banking/making-the-most/transaction-history/)
 - [Westpac App](https://www.westpac.com.au/personal-banking/online-banking/mobile-app/)
+- [Google Play: Westpac](https://play.google.com/store/apps/details?id=org.westpac.bank)
+- [Westpac Digital Asset Links](https://banking.westpac.com.au/.well-known/assetlinks.json)
+- [Westpac current public core JavaScript](https://banking.westpac.com.au/wbc/banking/scripts/desktop/core/0001combined.js.2c0b10581aa4d83fdd40ef304ba8c872d9491ae4.js)
+- [Westpac BioCatch facade](https://www.ui.westpac.com.au/cdnasset/biocatch/wp-fns-facade.min.js)
+- [Westpac NativeJS bridge](https://www.ui.westpac.com.au/cdnasset/nativebridge/NativeJSInterface.min.js)
 - [Security Devices](https://www.westpac.com.au/security/protect-yourself-and-your-business/security-devices/)
 - [Westpac Open Banking](https://www.westpac.com.au/about-westpac/innovation/open-banking/)
 - [Westpac Product API](https://www.westpac.com.au/about-westpac/innovation/open-banking/product-api/)
 - [Consumer Data Standards](https://consumerdatastandardsaustralia.github.io/standards/)
 - [Consumer Data Right provider guidance](https://www.cdr.gov.au/for-providers)
+- [CDR accreditation checklist](https://www.cdr.gov.au/sites/default/files/2024-12/CDR-accreditation-checklist-published-28-April-2023.pdf)
+- [CDR participant tooling](https://www.cdr.gov.au/for-providers/participant-tooling)
