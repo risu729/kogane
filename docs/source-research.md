@@ -40,11 +40,11 @@ Cost is 1 (small wrapper) through 5 (device-bound or adversarial automation).
 | JP BANK Card | P2 | JP BANK Card WEB | [#27](https://github.com/risu729/kogane/pull/27) | D (C candidate) | 4 (manual CSV: 1) | draft complete |
 | Rakuten Card / Point / Cash | P2 | e-NAVI / PointClub | [#29](https://github.com/risu729/kogane/pull/29) | E (C candidate) | 1-2 (replay: 4) | draft complete |
 | Amazon card / gift balance / points | P2 | Amazon account | [#28](https://github.com/risu729/kogane/pull/28) | C candidate | 4 (manual artifacts: 1-2) | draft complete |
-| au PAY | P2 | au PAY app/web | pending | — | — | queued |
+| au PAY | P2 | au PAY app/web | [#32](https://github.com/risu729/kogane/pull/32) | E (C candidate) | 1 (Web replay: 3) | draft complete |
 | J-Coin Pay | P2 | J-Coin Pay app | [#30](https://github.com/risu729/kogane/pull/30) | D (C candidate) | 4 (manual view: 1) | draft complete |
 | V Point / V Point Pay | P2 | V Point / Vpass / app | pending | — | — | queued |
-| ANA Pay / ANA Mileage Club | P2 | ANA app/web | pending | — | — | queued |
-| JAL Pay / JMB | P2 | JAL app/web | pending | — | — | queued |
+| ANA Pay / ANA Mileage Club | P2 | ANA app/web | [#31](https://github.com/risu729/kogane/pull/31) | C candidate | 4 (manual: 1-2) | draft complete |
+| JAL Pay / JMB | P2 | JAL app/web | [#33](https://github.com/risu729/kogane/pull/33) | D | 5 (manual: 1-2) | draft complete |
 | AirWallet | P2 | AirWallet app | pending | — | — | queued |
 | WESTER / J-WEST / wesmo! | P2 | JR West app/web | pending | — | — | queued |
 | Smart EX | P2 | Smart EX web/app | pending | — | — | queued |
