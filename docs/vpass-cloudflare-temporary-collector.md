@@ -66,11 +66,11 @@ bun run cf:deploy
 Inspect objects in the private R2 dashboard, or fetch a known manifest key with
 `npx wrangler r2 object get <bucket>/<key> --remote --pipe`.
 
-`POST /__collect?card=N` exists only for protected first-run/diagnostic
-collection and requires
+`POST /__collect-all` and `POST /__collect?card=N` exist only for protected
+first-run/diagnostic collection and require
 `Authorization: Bearer <ADMIN_TRIGGER_TOKEN>`.
 `GET /health` does not initiate a login. The scheduled handler is the ordinary
-execution path.
+execution path; the all-card endpoint is not an external scheduler.
 
 ## Live verification
 

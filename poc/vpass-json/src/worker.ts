@@ -582,7 +582,7 @@ export default {
     }
     if (
       request.method !== "POST" ||
-      url.pathname !== "/__collect"
+      (url.pathname !== "/__collect" && url.pathname !== "/__collect-all")
     ) {
       return new Response("Not found", { status: 404 });
     }
@@ -590,9 +590,12 @@ export default {
     if (request.headers.get("authorization") !== `Bearer ${expected}`) {
       return new Response("Unauthorized", { status: 401 });
     }
+    if (url.pathname === "/__collect-all") {
+      return Response.json(await collectAllCards(env, Date.now()));
+    }
     const requestedCard = Number(url.searchParams.get("card"));
-    if (!Number.isInteger(requestedCard) || requestedCard < 1 || requestedCard > 6) {
-      return Response.json({ error: "card must be an integer from 1 through 6" }, { status: 400 });
+    if (!Number.isInteger(requestedCard) || requestedCard < 1) {
+      return Response.json({ error: "card must be a positive integer" }, { status: 400 });
     }
     const summary = await collectOneCard(env, requestedCard - 1);
     return Response.json(summary);
