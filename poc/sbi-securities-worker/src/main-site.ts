@@ -705,25 +705,51 @@ function extractCsrfToken(html: string): string | undefined {
 }
 
 function htmlText(value: string): string {
-  return decodeHtml(
-    value
-      .replace(/<br\s*\/?\s*>/giu, " ")
-      .replace(/<[^>]+>/gu, ""),
-  )
+  return decodeHtml(textOutsideTags(value))
     .replace(/&nbsp;|&#160;/giu, " ")
     .replace(/\s+/gu, " ")
     .trim();
 }
 
+function textOutsideTags(value: string): string {
+  let output = "";
+  let inTag = false;
+  let quote: '"' | "'" | undefined;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (!inTag) {
+      if (character !== "<") {
+        output += character;
+        continue;
+      }
+      inTag = true;
+      if (/^<br(?:\s|\/|>)/iu.test(value.slice(index, index + 5))) {
+        output += " ";
+      }
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = undefined;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === ">") {
+      inTag = false;
+    }
+  }
+  return output;
+}
+
 function decodeHtml(value: string): string {
   return value
-    .replaceAll("&amp;", "&")
     .replaceAll("&quot;", '"')
     .replaceAll("&#34;", '"')
     .replaceAll("&#39;", "'")
     .replaceAll("&apos;", "'")
     .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">");
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
 }
 
 function decodeShiftJis(value: ArrayBuffer | Uint8Array): string {
