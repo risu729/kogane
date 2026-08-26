@@ -1,6 +1,6 @@
 # SMBC Trust Bank PRESTIA / GLOBAL PASS
 
-Research date: 2026-08-26
+Research date: 2026-08-27
 
 ## Scope and decision
 
@@ -10,36 +10,45 @@ SMBC Bank, Vpass credit cards, other banks, or personal-finance aggregators.
 The source is read-only: no transfer, foreign-exchange order, card control,
 limit change, or profile change is part of collection.
 
-**Decision:** start with PRESTIA Online in an established Kuebiko/Chrome
-profile. Collect balance pages, the official 180-day CSV exports, and new
-six-year statement PDFs. Treat the GLOBAL PASS member website as a second
-collector behind a separate validation gate. Prefer the member website over
-bank-account debits for card detail, because it exposes pending state,
-merchant and card-specific fields for 15 months. Do not use the bank's
-contracted aggregator API.
+**Decision after live validation:** split the implementation paths.
 
-The estimated implementation cost is **3/5 for PRESTIA bank balances and
-account activity**, and **4/5 when detailed GLOBAL PASS activity is included**.
-A browser implementation is plausible and has current third-party precedent,
-but the confirmed Akamai edge and the separate card site make unattended
-login the main risks.
+- For PRESTIA bank balances and account activity, stop treating password login
+  through PRESTIA Online as the first implementation. A single credential POST
+  from an otherwise normal Windows Chrome 153 session was denied by the Akamai
+  edge. Acquire and inspect the official Android package next, then decide
+  between its read-only transport and a persistent-browser fallback.
+- For GLOBAL PASS, keep the member website as the first collector. The same
+  capture session completed direct login without visible interaction and read
+  the month-by-month activity pages. The member website remains preferable to
+  bank-account debits because it exposes merchant, authorization, fee,
+  pending/confirmed, and family-card fields for 15 months.
+- A pure Cloudflare Worker HTTP client is an experiment, not the baseline.
+  GLOBAL PASS login includes a freshly generated Cloudflare Turnstile token
+  and Nablarch hidden state. Full Chrome is the only verified token-generation
+  path so far. Do not use the bank's contracted aggregator API.
+
+The revised estimated implementation cost is **4/5 for PRESTIA bank balances
+and account activity until the app transport is understood**, and **3/5 for
+detailed GLOBAL PASS activity with a browser runtime**. Browserless GLOBAL
+PASS collection is not yet rated as feasible.
 
 ## Research method and safety
 
 - Read the bank's current product, help, FAQ, terms, Google Play, and API
   partnership pages.
-- Probed only public, unauthenticated DNS and HTTP entry points. No credential,
-  account number, session cookie, personal identifier, or balance was used or
-  retained.
+- Performed one bounded PRESTIA credential POST and one bounded GLOBAL PASS
+  login in the dedicated Kuebiko capture profile. Secrets, cookies, account
+  identifiers, values, raw bodies, and screenshots remain outside Git.
 - Searched public GitHub code for current and older PRESTIA clients and
   inspected their data paths rather than assuming they used an API.
 - Used a prior read-only local observation only to establish that an existing
   browser session had once been reusable and later expired. No value or
   identifier from that observation is recorded here.
 
-This is a feasibility assessment, not a live authenticated capture. All
-session lifetimes, response formats, download URLs, and GLOBAL PASS behavior
-remain provisional until the bounded Kuebiko validation below is complete.
+This is a feasibility assessment with a live authenticated transport check.
+Session lifetimes, PRESTIA app transport, PRESTIA authenticated response
+formats, GLOBAL PASS pagination/transition identity, and portable unattended
+runtime behavior remain provisional.
 
 ## Official entry points
 
@@ -47,13 +56,43 @@ remain provisional until the bounded Kuebiko validation below is complete.
 | --- | --- | --- | --- |
 | PRESTIA Online (desktop) | [`login.smbctb.co.jp`](https://login.smbctb.co.jp/ib/portal/POSNIN1prestiatop.prst?LOCALE=ja_JP) | Balance summary, account details/activity, PDF statements, domestic-transfer acceptance history, overseas-remittance history | Only official channel that downloads account activity as CSV. |
 | PRESTIA Mobile (mobile web) | [`mlogin.smbctb.co.jp`](https://mlogin.smbctb.co.jp/ib/portal/POSNIN1prestiatop.prst?LOCALE=ja_JP) | Balances, activity and statements broadly matching Online | No account-activity download. |
-| SMBC Trust Bank app | [Official feature page](https://www.smbctb.co.jp/service/app/banking/), [Google Play](https://play.google.com/store/apps/details?id=jp.co.smbctb.prestia_app) | Balance summary, account details/activity, statements and the mobile banking menus | First sign-on needs Online ID/password; later biometric sign-on is device-oriented; no account-activity download. |
-| GLOBAL PASS member website | [`vpass.jp/globalpass/`](https://vpass.jp/globalpass/) via the bank's [official guide](https://www.smbctb.co.jp/product/globalpass/guide.html) | Visa debit shopping/overseas-ATM detail, pending status, limits and card controls | Separate member credentials; after initial linkage, the terms also permit SSO from signed-in PRESTIA Online. Collection must never visit write controls. |
+| SMBC Trust Bank app | [Official feature page](https://www.smbctb.co.jp/service/app/banking/), [Google Play](https://play.google.com/store/apps/details?id=jp.co.smbctb.prestia_app) | Bank-account balance, details/activity, statements and mobile banking menus | First sign-on needs Online ID/password; later biometric sign-on is device-oriented; no account-activity download. Official materials do not list full GLOBAL PASS Visa-card activity as an app function. |
+| GLOBAL PASS member website | Current official short entry [`http://vpass.jp/globalpass/`](http://vpass.jp/globalpass/) via the bank's [official guide](https://www.smbctb.co.jp/product/globalpass/guide.html); observed login host [`www.debit.vpass.ne.jp`](https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006) | Visa debit shopping/overseas-ATM detail, pending status, limits and card controls | Separate member credentials; login includes Turnstile and Nablarch form state. Collection must never visit write controls. |
 | Contracted account-information API | [Bank API policy](https://www.smbctb.co.jp/eaea/) | Account list, yen/FX/structured-deposit/fund balances, account activity, FX rates | Available to contracted electronic-payment intermediary operators, not published as a personal developer API. Current partners are listed on the bank's [contract page](https://www.smbctb.co.jp/dendai/detail.html). This path is intentionally excluded. |
 
 The bank documents that desktop, mobile web, and the app share most online
 banking menus, but explicitly excludes activity downloads from mobile web and
 the app. Desktop PRESTIA Online is therefore the canonical bank source.
+
+`vpass.jp/globalpass/` is not a deprecated or "old" entrance. As of the
+research date the bank's current guide still links to that HTTP vanity URL.
+In the live browser it opened the actual HTTPS login endpoint on
+`www.debit.vpass.ne.jp`. Treat the first URL as the official discovery entry
+and allowlist the resolved service host explicitly; do not assume that the
+vanity host itself serves the application.
+
+## Live transport validation: 2026-08-27
+
+The checks used the dedicated Kogane Capture profile on Windows Chrome Beta
+153. The network exited through Cloudflare WARP/Gateway in Sydney, Australia.
+The user's Zero Trust hostname routes had no rule matching either service, so
+the traffic did not use the home/TAMIA tunnel. Exact addresses, credentials,
+tokens, cookies, hidden values, and account data are intentionally omitted.
+
+| Check | Result | Consequence |
+| --- | --- | --- |
+| PRESTIA login page | Initial GET returned 200 | Public browser access alone does not establish accepted authentication. |
+| PRESTIA credential POST | The first and only POST returned Akamai/Edgesuite 403. The form was ordinary URL-encoded ID/password input; a Caulis fraud-detection script was also loaded. | Stop repeated web-password tests. Analyze the official app transport before investing in browser fingerprint tuning. |
+| GLOBAL PASS official entry | The bank's current `vpass.jp/globalpass/` link opened `www.debit.vpass.ne.jp` | Document both the stable official entry and the concrete service host. |
+| GLOBAL PASS direct login | GET and POST returned 200; no visible challenge or user gesture was required | Automated browser login is a viable PoC path on the Sydney WARP egress. |
+| GLOBAL PASS login state | The POST included `cf-turnstile-response`, `nablarch_hidden`, and standard Nablarch form fields | A plain HTTP rewrite must reproduce more than headers, cookies and TLS appearance. |
+| GLOBAL PASS activity | Authenticated read and month-selection POSTs returned 200; the selector exposed 15 months, from the current month through 14 prior months | Implement month-by-month server-rendered HTML ingestion; no JSON API or CSV export was observed. |
+
+The live activity page exposed transaction date/detail, transaction and funded
+currency amounts, transaction/ATM/FX fees, status, authorization number,
+remarks, local amount/fee, and applicable rate. It confirmed the documented
+retention window, but did not yet establish a stable pending-to-posted key or
+a reliable family-card identifier from sanitized transport metadata alone.
 
 ## Account enumeration and balance grain
 
@@ -176,6 +215,19 @@ source. It may help detect new activity, including family-card use, but the
 member site remains the canonical detailed record and the deposit ledger the
 canonical posted cash movement.
 
+The official banking app does **not** replace the GLOBAL PASS member website
+for this dataset. The bank describes the app as providing bank-account
+balances, account details/activity, statements, and online-banking functions.
+Its current FAQ separately assigns card-shopping and overseas-ATM detail
+(date/time, merchant and amount) to the GLOBAL PASS member website and assigns
+bank-account balances/activity to internet banking. Therefore the app can
+show the posted settlement-account debit as ordinary account activity, but no
+official source found in this pass says it shows the full card authorization
+record, pending state, authorization number, family-card attribution, or the
+15-month card-detail view. The app package may still reveal a useful PRESTIA
+banking transport; it should not be assumed to contain a second GLOBAL PASS
+activity API.
+
 ### GLOBAL PASS family cards: attribution and privacy
 
 The current [GLOBAL PASS terms](https://www.smbctb.co.jp/gp/terms/pdf/prestia_ja.pdf)
@@ -278,35 +330,67 @@ cards enroll separately.
 The current [member-site terms](https://www.smbctb.co.jp/gp/terms/pdf/prestia_ja.pdf)
 also describe an SSO route: after the member credentials are linked once from
 signed-in PRESTIA Online, later visits can enter the member service through
-the Online session while those credentials remain unchanged. This makes the
-SSO route the first GLOBAL PASS experiment. Direct login remains a fallback,
-not a reason to put card credentials in the bank collector.
+the Online session while those credentials remain unchanged. Direct member
+login is now the verified collector bootstrap; SSO is optional future work and
+must not couple the PRESTIA and GLOBAL PASS credential/session scopes.
 
 No public documentation found in this pass specifies member-site session
-lifetime or recurring-login OTP. A previous unauthenticated connection to
-`vpass.jp/globalpass/` timed out from this environment; this is not evidence
-that the service is generally unavailable.
+lifetime or recurring-login OTP. The current official short entry and direct
+service login both worked in the live browser validation.
 
 ## WAF and anti-bot assessment
 
-### Confirmed on 2026-08-26
+### Confirmed on 2026-08-27
 
 - `www`, `login`, `online`, `mlogin`, and `mobile.smbctb.co.jp` resolved via
-  `*.edgekey.net` to `*.akamaiedge.net`.
-- The public `www` response included `Akamai-GRN`.
-- Plain command-line GETs to the four online-banking entry hosts returned
-  HTTP 403 `Access Denied` pages referencing `errors.edgesuite.net`.
+  `*.edgekey.net` to `*.akamaiedge.net`, and the public `www` response included
+  `Akamai-GRN`.
+- Plain command-line GETs to the online-banking entry hosts returned HTTP 403
+  `Access Denied` pages referencing `errors.edgesuite.net`.
+- More importantly, a normal Windows Chrome 153 load returned 200 for the
+  PRESTIA login page but the first credential POST returned the same class of
+  Akamai/Edgesuite 403. The page also loaded a Caulis fraud-detection script.
 
 This confirms an Akamai delivery/protection edge in front of PRESTIA Online
-and that a naive HTTP client from the current environment is rejected. It does
-**not** prove which Akamai product/rule made the decision, that every cloud IP
-is rejected, or that Bot Manager is enabled. No bot-score or sensor endpoint
-was inspected.
+and shows that browser presence alone was insufficient in the tested session.
+It does **not** prove which Akamai product/rule made the decision, that every
+cloud IP is rejected, that Bot Manager is enabled, or that the denial was
+caused by IP, browser state, telemetry, credentials, or a combination. No
+rapid retry was performed.
 
-`vpass.jp` resolved directly to an IPv4 address in this probe and timed out.
-There is therefore no confirmed Akamai finding for the GLOBAL PASS member
-site. Its WAF, TLS client requirements, and availability must be measured from
-an accepted browser session.
+The GLOBAL PASS service behaved differently. Its current official short URL
+opened `www.debit.vpass.ne.jp`; direct login and activity requests succeeded.
+The captured origin traffic did not exhibit an Akamai denial. The login page
+loaded Cloudflare Turnstile from `challenges.cloudflare.com`, but the
+application origin was not observed behind Cloudflare's reverse proxy. This
+is consistent with Cloudflare's documented design: Turnstile can protect a
+site regardless of whether that site is proxied through Cloudflare.
+
+### Turnstile and a browserless Worker
+
+The successful GLOBAL PASS POST contained a fresh `cf-turnstile-response`.
+Cloudflare documents that the client-side widget runs in the visitor context,
+produces a token, and the protected service validates it with Siteverify.
+Production tokens expire after five minutes and are single-use. They cannot be
+stored for the daily job, replayed from a successful Chrome login, or replaced
+with Cloudflare's test token on a production site.
+
+No official Cloudflare documentation found here says that merely originating
+the request from a Worker or another Cloudflare-network address improves a
+visitor's trust score. Turnstile explicitly works for sites outside the
+Cloudflare proxy, and its analytics/risk model considers browser, operating
+system, user agent, IP, ASN, country, and client-side signals. A Worker egress
+therefore is not a documented substitute for executing the widget. It might
+produce a different risk decision in an empirical test, but any claim that it
+is inherently trusted would be speculation.
+
+A plain Worker remains worth a **bounded compatibility experiment** only if
+the login can legitimately obtain a fresh accepted token without a browser.
+The experiment must stop before credential submission if it cannot. Header,
+User-Agent, or TLS impersonation alone does not address Turnstile token
+generation or the Nablarch hidden state. The currently verified design is a
+real browser; Browser Rendering or a Container can host it, whereas an isolate
+`fetch()` implementation cannot execute the page widget by itself.
 
 ## Official Android app and APK value
 
@@ -364,11 +448,11 @@ rather than a stable public consumer API.
 
 | Runtime | Fit | Reason |
 | --- | --- | --- |
-| Local Windows Kuebiko / persistent Chrome | **Best for discovery and immediate collection** | Accepted interactive browser, download support, reusable profile, and complete request/response capture. |
-| OCI VM or Kubernetes pod with persistent browser profile | **Best first unattended PoC; medium confidence** | Full Chrome/Xvfb/Patchright and durable profile are straightforward; similar to the current public client. Akamai acceptance and login/session replay still need a controlled test. |
-| Cloudflare Container | **Plausible after OCI control; medium-low confidence** | Can run full Chrome and download artifacts, but persistent-profile handling, startup time and Akamai egress behavior need validation. Prefer importing an already accepted session before attempting password login. |
-| Cloudflare Worker isolate | **Not suitable for login; speculative for replay** | No full browser/download manager, and the public plain HTTP probe received Akamai 403. It becomes interesting only if Kuebiko proves a simple post-auth internal API that accepts an imported session. |
-| Android emulator/container | **Do not prioritize** | Adds Play distribution, device/biometric storage, possible integrity checks and instrumentation complexity while losing CSV download. |
+| Local Windows Kuebiko / persistent Chrome | **Verified for GLOBAL PASS discovery; rejected once for PRESTIA login** | GLOBAL PASS direct login and 15-month activity navigation succeeded. PRESTIA's first credential POST received Akamai 403. |
+| OCI VM or Kubernetes pod with persistent browser profile | **Best first unattended GLOBAL PASS PoC; medium-high confidence** | Full Chrome/Xvfb/Patchright and durable profile are straightforward; the remaining question is whether a fresh Linux/cloud browser earns an accepted Turnstile token. |
+| Cloudflare Browser Rendering / Container | **Plausible GLOBAL PASS serverless runtime; medium confidence** | Can execute the actual page/widget. A Container gives the most Chrome/runtime control; Browser Rendering may be simpler if its browser/profile lifetime and scheduled-job limits fit. |
+| Cloudflare Worker isolate | **Unproven for GLOBAL PASS login; unsuitable for PRESTIA login** | `fetch()` cannot itself execute the Turnstile browser widget, and PRESTIA rejected the tested browser credential POST. Use only for orchestration/storage or after a compliant browserless token and authenticated read flow are demonstrated. |
+| Official Android app analysis/runtime | **Next PRESTIA discovery path** | May expose read-only native endpoints or an app-specific WebView route that avoids the failing desktop entry. Device binding, biometrics, pinning/integrity, and Play distribution remain possible costs. |
 
 Keep `prestia-bank` and `prestia-globalpass` as separate collector identities,
 credential scopes, session generations, host allowlists and health checks.
@@ -380,12 +464,13 @@ other.
 
 | Capability | Cost (1-5) | Automation outlook | Main risk |
 | --- | ---: | --- | --- |
-| Monthly balances via PRESTIA Online HTML | 3 | Medium-high after accepted browser bootstrap | Akamai and selector drift |
-| 180-day account CSV collection | 2 | High after browser session exists | Per-account/currency selection, range row caps, browser downloads |
-| Six-year PDF statement backfill | 2 | High after browser session exists | Issue cadence/catalog and PDF parsing |
-| Domestic/overseas transfer histories | 3 | Medium-high | Pagination and overlapping representations |
-| GLOBAL PASS detailed activity | 4 | Medium, currently unproven | Separate site/session, SSO behavior, no found client/export, current timeout |
-| Official-app extraction | 5 | Low-medium | Device binding, biometrics, pinning/integrity, no CSV |
+| Monthly balances via PRESTIA Online HTML | 4 | Low until an accepted bootstrap exists | Akamai denied the first tested credential POST |
+| 180-day PRESTIA account CSV collection | 3 | High only after an accepted bank session exists | Bootstrap, per-account/currency selection, range row caps and downloads |
+| Six-year PRESTIA PDF statement backfill | 3 | High only after an accepted bank session exists | Bootstrap, issue cadence/catalog and PDF parsing |
+| Domestic/overseas PRESTIA transfer histories | 4 | Medium after bootstrap | Login, pagination and overlapping representations |
+| GLOBAL PASS detailed activity in Chrome | 3 | Medium-high; login and month navigation verified | Turnstile/browser runtime, HTML drift and pending-row identity |
+| Browserless GLOBAL PASS Worker | 4 / unproven | Unknown | Fresh accepted Turnstile token and Nablarch state |
+| Official-app PRESTIA extraction | 4 | Medium discovery value | Device binding, biometrics, pinning/integrity, no CSV |
 | Contracted API | 5 / not applicable | Technically high, operationally unavailable | Regulated intermediary contract and aggregator dependency |
 
 ## Next bounded validation
@@ -393,48 +478,31 @@ other.
 All steps are read-only. Do not enter a transfer, FX trade, time deposit,
 limit, card-control, registration, or settings screen except to leave it.
 
-1. Start a fresh Kuebiko run using the established dedicated PRESTIA Chrome
-   profile. Record browser/OS, egress region, time, and public-entry status.
-2. Sign in once through the official PRESTIA Online page. Record whether this
-   account's current sign-on policy asks for token OTP; do not change the
-   policy. Exclude authentication bodies, cookies, headers, identifiers, and
-   Akamai telemetry from normal evidence ingestion.
-3. Visit Home and Balance Summary. Record sanitized response classes, the
-   number and labels of balance groups, and whether data arrives as HTML,
-   XHR/fetch JSON, or both. Do not put values or account numbers in Git.
-4. For the 7-digit JPY account, the 8-digit MultiMoney JPY account, and one
-   displayed foreign currency, open Account Details/Activities for bounded
-   dates and download CSV. Record only encoding, header names, MIME type,
-   filename pattern, row-order semantics, pagination/cap behavior, and stable
-   transaction-key candidates.
-5. Open the statement catalog and download one recent and one older PDF.
-   Record catalog metadata, delivery URL class, `Content-Disposition`, issue
-   cadence and whether the bytes are stable across a repeat download.
-6. Open domestic-transfer acceptance and overseas-remittance histories without
-   selecting any write action. Record list/detail request shapes, pagination,
-   timestamps and identifiers.
-7. Enter GLOBAL PASS from inside PRESTIA Online first. Determine whether SSO
-   works for the existing enrollment, then capture the 15-month month selector,
-   pagination, pending/posted transition fields, family-card attribution and
-   response transport. With one already-posted family transaction, compare the
-   primary member-site row against PRESTIA Online activity, CSV and PDF using
-   sanitized field names only. Determine whether card/user filtering exists,
-   whether an opaque stable card ID is present, and whether pending-to-posted
-   rows keep a stable identifier. Do not visit limit or card-stop controls. If
-   SSO fails, stop and schedule one separate visible direct-login validation.
-8. Close and restart the browser, then test only an authenticated read health
-   check. Repeat at bounded intervals to measure idle/absolute lifetime and
-   whether profile restart preserves the session. Stop on login redirect,
-   `ERROR_401`, 401 or 403; never retry credentials rapidly.
-9. Only after the Windows/Kuebiko control is repeatable, import a freshly
-   accepted session into WSL/OCI Chrome and attempt the same read health check.
-   Test Cloudflare Container replay after OCI. Do not send ID/password to a
-   Worker or Container until password bootstrap independently passes more than
-   once.
-10. After web transport is understood, acquire the official installed Android
-    package from an owned device and perform static analysis only if it can
-    answer an unresolved host/model/pinning question. Do not build the first
-    collector around the app.
+1. Acquire the official installed Android split APKs from an owned device,
+   verify the package/signing identity, and record a reproducible extraction
+   and decompilation procedure. Map only hosts, WebView/native transport,
+   read-only response models, pinning, device binding, integrity, and biometric
+   dependencies before attempting authenticated replay.
+2. If the app reveals a plausible PRESTIA read-only route, test one balance
+   request locally. Otherwise keep PRESTIA Online browser automation as a
+   fallback but do not repeat credential submissions without a materially
+   different, evidence-based configuration.
+3. Implement a local GLOBAL PASS HTML parser around the verified direct login
+   and 15 month selector. Capture no write forms. Derive a stable normalized
+   key from documented fields and retain enough raw restricted evidence to
+   reconcile pending-to-posted transitions.
+4. Repeat GLOBAL PASS once in fresh local/OCI Chrome without importing the
+   Kuebiko profile. This distinguishes a generally accepted browser flow from
+   profile reputation. Then test Cloudflare Browser Rendering or a Container,
+   preserving the same bounded stop conditions.
+5. Separately test the public GLOBAL PASS page with a Worker `fetch()` client
+   and inspect form/state shape without sending credentials. Continue to a
+   credential POST only if there is a legitimate, freshly accepted Turnstile
+   token path; do not fabricate, replay, or bypass the token.
+6. Compare one posted GLOBAL PASS transaction against the PRESTIA app/account
+   ledger when that route works. Verify family attribution, pending-to-posted
+   identity, and whether the app shows only the cash debit or any complete
+   card-detail record.
 
 ## Open questions
 
@@ -448,7 +516,7 @@ limit, card-control, registration, or settings screen except to leave it.
 - Does the six-year statement catalog have a stable machine-readable index and
   stable PDF URLs/bytes?
 - Does PRESTIA Online SSO currently open GLOBAL PASS without another member
-  password, and is the resulting session scoped to `vpass.jp`?
+  password, and is the resulting session scoped to `www.debit.vpass.ne.jp`?
 - Does GLOBAL PASS offer any undocumented print/download artifact, or only
   month-by-month HTML?
 - Can the primary GLOBAL PASS view filter by family card or user, and does it
@@ -459,8 +527,11 @@ limit, card-control, registration, or settings screen except to leave it.
 - Does a family-card transaction's ANA mileage credit go to the primary or the
   family member's Mileage Club number, and is cashback attributable by card or
   only as a combined JPY deposit to the primary account?
-- Which WAF protects `vpass.jp`, and can an accepted GLOBAL PASS session be
-  replayed in OCI or Cloudflare without device re-authentication?
+- Can a fresh OCI or Cloudflare-hosted Chrome session obtain an accepted
+  GLOBAL PASS Turnstile token without importing the Kuebiko profile?
+- Is there any supported way to obtain a production GLOBAL PASS Turnstile
+  token in a Worker isolate, or must the scheduled collector always include a
+  browser runtime?
 - Does the current official Android app use WebView banking pages or separate
   native APIs, and are certificate pinning or integrity checks present?
 
@@ -468,6 +539,8 @@ limit, card-control, registration, or settings screen except to leave it.
 
 - [PRESTIA Online/Mobile](https://www.smbctb.co.jp/service/online/)
 - [Official banking channel comparison](https://www.smbctb.co.jp/service/welcome/channel.html)
+- [Official app feature page](https://www.smbctb.co.jp/service/app/banking/)
+- [GLOBAL PASS member website versus internet banking FAQ](https://faq.smbctb.co.jp/faq/show/1842?category_id=42&site_domain=smbctbjp)
 - [Balance Summary help](https://www.smbctb.co.jp/ib_help/ai/balance_summary.html)
 - [Account Details and Activities help](https://www.smbctb.co.jp/ib_help/ai/account_details_and_activities.html)
 - [CSV download help](https://www.smbctb.co.jp/ib_help/ai/download_account_activities.html)
@@ -483,5 +556,7 @@ limit, card-control, registration, or settings screen except to leave it.
 - [GLOBAL PASS introductory campaign](https://www.smbctb.co.jp/gpstart2/)
 - [GLOBAL PASS security and enrollment](https://www.smbctb.co.jp/service/security/gp/)
 - [GLOBAL PASS member-site terms](https://www.smbctb.co.jp/gp/terms/pdf/prestia_ja.pdf)
+- [Cloudflare Turnstile overview](https://developers.cloudflare.com/turnstile/get-started/)
+- [Cloudflare Turnstile server-side validation](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)
 - [Bank API policy](https://www.smbctb.co.jp/eaea/)
 - [Contracted API operators](https://www.smbctb.co.jp/dendai/detail.html)
