@@ -63,7 +63,7 @@ automation rating is treated as final.
 
 | Source PR | Audit finding | Required follow-up |
 | --- | --- | --- |
-| [#8 Mobile Suica](https://github.com/risu729/kogane/pull/8) | Detailed reverse engineering was incorrectly listed as a non-goal | Reconcile the existing decompilation artifacts and procedure with current JRE ID/app transports; identify read hosts, schemas, token renewal, integrity metadata, and Wallet boundary |
+| [#8 Mobile Suica](https://github.com/risu729/kogane/pull/8) | **Resolved:** 6.6.0 splits/DEX/.NET assemblies were inspected; SF history path/schema, token retry, `sfLog`, pinning, and Wallet boundary are now recorded | Compare against owner-device Play splits and observe one sanitized history call to resolve `sfLog`, token lifetime, and runtime integrity metadata |
 | [#13 MUFG Bank](https://github.com/risu729/kogane/pull/13) | Dynamic analysis was deferred because the Web route looked sufficient | Inspect the current Play-delivered app and compare app/Web read coverage and session issuance |
 | [#14 Mizuho Bank](https://github.com/risu729/kogane/pull/14) | Detailed app analysis was deferred | Resolve app transport, long-history local storage, point route, and device/session binding |
 | [#15 Japan Post Bank](https://github.com/risu729/kogane/pull/15) | Only an analysis plan was recorded | Execute the static inventory and identify the Direct/app read transport and FIDO boundary |
@@ -73,5 +73,5 @@ automation rating is treated as final.
 | [#20 Wise](https://github.com/risu729/kogane/pull/20) | Personal internal transport remains unknown | Trace current Web/app read requests, token/session renewal, and pending/posted models without assuming Business API equivalence |
 | [#21 St.George](https://github.com/risu729/kogane/pull/21) | Current Web clients exist, but app transport was left unknown | Extend the current Web implementation evidence and inspect the app read transport |
 | [#22 Mercari family](https://github.com/risu729/kogane/pull/22) | Financial app transports remain unknown | Analyze Mercari/Merpay/Mercoin packages separately and map common auth versus the three ledgers |
-| [#23 SBI VC Trade](https://github.com/risu729/kogane/pull/23) | APK decompilation/instrumentation was explicitly excluded | Perform a bounded app/Web transport study and update the C/D evidence |
-| [#24 MyJCB](https://github.com/risu729/kogane/pull/24) | Deobfuscation, runtime tracing, and traffic observation were rejected too broadly | Trace the protection JavaScript and current credit/debit read/export paths; keep write actions out of scope, not analysis |
+| [#23 SBI VC Trade](https://github.com/risu729/kogane/pull/23) | **Resolved:** public Nuxt source maps exposed the same-origin event gateway and read/write event split; APK analysis is now in scope | Pull owner-device Play splits and compare app transport/session metadata with the mapped Web events |
+| [#24 MyJCB](https://github.com/risu729/kogane/pull/24) | **Resolved:** protection JS, Okura session reuse, historical export candidates, deobfuscation, APK analysis, and runtime tracing are now in scope | Observe current credit/export/o-matome requests and inspect owner-device Play splits for issuer feature flags and app transport |
