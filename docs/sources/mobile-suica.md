@@ -4,7 +4,8 @@ Status: first-pass research, 2026-08-26
 
 Scope: consumer-owned Mobile Suica SF data and the directly related JRE ID / JRE POINT data paths
 
-Non-goals: charging, ticket purchase, card/account changes, migration to JRE ID, or detailed reverse engineering
+Non-goals: charging, ticket purchase, card/account changes, migration to JRE ID,
+security-control bypass, or retention of secrets, PII, and real account values
 
 ## Decision
 
@@ -56,8 +57,13 @@ without repeating WebAuthn and Fraud Defense on every collection.
 - Other public implementation references listed below.
 - JR East and Google documentation for Mobile Suica in Google Wallet, Google
   Wallet Takeout, and Google Wallet developer APIs.
-- Official Google Play listings. No APK was downloaded or decompiled, no vault
-  was opened, and no signed-in account page was opened.
+- Official Google Play listings, a separately obtained Mobile Suica 6.6.0 XAPK,
+  its split signatures, ordinary DEX files, native .NET Android assembly store,
+  and selected first-party managed assemblies. The package and extracted files
+  stayed under `/tmp` and were not committed or redistributed.
+- Public, unauthenticated JavaScript from `www.mobilesuica.com`; the JRE ID
+  redirect target was also requested without credentials and returned an
+  Akamai access-denied response from this WSL network.
 
 Account-specific facts in this update were supplied by the account owner: the
 current Mobile Suica login is JRE ID, a passkey is used and stored in Bitwarden,
@@ -319,8 +325,8 @@ still needs a live read-only check after JRE ID migration.
 
 The important open question is whether an already authenticated JRE POINT
 session can replay the history request from a non-browser runtime without
-re-running Fraud Defense. That test, not a full API reverse engineering effort,
-is the next decision gate.
+re-running Fraud Defense. Static and read-only dynamic transport analysis are
+appropriate next steps when the official UI does not answer that question.
 
 ## WAF / anti-bot observations
 
@@ -340,11 +346,14 @@ Separate facts from attribution:
   user agent reached the CAPTCHA form. Responses set `ASP.NET_SessionId` and an
   opaque `TS...` cookie. The current `mnie` fetch flow is corroborating evidence
   that full browser execution is not inherently required for this legacy path.
+- **JRE ID redirect target:** `https://id.jreast.co.jp/` redirected to
+  `https://www.jreast.co.jp/jreid/`; the latter returned HTTP 403 with
+  `server: AkamaiGHost` and an `edgesuite.net` reference from this WSL network.
+  This confirms Akamai on that public path, not that the authenticated API or
+  Mobile Suica app API uses the same edge policy.
 
 ### Not confirmed
 
-- No checked host exposed an Akamai hostname or an `AkamaiGHost` response in this
-  pass. Do **not** label the source "Akamai-protected" from the present evidence.
 - The vendor/function behind Mobile Suica's opaque `TS...` cookie was not
   established. It may be security or traffic-management state; vendor
   attribution would be speculation.
@@ -352,10 +361,12 @@ Separate facts from attribution:
   cookies, or another policy. It must be reproduced from the user's normal
   browser and then from the intended OCI/Cloudflare egress before assigning a
   specific cause.
-- App API protection, certificate pinning, Play Integrity, and device-attestation
-  requirements were not checked.
+- The inspected app configuration explicitly enables public-key pinning. No
+  direct Play Integrity or SafetyNet binding was found in the manifest or
+  selected managed assemblies, but absence from this static search does not
+  prove that runtime attestation is absent.
 
-## Android packages and value of static analysis
+## Android package reverse-engineering follow-up
 
 Official Google Play packages exist:
 
@@ -367,30 +378,124 @@ Official Google Play packages exist:
   [`com.google.android.apps.walletnfcrel`](https://play.google.com/store/apps/details?id=com.google.android.apps.walletnfcrel)
 
 JR East links to Google Play from its own service pages. No official standalone
-APK download was found; Google Play is the public official delivery route. A
-read-only static analysis should obtain the Play-delivered split APKs from an
-owned compatible device (or another authorized Play retrieval flow) and must not
-commit or redistribute them.
+APK download was found; Google Play remains the official public delivery route.
+The workspace, local private repositories, GitHub repositories/branches/gists,
+Downloads, Documents, Desktop and prior temporary trees were searched for the
+previously mentioned Mobile Suica decompile, but no preserved APK, extracted
+tree, hash manifest or reproduction note was found. A private Vpass decompile
+was present but is unrelated and was not treated as Mobile Suica evidence.
 
-Static analysis is worthwhile, but second priority:
+### Reproduction and package facts
 
-- useful targets: API hostnames, path names, request schemas, JRE ID redirect
-  parameters, certificate pinning, Play Integrity/attestation calls, and whether
-  point-history responses are shared by Web and app;
-- for Google Wallet, useful targets are exported components, content providers,
-  backup rules, history-view data flow and delegation to Google Play services or
-  Mobile FeliCa. Expect obfuscation and split-package boundaries; do not assume
-  an endpoint found in the APK is a supported consumer export API;
-- likely low-value target: emulating the whole Mobile Suica app in cloud. Android
-  Mobile Suica is coupled to a supported phone, Osaifu-Keitai/Mobile FeliCa and
-  device login state. Even if network endpoints are discovered, running the app
-  in a generic Kubernetes or Cloudflare environment is unlikely to be the cheap
-  collector path;
-- JRE POINT app analysis may be more useful because its rewards data is
-  server-side and the app can be reinstalled and logged into on a new phone, but
-  the Web route should be characterized first.
+The direct Google Play retrieval helper stopped at Google's Terms-of-Service
+acceptance boundary; no acceptance was automated. As a reproducible fallback,
+`apkeep -a com.mobilesuica.msb.android -d apk-pure <output-directory>` retrieved
+an [APKPure](https://apkpure.com/mobile-suica/com.mobilesuica.msb.android) XAPK.
+APKPure is a third-party redistribution source, so this proves the contents of
+that signed package, not byte identity with a package delivered to this
+account/device by Google Play. Re-run against an owned device as the provenance
+upgrade.
 
-No APK analysis is needed before the first website replay test.
+The XAPK identified package `com.mobilesuica.msb.android`, version name 6.6.0,
+version code 80, minimum SDK 23, and target/compile SDK 36. It contained base,
+`config.en`, `config.xxhdpi`, and `config.arm64_v8a` splits. `apksigner verify
+--verbose --print-certs` succeeded for every split with the same JR East signer
+subject (`Mobile Suica Group`, East Japan Railway Company), signer SHA-256
+`94d62e9e47ecf2a961e9b5a2f6761ca9085ae78d65e4e6f86b0513a6a5508f9b`, and a
+Google source stamp. These checks establish signer continuity and package
+structure; they do not make APKPure an official origin.
+
+The base APK contains two ordinary, extractable DEX files (`classes.dex` and
+`classes2.dex`); no DEX decryption step was required and no hidden/encrypted DEX
+was found. Most first-party logic is instead in the arm64 split's .NET Android
+assembly-store ELF, `libassemblies.arm64-v8a.blob.so`. The reproducible static
+pipeline is: unzip XAPK; verify every APK signature; inspect base and splits with
+`aapt2`; unzip DEX/assets; use the upstream
+[dotnet/android](https://github.com/dotnet/android) assembly-store format or
+[`pymauistore`](https://github.com/mwalkowski/pymauistore) to extract managed
+assemblies; and disassemble selected DLLs with `monodis` or ILSpy. Relevant
+assemblies include `MobileSuicaNGAPI.dll`,
+`Suica.Model.dll`, `Suica.ViewModel.dll`, `Suica.Droid.dll`,
+`MFCBindingLibrary.dll`, and `MFCCommonLibrary.dll`. Do not commit APK, DEX,
+native blobs, DLLs, IL, tokens, or account payloads.
+
+### Confirmed static transport and schema
+
+The packaged `assets/Property.json` names `https://ssl.mobilesuica.com/` as the
+app Web API base, `https://id.jreast.co.jp/` as the JRE ID base, and separate
+`rfd.mobilesuica.com`/`regist.mobilesuica.com` JSON resources. Configuration in
+an app build can be stale, test-oriented, or remotely overridden; dynamic
+capture is still required before treating these as live production contracts.
+
+The read-only SF-history method is an HTTP JSON `POST` to
+`/frna/iq/ir/getSuicaSfHistory` (API ID `NAIQIR01`, business type `00`). The
+request has a common header (`apiID`, `businessType`, `optimist`, `session`) and
+a card list whose static builder accepts `idm`, `cid`, and an `sfLog` array. The
+response has a common result header (`resultCode`, `messageID`, `message`,
+`optimist`) and a card list containing `IDm`, `Cid`, and `SfHistoryInfoList`.
+Each history item contains `Order`, `Valid`, `Message`, and a `Record` with
+`Date`, `Type1`, `Type2`, `Place1`, `Place2`, `Balance`, and `Amount`.
+
+No cursor, page, offset or limit field appears in this request/response model.
+The app's `StoredFareHistoryService` calls the Mobile FeliCa provider for card
+histories and passes `sfLog` into the request. The best current inference is
+that this endpoint validates or enriches device-read FeliCa log records rather
+than paginating a server-side account ledger. The exact `sfLog` encoding,
+maximum count, and whether the response adds server-only rows remain unconfirmed
+until a consented read-only runtime capture.
+
+Other statically confirmed read candidates are
+`/frna/iq/ci/getSuicaCardInfo`, `/frna/iq/ci/getJrePointAmount`,
+`/frna/ka/en/getJreidUserInfo`, and `/frna/va/sp/getAppStartUpInfo`. Authentication
+uses `User-Agent`, `X-Suica-Header`, `Accept-Language`, and
+`Authorization: Bearer ...` headers. The client stores access and refresh-token
+state, uses `/frna/ka/lg/getAccessToken` for renewal, and retries an authorized
+request once after HTTP 401. Static types show refresh-token input and a rotated
+authentication result, but exact live expiry units and renewal policy are not
+proven. Never log or persist token values during validation.
+
+The same client library contains charge, ticket purchase/refund, registration,
+update, delete and migration methods. Their presence is why a collector must use
+an explicit host+path allowlist and fail closed: only the five read candidates
+above may be explored, while every other `/frna/` path is rejected before any
+network call. Merely relying on HTTP method is insufficient because reads and
+writes both use POST.
+
+### Device, integrity and Google Wallet boundary
+
+The package declares Mobile FeliCa access and biometric capabilities, and the
+managed code has device-ID, encrypted local token and fingerprint-check provider
+types. Packaged build/default identifiers are fixture placeholders and are not
+evidence of a runtime device identity. `PublicKeyPinningEnabled` is `true` in
+configuration. No direct Play Integrity/SafetyNet symbol was found in this
+bounded static pass; a runtime handshake may still enforce device, app, key,
+FeliCa, TLS-client, or integrity state.
+
+The package includes the Xamarin Google Play Services Wallet binding, the deep
+link `suicaapp://startwallet`, and wallet-link status values for API and Wallet
+linkage. It also separately calls the Mobile FeliCa provider (`GetSFLog`,
+`GetAmount`, `GetIdm`, and `GetICCode`). This supports a launch/linkage boundary,
+not a claim that Mobile Suica can read Google Wallet's consumer transaction
+history through a Wallet API. Google Wallet remains a separate device-visible
+cross-check route.
+
+### Version boundary and public Web JavaScript
+
+The inspected 6.6.0 build contains JRE ID base configuration, JRE ID user-info
+types, and token/login paths, whereas `mnie` and the legacy PC form implement a
+Mobile Suica ID/password flow. A historical owner snapshot also pre-dated JRE ID
+migration, while the owner now confirms JRE ID/passkey use. These are distinct
+version/account-state boundaries; static 6.6.0 evidence must not be projected
+onto the legacy Web form or assumed to reproduce the current live JRE ID
+ceremony.
+
+Unauthenticated `www.mobilesuica.com` loaded only small legacy presentation
+scripts (`hf.js`, `main.js`, `Common.js`). They exposed no `fetch`, XHR, JRE ID,
+WebAuthn, OAuth, token, or `/frna/` transport. The JRE ID root redirected to the
+public JR East JRE ID page, which Akamai denied to this WSL client, so no JRE ID
+bundle or ceremony schema was obtained. This is an observation barrier, not a
+reason to bypass it: the next step is a visible browser capture on the owner's
+normal network, limited to non-secret request names and schemas.
 
 ## Third-party implementation review
 
@@ -537,11 +642,17 @@ longer-lived, lossy rewards path.
    try one read-only point-history replay from the same machine, then OCI. Stop
    if Fraud Defense requires repeated interactive/browser state; do not work
    around account locks or security challenges.
-9. **Only if Web replay/Takeout is insufficient, inspect APKs.** Extract the
-   official Mobile Suica/JRE POINT/Google Wallet packages from an owned device,
-   run static analysis locally, and document endpoints, exported components,
-   storage boundaries, pinning/attestation and shared Web/app APIs. Do not
-   redistribute packages or attempt to extract secure-element secrets.
+9. **Provenance and read-only app transport experiment.** Pull Mobile Suica 6.6.0
+   or the then-current version from an owned device with `adb shell pm path` and
+   `adb pull`, verify the JR East signer, and compare split names/hashes with the
+   third-party XAPK. On that same device, perform one already-intended history
+   refresh while recording only host, path, method, status, header names and
+   redacted JSON keys. First allow only `ssl.mobilesuica.com` plus the five
+   static read paths; abort before any unmatched path. If TLS pinning prevents
+   observation, record that barrier and stop rather than disabling or bypassing
+   the control. Determine whether `sfLog` is device input, its item count, and
+   whether 401 causes exactly one token renewal/retry. Never record IDm, Cid,
+   tokens, device identifiers, balances or transaction values.
 10. **Cloudflare last.** Test Cloudflare Container egress, then a minimal Worker
    replay with an explicit Shift_JIS decoder. Promote only a read-only,
    source-allowlisted client with byte-exact raw capture.
@@ -569,5 +680,10 @@ longer-lived, lossy rewards path.
   multiple rows grouped under a weekly posting in the current UI.
 - Whether the JRE POINT second password is re-requested for every new session,
   after a fixed timeout, or for every history visit.
-- App API pinning/attestation, Google Wallet/Mobile FeliCa storage boundaries,
-  and whether app history uses the same server endpoints as the Web site.
+- Whether pinning is enforced on the five read calls, whether any unobserved
+  integrity/device proof is attached, the exact `sfLog` encoding/count and
+  response relationship, and whether the current Google Play package is
+  byte-identical to the signed third-party XAPK inspected here.
+- Whether app history is solely device/FeliCa-derived plus server enrichment,
+  and whether any app endpoint shares transport or records with the PC member
+  website. Static path similarity is not sufficient evidence.
