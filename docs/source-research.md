@@ -38,10 +38,10 @@ Cost is 1 (small wrapper) through 5 (device-bound or adversarial automation).
 | MUFG card family | P2 | My Digital Connect | [#26](https://github.com/risu729/kogane/pull/26) | D (C candidate) | 4 (manual export: 1-2) | draft complete |
 | Epos / Epos Visa Prepaid | P2 | EposNet/app | [#25](https://github.com/risu729/kogane/pull/25) | E (C candidate) | 1-2 (analysis: 3-4) | draft complete |
 | JP BANK Card | P2 | JP BANK Card WEB | [#27](https://github.com/risu729/kogane/pull/27) | D (C candidate) | 4 (manual CSV: 1) | draft complete |
-| Rakuten Card / Point / Cash | P2 | e-NAVI / PointClub | pending | — | — | queued |
-| Amazon card / gift balance / points | P2 | Amazon account | pending | — | — | queued |
+| Rakuten Card / Point / Cash | P2 | e-NAVI / PointClub | [#29](https://github.com/risu729/kogane/pull/29) | E (C candidate) | 1-2 (replay: 4) | draft complete |
+| Amazon card / gift balance / points | P2 | Amazon account | [#28](https://github.com/risu729/kogane/pull/28) | C candidate | 4 (manual artifacts: 1-2) | draft complete |
 | au PAY | P2 | au PAY app/web | pending | — | — | queued |
-| J-Coin Pay | P2 | J-Coin Pay app | pending | — | — | queued |
+| J-Coin Pay | P2 | J-Coin Pay app | [#30](https://github.com/risu729/kogane/pull/30) | D (C candidate) | 4 (manual view: 1) | draft complete |
 | V Point / V Point Pay | P2 | V Point / Vpass / app | pending | — | — | queued |
 | ANA Pay / ANA Mileage Club | P2 | ANA app/web | pending | — | — | queued |
 | JAL Pay / JMB | P2 | JAL app/web | pending | — | — | queued |
