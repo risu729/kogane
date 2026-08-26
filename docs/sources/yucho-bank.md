@@ -28,8 +28,14 @@
   支配的であり、現時点では採用しない。
 - `www`、`direct`、`direct3` はDNS CNAMEが `edgekey.net` で、Akamai配信は確認できた。
   `direct`へのgeneric curlはtimeout/HTTP2 errorになった一方、検索crawlerと通常
-  browser向け公開ページは到達可能だった。ただし、この観測だけでAkamai Bot Manager
-  やWAF製品、bot score、headless遮断を確認したとはいえない。
+  browser向け公開ページは到達可能だった。通常Chromeで公開loginだけを観測すると、
+  Struts token/eventを持つHTML form、password/app別の`direct1`遷移、FIDO app link/return、
+  `directss`等へのsecurity telemetry POSTを確認できた。ただし、この観測だけでAkamai
+  Bot ManagerやWAF製品、bot score、headless遮断を確認したとはいえない。
+- 2026-08-26の公式Google Play掲載は、通帳アプリ`jp.japanpost.jp_bank.bankbookapp`
+  **21.0.0**（2026-04-10更新）、認証アプリ`jp.japanpost.jp_bank.FIDOapp` **18.0.0**
+  （2026-04-09更新）だった。正規install端末がなくAPK/split、versionCode、signerは未取得だが、
+  split取得、署名検証、deobfuscation、read-only runtime tracingの再現手順を具体化した。
 - 現在動作すると確認できた第三者clientは見つからなかった。`kkosuge/bank_job` は
   2014年のMechanizeによるHTML form/合言葉/表parse、`toc/pogact` はSeleniumによる
   旧画面操作である。`shinichy/get_statement` は2018年のSelenium downloaderだが、
@@ -64,7 +70,8 @@ browser collector 3/5、完全無人login 4/5、公式APIの技術実装 2/5・�
 1. ゆうちょ銀行の現行サービスページ、FAQ、操作ガイド、規定、API方針とGoogle Play
    の公式掲載を確認した。
 2. 2026-08-26に公開hostだけを未認証で調べ、DNS CNAME、HTTP応答、公式login手順を
-   確認した。login requestや架空の口座情報入力は行っていない。
+   確認した。通常Chromeでは公開login DOM、読み込まれたJavaScript、host/path/method/statusだけを
+   観測し、form submit、login request、架空の口座情報入力、request body保存は行っていない。
 3. GitHub Code Searchで現行/旧clientを探索し、commit時点のコードを読み、browser、
    CSV、HTML form、internal HTTPのどれを使っていたかを確認した。
 4. 公式情報で確認できない項目は第三者コードから現行仕様へ外挿せず、次の本人による
@@ -299,28 +306,164 @@ Koganeの理想形に近い。browser HTML change、CSV download、Akamai edge�
 - HTML formだけでなく認証後にJSON/internal APIを使うか、TLS/browser fingerprintを
   login判定に使うかは、認証後の受動captureが必要である。
 
+## 公開ゆうちょダイレクトWebのstatic inventory
+
+### login formと遷移transport
+
+2026-08-26に[公式login](https://direct.jp-bank.japanpost.jp/tp1web/U010101SCK.do)を通常Chromeで
+未認証表示し、値を読まずにDOM属性と公開JavaScriptだけを確認した。画面はserver-side HTML/Struts
+formを維持している。
+
+| 項目 | 公開画面での確認事実 |
+| --- | --- |
+| 初期document | `GET direct.jp-bank.japanpost.jp/tp1web/U010101SCK.do` |
+| form | `submitData`と`simpleTransitionForm`。いずれも初期actionは同じ`U010101SCK.do`、methodは`POST` |
+| state/CSRF候補 | hidden `org.apache.struts.taglib.html.TOKEN`と`event`。token値は取得・記録していない |
+| お客さま番号 | `okyakusamaBangou1`/`2`/`3`の3 input。value/autofill状態は読んでいない |
+| password login | button `U010103`が`event=U010103`を設定し、`POST https://direct1.jp-bank.japanpost.jp/tp1web/pc/U010901BLC.do`へform submit |
+| app login | button `U010107`が`event=U010107`を設定し、`POST https://direct1.jp-bank.japanpost.jp/tp1web/pc/U011101BLC.do`へform submit |
+| smartphone導線 | `event=U010105`で`https://direct1.jp-bank.japanpost.jp/tp1web/sp/U010101SCK.do`へ遷移 |
+| app deep link | 認証appは`fidoap.jp-bank.japanpost.jp/links/fido/...`、通帳appは同hostの`links/banking/...`。いずれも`redirect_uri=https://direct.jp-bank.japanpost.jp/tp1web/pc/U011401BLC.do`と`loginFuriwakeKubun=1`を渡す |
+
+同日の公開画面は「QRコード読み取りによるログインを一時的に停止」と表示し、password loginまたは
+スマートフォンからのDirect利用を案内していた。DOM/JavaScriptにapp login routeが残ることは、PCの
+QR loginが現在利用可能である証拠ではない。停止解除はlive検証時に公式画面で再確認する。
+
+公開`dcRequest(formName, url, names, values, alreadyClickControl)`は、指定hidden fieldへevent値を
+設定し、form actionを引数URLへ置換して`submit()`する。したがって`.do` pathや`POST`だけのallowlistは
+read/write隔離にならない。認証後は画面ID、event、exact button label、response画面を組にして、liveで
+確認したread操作だけをallowlistにする。
+
+`org.apache.struts.taglib.html.TOKEN`はCSRF/page-state候補だが、これだけからsession発行方式を断定しない。
+app flowは`U011401BLC.do`へ戻ることまで確認できたが、FIDO assertion、redirect後のsession cookie、
+password/OTP flowとのsession共通性は未確認である。Cookie、token、QR、FIDO `rawdata`は観測対象外とする。
+
+### 公開JavaScript、security/anti-fraud候補
+
+公開loginが実際にloadしたartifactを値なしでhash化した。hashは2026-08-26のsnapshotで、安定API契約を
+意味しない。
+
+| artifact | SHA-256 | static inventory |
+| --- | --- | --- |
+| `cache.../run.js?rv=26051` | `8b3c4673af6cfeb824b14914e9821799f7fbda3bde947ada63833ff2d1154b31` | FIDO app launch helper。`redirect_uri`と`loginFuriwakeKubun`を組み立てる |
+| `cache.../dgbaRequestControllerP02.js?rv=26051` | `4d889649c218bde85ab1af95f9779b5cad73578d0033b85027018f4b41c4d647` | 公開pageのrequest/UI controller |
+| `directcss.../HcFwEhqexk.js` | `3fca08de3ca3293ea490d557d7bae615f4a09916d36fce2bf06e2f157663f876` | `sendBeacon`/XHR、device/token/AES語を含むloader候補。役割/vendorは未確定 |
+| `directacct.../aes.js` | `fc7e184beeda61bf6427938a84560f52348976bb55e807b224eb53930e97ef6a` | 公開AES実装。どのfieldに適用するかは未確認 |
+| `directacct.../load.js` | `f8bf373263f5a240e0233345e28bc19c5c56119115d936197d3cc13b3fa8756d` | beacon/XHR、device/token/encrypt/decrypt候補 |
+| `directacct.../dl.js` | `8948fc815424bd77a7692f64b2b8e488295dff14ab2963798e22088a74fdec5b` | loader |
+| `directss.../ig.json` | `0d7c95ddd386ea08185249944e82fa26ee0965bdd13482b46e42baf09b2733c3` | `pwc_loadpljs`を呼ぶbootstrap script |
+| `directss.../js/r.js?ver=21&rev=826202611` | `aaa4679b3b76bfaf83374efe520289d2ccc1752a1c18f20855b9529c2d61cf95` | page ID、FIDO/token、screen/window、localStorage/cookie UUID、public-key encrypt、`dcRequest` hook、XHR/JSONP等のsymbolを持つobfuscated instrumentation候補 |
+
+公開page loadだけで、`/akam/13/198d305`のscript、同originの動的pathへのGET後POST、
+`directss.jp-bank.japanpost.jp/d`へのCORS preflight/POSTも発生した。body、header、Cookie、token、
+fingerprint値は取得せず、replayもしなかった。Akamai sensorおよび行動/不正検知telemetryの強い候補だが、
+各scriptのvendor/product、収集field、判定policyは確認事実から分離する。
+
+### 公開情報で確定できるread coverage
+
+公開loginで確定できたのは認証前のtransportだけである。残高、入出金、CSV、担保定額/定期については
+公式guideで画面機能を確認できるが、認証後のread endpoint、event、HTML/JSON schema、CSV生成requestは
+公開pageから取得できなかった。`U010901BLC.do`等はlogin遷移であり、残高/明細read endpointとして
+再利用しない。本人操作のread-only runtime観測で、値を落として次だけを追加inventoryする。
+
+- page title、form name、event/button label、method、host、path template、status、content-type
+- balance/statement/CSV/fixed-deposit画面がHTML navigation、XHR/JSON、downloadのどれか
+- session発行/refreshがpassword login、app login、登録済みbrowserでどう異なるか
+- 同一endpoint/event familyに送金、払込、定額/定期預入・払戻等のwriteが同居するか
+
 ## Android APKと静的解析
 
-公式Android packagesは次の通りである。
+### 公式package、version、provenance
 
-- 通帳アプリ: [`jp.japanpost.jp_bank.bankbookapp`](https://play.google.com/store/apps/details?id=jp.japanpost.jp_bank.bankbookapp)
-- 認証アプリ: [`jp.japanpost.jp_bank.FIDOapp`](https://play.google.com/store/apps/details?id=jp.japanpost.jp_bank.FIDOapp)
+2026-08-26に公式Google Play HTMLを直接確認した。
 
-銀行はApp StoreまたはGoogle Playからdownloadするよう明記しており、銀行siteから直接配布
-する公式APKは見つからなかった。第三者APK mirrorはprovenanceを保証できないため使わない。
-静的解析を行う場合は、Google Play由来artifactを取得し、packageとsigning certificateを
-検証してから行う。
+| app | package | version / Play更新日 | read/auth上の役割 |
+| --- | --- | --- | --- |
+| [ゆうちょ通帳アプリ](https://play.google.com/store/apps/details?id=jp.japanpost.jp_bank.bankbookapp) | `jp.japanpost.jp_bank.bankbookapp` | `21.0.0` / `2026-04-10` | 現在高、入出金、担保定額/定期、最大2口座。取引機能も同居 |
+| [ゆうちょ認証アプリ](https://play.google.com/store/apps/details?id=jp.japanpost.jp_bank.FIDOapp) | `jp.japanpost.jp_bank.FIDOapp` | `18.0.0` / `2026-04-09` | 金融dataは持たず、Direct login/取引時の端末FIDO認証 |
 
-細かい解析は後回しにするが、静的解析の有用性は**中**である。最初に調べる価値があるのは、
+銀行siteからのstandalone APK配布は確認できない。第三者mirrorはpackage/version表示だけでも正規splitや
+signer provenanceを保証しないため取得元にしない。この環境にはGoogle Playからinstall済みの管理Android、
+`adb`、`apksigner`、`bundletool`、`jadx`、`apktool`、`aapt2`、MobSFがなく、binaryは取得できなかった。
+DockerだけではPlay entitlement、端末固有split、signing provenanceを作れない。
 
-- manifest、deep link/app link、WebView境界、official host allowlist
-- network security config、certificate pinningの有無、FIDO/integrity SDK
-- local明細DB/cacheのschema・暗号化、Android機種変更で引き継げないdataの所在
-- 入出金/担保定額定期画面がnative、WebView、internal JSONのどれか
+Play HTMLが確認するのはpackage/versionName/更新日までである。versionCode、base/split構成、signer digest、
+APK hash、ABI/density/language split、rollout variantは正規artifact取得後に確定する。
 
-に限る。root/hook、pinning回避、生体情報・認証鍵・token抽出は行わない。server response
-schemaとsession issuanceは静的解析だけで確定できないので、通常端末のread-only black-box
-captureを先に行う。
+### 正規split APKの取得・署名確認手順
+
+ユーザー管理AndroidへGoogle Playから通常installした後、repository外の暗号化一時領域で実行する。
+
+```bash
+for PKG in jp.japanpost.jp_bank.bankbookapp jp.japanpost.jp_bank.FIDOapp; do
+  adb shell dumpsys package "$PKG" | rg 'versionName|versionCode|firstInstallTime|lastUpdateTime|signingInfo'
+  adb shell pm path "$PKG"
+  mkdir -p "artifact/$PKG"
+  while IFS= read -r LINE; do
+    REMOTE=${LINE#package:}
+    adb pull "$REMOTE" "artifact/$PKG/$(basename "$REMOTE")"
+  done < <(adb shell pm path "$PKG")
+done
+
+sha256sum artifact/jp.japanpost.jp_bank.bankbookapp/*.apk
+sha256sum artifact/jp.japanpost.jp_bank.FIDOapp/*.apk
+for APK in artifact/jp.japanpost.jp_bank.bankbookapp/*.apk artifact/jp.japanpost.jp_bank.FIDOapp/*.apk; do
+  apksigner verify --verbose --print-certs "$APK"
+done
+```
+
+同一packageのbase/splitでsigner digestが一致することを確認する。2つのappが同一signerとは仮定しない。
+package、versionName/versionCode、各split名/hash、signer certificate SHA-256、取得日時、Play install端末
+だけをprovenance recordへ残し、APK/decompiled codeはGitや第三者cloudへuploadしない。
+
+### manifest、host、schema、session/security inventory
+
+```bash
+jadx -d jadx-bankbook artifact/jp.japanpost.jp_bank.bankbookapp/*.apk
+jadx -d jadx-fido artifact/jp.japanpost.jp_bank.FIDOapp/*.apk
+apktool d -f artifact/jp.japanpost.jp_bank.bankbookapp/base.apk -o apktool-bankbook
+apktool d -f artifact/jp.japanpost.jp_bank.FIDOapp/base.apk -o apktool-fido
+aapt2 dump xmltree artifact/jp.japanpost.jp_bank.bankbookapp/base.apk AndroidManifest.xml
+aapt2 dump xmltree artifact/jp.japanpost.jp_bank.FIDOapp/base.apk AndroidManifest.xml
+rg -a -n 'https?://|wss://|jp-bank|direct[0-9]?|fidoap|redirect_uri|loginFuriwakeKubun|rawdata|okhttp|retrofit|webview|cookie|session|token|bearer|fido|webauthn|keystore|biometric|integrity|attestation|safetynet|certificate|pin' jadx-bankbook jadx-fido apktool-bankbook apktool-fido
+```
+
+static inventoryは次を分ける。
+
+- manifest: exported component、permission、intent filter、custom scheme/app link、対象Android/ABI、
+  backup/debuggable/profileable、network security config
+- app間連携: 認証app/通帳appのpackage check、`fidoap` deep link、`redirect_uri`、
+  `loginFuriwakeKubun`、FIDO `rawdata`の生成/受渡し境界
+- transport/schema: host/path定数、WebView/native、OkHttp/Retrofit等、request method、serializer/model、
+  balance/statement/fixed-deposit response field、CSV/download有無
+- session: server session発行/refresh、cookie/token storage、Android Keystore/EncryptedSharedPreferences、
+  app reinstall/機種変更時のinvalidation。秘密値は抽出しない
+- security: FIDO library/profile、biometric key use、Play Integrity/SafetyNet/attestation、root/debug/instrumentation
+  detection、signature self-check、certificate pinning候補。検出や判定は改変しない
+
+R8/ProGuard/string encryptionのdeobfuscation、URL builder/serializerのstatic data-flow追跡は対象である。
+ただしFIDO private key、生体template、account identifier、cookie/token、明細cacheの実値を抽出しない。
+server response schemaとsession issuanceはstaticだけで確定しない。
+
+### 本人操作のread-only runtime metadata観測
+
+1. 正規install済み・既存登録済み端末を使い、新規登録、再登録、取引時認証への切替はしない。
+2. 本人が通常操作で通帳appの現在高、入出金、既存担保定額/定期明細だけを開く。送金、払込、預入、
+   払戻、住所/電話、限度額、Direct+切替へ遷移しない。
+3. DNS/SNI、host、method、path template、status、content-type、field名だけを記録し、body値、header値、
+   Cookie、token、FIDO assertion/QR/rawdata、account/残高/摘要を保存しない。
+4. user-installed CAをappが通常受理する場合だけlocal proxyを使う。pinning/integrity/FIDO errorなら
+   patch/hookで回避せず、encrypted metadata観測またはstatic analysisへ戻る。
+5. runtime tracingはread画面のURL builder、OkHttp request metadata、serializer/model field名、WebView
+   navigationに限定する。certificate verifier、trust manager、FIDO/Keystore、integrity verdictをhookしない。
+6. 認証appは本人が既存のlogin承認だけを行い、observerはapp launch/return hostとstatusだけを見る。
+   認証情報登録、eKYC、取引認証、取引code設定は行わない。
+7. appとWebで同じ短期間を表示し、口座数、current/available balance field、明細件数/field、担保定額/
+   定期lot coverageを値なしで比較する。appに公式CSV exportがないこともUIで再確認する。
+
+Frida/Objection等のtracing自体を非目標にはしないが、正規appが通常起動する環境でread serializerを受動
+観測できる場合に限る。root化、Gadget注入、signature repack、anti-instrumentation無効化、pinning/
+integrity/FIDO bypassが必要になった時点で停止する。
 
 ## 第三者client
 
@@ -401,6 +544,12 @@ sanitized noteへ残す。
     expiry、Akamai error、同時実行error、rate limitを測る。
 11. local Chromeが安定した後だけ、同じread-only flowをOCI Tokyoのpersistent Chromeで1回試し、
     日本国内ISP要件、追加認証、blockの有無を確認する。Cloudflare Containerはその後の比較対象とする。
+12. Google Playから正規install済みの管理Androidが用意できたら、通帳アプリ21.0.0と認証アプリ18.0.0
+    のbase/all splitsを取得し、package/versionCode/signer/hashを確認してからstatic inventoryを作る。
+13. 通帳アプリのread画面と認証アプリによる既存loginを本人が1回だけ操作し、host/method/path template/
+    status/content-type/field名を値なしで観測する。Webとappのread coverage/sessionを比較する。
+14. runtime tracingはread URL builder/serializer/WebViewに限定し、pinning/integrity/FIDO/Keystore判定を
+    hookしない。appがinstrumentation、root、CAを拒否したら回避せず停止する。
 
 成功判定は、write screenへ進まず、全登録口座のstable pseudonymous identifier、現在高、増分CSV、
 担保定額定期lot、raw artifact hashを再現できること。中止条件は、認証設定変更、キャッシュカード
@@ -418,7 +567,10 @@ sanitized noteへ残す。
 - 通帳アプリは最大2口座、認証アプリは同一お客さま番号を1端末のみ。FIDO準拠。
 - 参照系APIは現在高、入出金、担保定額定期等を提供し、利用同意は90日で再同意が必要。
 - `www`/`direct`/`direct3`はAkamai `edgekey.net`へ解決される。
-- 公式Android packagesはbankbook appとFIDO appの2つで、公式配布はGoogle Play経由。
+- 公開loginはStruts token/eventを持つHTML formで、password/app loginは`direct1`の別`.do` endpoint、
+  appは`fidoap` linkから`U011401BLC.do`へ戻る。
+- 公開login loadはAkamai系動的pathと`directss`へtelemetry POSTする。body値は取得していない。
+- 公式Android packagesは通帳アプリ21.0.0と認証アプリ18.0.0で、公式配布はGoogle Play経由。
 
 ### 推測
 
@@ -437,11 +589,13 @@ sanitized noteへ残す。
 - 担保定額/定期のexact fields、過去結果保持期間、export有無。
 - 認証後endpointがHTML formかJSONか、appとWebが同じbackend APIを使うか。
 - AkamaiのWAF/bot製品、headless/datacenter判定、Cloudflare/OCIからのlogin可否。
-- bankbook appのpinning/integrity、local DB schema/暗号化。
+- 通帳/認証appのversionCode、split、signer、host/path/schema、session issuance、WebView/native境界、
+  FIDO profile、pinning/integrity、local DB schema/暗号化。
 - ゆうIDが銀行明細loginへ統合される時期/方式。
 
 ## 主な根拠URL
 
+- [ゆうちょダイレクト 公開login](https://direct.jp-bank.japanpost.jp/tp1web/U010101SCK.do)
 - [ゆうちょダイレクト サービス内容・利用時間・環境](https://www.jp-bank.japanpost.jp/direct/pc/service/dr_pc_sv_index.html)
 - [現在高照会の表示項目](https://faq.jp-bank.japanpost.jp/faq_detail.html?id=2)
 - [入出金明細の照会期間](https://faq.jp-bank.japanpost.jp/faq_detail.html?id=96)
