@@ -1,6 +1,9 @@
 import { createBitwardenAssertion } from '../packages/auth-bitwarden/src/fido2'
 import type { BitwardenPasskey } from '../packages/auth-bitwarden/src/vault'
-import { createPasskeySession } from '../packages/provider-sbi-sec/src/session'
+import {
+  createPasskeySession,
+  loginWithPasskey,
+} from '../packages/provider-sbi-sec/src/session'
 import type { PasskeyAssertionProvider } from '../packages/provider-sbi-sec/src/types'
 
 interface BitwardenCliItem {
@@ -104,6 +107,8 @@ const deriveAuthEntryUrl = (item: BitwardenCliItem, rpId: string) => {
 
 const classifyStage = (url: URL) => {
   if (url.hostname === 'sbi-mts-probe.invalid') return 'mts-handoff'
+  if (url.pathname === '/mtsmobile/ssologingate') return 'mts-login'
+  if (url.pathname === '/mtsmobile/commgate') return 'mts-read'
   if (url.pathname === '/api/fido2/auth/challenge') return 'challenge'
   if (url.pathname === '/fido2/auth') return 'assertion'
   if (url.pathname === '/sso/channel') return 'callback'
@@ -134,12 +139,16 @@ const main = async () => {
   }
 
   const trace: TraceEntry[] = []
+  const liveMtsBaseUrl = process.env.SBI_MTS_BASE_URL
+  if (liveMtsBaseUrl && new URL(liveMtsBaseUrl).protocol !== 'https:') {
+    throw new Error('SBI_MTS_BASE_URL must use HTTPS')
+  }
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input.toString())
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
     const stage = classifyStage(url)
-    if (stage === 'mts-handoff') {
+    if (stage === 'mts-handoff' && !liveMtsBaseUrl) {
       verifyMtsHandoff(init)
       trace.push({ stage, method, outcome: 'blocked-before-mts' })
       throw new MtsHandoffReached()
@@ -155,30 +164,59 @@ const main = async () => {
   }
 
   try {
-    await createPasskeySession({
-      authBaseUrl,
-      mtsBaseUrl: MTS_PROBE_ORIGIN,
-      passkeyProvider: provider,
-    })
-    throw new Error('MTS handoff was not intercepted')
-  } catch (error) {
-    if (!(error instanceof MtsHandoffReached)) throw error
+    if (liveMtsBaseUrl) {
+      const client = await loginWithPasskey({
+        authBaseUrl,
+        mtsBaseUrl: liveMtsBaseUrl,
+        passkeyProvider: provider,
+      })
+      const cash = await client.account.positions.cash()
+      const hasMethodError = Boolean(cash.error?.code && cash.error.code !== '000000')
+      process.stdout.write(
+        `${JSON.stringify(
+          {
+            status: hasMethodError
+              ? 'mts-read-returned-error'
+              : 'passkey-and-mts-read-succeeded',
+            readOperation: 'account.positions.cash',
+            positionCount: cash.positions.length,
+            serverTotalCount: cash.totalCount,
+            hasMethodError,
+            trace,
+          },
+          null,
+          2,
+        )}\n`,
+      )
+      return
+    }
+
+    try {
+      await createPasskeySession({
+        authBaseUrl,
+        mtsBaseUrl: MTS_PROBE_ORIGIN,
+        passkeyProvider: provider,
+      })
+      throw new Error('MTS handoff was not intercepted')
+    } catch (error) {
+      if (!(error instanceof MtsHandoffReached)) throw error
+    }
+
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          status: 'passkey-auth-succeeded',
+          mtsHandoffReached: true,
+          accessTokenPresent: true,
+          trace,
+        },
+        null,
+        2,
+      )}\n`,
+    )
   } finally {
     globalThis.fetch = originalFetch
   }
-
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        status: 'passkey-auth-succeeded',
-        mtsHandoffReached: true,
-        accessTokenPresent: true,
-        trace,
-      },
-      null,
-      2,
-    )}\n`,
-  )
 }
 
 try {

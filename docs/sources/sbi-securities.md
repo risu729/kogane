@@ -7,11 +7,11 @@
 
 ## 結論
 
-SBI証券は **実装コスト4/5、条件付きで定期自動化可能（初期評価B、検証後Aを狙える）** と評価する。現口座の実credentialでブラウザなしのWebAuthn challenge、assertion、SSO callback、access token復号まで成功したため、credentialとWebAuthn互換性の不確実性は解消した。一方、MTS session確立、read-onlyデータ取得、session寿命、連続実行の検証は残るため、総合コストは据え置く。
+SBI証券は **実装コスト3/5、条件付きで定期自動化可能（現状B、連続検証後Aを狙える）** と評価する。現口座の実credentialで、ブラウザなしのWebAuthn challenge、assertion、SSO callback、access token復号、MTS session確立、国内現物保有のread-only取得まで成功した。認証から主要データ取得までの技術的不確実性は解消し、残る主な課題はsession寿命、連続実行、実行元変更、読取専用bundleへの縮小である。
 
-推奨経路は、公式Webの `My資産` をデータ源とし、公式のパスキー認証でログインしたセッションから、資産管理画面が呼ぶ読取専用JSONを取得する方式である。最初の検証ではブラウザを使って正しい画面・通信・値を突合し、取得経路が固まったらHTTPクライアントへ縮退する。公式アプリの非公開通信は、Web経路だけで不足する買付余力・国内株式の詳細・米国株式詳細を補完する第2段階とする。
+推奨経路は、公式株アプリが使うMTS通信を、パスキー認証から直接ブラウザなしで呼ぶread-only clientである。現物保有を高頻度に取得する主経路とし、公式Webの `My資産` は商品横断の評価額・履歴・実現損益・配当を補完する第2経路にする。Koganeへ取り込む際は `mnie` 全体に依存せず、必要な認証、MTS login、読取TR codeだけを抽出する。
 
-既存実装により、保存したパスキーを用いた無人ログインと、Web／アプリ内部通信の直接呼出しは技術的に実現済みである。2026-08-26の実口座試験では、Bitwarden CLIからSBI証券に必要な最小credentialだけをprocess内へ渡し、`mnie` の既存署名関数とpasskey sessionを接続した。entry 200、challenge 200、assertion 302、callback 200を確認し、復号済みaccess tokenをMTSへ渡す直前で意図的に停止した。一方で、2026年6月に認証方式が変更され、ログイン入口にはEverspin系の防御があり、HeadlessChromeを示すアクセスが保守ページへ送られるとの第三者実装上の観測もある。安定運用には、日本国内の固定的な実行元、session失効検知、公式画面との継続的な値照合が必要になる。
+既存実装により、保存したパスキーを用いた無人ログインと、Web／アプリ内部通信の直接呼出しは技術的に実現済みである。2026-08-26の実口座試験では、Bitwarden CLIからSBI証券に必要な最小credentialだけをprocess内へ渡し、`mnie` の既存署名関数とpasskey sessionを接続した。entry 200、challenge 200、assertion 302、callback 200、MTS login 200、現物保有照会 200となり、server totalと解析件数が一致した。件数以外の口座データ、token、SID、credential識別子は記録していない。一方で、2026年6月に認証方式が変更され、ログイン入口にはEverspin系の防御がある。現時点ではブラウザなしのHTTP経路が受理されたが、安定運用にはsession失効検知、公式画面との継続的な値照合が必要になる。
 
 Koganeでは、取引機能を絶対に有効化しない。`pnsk-lab/mnie` のSBI providerは有用な仕様資料だが、注文発注・訂正・取消まで公開するため、そのまま依存・登録してはならない。読取部分だけを別パッケージへ抽出し、取引パスワードを設定・保管せず、注文系コードと宛先をビルドに含めない方針とする。
 
@@ -117,9 +117,10 @@ PCサイトとスマートフォンサイトのMy資産は公式上同じ対象�
 - Bitwarden CLIは該当itemのFIDO2 credential metadataと秘密鍵を復号済みJSONとして返す。実値はログ、repo、PRへ出していない。
 - 該当passkeyはECDSA P-256でdiscoverable属性を持ち、同一RPの候補は1件だった。RP ID、credential ID、user handle、counterの実値は記録しない。
 - `mnie` の既存 `createBitwardenAssertion` が生成したassertionをSBI証券が受理し、SSO callbackと復号可能なaccess tokenを返した。
+- 復号したtokenを株アプリのMTS loginへ渡してsession化し、read-only TR code `F2631` で国内現物保有一覧を取得できた。HTTPはいずれも200で、server totalと解析件数が一致した。
 - ローカルPoC用に、ログインID、ログインパスワード、RP一致URI、単一passkeyだけをWSLのGit管理外へ保存した。取引パスワードとBitwarden custom fieldsは保存していない。ディレクトリは `0700`、fileは `0600` である。
 
-従って、既存credentialのCLI exportability、ローカル署名、SBI証券とのWebAuthn互換性は確認済みである。未確認なのは、counterの連続利用時判定、assertion再利用拒否、session寿命、IP／UA変更、MTS以降のread-only通信である。
+従って、既存credentialのCLI exportability、ローカル署名、SBI証券とのWebAuthn互換性、MTS session、国内現物保有のread-only取得は確認済みである。未確認なのは、counterの連続利用時判定、assertion再利用拒否、session寿命、IP／UA変更、他のread-only TR codeである。
 
 ### 公開実装から確認したセッション方式
 
@@ -133,7 +134,7 @@ PCサイトとスマートフォンサイトのMy資産は公式上同じ対象�
 - `userVerification` optionはauthenticator dataのUV flagを設定するが、OSやBitwarden UIによる生体認証・利用者確認を実行するものではない。実口座ではこのassertionを1回受理したが、サーバー側がUVの実体をどう評価するか、連続利用や認証変更後も通るかは未確認である。
 - counterは保存値が正なら既定で1増やして署名するが、更新値をvaultへ書き戻さない。連続ログインで同じ値になる可能性、保存値が0の場合の挙動、SBI証券側の判定を確認する必要がある。実値は記録しない。
 - 現行のdefault `data.json` pathはmacOS向けである。WSL PoCはBitwarden CLI 2026.8.0を使うことで、このpathとvault形式への直接依存を回避した。
-- 合成credential testに加え、SBI証券の実credentialでpasskey callbackとaccess token復号まで確認した。MTS sessionと口座データ取得はまだ保証しない。
+- 合成credential testに加え、SBI証券の実credentialでpasskey callback、access token復号、MTS session、国内現物保有取得まで確認した。注文、端末登録、取引passwordは呼んでいない。
 
 `createBitwardenAuthManager().credentials()` はusername／passwordに加え、FIDO2秘密鍵をprivate JWKとして含む `portableCredential` を返せる。この汎用export経路はKoganeでは使用禁止とする。使うのは狭いassertion provider、またはそれを内包するSBI証券専用ローカルissuerだけであり、vault全体、master password、derived key、秘密鍵JWKをcloudへ置かない。
 
@@ -185,6 +186,10 @@ Android版は公式Google Playから配信される。生の単一APKをSBI証�
 | SBI証券 株アプリ | `jp.co.sbisec.hyperkabu2` | 2 | MTS base URL、TR code、端末登録、買付余力・保有照会 |
 
 APK解析は有用である。特に、`mnie` が環境変数として外出ししているauth／MTS／外国株式endpointの現行値、SBI証券Plusの履歴API、アプリ版のschemaを確認できる可能性が高い。一方、公式資料はEVERSPINによるソース暗号化、URL暗号化、改ざん検知を説明しており、静的解析だけでは完結しない可能性がある。詳細解析は後回しにし、まず文字列・manifest・network security config・ホスト名・read-only methodの存在だけを確認する。
+
+2026-08-26、株アプリpackageの配布copyを取得し、mirrorを単独で信用せずJAR署名を検証した。署名者名はSBI SECURITIESで、対象MTS hostのTLS証明書もSBI証券名義だった。JADX 1.5.6で、本番／試験環境tableにMTS originがあり、passkey login classが相対path `/mtsmobile/ssologingate` を結合することを確認した。実originそのものはrepoへ保存しない。
+
+`mnie` に `SBI_MTS_BASE_URL` の実値がないのは未発見だからではない。同repoの `AGENTS.md` は実endpointのoriginをhardcodeせず、pathだけをsourceへ置くruleを明記する。アプリもoriginを環境table、MTS methodを相対pathとして分離しており、originはアプリ更新や環境切替で変わり得る。従って `.env.example` は空欄のままにし、実行時に現行公式配信物または通信から検証した値を注入する設計である。
 
 TLS pinning、root／emulator検知、PlusアプリへのEVERSPIN適用範囲は未確認である。
 
@@ -297,11 +302,11 @@ Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_p
 1. 利用者の通常ブラウザでSBI証券へ公式パスキー認証し、My資産、保有一覧、実現損益、配当・分配金、取引履歴、円貨入出金明細を順に開く。Network logはhost、path、method、status、schemaだけを記録し、token・cookie・口座番号・実データを保存しない。
 2. **完了**: 利用者端末内だけでBitwarden CLI 2026.8.0からSBI証券itemを取得し、秘密値を表示せず、RP一致・候補一意性・passkey metadataを検証した。
 3. **完了**: 公式challengeから返るRP IDとBitwarden credentialを照合し、origin入りassertionを生成した。actual valueやcredential ID／user handleはrepoへ記録していない。
-4. **一部完了**: 既存 `createBitwardenAssertion` とSBI providerを接続した1回限りのHTTP試験は成功した。残りはstored counterの連続利用、assertion再利用拒否、複数credential拒否の実サーバー試験である。
+4. **完了**: 既存 `createBitwardenAssertion` とSBI providerを接続した1回限りのHTTP試験で、passkey callback、access token復号、MTS login、国内現物保有 `F2631` をすべてブラウザなしで実行した。server totalと解析件数は一致した。
 5. HTTP assertionが受理されない場合のみ、Playwright／CDPのvirtual authenticatorをローカルで試す。resident／discoverable credential、user verification、conditional UI、`allowCredentials`指定、パスキーボタン経路の差を比較し、秘密鍵を平文fixtureへexportしない。
 6. ログイン成功後、sessionのidle／absolute寿命、同時session、再起動後の再利用、IP／UA変更、日中／夜間／週末、429／403／302、メール・電話追加認証を7日以上観測する。session cookieや識別子は保存せず、寿命と失敗分類だけを記録する。
 7. SBI証券Plusを正規にGoogle Playから取得し、manifest、host名、network security config、My資産相当のread endpointだけを静的に確認する。株アプリは第2優先。
-8. `mnie`から注文コードと汎用 `credentials()`／`portableCredential` exportを完全に除いた最小prototypeを作り、My資産current JSON、買付余力、現物保有、円貨入出金だけをallowlistする。
+8. `mnie`から注文コード、端末登録、取引passwordと汎用 `credentials()`／`portableCredential` exportを完全に除いた最小prototypeを作り、まずMTS loginと現物保有 `F2631` だけをallowlistする。その後、買付余力、My資産current JSON、円貨入出金を個別に追加する。
 9. ローカルagentのpull型job、1回限りnonce、短寿命envelope、egress allowlist、重複実行禁止、指数backoff、失敗時のみ通知、raw暗号化、redacted schema logを実装する。OCI／Cloudflareへは暗号化済み結果だけを送る。
 10. 安定後にCloudflare Containers、次にpure fetch化したWorkersをscheduler・結果処理層として比較する。海外／可変egressで認証追加が増えるなら採用しない。
 11. 2年CSV、5年電子交付、My資産の2021-08以降履歴を一度だけ取得し、重複と期間の穴を可視化する。
