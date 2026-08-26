@@ -48,6 +48,14 @@ endpoint into a collector dependency. If a security control prevents passive
 observation, record the exact barrier and the additional experiment required;
 do not describe the whole reverse-engineering track as out of scope.
 
+Device-bound authentication deserves the same distinction. A source PR may
+conclude that an independent client is impractical, but only after mapping the
+official enrolment, key storage, signed challenge, attestation/integrity,
+deep-link, and app-to-Web session handoff boundaries as far as legitimate
+static analysis and owner-operated read-only observation allow. Implementing a
+bypass remains prohibited; investigating the mechanism and estimating the
+cost of a compatible client remain in scope.
+
 ## Why aggregators are secondary
 
 - they often reduce transaction, reward, lot, or account-subtype detail;

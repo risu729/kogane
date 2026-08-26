@@ -23,4 +23,3 @@ Use this outline:
 Do not include credentials, cookies, account/card/member numbers, balances, or
 personally identifying captures. Do not exercise transfer, trade, charge,
 profile, or other write endpoints.
-
