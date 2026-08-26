@@ -47,8 +47,8 @@ Cost is 1 (small wrapper) through 5 (device-bound or adversarial automation).
 | JAL Pay / JMB | P2 | JAL app/web | [#33](https://github.com/risu729/kogane/pull/33) | D | 5 (manual: 1-2) | draft complete |
 | AirWallet | P2 | AirWallet app | [#36](https://github.com/risu729/kogane/pull/36) | E (C candidate) | 1-2 (automation: 4-5) | draft complete |
 | WESTER / J-WEST / wesmo! | P2 | JR West app/web | [#35](https://github.com/risu729/kogane/pull/35) | D | 5 (manual: 1-2) | draft complete |
-| Smart EX | P2 | Smart EX web/app | pending | — | — | queued |
-| Opal | P2 | Transport for NSW web/app | pending | — | — | queued |
+| Smart EX | P2 | Smart EX web/app | [#37](https://github.com/risu729/kogane/pull/37) | D (Web: C candidate) | 4 (manual: 1) | draft complete |
+| Opal | P2 | Transport for NSW web/app | [#38](https://github.com/risu729/kogane/pull/38) | C candidate | 3 (manual: 1) | draft complete |
 
 Long-tail reward-only services stay in `data/account-inventory.csv`. Add them
 to this board when expiry risk or material value makes collection worthwhile.
@@ -64,7 +64,7 @@ automation rating is treated as final.
 | Source PR | Audit finding | Required follow-up |
 | --- | --- | --- |
 | [#8 Mobile Suica](https://github.com/risu729/kogane/pull/8) | **Resolved:** 6.6.0 splits/DEX/.NET assemblies were inspected; SF history path/schema, token retry, `sfLog`, pinning, and Wallet boundary are now recorded | Compare against owner-device Play splits and observe one sanitized history call to resolve `sfLog`, token lifetime, and runtime integrity metadata |
-| [#13 MUFG Bank](https://github.com/risu729/kogane/pull/13) | Dynamic analysis was deferred because the Web route looked sufficient | Inspect the current Play-delivered app and compare app/Web read coverage and session issuance |
+| [#13 MUFG Bank](https://github.com/risu729/kogane/pull/13) | **Resolved:** current login BFF, CSRF/screen headers, session extension, device print, Trusteer signal, and app provenance are recorded; runtime analysis is now in scope | Capture sanitized authenticated read BFF metadata and compare with owner-device Play splits/app coverage |
 | [#14 Mizuho Bank](https://github.com/risu729/kogane/pull/14) | Detailed app analysis was deferred | Resolve app transport, long-history local storage, point route, and device/session binding |
 | [#15 Japan Post Bank](https://github.com/risu729/kogane/pull/15) | Only an analysis plan was recorded | Execute the static inventory and identify the Direct/app read transport and FIDO boundary |
 | [#17 Sony Bank](https://github.com/risu729/kogane/pull/17) | WALLET app analysis was postponed until a Web gap appeared | Analyze the app transport now so the gap decision is evidence-based |
