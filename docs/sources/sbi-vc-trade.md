@@ -3,13 +3,13 @@
 - 調査日: 2026-08-26（Australia/Sydney）
 - 対象: SBI VCトレード株式会社が提供する **VCTRADE** の日本円・暗号資産口座データ取得面
 - 対象外: 同社の別サービス、SBI証券、カード、外部アグリゲーター
-- 制約: 公開情報と受動的な通信確認のみ。口座識別子、氏名、メールアドレス、電話番号、実残高、取引内容、Cookie値、パスワード、TOTPシード、OTP、passkeyを取得・記録していない。注文、取消、入出金、暗号資産の入出庫、貸コイン申込、認証・口座設定変更は実施していない。
+- 制約: 公開情報、公開Web artifact、正規配布アプリのread-only静的解析、および本人操作によるread-only動的観測を対象とする。口座識別子、氏名、メールアドレス、電話番号、実残高、取引内容、Cookie値、token、パスワード、TOTPシード、OTP、passkeyを取得・記録しない。注文、取消、入出金、暗号資産の入出庫、貸コイン申込、認証・口座設定変更、security control bypassは実施しない。
 
 ## 結論
 
 SBI VCトレードには、暗号資産・日本円の資産状況、残高履歴、注文履歴、約定履歴、入出金・入出庫履歴、損益・報告書、ステーキング、貸コインの読み取り面がある。一方、顧客向け公開APIは現時点で未提供で、公式FAQは将来の公開予定としている。したがって、安全な初期実装は、利用者が公式画面から手動取得したPDFまたはZIP内CSVを、ネットワーク通信を持たないローカル処理へ渡す方式である。
 
-総合評価は **E / コスト1**（手動エクスポート + ローカル解析）。認証済みWebの非公開通信再生は **C候補 / コスト4**、完全ブラウザーまたはアプリ自動化は **D / コスト5** だが、MFA/passkey、Cloudflareのbot対策、同一セッション内の書き込み機能、非公開仕様変更のため推奨しない。公開APIが実際に提供され、読み取り専用scopeと安定した仕様が確認できた場合に限りAを再評価する。
+総合評価は **E / コスト1**（手動エクスポート + ローカル解析）。認証済みWebの内部通信は公開bundle/source mapから具体的なtransportまで確認でき、**C候補 / コスト4** として静的解析・本人操作のread-only動的観測を続ける価値がある。完全ブラウザーまたはアプリ自動化は **D / コスト5**。採否はMFA/passkey、Cloudflareのbot対策、read/writeが同一session・endpointに混在する点、非公開仕様変更を実測してから決める。公開APIが実際に提供され、読み取り専用scopeと安定した仕様が確認できた場合はAを再評価する。
 
 ## 1. 口座・商品と列挙できる情報
 
@@ -137,9 +137,60 @@ Bitwarden自体はWebサイト・アプリのpasskey保存と利用に対応す�
 ## 6. 公式アプリとWebの役割
 
 - 現行Androidアプリの公式packageは `co.jp.sbivc.trade.app`、iOS App Store IDは `6639604109`。
+- 公式サイトから遷移するGoogle Playの公式listingは開発者を `SBI VC Trade Co., Ltd.` とし、2026-08-05更新を表示する。2026-08-26に同じGoogle Play公開payloadを `google-play-scraper` で構造化した結果、versionNameは `3.2.4` だった。versionCodeは公開listingから取得できなかったため未確認である。
 - 旧モバイルアプリは2026-01-28に終了し、2026-01-29から現行アプリへ一本化された。旧APK/旧マニュアルから現在のtransportや認証を推測しない。
 - シンプルモードはPC/スマートフォン向けの簡易UI、トレーダーモードはPC向け高機能UI、現行アプリは保有推移、TradingViewチャート、スピード注文、ステーキング表示を統合する。
-- APKのダウンロード、逆コンパイル、計測、証明書ピンニング回避は行わない。公開ストアメタデータと公式Webだけを利用する。
+- 正規split APKの取得、署名確認、逆コンパイル、deobfuscation、静的解析、runtime tracing、通信メタデータ観測は調査対象である。ただし、改変APKの実行、証明書pinning/attestation/root検知/Cloudflare challengeの回避、秘密・PII・実値の保存、write操作は行わない。
+
+### 6.1 正規split APKの取得状況とprovenance
+
+今回のWSL/Windows環境には、Playから当該アプリを正規インストール済みのAndroid端末、ADB、Android SDK build-tools、認可済みGoogle Play delivery clientがなかった。Google Playの公開listingはAPK download URLを提供しない。このため、第三者APK mirrorへ切り替えず、split APK、manifest、signing certificate、versionCode、native library、pinning/integrity実装の実解析は未実施である。
+
+次回は本人所有端末へGoogle Playから正規インストールした同packageを使い、Git管理外の一時領域へsplitをpullする。`pm path`が返すbase/config splitをすべて保存し、単一APKだけを完全artifactと誤認しない。
+
+```bash
+export SBI_VC_APK_DIR="$(mktemp -d)"
+adb devices -l
+adb shell dumpsys package co.jp.sbivc.trade.app \
+  | rg 'versionName|versionCode|firstInstallTime|lastUpdateTime'
+adb shell pm path co.jp.sbivc.trade.app \
+  | sed 's/^package://' > "$SBI_VC_APK_DIR/device-paths.txt"
+while IFS= read -r remote_apk; do
+  adb pull "$remote_apk" "$SBI_VC_APK_DIR/"
+done < "$SBI_VC_APK_DIR/device-paths.txt"
+sha256sum "$SBI_VC_APK_DIR"/*.apk
+for apk in "$SBI_VC_APK_DIR"/*.apk; do
+  apksigner verify --verbose --print-certs "$apk"
+done
+```
+
+Play listingのpackage/developer/version、端末のpackage/version、base APK manifest、全splitのhash、全splitで一貫するsigner certificate digestをprovenance recordにする。APK、certificate、解析出力はrepositoryへcommitしない。更新前後を比較する場合は同じ取得方法とcertificate digestを用いる。
+
+### 6.2 静的解析の次実験
+
+正規artifactを得たら、最初にmanifest/resources/native libraryを分け、次にdecompiled codeを見る。
+
+```bash
+for apk in "$SBI_VC_APK_DIR"/*.apk; do
+  apktool d -f "$apk" -o "$SBI_VC_APK_DIR/apktool-$(basename "$apk" .apk)"
+done
+jadx --log-level ERROR -d "$SBI_VC_APK_DIR/jadx" "$SBI_VC_APK_DIR"/*.apk
+rg -n -i \
+  'https?://|wss://|/api/|graphql|retrofit|okhttp|certificatepinner|network_security_config|play.?integrity|safetynet|attestation|refresh.?token|access.?token|session' \
+  "$SBI_VC_APK_DIR/jadx" "$SBI_VC_APK_DIR"/apktool-*
+```
+
+MobSFはlocal-onlyで起動し、image digestを記録してからbaseとsplitsを同一versionのartifact setとして確認する。結果HTML/JSONは秘密・PII scan後もGitへ入れない。
+
+```bash
+docker pull opensecurity/mobile-security-framework-mobsf:latest
+docker image inspect opensecurity/mobile-security-framework-mobsf:latest \
+  --format '{{index .RepoDigests 0}}'
+docker run --rm -it -p 127.0.0.1:8000:8000 \
+  opensecurity/mobile-security-framework-mobsf:latest
+```
+
+調べる対象はhost/path、request/response model名、WebSocket/REST/GraphQL、token/session更新、secure storage、network security config、certificate pinning、Play Integrity/attestation候補、root/anti-tamper候補である。文字列やクラスの存在は「実行時に有効」の証明ではなく候補として記録する。難読化解除と制御回避を混同しない。
 
 一次資料:
 
@@ -156,7 +207,29 @@ Bitwarden自体はWebサイト・アプリのpasskey保存と利用に対応す�
 - 公開GitHubをサービス名、公式ホスト、Android packageで検索したが、現在の認証済みVCTRADEへ接続する維持された公開クライアントは確認できなかった。
 - [`kittyflip-zig/crypto-ledger-tools`](https://github.com/kittyflip-zig/crypto-ledger-tools) はMITライセンスのローカルCSV正規化ツールで、READMEにSBI VC Trade adapterの初期項目がある。APIキーを使うネットワーククライアントではなく、現在のSBI CSVへの完全対応も未確認である。
 
-したがって、確認できる第三者transport/authは「利用者が手動取得したローカルファイルを読む / 認証なし」に限られる。非公開APIのURL、Cookie、CSRF token、リクエスト署名をブラウザーバンドルから抽出・再生しない。
+第三者実装として確認できるtransport/authは「利用者が手動取得したローカルファイルを読む / 認証なし」に限られる。一方、公式の公開Web bundle/source mapは現行Web client自身のtransportを具体化しており、次節のとおり静的解析した。endpoint/schemaの確認自体を禁止せず、秘密値の保存とwrite eventの送信を禁止する。
+
+### 7.1 公開Web JavaScript / source mapの観測
+
+2026-08-26、`https://simple.sbivc.co.jp/` はNuxt clientとして4つの公開bundleを配信し、main bundle `/_nuxt/f89914f.js` のSHA-256は `ff7856cdbd3080d87c8bfba7f45fb6b2982fdf26699114a57bd7089a3f87582f` だった。対応する [`f89914f.js.map`](https://simple.sbivc.co.jp/_nuxt/f89914f.js.map) も公開され、TypeScriptのsource filenameと`sourceContent`を含む。source mapは調査時点でHTTP 200、882,355 bytes、`Last-Modified: 2026-08-05`だった。bundle hashとファイル名はdeployで変わるため固定API versionではない。
+
+公開source `plugins/api/serverAPIClient.ts` から確認したWeb transportは次のとおり。
+
+- 同一originへJSON POSTし、bodyは概ね `{ event, data }`、responseは `{ meta, body }`。timeoutは15秒。
+- loginは `/api/cccmdipresen/gw/login`、追加認証は `/api/cccmdipresen/gw/loginSecondAuth`、passkey開始/完了は専用path、market dataは `/api/cccmdipresen/gw/market`。
+- 認証後の資産、注文、約定、cashflow、報告書、貸コイン、設定、注文/出金等は同じ `/api/cccmdipresen/gw/trade` に送られ、`event`で機能を振り分ける。
+- read候補eventには `cashBalanceList`、`orderList`、`executionList`、`accountMargin`、`getCashflowList`、`tradeReportList`、`monthlyTradeReport`、`yearlyPlReport`、`plCalcData`、`lendingStatusList` がある。
+- 同一path/sessionのwrite eventには `exStreamingOrder`、`requestWithdrawal`、`executeNetDeposit`、`applyReserveRequest`、`lendingRequest`、MFA/passkey/customer設定変更がある。HTTP path/methodだけではread/writeを隔離できず、event allowlistが必須である。
+- `executionList`は`historical=true/false`の結果をclient側でmergeする実装を持ち、直近/過去データが別backend viewであることを示す。
+- Vuexの`loginId`、wallet、report状態を`sessionStorage`へpersistするコードがある。別のWeb3/NFT wallet moduleは`accessToken`/`refreshToken`とAuthorization headerを使うが、VCTRADE取引口座sessionと同一と扱わない。
+- bundleはCloudflare Turnstile script/site-key設定を含み、login requestにchallenge response fieldがある。さらにsecret-likeなclient config値も公開bundleに見えるが、値は取得記録・転載・有効性試験をしていない。security control bypassへ使用しない。
+- `sessionTimeoutTime: 14400`というclient定数があるが、server sessionの実寿命が4時間だとはまだ確認できない。
+
+core trade callには明示的Authorization headerが見えないため、same-origin browser session/Cookieを使う可能性が高いという**推測**に留める。Cookie名、CSRF、server側session更新、passkey後のsession確立は本人操作のsanitized network metadataで確認する。公開source mapの存在はAPIが公開・安定・利用許諾済みであることを意味しない。
+
+### 7.2 Web/app transport差
+
+Web側は上記のsame-origin event gatewayまで確認できた。アプリ側はsplit APK未取得のため、host、protocol、request model、token storage、pinning/integrity、Webと同じgatewayを使うかを確認できていない。アプリがWebView、native REST、WebSocket等のどれかを推測で決めない。正規APKのhost/schema候補をWebの一覧とdiffし、本人のread-only画面操作時に実際に使われる候補だけを動的観測で昇格する。
 
 一次資料:
 
@@ -169,11 +242,11 @@ Bitwarden自体はWebサイト・アプリのpasskey保存と利用に対応す�
 
 最も安全な構成では、認証済みネットワーク接続そのものを解析器から除外する。利用者が公式画面でPDF/ZIPを手動取得し、ローカル解析器は読み取り専用でマウントされた入力だけを処理する。生ファイル、PII、金額、アドレス、口座IDはGit、ログ、クラウドへ送らない。
 
-将来公式APIが提供された場合も、次を満たすまで接続しない。
+将来公式API、または観測済み内部transportを使う場合も、次を満たすまで接続しない。
 
-1. 公式文書に読み取り専用scopeとendpointが明記されている。
-2. 書き込み権限を持たない別credentialを発行できる。
-3. 公式に副作用なしとされた操作だけをroute allowlistに置く。HTTP GETという理由だけで安全とはみなさない。
+1. 公式APIなら読み取り専用scopeとendpointが文書化されている。内部transportなら本人操作の1回観測で副作用のないevent/schemaが確認できている。
+2. 書き込み権限を持たないcredentialが最善。現行Webのように同一sessionへread/writeが混在する場合は、collector側egress proxyでorigin+path+eventを固定し、write eventを構造的に送信不能にする。
+3. 確認済みread eventだけをallowlistに置く。HTTP GET/POSTという理由だけで安全とはみなさない。
 4. deny-by-default、外向き通信先制限、レスポンスログの値マスク、少量の合成試験を行う。
 
 ### UIを観察する場合のallowlist
@@ -215,27 +288,31 @@ Bitwarden自体はWebサイト・アプリのpasskey保存と利用に対応す�
 |---|---:|---|
 | 手動PDF/ZIP取得 + ローカル解析 | **E / 1** | 公式exportを使い、秘密を処理系から隔離できる。推奨。 |
 | 将来の公式read-only API | 未評価（A候補） | 現在は仕様未公開。scope・endpoint・rate limit確認後に再調査。 |
-| 非公開Web通信の再生 | **C候補 / 4** | 技術的推測は可能でも、session/MFA/bot/副作用境界が非公開。採用しない。 |
+| 非公開Web通信の観測・read replay | **C候補 / 4** | 公開source mapでevent gatewayを確認。session/MFA/botとevent allowlistを本人操作のread-only観測で検証してから採否を決める。 |
 | Web完全自動化 | **D / 5** | passkey/MFA、Cloudflare bot対策、書き込み隣接により危険。 |
-| アプリ/端末自動化 | **D / 5** | 端末認証と操作面の混在。APK解析も対象外。 |
+| アプリ静的解析 + read-only動的観測 | **C候補 / 4-5** | 正規split取得、署名、host/schema、token/session、pinning/integrity候補を確認する次段階。 |
+| アプリ/端末完全自動化 | **D / 5** | 端末認証とread/write操作面の混在。解析結果に基づき再評価する。 |
 
 ## 11. read-only live検証計画とstop条件
 
 ### 段階的検証
 
-1. 公開ガイド、FAQ、公式ストア、受動的DNS/HTTPヘッダーだけを確認する。
-2. 追加検証が明示的に許可された場合も、利用者が自分でログインし、調査者は画面名と導線だけを見る。資格情報、OTP、QR、passkey prompt、実残高・実取引をキャプチャしない。
-3. 利用者が報告書/ZIPを自分で一度ダウンロードし、Git管理外のローカル一時領域へ置く。最初は値を読み込まず、列名、ファイル名、文字コード、期間表現だけをマスク済みで確認する。生ファイルはcommit・ログ・クラウド送信しない。
-4. 確認できたschemaだけから合成fixtureを作り、オフラインparserを検証する。実値をfixtureへ転記しない。
-5. 最大期間・件数・カラムが不明なら「不明」のまま残し、反復ダウンロードや過去全期間取得で探索しない。
+1. 公開ガイド、FAQ、公式ストア、DNS/HTTPヘッダー、公開HTML/JS/source mapを取得し、URL、hash、日時を記録する。bundle内のtoken/secret-like値は転載・試験しない。
+2. 正規Play install済み本人端末からsplit APKをpullし、package/version/hash/signing certificateを確認する。jadx/apktool/MobSFでhost/path/schema/token/session/pinning/integrity候補を抽出するが、artifact・解析出力はGitへ置かない。
+3. Webは利用者が自分でログインし、DevToolsで許可済みread画面1回分のmethod、origin、path、event名、status、content-type、timingだけを観測する。request/response body、header、Cookie、token、ID、実値を保存しない。HARを使うならcapture時点でbody/headerを除外し、共有前にsecret/PII scanする。
+4. アプリは本人端末で資産・残高履歴・約定履歴・報告書等のread画面だけを操作し、標準ADB/logcat/Perfettoまたは通常のローカルVPN captureでhost/path/status等のmetadataだけを観測する。TLS pinningで内容が見えない場合は迂回せず、静的候補とUI automationの評価に留める。logcatに実値が出る場合は収集を即停止する。
+5. Web/appで確認したread eventを比較し、同じschemaか、app固有API/tokenがあるかを区別する。read-only replayを行う場合は、bodyを合成できず実sessionが必要なら本人端末内、1 event、1回、deny-by-default egress proxyの条件に限定する。
+6. 利用者が報告書/ZIPを自分で一度ダウンロードし、Git管理外のローカル一時領域へ置く。最初は値を読み込まず、列名、ファイル名、文字コード、期間表現だけをマスク済みで確認する。生ファイルはcommit・ログ・クラウド送信しない。
+7. 確認できたschemaだけから合成fixtureを作り、オフラインparserを検証する。実値をfixtureへ転記しない。最大期間・件数が不明でも反復取得で探索しない。
 
 ### 即時停止条件
 
-- ログイン、MFA、passkey、メール/SMSコード、QR、TOTPシード、秘密鍵、Cookie値の入力・表示・保存が調査者側に必要になる。
+- ログイン、MFA、passkey、メール/SMSコード、QR、TOTPシード、秘密鍵、Cookie/token値の入力・表示・保存が調査者側に必要になる。本人が通常操作し、調査者が値を見ずmetadataだけを観測できる場合を除く。
 - 追加規約への同意、端末登録、認証設定変更、パスワード再設定が要求される。
-- 403、429、Cloudflare challenge、CAPTCHA、アクセス制限、ログイン失敗またはロック警告が出る。再試行しない。
+- 403、429、Cloudflare challenge、CAPTCHA、アクセス制限、ログイン失敗またはロック警告が出る。反復再試行、別IP、header偽装を行わない。
 - 注文、取消、決済、入出金、入出庫、アドレス登録、貸コイン申込、積立、設定変更へ進む必要がある。
-- 公式に文書化されたread-only APIがなく、非公開endpoint、Cookie replay、アプリ解析が必要になる。
+- certificate pinning、Play Integrity/attestation、root/anti-tamper、難読化が存在すること自体は停止条件ではないが、それらのsecurity controlを迂回しなければ観測・実行できない。
+- allowlist外event、write event、method/path/schema不明のrequestを送る必要がある。
 - ファイルや画面にPII、実残高、実取引、暗号資産アドレス等が見え、マスク前にログ・保存される可能性がある。
 
-このstop条件に達した場合、E / cost 1の手動export方式を維持し、それ以上の自動化を行わない。
+このstop条件に達した経路は中止し、E / cost 1の手動export方式を維持する。別のread-only静的解析や、制御回避を伴わない観測まで一律に禁止するものではない。
