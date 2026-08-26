@@ -1,5 +1,5 @@
 diff --git a/packages/provider-sbi-sec/src/methods/index.ts b/packages/provider-sbi-sec/src/methods/index.ts
-index 90adeb2..35e16f8 100644
+index 90adeb2..9fa3cae 100644
 --- a/packages/provider-sbi-sec/src/methods/index.ts
 +++ b/packages/provider-sbi-sec/src/methods/index.ts
 @@ -50,6 +50,8 @@ import type {
@@ -19,7 +19,15 @@ index 90adeb2..35e16f8 100644
  } from './types'
  import { SbiServerError } from './error-map'
  import { domesticMarketToMts, isUsMarket, mtsMarketToDomestic } from '../markets'
-@@ -506,9 +509,7 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods
+@@ -301,6 +304,7 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods
+           fetchAccountPower(session, { includeMarginAccount: true, ...options }),
+       },
+       positions: {
++        foreignCash: async (options) => usStock.foreignCash(options),
+         cash: async (options) =>
+           options?.market && isUsMarket(options.market)
+             ? usStock.positions(options)
+@@ -506,9 +510,7 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods
          },
          tradeRecords: async (options) => {
            if (!options.market || isUsMarket(options.market)) return usStock.tradeRecords(options)
@@ -30,7 +38,7 @@ index 90adeb2..35e16f8 100644
          },
        },
        cash: {
-@@ -1328,7 +1329,11 @@ const yenDetailHistoryCsrfTokenFromHtml = (html: string, responseUrl: string) =>
+@@ -1328,7 +1330,11 @@ const yenDetailHistoryCsrfTokenFromHtml = (html: string, responseUrl: string) =>
    return token
  }
  
@@ -43,7 +51,7 @@ index 90adeb2..35e16f8 100644
    if (!auth.cookies) throw new Error('SBI main site session does not include scoped cookies')
    const jar = auth.cookies.map((cookie) => ({ ...cookie }))
    const siteLinkParam = await fetchMainSiteLinkParam(session)
-@@ -1377,6 +1382,7 @@ const fetchYenDetailHistoryPage = async (session: SbiSession, auth: MainSiteAuth
+@@ -1377,6 +1383,7 @@ const fetchYenDetailHistoryPage = async (session: SbiSession, auth: MainSiteAuth
      referer = loginForm.action.toString()
    }
  
@@ -51,7 +59,7 @@ index 90adeb2..35e16f8 100644
    for (let redirectCount = 0; redirectCount < 10; redirectCount += 1) {
      const response = await fetch(requestUrl, {
        headers: {
-@@ -1389,23 +1395,24 @@ const fetchYenDetailHistoryPage = async (session: SbiSession, auth: MainSiteAuth
+@@ -1389,23 +1396,24 @@ const fetchYenDetailHistoryPage = async (session: SbiSession, auth: MainSiteAuth
      })
      updateCookieJar(jar, response, requestUrl)
      const location = response.headers.get('location')
@@ -89,7 +97,7 @@ index 90adeb2..35e16f8 100644
    referer = auth.assetsUrl
    for (let redirectCount = 0; redirectCount < 10; redirectCount += 1) {
      const response = await fetch(requestUrl, {
-@@ -1419,18 +1426,215 @@ const fetchYenDetailHistoryPage = async (session: SbiSession, auth: MainSiteAuth
+@@ -1419,18 +1427,215 @@ const fetchYenDetailHistoryPage = async (session: SbiSession, auth: MainSiteAuth
      })
      updateCookieJar(jar, response, requestUrl)
      const location = response.headers.get('location')
@@ -307,7 +315,7 @@ index 90adeb2..35e16f8 100644
    const pageText = await pageResponse.text()
    if (!pageResponse.ok) {
      throw new Error(
-@@ -1684,6 +1888,40 @@ const parseHtmlForm = (html: string, baseUrl: URL) => {
+@@ -1684,6 +1889,40 @@ const parseHtmlForm = (html: string, baseUrl: URL) => {
    return { action: new URL(action, baseUrl), fields }
  }
  
@@ -348,3 +356,157 @@ index 90adeb2..35e16f8 100644
  const attributeValue = (tag: string, name: string) => {
    const pattern = new RegExp(`${name}=(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i')
    const match = tag.match(pattern)
+diff --git a/packages/provider-sbi-sec/src/methods/us-stock.ts b/packages/provider-sbi-sec/src/methods/us-stock.ts
+index ebb18cd..6dcfc26 100644
+--- a/packages/provider-sbi-sec/src/methods/us-stock.ts
++++ b/packages/provider-sbi-sec/src/methods/us-stock.ts
+@@ -6,6 +6,7 @@ import type {
+   ChartPeriod,
+   ChartPrice,
+   CurrencyAmount,
++  ForeignCashBalanceList,
+   IssueChart,
+   IssueSearchResult,
+   MarketCode,
+@@ -25,6 +26,7 @@ import type {
+   CashOrderOptions,
+   CashOrderPreOrderOptions,
+   CashPositionOptions,
++  ForeignCashBalanceOptions,
+   IssueChartOptions,
+   IssueOptions,
+   IssueSearchOptions,
+@@ -139,6 +141,8 @@ export const createUsStockAdapter = (session: SbiSession) => ({
+   },
+   positions: async (options?: CashPositionOptions): Promise<CashPositionList> =>
+     fetchUsCashPositions(session, options),
++  foreignCash: async (options?: ForeignCashBalanceOptions): Promise<ForeignCashBalanceList> =>
++    fetchUsForeignCashBalances(session, options),
+   positionsDetail: async (options?: CashPositionOptions): Promise<CashPositionList> =>
+     fetchUsCashPositionDetail(session, options),
+   unrealized: async () => {
+@@ -373,6 +377,39 @@ const fetchUsCashPositions = async (
+   }
+ }
+ 
++const fetchUsForeignCashBalances = async (
++  session: SbiSession,
++  options?: ForeignCashBalanceOptions,
++): Promise<ForeignCashBalanceList> => {
++  const days = options?.days ?? 5
++  if (!Number.isSafeInteger(days) || days < 1 || days > 30) {
++    throw new Error('account.positions.foreignCash days must be an integer from 1 to 30')
++  }
++  const data = await callUsGraphql(session, 'GetForeignCashBalance', FOREIGN_CASH_BALANCES, {
++    input: { currencyCode: options?.currencyCode ?? 'USD', days },
++  })
++  const accounts = arrayAt(data, ['listForeignScheduleCashBalances', 'foreignCashBalances'])
++  return {
++    balances: accounts.flatMap((account) =>
++      arrayAt(account, ['currencyCashBalances']).flatMap((currency) => {
++        const currencyCode = stringAt(currency, ['currencyCode'])
++        if (currencyCode !== 'USD') return []
++        return arrayAt(currency, ['foreignScheduleCashBalances']).map((balance) => ({
++          accountKind: stringAt(account, ['accountKind']),
++          currencyCode,
++          businessDate: stringAt(balance, ['businessDate']),
++          daysLater: numberAt(balance, ['daysLater']),
++          buyPossibleAmount: usd(stringAt(balance, ['buyPossibleAmount'])),
++          keepCash: usd(stringAt(balance, ['keepCash'])),
++          transferPossibleAmount: usd(stringAt(balance, ['transferPossibleAmount'])),
++          remainingBuyPossibleAmount: usd(stringAt(balance, ['remainingBuyPossibleAmount'])),
++          amountPayValue: usd(stringAt(balance, ['amountPayValue'])),
++        }))
++      }),
++    ),
++  }
++}
++
+ const fetchUsCashPositionDetail = async (
+   session: SbiSession,
+   options?: CashPositionOptions,
+@@ -1388,6 +1425,22 @@ query GetOrderDetail($input: Input_fstock_order_GetForeignStockOrderDetailReques
+   checkJrNisaOpen { opened }
+ }`
+ 
++const FOREIGN_CASH_BALANCES = `
++query GetForeignCashBalance($input: Input_account_balance_ListForeignScheduleCashBalancesRequest) {
++  listForeignScheduleCashBalances(input: $input) {
++    foreignCashBalances {
++      accountKind
++      currencyCashBalances {
++        currencyCode
++        foreignScheduleCashBalances {
++          businessDate daysLater buyPossibleAmount keepCash transferPossibleAmount
++          remainingBuyPossibleAmount amountPayValue
++        }
++      }
++    }
++  }
++}`
++
+ const TRADE_RECORD_LIST = `
+ query GetTradeRecordList($input: Input_account_ListTradeRecordsRequest) {
+   listTradeRecords(input: $input) {
+diff --git a/packages/provider-sbi-sec/src/operations.ts b/packages/provider-sbi-sec/src/operations.ts
+index fc59a09..2a376e2 100644
+--- a/packages/provider-sbi-sec/src/operations.ts
++++ b/packages/provider-sbi-sec/src/operations.ts
+@@ -14,6 +14,7 @@ import type {
+   ExchangeRateInfo,
+   ExchangeSellMethod,
+   ExchangeSpecificMethod,
++  ForeignCashBalanceList,
+   DomesticMarket,
+   IssueCode,
+   IssueChart,
+@@ -99,6 +100,13 @@ export type CashPositionOptions = PagingOptions & {
+   accountType?: AccountType
+ }
+ 
++export interface ForeignCashBalanceOptions {
++  /** Currency to fetch. The current official foreign-stock API supports USD here. */
++  currencyCode?: 'USD'
++  /** Number of business-day schedule entries to include. Defaults to 5. */
++  days?: number
++}
++
+ export type MarginPositionOptions = PagingOptions & {
+   /** Filters margin positions by issue code. */
+   issueCode?: IssueCode
+@@ -595,6 +603,8 @@ export interface SbiClientMethodAccountPositions {
+   cashDetail(options?: CashPositionOptions): Promise<CashPositionList>
+   /** Fetches cash positions for a specific issue. */
+   cashForIssue(options: IssueOptions): Promise<CashPositionList>
++  /** Fetches scheduled foreign-currency cash balances from the foreign-stock account. */
++  foreignCash(options?: ForeignCashBalanceOptions): Promise<ForeignCashBalanceList>
+   /** Fetches margin positions. */
+   margin(options?: MarginPositionOptions): Promise<MarginPositionList>
+   /** Fetches the alternate margin-position list used by the mobile app. */
+diff --git a/packages/provider-sbi-sec/src/types.ts b/packages/provider-sbi-sec/src/types.ts
+index 1a71fb7..f623a4b 100644
+--- a/packages/provider-sbi-sec/src/types.ts
++++ b/packages/provider-sbi-sec/src/types.ts
+@@ -230,6 +230,22 @@ export interface CurrencyAmount {
+   currency: 'JPY' | 'USD'
+ }
+ 
++export interface ForeignCashBalance {
++  accountKind?: string
++  currencyCode: 'USD'
++  businessDate?: string
++  daysLater?: number | null
++  buyPossibleAmount?: CurrencyAmount
++  keepCash?: CurrencyAmount
++  transferPossibleAmount?: CurrencyAmount
++  remainingBuyPossibleAmount?: CurrencyAmount
++  amountPayValue?: CurrencyAmount
++}
++
++export interface ForeignCashBalanceList {
++  balances: ForeignCashBalance[]
++}
++
+ export interface PercentValue {
+   value: number | null
+   text: string

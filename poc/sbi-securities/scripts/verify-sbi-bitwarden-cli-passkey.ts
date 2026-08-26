@@ -169,47 +169,6 @@ const fetchUsHistorySearchDuration = async (session: SbiSession) => {
   }
 }
 
-const fetchForeignCashBalances = async (session: SbiSession, days: number) => {
-  const data = await foreignGraphql(
-    session,
-    'int',
-    'GetForeignCashBalance',
-    `query GetForeignCashBalance($input: Input_account_balance_ListForeignScheduleCashBalancesRequest) {
-      listForeignScheduleCashBalances(input: $input) {
-        foreignCashBalances {
-          accountKind
-          currencyCashBalances {
-            currencyCode
-            foreignScheduleCashBalances {
-              businessDate daysLater buyPossibleAmount keepCash
-              transferPossibleAmount remainingBuyPossibleAmount amountPayValue
-            }
-          }
-        }
-      }
-    }`,
-    { input: { currencyCode: 'USD', days } },
-  )
-  const response = objectValue(data.listForeignScheduleCashBalances)
-  return arrayValue(response?.foreignCashBalances).flatMap((account) => {
-    const accountObject = objectValue(account)
-    return arrayValue(accountObject?.currencyCashBalances).flatMap((currency) => {
-      const currencyObject = objectValue(currency)
-      return arrayValue(currencyObject?.foreignScheduleCashBalances).map((balance) => ({
-        accountKind: optionalString(accountObject?.accountKind),
-        currencyCode: optionalString(currencyObject?.currencyCode),
-        ...objectValue(balance),
-      }))
-    })
-  })
-}
-
-const numericStringState = (value: unknown) => {
-  if (typeof value !== 'string' && typeof value !== 'number') return 'missing'
-  const number = Number(String(value).replaceAll(',', ''))
-  return Number.isFinite(number) ? numberState(number) : 'missing'
-}
-
 const readOnlyResult = async <T>(read: () => Promise<T>) => {
   try {
     return { ok: true as const, value: await read() }
@@ -419,7 +378,7 @@ const main = async () => {
         ? await readOnlyResult(() => fetchUsHistorySearchDuration(exportedSession))
         : undefined
       const foreignCashBalanceResult = exportedSession
-        ? await readOnlyResult(() => fetchForeignCashBalances(exportedSession, 5))
+        ? await readOnlyResult(() => client.account.positions.foreignCash({ days: 5 }))
         : undefined
       const usHistoryFrom = requiredDate(
         process.env.SBI_US_HISTORY_FROM ?? '2021-01-01',
@@ -579,7 +538,7 @@ const main = async () => {
         .filter((date): date is string => Boolean(date))
         .sort()
       const foreignCashBalanceDates = foreignCashBalanceResult?.ok
-        ? foreignCashBalanceResult.value
+        ? foreignCashBalanceResult.value.balances
             .map((balance) => optionalString(balance.businessDate))
             .filter((date): date is string => Boolean(date))
             .sort()
@@ -854,26 +813,32 @@ const main = async () => {
               : undefined,
             foreignCashBalanceReadSucceeded: foreignCashBalanceResult?.ok,
             foreignCashBalanceEntryCount: foreignCashBalanceResult?.ok
-              ? foreignCashBalanceResult.value.length
+              ? foreignCashBalanceResult.value.balances.length
               : undefined,
             foreignCashBalanceCurrencies: foreignCashBalanceResult?.ok
-              ? [...new Set(foreignCashBalanceResult.value.map((balance) => balance.currencyCode))]
+              ? [
+                  ...new Set(
+                    foreignCashBalanceResult.value.balances.map((balance) => balance.currencyCode),
+                  ),
+                ]
                   .filter(Boolean)
                   .sort()
               : undefined,
             foreignCashBalanceAccountKindCount: foreignCashBalanceResult?.ok
-              ? new Set(foreignCashBalanceResult.value.map((balance) => balance.accountKind)).size
+              ? new Set(
+                  foreignCashBalanceResult.value.balances.map((balance) => balance.accountKind),
+                ).size
               : undefined,
             foreignCashBalanceOldestDate: foreignCashBalanceDates.at(0),
             foreignCashBalanceNewestDate: foreignCashBalanceDates.at(-1),
             foreignCashBalancePositiveKeepCashCount: foreignCashBalanceResult?.ok
-              ? foreignCashBalanceResult.value.filter(
-                  (balance) => numericStringState(balance.keepCash) === 'positive',
+              ? foreignCashBalanceResult.value.balances.filter(
+                  (balance) => amountState(balance.keepCash) === 'positive',
                 ).length
               : undefined,
             foreignCashBalancePositiveBuyPossibleCount: foreignCashBalanceResult?.ok
-              ? foreignCashBalanceResult.value.filter(
-                  (balance) => numericStringState(balance.buyPossibleAmount) === 'positive',
+              ? foreignCashBalanceResult.value.balances.filter(
+                  (balance) => amountState(balance.buyPossibleAmount) === 'positive',
                 ).length
               : undefined,
             foreignCashBalanceErrorType:

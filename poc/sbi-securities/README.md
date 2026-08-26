@@ -22,7 +22,7 @@
 14. 国内・米国株の個別現在値と日足チャート、USD外貨交換レートを任意probeで照会
 15. ログイン後ページの生きた「取引履歴」リンクから国内株の過去約定履歴フォームを開き、期間検索結果を構造化
 16. 国内株の対象期間を90日以下の非重複windowへ分割して全件走査
-17. 外国株式GraphQLからUSD外貨預り金の受渡日別残高、買付可能額、振替可能額を照会
+17. `account.positions.foreignCash()` からUSD外貨預り金の受渡日別残高、買付可能額、振替可能額を照会
 
 ブラウザを使わないpasskey認証、国内MTS session、外国株式session、メインサイトSSOと、国内・米国現物保有、国内・米国株取引履歴、USD外貨預り金、My資産現在評価、円貨入出金明細のread-only取得まで実口座で確認済みである。注文系method、取引パスワード、device registration、session再利用は使用・検証していない。通常ログへtoken、SID、口座番号、銘柄、数量、金額、入出金摘要を出さず、検証記録にはHTTP status、operation名、件数、日付範囲、残高のpositive／zero／missing状態、エラー型だけを残した。
 
@@ -106,7 +106,7 @@ USD外貨預り金は外国株式アプリと同じread-only GraphQL queryを使
 ## 実装の境界
 
 - `prepare-sbi-bitwarden-cli-secret.ts`: Bitwarden CLI item群からSBI専用の最小credentialを生成する。秘密値はstdout以外へ出さず、呼出側が権限制限した一時fileへ直接redirectする。
-- `patches/mnie-sbi-domestic-history.patch`: `orders.inquiry.tradeRecords({ market: 'XTKS', ... })` を国内向けに拡張する。メインサイトSSO後に固定sequence番号を使わず、現在のナビゲーションから生きた取引履歴URLを抽出する。検索formのhidden fieldを保持したまま期間を設定し、Shift-JIS HTMLを `TradeRecordList` に変換する。指定がなければ直近90日を検索し、1回の表示上限は200件である。
+- `patches/mnie-sbi-domestic-history.patch`: `orders.inquiry.tradeRecords({ market: 'XTKS', ... })` を国内向けに拡張する。メインサイトSSO後に固定sequence番号を使わず、現在のナビゲーションから生きた取引履歴URLを抽出する。検索formのhidden fieldを保持したまま期間を設定し、Shift-JIS HTMLを `TradeRecordList` に変換する。指定がなければ直近90日を検索し、1回の表示上限は200件である。加えて、外国株式sessionを使うread-only API `account.positions.foreignCash({ currencyCode: 'USD', days: 5 })` を公開する。
 - `verify-sbi-bitwarden-cli-passkey.ts`: 既存 `createBitwardenAssertion`、`createPasskeySession`、`loginWithPasskey` を直接利用する。既定ではMTSの予約済みprobe originへのfetchをnetwork送信前に遮断する。実行時に検証済みbase URLを渡した場合だけ、国内MTS、外国株式、メインサイトのread-only methodを呼ぶ。国内・米国履歴の90日分割、外国株式の検索可能期間query、USD外貨預り金queryもここで検証する。各methodは独立して例外を捕捉し、1経路の「データなし」や期間エラーで他経路の結果を失わない。
 - `run-sbi-bitwarden-cli-passkey-probe.sh`: 初回unlock、最小credential保存、probe実行、`bw lock`、秘密を含まないstage/status記録を行う。
 - 合成test: password同居、別item、別RP除外、曖昧候補拒否、custom field非コピーを確認する。
