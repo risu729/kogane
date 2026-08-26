@@ -10,12 +10,15 @@ St.George App の双方で、口座残高、取引履歴、カード、ローン
 Tracker、push 通知、Digital Card、Security Wellbeing Check などであり、残高・
 明細収集そのものに Android 実機は必須ではない。
 
-共通 rubric による個人データ収集の主評価は **C / cost 4** とする。現行に近い
-公開第三者実装が、利用者がログイン済みの Chrome に CDP で接続して口座カードと
-残高 DOM を読むところまで実証している。また、古い Puppeteer 実装には Internet
-Banking の日付範囲検索から CSV をダウンロードする具体的実装がある。ただし、
-公式の個人向け CSV 仕様、session renewal、安定 API は公開されておらず、adaptive
-authentication と Akamai 配下の login edge がある。従って B とはしない。
+共通 rubric による個人データ収集の主評価は **C / cost 4** とする。2026 年の公開
+第三者実装が、利用者がログイン済みの Chrome に CDP で接続して口座カードと残高
+DOM を読むところまで実証している。古い Puppeteer 実装には Internet Banking の
+日付範囲検索から CSV をダウンロードする具体的実装もある。さらに今回、現行公開
+login JavaScript を静的に整形し、dynamic form state、credential 文字置換、device
+print、remote-access probe、BioCatch の行動 telemetry/session start・resume・reset を
+確認した。ただし、認証後 read route の pagination、banking session renewal、安定 API
+は未確認で、adaptive authentication と Akamai 配下の login edge がある。従って B
+とはしない。
 
 安全な運用の初期値は、利用者が公式画面から取得した PDF を取り込む **E / cost 1**
 である。公開 Product API は **A / cost 1** だが商品情報だけで、個人の残高や明細は
@@ -40,6 +43,10 @@ security/privacy 運用が必要であり、小規模な自家用 collector の�
   number、password、OTP、cookie/token、口座番号、氏名・住所、残高、取引内容を
   取得・保存・ログ出力しない。送金、支払、振替、カード操作、口座設定変更、CDR
   consent の作成・変更・取消は行わない。
+- Reverse engineering、公開 JS の整形/deobfuscation、正規 Play split の static analysis、
+  本人操作下の read-only runtime metadata tracing は調査対象である。禁止するのは
+  write endpoint、秘密/PII/body の保存、certificate pinning 無効化、root/emulator/integrity
+  concealment、attestation spoof、repack/re-sign 等の security-control bypass である。
 
 ## 公式画面で確認できる対象
 
@@ -71,9 +78,13 @@ website、map location を表示できる。したがって collector は pendin
 同一取引として早期に deduplicate せず、少なくとも `status` と安定した transaction ID
 の有無を保持して reconciliation する必要がある。
 
-CDR の transaction schema も `PENDING` / `POSTED` を表現し、effective time は
-posting time、次に execution time、最後に data holder が選ぶ合理的な時刻の順で
-決める。ただし St.George の authenticated CDR response は未検証である。
+CDR の transaction schema も `PENDING` / `POSTED` を表現する。`transactionId`、
+`isDetailAvailable`、type、description、posting/value/execution time、amount/currency、reference、
+merchant name/category 等を持ち、posted では `postingDateTime` が必須である。standard 自体が
+pending と後続 posted を相関できる保証はないと明記するため、ID の一致を仮定しない。
+response は `links` (self/first/prev/next/last) と `meta.totalRecords` / `totalPages` を持ち、
+request の `page` / `page-size` で pagination する。ただし St.George の authenticated CDR
+response と、Internet Banking/App の内部 schema は未検証である。
 
 ## 明細期間、件数、export
 
@@ -95,7 +106,10 @@ posting time、次に execution time、最後に data holder が選ぶ合理的�
 
 ### CSV / OFX / QIF / PDF の結論
 
-- **PDF**: 個人向け公式根拠あり。Proof of Balance、Transaction Listing、eStatement。
+- **PDF**: 個人向け公式根拠あり。Proof of Balance、Transaction Listing、eStatement。current
+  Play description は App の Services から Proof of Balance、Interest Earned、Transaction Listing
+  report を download できると明示する。Internet Banking/App のどちらで各 PDF が取得可能かは
+  公式 help ごとに分離し、App の記載だけから Web の同一 coverage を推定しない。
 - **CSV**: 現行の公式個人向け help では発見できなかった。ただし 2022 年の公開
   Puppeteer 実装が `#transHistExport` をクリックし、`Date`, `Debit`, `Credit`,
   `Description` 列を parse している。2012 年の Mechanize 実装も
@@ -103,6 +117,8 @@ posting time、次に execution time、最後に data holder が選ぶ合理的�
   2026 年時点の現行保証には live read-only 確認が必要である。
 - **OFX / QIF**: St.George 個人 Internet Banking の現行公式資料・確認した公開実装の
   どちらにも根拠がない。未対応と断定せず「未確認」とする。
+- **CDR JSON**: accredited/sponsored data recipient 向けの structured account/transaction data。
+  PDF/CSV/OFX/QIF export ではなく、consumer が download button から直接得る形式でもない。
 - Business Banking Online の configurable export、PayWay/PaymentsPlus の CSV は
   別製品なので上記判定に含めない。
 
@@ -146,6 +162,39 @@ posting time、次に execution time、最後に data holder が選ぶ合理的�
   cookie lifetime、refresh、IP/device binding は不明。cookie/token を collector の
   renewable credential とみなせないため Level B ではない。
 
+### 現行 Web login transport の静的確認
+
+2026-08-26 に [公式 Internet Banking login](https://ibanking.stgeorge.com.au/ibank/loginPage.action)
+と、そこから公開ロードされる JavaScript を credential なしで取得した。bundle は
+Prettier で静的整形し、未知コードを `eval`/実行していない。動的な値は記録していない。
+
+- login は `POST logonActionSimple.action`。通常の `userId` (CAN/card)、`securityNumber`、
+  `password` に加え、`nameId`、`bmNameId`、`bmSessionId`、`statperfid`、`devicePrint`、
+  `radRes` 等の hidden field を送る。これらの値を固定値や再利用可能 token とみなさない。
+- `logonCrypto.js` は page ごとの AES key で security-number/password 用の置換表を復号し、
+  入力文字を置換してから submit する。これは client-side credential obfuscation の実装で
+  あって、banking access token や transport encryption の代替ではない。
+- `rsa.min.js` の `encode_deviceprint()` が `devicePrint` を生成する。`rdagent.js` は page
+  supplied の localhost WebSocket port 群を probe して結果を `radRes` に入れる。後者は
+  remote-access software の存在候補を測る anti-fraud signal と整合するが、判定 rule は不明。
+- 約 1 MB の `BM_v2_43.js` (public asset version `26E3MR36`) は整形後の class/function 名に
+  `BioCatchClient` を含む。`cdApi.setCustomerSessionId(...)` と context `LOGIN_PAGE` を使い、
+  internal state として `sid`/customer-session/partner-session/`muid`、server state
+  `sts`/`std`/`ott`、request counter を扱う。`startNewSession`、`resumeSession`、
+  `ResetSession`、context change、local/session storage (`bmuid`, `cdSrvrState` 等)、
+  VM detection、mouse/touch/key telemetry、`/client/v3.1/web/wup` / `/api/v4/wup` path を持つ。
+  これは fraud telemetry session であり、口座 read session/token と同一とは証明されない。
+- login GET は `LastLoginCookie`、`JSESSIONID`、`PD-S-SESSION-ID` 等を発行する。観測時、
+  `LastLoginCookie` は Secure/HttpOnly/SameSite=Strict、`PD-S-SESSION-ID` は Secure/HttpOnly、
+  `JSESSIONID` は HttpOnly だった。値は保存していない。未認証で
+  `viewAccountPortfolio.html` / `accountDetails.action` を GET すると HTTP 200 の logout
+  page が返るため、status code だけで authenticated session を判定できない。
+
+公開 login asset から確定できるのは認証 bootstrap までである。portfolio/transaction の
+current route、HTML/JSON transport、banking token、idle/absolute expiry、renewal、pagination、
+pending/posted field は認証後 runtime metadata なしでは確定できない。pending/posted の下記
+model は公式 UI 説明と CDR standard のもので、Internet Banking internal schema と混同しない。
+
 ## 公開 edge、WAF、anti-bot
 
 2026-08-26 に、credential を送らない DNS/HTTP read-only probe を実施した。
@@ -162,6 +211,77 @@ authentication は location/behaviour に応じた追加確認を示すため、
 headless login を繰り返す設計は避ける。403、429、CAPTCHA、Secure Code、unusual activity
 prompt を回避・自動突破しない。
 
+## 公式 mobile app artifact / transport
+
+### Play provenance と current metadata
+
+[St.George 公式 mobile page](https://www.stgeorge.com.au/online-services/mobile-banking) の
+Play 導線は package [`org.stgeorge.bank`](https://play.google.com/store/apps/details?id=org.stgeorge.bank&hl=en_AU&gl=AU)
+へ直接遷移する。2026-08-26 に公式 Play response から確認した current metadata は title
+`St.George Mobile Banking`、developer `St.George Bank`、version **9.52**、updated
+**2026-07-07** である。public metadata では versionCode と signer は得られない。
+
+同じ Play metadata では [BankSA `org.banksa.bank`](https://play.google.com/store/apps/details?id=org.banksa.bank&hl=en_AU&gl=AU)
+と [Bank of Melbourne `org.bom.bank`](https://play.google.com/store/apps/details?id=org.bom.bank&hl=en_AU&gl=AU) も
+9.52 で同日に更新され、公開 Web login の `logonSimple.js?ver=26E3MR36` も三ブランドで
+SHA-256 が一致した。これは St.George division brands に共通 release/code line がある強い
+証拠だが、authenticated host/schema/session が全て同一である証拠ではない。対して Westpac
+本体は別 [package `org.westpac.bank`](https://play.google.com/store/apps/details?id=org.westpac.bank&hl=en_AU&gl=AU)、別 Play release 表示で、
+[公式 Web](https://banking.westpac.com.au/) も `banking.westpac.com.au/wbc/banking/...` の
+Customer ID/password login である。St.George の
+3-field login、`ibanking.stgeorge.com.au/ibank/...` route を Westpac 本体へ、または逆に移植しない。
+
+### 正規 split の取得障壁と再現手順
+
+St.George は standalone APK を公式配布せず、consumer Play delivery は登録済み Android
+device/account 向けの app bundle/split である。今回の Windows/WSL 環境には Android SDK/
+`adb`、`apkanalyzer`/`aapt2`/`apksigner`、`jadx`/`apktool`、接続済み本人端末がなく、正規
+base/split を取得できなかった。このため current 9.52 の signer、versionCode、manifest、
+permissions/exported components、host/schema、network config、device binding、pinning、
+integrity/attestation は未確定である。third-party APK mirror を current official artifact と
+して採用しない。
+
+再現可能な取得・検証手順:
+
+1. 本人所有の対応・非 root Android で公式 St.George page の Play link から 9.52 を
+   install/update する。Quick Logon 登録済み端末では app data clear/reinstall/device migration
+   を行わない。
+2. 本人同意下で USB debugging を一時的に有効化し、`adb shell dumpsys package
+   org.stgeorge.bank` から versionName/versionCode、installer、split 名のみを採る。
+   `adb shell pm path org.stgeorge.bank` が通常権限で返す全 base/split を private work area
+   へ pull する。
+3. 全 split の SHA-256 と `apksigner verify --print-certs` の signer digest を確認する。
+   binary、certificate、device serial/account metadata は Git/CI に入れない。
+4. pull が拒否される、app が停止する、Quick Logon/device re-registration を求める時点で
+   停止する。root、backup exploit、repack/re-sign、mirror 代替、検知回避を行わない。
+
+### 取得後の static / runtime 観測
+
+- Manifest の permission、exported component/deep link、backup、`debuggable`/`profileable`、
+  network security config、FileProvider、biometric/Keystore、native library を確認する。
+- OkHttp/Retrofit/WebView/Custom Tabs 等の transport、host/path template、JSON/protobuf schema、
+  session issuance/renewal、pagination/cursor、pending/posted model、token storage、account namespace
+  を文字列/call graph から抽出する。実 token/body は扱わない。
+- Quick Balance/Quick Logon の device registration token、BiometricPrompt/Keystore gate、push
+  registration、Play Integrity/root/debug/emulator/pinning library の **候補** を切り分ける。
+- Proof of Balance、Interest Earned、Transaction Listing の renderer/download/share route と
+  MIME/schema を確認し、write service/payment/card functions と call graph で分離する。
+- 本人の既存登録済み公式 app で account list、balance、transaction search、pending/posted、
+  report control の表示だけを操作する。通常 attach 可能な Android Studio Network Inspector、
+  standard proxy/PCAP/logcat、または unmodified app が通常動作する範囲の Frida/Objection で、
+  method/origin/path template/status/content-type/call order/field 名だけを即時 redaction する。
+  body、header/cookie/token、account ID、値、screenshot、DB content は保存しない。
+
+pinning、root/debug/integrity detection、追加認証、device registration、app 停止が出た時点で
+停止する。CA install、pinning disable、root hiding、attestation spoof、repack/re-sign をしない。
+read/write side effect が分類できるまで replay せず、write endpoint は分類後も呼ばない。
+
+参考となる公開第三者 artifact は限定的である。[Tabbed Out analysis result](https://github.com/beerphilipp/tabbed-out/blob/3ada3bb1fc317cdf9a442a52445614ee5a8b7cff/analysis/results/org.stgeorge.bank.res.json)
+は version 不明の `SINGLE_APK` に Android Custom Tabs の利用文字列を確認し、
+[GrapheneOS report #570](https://github.com/PrivSec-dev/banking-apps-compat-report/issues/570)
+は Play 版 9.44/build 2025010700 が通常動作したと報告する。いずれも current 9.52 の
+host、signer、pinning/integrity、banking schema の証拠にはしない。
+
 ## 公式 CDR / Open Banking
 
 ### 公開 Product API
@@ -169,11 +289,14 @@ prompt を回避・自動突破しない。
 [St.George Product API](https://www.stgeorge.com.au/online-services/open-banking/product-api)
 の base は `https://digital-api.stgeorge.com.au/cds-au/v1/banking/products/`。REST GET、
 JSON、Australian Consumer Data Standards 準拠で、security/特別な auth header は不要である。
-ただし `x-v` version header は実 API の version negotiation に必要で、2026-08-26 の read-only
-GET は `x-v: 5` で 200、42 records / 2 pages を返した。この数は時点値であり固定しない。
+ただし `x-v` version header は endpoint ごとの version negotiation に必要で、2026-08-26 の
+read-only GET は Products が `x-v: 5` で 42 records、Discovery Status が `x-v: 1` で
+`OK` を返した。Products の page count は requested `page-size` に依存し、この数は時点値で
+固定しない。
 
 政府 CDR Register の St.George Bank brand entry は public/product base URI を
-`https://digital-api.stgeorge.com.au` とする。公式 DSB product comparator も Register から
+`https://digital-api.stgeorge.com.au` とする。2026-08-26 の Register v2 read-only GET では
+brand entry の `lastUpdated` は `2026-08-03T01:12:10Z` だった。公式 DSB product comparator も Register から
 base URI を取得し、browser `fetch` の GET に `Accept: application/json`, `x-v`, `x-min-v`
 を付け、`/banking/products/{productId}` へ進む。これは customer data transport ではない。
 
@@ -191,7 +314,9 @@ account の所有形態、online eligibility、closed status、product classific
 2025-03-04 以後の現行 ACCC guide では、過去 2 年以内の transaction data は required、
 2 年超 7 年未満は voluntary、closed account data も voluntary である。direct debit の required
 範囲は 13 か月。CDR standard の Get Transactions は `oldest-time` と `newest-time`、amount、
-text、pagination を持ち、省略時は直近 90 日を取得する。St.George が voluntary な 2–7 年や
+text、`page`/`page-size`、paginated links/meta を持ち、省略時は直近 90 日を取得する。
+CDR JSON は machine-readable customer-data route であり、Internet Banking CSV や official
+report PDF の代替形式ではない。St.George が voluntary な 2–7 年や
 closed account を実際に返すかは live ADR test なしでは確定しない。
 
 ### Consumer と ADR の要件
@@ -236,10 +361,10 @@ renewable token client、APK reverse-engineered protocol を確認できなか�
 | runtime | Product API | CDR ADR client | Internet Banking C route | App/device route |
 | --- | --- | --- | --- | --- |
 | Cloudflare Workers | 最適。scheduled GET + JSON normalize が容易 | outbound mTLS certificate binding と WebCrypto/JWT は技術的には候補。ただし ADR compliance、key lifecycle、CDR data environment、audit/retention を Workers 単体で満たす設計審査が必要 | 通常 fetch だけでは不可。Browser Run は Puppeteer を提供するが、login bootstrap、session、bank PII、adaptive auth、egress reputation のため第一候補にしない | 不適 |
-| Cloudflare Containers | 過剰 | `linux/amd64` image で通常の OAuth/FAPI stack を置けるが compliance は別問題 | Playwright/Puppeteer を OCI image に含められる。永続 browser profile と human bootstrap の安全な受渡しを別途設計 | Android app は動かさない |
-| Generic OCI container | 容易 | mTLS、HSM/KMS client、JWT、refresh token、監査 sidecar を組みやすい | browser version pin、stable egress、encrypted ephemeral volume を構成しやすい | Android 実機 bridge がなければ不可 |
+| Cloudflare Containers | 過剰 | `linux/amd64` image で通常の OAuth/FAPI stack を置けるが compliance は別問題 | Playwright/Puppeteer を OCI image に含められる。永続 browser profile と human bootstrap の安全な受渡しを別途設計 | APK static toolchain は置けるが Play delivery/本人端末/runtime は別 |
+| Generic OCI container | 容易 | mTLS、HSM/KMS client、JWT、refresh token、監査 sidecar を組みやすい | browser version pin、stable egress、encrypted ephemeral volume を構成しやすい | jadx/apktool 等の static analysis は適合。runtime は Android 実機 bridge が必要 |
 | Kubernetes | 小規模 Product API には過剰 | 最も運用自由度が高く、CronJob、Secrets/KMS、NetworkPolicy、audit/rotation を組める。ただし accreditation cost は下がらない | headful/headless pod と human handoff は可能だが、browser profile を secret と同等に扱う必要 | 実機 farm/ADB を別管理するなら可能だが cost 5 |
-| Non-rooted Android real device | 不要 | 不要 | web route があるため不要 | App-only features を検証する唯一の堅実な候補。root/emulator bypass はしない |
+| Non-rooted Android real device | 不要 | 不要 | web route があるため不要 | 正規 split、Quick Logon/device binding、app read transport を検証する第一候補。root/emulator bypass はしない |
 
 Cloudflare の現行公式資料では Workers に
 [mTLS certificate binding](https://developers.cloudflare.com/workers/wrangler/configuration/#mtls-certificates)、
@@ -263,10 +388,11 @@ Containers に [linux/amd64 image](https://developers.cloudflare.com/containers/
 | route | Level | Cost | 判定理由 |
 | --- | --- | ---: | --- |
 | 個人 balance/transaction の本線 | **C** | **4** | 2026 public code が logged-in Chrome bootstrap + DOM read を実証し、旧 code が CSV export を実装。renewable session は未確認で、adaptive auth/Akamai/selector drift がある |
+| App bootstrap 後の read-only transport replay 候補 | **C** | **4** | current split/runtime 未取得。renewable session、read endpoint、pinning/device binding を通常端末観測で確認できた場合だけ成立 |
 | 公式 PDF の手動取得と ingestion | **E** | **1** | 公式で安定し安全だが、人が App/Internet Banking から取得する必要がある |
 | 公開 Product API | **A** | **1** | documented unauthenticated REST GET。個人残高・明細なし |
 | accredited/sponsored CDR participant | **A** | **5** | documented machine-readable API、consented scheduled retrieval に適するが accreditation、PKI/mTLS/FAPI、conformance、security/privacy obligations が重い |
-| Android 実機 UI automation | **D** | **5** | web で足りるため採用理由が弱く、biometric/quick logon/device integrity と UI drift を抱える |
+| Android 実機 UI automation | **D** | **5** | biometric/quick logon/device integrity と UI drift を抱える。reverse engineering は調査対象だが、transport replay が成立しなければ full device が必要 |
 
 ## Read-only live 検証計画
 
@@ -277,25 +403,41 @@ Containers に [linux/amd64 image](https://developers.cloudflare.com/containers/
    必要時だけ保存する。
 2. DNS CNAME と response header の vendor-neutral facts を再確認する。高頻度 probe、path
    enumeration、login POST はしない。
-3. GitHub 第三者実装の commit SHA/date と selectors を固定し、実行はしない。
+3. GitHub 第三者実装の commit SHA/date と selectors を固定し、実行はしない。公開 login JS
+   は hash、asset version、form field/function 名だけを静的整形し、動的値を保存しない。
 
 ### Phase 1: 利用者同席の Internet Banking
 
 1. 利用者自身が通常 browser でログインする。collector は CAN/security number/password/
    OTP を入力・取得・保存しない。
-2. account portfolio に transaction/savings、card、loan、term deposit の account card が
+2. DevTools protocol で request body/header を capture せず、method、origin、path template、
+   status/content-type、redirect/call order、cookie **name/attribute** だけを記録する。
+   `viewAccountPortfolio.html` の 200 が portfolio か logout page かを DOM marker で判定する。
+3. account portfolio に transaction/savings、card、loan、term deposit の account card が
    存在するかを、値を読まずに DOM role/selector と件数だけ確認する。nickname、BSB、account
    number、balance text は screenshot/log/trace に入れない。
-3. 代表 account で current/available balance の **field presence**、pending/posted label、
+4. 代表 account で current/available balance の **field presence**、pending/posted label、
    date/amount/type filter、最大表示件数 selector を確認する。transaction description、merchant、
-   amount、date は記録しない。
-4. export menu に CSV が現存するか、PDF reports/eStatements の menu があるかだけ確認する。
+   amount、date は記録しない。page/page-size/cursor/total、pending→posted 相関 ID の field presence
+   を確認し、Internet Banking が HTML fragment、JSON、form POST のどれを使うか分類する。
+5. export menu に CSV が現存するか、PDF reports/eStatements の menu があるかだけ確認する。
    実ファイルは個人データを含むためこの調査では download しない。必要なら別途明示許可を得て
    encrypted temporary location で schema のみ確認し、即時消去する。
-5. browser を閉じて session cookie を複製せず終了する。後続段階で reusable session を試す
-   場合も、利用者の明示許可、secret store、ログ redaction、失効手順を先に用意する。
+6. idle/absolute expiry と normal navigation 中の cookie/session更新は、値を比較せず cookie 名、
+   attribute、発行/更新 event の有無だけ観測する。browser を閉じて session を複製せず終了する。
+   reusable session を試す場合は別の明示許可、secret store、redaction、失効手順を先に用意する。
 
-### Phase 2: CDR
+### Phase 2: 本人所有 Android
+
+1. 前述の正規 Play split 取得、signer/manifest/static analysis を先に行う。OTP/Quick Logon の
+   既存登録状態を変えない。
+2. 本人が account list、balance、transaction search、pending/posted、report controls を表示し、
+   method/origin/path/status/schema field 名、pagination/session refresh event だけを metadata-only
+   capture する。Internet Banking と同じ host/schema か、St.George app 固有 API かを確認する。
+3. report download、share、payment/transfer、card/limit/settings は実行しない。Web と app の
+   read coverage 差は control/field presence だけで作る。
+
+### Phase 3: CDR
 
 1. Public Product API までに留める。customer-data live test は active ADR/sponsor と CTS 済み
    software product、同意 UX、CDR data environment が揃うまで開始しない。
@@ -313,8 +455,9 @@ Containers に [linux/amd64 image](https://developers.cloudflare.com/containers/
 - 操作対象が transfer/pay、payee、BPAY、scheduled payment、card activation/lock/PIN、limit、
   dispute、contact details、statement delivery preference、term-deposit maturity instruction、CDR
   consent/authorisation change/revoke に入った。
-- request が GET/HEAD 以外を必要とする。ただし CDR standard の read-only bulk query が
-  POST を定義する場合でも、active ADR の正式検証計画なしには送らない。
+- endpoint/operation の side effect が分類できない POST/PUT/PATCH/DELETE。read-only navigation
+  が POST の場合も本人画面と public implementation から副作用なしと確認できるまで replay しない。
+  CDR standard の read-only bulk POST も active ADR の正式検証計画なしには送らない。
 - PII、account identifier、balance、transaction、cookie/token/OTP が console、trace、HAR、
   screenshot、crash dump に入りそうになった。
 - vendor challenge を stealth、fingerprint spoof、proxy rotation、root/emulator concealment、
@@ -327,13 +470,15 @@ Containers に [linux/amd64 image](https://developers.cloudflare.com/containers/
 - OFX/QIF export の有無。公式個人向け根拠は発見できなかった。
 - portfolio/search の現行 DOM selectors、session idle/absolute lifetime、cookie refresh、
   IP/device binding、Secure Code が read-only login に発火する条件。
-- App Quick logon の server-side device registration/attestation、登録台数、token storage、
-  passkey/WebAuthn 対応。Bitwarden autofill の可否。
+- App 9.52 の versionCode/signer、split/manifest、host/path/schema、pagination/pending-posted model、
+  Quick Logon の server-side device registration/attestation、登録台数、token storage、pinning/
+  integrity、passkey/WebAuthn 対応。Bitwarden autofill の可否。
 - St.George CDR が voluntary な 2–7 年、closed account、offline account、全対象 product を
   実際に返す範囲と、St.George 固有の current auth/mtls endpoint metadata。
 - Akamai/CloudFront の WAF/bot-management product と具体 rule。公開 header からは断定しない。
-- App 内部 transport/API。公式 Play Store 以外から APK を取得せず、reverse engineering、
-  TLS interception、pinning bypass は現段階では行わない。
+- App 内部 transport/API は正規 split と本人端末がないため未確認。前述の `dumpsys`/`pm path`/
+  全 split pull/`apksigner`/static analysis/runtime metadata tracing が次の具体的実験であり、
+  reverse engineering 自体は対象である。security-control bypass は対象外である。
 
 ## 主要 source
 
@@ -354,3 +499,6 @@ Containers に [linux/amd64 image](https://developers.cloudflare.com/containers/
 - [ACCC banking/NBL data-holder compliance guide](https://www.cdr.gov.au/resources/guides/compliance-guide-data-holders-banking-and-non-bank-lenders-sectors)
 - [Google Play: `org.stgeorge.bank`](https://play.google.com/store/apps/details?id=org.stgeorge.bank)
 - [Apple App Store: St.George Mobile Banking](https://apps.apple.com/au/app/st-george-mobile-banking/id294380705)
+- [CDR Register: Data Holder Brands Summary API](https://api.cdr.gov.au/cdr-register/v1/banking/data-holders/brands/summary)
+- [Tabbed Out: `org.stgeorge.bank` static result（第三者・version 不明）](https://github.com/beerphilipp/tabbed-out/blob/3ada3bb1fc317cdf9a442a52445614ee5a8b7cff/analysis/results/org.stgeorge.bank.res.json)
+- [GrapheneOS compatibility report #570（第三者・9.44）](https://github.com/PrivSec-dev/banking-apps-compat-report/issues/570)
