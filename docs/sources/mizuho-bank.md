@@ -21,7 +21,9 @@
   公開資料だけでは分からない。
 - 公開ログイン画面は現在もShift_JISのHTMLフォームで、`JSESSIONID`、POST token、
   cookie/JavaScript、クライアント環境値を使う。Akamai edgeと端末fingerprint用
-  scriptは確認できた。現在動作する第三者クライアントは見つからず、2011～2021
+  scriptは確認できた。公開JSから、動的`webX` hostへのform POST、画面eventごとの
+  action切替、`POSTKEY`付きDojo XHRまで確認したが、未認証画面に残高・明細JSON APIは
+  見つからなかった。現在動作する第三者クライアントは見つからず、2011～2021
   年の実装はいずれも旧HTMLフォーム/OFXに依存するため、設計参考に限る。
 - ユーザーから「passkeyを使用しBitwardenに保存済み」との情報があるが、みずほ
   銀行の公開仕様と2026-08-26の公開ログイン画面では、ブラウザログインは
@@ -56,8 +58,8 @@
 1. みずほ銀行の現行サービスページ、FAQ、規定、操作ガイド、Google Playの公式
    掲載を調べた。
 2. 2026-08-26に公開入口だけを未認証で取得し、DNS、HTTP header、ログインHTMLの
-   form、cookie属性、配信scriptを確認した。認証要求や架空のお客さま番号入力は
-   行っていない。
+   form、cookie属性、配信scriptを通常ブラウザでも確認した。公開JSのform transportと
+   client環境処理を静的に調べた。認証要求や架空のお客さま番号入力は行っていない。
 3. GitHub Code Searchで現行/旧クライアントを探索し、Ruby、Go、Perlの実装を
    commit単位で読み、browser、CSV/OFX、内部HTTP formのどれを使うかを確認した。
 4. 公式情報で確認できない項目は、第三者コードから現行仕様へ外挿せず、次のlive
@@ -177,6 +179,12 @@ pending authorization列はなく、反映済みledgerとみなす。未確定�
 - 履歴の保存期間、1行の項目、ページング、CSV/PDF export、失効予定のbucket粒度は
   未確認。live画面でDOM/JSONを観測するまで残高だけをMVP候補とする。
 
+公開資料で確認できる遷移は「アプリhomeの`P`マーク」から銀行のポイント専用pageへ進むことまでである。
+native API、WebView、外部browserのどれか、銀行app sessionをcookie／one-time codeで引き継ぐかは未確認である。
+正規Android splitの静的解析ではpoint関連deep link／hostname／WebView routeを列挙し、本人操作のread-only観測では
+遷移前後のorigin、method、path template、statusだけを記録する。query、cookie、authorization、SSO code、
+ポイント実値は保存せず、交換／チャージendpointは呼ばない。
+
 この範囲ではJ-Coin、MyJCB、カード会社ポイントへ遷移しない。
 
 ## 認証とsession
@@ -202,6 +210,31 @@ pending authorization列はなく、反映済みledgerとみなす。未確定�
   情報引継ぎができない。
 - 銀行は自動timeoutを明記するが、idle/absolute lifetimeの分数、並行session、cookie
   再利用、ログアウト時の全session失効は公開していない。
+
+### 公開Web JSとlogin transport
+
+[正規ログイン入口](https://web.ib.mizuhobank.co.jp/servlet/LOGBNK0000000B.do)を通常ブラウザで開くと、
+初回GETだけで`JSESSIONID`が発行され、HTMLの`base`とform actionは負荷分散された`webX.ib.mizuhobank.co.jp`
+を指した。form名は`LOGBNK_00000B`、methodはPOST、次画面は`/servlet/LOGBNK0000001B.do`である。
+入力値を除く公開schemaとして次のfield名を確認した。
+
+- session/page引継ぎ候補: `_FRAMEID`、`_TARGETID`、`_LUID`、`_TOKEN`、`_FORMID`、`_SUBINDEX`
+- request/client候補: `POSTKEY`、`CLIENT_ENV`
+- 最初の本人入力: `txbCustNo`（お客さま番号）
+
+共通JS `EmfJScript.js`、`MizuhoJScript.js`、`common.js`とinline scriptを静的に確認した。
+`doTransaction`はevent IDから`/servlet/<ID>.do`を組み立て、frame/target/subindexを更新して同じformをPOSTする。
+`getClientEnv`はbrowser language類を`CLIENT_ENV`へ設定する。`EmfJScript.js`には`POSTKEY`を付ける
+Dojo `xhrPost`もあるが、公開コード上で確認できた用途は不正input/script検査等であり、残高・明細JSON transportではない。
+このlogin pageが読む`rsa.js`は`post_deviceprint()`がtrueを返すstubであり、このfile名だけからRSA暗号化を推定しない。
+
+別originの`directinfo.ib.mizuhobank.co.jp/fp/tags.js`は、公開pageごとの一時session/page parameterを伴って
+読み込まれる。銀行の公式説明と合わせてdevice/browser risk signal候補と扱うが、vendor、収集field、score、
+appのdevice bindingとの共有は未確認である。session識別子自体は記録していない。
+
+従って現時点のtransport分類は、**未認証loginはcookie付きShift_JIS form POST**、一部補助処理はDojo XHRである。
+password入力後のpage、認証後read画面がHTML formだけかJSON/XHRを併用するか、JSESSIONID以外のsession要素、
+sessionとdevice fingerprintのbindingは、本人操作のread-only runtime metadata観測なしには確定できない。
 
 ユーザー申告のBitwarden内資格情報は、live検証時もextension/ユーザー操作で入力し、
 値をKogane、ログ、capture、Git、PR、container環境変数へ出さない。公開ログイン画面
@@ -245,13 +278,14 @@ pending authorization列はなく、反映済みledgerとみなす。未確定�
 このため、最初からCloudflare Workersの素の`fetch`でloginを再現するより、通常の
 Chromeと銀行が発行したsessionを使い、read endpoint/artifactを段階的に絞る。
 
-## Android APKと静的解析
+## Android app、正規split取得、静的／動的解析
 
-公式AndroidアプリはGoogle Play package
-[`jp.co.mizuhobank.banking`](https://play.google.com/store/apps/details?id=jp.co.mizuhobank.banking)
-で、developerはみずほ銀行、100万+ download、2026-07-22更新と掲載されている。
-銀行サイトから直接配布する公式APKは見つからず、第三者APK mirrorは来歴を保証できない
-ため使わない。
+銀行の[公式アプリページ](https://www.mizuhobank.co.jp/direct/app/index.html)にある
+[Android配布導線](https://www.mizuhobank.co.jp/special/directapp/dl_android.html)はGoogle Playの
+[`jp.co.mizuhobank.banking`](https://play.google.com/store/apps/details?id=jp.co.mizuhobank.banking&hl=ja&gl=JP)
+へ転送される。2026-08-26のPlay公開pageはdeveloper `MIZUHO BANK, LTD.`、version `5.30.0`、
+更新日2026-07-22、100万+ downloadを表示した。銀行公式導線、Play developer、packageの三点をprovenanceとする。
+銀行サイトから直接配布する公式APKは見つからず、第三者APK mirrorは来歴を保証できないため使わない。
 
 Play掲載と公式FAQで次を確認できる。
 
@@ -260,15 +294,52 @@ Play掲載と公式FAQで次を確認できる。
 - Android appは明細screenのscreenshotを禁止する。
 - 2026-01-31時点の公式対応環境はAndroid 15/16。対応外端末/tabletは保証外。
 
-細かいreverse engineeringは後回しにするが、Play由来split APKを取得し、certificateと
-package provenanceを確認した上での静的解析は有用である。最初に調べるのはmanifest、
-WebView/deep link、official host allowlist、network security config、pinning/integrity SDK、
-local明細DB schema、download handling、API/model class名に限る。難読化解除、root/hook、
-pinning回避、生体credential抽出、認証token抽出は行わない。
+reverse engineering、deobfuscation、static analysisと本人操作のruntime tracingを**今の並行調査対象**にする。
+ただし本調査環境にはADB、Android SDK build tools、jadx/apktool、接続済み本人所有Android実機がなく、
+Google Play認証済み端末から正規artifactを取得できなかった。再現可能な取得手順は次の通りである。
 
-期待値は**中**である。appがWeb screenへ遷移する科目と、native/local保存する明細の
-境界を早く把握できる一方、server schemaとsession issuanceは静的解析だけでは確定
-できない。署名済みappを通常端末でblack-box観測する方を優先する。
+1. 本人所有の対応・非root Androidで銀行公式導線からPlay版をインストールする。登録済みappがある場合、
+   server側のdevice登録を変えないため再install／data消去はしない。
+2. 本人の同意下でUSB debuggingを使い、`adb shell dumpsys package jp.co.mizuhobank.banking`で
+   versionName/versionCode、installer、split名を記録する。`adb shell pm path ...`でbase/split pathを列挙する。
+3. shellから読める場合だけbaseと全configuration/feature splitをprivate領域へ`adb pull`する。
+   SHA-256と`apksigner verify --print-certs`のsignerを記録し、binaryはGitへ入れない。
+4. pull不可、app停止、端末再登録要求になった時点で停止する。root化、第三者mirror、再署名、保護回避へ進まない。
+
+正規artifactを取得できたら、次を事実／候補に分けて静的に確認する。
+
+- manifest: permission、exported component、App Links/custom scheme、min/target SDK、backup/debuggable/profileable、
+  native library、Network Security Config、cleartext policy。
+- transport/schema: hostname/path、WebView、OkHttp/Retrofit等、JSON/protobuf、API/model class、download処理。
+- local long-history: Room/SQLite/SQLCipher、SharedPreferences/DataStore、DB file/schema/migration/index、
+  customer/account namespace、last-sync cursor、transaction balance／category field、暗号化・key管理候補。
+  schemaだけを対象にし、本人の明細recordやDB実値は抽出・保存しない。
+- point route: `P`導線のdeep link、point hostname、WebView／external browser境界、SSO/session handoff候補。
+- auth/device: Android Keystore、BiometricPrompt、app password、端末登録identifier、session issuance／renewal、
+  FIDO/WebAuthn候補。WebのBitwarden/passkey申告とは別物として確認する。
+- integrity: Play Integrity/SafetyNet、root/debug/emulator検知、certificate pinning library/config候補。
+  文字列やlibrary存在だけで「有効」と断定せず、通常動作時の観測と照合する。
+
+本人操作のread-only runtime tracingでは、残高・口座一覧・直近明細・端末内の古い明細・定期／外貨／
+グローバル口座・`P`導線を各1回だけ開く。method、origin、path template、status、content type、呼出順、
+schema field **name**、local DB/file **name**だけを記録し、body、cookie/token、端末identifier、口座番号、実値は
+capture時点で破棄する。Android Studio Network Inspector（profileableの場合）、標準proxy/PCAP metadata、
+絞り込んだlogcatを先に試す。Frida/Objection等のhookも、本人所有端末で公式appが無改変のまま通常動作する範囲に限り、
+network method／WebView navigation／DB openのmetadata観測へ使える。root/debug/integrity/pinningで停止する場合は
+そこで終了し、root隠蔽、attestation偽装、pinning無効化、証明書差替え、repack/re-sign等のsecurity-control bypassをしない。
+
+### appとWebのread coverage差
+
+| read surface | Web | app | 自動化上の結論 |
+| --- | --- | --- | --- |
+| 普通・貯蓄・外貨普通 | 残高、直近約3カ月HTML/PDF/CSV | 残高、明細、取引後残高、端末内履歴 | Web artifactを正本、app localをgap検出候補にする |
+| 長期明細 | 申込済みダイレクト通帳PDF/CSV、最大10年 | 継続起動で3カ月超を端末へ蓄積。未起動gap／移行lossあり | app DBは独自価値があるが、完全なbackfillとは扱わない |
+| 定期・積立・外貨定期・グローバル | 専用残高／lot／結果画面を公式説明で確認 | native表示かWeb遷移か未確認 | static/runtimeでroute差を確定する |
+| export | PC WebのPDF/CSV | app単独CSVは確認できない | 自動取込はWeb優位 |
+| みずほポイント | desktop Web homeからの入口は未確認 | `P`から公式ポイントpageへ遷移 | app固有の重要read route。銀行明細とはsession/sourceを分離する |
+
+appはlong-history local schemaとpoint routeの解明価値がある一方、公式exportと再現可能な長期backfillはWebが優位である。
+従って主収集器はWebのままにし、app解析を延期せずcoverage補完とtransport特定へ使う。
 
 ## 第三者クライアント
 
@@ -337,9 +408,16 @@ session取得を行う主体ではなく、local/管理下Chrome collectorのsch
    現在lot fieldと履歴/結果画面のfield名・保持範囲を記録する。預入/解約ボタンは押さない。
 8. appの`P`マークから公式ポイントページへ入り、origin、session境界、残高、獲得/利用/
    失効予定のrow field、paginationを記録する。チャージ/交換には進まない。
-9. public loginと認証後read requestを受動観測し、HTML formかJSON/XHRかを分類する。
-   certificate pinningやanti-debugに当たったら回避せず、Chrome collectorへ戻る。
-10. 7日間、同じbrowser profileで1日1回、口座一覧と短い明細だけ取得し、Akamai block、
+9. public loginでは、確認済みform field名と`LOGBNK...do`遷移だけをDevToolsで照合する。認証後read requestは
+   method、origin、path template、status、content type、field名だけを受動観測し、HTML form／JSON/XHRを分類する。
+   body、token、cookie、device fingerprint値は保存しない。
+10. 本人所有の対応非root実機から、上記手順で正規base/splitとsigner/hashを取得する。取得できればmanifest、host、
+    transport/model、local history schema、point route、session/device/integrity/pinning候補を静的解析する。
+11. 既存の登録済みappを本人が操作し、read-only画面のnetwork/local metadataを1回だけ観測する。
+    write遷移、app再登録、request replay、秘密／PII保存をせず、pinning/integrity/anti-debugで止まれば回避しない。
+12. Webとappの同じ短期間について、件数、取引後残高、カテゴリ、古いlocal明細、欠落を比較する。
+    app local履歴のrecord自体はexportせず、field名と集計差だけを残す。
+13. 7日間、同じbrowser profileで1日1回、口座一覧と短い明細だけ取得し、Akamai block、
     session expiry、duplicate、欠落、rate limitを評価してMVP方式を確定する。
 
 成功判定は、手動login後に書き込み画面へ入らず、全対象口座のstableなpseudonymous ID、
@@ -359,7 +437,9 @@ OTP/第2暗証番号をreadのために常時要求、root/pinning bypass、繰�
 - みずほポイントは現行で、銀行専用pageに残高・獲得/利用履歴・期限がある。
 - browser loginはお客さま番号+login password、risk判定時に第1暗証番号。Akamai edge、
   cookie、JavaScript、client environment/fingerprint scriptがある。
-- 公式Android packageは`jp.co.mizuhobank.banking`。
+- 銀行公式Android導線はPlay package`jp.co.mizuhobank.banking`へ転送され、調査時点のversionは`5.30.0`。
+- 未認証Webは`JSESSIONID`を先に発行し、`webX`へのShift_JIS form POSTとpage/session field、
+  `POSTKEY`、`CLIENT_ENV`、fingerprint tagを使う。公開login面に残高・明細JSON APIは確認できない。
 
 ### 推測
 
@@ -373,12 +453,14 @@ OTP/第2暗証番号をreadのために常時要求、root/pinning bypass、繰�
 
 - ユーザー申告のpasskeyがみずほダイレクト用か、現在のWebAuthn supportがあるか。
 - sessionのidle/absolute lifetime、session portability、並行login、logout invalidation。
-- 認証後endpointがHTMLのみか、JSON/XHRを併用するか。current form/page IDs。
+- password page以降と認証後endpointがHTMLのみか、JSON/XHRを併用するか。current read form/page IDs。
 - 現行CSV/PDFの列、encoding、1回の期間/件数、pagination、stable transaction ID。
 - 全口座科目の画面上のstable identifier、available balance、外貨/定期lotのexact fields。
 - 普通預金の未確定明細の有無。公開仕様ではposted ledgerしか確認できない。
 - みずほポイント履歴の保存期間、row fields、export、expiry bucket、session境界。
-- Bot Manager製品名、pinning、Play Integrity等、appのlocal DB暗号化。
+- 正規Android splitのversionCode、signer、manifest、hostname、native/WebView境界、API/model schema。
+- app local historyのDB schema/migration/encryption/key管理、pointのorigin/session handoff、device binding/session issuance。
+- Bot Manager製品名、certificate pinning、Play Integrity/root/debug検知の具体的実装。
 
 ## 主な根拠URL
 
