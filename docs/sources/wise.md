@@ -17,9 +17,13 @@ aggregator は初期取得経路にしない。
 - Wise Platform の OAuth 2.0 は契約済みパートナー向けで、client ID/secret、
   Developer Hub、mTLS が必要。個人が自分の口座だけを読むための一般公開 OAuth app
   登録経路は確認できない。
-- したがって現在値は **自動化レベル E、実装コスト 1**
-  （手動 export とローカル import）。ブラウザ replay は C/D 候補、コスト 4 だが、
-  Cloudflare の bot protection、再認証、passkey/2-step verification を伴うため既定にしない。
+- したがって安全な現在値は **自動化レベル E、実装コスト 1**
+  （手動 export とローカル import）。これは personal Web/app の内部 transport 調査を
+  先送りする理由ではない。公開 login JavaScript の静的解析までは実施し、認証済み
+  personal read transport と公式 Play split APK は次の read-only 検証対象として残した。
+- ブラウザ replay は C/D 候補、コスト 4 だが、Cloudflare の bot protection、再認証、
+  passkey/2-step verification を伴うため、正確な read route と session 更新を確認するまで
+  既定にしない。
 - 契約により read-only OAuth または Open Banking AISP の `accounts` scope を取得できる
   組織だけは A 候補だが、これは個人口座保有者が単独で開始できる経路ではない。
 
@@ -30,6 +34,13 @@ passkey は取得・記録していない。送金、換金、入出金、カー
 
 - Wise Help Centre、Wise Platform API docs、公式ストア掲載を優先した。
 - ログイン前の公開ページと HTTP response header だけを読み取り確認した。
+- 2026-08-26 の `/login` が配る Next.js build と JavaScript chunk を公式 origin から取得し、
+  SHA-256 を取って Prettier 3.9.6 で整形後、文字列と call site を静的に追跡した。repository
+  には bundle や artifact を保存していない。公開 source map は 403 だった。
+- Chrome の既存タブを確認したが Wise の認証済みタブはなかった。login、MFA、口座画面への
+  遷移は行わず、本人データを伴う runtime trace も取得しなかった。
+- Google Play の公式掲載で package/version を確認した。正規 split APK を取得できる管理下の
+  Android 端末と Android 解析 toolchain はこの環境になく、第三者 APK mirror は使っていない。
 - 公開 GitHub 実装は transport/auth と read/write 境界の確認にだけ使った。
 - 公式ドキュメントにない個人口座の API 可用性を、API schema の存在から推定しない。
 - 件数上限、session 寿命、内部 API の安定性など、公開根拠がないものは未確認とした。
@@ -191,6 +202,18 @@ Card Transactions V4 は別の partner API である。
 - statement download は Wise password の再入力が明記されている。
 - app は通知・生体認証を担うが、Web も同じ security settings を管理できる。
 
+公開 login build の静的解析では、次を確認した。これらは **identity/auth transport** であり、
+personal balance/transaction API ではない。
+
+- Axios の既定は `XSRF-TOKEN` cookie と `X-XSRF-TOKEN` header の組合せを持つ。
+- login は `POST /gateway/v2/login`、passkey/OTT は
+  `/gateway/v1/one-time-token/...`、Web 端末 challenge は `/v1/device/web/challenge` を使う。
+- password、TOTP、push、phone、passkey の OTT challenge route が同じ login app にある。
+- bundle にある固定 client marker は公開アプリ自身の識別子であり、個人 bearer/session token
+  ではない。値を collector credential として扱わない。
+- personal session cookie/token の発行形式、更新 route、寿命、device binding は login 前の
+  bundle だけでは確定できない。
+
 - https://wise.com/help/articles/2932125/how-do-i-add-change-or-remove-my-step-verification-settings
 - https://wise.com/help/articles/2951949/i-cant-use-my-step-verification-method
 
@@ -290,7 +313,100 @@ Wise Open Banking は認可済み AISP/TPP 向けに `accounts` scope の balanc
 | Platform API | 契約 scope 内の balance/statement/card data | JSON と statement formats | bearer OAuth/personal Business token、場合により SCA/mTLS |
 
 収集目的では Web export が最も広く、app は notification/2-step と spot check に向く。
-公式 Play package から APK を直接取得・解析して mobile transport を推測する必要はない。
+
+### 7.1 現行 Web JavaScript の静的 inventory
+
+2026-08-26 に公式 `/login` から取得した build ID は `login-app_main_7d8f91a`。entry は
+`pages/login-6024adb12c070424.js`、主要 app chunk は `_app-335f04025d26a9b1.js`
+（取得時 SHA-256 `d9a1c9f84d347f66630eda0d5cc288921bc7cca54e257f5c21f9700b9ceda0f1`）だった。
+整形・文字列追跡で 5.1 の identity route、XSRF 設定、passkey/OTT/device challenge を確認した。
+minified file が指す source map は公式 origin で 403 だったため、公開 bundle だけを解析した。
+
+`/home`、`/activity`、`/transactions`、`/balances`、`/your-account` の未認証 GET はいずれも
+`/login?redirectUrl=...` へ移り、login build manifest は login/account recovery 系 route だけを
+配る。したがって、この artifact から personal balance/activity chunk や read endpoint を
+見つけられなかったことは「endpoint がない」という証拠ではなく、認証後に別 app/bootstrap が
+配られるという証拠境界である。
+
+- https://wise.com/login
+
+### 7.2 personal read route の確認対象と recipient 除外
+
+公開 Platform API と personal internal API は別物として扱う。前者の path/schema を後者へ
+当てはめない。認証後の passive trace で次の UI 操作が発生させる request を一つずつ対応付ける。
+
+| UI read | 必要な schema | 取り込まないもの |
+| --- | --- | --- |
+| Home | currency balance、reserved/available、Jar、Assets の有無 | profile/account ID、氏名、住所 |
+| Activity 一覧/詳細 | stable ID の有無、timestamp、amount/currency、status、type、pagination | counterparty 名、口座番号、reference/free text |
+| card pending/completed | authorization/posted/cancelled/refund、reserved と settled の差 | card number/token、merchant location の詳細 |
+| conversion/fee 表示 | source/target amount/currency、rate、fee、同一 event の関連付け | quote/conversion の作成 request |
+| statement/transfer list | period、format、生成済み document の read | recipient filter 値、PDF/CSV の実データ |
+
+recipient 一覧・作成・編集 route は収集対象外で、`recipient`/`beneficiary` 専用 path にはアクセス
+しない。Activity response に相手情報が同居しても、collector は必要な取引状態だけを schema
+allowlist し、名前、bank detail、message/reference を破棄する。pending と posted は別 record と
+決め打ちせず、stable ID と状態遷移を確認してから reserved/settled をモデル化する。
+
+初回は passive page load で自然に発生した `GET` だけを候補にする。read が GraphQL/RPC の
+`POST` で実装されていても、method 名だけで安全と推定せず呼ばない。正確な path、query key、
+pagination、fee/FX field、session/renewal は認証済み trace がない現在は未確認である。
+
+### 7.3 公式 Android split APK の provenance と静的解析
+
+公式 Google Play listing で確認した package は `com.transferwise.android`、2026-08-26 時点の
+表示 version は `9.38.0`（2026-08-24 更新）。この調査環境には `adb`、`apksigner`、
+`bundletool`、`jadx`、`apktool`、`aapt2`、`apkanalyzer`、MobSF がなく、Docker だけがあった。
+また、管理下端末に Play から正規 install 済みの artifact がなかったため、versionCode、split
+一覧、SHA-256、signer certificate digest、manifest、host/path/schema は未取得である。
+
+- https://play.google.com/store/apps/details?id=com.transferwise.android
+
+第三者 mirror ではなく、本人管理の Google Play 端末へ公式 app を install/update した後、次の
+手順で全 split を取得する。端末の account data は開かず、repository 外の一時領域を使う。
+
+```bash
+PKG=com.transferwise.android
+OUT="$(mktemp -d)/$PKG"
+mkdir -p "$OUT"
+adb shell dumpsys package "$PKG" \
+  | rg 'versionName|versionCode|firstInstallTime|lastUpdateTime|signingInfo'
+adb shell pm path "$PKG" | tee "$OUT/package-paths.txt"
+while IFS= read -r line; do
+  remote=${line#package:}
+  adb pull "$remote" "$OUT/$(basename "$remote")"
+done < "$OUT/package-paths.txt"
+sha256sum "$OUT"/*.apk
+for apk in "$OUT"/*.apk; do
+  apksigner verify --verbose --print-certs "$apk"
+done
+jadx -d "$OUT/jadx" "$OUT"/*.apk
+apktool d -f "$OUT/base.apk" -o "$OUT/apktool-base"
+apkanalyzer manifest print "$OUT/base.apk" > "$OUT/AndroidManifest.xml"
+rg -a -n \
+  'https?://|wss://|api|gateway|balance|activity|transaction|statement|fee|exchange|recipient|okhttp|retrofit|webview|cookie|session|token|keystore|biometric|integrity|attestation|certificate|pin' \
+  "$OUT/jadx" "$OUT/apktool-base"
+```
+
+全 split の package/versionCode と signer digest の一致を先に検証し、base だけでなく code/config
+split も `jadx` へ渡す。manifest の exported component、app/deep link、network security config、
+WebView/native client、protobuf/JSON schema、session storage/renewal、Android Keystore/biometric、
+Play Integrity/attestation、certificate pinning 候補を inventory 化する。難読化解除と call graph
+追跡は対象だが、integrity/pinning/root/debugger 検出の **回避** はしない。MobSF は version/digest
+を固定したローカル container にだけ投入し、公開 cloud scanner へ APK を upload しない。
+
+### 7.4 本人操作の read-only runtime metadata 観測
+
+Web は本人が通常 login/MFA を完了した後、DevTools/CDP で現在の Home と Activity を再読込し、
+method、host、ID を template 化した path、query **key 名**、status、content-type、schema key だけを
+memory 内で集計する。header、cookie、token、request/response body、金額、ID、相手情報は保存しない。
+今回、既存 Chrome タブに Wise はなかったため実行していない。
+
+Android は改変していない公式 app で本人が Home/Activity を開く間に、DNS/SNI/IP と、OS trust
+の範囲で得られる場合だけ method/host/path、process/thread call site を観測する。通信 metadata
+を得られなければ TLS handshake/host までで止める。Frida 等で URL construction を
+runtime tracing すること自体は対象だが、token/header/body を hook せず、pinning/integrity を
+無効化しない。Web/app の host、path、schema、session issuance/renewal が同じとは仮定しない。
 
 ## 8. 公式 sample と公開 third-party client
 
@@ -338,6 +454,23 @@ MIT の古い Node.js client。`node-fetch`、bearer token、旧 host
 
 個人口座保有者が発行できる read-only API token/scope は確認できない。したがって
 「read-only scope の token を保管すれば安全」という設計は現時点では成立しない。
+
+personal internal transport を検証する collector は、公開 Platform client と完全に分ける。
+初回 inventory は本人の通常 UI 操作が自然に発生させた request の観測だけとし、次を強制する。
+
+- allowlist 候補は確認済み host 上の `GET` かつ Home balance、Activity list/detail、card
+  status、既存 statement metadata に対応した path だけ。未確認 path を再送しない。
+- `POST`/`PUT`/`PATCH`/`DELETE` は、read に見える GraphQL/RPC も含め初回は全て拒否する。
+- recipient/beneficiary、quote、conversion、transfer、funding、card control、Jar movement、
+  profile/security/notification settings の path は method に関係なく拒否する。
+- redirect を自動追従せず、host/path/method を再判定する。401/403/SCA/OTT/429 では停止し、
+  session refresh、MFA、device challenge を replay しない。
+- response から balance/transaction/status/fee/FX の許可 field だけを memory 内で抽出し、
+  ID、相手、reference、口座・カード detail、cookie/token を log/artifact に出さない。
+
+session/token issuance と renewal は未確認である。login bundle の XSRF/OTT route を personal
+data bearer と同一視せず、session replay 可否は Set-Cookie や Authorization 値そのものを保存
+せずに、credential **種別と更新イベントの有無**だけで判定する。
 
 ### 契約 API が利用可能になった場合
 
@@ -407,8 +540,9 @@ PR #5 の共通定義だけを使う。
 | Web/app 手動 export | **E** | **1** | 推奨。公式、広い形式、365 日 chunk |
 | 個人セルフサービス API | — | — | token/OAuth 発行経路を確認できない |
 | 契約 OAuth/Open Banking | A | 3–5 | 技術的には最良だが partnership/regulatory cost。個人 MVP 対象外 |
-| authenticated Web replay | C 候補 | 4 | internal API/session を live 未確認 |
+| authenticated Web replay | C 候補 | 4 | 公開 login transport は確認、personal read path/session renewal は未確認 |
 | full browser automation | D | 4 | Cloudflare/fraud signals、passkey/2-step、password 再入力 |
+| 公式 Android app replay | D 候補 | 5 | split APK/transport/device binding/pinning/integrity を未確認 |
 
 **source record の代表値は E / cost 1** とする。
 
@@ -419,6 +553,10 @@ PR #5 の共通定義だけを使う。
 - 公式 Help/API docs の現在の wording と URL。
 - `wise.com`、login、`api.wise.com` の DNS/response header。
 - 未認証 API が 401 で data を返さないこと。
+- 現行 login Next.js bundle の取得、hash、整形、identity/XSRF/OTT/device challenge call site。
+- personal UI route が未認証では login app へ redirect され、personal read chunk を配らないこと。
+- 公式 Play package/version/update date と、正規 split APK/toolchain が未取得である障壁。
+- 開いていた Chrome タブに Wise がないこと。login や runtime trace は開始していない。
 - 公開 repository の commit、license、transport/auth/write surface。
 
 ### 本人同席で次に確認する項目
@@ -426,13 +564,20 @@ PR #5 の共通定義だけを使う。
 値を記録せず、画面の有無・形式・schema だけを確認する。
 
 1. 個人 profile に API token menu がないこと。Business profile へ切り替えない。
-2. Home にある balance/Jar/Assets/card の種類だけを数値なしで確認。
-3. Statement 作成画面で 365 日制限、currency/Jar、format、fee-separate option を確認。
-4. Transactions の filter と CSV/PDF option を確認。download は本人が明示した場合だけ。
-5. Security settings で現在利用可能な method 名だけを確認。追加・削除・default 変更はしない。
-6. browser DevTools は request method/host/path/status と schema key だけを記録し、
+2. Home を一度再読込し、balance/Jar/Assets/card の種類と、それぞれの read request の
+   method/host/template path/status/pagination key/schema key だけを対応付ける。
+3. Activity 一覧/詳細を一つずつ開き、pending/posted/cancelled/refund、stable ID、fee/FX field の
+   **有無だけ**を確認する。recipient filter/list/settings へ移動しない。
+4. session の credential 種別、更新イベント、新規 device challenge の有無だけを記録する。
+   cookie/header/token の値、寿命を測るための長時間保持、refresh request の手動再送はしない。
+5. Statement 作成画面で 365 日制限、currency/Jar、format、fee-separate option を確認。
+6. Transactions の filter と CSV/PDF option を確認。download は本人が明示した場合だけ。
+7. Security settings で現在利用可能な method 名だけを確認。追加・削除・default 変更はしない。
+8. browser DevTools は request method/host/template path/status と schema key だけを記録し、
    header/body/cookie/token/ID/金額/取引内容を保存しない。
-7. もし export sample が必要なら、本人がローカルで作った完全に sanitized な header-only
+9. 公式 Play app の全 split と signer/versionCode を 7.3 の手順で確認し、static host/path/schema/
+   session/device/integrity/pinning 候補を inventory 化する。runtime は 7.4 の metadata に限る。
+10. もし export sample が必要なら、本人がローカルで作った完全に sanitized な header-only
    sample を使う。実取引ファイルを repository や issue に置かない。
 
 ### stop 条件
@@ -445,8 +590,10 @@ PR #5 の共通定義だけを使う。
 - OTP、password、passkey、recovery code、token、cookie、card/account identifier、PII の
   chat/log/trace への露出。
 - CAPTCHA、Turnstile、reCAPTCHA、account restriction、fraud warning、device verification。
-- 403 SCA、401 再認証、429、想定外 redirect、想定外の non-GET request。
+- 403 SCA、401 再認証、429、想定外 redirect、想定外の non-GET request。read に見える
+  GraphQL/RPC `POST` も安全性が証明できるまでは実行しない。
 - Cloudflare/fraud control の回避、stealth、fingerprint spoofing が必要になった場合。
+- pinning/integrity/root/debugger detection の無効化、hook による秘密/header/body 取得が必要な場合。
 - export が email delivery になり、本人の明示操作なしに外部送信を発生させる場合。
 
 login/2-step は本人が公式 UI で直接完了し、agent は秘密を受け取らない。失敗後に連続再試行
@@ -464,6 +611,9 @@ login/2-step は本人が公式 UI で直接完了し、agent は秘密を受け
 - 現行 Personal API Token は Business account 用。
 - Platform OAuth/Open Banking は partnership/mTLS 等を前提とする。
 - Cloudflare edge と `__cf_bm`、challenge/fraud 関連の public dependency がある。
+- 現行 public login build は XSRF cookie/header、login/OTT/passkey/device challenge の identity
+  route を持つが、personal balance/activity route は未認証 build に含まれない。
+- 公式 Android package は `com.transferwise.android`。公式 listing の観測 version は 9.38.0。
 - 公開 client は bearer HTTPS REST を実装し、一部は write endpoint も同居させる。
 
 ### 推測
@@ -480,7 +630,8 @@ login/2-step は本人が公式 UI で直接完了し、agent は秘密を受け
 - Assets holdings statement の個人口座全地域での形式、API の unit/cost basis coverage。
 - 複数 physical/digital card の export 区別と card filter の識別方法。
 - authenticated Web/mobile の host、endpoint、pagination、session/refresh lifetime。
-- device binding、mobile TLS pinning、Play Integrity/App Attest の利用。
+- 正規 Play split APK の versionCode、hash、signer、manifest、host/path/schema。
+- Web/app transport の差、device binding、mobile TLS pinning、Play Integrity/App Attest の利用。
 - Cloudflare challenge/fraud rule の発火条件。
 - Wise と Bitwarden の組合せに対する公式サポート可否。
 
