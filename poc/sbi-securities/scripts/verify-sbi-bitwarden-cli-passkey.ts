@@ -1,7 +1,7 @@
 import { createBitwardenAssertion } from '../packages/auth-bitwarden/src/fido2'
 import type { BitwardenPasskey } from '../packages/auth-bitwarden/src/vault'
 import { createPasskeySession, loginWithPasskey } from '../packages/provider-sbi-sec/src/session'
-import type { PasskeyAssertionProvider } from '../packages/provider-sbi-sec/src/types'
+import type { PasskeyAssertionProvider, SbiSession } from '../packages/provider-sbi-sec/src/types'
 
 interface BitwardenCliItem {
   id?: unknown
@@ -79,6 +79,137 @@ const requiredDate = (value: string, label: string) => {
   return value
 }
 
+const dateOnly = (value: Date) => value.toISOString().slice(0, 10)
+
+const addUtcDays = (value: string, days: number) => {
+  const date = new Date(`${requiredDate(value, 'date')}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return dateOnly(date)
+}
+
+const splitInclusiveDateRange = (from: string, to: string, maximumDays: number) => {
+  if (!Number.isSafeInteger(maximumDays) || maximumDays < 1) {
+    throw new Error('maximumDays must be a positive integer')
+  }
+  if (from > to) throw new Error('date range start must not be after end')
+  const windows: Array<{ from: string; to: string }> = []
+  for (let start = from; start <= to; ) {
+    const candidateEnd = addUtcDays(start, maximumDays - 1)
+    const end = candidateEnd < to ? candidateEnd : to
+    windows.push({ from: start, to: end })
+    start = addUtcDays(end, 1)
+  }
+  return windows
+}
+
+const objectValue = (value: unknown): Record<string, unknown> | undefined =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+
+const arrayValue = (value: unknown): unknown[] => (Array.isArray(value) ? value : [])
+
+const foreignGraphql = async (
+  session: SbiSession,
+  endpoint: 'bff' | 'int',
+  operationName: string,
+  query: string,
+  variables: Record<string, unknown>,
+) => {
+  const foreign = session.foreignStock
+  if (!foreign?.sessionId || !foreign.accountId || foreign.loginAuthenticated !== true) {
+    throw new Error('foreign stock session is not authenticated')
+  }
+  const url = endpoint === 'bff' ? foreign.endpoints.graphqlBffUrl : foreign.endpoints.graphqlIntUrl
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      authorization: `Bearer ${foreign.sessionId}`,
+      'account-id': foreign.accountId,
+      'content-type': 'application/json',
+      ...(foreign.endpoints.userAgent ? { 'user-agent': foreign.endpoints.userAgent } : {}),
+    },
+    body: JSON.stringify({ operationName, query, variables }),
+  })
+  const body = (await response.json()) as unknown
+  const root = objectValue(body)
+  if (!response.ok || arrayValue(root?.errors).length > 0) {
+    throw new Error(`foreign stock GraphQL ${operationName} failed`)
+  }
+  return objectValue(root?.data) ?? {}
+}
+
+const fetchUsHistorySearchDuration = async (session: SbiSession) => {
+  const data = await foreignGraphql(
+    session,
+    'bff',
+    'GetSearchingDuration',
+    `query GetSearchingDuration($input: GetSearchingDurationRequest!) {
+      getSearchingDuration(input: $input) {
+        pastYears searchDateFrom searchDateTo
+      }
+    }`,
+    {
+      input: {
+        countryCode: 'US',
+        searchFunction: 'EXECUTION_HISTORY',
+        searchDateType: 'TRADE_DATE_BASE',
+        dateType: 'MONTH',
+        quantity: 1,
+      },
+    },
+  )
+  const duration = objectValue(data.getSearchingDuration)
+  if (!duration) throw new Error('GetSearchingDuration returned no duration')
+  return {
+    pastYears: typeof duration.pastYears === 'number' ? duration.pastYears : undefined,
+    searchDateFrom: optionalString(duration.searchDateFrom),
+    searchDateTo: optionalString(duration.searchDateTo),
+  }
+}
+
+const fetchForeignCashBalances = async (session: SbiSession, days: number) => {
+  const data = await foreignGraphql(
+    session,
+    'int',
+    'GetForeignCashBalance',
+    `query GetForeignCashBalance($input: Input_account_balance_ListForeignScheduleCashBalancesRequest) {
+      listForeignScheduleCashBalances(input: $input) {
+        foreignCashBalances {
+          accountKind
+          currencyCashBalances {
+            currencyCode
+            foreignScheduleCashBalances {
+              businessDate daysLater buyPossibleAmount keepCash
+              transferPossibleAmount remainingBuyPossibleAmount amountPayValue
+            }
+          }
+        }
+      }
+    }`,
+    { input: { currencyCode: 'USD', days } },
+  )
+  const response = objectValue(data.listForeignScheduleCashBalances)
+  return arrayValue(response?.foreignCashBalances).flatMap((account) => {
+    const accountObject = objectValue(account)
+    return arrayValue(accountObject?.currencyCashBalances).flatMap((currency) => {
+      const currencyObject = objectValue(currency)
+      return arrayValue(currencyObject?.foreignScheduleCashBalances).map((balance) => ({
+        accountKind: optionalString(accountObject?.accountKind),
+        currencyCode: optionalString(currencyObject?.currencyCode),
+        ...objectValue(balance),
+      }))
+    })
+  })
+}
+
+const numericStringState = (value: unknown) => {
+  if (typeof value !== 'string' && typeof value !== 'number') return 'missing'
+  const number = Number(String(value).replaceAll(',', ''))
+  return Number.isFinite(number) ? numberState(number) : 'missing'
+}
+
 const readOnlyResult = async <T>(read: () => Promise<T>) => {
   try {
     return { ok: true as const, value: await read() }
@@ -91,6 +222,7 @@ const readOnlyResult = async <T>(read: () => Promise<T>) => {
       ok: false as const,
       errorType: error instanceof Error ? error.name : 'UnknownError',
       errorCode: code,
+      errorMessage: error instanceof Error ? error.message : undefined,
     }
   }
 }
@@ -231,6 +363,47 @@ const main = async () => {
         client.orders.inquiry.executionsToday(),
       )
       const domesticOpenOrdersResult = await readOnlyResult(() => client.orders.inquiry.open())
+      const domesticHistoryFrom = requiredDate(
+        process.env.SBI_DOMESTIC_HISTORY_FROM ?? '2024-01-01',
+        'SBI_DOMESTIC_HISTORY_FROM',
+      )
+      const domesticHistoryTo = requiredDate(
+        process.env.SBI_DOMESTIC_HISTORY_TO ?? new Date().toISOString().slice(0, 10),
+        'SBI_DOMESTIC_HISTORY_TO',
+      )
+      const domesticTradeHistoryResult = await readOnlyResult(() =>
+        client.orders.inquiry.tradeRecords({
+          market: 'XTKS',
+          from: domesticHistoryFrom,
+          to: domesticHistoryTo,
+          limit: 200,
+        }),
+      )
+      const verifyDomesticHistoryWindows =
+        process.env.SBI_VERIFY_DOMESTIC_HISTORY_WINDOWS === 'true'
+      const domesticHistoryWindows = verifyDomesticHistoryWindows
+        ? splitInclusiveDateRange(domesticHistoryFrom, domesticHistoryTo, 90)
+        : []
+      const domesticHistoryWindowResults = [] as Array<{
+        window: { from: string; to: string }
+        result: Awaited<
+          ReturnType<
+            typeof readOnlyResult<Awaited<ReturnType<typeof client.orders.inquiry.tradeRecords>>>
+          >
+        >
+      }>
+      for (const window of domesticHistoryWindows) {
+        domesticHistoryWindowResults.push({
+          window,
+          result: await readOnlyResult(() =>
+            client.orders.inquiry.tradeRecords({
+              market: 'XTKS',
+              ...window,
+              limit: 200,
+            }),
+          ),
+        })
+      }
 
       const usMarkets = ['XNAS', 'XNYS', 'ARCX'] as const
       const usPositionResults = liveForeignStockBaseUrl
@@ -241,6 +414,13 @@ const main = async () => {
             })),
           )
         : []
+      const exportedSession = liveForeignStockBaseUrl ? await client.session.export() : undefined
+      const usHistorySearchDurationResult = exportedSession
+        ? await readOnlyResult(() => fetchUsHistorySearchDuration(exportedSession))
+        : undefined
+      const foreignCashBalanceResult = exportedSession
+        ? await readOnlyResult(() => fetchForeignCashBalances(exportedSession, 5))
+        : undefined
       const usHistoryFrom = requiredDate(
         process.env.SBI_US_HISTORY_FROM ?? '2021-01-01',
         'SBI_US_HISTORY_FROM',
@@ -258,6 +438,40 @@ const main = async () => {
             }),
           )
         : undefined
+      const verifyUsHistoryWindows = process.env.SBI_VERIFY_US_HISTORY_WINDOWS === 'true'
+      const defaultScanFrom = (() => {
+        const pastYears = usHistorySearchDurationResult?.ok
+          ? usHistorySearchDurationResult.value.pastYears
+          : undefined
+        const toYear = Number(usHistoryTo.slice(0, 4))
+        return pastYears && Number.isSafeInteger(pastYears)
+          ? `${toYear - pastYears}-01-01`
+          : usHistoryFrom
+      })()
+      const usHistoryScanFrom = requiredDate(
+        process.env.SBI_US_HISTORY_SCAN_FROM ?? defaultScanFrom,
+        'SBI_US_HISTORY_SCAN_FROM',
+      )
+      const usHistoryWindows =
+        verifyUsHistoryWindows && liveForeignStockBaseUrl
+          ? splitInclusiveDateRange(usHistoryScanFrom, usHistoryTo, 90)
+          : []
+      const usHistoryWindowResults = [] as Array<{
+        window: { from: string; to: string }
+        result: Awaited<
+          ReturnType<
+            typeof readOnlyResult<Awaited<ReturnType<typeof client.orders.inquiry.tradeRecords>>>
+          >
+        >
+      }>
+      for (const window of usHistoryWindows) {
+        usHistoryWindowResults.push({
+          window,
+          result: await readOnlyResult(() =>
+            client.orders.inquiry.tradeRecords({ ...window, limit: 999 }),
+          ),
+        })
+      }
 
       const verifyMarketData = process.env.SBI_VERIFY_MARKET_DATA === 'true'
       const domesticSample = cashResult.ok ? cashResult.value.positions[0] : undefined
@@ -329,6 +543,7 @@ const main = async () => {
         marginResult.ok ? marginResult.value.error : undefined,
         domesticExecutionsResult.ok ? domesticExecutionsResult.value.error : undefined,
         domesticOpenOrdersResult.ok ? domesticOpenOrdersResult.value.error : undefined,
+        domesticTradeHistoryResult.ok ? domesticTradeHistoryResult.value.error : undefined,
         ...usPositionResults.map(({ result }) => (result.ok ? result.value.error : undefined)),
         usTradeHistoryResult?.ok ? usTradeHistoryResult.value.error : undefined,
       ].filter((error) => error?.code && error.code !== '000000')
@@ -343,8 +558,46 @@ const main = async () => {
             .filter((date): date is string => Boolean(date))
             .sort()
         : []
+      const domesticHistoryWindowRecords = domesticHistoryWindowResults.flatMap(({ result }) =>
+        result.ok ? result.value.records : [],
+      )
+      const domesticHistoryWindowUniqueRecords = new Map(
+        domesticHistoryWindowRecords.map((record) => [record.id, record]),
+      )
+      const domesticHistoryWindowDates = [...domesticHistoryWindowUniqueRecords.values()]
+        .map((record) => record.tradeDate)
+        .filter((date): date is string => Boolean(date))
+        .sort()
+      const usHistoryWindowRecords = usHistoryWindowResults.flatMap(({ result }) =>
+        result.ok ? result.value.records : [],
+      )
+      const usHistoryWindowUniqueRecords = new Map(
+        usHistoryWindowRecords.map((record) => [record.id, record]),
+      )
+      const usHistoryWindowDates = [...usHistoryWindowUniqueRecords.values()]
+        .map((record) => record.tradeDate)
+        .filter((date): date is string => Boolean(date))
+        .sort()
+      const foreignCashBalanceDates = foreignCashBalanceResult?.ok
+        ? foreignCashBalanceResult.value
+            .map((balance) => optionalString(balance.businessDate))
+            .filter((date): date is string => Boolean(date))
+            .sort()
+        : []
       const yenHistoryDates = yenHistoryResult?.ok
         ? yenHistoryResult.value.map((transaction) => transaction.occurredAt).sort()
+        : []
+      const yenDividendTransactions = yenHistoryResult?.ok
+        ? yenHistoryResult.value.filter((transaction) =>
+            /配当|分配金/.test(transaction.description ?? ''),
+          )
+        : []
+      const domesticIssueIdentifiers = cashResult.ok
+        ? cashResult.value.positions.flatMap((position) =>
+            [position.issue.code, position.issue.name].filter((value): value is string =>
+              Boolean(value),
+            ),
+          )
         : []
       process.stdout.write(
         `${JSON.stringify(
@@ -356,8 +609,14 @@ const main = async () => {
               'account.power.buyingPower',
               'orders.inquiry.executionsToday',
               'orders.inquiry.open',
+              'orders.inquiry.tradeRecords (domestic)',
               ...(liveForeignStockBaseUrl
-                ? ['account.positions.cash (US)', 'orders.inquiry.tradeRecords (US)']
+                ? [
+                    'account.positions.cash (US)',
+                    'orders.inquiry.tradeRecords (US)',
+                    'foreign cash balance (USD)',
+                    ...(verifyUsHistoryWindows ? ['US trade history 90-day window scan'] : []),
+                  ]
                 : []),
               ...(liveMainSiteBaseUrl ? ['account.assets.current', 'banking.detailHistory'] : []),
             ],
@@ -410,6 +669,55 @@ const main = async () => {
             domesticOpenOrdersErrorCode: domesticOpenOrdersResult.ok
               ? undefined
               : domesticOpenOrdersResult.errorCode,
+            domesticTradeHistoryReadSucceeded: domesticTradeHistoryResult.ok,
+            domesticTradeHistoryCount: domesticTradeHistoryResult.ok
+              ? domesticTradeHistoryResult.value.records.length
+              : undefined,
+            domesticTradeHistoryMethodErrorCode: domesticTradeHistoryResult.ok
+              ? domesticTradeHistoryResult.value.error?.code
+              : undefined,
+            domesticTradeHistoryErrorType: domesticTradeHistoryResult.ok
+              ? undefined
+              : domesticTradeHistoryResult.errorType,
+            domesticHistoryWindowScanEnabled: verifyDomesticHistoryWindows,
+            domesticHistoryWindowCount: verifyDomesticHistoryWindows
+              ? domesticHistoryWindows.length
+              : undefined,
+            domesticHistoryWindowSuccessCount: verifyDomesticHistoryWindows
+              ? domesticHistoryWindowResults.filter(({ result }) => result.ok).length
+              : undefined,
+            domesticHistoryWindowFailureCount: verifyDomesticHistoryWindows
+              ? domesticHistoryWindowResults.filter(({ result }) => !result.ok).length
+              : undefined,
+            domesticHistoryWindowFailures: verifyDomesticHistoryWindows
+              ? domesticHistoryWindowResults
+                  .filter(({ result }) => !result.ok)
+                  .map(({ window, result }) => ({
+                    ...window,
+                    errorType: result.ok ? undefined : result.errorType,
+                    errorCode: result.ok ? undefined : result.errorCode,
+                  }))
+              : undefined,
+            domesticHistoryWindowHasMoreCount: verifyDomesticHistoryWindows
+              ? domesticHistoryWindowResults.filter(
+                  ({ result }) => result.ok && result.value.hasMore,
+                ).length
+              : undefined,
+            domesticHistoryWindowRecordCount: verifyDomesticHistoryWindows
+              ? domesticHistoryWindowRecords.length
+              : undefined,
+            domesticHistoryWindowUniqueRecordCount: verifyDomesticHistoryWindows
+              ? domesticHistoryWindowUniqueRecords.size
+              : undefined,
+            domesticHistoryWindowDuplicateCount: verifyDomesticHistoryWindows
+              ? domesticHistoryWindowRecords.length - domesticHistoryWindowUniqueRecords.size
+              : undefined,
+            domesticHistoryWindowOldestDate: verifyDomesticHistoryWindows
+              ? domesticHistoryWindowDates.at(0)
+              : undefined,
+            domesticHistoryWindowNewestDate: verifyDomesticHistoryWindows
+              ? domesticHistoryWindowDates.at(-1)
+              : undefined,
             usPositionsConfigured: Boolean(liveForeignStockBaseUrl),
             usPositionsReadSucceeded:
               usPositionResults.length > 0 && usPositionResults.every(({ result }) => result.ok),
@@ -495,6 +803,87 @@ const main = async () => {
               usTradeHistoryResult && !usTradeHistoryResult.ok
                 ? usTradeHistoryResult.errorCode
                 : undefined,
+            usHistorySearchDurationReadSucceeded: usHistorySearchDurationResult?.ok,
+            usHistorySearchDurationPastYears: usHistorySearchDurationResult?.ok
+              ? usHistorySearchDurationResult.value.pastYears
+              : undefined,
+            usHistorySearchDurationDefaultFrom: usHistorySearchDurationResult?.ok
+              ? usHistorySearchDurationResult.value.searchDateFrom
+              : undefined,
+            usHistorySearchDurationDefaultTo: usHistorySearchDurationResult?.ok
+              ? usHistorySearchDurationResult.value.searchDateTo
+              : undefined,
+            usHistoryWindowScanEnabled: verifyUsHistoryWindows,
+            usHistoryWindowScanFrom: verifyUsHistoryWindows ? usHistoryScanFrom : undefined,
+            usHistoryWindowScanTo: verifyUsHistoryWindows ? usHistoryTo : undefined,
+            usHistoryWindowCount: verifyUsHistoryWindows ? usHistoryWindows.length : undefined,
+            usHistoryWindowSuccessCount: verifyUsHistoryWindows
+              ? usHistoryWindowResults.filter(({ result }) => result.ok).length
+              : undefined,
+            usHistoryWindowFailureCount: verifyUsHistoryWindows
+              ? usHistoryWindowResults.filter(({ result }) => !result.ok).length
+              : undefined,
+            usHistoryWindowFailures: verifyUsHistoryWindows
+              ? usHistoryWindowResults
+                  .filter(({ result }) => !result.ok)
+                  .map(({ window, result }) => ({
+                    ...window,
+                    errorType: result.ok ? undefined : result.errorType,
+                    errorCode: result.ok ? undefined : result.errorCode,
+                  }))
+              : undefined,
+            usHistoryWindowHasMoreCount: verifyUsHistoryWindows
+              ? usHistoryWindowResults.filter(
+                  ({ result }) => result.ok && result.value.hasMore === true,
+                ).length
+              : undefined,
+            usHistoryWindowRecordCount: verifyUsHistoryWindows
+              ? usHistoryWindowRecords.length
+              : undefined,
+            usHistoryWindowUniqueRecordCount: verifyUsHistoryWindows
+              ? usHistoryWindowUniqueRecords.size
+              : undefined,
+            usHistoryWindowDuplicateCount: verifyUsHistoryWindows
+              ? usHistoryWindowRecords.length - usHistoryWindowUniqueRecords.size
+              : undefined,
+            usHistoryWindowOldestDate: verifyUsHistoryWindows
+              ? usHistoryWindowDates.at(0)
+              : undefined,
+            usHistoryWindowNewestDate: verifyUsHistoryWindows
+              ? usHistoryWindowDates.at(-1)
+              : undefined,
+            foreignCashBalanceReadSucceeded: foreignCashBalanceResult?.ok,
+            foreignCashBalanceEntryCount: foreignCashBalanceResult?.ok
+              ? foreignCashBalanceResult.value.length
+              : undefined,
+            foreignCashBalanceCurrencies: foreignCashBalanceResult?.ok
+              ? [...new Set(foreignCashBalanceResult.value.map((balance) => balance.currencyCode))]
+                  .filter(Boolean)
+                  .sort()
+              : undefined,
+            foreignCashBalanceAccountKindCount: foreignCashBalanceResult?.ok
+              ? new Set(foreignCashBalanceResult.value.map((balance) => balance.accountKind)).size
+              : undefined,
+            foreignCashBalanceOldestDate: foreignCashBalanceDates.at(0),
+            foreignCashBalanceNewestDate: foreignCashBalanceDates.at(-1),
+            foreignCashBalancePositiveKeepCashCount: foreignCashBalanceResult?.ok
+              ? foreignCashBalanceResult.value.filter(
+                  (balance) => numericStringState(balance.keepCash) === 'positive',
+                ).length
+              : undefined,
+            foreignCashBalancePositiveBuyPossibleCount: foreignCashBalanceResult?.ok
+              ? foreignCashBalanceResult.value.filter(
+                  (balance) => numericStringState(balance.buyPossibleAmount) === 'positive',
+                ).length
+              : undefined,
+            foreignCashBalanceErrorType:
+              foreignCashBalanceResult && !foreignCashBalanceResult.ok
+                ? foreignCashBalanceResult.errorType
+                : undefined,
+            foreignCashBalanceErrorCode:
+              foreignCashBalanceResult && !foreignCashBalanceResult.ok
+                ? foreignCashBalanceResult.errorCode
+                : undefined,
             accountAssetsConfigured: Boolean(liveMainSiteBaseUrl),
             accountAssetsReadSucceeded: assetsResult?.ok,
             accountAssetCategories: assetsResult?.ok
@@ -516,6 +905,21 @@ const main = async () => {
               yenHistoryResult && !yenHistoryResult.ok ? yenHistoryResult.errorType : undefined,
             yenHistoryErrorCode:
               yenHistoryResult && !yenHistoryResult.ok ? yenHistoryResult.errorCode : undefined,
+            yenDividendTransactionCount: yenDividendTransactions.length,
+            yenDividendWithFourDigitCodeCount: yenDividendTransactions.filter((transaction) =>
+              /(^|\D)\d{4}(\D|$)/.test(transaction.description ?? ''),
+            ).length,
+            yenDividendMatchingCurrentIssueCount: yenDividendTransactions.filter((transaction) =>
+              domesticIssueIdentifiers.some((identifier) =>
+                (transaction.description ?? '').includes(identifier),
+              ),
+            ).length,
+            yenDividendWithSpecificDescriptionCount: yenDividendTransactions.filter(
+              (transaction) =>
+                !/^(株式)?配当金$|^分配金$/.test(
+                  (transaction.description ?? '').replaceAll(/\s/g, ''),
+                ),
+            ).length,
             hasMethodError,
             trace,
           },

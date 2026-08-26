@@ -1,0 +1,350 @@
+diff --git a/packages/provider-sbi-sec/src/methods/index.ts b/packages/provider-sbi-sec/src/methods/index.ts
+index 90adeb2..35e16f8 100644
+--- a/packages/provider-sbi-sec/src/methods/index.ts
++++ b/packages/provider-sbi-sec/src/methods/index.ts
+@@ -50,6 +50,8 @@ import type {
+   StockOrderPreOrder,
+   StockOrderPreOrderPriceStep,
+   ThemeInvestmentList,
++  TradeRecord,
++  TradeRecordList,
+   TradeSide,
+   Watchlist,
+ } from '../types'
+@@ -93,6 +95,7 @@ import type {
+   StockOrderMarginPosition,
+   ThemeInvestmentOrderOptions,
+   ThemeInvestmentPreOrderOptions,
++  TradeRecordInquiryOptions,
+ } from './types'
+ import { SbiServerError } from './error-map'
+ import { domesticMarketToMts, isUsMarket, mtsMarketToDomestic } from '../markets'
+@@ -506,9 +509,7 @@ export const createMethodsFromSession = (session: SbiSession): SbiClientMethods
+         },
+         tradeRecords: async (options) => {
+           if (!options.market || isUsMarket(options.market)) return usStock.tradeRecords(options)
+-          throw new Error(
+-            'orders.inquiry.tradeRecords is currently implemented only for US stock markets',
+-          )
++          return fetchDomesticTradeRecords(session, options)
+         },
+       },
+       cash: {
+@@ -1328,7 +1329,11 @@ const yenDetailHistoryCsrfTokenFromHtml = (html: string, responseUrl: string) =>
+   return token
+ }
+ 
+-const fetchYenDetailHistoryPage = async (session: SbiSession, auth: MainSiteAuthCache) => {
++const fetchMainSiteAuthenticatedPage = async (
++  session: SbiSession,
++  auth: MainSiteAuthCache,
++  entryUrl: URL | ((authenticatedHtml: string, responseUrl: URL) => URL),
++) => {
+   if (!auth.cookies) throw new Error('SBI main site session does not include scoped cookies')
+   const jar = auth.cookies.map((cookie) => ({ ...cookie }))
+   const siteLinkParam = await fetchMainSiteLinkParam(session)
+@@ -1377,6 +1382,7 @@ const fetchYenDetailHistoryPage = async (session: SbiSession, auth: MainSiteAuth
+     referer = loginForm.action.toString()
+   }
+ 
++  let authenticatedResponse: Response | undefined
+   for (let redirectCount = 0; redirectCount < 10; redirectCount += 1) {
+     const response = await fetch(requestUrl, {
+       headers: {
+@@ -1389,23 +1395,24 @@ const fetchYenDetailHistoryPage = async (session: SbiSession, auth: MainSiteAuth
+     })
+     updateCookieJar(jar, response, requestUrl)
+     const location = response.headers.get('location')
+-    if (!location) break
++    if (!location) {
++      authenticatedResponse = response
++      break
++    }
+     referer = requestUrl.toString()
+     requestUrl = new URL(location, requestUrl)
+   }
+ 
+-  const entryUrl = new URL('/ETGate/', auth.baseUrl)
+-  entryUrl.search = new URLSearchParams({
+-    _ControlID: 'WPLETsmR001Control',
+-    _PageID: 'WPLETsmR001Sdtl23',
+-    _ActionID: 'NoActionID',
+-    _DataStoreID: 'DSWPLETsmR001Control',
+-    OutSide: 'on',
+-    getFlg: 'on',
+-    path: 'banking/yen/detail-history',
+-  }).toString()
+-
+-  requestUrl = entryUrl
++  if (!authenticatedResponse) {
++    throw new Error('SBI main site login navigation exceeded redirect limit')
++  }
++  requestUrl =
++    typeof entryUrl === 'function'
++      ? entryUrl(
++          decodeShiftJis(Buffer.from(await authenticatedResponse.arrayBuffer())),
++          new URL(authenticatedResponse.url),
++        )
++      : entryUrl
+   referer = auth.assetsUrl
+   for (let redirectCount = 0; redirectCount < 10; redirectCount += 1) {
+     const response = await fetch(requestUrl, {
+@@ -1419,18 +1426,215 @@ const fetchYenDetailHistoryPage = async (session: SbiSession, auth: MainSiteAuth
+     })
+     updateCookieJar(jar, response, requestUrl)
+     const location = response.headers.get('location')
+-    if (!location) return { response, cookieHeader: cookieHeader(jar, requestUrl) }
++    if (!location) {
++      return {
++        response,
++        cookieHeader: cookieHeader(jar, requestUrl),
++        cookies: jar.map((cookie) => ({ ...cookie })),
++      }
++    }
+     referer = requestUrl.toString()
+     requestUrl = new URL(location, requestUrl)
+   }
+   throw new Error('SBI yen detail history navigation exceeded redirect limit')
+ }
+ 
++const htmlText = (value: string) =>
++  value
++    .replace(/<br\s*\/?\s*>/gi, ' ')
++    .replace(/<[^>]+>/g, '')
++    .replace(/&nbsp;|&#160;/gi, ' ')
++    .replace(/&amp;/gi, '&')
++    .replace(/&lt;/gi, '<')
++    .replace(/&gt;/gi, '>')
++    .replace(/&quot;|&#34;/gi, '"')
++    .replace(/&#39;|&apos;/gi, "'")
++    .replace(/\s+/g, ' ')
++    .trim()
++
++const domesticHistoryMarket = (label: string): MarketCode => {
++  if (label.includes('東証')) return 'XTKS'
++  if (label.includes('名証')) return 'XNGO'
++  if (label.includes('福証')) return 'XFKA'
++  if (label.includes('札証')) return 'XSAP'
++  return 'STK'
++}
++
++const domesticHistoryAccountType = (label: string): AccountType => {
++  if (label.includes('特定')) return 'specific'
++  if (label.includes('一般')) return 'general'
++  if (label.includes('NISA(成)') || label.includes('NISA（成）')) return 'growthInvestment'
++  if (label.includes('NISA')) return 'nisa'
++  return 'unknown'
++}
++
++const domesticHistoryIsoDate = (value: string) => {
++  const match = value.trim().match(/^(\d{2})\/(\d{2})\/(\d{2})$/)
++  if (!match) return undefined
++  return `20${match[1]}-${match[2]}-${match[3]}`
++}
++
++const parseDomesticTradeRecords = (html: string, limit: number): TradeRecordList => {
++  const table = [...html.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)]
++    .map((match) => match[1] ?? '')
++    .find(
++      (candidate) =>
++        htmlText(candidate).includes('約定日') && htmlText(candidate).includes('約定数量'),
++    )
++  if (!table) {
++    if (/\bname=["']ACT_search["']/i.test(html)) return { records: [], hasMore: false }
++    throw new Error('SBI domestic trade history response did not include a result table')
++  }
++
++  const parsedRecords = [...table.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)]
++    .map((row) =>
++      [...(row[1] ?? '').matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((cell) =>
++        htmlText(cell[1] ?? ''),
++      ),
++    )
++    .filter((cells) => cells.length === 7 && /^\d{2}\/\d{2}\/\d{2}$/.test(cells[0] ?? ''))
++    .map((cells): TradeRecord => {
++      const issueText = cells[1] ?? ''
++      const issueMatch = issueText.match(/^(.+?)\s+([0-9A-Z]{4})\s+(.+)$/)
++      const issueCode = issueMatch?.[2] ?? ''
++      const marketLabel = issueMatch?.[3] ?? ''
++      const tradeAccountMatch = (cells[2] ?? '').match(/^(.+?)\s+([^/]+)\/\s*(.*)$/)
++      const quantityPriceMatch = (cells[3] ?? '').match(/^([\d,.+-]+)\s+([\d,.+-]+)$/)
++      const valueDateAmountMatch = (cells[5] ?? '').match(
++        /^(\d{2}\/\d{2}\/\d{2})\s+([\d,.+△()-]+)$/,
++      )
++      const tradeDate = domesticHistoryIsoDate(cells[0] ?? '')
++      const valueDate = domesticHistoryIsoDate(valueDateAmountMatch?.[1] ?? '')
++      const tradeRecordTypeCode = tradeAccountMatch?.[1]?.trim() ?? cells[2]
++      return {
++        id: [issueCode, tradeDate, tradeRecordTypeCode, valueDate, cells[3], cells[5]]
++          .filter(Boolean)
++          .join(':'),
++        issue: {
++          code: issueCode,
++          market: domesticHistoryMarket(marketLabel),
++          name: issueMatch?.[1]?.trim() ?? issueText,
++        },
++        tradeRecordTypeCode,
++        tradeCurrencyCode: 'JPY',
++        accountType: domesticHistoryAccountType(tradeAccountMatch?.[2] ?? ''),
++        settlementCurrencyCode: 'JPY',
++        amount: yen(valueDateAmountMatch?.[2] ?? ''),
++        quantity: parseNumber(quantityPriceMatch?.[1] ?? ''),
++        price: yen(quantityPriceMatch?.[2] ?? ''),
++        tradeDate,
++        valueDate,
++      }
++    })
++  const occurrenceCounts = new Map<string, number>()
++  const records = parsedRecords.map((record) => {
++    const occurrence = (occurrenceCounts.get(record.id) ?? 0) + 1
++    occurrenceCounts.set(record.id, occurrence)
++    return { ...record, id: `${record.id}:${occurrence}` }
++  })
++
++  return { records, hasMore: records.length >= limit }
++}
++
++const fetchDomesticTradeRecords = async (
++  session: SbiSession,
++  options: TradeRecordInquiryOptions,
++): Promise<TradeRecordList> => {
++  const to = options.to ?? new Date().toISOString().slice(0, 10)
++  if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) {
++    throw new Error('orders.inquiry.tradeRecords to must use YYYY-MM-DD')
++  }
++  const defaultFromDate = new Date(`${to}T00:00:00.000Z`)
++  defaultFromDate.setUTCDate(defaultFromDate.getUTCDate() - 89)
++  const from = options.from ?? defaultFromDate.toISOString().slice(0, 10)
++  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || from > to) {
++    throw new Error('orders.inquiry.tradeRecords requires a valid from-to range')
++  }
++  const auth = await ensureMainSiteAuth(session)
++  const { response: initialResponse, cookies } = await fetchMainSiteAuthenticatedPage(
++    session,
++    auth,
++    (authenticatedHtml, responseUrl) => {
++      const historyLinks = [
++        ...authenticatedHtml.matchAll(
++          /<a\b[^>]*href=["']([^"']*WPLETacR007Control[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi,
++        ),
++      ]
++      const encodedHref = historyLinks[0]?.[1]
++      if (!encodedHref) {
++        throw new Error('SBI authenticated page did not include the domestic trade history link')
++      }
++      return new URL(encodedHref.replace(/&amp;/gi, '&'), responseUrl)
++    },
++  )
++  let response = initialResponse
++  let html = decodeShiftJis(Buffer.from(await response.arrayBuffer()))
++  if (!response.ok) {
++    throw new Error(`SBI domestic trade history failed with HTTP ${response.status}`)
++  }
++  if (textFromTitle(html)?.includes('メンテナンス')) {
++    throw new Error('SBI domestic trade history is unavailable during maintenance')
++  }
++  const searchForm = parseHtmlFormContaining(html, new URL(response.url), 'ACT_search')
++  const [fromYear, fromMonth, fromDay] = from.split('-')
++  const [toYear, toMonth, toDay] = to.split('-')
++  const searchFields = new URLSearchParams(searchForm.fields)
++  searchFields.set('ref_from_yyyy', fromYear ?? '')
++  searchFields.set('ref_from_mm', fromMonth ?? '')
++  searchFields.set('ref_from_dd', fromDay ?? '')
++  searchFields.set('ref_to_yyyy', toYear ?? '')
++  searchFields.set('ref_to_mm', toMonth ?? '')
++  searchFields.set('ref_to_dd', toDay ?? '')
++  searchFields.set('max_cnt', String(Math.min(Math.max(options.limit ?? 200, 1), 200)))
++  const searchResponse = await fetch(searchForm.action, {
++    method: searchForm.method,
++    headers: {
++      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
++      'content-type': 'application/x-www-form-urlencoded',
++      cookie: cookieHeader(cookies, searchForm.action),
++      referer: response.url,
++      'user-agent': MAIN_SITE_USER_AGENT,
++    },
++    body: searchFields,
++    redirect: 'manual',
++  })
++  updateCookieJar(cookies, searchResponse, searchForm.action)
++  response = searchResponse
++  if (searchResponse.headers.has('location')) {
++    const resultUrl = responseLocationUrl(searchResponse, searchForm.action)
++    response = await fetch(resultUrl, {
++      headers: {
++        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
++        cookie: cookieHeader(cookies, resultUrl),
++        referer: searchForm.action.toString(),
++        'user-agent': MAIN_SITE_USER_AGENT,
++      },
++      redirect: 'manual',
++    })
++    updateCookieJar(cookies, response, resultUrl)
++  }
++  html = decodeShiftJis(Buffer.from(await response.arrayBuffer()))
++  if (!response.ok) {
++    throw new Error(`SBI domestic trade history search failed with HTTP ${response.status}`)
++  }
++  return parseDomesticTradeRecords(html, Math.min(Math.max(options.limit ?? 200, 1), 200))
++}
++
+ const fetchYenDetailHistory = async (session: SbiSession): Promise<Transaction[]> => {
+   const auth = await ensureMainSiteAuth(session)
+   const pageUrl = new URL('/banking/yen/detail-history', MEMBER_SITE_ORIGIN)
++  const entryUrl = new URL('/ETGate/', auth.baseUrl)
++  entryUrl.search = new URLSearchParams({
++    _ControlID: 'WPLETsmR001Control',
++    _PageID: 'WPLETsmR001Sdtl23',
++    _ActionID: 'NoActionID',
++    _DataStoreID: 'DSWPLETsmR001Control',
++    OutSide: 'on',
++    getFlg: 'on',
++    path: 'banking/yen/detail-history',
++  }).toString()
+   const { response: pageResponse, cookieHeader: bankingCookieHeader } =
+-    await fetchYenDetailHistoryPage(session, auth)
++    await fetchMainSiteAuthenticatedPage(session, auth, entryUrl)
+   const pageText = await pageResponse.text()
+   if (!pageResponse.ok) {
+     throw new Error(
+@@ -1684,6 +1888,40 @@ const parseHtmlForm = (html: string, baseUrl: URL) => {
+   return { action: new URL(action, baseUrl), fields }
+ }
+ 
++const parseHtmlFormContaining = (html: string, baseUrl: URL, controlName: string) => {
++  const formMatch = [...html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/gi)].find((match) =>
++    new RegExp(`\\bname=["']${controlName}["']`, 'i').test(match[2] ?? ''),
++  )
++  if (!formMatch) throw new Error(`main site response did not include a ${controlName} form`)
++  const openingTag = `<form${formMatch[1] ?? ''}>`
++  const body = formMatch[2] ?? ''
++  const action = new URL(attributeValue(openingTag, 'action') ?? baseUrl.toString(), baseUrl)
++  const method = (attributeValue(openingTag, 'method') ?? 'GET').toUpperCase()
++  const fields: Array<[string, string]> = []
++  for (const inputMatch of body.matchAll(/<input\b[^>]*>/gi)) {
++    const tag = inputMatch[0]
++    const name = attributeValue(tag, 'name')
++    if (!name || /\bdisabled\b/i.test(tag)) continue
++    const type = (attributeValue(tag, 'type') ?? 'text').toLowerCase()
++    if ((type === 'checkbox' || type === 'radio') && !/\bchecked\b/i.test(tag)) continue
++    if ((type === 'submit' || type === 'button') && name !== controlName) continue
++    fields.push([name, attributeValue(tag, 'value') ?? ''])
++  }
++  for (const selectMatch of body.matchAll(/<select\b([^>]*)>([\s\S]*?)<\/select>/gi)) {
++    const name = attributeValue(`<select${selectMatch[1] ?? ''}>`, 'name')
++    if (!name || /\bdisabled\b/i.test(selectMatch[1] ?? '')) continue
++    const options = [...(selectMatch[2] ?? '').matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/gi)]
++    const selected = options.find((option) => /\bselected\b/i.test(option[1] ?? '')) ?? options[0]
++    if (selected) {
++      fields.push([
++        name,
++        attributeValue(`<option${selected[1] ?? ''}>`, 'value') ?? htmlText(selected[2] ?? ''),
++      ])
++    }
++  }
++  return { action, method, fields }
++}
++
+ const attributeValue = (tag: string, name: string) => {
+   const pattern = new RegExp(`${name}=(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i')
+   const match = tag.match(pattern)
