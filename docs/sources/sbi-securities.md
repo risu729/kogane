@@ -118,9 +118,14 @@ PCサイトとスマートフォンサイトのMy資産は公式上同じ対象�
 - 該当passkeyはECDSA P-256でdiscoverable属性を持ち、同一RPの候補は1件だった。RP ID、credential ID、user handle、counterの実値は記録しない。
 - `mnie` の既存 `createBitwardenAssertion` が生成したassertionをSBI証券が受理し、SSO callbackと復号可能なaccess tokenを返した。
 - 復号したtokenを株アプリのMTS loginへ渡してsession化し、read-only TR code `F2631` で国内現物保有一覧を取得できた。HTTPはいずれも200で、server totalと解析件数が一致した。
+- 同じ認証フローから外国株式アプリ用に別のpasskey channelとSSO sessionを作り、公式REST／GraphQL経由で米国株現物保有を取得できた。NASDAQ、NYSE、NYSE Arcaを個別照会し、実口座の保有を欠落なく分類できた。
+- メインサイトへETGate経由でSSOし、`My資産` の現在評価JSONを取得できた。商品カテゴリと評価額の有無を、銘柄名・数量・金額を通常ログへ出さず確認した。
+- 円貨入出金明細JSONの取得に成功した。返却された初期一覧の件数と最古・最新日だけを検証ログへ出し、摘要と金額は出していない。
+- 外国株式の取引履歴GraphQLは90日範囲で成功した。5年超を1回で要求すると拒否されたため、サーバーの検索可能期間を取得して期間分割する実装が必要である。
+- 国内注文照会は当日約定と未約定・直近注文を取得できた。過去の国内約定履歴全体は現行PoC／`mnie` high-level APIでは未実装である。
 - ローカルPoC用に、ログインID、ログインパスワード、RP一致URI、単一passkeyだけをWSLのGit管理外へ保存した。取引パスワードとBitwarden custom fieldsは保存していない。ディレクトリは `0700`、fileは `0600` である。
 
-従って、既存credentialのCLI exportability、ローカル署名、SBI証券とのWebAuthn互換性、MTS session、国内現物保有のread-only取得は確認済みである。未確認なのは、counterの連続利用時判定、assertion再利用拒否、session寿命、IP／UA変更、他のread-only TR codeである。
+従って、既存credentialのCLI exportability、ローカル署名、SBI証券とのWebAuthn互換性、国内MTS session、外国株式session、国内・米国現物保有、My資産現在評価、円貨入出金明細、米国株取引履歴のread-only取得は確認済みである。未確認なのは、counterの連続利用時判定、assertion再利用拒否、session寿命、IP／UA変更、国内過去約定履歴、My資産の資産推移・実現損益・配当、履歴の全期間ページングである。
 
 ### 公開実装から確認したセッション方式
 

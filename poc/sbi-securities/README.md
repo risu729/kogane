@@ -14,9 +14,15 @@
 6. callback内tokenのRSA復号
 7. 公式株アプリから抽出した現行MTS originへ `/mtsmobile/ssologingate` をPOST: HTTP 200
 8. MTS sessionを使い、`/mtsmobile/commgate` のread-only TR code `F2631` をPOST: HTTP 200
-9. 現物保有一覧を固定長Shift-JIS responseから解析し、server totalと解析件数の一致を確認
+9. 国内現物保有一覧を固定長Shift-JIS responseから解析し、server totalと解析件数の一致を確認
+10. 買付余力、国内信用建玉、当日約定、未約定・直近注文をそれぞれ独立して照会
+11. 外国株式アプリ用の別passkey channelとSSO sessionを作成し、米国株現物を3市場別に照会
+12. 外国株式GraphQLの取引履歴を90日範囲で照会
+13. メインサイトへSSOし、My資産の現在評価JSONと円貨入出金明細JSONを照会
 
-ブラウザを使わないpasskey認証、MTS session確立、国内現物保有のread-only取得まで実口座で確認済みである。注文系method、取引パスワード、device registration、My資産、session再利用は使用・検証していない。通常ログへtoken、SID、口座番号、銘柄、数量、金額を出さず、検証記録にはHTTP status、operation名、件数一致、エラー有無だけを残した。
+ブラウザを使わないpasskey認証、国内MTS session、外国株式session、メインサイトSSOと、国内・米国現物保有、My資産現在評価、円貨入出金明細、米国株取引履歴のread-only取得まで実口座で確認済みである。注文系method、取引パスワード、device registration、session再利用は使用・検証していない。通常ログへtoken、SID、口座番号、銘柄、数量、金額、入出金摘要を出さず、検証記録にはHTTP status、operation名、件数、日付範囲、残高のpositive／zero／missing状態、エラー型だけを残した。
+
+現時点の履歴範囲には差がある。外国株式の取引履歴は90日指定で成功したが、2021年から現在までを1リクエストで要求すると拒否された。アプリが先に呼ぶ検索可能期間queryを実装し、その範囲を短いwindowへ分割する必要がある。国内株は当日約定と未約定・直近注文だけが現行clientにあり、過去約定全体は未実装である。円貨入出金は初期一覧を取得できたが、公式上の保持期間を全件ページングできるかは未確認である。
 
 ## 再現手順
 
@@ -54,15 +60,19 @@
 
    CLIのsession key、master password、credential値は表示・保存しない。対象itemの絞り込みには、Bitwarden CLI 2026.8.0の `bw list items --url` と、既に実vaultで候補1件を返したSBI証券名検索を使う。
 
-5. 現行MTS originを実行時だけ環境変数で指定すると、同じscriptがMTS loginと現物保有照会を1回行う。
+5. 現行endpointを実行時だけ環境変数で指定すると、同じscriptが国内MTS、外国株式、メインサイトのread-only照会を個別に行う。
 
    ```sh
-   SBI_MTS_BASE_URL='<APKから検証したHTTPS origin>' \
+   SBI_MTS_BASE_URL='<株アプリから検証したHTTPS origin>' \
+   SBI_FOREIGN_STOCK_BASE_URL='<外国株式アプリから検証したHTTPS origin>' \
+   SBI_MAIN_SITE_BASE_URL='<公式メインサイトのHTTPS origin>' \
+   SBI_US_HISTORY_FROM='<YYYY-MM-DD>' \
+   SBI_US_HISTORY_TO='<YYYY-MM-DD>' \
      bun scripts/verify-sbi-bitwarden-cli-passkey.ts \
      < ~/.local/share/kogane/secrets/sbi-securities.json
    ```
 
-   `SBI_MTS_BASE_URL`を指定しなければ従来どおりMTS送信前に遮断する。実originをsource、`.env.example`、通常ログへ保存しない。
+   `SBI_MTS_BASE_URL`を指定しなければ従来どおりMTS送信前に遮断する。外国株式とメインサイトは各base URLを指定した場合だけ照会する。実originをsource、`.env.example`、通常ログへ保存しない。
 
 6. 初回成功後は、利用者が明示的に許可したローカルPoC credentialを `~/.local/share/kogane/secrets/sbi-securities.json` から読む。ディレクトリは `0700`、ファイルは `0600` とする。保存対象は次だけである。
 
@@ -76,7 +86,7 @@
 ## 実装の境界
 
 - `prepare-sbi-bitwarden-cli-secret.ts`: Bitwarden CLI item群からSBI専用の最小credentialを生成する。秘密値はstdout以外へ出さず、呼出側が権限制限した一時fileへ直接redirectする。
-- `verify-sbi-bitwarden-cli-passkey.ts`: 既存 `createBitwardenAssertion`、`createPasskeySession`、`loginWithPasskey` を直接利用する。既定ではMTSの予約済みprobe originへのfetchをnetwork送信前に遮断する。実行時に検証済みの `SBI_MTS_BASE_URL` を渡した場合だけ、MTS session作成と `account.positions.cash` を許可する。
+- `verify-sbi-bitwarden-cli-passkey.ts`: 既存 `createBitwardenAssertion`、`createPasskeySession`、`loginWithPasskey` を直接利用する。既定ではMTSの予約済みprobe originへのfetchをnetwork送信前に遮断する。実行時に検証済みbase URLを渡した場合だけ、国内MTS、外国株式、メインサイトのread-only methodを呼ぶ。各methodは独立して例外を捕捉し、1経路の「データなし」や期間エラーで他経路の結果を失わない。
 - `run-sbi-bitwarden-cli-passkey-probe.sh`: 初回unlock、最小credential保存、probe実行、`bw lock`、秘密を含まないstage/status記録を行う。
 - 合成test: password同居、別item、別RP除外、曖昧候補拒否、custom field非コピーを確認する。
 

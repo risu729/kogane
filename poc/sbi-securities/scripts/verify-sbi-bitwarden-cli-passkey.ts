@@ -1,9 +1,6 @@
 import { createBitwardenAssertion } from '../packages/auth-bitwarden/src/fido2'
 import type { BitwardenPasskey } from '../packages/auth-bitwarden/src/vault'
-import {
-  createPasskeySession,
-  loginWithPasskey,
-} from '../packages/provider-sbi-sec/src/session'
+import { createPasskeySession, loginWithPasskey } from '../packages/provider-sbi-sec/src/session'
 import type { PasskeyAssertionProvider } from '../packages/provider-sbi-sec/src/types'
 
 interface BitwardenCliItem {
@@ -63,6 +60,41 @@ const readCounter = (value: unknown) => {
   return Number.isSafeInteger(counter) && counter >= 0 ? counter : 0
 }
 
+const amountState = (amount: { value: number | null } | undefined) => {
+  if (typeof amount?.value !== 'number') return 'missing'
+  if (amount.value > 0) return 'positive'
+  if (amount.value < 0) return 'negative'
+  return 'zero'
+}
+
+const numberState = (value: number | null | undefined) => {
+  if (typeof value !== 'number') return 'missing'
+  if (value > 0) return 'positive'
+  if (value < 0) return 'negative'
+  return 'zero'
+}
+
+const requiredDate = (value: string, label: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error(`${label} must use YYYY-MM-DD`)
+  return value
+}
+
+const readOnlyResult = async <T>(read: () => Promise<T>) => {
+  try {
+    return { ok: true as const, value: await read() }
+  } catch (error) {
+    const code =
+      error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+        ? error.code
+        : undefined
+    return {
+      ok: false as const,
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+      errorCode: code,
+    }
+  }
+}
+
 const readPasskey = (item: BitwardenCliItem) => {
   const credentials = item.login?.fido2Credentials
   if (!Array.isArray(credentials) || credentials.length !== 1) {
@@ -109,6 +141,12 @@ const classifyStage = (url: URL) => {
   if (url.hostname === 'sbi-mts-probe.invalid') return 'mts-handoff'
   if (url.pathname === '/mtsmobile/ssologingate') return 'mts-login'
   if (url.pathname === '/mtsmobile/commgate') return 'mts-read'
+  if (url.pathname.includes('authentication:ssoLogin')) return 'foreign-login'
+  if (url.pathname.includes('/graphql/')) return 'foreign-graphql-read'
+  if (url.pathname.includes('/rest/')) return 'foreign-rest-read'
+  if (url.pathname.includes('/account/api/assets/')) return 'main-assets-read'
+  if (url.pathname.includes('/banking/api/yen/')) return 'main-yen-history-read'
+  if (url.pathname.includes('/ETGate/')) return 'main-etgate'
   if (url.pathname === '/api/fido2/auth/challenge') return 'challenge'
   if (url.pathname === '/fido2/auth') return 'assertion'
   if (url.pathname === '/sso/channel') return 'callback'
@@ -140,8 +178,16 @@ const main = async () => {
 
   const trace: TraceEntry[] = []
   const liveMtsBaseUrl = process.env.SBI_MTS_BASE_URL
-  if (liveMtsBaseUrl && new URL(liveMtsBaseUrl).protocol !== 'https:') {
-    throw new Error('SBI_MTS_BASE_URL must use HTTPS')
+  const liveForeignStockBaseUrl = process.env.SBI_FOREIGN_STOCK_BASE_URL
+  const liveMainSiteBaseUrl = process.env.SBI_MAIN_SITE_BASE_URL
+  for (const [label, value] of [
+    ['SBI_MTS_BASE_URL', liveMtsBaseUrl],
+    ['SBI_FOREIGN_STOCK_BASE_URL', liveForeignStockBaseUrl],
+    ['SBI_MAIN_SITE_BASE_URL', liveMainSiteBaseUrl],
+  ] as const) {
+    if (value && new URL(value).protocol !== 'https:') {
+      throw new Error(`${label} must use HTTPS`)
+    }
   }
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (input, init) => {
@@ -155,7 +201,12 @@ const main = async () => {
     }
     try {
       const response = await originalFetch(input, init)
-      trace.push({ stage, method, status: response.status, outcome: 'response' })
+      trace.push({
+        stage,
+        method,
+        status: response.status,
+        outcome: 'response',
+      })
       return response
     } catch (error) {
       trace.push({ stage, method, outcome: 'network-error' })
@@ -168,19 +219,197 @@ const main = async () => {
       const client = await loginWithPasskey({
         authBaseUrl,
         mtsBaseUrl: liveMtsBaseUrl,
+        foreignStockBaseUrl: liveForeignStockBaseUrl,
+        mainSiteBaseUrl: liveMainSiteBaseUrl,
         passkeyProvider: provider,
       })
-      const cash = await client.account.positions.cash()
-      const hasMethodError = Boolean(cash.error?.code && cash.error.code !== '000000')
+      const profile = await client.account.profile()
+      const cashResult = await readOnlyResult(() => client.account.positions.cash())
+      const powerResult = await readOnlyResult(() => client.account.power.buyingPower())
+      const marginResult = await readOnlyResult(() => client.account.positions.margin())
+      const domesticExecutionsResult = await readOnlyResult(() =>
+        client.orders.inquiry.executionsToday(),
+      )
+      const domesticOpenOrdersResult = await readOnlyResult(() => client.orders.inquiry.open())
+
+      const usMarkets = ['XNAS', 'XNYS', 'ARCX'] as const
+      const usPositionResults = liveForeignStockBaseUrl
+        ? await Promise.all(
+            usMarkets.map(async (market) => ({
+              market,
+              result: await readOnlyResult(() => client.account.positions.cash({ market })),
+            })),
+          )
+        : []
+      const usHistoryFrom = requiredDate(
+        process.env.SBI_US_HISTORY_FROM ?? '2021-01-01',
+        'SBI_US_HISTORY_FROM',
+      )
+      const usHistoryTo = requiredDate(
+        process.env.SBI_US_HISTORY_TO ?? new Date().toISOString().slice(0, 10),
+        'SBI_US_HISTORY_TO',
+      )
+      const usTradeHistoryResult = liveForeignStockBaseUrl
+        ? await readOnlyResult(() =>
+            client.orders.inquiry.tradeRecords({
+              from: usHistoryFrom,
+              to: usHistoryTo,
+              limit: 999,
+            }),
+          )
+        : undefined
+
+      const assetsResult = liveMainSiteBaseUrl
+        ? await readOnlyResult(() => client.account.assets.current())
+        : undefined
+      const yenHistoryResult = liveMainSiteBaseUrl
+        ? await readOnlyResult(() => client.banking.detailHistory())
+        : undefined
+      const methodErrors = [
+        cashResult.ok ? cashResult.value.error : undefined,
+        powerResult.ok ? powerResult.value.error : undefined,
+        marginResult.ok ? marginResult.value.error : undefined,
+        domesticExecutionsResult.ok ? domesticExecutionsResult.value.error : undefined,
+        domesticOpenOrdersResult.ok ? domesticOpenOrdersResult.value.error : undefined,
+        ...usPositionResults.map(({ result }) => (result.ok ? result.value.error : undefined)),
+        usTradeHistoryResult?.ok ? usTradeHistoryResult.value.error : undefined,
+      ].filter((error) => error?.code && error.code !== '000000')
+      const hasMethodError = methodErrors.length > 0
+      const usPositionCount = usPositionResults.reduce(
+        (total, { result }) => total + (result.ok ? result.value.positions.length : 0),
+        0,
+      )
+      const usTradeDates = usTradeHistoryResult?.ok
+        ? usTradeHistoryResult.value.records
+            .map((record) => record.tradeDate)
+            .filter((date): date is string => Boolean(date))
+            .sort()
+        : []
+      const yenHistoryDates = yenHistoryResult?.ok
+        ? yenHistoryResult.value.map((transaction) => transaction.occurredAt).sort()
+        : []
       process.stdout.write(
         `${JSON.stringify(
           {
-            status: hasMethodError
-              ? 'mts-read-returned-error'
-              : 'passkey-and-mts-read-succeeded',
-            readOperation: 'account.positions.cash',
-            positionCount: cash.positions.length,
-            serverTotalCount: cash.totalCount,
+            status: hasMethodError ? 'mts-read-returned-error' : 'passkey-and-mts-read-succeeded',
+            readOperations: [
+              'account.positions.cash',
+              'account.positions.margin',
+              'account.power.buyingPower',
+              'orders.inquiry.executionsToday',
+              'orders.inquiry.open',
+              ...(liveForeignStockBaseUrl
+                ? ['account.positions.cash (US)', 'orders.inquiry.tradeRecords (US)']
+                : []),
+              ...(liveMainSiteBaseUrl ? ['account.assets.current', 'banking.detailHistory'] : []),
+            ],
+            domesticCashReadSucceeded: cashResult.ok,
+            domesticCashPositionCount: cashResult.ok
+              ? cashResult.value.positions.length
+              : undefined,
+            domesticCashServerTotalCount: cashResult.ok ? cashResult.value.totalCount : undefined,
+            domesticCashReadErrorType: cashResult.ok ? undefined : cashResult.errorType,
+            domesticCashReadErrorCode: cashResult.ok ? undefined : cashResult.errorCode,
+            domesticMarginReadSucceeded: marginResult.ok,
+            domesticMarginPositionCount: marginResult.ok
+              ? marginResult.value.positions.length
+              : undefined,
+            domesticMarginServerTotalCount: marginResult.ok
+              ? marginResult.value.totalCount
+              : undefined,
+            domesticMarginReadErrorType: marginResult.ok ? undefined : marginResult.errorType,
+            domesticMarginReadErrorCode: marginResult.ok ? undefined : marginResult.errorCode,
+            hasMarginAccount: profile.hasMarginAccount,
+            accountPowerReadSucceeded: powerResult.ok,
+            accountPowerReadErrorType: powerResult.ok ? undefined : powerResult.errorType,
+            accountPowerReadErrorCode: powerResult.ok ? undefined : powerResult.errorCode,
+            cashBuyingPowerState: powerResult.ok
+              ? amountState(powerResult.value.cashBuyingPower)
+              : undefined,
+            withdrawableYenState: powerResult.ok
+              ? amountState(powerResult.value.withdrawableAmount)
+              : undefined,
+            sbiHybridDepositBalanceState: powerResult.ok
+              ? amountState(powerResult.value.sbiHybridDepositBalance)
+              : undefined,
+            domesticExecutionsTodayReadSucceeded: domesticExecutionsResult.ok,
+            domesticExecutionsTodayCount: domesticExecutionsResult.ok
+              ? domesticExecutionsResult.value.orders.length
+              : undefined,
+            domesticExecutionsTodayErrorType: domesticExecutionsResult.ok
+              ? undefined
+              : domesticExecutionsResult.errorType,
+            domesticExecutionsTodayErrorCode: domesticExecutionsResult.ok
+              ? undefined
+              : domesticExecutionsResult.errorCode,
+            domesticOpenOrdersReadSucceeded: domesticOpenOrdersResult.ok,
+            domesticOpenOrdersCount: domesticOpenOrdersResult.ok
+              ? domesticOpenOrdersResult.value.orders.length
+              : undefined,
+            domesticOpenOrdersErrorType: domesticOpenOrdersResult.ok
+              ? undefined
+              : domesticOpenOrdersResult.errorType,
+            domesticOpenOrdersErrorCode: domesticOpenOrdersResult.ok
+              ? undefined
+              : domesticOpenOrdersResult.errorCode,
+            usPositionsConfigured: Boolean(liveForeignStockBaseUrl),
+            usPositionsReadSucceeded:
+              usPositionResults.length > 0 && usPositionResults.every(({ result }) => result.ok),
+            usPositionCount,
+            usPositionCountsByMarket: Object.fromEntries(
+              usPositionResults.map(({ market, result }) => [
+                market,
+                result.ok ? result.value.positions.length : undefined,
+              ]),
+            ),
+            usPositionErrors: usPositionResults
+              .filter(({ result }) => !result.ok)
+              .map(({ market, result }) => ({
+                market,
+                errorType: result.ok ? undefined : result.errorType,
+                errorCode: result.ok ? undefined : result.errorCode,
+              })),
+            usTradeHistoryConfigured: Boolean(liveForeignStockBaseUrl),
+            usTradeHistoryReadSucceeded: usTradeHistoryResult?.ok,
+            usTradeHistoryQueryFrom: liveForeignStockBaseUrl ? usHistoryFrom : undefined,
+            usTradeHistoryQueryTo: liveForeignStockBaseUrl ? usHistoryTo : undefined,
+            usTradeHistoryCount: usTradeHistoryResult?.ok
+              ? usTradeHistoryResult.value.records.length
+              : undefined,
+            usTradeHistoryHasMore: usTradeHistoryResult?.ok
+              ? usTradeHistoryResult.value.hasMore
+              : undefined,
+            usTradeHistoryOldestDate: usTradeDates.at(0),
+            usTradeHistoryNewestDate: usTradeDates.at(-1),
+            usTradeHistoryErrorType:
+              usTradeHistoryResult && !usTradeHistoryResult.ok
+                ? usTradeHistoryResult.errorType
+                : undefined,
+            usTradeHistoryErrorCode:
+              usTradeHistoryResult && !usTradeHistoryResult.ok
+                ? usTradeHistoryResult.errorCode
+                : undefined,
+            accountAssetsConfigured: Boolean(liveMainSiteBaseUrl),
+            accountAssetsReadSucceeded: assetsResult?.ok,
+            accountAssetCategories: assetsResult?.ok
+              ? assetsResult.value.summaryDetails.map((detail) => ({
+                  category: detail.category,
+                  valuationState: numberState(detail.valuation),
+                }))
+              : undefined,
+            accountAssetsErrorType:
+              assetsResult && !assetsResult.ok ? assetsResult.errorType : undefined,
+            accountAssetsErrorCode:
+              assetsResult && !assetsResult.ok ? assetsResult.errorCode : undefined,
+            yenHistoryConfigured: Boolean(liveMainSiteBaseUrl),
+            yenHistoryReadSucceeded: yenHistoryResult?.ok,
+            yenHistoryCount: yenHistoryResult?.ok ? yenHistoryResult.value.length : undefined,
+            yenHistoryOldestDate: yenHistoryDates.at(0),
+            yenHistoryNewestDate: yenHistoryDates.at(-1),
+            yenHistoryErrorType:
+              yenHistoryResult && !yenHistoryResult.ok ? yenHistoryResult.errorType : undefined,
+            yenHistoryErrorCode:
+              yenHistoryResult && !yenHistoryResult.ok ? yenHistoryResult.errorCode : undefined,
             hasMethodError,
             trace,
           },
