@@ -11,7 +11,7 @@ MyJCB はアプリ専用ではなく、Web 版が明細・利用可能額・ポ�
 
 複数カードは「一つのアカウントにカードを追加」する模型ではない。カードごとに MyJCB ID があり、許可された組み合わせだけを「おまとめログイン」で相互に切り替える。本会員の明細内には家族、ETC、QUICPay 等の追加カード利用がカード単位でまとまる一方、家族カード ID はおまとめ対象外で、家族会員 ID から PDF／CSV をダウンロードできない。したがって、データ模型は `MyJCB ID に対応するルートカード` と `その明細内の追加カード` を分ける必要がある。
 
-公式の口座・明細 API は公開されていない。2026 年に更新された第三者実装は、Web の動的ログイン保護 JavaScript を隔離実行して ID／パスワードのフォームを POST し、Cookie と User-Agent を再利用して JCB デビット明細の HTML を GET する。実装可能性は示すが、非公式 HTML、動的保護、秘密の合い言葉／OTP／パスキー、発行会社差に依存するため、共通 rubric は **C、cost 4** とする。安全な既定値は確定明細の手動 export で **E、cost 1**。アプリ自動化は **D、cost 5** で、採用しない。
+公式の口座・明細 API は公開されていない。2026 年に更新された第三者実装は、Web の動的ログイン保護 JavaScript を隔離実行して ID／パスワードのフォームを POST し、Cookie と User-Agent を再利用して JCB デビット明細の HTML を GET する。実装可能性は示すが、非公式 HTML、動的保護、秘密の合い言葉／OTP／パスキー、発行会社差に依存するため、共通 rubric は **C、cost 4** とする。安全な既定値は確定明細の手動 export で **E、cost 1**。full app UI automation は **D、cost 5** だが、公式 APK の静的解析、deobfuscation、本人操作中の read-only runtime tracing／通信観測は transport と issuer 差を特定する有効な調査段階であり、一律に除外しない。
 
 ## 公式サーフェスとカード列挙
 
@@ -71,6 +71,17 @@ MyJCB はアプリ専用ではなく、Web 版が明細・利用可能額・ポ�
 - 生体情報は MyJCB に送信・保存されない。鍵は端末内またはクラウド同期可能。公式例は iCloud キーチェーンと Google パスワードマネージャー。長期間不使用で passkey が解除される場合があり、MyJCB 側で解除しても端末側鍵は残る。
 - J/Secure の OTP／MyJCB アプリ認証はオンライン購入の 3-D Secure であり、read-only collector のログイン認証と混同しない。
 
+対象カードごとの passkey 境界は次のとおり。カード番号自体は取得せず、既存画面が passkey を提示するかで最終確認する。
+
+| 対象 | 公式条件との関係 | 現時点の判定 |
+|---|---|---|
+| JCB W | 354 系個人クレジット/JCB 発行の通常対象と整合 | 対象候補。既存 ID の提示で確認 |
+| リクルートカード（JCB） | JCB 発行・番号/契約条件を満たす場合に対象 | 商品名だけでは確定しない。Visa/Mastercard は完全に別 |
+| みずほ JCB デビット | 357 系個人デビット条件と整合。公式除外は「みずほ Smart Debit」で、通常 JCB デビットを一括除外していない | 対象候補だが issuer 実画面で未確認 |
+| 京銀 JCB デビット | 357 系個人デビットかつ京都銀行は JCB group issuer 一覧に掲載、明示除外なし | 対象候補だが issuer 実画面で未確認 |
+
+passkey 登録済み ID は password login を使えないため、Okura の ID/password flow と排他的になり得る。おまとめ済み複数 ID のうち一つだけ passkey の場合、root login、切替先、再認証要求の組合せを live で確認し、全カードへ一般化しない。
+
 ### Bitwarden と自動化に関する推測
 
 - **事実**: JCB は Bitwarden を対応・非対応のどちらとも記載せず、代表例として Apple／Google だけを挙げる。
@@ -81,24 +92,30 @@ MyJCB はアプリ専用ではなく、Web 版が明細・利用可能額・ポ�
 ## Web 保護、WAF、Akamai
 
 - 2026-08-26 の未認証 HEAD／DNS 観測では、公開コンテンツ `www.jcb.co.jp` は Cloudflare の CNAME／IP と `server: cloudflare`、`cf-ray` を返した。これは公開サイト edge の事実で、ログイン backend の認証方式を示さない。
-- `my.jcb.co.jp/Login` は別 IP で `server: nginx`。`/apl/login-prot.js?init` は動的 cookie、`X-Ion-Hop: 1`、`Via: 1.1 google` を返し、公開実装は init script が示す async script も取得してフォーム保護値を生成する。製品名を示す公式表示はない。
+- `my.jcb.co.jp/Login` は別 IP で `server: nginx`。2026-08-26 の公開 GET は `200`、HTML は Windows-31J、login form は `POST /iss-pc/member/user_manage/Login`、static field は `userId`、`password`、`screenId=0102001`、`loginRouteId=0102001` だった。passkey 用 JavaScript も同じ未認証 HTML から読み込まれる。
+- login HTML は `/apl/login-prot.js?init` を最初に load する。今回の init response は約 22 KB、`no-cache/no-store`、`X-Ion-Hop: 1`、`Via: 1.1 google` と JCB domain cookie を返し、query に一時 seed を含む `/apl/login-prot.js?async...` を追加 load した。async response は約 303 KB だった。seed、cookie、生成 field の実値は記録していない。
+- init script の公開内容は対象 origin/path の POST を instrument し、async script の初期化後に form submit を処理する構造と整合する。Okura は init/async の両方と cookie を同一 HTTP session で取得し、限定 DOM 内で実行して form action/body と cookie update を得る。動的 field は少なくとも 6 種あることだけを検証し、field 名・値を固定仕様とみなしていない。
 - **Akamai は確認できなかった。** `www` は現在 Cloudflare で、認証 host から Akamai 固有と断定できる十分な証拠もない。`X-Ion-Hop` や動的 cookie だけから F5／Shape／Akamai 等の vendor を推定しない。
-- protection script、cookie、要求ヘッダー、リダイレクト、未知の追加認証は変更可能である。403／429、チャレンジ、フォーム構造変更を bypass せず停止条件とする。
+- protection script、cookie、要求ヘッダー、リダイレクト、未知の追加認証は変更可能である。403／429、チャレンジ、フォーム構造変更を bypass せず停止条件とする。公開 script の整形・deobfuscation、control-flow/DOM/API dependency の静的把握は許可するが、bot 判定値の改変や security control の無効化には使わない。
 
 ## 公開 third-party client の具体的実装
 
 ### 現行に近い実装
 
-- [youseiushida/Okura](https://github.com/youseiushida/Okura) は AGPL-3.0 の公開実装で、2026-08-25 に更新されている。JCB adapter は Deno/TypeScript で、既定 origin を `https://my.jcb.co.jp` とする。
+- [youseiushida/Okura](https://github.com/youseiushida/Okura) は AGPL-3.0 の公開実装で、調査時点の main は commit [`afc6057f`](https://github.com/youseiushida/Okura/commit/afc6057fba78b5bfd6364654548fbfd91c76692a)（2026-08-25）である。JCB adapter は Deno/TypeScript で、既定 origin を `https://my.jcb.co.jp` とする。
+- 根拠 code は [`login.ts`](https://github.com/youseiushida/Okura/blob/afc6057fba78b5bfd6364654548fbfd91c76692a/app/internal/adapter/jcb/login.ts)、[`protection_runtime.js`](https://github.com/youseiushida/Okura/blob/afc6057fba78b5bfd6364654548fbfd91c76692a/app/internal/adapter/jcb/protection_runtime.js)、[`authentication.ts`](https://github.com/youseiushida/Okura/blob/afc6057fba78b5bfd6364654548fbfd91c76692a/app/internal/adapter/jcb/authentication.ts)、[`adapter.ts`](https://github.com/youseiushida/Okura/blob/afc6057fba78b5bfd6364654548fbfd91c76692a/app/internal/adapter/jcb/adapter.ts) である。
 - transport/auth は次の通り。
   1. `GET /Login`。
-  2. HTML から同一 origin の `/apl/login-prot.js?init...` を抽出し取得。
-  3. init script から `/apl/login-prot.js?async...` を抽出し取得。
-  4. 両 script を network permission なしの Worker／VM で限定 DOM と共に実行し、`userId`、`password`、`screenId`、`loginRouteId` と少なくとも 6 個の動的 field、cookie 更新を生成。
-  5. `POST /iss-pc/member/user_manage/Login` (`application/x-www-form-urlencoded`)。Origin／Referer／browser User-Agent を固定し、同一 origin と期待 path を検証。
-  6. `GET /iss-pc/member/mypage/mypage.html` で logout link と debit detail link を確認して session validation。Cookie と User-Agent を暗号化 vault に capture/restore 可能。
-  7. `GET /iss-pc/member/debit/details/debitDetailMenu.html?link_id=myj_main_debitDetailMenu`、次いで `GET /iss-pc/member/debit/details/debitDetail.html?seq=N`。15 cycle を HTML parse する。
+  2. HTML から同一 origin の `/apl/login-prot.js?init...` を抽出し、同じ cookie jar と browser User-Agent で取得。
+  3. init script が動的に示す `/apl/login-prot.js?async...` を同じ session で取得。
+  4. 両 script を Deno permission `none` の Worker 内で Node `vm` と限定 DOM により実行する。runtime は `navigator.userAgent`、screen、Web Crypto、document cookie、form/event API 等を提供する一方、host network/file/env permission を与えない。
+  5. script が submit した form から `userId`、`password`、`screenId`、`loginRouteId`、少なくとも 6 個の動的 field、cookie update を回収。action が同一 origin の login path であることと、credential が改変されていないことを検証する。
+  6. `POST /iss-pc/member/user_manage/Login` (`application/x-www-form-urlencoded`)。Origin／Referer／生成時と同じ User-Agent を付け、MyJCB mypage 以外への response を拒否する。
+  7. `GET /iss-pc/member/mypage/mypage.html` で logout link と debit detail link を確認して session validation。
+  8. validation 後だけ、cookie の name/value/domain/path/expiry/security 属性と User-Agent を session snapshot として capture/restore する。restore 後は mypage GET で再検証し、expired/unexpected/403 を同一視しない。
+  9. `GET /iss-pc/member/debit/details/debitDetailMenu.html?link_id=myj_main_debitDetailMenu`、次いで `GET /iss-pc/member/debit/details/debitDetail.html?seq=N`。15 cycle を HTML parse する。
 - この実装は **デビット画面専用**で、JCB W／リクルートカードのクレジット明細、確定 CSV／PDF／OFX、おまとめ ID 切替、passkey、秘密の合い言葉／OTP は実装していない。成功を公式保証や全 issuer 互換性の証拠にしない。
+- Okura に refresh/renew endpoint はない。cookie＋User-Agent を再利用できる間だけ session を restore し、失効時は再 login が必要である。login protection の動的 field を CSRF token と断定せず、post-login form の hidden token/local state も snapshot していない。
 
 ### 古い実装
 
@@ -106,15 +123,53 @@ MyJCB はアプリ専用ではなく、Web 版が明細・利用可能額・ポ�
 - [swdyh/add-to-zaim](https://github.com/swdyh/add-to-zaim)（2013）はログイン済み MyJCB DOM の日付・金額・加盟店を XPath で抽出する Chrome extension。API ではなく画面依存で、現在の DOM 互換性はない。
 - 公開実装群は、過去から一貫して「公開 API」ではなく cookie 付き HTML／export／DOM を利用してきたことを示す。
 
-## APK と静的解析の将来方針
+### read/export/おまとめ切替の transport 候補
 
-- APK は第三者ミラーから取得しない。必要になった場合のみ、管理下 Android 実機の Google Play から公式 package `jp.co.jcb.my` を取得し、split APK と署名証明書 digest、versionCode、取得日を機密を含まない manifest に記録する。
-- 初期の静的解析は manifest、exported components、deep links、network security config、同梱ライブラリ、ホスト名、証明書 pinning の有無まで。文字列に token／鍵らしき値があっても使用・公開しない。
-- 難読化解除、pinning 回避、runtime hook、root/jailbreak 検知回避、traffic MITM、端末 attest 回避は行わない。Web で対象情報が取得できるため、現時点で APK 解析の費用対効果は低い。
+| 機能 | 現時点の具体的候補 | 確度と次の確認 |
+|---|---|---|
+| デビット read | Okura の `debitDetailMenu.html?link_id=...` → `debitDetail.html?seq=N` | 現行公開 code。みずほ/京銀 issuer と passkey 未登録 ID での live 成功は未確認 |
+| クレジット read | 旧実装の `/iss-pc/member/details_inquiry/detail.html?detailMonth=N&output=web` | 2015 code の historical candidate。現行画面で link/form action を観測するまで送信しない |
+| PDF export | 旧実装の `/iss-pc/member/details_inquiry/detailDbPdf.html?detailMonth=N&output=pdf` | historical candidate。現行 native PDF control の request method/path/CSRF を DevTools で確認 |
+| CSV export | 旧実装の `detail.html?detailMonth=N&output=csv` | historical candidate。公式には CSV が現存するが path/encoding/field は未確定 |
+| OFX export | 公式 UI 上の存在は確認済み、公開 code の現行 path は未発見 | control 操作時の method/path/content-type/Content-Disposition だけを redacted 観測 |
+| おまとめ済みカード列挙 | mypage の「ID切替」→表示カード切替画面 | 公式 UI の存在は確認済み。カード名/ID/番号を保存せず route と一般 issuer/type だけ確認 |
+| おまとめ済み ID 切替 | 既存切替画面の card-select action | 金融取引ではなく session の current-card context 変更候補。method、hidden field、CSRF、戻り先を確認してから 1 回だけ replay |
+| おまとめ設定追加/解除・初期表示変更 | 設定画面 | write。transport 調査で見えても呼ばない |
+
+クレジット/export の旧 path は current contract ではない。現行 HTML/JS または本人操作の DevTools 観測から同じ path が再確認できるまでは候補に留める。`detailMonth`、`seq`、card selector 等の実値は保存せず、parameter 名と型だけを記録する。
+
+### CSRF と session renewal の確認点
+
+- login の 6 個以上の動的 field は protection script が生成するが、用途は公開されていない。CSRF、bot signal、integrity data のどれかに決め打ちしない。
+- post-login のクレジット export、OFX、ID切替が POST の場合は、hidden input/header/cookie の **存在、名称の hash、長さ、rotation timing** だけを確認し、値は保存しない。GET でも state-changing action と同じ token を共有する場合は replay を止める。
+- cookie snapshot は authenticated validation 後に限定し、User-Agent を必ず対で再利用する。Okura の固定 Chrome 140 UA は将来古くなるため、保護 script を生成した実 browser/approved UA との一致を live で検証する。
+- cookie の Expires/Max-Age、idle timeout、absolute timeout、ID切替前後の cookie rotation、logout 後の invalidation を metadata として確認する。protection cookie の長い Max-Age を authenticated session 寿命とみなさない。
+- refresh/renew endpoint は未発見。自動的な silent renewal を仮定せず、session expiry は user-assisted reauthentication とする。passkey 登録済み ID では password replay を試さず、既存 browser/app bootstrap から session capture できるかだけを検討する。
+
+## 公式 APK の入手・静的解析・runtime tracing
+
+[Google Play の公式 listing](https://play.google.com/store/apps/details?id=jp.co.jcb.my) は package `jp.co.jcb.my`、JCB 公式 app、2026-07-27 更新、version 3.11.1 を示す。今回の環境には ADB と owner-controlled Android 実機がなく、Google Play が配布する正規 split APK/app bundle を取得できなかった。third-party mirror で代替せず、binary artifact 未取得のまま manifest/host/pinning を確定しない。
+
+正規 artifact を得られる次の実験は次のとおり。
+
+1. 管理下 Android 実機で Google Play の developer/package 表示を確認して app を install/update する。
+2. read-only に `adb shell pm path jp.co.jcb.my` で base/split package path を列挙し、所有者の許可した解析 host へ pull する。APK、signing certificate、各 split の SHA-256、versionName/versionCode、取得日時だけを evidence manifest に残す。
+3. `apksigner verify --print-certs`、`apkanalyzer manifest print`/`aapt2 dump` で署名、SDK、permission、exported component、deep link、provider/service/receiver、`android:networkSecurityConfig`、debuggable/backup flag を確認する。
+4. `jadx --deobf`、resource table、native library symbol/string を使い、難読化された class 名を読みやすい局所名に変換しつつ、official host、WebView route、OkHttp/Retrofit 等の transport、request/response model、Room/SQLite schema、export model、issuer feature flag を特定する。deobfuscation 自体は許可する。
+5. `network_security_config.xml`、`CertificatePinner`/TrustManager/hostname verifier、Play Integrity/attestation API、root/hook detection の **存在と call site** を記録する。pinning/attestation の無効化、return 値改変、検知回避は行わない。
+
+本人が通常操作する一回限りの read-only runtime tracing も調査対象とする。
+
+- Android Studio profiler/Network Inspector が正規 app に attach できる場合、process/thread/class/method、host、HTTP method、path template、status、content-type、schema field 名の hash だけを観測する。
+- attach 可能な Java/native method hook は、read path の呼出しと引数/戻り値の **型・長さ・field 名** だけを記録し、値を保存せず、return 値や control flow を変更しない。hook のために root、debug flag 改変、anti-hook/Integrity 回避が必要なら停止する。
+- app が user-installed CA を通常設定として信頼する場合だけ、owner-controlled proxy で redacted HTTPS metadata を観測できる。certificate pinning が拒否した場合は bypass せず、DNS/SNI/IP/TLS timing 等の暗号化外 metadata と静的 call graph に戻る。
+- logcat、crash dump、screenshot、HAR/pcap、analytics export は secret/PII/実明細を含み得るため原則保存しない。必要な route/schema metadata はその場で redact し、raw artifact を破棄する。
+
+静的解析と no-op tracing の目的は Web と app の host/schema/issuer 差、passkey bootstrap、カード切替、read/export route を特定することにある。write endpoint を実行せず、security control を bypass しない範囲では、Web で取得可能という理由だけで費用対効果を低いと決めない。
 
 ## read/write 隔離
 
-read-only allowlist は、既存 session の検証、カード表示一覧、明細画面、ポイント残高／履歴、利用可能額／残高 snapshot、公式 export の取得だけとする。write 操作が同じ UI に隣接するため、URL だけでなく method、form action、期待 response type も allowlist する。
+read-only allowlist は、既存 session の検証、カード表示一覧、明細画面、ポイント残高／履歴、利用可能額／残高 snapshot、公式 export の取得、おまとめ設定済みカード間の一時的な表示切替だけとする。write 操作が同じ UI に隣接するため、URL だけでなく method、form action、field 名、期待 response type、遷移後 page class も allowlist する。
 
 禁止する操作:
 
@@ -126,7 +181,7 @@ read-only allowlist は、既存 session の検証、カード表示一覧、明
 - ポイント交換、MyJCB Pay、キャンペーン登録、J/Secure を伴う購入
 - passkey 登録／解除、パスワード再設定、OTP 発行（read-only login continuation として利用者が明示操作する場合を除く）
 
-`POST` は原則拒否する。唯一の候補であるログイン POST も、専用 origin・path、field allowlist、no-follow unexpected redirect、利用者が選んだ既存認証方式という条件で別コンポーネントに隔離する。export endpoint が POST の場合は、live 観測で副作用なしと確認するまで自動送信しない。
+HTTP method だけで read/write を決めない。login POST、公式 export POST、既存おまとめ ID の表示切替 POST は read-only workflow の候補になり得るが、専用 origin/path、field allowlist、CSRF/session state、expected redirect/response、no-follow unexpected redirect を本人操作の観測で確定してから別コンポーネントに隔離する。おまとめ **設定** の追加/解除や初期表示変更とは route/action を分ける。semantics 未確認の POST／PUT／PATCH／DELETE は拒否する。
 
 ## 実行環境適性
 
@@ -137,7 +192,7 @@ read-only allowlist は、既存 session の検証、カード表示一覧、明
 | Cloudflare Containers | 適 | [公式](https://developers.cloudflare.com/containers/)は Linux/amd64 の任意 runtime・filesystem を提供。Deno/Node parser、隔離 worker、browser を包装できる。cold start と instance lifecycle を跨ぐ session は外部暗号化 store が必要。 |
 | OCI container | 適 | parser と browser を固定 digest の image に閉じ込められる。secret は image／環境変数に焼かず、実行時 secret store、tmpfs、egress allowlist を使う。 |
 | Kubernetes | 過剰だが適 | [Kubernetes image](https://kubernetes.io/docs/concepts/containers/images/)で digest pin、Secret、NetworkPolicy、CronJob、専用 namespace を構成できる。少数カードには運用費が大きい。rootless、read-only FS、ephemeral volume、1 connection/Pod を推奨。 |
-| 管理下 Android 実機 | 技術的に可・非推奨 | app-only の初期登録、OTP、passkey／生体には最も適するが、D/cost 5。端末拘束、画面変更、attestation、通知誤操作、write UI 隣接の危険が大きい。 |
+| 管理下 Android 実機 | 調査に適、full UI automation は高コスト | 正規 APK 取得、manifest/host/schema 静的解析、本人操作の read-only tracing、passkey/issuer 境界確認に適する。定常 UI automation は端末拘束、画面変更、attestation、write UI 隣接により D/cost 5。 |
 
 どの cloud runtime でも、session／cookie／OTP／明細実値を application log、trace、crash dump、analytics に出さない。issuer／product も必要最小限の一般名だけを tag にする。
 
@@ -164,6 +219,8 @@ read-only allowlist は、既存 session の検証、カード表示一覧、明
 
 A は公開 API がないため不適、B は非公式 HTML と動的 login protection を「stable internal API」と呼べないため不適。passkey 登録済み ID、未知 challenge、issuer 非対応では C が成立せず、その connection だけ D/E へ downgrade する。
 
+公開 login JS/公式 APK の静的解析と本人操作中の redacted tracing は acquisition route ではなく、C candidate を判定するための実験なので A–E level を別途付けない。これらを実施しても transport/session の安定性が確認できなければ、source 評価は変えない。
+
 ## read-only live 検証計画
 
 実値を保存しない一回限りの対話検証。最初は test fixture ではなく利用者の既存状態を読むが、画面・HAR・HTML・ログを保存しない。
@@ -175,8 +232,11 @@ A は公開 API がないため不適、B は非公式 HTML と動的 login prot
 5. クレジットで未確定と確定の月数、月次 export に PDF／CSV／OFX が出るか、family ID で download 不可かを確認。ファイルは一時領域に一件だけ保存し、列名・encoding・行数の型だけ検証後に削除。
 6. デビットで通常／差額の section、状態ラベル集合、負額 refund、承認番号有無を型として確認。実値は memory 外へ出さない。
 7. JCB W の J-POINT、Recruit の別ポイント導線、みずほ cash back、京銀 J-POINT が source ごとに分離されることを確認。交換・使用画面へ進まない。
-8. network は DevTools の request method、origin、path template、status、Content-Type、cookie expiry 属性だけを redacted 集計。request/response body、query 実値、headers、HAR は保存しない。
-9. logout は公式 read-only session 終了操作として明示的に行い、一時 file、browser profile、cookie snapshot を破棄。
+8. DevTools で login HTML → `login-prot.js?init` → `?async` → login form POST の順序を確認し、script hash/size、method、origin/path template、status、Content-Type、cookie 名の hash/属性、User-Agent 一致だけを集計。seed、dynamic field、body、cookie value は保存しない。
+9. クレジット read、PDF/CSV/OFX export、デビット read、既存おまとめ ID 切替をそれぞれ一回だけ本人が操作し、method/path template、parameter 名と型、hidden/header token の有無・rotation、response type、cookie rotation を確認。おまとめ設定画面へは進まない。
+10. session を閉じずに短時間再接続し、mypage validation と同一カード表示を確認する。idle/absolute timeout、refresh endpoint、silent renewal は観測された事実だけを記録し、失効時は再 login する。
+11. 正規 APK を管理下実機から取得できる場合、署名/manifest/network config/host/schema/pinning/integrity call site を静的解析し、通常操作中の no-op hook または profiler で型・route metadata だけを観測。attach/pinning/attestation が拒否したら回避せず停止。
+12. logout は公式 read-only session 終了操作として明示的に行い、一時 file、browser profile、cookie snapshot、APK 以外の raw trace を破棄。
 
 ### stop 条件
 
@@ -190,13 +250,15 @@ A は公開 API がないため不適、B は非公式 HTML と動的 login prot
 - DOM／CSV schema、issuer、カード切替規則、デビット状態が未知
 - PII、カード番号、金額、加盟店、cookie、token、OTP が log／trace／screenshot に出そうになる
 - 同一取得の retry が duplicate write または account risk を生み得る不確実状態
+- APK/runtime 観測に root/debug flag 改変、pinning/attestation/anti-hook 回避、return 値改変、decrypted raw traffic の保存が必要
 
 ## 未確認事項
 
 - 実インベントリ各カードの正確な発行会社表示と、JCB W／Recruit JCB／みずほ JCB デビット／京銀 JCB デビット間で現在設定済みのおまとめ切替グラフ。
 - みずほ JCB デビットと京銀 JCB デビットで passkey が実際に提示されるか、Bitwarden passkey が Web／アプリで動作するか。
-- クレジット側の現行 internal path、export request method、CSRF、cookie TTL、session の実寿命、おまとめ切替 transport。
+- クレジット側で historical `details_inquiry` path が現存するか、PDF/CSV/OFX の現行 method/path、post-login CSRF/session token、cookie TTL、idle/absolute timeout、renewal、既存おまとめ ID 切替 transport。
 - 公式 export のカード別列、OFX の fitid、CSV encoding、行数上限、ゼロ件月の response。
 - デビット差額明細の公式な全状態一覧と、負額・取消・cashback の issuer 別表現。
 - 公開実装 Okura が本番の各 issuer／passkey 未登録 ID で成功しているか。コードの新しさは live 成功の証明ではない。
 - 認証 host の WAF／bot-management vendor。Cloudflare は公開 `www` で確認したが、`my` の製品名と Akamai 利用は未確認。
+- 公式 version 3.11.1 APK の signing certificate、manifest、host、network security config、app schema、pinning/Integrity 実装。現環境では正規 artifact を取得できず未解析。
