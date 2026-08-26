@@ -24,8 +24,9 @@
   を fill する候補であって、Bitwarden に保存されていることだけから passkey と
   判定してはならない。
 - 現行 Web は 2025-05-06 のサービス更新後の Next.js SPA で、同一 origin の
-  `/custom-web00` BFF に JSON を送る。public asset から login endpoint、request
-  header、payload 構造、CSRF/revision/event-hash interceptor を確認できる。旧
+  `/custom-web00` BFF に JSON を送る。public asset からrequest header、payload構造、
+  CSRF/revision/event-hash interceptorを確認できる。調査開始時buildのlogin pathは
+  同日rebuild後のbundleでliteralを再確認できず、runtimeで現行性を確定する。旧
   `o2o.moneykit.net` の HTML form scraper は現在 DNS 解決せず、そのままは使えない。
 - 2026-08-26 の公開観測では `sonybank.jp` は Amazon CloudFront、静的画面は S3、
   BFF は AWS trace header を返した。Akamai は観測していない。一方、ログイン画面は
@@ -34,8 +35,11 @@
   bot score、headless/datacenter 判定条件は公開情報から確定できない。
 - 公式アプリは二つある。`ソニー銀行 アプリ` は全商品の残高と認証・取引、
   `Sony Bank WALLET アプリ` は円/外貨普通預金と Visa debit 履歴・カード設定が
-  中心。cloud collector の primary にせず、Web 認証補助と公式値の照合に使う。
-  銀行公式の直接 APK 配布は確認できず、第三者 APK mirror は使わない。
+  中心。公式 Play listing の package/version はそれぞれ
+  `net.moneykit.SonyBankApp` / `8.02.00`、`net.moneykit.sbw` / `12.04.00` だった。
+  ただし前者は本日開始の renewal 告知と listing 更新日が一致せず、staged rollout
+  または公開 metadata 遅延を含む未解決の version gap がある。Web gap の有無を
+  APK 調査開始条件にせず、Web bundle と正規 split APK を並行解析する。
 - 現段階の総合評価は **実装コスト 4/5、自動化レベル C**。最初は通常 Chrome で
   login と公式 CSV download を低頻度で自動化し、現行 BFF の read endpoint が
   capture で確定した後だけ JSON replay を検討する。Workers 単体より、永続 profile
@@ -56,6 +60,8 @@
 
 今回、認証済み口座へ新規 login せず、公開公式ページ、未認証の公式 login 入口、
 公式配信の JavaScript/config、Google Play の公式掲載、公開 GitHub 実装を調べた。
+follow-up では 2026-08-26 の current Next.js build、公式 Play の package/version/update
+metadata、workspace 内の APK artifact/tool availability も再確認した。
 未認証入口には架空値も含めて何も入力していない。公開 header の確認は HEAD/GET
 だけであり、口座データや認証 cookie は取得していない。
 
@@ -223,13 +229,15 @@ step-up 条件は公開されていない。次のいずれかが出たら自動
 - `sonybank.jp/pages/db/...` は Next.js SPA。HTML/JS は S3 origin の CloudFront 配信。
 - [`core.js`](https://sonybank.jp/pages/config/core.js) は BFF base を
   `/custom-web00`、認証 provider header を `FBaaS-Provider-Key: CustomAuth` と定義する。
-- login bundle は `POST /custom-web00/dbca/cust-web/to-customers/login` を使う。
+- 調査開始時のlogin bundleでは
+  `POST /custom-web00/dbca/cust-web/to-customers/login`を確認した。同日follow-up時の
+  rebuildではpath literalがshared chunkに露出せず、current runtime transportは未確定。
 - JSON payload は `requestBizHdCommon.screenId = DBCA0100I1f`、
   `eventId = DBCA0100I1fE15` と、data 内の `branchNum`、`accountNum`、`loginPwd`。
 - axios interceptor は CSRF token、locale、`FBaaS-SS: db`、
   `FBaaS-Revision: revision-<current>`、event hash を request に追加する。revision は
   public JSON で更新確認し、画面切替/timeout/error も BFF response に依存する。
-- 2026-08-26 の public revision は691だったが deploy のたびに変わる。hard-code せず
+- 2026-08-26 の調査開始時public revisionは691だったがdeployのたびに変わる。hard-codeせず
   page asset が提供する値を使う。
 - credential なしの BFF HEAD は401、CloudFront `Error from cloudfront`、
   `x-amzn-trace-id` を返した。401 は正常な未認証結果で、endpoint availability のみを示す。
@@ -242,6 +250,36 @@ allowlist の両方から除外する。
 session cookie の名前、idle/absolute lifetime、並行 session、IP/UA binding、logout 時
 失効、cookie export/import 可否は未確認。画面遷移の local/session storage と cookie
 だけを保存しても、Caulis/PhishWall state が足りない可能性がある。
+
+### 2026-08-26 public Web/BFF follow-up
+
+同日 11:03 AEST 頃の login HTML は Next build ID `swtv76wAOANOG8i6C3jrC` を参照した。
+route chunk は423 bytesで、login本体 module `00Lr`をshared chunkから読む構成だった。
+shared chunk `5c38...c01c91f...js`の SHA-256 は
+`5c0170415f29dd83649446e0f4e0bd1eabb1bbef34a645f74fc159378667f950`である。
+これはpublic assetのprovenanceで、bank APKまたは認証sessionのhashではない。対応する
+source mapはHTTP 403で、取得を迂回しなかった。
+
+current public bundleで確認できたsession bootstrapは次の通り。
+
+1. 未認証画面はevent `DBCA5700C1fE99`でCSRF初期化を行い、成功responseの
+   `bff-csrf` headerを以後の`BFF-CSRF` request headerへ入れる。
+2. login formはevent `DBCA0100I1fE15`とbranch/account/passwordをlogin action
+   `DBCA185AF`へ渡す。Caulis scriptはsubmit stateに連動して読み込まれる。
+3. public response modelは`accountInfo[]`、`customerLoginResFlg`、氏名field、
+   `integratedId`、`maUniqueId`等を含む。これらはPII/identifierなのでcaptureしない。
+4. login後のcurrent-user action `DBBA505AF`はresponse wrapperの
+   `fbaas-login-info` headerを`loginId`として読む。localStorageの`loginStat=1`は
+   複数画面間の表示statusにすぎず、認証credentialまたはreusable tokenではない。
+5. authenticated sessionを実際に発行するcookie/header、その`Secure`/`HttpOnly`/
+   `SameSite`、rotation、logout失効はpublic JSに露出せず未確認である。
+
+前回確認した`/custom-web00/dbca/cust-web/to-customers/login`はBFF transportの強い候補
+だが、当日のrebuild後のpublic chunkではpath literalを再確認できず、API IDから推測して
+probeしない。本人操作runtime観測でhost/path/method/statusとheader**名だけ**を確認して
+現行性を確定する。public bundleには円/外貨、card loan、住宅loan等のtransaction group
+IDと広いresponse modelが含まれるが、認証後read endpointのURL、pagination、session
+scopeを証明するものではない。
 
 ## CDN、WAF、anti-bot / anti-fraud
 
@@ -288,20 +326,109 @@ session cookie の名前、idle/absolute lifetime、並行 session、IP/UA bindi
 - 公式 site から直接 download する standalone APK は確認できない。Play の split APK/
   bundle を第三者 mirror から取ると provenance を失うため、Kogane の入力にしない。
 
+### Play package/version/provenance follow-up
+
+公式bank pageから各Google Play listingへのlinkを再取得し、Play自身のpublic metadataを
+確認した。versionは端末へ配信されたartifactをまだ意味しない。
+
+| app | package | Play public version / update | provenance判定 |
+| --- | --- | --- | --- |
+| ソニー銀行 アプリ | `net.moneykit.SonyBankApp` | `8.02.00` / 2026-03-27（JP listingの英語表示） | 公式bank pageから直接link、developer `SONY BANK INCORPORATED`。8月26日renewalとのgapあり |
+| Sony Bank WALLET | `net.moneykit.sbw` | `12.04.00` / 2026-08-18 | 公式bank pageから直接link、developer `SONY BANK INCORPORATED` |
+
+main appのrenewal告知は2026-08-26に再登録を伴う新versionを配信すると明記する一方、同日の
+Play public metadataは3月の`8.02.00`だった。公式の動作環境pageも2025-10-17更新のまま
+Android 9〜16を掲げるが、renewal告知はnew appをAndroid 12〜16とする。これはstaged rollout、
+地域/device compatibility、cache、metadata反映待ちのいずれかをpublic情報だけでは区別できない。
+`8.02.00`をrenewal後buildと呼ばず、取得deviceに実際に配信された`versionCode/versionName`を
+manifestから読む。
+
+workspaceには`.apk`/`.apks`/`.aab`/`.xapk`がなく、WSLにも`adb`、`apksigner`、`aapt2`、
+`apkanalyzer`、JADX、apktool、bundletoolがなかった。このため今回manifest/DEX/native libraryを
+解析したという事実はない。mirrorや非公開Play download endpointへ迂回せず、障壁と再実行手順を
+次に固定する。
+
+### 正規split APKの取得・照合手順
+
+本人所有Android端末でGoogle Playの公式listingからinstall/updateした**直後**に行う。
+
+1. 端末とPCの日時、Play account region、device model/ABI/Android version、公式listing URLを
+   local research noteに記録する。account email、Android serial、Advertising IDは記録しない。
+2. Android Platform Toolsをofficial SDKから導入し、`adb shell pm path <package>`でbase/splitの
+   package pathを列挙する。`net.moneykit.SonyBankApp`と`net.moneykit.sbw`を別directoryへ
+   `adb pull`し、original filenameとpull時刻を保持する。
+3. 各APKを`sha256sum`し、`apksigner verify --verbose --print-certs`で全splitが同一signerか確認。
+   signer certificate digest、package、versionCode/versionName、base/split filenameだけを保存する。
+4. `apkanalyzer manifest application-id/version-name/version-code/min-sdk/target-sdk`と
+   `aapt2 dump badging/xmltree`でmanifest metadataを読む。銀行account/device identifierは存在しない
+   install artifactだけを対象にする。
+5. app update後に同じ手順を繰り返し、signer continuity、split集合、version差を比較する。
+   Play public versionとdevice配信versionが異なる場合は両方を残し、片方を上書きしない。
+6. base/split、decompile output、runtime captureはGit/CI/cloudへuploadせず、owner-controlled local
+   encrypted storageで期限付き保持する。repositoryにはhash、version、sanitized findingだけを書く。
+
+`pm path`が返すinstall directoryのrandom segmentはprovenanceに不要なので正規化する。Play Integrityや
+license checkを騙すためのbundle再署名、repack、patched APK、root/emulator、別region取得は行わない。
+
+### manifest / static analysisで確認する項目
+
+| 項目 | 具体的確認 | 現在の状態 |
+| --- | --- | --- |
+| package/provenance | package、version、split、signer digest、Play listing/updateとの一致 | listingのみ確認。artifact未取得 |
+| components | exported activity/service/receiver/provider、permission、intent filter、App Link/deep link | 未確認 |
+| transport | manifest network security config、cleartext flag、host/path literal、Retrofit/OkHttp、WebView bridge、JSON/protobuf schema | 未確認 |
+| session issuance | login/register response model、cookie/token/key alias、refresh/rotation/logout、app→Web SSO handoff | 未確認 |
+| device binding | Android Keystore/key alias、device registration ID、SMS/cash-card enrollment、1口座1端末 enforcement | 公式はmain appの1口座1端末と再登録/SMSを確認。機構は未確認 |
+| integrity/anti-tamper | Play Integrity/SafetyNet/App Check library、root/hook/debug/emulator check、runtime protection/native library | 公式はroot/解析・改ざん防御を明記。vendor/実装は未確認 |
+| TLS/pinning | network security config、`CertificatePinner`/TrustKit、native trust store、pin/backup pin | 未確認。proxy失敗だけで原因を断定しない |
+| Web fraud tools | `fraud-alert.net`/Caulis、`dd.sonybank.jp`/PhishWall、WebView asset/cookie共有 | Webでは確認、appでの採用は未確認 |
+| read/write route | balance/history/list/detailとpay/transfer/trade/card-setting routeのmethod/path/schema | 未確認。static call graphで別表化する |
+
+JADX/apktoolでresource/DEX call graph、serializer annotation、native library strings/`readelf`を追い、
+R8名はresource ID、method signature、schema field、callsiteで関連付ける。deobfuscationとruntime tracingは
+調査対象であり、Webで不足するまで延期しない。ただしroot/anti-tamper/pinning/integrityの解除やhookを
+成功条件にせず、観測不能ならcontrol名、error class、到達点を障壁として残す。
+
 ### 役割分担
 
 | surface | 強み | 自動化上の判断 |
 | --- | --- | --- |
-| 公式 Web | 全商品の画面、過去通帳、CSV、電子交付。browser から raw evidence を取りやすい | primary |
-| ソニー銀行 アプリ | 全商品残高、OTP、transaction 認証、外貨普通取引、振込 | manual auth/照合。取引 UI は触らない |
-| Sony Bank WALLET アプリ | 円/外貨普通残高、通貨別履歴、Visa debit の1年推移/継続利用 | debit 補完。設定機能が多く UI 自動化は危険 |
+| 公式 Web | 全商品の画面、過去通帳、CSV、電子交付。browser からraw evidenceを取りやすい | primary ledger/export。BFF schema基準 |
+| ソニー銀行 アプリ | 全商品残高、OTP、transaction認証、外貨普通取引、振込、Web shortcut | read surfaceとauth/session handoffを並行調査。取引UIは触らない |
+| Sony Bank WALLET アプリ | 円/外貨普通残高、通貨別履歴、Visa debit の1年推移/継続利用、family debit | debit/read schemaのprimary mobile evidence。設定機能はdeny |
 | 公式参照系 API | 最も安定した構造化 read | 契約した電子決済等代行業者向け。個人 Kogane の初期経路ではない |
 
 ソニー銀行 アプリは2026-08-26に大きく更新され、再登録が必要になった。旧/新版が
-併存する移行日なので、公開 screenshot や以前の app UI を固定仕様にしない。Web の
-CSV と同一時点の app 表示を手動照合し、app transport 解析は Web で欠ける項目が明確に
-なった後の別調査とする。certificate pinning、Play Integrity、app attestation、端末鍵
-storage は未確認であり、回避しない。
+併存する移行日なので、公開 screenshot や以前のapp UIを固定仕様にしない。renewal告知は
+残高推移、pattern login、一部円普通絞込、通知履歴をnew appから削除するとする一方、
+current Play listingは過去1年の残高推移をまだ説明する。このcoverage gapもversion差として
+扱い、Web CSVと同時点のapp表示を手動照合する。
+
+main appからpassword不要でlogin後Webへ移るofficial shortcutはapp→Webのsession handoffが
+存在する証拠だが、session tokenの形式・scope・再利用性は不明である。WALLETは円/外貨普通と
+debitに深く、Webは全商品・長期CSVに強い。APK/static/runtime調査を並行しても定常collectorの
+primaryは引き続きWeb/official exportとし、mobile routeはWebにないdebit status/schema、
+device-bound auth、app→Web boundaryを解明するために使う。
+
+### 本人操作read-only runtime metadata観測
+
+1. 正規version/signatureを確認したstock端末で、既存のdashboard、円/外貨普通残高・履歴、
+   WALLETの既存debit利用状況/継続利用だけを各1回開く。実値をscreenshot/logへ残さない。
+2. 端末自身の明示proxy/VPNまたはOS標準診断でDNS/SNI、host、path、method、status、MIME、
+   header**名**、TLS certificate chain metadataを観測する。login/register/OTP request body、
+   token/cookie/device ID/attestation値はcapture filterで破棄する。
+3. read responseはkey名、type、nullability、array count range、pagination field名だけをlocalで
+   redactし、amount、merchant、date/location、card/account/member IDを保存しない。
+4. app→Web shortcutは、既存login済みstateからread-only dashboardへ遷移する1回だけhost/
+   redirect chain/header名を観測し、handoff parameter値を保存しない。
+5. write routeはstatic call graphからmethod/path patternだけ抽出し、runtimeでは呼ばない。
+   外貨売買、振込、ATM、Google Pay登録、card停止/制限解除/limit/family設定を操作しない。
+6. user CAをappが受け入れなければSNI/DNSまでで停止する。pinning、root、attestation、
+   anti-tamperをpatch/hook/disableせず、観測障壁として記録する。
+
+stop: OTP/transaction認証、SMS/cash card/app再登録、write/unknown control、401/403/429、
+account lock、pinning/integrity/root/anti-tamper error、unexpected host/redirect、PII/secretが
+captureへ入った疑い、version/signature不一致。retryやcontrol bypassは行わない。
 
 ## 公開第三者実装
 
@@ -393,7 +520,9 @@ browser profile、1 source 1 active run、固定的な egress、secret 非出力
 | password login も pure HTTP/Worker で再現 | 4/5 | 未検証C | 同上 | telemetry/session 要件不明。最初に選ばない |
 | 公式契約済み参照系 API | 5/5 | A | 公式一覧の広範な残高/通帳 | 適格企業との契約が必要。個人 MVP はE相当 |
 | ソニー銀行 アプリ UI automation | 5/5 | D | 全商品表示、認証 | 1端末制限・SMS/生体・write UI 混在のため非推奨 |
-| WALLET app UI automation/APK reverse engineering | 5/5 | D | debit/普通預金 | Web/CSV で不足する根拠が出るまで行わない |
+| 2 appの正規split APK static/deobfuscation | 3–4/5 | C調査 | manifest、host/schema/session/device/integrity候補 | **Webと並行実施**。artifact provenance必須 |
+| WALLET本人操作read-only runtime metadata | 4/5 | C候補 | debit/円・外貨普通 | host/schemaが確認できればheadless replayを別評価 |
+| WALLET/full app UI automation | 5/5 | D | debit/普通預金/全商品 | write UI、device binding、更新で脆く定常採用しない |
 | aggregator 情報連携 | 1–2/5 | A | 残高/明細等 | 公式 OAuth-like 同意だが初期経路から除外 |
 
 総合判定は **cost 4/5、level C**。円/外貨 CSV だけの MVP は cost 3/5 まで下げられる。
@@ -431,6 +560,12 @@ boolean と schema metadata に限定する。
     正常に検知して止まり、credential login を自動 retry しないことを確認する。
 12. local 基準が安定した後だけ OCI/Cloudflare Container で1回ずつ同じ read flow を実施。
     egress、UA、profile を固定し、401/403/429/challenge の差だけを記録する。
+13. Web安定化を待たず、正規Play installから2 packageのbase/splitを取得し、version、signer、
+    manifest、network security config、host/schema、session/device/integrity候補を静的解析する。
+14. 本人が既存read画面を開く各1回だけapp metadataを観測し、Web BFF/CSVとのcoverage、
+    schema、session handoffを比較する。write controlを操作して差分を作らない。
+15. pinning/integrity/root/anti-tamperでpath/bodyが見えなければDNS/SNIまでを結果とし、
+    hook/repack/bypassへ進まない。
 
 ### stop 条件
 
@@ -453,11 +588,15 @@ boolean と schema metadata に限定する。
 1. 手動取得した公式円/外貨 CSV の local importer を作り、raw file を content hash で保存。
 2. 円普通 CSV の現行 schema fixture を実データ匿名化ではなく、構造だけの synthetic fixture
    として作る。実 row を Git に入れない。
-3. 通常 Chrome の persistent profile で login と CSV download を1 source 1 active run にする。
-4. Kuebiko capture から authenticated read endpoint を特定し、path allowlist を作る。
-5. CSV と同一期間の read JSON/DOM を照合し、read-only BFF replay を追加する。
-6. 円普通が安定してから外貨横断 CSV、定期/積立/仕組み預金 lot、投信等を別moduleで追加。
-7. local で複数日安定後、OCI または Cloudflare Container へ移す。Workers は coordinator、
+3. 同時に2公式packageの正規base/splitを取得し、provenance/manifest/host/schema/session/
+   device/integrity/pinning候補を静的解析する。Web gapを開始条件にしない。
+4. 通常 Chrome の persistent profileでloginとCSV downloadを1 source 1 active runにする。
+5. Kuebiko captureからauthenticated read endpointを特定し、path allowlistを作る。
+6. 本人操作のapp read-only metadata観測を1回行い、Web/CSVとcoverage/schemaを比較する。
+7. CSVと同一期間のread JSON/DOMを照合し、read-only BFF replayを追加する。app routeの
+   replayはdevice binding/session scopeが独立に証明された場合だけ別collectorで評価する。
+8. 円普通が安定してから外貨横断CSV、定期/積立/仕組み預金lot、投信等を別moduleで追加。
+9. local で複数日安定後、OCI または Cloudflare Container へ移す。Workers は coordinator、
    session lease、ingestion に限定し、login fetch は後回しにする。
 
 ## 未確認事項
@@ -465,6 +604,7 @@ boolean と schema metadata に限定する。
 - 実口座の現在の認証方式と、通常残高 login での step-up 頻度
 - Bitwarden item が通常 credential か passkey か（値は確認不要）
 - 2026-08-26 renewal 後の app login が biometric/PIN のどちらで、旧版併存がいつまでか
+- Play public `8.02.00`と8月26日renewal buildの対応、staged rollout/region/device別version
 - 現行円普通 CSV の全 column、encoding、quote/newline、最大期間/件数、stable ID、同日順
 - 通帳 HTML/BFF の page size、pagination、memo/EDI の export 可否
 - 外貨横断 CSV の保持開始日、最大件数、一括範囲、currency precision
@@ -473,7 +613,11 @@ boolean と schema metadata に限定する。
 - Caulis/PhishWall が login acceptance に与える条件、Cloudflare/OCI egress の評価
 - CloudFront に AWS WAF/Bot Control が関連付くか。Akamai は現行 login で未観測
 - session の browser/profile 間 export/import と同時 session の扱い
-- 公式 app の certificate pinning、Play Integrity、attestation、端末 secure storage
+- 2 appのbase/split集合、versionCode、signer、manifest component/permission/deep link
+- app read APIのhost/path/method/schema/pagination、token/cookie/key alias、refresh/logout
+- main appの1口座1端末、transaction key、app→Web SSO handoffの具体的device/session binding
+- appでのCaulis/PhishWall採用有無、certificate pinning、Play Integrity、attestation、
+  root/anti-tamper vendor、端末secure storage
 - 普通預金 ledger の PDF download 有無（公開資料では CSV のみ確認）
 - 参照系 API の開発環境/仕様書を個人が契約なしで利用できるか（現状は不可と評価）
 
@@ -493,7 +637,11 @@ boolean と schema metadata に限定する。
 - [ソニー銀行 アプリの表示内容](https://sonybank.jp/tool/app/banking/01.html)
 - [二つの公式アプリの違い](https://sonybank.jp/inquiry/app/01.html)
 - [Sony Bank WALLET アプリ](https://sonybank.jp/tool/app/sbw/)
+- [ソニー銀行 アプリ Google Play](https://play.google.com/store/apps/details?id=net.moneykit.SonyBankApp)
+- [Sony Bank WALLET Google Play](https://play.google.com/store/apps/details?id=net.moneykit.sbw)
 - [2026-08-26 アプリ renewal](https://sonybank.jp/info/2026/0724-01.html)
+- [アプリ動作確認環境](https://sonybank.jp/guide/spec/04.html)
+- [スマートフォンアプリ約款](https://sonybank.jp/stpl/84.html)
 - [情報連携サービス](https://sonybank.jp/services/api/)
 - [参照系 API の対象一覧](https://sonybank.jp/stpl/161.html)
 - [API 接続先の適格性基準](https://sonybank.jp/stpl/162.html)
