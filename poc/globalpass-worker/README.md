@@ -102,11 +102,22 @@ Cloudflare Containersの[outbound traffic](https://developers.cloudflare.com/con
 
 sanitizedな手順、観測値、推論と未確定事項は[`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)に保存する。
 
+同日、スタートメニューの`kogane capture`から新規起動した通常Chrome/Kuebikoでも同じlogin URLを比較した。資格情報は入力せず、login POSTも行っていない。
+
+- HTTP 200、formあり、`Access Denied`なしはBrowser Runと同じだった。
+- page JavaScriptからはWindows Chrome 153、`Win32`、`navigator.webdriver=false`、`en-US`に見えた。
+- Turnstile APIは302後にbuild版200、challenge documentも200だった。
+- `cf-turnstile-response`は約15秒以内に773文字になった。Browser Runは30秒後も0文字だった。
+- structured CDP/Kuebiko metadata上、`brunhild.challenges.cloudflare.com`と対象hostの4xx/5xxはなかった。未使用CSS 1件だけ`ERR_ABORTED`だが、challenge failureはなかった。
+- Kuebikoの生capture run `2026-08-27T21-46-51`はcookie等を含み得るためローカルだけに残し、Gitにはsanitized結果だけを保存した。
+
+Kuebikoはremote debugging付きでも`navigator.webdriver=false`でtoken生成に成功した。CDP利用そのものより、Browser Runの`Cloudflare-Workers`/Linux/`webdriver=true` fingerprintと削除不能な識別headerが強い差分である。ただしKuebikoとBrowser Runのegressは同一ではないため、fingerprint単独原因とはまだ断定しない。
+
 ## 次に試す順序
 
-1. 成功する通常Chrome/KuebikoをTAMIAと同じ経路でcaptureし、Turnstile request、frame、token生成までをBrowser Runのsanitized結果と比較する。
+1. Container/OCI ChromiumをTAMIA経路へ載せたまま、`navigator.webdriver=false`、Windows相当fingerprint、実browser profileを1項目ずつ通常Chromeへ近づけるA/Bを行う。
 2. Browser Runで対話型challengeが割り当てられたのかを、Live Viewまたはscreenshotで確認する。ただし手動介入が必要ならproduction collector候補から外す。
-3. 同一IPが必要かを検証する場合は、Browser RunではなくContainer/OCI ChromiumをTAMIA経路へ載せ、browser fingerprintだけを変えるA/Bにする。
+3. IP要因を分離するときはBrowser Runではなく、成功・失敗browserの両方を同じTAMIA経路へ載せる。
 4. IPv6追加は`brunhild`が成功runで必須だと確認できた場合だけ行う。
 
 いずれもtoken生成、ログインPOST、明細画面、月selectorの順にbounded testし、成功してから初回backfillと日次Cronを有効化する。

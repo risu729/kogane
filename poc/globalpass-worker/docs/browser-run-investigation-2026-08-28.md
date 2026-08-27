@@ -53,6 +53,30 @@ credential、cookie value、request/response body、Turnstileの動的識別子�
 | HTTP 4xx/5xx / request failure | なし |
 | credential POST | なし |
 
+## 通常Chrome/Kuebikoとの比較
+
+2026-08-28 AESTに、スタートメニューの`kogane capture`から新規起動したKuebikoプロファイルで同じGLOBAL PASS login URLを開いた。capture runは`2026-08-27T21-46-51`（UTC）で、Kuebiko 1.3.0がnetlog、response metadata、body、storageをローカルに保存した。生captureにはcookie等が含まれ得るためGitには入れず、以下のsanitized観測値だけを残す。資格情報は入力せず、login POSTも行っていない。
+
+| 項目 | Cloudflare Browser Run | 通常Chrome/Kuebiko |
+| --- | --- | --- |
+| login page | HTTP 200 / `ログイン` | HTTP 200 / `Sign On` |
+| form / Access Denied | formあり / false | form 1件 / false |
+| page JavaScript UA | `Cloudflare-Workers` | Windows Chrome 153 |
+| platform | `Linux x86_64` | `Win32` |
+| `navigator.webdriver` | `true` | `false` |
+| language | `en-US` | `en-US`（languagesには`ja`も含む） |
+| Turnstile API | 302後にbuild版200 | 302後にbuild版200 |
+| challenge document | 200 | 200 |
+| `cf-turnstile-response` | 30秒後も0文字 | 約15秒以内に773文字 |
+| challenge frame | 30秒後も存在 | token観測時にはiframeなし |
+| `brunhild.challenges.cloudflare.com` | requestなし | structured CDP/Kuebiko metadata上はrequestなし |
+| HTTP 4xx/5xx / request failure | なし | 4xx/5xxなし。未使用CSS 1件が`ERR_ABORTED`、challenge failureなし |
+| credential/login POST | なし | なし |
+
+Kuebiko側はremote debugging port付きのChrome Betaだが、`--enable-automation`は使わず、pageからは`navigator.webdriver=false`に見えた。つまりCDP接続や通信capture自体がTurnstile token生成を妨げるわけではない。一方Browser Runはnetwork headerのUAをWindows Chrome 153相当にしても、page JavaScript fingerprintとCloudflareが付与する削除不能header/Web Bot Auth署名は通常Chromeにならない。
+
+この比較は「Browser Run固有のbrowser identityが失敗要因」という仮説を強くするが、IP/egressは完全には分離していない。clientから確認できた`150.48.6.170`はGLOBAL PASS側の接続先IPであり、Kuebikoの送信元IPではない。KuebikoはローカルWARP/hostname routeの影響を受け得る一方、Browser RunはCloudflare egress固定なので、この1比較だけでbrowser fingerprintを単独原因とは断定しない。
+
 ## 結論
 
 Browser RunはGLOBAL PASSのlogin pageとTurnstile challenge transportを正常に200で取得したが、tokenを完成できなかった。少なくとも今回のBrowser Run失敗は`brunhild.challenges.cloudflare.com`のIPv6到達性では説明できない。したがって「TAMIAにIPv6がないことが既知のblocker」という以前の推論は撤回する。
@@ -64,4 +88,4 @@ Browser RunはGLOBAL PASSのlogin pageとTurnstile challenge transportを正常�
 - challengeが対話または追加のbrowser signalを要求したが、headless probeが完了できなかった
 - ContainerではGLOBAL PASSとTurnstileのegressが分離し、Browser Runでは全通信がCloudflare egressになるというnetwork identity差
 
-Browser Run単独をproduction collectorへ採用する根拠は得られなかった。次は成功する通常Chrome/Kuebiko captureと、同じ項目を比較する。IPv6追加は成功runでも`brunhild`が必須だと確認できるまで優先しない。
+Browser Run単独をproduction collectorへ採用する根拠は得られなかった。通常Chrome/Kuebikoでは同じ入口でtokenが生成されたため、次はContainer/OCI側で`navigator.webdriver=false`、Windows相当fingerprint、実browser profileを段階的に合わせる。IP要因を分離するA/Bでは同じTAMIA経路を使う。IPv6追加は成功runでも`brunhild`が必須だと確認できるまで優先しない。
