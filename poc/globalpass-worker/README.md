@@ -113,17 +113,19 @@ sanitizedな手順、観測値、推論と未確定事項は[`docs/browser-run-i
 
 Kuebikoはremote debugging付きでも`navigator.webdriver=false`でtoken生成に成功した。CDP利用そのものより、Browser Runの`Cloudflare-Workers`/Linux/`webdriver=true` fingerprintと削除不能な識別headerが強い差分である。ただしKuebikoとBrowser Runのegressは同一ではないため、fingerprint単独原因とはまだ断定しない。
 
-## 2026-08-28 Container Chromium A/B
+## 2026-08-28 Container browser A/B
 
 GLOBAL PASSを同じTAMIA経路に固定し、Playwright Chromiumを`baseline`、`webdriver=false`、Windows相当fingerprint、headed、fresh persistent profileの順で1項目ずつ近づけた。5条件すべてでlogin pageは200、formあり、`Access Denied`なしだったが、30秒後もTurnstile tokenは0文字だった。共通してchallenge fetch 401、Brunhild 204直後の`ERR_ABORTED`が観測された。
 
-この結果から、`webdriver`、表面的なWindows情報、headless、persistent contextのいずれか一つだけが原因ではない。資格情報の入力、login POST、cookie再利用、R2書き込みは行っていない。旧instance `v9`はdestroy済み、検証instance `v10`はstop済みである。詳細な比較表は[`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)、削除対象は[`docs/cleanup.md`](docs/cleanup.md)に記録した。
+追加で、Playwright公式の`channel: "chrome"`を使い、Containerへ導入したブランド版Google Chrome Stable `152.0.7977.64`でも同じ条件を実行した。login pageは200だったがtokenは0文字で、challenge fetch 401とBrunhild 204直後の`ERR_ABORTED`も変わらなかった。したがってPlaywright同梱Chromiumだけが失敗原因ではない。
+
+資格情報の入力、login POST、cookie再利用、R2書き込みは行っていない。旧instance `v9`・`v10`はdestroy済み、Google Chrome検証instance `v11`はstop済みである。詳細な比較表は[`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)、削除対象は[`docs/cleanup.md`](docs/cleanup.md)に記録した。
 
 ## 次に試す順序
 
-1. Container/OCIを同じTAMIA経路へ載せたまま、Playwright同梱ChromiumではなくGoogle Chrome Stableの実binaryで最小probeを行う。
-2. Kuebiko成功runとContainer失敗runの送信元IPを直接確認し、browser差とnetwork identity差を分離する。
-3. 実Chromeでも失敗する場合だけ、TLS・GPU・font・codec・OS APIの整合性や、保存済みprofileの信頼履歴を比較する。JS property patchだけは増やさない。
+1. Kuebiko成功runとContainer失敗runの送信元IPを直接確認し、browser差とnetwork identity差を分離する。
+2. 同じContainer Chromeで、Windows偽装なしのnative Linux、実version 152と一致するClient Hints、保存済みprofileの順に比較する。
+3. それでも差が残る場合だけ、TLS・GPU・font・codec・OS APIの整合性を比較する。JS property patchだけは増やさない。
 4. Browser Runの対話型challengeを確認する必要があればLive Viewまたはscreenshotを使う。ただし手動介入が必要ならproduction collector候補から外す。
 5. IPv6追加は`brunhild`が成功runで必須だと確認できた場合だけ行う。
 
@@ -144,7 +146,8 @@ bun run deploy:dry
 scripts/trigger.sh daily
 scripts/trigger.sh backfill
 scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token baseline
-scripts/trigger.sh stop ~/.local/share/kogane/secrets/globalpass-worker-admin-token v10 stop
+scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token chrome-stable-headed-persistent-windows
+scripts/trigger.sh stop ~/.local/share/kogane/secrets/globalpass-worker-admin-token v11 stop
 ```
 
 ## 残る検証項目

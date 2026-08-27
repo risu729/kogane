@@ -23,10 +23,11 @@ const RELAY_HOSTS = new Set([
   TURNSTILE_HELPER_HOST,
 ]);
 const MAX_NDJSON_LINE_BYTES = 3 * 1024 * 1024;
-const CONTAINER_ID = "prestia-globalpass-read-only-v10";
+const CONTAINER_ID = "prestia-globalpass-read-only-v11";
 const STOPPABLE_CONTAINER_IDS = new Map([
   ["v9", "prestia-globalpass-read-only-v9"],
-  ["v10", CONTAINER_ID],
+  ["v10", "prestia-globalpass-read-only-v10"],
+  ["v11", CONTAINER_ID],
 ]);
 
 export class GlobalPassCollectorContainer extends Container<Env> {

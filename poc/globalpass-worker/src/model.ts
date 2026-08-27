@@ -6,6 +6,7 @@ export const CONTAINER_PROBE_VARIANTS = [
   "windows",
   "headed-windows",
   "headed-persistent-windows",
+  "chrome-stable-headed-persistent-windows",
 ] as const;
 
 export type ContainerProbeVariant = (typeof CONTAINER_PROBE_VARIANTS)[number];

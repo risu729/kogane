@@ -30,6 +30,7 @@ const PROBE_VARIANTS = [
   "windows",
   "headed-windows",
   "headed-persistent-windows",
+  "chrome-stable-headed-persistent-windows",
 ];
 let collecting = false;
 let xvfbProcess;
@@ -299,6 +300,7 @@ function probeConfiguration(variant) {
     windows: index >= 2,
     headed: index >= 3,
     persistent: index >= 4,
+    chromeStable: index >= 5,
   };
 }
 
@@ -351,6 +353,7 @@ async function launchProbeContext(config, socksPort) {
   const launchOptions = {
     headless: !config.headed,
     args,
+    ...(config.chromeStable ? { channel: "chrome" } : {}),
     ...(display ? { env: { ...process.env, DISPLAY: display } } : {}),
     proxy: {
       server: `socks5://127.0.0.1:${socksPort}`,

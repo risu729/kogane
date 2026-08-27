@@ -77,7 +77,7 @@ Kuebiko側はremote debugging port付きのChrome Betaだが、`--enable-automat
 
 この比較は「Browser Run固有のbrowser identityが失敗要因」という仮説を強くするが、IP/egressは完全には分離していない。clientから確認できた`150.48.6.170`はGLOBAL PASS側の接続先IPであり、Kuebikoの送信元IPではない。KuebikoはローカルWARP/hostname routeの影響を受け得る一方、Browser RunはCloudflare egress固定なので、この1比較だけでbrowser fingerprintを単独原因とは断定しない。
 
-## Container Chromiumの段階的A/B
+## Container browserの段階的A/B
 
 同日、Cloudflare ContainerのGLOBAL PASS通信を全runで同じTAMIA Tunnel経路に固定し、browser側だけを1段階ずつ変更した。Turnstileの2 hostはContainerの通常internet egressを使う。各runはログイン画面を1回開き、tokenを最大30秒待つだけで、資格情報の入力、login POST、cookieの再利用、R2への書き込みは行っていない。
 
@@ -88,12 +88,13 @@ Kuebiko側はremote debugging port付きのChrome Betaだが、`--enable-automat
 | `windows` | Windows Chrome 153 UA・Client Hints・platform・languages | Win32 / Chrome 153相当 / `webdriver=false` / `en-US` | 0文字 |
 | `headed-windows` | Xvfb上のheaded Chromium | 上記Windows情報、headed | 0文字 |
 | `headed-persistent-windows` | fresh profileのpersistent context | 上記Windows情報、headed、persistent | 0文字 |
+| `chrome-stable-headed-persistent-windows` | 実行binaryだけをブランド版Google Chrome Stableへ変更 | Google Chrome 152.0.7977.64、上記Windows情報、headed、persistent | 0文字 |
 
-全runでlogin pageはHTTP 200、formあり、`Access Denied`なしだった。Turnstile APIは302からbuild版200、challenge documentは200、XHR POSTは2回とも200、imageも200だった。一方で共通してchallenge fetchが401、`brunhild.challenges.cloudflare.com`が204の直後に`net::ERR_ABORTED`となり、tokenは完成しなかった。最後のrunでもPlaywright同梱browserの実体はChromium `151.0.7922.34`であり、JS/Client Hints上だけChrome 153に見せている。
+全runでlogin pageはHTTP 200、formあり、`Access Denied`なしだった。Turnstile APIは302からbuild版200、challenge documentは200、XHR POSTは2回とも200、imageも200だった。一方で共通してchallenge fetchが401、`brunhild.challenges.cloudflare.com`が204の直後に`net::ERR_ABORTED`となり、tokenは完成しなかった。最初の5 runはChromium `151.0.7922.34`、6 run目はブランド版Google Chrome `152.0.7977.64`である。Windows variantではいずれもJS/Client Hints上だけChrome 153に見せている。
 
-このA/Bから、`navigator.webdriver`、表面的なWindows UA/platform/language、headless、fresh persistent contextのいずれか一つを直すだけでは不十分と分かった。persistent contextは保存済みの信頼履歴を持つprofileではないため、「過去の正常利用履歴が必要か」は未検証である。また、Windows Chrome 153の値を返すLinux Chromium 151は、TLS、GPU、font、codec、OS固有APIなどと整合しない可能性がある。
+このA/Bから、`navigator.webdriver`、表面的なWindows UA/platform/language、headless、fresh persistent context、Playwright同梱Chromiumのいずれか一つを直すだけでは不十分と分かった。ブランド版Chromeでもchallenge fetch 401とBrunhild 204直後の`ERR_ABORTED`は変わらなかった。persistent contextは保存済みの信頼履歴を持つprofileではないため、「過去の正常利用履歴が必要か」は未検証である。また、Linux上のChrome 152にWindows Chrome 153の値を返させているため、TLS、GPU、font、codec、OS固有APIなどとの不整合は残る。
 
-次に価値があるのは、JS property patchを増やすことではなく、同じTAMIA経路上でGoogle Chrome Stableの実binaryを使う比較である。それでも失敗する場合は、Kuebiko成功runとContainer失敗runの送信元IPを直接確認してnetwork identityを分離する。今回作成したContainer instance `v10`は検証後にstopした。
+次に価値があるのは、JS property patchを増やすことではなく、Kuebiko成功runとContainer失敗runの送信元IPを直接確認してnetwork identityを分離することである。その次に、Windows偽装なしのnative Linux Chrome、Chrome 152と一致させたClient Hints、保存履歴のあるprofileの順で比較する。今回作成したContainer instance `v10`は後にdestroyし、Google Chrome検証用の`v11`は検証後にstopした。
 
 ## 結論
 
@@ -106,4 +107,4 @@ Browser RunはGLOBAL PASSのlogin pageとTurnstile challenge transportを正常�
 - challengeが対話または追加のbrowser signalを要求したが、headless probeが完了できなかった
 - ContainerではGLOBAL PASSとTurnstileのegressが分離し、Browser Runでは全通信がCloudflare egressになるというnetwork identity差
 
-Browser Run単独をproduction collectorへ採用する根拠は得られなかった。Container Chromiumでも5条件すべてでtokenを生成できず、表面的なfingerprint調整では通常Chrome/Kuebikoとの差を埋められなかった。次は同じTAMIA経路でGoogle Chrome Stableの実binaryを使う最小比較と、両runの送信元IPの直接確認を優先する。IPv6追加は成功runでも`brunhild`が必須だと確認できるまで優先しない。
+Browser Run単独をproduction collectorへ採用する根拠は得られなかった。Containerではブランド版Google Chrome Stableを含む6条件すべてでtokenを生成できず、表面的なfingerprint調整やbrowser binaryの差し替えでは通常Chrome/Kuebikoとの差を埋められなかった。次はKuebiko成功runとContainer失敗runの送信元IPの直接確認を優先する。IPv6追加は成功runでも`brunhild`が必須だと確認できるまで優先しない。
