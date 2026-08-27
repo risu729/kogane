@@ -525,16 +525,25 @@ A hostname route is configured in the account's Zero Trust route table, not
 inside one Worker, so it cannot itself be scoped to “requests from this
 scraper.” An enrolled personal WARP client may also be eligible for that route.
 Use a dedicated personal-device profile to keep this effect off the user's
-ordinary browsing:
+ordinary browsing. There are two distinct goals:
 
-1. Add the scraper hostnames to that profile's Local Domain Fallback list so
-   the device resolves them with its local resolver instead of Gateway. This is
-   the narrow first A/B because it changes DNS behavior only.
-2. If the requirement is to guarantee that matching traffic leaves through the
-   PC's ordinary local route rather than WARP, add the same domain set to that
-   profile's Split Tunnel Exclude list. Cloudflare explicitly says Local Domain
-   Fallback changes DNS resolution, not the destination traffic flow; Split
-   Tunnel Exclude is the control that bypasses the Cloudflare One Client.
+1. **Avoid TAMIA while retaining ordinary WARP/Gateway transport.** Add the
+   scraper hostnames to that profile's Local Domain Fallback list so the device
+   receives the public resolver's real destination IP instead of Gateway's
+   initial resolved/token IP. Cloudflare documents that hostname routing is
+   selected by Gateway returning a token IP and mapping the following network
+   connection to its hostname and next hop. It also documents that Local Domain
+   Fallback bypasses Gateway DNS. These two facts make Local Domain Fallback a
+   strong candidate for avoiding the hostname route while leaving later WARP
+   traffic intact, but Cloudflare does not explicitly promise this combination.
+   Treat it as the first personal-PC A/B and verify both the DNS answer and the
+   observed egress before relying on it.
+2. **Bypass WARP itself for the target.** If the requirement is to guarantee
+   that matching destination traffic leaves through the PC's ordinary local
+   route, add the same exact domain set to that profile's Split Tunnel Exclude
+   list. Cloudflare explicitly says Local Domain Fallback changes DNS
+   resolution, not destination traffic flow, while Split Tunnel Exclude causes
+   the matching traffic to bypass the Cloudflare One Client.
 
 This separation is per device profile. It leaves the Worker's
 `cf1:network`/Gateway path and account hostname routes available to the
@@ -727,6 +736,7 @@ limit, card-control, registration, or settings screen except to leave it.
 - [Cloudflare Workers VPC binding API](https://developers.cloudflare.com/workers-vpc/api/)
 - [Cloudflare VPC Networks](https://developers.cloudflare.com/workers-vpc/configuration/vpc-networks/)
 - [Cloudflare Zero Trust routes](https://developers.cloudflare.com/cloudflare-one/networks/routes/add-routes/)
+- [Cloudflare initial resolved/token IPs](https://developers.cloudflare.com/cloudflare-one/networks/routes/configure-initial-resolved-ips/)
 - [Cloudflare Local Domain Fallback](https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/configure/route-traffic/local-domains/)
 - [Cloudflare One Client route traffic](https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/configure/route-traffic/)
 - [Cloudflare Workers TCP socket considerations](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/)
