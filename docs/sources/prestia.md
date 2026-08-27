@@ -392,6 +392,78 @@ generation or the Nablarch hidden state. The currently verified design is a
 real browser; Browser Rendering or a Container can host it, whereas an isolate
 `fetch()` implementation cannot execute the page widget by itself.
 
+### Cloudflare Container, TAMIA egress and raw-TCP follow-up (2026-08-27)
+
+A bounded Cloudflare Container experiment tested whether Playwright Chromium
+could keep its own TLS handshake while only the network path moved through the
+existing TAMIA Cloudflare Tunnel. No PRESTIA or GLOBAL PASS credential request
+was sent in this phase, so every result below is **before Turnstile and before
+the member-site login**.
+
+The desired property is different from an HTTP reverse proxy. Calling
+`TAMIA.fetch()` makes Cloudflare originate the upstream HTTPS request. It can
+select TAMIA's path, but the destination then observes Cloudflare's HTTP/TLS
+client rather than Chromium's original TLS fingerprint. To preserve the
+browser handshake, the experiment instead used an opaque byte path:
+
+`Chromium -> local SOCKS5 -> WebSocket -> egress Worker ->
+TAMIA.connect() -> destination`
+
+The measured results were:
+
+| Probe | Result | Interpretation |
+| --- | --- | --- |
+| `TAMIA.fetch()` to an AWS IP reflector | HTTP 200 and TAMIA public IPv4 | HTTP-level VPC routing through the existing Tunnel works. |
+| Container Chromium -> local SOCKS5 -> egress Worker | SOCKS negotiation and WebSocket upgrade succeeded | The Container, Chromium proxy configuration and Worker relay were not the first failure. |
+| `TAMIA.connect()` to Cloudflare-hosted `icanhazip.com:443` | Socket became readable EOF with zero response bytes; Chromium timed out | Initially suggested the documented Workers restriction on outbound TCP to Cloudflare IP ranges, but this was only a hypothesis. |
+| `TAMIA.connect()` to AWS-hosted `checkip.amazonaws.com` on 80 and 443 | Same zero-byte EOF | Falsifies “Cloudflare-owned destination alone caused the EOF.” Public raw-TCP egress through this direct `tunnel_id` binding is not established. |
+| Direct read-only TCP/TLS from TAMIA to both reflectors | Successful | The public destinations and TAMIA's ordinary IPv4 Internet access were healthy. |
+| `TAMIA.connect("100.64.1.254:22")` | Zero-byte EOF | TAMIA's LAN-side address was not reachable as an announced route through this binding. |
+| `TAMIA.connect("127.0.0.1:22")` | Returned the TAMIA OpenSSH banner | Raw TCP over the VPC binding works for a service local to the `cloudflared` host. |
+
+Here, EOF means the Worker's `ReadableStream` completed with `done: true`
+before returning any application bytes. It is not an HTTP status and does not
+show that Akamai, Turnstile or GLOBAL PASS rejected the browser. The contrast
+between public destinations and `127.0.0.1:22` is consistent with the documented
+scope of VPC `connect()`: private services reachable through a Tunnel, Mesh or
+WAN on-ramp. Cloudflare documents public-Internet egress for the account-wide
+`network_id: "cf1:network"` / Gateway path; this experiment bound one Tunnel
+directly by `tunnel_id`. Workers VPC and its raw-TCP API are also still beta, so
+the exact EOF rather than a thrown routing error may be implementation behavior
+rather than a stable contract.
+
+Cloudflare separately documents that the ordinary Workers outbound TCP Socket
+API blocks Cloudflare-owned IP ranges. That warning explains why a
+Cloudflare-hosted reflector was a poor first test target, but it does **not**
+explain the AWS EOF and must not be generalized into “every Cloudflare VPC TCP
+connection to Cloudflare is impossible.” The VPC binding's successful
+localhost SSH connection is a distinct private-network path.
+
+The remaining no-MITM design is SSH dynamic forwarding. OpenSSH `ssh -D`
+creates a local SOCKS4/5 listener; for each hostname and port requested by
+Chromium, the authenticated SSH server opens the destination connection from
+the remote machine. Applied here, the path would be:
+
+`Chromium -> Container-local SOCKS5 -> SSH stream over WebSocket ->
+egress Worker -> TAMIA.connect("127.0.0.1:22") -> TAMIA sshd -> destination`
+
+The destination would therefore see TAMIA's home IP while Chromium still
+performs the end-to-end TLS handshake. This is not TLS interception and does
+not require an HTTP proxy on TAMIA. The control connection does require a
+separate read-only SSH credential. The normal localhost sshd rejected the
+existing WSL identity and the user's `authorized_keys` file was empty. WSL's
+working `tamia` alias used a different no-key authentication path; reusing that
+would depend on Tailscale and is intentionally outside this design. No key,
+package, route or service was added to TAMIA during the probe.
+
+[`nyanshiba/warp-router`](https://github.com/nyanshiba/warp-router) is useful
+context but not a drop-in fix for this direct-Tunnel experiment. It configures
+a dual-stack Linux WARP Connector as a gateway to AS13335 and changes nftables,
+IP forwarding and optionally FRR. TAMIA had ordinary IPv4 but no global IPv6
+route in the read-only inspection, and changing its routing stack was outside
+the experiment. A later `cf1:network` / Cloudflare Mesh design should evaluate
+it separately from the narrower SSH-forward approach.
+
 ## Official Android app and APK value
 
 Google Play publishes the official package as
@@ -450,7 +522,7 @@ rather than a stable public consumer API.
 | --- | --- | --- |
 | Local Windows Kuebiko / persistent Chrome | **Verified for GLOBAL PASS discovery; rejected once for PRESTIA login** | GLOBAL PASS direct login and 15-month activity navigation succeeded. PRESTIA's first credential POST received Akamai 403. |
 | OCI VM or Kubernetes pod with persistent browser profile | **Best first unattended GLOBAL PASS PoC; medium-high confidence** | Full Chrome/Xvfb/Patchright and durable profile are straightforward; the remaining question is whether a fresh Linux/cloud browser earns an accepted Turnstile token. |
-| Cloudflare Browser Rendering / Container | **Plausible GLOBAL PASS serverless runtime; medium confidence** | Can execute the actual page/widget. A Container gives the most Chrome/runtime control; Browser Rendering may be simpler if its browser/profile lifetime and scheduled-job limits fit. |
+| Cloudflare Browser Rendering / Container | **Browser runtime works; TAMIA egress remains gated; medium confidence** | A Container ran Playwright Chromium, local SOCKS5 and the Worker WebSocket leg. HTTP `fetch()` used TAMIA's IP but replaced the browser TLS client; public raw TCP through a direct `tunnel_id` binding returned zero-byte EOF. A narrowly scoped SSH dynamic forward through TAMIA localhost is the next no-MITM path. Browser Rendering may be simpler if TAMIA egress is unnecessary. |
 | Cloudflare Worker isolate | **Unproven for GLOBAL PASS login; unsuitable for PRESTIA login** | `fetch()` cannot itself execute the Turnstile browser widget, and PRESTIA rejected the tested browser credential POST. Use only for orchestration/storage or after a compliant browserless token and authenticated read flow are demonstrated. |
 | Official Android app analysis/runtime | **Next PRESTIA discovery path** | May expose read-only native endpoints or an app-specific WebView route that avoids the failing desktop entry. Device binding, biometrics, pinning/integrity, and Play distribution remain possible costs. |
 
@@ -493,7 +565,11 @@ limit, card-control, registration, or settings screen except to leave it.
    reconcile pending-to-posted transitions.
 4. Repeat GLOBAL PASS once in fresh local/OCI Chrome without importing the
    Kuebiko profile. This distinguishes a generally accepted browser flow from
-   profile reputation. Then test Cloudflare Browser Rendering or a Container,
+   profile reputation. Before a Cloudflare Container credential request, use a
+   separate revocable key to complete an IP-only SSH dynamic-forward check
+   through `TAMIA.connect("127.0.0.1:22")`; prove that the reflector sees
+   TAMIA's IPv4 and Chromium keeps its end-to-end TLS. Do not use Tailscale or
+   install a proxy on TAMIA. Then test Browser Rendering or the Container while
    preserving the same bounded stop conditions.
 5. Separately test the public GLOBAL PASS page with a Worker `fetch()` client
    and inspect form/state shape without sending credentials. Continue to a
@@ -532,6 +608,10 @@ limit, card-control, registration, or settings screen except to leave it.
 - Is there any supported way to obtain a production GLOBAL PASS Turnstile
   token in a Worker isolate, or must the scheduled collector always include a
   browser runtime?
+- After a TAMIA SSH dynamic-forward IP check passes, does GLOBAL PASS accept
+  Container Chromium, and does bypassing only `challenges.cloudflare.com` from
+  the home proxy materially change Turnstile issuance? Keep this as a separate
+  A/B test; do not infer it from the current pre-login network probes.
 - Does the current official Android app use WebView banking pages or separate
   native APIs, and are certificate pinning or integrity checks present?
 
@@ -558,5 +638,9 @@ limit, card-control, registration, or settings screen except to leave it.
 - [GLOBAL PASS member-site terms](https://www.smbctb.co.jp/gp/terms/pdf/prestia_ja.pdf)
 - [Cloudflare Turnstile overview](https://developers.cloudflare.com/turnstile/get-started/)
 - [Cloudflare Turnstile server-side validation](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)
+- [Cloudflare Workers VPC binding API](https://developers.cloudflare.com/workers-vpc/api/)
+- [Cloudflare VPC Networks](https://developers.cloudflare.com/workers-vpc/configuration/vpc-networks/)
+- [Cloudflare Workers TCP socket considerations](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/)
+- [OpenSSH dynamic forwarding (`ssh -D`)](https://man.openbsd.org/ssh#D)
 - [Bank API policy](https://www.smbctb.co.jp/eaea/)
 - [Contracted API operators](https://www.smbctb.co.jp/dendai/detail.html)
