@@ -12,11 +12,11 @@ limit change, or profile change is part of collection.
 
 **Decision after live validation:** split the implementation paths.
 
-- For PRESTIA bank balances and account activity, stop treating password login
-  through PRESTIA Online as the first implementation. A single credential POST
-  from an otherwise normal Windows Chrome 153 session was denied by the Akamai
-  edge. Acquire and inspect the official Android package next, then decide
-  between its read-only transport and a persistent-browser fallback.
+- For PRESTIA bank balances and account activity, prototype the app's mobile
+  HTML transport before returning to desktop browser tuning. A single desktop
+  credential POST was denied by the Akamai edge, while static Android analysis
+  now shows an explicit Cordova scraper over the mobile sign-on, balance and
+  history pages. It does not expose a separate native JSON banking API.
 - For GLOBAL PASS, keep the member website as the first collector. The same
   capture session completed direct login without visible interaction and read
   the month-by-month activity pages. The member website remains preferable to
@@ -31,9 +31,9 @@ limit change, or profile change is part of collection.
   not use the bank's contracted aggregator API.
 
 The revised estimated implementation cost is **4/5 for PRESTIA bank balances
-and account activity until the app transport is understood**, and **3/5 for
-detailed GLOBAL PASS activity with a browser runtime**. Browserless GLOBAL
-PASS collection is not yet rated as feasible.
+and account activity because mobile form/fraud bootstrap remains unvalidated**,
+and **3/5 for detailed GLOBAL PASS activity with a browser runtime**.
+Browserless GLOBAL PASS collection is not yet rated as feasible.
 
 ## Research method and safety
 
@@ -556,27 +556,137 @@ Do not add broad CDN suffixes or resolved CDN IP ranges merely for convenience.
 
 Google Play publishes the official package as
 `jp.co.smbctb.prestia_app` by SMBC Trust Bank Ltd. The Play listing reports
-50K+ installs and describes the same balance/activity features as mobile
-banking, explicitly excluding activity downloads.
+50K+ installs, was updated on 2026-07-31, and describes the same
+balance/activity features as mobile banking, explicitly excluding activity
+downloads. The bank does not publish a standalone APK on its website.
 
-The bank does not publish a standalone APK on its official website. Obtain the
-installed split APKs from an owned Android device or an authenticated Google
-Play acquisition flow and verify the package/signing identity against the
-installed official app. Do not trust a third-party APK mirror as the
-collection runtime.
+### Bounded static-analysis artifact
 
-Static analysis is useful, but it is a second-phase discovery aid:
+`apkeep`'s APKPure backend returned a third-party redistributed XAPK while no
+authenticated Google Play token or owned-device extraction was available. It
+was never installed or executed. The artifact is useful static evidence, but
+it is **not yet proven byte-identical to the package currently delivered to
+this account/device by Google Play**.
 
-- enumerate official API/HTML hosts, WebView routes and deep links;
-- determine whether balances are rendered by a WebView or native JSON calls;
-- inspect certificate pinning, Network Security Config, root/emulator checks,
-  biometric-keystore usage and token storage;
-- compare response models with Kuebiko's web capture.
+| Field | Observed value |
+| --- | --- |
+| Package / version | `jp.co.smbctb.prestia_app`, `1.4.0` (`1040010`) |
+| SDK | minimum 26, target 35 |
+| XAPK | base plus `config.armeabi_v7a`, `config.en`, `config.mdpi`, and `config.zh`; 71,102,422 bytes; SHA-256 `2227d396b074d3b7dd141c33ba72231c8ba964be2a2de9d5d3f193319cc34cdc` |
+| Base APK | 69,969,786 bytes; SHA-256 `3a52b82f336b9ccf2d014693f04d0050c612f1a2a3cd50bdf3ce29b8ad7ec129` |
+| Signer | every split verified with APK Signature Schemes v2/v3 and the same certificate; SHA-256 `0130f6487f9bf21ee0b2b888707c851057136e7dae1b97b893ae71f2136af086`; subject names SMBC Trust Bank Ltd. |
+| Source stamp | the APK set carries Google source-stamp signer metadata, but `apksigner` did not report a verified SourceStamp |
+| Decompilers | JADX 1.5.6 and apktool 3.0.3, on WSL-native storage |
 
-It is not yet evidence that those endpoints can be replayed. The app's
-biometric/device binding and potential Play Integrity or pinning checks may
-make unattended Android automation more expensive than desktop Online, and
-the app cannot produce the official CSV export in any case.
+The signer subject and source-stamp metadata make the third-party copy a
+plausible Play-origin candidate. They do not replace comparison with an
+owned-device/current-Play signer, so Kogane must not use this copy as a runtime
+or claim official provenance. The binary and decompiler output are kept only
+in the private Android artifact archive; this public repository contains
+hashes, commands, and sanitized findings.
+
+The private archive uses app/version boundaries: existing Vpass material is
+under `android/vpass/`, while this snapshot is under
+`android/prestia/1.4.0/` with separate `artifact`, `metadata`, `jadx`, and
+`apktool` subtrees. The public hashes above are the join keys; do not copy APK,
+DEX, decompiled source, certificates, tokens, or account data into Kogane.
+
+The reproducible offline procedure was:
+
+```bash
+work_dir="$(mktemp -d /tmp/prestia-android.XXXXXX)"
+chmod 700 "$work_dir"
+mkdir -p "$work_dir/download" "$work_dir/unpacked" \
+  "$work_dir/jadx" "$work_dir/apktool"
+
+apkeep -a jp.co.smbctb.prestia_app -d apk-pure "$work_dir/download"
+sha256sum "$work_dir/download/jp.co.smbctb.prestia_app.xapk"
+unzip -q "$work_dir/download/jp.co.smbctb.prestia_app.xapk" \
+  -d "$work_dir/unpacked"
+
+for apk in "$work_dir"/unpacked/*.apk; do
+  sha256sum "$apk"
+  aapt dump badging "$apk" | sed -n '1,4p'
+  apksigner verify --verbose --print-certs "$apk"
+done
+
+jadx --show-bad-code --deobf \
+  -d "$work_dir/jadx/1.4.0" "$work_dir"/unpacked/*.apk
+java -jar apktool_3.0.3.jar d --force \
+  -o "$work_dir/apktool/1.4.0" \
+  "$work_dir/unpacked/jp.co.smbctb.prestia_app.apk"
+```
+
+For a provenance upgrade, replace the `apkeep -d apk-pure` step with the
+complete Play-delivered split set from an owned device, then compare package,
+version, every split signer and hashes before reusing any conclusion.
+
+### Confirmed application architecture and read paths
+
+The app is a Cordova/Vue hybrid, not a native JSON banking client. The base
+contains one ordinary `classes.dex` (17,628,428 bytes), local
+`assets/www/js/*.js`, and Cordova plugins. No encrypted payload, secondary DEX
+loader, or protected-DEX recovery step like the Vpass app was found. JADX
+generated 7,247 source files and the usable resource tree, but reported 4,128
+individual decompilation errors in heavily obfuscated classes. That count does
+not mean the APK or all DEX failed to decode; endpoint configuration, Web
+assets, manifest, and several plugins remain directly inspectable.
+
+Packaged JavaScript defines requests as URL/method plus XPath extraction
+schemas. `plugin.kamiressapi.KamiressApi` executes them with
+`HttpsURLConnection`, retains response headers/cookies, and converts returned
+HTML into structured values for the local Vue UI. Important read paths are:
+
+| Purpose | Packaged route and response handling |
+| --- | --- |
+| Bootstrap | `GET https://mlogin.smbctb.co.jp/ib/portal/POSNIN1prestiatop.prst`; extracts the sign-on form's hidden inputs |
+| Sign-on transition | `POST https://mobile.smbctb.co.jp/ib/portal/POSNIN1next.prst`; extracts `hashedCIF` and hidden parameters for the home, authentication and related forms |
+| Optional OTP | `POST https://mobile.smbctb.co.jp/ib/authentication/AUOTIN1next1.prst` |
+| Home | `GET https://mobile.smbctb.co.jp/ib/portal/POSNIN1prestiatop.prst`; parses user/account summary and carried hidden state |
+| Balance/account enumeration | `POST https://mobile.smbctb.co.jp/ib/top/TOMETOPaccountinfokozazandaka.prst`; parses deposit, foreign-currency, structured-deposit, investment and commingled-trust totals plus account rows/links |
+| Account detail and first history page | `POST https://mobile.smbctb.co.jp/ib/accountinfo/ACKZDSPkozashosai.prst` |
+| History paging/query | `POST https://mobile.smbctb.co.jp/ib/accountinfo/ACKSDSPpages.prst` and `ACKSDSPnext2.prst`; parses account metadata and repeated history cells |
+| Mutual-fund bridge/list | mobile `TOMETOPbpdirect.prst` / `ACKZDSPbpdirect.prst`, then `POST https://bp-direct-mb.smbctb.co.jp/Login/0/login/ipan_web/exec`; parses HTML totals and account rows |
+| Sign-off | `POST https://mobile.smbctb.co.jp/ib/top/TOMETOPportalsignoff.prst` |
+
+This materially changes the implementation decision: the Android app does not
+reveal a separate stable balance/history JSON API. It packages an explicit
+HTML scraper for PRESTIA Mobile and may still be a valuable protocol oracle,
+but a browserless collector must reproduce form state, cookies, OTP behavior,
+the mobile HTML contract, and the app's fraud signal. It should reuse the
+publicly documented 180-day limits and still use desktop CSV/PDF for durable
+backfill after a valid session is available.
+
+The app includes Caulis `FraudAlertSDK` 1.7.10. Its packaged production
+configuration posts to `https://stp.fraud-alert.net` and enables carrier,
+keyboard list, language, screen size, jailbreak/root-style state, and battery
+signals while disabling several other sensors and raw identifiers. The login
+SDK constructs a session and a user-derived hash. Static analysis did not show
+the raw internet-banking password being sent to the fraud endpoint, but a
+runtime capture is required before making a stronger privacy claim. This SDK
+is a credible reason that merely replaying the visible form from a generic
+Worker may differ from the official app.
+
+No manifest Network Security Config, hard-coded `CertificatePinner`, Play
+Integrity, SafetyNet, or common root-tool strings were found. The custom HTTP
+plugin uses the platform trust manager and `checkServerTrusted`; this is
+evidence for ordinary system certificate validation, not proof that no pinning
+or integrity check can be supplied dynamically. The manifest permits
+cleartext traffic, although every banking route found here is HTTPS.
+
+The biometric plugin has an explicit `UserData` model containing ID/password
+and invokes Android biometric APIs. Because the storage/key-handling classes
+are heavily obfuscated and no runtime was used, the exact Android Keystore
+binding, ciphertext location, migration behavior, and exportability remain
+unconfirmed. Kogane should use the user's normal ID/password bootstrap rather
+than attempt to copy biometric state.
+
+The only GLOBAL PASS activity route found in the packaged Web assets is the
+separate member-site login URL on `www.debit.vpass.ne.jp`. No GLOBAL PASS card
+activity model or 15-month API was found. The banking app remains useful for
+the posted settlement-account debit, but it does not replace the separate
+GLOBAL PASS collector for merchant, pending, authorization, fee, or family-card
+detail.
 
 ## Third-party clients and implementation evidence
 
@@ -613,7 +723,7 @@ rather than a stable public consumer API.
 | Cloudflare Container | **End-to-end browser transport through TAMIA verified; GLOBAL PASS login untested; medium-high confidence** | Playwright Chromium 128 loaded Abema with HTTP 200 through a WebSocket relay, `cf1:network`, an existing hostname route and TAMIA. The relay preserves Chromium-originated TLS bytes. GLOBAL PASS still needs its own minimal hostname inventory, routes and bounded login test. |
 | Cloudflare Browser Rendering | **Plausible without TAMIA; not validated for this relay** | It can execute browser code, but the verified SOCKS/WebSocket/hostname-route path is the Container design. Use only after independently proving compatible proxy and profile behavior. |
 | Cloudflare Worker isolate | **Unproven for GLOBAL PASS login; unsuitable for PRESTIA login** | `fetch()` cannot itself execute the Turnstile browser widget, and PRESTIA rejected the tested browser credential POST. Use only for orchestration/storage or after a compliant browserless token and authenticated read flow are demonstrated. |
-| Official Android app analysis/runtime | **Next PRESTIA discovery path** | May expose read-only native endpoints or an app-specific WebView route that avoids the failing desktop entry. Device binding, biometrics, pinning/integrity, and Play distribution remain possible costs. |
+| Official Android app-derived mobile transport | **Best next PRESTIA PoC; medium confidence** | Static analysis identifies ordinary mobile HTML routes and XPath schemas rather than a native JSON API. A guarded local replay must still validate form state, Caulis fraud signaling, OTP, cookies, and accepted egress. |
 
 Keep `prestia-bank` and `prestia-globalpass` as separate collector identities,
 credential scopes, session generations, host allowlists and health checks.
@@ -631,7 +741,7 @@ other.
 | Domestic/overseas PRESTIA transfer histories | 4 | Medium after bootstrap | Login, pagination and overlapping representations |
 | GLOBAL PASS detailed activity in Chrome | 3 | Medium-high; login and month navigation verified | Turnstile/browser runtime, HTML drift and pending-row identity |
 | Browserless GLOBAL PASS Worker | 4 / unproven | Unknown | Fresh accepted Turnstile token and Nablarch state |
-| Official-app PRESTIA extraction | 4 | Medium discovery value | Device binding, biometrics, pinning/integrity, no CSV |
+| App-derived PRESTIA Mobile HTML extraction | 4 | Medium after one accepted bootstrap | Hidden form state, Caulis fraud signal, optional OTP, HTML drift and no CSV |
 | Contracted API | 5 / not applicable | Technically high, operationally unavailable | Regulated intermediary contract and aggregator dependency |
 
 ## Next bounded validation
@@ -639,15 +749,15 @@ other.
 All steps are read-only. Do not enter a transfer, FX trade, time deposit,
 limit, card-control, registration, or settings screen except to leave it.
 
-1. Acquire the official installed Android split APKs from an owned device,
-   verify the package/signing identity, and record a reproducible extraction
-   and decompilation procedure. Map only hosts, WebView/native transport,
-   read-only response models, pinning, device binding, integrity, and biometric
-   dependencies before attempting authenticated replay.
-2. If the app reveals a plausible PRESTIA read-only route, test one balance
-   request locally. Otherwise keep PRESTIA Online browser automation as a
-   fallback but do not repeat credential submissions without a materially
-   different, evidence-based configuration.
+1. Upgrade provenance by extracting the current Play-delivered split set from
+   an owned device and compare package/version/signers before treating the
+   1.4.0 static snapshot as current official evidence.
+2. Implement the app-observed mobile GET/bootstrap and one balance-summary
+   request locally, using a fresh in-memory cookie jar and the packaged Caulis
+   login flow. Print only status/schema summaries. Stop on OTP, rejection or
+   any write page; do not repeat credential submissions without a materially
+   different, evidence-based configuration. Keep PRESTIA Online browser
+   automation as the fallback and desktop CSV/PDF as the durable export path.
 3. Implement a local GLOBAL PASS HTML parser around the verified direct login
    and 15 month selector. Capture no write forms. Derive a stable normalized
    key from documented fields and retain enough raw restricted evidence to
@@ -707,8 +817,11 @@ limit, card-control, registration, or settings screen except to leave it.
   profile before creating production routes; the official guarantee is only
   that Local Domain Fallback changes DNS and Split Tunnel Exclude changes the
   traffic path.
-- Does the current official Android app use WebView banking pages or separate
-  native APIs, and are certificate pinning or integrity checks present?
+- Does a current owned-device Play copy have the same signer and protocol as
+  the third-party 1.4.0 snapshot, and does its Caulis-assisted mobile sign-on
+  accept a guarded pure HTTP implementation? Static analysis found system
+  certificate validation and no common integrity/pinning references, but this
+  still needs runtime confirmation.
 
 ## Primary references
 
