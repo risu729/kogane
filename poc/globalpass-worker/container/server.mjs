@@ -8,6 +8,12 @@ const LOGIN_URL =
   "https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006";
 const GLOBALPASS_HOST = "www.debit.vpass.ne.jp";
 const TURNSTILE_HOST = "challenges.cloudflare.com";
+const TURNSTILE_HELPER_HOST = "brunhild.challenges.cloudflare.com";
+const RELAY_HOSTS = new Set([
+  GLOBALPASS_HOST,
+  TURNSTILE_HOST,
+  TURNSTILE_HELPER_HOST,
+]);
 const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const DAILY_MONTHS = 2;
@@ -78,7 +84,7 @@ function startSocksRelay(relayToken, relayUrl) {
       const offset = 5 + length;
       const port = buffer.readUInt16BE(offset);
       const remainder = buffer.subarray(offset + 2);
-      if (hostname !== GLOBALPASS_HOST || port !== 443) return fail();
+      if (!RELAY_HOSTS.has(hostname) || port !== 443) return fail();
 
       phase = "connecting";
       const target = new URL(relayUrl);
@@ -253,10 +259,14 @@ async function collect(payload, response) {
     args: ["--no-sandbox", "--disable-dev-shm-usage"],
     proxy: {
       server: `socks5://127.0.0.1:${socks.port}`,
-      bypass: TURNSTILE_HOST,
+      bypass: `${TURNSTILE_HOST},${TURNSTILE_HELPER_HOST}`,
     },
   });
   let page;
+  const networkDiagnostic = [];
+  const recordNetwork = (value) => {
+    if (networkDiagnostic.length < 24) networkDiagnostic.push(value);
+  };
   try {
     const context = await browser.newContext({
       locale: "ja-JP",
@@ -267,8 +277,7 @@ async function collect(payload, response) {
       const url = new URL(route.request().url());
       if (
         ["about:", "blob:", "data:"].includes(url.protocol) ||
-        url.hostname === GLOBALPASS_HOST ||
-        url.hostname === TURNSTILE_HOST
+        RELAY_HOSTS.has(url.hostname)
       ) {
         await route.continue();
       } else {
@@ -276,14 +285,63 @@ async function collect(payload, response) {
       }
     });
     page = await context.newPage();
+    page.on("requestfailed", (request) => {
+      const url = new URL(request.url());
+      recordNetwork({
+        event: "requestfailed",
+        host: url.hostname,
+        path: url.pathname.slice(0, 120),
+        resourceType: request.resourceType(),
+        error: request.failure()?.errorText?.slice(0, 100) ?? "unknown",
+      });
+    });
+    page.on("response", (pageResponse) => {
+      if (pageResponse.status() < 400) return;
+      const url = new URL(pageResponse.url());
+      recordNetwork({
+        event: "http",
+        host: url.hostname,
+        path: url.pathname.slice(0, 120),
+        status: pageResponse.status(),
+      });
+    });
     page.setDefaultTimeout(45_000);
     await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" });
-    await page.waitForFunction(() => {
-      const input = document.querySelector(
-        "input[name=cf-turnstile-response]",
+    try {
+      await page.waitForFunction(() => {
+        const input = document.querySelector("[name=cf-turnstile-response]");
+        return Boolean(input && "value" in input && input.value.length > 20);
+      });
+    } catch (error) {
+      const diagnostic = await page.evaluate(() => {
+        const response = document.querySelector("[name=cf-turnstile-response]");
+        const body = document.body?.innerText ?? "";
+        return {
+          urlHost: location.hostname,
+          title: document.title.slice(0, 80),
+          responseField: response?.tagName ?? null,
+          responseLength:
+            response && "value" in response ? response.value.length : 0,
+          loginFormVisible: Boolean(document.querySelector("#usrId")),
+          denied: /Access Denied|アクセスが拒否/iu.test(body),
+          frames: [...document.querySelectorAll("iframe")]
+            .map((frame) => {
+              try {
+                const url = new URL(frame.src);
+                return { host: url.hostname, path: url.pathname.slice(0, 120) };
+              } catch {
+                return null;
+              }
+            })
+            .filter(Boolean)
+            .slice(0, 8),
+        };
+      });
+      throw new Error(
+        `GLOBAL PASS Turnstile token unavailable: ${JSON.stringify({ networkDiagnostic, ...diagnostic })}`,
+        { cause: error },
       );
-      return Boolean(input && input.value.length > 20);
-    });
+    }
     await page.locator("#usrId").fill(payload.user);
     await page.locator("#password").fill(payload.password);
     await (await visibleLoginButton(page)).click();

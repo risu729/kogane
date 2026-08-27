@@ -12,8 +12,15 @@ import {
 } from "./model";
 
 const GLOBALPASS_HOST = "www.debit.vpass.ne.jp";
+const TURNSTILE_HOST = "challenges.cloudflare.com";
+const TURNSTILE_HELPER_HOST = "brunhild.challenges.cloudflare.com";
+const RELAY_HOSTS = new Set([
+  GLOBALPASS_HOST,
+  TURNSTILE_HOST,
+  TURNSTILE_HELPER_HOST,
+]);
 const MAX_NDJSON_LINE_BYTES = 3 * 1024 * 1024;
-const CONTAINER_ID = "prestia-globalpass-read-only-v1";
+const CONTAINER_ID = "prestia-globalpass-read-only-v9";
 
 export class GlobalPassCollectorContainer extends Container<Env> {
   override defaultPort = 8080;
@@ -122,7 +129,7 @@ async function runCollection(
       failures.push({
         operation: "browser-collection",
         errorType: record.errorType,
-        message: redactText(record.message).slice(0, 300),
+        message: redactText(record.message).slice(0, 2_000),
       });
       continue;
     }
@@ -291,7 +298,7 @@ async function relayTcp(
   }
   const hostname = url.searchParams.get("host") ?? "";
   const port = Number(url.searchParams.get("port"));
-  if (hostname !== GLOBALPASS_HOST || port !== 443) {
+  if (!RELAY_HOSTS.has(hostname) || port !== 443) {
     return Response.json({ error: "Target denied" }, { status: 403 });
   }
 

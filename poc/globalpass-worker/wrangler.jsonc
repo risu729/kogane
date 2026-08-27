@@ -19,9 +19,6 @@
     "COLLECTOR_SCHEMA_VERSION": "globalpass-browser-poc-v1",
     "RELAY_PUBLIC_URL": "wss://kogane-globalpass-collector-poc.takuanimal.workers.dev/tcp"
   },
-  "triggers": {
-    "crons": ["15 21 * * *"]
-  },
   "r2_buckets": [
     {
       "binding": "SNAPSHOTS",
@@ -31,7 +28,7 @@
   "vpc_networks": [
     {
       "binding": "MESH",
-      "network_id": "cf1:network",
+      "tunnel_id": "6b0ccf30-68b2-494e-baa8-f4f9f3e46b33",
       "remote": true
     }
   ],
