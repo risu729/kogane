@@ -25,7 +25,10 @@ limit change, or profile change is part of collection.
 - A pure Cloudflare Worker HTTP client is an experiment, not the baseline.
   GLOBAL PASS login includes a freshly generated Cloudflare Turnstile token
   and Nablarch hidden state. Full Chrome is the only verified token-generation
-  path so far. Do not use the bank's contracted aggregator API.
+  path so far. A Cloudflare Container can now carry Chromium's opaque TCP/TLS
+  stream through `cf1:network`, an account hostname route and TAMIA without an
+  SSH proxy, but GLOBAL PASS itself has not yet been tested on that path. Do
+  not use the bank's contracted aggregator API.
 
 The revised estimated implementation cost is **4/5 for PRESTIA bank balances
 and account activity until the app transport is understood**, and **3/5 for
@@ -75,9 +78,12 @@ vanity host itself serves the application.
 
 The checks used the dedicated Kogane Capture profile on Windows Chrome Beta
 153. The network exited through Cloudflare WARP/Gateway in Sydney, Australia.
-The user's Zero Trust hostname routes had no rule matching either service, so
-the traffic did not use the home/TAMIA tunnel. Exact addresses, credentials,
-tokens, cookies, hidden values, and account data are intentionally omitted.
+At the time of this authenticated check, the user's Zero Trust hostname routes
+had no rule matching either service, so this traffic did not use the
+home/TAMIA tunnel. A later pre-login routing probe used an already-existing
+Abema route; it did not add a GLOBAL PASS or PRESTIA route. Exact addresses,
+credentials, tokens, cookies, hidden values, and account data are intentionally
+omitted.
 
 | Check | Result | Consequence |
 | --- | --- | --- |
@@ -439,7 +445,8 @@ explain the AWS EOF and must not be generalized into “every Cloudflare VPC TCP
 connection to Cloudflare is impossible.” The VPC binding's successful
 localhost SSH connection is a distinct private-network path.
 
-The remaining no-MITM design is SSH dynamic forwarding. OpenSSH `ssh -D`
+At this stage, before testing the account-wide Mesh binding, the remaining
+no-MITM design appeared to be SSH dynamic forwarding. OpenSSH `ssh -D`
 creates a local SOCKS4/5 listener; for each hostname and port requested by
 Chromium, the authenticated SSH server opens the destination connection from
 the remote machine. Applied here, the path would be:
@@ -462,7 +469,79 @@ a dual-stack Linux WARP Connector as a gateway to AS13335 and changes nftables,
 IP forwarding and optionally FRR. TAMIA had ordinary IPv4 but no global IPv6
 route in the read-only inspection, and changing its routing stack was outside
 the experiment. A later `cf1:network` / Cloudflare Mesh design should evaluate
-it separately from the narrower SSH-forward approach.
+it separately from the narrower SSH-forward approach. The follow-up below
+superseded SSH as the preferred design without invalidating these direct-
+Tunnel measurements.
+
+### `cf1:network` and existing hostname-route validation (2026-08-27)
+
+A second bounded experiment changed only the Worker binding: it used the
+account-wide Cloudflare Mesh VPC network `network_id: "cf1:network"`. It did
+not create, edit or delete any route. The selected target was `abema.tv`
+because an existing Zero Trust hostname route already mapped that public
+hostname to TAMIA and the unauthenticated main page was a low-risk control.
+No PRESTIA or GLOBAL PASS request was sent.
+
+Cloudflare documents that a `cf1:network` binding can reach account hostname
+routes and public Internet destinations through Gateway, while a direct
+`tunnel_id` binding represents one Tunnel. The measured follow-up was:
+
+| Probe | Measured result | What it establishes |
+| --- | --- | --- |
+| `MESH.fetch("https://abema.tv/")` | HTTP 200 | Worker HTTP routing through `cf1:network` and the existing route worked. It does not preserve Chromium's TLS fingerprint because the Worker originates this HTTPS request. |
+| `MESH.connect("abema.tv:80")` | `HTTP/1.1 301 Moved Permanently`, 434 response bytes | Public raw TCP returned application bytes over the hostname-route path; the earlier direct-Tunnel zero-byte EOF is not a general public-TCP limitation of `cf1:network`. |
+| Read-only observation on TAMIA during the probes | Outbound TCP connections from TAMIA to the resolved Abema addresses on ports 80 and 443 | The existing hostname route selected TAMIA rather than ordinary Worker egress. |
+| Container Playwright Chromium 128 through the WebSocket/TCP relay | Main document HTTP 200 with the expected ABEMA title | Container Chromium, the local SOCKS layer, Worker relay, `MESH.connect()`, hostname route and TAMIA formed a complete browser path. |
+
+The browser path is:
+
+`Container Chromium -> local SOCKS5 -> WebSocket relay Worker ->
+cf1:network -> existing hostname route -> TAMIA -> public destination`
+
+The relay transports opaque TCP bytes. Chromium performs TLS with the target;
+neither the Worker nor TAMIA terminates and recreates HTTPS. Cloudflare's note
+that VPC `connect()` supports plaintext TCP means the binding does not provide
+its own TLS mode; it does not prevent Chromium from sending its TLS records
+inside that TCP stream. This is the needed property for a later browser-
+fingerprint experiment.
+
+The first Chromium runs timed out because the probe treated WebSocket `Blob`
+messages as if they were `ArrayBuffer` values and consequently wrote zero bytes
+upstream. Normalizing `Blob`, `ArrayBuffer`, and typed-array messages fixed the
+relay. That zero-byte behavior was a probe implementation bug, not Cloudflare
+VPC EOF and not a decision by Abema, Akamai, Turnstile or GLOBAL PASS.
+
+These results establish only the network and browser transport. They do not
+show that Container Chromium can obtain an accepted production Turnstile token
+or log in to GLOBAL PASS. The next target experiment must first enumerate the
+minimal GLOBAL PASS hostname set from a successful capture, create only those
+account hostname routes, and enforce the same finite set again in the scraper's
+relay. The Worker binding itself is account-wide and is not an isolation
+boundary, so the application allowlist is mandatory.
+
+#### Separating the scraper route from personal WARP use
+
+A hostname route is configured in the account's Zero Trust route table, not
+inside one Worker, so it cannot itself be scoped to “requests from this
+scraper.” An enrolled personal WARP client may also be eligible for that route.
+Use a dedicated personal-device profile to keep this effect off the user's
+ordinary browsing:
+
+1. Add the scraper hostnames to that profile's Local Domain Fallback list so
+   the device resolves them with its local resolver instead of Gateway. This is
+   the narrow first A/B because it changes DNS behavior only.
+2. If the requirement is to guarantee that matching traffic leaves through the
+   PC's ordinary local route rather than WARP, add the same domain set to that
+   profile's Split Tunnel Exclude list. Cloudflare explicitly says Local Domain
+   Fallback changes DNS resolution, not the destination traffic flow; Split
+   Tunnel Exclude is the control that bypasses the Cloudflare One Client.
+
+This separation is per device profile. It leaves the Worker's
+`cf1:network`/Gateway path and account hostname routes available to the
+scraper. The trade-off is that excluded personal-device traffic loses Gateway
+inspection and logging. Configure exact service hostnames where possible and
+validate the effective profile on the PC before adding GLOBAL PASS routes.
+Do not add broad CDN suffixes or resolved CDN IP ranges merely for convenience.
 
 ## Official Android app and APK value
 
@@ -522,7 +601,8 @@ rather than a stable public consumer API.
 | --- | --- | --- |
 | Local Windows Kuebiko / persistent Chrome | **Verified for GLOBAL PASS discovery; rejected once for PRESTIA login** | GLOBAL PASS direct login and 15-month activity navigation succeeded. PRESTIA's first credential POST received Akamai 403. |
 | OCI VM or Kubernetes pod with persistent browser profile | **Best first unattended GLOBAL PASS PoC; medium-high confidence** | Full Chrome/Xvfb/Patchright and durable profile are straightforward; the remaining question is whether a fresh Linux/cloud browser earns an accepted Turnstile token. |
-| Cloudflare Browser Rendering / Container | **Browser runtime works; TAMIA egress remains gated; medium confidence** | A Container ran Playwright Chromium, local SOCKS5 and the Worker WebSocket leg. HTTP `fetch()` used TAMIA's IP but replaced the browser TLS client; public raw TCP through a direct `tunnel_id` binding returned zero-byte EOF. A narrowly scoped SSH dynamic forward through TAMIA localhost is the next no-MITM path. Browser Rendering may be simpler if TAMIA egress is unnecessary. |
+| Cloudflare Container | **End-to-end browser transport through TAMIA verified; GLOBAL PASS login untested; medium-high confidence** | Playwright Chromium 128 loaded Abema with HTTP 200 through a WebSocket relay, `cf1:network`, an existing hostname route and TAMIA. The relay preserves Chromium-originated TLS bytes. GLOBAL PASS still needs its own minimal hostname inventory, routes and bounded login test. |
+| Cloudflare Browser Rendering | **Plausible without TAMIA; not validated for this relay** | It can execute browser code, but the verified SOCKS/WebSocket/hostname-route path is the Container design. Use only after independently proving compatible proxy and profile behavior. |
 | Cloudflare Worker isolate | **Unproven for GLOBAL PASS login; unsuitable for PRESTIA login** | `fetch()` cannot itself execute the Turnstile browser widget, and PRESTIA rejected the tested browser credential POST. Use only for orchestration/storage or after a compliant browserless token and authenticated read flow are demonstrated. |
 | Official Android app analysis/runtime | **Next PRESTIA discovery path** | May expose read-only native endpoints or an app-specific WebView route that avoids the failing desktop entry. Device binding, biometrics, pinning/integrity, and Play distribution remain possible costs. |
 
@@ -563,14 +643,14 @@ limit, card-control, registration, or settings screen except to leave it.
    and 15 month selector. Capture no write forms. Derive a stable normalized
    key from documented fields and retain enough raw restricted evidence to
    reconcile pending-to-posted transitions.
-4. Repeat GLOBAL PASS once in fresh local/OCI Chrome without importing the
-   Kuebiko profile. This distinguishes a generally accepted browser flow from
-   profile reputation. Before a Cloudflare Container credential request, use a
-   separate revocable key to complete an IP-only SSH dynamic-forward check
-   through `TAMIA.connect("127.0.0.1:22")`; prove that the reflector sees
-   TAMIA's IPv4 and Chromium keeps its end-to-end TLS. Do not use Tailscale or
-   install a proxy on TAMIA. Then test Browser Rendering or the Container while
-   preserving the same bounded stop conditions.
+4. From the successful Kuebiko capture, enumerate the exact GLOBAL PASS origin,
+   Turnstile and redirect hostnames required before and during login. Add only
+   the target-origin hostnames that must exit via TAMIA as account hostname
+   routes, mirror the finite set in the relay allowlist, and use the verified
+   Container -> `cf1:network` path for one bounded login. Do not route
+   `challenges.cloudflare.com` through TAMIA unless a separate A/B establishes
+   that it is required. No SSH key, Tailscale path or proxy installation on
+   TAMIA is needed for this first test.
 5. Separately test the public GLOBAL PASS page with a Worker `fetch()` client
    and inspect form/state shape without sending credentials. Continue to a
    credential POST only if there is a legitimate, freshly accepted Turnstile
@@ -608,10 +688,16 @@ limit, card-control, registration, or settings screen except to leave it.
 - Is there any supported way to obtain a production GLOBAL PASS Turnstile
   token in a Worker isolate, or must the scheduled collector always include a
   browser runtime?
-- After a TAMIA SSH dynamic-forward IP check passes, does GLOBAL PASS accept
-  Container Chromium, and does bypassing only `challenges.cloudflare.com` from
-  the home proxy materially change Turnstile issuance? Keep this as a separate
-  A/B test; do not infer it from the current pre-login network probes.
+- Does GLOBAL PASS accept Container Chromium over the now-verified
+  `cf1:network`/hostname-route/TAMIA transport, and should
+  `challenges.cloudflare.com` use normal Cloudflare egress or TAMIA? Keep this
+  as a separate A/B; the Abema result proves transport only.
+- Does Local Domain Fallback alone prevent a matching account hostname route
+  from selecting TAMIA for the user's current WARP client version, or is a
+  matching Split Tunnel Exclude also required? Verify on the personal-device
+  profile before creating production routes; the official guarantee is only
+  that Local Domain Fallback changes DNS and Split Tunnel Exclude changes the
+  traffic path.
 - Does the current official Android app use WebView banking pages or separate
   native APIs, and are certificate pinning or integrity checks present?
 
@@ -640,6 +726,9 @@ limit, card-control, registration, or settings screen except to leave it.
 - [Cloudflare Turnstile server-side validation](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)
 - [Cloudflare Workers VPC binding API](https://developers.cloudflare.com/workers-vpc/api/)
 - [Cloudflare VPC Networks](https://developers.cloudflare.com/workers-vpc/configuration/vpc-networks/)
+- [Cloudflare Zero Trust routes](https://developers.cloudflare.com/cloudflare-one/networks/routes/add-routes/)
+- [Cloudflare Local Domain Fallback](https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/configure/route-traffic/local-domains/)
+- [Cloudflare One Client route traffic](https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/configure/route-traffic/)
 - [Cloudflare Workers TCP socket considerations](https://developers.cloudflare.com/workers/runtime-apis/tcp-sockets/)
 - [OpenSSH dynamic forwarding (`ssh -D`)](https://man.openbsd.org/ssh#D)
 - [Bank API policy](https://www.smbctb.co.jp/eaea/)
