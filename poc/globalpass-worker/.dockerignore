@@ -1,0 +1,6 @@
+.git
+.wrangler
+node_modules
+test
+scripts
+worker-configuration.d.ts

@@ -1,0 +1,63 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "kogane-globalpass-collector-poc",
+  "main": "src/worker.ts",
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "vars": {
+    "COLLECTOR_SCHEMA_VERSION": "globalpass-browser-poc-v1",
+    "RELAY_PUBLIC_URL": "wss://kogane-globalpass-collector-poc.takuanimal.workers.dev/tcp"
+  },
+  "triggers": {
+    "crons": ["15 21 * * *"]
+  },
+  "r2_buckets": [
+    {
+      "binding": "SNAPSHOTS",
+      "bucket_name": "kogane-globalpass-collector-poc"
+    }
+  ],
+  "vpc_networks": [
+    {
+      "binding": "MESH",
+      "network_id": "cf1:network",
+      "remote": true
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "GlobalPassCollectorContainer",
+      "image": "./Dockerfile",
+      "max_instances": 1,
+      "instance_type": "basic",
+      "constraints": {
+        "regions": ["APAC"]
+      }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "COLLECTOR_CONTAINER",
+        "class_name": "GlobalPassCollectorContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["GlobalPassCollectorContainer"]
+    }
+  ]
+}
