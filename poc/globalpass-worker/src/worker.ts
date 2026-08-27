@@ -10,6 +10,7 @@ import {
   type ContainerRecord,
   type StoredArtifact,
 } from "./model";
+import { runGlobalPassBrowserProbe } from "./browser-probe";
 
 const GLOBALPASS_HOST = "www.debit.vpass.ne.jp";
 const TURNSTILE_HOST = "challenges.cloudflare.com";
@@ -61,6 +62,14 @@ export default {
       url.pathname === "/tcp"
     ) {
       return relayTcp(request, env, ctx, url);
+    }
+    if (request.method === "POST" && url.pathname === "/browser-probe") {
+      if (!(await validBearer(request, env.ADMIN_TRIGGER_TOKEN))) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      return Response.json(await runGlobalPassBrowserProbe(env), {
+        headers: { "cache-control": "no-store" },
+      });
     }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });

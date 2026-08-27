@@ -25,6 +25,9 @@
       "bucket_name": "kogane-globalpass-collector-poc"
     }
   ],
+  "browser": {
+    "binding": "BROWSER"
+  },
   "vpc_networks": [
     {
       "binding": "MESH",
