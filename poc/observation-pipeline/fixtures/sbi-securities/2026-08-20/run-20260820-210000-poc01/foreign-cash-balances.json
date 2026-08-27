@@ -1,0 +1,34 @@
+{
+  "listForeignScheduleCashBalances": {
+    "foreignCashBalances": [
+      {
+        "accountKind": "GENERAL",
+        "currencyCashBalances": [
+          {
+            "currencyCode": "USD",
+            "foreignScheduleCashBalances": [
+              {
+                "businessDate": "2026-08-20",
+                "daysLater": 0,
+                "buyPossibleAmount": "1024.53",
+                "keepCash": "0.00",
+                "transferPossibleAmount": "1024.53",
+                "remainingBuyPossibleAmount": "1024.53",
+                "amountPayValue": "0.00"
+              },
+              {
+                "businessDate": "2026-08-24",
+                "daysLater": 2,
+                "buyPossibleAmount": "1024.53",
+                "keepCash": "0.00",
+                "transferPossibleAmount": "1024.53",
+                "remainingBuyPossibleAmount": "1024.53",
+                "amountPayValue": "0.00"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
