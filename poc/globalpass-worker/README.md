@@ -2,7 +2,7 @@
 
 GLOBAL PASS（Vpassデビット専用サイト）のサーバーレンダリングHTMLを、Cloudflare ContainerのPlaywright Chromiumで取得し、private R2へ保存する独立PoCである。SMBCカード用VpassアプリAPIや`mnie`をruntime依存・設定源・submoduleとして使用しない。
 
-2026-08-27にCloudflareへ実デプロイし、実アカウントでbounded live runまで実施した。Container Chromium/TAMIA経路とCloudflare Browser Run経路はいずれもGLOBAL PASSのログイン画面を200で取得できるが、Turnstile tokenを生成できず、認証情報のPOSTより前で停止する。そのため明細HTMLはまだ取得できていない。失敗を毎日繰り返さないようCronは無効化し、手動`/trigger`、認証付き`/browser-probe`、診断情報だけを残している。
+2026-08-27にCloudflareへ実デプロイし、実アカウントでbounded live runまで実施した。Container Chromium/TAMIA経路とCloudflare Browser Run経路はいずれもGLOBAL PASSのログイン画面を200で取得できるが、Turnstile tokenを生成できず、認証情報のPOSTより前で停止する。そのため明細HTMLはまだ取得できていない。失敗を毎日繰り返さないようCronは無効化し、手動`/trigger`、認証付きの`/browser-probe`・`/container-probe`、診断情報だけを残している。
 
 ## 現在の実行構成
 
@@ -48,7 +48,7 @@ WebSocket TCP relayは非hibernating接続である。対応するupstream TCP s
 
 - `GLOBALPASS_ID`
 - `GLOBALPASS_PASSWORD`
-- `ADMIN_TRIGGER_TOKEN`: `/trigger`と`/browser-probe`専用
+- `ADMIN_TRIGGER_TOKEN`: `/trigger`、`/browser-probe`、`/container-probe`、`/container-stop`専用
 - `RELAY_TOKEN`: WebSocket relay専用
 
 session cookie、Turnstile token、Nablarch hidden stateは保存・再利用せず、毎run新しいbrowser contextで取得する。資格情報JSON、secret、実データはGitへ入れない。remote secretは`wrangler.jsonc`にも生成型にも現れないため、`env.d.ts`は上記4 secret名だけをaugmentationする。
@@ -113,12 +113,19 @@ sanitizedな手順、観測値、推論と未確定事項は[`docs/browser-run-i
 
 Kuebikoはremote debugging付きでも`navigator.webdriver=false`でtoken生成に成功した。CDP利用そのものより、Browser Runの`Cloudflare-Workers`/Linux/`webdriver=true` fingerprintと削除不能な識別headerが強い差分である。ただしKuebikoとBrowser Runのegressは同一ではないため、fingerprint単独原因とはまだ断定しない。
 
+## 2026-08-28 Container Chromium A/B
+
+GLOBAL PASSを同じTAMIA経路に固定し、Playwright Chromiumを`baseline`、`webdriver=false`、Windows相当fingerprint、headed、fresh persistent profileの順で1項目ずつ近づけた。5条件すべてでlogin pageは200、formあり、`Access Denied`なしだったが、30秒後もTurnstile tokenは0文字だった。共通してchallenge fetch 401、Brunhild 204直後の`ERR_ABORTED`が観測された。
+
+この結果から、`webdriver`、表面的なWindows情報、headless、persistent contextのいずれか一つだけが原因ではない。資格情報の入力、login POST、cookie再利用、R2書き込みは行っていない。旧instance `v9`はdestroy済み、検証instance `v10`はstop済みである。詳細な比較表は[`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)、削除対象は[`docs/cleanup.md`](docs/cleanup.md)に記録した。
+
 ## 次に試す順序
 
-1. Container/OCI ChromiumをTAMIA経路へ載せたまま、`navigator.webdriver=false`、Windows相当fingerprint、実browser profileを1項目ずつ通常Chromeへ近づけるA/Bを行う。
-2. Browser Runで対話型challengeが割り当てられたのかを、Live Viewまたはscreenshotで確認する。ただし手動介入が必要ならproduction collector候補から外す。
-3. IP要因を分離するときはBrowser Runではなく、成功・失敗browserの両方を同じTAMIA経路へ載せる。
-4. IPv6追加は`brunhild`が成功runで必須だと確認できた場合だけ行う。
+1. Container/OCIを同じTAMIA経路へ載せたまま、Playwright同梱ChromiumではなくGoogle Chrome Stableの実binaryで最小probeを行う。
+2. Kuebiko成功runとContainer失敗runの送信元IPを直接確認し、browser差とnetwork identity差を分離する。
+3. 実Chromeでも失敗する場合だけ、TLS・GPU・font・codec・OS APIの整合性や、保存済みprofileの信頼履歴を比較する。JS property patchだけは増やさない。
+4. Browser Runの対話型challengeを確認する必要があればLive Viewまたはscreenshotを使う。ただし手動介入が必要ならproduction collector候補から外す。
+5. IPv6追加は`brunhild`が成功runで必須だと確認できた場合だけ行う。
 
 いずれもtoken生成、ログインPOST、明細画面、月selectorの順にbounded testし、成功してから初回backfillと日次Cronを有効化する。
 
@@ -136,6 +143,8 @@ bun run deploy:dry
 ```sh
 scripts/trigger.sh daily
 scripts/trigger.sh backfill
+scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token baseline
+scripts/trigger.sh stop ~/.local/share/kogane/secrets/globalpass-worker-admin-token v10 stop
 ```
 
 ## 残る検証項目

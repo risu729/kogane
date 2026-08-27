@@ -1,6 +1,10 @@
 import http from "node:http";
 import { once } from "node:events";
+import { spawn } from "node:child_process";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import net from "node:net";
+import os from "node:os";
+import path from "node:path";
 import { chromium } from "playwright";
 import WebSocket from "ws";
 
@@ -17,7 +21,18 @@ const RELAY_HOSTS = new Set([
 const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const DAILY_MONTHS = 2;
+const WINDOWS_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
+const PROBE_VARIANTS = [
+  "baseline",
+  "webdriver-false",
+  "windows",
+  "headed-windows",
+  "headed-persistent-windows",
+];
 let collecting = false;
+let xvfbProcess;
 
 async function writeLine(response, value) {
   if (!response.write(`${JSON.stringify(value)}\n`)) {
@@ -44,6 +59,17 @@ function validRequest(value) {
     value.user.length > 0 &&
     typeof value.password === "string" &&
     value.password.length > 0 &&
+    typeof value.relayToken === "string" &&
+    value.relayToken.length >= 32 &&
+    typeof value.relayUrl === "string" &&
+    value.relayUrl.startsWith("wss://")
+  );
+}
+
+function validProbeRequest(value) {
+  return (
+    value &&
+    PROBE_VARIANTS.includes(value.variant) &&
     typeof value.relayToken === "string" &&
     value.relayToken.length >= 32 &&
     typeof value.relayUrl === "string" &&
@@ -252,6 +278,283 @@ async function signOut(page) {
   }
 }
 
+function normalizeDiagnosticPath(url) {
+  if (url.pathname.startsWith("/turnstile/v0/")) {
+    return url.pathname.endsWith("/api.js")
+      ? "/turnstile/v0/<build>/api.js"
+      : "/turnstile/v0/<redacted>";
+  }
+  if (url.pathname.startsWith("/cdn-cgi/challenge-platform/")) {
+    return "/cdn-cgi/challenge-platform/<redacted>";
+  }
+  return url.pathname
+    .replace(/;jsessionid=[^/;]+/giu, ";jsessionid=<redacted>")
+    .slice(0, 120);
+}
+
+function probeConfiguration(variant) {
+  const index = PROBE_VARIANTS.indexOf(variant);
+  return {
+    webdriverFalse: index >= 1,
+    windows: index >= 2,
+    headed: index >= 3,
+    persistent: index >= 4,
+  };
+}
+
+function probeContextOptions(config) {
+  return {
+    locale: config.windows ? "en-US" : "ja-JP",
+    timezoneId: "Asia/Tokyo",
+    viewport: { width: 1365, height: 768 },
+    ...(config.windows ? { userAgent: WINDOWS_UA } : {}),
+  };
+}
+
+async function ensureXvfb() {
+  if (xvfbProcess && xvfbProcess.exitCode === null) return ":99";
+  xvfbProcess = spawn(
+    "Xvfb",
+    [":99", "-screen", "0", "1365x768x24", "-nolisten", "tcp"],
+    { stdio: "ignore" },
+  );
+  await new Promise((resolve, reject) => {
+    xvfbProcess.once("error", reject);
+    const check = async (attempt) => {
+      if (xvfbProcess.exitCode !== null) {
+        reject(new Error(`Xvfb exited with code ${xvfbProcess.exitCode}`));
+        return;
+      }
+      try {
+        await access("/tmp/.X11-unix/X99");
+        resolve();
+      } catch {
+        if (attempt >= 50) {
+          reject(new Error("Xvfb did not create its display socket"));
+          return;
+        }
+        setTimeout(() => void check(attempt + 1), 50);
+      }
+    };
+    void check(0);
+  });
+  return ":99";
+}
+
+async function launchProbeContext(config, socksPort) {
+  const args = ["--no-sandbox", "--disable-dev-shm-usage"];
+  if (config.webdriverFalse) {
+    args.push("--disable-blink-features=AutomationControlled");
+  }
+  if (config.headed) args.push("--window-size=1365,768");
+  const display = config.headed ? await ensureXvfb() : undefined;
+  const launchOptions = {
+    headless: !config.headed,
+    args,
+    ...(display ? { env: { ...process.env, DISPLAY: display } } : {}),
+    proxy: {
+      server: `socks5://127.0.0.1:${socksPort}`,
+      bypass: `${TURNSTILE_HOST},${TURNSTILE_HELPER_HOST}`,
+    },
+  };
+  let browser;
+  let context;
+  let profileDirectory;
+  if (config.persistent) {
+    profileDirectory = await mkdtemp(
+      path.join(os.tmpdir(), "kogane-globalpass-profile-"),
+    );
+    context = await chromium.launchPersistentContext(profileDirectory, {
+      ...launchOptions,
+      ...probeContextOptions(config),
+    });
+    browser = context.browser();
+  } else {
+    browser = await chromium.launch(launchOptions);
+    context = await browser.newContext(probeContextOptions(config));
+  }
+  return {
+    browser,
+    context,
+    async close() {
+      try {
+        if (config.persistent) await context.close();
+        else await browser.close();
+      } finally {
+        if (profileDirectory) {
+          await rm(profileDirectory, { recursive: true, force: true });
+        }
+      }
+    },
+  };
+}
+
+async function configureWindowsFingerprint(context, page) {
+  await context.addInitScript(() => {
+    Object.defineProperty(Navigator.prototype, "platform", {
+      configurable: true,
+      get: () => "Win32",
+    });
+    Object.defineProperty(Navigator.prototype, "languages", {
+      configurable: true,
+      get: () => ["en-US", "ja", "en-AU", "en-GB", "en"],
+    });
+  });
+  const session = await context.newCDPSession(page);
+  await session.send("Emulation.setUserAgentOverride", {
+    userAgent: WINDOWS_UA,
+    acceptLanguage: "en-US,ja;q=0.9,en-AU;q=0.8,en-GB;q=0.7,en;q=0.6",
+    platform: "Win32",
+    userAgentMetadata: {
+      brands: [
+        { brand: "Chromium", version: "153" },
+        { brand: "Google Chrome", version: "153" },
+        { brand: "Not_A Brand", version: "99" },
+      ],
+      fullVersionList: [
+        { brand: "Chromium", version: "153.0.0.0" },
+        { brand: "Google Chrome", version: "153.0.0.0" },
+        { brand: "Not_A Brand", version: "99.0.0.0" },
+      ],
+      fullVersion: "153.0.0.0",
+      platform: "Windows",
+      platformVersion: "10.0.0",
+      architecture: "x86",
+      model: "",
+      mobile: false,
+      bitness: "64",
+      wow64: false,
+    },
+  });
+}
+
+async function probeTurnstile(payload) {
+  const config = probeConfiguration(payload.variant);
+  const socks = await startSocksRelay(payload.relayToken, payload.relayUrl);
+  let launched;
+  const network = [];
+  const recordNetwork = (value) => {
+    if (network.length < 80) network.push(value);
+  };
+  const startedAt = Date.now();
+  try {
+    launched = await launchProbeContext(config, socks.port);
+    const { browser, context } = launched;
+    await context.route("**/*", async (route) => {
+      const url = new URL(route.request().url());
+      if (
+        ["about:", "blob:", "data:"].includes(url.protocol) ||
+        RELAY_HOSTS.has(url.hostname)
+      ) {
+        await route.continue();
+      } else {
+        await route.abort("blockedbyclient");
+      }
+    });
+    const page = await context.newPage();
+    if (config.windows) {
+      await configureWindowsFingerprint(context, page);
+    }
+    page.on("response", (response) => {
+      const url = new URL(response.url());
+      if (!RELAY_HOSTS.has(url.hostname)) return;
+      recordNetwork({
+        event: "response",
+        host: url.hostname,
+        path: normalizeDiagnosticPath(url),
+        method: response.request().method(),
+        resourceType: response.request().resourceType(),
+        status: response.status(),
+      });
+    });
+    page.on("requestfailed", (request) => {
+      const url = new URL(request.url());
+      if (!RELAY_HOSTS.has(url.hostname)) return;
+      recordNetwork({
+        event: "requestfailed",
+        host: url.hostname,
+        path: normalizeDiagnosticPath(url),
+        method: request.method(),
+        resourceType: request.resourceType(),
+        error: request.failure()?.errorText?.slice(0, 100) ?? "unknown",
+      });
+    });
+    page.setDefaultTimeout(30_000);
+    const navigation = await page.goto(LOGIN_URL, {
+      waitUntil: "domcontentloaded",
+    });
+    let tokenGenerated = false;
+    try {
+      await page.waitForFunction(
+        () => {
+          const input = document.querySelector("[name=cf-turnstile-response]");
+          return Boolean(input && "value" in input && input.value.length > 20);
+        },
+        undefined,
+        { timeout: 30_000 },
+      );
+      tokenGenerated = true;
+    } catch {}
+    const pageState = await page.evaluate(() => {
+      const input = document.querySelector("[name=cf-turnstile-response]");
+      const body = document.body?.innerText ?? "";
+      return {
+        title: document.title.slice(0, 80),
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+        webdriver: navigator.webdriver,
+        language: navigator.language,
+        languages: navigator.languages,
+        screen: {
+          width: window.screen.width,
+          height: window.screen.height,
+          availWidth: window.screen.availWidth,
+          availHeight: window.screen.availHeight,
+          devicePixelRatio: window.devicePixelRatio,
+        },
+        loginFormVisible: Boolean(document.querySelector("#usrId")),
+        denied: /Access Denied|アクセスが拒否/iu.test(body),
+        tokenLength: input && "value" in input ? input.value.length : 0,
+        frames: [...document.querySelectorAll("iframe")]
+          .map((frame) => {
+            try {
+              const url = new URL(frame.src);
+              return {
+                host: url.hostname,
+                path: url.pathname.startsWith("/cdn-cgi/challenge-platform/")
+                  ? "/cdn-cgi/challenge-platform/<redacted>"
+                  : url.pathname.slice(0, 120),
+              };
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean)
+          .slice(0, 8),
+      };
+    });
+    return {
+      variant: payload.variant,
+      config,
+      elapsedMs: Date.now() - startedAt,
+      tokenGenerated,
+      navigationStatus: navigation?.status() ?? null,
+      browserVersion: browser?.version() ?? "unknown",
+      page: pageState,
+      brunhildRequested: network.some(
+        (entry) => entry.host === TURNSTILE_HELPER_HOST,
+      ),
+      network,
+    };
+  } finally {
+    try {
+      if (launched) await launched.close();
+    } finally {
+      await socks.close();
+    }
+  }
+}
+
 async function collect(payload, response) {
   const socks = await startSocksRelay(payload.relayToken, payload.relayUrl);
   const browser = await chromium.launch({
@@ -397,7 +700,9 @@ http
       response.end('{"ok":true}');
       return;
     }
-    if (request.method !== "POST" || request.url !== "/collect") {
+    const isCollect = request.method === "POST" && request.url === "/collect";
+    const isProbe = request.method === "POST" && request.url === "/probe";
+    if (!isCollect && !isProbe) {
       response.writeHead(404, { "content-type": "application/json" });
       response.end('{"error":"not found"}');
       return;
@@ -410,6 +715,20 @@ http
     collecting = true;
     try {
       const payload = await readJson(request);
+      if (isProbe) {
+        if (!validProbeRequest(payload)) {
+          response.writeHead(400, { "content-type": "application/json" });
+          response.end('{"error":"invalid probe request"}');
+          return;
+        }
+        const result = await probeTurnstile(payload);
+        response.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store",
+        });
+        response.end(JSON.stringify(result));
+        return;
+      }
       if (!validRequest(payload)) {
         response.writeHead(400, { "content-type": "application/json" });
         response.end('{"error":"invalid collection request"}');

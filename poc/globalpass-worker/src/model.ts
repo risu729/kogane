@@ -1,5 +1,15 @@
 export type CollectionMode = "daily" | "backfill";
 
+export const CONTAINER_PROBE_VARIANTS = [
+  "baseline",
+  "webdriver-false",
+  "windows",
+  "headed-windows",
+  "headed-persistent-windows",
+] as const;
+
+export type ContainerProbeVariant = (typeof CONTAINER_PROBE_VARIANTS)[number];
+
 export interface StoredArtifact {
   month: string;
   key: string;
@@ -39,6 +49,15 @@ export function parseMode(value: string | null): CollectionMode {
   if (value === null || value === "daily") return "daily";
   if (value === "backfill") return value;
   throw new Error("mode must be daily or backfill");
+}
+
+export function parseContainerProbeVariant(
+  value: string | null,
+): ContainerProbeVariant {
+  for (const candidate of CONTAINER_PROBE_VARIANTS) {
+    if (value === candidate) return candidate;
+  }
+  throw new Error("unknown container probe variant");
 }
 
 export function safeMonth(value: string): string {

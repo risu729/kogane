@@ -2,11 +2,13 @@ import { Container, getContainer } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   parseMode,
+  parseContainerProbeVariant,
   runPrefix,
   safeMonth,
   type CollectionFailure,
   type CollectionManifest,
   type CollectionMode,
+  type ContainerProbeVariant,
   type ContainerRecord,
   type StoredArtifact,
 } from "./model";
@@ -21,7 +23,11 @@ const RELAY_HOSTS = new Set([
   TURNSTILE_HELPER_HOST,
 ]);
 const MAX_NDJSON_LINE_BYTES = 3 * 1024 * 1024;
-const CONTAINER_ID = "prestia-globalpass-read-only-v9";
+const CONTAINER_ID = "prestia-globalpass-read-only-v10";
+const STOPPABLE_CONTAINER_IDS = new Map([
+  ["v9", "prestia-globalpass-read-only-v9"],
+  ["v10", CONTAINER_ID],
+]);
 
 export class GlobalPassCollectorContainer extends Container<Env> {
   override defaultPort = 8080;
@@ -71,6 +77,43 @@ export default {
         headers: { "cache-control": "no-store" },
       });
     }
+    if (request.method === "POST" && url.pathname === "/container-probe") {
+      if (!(await validBearer(request, env.ADMIN_TRIGGER_TOKEN))) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      try {
+        const variant = parseContainerProbeVariant(
+          url.searchParams.get("variant"),
+        );
+        return await runContainerProbe(env, variant);
+      } catch (error) {
+        return Response.json(
+          { error: redactError(error).slice(0, 300) },
+          { status: 400 },
+        );
+      }
+    }
+    if (request.method === "POST" && url.pathname === "/container-stop") {
+      if (!(await validBearer(request, env.ADMIN_TRIGGER_TOKEN))) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      const instance = url.searchParams.get("instance") ?? "";
+      const containerId = STOPPABLE_CONTAINER_IDS.get(instance);
+      if (!containerId) {
+        return Response.json({ error: "Unknown container instance" }, { status: 400 });
+      }
+      const action = url.searchParams.get("action") ?? "stop";
+      const container = getContainer(env.COLLECTOR_CONTAINER, containerId);
+      if (action === "destroy") {
+        await container.destroy();
+        return Response.json({ destroyed: instance });
+      }
+      if (action !== "stop") {
+        return Response.json({ error: "Unknown cleanup action" }, { status: 400 });
+      }
+      await container.stop();
+      return Response.json({ stopped: instance });
+    }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
@@ -95,6 +138,32 @@ export default {
     await runCollection(env, "daily");
   },
 } satisfies ExportedHandler<Env>;
+
+async function runContainerProbe(
+  env: Env,
+  variant: ContainerProbeVariant,
+): Promise<Response> {
+  const container = getContainer(env.COLLECTOR_CONTAINER, CONTAINER_ID);
+  await container.startAndWaitForPorts();
+  const response = await container.fetch(
+    new Request("http://container/probe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        variant,
+        relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
+        relayUrl: env.RELAY_PUBLIC_URL,
+      }),
+    }),
+  );
+  return new Response(response.body, {
+    status: response.status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  });
+}
 
 async function runCollection(
   env: Env,

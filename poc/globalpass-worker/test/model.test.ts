@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { parseMode, runPrefix, safeMonth } from "../src/model";
+import {
+  CONTAINER_PROBE_VARIANTS,
+  parseContainerProbeVariant,
+  parseMode,
+  runPrefix,
+  safeMonth,
+} from "../src/model";
 
 describe("GLOBAL PASS collection model", () => {
   test("defaults to the bounded daily mode", () => {
@@ -19,5 +25,13 @@ describe("GLOBAL PASS collection model", () => {
     expect(runPrefix("2026-08-27T12:00:00.000Z", "run-id")).toBe(
       "raw/prestia-globalpass/2026/08/27/run-id",
     );
+  });
+
+  test("accepts only the bounded container probe matrix", () => {
+    for (const variant of CONTAINER_PROBE_VARIANTS) {
+      expect(parseContainerProbeVariant(variant)).toBe(variant);
+    }
+    expect(() => parseContainerProbeVariant(null)).toThrow();
+    expect(() => parseContainerProbeVariant("arbitrary-flags")).toThrow();
   });
 });
