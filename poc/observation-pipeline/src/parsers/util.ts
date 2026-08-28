@@ -5,16 +5,11 @@
 // record a warning and keep the row instead of storing a value the source
 // never stated.
 
-/** Minor-unit exponents for the currencies the PoC sources actually report. */
-const MINOR_UNIT_EXPONENT: Record<string, number> = {
-  JPY: 0,
-  USD: 2,
-  AUD: 2,
-};
+// The minor-unit table lives in ../money.ts so the parsers, the HTTP API, and
+// the browser client all share one definition of a currency's scale.
+export { minorUnitExponent } from "../money.ts";
+import { minorUnitExponent } from "../money.ts";
 
-export function minorUnitExponent(currency: string): number | undefined {
-  return MINOR_UNIT_EXPONENT[currency];
-}
 
 /**
  * Validate digit grouping and remove it. Commas are only accepted as
