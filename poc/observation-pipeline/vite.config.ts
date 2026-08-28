@@ -11,7 +11,9 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    sourcemap: true,
+    // No source map: serve.ts would serve it, and it is a megabyte of
+    // artifact on a surface that renders real financial evidence.
+    sourcemap: false,
   },
   server: {
     port: 5173,

@@ -47,6 +47,18 @@ function readInteger(row: Record<string, unknown>, key: string): number | null {
   return typeof value === "number" ? value : null;
 }
 
+/**
+ * Read a stored amount. The API sends it as a decimal string so an integer
+ * past 2^53 survives JSON intact; a number is still accepted so this keeps
+ * working if a column is ever returned unwrapped.
+ */
+function readAmount(row: Record<string, unknown>, key: string): string | null {
+  const value = row[key];
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  return null;
+}
+
 export function ObservationDetailPage({
   kind,
   id,
@@ -80,7 +92,7 @@ export function ObservationDetailPage({
 function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
   const { row, provenance } = detail;
   const columns = Object.keys(row);
-  const amountMinor = readInteger(row, "amount_minor");
+  const amountMinor = readAmount(row, "amount_minor");
   const amountText = readString(row, "amount_text");
   const unit = readString(row, "currency") ?? readString(row, "instrument");
   const rawLocator = readString(row, "raw_locator");
@@ -305,13 +317,13 @@ function ProvenanceChain({
           </dd>
           <dt>warnings</dt>
           <dd>
-            {provenance.warnings.length === 0 ? (
+            {provenance.warnings.list.length === 0 ? (
               <span className="dim">none</span>
             ) : (
               <>
                 <Badge tone="warn">
-                  {provenance.warnings.length} warning
-                  {provenance.warnings.length === 1 ? "" : "s"}
+                  {provenance.warnings.list.length} warning
+                  {provenance.warnings.list.length === 1 ? "" : "s"}
                 </Badge>
                 <WarningList warnings={provenance.warnings} />
               </>

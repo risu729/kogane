@@ -177,7 +177,7 @@ function ParseRunCard({ run }: { run: ParseRunDetail }): ReactNode {
         )}
         <WarningList warnings={run.warnings} />
 
-        <h3 style={{ marginTop: run.warnings.length > 0 ? "0.6rem" : 0 }}>
+        <h3 style={{ marginTop: run.warnings.list.length > 0 ? "0.6rem" : 0 }}>
           Observations{" "}
           <span className="count dim">
             ({run.observations.length}

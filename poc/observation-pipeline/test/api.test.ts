@@ -1,5 +1,19 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createApi } from "../src/api.ts";
+import { latestBalances } from "../src/queries.ts";
+import {
+  supersedeOlderParseRuns,
+  insertFetchArtifact,
+  insertFetchRun,
+  insertObservation,
+  insertParseRun,
+  openStore,
+  putRawObject,
+  upsertSource,
+} from "../src/store.ts";
 import { formatAmount, amountSign } from "../src/money.ts";
 import {
   buildFixture,
@@ -100,7 +114,8 @@ describe("overview", () => {
     );
     expect(retired.superseded_by_parse_run_id).toBe(current.id);
     expect(current.superseded_by_parse_run_id).toBeNull();
-    expect(current.warnings).toHaveLength(1);
+    expect(current.warnings.list).toHaveLength(1);
+    expect(current.warnings.parsed).toBe(true);
   });
 });
 
@@ -117,7 +132,7 @@ describe("current views", () => {
   test("transactions carry the amount as stored, not as a formatted string", async () => {
     const body = await json("/api/transactions");
     const row = body.transactions.find((entry: { external_id: string }) => entry.external_id === "T-2");
-    expect(row.amount_minor).toBe(102453);
+    expect(row.amount_minor).toBe("102453");
     expect(row.currency).toBe("USD");
     expect(formatAmount(row.amount_minor, row.currency)).toBe("1,024.53 USD");
   });
@@ -128,7 +143,7 @@ describe("current views", () => {
     // only the later one is current.
     expect(body.latest).toHaveLength(1);
     expect(body.latest[0].as_of).toBe("2026-08-20");
-    expect(body.latest[0].amount_minor).toBe(248820);
+    expect(body.latest[0].amount_minor).toBe("248820");
     expect(body.history.length).toBeGreaterThanOrEqual(2);
     expect(body.history[0].as_of).toBe("2026-08-20");
   });
@@ -258,5 +273,345 @@ describe("routing", () => {
     const api = await served.fetch(new Request("http://api.test/api/nope"));
     expect(api.status).toBe(404);
     expect(await api.text()).toContain("no such endpoint");
+  });
+});
+
+describe("invariants that a shared label could break", () => {
+  test("two institutions using the same account label do not hide each other", () => {
+    // `source_account` is only the provider's own name for an account. Two
+    // sources both calling one "main" must stay two rows in the latest-balance
+    // view, or one institution's balance silently replaces the other's.
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-collide-")));
+    for (const sourceId of ["bank-a", "bank-b"]) {
+      upsertSource(store, {
+        id: sourceId,
+        provider: sourceId,
+        ingestion: "collector-r2",
+      });
+      const fetchRunId = insertFetchRun(store, {
+        sourceId,
+        externalRunId: `${sourceId}-run`,
+        tool: "import-run",
+        startedAt: "2026-08-20T00:00:00Z",
+        status: "success",
+      });
+      const stored = putRawObject(
+        store,
+        new TextEncoder().encode(`{"source":"${sourceId}"}`),
+        "application/json",
+      );
+      const artifactId = insertFetchArtifact(store, {
+        fetchRunId,
+        sourceId,
+        dataset: "balances",
+        mime: "application/json",
+        fetchedAt: "2026-08-20T00:00:00Z",
+        sha256: stored.sha256,
+      });
+      const parseRunId = insertParseRun(store, {
+        artifactId,
+        parserName: "p",
+        parserVersion: "1.0.0",
+        parsedAt: "2026-08-20T01:00:00Z",
+        status: "ok",
+        warnings: [],
+      });
+      insertObservation(store, parseRunId, {
+        kind: "balance",
+        sourceAccount: "main", // the colliding label
+        metric: "ledger",
+        instrument: "JPY",
+        amountMinor: sourceId === "bank-a" ? 111 : 222,
+        asOf: "2026-08-20",
+        rawLocator: "json:$",
+        extra: {},
+      });
+    }
+    const latest = latestBalances(store);
+    expect(latest).toHaveLength(2);
+    expect(latest.map((row) => row.source_id).sort()).toEqual(["bank-a", "bank-b"]);
+    expect(latest.map((row) => row.amount_minor).sort()).toEqual(["111", "222"]);
+  });
+
+  test("a content type carrying CRLF cannot reach the response header", async () => {
+    // The stored content type is provider-derived. A CR or LF in it would
+    // otherwise split the response or throw out of the handler.
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-crlf-")));
+    upsertSource(store, { id: "s", provider: "S", ingestion: "file-export" });
+    const fetchRunId = insertFetchRun(store, {
+      sourceId: "s",
+      externalRunId: "r",
+      tool: "ingest-file",
+      startedAt: "2026-08-20T00:00:00Z",
+      status: "success",
+    });
+    const bytes = new TextEncoder().encode("evidence");
+    const stored = putRawObject(
+      store,
+      bytes,
+      "text/plain\r\nX-Injected: yes",
+    );
+    insertFetchArtifact(store, {
+      fetchRunId,
+      sourceId: "s",
+      mime: "text/plain",
+      fetchedAt: "2026-08-20T00:00:00Z",
+      sha256: stored.sha256,
+    });
+    const api = createApi(store);
+    const response = await api.fetch(
+      new Request(`http://api.test/api/raw/${stored.sha256}`),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-injected")).toBeNull();
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
+    // the bytes themselves are still exact
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+  });
+});
+
+describe("rule: only a successful, unsuperseded parse run is current", () => {
+  // Mutation testing showed the earlier suite could not detect a violation of
+  // this rule for positions, valuations, or an error run: the fixture had one
+  // source and its only superseded run produced a transaction. These build the
+  // missing cases.
+  function storeWithRetiredAndFailed(): {
+    store: ReturnType<typeof openStore>;
+    artifactId: number;
+  } {
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-current-")));
+    upsertSource(store, { id: "s", provider: "S", ingestion: "collector-r2" });
+    const fetchRunId = insertFetchRun(store, {
+      sourceId: "s",
+      externalRunId: "r",
+      tool: "import-run",
+      startedAt: "2026-08-20T00:00:00Z",
+      status: "success",
+    });
+    const stored = putRawObject(
+      store,
+      new TextEncoder().encode('{"holdings":[]}'),
+      "application/json",
+    );
+    const artifactId = insertFetchArtifact(store, {
+      fetchRunId,
+      sourceId: "s",
+      dataset: "holdings",
+      mime: "application/json",
+      fetchedAt: "2026-08-20T00:00:00Z",
+      sha256: stored.sha256,
+    });
+
+    const retired = insertParseRun(store, {
+      artifactId,
+      parserName: "p",
+      parserVersion: "0.1.0",
+      parsedAt: "2026-08-20T01:00:00Z",
+      status: "ok",
+      warnings: [],
+    });
+    insertObservation(store, retired, {
+      kind: "position",
+      sourceAccount: "s:acct",
+      securityCode: "RETIRED_POS",
+      quantityText: "1",
+      quantityScale: 0,
+      rawLocator: "json:$",
+      extra: {},
+    });
+    insertObservation(store, retired, {
+      kind: "valuation",
+      sourceAccount: "s:acct",
+      subject: "RETIRED_POS",
+      metric: "evaluation_amount",
+      amountMinor: 1,
+      currency: "JPY",
+      rawLocator: "json:$",
+      extra: {},
+    });
+
+    const current = insertParseRun(store, {
+      artifactId,
+      parserName: "p",
+      parserVersion: "0.2.0",
+      parsedAt: "2026-08-20T02:00:00Z",
+      status: "ok",
+      warnings: [],
+    });
+    insertObservation(store, current, {
+      kind: "position",
+      sourceAccount: "s:acct",
+      securityCode: "CURRENT_POS",
+      quantityText: "2",
+      quantityScale: 0,
+      rawLocator: "json:$",
+      extra: {},
+    });
+    supersedeOlderParseRuns(store, artifactId, "p", current);
+
+    // A different parser that failed, but whose observations exist. Nothing
+    // stops a row being written under a run later marked error, so the view
+    // must exclude it by status, not merely by supersession.
+    const failed = insertParseRun(store, {
+      artifactId,
+      parserName: "q",
+      parserVersion: "1.0.0",
+      parsedAt: "2026-08-20T03:00:00Z",
+      status: "error",
+      error: "boom",
+      warnings: [],
+    });
+    insertObservation(store, failed, {
+      kind: "position",
+      sourceAccount: "s:acct",
+      securityCode: "FAILED_POS",
+      quantityText: "3",
+      quantityScale: 0,
+      rawLocator: "json:$",
+      extra: {},
+    });
+    insertObservation(store, failed, {
+      kind: "valuation",
+      sourceAccount: "s:acct",
+      subject: "FAILED_POS",
+      metric: "evaluation_amount",
+      amountMinor: 3,
+      currency: "JPY",
+      rawLocator: "json:$",
+      extra: {},
+    });
+    return { store, artifactId };
+  }
+
+  test("a superseded position and valuation are absent from current views", async () => {
+    const { store, artifactId } = storeWithRetiredAndFailed();
+    const api = createApi(store);
+    const positions = await (await api.fetch(new Request("http://t/api/positions"))).json();
+    const codes = positions.positions.map(
+      (entry: { position: { security_code: string } }) => entry.position.security_code,
+    );
+    expect(codes).toContain("CURRENT_POS");
+    expect(codes).not.toContain("RETIRED_POS");
+
+    // ...but they remain reachable through the artifact that produced them.
+    const detail = await (
+      await api.fetch(new Request(`http://t/api/artifacts/${artifactId}`))
+    ).json();
+    const summaries = detail.parseRuns
+      .flatMap((run: { observations: { summary: string }[] }) => run.observations)
+      .map((observation: { summary: string }) => observation.summary)
+      .join(" ");
+    expect(summaries).toContain("RETIRED_POS");
+  });
+
+  test("an error parse run's observations never reach a current view", async () => {
+    const { store } = storeWithRetiredAndFailed();
+    const api = createApi(store);
+    const positions = await (await api.fetch(new Request("http://t/api/positions"))).json();
+    const blob = JSON.stringify(positions);
+    expect(blob).not.toContain("FAILED_POS");
+  });
+
+  test("an amount past the safe integer range survives the API intact", async () => {
+    // bun:sqlite returns an INTEGER column as a JS number, which would round
+    // this silently. The queries cast amounts to text for that reason.
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-big-")));
+    upsertSource(store, { id: "s", provider: "S", ingestion: "file-export" });
+    const fetchRunId = insertFetchRun(store, {
+      sourceId: "s",
+      externalRunId: "r",
+      tool: "ingest-file",
+      startedAt: "2026-08-20T00:00:00Z",
+      status: "success",
+    });
+    const stored = putRawObject(store, new TextEncoder().encode("{}"), "application/json");
+    const artifactId = insertFetchArtifact(store, {
+      fetchRunId,
+      sourceId: "s",
+      mime: "application/json",
+      fetchedAt: "2026-08-20T00:00:00Z",
+      sha256: stored.sha256,
+    });
+    const parseRunId = insertParseRun(store, {
+      artifactId,
+      parserName: "p",
+      parserVersion: "1.0.0",
+      parsedAt: "2026-08-20T01:00:00Z",
+      status: "ok",
+      warnings: [],
+    });
+    // Written through SQL so the value never passes through a JS number.
+    store.db
+      .query(
+        `INSERT INTO transaction_observations
+           (parse_run_id, source_account, amount_minor, currency, raw_locator, extra_json)
+         VALUES (?1, 's:acct', 9223372036854775807, 'JPY', 'json:$', '{}')`,
+      )
+      .run(parseRunId);
+
+    const api = createApi(store);
+    const body = await (await api.fetch(new Request("http://t/api/transactions"))).json();
+    expect(body.transactions[0].amount_minor).toBe("9223372036854775807");
+    expect(formatAmount(body.transactions[0].amount_minor, "JPY")).toBe(
+      "9,223,372,036,854,775,807 JPY",
+    );
+  });
+
+  test("an unreadable warnings value is reported, not silently empty", async () => {
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-warn-")));
+    upsertSource(store, { id: "s", provider: "S", ingestion: "file-export" });
+    const fetchRunId = insertFetchRun(store, {
+      sourceId: "s",
+      externalRunId: "r",
+      tool: "ingest-file",
+      startedAt: "2026-08-20T00:00:00Z",
+      status: "success",
+    });
+    const stored = putRawObject(store, new TextEncoder().encode("{}"), "application/json");
+    const artifactId = insertFetchArtifact(store, {
+      fetchRunId,
+      sourceId: "s",
+      mime: "application/json",
+      fetchedAt: "2026-08-20T00:00:00Z",
+      sha256: stored.sha256,
+    });
+    const parseRunId = insertParseRun(store, {
+      artifactId,
+      parserName: "p",
+      parserVersion: "1.0.0",
+      parsedAt: "2026-08-20T01:00:00Z",
+      status: "ok",
+      warnings: [],
+    });
+    store.db
+      .query("UPDATE parse_runs SET warnings_json = ?1 WHERE id = ?2")
+      .run("{ truncated", parseRunId);
+
+    const api = createApi(store);
+    const body = await (await api.fetch(new Request("http://t/api/overview"))).json();
+    const run = body.parseRuns[0];
+    expect(run.warnings.parsed).toBe(false);
+    expect(run.warnings.raw).toBe("{ truncated");
+  });
+
+  test("raw bytes that no longer match their digest are refused", async () => {
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-tamper-")));
+    const stored = putRawObject(
+      store,
+      new TextEncoder().encode("original evidence"),
+      "text/plain",
+    );
+    // Replace the blob on disk, leaving the row claiming the original digest.
+    const row = store.db
+      .query("SELECT blob_key FROM raw_objects WHERE sha256 = ?1")
+      .get(stored.sha256) as { blob_key: string };
+    writeFileSync(join(store.blobDir, ...row.blob_key.split("/")), "tampered");
+
+    const api = createApi(store);
+    const response = await api.fetch(
+      new Request(`http://t/api/raw/${stored.sha256}`),
+    );
+    expect(response.status).toBe(500);
+    expect((await response.json()).error).toContain("does not match");
   });
 });

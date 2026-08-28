@@ -48,6 +48,15 @@ if (!runnable) {
     ? "the client is not built (run `bun run build`)"
     : "no Chromium binary was found";
   console.log(`browser tests skipped: ${reason}`);
+  // A missing Chromium is an environment fact and skipping is right. A missing
+  // build is a step the developer forgot, and reporting it as a green run
+  // would let a broken client pass unnoticed, so it fails the suite instead.
+  if (!clientBuilt) {
+    process.exitCode = 1;
+    console.log(
+      "  -> failing the suite: `bun test` cannot vouch for a client that was never built",
+    );
+  }
 }
 
 describe.if(runnable)("evidence browser in a real browser", () => {

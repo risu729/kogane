@@ -6,6 +6,14 @@
 // which has no business in a browser bundle. When a query shape changes, this
 // file is the one place the client has to follow it.
 //
+export interface Warnings {
+  /** Parsed warning strings; empty when the stored value could not be read. */
+  list: string[];
+  /** The stored text, so an unreadable value can be shown rather than hidden. */
+  raw: string | null;
+  parsed: boolean;
+}
+
 // Amounts are never widened here. `amount_minor` is carried as the integer
 // minor-unit value the API sent and `amount_text` as the provider's verbatim
 // string; both go to src/money.ts untouched.
@@ -36,7 +44,7 @@ export interface Overview {
     parser_version: string;
     parsed_at: string;
     status: string;
-    warnings: string[];
+    warnings: Warnings;
     error: string | null;
     superseded_by_parse_run_id: number | null;
   }[];
@@ -47,7 +55,7 @@ export interface TransactionRow {
   source_id: string;
   source_account: string;
   as_of: string | null;
-  amount_minor: number | null;
+  amount_minor: string | null;
   amount_text: string | null;
   currency: string | null;
   description: string | null;
@@ -63,7 +71,7 @@ export interface BalanceRow {
   source_account: string;
   metric: string;
   instrument: string;
-  amount_minor: number | null;
+  amount_minor: string | null;
   amount_text: string | null;
   as_of: string | null;
   observed_at: string | null;
@@ -95,7 +103,7 @@ export interface ValuationRow {
   source_account: string;
   subject: string;
   metric: string;
-  amount_minor: number | null;
+  amount_minor: string | null;
   amount_text: string | null;
   currency: string;
   as_of: string | null;
@@ -135,7 +143,7 @@ export interface ParseRunDetail {
   parsed_at: string;
   status: string;
   error: string | null;
-  warnings: string[];
+  warnings: Warnings;
   superseded_by_parse_run_id: number | null;
   observations: ObservationRef[];
 }
@@ -170,7 +178,7 @@ export interface Provenance {
   parsed_at: string;
   parse_status: string;
   error: string | null;
-  warnings: string[];
+  warnings: Warnings;
   superseded_by_parse_run_id: number | null;
   artifact_id: number;
   source_id: string;

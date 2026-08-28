@@ -198,6 +198,12 @@ function Figure({ valuation }: { valuation: ValuationRow }): ReactNode {
         <span className="figure-currency" title={`stated in ${valuation.currency}`}>
           {valuation.currency}
         </span>
+        {/* The pairing above is made on labels alone, with no time alignment,
+            so the date each figure describes is the thing most worth showing:
+            a valuation from another day is not a view of today's position. */}
+        <span className="figure-asof" title="the date this figure describes">
+          {valuation.as_of ?? "no as_of"}
+        </span>
         <ObservationLink kind="valuation" id={valuation.id} />
       </div>
     </div>

@@ -9,7 +9,7 @@
 // returned. Neither is a query, so neither can change which observations count
 // as current.
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   columnFilteringFeature,
   createColumnHelper,
@@ -151,12 +151,11 @@ export function TransactionsPage(): ReactNode {
 function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
-  const data = useMemo(() => rows, [rows]);
 
   const table = useTable({
     features,
     columns,
-    data,
+    data: rows,
     state: { sorting, globalFilter },
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,

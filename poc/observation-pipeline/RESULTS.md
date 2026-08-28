@@ -6,7 +6,7 @@ is synthetic.
 
 The PoC ingests 4 synthetic artifacts from 2 sources into 28 observations
 (8 transaction, 10 balance, 2 position, 8 valuation) across 4 parse runs.
-`bun test` is 58 pass, `tsc --noEmit` is clean.
+`bun test` is 75 pass across 4 files, `tsc --noEmit` is clean.
 
 ## What it settled
 
@@ -78,6 +78,62 @@ each one is a trap the real implementation would otherwise walk into.
 The general lesson: every one of these failed *silently* and in the
 direction of looking correct. That is the argument for the evidence browser
 — and for warnings being data, not log lines.
+
+## What the browser rebuild settled, and what it cost
+
+The evidence browser was one 1,164-line module that ran the SQL, formatted
+the amounts, and concatenated the HTML inside the same functions. It is now
+`src/queries.ts`, `src/money.ts`, a Hono JSON API in `src/api.ts`, and a
+React client under `web/`, built by Vite.
+
+**The queries became testable without a renderer.** `test/api.test.ts`
+drives 27 tests through the app object with no browser involved: the
+current-view predicate, ids that must not be coerced into row lookups, raw
+bytes round-tripping to their content address. Five further tests in
+`test/browser.test.ts` run a real Chromium for the claims that only hold
+end to end — provider text shaped like markup rendering as text, a
+superseded observation being absent from the current view and present on
+its artifact page, and the raw link returning bytes that hash to the digest
+in its own URL.
+
+**Money has one definition that a browser bundle can import.**
+`formatAmount` and the minor-unit table moved into `src/money.ts`, which
+imports no runtime API. The parsers, the API and the client now all import
+it — before, the browser imported the parsers' helper, which a bundle
+cannot follow. Nothing else in the client formats an amount.
+
+**No chart library was added, and none is a dependency.** The rule in
+`docs/evidence-browser.md` is that a chart is a claim about a trend, where
+every claim here should be a row someone can trace. Keeping it out of
+`package.json` is the part that will still be true in six months: adding
+one means adding a package, not calling something already installed. The
+same holds for a component library, a CSS framework, and an icon pack — the
+client is React, TanStack Query, TanStack Table, and one plain stylesheet.
+
+**It cost a build step and a layer of restatement.** `bun run serve`
+renders nothing until `bun run build` has run, though the dev server builds
+as it goes. The client restates every response shape in
+`web/src/api.ts` rather than importing it from `src/queries.ts`, because
+that file reaches `bun:sqlite`. A column added to an observation table now
+lands in three places instead of one.
+
+**Two invariants lost their tests in the rewrite, and got them back.**
+`test/ui.test.ts` built a two-institution store whose account labels collide
+and asserted that neither institution's balance hid the other's; it also
+stored a content type containing CRLF and asserted that the raw route
+neither injected a header nor returned a 500. The SQL's source-qualified
+keys and the printable-ASCII check both carried over verbatim into
+`src/queries.ts` and `src/api.ts` — the tests did not, and for a while the
+suite grew while quietly losing two defences against exactly the kind of
+failure this document is otherwise a list of. Both are now asserted again
+in `test/api.test.ts`. Worth recording because the rewrite looked complete
+and green at the moment the coverage was missing: a passing suite is not
+evidence that the suite still checks what it used to.
+
+**The 75 figure assumes a built client and a Chromium.** The browser tests
+skip themselves when either is missing, printing why, and `bun test` then
+reports 70 pass rather than failing. That is convenient on a machine
+without a browser and easy to misread as a full run.
 
 ## Open questions
 

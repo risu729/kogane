@@ -21,10 +21,19 @@ implements, and `RESULTS.md` for what it settled and what it did not.
 ```sh
 bun install
 bun run demo          # ingest the fixtures, parse them, print row counts
-bun run ui            # read-only evidence browser on http://localhost:8787/
-bun test              # 58 tests
+bun run build         # build the client into web/dist
+bun run serve         # API + built client on http://127.0.0.1:8787/
+bun run dev           # Vite dev server on 5173, proxying /api to 8787
+bun test              # 75 tests across 4 files
 bun run typecheck
 ```
+
+`bun run serve` binds loopback only and has no authentication: it renders
+real financial evidence and must never be reachable from a network. The
+same holds for the dev server, which binds localhost unless it is given
+`--host`. `bun test` runs 5 of its tests in a real Chromium when one is
+available and the client has been built; without either it reports why it
+skipped them.
 
 `bun run demo` is idempotent. Running it twice ingests nothing new and
 parses nothing new, because runs are keyed by their external run id, blobs
@@ -32,7 +41,9 @@ by their SHA-256, and parse runs by (artifact, parser, version).
 
 State lives in `state/` (gitignored): `kogane-poc.sqlite` stands in for D1,
 and `state/blobs/` stands in for R2. Deleting the directory and re-running
-is always safe — that is the point of the architecture.
+is always safe — that is the point of the architecture. The client build
+output in `web/dist/` is gitignored too, and `bun run serve` says so
+rather than 404-ing silently when it is missing.
 
 ## What it does
 
@@ -44,9 +55,10 @@ raw_objects + fetch_artifacts + fetch_runs         layer A: evidence
       │  parse.ts — deterministic, versioned, supersession-aware
       ▼
 transaction / balance / position / valuation observations   layer B
-      │  ui.ts — read-only, computed per request, stores nothing
+      │  queries.ts — read-only, computed per request, stores nothing
+      │  api.ts — a Hono JSON API over those queries
       ▼
-evidence browser
+evidence browser (React client in web/, served by serve.ts)
 ```
 
 Four parsers run against the shapes the collectors already produce:
@@ -92,18 +104,44 @@ someone can check what changed.
 
 ```text
 /                              row counts, sources, fetch runs, parse runs
-/transactions                  current transaction observations
+/transactions                  current transaction observations, sortable
 /balances                      latest per (account, metric, instrument), then full history
 /positions                     current positions with provider-reported valuations
 /observations/:kind/:id        every column, extra_json, and the provenance walk
 /artifacts                     every artifact and its observation counts
 /artifacts/:id                 all parse runs including superseded ones
-/raw/:sha256                   the stored bytes, verbatim
 ```
 
-Every current-state view is computed per request and stored nowhere. The
-provenance walk is the point of the tool: observation → parse run
-(parser@version, warnings) → artifact → raw object → fetch run.
+Each page reads one endpoint of the same name under `/api`, with `/`
+reading `/api/overview`; the stored bytes are at `/api/raw/:sha256`, which
+the client links to and never fetches. Any method other than GET or HEAD
+is refused before routing, and every current-state view is computed per
+request and stored nowhere. The provenance walk is the point of the tool:
+observation → parse run (parser@version, warnings) → artifact → raw object
+→ fetch run.
+
+The server is `src/api.ts` (a Hono app, so the same object can run on a
+Worker later) over `src/queries.ts` (every read query, with the "current"
+predicate stated once) and `src/money.ts` (minor units and amount
+formatting, shared with the parsers). The client is React, built by Vite:
+
+```text
+web/index.html
+web/src/main.tsx       React root and the query client
+web/src/app.tsx        masthead, and the view for the current route
+web/src/router.tsx     a pushState router, so there is no router dependency
+web/src/api.ts         typed fetch layer, one hook per endpoint
+web/src/ui.tsx         shared components: amounts, badges, panels, links
+web/src/money.ts       re-export of src/money.ts — one formatter, not two
+web/src/styles.css     one plain stylesheet, light and dark
+web/src/pages/*.tsx    one page per route
+```
+
+Dependencies are Hono, React, TanStack Query and TanStack Table, with Vite
+and Playwright for development. There is no component library, no CSS
+framework, no icon pack, and no chart library: a chart is a claim about a
+trend, and every claim here should be a row someone can trace
+(`docs/evidence-browser.md`).
 
 ## Fixtures
 

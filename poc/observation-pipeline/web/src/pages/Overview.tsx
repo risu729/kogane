@@ -202,7 +202,7 @@ export function OverviewPage(): ReactNode {
                           <StatusBadge status={run.status} />
                         </td>
                         <td>
-                          <WarningBadge count={run.warnings.length} />
+                          <WarningBadge count={run.warnings.list.length} />
                         </td>
                         <td>
                           <LineageBadge supersededBy={run.superseded_by_parse_run_id} />

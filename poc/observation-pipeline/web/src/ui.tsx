@@ -16,6 +16,7 @@
 // descriptions, counterparty names, security names, extra_json — safe to put
 // on the page.
 
+import type { Warnings } from "./api.ts";
 import type { ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { amountSign, formatAmount } from "./money.ts";
@@ -34,7 +35,9 @@ export function Amount({
   unit,
   text,
 }: {
-  minor: number | null;
+  // A decimal string: the API sends amounts as text so that an integer past
+  // 2^53 is not rounded by JSON on its way here.
+  minor: string | null;
   unit: string | null;
   text: string | null;
 }): ReactNode {
@@ -136,11 +139,23 @@ export function WarningBadge({ count }: { count: number }): ReactNode {
   );
 }
 
-export function WarningList({ warnings }: { warnings: string[] }): ReactNode {
-  if (warnings.length === 0) return null;
+export function WarningList({ warnings }: { warnings: Warnings }): ReactNode {
+  // A warnings value the store could not parse is shown as such. Warnings are
+  // the parser's record of what it could not read, so rendering "none" for an
+  // unreadable one would hide the very thing worth seeing.
+  if (!warnings.parsed) {
+    return (
+      <p className="warn-unreadable">
+        This parse run's warnings are stored in a form this view cannot read.
+        The stored text is <code>{warnings.raw}</code>.
+      </p>
+    );
+  }
+  const list = warnings.list;
+  if (list.length === 0) return null;
   return (
     <ul className="warning-list">
-      {warnings.map((warning, index) => (
+      {list.map((warning, index) => (
         <li key={`${String(index)}:${warning}`}>{warning}</li>
       ))}
     </ul>

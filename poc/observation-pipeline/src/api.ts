@@ -15,7 +15,7 @@
 //     document. See the /api/raw handler.
 
 import { Hono } from "hono";
-import { readRawObject, type Store } from "./store.ts";
+import { readRawObject, sha256Hex, type Store } from "./store.ts";
 import {
   artifactDetail,
   artifacts,
@@ -52,6 +52,12 @@ export function createApi(store: Store, options: ApiOptions = {}): Hono {
       return c.text("405 method not allowed: this browser is read-only\n", 405);
     }
     await next();
+    // Responses carry financial evidence. The HTTP cache is a persistence path
+    // the client cannot see or clear, so nothing here may be stored by it.
+    if (c.req.path.startsWith("/api/")) {
+      c.header("cache-control", "no-store");
+      c.header("x-content-type-options", "nosniff");
+    }
   });
 
   app.get("/api/overview", (c) => c.json(overview(store)));
@@ -109,6 +115,20 @@ export function createApi(store: Store, options: ApiOptions = {}): Hono {
         {
           error: `raw object ${meta.sha256} is recorded but unreadable`,
           detail: error instanceof Error ? error.message : String(error),
+        },
+        500,
+      );
+    }
+    // The digest is the identity of these bytes, and this route is the one
+    // place the claim "this is the evidence" is made. Re-hashing turns that
+    // claim into a check: a blob corrupted or replaced on disk is reported
+    // rather than served under the digest it no longer has.
+    const actual = sha256Hex(bytes);
+    if (actual !== meta.sha256) {
+      return c.json(
+        {
+          error: `raw object ${meta.sha256} does not match its stored bytes`,
+          detail: `the blob on disk hashes to ${actual}`,
         },
         500,
       );

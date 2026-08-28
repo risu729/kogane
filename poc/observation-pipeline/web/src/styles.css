@@ -803,6 +803,12 @@ tr.is-superseded th:first-child {
   padding: 0 0.3em;
 }
 
+.figure-asof {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .figure-foot {
   display: flex;
   justify-content: space-between;

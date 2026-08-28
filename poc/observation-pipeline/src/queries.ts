@@ -46,13 +46,31 @@ const CURRENT = "p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'";
 
 const SEPARATOR = " · ";
 
-export function parseWarnings(warningsJson: string | null): string[] {
-  if (!warningsJson) return [];
+export interface Warnings {
+  /** Parsed warning strings, empty when the stored value was not an array. */
+  list: string[];
+  /** The stored text, so an unreadable value is visible rather than silent. */
+  raw: string | null;
+  parsed: boolean;
+}
+
+/**
+ * Read a stored warnings array. A malformed value must not quietly become
+ * "no warnings": warnings are the parser's record of what it could not read,
+ * so losing them loses exactly the signal this store exists to keep.
+ */
+export function parseWarnings(warningsJson: string | null): Warnings {
+  if (warningsJson === null || warningsJson === "") {
+    return { list: [], raw: warningsJson, parsed: true };
+  }
   try {
-    const parsed: unknown = JSON.parse(warningsJson);
-    return Array.isArray(parsed) ? parsed.map((entry) => String(entry)) : [];
+    const value: unknown = JSON.parse(warningsJson);
+    if (!Array.isArray(value)) {
+      return { list: [], raw: warningsJson, parsed: false };
+    }
+    return { list: value.map((entry) => String(entry)), raw: warningsJson, parsed: true };
   } catch {
-    return [];
+    return { list: [], raw: warningsJson, parsed: false };
   }
 }
 
@@ -79,7 +97,7 @@ export interface Overview {
     parser_version: string;
     parsed_at: string;
     status: string;
-    warnings: string[];
+    warnings: Warnings;
     error: string | null;
     superseded_by_parse_run_id: number | null;
   }[];
@@ -127,7 +145,7 @@ export interface TransactionRow {
   source_id: string;
   source_account: string;
   as_of: string | null;
-  amount_minor: number | null;
+  amount_minor: string | null;
   amount_text: string | null;
   currency: string | null;
   description: string | null;
@@ -140,7 +158,8 @@ export interface TransactionRow {
 export function currentTransactions(store: Store): TransactionRow[] {
   return store.db
     .query(
-      `SELECT t.id, fa.source_id, t.source_account, t.as_of, t.amount_minor, t.amount_text,
+      `SELECT t.id, fa.source_id, t.source_account, t.as_of,
+              CAST(t.amount_minor AS TEXT) AS amount_minor, t.amount_text,
               t.currency, t.description, t.counterparty, t.external_id, t.status,
               p.parser_name || '@' || p.parser_version AS parser
        FROM transaction_observations t
@@ -158,7 +177,7 @@ export interface BalanceRow {
   source_account: string;
   metric: string;
   instrument: string;
-  amount_minor: number | null;
+  amount_minor: string | null;
   amount_text: string | null;
   as_of: string | null;
   observed_at: string | null;
@@ -182,7 +201,8 @@ export function latestBalances(store: Store): BalanceRow[] {
               amount_text, as_of, observed_at, parser
        FROM (
          SELECT b.id, fa.source_id, b.source_account, b.metric, b.instrument,
-                b.amount_minor, b.amount_text, b.as_of, b.observed_at,
+                CAST(b.amount_minor AS TEXT) AS amount_minor, b.amount_text,
+                b.as_of, b.observed_at,
                 p.parser_name || '@' || p.parser_version AS parser,
                 ROW_NUMBER() OVER (
                   PARTITION BY fa.source_id, b.source_account, b.metric, b.instrument
@@ -208,7 +228,8 @@ export interface BalanceHistoryRow extends BalanceRow {
 export function balanceHistory(store: Store): BalanceHistoryRow[] {
   return store.db
     .query(
-      `SELECT b.id, fa.source_id, b.source_account, b.metric, b.instrument, b.amount_minor,
+      `SELECT b.id, fa.source_id, b.source_account, b.metric, b.instrument,
+              CAST(b.amount_minor AS TEXT) AS amount_minor,
               b.amount_text, b.as_of, b.observed_at,
               p.parser_name || '@' || p.parser_version AS parser,
               p.superseded_by_parse_run_id, p.status AS parse_status
@@ -240,7 +261,7 @@ export interface ValuationRow {
   source_account: string;
   subject: string;
   metric: string;
-  amount_minor: number | null;
+  amount_minor: string | null;
   amount_text: string | null;
   currency: string;
   as_of: string | null;
@@ -265,7 +286,8 @@ export function currentPositions(store: Store): PositionRow[] {
 export function currentValuations(store: Store): ValuationRow[] {
   return store.db
     .query(
-      `SELECT v.id, fa.source_id, v.source_account, v.subject, v.metric, v.amount_minor,
+      `SELECT v.id, fa.source_id, v.source_account, v.subject, v.metric,
+              CAST(v.amount_minor AS TEXT) AS amount_minor,
               v.amount_text, v.currency, v.as_of,
               p.parser_name || '@' || p.parser_version AS parser
        FROM valuation_observations v
@@ -360,7 +382,7 @@ export interface ParseRunDetail {
   parsed_at: string;
   status: string;
   error: string | null;
-  warnings: string[];
+  warnings: Warnings;
   superseded_by_parse_run_id: number | null;
   observations: { kind: ObservationKind; id: number; summary: string }[];
 }
@@ -531,7 +553,7 @@ export interface Provenance {
   parsed_at: string;
   parse_status: string;
   error: string | null;
-  warnings: string[];
+  warnings: Warnings;
   superseded_by_parse_run_id: number | null;
   artifact_id: number;
   source_id: string;
@@ -574,7 +596,9 @@ export function observationDetail(
   // never from the request path.
   const table = OBSERVATION_TABLES[kind];
   const row = store.db
-    .query(`SELECT * FROM ${table} WHERE id = ?1`)
+    // The trailing CAST overrides the same column from `*`, so every stored
+    // column is still returned but the amount keeps all of its digits.
+    .query(`SELECT *, CAST(amount_minor AS TEXT) AS amount_minor FROM ${table} WHERE id = ?1`)
     .get(id) as Record<string, unknown> | null;
   if (!row) return undefined;
 
