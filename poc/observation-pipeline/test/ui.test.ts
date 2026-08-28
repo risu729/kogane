@@ -215,6 +215,12 @@ describe("amount formatting", () => {
     expect(formatAmount(1234567890, "JPY")).toBe("1,234,567,890 JPY");
     expect(formatAmount(-5, "AUD")).toBe("-0.05 AUD");
     expect(formatAmount(0, "JPY")).toBe("0 JPY");
+    // Every value above is exactly representable as a double, so none of them
+    // can tell an exact implementation from a floating-point one. These can:
+    // via double arithmetic the first renders ...345.69 and the second loses
+    // its final digits entirely.
+    expect(formatAmount(12345678901234567n, "USD")).toBe("123,456,789,012,345.67 USD");
+    expect(formatAmount(9007199254740993n, "JPY")).toBe("9,007,199,254,740,993 JPY");
   });
 
   test("falls back to the stored decimal string when amount_minor is NULL", () => {
@@ -245,7 +251,7 @@ describe("pages", () => {
 
   test("balances derive a latest row per (account, metric, instrument)", async () => {
     const body = await html("/balances");
-    expect(body).toContain("Latest per (source_account, metric, instrument)");
+    expect(body).toContain("Latest per (source, source_account, metric, instrument)");
     const [latest = "", history = ""] = body.split("<h2>Full history</h2>");
     // Two ledger observations of the same account: only the later one is
     // "latest", and that section is computed by this request, not stored.
@@ -327,5 +333,160 @@ describe("routing", () => {
       new Request("http://ui.test/transactions", { method: "POST" }),
     );
     expect(response.status).toBe(405);
+  });
+});
+
+// Two institutions that both label an account "main" and both report a
+// security code "1234". source_account carries no institution identity and
+// security codes are not globally unique (numeric TSE codes are shared across
+// every Japanese broker), so anything keyed without the source cross-wires
+// them.
+describe("two sources that use the same labels", () => {
+  function twoSourceHandler(): (request: Request) => Response {
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-ui-two-")));
+    for (const source of ["bank-a", "bank-b"]) {
+      upsertSource(store, { id: source, provider: source, ingestion: "file-export" });
+      const runId = insertFetchRun(store, {
+        sourceId: source,
+        externalRunId: `${source}-run`,
+        tool: "ingest-file",
+        startedAt: "2026-08-20T00:00:00Z",
+        status: "success",
+      });
+      const stored = putRawObject(
+        store,
+        new TextEncoder().encode(`{"source":"${source}"}`),
+        "application/json",
+      );
+      const artifactId = insertFetchArtifact(store, {
+        fetchRunId: runId,
+        sourceId: source,
+        dataset: "d",
+        mime: "application/json",
+        fetchedAt: "2026-08-20T00:00:00Z",
+        sha256: stored.sha256,
+      });
+      const parseRunId = insertParseRun(store, {
+        artifactId,
+        parserName: `${source}-parser`,
+        parserVersion: "1.0.0",
+        parsedAt: "2026-08-20T00:00:00Z",
+        status: "ok",
+        warnings: [],
+      });
+      insertObservation(store, parseRunId, {
+        kind: "balance",
+        sourceAccount: "main",
+        metric: "ledger",
+        amountMinor: source === "bank-a" ? 111 : 222,
+        instrument: "JPY",
+        asOf: "2026-08-20",
+        rawLocator: "json:$",
+        extra: {},
+      });
+      insertObservation(store, parseRunId, {
+        kind: "position",
+        sourceAccount: "main",
+        securityCode: "1234",
+        securityName: `${source} fund`,
+        quantityText: "1",
+        quantityScale: 0,
+        rawLocator: "json:$",
+        extra: {},
+      });
+      insertObservation(store, parseRunId, {
+        kind: "valuation",
+        sourceAccount: "main",
+        subject: "1234",
+        metric: "evaluation_amount",
+        amountMinor: source === "bank-a" ? 1010 : 2020,
+        currency: "JPY",
+        rawLocator: "json:$",
+        extra: {},
+      });
+    }
+    return createUiHandler(store);
+  }
+
+  test("neither institution's latest balance hides the other", async () => {
+    const handler = twoSourceHandler();
+    const body = await (await handler(new Request("http://ui.test/balances"))).text();
+    expect(body).toContain("111 JPY");
+    expect(body).toContain("222 JPY");
+    expect(body).toContain("bank-a");
+    expect(body).toContain("bank-b");
+  });
+
+  test("a valuation never attaches to the other institution's position", async () => {
+    const handler = twoSourceHandler();
+    const body = await (await handler(new Request("http://ui.test/positions"))).text();
+    // Each position section shows only its own institution's valuation.
+    const sections = body.split("<h3>").slice(1);
+    expect(sections).toHaveLength(2);
+    const sectionA = sections.find((part) => part.includes("bank-a"))!;
+    const sectionB = sections.find((part) => part.includes("bank-b"))!;
+    expect(sectionA).toContain("1,010 JPY");
+    expect(sectionA).not.toContain("2,020 JPY");
+    expect(sectionB).toContain("2,020 JPY");
+    expect(sectionB).not.toContain("1,010 JPY");
+  });
+});
+
+describe("raw evidence is served inert", () => {
+  test("html evidence cannot execute in the browser's origin", () => {
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-ui-raw-")));
+    upsertSource(store, { id: "s", provider: "s", ingestion: "file-export" });
+    const runId = insertFetchRun(store, {
+      sourceId: "s",
+      externalRunId: "r",
+      tool: "ingest-file",
+      startedAt: "2026-08-20T00:00:00Z",
+      status: "success",
+    });
+    const evil = new TextEncoder().encode("<html><script>alert(1)</script></html>");
+    const stored = putRawObject(store, evil, "text/html");
+    insertFetchArtifact(store, {
+      fetchRunId: runId,
+      sourceId: "s",
+      mime: "text/html",
+      fetchedAt: "2026-08-20T00:00:00Z",
+      sha256: stored.sha256,
+    });
+    const handler = createUiHandler(store);
+    const response = handler(new Request(`http://ui.test/raw/${stored.sha256}`));
+    expect(response.status).toBe(200);
+    // The bytes stay verbatim — they are the evidence — but the page is
+    // denied an origin and scripting.
+    expect(response.headers.get("content-security-policy")).toBe("sandbox");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  test("a stored content type containing CRLF cannot break the response", () => {
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-ui-crlf-")));
+    upsertSource(store, { id: "s", provider: "s", ingestion: "file-export" });
+    const runId = insertFetchRun(store, {
+      sourceId: "s",
+      externalRunId: "r",
+      tool: "ingest-file",
+      startedAt: "2026-08-20T00:00:00Z",
+      status: "success",
+    });
+    const stored = putRawObject(
+      store,
+      new TextEncoder().encode("{}"),
+      "text/plain\r\nX-Injected: 1",
+    );
+    insertFetchArtifact(store, {
+      fetchRunId: runId,
+      sourceId: "s",
+      mime: "application/json",
+      fetchedAt: "2026-08-20T00:00:00Z",
+      sha256: stored.sha256,
+    });
+    const handler = createUiHandler(store);
+    const response = handler(new Request(`http://ui.test/raw/${stored.sha256}`));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-injected")).toBeNull();
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
   });
 });

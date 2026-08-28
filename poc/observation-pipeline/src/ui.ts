@@ -470,16 +470,21 @@ ${htmlTable(
 function renderTransactions(store: Store): Response {
   const rows = store.db
     .query(
-      `SELECT t.id, t.source_account, t.as_of, t.amount_minor, t.currency, t.description,
-              t.counterparty, t.external_id, t.status,
+      // An error parse run is never superseded, so the current predicate has
+      // to exclude it explicitly as well as checking supersession.
+      `SELECT t.id, fa.source_id, t.source_account, t.as_of, t.amount_minor, t.amount_text,
+              t.currency, t.description, t.counterparty, t.external_id, t.status,
               p.parser_name, p.parser_version
        FROM transaction_observations t
        JOIN parse_runs p ON p.id = t.parse_run_id
-       WHERE p.superseded_by_parse_run_id IS NULL
+       JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+       WHERE p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'
        ORDER BY COALESCE(t.as_of, '') DESC, t.id DESC`,
     )
     .all() as {
     id: number;
+    source_id: string;
+    amount_text: string | null;
     source_account: string;
     as_of: string | null;
     amount_minor: number | null;
@@ -499,12 +504,13 @@ readable through their artifact. external_id is what the provider said, not a
 logical identity: a pending row and its posted row are related by a link, never
 by an update.</p>
 ${htmlTable(
-  ["observation", "account", "as_of", "amount", "currency", "description", "counterparty", "external_id", "parser"],
+  ["observation", "source", "account", "as_of", "amount", "currency", "description", "counterparty", "external_id", "parser"],
   rows.map((row) => [
     link(`/observations/transaction/${row.id}`, `#${row.id}`),
+    cell(row.source_id),
     cell(row.source_account),
     cell(row.as_of),
-    `<span class="num">${cell(formatAmount(row.amount_minor, row.currency))}</span>`,
+    `<span class="num">${cell(formatAmount(row.amount_minor, row.currency, row.amount_text))}</span>`,
     cell(row.currency),
     cell(row.description),
     cell(row.counterparty),
@@ -519,27 +525,33 @@ ${htmlTable(
 function renderBalances(store: Store): Response {
   // Window function over non-superseded observations, evaluated on this
   // request. There is no "current balance" anywhere in the database.
+  // `source_account` is only the provider's own label, so it does not
+  // identify an institution: two sources can both call an account "main".
+  // The source is carried through the join and into the partition key, or one
+  // institution's balance would silently hide the other's.
   const latest = store.db
     .query(
-      `SELECT id, source_account, metric, instrument, amount_minor, amount_text,
-              as_of, observed_at, parser
+      `SELECT id, source_id, source_account, metric, instrument, amount_minor,
+              amount_text, as_of, observed_at, parser
        FROM (
-         SELECT b.id, b.source_account, b.metric, b.instrument, b.amount_minor,
-                b.amount_text, b.as_of, b.observed_at,
+         SELECT b.id, fa.source_id, b.source_account, b.metric, b.instrument,
+                b.amount_minor, b.amount_text, b.as_of, b.observed_at,
                 p.parser_name || '@' || p.parser_version AS parser,
                 ROW_NUMBER() OVER (
-                  PARTITION BY b.source_account, b.metric, b.instrument
+                  PARTITION BY fa.source_id, b.source_account, b.metric, b.instrument
                   ORDER BY COALESCE(b.as_of, b.observed_at, '') DESC, b.id DESC
                 ) AS rank_in_group
          FROM balance_observations b
          JOIN parse_runs p ON p.id = b.parse_run_id
-         WHERE p.superseded_by_parse_run_id IS NULL
+         JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+         WHERE p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'
        )
        WHERE rank_in_group = 1
-       ORDER BY source_account, metric, instrument`,
+       ORDER BY source_id, source_account, metric, instrument`,
     )
     .all() as {
     id: number;
+    source_id: string;
     source_account: string;
     metric: string;
     instrument: string;
@@ -574,15 +586,16 @@ function renderBalances(store: Store): Response {
   }[];
 
   const body = `
-<h2>Latest per (source_account, metric, instrument)</h2>
+<h2>Latest per (source, source_account, metric, instrument)</h2>
 <p class="note">Derived on request. This table is computed by a window function
 over the non-superseded observations below and is never stored: a balance is a
 measurement (subject, metric, value, as_of, source), not a column on an
 account, and each metric an institution reports is its own measurement.</p>
 ${htmlTable(
-  ["observation", "account", "metric", "instrument", "amount", "as_of", "observed_at", "parser"],
+  ["observation", "source", "account", "metric", "instrument", "amount", "as_of", "observed_at", "parser"],
   latest.map((row) => [
     link(`/observations/balance/${row.id}`, `#${row.id}`),
+    cell(row.source_id),
     cell(row.source_account),
     cell(row.metric),
     cell(row.instrument),
@@ -620,16 +633,18 @@ ${htmlTable(
 function renderPositions(store: Store): Response {
   const positions = store.db
     .query(
-      `SELECT po.id, po.source_account, po.security_code, po.security_name, po.market,
-              po.quantity_text, po.quantity_scale, po.currency, po.as_of, po.observed_at,
-              p.parser_name, p.parser_version
+      `SELECT po.id, fa.source_id, po.source_account, po.security_code, po.security_name,
+              po.market, po.quantity_text, po.quantity_scale, po.currency, po.as_of,
+              po.observed_at, p.parser_name, p.parser_version
        FROM position_observations po
        JOIN parse_runs p ON p.id = po.parse_run_id
-       WHERE p.superseded_by_parse_run_id IS NULL
-       ORDER BY po.source_account, po.security_code, po.id`,
+       JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+       WHERE p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'
+       ORDER BY fa.source_id, po.source_account, po.security_code, po.id`,
     )
     .all() as {
     id: number;
+    source_id: string;
     source_account: string;
     security_code: string;
     security_name: string | null;
@@ -645,15 +660,17 @@ function renderPositions(store: Store): Response {
 
   const valuations = store.db
     .query(
-      `SELECT v.id, v.source_account, v.subject, v.metric, v.amount_minor, v.amount_text,
-              v.currency, v.as_of, v.observed_at
+      `SELECT v.id, fa.source_id, v.source_account, v.subject, v.metric, v.amount_minor,
+              v.amount_text, v.currency, v.as_of, v.observed_at
        FROM valuation_observations v
        JOIN parse_runs p ON p.id = v.parse_run_id
-       WHERE p.superseded_by_parse_run_id IS NULL
-       ORDER BY v.source_account, v.subject, v.metric, v.id`,
+       JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+       WHERE p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'
+       ORDER BY fa.source_id, v.source_account, v.subject, v.metric, v.id`,
     )
     .all() as {
     id: number;
+    source_id: string;
     source_account: string;
     subject: string;
     metric: string;
@@ -664,12 +681,21 @@ function renderPositions(store: Store): Response {
     observed_at: string | null;
   }[];
 
-  // Provider-reported valuations, grouped by the (account, subject) pair the
-  // position identifies. Each metric keeps the currency the provider stated;
-  // nothing is summed and nothing is converted.
+  // Provider-reported valuations, grouped by the (source, account, subject)
+  // triple the position identifies. The source belongs in the key: security
+  // codes are not globally unique — numeric TSE codes are shared across every
+  // Japanese broker — so without it one broker's valuation would attach to
+  // another broker's position. Each metric keeps the currency the provider
+  // stated; nothing is summed and nothing is converted.
   const bySubject = new Map<string, typeof valuations>();
+  const subjectKey = (source: string, account: string, subject: string): string =>
+    `${source}\u0000${account}\u0000${subject}`;
   for (const valuation of valuations) {
-    const key = `${valuation.source_account}\u0000${valuation.subject}`;
+    const key = subjectKey(
+      valuation.source_id,
+      valuation.source_account,
+      valuation.subject,
+    );
     const bucket = bySubject.get(key);
     if (bucket) bucket.push(valuation);
     else bySubject.set(key, [valuation]);
@@ -677,17 +703,20 @@ function renderPositions(store: Store): Response {
 
   const sections = positions.map((position) => {
     const matching =
-      bySubject.get(`${position.source_account}\u0000${position.security_code}`) ?? [];
-    const heading = `${position.security_code}${
+      bySubject.get(
+        subjectKey(position.source_id, position.source_account, position.security_code),
+      ) ?? [];
+    const heading = `${position.source_id} · ${position.security_code}${
       position.security_name === null ? "" : ` — ${position.security_name}`
     }`;
     return `
 <h3>${escapeHtml(heading)}</h3>
 ${htmlTable(
-  ["observation", "account", "market", "quantity", "scale", "currency", "as_of", "parser"],
+  ["observation", "source", "account", "market", "quantity", "scale", "currency", "as_of", "parser"],
   [
     [
       link(`/observations/position/${position.id}`, `#${position.id}`),
+      cell(position.source_id),
       cell(position.source_account),
       cell(position.market),
       `<span class="num">${cell(position.quantity_text)}</span>`,
@@ -1037,11 +1066,27 @@ function renderRaw(store: Store, sha256: string): Response {
       { status: 500, headers: { "content-type": "text/plain; charset=utf-8" } },
     );
   }
+  // The bytes go out verbatim, but they are never treated as an active
+  // document. Captured evidence can be attacker-authored HTML: rendered
+  // inline it would run its own script in this origin, which can read every
+  // other page here — the whole financial dataset. `sandbox` denies it an
+  // origin and scripts, and `nosniff` stops the browser inferring a type the
+  // source never declared.
+  //
+  // A stored content type is provider-derived and reaches a header, so it is
+  // validated first: a CR or LF in it would otherwise throw out of the
+  // handler as an unhandled 500.
+  const declared = row.content_type.trim();
+  const contentType = /^[ -~]+$/u.test(declared)
+    ? declared
+    : "application/octet-stream";
   return new Response(bytes, {
     status: 200,
     headers: {
-      "content-type": row.content_type,
+      "content-type": contentType,
       "content-disposition": "inline",
+      "content-security-policy": "sandbox",
+      "x-content-type-options": "nosniff",
       "x-kogane-sha256": row.sha256,
     },
   });
@@ -1107,9 +1152,13 @@ export function createUiHandler(store: Store): (request: Request) => Response {
 
 if (import.meta.main) {
   const store = openStore();
+  // Loopback only, and deliberately so: this server has no authentication and
+  // renders real financial evidence once a capture is loaded. It must never be
+  // reachable from a shared or forwarded interface.
   const server = Bun.serve({
+    hostname: "127.0.0.1",
     port: Number(process.env["PORT"] ?? 8787),
     fetch: createUiHandler(store),
   });
-  console.log(`kogane evidence browser on http://localhost:${server.port}/`);
+  console.log(`kogane evidence browser on http://127.0.0.1:${server.port}/`);
 }
