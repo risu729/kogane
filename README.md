@@ -13,6 +13,7 @@ different rules.
 - [Authenticated collectors](docs/authenticated-collectors.md)
 - [Credential delivery](docs/credentials.md)
 - [Existing tools and reuse](docs/tooling.md)
+- [Prior art: self-hosted finance software](docs/prior-art.md)
 - [Vpass aggregator alternatives](docs/vpass-aggregators.md)
 - [Vpass Android app API](docs/vpass-android-api.md)
 - [Account and source inventory](docs/account-inventory.md)

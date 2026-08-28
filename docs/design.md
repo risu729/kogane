@@ -325,7 +325,9 @@ D1 conventions to avoid known pitfalls:
 ## Prior Art
 
 Existing projects were evaluated as a canonical store and not adopted,
-though several inform the design:
+though several inform the design. `docs/prior-art.md` is the detailed
+survey — what each contains, what its data model does with the source
+material, and what is worth taking. In summary:
 
 - **Plaid / Open Banking (GoCardless) transaction models** — the closest to
   this design: pending and posted are separate linked records, multiple
