@@ -398,13 +398,13 @@ balance partition key, the position ordering, and the valuation bucket key
 in `src/queries.ts` therefore all include `fetch_artifacts.source_id`, and
 the transaction and position views show the source as a column.
 
-Nothing asserts that today. `test/ui.test.ts` built a two-institution
-store whose labels collide and asserted that neither institution's balance
-hid the other's and that neither's valuation attached to the other's
-position; the SQL survived the rebuild verbatim, the test did not, and no
-replacement was written. The invariant is in the code and out of the
-suite, which is the weakest place for an invariant to be, and restoring
-the test against the API is the cheapest fix available.
+`test/api.test.ts` builds exactly that collision — two sources both
+calling an account "main" — and asserts that both survive the
+latest-balance view. The assertion was briefly lost: it lived in
+`test/ui.test.ts`, the SQL survived the rebuild verbatim and the test did
+not, and for a while the invariant was in the code and out of the suite.
+That gap was found by mutating the partition key and watching the suite
+stay green, which is the only reliable way to notice it.
 
 ### Raw evidence is served inert
 
@@ -421,10 +421,9 @@ read a JSON or CSV artifact in place; `sandbox` is what makes that safe.
 The stored content type is itself provider-derived and reaches a response
 header, so it is validated as printable ASCII first and replaced with
 `application/octet-stream` otherwise. A CR or LF in it would otherwise
-split the response or throw out of the handler. `test/ui.test.ts` stored a
-content type containing CRLF and asserted that neither an injected header
-nor a 500 resulted; as with the collision test above, the check survived
-the rebuild in `src/api.ts` and the test did not.
+split the response or throw out of the handler. `test/api.test.ts` stores
+a content type containing CRLF and asserts that neither an injected header
+nor a 500 results.
 
 `test/api.test.ts` does assert the rest of this rule: that the bytes come
 back byte for byte, hashing to the digest in the URL, and that they carry

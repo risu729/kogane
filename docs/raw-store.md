@@ -243,7 +243,7 @@ bytes, and it is frozen: a deduplicated write does nothing at all, so a
 later fetch that declares a different type never reaches the row. It
 exists so the evidence browser can serve `/raw/:sha256` with some
 declared type when no artifact is in hand
-(`poc/observation-pipeline/src/ui.ts`). Any question of the form "what
+(`poc/observation-pipeline/src/queries.ts`). Any question of the form "what
 did the source call these bytes" is answered by joining through
 `fetch_artifacts`.
 

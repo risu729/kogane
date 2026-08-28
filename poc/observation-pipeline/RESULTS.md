@@ -6,7 +6,7 @@ is synthetic.
 
 The PoC ingests 4 synthetic artifacts from 2 sources into 28 observations
 (8 transaction, 10 balance, 2 position, 8 valuation) across 4 parse runs.
-`bun test` is 75 pass across 4 files, `tsc --noEmit` is clean.
+`bun test` is 80 pass across 4 files, `tsc --noEmit` is clean.
 
 ## What it settled
 
@@ -87,7 +87,7 @@ the amounts, and concatenated the HTML inside the same functions. It is now
 React client under `web/`, built by Vite.
 
 **The queries became testable without a renderer.** `test/api.test.ts`
-drives 27 tests through the app object with no browser involved: the
+drives 32 tests through the app object with no browser involved: the
 current-view predicate, ids that must not be coerced into row lookups, raw
 bytes round-tripping to their content address. Five further tests in
 `test/browser.test.ts` run a real Chromium for the claims that only hold
@@ -130,10 +130,26 @@ in `test/api.test.ts`. Worth recording because the rewrite looked complete
 and green at the moment the coverage was missing: a passing suite is not
 evidence that the suite still checks what it used to.
 
-**The 75 figure assumes a built client and a Chromium.** The browser tests
+**The 80 figure assumes a built client and a Chromium.** The browser tests
 skip themselves when either is missing, printing why, and `bun test` then
-reports 70 pass rather than failing. That is convenient on a machine
+reports 75 pass rather than failing. That is convenient on a machine
 without a browser and easy to misread as a full run.
+
+**An adversarial review of the rebuild found two blocking defects.** Amounts
+were passing through an IEEE-754 double between SQLite and the screen,
+because `bun:sqlite` returns an INTEGER column as a JS number — and a
+comment in `src/money.ts` asserted a protection against exactly that which
+nothing implemented. Amounts are now cast to text in every query. And
+mutation testing showed the suite could not detect a violation of the
+current-view rule for three of the four observation kinds: dropping the
+status check, or the source from the balance partition key, left every test
+passing. Both are fixed, and each new test was confirmed to fail when its
+line is mutated.
+
+The pattern is the same one this document keeps recording: the failure was
+silent and in the direction of looking correct. A rounded amount still
+renders as a neatly grouped figure; a green suite still looks like
+coverage. Neither announces itself.
 
 ## Open questions
 

@@ -24,7 +24,7 @@ bun run demo          # ingest the fixtures, parse them, print row counts
 bun run build         # build the client into web/dist
 bun run serve         # API + built client on http://127.0.0.1:8787/
 bun run dev           # Vite dev server on 5173, proxying /api to 8787
-bun test              # 75 tests across 4 files
+bun test              # 80 tests across 4 files
 bun run typecheck
 ```
 

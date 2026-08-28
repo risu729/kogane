@@ -216,7 +216,8 @@ The runnable entry points are `package.json` scripts:
 bun run demo        ingest the fixtures, parse them, print row counts
 bun run ingest      ingestion only
 bun run parse       every registered parser over every artifact
-bun run ui          the read-only browser on 127.0.0.1:8787
+bun run build       build the evidence browser's client
+bun run serve       the read-only browser on 127.0.0.1:8787
 bun test            the suite
 bun run typecheck   tsc --noEmit
 ```
@@ -321,7 +322,7 @@ they satisfy the first condition forever. They happen to carry no
 observation rows today, which makes the omission harmless when joining an
 observation table and wrong for any query over `parse_runs` itself; a
 future error path that recorded partial output would make it wrong
-everywhere. Every current view in `src/ui.ts` uses both conditions:
+everywhere. Every current view in `src/queries.ts` uses both conditions:
 transactions, the latest-balance window function, positions, and
 valuations. The balances page also renders a full history with no
 predicate at all, marking the superseded rows, which is how a re-parse can
@@ -411,12 +412,12 @@ should be corrected when that work lands.
 
 Two consequences hold today. `source_account` carries no institution
 identity, so every current-state view must partition by source as well:
-`src/ui.ts` keys the latest-balance window function on `(source_id,
+`src/queries.ts` keys the latest-balance window function on `(source_id,
 source_account, metric, instrument)` and matches valuations to positions
 on `(source_id, source_account, subject)`, because two institutions can
 both call an account "main" and numeric TSE security codes are shared
-across every Japanese broker. `test/ui.test.ts` builds exactly that
-collision and asserts neither institution's figures reach the other's row.
+across every Japanese broker. `test/api.test.ts` builds exactly that
+collision and asserts neither institution's balance hides the other's.
 
 ### `observed_at` is deliberately empty everywhere
 
@@ -701,7 +702,7 @@ would be lost, or the result leaves the safe-integer range; it validates
 its own input rather than trusting it, so an empty string can never become
 zero yen. Position quantities keep only the text form.
 
-The same rule holds on the way out. `formatAmount` in `src/ui.ts` renders
+The same rule holds on the way out. `formatAmount` in `src/money.ts` renders
 minor units through `BigInt` and string manipulation only, so an amount
 never passes through floating point even on its way to a screen, and an
 instrument with no known exponent is labelled `(minor units)` rather than
@@ -979,7 +980,7 @@ the same version, an older version failing to make stale output current, a
 failed observation insert leaving no partially-parsed `ok` run, and a
 missing blob failing only its own artifact rather than the sweep.
 
-`test/ui.test.ts` covers the browse layer: exact amount formatting
+`test/api.test.ts` covers the browse layer: exact amount formatting
 including values that only an exact implementation gets right, the
 derived-not-stored latest-balance view, provider text escaped rather than
 emitted as markup, a superseded run hidden from current views while
@@ -1048,7 +1049,7 @@ Finally, compare current observation counts per shape against the previous
 version's counts. A difference is expected when the parser changed, and
 its direction should match the change that was made; an unexplained
 difference is the signal that the bump did something other than intended.
-`bun run ui` shows the same thing by hand: the new parse run current, the
+`bun run serve` shows the same thing by hand: the new parse run current, the
 old one marked superseded, both readings still reachable from the
 artifact, and each run's warnings listed beside its observations.
 
