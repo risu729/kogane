@@ -59,22 +59,23 @@ export function ingestRunDirectory(
   const startedAt = String(manifest["startedAt"] ?? new Date(0).toISOString());
   const completedAt =
     typeof manifest["completedAt"] === "string" ? manifest["completedAt"] : undefined;
-  const runId = insertFetchRun(store, {
-    sourceId: source.id,
-    externalRunId: manifest["runId"],
-    tool: "import-run",
-    startedAt,
-    ...(completedAt !== undefined ? { completedAt } : {}),
-    status: String(manifest["status"] ?? "success"),
-  });
 
-  let artifacts = 0;
-  let deduplicated = 0;
+  // Read and verify every artifact BEFORE writing anything. A run row written
+  // ahead of a failure would make the run look ingested, and every later
+  // attempt a silent no-op.
+  const pending: { dataset: string; bytes: Uint8Array }[] = [];
+  const seenDatasets = new Set<string>();
   for (const entry of manifest["artifacts"]) {
     if (!isObject(entry) || typeof entry["dataset"] !== "string") {
       throw new Error(`${directory}/manifest.json has a malformed artifact entry`);
     }
     const dataset = entry["dataset"];
+    if (seenDatasets.has(dataset)) {
+      throw new Error(
+        `${directory}/manifest.json lists dataset ${dataset} more than once`,
+      );
+    }
+    seenDatasets.add(dataset);
     const bytes = readFileSync(join(directory, `${dataset}.json`));
     const digest = sha256Hex(bytes);
     if (typeof entry["sha256"] === "string" && entry["sha256"] !== digest) {
@@ -82,19 +83,34 @@ export function ingestRunDirectory(
         `${dataset}: bytes hash ${digest} does not match manifest sha256 ${entry["sha256"]}`,
       );
     }
-    const stored = putRawObject(store, bytes, "application/json");
-    if (stored.deduplicated) deduplicated += 1;
-    insertFetchArtifact(store, {
-      fetchRunId: runId,
-      sourceId: source.id,
-      dataset,
-      mime: "application/json",
-      fetchedAt: completedAt ?? startedAt,
-      sha256: stored.sha256,
-    });
-    artifacts += 1;
+    pending.push({ dataset, bytes });
   }
-  return { runId, artifacts, deduplicated, skippedExisting: false };
+
+  let deduplicated = 0;
+  const runId = store.db.transaction(() => {
+    const insertedRunId = insertFetchRun(store, {
+      sourceId: source.id,
+      externalRunId: manifest["runId"] as string,
+      tool: "import-run",
+      startedAt,
+      ...(completedAt !== undefined ? { completedAt } : {}),
+      status: String(manifest["status"] ?? "success"),
+    });
+    for (const { dataset, bytes } of pending) {
+      const stored = putRawObject(store, bytes, "application/json");
+      if (stored.deduplicated) deduplicated += 1;
+      insertFetchArtifact(store, {
+        fetchRunId: insertedRunId,
+        sourceId: source.id,
+        dataset,
+        mime: "application/json",
+        fetchedAt: completedAt ?? startedAt,
+        sha256: stored.sha256,
+      });
+    }
+    return insertedRunId;
+  })();
+  return { runId, artifacts: pending.length, deduplicated, skippedExisting: false };
 }
 
 export function ingestFile(
@@ -108,37 +124,39 @@ export function ingestFile(
 ): IngestSummary {
   upsertSource(store, { ...options.source, ingestion: "file-export" });
   const bytes = readFileSync(path);
-  const digest = sha256Hex(bytes);
-  const externalRunId = `file:${basename(path)}:${digest.slice(0, 16)}`;
+  // The run identity is the fetch, not the content. Re-fetching an unchanged
+  // export at a later time is a second confirmation and must be recorded as
+  // its own fetch, even though the bytes deduplicate to one blob.
+  const externalRunId = `file:${basename(path)}@${options.fetchedAt}`;
   const existing = store.db
     .query("SELECT id FROM fetch_runs WHERE source_id = ?1 AND external_run_id = ?2")
     .get(options.source.id, externalRunId) as { id: number } | null;
   if (existing) {
     return { runId: existing.id, artifacts: 0, deduplicated: 0, skippedExisting: true };
   }
-  const runId = insertFetchRun(store, {
-    sourceId: options.source.id,
-    externalRunId,
-    tool: "ingest-file",
-    startedAt: options.fetchedAt,
-    completedAt: options.fetchedAt,
-    status: "success",
-  });
-  const stored = putRawObject(store, bytes, options.mime);
-  insertFetchArtifact(store, {
-    fetchRunId: runId,
-    sourceId: options.source.id,
-    url: `file:${basename(path)}`,
-    mime: options.mime,
-    fetchedAt: options.fetchedAt,
-    sha256: stored.sha256,
-  });
-  return {
-    runId,
-    artifacts: 1,
-    deduplicated: stored.deduplicated ? 1 : 0,
-    skippedExisting: false,
-  };
+  let deduplicated = 0;
+  const runId = store.db.transaction(() => {
+    const insertedRunId = insertFetchRun(store, {
+      sourceId: options.source.id,
+      externalRunId,
+      tool: "ingest-file",
+      startedAt: options.fetchedAt,
+      completedAt: options.fetchedAt,
+      status: "success",
+    });
+    const stored = putRawObject(store, bytes, options.mime);
+    if (stored.deduplicated) deduplicated += 1;
+    insertFetchArtifact(store, {
+      fetchRunId: insertedRunId,
+      sourceId: options.source.id,
+      url: `file:${basename(path)}`,
+      mime: options.mime,
+      fetchedAt: options.fetchedAt,
+      sha256: stored.sha256,
+    });
+    return insertedRunId;
+  })();
+  return { runId, artifacts: 1, deduplicated, skippedExisting: false };
 }
 
 /** Ingest every fixture shipped with the PoC. */

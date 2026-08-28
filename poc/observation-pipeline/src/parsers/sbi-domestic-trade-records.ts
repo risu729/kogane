@@ -8,15 +8,21 @@
 // the provider displayed them (△ handled as a negative marker); no sign is
 // invented from the trade type — that is interpretation, which belongs to
 // layer C, not to a parser.
+//
+// `observed_at` is deliberately left unset: this payload carries no timestamp
+// stating when the source displayed the value. When the value was retrieved is
+// `fetch_artifacts.fetched_at`, reachable through the observation's parse run,
+// and copying it into `observed_at` would collapse two of the three distinct
+// timestamps docs/design.md separates.
 
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
-import { amountToMinorUnits, decodeUtf8, isObject } from "./util.ts";
+import { amountToMinorUnits, decimalText, decodeUtf8, isObject } from "./util.ts";
 
 const SOURCE_ACCOUNT = "sbi-securities:domestic";
 
 export const sbiDomesticTradeRecords: Parser = {
   name: "sbi-domestic-trade-records",
-  version: "0.1.0",
+  version: "0.2.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -35,16 +41,41 @@ export const sbiDomesticTradeRecords: Parser = {
     const warnings: string[] = [];
     const observations: Observation[] = body["records"].map(
       (record: unknown, index: number): Observation => {
+        const locator = `json:$.records[${index}]`;
+        // A record that is not an object is still evidence: it is recorded
+        // with the raw element in `extra` rather than discarded, and rather
+        // than failing the whole artifact and losing its good records too.
         if (!isObject(record)) {
-          throw new Error(`records[${index}] is not an object`);
+          warnings.push(
+            `records[${index}]: expected an object, got ${typeof record}; recorded verbatim`,
+          );
+          return {
+            kind: "transaction",
+            sourceAccount: SOURCE_ACCOUNT,
+            currency: "JPY",
+            rawLocator: locator,
+            extra: { _kogane: { unparsedElement: record } },
+          };
         }
-        const amount = typeof record["amount"] === "string" ? record["amount"] : "";
-        const amountMinor = amountToMinorUnits(amount, "JPY");
+
+        const rawAmount = record["amount"];
+        // The collector emits amounts as display strings, but a JSON number is
+        // just as parseable and must not be thrown away.
+        const amountText =
+          typeof rawAmount === "string"
+            ? rawAmount
+            : typeof rawAmount === "number"
+              ? (decimalText(rawAmount)?.text ?? "")
+              : "";
+        const amountMinor =
+          amountText === "" ? undefined : amountToMinorUnits(amountText, "JPY");
         if (amountMinor === undefined) {
           warnings.push(
-            `records[${index}]: amount ${JSON.stringify(amount)} did not resolve to JPY minor units`,
+            `records[${index}]: amount ${JSON.stringify(rawAmount)} did not resolve to JPY minor units`,
           );
         }
+        const normalized = amountText === "" ? undefined : decimalText(amountText);
+
         const rawCells = Array.isArray(record["rawCells"])
           ? (record["rawCells"] as unknown[])
           : undefined;
@@ -60,14 +91,24 @@ export const sbiDomesticTradeRecords: Parser = {
           sourceAccount: SOURCE_ACCOUNT,
           ...(externalId !== undefined ? { externalId } : {}),
           ...(amountMinor !== undefined ? { amountMinor } : {}),
+          // The verbatim amount is kept even when it does not resolve to minor
+          // units, so no stated figure is lost to a parsing limitation.
+          ...(normalized !== undefined
+            ? { amountText: normalized.text, amountScale: normalized.scale }
+            : amountText !== ""
+              ? { amountText }
+              : {}),
           currency: "JPY",
           description,
           ...(tradeDate !== undefined ? { asOf: tradeDate } : {}),
-          observedAt: artifact.fetchedAt,
-          rawLocator: `json:$.records[${index}]`,
+          rawLocator: locator,
           // The whole record is carried forward; nothing the collector saw is
-          // dropped, including fields this parser does not model.
-          extra: { ...record, externalIdOrigin: "collector-fingerprint" },
+          // dropped. Parser-added fields are namespaced so they can never
+          // overwrite a provider field of the same name.
+          extra: {
+            ...record,
+            _kogane: { externalIdOrigin: "collector-fingerprint" },
+          },
         };
       },
     );

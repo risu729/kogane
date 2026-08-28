@@ -14,6 +14,10 @@
 // the `frn*` variants are denominated in `currencyCode`. If this turns out to
 // be wrong, bumping the parser version and re-parsing corrects every
 // observation; that operation is exactly what the pipeline exists to prove.
+//
+// `observed_at` and the position's `as_of` are left unset: this payload states
+// no time for the values it reports. See the note in
+// sbi-domestic-trade-records.ts.
 
 import type {
   ArtifactMeta,
@@ -32,7 +36,6 @@ function valuationFor(options: {
   currency: string;
   subject: string;
   locator: string;
-  observedAt: string;
   extra: Record<string, unknown>;
   warnings: string[];
 }): ValuationObservation | undefined {
@@ -45,6 +48,11 @@ function valuationFor(options: {
     return undefined;
   }
   const minor = decimalToMinorUnits(decimal.text, options.currency);
+  if (minor === undefined) {
+    options.warnings.push(
+      `${options.locator}: ${options.metric} ${decimal.text} has no exact ${options.currency} minor-unit form; kept as text`,
+    );
+  }
   return {
     kind: "valuation",
     sourceAccount: SOURCE_ACCOUNT,
@@ -54,7 +62,6 @@ function valuationFor(options: {
     amountText: decimal.text,
     amountScale: decimal.scale,
     currency: options.currency,
-    observedAt: options.observedAt,
     rawLocator: options.locator,
     extra: options.extra,
   };
@@ -62,7 +69,7 @@ function valuationFor(options: {
 
 export const sbiForeignCashPositions: Parser = {
   name: "sbi-foreign-cash-positions",
-  version: "0.1.0",
+  version: "0.2.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -83,50 +90,65 @@ export const sbiForeignCashPositions: Parser = {
     const warnings: string[] = [];
     const observations: Observation[] = [];
     balances.forEach((element: unknown, index: number) => {
-      if (!isObject(element)) {
-        throw new Error(`securitiesBalances[${index}] is not an object`);
-      }
       const locator = `json:$.listSecuritiesBalances.securitiesBalances[${index}]`;
+      if (!isObject(element)) {
+        // Recorded rather than dropped, and rather than failing the artifact.
+        warnings.push(
+          `securitiesBalances[${index}]: expected an object, got ${typeof element}; recorded verbatim`,
+        );
+        observations.push({
+          kind: "position",
+          sourceAccount: SOURCE_ACCOUNT,
+          securityCode: "",
+          quantityText: "",
+          quantityScale: 0,
+          rawLocator: locator,
+          extra: { _kogane: { unparsedElement: element } },
+        });
+        return;
+      }
       const securities = isObject(element["securities"]) ? element["securities"] : {};
       const market = isObject(element["market"]) ? element["market"] : {};
       const securityCode = String(securities["securitiesCode"] ?? "");
+      if (securityCode === "") {
+        warnings.push(
+          `${locator}: securities.securitiesCode is missing; the observation cannot be joined by security`,
+        );
+      }
       const currency =
         typeof element["currencyCode"] === "string" ? element["currencyCode"] : undefined;
 
       const quantity = decimalText(element["securitiesQuantity"]);
       if (!quantity) {
         warnings.push(
-          `${locator}: securitiesQuantity ${JSON.stringify(element["securitiesQuantity"])} is not an exact decimal; position skipped, kept in valuation extras`,
+          `${locator}: securitiesQuantity ${JSON.stringify(element["securitiesQuantity"])} is not an exact decimal; the position is recorded without a quantity`,
         );
-      } else {
-        observations.push({
-          kind: "position",
-          sourceAccount: SOURCE_ACCOUNT,
-          securityCode,
-          ...(typeof securities["securitiesName"] === "string"
-            ? { securityName: securities["securitiesName"] }
-            : {}),
-          ...(typeof market["marketCode"] === "string"
-            ? { market: market["marketCode"] }
-            : {}),
-          quantityText: quantity.text,
-          quantityScale: quantity.scale,
-          ...(currency !== undefined ? { currency } : {}),
-          observedAt: artifact.fetchedAt,
-          rawLocator: locator,
-          extra: { ...element },
-        });
       }
+      // The position is emitted whether or not the quantity parsed, so that a
+      // holding never disappears because one field was unreadable.
+      observations.push({
+        kind: "position",
+        sourceAccount: SOURCE_ACCOUNT,
+        securityCode,
+        ...(typeof securities["securitiesName"] === "string"
+          ? { securityName: securities["securitiesName"] }
+          : {}),
+        ...(typeof market["marketCode"] === "string"
+          ? { market: market["marketCode"] }
+          : {}),
+        quantityText: quantity?.text ?? "",
+        quantityScale: quantity?.scale ?? 0,
+        ...(currency !== undefined ? { currency } : {}),
+        rawLocator: locator,
+        extra: { ...element },
+      });
 
       const profitLoss = isObject(element["evaluationProfitLoss"])
         ? element["evaluationProfitLoss"]
         : {};
-      const valuationExtra = {
-        securities,
-        stockPrice: element["stockPrice"],
-        evaluationProfitLoss: profitLoss,
-        specificAccountCode: element["specificAccountCode"],
-      };
+      // The full element is carried on every valuation too, so a valuation row
+      // is self-contained evidence of what the source said around it.
+      const valuationExtra = { ...element };
       const cases: { value: unknown; metric: string; currency: string }[] = [
         { value: profitLoss["evaluationAmount"], metric: "evaluation_amount", currency: "JPY" },
         {
@@ -134,21 +156,28 @@ export const sbiForeignCashPositions: Parser = {
           metric: "evaluation_profit_loss",
           currency: "JPY",
         },
-        ...(currency !== undefined
-          ? [
-              {
-                value: profitLoss["frnEvaluationAmount"],
-                metric: "frn_evaluation_amount",
-                currency,
-              },
-              {
-                value: profitLoss["frnEvaluationProfitLoss"],
-                metric: "frn_evaluation_profit_loss",
-                currency,
-              },
-            ]
-          : []),
       ];
+      if (currency !== undefined) {
+        cases.push(
+          {
+            value: profitLoss["frnEvaluationAmount"],
+            metric: "frn_evaluation_amount",
+            currency,
+          },
+          {
+            value: profitLoss["frnEvaluationProfitLoss"],
+            metric: "frn_evaluation_profit_loss",
+            currency,
+          },
+        );
+      } else if (
+        profitLoss["frnEvaluationAmount"] !== undefined ||
+        profitLoss["frnEvaluationProfitLoss"] !== undefined
+      ) {
+        warnings.push(
+          `${locator}: currencyCode is missing, so the frn* valuations cannot be denominated; they remain only in extra`,
+        );
+      }
       for (const item of cases) {
         const observation = valuationFor({
           value: item.value,
@@ -156,7 +185,6 @@ export const sbiForeignCashPositions: Parser = {
           currency: item.currency,
           subject: securityCode,
           locator: `${locator}.evaluationProfitLoss`,
-          observedAt: artifact.fetchedAt,
           extra: valuationExtra,
           warnings,
         });

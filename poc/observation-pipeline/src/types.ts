@@ -21,6 +21,8 @@ export interface TransactionObservation {
   externalId?: string;
   status?: string;
   amountMinor?: number;
+  amountText?: string;
+  amountScale?: number;
   currency?: string;
   description?: string;
   counterparty?: string;

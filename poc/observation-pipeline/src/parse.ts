@@ -48,25 +48,41 @@ export function runParsers(
         summary.skipped += 1;
         continue;
       }
-      const bytes = readRawObject(store, artifact.sha256);
-      let parseRunId: number;
       try {
+        // The blob read is inside the try so that one missing object produces
+        // an error parse run for that artifact instead of aborting the sweep.
+        const bytes = readRawObject(store, artifact.sha256);
         const result = parser.parse(bytes, artifact);
-        parseRunId = insertParseRun(store, {
-          artifactId: artifact.id,
-          parserName: parser.name,
-          parserVersion: parser.version,
-          parsedAt: now(),
-          status: "ok",
-          warnings: result.warnings,
-        });
-        for (const observation of result.observations) {
-          insertObservation(store, parseRunId, observation);
-          summary.observations += 1;
-        }
+        // The parse run and all of its observations commit together: a partial
+        // observation set under a run marked "ok" would be indistinguishable
+        // from a source that really said less.
+        const parseRunId = store.db.transaction(() => {
+          const runId = insertParseRun(store, {
+            artifactId: artifact.id,
+            parserName: parser.name,
+            parserVersion: parser.version,
+            parsedAt: now(),
+            status: "ok",
+            warnings: result.warnings,
+          });
+          for (const observation of result.observations) {
+            insertObservation(store, runId, observation);
+          }
+          return runId;
+        })();
+        summary.observations += result.observations.length;
         summary.parsed += 1;
+        // Only a successful run changes what is current. An error run never
+        // supersedes anything, so a transient failure cannot empty the
+        // current view.
+        summary.superseded += supersedeOlderParseRuns(
+          store,
+          artifact.id,
+          parser.name,
+          parseRunId,
+        );
       } catch (error) {
-        parseRunId = insertParseRun(store, {
+        insertParseRun(store, {
           artifactId: artifact.id,
           parserName: parser.name,
           parserVersion: parser.version,
@@ -77,12 +93,6 @@ export function runParsers(
         });
         summary.errors += 1;
       }
-      summary.superseded += supersedeOlderParseRuns(
-        store,
-        artifact.id,
-        parser.name,
-        parseRunId,
-      );
     }
   }
   return summary;

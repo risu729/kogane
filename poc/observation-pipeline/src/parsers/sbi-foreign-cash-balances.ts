@@ -11,6 +11,10 @@
 // Balances are measurements, not columns (docs/design.md): each schedule row
 // yields one balance observation per provider metric, keyed by
 // (source_account, metric, instrument, as_of), append-only.
+//
+// Structures this parser does not recognize are never skipped quietly — each
+// one produces a warning naming its locator, because a silently dropped
+// container could be an entire account.
 
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
 import { decimalText, decimalToMinorUnits, decodeUtf8, isObject } from "./util.ts";
@@ -25,9 +29,21 @@ const METRIC_FIELDS: readonly { field: string; metric: string }[] = [
   { field: "amountPayValue", metric: "amount_pay_value" },
 ];
 
+/** Copy an object without the child collection the caller walks separately. */
+function withoutChild(
+  value: Record<string, unknown>,
+  child: string,
+): Record<string, unknown> {
+  const copy: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key !== child) copy[key] = entry;
+  }
+  return copy;
+}
+
 export const sbiForeignCashBalances: Parser = {
   name: "sbi-foreign-cash-balances",
-  version: "0.1.0",
+  version: "0.2.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -48,32 +64,72 @@ export const sbiForeignCashBalances: Parser = {
     const warnings: string[] = [];
     const observations: Observation[] = [];
     accounts.forEach((account: unknown, accountIndex: number) => {
-      if (!isObject(account)) return;
-      const currencies = Array.isArray(account["currencyCashBalances"])
-        ? account["currencyCashBalances"]
-        : [];
+      const accountLocator = `json:$.listForeignScheduleCashBalances.foreignCashBalances[${accountIndex}]`;
+      if (!isObject(account)) {
+        warnings.push(
+          `${accountLocator}: expected an object, got ${typeof account}; nothing could be read from it`,
+        );
+        return;
+      }
+      const currencies = account["currencyCashBalances"];
+      if (!Array.isArray(currencies)) {
+        warnings.push(
+          `${accountLocator}.currencyCashBalances: expected an array, got ${typeof currencies}; the whole account was skipped`,
+        );
+        return;
+      }
       currencies.forEach((currencyEntry: unknown, currencyIndex: number) => {
-        if (!isObject(currencyEntry)) return;
+        const currencyLocator = `${accountLocator}.currencyCashBalances[${currencyIndex}]`;
+        if (!isObject(currencyEntry)) {
+          warnings.push(
+            `${currencyLocator}: expected an object, got ${typeof currencyEntry}; skipped`,
+          );
+          return;
+        }
         const currencyCode =
           typeof currencyEntry["currencyCode"] === "string"
             ? currencyEntry["currencyCode"]
             : undefined;
         if (currencyCode === undefined) {
+          warnings.push(`${currencyLocator} omitted currencyCode; skipped`);
+          return;
+        }
+        const schedule = currencyEntry["foreignScheduleCashBalances"];
+        if (!Array.isArray(schedule)) {
           warnings.push(
-            `foreignCashBalances[${accountIndex}].currencyCashBalances[${currencyIndex}] omitted currencyCode; skipped`,
+            `${currencyLocator}.foreignScheduleCashBalances: expected an array, got ${typeof schedule}; skipped`,
           );
           return;
         }
-        const schedule = Array.isArray(currencyEntry["foreignScheduleCashBalances"])
-          ? currencyEntry["foreignScheduleCashBalances"]
-          : [];
         schedule.forEach((row: unknown, rowIndex: number) => {
-          if (!isObject(row)) return;
-          const locator =
-            `json:$.listForeignScheduleCashBalances.foreignCashBalances[${accountIndex}]` +
-            `.currencyCashBalances[${currencyIndex}].foreignScheduleCashBalances[${rowIndex}]`;
+          const locator = `${currencyLocator}.foreignScheduleCashBalances[${rowIndex}]`;
+          if (!isObject(row)) {
+            warnings.push(
+              `${locator}: expected an object, got ${typeof row}; skipped`,
+            );
+            return;
+          }
           const asOf =
             typeof row["businessDate"] === "string" ? row["businessDate"] : undefined;
+          // Fields of the enclosing account and currency entry are carried on
+          // every observation, so an unmodelled sibling (a balance the schema
+          // does not know about yet) is never lost.
+          const context = {
+            account: withoutChild(account, "currencyCashBalances"),
+            currencyEntry: withoutChild(currencyEntry, "foreignScheduleCashBalances"),
+            row: { ...row },
+          };
+          const unmodelled = Object.keys(row).filter(
+            (key) =>
+              key !== "businessDate" &&
+              key !== "daysLater" &&
+              !METRIC_FIELDS.some((entry) => entry.field === key),
+          );
+          if (unmodelled.length > 0) {
+            warnings.push(
+              `${locator}: fields not modelled as metrics were kept only in extra: ${unmodelled.join(", ")}`,
+            );
+          }
           for (const { field, metric } of METRIC_FIELDS) {
             const value = row[field];
             if (value === undefined || value === null) continue;
@@ -85,6 +141,11 @@ export const sbiForeignCashBalances: Parser = {
               continue;
             }
             const minor = decimalToMinorUnits(decimal.text, currencyCode);
+            if (minor === undefined) {
+              warnings.push(
+                `${locator}.${field}: ${decimal.text} has no exact ${currencyCode} minor-unit form; kept as text`,
+              );
+            }
             observations.push({
               kind: "balance",
               sourceAccount: SOURCE_ACCOUNT,
@@ -94,13 +155,8 @@ export const sbiForeignCashBalances: Parser = {
               amountScale: decimal.scale,
               instrument: currencyCode,
               ...(asOf !== undefined ? { asOf } : {}),
-              observedAt: artifact.fetchedAt,
               rawLocator: `${locator}.${field}`,
-              extra: {
-                accountKind: account["accountKind"],
-                daysLater: row["daysLater"],
-                row: { ...row },
-              },
+              extra: context,
             });
           }
         });

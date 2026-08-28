@@ -73,9 +73,16 @@ CREATE TABLE IF NOT EXISTS parse_runs (
   status                      TEXT NOT NULL,  -- 'ok' | 'error'
   error                       TEXT,
   warnings_json               TEXT,           -- JSON array of warning strings
-  superseded_by_parse_run_id  INTEGER REFERENCES parse_runs(id),
-  UNIQUE (fetch_artifact_id, parser_name, parser_version)
+  superseded_by_parse_run_id  INTEGER REFERENCES parse_runs(id)
 ) STRICT;
+
+-- One SUCCESSFUL parse run per (artifact, parser, version). Failed attempts
+-- are deliberately not covered by this index: a parse that failed on a
+-- transient condition must remain retryable at the same version, and a failed
+-- attempt is itself evidence worth keeping.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_parse_runs_success
+  ON parse_runs (fetch_artifact_id, parser_name, parser_version)
+  WHERE status = 'ok';
 
 CREATE INDEX IF NOT EXISTS idx_parse_runs_artifact
   ON parse_runs (fetch_artifact_id, parser_name);
@@ -88,6 +95,8 @@ CREATE TABLE IF NOT EXISTS transaction_observations (
   external_id    TEXT,                   -- provider id; NOT a logical identity
   status         TEXT,                   -- provider-shown status, verbatim domain
   amount_minor   INTEGER,                -- signed minor units; NULL if unparseable
+  amount_text    TEXT,                   -- verbatim/high-precision amount, never lost
+  amount_scale   INTEGER,
   currency       TEXT,                   -- ISO 4217 as the provider stated it
   description    TEXT,
   counterparty   TEXT,
@@ -159,3 +168,14 @@ CREATE TABLE IF NOT EXISTS valuation_observations (
 
 CREATE INDEX IF NOT EXISTS idx_val_obs_subject
   ON valuation_observations (source_account, subject, metric, as_of);
+
+-- parse_run_id is the join column for every "which observations are current"
+-- query, so each observation table is indexed on it.
+CREATE INDEX IF NOT EXISTS idx_txn_obs_parse_run
+  ON transaction_observations (parse_run_id);
+CREATE INDEX IF NOT EXISTS idx_bal_obs_parse_run
+  ON balance_observations (parse_run_id);
+CREATE INDEX IF NOT EXISTS idx_pos_obs_parse_run
+  ON position_observations (parse_run_id);
+CREATE INDEX IF NOT EXISTS idx_val_obs_parse_run
+  ON valuation_observations (parse_run_id);
