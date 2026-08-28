@@ -624,6 +624,18 @@ tr.is-superseded th:first-child {
   margin-bottom: 0.75rem;
 }
 
+/* A superseded parse run is tinted whole, head included, so it can never be
+ * mistaken for a current one at a glance. */
+.chain-card.is-superseded {
+  border-color: var(--sup-border);
+  background: var(--sup-bg);
+}
+
+.chain-card.is-superseded > .chain-card-head {
+  background: color-mix(in srgb, var(--sup-bg) 70%, var(--border));
+  border-bottom-color: var(--sup-border);
+}
+
 .chain-card > .chain-card-head {
   display: flex;
   align-items: baseline;

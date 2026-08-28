@@ -155,13 +155,8 @@ function ParseRunCard({ run }: { run: ParseRunDetail }): ReactNode {
   const isSuperseded = run.superseded_by_parse_run_id !== null;
   return (
     <section
-      className="chain-card"
-      style={
-        isSuperseded
-          ? { borderColor: "var(--sup-border)", background: "var(--sup-bg)" }
-          : undefined
-      }
-      aria-label={`parse run ${String(run.id)}`}
+      className={isSuperseded ? "chain-card is-superseded" : "chain-card"}
+      aria-label={`parse run ${String(run.id)}${isSuperseded ? ", superseded" : ""}`}
     >
       <div className="chain-card-head">
         <span className="chain-stage">parse run</span>
