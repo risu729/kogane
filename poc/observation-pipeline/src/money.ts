@@ -30,8 +30,15 @@ function groupDigits(digits: string): string {
  * the integer is shown as-is and labelled, rather than guessing a scale. When
  * amountMinor is null the stored decimal string is shown verbatim.
  *
- * Intl.NumberFormat is deliberately not used: it takes a Number, so every
- * amount would round-trip through a double on its way to the screen.
+ * Intl.NumberFormat is deliberately not used, for three measured reasons:
+ *
+ *   * its `format()` is exact for a string or a BigInt but not for a Number,
+ *     and the easy call is the lossy one;
+ *   * it accepts an invalid currency code silently, formatting "BTC" with two
+ *     decimals and no error, which would quietly truncate a crypto quantity;
+ *   * its symbol for a currency depends on locale, and "$" is both USD and
+ *     AUD. In a JPY/USD/AUD ledger that ambiguity is unacceptable, so the unit
+ *     is appended verbatim as the source stated it.
  */
 export function formatAmount(
   amountMinor: number | bigint | string | null | undefined,
