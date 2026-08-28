@@ -41,6 +41,8 @@ long tail.
 ## Phase 2 — Infrastructure + Raw Evidence Collector
 
 Built only after phase 1, then backfilled with all accumulated captures.
+The detailed plan — full DDL, the ingestion API, the importer CLI,
+idempotency and backfill rules — is in `docs/raw-store.md`.
 
 - Cloudflare Worker, D1 database, private R2 bucket, CI.
 - Bearer-token auth for the ingestion API.
@@ -71,8 +73,10 @@ most useful signal for later parser development.
 ## Phase 3 — Observation Layer
 
 Deterministic, versioned parsers turn raw objects into typed observations
-("the source says X") — no interpretation yet. Physically separate tables
-per shape, not one generic EAV table:
+("the source says X") — no interpretation yet. The detailed plan — the
+parser contract, versioning and supersession, the tables, and the first
+parsers — is in `docs/observations.md`. Physically separate tables per
+shape, not one generic EAV table:
 
 ```text
 transaction_observations   balance_observations
@@ -90,6 +94,19 @@ scraper`'s `parser.ts` (Vpass card) and `pnsk-lab/mnie`'s provider parse
 code already produce close-to-correct typed output. Both need the same two
 changes — emit parser name/version and raw locators, and stop dropping
 unrecognized fields — before adoption. See `docs/tooling.md`.
+
+## Operator tooling — Evidence Browser
+
+Not a numbered phase, because it is not a data layer: it is a read-only
+operator tool that spans phases 2 and 3 and would be deleted without data
+loss. It exists so that a human can see, for any observation, the exact
+bytes it came from and the parser version that produced it. Re-parsing is
+a first-class operation, and an operation nobody can verify is an
+operation nobody trusts.
+
+It reads layers A and B only, computes every current-state view on
+request, and stores nothing. It is not the product UI, which stays out of
+scope — see the MVP cut below and `docs/evidence-browser.md`.
 
 ## Phase 4 — Identity
 
@@ -175,4 +192,19 @@ typed balance / transaction / position observations extracted
 ```
 
 Explicitly out of scope for the MVP: ledger, categories, transfers, lots,
-P&L, tax, reward valuation, AI classification, any UI.
+P&L, tax, reward valuation, AI classification, and the product UI.
+
+This last exclusion was originally written as "any UI", and is narrowed
+here deliberately rather than quietly. The read-only evidence browser
+described above is admitted to the MVP; every user-facing view — balances
+as a dashboard, net worth, categories, charts — remains excluded. The
+distinction being drawn is that the browser renders observations and their
+provenance and nothing else: it interprets nothing, stores nothing, and
+computes no derived value. Admitting it costs the MVP a surface that
+renders real financial data and must never be publicly reachable, which is
+a real cost and the reason the boundary is stated as rules in
+`docs/evidence-browser.md` rather than left to judgement.
+
+A worked implementation of phases 2 and 3 and the browser, against the
+payload shapes the live collectors already emit, is in
+`poc/observation-pipeline`.

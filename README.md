@@ -7,6 +7,9 @@ different rules.
 
 - [Design](docs/design.md)
 - [Evidence collection](docs/collection.md)
+- [Raw evidence store](docs/raw-store.md)
+- [Observation layer](docs/observations.md)
+- [Evidence browser](docs/evidence-browser.md)
 - [Authenticated collectors](docs/authenticated-collectors.md)
 - [Credential delivery](docs/credentials.md)
 - [Existing tools and reuse](docs/tooling.md)
@@ -20,6 +23,7 @@ different rules.
 
 ## Proofs of concept
 
+- [Observation pipeline (ingest, parsers, evidence browser)](poc/observation-pipeline/README.md)
 - [Browserless Vpass JSON collector](poc/vpass-json/README.md)
 - [OCI/WSL Vpass browser comparison](poc/oci-browser-probe/README.md)
 - [Camoufox Windows/macOS fingerprint controls](poc/camoufox-container-probe/README.md)

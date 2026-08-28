@@ -301,6 +301,14 @@ describe("supersession", () => {
     expect(body).toContain("demo-statement@0.1.0");
     expect(body).toContain("demo-statement@0.2.0");
   });
+
+  test("the artifact index lists the artifact and links to its bytes", async () => {
+    const body = await html("/artifacts");
+    expect(body).toContain("demo-bank");
+    expect(body).toContain("statement");
+    expect(body).toContain(`/artifacts/${fixture.artifactId}`);
+    expect(body).toContain(fixture.sha256.slice(0, 12));
+  });
 });
 
 describe("raw evidence", () => {
