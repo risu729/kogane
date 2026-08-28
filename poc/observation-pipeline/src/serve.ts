@@ -6,7 +6,7 @@
 // bearer token as the ingestion API — see docs/evidence-browser.md.
 
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { createApi } from "./api.ts";
 import { openStore } from "./store.ts";
 
@@ -26,7 +26,11 @@ function clientHandler(): (request: Request) => Promise<Response | undefined> {
     const pathname = decodeURIComponent(url.pathname);
     if (pathname.includes("..") || pathname.includes("\0")) return undefined;
     const candidate = join(CLIENT_DIR, pathname);
-    if (candidate.startsWith(CLIENT_DIR) && pathname !== "/") {
+    // A prefix test alone would also accept a sibling directory whose name
+    // merely starts with the client directory's, so the separator is required.
+    const inside =
+      candidate === CLIENT_DIR || candidate.startsWith(`${CLIENT_DIR}${sep}`);
+    if (inside && pathname !== "/") {
       const file = Bun.file(candidate);
       if (await file.exists()) return new Response(file);
     }
