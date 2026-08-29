@@ -1,0 +1,67 @@
+{
+  "listSecuritiesBalances": {
+    "securitiesBalances": [
+      {
+        "specificAccountCode": "SPECIFIC",
+        "securitiesQuantity": 12,
+        "frnAcquisitionPrice": "98.11",
+        "acquisitionPrice": "14530",
+        "currencyCode": "USD",
+        "countryCode": "US",
+        "securities": {
+          "countryCode": "US",
+          "securitiesCode": "VT",
+          "securitiesName": "VANGUARD TOTAL WORLD STOCK ETF",
+          "securitiesShortName": "VT",
+          "ric": "VT.P"
+        },
+        "market": {
+          "marketCode": "NYSEARCA",
+          "marketName": "NYSE Arca",
+          "marketShortName": "ARCA",
+          "timeZone": "America/New_York"
+        },
+        "evaluationProfitLoss": {
+          "frnEvaluationAmount": "1568.40",
+          "frnEvaluationProfitLoss": "391.08",
+          "evaluationAmount": "231847",
+          "evaluationProfitLoss": "57433",
+          "evaluationProfitLossPercent": "32.93",
+          "frnEvaluationProfitLossPercent": "33.21"
+        },
+        "stockPrice": { "last": "130.70", "tickArrow": "UP" }
+      },
+      {
+        "specificAccountCode": "SPECIFIC",
+        "securitiesQuantity": 5,
+        "frnAcquisitionPrice": "182.52",
+        "acquisitionPrice": "27100",
+        "currencyCode": "USD",
+        "countryCode": "US",
+        "securities": {
+          "countryCode": "US",
+          "securitiesCode": "AAPL",
+          "securitiesName": "APPLE INC",
+          "securitiesShortName": "APPLE",
+          "ric": "AAPL.O"
+        },
+        "market": {
+          "marketCode": "NASDAQ",
+          "marketName": "NASDAQ",
+          "marketShortName": "NASDAQ",
+          "timeZone": "America/New_York"
+        },
+        "evaluationProfitLoss": {
+          "frnEvaluationAmount": "1121.75",
+          "frnEvaluationProfitLoss": "209.15",
+          "evaluationAmount": "165830",
+          "evaluationProfitLoss": "30915",
+          "evaluationProfitLossPercent": "22.92",
+          "frnEvaluationProfitLossPercent": "22.92"
+        },
+        "stockPrice": { "last": "224.35", "tickArrow": "DOWN" }
+      }
+    ],
+    "page": { "hasNextPage": false, "pageNum": 1, "pageSize": 999 }
+  }
+}

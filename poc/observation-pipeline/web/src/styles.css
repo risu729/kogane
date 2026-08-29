@@ -1,0 +1,985 @@
+/* Kogane evidence browser — one plain stylesheet, no framework.
+ *
+ * Every colour is a custom property defined once on :root for light and
+ * redefined under prefers-color-scheme: dark. Colour is only ever used to
+ * carry meaning: sign of an amount, and the status of a parse run
+ * (ok / warning / error / superseded). Nothing here is decorative.
+ *
+ * Figures are monospace with tabular numerals and right-aligned, so digits
+ * line up down a column and a mis-scaled amount is visible at a glance. */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f6f6f4;
+  --panel: #ffffff;
+  --panel-2: #fafaf8;
+  --panel-3: #f1f1ed;
+  --border: #dedeD7;
+  --border-strong: #c2c2b9;
+  --text: #16161a;
+  --text-2: #57574f;
+  --text-3: #86867c;
+  --link: #1f5aa6;
+  --focus: #1f5aa6;
+
+  --pos: #12703f;
+  --neg: #a4232a;
+  --zero: #86867c;
+
+  --ok-fg: #12703f;
+  --ok-bg: #eaf5ee;
+  --ok-border: #c1e0cd;
+  --warn-fg: #7a5200;
+  --warn-bg: #fdf3dd;
+  --warn-border: #e7d3a0;
+  --bad-fg: #a4232a;
+  --bad-bg: #fdecea;
+  --bad-border: #f0c3c0;
+  --sup-fg: #5f45a0;
+  --sup-bg: #f1edfb;
+  --sup-border: #dbd0f1;
+
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo,
+    Consolas, "Liberation Mono", monospace;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Noto Sans JP",
+    sans-serif;
+
+  --radius: 3px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e0f11;
+    --panel: #16181b;
+    --panel-2: #1a1d20;
+    --panel-3: #212529;
+    --border: #2a2e33;
+    --border-strong: #3c4248;
+    --text: #e7e7e3;
+    --text-2: #a6abb0;
+    --text-3: #7c8186;
+    --link: #83b4f0;
+    --focus: #83b4f0;
+
+    --pos: #5cc98d;
+    --neg: #f0908b;
+    --zero: #7c8186;
+
+    --ok-fg: #5cc98d;
+    --ok-bg: #12241d;
+    --ok-border: #214536;
+    --warn-fg: #e3bd6c;
+    --warn-bg: #272016;
+    --warn-border: #473a1f;
+    --bad-fg: #f0908b;
+    --bad-bg: #291a1a;
+    --bad-border: #4b2a29;
+    --sup-fg: #b7a2ef;
+    --sup-bg: #1e1b2b;
+    --sup-border: #383050;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 15px;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--link);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--link) 30%, transparent);
+}
+
+a:hover {
+  border-bottom-color: var(--link);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── shell ─────────────────────────────────────────────────────────── */
+
+.masthead {
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.masthead-inner {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.6rem 0;
+  border-bottom: none;
+  color: var(--text);
+}
+
+.brand:hover {
+  border-bottom: none;
+}
+
+.brand-name {
+  font-family: var(--mono);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.brand-sub {
+  color: var(--text-3);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nav {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.nav a {
+  border-bottom: 2px solid transparent;
+  padding: 0.6rem 0.55rem;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  display: block;
+}
+
+.nav a:hover {
+  color: var(--text);
+  border-bottom-color: var(--border-strong);
+}
+
+.nav a[aria-current="page"] {
+  color: var(--text);
+  border-bottom-color: var(--link);
+  font-weight: 600;
+}
+
+main {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 1.25rem 1.25rem 5rem;
+}
+
+.page-head {
+  margin-bottom: 1.25rem;
+}
+
+h1 {
+  font-size: 1.0625rem;
+  margin: 0 0 0.2rem;
+  font-family: var(--mono);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  font-size: 0.8125rem;
+  margin: 0;
+  font-family: var(--mono);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+}
+
+h3 {
+  font-size: 0.8125rem;
+  margin: 0;
+  font-family: var(--mono);
+  font-weight: 600;
+}
+
+.lede {
+  color: var(--text-2);
+  margin: 0;
+  max-width: 78ch;
+}
+
+.footnote {
+  color: var(--text-3);
+  font-size: 0.75rem;
+  margin: 0.5rem 0 0;
+  max-width: 92ch;
+}
+
+.footnote code {
+  font-size: 0.9em;
+}
+
+/* ── panels ────────────────────────────────────────────────────────── */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 1.25rem;
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.count {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-body {
+  padding: 0.75rem;
+}
+
+.panel-note {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 0.8125rem;
+  background: var(--panel);
+}
+
+.derived-note {
+  background: var(--warn-bg);
+  border-bottom: 1px solid var(--warn-border);
+  color: var(--warn-fg);
+}
+
+.derived-note strong {
+  font-family: var(--mono);
+}
+
+/* ── tables ────────────────────────────────────────────────────────── */
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 0.78125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+caption {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-3);
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border-strong);
+  padding: 0;
+  font-size: 0.71875rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  z-index: 1;
+}
+
+thead th .th-label {
+  display: block;
+  padding: 0.35rem 0.6rem;
+}
+
+th.num,
+td.num {
+  text-align: right;
+}
+
+tbody th {
+  text-align: left;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+td,
+tbody th {
+  padding: 0.28rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+tbody tr:nth-child(even) {
+  background: var(--panel-2);
+}
+
+tbody tr:hover {
+  background: var(--panel-3);
+}
+
+tbody tr:last-child td,
+tbody tr:last-child th {
+  border-bottom: none;
+}
+
+.sort-button {
+  all: unset;
+  cursor: pointer;
+  display: block;
+  width: 100%;
+  padding: 0.35rem 0.6rem;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+th.num .sort-button {
+  text-align: right;
+}
+
+.sort-button:hover {
+  color: var(--text);
+  background: var(--border);
+}
+
+.sort-arrow {
+  color: var(--text-3);
+  margin-left: 0.35em;
+  font-size: 0.9em;
+}
+
+th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
+  color: var(--link);
+}
+
+.wrap {
+  white-space: normal;
+  min-width: 14ch;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.trunc {
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── values ────────────────────────────────────────────────────────── */
+
+.amount {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.amount-negative {
+  color: var(--neg);
+}
+
+.amount-positive {
+  color: var(--pos);
+}
+
+.amount-zero,
+.amount-unknown {
+  color: var(--zero);
+}
+
+.null {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.dim {
+  color: var(--text-3);
+}
+
+.hash {
+  font-family: var(--mono);
+  letter-spacing: -0.01em;
+  word-break: break-all;
+}
+
+/* ── badges ────────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  line-height: 1.5;
+  padding: 0 0.4em;
+  border-radius: 2px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-3);
+  color: var(--text-2);
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+.badge-ok {
+  color: var(--ok-fg);
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+}
+
+.badge-warn {
+  color: var(--warn-fg);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+.badge-bad {
+  color: var(--bad-fg);
+  background: var(--bad-bg);
+  border-color: var(--bad-border);
+}
+
+.badge-superseded {
+  color: var(--sup-fg);
+  background: var(--sup-bg);
+  border-color: var(--sup-border);
+}
+
+.badge-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+tr.is-superseded {
+  background: var(--sup-bg) !important;
+}
+
+tr.is-superseded td,
+tr.is-superseded th {
+  color: var(--text-2);
+}
+
+tr.is-superseded td:first-child,
+tr.is-superseded th:first-child {
+  box-shadow: inset 2px 0 0 var(--sup-fg);
+}
+
+/* ── stat tiles ────────────────────────────────────────────────────── */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(196px, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border-top: 1px solid var(--border);
+}
+
+.tile {
+  background: var(--panel);
+  padding: 0.6rem 0.75rem;
+}
+
+.tile-value {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.375rem;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.tile-label {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--text-3);
+  word-break: break-word;
+}
+
+/* ── key/value grids ───────────────────────────────────────────────── */
+
+.kv {
+  display: grid;
+  grid-template-columns: minmax(9rem, max-content) minmax(0, 1fr);
+  gap: 0;
+  margin: 0;
+  font-size: 0.78125rem;
+}
+
+.kv > dt {
+  font-family: var(--mono);
+  color: var(--text-3);
+  padding: 0.22rem 0.75rem 0.22rem 0;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.kv > dd {
+  font-family: var(--mono);
+  margin: 0;
+  padding: 0.22rem 0;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.kv > dt:last-of-type,
+.kv > dd:last-of-type {
+  border-bottom: none;
+}
+
+/* ── provenance chain ──────────────────────────────────────────────── */
+
+.chain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.chain-step {
+  position: relative;
+  padding-left: 2.25rem;
+}
+
+.chain-step::before {
+  content: "";
+  position: absolute;
+  left: 0.7rem;
+  top: 2.2rem;
+  bottom: 0;
+  width: 2px;
+  background: var(--border-strong);
+}
+
+.chain-step:last-child::before {
+  display: none;
+}
+
+.chain-marker {
+  position: absolute;
+  left: 0;
+  top: 0.55rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-3);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chain-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  margin-bottom: 0.75rem;
+}
+
+/* A superseded parse run is tinted whole, head included, so it can never be
+ * mistaken for a current one at a glance. */
+.chain-card.is-superseded {
+  border-color: var(--sup-border);
+  background: var(--sup-bg);
+}
+
+.chain-card.is-superseded > .chain-card-head {
+  background: color-mix(in srgb, var(--sup-bg) 70%, var(--border));
+  border-bottom-color: var(--sup-border);
+}
+
+.chain-card > .chain-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.chain-stage {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.chain-title {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+
+.chain-body {
+  padding: 0.5rem 0.7rem;
+}
+
+.chain-arrow {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0 0 0.85rem 0;
+  display: block;
+}
+
+/* ── cards / positions ─────────────────────────────────────────────── */
+
+.position-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  margin-bottom: 1rem;
+  display: grid;
+  grid-template-columns: minmax(280px, 22rem) minmax(0, 1fr);
+}
+
+@media (max-width: 860px) {
+  .position-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.position-facts {
+  padding: 0.7rem 0.8rem;
+  border-right: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+@media (max-width: 860px) {
+  .position-facts {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+.position-valuations {
+  padding: 0.7rem 0.8rem;
+  min-width: 0;
+}
+
+.position-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.security-code {
+  font-family: var(--mono);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.security-name {
+  color: var(--text-2);
+  font-size: 0.78125rem;
+}
+
+.quantity {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.5rem;
+}
+
+/* One block per currency, so the page cannot be read as a set of figures
+ * waiting to be added up. The rule is structural, not just stated. */
+.currency-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 0.6rem;
+}
+
+.currency-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.35rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-3);
+}
+
+.currency-group-body {
+  padding: 0.55rem;
+}
+
+.currency-label {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 0.8125rem;
+}
+
+.figure {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.45rem 0.55rem;
+  background: var(--panel-2);
+  min-width: 0;
+}
+
+.figure-metric {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+.figure-amount {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+.figure-currency {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--text-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  padding: 0 0.3em;
+}
+
+.figure-asof {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.figure-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+  font-size: 0.6875rem;
+}
+
+/* ── observations list ─────────────────────────────────────────────── */
+
+.obs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--mono);
+  font-size: 0.78125rem;
+}
+
+.obs-list li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.obs-list li:last-child {
+  border-bottom: none;
+}
+
+.obs-summary {
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.warning-list {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--warn-fg);
+}
+
+/* ── pre blocks ────────────────────────────────────────────────────── */
+
+pre {
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  tab-size: 2;
+}
+
+/* ── toolbar / filter ──────────────────────────────────────────────── */
+
+.toolbar {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.filter-input {
+  font-family: var(--mono);
+  font-size: 0.78125rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  min-width: 30ch;
+}
+
+.filter-input::placeholder {
+  color: var(--text-3);
+}
+
+.button {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.button:hover {
+  color: var(--text);
+  background: var(--panel-3);
+}
+
+/* ── states ────────────────────────────────────────────────────────── */
+
+.state {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 1.25rem;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+}
+
+.state-error {
+  border-color: var(--bad-border);
+  background: var(--bad-bg);
+  color: var(--bad-fg);
+}
+
+.state-title {
+  font-weight: 600;
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.skeleton-bar {
+  height: 0.6rem;
+  border-radius: 2px;
+  background: var(--panel-3);
+  margin: 0.4rem 0;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-bar {
+    animation: none;
+  }
+}
+
+.section-gap {
+  margin-top: 1.5rem;
+}
+
+.inline-links {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: 0.78125rem;
+}
+
+.breadcrumb {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text-3);
+  margin-bottom: 0.4rem;
+}
+
+.title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}

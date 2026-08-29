@@ -1,0 +1,74 @@
+{
+  "records": [
+    {
+      "id": "3f9c1a7b2d8e4c5f6a0b1c2d:1",
+      "tradeDate": "2026-08-12",
+      "issueName": "三菱ＵＦＪフィナンシャル・グループ",
+      "issueCode": "8306",
+      "marketLabel": "東証",
+      "tradeType": "株式現物買",
+      "accountLabel": "特定",
+      "orderKind": "成行",
+      "quantity": "100",
+      "price": "1,802",
+      "valueDate": "2026-08-14",
+      "amount": "180,200",
+      "rawCells": [
+        "26/08/12",
+        "三菱ＵＦＪフィナンシャル・グループ 8306 東証",
+        "株式現物買 特定/ 成行",
+        "100 1,802",
+        "-",
+        "26/08/14 180,200",
+        "-"
+      ]
+    },
+    {
+      "id": "8a2b3c4d5e6f7a8b9c0d1e2f:1",
+      "tradeDate": "2026-08-18",
+      "issueName": "トヨタ自動車",
+      "issueCode": "7203",
+      "marketLabel": "東証",
+      "tradeType": "株式現物売",
+      "accountLabel": "特定",
+      "orderKind": "指値",
+      "quantity": "100",
+      "price": "2,520",
+      "valueDate": "2026-08-20",
+      "amount": "252,000",
+      "rawCells": [
+        "26/08/18",
+        "トヨタ自動車 7203 東証",
+        "株式現物売 特定/ 指値",
+        "100 2,520",
+        "-",
+        "26/08/20 252,000",
+        "-"
+      ]
+    },
+    {
+      "id": "0c9d8e7f6a5b4c3d2e1f0a9b:1",
+      "tradeDate": "2026-08-19",
+      "issueName": "ｅＭＡＸＩＳ　Ｓｌｉｍ全世界株式",
+      "issueCode": "8931",
+      "marketLabel": "投信",
+      "tradeType": "投信金額買付",
+      "accountLabel": "NISA(成)",
+      "orderKind": "金額指定",
+      "quantity": "34,182",
+      "price": "29,254",
+      "valueDate": "2026-08-25",
+      "amount": "△100,000",
+      "rawCells": [
+        "26/08/19",
+        "ｅＭＡＸＩＳ　Ｓｌｉｍ全世界株式 8931 投信",
+        "投信金額買付 NISA(成)/ 金額指定",
+        "34,182 29,254",
+        "-",
+        "26/08/25 △100,000",
+        "-"
+      ]
+    }
+  ],
+  "hasMore": false
+}

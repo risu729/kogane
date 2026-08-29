@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "sbi-worker-poc-v1",
+  "source": "sbi-securities",
+  "runId": "20260820-210000-poc01",
+  "scope": "all",
+  "startedAt": "2026-08-20T21:00:07Z",
+  "completedAt": "2026-08-20T21:01:42Z",
+  "status": "success",
+  "artifacts": [
+    {
+      "dataset": "domestic-trade-records",
+      "key": "raw/sbi-securities/2026/08/20/20260820-210000-poc01/domestic-trade-records.json",
+      "sha256": "1bfcad18281c80aaf1143f0c9be6d01796ccdf791439783cfb1a86f2a937dae8",
+      "bytes": 2009,
+      "window": {
+        "from": "2026-05-22",
+        "to": "2026-08-20"
+      }
+    },
+    {
+      "dataset": "foreign-cash-positions",
+      "key": "raw/sbi-securities/2026/08/20/20260820-210000-poc01/foreign-cash-positions.json",
+      "sha256": "1390f34c52bce921024ba6face8b616a89018e9a06daec5b3375f42d12be1afe",
+      "bytes": 2167
+    },
+    {
+      "dataset": "foreign-cash-balances",
+      "key": "raw/sbi-securities/2026/08/20/20260820-210000-poc01/foreign-cash-balances.json",
+      "sha256": "aba3ef263b4c8d06c49b6160655358b802c72e48e26df7da5f410d5336d94a96",
+      "bytes": 985
+    }
+  ],
+  "failures": []
+}

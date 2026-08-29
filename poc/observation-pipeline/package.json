@@ -1,0 +1,31 @@
+{
+  "name": "@kogane/poc-observation-pipeline",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "bun run src/demo.ts",
+    "ingest": "bun run src/ingest.ts",
+    "parse": "bun run src/parse.ts",
+    "serve": "bun run src/serve.ts",
+    "dev": "vite",
+    "build": "vite build",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.8",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "6.1.0",
+    "playwright": "1.62.1",
+    "typescript": "5.9.3",
+    "vite": "8.2.2"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.102.8",
+    "@tanstack/react-table": "9.2.3",
+    "hono": "4.13.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  }
+}
