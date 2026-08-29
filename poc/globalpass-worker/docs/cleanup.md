@@ -1,6 +1,6 @@
 # GLOBAL PASS PoC cleanup inventory
 
-2026-08-29時点の検証資源を、削除範囲の誤りを避けるため3分類する。TAMIA Tunnelや他collectorと共有する資源は、このPoCのcleanupに含めない。
+2026-08-30時点の検証資源を、削除範囲の誤りを避けるため3分類する。TAMIA Tunnelや他collectorと共有する資源は、このPoCのcleanupに含めない。
 
 ## 検証後すぐに整理できるもの
 
@@ -22,6 +22,11 @@
 - 2026-08-30 same-runtime network A/B用WSL profile `/home/risu/.local/share/kogane/browser-profile-globalpass-wsl-tamia-20260830`と`/home/risu/.local/share/kogane/browser-profile-globalpass-wsl-warp-control-20260830`: どちらもfresh profile。sanitized結果確認後に各directoryだけ削除する。
 - 2026-08-30同A/BのChrome log `/home/risu/.local/state/kogane-globalpass-wsl-tamia-20260830.log`と`/home/risu/.local/state/kogane-globalpass-wsl-warp-control-20260830.log`: token値・資格情報は記録していない。追加解析後にこの2 fileだけ削除する。
 - 2026-08-30 Xvfb control用WSL profile `/home/risu/.local/share/kogane/browser-profile-globalpass-wsl-xvfb-tamia-20260830`とlog directory `/home/risu/.local/state/kogane-globalpass-xvfb-tamia-20260830`: token値・資格情報は記録していない。追加解析後にこのprofileとlog directoryだけ削除する。
+- 2026-08-30 Turnstile body/Debugger比較用WSL profiles: `/home/risu/.local/share/kogane/browser-profile-globalpass-wsl-xvfb-tamia-payload-20260830`、`browser-profile-globalpass-wsl-xvfb-tamia-payload2-20260830`、`browser-profile-globalpass-wsl-xvfb-tamia-debugger-20260830`、`browser-profile-globalpass-wsl-xvfb-tamia-trace-20260830`、`browser-profile-globalpass-wsl-xvfb-tamia-vmtrace-20260830`、`browser-profile-globalpass-wsl-xvfb-tamia-vmtrace2-20260830`。各profileだけを追加解析完了後に削除する。
+- 同比較のWSL state directories: `/home/risu/.local/state/kogane-globalpass-wsl-xvfb-tamia-payload-20260830`、`kogane-globalpass-wsl-xvfb-tamia-debugger-20260830`、`kogane-globalpass-wsl-xvfb-tamia-trace-20260830`、`kogane-globalpass-wsl-xvfb-tamia-vmtrace-20260830`、`kogane-globalpass-wsl-xvfb-tamia-vmtrace2-20260830`。Chrome/Xvfb processは停止済み。
+- private raw comparison directory `/home/risu/.local/share/kogane/private/globalpass-turnstile/20260830`: POST body、response body、compile済みscript、sanitized reportを含む。資格情報入力とlogin POSTは行っていないが、challenge値を含むためGitへ入れず、追加解析が完了した時点でdirectory単位で削除する。
+- temporary deobfuscation tools/reports `/tmp/kogane-turnstile-tools`、`/tmp/kogane-turnstile-index.json`、`/tmp/kogane-turnstile-comparison.json`、および明示的に作成したoutside-worktree pretty directory。private capture本体とは別に削除できる。
+- 誤った旧worktree `/home/risu/codex-work/2026-08-27/kogane-globalpass-worker`内の同名untracked analyzer 5 files: 正しいPR worktreeへ反映済みなので、旧worktreeを破棄するときだけ削除する。
 - local admin token file `/home/risu/.local/share/kogane/secrets/globalpass-worker-admin-token`: PoCを操作しなくなった時点で削除する。
 - `/home/risu/.docker/config.json`内のCloudflare registry認証entry: Wranglerが追加した可能性があるため確認して、不要ならそのentryだけを除去する。ファイル全体は他registry設定を含み得るため削除しない。
 - このgit worktree: PRをmergeまたはcloseし、必要なcommitがremoteにあることを確認した後だけ削除可能。
@@ -39,6 +44,9 @@
 - local WSL成功profileのcopy `/opt/kogane-globalpass-probe/profile-from-wsl-20260829`
 - SwiftShader比較profile `/opt/kogane-globalpass-probe/profile-swiftshader`
 - TAMIA relay比較profile `/opt/kogane-globalpass-probe/profile-tamia-swiftshader`
+- Turnstile payload/Debugger比較profiles `/opt/kogane-globalpass-probe/profile-payload-tamia-20260830`、`profile-payload-tamia-debugger-20260830`
+- 同比較のstate directories `/opt/kogane-globalpass-probe/state-payload-tamia-20260830`、`state-payload-tamia-debugger-20260830`
+- private raw captures `/opt/kogane-globalpass-probe/private/turnstile-bots-xvfb-tamia-20260830.json`、`turnstile-bots-xvfb-tamia-debugger-20260830.json`と後者のgzip copy。Gitへ入れず、再比較用に保持する。
 - sanitized probe scripts、`ws` dependency、Chrome/Xvfb logs (`/opt/kogane-globalpass-probe/app`, `logs`)
 
 TAMIA比較に使うlocalhost SOCKS adapter processは検証後に停止済みで、port 11080も

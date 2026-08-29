@@ -157,6 +157,16 @@ fresh profile、通常Chrome 152、`webdriver=false`のままtoken 794を生成�
 ない。server環境固有のhost/container runtimeまたは公開されないintegrity signalへ焦点を
 移す。
 
+同じChrome、Xvfb、TAMIA条件でTurnstileのOOPIFとworkerへCDPでattachし、成功WSLと
+失敗OCIの2段階POST、response body、compile済みscript sourceを比較した。両方とも
+84,236-byte `api.js`は同一だったが、session-specific `rch` runtime、2本目POST、2本目
+responseは異なった。特に2本目responseは成功4,288 bytes、失敗127,724 bytesで、両方
+HTTP 200だった。runtimeは標準WebCryptoではなくcustom bytecode VMとbitwise codecで
+API名とpayloadを実行時に解決している。確認できたAPI語彙、難読化解除手順、safe analyzer、
+targeted breakpointの限界は
+[`docs/turnstile-local-analysis.md`](docs/turnstile-local-analysis.md)に記録した。raw body、
+cookie、challenge IDはGitへ入れていない。
+
 Cloudflareも本番challengeに対するPlaywright、Selenium、Puppeteerを公式サポートしていないため、現時点ではこのbrowser方式をproduction collectorへ昇格させない。調査したPatchright、SeleniumBase Pure CDP、その他の第三者workaroundと採否理由はdocs/browser-run-investigation-2026-08-28.mdに集約した。
 
 ## 2026-08-29 local Windows / WSL profile A/B
