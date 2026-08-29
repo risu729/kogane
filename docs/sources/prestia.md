@@ -733,6 +733,39 @@ the posted settlement-account debit, but it does not replace the separate
 GLOBAL PASS collector for merchant, pending, authorization, fee, or family-card
 detail.
 
+### Android Emulator runtime comparison: 2026-08-30
+
+A bounded local runtime comparison used new Pixel 10 AVDs and never reached an
+authenticated banking request. The result rules out the generated re-signed
+APK as a reliable protocol oracle and also shows that an x86 host's ARM native
+bridge is not a valid substitute for an ARM device for this protected build.
+
+| Runtime and package | Result | Interpretation |
+| --- | --- | --- |
+| Android 17 / API 37.1, x86_64 AVD with `arm64-v8a` native bridge, re-signed 1.4.1 with a user-CA Network Security Config | Startup failed with `ClassNotFoundException` for `View$OnUnhandledKeyEventListener` from the obfuscated/AppCompat path | Rebuilding and re-signing changes protected runtime behavior; do not use this APK for capture. |
+| Android 15 / API 35, 4 KiB-page x86_64 AVD with `arm64-v8a` native bridge, the same re-signed 1.4.1 | The same `ClassNotFoundException` occurred | The API 37 and 16 KiB-page combination was not the cause. |
+| Android 15 / API 35, same AVD, unmodified and bank-signed 1.4.1 split set | Startup advanced further, then failed with an NPE in the obfuscated `xw.lvz` invocation thread | Signature preservation changed the failure mode but did not make ARM-on-x86 execution stable. |
+| Android 11 / API 30, x86_64 AVD advertising `armeabi-v7a`, unmodified and bank-signed 1.4.0 split set | Startup failed with divide-by-zero in obfuscated `xw.kDq` code | Using the older 32-bit ARM build and bridge did not solve the protected-runtime incompatibility. |
+
+The API 35 AVD successfully loaded the arm64 native split before the Java-side
+failure, while the API 30 AVD exposed the full `x86_64,x86,arm64-v8a,
+armeabi-v7a,armeabi` ABI list. These were not package-install failures. Static
+analysis still finds ordinary DEX plus a native library and heavily obfuscated
+reflection threads; the differing impossible-looking Java failures are
+consistent with the protected/obfuscated runtime producing invalid state under
+native translation. They are not evidence that the app is broken on a normal
+ARM phone.
+
+No PRESTIA origin request reached the sanitized capture log, so this experiment
+reveals nothing new about credential fields, cookies, Caulis payloads, account
+data, or the acceptance of a user-installed CA. The next capture must use the
+current Play-delivered split set on an owned physical ARM device. First test the
+unmodified app with the dedicated proxy and user CA. If its custom HTTP stack
+rejects the user CA, stop rather than re-sign: use an explicitly authorized
+rooted ARM test device/system-CA route or another runtime hook that preserves
+the bank signature. Keep only value-free request structure in the diagnostic
+log.
+
 ## Third-party clients and implementation evidence
 
 Public GitHub code search found three relevant implementations as of the
@@ -794,10 +827,12 @@ other.
 All steps are read-only. Do not enter a transfer, FX trade, time deposit,
 limit, card-control, registration, or settings screen except to leave it.
 
-1. Upgrade provenance by extracting the current Play-delivered split set from
-   an owned device and compare package/version/signers before treating the
-   1.4.0 static snapshot as current official evidence.
-2. Implement the app-observed mobile GET/bootstrap and one balance-summary
+1. Connect an owned physical ARM Android device, install the app through
+   Google Play, extract the complete current split set and compare
+   package/version/signers. Run one launch with the dedicated proxy and user
+   CA. Stop if TLS fails; do not rebuild or re-sign the protected APK.
+2. From a successful physical-device capture, implement the app-observed
+   mobile GET/bootstrap and one balance-summary
    request locally, using a fresh in-memory cookie jar and the packaged Caulis
    login flow. Print only status/schema summaries. Stop on OTP, rejection or
    any write page; do not repeat credential submissions without a materially
