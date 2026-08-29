@@ -248,6 +248,32 @@ Xvfb processだけを停止する。TAMIA比較用のlocalhost SOCKS adapterは
 tokenをstdinから受け取る。今回のinstall、profile、dependency、logは比較用に削除せず
 保持した。
 
+## 2026-08-30 local WSL same-runtime network A/B
+
+network reputationとserver runtimeを分離するため、同じ時刻帯、同じlocal WSL、同じ
+Google Chrome Stable 152.0.7977.64、完全なfresh profile、1365x768 windowで、出口だけを
+変えた。どちらもheadless、Playwright、`--enable-automation`を使わず、pageからは
+native `Linux x86_64`、`navigator.webdriver=false`に見えた。CDPはtokenの長さと
+非機密なpage状態を読むためだけに使った。
+
+| local WSL Chromeの出口 | profile | token | page状態 |
+| --- | --- | ---: | --- |
+| local WARP、`104.28.211.106`、JP/NRT | fresh | 752 | Sign On、form/widgetあり、Access Deniedなし |
+| host allowlist付きWorker relay経由のTAMIA、`223.223.22.214`、JP/KIX、ASN 18144 | fresh | 794 | 同上 |
+
+TAMIA runはTailscaleを使わず、[`scripts/run-bots-tamia-socks.mjs`](../scripts/run-bots-tamia-socks.mjs)
+をWSL localhostで起動し、GLOBAL PASSと2個のTurnstile hostだけを既存Worker relayへ流した。
+別のallowlist済み`/egress` requestでTAMIA IP/ASNを確認してからChromeへ
+`--proxy-server=socks5://127.0.0.1:11080`を渡した。両runともtoken値、資格情報、login POST、
+cookie値を保存・送信していない。Chromeと一時SOCKS processはrun後に停止し、profileと
+Chrome logだけをローカルに保持した。
+
+このA/Bにより、TAMIAのIP、ASN、KIX経路またはIPv4であることはtoken未生成の十分条件では
+ない。同じTAMIA出口でlocal WSLは成功し、Cloudflare ContainerとOCI `bots`は失敗したため、
+両server環境の失敗をnetwork reputationだけでは説明できない。少なくともhost/runtimeまたは
+Cloudflareが観測するbrowser/OS integrity signalの差が必要であり、networkとの相互作用が
+残る可能性はあっても「TAMIAだから常に失敗する」という仮説は棄却する。
+
 ## 結論
 
 2026-08-29の追加検証により、送信元IPはTAMIA統一とContainer直通の両方で直接確認できた。split解消、Brunhild到達可能な同一出口、Patchright、Chrome通常processの後付けCDP、Windows Chrome 152と整合させた表層fingerprintを個別・組合せで試してもtokenは0だった。したがって、Cloudflare Containers上のbrowser routeをproduction collectorとして追い続ける優先度は下げる。残る可能性は実Windows browser、正常利用履歴を持つprofile、または公開情報から観測できないbrowser/OS integrity signalだが、どれもserverless collectorの単純な構成から外れる。
@@ -260,11 +286,11 @@ OSだけで説明しない。
 
 Browser RunはGLOBAL PASSのlogin pageとTurnstile challenge transportを正常に200で取得したが、tokenを完成できなかった。少なくとも今回のBrowser Run失敗は`brunhild.challenges.cloudflare.com`のIPv6到達性では説明できない。したがって「TAMIAにIPv6がないことが既知のblocker」という以前の推論は撤回する。
 
-現時点で区別できない候補は次の通り。
+現時点で残る候補は次の通り。
 
-- local WSLのJP/WARP経路と、OCI・TAMIA・Container各出口のIP/ASN reputation差
 - OCI/Containerとlocal WSLのhost runtimeまたはCloudflareが観測するintegrity signal差
 - Browser Run固有の識別header/Web Bot Auth署名を含むbot判定
 - challengeが追加のbrowser signalを要求したが、OCI/Containerでは完了できなかった可能性
+- network reputationとserver runtime/integrity signalの相互作用
 
-Browser Run単独をproduction collectorへ採用する根拠は得られなかった。Containerではブランド版Google Chrome Stableを含む各条件、OCIではPlaywrightなしの公式Chromeでもtokenを生成できず、表面的なfingerprint調整、browser binaryの差し替え、profile移送、software WebGLでは通常Chrome/Kuebikoとの差を埋められなかった。同じOCI Chromeで生OCI出口とTAMIA出口の両方が失敗したため、OCI生IPだけを原因とは扱わない。送信元はContainer直通、TAMIA、OCI、local WSLで直接記録済みだが、成功したlocal WSLのWARP出口をOCI Chromeで再利用できていないため、IP/ASNとhost runtimeは完全には分離できない。IPv6追加は成功runでも`brunhild`が必須だと確認できるまで優先しない。
+Browser Run単独をproduction collectorへ採用する根拠は得られなかった。Containerではブランド版Google Chrome Stableを含む各条件、OCIではPlaywrightなしの公式Chromeでもtokenを生成できず、表面的なfingerprint調整、browser binaryの差し替え、profile移送、software WebGLでは通常Chrome/Kuebikoとの差を埋められなかった。一方、local WSL ChromeはWARPとTAMIAの両出口でtokenを生成した。同じTAMIA出口でruntimeだけが違う比較結果から、TAMIAのnetwork reputationを単独root causeから除外する。送信元はContainer直通、TAMIA、OCI、local WSLで直接記録済みであり、次の焦点はserver host/runtimeとCloudflareが観測するbrowser/OS integrity signalである。IPv6追加は成功runでも`brunhild`が必須だと確認できるまで優先しない。

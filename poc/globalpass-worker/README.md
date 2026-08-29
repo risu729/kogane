@@ -143,6 +143,14 @@ Sign On画面とTurnstile widgetは表示されたがtokenは0だった。
 削除していない。詳細と再実行scriptは
 [`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)を参照する。
 
+続けてlocal WSLの同じGoogle Chrome 152を使い、fresh profileを2個作って出口だけを
+同時刻帯に比較した。WARP JP/NRT (`104.28.211.106`)ではtoken 752、既存Worker relay経由の
+TAMIA JP/KIX (`223.223.22.214`, ASN 18144)ではtoken 794となり、どちらもSign On、form、
+widgetあり、Access Deniedなしだった。資格情報入力とlogin POSTは0回である。同じTAMIA
+出口でlocal WSLは成功し、ContainerとOCIは失敗したため、TAMIAのnetwork reputationは
+単独root causeではない。server host/runtimeまたはbrowser/OS integrity signalを次の
+主要差分として扱う。
+
 Cloudflareも本番challengeに対するPlaywright、Selenium、Puppeteerを公式サポートしていないため、現時点ではこのbrowser方式をproduction collectorへ昇格させない。調査したPatchright、SeleniumBase Pure CDP、その他の第三者workaroundと採否理由はdocs/browser-run-investigation-2026-08-28.mdに集約した。
 
 ## 2026-08-29 local Windows / WSL profile A/B
