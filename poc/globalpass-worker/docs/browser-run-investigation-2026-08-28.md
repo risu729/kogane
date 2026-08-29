@@ -190,6 +190,21 @@ Container/browser automation固有のidentity・integrity signal、runtime、net
 経路などであり、Windows偽装や個人profile移送を先にproduction設計へ入れる根拠は
 なくなった。
 
+### Fresh WSL profileでの認証POST
+
+同じfresh WSL profile、Google Chrome 152、WARP JP/NRTの条件で、保存済みの
+GLOBAL PASS資格情報を1回だけ入力した。送信直前のTurnstile token長は730だった。
+`POST /p/login/RW1312010101;jsessionid=<redacted>`はHTTP 200となり、遷移後は
+title `TOP`、login formなし、利用明細導線ありになった。Access Denied、
+Turnstile error、credential errorは観測されなかった。これにより、local WSLでは
+token生成だけでなくserver-side validationと認証POSTまで自動実行できることを
+確認した。明細画面への遷移やデータ取得はこのrunでは行っていない。
+
+再実行用の[`scripts/probe-local-login.mjs`](../scripts/probe-local-login.mjs)は、
+資格情報をstdinの1行JSONから読み、値を出力しない。結果の動的session IDも
+`<redacted>`へ置換する。raw Kuebiko captureにはcookieやPOST由来の機密情報が
+含まれ得るためGitへ入れない。
+
 ## 結論
 
 2026-08-29の追加検証により、送信元IPはTAMIA統一とContainer直通の両方で直接確認できた。split解消、Brunhild到達可能な同一出口、Patchright、Chrome通常processの後付けCDP、Windows Chrome 152と整合させた表層fingerprintを個別・組合せで試してもtokenは0だった。したがって、Cloudflare Containers上のbrowser routeをproduction collectorとして追い続ける優先度は下げる。残る可能性は実Windows browser、正常利用履歴を持つprofile、または公開情報から観測できないbrowser/OS integrity signalだが、どれもserverless collectorの単純な構成から外れる。

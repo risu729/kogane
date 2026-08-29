@@ -148,6 +148,12 @@ CDP利用のいずれか一つへ帰属させない。計測時のCloudflare tra
 [`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)
 に記録した。
 
+続けて同じfresh WSL profileから資格情報を1回だけ送信した。Turnstile token長
+730の状態でlogin POSTはHTTP 200となり、title `TOP`、login formなし、利用明細
+導線ありへ遷移した。Access Denied、Turnstile error、credential errorはなかった。
+したがってlocal WSLでは、手動操作やWindows偽装なしでtokenのserver-side
+validationとログインまで自動化できる。明細取得はこのbounded runの対象外とした。
+
 ## 次に試す順序
 
 1. GLOBAL PASSの公式mobile appや別の公式提供経路で、利用履歴を取得できるかを優先する。

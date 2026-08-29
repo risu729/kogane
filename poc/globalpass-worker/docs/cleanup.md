@@ -18,6 +18,7 @@
 - 2026-08-29 local A/B用Windows profile `C:\Users\risu\AppData\Local\Kuebiko\browser-profile-globalpass-copy-win-20260829`と`browser-profile-globalpass-fresh-win-20260829`: 元profileは削除せず、この2個だけ追加解析後に削除する。
 - 2026-08-29 local A/B用WSL profile `/home/risu/.local/share/kogane/browser-profile-globalpass-copy-wsl-20260829`と`browser-profile-globalpass-fresh-wsl-20260829`: 前者はWindows profileの約5 GiB copy。この2個だけ追加解析後に削除する。
 - 2026-08-29 local A/B raw captures: Windowsの`2026-08-29T12-35-16`、`2026-08-29T12-53-00`、`2026-08-29T12-55-57`と、WSLの`2026-08-29T12-45-21`、`2026-08-29T12-51-54`。cookie等を含み得るためGitへ入れず、sanitized結果確認後に各capture directoryだけ削除する。
+- 2026-08-29 fresh WSL login POST raw capture `/home/risu/.local/state/Kuebiko/captures/2026-08-29T13-08-05`: login cookieと認証POST由来の機密情報を含み得る。sanitized結果はrepoへ記録済みなので、追加解析後はこのdirectoryだけ削除する。
 - local admin token file `/home/risu/.local/share/kogane/secrets/globalpass-worker-admin-token`: PoCを操作しなくなった時点で削除する。
 - `/home/risu/.docker/config.json`内のCloudflare registry認証entry: Wranglerが追加した可能性があるため確認して、不要ならそのentryだけを除去する。ファイル全体は他registry設定を含み得るため削除しない。
 - このgit worktree: PRをmergeまたはcloseし、必要なcommitがremoteにあることを確認した後だけ削除可能。
