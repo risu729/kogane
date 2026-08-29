@@ -205,6 +205,36 @@ token生成だけでなくserver-side validationと認証POSTまで自動実行�
 `<redacted>`へ置換する。raw Kuebiko captureにはcookieやPOST由来の機密情報が
 含まれ得るためGitへ入れない。
 
+## 2026-08-30 OCI `bots` official Chrome control
+
+Cloudflare Container固有のruntimeとOCI上の通常Chromeを分けるため、既存SSH host
+`bots`（OCI ARM64）へ公式Google Chrome Stable 152.0.7977.64 ARM64、Xvfb、
+Noto CJK fontとNode.js 24.20.0を導入し、headed Chromeを直接起動した。
+`--enable-automation`、headless、Playwrightはいずれも使用せず、pageからは
+`navigator.webdriver=false`、native `Linux x86_64`として見えた。CDPはtokenの
+長さと非機密なpage状態を読むためだけに使用した。
+
+OCIの通常internet出口は`138.2.53.208`、`loc=JP`、`colo=KIX`、HTTP/2、
+`warp=off`だった。次の3条件はすべてSign On画面、login form、300x68のTurnstile
+widgetを表示し、Access Deniedではなかったが、最大30秒待ってもtokenは0文字だった。
+
+| profile / graphics | 結果 |
+| --- | --- |
+| OCI上のfresh persistent profile、Xvfb既定graphics | token 0。Chrome logでWebGL 1/2がblocklistされた |
+| local WSLでtoken生成・認証POSTに成功したprofileのLinux-to-Linux copy | login状態は移送されずSign Onへ戻り、token 0 |
+| OCI上の別fresh profile、ANGLE SwiftShader WebGLを明示的に有効化 | WebGL context生成をlogで確認したがtoken 0 |
+
+この比較により、Containerだけの問題、Playwrightだけの問題、Linuxだけの問題、
+profile履歴不足、XvfbでWebGLが無効という各単独仮説は棄却できる。local WSLと
+OCIの差としてnetwork/ASN・host runtime・Cloudflareが観測するintegrity signalは
+まだ分離できない。ただしOCIでprofileを移してsoftware WebGLまで有効化しても
+tokenが生成されなかったため、OCI Kubernetesへ通常Chromeを移すだけでは
+collectorを成立させられない。3 runとも資格情報入力とlogin POSTは0回である。
+
+再実行には[`scripts/run-bots-globalpass.sh`](../scripts/run-bots-globalpass.sh)を使う。
+既定では`/opt/kogane-globalpass-probe`配下のprofileとlogを保持し、終了時にChromeと
+Xvfb processだけを停止する。今回のinstall、profile、logは比較用に削除せず保持した。
+
 ## 結論
 
 2026-08-29の追加検証により、送信元IPはTAMIA統一とContainer直通の両方で直接確認できた。split解消、Brunhild到達可能な同一出口、Patchright、Chrome通常processの後付けCDP、Windows Chrome 152と整合させた表層fingerprintを個別・組合せで試してもtokenは0だった。したがって、Cloudflare Containers上のbrowser routeをproduction collectorとして追い続ける優先度は下げる。残る可能性は実Windows browser、正常利用履歴を持つprofile、または公開情報から観測できないbrowser/OS integrity signalだが、どれもserverless collectorの単純な構成から外れる。
@@ -219,9 +249,9 @@ Browser RunはGLOBAL PASSのlogin pageとTurnstile challenge transportを正常�
 
 現時点で区別できない候補は次の通り。
 
-- Browser Runと明示するheader/Web Bot Auth署名を含むbot判定
-- `navigator.webdriver=true`、Linux、`Cloudflare-Workers`などのbrowser fingerprint
-- challengeが対話または追加のbrowser signalを要求したが、headless probeが完了できなかった
-- ContainerではGLOBAL PASSとTurnstileのegressが分離し、Browser Runでは全通信がCloudflare egressになるというnetwork identity差
+- local WSLのJP/WARP経路と、OCI・Container各出口のIP/ASN reputation差
+- OCI/Containerとlocal WSLのhost runtimeまたはCloudflareが観測するintegrity signal差
+- Browser Run固有の識別header/Web Bot Auth署名を含むbot判定
+- challengeが追加のbrowser signalを要求したが、OCI/Containerでは完了できなかった可能性
 
-Browser Run単独をproduction collectorへ採用する根拠は得られなかった。Containerではブランド版Google Chrome Stableを含む6条件すべてでtokenを生成できず、表面的なfingerprint調整やbrowser binaryの差し替えでは通常Chrome/Kuebikoとの差を埋められなかった。次はKuebiko成功runとContainer失敗runの送信元IPの直接確認を優先する。IPv6追加は成功runでも`brunhild`が必須だと確認できるまで優先しない。
+Browser Run単独をproduction collectorへ採用する根拠は得られなかった。Containerではブランド版Google Chrome Stableを含む各条件、OCIではPlaywrightなしの公式Chromeでもtokenを生成できず、表面的なfingerprint調整、browser binaryの差し替え、profile移送、software WebGLでは通常Chrome/Kuebikoとの差を埋められなかった。送信元はContainer直通、TAMIA、OCI、local WSLで直接記録済みだが、IP/ASNとhost runtimeを同時に変えているため両者はまだ分離できない。IPv6追加は成功runでも`brunhild`が必須だと確認できるまで優先しない。

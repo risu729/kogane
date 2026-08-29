@@ -23,6 +23,23 @@
 - `/home/risu/.docker/config.json`内のCloudflare registry認証entry: Wranglerが追加した可能性があるため確認して、不要ならそのentryだけを除去する。ファイル全体は他registry設定を含み得るため削除しない。
 - このgit worktree: PRをmergeまたはcloseし、必要なcommitがremoteにあることを確認した後だけ削除可能。
 
+## 現在は保持するOCI `bots`検証資源
+
+2026-08-30の指示により、次の資源は検証後も削除しない。Chrome/Xvfb processは各runの
+終了時に停止するが、package、runtime、profile、script、logは再比較用に保持する。
+
+- probe root `/opt/kogane-globalpass-probe`
+- official Google Chrome Stable 152.0.7977.64 ARM64
+- Xvfb、Noto CJK font
+- Node.js 24.20.0 ARM64 (`/opt/kogane-globalpass-probe/node`)
+- OCI fresh profile `/opt/kogane-globalpass-probe/profile`
+- local WSL成功profileのcopy `/opt/kogane-globalpass-probe/profile-from-wsl-20260829`
+- SwiftShader比較profile `/opt/kogane-globalpass-probe/profile-swiftshader`
+- sanitized probe scriptsとChrome/Xvfb logs (`/opt/kogane-globalpass-probe/app`, `logs`)
+
+これらを後で削除する場合は、先に`bots`上で絶対pathとChrome processを再確認し、
+`/opt/kogane-globalpass-probe`以外のOCI workloadへ影響しないことを確認する。
+
 ## PoC全体を廃止するときに削除するもの
 
 - 現行app repository kogane-globalpass-collector-poc-globalpasscollectorcontainer の旧tags: 007215b4、0080b617、2444b612、4311cdf8、63148685、87f23407、8b4e8803、a220cfae、b8e96bd2、cb98569f、d86b50ae、f2585107、f6406948、f73b2bab。現行cd80a6eeはapp削除後に削除する。
