@@ -325,23 +325,117 @@ locale data、D-Bus/audio、Chrome同梱外shared libraryを小さく比較す�
 browser JavaScriptから直接観測しにくいため後順位とする。Cloudflare instance type変更は、
 local unlimited imageも失敗した現時点では優先しない。
 
+## 2026-08-30 browser-visible環境差分
+
+同一WSL host上でtokenを生成できるnative Google Chromeと、tokenを生成できなかったexact
+deploy image内Chromeを、GLOBAL PASSへ接続しないlocalhost診断pageで比較した。両方とも
+Chrome 152、Xvfb `1365x768x24`である。raw font/canvas/audio値はGitへ入れず、差分の
+集計だけを残す。
+
+| 項目 | WSL native | exact image | 比較 |
+| --- | --- | --- | --- |
+| timezone | `Asia/Tokyo` | `UTC` | 差あり |
+| font files / families | 155 / 32 | 50 / 20 | 差あり |
+| font metrics | baseline | Latin 16/20、CJK/emoji 20/20候補で差 | 差あり |
+| `enumerateDevices()` | audio input 1 / output 1 | すべて0 | 差あり |
+| UA / platform / languages | Linux Chrome 152 / `en-US,en` | 同一 | 一致 |
+| `navigator.webdriver` | `false` | `false` | 一致 |
+| CPU / memory / screen / DPR | 16 / 16 GiB / 1365x768 / 1 | 同一 | 一致 |
+| speech voices / codec / plugins | baseline | 同一 | 一致 |
+| standard canvas / OfflineAudioContext hash | private comparison | 同一 | 一致 |
+| WebGL | unavailable | unavailable | 一致 |
+
+hostのfont directoryと`/etc/fonts`をread-only bind mountし、ephemeral cacheを更新すると、
+Containerのfamily数とdefault font matchはhostと一致した。しかし同じChrome/TAMIA条件の
+tokenは0のままだった。font family集合とfontconfig defaultの差は単独root causeではない。
+rendering libraryやmetric差一般を否定する試験ではない。
+
+## 2026-08-30 timezone controlled A/B
+
+現行exact image `cd80a6ee`、digest
+`sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`
+を再buildせず、Chrome 152.0.7977.64、Xvfb、fresh profile、25秒後CDP attach、全通信TAMIA
+を固定してtimezoneだけを変更した。各runで資格情報入力とlogin POSTは0回である。
+
+| timezone条件 | Chrome Intl timezone | token | 結果 |
+| --- | --- | ---: | --- |
+| image default | `UTC` | 0 | 失敗control |
+| `TZ=Asia/Tokyo` + `/etc/localtime` mount | `Asia/Tokyo` | 794 | formあり、Access Deniedなし |
+| `TZ=Asia/Tokyo` envだけ | `Asia/Tokyo` | 794 | 同上 |
+
+`/etc/localtime` mountは不要で、Container環境変数だけで0文字から794文字へ変化した。同一
+image、Chrome、display、profile種別、TAMIA経路のcontrolled A/Bではtimezone不一致が
+必要十分な失敗要因だった。native Chromeへ`TZ=UTC`を設定する逆向き試験は行っておらず、
+別version/sitekeyを含む全環境へ一般化しない。
+
+Worker Container classへ`envVars = { TZ: "Asia/Tokyo" }`を設定した本番deployでも、
+`chrome-direct-process-attach-late-all-tamia`とcollector相当の
+`chrome-stable-no-ua-all-tamia`がともにtoken 794を生成した。後者のegressは
+`223.223.22.214`、JP/KIX、ASN 18144、HTTP/2で、Chrome 152.0.7977.64、formあり、
+Access Deniedなしだった。PAT 401とBrunhildの`ERR_CONNECTION_CLOSED`は残ったが、2段階の
+challenge POSTは200でtoken生成に成功したため、これらは単独blockerではない。
+
+## 2026-08-30 Camoufox control
+
+[Camoufox](https://github.com/daijro/camoufox)の現行構成として
+`cloverlabs-camoufox==0.6.0`、official prerelease Firefox `152.0.4-beta.29`、real Windows
+fingerprint、`ja-JP`、uBlock Originなしを試した。fresh installのPlaywright 1.62.0は
+Jugglerの`Browser.setDefaultViewport` schema errorとなり、[issue #653](https://github.com/daijro/camoufox/issues/653)
+と同じversion skewだったためPlaywright 1.60.0へpinした。
+
+WSL nativeと、現行deploy imageをbaseにしたnon-root Docker/Xvfbの両方でHTTP 200、
+login form/widgetあり、Access Deniedなし、`navigator.webdriver=false`となり、tokenは709文字
+だった。出口はいずれもTAMIAで、資格情報入力とlogin POSTは0回である。これはContainer境界
+一般が拒否されたわけではないことを示す独立controlである。ただし通常Chromeもtimezoneだけで
+成功したため、Camoufoxはproduction依存へ追加せず、将来のregression時の第2候補とする。
+
+Camoufox一時venv/browser/profile、Docker image
+`kogane-camoufox-probe-20260830:one-shot`、container、一時script、relay portは削除・停止済みで、
+registry pushはしていない。共有BuildKit cacheは他buildへ影響するためpruneしていない。
+
+## 2026-08-30 production collection progression
+
+最初のreal `daily`はHTTP 502だったが、管理者認証付き`GET /latest-manifest?date=YYYY-MM-DD`
+を追加して、同じloginを再実行せずR2のfailure manifestを回収した。旧collectorがheadless
+bundled Chromium、ephemeral context、GLOBAL PASSだけTAMIA・Turnstileは別出口という古い
+条件を使っており、probeの成功条件と一致していなかったことが原因だった。
+
+実collectorをheaded Google Chrome Stable、fresh persistent profile、全通信TAMIAへ統一した。
+固定Container IDはapp image更新後も旧instance/imageを再開し得たため、runtime revisionを応答へ
+付け、新しいDurable Object identityへ切り替えて実行世代を検証する。`timezone-collector-v2`では
+Turnstileとlogin POSTが成功し、失敗点は`GLOBAL PASS activity link was not found after login`まで
+進んだ。これはAkamai/Turnstile/IP rejectionではなく、英語表示のログイン後画面に対して日本語の
+「ご利用明細」だけを探していたselector不一致である。
+
+保存済みの成功Kuebiko captureを再利用し、値を出力せずDOM routeだけを確認すると、利用明細は
+Nablarchの`/p/statementInquiry/RW...`へPOSTするlinkだった。`timezone-collector-v4`でこの
+read-only path prefixを優先selectorにした。app image rollout完了後、新しいContainer identity
+`v18`でruntime revisionがv4であることとtoken 794を確認してからE2Eを実行した。
+
+`daily` run `93e226f7-30e3-4c94-9270-5b71536539b6`はHTTP 200、status `success`、
+available months 15、2026-08と2026-07のHTML 2件、failure 0だった。続く初回`backfill` run
+`f218329f-764e-4fe1-938e-abc5accfba1f`もHTTP 200、status `success`で、2025-06から
+2026-08まで15件を約65秒でR2へ保存し、failure 0だった。各HTMLは27,720〜70,958 bytesで
+2 MiB上限内だった。資格情報、cookie、Turnstile token値、HTML本文はlogやGitへ入れていない。
+
+bounded dailyとbackfillが成功したため、Workers Cronを`17 18 * * *`（03:17 JST）で1日1回
+有効化する。GitHub Actions scheduleは使わない。固定identity `v18`を通常運用に使い、image更新時は
+appのactive digestが切り替わってから新しいidentityを採番する。
+
 ## 結論
 
-2026-08-29の追加検証により、送信元IPはTAMIA統一とContainer直通の両方で直接確認できた。split解消、Brunhild到達可能な同一出口、Patchright、Chrome通常processの後付けCDP、Windows Chrome 152と整合させた表層fingerprintを個別・組合せで試してもtokenは0だった。したがって、Cloudflare Containers上のbrowser routeをproduction collectorとして追い続ける優先度は下げる。残る可能性は実Windows browser、正常利用履歴を持つprofile、または公開情報から観測できないbrowser/OS integrity signalだが、どれもserverless collectorの単純な構成から外れる。
+2026-08-29までの失敗は、TAMIAのIP、IPv6不足、Xvfb、WebGL、Linux、Docker、root、
+CPU/memory、Chrome binary、Playwright/CDP、fresh profileのいずれか単独では説明できなかった。
+2026-08-30のcontrolled A/Bで、exact imageのbrowser timezoneが`UTC`であることを特定し、
+`TZ=Asia/Tokyo`だけで通常Chrome Containerのtokenを0から794へ変えられた。Cloudflare本番でも
+同じ結果を再現し、さらに実アカウントのlogin POSTまで成功した。
 
-ただし同日のlocal A/Bでは、fresh Windows、copied Windows、fresh WSL、
-Windows profileをcopyしたWSLの全条件でtoken生成に成功した。この結果により、
-「実Windowsまたは正常利用履歴profileが必須」という候補は弱くなった。native
-Linux ChromeもローカルJP/WARP経路では成功するため、Containerとの差をLinux
-OSだけで説明しない。
+したがって、GLOBAL PASSの第一候補はCloudflare Container + Google Chrome Stable + Xvfb +
+fresh persistent profile + source専用TAMIA allowlistである。Windows偽装、個人profile copy、
+Camoufox、Patchright、Browser Runは現行経路に不要である。CamoufoxはDocker内でもtokenを生成
+できたため、通常Chromeの将来regression時のcontrolとしてのみ残す。
 
-Browser RunはGLOBAL PASSのlogin pageとTurnstile challenge transportを正常に200で取得したが、tokenを完成できなかった。少なくとも今回のBrowser Run失敗は`brunhild.challenges.cloudflare.com`のIPv6到達性では説明できない。したがって「TAMIAにIPv6がないことが既知のblocker」という以前の推論は撤回する。
-
-現時点で残る候補は次の通り。
-
-- OCI/Containerとlocal WSLのhost runtimeまたはCloudflareが観測するintegrity signal差
-- Browser Run固有の識別header/Web Bot Auth署名を含むbot判定
-- challengeが追加のbrowser signalを要求したが、OCI/Containerでは完了できなかった可能性
-- network reputationとserver runtime/integrity signalの相互作用
-
-Browser Run単独をproduction collectorへ採用する根拠は得られなかった。Containerではブランド版Google Chrome Stableを含む各条件、OCIではPlaywrightなしの公式Chromeでもtokenを生成できず、表面的なfingerprint調整、browser binaryの差し替え、profile移送、software WebGLでは通常Chrome/Kuebikoとの差を埋められなかった。一方、local WSL ChromeはWARPとTAMIAの両出口、さらにTAMIA+Xvfb+WebGL blocklistの条件でもtokenを生成した。同じTAMIA出口でruntimeだけが違う比較結果から、TAMIAのnetwork reputation、Xvfb、WebGL unavailableを単独root causeから除外する。送信元はContainer直通、TAMIA、OCI、local WSLで直接記録済みであり、次の焦点はserver host/runtimeとCloudflareが観測するbrowser/OS integrity signalである。IPv6追加は成功runでも`brunhild`が必須だと確認できるまで優先しない。
+PAT 401、Brunhild abort、TAMIAのIPv6不足は、成功runでも観測され得るため単独blockerとして
+扱わない。Browser Run単独もtokenを完成できなかったため採用しない。残る作業はbot回避ではなく、
+英語/日本語のlogin後DOM、月selector、HTMLサイズ、R2保存を確定する通常のcollector実装である。
+Cronはdailyとbackfillのend-to-end成功を確認するまで無効のままにする。

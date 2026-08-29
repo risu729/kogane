@@ -25,6 +25,9 @@ const RELAY_HOSTS = new Set([
 const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const DAILY_MONTHS = 2;
+const RUNTIME_REVISION = "timezone-collector-v4";
+const ACTIVITY_LABEL =
+  /ご利用明細|利用明細|account activity|transaction(?:s| history)?|usage details|card activity|statement/iu;
 const PROBE_VARIANTS = [
   "baseline",
   "webdriver-false",
@@ -205,16 +208,61 @@ async function openActivity(page) {
   } catch {
     // The home screen exposes an activity link, not the month selector.
   }
-  const candidates = page.getByRole("link", { name: /ご利用明細|利用明細/u });
-  const count = await candidates.count();
-  for (let index = 0; index < count; index += 1) {
-    const candidate = candidates.nth(index);
-    if (!(await candidate.isVisible())) continue;
-    await candidate.click();
-    await page.waitForLoadState("domcontentloaded");
-    return;
+  const candidateGroups = [
+    page.locator('a[href*="/p/statementInquiry/"]'),
+    page.getByRole("link", { name: ACTIVITY_LABEL }),
+  ];
+  for (const candidates of candidateGroups) {
+    const count = await candidates.count();
+    for (let index = 0; index < count; index += 1) {
+      const candidate = candidates.nth(index);
+      if (!(await candidate.isVisible())) continue;
+      await candidate.click();
+      await page.waitForLoadState("domcontentloaded");
+      return;
+    }
   }
-  throw new Error("GLOBAL PASS activity link was not found after login");
+  const diagnostics = await page.locator("a,button").evaluateAll(
+    (elements, activityPattern) =>
+      elements
+        .map((element) => {
+          const text = (element.textContent ?? "").replace(/\s+/gu, " ").trim();
+          if (!activityPattern || !(new RegExp(activityPattern, "iu")).test(text)) {
+            return null;
+          }
+          const style = getComputedStyle(element);
+          const box = element.getBoundingClientRect();
+          if (
+            style.display === "none" ||
+            style.visibility === "hidden" ||
+            box.width === 0 ||
+            box.height === 0
+          ) {
+            return null;
+          }
+          let path = null;
+          if (element instanceof HTMLAnchorElement && element.href) {
+            try {
+              path = new URL(element.href).pathname.replace(
+                /;jsessionid=[^/;]+/giu,
+                ";jsessionid=<redacted>",
+              );
+            } catch {}
+          }
+          return { tag: element.tagName, text: text.slice(0, 80), path };
+        })
+        .filter(Boolean)
+        .slice(0, 12),
+    ACTIVITY_LABEL.source,
+  );
+  const pageState = {
+    title: (await page.title()).slice(0, 80),
+    path: normalizeDiagnosticPath(new URL(page.url())),
+    activityCandidates: diagnostics,
+  };
+  throw new Error(
+    `GLOBAL PASS activity link was not found after login (${RUNTIME_REVISION}): ${JSON.stringify(pageState)}`,
+  );
 }
 
 async function visibleLoginButton(page) {
@@ -662,6 +710,7 @@ async function probeDirectChrome(payload, config, socksPort, startedAt) {
     if (!page) throw new Error("Google Chrome did not expose a page");
     const pageState = await inspectProbePage(page);
     return {
+      runtimeRevision: RUNTIME_REVISION,
       variant: payload.variant,
       config,
       elapsedMs: Date.now() - startedAt,
@@ -820,6 +869,7 @@ async function probeTurnstile(payload) {
     } catch {}
     const pageState = await inspectProbePage(page);
     return {
+      runtimeRevision: RUNTIME_REVISION,
       variant: payload.variant,
       config,
       elapsedMs: Date.now() - startedAt,
@@ -845,25 +895,15 @@ async function probeTurnstile(payload) {
 
 async function collect(payload, response) {
   const socks = await startSocksRelay(payload.relayToken, payload.relayUrl);
-  const browser = await chromium.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-dev-shm-usage"],
-    proxy: {
-      server: `socks5://127.0.0.1:${socks.port}`,
-      bypass: `${TURNSTILE_HOST},${TURNSTILE_HELPER_HOST}`,
-    },
-  });
+  const config = probeConfiguration("chrome-stable-no-ua-all-tamia");
+  const launched = await launchProbeContext(config, socks.port);
+  const { browser, context } = launched;
   let page;
   const networkDiagnostic = [];
   const recordNetwork = (value) => {
     if (networkDiagnostic.length < 24) networkDiagnostic.push(value);
   };
   try {
-    const context = await browser.newContext({
-      locale: "ja-JP",
-      timezoneId: "Asia/Tokyo",
-      viewport: { width: 1365, height: 768 },
-    });
     await context.route("**/*", async (route) => {
       const url = new URL(route.request().url());
       if (
@@ -881,7 +921,7 @@ async function collect(payload, response) {
       recordNetwork({
         event: "requestfailed",
         host: url.hostname,
-        path: url.pathname.slice(0, 120),
+        path: normalizeDiagnosticPath(url),
         resourceType: request.resourceType(),
         error: request.failure()?.errorText?.slice(0, 100) ?? "unknown",
       });
@@ -892,7 +932,7 @@ async function collect(payload, response) {
       recordNetwork({
         event: "http",
         host: url.hostname,
-        path: url.pathname.slice(0, 120),
+        path: normalizeDiagnosticPath(url),
         status: pageResponse.status(),
       });
     });
@@ -929,7 +969,7 @@ async function collect(payload, response) {
         };
       });
       throw new Error(
-        `GLOBAL PASS Turnstile token unavailable: ${JSON.stringify({ networkDiagnostic, ...diagnostic })}`,
+        `GLOBAL PASS Turnstile token unavailable (${RUNTIME_REVISION}): ${JSON.stringify({ networkDiagnostic, ...diagnostic })}`,
         { cause: error },
       );
     }
@@ -959,6 +999,7 @@ async function collect(payload, response) {
         : availableMonths.slice(0, DAILY_MONTHS);
     await writeLine(response, {
       type: "metadata",
+      runtimeRevision: RUNTIME_REVISION,
       availableMonths,
       selectedMonths,
       browserVersion: browser.version(),
@@ -974,7 +1015,7 @@ async function collect(payload, response) {
     await signOut(page);
   } finally {
     try {
-      await browser.close();
+      await launched.close();
     } finally {
       await socks.close();
     }
@@ -985,7 +1026,7 @@ http
   .createServer(async (request, response) => {
     if (request.method === "GET" && request.url === "/health") {
       response.writeHead(200, { "content-type": "application/json" });
-      response.end('{"ok":true}');
+      response.end(JSON.stringify({ ok: true, runtimeRevision: RUNTIME_REVISION }));
       return;
     }
     const isCollect = request.method === "POST" && request.url === "/collect";

@@ -1,23 +1,23 @@
 # PRESTIA GLOBAL PASS read-only Worker PoC
 
-GLOBAL PASS（Vpassデビット専用サイト）のサーバーレンダリングHTMLを、Cloudflare ContainerのPlaywright Chromiumで取得し、private R2へ保存する独立PoCである。SMBCカード用VpassアプリAPIや`mnie`をruntime依存・設定源・submoduleとして使用しない。
+GLOBAL PASS（Vpassデビット専用サイト）のサーバーレンダリングHTMLを、Cloudflare ContainerのPlaywright Google Chromeで取得し、private R2へ保存する独立PoCである。SMBCカード用VpassアプリAPIや`mnie`をruntime依存・設定源・submoduleとして使用しない。
 
-2026-08-27にCloudflareへ実デプロイし、実アカウントでbounded live runまで実施した。Container Chromium/TAMIA経路とCloudflare Browser Run経路はいずれもGLOBAL PASSのログイン画面を200で取得できるが、Turnstile tokenを生成できず、認証情報のPOSTより前で停止する。そのため明細HTMLはまだ取得できていない。失敗を毎日繰り返さないようCronは無効化し、手動`/trigger`、認証付きの`/browser-probe`・`/container-probe`、診断情報だけを残している。
+2026-08-30に、Cloudflare Containerのtimezoneを`Asia/Tokyo`へ合わせるだけでTurnstile token生成を再現し、実アカウントのlogin、daily、15か月backfillをend-to-endで完了した。HTMLとmanifestはprivate R2へ保存済みで、Workers Cronを1日1回だけ有効化している。GitHub Actionsのscheduleは使わない。手動`/trigger`と認証付きの`/browser-probe`・`/container-probe`・`/latest-manifest`は運用診断用に残す。
 
 ## 現在の実行構成
 
 ```text
 authenticated POST /trigger
   -> Worker orchestration
-  -> Container Playwright Chromium
+  -> Container Playwright Google Chrome Stable
   -> Container-local SOCKS5
   -> authenticated WebSocket relay on the Worker
   -> tunnel_idでTAMIA Tunnelを直接指定
   -> tamia cloudflared
   -> www.debit.vpass.ne.jp:443
 
-Turnstile hosts
-  -> Containerの通常internet egress
+GLOBAL PASS + Turnstile hosts
+  -> 同じTAMIA出口へ固定
 
 authenticated POST /browser-probe
   -> Cloudflare Browser Run Puppeteer
@@ -48,7 +48,7 @@ WebSocket TCP relayは非hibernating接続である。対応するupstream TCP s
 
 - `GLOBALPASS_ID`
 - `GLOBALPASS_PASSWORD`
-- `ADMIN_TRIGGER_TOKEN`: `/trigger`、`/browser-probe`、`/container-probe`、`/container-stop`専用
+- `ADMIN_TRIGGER_TOKEN`: `/trigger`、`/browser-probe`、`/container-probe`、`/container-stop`、`/latest-manifest`専用
 - `RELAY_TOKEN`: WebSocket relay専用
 
 session cookie、Turnstile token、Nablarch hidden stateは保存・再利用せず、毎run新しいbrowser contextで取得する。資格情報JSON、secret、実データはGitへ入れない。remote secretは`wrangler.jsonc`にも生成型にも現れないため、`env.d.ts`は上記4 secret名だけをaugmentationする。
@@ -68,10 +68,15 @@ scripts/sync-local-secrets.sh \
 - URL: `https://kogane-globalpass-collector-poc.takuanimal.workers.dev`
 - Container app: `kogane-globalpass-collector-poc-globalpasscollectorcontainer`
 - Container app ID: `a03ac341-52a7-4e81-9a7c-279a90cc4b0c`
+- Container上限: 2（通常収集は固定ID 1個、image rollout時の旧instance退避用に1枠）
 - R2 bucket: `kogane-globalpass-collector-poc`
 - Browser Run binding: `BROWSER`
 - VPC binding: TAMIA Tunnel `6b0ccf30-68b2-494e-baa8-f4f9f3e46b33`を直接指定
-- Cron: blocker解消まで無効
+- Cron: `17 18 * * *`（毎日03:17 JST、Workers Cron）
+
+現行Containerは`TZ=Asia/Tokyo`を起動環境へ明示し、Google Chrome StableをXvfb上のheaded persistent contextとして起動する。GLOBAL PASS、Turnstile本体、helperを同じTAMIA出口へ固定する。2026-08-30のE2E成功imageはdigest `sha256:831819f48420eec226601985df6b84e3a80d3948ae389dd2fbbd557d23eed0f3`、runtime revision `timezone-collector-v4`である。
+
+現行Worker versionは`906c8dbe-b62c-4f73-8577-72a065dea029`で、deploy出力上もschedule `17 18 * * *`を確認した。
 
 `wrangler deploy`の完了後もContainer appのimage rolloutは非同期で続く。検証時は`wrangler containers info <app-id>`で新image digestとhealthy instanceを確認してから、新しいDurable Object IDで実行する。rollout前に実行すると旧imageを使い、コード不具合のように見えることがある。
 
@@ -181,7 +186,7 @@ targeted breakpointの限界は
 [`docs/turnstile-local-analysis.md`](docs/turnstile-local-analysis.md)に記録した。raw body、
 cookie、challenge IDはGitへ入れていない。
 
-Cloudflareも本番challengeに対するPlaywright、Selenium、Puppeteerを公式サポートしていないため、現時点ではこのbrowser方式をproduction collectorへ昇格させない。調査したPatchright、SeleniumBase Pure CDP、その他の第三者workaroundと採否理由はdocs/browser-run-investigation-2026-08-28.mdに集約した。
+2026-08-30のtimezone A/Bでこの結論は更新した。通常Chrome Containerでもtokenを生成できるため、browser方式をPoCの第一候補として継続する。調査したCamoufox、Patchright、SeleniumBase Pure CDP、その他の第三者workaroundと採否理由はdocs/browser-run-investigation-2026-08-28.mdに集約した。
 
 ## 2026-08-29 local Windows / WSL profile A/B
 
@@ -208,11 +213,12 @@ validationとログインまで自動化できる。明細取得はこのbounded
 
 ## 次に試す順序
 
-1. GLOBAL PASSの公式mobile appや別の公式提供経路で、利用履歴を取得できるかを優先する。
-2. browser routeを再開する場合、個人profile移送やWindows偽装より先に、Containerとlocal native Chromeのruntime・network identity差を測る。
-3. split egressは採用せず、同一TAMIA出口または同一Container出口に固定する。
-4. PAT 401やBrunhild 204後のabortを、それ単独でblockerと判断しない。
-5. Cronはtoken生成、login POST、明細画面、月selectorの順にbounded testが成功するまで有効化しない。
+1. 英語表示を含むlogin後の利用明細導線と月selectorをbounded live runで確定する。
+2. `daily`で現在月・前月のHTMLとmanifestがR2へ保存されることを確認する。
+3. `backfill`はdaily成功後に1回だけ実行し、提示された15か月を保存する。
+4. split egressは採用せず、GLOBAL PASSとTurnstileを同一TAMIA出口へ固定する。
+5. PAT 401やBrunhild abortを、それ単独でblockerと判断しない。
+6. Cronはtoken生成、login POST、明細画面、月selector、R2保存の順にbounded testが成功するまで有効化しない。
 
 いずれもtoken生成、ログインPOST、明細画面、月selectorの順にbounded testし、成功してから初回backfillと日次Cronを有効化する。
 
@@ -234,12 +240,12 @@ scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-t
 scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token chrome-stable-headed-persistent-windows
 scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token patchright-chrome-native-all-tamia
 scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token chrome-direct-process-attach-late-direct
-scripts/trigger.sh stop ~/.local/share/kogane/secrets/globalpass-worker-admin-token v14 stop
+scripts/trigger.sh stop ~/.local/share/kogane/secrets/globalpass-worker-admin-token v18 stop
+scripts/trigger.sh manifest ~/.local/share/kogane/secrets/globalpass-worker-admin-token 2026-08-29
 ```
 
 ## 残る検証項目
 
-- 通常Chromeと自動化ChromiumでTurnstileが選ぶchallengeとtoken生成条件の差
 - login後の「ご利用明細」リンクと月selectorの現行DOM selector
 - `select`のchange eventだけで月POSTが実行されるか
 - 全月の各HTMLが2 MiB以下か

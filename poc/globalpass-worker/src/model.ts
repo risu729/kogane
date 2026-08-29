@@ -36,6 +36,7 @@ export interface CollectionFailure {
 export interface CollectionManifest {
   schemaVersion: string;
   source: "prestia-globalpass";
+  runtimeRevision?: string;
   runId: string;
   mode: CollectionMode;
   startedAt: string;
@@ -49,6 +50,7 @@ export interface CollectionManifest {
 export type ContainerRecord =
   | {
       type: "metadata";
+      runtimeRevision?: string;
       availableMonths: string[];
       selectedMonths: string[];
       browserVersion: string;

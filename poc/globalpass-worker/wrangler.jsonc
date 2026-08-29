@@ -7,6 +7,9 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
+  "triggers": {
+    "crons": ["17 18 * * *"]
+  },
   "observability": {
     "enabled": true,
     "logs": {
@@ -39,7 +42,7 @@
     {
       "class_name": "GlobalPassCollectorContainer",
       "image": "./Dockerfile",
-      "max_instances": 1,
+      "max_instances": 2,
       "instance_type": "basic",
       "constraints": {
         "regions": ["APAC"]

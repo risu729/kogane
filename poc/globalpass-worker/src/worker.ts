@@ -25,14 +25,18 @@ const RELAY_HOSTS = new Set([
   PROBE_EGRESS_HOST,
 ]);
 const MAX_NDJSON_LINE_BYTES = 3 * 1024 * 1024;
-const CONTAINER_ID = "prestia-globalpass-read-only-v14";
+const CONTAINER_ID = "prestia-globalpass-read-only-v18";
 const STOPPABLE_CONTAINER_IDS = new Map([
   ["v9", "prestia-globalpass-read-only-v9"],
   ["v10", "prestia-globalpass-read-only-v10"],
   ["v11", "prestia-globalpass-read-only-v11"],
   ["v12", "prestia-globalpass-read-only-v12"],
   ["v13", "prestia-globalpass-read-only-v13"],
-  ["v14", CONTAINER_ID],
+  ["v14", "prestia-globalpass-read-only-v14"],
+  ["v15", "prestia-globalpass-read-only-v15"],
+  ["v16", "prestia-globalpass-read-only-v16"],
+  ["v17", "prestia-globalpass-read-only-v17"],
+  ["v18", CONTAINER_ID],
 ]);
 
 export class GlobalPassCollectorContainer extends Container<Env> {
@@ -40,6 +44,7 @@ export class GlobalPassCollectorContainer extends Container<Env> {
   override requiredPorts = [8080];
   override sleepAfter = "5m";
   override enableInternet = true;
+  override envVars = { TZ: "Asia/Tokyo" };
 
   override onStart(): void {
     console.log(JSON.stringify({ event: "globalpass-container-start" }));
@@ -132,6 +137,22 @@ export default {
       await container.stop();
       return Response.json({ stopped: instance });
     }
+    if (request.method === "GET" && url.pathname === "/latest-manifest") {
+      if (!(await validBearer(request, env.ADMIN_TRIGGER_TOKEN))) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      try {
+        return await latestManifestResponse(
+          env.SNAPSHOTS,
+          url.searchParams.get("date"),
+        );
+      } catch (error) {
+        return Response.json(
+          { error: redactError(error).slice(0, 300) },
+          { status: 400 },
+        );
+      }
+    }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
@@ -156,6 +177,35 @@ export default {
     await runCollection(env, "daily");
   },
 } satisfies ExportedHandler<Env>;
+
+async function latestManifestResponse(
+  bucket: R2Bucket,
+  requestedDate: string | null,
+): Promise<Response> {
+  const date = requestedDate ?? new Date().toISOString().slice(0, 10);
+  if (!/^20\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u.test(date)) {
+    throw new Error("date must use YYYY-MM-DD");
+  }
+  const prefix = `raw/prestia-globalpass/${date.replaceAll("-", "/")}/`;
+  const listed = await bucket.list({ prefix, limit: 1_000 });
+  const latest = listed.objects
+    .filter((object) => object.key.endsWith("/manifest.json"))
+    .sort((left, right) => right.uploaded.getTime() - left.uploaded.getTime())[0];
+  if (!latest) {
+    return Response.json({ error: "No manifest for date" }, { status: 404 });
+  }
+  const object = await bucket.get(latest.key);
+  if (!object) {
+    return Response.json({ error: "Manifest disappeared" }, { status: 404 });
+  }
+  return new Response(object.body, {
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "x-manifest-key": latest.key,
+    },
+  });
+}
 
 async function runContainerProbe(
   env: Env,
@@ -193,6 +243,7 @@ async function runCollection(
   const artifacts: StoredArtifact[] = [];
   const failures: CollectionFailure[] = [];
   let availableMonths: string[] = [];
+  let runtimeRevision: string | undefined;
 
   const container = getContainer(env.COLLECTOR_CONTAINER, CONTAINER_ID);
   await container.startAndWaitForPorts();
@@ -219,6 +270,7 @@ async function runCollection(
   for await (const record of readNdjson(response.body)) {
     if (record.type === "metadata") {
       availableMonths = record.availableMonths.map(safeMonth);
+      runtimeRevision = record.runtimeRevision;
       continue;
     }
     if (record.type === "error") {
@@ -256,6 +308,7 @@ async function runCollection(
   const manifest: CollectionManifest = {
     schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
     source: "prestia-globalpass",
+    runtimeRevision,
     runId,
     mode,
     startedAt,
@@ -349,10 +402,17 @@ function parseContainerRecord(line: string): ContainerRecord {
     Array.isArray(record["selectedMonths"]) &&
     record["availableMonths"].every((item) => typeof item === "string") &&
     record["selectedMonths"].every((item) => typeof item === "string") &&
-    typeof record["browserVersion"] === "string"
+    typeof record["browserVersion"] === "string" &&
+    (record["runtimeRevision"] === undefined ||
+      (typeof record["runtimeRevision"] === "string" &&
+        /^[a-z0-9-]{1,64}$/u.test(record["runtimeRevision"])))
   ) {
     return {
       type: "metadata",
+      runtimeRevision:
+        typeof record["runtimeRevision"] === "string"
+          ? record["runtimeRevision"]
+          : undefined,
       availableMonths: record["availableMonths"],
       selectedMonths: record["selectedMonths"],
       browserVersion: record["browserVersion"],

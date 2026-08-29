@@ -5,8 +5,8 @@ mode=${1:-daily}
 admin_token_file=${2:-"$HOME/.local/share/kogane/secrets/globalpass-worker-admin-token"}
 collector_url=${GLOBALPASS_WORKER_BASE_URL:-"https://kogane-globalpass-collector-poc.takuanimal.workers.dev"}
 
-if [[ $mode != daily && $mode != backfill && $mode != probe && $mode != stop ]]; then
-  echo "mode must be daily, backfill, probe, or stop" >&2
+if [[ $mode != daily && $mode != backfill && $mode != probe && $mode != stop && $mode != manifest ]]; then
+  echo "mode must be daily, backfill, probe, stop, or manifest" >&2
   exit 2
 fi
 if [[ ! -s $admin_token_file ]]; then
@@ -28,6 +28,11 @@ elif [[ $mode == stop ]]; then
     --request POST \
     --header "Authorization: Bearer ${admin_token}" \
     "${collector_url}/container-stop?instance=${instance}&action=${action}"
+elif [[ $mode == manifest ]]; then
+  manifest_date=${3:-$(date -u +%F)}
+  curl --fail-with-body --silent --show-error --max-time 60 \
+    --header "Authorization: Bearer ${admin_token}" \
+    "${collector_url}/latest-manifest?date=${manifest_date}"
 else
   curl --fail-with-body --silent --show-error --max-time 900 \
     --request POST \
