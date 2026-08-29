@@ -675,11 +675,56 @@ or integrity check can be supplied dynamically. The manifest permits
 cleartext traffic, although every banking route found here is HTTPS.
 
 The biometric plugin has an explicit `UserData` model containing ID/password
-and invokes Android biometric APIs. Because the storage/key-handling classes
-are heavily obfuscated and no runtime was used, the exact Android Keystore
-binding, ciphertext location, migration behavior, and exportability remain
-unconfirmed. Kogane should use the user's normal ID/password bootstrap rather
-than attempt to copy biometric state.
+and invokes Android biometric APIs. Static tracing confirms that the app
+encrypts those credentials with Android Keystore, stores ciphertext plus IV in
+SharedPreferences, and decrypts them after the local biometric gate before
+performing the same normal sign-on. No WebAuthn, FIDO, Credential Manager or
+server-side passkey flow was found. Kogane should therefore use the user's
+normal ID/password bootstrap rather than attempt to copy biometric state.
+
+### Browserless mobile replay validation: 2026-08-30
+
+A separate WSL-native worktree added a guarded PoC under
+`poc/prestia-mobile-html/`. It uses an in-memory cookie jar, reproduces the
+mobile hidden-form transition, accepts credentials only through a masked
+prompt or one-shot stdin JSON, and emits only value-free structural summaries.
+It never writes an authenticated body, cookie, token, ID, account number or
+balance. OTP, Access Denied, or a returned login form is a hard stop without
+automatic retry.
+
+The bounded live results were:
+
+| Step | Result | Interpretation |
+| --- | --- | --- |
+| Android-WebView-shaped bootstrap GET from WSL | HTTP 200, six cookies, `PRESTIAHEADERFORM` and `POSNIN1` present | The mobile entry is reachable without Chrome from the current egress; Akamai did not block this request. |
+| First credential POST | HTTP 200, login form returned | The initial PoC incorrectly left the two display-field copies empty; this did not reproduce the official page's `submitProc()`. |
+| Second credential POST with both visible/hidden credential pairs populated | HTTP 200, login form returned again; no redirect, OTP, home form or `hashedCIF` | The edge accepted the request shape and did not return Akamai denial, but the response did not establish a session. Repeated credential submissions were stopped. Current evidence does not distinguish invalid/currently changed credentials, a missing app fraud/client condition, or another request-shape difference. |
+| Full packaged Web bundle under headless Chrome | Did not reach the client-config initialization before the obfuscated startup occupied the page execution thread | Do not treat whole-app headless execution as a practical config extractor. Isolate the config module or capture the official app runtime instead. |
+
+The public sign-on page's `submitProc()` copies `dispuserId` and
+`disppassword` into `userId` and `password`, then makes `_TARGETID` equal to
+`_FRAMEID` before posting. The captured bootstrap already had equal target and
+frame values, and the revised PoC now enforces the assignment explicitly. It
+also refuses every redirect after the credential POST, follows only same-host
+credential-free bootstrap GET redirects while retaining each hop's cookies,
+and implements the packaged login → home GET → balance POST order. The Android
+app itself appears to build the request from hidden form state plus the two
+credential fields and adds several app-specific transport signals:
+
+- `User-Agent`, `X-FORWARDED-UA` header, and an encoded
+  `X-FORWARDED-UA` cookie;
+- a small `via` marker;
+- host-scoped application Basic-auth configuration embedded in the app;
+- Caulis FraudAlert initialization before sign-on, a user-derived hash around
+  the attempt, and `hashedCIF` association after an accepted sign-on.
+
+The Basic-auth values and all account secrets remain outside this public
+repository. Caulis does not explain bootstrap blocking because the bootstrap
+already returns 200 before the fraud call. It may still influence credential
+acceptance. A future live attempt must first establish a materially different
+condition: either confirm the credentials through the dedicated Kogane Capture
+browser, or capture one official-app request and reproduce its header/form
+shape. Do not guess-and-retry passwords or fraud payloads.
 
 The only GLOBAL PASS activity route found in the packaged Web assets is the
 separate member-site login URL on `www.debit.vpass.ne.jp`. No GLOBAL PASS card
