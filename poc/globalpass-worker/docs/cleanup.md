@@ -27,6 +27,7 @@
 - private raw comparison directory `/home/risu/.local/share/kogane/private/globalpass-turnstile/20260830`: POST body、response body、compile済みscript、sanitized reportを含む。資格情報入力とlogin POSTは行っていないが、challenge値を含むためGitへ入れず、追加解析が完了した時点でdirectory単位で削除する。
 - temporary deobfuscation tools/reports `/tmp/kogane-turnstile-tools`、`/tmp/kogane-turnstile-index.json`、`/tmp/kogane-turnstile-comparison.json`、および明示的に作成したoutside-worktree pretty directory。private capture本体とは別に削除できる。
 - 誤った旧worktree `/home/risu/codex-work/2026-08-27/kogane-globalpass-worker`内の同名untracked analyzer 5 files: 正しいPR worktreeへ反映済みなので、旧worktreeを破棄するときだけ削除する。
+- 誤ってWindows側へ作成されていた`C:\home`は2026-08-30に監査し、14 fileすべてがWSL側より古い草稿でsecret/cookie/captureを含まず正本がGit/WSLにあることを確認して削除済み。cleanup対象には残っていない。
 - local admin token file `/home/risu/.local/share/kogane/secrets/globalpass-worker-admin-token`: PoCを操作しなくなった時点で削除する。
 - `/home/risu/.docker/config.json`内のCloudflare registry認証entry: Wranglerが追加した可能性があるため確認して、不要ならそのentryだけを除去する。ファイル全体は他registry設定を含み得るため削除しない。
 - このgit worktree: PRをmergeまたはcloseし、必要なcommitがremoteにあることを確認した後だけ削除可能。
@@ -64,6 +65,7 @@ listenしていない。relay tokenはstdinからmemoryへ渡し、`bots`のfile
 - Worker `kogane-globalpass-collector-poc`とworkers.dev deployment。
 - Container app `kogane-globalpass-collector-poc-globalpasscollectorcontainer`（app ID `a03ac341-52a7-4e81-9a7c-279a90cc4b0c`）。
 - 現行Container image `sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`（Google Chrome Stable、Patchright、same-egress probe入り）と、registryに残る上記旧image。
+- 2026-08-30 WSL local Docker A/Bの一時container `kogane-globalpass-wsl-ab-*`、port 8080/18080/18081/18082、Xvfb :93/:94、host SOCKS port 11080は全run終了後に停止・削除済み。新しいimage、profile、captureは作成していない。
 - 2026-08-29追加検証の旧Container image `sha256:ac8dcc44bfcd5135dd60582ed801492f599735d4e45df63e4cf9416f108dded1`、`sha256:f3fe89e1590fce95edcca8b29dbb34aff3426b5cb39be88aedacb230e4dc284f`、およびそれ以前の現行imageだった`sha256:4933be0abc6397d74ec6f02b0e49a4a046daeda392962f7f28f3c3d41514c7c6`。
 - Workerの公開診断endpoint `/egress`。既存Worker以外のresourceは作らず、Worker削除に従って消える。
 - npm依存の`patchright`。別serviceや別registry resourceは作っていないため、repo/Container imageの削除だけで除去される。

@@ -288,6 +288,43 @@ Xvfb、physical displayなし、WebGL unavailableのいずれも単独blockerで
 local WSLとserver環境の残差はdisplay serverやWebGLより下のhost/container runtime、
 browser buildの実行環境、Cloudflareが観測するintegrity signalへさらに絞られる。
 
+### WSL native / local Docker image A/B
+
+Cloudflare Containersのlocal developmentはCloudflare本番Container bindingへのremote接続
+ではなく、local Docker Engine上のsimulationである。このため本番runtimeの同一再現とは
+扱わず、deploy imageのuserlandとDocker境界をWSL host上で分離する比較として実施した。
+
+再buildによるdriftを避け、Cloudflareへdeploy済みの現行image digest
+`sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`
+（local tag `kogane-globalpass-collector-poc-globalpasscollectorcontainer:cd80a6ee`）をそのまま
+使った。variantはGoogle Chromeを直接spawnし25秒後までCDP attachしない
+`chrome-direct-process-attach-late-all-tamia`で、資格情報入力とlogin POSTは全runで0回である。
+
+| 同一WSL host上の条件 | token | 解釈 |
+| --- | ---: | --- |
+| native Chrome、fresh profile、Xvfb、TAMIA | 794 | current successful control |
+| 上記へ`--no-sandbox --disable-dev-shm-usage`を追加 | 794 | Container用flagは単独blockerではない |
+| exact image、0.25 CPU / 1 GiB | 0 | Cloudflare `basic`相当 |
+| exact image、resource制限なし | 0 | CPU/memory starvationは単独blockerではない |
+| exact image、UID/GID 1000 | 0 | root実行は単独blockerではない |
+| exact image、host network | 0 | Docker bridge network namespaceは単独blockerではない |
+
+hostとimage内のChromeはどちらもGoogle Chrome Stable `152.0.7977.64-1`であり、実体
+`/opt/google/chrome/chrome`のSHA-256は同じ
+`44bd90e776ea03a952242b3536d4a10a2e43c64a227c243af2840f07f1f0ed17`だった。したがって
+表示versionだけでなくChrome executable byte差も除外できる。両者の`LANG`は`C.UTF-8`、
+pageはnative Linux、`navigator.webdriver=false`、Sign On/formあり、Access Deniedなしだった。
+
+以前の2026-08-27 local Docker試行は旧imageの`/health`到達前後にWSLが
+`Wsl/Service/E_UNEXPECTED`となり、Turnstile `/probe`を一度も呼べていなかったため、この
+A/Bの既実施結果には数えない。今回初めてexact deploy imageでtoken gateまで完了した。
+
+この結果はCloudflare固有runtimeが原因だと証明するものではない。むしろlocal WSLだけで
+native成功 / Container失敗を再現できたため、次はimage内のfont/fontconfig、speech voices、
+locale data、D-Bus/audio、Chrome同梱外shared libraryを小さく比較する。PID namespaceは
+browser JavaScriptから直接観測しにくいため後順位とする。Cloudflare instance type変更は、
+local unlimited imageも失敗した現時点では優先しない。
+
 ## 結論
 
 2026-08-29の追加検証により、送信元IPはTAMIA統一とContainer直通の両方で直接確認できた。split解消、Brunhild到達可能な同一出口、Patchright、Chrome通常processの後付けCDP、Windows Chrome 152と整合させた表層fingerprintを個別・組合せで試してもtokenは0だった。したがって、Cloudflare Containers上のbrowser routeをproduction collectorとして追い続ける優先度は下げる。残る可能性は実Windows browser、正常利用履歴を持つprofile、または公開情報から観測できないbrowser/OS integrity signalだが、どれもserverless collectorの単純な構成から外れる。

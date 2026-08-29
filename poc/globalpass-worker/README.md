@@ -157,6 +157,20 @@ fresh profile、通常Chrome 152、`webdriver=false`のままtoken 794を生成�
 ない。server環境固有のhost/container runtimeまたは公開されないintegrity signalへ焦点を
 移す。
 
+Cloudflareへdeploy済みの現行Container image digest
+`sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`
+を再buildせず、local WSLのDocker Engineでも実行した。通常Chromeを直接起動して25秒後
+までCDP attachしない`chrome-direct-process-attach-late-all-tamia`を使い、Cloudflare
+`basic`相当の0.25 CPU / 1 GiBとresource制限なしの両方でtokenは0だった。対して同じ
+WSL hostでnative Chromeを起動するとtoken 794であり、Containerと同じ
+`--no-sandbox --disable-dev-shm-usage`を追加しても794だった。hostとimage内のChromeは
+version `152.0.7977.64`、package、実体`/opt/google/chrome/chrome`のSHA-256まで一致した。
+さらにimageをUID 1000で実行した条件と`--network=host`条件もtoken 0だった。これにより、
+CPU/memory、2起動flag、Chrome binary、root、Docker bridge networkを各単独root cause
+から除外し、image内のfont・speech/locale・shared libraryなどbrowser-visible userland差を
+次の比較対象とする。local ContainerはCloudflare本番runtimeではなくDocker上のlocal
+simulationなので、この結果をCloudflare固有host signalの再現とは扱わない。
+
 同じChrome、Xvfb、TAMIA条件でTurnstileのOOPIFとworkerへCDPでattachし、成功WSLと
 失敗OCIの2段階POST、response body、compile済みscript sourceを比較した。両方とも
 84,236-byte `api.js`は同一だったが、session-specific `rch` runtime、2本目POST、2本目
