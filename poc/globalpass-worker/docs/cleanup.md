@@ -15,6 +15,9 @@
 - 旧Container image `sha256:35d493c8d276d9e6d58856fe4b132d5ec9a14cbc28f92118c48dc5fc50bb9c03`: Playwright同梱Chromiumだけを含む6条件目導入前のimage。
 - local Docker image/tag `kogane-globalpass-collector-poc-globalpasscollectorcontainer:worker`: remote deployを検証し終えたら削除可能。
 - Kuebiko raw capture `C:\Users\risu\AppData\Local\Kuebiko\captures\2026-08-27T21-46-51`: cookie等を含み得る。sanitized結果は本repoに記録済みなので、追加解析が不要になった時点で削除する。
+- 2026-08-29 local A/B用Windows profile `C:\Users\risu\AppData\Local\Kuebiko\browser-profile-globalpass-copy-win-20260829`と`browser-profile-globalpass-fresh-win-20260829`: 元profileは削除せず、この2個だけ追加解析後に削除する。
+- 2026-08-29 local A/B用WSL profile `/home/risu/.local/share/kogane/browser-profile-globalpass-copy-wsl-20260829`と`browser-profile-globalpass-fresh-wsl-20260829`: 前者はWindows profileの約5 GiB copy。この2個だけ追加解析後に削除する。
+- 2026-08-29 local A/B raw captures: Windowsの`2026-08-29T12-35-16`、`2026-08-29T12-53-00`、`2026-08-29T12-55-57`と、WSLの`2026-08-29T12-45-21`、`2026-08-29T12-51-54`。cookie等を含み得るためGitへ入れず、sanitized結果確認後に各capture directoryだけ削除する。
 - local admin token file `/home/risu/.local/share/kogane/secrets/globalpass-worker-admin-token`: PoCを操作しなくなった時点で削除する。
 - `/home/risu/.docker/config.json`内のCloudflare registry認証entry: Wranglerが追加した可能性があるため確認して、不要ならそのentryだけを除去する。ファイル全体は他registry設定を含み得るため削除しない。
 - このgit worktree: PRをmergeまたはcloseし、必要なcommitがremoteにあることを確認した後だけ削除可能。

@@ -131,10 +131,27 @@ Cloudflare公式資料を再確認し、PAT endpointの401とBrunhild 204直後�
 
 Cloudflareも本番challengeに対するPlaywright、Selenium、Puppeteerを公式サポートしていないため、現時点ではこのbrowser方式をproduction collectorへ昇格させない。調査したPatchright、SeleniumBase Pure CDP、その他の第三者workaroundと採否理由はdocs/browser-run-investigation-2026-08-28.mdに集約した。
 
+## 2026-08-29 local Windows / WSL profile A/B
+
+同じ時刻帯に、ローカルWindows Chrome Beta 153とWSL Google Chrome 152で、
+fresh profileと既存Kuebiko profileのcopyを比較した。4条件すべてで
+`cf-turnstile-response`が生成され、formあり、`Access Denied`なし、
+`navigator.webdriver=false`だった。token長はWindows copy 794、Windows fresh
+752、WSL copy 773、WSL fresh 730である。token値、資格情報、login POSTは保存・
+送信していない。
+
+WSLはWindows profileをcopyしても成功したが、fresh profileも成功したため、
+profile copyやDPAPIで保護されたWindows cookieが成功原因とはいえない。native
+Linux Chromeもローカルでは通るので、Container失敗をLinux、fresh profile、
+CDP利用のいずれか一つへ帰属させない。計測時のCloudflare traceはWindows/WSL
+ともWARP有効、JP/NRTだった。詳細な手順と解釈は
+[`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)
+に記録した。
+
 ## 次に試す順序
 
 1. GLOBAL PASSの公式mobile appや別の公式提供経路で、利用履歴を取得できるかを優先する。
-2. browser routeを再開するのは、実Windows上の正常profileを安全にserverlessへ持ち込める設計、または明確に新しい一次情報が得られた場合だけにする。
+2. browser routeを再開する場合、個人profile移送やWindows偽装より先に、Containerとlocal native Chromeのruntime・network identity差を測る。
 3. split egressは採用せず、同一TAMIA出口または同一Container出口に固定する。
 4. PAT 401やBrunhild 204後のabortを、それ単独でblockerと判断しない。
 5. Cronはtoken生成、login POST、明細画面、月selectorの順にbounded testが成功するまで有効化しない。

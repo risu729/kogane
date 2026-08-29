@@ -151,9 +151,54 @@ References:
 - [Playwright Google Chrome channel](https://playwright.dev/docs/browsers#google-chrome--microsoft-edge)
 - [Playwright browser launch arguments](https://playwright.dev/docs/api/class-browsertype)
 
+## 2026-08-29 local Windows / WSL profile A/B
+
+「正常利用履歴のあるWindows profileが必要」「Linux Chromeでは通らない」
+という仮説を分けるため、同じ時刻帯のローカルWindowsとWSLで4条件を
+比較した。GLOBAL PASS login URLを1回開き、CDPのread-only
+`Runtime.evaluate`でtokenの**長さだけ**を確認した。資格情報の入力、login
+POST、token値の保存・出力は行っていない。全runをKuebikoでcaptureし、生の
+captureはcookie等を含み得るためGitには入れない。
+
+計測には[`scripts/probe-local-turnstile.mjs`](../scripts/probe-local-turnstile.mjs)
+を使用した。Node.js 22以降で`node scripts/probe-local-turnstile.mjs <CDP port>`
+として実行する。scriptはtoken本文を返さず、長さと非機密のpage状態だけを出す。
+
+| OS / Chrome | profile | token | page上の観測 |
+| --- | --- | ---: | --- |
+| Windows / Chrome Beta 153 | 既存Kuebiko profileの同一Windows内copy | 794 | `Win32`、`webdriver=false`、formあり、Access Deniedなし |
+| Windows / Chrome Beta 153 | 完全なfresh profile | 752 | 同上 |
+| WSL / Google Chrome 152 | Windows Kuebiko profileをWSL ext4へcopy | 773 | `Linux x86_64`、`webdriver=false`、formあり、Access Deniedなし |
+| WSL / Google Chrome 152 | 完全なfresh profile | 730 | 同上 |
+
+計測時のCloudflare traceはWindowsがIPv6、WSLがIPv4だったが、どちらも
+WARP有効、`loc=JP`、`colo=NRT`だった。これはGLOBAL PASS originが同じ値を
+見たことの証明ではなく、ローカル経路のcontrol情報としてのみ記録する。
+
+Windows fresh profileは初回の`chrome://intro/`を表示したため、CDPの
+`/json/new`で対象URLを新規tabに開いた。WSL fresh profileではKuebikoの
+launch wrapperが最初のCDP待機に失敗したが、同じprofileをChromeの通常process
+として起動するとCDPが公開され、Kuebikoを後からattachできた。したがって、
+このwrapper failureはTurnstile rejectionとして数えない。
+
+Windows profileをLinuxへcopyしてもtokenは生成されたため、少なくとも
+Turnstile表示までにはWindows DPAPIで復号可能なcookieは必須ではなかった。
+さらにfresh WSLでも成功したため、今回の成功をprofile copyや過去の正常利用
+履歴へ帰属できない。Linux OS、fresh profile、CDP接続のいずれもローカル環境では
+単独blockerではない。Cloudflare Containerでの失敗との差として残るのは、
+Container/browser automation固有のidentity・integrity signal、runtime、network
+経路などであり、Windows偽装や個人profile移送を先にproduction設計へ入れる根拠は
+なくなった。
+
 ## 結論
 
 2026-08-29の追加検証により、送信元IPはTAMIA統一とContainer直通の両方で直接確認できた。split解消、Brunhild到達可能な同一出口、Patchright、Chrome通常processの後付けCDP、Windows Chrome 152と整合させた表層fingerprintを個別・組合せで試してもtokenは0だった。したがって、Cloudflare Containers上のbrowser routeをproduction collectorとして追い続ける優先度は下げる。残る可能性は実Windows browser、正常利用履歴を持つprofile、または公開情報から観測できないbrowser/OS integrity signalだが、どれもserverless collectorの単純な構成から外れる。
+
+ただし同日のlocal A/Bでは、fresh Windows、copied Windows、fresh WSL、
+Windows profileをcopyしたWSLの全条件でtoken生成に成功した。この結果により、
+「実Windowsまたは正常利用履歴profileが必須」という候補は弱くなった。native
+Linux ChromeもローカルJP/WARP経路では成功するため、Containerとの差をLinux
+OSだけで説明しない。
 
 Browser RunはGLOBAL PASSのlogin pageとTurnstile challenge transportを正常に200で取得したが、tokenを完成できなかった。少なくとも今回のBrowser Run失敗は`brunhild.challenges.cloudflare.com`のIPv6到達性では説明できない。したがって「TAMIAにIPv6がないことが既知のblocker」という以前の推論は撤回する。
 
