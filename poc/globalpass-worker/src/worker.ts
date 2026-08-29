@@ -17,17 +17,22 @@ import { runGlobalPassBrowserProbe } from "./browser-probe";
 const GLOBALPASS_HOST = "www.debit.vpass.ne.jp";
 const TURNSTILE_HOST = "challenges.cloudflare.com";
 const TURNSTILE_HELPER_HOST = "brunhild.challenges.cloudflare.com";
+const PROBE_EGRESS_HOST = "kogane-globalpass-collector-poc.takuanimal.workers.dev";
 const RELAY_HOSTS = new Set([
   GLOBALPASS_HOST,
   TURNSTILE_HOST,
   TURNSTILE_HELPER_HOST,
+  PROBE_EGRESS_HOST,
 ]);
 const MAX_NDJSON_LINE_BYTES = 3 * 1024 * 1024;
-const CONTAINER_ID = "prestia-globalpass-read-only-v11";
+const CONTAINER_ID = "prestia-globalpass-read-only-v14";
 const STOPPABLE_CONTAINER_IDS = new Map([
   ["v9", "prestia-globalpass-read-only-v9"],
   ["v10", "prestia-globalpass-read-only-v10"],
-  ["v11", CONTAINER_ID],
+  ["v11", "prestia-globalpass-read-only-v11"],
+  ["v12", "prestia-globalpass-read-only-v12"],
+  ["v13", "prestia-globalpass-read-only-v13"],
+  ["v14", CONTAINER_ID],
 ]);
 
 export class GlobalPassCollectorContainer extends Container<Env> {
@@ -63,6 +68,18 @@ export default {
         source: "prestia-globalpass",
         schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       });
+    }
+    if (request.method === "GET" && url.pathname === "/egress") {
+      return Response.json(
+        {
+          ip: request.headers.get("cf-connecting-ip"),
+          country: request.cf?.country ?? null,
+          colo: request.cf?.colo ?? null,
+          asn: request.cf?.asn ?? null,
+          httpProtocol: request.cf?.httpProtocol ?? null,
+        },
+        { headers: { "cache-control": "no-store" } },
+      );
     }
     if (
       request.headers.get("upgrade")?.toLowerCase() === "websocket" &&

@@ -5,6 +5,7 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { chromium as patchrightChromium } from "patchright";
 import { chromium } from "playwright";
 import WebSocket from "ws";
 
@@ -13,17 +14,17 @@ const LOGIN_URL =
 const GLOBALPASS_HOST = "www.debit.vpass.ne.jp";
 const TURNSTILE_HOST = "challenges.cloudflare.com";
 const TURNSTILE_HELPER_HOST = "brunhild.challenges.cloudflare.com";
+const PROBE_EGRESS_HOST = "kogane-globalpass-collector-poc.takuanimal.workers.dev";
+const PROBE_EGRESS_URL = `https://${PROBE_EGRESS_HOST}/egress`;
 const RELAY_HOSTS = new Set([
   GLOBALPASS_HOST,
   TURNSTILE_HOST,
   TURNSTILE_HELPER_HOST,
+  PROBE_EGRESS_HOST,
 ]);
 const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const DAILY_MONTHS = 2;
-const WINDOWS_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-  "(KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
 const PROBE_VARIANTS = [
   "baseline",
   "webdriver-false",
@@ -31,6 +32,16 @@ const PROBE_VARIANTS = [
   "headed-windows",
   "headed-persistent-windows",
   "chrome-stable-headed-persistent-windows",
+  "chrome-stable-no-ua-direct",
+  "chrome-stable-no-ua-split",
+  "chrome-stable-no-ua-all-tamia",
+  "chrome-stable-no-ua-all-tamia-default-automation",
+  "chrome-stable-windows-matched-all-tamia",
+  "chrome-stable-windows-matched-direct",
+  "patchright-chrome-native-all-tamia",
+  "patchright-chrome-native-direct",
+  "chrome-direct-process-attach-late-all-tamia",
+  "chrome-direct-process-attach-late-direct",
 ];
 let collecting = false;
 let xvfbProcess;
@@ -286,6 +297,9 @@ function normalizeDiagnosticPath(url) {
       : "/turnstile/v0/<redacted>";
   }
   if (url.pathname.startsWith("/cdn-cgi/challenge-platform/")) {
+    if (url.pathname.includes("/pat/")) {
+      return "/cdn-cgi/challenge-platform/<redacted>/pat/<redacted>";
+    }
     return "/cdn-cgi/challenge-platform/<redacted>";
   }
   return url.pathname
@@ -295,21 +309,144 @@ function normalizeDiagnosticPath(url) {
 
 function probeConfiguration(variant) {
   const index = PROBE_VARIANTS.indexOf(variant);
-  return {
-    webdriverFalse: index >= 1,
-    windows: index >= 2,
-    headed: index >= 3,
-    persistent: index >= 4,
-    chromeStable: index >= 5,
+  if (index >= 0 && index <= 5) {
+    return {
+      webdriverFalse: index >= 1,
+      windows: index >= 2,
+      windowsVersion: "153.0.0.0",
+      headed: index >= 3,
+      persistent: index >= 4,
+      chromeStable: index >= 5,
+      nativeContext: false,
+      patchright: false,
+      directChrome: false,
+      egress: "split",
+    };
+  }
+  const chromeNative = {
+    webdriverFalse: true,
+    windows: false,
+    windowsVersion: null,
+    headed: true,
+    persistent: true,
+    chromeStable: true,
+    nativeContext: true,
+    patchright: false,
+    directChrome: false,
   };
+  if (variant === "chrome-stable-no-ua-direct") {
+    return { ...chromeNative, egress: "direct" };
+  }
+  if (variant === "chrome-stable-no-ua-split") {
+    return { ...chromeNative, egress: "split" };
+  }
+  if (variant === "chrome-stable-no-ua-all-tamia") {
+    return { ...chromeNative, egress: "all-tamia" };
+  }
+  if (variant === "chrome-stable-no-ua-all-tamia-default-automation") {
+    return {
+      ...chromeNative,
+      webdriverFalse: false,
+      egress: "all-tamia",
+    };
+  }
+  if (variant === "chrome-stable-windows-matched-all-tamia") {
+    return {
+      ...chromeNative,
+      windows: true,
+      windowsVersion: "152.0.7977.64",
+      nativeContext: false,
+      egress: "all-tamia",
+    };
+  }
+  if (variant === "chrome-stable-windows-matched-direct") {
+    return {
+      ...chromeNative,
+      windows: true,
+      windowsVersion: "152.0.7977.64",
+      nativeContext: false,
+      egress: "direct",
+    };
+  }
+  if (variant === "patchright-chrome-native-all-tamia") {
+    return {
+      ...chromeNative,
+      webdriverFalse: false,
+      patchright: true,
+      egress: "all-tamia",
+    };
+  }
+  if (variant === "patchright-chrome-native-direct") {
+    return {
+      ...chromeNative,
+      webdriverFalse: false,
+      patchright: true,
+      egress: "direct",
+    };
+  }
+  if (variant === "chrome-direct-process-attach-late-all-tamia") {
+    return {
+      ...chromeNative,
+      webdriverFalse: false,
+      directChrome: true,
+      egress: "all-tamia",
+    };
+  }
+  if (variant === "chrome-direct-process-attach-late-direct") {
+    return {
+      ...chromeNative,
+      webdriverFalse: false,
+      directChrome: true,
+      egress: "direct",
+    };
+  }
+  throw new Error("unknown probe configuration");
 }
 
 function probeContextOptions(config) {
+  if (config.nativeContext) return { viewport: null };
+  const windowsVersion = config.windowsVersion ?? "153.0.0.0";
   return {
     locale: config.windows ? "en-US" : "ja-JP",
     timezoneId: "Asia/Tokyo",
     viewport: { width: 1365, height: 768 },
-    ...(config.windows ? { userAgent: WINDOWS_UA } : {}),
+    ...(config.windows
+      ? { userAgent: windowsUserAgent(windowsVersion) }
+      : {}),
+  };
+}
+
+function windowsUserAgent(version) {
+  return (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+    `AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`
+  );
+}
+
+function diagnosticConsoleSignal(message) {
+  const codes = message.match(/\b(?:1|2|3|4|6)\d{5}\b/gu) ?? [];
+  if (!/turnstile|challenge|cloudflare|error/iu.test(message) && codes.length === 0) {
+    return null;
+  }
+  return {
+    codes: [...new Set(codes)].slice(0, 8),
+    category: /turnstile/iu.test(message)
+      ? "turnstile"
+      : /challenge|cloudflare/iu.test(message)
+        ? "challenge"
+        : "error",
+  };
+}
+
+function probeProxy(config, socksPort) {
+  if (config.egress === "direct") return undefined;
+  const bypass =
+    config.egress === "split"
+      ? `${TURNSTILE_HOST},${TURNSTILE_HELPER_HOST}`
+      : undefined;
+  return {
+    server: `socks5://127.0.0.1:${socksPort}`,
+    ...(bypass ? { bypass } : {}),
   };
 }
 
@@ -344,8 +481,11 @@ async function ensureXvfb() {
 }
 
 async function launchProbeContext(config, socksPort) {
-  const args = ["--no-sandbox", "--disable-dev-shm-usage"];
-  if (config.webdriverFalse) {
+  const browserType = config.patchright ? patchrightChromium : chromium;
+  const args = config.patchright
+    ? ["--no-sandbox"]
+    : ["--no-sandbox", "--disable-dev-shm-usage"];
+  if (config.webdriverFalse && !config.patchright) {
     args.push("--disable-blink-features=AutomationControlled");
   }
   if (config.headed) args.push("--window-size=1365,768");
@@ -355,10 +495,9 @@ async function launchProbeContext(config, socksPort) {
     args,
     ...(config.chromeStable ? { channel: "chrome" } : {}),
     ...(display ? { env: { ...process.env, DISPLAY: display } } : {}),
-    proxy: {
-      server: `socks5://127.0.0.1:${socksPort}`,
-      bypass: `${TURNSTILE_HOST},${TURNSTILE_HELPER_HOST}`,
-    },
+    ...(probeProxy(config, socksPort)
+      ? { proxy: probeProxy(config, socksPort) }
+      : {}),
   };
   let browser;
   let context;
@@ -367,13 +506,13 @@ async function launchProbeContext(config, socksPort) {
     profileDirectory = await mkdtemp(
       path.join(os.tmpdir(), "kogane-globalpass-profile-"),
     );
-    context = await chromium.launchPersistentContext(profileDirectory, {
+    context = await browserType.launchPersistentContext(profileDirectory, {
       ...launchOptions,
       ...probeContextOptions(config),
     });
     browser = context.browser();
   } else {
-    browser = await chromium.launch(launchOptions);
+    browser = await browserType.launch(launchOptions);
     context = await browser.newContext(probeContextOptions(config));
   }
   return {
@@ -392,7 +531,158 @@ async function launchProbeContext(config, socksPort) {
   };
 }
 
-async function configureWindowsFingerprint(context, page) {
+async function availableLocalPort() {
+  const server = net.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  const port = address.port;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+async function waitForChromeEndpoint(endpoint, child) {
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    if (child.exitCode !== null) {
+      throw new Error("Google Chrome exited with code " + child.exitCode);
+    }
+    try {
+      const response = await fetch(endpoint + "/json/version");
+      if (response.ok) return;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Google Chrome CDP endpoint did not become ready");
+}
+
+async function stopChild(child) {
+  if (child.exitCode !== null) return;
+  child.kill("SIGTERM");
+  await Promise.race([
+    once(child, "exit").catch(() => undefined),
+    new Promise((resolve) => setTimeout(resolve, 2_000)),
+  ]);
+  if (child.exitCode === null) child.kill("SIGKILL");
+}
+
+async function inspectProbePage(page) {
+  return page.evaluate(() => {
+    const input = document.querySelector("[name=cf-turnstile-response]");
+    const body = document.body?.innerText ?? "";
+    return {
+      title: document.title.slice(0, 80),
+      userAgent: navigator.userAgent,
+      platform: navigator.platform,
+      webdriver: navigator.webdriver,
+      language: navigator.language,
+      languages: navigator.languages,
+      screen: {
+        width: window.screen.width,
+        height: window.screen.height,
+        availWidth: window.screen.availWidth,
+        availHeight: window.screen.availHeight,
+        devicePixelRatio: window.devicePixelRatio,
+      },
+      loginFormVisible: Boolean(document.querySelector("#usrId")),
+      denied: /Access Denied|アクセスが拒否/iu.test(body),
+      challengeErrorCodes: [
+        ...new Set(body.match(/\b(?:1|2|3|4|6)\d{5}\b/gu) ?? []),
+      ].slice(0, 8),
+      tokenLength: input && "value" in input ? input.value.length : 0,
+      frames: [...document.querySelectorAll("iframe")]
+        .map((frame) => {
+          try {
+            const url = new URL(frame.src);
+            return {
+              host: url.hostname,
+              path: url.pathname.startsWith("/cdn-cgi/challenge-platform/")
+                ? "/cdn-cgi/challenge-platform/<redacted>"
+                : url.pathname.slice(0, 120),
+            };
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean)
+        .slice(0, 8),
+    };
+  });
+}
+
+async function probeDirectChrome(payload, config, socksPort, startedAt) {
+  const display = await ensureXvfb();
+  const profileDirectory = await mkdtemp(
+    path.join(os.tmpdir(), "kogane-globalpass-direct-chrome-profile-"),
+  );
+  const debuggingPort = await availableLocalPort();
+  const endpoint = "http://127.0.0.1:" + debuggingPort;
+  const attachedAfterMs = 25_000;
+  const proxyArguments =
+    config.egress === "direct"
+      ? []
+      : ["--proxy-server=socks5://127.0.0.1:" + socksPort];
+  const child = spawn(
+    "/usr/bin/google-chrome",
+    [
+      "--no-sandbox",
+      "--disable-dev-shm-usage",
+      "--no-first-run",
+      "--no-default-browser-check",
+      "--user-data-dir=" + profileDirectory,
+      "--remote-debugging-port=" + debuggingPort,
+      "--remote-debugging-address=127.0.0.1",
+      ...proxyArguments,
+      "--window-size=1365,768",
+      LOGIN_URL,
+    ],
+    {
+      env: { ...process.env, DISPLAY: display },
+      stdio: "ignore",
+    },
+  );
+  let browser;
+  try {
+    await waitForChromeEndpoint(endpoint, child);
+    const remaining = attachedAfterMs - (Date.now() - startedAt);
+    if (remaining > 0) {
+      await new Promise((resolve) => setTimeout(resolve, remaining));
+    }
+    browser = await chromium.connectOverCDP(endpoint);
+    const pages = browser.contexts().flatMap((context) => context.pages());
+    const page =
+      pages.find((candidate) => {
+        try {
+          return new URL(candidate.url()).hostname === GLOBALPASS_HOST;
+        } catch {
+          return false;
+        }
+      }) ?? pages[0];
+    if (!page) throw new Error("Google Chrome did not expose a page");
+    const pageState = await inspectProbePage(page);
+    return {
+      variant: payload.variant,
+      config,
+      elapsedMs: Date.now() - startedAt,
+      attachedAfterMs,
+      tokenGenerated: pageState.tokenLength > 20,
+      navigationStatus: null,
+      browserVersion: browser.version(),
+      egress: { route: config.egress, measured: false },
+      page: pageState,
+      consoleSignals: [],
+      brunhildRequested: null,
+      network: [],
+    };
+  } finally {
+    if (browser) await browser.close().catch(() => undefined);
+    await stopChild(child);
+    await rm(profileDirectory, { recursive: true, force: true });
+  }
+}
+
+async function configureWindowsFingerprint(context, page, version) {
   await context.addInitScript(() => {
     Object.defineProperty(Navigator.prototype, "platform", {
       configurable: true,
@@ -405,21 +695,21 @@ async function configureWindowsFingerprint(context, page) {
   });
   const session = await context.newCDPSession(page);
   await session.send("Emulation.setUserAgentOverride", {
-    userAgent: WINDOWS_UA,
+    userAgent: windowsUserAgent(version),
     acceptLanguage: "en-US,ja;q=0.9,en-AU;q=0.8,en-GB;q=0.7,en;q=0.6",
     platform: "Win32",
     userAgentMetadata: {
       brands: [
-        { brand: "Chromium", version: "153" },
-        { brand: "Google Chrome", version: "153" },
+        { brand: "Chromium", version: version.split(".")[0] },
+        { brand: "Google Chrome", version: version.split(".")[0] },
         { brand: "Not_A Brand", version: "99" },
       ],
       fullVersionList: [
-        { brand: "Chromium", version: "153.0.0.0" },
-        { brand: "Google Chrome", version: "153.0.0.0" },
+        { brand: "Chromium", version },
+        { brand: "Google Chrome", version },
         { brand: "Not_A Brand", version: "99.0.0.0" },
       ],
-      fullVersion: "153.0.0.0",
+      fullVersion: version,
       platform: "Windows",
       platformVersion: "10.0.0",
       architecture: "x86",
@@ -441,6 +731,9 @@ async function probeTurnstile(payload) {
   };
   const startedAt = Date.now();
   try {
+    if (config.directChrome) {
+      return await probeDirectChrome(payload, config, socks.port, startedAt);
+    }
     launched = await launchProbeContext(config, socks.port);
     const { browser, context } = launched;
     await context.route("**/*", async (route) => {
@@ -456,8 +749,25 @@ async function probeTurnstile(payload) {
     });
     const page = await context.newPage();
     if (config.windows) {
-      await configureWindowsFingerprint(context, page);
+      await configureWindowsFingerprint(
+        context,
+        page,
+        config.windowsVersion ?? "153.0.0.0",
+      );
     }
+    const consoleSignals = [];
+    page.on("console", (message) => {
+      const signal = diagnosticConsoleSignal(message.text());
+      if (signal && consoleSignals.length < 16) {
+        consoleSignals.push({ type: message.type(), ...signal });
+      }
+    });
+    page.on("pageerror", (error) => {
+      const signal = diagnosticConsoleSignal(error.message);
+      if (signal && consoleSignals.length < 16) {
+        consoleSignals.push({ type: "pageerror", ...signal });
+      }
+    });
     page.on("response", (response) => {
       const url = new URL(response.url());
       if (!RELAY_HOSTS.has(url.hostname)) return;
@@ -483,6 +793,16 @@ async function probeTurnstile(payload) {
       });
     });
     page.setDefaultTimeout(30_000);
+    let egress = null;
+    try {
+      const egressResponse = await page.goto(PROBE_EGRESS_URL, {
+        waitUntil: "domcontentloaded",
+        timeout: 15_000,
+      });
+      if (egressResponse?.ok()) egress = await egressResponse.json();
+    } catch {
+      egress = { error: "egress probe failed" };
+    }
     const navigation = await page.goto(LOGIN_URL, {
       waitUntil: "domcontentloaded",
     });
@@ -498,44 +818,7 @@ async function probeTurnstile(payload) {
       );
       tokenGenerated = true;
     } catch {}
-    const pageState = await page.evaluate(() => {
-      const input = document.querySelector("[name=cf-turnstile-response]");
-      const body = document.body?.innerText ?? "";
-      return {
-        title: document.title.slice(0, 80),
-        userAgent: navigator.userAgent,
-        platform: navigator.platform,
-        webdriver: navigator.webdriver,
-        language: navigator.language,
-        languages: navigator.languages,
-        screen: {
-          width: window.screen.width,
-          height: window.screen.height,
-          availWidth: window.screen.availWidth,
-          availHeight: window.screen.availHeight,
-          devicePixelRatio: window.devicePixelRatio,
-        },
-        loginFormVisible: Boolean(document.querySelector("#usrId")),
-        denied: /Access Denied|アクセスが拒否/iu.test(body),
-        tokenLength: input && "value" in input ? input.value.length : 0,
-        frames: [...document.querySelectorAll("iframe")]
-          .map((frame) => {
-            try {
-              const url = new URL(frame.src);
-              return {
-                host: url.hostname,
-                path: url.pathname.startsWith("/cdn-cgi/challenge-platform/")
-                  ? "/cdn-cgi/challenge-platform/<redacted>"
-                  : url.pathname.slice(0, 120),
-              };
-            } catch {
-              return null;
-            }
-          })
-          .filter(Boolean)
-          .slice(0, 8),
-      };
-    });
+    const pageState = await inspectProbePage(page);
     return {
       variant: payload.variant,
       config,
@@ -543,7 +826,9 @@ async function probeTurnstile(payload) {
       tokenGenerated,
       navigationStatus: navigation?.status() ?? null,
       browserVersion: browser?.version() ?? "unknown",
+      egress,
       page: pageState,
+      consoleSignals,
       brunhildRequested: network.some(
         (entry) => entry.host === TURNSTILE_HELPER_HOST,
       ),

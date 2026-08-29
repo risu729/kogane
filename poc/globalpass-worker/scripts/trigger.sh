@@ -22,7 +22,7 @@ if [[ $mode == probe ]]; then
     --header "Authorization: Bearer ${admin_token}" \
     "${collector_url}/container-probe?variant=${variant}"
 elif [[ $mode == stop ]]; then
-  instance=${3:-v11}
+  instance=${3:-v14}
   action=${4:-stop}
   curl --fail-with-body --silent --show-error --max-time 60 \
     --request POST \

@@ -96,7 +96,64 @@ Kuebiko側はremote debugging port付きのChrome Betaだが、`--enable-automat
 
 次に価値があるのは、JS property patchを増やすことではなく、Kuebiko成功runとContainer失敗runの送信元IPを直接確認してnetwork identityを分離することである。その次に、Windows偽装なしのnative Linux Chrome、Chrome 152と一致させたClient Hints、保存履歴のあるprofileの順で比較する。今回作成したContainer instance `v10`は後にdestroyし、Google Chrome検証用の`v11`は検証後にstopした。
 
+## 2026-08-29 公式仕様による訂正
+
+この節は上にある2026-08-28時点の原因推定を上書きする。Cloudflareの一次資料を再確認し、過去の診断を次のように訂正した。
+
+- Private Access Token requestの401は、端末がPATを提示できない場合の通常のfallbackであり、それ自体はchallenge失敗を意味しない。
+- challenges.cloudflare.com配下の一部request failureは、challengeの内部制御として発生し得る。Brunhildの204直後のERR_ABORTEDだけをroot causeにはできない。
+- challengeを取得したIPとsolveを送るIPが変わると、solveが無効になる場合がある。従来PoCはGLOBAL PASSをTAMIA、TurnstileをContainer直通に分けていたため、最初に同一出口化すべきだった。
+- CloudflareはPlaywright、Selenium、Puppeteerなどの自動化browserで本番challengeを解くことを公式サポートしていない。以下のprobeは採用保証ではなく、原因を切り分けるbounded diagnosticである。
+
+References:
+
+- [Challenge solve issues](https://developers.cloudflare.com/cloudflare-challenges/troubleshooting/challenge-solve-issues/)
+- [How Challenges work](https://developers.cloudflare.com/cloudflare-challenges/concepts/how-challenges-work/)
+- [Supported browsers](https://developers.cloudflare.com/cloudflare-challenges/reference/supported-browsers/)
+- [Turnstile client-side error codes](https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/)
+
+diagnostic path sanitizerも変更し、動的pathを漏らさずにPATだけはcdn-cgi/challenge-platform/redacted/pat/redactedと分類できるようにした。console本文は保存せず、Turnstileの6桁error codeと大分類だけを返す。今回のrunでは明示的な6桁error codeは出なかった。
+
+## 2026-08-29 追加A/B
+
+親pageとTurnstileを同一TAMIA出口へ統一した条件、全通信をContainer直通にした条件、従来のsplit条件を比較した。すべてGoogle Chrome Stable 152.0.7977.64、headed、fresh persistent profileである。各runはtokenを最大30秒待つだけで、資格情報入力、login POST、cookie再利用、R2書き込みは0回である。
+
+| variant | browser側差分 | egress | token |
+| --- | --- | --- | --- |
+| chrome-stable-no-ua-all-tamia | native Linux、webdriver=false | 全通信TAMIA | 0 |
+| chrome-stable-no-ua-all-tamia-default-automation | Playwright既定、webdriver=true | 全通信TAMIA | 0 |
+| patchright-chrome-native-all-tamia | Patchright 1.62.2 | 全通信TAMIA | 0 |
+| chrome-direct-process-attach-late-all-tamia | Chromeを通常process起動、25秒後だけCDP接続 | 全通信TAMIA | 0 |
+| chrome-stable-windows-matched-all-tamia | Windows/Chrome 152 UA・Client Hints・platformを一致 | 全通信TAMIA | 0 |
+| chrome-stable-no-ua-direct | native Linux、webdriver=false | 全通信Container直通 | 0 |
+| patchright-chrome-native-direct | Patchright 1.62.2 | 全通信Container直通 | 0 |
+| chrome-direct-process-attach-late-direct | Chromeを通常process起動、25秒後だけCDP接続 | 全通信Container直通 | 0 |
+| chrome-stable-windows-matched-direct | Windows/Chrome 152 UA・Client Hints・platformを一致 | 全通信Container直通 | 0 |
+| chrome-stable-no-ua-split | native Linux、webdriver=false | 親page=TAMIA、Turnstile=直通 | 0 |
+
+TAMIA統一runの送信元は223.223.22.214、国JP、Cloudflare colo KIX、ASN 18144、HTTP/2と確認した。Container直通runは国SG、colo SIN、ASN 13335、IPv6のCloudflare egressだった。split runでは親pageの確認endpointはTAMIAを示した一方、Turnstileは直通であり、challenge imageがHTTP 400になったrunがある。これはsplitを避ける根拠になるが、同一出口に直してもtokenは生成されなかった。
+
+TAMIA統一ではBrunhildがERR_CONNECTION_CLOSED、Container直通では204後にERR_ABORTEDだった。しかし両経路ともtoken 0であり、公式資料上も後者は単独のfailure signalではない。PAT endpointは全runで401だったが、これも通常fallbackとして扱う。
+
+### 既存workaround実装の調査
+
+subagentを分け、Cloudflare一次資料と各実装の公開READMEを相互確認した。
+
+1. PatchrightはPlaywright API互換で、Runtime.enableやConsole.enable、既定flagなどautomation signalを減らすと説明している。実際にGoogle Chrome channel、headed、viewport null、UA上書きなしで試したがtoken 0だった。これは第三者実装の主張であり、Cloudflare公式の通過保証ではない。
+2. SeleniumBase Pure CDP Modeは、WebDriver接続を切ってChromeのCDP操作へ寄せる実装である。ただし今回、それより介入の少ない「Chromeを通常processとして25秒動作させ、後からCDP接続」が失敗したため、追加実行の優先度を下げた。
+3. puppeteer-real-browser、rebrowser-patches、puppeteer-extra stealth、undetected-chromedriver、Camoufoxも候補として確認した。いずれも第三者の検知回避実装で、公式サポート外であり、Patchrightと通常Chrome processの双方が失敗した後に依存を増やす根拠は得られなかった。
+4. profile再利用は技術的には可能だが、今回作れるのは失敗challengeを見ただけのfresh profileであり、正常利用履歴の再現にならない。個人Chrome profile/cookieをContainerへ持ち込む方式はsecret管理と失効管理を悪化させるため、このPoCでは採用しない。
+
+References:
+
+- [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-nodejs)
+- [SeleniumBase Pure CDP Mode](https://github.com/seleniumbase/SeleniumBase/blob/master/examples/cdp_mode/ReadMe.md)
+- [Playwright Google Chrome channel](https://playwright.dev/docs/browsers#google-chrome--microsoft-edge)
+- [Playwright browser launch arguments](https://playwright.dev/docs/api/class-browsertype)
+
 ## 結論
+
+2026-08-29の追加検証により、送信元IPはTAMIA統一とContainer直通の両方で直接確認できた。split解消、Brunhild到達可能な同一出口、Patchright、Chrome通常processの後付けCDP、Windows Chrome 152と整合させた表層fingerprintを個別・組合せで試してもtokenは0だった。したがって、Cloudflare Containers上のbrowser routeをproduction collectorとして追い続ける優先度は下げる。残る可能性は実Windows browser、正常利用履歴を持つprofile、または公開情報から観測できないbrowser/OS integrity signalだが、どれもserverless collectorの単純な構成から外れる。
 
 Browser RunはGLOBAL PASSのlogin pageとTurnstile challenge transportを正常に200で取得したが、tokenを完成できなかった。少なくとも今回のBrowser Run失敗は`brunhild.challenges.cloudflare.com`のIPv6到達性では説明できない。したがって「TAMIAにIPv6がないことが既知のblocker」という以前の推論は撤回する。
 

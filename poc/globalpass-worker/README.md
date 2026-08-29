@@ -121,13 +121,23 @@ GLOBAL PASSを同じTAMIA経路に固定し、Playwright Chromiumを`baseline`�
 
 資格情報の入力、login POST、cookie再利用、R2書き込みは行っていない。旧instance `v9`・`v10`はdestroy済み、Google Chrome検証instance `v11`はstop済みである。詳細な比較表は[`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)、削除対象は[`docs/cleanup.md`](docs/cleanup.md)に記録した。
 
+## 2026-08-29 same-egress / workaround verification
+
+Cloudflare公式資料を再確認し、PAT endpointの401とBrunhild 204直後のERR_ABORTEDをroot causeとして扱った以前の推論を撤回した。PAT 401は通常fallbackであり、challenge関連subdomainの一部failureも単独では失敗を意味しない。一方、challenge取得とsolve送信のIPが異なると無効になり得るため、従来のsplit経路を最初に再検証した。
+
+新しいbounded probeでは、親pageとTurnstileの全通信をTAMIAへ統一したrun、全通信をContainer直通にしたrun、従来のsplit runを実測した。TAMIA統一は223.223.22.214、JP/KIX、ASN 18144、HTTP/2、Container直通はSG/SIN、ASN 13335のIPv6 Cloudflare egressだった。split runではchallenge imageのHTTP 400も観測したためproductionでは避けるべきだが、同一出口に直してもtokenは生成されなかった。
+
+同時にnative Linux Chrome、webdriver true/false、Patchright 1.62.2、Google Chromeを通常processとして起動して25秒後にだけCDP接続する条件、Chrome 152とversionを一致させたWindows UA・Client Hints・platform・languagesを試した。headed、fresh persistent profile、UA上書きなしも含む全10追加条件でtokenは0だった。資格情報入力、login POST、cookie再利用、R2書き込みは0回である。
+
+Cloudflareも本番challengeに対するPlaywright、Selenium、Puppeteerを公式サポートしていないため、現時点ではこのbrowser方式をproduction collectorへ昇格させない。調査したPatchright、SeleniumBase Pure CDP、その他の第三者workaroundと採否理由はdocs/browser-run-investigation-2026-08-28.mdに集約した。
+
 ## 次に試す順序
 
-1. Kuebiko成功runとContainer失敗runの送信元IPを直接確認し、browser差とnetwork identity差を分離する。
-2. 同じContainer Chromeで、Windows偽装なしのnative Linux、実version 152と一致するClient Hints、保存済みprofileの順に比較する。
-3. それでも差が残る場合だけ、TLS・GPU・font・codec・OS APIの整合性を比較する。JS property patchだけは増やさない。
-4. Browser Runの対話型challengeを確認する必要があればLive Viewまたはscreenshotを使う。ただし手動介入が必要ならproduction collector候補から外す。
-5. IPv6追加は`brunhild`が成功runで必須だと確認できた場合だけ行う。
+1. GLOBAL PASSの公式mobile appや別の公式提供経路で、利用履歴を取得できるかを優先する。
+2. browser routeを再開するのは、実Windows上の正常profileを安全にserverlessへ持ち込める設計、または明確に新しい一次情報が得られた場合だけにする。
+3. split egressは採用せず、同一TAMIA出口または同一Container出口に固定する。
+4. PAT 401やBrunhild 204後のabortを、それ単独でblockerと判断しない。
+5. Cronはtoken生成、login POST、明細画面、月selectorの順にbounded testが成功するまで有効化しない。
 
 いずれもtoken生成、ログインPOST、明細画面、月selectorの順にbounded testし、成功してから初回backfillと日次Cronを有効化する。
 
@@ -147,7 +157,9 @@ scripts/trigger.sh daily
 scripts/trigger.sh backfill
 scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token baseline
 scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token chrome-stable-headed-persistent-windows
-scripts/trigger.sh stop ~/.local/share/kogane/secrets/globalpass-worker-admin-token v11 stop
+scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token patchright-chrome-native-all-tamia
+scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token chrome-direct-process-attach-late-direct
+scripts/trigger.sh stop ~/.local/share/kogane/secrets/globalpass-worker-admin-token v14 stop
 ```
 
 ## 残る検証項目

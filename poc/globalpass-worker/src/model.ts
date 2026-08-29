@@ -7,6 +7,16 @@ export const CONTAINER_PROBE_VARIANTS = [
   "headed-windows",
   "headed-persistent-windows",
   "chrome-stable-headed-persistent-windows",
+  "chrome-stable-no-ua-direct",
+  "chrome-stable-no-ua-split",
+  "chrome-stable-no-ua-all-tamia",
+  "chrome-stable-no-ua-all-tamia-default-automation",
+  "chrome-stable-windows-matched-all-tamia",
+  "chrome-stable-windows-matched-direct",
+  "patchright-chrome-native-all-tamia",
+  "patchright-chrome-native-direct",
+  "chrome-direct-process-attach-late-all-tamia",
+  "chrome-direct-process-attach-late-direct",
 ] as const;
 
 export type ContainerProbeVariant = (typeof CONTAINER_PROBE_VARIANTS)[number];

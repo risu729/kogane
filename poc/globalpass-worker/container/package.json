@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "patchright": "1.62.2",
     "playwright": "1.62.1",
     "ws": "8.21.3"
   }
