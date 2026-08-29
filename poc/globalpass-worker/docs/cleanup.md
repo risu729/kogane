@@ -21,6 +21,9 @@
 
 ## PoC全体を廃止するときに削除するもの
 
+- 現行app repository kogane-globalpass-collector-poc-globalpasscollectorcontainer の旧tags: 007215b4、0080b617、2444b612、4311cdf8、63148685、87f23407、8b4e8803、a220cfae、b8e96bd2、cb98569f、d86b50ae、f2585107、f6406948、f73b2bab。現行cd80a6eeはapp削除後に削除する。
+- 旧standalone probe repository kogane-globalpass-container-probe-20260827-globalpassprobecontainer の全tags: 1068a298、57c4aa1c、73d5ead9、7c10d299、833aeb70、927ed319、9d7b1c69、ae9b6abc、c16fe4c8、c2e12ab7、c7f3e510、d1e7d4f5、ed0300e2、ee37d303、ee71d223。現行appから参照されていないが、このPoC全体を廃止するときだけ削除する。
+
 - Worker `kogane-globalpass-collector-poc`とworkers.dev deployment。
 - Container app `kogane-globalpass-collector-poc-globalpasscollectorcontainer`（app ID `a03ac341-52a7-4e81-9a7c-279a90cc4b0c`）。
 - 現行Container image `sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`（Google Chrome Stable、Patchright、same-egress probe入り）と、registryに残る上記旧image。
