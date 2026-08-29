@@ -274,6 +274,20 @@ Chrome logだけをローカルに保持した。
 Cloudflareが観測するbrowser/OS integrity signalの差が必要であり、networkとの相互作用が
 残る可能性はあっても「TAMIAだから常に失敗する」という仮説は棄却する。
 
+### Xvfb control
+
+同じlocal WSL、Chrome 152、fresh profile、TAMIA出口を保ち、表示先だけをWSLgから
+`Xvfb :98 -screen 0 1365x768x24 -nolisten tcp`へ変更した。headless、Playwright、
+`--enable-automation`、SwiftShader強制flagは使っていない。結果はtoken 794、Sign On、
+form/widgetあり、Access Deniedなし、native `Linux x86_64`、`navigator.webdriver=false`
+だった。資格情報入力とlogin POSTは0回である。
+
+Chrome logではWebGL 1/2がblocklistされたが、それでもtokenは生成された。したがって、
+Xvfb、physical displayなし、WebGL unavailableのいずれも単独blockerではない。OCI `bots`
+でも同じXvfb geometryを使い、SwiftShader有効化の有無にかかわらずtoken 0だったため、
+local WSLとserver環境の残差はdisplay serverやWebGLより下のhost/container runtime、
+browser buildの実行環境、Cloudflareが観測するintegrity signalへさらに絞られる。
+
 ## 結論
 
 2026-08-29の追加検証により、送信元IPはTAMIA統一とContainer直通の両方で直接確認できた。split解消、Brunhild到達可能な同一出口、Patchright、Chrome通常processの後付けCDP、Windows Chrome 152と整合させた表層fingerprintを個別・組合せで試してもtokenは0だった。したがって、Cloudflare Containers上のbrowser routeをproduction collectorとして追い続ける優先度は下げる。残る可能性は実Windows browser、正常利用履歴を持つprofile、または公開情報から観測できないbrowser/OS integrity signalだが、どれもserverless collectorの単純な構成から外れる。
@@ -293,4 +307,4 @@ Browser RunはGLOBAL PASSのlogin pageとTurnstile challenge transportを正常�
 - challengeが追加のbrowser signalを要求したが、OCI/Containerでは完了できなかった可能性
 - network reputationとserver runtime/integrity signalの相互作用
 
-Browser Run単独をproduction collectorへ採用する根拠は得られなかった。Containerではブランド版Google Chrome Stableを含む各条件、OCIではPlaywrightなしの公式Chromeでもtokenを生成できず、表面的なfingerprint調整、browser binaryの差し替え、profile移送、software WebGLでは通常Chrome/Kuebikoとの差を埋められなかった。一方、local WSL ChromeはWARPとTAMIAの両出口でtokenを生成した。同じTAMIA出口でruntimeだけが違う比較結果から、TAMIAのnetwork reputationを単独root causeから除外する。送信元はContainer直通、TAMIA、OCI、local WSLで直接記録済みであり、次の焦点はserver host/runtimeとCloudflareが観測するbrowser/OS integrity signalである。IPv6追加は成功runでも`brunhild`が必須だと確認できるまで優先しない。
+Browser Run単独をproduction collectorへ採用する根拠は得られなかった。Containerではブランド版Google Chrome Stableを含む各条件、OCIではPlaywrightなしの公式Chromeでもtokenを生成できず、表面的なfingerprint調整、browser binaryの差し替え、profile移送、software WebGLでは通常Chrome/Kuebikoとの差を埋められなかった。一方、local WSL ChromeはWARPとTAMIAの両出口、さらにTAMIA+Xvfb+WebGL blocklistの条件でもtokenを生成した。同じTAMIA出口でruntimeだけが違う比較結果から、TAMIAのnetwork reputation、Xvfb、WebGL unavailableを単独root causeから除外する。送信元はContainer直通、TAMIA、OCI、local WSLで直接記録済みであり、次の焦点はserver host/runtimeとCloudflareが観測するbrowser/OS integrity signalである。IPv6追加は成功runでも`brunhild`が必須だと確認できるまで優先しない。

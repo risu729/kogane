@@ -21,6 +21,7 @@
 - 2026-08-29 fresh WSL login POST raw capture `/home/risu/.local/state/Kuebiko/captures/2026-08-29T13-08-05`: login cookieと認証POST由来の機密情報を含み得る。sanitized結果はrepoへ記録済みなので、追加解析後はこのdirectoryだけ削除する。
 - 2026-08-30 same-runtime network A/B用WSL profile `/home/risu/.local/share/kogane/browser-profile-globalpass-wsl-tamia-20260830`と`/home/risu/.local/share/kogane/browser-profile-globalpass-wsl-warp-control-20260830`: どちらもfresh profile。sanitized結果確認後に各directoryだけ削除する。
 - 2026-08-30同A/BのChrome log `/home/risu/.local/state/kogane-globalpass-wsl-tamia-20260830.log`と`/home/risu/.local/state/kogane-globalpass-wsl-warp-control-20260830.log`: token値・資格情報は記録していない。追加解析後にこの2 fileだけ削除する。
+- 2026-08-30 Xvfb control用WSL profile `/home/risu/.local/share/kogane/browser-profile-globalpass-wsl-xvfb-tamia-20260830`とlog directory `/home/risu/.local/state/kogane-globalpass-xvfb-tamia-20260830`: token値・資格情報は記録していない。追加解析後にこのprofileとlog directoryだけ削除する。
 - local admin token file `/home/risu/.local/share/kogane/secrets/globalpass-worker-admin-token`: PoCを操作しなくなった時点で削除する。
 - `/home/risu/.docker/config.json`内のCloudflare registry認証entry: Wranglerが追加した可能性があるため確認して、不要ならそのentryだけを除去する。ファイル全体は他registry設定を含み得るため削除しない。
 - このgit worktree: PRをmergeまたはcloseし、必要なcommitがremoteにあることを確認した後だけ削除可能。

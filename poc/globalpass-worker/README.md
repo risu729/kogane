@@ -151,6 +151,12 @@ widgetあり、Access Deniedなしだった。資格情報入力とlogin POSTは
 単独root causeではない。server host/runtimeまたはbrowser/OS integrity signalを次の
 主要差分として扱う。
 
+さらにlocal WSLの表示先だけをWSLgからXvfb (`1365x768x24`)へ変更した。TAMIA出口、
+fresh profile、通常Chrome 152、`webdriver=false`のままtoken 794を生成した。Chrome log
+ではWebGL 1/2がblocklistされていたため、XvfbとWebGL unavailableも単独root causeでは
+ない。server環境固有のhost/container runtimeまたは公開されないintegrity signalへ焦点を
+移す。
+
 Cloudflareも本番challengeに対するPlaywright、Selenium、Puppeteerを公式サポートしていないため、現時点ではこのbrowser方式をproduction collectorへ昇格させない。調査したPatchright、SeleniumBase Pure CDP、その他の第三者workaroundと採否理由はdocs/browser-run-investigation-2026-08-28.mdに集約した。
 
 ## 2026-08-29 local Windows / WSL profile A/B
