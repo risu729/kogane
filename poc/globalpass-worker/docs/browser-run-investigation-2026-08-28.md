@@ -215,7 +215,7 @@ Noto CJK fontとNode.js 24.20.0を導入し、headed Chromeを直接起動した
 長さと非機密なpage状態を読むためだけに使用した。
 
 OCIの通常internet出口は`138.2.53.208`、`loc=JP`、`colo=KIX`、HTTP/2、
-`warp=off`だった。次の3条件はすべてSign On画面、login form、300x68のTurnstile
+`warp=off`だった。次の4条件はすべてSign On画面、login form、300x68のTurnstile
 widgetを表示し、Access Deniedではなかったが、最大30秒待ってもtokenは0文字だった。
 
 | profile / graphics | 結果 |
@@ -223,17 +223,30 @@ widgetを表示し、Access Deniedではなかったが、最大30秒待って�
 | OCI上のfresh persistent profile、Xvfb既定graphics | token 0。Chrome logでWebGL 1/2がblocklistされた |
 | local WSLでtoken生成・認証POSTに成功したprofileのLinux-to-Linux copy | login状態は移送されずSign Onへ戻り、token 0 |
 | OCI上の別fresh profile、ANGLE SwiftShader WebGLを明示的に有効化 | WebGL context生成をlogで確認したがtoken 0 |
+| OCI上の別fresh profile、SwiftShader、全browser通信を既存Worker relay経由でTAMIAへ固定 | token 0 |
+
+最後の条件はTailscaleを使用していない。Cloudflare Tunnel経由の`ssh bots`は
+`forward_tcpip`を許可しないため、SSH reverse SOCKSは接続時点で拒否された。
+代わりに既存PoCのhost allowlist付きWebSocket/TCP relayを再利用し、OCI localhostに
+一時SOCKS5 adapterを起動した。browserが使うproxy経路は別の`/egress` requestで
+`223.223.22.214`、JP/KIX、ASN 18144、HTTP/2と確認した。adapterはrelay tokenを
+stdinからmemoryへ読むだけでfileへ保存せず、run後に停止した。script、dependency、
+profileとlogは保持した。
 
 この比較により、Containerだけの問題、Playwrightだけの問題、Linuxだけの問題、
 profile履歴不足、XvfbでWebGLが無効という各単独仮説は棄却できる。local WSLと
 OCIの差としてnetwork/ASN・host runtime・Cloudflareが観測するintegrity signalは
-まだ分離できない。ただしOCIでprofileを移してsoftware WebGLまで有効化しても
-tokenが生成されなかったため、OCI Kubernetesへ通常Chromeを移すだけでは
-collectorを成立させられない。3 runとも資格情報入力とlogin POSTは0回である。
+まだ分離できない。ただしOCIでprofileを移し、software WebGLを有効化し、さらに
+生OCI出口からTAMIA出口へ変更してもtokenが生成されなかったため、OCI Kubernetesへ
+通常Chromeを移すだけではcollectorを成立させられない。4 runとも資格情報入力と
+login POSTは0回である。
 
 再実行には[`scripts/run-bots-globalpass.sh`](../scripts/run-bots-globalpass.sh)を使う。
 既定では`/opt/kogane-globalpass-probe`配下のprofileとlogを保持し、終了時にChromeと
-Xvfb processだけを停止する。今回のinstall、profile、logは比較用に削除せず保持した。
+Xvfb processだけを停止する。TAMIA比較用のlocalhost SOCKS adapterは
+[`scripts/run-bots-tamia-socks.mjs`](../scripts/run-bots-tamia-socks.mjs)であり、relay
+tokenをstdinから受け取る。今回のinstall、profile、dependency、logは比較用に削除せず
+保持した。
 
 ## 結論
 
@@ -249,9 +262,9 @@ Browser RunはGLOBAL PASSのlogin pageとTurnstile challenge transportを正常�
 
 現時点で区別できない候補は次の通り。
 
-- local WSLのJP/WARP経路と、OCI・Container各出口のIP/ASN reputation差
+- local WSLのJP/WARP経路と、OCI・TAMIA・Container各出口のIP/ASN reputation差
 - OCI/Containerとlocal WSLのhost runtimeまたはCloudflareが観測するintegrity signal差
 - Browser Run固有の識別header/Web Bot Auth署名を含むbot判定
 - challengeが追加のbrowser signalを要求したが、OCI/Containerでは完了できなかった可能性
 
-Browser Run単独をproduction collectorへ採用する根拠は得られなかった。Containerではブランド版Google Chrome Stableを含む各条件、OCIではPlaywrightなしの公式Chromeでもtokenを生成できず、表面的なfingerprint調整、browser binaryの差し替え、profile移送、software WebGLでは通常Chrome/Kuebikoとの差を埋められなかった。送信元はContainer直通、TAMIA、OCI、local WSLで直接記録済みだが、IP/ASNとhost runtimeを同時に変えているため両者はまだ分離できない。IPv6追加は成功runでも`brunhild`が必須だと確認できるまで優先しない。
+Browser Run単独をproduction collectorへ採用する根拠は得られなかった。Containerではブランド版Google Chrome Stableを含む各条件、OCIではPlaywrightなしの公式Chromeでもtokenを生成できず、表面的なfingerprint調整、browser binaryの差し替え、profile移送、software WebGLでは通常Chrome/Kuebikoとの差を埋められなかった。同じOCI Chromeで生OCI出口とTAMIA出口の両方が失敗したため、OCI生IPだけを原因とは扱わない。送信元はContainer直通、TAMIA、OCI、local WSLで直接記録済みだが、成功したlocal WSLのWARP出口をOCI Chromeで再利用できていないため、IP/ASNとhost runtimeは完全には分離できない。IPv6追加は成功runでも`brunhild`が必須だと確認できるまで優先しない。

@@ -76,6 +76,7 @@ for _ in $(seq 1 300); do
   sleep 0.1
 done
 
+echo "host-egress-control (browser may differ when --proxy-server is set):"
 curl -fsS https://www.cloudflare.com/cdn-cgi/trace \
   | grep -E '^(ip|loc|colo|warp|http)='
 "$node_bin" "$app_dir/probe-local-turnstile.mjs" "$cdp_port"

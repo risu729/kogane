@@ -35,7 +35,12 @@
 - OCI fresh profile `/opt/kogane-globalpass-probe/profile`
 - local WSL成功profileのcopy `/opt/kogane-globalpass-probe/profile-from-wsl-20260829`
 - SwiftShader比較profile `/opt/kogane-globalpass-probe/profile-swiftshader`
-- sanitized probe scriptsとChrome/Xvfb logs (`/opt/kogane-globalpass-probe/app`, `logs`)
+- TAMIA relay比較profile `/opt/kogane-globalpass-probe/profile-tamia-swiftshader`
+- sanitized probe scripts、`ws` dependency、Chrome/Xvfb logs (`/opt/kogane-globalpass-probe/app`, `logs`)
+
+TAMIA比較に使うlocalhost SOCKS adapter processは検証後に停止済みで、port 11080も
+listenしていない。relay tokenはstdinからmemoryへ渡し、`bots`のfileには保存していない。
+再実行時だけ同processを起動し、終了後に停止する。
 
 これらを後で削除する場合は、先に`bots`上で絶対pathとChrome processを再確認し、
 `/opt/kogane-globalpass-probe`以外のOCI workloadへ影響しないことを確認する。

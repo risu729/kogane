@@ -134,10 +134,13 @@ Cloudflare公式資料を再確認し、PAT endpointの401とBrunhild 204直後�
 Cloudflare Containerの外でも比較するため、OCI ARM64 host `bots`に公式Google Chrome
 Stable 152を残置し、Xvfb上のheaded ChromeをPlaywrightなしで実行した。通常のfresh
 profile、local WSLで認証成功したprofileのcopy、SwiftShader WebGLを有効化した別fresh
-profileの3条件すべてで、Sign On画面とTurnstile widgetは表示されたがtokenは0だった。
+profile、同じOCI Chromeを既存Worker relayでTAMIA出口へ固定した条件のすべてで、
+Sign On画面とTurnstile widgetは表示されたがtokenは0だった。
 出口は`138.2.53.208`、JP/KIX、WARPなしで、pageからはnative Linux、
-`navigator.webdriver=false`に見えた。token gateにより資格情報入力とlogin POSTは
-0回である。導入物、profile、logは再検証用に削除していない。詳細と再実行scriptは
+`navigator.webdriver=false`に見えた。TAMIA比較時のbrowser出口は
+`223.223.22.214`、JP/KIX、ASN 18144だったが結果は変わらなかった。token gateにより
+資格情報入力とlogin POSTは0回である。導入物、profile、dependency、logは再検証用に
+削除していない。詳細と再実行scriptは
 [`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)を参照する。
 
 Cloudflareも本番challengeに対するPlaywright、Selenium、Puppeteerを公式サポートしていないため、現時点ではこのbrowser方式をproduction collectorへ昇格させない。調査したPatchright、SeleniumBase Pure CDP、その他の第三者workaroundと採否理由はdocs/browser-run-investigation-2026-08-28.mdに集約した。
