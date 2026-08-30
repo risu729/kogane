@@ -701,12 +701,14 @@ async function responseText(response: Response): Promise<string> {
 }
 
 function decodeHtml(value: string): string {
-  return value
-    .replaceAll("&amp;", "&")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&#39;", "'")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">");
+  const entities: Record<string, string> = {
+    "&amp;": "&",
+    "&quot;": '"',
+    "&#39;": "'",
+    "&lt;": "<",
+    "&gt;": ">",
+  };
+  return value.replace(/&(amp|quot|#39|lt|gt);/gu, (entity) => entities[entity] ?? entity);
 }
 
 function stripTags(value: string): string {

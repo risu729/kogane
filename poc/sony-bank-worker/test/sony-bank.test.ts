@@ -57,4 +57,15 @@ describe("Sony Bank WALLET HTML", () => {
     expect(sanitized).not.toContain("session.WEB01");
     expect(sanitized).not.toContain('value="secret"');
   });
+
+  test("does not double-decode month labels", () => {
+    const html = `
+      <form name="nablarch_form3">
+        <select name="W131301.referenceDate">
+          <option value="20260831">A&amp;quot;B</option>
+        </select>
+      </form>
+    `;
+    expect(walletMonths(html)[0]?.label).toBe('A&quot;B');
+  });
 });
