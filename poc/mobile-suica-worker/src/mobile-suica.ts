@@ -173,11 +173,14 @@ function tableRows(html: string): string[][] {
 function textContent(html: string): string {
   return html
     .replace(/<[^>]+>/gu, " ")
-    .replace(/&nbsp;|&#160;/giu, " ")
-    .replace(/&amp;/giu, "&")
-    .replace(/&lt;/giu, "<")
-    .replace(/&gt;/giu, ">")
-    .replace(/&#(\d+);/gu, (_match, value: string) => String.fromCodePoint(Number(value)))
+    .replace(/&(nbsp|amp|lt|gt|#\d+);/giu, (_match, entity: string) => {
+      const normalized = entity.toLowerCase();
+      if (normalized === "nbsp") return " ";
+      if (normalized === "amp") return "&";
+      if (normalized === "lt") return "<";
+      if (normalized === "gt") return ">";
+      return String.fromCodePoint(Number(normalized.slice(1)));
+    })
     .replace(/\s+/gu, " ")
     .trim();
 }

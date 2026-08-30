@@ -43,4 +43,9 @@ describe("Mobile Suica session replay", () => {
     const row = `<tr><td></td><td>08/30</td><td>物販</td><td>店舗</td><td></td><td></td><td>\\1,234</td><td>-100</td></tr>`;
     expect(parseHistoryRows(`<table>${row}${row}</table>`, "2026-08-31")).toHaveLength(2);
   });
+
+  test("does not decode generated entity text a second time", () => {
+    const row = `<tr><td></td><td>08/30</td><td>物販</td><td>&amp;#38;</td><td></td><td></td><td>\\1</td><td>-1</td></tr>`;
+    expect(parseHistoryRows(`<table>${row}</table>`, "2026-08-31")[0]?.placeFrom).toBe("&#38;");
+  });
 });
