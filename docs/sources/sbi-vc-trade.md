@@ -348,6 +348,7 @@ login page map `b21877a.js.map`は91,166 bytes、SHA-256 `d5c3e578f302981163acf1
 |---|---|---|---|
 | `cashBalanceList` | `/api/cccmdipresen/gw/trade` | `secureKey` | 日本円・暗号資産残高 |
 | `accountMargin` | 同上 | `secureKey` | 純資産、証拠金等の口座詳細 |
+| `positionSummaryList` | 同上 | `secureKey` | 保有ポジションsummary |
 | `executionList` | 同上 | `secureKey`, page, sort, `historical` | 約定履歴。recent/historicalが別view |
 | `getCashflowList` | 同上 | `secureKey`, page, `historical`, currency/type filters | 日本円入出金等のcashflow |
 
@@ -381,11 +382,14 @@ login resultの`isAgreed`がfalseの場合、現行UIは`setAgreement` write eve
 | 3 | WebAuthn assertionを本人が承認し`loginWithPasskey` | HTTP 200 JSON |
 | 4 | 認証後`accountMargin` | HTTP 200 JSON |
 | 5 | `informationTitle`, `getAuthStatus`, `getPasskeyList` | すべてHTTP 200 JSON |
-| 6 | page reload | `/login#verifyGa`へredirect |
+| 6 | read-onlyの保有資産画面 | `positionSummaryList`と`accountMargin`がHTTP 200 JSON |
+| 7 | page reload | `/login#verifyGa`へredirect |
 
 liveの`loginWithPasskey` request keyは公開DTOどおりchallenge、credential ID、authenticator data、client data JSON、signature、user handleで、Turnstile fieldはなかった。password form用Turnstileがpageに存在しても、passkey application flowにtokenが含まれないという静的結論を実通信でも確認した。
 
 `accountMargin` bodyには`cashBalance`、`receivedMarginList`（46件）、`lendingLimitList`（33件）、`withdrawalLimitList`（23件）、`restrictedWithdrawalAmountList`（23件）と関連margin fieldが存在した。件数とfield名だけを記録し、各item・金額・銘柄等は保存していない。`getAuthStatus` bodyは`isIdentified`と`isTotpIdentified`、`getPasskeyList` itemはchannel、credential ID、last-used datetime、label、register datetime/source IP fieldを持ち、list lengthは1だった。値は保存していない。
+
+保有資産画面では`positionSummaryList`が`{secureKey}`だけを送りHTTP 200 JSONとなった。この口座のlive response bodyは空objectだったため、position item shapeはlive確認できておらず、公開bundle DTOの構造を暫定とする。残高collectorでは`cashBalanceList`、`accountMargin`と併せてこのeventを固定allowlistに含める。
 
 最初のhome表示とread APIは成功したが、reload後は`/login#verifyGa`へ戻った。原因はpasskey後sessionの短期性、reload時の追加検証、Cookie/sessionStorageの組合せ、Kogane Capture条件等のいずれか未確定である。このため「sessionが通常reloadで永続する」「Cookieと`secureKey`をBunへ移せる」「daily cronで再利用できる」はまだ証明されていない。
 

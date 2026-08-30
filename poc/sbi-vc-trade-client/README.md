@@ -6,6 +6,7 @@
 
 - `cashBalanceList`: 日本円・暗号資産の残高
 - `accountMargin`: 口座詳細
+- `positionSummaryList`: 保有ポジションsummary
 - `executionList`: 約定履歴。page 0で`historical=false`を1回、`historical=true`をpagination
 - `getCashflowList`: 日本円の入出金履歴。現行UIと同じ`historical=true`だけをpagination
 

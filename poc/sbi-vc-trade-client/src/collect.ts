@@ -16,6 +16,7 @@ export async function collectSbiVcTrade(
   const artifacts: Artifact[] = [
     { name: "cash-balances.json", response: await client.cashBalances() },
     { name: "account-margin.json", response: await client.accountMargin() },
+    { name: "position-summary.json", response: await client.positionSummary() },
   ];
   artifacts.push({
     name: "executions-recent-page-0001.json",

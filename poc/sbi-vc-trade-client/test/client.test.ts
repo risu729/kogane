@@ -69,13 +69,14 @@ describe("SBI VC Trade read-only gateway", () => {
       events.push({ event: request.event, historical: request.data.historical });
       return json({
         meta: { status: "OK" },
-        body: request.event === "cashBalanceList" || request.event === "accountMargin"
+        body: ["cashBalanceList", "accountMargin", "positionSummaryList"].includes(request.event)
           ? {}
           : { list: [], totalSize: 0, pageNumber: 0, pageSize: 30 },
       });
     });
     const artifacts = await collectSbiVcTrade(client);
-    expect(artifacts).toHaveLength(5);
+    expect(artifacts).toHaveLength(6);
+    expect(events).toContainEqual({ event: "positionSummaryList", historical: undefined });
     expect(events).toContainEqual({ event: "executionList", historical: "false" });
     expect(events).toContainEqual({ event: "executionList", historical: "true" });
     expect(events).toContainEqual({ event: "getCashflowList", historical: "true" });

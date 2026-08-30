@@ -10,6 +10,7 @@ const TRADE_PATH = "/api/cccmdipresen/gw/trade";
 const READ_EVENTS = {
   cashBalanceList: true,
   accountMargin: true,
+  positionSummaryList: true,
   executionList: true,
   getCashflowList: true,
 } as const;
@@ -52,6 +53,12 @@ export class SbiVcTradeClient {
 
   accountMargin(): Promise<GatewayEnvelope> {
     return this.#read("accountMargin", {
+      secureKey: this.#session.secureKey,
+    });
+  }
+
+  positionSummary(): Promise<GatewayEnvelope> {
+    return this.#read("positionSummaryList", {
       secureKey: this.#session.secureKey,
     });
   }
