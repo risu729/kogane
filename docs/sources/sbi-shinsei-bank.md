@@ -150,8 +150,41 @@ set and signing-certificate metadata.
 APK/split APK bytes, decompiler output, signing metadata and any generated
 intermediate files belong only in the designated private Android-analysis
 repository. This public repository should contain the reproducible acquisition
-and decompilation procedure, hashes/package/version metadata, sanitized endpoint
-inventory and conclusions, but not bank application binaries or decompiled code.
+and decompilation procedure plus sanitized package/version, architecture and
+endpoint conclusions, but not full hashes, bank application binaries or
+decompiled code.
+
+#### Sanitized historical Android findings
+
+An authorized **historical version 3.6.0 / version code 71** artifact was
+archived with its private static-analysis output in signed private commit
+`63a7b1f2`. These findings must not be described as the current 3.11.0 app:
+
+- the hybrid WebView identifies itself with `SHINSEI/SNBSDK_2.0` in its user
+  agent;
+- app preferences are copied into WebView `sessionStorage` to bootstrap
+  `token` and `SFC_CONTROL_INFO` state;
+- a `JavaInterface` bridge exposes the names `refreshCsrfToken`, `openURL`,
+  `callNative`, `downloadDynamicPDF` and `clearSDKData`;
+- ThreatMetrix and Transmit Security components are present alongside Android
+  Keystore/biometric handling;
+- Kony/VoltMX message-integrity support code is present.
+
+This historical structure is consistent with a native security/bootstrap shell
+around Web content, but it does not prove that current app requests or session
+state can be reproduced by a Worker. Static searches in this artifact found no
+literal `/SFC/app/` route, Akamai cookie name or Play Integrity reference. Those
+negative results are narrowly scoped: indirect construction, another split,
+the current build, edge policy and runtime-delivered code were not covered and
+therefore are not disproved.
+
+The private workflow has only a hash/signature metadata checkpoint for the
+**current version 3.11.0 / version code 115**. Its binary is not archived because
+the Play acquisition attempt returned HTTP 429. The next authorized acquisition
+path is an owner-device handoff: enumerate the installed base/split paths with
+`adb shell pm path com.shinseibank.powerdirect`, then pull that exact split set
+and verify it privately. Do not substitute the historical archive for that
+current-device capture.
 
 Static analysis is useful **later** to inventory official hostnames, deep links,
 network libraries, certificate-pinning or device-integrity controls, local
