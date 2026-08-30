@@ -150,9 +150,23 @@ passkey 登録済み ID は password login を使えないため、Okura の ID/
 
 ## 公式 APK の入手・静的解析・runtime tracing
 
-[Google Play の公式 listing](https://play.google.com/store/apps/details?id=jp.co.jcb.my) は package `jp.co.jcb.my`、JCB 公式 app、2026-07-27 更新、version 3.11.1 を示す。今回の環境には ADB と owner-controlled Android 実機がなく、Google Play が配布する正規 split APK/app bundle を取得できなかった。third-party mirror で代替せず、binary artifact 未取得のまま manifest/host/pinning を確定しない。
+[Google Play の公式 listing](https://play.google.com/store/apps/details?id=jp.co.jcb.my) は package `jp.co.jcb.my`、JCB 公式 app、2026-07-27 更新、version 3.11.1 を示す。匿名の Google Play artifact delivery は local/OCI とも HTTP 429、Play 認証済み emulator と owner-controlled Android 実機は未接続だったため、現行 3.11.1 の正規 split APK/app bundle は取得できなかった。
 
-正規 artifact を得られる次の実験は次のとおり。
+再現可能な静的調査を残すため、2026-08-31 に `apkeep 1.0.0` の APKPure backend から mirror 版 3.9.0（versionCode 3901、20 split）を取得し、raw artifact、hash、certificate、JADX/apktool output、手順を private repository に保存した。20 split は package/versionCode が一致し、同一 signer で検証でき、Google Source Stamp の検証にも成功した。ただし mirror provenance であり、現行 3.11.1 の公式 Play signer と独立照合できていないため、現行 binary と同一 trust chain／実装であるとは扱わない。private archive の raw artifact、certificate、decompiled source は公開 Kogane へ転載しない。
+
+3.9.0 の解析結果は次のとおり。
+
+- JADX 1.5.6 は source 18,085 files、resources 2,758 files を生成した。exit code 3、177 method errors が残ったが、app/API interface は読めた。
+- apktool 3.0.3 は 22,195 files を生成し exit 0。base-only decode に由来する split-resource warning 80 件がある。
+- DEX は通常の 2 files で、暗号化 DEX の復号・runtime dump は不要だった。
+- native WebView wrapper ではなく Retrofit/OkHttp/Moshi の JSON client で、historical primary base URL は `https://imad.jcb.co.jp/v1/`。latest/monthly credit detail、debit detail、point、notification、複数カード切替、security setting の interface があり、monthly detail は target year-month を受ける。retention と authenticated schema は未検証。
+- passkey/FIDO は Nok Nok SDK と AndroidX Credential Manager を使い、JCB の registration/authentication endpoint を分離している。Nok Nok の packaged default は server request に応じて Play Integrity、keystore attestation、jailbreak risk、location、Wi-Fi SSID、in-call、metrics、credential-provider 等の signal を扱えるが、MyJCB server が実際に何を要求するかは runtime 未観測である。
+- production network-security config は system CA を使い cleartext を無効化する。静的な OkHttp `CertificatePinner` や production trust-all path は見つからなかった。ただし dynamic/native check と現行 3.11.1 は未確認。
+- `libsigner.so` は Adjust analytics の component であり、MyJCB API request signing の証拠ではない。
+
+この結果から、Web session replay だけでなく app JSON API を別 candidate として扱う価値がある。特に年月指定の credit detail は backfill に適する可能性がある。一方、認証 bootstrap、server-selected FIDO/Integrity signal、session renewal、response schema、retention を実機の本人操作で確認するまで、browserless scheduled collector が成立したとは判断しない。
+
+現行の正規 artifact を得られる次の実験は次のとおり。
 
 1. 管理下 Android 実機で Google Play の developer/package 表示を確認して app を install/update する。
 2. read-only に `adb shell pm path jp.co.jcb.my` で base/split package path を列挙し、所有者の許可した解析 host へ pull する。APK、signing certificate、各 split の SHA-256、versionName/versionCode、取得日時だけを evidence manifest に残す。
@@ -263,7 +277,7 @@ A は公開 API がないため不適、B は非公式 HTML と動的 login prot
 - デビット差額明細の公式な全状態一覧と、負額・取消・cashback の issuer 別表現。
 - 公開実装 Okura が本番の各 issuer／passkey 未登録 ID で成功しているか。コードの新しさは live 成功の証明ではない。
 - 認証 host の WAF／bot-management vendor。Cloudflare は公開 `www` で確認したが、`my` の製品名と Akamai 利用は未確認。
-- 公式 version 3.11.1 APK の signing certificate、manifest、host、network security config、app schema、pinning/Integrity 実装。現環境では正規 artifact を取得できず未解析。
+- mirror 版 3.9.0 は private archive で静的解析済みだが、公式 version 3.11.1 APK の signing certificate、manifest、host、network security config、app schema、pinning/Integrity 実装は未確認。3.9.0 の runtime headers/cookies、server-selected FIDO extension、login/OTP/passkey flow、authenticated response schema も未検証。
 
 ## Worker PoC（2026-08-31）
 
