@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kogane-vpoint-pay-collector-poc",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "exports": {
+    "VPointPayCredentialState": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "VPOINT_PAY_STATE",
+        "class_name": "VPointPayCredentialState"
+      }
+    ]
+  },
+  "r2_buckets": [
+    {
+      "binding": "SNAPSHOTS",
+      "bucket_name": "kogane-vpoint-pay-collector-poc"
+    }
+  ],
+  "vars": {
+    "COLLECTOR_SCHEMA_VERSION": "vpoint-pay-worker-poc-v1"
+  },
+  "secrets": {
+    "required": [
+      "VPOINT_PAY_REFRESH_TOKEN",
+      "VPOINT_PAY_DEVICE_UUID",
+      "ADMIN_TRIGGER_TOKEN"
+    ]
+  },
+  "triggers": {
+    "crons": ["30 21 * * *"]
+  }
+}

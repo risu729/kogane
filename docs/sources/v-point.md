@@ -5,6 +5,8 @@
 Live追試: 2026-08-31、Kogane Capture Chromeのユーザー口座でVポイントMy Pageへloginし、
 `balance_info`、`tpoint_history`、`smfg_point`をread-onlyで検証した。値、加盟店、会員番号、
 Cookie、個人情報はrepositoryへ保存していない。PoCは`poc/vpoint-worker/`に置く。
+同日のVポイントPay app静的解析と独立Worker設計は`docs/sources/v-point-pay.md`および
+`poc/vpoint-pay-worker/`へ分離した。
 
 ## 1. 対象範囲と安全境界
 
@@ -35,9 +37,9 @@ Cookie、OTP、app passcode、session/token、passkey private key、実残高、
   解析 snapshot をローカル参照し、transport/auth/schema の型・フィールド名を確認した。後者は
   public third-party client ではなく、公開 URL の根拠にも使わない。snapshot に記載された provenance/
   signature は、今回 APK を再取得・再検証した事実とは分ける。
-- 正規 APK/split APK はこの環境では取得していない。公式 Play listing の package/version と、
-  ユーザー管理の非公開 Vpass 5.12.0 解析 snapshot を使い、他アプリの binary transport は再現可能な
-  次実験として残す。
+- VポイントPay APK候補は2026-08-31に別途取得・解析した。binary、通常/復号DEX、decompiler outputは
+  private archiveへ保存し、本書のVポイントWeb検証とは証拠境界を分ける。詳細は
+  `docs/sources/v-point-pay.md`を参照する。
 - 以下では **確認事実**、そこからの **推測/設計判断**、**未確認** を明示的に分ける。
 
 ## 3. 台帳の正本と経路別 trade-off
@@ -167,9 +169,10 @@ Vpass で確認するよう案内する。付与予定は表示されない。
 
 ### 5.2 期間、件数、export
 
-公開公式資料には V Point Pay 利用明細の保持期間、1 page/最大件数、CSV/PDF、file export、行の
-安定 ID を確認できなかった。app の表示可能な最古日、pagination/infinite scroll、authorization が
-settled 行へ更新されるか別行になるか、返金の原取引 linkage を live 検証項目とする。
+公開公式資料には V Point Pay 利用明細の保持期間、CSV/PDF、file export、行の安定 ID を確認できなかった。
+後続のAPK解析ではbalance応答の`inquiry_period`を最古月として、`target_month=yyyyMM`で月別JSONを
+取得する構造を確認した。固定保持期間を仮定せず、実口座の最古月、authorizationがsettled行へ更新
+されるか別行になるか、返金の原取引linkageをlive検証項目とする。
 
 [ポイントチャージ手順](https://qa.smbc-card.com/mem/vptapp/detail?category=189&id=1778) は公式情報だが、
 実行はポイント減少/Pay 残高増加を起こす write である。read-only 検証ではチャージ画面へ遷移せず、

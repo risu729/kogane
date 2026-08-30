@@ -42,7 +42,8 @@ Cost is 1 (small wrapper) through 5 (device-bound or adversarial automation).
 | Amazon card / gift balance / points | P2 | Amazon account | [#28](https://github.com/risu729/kogane/pull/28) | C candidate | 4 (manual artifacts: 1-2) | draft complete |
 | au PAY | P2 | au PAY app/web | [#32](https://github.com/risu729/kogane/pull/32) | E (C candidate) | 1 (Web replay: 3) | draft complete |
 | J-Coin Pay | P2 | J-Coin Pay app | [#30](https://github.com/risu729/kogane/pull/30) | D (C candidate) | 4 (manual view: 1) | draft complete |
-| V Point / V Point Pay | P2 | V Point / Vpass / app | [#34](https://github.com/risu729/kogane/pull/34) | D (Web: C candidate) | 4-5 (manual: 1) | draft complete |
+| V Point / V Money | P2 | V Point My Page | [#34](https://github.com/risu729/kogane/pull/34) | B | 3 | production PoC verified |
+| V Point Pay | P2 | V Point Pay app API | follow-up PR | B candidate | 3 | Worker PoC implemented; app bootstrap/live API pending |
 | ANA Pay / ANA Mileage Club | P2 | ANA app/web | [#31](https://github.com/risu729/kogane/pull/31) | C candidate | 4 (manual: 1-2) | draft complete |
 | JAL Pay / JMB | P2 | JAL app/web | [#33](https://github.com/risu729/kogane/pull/33) | D | 5 (manual: 1-2) | draft complete |
 | AirWallet | P2 | AirWallet app | [#36](https://github.com/risu729/kogane/pull/36) | E (C candidate) | 1-2 (automation: 4-5) | draft complete |
