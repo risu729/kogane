@@ -13,8 +13,8 @@
 - Container instance identity `prestia-globalpass-read-only-v15`: timezone collector v2検証後にstop/destroyを受理済み。Cloudflareのinstance一覧にはinactive recordが残るため、app削除時に消す。
 - Container instance identity `prestia-globalpass-read-only-v16`: timezone collector v3検証用。destroy受理済みで、inactive recordはapp削除に従わせる。
 - Container instance identities `prestia-globalpass-read-only-v17`: image rollout完了前に起動して旧v3 imageを保持したため、destroy受理済み。inactive recordはapp削除に従わせる。
-- Container instance identity `prestia-globalpass-read-only-v18`: rollout完了後に起動した現行timezone collector v4。daily/backfill成功済みで、Workers Cronが使用するため保持する。
-- Container instance identity `prestia-globalpass-chromium-timezone-probe-v1`: 最終成功条件でbinaryだけをPlaywright同梱Chromiumへ変えるA/B専用。検証後は`scripts/trigger.sh stop ... chromium-timezone stop`で停止し、inactive recordはapp削除に従わせる。
+- Container instance identity `prestia-globalpass-read-only-v18`: Workers Cronが使用する現行identity。v4でdaily/backfill成功済み、v5のChrome control成功後はdestroy済みで、次回Cron時に再作成される。
+- Container instance identity `prestia-globalpass-chromium-timezone-probe-v1`: 最終成功条件でbinaryだけをPlaywright同梱Chromiumへ変えたA/B専用。3 run完了後にdestroy済みで、inactive recordはapp削除に従わせる。
 - 旧Container image `sha256:3035cabb81c0f7a70923cd5491a310406b31ef29e1f092397c28d2157276f2e5`: Xvfb wrapperによりport 8080をlistenできなかった検証image。
 - 旧Container image `sha256:3027472193d263d31180ac600d87f230134a3d84407e2b97a2de63b3547be757`: diagnostic path sanitizer導入前の検証image。
 - 旧Container image `sha256:35d493c8d276d9e6d58856fe4b132d5ec9a14cbc28f92118c48dc5fc50bb9c03`: Playwright同梱Chromiumだけを含む6条件目導入前のimage。
@@ -72,7 +72,7 @@ listenしていない。relay tokenはstdinからmemoryへ渡し、`bots`のfile
 
 - Worker `kogane-globalpass-collector-poc`とworkers.dev deployment。
 - Container app `kogane-globalpass-collector-poc-globalpasscollectorcontainer`（app ID `a03ac341-52a7-4e81-9a7c-279a90cc4b0c`）。
-- 現行Container image `sha256:831819f48420eec226601985df6b84e3a80d3948ae389dd2fbbd557d23eed0f3`（timezone collector v4）と、旧digests `sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`、`sha256:7cd71344cc130d6b5e5c62a78743a8102daf07c0deb7ecd4a9e2428f55d2e863`、`sha256:c85e093a8a827821407fcba2fed849ea6558342fc103978846561cbc6f4192f7`、`sha256:c0bd4b80395580cf61eb8f6d34f5326a073e4191eda18064d47f5e5ecacdd501`、`sha256:c768879b72c2b88099fee38a139036142d4c43c6d0c8960a727deb11f52853af`を含むregistryの旧image。
+- 現行Container image `sha256:4c519cffcc19812ec90c826e42d2c483421bae8fa64f00e03d2ece95de3f9e49`（timezone collector v5）と、v4 `sha256:831819f48420eec226601985df6b84e3a80d3948ae389dd2fbbd557d23eed0f3`、旧digests `sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`、`sha256:7cd71344cc130d6b5e5c62a78743a8102daf07c0deb7ecd4a9e2428f55d2e863`、`sha256:c85e093a8a827821407fcba2fed849ea6558342fc103978846561cbc6f4192f7`、`sha256:c0bd4b80395580cf61eb8f6d34f5326a073e4191eda18064d47f5e5ecacdd501`、`sha256:c768879b72c2b88099fee38a139036142d4c43c6d0c8960a727deb11f52853af`を含むregistryの旧image。
 - 2026-08-30 WSL local Docker A/Bの一時container `kogane-globalpass-wsl-ab-*`、port 8080/18080/18081/18082、Xvfb :93/:94、host SOCKS port 11080は全run終了後に停止・削除済み。新しいimage、profile、captureは作成していない。
 - 2026-08-29追加検証の旧Container image `sha256:ac8dcc44bfcd5135dd60582ed801492f599735d4e45df63e4cf9416f108dded1`、`sha256:f3fe89e1590fce95edcca8b29dbb34aff3426b5cb39be88aedacb230e4dc284f`、およびそれ以前の現行imageだった`sha256:4933be0abc6397d74ec6f02b0e49a4a046daeda392962f7f28f3c3d41514c7c6`。
 - Workerの公開診断endpoint `/egress`。既存Worker以外のresourceは作らず、Worker削除に従って消える。

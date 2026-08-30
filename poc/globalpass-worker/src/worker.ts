@@ -252,10 +252,10 @@ async function runCollection(
     return await collectWithContainer(env, mode, container, startedAt, runId);
   } finally {
     try {
-      await container.stop();
+      await container.destroy();
       console.log(
         JSON.stringify({
-          event: "globalpass-collection-container-stopped",
+          event: "globalpass-collection-container-destroyed",
           runId,
           mode,
         }),
@@ -263,7 +263,7 @@ async function runCollection(
     } catch (error) {
       console.warn(
         JSON.stringify({
-          event: "globalpass-collection-container-stop-failed",
+          event: "globalpass-collection-container-destroy-failed",
           runId,
           mode,
           errorType: error instanceof Error ? error.name : "UnknownError",

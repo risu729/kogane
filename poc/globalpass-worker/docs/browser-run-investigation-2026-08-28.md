@@ -438,4 +438,27 @@ Camoufox、Patchright、Browser Runは現行経路に不要である。Camoufox�
 PAT 401、Brunhild abort、TAMIAのIPv6不足は、成功runでも観測され得るため単独blockerとして
 扱わない。Browser Run単独もtokenを完成できなかったため採用しない。残る作業はbot回避ではなく、
 英語/日本語のlogin後DOM、月selector、HTMLサイズ、R2保存を確定する通常のcollector実装である。
-Cronはdailyとbackfillのend-to-end成功を確認するまで無効のままにする。
+dailyとbackfillのend-to-end成功後、Workers Cronを毎日03:17 JSTで有効化した。
+
+## 2026-08-30 最終成功条件でのChromium A/B
+
+timezone発見前のChromium比較には`UTC`やsplit egressなどの交絡が残っていたため、runtime
+`timezone-collector-v5`でbrowser binary以外を最終成功条件へ揃え直した。共通条件は
+`TZ=Asia/Tokyo`、Xvfb headed、fresh persistent profile、native Linux情報、
+`navigator.webdriver=false`、GLOBAL PASS・Turnstile・helperの全通信TAMIAである。
+
+| binary | 回数 | HTTP | Turnstile token | browser version | elapsed |
+| --- | ---: | ---: | --- | --- | --- |
+| Playwright同梱Chromium | 3 | 200 / 200 / 200 | 0 / 0 / 0文字 | 151.0.7922.34 | 38.8 / 40.6 / 41.6秒 |
+| Google Chrome Stable control | 1 | 200 | 794文字 | 152.0.7977.64 | 32.0秒 |
+
+4 runともTAMIAの同じ日本出口とCloudflare KIXで観測され、Brunhild requestも発生した。
+Chromiumの3 runは各回fresh profileである。tokenが一度も生成されなかったため、Chromium側では
+資格情報入力、login POST、cookie再利用、R2書き込みを行っていない。同時刻帯のChrome controlが
+成功したので、今回はtimezone・egress・headless・profileではなくbrowser binary/version差へ
+失敗要因を絞れる。Chromium 151とChrome 152のversion差は残るためbrandだけの差とは断定しないが、
+現行Playwright同梱Chromiumへ切り替える根拠はなく、productionはE2E実績のあるChromeを維持する。
+
+専用identity `prestia-globalpass-chromium-timezone-probe-v1`とChrome controlに再作成された`v18`は
+検証後にdestroyし、両方がinactiveになったことを確認した。なお、`sleepAfter=30s`と`stop()` RPC
+成功だけではrelay使用後のinstanceがrunningのまま残ったため、通常収集後も`destroy()`を使う。
