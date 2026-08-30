@@ -473,6 +473,8 @@ synthetic testでは、request shape、recent/historical分離、pagination停�
 
 認証後の19回の`trade` requestについて、Cookie値と`secureKey`を出力せずSHA-256同値比較だけを行った。`secureKey`、`vct_bff_sid`、`JSESSIONID`、`AWSALBAPP-0`から`AWSALBAPP-3`は全期間で同一だった。一方、`AWSALB`、`AWSALBCORS`、2個の`__cf_bm`は繰り返し変化し、完全なCookie headerは19回中ほぼ毎回異なった。
 
+login responseの属性では、`vct_bff_sid`と`__cf_bm`の`Expires`が約30分後、`AWSALB`、`AWSALBCORS`、`AWSALBAPP-0..3`が約7日後だった。`JSESSIONID`には`Expires`/`Max-Age`がなくsession cookieだった。後続の認証済み`trade` responseも同じcookie名を`Set-Cookie`し、`vct_bff_sid`は同じ値のまま約30分先へ、AWS routing cookieは約7日先へ期限を延長していた。したがって30分は固定login寿命ではなくrolling idle windowの可能性が高い。再認証を避ける常駐collectorは30分未満のread-only keepaliveと`Set-Cookie`追従が必要になる。server側absolute lifetimeは引き続き不明である。
+
 `accountMargin`だけを使ったleave-one-out試験では次の結果になった。
 
 | Cookie subset | 結果 |
