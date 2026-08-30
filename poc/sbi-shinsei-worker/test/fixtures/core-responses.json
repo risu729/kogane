@@ -1,0 +1,212 @@
+{
+  "validateToken": {
+    "header": {
+      "adapterResultCode": "SYNTHETIC_OK",
+      "newToken": "synthetic-next-csrf-token"
+    }
+  },
+  "topBalances": {
+    "responseParam": {
+      "overview": {
+        "requestParam": {},
+        "responseParam": {
+          "totalCreditBalance": "300000",
+          "totalDebitBalance": "0",
+          "savingsBalance": "300000",
+          "tdBalance": "0",
+          "sdBalance": "0",
+          "debuntureBalance": "0",
+          "loanBalance": "0",
+          "savingsDetails": [
+            {
+              "accountNo": "synthetic-account-1",
+              "balance": "100000",
+              "yenEqui": "100000",
+              "currency": "JPY",
+              "productCode": "SYNTHETIC_YEN"
+            },
+            {
+              "accountNo": "synthetic-account-2",
+              "balance": "200000",
+              "yenEqui": "200000",
+              "currency": "JPY",
+              "productCode": "SYNTHETIC_HYPER"
+            }
+          ],
+          "hyperYokinStatus": "SYNTHETIC_ACTIVE"
+        },
+        "header": {
+          "referenceNo": "synthetic-reference",
+          "systemCode": "synthetic-system",
+          "langCode": "ja"
+        },
+        "errorInfo": {
+          "statusID": "",
+          "statusMessage": ""
+        }
+      },
+      "activity": {
+        "requestParam": {},
+        "responseParam": {
+          "type": "SYNTHETIC",
+          "fromDate": "20260801",
+          "toDate": "20260831",
+          "purgeflag": false,
+          "currentBalance": "100000",
+          "accountNo": "synthetic-account-1",
+          "currency": "JPY",
+          "activityDetails": [
+            {
+              "txnReferenceNo": "synthetic-txn-1",
+              "description": "SYNTHETIC CREDIT",
+              "credit": "1000",
+              "debit": null,
+              "postingDate": "20260830",
+              "balance": "100000",
+              "tradeTypeCode": "SYNTHETIC"
+            }
+          ]
+        },
+        "header": {
+          "referenceNo": "synthetic-reference",
+          "systemCode": "synthetic-system",
+          "langCode": "ja"
+        },
+        "errorInfo": {
+          "statusID": "",
+          "statusMessage": ""
+        }
+      },
+      "systemResponseTime": "20260831060000",
+      "sbiHyperYokinFlg": true
+    },
+    "header": {
+      "adapterResultCode": "SYNTHETIC_OK"
+    }
+  },
+  "balanceSummary": {
+    "responseParam": {
+      "summary": {
+        "requestParam": {},
+        "responseParam": {
+          "customerName": "SYNTHETIC CUSTOMER",
+          "customerNameKanji": "SYNTHETIC",
+          "customerNameKana": "SYNTHETIC",
+          "mfAccountStatus": "NONE",
+          "savingsBalance": "300000",
+          "odLimit": "0",
+          "totalCredit": "300000",
+          "totalDebit": "0",
+          "fxCasaBalance": "0",
+          "yenTDBalance": "0"
+        },
+        "header": {},
+        "errorInfo": {}
+      },
+      "mutualFundBalance": "0",
+      "category": {
+        "requestParam": {},
+        "responseParam": {
+          "freeTransferCount": "1",
+          "customerCategory": "SYNTHETIC",
+          "atmFee": "0",
+          "allowedAtmWithFreeCnt": "1",
+          "balanceAtmWithFreeCnt": "1"
+        },
+        "header": {},
+        "errorInfo": {}
+      },
+      "branchFetch": {
+        "requestParam": {},
+        "responseParam": {
+          "branchCode": "000",
+          "branchName": "SYNTHETIC BRANCH"
+        },
+        "header": {},
+        "errorInfo": {}
+      }
+    },
+    "header": {
+      "adapterResultCode": "SYNTHETIC_OK"
+    }
+  },
+  "exchangeRate": {
+    "responseParam": {
+      "exchangeRateInformation": {
+        "requestParam": {},
+        "responseParam": {
+          "transactionTime": "20260831060000",
+          "exchangeRates": [
+            {
+              "currency": "USD",
+              "customerCategory": "SYNTHETIC",
+              "buyRate": "145.00",
+              "sellRate": "147.00",
+              "midRate": "146.00"
+            }
+          ]
+        },
+        "header": {},
+        "errorInfo": {}
+      }
+    },
+    "header": {
+      "adapterResultCode": "SYNTHETIC_OK"
+    }
+  },
+  "yenDeposit": {
+    "responseParam": {
+      "postingDate": "20260831",
+      "transactionTime": "20260831060000",
+      "customerCategory": "SYNTHETIC",
+      "debitAccountDetails": [
+        {
+          "accountNo": "synthetic-account-1",
+          "balance": "100000",
+          "currency": "JPY",
+          "productCode": "SYNTHETIC_YEN",
+          "accountStatus": "ACTIVE",
+          "moduleCode": "SYNTHETIC",
+          "unitNo": "1",
+          "maturityDate": null,
+          "valueDate": null,
+          "replicateFlag": false,
+          "productDescription": "SYNTHETIC SAVINGS"
+        }
+      ],
+      "productDetails": [
+        {
+          "productCode": "SYNTHETIC_YEN",
+          "tdProductDetail": {},
+          "pdProductDetail": {}
+        }
+      ],
+      "sdBalance": "0",
+      "fcyCASABalance": "0",
+      "newCustStatus": "SYNTHETIC",
+      "savingsDetails": [
+        {
+          "accountNo": "synthetic-account-1",
+          "balance": "100000",
+          "yenEqui": "100000",
+          "currency": "JPY",
+          "productCode": "SYNTHETIC_YEN"
+        }
+      ],
+      "tdDetails": [],
+      "sdDetails": [],
+      "debuntureDetails": [],
+      "loanDetails": [],
+      "moduleDetails": [
+        {
+          "moduleCode": "SYNTHETIC",
+          "moduleDesc": "SYNTHETIC MODULE",
+          "moduleBalance": "100000"
+        }
+      ]
+    },
+    "header": {
+      "adapterResultCode": "SYNTHETIC_OK"
+    }
+  }
+}

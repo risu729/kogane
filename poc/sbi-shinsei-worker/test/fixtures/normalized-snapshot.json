@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "sbi-shinsei-synthetic-v1",
+  "capturedAt": "2026-08-31T00:00:00.000Z",
+  "balances": [
+    {
+      "accountKey": "synthetic-yen-1",
+      "product": "yen-savings",
+      "currency": "JPY",
+      "balance": "123456",
+      "yenEquivalent": null,
+      "asOf": "2026-08-31T00:00:00.000Z"
+    },
+    {
+      "accountKey": "synthetic-hyper-1",
+      "product": "hyper-yokin",
+      "currency": "JPY",
+      "balance": "654321",
+      "yenEquivalent": null,
+      "asOf": "2026-08-31T00:00:00.000Z"
+    },
+    {
+      "accountKey": "synthetic-usd-1",
+      "product": "foreign-savings",
+      "currency": "USD",
+      "balance": "42.50",
+      "yenEquivalent": "6250",
+      "asOf": "2026-08-31T00:00:00.000Z"
+    }
+  ],
+  "transactions": [
+    {
+      "accountKey": "synthetic-yen-1",
+      "transactionDate": "2026-08-30",
+      "description": "SYNTHETIC CREDIT",
+      "debit": null,
+      "credit": "1000",
+      "balance": "123456",
+      "currency": "JPY"
+    },
+    {
+      "accountKey": "synthetic-usd-1",
+      "transactionDate": "2026-08-29",
+      "description": "SYNTHETIC DEBIT",
+      "debit": "1.25",
+      "credit": null,
+      "balance": "42.50",
+      "currency": "USD"
+    }
+  ]
+}

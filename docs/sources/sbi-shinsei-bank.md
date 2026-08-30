@@ -1,6 +1,6 @@
 # SBI新生銀行 source assessment
 
-調査日: 2026-08-26
+調査日: 2026-08-31（公式資料・公開コード・未認証edge probeを再確認）
 
 ## Scope and safety boundary
 
@@ -17,11 +17,19 @@ repository history.
 
 ## Executive decision
 
-**Recommendation: start with the official desktop PowerDirect UI and its own
-CSV/PDF exports, using a visible, user-controlled browser session.** Capture the
-read-only network traffic during that manual run. Only after the response shapes
-and session behavior have been observed should Kogane decide whether to automate
-the official export buttons or replay a read-only internal endpoint.
+**Recommendation: use the official desktop PowerDirect web surface as the next
+collector target.** The official security and operation guides now give strong
+evidence that an ordinary read-only web login requires only the 10-digit
+branch/account identifier and PowerDirect password. The registered-phone FIDO
+approval is documented for important transactions, not as a mandatory approval
+for every browser login. This is materially different from SMBC Safety Pass.
+
+The first live run should still use a visible, user-controlled browser and record
+only sanitized request topology. An unauthenticated direct HTTP probe from the
+current Windows and WSL network paths received no response bytes before timeout,
+so neither a simple form protocol nor a Workers-compatible endpoint has yet been
+proven. Capture the read-only login/balance/history/export transport once, then
+test the smallest equivalent local HTTP client before choosing browser automation.
 
 This route has the best evidence-to-maintenance ratio:
 
@@ -41,13 +49,29 @@ An official PowerDirect API also exists, but the published route is an
 external-service-provider integration. Becoming such a provider is a separate
 business/compliance project, not a shortcut for a personal collector. The mobile
 app is valuable for discovery and as an operator interface, but its FIDO-bound
-device model makes it a poor first automation target.
+device model makes it a poor first automation target. The public Web surface is
+the preferred implementation route; app analysis is a parallel inventory/fallback
+track, not a prerequisite for the first collector.
 
-Overall implementation cost is **3/5** for a reliable, user-assisted
-PowerDirect CSV/PDF collector and **4/5** for unattended browser collection.
+Overall implementation cost is **2/5** for a reliable, user-assisted
+PowerDirect CSV/PDF collector and **3/5** for an unattended persistent-browser
+collector. A browserless HTTP collector remains **3/5 but conditional** on the
+authenticated capture showing ordinary form/session requests that Akamai accepts
+outside Chrome.
 The automation outlook is **high for balances and ordinary-account activity
 after a session is established**, **medium for deposits represented only by
 product/statement screens**, and **unproven for cloud-side login**.
+
+### Current blocker matrix
+
+| Question | Evidence as of 2026-08-31 | Decision impact |
+| --- | --- | --- |
+| Is Akamai in front of PowerDirect? | Yes. The login hostname CNAMEs through `edgekey.net` to `akamaiedge.net`. | Expect edge policy and possible fingerprint/IP sensitivity. |
+| Is Akamai browser telemetry proved? | Yes. The public login loads an Akamai sensor path under `/akam/13/...`. The exact Akamai product/rule and cookie behavior are not yet identified. | Browser telemetry exists, but do not equate it with a proved rejection decision. |
+| Is Turnstile present? | No evidence. Turnstile is a Cloudflare product and neither public pages nor this probe showed it. | Do not carry the GLOBAL PASS Turnstile architecture into this collector without capture evidence. |
+| Is registered-device approval required for read-only browser login? | Official login documentation lists only branch/account number and PowerDirect password. FIDO guidance describes approval of important transactions such as transfers. | Unlike SMBC Safety Pass, FIDO is not presently a blocker to read-only Web collection. Live risk-trigger behavior remains untested. |
+| Can a Worker perform the login today? | Not proved. Direct unauthenticated `curl` from both local Windows and WSL timed out with zero HTTP response bytes, while indexed fetch infrastructure can read the login surface. | Capture an accepted browser request first; do not start with speculative Worker retries. |
+| Is the app an easier path? | No. Current app login is biometric/FIDO, one registered phone per account, and device replacement/reinstall repeats identity verification. | Keep app static analysis separate; prefer Web for collection. |
 
 ## Official surfaces and data coverage
 
@@ -101,10 +125,13 @@ when the list also contains a next-month settlement row.
 
 The official Android listing is
 [Google Play package `com.shinseibank.powerdirect`](https://play.google.com/store/apps/details?id=com.shinseibank.powerdirect&hl=ja&gl=JP).
-At the time of research the public listing showed 500,000+ installs, a
-2026-08-06 update date, balance/account-activity and time-deposit functions,
-and smartphone authentication. The bank's current guide applies to app version
-3.9.0 or later.
+At the time of the 2026-08-31 refresh the public listing showed 500,000+
+installs, an Android update date of 2026-08-24, balance/account-activity and
+time-deposit functions, smartphone ATM, and smartphone authentication. The
+bank's current guide applies to app version 3.9.0 or later. The official Apple
+listing reported version 3.11.0 on 2026-08-31; the public Google Play page did
+not expose a trustworthy Android version number, so do not assume parity from
+the update date alone.
 
 The app gives a compact asset/bank-account view and dedicated Hyper Yokin and
 account-activity screens. Its
@@ -119,6 +146,12 @@ surface is Google Play; Kogane should obtain any analysis artifact only through
 the user's authorized Play delivery/device, not a third-party APK mirror. A
 Play App Bundle may produce split APKs, so analysis must preserve the full split
 set and signing-certificate metadata.
+
+APK/split APK bytes, decompiler output, signing metadata and any generated
+intermediate files belong only in the designated private Android-analysis
+repository. This public repository should contain the reproducible acquisition
+and decompilation procedure, hashes/package/version metadata, sanitized endpoint
+inventory and conclusions, but not bank application binaries or decompiled code.
 
 Static analysis is useful **later** to inventory official hostnames, deep links,
 network libraries, certificate-pinning or device-integrity controls, local
@@ -237,9 +270,11 @@ and monthly reports, not manufacture a unified event ledger prematurely.
 ### Confirmed facts
 
 - Browser PowerDirect login is documented as branch number + account number +
-  PowerDirect password. The
+  PowerDirect password. The bank's dedicated
+  [login-authentication page](https://www.sbishinseibank.co.jp/security/pd/005.html)
+  explicitly calls those the two login factors, and the
   [account-information guide](https://www.sbishinseibank.co.jp/service/newpd/guide/koza.html)
-  shows this login before read-only balance access.
+  shows the same login before read-only balance access.
 - The bank states that browser PowerDirect remains available regardless of the
   authentication method, while use of the current app requires smartphone
   authentication (FIDO).
@@ -257,6 +292,10 @@ and monthly reports, not manufacture a unified event ledger prematurely.
   [push-notification guide](https://www.sbishinseibank.co.jp/service/newpd/app_pd/guide/push.html)
   says approval must complete within 120 seconds.
 - The former VIP Access smartphone-authentication method ended on 2026-06-27.
+- No official source found a browser passkey login for PowerDirect. The bank's
+  current use of the word FIDO refers to the one-phone SBI新生銀行 app
+  registration and transaction approval flow, not a syncable credential that
+  can be fetched from Bitwarden and supplied to a Worker.
 - The bank documents automatic browser logout after an unspecified period of
   inactivity in its
   [security guidance](https://www.sbishinseibank.co.jp/security/pd/010.html).
@@ -282,7 +321,7 @@ must not automate a transaction approval.
 
 ### Confirmed
 
-On 2026-08-26, a live DNS lookup showed:
+On 2026-08-31, a repeated live DNS lookup showed:
 
 ```text
 bk.web.sbishinseibank.co.jp
@@ -291,24 +330,112 @@ bk.web.sbishinseibank.co.jp
 ```
 
 This confirms that the authenticated PowerDirect hostname is delivered through
-an Akamai edge. A plain WSL `curl` probe did not complete successfully (HTTP/2
-internal error, then HTTP/1.1 timeout), while a normal indexed web fetch could
-load the login HTML. These observations justify a browser-first test but do not
-identify a particular Akamai product or blocking rule.
+an Akamai edge. HTTP/1.1 probes from both the current Windows and WSL paths each
+timed out after 20 seconds with zero response bytes, while a normal Chrome
+session and indexed fetch infrastructure could load the login surface. The TLS
+handshake itself succeeded and presented the bank's current certificate. This
+separates TCP/TLS reachability from HTTP acceptance, but it does not identify a
+particular Akamai blocking rule or prove that cloud traffic is always rejected.
+
+### Public login asset and transport observations
+
+Inspection of the current public login page and JavaScript in a normal Chrome
+session on 2026-08-31 materially narrows the architecture:
+
+- the visible entry is
+  `https://bk.web.sbishinseibank.co.jp/SFC/apps/services/www/SFC/desktopbrowser/default/login?mode=1`;
+- page assets include an Akamai sensor path under `/akam/13/...`, a CAFIS Brain
+  risk collector, `fp-clientlib-v5`, Transmit Security `platform-websdk`, and
+  `WLClient.js`;
+- the login form exposes `nationalId`, `password` and hidden `dtokeninfo` fields;
+- `LG0001_login.js` invokes ThreatMetrix, a Transmit Security DRS
+  `triggerActionEvent` with a claimed user identifier, and
+  `CAFISBrainRiskCollector.getDeviceTokenInfoV3`, whose result is placed in
+  `dtokeninfo` and submitted as `jsc`; Transmit DRS also sends device
+  configuration/events to `collect.riskid.security`;
+- the application login payload includes `fldUserID`, `password`, `langCode`,
+  `mode`, `postubFlag`, `jsc`, `forward`, and `userAgentInfo`;
+- the credential submission route is
+  `POST /SFC/app/ShinseiAuthenticatorRealm/login_auth_request_url`;
+- a successful login is expected to return an `Authorization` response header
+  and a separate response token, both kept in browser session state;
+- post-login adapter traffic uses `POST /SFC/app/{adapter}/{procedure}` with a
+  session token in `Authorization`, a JSON request body, and a response-header
+  token that rotates for subsequent calls;
+- CSV export is a separate authenticated POST to
+  `/SFC/adapters/IFAI_CsvDownloadAdapter/csvDownload/getCsv`, carrying the
+  session token plus account/date selection.
+
+This proves more than a generic Akamai edge. The login is coupled to multiple
+device/risk signals, and the JSON adapters depend on a rotating authenticated
+token. It still does **not** prove that those risk libraries reject automation,
+that every signal is mandatory, or that a direct HTTP client cannot reproduce
+the accepted read-only flow. It does show why a bare username/password POST is
+not a sufficient first implementation. It also changes the preferred collector
+classification: current post-login reads should target the official JSON adapter
+transport, with CSV/PDF retained as raw evidence, rather than scrape rendered
+HTML tables.
+
+Public JavaScript names the following read-looking procedures. Their response
+schemas and authorization behavior must be confirmed in an authenticated,
+read-only capture before implementation:
+
+| Adapter | Observed read-looking procedures |
+| --- | --- |
+| `IFTP_TopAdapter` | `getAccountsBalanceAndActivity`, `getBalanceSummaryAndStage` |
+| `IFCM_CommonAdapter` | `getAccountInformationListDisplay`, `getProductDescription` |
+| `IFAI_AccountAdapter` | `getAccountInformationOthersDisplay`, `getCasaAccountActivitySpecificPeriod` |
+| `AIAI_AccountInfomationAdapter` | `getAccountList`, `getInboxList` |
+| `AIYD_YenDepositAdapter` | `getYenProductDetails`, `getYenDepositAccount` |
+
+The current account screen distinguishes at least product code `601` for yen
+ordinary savings and `603` for SBI Hyper Yokin. Foreign savings, yen time
+deposits, foreign time deposits, structured deposits and loans are represented
+as distinct arrays. These are client-side observations, not yet authenticated
+response-schema guarantees.
+
+The current activity controller receives `activityDetails` and performs local
+pagination at 30 rows per page. Query fields include `accountNo`, `type`,
+`fromDate`, `toDate`, `eventType` and optionally `accountActivityDetails`. The
+CSV controller creates a UTF-8-BOM Blob from the authenticated response. A
+collector must compare full returned row counts rather than mistake the 30-row
+UI page size for a server/export limit.
+
+Procedure naming is not an authorization or safety guarantee. The collector
+must use an explicit allowlist of captured read procedures; everything else,
+especially transfers, FX, deposit creation/changes, memo updates, settings and
+registration procedures, is denied by default.
+
+Minimum explicit write-deny examples from the current client include:
+
+- `AIAI_AccountInfomationAdapter/editCasaAccountActivityMemo`;
+- password, email, address, transfer-limit and My Number update procedures;
+- transfer registration, confirmation, cancellation and beneficiary deletion;
+- FX registration procedures;
+- smartphone-authentication device registration/deletion;
+- account opening and investment profiling.
+
+Production code must not expose a generic `{adapter}/{procedure}` caller to a
+scheduled job. Because `header.newToken` replaces the current token after a
+response, calls must be serialized per session and the latest token persisted
+atomically before the next request.
 
 ### Unconfirmed inference
 
 It is plausible that Akamai WAF/bot controls, TLS/client fingerprinting,
-JavaScript telemetry, IP reputation or rate limits affect non-browser/cloud
-clients. The DNS chain and one failed command-line request do **not** prove Bot
-Manager, prove that automation is blocked, or show which signal mattered.
+JavaScript telemetry, CAFIS/ThreatMetrix/Transmit risk decisions, IP reputation
+or rate limits affect non-browser/cloud clients. The Akamai sensor asset is
+stronger evidence than DNS alone, but it still does not identify the exact
+product/rule or show which signal caused the command-line timeout.
 No credentialed anti-bot test was performed. The collector must stop on 401,
 403, login redirect or challenge and must not rapidly retry authentication.
 
 ## Existing third-party implementations
 
-Repository/code search found no current unofficial client for the 2026 app/FIDO
-stack. The useful public evidence is:
+Repository/code search refreshed on 2026-08-31 found no current unofficial
+client for the 2026 Web adapter or app/FIDO stack. A GitHub code search for the
+current `sbishinseibank.co.jp/SFC` host found only this assessment. The useful
+public historical/CSV evidence is:
 
 | Project | Last activity observed | Implementation confirmed in code | Reuse value |
 | --- | --- | --- | --- |
@@ -331,16 +458,24 @@ used for validation.
 | Visible local/physical Chrome + official CSV/PDF | High | 2 | Best initial evidence path. User logs in; collector performs only verified read/download navigation. |
 | Persistent local browser automation | Medium-high | 3 | Promising if read-only login and downloads repeat after restart; requires safe secret delivery and session tests. |
 | Official PowerDirect API as a contracted provider | Potentially high | 5 | Most supportable long-term route, but availability/fields/contract are unknown and onboarding is disproportionate for the first personal prototype. |
-| Cloudflare Workers isolate | Low for collection; high for orchestration/storage | 4 | No full browser/App/FIDO runtime and poor fit for authenticated downloads. Use only after a browser/container produces artifacts or a supported API token. |
+| Cloudflare Workers isolate | Conditional | 3 | Web FIDO is not required for read-only login, and the current Web client uses JSON adapters, so the runtime is not inherently impossible. However, login risk collectors, Akamai acceptance and rotating-token bootstrap are unproved outside Chrome. Implement only after a local direct-client reproduction succeeds. |
 | Cloudflare Containers with Chromium | Medium, unproven | 4 | Can run a browser, but persistent profile/secret handling and Akamai/cloud-login acceptance need testing. Use after local session behavior is understood. |
 | OCI VM or Kubernetes with Chromium + encrypted persistent volume | Medium-high | 4 | Best cloud control over browser, storage and egress, but operationally heavier. A stable IP does not guarantee Akamai acceptance. |
 | Reverse-engineered Android app API | Low | 5 | FIDO/device binding, app attestation/pinning risk and rapid drift. Static inventory only; not the recommended collector. |
 
-For an unattended deployment, OCI is currently the more controllable browser
-host. Cloudflare Containers remain worth a bounded comparison, while a Worker
-is the coordinator/ingestion layer rather than the bank client. The preferred
-architecture still keeps authentication bootstrap on a user-controlled,
-trusted device until a cloud login has passed repeated read-only tests.
+For an unattended deployment, try the cheapest architecture in this order:
+
+1. reproduce the captured login plus read adapters with a local direct HTTP
+   client, including the documented risk bootstrap and rotating token;
+2. if that works repeatedly, port the same fetch flow to a Cloudflare Worker;
+3. if direct HTTP fails but an ordinary persistent browser succeeds, use a
+   Cloudflare Container or OCI/Kubernetes browser and keep Workers for
+   orchestration/storage.
+
+OCI is the more controllable fallback browser host, but it should not be chosen
+before the direct-client test. The preferred architecture keeps authentication
+bootstrap on a user-controlled trusted device until cloud login passes repeated
+read-only tests.
 
 ## Proposed validation plan
 
@@ -348,9 +483,9 @@ All steps below are read-only and use the customer's account only with redacted
 capture/logging rules.
 
 1. Start a dedicated visible Chrome/Kuebiko profile locally. Log in manually to
-   PowerDirect. Record only public host/path names and response shapes; exclude
-   authentication bodies, cookies, headers, account identifiers, customer name
-   and amounts.
+   PowerDirect. Record sanitized host/path, adapter/procedure, field names,
+   status/content type and token-rotation topology; exclude authentication
+   values, cookies/tokens, account identifiers, customer name and amounts.
 2. Enumerate the labels and stable product identifiers, if any, for 円普通預金,
    SBIハイパー預金, every held yen time-deposit family, each foreign-currency
    savings account and every held foreign-currency time deposit. Store a
@@ -365,18 +500,24 @@ capture/logging rules.
 5. Compare the same Hyper Yokin date range in app and web, including any
    next-business-day settlement row, without recording values. Define explicit
    `as_of` and effective-date handling before parsing.
-6. Observe network calls for balance list, product lists, activity query, CSV
-   download and PDF download. Prefer an official download over endpoint replay.
-   If an internal read endpoint is considered, replay it once in the same
-   authenticated browser context and compare it byte/row-wise with the UI.
-7. Measure idle timeout, browser-restart survival and one same-host session
+6. Build an explicit read allowlist from the observed top/common/account/yen
+   adapters. Capture the login risk-bootstrap ordering, session token issuance,
+   response-header token rotation, balance list, product list, period query,
+   CSV download and PDF navigation. Preserve no live values.
+7. Replay one allowlisted balance or activity call in the same authenticated
+   browser context and compare it with the UI. Then implement the same call in a
+   local direct HTTP client. Stop rather than guessing if the risk bootstrap or
+   token transition is incomplete.
+8. Measure idle timeout, browser-restart survival and one same-host session
    replay. Then run one bounded WSL/OCI/Cloudflare Container validation with an
    already established read-only session. Stop at the first login redirect,
    401, 403 or challenge; do not submit credentials repeatedly.
-8. Separately acquire the current Play-delivered split APK set from the user's
+9. Separately acquire the current Play-delivered split APK set from the user's
    registered/authorized device and perform static endpoint/library inventory.
-   Do not hook biometrics, bypass device checks or exercise transaction APIs.
-9. If a supported direct API is still desirable, contact the bank's published
+   Archive binaries/decompiler output only in the private analysis repository;
+   publish the reproducible procedure and sanitized findings here. Do not hook
+   biometrics, bypass device checks or exercise transaction APIs.
+10. If a supported direct API is still desirable, contact the bank's published
    retail API channel for documentation, sandbox/onboarding conditions, exact
    balance/product/history coverage, consent lifetime and read-only scope. Keep
    this track independent of aggregator ingestion.
@@ -402,6 +543,22 @@ capture/logging rules.
   Hyper Yokin and detailed time-deposit holdings rather than only ordinary
   account balances/activity?
 
-Until these are answered, the implementation should remain an official-export
-collector with browser-assisted capture, not a credentialed headless scraper or
-mobile API client.
+Until these are answered, implementation should start as an official Web/export
+collector with browser-assisted discovery. A credentialed direct HTTP client is
+an explicit next experiment, but only for captured allowlisted read procedures
+and only after it reproduces the risk/token sequence without repeated login
+attempts. The mobile app API is not the first collector path.
+
+## Implementation status (2026-08-31)
+
+[`poc/sbi-shinsei-worker`](../../poc/sbi-shinsei-worker/) now contains an
+isolated Workers/R2/Cron skeleton. It does not depend on Mnie and does not submit
+credentials. The exact read candidates above are represented in a static
+allowlist, but every entry remains disabled and has an unknown response schema.
+Routes observed returning 200 in the 2026-08-31 Kuebiko login/read capture are
+separately marked `liveValidated`; this does not enable production traffic.
+The transport checks the allowlist before `fetch`, rejects write-looking paths,
+stops at authentication boundaries, limits response size, and refuses to store
+or interpret unknown responses. See the PoC's
+[`INVESTIGATION-2026-08-31.md`](../../poc/sbi-shinsei-worker/INVESTIGATION-2026-08-31.md)
+for the evidence boundary and enablement checklist.
