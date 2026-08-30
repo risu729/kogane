@@ -316,3 +316,113 @@ Web側は上記のsame-origin event gatewayまで確認できた。アプリ側�
 - ファイルや画面にPII、実残高、実取引、暗号資産アドレス等が見え、マスク前にログ・保存される可能性がある。
 
 このstop条件に達した経路は中止し、E / cost 1の手動export方式を維持する。別のread-only静的解析や、制御回避を伴わない観測まで一律に禁止するものではない。
+
+## 12. 2026-08-31 現行Webの再検証
+
+PR #23で調べた公開artifactが現行deployでも使われているか、認証情報を入力せず再確認した。ファイル名はNuxt deployごとに変わり得る観測値であり、collectorの固定契約にしない。
+
+### ブラウザー観測
+
+- `https://simple.sbivc.co.jp/login` は通常のWindows Chrome 151でHTTP 200となり、メールアドレス/口座番号、password、`パスキーでログイン`を表示した。
+- 初期表示時に`/libs/simplewebauthn-browser.min.js`とCloudflare Turnstileのscript/iframeを読み込んだ。
+- credential操作前に、browserは`POST /api/cccmdipresen/gw/initiateLoginWithPasskey`を1回送り、HTTP 200 `application/json`を受けた。bodyは保存していない。このeventはWebAuthn challenge bootstrapで、POSTであっても資産・設定を変更するwriteではない。HTTP methodだけでread/writeを分類できない具体例である。
+- Bitwarden vaultには本人のSBI VCトレードitemとpasskey sectionが存在することだけを確認した。username、password、passkey material、TOTP、Cookie、response bodyは表示・複製・保存していない。live bootstrapでは通常Chromeで既存passkeyを使うのを第一候補とし、ID/password + MFAは公式に残るfallbackとする。
+
+### 公開bundle/source map
+
+`/login`から直接または実行時に観測した現行chunkは次の5件だった。
+
+| artifact | bytes | SHA-256 |
+|---|---:|---|
+| `b21877a.js` | 33,499 | `d68fba0d820170d325466a639f2aa2e52a8b95e9b0ca015561d38dca3e9fe3c5` |
+| `138abe1.js` | 4,128 | `21f1333fc473cab7db5d1bacb4627919fc9e6ea756bc13b003342e9df19cb602` |
+| `70aeb42.js` | 300,940 | `78e0f0c8a551be815eeafc77133f10ce1e77545bf1af5466bb57b8802e020ad4` |
+| `85a3155.js` | 1,564,956 | `4bf32b912ad1b72cfab6e9a2bfde4601d53ccac45b06966dae6b97775ca3dbf6` |
+| `f89914f.js` | 496,749 | `ff7856cdbd3080d87c8bfba7f45fb6b2982fdf26699114a57bd7089a3f87582f` |
+
+全5件の`.map`もHTTP 200だった。`f89914f.js.map`は882,355 bytes、SHA-256 `2c7c20685a71b1e9748e48e7cd8cb7d9e00271a9f68a4feccf22e5a3f69492fe`で、PR #23時点と同じmain bundle/source内容だった。`serverAPIClient.ts`から再確認した最小read schemaは次のとおり。
+
+login page map `b21877a.js.map`は91,166 bytes、SHA-256 `d5c3e578f302981163acf19289631468cb0185b4229c231cd5c5c69a7fe2935a`、配布`simplewebauthn-browser.min.js`は9,234 bytes、SHA-256 `7597a071cdf7634156e2185a61b6e3f535fe544c23d3bad1be7f599c0a3b4cfa`だった。sourceは`@simplewebauthn/browser@13.2.2`に対応する。ここに記録した主要artifactの`Last-Modified`はすべて2026-08-05だった。
+
+| event | path | request dataの必須要素 | 用途 |
+|---|---|---|---|
+| `cashBalanceList` | `/api/cccmdipresen/gw/trade` | `secureKey` | 日本円・暗号資産残高 |
+| `accountMargin` | 同上 | `secureKey` | 純資産、証拠金等の口座詳細 |
+| `executionList` | 同上 | `secureKey`, page, sort, `historical` | 約定履歴。recent/historicalが別view |
+| `getCashflowList` | 同上 | `secureKey`, page, `historical`, currency/type filters | 日本円入出金等のcashflow |
+
+約定履歴pageの実行時chunkは`32085e8.js`（23,308 bytes、SHA-256 `5669689931bf53e76a3cd98d4f4144ce70e5fb70e7feef9a74722085bee867c3`）、mapは61,277 bytes、SHA-256 `78b0bcfdaf5c37d72a8b79220c784286fe5dd5363e520e5187e6248d369867aa`だった。source `pages/trade-history.vue`は`sortKey: "executionDatetime"`、`sortAsc: "false"`、page size 30を使う。最初にhistorical pageを取得し、page 0だけrecent viewも取得してclient側でmergeする。page 1以降はhistorical viewだけである。PoCもこの順序と値へ合わせ、推測のsort keyやrecent全page走査を行わない。
+
+入出金履歴pageのchunkは`12ae015.js`（10,317 bytes、SHA-256 `d2a77c40f3a80e68010be78f14eec395c9fbddc7562ff4d65673b15242d5e706`）、mapのSHA-256は`4746882930a46470b5042c68ca9b3482afc3c92d745b8964dc50e904a6032269`だった。source `pages/account-activity/history.vue`はpage size 30で`historical: "true"`を1回ずつpage走査し、recent/old mergeをしない。default filterは`currency: ["JPY"]`、`cashflowType: ["REMITTANCE_DEPOSIT", "REMITTANCE_WITHDRAW"]`である。公開UIはdate fieldを送らないため、PoCもformatを推測した任意date filterを送らない。
+
+`secureKey`はpublic source上の`store.state.loginId`であり、Authorization bearerとは確認できない。Cookie名、CSRFの有無、Cookieと`secureKey`の結合、server session TTL、refresh方法、Turnstile通過後に通常HTTP replayが許可されるかは、まだlive sessionで未確認である。client定数`sessionTimeoutTime: 14400`をserver側4時間保証と解釈しない。
+
+### login transportと境界
+
+- password login: `POST /api/cccmdipresen/gw/login`, `{event: "login", data: {accountId, password, response}}`。`response`はTurnstile token。
+- second auth: `POST /api/cccmdipresen/gw/loginSecondAuth`, `{event: "loginSecondAuth", data: {accountId, authCode}}`。
+- passkey開始: `POST /api/cccmdipresen/gw/initiateLoginWithPasskey`, dataは`channel: "SIMPLE_MODE"`。
+- passkey完了: `POST /api/cccmdipresen/gw/loginWithPasskey`。challenge、credential ID、authenticator data、client data JSON、signature、user handleを送る。
+
+password login requestにはTurnstile tokenの`response`があるが、公開source上のpasskey開始・完了request DTOにはTurnstile token fieldがない。2026-08-31の通常Chromeでも、credential操作前のpasskey開始POSTは200だった。これはpasskey経路がpassword経路より自動化しやすい可能性を示すが、Cloudflare edgeがCookie・bot score・challenge結果を別に要求しないことの証明ではない。
+
+second authの`authType`は`0`がemail、`1`がauthenticator/TOTP、`2`がSMSである。password loginが失敗した場合、clientはTurnstile tokenを再利用せずwidgetをresetする。Turnstile tokenはCloudflare仕様上5分・single-useであり、保存・再利用するsession credentialではない。passkey completion後はsecond-auth endpointを通らずlogin成功処理へ進む。
+
+login resultの`isAgreed`がfalseの場合、現行UIは`setAgreement` write eventへ進む。collectorは規約同意を自動実行せず、即停止して本人操作へhandoffする。
+
+passkeyはSMBC Safety Passのように特定bank appの登録端末で毎回生体承認させる独自方式ではない。既存WebAuthn credentialを通常Chromeで利用できる可能性がある。さらに将来案として、Kogane専用のWebAuthn credentialを正規の登録画面で追加し、そのcredentialだけをcollectorへ渡す方式がある。標準のBitwarden/Windows Hello passkeyから秘密鍵を抽出する設計ではなく、最初からautomation専用software authenticatorとして生成・登録する。まずChrome DevTools Protocolのvirtual authenticatorをContainer内で使い、RPがそのcredentialを登録・再利用できるか、credential metadataを安全にexportできるかを本人操作で検証する。成功してもprivate keyは金融credentialなのでGitへ置かずWorker Secret等へ限定する。
+
+Cloudflare Workers Web CryptoでWebAuthn assertion用ECDSA署名を組み立てること自体は技術上可能性がある。しかし、RP ID/origin、UV/UP flags、signature counter、resident credential/user handle、server challenge、Cloudflare sessionの条件が未確認であるため、現段階では「browserless passkey login候補」であって実装済みとはしない。
+
+## 13. read-only gateway PoC
+
+[`poc/sbi-vc-trade-client`](../../poc/sbi-vc-trade-client/)に、認証済みsessionから上記4 eventだけを呼ぶローカルBun clientを追加した。
+
+設計上の制限:
+
+1. generic event senderをexportしない。同じ`trade` pathにある注文、取消、出金・出庫、貸コイン申込、積立、MFA/passkey変更を呼ぶAPIは実装しない。
+2. browser loginとread replayを分離する。PoCはpassword、TOTP、SMS/email OTP、Turnstile token、passkey secretを受け取らない。
+3. 一時session fileはCookie headerと`secureKey`だけを持ち、mode 600を強制する。値をargument、stdout、errorへ出さない。
+4. recentとhistoricalを別々に取得する。1回だけの`historical=true`で全期間を得たと仮定しない。
+5. responseはHTTP success、JSON content type、`meta.status === "OK"`を確認する。maintenance HTMLやvalidation errorをraw dataとして保存しない。
+6. paginationは`list`と`totalSize`が確認できた場合だけ続行し、100 pageの既定上限を設ける。schema不明時に無限走査しない。
+7. outputには実残高・履歴が含まれるためlocal private directoryだけに置き、Git、CI artifact、stdout、Cloudflareへ送らない。
+
+synthetic testで確認済みなのは、request shape、recent/historical分離、pagination停止、non-JSON/error拒否、error textにsession値を含めないことまでである。2026-08-31時点では認証済みsessionをまだ投入していないため、実レスポンスschema、full pagination、直接HTTP replay、session寿命は未検証である。
+
+### 次のlive検証
+
+1. 本人が通常Chromeで既存passkeyを使ってloginする。追加規約、passkey再登録、認証設定変更が出たら停止する。
+2. DevToolsまたはlocal CDP helperで、秘密値を画面・logへ出さず、認証済みCookieと`secureKey`をGit外のmode 600一時fileへ渡す。一時fileの生成helperはCookie maskingを検証するまでcommitしない。
+3. `cashBalanceList`を1回だけ呼び、status/content-type/schemaだけを確認する。403、Turnstile challenge、session invalidなら反復せず停止する。
+4. 成功した場合のみ`accountMargin`、`executionList`のrecent/historical各1 page、`getCashflowList`のrecent/historical各1 pageへ進む。
+5. 件数・pagination fieldをsanitized metadataとして記録した後にbackfill上限とserverless適性を再評価する。
+
+現時点のblockerは「アプリ固有の非exportable credential」ではなく、**認証済みsessionをdirect clientへ安全に引き継げるか**である。password経路ではTurnstileが明示的blockerだが、passkey request schemaにはTurnstile fieldがなく、Kogane専用WebAuthn credentialを使うbrowserless経路も検証候補になる。session replayが成功すればContainers/Workersからread gatewayを呼べる可能性が出る。Cookieがbrowser/TLS/IPへ強く結合されていれば、full Chrome Containerまたは同一browser context内fetchが必要になる。
+
+### runtime候補の優先順位
+
+| runtime | 現時点の判断 | 次に証明すること |
+|---|---|---|
+| Container + full Chrome | 最初のlive実証 | 通常UIでpasskey loginし、同一contextでread eventを1回だけ呼べるか |
+| Container認証後のCookie replay | 補助候補 | Cookie/`secureKey`だけで通常HTTPが通るか、TTL・更新・IP/UA binding |
+| Worker-only + Kogane専用passkey | 長期の有力候補 | 専用software credentialの登録、UV/UP、counter、backup flags、WebCrypto assertion |
+| Worker-only + password | 非推奨 | DOM Turnstileとsingle-use tokenを別runtimeへ渡す不安定性が大きい |
+| Browser Rendering | 後順位 | current CDP schemaでWebAuthn virtual authenticatorを使えるか未確認 |
+
+### third-party client再調査
+
+2026-08-31にGitHub code searchを`simple.sbivc.co.jp`、`co.jp.sbivc.trade.app`、`cashBalanceList`で再実行したが、現行VCTRADEへloginしてnetwork取得するmaintained public clientは見つからなかった。CCXTの2026-08-29 snapshotにもSBI VCトレードimplementationは確認できない。
+
+`kittyflip-zig/crypto-ledger-tools`はnetwork clientではなくMITのlocal CSV normalizerである。2026-06 snapshotの`sbivc_trade_record` adapterは`trade_record_list`または`約定日時/銘柄/売買/数量`列を認識し、数量、約定rate、手数料等をJPY quoteの共通recordへ変換する。一方、SBI専用fixture/testと`CASHFLOW` parserは確認できない。offline importの参考にはなるが、auth/session automationの先例ではない。
+
+追加の技術資料:
+
+- [Turnstile server-side validation](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)
+- [Workers Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)
+- [現行login page source map](https://simple.sbivc.co.jp/_nuxt/b21877a.js.map)
+- [約定履歴page source map](https://simple.sbivc.co.jp/_nuxt/32085e8.js.map)
+- [入出金履歴page source map](https://simple.sbivc.co.jp/_nuxt/12ae015.js.map)
+- [`crypto-ledger-tools` SBI adapter](https://github.com/kittyflip-zig/crypto-ledger-tools/blob/33758391c2b93ce99812257b2e4c1c82b67c6a1d/src/crypto_ledger_tools/exchange_adapters.py)
+
+残る未確認事項は、authenticated Cookie名/属性、CSRF、server TTL/renewal、bot binding、passkey preflightのRP/algorithm/UV/allowCredentials、virtual authenticatorの登録可否、report取得によるread status更新、最大page size、history retention、rate limit、アプリ固有transport/pinning/integrityである。
