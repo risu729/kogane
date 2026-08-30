@@ -383,13 +383,16 @@ login resultの`isAgreed`がfalseの場合、現行UIは`setAgreement` write eve
 | 4 | 認証後`accountMargin` | HTTP 200 JSON |
 | 5 | `informationTitle`, `getAuthStatus`, `getPasskeyList` | すべてHTTP 200 JSON |
 | 6 | read-onlyの保有資産画面 | `positionSummaryList`と`accountMargin`がHTTP 200 JSON |
-| 7 | page reload | `/login#verifyGa`へredirect |
+| 7 | read-onlyの取引履歴画面 | `executionList`をrecent/historical各1回、どちらもHTTP 200 JSON |
+| 8 | page reload | `/login#verifyGa`へredirect |
 
 liveの`loginWithPasskey` request keyは公開DTOどおりchallenge、credential ID、authenticator data、client data JSON、signature、user handleで、Turnstile fieldはなかった。password form用Turnstileがpageに存在しても、passkey application flowにtokenが含まれないという静的結論を実通信でも確認した。
 
 `accountMargin` bodyには`cashBalance`、`receivedMarginList`（46件）、`lendingLimitList`（33件）、`withdrawalLimitList`（23件）、`restrictedWithdrawalAmountList`（23件）と関連margin fieldが存在した。件数とfield名だけを記録し、各item・金額・銘柄等は保存していない。`getAuthStatus` bodyは`isIdentified`と`isTotpIdentified`、`getPasskeyList` itemはchannel、credential ID、last-used datetime、label、register datetime/source IP fieldを持ち、list lengthは1だった。値は保存していない。
 
 保有資産画面では`positionSummaryList`が`{secureKey}`だけを送りHTTP 200 JSONとなった。この口座のlive response bodyは空objectだったため、position item shapeはlive確認できておらず、公開bundle DTOの構造を暫定とする。残高collectorでは`cashBalanceList`、`accountMargin`と併せてこのeventを固定allowlistに含める。
+
+取引履歴画面は公開sourceどおり`executionList`を2回送り、request keyは`historical`、`isCloseOrder`、`isExOrder`、page number/size、`secureKey`、sort ascending/keyだった。両方HTTP 200で、一方は6 item、他方は0 itemだった。recent/historicalの対応をresponse値から推測せず、requestの`historical` fieldで区別する。live item keyにはexecution ID/sub-number、currency pair、product ID、約定数量・価格・日時、commission amount/currency、trade/order price、order/buy-sell/close/ex-order type、settle/swap/base-currency PL、trade channel、public/internal memo、value dateがあった。envelopeにはpage number/size/total pages/total sizeとmetaの`secureKey`、session update time、status、timestampがあった。field名と件数だけを保存し、実値は破棄した。
 
 最初のhome表示とread APIは成功したが、reload後は`/login#verifyGa`へ戻った。原因はpasskey後sessionの短期性、reload時の追加検証、Cookie/sessionStorageの組合せ、Kogane Capture条件等のいずれか未確定である。このため「sessionが通常reloadで永続する」「Cookieと`secureKey`をBunへ移せる」「daily cronで再利用できる」はまだ証明されていない。
 
