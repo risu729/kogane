@@ -275,6 +275,39 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 
 2026-03-31時点の契約先にはMoneytree、Money Forward、freee、Zaim等が含まれる。[公式契約先一覧](https://www.smbc.co.jp/collaboration/keiyakunaiyou.html) これは技術的には最も安定する経路だが、本プロジェクトの「aggregatorをできるだけ回避し、公式サイト/公式アプリを直接データ源とする」方針と合わない。個人開発者向けの公開セルフサービスAPIは確認できなかったため、現フェーズでは候補から外す。
 
+## Money Forward ME API連携の実口座検証（2026-08-31）
+
+### 位置付け
+
+本プロジェクトは公式サイト・公式アプリからの直接取得を優先するが、SMBCセーフティパスにより再ログインが有人になる間の比較対象・補助経路として、契約済み電子決済等代行業者であるMoney Forward MEを本人の既存無料アカウントで確認した。Money Forward公式サポートは、三井住友銀行をスクレイピングではなく**API連携方式**の例として明記している。
+
+Kuebikoの専用Chrome profileで本人がログインした状態を読み取り専用で観測し、次を確認した。口座番号、残高、明細、氏名、メールアドレス、Cookie、CSRF token、WebAuthn challenge/credential値は保存・コミットしていない。
+
+- 三井住友銀行連携は正常状態で、円の「残高別普通」と「外貨」の2科目が同じ銀行連携の配下に表示された。従って、少なくとも現在残高とMoney Forwardへ取り込まれた入出金は円・外貨の両方を単一連携から参照できる。
+- 同じ無料アカウントには三井住友銀行とは別に「三井住友カード (VpassID)」も登録されている。Oliveデビットの銀行引落しは銀行側の入出金として現れ得るが、加盟店名・売上確定状態等のカード粒度がVpass連携から得られるかは今回未検証であり、銀行API連携だけでOliveデビット明細を満たすとは扱わない。
+- 無料会員の連携可能数は4件で、この既存アカウントは表示対象4件を使用中だった。KoganeがMoney Forwardを補助経路にする場合、追加サービスのために既存連携を削除する設計は採らない。
+- 無料会員の画面上の閲覧可能期間は過去1年。Money Forwardは連携時に金融機関/APIで照会可能な期間を取得し、1年より古い取得済みデータも可能な限り保持する方針だが、無料会員のままでは表示できない。Kogane側の定期raw保存を早期に始める価値はある。
+- 無料会員では一括更新と更新頻度アップが提供されない。個別の更新ボタンは表示されたが、本検証では更新要求を実行していない。日次収集の正本として使う前に、Money Forward側の自動更新実測と、Kogane取得時点の最終取得日時をmanifestへ保存する必要がある。
+
+公式根拠:
+
+- [金融関連サービス口座の登録方法](https://support.me.moneyforward.com/hc/ja/articles/13480029279897-%E9%87%91%E8%9E%8D%E9%96%A2%E9%80%A3%E3%82%B5%E3%83%BC%E3%83%93%E3%82%B9%E5%8F%A3%E5%BA%A7%E3%81%AE%E7%99%BB%E9%8C%B2%E6%96%B9%E6%B3%95): 三井住友銀行をAPI連携方式の例として掲載
+- [コース別対応機能一覧](https://support.me.moneyforward.com/hc/ja/articles/900004382283-%E3%83%97%E3%83%AC%E3%83%9F%E3%82%A2%E3%83%A0%E3%82%B5%E3%83%BC%E3%83%93%E3%82%B9-%E3%82%B3%E3%83%BC%E3%82%B9%E5%88%A5%E5%AF%BE%E5%BF%9C%E6%A9%9F%E8%83%BD%E4%B8%80%E8%A6%A7): 無料会員は過去1年、4連携まで。プレミアムは期間・連携数とも無制限
+- [データの閲覧可能期間](https://support.me.moneyforward.com/hc/ja/articles/900004413423-%E3%83%87%E3%83%BC%E3%82%BF%E3%81%AE%E9%96%B2%E8%A6%A7%E5%8F%AF%E8%83%BD%E6%9C%9F%E9%96%93%E3%81%AB%E3%81%A4%E3%81%84%E3%81%A6%E6%95%99%E3%81%88%E3%81%A6%E3%81%8F%E3%81%A0%E3%81%95%E3%81%84): 初回に連携先で照会可能な期間を取得し、古い取得済みデータも保持
+
+### Money Forward ID認証とパスキー再現
+
+Kuebiko captureとBitwardenの表示メタデータを突き合わせ、次を確認した。
+
+- WebAuthn RP ID/登録先は双方とも`id.moneyforward.com`で、domain不一致ではない。
+- Bitwardenでパスキーを削除・再作成すると、Money Forwardが`POST /webauthn/assertion/options`で返すemail指定ログイン用`allowCredentials`のcredential IDも新しい値へ変わった。したがってMoney Forward側の再登録は反映されている。
+- assertion optionsは`userVerification: required`、timeout 120秒。パスキーボタンからのdiscoverable loginでは`allowCredentials`が空、メールアドレス入力後は1件に限定された。
+- 再作成後もBitwarden/ChromeはMoney ForwardへWebAuthn assertionを送らなかった。一方、同じKuebiko profileのBitwarden passkeyは別RPで成功しているため、WebAuthn全体の無効化ではなくMoney Forward credentialの提示/選択境界に残る問題である。
+- Google OIDC accountは連携済みで、`POST /auth/google`、Google consent/account chooser、`GET /auth/google/callback`、Money Forward MEの`/auth/mfid` callbackでログインできた。これは有人fallbackとして有効だが、Google sessionをWorkersへ複製する設計は採らない。
+- Chrome 153の直接CDPでは一時的なCTAP2.1 virtual authenticatorの追加、credential一覧取得（初期0件）、削除まで成功した。Money ForwardにKogane専用passkeyを新規登録し、そのcredentialをsoftware authenticatorとして保持すれば、HTTP clientでassertionを生成できる可能性がある。
+
+次の検証は、本人確認の上でKogane専用passkeyを1件追加し、local clientで登録credentialをsecret fileにのみ保存して、(1) browser再起動後のvirtual authenticator login、(2) browserなしで`clientDataJSON`、authenticator data、P-256署名を生成する直接HTTP login、の順で行う。private key、credential ID、challenge、Cookieはgit/R2/raw captureのsanitize済みmanifestへ入れない。成功後はCloudflare Secretへ移し、Workers Web CryptoのECDSA P-256互換性を検証する。失敗した場合はGoogle OAuth/session capsuleを有人fallbackとし、Money Forwardを完全無人の正本にはしない。
+
 ## 実行環境の適性
 
 | 環境 | 適性 | 理由 |
