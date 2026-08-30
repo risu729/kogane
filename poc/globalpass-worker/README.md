@@ -76,11 +76,13 @@ scripts/sync-local-secrets.sh \
 
 現行Containerは`TZ=Asia/Tokyo`を起動環境へ明示し、Google Chrome StableをXvfb上のheaded persistent contextとして起動する。GLOBAL PASS、Turnstile本体、helperを同じTAMIA出口へ固定する。2026-08-30のChromium A/B追加imageはdigest `sha256:4c519cffcc19812ec90c826e42d2c483421bae8fa64f00e03d2ece95de3f9e49`、runtime revision `timezone-collector-v5`である。通常collectorのbrowser条件はv4から変更していない。
 
-現行Worker versionは`f984d430-e139-4794-b529-c0644f2c099f`で、deploy出力上もschedule `17 18 * * *`を確認した。
+現行Worker versionは`550b1ff5-6b6f-4831-b0c9-5c084f6f23fd`で、deploy出力上もschedule `17 18 * * *`を確認した。
 
 daily/backfillはR2へのmanifest保存を含む処理の成否にかかわらず、最後にephemeralな固定Container instanceへ`destroy()`を送る。破棄要求自体の失敗は収集結果へ混ぜず、構造化logへ記録する。`30s`のidle timeoutも残すが、relay使用後は`stop()` RPCがoutcome `ok`でもinstanceが`running`のまま残ることをlive確認したため、課金停止は`destroy()`で保証する。
 
 2026-08-30のdeploy後daily run `8d498b19-dda5-4dfb-84b6-1239c4d9e765`は約52秒でstatus `success`、2026-08と2026-07のHTML 2件、failure 0だった。ただし同runの`stop` RPCがoutcome `ok`、app状態が`assigned: 0`でも、後のinstance一覧では`v18`が`running`だった。Chromium A/B rollout時にこの差を発見して旧`v18`を明示destroyし、収集後処理を`destroy()`へ変更した。
+
+修正後daily run `251bbae4-007c-4d91-b7e5-9b4385656285`もruntime v5、status `success`、HTML 2件、failure 0だった。R2 manifest保存直後に`globalpass-collection-container-destroyed`が記録され、Wranglerのinstance一覧でも`v18`が`inactive`になったことを確認した。
 
 `wrangler deploy`の完了後もContainer appのimage rolloutは非同期で続く。検証時は`wrangler containers info <app-id>`で新image digestとhealthy instanceを確認してから、新しいDurable Object IDで実行する。rollout前に実行すると旧imageを使い、コード不具合のように見えることがある。
 

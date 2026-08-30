@@ -13,7 +13,7 @@
 - Container instance identity `prestia-globalpass-read-only-v15`: timezone collector v2検証後にstop/destroyを受理済み。Cloudflareのinstance一覧にはinactive recordが残るため、app削除時に消す。
 - Container instance identity `prestia-globalpass-read-only-v16`: timezone collector v3検証用。destroy受理済みで、inactive recordはapp削除に従わせる。
 - Container instance identities `prestia-globalpass-read-only-v17`: image rollout完了前に起動して旧v3 imageを保持したため、destroy受理済み。inactive recordはapp削除に従わせる。
-- Container instance identity `prestia-globalpass-read-only-v18`: Workers Cronが使用する現行identity。v4でdaily/backfill成功済み、v5のChrome control成功後はdestroy済みで、次回Cron時に再作成される。
+- Container instance identity `prestia-globalpass-read-only-v18`: Workers Cronが使用する現行identity。v4でdaily/backfill成功済み、v5のChrome controlと修正後dailyも成功し、収集後`destroy()`でinactiveになることを確認済み。
 - Container instance identity `prestia-globalpass-chromium-timezone-probe-v1`: 最終成功条件でbinaryだけをPlaywright同梱Chromiumへ変えたA/B専用。3 run完了後にdestroy済みで、inactive recordはapp削除に従わせる。
 - 旧Container image `sha256:3035cabb81c0f7a70923cd5491a310406b31ef29e1f092397c28d2157276f2e5`: Xvfb wrapperによりport 8080をlistenできなかった検証image。
 - 旧Container image `sha256:3027472193d263d31180ac600d87f230134a3d84407e2b97a2de63b3547be757`: diagnostic path sanitizer導入前の検証image。
@@ -67,7 +67,7 @@ listenしていない。relay tokenはstdinからmemoryへ渡し、`bots`のfile
 
 ## PoC全体を廃止するときに削除するもの
 
-- 現行app repository kogane-globalpass-collector-poc-globalpasscollectorcontainer の旧tags: 007215b4、0080b617、2444b612、4311cdf8、63148685、87f23407、8b4e8803、a220cfae、b8e96bd2、cb98569f、d86b50ae、f2585107、f6406948、f73b2bab、cd80a6ee、791950f1、bef74562、9fe9a176、790bbb11、92453ede。現行v4 registry tag `1cdfb2ea`はapp削除後に削除する。同じdigestを再利用したlocal tags `b9013549`と`45bc7bac`はWranglerがdeploy時にuntag済み。
+- 現行app repository kogane-globalpass-collector-poc-globalpasscollectorcontainer の旧tags: 007215b4、0080b617、2444b612、4311cdf8、63148685、87f23407、8b4e8803、a220cfae、b8e96bd2、cb98569f、d86b50ae、f2585107、f6406948、f73b2bab、cd80a6ee、791950f1、bef74562、9fe9a176、790bbb11、92453ede、1cdfb2ea。現行v5 registry tag `acd857ec`はapp削除後に削除する。同じdigestを再利用したlocal tags `b9013549`、`45bc7bac`、`550b1ff5`はWranglerがdeploy時にuntag済み。
 - 旧standalone probe repository kogane-globalpass-container-probe-20260827-globalpassprobecontainer の全tags: 1068a298、57c4aa1c、73d5ead9、7c10d299、833aeb70、927ed319、9d7b1c69、ae9b6abc、c16fe4c8、c2e12ab7、c7f3e510、d1e7d4f5、ed0300e2、ee37d303、ee71d223。現行appから参照されていないが、このPoC全体を廃止するときだけ削除する。
 
 - Worker `kogane-globalpass-collector-poc`とworkers.dev deployment。

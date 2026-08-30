@@ -462,3 +462,8 @@ Chromiumの3 runは各回fresh profileである。tokenが一度も生成され�
 専用identity `prestia-globalpass-chromium-timezone-probe-v1`とChrome controlに再作成された`v18`は
 検証後にdestroyし、両方がinactiveになったことを確認した。なお、`sleepAfter=30s`と`stop()` RPC
 成功だけではrelay使用後のinstanceがrunningのまま残ったため、通常収集後も`destroy()`を使う。
+
+`destroy()`実装をdeployした後のdaily run `251bbae4-007c-4d91-b7e5-9b4385656285`はruntime v5、
+status `success`、HTML 2件、failure 0だった。R2 manifest保存後に
+`globalpass-collection-container-destroyed`が記録され、直後のWrangler instance一覧でも`v18`は
+`inactive`だった。したがって、通常収集の成功と実際のscale-to-zeroを同じrunで確認できた。
