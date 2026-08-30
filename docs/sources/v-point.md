@@ -1,7 +1,10 @@
 # V Point / V Point Pay source research
 
-調査日: 2026-08-26（公開情報、ログアウト状態の公開 endpoint、公開 JavaScript、公開第三者実装）、
-ユーザー口座を使う live 検証は未実施
+調査日: 2026-08-26（公開情報、ログアウト状態の公開 endpoint、公開 JavaScript、公開第三者実装）
+
+Live追試: 2026-08-31、Kogane Capture Chromeのユーザー口座でVポイントMy Pageへloginし、
+`balance_info`、`tpoint_history`、`smfg_point`をread-onlyで検証した。値、加盟店、会員番号、
+Cookie、個人情報はrepositoryへ保存していない。PoCは`poc/vpoint-worker/`に置く。
 
 ## 1. 対象範囲と安全境界
 
@@ -94,10 +97,11 @@ Pay へ移行するとポイント側の減少と Pay 側の増加という二�
   マイナス等を除外するため、台帳の完全な代替ではない。
 - V Point サイト/アプリは残高と履歴を確認できる。電話照会は残高だけで、ストア限定を表示しない。
 
-公開 JavaScript から確認できた履歴行の候補フィールドは `point_div`、`point_type`、`point`、
-`store_company`、`store_category`、`store_name`、`store_alliance_name`、`date_reflect`、`date_use`、
-`is_use_mbo`、`reason` である。`point_div` は獲得、利用、失効、訂正、取消等、`point_type` は通常、
-ストア限定、どこでも使える期限固定を区別する。値は取得/記録していない。
+公開 JavaScript と2026-08-31のlive response schemaから確認できた履歴行のフィールドは
+`date_reflect`、`date_use`、`point_div`、`store_company`、`store_category`、`store_name`、
+`point_type`、`point`、`is_use_mbo`、`store_alliance_name`、`reason` である。
+`point_div` は獲得、利用、失効、訂正、取消等、`point_type` は通常、
+ストア限定、どこでも使える期限固定を区別する。実値はrepositoryへ記録していない。
 
 公開公式資料には、V Point 履歴の CSV/PDF download、1 page 件数、総件数上限、API、欠番や取消行の
 安定 ID を確認できなかった。「export 不可」と断定せず、**公開資料で未確認** とする。3 年を超える
@@ -282,15 +286,15 @@ Nuxt chunk `/_nuxt/64c5c08.js` を静的解析し、次の same-origin first-par
 `tpoint_history` の filter は獲得、利用、取消、失効、移行、訂正、期限延長、再発行、その他と、
 利用日/反映日 sort を含む。client は `results.total` と収集行数を比較して pagination する。これは
 具体的な read API/schema の強い証拠だが、公開 API ではなく session/cookie 保護された internal API
-である。renewable session、CSRF、rate limit、schema stability、利用規約上の自動取得可否は未確認で、
-匿名 POST や replay は行っていない。
+である。2026-08-31にはユーザー管理browserの通常login sessionから、同一originのread-only requestを
+live検証した。renewable session、CSRF、rate limit、schema stability、利用規約上の自動取得可否は
+引き続き未確認である。
 
 ### 8.3 正規 split APK の次実験
 
-この環境にはユーザー管理 Android、Google Play の認証済み artifact 取得経路、`adb`、`apksigner`、
-`bundletool`、`jadx`、`apktool`、MobSF が揃っていないため、V Point/V Point Pay/SMBC の APK は取得
-しなかった。ユーザー管理 Android に Google Play から正規 install した後、各 package で次を行う。
-binary/解析結果は repository 外の暗号化一時領域に置き、共有/commit しない。
+この調査ではV Point/V Point Pay/SMBCのAPKを新規取得しなかった。ユーザー管理AndroidにGoogle Play
+から正規installした後、各packageで次を行う。binary/decompiled/decrypted artifactはKoganeのpublic
+repositoryへ入れず、既存のprivate Android archive repositoryにprovenanceとともに保存する。
 
 ```bash
 PKG=jp.co.ccc.Tsite  # com.smbc_card.vpoint / com.smbc_card.vpass / jp.co.smbc.direct に変更
@@ -304,8 +308,8 @@ apktool d -f artifact/base.apk -o apktool-out
 rg -a -n 'https?://|wss://|retrofit|okhttp|graphql|grpc|protobuf|oauth|bearer|cookie|session|pin|certificate|integrity|attestation|safetynet' jadx-out apktool-out
 ```
 
-- 全 split の signer digest が一致することを確認し、package/version/signer/hash だけを provenance
-  record に残す。APK/decompiled code は commit しない。
+- 全 split の signer digest が一致することを確認し、package/version/signer/hashをpublic provenance
+  recordにも残す。APK/decompiled codeはprivate archiveだけへcommitする。
 - Manifest、network security config、host/path、Retrofit/OkHttp/gRPC/GraphQL/protobuf schema、session/
   token 更新 call、Play Integrity/attestation/pinning library 候補を列挙する。
 - R8/ProGuard、string encryption の deobfuscation、read method の runtime tracing は対象にできる。
@@ -354,6 +358,31 @@ V Point の残高/履歴 client ではなく、sensitive card data を要求し�
 API/SDK を確認できなかったが、不在を証明するものではない。
 
 ## 10. read-only 動的観測
+
+### 10.1 2026-08-31 live検証結果
+
+Kogane Capture Chromeでユーザーが通常loginしたsessionを使い、値を出力せずstatus、schema、件数だけを
+観測した。Web画面のV会員番号はmaskされたままだったが、API requestには会員番号fieldがなく、session
+だけで以下が成功した。
+
+| endpoint | HTTP / application status | liveで確認した範囲 |
+| --- | --- | --- |
+| `POST /api/balance_info` | `200` / `0000` | `results.get_month/common/store/tmoney`; `common[]`の`point/expiration/point_type` |
+| `POST /api/tpoint_history` | `200` / `0000` | `total=149`; page 1-4各30件、page 5は29件、page 6は0件。全件走査と終端を確認 |
+| `POST /api/smfg_point` | `200` / `0000` | `point_smbc`, `point_smcc` |
+| `POST /api/rank_info` | `200` / `0000` | transportだけ確認。collector対象外 |
+
+履歴requestは`page`、`get_graph=1`、`sort=use`、獲得/利用/取消/失効/移行/訂正/期限延長/
+再発行filter、`filter_date=""`のmultipartである。PoCは`results.total`へ達した時点で停止し、空の
+終端pageを通常runでは要求しない。匿名sessionでは同じAPIがHTTP 200でもapplication status `0010`を
+返すため、HTTP statusだけでlogin成否を判定しない。
+
+このrunではKuebiko本体のrequest artifactにMy Page trafficが残らず、同時にattachされたChrome操作側の
+CDPから確認した。複数debugger attachmentの競合が候補だが未確定であり、「Kuebikoに記録がない」ことを
+「通信がない」という証拠にはしない。Cookie、会員番号、実残高、履歴値、加盟店、個人情報はrepositoryや
+tool outputへ保存していない。
+
+### 10.2 次の動的観測
 
 1. **V Point web**: ユーザー管理 browser で通常 login し、残高/全 expiry bucket と履歴 1 page だけを
    開く。DevTools では origin、method、path template、status、content-type、field 名、pagination
@@ -444,8 +473,9 @@ V Point web だけを C として限定導入する。Pay を同時に無理に 
 
 read-only live 検証項目:
 
-- [ ] V Point My Page の総残高と全 `common`/`store` expiry bucket、通常/固定期限/ストア限定の表示
-- [ ] 履歴の利用日/反映日 sort、各 filter、detail、`results.total`、1 page 件数、最古 3 年境界
+- [x] V Point My Page の `common`/`store` expiry bucket schemaと総残高API
+- [x] 履歴の`results.total`、1 page件数、全page走査、行schema
+- [ ] 履歴の利用日/反映日sort、各filter、detail、最古3年境界
 - [ ] CSV/PDF/export 導線の有無と、存在する場合の期間、header、encoding、最大件数
 - [ ] ID 連携済み/未連携を変更せず識別し、Vpass の旧履歴、1 年/100 件境界を確認
 - [ ] Olive credit/debit/point mode と SMBC bank/card provenance label。銀行/カード実値は記録しない
@@ -474,6 +504,8 @@ read-only live 検証項目:
   後日プラス表示され得る。公開資料に保持期間/export は確認できない。
 - V Point My Page の公開 JS は、残高・期限 bucket と履歴 pagination の具体的な first-party internal
   POST API/schema を含む。
+- 通常login sessionを使ったlive検証で、会員番号をrequestへ渡さず、残高、SMBC内訳、履歴149件の
+  全5pageをread-only APIから取得できた。匿名時はHTTP 200/application status `0010`、認証時は`0000`。
 - ユーザー管理の Vpass 5.12.0 静的解析 snapshot は `spap.smbc-card.com/api/v3/fa/Vpoint`、
   Retrofit/OkHttp/Gson、header/
   cookie/session-time、残高/期限/連携状態 model を具体化する。
@@ -485,13 +517,13 @@ read-only live 検証項目:
 
 - 統合 V Point の正本は V Point web/app、card/bank provenance は Vpass/SMBC、Pay ledger は V Point
   Pay と分けるのが最も二重計上を防ぎやすい。
-- V Point web は C/3-4 の有力候補だが、B への昇格には renewable session と安定 read-only replay の
-  live 証明が必要。family 全体は Pay device が残るため D/4-5 と評価する。
+- V Point web のread-only replay自体はlive証明できたためC/3のPoCへ進める。Bへの昇格にはrenewable
+  sessionの生成・更新を証明する必要がある。family全体はPay deviceが残るためD/4-5と評価する。
 - Vpass の `Fa/Vpoint` は残高/期限/連携状態用で、全履歴は V Point web へ委ねる可能性がある。
 
 ### 未確認
 
-- 各 surface の公式 CSV/PDF/export、V Point の page size/総件数上限、Pay の保持期間/page/count。
+- 各 surface の公式 CSV/PDF/export、V Point の総件数上限、Pay の保持期間/page/count。
 - 履歴/Pay の安定 row ID、原取引と返金、Point→Pay 二台帳を結ぶ link ID。
 - V Point internal API の session/CSRF/refresh/rate limit/規約上の扱い、Vpass endpoint の現行 live 応答。
 - V Point Pay/SMBC/V Point APK の host/path/schema、pinning/integrity 候補、Pay の app API/WAF。
