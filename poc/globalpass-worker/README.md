@@ -78,6 +78,8 @@ scripts/sync-local-secrets.sh \
 
 現行Worker versionは`906c8dbe-b62c-4f73-8577-72a065dea029`で、deploy出力上もschedule `17 18 * * *`を確認した。
 
+daily/backfillはR2へのmanifest保存を含む処理の成否にかかわらず、最後に固定Container instanceへ`stop()`を送る。停止要求自体の失敗は収集結果へ混ぜず、構造化logへ記録する。さらに`stop()`失敗時のscale-to-zero安全弁として`30s`のidle timeoutを設定し、1日1回の収集後に不要な起動時間を残さない。
+
 `wrangler deploy`の完了後もContainer appのimage rolloutは非同期で続く。検証時は`wrangler containers info <app-id>`で新image digestとhealthy instanceを確認してから、新しいDurable Object IDで実行する。rollout前に実行すると旧imageを使い、コード不具合のように見えることがある。
 
 ## 2026-08-27 live verification

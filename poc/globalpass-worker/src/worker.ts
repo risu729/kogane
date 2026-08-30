@@ -42,7 +42,7 @@ const STOPPABLE_CONTAINER_IDS = new Map([
 export class GlobalPassCollectorContainer extends Container<Env> {
   override defaultPort = 8080;
   override requiredPorts = [8080];
-  override sleepAfter = "5m";
+  override sleepAfter = "30s";
   override enableInternet = true;
   override envVars = { TZ: "Asia/Tokyo" };
 
@@ -239,13 +239,46 @@ async function runCollection(
 ): Promise<CollectionManifest & { manifestKey: string }> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
+  const container = getContainer(env.COLLECTOR_CONTAINER, CONTAINER_ID);
+
+  try {
+    return await collectWithContainer(env, mode, container, startedAt, runId);
+  } finally {
+    try {
+      await container.stop();
+      console.log(
+        JSON.stringify({
+          event: "globalpass-collection-container-stopped",
+          runId,
+          mode,
+        }),
+      );
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          event: "globalpass-collection-container-stop-failed",
+          runId,
+          mode,
+          errorType: error instanceof Error ? error.name : "UnknownError",
+        }),
+      );
+    }
+  }
+}
+
+async function collectWithContainer(
+  env: Env,
+  mode: CollectionMode,
+  container: DurableObjectStub<GlobalPassCollectorContainer>,
+  startedAt: string,
+  runId: string,
+): Promise<CollectionManifest & { manifestKey: string }> {
   const prefix = runPrefix(startedAt, runId);
   const artifacts: StoredArtifact[] = [];
   const failures: CollectionFailure[] = [];
   let availableMonths: string[] = [];
   let runtimeRevision: string | undefined;
 
-  const container = getContainer(env.COLLECTOR_CONTAINER, CONTAINER_ID);
   await container.startAndWaitForPorts();
   const response = await container.fetch(
     new Request("http://container/collect", {
