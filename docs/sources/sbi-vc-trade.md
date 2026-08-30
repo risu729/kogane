@@ -103,7 +103,7 @@ SBI VCトレードには、暗号資産・日本円の資産状況、残高履�
 
 ### Bitwardenとの関係
 
-Bitwarden自体はWebサイト・アプリのpasskey保存と利用に対応する。しかし、SBI VCトレードの公式対応プロバイダー一覧にBitwardenはなく、同サービスとの互換性は**未確認**である。「一般にWebAuthn対応だから使える」とは断定しない。パスワード、TOTPシード、passkeyを同一自動化プロセスへ渡す設計も採用しない。
+Bitwarden自体はWebサイト・アプリのpasskey保存と利用に対応する。SBI VCトレードの公式対応プロバイダー一覧にBitwardenはないものの、2026-08-31に本人の既存Bitwarden passkeyをWindows Chromeから選択し、現行VCTRADEへ正常loginできた。したがってこの環境での相互運用性はlive確認済みである。これはBitwarden CLIからpasskey秘密鍵をexportできること、または別runtimeで無人利用できることを意味しない。パスワード、TOTPシード、通常利用のpasskeyを同一自動化プロセスへ渡す設計も採用しない。
 
 一次資料:
 
@@ -370,6 +370,25 @@ second authの`authType`は`0`がemail、`1`がauthenticator/TOTP、`2`がSMSで
 
 login resultの`isAgreed`がfalseの場合、現行UIは`setAgreement` write eventへ進む。collectorは規約同意を自動実行せず、即停止して本人操作へhandoffする。
 
+### 認証済みlive検証
+
+2026-08-31、Kogane Captureの通常Windows Chromeで、本人がBitwardenに保存していた既存passkeyを選択しloginに成功した。秘密、request/response bodyの実値、Cookie値、口座ID、残高、IPは保存していない。
+
+| 順序 | sanitized metadata | 結果 |
+|---:|---|---|
+| 1 | 未認証`accountMargin` / `positionSummaryList` | HTTP 403 `text/html` |
+| 2 | `initiateLoginWithPasskey` | HTTP 200 JSON |
+| 3 | WebAuthn assertionを本人が承認し`loginWithPasskey` | HTTP 200 JSON |
+| 4 | 認証後`accountMargin` | HTTP 200 JSON |
+| 5 | `informationTitle`, `getAuthStatus`, `getPasskeyList` | すべてHTTP 200 JSON |
+| 6 | page reload | `/login#verifyGa`へredirect |
+
+liveの`loginWithPasskey` request keyは公開DTOどおりchallenge、credential ID、authenticator data、client data JSON、signature、user handleで、Turnstile fieldはなかった。password form用Turnstileがpageに存在しても、passkey application flowにtokenが含まれないという静的結論を実通信でも確認した。
+
+`accountMargin` bodyには`cashBalance`、`receivedMarginList`（46件）、`lendingLimitList`（33件）、`withdrawalLimitList`（23件）、`restrictedWithdrawalAmountList`（23件）と関連margin fieldが存在した。件数とfield名だけを記録し、各item・金額・銘柄等は保存していない。`getAuthStatus` bodyは`isIdentified`と`isTotpIdentified`、`getPasskeyList` itemはchannel、credential ID、last-used datetime、label、register datetime/source IP fieldを持ち、list lengthは1だった。値は保存していない。
+
+最初のhome表示とread APIは成功したが、reload後は`/login#verifyGa`へ戻った。原因はpasskey後sessionの短期性、reload時の追加検証、Cookie/sessionStorageの組合せ、Kogane Capture条件等のいずれか未確定である。このため「sessionが通常reloadで永続する」「Cookieと`secureKey`をBunへ移せる」「daily cronで再利用できる」はまだ証明されていない。
+
 passkeyはSMBC Safety Passのように特定bank appの登録端末で毎回生体承認させる独自方式ではない。既存WebAuthn credentialを通常Chromeで利用できる可能性がある。さらに将来案として、Kogane専用のWebAuthn credentialを正規の登録画面で追加し、そのcredentialだけをcollectorへ渡す方式がある。標準のBitwarden/Windows Hello passkeyから秘密鍵を抽出する設計ではなく、最初からautomation専用software authenticatorとして生成・登録する。まずChrome DevTools Protocolのvirtual authenticatorをContainer内で使い、RPがそのcredentialを登録・再利用できるか、credential metadataを安全にexportできるかを本人操作で検証する。成功してもprivate keyは金融credentialなのでGitへ置かずWorker Secret等へ限定する。
 
 Cloudflare Workers Web CryptoでWebAuthn assertion用ECDSA署名を組み立てること自体は技術上可能性がある。しかし、RP ID/origin、UV/UP flags、signature counter、resident credential/user handle、server challenge、Cloudflare sessionの条件が未確認であるため、現段階では「browserless passkey login候補」であって実装済みとはしない。
@@ -388,14 +407,14 @@ Cloudflare Workers Web CryptoでWebAuthn assertion用ECDSA署名を組み立て�
 6. paginationは`list`と`totalSize`が確認できた場合だけ続行し、100 pageの既定上限を設ける。schema不明時に無限走査しない。
 7. outputには実残高・履歴が含まれるためlocal private directoryだけに置き、Git、CI artifact、stdout、Cloudflareへ送らない。
 
-synthetic testで確認済みなのは、request shape、recent/historical分離、pagination停止、non-JSON/error拒否、error textにsession値を含めないことまでである。2026-08-31時点では認証済みsessionをまだ投入していないため、実レスポンスschema、full pagination、直接HTTP replay、session寿命は未検証である。
+synthetic testで確認済みなのは、request shape、recent/historical分離、pagination停止、non-JSON/error拒否、error textにsession値を含めないことまでである。通常Chromeではpasskey loginと`accountMargin`の実レスポンスschemaを確認した。一方、local Bun clientへ認証済みsessionをまだ投入しておらず、full pagination、直接HTTP replay、session寿命は未検証である。
 
 ### 次のlive検証
 
-1. 本人が通常Chromeで既存passkeyを使ってloginする。追加規約、passkey再登録、認証設定変更が出たら停止する。
+1. 既存passkeyによる通常Chrome loginは成功済み。次はreloadで`verifyGa`になる条件を、1回のsanitized metadata観測で特定する。
 2. DevToolsまたはlocal CDP helperで、秘密値を画面・logへ出さず、認証済みCookieと`secureKey`をGit外のmode 600一時fileへ渡す。一時fileの生成helperはCookie maskingを検証するまでcommitしない。
-3. `cashBalanceList`を1回だけ呼び、status/content-type/schemaだけを確認する。403、Turnstile challenge、session invalidなら反復せず停止する。
-4. 成功した場合のみ`accountMargin`、`executionList`のrecent/historical各1 page、`getCashflowList`のrecent/historical各1 pageへ進む。
+3. Bun clientから`cashBalanceList`を1回だけ呼び、status/content-type/schemaだけを確認する。403、Turnstile challenge、session invalidなら反復せず停止する。
+4. 成功した場合のみ`accountMargin`、`executionList` recent/historical各1 page、`getCashflowList` historical 1 pageへ進む。
 5. 件数・pagination fieldをsanitized metadataとして記録した後にbackfill上限とserverless適性を再評価する。
 
 現時点のblockerは「アプリ固有の非exportable credential」ではなく、**認証済みsessionをdirect clientへ安全に引き継げるか**である。password経路ではTurnstileが明示的blockerだが、passkey request schemaにはTurnstile fieldがなく、Kogane専用WebAuthn credentialを使うbrowserless経路も検証候補になる。session replayが成功すればContainers/Workersからread gatewayを呼べる可能性が出る。Cookieがbrowser/TLS/IPへ強く結合されていれば、full Chrome Containerまたは同一browser context内fetchが必要になる。
