@@ -13,6 +13,7 @@ const READ_EVENTS = {
   positionSummaryList: true,
   executionList: true,
   getCashflowList: true,
+  tradeReportList: true,
 } as const;
 
 export type ReadEvent = keyof typeof READ_EVENTS;
@@ -26,6 +27,15 @@ export interface PageOptions {
   pageNumber: number;
   pageSize: number;
   historical: boolean;
+}
+
+export interface ReportPageOptions {
+  statementType: string;
+  pageNumber: number;
+  pageSize: number;
+  fromBasisYmdDate?: string;
+  toBasisYmdDate?: string;
+  unreadOnly?: boolean;
 }
 
 /**
@@ -84,6 +94,19 @@ export class SbiVcTradeClient {
       historical: String(options.historical),
       currency: ["JPY"],
       cashflowType: ["REMITTANCE_DEPOSIT", "REMITTANCE_WITHDRAW"],
+    });
+  }
+
+  tradeReports(options: ReportPageOptions): Promise<GatewayEnvelope> {
+    if (!options.statementType.trim()) throw new Error("statementType is required");
+    return this.#read("tradeReportList", {
+      secureKey: this.#session.secureKey,
+      statementType: options.statementType,
+      ...(options.fromBasisYmdDate ? { fromBasisYmdDate: options.fromBasisYmdDate } : {}),
+      ...(options.toBasisYmdDate ? { toBasisYmdDate: options.toBasisYmdDate } : {}),
+      getUnreadReportOnly: String(options.unreadOnly ?? false),
+      pageSize: String(options.pageSize),
+      pageNumber: String(options.pageNumber),
     });
   }
 

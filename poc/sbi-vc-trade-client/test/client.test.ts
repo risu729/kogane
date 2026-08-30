@@ -47,6 +47,29 @@ describe("SBI VC Trade read-only gateway", () => {
     expect(requests[1]?.data).not.toHaveProperty("eventDateTo");
   });
 
+  test("keeps report listing separate from report download events", async () => {
+    let request: { event: string; data: Record<string, unknown> } | undefined;
+    const client = new SbiVcTradeClient(session, async (_input, init) => {
+      request = JSON.parse(String(init?.body));
+      return json({ meta: { status: "OK" }, body: { list: [], totalSize: "0" } });
+    });
+    await client.tradeReports({
+      statementType: "synthetic-statement-type",
+      pageNumber: 0,
+      pageSize: 30,
+    });
+    expect(request).toEqual({
+      event: "tradeReportList",
+      data: {
+        secureKey: "synthetic-key",
+        statementType: "synthetic-statement-type",
+        getUnreadReportOnly: "false",
+        pageSize: "30",
+        pageNumber: "0",
+      },
+    });
+  });
+
   test("does not leak session values in HTTP errors", async () => {
     const client = new SbiVcTradeClient(session, async () =>
       new Response("blocked", { status: 403 }));
