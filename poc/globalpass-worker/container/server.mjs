@@ -2,12 +2,12 @@ import http from "node:http";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { access, mkdtemp, rm } from "node:fs/promises";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { chromium as patchrightChromium } from "patchright";
 import { chromium } from "playwright";
-import WebSocket from "ws";
+
+import { startConnectRelay } from "./connect-relay.mjs";
 
 const LOGIN_URL =
   "https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006";
@@ -25,7 +25,7 @@ const RELAY_HOSTS = new Set([
 const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const DAILY_MONTHS = 2;
-const RUNTIME_REVISION = "timezone-collector-v5";
+const RUNTIME_REVISION = "timezone-collector-v6";
 const ACTIVITY_LABEL =
   /ご利用明細|利用明細|account activity|transaction(?:s| history)?|usage details|card activity|statement/iu;
 const PROBE_VARIANTS = [
@@ -92,76 +92,6 @@ function validProbeRequest(value) {
     typeof value.relayUrl === "string" &&
     value.relayUrl.startsWith("wss://")
   );
-}
-
-function startSocksRelay(relayToken, relayUrl) {
-  const server = net.createServer((socket) => {
-    let buffer = Buffer.alloc(0);
-    let phase = "greeting";
-    let relay;
-
-    const fail = () => {
-      if (!socket.destroyed) socket.destroy();
-      if (relay && relay.readyState < WebSocket.CLOSING) relay.close();
-    };
-
-    socket.on("data", (chunk) => {
-      if (phase === "relay") {
-        if (relay?.readyState === WebSocket.OPEN) relay.send(chunk);
-        return;
-      }
-      buffer = Buffer.concat([buffer, chunk]);
-      if (phase === "greeting") {
-        if (buffer.length < 2) return;
-        const methodCount = buffer[1];
-        if (buffer.length < 2 + methodCount || buffer[0] !== 5) return fail();
-        buffer = buffer.subarray(2 + methodCount);
-        socket.write(Buffer.from([5, 0]));
-        phase = "request";
-      }
-      if (phase !== "request" || buffer.length < 5) return;
-      if (buffer[0] !== 5 || buffer[1] !== 1 || buffer[3] !== 3) return fail();
-      const length = buffer[4];
-      if (buffer.length < 7 + length) return;
-      const hostname = buffer.subarray(5, 5 + length).toString("utf8");
-      const offset = 5 + length;
-      const port = buffer.readUInt16BE(offset);
-      const remainder = buffer.subarray(offset + 2);
-      if (!RELAY_HOSTS.has(hostname) || port !== 443) return fail();
-
-      phase = "connecting";
-      const target = new URL(relayUrl);
-      target.searchParams.set("host", hostname);
-      target.searchParams.set("port", String(port));
-      relay = new WebSocket(target, {
-        headers: { authorization: `Bearer ${relayToken}` },
-      });
-      relay.binaryType = "arraybuffer";
-      relay.on("open", () => {
-        socket.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
-        phase = "relay";
-        if (remainder.length) relay.send(remainder);
-      });
-      relay.on("message", (data) => socket.write(Buffer.from(data)));
-      relay.on("close", () => socket.end());
-      relay.on("error", fail);
-    });
-    socket.on("error", fail);
-    socket.on("close", () => {
-      if (relay && relay.readyState < WebSocket.CLOSING) relay.close();
-    });
-  });
-
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      resolve({
-        port: address.port,
-        close: () => new Promise((done) => server.close(done)),
-      });
-    });
-  });
 }
 
 function normalizeMonth(label, value) {
@@ -498,14 +428,14 @@ function diagnosticConsoleSignal(message) {
   };
 }
 
-function probeProxy(config, socksPort) {
+function probeProxy(config, proxyPort) {
   if (config.egress === "direct") return undefined;
   const bypass =
     config.egress === "split"
       ? `${TURNSTILE_HOST},${TURNSTILE_HELPER_HOST}`
       : undefined;
   return {
-    server: `socks5://127.0.0.1:${socksPort}`,
+    server: `http://127.0.0.1:${proxyPort}`,
     ...(bypass ? { bypass } : {}),
   };
 }
@@ -540,7 +470,7 @@ async function ensureXvfb() {
   return ":99";
 }
 
-async function launchProbeContext(config, socksPort) {
+async function launchProbeContext(config, proxyPort) {
   const browserType = config.patchright ? patchrightChromium : chromium;
   const args = config.patchright
     ? ["--no-sandbox"]
@@ -555,8 +485,8 @@ async function launchProbeContext(config, socksPort) {
     args,
     ...(config.chromeStable ? { channel: "chrome" } : {}),
     ...(display ? { env: { ...process.env, DISPLAY: display } } : {}),
-    ...(probeProxy(config, socksPort)
-      ? { proxy: probeProxy(config, socksPort) }
+    ...(probeProxy(config, proxyPort)
+      ? { proxy: probeProxy(config, proxyPort) }
       : {}),
   };
   let browser;
@@ -671,7 +601,7 @@ async function inspectProbePage(page) {
   });
 }
 
-async function probeDirectChrome(payload, config, socksPort, startedAt) {
+async function probeDirectChrome(payload, config, proxyPort, startedAt) {
   const display = await ensureXvfb();
   const profileDirectory = await mkdtemp(
     path.join(os.tmpdir(), "kogane-globalpass-direct-chrome-profile-"),
@@ -682,7 +612,7 @@ async function probeDirectChrome(payload, config, socksPort, startedAt) {
   const proxyArguments =
     config.egress === "direct"
       ? []
-      : ["--proxy-server=socks5://127.0.0.1:" + socksPort];
+      : ["--proxy-server=http://127.0.0.1:" + proxyPort];
   const child = spawn(
     "/usr/bin/google-chrome",
     [
@@ -784,7 +714,11 @@ async function configureWindowsFingerprint(context, page, version) {
 
 async function probeTurnstile(payload) {
   const config = probeConfiguration(payload.variant);
-  const socks = await startSocksRelay(payload.relayToken, payload.relayUrl);
+  const relay = await startConnectRelay({
+    relayToken: payload.relayToken,
+    relayUrl: payload.relayUrl,
+    allowedHosts: RELAY_HOSTS,
+  });
   let launched;
   const network = [];
   const recordNetwork = (value) => {
@@ -793,9 +727,9 @@ async function probeTurnstile(payload) {
   const startedAt = Date.now();
   try {
     if (config.directChrome) {
-      return await probeDirectChrome(payload, config, socks.port, startedAt);
+      return await probeDirectChrome(payload, config, relay.port, startedAt);
     }
-    launched = await launchProbeContext(config, socks.port);
+    launched = await launchProbeContext(config, relay.port);
     const { browser, context } = launched;
     await context.route("**/*", async (route) => {
       const url = new URL(route.request().url());
@@ -900,15 +834,19 @@ async function probeTurnstile(payload) {
     try {
       if (launched) await launched.close();
     } finally {
-      await socks.close();
+      await relay.close();
     }
   }
 }
 
 async function collect(payload, response) {
-  const socks = await startSocksRelay(payload.relayToken, payload.relayUrl);
+  const relay = await startConnectRelay({
+    relayToken: payload.relayToken,
+    relayUrl: payload.relayUrl,
+    allowedHosts: RELAY_HOSTS,
+  });
   const config = probeConfiguration("chrome-stable-no-ua-all-tamia");
-  const launched = await launchProbeContext(config, socks.port);
+  const launched = await launchProbeContext(config, relay.port);
   const { browser, context } = launched;
   let page;
   const networkDiagnostic = [];
@@ -1029,7 +967,7 @@ async function collect(payload, response) {
     try {
       await launched.close();
     } finally {
-      await socks.close();
+      await relay.close();
     }
   }
 }

@@ -13,7 +13,8 @@
 - Container instance identity `prestia-globalpass-read-only-v15`: timezone collector v2検証後にstop/destroyを受理済み。Cloudflareのinstance一覧にはinactive recordが残るため、app削除時に消す。
 - Container instance identity `prestia-globalpass-read-only-v16`: timezone collector v3検証用。destroy受理済みで、inactive recordはapp削除に従わせる。
 - Container instance identities `prestia-globalpass-read-only-v17`: image rollout完了前に起動して旧v3 imageを保持したため、destroy受理済み。inactive recordはapp削除に従わせる。
-- Container instance identity `prestia-globalpass-read-only-v18`: Workers Cronが使用する現行identity。v4でdaily/backfill成功済み、v5のChrome controlと修正後dailyも成功し、収集後`destroy()`でinactiveになることを確認済み。
+- Container instance identity `prestia-globalpass-read-only-v18`: v4でdaily/backfill、v5でChrome controlと修正後dailyに成功。HTTP CONNECT版のrollout後に旧v5が再起動したため、2026-08-31に`destroy`済み。
+- Container instance identity `prestia-globalpass-read-only-v19`: Workers CronとHTTP CONNECT版が使用する現行identity。2026-08-31のdaily成功後に`destroy()`され、inactiveへ戻ることを確認済み。
 - Container instance identity `prestia-globalpass-chromium-timezone-probe-v1`: 最終成功条件でbinaryだけをPlaywright同梱Chromiumへ変えたA/B専用。3 run完了後にdestroy済みで、inactive recordはapp削除に従わせる。
 - 旧Container image `sha256:3035cabb81c0f7a70923cd5491a310406b31ef29e1f092397c28d2157276f2e5`: Xvfb wrapperによりport 8080をlistenできなかった検証image。
 - 旧Container image `sha256:3027472193d263d31180ac600d87f230134a3d84407e2b97a2de63b3547be757`: diagnostic path sanitizer導入前の検証image。
@@ -68,12 +69,12 @@ listenしていない。relay tokenはstdinからmemoryへ渡し、`bots`のfile
 
 ## PoC全体を廃止するときに削除するもの
 
-- 現行app repository kogane-globalpass-collector-poc-globalpasscollectorcontainer の旧tags: 007215b4、0080b617、2444b612、4311cdf8、63148685、87f23407、8b4e8803、a220cfae、b8e96bd2、cb98569f、d86b50ae、f2585107、f6406948、f73b2bab、cd80a6ee、791950f1、bef74562、9fe9a176、790bbb11、92453ede、1cdfb2ea。現行v5 registry tag `acd857ec`はapp削除後に削除する。同じdigestを再利用したlocal tags `b9013549`、`45bc7bac`、`550b1ff5`はWranglerがdeploy時にuntag済み。
+- 現行app repository kogane-globalpass-collector-poc-globalpasscollectorcontainer の旧tags: 007215b4、0080b617、2444b612、4311cdf8、63148685、87f23407、8b4e8803、a220cfae、b8e96bd2、cb98569f、d86b50ae、f2585107、f6406948、f73b2bab、cd80a6ee、791950f1、bef74562、9fe9a176、790bbb11、92453ede、1cdfb2ea、acd857ec。現行v6 registry tag `a8c58f4b`はapp削除後に削除する。同じdigestを再利用したlocal tagsはWranglerがdeploy時にuntag済み。
 - 旧standalone probe repository kogane-globalpass-container-probe-20260827-globalpassprobecontainer の全tags: 1068a298、57c4aa1c、73d5ead9、7c10d299、833aeb70、927ed319、9d7b1c69、ae9b6abc、c16fe4c8、c2e12ab7、c7f3e510、d1e7d4f5、ed0300e2、ee37d303、ee71d223。現行appから参照されていないが、このPoC全体を廃止するときだけ削除する。
 
 - Worker `kogane-globalpass-collector-poc`とworkers.dev deployment。
 - Container app `kogane-globalpass-collector-poc-globalpasscollectorcontainer`（app ID `a03ac341-52a7-4e81-9a7c-279a90cc4b0c`）。
-- 現行Container image `sha256:4c519cffcc19812ec90c826e42d2c483421bae8fa64f00e03d2ece95de3f9e49`（timezone collector v5）と、v4 `sha256:831819f48420eec226601985df6b84e3a80d3948ae389dd2fbbd557d23eed0f3`、旧digests `sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`、`sha256:7cd71344cc130d6b5e5c62a78743a8102daf07c0deb7ecd4a9e2428f55d2e863`、`sha256:c85e093a8a827821407fcba2fed849ea6558342fc103978846561cbc6f4192f7`、`sha256:c0bd4b80395580cf61eb8f6d34f5326a073e4191eda18064d47f5e5ecacdd501`、`sha256:c768879b72c2b88099fee38a139036142d4c43c6d0c8960a727deb11f52853af`を含むregistryの旧image。
+- 現行Container image `sha256:195ebaa959f2676e08e8c6d40335b5984e64e36e905efc957a4061070835e6b1`（timezone collector v6）と、v5 `sha256:f0b630d018a20ae23f2834134cb02923e3b640500d53114a42be036dd594a4c0`、v4 `sha256:831819f48420eec226601985df6b84e3a80d3948ae389dd2fbbd557d23eed0f3`、旧digests `sha256:db2ea4549e95c40114e95648d625b498c6d0ed7095a6d05bbc6d56bd09709f6c`、`sha256:7cd71344cc130d6b5e5c62a78743a8102daf07c0deb7ecd4a9e2428f55d2e863`、`sha256:c85e093a8a827821407fcba2fed849ea6558342fc103978846561cbc6f4192f7`、`sha256:c0bd4b80395580cf61eb8f6d34f5326a073e4191eda18064d47f5e5ecacdd501`、`sha256:c768879b72c2b88099fee38a139036142d4c43c6d0c8960a727deb11f52853af`を含むregistryの旧image。
 - 2026-08-30 WSL local Docker A/Bの一時container `kogane-globalpass-wsl-ab-*`、port 8080/18080/18081/18082、Xvfb :93/:94、host SOCKS port 11080は全run終了後に停止・削除済み。新しいimage、profile、captureは作成していない。
 - 2026-08-29追加検証の旧Container image `sha256:ac8dcc44bfcd5135dd60582ed801492f599735d4e45df63e4cf9416f108dded1`、`sha256:f3fe89e1590fce95edcca8b29dbb34aff3426b5cb39be88aedacb230e4dc284f`、およびそれ以前の現行imageだった`sha256:4933be0abc6397d74ec6f02b0e49a4a046daeda392962f7f28f3c3d41514c7c6`。
 - Workerの公開診断endpoint `/egress`。既存Worker以外のresourceは作らず、Worker削除に従って消える。
@@ -91,4 +92,4 @@ listenしていない。relay tokenはstdinからmemoryへ渡し、`bots`のfile
 
 この検証ではQueue、D1、新しいhostname routeを作成していないため、それらのcleanupは不要である。Workers Cron `17 18 * * *`はWorker削除に従って消えるが、PoCを残して定期収集だけ止める場合は`triggers.crons`を外してdeployする。active image rolloutでは旧instanceが旧imageを保持する場合があるため、app/image削除前にContainer instanceをstopまたはdestroyしてから確認する。
 
-Container appの`max_instances`は2である。通常collectorは固定identity `v18`だけを使い、2枠目はimage rollout時の旧inactive instance退避またはbounded probe用である。PoC廃止時はapp削除に従わせ、共有Tunnelの設定を変更しない。
+Container appの`max_instances`は2である。通常collectorは固定identity `v19`だけを使い、2枠目はimage rollout時の旧inactive instance退避またはbounded probe用である。PoC廃止時はapp削除に従わせ、共有Tunnelの設定を変更しない。

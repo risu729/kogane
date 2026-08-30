@@ -10,7 +10,7 @@ GLOBAL PASS（Vpassデビット専用サイト）のサーバーレンダリン�
 authenticated POST /trigger
   -> Worker orchestration
   -> Container Playwright Google Chrome Stable
-  -> Container-local SOCKS5
+  -> Container-local HTTP CONNECT proxy
   -> authenticated WebSocket relay on the Worker
   -> tunnel_idでTAMIA Tunnelを直接指定
   -> tamia cloudflared
@@ -25,11 +25,13 @@ authenticated POST /browser-probe
   -> GLOBAL PASS + Turnstile
 ```
 
-WorkerはTLSを終端せず暗号化済みTCPを中継するため、GLOBAL PASSとのTLS handshakeはChromium自身が行う。relayは次の3 hostの443番だけを許可し、request指定の任意hostや汎用TCP proxyには広げない。
+WorkerはTLSを終端せず暗号化済みTCPを中継するため、GLOBAL PASSとのTLS handshakeはChromium自身が行う。Container内ではNode.js標準HTTP serverの`connect` eventでChromeのCONNECT要求を受け、`ws.createWebSocketStream()`のbackpressure付きstreamへ接続する。Worker側のVPC relayとContainer側の両方で、次のproduction 3 host（および出口診断用Worker host）の443番だけを許可し、request指定の任意hostや汎用TCP proxyには広げない。
 
 - `www.debit.vpass.ne.jp`
 - `challenges.cloudflare.com`
 - `brunhild.challenges.cloudflare.com`
+
+Container runtimeはNode.jsを維持する。Bun 1.4.0では`ws.createWebSocketStream()`が`Not supported yet in Bun`となることを境界テストで確認した。Google Chromeが起動時間とresource使用の大半を占めるこのContainerではBunへ替える実利が小さく、Bun native WebSocket/TCP APIへの書き換えは手動のqueue・backpressure制御を再導入するため、現時点では採用しない。Bunはpackage managerと既存test runnerとして引き続き使用する。
 
 VPC bindingは`network_id: "cf1:network"`ではなくTAMIAの`tunnel_id`を直接指定する。このWorkerだけがTAMIA Tunnelを使い、Zero Trustアカウントのhostname routeを追加しないため、個人PCのWARP通信には影響しない。Cloudflareの[VPC Network binding](https://developers.cloudflare.com/workers-vpc/configuration/vpc-networks/)と[Cloudflare Tunnel](https://developers.cloudflare.com/workers-vpc/configuration/tunnel/)に沿った構成である。
 
@@ -74,19 +76,21 @@ scripts/sync-local-secrets.sh \
 - VPC binding: TAMIA Tunnel `6b0ccf30-68b2-494e-baa8-f4f9f3e46b33`を直接指定
 - Cron: `17 18 * * *`（毎日03:17 JST、Workers Cron）
 
-現行Containerは`TZ=Asia/Tokyo`を起動環境へ明示し、Google Chrome StableをXvfb上のheaded persistent contextとして起動する。GLOBAL PASS、Turnstile本体、helperを同じTAMIA出口へ固定する。NRT Gateway診断variantを含む現行imageはdigest `sha256:f0b630d018a20ae23f2834134cb02923e3b640500d53114a42be036dd594a4c0`、runtime revision `timezone-collector-v5`である。通常collectorのbrowser条件はv4から変更していない。
+現行Containerは`TZ=Asia/Tokyo`を起動環境へ明示し、Google Chrome StableをXvfb上のheaded persistent contextとして起動する。GLOBAL PASS、Turnstile本体、helperを同じTAMIA出口へ固定する。NRT Gateway診断variantを含む現行imageはdigest `sha256:195ebaa959f2676e08e8c6d40335b5984e64e36e905efc957a4061070835e6b1`、runtime revision `timezone-collector-v6`である。v6はContainer-local relayを独自SOCKS5からNode.js HTTP CONNECTへ置換しただけで、通常collectorのbrowser条件はv4から変更していない。
 
 timezone修正後に出口だけを変えたcontrolled A/Bでは、Container直通（SG/SINのCloudflare IPv6 egress）は2回ともlogin pageがHTTP 200でもTurnstile token 0、同時刻の全通信TAMIA controlはtoken 794だった。したがって現行productionはTAMIA固定を維持する。詳細は[`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)に記録した。
 
 追加のCloudflare Gateway診断では、WorkerをTokyo近傍へplacementし、`cf1:network`経由でJP/NRTのCloudflare IPv6 egressを実現した。NRTは2回ともtoken 0だったが、直後のTAMIA controlもtoken 0になったため、短時間の連続challengeまたは時系列変動が交絡している。通常collectorはTAMIAのままとし、NRT variantは十分な間隔を空けた再検証専用に残す。
 
-現行Worker versionは`c8a72ca3-79c3-4515-af25-16147f35cbbe`で、deploy出力上もschedule `17 18 * * *`を確認した。
+現行Worker versionは`2abc1133-83db-4c8d-b593-c82ec8ca4dcf`で、deploy出力上もschedule `17 18 * * *`を確認した。
 
 daily/backfillはR2へのmanifest保存を含む処理の成否にかかわらず、最後にephemeralな固定Container instanceへ`destroy()`を送る。破棄要求自体の失敗は収集結果へ混ぜず、構造化logへ記録する。`30s`のidle timeoutも残すが、relay使用後は`stop()` RPCがoutcome `ok`でもinstanceが`running`のまま残ることをlive確認したため、課金停止は`destroy()`で保証する。
 
 2026-08-30のdeploy後daily run `8d498b19-dda5-4dfb-84b6-1239c4d9e765`は約52秒でstatus `success`、2026-08と2026-07のHTML 2件、failure 0だった。ただし同runの`stop` RPCがoutcome `ok`、app状態が`assigned: 0`でも、後のinstance一覧では`v18`が`running`だった。Chromium A/B rollout時にこの差を発見して旧`v18`を明示destroyし、収集後処理を`destroy()`へ変更した。
 
 修正後daily run `251bbae4-007c-4d91-b7e5-9b4385656285`もruntime v5、status `success`、HTML 2件、failure 0だった。R2 manifest保存直後に`globalpass-collection-container-destroyed`が記録され、Wranglerのinstance一覧でも`v18`が`inactive`になったことを確認した。
+
+HTTP CONNECTへ置換したruntime v6は、新しいidentity `v19`でbounded probeを実行し、GLOBAL PASS HTTP 200、Turnstile token 794文字、TAMIA JP/KIX出口を確認した。続くdaily run `8101b4c8-170d-400a-9e27-7823dce9cf28`は約42秒でstatus `success`、利用可能15か月を検出し、2026-08と2026-07のHTML 2件、failure 0だった。`/latest-manifest`から同じmanifestを再取得し、instance一覧でも`v19`が`inactive`になったことを確認した。
 
 `wrangler deploy`の完了後もContainer appのimage rolloutは非同期で続く。検証時は`wrangler containers info <app-id>`で新image digestとhealthy instanceを確認してから、新しいDurable Object IDで実行する。rollout前に実行すると旧imageを使い、コード不具合のように見えることがある。
 
@@ -250,7 +254,7 @@ scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-t
 scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token chrome-stable-headed-persistent-windows
 scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token patchright-chrome-native-all-tamia
 scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token chrome-direct-process-attach-late-direct
-scripts/trigger.sh stop ~/.local/share/kogane/secrets/globalpass-worker-admin-token v18 stop
+scripts/trigger.sh stop ~/.local/share/kogane/secrets/globalpass-worker-admin-token v19 stop
 scripts/trigger.sh manifest ~/.local/share/kogane/secrets/globalpass-worker-admin-token 2026-08-29
 ```
 

@@ -25,7 +25,7 @@ const RELAY_HOSTS = new Set([
   PROBE_EGRESS_HOST,
 ]);
 const MAX_NDJSON_LINE_BYTES = 3 * 1024 * 1024;
-const CONTAINER_ID = "prestia-globalpass-read-only-v18";
+const CONTAINER_ID = "prestia-globalpass-read-only-v19";
 const CHROMIUM_TIMEZONE_PROBE_ID =
   "prestia-globalpass-chromium-timezone-probe-v1";
 const STOPPABLE_CONTAINER_IDS = new Map([
@@ -38,7 +38,8 @@ const STOPPABLE_CONTAINER_IDS = new Map([
   ["v15", "prestia-globalpass-read-only-v15"],
   ["v16", "prestia-globalpass-read-only-v16"],
   ["v17", "prestia-globalpass-read-only-v17"],
-  ["v18", CONTAINER_ID],
+  ["v18", "prestia-globalpass-read-only-v18"],
+  ["v19", CONTAINER_ID],
   ["chromium-timezone", CHROMIUM_TIMEZONE_PROBE_ID],
 ]);
 
