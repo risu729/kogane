@@ -59,6 +59,18 @@ describe("SBI Shinsei read allowlist", () => {
     })).toThrow(UnsafeReadRequestError);
   });
 
+  test("read-only exchange-rate is not rejected as an FX write", () => {
+    const route = READ_ROUTE_CATALOG.find(
+      (candidate) => candidate.operation === "common.exchange-rate",
+    );
+    if (!route) throw new Error("exchange-rate route is missing");
+    expect(() => assertReadAllowed({
+      operation: route.operation,
+      method: route.method,
+      url: `${route.origin}${route.path}`,
+    })).toThrow(UnverifiedReadRouteError);
+  });
+
   test("transport performs zero fetches while routes are unverified", async () => {
     let fetchCount = 0;
     const transport = new SbiShinseiReadTransport({

@@ -12,7 +12,7 @@ No credential, account number, session token, cookie, customer identity, balance
 
 ## Confirmed public transport shape
 
-The current PowerDirect frontend uses an IBM MobileFirst/WLClient-style JSON transport under `https://bk.web.sbishinseibank.co.jp/SFC/`. Public client code constructs JSON `POST` requests as `/SFC/app/{adapter}/{procedure}`. The browser keeps a session token in `sessionStorage`, sends it in the `Authorization` header and accepts a rotated token from the response header `newToken`.
+The current PowerDirect frontend uses an IBM MobileFirst/WLClient-style JSON transport under `https://bk.web.sbishinseibank.co.jp/SFC/`. Public client code constructs JSON `POST` requests as `/SFC/app/{adapter}/{procedure}`. The browser keeps a session token in `sessionStorage`, sends it in the `Authorization` header and accepts a rotated CSRF token from JSON `header.newToken`.
 
 This is transport evidence only. It does not prove that a token can be moved to another runtime or that a route has no side effects. The authenticated run additionally showed `X-CSRF-Token` on session reads.
 
@@ -79,7 +79,7 @@ Once a route is enabled, transport behavior is also bounded:
 - stop on 401/403 without credential retry;
 - accept only listed JSON media types;
 - stream with a 2 MiB limit, not unbounded buffering;
-- require strict operation-specific validation before rotating `newToken`;
+- require strict operation-specific validation before atomically adopting an optional root `header.newToken` from any known response;
 - never put unknown responses into R2 or logs.
 
 The synthetic normalized fixture is not a claimed bank schema. It only fixes a tentative Kogane model for separate yen savings, Hyper Yokin, foreign savings and deposits while preserving native currency, optional yen equivalent and explicit `asOf`.

@@ -16,9 +16,9 @@ export function parseCredential(value: string): SbiShinseiCredential {
   }
   if (
     typeof parsed.branchNumber !== "string" ||
-    !/^\d+$/u.test(parsed.branchNumber) ||
+    !/^\d{3}$/u.test(parsed.branchNumber) ||
     typeof parsed.accountNumber !== "string" ||
-    !/^\d+$/u.test(parsed.accountNumber) ||
+    !/^\d{7}$/u.test(parsed.accountNumber) ||
     typeof parsed.powerDirectPassword !== "string" ||
     parsed.powerDirectPassword.length === 0
   ) {

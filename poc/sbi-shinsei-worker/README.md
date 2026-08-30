@@ -7,7 +7,7 @@ SBI新生銀行 PowerDirect の read-only collector を Kogane 内で独立実�
 
 **この branch は deploy しません。また、実口座への network request は意図的に無効です。**
 
-公開 login bundle から MobileFirst/WLClient 形式の read 候補 route、session token と `newToken` rotation は確認できました。しかし、実 credential flow、CAFIS Brain の `jsc`、各 response schema はまだ authenticated capture で検証していません。そのため:
+公開 login bundle と Kuebiko capture から MobileFirst/WLClient 形式の read route、session/CSRF token topology、core response schema を確認しました。しかし、CAFIS Brain の `jsc` を含む login を direct client で再現できるかはまだ検証していません。そのため:
 
 - production login は未実装です。
 - route catalog は exact-origin / exact-path / exact-method です。2026-08-31 の Kuebiko capture で 200 を確認した route は `liveValidated: true`、公開 bundle だけの候補は `false` です。ただし全 entry が `productionEnabled: false` のため実 request は行いません。

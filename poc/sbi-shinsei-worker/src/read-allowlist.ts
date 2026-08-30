@@ -12,10 +12,10 @@ import type {
 const ORIGIN = "https://bk.web.sbishinseibank.co.jp" as const;
 
 /**
- * Route names were recovered from the bank's public login JavaScript on
- * 2026-08-31. They are candidates, not authenticated-response proof.
- * Consequently every entry stays disabled until its request and response have
- * both been captured from the matching read-only UI action.
+ * Route names came from the public login JavaScript. Entries observed in the
+ * 2026-08-31 authenticated Kuebiko run are marked liveValidated; bundle-only
+ * candidates are not. Every entry remains production-disabled until the
+ * direct client and the exact request/response contract pass validation.
  */
 export const READ_ROUTE_CATALOG = [
   capturedRoute(
@@ -104,7 +104,6 @@ const FORBIDDEN_PATH_TERMS = [
   "withdraw",
   "purchase",
   "sell",
-  "exchange",
   "memo",
   "setting",
   "password",

@@ -22,4 +22,30 @@ describe("SBI Shinsei credential secret", () => {
       otp: "000000",
     }))).toThrow("invalid shape");
   });
+
+  test("requires the official three-digit branch and seven-digit account", () => {
+    for (const [branchNumber, accountNumber] of [
+      ["40", "1234567"],
+      ["0400", "1234567"],
+      ["400", "123456"],
+      ["400", "12345678"],
+    ]) {
+      expect(() => parseCredential(JSON.stringify({
+        branchNumber,
+        accountNumber,
+        powerDirectPassword: "synthetic-password",
+      }))).toThrow("invalid fields");
+    }
+  });
+
+  test("preserves leading zeroes", () => {
+    expect(parseCredential(JSON.stringify({
+      branchNumber: "040",
+      accountNumber: "0123456",
+      powerDirectPassword: "synthetic-password",
+    }))).toMatchObject({
+      branchNumber: "040",
+      accountNumber: "0123456",
+    });
+  });
 });

@@ -303,10 +303,13 @@ function responseRoot(value: unknown, label: string): JsonObject {
   const header = exactObject(
     root.header,
     `${label}.header`,
-    ["adapterResultCode"],
+    ["adapterResultCode", "newToken"],
     ["adapterResultCode"],
   );
   scalar(header.adapterResultCode, `${label}.header.adapterResultCode`);
+  if (header.newToken !== undefined) {
+    nonEmptyString(header.newToken, `${label}.header.newToken`);
+  }
   return root;
 }
 

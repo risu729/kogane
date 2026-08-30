@@ -105,22 +105,29 @@ export class SbiShinseiReadTransport {
     }
 
     const validated = validateKnownResponse(route.responseSchema, parsed);
-    if (request.operation === "common.validate-token") {
-      const header = validated.header;
-      if (
-        typeof header !== "object" ||
-        header === null ||
-        Array.isArray(header) ||
-        typeof (header as JsonObject).newToken !== "string"
-      ) {
-        throw new UnknownResponseShapeError(
-          "validateToken response omitted the next CSRF token",
-        );
-      }
-      this.options.session.rotateCsrfToken((header as JsonObject).newToken as string);
-    }
+    rotateCsrfTokenIfPresent(this.options.session, validated);
     return validated;
   }
+}
+
+export function rotateCsrfTokenIfPresent(
+  session: SessionStateStore,
+  response: JsonObject,
+): void {
+  const header = response.header;
+  if (typeof header !== "object" || header === null || Array.isArray(header)) {
+    throw new UnknownResponseShapeError(
+      "Validated PowerDirect response omitted its header object",
+    );
+  }
+  const nextToken = (header as JsonObject).newToken;
+  if (nextToken === undefined) return;
+  if (typeof nextToken !== "string" || nextToken.length === 0) {
+    throw new UnknownResponseShapeError(
+      "PowerDirect response contained an invalid next CSRF token",
+    );
+  }
+  session.rotateCsrfToken(nextToken);
 }
 
 async function readLimited(
