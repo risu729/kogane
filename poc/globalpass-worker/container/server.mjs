@@ -25,7 +25,7 @@ const RELAY_HOSTS = new Set([
 const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const DAILY_MONTHS = 2;
-const RUNTIME_REVISION = "timezone-collector-v4";
+const RUNTIME_REVISION = "timezone-collector-v5";
 const ACTIVITY_LABEL =
   /ご利用明細|利用明細|account activity|transaction(?:s| history)?|usage details|card activity|statement/iu;
 const PROBE_VARIANTS = [
@@ -45,6 +45,7 @@ const PROBE_VARIANTS = [
   "patchright-chrome-native-direct",
   "chrome-direct-process-attach-late-all-tamia",
   "chrome-direct-process-attach-late-direct",
+  "chromium-native-all-tamia",
 ];
 let collecting = false;
 let xvfbProcess;
@@ -446,6 +447,13 @@ function probeConfiguration(variant) {
       webdriverFalse: false,
       directChrome: true,
       egress: "direct",
+    };
+  }
+  if (variant === "chromium-native-all-tamia") {
+    return {
+      ...chromeNative,
+      chromeStable: false,
+      egress: "all-tamia",
     };
   }
   throw new Error("unknown probe configuration");

@@ -14,6 +14,7 @@
 - Container instance identity `prestia-globalpass-read-only-v16`: timezone collector v3検証用。destroy受理済みで、inactive recordはapp削除に従わせる。
 - Container instance identities `prestia-globalpass-read-only-v17`: image rollout完了前に起動して旧v3 imageを保持したため、destroy受理済み。inactive recordはapp削除に従わせる。
 - Container instance identity `prestia-globalpass-read-only-v18`: rollout完了後に起動した現行timezone collector v4。daily/backfill成功済みで、Workers Cronが使用するため保持する。
+- Container instance identity `prestia-globalpass-chromium-timezone-probe-v1`: 最終成功条件でbinaryだけをPlaywright同梱Chromiumへ変えるA/B専用。検証後は`scripts/trigger.sh stop ... chromium-timezone stop`で停止し、inactive recordはapp削除に従わせる。
 - 旧Container image `sha256:3035cabb81c0f7a70923cd5491a310406b31ef29e1f092397c28d2157276f2e5`: Xvfb wrapperによりport 8080をlistenできなかった検証image。
 - 旧Container image `sha256:3027472193d263d31180ac600d87f230134a3d84407e2b97a2de63b3547be757`: diagnostic path sanitizer導入前の検証image。
 - 旧Container image `sha256:35d493c8d276d9e6d58856fe4b132d5ec9a14cbc28f92118c48dc5fc50bb9c03`: Playwright同梱Chromiumだけを含む6条件目導入前のimage。
@@ -89,4 +90,4 @@ listenしていない。relay tokenはstdinからmemoryへ渡し、`bots`のfile
 
 この検証ではQueue、D1、新しいhostname routeを作成していないため、それらのcleanupは不要である。Workers Cron `17 18 * * *`はWorker削除に従って消えるが、PoCを残して定期収集だけ止める場合は`triggers.crons`を外してdeployする。active image rolloutでは旧instanceが旧imageを保持する場合があるため、app/image削除前にContainer instanceをstopまたはdestroyしてから確認する。
 
-Container appの`max_instances`は2である。通常collectorは固定identity `v16`だけを使い、2枠目はimage rollout時に旧inactive instanceが枠を即時解放しない場合の入替用である。PoC廃止時はapp削除に従わせ、共有Tunnelの設定を変更しない。
+Container appの`max_instances`は2である。通常collectorは固定identity `v18`だけを使い、2枠目はimage rollout時の旧inactive instance退避またはbounded probe用である。PoC廃止時はapp削除に従わせ、共有Tunnelの設定を変更しない。

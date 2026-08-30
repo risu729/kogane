@@ -26,6 +26,8 @@ const RELAY_HOSTS = new Set([
 ]);
 const MAX_NDJSON_LINE_BYTES = 3 * 1024 * 1024;
 const CONTAINER_ID = "prestia-globalpass-read-only-v18";
+const CHROMIUM_TIMEZONE_PROBE_ID =
+  "prestia-globalpass-chromium-timezone-probe-v1";
 const STOPPABLE_CONTAINER_IDS = new Map([
   ["v9", "prestia-globalpass-read-only-v9"],
   ["v10", "prestia-globalpass-read-only-v10"],
@@ -37,6 +39,7 @@ const STOPPABLE_CONTAINER_IDS = new Map([
   ["v16", "prestia-globalpass-read-only-v16"],
   ["v17", "prestia-globalpass-read-only-v17"],
   ["v18", CONTAINER_ID],
+  ["chromium-timezone", CHROMIUM_TIMEZONE_PROBE_ID],
 ]);
 
 export class GlobalPassCollectorContainer extends Container<Env> {
@@ -211,7 +214,11 @@ async function runContainerProbe(
   env: Env,
   variant: ContainerProbeVariant,
 ): Promise<Response> {
-  const container = getContainer(env.COLLECTOR_CONTAINER, CONTAINER_ID);
+  const containerId =
+    variant === "chromium-native-all-tamia"
+      ? CHROMIUM_TIMEZONE_PROBE_ID
+      : CONTAINER_ID;
+  const container = getContainer(env.COLLECTOR_CONTAINER, containerId);
   await container.startAndWaitForPorts();
   const response = await container.fetch(
     new Request("http://container/probe", {

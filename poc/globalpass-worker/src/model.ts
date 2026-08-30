@@ -17,6 +17,7 @@ export const CONTAINER_PROBE_VARIANTS = [
   "patchright-chrome-native-direct",
   "chrome-direct-process-attach-late-all-tamia",
   "chrome-direct-process-attach-late-direct",
+  "chromium-native-all-tamia",
 ] as const;
 
 export type ContainerProbeVariant = (typeof CONTAINER_PROBE_VARIANTS)[number];
