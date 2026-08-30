@@ -1,6 +1,6 @@
 # Mobile Suica / JRE ID / JRE POINT source assessment
 
-Status: first-pass research, 2026-08-26
+Status: live browser, HTTP replay, and Cloudflare Worker validated, 2026-08-31
 
 Scope: consumer-owned Mobile Suica SF data and the directly related JRE ID / JRE POINT data paths
 
@@ -39,8 +39,9 @@ own Mobile Suica and JRE POINT websites/apps.
 The existing `mnie` client implements the legacy Mobile Suica-ID form. JR East
 states that the legacy ID/password stop working after JRE ID migration. That
 legacy client is consequently protocol prior art only for this account. The main
-unknown is whether a browser-issued JRE ID/Mobile Suica session can be replayed
-without repeating WebAuthn and Fraud Defense on every collection.
+session can now be replayed from plain WSL Node and Cloudflare Workers. The
+remaining production gate is unattended JRE ID/WebAuthn renewal after the
+short-lived browser-issued session expires.
 
 ## What was checked
 
@@ -64,6 +65,13 @@ without repeating WebAuthn and Fraud Defense on every collection.
 - Public, unauthenticated JavaScript from `www.mobilesuica.com`; the JRE ID
   redirect target was also requested without credentials and returned an
   Akamai access-denied response from this WSL network.
+- A live `kogane capture` Chrome Beta 153 login with the owner's Bitwarden
+  passkey, followed by one SF-history search. Kuebiko retained the private raw
+  traffic; only paths, field names, cookie names, counts and protocol metadata
+  are recorded here.
+- Source-scoped session replay from WSL Node and from a deployed Cloudflare
+  Worker, with successful private R2 storage and no credential values in the
+  manifest or collection summary.
 
 Account-specific facts in this update were supplied by the account owner: the
 current Mobile Suica login is JRE ID, a passkey is used and stored in Bitwarden,
@@ -79,7 +87,7 @@ were recorded.
 | Route | Officially available data | Window / limit | Timing and granularity | Automation assessment |
 | --- | --- | --- | --- | --- |
 | Mobile Suica Android/iOS app | Current SF balance and SF use history | History: within 26 weeks, at most 100 entries | App history includes the current day's use; rail rows show station names where available, bus rows show operator, and auto-charge is labelled | Best user display, but poor cloud collector: tied to a supported device and app state |
-| Mobile Suica member website (PC), via current JRE ID | SF history, balance after each row, printable history | Official UI says within 26 weeks and at most 100 entries | Through the previous day; available 05:00 to 00:50 JST | Preferred primary route after local JRE ID bootstrap/session replay is proven; post-login legacy parser is reusable, login is not |
+| Mobile Suica member website (PC), via current JRE ID | SF history, balance after each row, printable history | Official UI says within 26 weeks and at most 100 entries per search | Through the previous day; available 05:00 to 00:50 JST | Preferred primary route; plain Worker replay is proven, while unattended WebAuthn renewal remains open |
 | Google Wallet on Android | SF balance and a card transaction-history view; Google documents purchases, card/store charges and gifts for Japanese e-money, and generic transit views expose station names, dates and times | No fixed Suica count/window found; Google warns that details can be omitted after many transactions in a short period | Device-local official platform view; current-day behavior and exact Suica row fields need live capture | Useful secondary snapshot/cross-check. No documented consumer read API; app/UI automation is device-bound and likely brittle |
 | Mobile Suica app, JRE POINT menu | JRE POINT current holdings; also write operations that Kogane must never call | Current point balance only is documented | No point-history feature is documented on this route | Low-value balance snapshot; do not use for reward history |
 | JRE POINT Web/app | Total point balance and point history | Point history: previous one year | History marks distinguish rail, Suica purchase, View Card, and other sources; exact live columns still need capture | Preferred reward route, but authentication/anti-abuse is materially harder |
@@ -270,6 +278,44 @@ longer be used and the login method cannot be reverted. See
 [Mobile Suica migration FAQ 4766](https://msfaq.mobilesuica.com/faq/show/4766?site_domain=default).
 The existing `mnie` form client will therefore need a new JRE ID bootstrap/session
 path before it can support a migrated account.
+
+### Live JRE ID and Mobile Suica replay, 2026-08-31
+
+The account owner completed the official passkey flow in the dedicated
+`kogane capture` profile. The captured read-only protocol established:
+
+- JRE ID first posts `AUTH_THREEKEY` plus a 32-character hexadecimal browser
+  fingerprint to `/idcs/account_custom/login`.
+- The passkey branch posts `AUTH_FS2` and a JSON `username` field to
+  `/idcs/account/login`; the response challenge uses RP ID
+  `id.jreast.co.jp`, `userVerification: required`, a 60-second timeout and one
+  allowed `public-key` credential.
+- A standard WebAuthn assertion is returned in `Fs2AuthenticationResponse`,
+  with `id`, `rawId`, `authenticatorData`, `clientDataJSON`, `signature` and
+  `userHandle`. No values from those fields are retained in this document.
+- The current JRE ID bundle includes Fingerprint2 2.1.5 and sends its
+  32-character hexadecimal result as `Fingerprint`. Whether the server accepts
+  a deterministic Worker-generated value is the next direct-login gate.
+- The Mobile Suica history endpoint is
+  `POST /iq/ir/SuicaDisp.aspx`, with `baseVariable`, `specifyYearMonth`,
+  `specifyDay` and the Shift_JIS search-button value. It returns Shift_JIS HTML.
+  The authenticated request carried only `ASP.NET_SessionId`, `sc_auth` and
+  `TS0184138d` cookies for this host.
+
+The exact captured POST was replayed from ordinary WSL Node `fetch` and returned
+the authenticated history page with HTTP 200. A separate deployed Worker then
+patched the search date, fetched the same endpoint from Cloudflare egress, parsed
+15 rows, and stored three private R2 artifacts with failure count zero. This
+rules out a Chrome-process, TLS-fingerprint and source-IP binding for the
+post-login SF-history read. It does not prove that the JRE ID login itself is
+browserless.
+
+The observed JRE ID `sid`, `sid_fs2` and `sid_risk_fs2` cookies have
+`Max-Age=3600`; Mobile Suica's cookies are session cookies and its UI expires
+after 20 minutes of inactivity. The daily 00:50–05:00 JST service stop also
+prevents keepalive from bridging one day to the next. Daily unattended
+collection therefore requires direct WebAuthn renewal or a browser bootstrap;
+session replay alone is intentionally treated as short-lived.
 
 ### Local Bitwarden WebAuthn feasibility
 
@@ -565,7 +611,7 @@ exists.
 | Runtime | Mobile Suica SF through current JRE ID | JRE POINT | Google Wallet secondary view | Why |
 | --- | --- | --- | --- | --- |
 | Local Windows/WSL | High for bootstrap and replay tests | Medium | Medium for UI/export capture | Best Kuebiko/passkey environment; local Bitwarden can stay local and the owner can complete device verification |
-| Plain Cloudflare Worker | Medium only after session replay is proven | Low | Very low | `fetch`/cookies fit and Shift_JIS needs an explicit decoder, but WebAuthn/Fraud Defense bootstrap and Android state do not fit |
+| Plain Cloudflare Worker | High for a live imported session; medium-low for unattended renewal | Low | Very low | Cloudflare egress replay and R2 storage are proven; WebAuthn/Fingerprint2 renewal is not |
 | Cloudflare Container | Medium-high after replay validation | Medium | Very low | Full Linux/Node/Bun/browser options; still no Android secure-element/card state and egress may trigger controls |
 | Generic OCI / Kubernetes | Medium-high after replay validation | Medium | Very low | Easiest controlled session-replay and scheduled-job test; no guarantee JRE accepts egress |
 | Owner's Android device | High for official app view, low as a server job | Medium-high for point app | High for viewing, low-medium for local UI automation | Has the live Osaifu-Keitai/Wallet state; unattended orchestration, screen unlock and upgrades make it fragile |
@@ -575,8 +621,9 @@ a subset/polyfill set of Node APIs; Containers run a full Linux/container image.
 See [Workers Node compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/)
 and [Containers overview](https://developers.cloudflare.com/containers/).
 
-The recommended deployment sequence is local JRE ID/passkey bootstrap, same-host
-session replay, then OCI/Cloudflare Container, and only then a minimal Worker.
+The deployed sequence is local JRE ID/passkey bootstrap, WSL replay, then a
+minimal Cloudflare Worker. Container Chrome is now a fallback for renewal, not a
+prerequisite for history reads.
 Keep Google Wallet experiments local to the owned Android device/Takeout. Do not
 start with a cloud runtime and assume failures are source-side; first separate
 session, encoding and egress/Fraud Defense issues.
@@ -587,9 +634,9 @@ Scale: 1 = nearly direct export; 5 = fragile, device-bound or major protocol wor
 
 | Deliverable | Cost | Expected automation | Confidence |
 | --- | ---: | --- | --- |
-| Current Mobile Suica SF, visible local JRE ID/passkey bootstrap + same-host replay | 4/5 | Semi-automatic: owner presence on initial/expired login, scheduled reads while the replay session survives | Medium; WebAuthn signing is feasible prior art, JRE adapter/session lifetime are unknown |
+| Current Mobile Suica SF, visible local JRE ID/passkey bootstrap + Worker replay | 2/5 | Semi-automatic: owner presence on initial/expired login, plain scheduled reads while the replay session survives | High; WSL and Cloudflare replay are live-validated |
 | Current Mobile Suica SF, local Bitwarden assertion issued without browser authenticator UI | 4/5 | Potentially unattended on the owner's machine; still subject to Fraud Defense and exact JRE WebAuthn ceremony | Medium-low until RP ID/request/response are captured |
-| Current Mobile Suica SF, cloud session replay | 4/5 | Scheduled if a locally issued session survives host/egress change; rebootstrap remains local | Medium-low |
+| Current Mobile Suica SF, cloud session replay | 2/5 | Scheduled while a locally issued session survives; rebootstrap remains local | High for the live session, low for next-day renewal |
 | Legacy Mobile Suica-ID fetch | 2/5 | Existing CAPTCHA flow and parser, but not applicable to the confirmed current account | High on implementation, irrelevant as the production bootstrap |
 | JRE POINT balance + one-year point history | 4/5 | Semi-automatic bootstrap, second-password step, then replay if proven; otherwise browser collection | Medium-low |
 | Google Wallet one-time app/Takeout snapshot | 2/5 | Manual or owner-triggered local capture; good for comparison, not scheduling | Medium; exact exported Suica fields are unknown |
@@ -597,9 +644,11 @@ Scale: 1 = nearly direct export; 5 = fragile, device-bound or major protocol wor
 | App/API discovery via APK static analysis | 4/5 | Useful research, not itself an operational collector | Medium |
 | Full Mobile Suica app automation in cloud | 5/5 | Not recommended | High |
 
-Overall recommendation: start with a local, visible JRE ID/passkey login and
-prove that the resulting official Mobile Suica session can replay one SF-history
-read. Adapt `mnie` only after that gate, using its post-login protocol/parser.
+Overall recommendation: keep the now-proven local, visible JRE ID/passkey
+bootstrap and plain Worker history collector as the safe fallback. Next, test a
+Kogane-dedicated WebAuthn credential and the captured JRE ID API sequence so the
+Worker can renew its own Mobile Suica session without exporting the Bitwarden
+vault or the owner's existing passkey.
 Use Google Wallet to inventory/cross-check recent device-visible data and test a
 one-time Takeout export, but do not choose it as the ledger source without a
 row-for-row completeness result. Characterize JRE POINT separately as the
@@ -607,42 +656,43 @@ longer-lived, lossy rewards path.
 
 ## Next validation, in order
 
-1. **Bitwarden/JRE credential match, locally only.** With a tool that prints only
-   match counts and non-secret metadata, capture the JRE ID WebAuthn request and
-   verify the exact RP ID/origin and that exactly one Bitwarden credential ID is
-   allowed. Do not print vault items, usernames, IDs, private keys or passwords.
-2. **Kuebiko capture of one visible JRE ID login.** Let the owner complete the
-   passkey/device verification. Redact credentials, WebAuthn assertion, cookies,
-   per-session URLs and Suica IDs in research artifacts; preserve private raw
-   bodies only in the designated evidence store.
-3. **Same-host read-only replay.** Replay one SF-history request without opening
-   the vault again. If successful, adapt `mnie`'s history transport/parser and
-   compare row count, oldest/newest dates, types, places, amounts and balance-
-   after values with the official page. Verify whether repeated as-of searches
-   recover more than 100 total entries within 26 weeks. Do not print transaction
-   content to CI logs.
-4. **Session matrix.** Import the same encrypted, source-scoped session after 1 hour,
-   24 hours and 7 days, then from WSL and one OCI container. Record success,
-   HTTP status and whether JRE reauthentication is requested. Never put the
-   vault, password or passkey material in the replay envelope.
-5. **Google Wallet inventory and cross-check.** On the owned Android device,
+1. **Dedicated Kogane passkey.** Generate a non-exported P-256 credential for
+   this source, register its public credential through the official JRE ID UI,
+   and store only the dedicated private key in Cloudflare Secret Store. This is
+   a separate account-security change and requires an explicit owner review
+   before registration.
+2. **Direct JRE ID API renewal.** Reproduce the captured `AUTH_THREEKEY` then
+   `AUTH_FS2` challenge/assertion sequence with that credential. Preserve exact
+   RP ID, origin, challenge, allowed credential ID and `UV` flag; never replay a
+   captured assertion or reuse its challenge.
+3. **Fingerprint gate.** Test the captured Fingerprint2 2.1.5 value generation
+   first from WSL and then a plain Worker. If the API rejects non-browser
+   generation, use Container Chrome only for the short bootstrap and return the
+   same source-scoped session envelope to the Worker.
+4. **Expiry matrix.** Confirm failure after 20 minutes, 1 hour and the overnight
+   service stop. Do not keep the account alive with frequent requests merely to
+   avoid authentication.
+5. **Pagination boundary.** The live account currently fits on one 15-row page.
+   Retain the implemented earlier-date cursor and fail closed if one day alone
+   reaches 100 rows; a synthetic parser test is not proof of the server limit.
+6. **Google Wallet inventory and cross-check.** On the owned Android device,
    record only field names, visible row count, oldest/newest dates, whether
    amounts/balance-after/station/merchant/charge labels are present, and current
    balance. Compare the same recent transactions against Mobile Suica and list
    every omitted or coarsened field. Do not trigger charge, purchase or changes.
-6. **One-time Google Takeout test.** Owner-initiate a Wallet-only export, inspect
+7. **One-time Google Takeout test.** Owner-initiate a Wallet-only export, inspect
    whether Suica rows and balances are present, and record format/window/fields.
    Treat absence as route-specific, not proof Google holds no other device data.
-7. **JRE POINT live schema capture.** In the official Web UI, enter the second
+8. **JRE POINT live schema capture.** In the official Web UI, enter the second
    password manually and record field names, filters, row count, oldest date,
    category labels, pending state, point expiry fields and whether export exists.
    Compare at least one rail credit and one eligible Suica purchase with the SF
    history to quantify aggregation/loss.
-8. **JRE ID/JRE POINT replay gate.** Capture a browser-issued JRE ID/JRE POINT session and
+9. **JRE ID/JRE POINT replay gate.** Capture a browser-issued JRE ID/JRE POINT session and
    try one read-only point-history replay from the same machine, then OCI. Stop
    if Fraud Defense requires repeated interactive/browser state; do not work
    around account locks or security challenges.
-9. **Provenance and read-only app transport experiment.** Pull Mobile Suica 6.6.0
+10. **Provenance and read-only app transport experiment.** Pull Mobile Suica 6.6.0
    or the then-current version from an owned device with `adb shell pm path` and
    `adb pull`, verify the JR East signer, and compare split names/hashes with the
    third-party XAPK. On that same device, perform one already-intended history
@@ -653,20 +703,15 @@ longer-lived, lossy rewards path.
    the control. Determine whether `sfLog` is device input, its item count, and
    whether 401 causes exactly one token renewal/retry. Never record IDm, Cid,
    tokens, device identifiers, balances or transaction values.
-10. **Cloudflare last.** Test Cloudflare Container egress, then a minimal Worker
-   replay with an explicit Shift_JIS decoder. Promote only a read-only,
-   source-allowlisted client with byte-exact raw capture.
-
 ## Open questions
 
-- Exact JRE ID WebAuthn RP ID/origin, allowed credential ID and extensions, and
-  whether the referenced Bitwarden passkey is the matching live credential.
-- Whether `mnie`'s Bitwarden assertion builder satisfies JRE ID as-is or needs
-  additional client-data/authenticator-data fields and counter handling.
-- Actual Mobile Suica cookie lifetime and whether five-minute reads extend it.
-- Whether a JRE ID-issued Mobile Suica session is accepted by a plain fetch
-  replay, and whether it survives a move from the owner's machine to OCI or
-  Cloudflare egress.
+- Whether JRE ID accepts a standard P-256 assertion produced by a dedicated
+  Kogane software authenticator, including a monotonic sign counter and the
+  observed `UP|UV` flags.
+- Whether the 32-character Fingerprint2 value is validated only for format and
+  transaction consistency or against browser-side Fraud Defense state.
+- Exact server-side Mobile Suica idle lifetime and whether authenticated reads
+  extend it; the UI states 20 minutes, but no overnight survival is expected.
 - Whether the as-of date search returns more than 100 total rows inside 26 weeks
   on the current production account.
 - Exact Google Wallet Suica fields, visible count and oldest date on the owner's
