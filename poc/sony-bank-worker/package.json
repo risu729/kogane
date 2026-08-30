@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "bun test",
+    "smoke:live": "bun scripts/live-smoke.ts",
     "typecheck": "wrangler types && tsc --noEmit",
     "cf:types": "wrangler types",
     "cf:check": "wrangler deploy --dry-run",

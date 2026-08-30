@@ -22,7 +22,7 @@
     }
   ],
   "vars": {
-    "COLLECTOR_SCHEMA_VERSION": "sony-bank-worker-poc-v1"
+    "COLLECTOR_SCHEMA_VERSION": "sony-bank-worker-poc-v2"
   },
   "triggers": {
     "crons": ["0 21 * * *"]

@@ -370,9 +370,38 @@ data: branchNum, accountNum,
 `MessageCheck`として`POST https://igw.sonybank.jp/vcfb/vcfb02001`へ送る。通常menuの
 `POST /custom-web00/jada/debit-sso/login`も同じ外部入口へ遷移する。
 
-Koganeへ追加するには、現在のbank sessionからSSO dataを発行し、値を保存せずigwへ渡し、
-SSO後の一覧/detail/pagination通信を本人操作で1回観測する。外部card基盤のread endpointが
-通常HTTPで再生できることを確認するまで、預金collectorへ推測実装を混ぜない。
+2026-08-31にKuebikoで本人操作をlive captureし、続けてChrome Cookieを流用しない通常HTTP
+clientで再生した。銀行BFFから発行した一時SSO値を`igw.sonybank.jp`へ渡すと、ASCII hidden
+`r01`/`cc`を持つauto-submit HTMLが返り、これを`dc.sonybank.jp/p/sLogin/RW13F2010101`へ
+POSTすると`利用明細照会`が200になった。Linux BunとCloudflare Workerの標準`fetch()`で
+実装でき、Chrome profileやbrowser runtimeは不要である。
+
+card基盤はJSON APIではなくShift_JIS HTMLで、構造は次だった。
+
+- 直近15か月は`W131301.referenceDate`の15 optionとして返る。
+- 月切替はNablarch form POST `RW1313010201`。各月は一覧HTML全体として返る。
+- お取引日、ご利用通貨・金額、お取引通貨・金額、換算レート、海外取引経費、現地手数料、
+  お取引内容、承認番号、確定日、備考が一覧内にあり、別detail endpointはない。
+- `RW1313010301`は月別PDFのGET formだが、現PoCはHTMLだけを保存する。
+- 公開`/js/W131301.js`は利用明細月検索を10秒以内に連続送信すると後者を拒否する。
+  実口座でも高速走査の途中で403になり、10.25秒間隔では15か月すべて成功した。
+- 一時SSO値、`r01`、`cc`、Cookie/JSESSIONID、hidden input値はR2へ保存しない。月別HTMLは
+  `;jsessionid`を除去し、hidden inputのvalueを空にしてからprivate R2へ保存する。
+
+同じlive captureで普通預金取引履歴画面`/pages/ea/eaba0600/`も確認した。通貨はJPYに加え
+USD/EUR/GBP/AUD/NZD/CAD/CHF/HKD/ZAR/SEK、初回は
+`/eaba/cust-web/ordinary-deposit-transaction-histories`、2ページ目以降は
+`/eaba/cust-web/ordinary-deposit-transaction-histories-pager`、CSVは
+`/eaba/ordinary-deposit-transaction-histories/csv/load`である。3件単位、開始位置は
+1/4/7...、20か月を一度に指定しても200になった。2025-01-01〜2026-08-31の実口座smoke
+testでは外貨57 artifact、WALLET 15か月を含む102 artifactを生成し、保存前WALLET HTMLの
+session/hidden値残存は0件だった。明細の実値はdocumentationへ記録していない。
+
+同日のCloudflare Worker本番検証では2025-09-01〜2026-08-31を走査し、円10件、外貨6件・
+11ページ、WALLET 15か月を含む34 artifactをprivate R2へ保存してfailure 0だった。R2から
+月別HTMLを再取得し、日本語title、JSESSIONIDなし、非空hidden値なし、MessageCheckなしを確認した。
+EURなど取引0件の通貨でCSV生成を呼ぶとCloudflare egressだけ500になる場合があったため、
+0件では空CSVを省略し、残高と空の履歴JSONは保持する。取引がある通貨のCSVは保存する。
 
 ## 公式 APK / app と Web の役割
 

@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   CookieBag,
   parseCredential,
+  sanitizeWalletHtml,
   splitSetCookie,
+  walletMonths,
 } from "../src/sony-bank";
 
 describe("Sony Bank credential", () => {
@@ -32,5 +34,27 @@ describe("Sony Bank cookie handling", () => {
     jar.absorb(headers);
     expect(jar.names()).toEqual(["FSID", "ct1"]);
     expect(jar.header()).toContain("FSID=a");
+  });
+});
+
+describe("Sony Bank WALLET HTML", () => {
+  test("extracts months without retaining session values", () => {
+    const html = `
+      <form name="nablarch_form3" method="post">
+        <select name="W131301.referenceDate">
+          <option value="20260831">2026年8月(当月分)</option>
+          <option value="20260731">2026年7月</option>
+        </select>
+        <input type="hidden" name="nablarch_hidden" value="secret">
+      </form>
+      <a href="/p/example;jsessionid=session.WEB01">明細</a>
+    `;
+    expect(walletMonths(html)).toEqual([
+      { value: "20260831", label: "2026年8月(当月分)", submitName: "nablarch_form3_1" },
+      { value: "20260731", label: "2026年7月", submitName: "nablarch_form3_2" },
+    ]);
+    const sanitized = sanitizeWalletHtml(html);
+    expect(sanitized).not.toContain("session.WEB01");
+    expect(sanitized).not.toContain('value="secret"');
   });
 });
