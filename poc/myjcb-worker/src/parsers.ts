@@ -266,12 +266,16 @@ function stripTags(value: string): string {
 }
 
 function decodeHtml(value: string): string {
-  return value
-    .replaceAll("&amp;", "&")
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&quot;", "\"")
-    .replaceAll("&#39;", "'");
+  const entities: Readonly<Record<string, string>> = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: "\"",
+    "#39": "'",
+  };
+  return value.replace(/&(amp|lt|gt|quot|#39);/gu, (entity, name: string) =>
+    entities[name] ?? entity
+  );
 }
 
 function normalizeText(value: string): string {
