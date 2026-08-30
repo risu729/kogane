@@ -1,7 +1,17 @@
-import { decodeMyJcbHtml, MyJcbReadClient } from "./client";
+import { decodeMyJcbHtml, MyJcbReadClient, type ReadResponse } from "./client";
 import { CookieJar } from "./cookie-jar";
 import { loginWithOfficialProtection } from "./login-protection";
-import { parseCardInventory, parseStatementPeriods, redactedStatementHtml } from "./parsers";
+import {
+  discoverCreditExports,
+  extractCreditMenuLinkId,
+  extractGeneralJsonDiscriminator,
+  parseCardInventory,
+  parseCreditLedger,
+  parseCreditMenuMonths,
+  parsePastMonthAvailability,
+  parseStatementPeriods,
+  redactedStatementHtml,
+} from "./parsers";
 import { allowedUrl, MYJCB_ORIGIN } from "./policy";
 import type {
   ConnectionSummary,
@@ -25,49 +35,33 @@ export async function collectConnection(options: {
   try {
     const cards = parseCardInventory(login.mypageHtml);
     const client = new MyJcbReadClient(login.jar, login.userAgent);
-    const menu = await client.get(
-      "debit-menu",
-      new URLSearchParams({ link_id: "myj_main_debitDetailMenu" }),
-    );
-    const menuHtml = decodeMyJcbHtml(menu.body, menu.contentType);
-    const periods = parseStatementPeriods(menuHtml);
-    const sequences = periods
-      .flatMap((period) => period.sequence === undefined ? [] : [period.sequence])
-      .filter((value, index, values) => values.indexOf(value) === index)
-      .sort((left, right) => left - right);
-    const effectiveSequences = sequences.length > 0
-      ? sequences
-      : Array.from({ length: 15 }, (_, index) => index);
-    const artifacts: RawArtifact[] = [{
-      dataset: "debit-menu",
-      filename: "debit-menu.html",
-      body: redactedStatementHtml(menuHtml),
-      mediaType: "text/html; charset=utf-8",
-      statementState: "debit",
-    }];
-    for (const sequence of effectiveSequences) {
-      const detail = await client.get(
-        "debit-detail",
-        new URLSearchParams({ seq: String(sequence) }),
-      );
-      const detailHtml = decodeMyJcbHtml(detail.body, detail.contentType);
-      artifacts.push({
-        dataset: "debit-detail",
-        filename: `debit-detail-${String(sequence).padStart(2, "0")}.html`,
-        body: redactedStatementHtml(detailHtml),
-        mediaType: "text/html; charset=utf-8",
-        statementState: "debit",
-        period: periods.find((period) => period.sequence === sequence)?.label ?? `seq-${sequence}`,
-      });
+    const artifacts: RawArtifact[] = [];
+    let periodCount = 0;
+
+    const creditLinkId = extractCreditMenuLinkId(login.mypageHtml);
+    if (creditLinkId) {
+      const credit = await collectCredit(client, creditLinkId);
+      artifacts.push(...credit.artifacts);
+      periodCount += credit.periodCount;
     }
+    if (login.mypageHtml.includes("/iss-pc/member/debit/details/debitDetailMenu.html")) {
+      const debit = await collectDebit(client);
+      artifacts.push(...debit.artifacts);
+      periodCount += debit.periodCount;
+    }
+    if (artifacts.length === 0) {
+      throw new Error("MyJCB mypage exposed neither an allowlisted credit nor debit route");
+    }
+
     const discovery = {
       schemaVersion: 1,
+      bootstrapMode: options.credential.bootstrapMode,
       cards,
-      periods,
-      cookieNames: login.jar.names(),
+      periodCount,
+      cookieCount: login.jar.count(),
       limitations: [
-        "Root-card switching is discovery-only until its current POST contract is observed.",
-        "Credit confirmed/unconfirmed and CSV/PDF/OFX routes are disabled until live read-only observation.",
+        "Root-card switching remains discovery-only until its current POST contract is observed.",
+        "Passkey renewal remains human-operated; session bootstrap is short-lived.",
       ],
     };
     artifacts.push({
@@ -82,7 +76,7 @@ export async function collectConnection(options: {
         bootstrapMode: options.credential.bootstrapMode,
         status: "success",
         cardCount: Math.max(cards.length, 1),
-        periodCount: effectiveSequences.length,
+        periodCount,
         artifactCount: artifacts.length,
       },
       artifacts,
@@ -92,9 +86,260 @@ export async function collectConnection(options: {
   }
 }
 
+async function collectDebit(client: MyJcbReadClient): Promise<{
+  readonly periodCount: number;
+  readonly artifacts: RawArtifact[];
+}> {
+  const menu = await client.get(
+      "debit-menu",
+      new URLSearchParams({ link_id: "myj_main_debitDetailMenu" }),
+    );
+    const menuHtml = decodeMyJcbHtml(menu.body, menu.contentType);
+    const periods = parseStatementPeriods(menuHtml);
+    const sequences = periods
+      .flatMap((period) => period.sequence === undefined ? [] : [period.sequence])
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .sort((left, right) => left - right);
+    if (sequences.length === 0) {
+      throw new Error("MyJCB debit menu did not enumerate statement sequences");
+    }
+    const artifacts: RawArtifact[] = [{
+      dataset: "debit-menu",
+      filename: "debit-menu.html",
+      body: redactedStatementHtml(menuHtml),
+      mediaType: "text/html; charset=utf-8",
+      statementState: "debit",
+    }];
+    for (const sequence of sequences) {
+      const detail = await client.get(
+        "debit-detail",
+        new URLSearchParams({ seq: String(sequence) }),
+      );
+      const detailHtml = decodeMyJcbHtml(detail.body, detail.contentType);
+      artifacts.push({
+        dataset: "debit-detail",
+        filename: `debit-detail-${String(sequence).padStart(2, "0")}.html`,
+        body: redactedStatementHtml(detailHtml),
+        mediaType: "text/html; charset=utf-8",
+        statementState: "debit",
+        period: periods.find((period) => period.sequence === sequence)?.label ?? `seq-${sequence}`,
+      });
+    }
+    return { periodCount: sequences.length, artifacts };
+}
+
+async function collectCredit(
+  client: MyJcbReadClient,
+  linkId: string,
+): Promise<{ readonly periodCount: number; readonly artifacts: RawArtifact[] }> {
+  const menu = await client.get(
+    "credit-menu",
+    new URLSearchParams({ link_id: linkId }),
+  );
+  const menuHtml = decodeMyJcbHtml(menu.body, menu.contentType);
+  const initialMonths = parseCreditMenuMonths(menuHtml);
+  if (initialMonths.length === 0) {
+    throw new Error("MyJCB credit menu did not enumerate detailMonth values");
+  }
+  const artifacts: RawArtifact[] = [{
+    dataset: "credit-menu",
+    filename: "credit-menu.html",
+    body: redactedStatementHtml(menuHtml),
+    mediaType: "text/html; charset=utf-8",
+  }];
+
+  const firstMonth = initialMonths[0];
+  if (firstMonth === undefined) throw new Error("MyJCB credit menu was empty");
+  const detailCache = new Map<number, ReadResponse>();
+  const firstDetail = await fetchCreditDetail(client, firstMonth);
+  detailCache.set(firstMonth, firstDetail);
+  const firstHtml = decodeMyJcbHtml(firstDetail.body, firstDetail.contentType);
+  const discriminator = extractGeneralJsonDiscriminator(firstHtml);
+  const pastResponse = await client.postCreditPastJson({
+    generalJsonShikibetuId: discriminator,
+    id: "030100601",
+    detailMonth: firstMonth,
+  });
+  const pastJson = new TextDecoder("utf-8", { fatal: true }).decode(pastResponse.body);
+  const pastMonths = parsePastMonthAvailability(pastJson);
+  artifacts.push({
+    dataset: "credit-past-months",
+    filename: "credit-past-months.json",
+    body: pastResponse.body,
+    mediaType: "application/json",
+  });
+  const availableMonths = [...new Set([
+    ...initialMonths,
+    ...pastMonths.filter((month) => month.available).map((month) => month.detailMonth),
+  ])].sort((left, right) => left - right);
+
+  for (const detailMonth of availableMonths) {
+    const detail = detailCache.get(detailMonth) ?? await fetchCreditDetail(client, detailMonth);
+    const html = decodeMyJcbHtml(detail.body, detail.contentType);
+    const exports = discoverCreditExports(html, detailMonth);
+    const ledger = parseCreditLedger(
+      html,
+      detailMonth === 0 ? "unconfirmed" : "confirmed",
+    );
+    if (detailMonth === 0 && !ledger) {
+      throw new Error("MyJCB unconfirmed detail page omitted .detail-list-01");
+    }
+    const state = detailMonth === 0
+      ? "unconfirmed"
+      : ledger || exports.length > 0
+        ? "confirmed"
+        : "unknown";
+    const period = pastMonths.find((month) => month.detailMonth === detailMonth)?.settlementYM ??
+      `detailMonth-${detailMonth}`;
+    artifacts.push({
+      dataset: "credit-detail",
+      filename: `credit-detail-${String(detailMonth).padStart(2, "0")}.html`,
+      body: redactedStatementHtml(html),
+      mediaType: "text/html; charset=utf-8",
+      statementState: state,
+      period,
+    });
+    if (ledger) {
+      artifacts.push({
+        dataset: "credit-ledger",
+        filename: `credit-ledger-${String(detailMonth).padStart(2, "0")}.json`,
+        body: JSON.stringify({ schemaVersion: 1, detailMonth, period, ...ledger }),
+        mediaType: "application/json",
+        statementState: state,
+        period,
+      });
+    }
+    for (const exportKind of exports) {
+      artifacts.push(await fetchCreditExport(client, detailMonth, period, exportKind));
+    }
+  }
+  return { periodCount: availableMonths.length, artifacts };
+}
+
+async function fetchCreditDetail(
+  client: MyJcbReadClient,
+  detailMonth: number,
+): Promise<ReadResponse> {
+  return await client.get(
+    "credit-detail",
+    new URLSearchParams({ detailMonth: String(detailMonth), output: "web" }),
+  );
+}
+
+async function fetchCreditExport(
+  client: MyJcbReadClient,
+  detailMonth: number,
+  period: string,
+  kind: "csv" | "pdf" | "ofx",
+): Promise<RawArtifact> {
+  const operation = kind === "csv" ? "credit-csv" : kind === "pdf" ? "credit-pdf" : "credit-ofx";
+  const output = kind === "csv" ? "csv" : kind === "pdf" ? "pdf" : "money";
+  const response = await client.get(
+    operation,
+    new URLSearchParams({ detailMonth: String(detailMonth), output }),
+  );
+  validateCreditExport(kind, response.body);
+  const mediaType = kind === "csv"
+    ? "text/csv; charset=windows-31j"
+    : kind === "pdf"
+      ? "application/pdf"
+      : "application/x-ofx";
+  return {
+    dataset: `credit-${kind}`,
+    filename: `credit-${String(detailMonth).padStart(2, "0")}.${kind}`,
+    body: response.body,
+    mediaType,
+    statementState: "confirmed",
+    period,
+  };
+}
+
+function validateCreditExport(kind: "csv" | "pdf" | "ofx", body: ArrayBuffer): void {
+  const bytes = new Uint8Array(body);
+  if (kind === "pdf") {
+    const header = new TextDecoder("ascii").decode(bytes.slice(0, 8));
+    if (!header.startsWith("%PDF-")) throw new Error("MyJCB PDF export had an invalid signature");
+    return;
+  }
+  if (kind === "ofx") {
+    const header = new TextDecoder("ascii").decode(bytes.slice(0, 256));
+    if (!/(?:OFXHEADER:|<OFX>)/u.test(header)) {
+      throw new Error("MyJCB OFX export had an invalid header");
+    }
+    return;
+  }
+  const csv = new TextDecoder("shift_jis", { fatal: true }).decode(body);
+  validateCreditCsvText(csv);
+}
+
+export function validateCreditCsvText(csv: string): void {
+  const expectedHeaders = [
+    "ご利用者",
+    "カテゴリ",
+    "ご利用日",
+    "ご利用先など",
+    "ご利用金額(￥)",
+    "支払区分",
+    "今回回数",
+    "訂正サイン",
+    "お支払い金額(￥)",
+    "国内／海外",
+    "摘要",
+    "備考",
+  ];
+  const foundHeader = csv.split(/\r?\n/u)
+    .filter((line) => line.trim() !== "")
+    .some((line) => csvColumns(line).join("\0") === expectedHeaders.join("\0"));
+  if (!foundHeader) {
+    throw new Error("MyJCB CSV export had an unknown 12-column schema");
+  }
+}
+
+function csvColumns(line: string): string[] {
+  const values: string[] = [];
+  let value = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === "\"") {
+      if (quoted && line[index + 1] === "\"") {
+        value += "\"";
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (character === "," && !quoted) {
+      values.push(value);
+      value = "";
+    } else {
+      value += character;
+    }
+  }
+  if (quoted) throw new Error("MyJCB CSV export contained an unterminated quote");
+  values.push(value);
+  return values;
+}
+
 export function parseCredentials(value: string): MyJcbCredential[] {
   const parsed: unknown = JSON.parse(value);
-  if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > 16) {
+  if (!Array.isArray(parsed)) {
+    throw new Error("MYJCB_CONNECTIONS_JSON must be a JSON array");
+  }
+  return parseCredentialItems(parsed);
+}
+
+export function parseCredentialSecrets(values: readonly string[]): MyJcbCredential[] {
+  const items: unknown[] = [];
+  for (const value of values) {
+    const parsed: unknown = JSON.parse(value);
+    if (Array.isArray(parsed)) items.push(...parsed);
+    else items.push(parsed);
+  }
+  return parseCredentialItems(items);
+}
+
+function parseCredentialItems(parsed: readonly unknown[]): MyJcbCredential[] {
+  if (parsed.length === 0 || parsed.length > 16) {
     throw new Error("MYJCB_CONNECTIONS_JSON must contain 1 to 16 connections");
   }
   const ids = new Set<string>();

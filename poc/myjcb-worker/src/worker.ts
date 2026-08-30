@@ -1,5 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
-import { collectConnection, parseCredentials } from "./collector";
+import { collectConnection, parseCredentialSecrets } from "./collector";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import type {
   CollectionFailure,
@@ -7,10 +6,11 @@ import type {
   ConnectionSummary,
   StoredArtifact,
 } from "./types";
-import { HumanRequiredError } from "./types";
+import { HumanRequiredError, StopConditionError } from "./types";
 
 type MyJcbEnv = Env & {
   readonly MYJCB_CONNECTIONS_JSON?: string;
+  readonly MYJCB_CONNECTION_SECRET_NAMES?: string;
   readonly ADMIN_TRIGGER_TOKEN?: string;
 };
 
@@ -27,7 +27,7 @@ export default {
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
-    if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
+    if (!await authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
     const result = await runCollection(env, "manual");
@@ -56,10 +56,7 @@ async function runCollection(
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const prefix = runPrefix(startedAt, runId);
-  const credentials = parseCredentials(requiredSecret(
-    env.MYJCB_CONNECTIONS_JSON,
-    "MYJCB_CONNECTIONS_JSON",
-  ));
+  const credentials = parseCredentialSecrets(connectionSecretValues(env));
   const artifacts: StoredArtifact[] = [];
   const connections: ConnectionSummary[] = [];
   const failures: CollectionFailure[] = [];
@@ -130,17 +127,54 @@ async function runCollection(
   return { manifest, manifestKey };
 }
 
-function authorized(request: Request, expected: string | undefined): boolean {
+async function authorized(request: Request, expected: string | undefined): Promise<boolean> {
   const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
   if (!provided || !expected) return false;
-  const left = new TextEncoder().encode(provided);
-  const right = new TextEncoder().encode(expected);
-  return left.byteLength === right.byteLength && timingSafeEqual(left, right);
+  const encoder = new TextEncoder();
+  const [left, right] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(provided)),
+    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
+  ]);
+  if (!hasTimingSafeEqual(crypto.subtle)) {
+    throw new Error("Worker runtime omitted crypto.subtle.timingSafeEqual");
+  }
+  return crypto.subtle.timingSafeEqual(left, right);
+}
+
+function hasTimingSafeEqual(
+  subtle: SubtleCrypto,
+): subtle is SubtleCrypto & {
+  timingSafeEqual(left: ArrayBuffer, right: ArrayBuffer): boolean;
+} {
+  return typeof Reflect.get(subtle, "timingSafeEqual") === "function";
 }
 
 function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
+}
+
+function connectionSecretValues(env: MyJcbEnv): string[] {
+  const names = env.MYJCB_CONNECTION_SECRET_NAMES
+    ?.split(",")
+    .map((name) => name.trim())
+    .filter(Boolean) ?? [];
+  if (names.length === 0) {
+    return [requiredSecret(env.MYJCB_CONNECTIONS_JSON, "MYJCB_CONNECTIONS_JSON")];
+  }
+  if (names.length > 16 || new Set(names).size !== names.length) {
+    throw new Error("MYJCB_CONNECTION_SECRET_NAMES must contain 1 to 16 unique names");
+  }
+  return names.map((name) => {
+    if (!/^MYJCB_ACCOUNT_[A-Z0-9_]{1,48}_JSON$/u.test(name)) {
+      throw new Error("MYJCB connection secret name is invalid");
+    }
+    const value = Reflect.get(env, name);
+    if (typeof value !== "string" || value === "") {
+      throw new Error(`Missing Worker secret binding: ${name}`);
+    }
+    return value;
+  });
 }
 
 function failure(
@@ -157,9 +191,10 @@ function failure(
 }
 
 function publicError(error: unknown): string {
-  const message = error instanceof Error ? error.message : "Unknown error";
-  return message
-    .replace(/Bearer\s+[^\s,;]+/giu, "Bearer [redacted]")
-    .replace(/(password|userId|cookie|csrf|token|otp)=?[^\s,;]+/giu, "$1=[redacted]")
-    .slice(0, 300);
+  if (error instanceof HumanRequiredError) return "Human authentication is required";
+  if (error instanceof StopConditionError) return "Collector stopped on an unknown upstream state";
+  if (error instanceof SyntaxError || error instanceof TypeError) {
+    return "Collector configuration or response schema is invalid";
+  }
+  return "Collector operation failed";
 }

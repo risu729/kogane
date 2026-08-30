@@ -1,0 +1,31 @@
+{
+  "jsonrpc": "2.0",
+  "result": {
+    "errId": "0",
+    "errMessage": "",
+    "detailPastJsonInfo": [
+      {
+        "detailAvailableFlag": "0",
+        "detailMonth": "9",
+        "payAmount": "0",
+        "payAmountDispFlag": "0",
+        "settlementYM": "202511"
+      },
+      {
+        "detailAvailableFlag": "1",
+        "detailMonth": "10",
+        "payAmount": "1234",
+        "payAmountDispFlag": "1",
+        "settlementYM": "2025年10月お支払い分"
+      },
+      {
+        "detailAvailableFlag": true,
+        "detailMonth": 13,
+        "payAmount": "5678",
+        "payAmountDispFlag": "1",
+        "settlementYM": "202507"
+      }
+    ]
+  },
+  "id": "030100601"
+}

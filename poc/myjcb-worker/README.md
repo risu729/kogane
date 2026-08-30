@@ -2,19 +2,19 @@
 
 MyJCBの公式WebをCloudflare WorkersのScheduled handlerから読み、取得時の公式HTMLと取得manifestをprivate R2へ追記保存する独立PoCである。`mnie`は利用せず、Okuraのコードも取り込んでいない。
 
-これは**未deploy・未実認証**のPoCである。現時点で実装済みの取得経路は、password loginが許されるMyJCB IDのlogin bootstrapと、公開実装で現行性が具体的に示されたJCBデビット通常／差額明細だけである。クレジット確定・未確定明細、公式CSV/PDF/OFX、おまとめカード切替はroute/actionのlive read-only観測が完了するまで明示的に無効である。
+Worker PoC自体は**未deploy・未auth test**である。一方、2026-08-31に利用者が専用Kuebiko Chromeで第一のMyJCB IDへpasskey loginし、クレジット確定／未確定HTML、過去月JSON、公式CSV/PDF/OFXをread-only観測した。raw credential、WebAuthn assertion、cookie、明細値、file hashはcommitしていない。観測済みcontractを実装したが、Worker/Browser Runで成功したことを意味しない。
 
 ## なぜBrowser Runを使うか
 
 `/Login`はloadごとに`/apl/login-prot.js?init`とephemeral seed付き`?async`を読み、公式JavaScriptがlogin formへ動的field/cookieを追加する。Workersは取得した任意JavaScriptを`eval`/`new Function`で実行する環境ではなく、保護scriptを手書きで再実装すると追従性と安全境界が悪化する。このPoCは`src/login-protection.ts`だけでCloudflare Browser Runを起動し、公式page内で公式scriptをそのまま実行する。
 
-login成功後はbrowser cookieとUser-Agentを`CookieJar`へ移し、`src/policy.ts`のmethod/origin/path/query allowlistを通るGETだけを通常のWorker `fetch`で取得する。Browserはconnectionごとに閉じる。動的script source、credential、protected POST body、cookie値、mypage HTMLはR2へ保存しない。
+login成功後はbrowser cookieとUser-Agentを`CookieJar`へ移し、`src/policy.ts`のmethod/origin/path/query allowlistを通るGETと過去月列挙JSON-RPC POSTだけを通常のWorker `fetch`で取得する。Browserはconnectionごとの`finally`で閉じる。動的script source、credential、protected login POST body、cookie値、mypage HTMLはR2へ保存しない。
 
 現段階ではContainerを追加しない。Browser Runで公式scriptを実ブラウザ実行でき、Worker内にR2/Cron/read clientを残せるためである。今後、Browser Runからのpassword loginだけが環境要因で拒否され、同一script/profileでContainer Chromeが再現性を持って成功することがsanitized live testで確認された場合に限り、login bootstrapだけを最小Containerへ移す。
 
 ## 認証とsecret
 
-Worker secret `MYJCB_CONNECTIONS_JSON`は1〜16 connectionを持つ。
+小規模PoCではWorker secret `MYJCB_CONNECTIONS_JSON`に1〜16 connectionを置ける。
 
 ```json
 [
@@ -50,6 +50,16 @@ wrangler secret put MYJCB_CONNECTIONS_JSON
 wrangler secret put ADMIN_TRIGGER_TOKEN
 ```
 
+Cloudflare Workersのenvironment variable/secretは1値5 KB上限である。複数IDやcomplete cookie jarを一つのJSONへ集約すると超過するため、実装は`MYJCB_CONNECTION_SECRET_NAMES`にcomma区切りのsecret binding名を置き、各`MYJCB_ACCOUNT_<NAME>_JSON`へ一接続ずつ分割する経路も持つ。
+
+```sh
+wrangler secret put MYJCB_CONNECTION_SECRET_NAMES
+wrangler secret put MYJCB_ACCOUNT_JCB_W_JSON
+wrangler secret put MYJCB_ACCOUNT_RECRUIT_JSON
+```
+
+ただし一接続のpasskey session cookie jar自体が5 KBを超える可能性がある。現`session` modeはJSON全体が5 KB以内の場合だけのPoCで、確実に動くとは断言しない。実用案は、local sync CLIがcookie envelopeをclient-side AES-GCMで暗号化してprivate R2へ置き、Worker secretには小さいwrapping keyだけを置く構成である。このencrypted-envelope実装とkey rotationは本PRに含まず、5 KB超sessionはblockerとして停止する。
+
 secret値をsource、`wrangler.jsonc`、`.dev.vars`のcommit、shell引数、stdout、manifestへ入れない。passkey登録済みIDは公式仕様上ID/password loginを使えないため`bootstrapMode=password`で試行せず、本人bootstrap後の`session`を使う。session expiry後は`human-required`となり、passkeyの完全無人renewalは未解決のままである。
 
 ## read-only policy
@@ -61,14 +71,19 @@ active allowlistは次だけである。
 | login page | GET | `/Login` | protection scriptを含む公式login page bootstrap |
 | login submit | POST | `/iss-pc/member/user_manage/Login` | Browser内でform actionを検査して一回だけsubmit |
 | mypage | GET | `/iss-pc/member/mypage/mypage.html` | login landing/session確認 |
+| credit menu | GET | `/iss-pc/member/details_inquiry/detailMenu.html?link_id=<observed>` | 初期`detailMonth`列挙 |
+| credit detail | GET | `/iss-pc/member/details_inquiry/detail.html?detailMonth=0..17&output=web` | 確定／未確定HTML snapshot |
+| older availability | POST JSON-RPC | `/iss-pc/general_json/member/details_inquiry/detailPastJson.json` | hidden discriminatorを使いavailable月だけ列挙 |
+| credit CSV/OFX | GET | `detail.html?detailMonth=N&output=csv|money` | 確定月の公式export |
+| credit PDF | GET | `detailDbPdf.html?detailMonth=N&output=pdf` | 確定月の公式statement PDF |
 | debit menu | GET | `/iss-pc/member/debit/details/debitDetailMenu.html?link_id=myj_main_debitDetailMenu` | period列挙 |
 | debit detail | GET | `/iss-pc/member/debit/details/debitDetail.html?seq=0..14` | 通常／差額明細 |
 
 以下はread candidateだが**無効**である。
 
 - 既存おまとめIDの表示切替POST
-- クレジット確定／未確定明細
-- 公式CSV/PDF/OFX download
+- `detailReplaceJson`（read-likeだがledger取得に不要）
+- notice用`detailNewspdf.html`（statement PDFではない）
 
 これらはHTTP methodがPOSTだから一律禁止しているのではない。現在のorigin/path、field名と型、CSRF/session token、期待response、redirect、read semanticsが本人操作のsanitized観測で未確認だからである。確認後も個別operationとして固定allowlistへ追加し、未知fieldやredirectでは停止する。
 
@@ -92,9 +107,11 @@ scheduled runは同じconnectionを自動再試行しない。次回の日次run
 
 `parseCardInventory`は各独立connectionのmypage内に存在する既存card candidateをcard番号や氏名ではなく`card-001`等のlocal indexと一般商品名allowlistへ正規化する。現PoCは切替を行わないため、current root以外はdiscovery candidateに留まる。複数connection間の同一性やおまとめ関係を推測しない。
 
-`parseStatementPeriods`はmenuの`seq=0..14`と表示labelを列挙する。menuからseqを得られない場合も、公開実装で観測された15 cycleを0〜14として走査する。これはデビット経路のfallbackで、クレジットの17か月表示や15か月exportへ一般化しない。
+デビットはmenuに実在する`seq=0..14`だけを列挙する。parse不能時は停止し、0〜14をblind走査しない。
 
-保存artifactには`statementState`として`debit`、将来のcredit pathには`confirmed`または`unconfirmed`を付ける。未確定はmutable snapshotであり、確定artifactを上書きしない。CSV/PDF/OFXの種類はpage metadataから発見できても、download actionがlive確認されるまでrequestしない。
+クレジット初期menuでは観測された月だけを取得し、`detailPastJson`の9〜17候補は`detailAvailableFlag=true`だけを追加する。例ではolder 9候補中10/13だけがavailableだったため、全offset総当たりをしない。API failureやhidden `generalJsonShikibetuId`欠落時は停止する。JSON-RPCは`method=execute`、`params=[{generalJsonShikibetuId}]`、official JSと同じ`0301006`＋2桁counter形のIDを使う。
+
+`detailMonth=0`はmutable `unconfirmed` snapshotで、exportなしの`.detail-list-01`をHTML＋parsed JSONとして保存する。確定月も同ledger componentを持ち、CSV/OFXと突合できる。export linkがその月のHTMLに実在する場合だけCSV/PDF/OFXを取得し、notice PDFは除外する。CSVはmetadata行の後に現れるexact 12-column headerを探し、CP932 bytesをそのまま保存する。
 
 ## R2 layout
 
@@ -102,6 +119,15 @@ scheduled runは同じconnectionを自動再試行しない。次回の日次run
 raw/myjcb/YYYY/MM/DD/<run-id>/
   manifest.json
   <connection-id>/
+    credit-menu.html
+    credit-past-months.json
+    credit-detail-00.html
+    credit-ledger-00.json
+    credit-detail-10.html
+    credit-ledger-10.json
+    credit-10.csv
+    credit-10.pdf
+    credit-10.ofx
     debit-menu.html
     debit-detail-00.html
     ...
@@ -124,9 +150,11 @@ bun run typecheck
 bun run cf:check
 ```
 
-このPRでは`wrangler deploy`、R2 bucket作成、secret投入、実credential testを行わない。
+このPRでは`wrangler deploy`、R2 bucket作成、secret投入、Worker実credential testを行わない。Kuebikoでは利用者がpasskey loginとread/exportを実施し、sanitized route/schema/formatだけを設計根拠にした。
 
-deploy時に作成するpersistent resourceはWorker `kogane-myjcb-collector-poc`、private R2 bucket同名、Cron `0 21 * * *`、上記2 secretである。Browser Run sessionはconnection完了時にcloseし、永続profileを作らない。廃棄時は先にR2 object一覧と必要artifactの退避を確認してからWorkerを削除し、最後にR2 bucketを削除する。bucket削除は金融sourceを回復不能にするため自動cleanup scriptにはしない。
+deploy時に作成するpersistent resourceはWorker `kogane-myjcb-collector-poc`、private R2 bucket同名、Cron `0 21 * * *`、admin/connection secret群である。Browser Run sessionはconnection完了時にcloseし、永続profileを作らない。廃棄時は先にR2 object一覧と必要artifactの退避を確認してからWorkerを削除し、最後にR2 bucketを削除する。bucket削除は金融sourceを回復不能にするため自動cleanup scriptにはしない。
+
+Cronとmanual triggerのoverlap lockは未実装である。同一IDの同時login/readを避けるため、Durable Object lockまたはQueueによる一接続一実行の直列化をdeploy/merge前要件とする。本PRのPoCをそのままscheduled運用しない。
 
 ## synthetic test
 
@@ -134,19 +162,20 @@ deploy時に作成するpersistent resourceはWorker `kogane-myjcb-collector-poc
 
 ## public prior art boundary
 
-公開AGPL-3.0実装[youseiushida/Okura](https://github.com/youseiushida/Okura)の2026-08-31時点commit `bbf11e032aba4a380009508e91954361a3f9d658`を、login protectionの存在、origin/path、cookie＋User-Agent維持、デビット15 cycleの現行性を照合するためだけに読んだ。source、DOM runtime、parser、test fixtureは転用していない。詳細は`THIRD_PARTY_NOTICES.md`を参照。
+公開AGPL-3.0実装[youseiushida/Okura](https://github.com/youseiushida/Okura)は、PR #24の2026-08-26調査時点commit `afc6057fba78b5bfd6364654548fbfd91c76692a`と、PoC実装時の2026-08-31 commit `bbf11e032aba4a380009508e91954361a3f9d658`を区別して記録する。後者をlogin protection、origin/path、cookie＋User-Agent維持、デビット15 cycleの現行性照合にだけ使った。Okuraのvalidatorはlogout link＋`toNaviDebitDetailMenu`を要求するためcredit-only valid sessionを失敗扱いにし得る。またprotection runtimeの`node:vm`は[Cloudflare Workersではnon-functional stub](https://developers.cloudflare.com/workers/runtime-apis/nodejs/#non-functional-stub-modules)なので、plain Workerへ移植せずBrowser Runを使う。source、DOM runtime、parser、test fixtureは転用していない。詳細は`THIRD_PARTY_NOTICES.md`を参照。
 
 ## 未確認事項
 
 - Browser Run egress/profileでpassword loginが完了するか
 - 各実IDがpasswordかpasskeyか、秘密の合い言葉/OTPが出る条件
 - 現行mypageのcard enumeration DOMとおまとめ切替contract
-- credit confirmed/unconfirmedの現行path/schema
-- CSV/PDF/OFX action、encoding、field、zero-row response、card/subcard列
+- 複数の実ID/issuerでcredit path、ledger DOM、CSV/PDF/OFX schemaが同一か
+- zero-row CSV/PDF/OFX response、card/subcard列、取消/返金表現
 - debit menu/detailの全issuer互換性、状態label、0件/取消/差額表現
 - session idle/absolute TTLとcookie rotation
 - Browser Runで得たcookieを通常Worker `fetch`へ移した際、TLS/connection/egress差によってsession replayが拒否されないか
 - login protection vendorとchange cadence
+- encrypted R2 session envelope、key rotation、overlap lock/Queue
 
 以上は実値を保存しない一回限りのKuebiko/live observationで更新し、unknown時は実装を推測で拡張しない。
 

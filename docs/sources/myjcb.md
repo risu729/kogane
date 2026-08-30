@@ -3,7 +3,7 @@
 - 調査日: 2026-08-26（Australia/Sydney）
 - 対象: 同一の MyJCB／関連バックエンドで参照できる個人カード群。現インベントリでは JCB W、リクルートカード（JCB）、みずほ JCB デビット、京銀 JCB デビットを中心とする。
 - 対象外: Visa／Mastercard 版リクルートカード、JCB ブランドでも MyJCB 非対応のカード、銀行口座そのものの入出金明細、カード申込・支払・設定変更などの write 操作。
-- 調査制約: 未ログインの公式公開情報、公開レスポンス、公開コードだけを使用した。口座 ID、MyJCB ID、カード番号、氏名、残高、利用額、加盟店、Cookie、OTP、秘密の合い言葉等の実値は取得・保存していない。ログイン後の live 検証は未実施。
+- 調査制約: 2026-08-26 の初期調査は未ログインの公式公開情報、公開レスポンス、公開コードだけを使用した。2026-08-31 に利用者が専用 Kuebiko Chrome で第一の MyJCB ID へ通常の passkey login を行い、read-only route と response schema／format を sanitization して追記した。口座 ID、MyJCB ID、カード番号、氏名、残高、利用額、加盟店、Cookie、WebAuthn assertion、OTP、秘密の合い言葉等の実値は Git／公開文書へ保存していない。
 
 ## 結論
 
@@ -115,6 +115,7 @@ passkey 登録済み ID は password login を使えないため、Okura の ID/
   8. validation 後だけ、cookie の name/value/domain/path/expiry/security 属性と User-Agent を session snapshot として capture/restore する。restore 後は mypage GET で再検証し、expired/unexpected/403 を同一視しない。
   9. `GET /iss-pc/member/debit/details/debitDetailMenu.html?link_id=myj_main_debitDetailMenu`、次いで `GET /iss-pc/member/debit/details/debitDetail.html?seq=N`。15 cycle を HTML parse する。
 - この実装は **デビット画面専用**で、JCB W／リクルートカードのクレジット明細、確定 CSV／PDF／OFX、おまとめ ID 切替、passkey、秘密の合い言葉／OTP は実装していない。成功を公式保証や全 issuer 互換性の証拠にしない。
+- Okura の authenticated-session validator は logout link と`toNaviDebitDetailMenu`を成功条件に含むため、credit-only valid sessionを失敗扱いにする。クレジット専用 ID の validator としてそのまま一般化できない。また protection runtime は Deno Worker の隔離に加えて`node:vm`と手製 DOM shim を使う。[Cloudflare公式のNode.js compatibility表](https://developers.cloudflare.com/workers/runtime-apis/nodejs/#non-functional-stub-modules)では`node:vm`はimportできてもunderlying APIが動作しないnon-functional stubである。したがってplain Workerへそのまま移植できず、本PoCは公式pageをBrowser Runで実行し、必要時のみContainerを検討する境界を選んだ。
 - Okura に refresh/renew endpoint はない。cookie＋User-Agent を再利用できる間だけ session を restore し、失効時は再 login が必要である。login protection の動的 field を CSRF token と断定せず、post-login form の hidden token/local state も snapshot していない。
 
 ### 古い実装
@@ -128,20 +129,21 @@ passkey 登録済み ID は password login を使えないため、Okura の ID/
 | 機能 | 現時点の具体的候補 | 確度と次の確認 |
 |---|---|---|
 | デビット read | Okura の `debitDetailMenu.html?link_id=...` → `debitDetail.html?seq=N` | 現行公開 code。みずほ/京銀 issuer と passkey 未登録 ID での live 成功は未確認 |
-| クレジット read | 旧実装の `/iss-pc/member/details_inquiry/detail.html?detailMonth=N&output=web` | 2015 code の historical candidate。現行画面で link/form action を観測するまで送信しない |
-| PDF export | 旧実装の `/iss-pc/member/details_inquiry/detailDbPdf.html?detailMonth=N&output=pdf` | historical candidate。現行 native PDF control の request method/path/CSRF を DevTools で確認 |
-| CSV export | 旧実装の `detail.html?detailMonth=N&output=csv` | historical candidate。公式には CSV が現存するが path/encoding/field は未確定 |
-| OFX export | 公式 UI 上の存在は確認済み、公開 code の現行 path は未発見 | control 操作時の method/path/content-type/Content-Disposition だけを redacted 観測 |
+| クレジット read | `/iss-pc/member/details_inquiry/detailMenu.html?link_id=...` → `detail.html?detailMonth=N&output=web` | 2026-08-31 の本人操作で現行 GET を確認。初期 HTML は `0..8`、過去月 API は `9..17` のうち account ごとの available 月だけを返した |
+| 過去月 availability | `POST /iss-pc/general_json/member/details_inquiry/detailPastJson.json` | `detailAPI.js` と本人操作で JSON-RPC contract を確認。hidden discriminator 欠落／API failure では停止し、blind scan しない |
+| PDF export | `/iss-pc/member/details_inquiry/detailDbPdf.html?detailMonth=N&output=pdf` | 2026-08-31 に確定月の GET と `%PDF-1.4` signature を確認。`detailNewspdf.html` は notice であり statement ではない |
+| CSV export | `detail.html?detailMonth=N&output=csv` | 2026-08-31 に GET、Windows-31J/CP932、metadata 行後の exact 12-column header を確認 |
+| OFX export | `detail.html?detailMonth=N&output=money` | 2026-08-31 に GET、OFX 1.x credit-card statement group を確認 |
 | おまとめ済みカード列挙 | mypage の「ID切替」→表示カード切替画面 | 公式 UI の存在は確認済み。カード名/ID/番号を保存せず route と一般 issuer/type だけ確認 |
 | おまとめ済み ID 切替 | 既存切替画面の card-select action | 金融取引ではなく session の current-card context 変更候補。method、hidden field、CSRF、戻り先を確認してから 1 回だけ replay |
 | おまとめ設定追加/解除・初期表示変更 | 設定画面 | write。transport 調査で見えても呼ばない |
 
-クレジット/export の旧 path は current contract ではない。現行 HTML/JS または本人操作の DevTools 観測から同じ path が再確認できるまでは候補に留める。`detailMonth`、`seq`、card selector 等の実値は保存せず、parameter 名と型だけを記録する。
+クレジット read/export path は 2026-08-31 に current contract として再確認した。確認は第一 ID の一時点に限るため、別 issuer／ID では link、schema、export control を毎回検査する。`detailMonth` は HTML／availability API に実在する値だけを取得し、card selector や financial value は公開記録へ保存しない。
 
 ### CSRF と session renewal の確認点
 
 - login の 6 個以上の動的 field は protection script が生成するが、用途は公開されていない。CSRF、bot signal、integrity data のどれかに決め打ちしない。
-- post-login のクレジット export、OFX、ID切替が POST の場合は、hidden input/header/cookie の **存在、名称の hash、長さ、rotation timing** だけを確認し、値は保存しない。GET でも state-changing action と同じ token を共有する場合は replay を止める。
+- クレジット CSV／PDF／OFX は現行 GET と確認した。ID 切替など未確認 POST は、hidden input/header/cookie の **存在、名称の hash、長さ、rotation timing** だけを確認し、値は保存しない。GET でも state-changing action と同じ token を共有する場合は replay を止める。
 - cookie snapshot は authenticated validation 後に限定し、User-Agent を必ず対で再利用する。Okura の固定 Chrome 140 UA は将来古くなるため、保護 script を生成した実 browser/approved UA との一致を live で検証する。
 - cookie の Expires/Max-Age、idle timeout、absolute timeout、ID切替前後の cookie rotation、logout 後の invalidation を metadata として確認する。protection cookie の長い Max-Age を authenticated session 寿命とみなさない。
 - refresh/renew endpoint は未発見。自動的な silent renewal を仮定せず、session expiry は user-assisted reauthentication とする。passkey 登録済み ID では password replay を試さず、既存 browser/app bootstrap から session capture できるかだけを検討する。
@@ -256,8 +258,8 @@ A は公開 API がないため不適、B は非公式 HTML と動的 login prot
 
 - 実インベントリ各カードの正確な発行会社表示と、JCB W／Recruit JCB／みずほ JCB デビット／京銀 JCB デビット間で現在設定済みのおまとめ切替グラフ。
 - みずほ JCB デビットと京銀 JCB デビットで passkey が実際に提示されるか、Bitwarden passkey が Web／アプリで動作するか。
-- クレジット側で historical `details_inquiry` path が現存するか、PDF/CSV/OFX の現行 method/path、post-login CSRF/session token、cookie TTL、idle/absolute timeout、renewal、既存おまとめ ID 切替 transport。
-- 公式 export のカード別列、OFX の fitid、CSV encoding、行数上限、ゼロ件月の response。
+- 別 issuer／ID でも同じ `details_inquiry` path、ledger DOM、PDF/CSV/OFX schema が使えるか。post-login cookie TTL、idle/absolute timeout、renewal、既存おまとめ ID 切替 transport。
+- 公式 export のカード別列、OFX の fitid、行数上限、ゼロ件月の response。第一 ID の CSV encoding と 12 列 header は確認済み。
 - デビット差額明細の公式な全状態一覧と、負額・取消・cashback の issuer 別表現。
 - 公開実装 Okura が本番の各 issuer／passkey 未登録 ID で成功しているか。コードの新しさは live 成功の証明ではない。
 - 認証 host の WAF／bot-management vendor。Cloudflare は公開 `www` で確認したが、`my` の製品名と Akamai 利用は未確認。
@@ -265,33 +267,43 @@ A は公開 API がないため不適、B は非公式 HTML と動的 login prot
 
 ## Worker PoC（2026-08-31）
 
-`poc/myjcb-worker`に、既存collectorをreuseしない独立Cloudflare Workers PoCを追加した。これは未deploy・未実認証であり、現段階のcoverageはpassword login bootstrapとJCBデビット明細の既知GETだけである。
+`poc/myjcb-worker`に、`mnie`やOkuraのsourceをreuseしない独立Cloudflare Workers PoCを追加した。Worker自体は**未deploy・未auth test**であり、実credentialを投入していない。一方、利用者のKuebiko sessionでは第一IDへの実passkey loginとread/exportを観測しており、そのroute、field名、DOM shape、formatだけを実装へ反映した。raw credential、WebAuthn assertion、cookie、明細値、取得file、hashはcommitしていない。
 
-構成は二段階である。
+構成は次の二段階である。
 
-1. `login-protection.ts`がCloudflare Browser Runで公式`/Login`を開き、公式`login-prot.js`をpage内で実行する。named `userId`/`password`だけをselectorで入力し、submit直前にmethod/origin/pathを検査する。passkey、OTP、秘密の合い言葉、CAPTCHA、Access Deniedを検出したら人へhand-offし、繰り返さない。
-2. login landingが既知mypageであることを確認後、cookieとUser-Agentだけをmemory上のcookie jarへ移す。通常Worker `fetch`は固定allowlistのGETだけを行い、デビットmenuと`seq=0..14`を取得する。Browserはconnectionごとに閉じる。
+1. `login-protection.ts`だけがCloudflare Browser Runを使って公式`/Login`を開き、公式`login-prot.js`をpage内で実行する。`form[name=loginForm]`内のnamed `userId`/`password`だけを入力し、submit直前にmethod/origin/pathを検査する。passkey、OTP、秘密の合い言葉、CAPTCHA、Access Deniedではretryせず`human-required`とする。
+2. 既知mypageへ到達したらcomplete cookie jarと同じUser-Agentをmemoryへ移し、通常Worker `fetch`でstrict allowlistのreadだけを行う。クレジットmenu/detail/過去月JSON-RPC/CSV/PDF/OFXとデビットmenu/detailを対象とし、Browserはconnectionごとの`finally`で閉じる。
 
-Workers内でdownloadした任意JavaScriptをevalせず、保護scriptを手書き移植しない。Browser Runで公式scriptを実行できるため、現段階でContainerは不要と判断した。Browser Runだけが環境判定で失敗し、同じ公式flowがContainer Chromeで再現性を持って成功した場合に限りlogin bootstrapの最小Container化を再検討する。
+Workers内でdownloadした任意JavaScriptを`eval`せず、保護scriptを手書き移植しない。Browser Runで公式scriptを実行できるため、現段階でContainerは追加しない。Browser Runだけが環境判定で失敗し、同じ公式flowがContainer Chromeで再現性を持って成功した場合に限りlogin bootstrapの最小Container化を再検討する。
 
-active allowlistはlogin page GET、既知login form POST、mypage GET、デビットmenu GET、デビットdetail GETだけである。クレジット確定・未確定、CSV/PDF/OFX、おまとめ表示切替は、本人操作で現行contractをsanitized観測するまで`DEFERRED_READ_ROUTES`としてdisabledにした。HTTP methodだけでread/writeを判断せず、各POST/downloadを個別にmethod/path/field/CSRF/redirect/responseまで確認してから追加する。
+### Kuebikoで確認したlogin境界
 
-R2は`raw/myjcb/YYYY/MM/DD/<run-id>/<connection-id>/...`でappend-onlyに保存する。login/mypage/protection source、credential、protected POST body、cookie値は保存しない。明細HTMLはtoken類と16桁card番号をredactし、UTF-8へ正規化してから保存する。`manifest.json`はSHA-256、dataset、state、period、failure metadataだけを持つ。`connection-id`は利用者が付けるpseudonymで、MyJCB IDやcard番号を使わない。
+- URLは`https://my.jcb.co.jp/Login`。password formは`POST /iss-pc/member/user_manage/Login`で、named controlsは`userId`、`password`、`screenId`、`loginRouteId`、`un`、`pcSpScreenSwitchUrl`だった。
+- rendered DOMにはnameのないtext/password decoy candidateもあったため、input typeやindexでは選ばない。
+- `/apl/login-prot.js?init`、loadごとに変わるseed付き`?async`、version付きpasskey/NNL SDK assetsがloadされた。source/version/seedはhard-codeしない。
+- 初期画面の通常選択肢にpasskeyがあるため、その文字だけではchallengeと判定しない。第一IDの本人loginは`POST /iss-pc/member/user_manage/PasskeyLogin`（200）、`POST .../userLoginPasskeyServiceStatusCommunication.html`（200）、`POST .../userLoginPasskeyAuthCheckCommunication.html`（200）、`POST .../userPasskeyLoginRelay.html`（302）、`GET /iss-pc/member/mypage/mypage.html`（200）の順だった。WebAuthn assertionはprivate captureにのみ存在する。
+- passkey flowのcookieはstable application cookie、`rp1..rp33`型、random-looking per-session名が混在した。完全なjarと属性を扱う必要はあるが、個々の名前は相関telemetryになるためdiscovery、manifest、logへ保存しない。
+- 第一IDはpasskeyだったため、password-only unattended loginでは全IDを覆えない。PoCの`session` modeは本人bootstrap後の短命cookie＋User-Agent replayであり、passkey renewalの自動化ではない。
 
-日次実行は`0 21 * * *`のCloudflare CronからWorker `scheduled()`を直接呼ぶ。GitHub Actions cronは使用しない。secretは`MYJCB_CONNECTIONS_JSON`と手動trigger用`ADMIN_TRIGGER_TOKEN`で、source/configへ値をcommitしない。connections arrayの各要素は独立したID/session/R2 namespaceであり、最初のIDや一つのおまとめloginが全IDを包含すると仮定しない。
+### Kuebikoで確認したクレジットread/export
 
-bootstrapは`password`と`session`を明示する。password modeは公式formをBrowser Runで処理する。passkey登録済みIDはpassword login不可なので、本人が既存browserで作った短命sessionをcookie＋同一User-Agentとしてsecret投入し、mypage検証後にread-only replayできる。ただしこれはpasskey自動化ではなく、session失効後の無人renewalは未解決である。実装、stop条件、R2 layout、cleanup前提、synthetic test、未確認事項は`poc/myjcb-worker/README.md`に集約した。
+- 初期menuは`detailMenu.html?link_id=...`、明細は`detail.html?detailMonth=N&output=web`。第一IDの初期HTMLは`0..8`を列挙した。
+- `detailAPI.js`はdetail pageの`input:hidden[name=generalJsonShikibetuId]`を読み、`detailPastJson.json`へ`application/json`でJSON-RPC POSTする。request fieldsは`jsonrpc`、`method`、`params`、`id`、contractは`method=execute`、`params=[{generalJsonShikibetuId}]`、IDは`0301006`＋2桁counter（初回`030100601`）。responseは`result.errId`、`errMessage`、`detailPastJsonInfo[]`を持ち、item fieldsは`detailAvailableFlag`、`detailMonth`、`payAmount`、`payAmountDispFlag`、`settlementYM`だった。hidden欠落／API failureでは停止し、推測値や`0..17`をblind scanしない。
+- 第一IDの過去月responseは9候補（`detailMonth=9..17`）のうち2件（`10`、`13`）だけがavailableだった。collectorは`detailAvailableFlag=true`だけを初期menu月へ追加する。
+- 別の`detailReplaceJson.json`はrequest parameterに`generalJsonShikibetuId`、`simeYmd`、`payAmount`、response itemに`changeOperationLimitDate`、`detailInquiryURL`、`fixFlag`、`newestFlag`、`payAmount`、`payAmountDispFlag`、`payHowChangeEnableFlag`、`settlementDate`を持つUI/payment-display metadataだった。ledger取得には不要なのでallowlistしない。
+- 未確定`detailMonth=0`はexportなしで、`.detail-list-01`の`.head`とrepeated `.content`をparseする。summary labelsは`ご利用日`、`ご利用先など`／`支払区分`、`ご利用金額`、expanded labelsは`今回のお支払い金額`、`摘要`、`今回回数`、`備考`、`訂正サイン`だった。
+- 確定月HTMLにも同ledger componentがあり、summary labelsは`ご利用日`、`ご利用先など`／`支払区分`、`今回のお支払い金額`、expanded labelsは`ご利用金額`、`摘要`、`今回回数`、`備考`、`訂正サイン`だった。CSV/OFXと突合できる。
+- 確定月のGET exportは`detailDbPdf.html?...&output=pdf`、`detail.html?...&output=csv`、`detail.html?...&output=money`。CSVはCP932で、先頭metadata行ではなく後続行に`ご利用者`、`カテゴリ`、`ご利用日`、`ご利用先など`、`ご利用金額(￥)`、`支払区分`、`今回回数`、`訂正サイン`、`お支払い金額(￥)`、`国内／海外`、`摘要`、`備考`のexact 12-column headerがある。PDFは`%PDF-1.4`、OFXは1.xの`CREDITCARDMSGSRSV1`／`CCSTMTRS`／`BANKTRANLIST`／`LEDGERBAL`を確認した。`detailNewspdf.html`はnoticeなので除外する。
+- `/iss-pc/member/detailsinvoice/detailsInvoiceList.html`は別のinvoice surfaceで、第一IDでは上記statement export controlsを持たなかった。明細取得routeとして混同しない。
 
-### 公開login pageのKuebiko観測（2026-08-31 JST）
+### credential、R2、schedulerの境界
 
-credentialをsubmitしないlogged-out状態だけを、専用Kuebiko Chrome `MyJCB Kuebiko capture`で再確認した。最初に通常Chromeで開いたtest tabはlogin前に閉じ、以後の認証観測先と混ぜていない。Kuebiko capture run `2026-08-30T18-44-02`ではpage openに伴ってrequest/body storeが更新されたが、raw captureはlocal/privateのままcommitしない。
+設定は複数の独立`connections[]`を持ち、IDごとにcredential/session/result/R2 namespaceを分離する。一つのおまとめloginが全IDを含むとは仮定しない。小規模fallbackは`MYJCB_CONNECTIONS_JSON`だが、[Workers limit](https://developers.cloudflare.com/workers/platform/limits/)ではsecret/variable一値が5 KBなので、`MYJCB_CONNECTION_SECRET_NAMES`と一接続一secretの`MYJCB_ACCOUNT_<NAME>_JSON`も実装した。
 
-- URLは`https://my.jcb.co.jp/Login`、titleは`JCBの会員専用WEBサービス「MyJCB（マイジェーシービー）」`。
-- login選択肢としてID/passwordとpasskeyの両方が初期画面に表示される。したがって、単にpage textに`passkey`があることをchallenge判定に使わない。password submit後にmypageへ到達しなかった場合だけpasskey要求をhuman-requiredとして分類する。
-- password formは`name=loginForm`、`POST /iss-pc/member/user_manage/Login`。named controlとして`userId`、`password`、`screenId`、`loginRouteId`、`un`、`pcSpScreenSwitchUrl`を確認した。
-- rendered DOMにはvisible named controlとは別に、nameのないtext/password inputも存在した。protection/decoy candidateとして扱い、input indexや`input[type=password]`全体を埋めない。PoCは`form[name=loginForm]`内の`input[name=userId]`と`input[name=password]`だけを対象にし、form actionを直前検査する。
-- 30 scriptを観測し、`/apl/login-prot.js?init`、loadごとに変わるseed付き`/apl/login-prot.js?async...`、`login2.js?ver=20240628`、`config_login.js?ver=20251110`、`passkey_common_login.js?ver=20260309`、`passkeyLogin.js?ver=20251110`を含んだ。
-- NNL App SDK 9.2.0の`fido-client.js`、`fido-method-ui.js`、`oob-ui.js`、`otp-method-ui.js`、`external-auth-method-ui.js`もloadされる。これらの存在だけで実IDにOTP/FIDOが要求されるとは判定しない。
-- cookie、token、credential、account/card identifier、financial value、response body、ephemeral seed/dynamic field値は記録していない。
+一接続のfull cookie jarだけで5 KBを超え得るため、`session` modeは5 KB以内だけのPoCである。実用案はlocal sync CLIでclient-side AES-GCM暗号化したsession envelopeをprivate R2へ置き、Worker secretには小さいwrapping keyだけを置く構成だが、本PRでは未実装であり5 KB超sessionはblockerとする。
 
-この観測は、保護scriptをstatic bundleとして固定せず公式page内で実行する設計、named selector、passkey初期選択肢と実challengeの分離を支持する。authenticated route/schemaの観測は、Kuebikoで本人が通常loginしたsessionについてmethod/path/status/content-type/schema field名だけをsanitizedに記録する別段階とする。
+R2は`raw/myjcb/YYYY/MM/DD/<run-id>/<connection-id>/...`へsource-preserving artifact、normalized ledger、manifestをappend-only保存する。login/mypage/protection source、credential、protected POST body、cookie値は保存しない。HTMLはtoken候補と16桁card番号をredactしてから保存し、runtime errorはtyped codeと固定public messageに正規化する。discoveryにはcookie名を残さずcountだけを置く。
+
+日次実行は`0 21 * * *`のCloudflare CronからWorker `scheduled()`を直接呼び、GitHub Actions cronを使わない。手動`POST /trigger`のBearerはSHA-256で固定長化してから`crypto.subtle.timingSafeEqual`で比較する。ただしCron/manual overlap lockは未実装で、同一IDの同時login/readを防ぐDurable Object lockまたはQueue直列化をdeploy/merge前要件とする。
+
+実装、stop条件、R2 layout、cleanup前提、synthetic test、未確認事項は`poc/myjcb-worker/README.md`に集約した。公開AGPL prior artの観測は、PR #24調査時点のOkura commit `afc6057fba78b5bfd6364654548fbfd91c76692a`とPoC照合時点の`bbf11e032aba4a380009508e91954361a3f9d658`を区別し、protocol確認だけに使った。

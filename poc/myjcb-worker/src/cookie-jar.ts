@@ -53,8 +53,8 @@ export class CookieJar {
     return values.join("; ");
   }
 
-  names(): string[] {
-    return [...this.#cookies.values()].map((cookie) => cookie.name).sort();
+  count(): number {
+    return this.#cookies.size;
   }
 
   #set(cookie: StoredCookie, requestUrl: URL): void {
@@ -98,6 +98,7 @@ function parseSetCookie(value: string, requestUrl: URL): StoredCookie | undefine
   let domain = requestUrl.hostname.toLowerCase();
   let path = defaultPath(requestUrl.pathname);
   let secure = false;
+  let maxAgeAt: number | undefined;
   let expiresAt: number | undefined;
   for (const segment of segments) {
     const [rawName, ...rest] = segment.split("=");
@@ -107,13 +108,21 @@ function parseSetCookie(value: string, requestUrl: URL): StoredCookie | undefine
     if (attribute === "path" && attributeValue.startsWith("/")) path = attributeValue;
     if (attribute === "secure") secure = true;
     if (attribute === "max-age" && /^-?\d+$/u.test(attributeValue)) {
-      expiresAt = Date.now() + Number(attributeValue) * 1000;
+      maxAgeAt = Date.now() + Number(attributeValue) * 1000;
     } else if (attribute === "expires") {
       const parsed = Date.parse(attributeValue);
       if (!Number.isNaN(parsed)) expiresAt = parsed;
     }
   }
-  return { name, value: cookieValue, domain, path, secure, ...(expiresAt ? { expiresAt } : {}) };
+  const effectiveExpiry = maxAgeAt ?? expiresAt;
+  return {
+    name,
+    value: cookieValue,
+    domain,
+    path,
+    secure,
+    ...(effectiveExpiry === undefined ? {} : { expiresAt: effectiveExpiry }),
+  };
 }
 
 function normalizeDomain(value: string): string {

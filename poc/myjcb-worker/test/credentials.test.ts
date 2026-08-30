@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { parseCredentials } from "../src/collector";
+import {
+  parseCredentials,
+  parseCredentialSecrets,
+  validateCreditCsvText,
+} from "../src/collector";
 
 describe("MyJCB connection configuration", () => {
   test("keeps independent password and session bootstraps separate", () => {
@@ -44,5 +48,42 @@ describe("MyJCB connection configuration", () => {
         password: "two",
       },
     ]))).toThrow("unique");
+  });
+
+  test("combines one-account-per-secret payloads", () => {
+    const credentials = parseCredentialSecrets([
+      JSON.stringify({
+        connectionId: "split-one",
+        bootstrapMode: "password",
+        userId: "one",
+        password: "one",
+      }),
+      JSON.stringify({
+        connectionId: "split-two",
+        bootstrapMode: "password",
+        userId: "two",
+        password: "two",
+      }),
+    ]);
+    expect(credentials.map((item) => item.connectionId)).toEqual(["split-one", "split-two"]);
+  });
+
+  test("finds the 12-column CSV header after metadata lines", () => {
+    const header = [
+      "ご利用者",
+      "カテゴリ",
+      "ご利用日",
+      "ご利用先など",
+      "ご利用金額(￥)",
+      "支払区分",
+      "今回回数",
+      "訂正サイン",
+      "お支払い金額(￥)",
+      "国内／海外",
+      "摘要",
+      "備考",
+    ].join(",");
+    expect(() => validateCreditCsvText(`お支払い日,2026年1月1日\r\n${header}\r\n`))
+      .not.toThrow();
   });
 });

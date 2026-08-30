@@ -6,6 +6,12 @@ export type ReadOperation =
   | "login-page"
   | "login-submit"
   | "mypage"
+  | "credit-menu"
+  | "credit-detail"
+  | "credit-csv"
+  | "credit-ofx"
+  | "credit-pdf"
+  | "credit-past-json"
   | "debit-menu"
   | "debit-detail";
 
@@ -29,6 +35,41 @@ const ACTIVE_ALLOWLIST: readonly RoutePolicy[] = [
     pathname: "/iss-pc/member/mypage/mypage.html",
   },
   {
+    operation: "credit-menu",
+    method: "GET",
+    pathname: "/iss-pc/member/details_inquiry/detailMenu.html",
+    query: { link_id: /^[A-Za-z0-9_-]{1,128}$/u },
+  },
+  {
+    operation: "credit-detail",
+    method: "GET",
+    pathname: "/iss-pc/member/details_inquiry/detail.html",
+    query: { detailMonth: /^(?:[0-9]|1[0-7])$/u, output: /^web$/u },
+  },
+  {
+    operation: "credit-csv",
+    method: "GET",
+    pathname: "/iss-pc/member/details_inquiry/detail.html",
+    query: { detailMonth: /^(?:[0-9]|1[0-7])$/u, output: /^csv$/u },
+  },
+  {
+    operation: "credit-ofx",
+    method: "GET",
+    pathname: "/iss-pc/member/details_inquiry/detail.html",
+    query: { detailMonth: /^(?:[0-9]|1[0-7])$/u, output: /^money$/u },
+  },
+  {
+    operation: "credit-pdf",
+    method: "GET",
+    pathname: "/iss-pc/member/details_inquiry/detailDbPdf.html",
+    query: { detailMonth: /^(?:[0-9]|1[0-7])$/u, output: /^pdf$/u },
+  },
+  {
+    operation: "credit-past-json",
+    method: "POST",
+    pathname: "/iss-pc/general_json/member/details_inquiry/detailPastJson.json",
+  },
+  {
     operation: "debit-menu",
     method: "GET",
     pathname: "/iss-pc/member/debit/details/debitDetailMenu.html",
@@ -43,13 +84,7 @@ const ACTIVE_ALLOWLIST: readonly RoutePolicy[] = [
 ];
 
 export interface DeferredRoute {
-  readonly capability:
-    | "root-card-switch"
-    | "credit-confirmed"
-    | "credit-unconfirmed"
-    | "credit-csv"
-    | "credit-pdf"
-    | "credit-ofx";
+  readonly capability: "root-card-switch";
   readonly enabled: false;
   readonly reason: string;
 }
@@ -59,31 +94,6 @@ export const DEFERRED_READ_ROUTES: readonly DeferredRoute[] = [
     capability: "root-card-switch",
     enabled: false,
     reason: "The current POST action and state fields have not been observed live.",
-  },
-  {
-    capability: "credit-confirmed",
-    enabled: false,
-    reason: "The current credit statement path and schema have not been observed live.",
-  },
-  {
-    capability: "credit-unconfirmed",
-    enabled: false,
-    reason: "Unconfirmed statements are mutable and the current path is unverified.",
-  },
-  {
-    capability: "credit-csv",
-    enabled: false,
-    reason: "The official CSV form action and CSRF fields have not been observed live.",
-  },
-  {
-    capability: "credit-pdf",
-    enabled: false,
-    reason: "The official PDF download action has not been observed live.",
-  },
-  {
-    capability: "credit-ofx",
-    enabled: false,
-    reason: "The official OFX download action has not been observed live.",
   },
 ];
 
