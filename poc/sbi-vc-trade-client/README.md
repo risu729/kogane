@@ -11,7 +11,7 @@
 - `getCashflowList`: 日本円の入出金履歴。現行UIと同じ`historical=true`だけをpagination
 - `tradeReportList`: 報告書metadata一覧。download eventは含めない
 
-このPoCはloginを実装しない。loginにはCloudflare TurnstileとpasskeyまたはID/password + MFAが必要で、認証済みsessionの成立とread replayを分離して検証するためである。session fileは一時的なCookie headerとWeb clientの`secureKey`だけを持ち、Git外・mode 600で用意する。値をshell引数や標準出力へ置かない。
+このPoCはloginを実装しない。loginにはCloudflare TurnstileとpasskeyまたはID/password + MFAが必要で、認証済みsessionの成立とread replayを分離して検証するためである。session fileは一時的なCookie headerとWeb clientの`secureKey`だけを持ち、Git外・mode 600で用意する。値をshell引数や標準出力へ置かない。読み取り時は`O_NOFOLLOW`で一度だけfileを開き、同じdescriptorでregular-file/mode検査とreadを行うため、pathの`stat`と再openの間に差し替えられるTOCTOUを作らない。
 
 ```json
 {
