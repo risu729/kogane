@@ -1,0 +1,145 @@
+# V Point Worker PoC
+
+Vポイント本体の残高・期限bucket・SMBC由来内訳・最大3年の履歴、およびVマネー残高・
+最大3年の履歴を、認証済みVポイントMy Page sessionでfirst-party JSON APIから取得し、
+raw responseとmanifestをprivate R2へ保存するPoCである。VポイントPayとVpass明細は別の
+サービス・認証・台帳であるため含めない。
+
+## Liveで確認したデータソース
+
+2026-08-31、Kogane Capture Chromeのユーザー口座で次を確認した。値、加盟店、Cookie、
+会員番号、個人情報はこのrepositoryへ保存していない。
+
+- `POST https://mypage.tsite.jp/api/balance_info`
+  - `results.common[]`: `point`, `expiration`, `point_type`
+  - `results.store[]`: store限定の期限bucket
+  - `results.tmoney`: Vマネー残高・有効期限。live口座では空objectだった
+- `POST https://mypage.tsite.jp/api/tpoint_history`
+  - multipart `page`, `get_graph`, `sort`と全履歴filter
+  - live口座では`total=149`。page 1-4は各30件、page 5は29件、終端のpage 6は0件で、
+    すべてHTTP 200 / application status `0000`を確認した。PoCはtotalへ達したpage 5で停止する。
+- `POST https://mypage.tsite.jp/api/smfg_point`
+  - `results.get_point.point_smbc`, `point_smcc`
+- `POST https://mypage.tsite.jp/api/tmoney_history`
+  - multipart `page`, `sort`と、利用・チャージ・取消・失効・移行・返金の全履歴filter
+  - Vポイント履歴と同じMy Page sessionを使用する
+  - live口座ではHTTP 200 / application status `0000`、`total=0`, `history=[]`だった
+
+[Vポイント公式FAQ](https://ssl.help.tsite.jp/faq/show/25463?site_domain=qa-tsite)は、
+Vマネー履歴を同じMy Pageで確認でき、履歴上限は過去3年と説明している。また、
+[公式チャージ案内](https://t-point.tsite.jp/finance/tmoney/charge/ptcharge/)もVマネーと
+三井住友カードのVポイントPayを明確に区別する。Vマネーは別の電子マネー台帳だが、この
+collectorの認証境界とデータソースには含まれるため、同じrunで収集する。
+
+## 認証とsession自動更新
+
+My Page APIは未認証でもHTTP 200を返すが、application statusは`0010`となる。認証済みは
+`0000`。2026-08-31、Kogane Capture Chromeの通信とブラウザなしのlive requestを照合し、
+V会員番号とメール認証からsessionを生成できることを確認した。passwordは使わない。
+
+loginのfirst-party form chainは次のとおり。各画面からhidden fieldとStruts tokenを引き継ぎ、
+responseのWindows-31Jをdecodeする。
+
+```text
+GET  /tm/pc/login/STKIp0018001.do
+POST /tm/pc/login/STKIp0002010.do
+POST /tm/pc/login/STKIp0002011.do  (V会員番号)
+POST /tm/pc/login/STKIp0002040.do
+POST /tm/pc/login/STKIp0002042.do  (メール送信)
+POST /tm/pc/login/STKIp0002045.do  (メール認証コード)
+POST https://mypage.tsite.jp/api/user_info
+```
+
+メール認証コードは連続したlive mailで4桁、5桁、6桁を確認したため、固定長と仮定しない。
+メール記載の有効時間は1分である。最後の`POST /api/user_info`は省略できず、ここでMy Page用
+`SESSIONID`が発行される。これを呼ばずに`/api/balance_info`へ進むと`0010`となる。
+
+本番PoCでは、SQLite Durable Objectの単一instanceが次を保持する。
+
+- 有効なMy Page session Cookie
+- メール待機中だけ、最大2分のserializable challenge state
+
+sessionがない、または`0010`になったrunは新しい認証メールを要求する。対象アドレスだけの
+Cloudflare Email Routing ruleが同じWorkerの`email()` handlerへ配送し、handlerは元メールを
+従来のGmail宛へ転送したうえでコードを抽出する。Durable Objectがloginを完了すると、email
+event内でcollectionを再実行する。通常のcatch-all転送ruleは変更していない。
+
+Cookie、会員番号、認証コード、メール本文、challenge stateをsource、log、R2、manifestへ
+保存しない。Cookieとchallenge stateはDurable Object storage内だけに置く。
+
+Web画面のV会員番号はlogin後もmask表示だったが、collection API自体は会員番号をrequest
+fieldとして要求しない。会員番号はsession再生成専用のWorker secretである。
+
+ログイン画面はCloudflare越しでも通常表示でき、APIも匿名curlへ`0010`を返すため、今回の
+観測ではbot challengeが主障害ではない。標準Workers `fetch()`でlogin、メール認証、JSON
+collectionまで完了し、browser、TLS impersonation、Containerは不要だった。
+
+## 保存内容
+
+各runは以下へ保存する。
+
+```text
+raw/v-point/YYYY/MM/DD/<run-id>/
+  balance-info.json
+  smfg-point.json
+  history-page-0001.json
+  ...
+  vmoney-history-page-0001.json
+  ...
+  collection-summary.json
+  manifest.json
+```
+
+Vポイント履歴とVマネー履歴は毎run、`filter_date`を空にして公開上限の最大3年を全page
+走査する。現在はVポイント149件を5 request、Vマネー0件を1 requestで取得できるため、
+Queueは不要である。
+
+## 開発とデプロイ
+
+```bash
+bun install
+bun test
+bun run typecheck
+bun run cf:check
+```
+
+必要なCloudflare resources/secrets:
+
+- R2 bucket: `kogane-vpoint-collector-poc`
+- SQLite Durable Object: `VPointSession`
+- Email Routing rule: `kogane-vpoint-auth`（対象アドレスだけをWorkerへ配送）
+- secret: `VPOINT_MEMBER_NUMBER`
+- secret: `VPOINT_EMAIL_RECIPIENT`
+- secret: `VPOINT_EMAIL_FORWARD_TO`
+- secret: `ADMIN_TRIGGER_TOKEN`
+- Cron: `15 21 * * *`（毎日06:15 JST）
+
+manual triggerは`POST /trigger`に`Authorization: Bearer <ADMIN_TRIGGER_TOKEN>`を付ける。
+認証メール待ちはHTTP 202と`reauthenticationPending: true`、通常収集はHTTP 200、実エラーは
+HTTP 502を返す。`GET /health`は秘密値や口座データを返さない。
+
+2026-08-31のproduction verificationでは、初回triggerが認証メールを要求し、Email Workerが
+受信・Gmail転送・session生成・再収集を完了した。成功runは履歴149件を5 pageで走査し、
+8 artifactとfailure 0のmanifestをR2へ保存した。続くmanual triggerも追加メールなしで
+Durable Objectのsessionを再利用し、同じ149件・5 page・8 artifactで成功した。
+
+同日のVマネー追加後のproduction verificationでは、同じメール認証とMy Page sessionで
+`/api/tmoney_history`もHTTP 200 / application status `0000`となった。live口座のVマネー
+履歴は0件だったが、空のpage 1 raw responseを欠落させず保存した。Vポイント149件・5 page、
+Vマネー0件・1 page、9 artifact、failure 0のv2 manifestをR2から再読して確認した。
+
+検証環境を削除するときは、次を一組として扱う。
+
+1. Email Routing rule `kogane-vpoint-auth`
+2. Worker `kogane-vpoint-collector-poc`（Cron、secrets、`VPointSession` namespaceを含む）
+3. R2 bucket `kogane-vpoint-collector-poc`
+
+先にEmail Routing ruleを削除または無効化し、その後WorkerとR2を削除する。catch-all ruleは
+削除対象ではない。
+
+## VポイントPayとapp archive
+
+VポイントPayはプリペイドJPY残高・authorization・settlement・refund・chargeの別台帳で、
+正本は`com.smbc_card.vpoint`アプリである。このWeb PoCではAPKを取得・decompileしていない。
+将来app解析を行う場合、binary/decompiled/decrypted artifactは既存private Android archive
+repositoryへ保存し、Koganeにはprovenance、hash、再現手順、sanitize済みのschemaだけを置く。

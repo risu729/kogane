@@ -1,0 +1,52 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kogane-vpoint-collector-poc",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "exports": {
+    "VPointSession": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "VPOINT_SESSION",
+        "class_name": "VPointSession"
+      }
+    ]
+  },
+  "r2_buckets": [
+    {
+      "binding": "SNAPSHOTS",
+      "bucket_name": "kogane-vpoint-collector-poc"
+    }
+  ],
+  "vars": {
+    "COLLECTOR_SCHEMA_VERSION": "vpoint-worker-poc-v2"
+  },
+  "secrets": {
+    "required": [
+      "VPOINT_MEMBER_NUMBER",
+      "VPOINT_EMAIL_RECIPIENT",
+      "VPOINT_EMAIL_FORWARD_TO",
+      "ADMIN_TRIGGER_TOKEN"
+    ]
+  },
+  "triggers": {
+    "crons": ["15 21 * * *"]
+  }
+}
