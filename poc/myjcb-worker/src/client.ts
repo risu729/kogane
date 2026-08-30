@@ -27,6 +27,7 @@ export class MyJcbReadClient {
     const headers = new Headers({
       Accept: "text/html,application/xhtml+xml,application/octet-stream;q=0.8,*/*;q=0.5",
       "Accept-Language": "ja,en-US;q=0.8,en;q=0.6",
+      Referer: refererFor(operation),
       "User-Agent": this.userAgent,
     });
     if (cookie) headers.set("Cookie", cookie);
@@ -58,6 +59,17 @@ export class MyJcbReadClient {
       body,
     };
   }
+}
+
+function refererFor(operation: Exclude<ReadOperation, "login-submit">): string {
+  if (operation === "debit-detail") {
+    return allowedUrl(
+      "debit-menu",
+      new URLSearchParams({ link_id: "myj_main_debitDetailMenu" }),
+    ).href;
+  }
+  if (operation === "debit-menu") return allowedUrl("mypage").href;
+  return allowedUrl("login-page").href;
 }
 
 export function decodeMyJcbHtml(body: ArrayBuffer, contentType: string): string {
