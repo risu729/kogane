@@ -37,6 +37,11 @@ export default {
       connectionCount: result.manifest.connections.length,
       artifactCount: result.manifest.artifacts.length,
       failureCount: result.manifest.failures.length,
+      blockers: result.manifest.connections.flatMap((connection) =>
+        connection.blocker === undefined
+          ? []
+          : [{ connectionId: connection.connectionId, code: connection.blocker }]
+      ),
       manifestKey: result.manifestKey,
     }, { status: result.manifest.status === "failed" ? 502 : 200 });
   },
@@ -88,6 +93,12 @@ async function runCollection(
       });
     } catch (error) {
       const humanRequired = error instanceof HumanRequiredError;
+      console.warn(JSON.stringify({
+        event: "myjcb-connection-failed",
+        connectionId: credential.connectionId,
+        bootstrapMode: credential.bootstrapMode,
+        code: publicError(error),
+      }));
       connections.push({
         connectionId: credential.connectionId,
         bootstrapMode: credential.bootstrapMode,
@@ -191,8 +202,8 @@ function failure(
 }
 
 function publicError(error: unknown): string {
-  if (error instanceof HumanRequiredError) return "Human authentication is required";
-  if (error instanceof StopConditionError) return "Collector stopped on an unknown upstream state";
+  if (error instanceof HumanRequiredError) return `human-required:${error.reason}`;
+  if (error instanceof StopConditionError) return error.code;
   if (error instanceof SyntaxError || error instanceof TypeError) {
     return "Collector configuration or response schema is invalid";
   }

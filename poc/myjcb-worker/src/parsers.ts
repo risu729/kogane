@@ -173,30 +173,59 @@ export function parseCreditLedger(
   const document = parse(html);
   const ledger = findElements(document, (element) => hasClass(element, "detail-list-01"))[0];
   if (!ledger) return undefined;
-  const header = directElementChildren(ledger).find((element) => hasClass(element, "head"));
+  const header = findElements(ledger, (element) => hasClass(element, "head"))[0];
+  const hasEmptyMarker = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u
+    .test(nodeText(ledger));
   const headers = state === "unconfirmed"
     ? ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"]
     : ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"];
   const headerText = header ? normalizeText(nodeText(header)) : "";
-  if (headers.some((label) => !headerText.includes(label))) {
-    throw new StopConditionError(`MyJCB ${state} ledger headers changed`);
+  const requiredCoreHeaders = hasEmptyMarker
+    ? ["ご利用日", "ご利用先など"]
+    : ["ご利用日", "ご利用先など", "支払区分"];
+  if (requiredCoreHeaders.some((label) => !headerText.includes(label))) {
+    throw new StopConditionError(`MyJCB ${state} ledger headers changed`, "credit-ledger-headers");
   }
   const expandedLabels = state === "unconfirmed"
     ? ["今回のお支払い金額", "摘要", "今回回数", "備考", "訂正サイン"]
     : ["ご利用金額", "摘要", "今回回数", "備考", "訂正サイン"];
   const rows = directElementChildren(ledger)
     .filter((element) => hasClass(element, "content"))
-    .map((row) => {
-      const itemCell = directElementChildren(row)
-        .find((element) => hasClass(element, "item-cell"));
+    .flatMap((row) => {
+      const itemCell = findElements(row, (element) => hasClass(element, "item-cell"))[0];
       if (!itemCell) {
-        throw new StopConditionError(`MyJCB ${state} ledger row omitted item-cell`);
+        console.warn(JSON.stringify({
+          event: "myjcb-credit-ledger-row-shape",
+          state,
+          rowClasses: safeClassNames(row),
+          childClasses: directElementChildren(row).flatMap(safeClassNames),
+        }));
+        throw new StopConditionError(
+          `MyJCB ${state} ledger row omitted item-cell`,
+          "credit-ledger-item-cell",
+        );
       }
       const summaryCells = directElementChildren(itemCell)
         .filter((element) => hasClass(element, "cell"))
         .map((element) => normalizeText(nodeText(element)));
+      if (
+        hasEmptyMarker &&
+        summaryCells.length === 1 &&
+        directElementChildren(itemCell).some((element) => hasClass(element, "w-100per"))
+      ) {
+        return [];
+      }
       if (summaryCells.length !== 4) {
-        throw new StopConditionError(`MyJCB ${state} ledger row changed its direct cell count`);
+        console.warn(JSON.stringify({
+          event: "myjcb-credit-ledger-cell-shape",
+          state,
+          summaryCellCount: summaryCells.length,
+          childClasses: directElementChildren(itemCell).flatMap(safeClassNames),
+        }));
+        throw new StopConditionError(
+          `MyJCB ${state} ledger row changed its direct cell count`,
+          "credit-ledger-cell-count",
+        );
       }
       const itemMore = findElements(row, (element) => hasClass(element, "item-more"))[0];
       const list = itemMore
@@ -209,9 +238,16 @@ export function parseCreditLedger(
           if (value !== undefined) expanded[label] = value;
         }
       }
-      return { summaryCells, expanded };
+      return [{ summaryCells, expanded }];
     });
   return { state, headers, rows };
+}
+
+function safeClassNames(element: HtmlElement): string[] {
+  return (element.attrs.find((attribute) => attribute.name === "class")?.value ?? "")
+    .split(/\s+/u)
+    .filter((value) => /^[a-z0-9_-]{1,64}$/iu.test(value))
+    .slice(0, 16);
 }
 
 export function statementState(value: string): StatementState {

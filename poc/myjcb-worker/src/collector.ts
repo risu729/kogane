@@ -1,6 +1,6 @@
 import { decodeMyJcbHtml, MyJcbReadClient, type ReadResponse } from "./client";
 import { CookieJar } from "./cookie-jar";
-import { loginWithOfficialProtection } from "./login-protection";
+import { loginWithBitwardenPasskey, loginWithOfficialProtection } from "./login-protection";
 import {
   discoverCreditExports,
   extractCreditMenuLinkId,
@@ -19,6 +19,7 @@ import type {
   RawArtifact,
   SessionCredential,
 } from "./types";
+import { StopConditionError, type StopConditionCode } from "./types";
 
 export interface ConnectionCollection {
   readonly summary: ConnectionSummary;
@@ -31,21 +32,32 @@ export async function collectConnection(options: {
 }): Promise<ConnectionCollection> {
   const login = options.credential.bootstrapMode === "password"
     ? await loginWithOfficialProtection(options.browserBinding, options.credential)
-    : await restoreSession(options.credential);
+    : options.credential.bootstrapMode === "passkey"
+      ? await loginWithBitwardenPasskey(options.browserBinding, options.credential)
+      : await restoreSession(options.credential);
   try {
-    const cards = parseCardInventory(login.mypageHtml);
+    const cards = await collectionStage(
+      "collect-discovery",
+      async () => parseCardInventory(login.mypageHtml),
+    );
     const client = new MyJcbReadClient(login.jar, login.userAgent);
     const artifacts: RawArtifact[] = [];
     let periodCount = 0;
 
     const creditLinkId = extractCreditMenuLinkId(login.mypageHtml);
     if (creditLinkId) {
-      const credit = await collectCredit(client, creditLinkId);
+      const credit = await collectionStage(
+        "collect-credit",
+        async () => await collectCredit(client, creditLinkId),
+      );
       artifacts.push(...credit.artifacts);
       periodCount += credit.periodCount;
     }
     if (login.mypageHtml.includes("/iss-pc/member/debit/details/debitDetailMenu.html")) {
-      const debit = await collectDebit(client);
+      const debit = await collectionStage(
+        "collect-debit",
+        async () => await collectDebit(client),
+      );
       artifacts.push(...debit.artifacts);
       periodCount += debit.periodCount;
     }
@@ -61,7 +73,9 @@ export async function collectConnection(options: {
       cookieCount: login.jar.count(),
       limitations: [
         "Root-card switching remains discovery-only until its current POST contract is observed.",
-        "Passkey renewal remains human-operated; session bootstrap is short-lived.",
+        options.credential.bootstrapMode === "passkey"
+          ? "Passkey bootstrap uses an imported Bitwarden credential with a zero signature counter."
+          : "Passkey renewal remains human-operated; session bootstrap is short-lived.",
       ],
     };
     artifacts.push({
@@ -83,6 +97,18 @@ export async function collectConnection(options: {
     };
   } finally {
     await login.close();
+  }
+}
+
+async function collectionStage<T>(
+  code: StopConditionCode,
+  action: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    if (error instanceof StopConditionError && error.code !== "unknown-upstream-state") throw error;
+    throw new StopConditionError(`MyJCB collection stopped at ${code}`, code);
   }
 }
 
@@ -132,15 +158,18 @@ async function collectCredit(
   client: MyJcbReadClient,
   linkId: string,
 ): Promise<{ readonly periodCount: number; readonly artifacts: RawArtifact[] }> {
-  const menu = await client.get(
-    "credit-menu",
-    new URLSearchParams({ link_id: linkId }),
-  );
-  const menuHtml = decodeMyJcbHtml(menu.body, menu.contentType);
-  const initialMonths = parseCreditMenuMonths(menuHtml);
-  if (initialMonths.length === 0) {
-    throw new Error("MyJCB credit menu did not enumerate detailMonth values");
-  }
+  const { menuHtml, initialMonths } = await collectionStage("collect-credit-menu", async () => {
+    const menu = await client.get(
+      "credit-menu",
+      new URLSearchParams({ link_id: linkId }),
+    );
+    const menuHtml = decodeMyJcbHtml(menu.body, menu.contentType);
+    const initialMonths = parseCreditMenuMonths(menuHtml);
+    if (initialMonths.length === 0) {
+      throw new Error("MyJCB credit menu did not enumerate detailMonth values");
+    }
+    return { menuHtml, initialMonths };
+  });
   const artifacts: RawArtifact[] = [{
     dataset: "credit-menu",
     filename: "credit-menu.html",
@@ -151,17 +180,24 @@ async function collectCredit(
   const firstMonth = initialMonths[0];
   if (firstMonth === undefined) throw new Error("MyJCB credit menu was empty");
   const detailCache = new Map<number, ReadResponse>();
-  const firstDetail = await fetchCreditDetail(client, firstMonth);
+  const { firstDetail, discriminator } = await collectionStage(
+    "collect-credit-first-detail",
+    async () => {
+      const firstDetail = await fetchCreditDetail(client, firstMonth);
+      const firstHtml = decodeMyJcbHtml(firstDetail.body, firstDetail.contentType);
+      return { firstDetail, discriminator: extractGeneralJsonDiscriminator(firstHtml) };
+    },
+  );
   detailCache.set(firstMonth, firstDetail);
-  const firstHtml = decodeMyJcbHtml(firstDetail.body, firstDetail.contentType);
-  const discriminator = extractGeneralJsonDiscriminator(firstHtml);
-  const pastResponse = await client.postCreditPastJson({
-    generalJsonShikibetuId: discriminator,
-    id: "030100601",
-    detailMonth: firstMonth,
+  const { pastResponse, pastMonths } = await collectionStage("collect-credit-past-months", async () => {
+    const pastResponse = await client.postCreditPastJson({
+      generalJsonShikibetuId: discriminator,
+      id: "030100601",
+      detailMonth: firstMonth,
+    });
+    const pastJson = new TextDecoder("utf-8", { fatal: true }).decode(pastResponse.body);
+    return { pastResponse, pastMonths: parsePastMonthAvailability(pastJson) };
   });
-  const pastJson = new TextDecoder("utf-8", { fatal: true }).decode(pastResponse.body);
-  const pastMonths = parsePastMonthAvailability(pastJson);
   artifacts.push({
     dataset: "credit-past-months",
     filename: "credit-past-months.json",
@@ -174,43 +210,75 @@ async function collectCredit(
   ])].sort((left, right) => left - right);
 
   for (const detailMonth of availableMonths) {
-    const detail = detailCache.get(detailMonth) ?? await fetchCreditDetail(client, detailMonth);
-    const html = decodeMyJcbHtml(detail.body, detail.contentType);
-    const exports = discoverCreditExports(html, detailMonth);
-    const ledger = parseCreditLedger(
-      html,
-      detailMonth === 0 ? "unconfirmed" : "confirmed",
-    );
-    if (detailMonth === 0 && !ledger) {
-      throw new Error("MyJCB unconfirmed detail page omitted .detail-list-01");
-    }
-    const state = detailMonth === 0
-      ? "unconfirmed"
-      : ledger || exports.length > 0
-        ? "confirmed"
-        : "unknown";
-    const period = pastMonths.find((month) => month.detailMonth === detailMonth)?.settlementYM ??
-      `detailMonth-${detailMonth}`;
-    artifacts.push({
-      dataset: "credit-detail",
-      filename: `credit-detail-${String(detailMonth).padStart(2, "0")}.html`,
-      body: redactedStatementHtml(html),
-      mediaType: "text/html; charset=utf-8",
-      statementState: state,
-      period,
-    });
-    if (ledger) {
+    try {
+      const detail = await collectionStage(
+        "collect-credit-month-fetch",
+        async () => detailCache.get(detailMonth) ?? await fetchCreditDetail(client, detailMonth),
+      );
+      const { html, exports, ledger } = await collectionStage(
+        "collect-credit-month-parse",
+        async () => {
+          const html = decodeMyJcbHtml(detail.body, detail.contentType);
+          const exports = discoverCreditExports(html, detailMonth);
+          const hasLedgerContainer = /\bdetail-list-01\b/u.test(html);
+          const hasEmptyMarker = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u
+            .test(html);
+          if (!hasLedgerContainer && hasEmptyMarker) {
+            throw new Error("MyJCB credit detail exposed an inconsistent empty state");
+          }
+          const ledgerState = detailMonth <= 1 && exports.length === 0
+            ? "unconfirmed"
+            : "confirmed";
+          const ledger = parseCreditLedger(
+            html,
+            ledgerState,
+          );
+          if (detailMonth === 0 && !ledger) {
+            throw new Error("MyJCB unconfirmed detail page omitted .detail-list-01");
+          }
+          return { html, exports, ledger };
+        },
+      );
+      const state = detailMonth === 0
+        ? "unconfirmed"
+        : ledger?.state === "unconfirmed"
+          ? "unconfirmed"
+          : ledger || exports.length > 0
+          ? "confirmed"
+          : "unknown";
+      const period = pastMonths.find((month) => month.detailMonth === detailMonth)?.settlementYM ??
+        `detailMonth-${detailMonth}`;
       artifacts.push({
-        dataset: "credit-ledger",
-        filename: `credit-ledger-${String(detailMonth).padStart(2, "0")}.json`,
-        body: JSON.stringify({ schemaVersion: 1, detailMonth, period, ...ledger }),
-        mediaType: "application/json",
+        dataset: "credit-detail",
+        filename: `credit-detail-${String(detailMonth).padStart(2, "0")}.html`,
+        body: redactedStatementHtml(html),
+        mediaType: "text/html; charset=utf-8",
         statementState: state,
         period,
       });
-    }
-    for (const exportKind of exports) {
-      artifacts.push(await fetchCreditExport(client, detailMonth, period, exportKind));
+      if (ledger) {
+        artifacts.push({
+          dataset: "credit-ledger",
+          filename: `credit-ledger-${String(detailMonth).padStart(2, "0")}.json`,
+          body: JSON.stringify({ schemaVersion: 1, detailMonth, period, ...ledger }),
+          mediaType: "application/json",
+          statementState: state,
+          period,
+        });
+      }
+      for (const exportKind of exports) {
+        artifacts.push(await collectionStage(
+          "collect-credit-export",
+          async () => await fetchCreditExport(client, detailMonth, period, exportKind),
+        ));
+      }
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: "myjcb-credit-month-failed",
+        detailMonth,
+        code: error instanceof StopConditionError ? error.code : "collector-operation-failed",
+      }));
+      throw error;
     }
   }
   return { periodCount: availableMonths.length, artifacts };
@@ -404,8 +472,70 @@ function parseCredentialItems(parsed: readonly unknown[]): MyJcbCredential[] {
       });
       return { connectionId, bootstrapMode, userAgent, cookies: normalizedCookies };
     }
+    if (bootstrapMode === "passkey") {
+      const credentialId = item.credentialId;
+      const privateKey = item.privateKey;
+      const rpId = item.rpId;
+      const userHandle = item.userHandle;
+      const counter = item.counter;
+      const discoverable = item.discoverable;
+      const userName = item.userName;
+      const userDisplayName = item.userDisplayName;
+      if (typeof credentialId !== "string" || !isBitwardenCredentialId(credentialId)) {
+        throw new Error(`MyJCB connection ${index + 1} has an invalid passkey credentialId`);
+      }
+      if (typeof privateKey !== "string" || !isBase64Url(privateKey)) {
+        throw new Error(`MyJCB connection ${index + 1} has an invalid passkey privateKey`);
+      }
+      if (rpId !== "my.jcb.co.jp" && rpId !== "jcb.co.jp") {
+        throw new Error(`MyJCB connection ${index + 1} has an unexpected passkey rpId`);
+      }
+      if (typeof userHandle !== "string" || !isBase64Url(userHandle)) {
+        throw new Error(`MyJCB connection ${index + 1} has an invalid passkey userHandle`);
+      }
+      if (counter !== 0) {
+        throw new Error(`MyJCB connection ${index + 1} has a stateful passkey counter`);
+      }
+      if (discoverable !== true) {
+        throw new Error(`MyJCB connection ${index + 1} passkey is not discoverable`);
+      }
+      if (userName !== undefined && typeof userName !== "string") {
+        throw new Error(`MyJCB connection ${index + 1} passkey userName is malformed`);
+      }
+      if (userDisplayName !== undefined && typeof userDisplayName !== "string") {
+        throw new Error(`MyJCB connection ${index + 1} passkey userDisplayName is malformed`);
+      }
+      return {
+        connectionId,
+        bootstrapMode,
+        credentialId,
+        privateKey,
+        rpId,
+        userHandle,
+        counter,
+        discoverable,
+        ...(userName === undefined ? {} : { userName }),
+        ...(userDisplayName === undefined ? {} : { userDisplayName }),
+      };
+    }
     throw new Error(`MyJCB connection ${index + 1} has an unsupported bootstrapMode`);
   });
+}
+
+function isBitwardenCredentialId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu
+    .test(value) || (value.startsWith("b64.") && isBase64Url(value.slice(4)));
+}
+
+function isBase64Url(value: string): boolean {
+  if (!/^[A-Za-z0-9_-]+$/u.test(value)) return false;
+  try {
+    const standard = value.replace(/-/gu, "+").replace(/_/gu, "/");
+    atob(standard.padEnd(Math.ceil(standard.length / 4) * 4, "="));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function restoreSession(credential: SessionCredential): Promise<{

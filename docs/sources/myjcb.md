@@ -82,12 +82,18 @@ MyJCB はアプリ専用ではなく、Web 版が明細・利用可能額・ポ�
 
 passkey 登録済み ID は password login を使えないため、Okura の ID/password flow と排他的になり得る。おまとめ済み複数 ID のうち一つだけ passkey の場合、root login、切替先、再認証要求の組合せを live で確認し、全カードへ一般化しない。
 
-### Bitwarden と自動化に関する推測
+### Bitwarden と自動化に関する確認結果
 
-- **事実**: JCB は Bitwarden を対応・非対応のどちらとも記載せず、代表例として Apple／Google だけを挙げる。
-- **推測**: WebAuthn 対応ブラウザと同期 passkey provider の組み合わせとして Bitwarden が動く可能性はあるが、JCB の issuer 別フロー、QR cross-device、アプリ内 WebView での互換性は未検証。対応済みと記録しない。
+- **公式情報**: JCB は Bitwarden を対応・非対応のどちらとも記載せず、代表例として Apple／Google だけを挙げる。
+- **live確認**: 第一のMyJCB IDでは、Bitwarden CLIが返した一つのdiscoverable passkey（RP ID一致、counter 0）をChrome CDP virtual authenticatorへ一時注入し、Cloudflare Browser Run上でWebAuthn assertionが発生してmypageへ到達した。これは当該ID／時点の相互運用確認であり、全issuer、QR cross-device、アプリ内WebViewへ一般化しない。
 - **推測**: ID／パスワードは通常のブラウザ autocomplete の対象なので Bitwarden autofill が機能する可能性は高い。しかし passkey 登録済み ID ではパスワードログイン自体が無効で、headless secret injection の代替にはならない。
 - collector は passkey の新規登録・解除、パスワード再設定、OTP 宛先変更を行わない。利用者が既に選んだ認証状態を尊重し、人の操作が必要なら停止する。
+
+### passkey内部通信とBrowser境界（2026-08-31 live）
+
+Browser Run上の成功loginで、同一originの動的通信を値なしで観測した。`PasskeyLogin`開始、`userLoginPasskeyServiceStatusCommunication.html`への`loginRouteId`、NNL Apps SDK 9.2.0、`userLoginPasskeyAuthCheckCommunication.html`へのopaqueな`result`、mypage GETの順だった。すべて200で、動的responseのMIMEは`text/html`だった。challenge、assertion、`result`値、cookie、header、queryは保存していない。
+
+このため、現在確認できた契約は「標準WebAuthn JSON APIを直接呼ぶ」形ではない。Browserを外すには、公式NNL SDKが生成する`result` envelopeとserver-side state/cookie contractを別途再現する必要がある。Workers Web CryptoでP-256署名を行えることだけでは十分でない。現PoCはlogin bootstrapだけBrowser Runを使い、mypage到達後はbrowserを閉じるまでにcookie/User-Agentを取り出し、menu、detail、`detailPastJson`、exportを通常のWorker fetchへ切り替える。このhandoffとprivate R2保存は第一IDのlive runで成功した。
 
 ## Web 保護、WAF、Akamai
 
@@ -164,7 +170,7 @@ passkey 登録済み ID は password login を使えないため、Okura の ID/
 - production network-security config は system CA を使い cleartext を無効化する。静的な OkHttp `CertificatePinner` や production trust-all path は見つからなかった。ただし dynamic/native check と現行 3.11.1 は未確認。
 - `libsigner.so` は Adjust analytics の component であり、MyJCB API request signing の証拠ではない。
 
-この結果から、Web session replay だけでなく app JSON API を別 candidate として扱う価値がある。特に年月指定の credit detail は backfill に適する可能性がある。一方、認証 bootstrap、server-selected FIDO/Integrity signal、session renewal、response schema、retention を実機の本人操作で確認するまで、browserless scheduled collector が成立したとは判断しない。
+この結果から、Webが成立しない場合のfallbackとしてapp JSON APIを別candidateに残す価値がある。特に年月指定のcredit detailはbackfillに適する可能性がある。ただし優先経路はBitwarden保存済みpasskeyを使うWeb Browser Runであり、app APIへはWeb passkey modeとsession modeが成立しない場合だけ進む。app側は認証bootstrap、server-selected FIDO/Integrity signal、session renewal、response schema、retentionを実機の本人操作で確認するまでscheduled collectorが成立したとは判断しない。
 
 現行の正規 artifact を得られる次の実験は次のとおり。
 
@@ -297,7 +303,7 @@ Workers内でdownloadした任意JavaScriptを`eval`せず、保護scriptを手�
 - `/apl/login-prot.js?init`、loadごとに変わるseed付き`?async`、version付きpasskey/NNL SDK assetsがloadされた。source/version/seedはhard-codeしない。
 - 初期画面の通常選択肢にpasskeyがあるため、その文字だけではchallengeと判定しない。第一IDの本人loginは`POST /iss-pc/member/user_manage/PasskeyLogin`（200）、`POST .../userLoginPasskeyServiceStatusCommunication.html`（200）、`POST .../userLoginPasskeyAuthCheckCommunication.html`（200）、`POST .../userPasskeyLoginRelay.html`（302）、`GET /iss-pc/member/mypage/mypage.html`（200）の順だった。WebAuthn assertionはprivate captureにのみ存在する。
 - passkey flowのcookieはstable application cookie、`rp1..rp33`型、random-looking per-session名が混在した。完全なjarと属性を扱う必要はあるが、個々の名前は相関telemetryになるためdiscovery、manifest、logへ保存しない。
-- 第一IDはpasskeyだったため、password-only unattended loginでは全IDを覆えない。PoCの`session` modeは本人bootstrap後の短命cookie＋User-Agent replayであり、passkey renewalの自動化ではない。
+- 第一IDはpasskeyだったため、password-only unattended loginでは全IDを覆えない。2026-08-31にBitwarden export modelとChrome CDP WebAuthn contractを照合し、P-256 PKCS#8、credential ID、user handleをBrowser Runの一時virtual authenticatorへ注入する`passkey` modeを追加した。counter=0、discoverable、JCB RP IDだけを許可し、鍵/assertion/cookieをartifact/logへ保存しない。live Worker authは未検証である。
 
 ### Kuebikoで確認したクレジットread/export
 
@@ -305,6 +311,7 @@ Workers内でdownloadした任意JavaScriptを`eval`せず、保護scriptを手�
 - `detailAPI.js`はdetail pageの`input:hidden[name=generalJsonShikibetuId]`を読み、`detailPastJson.json`へ`application/json`でJSON-RPC POSTする。request fieldsは`jsonrpc`、`method`、`params`、`id`、contractは`method=execute`、`params=[{generalJsonShikibetuId}]`、IDは`0301006`＋2桁counter（初回`030100601`）。responseは`result.errId`、`errMessage`、`detailPastJsonInfo[]`を持ち、item fieldsは`detailAvailableFlag`、`detailMonth`、`payAmount`、`payAmountDispFlag`、`settlementYM`だった。hidden欠落／API failureでは停止し、推測値や`0..17`をblind scanしない。
 - 第一IDの過去月responseは9候補（`detailMonth=9..17`）のうち2件（`10`、`13`）だけがavailableだった。collectorは`detailAvailableFlag=true`だけを初期menu月へ追加する。
 - 別の`detailReplaceJson.json`はrequest parameterに`generalJsonShikibetuId`、`simeYmd`、`payAmount`、response itemに`changeOperationLimitDate`、`detailInquiryURL`、`fixFlag`、`newestFlag`、`payAmount`、`payAmountDispFlag`、`payHowChangeEnableFlag`、`settlementDate`を持つUI/payment-display metadataだった。ledger取得には不要なのでallowlistしない。
+- **JSON/HTML境界**: 本人操作のnetwork captureで、取引行を返すJSON endpointは確認できなかった。`detailPastJson`は取得可能月、`detailReplaceJson`はUI/payment metadataだけで、未確定取引行はserver-rendered detail HTMLに存在する。確定月は公式CSVを正規sourceとして優先できるが、未確定はexport不可なのでHTML parserが必要である。第一connectionの成功Worker runでもcredit detail 11、ledger 6に対してexport link/artifactは0だったため、このIDはHTMLを捨てると取得不能になる。従ってPoCは全月blind HTML scrapingではなく、JSONでavailable月を絞り、exportがある確定月はCSV/PDF/OFXを優先し、それ以外だけHTML ledgerを使う方向へ最適化する。
 - 未確定`detailMonth=0`はexportなしで、`.detail-list-01`の`.head`とrepeated `.content`をparseする。summary labelsは`ご利用日`、`ご利用先など`／`支払区分`、`ご利用金額`、expanded labelsは`今回のお支払い金額`、`摘要`、`今回回数`、`備考`、`訂正サイン`だった。
 - 確定月HTMLにも同ledger componentがあり、summary labelsは`ご利用日`、`ご利用先など`／`支払区分`、`今回のお支払い金額`、expanded labelsは`ご利用金額`、`摘要`、`今回回数`、`備考`、`訂正サイン`だった。CSV/OFXと突合できる。
 - 確定月のGET exportは`detailDbPdf.html?...&output=pdf`、`detail.html?...&output=csv`、`detail.html?...&output=money`。CSVはCP932で、先頭metadata行ではなく後続行に`ご利用者`、`カテゴリ`、`ご利用日`、`ご利用先など`、`ご利用金額(￥)`、`支払区分`、`今回回数`、`訂正サイン`、`お支払い金額(￥)`、`国内／海外`、`摘要`、`備考`のexact 12-column headerがある。PDFは`%PDF-1.4`、OFXは1.xの`CREDITCARDMSGSRSV1`／`CCSTMTRS`／`BANKTRANLIST`／`LEDGERBAL`を確認した。`detailNewspdf.html`はnoticeなので除外する。

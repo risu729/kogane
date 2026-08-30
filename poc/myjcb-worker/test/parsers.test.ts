@@ -66,4 +66,16 @@ describe("MyJCB synthetic parsers", () => {
     expect(unconfirmed?.rows).toHaveLength(1);
     expect(unconfirmed?.rows[0]?.expanded["今回のお支払い金額"]).toBe("2,000円");
   });
+
+  test("accepts a structurally known empty ledger row", () => {
+    const empty = parseCreditLedger(`
+      <div class="detail-list-01">
+        <div class="head">ご利用日 ご利用先など 支払区分 ご利用金額</div>
+        <div class="content"><div class="item"><div class="item-cell">
+          <div class="cell w-100per">ご利用明細はありません</div>
+        </div></div></div>
+      </div>
+    `, "confirmed");
+    expect(empty?.rows).toEqual([]);
+  });
 });

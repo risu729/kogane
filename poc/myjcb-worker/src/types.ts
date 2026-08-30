@@ -19,7 +19,20 @@ export interface SessionCredential {
   }[];
 }
 
-export type MyJcbCredential = PasswordCredential | SessionCredential;
+export interface PasskeyCredential {
+  readonly connectionId: string;
+  readonly bootstrapMode: "passkey";
+  readonly credentialId: string;
+  readonly privateKey: string;
+  readonly rpId: "my.jcb.co.jp" | "jcb.co.jp";
+  readonly userHandle: string;
+  readonly counter: 0;
+  readonly discoverable: true;
+  readonly userName?: string;
+  readonly userDisplayName?: string;
+}
+
+export type MyJcbCredential = PasswordCredential | SessionCredential | PasskeyCredential;
 
 export type StatementState = "confirmed" | "unconfirmed" | "debit" | "unknown";
 
@@ -94,6 +107,38 @@ export class HumanRequiredError extends Error {
   }
 }
 
+export type StopConditionCode =
+  | "unknown-upstream-state"
+  | "passkey-browser-setup"
+  | "passkey-cdp-enable"
+  | "passkey-authenticator-add"
+  | "passkey-credential-add"
+  | "passkey-login-page"
+  | "passkey-control"
+  | "passkey-trigger"
+  | "passkey-assertion"
+  | "passkey-landing"
+  | "passkey-session-import"
+  | "collect-discovery"
+  | "collect-credit"
+  | "collect-credit-menu"
+  | "collect-credit-first-detail"
+  | "collect-credit-past-months"
+  | "collect-credit-month-fetch"
+  | "collect-credit-month-parse"
+  | "collect-credit-export"
+  | "credit-ledger-headers"
+  | "credit-ledger-item-cell"
+  | "credit-ledger-cell-count"
+  | "collect-debit";
+
 export class StopConditionError extends Error {
   override readonly name = "StopConditionError";
+
+  constructor(
+    message: string,
+    readonly code: StopConditionCode = "unknown-upstream-state",
+  ) {
+    super(message);
+  }
 }

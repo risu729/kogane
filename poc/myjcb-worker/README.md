@@ -2,13 +2,25 @@
 
 MyJCBの公式WebをCloudflare WorkersのScheduled handlerから読み、取得時の公式HTMLと取得manifestをprivate R2へ追記保存する独立PoCである。`mnie`は利用せず、Okuraのコードも取り込んでいない。
 
-Worker PoC自体は**未deploy・未auth test**である。一方、2026-08-31に利用者が専用Kuebiko Chromeで第一のMyJCB IDへpasskey loginし、クレジット確定／未確定HTML、過去月JSON、公式CSV/PDF/OFXをread-only観測した。raw credential、WebAuthn assertion、cookie、明細値、file hashはcommitしていない。観測済みcontractを実装したが、Worker/Browser Runで成功したことを意味しない。
+Worker PoCは2026-08-31にdeployし、第一のMyJCB IDで実auth testまで完了した。Bitwardenから一項目だけをlocal syncし、Browser Runの一時virtual authenticatorでpasskey assertionを生成してmypageへ到達した後、cookieとUser-Agentを通常のWorker `fetch`へ移管した。過去月JSONによるavailable月列挙、credit detail取得、private R2への20 artifactとmanifest保存が1 runで成功し、failureは0だった。raw credential、WebAuthn assertion、cookie、明細値、file hashはcommit／logしていない。
 
 ## なぜBrowser Runを使うか
 
 `/Login`はloadごとに`/apl/login-prot.js?init`とephemeral seed付き`?async`を読み、公式JavaScriptがlogin formへ動的field/cookieを追加する。Workersは取得した任意JavaScriptを`eval`/`new Function`で実行する環境ではなく、保護scriptを手書きで再実装すると追従性と安全境界が悪化する。このPoCは`src/login-protection.ts`だけでCloudflare Browser Runを起動し、公式page内で公式scriptをそのまま実行する。
 
 login成功後はbrowser cookieとUser-Agentを`CookieJar`へ移し、`src/policy.ts`のmethod/origin/path/query allowlistを通るGETと過去月列挙JSON-RPC POSTだけを通常のWorker `fetch`で取得する。Browserはconnectionごとの`finally`で閉じる。動的script source、credential、protected login POST body、cookie値、mypage HTMLはR2へ保存しない。
+
+### Browser Runを外せるか
+
+passkey成功時のsanitized network shapeでは、同一origin内で次の順序を確認した。query、header、cookie、request/response body、challenge、assertion、`result`値は保存していない。
+
+1. `POST /iss-pc/member/user_manage/PasskeyLogin`
+2. `POST /iss-pc/member/user_manage/userLoginPasskeyServiceStatusCommunication.html`（field名は`loginRouteId`）
+3. NNL Apps SDK 9.2.0のUI resource取得
+4. `POST /iss-pc/member/user_manage/userLoginPasskeyAuthCheckCommunication.html`（field名は`result`）
+5. `GET /iss-pc/member/mypage/mypage.html`
+
+これは標準WebAuthn assertionを単一JSON endpointへ直接送る契約ではなく、公式NNL SDKがchallenge／assertionをopaqueな`result`へ組み立てるflowである。P-256署名自体はWorkers Web Cryptoでも可能だが、NNL `result` contractを観測・再実装・追従する必要があるため、現時点のworking implementationではlogin bootstrapだけBrowser Runを使う。Browser Runが原理的に必須と証明されたわけではなく、将来のcost最適化候補としてdirect passkey clientを分離調査する。ログイン後のmenu、過去月JSON、detail、export、R2保存にはBrowser Runを使わないことはlive runで確認済みである。
 
 現段階ではContainerを追加しない。Browser Runで公式scriptを実ブラウザ実行でき、Worker内にR2/Cron/read clientを残せるためである。今後、Browser Runからのpassword loginだけが環境要因で拒否され、同一script/profileでContainer Chromeが再現性を持って成功することがsanitized live testで確認された場合に限り、login bootstrapだけを最小Containerへ移す。
 
@@ -43,7 +55,24 @@ login成功後はbrowser cookieとUser-Agentを`CookieJar`へ移し、`src/polic
 
 各array要素は独立したMyJCB ID/session/R2 namespaceである。最初のIDや一つのおまとめloginが他IDを網羅すると仮定しない。`connectionId`はR2 key用の利用者定義pseudonymであり、MyJCB ID、カード番号、氏名を使わない。`ADMIN_TRIGGER_TOKEN`は手動`POST /trigger`のBearer secretである。
 
-`bootstrapMode=password`は公式password formとlogin protection scriptをBrowser Runで実行する。`bootstrapMode=session`は、本人が別browserで正常loginした後に短命なcookie＋同一User-Agentをsecretとして投入し、mypageを検証してからread-only replayする。session値をR2やmanifestへ保存しない。passkey自体をWorkerから自動操作する実装ではなく、失効時の自動renewalも未解決である。
+`bootstrapMode=password`は公式password formとlogin protection scriptをBrowser Runで実行する。`bootstrapMode=passkey`はBitwarden JSONの単一`fido2Credentials`からP-256 PKCS#8鍵、credential ID、user handleを一接続一secretへ同期し、Browser RunのCDP virtual authenticatorへ一時注入して公式「パスキーでログイン」を実行する。Browserを閉じるとvirtual authenticatorも消え、鍵、assertion、cookieをR2やmanifestへ保存しない。`bootstrapMode=session`は、本人が別browserで正常loginした後に短命なcookie＋同一User-Agentをsecretとして投入し、mypageを検証してからread-only replayする。
+
+Bitwarden自身の実装は`keyValue`をbase64url PKCS#8、credential IDをUUIDまたは`b64.`形式として扱う。Chrome CDPはPKCS#8とraw credential IDをstandard base64で要求するため、PoCはlocal conversionだけを行い秘密鍵を再生成しない。Bitwarden exportのsignature counterが非zeroの場合は、serverとのcounter同期を壊し得るため拒否する。MyJCBのpasswordless flowに必要なdiscoverable credentialと、RP ID `my.jcb.co.jp`/`jcb.co.jp`以外も拒否する。
+
+全vault exportは作らず、unlocked WSL terminalで第一項目だけを取得・検査する。既定はcheck-onlyで、秘密値をstdoutへ出さない。`--put`時だけ生成JSONをstdinでWranglerへ渡す。
+
+```sh
+bun run bw:passkey -- \
+  --item-id '<Bitwarden item UUID>' \
+  --connection-id first-card \
+  --secret-name MYJCB_ACCOUNT_FIRST_JSON
+
+bun run bw:passkey -- \
+  --item-id '<Bitwarden item UUID>' \
+  --connection-id first-card \
+  --secret-name MYJCB_ACCOUNT_FIRST_JSON \
+  --put
+```
 
 ```sh
 wrangler secret put MYJCB_CONNECTIONS_JSON
@@ -60,7 +89,7 @@ wrangler secret put MYJCB_ACCOUNT_RECRUIT_JSON
 
 ただし一接続のpasskey session cookie jar自体が5 KBを超える可能性がある。現`session` modeはJSON全体が5 KB以内の場合だけのPoCで、確実に動くとは断言しない。実用案は、local sync CLIがcookie envelopeをclient-side AES-GCMで暗号化してprivate R2へ置き、Worker secretには小さいwrapping keyだけを置く構成である。このencrypted-envelope実装とkey rotationは本PRに含まず、5 KB超sessionはblockerとして停止する。
 
-secret値をsource、`wrangler.jsonc`、`.dev.vars`のcommit、shell引数、stdout、manifestへ入れない。passkey登録済みIDは公式仕様上ID/password loginを使えないため`bootstrapMode=password`で試行せず、本人bootstrap後の`session`を使う。session expiry後は`human-required`となり、passkeyの完全無人renewalは未解決のままである。
+secret値をsource、`wrangler.jsonc`、`.dev.vars`のcommit、shell引数、stdout、manifestへ入れない。passkey登録済みIDは公式仕様上ID/password loginを使えないため`bootstrapMode=password`で試行しない。まず`passkey` modeを使い、exportされたcredentialが非discoverable、counter非zero、RP mismatch、またはMyJCB/Browser Runで拒否された場合だけ本人bootstrap後の`session`へdowngradeする。Android APIはWeb passkey modeとsession modeが成立しない場合だけのfallbackである。
 
 ## read-only policy
 
@@ -150,9 +179,9 @@ bun run typecheck
 bun run cf:check
 ```
 
-このPRでは`wrangler deploy`、R2 bucket作成、secret投入、Worker実credential testを行わない。Kuebikoでは利用者がpasskey loginとread/exportを実施し、sanitized route/schema/formatだけを設計根拠にした。
+live PoCでは`wrangler deploy`、private R2 bucket作成、secret投入、第一connectionの実credential testまで行った。成功runは1 connection、20 artifact、failure 0で、内訳はcredit detail 11、parsed ledger 6、menu 1、過去月JSON 1、discovery 1だった。このrunでは公式CSV/PDF/OFX linkが提示されず、export artifactは0だった。従ってこのconnectionではHTML ledgerが実データsourceとして必要であり、別IDでexportが存在する場合だけ確定月をCSV中心へ最適化する。manifestとsource-preserving artifactはprivate R2へ保存し、実値やsecretはPRへ含めない。
 
-deploy時に作成するpersistent resourceはWorker `kogane-myjcb-collector-poc`、private R2 bucket同名、Cron `0 21 * * *`、admin/connection secret群である。Browser Run sessionはconnection完了時にcloseし、永続profileを作らない。廃棄時は先にR2 object一覧と必要artifactの退避を確認してからWorkerを削除し、最後にR2 bucketを削除する。bucket削除は金融sourceを回復不能にするため自動cleanup scriptにはしない。
+作成済みpersistent resourceはWorker `kogane-myjcb-collector-poc`、private R2 bucket同名、Cron `0 21 * * *`、admin/connection secret群である。Browser Run sessionはconnection完了時にcloseし、永続profileを作らない。廃棄対象一覧はこの4分類と、debug中にR2へ作られたfailed/success manifests以下のobjectsである。廃棄時は先にR2 object一覧と必要artifactの退避を確認してからWorkerを削除し、最後にR2 bucketを削除する。bucket削除は金融sourceを回復不能にするため自動cleanup scriptにはしない。
 
 Cronとmanual triggerのoverlap lockは未実装である。同一IDの同時login/readを避けるため、Durable Object lockまたはQueueによる一接続一実行の直列化をdeploy/merge前要件とする。本PRのPoCをそのままscheduled運用しない。
 

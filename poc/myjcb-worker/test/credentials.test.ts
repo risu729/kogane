@@ -6,13 +6,23 @@ import {
 } from "../src/collector";
 
 describe("MyJCB connection configuration", () => {
-  test("keeps independent password and session bootstraps separate", () => {
+  test("keeps independent password, passkey, and session bootstraps separate", () => {
     const credentials = parseCredentials(JSON.stringify([
       {
         connectionId: "account-one",
         bootstrapMode: "password",
         userId: "synthetic-user",
         password: "synthetic-password",
+      },
+      {
+        connectionId: "account-passkey",
+        bootstrapMode: "passkey",
+        credentialId: "b3fbc8d2-b0fe-4a70-9b2d-f5cb4b321c33",
+        privateKey: "c3ludGhldGljLXBrY3M4",
+        rpId: "my.jcb.co.jp",
+        userHandle: "c3ludGhldGljLXVzZXI",
+        counter: 0,
+        discoverable: true,
       },
       {
         connectionId: "account-two",
@@ -29,8 +39,36 @@ describe("MyJCB connection configuration", () => {
     ]));
     expect(credentials.map((value) => [value.connectionId, value.bootstrapMode])).toEqual([
       ["account-one", "password"],
+      ["account-passkey", "passkey"],
       ["account-two", "session"],
     ]);
+  });
+
+  test("rejects exported passkeys with a stateful signature counter", () => {
+    expect(() => parseCredentials(JSON.stringify([{
+      connectionId: "stateful-passkey",
+      bootstrapMode: "passkey",
+      credentialId: "b3fbc8d2-b0fe-4a70-9b2d-f5cb4b321c33",
+      privateKey: "c3ludGhldGljLXBrY3M4",
+      rpId: "my.jcb.co.jp",
+      userHandle: "c3ludGhldGljLXVzZXI",
+      counter: 1,
+      discoverable: true,
+    }]))).toThrow("stateful passkey counter");
+  });
+
+  test("accepts Bitwarden legacy GUID-shaped credential IDs", () => {
+    const [credential] = parseCredentials(JSON.stringify([{
+      connectionId: "legacy-guid-passkey",
+      bootstrapMode: "passkey",
+      credentialId: "00112233-4455-0677-0899-aabbccddeeff",
+      privateKey: "c3ludGhldGljLXBrY3M4",
+      rpId: "my.jcb.co.jp",
+      userHandle: "c3ludGhldGljLXVzZXI",
+      counter: 0,
+      discoverable: true,
+    }]));
+    expect(credential?.bootstrapMode).toBe("passkey");
   });
 
   test("rejects duplicate namespaces", () => {
