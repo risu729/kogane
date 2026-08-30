@@ -10,6 +10,7 @@ export const CONTAINER_PROBE_VARIANTS = [
   "chrome-stable-no-ua-direct",
   "chrome-stable-no-ua-split",
   "chrome-stable-no-ua-all-tamia",
+  "chrome-stable-no-ua-all-cloudflare-gateway",
   "chrome-stable-no-ua-all-tamia-default-automation",
   "chrome-stable-windows-matched-all-tamia",
   "chrome-stable-windows-matched-direct",

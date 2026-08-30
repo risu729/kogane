@@ -7,6 +7,9 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
+  "placement": {
+    "region": "aws:ap-northeast-1"
+  },
   "triggers": {
     "crons": ["17 18 * * *"]
   },
@@ -35,6 +38,11 @@
     {
       "binding": "MESH",
       "tunnel_id": "6b0ccf30-68b2-494e-baa8-f4f9f3e46b33",
+      "remote": true
+    },
+    {
+      "binding": "CF_EGRESS",
+      "network_id": "cf1:network",
       "remote": true
     }
   ],

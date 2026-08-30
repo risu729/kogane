@@ -227,7 +227,10 @@ async function runContainerProbe(
       body: JSON.stringify({
         variant,
         relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
-        relayUrl: env.RELAY_PUBLIC_URL,
+        relayUrl:
+          variant === "chrome-stable-no-ua-all-cloudflare-gateway"
+            ? `${env.RELAY_PUBLIC_URL}?network=cf-gateway`
+            : env.RELAY_PUBLIC_URL,
       }),
     }),
   );
@@ -494,15 +497,20 @@ async function relayTcp(
   }
   const hostname = url.searchParams.get("host") ?? "";
   const port = Number(url.searchParams.get("port"));
+  const network = url.searchParams.get("network") ?? "tamia";
   if (!RELAY_HOSTS.has(hostname) || port !== 443) {
     return Response.json({ error: "Target denied" }, { status: 403 });
+  }
+  if (network !== "tamia" && network !== "cf-gateway") {
+    return Response.json({ error: "Network denied" }, { status: 403 });
   }
 
   const pair = new WebSocketPair();
   const client = pair[0];
   const server = pair[1];
   server.accept();
-  const socket = (env.MESH as VpcNetworkBinding).connect({ hostname, port });
+  const binding = network === "cf-gateway" ? env.CF_EGRESS : env.MESH;
+  const socket = (binding as VpcNetworkBinding).connect({ hostname, port });
   const writer = socket.writable.getWriter();
   let writeChain = Promise.resolve();
 

@@ -375,6 +375,43 @@ Worker Container classへ`envVars = { TZ: "Asia/Tokyo" }`を設定した本番de
 Access Deniedなしだった。PAT 401とBrunhildの`ERR_CONNECTION_CLOSED`は残ったが、2段階の
 challenge POSTは200でtoken生成に成功したため、これらは単独blockerではない。
 
+### timezone修正後のContainer直通A/B
+
+timezone修正前のdirect失敗には`UTC`という交絡があったため、同じ本番runtime
+`timezone-collector-v5`で出口だけを再比較した。Chrome 152.0.7977.64、Xvfb headed、fresh
+persistent profile、`TZ=Asia/Tokyo`、native Linux情報、`navigator.webdriver=false`は固定した。
+資格情報入力、login POST、cookie再利用、R2書き込みは0回である。
+
+| egress | 回数 | login page | Turnstile token | challenge image | 出口 |
+| --- | ---: | --- | ---: | --- | --- |
+| Container直通 | 2 | いずれもHTTP 200、formあり、Access Deniedなし | 0 / 0 | いずれもHTTP 400 | SG/SIN、ASN 13335、Cloudflare IPv6 |
+| 全通信TAMIA | 1（同時刻control） | HTTP 200、formあり、Access Deniedなし | 794 | HTTP 200 | `223.223.22.214`、JP/KIX、ASN 18144 |
+
+このcontrolled A/Bでは出口だけで結果が再現し、現行ContainerからのCloudflare直通egressは
+Turnstileを通過しなかった。Chromeやtimezoneだけでは十分ではなく、productionはGLOBAL PASS、
+Turnstile、helperを同じTAMIA出口へ固定したままにする。個別hostだけをdirectへ逃がすsplitも
+challenge取得・solve間の出口差を作るため採用しない。direct 2 runの終了後、診断に使った固定
+Container instance `v18`は課金を残さないようdestroyした。Cron、R2、本番relay設定は変更していない。
+
+### NRT Cloudflare Gateway egress
+
+Container placement constraintは`APAC`より細かいmetroを指定できない。新しいDurable Object IDへ
+`locationHint: "apac-ne"`を与えたdirect probeはTPEに配置され、login pageはHTTP 200でもtoken 0、
+challenge imageはHTTP 400だった。診断instanceはdestroy済みである。
+
+NRTを実測するため、Workerへ`placement.region: "aws:ap-northeast-1"`を設定し、TAMIA Tunnelの
+`MESH`とは別に`network_id: "cf1:network"`の`CF_EGRESS` bindingを追加した。診断variantでは
+Container ChromeのSOCKSから認証付きWebSocket relayへ渡した暗号化TCPを`CF_EGRESS.connect()`へ
+送り、GLOBAL PASS、Turnstile、helperを同じCloudflare Gateway出口へ固定する。WorkerはTLSを
+終端しないためChromeのTLS handshakeは維持される。通常collectorは引き続き`MESH`だけを使う。
+
+Gateway variantは2回ともJP/NRT、ASN 13335のCloudflare IPv6 egressになり、login page、form、
+challenge imageはHTTP 200、Access Deniedなしだったが、tokenは0 / 0だった。ただし直後の同一
+image・同一ChromeによるTAMIA controlも、それ以前の794文字成功と異なりtoken 0になった。短時間の
+連続challengeによる一時的評価・rate状態またはTurnstile側の時系列変動が交絡しており、NRT出口を
+失敗原因とは断定しない。NRT経路の構築成功とTurnstile通過は分けて扱い、通常collectorをNRTへ
+切り替えない。管理token必須のGateway variantは、十分な間隔を空けた将来のA/B用に残す。
+
 ## 2026-08-30 Camoufox control
 
 [Camoufox](https://github.com/daijro/camoufox)の現行構成として

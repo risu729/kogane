@@ -74,9 +74,13 @@ scripts/sync-local-secrets.sh \
 - VPC binding: TAMIA Tunnel `6b0ccf30-68b2-494e-baa8-f4f9f3e46b33`を直接指定
 - Cron: `17 18 * * *`（毎日03:17 JST、Workers Cron）
 
-現行Containerは`TZ=Asia/Tokyo`を起動環境へ明示し、Google Chrome StableをXvfb上のheaded persistent contextとして起動する。GLOBAL PASS、Turnstile本体、helperを同じTAMIA出口へ固定する。2026-08-30のChromium A/B追加imageはdigest `sha256:4c519cffcc19812ec90c826e42d2c483421bae8fa64f00e03d2ece95de3f9e49`、runtime revision `timezone-collector-v5`である。通常collectorのbrowser条件はv4から変更していない。
+現行Containerは`TZ=Asia/Tokyo`を起動環境へ明示し、Google Chrome StableをXvfb上のheaded persistent contextとして起動する。GLOBAL PASS、Turnstile本体、helperを同じTAMIA出口へ固定する。NRT Gateway診断variantを含む現行imageはdigest `sha256:f0b630d018a20ae23f2834134cb02923e3b640500d53114a42be036dd594a4c0`、runtime revision `timezone-collector-v5`である。通常collectorのbrowser条件はv4から変更していない。
 
-現行Worker versionは`550b1ff5-6b6f-4831-b0c9-5c084f6f23fd`で、deploy出力上もschedule `17 18 * * *`を確認した。
+timezone修正後に出口だけを変えたcontrolled A/Bでは、Container直通（SG/SINのCloudflare IPv6 egress）は2回ともlogin pageがHTTP 200でもTurnstile token 0、同時刻の全通信TAMIA controlはtoken 794だった。したがって現行productionはTAMIA固定を維持する。詳細は[`docs/browser-run-investigation-2026-08-28.md`](docs/browser-run-investigation-2026-08-28.md)に記録した。
+
+追加のCloudflare Gateway診断では、WorkerをTokyo近傍へplacementし、`cf1:network`経由でJP/NRTのCloudflare IPv6 egressを実現した。NRTは2回ともtoken 0だったが、直後のTAMIA controlもtoken 0になったため、短時間の連続challengeまたは時系列変動が交絡している。通常collectorはTAMIAのままとし、NRT variantは十分な間隔を空けた再検証専用に残す。
+
+現行Worker versionは`c8a72ca3-79c3-4515-af25-16147f35cbbe`で、deploy出力上もschedule `17 18 * * *`を確認した。
 
 daily/backfillはR2へのmanifest保存を含む処理の成否にかかわらず、最後にephemeralな固定Container instanceへ`destroy()`を送る。破棄要求自体の失敗は収集結果へ混ぜず、構造化logへ記録する。`30s`のidle timeoutも残すが、relay使用後は`stop()` RPCがoutcome `ok`でもinstanceが`running`のまま残ることをlive確認したため、課金停止は`destroy()`で保証する。
 

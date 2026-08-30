@@ -38,6 +38,7 @@ const PROBE_VARIANTS = [
   "chrome-stable-no-ua-direct",
   "chrome-stable-no-ua-split",
   "chrome-stable-no-ua-all-tamia",
+  "chrome-stable-no-ua-all-cloudflare-gateway",
   "chrome-stable-no-ua-all-tamia-default-automation",
   "chrome-stable-windows-matched-all-tamia",
   "chrome-stable-windows-matched-direct",
@@ -391,6 +392,9 @@ function probeConfiguration(variant) {
   }
   if (variant === "chrome-stable-no-ua-all-tamia") {
     return { ...chromeNative, egress: "all-tamia" };
+  }
+  if (variant === "chrome-stable-no-ua-all-cloudflare-gateway") {
+    return { ...chromeNative, egress: "all-cloudflare-gateway" };
   }
   if (variant === "chrome-stable-no-ua-all-tamia-default-automation") {
     return {
