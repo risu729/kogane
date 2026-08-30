@@ -126,6 +126,8 @@ bun run cf:check
 
 このPRでは`wrangler deploy`、R2 bucket作成、secret投入、実credential testを行わない。
 
+deploy時に作成するpersistent resourceはWorker `kogane-myjcb-collector-poc`、private R2 bucket同名、Cron `0 21 * * *`、上記2 secretである。Browser Run sessionはconnection完了時にcloseし、永続profileを作らない。廃棄時は先にR2 object一覧と必要artifactの退避を確認してからWorkerを削除し、最後にR2 bucketを削除する。bucket削除は金融sourceを回復不能にするため自動cleanup scriptにはしない。
+
 ## synthetic test
 
 `test/fixtures`は架空merchant・架空額・架空token/card番号だけを持つ手書きHTMLであり、MyJCB/Okura/mnieのHTMLをcopyしていない。testはroute allowlist、cross-origin/unknown method拒否、cookie domain/path、card/month parser、token/card番号redactionを検証する。
@@ -143,6 +145,15 @@ bun run cf:check
 - CSV/PDF/OFX action、encoding、field、zero-row response、card/subcard列
 - debit menu/detailの全issuer互換性、状態label、0件/取消/差額表現
 - session idle/absolute TTLとcookie rotation
+- Browser Runで得たcookieを通常Worker `fetch`へ移した際、TLS/connection/egress差によってsession replayが拒否されないか
 - login protection vendorとchange cadence
 
 以上は実値を保存しない一回限りのKuebiko/live observationで更新し、unknown時は実装を推測で拡張しない。
+
+## 2026-08-31 public login observationの反映
+
+専用Kuebiko Chromeのlogged-out pageで、`loginForm`のnamed `userId`/`password`に加え、nameのないtext/password decoy candidateが存在することを確認した。このためPoCはinputのtypeや位置でfieldを選ばず、form名とcontrol名を併用する。form actionもsubmit直前にallowlist検査する。
+
+初期画面にはpasswordとpasskeyの両方が通常の選択肢として出るため、初回pageに`passkey`という文字があるだけでは停止しない。password submit後に既知mypageへ到達せず、遷移先でpasskey/OTP/秘密の合い言葉等を検出した場合だけ`human-required`にする。
+
+`login-prot.js?async`のseedはloadごとに変わり、passkey/NNL SDK assetにもversion付きscriptがある。PoCはscript source/version/seedをhard-codeせず、raw captureもcommitしない。観測したversionとprivacy境界は`docs/sources/myjcb.md`へ記録した。

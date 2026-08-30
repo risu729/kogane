@@ -281,3 +281,17 @@ R2は`raw/myjcb/YYYY/MM/DD/<run-id>/<connection-id>/...`でappend-onlyに保存�
 日次実行は`0 21 * * *`のCloudflare CronからWorker `scheduled()`を直接呼ぶ。GitHub Actions cronは使用しない。secretは`MYJCB_CONNECTIONS_JSON`と手動trigger用`ADMIN_TRIGGER_TOKEN`で、source/configへ値をcommitしない。connections arrayの各要素は独立したID/session/R2 namespaceであり、最初のIDや一つのおまとめloginが全IDを包含すると仮定しない。
 
 bootstrapは`password`と`session`を明示する。password modeは公式formをBrowser Runで処理する。passkey登録済みIDはpassword login不可なので、本人が既存browserで作った短命sessionをcookie＋同一User-Agentとしてsecret投入し、mypage検証後にread-only replayできる。ただしこれはpasskey自動化ではなく、session失効後の無人renewalは未解決である。実装、stop条件、R2 layout、cleanup前提、synthetic test、未確認事項は`poc/myjcb-worker/README.md`に集約した。
+
+### 公開login pageのKuebiko観測（2026-08-31 JST）
+
+credentialをsubmitしないlogged-out状態だけを、専用Kuebiko Chrome `MyJCB Kuebiko capture`で再確認した。最初に通常Chromeで開いたtest tabはlogin前に閉じ、以後の認証観測先と混ぜていない。Kuebiko capture run `2026-08-30T18-44-02`ではpage openに伴ってrequest/body storeが更新されたが、raw captureはlocal/privateのままcommitしない。
+
+- URLは`https://my.jcb.co.jp/Login`、titleは`JCBの会員専用WEBサービス「MyJCB（マイジェーシービー）」`。
+- login選択肢としてID/passwordとpasskeyの両方が初期画面に表示される。したがって、単にpage textに`passkey`があることをchallenge判定に使わない。password submit後にmypageへ到達しなかった場合だけpasskey要求をhuman-requiredとして分類する。
+- password formは`name=loginForm`、`POST /iss-pc/member/user_manage/Login`。named controlとして`userId`、`password`、`screenId`、`loginRouteId`、`un`、`pcSpScreenSwitchUrl`を確認した。
+- rendered DOMにはvisible named controlとは別に、nameのないtext/password inputも存在した。protection/decoy candidateとして扱い、input indexや`input[type=password]`全体を埋めない。PoCは`form[name=loginForm]`内の`input[name=userId]`と`input[name=password]`だけを対象にし、form actionを直前検査する。
+- 30 scriptを観測し、`/apl/login-prot.js?init`、loadごとに変わるseed付き`/apl/login-prot.js?async...`、`login2.js?ver=20240628`、`config_login.js?ver=20251110`、`passkey_common_login.js?ver=20260309`、`passkeyLogin.js?ver=20251110`を含んだ。
+- NNL App SDK 9.2.0の`fido-client.js`、`fido-method-ui.js`、`oob-ui.js`、`otp-method-ui.js`、`external-auth-method-ui.js`もloadされる。これらの存在だけで実IDにOTP/FIDOが要求されるとは判定しない。
+- cookie、token、credential、account/card identifier、financial value、response body、ephemeral seed/dynamic field値は記録していない。
+
+この観測は、保護scriptをstatic bundleとして固定せず公式page内で実行する設計、named selector、passkey初期選択肢と実challengeの分離を支持する。authenticated route/schemaの観測は、Kuebikoで本人が通常loginしたsessionについてmethod/path/status/content-type/schema field名だけをsanitizedに記録する別段階とする。
