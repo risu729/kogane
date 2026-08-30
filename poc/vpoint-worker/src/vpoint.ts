@@ -32,7 +32,7 @@ export async function collectVPoint(options: {
   fetcher?: Fetcher;
 }): Promise<VPointCollection> {
   const sessionCookie = parseSessionCookie(options.sessionCookie);
-  const client = new VPointClient(options.fetcher ?? fetch, sessionCookie);
+  const client = new VPointClient(options.fetcher ?? defaultFetch, sessionCookie);
   const balance = await client.requestJson(BALANCE_PATH);
   const smfg = await client.requestJson(SMFG_PATH);
   const history = await client.history();
@@ -81,7 +81,7 @@ export function parseSessionCookie(value: string): string {
     trimmed.includes("\n") ||
     !trimmed.includes("=")
   ) {
-    throw new Error("VPOINT_SESSION_COOKIE must be a valid Cookie header value");
+    throw new Error("V Point session cookie must be a valid Cookie header value");
   }
   return trimmed;
 }
@@ -142,10 +142,9 @@ class VPointClient {
       ? status.code
       : null;
     if (code !== "0000") {
+      if (code === "0010") throw new VPointSessionExpiredError();
       throw new Error(
-        code === "0010"
-          ? "V Point session is not authenticated or has expired"
-          : `V Point ${path} returned application status ${code ?? "unknown"}`,
+        `V Point ${path} returned application status ${code ?? "unknown"}`,
       );
     }
     return { rawText, json };
@@ -194,6 +193,13 @@ class VPointError extends Error {
   }
 }
 
+export class VPointSessionExpiredError extends Error {
+  constructor() {
+    super("V Point session is not authenticated or has expired");
+    this.name = "VPointSessionExpiredError";
+  }
+}
+
 function countValue(value: unknown): number {
   const count = typeof value === "number" ? value : Number(value);
   if (!Number.isSafeInteger(count) || count < 0) {
@@ -204,4 +210,11 @@ function countValue(value: unknown): number {
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function defaultFetch(
+  input: string | URL | Request,
+  init?: RequestInit,
+): Promise<Response> {
+  return fetch(input, init);
 }

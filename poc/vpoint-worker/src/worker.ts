@@ -1,11 +1,15 @@
 import { timingSafeEqual } from "node:crypto";
+import { extractVPointEmailCode } from "./email";
+import { VPointSession } from "./session";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import type {
   CollectionFailure,
   CollectionManifest,
   CollectionResult,
 } from "./types";
-import { collectVPoint } from "./vpoint";
+import { collectVPoint, VPointSessionExpiredError } from "./vpoint";
+
+export { VPointSession };
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -24,16 +28,54 @@ export default {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
     const result = await runCollection(env);
+    const pending = awaitingReauthentication(result);
     return Response.json(publicResult(result), {
-      status: result.status === "failed" ? 502 : 200,
+      status: pending ? 202 : result.status === "failed" ? 502 : 200,
     });
   },
 
   async scheduled(_controller, env): Promise<void> {
     const result = await runCollection(env);
-    if (result.status === "failed") {
+    if (result.status === "failed" && !awaitingReauthentication(result)) {
       throw new Error(`V Point collection failed; manifest=${result.manifestKey}`);
     }
+  },
+
+  async email(message, env): Promise<void> {
+    const isTarget = message.to.toLowerCase() === requiredSecret(
+      env.VPOINT_EMAIL_RECIPIENT,
+      "VPOINT_EMAIL_RECIPIENT",
+    ).toLowerCase();
+    const raw = isTarget
+      ? await new Response(message.raw).arrayBuffer()
+      : null;
+    let forwardError: unknown = null;
+    try {
+      await message.forward(requiredSecret(
+        env.VPOINT_EMAIL_FORWARD_TO,
+        "VPOINT_EMAIL_FORWARD_TO",
+      ));
+    } catch (error) {
+      forwardError = error;
+    }
+
+    if (raw) {
+      const code = await extractVPointEmailCode(raw);
+      if (code) {
+        const session = sessionStub(env);
+        if (await session.hasPendingChallenge()) {
+          await session.completeEmailCode(code);
+          const result = await runCollection(env);
+          if (result.status === "failed") {
+            throw new Error(
+              `V Point post-auth collection failed; manifest=${result.manifestKey}`,
+            );
+          }
+        }
+      }
+    }
+
+    if (forwardError) throw forwardError;
   },
 } satisfies ExportedHandler<Env>;
 
@@ -45,13 +87,16 @@ async function runCollection(env: Env): Promise<CollectionResult> {
   const failures: CollectionFailure[] = [];
   let historyTotal = 0;
   let historyPageCount = 0;
+  const session = sessionStub(env);
 
   try {
+    const sessionCookie = await session.getSession();
+    if (!sessionCookie) {
+      await session.ensureEmailChallenge();
+      throw new VPointReauthenticationPendingError();
+    }
     const collection = await collectVPoint({
-      sessionCookie: requiredSecret(
-        env.VPOINT_SESSION_COOKIE,
-        "VPOINT_SESSION_COOKIE",
-      ),
+      sessionCookie,
     });
     historyTotal = collection.historyTotal;
     historyPageCount = collection.historyPageCount;
@@ -67,6 +112,10 @@ async function runCollection(env: Env): Promise<CollectionResult> {
       }
     }
   } catch (error) {
+    if (error instanceof VPointSessionExpiredError) {
+      await session.invalidateSession();
+      await session.ensureEmailChallenge();
+    }
     failures.push(failure("collect", error));
   }
 
@@ -104,6 +153,10 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     manifestKey,
   }));
   return { ...manifest, manifestKey };
+}
+
+function sessionStub(env: Env): DurableObjectStub<VPointSession> {
+  return env.VPOINT_SESSION.get(env.VPOINT_SESSION.idFromName("primary"));
 }
 
 function authorized(request: Request, expected: string | undefined): boolean {
@@ -144,6 +197,23 @@ function publicResult(result: CollectionResult): object {
     historyPageCount: result.historyPageCount,
     artifactCount: result.artifacts.length,
     failureCount: result.failures.length,
+    reauthenticationPending: awaitingReauthentication(result),
     manifestKey: result.manifestKey,
   };
+}
+
+function awaitingReauthentication(result: CollectionResult): boolean {
+  return result.status === "failed" &&
+    result.failures.length === 1 &&
+    [
+      "VPointReauthenticationPendingError",
+      "VPointSessionExpiredError",
+    ].includes(result.failures[0]?.errorType ?? "");
+}
+
+class VPointReauthenticationPendingError extends Error {
+  constructor() {
+    super("V Point email reauthentication is pending");
+    this.name = "VPointReauthenticationPendingError";
+  }
 }
