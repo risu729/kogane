@@ -30,6 +30,8 @@ export interface CollectionManifest {
   status: "success" | "partial" | "failed";
   historyTotal: number;
   historyPageCount: number;
+  vMoneyHistoryTotal: number;
+  vMoneyHistoryPageCount: number;
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];
 }

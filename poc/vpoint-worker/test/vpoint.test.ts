@@ -3,6 +3,7 @@ import {
   collectVPoint,
   historyForm,
   parseSessionCookie,
+  vMoneyHistoryForm,
 } from "../src/vpoint";
 
 describe("V Point session", () => {
@@ -33,9 +34,26 @@ describe("V Point history form", () => {
   });
 });
 
+describe("V Money history form", () => {
+  test("matches the current My Page request fields", () => {
+    const form = vMoneyHistoryForm(3);
+    expect(form.get("page")).toBe("3");
+    expect(form.get("sort")).toBe("use");
+    expect(form.get("filter_use")).toBe("1");
+    expect(form.get("filter_charge")).toBe("1");
+    expect(form.get("filter_use_cancel")).toBe("1");
+    expect(form.get("filter_charge_cancel")).toBe("1");
+    expect(form.get("filter_expired")).toBe("1");
+    expect(form.get("filter_transfer")).toBe("1");
+    expect(form.get("filter_refund")).toBe("1");
+    expect(form.get("filter_date")).toBe("");
+  });
+});
+
 describe("V Point collection", () => {
   test("walks all declared history pages and stores raw JSON", async () => {
-    const seenPages: string[] = [];
+    const seenPointPages: string[] = [];
+    const seenVMoneyPages: string[] = [];
     const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
       if (path === "/api/balance_info") {
@@ -53,7 +71,17 @@ describe("V Point collection", () => {
       const form = init?.body;
       if (!(form instanceof FormData)) throw new Error("expected FormData");
       const page = String(form.get("page"));
-      seenPages.push(page);
+      if (path === "/api/tmoney_history") {
+        seenVMoneyPages.push(page);
+        return jsonResponse({
+          status: { code: "0000" },
+          results: {
+            total: 2,
+            history: [{ money: 100 }, { money: -50 }],
+          },
+        });
+      }
+      seenPointPages.push(page);
       const count = page === "3" ? 1 : 30;
       return jsonResponse({
         status: { code: "0000" },
@@ -69,15 +97,19 @@ describe("V Point collection", () => {
       sessionCookie: "session=value",
       fetcher,
     });
-    expect(seenPages).toEqual(["1", "2", "3"]);
+    expect(seenPointPages).toEqual(["1", "2", "3"]);
+    expect(seenVMoneyPages).toEqual(["1"]);
     expect(result.historyTotal).toBe(61);
     expect(result.historyPageCount).toBe(3);
+    expect(result.vMoneyHistoryTotal).toBe(2);
+    expect(result.vMoneyHistoryPageCount).toBe(1);
     expect(result.artifacts.map((artifact) => artifact.filename)).toEqual([
       "balance-info.json",
       "smfg-point.json",
       "history-page-0001.json",
       "history-page-0002.json",
       "history-page-0003.json",
+      "vmoney-history-page-0001.json",
       "collection-summary.json",
     ]);
   });
@@ -91,6 +123,31 @@ describe("V Point collection", () => {
       sessionCookie: "session=value",
       fetcher,
     })).rejects.toThrow("expired");
+  });
+
+  test("stores an empty V Money response for accounts without history", async () => {
+    const fetcher = async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/tmoney_history") {
+        return jsonResponse({ status: { code: "0000" }, results: {} });
+      }
+      if (path === "/api/tpoint_history") {
+        return jsonResponse({
+          status: { code: "0000" },
+          results: { total: 0, history: [], graph: {} },
+        });
+      }
+      return jsonResponse({ status: { code: "0000" }, results: {} });
+    };
+    const result = await collectVPoint({
+      sessionCookie: "session=value",
+      fetcher,
+    });
+    expect(result.vMoneyHistoryTotal).toBe(0);
+    expect(result.vMoneyHistoryPageCount).toBe(1);
+    expect(result.artifacts.some((artifact) =>
+      artifact.filename === "vmoney-history-page-0001.json"
+    )).toBe(true);
   });
 });
 

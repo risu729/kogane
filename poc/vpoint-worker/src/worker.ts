@@ -87,6 +87,8 @@ async function runCollection(env: Env): Promise<CollectionResult> {
   const failures: CollectionFailure[] = [];
   let historyTotal = 0;
   let historyPageCount = 0;
+  let vMoneyHistoryTotal = 0;
+  let vMoneyHistoryPageCount = 0;
   const session = sessionStub(env);
 
   try {
@@ -100,6 +102,8 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     });
     historyTotal = collection.historyTotal;
     historyPageCount = collection.historyPageCount;
+    vMoneyHistoryTotal = collection.vMoneyHistoryTotal;
+    vMoneyHistoryPageCount = collection.vMoneyHistoryPageCount;
     for (const artifact of collection.artifacts) {
       try {
         artifacts.push(await storeArtifact({
@@ -134,6 +138,8 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     status,
     historyTotal,
     historyPageCount,
+    vMoneyHistoryTotal,
+    vMoneyHistoryPageCount,
     artifacts,
     failures,
   };
@@ -148,6 +154,8 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     status,
     historyTotal,
     historyPageCount,
+    vMoneyHistoryTotal,
+    vMoneyHistoryPageCount,
     artifactCount: artifacts.length,
     failureCount: failures.length,
     manifestKey,

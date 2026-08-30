@@ -3,6 +3,7 @@ import type { JsonObject, RawArtifact } from "./types";
 const ORIGIN = "https://mypage.tsite.jp";
 const BALANCE_PATH = "/api/balance_info";
 const HISTORY_PATH = "/api/tpoint_history";
+const VMONEY_HISTORY_PATH = "/api/tmoney_history";
 const SMFG_PATH = "/api/smfg_point";
 const MAX_HISTORY_PAGES = 200;
 
@@ -20,6 +21,8 @@ export interface VPointCollection {
   artifacts: RawArtifact[];
   historyTotal: number;
   historyPageCount: number;
+  vMoneyHistoryTotal: number;
+  vMoneyHistoryPageCount: number;
 }
 
 interface HistoryCollection {
@@ -36,6 +39,7 @@ export async function collectVPoint(options: {
   const balance = await client.requestJson(BALANCE_PATH);
   const smfg = await client.requestJson(SMFG_PATH);
   const history = await client.history();
+  const vMoneyHistory = await client.vMoneyHistory();
   const artifacts: RawArtifact[] = [
     {
       dataset: "balance-info",
@@ -55,14 +59,22 @@ export async function collectVPoint(options: {
       mediaType: "application/json",
       body: page.rawText,
     })),
+    ...vMoneyHistory.pages.map((page, index) => ({
+      dataset: `vmoney-history-page-${String(index + 1).padStart(4, "0")}`,
+      filename: `vmoney-history-page-${String(index + 1).padStart(4, "0")}.json`,
+      mediaType: "application/json",
+      body: page.rawText,
+    })),
     {
       dataset: "collection-summary",
       filename: "collection-summary.json",
       mediaType: "application/json",
       body: JSON.stringify({
-        schemaVersion: "vpoint-collection-summary-v1",
+        schemaVersion: "vpoint-collection-summary-v2",
         historyTotal: history.total,
         historyPageCount: history.pages.length,
+        vMoneyHistoryTotal: vMoneyHistory.total,
+        vMoneyHistoryPageCount: vMoneyHistory.pages.length,
       }),
     },
   ];
@@ -70,6 +82,8 @@ export async function collectVPoint(options: {
     artifacts,
     historyTotal: history.total,
     historyPageCount: history.pages.length,
+    vMoneyHistoryTotal: vMoneyHistory.total,
+    vMoneyHistoryPageCount: vMoneyHistory.pages.length,
   };
 }
 
@@ -102,6 +116,24 @@ export function historyForm(page: number): FormData {
   form.set("filter_correct", "1");
   form.set("filter_extend", "1");
   form.set("filter_reissue", "1");
+  form.set("filter_date", "");
+  return form;
+}
+
+export function vMoneyHistoryForm(page: number): FormData {
+  if (!Number.isSafeInteger(page) || page < 1) {
+    throw new Error("V Money history page must be a positive integer");
+  }
+  const form = new FormData();
+  form.set("page", String(page));
+  form.set("sort", "use");
+  form.set("filter_use", "1");
+  form.set("filter_charge", "1");
+  form.set("filter_use_cancel", "1");
+  form.set("filter_charge_cancel", "1");
+  form.set("filter_expired", "1");
+  form.set("filter_transfer", "1");
+  form.set("filter_refund", "1");
   form.set("filter_date", "");
   return form;
 }
@@ -151,16 +183,35 @@ class VPointClient {
   }
 
   async history(): Promise<HistoryCollection> {
+    return this.paginatedHistory(HISTORY_PATH, historyForm, false);
+  }
+
+  async vMoneyHistory(): Promise<HistoryCollection> {
+    return this.paginatedHistory(VMONEY_HISTORY_PATH, vMoneyHistoryForm, true);
+  }
+
+  private async paginatedHistory(
+    path: string,
+    formForPage: (page: number) => FormData,
+    emptyResultsAreEmptyHistory: boolean,
+  ): Promise<HistoryCollection> {
     const pages: RawJsonResponse[] = [];
     let declaredTotal: number | null = null;
     let observedRows = 0;
     let pageSize: number | null = null;
 
     for (let page = 1; page <= MAX_HISTORY_PAGES; page += 1) {
-      const response = await this.requestJson(HISTORY_PATH, historyForm(page));
+      const response = await this.requestJson(path, formForPage(page));
       const results = response.json.results;
+      if (
+        emptyResultsAreEmptyHistory &&
+        (!isObject(results) || Object.keys(results).length === 0)
+      ) {
+        pages.push(response);
+        return { pages, total: 0 };
+      }
       if (!isObject(results)) {
-        throw new Error("V Point history returned no results object");
+        throw new Error(`${path} returned no results object`);
       }
       const rows = Array.isArray(results.history) ? results.history.length : 0;
       const total = countValue(results.total);

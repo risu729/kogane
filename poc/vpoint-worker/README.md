@@ -1,8 +1,9 @@
 # V Point Worker PoC
 
-Vポイント本体の残高・期限bucket・SMBC由来内訳・最大3年の履歴を、認証済み
-VポイントMy Page sessionでfirst-party JSON APIから取得し、raw responseとmanifestを
-private R2へ保存するPoCである。VポイントPay、Vマネー、Vpass明細は別台帳のため含めない。
+Vポイント本体の残高・期限bucket・SMBC由来内訳・最大3年の履歴、およびVマネー残高・
+最大3年の履歴を、認証済みVポイントMy Page sessionでfirst-party JSON APIから取得し、
+raw responseとmanifestをprivate R2へ保存するPoCである。VポイントPayとVpass明細は別の
+サービス・認証・台帳であるため含めない。
 
 ## Liveで確認したデータソース
 
@@ -12,14 +13,23 @@ private R2へ保存するPoCである。VポイントPay、Vマネー、Vpass明
 - `POST https://mypage.tsite.jp/api/balance_info`
   - `results.common[]`: `point`, `expiration`, `point_type`
   - `results.store[]`: store限定の期限bucket
+  - `results.tmoney`: Vマネー残高・有効期限。live口座では空objectだった
 - `POST https://mypage.tsite.jp/api/tpoint_history`
   - multipart `page`, `get_graph`, `sort`と全履歴filter
   - live口座では`total=149`。page 1-4は各30件、page 5は29件、終端のpage 6は0件で、
     すべてHTTP 200 / application status `0000`を確認した。PoCはtotalへ達したpage 5で停止する。
 - `POST https://mypage.tsite.jp/api/smfg_point`
   - `results.get_point.point_smbc`, `point_smcc`
+- `POST https://mypage.tsite.jp/api/tmoney_history`
+  - multipart `page`, `sort`と、利用・チャージ・取消・失効・移行・返金の全履歴filter
+  - Vポイント履歴と同じMy Page sessionを使用する
+  - live口座ではHTTP 200 / application status `0000`、`total=0`, `history=[]`だった
 
-`/api/tmoney_history`はVマネーであり、VポイントPayではないため呼ばない。
+[Vポイント公式FAQ](https://ssl.help.tsite.jp/faq/show/25463?site_domain=qa-tsite)は、
+Vマネー履歴を同じMy Pageで確認でき、履歴上限は過去3年と説明している。また、
+[公式チャージ案内](https://t-point.tsite.jp/finance/tmoney/charge/ptcharge/)もVマネーと
+三井住友カードのVポイントPayを明確に区別する。Vマネーは別の電子マネー台帳だが、この
+collectorの認証境界とデータソースには含まれるため、同じrunで収集する。
 
 ## 認証とsession自動更新
 
@@ -74,12 +84,15 @@ raw/v-point/YYYY/MM/DD/<run-id>/
   smfg-point.json
   history-page-0001.json
   ...
+  vmoney-history-page-0001.json
+  ...
   collection-summary.json
   manifest.json
 ```
 
-履歴は毎run、`filter_date`を空にして公開上限の最大3年を全page走査する。現在の149件なら
-5 requestなのでQueueは不要である。
+Vポイント履歴とVマネー履歴は毎run、`filter_date`を空にして公開上限の最大3年を全page
+走査する。現在はVポイント149件を5 request、Vマネー0件を1 requestで取得できるため、
+Queueは不要である。
 
 ## 開発とデプロイ
 
@@ -109,6 +122,11 @@ HTTP 502を返す。`GET /health`は秘密値や口座データを返さない�
 受信・Gmail転送・session生成・再収集を完了した。成功runは履歴149件を5 pageで走査し、
 8 artifactとfailure 0のmanifestをR2へ保存した。続くmanual triggerも追加メールなしで
 Durable Objectのsessionを再利用し、同じ149件・5 page・8 artifactで成功した。
+
+同日のVマネー追加後のproduction verificationでは、同じメール認証とMy Page sessionで
+`/api/tmoney_history`もHTTP 200 / application status `0000`となった。live口座のVマネー
+履歴は0件だったが、空のpage 1 raw responseを欠落させず保存した。Vポイント149件・5 page、
+Vマネー0件・1 page、9 artifact、failure 0のv2 manifestをR2から再読して確認した。
 
 検証環境を削除するときは、次を一組として扱う。
 

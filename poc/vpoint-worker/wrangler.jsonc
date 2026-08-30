@@ -36,7 +36,7 @@
     }
   ],
   "vars": {
-    "COLLECTOR_SCHEMA_VERSION": "vpoint-worker-poc-v1"
+    "COLLECTOR_SCHEMA_VERSION": "vpoint-worker-poc-v2"
   },
   "secrets": {
     "required": [
