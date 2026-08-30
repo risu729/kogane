@@ -103,7 +103,7 @@ SBI VCトレードには、暗号資産・日本円の資産状況、残高履�
 
 ### Bitwardenとの関係
 
-Bitwarden自体はWebサイト・アプリのpasskey保存と利用に対応する。SBI VCトレードの公式対応プロバイダー一覧にBitwardenはないものの、2026-08-31に本人の既存Bitwarden passkeyをWindows Chromeから選択し、現行VCTRADEへ正常loginできた。したがってこの環境での相互運用性はlive確認済みである。これはBitwarden CLIからpasskey秘密鍵をexportできること、または別runtimeで無人利用できることを意味しない。パスワード、TOTPシード、通常利用のpasskeyを同一自動化プロセスへ渡す設計も採用しない。
+Bitwarden自体はWebサイト・アプリのpasskey保存と利用に対応する。SBI VCトレードの公式対応プロバイダー一覧にBitwardenはないものの、2026-08-31に本人の既存Bitwarden passkeyを選択して現行VCTRADEへ正常loginできた。最初に誤って開いた通常Chromeでもlogin成功を見たが、そのtabは閉じた。後述する認証済み通信・schema evidenceの正本は、その後に本人がloginを完了した**Kogane Capture Chrome**で取得した。したがってBitwardenとの相互運用性はlive確認済みである。これはBitwarden CLIからpasskey秘密鍵をexportできること、または別runtimeで無人利用できることを意味しない。パスワード、TOTPシード、通常利用のpasskeyを同一自動化プロセスへ渡す設計も採用しない。
 
 一次資料:
 
@@ -323,10 +323,10 @@ PR #23で調べた公開artifactが現行deployでも使われているか、認
 
 ### ブラウザー観測
 
-- `https://simple.sbivc.co.jp/login` は通常のWindows Chrome 151でHTTP 200となり、メールアドレス/口座番号、password、`パスキーでログイン`を表示した。
+- 公開login UIの最初の確認は誤って通常Windows Chrome 151で行い、HTTP 200、メールアドレス/口座番号、password、`パスキーでログイン`を確認した。このtabは閉じた。以降の認証済みnetwork/schema観測はKogane Capture Chromeだけを正本とする。
 - 初期表示時に`/libs/simplewebauthn-browser.min.js`とCloudflare Turnstileのscript/iframeを読み込んだ。
 - credential操作前に、browserは`POST /api/cccmdipresen/gw/initiateLoginWithPasskey`を1回送り、HTTP 200 `application/json`を受けた。bodyは保存していない。このeventはWebAuthn challenge bootstrapで、POSTであっても資産・設定を変更するwriteではない。HTTP methodだけでread/writeを分類できない具体例である。
-- Bitwarden vaultには本人のSBI VCトレードitemとpasskey sectionが存在することだけを確認した。username、password、passkey material、TOTP、Cookie、response bodyは表示・複製・保存していない。live bootstrapでは通常Chromeで既存passkeyを使うのを第一候補とし、ID/password + MFAは公式に残るfallbackとする。
+- Bitwarden vaultには本人のSBI VCトレードitemとpasskey sectionが存在することだけを確認した。username、password、passkey material、TOTP、Cookie、response bodyは表示・複製・保存していない。live bootstrapではKogane Capture Chromeで既存passkeyを使い、ID/password + MFAは公式に残るfallbackとする。
 
 ### 公開bundle/source map
 
@@ -365,7 +365,7 @@ login page map `b21877a.js.map`は91,166 bytes、SHA-256 `d5c3e578f302981163acf1
 - passkey開始: `POST /api/cccmdipresen/gw/initiateLoginWithPasskey`, dataは`channel: "SIMPLE_MODE"`。
 - passkey完了: `POST /api/cccmdipresen/gw/loginWithPasskey`。challenge、credential ID、authenticator data、client data JSON、signature、user handleを送る。
 
-password login requestにはTurnstile tokenの`response`があるが、公開source上のpasskey開始・完了request DTOにはTurnstile token fieldがない。2026-08-31の通常Chromeでも、credential操作前のpasskey開始POSTは200だった。これはpasskey経路がpassword経路より自動化しやすい可能性を示すが、Cloudflare edgeがCookie・bot score・challenge結果を別に要求しないことの証明ではない。
+password login requestにはTurnstile tokenの`response`があるが、公開source上のpasskey開始・完了request DTOにはTurnstile token fieldがない。2026-08-31のKogane Capture Chromeで、credential操作前のpasskey開始POSTは200だった。これはpasskey経路がpassword経路より自動化しやすい可能性を示すが、Cloudflare edgeがCookie・bot score・challenge結果を別に要求しないことの証明ではない。
 
 second authの`authType`は`0`がemail、`1`がauthenticator/TOTP、`2`がSMSである。password loginが失敗した場合、clientはTurnstile tokenを再利用せずwidgetをresetする。Turnstile tokenはCloudflare仕様上5分・single-useであり、保存・再利用するsession credentialではない。passkey completion後はsecond-auth endpointを通らずlogin成功処理へ進む。
 
@@ -373,7 +373,7 @@ login resultの`isAgreed`がfalseの場合、現行UIは`setAgreement` write eve
 
 ### 認証済みlive検証
 
-2026-08-31、Kogane Captureの通常Windows Chromeで、本人がBitwardenに保存していた既存passkeyを選択しloginに成功した。秘密、request/response bodyの実値、Cookie値、口座ID、残高、IPは保存していない。
+2026-08-31、本人が**Kogane Capture Chrome profile**でBitwardenに保存していた既存passkeyを選択しloginに成功した。以下の認証済みnetwork/schema evidenceはすべてこのprofileで取得した。秘密、request/response bodyの実値、Cookie値、口座ID、残高、IPは保存していない。
 
 | 順序 | sanitized metadata | 結果 |
 |---:|---|---|
@@ -417,11 +417,11 @@ Cloudflare Workers Web CryptoでWebAuthn assertion用ECDSA署名を組み立て�
 6. paginationは`list`と`totalSize`が確認できた場合だけ続行し、100 pageの既定上限を設ける。schema不明時に無限走査しない。
 7. outputには実残高・履歴が含まれるためlocal private directoryだけに置き、Git、CI artifact、stdout、Cloudflareへ送らない。
 
-synthetic testで確認済みなのは、request shape、recent/historical分離、pagination停止、non-JSON/error拒否、error textにsession値を含めないことまでである。通常Chromeではpasskey loginと`accountMargin`の実レスポンスschemaを確認した。一方、local Bun clientへ認証済みsessionをまだ投入しておらず、full pagination、直接HTTP replay、session寿命は未検証である。
+synthetic testで確認済みなのは、request shape、recent/historical分離、pagination停止、non-JSON/error拒否、error textにsession値を含めないことまでである。Kogane Capture Chromeではpasskey loginと`accountMargin`等の実レスポンスschemaを確認した。一方、local Bun clientへ認証済みsessionをまだ投入しておらず、full pagination、直接HTTP replay、session寿命は未検証である。
 
 ### 次のlive検証
 
-1. 既存passkeyによる通常Chrome loginは成功済み。次はreloadで`verifyGa`になる条件を、1回のsanitized metadata観測で特定する。
+1. 既存passkeyによるKogane Capture Chrome loginは成功済み。次はreloadで`verifyGa`になる条件を、1回のsanitized metadata観測で特定する。
 2. DevToolsまたはlocal CDP helperで、秘密値を画面・logへ出さず、認証済みCookieと`secureKey`をGit外のmode 600一時fileへ渡す。一時fileの生成helperはCookie maskingを検証するまでcommitしない。
 3. Bun clientから`cashBalanceList`を1回だけ呼び、status/content-type/schemaだけを確認する。403、Turnstile challenge、session invalidなら反復せず停止する。
 4. 成功した場合のみ`accountMargin`、`executionList` recent/historical各1 page、`getCashflowList` historical 1 pageへ進む。
