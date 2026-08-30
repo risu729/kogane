@@ -262,3 +262,22 @@ A は公開 API がないため不適、B は非公式 HTML と動的 login prot
 - 公開実装 Okura が本番の各 issuer／passkey 未登録 ID で成功しているか。コードの新しさは live 成功の証明ではない。
 - 認証 host の WAF／bot-management vendor。Cloudflare は公開 `www` で確認したが、`my` の製品名と Akamai 利用は未確認。
 - 公式 version 3.11.1 APK の signing certificate、manifest、host、network security config、app schema、pinning/Integrity 実装。現環境では正規 artifact を取得できず未解析。
+
+## Worker PoC（2026-08-31）
+
+`poc/myjcb-worker`に、既存collectorをreuseしない独立Cloudflare Workers PoCを追加した。これは未deploy・未実認証であり、現段階のcoverageはpassword login bootstrapとJCBデビット明細の既知GETだけである。
+
+構成は二段階である。
+
+1. `login-protection.ts`がCloudflare Browser Runで公式`/Login`を開き、公式`login-prot.js`をpage内で実行する。named `userId`/`password`だけをselectorで入力し、submit直前にmethod/origin/pathを検査する。passkey、OTP、秘密の合い言葉、CAPTCHA、Access Deniedを検出したら人へhand-offし、繰り返さない。
+2. login landingが既知mypageであることを確認後、cookieとUser-Agentだけをmemory上のcookie jarへ移す。通常Worker `fetch`は固定allowlistのGETだけを行い、デビットmenuと`seq=0..14`を取得する。Browserはconnectionごとに閉じる。
+
+Workers内でdownloadした任意JavaScriptをevalせず、保護scriptを手書き移植しない。Browser Runで公式scriptを実行できるため、現段階でContainerは不要と判断した。Browser Runだけが環境判定で失敗し、同じ公式flowがContainer Chromeで再現性を持って成功した場合に限りlogin bootstrapの最小Container化を再検討する。
+
+active allowlistはlogin page GET、既知login form POST、mypage GET、デビットmenu GET、デビットdetail GETだけである。クレジット確定・未確定、CSV/PDF/OFX、おまとめ表示切替は、本人操作で現行contractをsanitized観測するまで`DEFERRED_READ_ROUTES`としてdisabledにした。HTTP methodだけでread/writeを判断せず、各POST/downloadを個別にmethod/path/field/CSRF/redirect/responseまで確認してから追加する。
+
+R2は`raw/myjcb/YYYY/MM/DD/<run-id>/<connection-id>/...`でappend-onlyに保存する。login/mypage/protection source、credential、protected POST body、cookie値は保存しない。明細HTMLはtoken類と16桁card番号をredactし、UTF-8へ正規化してから保存する。`manifest.json`はSHA-256、dataset、state、period、failure metadataだけを持つ。`connection-id`は利用者が付けるpseudonymで、MyJCB IDやcard番号を使わない。
+
+日次実行は`0 21 * * *`のCloudflare CronからWorker `scheduled()`を直接呼ぶ。GitHub Actions cronは使用しない。secretは`MYJCB_CONNECTIONS_JSON`と手動trigger用`ADMIN_TRIGGER_TOKEN`で、source/configへ値をcommitしない。connections arrayの各要素は独立したID/session/R2 namespaceであり、最初のIDや一つのおまとめloginが全IDを包含すると仮定しない。
+
+bootstrapは`password`と`session`を明示する。password modeは公式formをBrowser Runで処理する。passkey登録済みIDはpassword login不可なので、本人が既存browserで作った短命sessionをcookie＋同一User-Agentとしてsecret投入し、mypage検証後にread-only replayできる。ただしこれはpasskey自動化ではなく、session失効後の無人renewalは未解決である。実装、stop条件、R2 layout、cleanup前提、synthetic test、未確認事項は`poc/myjcb-worker/README.md`に集約した。
