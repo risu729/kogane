@@ -313,6 +313,96 @@ scopeを証明するものではない。
 で login を再現できると仮定せず、低頻度、同一 profile、同一 UA/egress で成功/失敗を
 測る。401/403/429 や challenge を bypass しない。
 
+### 2026-08-30 本人同意済みlive replayとWorkers実行
+
+上の段階的方針に従って本人の実口座で確認した結果、現行read-only loginはbrowserを必要と
+しなかった。最初にKuebiko Chromeで成功flowを1回観測した後、Chrome cookieを流用しない
+新規`.NET HttpClient`で次の連鎖がすべて200になった。
+
+1. `GET /pages/db/dbca0100/input/`
+2. `POST /custom-web00/dbca/csrf-token/get`で`BFF-CSRF`と`FSID`を取得
+3. `FBaaS-Provider-Key: CustomAuth`、画面/event header、店番号、口座番号、login passwordを
+   `POST /custom-web00/dbca/cust-web/to-customers/login`へ送信
+4. `POST /custom-web00/dcba/cust-web/gross-balance/acq`
+5. `POST /custom-web00/eaba/cust-web/ordinary-deposit-transaction-histories`
+6. pagerと`POST /custom-web00/eaba/ordinary-deposit-transaction-histories/csv/load`
+
+UA、`sec-*`、Origin、Referer、TLS impersonation、Caulis/PhishWall telemetryは付けなかった。
+読取APIはCookie、`BFF-CSRF`、`FBaaS-Message-Locale`、`FBaaS-Request-Biz-Hd-Common`、
+`FBaaS-Revision`、`FBaaS-SS`、`FBaaS-URI`だけで再生できた。`FBaaS-Provider-Key`は
+公開`core.js`にある静的値で、端末評価tokenではない。revisionは
+`/pages/config/revisions/<area>/revision.json`から毎回取得し、固定しない。
+
+同じ実装をCloudflare Workerの標準`fetch()`へ移し、Cloudflare egressからも新規login、
+総残高、非空の円履歴、公式CSV取得に成功した。raw responseはprivate R2
+`kogane-sony-bank-collector-poc`へ日付/run単位で保存し、login response、Cookie値、CSRF、
+passwordは保存しない。従って現時点のSony銀行Web collectorはContainer、Browser Rendering、
+Chrome profile、Akamai workaroundを必要としない。
+
+CSV requestで任意の`depositAndWithdrawalSg`を空文字として送ると422 `FCB00010`になった。
+UI実装どおり値が未定義ならfield自体を省略すると200になる。任意項目を空文字で補完しない。
+
+## Sony Bank WALLET利用履歴
+
+Sony Bank WALLETのVisa debit明細は普通預金BFFの別datasetではなく、銀行BFFから外部card
+基盤へSSOする別系統である。
+
+- [商品詳細説明書](https://sonybank.jp/products/sbw/03.html)はWeb明細の保持を直近15か月とする。
+- `確定日`が日付なら確定、`未確定`なら加盟店から売上確定dataが未着である。
+- 利用、利用取消、売上確定、売上確定取消が別行になる場合と、当初利用行が確定行へ
+  置換される場合がある。merchant名も確定時に変わりうるためappend-only ledgerとして扱わない。
+- [WALLET app](https://sonybank.jp/tool/app/sbw/)は当月利用状況、過去1年の月別推移、
+  都度/継続利用の内訳、継続利用明細、family debitのcard別利用状況を案内する。
+- Visa debit専用明細のCSV/PDFは公式公開資料で確認できない。円/外貨普通CSVは照合に使えるが、
+  確定日、未確定状態、備考、card識別、行置換関係の完全な代替ではない。
+
+現行公開bundleの直接利用明細flowは次である。
+
+```text
+screenId: JADA160AC5f
+eventId:  JADA160AC5fE01
+POST /custom-web00/jada/debit-sso/login-usage-dtl-inq
+data: branchNum, accountNum,
+      debitSSOTransactionType="10", serviceId="DAYA070Ao", buttonId="021"
+```
+
+このresponseの`debitSsoBinDat`は明細ではなく一時SSO dataである。browserはこれをhidden
+`MessageCheck`として`POST https://igw.sonybank.jp/vcfb/vcfb02001`へ送る。通常menuの
+`POST /custom-web00/jada/debit-sso/login`も同じ外部入口へ遷移する。
+
+2026-08-31にKuebikoで本人操作をlive captureし、続けてChrome Cookieを流用しない通常HTTP
+clientで再生した。銀行BFFから発行した一時SSO値を`igw.sonybank.jp`へ渡すと、ASCII hidden
+`r01`/`cc`を持つauto-submit HTMLが返り、これを`dc.sonybank.jp/p/sLogin/RW13F2010101`へ
+POSTすると`利用明細照会`が200になった。Linux BunとCloudflare Workerの標準`fetch()`で
+実装でき、Chrome profileやbrowser runtimeは不要である。
+
+card基盤はJSON APIではなくShift_JIS HTMLで、構造は次だった。
+
+- 直近15か月は`W131301.referenceDate`の15 optionとして返る。
+- 月切替はNablarch form POST `RW1313010201`。各月は一覧HTML全体として返る。
+- お取引日、ご利用通貨・金額、お取引通貨・金額、換算レート、海外取引経費、現地手数料、
+  お取引内容、承認番号、確定日、備考が一覧内にあり、別detail endpointはない。
+- `RW1313010301`は月別PDFのGET formだが、現PoCはHTMLだけを保存する。
+- 公開`/js/W131301.js`は利用明細月検索を10秒以内に連続送信すると後者を拒否する。
+  実口座でも高速走査の途中で403になり、10.25秒間隔では15か月すべて成功した。
+- 一時SSO値、`r01`、`cc`、Cookie/JSESSIONID、hidden input値はR2へ保存しない。月別HTMLは
+  `;jsessionid`を除去し、hidden inputのvalueを空にしてからprivate R2へ保存する。
+
+同じlive captureで普通預金取引履歴画面`/pages/ea/eaba0600/`も確認した。通貨はJPYに加え
+USD/EUR/GBP/AUD/NZD/CAD/CHF/HKD/ZAR/SEK、初回は
+`/eaba/cust-web/ordinary-deposit-transaction-histories`、2ページ目以降は
+`/eaba/cust-web/ordinary-deposit-transaction-histories-pager`、CSVは
+`/eaba/ordinary-deposit-transaction-histories/csv/load`である。3件単位、開始位置は
+1/4/7...、20か月を一度に指定しても200になった。2025-01-01〜2026-08-31の実口座smoke
+testでは外貨57 artifact、WALLET 15か月を含む102 artifactを生成し、保存前WALLET HTMLの
+session/hidden値残存は0件だった。明細の実値はdocumentationへ記録していない。
+
+同日のCloudflare Worker本番検証では2025-09-01〜2026-08-31を走査し、円10件、外貨6件・
+11ページ、WALLET 15か月を含む34 artifactをprivate R2へ保存してfailure 0だった。R2から
+月別HTMLを再取得し、日本語title、JSESSIONIDなし、非空hidden値なし、MessageCheckなしを確認した。
+EURなど取引0件の通貨でCSV生成を呼ぶとCloudflare egressだけ500になる場合があったため、
+0件では空CSVを省略し、残高と空の履歴JSONは保持する。取引がある通貨のCSVは保存する。
+
 ## 公式 APK / app と Web の役割
 
 ### 公式配布物
@@ -609,10 +699,13 @@ boolean と schema metadata に限定する。
 - 通帳 HTML/BFF の page size、pagination、memo/EDI の export 可否
 - 外貨横断 CSV の保持開始日、最大件数、一括範囲、currency precision
 - 円定期、積立定期、外貨定期、仕組み預金の現行 lot field と終了済み契約の保持期間
-- current BFF の authenticated read endpoint、response schema、CSRF/cookie/session lifetime
-- Caulis/PhishWall が login acceptance に与える条件、Cloudflare/OCI egress の評価
+- confirmed BFF以外の商品別read endpoint、sessionのidle/absolute lifetime
+- Caulis/PhishWallが現在成功しているpassword login以外のrisk条件に与える影響。Cloudflare
+  egressはtelemetryなしで成功、OCIは未評価
 - CloudFront に AWS WAF/Bot Control が関連付くか。Akamai は現行 login で未観測
 - session の browser/profile 間 export/import と同時 session の扱い
+- WALLET SSO後の`igw.sonybank.jp`一覧/detail/pagination API、15か月走査、stable ID、
+  family debit識別、未確定から確定への行置換規則
 - 2 appのbase/split集合、versionCode、signer、manifest component/permission/deep link
 - app read APIのhost/path/method/schema/pagination、token/cookie/key alias、refresh/logout
 - main appの1口座1端末、transaction key、app→Web SSO handoffの具体的device/session binding
@@ -637,6 +730,12 @@ boolean と schema metadata に限定する。
 - [ソニー銀行 アプリの表示内容](https://sonybank.jp/tool/app/banking/01.html)
 - [二つの公式アプリの違い](https://sonybank.jp/inquiry/app/01.html)
 - [Sony Bank WALLET アプリ](https://sonybank.jp/tool/app/sbw/)
+- [Sony Bank WALLET 商品詳細説明書](https://sonybank.jp/products/sbw/03.html)
+- [Visa debitの引落・返金・明細状態](https://sonybank.jp/products/sbw/29.html)
+- [Sony Bank WALLET明細の公式確認手順](https://sonybank.jp/campaign/wallet202606/)
+- [WALLET利用明細直リンク](https://sonybank.jp/pages/ja/jada160a/confirm1/)
+- [WALLET SSO confirm4 bundle](https://sonybank.jp/pages/ja/_next/static/chunks/pages/jada160a/confirm4-ff822f4f2d314a11e514.js)
+- [WALLET SSO confirm5 bundle](https://sonybank.jp/pages/ja/_next/static/chunks/pages/jada160a/confirm5-1c58728bac0d7c38262f.js)
 - [ソニー銀行 アプリ Google Play](https://play.google.com/store/apps/details?id=net.moneykit.SonyBankApp)
 - [Sony Bank WALLET Google Play](https://play.google.com/store/apps/details?id=net.moneykit.sbw)
 - [2026-08-26 アプリ renewal](https://sonybank.jp/info/2026/0724-01.html)
