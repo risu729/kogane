@@ -12,6 +12,7 @@
 - Safety Passは銀行側の登録受理、契約者番号と登録端末の紐付け、解除・失効状態を含む。Android 12.8.0候補の静的解析では、契約IDをaliasとするEC秘密鍵を`AndroidKeyStore`内で生成し、毎回のサーバーchallengeを`BiometricPrompt.CryptoObject`で生体認証後に署名する実装を確認した。秘密鍵exportはなく、profile/app dataのコピーでは移植できない。
 - ログイン側の `direct.smbc.co.jp` と取引側の `direct3.smbc.co.jp` がAkamai edgeを使うことは確認できた。Bot Manager系の保護も有力だが、具体的なWAFポリシーと認証後エンドポイントでの判定条件は未確認である。
 - 個人口座向け公式APIは存在するが、契約済みの電子決済等代行業者向けであり、個人開発者が自己口座用トークンを直接発行する公開経路は確認できなかった。本プロジェクトではaggregatorを避けるため採用しない。
+- 補助経路として確認した既存Money Forward MEアカウントはSMBCの円・外貨をAPI連携済みであり、WSL上の`bw get item`から取得した既存Bitwarden passkeyを用いて、ブラウザなしのMoney Forward ID loginと認証済み`/me`取得に成功した。aggregator回避方針は維持するが、完全無人性を優先する場合の実動fallbackは成立する。
 
 総合評価は、**普通預金MVPの実装コスト 3/5、複数科目を含む堅牢な実装 4/5、完全無人ログインの見込み 1/5、有人承認後の自動収集 4/5**。
 
@@ -295,18 +296,38 @@ Kuebikoの専用Chrome profileで本人がログインした状態を読み取�
 - [コース別対応機能一覧](https://support.me.moneyforward.com/hc/ja/articles/900004382283-%E3%83%97%E3%83%AC%E3%83%9F%E3%82%A2%E3%83%A0%E3%82%B5%E3%83%BC%E3%83%93%E3%82%B9-%E3%82%B3%E3%83%BC%E3%82%B9%E5%88%A5%E5%AF%BE%E5%BF%9C%E6%A9%9F%E8%83%BD%E4%B8%80%E8%A6%A7): 無料会員は過去1年、4連携まで。プレミアムは期間・連携数とも無制限
 - [データの閲覧可能期間](https://support.me.moneyforward.com/hc/ja/articles/900004413423-%E3%83%87%E3%83%BC%E3%82%BF%E3%81%AE%E9%96%B2%E8%A6%A7%E5%8F%AF%E8%83%BD%E6%9C%9F%E9%96%93%E3%81%AB%E3%81%A4%E3%81%84%E3%81%A6%E6%95%99%E3%81%88%E3%81%A6%E3%81%8F%E3%81%A0%E3%81%95%E3%81%84): 初回に連携先で照会可能な期間を取得し、古い取得済みデータも保持
 
-### Money Forward ID認証とパスキー再現
+### Money Forward ID認証とBitwardenパスキー再現
 
-Kuebiko captureとBitwardenの表示メタデータを突き合わせ、次を確認した。
+Kuebiko capture、WSL上のBitwarden CLI 2026.8.0、Bitwarden公式client sourceを突き合わせ、次を確認した。`bw get item`はlogin itemの`fido2Credentials`を復号して返し、今回の既存credentialには`credentialId`、PKCS#8形式のP-256 private key、RP ID、user handle、counter等が含まれていた。値そのもの、vault session、master password、Cookie、challenge、assertionは保存・コミットしていない。
 
 - WebAuthn RP ID/登録先は双方とも`id.moneyforward.com`で、domain不一致ではない。
 - Bitwardenでパスキーを削除・再作成すると、Money Forwardが`POST /webauthn/assertion/options`で返すemail指定ログイン用`allowCredentials`のcredential IDも新しい値へ変わった。したがってMoney Forward側の再登録は反映されている。
 - assertion optionsは`userVerification: required`、timeout 120秒。パスキーボタンからのdiscoverable loginでは`allowCredentials`が空、メールアドレス入力後は1件に限定された。
 - 再作成後もBitwarden/ChromeはMoney ForwardへWebAuthn assertionを送らなかった。一方、同じKuebiko profileのBitwarden passkeyは別RPで成功しているため、WebAuthn全体の無効化ではなくMoney Forward credentialの提示/選択境界に残る問題である。
 - Google OIDC accountは連携済みで、`POST /auth/google`、Google consent/account chooser、`GET /auth/google/callback`、Money Forward MEの`/auth/mfid` callbackでログインできた。これは有人fallbackとして有効だが、Google sessionをWorkersへ複製する設計は採らない。
-- Chrome 153の直接CDPでは一時的なCTAP2.1 virtual authenticatorの追加、credential一覧取得（初期0件）、削除まで成功した。Money ForwardにKogane専用passkeyを新規登録し、そのcredentialをsoftware authenticatorとして保持すれば、HTTP clientでassertionを生成できる可能性がある。
+- Chrome 153の直接CDPでは一時的なCTAP2.1 virtual authenticatorの追加、credential一覧取得（初期0件）、削除まで成功した。ただしKogane専用credentialを新規登録する必要はなく、既存Bitwarden credentialを直接利用できた。
 
-次の検証は、本人確認の上でKogane専用passkeyを1件追加し、local clientで登録credentialをsecret fileにのみ保存して、(1) browser再起動後のvirtual authenticator login、(2) browserなしで`clientDataJSON`、authenticator data、P-256署名を生成する直接HTTP login、の順で行う。private key、credential ID、challenge、Cookieはgit/R2/raw captureのsanitize済みmanifestへ入れない。成功後はCloudflare Secretへ移し、Workers Web CryptoのECDSA P-256互換性を検証する。失敗した場合はGoogle OAuth/session capsuleを有人fallbackとし、Money Forwardを完全無人の正本にはしない。
+#### ブラウザなしログインの実証
+
+2026-08-31に、WSL/LinuxのPython HTTP clientと既存Bitwarden passkeyだけで、Chrome、Bitwarden extension、Google OAuthを使わない新規session loginに成功した。
+
+1. `GET /sign_in`でanonymous session CookieとCSRF tokenを取得する。
+2. `POST /webauthn/assertion/options`へ`{"userIdentifier":{},"authenticationContext":"sign_in"}`を送り、discoverable login用challengeを取得する。実測ではchallengeはbase64url 43文字、`userVerification: required`、timeout 120秒、`allowCredentials: []`だった。RP ID省略時はorigin hostの`id.moneyforward.com`を使う。
+3. `clientDataJSON`を`type: webauthn.get`、取得challenge、origin `https://id.moneyforward.com`、`crossOrigin: false`で生成する。
+4. authenticator dataは`SHA-256(rpId)`、UP/UV/BE/BS flag、credential counterから生成し、`authenticatorData || SHA-256(clientDataJSON)`を保存済みP-256 private keyでECDSA/SHA-256署名する。署名はASN.1 DER形式へ変換する。
+5. `POST /webauthn/assertion`へ`authenticatorResponse`、`authenticationContext: sign_in`、空の`returnUrl`を送る。
+6. 成功時に返るsession Cookieを同じjarで保持する。
+
+最初はBitwarden保存値の36文字`credentialId`をそのままWebAuthn JSONの`id`/`rawId`へ入れ、HTTP 401と`notFoundWebauthnCredentialId`になった。Bitwardenはcredential作成時にUUIDを保存し、assertion時に16-byte raw UUIDへ変換してbase64url化する。公式の[`parseCredentialId`](https://github.com/bitwarden/clients/blob/main/libs/common/src/platform/services/fido2/credential-id-utils.ts)と[`generateAuthData`/`generateSignature`](https://github.com/bitwarden/clients/blob/main/libs/common/src/platform/services/fido2/fido2-authenticator.service.ts)に合わせると、`POST /webauthn/assertion`はHTTP 200と`redirectPath`を返した。さらに同じCookie jarの`GET /me`はHTTP 200になり、対照の未認証jarではHTTP 302で`/sign_in`へ戻ったため、session issuanceまで成立したと判断できる。
+
+この結果から、Money Forward ID認証についてはブラウザprofile、extension UI、Chrome fingerprintの保存は不要である。必要なのはcredential materialと通常のCookie/CSRF jarだけであり、master passwordをserverless runtimeへ置く必要もない。productionでは次の境界にする。
+
+- ローカルWSLでvault unlock済みの`bw get item`を実行し、対象credentialの`credentialId`、`keyValue`、`userHandle`、counter、RP IDだけをKogane用secretへ同期する。vault全体の`data.json`、`BW_SESSION`、master passwordは送らない。
+- WorkersではPKCS#8 P-256 keyをWeb Cryptoへimportして署名し、Web Cryptoが返すP1363 signatureをASN.1 DERへ変換する。UUID credential IDのraw 16-byte変換もBitwarden互換にする。
+- Cookie jarは実行ごとに新規作成できるため、Bitwarden sessionとMoney Forward sessionを永続化しない。日次収集の前に毎回passkey loginし、失敗時だけcredential再同期を要求する。
+- secret rotationは、利用者がBitwarden側でpasskeyを再作成した直後にローカル同期CLIを明示実行する。challenge、assertion、Money Forward Cookie、取得金融データはsecret同期経路へ混ぜない。
+
+残る実装検証は、Workers Web Cryptoで同じassertionを生成できること、Money Forward ME側へのOIDC遷移後にSMBC連携済みデータを読み取るrouteを特定すること、無料会員の更新頻度と取得済み1年分のbackfill境界である。
 
 ## 実行環境の適性
 
@@ -333,6 +354,7 @@ Kuebiko captureとBitwardenの表示メタデータを突き合わせ、次を�
 | Safety Pass登録端末/profileをコピー | 5/5以上 | 不成立 | 認証機構 | Keystore秘密鍵がnon-exportableかつ毎回生体認証。**不採用** |
 | 専用Android emulator | 5/5以上 | 生体/attestationで無人化できない | アプリ表示全般 | Keystore、BiometricPrompt、Transmit attestation、root検知があり、serverless経路にならない |
 | 契約済みaggregator API | Kogane側1/5 | 高い | 広い | 方針により不採用 |
+| Money Forward既存passkey + SMBC API連携 | 2/5 | 完全無人loginを実証 | Money Forwardへ取得済みの円・外貨残高・明細 | 正本にはしないが、Safety Passなしの実動fallback |
 | 個人向け公式外部連携token | Kogane側1/5 | 高い | 残高・明細等 | 仕組みは理想的だが、production接続は契約済み電子決済等代行業者に限定。self-service tokenなし |
 | [LINE残高照会](https://www.smbc.co.jp/sns/line/service.html) | 2/5 | 初回連携後は一定期間無人 | 主口座、直近1週間・最大100件という公開仕様 | 現行提供をlive確認してから補助候補。完全ledger/backfillには不足 |
 | [店番号・口座・キャッシュカード暗証の残高照会](https://direct3.smbc.co.jp/aib/aibgsjsw1k12.jsp) | 1/5 | 高い | 現在残高のみ | 一部利用者は制限、明細なし。暗証保存を増やすため不採用 |
