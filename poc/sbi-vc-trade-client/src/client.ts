@@ -120,7 +120,7 @@ export class SbiVcTradeClient {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        Cookie: this.#session.cookieHeader,
+        Cookie: cookieHeader(this.#session),
         Origin: ORIGIN,
         Referer: `${ORIGIN}/`,
       },
@@ -152,12 +152,29 @@ export class GatewayError extends Error {
 }
 
 function validateSession(value: SessionMaterial): void {
-  if (!value.cookieHeader.trim() || !value.secureKey.trim()) {
+  const cookieValues = [
+    value.cookies.vctBffSid,
+    value.cookies.jSessionId,
+    ...value.cookies.awsAlbApp,
+    value.cookies.awsAlb,
+    value.cookies.awsAlbCors,
+  ];
+  if (!value.secureKey.trim() || cookieValues.some((part) => !part.trim())) {
     throw new Error("session material is incomplete");
   }
-  if (/\r|\n/u.test(value.cookieHeader)) {
-    throw new Error("cookieHeader contains a newline");
+  if (cookieValues.some((part) => /[;\r\n]/u.test(part))) {
+    throw new Error("session cookie value contains a delimiter or newline");
   }
+}
+
+function cookieHeader(session: SessionMaterial): string {
+  return [
+    `vct_bff_sid=${session.cookies.vctBffSid}`,
+    `JSESSIONID=${session.cookies.jSessionId}`,
+    ...session.cookies.awsAlbApp.map((value, index) => `AWSALBAPP-${index}=${value}`),
+    `AWSALB=${session.cookies.awsAlb}`,
+    `AWSALBCORS=${session.cookies.awsAlbCors}`,
+  ].join("; ");
 }
 
 function isEnvelope(value: unknown): value is GatewayEnvelope {

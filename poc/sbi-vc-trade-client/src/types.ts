@@ -1,7 +1,13 @@
 export type JsonObject = Record<string, unknown>;
 
 export interface SessionMaterial {
-  cookieHeader: string;
+  cookies: {
+    vctBffSid: string;
+    jSessionId: string;
+    awsAlbApp: [string, string, string, string];
+    awsAlb: string;
+    awsAlbCors: string;
+  };
   secureKey: string;
 }
 

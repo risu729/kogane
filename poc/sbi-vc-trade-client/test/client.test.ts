@@ -2,13 +2,29 @@ import { describe, expect, test } from "bun:test";
 import { collectSbiVcTrade } from "../src/collect";
 import { SbiVcTradeClient } from "../src/client";
 
-const session = { cookieHeader: "session=synthetic", secureKey: "synthetic-key" };
+const session = {
+  cookies: {
+    vctBffSid: "synthetic-vct",
+    jSessionId: "synthetic-jsession",
+    awsAlbApp: ["synthetic-0", "synthetic-1", "synthetic-2", "synthetic-3"] as [
+      string,
+      string,
+      string,
+      string,
+    ],
+    awsAlb: "synthetic-alb",
+    awsAlbCors: "synthetic-alb-cors",
+  },
+  secureKey: "synthetic-key",
+};
 
 describe("SBI VC Trade read-only gateway", () => {
   test("sends only the statically verified balance event shape", async () => {
     let requestBody: unknown;
+    let cookieHeader: string | undefined;
     const client = new SbiVcTradeClient(session, async (_input, init) => {
       requestBody = JSON.parse(String(init?.body));
+      cookieHeader = (init?.headers as Record<string, string> | undefined)?.Cookie;
       return json({ meta: { status: "OK" }, body: { list: [] } });
     });
     await client.cashBalances();
@@ -16,6 +32,13 @@ describe("SBI VC Trade read-only gateway", () => {
       event: "cashBalanceList",
       data: { secureKey: "synthetic-key" },
     });
+    expect(cookieHeader).toBe(
+      "vct_bff_sid=synthetic-vct; JSESSIONID=synthetic-jsession; " +
+        "AWSALBAPP-0=synthetic-0; AWSALBAPP-1=synthetic-1; " +
+        "AWSALBAPP-2=synthetic-2; AWSALBAPP-3=synthetic-3; " +
+        "AWSALB=synthetic-alb; AWSALBCORS=synthetic-alb-cors",
+    );
+    expect(cookieHeader).not.toContain("__cf_bm");
   });
 
   test("uses the observed execution and cashflow defaults", async () => {
@@ -78,7 +101,7 @@ describe("SBI VC Trade read-only gateway", () => {
       await client.accountMargin();
     } catch (error) {
       expect(String(error)).not.toContain("synthetic-key");
-      expect(String(error)).not.toContain("session=synthetic");
+      expect(String(error)).not.toContain("synthetic-vct");
     }
   });
 

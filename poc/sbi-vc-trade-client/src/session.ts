@@ -13,18 +13,29 @@ export async function readSessionFile(path: string): Promise<SessionMaterial> {
       throw new Error("session file must not be accessible by group or others (chmod 600)");
     }
     const parsed = JSON.parse(await handle.readFile("utf8")) as unknown;
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      !("cookieHeader" in parsed) ||
-      !("secureKey" in parsed) ||
-      typeof parsed.cookieHeader !== "string" ||
-      typeof parsed.secureKey !== "string"
-    ) {
-      throw new Error("session file must contain cookieHeader and secureKey strings");
+    if (!isSessionMaterial(parsed)) {
+      throw new Error("session file must contain the eight observed session cookies and secureKey");
     }
-    return { cookieHeader: parsed.cookieHeader, secureKey: parsed.secureKey };
+    return parsed;
   } finally {
     await handle.close();
   }
+}
+
+function isSessionMaterial(value: unknown): value is SessionMaterial {
+  if (!isRecord(value) || typeof value.secureKey !== "string" || !isRecord(value.cookies)) {
+    return false;
+  }
+  const cookies = value.cookies;
+  return typeof cookies.vctBffSid === "string" &&
+    typeof cookies.jSessionId === "string" &&
+    typeof cookies.awsAlb === "string" &&
+    typeof cookies.awsAlbCors === "string" &&
+    Array.isArray(cookies.awsAlbApp) &&
+    cookies.awsAlbApp.length === 4 &&
+    cookies.awsAlbApp.every((part) => typeof part === "string");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

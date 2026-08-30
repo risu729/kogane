@@ -469,6 +469,24 @@ synthetic testでは、request shape、recent/historical分離、pagination停�
 - 同じWSL/Bun、同じrequest bodyへ認証済みCookieを付けるとHTTP 200 `application/json`、gateway status `OK`になった。したがって、この試験ではbrowser TLS fingerprintやbrowser process自体はreplayの必須条件ではなく、Cookieと`secureKey`の組が必要だった。
 - Cookieと`secureKey`の個別TTL、server側refresh、別IP/別regionへの移送可否、passkeyからの完全無人bootstrapは未確認である。一度reloadで`/login#verifyGa`へ戻った観測もあるため、client定数だけからsession lifetimeを決めない。
 
+### Cookie最小化とrotation
+
+認証後の19回の`trade` requestについて、Cookie値と`secureKey`を出力せずSHA-256同値比較だけを行った。`secureKey`、`vct_bff_sid`、`JSESSIONID`、`AWSALBAPP-0`から`AWSALBAPP-3`は全期間で同一だった。一方、`AWSALB`、`AWSALBCORS`、2個の`__cf_bm`は繰り返し変化し、完全なCookie headerは19回中ほぼ毎回異なった。
+
+`accountMargin`だけを使ったleave-one-out試験では次の結果になった。
+
+| Cookie subset | 結果 |
+|---|---|
+| `vct_bff_sid` + `JSESSIONID`だけ | application側403 |
+| 上記2個 + `AWSALBAPP-0..3` | 初回は200、後の再試験では403。routing先依存で再現性なし |
+| 上記成功集合から`AWSALBAPP` fragmentを1個ずつ除外 | 4通りすべてapplication側403 |
+| `AWSALBAPP-0..3` + `JSESSIONID`（`vct_bff_sid`なし） | application側403 |
+| `AWSALBAPP-0..3` + `vct_bff_sid`（`JSESSIONID`なし） | application側403 |
+| 完全headerから`__cf_bm`を除外 | HTTP 200 / gateway `OK` |
+| 完全headerから`AWSALB`/`AWSALBCORS`/`AWSALBAPP-*`を除外 | application側403 |
+
+6 cookieだけで通った試行はあったが再現しなかったため、production入力から`AWSALB`と`AWSALBCORS`を除外してはならない。今回再現できた集合は、`vct_bff_sid`、`JSESSIONID`、分割された`AWSALBAPP-0..3`、`AWSALB`、`AWSALBCORS`の8 cookieである。`__cf_bm`は除外しても成功し、Bun既定User-AgentとChrome User-Agentの両方で完全headerは成功した。したがってCloudflare Bot Management cookieやChrome UAは同一host replayの必須条件ではない。一方、AWS routing cookieは頻繁にrotationするため、長時間collectorではresponseの`Set-Cookie`を追従するcookie jarが必要になる可能性がある。別IP/regionでも同じとはまだ断定しない。
+
 ### read-only collectorの実データ検証
 
 `poc/sbi-vc-trade-client`へCookieと`secureKey`をmode 600のtmpfs fileで渡し、次の固定allowlistだけを実行した。
@@ -479,6 +497,6 @@ synthetic testでは、request shape、recent/historical分離、pagination停�
 - `executionList`のrecent page 0とhistorical pagination
 - `getCashflowList`のhistorical pagination（JPY入出金filter）
 
-全eventがHTTP 200 JSON、gateway status `OK`となり、collectorは6個のlocal artifactを生成して正常終了した。実件数と実値は公開文書へ記録しない。paginationは`list`と`totalSize`で停止し、最大100 pageの上限を維持した。出力directoryはmode 700、各JSONはmode 600で、Git管理外の`~/.local/share/kogane/sbi-vc-trade/<timestamp>/`へ保存した。session fileは実行後にtmpfsから削除され、Cookie/`secureKey`はartifactへ含めていない。
+全eventがHTTP 200 JSON、gateway status `OK`となり、collectorは6個のlocal artifactを生成して正常終了した。さらにsession inputを上記8 cookieへ型付けした後も、`__cf_bm`を送らずcollector全体が再度成功した。実件数と実値は公開文書へ記録しない。paginationは`list`と`totalSize`で停止し、最大100 pageの上限を維持した。最初の出力directoryはmode 700、各JSONはmode 600で、Git管理外の`~/.local/share/kogane/sbi-vc-trade/<timestamp>/`へ保存した。8-cookie再検証のoutputとsession fileはtmpfs上で確認後に削除した。Cookie/`secureKey`はartifactへ含めていない。
 
 この結果により、transport部分は標準的なWorkers/Bun `fetch`へ移植可能と判断できる。ただし定期実行の残課題はAPI transportではなく、passkey login後のCookie/`secureKey` bootstrapと更新である。既存の個人用passkey秘密をexportする設計は採らず、専用credential登録または短命session handoffを別途評価する。write eventと同じgateway/sessionを共有するため、Worker実装でもgeneric event senderを作らず、compile-time read allowlistを維持する。
