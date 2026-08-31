@@ -26,6 +26,7 @@ export interface VPointPayEmailEvent {
 export interface ParsedVPointPayEmail {
   event: VPointPayEmailEvent;
   raw: Uint8Array;
+  delivery: "direct" | "forwarded-rfc822";
 }
 
 export interface StoredVPointPayEmail {
@@ -39,6 +40,12 @@ export async function parseVPointPayEmail(
   raw: ArrayBuffer | Uint8Array,
 ): Promise<ParsedVPointPayEmail | null> {
   return parseCandidate(toBytes(raw), 0);
+}
+
+export function shouldForwardToMailbox(
+  parsed: ParsedVPointPayEmail | null,
+): boolean {
+  return parsed === null || parsed.delivery === "direct";
 }
 
 export async function storeVPointPayEmail(options: {
@@ -83,7 +90,7 @@ async function parseCandidate(
     rfc822Attachments: true,
     forceRfc822Attachments: true,
   });
-  const direct = await normalize(email, raw);
+  const direct = await normalize(email, raw, depth);
   if (direct) return direct;
   if (depth >= MAX_RFC822_DEPTH) return null;
   for (const attachment of email.attachments) {
@@ -100,6 +107,7 @@ async function parseCandidate(
 async function normalize(
   email: Email,
   raw: Uint8Array,
+  depth: number,
 ): Promise<ParsedVPointPayEmail | null> {
   if (senderAddress(email) !== VPOINT_PAY_SENDER) return null;
   const subject = email.subject?.trim() ?? "";
@@ -134,7 +142,11 @@ async function normalize(
     usedPoints: pointsField(text, "内、利用Vポイント数"),
     balanceYen: yenField(text, balanceLabel),
   };
-  return { event, raw };
+  return {
+    event,
+    raw,
+    delivery: depth === 0 ? "direct" : "forwarded-rfc822",
+  };
 }
 
 function senderAddress(email: Email): string | null {

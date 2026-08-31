@@ -165,8 +165,11 @@ repositoryへ保存し、Koganeにはprovenance、hash、再現手順、sanitize
 原本は`kogane-vpoint-pay-collector-poc` bucketの
 `raw/v-point-pay-email/YYYY/MM/DD/<sha256>.eml`、正規化結果は同じprefixの`.json`へ保存する。
 原本hashをkeyにするため、同じbackfillを再実行しても原本は増えない。正規化JSONはparserの
-修正を反映できるよう再生成する。転送された通知は元からGmailに存在するためWorkerから
-Gmailへ戻さず、OTPや転送先確認メールなど対象外メールだけ従来どおり転送する。
+修正を反映できるよう再生成する。Gmailから`message/rfc822`添付で転送された通知は元から
+Gmailに存在するためWorkerから戻さない。公式送信元から`vpoint@takuk.me`へ直接届いた通知は、
+R2保存後に従来のGmail宛へ転送する。OTPや転送先確認メールなど対象外メールも従来どおり
+転送する。この区別により、VポイントPayの登録メールをaliasへ変更してもGmailで通知を読め、
+Gmailからのbackfillは転送loopを起こさない。
 
 既存メールのbackfill手順:
 

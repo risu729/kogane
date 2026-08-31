@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { parseVPointPayEmail } from "../src/vpoint-pay-email";
+import {
+  parseVPointPayEmail,
+  shouldForwardToMailbox,
+} from "../src/vpoint-pay-email";
 
 describe("V Point Pay notification email", () => {
   test("normalizes an explicit point-funded usage without changing signs", async () => {
@@ -14,6 +17,8 @@ describe("V Point Pay notification email", () => {
     expect(parsed?.event.amountYen).toBe(1234);
     expect(parsed?.event.usedPoints).toBe(200);
     expect(parsed?.event.merchant).toBe("テスト加盟店");
+    expect(parsed?.delivery).toBe("direct");
+    expect(shouldForwardToMailbox(parsed ?? null)).toBeTrue();
   });
 
   test("finds the original notification in a forwarded rfc822 attachment", async () => {
@@ -40,6 +45,8 @@ describe("V Point Pay notification email", () => {
     expect(parsed?.event.eventType).toBe("charge");
     expect(parsed?.event.amountYen).toBe(500);
     expect(parsed?.event.detail).toBe("Vポイントからチャージ");
+    expect(parsed?.delivery).toBe("forwarded-rfc822");
+    expect(shouldForwardToMailbox(parsed ?? null)).toBeFalse();
   });
 
   test("rejects a lookalike sender", async () => {
@@ -49,6 +56,7 @@ describe("V Point Pay notification email", () => {
       "attacker@example.invalid",
     );
     expect(await parseVPointPayEmail(new TextEncoder().encode(text))).toBeNull();
+    expect(shouldForwardToMailbox(null)).toBeTrue();
   });
 });
 

@@ -4,6 +4,7 @@ import { VPointSession } from "./session";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import {
   parseVPointPayEmail,
+  shouldForwardToMailbox,
   storeVPointPayEmail,
 } from "./vpoint-pay-email";
 import { reconcileVPointPayEmails } from "./vpoint-pay-reconcile";
@@ -69,7 +70,7 @@ export default {
     }
 
     let forwardError: unknown = null;
-    if (!payEmail) {
+    if (shouldForwardToMailbox(payEmail)) {
       try {
         await message.forward(requiredSecret(
           env.VPOINT_EMAIL_FORWARD_TO,
