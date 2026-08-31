@@ -354,7 +354,7 @@ function looksSignedOut(html: string): boolean {
 }
 
 function htmlDecode(value: string): string {
-  return value.replaceAll("&amp;", "&").replaceAll("&quot;", '"').replaceAll("&#39;", "'");
+  return value.replaceAll("&quot;", '"').replaceAll("&#39;", "'").replaceAll("&amp;", "&");
 }
 
 function objectValue(value: unknown, name: string): Record<string, unknown> {

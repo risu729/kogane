@@ -31,6 +31,15 @@ describe("extractAccountContext", () => {
       csrf: "csrf&value",
     });
   });
+
+  test("decodes HTML entities exactly once", () => {
+    const html = `
+      <meta name="csrf-token" content="csrf&amp;quot;value">
+      <input name="account[id_hash]" value="account_hash">
+      <input value="42" name="service[id]">
+    `;
+    expect(extractAccountContext(html).csrf).toBe("csrf&quot;value");
+  });
 });
 
 describe("recentMonths", () => {
