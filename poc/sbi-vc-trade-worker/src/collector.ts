@@ -74,7 +74,8 @@ async function collectPages(options: {
     const dataset = `${options.prefix}-page-${String(pageNumber + 1).padStart(4, "0")}`;
     const body = await options.collect(dataset, pageNumber);
     const page = pageInfo(body);
-    if (page === null || page.listLength === 0) return;
+    if (page === null) throw new Error(`${options.prefix}_invalid_pagination`);
+    if (page.listLength === 0) return;
     if ((pageNumber + 1) * PAGE_SIZE >= page.totalSize) return;
   }
   throw new Error(`${options.prefix}_page_limit_exceeded`);

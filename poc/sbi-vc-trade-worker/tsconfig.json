@@ -13,5 +13,5 @@
     "skipLibCheck": true,
     "types": ["@types/bun", "@cloudflare/vitest-plugin/types"]
   },
-  "include": ["env.d.ts", "src/**/*.ts", "test/**/*.ts", "worker-test/**/*.ts", "vitest.config.ts"]
+  "include": ["worker-configuration.d.ts", "src/**/*.ts", "test/**/*.ts", "worker-test/**/*.ts", "vitest.config.ts"]
 }

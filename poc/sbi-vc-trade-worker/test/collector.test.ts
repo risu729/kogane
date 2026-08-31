@@ -66,4 +66,28 @@ describe("Worker collector", () => {
     expect(finalSession.secureKey).toBe("next-secure");
     expect(finalSession.cookies.awsAlb).toBe("rotated");
   });
+
+  test("rejects malformed pagination metadata instead of silently truncating history", async () => {
+    const artifacts: CollectorArtifact[] = [];
+    const fetcher = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { event: string; data: Record<string, unknown> };
+      const isMalformedHistoricalExecution = request.event === "executionList"
+        && request.data.historical === "true";
+      return Response.json({
+        meta: { status: "OK", secureKey: "next-secure" },
+        body: isMalformedHistoricalExecution
+          ? { list: [{ synthetic: true }] }
+          : { list: [], totalSize: "0" },
+      });
+    }) as typeof fetch;
+
+    await expect(collectSbiVcTrade({
+      session: seed,
+      fetcher,
+      onSession: async () => undefined,
+      onArtifact: async (artifact) => { artifacts.push(artifact); },
+    })).rejects.toThrow("executions-historical_invalid_pagination");
+
+    expect(artifacts.at(-1)?.dataset).toBe("executions-historical-page-0001");
+  });
 });

@@ -6,7 +6,7 @@
     "test": "bun run test:unit && bun run test:workers",
     "test:unit": "bun test ./test/*.test.ts",
     "test:workers": "vitest run",
-    "cf:types": "wrangler types env.d.ts --env-file .dev.vars.example --strict-vars false",
+    "cf:types": "wrangler types worker-configuration.d.ts --env-file .dev.vars.example --strict-vars false",
     "typecheck": "bun run cf:types && tsc --noEmit",
     "cf:check": "wrangler deploy --dry-run",
     "cf:deploy": "wrangler deploy"
