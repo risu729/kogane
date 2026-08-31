@@ -1,4 +1,5 @@
 import type {
+  JsonObject,
   NormalizedBalance,
   NormalizedSnapshot,
   NormalizedTransaction,
@@ -11,7 +12,7 @@ export function parseNormalizedSnapshot(value: unknown): NormalizedSnapshot {
     "balances",
     "transactions",
   ]);
-  if (root.schemaVersion !== "sbi-shinsei-synthetic-v1") {
+  if (root.schemaVersion !== "sbi-shinsei-v1") {
     throw new Error("Unknown SBI Shinsei normalized schema version");
   }
   const capturedAt = isoInstant(root.capturedAt, "capturedAt");
@@ -24,6 +25,82 @@ export function parseNormalizedSnapshot(value: unknown): NormalizedSnapshot {
     balances: root.balances.map(parseBalance),
     transactions: root.transactions.map(parseTransaction),
   };
+}
+
+export function normalizeCoreResponses(options: {
+  capturedAt: string;
+  topBalances: JsonObject;
+}): NormalizedSnapshot {
+  const capturedAt = isoInstant(options.capturedAt, "capturedAt");
+  const responseParam = requiredObject(
+    options.topBalances.responseParam,
+    "topBalances.responseParam",
+  );
+  const overview = requiredObject(responseParam.overview, "topBalances.overview");
+  const overviewResponse = requiredObject(
+    overview.responseParam,
+    "topBalances.overview.responseParam",
+  );
+  const savings = requiredArray(
+    overviewResponse.savingsDetails,
+    "topBalances.overview.responseParam.savingsDetails",
+  );
+  const balances = savings.map((value, index): NormalizedBalance => {
+    const item = requiredObject(value, `savingsDetails[${index}]`);
+    const accountKey = nonEmptyString(item.accountNo, "accountNo");
+    const nativeCurrency = currency(item.currency);
+    const productCode = nonEmptyString(item.productCode, "productCode");
+    return {
+      accountKey,
+      product: nativeCurrency !== "JPY"
+        ? "foreign-savings"
+        : productCode === "603"
+          ? "hyper-yokin"
+          : "yen-savings",
+      currency: nativeCurrency,
+      balance: decimalFromScalar(item.balance, "balance"),
+      yenEquivalent: nullableDecimalFromScalar(item.yenEqui, "yenEqui"),
+      asOf: capturedAt,
+    };
+  });
+
+  const activity = requiredObject(responseParam.activity, "topBalances.activity");
+  const activityResponse = requiredObject(
+    activity.responseParam,
+    "topBalances.activity.responseParam",
+  );
+  const activityCurrency = currency(activityResponse.currency);
+  const activityAccount = nonEmptyString(activityResponse.accountNo, "accountNo");
+  const details = requiredArray(
+    activityResponse.activityDetails,
+    "topBalances.activity.responseParam.activityDetails",
+  );
+  const transactions = details.map((value, index): NormalizedTransaction => {
+    const item = requiredObject(value, `activityDetails[${index}]`);
+    const debit = nullableDecimalFromScalar(item.debit, "debit");
+    const credit = nullableDecimalFromScalar(item.credit, "credit");
+    if ((debit === null) === (credit === null)) {
+      throw new Error(
+        `activityDetails[${index}] must contain exactly one debit or credit`,
+      );
+    }
+    return {
+      accountKey: activityAccount,
+      transactionDate: compactDate(item.postingDate, "postingDate"),
+      description: nonEmptyString(item.description, "description"),
+      debit,
+      credit,
+      balance: decimalFromScalar(item.balance, "balance"),
+      currency: activityCurrency,
+    };
+  });
+
+  return parseNormalizedSnapshot({
+    schemaVersion: "sbi-shinsei-v1",
+    capturedAt,
+    balances,
+    transactions,
+  });
 }
 
 function parseBalance(value: unknown): NormalizedBalance {
@@ -119,6 +196,24 @@ function nullableDecimal(value: unknown, field: string): string | null {
   return value === null ? null : decimal(value, field);
 }
 
+function decimalFromScalar(value: unknown, field: string): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return decimal(String(value), field);
+  }
+  if (typeof value !== "string") {
+    throw new Error(`${field} must be a string or finite number`);
+  }
+  return decimal(value.replaceAll(",", "").trim(), field);
+}
+
+function nullableDecimalFromScalar(
+  value: unknown,
+  field: string,
+): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  return decimalFromScalar(value, field);
+}
+
 function currency(value: unknown): string {
   if (typeof value !== "string" || !/^[A-Z]{3}$/u.test(value)) {
     throw new Error("currency must be an ISO-style three-letter code");
@@ -134,6 +229,32 @@ function date(value: unknown, field: string): string {
   ) {
     throw new Error(`${field} must be a valid YYYY-MM-DD date`);
   }
+  return value;
+}
+
+function compactDate(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`${field} must be a date string`);
+  }
+  const trimmed = value.trim();
+  if (/^\d{8}$/u.test(trimmed)) {
+    return date(
+      `${trimmed.slice(0, 4)}-${trimmed.slice(4, 6)}-${trimmed.slice(6, 8)}`,
+      field,
+    );
+  }
+  return date(trimmed.replaceAll("/", "-"), field);
+}
+
+function requiredObject(value: unknown, field: string): JsonObject {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${field} must be an object`);
+  }
+  return value as JsonObject;
+}
+
+function requiredArray(value: unknown, field: string): unknown[] {
+  if (!Array.isArray(value)) throw new Error(`${field} must be an array`);
   return value;
 }
 

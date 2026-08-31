@@ -8,6 +8,8 @@ const NO_BODY_OPERATIONS = new Set([
   "common.exchange-rate",
 ] as const);
 
+export const YEN_DEPOSIT_SCREEN_GROUP_ID = "CTYD0004" as const;
+
 export function noBodyRequest(
   operation:
     | "common.security-connect"

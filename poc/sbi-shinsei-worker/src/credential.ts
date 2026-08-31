@@ -20,7 +20,9 @@ export function parseCredential(value: string): SbiShinseiCredential {
     typeof parsed.accountNumber !== "string" ||
     !/^\d{7}$/u.test(parsed.accountNumber) ||
     typeof parsed.powerDirectPassword !== "string" ||
-    parsed.powerDirectPassword.length === 0
+    parsed.powerDirectPassword.length === 0 ||
+    parsed.powerDirectPassword.length > 128 ||
+    /[\r\n\0]/u.test(parsed.powerDirectPassword)
   ) {
     throw new Error("SBI Shinsei credential secret has invalid fields");
   }

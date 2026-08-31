@@ -7,6 +7,7 @@ import type { ResponseSchemaId } from "../src/types";
 const fixturePath = `${import.meta.dir}/fixtures/core-responses.json`;
 
 const CASES = [
+  ["securityConnect", "sbi-shinsei-security-connect-v1"],
   ["validateToken", "sbi-shinsei-validate-token-v1"],
   ["topBalances", "sbi-shinsei-top-balances-v1"],
   ["balanceSummary", "sbi-shinsei-balance-summary-v1"],

@@ -6,8 +6,9 @@
 
 This assessment covers **SBI新生銀行 (retail PowerFlex / PowerDirect) only**.
 It does not use SBI証券, 住信SBIネット銀行, SBI VC Trade, another bank, or a
-financial aggregator as a data source. The customer has an SBI新生銀行 account,
-but no authenticated account data was collected in this research pass.
+financial aggregator as a data source. User-controlled authenticated captures
+were used to validate transport topology, but no authenticated value or body is
+included in this public repository.
 
 The proposed collector is read-only. It must not initiate a domestic transfer,
 an account-to-account transfer, an FX conversion, a time-deposit transaction, a
@@ -24,12 +25,14 @@ branch/account identifier and PowerDirect password. The registered-phone FIDO
 approval is documented for important transactions, not as a mandatory approval
 for every browser login. This is materially different from SMBC Safety Pass.
 
-The first live run should still use a visible, user-controlled browser and record
-only sanitized request topology. An unauthenticated direct HTTP probe from the
+Visible, user-controlled live runs have now succeeded in both ordinary Chrome
+and the dedicated Kuebiko profile. The Kuebiko capture confirms the login and
+major read-adapter request/response bodies and HTTP 200 results, but no live value
+is reproduced in this repository. An unauthenticated direct HTTP probe from the
 current Windows and WSL network paths received no response bytes before timeout,
-so neither a simple form protocol nor a Workers-compatible endpoint has yet been
-proven. Capture the read-only login/balance/history/export transport once, then
-test the smallest equivalent local HTTP client before choosing browser automation.
+so a Workers-compatible endpoint has not yet been proved. The current PoC keeps
+CAFIS generation, login and authenticated reads in one Chrome context; a plain
+Worker isolate cannot yet replace that browser boundary.
 
 This route has the best evidence-to-maintenance ratio:
 
@@ -55,9 +58,9 @@ track, not a prerequisite for the first collector.
 
 Overall implementation cost is **2/5** for a reliable, user-assisted
 PowerDirect CSV/PDF collector and **3/5** for an unattended persistent-browser
-collector. A browserless HTTP collector remains **3/5 but conditional** on the
-authenticated capture showing ordinary form/session requests that Akamai accepts
-outside Chrome.
+collector. A browserless HTTP collector remains **3/5 but conditional** on a
+local direct client reproducing the captured risk/login/token/read sequence and
+receiving the same Akamai decision outside Chrome.
 The automation outlook is **high for balances and ordinary-account activity
 after a session is established**, **medium for deposits represented only by
 product/statement screens**, and **unproven for cloud-side login**.
@@ -68,9 +71,9 @@ product/statement screens**, and **unproven for cloud-side login**.
 | --- | --- | --- |
 | Is Akamai in front of PowerDirect? | Yes. The login hostname CNAMEs through `edgekey.net` to `akamaiedge.net`. | Expect edge policy and possible fingerprint/IP sensitivity. |
 | Is Akamai browser telemetry proved? | Yes. The public login loads an Akamai sensor path under `/akam/13/...`. The exact Akamai product/rule and cookie behavior are not yet identified. | Browser telemetry exists, but do not equate it with a proved rejection decision. |
-| Is Turnstile present? | No evidence. Turnstile is a Cloudflare product and neither public pages nor this probe showed it. | Do not carry the GLOBAL PASS Turnstile architecture into this collector without capture evidence. |
-| Is registered-device approval required for read-only browser login? | Official login documentation lists only branch/account number and PowerDirect password. FIDO guidance describes approval of important transactions such as transfers. | Unlike SMBC Safety Pass, FIDO is not presently a blocker to read-only Web collection. Live risk-trigger behavior remains untested. |
-| Can a Worker perform the login today? | Not proved. Direct unauthenticated `curl` from both local Windows and WSL timed out with zero HTTP response bytes, while indexed fetch infrastructure can read the login surface. | Capture an accepted browser request first; do not start with speculative Worker retries. |
+| Is Turnstile present? | Not observed. Successful normal-Chrome and Kuebiko logins showed no Turnstile step, asset or challenge. | Do not carry the GLOBAL PASS Turnstile architecture into this collector unless another environment actually receives a challenge. |
+| Is registered-device approval required for read-only browser login? | No in two successful runs: ordinary Chrome and the dedicated Kuebiko profile both reached read adapters with branch/account number plus PowerDirect password and without OTP or FIDO. | Unlike SMBC Safety Pass, registered-device approval is not a blocker to the observed read-only Web login. Risk-triggered behavior on other networks/headless clients remains untested. |
+| Can a Worker perform the login today? | Not proved. Accepted Chrome topology is captured, but plain Windows/WSL HTTP timed out and CAFIS needs browser surfaces. | Validate the one-context Chrome client, then move that boundary to Browser Run or a Container before attempting to remove the browser. |
 | Is the app an easier path? | No. Current app login is biometric/FIDO, one registered phone per account, and device replacement/reinstall repeats identity verification. | Keep app static analysis separate; prefer Web for collection. |
 
 ## Official surfaces and data coverage
@@ -308,6 +311,10 @@ and monthly reports, not manufacture a unified event ledger prematurely.
   explicitly calls those the two login factors, and the
   [account-information guide](https://www.sbishinseibank.co.jp/service/newpd/guide/koza.html)
   shows the same login before read-only balance access.
+- Manual logins in the user's ordinary Chrome profile and dedicated Kuebiko
+  profile succeeded on 2026-08-31 without OTP, FIDO or Turnstile. The Kuebiko
+  run reached the core read adapters with HTTP 200; no credential, token,
+  identifier or account value is transcribed here.
 - The bank states that browser PowerDirect remains available regardless of the
   authentication method, while use of the current app requires smartphone
   authentication (FIDO).
@@ -338,8 +345,8 @@ and monthly reports, not manufacture a unified event ledger prematurely.
 - exact idle and absolute session lifetimes;
 - whether a PowerDirect session survives browser restart or can be replayed in
   another browser/container while retaining the same cookie jar;
-- whether read-only login ever triggers additional SMS/telephone/FIDO checks
-  based on risk, IP, device or session history;
+- whether another IP/network or unattended/headless login triggers additional
+  SMS/telephone/FIDO checks despite the successful visible-Chrome runs;
 - whether concurrent sessions are allowed or one login invalidates another;
 - which cookies or browser storage values are necessary after login;
 - whether download navigation uses the same session or a short-lived token.
@@ -370,10 +377,10 @@ handshake itself succeeded and presented the bank's current certificate. This
 separates TCP/TLS reachability from HTTP acceptance, but it does not identify a
 particular Akamai blocking rule or prove that cloud traffic is always rejected.
 
-### Public login asset and transport observations
+### Public login assets and authenticated transport observations
 
-Inspection of the current public login page and JavaScript in a normal Chrome
-session on 2026-08-31 materially narrows the architecture:
+Inspection of the current public login page and JavaScript, followed by the
+authenticated Kuebiko read-only capture, materially narrows the architecture:
 
 - the visible entry is
   `https://bk.web.sbishinseibank.co.jp/SFC/apps/services/www/SFC/desktopbrowser/default/login?mode=1`;
@@ -390,14 +397,34 @@ session on 2026-08-31 materially narrows the architecture:
   `mode`, `postubFlag`, `jsc`, `forward`, and `userAgentInfo`;
 - the credential submission route is
   `POST /SFC/app/ShinseiAuthenticatorRealm/login_auth_request_url`;
-- a successful login is expected to return an `Authorization` response header
-  and a separate response token, both kept in browser session state;
+- a successful login returns an authorization response header and a separate
+  response token, both kept in browser session state;
 - post-login adapter traffic uses `POST /SFC/app/{adapter}/{procedure}` with a
   session token in `Authorization`, a JSON request body, and a response-header
   token that rotates for subsequent calls;
 - CSV export is a separate authenticated POST to
   `/SFC/adapters/IFAI_CsvDownloadAdapter/csvDownload/getCsv`, carrying the
   session token plus account/date selection.
+
+One successful sample established the token transition: the login JSON token is
+the initial `X-CSRF-Token`; `securityConnect` and `validateToken` reuse the login
+authorization; `validateToken.header.newToken` becomes the CSRF token for the
+next serialized request. Any later known response may carry another `newToken`,
+so the implementation replaces it atomically before continuing. No token value
+is stored in this repository.
+
+The same capture confirms that `securityConnect`, `validateToken`, both top
+reads and `getExchangeRate` have no request body. `getYenDepositAccount` uses
+only `{requestParam:{screenGroupID}}`; the observed read-only screen value is
+encoded as a fixed request builder rather than exposed through a generic caller.
+
+Initial navigation and Akamai sensor execution established the browser cookie
+jar before credential submission. Successful login added the application load
+balancer/session cookies, while the observed client created `_sb.pcd` after
+`securityConnect`. The official client also emits `sendActivityLog`; Kogane does
+not allowlist that telemetry/write-like procedure. If the client-side cookie is
+proved mandatory for validation, automation should reuse the official bootstrap
+inside the same page rather than invent its value.
 
 This proves more than a generic Akamai edge. The login is coupled to multiple
 device/risk signals, and the JSON adapters depend on a rotating authenticated
@@ -409,17 +436,32 @@ classification: current post-login reads should target the official JSON adapter
 transport, with CSV/PDF retained as raw evidence, rather than scrape rendered
 HTML tables.
 
-Public JavaScript names the following read-looking procedures. Their response
-schemas and authorization behavior must be confirmed in an authenticated,
-read-only capture before implementation:
+The authenticated Kuebiko run observed HTTP 200 for the following read families:
+
+| Adapter family | Observed procedures |
+| --- | --- |
+| `IFCM` | `securityConnect`, `validateToken`, `getExchangeRate`, `getApplicationInformationList` |
+| `AIAI` | `getInboxList` |
+| `AICM` | `getUiuxFlag` |
+| `IFTP` | `getAccountsBalanceAndActivity`, `getBalanceSummaryAndStage` |
+| `IFEM` | `getEmailAddress` |
+| `AIYD` | `getYenDepositAccount` |
+
+Public JavaScript names additional read-looking procedures. They remain
+allowlist candidates until authenticated validation:
 
 | Adapter | Observed read-looking procedures |
 | --- | --- |
-| `IFTP_TopAdapter` | `getAccountsBalanceAndActivity`, `getBalanceSummaryAndStage` |
 | `IFCM_CommonAdapter` | `getAccountInformationListDisplay`, `getProductDescription` |
 | `IFAI_AccountAdapter` | `getAccountInformationOthersDisplay`, `getCasaAccountActivitySpecificPeriod` |
-| `AIAI_AccountInfomationAdapter` | `getAccountList`, `getInboxList` |
-| `AIYD_YenDepositAdapter` | `getYenProductDetails`, `getYenDepositAccount` |
+| `AIAI_AccountInfomationAdapter` | `getAccountList` |
+| `AIYD_YenDepositAdapter` | `getYenProductDetails` |
+
+Only sanitized field topology crossed into fixtures. The top read contains
+`savingsDetails` and `activityDetails`; the yen-deposit read returns separate
+arrays for savings/deposit/product/module families; the exchange-rate read
+contains per-currency buy/sell/mid values. Unknown fields and unknown nested
+item shapes fail before storage.
 
 The current account screen distinguishes at least product code `601` for yen
 ordinary savings and `603` for SBI Hyper Yokin. Foreign savings, yen time
@@ -453,6 +495,205 @@ scheduled job. Because `header.newToken` replaces the current token after a
 response, calls must be serialized per session and the latest token persisted
 atomically before the next request.
 
+### CAFIS Brain `jsc` bootstrap: sanitized implementation contract
+
+The successful Kuebiko sample makes the CAFIS part concrete without retaining
+its output. The public application loads
+`https://distribute.cafisbrain.com/cafisbrainriskcollector.js` from the login
+index before the bank's
+`/SFC/apps/services/www/SFC/desktopbrowser/default/js/controller/LG0001_login.js`.
+The login view contains a hidden `input#dtokeninfo`, explicitly labelled in the
+bank HTML as JavaScript-collected CAFIS Brain device information.
+The exact public assets observed in this sample had SHA-256
+`1fe49a16ff5a02d7bc9a82340c8bafb021c8b4b7814642186a3e377eb2cc4f3d`
+(vendor collector) and
+`8416c7d16d84c96f34b15aa3c6a0846b9c07e254cecf3292167a2181c957f426`
+(bank login controller), so later drift can be distinguished from analysis
+error without archiving authenticated traffic in this repository.
+
+The bank controller performs this sequence during controller initialization:
+
+1. `CAFISBrainRiskCollector.init({clientChannel: "CBRU"})`;
+2. `CAFISBrainRiskCollector.getDeviceTokenInfoV3({submitEvent, inputEL})`, where
+   `inputEL` is `#dtokeninfo`;
+3. on login click, read the hidden value into the `jsc` request field;
+4. if the hidden field is still empty, use the literal client fallback `aaaa`;
+5. submit `jsc` with the other login fields to
+   `login_auth_request_url`.
+
+The successful captured login had a present, non-empty `jsc` and did **not** use
+the literal fallback. No value or length is recorded here. The fallback proves
+only that the public client tolerates collector failure long enough to send a
+login request; it does not prove that the server accepts that request. Do not
+turn it into an authentication retry strategy.
+
+Deobfuscating only the public SDK's exported wrapper gives the following API
+contract:
+
+- exports are `init`, `getDeviceTokenInfoV3` and `getSDKVer`;
+- `init(options, callback)` accepts `clientChannel` as a string and maps it into
+  the SDK client/channel configuration; the bank uses `CBRU`;
+- `getDeviceTokenInfoV3(callback, option)` accepts a callback overload. The
+  second argument defaults to `true`; its semantic name is not exposed by the
+  wrapper, so an implementation should omit it instead of guessing `false`;
+- the successful callback model contains at least
+  `{deviceTokenInfo: string}`. The object overload is just a DOM adapter: it
+  calls `submitEvent.preventDefault()`, invokes the same version-3 collector,
+  assigns `result.deviceTokenInfo` to `inputEL.value`, and calls
+  `submitEvent.target.submit()`;
+- a synchronous module-start failure is converted through the SDK's
+  `buildDetectInfoM` error model. Code must treat a missing/non-string
+  `deviceTokenInfo` as failure and must never log the result.
+
+The callback overload is the stable integration point for automation; it avoids
+depending on the bank controller's unbound global `event`. In a real page, the
+minimum safe bridge is conceptually:
+
+```js
+await page.evaluate(() => new Promise((resolve, reject) => {
+  CAFISBrainRiskCollector.getDeviceTokenInfoV3((result) => {
+    const value = result?.deviceTokenInfo;
+    if (typeof value !== "string" || value.length === 0) {
+      reject(new Error("CAFIS device token was not generated"));
+      return;
+    }
+    document.querySelector("#dtokeninfo").value = value;
+    resolve(true); // never return the value across the browser boundary
+  });
+}));
+```
+
+Production automation should first wait briefly for the bank controller to
+populate the hidden field and call the callback overload only if it remains
+empty, so one login does not create needless duplicate risk requests.
+
+In the same successful sample, the SDK made CORS preflights and JSON POSTs from
+the bank origin to these public CAFIS endpoints, in this observed order:
+
+1. `https://diproxy.cafisbrain.com/data/1938/forward`;
+2. `https://diproxy.cafisbrain.com/data/1941/forward`.
+
+Both returned HTTP 200 before credential submission. Their request envelopes
+have the shape
+`{req:{content,channel,token,version,type,timestamp}}`; `content` is an opaque
+string produced by the vendor SDK. The first response includes risk-result and
+client-info fields, while the second includes control/signing fields. No request
+or response value is transcribed. The captured diproxy requests had no HTTP
+`Cookie` header, and no CAFIS/diproxy-named local- or session-storage entry was
+found in this sample. That is evidence about one execution, not a promise that
+all SDK branches are stateless. The bank page's origin, DOM and browser state
+still feed the collector.
+
+Decoded string references in the public vendor bundle show probes or support
+for all of the following browser surfaces: `navigator` user agent and UA data,
+language/platform, screen geometry/orientation/pixel ratio, timezone, touch and
+motion, hardware concurrency, device memory, plugins/MIME types, cookies,
+local/session storage and IndexedDB, canvas, WebGL renderer/vendor/parameters,
+audio, fonts, media-device enumeration, permissions, performance, WebDriver
+markers, `Worker` and `SharedWorker`. This inventory does not prove that every
+probe is used in the `CBRU` version-3 path, but it explains why the opaque
+`content` is not equivalent to a small documented JSON payload.
+
+#### Runtime fit for generating `jsc`
+
+| Runtime | Can run the public SDK faithfully? | Implementation decision |
+| --- | --- | --- |
+| Plain Cloudflare Worker isolate | No. It has `fetch`, but not a page DOM, Chrome canvas/WebGL/audio/font/plugin surfaces or the browser worker/storage environment expected by this collector. | Do not port the minified collector or synthesize its opaque encrypted `content`. A direct POST to diproxy is not an equivalent client. |
+| Bare Node.js or DOM shim | No for production. A shim can expose the three wrapper methods but produces synthetic/missing fingerprint inputs. | Use only for static wrapper inspection, never for authentication. |
+| Cloudflare Browser Run | Yes at the API level: it supplies a managed Chromium controlled from a Worker through Puppeteer/Playwright. | Bounded trials timed out before CAFIS became ready and before any credential POST, so it is no longer the active PoC runtime. |
+| Cloudflare Container + Chrome | Yes, with a full browser and more control over profile, flags and proxy/egress. | Current deployed PoC runtime. Direct APAC egress returned login 403; the same image completed a full live run through the allowlisted TAMIA/VPC relay path. |
+| OCI/Kubernetes + Chrome/Playwright | Yes, with the most control over the browser build, persistent volume and egress. | Operational fallback, not needed until both direct fetch and Browser Run have a bounded result. |
+
+Cloudflare officially exposes Browser Run as a Chromium browser binding with
+[Puppeteer](https://developers.cloudflare.com/browser-run/puppeteer/) or
+[Playwright](https://developers.cloudflare.com/browser-run/playwright/) and
+supports [reconnectable sessions](https://developers.cloudflare.com/browser-run/features/reuse-sessions/).
+Its Puppeteer documentation also states that changing the user agent does not
+bypass bot protection and Browser Run requests remain bot-identified.
+[Cloudflare Containers](https://developers.cloudflare.com/containers/) run
+arbitrary Linux images alongside a Worker and are available on the Workers Paid
+plan. These runtime facts support the matrix; they do not predict the bank's
+risk decision.
+
+The implemented validation path is now:
+
+1. scheduled Worker starts one isolated Container and opens the official login
+   page in its browser;
+2. wait for the public CAFIS object and a non-empty hidden field; if necessary,
+   invoke the callback overload once and assign the result only inside the page;
+3. fill and submit the official login form in that same browser context, with
+   request/console logging redacted before credentials are introduced;
+4. stop on any challenge, non-success auth state, 401, 403 or 429; never fall
+   back to repeated `aaaa` submissions;
+5. issue only the explicit read allowlist from the authenticated page context,
+   so its cookies and browser risk state remain coupled to the session;
+6. return only the bounded validated-read envelope to the Worker, then destroy
+   the Container; retain scheduling, validation and R2 storage in the Worker.
+
+An optimized hybrid that extracts `jsc` from Browser Run and performs login in
+a plain Worker is not the first implementation: `jsc` is only one of Akamai,
+ThreatMetrix, Transmit and browser-session signals, and moving it across contexts
+breaks the exact accepted topology. Optimize the browser away only after one
+bounded local direct-client test proves which inputs are actually optional.
+
+The PoC's preferred local path now keeps CAFIS generation, credential submission,
+Authorization/CSRF state and all serialized reads inside the same Chrome target.
+Only the four validated read JSON bodies cross the CDP boundary. A separate
+hybrid implementation exists only as a diagnostic; it is not the production
+path because moving `jsc` to another HTTP/TLS context may break risk binding.
+
+An initial bounded automated login stopped with `authStatus=failed` because the
+client used the guessed language code `JPN`. Sanitized comparison with the
+successful browser request isolated the correct adapter value as `JAP`; all
+credential fields, mode, post-login flag, forward value and user agent matched.
+The client was corrected and did not retry automatically. This was an
+implementation-contract error, not evidence that Akamai rejected automation.
+
+The corrected Kuebiko same-context run then completed login, `securityConnect`,
+`validateToken` and all four core reads with HTTP 200. This is the positive
+control for the implemented orchestration; it proves neither Browser Run nor a
+Linux Container is accepted.
+
+Subsequent cloud-runtime comparisons established a narrower boundary. Browser
+Run timed out before CAFIS was ready on both the official-entry and direct-login
+routes, and made no credential-bearing login POST. The first Container image
+had a local startup defect (`xvfb-run` prevented the Node service from
+listening); running Node as PID 1 and starting Xvfb internally fixed that
+defect. With the service reachable, local stable-Chrome Container trials
+received HTTP 403 at login for plain Linux, Windows-matched UA/platform/client
+hints, and those hints plus hidden `navigator.webdriver`/disabled
+`AutomationControlled` when login was reconstructed with direct fetch.
+
+The final local comparison used Docker, stable Google Chrome, its native Linux
+fingerprint and a Japanese egress while NRT/WARP was connected. Direct-fetch
+login returned HTTP 403 both before and after a late CDP attachment. Patchright
+did not reach login because its main-world execution left the CAFIS collector
+unavailable. With the same late-CDP Chrome, continuously filling the real form
+and activating its submit control invoked the bank page's own `login()` path and
+returned HTTP 200. The page automatically issued `securityConnect`; the
+Container retained login Authorization and initial CSRF in that same page, then
+explicitly ran `validateToken` and the four allowlisted core reads. All four
+reads succeeded. A subsequent Cloudflare deployment reproduced the complete run
+through the scoped TAMIA/VPC relay path described below.
+
+The deployed route is Container-local HTTP CONNECT to an authenticated Worker
+WebSocket `/tcp`, then a Worker VPC binding configured with TAMIA's explicit
+`tunnel_id`. It is independent of the user's personal WARP hostname routes. The
+relay accepts only TCP 443 for `bk.web.sbishinseibank.co.jp`,
+`www.sbishinseibank.co.jp`, `distribute.cafisbrain.com`,
+`diproxy.cafisbrain.com` and `platform-websdk.transmitsecurity.io`. The APAC
+Container using direct egress and no TAMIA path returned login HTTP 403 after
+the new image was active.
+
+Live run `0e999a32-6994-450e-a495-2daff0e7aeb1` completed successfully with
+zero failures and five artifacts (four raw plus one normalized). Metadata-only
+verification found all hashes valid, all byte counts positive and the Container
+instance inactive after the run. No artifact body, balance, transaction,
+credential, cookie, Authorization or CSRF/token value was read during this
+verification. Earlier failure manifests are retained for two rollout
+cold/listen failures, one direct-Container login 403 and two old-response-shape
+failures while the TAMIA image revision was rolling out.
+
 ### Unconfirmed inference
 
 It is plausible that Akamai WAF/bot controls, TLS/client fingerprinting,
@@ -460,8 +701,17 @@ JavaScript telemetry, CAFIS/ThreatMetrix/Transmit risk decisions, IP reputation
 or rate limits affect non-browser/cloud clients. The Akamai sensor asset is
 stronger evidence than DNS alone, but it still does not identify the exact
 product/rule or show which signal caused the command-line timeout.
-No credentialed anti-bot test was performed. The collector must stop on 401,
-403, login redirect or challenge and must not rapidly retry authentication.
+The corrected Kuebiko same-context run and the native-Linux real-form local
+Container run are accepted, while direct-fetch login remained 403 before and
+after late CDP. Windows fingerprinting is therefore not required in the
+accepted local topology, and network location alone cannot explain the 403/200
+split because both local paths shared the same Japanese egress. This does not
+prove that an overseas egress would be accepted. Late CDP alone is also
+insufficient; the successful implementation passed through the bank page's own
+form/login processing. The exact internal difference from direct fetch remains
+unisolated. The collector must stop on
+401, 403, 429, login redirect, challenge or non-success auth state and must not
+automatically retry.
 
 ## Existing third-party implementations
 
@@ -491,32 +741,36 @@ used for validation.
 | Visible local/physical Chrome + official CSV/PDF | High | 2 | Best initial evidence path. User logs in; collector performs only verified read/download navigation. |
 | Persistent local browser automation | Medium-high | 3 | Promising if read-only login and downloads repeat after restart; requires safe secret delivery and session tests. |
 | Official PowerDirect API as a contracted provider | Potentially high | 5 | Most supportable long-term route, but availability/fields/contract are unknown and onboarding is disproportionate for the first personal prototype. |
-| Cloudflare Workers isolate | Conditional | 3 | Web FIDO is not required for read-only login, and the current Web client uses JSON adapters, so the runtime is not inherently impossible. However, login risk collectors, Akamai acceptance and rotating-token bootstrap are unproved outside Chrome. Implement only after a local direct-client reproduction succeeds. |
-| Cloudflare Containers with Chromium | Medium, unproven | 4 | Can run a browser, but persistent profile/secret handling and Akamai/cloud-login acceptance need testing. Use after local session behavior is understood. |
+| Cloudflare Workers isolate | Low for login | 3 | The JSON reads fit Workers after bootstrap, but direct-fetch login returned 403. Keep the accepted login/browser state in Chrome; use the Worker for scheduling, relay policy, validation and storage. |
+| Cloudflare Containers with Chrome + scoped TAMIA/VPC relay | High for current PoC | 4 | Deployed Worker/Container/R2/Cron completed one live run with four raw and one normalized artifact. Direct APAC Container egress still returned login 403. |
 | OCI VM or Kubernetes with Chromium + encrypted persistent volume | Medium-high | 4 | Best cloud control over browser, storage and egress, but operationally heavier. A stable IP does not guarantee Akamai acceptance. |
 | Reverse-engineered Android app API | Low | 5 | FIDO/device binding, app attestation/pinning risk and rapid drift. Static inventory only; not the recommended collector. |
 
-For an unattended deployment, try the cheapest architecture in this order:
-
-1. reproduce the captured login plus read adapters with a local direct HTTP
-   client, including the documented risk bootstrap and rotating token;
-2. if that works repeatedly, port the same fetch flow to a Cloudflare Worker;
-3. if direct HTTP fails but an ordinary persistent browser succeeds, use a
-   Cloudflare Container or OCI/Kubernetes browser and keep Workers for
-   orchestration/storage.
-
-OCI is the more controllable fallback browser host, but it should not be chosen
-before the direct-client test. The preferred architecture keeps authentication
-bootstrap on a user-controlled trusted device until cloud login passes repeated
-read-only tests.
+The accepted unattended architecture keeps the official form/login path and
+session bootstrap inside Container Chrome, sends only the five exact HTTPS host
+families through the authenticated TAMIA/VPC relay, and leaves scheduling,
+relay policy, strict validation and R2 storage in the Worker. A plain Worker
+login and direct Container egress are not current fallbacks because their login
+attempts were rejected. OCI/Kubernetes remains only an operational alternative
+if repeat Cloudflare runs become unreliable.
 
 ## Proposed validation plan
 
 All steps below are read-only and use the customer's account only with redacted
 capture/logging rules.
 
-1. Start a dedicated visible Chrome/Kuebiko profile locally. Log in manually to
-   PowerDirect. Record sanitized host/path, adapter/procedure, field names,
+Current checkpoint: visible Chrome and Kuebiko logins plus sanitized core schema
+capture are complete, and the corrected same-context client has completed all
+four core reads. Browser Run stopped before CAFIS without an authentication
+POST. The initial Container listen defect is fixed. Native Linux stable Chrome
+then completed login and four reads locally when the actual form invoked the
+bank page's own login path; direct fetch remained 403 before and after late CDP,
+and Patchright left CAFIS unavailable in the main world. The deployed TAMIA/VPC
+relay path then completed one metadata-verified live run. Repeat reliability,
+CSV/PDF validation and session lifetime remain open.
+
+1. Completed: dedicated visible Chrome/Kuebiko login. Record sanitized
+   host/path, adapter/procedure, field names,
    status/content type and token-rotation topology; exclude authentication
    values, cookies/tokens, account identifiers, customer name and amounts.
 2. Enumerate the labels and stable product identifiers, if any, for 円普通預金,
@@ -576,22 +830,31 @@ capture/logging rules.
   Hyper Yokin and detailed time-deposit holdings rather than only ordinary
   account balances/activity?
 
-Until these are answered, implementation should start as an official Web/export
-collector with browser-assisted discovery. A credentialed direct HTTP client is
-an explicit next experiment, but only for captured allowlisted read procedures
-and only after it reproduces the risk/token sequence without repeated login
-attempts. The mobile app API is not the first collector path.
+Until these are answered, implementation remains an official Web collector with
+the browser security boundary intact. The mobile app API is not the first
+collector path.
 
 ## Implementation status (2026-08-31)
 
 [`poc/sbi-shinsei-worker`](../../poc/sbi-shinsei-worker/) now contains an
-isolated Workers/R2/Cron skeleton. It does not depend on Mnie and does not submit
-credentials. The exact read candidates above are represented in a static
-allowlist, but every entry remains disabled and has an unknown response schema.
-Routes observed returning 200 in the 2026-08-31 Kuebiko login/read capture are
-separately marked `liveValidated`; this does not enable production traffic.
-The transport checks the allowlist before `fetch`, rejects write-looking paths,
-stops at authentication boundaries, limits response size, and refuses to store
-or interpret unknown responses. See the PoC's
+isolated local Chrome collector and a Container/R2/Cron collector. It does
+not depend on Mnie. The local CLI accepts credentials through stdin or a
+private mode-0600 file. Both paths keep CAFIS/session material inside one
+browser page and hand off only four validated read JSON bodies. The corrected
+local run completed login, bootstrap and all four core reads. The cloud resources
+have been provisioned for bounded validation, but Browser Run did not reach an
+authentication POST. The real-form Container topology now succeeds in local
+Docker with native Linux Chrome. The deployed APAC Container failed with direct
+egress but completed a live run through the exact-host TAMIA/VPC relay. Captured
+core routes have strict
+synthetic fixtures and response validators; bundle-only and direct-HTTP routes
+remain unreachable. See the PoC's
 [`INVESTIGATION-2026-08-31.md`](../../poc/sbi-shinsei-worker/INVESTIGATION-2026-08-31.md)
 for the evidence boundary and enablement checklist.
+
+The deployed schedule is `0 21 * * *`. Teardown inventory is the active Worker,
+the SBI credential/admin-trigger/relay secrets, the R2 bucket containing the
+success and retained failure manifests/artifacts, the Container application and
+image revisions, and the explicit-tunnel VPC binding configuration. The local
+Docker test Container/image should be removed after validation; the cloud
+resources remain active for scheduled collection and evidence retention.

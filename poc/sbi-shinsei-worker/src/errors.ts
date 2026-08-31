@@ -17,3 +17,11 @@ export class ResponseTooLargeError extends Error {
 export class AuthenticationBoundaryError extends Error {
   override name = "AuthenticationBoundaryError";
 }
+
+export class JscAcquisitionError extends Error {
+  override name = "JscAcquisitionError";
+}
+
+export class LoginResponseError extends Error {
+  override name = "LoginResponseError";
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@kogane/sbi-shinsei-collector-container",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "playwright": "1.62.1",
+    "ws": "8.21.3"
+  }
+}

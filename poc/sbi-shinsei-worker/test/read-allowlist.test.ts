@@ -11,28 +11,30 @@ import {
 import { SbiShinseiReadTransport } from "../src/transport";
 
 describe("SBI Shinsei read allowlist", () => {
-  test("captured routes and public candidates all remain production-disabled", () => {
+  test("only captured routes with strict schemas are production-enabled", () => {
     expect(READ_ROUTE_CATALOG.length).toBe(17);
-    expect(liveReadsEnabled()).toBeFalse();
+    expect(liveReadsEnabled()).toBeTrue();
     for (const route of READ_ROUTE_CATALOG) {
-      expect(route.productionEnabled).toBeFalse();
+      expect(route.productionEnabled).toBe(
+        route.liveValidated && route.responseSchema !== "unknown",
+      );
       expect(route.method).toBe("POST");
       expect(route.origin).toBe("https://bk.web.sbishinseibank.co.jp");
     }
     expect(READ_ROUTE_CATALOG.filter(
       (route) => route.responseSchema !== "unknown",
-    )).toHaveLength(5);
+    )).toHaveLength(6);
   });
 
-  test("an authenticated-capture route fails closed without a schema", () => {
+  test("an authenticated-capture route with a schema is production-enabled", () => {
     const route = READ_ROUTE_CATALOG[0];
     expect(route.liveValidated).toBeTrue();
     expect(route.evidence).toBe("authenticated-capture");
-    expect(() => assertReadAllowed({
+    expect(assertReadAllowed({
       operation: route.operation,
       method: route.method,
       url: `${route.origin}${route.path}`,
-    })).toThrow(UnverifiedReadRouteError);
+    }).operation).toBe(route.operation);
   });
 
   test("origin, path and query must match exactly", () => {
@@ -64,14 +66,14 @@ describe("SBI Shinsei read allowlist", () => {
       (candidate) => candidate.operation === "common.exchange-rate",
     );
     if (!route) throw new Error("exchange-rate route is missing");
-    expect(() => assertReadAllowed({
+    expect(assertReadAllowed({
       operation: route.operation,
       method: route.method,
       url: `${route.origin}${route.path}`,
-    })).toThrow(UnverifiedReadRouteError);
+    }).operation).toBe(route.operation);
   });
 
-  test("transport performs zero fetches while routes are unverified", async () => {
+  test("direct HTTP transport performs zero fetches even for enabled browser routes", async () => {
     let fetchCount = 0;
     const transport = new SbiShinseiReadTransport({
       fetch: async () => {
@@ -88,5 +90,27 @@ describe("SBI Shinsei read allowlist", () => {
       operation: "top.accounts-balance-and-activity",
     })).rejects.toBeInstanceOf(UnverifiedReadRouteError);
     expect(fetchCount).toBe(0);
+  });
+
+  test("local validation profile enables only captured routes with schemas", () => {
+    const captured = READ_ROUTE_CATALOG.find(
+      (route) => route.operation === "top.accounts-balance-and-activity",
+    );
+    if (!captured) throw new Error("captured route is missing");
+    expect(assertReadAllowed({
+      operation: captured.operation,
+      method: captured.method,
+      url: `${captured.origin}${captured.path}`,
+    }, "local-captured-validation").operation).toBe(captured.operation);
+
+    const bundleOnly = READ_ROUTE_CATALOG.find(
+      (route) => route.operation === "account.casa-activity-specific-period",
+    );
+    if (!bundleOnly) throw new Error("bundle-only route is missing");
+    expect(() => assertReadAllowed({
+      operation: bundleOnly.operation,
+      method: bundleOnly.method,
+      url: `${bundleOnly.origin}${bundleOnly.path}`,
+    }, "local-captured-validation")).toThrow(UnverifiedReadRouteError);
   });
 });

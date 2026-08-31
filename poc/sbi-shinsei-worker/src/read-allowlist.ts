@@ -4,6 +4,7 @@ import {
 } from "./errors";
 import type {
   ReadOperationId,
+  ReadExecutionProfile,
   ReadRequestDescriptor,
   ReadRoute,
   ResponseSchemaId,
@@ -14,13 +15,14 @@ const ORIGIN = "https://bk.web.sbishinseibank.co.jp" as const;
 /**
  * Route names came from the public login JavaScript. Entries observed in the
  * 2026-08-31 authenticated Kuebiko run are marked liveValidated; bundle-only
- * candidates are not. Every entry remains production-disabled until the
- * direct client and the exact request/response contract pass validation.
+ * candidates are not. Captured entries with a strict response schema are
+ * production-enabled for the same-page Browser Run collector only.
  */
 export const READ_ROUTE_CATALOG = [
   capturedRoute(
     "common.security-connect",
     "/SFC/app/IFCM_CommonAdapter/securityConnect",
+    "sbi-shinsei-security-connect-v1",
   ),
   capturedRoute(
     "common.validate-token",
@@ -130,6 +132,7 @@ export function getReadRoute(operation: ReadOperationId): ReadRoute {
 
 export function assertReadAllowed(
   request: ReadRequestDescriptor,
+  executionProfile: ReadExecutionProfile = "worker-production",
 ): ReadRoute {
   const route = getReadRoute(request.operation);
   let parsed: URL;
@@ -161,9 +164,22 @@ export function assertReadAllowed(
       `Read operation ${route.operation} has not passed authenticated capture validation`,
     );
   }
-  if (!route.productionEnabled || route.responseSchema === "unknown") {
+  if (route.responseSchema === "unknown") {
     throw new UnverifiedReadRouteError(
-      `Read operation ${route.operation} has no approved production schema`,
+      `Read operation ${route.operation} has no approved response schema`,
+    );
+  }
+  if (executionProfile === "direct-http-diagnostic") {
+    throw new UnverifiedReadRouteError(
+      "Direct HTTP reads are disabled; use the same-page browser collector",
+    );
+  }
+  if (
+    executionProfile === "worker-production" &&
+    !route.productionEnabled
+  ) {
+    throw new UnverifiedReadRouteError(
+      `Read operation ${route.operation} is not enabled for production`,
     );
   }
   return route;
@@ -195,7 +211,7 @@ function capturedRoute(
     path,
     evidence: "authenticated-capture",
     liveValidated: true,
-    productionEnabled: false,
+    productionEnabled: responseSchema !== "unknown",
     responseSchema,
     maxResponseBytes: 2 * 1024 * 1024,
   };

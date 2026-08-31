@@ -6,6 +6,8 @@ export function validateKnownResponse(
   value: unknown,
 ): JsonObject {
   switch (schema) {
+    case "sbi-shinsei-security-connect-v1":
+      return validateSecurityConnect(value);
     case "sbi-shinsei-validate-token-v1":
       return validateToken(value);
     case "sbi-shinsei-top-balances-v1":
@@ -21,6 +23,36 @@ export function validateKnownResponse(
   }
 }
 
+function validateSecurityConnect(value: unknown): JsonObject {
+  const root = exactObject(
+    value,
+    "securityConnect",
+    ["userId", "attributes"],
+    ["userId", "attributes"],
+  );
+  scalar(root.userId, "securityConnect.userId");
+  const attributes = exactObject(
+    root.attributes,
+    "securityConnect.attributes",
+    [
+      "lastLoginTime",
+      "createtime",
+      "nationalId",
+      "systemCode",
+      "langCode",
+      "AILG04_Login",
+      "sessionId",
+    ],
+    [],
+  );
+  optionalScalars(
+    attributes,
+    Object.keys(attributes),
+    "securityConnect.attributes",
+  );
+  return root;
+}
+
 function validateToken(value: unknown): JsonObject {
   const root = exactObject(value, "validateToken", ["header"], ["header"]);
   const header = exactObject(
@@ -29,7 +61,7 @@ function validateToken(value: unknown): JsonObject {
     ["adapterResultCode", "newToken"],
     ["adapterResultCode", "newToken"],
   );
-  scalar(header.adapterResultCode, "validateToken.header.adapterResultCode");
+  successCode(header.adapterResultCode, "validateToken.header.adapterResultCode");
   nonEmptyString(header.newToken, "validateToken.header.newToken");
   return root;
 }
@@ -165,7 +197,15 @@ function validateBalanceSummary(value: unknown): JsonObject {
   );
   optionalScalars(branchResponse, Object.keys(branchResponse), "balanceSummary.branchFetch.responseParam");
   if (response.mutualFundBalance !== undefined) {
-    scalarOrObject(response.mutualFundBalance, "balanceSummary.mutualFundBalance");
+    if (
+      typeof response.mutualFundBalance === "object" &&
+      response.mutualFundBalance !== null &&
+      !Array.isArray(response.mutualFundBalance)
+    ) {
+      optionalWrapper(response.mutualFundBalance, "balanceSummary.mutualFundBalance");
+    } else {
+      scalar(response.mutualFundBalance, "balanceSummary.mutualFundBalance");
+    }
   }
   return root;
 }
@@ -272,8 +312,11 @@ function validateYenDeposit(value: unknown): JsonObject {
       ["productCode"],
     );
     scalar(product.productCode, `${label}.productCode`);
-    for (const key of ["tdProductDetail", "pdProductDetail"] as const) {
-      if (product[key] !== undefined) scalarOrObject(product[key], `${label}.${key}`);
+    if (product.tdProductDetail !== undefined) {
+      validateTermDepositProduct(product.tdProductDetail, `${label}.tdProductDetail`);
+    }
+    if (product.pdProductDetail !== undefined) {
+      scalarOrEmptyObject(product.pdProductDetail, `${label}.pdProductDetail`);
     }
   });
   objectArray(response.moduleDetails, "yenDeposit.moduleDetails", (item, label) => {
@@ -298,6 +341,101 @@ function validateYenDeposit(value: unknown): JsonObject {
   return root;
 }
 
+function optionalWrapper(value: unknown, label: string): void {
+  const result = exactObject(
+    value,
+    label,
+    ["requestParam", "responseParam", "header", "errorInfo"],
+    [],
+  );
+  if (result.requestParam !== undefined) object(result.requestParam, `${label}.requestParam`);
+  if (result.responseParam !== undefined) {
+    const response = object(result.responseParam, `${label}.responseParam`);
+    if (Object.keys(response).length !== 0) {
+      throw unknown(`${label}.responseParam schema is not known`);
+    }
+  }
+  if (result.header !== undefined) {
+    const header = exactObject(
+      result.header,
+      `${label}.header`,
+      ["referenceNo", "systemCode", "langCode"],
+      [],
+    );
+    optionalScalars(header, Object.keys(header), `${label}.header`);
+  }
+  if (result.errorInfo !== undefined) {
+    const error = exactObject(
+      result.errorInfo,
+      `${label}.errorInfo`,
+      ["statusID", "statusMessage"],
+      [],
+    );
+    optionalScalars(error, Object.keys(error), `${label}.errorInfo`);
+  }
+}
+
+function validateTermDepositProduct(value: unknown, label: string): void {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    scalar(value, label);
+    return;
+  }
+  const detail = exactObject(
+    value,
+    label,
+    [
+      "bookingMaturityCode",
+      "bookingMaturityDesc",
+      "changeMaturityCode",
+      "changeMaturityDesc",
+      "currency",
+      "customerCategoryDetails",
+      "maxDepositAmount",
+      "maxDepositTerm",
+      "minDepositAmount",
+      "minDepositTerm",
+      "moduleCode",
+      "otameshiAmount",
+      "otameshiDepositTerm",
+      "otameshiInitialInterestRate",
+      "productCode",
+      "productName",
+      "productRiskLevel",
+      "productType",
+      "redemptionFlag",
+    ],
+    [],
+  );
+  for (const key of Object.keys(detail)) {
+    if (key === "customerCategoryDetails") continue;
+    scalar(detail[key], `${label}.${key}`);
+  }
+  if (detail.customerCategoryDetails !== undefined) {
+    objectArray(
+      detail.customerCategoryDetails,
+      `${label}.customerCategoryDetails`,
+      (categoryValue, categoryLabel) => {
+        const category = exactObject(
+          categoryValue,
+          categoryLabel,
+          ["customerCategory", "term"],
+          ["customerCategory", "term"],
+        );
+        scalar(category.customerCategory, `${categoryLabel}.customerCategory`);
+        objectArray(category.term, `${categoryLabel}.term`, (termValue, termLabel) => {
+          const term = exactObject(
+            termValue,
+            termLabel,
+            ["months", "days", "interest"],
+            ["months", "days", "interest"],
+          );
+          optionalScalars(term, Object.keys(term), termLabel);
+        });
+      },
+    );
+  }
+}
+
 function responseRoot(value: unknown, label: string): JsonObject {
   const root = exactObject(value, label, ["responseParam", "header"], ["responseParam", "header"]);
   const header = exactObject(
@@ -306,7 +444,7 @@ function responseRoot(value: unknown, label: string): JsonObject {
     ["adapterResultCode", "newToken"],
     ["adapterResultCode"],
   );
-  scalar(header.adapterResultCode, `${label}.header.adapterResultCode`);
+  successCode(header.adapterResultCode, `${label}.header.adapterResultCode`);
   if (header.newToken !== undefined) {
     nonEmptyString(header.newToken, `${label}.header.newToken`);
   }
@@ -423,7 +561,13 @@ function scalar(value: unknown, label: string): void {
   }
 }
 
-function scalarOrObject(value: unknown, label: string): void {
+function successCode(value: unknown, label: string): void {
+  if (value !== "0") {
+    throw unknown(`${label} is not the captured success code`);
+  }
+}
+
+function scalarOrEmptyObject(value: unknown, label: string): void {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     if (Object.keys(value).length !== 0) {
       throw unknown(`${label} object schema is not known`);

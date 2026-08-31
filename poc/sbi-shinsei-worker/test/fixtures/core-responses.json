@@ -1,7 +1,19 @@
 {
+  "securityConnect": {
+    "userId": "synthetic-user",
+    "attributes": {
+      "lastLoginTime": "20260831060000",
+      "createtime": "20260831055959",
+      "nationalId": "synthetic-national-id",
+      "systemCode": "synthetic-system",
+      "langCode": "JAP",
+      "AILG04_Login": "synthetic-login-state",
+      "sessionId": "synthetic-session"
+    }
+  },
   "validateToken": {
     "header": {
-      "adapterResultCode": "SYNTHETIC_OK",
+      "adapterResultCode": "0",
       "newToken": "synthetic-next-csrf-token"
     }
   },
@@ -30,7 +42,7 @@
               "balance": "200000",
               "yenEqui": "200000",
               "currency": "JPY",
-              "productCode": "SYNTHETIC_HYPER"
+              "productCode": "603"
             }
           ],
           "hyperYokinStatus": "SYNTHETIC_ACTIVE"
@@ -81,7 +93,7 @@
       "sbiHyperYokinFlg": true
     },
     "header": {
-      "adapterResultCode": "SYNTHETIC_OK"
+      "adapterResultCode": "0"
     }
   },
   "balanceSummary": {
@@ -127,7 +139,7 @@
       }
     },
     "header": {
-      "adapterResultCode": "SYNTHETIC_OK"
+      "adapterResultCode": "0"
     }
   },
   "exchangeRate": {
@@ -151,7 +163,7 @@
       }
     },
     "header": {
-      "adapterResultCode": "SYNTHETIC_OK"
+      "adapterResultCode": "0"
     }
   },
   "yenDeposit": {
@@ -177,8 +189,23 @@
       "productDetails": [
         {
           "productCode": "SYNTHETIC_YEN",
-          "tdProductDetail": {},
-          "pdProductDetail": {}
+          "tdProductDetail": {
+            "productCode": "SYNTHETIC_YEN",
+            "productName": "SYNTHETIC PRODUCT",
+            "customerCategoryDetails": [
+              {
+                "customerCategory": "SYNTHETIC_CATEGORY",
+                "term": [
+                  {
+                    "months": "1",
+                    "days": "0",
+                    "interest": "0.001"
+                  }
+                ]
+              }
+            ]
+          },
+          "pdProductDetail": ""
         }
       ],
       "sdBalance": "0",
@@ -206,7 +233,7 @@
       ]
     },
     "header": {
-      "adapterResultCode": "SYNTHETIC_OK"
+      "adapterResultCode": "0"
     }
   }
 }

@@ -6,6 +6,22 @@ export interface SbiShinseiCredential {
   powerDirectPassword: string;
 }
 
+export interface JscMaterial {
+  jsc: string;
+  userAgent: string;
+  sourceOrigin: "https://bk.web.sbishinseibank.co.jp";
+}
+
+export interface JscProvider {
+  readonly name: string;
+  acquire(): Promise<JscMaterial>;
+}
+
+export interface LoginSession {
+  authorization: string;
+  csrfToken: string;
+}
+
 export const READ_OPERATION_IDS = [
   "common.security-connect",
   "common.validate-token",
@@ -42,6 +58,7 @@ export interface ReadRoute {
 
 export type ResponseSchemaId =
   | "unknown"
+  | "sbi-shinsei-security-connect-v1"
   | "sbi-shinsei-validate-token-v1"
   | "sbi-shinsei-top-balances-v1"
   | "sbi-shinsei-balance-summary-v1"
@@ -60,9 +77,20 @@ export interface SessionStateStore {
   rotateCsrfToken(nextToken: string): void;
 }
 
+export type ReadExecutionProfile =
+  | "worker-production"
+  | "direct-http-diagnostic"
+  | "local-captured-validation";
+
 export interface TransportRequest {
   operation: ReadOperationId;
   body?: JsonObject;
+}
+
+export interface ReadTransportResult {
+  data: JsonObject;
+  rawBody: string;
+  mediaType: string;
 }
 
 export interface NormalizedBalance {
@@ -85,7 +113,7 @@ export interface NormalizedTransaction {
 }
 
 export interface NormalizedSnapshot {
-  schemaVersion: "sbi-shinsei-synthetic-v1";
+  schemaVersion: "sbi-shinsei-v1";
   capturedAt: string;
   balances: NormalizedBalance[];
   transactions: NormalizedTransaction[];

@@ -7,6 +7,8 @@ import { assertReadAllowed, getReadRoute } from "./read-allowlist";
 import { validateKnownResponse } from "./response-schemas";
 import type {
   JsonObject,
+  ReadExecutionProfile,
+  ReadTransportResult,
   SessionStateStore,
   TransportRequest,
 } from "./types";
@@ -32,17 +34,23 @@ export class SbiShinseiReadTransport {
         init?: RequestInit,
       ) => Promise<Response>;
       session: SessionStateStore;
+      executionProfile?: ReadExecutionProfile;
+      userAgent?: string;
     },
   ) {}
 
   async call(request: TransportRequest): Promise<JsonObject> {
+    return (await this.callWithRaw(request)).data;
+  }
+
+  async callWithRaw(request: TransportRequest): Promise<ReadTransportResult> {
     const candidate = getReadRoute(request.operation);
     const url = `${candidate.origin}${candidate.path}`;
     const route = assertReadAllowed({
       operation: request.operation,
       method: candidate.method,
       url,
-    });
+    }, this.options.executionProfile ?? "direct-http-diagnostic");
 
     const authorization = this.options.session.getAuthorization();
     const csrfToken = this.options.session.getCsrfToken();
@@ -53,13 +61,14 @@ export class SbiShinseiReadTransport {
     }
 
     const headers: Record<string, string> = {
-      accept: "application/json",
+      accept: "application/json, text/plain, */*",
       authorization,
+      "content-type": "application/json",
+      referer: `${route.origin}/SFC/apps/services/www/SFC/desktopbrowser/default/`,
+      "x-requested-with": "XMLHttpRequest",
       "X-CSRF-Token": csrfToken,
     };
-    if (request.body !== undefined) {
-      headers["content-type"] = "application/json";
-    }
+    if (this.options.userAgent) headers["user-agent"] = this.options.userAgent;
     const init: RequestInit = {
       method: route.method,
       headers,
@@ -95,9 +104,10 @@ export class SbiShinseiReadTransport {
     }
 
     const body = await readLimited(response, route.maxResponseBytes);
+    const rawBody = new TextDecoder().decode(body);
     let parsed: unknown;
     try {
-      parsed = JSON.parse(new TextDecoder().decode(body));
+      parsed = JSON.parse(rawBody);
     } catch {
       throw new UnknownResponseShapeError(
         "PowerDirect read returned invalid JSON",
@@ -106,7 +116,11 @@ export class SbiShinseiReadTransport {
 
     const validated = validateKnownResponse(route.responseSchema, parsed);
     rotateCsrfTokenIfPresent(this.options.session, validated);
-    return validated;
+    return {
+      data: validated,
+      rawBody,
+      mediaType: contentType,
+    };
   }
 }
 
@@ -115,6 +129,7 @@ export function rotateCsrfTokenIfPresent(
   response: JsonObject,
 ): void {
   const header = response.header;
+  if (header === undefined) return;
   if (typeof header !== "object" || header === null || Array.isArray(header)) {
     throw new UnknownResponseShapeError(
       "Validated PowerDirect response omitted its header object",
