@@ -290,6 +290,35 @@ Kuebikoの専用Chrome profileで本人がログインした状態を読み取�
 - 無料会員の画面上の閲覧可能期間は過去1年。Money Forwardは連携時に金融機関/APIで照会可能な期間を取得し、1年より古い取得済みデータも可能な限り保持する方針だが、無料会員のままでは表示できない。Kogane側の定期raw保存を早期に始める価値はある。
 - 無料会員では一括更新と更新頻度アップが提供されない。個別の更新ボタンは表示されたが、本検証では更新要求を実行していない。日次収集の正本として使う前に、Money Forward側の自動更新実測と、Kogane取得時点の最終取得日時をmanifestへ保存する必要がある。
 
+### Kogane PoCの確定結果
+
+2026-08-31に、ローカルWSLとCloudflare Workersの双方から、ブラウザを使わずMoney Forward MEの読み取り専用収集を完走した。認証には既存Bitwarden vault内のpasskeyだけを用い、Money Forward IDのmaster password、Bitwarden master password、`BW_SESSION`、ブラウザCookieはruntimeへ保存していない。
+
+- BitwardenにはRP IDが`id.moneyforward.com`の既存passkeyが2候補あった。両候補ともWebAuthn assertionの署名検証とMoney Forward ID session発行には成功するため、署名成功だけでは対象のME家計を特定できない。
+- Money Forward MEへのOAuth遷移後、account selectorの`active`な候補を選び、`/accounts`と口座詳細へ到達できるかを照合すると、実際のME家計に対応する1候補だけを識別できた。item名や候補順では選ばず、このend-to-end到達確認を選択条件とする。
+- 正しい既存passkeyでは、ローカル収集とWorkers収集の双方で、4口座の詳細、4口座それぞれ直近12か月分の48月次断片、manifestを含む合計53 artifactsを取得し、failureは0件だった。
+- Workersでは毎実行時に新しいMoney Forward ID/ME sessionを作り、取得したraw HTMLを非公開R2へ保存する。公開応答には件数とmanifest keyだけを返す。R2上のmanifestについて、全53 artifactsのbyte countとSHA-256、およびsample objectの再取得hash一致を検証した。
+- 検証途中に追加した一時的なKogane専用passkeyは、既存Bitwarden passkeyで再ログインしてMoney Forward IDから削除した。Windows/WSLに置いた一時private keyも削除済みであり、現在のPoCとWorker Secretは既存Bitwarden passkey由来である。
+
+この実証は、Money Forward MEが公式の個人向けexport APIを提供していることを意味しない。KoganeはMoney Forwardの非公開Web interfaceをread-onlyで観測するPoCであり、routeやHTML変更、利用条件、連携元の更新遅延に影響されるfallbackとして扱う。
+
+### Money Forward経由で欠落・弱化するデータ
+
+実画面と収集artifactから確認できたのは、Money Forwardへ正規化された口座残高、一般的な入出金行、Vpass側の請求・利用行である。次は公式SMBC/Vpassのraw明細と同等には取得できない、または完全性を保証できない。
+
+| 対象 | 欠落または保証できないデータ |
+| --- | --- |
+| SMBC円預金 | 取引後残高、銀行側transaction/reference ID、value date、振込相手の構造化情報、公式CSVまたは銀行APIのraw bytes |
+| SMBC外貨 | 原通貨建て金額、通貨、適用レート、取引後外貨残高を一組として保持した公式粒度 |
+| SMBC定期等 | 預入ロット、満期日など商品固有の詳細。今回の4口座取得成功は、Money Forwardが全科目・全履歴を完全取得する保証ではない |
+| Vpass | 利用中・売上確定・請求確定の状態、一括/分割/リボと回数、請求月、支払日、請求書単位のgrouping、取消/返金と原取引のlink |
+| Vpass海外利用 | 原通貨額、原通貨、換算レート、authorization/sales ID、加盟店国・業種 |
+| Vpass付帯情報 | ポイント情報、および公式明細が持つ可能性のあるsource固有field |
+| Oliveデビット | 銀行連携側では引落し金額を見られても加盟店粒度は得られない。Vpass連携側で一般的な内容・金額が表示されても、全件性、確定状態、公式詳細との一致は保証できない |
+| 共通 | 連携元で未更新・保留中の最新データ、初回backfillの完全性、各明細が連携元から取得された正確な時刻 |
+
+無料会員には4連携、画面上1年、一括更新なし・更新頻度アップなしという追加制約がある。従ってMoney Forward経路は、公式sourceの代替正本ではなく、Safety Passの有人承認なしで高頻度にsnapshotを蓄積する補助経路に限定する。
+
 公式根拠:
 
 - [金融関連サービス口座の登録方法](https://support.me.moneyforward.com/hc/ja/articles/13480029279897-%E9%87%91%E8%9E%8D%E9%96%A2%E9%80%A3%E3%82%B5%E3%83%BC%E3%83%93%E3%82%B9%E5%8F%A3%E5%BA%A7%E3%81%AE%E7%99%BB%E9%8C%B2%E6%96%B9%E6%B3%95): 三井住友銀行をAPI連携方式の例として掲載
@@ -327,7 +356,7 @@ Kuebiko capture、WSL上のBitwarden CLI 2026.8.0、Bitwarden公式client source
 - Cookie jarは実行ごとに新規作成できるため、Bitwarden sessionとMoney Forward sessionを永続化しない。日次収集の前に毎回passkey loginし、失敗時だけcredential再同期を要求する。
 - secret rotationは、利用者がBitwarden側でpasskeyを再作成した直後にローカル同期CLIを明示実行する。challenge、assertion、Money Forward Cookie、取得金融データはsecret同期経路へ混ぜない。
 
-残る実装検証は、Workers Web Cryptoで同じassertionを生成できること、Money Forward ME側へのOIDC遷移後にSMBC連携済みデータを読み取るrouteを特定すること、無料会員の更新頻度と取得済み1年分のbackfill境界である。
+Workers Web Cryptoによるassertion生成、Money Forward ME側へのOAuth遷移、SMBC/Vpassを含む4口座詳細と直近12か月の月次走査は、上記PoCで実証済みである。残る検証は、無料会員でのMoney Forward側の実更新頻度、取得済み1年分のbackfill境界、長期運用時のroute/HTML変更検知である。
 
 ## 実行環境の適性
 
