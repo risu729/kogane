@@ -1,0 +1,24 @@
+{
+  "name": "@kogane/poc-sbi-shinsei-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "cf:types": "wrangler types",
+    "cf:check": "wrangler deploy --dry-run",
+    "cf:deploy": "wrangler deploy",
+    "local:collect": "bun run src/local/cli.ts",
+    "local:check": "bun run src/local/cli.ts --dry-run",
+    "local:check-jsc": "bun run src/local/check-jsc.ts"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.8",
+    "@types/node": "24.3.0",
+    "typescript": "5.9.3",
+    "wrangler": "4.127.1"
+  }
+}
