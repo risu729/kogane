@@ -22,6 +22,19 @@ passkey成功時のsanitized network shapeでは、同一origin内で次の順�
 
 これは標準WebAuthn assertionを単一JSON endpointへ直接送る契約ではなく、公式NNL SDKがchallenge／assertionをopaqueな`result`へ組み立てるflowである。P-256署名自体はWorkers Web Cryptoでも可能だが、NNL `result` contractを観測・再実装・追従する必要があるため、現時点のworking implementationではlogin bootstrapだけBrowser Runを使う。Browser Runが原理的に必須と証明されたわけではなく、将来のcost最適化候補としてdirect passkey clientを分離調査する。ログイン後のmenu、過去月JSON、detail、export、R2保存にはBrowser Runを使わないことはlive runで確認済みである。
 
+### Browserless passkey clientの実装計画
+
+Browserless化は明細clientを書き換える作業ではなく、`loginWithBitwardenPasskey`だけをdirect bootstrapへ置き換える作業とする。既存のcookie jar、strict read allowlist、parser、R2保存はそのまま利用する。現時点では`result`の実値を保存していないため、次の順序を飛ばして署名だけを実装しない。
+
+1. 所有者自身のaccountで成功loginを複数回private captureし、NNL SDK resourceのversion/hash、`navigator.credentials.get()`へ渡る`PublicKeyCredentialRequestOptions`、返る`PublicKeyCredential`、直後の`result`、cookie rotation、relayを同一run内で対応付ける。challenge、assertion、cookie、`result`の値はpublic repo、Worker log、R2へ置かず、必要な解析中だけprivate evidenceとして扱う。
+2. 二つ以上のfresh challengeを比較し、`result`が単なるJSON/Base64か、SDK固有envelope、MAC／暗号化、transaction ID、SDK metadata、risk/device signalを持つかを切り分ける。一標本からfieldを固定仕様と推定せず、NNL assetのversion変更も別caseとして扱う。
+3. 標準WebAuthn部分をWorkers Web Cryptoで生成する。入力はcredential ID、P-256 private key、RP ID、user handle、server challengeで、`clientDataJSON`のorigin/type/challenge、`authenticatorData`のRP ID hash・UP/UV・BE/BS・counter・extensions、`authenticatorData || SHA-256(clientDataJSON)`へのES256署名、必要ならWeb Crypto出力からWebAuthn署名表現への変換をbyte単位でtest vector化する。
+4. 観測で確認したNNL/JCB serializationだけを独立adapterに実装する。`PasskeyLogin`、service-status、auth-check、relayのmethod/origin/path、CSRFまたは動的field、完全なcookie jarをstate machineとして扱い、未知redirect、SDK version、response shape、追加認証では停止する。取得したSDKをWorker内で`eval`／`new Function`して代用しない。
+5. `bootstrapMode: "passkey-direct"`のようにBrowser版と分離して導入し、fresh challengeの一回利用、replay拒否、RP ID/origin不一致拒否、連続run、Cron実行元、session expiry、NNL version driftを検証する。mypage到達後は既存fetch clientへhandoffし、同じaccount・同じ時点でBrowser版とcard/period/artifact種別を照合する。秘密値、明細値、assertionを差分logへ出さない。
+6. direct版が複数回のlive runとversion-drift停止試験を通るまではBrowser版を既定値として残す。失敗時に同一runで自動Browser fallbackして認証を二重送信せず、次回runで明示設定されたbootstrapだけを使う。
+
+完了条件は「署名が作れた」ではなく、fresh server stateからauth-checkとrelayを通り、mypage sessionを取得し、既存read-only collectionが同等の範囲を回収でき、古いchallenge／未知SDKではfail closedになることである。Browser Runの削除とbinding除去は、この条件を満たした後の別変更とする。
+
 現段階ではContainerを追加しない。Browser Runで公式scriptを実ブラウザ実行でき、Worker内にR2/Cron/read clientを残せるためである。今後、Browser Runからのpassword loginだけが環境要因で拒否され、同一script/profileでContainer Chromeが再現性を持って成功することがsanitized live testで確認された場合に限り、login bootstrapだけを最小Containerへ移す。
 
 ## 認証とsecret

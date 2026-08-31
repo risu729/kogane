@@ -95,6 +95,10 @@ Browser Run上の成功loginで、同一originの動的通信を値なしで観�
 
 このため、現在確認できた契約は「標準WebAuthn JSON APIを直接呼ぶ」形ではない。Browserを外すには、公式NNL SDKが生成する`result` envelopeとserver-side state/cookie contractを別途再現する必要がある。Workers Web CryptoでP-256署名を行えることだけでは十分でない。現PoCはlogin bootstrapだけBrowser Runを使い、mypage到達後はbrowserを閉じるまでにcookie/User-Agentを取り出し、menu、detail、`detailPastJson`、exportを通常のWorker fetchへ切り替える。このhandoffとprivate R2保存は第一IDのlive runで成功した。
 
+Browserless化は可能性を否定しないが、現在のcaptureだけから`result`をJSON、JWT、暗号文等のどれかへ断定しない。実装は、(1) 複数の成功runでNNL SDK version、WebAuthn request/response、`result`、cookie/relay stateをprivateに対応付け、(2) challenge依存部分と固定envelope、integrity、transaction/SDK metadata、extension/risk signalを差分し、(3) WebAuthn標準部分をbyte-exact test付きでWorkers Web Cryptoへ移し、(4) 観測済みNNL/JCB serializationとendpoint state machineだけを独立adapterへ実装する順序とする。`clientDataJSON`、RP ID hash、UP/UV/BE/BS、counter、extensions、ES256署名表現のいずれも「秘密鍵が同じ」ことから推測しない。
+
+direct clientは既存Browser bootstrapと別modeにし、fresh challenge、一回利用、replay拒否、RP ID/origin不一致、session expiry、連続Cron、NNL version driftを検証する。未知のSDK／response／redirect／追加認証ではfail closedとし、同一runでBrowserへ自動fallbackして認証を二重送信しない。mypage到達後のcookie jar、strict read allowlist、明細client、R2保存は現在の実装を再利用し、Browser版とcard/period/artifact種別が一致することを確認してから別PRでBrowser bindingを除去する。解析用のchallenge、assertion、cookie、`result`、明細値はpublic repo、Worker log、R2へ保存しない。詳細な実装順と完了条件は`poc/myjcb-worker/README.md`に置く。
+
 ## Web 保護、WAF、Akamai
 
 - 2026-08-26 の未認証 HEAD／DNS 観測では、公開コンテンツ `www.jcb.co.jp` は Cloudflare の CNAME／IP と `server: cloudflare`、`cf-ray` を返した。これは公開サイト edge の事実で、ログイン backend の認証方式を示さない。
