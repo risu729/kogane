@@ -1,0 +1,4 @@
+SESSION_SEED="set-with-wrangler-secret"
+SESSION_ENCRYPTION_KEY="set-with-wrangler-secret"
+ADMIN_TOKEN="set-with-wrangler-secret"
+PASSKEY_CREDENTIAL="set-with-wrangler-secret"

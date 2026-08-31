@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "WebWorker"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "types": ["@types/bun", "@cloudflare/vitest-plugin/types"]
+  },
+  "include": ["env.d.ts", "src/**/*.ts", "test/**/*.ts", "worker-test/**/*.ts", "vitest.config.ts"]
+}

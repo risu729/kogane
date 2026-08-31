@@ -7,9 +7,9 @@
 
 ## 結論
 
-SBI VCトレードには、暗号資産・日本円の資産状況、残高履歴、注文履歴、約定履歴、入出金・入出庫履歴、損益・報告書、ステーキング、貸コインの読み取り面がある。一方、顧客向け公開APIは現時点で未提供で、公式FAQは将来の公開予定としている。認証済みCookieと`secureKey`を使う内部Web gatewayのbrowser外replayは2026-08-31に実証できたため、手動PDF/ZIPだけでなく、固定read allowlistによるcollectorも実装候補になった。
+SBI VCトレードには、暗号資産・日本円の資産状況、残高履歴、注文履歴、約定履歴、入出金・入出庫履歴、損益・報告書、ステーキング、貸コインの読み取り面がある。一方、顧客向け公開APIは現時点で未提供で、公式FAQは将来の公開予定としている。認証済みCookieと`secureKey`を使う内部Web gatewayのbrowser外replayに加え、既存Bitwarden passkeyからCloudflare Workerだけで新規sessionを作る無人再認証も2026-08-31に実証できた。固定read allowlistによるcollectorをブラウザーなしで運用できる見込みである。
 
-総合評価は、手動エクスポート + ローカル解析が **E / コスト1**、認証済みWeb replayが **C / コスト3-4** である。標準Bun `fetch`によるread-only collectorは実データで成功し、Cloudflareやbrowser TLS fingerprintは認証後replayのblockerではなかった。残る高コスト部分はpasskey login後のCookie/`secureKey` bootstrapと更新である。完全ブラウザーまたはアプリ自動化は **D / コスト5**。公開APIが実際に提供され、読み取り専用scopeと安定した仕様が確認できた場合はAを再評価する。
+総合評価は、手動エクスポート + ローカル解析が **E / コスト1**、無人passkey再認証を含むWeb collectorが **B / コスト3** である。標準Bun/Workers `fetch`によるread-only collectorとWorkers Web Cryptoによるpasskey loginは実データで成功し、Cloudflare IP、browser TLS fingerprint、Chrome、Turnstileはpasskey経路の必須条件ではなかった。完全ブラウザーまたはアプリ自動化は不要になった。残る作業は取得eventのWorker統合、R2への原文保存、失効・仕様変更時の運用検証である。
 
 ## 1. 口座・商品と列挙できる情報
 
@@ -103,7 +103,11 @@ SBI VCトレードには、暗号資産・日本円の資産状況、残高履�
 
 ### Bitwardenとの関係
 
-Bitwarden自体はWebサイト・アプリのpasskey保存と利用に対応する。SBI VCトレードの公式対応プロバイダー一覧にBitwardenはないものの、2026-08-31に本人の既存Bitwarden passkeyを選択して現行VCTRADEへ正常loginできた。最初に誤って開いた通常Chromeでもlogin成功を見たが、そのtabは閉じた。後述する認証済み通信・schema evidenceの正本は、その後に本人がloginを完了した**Kogane Capture Chrome**で取得した。したがってBitwardenとの相互運用性はlive確認済みである。これはBitwarden CLIからpasskey秘密鍵をexportできること、または別runtimeで無人利用できることを意味しない。パスワード、TOTPシード、通常利用のpasskeyを同一自動化プロセスへ渡す設計も採用しない。
+Bitwarden自体はWebサイト・アプリのpasskey保存と利用に対応する。SBI VCトレードの公式対応プロバイダー一覧にBitwardenはないものの、2026-08-31に本人の既存Bitwarden passkeyを選択して現行VCTRADEへ正常loginできた。最初に誤って開いた通常Chromeでもlogin成功を見たが、そのtabは閉じた。後述する認証済み通信・schema evidenceの正本は、その後に本人がloginを完了した**Kogane Capture Chrome**で取得した。したがってBitwardenとの相互運用性はlive確認済みである。
+
+同日、WSLのBitwarden CLI 2026.8.0を本人がmaster passwordでunlockし、`SBI VCトレード` itemが1件のFIDO2 credentialを持つことを確認した。値を表示せずfield名だけを検査した結果、`credentialId`、P-256の`keyValue`、`rpId`、`userHandle`、`counter`等、WebAuthn assertionに必要な構造をCLIから取得できる。Kogane専用credentialは新設せず、この既存credentialを無人再認証候補とする。credential値、master password、vault sessionはGit、PR、標準出力へ保存しない。
+
+Bitwarden公式はexport済みpasskeyのcounterがservice側と一致しない場合に拒否され得ると一般論として説明する。一方、このcredentialの保存値と成功したbrowser assertionはいずれもcounter `0`だった。Bitwarden 2026.8.0の実装も保存counterが0より大きい場合だけincrementするため、このcredentialではBitwarden本体とのcounter分岐は起きない。Workerはcounter `0`だけを受理し、将来non-zeroへ変化した場合は自動更新を推測せず停止する。
 
 一次資料:
 
@@ -115,6 +119,7 @@ Bitwarden自体はWebサイト・アプリのpasskey保存と利用に対応す�
 - [passkey登録上限](https://www.sbivc.co.jp/guide/5-6)
 - [ログインロック](https://www.sbivc.co.jp/faqs/content/m9howuvxidze)
 - [Bitwarden公式: passkey保存・自動入力](https://bitwarden.com/help/storing-passkeys/)
+- [Bitwarden公式: vault exportとpasskey counterの注意](https://bitwarden.com/help/export-your-data/)
 
 ### 未確認
 
@@ -260,9 +265,9 @@ Web側は上記のsame-origin event gatewayまで確認できた。アプリ側�
 ## 9. Workers / Containers / OCI / Kubernetes適性
 
 - **ローカルOCIコンテナ: 適合。** ZIP/CSV/PDFのオフライン解析器をOCI imageとして再現可能にできる。入力はread-only mount、出力はローカル、network none、非root、固定digestが望ましい。単一利用者には通常のローカルCLIでも十分。
-- **Cloudflare Workers: read transportは適合、無人認証は未解決。** 標準Bun `fetch`でCookie + `secureKey` replayが成功したため、read gateway呼出しとCron自体はWorkersへ移植できる。短命sessionのbootstrap/renewal、Secret格納、raw金融dataの保存先を先に設計する。
-- **Cloudflare Containers: 認証bootstrap候補。** full Chrome/WebAuthnが必要な場合だけ使い、取得後のread replayは軽いWorkerへ分離できる。既存の個人用passkeyを抽出せず、専用credentialまたは本人handoffを評価する。
-- **Cloudflare Browser Rendering: 認証bootstrapの検証候補。** CDP/Playwright能力だけではWebAuthn credential永続化を保証しないが、read transportを担わせる必要はなくなった。
+- **Cloudflare Workers: 適合。** 標準Bun/Workers `fetch`でCookie + `secureKey` replayが成功し、15分Cron、暗号化Durable Object状態、`Set-Cookie`追従を実装した。Workers Web Cryptoと既存Bitwarden passkeyによる新規session bootstrapも実証した。
+- **Cloudflare Containers: 不要。** Worker-onlyのpasskey loginが成功したため、full Chrome/WebAuthn用Containerを追加する理由はない。
+- **Cloudflare Browser Rendering: 不要。** 認証・read transportの両方をWorkerだけで実証した。
 - **Kubernetes: 単一口座には過剰。** 組織内で多数の手動エクスポートを処理する場合に限りCronJob、Secret、NetworkPolicy等を検討できるが、まず認証済み取得を行わない設計を維持する。
 
 基盤の一次資料:
@@ -288,8 +293,8 @@ Web側は上記のsame-origin event gatewayまで確認できた。アプリ側�
 |---|---:|---|
 | 手動PDF/ZIP取得 + ローカル解析 | **E / 1** | 公式exportを使い、秘密を処理系から隔離できる。推奨。 |
 | 将来の公式read-only API | 未評価（A候補） | 現在は仕様未公開。scope・endpoint・rate limit確認後に再調査。 |
-| 非公開Web通信の観測・read replay | **C / 3-4** | Cookie + `secureKey`でBunから実データ取得成功。残課題はpasskey bootstrap、session更新、仕様変更追従。 |
-| Web完全自動化 | **D / 5** | passkey/MFA、Cloudflare bot対策、書き込み隣接により危険。 |
+| 非公開Web API + passkey無人再認証 | **B / 3** | Bun/Workersから実データ取得、新規passkey session、15分rolling更新に成功。残課題はcollector統合と長期運用。 |
+| Web完全自動化 | **D / 5（不採用）** | Worker-only経路が成立したため不要。書き込み隣接の危険も増える。 |
 | アプリ静的解析 + read-only動的観測 | **C候補 / 4-5** | 正規split取得、署名、host/schema、token/session、pinning/integrity候補を確認する次段階。 |
 | アプリ/端末完全自動化 | **D / 5** | 端末認証とread/write操作面の混在。解析結果に基づき再評価する。 |
 
@@ -325,7 +330,7 @@ PR #23で調べた公開artifactが現行deployでも使われているか、認
 
 - 公開login UIの最初の確認は誤って通常Windows Chrome 151で行い、HTTP 200、メールアドレス/口座番号、password、`パスキーでログイン`を確認した。このtabは閉じた。以降の認証済みnetwork/schema観測はKogane Capture Chromeだけを正本とする。
 - 初期表示時に`/libs/simplewebauthn-browser.min.js`とCloudflare Turnstileのscript/iframeを読み込んだ。
-- credential操作前に、browserは`POST /api/cccmdipresen/gw/initiateLoginWithPasskey`を1回送り、HTTP 200 `application/json`を受けた。bodyは保存していない。このeventはWebAuthn challenge bootstrapで、POSTであっても資産・設定を変更するwriteではない。HTTP methodだけでread/writeを分類できない具体例である。
+- credential操作前に、browserは`POST /api/cccmdipresen/gw/initiateLoginWithPasskey`を1回送り、HTTP 200 `application/json`を受けた。秘密capture内のresponseは`challenge`、RP ID、timeout、`userVerification`を持ち、RP IDは`sbivc.co.jp`、user verificationは`required`だった。値はGitやPRへ保存しない。このeventはWebAuthn challenge bootstrapで、POSTであっても資産・設定を変更するwriteではない。HTTP methodだけでread/writeを分類できない具体例である。
 - Bitwarden vaultには本人のSBI VCトレードitemとpasskey sectionが存在することだけを確認した。username、password、passkey material、TOTP、Cookie、response bodyは表示・複製・保存していない。live bootstrapではKogane Capture Chromeで既存passkeyを使い、ID/password + MFAは公式に残るfallbackとする。
 
 ### 公開bundle/source map
@@ -365,7 +370,7 @@ login page map `b21877a.js.map`は91,166 bytes、SHA-256 `d5c3e578f302981163acf1
 - passkey開始: `POST /api/cccmdipresen/gw/initiateLoginWithPasskey`, dataは`channel: "SIMPLE_MODE"`。
 - passkey完了: `POST /api/cccmdipresen/gw/loginWithPasskey`。challenge、credential ID、authenticator data、client data JSON、signature、user handleを送る。
 
-password login requestにはTurnstile tokenの`response`があるが、公開source上のpasskey開始・完了request DTOにはTurnstile token fieldがない。2026-08-31のKogane Capture Chromeで、credential操作前のpasskey開始POSTは200だった。これはpasskey経路がpassword経路より自動化しやすい可能性を示すが、Cloudflare edgeがCookie・bot score・challenge結果を別に要求しないことの証明ではない。
+password login requestにはTurnstile tokenの`response`があるが、公開source上のpasskey開始・完了request DTOにはTurnstile token fieldがない。2026-08-31のKogane Capture Chromeで開始・完了が200となり、後述のWorker新規sessionでも同じ2 requestが成功した。したがって今回のpasskey経路ではTurnstile token、browser Cookie、Cloudflare bot cookieを必要としないことまで実証した。
 
 second authの`authType`は`0`がemail、`1`がauthenticator/TOTP、`2`がSMSである。password loginが失敗した場合、clientはTurnstile tokenを再利用せずwidgetをresetする。Turnstile tokenはCloudflare仕様上5分・single-useであり、保存・再利用するsession credentialではない。passkey completion後はsecond-auth endpointを通らずlogin成功処理へ進む。
 
@@ -387,7 +392,7 @@ login resultの`isAgreed`がfalseの場合、現行UIは`setAgreement` write eve
 | 8 | read-onlyの取引報告書一覧 | `tradeReportList`を2回、どちらもHTTP 200 JSON |
 | 9 | page reload | `/login#verifyGa`へredirect |
 
-liveの`loginWithPasskey` request keyは公開DTOどおりchallenge、credential ID、authenticator data、client data JSON、signature、user handleで、Turnstile fieldはなかった。password form用Turnstileがpageに存在しても、passkey application flowにtokenが含まれないという静的結論を実通信でも確認した。
+liveの`loginWithPasskey` request keyは公開DTOどおりchallenge、credential ID、authenticator data、client data JSON、signature、user handleで、Turnstile fieldはなかった。全fieldはpaddingなしbase64urlだった。`clientDataJSON`は`webauthn.get`、origin `https://simple.sbivc.co.jp`、`crossOrigin: false`、authenticator dataは37 bytes、RP ID hash一致、flags `0x1d`（UP/UV/BE/BS）、counter 0、signatureはP-256 ECDSAのASN.1 DERだった。Bitwarden保存credential IDはUUIDをraw 16 bytesへ変換するとrequest値と一致し、user handleも一致した。
 
 `accountMargin` bodyには`cashBalance`、`receivedMarginList`（46件）、`lendingLimitList`（33件）、`withdrawalLimitList`（23件）、`restrictedWithdrawalAmountList`（23件）と関連margin fieldが存在した。件数とfield名だけを記録し、各item・金額・銘柄等は保存していない。`getAuthStatus` bodyは`isIdentified`と`isTotpIdentified`、`getPasskeyList` itemはchannel、credential ID、last-used datetime、label、register datetime/source IP fieldを持ち、list lengthは1だった。値は保存していない。
 
@@ -399,9 +404,9 @@ liveの`loginWithPasskey` request keyは公開DTOどおりchallenge、credential
 
 最初のhome表示とread APIは成功したが、reload後は`/login#verifyGa`へ戻った。原因はpasskey後sessionの短期性、reload時の追加検証、Cookie/sessionStorageの組合せ、Kogane Capture条件等のいずれか未確定である。このため「sessionが通常reloadで永続する」「Cookieと`secureKey`をBunへ移せる」「daily cronで再利用できる」はまだ証明されていない。
 
-passkeyはSMBC Safety Passのように特定bank appの登録端末で毎回生体承認させる独自方式ではない。既存WebAuthn credentialを通常Chromeで利用できる可能性がある。さらに将来案として、Kogane専用のWebAuthn credentialを正規の登録画面で追加し、そのcredentialだけをcollectorへ渡す方式がある。標準のBitwarden/Windows Hello passkeyから秘密鍵を抽出する設計ではなく、最初からautomation専用software authenticatorとして生成・登録する。まずChrome DevTools Protocolのvirtual authenticatorをContainer内で使い、RPがそのcredentialを登録・再利用できるか、credential metadataを安全にexportできるかを本人操作で検証する。成功してもprivate keyは金融credentialなのでGitへ置かずWorker Secret等へ限定する。
+passkeyはSMBC Safety Passのように特定bank appの登録端末で毎回生体承認させる独自方式ではない。既存Bitwarden credentialでlive loginでき、CLIからWebAuthn credential構造も取得できた。利用者方針によりKogane専用credentialは作成せず、同じ既存credentialをWorker側の無人再認証に使う。private key、credential ID、user handle、counterは金融credentialとしてGitやDurable Objectへ置かずWorker Secretだけに限定し、生成後のsessionだけを暗号化Durable Object状態にする。
 
-Cloudflare Workers Web CryptoでWebAuthn assertion用ECDSA署名を組み立てること自体は技術上可能性がある。しかし、RP ID/origin、UV/UP flags、signature counter、resident credential/user handle、server challenge、Cloudflare sessionの条件が未確認であるため、現段階では「browserless passkey login候補」であって実装済みとはしない。
+Cloudflare Workers Web Cryptoで、上記browser assertionと同じRP ID/origin、flags、counter、credential ID変換、P1363→DER署名変換を実装した。Bitwarden CLIから既存credentialの必要fieldだけをWorker Secretへ投入し、Cloudflare Workerからの実loginに成功した。credentialのcounterは0のためBitwarden本体との分岐は観測されず、専用passkeyもContainer/browser handoffも不要である。
 
 ## 13. read-only gateway PoC
 
@@ -417,7 +422,7 @@ Cloudflare Workers Web CryptoでWebAuthn assertion用ECDSA署名を組み立て�
 6. paginationは`list`と`totalSize`が確認できた場合だけ続行し、100 pageの既定上限を設ける。schema不明時に無限走査しない。
 7. outputには実残高・履歴が含まれるためlocal private directoryだけに置き、Git、CI artifact、stdout、Cloudflareへ送らない。
 
-synthetic testでは、request shape、recent/historical分離、pagination停止、non-JSON/error拒否、error textにsession値を含めないことを確認した。さらにKogane Capture Chromeの認証済みsessionをmode 600のtmpfs file経由でlocal Bun clientへ渡し、固定allowlistの全collectorを実データで完走した。直接HTTP replayとpaginationは実証済みで、session寿命と無人更新は未検証である。
+synthetic testでは、request shape、recent/historical分離、pagination停止、non-JSON/error拒否、error textにsession値を含めないことを確認した。さらにKogane Capture Chromeの認証済みsessionをmode 600のtmpfs file経由でlocal Bun clientへ渡し、固定allowlistの全collectorを実データで完走した。直接HTTP replay、pagination、session rolling更新、無人passkey再認証まで実証済みで、server absolute TTLだけが未確認である。
 
 ### 完了したlive検証
 
@@ -426,16 +431,18 @@ synthetic testでは、request shape、recent/historical分離、pagination停�
 3. Cookieなしreplayがapplication側の「ログインしていません」403になることを1回確認した。
 4. Cookie + `secureKey`ではBun clientの`cashBalanceList`、`accountMargin`、`positionSummaryList`、`executionList` recent/historical、`getCashflowList` historicalがすべてHTTP 200 JSON、gateway `OK`になった。
 5. pagination停止とprivate output modeを確認し、session tmpfs fileを削除した。実値・実件数・秘密はGit/PRへ記録していない。
+6. Workers Cronを複数回発火させ、暗号化sessionと8 Cookieのrolling更新を確認した。
+7. 既存Bitwarden passkeyをWorker Secretへ最小化投入し、Worker-onlyの新規loginと直後のread-only keepaliveに成功した。
 
-認証済みsessionをdirect clientへ安全に引き継げることは実証できた。現時点のblockerは、**daily実行でCookieと`secureKey`をどうbootstrap・更新するか**である。password経路ではTurnstileが明示的blockerだが、passkey request schemaにはTurnstile fieldがなく、Kogane専用WebAuthn credentialを使うbrowserless経路も検証候補になる。少なくとも今回の同一host上replayではbrowser TLS fingerprintは不要だった。別IP/regionでのbindingは未確認である。
+認証済みsessionのdirect replayと、失効後に使う新規bootstrapの両方をWorker-onlyで実証した。password経路のTurnstile、browser TLS fingerprint、Chrome、Container、TAMIAは採用しない。残る実装課題は、既存Bun collectorの固定read allowlistをWorkerへ統合し、原responseをR2へ安全に保存することである。
 
 ### runtime候補の優先順位
 
 | runtime | 現時点の判断 | 次に証明すること |
 |---|---|---|
-| Container + full Chrome | 認証bootstrap候補 | WebAuthn credentialを永続化し、Cookie/`secureKey`を安全にWorkerへhandoffできるか |
-| Container認証後のCookie replay | transport実証済み | 同一hostのBunで成功。残りはTTL・更新・別IP/region binding |
-| Worker-only + Kogane専用passkey | 長期の有力候補 | 専用software credentialの登録、UV/UP、counter、backup flags、WebCrypto assertion |
+| Worker-only + 既存Bitwarden passkey | **採用** | Cloudflare IPから新規login、8 Cookie/`secureKey`構築、read確認まで成功 |
+| Worker keepalive | **採用** | 15分CronとCookie rotation成功。実際のabsolute expiry到達時fallbackを長期観測 |
+| Container + full Chrome | 不採用 | Worker-only認証が成立したため不要 |
 | Worker-only + password | 非推奨 | DOM Turnstileとsingle-use tokenを別runtimeへ渡す不安定性が大きい |
 | Browser Rendering | 後順位 | current CDP schemaでWebAuthn virtual authenticatorを使えるか未確認 |
 
@@ -454,7 +461,7 @@ synthetic testでは、request shape、recent/historical分離、pagination停�
 - [入出金履歴page source map](https://simple.sbivc.co.jp/_nuxt/12ae015.js.map)
 - [`crypto-ledger-tools` SBI adapter](https://github.com/kittyflip-zig/crypto-ledger-tools/blob/33758391c2b93ce99812257b2e4c1c82b67c6a1d/src/crypto_ledger_tools/exchange_adapters.py)
 
-残る未確認事項は、authenticated Cookie名/属性、CSRF、server TTL/renewal、bot binding、passkey preflightのRP/algorithm/UV/allowCredentials、virtual authenticatorの登録可否、report取得によるread status更新、最大page size、history retention、rate limit、アプリ固有transport/pinning/integrityである。
+残る未確認事項は、server absolute TTL、passkey credential失効時のerror schema、rate limit、report取得によるread status更新、最大page size、history retention、アプリ固有transport/pinning/integrityである。
 
 ## 14. 2026-08-31 認証済みWeb sessionの直接replay
 
@@ -467,7 +474,7 @@ synthetic testでは、request shape、recent/historical分離、pagination停�
 - KuebikoのNetLogでは、認証済み`trade` requestに`cookie` headerがあり、responseには複数の`set-cookie` headerがあった。公開bundleだけから推測していたCookie session利用をlive確認できた。
 - Kuebikoが保存した最新`secureKey`だけを使い、Cookieを付けずWSL/Bunから`accountMargin`を送るとHTTP 403、HTML titleは`ログインしていません`だった。Cloudflare challenge pageではなくapplication session拒否である。
 - 同じWSL/Bun、同じrequest bodyへ認証済みCookieを付けるとHTTP 200 `application/json`、gateway status `OK`になった。したがって、この試験ではbrowser TLS fingerprintやbrowser process自体はreplayの必須条件ではなく、Cookieと`secureKey`の組が必要だった。
-- Cookieと`secureKey`の個別TTL、server側refresh、別IP/別regionへの移送可否、passkeyからの完全無人bootstrapは未確認である。一度reloadで`/login#verifyGa`へ戻った観測もあるため、client定数だけからsession lifetimeを決めない。
+- Cookieと`secureKey`のserver側absolute TTLは未確認である。一度reloadで`/login#verifyGa`へ戻った観測もあるため、client定数だけからsession lifetimeを決めない。別IP/regionへの移送とpasskeyからの完全無人bootstrapは後続Worker試験で成功した。
 
 ### Cookie最小化とrotation
 
@@ -501,4 +508,44 @@ login responseの属性では、`vct_bff_sid`と`__cf_bm`の`Expires`が約30分
 
 全eventがHTTP 200 JSON、gateway status `OK`となり、collectorは6個のlocal artifactを生成して正常終了した。さらにsession inputを上記8 cookieへ型付けした後も、`__cf_bm`を送らずcollector全体が再度成功した。実件数と実値は公開文書へ記録しない。paginationは`list`と`totalSize`で停止し、最大100 pageの上限を維持した。最初の出力directoryはmode 700、各JSONはmode 600で、Git管理外の`~/.local/share/kogane/sbi-vc-trade/<timestamp>/`へ保存した。8-cookie再検証のoutputとsession fileはtmpfs上で確認後に削除した。Cookie/`secureKey`はartifactへ含めていない。
 
-この結果により、transport部分は標準的なWorkers/Bun `fetch`へ移植可能と判断できる。ただし定期実行の残課題はAPI transportではなく、passkey login後のCookie/`secureKey` bootstrapと更新である。既存の個人用passkey秘密をexportする設計は採らず、専用credential登録または短命session handoffを別途評価する。write eventと同じgateway/sessionを共有するため、Worker実装でもgeneric event senderを作らず、compile-time read allowlistを維持する。
+この結果により、transport部分は標準的なWorkers/Bun `fetch`へ移植した。さらに既存Bitwarden passkeyをWorker Web Cryptoで利用し、Cookie/`secureKey`の新規bootstrapにも成功した。write eventと同じgateway/sessionを共有するため、今後もgeneric event senderを作らず、compile-time read allowlistを維持する。
+
+## 15. Cloudflare Workers session・passkey PoC
+
+[`poc/sbi-vc-trade-worker`](../../poc/sbi-vc-trade-worker/)へ、一時Worker `kogane-sbi-vc-session-poc`を追加した。Cloudflareの有料plan上でDurable Objectと15分Cronを使う。GitHub Actionsはtriggerに使わない。
+
+### 構成
+
+- `SESSION_SEED` Worker Secretに、実測で必要だった8 Cookieと`secureKey`を初期投入する。
+- `SESSION_ENCRYPTION_KEY` Worker SecretをAES-256-GCM keyとし、rotation後のsessionをDurable Objectへ暗号化保存する。
+- `PASSKEY_CREDENTIAL` Worker Secretには、既存Bitwarden credentialのcredential ID、PKCS#8 P-256 private key、RP ID、user handle、counter、algorithm/curveだけを投入する。master passwordとBitwarden session keyは投入しない。
+- Cronは`*/15 * * * *`で、公式UI自身が10分ごとに使う軽いread-only event `informationTitle`を1回だけ送る。
+- responseは64 KiB上限でJSON envelopeと`meta.status === "OK"`だけを確認し、bodyを保存しない。
+- `Set-Cookie`は8 Cookieだけを追従し、`__cf_bm`は無視する。`meta.secureKey`が変化した場合も暗号化状態へ反映する。
+- 平文healthはlast attempt/success、HTTP/gateway status、Cookie更新数、連続失敗数、固定error codeだけで、残高・履歴・Cookie値・response bodyを含まない。
+- 手動`/run`、`/reauth`、`/health`はrandom bearer tokenのWorker Secretで保護する。
+- keepaliveがHTTP 401/403、gateway拒否、seed欠落になった場合だけ再認証する。6時間cooldownで反復loginを抑止し、同種の同時実行を単一Promiseへ畳み込み、keepaliveと再認証のsession変更はDurable Object内で直列化する。
+- passkey完了responseの`body.accountId`は直後のread APIの`secureKey`と一致したため、新規sessionの`secureKey`として使う。`isAgreed !== true`なら`setAgreement`を送らず停止する。
+
+### live結果
+
+2026-08-31 JST、Kuebiko NetLog末尾256 MiBから直近の認証済み`trade` requestを構造化し、値を標準出力へ出さず8 Cookieを抽出した。最新`informationTitle` requestから`secureKey`も取得し、mode 600のtmpfsを経由して`wrangler secret put`の標準入力へ渡した。seed tmpfs fileは投入直後に削除した。
+
+初回実行はHTTP 200 JSON、gateway `OK`となり、3件のsession更新を暗号化状態へ反映した。したがって現在の認証済みsessionはCloudflare Workers egressへ移送可能で、少なくともこの経路では日本の家庭IP、TAMIA、browser TLS fingerprint、Chrome User-Agent、`__cf_bm`は必要ない。後続試験ではCloudflare IPからのlogin/passkey bootstrapにも成功した。
+
+Workers runtimeで`redirect: "error"`を指定したsubrequestはresponseを返さずTypeErrorになった。同じrequestを`redirect: "manual"`（追従なし）へ変えると200になったため、SBI側3xxを観測したとは記録せず、Workers fetchのredirect mode差として扱う。
+
+Cronは複数回実発火し、少なくとも2026-08-31 02:00 UTCの時点でもHTTP 200、gateway `OK`、連続失敗0だった。
+
+同日、WSLでBitwarden CLIをunlockし、`SBI VCトレード` itemの既存FIDO2 credentialから必要7 fieldだけをtmpfsへ抽出した。Worker Secret投入後に`/reauth`を1回実行し、Cloudflare Workerから`initiateLoginWithPasskey`、P-256 WebAuthn assertion生成、`loginWithPasskey`、新sessionでの`informationTitle`まで連続成功した。healthは再認証成功、HTTP 200、gateway `OK`、Cookie更新3件、連続失敗0を示した。Chrome、TAMIA、日本家庭IP、Turnstile token、過去session Cookie、`__cf_bm`は使っていない。
+
+これによりrolling keepaliveとabsolute/session失効後の無人復旧経路の両方を実証した。未確認なのは、実際にabsolute expiryへ達した瞬間の自動fallback、credential revoke、backend schema変更、長期rate limitである。手動`/reauth`成功だけでCron fallbackの全failure modeまで証明したとは扱わない。
+
+### cleanup対象
+
+- Worker: `kogane-sbi-vc-session-poc`
+- Durable Object class: `SbiVcSessionState`
+- Cron: `*/15 * * * *`
+- Secrets: `SESSION_SEED`, `SESSION_ENCRYPTION_KEY`, `ADMIN_TOKEN`, `PASSKEY_CREDENTIAL`
+
+検証終了時は`poc/sbi-vc-trade-worker`から`npx wrangler delete --name kogane-sbi-vc-session-poc`でまとめて削除する。現時点ではCron継続検証のため残す。
