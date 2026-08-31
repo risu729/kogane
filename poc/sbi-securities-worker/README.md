@@ -2,6 +2,12 @@
 
 SBI証券の保存済みパスキーから毎回新しいsessionを作り、国内・米国株の残高と履歴を公式のWeb／アプリ通信から取得してprivate R2へ保存する独立Workerである。`mnie`をruntime依存、submodule、設定源として使用しない。必要だった認証・復号・read-only通信だけをこのディレクトリへ移植した。
 
+## Runtime profile
+
+- **Browser: なし。** Cloudflare Browser Run、Container Chrome/Chromium、外部browser sessionを使用しない。
+- WebAuthn challenge/assertion、SSO callback、MTS／外国株式／メインサイトsessionをWorker内の暗号処理と`fetch`で直接処理する。
+- HTML endpointを読む場合もbrowser renderingは行わず、read-only HTTP responseとして取得・parseする。
+
 ## 現在の範囲
 
 - 国内株アプリ: MTS sessionとread-only TR code `F2631`による国内現物・預り金payload

@@ -2,6 +2,12 @@
 
 Sony銀行の現行Web BFFへ毎回新規ログインし、総残高、円・外貨普通預金取引履歴、公式CSV、Sony Bank WALLETの直近15か月明細をprivate R2へ保存する独立Workerである。Chrome、Browser Rendering、Container、TLS impersonation、Akamai対策は使用しない。
 
+## Runtime profile
+
+- **Browser: なし。** 認証、Web BFF、WALLET SSO、月切替、HTML/CSV取得をすべてWorker `fetch`で実行する。
+- WALLETのserver-rendered HTMLもHTTP responseとしてparseし、JavaScript navigationやbrowser cookie jarを必要としない。
+- 調査時のChrome captureやbrowser用scriptの存在は、collector runtime依存ではない。
+
 ## 検証済みの認証経路
 
 2026-08-30に本人の実口座で、ChromeのCookieを流用しない新規`.NET HttpClient`から次を確認した。

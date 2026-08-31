@@ -4,6 +4,12 @@ MyJCBの公式WebをCloudflare WorkersのScheduled handlerから読み、取得�
 
 Worker PoCは2026-08-31にdeployし、第一のMyJCB IDで実auth testまで完了した。Bitwardenから一項目だけをlocal syncし、Browser Runの一時virtual authenticatorでpasskey assertionを生成してmypageへ到達した後、cookieとUser-Agentを通常のWorker `fetch`へ移管した。過去月JSONによるavailable月列挙、credit detail取得、private R2への20 artifactとmanifest保存が1 runで成功し、failureは0だった。raw credential、WebAuthn assertion、cookie、明細値、file hashはcommit／logしていない。
 
+## Runtime profile
+
+- **Browser: ログインのみ。** Cloudflare Browser Run bindingで公式login pageを開き、動的login protection scriptとNNL Apps SDKのWebAuthn flowを実行する。
+- passkey modeではBitwarden credentialを一時CDP virtual authenticatorへ注入し、password modeでも公式pageの動的field/cookie生成をbrowserへ任せる。目的はsession bootstrapであり、明細renderingではない。
+- mypage到達後に完全なcookie jarとUser-Agentを通常のWorker `fetch`へ渡し、Browser Runを閉じる。menu、月列挙JSON、明細HTML、CSV/PDF/OFX、R2保存はbrowserを使わない。
+
 ## なぜBrowser Runを使うか
 
 `/Login`はloadごとに`/apl/login-prot.js?init`とephemeral seed付き`?async`を読み、公式JavaScriptがlogin formへ動的field/cookieを追加する。Workersは取得した任意JavaScriptを`eval`/`new Function`で実行する環境ではなく、保護scriptを手書きで再実装すると追従性と安全境界が悪化する。このPoCは`src/login-protection.ts`だけでCloudflare Browser Runを起動し、公式page内で公式scriptをそのまま実行する。
