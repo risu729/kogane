@@ -13,17 +13,11 @@ const REQUIRED_OPERATIONS = [
   "yen-deposit.account",
 ] as const satisfies readonly ReadOperationId[];
 
-export interface CollectionWindow {
-  from: string;
-  to: string;
-}
-
 export interface CollectorOutput {
   artifacts: RawArtifact[];
 }
 
 export async function collectSbiShinsei(options: {
-  window: CollectionWindow;
   credentialJson: string;
   collectHandoff: (credentialJson: string) => Promise<string>;
   now?: () => Date;

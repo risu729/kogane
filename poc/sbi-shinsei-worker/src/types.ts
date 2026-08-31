@@ -147,7 +147,6 @@ export interface CollectionManifest {
   startedAt: string;
   completedAt: string;
   status: "success" | "partial" | "failed";
-  window: { from: string; to: string };
   liveReadsEnabled: boolean;
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];

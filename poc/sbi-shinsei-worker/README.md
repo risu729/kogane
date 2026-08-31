@@ -51,7 +51,7 @@ TAMIA経路のCloudflare live run `0e999a32-6994-450e-a495-2daff0e7aeb1` は `st
 | Trigger | Behavior |
 | --- | --- |
 | `GET /health` | schema version、source、live-read readiness のみ返す。 |
-| `POST /trigger?from=YYYY-MM-DD&to=YYYY-MM-DD` | `Authorization: Bearer <ADMIN_TRIGGER_TOKEN>` 必須。Container収集を1回実行し、validated artifactとmanifestをR2へ保存。 |
+| `POST /trigger` | `Authorization: Bearer <ADMIN_TRIGGER_TOKEN>` 必須。実行時点のsnapshotを1回収集し、validated artifactとmanifestをR2へ保存。期間指定は受け付けない。 |
 | Cron `0 21 * * *` | 毎日 06:00 JSTに同じContainer収集を1回実行。収集失敗はfailure manifestを保存した上でinvocationを失敗させる。 |
 
 R2 key:
@@ -62,6 +62,8 @@ raw/sbi-shinsei/YYYY/MM/DD/<run-id>/<verified artifact>
 ```
 
 unknown response や authentication response body は R2 に保存しません。4件のcore responseはauthenticated captureとローカル実行で検証し、strict schemaを通過した場合だけ保存します。
+
+現在の4 readはtop page由来のsnapshotです。manifestの`startedAt` / `completedAt`は実行時刻を表し、過去期間を取得済みとは記録しません。期間履歴を追加する場合は、期間を実際に送るread routeと取得範囲を別途検証してから導入します。
 
 Kuebiko capture で得た core response の field-name topology は synthetic fixture と strict validator に反映済みです。1 sample だけなので known field を optional として扱う箇所がありますが、unknown field、unknown nested item、unknown schema は拒否します。validator実装だけでは route を有効化せず、exact request builder とaccepted browser-contextでの実行成功も必要です。
 

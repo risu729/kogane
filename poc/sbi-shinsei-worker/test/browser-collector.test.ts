@@ -13,7 +13,6 @@ describe("SBI Shinsei Container handoff", () => {
     const fixtures = await Bun.file(fixturePath).json() as Record<string, unknown>;
     let calls = 0;
     const result = await collectSbiShinsei({
-      window: { from: "2026-08-01", to: "2026-08-31" },
       credentialJson,
       now: () => new Date("2026-08-31T00:00:00.000Z"),
       collectHandoff: async (value) => {
@@ -43,7 +42,6 @@ describe("SBI Shinsei Container handoff", () => {
   test("does not retry a rejected login", async () => {
     let calls = 0;
     await expect(collectSbiShinsei({
-      window: { from: "2026-08-01", to: "2026-08-31" },
       credentialJson,
       collectHandoff: async () => {
         calls += 1;
@@ -59,7 +57,6 @@ describe("SBI Shinsei Container handoff", () => {
 
   test("rejects a non-object or unknown handoff before storage", async () => {
     await expect(collectSbiShinsei({
-      window: { from: "2026-08-01", to: "2026-08-31" },
       credentialJson,
       collectHandoff: async () => "[]",
     })).rejects.toThrow("handoff was not an object");
@@ -67,7 +64,6 @@ describe("SBI Shinsei Container handoff", () => {
 
   test("bounds the handoff before parsing", async () => {
     await expect(collectSbiShinsei({
-      window: { from: "2026-08-01", to: "2026-08-31" },
       credentialJson,
       collectHandoff: async () => "x".repeat(10 * 1024 * 1024 + 1),
     })).rejects.toThrow("handoff was not bounded JSON text");

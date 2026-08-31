@@ -64,13 +64,15 @@ export default {
     if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
+    if (url.searchParams.size !== 0) {
+      return Response.json(
+        { error: "SBI Shinsei collection is a current snapshot and accepts no date range" },
+        { status: 400 },
+      );
+    }
 
     try {
-      const window = parseWindow(
-        url.searchParams.get("from"),
-        url.searchParams.get("to"),
-      );
-      const result = await runCollection(env, window);
+      const result = await runCollection(env);
       return Response.json(publicResult(result), {
         status: result.status === "failed" ? 503 : 200,
       });
@@ -80,7 +82,7 @@ export default {
   },
 
   async scheduled(_controller, env): Promise<void> {
-    const result = await runCollection(env, defaultWindow(new Date()));
+    const result = await runCollection(env);
     if (result.status === "failed") {
       throw new Error(
         `SBI Shinsei collection failed; manifest=${result.manifestKey}`,
@@ -89,10 +91,7 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-async function runCollection(
-  env: Env,
-  window: { from: string; to: string },
-): Promise<CollectionResult> {
+async function runCollection(env: Env): Promise<CollectionResult> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const prefix = runPrefix(startedAt, runId);
@@ -102,7 +101,6 @@ async function runCollection(
 
   try {
     const output = await collectSbiShinsei({
-      window,
       credentialJson: env.SBI_SHINSEI_CREDENTIAL_JSON,
       collectHandoff: async (credentialJson) => {
         await container.startAndWaitForPorts();
@@ -164,7 +162,6 @@ async function runCollection(
     startedAt,
     completedAt,
     status,
-    window,
     liveReadsEnabled: liveReadsEnabled(),
     artifacts,
     failures,
@@ -184,32 +181,6 @@ async function runCollection(
     manifestKey,
   }));
   return { ...manifest, manifestKey };
-}
-
-function parseWindow(
-  from: string | null,
-  to: string | null,
-): { from: string; to: string } {
-  if (from === null && to === null) return defaultWindow(new Date());
-  if (!from || !to) throw new Error("from and to must be specified together");
-  if (
-    !/^\d{4}-\d{2}-\d{2}$/u.test(from) ||
-    !/^\d{4}-\d{2}-\d{2}$/u.test(to) ||
-    from > to ||
-    !validDate(from) ||
-    !validDate(to)
-  ) {
-    throw new Error("from and to must be a valid YYYY-MM-DD range");
-  }
-  const days = Math.floor(
-    (Date.parse(`${to}T00:00:00.000Z`) -
-      Date.parse(`${from}T00:00:00.000Z`)) /
-      86_400_000,
-  ) + 1;
-  if (days > 731) {
-    throw new Error("a trigger window must not exceed 731 days");
-  }
-  return { from, to };
 }
 
 async function readBoundedText(
@@ -241,15 +212,6 @@ async function readBoundedText(
   } finally {
     reader.releaseLock();
   }
-}
-
-function defaultWindow(now: Date): { from: string; to: string } {
-  const to = now.toISOString().slice(0, 10);
-  return { from: `${to.slice(0, 8)}01`, to };
-}
-
-function validDate(value: string): boolean {
-  return new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
 }
 
 function authorized(request: Request, expected: string | undefined): boolean {
@@ -386,7 +348,6 @@ function publicResult(result: CollectionResult): object {
   return {
     runId: result.runId,
     status: result.status,
-    window: result.window,
     liveReadsEnabled: result.liveReadsEnabled,
     artifactCount: result.artifacts.length,
     failureCount: result.failures.length,
