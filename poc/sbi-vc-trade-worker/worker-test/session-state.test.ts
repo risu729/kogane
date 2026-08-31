@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
 import { createAssertion, parsePasskeyCredential } from "../src/passkey";
+import { runPrefix, storeArtifact } from "../src/storage";
 
 describe("SbiVcSessionState", () => {
   test("starts with sanitized empty health state", async () => {
@@ -40,6 +41,21 @@ describe("SbiVcSessionState", () => {
     const signature = fromBase64Url(assertion.signature!);
     expect(signature[0]).toBe(0x30);
     expect(fromBase64Url(assertion.authenticatorData!)).toHaveLength(37);
+  });
+
+  test("stores a sanitized collector artifact through the R2 binding", async () => {
+    const runId = crypto.randomUUID();
+    const prefix = runPrefix("2026-08-31T12:00:00.000Z", runId);
+    const stored = await storeArtifact({
+      bucket: env.SNAPSHOTS,
+      prefix,
+      artifact: { dataset: "synthetic", body: JSON.stringify({ ok: true }) },
+    });
+    const object = await env.SNAPSHOTS.get(stored.key);
+    expect(object).not.toBeNull();
+    expect(await object!.json()).toEqual({ ok: true });
+    expect(stored.sha256).toMatch(/^[0-9a-f]{64}$/u);
+    await env.SNAPSHOTS.delete(stored.key);
   });
 });
 

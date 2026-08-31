@@ -43,3 +43,46 @@ export interface PasskeyCredential {
   keyAlgorithm: "ECDSA";
   keyCurve: "P-256";
 }
+
+export type ReadEvent =
+  | "cashBalanceList"
+  | "accountMargin"
+  | "positionSummaryList"
+  | "executionList"
+  | "getCashflowList";
+
+export interface CollectorArtifact {
+  dataset: string;
+  body: string;
+}
+
+export interface StoredArtifact {
+  dataset: string;
+  key: string;
+  sha256: string;
+  bytes: number;
+}
+
+export interface CollectionFailure {
+  operation: string;
+  errorCode: string;
+}
+
+export interface CollectionManifest {
+  schemaVersion: string;
+  source: "sbi-vc-trade";
+  runId: string;
+  startedAt: string;
+  completedAt: string;
+  status: "success" | "partial" | "failed";
+  artifacts: StoredArtifact[];
+  failures: CollectionFailure[];
+}
+
+export interface CollectionSummary {
+  runId: string;
+  status: CollectionManifest["status"];
+  artifactCount: number;
+  failureCount: number;
+  manifestKey: string;
+}

@@ -15,6 +15,15 @@
       "head_sampling_rate": 1
     }
   },
+  "r2_buckets": [
+    {
+      "binding": "SNAPSHOTS",
+      "bucket_name": "kogane-sbi-vc-trade-poc"
+    }
+  ],
+  "vars": {
+    "COLLECTOR_SCHEMA_VERSION": "sbi-vc-trade-worker-poc-v1"
+  },
   "durable_objects": {
     "bindings": [
       {
@@ -30,6 +39,6 @@
     }
   ],
   "triggers": {
-    "crons": ["*/15 * * * *"]
+    "crons": ["*/15 * * * *", "5 21 * * *"]
   }
 }

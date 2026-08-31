@@ -1,12 +1,24 @@
 import { DurableObject } from "cloudflare:workers";
+import { collectSbiVcTrade } from "./collector";
 import { decryptSession, encryptSession } from "./crypto";
 import { createPasskeySession, parsePasskeyCredential } from "./passkey";
 import { applySessionUpdates, cookieHeader, parseGatewayMeta, parseSession } from "./session";
-import type { EncryptedSession, HealthState, SessionMaterial } from "./types";
+import { runPrefix, storeArtifact, storeManifest } from "./storage";
+import type {
+  CollectionFailure,
+  CollectionManifest,
+  CollectionSummary,
+  EncryptedSession,
+  HealthState,
+  SessionMaterial,
+  StoredArtifact,
+} from "./types";
 
 const ORIGIN = "https://simple.sbivc.co.jp";
 const TRADE_URL = `${ORIGIN}/api/cccmdipresen/gw/trade`;
 const MAX_RESPONSE_BYTES = 64 * 1024;
+const KEEPALIVE_CRON = "*/15 * * * *";
+const COLLECTION_CRON = "5 21 * * *";
 const INITIAL_HEALTH: HealthState = {
   initializedAt: null,
   lastAttemptAt: null,
@@ -25,6 +37,7 @@ const REAUTH_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 export class SbiVcSessionState extends DurableObject<Env> {
   #running: Promise<HealthState> | null = null;
   #reauthRunning: Promise<HealthState> | null = null;
+  #collectionRunning: Promise<CollectionSummary> | null = null;
   #operationTail: Promise<void> = Promise.resolve();
 
   async getHealth(): Promise<HealthState> {
@@ -49,6 +62,70 @@ export class SbiVcSessionState extends DurableObject<Env> {
     } finally {
       this.#reauthRunning = null;
     }
+  }
+
+  async runCollection(): Promise<CollectionSummary> {
+    if (this.#collectionRunning) return this.#collectionRunning;
+    this.#collectionRunning = this.#exclusive(() => this.#performCollection());
+    try {
+      return await this.#collectionRunning;
+    } finally {
+      this.#collectionRunning = null;
+    }
+  }
+
+  async #performCollection(): Promise<CollectionSummary> {
+    const startedAt = new Date().toISOString();
+    const runId = crypto.randomUUID();
+    const prefix = runPrefix(startedAt, runId);
+    const artifacts: StoredArtifact[] = [];
+    const failures: CollectionFailure[] = [];
+    let operation = "load_session";
+    try {
+      const session = await this.loadSession(startedAt);
+      operation = "collect";
+      await collectSbiVcTrade({
+        session,
+        onSession: async (updated) => {
+          operation = "persist_session";
+          await this.ctx.storage.put("session", await encryptSession(updated, this.env.SESSION_ENCRYPTION_KEY));
+          operation = "collect";
+        },
+        onArtifact: async (artifact) => {
+          operation = `r2_${artifact.dataset}`;
+          artifacts.push(await storeArtifact({ bucket: this.env.SNAPSHOTS, prefix, artifact }));
+          operation = "collect";
+        },
+      });
+    } catch (error) {
+      failures.push({ operation, errorCode: classifyError(error) });
+    }
+    const completedAt = new Date().toISOString();
+    const status: CollectionManifest["status"] = failures.length === 0
+      ? "success"
+      : artifacts.length === 0
+        ? "failed"
+        : "partial";
+    const manifest: CollectionManifest = {
+      schemaVersion: this.env.COLLECTOR_SCHEMA_VERSION,
+      source: "sbi-vc-trade",
+      runId,
+      startedAt,
+      completedAt,
+      status,
+      artifacts,
+      failures,
+    };
+    const manifestKey = await storeManifest({ bucket: this.env.SNAPSHOTS, prefix, manifest });
+    console.log(JSON.stringify({
+      message: "sbi_vc_collection",
+      runId,
+      status,
+      artifactCount: artifacts.length,
+      failureCount: failures.length,
+      manifestKey,
+    }));
+    return { runId, status, artifactCount: artifacts.length, failureCount: failures.length, manifestKey };
   }
 
   async #performReauthenticate(force: boolean): Promise<HealthState> {
@@ -221,28 +298,51 @@ export default {
       if (reauthenticated.lastReauthErrorCode !== null) return Response.json(reauthenticated, { status: 502 });
       return Response.json(await stub.runKeepAlive());
     }
+    if (request.method === "POST" && path === "/collect") {
+      const health = await ensureHealthySession(stub);
+      if (health.lastErrorCode !== null) return Response.json(health, { status: 502 });
+      const result = await stub.runCollection();
+      return Response.json(result, { status: result.status === "success" ? 200 : 502 });
+    }
     if (request.method === "GET" && path === "/health") return Response.json(await stub.getHealth());
     return new Response(null, { status: 404 });
   },
 
-  async scheduled(_controller, env): Promise<void> {
+  async scheduled(controller, env): Promise<void> {
     const stub = env.SESSION_STATE.getByName("singleton");
-    let health = await stub.runKeepAlive();
-    if (shouldReauthenticate(health)) {
-      const previousReauthSuccessAt = health.lastReauthSuccessAt;
-      const reauthenticated = await stub.runReauthenticate(false);
-      if (
-        reauthenticated.lastReauthErrorCode === null
-        && reauthenticated.lastReauthSuccessAt !== previousReauthSuccessAt
-      ) {
-        health = await stub.runKeepAlive();
-      } else {
-        health = reauthenticated;
-      }
+    if (controller.cron === KEEPALIVE_CRON) {
+      const health = await ensureHealthySession(stub);
+      if (health.lastErrorCode !== null) throw new Error("scheduled_keepalive_failed");
+      return;
     }
-    if (health.lastErrorCode !== null) throw new Error("scheduled_keepalive_failed");
+    if (controller.cron === COLLECTION_CRON) {
+      const health = await ensureHealthySession(stub);
+      if (health.lastErrorCode !== null) throw new Error("scheduled_collection_session_failed");
+      const result = await stub.runCollection();
+      if (result.status !== "success") throw new Error("scheduled_collection_failed");
+      return;
+    }
+    throw new Error("unknown_cron_trigger");
   },
 } satisfies ExportedHandler<Env>;
+
+async function ensureHealthySession(
+  stub: DurableObjectStub<SbiVcSessionState>,
+): Promise<HealthState> {
+  let health = await stub.runKeepAlive();
+  if (!shouldReauthenticate(health)) return health;
+  const previousReauthSuccessAt = health.lastReauthSuccessAt;
+  const reauthenticated = await stub.runReauthenticate(false);
+  if (
+    reauthenticated.lastReauthErrorCode === null
+    && reauthenticated.lastReauthSuccessAt !== previousReauthSuccessAt
+  ) {
+    health = await stub.runKeepAlive();
+  } else {
+    health = reauthenticated;
+  }
+  return health;
+}
 
 function shouldReauthenticate(health: HealthState): boolean {
   return health.lastHttpStatus === 401

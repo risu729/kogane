@@ -9,7 +9,7 @@
 
 SBI VCトレードには、暗号資産・日本円の資産状況、残高履歴、注文履歴、約定履歴、入出金・入出庫履歴、損益・報告書、ステーキング、貸コインの読み取り面がある。一方、顧客向け公開APIは現時点で未提供で、公式FAQは将来の公開予定としている。認証済みCookieと`secureKey`を使う内部Web gatewayのbrowser外replayに加え、既存Bitwarden passkeyからCloudflare Workerだけで新規sessionを作る無人再認証も2026-08-31に実証できた。固定read allowlistによるcollectorをブラウザーなしで運用できる見込みである。
 
-総合評価は、手動エクスポート + ローカル解析が **E / コスト1**、無人passkey再認証を含むWeb collectorが **B / コスト3** である。標準Bun/Workers `fetch`によるread-only collectorとWorkers Web Cryptoによるpasskey loginは実データで成功し、Cloudflare IP、browser TLS fingerprint、Chrome、Turnstileはpasskey経路の必須条件ではなかった。完全ブラウザーまたはアプリ自動化は不要になった。残る作業は取得eventのWorker統合、R2への原文保存、失効・仕様変更時の運用検証である。
+総合評価は、手動エクスポート + ローカル解析が **E / コスト1**、無人passkey再認証を含むWeb collectorが **B / コスト3** である。標準Bun/Workers `fetch`によるread-only collectorとWorkers Web Cryptoによるpasskey loginは実データで成功し、Cloudflare IP、browser TLS fingerprint、Chrome、Turnstileはpasskey経路の必須条件ではなかった。固定read allowlistの日次収集とprivate R2保存までWorkerへ統合済みで、完全ブラウザーまたはアプリ自動化は不要になった。残るのはabsolute expiry時fallbackと仕様変更の長期観測、PoCから本設計への統合である。
 
 ## 1. 口座・商品と列挙できる情報
 
@@ -293,7 +293,7 @@ Web側は上記のsame-origin event gatewayまで確認できた。アプリ側�
 |---|---:|---|
 | 手動PDF/ZIP取得 + ローカル解析 | **E / 1** | 公式exportを使い、秘密を処理系から隔離できる。推奨。 |
 | 将来の公式read-only API | 未評価（A候補） | 現在は仕様未公開。scope・endpoint・rate limit確認後に再調査。 |
-| 非公開Web API + passkey無人再認証 | **B / 3** | Bun/Workersから実データ取得、新規passkey session、15分rolling更新に成功。残課題はcollector統合と長期運用。 |
+| 非公開Web API + passkey無人再認証 | **B / 3** | Worker-onlyで新規passkey session、15分rolling更新、日次read収集、private R2保存に成功。残課題は長期運用。 |
 | Web完全自動化 | **D / 5（不採用）** | Worker-only経路が成立したため不要。書き込み隣接の危険も増える。 |
 | アプリ静的解析 + read-only動的観測 | **C候補 / 4-5** | 正規split取得、署名、host/schema、token/session、pinning/integrity候補を確認する次段階。 |
 | アプリ/端末完全自動化 | **D / 5** | 端末認証とread/write操作面の混在。解析結果に基づき再評価する。 |
@@ -434,7 +434,7 @@ synthetic testでは、request shape、recent/historical分離、pagination停�
 6. Workers Cronを複数回発火させ、暗号化sessionと8 Cookieのrolling更新を確認した。
 7. 既存Bitwarden passkeyをWorker Secretへ最小化投入し、Worker-onlyの新規loginと直後のread-only keepaliveに成功した。
 
-認証済みsessionのdirect replayと、失効後に使う新規bootstrapの両方をWorker-onlyで実証した。password経路のTurnstile、browser TLS fingerprint、Chrome、Container、TAMIAは採用しない。残る実装課題は、既存Bun collectorの固定read allowlistをWorkerへ統合し、原responseをR2へ安全に保存することである。
+認証済みsessionのdirect replayと、失効後に使う新規bootstrapの両方をWorker-onlyで実証した。さらに既存Bun collectorの固定read allowlistをWorkerへ移植し、sanitize後のresponseをprivate R2へ保存するところまで完了した。password経路のTurnstile、browser TLS fingerprint、Chrome、Container、TAMIAは採用しない。
 
 ### runtime候補の優先順位
 
@@ -519,7 +519,10 @@ login responseの属性では、`vct_bff_sid`と`__cf_bm`の`Expires`が約30分
 - `SESSION_SEED` Worker Secretに、実測で必要だった8 Cookieと`secureKey`を初期投入する。
 - `SESSION_ENCRYPTION_KEY` Worker SecretをAES-256-GCM keyとし、rotation後のsessionをDurable Objectへ暗号化保存する。
 - `PASSKEY_CREDENTIAL` Worker Secretには、既存Bitwarden credentialのcredential ID、PKCS#8 P-256 private key、RP ID、user handle、counter、algorithm/curveだけを投入する。master passwordとBitwarden session keyは投入しない。
-- Cronは`*/15 * * * *`で、公式UI自身が10分ごとに使う軽いread-only event `informationTitle`を1回だけ送る。
+- Cron `*/15 * * * *`は、公式UI自身が10分ごとに使う軽いread-only event `informationTitle`を1回だけ送る。
+- Cron `5 21 * * *`は毎日06:05 JSTに残高、口座詳細、position summary、約定recent/historical、JPY入出金historicalを取得する。
+- private R2 bucket `kogane-sbi-vc-trade-poc`へ、`raw/sbi-vc-trade/YYYY/MM/DD/<run-id>/`単位でartifactとmanifestを保存する。
+- responseの`meta.secureKey`はsession更新へ使った後に削除し、R2へ保存しない。各artifactは取得直後にR2へ書き、全履歴をmemoryへ保持しない。
 - responseは64 KiB上限でJSON envelopeと`meta.status === "OK"`だけを確認し、bodyを保存しない。
 - `Set-Cookie`は8 Cookieだけを追従し、`__cf_bm`は無視する。`meta.secureKey`が変化した場合も暗号化状態へ反映する。
 - 平文healthはlast attempt/success、HTTP/gateway status、Cookie更新数、連続失敗数、固定error codeだけで、残高・履歴・Cookie値・response bodyを含まない。
@@ -539,13 +542,16 @@ Cronは複数回実発火し、少なくとも2026-08-31 02:00 UTCの時点で�
 
 同日、WSLでBitwarden CLIをunlockし、`SBI VCトレード` itemの既存FIDO2 credentialから必要7 fieldだけをtmpfsへ抽出した。Worker Secret投入後に`/reauth`を1回実行し、Cloudflare Workerから`initiateLoginWithPasskey`、P-256 WebAuthn assertion生成、`loginWithPasskey`、新sessionでの`informationTitle`まで連続成功した。healthは再認証成功、HTTP 200、gateway `OK`、Cookie更新3件、連続失敗0を示した。Chrome、TAMIA、日本家庭IP、Turnstile token、過去session Cookie、`__cf_bm`は使っていない。
 
+同日、WorkerへR2 bindingと日次Cronを追加し、admin認証付き`POST /collect`を1回実行した。`cash-balances`、`account-margin`、`position-summary`、`executions-recent-page-0001`、`executions-historical-page-0001`、`cashflows-historical-page-0001`の6 artifact、合計35,180 bytesとmanifestをprivate R2へ保存し、status `success`、failure 0だった。全artifactをR2から再取得し、manifestのSHA-256一致、JSON envelopeのgateway status `OK`、`meta.secureKey`非含有を確認した。金融値とbodyは表示・ログ出力していない。
+
 これによりrolling keepaliveとabsolute/session失効後の無人復旧経路の両方を実証した。未確認なのは、実際にabsolute expiryへ達した瞬間の自動fallback、credential revoke、backend schema変更、長期rate limitである。手動`/reauth`成功だけでCron fallbackの全failure modeまで証明したとは扱わない。
 
 ### cleanup対象
 
 - Worker: `kogane-sbi-vc-session-poc`
 - Durable Object class: `SbiVcSessionState`
-- Cron: `*/15 * * * *`
+- R2 bucket: `kogane-sbi-vc-trade-poc`
+- Cron: `*/15 * * * *`, `5 21 * * *`
 - Secrets: `SESSION_SEED`, `SESSION_ENCRYPTION_KEY`, `ADMIN_TOKEN`, `PASSKEY_CREDENTIAL`
 
-検証終了時は`poc/sbi-vc-trade-worker`から`npx wrangler delete --name kogane-sbi-vc-session-poc`でまとめて削除する。現時点ではCron継続検証のため残す。
+検証終了時は`poc/sbi-vc-trade-worker`から`npx wrangler delete --name kogane-sbi-vc-session-poc`でWorker、DO binding、Cron、Secretsを削除する。R2 dataが不要になったことを別途確認した後だけ、objectsとbucket `kogane-sbi-vc-trade-poc`を削除する。現時点では日次収集の継続検証のためすべて残す。
