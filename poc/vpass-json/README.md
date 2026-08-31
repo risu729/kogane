@@ -9,6 +9,12 @@ This is not an official SMCC integration. Endpoint and anti-bot behavior can
 change without notice. Do not turn this into a hosted service or send Vpass
 credentials, cookies, or card identifiers to a third party.
 
+## Runtime profile
+
+- **Browser: なし。** Cloudflare Browser Run、Container Chrome/Chromium、外部browser sessionを使用しない。
+- Worker `fetch`でVpass Androidの認証・card/月列挙・明細JSON protocolを直接実行する。既存browser cookie、JavaScript実行、TLS impersonationも不要である。
+- 調査・検証にbrowserを使った履歴があっても、現在のcollector runtime依存ではない。
+
 Before maintaining a private Vpass client, see the
 [aggregator alternatives](../../docs/vpass-aggregators.md). In particular,
 freee offers a self-service official JSON API for synchronized credit-card
