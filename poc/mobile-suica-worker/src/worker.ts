@@ -2,6 +2,12 @@ import { timingSafeEqual } from "node:crypto";
 import { collectMobileSuica, parseSessionEnvelope } from "./mobile-suica";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import type { CollectionFailure, CollectionManifest, CollectionResult } from "./types";
+import { checkStoredJreCredential, parseStoredJreCredential } from "./webauthn";
+import {
+  bootstrapMobileSuicaSessionWithBrowser,
+  checkBrowserPasskeyLogin,
+  inspectBrowserBootstrap,
+} from "./browser-bootstrap";
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -12,6 +18,85 @@ export default {
         source: "mobile-suica",
         schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       });
+    }
+    if (request.method === "POST" && url.pathname === "/credential-check") {
+      if (!authorized(request, secretBinding(env, "ADMIN_TRIGGER_TOKEN"))) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      const credential = parseStoredJreCredential(
+        requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
+      );
+      const check = checkStoredJreCredential(credential);
+      return Response.json({
+        ok: check.verified,
+        rpId: credential.rpId,
+        algorithm: "ES256",
+        credentialIdBytes: check.credentialIdBytes,
+        authenticatorDataBytes: check.authenticatorDataBytes,
+        flags: check.flags,
+        signCount: check.signCount,
+        syncedAt: credential.syncedAt,
+      }, { status: check.verified ? 200 : 500 });
+    }
+    if (request.method === "POST" && url.pathname === "/browser-bootstrap-inspect") {
+      if (!authorized(request, secretBinding(env, "ADMIN_TRIGGER_TOKEN"))) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      try {
+        const credential = parseStoredJreCredential(
+          requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
+        );
+        return Response.json(await inspectBrowserBootstrap(env.BROWSER, credential));
+      } catch (error) {
+        return Response.json({
+          ok: false,
+          errorType: error instanceof Error ? error.name : "UnknownError",
+          message: publicError(error),
+        }, { status: 502 });
+      }
+    }
+    if (request.method === "POST" && url.pathname === "/browser-login-check") {
+      if (!authorized(request, secretBinding(env, "ADMIN_TRIGGER_TOKEN"))) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      try {
+        const credential = parseStoredJreCredential(
+          requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
+        );
+        const result = await checkBrowserPasskeyLogin(env.BROWSER, credential);
+        return Response.json(result, { status: result.ok ? 200 : 502 });
+      } catch (error) {
+        return Response.json({
+          ok: false,
+          errorType: error instanceof Error ? error.name : "UnknownError",
+          message: publicError(error),
+        }, { status: 502 });
+      }
+    }
+    if (request.method === "POST" && url.pathname === "/browser-session-check") {
+      if (!authorized(request, secretBinding(env, "ADMIN_TRIGGER_TOKEN"))) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      try {
+        const credential = parseStoredJreCredential(
+          requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
+        );
+        const session = parseSessionEnvelope(JSON.stringify(
+          await bootstrapMobileSuicaSessionWithBrowser(env.BROWSER, credential),
+        ));
+        return Response.json({
+          ok: true,
+          capturedAt: session.capturedAt,
+          cookieNames: session.cookieHeader.split(";").map((part) => part.split("=", 1)[0]?.trim()).sort(),
+          hasFormState: new URLSearchParams(session.formBody).has("baseVariable"),
+        });
+      } catch (error) {
+        return Response.json({
+          ok: false,
+          errorType: error instanceof Error ? error.name : "UnknownError",
+          message: publicError(error),
+        }, { status: 502 });
+      }
     }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
@@ -48,9 +133,12 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionR
   let capturedSessionAt: string | undefined;
 
   try {
-    const session = parseSessionEnvelope(
-      requiredSecret(secretBinding(env, "MOBILE_SUICA_SESSION_JSON"), "MOBILE_SUICA_SESSION_JSON"),
+    const credential = parseStoredJreCredential(
+      requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
     );
+    const session = parseSessionEnvelope(JSON.stringify(
+      await bootstrapMobileSuicaSessionWithBrowser(env.BROWSER, credential),
+    ));
     capturedSessionAt = session.capturedAt;
     const collection = await collectMobileSuica({ session, asOfDateJst });
     transactionCount = collection.rows.length;
