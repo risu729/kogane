@@ -32,3 +32,4 @@ different rules.
 - [Cloudflare Container runtime probe](poc/cloudflare-runtime-probe/README.md)
 - [Cloudflare Browser Rendering probe](poc/cloudflare-browser-run/README.md)
 - [Per-scraper tamia TCP bridge probe](poc/tamia-tcp-bridge/README.md)
+- [Mobile Suica JRE ID passkey collector](poc/mobile-suica-worker/README.md)
