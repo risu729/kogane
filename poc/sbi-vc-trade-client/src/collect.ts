@@ -63,7 +63,8 @@ async function collectPages(options: {
       response,
     });
     const page = pageInfo(response.body);
-    if (page === null || page.listLength === 0) break;
+    if (page === null) throw new Error(`${options.name} returned invalid pagination metadata`);
+    if (page.listLength === 0) break;
     if ((pageNumber + 1) * options.pageSize >= page.totalSize) break;
     if (pageNumber + 1 === options.maxPages) {
       throw new Error(`${options.name} exceeded maxPages=${options.maxPages}`);

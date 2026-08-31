@@ -140,6 +140,24 @@ describe("SBI VC Trade read-only gateway", () => {
       json({ meta: { status: "VALIDATION_ERROR" }, body: {} }));
     await expect(validation.accountMargin()).rejects.toThrow("VALIDATION_ERROR");
   });
+
+  test("rejects malformed pagination metadata instead of silently truncating history", async () => {
+    const client = new SbiVcTradeClient(session, async (_input, init) => {
+      const request = JSON.parse(String(init?.body)) as {
+        event: string;
+        data: { historical?: string };
+      };
+      const malformed = request.event === "executionList" && request.data.historical === "true";
+      return json({
+        meta: { status: "OK" },
+        body: malformed ? { list: [{}] } : {},
+      });
+    });
+
+    await expect(collectSbiVcTrade(client)).rejects.toThrow(
+      "executions-historical returned invalid pagination metadata",
+    );
+  });
 });
 
 function json(value: unknown): Response {

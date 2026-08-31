@@ -1,21 +1,12 @@
-import { chmod, mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { writeArtifacts } from "./artifacts";
 import { collectSbiVcTrade } from "./collect";
 import { SbiVcTradeClient } from "./client";
 import { readSessionFile } from "./session";
 
 const args = parseArgs(Bun.argv.slice(2));
 const session = await readSessionFile(args.sessionFile);
-const output = resolve(args.output);
-await mkdir(output, { recursive: true, mode: 0o700 });
-await chmod(output, 0o700);
-
 const artifacts = await collectSbiVcTrade(new SbiVcTradeClient(session));
-for (const artifact of artifacts) {
-  const path = resolve(output, artifact.name);
-  await Bun.write(path, JSON.stringify(artifact.response));
-  await chmod(path, 0o600);
-}
+await writeArtifacts(args.output, artifacts);
 console.log(JSON.stringify({ status: "success", artifactCount: artifacts.length }));
 
 interface Args {
