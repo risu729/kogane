@@ -1,0 +1,44 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kogane-sbi-vc-session-poc",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "r2_buckets": [
+    {
+      "binding": "SNAPSHOTS",
+      "bucket_name": "kogane-sbi-vc-trade-poc"
+    }
+  ],
+  "vars": {
+    "COLLECTOR_SCHEMA_VERSION": "sbi-vc-trade-worker-poc-v1"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SESSION_STATE",
+        "class_name": "SbiVcSessionState"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SbiVcSessionState"]
+    }
+  ],
+  "triggers": {
+    "crons": ["*/15 * * * *", "5 21 * * *"]
+  }
+}
