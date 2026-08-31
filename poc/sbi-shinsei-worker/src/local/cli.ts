@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
-import { lstat, readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
 import { parseCredential } from "../credential";
 import {
   createPrivateRunDirectory,
@@ -106,17 +107,25 @@ async function loadCredentialJson(
   }
   const environmentValue = process.env.SBI_SHINSEI_CREDENTIAL_JSON;
   if (environmentValue) return environmentValue;
-  const metadata = await lstat(credentialFile);
-  if (!metadata.isFile() || metadata.isSymbolicLink()) {
-    throw new Error("SBI Shinsei credential path must be a regular file");
+  const handle = await open(
+    credentialFile,
+    constants.O_RDONLY | constants.O_NOFOLLOW,
+  );
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) {
+      throw new Error("SBI Shinsei credential path must be a regular file");
+    }
+    if ((metadata.mode & 0o777) !== 0o600) {
+      throw new Error("SBI Shinsei credential file must have mode 0600");
+    }
+    if (metadata.size === 0 || metadata.size > 4_096) {
+      throw new Error("SBI Shinsei credential file has an invalid size");
+    }
+    return await handle.readFile("utf8");
+  } finally {
+    await handle.close();
   }
-  if ((metadata.mode & 0o777) !== 0o600) {
-    throw new Error("SBI Shinsei credential file must have mode 0600");
-  }
-  if (metadata.size === 0 || metadata.size > 4_096) {
-    throw new Error("SBI Shinsei credential file has an invalid size");
-  }
-  return readFile(credentialFile, "utf8");
 }
 
 function log(value: Record<string, unknown>): void {
