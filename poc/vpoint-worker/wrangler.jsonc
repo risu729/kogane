@@ -33,6 +33,10 @@
     {
       "binding": "SNAPSHOTS",
       "bucket_name": "kogane-vpoint-collector-poc"
+    },
+    {
+      "binding": "VPOINT_PAY_SNAPSHOTS",
+      "bucket_name": "kogane-vpoint-pay-collector-poc"
     }
   ],
   "vars": {

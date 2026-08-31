@@ -34,6 +34,18 @@ export interface CollectionManifest {
   vMoneyHistoryPageCount: number;
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];
+  emailReconciliation?: {
+    reportKey: string;
+    emailEventCount: number;
+    comparableCount: number;
+    matchedCount: number;
+    ambiguousCount: number;
+    unmatchedCount: number;
+    notComparableCount: number;
+    appLedgerStatus:
+      | "unavailable-no-live-snapshot"
+      | "available-not-compared";
+  };
 }
 
 export interface CollectionResult extends CollectionManifest {

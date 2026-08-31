@@ -2,6 +2,11 @@ import { timingSafeEqual } from "node:crypto";
 import { extractVPointEmailCode } from "./email";
 import { VPointSession } from "./session";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
+import {
+  parseVPointPayEmail,
+  storeVPointPayEmail,
+} from "./vpoint-pay-email";
+import { reconcileVPointPayEmails } from "./vpoint-pay-reconcile";
 import type {
   CollectionFailure,
   CollectionManifest,
@@ -49,14 +54,30 @@ export default {
     const raw = isTarget
       ? await new Response(message.raw).arrayBuffer()
       : null;
+    const payEmail = raw ? await parseVPointPayEmail(raw) : null;
+    if (payEmail) {
+      const stored = await storeVPointPayEmail({
+        bucket: env.VPOINT_PAY_SNAPSHOTS,
+        parsed: payEmail,
+      });
+      console.log(JSON.stringify({
+        event: "vpoint-pay-email-stored",
+        eventType: stored.event.eventType,
+        duplicate: stored.duplicate,
+        rawKey: stored.rawKey,
+      }));
+    }
+
     let forwardError: unknown = null;
-    try {
-      await message.forward(requiredSecret(
-        env.VPOINT_EMAIL_FORWARD_TO,
-        "VPOINT_EMAIL_FORWARD_TO",
-      ));
-    } catch (error) {
-      forwardError = error;
+    if (!payEmail) {
+      try {
+        await message.forward(requiredSecret(
+          env.VPOINT_EMAIL_FORWARD_TO,
+          "VPOINT_EMAIL_FORWARD_TO",
+        ));
+      } catch (error) {
+        forwardError = error;
+      }
     }
 
     if (raw) {
@@ -89,6 +110,7 @@ async function runCollection(env: Env): Promise<CollectionResult> {
   let historyPageCount = 0;
   let vMoneyHistoryTotal = 0;
   let vMoneyHistoryPageCount = 0;
+  let emailReconciliation;
   const session = sessionStub(env);
 
   try {
@@ -114,6 +136,16 @@ async function runCollection(env: Env): Promise<CollectionResult> {
       } catch (error) {
         failures.push(failure(`r2:${artifact.dataset}`, error));
       }
+    }
+    try {
+      emailReconciliation = await reconcileVPointPayEmails({
+        bucket: env.VPOINT_PAY_SNAPSHOTS,
+        vPointArtifacts: collection.artifacts,
+        runId,
+        completedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      failures.push(failure("reconcile:vpoint-pay-email", error));
     }
   } catch (error) {
     if (error instanceof VPointSessionExpiredError) {
@@ -142,6 +174,7 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     vMoneyHistoryPageCount,
     artifacts,
     failures,
+    emailReconciliation,
   };
   const manifestKey = await storeManifest({
     bucket: env.SNAPSHOTS,
@@ -158,6 +191,7 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     vMoneyHistoryPageCount,
     artifactCount: artifacts.length,
     failureCount: failures.length,
+    emailReconciliation,
     manifestKey,
   }));
   return { ...manifest, manifestKey };
@@ -205,6 +239,7 @@ function publicResult(result: CollectionResult): object {
     historyPageCount: result.historyPageCount,
     artifactCount: result.artifacts.length,
     failureCount: result.failures.length,
+    emailReconciliation: result.emailReconciliation,
     reauthenticationPending: awaitingReauthentication(result),
     manifestKey: result.manifestKey,
   };

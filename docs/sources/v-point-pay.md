@@ -73,3 +73,20 @@ Durable Objectへ保存する。token/UUID/access tokenをR2やログへ出さ�
 この結果はCloudflare edge IPやTLS fingerprintだけでは拒否されないことを示す。一方、
 認証済みAPIのtoken/device bindingを証明しないため、owner app bootstrap後にrefresh、
 balance、transactionを個別に検証する。
+
+## 通知メールによる補助台帳
+
+app sessionがない期間も、公式通知メールから利用・チャージ・残高加算・利用不可eventを
+取得できる。これはapp API明細の代替正本ではなく、欠落期間を補う独立sourceとして扱う。
+`poc/vpoint-worker/`の既存Email Workerへ取り込みを追加し、原本EMLと正規化JSONを
+VポイントPay用private R2へ保存する。Gmail転送は原本をinline `message/rfc822`にするため、
+外側のGmail送信者ではなく内側の公式送信者を検証する必要がある。
+
+2026-08-31に既存通知85通をbackfillし、85件すべてをhash keyで重複なしに保存した。
+Vポイント本体の同時点履歴149件との照合は、明示的なポイント額とJST暦日だけを使った。
+比較可能34件のうち11件一致、23件不一致、候補複数0件、比較対象外51件だった。
+app APIのlive snapshotは存在しないため、email対app明細は未照合である。
+
+不一致を理由にsource eventを書き換えない。後日app APIが復旧したら、email、app transaction、
+Vポイント履歴を三つの独立sourceとして照合し、authorization/settlement/refundによる差を
+reportへ追加する。matchできないeventはunknownのまま残す。
