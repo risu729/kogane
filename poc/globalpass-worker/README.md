@@ -4,6 +4,12 @@ GLOBAL PASS（Vpassデビット専用サイト）のサーバーレンダリン�
 
 2026-08-30に、Cloudflare Containerのtimezoneを`Asia/Tokyo`へ合わせるだけでTurnstile token生成を再現し、実アカウントのlogin、daily、15か月backfillをend-to-endで完了した。HTMLとmanifestはprivate R2へ保存済みで、Workers Cronを1日1回だけ有効化している。GitHub Actionsのscheduleは使わない。手動`/trigger`と認証付きの`/browser-probe`・`/container-probe`・`/latest-manifest`は運用診断用に残す。
 
+## Runtime profile
+
+- **Browser: 全収集区間。** 通常のdaily/backfillはCloudflare Container内のheaded Google Chrome StableをPlaywrightで起動する。
+- browserの目的はTurnstile token生成、公式JavaScript login、server-rendered明細の表示、利用可能月selectorによる月切替である。login後にWorker `fetch`へ切り替えず、明細HTMLまで同じbrowser sessionで取得する。
+- Worker側のBrowser Run bindingは認証付き`/browser-probe`専用の診断経路であり、production collectionには使わない。Worker本体はContainer orchestration、TAMIAへのopaque relay、NDJSON受信、R2保存を担当する。
+
 ## 現在の実行構成
 
 ```text

@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kogane-mobile-suica-collector-poc",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "secrets": {
+    "required": [
+      "ADMIN_TRIGGER_TOKEN",
+      "JRE_ID_CREDENTIAL_JSON"
+    ]
+  },
+  "r2_buckets": [
+    {
+      "binding": "SNAPSHOTS",
+      "bucket_name": "kogane-mobile-suica-collector-poc"
+    }
+  ],
+  "browser": {
+    "binding": "BROWSER",
+    "remote": true
+  },
+  "vars": {
+    "COLLECTOR_SCHEMA_VERSION": "mobile-suica-worker-poc-v1"
+  },
+  "triggers": {
+    "crons": ["10 21 * * *"]
+  }
+}

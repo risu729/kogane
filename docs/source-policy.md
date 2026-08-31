@@ -86,8 +86,16 @@ Every source PR records:
 - third-party clients, their exact transport/auth approach, activity, and
   license;
 - feasibility on Workers, Containers, OCI Kubernetes, and local issuance;
+- the implemented runtime's browser classification (`none`, `login only`, or
+  `full collection`), the exact Browser Run/Container/external-browser
+  boundary, and why each browser-controlled step cannot yet use direct HTTP;
 - a 1-5 implementation-cost score and a recommended next experiment;
 - a strict read-only allowlist when the upstream surface also exposes writes.
+
+Deployable PoCs also place the standardized `Runtime profile` near the top of
+their README and update the central [`poc/README.md`](../poc/README.md)
+inventory. Research-time browser capture and production runtime dependency are
+recorded separately.
 
 Multiple official routes to the same value are compared explicitly. For
 example, a point balance exposed by a card portal and by the point program may

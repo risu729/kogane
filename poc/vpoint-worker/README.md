@@ -5,6 +5,12 @@ Vポイント本体の残高・期限bucket・SMBC由来内訳・最大3年の�
 raw responseとmanifestをprivate R2へ保存するPoCである。VポイントPayとVpass明細は別の
 サービス・認証・台帳であるため含めない。
 
+## Runtime profile
+
+- **Browser: なし。** Cloudflare Browser Run、Container Chrome/Chromium、既存browser cookieを使用しない。
+- Worker `fetch`でfirst-party form chainを進め、Email Workerで認証コードを受け、SQLite Durable Objectに短命sessionを保持してJSON APIを収集する。
+- Kogane Capture Chromeはendpoint/schemaの本人確認に使っただけで、production collectorはbrowserを起動しない。
+
 ## Liveで確認したデータソース
 
 2026-08-31、Kogane Capture Chromeのユーザー口座で次を確認した。値、加盟店、Cookie、
