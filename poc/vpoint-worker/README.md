@@ -113,7 +113,8 @@ bun run cf:check
 
 - R2 bucket: `kogane-vpoint-collector-poc`
 - SQLite Durable Object: `VPointSession`
-- Email Routing rule: `kogane-vpoint-auth`（対象アドレスだけをWorkerへ配送）
+- Email Routing rule: `kogane-vpoint-auth`（`vpoint@takuk.me`だけをWorkerへ配送）
+- Email Routing rule: `kogane-vpoint-pay`（`vpointpay@takuk.me`だけを同じWorkerへ配送）
 - secret: `VPOINT_MEMBER_NUMBER`
 - secret: `VPOINT_EMAIL_RECIPIENT`
 - secret: `VPOINT_EMAIL_FORWARD_TO`
@@ -136,7 +137,7 @@ Vマネー0件・1 page、9 artifact、failure 0のv2 manifestをR2から再読�
 
 検証環境を削除するときは、次を一組として扱う。
 
-1. Email Routing rule `kogane-vpoint-auth`
+1. Email Routing rules `kogane-vpoint-auth`、`kogane-vpoint-pay`
 2. Worker `kogane-vpoint-collector-poc`（Cron、secrets、`VPointSession` namespaceを含む）
 3. R2 bucket `kogane-vpoint-collector-poc`
 
@@ -152,7 +153,7 @@ repositoryへ保存し、Koganeにはprovenance、hash、再現手順、sanitize
 
 ## VポイントPay通知メールの取り込みと照合
 
-同じEmail Routing ruleをVポイントPay通知のarchiveにも使う。Gmailから対象通知を
+同じWorkerのVポイントPay専用Email Routing ruleを通知archiveにも使う。Gmailから対象通知を
 `vpoint@takuk.me`へ転送すると、Gmailは原本を`message/rfc822`のinline attachmentとして
 送る。handlerは`forceRfc822Attachments`で内側の原本を分離し、内側のFromが
 `info@prepaid.smbc-card.com`で、subjectが次のいずれかである場合だけ取り込む。
@@ -166,7 +167,7 @@ repositoryへ保存し、Koganeにはprovenance、hash、再現手順、sanitize
 `raw/v-point-pay-email/YYYY/MM/DD/<sha256>.eml`、正規化結果は同じprefixの`.json`へ保存する。
 原本hashをkeyにするため、同じbackfillを再実行しても原本は増えない。正規化JSONはparserの
 修正を反映できるよう再生成する。Gmailから`message/rfc822`添付で転送された通知は元から
-Gmailに存在するためWorkerから戻さない。公式送信元から`vpoint@takuk.me`へ直接届いた通知は、
+Gmailに存在するためWorkerから戻さない。公式送信元から`vpointpay@takuk.me`へ直接届いた通知は、
 R2保存後に従来のGmail宛へ転送する。OTPや転送先確認メールなど対象外メールも従来どおり
 転送する。この区別により、VポイントPayの登録メールをaliasへ変更してもGmailで通知を読め、
 Gmailからのbackfillは転送loopを起こさない。
@@ -184,6 +185,10 @@ Gmailからのbackfillは転送loopを起こさない。
 3. Vポイントcollectorを1回実行する。現在runのVポイント履歴と、保存済みの全通知を照合し、
    `derived/v-point-pay-email-reconciliation/YYYY/MM/DD/<run-id>.json`へreportを保存する。
 4. reportの件数をGmail検索件数と突き合わせる。再実行は安全だが、欠落分だけ再転送してよい。
+
+`vpoint@takuk.me`はVポイントWeb認証メールと過去メールbackfill専用、
+`vpointpay@takuk.me`はVポイントPayアプリの登録先および今後の公式通知専用とする。両routeは
+同じWorkerへ届くが、後者はコード抽出には使われない。通常のcatch-all転送ruleは残す。
 
 照合は次のexact ruleだけを使う。
 

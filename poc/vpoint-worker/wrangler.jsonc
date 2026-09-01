@@ -40,7 +40,8 @@
     }
   ],
   "vars": {
-    "COLLECTOR_SCHEMA_VERSION": "vpoint-worker-poc-v2"
+    "COLLECTOR_SCHEMA_VERSION": "vpoint-worker-poc-v2",
+    "VPOINT_PAY_EMAIL_RECIPIENT": "vpointpay@takuk.me"
   },
   "secrets": {
     "required": [

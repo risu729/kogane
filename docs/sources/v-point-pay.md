@@ -82,7 +82,7 @@ app sessionがない期間も、公式通知メールから利用・チャージ
 VポイントPay用private R2へ保存する。Gmail転送は原本をinline `message/rfc822`にするため、
 外側のGmail送信者ではなく内側の公式送信者を検証する必要がある。
 
-VポイントPay側の登録メールを`vpoint@takuk.me`へ変更した後は、公式からの直接配送を
+VポイントPay側の登録メールを`vpointpay@takuk.me`へ変更した後は、公式からの直接配送を
 保存後にGmailへ転送する。一方、Gmailから`message/rfc822`でbackfillした通知は再転送しない。
 transport形状を明示的に区別し、通常通知を失わずに転送loopを防ぐ。
 

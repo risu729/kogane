@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { extractVPointEmailCode } from "./email";
+import { extractVPointEmailCode, isCollectorRecipient } from "./email";
 import { VPointSession } from "./session";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import {
@@ -48,10 +48,13 @@ export default {
   },
 
   async email(message, env): Promise<void> {
-    const isTarget = message.to.toLowerCase() === requiredSecret(
-      env.VPOINT_EMAIL_RECIPIENT,
-      "VPOINT_EMAIL_RECIPIENT",
-    ).toLowerCase();
+    const isTarget = isCollectorRecipient(message.to, [
+      requiredSecret(env.VPOINT_EMAIL_RECIPIENT, "VPOINT_EMAIL_RECIPIENT"),
+      requiredSecret(
+        env.VPOINT_PAY_EMAIL_RECIPIENT,
+        "VPOINT_PAY_EMAIL_RECIPIENT",
+      ),
+    ]);
     const raw = isTarget
       ? await new Response(message.raw).arrayBuffer()
       : null;
