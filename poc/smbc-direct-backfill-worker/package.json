@@ -1,0 +1,21 @@
+{
+  "name": "@kogane/poc-smbc-direct-backfill-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "cf:types": "wrangler types worker-configuration.d.ts --env-file .dev.vars.example --strict-vars false",
+    "typecheck": "bun run cf:types && tsc --noEmit",
+    "cf:check": "wrangler deploy --dry-run",
+    "cf:deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "iconv-lite": "0.7.3",
+    "uqr": "0.1.3"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.8",
+    "typescript": "5.9.3",
+    "wrangler": "4.127.1"
+  }
+}

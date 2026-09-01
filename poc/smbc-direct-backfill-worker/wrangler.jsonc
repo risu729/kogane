@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kogane-smbc-direct-backfill-poc",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-08-31",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "r2_buckets": [
+    {
+      "binding": "SNAPSHOTS",
+      "bucket_name": "kogane-smbc-direct-backfill-poc"
+    }
+  ],
+  "vpc_networks": [
+    {
+      "binding": "TAMIA",
+      "tunnel_id": "6b0ccf30-68b2-494e-baa8-f4f9f3e46b33",
+      "remote": true
+    }
+  ],
+  "vars": {
+    "COLLECTOR_SCHEMA_VERSION": "smbc-direct-backfill-worker-poc-v1",
+    "SMBC_DIRECT_BASE_URL": "https://direct3.smbc.co.jp",
+    "SMBC_DIRECT_LOGIN_BASE_URL": "https://direct.smbc.co.jp",
+    "DEFAULT_BACKFILL_FROM": "2019-01-01"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BACKFILL_SESSION",
+        "class_name": "SmbcBackfillSession"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["SmbcBackfillSession"]
+    }
+  ]
+}
