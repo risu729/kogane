@@ -113,7 +113,8 @@ bun run cf:check
 
 - R2 bucket: `kogane-vpoint-collector-poc`
 - SQLite Durable Object: `VPointSession`
-- Email Routing rule: `kogane-vpoint-auth`（対象アドレスだけをWorkerへ配送）
+- Email Routing rule: `kogane-vpoint-auth`（`vpoint@takuk.me`だけをWorkerへ配送）
+- Email Routing rule: `kogane-vpoint-pay`（`vpointpay@takuk.me`だけを同じWorkerへ配送）
 - secret: `VPOINT_MEMBER_NUMBER`
 - secret: `VPOINT_EMAIL_RECIPIENT`
 - secret: `VPOINT_EMAIL_FORWARD_TO`
@@ -136,7 +137,7 @@ Vマネー0件・1 page、9 artifact、failure 0のv2 manifestをR2から再読�
 
 検証環境を削除するときは、次を一組として扱う。
 
-1. Email Routing rule `kogane-vpoint-auth`
+1. Email Routing rules `kogane-vpoint-auth`、`kogane-vpoint-pay`
 2. Worker `kogane-vpoint-collector-poc`（Cron、secrets、`VPointSession` namespaceを含む）
 3. R2 bucket `kogane-vpoint-collector-poc`
 
@@ -149,3 +150,59 @@ VポイントPayはプリペイドJPY残高・authorization・settlement・refun
 正本は`com.smbc_card.vpoint`アプリである。このWeb PoCではAPKを取得・decompileしていない。
 将来app解析を行う場合、binary/decompiled/decrypted artifactは既存private Android archive
 repositoryへ保存し、Koganeにはprovenance、hash、再現手順、sanitize済みのschemaだけを置く。
+
+## VポイントPay通知メールの取り込みと照合
+
+同じWorkerのVポイントPay専用Email Routing ruleを通知archiveにも使う。Gmailから対象通知を
+`vpoint@takuk.me`へ転送すると、Gmailは原本を`message/rfc822`のinline attachmentとして
+送る。handlerは`forceRfc822Attachments`で内側の原本を分離し、内側のFromが
+`info@prepaid.smbc-card.com`で、subjectが次のいずれかである場合だけ取り込む。
+
+- ご利用のお知らせ
+- チャージ受付のお知らせ
+- プリペイド残高加算のお知らせ
+- ご利用不可のお知らせ／カードがご利用頂けませんでした
+
+原本は`kogane-vpoint-pay-collector-poc` bucketの
+`raw/v-point-pay-email/YYYY/MM/DD/<sha256>.eml`、正規化結果は同じprefixの`.json`へ保存する。
+原本hashをkeyにするため、同じbackfillを再実行しても原本は増えない。正規化JSONはparserの
+修正を反映できるよう再生成する。Gmailから`message/rfc822`添付で転送された通知は元から
+Gmailに存在するためWorkerから戻さない。公式送信元から`vpointpay@takuk.me`へ直接届いた通知は、
+R2保存後に従来のGmail宛へ転送する。OTPや転送先確認メールなど対象外メールも従来どおり
+転送する。この区別により、VポイントPayの登録メールをaliasへ変更してもGmailで通知を読め、
+Gmailからのbackfillは転送loopを起こさない。
+
+既存メールのbackfill手順:
+
+1. Gmailで次を検索する。
+
+   ```text
+   from:info@prepaid.smbc-card.com (subject:"ご利用のお知らせ" OR subject:"チャージ受付のお知らせ" OR subject:"プリペイド残高加算のお知らせ" OR subject:"ご利用不可のお知らせ" OR subject:"カードがご利用頂けませんでした") -in:spam -in:trash
+   ```
+
+2. 検索結果を原本添付のまま`vpoint@takuk.me`へ転送する。Gmail APIを使う場合は
+   `message/rfc822`を保持し、1 request最大10通で分割する。
+3. Vポイントcollectorを1回実行する。現在runのVポイント履歴と、保存済みの全通知を照合し、
+   `derived/v-point-pay-email-reconciliation/YYYY/MM/DD/<run-id>.json`へreportを保存する。
+4. reportの件数をGmail検索件数と突き合わせる。再実行は安全だが、欠落分だけ再転送してよい。
+
+`vpoint@takuk.me`はVポイントWeb認証メールと過去メールbackfill専用、
+`vpointpay@takuk.me`はVポイントPayアプリの登録先および今後の公式通知専用とする。両routeは
+同じWorkerへ届くが、後者はコード抽出には使われない。通常のcatch-all転送ruleは残す。
+
+照合は次のexact ruleだけを使う。
+
+- メールに`内、利用Vポイント数`が明記された場合、その値を使う。
+- チャージの`取引内容`が`ポイント`と明記された場合、そのチャージ額を使う。
+- JST暦日とVポイント数がVポイント履歴の利用行に完全一致した1件だけを`matched`とする。
+- 0件は`unmatched`、複数は`ambiguous`、明示額がない通知は`not-comparable`とする。
+
+加盟店名の近似、前後日へのずらし、金額の補正、候補の自動選択は行わない。reportはsource keyと
+row fingerprintを参照するだけで、メール原本、正規化event、Vポイント履歴、VポイントPay app
+履歴のいずれも変更・削除・統合しない。appのlive transaction snapshotがまだない場合は
+`unavailable-no-live-snapshot`を明示する。
+
+2026-08-31のlive backfillではGmail検索85通、R2 event 85件で一致した。Vポイント履歴149件との
+exact照合は、比較可能34件中11件matched、23件unmatched、0件ambiguous、51件not-comparable
+だった。不一致23件は推測で修正していない。VポイントPay app履歴はlive credential消失後のため
+未取得で、email対appの照合は実行していない。

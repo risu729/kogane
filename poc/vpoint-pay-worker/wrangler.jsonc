@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "kogane-vpoint-collector-poc",
+  "name": "kogane-vpoint-pay-collector-poc",
   "main": "src/worker.ts",
   "compatibility_date": "2026-08-30",
   "compatibility_flags": ["nodejs_compat"],
@@ -16,7 +16,7 @@
     }
   },
   "exports": {
-    "VPointSession": {
+    "VPointPayCredentialState": {
       "type": "durable-object",
       "storage": "sqlite"
     }
@@ -24,34 +24,28 @@
   "durable_objects": {
     "bindings": [
       {
-        "name": "VPOINT_SESSION",
-        "class_name": "VPointSession"
+        "name": "VPOINT_PAY_STATE",
+        "class_name": "VPointPayCredentialState"
       }
     ]
   },
   "r2_buckets": [
     {
       "binding": "SNAPSHOTS",
-      "bucket_name": "kogane-vpoint-collector-poc"
-    },
-    {
-      "binding": "VPOINT_PAY_SNAPSHOTS",
       "bucket_name": "kogane-vpoint-pay-collector-poc"
     }
   ],
   "vars": {
-    "COLLECTOR_SCHEMA_VERSION": "vpoint-worker-poc-v2",
-    "VPOINT_PAY_EMAIL_RECIPIENT": "vpointpay@takuk.me"
+    "COLLECTOR_SCHEMA_VERSION": "vpoint-pay-worker-poc-v1"
   },
   "secrets": {
     "required": [
-      "VPOINT_MEMBER_NUMBER",
-      "VPOINT_EMAIL_RECIPIENT",
-      "VPOINT_EMAIL_FORWARD_TO",
+      "VPOINT_PAY_REFRESH_TOKEN",
+      "VPOINT_PAY_DEVICE_UUID",
       "ADMIN_TRIGGER_TOKEN"
     ]
   },
   "triggers": {
-    "crons": ["15 21 * * *"]
+    "crons": ["30 21 * * *"]
   }
 }

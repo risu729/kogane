@@ -2,6 +2,16 @@ import PostalMime from "postal-mime";
 
 export const VPOINT_EMAIL_SUBJECT = "Vポイントサイト認証コードのお知らせ";
 
+export function isCollectorRecipient(
+  recipient: string,
+  configuredRecipients: string[],
+): boolean {
+  const normalizedRecipient = recipient.trim().toLowerCase();
+  return configuredRecipients.some(
+    (configured) => normalizedRecipient === configured.trim().toLowerCase(),
+  );
+}
+
 export async function extractVPointEmailCode(
   raw: ArrayBuffer | Uint8Array,
 ): Promise<string | null> {

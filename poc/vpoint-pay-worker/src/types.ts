@@ -1,9 +1,14 @@
 export type JsonObject = Record<string, unknown>;
 
+export interface VPointPayCredential {
+  refreshToken: string;
+  deviceUuid: string;
+}
+
 export interface RawArtifact {
   dataset: string;
   filename: string;
-  mediaType: string;
+  mediaType: "application/json";
   body: string;
 }
 
@@ -23,31 +28,27 @@ export interface CollectionFailure {
 
 export interface CollectionManifest {
   schemaVersion: string;
-  source: "v-point";
+  source: "v-point-pay";
   runId: string;
   startedAt: string;
   completedAt: string;
   status: "success" | "partial" | "failed";
-  historyTotal: number;
-  historyPageCount: number;
-  vMoneyHistoryTotal: number;
-  vMoneyHistoryPageCount: number;
+  earliestMonth: string | null;
+  latestMonth: string | null;
+  transactionMonthCount: number;
+  transactionCount: number;
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];
-  emailReconciliation?: {
-    reportKey: string;
-    emailEventCount: number;
-    comparableCount: number;
-    matchedCount: number;
-    ambiguousCount: number;
-    unmatchedCount: number;
-    notComparableCount: number;
-    appLedgerStatus:
-      | "unavailable-no-live-snapshot"
-      | "available-not-compared";
-  };
 }
 
 export interface CollectionResult extends CollectionManifest {
   manifestKey: string;
+}
+
+export interface ApiCollection {
+  artifacts: RawArtifact[];
+  earliestMonth: string;
+  latestMonth: string;
+  transactionMonthCount: number;
+  transactionCount: number;
 }
