@@ -255,6 +255,30 @@ APK静的解析で分かるのは、宣言されたcomponent、文字列/host、
 
 GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnextPreTS` を実装する公開コードは`mnie`以外に見つからなかった。従って、現在再利用価値があるのは実質的に`mnie`で、他はCSV fallbackの設計資料である。
 
+### Kogane Workers PoC live result（2026-09-01）
+
+`poc/smbc-direct-backfill-worker`へ、`mnie`をruntime dependencyにせず必要なread-only login、円普通預金残高、月次明細、logoutだけを分離した。Cloudflare AccessでUIを保護し、QR challengeと認証済みsessionをDurable ObjectへAES-256-GCM暗号化保存、raw Shift_JIS JSON・normalized JSON・manifestをprivate R2へ保存する。開始日/終了日はclientから受け付けず、Web通帳の最古日2019-01-01から日本時間の実行当日までを常に月単位で走査する。
+
+同一code・credentialsでegressだけを比較した結果:
+
+| Egress | Login pre-step | 判定 |
+| --- | --- | --- |
+| 通常のWorkers `fetch()` | HTTP 200だがSMBC `ERRINFO` form | Safety Pass challengeへ進めない |
+| 既存TAMIA Tunnelを直接指定したVPC bindingの`fetch()` | `BCATBCA` formとSafety Pass QR生成 | 採用 |
+
+`direct.smbc.co.jp`と`direct3.smbc.co.jp`だけをcode上のexact allowlistに固定して`TAMIA.fetch()`へ渡す。任意host、client指定destination、Tailscale、hostname route、Container、Browser Renderingは使わない。これは通常のWorkers TLS/HTTP fingerprintを家庭回線側へ移す経路であり、Chrome fingerprintを保存するopaque TCP bridgeではないが、SMBC Directの今回のHTTP flowには十分だった。
+
+実口座では最初のSafety Pass sessionが48/93か月で`TPALTOP` formを失い、3回のbounded retry後にpartialとなった。取得済み48か月、188明細、98 artifactはR2に残した。新しいQR承認後、同じRun IDとartifact集合を保って49か月目から再開し、最終的に次をR2 manifestで確認した。
+
+- status `success`
+- 93/93 monthly chunks（2019-01-01から2026-09-01）
+- 1,069 transactions
+- 188 data artifacts + manifest
+- failure code 0
+- official logout success
+
+したがって、1回のSafety Pass承認で30年相当を必ず完走できるとは扱わず、partial stateを保持して次の手動QR承認から未取得月を再開する必要がある。再開時に既存month objectを再取得・上書きせず、全chunk完了後だけ最終statusをsuccessにする。
+
 ## 公式APIとaggregator回避
 
 三井住友銀行は個人口座向けに、普通口座残高・明細、定期、外貨、債券、ポイント、住宅ローン等を提供するAPI基盤を整備している。ただし接続先は、銀行と契約し接続基準を満たした電子決済等代行業者に限定される。[公式連携方針](https://www.smbc.co.jp/collaboration/)
@@ -269,9 +293,9 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 | OCI VM / 単一コンテナ | 4/5 | 固定egress、Node/Bun、暗号化ストレージを用意しやすい。承認URL/QRを安全にユーザーへ返す必要がある |
 | OCI Kubernetes | 3/5 | CronJobとSecret管理は可能だが、単一個人口座には過剰。Pod再配置でegressやセッション保存が変わらないよう設計が必要 |
 | Cloudflare Containers | 4/5 | 現行のNode/Bun互換コードを載せやすい。人の承認待ちとセッション永続化を別の状態ストアで扱う必要がある |
-| Cloudflare Workers | 2/5 | pure fetch自体は移植可能だが、現行実装は`Buffer`、`process.env`、`iconv-lite`を使う。Node互換設定、Shift_JIS、Cookie jar、承認待ち状態、暗号化保存、共有egressに対するAkamai判定を検証する必要がある |
+| Cloudflare Workers + TAMIA VPC binding | 5/5 | Node互換、Shift_JIS、Cookie jar、暗号化DO、R2、Access、QR再承認後resumeを実口座で完走確認。通常Workers egressだけではSMBC `ERRINFO` |
 
-初期実装はローカルまたはOCIの専用コンテナを推奨する。収集処理は1プロファイル1実行に直列化し、同じセッションを複数Podから同時使用しない。Akamai対策としてリクエスト頻度を人の通常操作に近い低頻度に保ち、固定egressと一貫したUser-Agentを使う。ブラウザ指紋の偽装を増やす前に、通常のHTTPフローでどこまで安定するかを測る。
+採用PoCはCloudflare Workers + 既存TAMIA VPC bindingである。収集処理は1 Access identity・1 Durable Object・1実行に直列化し、同じセッションを複数runから同時使用しない。通常Workers egress失敗とTAMIA成功のA/Bが取れたため、2つのSMBC hostだけをTAMIAへ固定する。
 
 ## コストと自動化見込み
 
@@ -313,10 +337,8 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 
 ## 未確認事項
 
-- 実契約がSMBCセーフティパスかワンタイムパスワードのどちらを使用しているか
-- 現行セッションの無操作・最大寿命と、安全な同期頻度
-- Akamaiが認証後のNode/Bun、Cloudflare、OCI egressをどう判定するか
-- `mnie`の現行コードが実口座で再現するか、および既定科目コード `2206` が対象口座と一致するか
+- 現行セッションの無操作・絶対時間上限と、48か月地点の失効が時間・request数・別条件のどれに依存するか
+- TAMIA経由での日次増分取得を長期運用した場合の429、追加認証、session寿命
 - 実際の複数サービス利用口座一覧を返す内部endpointと、安定した口座識別子
 - 定期・積立の預入ロット項目と履歴保存期間
 - 外貨CSV/内部JSONの通貨、小数桁、適用レート、取引後残高の正確なschema
