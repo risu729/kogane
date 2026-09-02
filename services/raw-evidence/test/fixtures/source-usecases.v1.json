@@ -1,0 +1,90 @@
+{
+  "schemaVersion": "kogane-source-usecases-v1",
+  "sanitization": {
+    "syntheticOnly": true,
+    "containsCredentials": false,
+    "containsFinancialValues": false,
+    "containsRawUrlsOrQueryValues": false
+  },
+  "cases": {
+    "vpassMultiCard": {
+      "sourceId": "vpass",
+      "sessionId": "fixture-vpass-multi-card",
+      "cardKeys": ["card-slot-a", "card-slot-b"],
+      "snapshotBody": "{\"fixture\":\"vpass-snapshot\",\"rows\":[]}",
+      "manifestBody": "{\"schemaVersion\":\"fixture-v1\",\"status\":\"success\"}"
+    },
+    "sbiSecuritiesPartial": {
+      "sourceId": "sbi-securities",
+      "sessionId": "fixture-sbi-securities-partial",
+      "successBody": "{\"fixture\":\"domestic-history\",\"rows\":[]}",
+      "errorBody": "{\"fixture\":\"foreign-history\",\"safeFailureCode\":\"human-required\"}",
+      "manifestBody": "{\"schemaVersion\":\"fixture-v1\",\"status\":\"partial\"}"
+    },
+    "sbiShinseiLineage": {
+      "sourceId": "sbi-shinsei-bank",
+      "sessionId": "fixture-sbi-shinsei-lineage",
+      "rawBody": "{\"fixture\":\"provider-response\",\"items\":[]}",
+      "normalizedBody": "{\"fixture\":\"normalized-response\",\"items\":[]}"
+    },
+    "sbiVcPagination": {
+      "sourceId": "sbi-vc-trade",
+      "sessionId": "fixture-sbi-vc-pagination",
+      "pageBodies": [
+        "{\"fixture\":\"asset-history\",\"page\":0,\"items\":[]}",
+        "{\"fixture\":\"asset-history\",\"page\":1,\"items\":[]}",
+        "{\"fixture\":\"asset-history\",\"page\":2,\"items\":[]}"
+      ]
+    },
+    "myjcbMultiConnection": {
+      "sourceId": "myjcb",
+      "sessionId": "fixture-myjcb-multi-connection",
+      "connectionKeys": ["connection-slot-a", "connection-slot-b"],
+      "sanitizedBody": "<html><body data-fixture=\"myjcb-sanitized\"></body></html>"
+    },
+    "mobileSuicaCp932": {
+      "sourceId": "mobile-suica",
+      "sessionId": "fixture-mobile-suica-cp932",
+      "cp932Hex": "979a97f02c8d8096da0d0a89cb8bf32c82c882b50d0a"
+    },
+    "vPointEmptyPage": {
+      "sourceId": "v-point",
+      "sessionId": "fixture-v-point-empty-page",
+      "body": "{\"fixture\":\"point-history\",\"items\":[],\"nextPage\":null}"
+    },
+    "vPointPayMail": {
+      "sourceId": "v-point-pay",
+      "reconciliationSourceId": "v-point",
+      "sessionId": "fixture-v-point-pay-mail",
+      "directBody": "From: notice@provider.example\r\nTo: fixture@example.invalid\r\nSubject: fixture-direct\r\n\r\nSANITIZED FIXTURE\r\n",
+      "forwardedBody": "From: forwarder@example.invalid\r\nTo: fixture@example.invalid\r\nSubject: fixture-forwarded\r\nContent-Type: message/rfc822\r\n\r\nFrom: notice@provider.example\r\nSubject: nested-fixture\r\n\r\nSANITIZED FIXTURE\r\n",
+      "reconciliationBody": "{\"schemaVersion\":\"fixture-reconciliation-v1\",\"entries\":[],\"semanticPhase\":3}"
+    },
+    "sonyNonRetention": {
+      "sourceId": "sony-bank",
+      "sessionId": "fixture-sony-non-retention",
+      "sanitizedBody": "<html><body data-fixture=\"sony-sanitized\"></body></html>"
+    },
+    "moneyForwardOrdering": {
+      "sourceId": "moneyforward-me",
+      "sessionId": "fixture-moneyforward-ordering",
+      "bodies": [
+        "{\"fixture\":\"capture-step\",\"sequence\":0}",
+        "{\"fixture\":\"capture-step\",\"sequence\":1}",
+        "{\"fixture\":\"capture-step\",\"sequence\":2}"
+      ]
+    },
+    "smbcResume": {
+      "sourceId": "smbc-bank",
+      "sessionId": "fixture-smbc-resume",
+      "chunkKeys": ["chunk-000", "chunk-001"],
+      "chunkBody": "{\"fixture\":\"bounded-history-chunk\",\"items\":[]}"
+    },
+    "largeStagedInventory": {
+      "sourceId": "kogane-synthetic",
+      "sessionId": "fixture-large-staged-inventory",
+      "itemCount": 1001,
+      "body": "{\"fixture\":\"shared-content-for-large-inventory\"}"
+    }
+  }
+}

@@ -1,913 +1,431 @@
 # Raw evidence store
 
-This document is the implementation plan for phase 2 of `docs/roadmap.md`:
-the layer-A store that holds raw bytes and the metadata describing where
-they came from. It replaces the four-table sketch in the roadmap with
-complete DDL, an API surface, an importer CLI, and a backfill plan,
-derived from what the two live collectors already write and from what
-`poc/observation-pipeline` already implements.
+Status: phase 2 schema and Worker candidate under final review. D1, R2, Worker,
+and a synthetic sealed run were verified in production on 2026-09-02; the
+additive `0003` contract and run-scoped API are verified locally and are
+deployed only through the migration-first runbook below.
 
-## Scope
+This is the canonical design for layer A of Kogane. It was derived from the
+current collector manifests **and** the source and architecture notes under
+`docs/`. The store records what bytes were acquired, how they were acquired,
+and whether the central copy is complete. It deliberately does not interpret
+transactions, accounts, instruments, balances, rewards, or economic events.
 
-The raw store answers one question: what did a source hand us, when, and
-where are those bytes now. It consists of
+## Boundary
 
-- a private R2 bucket holding content-addressed blobs;
-- a D1 database holding the source registry, fetch runs, raw object
-  records, and fetch artifacts;
-- a Worker exposing a small authenticated ingestion API;
-- a local CLI that feeds it from Kuebiko captures, file exports, and the
-  collector buckets that already exist.
+The service has two stores and one authenticated Worker:
 
-### What this layer refuses to do
+```text
+collector / capture / file
+          |
+          | source-scoped ingest credential
+          v
+  kogane-ingest Worker
+       |           |
+       | bytes     | immutable metadata
+       v           v
+private R2       D1 catalogue
+```
 
-Ingestion never parses. It does not know what a transaction is, what a
-balance means, which account a payload belongs to, or whether two
-payloads describe the same thing. It stores bytes, records metadata about
-the transfer, and returns an identifier.
+- R2 stores content-addressed bytes at `objects/<first-two-hex>/<sha256>`.
+- D1 stores origin, acquisition, integrity, and completeness claims.
+- Parsing begins in phase 3 and writes observations elsewhere.
+- Credentials, cookies, session tokens, passkey material, account numbers,
+  raw URLs, URL query values, and unredacted secret-bearing login pages are not
+  catalogue metadata.
+- An artifact may intentionally be a sanitized provider capture when retaining
+  its source bytes would retain credentials. That decision and every transform
+  step remain explicit.
 
-`docs/collection.md` gives the reason: any future client — the importer
-CLI, a scheduled collector, an email handler, a manual upload from a
-phone — must be able to use the same API unchanged. The moment ingestion
-understands a payload, every new source needs an ingestion change before
-its evidence can be stored, and evidence collection stops being decoupled
-from modelling. It also refuses:
-
-- **Normalizing bodies.** No re-encoding, no pretty-printing, no
-  Shift-JIS-to-UTF-8 conversion, no NFKC. `docs/tooling.md` records this
-  as the specific defect to fix in `smcc-meisai-scraper`'s
-  `downloader.ts`: save the raw bytes first, decode in the parser. A
-  digest over decoded text is a digest over our decoding decision, not
-  over the evidence.
-- **Splitting composite payloads.** The Vpass collector writes one
-  `snapshot.json` per card run containing several captured pages as
-  embedded raw JSON strings (`poc/vpass-json/src/worker.ts`). Ingestion
-  stores that object as one artifact, because that is the object the
-  collector wrote. Addressing a page inside it is the parser's job, via
-  the `raw_locator` recorded on every observation (phase 3).
-- **Deduplicating semantically.** Identical bytes are stored once; that
-  is a storage property, not a claim that two fetches mean the same
-  thing. Every fetch keeps its own artifact row.
-- **Deleting or updating evidence.** Raw objects, fetch artifacts, and
-  fetch runs are append-only per the mutation policy in `docs/design.md`,
-  with no exception. See "Why there is no run status update" below.
-
-## Named resources
-
-Both live collectors name their bucket exactly in their
-`wrangler.jsonc`: `kogane-sbi-collector-poc` and
-`kogane-vpass-collector-poc`, each bound as `SNAPSHOTS`. The evidence
-store follows the same convention and does not yet exist:
+The named production resources are:
 
 ```text
 Worker      kogane-ingest
-R2 bucket   kogane-raw-evidence      binding EVIDENCE
-D1 database kogane-raw-evidence      binding DB
+R2 bucket   kogane-raw-evidence
+D1 database kogane-raw-evidence
 ```
 
-The bucket is private and has no public route. It is deliberately not
-named `-poc`: the collector buckets are disposable experiments
-(`docs/vpass-cloudflare-temporary-collector.md` documents how to delete
-one), while this bucket is the store of record and nothing else may hold
-the only copy of an artifact.
-
-## Tables
-
-The starting point is the layer-A section of
-`poc/observation-pipeline/schema.sql`, which is already written to stay
-valid on D1: STRICT tables, no `PRAGMA` statements, foreign keys enforced
-by the connection as D1 does by default. Phase 2 adds the columns the two
-live collectors turn out to need.
-
-```sql
--- migrations/0001_raw_store.sql
-
-CREATE TABLE sources (
-  id        TEXT PRIMARY KEY,     -- 'sbi-securities', 'vpass', 'paypay'
-  provider  TEXT NOT NULL,        -- display name
-  ingestion TEXT NOT NULL
-    CHECK (ingestion IN ('kuebiko', 'collector-r2', 'file-export')),
-  active    INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
-) STRICT;
-
-CREATE TABLE url_patterns (
-  id        INTEGER PRIMARY KEY,
-  source_id TEXT REFERENCES sources(id),  -- NULL: applies to every source
-  kind      TEXT NOT NULL CHECK (kind IN ('allow', 'deny')),
-  host_glob TEXT NOT NULL,
-  path_glob TEXT NOT NULL DEFAULT '*',
-  note      TEXT,
-  UNIQUE (source_id, kind, host_glob, path_glob)
-) STRICT;
-
--- SQLite treats NULLs as distinct in a UNIQUE index, so the constraint
--- above does not deduplicate the global rows. A partial unique index
--- does, and schema.sql already relies on partial indexes working here
--- (idx_parse_runs_success).
-CREATE UNIQUE INDEX idx_url_patterns_global
-  ON url_patterns (kind, host_glob, path_glob)
-  WHERE source_id IS NULL;
-
-CREATE TABLE fetch_runs (
-  id              INTEGER PRIMARY KEY,
-  source_id       TEXT NOT NULL REFERENCES sources(id),
-  external_run_id TEXT NOT NULL,  -- collector runId / capture dir / file key
-  tool            TEXT NOT NULL,  -- 'sbi-securities-worker' | 'import-kuebiko'
-  tool_version    TEXT,           -- manifest schemaVersion, CLI version
-  started_at      TEXT NOT NULL,  -- ISO 8601 UTC, from the collector
-  completed_at    TEXT,
-  status          TEXT NOT NULL
-    CHECK (status IN ('success', 'partial', 'failed')),
-  ingested_at     TEXT NOT NULL,  -- when we recorded it; bookkeeping only
-  UNIQUE (source_id, external_run_id),
-  UNIQUE (id, source_id)          -- FK target for fetch_artifacts
-) STRICT;
-
-CREATE TABLE raw_objects (
-  sha256        TEXT PRIMARY KEY  -- hex digest; also the object key
-    CHECK (length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'),
-  size          INTEGER NOT NULL CHECK (size >= 0),
-  content_type  TEXT NOT NULL,    -- the first observer's claim only
-  blob_key      TEXT NOT NULL,    -- R2 key
-  first_seen_at TEXT NOT NULL
-) STRICT;
-
-CREATE TABLE fetch_artifacts (
-  id           INTEGER PRIMARY KEY,
-  fetch_run_id INTEGER NOT NULL,
-  source_id    TEXT NOT NULL,
-  artifact_key TEXT NOT NULL,     -- unique within the run; see below
-  dataset      TEXT,              -- collector dataset name, if any
-  url          TEXT,              -- provisional; see below
-  method       TEXT,              -- provisional
-  http_status  INTEGER,           -- provisional
-  mime         TEXT NOT NULL,     -- declared media type, verbatim
-  fetched_at   TEXT NOT NULL,
-  window_from  TEXT,              -- period the payload covers, if declared
-  window_to    TEXT,
-  origin_key   TEXT,              -- key in the collector's own bucket
-  sequence     INTEGER,           -- provisional
-  sha256       TEXT NOT NULL REFERENCES raw_objects(sha256),
-  UNIQUE (fetch_run_id, artifact_key),
-  FOREIGN KEY (fetch_run_id, source_id)
-    REFERENCES fetch_runs(id, source_id)
-) STRICT;
-
-CREATE INDEX idx_fetch_runs_source
-  ON fetch_runs (source_id, started_at);
-CREATE INDEX idx_fetch_artifacts_source
-  ON fetch_artifacts (source_id, dataset, fetched_at);
-CREATE INDEX idx_fetch_artifacts_sha
-  ON fetch_artifacts (sha256);
-```
-
-There is no separate index on `fetch_artifacts (fetch_run_id)`: the
-`UNIQUE (fetch_run_id, artifact_key)` constraint already creates an index
-with `fetch_run_id` leftmost, which serves every lookup by run.
-
-### Why each choice
-
-`raw_objects.sha256` is the primary key, not a surrogate id, because the
-digest is the identity of the bytes. There is no second row that can
-describe the same content, no way to write a different `blob_key` for the
-same digest, and no insert-versus-update decision at the call site: the
-existence check in `putRawObject` is a primary-key lookup
-(`poc/observation-pipeline/src/store.ts`). `blob_key` is kept as a
-separate column rather than derived, so the key layout can change without
-rewriting history; the PoC already exercises this by pointing it at a
-filesystem path.
-
-`fetch_artifacts` is append-only and keeps HTTP-level fields because, as
-`docs/roadmap.md` says, URL and status are the most useful signal for
-later parser development, and because the same bytes reached us through a
-particular request that may itself become interesting (an endpoint that
-starts returning 302, a dataset that silently empties). One row per fetch
-is what makes "we confirmed the same state again at 07:00" a recorded
-fact rather than a no-op.
-
-`fetch_artifacts.source_id` duplicates its run's `source_id`, so a
-composite foreign key to `fetch_runs (id, source_id)` makes the two
-unable to disagree; that is what the extra `UNIQUE (id, source_id)` on
-`fetch_runs` exists for. Dropping the column and joining through
-`fetch_runs` was the alternative. It was rejected because phase 3 selects
-parsers from artifact metadata alone — every `accepts` predicate in
-`poc/observation-pipeline/src/parsers/` reads `artifact.sourceId` — and
-`idx_fetch_artifacts_source (source_id, dataset, fetched_at)` is the
-access path for the parser sweep. The denormalization is kept and
-enforced rather than kept and trusted.
-
-`fetch_runs.external_run_id` carries the collector's own run identifier.
-With `UNIQUE (source_id, external_run_id)` it is the idempotency key for
-the whole run. It is opaque text and must never be parsed: the two live
-collectors use different shapes, and a third appears in the PoC fixtures.
-
-| Producer | Shape | Source |
-| --- | --- | --- |
-| SBI Securities Worker | `crypto.randomUUID()` | `poc/sbi-securities-worker/src/worker.ts` |
-| Vpass Worker | `toISOString()` with `:` and the first `.` replaced by `-` | `poc/vpass-json/src/worker.ts` |
-| PoC fixture | `20260820-210000-poc01` | `poc/observation-pipeline/fixtures/` |
-
-Dates therefore come from `started_at` or from the collector's own key
-prefix, never from the run id.
-
-`UNIQUE (fetch_run_id, artifact_key)` is the per-artifact idempotency
-key. `artifact_key` is a caller-assigned, run-local name: the dataset
-name for SBI runs (`domestic-trade-records`), the card-scoped path for
-Vpass (`card-003/snapshot.json`), the file name for `ingest-file`, and,
-provisionally, a sequence-plus-URL key for a Kuebiko entry. Re-posting
-the same artifact is then a detectable no-op, and posting different bytes
-under a key already used in the same run is a conflict worth surfacing
-rather than a second silent row.
-
-`ingested_at` is bookkeeping, not a fourth measurement timestamp. The
-three timestamps `docs/design.md` distinguishes — `as_of`, `observed_at`,
-`fetched_at` — describe the value and the source; `ingested_at` describes
-our own storage and must never be substituted for `fetched_at`.
-
-CHECK constraints cover the three columns the prose treats as closed
-enums (`sources.ingestion`, `url_patterns.kind`, `fetch_runs.status`) and
-the digest format. The Worker validates the same values, but the Worker
-is not the only writer: the registry seed and the backfill reconciliation
-queries run through `wrangler d1 execute`, and a typo there would
-otherwise land a value no reader expects.
-
-### mime versus content_type
-
-`fetch_artifacts.mime` is authoritative. It records what the source
-declared for that particular fetch, verbatim and including parameters
-(`application/json; charset=utf-8` is what the Vpass collector sets on
-every object it writes; the SBI collector sets `application/json`).
-
-`raw_objects.content_type` is only the first observer's claim about those
-bytes, and it is frozen: a deduplicated write does nothing at all, so a
-later fetch that declares a different type never reaches the row. It
-exists so the evidence browser can serve `/raw/:sha256` with some
-declared type when no artifact is in hand
-(`poc/observation-pipeline/src/queries.ts`). Any question of the form "what
-did the source call these bytes" is answered by joining through
-`fetch_artifacts`.
-
-Keeping the declared value verbatim in `mime` is also how the charset
-problem from `poc/observation-pipeline/RESULTS.md` gets its input:
-parsers there decode UTF-8 strictly and fail loudly, because the
-artifact's encoding is not recorded and no decoder can be selected.
-Several documented sources are CP932. A second `charset` column was
-considered and rejected — two columns describing one header is the same
-defect as `content_type` versus `mime`. When a source declares no media
-type at all, the importer writes `application/octet-stream` rather than
-inventing one.
-
-### Differences from the roadmap sketch
-
-- The sketch calls the blob column `r2_key`; it is `blob_key` here,
-  matching the PoC, because the same schema runs against a filesystem
-  store in local development and tests. The production value is an R2
-  key.
-- The sketch puts the domain allowlist inside `sources`. It is a separate
-  `url_patterns` table because the allowlist needs `deny` rules
-  (sensor telemetry, authentication endpoints) as data rather than code,
-  and because rules that apply to every source cannot be a column on one
-  source's row.
-- `dataset`, `window_from` / `window_to`, `origin_key`, `tool_version`,
-  and `first_seen_at` are not in the sketch. Each is present in something
-  a live collector already writes: `ArtifactManifest` in
-  `poc/sbi-securities-worker/src/types.ts` carries `dataset`, `key`,
-  `sha256`, `bytes`, and an optional `window`, and `CollectionManifest`
-  carries `schemaVersion`.
-
-### Differences from the PoC schema
-
-- `external_run_id` becomes `NOT NULL`. In SQLite, NULLs are distinct in
-  a UNIQUE index, so a nullable column would silently disable the
-  idempotency it exists to provide. Every ingestion path can synthesize
-  an identifier; `ingestFile` already does.
-- `artifact_key` and its UNIQUE constraint are new. The PoC achieves
-  idempotency only at run granularity, which is sufficient for a fixture
-  demo and insufficient for an API where a client may retry one artifact.
-- `sources.active` is new, and is load-bearing for the `403` rule below:
-  a source that must stop being ingested is deactivated rather than
-  deleted, because its existing runs and artifacts must keep resolving.
-- The composite foreign key, the `UNIQUE (id, source_id)` it needs, the
-  CHECK constraints, `ingested_at`, `first_seen_at`, and the
-  `url_patterns` table are new.
-- Nothing is removed. The PoC's layer-A columns all survive.
-
-### What is provisional
-
-`docs/roadmap.md` states the sequencing rule plainly: collect and analyze
-real captures before freezing any schema, and phase 1 owns "which
-artifact metadata to keep, the source allowlist structure, and the
-ingestion tables". That rule is satisfied for one half of this schema and
-not the other, and the difference is recorded here rather than papered
-over.
-
-Grounded in live output: `dataset`, `window_from` / `window_to`,
-`origin_key`, `tool_version`, `external_run_id`, `status`, `started_at`,
-`completed_at`, `sha256`, and `size`. Every one of them is read from a
-manifest the SBI or Vpass collector writes today, and
-`poc/observation-pipeline` ingests a fixture shaped like that manifest.
-
-Provisional: `url`, `method`, `http_status`, `sequence`, and the
-capture-side `artifact_key` rule. These exist only for Kuebiko-style
-ingestion. `docs/collection.md` states the mapping as "`metadata.ndjson`
-line → `fetch_artifact` (URL, method, status, timing)", but nothing in
-this repository establishes that file's field names, ordering guarantees,
-or identity guarantees, and `data/` contains only
-`account-inventory.csv` — there is no capture on disk to have
-characterized. These columns are therefore a hypothesis to be confirmed
-against a real capture before the migration is applied, and the open
-questions below keep that gate visible. Nothing else in phase 2 depends
-on them: the backfill of the two collector buckets leaves all four NULL.
-
-## Content addressing and deduplication
-
-Blobs are keyed by the SHA-256 of their bytes. Writing a blob is: compute
-the digest, look up `raw_objects`, and if the row exists do nothing at
-all — no R2 write, no D1 write to that table. `putRawObject` in
-`poc/observation-pipeline/src/store.ts` returns `{ sha256, deduplicated }`
-so callers can report this.
-
-The fetch history is stored separately and is never deduplicated. A daily
-collector that finds an unchanged statement page writes one new
-`fetch_artifacts` row per day and zero new blobs. The expensive thing
-(bytes) is stored once and the cheap thing (the claim that a source still
-said this at 07:00 on this date) is preserved in full. Phase 3 and later
-depend on that distinction: a value that stopped changing and a source
-that stopped being fetched look identical if only blobs are kept. The PoC
-test `re-fetching an unchanged export records a second confirmation`
-(`poc/observation-pipeline/test/pipeline.test.ts`) pins exactly this — two
-artifacts, one blob.
-
-Re-importing an old capture or run directory is safe at three levels:
-
-1. the run row already exists, is found by `(source_id,
-   external_run_id)`, and is reused rather than duplicated;
-2. bytes seen before are recognized by digest, so only artifact rows are
-   written;
-3. an artifact re-posted inside the same run collides with
-   `(fetch_run_id, artifact_key)` and is a no-op.
-
-Note that level 1 reuses the run; it does not stop the import. That
-distinction is the whole of the resumability rule below, and getting it
-wrong is how a half-imported run becomes permanently un-finishable.
-
-Old directories can consequently be imported at any time, in any order,
-repeatedly. This is what lets phase 0 run for months with no
-infrastructure and lose nothing.
-
-## R2 key layout
-
-Two namespaces exist, and they are not the same thing.
-
-**Collector landing zones (already live, unchanged).** The SBI Securities
-Worker writes to bucket `kogane-sbi-collector-poc`, with the prefix built
-from the run's `startedAt` date and its `runId`
-(`poc/sbi-securities-worker/src/storage.ts`):
-
-```text
-raw/sbi-securities/YYYY/MM/DD/<runId>/<dataset>.json
-raw/sbi-securities/YYYY/MM/DD/<runId>/manifest.json
-```
-
-The Vpass Worker writes to bucket `kogane-vpass-collector-poc`:
-
-```text
-vpass/YYYY/MM/DD/<runId>/card-NNN/snapshot.json
-vpass/YYYY/MM/DD/<runId>/card-NNN/manifest.json
-vpass/YYYY/MM/DD/<runId>/card-NNN/error.json   (that card failed)
-vpass/YYYY/MM/DD/<runId>/error.json            (the session failed)
-```
-
-There is no run-level manifest in the Vpass bucket. The Worker builds an
-`AllCardsRunSummary` and only writes it to the log
-(`poc/vpass-json/src/worker.ts`); nothing run-level reaches R2 except the
-run-level `error.json`, which is written when the session cannot be
-opened and is then the only object in the run.
-
-Both layouts are date-partitioned and run-scoped, which makes them easy
-to enumerate for backfill but means the same bytes are stored once per
-run. Phase 2 does not rewrite either collector. They keep writing what
-they write; the importer reads those prefixes and copies bytes into the
-store.
-
-**The evidence store.** One private bucket holds content-addressed
-objects under a single prefix:
-
-```text
-objects/<aa>/<sha256>
-```
-
-where `aa` is the first byte of the digest in hex, matching the shape
-`putRawObject` already builds. R2 has no directories, so the fan-out is
-only about keeping listings and any future lifecycle rules manageable.
-The key is fully derivable from the digest, but it is still stored in
-`raw_objects.blob_key` so the layout can be changed for new objects
-without invalidating old rows.
-
-The original collector key is retained per artifact in
-`fetch_artifacts.origin_key`, so any object can be traced back to the
-bucket and path the collector chose, and the manifest that described it
-re-read.
-
-## The source registry and the allowlist
-
-The registry — the `sources` rows and every `url_patterns` row — is
-checked into the repository as `registry/sources.sql` and applied to D1
-on deploy. That file is authoritative. The Worker reads the registry from
-D1 to enforce `403`; the importer CLI loads the same file into an
-in-memory SQLite database and matches with the same `GLOB` operator, so
-both sides evaluate identical semantics from one text.
-
-This resolves the question of where the allowlist lives, and it means
-phase 2 adds no read route: the ingestion API writes only. A
-`GET /registry/...` route was the alternative and was rejected for two
-reasons. It would be the first read route on an API that otherwise only
-accepts writes, widening what a leaked token can do from "write evidence"
-to "enumerate which sources are collected". And a registry in D1 is not
-reviewable: the privacy argument for batch import (below) is that
-filtering decisions can be inspected before anything leaves the machine,
-which requires the filter to be a diff in a pull request.
-
-The registry is configuration, not evidence. `docs/design.md` places raw
-objects, fetch history, source observations, and price observations in
-the Immutable class; the source registry is in none of them. Re-applying
-the seed may update a `note` or flip `active`, and its history lives in
-git.
-
-Matching rules:
-
-- `host_glob` and `path_glob` use SQLite `GLOB` syntax.
-- `deny` is evaluated before `allow`, and a `deny` match is final.
-- A row with `source_id IS NULL` applies to every source. The default
-  deny set — sensor and anti-bot telemetry, authentication endpoints —
-  is expressed this way, which is why `source_id` is nullable.
-- A URL that matches `allow` patterns belonging to two different sources
-  is an error, not a choice. The importer refuses the entry and reports
-  it; the fix is to make the path patterns disjoint in the registry. Two
-  sources genuinely sharing a host is expected (`docs/sources/README.md`
-  gives each confirmed shared API family its own research record), and
-  silently picking one would attribute evidence to the wrong source.
-
-## Ingestion API
-
-A Worker exposes the two endpoints sketched in `docs/collection.md`. All
-requests require `Authorization: Bearer <token>`; the token is a Worker
-secret (`INGEST_TOKEN`), compared with a constant-time comparison. There
-is no unauthenticated route, no CORS allowance, and no read route.
-
-### POST /ingest/run
-
-Records a fetch run.
-
-```json
-{
-  "sourceId": "sbi-securities",
-  "externalRunId": "0f2b6d5a-9c41-4f0e-8a3c-1d7f9b2e64aa",
-  "tool": "import-collector-run",
-  "toolVersion": "sbi-worker-poc-v1",
-  "startedAt": "2026-08-20T21:00:07Z",
-  "completedAt": "2026-08-20T21:01:42Z",
-  "status": "success"
-}
-```
-
-Response `201 {"runId": 41, "created": true}`, or `200 {"runId": 41,
-"created": false}` when the run already exists with identical fields. A
-second call for the same `(sourceId, externalRunId)` carrying a different
-`status` or `completedAt` is `409`: the run row is written once and never
-rewritten.
-
-### Why there is no run status update
-
-An earlier draft of this plan gave runs an `open` status and allowed one
-`open → success | partial | failed` transition. That is an UPDATE on a
-table this document calls append-only, and `docs/design.md` names fetch
-history in the Immutable class explicitly. `schema.sql` shows what
-justifying such an exception costs: it permits exactly one UPDATE,
-`parse_runs.superseded_by_parse_run_id`, and argues it in the file as
-lineage data rather than a mutation of any observation. No comparable
-argument exists here — a run's status is a fact about the collection,
-already decided before we hear about it.
-
-So the exception is avoided instead. Every phase-2 client knows the
-outcome before it posts anything: the importer reads a finished manifest,
-and `ingest-file` describes a fetch that has already happened. The status
-enum is exactly the collector's own (`CollectionManifest.status` in
-`poc/sbi-securities-worker/src/types.ts` is `'success' | 'partial' |
-'failed'`), and the Vpass `error.json` value `"error"` maps onto
-`failed`.
-
-If a future client genuinely streams — a collector posting artifacts as
-it fetches them, with the outcome unknown until the end — the answer is
-an append-only `fetch_run_events` table with the status derived from the
-latest event, not a mutable column. Nothing needs it today, and the
-safest version of an unused feature is its absence.
-
-### POST /ingest/artifact
-
-`multipart/form-data` with two parts: `meta` (JSON) and `body` (the raw
-bytes, sent verbatim, with no transformation).
-
-```json
-{
-  "sourceId": "sbi-securities",
-  "externalRunId": "0f2b6d5a-9c41-4f0e-8a3c-1d7f9b2e64aa",
-  "artifactKey": "domestic-trade-records",
-  "dataset": "domestic-trade-records",
-  "mime": "application/json",
-  "fetchedAt": "2026-08-20T21:01:42Z",
-  "sha256": "1bfcad18281c80aaf1143f0c9be6d0179"
-              "6ccdf791439783cfb1a86f2a937dae8",
-  "bytes": 2009,
-  "window": { "from": "2026-05-22", "to": "2026-08-20" },
-  "originKey":
-    "raw/sbi-securities/2026/08/20/<runId>/domestic-trade-records.json"
-}
-```
-
-The `meta` schema is closed: any field not in the table below is a `400`,
-which is how the metadata whitelist is enforced structurally rather than
-by review.
-
-| Field | Type | Required for |
-| --- | --- | --- |
-| `sourceId` | string | every path |
-| `externalRunId` | string | every path |
-| `artifactKey` | string | every path |
-| `mime` | string | every path |
-| `fetchedAt` | ISO 8601 UTC | every path |
-| `sha256` | 64 lowercase hex | every path |
-| `bytes` | integer | every path |
-| `dataset` | string | collector runs |
-| `window` | `{from, to}` dates | collector runs, when declared |
-| `originKey` | string | collector runs |
-| `url` | string | file exports; captures (provisional) |
-| `method` | string | captures (provisional) |
-| `httpStatus` | integer | captures (provisional) |
-| `sequence` | integer | captures (provisional) |
-
-The `body` part may be omitted when `raw_objects` already holds `sha256`,
-so a re-import does not re-upload gigabytes. If the digest is unknown,
-the Worker answers `412 {"error": "blob_required"}` — the precondition
-the client asserted by omitting the body is false — and the client
-retries with the bytes.
-
-| Status | Meaning |
+The bucket has no public route. Existing collector buckets remain acquisition
+staging areas until their runs have been reconciled and sealed centrally.
+
+The deployed D1 database is in APAC. Production verification streamed one
+synthetic object, reused it by content hash, created a run and terminal report,
+verified its R2 checksum/metadata, and produced a complete seal. A first
+post-deployment attempt created its run but the immediately following request
+returned 404; the row was present on direct D1 inspection and the same
+idempotent request succeeded shortly afterwards, which is consistent with a
+cross-request visibility delay. The verifier now performs bounded retries for
+idempotent 404/500/503 responses and can take an explicit safe session ID to
+resume that exact run. The interrupted run was resumed and sealed rather than
+deleted, exercising the intended append-only recovery path. No financial
+values or provider credentials were used.
+
+Early verification runs used `external_id_namespace='synthetic'` under the real
+`sbi-securities` source. Migration `0003` preserves those immutable rows but
+adds an explicit `exclude_from_financial_views` annotation and the
+`financial_fetch_runs` view; future verification uses `kogane-synthetic`.
+Migration `0004` also excludes that dedicated synthetic source from the view,
+so neither legacy nor current operational checks appear as financial runs.
+
+## Why the schema is larger than the roadmap sketch
+
+The four-table sketch in `docs/roadmap.md` was enough to describe the storage
+idea, but not enough to preserve the cases already documented in this repo:
+
+- a Kuebiko directory can contain several financial sources;
+- one source may be acquired through Kuebiko, an official export, email, or a
+  scheduled collector without those being the same identity;
+- Vpass stores a self-contained multi-card bundle, while other collectors store
+  one object per endpoint or page;
+- SMBC backfill can stop for renewed QR approval and resume from a later chunk;
+- SBI VC Trade, SBI Securities, V Point, and other sources have pagination,
+  separate ledgers, or requested/declared date windows;
+- MyJCB and Sony Bank can require redaction before an artifact is safe to retain;
+- V Point Pay can arrive as a direct or forwarded `message/rfc822` attachment;
+- CSV, CP932/Shift-JIS HTML, JSON, PDF, ZIP, XLSX, OFX, QIF, MT940, CAMT, and
+  unknown legacy bytes must remain representable without parsing;
+- a producer reporting `success` is different from the central importer proving
+  that it received every declared artifact.
+
+The schema in `services/raw-evidence/migrations/0001_initial.sql` encodes these
+differences rather than hiding them in JSON blobs.
+
+## Entity model
+
+### Mutable reviewed configuration
+
+| Entity | Meaning |
 | --- | --- |
-| 201 | artifact recorded (blob stored or already present) |
-| 200 | identical artifact already recorded for this run and key |
-| 400 | malformed or non-whitelisted metadata |
-| 401 | missing or invalid bearer token |
-| 403 | unknown source, inactive source, or URL not allowlisted |
-| 409 | same `artifactKey` in this run with different bytes |
-| 412 | body omitted and the digest is unknown |
-| 422 | uploaded bytes do not hash to the declared `sha256` |
+| `sources` | Financial or official data surface, independent of acquisition method |
+| `producers` | Collector, capture importer, file importer, or other byte producer |
+| `producer_sources` | Sources a producer is allowed to claim |
+| `ingest_clients` | Identity selected by a Worker secret |
+| `ingest_client_producers` | Producers a client may speak for |
+| `ingest_client_routes` | Exact client + producer + source authorization |
+| `http_scope_rules` | Sanitized host/path allow and deny rules; deny wins |
+| `origin_template_policies` | Exact reviewed templates and redaction/HMAC-key versions accepted per source |
+| `source_external_ids` | Reviewed manifest/capture name to canonical source mapping |
 
-Order of operations inside the handler: verify the digest, write the R2
-object, then write the D1 rows in one atomic batch. An interrupted
-request can therefore leave an orphan blob (harmless, unreferenced,
-content-addressed) but never a row pointing at bytes that do not exist.
-The reverse order would produce silent corruption and is forbidden.
+Deactivating any component prevents new history without invalidating old
+foreign keys. `0002_registry.sql` seeds every source currently represented by
+`docs/sources`, plus the existing `vpass` and `global-pass` collectors.
+`0003_runtime_contract.sql` adds MoneyForward and a dedicated synthetic
+verification source. The registry also
+seeds separate Kuebiko, collector-R2, and local-file import mechanisms. “Active”
+means evidence may be catalogued; it does not claim unattended collection is
+already implemented.
 
-### Resumability
+### Immutable acquisition history
 
-`POST /ingest/run` never short-circuits an import. Finding an existing
-run returns `200 {"created": false}` and the client continues posting
-every artifact; the ones already recorded return `200` and the missing
-ones are written. A client that crashes after ten of thirty artifacts is
-resumed by running it again.
-
-This differs from the PoC on purpose, and the difference is worth
-stating because the PoC's behaviour is correct for the PoC.
-`ingestRunDirectory` in `poc/observation-pipeline/src/ingest.ts` returns
-`{ skippedExisting: true }` and imports nothing when the run row already
-exists. It can do that safely because it reads and hash-verifies every
-artifact in the directory before writing anything and then commits the
-run row and all its artifacts in one `store.db.transaction()`. A run row
-therefore implies a complete run, and a failed import leaves nothing
-behind at all — pinned by the tests `a rejected run leaves nothing behind
-and can be re-ingested` and `a run whose file is missing leaves nothing
-behind` in `poc/observation-pipeline/test/pipeline.test.ts`.
-
-The API cannot make that guarantee, because a run is many independent
-requests and the client may die between any two of them. Its unit of
-atomicity is one artifact, so an existing run row implies nothing about
-completeness, so it must not be treated as a stop signal. Completeness is
-established by reconciling artifact rows against the manifest, not by the
-presence of the run.
-
-Open at this stage: the maximum request body size, which must be chosen
-against the Worker plan's limit and against real Kuebiko body sizes; and
-whether many small capture artifacts need a batch endpoint.
-
-## Importer CLI
-
-A local Bun CLI, run by hand or from a script. It holds the bearer token
-in the local environment; it is not deployed anywhere.
-
-```text
-kogane import-kuebiko <run-dir>
-kogane ingest-file <path> --source <source-id> [--fetched-at <iso>]
-                          [--mime <type>]
-kogane import-collector-run <bucket-prefix>
-```
-
-`import-kuebiko` reads `metadata.ndjson` line by line and matches each
-entry's URL against the registry. A matched entry is uploaded as one
-artifact: the response body from the capture's content-addressed body
-store, with the digest verified against the file name before upload, plus
-the whitelisted metadata. Unmatched hosts are never uploaded; they are
-aggregated into a report (host, request count, sample paths) for review,
-after which genuinely financial hosts are added to the registry and the
-rest — ads, analytics, unrelated browsing — stay out permanently.
-Re-running the import after a registry change picks up newly allowlisted
-entries from the same directory, because the run is keyed by directory
-name and each artifact by its own key. This command is the part of the
-CLI that depends on the provisional columns, and it cannot be finished
-before a real capture has been characterized.
-
-`ingest-file` covers exports that CDP capture cannot see: CSV, OFX, QIF,
-statement PDFs, browser downloads. It synthesizes a single-artifact run
-keyed `file:<basename>@<fetchedAt>`, which is what `ingestFile` in
-`poc/observation-pipeline/src/ingest.ts` already does. The fetch time is
-part of the key deliberately: run identity is the fetch, not the content,
-so re-downloading an unchanged export next month is a second confirmation
-with its own run and artifact row and no second blob, while importing the
-same file twice from the same fetch is a no-op.
-
-`import-collector-run` is the backfill path and is new relative to
-`docs/collection.md`: it lists a run prefix in a collector bucket, reads
-what that collector wrote there, and replays it through the same API. It
-exists because the SBI and Vpass collectors write R2 directly and predate
-the ingestion API.
-
-Batch import is preferred over a live Kuebiko plugin for the reasons in
-`docs/collection.md` — it works on past captures, keeps network activity
-out of the capture loop, and is trivially re-runnable — and for one more
-that only becomes visible once the allowlist is real: filtering decisions
-are reviewable before anything leaves the machine, and a corrected
-allowlist can be re-applied to captures already on disk. A live plugin
-would have to make those decisions irrevocably, at capture time, with no
-review step.
-
-## Privacy rules enforced on upload
-
-`docs/collection.md` states these as importer rules. Phase 2 makes them
-checks on both sides, because a rule enforced only in the client is a
-rule that a future client forgets.
-
-| Rule | Enforcement |
+| Entity | Meaning |
 | --- | --- |
-| Request headers are never uploaded | The `meta` schema has no header field; unknown fields are `400`. Structurally unrepresentable. |
-| Authentication request bodies are never uploaded or retained | Only response bodies are modelled at all — an artifact has exactly one body. Auth endpoints additionally carry `deny` patterns. |
-| Sensor and anti-bot telemetry excluded | `deny` patterns with `source_id IS NULL`, which is why that column is nullable. |
-| Allowlisted sources only | Unknown or inactive `sourceId` is `403`; a URL that matches no `allow` pattern for its source is `403`. |
-| Metadata whitelist per artifact | Exactly the fields in the `meta` table above, none of which can carry credential material. Anything else is `400`. |
+| `acquisition_sessions` | One producer invocation or capture directory; may contain multiple sources |
+| `fetch_runs` | One source-specific ledger within a session |
+| `fetch_units` | Optional account/card/connection/chunk hierarchy |
+| `fetch_unit_reports` | Append-only progress and terminal claims for a unit |
+| `fetch_page_groups` | Page sets, including a declared zero-page set |
+| `fetch_run_reports` | Append-only producer progress and one terminal outcome |
+| `fetch_run_ranges` | Requested, selector, or declared coverage at instant/date/month precision |
+| `raw_objects` | SHA-256, byte size, and content-addressed R2 key only |
+| `fetch_artifacts` | One appearance of bytes in a source run |
+| typed metadata tables | Sanitized HTTP, storage, file, email, and artifact range facts |
+| `artifact_relations` | Input and manifest/description edges between artifacts |
+| `artifact_transform_steps` | Ordered decoding, decryption, redaction, re-encoding, bundling, rendering, or extraction |
+| `run_inventories` / items | Sender-declared complete artifact set |
+| `fetch_run_seals` | Server-validated proof that the full run is centrally present |
+| `ingestion_attempts` | Central transfer outcome, separate from provider outcome |
+| `raw_object_verification_events` | Append-only later R2 integrity checks |
 
-The keyed diagnostic hash that `docs/collection.md` permits for auth
-bodies "when operationally needed" is not implemented in phase 2. Nothing
-currently needs it.
+All acquisition-history tables reject updates and deletes. Duplicate-insert
+guards also reject SQLite `INSERT OR REPLACE` on every uniqueness path,
+including artifact sequence and page position. Exact retries use
+`INSERT ... SELECT ... WHERE NOT EXISTS`, followed by a read and immutable
+field comparison. Artifact scalar and child rows are validated and written in
+one D1 batch; seal, inventory items, and its complete ingestion attempt are
+also atomic. Set-like descriptor arrays are normalized and duplicates rejected
+before hashing.
 
-One rule is not yet expressible: some sites place session identifiers in
-URL query strings, and `fetch_artifacts.url` stores the URL verbatim. See
-open questions.
+## Artifact semantics
 
-## Backfill
+`artifact_role` answers what the object represents:
 
-Evidence already exists in the two collector buckets and must be loaded
-without touching the collectors. Both write daily from a Cloudflare Cron
-Trigger at 21:00 UTC.
+- exact provider responses, exports, documents, or messages;
+- collector manifests, errors, and summaries;
+- collector-derived objects;
+- sanitized provider or user captures.
 
-### SBI Securities
+`payload_fidelity` answers what happened to the bytes: exact,
+transport-decoded, transformed, generated, or unknown. `container_kind`
+separately records single object, bundle, archive, multipart, or unknown.
+`lineage_disposition` distinguishes linked source bytes, embedded source bytes,
+intentional non-retention for security, unavailable source bytes, and cases
+where lineage does not apply.
 
-`poc/sbi-securities-worker/README.md` records the initial load as
-`scripts/backfill.sh 2024-08-28 2026-05-29`, split into non-overlapping
-windows of 90 days or fewer, with the daily Cron adding runs since. The
-number of run directories and artifacts now in the bucket is not recorded
-anywhere in this repository; it is established by listing the bucket
-during the backfill and is one of the exit criteria below, not a figure
-to be quoted in advance.
+Compound transformations are ordered rows. For example, a safe MyJCB HTML
+artifact can be `redacted` then `reencoded`; a Vpass snapshot can be `bundled`
+then `reencoded` while declaring that the source bytes are embedded. A
+transformed artifact that claims linked input must actually have an input edge
+before the run can be sealed, and relation cycles are rejected.
 
-Each run directory becomes one `fetch_run` keyed by the manifest's
-`runId`, with `tool_version` from `schemaVersion`, `started_at` and
-`completed_at` from the manifest, and `status` copied verbatim — the
-manifest's enum is already ours. Each entry in `artifacts[]` becomes one
-`fetch_artifact` with `dataset`, `origin_key` from `key`, `window_from` /
-`window_to` when `window` is present, and `sha256` from the manifest,
-cross-checked against the bytes.
+## Privacy-preserving origin metadata
 
-The manifest carries no per-artifact time. `ArtifactManifest` is
-`{ dataset, key, sha256, bytes, window? }`, and only the run has
-`startedAt` and `completedAt`. So for collector runs, `fetched_at` is the
-run's `completedAt`, falling back to `startedAt` when it is absent —
-which is what `poc/observation-pipeline/src/ingest.ts` does. Every
-artifact in a run therefore shares one timestamp. That is coarser than
-`docs/design.md` would like from a distinguished timestamp, and the
-honest fix is for the collector to record a per-artifact fetch time in
-`ArtifactManifest`; until it does, the derived value is used and its
-coarseness is documented here rather than disguised by a plausible-looking
-per-artifact value.
+Raw origin strings often contain bearer tokens, customer identifiers, email
+addresses, card fragments, or private filenames. Therefore:
 
-The manifest itself is ingested as an artifact
-(`artifact_key = "manifest"`), because `failures[]` and `scope` are
-evidence about the collection and are worth re-reading later.
+- HTTP stores scheme, lower-case host, optional port, a redacted path template,
+  query **names only**, and optional versioned HMAC fingerprint. It never stores
+  a raw URL or query value. Query names use a strict token grammar, are sorted,
+  and the complete name set must exactly match a reviewed template-policy row;
+  a policy for no query names does not authorize additional names.
+- Storage stores a redacted object-key template and versioned HMAC fingerprint,
+  not the original source bucket key when that key is sensitive.
+- File and email attachment names use a redacted basename template and
+  versioned HMAC fingerprint.
+- Email distinguishes direct, forwarded RFC822, and unknown transport, and can
+  identify a nested MIME part without storing recipient or subject text.
+- Source-specific HTTP allow rules and an exact active origin-template policy
+  are required before HTTP metadata is accepted. Storage/file/attachment
+  templates likewise require a reviewed exact policy. Global deny rules
+  override allows.
+- A declared media type is stored only as a lower-case `type/subtype` essence.
+  Parameters such as multipart boundaries and filenames are rejected rather
+  than copied into catalogue metadata.
 
-One gap cannot be closed by backfill: the manifest is written after
-collection, so a run that failed before reaching R2 — a missing Worker
-secret, for instance — leaves no directory at all. "The source was
-unreachable" and "we never ran" are distinguishable only where a manifest
-exists.
+The local file importer computes fingerprints with a separate HMAC-SHA-256 key,
+not the ingest bearer and not unsalted SHA-256. The API can validate digest
+shape, key version, and template policy, but cannot cryptographically prove how
+an external importer produced a submitted fingerprint; importer tests and key
+provisioning remain part of that trust boundary. Only digest and version enter
+D1.
 
-### Vpass
+Its run identity is deterministic from safe file metadata and keyed path/hash
+fingerprints, so the same evidence is not duplicated. Each invocation receives
+a distinct immutable ingestion-attempt ID and start time; rerunning after a
+committed seal whose response was lost therefore records reuse instead of
+conflicting with the prior attempt.
 
-The Vpass bucket needs a different rule for every run-level field,
-because there is no run-level manifest to read.
+## Lifecycle and completeness
 
-Each `card-NNN` directory contributes artifacts with
-`artifact_key = "card-NNN/snapshot.json"` and
-`"card-NNN/manifest.json"`, or `"card-NNN/error.json"` for a card that
-failed. A run whose session could not be opened is a single run-level
-`error.json` and no card directories at all; it is ingested as one
-artifact under `artifact_key = "error.json"`.
+1. The client creates/reuses its acquisition session and source run. This
+   proves an exact active client + producer + source route before any bytes are
+   accepted.
+2. The client streams the original/safe-to-retain bytes through that run to R2 with its expected
+   SHA-256 and exact byte size.
+3. R2 validates the checksum. A conditional write prevents a racing writer from
+   replacing the same content-addressed key.
+4. Only after R2 succeeds does the Worker register `raw_objects` in D1. An R2
+   object left by a D1 failure is a safe orphan and may be reconciled later.
+5. It appends reports and artifacts. Progress states such as `running`,
+   `human_required`, and `partial` never overwrite prior claims.
+6. For at most 1,000 artifacts the client may submit one complete sorted
+   inventory. Larger/interrupted runs begin a staged inventory, append
+   idempotent chunks, inspect received count, and finalize it. The staged path
+   is capped at 10,000 artifacts so final digest verification stays below D1
+   response and Worker memory limits.
+7. The Worker compares the inventory in
+   both directions against the D1 artifact catalogue and recomputes the digest.
+8. D1 triggers additionally verify the terminal report, declared all/provider
+   count, required unit reports/counts, page completeness, lineage, and
+   contiguous transform steps. Only then can the run be sealed.
+9. A sealed run rejects any later run-scoped child mutation. A correction is a
+   new acquisition/run, preserving the old provider claim.
 
-The `fetch_run` is synthesized from what the run contains:
+Provider `failed` or `partial` is still valid evidence. A terminal failed run
+with no artifacts may be sealed with an explicit zero-item inventory; an
+unfinished or accidentally truncated run may not.
 
-- `external_run_id`: the `runId` field carried inside every card
-  manifest, card `error.json`, and run-level `error.json`.
-- `started_at`: the `startedAt` field from any of those objects. All
-  cards in a run share one `started` timestamp, because the scheduled
-  handler passes one `Date` to every card.
-- `completed_at`: the latest `completedAt` across the card manifests, or
-  the `failedAt` of the run-level `error.json`.
-- `status`: `success` when every card directory has a `manifest.json`;
-  `partial` when at least one card has a `manifest.json` and at least one
-  has an `error.json`; `failed` when no card manifest exists. The
-  `"status": "error"` written in `error.json` maps onto `failed`.
-- `tool_version`: NULL. The card manifest carries no `schemaVersion`.
-  `snapshot.json` carries `format: "kogane-vpass-r2-snapshot/v1"`, but
-  that describes the object, not the collector that wrote it.
+## Worker API v1
 
-Two further differences from SBI matter.
+Authentication is `Authorization: Bearer <client-id>.<secret>`. The JSON map of
+client IDs to high-entropy secrets is the Worker secret
+`INGEST_CLIENT_KEYS`; secrets are never stored in D1 or Git.
 
-First, the Vpass manifest records counts and status but no per-artifact
-SHA-256, so there is no independent hash to cross-check: the digest we
-compute is the only integrity anchor. The right fix is for the collector
-to record one, as SBI's `storeArtifact` already does.
+For the current local bootstrap, `scripts/sync-ingest-key.sh --rotate` creates a
+random key, encrypts it with the WSL systemd host credential key at
+`~/.config/kogane/ingest-client-keys.cred`, and publishes the complete local
+authoritative client-key map to the Worker secret. Rotation merges only the
+selected client into that map, verifies the new remote credential before the
+encrypted local blob is atomically replaced, and rolls the remote map back on
+failure. `origin-fingerprint.cred` is separate. Import and verification scripts
+pass credentials through inherited file descriptors/config streams, not
+arguments or environment variables.
+The encrypted local file is a bootstrap, not a replacement for the repository's
+Bitwarden sync model: when the credential sync command is unified, the same
+secret payload can come from a dedicated Bitwarden item without changing the
+Worker or D1 schema. Do not place it in `.dev.vars`, shell history, or Git.
+On the current WSL host, `systemd-creds` reports that its host key is not itself
+on encrypted media. The credential blob therefore prevents casual/non-root
+file reads but is not a security boundary against WSL root or offline access to
+the host-key storage. This is acceptable only for the local bootstrap assumed
+here; a future Bitwarden-backed sync should remain the authoritative copy.
 
-Second, `snapshot.json` embeds every captured page of every month as a
-raw JSON string inside one object. It is ingested as a single artifact;
-the phase-3 parser addresses individual pages through `raw_locator`.
-Splitting it during ingestion would be parsing.
+| Request | Purpose |
+| --- | --- |
+| `GET /health` | Non-sensitive liveness and schema version |
+| `PUT /v1/runs/:id/objects/:sha256` | Stream bytes to R2 after run-scoped authorization; requires exact byte size |
+| `POST /v1/runs/:id/objects/:sha256/verify` | Append a route-scoped R2 integrity check after the object is catalogued in the run; reuse a recent same-client result |
+| `POST /v1/runs` | Idempotently create an acquisition session and source run |
+| `POST /v1/runs/:id/reports` | Append progress or terminal producer report |
+| `POST /v1/runs/:id/ranges` | Append a validated instant/date/month run range |
+| `POST /v1/runs/:id/page-groups` | Declare a known or unknown-size page set |
+| `POST /v1/runs/:id/units` | Append a root or child account/card/chunk unit |
+| `POST /v1/units/:id/reports` | Append progress or terminal unit report |
+| `POST /v1/runs/:id/artifacts` | Catalogue an R2 object, ranges, origins, transforms, and relations |
+| `POST /v1/runs/:id/attempts` | Idempotently record an incomplete/failed central transfer |
+| `POST /v1/runs/:id/seal` | Verify exact inventory, create seal and complete ingest attempt |
+| `POST /v1/runs/:id/inventories` | Begin/reuse a resumable inventory with expected count and digest |
+| `POST /v1/runs/:id/inventories/:inventory/items` | Append an idempotent chunk of at most 30 exact items |
+| `GET /v1/runs/:id/inventories/:inventory` | Read expected/received counts and seal state |
+| `POST /v1/runs/:id/inventories/:inventory/seal` | Recompute a staged inventory digest and atomically seal it with a complete attempt |
 
-Per-card times are better than SBI's: each card manifest carries its own
-`completedAt` (its `startedAt` is the shared run start, one `Date` created
-once in `collectAllCards` and passed to every card), so a card's artifacts
-take that card's `completedAt` as `fetched_at` rather than a whole-run
-value.
+JSON request bodies are bounded. Raw bodies are streamed directly to R2 and are
+never read with `arrayBuffer()`, `text()`, or `formData()`. The default direct
+upload limit is 50 MiB; larger objects require a future authenticated multipart
+protocol rather than raising the limit blindly.
 
-How many cards a run should have contained is not always recoverable.
-`cardCount` appears only in a successful card manifest, so a run in which
-every card failed cannot be reconciled against an expected count.
+### Canonical digests
 
-### What can go wrong
+Artifact descriptor version `v1` is SHA-256 over UTF-8 JSON after:
 
-- **Manifest and byte hash disagree.** A per-artifact rejection must not
-  abort a two-year import: the artifact is rejected and reported, the
-  rest of the run continues, and the CLI exits non-zero with a list. This
-  is a change from the PoC, not inherited behaviour — `ingestRunDirectory`
-  aborts the whole directory on the first mismatch, which is right for
-  four fixture files and wrong for a backfill. The PoC also skips the
-  comparison when the manifest declares no `sha256`; the importer must
-  instead treat a missing declared hash as a rejection for any source
-  whose manifest is supposed to carry one, which is every SBI run, since
-  `ArtifactManifest.sha256` is not optional.
-- **Partial and failed runs.** A `partial` SBI run has real artifacts and
-  a populated `failures[]`; both are ingested. A Vpass card run that
-  failed wrote `error.json` and no snapshot; that file is the artifact. A
-  `failed` run with zero artifacts still gets a `fetch_runs` row.
-- **Dataset names that changed over time.** Parsers select on
-  `artifact.dataset` (see the `accepts` predicates in
-  `poc/observation-pipeline/src/parsers/`). Historical `dataset` values
-  are never rewritten to match a newer name. A rename is handled in the
-  parser's `accepts` — a parser version bump and a re-parse, the
-  operation phase 3 is built around — not by a data migration.
+1. rejecting unknown fields;
+2. validating and normalizing values (for example, lower-case domains and
+   sorted unique query names);
+3. sorting every object key recursively while preserving array order;
+4. rejecting non-safe-integer JSON numbers.
 
-The backfill is idempotent and re-runnable by construction: run identity
-comes from the collector's own `runId`, artifact identity from `(run,
-artifact_key)`, and blob identity from the digest. Interrupting it
-halfway and starting over costs a listing pass and nothing else.
+Inventory digest version `v1` is stored explicitly and is SHA-256 over the same canonical JSON encoding of items
+sorted by `artifactKey`, each containing `artifactKey`, `sha256`, and
+`descriptorSha256`. The Worker recomputes both digests; callers do not choose
+stored descriptor digests.
 
-## Integrity and failure handling
+## Use-case coverage review
 
-Every upload is verified: the Worker hashes the received bytes and
-compares against the declared `sha256`, rejecting a mismatch with `422`
-before writing anything. The digest is recomputed rather than trusted
-because the client is the party most likely to be wrong about it.
+The candidate schema was independently reviewed against every `docs/*.md`,
+every `docs/sources/*.md`, current collector manifest shapes, and adversarial
+D1/API behavior. A schema is not called frozen until the final fixed-hash
+review reports no P0/P1 issue. Covered cases include:
 
-A periodic verification job re-reads a sample of `raw_objects` from R2
-and re-hashes them, so that bit rot or a lost object surfaces as an alert
-rather than as a parse failure years later. Its frequency and sample size
-are undecided.
+| Case | Representation |
+| --- | --- |
+| Kuebiko with multiple sites | one acquisition session, multiple source runs |
+| Multiple cards/connections/accounts | hierarchical units and source-scoped runs |
+| Paginated history | page group plus page-indexed artifacts; zero/known/unknown counts |
+| Backfill and resume | run/unit progress reports, requested/coverage ranges, immutable retries |
+| Pending then posted/corrected data | separate evidence runs; interpretation deferred |
+| Composite Vpass snapshot | bundle with embedded-source lineage and ordered transforms |
+| Sanitized MyJCB/Sony HTML | transformed capture, redaction step, explicit source non-retention |
+| API JSON and browser HTML | provider-response role with HTTP origin metadata |
+| CSV/PDF/OFX/XLSX/manual files | provider export/document or user capture with file origin |
+| Direct/forwarded V Point Pay mail | provider message with email transport and MIME path |
+| Collector manifest/error/summary | generated roles, counted in all-catalogued inventory |
+| Legacy evidence with weak metadata | unknown fidelity/container and explicit time basis |
+| Same bytes fetched repeatedly | one R2 object, separate artifact appearances |
+| Parser re-run | raw object and descriptor remain stable; phase 3 adds versioned observations |
 
-Run status is the collector's status, recorded verbatim. It is not a
-judgment about our ingestion. A failed run is evidence: "the source was
-unreachable on 2026-03-11" and "we never tried on 2026-03-11" are
-different facts, and every later gap analysis, freshness check, and "why
-is this balance stale" question depends on telling them apart.
+Account identity, family-card ownership, canonical instruments, transaction
+state changes, matching, OCR meaning, reward expiry, prices, FX, P&L, and tax
+remain later-layer concerns. Putting them in layer A would make evidence
+ingestion depend on interpretations that need to be corrigible.
 
-Ingestion-side incompleteness — an artifact the importer refused to send,
-or one that failed hash verification — is reported by the CLI and is
-deliberately not written into `fetch_runs.status`, because that would
-overload a collector-owned field and reintroduce the mutable column this
-plan removed.
+## Verification
 
-## Exit criteria
+Local tests use the current Cloudflare Vitest integration with real
+workerd/Miniflare D1 and R2 bindings. They cover:
 
-Phase 2 is done when all of the following hold.
+- append-only update/delete and `INSERT OR REPLACE` attacks;
+- inactive route attribution;
+- incomplete, subset, zero-artifact, unit, page, and transform seal cases;
+- MyJCB and Vpass lineage shapes and unknown legacy evidence;
+- privacy rejection for query values;
+- streamed R2 checksum validation and object reuse;
+- atomic artifact rejection without immutable residue;
+- same-source, cross-session lineage;
+- incomplete/failed attempt retry and conflict handling;
+- resumable staged inventory chunk replay;
+- route-scoped R2 integrity verification;
+- end-to-end authenticated run, report, artifact, inventory, and seal retries.
 
-- [ ] `migrations/0001_raw_store.sql` applied to D1; schema checked in.
-- [ ] `kogane-raw-evidence` R2 bucket created, private, with no public
-      route; `kogane-ingest` deployed with `INGEST_TOKEN` as a secret and
-      no unauthenticated and no read route.
-- [ ] `POST /ingest/run` and `POST /ingest/artifact` implemented with the
-      status codes above, including the `409`, `412`, and `422` paths.
-- [ ] `registry/sources.sql` populated for every source being collected
-      today, including the global deny set, and applied to D1 by the
-      deploy step.
-- [ ] The CLI and the Worker are demonstrated to reach the same
-      allow/deny verdict for a shared set of URLs, including one that two
-      sources' patterns both match, which both must refuse.
-- [ ] `ingest-file` and `import-collector-run` work end to end against
-      the deployed Worker.
-- [ ] Every SBI Securities run directory in `kogane-sbi-collector-poc` is
-      backfilled, and the count of runs and artifacts in D1 reconciles
-      against a bucket listing. That listing is the first record of those
-      counts in this repository; it is written down when it is taken.
-- [ ] Every Vpass run in `kogane-vpass-collector-poc` is backfilled,
-      including at least one run containing a card `error.json` and, if
-      one exists, a run that is a single run-level `error.json`.
-- [ ] Re-running the full backfill produces zero new blobs, zero new
-      artifact rows, and zero new run rows, demonstrated by the CLI
-      report.
-- [ ] Resuming an interrupted import completes the run: kill the importer
-      mid-run, re-run it, and confirm the artifact count matches the
-      manifest.
-- [ ] Privacy checks covered by tests: non-whitelisted metadata rejected,
-      non-allowlisted URL rejected, globally denied host rejected for a
-      source that has no deny rule of its own.
-- [ ] CI runs typecheck, tests, and a migration dry-run on every PR.
-- [ ] Every artifact's bytes are retrievable by digest and re-hash
-      correctly.
+The deployed account is on a paid Workers plan. Artifact child arrays are
+bounded at 100 per kind and staged inventory chunks at 30; their worst-case D1
+query counts fit the paid 1,000-query invocation limit. The service does not
+claim compatibility with the Free-plan 50-query limit.
 
-`import-kuebiko` is deliberately not on this list. It cannot be completed
-before a real capture has been characterized, and blocking phase 2 on it
-would invert the sequencing rule in `docs/roadmap.md`. The two collector
-buckets are enough evidence to build and prove the store.
+## Source ID mapping and origin enablement
 
-Phase 3 starts only after the last item, because a parser is worthless if
-the bytes it re-reads are not provably the bytes that were collected.
+The registry includes explicit collector-manifest aliases:
 
-## Open questions
+| External ID | Canonical source |
+| --- | --- |
+| `sbi-shinsei` | `sbi-shinsei-bank` |
+| `prestia-globalpass` | `global-pass` |
+| `smbc-direct` | `smbc-bank` |
+| `moneyforward-me` | `moneyforward-me` |
+| `v-point-pay-email` | `v-point-pay` |
+| `v-point-pay-email-reconciliation` | `v-point` |
 
-These are unresolved. None should be closed by guessing.
+`v-point-pay-email-reconciliation` is a generated report emitted by the V Point
+collector while reconciling its own point-history evidence with V Point Pay mail.
+Layer A therefore catalogues the bytes as a `collector_summary` in the `v-point`
+source run that produced it; it does not claim cross-source raw lineage or a
+financial match. Any interpretation of its entries, including match confidence
+and links to V Point Pay observations, starts in phase 3. The archived direct and
+forwarded messages themselves remain `provider_message` artifacts under
+`v-point-pay`.
 
-- **The Kuebiko capture shape.** `url`, `method`, `http_status`,
-  `sequence`, and the capture-side `artifact_key` rule are provisional
-  until `metadata.ndjson` from a real capture has been read: field names,
-  whether order is guaranteed, and whether an entry has any stable
-  identity of its own. Nothing in this repository establishes them, and
-  no capture is on disk here.
-- **Session identifiers in URLs.** Some sites carry them in query
-  strings, and `fetch_artifacts.url` stores the URL verbatim. Redaction
-  conflicts with byte-exactness of metadata; storing it conflicts with
-  the credential rules. Needs a real capture to judge how often it
-  occurs.
-- **Request size limit and batching.** The per-request body cap and
-  whether a batch endpoint is needed cannot be settled before real
-  Kuebiko body-size distributions are measured.
-- **Per-artifact time and hash from the collectors.** SBI's
-  `ArtifactManifest` has no timestamp and Vpass's card manifest has no
-  hash. Both are one-line collector changes that would remove a derived
-  value and an unverifiable one, but changing a live collector is its own
-  risk and no decision has been taken.
-- **Do the live collectors keep writing R2 directly?** They work, and
-  phase 2 does not change them. Whether they should later POST to the
-  ingestion API instead — making their buckets a transient landing zone,
-  or removing them — is a separate decision with its own failure modes.
-- **Does ingestion completeness need its own column?** Reporting
-  client-side leaves no queryable record that an artifact was refused.
-  Any stored form would be a second status on a table with no mutable
-  columns, so it would have to be an append-only events table. Deferred
-  until a real gap is missed.
-- **Vpass snapshot granularity.** One artifact per card run is the
-  phase-2 decision. If `raw_locator` addressing into the embedded pages
-  proves painful in phase 3, the alternative is changing the collector to
-  write one object per page — a collector change, not a store change.
-- **Per-client tokens and rotation.** One shared bearer token is the
-  phase-2 answer. Whether the importer, each collector, and any future
-  email handler should hold distinct, source-scoped tokens is unexamined.
-- **Growth and verification cadence.** D1 row counts and R2 object counts
-  per year are unknown until the backfill and then Kuebiko imports run at
-  volume, and so are the right sample size and frequency for the
-  re-hashing job and whether any R2 storage-class or lifecycle option is
-  worth using. Nothing is ever deleted regardless.
+Financial HTTP and storage templates remain default-deny. Each importer PR must
+add a reviewed source-specific scope and exact template-policy migration from
+its checked-in manifest/docs before its backfill can start. The synthetic
+fixture is the only HTTP rule seeded globally by this PR. Local-file policies
+are seeded for every source because filenames are represented only as a fixed
+redacted template plus a separate-key HMAC fingerprint.
+
+## Deployment order
+
+Run `bun run cf:deploy` from `services/raw-evidence`. The checked-in deployment
+script lists and applies pending remote D1 migrations first, deploys the Worker
+second, then runs the authenticated synthetic round trip. `0003` is additive;
+the prior Worker remains compatible if Worker deployment fails after migration.
+Do not deploy the new Worker before the migration because it reads the new
+inventory digest-version column and synthetic route.
+
+The sanitized `source-usecases.v1.json` acceptance fixture and its independent
+Worker integration suite retain coverage
+for Vpass multi-card bundles, SBI Securities partial/failure, SBI Shinsei
+raw-to-normalized artifacts, SBI VC pagination, MyJCB multi-connection
+redaction/re-encoding, Mobile Suica Shift-JIS pages, V Point empty pages, V Point
+Pay direct/forwarded mail, Sony source non-retention, MoneyForward ordering, and
+SMBC chunk resume. The same suite crosses the 1,000-item direct-seal boundary and
+seals 1,001 artifacts through the resumable staged-inventory API. All fixture
+payloads are invented and explicitly contain no credentials, real financial
+values, raw URLs, or query values.
+
+## Backfill order
+
+Backfill is read-only against each staging bucket and must never delete or move
+its source object. For every bucket:
+
+1. list all keys with pagination and save a local inventory receipt;
+2. classify run boundaries from its documented manifest, never just key names;
+3. upload bytes by content hash and register storage-origin metadata with a
+   redacted key template;
+4. add the producer terminal report and the complete central inventory;
+5. seal only when manifest counts, listed objects, R2 sizes, and hashes agree;
+6. record partial/failed runs too, but do not invent a successful seal;
+7. reconcile source object count, unique content count, artifact count, run
+   count, and seal count before calling that bucket complete.
+
+Current staging buckets to process are discovered from checked-in Wrangler
+configuration, including SBI Securities, Vpass, SBI Shinsei, SBI VC Trade,
+MyJCB, Mobile Suica, GLOBAL PASS, SMBC Direct backfill, Sony Bank, V Point, and
+V Point Pay. Discovery is repeated at execution time because cloud resources
+and object counts are live state.
+
+## Remaining implementation steps
+
+- Add importer commands for collector R2 and Kuebiko. The local-file importer is
+  implemented. They share
+  the same API and differ only in acquisition/origin mapping.
+- Backfill staging buckets one at a time with count/hash reconciliation.
+- Schedule a bounded caller for the route-scoped verifier; the endpoint already
+  appends immutable `raw_object_verification_events` and suppresses duplicate
+  checks from one client for five minutes.
