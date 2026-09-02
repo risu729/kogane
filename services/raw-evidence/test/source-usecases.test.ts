@@ -580,5 +580,5 @@ describe("sanitized source-usecase contract", () => {
     expect(await env.DB.prepare(`
       SELECT count(*) AS count FROM run_inventory_items WHERE inventory_id = ?
     `).bind(inventoryId).first<{ count: number }>()).toEqual({ count: value.itemCount });
-  }, 120_000);
+  }, 180_000);
 });

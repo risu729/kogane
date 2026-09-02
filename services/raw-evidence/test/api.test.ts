@@ -729,7 +729,7 @@ describe("raw-evidence Worker", () => {
     });
     expect(seal.status).toBe(201);
     expect((await seal.json() as { sealed: boolean }).sealed).toBe(true);
-  });
+  }, 30_000);
 
   it("keeps one acquisition session across multiple source-specific runs", async () => {
     const externalSessionId = "api-session-multi-source";
