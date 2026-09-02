@@ -1,0 +1,25 @@
+{
+  "name": "@kogane/raw-evidence",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.0",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "check:importer": "bun build scripts/ingest-file.ts --target=bun --outfile=/tmp/kogane-ingest-file-check.js",
+    "cf:types": "wrangler types",
+    "cf:check": "wrangler deploy --dry-run",
+    "cf:deploy": "bash scripts/deploy.sh",
+    "credential:sync": "bash scripts/sync-ingest-key.sh",
+    "credential:rotate": "bash scripts/sync-ingest-key.sh --rotate",
+    "verify:production": "bash scripts/verify-production.sh",
+    "ingest:file": "bash scripts/ingest-file.sh"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.1.3",
+    "@types/node": "26.4.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
+    "wrangler": "4.128.0"
+  }
+}

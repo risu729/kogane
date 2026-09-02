@@ -44,6 +44,17 @@ Built only after phase 1, then backfilled with all accumulated captures.
 The detailed plan — full DDL, the ingestion API, the importer CLI,
 idempotency and backfill rules — is in `docs/raw-store.md`.
 
+**Implementation status (2026-09-02):** the cross-source D1 schema and Worker
+foundation passed independent architecture, use-case, and adversarial
+SQLite/D1 review with no P0/P1 findings. Migrations through `0004` and Worker
+schema version `0004` are deployed. The production synthetic round trip proves
+run-scoped streaming R2 writes, immutable catalogue ingestion, R2 integrity
+verification, and complete sealing; production reconciliation reports no
+unsealed run and no synthetic run in the financial projection. The sanitized
+acceptance suite covers 12 documented source shapes, including a 1,001-item
+resumable inventory. Collector-R2/Kuebiko importers and staging-bucket backfill
+remain the next implementation unit. See `docs/raw-store.md`.
+
 - Cloudflare Worker, D1 database, private R2 bucket, CI.
 - Bearer-token auth for the ingestion API.
 - Importer CLI (`import-kuebiko`, `ingest-file`).
@@ -56,19 +67,25 @@ idempotency and backfill rules — is in `docs/raw-store.md`.
   an encrypted source-scoped session envelope. The vault, master password, and
   Vpass password never enter Cloudflare for the replay-only flow.
 
-Expected shape of the tables (to be finalized in phase 1):
+The original four-table sketch below remains useful as the layer summary; the
+candidate schema expands it with acquisition method, scoped authorization,
+progress/terminal reports, units/pages/ranges, typed privacy-safe origins,
+lineage, transforms, inventory seals, and integrity events:
 
 ```sql
-sources          -- registry: provider, ingestion type, domain allowlist
-fetch_runs       -- when a collection happened, tool, status
-raw_objects      -- sha256 (key), r2_key, content_type, size
-fetch_artifacts  -- run, source, url, method, status, mime,
-                 -- fetched_at, raw_object sha
+sources                 -- reviewed provider/data-surface registry
+fetch_runs              -- source-specific acquisition identity
+raw_objects             -- sha256, exact byte size, private R2 key
+fetch_artifacts         -- run, role/fidelity/container, safe media essence,
+                        -- timestamp basis, raw-object digest
+artifact_http_metadata  -- method/status/scheme/host, sanitized path template,
+                        -- reviewed query names and optional HMAC only
 ```
 
 Blobs are content-addressed in R2 (dedupe); fetch history is append-only.
-`fetch_artifacts` keeps HTTP-level fields (URL, status) because they are the
-most useful signal for later parser development.
+Raw URLs, query values, userinfo, fragments, cookies, tokens, and unreviewed
+path/query shapes are never catalogue fields. HTTP provenance is useful for
+later parser development only after this enforced sanitization boundary.
 
 ## Phase 3 — Observation Layer
 
