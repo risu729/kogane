@@ -59,6 +59,16 @@ WALLETは銀行BFFの`/jada/debit-sso/login-usage-dtl-inq`から毎回一時SSO�
 公式CSVを要求するとSony側がCloudflare egressに500を返す場合があるため、JSONの件数が0なら
 情報量のない空CSVを省略する。残高と0件の履歴JSONは保存する。
 
+2026-09-04に中央raw-evidenceへの既存データ移行を本番確認した。source bucketの全120 listing
+pageを走査して11 manifest（旧v1が2、現行v2が9）を取り込み、D1上の11 runはすべてseal済み、
+未sealは0だった。同じ全件backfillを先頭から再実行してもrun数は11のままであり、seal済みrunの
+exact replayが冪等であることを確認した。さらに旧v1 manifestを1件抽出し、source R2 objectと
+中央content-addressed R2 objectのSHA-256およびbyte数が一致することを確認した。確認では本文や
+金融値を標準出力・documentationへ記録していない。
+
+現在のbackfillはoperatorがscriptを実行する方式である。source R2はdurable outboxとして保持し、
+削除しない。将来のreconcilerはmanifest eventとrepair scanから同じ冪等import contractを呼び出す。
+
 ローカルで実口座を検証する場合は、認証JSONを標準出力やshell引数へ置かず、600相当で保護した
 ファイルを`SONY_BANK_CREDENTIAL_FILE`に指定する。
 
