@@ -173,7 +173,12 @@ describe("SBI VC Trade staged-run importer", () => {
         staticArtifact("position-summary"),
         staticArtifact("executions-recent-page-0001"),
         ...pages,
-      ], [{ operation: "collect", errorCode: "collector_http_503" }]);
+      ], [{
+        operation: "collect",
+        errorCode: pages.length === 1
+          ? "executions_historical_pagination_length_mismatch"
+          : "executions_historical_pagination_total_changed",
+      }]);
       const central = new FakeCentral();
       await expect(importRun(bucket, central)).resolves.toMatchObject({
         sealed: true,
@@ -181,6 +186,23 @@ describe("SBI VC Trade staged-run importer", () => {
       });
       expect(central.requests.some((request) => request.path.endsWith("/seal"))).toBe(true);
     }
+  });
+
+  test("does not waive semantic validation for a non-pagination collect failure", async () => {
+    const bucket = new FakeBucket();
+    await storeRun(bucket, [
+      staticArtifact("cash-balances"),
+      staticArtifact("account-margin"),
+      staticArtifact("position-summary"),
+      staticArtifact("executions-recent-page-0001"),
+      pageArtifact("executions-historical-page-0001", 1, 31),
+    ], [{ operation: "collect", errorCode: "collector_http_503" }]);
+    const central = new FakeCentral();
+    await expect(importRun(bucket, central)).rejects.toMatchObject({
+      status: 400,
+      code: "manifest_page_length_mismatch",
+    });
+    expect(central.requests).toHaveLength(0);
   });
 
   test("rejects unexpected prefix objects and exact custom metadata mismatches", async () => {

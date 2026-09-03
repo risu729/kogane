@@ -26,6 +26,7 @@ const FINGERPRINT_VERSION = "collector-r2-v1";
 const MANIFEST_KEY = /^raw\/sbi-vc-trade\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const ERROR_CODE = /^[a-z0-9_]{1,100}$/u;
+const PAGINATION_EVIDENCE_ERROR = /^(?:executions_historical|cashflows_historical)_(?:invalid_pagination|pagination_total_changed|pagination_length_mismatch|page_limit_exceeded)$/u;
 const STATIC_DATASETS = [
   "cash-balances",
   "account-margin",
@@ -106,6 +107,7 @@ export async function importSbiVcRun(options: {
     const verifiedArtifacts: VerifiedArtifact[] = [];
     const collectFailureEvidenceIndex =
       manifest.failures.length === 1 && manifest.failures[0]?.operation === "collect" &&
+        PAGINATION_EVIDENCE_ERROR.test(manifest.failures[0].errorCode) &&
         manifest.artifacts.length > 0
         ? manifest.artifacts.length - 1
         : -1;
@@ -424,7 +426,9 @@ function validateFailureComplement(
   }
   const operation = manifest.failures[0]!.operation;
   const last = artifacts.at(-1);
-  if (operation === "collect" && last?.failureEvidence) {
+  if (operation === "collect" &&
+      PAGINATION_EVIDENCE_ERROR.test(manifest.failures[0]!.errorCode) &&
+      last?.failureEvidence) {
     const expected = nextExpectedDataset(artifacts.slice(0, -1));
     if (expected !== last.artifact.dataset) {
       invalid("manifest_failure_complement_mismatch");

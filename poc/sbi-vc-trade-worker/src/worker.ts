@@ -401,7 +401,9 @@ function shouldReauthenticate(health: HealthState): boolean {
 }
 
 function classifyError(error: unknown): string {
-  if (error instanceof Error && /^[a-z0-9_]+$/u.test(error.message)) return error.message;
+  if (error instanceof Error && /^[a-z0-9_-]+$/u.test(error.message)) {
+    return error.message.replaceAll("-", "_");
+  }
   if (error instanceof SyntaxError) return "json_parse_failed";
   if (error instanceof DOMException) return classifyCryptoError(error);
   if (error instanceof TypeError) return "type_error";
