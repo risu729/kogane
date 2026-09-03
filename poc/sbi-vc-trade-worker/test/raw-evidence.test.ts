@@ -38,6 +38,7 @@ describe("raw evidence importer binding", () => {
         scannedObjectCount: 1,
         importedManifestCount: 1,
         skippedManifestCount: 0,
+        deferredManifestCount: 0,
         failedManifestCount: 0,
         nextCursor: "next",
         truncated: true,

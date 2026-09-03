@@ -554,7 +554,11 @@ private R2を削除しないdurable outboxとして維持したまま、`kogane-
 
 importerはSBI VC Trade固有の順序・pagination契約を使い、manifest schema/source/run/date/status、固定dataset、履歴pageの連番・`totalSize`一貫性・page長・終了条件、失敗時に次に欠けるdataset、prefix内の全object、size、custom metadata、SHA-256を中央run作成前に検証する。artifactは最大4 MiB、最大204件なので全bytesを同時保持せず逐次検証し、転送時に再読込・再検証した元bytesを再serializeせず送る。同期Service Binding経路はdata artifact 11件までとし、12件以上は中央stateを作らずR2にdeferして後続Queue reconcilerへ委ねる。中央routeとBearer clientは`collector-r2-sbi-vc`専用で、SBI証券用clientとは分離する。
 
+`collect`がpagination異常を検出した場合、collectorは原因になった最後のprovider responseを保存してからpartial manifestを確定する。importerはその末尾artifactについてenvelope、gateway status、secret除去、R2 metadata、hash、sizeとdataset位置を検証し、正常pageとは見なさず「失敗原因のraw evidence」として中央へcatalogueする。これにより異常responseを失わず、run全体はpartial/failedのままsealされる。
+
 即時転送が失敗してもoutboxは残り、`scripts/backfill-raw-evidence.sh`がcursor付きの別top-level requestを繰り返す。各requestはR2 objectを最大1件走査し、manifestに当たった場合も1 runだけを冪等再送する。自動再試行・監視は後続reconcilerの責務であり、この変更には含めない。
+
+同期上限を超えるmanifestはbackfill失敗でなくdeferredとして数え、cursorを進める。これにより大きなrunが後続の同期可能runを恒久的に遮断せず、deferred run自体はreconcilerのQueue分割処理対象として残る。
 
 ### 中央転送の本番検証
 

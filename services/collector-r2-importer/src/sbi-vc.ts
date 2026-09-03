@@ -41,6 +41,7 @@ type PageGroup = "executions-historical" | "cashflows-historical";
 interface VerifiedArtifact {
   artifact: SbiVcArtifactManifest;
   page?: PageInfo;
+  failureEvidence?: true;
 }
 
 interface PageInfo {
@@ -103,8 +104,18 @@ export async function importSbiVcRun(options: {
     // and keep only page metadata so the Worker never buffers a whole run.
     phase = "artifact_validation";
     const verifiedArtifacts: VerifiedArtifact[] = [];
-    for (const artifact of manifest.artifacts) {
+    const collectFailureEvidenceIndex =
+      manifest.failures.length === 1 && manifest.failures[0]?.operation === "collect" &&
+        manifest.artifacts.length > 0
+        ? manifest.artifacts.length - 1
+        : -1;
+    for (const [index, artifact] of manifest.artifacts.entries()) {
       const bytes = await readVerifiedArtifact(options.bucket, artifact);
+      if (index === collectFailureEvidenceIndex) {
+        assertStoredFailureEnvelope(bytes);
+        verifiedArtifacts.push({ artifact, failureEvidence: true });
+        continue;
+      }
       verifiedArtifacts.push({
         artifact,
         ...parseStoredEnvelope(bytes, artifact.dataset),
@@ -406,13 +417,22 @@ function validateFailureComplement(
   manifest: SbiVcManifest,
   artifacts: VerifiedArtifact[],
 ): void {
-  const nextDataset = nextExpectedDataset(artifacts);
   if (manifest.failures.length === 0) {
+    const nextDataset = nextExpectedDataset(artifacts);
     if (nextDataset !== null) invalid("manifest_dataset_completeness_mismatch");
     return;
   }
-  if (nextDataset === null) invalid("manifest_failure_complement_mismatch");
   const operation = manifest.failures[0]!.operation;
+  const last = artifacts.at(-1);
+  if (operation === "collect" && last?.failureEvidence) {
+    const expected = nextExpectedDataset(artifacts.slice(0, -1));
+    if (expected !== last.artifact.dataset) {
+      invalid("manifest_failure_complement_mismatch");
+    }
+    return;
+  }
+  const nextDataset = nextExpectedDataset(artifacts);
+  if (nextDataset === null) invalid("manifest_failure_complement_mismatch");
   if (operation === "load_session" && artifacts.length !== 0) {
     invalid("manifest_failure_complement_mismatch");
   }
@@ -486,24 +506,7 @@ function parseStoredEnvelope(
   bytes: Uint8Array,
   dataset: string,
 ): { page?: PageInfo } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-  } catch {
-    throw new ImportError(409, "artifact_json_invalid");
-  }
-  const envelope = recordConflict(parsed, "artifact_envelope_invalid");
-  const keys = Object.keys(envelope).sort();
-  if (keys.length !== 2 || keys[0] !== "body" || keys[1] !== "meta") {
-    throw new ImportError(409, "artifact_envelope_invalid");
-  }
-  const meta = recordConflict(envelope.meta, "artifact_meta_invalid");
-  if (meta.status !== "OK") {
-    throw new ImportError(409, "artifact_gateway_status_invalid");
-  }
-  if (Object.hasOwn(meta, "secureKey")) {
-    throw new ImportError(409, "artifact_secure_key_present");
-  }
+  const envelope = storedEnvelope(bytes);
   const group = pageGroup(dataset);
   const recentExecution = dataset === "executions-recent-page-0001";
   if (!group && !recentExecution) return {};
@@ -526,6 +529,32 @@ function parseStoredEnvelope(
       totalSize,
     },
   };
+}
+
+function assertStoredFailureEnvelope(bytes: Uint8Array): void {
+  storedEnvelope(bytes);
+}
+
+function storedEnvelope(bytes: Uint8Array): JsonObject {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    throw new ImportError(409, "artifact_json_invalid");
+  }
+  const envelope = recordConflict(parsed, "artifact_envelope_invalid");
+  const keys = Object.keys(envelope).sort();
+  if (keys.length !== 2 || keys[0] !== "body" || keys[1] !== "meta") {
+    throw new ImportError(409, "artifact_envelope_invalid");
+  }
+  const meta = recordConflict(envelope.meta, "artifact_meta_invalid");
+  if (meta.status !== "OK") {
+    throw new ImportError(409, "artifact_gateway_status_invalid");
+  }
+  if (Object.hasOwn(meta, "secureKey")) {
+    throw new ImportError(409, "artifact_secure_key_present");
+  }
+  return envelope;
 }
 
 async function assertExactPrefix(

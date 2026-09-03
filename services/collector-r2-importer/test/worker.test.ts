@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import worker from "../src/worker";
+import worker, { classifySbiVcBackfillError } from "../src/worker";
+import { ImportError } from "../src/error";
 
 describe("collector R2 importer routes", () => {
   test("the SBI VC backfill page lists at most one source object", async () => {
@@ -32,6 +33,7 @@ describe("collector R2 importer routes", () => {
       scannedObjectCount: 1,
       importedManifestCount: 0,
       skippedManifestCount: 1,
+      deferredManifestCount: 0,
       nextCursor: "next-cursor",
       truncated: true,
     });
@@ -54,6 +56,21 @@ describe("collector R2 importer routes", () => {
     expect(response.status).toBe(400);
     const body = await response.json() as { error: string };
     expect(body).toEqual({ error: "backfill_limit_must_be_one" });
+  });
+
+  test("classifies the synchronous chain limit as deferred, not failed", () => {
+    expect(classifySbiVcBackfillError(
+      new ImportError(409, "sync_import_worker_chain_limit"),
+    )).toEqual({
+      deferred: true,
+      code: "sync_import_worker_chain_limit",
+    });
+    expect(classifySbiVcBackfillError(
+      new ImportError(409, "artifact_checksum_mismatch"),
+    )).toEqual({
+      deferred: false,
+      code: "artifact_checksum_mismatch",
+    });
   });
 });
 

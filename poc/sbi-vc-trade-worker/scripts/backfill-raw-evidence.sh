@@ -20,6 +20,7 @@ cursor=""
 if [[ -s "${cursor_file}" ]]; then IFS= read -r cursor < "${cursor_file}"; fi
 page=0
 manifest_count=0
+deferred_count=0
 while (( page < 10000 )); do
   page=$((page + 1))
   url="${collector_url}/backfill-raw-evidence?limit=1"
@@ -37,7 +38,9 @@ while (( page < 10000 )); do
     exit 1
   fi
   imported="$(jq -er '.importedManifestCount' <<<"${response}")"
+  deferred="$(jq -er '.deferredManifestCount // 0' <<<"${response}")"
   manifest_count=$((manifest_count + imported))
+  deferred_count=$((deferred_count + deferred))
   if [[ "${KOGANE_STOP_AFTER_MANIFEST:-0}" == 1 && "${imported}" -gt 0 ]]; then
     jq '{stoppedAfterManifest:true,result}' <<<"${response}"
     exit 0
@@ -45,8 +48,8 @@ while (( page < 10000 )); do
   truncated="$(jq -r '.truncated' <<<"${response}")"
   if [[ "${truncated}" == false ]]; then
     rm -f -- "${cursor_file}"
-    printf '{"complete":true,"pages":%d,"importedManifests":%d}\n' \
-      "${page}" "${manifest_count}"
+    printf '{"complete":true,"pages":%d,"importedManifests":%d,"deferredManifests":%d}\n' \
+      "${page}" "${manifest_count}" "${deferred_count}"
     exit 0
   fi
   cursor="$(jq -er '.nextCursor | select(type == "string" and length > 0)' <<<"${response}")"

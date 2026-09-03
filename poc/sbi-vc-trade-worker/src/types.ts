@@ -108,9 +108,11 @@ export interface RawEvidenceBackfillPageResult {
   scannedObjectCount: number;
   importedManifestCount: number;
   skippedManifestCount: number;
+  deferredManifestCount: number;
   failedManifestCount: number;
   nextCursor: string | null;
   truncated: boolean;
   failureCode?: string;
+  deferredReason?: "sync_import_worker_chain_limit";
   result?: RawEvidenceImportResult;
 }

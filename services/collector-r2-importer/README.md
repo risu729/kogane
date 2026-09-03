@@ -26,7 +26,7 @@ SBI VC TradeのmanifestはSBI証券とは共有せず、`sbi-vc-trade-worker-poc
 
 ## backfillの分割
 
-SBI証券の完全な1 runは中央Workerを最大約23回呼ぶ。Cloudflareの1 requestに連なるWorker呼び出し上限へ抵触しないよう、`backfill-page`は1回につきR2 objectを1件だけ走査し、manifestを見つけた場合も1 runだけを転送する。SBI VC Tradeはdata artifact 11件を超えるmanifestを`sync_import_worker_chain_limit`で中央state作成前に停止する。呼出元は返されたcursorで別のtop-level requestを繰り返し、大きなrunは後続Queue reconcilerがartifact単位で処理する。
+SBI証券の完全な1 runは中央Workerを最大約23回呼ぶ。Cloudflareの1 requestに連なるWorker呼び出し上限へ抵触しないよう、`backfill-page`は1回につきR2 objectを1件だけ走査し、manifestを見つけた場合も1 runだけを転送する。SBI VC Tradeはdata artifact 11件を超えるmanifestを`sync_import_worker_chain_limit`で中央state作成前に停止する。backfillではこの既知の上限を失敗でなくdeferredとして数え、R2 cursorを先へ進めるため、後続runをpoison pillとして遮断しない。大きなrun自体は後続Queue reconcilerがartifact単位で処理する。
 
 ## 検証とデプロイ
 

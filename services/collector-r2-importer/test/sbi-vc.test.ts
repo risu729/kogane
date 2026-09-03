@@ -160,7 +160,7 @@ describe("SBI VC Trade staged-run importer", () => {
     expect(central.requests).toHaveLength(0);
   });
 
-  test("rejects changing totals and short non-terminal pages before central state", async () => {
+  test("catalogues the final response that caused a collect pagination failure", async () => {
     for (const pages of [
       [pageArtifact("executions-historical-page-0001", 30, 31),
         pageArtifact("executions-historical-page-0002", 1, 32)],
@@ -175,8 +175,11 @@ describe("SBI VC Trade staged-run importer", () => {
         ...pages,
       ], [{ operation: "collect", errorCode: "collector_http_503" }]);
       const central = new FakeCentral();
-      await expect(importRun(bucket, central)).rejects.toMatchObject({ status: 400 });
-      expect(central.requests).toHaveLength(0);
+      await expect(importRun(bucket, central)).resolves.toMatchObject({
+        sealed: true,
+        artifactCount: pages.length + 5,
+      });
+      expect(central.requests.some((request) => request.path.endsWith("/seal"))).toBe(true);
     }
   });
 

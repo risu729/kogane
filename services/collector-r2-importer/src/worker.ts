@@ -103,16 +103,24 @@ export default {
         const object = listed.objects[0];
         let importedManifestCount = 0;
         let skippedManifestCount = 0;
+        let deferredManifestCount = 0;
         let failedManifestCount = 0;
         let failureCode: string | undefined;
+        let deferredReason: string | undefined;
         let result: Awaited<ReturnType<typeof importOneSbiVc>> | undefined;
         if (object?.key.endsWith("/manifest.json")) {
           try {
             result = await importOneSbiVc(env, object.key);
             importedManifestCount = 1;
           } catch (error) {
-            failedManifestCount = 1;
-            failureCode = safeCode(error);
+            const classification = classifySbiVcBackfillError(error);
+            if (classification.deferred) {
+              deferredManifestCount = 1;
+              deferredReason = classification.code;
+            } else {
+              failedManifestCount = 1;
+              failureCode = classification.code;
+            }
           }
         } else if (object) {
           skippedManifestCount = 1;
@@ -122,10 +130,12 @@ export default {
           scannedObjectCount: listed.objects.length,
           importedManifestCount,
           skippedManifestCount,
+          deferredManifestCount,
           failedManifestCount,
           nextCursor: listed.truncated ? listed.cursor ?? null : null,
           truncated: listed.truncated,
           ...(failureCode ? { failureCode } : {}),
+          ...(deferredReason ? { deferredReason } : {}),
           ...(result ? { result } : {}),
         });
       } catch (error) {
@@ -222,6 +232,14 @@ function safeCode(error: unknown): string {
     ? error.code
     : error instanceof Error ? error.message : "request_failed";
   return /^[a-z0-9_-]{1,100}$/u.test(candidate) ? candidate : "request_failed";
+}
+
+export function classifySbiVcBackfillError(error: unknown): {
+  deferred: boolean;
+  code: string;
+} {
+  const code = safeCode(error);
+  return { deferred: code === "sync_import_worker_chain_limit", code };
 }
 
 function json(value: unknown, status = 200): Response {
