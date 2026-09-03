@@ -1,4 +1,5 @@
 import { CentralClient } from "./central";
+import { ImportError } from "./error";
 import type {
   CentralInventoryItem,
   SbiArtifactManifest,
@@ -15,6 +16,7 @@ const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const STORAGE_TEMPLATE = "raw/sbi-securities/{date}/{run-id}/{artifact}.json";
 const STORAGE_CONTAINER = "kogane-sbi-collector-poc";
 const FINGERPRINT_VERSION = "collector-r2-v1";
+const CENTRAL_CLIENT_ID = "collector-r2-sbi";
 const MANIFEST_KEY = /^raw\/sbi-securities\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SAFE_TEXT = /^[A-Za-z0-9._:/-]{1,200}$/u;
@@ -44,11 +46,7 @@ const EXPECTED_DATASETS: Record<Scope, readonly string[]> = {
 type Scope = "domestic" | "foreign";
 type JsonObject = Record<string, unknown>;
 
-export class ImportError extends Error {
-  constructor(readonly status: number, readonly code: string) {
-    super(code);
-  }
-}
+export { ImportError } from "./error";
 
 export interface ImportRunResult {
   source: typeof SOURCE;
@@ -104,7 +102,11 @@ export async function importSbiRun(options: {
     })));
 
     phase = "central_create";
-    const central = new CentralClient(options.centralService, options.centralToken);
+    const central = new CentralClient(
+      options.centralService,
+      options.centralToken,
+      CENTRAL_CLIENT_ID,
+    );
     centralRunId = await central.createRun({
       producerId: PRODUCER,
       sourceId: SOURCE,
@@ -232,7 +234,11 @@ export async function importSbiRun(options: {
   } catch (error) {
     if (centralRunId !== undefined) {
       try {
-        const central = new CentralClient(options.centralService, options.centralToken);
+        const central = new CentralClient(
+          options.centralService,
+          options.centralToken,
+          CENTRAL_CLIENT_ID,
+        );
         const transferred = acceptedArtifactCount + reusedArtifactCount;
         await central.recordAttempt(centralRunId, {
           externalAttemptId: attemptId,

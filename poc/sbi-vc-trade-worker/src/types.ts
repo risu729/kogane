@@ -85,4 +85,34 @@ export interface CollectionSummary {
   artifactCount: number;
   failureCount: number;
   manifestKey: string;
+  central: RawEvidenceImportResult | RawEvidenceDeferredResult;
+}
+
+export interface RawEvidenceDeferredResult {
+  deferred: true;
+  reason: "worker-invocation-chain-limit";
+  artifactCount: number;
+}
+
+export interface RawEvidenceImportResult {
+  source: "sbi-vc-trade";
+  manifestKey: string;
+  centralRunId: number;
+  artifactCount: number;
+  sealed: boolean;
+  allObjectsReused: boolean;
+}
+
+export interface RawEvidenceBackfillPageResult {
+  source: "sbi-vc-trade";
+  scannedObjectCount: number;
+  importedManifestCount: number;
+  skippedManifestCount: number;
+  deferredManifestCount: number;
+  failedManifestCount: number;
+  nextCursor: string | null;
+  truncated: boolean;
+  failureCode?: string;
+  deferredReason?: "sync_import_worker_chain_limit";
+  result?: RawEvidenceImportResult;
 }

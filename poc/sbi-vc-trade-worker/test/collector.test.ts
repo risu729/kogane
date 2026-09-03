@@ -90,4 +90,25 @@ describe("Worker collector", () => {
 
     expect(artifacts.at(-1)?.dataset).toBe("executions-historical-page-0001");
   });
+
+  test("rejects a short non-terminal page instead of skipping history", async () => {
+    const fetcher = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { event: string; data: Record<string, unknown> };
+      const isHistoricalExecution = request.event === "executionList"
+        && request.data.historical === "true";
+      return Response.json({
+        meta: { status: "OK", secureKey: "next-secure" },
+        body: isHistoricalExecution
+          ? { list: [{ synthetic: true }], totalSize: "31" }
+          : { list: [], totalSize: "0" },
+      });
+    }) as typeof fetch;
+
+    await expect(collectSbiVcTrade({
+      session: seed,
+      fetcher,
+      onSession: async () => undefined,
+      onArtifact: async () => undefined,
+    })).rejects.toThrow("executions-historical_pagination_length_mismatch");
+  });
 });

@@ -30,3 +30,26 @@ export interface CentralInventoryItem {
   sha256: string;
   descriptorSha256: string;
 }
+
+export interface SbiVcArtifactManifest {
+  dataset: string;
+  key: string;
+  sha256: string;
+  bytes: number;
+}
+
+export interface SbiVcFailure {
+  operation: string;
+  errorCode: string;
+}
+
+export interface SbiVcManifest {
+  schemaVersion: "sbi-vc-trade-worker-poc-v1";
+  source: "sbi-vc-trade";
+  runId: string;
+  startedAt: string;
+  completedAt: string;
+  status: "success" | "partial" | "failed";
+  artifacts: SbiVcArtifactManifest[];
+  failures: SbiVcFailure[];
+}

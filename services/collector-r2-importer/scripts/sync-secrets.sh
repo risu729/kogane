@@ -15,13 +15,16 @@ if ! test -f "${credential_path}" || ! test -f "${fingerprint_path}"; then
   exit 1
 fi
 
-(
-  cd -- "${raw_dir}"
-  KOGANE_INGEST_CLIENT_ID=collector-r2-sbi bash scripts/sync-ingest-key.sh
-)
+for client_id in collector-r2-sbi collector-r2-sbi-vc; do
+  (
+    cd -- "${raw_dir}"
+    KOGANE_INGEST_CLIENT_ID="${client_id}" bash scripts/sync-ingest-key.sh
+  )
+done
 
 key_map="$(sudo systemd-creds decrypt "${credential_path}" -)"
-client_secret="$(jq -er '."collector-r2-sbi" | select(type == "string" and length >= 20)' <<<"${key_map}")"
+sbi_secret="$(jq -er '."collector-r2-sbi" | select(type == "string" and length >= 20)' <<<"${key_map}")"
+sbi_vc_secret="$(jq -er '."collector-r2-sbi-vc" | select(type == "string" and length >= 20)' <<<"${key_map}")"
 fingerprint_secret="$(sudo systemd-creds decrypt "${fingerprint_path}" -)"
 if ! [[ "${fingerprint_secret}" =~ ^[0-9a-f]{64}$ ]]; then
   printf 'origin fingerprint credential is invalid\n' >&2
@@ -30,10 +33,12 @@ fi
 
 (
   cd -- "${service_dir}"
-  printf 'collector-r2-sbi.%s' "${client_secret}" |
+  printf 'collector-r2-sbi.%s' "${sbi_secret}" |
     npx wrangler secret put RAW_EVIDENCE_TOKEN >/dev/null
+  printf 'collector-r2-sbi-vc.%s' "${sbi_vc_secret}" |
+    npx wrangler secret put RAW_EVIDENCE_TOKEN_SBI_VC >/dev/null
   printf '%s' "${fingerprint_secret}" |
     npx wrangler secret put ORIGIN_FINGERPRINT_KEY >/dev/null
 )
-unset key_map client_secret fingerprint_secret
+unset key_map sbi_secret sbi_vc_secret fingerprint_secret
 printf '{"synced":true,"worker":"kogane-collector-r2-importer"}\n'

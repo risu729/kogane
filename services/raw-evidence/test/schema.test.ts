@@ -451,6 +451,7 @@ describe("0001 raw-evidence schema", () => {
       { external_source_id: "prestia-globalpass", source_id: "global-pass" },
       { external_source_id: "sbi-securities", source_id: "sbi-securities" },
       { external_source_id: "sbi-shinsei", source_id: "sbi-shinsei-bank" },
+      { external_source_id: "sbi-vc-trade", source_id: "sbi-vc-trade" },
       { external_source_id: "smbc-direct", source_id: "smbc-bank" },
       { external_source_id: "v-point-pay-email", source_id: "v-point-pay" },
       { external_source_id: "v-point-pay-email-reconciliation", source_id: "v-point" },
@@ -469,6 +470,20 @@ describe("0001 raw-evidence schema", () => {
       producer_id: "collector-r2-importer",
       source_id: "sbi-securities",
     }]);
+    const sbiVcRoute = await env.DB.prepare(`
+      SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes
+      WHERE ingest_client_id = 'collector-r2-sbi-vc'
+      ORDER BY producer_id, source_id
+    `).all<{
+      ingest_client_id: string;
+      producer_id: string;
+      source_id: string;
+    }>();
+    expect(sbiVcRoute.results).toEqual([{
+      ingest_client_id: "collector-r2-sbi-vc",
+      producer_id: "collector-r2-importer",
+      source_id: "sbi-vc-trade",
+    }]);
     const sbiPolicies = await env.DB.prepare(`
       SELECT template, redaction_version, fingerprint_key_version
       FROM origin_template_policies
@@ -480,6 +495,20 @@ describe("0001 raw-evidence schema", () => {
     }>();
     expect(sbiPolicies.results).toEqual([{
       template: "raw/sbi-securities/{date}/{run-id}/{artifact}.json",
+      redaction_version: "v1",
+      fingerprint_key_version: "collector-r2-v1",
+    }]);
+    const sbiVcPolicies = await env.DB.prepare(`
+      SELECT template, redaction_version, fingerprint_key_version
+      FROM origin_template_policies
+      WHERE source_id = 'sbi-vc-trade' AND origin_kind = 'storage' AND active = 1
+    `).all<{
+      template: string;
+      redaction_version: string;
+      fingerprint_key_version: string;
+    }>();
+    expect(sbiVcPolicies.results).toEqual([{
+      template: "raw/sbi-vc-trade/{date}/{run-id}/{artifact}.json",
       redaction_version: "v1",
       fingerprint_key_version: "collector-r2-v1",
     }]);

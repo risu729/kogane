@@ -6,8 +6,11 @@ export class CentralClient {
   readonly #service: Fetcher;
   readonly #token: string;
 
-  constructor(service: Fetcher, token: string) {
-    if (!/^collector-r2-sbi\.[^\s]{20,}$/u.test(token)) {
+  constructor(service: Fetcher, token: string, expectedClientId: string) {
+    if (!/^[a-z0-9-]{1,100}$/u.test(expectedClientId) ||
+        !token.startsWith(`${expectedClientId}.`) ||
+        token.slice(expectedClientId.length + 1).length < 20 ||
+        /\s/u.test(token)) {
       throw new Error("central_auth_configuration_invalid");
     }
     this.#service = service;

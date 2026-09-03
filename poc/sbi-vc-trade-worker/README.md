@@ -22,15 +22,26 @@ Bitwarden内の既存passkeyをWorkers Web Cryptoで使い、`initiateLoginWithP
 - 保存対象: 残高、口座詳細、position summary、約定recent page 0、約定historical全page、JPY入出金historical全page、manifest。
 - page sizeは公式Web clientと同じ30、上限100 page。write eventを指定できるgeneric senderは公開しない。
 - 各response直後にrotation後sessionを暗号化保存し、各artifactは即時R2へ書く。全responseをmemoryへ蓄積しない。
+- artifactと最後のmanifestは`etagDoesNotMatch: "*"`で同一keyへの上書きを拒否し、R2 native SHA-256も指定する。UUID run IDのprefixをcommit marker後に変更しない。
+- `manifest.json`保存後、data artifactが11件以下なら内部Service Bindingで中央raw-evidence importerへ即時転送する。12件以上は32 Worker invocation上限を避けてdeferし、private R2を後続Queue reconcilerのdurable outboxとして残す。
+- 過去runはadmin bearer付き`POST /backfill-raw-evidence?limit=1`をcursorで繰り返す。1 requestで走査するR2 objectと転送するmanifestは最大1件。
 
 ## 検証
 
 ```sh
 bun install --frozen-lockfile
-bun test
+bun run test
 bun run typecheck
 bun run cf:check
 ```
+
+中央schema `0006`、`kogane-ingest`、`kogane-collector-r2-importer`の順に反映し、importerのsource専用credentialを同期してからこのWorkerをdeployする。過去outboxは次で再送する。
+
+```sh
+scripts/backfill-raw-evidence.sh
+```
+
+backfillと即時転送は元R2 objectを削除しない。
 
 ## 一時Cloudflare resourceとcleanup
 

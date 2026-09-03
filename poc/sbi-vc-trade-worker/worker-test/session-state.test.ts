@@ -49,12 +49,20 @@ describe("SbiVcSessionState", () => {
     const stored = await storeArtifact({
       bucket: env.SNAPSHOTS,
       prefix,
+      runId,
       artifact: { dataset: "synthetic", body: JSON.stringify({ ok: true }) },
     });
     const object = await env.SNAPSHOTS.get(stored.key);
     expect(object).not.toBeNull();
     expect(await object!.json()).toEqual({ ok: true });
     expect(stored.sha256).toMatch(/^[0-9a-f]{64}$/u);
+    expect(object!.checksums.sha256).toBeInstanceOf(ArrayBuffer);
+    await expect(storeArtifact({
+      bucket: env.SNAPSHOTS,
+      prefix,
+      runId,
+      artifact: { dataset: "synthetic", body: JSON.stringify({ overwritten: true }) },
+    })).rejects.toThrow("artifact_key_already_exists");
     await env.SNAPSHOTS.delete(stored.key);
   });
 });

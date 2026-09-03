@@ -21,6 +21,12 @@
       "bucket_name": "kogane-sbi-vc-trade-poc"
     }
   ],
+  "services": [
+    {
+      "binding": "RAW_EVIDENCE_IMPORTER",
+      "service": "kogane-collector-r2-importer"
+    }
+  ],
   "vars": {
     "COLLECTOR_SCHEMA_VERSION": "sbi-vc-trade-worker-poc-v1"
   },

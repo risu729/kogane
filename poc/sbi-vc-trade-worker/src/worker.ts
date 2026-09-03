@@ -4,6 +4,7 @@ import { decryptSession, encryptSession } from "./crypto";
 import { createPasskeySession, parsePasskeyCredential } from "./passkey";
 import { applySessionUpdates, cookieHeader, parseGatewayMeta, parseSession } from "./session";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
+import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
 import type {
   CollectionFailure,
   CollectionManifest,
@@ -17,6 +18,7 @@ import type {
 const ORIGIN = "https://simple.sbivc.co.jp";
 const TRADE_URL = `${ORIGIN}/api/cccmdipresen/gw/trade`;
 const MAX_RESPONSE_BYTES = 64 * 1024;
+const MAX_SYNCHRONOUS_RAW_EVIDENCE_ARTIFACTS = 11;
 const KEEPALIVE_CRON = "*/15 * * * *";
 const COLLECTION_CRON = "5 21 * * *";
 const INITIAL_HEALTH: HealthState = {
@@ -93,7 +95,12 @@ export class SbiVcSessionState extends DurableObject<Env> {
         },
         onArtifact: async (artifact) => {
           operation = `r2_${artifact.dataset}`;
-          artifacts.push(await storeArtifact({ bucket: this.env.SNAPSHOTS, prefix, artifact }));
+          artifacts.push(await storeArtifact({
+            bucket: this.env.SNAPSHOTS,
+            prefix,
+            runId,
+            artifact,
+          }));
           operation = "collect";
         },
       });
@@ -117,6 +124,13 @@ export class SbiVcSessionState extends DurableObject<Env> {
       failures,
     };
     const manifestKey = await storeManifest({ bucket: this.env.SNAPSHOTS, prefix, manifest });
+    const central = artifacts.length <= MAX_SYNCHRONOUS_RAW_EVIDENCE_ARTIFACTS
+      ? await importStoredRun(this.env.RAW_EVIDENCE_IMPORTER, manifestKey)
+      : {
+          deferred: true as const,
+          reason: "worker-invocation-chain-limit" as const,
+          artifactCount: artifacts.length + 1,
+        };
     console.log(JSON.stringify({
       message: "sbi_vc_collection",
       runId,
@@ -124,8 +138,18 @@ export class SbiVcSessionState extends DurableObject<Env> {
       artifactCount: artifacts.length,
       failureCount: failures.length,
       manifestKey,
+      ...("deferred" in central
+        ? { centralDeferred: true, centralDeferredReason: central.reason }
+        : { centralRunId: central.centralRunId, centralSealed: central.sealed }),
     }));
-    return { runId, status, artifactCount: artifacts.length, failureCount: failures.length, manifestKey };
+    return {
+      runId,
+      status,
+      artifactCount: artifacts.length,
+      failureCount: failures.length,
+      manifestKey,
+      central,
+    };
   }
 
   async #performReauthenticate(force: boolean): Promise<HealthState> {
@@ -290,7 +314,20 @@ export class SbiVcSessionState extends DurableObject<Env> {
 export default {
   async fetch(request, env): Promise<Response> {
     if (!(await isAuthorized(request, env.ADMIN_TOKEN))) return new Response(null, { status: 404 });
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    const path = url.pathname;
+    if (request.method === "POST" && path === "/backfill-raw-evidence") {
+      try {
+        const cursor = url.searchParams.get("cursor") ?? undefined;
+        const limit = parseBackfillLimit(url.searchParams.get("limit"));
+        return Response.json(await backfillStoredRuns(
+          env.RAW_EVIDENCE_IMPORTER,
+          { ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) },
+        ));
+      } catch (error) {
+        return Response.json({ error: safeError(error) }, { status: 502 });
+      }
+    }
     const stub = env.SESSION_STATE.getByName("singleton");
     if (request.method === "POST" && path === "/run") return Response.json(await stub.runKeepAlive());
     if (request.method === "POST" && path === "/reauth") {
@@ -326,6 +363,18 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+function parseBackfillLimit(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  if (value !== "1") throw new Error("backfill_limit_must_be_one");
+  return 1;
+}
+
+function safeError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "request_failed";
+  const match = message.match(/(?:^|: )([a-z0-9_-]{1,100})$/u);
+  return match?.[1] ?? "request_failed";
+}
+
 async function ensureHealthySession(
   stub: DurableObjectStub<SbiVcSessionState>,
 ): Promise<HealthState> {
@@ -352,7 +401,9 @@ function shouldReauthenticate(health: HealthState): boolean {
 }
 
 function classifyError(error: unknown): string {
-  if (error instanceof Error && /^[a-z0-9_]+$/u.test(error.message)) return error.message;
+  if (error instanceof Error && /^[a-z0-9_-]+$/u.test(error.message)) {
+    return error.message.replaceAll("-", "_");
+  }
   if (error instanceof SyntaxError) return "json_parse_failed";
   if (error instanceof DOMException) return classifyCryptoError(error);
   if (error instanceof TypeError) return "type_error";

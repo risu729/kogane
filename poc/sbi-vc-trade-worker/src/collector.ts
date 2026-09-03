@@ -70,13 +70,22 @@ async function collectPages(options: {
   prefix: string;
   collect: (dataset: string, pageNumber: number) => Promise<unknown>;
 }): Promise<void> {
+  let expectedTotal: number | null = null;
   for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber += 1) {
     const dataset = `${options.prefix}-page-${String(pageNumber + 1).padStart(4, "0")}`;
     const body = await options.collect(dataset, pageNumber);
     const page = pageInfo(body);
     if (page === null) throw new Error(`${options.prefix}_invalid_pagination`);
-    if (page.listLength === 0) return;
-    if ((pageNumber + 1) * PAGE_SIZE >= page.totalSize) return;
+    expectedTotal ??= page.totalSize;
+    if (page.totalSize !== expectedTotal) {
+      throw new Error(`${options.prefix}_pagination_total_changed`);
+    }
+    const offset = pageNumber * PAGE_SIZE;
+    const expectedLength = Math.min(PAGE_SIZE, Math.max(expectedTotal - offset, 0));
+    if (page.listLength !== expectedLength) {
+      throw new Error(`${options.prefix}_pagination_length_mismatch`);
+    }
+    if (offset + page.listLength >= expectedTotal) return;
   }
   throw new Error(`${options.prefix}_page_limit_exceeded`);
 }

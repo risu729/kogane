@@ -8,16 +8,25 @@ export function runPrefix(startedAt: string, runId: string): string {
 export async function storeArtifact(options: {
   bucket: R2Bucket;
   prefix: string;
+  runId: string;
   artifact: CollectorArtifact;
 }): Promise<StoredArtifact> {
   if (!/^[a-z0-9-]+$/u.test(options.artifact.dataset)) throw new Error("invalid_artifact_dataset");
   const encoded = new TextEncoder().encode(options.artifact.body);
   const sha256 = await sha256Hex(encoded);
   const key = `${options.prefix}/${options.artifact.dataset}.json`;
-  await options.bucket.put(key, encoded, {
+  const stored = await options.bucket.put(key, encoded, {
+    onlyIf: { etagDoesNotMatch: "*" },
+    sha256,
     httpMetadata: { contentType: "application/json" },
-    customMetadata: { dataset: options.artifact.dataset, sha256 },
+    customMetadata: {
+      source: "sbi-vc-trade",
+      runId: options.runId,
+      dataset: options.artifact.dataset,
+      sha256,
+    },
   });
+  if (!stored) throw new Error("artifact_key_already_exists");
   return { dataset: options.artifact.dataset, key, sha256, bytes: encoded.byteLength };
 }
 
@@ -27,7 +36,11 @@ export async function storeManifest(options: {
   manifest: CollectionManifest;
 }): Promise<string> {
   const key = `${options.prefix}/manifest.json`;
-  await options.bucket.put(key, JSON.stringify(options.manifest), {
+  const encoded = new TextEncoder().encode(JSON.stringify(options.manifest));
+  const sha256 = await sha256Hex(encoded);
+  const stored = await options.bucket.put(key, encoded, {
+    onlyIf: { etagDoesNotMatch: "*" },
+    sha256,
     httpMetadata: { contentType: "application/json" },
     customMetadata: {
       source: options.manifest.source,
@@ -35,6 +48,7 @@ export async function storeManifest(options: {
       status: options.manifest.status,
     },
   });
+  if (!stored) throw new Error("manifest_key_already_exists");
   return key;
 }
 

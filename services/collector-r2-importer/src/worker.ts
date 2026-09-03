@@ -1,4 +1,6 @@
-import { ImportError, importSbiRun } from "./sbi";
+import { ImportError } from "./error";
+import { importSbiRun } from "./sbi";
+import { importSbiVcRun } from "./sbi-vc";
 
 type JsonObject = Record<string, unknown>;
 
@@ -71,6 +73,75 @@ export default {
         return errorResponse(error);
       }
     }
+    if (request.method === "POST" && url.pathname === "/v1/sbi-vc-trade/import-run" &&
+        url.search === "") {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["manifestKey"]);
+        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
+        return json(await importOneSbiVc(env, manifestKey));
+      } catch (error) {
+        return errorResponse(error);
+      }
+    }
+    if (request.method === "POST" && url.pathname === "/v1/sbi-vc-trade/backfill-page" &&
+        url.search === "") {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["cursor", "limit"]);
+        const cursor = input.cursor === undefined
+          ? undefined
+          : requiredString(input.cursor, "cursor_invalid", 4_096);
+        if (input.limit !== undefined && input.limit !== 1) {
+          throw new ImportError(400, "backfill_limit_must_be_one");
+        }
+        const listed = await env.SBI_VC_SNAPSHOTS.list({
+          prefix: "raw/sbi-vc-trade/",
+          limit: 1,
+          ...(cursor ? { cursor } : {}),
+        });
+        const object = listed.objects[0];
+        let importedManifestCount = 0;
+        let skippedManifestCount = 0;
+        let deferredManifestCount = 0;
+        let failedManifestCount = 0;
+        let failureCode: string | undefined;
+        let deferredReason: string | undefined;
+        let result: Awaited<ReturnType<typeof importOneSbiVc>> | undefined;
+        if (object?.key.endsWith("/manifest.json")) {
+          try {
+            result = await importOneSbiVc(env, object.key);
+            importedManifestCount = 1;
+          } catch (error) {
+            const classification = classifySbiVcBackfillError(error);
+            if (classification.deferred) {
+              deferredManifestCount = 1;
+              deferredReason = classification.code;
+            } else {
+              failedManifestCount = 1;
+              failureCode = classification.code;
+            }
+          }
+        } else if (object) {
+          skippedManifestCount = 1;
+        }
+        return json({
+          source: "sbi-vc-trade",
+          scannedObjectCount: listed.objects.length,
+          importedManifestCount,
+          skippedManifestCount,
+          deferredManifestCount,
+          failedManifestCount,
+          nextCursor: listed.truncated ? listed.cursor ?? null : null,
+          truncated: listed.truncated,
+          ...(failureCode ? { failureCode } : {}),
+          ...(deferredReason ? { deferredReason } : {}),
+          ...(result ? { result } : {}),
+        });
+      } catch (error) {
+        return errorResponse(error);
+      }
+    }
     return json({ error: "not_found" }, 404);
   },
 } satisfies ExportedHandler<Env>;
@@ -80,6 +151,17 @@ function importOne(env: Env, manifestKey: string) {
     bucket: env.SBI_SNAPSHOTS,
     centralService: env.RAW_EVIDENCE,
     centralToken: env.RAW_EVIDENCE_TOKEN,
+    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
+    importerVersion: env.IMPORTER_VERSION,
+    manifestKey,
+  });
+}
+
+function importOneSbiVc(env: Env, manifestKey: string) {
+  return importSbiVcRun({
+    bucket: env.SBI_VC_SNAPSHOTS,
+    centralService: env.RAW_EVIDENCE,
+    centralToken: env.RAW_EVIDENCE_TOKEN_SBI_VC,
     fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
     importerVersion: env.IMPORTER_VERSION,
     manifestKey,
@@ -150,6 +232,14 @@ function safeCode(error: unknown): string {
     ? error.code
     : error instanceof Error ? error.message : "request_failed";
   return /^[a-z0-9_-]{1,100}$/u.test(candidate) ? candidate : "request_failed";
+}
+
+export function classifySbiVcBackfillError(error: unknown): {
+  deferred: boolean;
+  code: string;
+} {
+  const code = safeCode(error);
+  return { deferred: code === "sync_import_worker_chain_limit", code };
 }
 
 function json(value: unknown, status = 200): Response {
