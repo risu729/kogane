@@ -30,7 +30,7 @@ Bitwarden内の既存passkeyをWorkers Web Cryptoで使い、`initiateLoginWithP
 
 ```sh
 bun install --frozen-lockfile
-bun test
+bun run test
 bun run typecheck
 bun run cf:check
 ```

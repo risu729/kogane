@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "services/raw-evidence/**"
+      - "services/collector-r2-importer/**"
+      - "poc/sbi-vc-trade-worker/**"
       - "docs/raw-store.md"
       - "docs/roadmap.md"
       - ".github/workflows/raw-evidence.yml"
@@ -11,6 +13,8 @@ on:
     branches: [main]
     paths:
       - "services/raw-evidence/**"
+      - "services/collector-r2-importer/**"
+      - "poc/sbi-vc-trade-worker/**"
       - "docs/raw-store.md"
       - "docs/roadmap.md"
       - ".github/workflows/raw-evidence.yml"
@@ -31,4 +35,30 @@ jobs:
       - run: bun run typecheck
       - run: bun run check:importer
       - run: bun run test
+      - run: bun run cf:check
+
+  collector-r2-importer:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/collector-r2-importer
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      - run: bun run typecheck
+      - run: bun run cf:check
+
+  sbi-vc-trade-worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: poc/sbi-vc-trade-worker
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      - run: bun run typecheck
       - run: bun run cf:check
