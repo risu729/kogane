@@ -85,4 +85,26 @@ export interface CollectionSummary {
   artifactCount: number;
   failureCount: number;
   manifestKey: string;
+  central: RawEvidenceImportResult;
+}
+
+export interface RawEvidenceImportResult {
+  source: "sbi-vc-trade";
+  manifestKey: string;
+  centralRunId: number;
+  artifactCount: number;
+  sealed: boolean;
+  allObjectsReused: boolean;
+}
+
+export interface RawEvidenceBackfillPageResult {
+  source: "sbi-vc-trade";
+  scannedObjectCount: number;
+  importedManifestCount: number;
+  skippedManifestCount: number;
+  failedManifestCount: number;
+  nextCursor: string | null;
+  truncated: boolean;
+  failureCode?: string;
+  result?: RawEvidenceImportResult;
 }

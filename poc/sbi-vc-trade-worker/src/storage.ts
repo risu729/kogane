@@ -14,10 +14,13 @@ export async function storeArtifact(options: {
   const encoded = new TextEncoder().encode(options.artifact.body);
   const sha256 = await sha256Hex(encoded);
   const key = `${options.prefix}/${options.artifact.dataset}.json`;
-  await options.bucket.put(key, encoded, {
+  const stored = await options.bucket.put(key, encoded, {
+    onlyIf: { etagDoesNotMatch: "*" },
+    sha256,
     httpMetadata: { contentType: "application/json" },
     customMetadata: { dataset: options.artifact.dataset, sha256 },
   });
+  if (!stored) throw new Error("artifact_key_already_exists");
   return { dataset: options.artifact.dataset, key, sha256, bytes: encoded.byteLength };
 }
 
@@ -27,7 +30,11 @@ export async function storeManifest(options: {
   manifest: CollectionManifest;
 }): Promise<string> {
   const key = `${options.prefix}/manifest.json`;
-  await options.bucket.put(key, JSON.stringify(options.manifest), {
+  const encoded = new TextEncoder().encode(JSON.stringify(options.manifest));
+  const sha256 = await sha256Hex(encoded);
+  const stored = await options.bucket.put(key, encoded, {
+    onlyIf: { etagDoesNotMatch: "*" },
+    sha256,
     httpMetadata: { contentType: "application/json" },
     customMetadata: {
       source: options.manifest.source,
@@ -35,6 +42,7 @@ export async function storeManifest(options: {
       status: options.manifest.status,
     },
   });
+  if (!stored) throw new Error("manifest_key_already_exists");
   return key;
 }
 

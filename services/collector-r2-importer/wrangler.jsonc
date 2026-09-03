@@ -19,6 +19,10 @@
     {
       "binding": "SBI_SNAPSHOTS",
       "bucket_name": "kogane-sbi-collector-poc"
+    },
+    {
+      "binding": "SBI_VC_SNAPSHOTS",
+      "bucket_name": "kogane-sbi-vc-trade-poc"
     }
   ],
   "services": [
@@ -28,6 +32,6 @@
     }
   ],
   "vars": {
-    "IMPORTER_VERSION": "collector-r2-importer-v2"
+    "IMPORTER_VERSION": "collector-r2-importer-v3"
   }
 }
