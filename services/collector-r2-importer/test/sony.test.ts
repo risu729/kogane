@@ -536,6 +536,11 @@ describe("Sony Bank staged-run importer", () => {
       central.requests.find((request) => request.path === "/v1/runs")!.body,
     ) as { externalIdNamespace: string };
     expect(createRun.externalIdNamespace).toBe("sony-bank-worker-poc-v1");
+    const descriptorVersions = central.requests
+      .filter((request) => /\/artifacts$/u.test(request.path))
+      .map((request) => (JSON.parse(request.body) as { formatVersion: string }).formatVersion);
+    expect(descriptorVersions).toHaveLength(manifest.artifacts.length + 1);
+    expect(new Set(descriptorVersions)).toEqual(new Set(["sony-bank-worker-poc-v1"]));
 
     const invalidBucket = new FakeBucket();
     await storeRun(invalidBucket, [
