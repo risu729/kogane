@@ -54,7 +54,7 @@ export interface RawEvidenceImportSealed {
   centralRunId: number;
   artifactCount: number;
   sealed: true;
-  allObjectsReused: boolean;
+  finalChunkAllObjectsReused: boolean;
 }
 
 export interface RawEvidenceImportDeferred {

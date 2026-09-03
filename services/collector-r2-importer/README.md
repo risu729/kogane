@@ -37,7 +37,7 @@ bun run typecheck
 bun run cf:check
 ```
 
-中央schema `0006`を先にデプロイした後、次を実行する。
+中央schema `0007`を先にデプロイした後、次を実行する。
 
 ```sh
 bash scripts/deploy.sh
@@ -47,6 +47,7 @@ bash scripts/deploy.sh
 
 - `RAW_EVIDENCE_TOKEN`: `collector-r2-sbi`専用Bearer
 - `RAW_EVIDENCE_TOKEN_SBI_VC`: `collector-r2-sbi-vc`専用Bearer
+- `RAW_EVIDENCE_TOKEN_SONY`: `collector-r2-sony-bank`専用Bearer
 - `ORIGIN_FINGERPRINT_KEY`: storage keyを不可逆HMACへ変換する共通鍵
 
 SBI collector側のhistorical outboxは次で再送する。
@@ -54,6 +55,7 @@ SBI collector側のhistorical outboxは次で再送する。
 ```sh
 poc/sbi-securities-worker/scripts/backfill-raw-evidence.sh
 poc/sbi-vc-trade-worker/scripts/backfill-raw-evidence.sh
+poc/sony-bank-worker/scripts/backfill-raw-evidence.sh
 ```
 
 source R2はbackfill完了後も自動削除しない。
@@ -68,3 +70,5 @@ source R2はbackfill完了後も自動削除しない。
 - collection summaryとmanifestはcollector生成物である。
 
 Cloudflareは1 requestあたりWorker invocationを32回に制限する。Sony銀行の正常runは最小でもmanifest込み16 objectなので即時要求はsource全体の検証後に`202 deferred`を返し、source R2保存を成功のまま保つ。backfillは毎回source全体を再検証してから、staged inventoryへ最大10 objectずつ冪等転送する。cursorはR2走査位置とrun内offsetを保持し、最終chunkだけterminal reportとsealを行う。
+
+reconciler導入前は、通常収集後に上記backfill scriptを実行してsealまで進める必要がある。各chunkの応答に含まれる`finalChunkAllObjectsReused`は、run全体ではなくsealした最後のchunk内だけの再利用判定である。新規manifestのfailure messageは固定コードだけを保存する。既存v2 manifestは互換のため検証後に取り込めるが、自由形式messageを中央のfailure codeには転記しない。

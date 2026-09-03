@@ -6,6 +6,7 @@ on:
       - "services/raw-evidence/**"
       - "services/collector-r2-importer/**"
       - "poc/sbi-vc-trade-worker/**"
+      - "poc/sony-bank-worker/**"
       - "docs/raw-store.md"
       - "docs/roadmap.md"
       - ".github/workflows/raw-evidence.yml"
@@ -15,6 +16,7 @@ on:
       - "services/raw-evidence/**"
       - "services/collector-r2-importer/**"
       - "poc/sbi-vc-trade-worker/**"
+      - "poc/sony-bank-worker/**"
       - "docs/raw-store.md"
       - "docs/roadmap.md"
       - ".github/workflows/raw-evidence.yml"
@@ -55,6 +57,19 @@ jobs:
     defaults:
       run:
         working-directory: poc/sbi-vc-trade-worker
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      - run: bun run typecheck
+      - run: bun run cf:check
+
+  sony-bank-worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: poc/sony-bank-worker
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2

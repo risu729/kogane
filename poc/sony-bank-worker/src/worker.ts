@@ -190,7 +190,7 @@ function failure(operation: string, error: unknown): CollectionFailure {
   return {
     operation,
     errorType: error instanceof Error ? error.name : "UnknownError",
-    message: publicError(error),
+    message: operation === "collect" ? "collector_request_failed" : "staging_write_failed",
   };
 }
 

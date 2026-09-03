@@ -121,6 +121,7 @@ describe("Sony Bank staged-run importer", () => {
     const { manifest, bodies } = await storeCompleteRun(bucket);
     const central = new FakeCentral();
 
+    const firstStart = central.requests.length;
     const first = await importRun(bucket, central, { immediate: false });
     expect(first).toEqual({
       source: "sony-bank",
@@ -132,7 +133,9 @@ describe("Sony Bank staged-run importer", () => {
     });
     expect(central.requests.filter((request) => request.method === "PUT")).toHaveLength(10);
     expect(central.requests.filter((request) => /\/seal$/u.test(request.path))).toHaveLength(0);
+    expect(central.requests.length - firstStart).toBeLessThanOrEqual(27);
 
+    const secondStart = central.requests.length;
     const second = await importRun(bucket, central, {
       immediate: false,
       offset: SONY_TRANSFER_CHUNK_SIZE,
@@ -142,9 +145,10 @@ describe("Sony Bank staged-run importer", () => {
       status: "sealed",
       artifactCount: manifest.artifacts.length + 1,
       sealed: true,
-      allObjectsReused: false,
+      finalChunkAllObjectsReused: false,
     });
     expect(central.requests.filter((request) => /\/seal$/u.test(request.path))).toHaveLength(1);
+    expect(central.requests.length - secondStart).toBeLessThanOrEqual(27);
 
     for (const artifact of manifest.artifacts) {
       expect(central.uploaded.get(`/v1/runs/1/objects/${artifact.sha256}`))
@@ -176,7 +180,7 @@ describe("Sony Bank staged-run importer", () => {
     const uploadedCount = central.uploaded.size;
 
     const replay = await importAllChunks(bucket, central, manifest.artifacts.length + 1);
-    expect(replay).toMatchObject({ status: "sealed", allObjectsReused: true });
+    expect(replay).toMatchObject({ status: "sealed", finalChunkAllObjectsReused: true });
     expect(central.uploaded.size).toBe(uploadedCount);
   });
 

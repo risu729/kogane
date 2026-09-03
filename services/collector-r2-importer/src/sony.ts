@@ -103,7 +103,7 @@ export interface SonyImportSealed {
   centralRunId: number;
   artifactCount: number;
   sealed: true;
-  allObjectsReused: boolean;
+  finalChunkAllObjectsReused: boolean;
 }
 
 export async function importSonyRun(options: {
@@ -236,7 +236,7 @@ export async function importSonyRun(options: {
       centralRunId,
       artifactCount: plans.length,
       sealed: true,
-      allObjectsReused: acceptedArtifactCount === 0,
+      finalChunkAllObjectsReused: acceptedArtifactCount === 0,
     };
   } catch (error) {
     if (centralRunId !== undefined) {
