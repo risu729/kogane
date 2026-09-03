@@ -108,7 +108,20 @@ class FakeCentral {
     if (/\/units$/u.test(path)) return Response.json({ unitId: 10 }, { status: 201 });
     if (/\/inventories$/u.test(path)) return Response.json({ inventoryId: 20 }, { status: 201 });
     if (/\/artifacts$/u.test(path)) {
-      return Response.json({ descriptorSha256: await digest(encode(canonicalJson(JSON.parse(requestBody)))) }, { status: 201 });
+      const submitted = JSON.parse(requestBody) as Record<string, unknown>;
+      const { http, storage, file, email, ...fields } = submitted;
+      const centralNormalized = {
+        ...fields,
+        origins: {
+          http: http ?? null,
+          storage: storage ?? null,
+          file: file ?? null,
+          email: email ?? null,
+        },
+      };
+      return Response.json({
+        descriptorSha256: await digest(encode(canonicalJson(centralNormalized))),
+      }, { status: 201 });
     }
     if (/\/seal$/u.test(path)) return Response.json({ sealed: true }, { status: 201 });
     return Response.json({ ok: true }, { status: 201 });

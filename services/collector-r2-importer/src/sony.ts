@@ -1117,7 +1117,17 @@ function canonical(value: JsonValue): JsonValue {
 }
 
 async function descriptorSha256(descriptor: JsonObject): Promise<string> {
-  return sha256Hex(canonicalJson(descriptor as JsonValue));
+  const { http, storage, file, email, ...fields } = descriptor;
+  const normalized = {
+    ...fields,
+    origins: {
+      http: http ?? null,
+      storage: storage ?? null,
+      file: file ?? null,
+      email: email ?? null,
+    },
+  };
+  return sha256Hex(canonicalJson(normalized as JsonValue));
 }
 
 async function sha256Hex(value: string | Uint8Array): Promise<string> {

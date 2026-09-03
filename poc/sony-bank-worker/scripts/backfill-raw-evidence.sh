@@ -2,7 +2,7 @@
 set -euo pipefail
 
 user_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
-admin_token_file="${1:-${user_home}/.local/share/kogane/secrets/sony-bank-worker-admin-token}"
+admin_token_file="${1:-${user_home}/.local/share/kogane/secrets/sony-bank-admin-token}"
 collector_url="${SONY_BANK_WORKER_BASE_URL:-https://kogane-sony-bank-collector-poc.takuanimal.workers.dev}"
 state_dir="${KOGANE_STATE_DIR:-${user_home}/.local/state/kogane}"
 cursor_file="${state_dir}/sony-bank-raw-evidence-backfill.cursor"
