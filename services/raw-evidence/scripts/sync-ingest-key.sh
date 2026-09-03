@@ -8,7 +8,11 @@ config_dir="${KOGANE_CONFIG_DIR:-${user_home}/.config/kogane}"
 credential_path="${config_dir}/ingest-client-keys.cred"
 legacy_path="${config_dir}/ingest-client.cred"
 fingerprint_path="${config_dir}/origin-fingerprint.cred"
-client_id="local-backfill"
+client_id="${KOGANE_INGEST_CLIENT_ID:-local-backfill}"
+if ! [[ "${client_id}" =~ ^[a-z0-9-]{1,100}$ ]]; then
+  printf 'invalid KOGANE_INGEST_CLIENT_ID\n' >&2
+  exit 1
+fi
 next_path="${credential_path}.next.$$"
 recovery_path="${credential_path}.recovery"
 
@@ -20,7 +24,7 @@ if test -f "${credential_path}"; then
   old_map="$(sudo systemd-creds decrypt "${credential_path}" -)"
 elif test -f "${legacy_path}"; then
   legacy_secret="$(sudo systemd-creds decrypt "${legacy_path}" -)"
-  old_map="$(jq -nc --arg clientId "${client_id}" --arg secret "${legacy_secret}" \
+  old_map="$(jq -nc --arg clientId "local-backfill" --arg secret "${legacy_secret}" \
     '{($clientId):$secret}')"
   unset legacy_secret
 fi
@@ -29,7 +33,8 @@ jq -e 'type == "object" and all(values[]; type == "string" and length >= 20)' \
 
 key_map="${old_map}"
 write_local=0
-if test "${1:-}" = "--rotate" || ! test -f "${credential_path}"; then
+if test "${1:-}" = "--rotate" || ! test -f "${credential_path}" ||
+    ! jq -e --arg clientId "${client_id}" 'has($clientId)' <<<"${old_map}" >/dev/null; then
   client_secret="$(openssl rand -hex 32)"
   key_map="$(jq -c --arg clientId "${client_id}" --arg secret "${client_secret}" \
     '. + {($clientId):$secret}' <<<"${old_map}")"

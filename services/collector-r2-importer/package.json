@@ -1,0 +1,16 @@
+{
+  "name": "@kogane/collector-r2-importer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "cf:check": "wrangler deploy --dry-run",
+    "cf:deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.8",
+    "typescript": "5.9.3",
+    "wrangler": "4.128.0"
+  }
+}

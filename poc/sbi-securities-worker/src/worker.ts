@@ -10,6 +10,11 @@ import {
   storeArtifact,
   storeManifest,
 } from "./storage";
+import {
+  backfillStoredRuns,
+  importStoredRun,
+  type ImportRunResult,
+} from "./raw-evidence";
 import type {
   Artifact,
   CollectionFailure,
@@ -34,6 +39,24 @@ export default {
         source: "sbi-securities",
         schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       });
+    }
+    if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
+      if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      try {
+        const cursor = url.searchParams.get("cursor") ?? undefined;
+        const limit = parseBackfillLimit(url.searchParams.get("limit"));
+        return Response.json(await backfillStoredRuns(
+          env.RAW_EVIDENCE_IMPORTER,
+          { ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) },
+        ));
+      } catch (error) {
+        return Response.json(
+          { error: safeError(error, "Raw evidence backfill failed") },
+          { status: 502 },
+        );
+      }
     }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
@@ -73,7 +96,10 @@ async function runCollection(
   env: Env,
   scope: CollectionScope,
   window?: { from: string; to: string },
-): Promise<CollectionManifest & { manifestKey: string }> {
+): Promise<CollectionManifest & {
+  manifestKey: string;
+  central: ImportRunResult;
+}> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const prefix = runPrefix(startedAt, runId);
@@ -171,6 +197,7 @@ async function runCollection(
     prefix,
     manifest,
   });
+  const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey);
   console.log(
     JSON.stringify({
       event: "sbi-collection-stored",
@@ -180,9 +207,11 @@ async function runCollection(
       artifactCount: artifactManifests.length,
       failureCount: failures.length,
       manifestKey,
+      centralRunId: central.centralRunId,
+      centralSealed: central.sealed,
     }),
   );
-  return { ...manifest, manifestKey };
+  return { ...manifest, manifestKey, central };
 }
 
 function authorized(request: Request, expected: string | undefined): boolean {
@@ -201,6 +230,14 @@ function parseScope(value: string | null): CollectionScope {
   if (value === null || value === "all") return "all";
   if (value === "domestic" || value === "foreign") return value;
   throw new Error("scope must be all, domestic, or foreign");
+}
+
+function parseBackfillLimit(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  if (value !== "1") {
+    throw new Error("backfill limit must be 1");
+  }
+  return 1;
 }
 
 function parseWindow(
@@ -246,4 +283,10 @@ function redactError(value: string): string {
   return value
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+/giu, "Bearer [redacted]")
     .replace(/(token|sid|cookie)=?[^\s,;]+/giu, "$1=[redacted]");
+}
+
+function safeError(error: unknown, fallback: string): string {
+  return error instanceof Error
+    ? redactError(error.message).slice(0, 300)
+    : fallback;
 }
