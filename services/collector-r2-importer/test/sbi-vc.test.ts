@@ -243,7 +243,10 @@ describe("SBI VC Trade staged-run importer", () => {
           3_001,
         )),
     ];
-    await storeRun(bucket, entries, [{ operation: "collect", errorCode: "unexpected_error" }]);
+    await storeRun(bucket, entries, [{
+      operation: "collect",
+      errorCode: "executions_historical_page_limit_exceeded",
+    }]);
     const central = new FakeCentral();
     await expect(importRun(bucket, central)).rejects.toMatchObject({
       status: 409,

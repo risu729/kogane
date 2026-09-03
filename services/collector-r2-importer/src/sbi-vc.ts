@@ -26,7 +26,7 @@ const FINGERPRINT_VERSION = "collector-r2-v1";
 const MANIFEST_KEY = /^raw\/sbi-vc-trade\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const ERROR_CODE = /^[a-z0-9_]{1,100}$/u;
-const PAGINATION_EVIDENCE_ERROR = /^(?:executions_historical|cashflows_historical)_(?:invalid_pagination|pagination_total_changed|pagination_length_mismatch|page_limit_exceeded)$/u;
+const PAGINATION_EVIDENCE_ERROR = /^(?:executions_historical|cashflows_historical)_(?:invalid_pagination|pagination_total_changed|pagination_length_mismatch)$/u;
 const STATIC_DATASETS = [
   "cash-balances",
   "account-margin",
