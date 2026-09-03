@@ -438,7 +438,7 @@ describe("0001 raw-evidence schema", () => {
     ]);
   });
 
-  it("applies the runtime registry migration and permits reviewed policy revocation", async () => {
+  it("applies the runtime registry migrations and permits reviewed policy revocation", async () => {
     const columns = await env.DB.prepare("PRAGMA table_info(run_inventories)")
       .all<{ name: string }>();
     expect(columns.results.map((row) => row.name)).toContain("inventory_digest_version");
@@ -449,11 +449,40 @@ describe("0001 raw-evidence schema", () => {
     expect(aliases.results).toEqual([
       { external_source_id: "moneyforward-me", source_id: "moneyforward-me" },
       { external_source_id: "prestia-globalpass", source_id: "global-pass" },
+      { external_source_id: "sbi-securities", source_id: "sbi-securities" },
       { external_source_id: "sbi-shinsei", source_id: "sbi-shinsei-bank" },
       { external_source_id: "smbc-direct", source_id: "smbc-bank" },
       { external_source_id: "v-point-pay-email", source_id: "v-point-pay" },
       { external_source_id: "v-point-pay-email-reconciliation", source_id: "v-point" },
     ]);
+    const sbiRoute = await env.DB.prepare(`
+      SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes
+      WHERE ingest_client_id = 'collector-r2-sbi'
+      ORDER BY producer_id, source_id
+    `).all<{
+      ingest_client_id: string;
+      producer_id: string;
+      source_id: string;
+    }>();
+    expect(sbiRoute.results).toEqual([{
+      ingest_client_id: "collector-r2-sbi",
+      producer_id: "collector-r2-importer",
+      source_id: "sbi-securities",
+    }]);
+    const sbiPolicies = await env.DB.prepare(`
+      SELECT template, redaction_version, fingerprint_key_version
+      FROM origin_template_policies
+      WHERE source_id = 'sbi-securities' AND origin_kind = 'storage' AND active = 1
+    `).all<{
+      template: string;
+      redaction_version: string;
+      fingerprint_key_version: string;
+    }>();
+    expect(sbiPolicies.results).toEqual([{
+      template: "raw/sbi-securities/{date}/{run-id}/{artifact}.json",
+      redaction_version: "v1",
+      fingerprint_key_version: "collector-r2-v1",
+    }]);
     await env.DB.prepare(`
       UPDATE origin_template_policies SET active = 0
       WHERE source_id = 'kogane-synthetic' AND origin_kind = 'http'

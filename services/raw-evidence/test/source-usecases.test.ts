@@ -7,6 +7,8 @@ const AUTH = "Bearer test.test-secret-at-least-twenty-chars";
 const PRODUCER = "collector-r2-importer";
 const STORAGE_TEMPLATE = "runs/{redacted}/artifact";
 const FINGERPRINT_VERSION = "fixture-hmac-v1";
+const SBI_STORAGE_TEMPLATE = "raw/sbi-securities/{date}/{run-id}/{artifact}.json";
+const SBI_FINGERPRINT_VERSION = "collector-r2-v1";
 const cases = fixture.cases;
 
 interface InventoryItem {
@@ -70,6 +72,19 @@ async function storageOrigin(artifactKey: string) {
     objectKeyTemplate: STORAGE_TEMPLATE,
     objectKeyFingerprint: await sha256Hex(new TextEncoder().encode(`fixture:${artifactKey}`)),
     fingerprintKeyVersion: FINGERPRINT_VERSION,
+    redactionVersion: "v1",
+  };
+}
+
+async function sbiStorageOrigin(artifactKey: string) {
+  return {
+    storageKind: "r2",
+    containerName: "kogane-sbi-collector-poc",
+    objectKeyTemplate: SBI_STORAGE_TEMPLATE,
+    objectKeyFingerprint: await sha256Hex(
+      new TextEncoder().encode(`fixture-sbi:${artifactKey}`),
+    ),
+    fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
     redactionVersion: "v1",
   };
 }
@@ -227,33 +242,160 @@ describe("sanitized source-usecase contract", () => {
     const { runId } = await createRun(value.sourceId, value.sessionId);
     const domestic = await unit(runId, "scope", "domestic");
     const foreign = await unit(runId, "scope", "foreign");
+    const successBytes = new TextEncoder().encode(value.successBody);
+    const successSha256 = await sha256Hex(successBytes);
+    const manifestBody = JSON.stringify({
+      schemaVersion: "sbi-worker-poc-v1",
+      source: "sbi-securities",
+      runId: value.sessionId,
+      scope: "all",
+      startedAt: value.startedAt,
+      completedAt: value.completedAt,
+      status: "partial",
+      artifacts: [{
+        dataset: "domestic-trade-records",
+        key: `raw/sbi-securities/2026/08/27/${value.sessionId}/domestic-trade-records.json`,
+        sha256: successSha256,
+        bytes: successBytes.byteLength,
+        window: value.window,
+      }],
+      failures: [value.failure],
+    });
     const artifacts = [
-      await catalogue(runId, "domestic/history.json", value.successBody, {
+      await catalogue(runId, "domestic-trade-records.json", value.successBody, {
         fetchUnitId: domestic,
-        dataset: "domestic-history",
+        artifactRole: "collector_derived",
+        payloadFidelity: "transformed",
+        lineageDisposition: "source_bytes_not_available",
+        dataset: "domestic-trade-records",
+        formatId: "sbi-domestic-trade-records-json",
+        formatVersion: "sbi-worker-poc-v1",
         declaredMediaType: "application/json",
-        mediaTypeBasis: "manifest",
+        mediaTypeBasis: "operator",
+        storage: await sbiStorageOrigin("domestic-trade-records.json"),
+        ranges: [{
+          rangeKey: "requested-window",
+          rangeKind: "requested",
+          precision: "date",
+          startValue: value.window.from,
+          endValue: value.window.to,
+          startInclusive: true,
+          endInclusive: true,
+          basis: "manifest",
+        }],
+        transformSteps: [
+          {
+            stepIndex: 0,
+            stepKind: "transport_decoded",
+            transformerId: "sbi-securities-worker",
+            transformerVersion: "sbi-worker-poc-v1",
+          },
+          {
+            stepIndex: 1,
+            stepKind: "extracted",
+            transformerId: "sbi-securities-worker",
+            transformerVersion: "sbi-worker-poc-v1",
+          },
+          {
+            stepIndex: 2,
+            stepKind: "reencoded",
+            transformerId: "sbi-securities-worker",
+            transformerVersion: "sbi-worker-poc-v1",
+          },
+        ],
       }),
-      await catalogue(runId, "foreign/error.json", value.errorBody, {
-        fetchUnitId: foreign,
-        artifactRole: "collector_error",
-        payloadFidelity: "generated",
-        dataset: "collection-error",
-        declaredMediaType: "application/json",
-        mediaTypeBasis: "manifest",
-      }),
-      await catalogue(runId, "manifest.json", value.manifestBody, {
+      await catalogue(runId, "manifest.json", manifestBody, {
         artifactRole: "collector_manifest",
         payloadFidelity: "generated",
         dataset: "collector-manifest",
+        formatId: "sbi-collector-manifest-json",
+        formatVersion: "sbi-worker-poc-v1",
         declaredMediaType: "application/json",
-        mediaTypeBasis: "manifest",
+        mediaTypeBasis: "operator",
+        storage: await sbiStorageOrigin("manifest.json"),
       }),
     ];
     await unitTerminal(domestic, 1);
-    await unitTerminal(foreign, 1, "failed", "human-required");
+    await unitTerminal(foreign, 0, "failed", "passkey-graphql-failed");
     await terminal(runId, artifacts.length, "partial");
     await seal(runId, artifacts, "sbi-securities-partial");
+
+    const stored = await env.DB.prepare(`
+      SELECT artifact_key, artifact_role, payload_fidelity, lineage_disposition
+      FROM fetch_artifacts WHERE fetch_run_id = ? ORDER BY artifact_key
+    `).bind(runId).all<{
+      artifact_key: string;
+      artifact_role: string;
+      payload_fidelity: string;
+      lineage_disposition: string;
+    }>();
+    expect(stored.results).toEqual([
+      {
+        artifact_key: "domestic-trade-records.json",
+        artifact_role: "collector_derived",
+        payload_fidelity: "transformed",
+        lineage_disposition: "source_bytes_not_available",
+      },
+      {
+        artifact_key: "manifest.json",
+        artifact_role: "collector_manifest",
+        payload_fidelity: "generated",
+        lineage_disposition: "not_applicable",
+      },
+    ]);
+  });
+
+  it("seals a complete SBI Securities eight-artifact inventory", async () => {
+    const sessionId = "fixture-sbi-securities-complete";
+    const { runId } = await createRun("sbi-securities", sessionId, "all");
+    const domestic = await unit(runId, "scope", "domestic");
+    const foreign = await unit(runId, "scope", "foreign");
+    const datasets = [
+      "domestic-cash-positions",
+      "account-assets-current",
+      "yen-detail-history",
+      "domestic-trade-records",
+      "foreign-cash-positions",
+      "foreign-cash-balances",
+      "foreign-trade-records",
+    ];
+    const artifacts: InventoryItem[] = [];
+    for (const [sequence, dataset] of datasets.entries()) {
+      artifacts.push(await catalogue(runId, `${dataset}.json`, `{"dataset":"${dataset}"}`, {
+        fetchUnitId: dataset.startsWith("foreign-") ? foreign : domestic,
+        artifactRole: "collector_derived",
+        payloadFidelity: "transformed",
+        lineageDisposition: "source_bytes_not_available",
+        dataset,
+        formatId: `sbi-${dataset}-json`,
+        formatVersion: "sbi-worker-poc-v1",
+        declaredMediaType: "application/json",
+        mediaTypeBasis: "operator",
+        sequence,
+        storage: await sbiStorageOrigin(`${dataset}.json`),
+        transformSteps: [
+          { stepIndex: 0, stepKind: "transport_decoded", transformerId: "sbi-securities-worker", transformerVersion: "sbi-worker-poc-v1" },
+          { stepIndex: 1, stepKind: "extracted", transformerId: "sbi-securities-worker", transformerVersion: "sbi-worker-poc-v1" },
+          ...(dataset === "foreign-trade-records" ? [{ stepIndex: 2, stepKind: "bundled", transformerId: "sbi-securities-worker", transformerVersion: "sbi-worker-poc-v1" }] : []),
+          { stepIndex: dataset === "foreign-trade-records" ? 3 : 2, stepKind: "reencoded", transformerId: "sbi-securities-worker", transformerVersion: "sbi-worker-poc-v1" },
+        ],
+      }));
+    }
+    artifacts.push(await catalogue(runId, "manifest.json", "{\"status\":\"success\"}", {
+      artifactRole: "collector_manifest",
+      payloadFidelity: "generated",
+      dataset: "collector-manifest",
+      formatId: "sbi-collector-manifest-json",
+      formatVersion: "sbi-worker-poc-v1",
+      declaredMediaType: "application/json",
+      mediaTypeBasis: "operator",
+      sequence: 7,
+      storage: await sbiStorageOrigin("manifest.json"),
+    }));
+    await unitTerminal(domestic, 4);
+    await unitTerminal(foreign, 3);
+    await terminal(runId, artifacts.length);
+    await seal(runId, artifacts, "sbi-securities-complete");
   });
 
   it("links an SBI Shinsei normalized artifact to its exact provider response", async () => {

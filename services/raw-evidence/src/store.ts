@@ -886,8 +886,10 @@ export async function sealRun(
     runId,
     inventorySha256,
   )];
-  for (let offset = 0; offset < submitted.length; offset += 30) {
-    const chunk = submitted.slice(offset, offset + 30);
+  // D1's runtime SQLite build accepts at most five terms in a compound SELECT.
+  // Keep the VALUES-shaped UNION below that limit for direct inventories.
+  for (let offset = 0; offset < submitted.length; offset += 5) {
+    const chunk = submitted.slice(offset, offset + 5);
     const rows = chunk.map(() => "SELECT ? AS artifact_key, ? AS sha256, ? AS descriptor_sha256")
       .join(" UNION ALL ");
     statements.push(env.DB.prepare(`

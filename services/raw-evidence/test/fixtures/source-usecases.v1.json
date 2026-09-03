@@ -17,9 +17,16 @@
     "sbiSecuritiesPartial": {
       "sourceId": "sbi-securities",
       "sessionId": "fixture-sbi-securities-partial",
-      "successBody": "{\"fixture\":\"domestic-history\",\"rows\":[]}",
-      "errorBody": "{\"fixture\":\"foreign-history\",\"safeFailureCode\":\"human-required\"}",
-      "manifestBody": "{\"schemaVersion\":\"fixture-v1\",\"status\":\"partial\"}"
+      "successBody": "{\"records\":[],\"hasMore\":false}",
+      "window": {"from": "2026-06-01", "to": "2026-08-27"},
+      "startedAt": "2026-08-27T00:00:00.000Z",
+      "completedAt": "2026-08-27T00:00:01.000Z",
+      "failure": {
+        "scope": "foreign",
+        "operation": "passkey-graphql",
+        "errorType": "Error",
+        "message": "SBI foreign collection failed"
+      }
     },
     "sbiShinseiLineage": {
       "sourceId": "sbi-shinsei-bank",
