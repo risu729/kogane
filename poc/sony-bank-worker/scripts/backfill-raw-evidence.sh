@@ -32,7 +32,7 @@ while (( page < 100000 )); do
     --request POST "${url}")"
   failed="$(jq -er '.failedManifestCount' <<<"${response}")"
   if (( failed != 0 )); then
-    jq '{page: $page, failedManifestCount, failureCode}' --argjson page "${page}" <<<"${response}" >&2
+    jq '{page: $page, failedManifestCount, failureCode, failedManifestKey}' --argjson page "${page}" <<<"${response}" >&2
     exit 1
   fi
   imported="$(jq -er '.importedManifestCount' <<<"${response}")"

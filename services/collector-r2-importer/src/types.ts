@@ -69,7 +69,7 @@ export interface SonyFailure {
 }
 
 export interface SonyManifest {
-  schemaVersion: "sony-bank-worker-poc-v2";
+  schemaVersion: "sony-bank-worker-poc-v1" | "sony-bank-worker-poc-v2";
   source: "sony-bank";
   runId: string;
   startedAt: string;

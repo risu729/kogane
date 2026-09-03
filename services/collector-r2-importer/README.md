@@ -64,6 +64,8 @@ source R2はbackfill完了後も自動削除しない。
 
 `sony-bank-worker-poc-v2`専用validatorはmanifest、prefix inventory、R2 metadata、保存bytesとSHA-256、JSON/CSV/HTML media typeを検証する。円と10外貨の3件単位page連番、外貨CSVの件数条件、1〜15か月のWALLET selector、collection summary、`r2:<dataset>`失敗との補集合まで一致した場合だけ中央状態を作る。
 
+導入前に保存された`sony-bank-worker-poc-v1`は、総残高・円履歴page・円CSV・v1 summaryだけを許す別契約として検証し、v1 namespace/format versionのまま取り込む。v1に外貨・WALLETなどv2 datasetが混在する場合は拒否する。
+
 R2書込み失敗で欠けたhistory pageやWALLET HTMLも、manifestの順序付きfailureが保存済みartifactとの完全な補集合で、page番号・summary件数・statusが整合する場合はpartial/failed evidenceとしてcatalogueする。欠けたprovider bytesを成功扱いせず、terminal reportの固定failure codeに残す。
 
 - BFF JSONはresponse textをUTF-8へ再encodeしたため`provider_response / transport_decoded`。

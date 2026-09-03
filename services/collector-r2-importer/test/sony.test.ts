@@ -513,6 +513,38 @@ describe("Sony Bank staged-run importer", () => {
       manifestKey: MANIFEST_KEY,
     })).rejects.toThrow("central_auth_configuration_invalid");
   });
+
+  test("imports the legacy yen-only v1 contract in its own namespace and rejects v2 datasets", async () => {
+    const { entries } = completeEntries();
+    const legacyEntries = entries
+      .filter((value) =>
+        value.dataset === "gross-balance" ||
+        value.dataset.startsWith("yen-history-") ||
+        value.dataset === "collection-summary"
+      )
+      .map((value) => value.dataset === "collection-summary"
+        ? entry("collection-summary", legacySummaryBody())
+        : value);
+    const bucket = new FakeBucket();
+    const manifest = await storeRun(bucket, legacyEntries, [], {
+      schemaVersion: "sony-bank-worker-poc-v1",
+    });
+    const central = new FakeCentral();
+    await expect(importAllChunks(bucket, central, manifest.artifacts.length + 1))
+      .resolves.toMatchObject({ status: "sealed", sealed: true });
+    const createRun = JSON.parse(
+      central.requests.find((request) => request.path === "/v1/runs")!.body,
+    ) as { externalIdNamespace: string };
+    expect(createRun.externalIdNamespace).toBe("sony-bank-worker-poc-v1");
+
+    const invalidBucket = new FakeBucket();
+    await storeRun(invalidBucket, [
+      ...legacyEntries.slice(0, -1),
+      entry("foreign-history-usd-page-0001", pageBody(0, 0)),
+      legacyEntries.at(-1)!,
+    ], [], { schemaVersion: "sony-bank-worker-poc-v1" });
+    await expectRejected(invalidBucket, "manifest_dataset_completeness_mismatch");
+  });
 });
 
 function completeEntries(walletMonths = WALLET_MONTHS): { entries: Entry[]; bodies: Map<string, Uint8Array> } {
@@ -554,7 +586,10 @@ async function storeRun(
   bucket: FakeBucket,
   entries: Entry[],
   failures: Failure[] = [],
-  options: { transactionCount?: number } = {},
+  options: {
+    transactionCount?: number;
+    schemaVersion?: TestManifest["schemaVersion"];
+  } = {},
 ): Promise<TestManifest> {
   const artifacts: ManifestArtifact[] = [];
   for (const value of entries) {
@@ -570,7 +605,7 @@ async function storeRun(
     });
   }
   const manifest: TestManifest = {
-    schemaVersion: "sony-bank-worker-poc-v2",
+    schemaVersion: options.schemaVersion ?? "sony-bank-worker-poc-v2",
     source: "sony-bank",
     runId: RUN_ID,
     startedAt: "2026-09-03T00:00:00.000Z",
@@ -635,6 +670,16 @@ function summaryBody(overrides: Record<string, unknown> = {}): Uint8Array {
     walletMonthCount: 2,
     cookieNames: ["SESSION"],
     ...overrides,
+  });
+}
+
+function legacySummaryBody(): Uint8Array {
+  return jsonBody({
+    schemaVersion: "sony-bank-collection-summary-v1",
+    window: { ...WINDOW },
+    transactionCount: 4,
+    pageCount: 2,
+    cookieNames: ["SESSION"],
   });
 }
 

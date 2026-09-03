@@ -302,6 +302,7 @@ async function backfillSony(env: Env, encodedCursor: string | undefined): Promis
       scannedObjectCount: 1,
       failedManifestCount: 1,
       failureCode: safeCode(error),
+      failedManifestKey: object.key,
       nextCursor: nextSonyScanCursor(continuation),
     });
   }
@@ -314,6 +315,7 @@ function sonyBackfillResponse(input: {
   deferredManifestCount?: number;
   failedManifestCount?: number;
   failureCode?: string;
+  failedManifestKey?: string;
   nextCursor: string | null;
   result?: unknown;
 }): JsonObject {
@@ -327,6 +329,7 @@ function sonyBackfillResponse(input: {
     nextCursor: input.nextCursor,
     truncated: input.nextCursor !== null,
     ...(input.failureCode ? { failureCode: input.failureCode } : {}),
+    ...(input.failedManifestKey ? { failedManifestKey: input.failedManifestKey } : {}),
     ...(input.result ? { result: input.result } : {}),
   };
 }

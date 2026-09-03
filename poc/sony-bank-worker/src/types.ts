@@ -76,5 +76,6 @@ export interface RawEvidenceBackfillPageResult {
   nextCursor: string | null;
   truncated: boolean;
   failureCode?: string;
+  failedManifestKey?: string;
   result?: RawEvidenceImportResult;
 }

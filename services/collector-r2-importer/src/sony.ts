@@ -10,7 +10,9 @@ import type {
 const SOURCE = "sony-bank" as const;
 const PRODUCER = "collector-r2-importer";
 const SCHEMA_VERSION = "sony-bank-worker-poc-v2";
+const LEGACY_SCHEMA_VERSION = "sony-bank-worker-poc-v1";
 const SUMMARY_VERSION = "sony-bank-collection-summary-v2";
+const LEGACY_SUMMARY_VERSION = "sony-bank-collection-summary-v1";
 const INGEST_CONTRACT_VERSION = "sony-bank-r2-v1";
 const CENTRAL_CLIENT_ID = "collector-r2-sony-bank";
 const STORAGE_CONTAINER = "kogane-sony-bank-collector-poc";
@@ -144,7 +146,7 @@ export async function importSonyRun(options: {
     centralRunId = await central.createRun({
       producerId: PRODUCER,
       sourceId: SOURCE,
-      externalIdNamespace: SCHEMA_VERSION,
+      externalIdNamespace: validated.manifest.schemaVersion,
       externalSessionId: validated.manifest.runId,
       sourceRunKey: `full-snapshot-${INGEST_CONTRACT_VERSION}`,
     });
@@ -312,7 +314,7 @@ async function validateLoadedSonyRun(
   const artifacts: VerifiedArtifact[] = [];
   for (const artifact of manifest.artifacts) {
     const bytes = await readVerifiedArtifact(bucket, artifact, manifest.runId);
-    artifacts.push(parseArtifactPayload(artifact, bytes));
+    artifacts.push(parseArtifactPayload(artifact, bytes, manifest.schemaVersion));
   }
   validateCompleteness(manifest, artifacts);
   await assertExactPrefix(bucket, prefix, expectedKeys);
@@ -333,7 +335,9 @@ export function parseSonyManifest(bytes: Uint8Array, manifestKey: string): SonyM
     "schemaVersion", "source", "runId", "startedAt", "completedAt", "status",
     "window", "transactionCount", "artifacts", "failures",
   ]);
-  if (input.schemaVersion !== SCHEMA_VERSION) invalid("manifest_schema_invalid");
+  if (input.schemaVersion !== SCHEMA_VERSION && input.schemaVersion !== LEGACY_SCHEMA_VERSION) {
+    invalid("manifest_schema_invalid");
+  }
   if (input.source !== SOURCE) invalid("manifest_source_invalid");
   if (input.runId !== key[4]) invalid("manifest_run_id_mismatch");
   const startedAt = instant(input.startedAt, "manifest_started_at_invalid");
@@ -365,7 +369,7 @@ export function parseSonyManifest(bytes: Uint8Array, manifestKey: string): SonyM
   const expectedStatus = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
   if (status !== expectedStatus) invalid("manifest_status_mismatch");
   return {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion: input.schemaVersion as SonyManifest["schemaVersion"],
     source: SOURCE,
     runId: input.runId as string,
     startedAt,
@@ -446,34 +450,39 @@ function validateCompleteness(manifest: SonyManifest, artifacts: VerifiedArtifac
   const present = new Map(artifacts.map((artifact) => [artifact.artifact.dataset, artifact]));
   const failed = manifest.failures.map((failure) => failure.operation.slice(3));
   const declared = new Set([...present.keys(), ...failed]);
+  const legacy = manifest.schemaVersion === LEGACY_SCHEMA_VERSION;
 
   const yenPages = pageNames(declared, /^yen-history-page-(\d{4})$/u, "yen-history-page");
   const foreignPages = new Map<string, string[]>();
-  for (const currency of CURRENCIES) {
-    foreignPages.set(currency, pageNames(
-      declared,
-      new RegExp(`^foreign-history-${currency}-page-(\\d{4})$`, "u"),
-      `foreign-history-${currency}-page`,
-    ));
+  if (!legacy) {
+    for (const currency of CURRENCIES) {
+      foreignPages.set(currency, pageNames(
+        declared,
+        new RegExp(`^foreign-history-${currency}-page-(\\d{4})$`, "u"),
+        `foreign-history-${currency}-page`,
+      ));
+    }
   }
   const walletNames = [...declared].filter((name) => /^wallet-history-\d{6}$/u.test(name));
   walletNames.sort((left, right) => right.localeCompare(left));
-  if (walletNames.length < 1 || walletNames.length > 15 ||
+  if ((!legacy && walletNames.length < 1) || walletNames.length > 15 ||
       new Set(walletNames).size !== walletNames.length ||
       walletNames.some((name) => !validMonth(name.slice(-6)))) {
     invalid("manifest_wallet_months_invalid");
   }
   const expected = ["gross-balance", ...yenPages, "yen-history-csv"];
-  for (const currency of CURRENCIES) {
-    const pages = foreignPages.get(currency)!;
-    expected.push(...pages);
-    const first = present.get(pages[0] ?? "")?.page;
-    const csv = `foreign-history-${currency}-csv`;
-    if (first?.declaredTotal !== null && first?.declaredTotal !== undefined) {
-      const shouldExist = first.declaredTotal > 0;
-      if (declared.has(csv) !== shouldExist) invalid("manifest_foreign_csv_condition_mismatch");
+  if (!legacy) {
+    for (const currency of CURRENCIES) {
+      const pages = foreignPages.get(currency)!;
+      expected.push(...pages);
+      const first = present.get(pages[0] ?? "")?.page;
+      const csv = `foreign-history-${currency}-csv`;
+      if (first?.declaredTotal !== null && first?.declaredTotal !== undefined) {
+        const shouldExist = first.declaredTotal > 0;
+        if (declared.has(csv) !== shouldExist) invalid("manifest_foreign_csv_condition_mismatch");
+      }
+      if (declared.has(csv)) expected.push(csv);
     }
-    if (declared.has(csv)) expected.push(csv);
   }
   expected.push(...walletNames, "collection-summary");
   if (expected.length !== declared.size || expected.some((name) => !declared.has(name))) {
@@ -487,8 +496,10 @@ function validateCompleteness(manifest: SonyManifest, artifacts: VerifiedArtifac
   if (!sameStrings(expectedFailed, failed)) invalid("manifest_failure_order_invalid");
 
   validatePageGroup(yenPages, present, manifest.transactionCount, "yen");
-  for (const currency of CURRENCIES) {
-    validatePageGroup(foreignPages.get(currency)!, present, null, currency);
+  if (!legacy) {
+    for (const currency of CURRENCIES) {
+      validatePageGroup(foreignPages.get(currency)!, present, null, currency);
+    }
   }
 
   const summaries = artifacts.filter((artifact) => artifact.summary);
@@ -498,17 +509,19 @@ function validateCompleteness(manifest: SonyManifest, artifacts: VerifiedArtifac
     if (!sameWindow(summary.window, manifest.window) ||
         summary.transactionCount !== manifest.transactionCount ||
         summary.pageCount !== yenPages.length ||
-        summary.foreignCurrencyCount !== CURRENCIES.length ||
-        summary.foreignPageCount !== [...foreignPages.values()].reduce((sum, pages) => sum + pages.length, 0) ||
-        summary.walletMonthCount !== walletNames.length) {
+        (!legacy && summary.foreignCurrencyCount !== CURRENCIES.length) ||
+        (!legacy && summary.foreignPageCount !== [...foreignPages.values()].reduce((sum, pages) => sum + pages.length, 0)) ||
+        (!legacy && summary.walletMonthCount !== walletNames.length)) {
       invalid("summary_manifest_mismatch");
     }
-    const totals = CURRENCIES.map((currency) =>
-      present.get(foreignPages.get(currency)![0] ?? "")?.page?.declaredTotal ?? null
-    );
-    if (totals.every((value): value is number => value !== null) &&
-        totals.reduce((sum, value) => sum + value, 0) !== summary.foreignTransactionCount) {
-      invalid("summary_foreign_count_mismatch");
+    if (!legacy) {
+      const totals = CURRENCIES.map((currency) =>
+        present.get(foreignPages.get(currency)![0] ?? "")?.page?.declaredTotal ?? null
+      );
+      if (totals.every((value): value is number => value !== null) &&
+          totals.reduce((sum, value) => sum + value, 0) !== summary.foreignTransactionCount) {
+        invalid("summary_foreign_count_mismatch");
+      }
     }
   }
 
@@ -562,7 +575,11 @@ function validatePageGroup(
   }
 }
 
-function parseArtifactPayload(artifact: SonyArtifactManifest, bytes: Uint8Array): VerifiedArtifact {
+function parseArtifactPayload(
+  artifact: SonyArtifactManifest,
+  bytes: Uint8Array,
+  schemaVersion: SonyManifest["schemaVersion"],
+): VerifiedArtifact {
   const filename = filenameFor(artifact.dataset)!;
   if (artifact.dataset.endsWith("-csv")) return { artifact, filename };
   if (artifact.dataset.startsWith("wallet-history-")) {
@@ -591,7 +608,7 @@ function parseArtifactPayload(artifact: SonyArtifactManifest, bytes: Uint8Array)
   }
   if (containsSecretField(parsed)) throw new ImportError(409, "artifact_secret_field_present");
   if (artifact.dataset === "collection-summary") {
-    return { artifact, filename, summary: parseSummary(parsed) };
+    return { artifact, filename, summary: parseSummary(parsed, schemaVersion) };
   }
   const pageMatch = /^(yen-history|foreign-history-[a-z]{3})-page-(\d{4})$/u.exec(artifact.dataset);
   if (pageMatch) {
@@ -621,20 +638,26 @@ function parseArtifactPayload(artifact: SonyArtifactManifest, bytes: Uint8Array)
   throw new ImportError(409, "artifact_dataset_payload_invalid");
 }
 
-function parseSummary(value: unknown): Summary {
+function parseSummary(value: unknown, schemaVersion: SonyManifest["schemaVersion"]): Summary {
   const input = conflictRecord(value, "summary_invalid");
-  conflictExactKeys(input, [
-    "schemaVersion", "window", "transactionCount", "pageCount", "foreignCurrencyCount",
-    "foreignTransactionCount", "foreignPageCount", "walletMonthCount", "cookieNames",
-  ], "summary_invalid");
-  if (input.schemaVersion !== SUMMARY_VERSION) throw new ImportError(409, "summary_schema_invalid");
+  const legacy = schemaVersion === LEGACY_SCHEMA_VERSION;
+  conflictExactKeys(input, legacy
+    ? ["schemaVersion", "window", "transactionCount", "pageCount", "cookieNames"]
+    : [
+        "schemaVersion", "window", "transactionCount", "pageCount", "foreignCurrencyCount",
+        "foreignTransactionCount", "foreignPageCount", "walletMonthCount", "cookieNames",
+      ], "summary_invalid");
+  const expectedSummaryVersion = legacy ? LEGACY_SUMMARY_VERSION : SUMMARY_VERSION;
+  if (input.schemaVersion !== expectedSummaryVersion) {
+    throw new ImportError(409, "summary_schema_invalid");
+  }
   const window = conflictWindow(input.window);
   const transactionCount = requiredCount(input.transactionCount, "summary_count_invalid");
   const pageCount = requiredCount(input.pageCount, "summary_count_invalid");
-  const foreignCurrencyCount = requiredCount(input.foreignCurrencyCount, "summary_count_invalid");
-  const foreignTransactionCount = requiredCount(input.foreignTransactionCount, "summary_count_invalid");
-  const foreignPageCount = requiredCount(input.foreignPageCount, "summary_count_invalid");
-  const walletMonthCount = requiredCount(input.walletMonthCount, "summary_count_invalid");
+  const foreignCurrencyCount = legacy ? 0 : requiredCount(input.foreignCurrencyCount, "summary_count_invalid");
+  const foreignTransactionCount = legacy ? 0 : requiredCount(input.foreignTransactionCount, "summary_count_invalid");
+  const foreignPageCount = legacy ? 0 : requiredCount(input.foreignPageCount, "summary_count_invalid");
+  const walletMonthCount = legacy ? 0 : requiredCount(input.walletMonthCount, "summary_count_invalid");
   if (!Array.isArray(input.cookieNames) || input.cookieNames.length > 100 ||
       input.cookieNames.some((name) => typeof name !== "string" || !COOKIE_NAME.test(name)) ||
       !sameStrings(input.cookieNames as string[], [...(input.cookieNames as string[])].sort()) ||
@@ -723,7 +746,7 @@ async function dataDescriptor(
       : [];
   const transformSteps = wallet
     ? ["transport_decoded", "redacted", "reencoded"].map((stepKind, stepIndex) => ({
-        stepIndex, stepKind, transformerId: "sony-bank-worker", transformerVersion: SCHEMA_VERSION,
+        stepIndex, stepKind, transformerId: "sony-bank-worker", transformerVersion: manifest.schemaVersion,
       }))
     : [];
   return normalizedDescriptor({
@@ -733,6 +756,7 @@ async function dataDescriptor(
     lineageDisposition: lineage,
     dataset,
     formatId: formatId(dataset),
+    formatVersion: manifest.schemaVersion,
     declaredMediaType: mediaTypeBase(verified.artifact.mediaType),
     mediaTypeBasis: "manifest",
     fetchedAtMs: Date.parse(manifest.completedAt),
@@ -759,6 +783,7 @@ async function manifestDescriptor(
     lineageDisposition: "not_applicable",
     dataset: "collector-manifest",
     formatId: "sony-bank-collector-manifest-json",
+    formatVersion: validated.manifest.schemaVersion,
     declaredMediaType: "application/json",
     mediaTypeBasis: "operator",
     fetchedAtMs: Date.parse(validated.manifest.completedAt),
@@ -779,6 +804,7 @@ function normalizedDescriptor(input: {
   lineageDisposition: string;
   dataset: string;
   formatId: string;
+  formatVersion: SonyManifest["schemaVersion"];
   declaredMediaType: string;
   mediaTypeBasis: string;
   fetchedAtMs: number;
@@ -798,7 +824,7 @@ function normalizedDescriptor(input: {
     lineageDisposition: input.lineageDisposition,
     dataset: input.dataset,
     formatId: input.formatId,
-    formatVersion: SCHEMA_VERSION,
+    formatVersion: input.formatVersion,
     declaredMediaType: input.declaredMediaType,
     mediaTypeBasis: input.mediaTypeBasis,
     fetchedAtMs: input.fetchedAtMs,
