@@ -86,6 +86,9 @@ describe("SBI VC Trade staged-run importer", () => {
       pageArtifact("executions-historical-page-0001", 1, 1),
       pageArtifact("cashflows-historical-page-0001", 0, 0),
     ], [], bodies);
+    const legacyArtifact = bucket.objects.get(manifest.artifacts[0]!.key)!;
+    delete legacyArtifact.customMetadata.source;
+    delete legacyArtifact.customMetadata.runId;
     const central = new FakeCentral();
     const first = await importRun(bucket, central);
     expect(first).toMatchObject({

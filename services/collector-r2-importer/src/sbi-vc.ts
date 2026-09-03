@@ -557,12 +557,7 @@ async function readVerifiedArtifact(
   if (object.size !== artifact.bytes || object.size > MAX_ARTIFACT_BYTES) {
     throw new ImportError(409, "artifact_size_mismatch");
   }
-  assertExactMetadata(object.customMetadata, {
-    source: SOURCE,
-    runId: artifact.key.split("/").at(-2)!,
-    dataset: artifact.dataset,
-    sha256: artifact.sha256,
-  }, "artifact_metadata_mismatch");
+  assertArtifactMetadata(object.customMetadata, artifact);
   assertJsonContentType(object, "artifact_content_type_mismatch");
   const bytes = new Uint8Array(await object.arrayBuffer());
   assertNativeSha256(object, artifact.sha256);
@@ -706,6 +701,30 @@ function assertExactMetadata(
   if (actualKeys.length !== expectedKeys.length ||
       actualKeys.some((key, index) => key !== expectedKeys[index] || actual[key] !== expected[key])) {
     throw new ImportError(409, code);
+  }
+}
+
+function assertArtifactMetadata(
+  actual: Record<string, string> | undefined,
+  artifact: SbiVcArtifactManifest,
+): void {
+  if (!actual) throw new ImportError(409, "artifact_metadata_mismatch");
+  const legacy = { dataset: artifact.dataset, sha256: artifact.sha256 };
+  const current = {
+    source: SOURCE,
+    runId: artifact.key.split("/").at(-2)!,
+    ...legacy,
+  };
+  const matches = (expected: Record<string, string>) => {
+    const actualKeys = Object.keys(actual).sort();
+    const expectedKeys = Object.keys(expected).sort();
+    return actualKeys.length === expectedKeys.length &&
+      actualKeys.every((key, index) =>
+        key === expectedKeys[index] && actual[key] === expected[key]
+      );
+  };
+  if (!matches(legacy) && !matches(current)) {
+    throw new ImportError(409, "artifact_metadata_mismatch");
   }
 }
 
