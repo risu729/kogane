@@ -556,6 +556,14 @@ importerはSBI VC Trade固有の順序・pagination契約を使い、manifest sc
 
 即時転送が失敗してもoutboxは残り、`scripts/backfill-raw-evidence.sh`がcursor付きの別top-level requestを繰り返す。各requestはR2 objectを最大1件走査し、manifestに当たった場合も1 runだけを冪等再送する。自動再試行・監視は後続reconcilerの責務であり、この変更には含めない。
 
+### 中央転送の本番検証
+
+2026-09-04 JSTに中央D1 migration `0006_sbi_vc_trade_collector_r2.sql`、中央ingest Worker、collector-R2 importer、SBI VC Trade collectorを順に本番反映した。中央`/health`はschema `0006`を返し、synthetic round tripもsealedまで完了した。
+
+その後、実アカウントで新しいcollectionを1回実行した。source側は6 data artifactとmanifestを保存して`success`、中央側は7 artifactを受理してsealedとなった。金融値やresponse bodyを表示せず、source R2のartifact 1件と中央content-addressed objectを再取得して比較した結果、byte列、SHA-256、sizeが完全一致した。
+
+既存outbox全体のbackfillでは35 object、5 manifest、30 data objectを走査し、5 runすべてが中央でsealedとなった。同じbackfillをもう一度実行すると5 manifestすべてが既存runへ冪等reuseされ、中央D1集計は5 runs、5 seals、35 artifacts、unsealed 0だった。source R2 objectは削除していない。
+
 ### cleanup対象
 
 - Worker: `kogane-sbi-vc-session-poc`
