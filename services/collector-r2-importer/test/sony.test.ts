@@ -172,7 +172,7 @@ describe("Sony Bank staged-run importer", () => {
     });
   });
 
-  test("replays every chunk idempotently and reports all objects reused on the sealing chunk", async () => {
+  test("replays every chunk idempotently and reports the sealing chunk as fully reused", async () => {
     const bucket = new FakeBucket();
     const { manifest } = await storeCompleteRun(bucket);
     const central = new FakeCentral();
@@ -264,7 +264,7 @@ describe("Sony Bank staged-run importer", () => {
     expect(JSON.parse(unitReport!.body)).toMatchObject({
       producerStatus: "failed",
       safeFailureCode: "collector-request-failed",
-      declaredArtifactCount: 0,
+      declaredArtifactCount: 1,
     });
   });
 
@@ -286,7 +286,7 @@ describe("Sony Bank staged-run importer", () => {
     await expectRejected(bucket, "manifest_foreign_csv_condition_mismatch");
   });
 
-  test("rejects partial runs whose missing pages or complete WALLET set cannot be proven", async () => {
+  test("catalogues declared page and complete WALLET R2 failures as partial evidence", async () => {
     const { entries } = completeEntries();
     const pageBucket = new FakeBucket();
     await storeRun(
@@ -298,7 +298,13 @@ describe("Sony Bank staged-run importer", () => {
         message: "R2 write failed",
       }],
     );
-    await expectRejected(pageBucket, "manifest_unverifiable_partial");
+    const pageManifest = readManifest(pageBucket);
+    const pageResult = await importAllChunks(
+      pageBucket,
+      new FakeCentral(),
+      pageManifest.artifacts.length + 1,
+    );
+    expect(pageResult).toMatchObject({ status: "sealed", sealed: true });
 
     const walletDatasets = new Set(WALLET_MONTHS.map((month) => `wallet-history-${month}`));
     const walletBucket = new FakeBucket();
@@ -311,7 +317,13 @@ describe("Sony Bank staged-run importer", () => {
         message: "R2 write failed",
       })),
     );
-    await expectRejected(walletBucket, "manifest_unverifiable_partial");
+    const walletManifest = readManifest(walletBucket);
+    const walletResult = await importAllChunks(
+      walletBucket,
+      new FakeCentral(),
+      walletManifest.artifacts.length + 1,
+    );
+    expect(walletResult).toMatchObject({ status: "sealed", sealed: true });
   });
 
   test("rejects prefix and exact metadata mismatches before central state", async () => {

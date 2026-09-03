@@ -206,7 +206,7 @@ export async function importSonyRun(options: {
       startedAtBasis: "manifest",
       completedAtMs: Date.parse(validated.manifest.completedAt),
       completedAtBasis: "manifest",
-      declaredArtifactCount: validated.manifest.artifacts.length,
+      declaredArtifactCount: plans.length,
       artifactCountScope: "direct",
       ...(validated.manifest.failures.length > 0
         ? { safeFailureCode: safeFailureCode(validated.manifest.failures) }
@@ -447,10 +447,6 @@ function validateCompleteness(manifest: SonyManifest, artifacts: VerifiedArtifac
   const failed = manifest.failures.map((failure) => failure.operation.slice(3));
   const declared = new Set([...present.keys(), ...failed]);
 
-  if (failed.some((name) => /^(?:yen-history|foreign-history-[a-z]{3})-page-\d{4}$/u.test(name))) {
-    invalid("manifest_unverifiable_partial");
-  }
-
   const yenPages = pageNames(declared, /^yen-history-page-(\d{4})$/u, "yen-history-page");
   const foreignPages = new Map<string, string[]>();
   for (const currency of CURRENCIES) {
@@ -467,10 +463,6 @@ function validateCompleteness(manifest: SonyManifest, artifacts: VerifiedArtifac
       walletNames.some((name) => !validMonth(name.slice(-6)))) {
     invalid("manifest_wallet_months_invalid");
   }
-  if (walletNames.every((name) => !present.has(name))) {
-    invalid("manifest_unverifiable_partial");
-  }
-
   const expected = ["gross-balance", ...yenPages, "yen-history-csv"];
   for (const currency of CURRENCIES) {
     const pages = foreignPages.get(currency)!;
@@ -550,7 +542,7 @@ function validatePageGroup(
   names: string[],
   present: Map<string, VerifiedArtifact>,
   manifestTotal: number | null,
-  group: string,
+  _group: string,
 ): void {
   const parsed = names.flatMap((name) => present.get(name)?.page ? [present.get(name)!.page!] : []);
   const totals = parsed.flatMap((page) => page.declaredTotal === null ? [] : [page.declaredTotal]);
@@ -559,15 +551,14 @@ function validatePageGroup(
   if (manifestTotal !== null && declaredTotal !== null && manifestTotal !== declaredTotal) {
     invalid("manifest_transaction_count_mismatch");
   }
-  if (declaredTotal !== null) {
-    const expectedPages = Math.max(1, Math.ceil(declaredTotal / PAGE_SIZE));
+  const effectiveTotal = declaredTotal ?? manifestTotal;
+  if (effectiveTotal !== null) {
+    const expectedPages = Math.max(1, Math.ceil(effectiveTotal / PAGE_SIZE));
     if (names.length !== expectedPages) invalid("artifact_page_count_mismatch");
     for (const page of parsed) {
-      const expectedRows = Math.max(0, Math.min(PAGE_SIZE, declaredTotal - ((page.index - 1) * PAGE_SIZE)));
+      const expectedRows = Math.max(0, Math.min(PAGE_SIZE, effectiveTotal - ((page.index - 1) * PAGE_SIZE)));
       if (page.rowCount !== expectedRows) invalid("artifact_page_rows_mismatch");
     }
-  } else if (group === "yen" && manifestTotal === 0 && names.length !== 1) {
-    invalid("artifact_page_count_mismatch");
   }
 }
 
