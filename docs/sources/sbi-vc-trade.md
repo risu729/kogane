@@ -552,7 +552,7 @@ private R2を削除しないdurable outboxとして維持したまま、`kogane-
 
 各artifactとmanifestのR2 putは`etagDoesNotMatch: "*"`で同一keyへの上書きを拒否し、R2 native SHA-256を指定する。UUIDのrun prefixとmanifest-lastを将来のR2 notificationでもcommit markerとして使えるため、別の`commit.json`は追加しない。既存outboxはnative SHA-256が未設定でも、manifest値・custom metadata・再計算SHA-256の一致でbackfill可能なままにする。
 
-importerはSBI VC Trade固有の順序・pagination契約を使い、manifest schema/source/run/date/status、固定dataset、履歴pageの連番と終了条件、失敗時に次に欠けるdataset、prefix内の全object、size、custom metadata、SHA-256を中央run作成前に検証する。artifactは最大4 MiB、最大204件なので全bytesを同時保持せず逐次検証し、転送時に再読込・再検証した元bytesを再serializeせず送る。中央routeとBearer clientは`collector-r2-sbi-vc`専用で、SBI証券用clientとは分離する。
+importerはSBI VC Trade固有の順序・pagination契約を使い、manifest schema/source/run/date/status、固定dataset、履歴pageの連番・`totalSize`一貫性・page長・終了条件、失敗時に次に欠けるdataset、prefix内の全object、size、custom metadata、SHA-256を中央run作成前に検証する。artifactは最大4 MiB、最大204件なので全bytesを同時保持せず逐次検証し、転送時に再読込・再検証した元bytesを再serializeせず送る。同期Service Binding経路はdata artifact 11件までとし、12件以上は中央stateを作らずR2にdeferして後続Queue reconcilerへ委ねる。中央routeとBearer clientは`collector-r2-sbi-vc`専用で、SBI証券用clientとは分離する。
 
 即時転送が失敗してもoutboxは残り、`scripts/backfill-raw-evidence.sh`がcursor付きの別top-level requestを繰り返す。各requestはR2 objectを最大1件走査し、manifestに当たった場合も1 runだけを冪等再送する。自動再試行・監視は後続reconcilerの責務であり、この変更には含めない。
 

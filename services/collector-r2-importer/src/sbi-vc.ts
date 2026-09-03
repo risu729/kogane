@@ -16,6 +16,10 @@ const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_ARTIFACT_BYTES = 4 * 1024 * 1024;
 const MAX_PAGE_COUNT = 100;
 const PAGE_SIZE = 30;
+// The public collector is the only caller. Its Service Binding call into this
+// importer plus every importer-to-central call all share the 32 Worker
+// invocation chain. 2n + 9 <= 32, where n excludes the manifest.
+const MAX_SYNCHRONOUS_ARTIFACTS = 11;
 const STORAGE_TEMPLATE = "raw/sbi-vc-trade/{date}/{run-id}/{artifact}.json";
 const STORAGE_CONTAINER = "kogane-sbi-vc-trade-poc";
 const FINGERPRINT_VERSION = "collector-r2-v1";
@@ -113,6 +117,10 @@ export async function importSbiVcRun(options: {
       ...manifest.artifacts.map((artifact) => artifact.key),
       options.manifestKey,
     ]);
+
+    if (manifest.artifacts.length > MAX_SYNCHRONOUS_ARTIFACTS) {
+      throw new ImportError(409, "sync_import_worker_chain_limit");
+    }
 
     phase = "central_create";
     const central = new CentralClient(
@@ -442,10 +450,22 @@ function nextExpectedDataset(artifacts: VerifiedArtifact[]): string | null {
 }
 
 function assertPageChain(artifacts: VerifiedArtifact[]): void {
-  for (const artifact of artifacts.slice(0, -1)) {
-    if (pageIsTerminal(requiredPage(artifact))) {
+  const pages = artifacts.map(requiredPage);
+  const totalSize = pages[0]!.totalSize;
+  let observed = 0;
+  for (const page of pages) {
+    if (page.totalSize !== totalSize) invalid("manifest_page_total_changed");
+    const offset = (page.index - 1) * PAGE_SIZE;
+    const expectedLength = Math.min(PAGE_SIZE, Math.max(totalSize - offset, 0));
+    if (page.listLength !== expectedLength) invalid("manifest_page_length_mismatch");
+    observed += page.listLength;
+    if (page !== pages.at(-1) && pageIsTerminal(page)) {
       invalid("manifest_page_after_terminal");
     }
+  }
+  const last = pages.at(-1)!;
+  if (pageIsTerminal(last) && observed !== totalSize) {
+    invalid("manifest_page_total_mismatch");
   }
 }
 
@@ -538,6 +558,8 @@ async function readVerifiedArtifact(
     throw new ImportError(409, "artifact_size_mismatch");
   }
   assertExactMetadata(object.customMetadata, {
+    source: SOURCE,
+    runId: artifact.key.split("/").at(-2)!,
     dataset: artifact.dataset,
     sha256: artifact.sha256,
   }, "artifact_metadata_mismatch");

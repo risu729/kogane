@@ -19,7 +19,7 @@ describe("collector R2 importer routes", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ cursor: "prior", limit: 1 }),
-      }),
+      }) as Parameters<typeof worker.fetch>[0],
       environment(bucket),
     );
     expect(response.status).toBe(200);
@@ -48,7 +48,7 @@ describe("collector R2 importer routes", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ limit: 2 }),
-      }),
+      }) as Parameters<typeof worker.fetch>[0],
       environment(bucket),
     );
     expect(response.status).toBe(400);

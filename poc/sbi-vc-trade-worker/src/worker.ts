@@ -18,6 +18,7 @@ import type {
 const ORIGIN = "https://simple.sbivc.co.jp";
 const TRADE_URL = `${ORIGIN}/api/cccmdipresen/gw/trade`;
 const MAX_RESPONSE_BYTES = 64 * 1024;
+const MAX_SYNCHRONOUS_RAW_EVIDENCE_ARTIFACTS = 11;
 const KEEPALIVE_CRON = "*/15 * * * *";
 const COLLECTION_CRON = "5 21 * * *";
 const INITIAL_HEALTH: HealthState = {
@@ -94,7 +95,12 @@ export class SbiVcSessionState extends DurableObject<Env> {
         },
         onArtifact: async (artifact) => {
           operation = `r2_${artifact.dataset}`;
-          artifacts.push(await storeArtifact({ bucket: this.env.SNAPSHOTS, prefix, artifact }));
+          artifacts.push(await storeArtifact({
+            bucket: this.env.SNAPSHOTS,
+            prefix,
+            runId,
+            artifact,
+          }));
           operation = "collect";
         },
       });
@@ -118,7 +124,13 @@ export class SbiVcSessionState extends DurableObject<Env> {
       failures,
     };
     const manifestKey = await storeManifest({ bucket: this.env.SNAPSHOTS, prefix, manifest });
-    const central = await importStoredRun(this.env.RAW_EVIDENCE_IMPORTER, manifestKey);
+    const central = artifacts.length <= MAX_SYNCHRONOUS_RAW_EVIDENCE_ARTIFACTS
+      ? await importStoredRun(this.env.RAW_EVIDENCE_IMPORTER, manifestKey)
+      : {
+          deferred: true as const,
+          reason: "worker-invocation-chain-limit" as const,
+          artifactCount: artifacts.length + 1,
+        };
     console.log(JSON.stringify({
       message: "sbi_vc_collection",
       runId,
@@ -126,8 +138,9 @@ export class SbiVcSessionState extends DurableObject<Env> {
       artifactCount: artifacts.length,
       failureCount: failures.length,
       manifestKey,
-      centralRunId: central.centralRunId,
-      centralSealed: central.sealed,
+      ...("deferred" in central
+        ? { centralDeferred: true, centralDeferredReason: central.reason }
+        : { centralRunId: central.centralRunId, centralSealed: central.sealed }),
     }));
     return {
       runId,

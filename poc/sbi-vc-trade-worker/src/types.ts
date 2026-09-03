@@ -85,7 +85,13 @@ export interface CollectionSummary {
   artifactCount: number;
   failureCount: number;
   manifestKey: string;
-  central: RawEvidenceImportResult;
+  central: RawEvidenceImportResult | RawEvidenceDeferredResult;
+}
+
+export interface RawEvidenceDeferredResult {
+  deferred: true;
+  reason: "worker-invocation-chain-limit";
+  artifactCount: number;
 }
 
 export interface RawEvidenceImportResult {

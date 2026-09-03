@@ -8,6 +8,7 @@ export function runPrefix(startedAt: string, runId: string): string {
 export async function storeArtifact(options: {
   bucket: R2Bucket;
   prefix: string;
+  runId: string;
   artifact: CollectorArtifact;
 }): Promise<StoredArtifact> {
   if (!/^[a-z0-9-]+$/u.test(options.artifact.dataset)) throw new Error("invalid_artifact_dataset");
@@ -18,7 +19,12 @@ export async function storeArtifact(options: {
     onlyIf: { etagDoesNotMatch: "*" },
     sha256,
     httpMetadata: { contentType: "application/json" },
-    customMetadata: { dataset: options.artifact.dataset, sha256 },
+    customMetadata: {
+      source: "sbi-vc-trade",
+      runId: options.runId,
+      dataset: options.artifact.dataset,
+      sha256,
+    },
   });
   if (!stored) throw new Error("artifact_key_already_exists");
   return { dataset: options.artifact.dataset, key, sha256, bytes: encoded.byteLength };

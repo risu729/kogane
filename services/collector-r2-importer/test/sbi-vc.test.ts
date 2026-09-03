@@ -157,6 +157,26 @@ describe("SBI VC Trade staged-run importer", () => {
     expect(central.requests).toHaveLength(0);
   });
 
+  test("rejects changing totals and short non-terminal pages before central state", async () => {
+    for (const pages of [
+      [pageArtifact("executions-historical-page-0001", 30, 31),
+        pageArtifact("executions-historical-page-0002", 1, 32)],
+      [pageArtifact("executions-historical-page-0001", 1, 31)],
+    ]) {
+      const bucket = new FakeBucket();
+      await storeRun(bucket, [
+        staticArtifact("cash-balances"),
+        staticArtifact("account-margin"),
+        staticArtifact("position-summary"),
+        staticArtifact("executions-recent-page-0001"),
+        ...pages,
+      ], [{ operation: "collect", errorCode: "collector_http_503" }]);
+      const central = new FakeCentral();
+      await expect(importRun(bucket, central)).rejects.toMatchObject({ status: 400 });
+      expect(central.requests).toHaveLength(0);
+    }
+  });
+
   test("rejects unexpected prefix objects and exact custom metadata mismatches", async () => {
     const bucket = new FakeBucket();
     await storeRun(bucket, [], [{ operation: "load_session", errorCode: "missing_session_seed" }]);
@@ -181,7 +201,7 @@ describe("SBI VC Trade staged-run importer", () => {
     expect(secondCentral.requests).toHaveLength(0);
   });
 
-  test("catalogues the valid partial prefix when the 100-page safety limit stops collection", async () => {
+  test("defers a valid large partial prefix before creating central state", async () => {
     const bucket = new FakeBucket();
     const entries = [
       staticArtifact("cash-balances"),
@@ -196,10 +216,12 @@ describe("SBI VC Trade staged-run importer", () => {
         )),
     ];
     await storeRun(bucket, entries, [{ operation: "collect", errorCode: "unexpected_error" }]);
-    await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({
-      artifactCount: 105,
-      sealed: true,
+    const central = new FakeCentral();
+    await expect(importRun(bucket, central)).rejects.toMatchObject({
+      status: 409,
+      code: "sync_import_worker_chain_limit",
     });
+    expect(central.requests).toHaveLength(0);
   });
 
   test("rejects a checksum mismatch before central state is created", async () => {
@@ -279,7 +301,12 @@ async function storeRun(
     const sha256 = await digest(body);
     const key = `${PREFIX}${entry.dataset}.json`;
     bodies.set(entry.dataset, body);
-    bucket.objects.set(key, stored(body, { dataset: entry.dataset, sha256 }));
+    bucket.objects.set(key, stored(body, {
+      source: "sbi-vc-trade",
+      runId: RUN_ID,
+      dataset: entry.dataset,
+      sha256,
+    }));
     artifacts.push({ dataset: entry.dataset, key, sha256, bytes: body.byteLength });
   }
   const manifest = {

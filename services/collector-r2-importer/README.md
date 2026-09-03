@@ -20,13 +20,13 @@ Service Bindingは公開URLを経由しない到達経路であり、認証の�
 
 SBI VC TradeのmanifestはSBI証券とは共有せず、`sbi-vc-trade-worker-poc-v1`専用validatorで扱う。固定4 datasetの順序、約定履歴とJPY入出金履歴の1始まり連番、各pageの`list`/`totalSize`終了条件、最大100 page、失敗時の保存済みprefixと次datasetの補集合を検証する。さらにmanifestと全artifactについてkey、size、完全一致custom metadata、JSON content type、SHA-256、prefix内の完全inventoryを確認する。
 
-最大runは4 MiB artifactを204個含み得るため、全runをmemoryへ保持しない。中央run作成前に1 objectずつ全件検証してpage metadataだけを保持し、中央転送時に同じobjectを再読込・再検証して元bytesをそのまま送る。R2 outboxは成功時も失敗時も削除しない。
+最大runは4 MiB artifactを204個含み得るため、全runをmemoryへ保持しない。中央run作成前に1 objectずつ全件検証してpage metadataだけを保持し、中央転送時に同じobjectを再読込・再検証して元bytesをそのまま送る。同期経路はService Bindingの32 Worker invocation上限からdata artifact 11件までに制限し、それを超えるrunは中央stateを一切作らず後続Queue reconcilerへ委ねる。R2 outboxは成功時も失敗時も削除しない。
 
 中央では`collector-r2-sbi-vc`専用credentialを使い、registryも`collector-r2-importer → sbi-vc-trade`だけを許可する。SBI証券credentialをSBI VC Trade routeへ流用できない。
 
 ## backfillの分割
 
-SBI証券の完全な1 runは中央Workerを最大約23回、SBI VC Tradeはpage数によりさらに多く呼ぶ。Cloudflareの1 requestに連なるWorker呼び出し上限へ抵触しないよう、`backfill-page`は1回につきR2 objectを1件だけ走査し、manifestを見つけた場合も1 runだけを転送する。呼出元は返されたcursorで別のtop-level requestを繰り返す。
+SBI証券の完全な1 runは中央Workerを最大約23回呼ぶ。Cloudflareの1 requestに連なるWorker呼び出し上限へ抵触しないよう、`backfill-page`は1回につきR2 objectを1件だけ走査し、manifestを見つけた場合も1 runだけを転送する。SBI VC Tradeはdata artifact 11件を超えるmanifestを`sync_import_worker_chain_limit`で中央state作成前に停止する。呼出元は返されたcursorで別のtop-level requestを繰り返し、大きなrunは後続Queue reconcilerがartifact単位で処理する。
 
 ## 検証とデプロイ
 
