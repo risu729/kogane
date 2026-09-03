@@ -342,7 +342,6 @@ class SonyBankClient {
     const revision = await this.revision("ea");
     const pages: RawJsonResponse[] = [];
     let acquisitionStart = 1;
-    let observedTransactions = 0;
     let declaredTotal: number | null = null;
 
     for (let pageIndex = 0; pageIndex < MAX_HISTORY_PAGES; pageIndex += 1) {
@@ -370,15 +369,12 @@ class SonyBankClient {
         },
       );
       pages.push(page);
-      const rows = Array.isArray(page.json.transactionHistInfo)
-        ? page.json.transactionHistInfo.length
-        : 0;
-      observedTransactions += rows;
-      declaredTotal ??= countValue(page.json.countCnt);
-      if (rows < PAGE_SIZE || (declaredTotal !== null && observedTransactions >= declaredTotal)) {
+      const pageInfo = validateHistoryPage(page.json, pageIndex, declaredTotal);
+      declaredTotal = pageInfo.total;
+      if (pageInfo.terminal) {
         return {
           pages,
-          transactionCount: declaredTotal ?? observedTransactions,
+          transactionCount: declaredTotal,
         };
       }
       acquisitionStart += PAGE_SIZE;
@@ -522,6 +518,9 @@ class SonyBankClient {
         walletPageUrl = page.url || new URL(state.action, WALLET_CARD_ORIGIN).href;
         assertWalletPage(page.status, html);
       }
+      if (selectedWalletMonth(html) !== month.value) {
+        throw new Error("Sony Bank WALLET selected month mismatch");
+      }
       artifacts.push({ ...month, html: sanitizeWalletHtml(html) });
     }
     return { months: artifacts };
@@ -555,6 +554,33 @@ class SonyBankClient {
     }
     return headers;
   }
+}
+
+export function validateHistoryPage(
+  json: JsonObject,
+  pageIndex: number,
+  expectedTotal: number | null,
+): { rowCount: number; total: number; terminal: boolean } {
+  const rowCount = Array.isArray(json.transactionHistInfo)
+    ? json.transactionHistInfo.length
+    : null;
+  if (rowCount === null || rowCount > PAGE_SIZE || !Number.isSafeInteger(pageIndex) || pageIndex < 0) {
+    throw new Error("sony_bank_history_pagination_invalid");
+  }
+  const total = countValue(json.countCnt);
+  if (total === null) throw new Error("sony_bank_history_pagination_invalid");
+  if (expectedTotal !== null && total !== expectedTotal) {
+    throw new Error("sony_bank_history_pagination_total_changed");
+  }
+  const expectedRows = Math.max(0, Math.min(PAGE_SIZE, total - (pageIndex * PAGE_SIZE)));
+  if (rowCount !== expectedRows) {
+    throw new Error("sony_bank_history_pagination_length_mismatch");
+  }
+  return {
+    rowCount,
+    total,
+    terminal: (pageIndex + 1) * PAGE_SIZE >= total,
+  };
 }
 
 class SonyBankError extends Error {
@@ -626,6 +652,23 @@ export function walletMonths(html: string): WalletMonth[] {
       submitName: `nablarch_form3_${index + 1}`,
     }))
     .filter((month) => /^\d{8}$/u.test(month.value));
+}
+
+export function selectedWalletMonth(html: string): string | null {
+  const form = formBlock(html, "nablarch_form3");
+  const select = form.match(
+    /<select\b[^>]*\bname\s*=\s*["']W131301\.referenceDate["'][^>]*>([\s\S]*?)<\/select>/iu,
+  )?.[1];
+  if (!select) return null;
+  const options = [...select.matchAll(/<option\b([^>]*)\bvalue\s*=\s*["'](\d{8})["']([^>]*)>/giu)]
+    .map((match) => ({
+      value: match[2]!,
+      selected: /(?:^|\s)selected(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?(?=\s|$)/iu
+        .test(`${match[1] ?? ""} ${match[3] ?? ""}`),
+    }));
+  const selected = options.filter((option) => option.selected);
+  if (selected.length > 1) return null;
+  return (selected[0] ?? options[0])?.value ?? null;
 }
 
 function walletMonthRequest(

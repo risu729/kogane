@@ -56,6 +56,40 @@ export class CentralClient {
     return requiredSha256(result.descriptorSha256, "central_descriptor_missing");
   }
 
+  async beginInventory(
+    runId: number,
+    inventorySha256: string,
+    expectedArtifactCount: number,
+  ): Promise<number> {
+    const result = await this.json(`/v1/runs/${runId}/inventories`, {
+      inventorySha256,
+      expectedArtifactCount,
+      declarationBasis: "producer_manifest",
+    });
+    return requiredInteger(result.inventoryId, "central_inventory_id_missing");
+  }
+
+  async addInventoryItems(
+    runId: number,
+    inventoryId: number,
+    items: CentralInventoryItem[],
+  ): Promise<void> {
+    await this.json(`/v1/runs/${runId}/inventories/${inventoryId}/items`, { items });
+  }
+
+  async sealStagedInventory(
+    runId: number,
+    inventoryId: number,
+    externalAttemptId: string,
+    startedAtMs: number,
+  ): Promise<void> {
+    const result = await this.json(
+      `/v1/runs/${runId}/inventories/${inventoryId}/seal`,
+      { externalAttemptId, startedAtMs },
+    );
+    if (result.sealed !== true) throw new Error("central_seal_missing");
+  }
+
   async addRunReport(runId: number, input: JsonObject): Promise<void> {
     await this.json(`/v1/runs/${runId}/reports`, input);
   }

@@ -3,6 +3,59 @@ import worker, { classifySbiVcBackfillError } from "../src/worker";
 import { ImportError } from "../src/error";
 
 describe("collector R2 importer routes", () => {
+  test("the Sony backfill page scans one non-manifest object without central writes", async () => {
+    const calls: R2ListOptions[] = [];
+    const bucket = {
+      list: async (options: R2ListOptions) => {
+        calls.push(options);
+        return {
+          objects: [{ key: "raw/sony-bank/2026/09/03/run/gross-balance.json" }],
+          truncated: false,
+        } as unknown as R2Objects;
+      },
+    } as unknown as R2Bucket;
+    const response = await worker.fetch(
+      new Request("https://importer.internal/v1/sony-bank/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      }) as Parameters<typeof worker.fetch>[0],
+      environment({} as R2Bucket, bucket),
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ prefix: "raw/sony-bank/", limit: 1 }]);
+    const responseBody: unknown = await response.json();
+    expect(responseBody).toEqual({
+      source: "sony-bank",
+      scannedObjectCount: 1,
+      importedManifestCount: 0,
+      skippedManifestCount: 1,
+      deferredManifestCount: 0,
+      failedManifestCount: 0,
+      nextCursor: null,
+      truncated: false,
+    });
+  });
+
+  test("the Sony backfill route rejects invalid limits and cursors before listing R2", async () => {
+    const bucket = {
+      list: async () => {
+        throw new Error("list_must_not_be_called");
+      },
+    } as unknown as R2Bucket;
+    for (const body of [{ limit: 2 }, { cursor: "not-a-sony-cursor", limit: 1 }]) {
+      const response = await worker.fetch(
+        new Request("https://importer.internal/v1/sony-bank/backfill-page", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }) as Parameters<typeof worker.fetch>[0],
+        environment({} as R2Bucket, bucket),
+      );
+      expect(response.status).toBe(400);
+    }
+  });
+
   test("the SBI VC backfill page lists at most one source object", async () => {
     const calls: R2ListOptions[] = [];
     const bucket = {
@@ -74,14 +127,16 @@ describe("collector R2 importer routes", () => {
   });
 });
 
-function environment(bucket: R2Bucket): Env {
+function environment(bucket: R2Bucket, sonyBucket: R2Bucket = {} as R2Bucket): Env {
   return {
     SBI_SNAPSHOTS: {} as R2Bucket,
     SBI_VC_SNAPSHOTS: bucket,
+    SONY_SNAPSHOTS: sonyBucket,
     RAW_EVIDENCE: {} as Fetcher,
-    IMPORTER_VERSION: "collector-r2-importer-v3",
+    IMPORTER_VERSION: "collector-r2-importer-v4",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_VC: `collector-r2-sbi-vc.${"v".repeat(32)}`,
+    RAW_EVIDENCE_TOKEN_SONY: `collector-r2-sony-bank.${"o".repeat(32)}`,
     ORIGIN_FINGERPRINT_KEY: "ab".repeat(32),
   };
 }

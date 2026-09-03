@@ -1,6 +1,6 @@
 # Collector R2 importer
 
-各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券とSBI VC Tradeに対応する。
+各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行に対応する。
 
 ## SBI証券の境界
 
@@ -37,7 +37,7 @@ bun run typecheck
 bun run cf:check
 ```
 
-中央schema `0006`を先にデプロイした後、次を実行する。
+中央schema `0007`を先にデプロイした後、次を実行する。
 
 ```sh
 bash scripts/deploy.sh
@@ -47,6 +47,7 @@ bash scripts/deploy.sh
 
 - `RAW_EVIDENCE_TOKEN`: `collector-r2-sbi`専用Bearer
 - `RAW_EVIDENCE_TOKEN_SBI_VC`: `collector-r2-sbi-vc`専用Bearer
+- `RAW_EVIDENCE_TOKEN_SONY`: `collector-r2-sony-bank`専用Bearer
 - `ORIGIN_FINGERPRINT_KEY`: storage keyを不可逆HMACへ変換する共通鍵
 
 SBI collector側のhistorical outboxは次で再送する。
@@ -54,6 +55,24 @@ SBI collector側のhistorical outboxは次で再送する。
 ```sh
 poc/sbi-securities-worker/scripts/backfill-raw-evidence.sh
 poc/sbi-vc-trade-worker/scripts/backfill-raw-evidence.sh
+poc/sony-bank-worker/scripts/backfill-raw-evidence.sh
 ```
 
 source R2はbackfill完了後も自動削除しない。
+
+## Sony銀行の境界
+
+`sony-bank-worker-poc-v2`専用validatorはmanifest、prefix inventory、R2 metadata、保存bytesとSHA-256、JSON/CSV/HTML media typeを検証する。円と10外貨の3件単位page連番、外貨CSVの件数条件、1〜15か月のWALLET selector、collection summary、`r2:<dataset>`失敗との補集合まで一致した場合だけ中央状態を作る。
+
+導入前に保存された`sony-bank-worker-poc-v1`は、総残高・円履歴page・円CSV・v1 summaryだけを許す別契約として検証し、v1 namespace/format versionのまま取り込む。v1に外貨・WALLETなどv2 datasetが混在する場合は拒否する。
+
+R2書込み失敗で欠けたhistory pageやWALLET HTMLも、manifestの順序付きfailureが保存済みartifactとの完全な補集合で、page番号・summary件数・statusが整合する場合はpartial/failed evidenceとしてcatalogueする。欠けたprovider bytesを成功扱いせず、terminal reportの固定failure codeに残す。
+
+- BFF JSONはresponse textをUTF-8へ再encodeしたため`provider_response / transport_decoded`。
+- 公式CSVは受信bytesをそのまま保存するため`provider_export / exact`。
+- WALLET HTMLはJSESSIONIDとhidden値を除去してUTF-8へ再encodeするため`sanitized_provider_capture / transformed / source_not_retained_for_security`。
+- collection summaryとmanifestはcollector生成物である。
+
+Cloudflareは1 requestあたりWorker invocationを32回に制限する。Sony銀行の正常runは最小でもmanifest込み16 objectなので即時要求はsource全体の検証後に`202 deferred`を返し、source R2保存を成功のまま保つ。backfillは毎回source全体を再検証してから、staged inventoryへ最大10 objectずつ冪等転送する。cursorはR2走査位置とrun内offsetを保持し、最終chunkだけterminal reportとsealを行う。
+
+reconciler導入前は、通常収集後に上記backfill scriptを実行してsealまで進める必要がある。各chunkの応答に含まれる`finalChunkAllObjectsReused`は、run全体ではなくsealした最後のchunk内だけの再利用判定である。新規manifestのfailure messageは固定コードだけを保存する。既存v2 manifestは互換のため検証後に取り込めるが、自由形式messageを中央のfailure codeには転記しない。

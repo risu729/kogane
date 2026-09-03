@@ -1142,11 +1142,6 @@ export async function addInventoryItems(
     SELECT 1 AS ok FROM run_inventories WHERE id = ? AND fetch_run_id = ?
   `).bind(inventoryId, runId).first<{ ok: number }>();
   if (!inventory) throw new ApiError(404, "inventory_not_found");
-  const sealed = await env.DB.prepare(
-    "SELECT 1 AS ok FROM fetch_run_seals WHERE fetch_run_id = ?",
-  ).bind(runId).first<{ ok: number }>();
-  if (sealed) throw new ApiError(409, "run_already_sealed");
-
   const newItems: InventoryItem[] = [];
   for (const item of items) {
     const artifact = await env.DB.prepare(`
@@ -1170,6 +1165,10 @@ export async function addInventoryItems(
       newItems.push(item);
     }
   }
+  const sealed = await env.DB.prepare(
+    "SELECT 1 AS ok FROM fetch_run_seals WHERE fetch_run_id = ?",
+  ).bind(runId).first<{ ok: number }>();
+  if (sealed && newItems.length > 0) throw new ApiError(409, "run_already_sealed");
   const capacity = await env.DB.prepare(`
     SELECT inventory.expected_artifact_count AS expected,
            count(item.artifact_key) AS received

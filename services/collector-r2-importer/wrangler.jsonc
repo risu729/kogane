@@ -23,6 +23,10 @@
     {
       "binding": "SBI_VC_SNAPSHOTS",
       "bucket_name": "kogane-sbi-vc-trade-poc"
+    },
+    {
+      "binding": "SONY_SNAPSHOTS",
+      "bucket_name": "kogane-sony-bank-collector-poc"
     }
   ],
   "services": [
@@ -32,6 +36,6 @@
     }
   ],
   "vars": {
-    "IMPORTER_VERSION": "collector-r2-importer-v3"
+    "IMPORTER_VERSION": "collector-r2-importer-v4"
   }
 }

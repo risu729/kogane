@@ -403,6 +403,18 @@ session/hidden値残存は0件だった。明細の実値はdocumentationへ記�
 EURなど取引0件の通貨でCSV生成を呼ぶとCloudflare egressだけ500になる場合があったため、
 0件では空CSVを省略し、残高と空の履歴JSONは保持する。取引がある通貨のCSVは保存する。
 
+### 2026-09-04 中央raw-evidence移行の本番検証
+
+source R2を全120 listing page走査して11 manifestを中央へ取り込み、D1で旧v1が2 run、現行v2が
+9 run、合計11 runすべてseal済み、未seal 0を確認した。先頭から同じ11 manifestを再投入した後も
+run数は11のままで、seal済みrunのexact replayは冪等だった。旧v1 manifestのsource objectと
+中央content-addressed objectを1件比較し、SHA-256とbyte数がともに一致した。本文、hash値、残高、
+明細値はverification outputやこの文書へ記録していない。
+
+現段階ではoperator実行のbackfill scriptが10 object単位でstaged inventoryを送り、最後にsealする。
+source R2はdurable outboxとして残し、削除しない。後続のreconcilerはmanifest eventと定期repair
+scanを入口にし、同じ冪等contractを自動実行する。
+
 ## 公式 APK / app と Web の役割
 
 ### 公式配布物

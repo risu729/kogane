@@ -68,7 +68,7 @@ describe("raw-evidence Worker", () => {
       ok: true,
       service: "kogane-ingest",
       apiVersion: "v1",
-      schemaVersion: "0006",
+      schemaVersion: "0007",
     });
     const denied = await post("/v1/runs", {});
     expect(denied.status).toBe(400);
@@ -671,6 +671,13 @@ describe("raw-evidence Worker", () => {
 
   it("resumes a staged inventory and seals it after exact chunk replay", async () => {
     const runId = await createTestRun("api-session-staged");
+    const unitResponse = await post(`/v1/runs/${runId}/units`, {
+      unitKind: "collection",
+      unitKey: "account",
+      terminalReportRequired: true,
+    });
+    expect(unitResponse.status).toBe(201);
+    const { unitId } = await unitResponse.json() as { unitId: number };
     const object = await uploadText(runId, "staged");
     const artifacts: Array<{ artifactKey: string; sha256: string; descriptorSha256: string }> = [];
     for (let index = 0; index < 35; index += 1) {
@@ -681,6 +688,7 @@ describe("raw-evidence Worker", () => {
         payloadFidelity: "exact",
         containerKind: "single",
         lineageDisposition: "not_applicable",
+        fetchUnitId: unitId,
         sequence: index,
         sha256: object.sha256,
         byteSize: object.byteSize,
@@ -717,6 +725,13 @@ describe("raw-evidence Worker", () => {
       receivedArtifactCount: 35,
       sealed: false,
     });
+    await post(`/v1/units/${unitId}/reports`, {
+      reportKey: "terminal",
+      reportKind: "terminal",
+      normalizedOutcome: "success",
+      declaredArtifactCount: 35,
+      artifactCountScope: "direct",
+    });
     await post(`/v1/runs/${runId}/reports`, {
       reportKey: "terminal",
       reportKind: "terminal",
@@ -729,6 +744,12 @@ describe("raw-evidence Worker", () => {
     });
     expect(seal.status).toBe(201);
     expect((await seal.json() as { sealed: boolean }).sealed).toBe(true);
+    const sealedReplay = await post(
+      `/v1/runs/${runId}/inventories/${inventoryId}/items`,
+      firstChunk,
+    );
+    expect(sealedReplay.status).toBe(201);
+    expect((await sealedReplay.json() as { accepted: number }).accepted).toBe(0);
   }, 30_000);
 
   it("keeps one acquisition session across multiple source-specific runs", async () => {

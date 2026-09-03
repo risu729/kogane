@@ -33,6 +33,8 @@ Sony銀行の現行Web BFFへ毎回新規ログインし、総残高、円・外
 
 日次Cronは21:00 UTC（日本時間06:00）に当月1日から実行日までを収集する。手動`POST /trigger?from=YYYY-MM-DD&to=YYYY-MM-DD`は最大366日で、Bearer認証が必要である。
 
+manifest保存後は内部Service Bindingで中央raw-evidence importerを呼ぶ。正常runは32 Worker invocation上限を超えるため、即時呼出しは検証済み`deferred`として終了し、元R2をdurable outboxとして保持する。`scripts/backfill-raw-evidence.sh`がcursorを保存し、10 objectずつstaged inventoryへ転送して最後にsealする。既存の`sony-bank-worker-poc-v2` objectはnative SHA-256がないlegacyでもmanifest SHA-256との再計算一致を必須とし、新規objectはimmutable conditional putとR2 native SHA-256の両方を必須とする。
+
 ```text
 raw/sony-bank/YYYY/MM/DD/<run-id>/gross-balance.json
 raw/sony-bank/YYYY/MM/DD/<run-id>/yen-history-page-0001.json
@@ -57,6 +59,16 @@ WALLETは銀行BFFの`/jada/debit-sso/login-usage-dtl-inq`から毎回一時SSO�
 公式CSVを要求するとSony側がCloudflare egressに500を返す場合があるため、JSONの件数が0なら
 情報量のない空CSVを省略する。残高と0件の履歴JSONは保存する。
 
+2026-09-04に中央raw-evidenceへの既存データ移行を本番確認した。source bucketの全120 listing
+pageを走査して11 manifest（旧v1が2、現行v2が9）を取り込み、D1上の11 runはすべてseal済み、
+未sealは0だった。同じ全件backfillを先頭から再実行してもrun数は11のままであり、seal済みrunの
+exact replayが冪等であることを確認した。さらに旧v1 manifestを1件抽出し、source R2 objectと
+中央content-addressed R2 objectのSHA-256およびbyte数が一致することを確認した。確認では本文や
+金融値を標準出力・documentationへ記録していない。
+
+現在のbackfillはoperatorがscriptを実行する方式である。source R2はdurable outboxとして保持し、
+削除しない。将来のreconcilerはmanifest eventとrepair scanから同じ冪等import contractを呼び出す。
+
 ローカルで実口座を検証する場合は、認証JSONを標準出力やshell引数へ置かず、600相当で保護した
 ファイルを`SONY_BANK_CREDENTIAL_FILE`に指定する。
 
@@ -69,6 +81,8 @@ SONY_BANK_CREDENTIAL_FILE=/secure/path/sony-bank.json \
 
 - `SONY_BANK_CREDENTIAL_JSON`: `branchNum`、`accountNum`、`loginPwd`だけを持つJSON
 - `ADMIN_TRIGGER_TOKEN`: 手動triggerのBearer token
+
+中央importer側は`collector-r2-sony-bank`専用credentialを使い、他sourceのcredentialを流用しない。
 
 Secret値をsource、Wrangler config、shell履歴、標準出力へ置かない。
 
