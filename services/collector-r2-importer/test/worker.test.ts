@@ -78,10 +78,12 @@ function environment(bucket: R2Bucket): Env {
   return {
     SBI_SNAPSHOTS: {} as R2Bucket,
     SBI_VC_SNAPSHOTS: bucket,
+    SONY_SNAPSHOTS: {} as R2Bucket,
     RAW_EVIDENCE: {} as Fetcher,
-    IMPORTER_VERSION: "collector-r2-importer-v3",
+    IMPORTER_VERSION: "collector-r2-importer-v4",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_VC: `collector-r2-sbi-vc.${"v".repeat(32)}`,
+    RAW_EVIDENCE_TOKEN_SONY: `collector-r2-sony-bank.${"o".repeat(32)}`,
     ORIGIN_FINGERPRINT_KEY: "ab".repeat(32),
   };
 }

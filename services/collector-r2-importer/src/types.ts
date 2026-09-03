@@ -53,3 +53,30 @@ export interface SbiVcManifest {
   artifacts: SbiVcArtifactManifest[];
   failures: SbiVcFailure[];
 }
+
+export interface SonyArtifactManifest {
+  dataset: string;
+  key: string;
+  mediaType: string;
+  sha256: string;
+  bytes: number;
+}
+
+export interface SonyFailure {
+  operation: string;
+  errorType: string;
+  message: string;
+}
+
+export interface SonyManifest {
+  schemaVersion: "sony-bank-worker-poc-v2";
+  source: "sony-bank";
+  runId: string;
+  startedAt: string;
+  completedAt: string;
+  status: "success" | "partial" | "failed";
+  window: { from: string; to: string };
+  transactionCount: number;
+  artifacts: SonyArtifactManifest[];
+  failures: SonyFailure[];
+}

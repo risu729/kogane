@@ -21,6 +21,12 @@
       "bucket_name": "kogane-sony-bank-collector-poc"
     }
   ],
+  "services": [
+    {
+      "binding": "RAW_EVIDENCE_IMPORTER",
+      "service": "kogane-collector-r2-importer"
+    }
+  ],
   "vars": {
     "COLLECTOR_SCHEMA_VERSION": "sony-bank-worker-poc-v2"
   },

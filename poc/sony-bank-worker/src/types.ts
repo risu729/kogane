@@ -42,4 +42,39 @@ export interface CollectionManifest {
 
 export interface CollectionResult extends CollectionManifest {
   manifestKey: string;
+  central: RawEvidenceImportResult;
+}
+
+export type RawEvidenceImportResult = RawEvidenceImportSealed | RawEvidenceImportDeferred;
+
+export interface RawEvidenceImportSealed {
+  source: "sony-bank";
+  manifestKey: string;
+  status: "sealed";
+  centralRunId: number;
+  artifactCount: number;
+  sealed: true;
+  allObjectsReused: boolean;
+}
+
+export interface RawEvidenceImportDeferred {
+  source: "sony-bank";
+  manifestKey: string;
+  status: "deferred";
+  reason: "worker_invocation_limit" | "central_inventory_limit";
+  artifactCount: number;
+  nextOffset: number;
+}
+
+export interface RawEvidenceBackfillPageResult {
+  source: "sony-bank";
+  scannedObjectCount: number;
+  importedManifestCount: number;
+  skippedManifestCount: number;
+  deferredManifestCount: number;
+  failedManifestCount: number;
+  nextCursor: string | null;
+  truncated: boolean;
+  failureCode?: string;
+  result?: RawEvidenceImportResult;
 }

@@ -33,6 +33,8 @@ Sony銀行の現行Web BFFへ毎回新規ログインし、総残高、円・外
 
 日次Cronは21:00 UTC（日本時間06:00）に当月1日から実行日までを収集する。手動`POST /trigger?from=YYYY-MM-DD&to=YYYY-MM-DD`は最大366日で、Bearer認証が必要である。
 
+manifest保存後は内部Service Bindingで中央raw-evidence importerを呼ぶ。正常runは32 Worker invocation上限を超えるため、即時呼出しは検証済み`deferred`として終了し、元R2をdurable outboxとして保持する。`scripts/backfill-raw-evidence.sh`がcursorを保存し、10 objectずつstaged inventoryへ転送して最後にsealする。既存の`sony-bank-worker-poc-v2` objectはnative SHA-256がないlegacyでもmanifest SHA-256との再計算一致を必須とし、新規objectはimmutable conditional putとR2 native SHA-256の両方を必須とする。
+
 ```text
 raw/sony-bank/YYYY/MM/DD/<run-id>/gross-balance.json
 raw/sony-bank/YYYY/MM/DD/<run-id>/yen-history-page-0001.json
@@ -69,6 +71,8 @@ SONY_BANK_CREDENTIAL_FILE=/secure/path/sony-bank.json \
 
 - `SONY_BANK_CREDENTIAL_JSON`: `branchNum`、`accountNum`、`loginPwd`だけを持つJSON
 - `ADMIN_TRIGGER_TOKEN`: 手動triggerのBearer token
+
+中央importer側は`collector-r2-sony-bank`専用credentialを使い、他sourceのcredentialを流用しない。
 
 Secret値をsource、Wrangler config、shell履歴、標準出力へ置かない。
 

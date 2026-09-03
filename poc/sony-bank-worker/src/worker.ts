@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { collectSonyBank, parseCredential } from "./sony-bank";
+import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import type {
   CollectionFailure,
@@ -17,11 +18,23 @@ export default {
         schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       });
     }
-    if (request.method !== "POST" || url.pathname !== "/trigger") {
-      return Response.json({ error: "Not found" }, { status: 404 });
-    }
     if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
+      try {
+        const cursor = url.searchParams.get("cursor") ?? undefined;
+        const limit = parseBackfillLimit(url.searchParams.get("limit"));
+        return Response.json(await backfillStoredRuns(
+          env.RAW_EVIDENCE_IMPORTER,
+          { ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) },
+        ));
+      } catch (error) {
+        return Response.json({ error: stableError(error) }, { status: 502 });
+      }
+    }
+    if (request.method !== "POST" || url.pathname !== "/trigger") {
+      return Response.json({ error: "Not found" }, { status: 404 });
     }
     try {
       const window = parseWindow(
@@ -74,6 +87,7 @@ async function runCollection(
         artifacts.push(await storeArtifact({
           bucket: env.SNAPSHOTS,
           prefix,
+          runId,
           artifact,
         }));
       } catch (error) {
@@ -108,6 +122,7 @@ async function runCollection(
     prefix,
     manifest,
   });
+  const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey);
   console.log(JSON.stringify({
     event: "sony-bank-collection-stored",
     runId,
@@ -116,8 +131,10 @@ async function runCollection(
     artifactCount: artifacts.length,
     failureCount: failures.length,
     manifestKey,
+    centralStatus: central.status,
+    ...(central.status === "sealed" ? { centralRunId: central.centralRunId } : {}),
   }));
-  return { ...manifest, manifestKey };
+  return { ...manifest, manifestKey, central };
 }
 
 function parseWindow(
@@ -194,5 +211,28 @@ function publicResult(result: CollectionResult): object {
     artifactCount: result.artifacts.length,
     failureCount: result.failures.length,
     manifestKey: result.manifestKey,
+    central: result.central.status === "sealed"
+      ? {
+          status: result.central.status,
+          centralRunId: result.central.centralRunId,
+          sealed: result.central.sealed,
+        }
+      : {
+          status: result.central.status,
+          reason: result.central.reason,
+          nextOffset: result.central.nextOffset,
+        },
   };
+}
+
+function parseBackfillLimit(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  if (value !== "1") throw new Error("backfill_limit_must_be_one");
+  return 1;
+}
+
+function stableError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "request_failed";
+  const match = message.match(/(?:^|: )([a-z0-9_-]{1,100})$/u);
+  return match?.[1] ?? "request_failed";
 }
