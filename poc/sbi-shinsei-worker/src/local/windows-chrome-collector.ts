@@ -4,6 +4,7 @@ import { normalizeCoreResponses } from "../normalized";
 import { validateKnownResponse } from "../response-schemas";
 import type {
   JsonObject,
+  CollectionFailure,
   NormalizedSnapshot,
   RawArtifact,
   SbiShinseiCredential,
@@ -14,8 +15,36 @@ const MAX_HELPER_OUTPUT_BYTES = 10 * 1024 * 1024;
 
 export interface ChromeContextCollectorResult {
   artifacts: RawArtifact[];
-  normalized: NormalizedSnapshot;
+  normalized?: NormalizedSnapshot;
+  failures: CollectionFailure[];
 }
+
+const RESPONSE_PLAN = [
+  {
+    key: "topBalances",
+    dataset: "top-accounts-balance-and-activity",
+    filename: "raw-top-accounts-balance-and-activity.json",
+    schema: "sbi-shinsei-top-balances-v1",
+  },
+  {
+    key: "balanceSummary",
+    dataset: "balance-summary-and-stage",
+    filename: "raw-balance-summary-and-stage.json",
+    schema: "sbi-shinsei-balance-summary-v1",
+  },
+  {
+    key: "exchangeRate",
+    dataset: "exchange-rate",
+    filename: "raw-exchange-rate.json",
+    schema: "sbi-shinsei-exchange-rate-v1",
+  },
+  {
+    key: "yenDeposit",
+    dataset: "yen-deposit-account",
+    filename: "raw-yen-deposit-account.json",
+    schema: "sbi-shinsei-yen-deposit-account-v1",
+  },
+] as const;
 
 export class WindowsChromeContextCollector {
   async collect(
@@ -97,48 +126,102 @@ export function parseCollectionHandoff(
   parsed: unknown,
   capturedAt: Date,
 ): ChromeContextCollectorResult {
-  const root = exactObject(parsed, ["ok", "responses"], "collector");
+  const input = object(parsed, "collector");
+  const partial = Object.hasOwn(input, "failure");
+  const root = exactObject(
+    input,
+    partial ? ["ok", "responses", "failure"] : ["ok", "responses"],
+    "collector",
+  );
   if (root.ok !== true) {
     throw new UnknownResponseShapeError("Chrome-context collector did not succeed");
   }
-  const responses = exactObject(
-    root.responses,
-    ["topBalances", "balanceSummary", "exchangeRate", "yenDeposit"],
-    "collector.responses",
-  );
-  const topBalances = validateRaw(
-    responses.topBalances,
-    "sbi-shinsei-top-balances-v1",
-    "topBalances",
-  );
-  const balanceSummary = validateRaw(
-    responses.balanceSummary,
-    "sbi-shinsei-balance-summary-v1",
-    "balanceSummary",
-  );
-  const exchangeRate = validateRaw(
-    responses.exchangeRate,
-    "sbi-shinsei-exchange-rate-v1",
-    "exchangeRate",
-  );
-  const yenDeposit = validateRaw(
-    responses.yenDeposit,
-    "sbi-shinsei-yen-deposit-account-v1",
-    "yenDeposit",
-  );
-  const normalized = normalizeCoreResponses({
-    capturedAt: capturedAt.toISOString(),
-    topBalances: topBalances.data,
-  });
+  const responses = object(root.responses, "collector.responses");
+  const responseKeys = Object.keys(responses).sort();
+  const expectedKeys = RESPONSE_PLAN.slice(0, responseKeys.length)
+    .map((entry) => entry.key)
+    .sort();
+  if (responseKeys.length < 1 || responseKeys.length > RESPONSE_PLAN.length ||
+      responseKeys.some((key, index) => key !== expectedKeys[index])) {
+    throw new UnknownResponseShapeError("collector.responses was not an ordered prefix");
+  }
+  if (!partial && responseKeys.length !== RESPONSE_PLAN.length) {
+    throw new UnknownResponseShapeError("collector.responses was incomplete");
+  }
+  if (partial) {
+    if (responseKeys.length === RESPONSE_PLAN.length) {
+      throw new UnknownResponseShapeError("collector failure followed a complete response");
+    }
+    const failure = exactObject(root.failure, ["dataset", "stage"], "collector.failure");
+    const next = RESPONSE_PLAN[responseKeys.length]!;
+    if (failure.dataset !== next.dataset || typeof failure.stage !== "string" ||
+        !/^[a-z0-9-]{1,80}$/u.test(failure.stage)) {
+      throw new UnknownResponseShapeError("collector failure did not match the next dataset");
+    }
+  }
+  const validated: Array<{
+    plan: (typeof RESPONSE_PLAN)[number];
+    response: { raw: string; data: JsonObject };
+  }> = [];
+  const failures: CollectionFailure[] = [];
+  for (const plan of RESPONSE_PLAN.slice(0, responseKeys.length)) {
+    try {
+      validated.push({
+        plan,
+        response: validateRaw(responses[plan.key], plan.schema, plan.key),
+      });
+    } catch {
+      failures.push({
+        operation: `read:${plan.dataset}`,
+        errorType: "ResponseSchemaError",
+        message: "provider_response_invalid",
+      });
+    }
+  }
+  const topBalances = validated.find(({ plan }) => plan.key === "topBalances")
+    ?.response;
+  let normalized: NormalizedSnapshot | undefined;
+  if (topBalances) {
+    try {
+      normalized = normalizeCoreResponses({
+        capturedAt: capturedAt.toISOString(),
+        topBalances: topBalances.data,
+      });
+    } catch {
+      failures.push({
+        operation: "derive:normalized",
+        errorType: "DerivationError",
+        message: "normalized_derivation_failed",
+      });
+    }
+  } else {
+    failures.push({
+      operation: "derive:normalized",
+      errorType: "DependencyInvalid",
+      message: "normalized_source_invalid",
+    });
+  }
+  if (partial) {
+    for (const [index, plan] of RESPONSE_PLAN.slice(responseKeys.length).entries()) {
+      failures.push({
+        operation: `read:${plan.dataset}`,
+        errorType: index === 0 ? "ProviderReadError" : "NotAttempted",
+        message: index === 0
+          ? "provider_read_failed"
+          : "provider_read_not_attempted",
+      });
+    }
+  }
   return {
-    normalized,
+    ...(normalized ? { normalized } : {}),
     artifacts: [
-      artifact("top-accounts-balance-and-activity", "raw-top-accounts-balance-and-activity.json", topBalances.raw),
-      artifact("balance-summary-and-stage", "raw-balance-summary-and-stage.json", balanceSummary.raw),
-      artifact("exchange-rate", "raw-exchange-rate.json", exchangeRate.raw),
-      artifact("yen-deposit-account", "raw-yen-deposit-account.json", yenDeposit.raw),
-      artifact("normalized", "normalized.json", `${JSON.stringify(normalized, null, 2)}\n`),
+      ...validated.map(({ plan, response }) =>
+        artifact(plan.dataset, plan.filename, response.raw)),
+      ...(normalized
+        ? [artifact("normalized", "normalized.json", `${JSON.stringify(normalized, null, 2)}\n`)]
+        : []),
     ],
+    failures,
   };
 }
 
@@ -177,6 +260,13 @@ function exactObject(
     throw new UnknownResponseShapeError(`${label} has an unknown shape`);
   }
   return result;
+}
+
+function object(value: unknown, label: string): JsonObject {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new UnknownResponseShapeError(`${label} was not an object`);
+  }
+  return value as JsonObject;
 }
 
 function artifact(dataset: string, filename: string, body: string): RawArtifact {

@@ -18,7 +18,7 @@ async function route(request: Request, env: WorkerEnv): Promise<Response> {
   const url = new URL(request.url);
   if (url.search) throw new ApiError(400, "query_string_not_allowed");
   if (request.method === "GET" && url.pathname === "/health") {
-    return json({ ok: true, service: "kogane-ingest", apiVersion: "v1", schemaVersion: "0007" });
+    return json({ ok: true, service: "kogane-ingest", apiVersion: "v1", schemaVersion: "0008" });
   }
 
   const clientId = await authenticate(request, env);
@@ -109,7 +109,7 @@ export default {
       if (/inactive_ingest_(client|route)/.test(message)) {
         return json({ error: "inactive_ingest_route" }, 403);
       }
-      if (/D1_ERROR/.test(message) && /UNIQUE constraint|FOREIGN KEY constraint|append-only|after_seal|already_sealed|incomplete_inventory|inventory_|artifact_relation_|page_index_|terminal_report|required|mismatch|conflict/.test(message)) {
+      if (/D1_ERROR/.test(message) && /UNIQUE constraint|CHECK constraint|FOREIGN KEY constraint|append-only|after_seal|already_sealed|incomplete_inventory|inventory_|artifact_relation_|page_index_|terminal_report|required|mismatch|conflict/.test(message)) {
         return json({ error: "catalogue_conflict" }, 409);
       }
       return json({ error: "internal_error" }, 500);

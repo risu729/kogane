@@ -111,6 +111,43 @@ describe("collector R2 importer routes", () => {
     expect(body).toEqual({ error: "backfill_limit_must_be_one" });
   });
 
+  test("the SBI Shinsei backfill page lists exactly one source object", async () => {
+    const calls: R2ListOptions[] = [];
+    const bucket = {
+      list: async (options: R2ListOptions) => {
+        calls.push(options);
+        return {
+          objects: [{ key: "raw/sbi-shinsei/2026/09/03/run/raw-exchange-rate.json" }],
+          truncated: true,
+          cursor: "next-cursor",
+        } as unknown as R2Objects;
+      },
+    } as unknown as R2Bucket;
+    const response = await worker.fetch(
+      new Request("https://importer.internal/v1/sbi-shinsei/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cursor: "prior", limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment({} as R2Bucket, {} as R2Bucket, bucket),
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{
+      prefix: "raw/sbi-shinsei/",
+      limit: 1,
+      cursor: "prior",
+    }]);
+    expect(await response.json()).toMatchObject({
+      source: "sbi-shinsei",
+      scannedObjectCount: 1,
+      importedManifestCount: 0,
+      skippedManifestCount: 1,
+      failedManifestCount: 0,
+      nextCursor: "next-cursor",
+      truncated: true,
+    });
+  });
+
   test("classifies the synchronous chain limit as deferred, not failed", () => {
     expect(classifySbiVcBackfillError(
       new ImportError(409, "sync_import_worker_chain_limit"),
@@ -127,16 +164,22 @@ describe("collector R2 importer routes", () => {
   });
 });
 
-function environment(bucket: R2Bucket, sonyBucket: R2Bucket = {} as R2Bucket): Env {
+function environment(
+  bucket: R2Bucket,
+  sonyBucket: R2Bucket = {} as R2Bucket,
+  sbiShinseiBucket: R2Bucket = {} as R2Bucket,
+): Env {
   return {
     SBI_SNAPSHOTS: {} as R2Bucket,
     SBI_VC_SNAPSHOTS: bucket,
     SONY_SNAPSHOTS: sonyBucket,
+    SBI_SHINSEI_SNAPSHOTS: sbiShinseiBucket,
     RAW_EVIDENCE: {} as Fetcher,
-    IMPORTER_VERSION: "collector-r2-importer-v4",
+    IMPORTER_VERSION: "collector-r2-importer-v5",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_VC: `collector-r2-sbi-vc.${"v".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SONY: `collector-r2-sony-bank.${"o".repeat(32)}`,
+    RAW_EVIDENCE_TOKEN_SBI_SHINSEI: `collector-r2-sbi-shinsei.${"n".repeat(32)}`,
     ORIGIN_FINGERPRINT_KEY: "ab".repeat(32),
   };
 }

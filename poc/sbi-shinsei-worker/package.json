@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "bun test",
+    "test": "bun test && bash test/admin-token-sync.test.sh",
     "typecheck": "wrangler types && tsc --noEmit",
     "cf:types": "wrangler types",
     "cf:check": "wrangler deploy --dry-run",

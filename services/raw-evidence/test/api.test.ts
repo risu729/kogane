@@ -68,7 +68,7 @@ describe("raw-evidence Worker", () => {
       ok: true,
       service: "kogane-ingest",
       apiVersion: "v1",
-      schemaVersion: "0007",
+      schemaVersion: "0008",
     });
     const denied = await post("/v1/runs", {});
     expect(denied.status).toBe(400);
@@ -414,6 +414,38 @@ describe("raw-evidence Worker", () => {
       .mockRejectedValueOnce(new Error("synthetic transient D1 failure"));
     expect((await post(`/v1/runs/${runId}/artifacts`, payload)).status).toBe(500);
     batchSpy.mockRestore();
+    expect(await env.DB.prepare(
+      "SELECT count(*) AS count FROM fetch_artifacts WHERE fetch_run_id = ?",
+    ).bind(runId).first<{ count: number }>()).toEqual({ count: 0 });
+    expect((await post(`/v1/runs/${runId}/artifacts`, payload)).status).toBe(201);
+  });
+
+  it("classifies a D1 CHECK violation without exposing its diagnostic", async () => {
+    const runId = await createTestRun("api-session-artifact-check-conflict");
+    const content = await uploadText(runId, "artifact-check-conflict");
+    const payload = {
+      artifactKey: "check-conflict.json",
+      artifactRole: "provider_response",
+      payloadFidelity: "exact",
+      containerKind: "single",
+      lineageDisposition: "not_applicable",
+      sha256: content.sha256,
+      byteSize: content.byteSize,
+    };
+    const privateDiagnostic = "synthetic-private-diagnostic-3bb73dca";
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const batchSpy = vi.spyOn(env.DB, "batch").mockRejectedValueOnce(new Error(
+      `D1_ERROR: CHECK constraint failed: fetch_artifacts ${privateDiagnostic}`,
+    ));
+    const response = await post(`/v1/runs/${runId}/artifacts`, payload);
+    batchSpy.mockRestore();
+    errorSpy.mockRestore();
+
+    expect(response.status).toBe(409);
+    const responseText = await response.text();
+    expect(JSON.parse(responseText)).toEqual({ error: "catalogue_conflict" });
+    expect(responseText).not.toContain(privateDiagnostic);
+    expect(errorSpy).not.toHaveBeenCalled();
     expect(await env.DB.prepare(
       "SELECT count(*) AS count FROM fetch_artifacts WHERE fetch_run_id = ?",
     ).bind(runId).first<{ count: number }>()).toEqual({ count: 0 });

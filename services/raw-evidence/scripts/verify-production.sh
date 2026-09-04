@@ -43,12 +43,12 @@ health=''
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   health="$(curl --fail-with-body --silent --show-error --max-time 30 \
     --proto '=https' --tlsv1.2 "${base_url}/health" || true)"
-  if jq -e '.ok == true and .schemaVersion == "0007"' <<<"${health}" >/dev/null 2>&1; then
+  if jq -e '.ok == true and .schemaVersion == "0008"' <<<"${health}" >/dev/null 2>&1; then
     break
   fi
   sleep 1
 done
-jq -e '.ok == true and .schemaVersion == "0007"' <<<"${health}" >/dev/null
+jq -e '.ok == true and .schemaVersion == "0008"' <<<"${health}" >/dev/null
 payload='{"fixture":"production-round-trip"}'
 payload_sha="$(printf '%s' "${payload}" | sha256sum | cut -d ' ' -f1)"
 payload_size="$(printf '%s' "${payload}" | wc -c)"

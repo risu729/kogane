@@ -2,7 +2,7 @@ import { parseCredential } from "./credential";
 import { UnknownResponseShapeError } from "./errors";
 import { parseCollectionResult } from "./local/windows-chrome-collector";
 import { assertReadAllowed, getReadRoute } from "./read-allowlist";
-import type { RawArtifact, ReadOperationId } from "./types";
+import type { CollectionFailure, RawArtifact, ReadOperationId } from "./types";
 
 const REQUIRED_OPERATIONS = [
   "common.security-connect",
@@ -15,6 +15,7 @@ const REQUIRED_OPERATIONS = [
 
 export interface CollectorOutput {
   artifacts: RawArtifact[];
+  failures: CollectionFailure[];
 }
 
 export async function collectSbiShinsei(options: {
@@ -33,12 +34,11 @@ export async function collectSbiShinsei(options: {
         `SBI Shinsei browser collection stopped at ${handoff.stage}`,
       );
     }
-    return {
-      artifacts: parseCollectionResult(
-        handoffJson,
-        options.now?.() ?? new Date(),
-      ).artifacts,
-    };
+    const result = parseCollectionResult(
+      handoffJson,
+      options.now?.() ?? new Date(),
+    );
+    return { artifacts: result.artifacts, failures: result.failures };
   } finally {
     credential.powerDirectPassword = "";
   }

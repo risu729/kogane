@@ -432,6 +432,70 @@ describe("sanitized source-usecase contract", () => {
       .first<{ count: number }>()).toMatchObject({ count: 1 });
   });
 
+  it("accepts a sanitized SBI Shinsei failure manifest as derived evidence", async () => {
+    const { sourceId } = cases.sbiShinseiLineage;
+    const { runId } = await createRun(
+      sourceId,
+      "synthetic-sbi-shinsei-sanitized-manifest",
+      "sanitized-failure-manifest",
+    );
+    const artifact = await catalogue(
+      runId,
+      "manifest.json",
+      JSON.stringify({
+        schemaVersion: "sbi-shinsei-worker-poc-v1",
+        status: "failed",
+        failures: [{
+          operation: "collect",
+          errorType: "Error",
+          message: "collector_request_failed",
+        }],
+      }),
+      {
+        artifactRole: "collector_derived",
+        payloadFidelity: "transformed",
+        lineageDisposition: "source_not_retained_for_security",
+        dataset: "collector-manifest",
+        formatId: "sbi-shinsei-collector-manifest-json",
+        formatVersion: "sbi-shinsei-worker-poc-v1",
+        declaredMediaType: "application/json",
+        mediaTypeBasis: "operator",
+        sequence: 0,
+        transformSteps: [
+          {
+            stepIndex: 0,
+            stepKind: "transport_decoded",
+            transformerId: "sbi-shinsei-manifest-sanitizer",
+            transformerVersion: "v1",
+          },
+          {
+            stepIndex: 1,
+            stepKind: "redacted",
+            transformerId: "sbi-shinsei-manifest-sanitizer",
+            transformerVersion: "v1",
+          },
+          {
+            stepIndex: 2,
+            stepKind: "reencoded",
+            transformerId: "sbi-shinsei-manifest-sanitizer",
+            transformerVersion: "v1",
+          },
+        ],
+      },
+    );
+    await terminal(runId, 1, "failed");
+    await seal(runId, [artifact], "sbi-shinsei-sanitized-failure-manifest");
+
+    expect(await env.DB.prepare(`
+      SELECT artifact_role, payload_fidelity, lineage_disposition
+      FROM fetch_artifacts WHERE fetch_run_id = ? AND artifact_key = 'manifest.json'
+    `).bind(runId).first()).toEqual({
+      artifact_role: "collector_derived",
+      payload_fidelity: "transformed",
+      lineage_disposition: "source_not_retained_for_security",
+    });
+  });
+
   it("requires every declared SBI VC Trade page before sealing", async () => {
     const value = cases.sbiVcPagination;
     const { runId } = await createRun(value.sourceId, value.sessionId);

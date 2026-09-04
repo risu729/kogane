@@ -80,3 +80,30 @@ export interface SonyManifest {
   artifacts: SonyArtifactManifest[];
   failures: SonyFailure[];
 }
+
+export interface SbiShinseiArtifactManifest {
+  dataset: string;
+  key: string;
+  mediaType: "application/json";
+  sha256: string;
+  bytes: number;
+}
+
+export interface SbiShinseiFailure {
+  operation: string;
+  errorType: string;
+  message: string;
+}
+
+export interface SbiShinseiManifest {
+  schemaVersion: "sbi-shinsei-worker-poc-v1";
+  source: "sbi-shinsei";
+  runId: string;
+  startedAt: string;
+  completedAt: string;
+  status: "success" | "partial" | "failed";
+  liveReadsEnabled: boolean;
+  artifacts: SbiShinseiArtifactManifest[];
+  failures: SbiShinseiFailure[];
+  legacyWindow?: { from: string; to: string };
+}

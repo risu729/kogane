@@ -21,5 +21,8 @@ export default defineConfig({
   ],
   test: {
     setupFiles: ["./test/apply-migrations.ts"],
+    // The D1 concurrency cases intentionally serialize multiple Worker calls.
+    // Five seconds is too tight on shared CI runners and under parallel test load.
+    testTimeout: 20_000,
   },
 });
