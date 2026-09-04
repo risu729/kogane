@@ -253,6 +253,32 @@ describe("Mobile Suica R2 importer", () => {
     await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({ status: "sealed" });
   });
 
+  test("accepts a pre-run browser capture for v1 and v2 but rejects one after completion", async () => {
+    for (const version of [1, 2] as const) {
+      const bucket = new FakeBucket();
+      const manifest = await storeRun(bucket, { version, rows: 1 });
+      manifest.capturedSessionAt = "2026-09-04T23:36:27.538Z";
+      const summary = JSON.parse(decode(bucket.objects.get(`${PREFIX}collection-summary.json`)!.body));
+      summary.capturedSessionAt = manifest.capturedSessionAt;
+      await replaceArtifact(
+        bucket,
+        manifest,
+        "collection-summary",
+        new TextEncoder().encode(JSON.stringify(summary)),
+        version,
+      );
+      await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({ status: "sealed" });
+
+      const future = new FakeBucket();
+      const futureManifest = await storeRun(future, { version, rows: 1 });
+      futureManifest.capturedSessionAt = "2026-09-05T00:01:00.001Z";
+      await replaceManifest(future, futureManifest, version);
+      const central = new FakeCentral();
+      await expect(importRun(future, central)).rejects.toMatchObject({ code: "manifest_captured_at_invalid" });
+      expect(central.requests).toHaveLength(0);
+    }
+  });
+
   test("accepts a v2 one-page 100-row boundary only as explicit partial evidence", async () => {
     const bucket = new FakeBucket();
     await storeRun(bucket, { version: 2, rows: 100, boundary: true });

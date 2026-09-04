@@ -323,7 +323,7 @@ export function parseMobileSuicaManifest(bytes: Uint8Array, manifestKey: string)
   const capturedSessionAt = input.capturedSessionAt === undefined
     ? undefined
     : instant(input.capturedSessionAt, "manifest_captured_at_invalid");
-  if (capturedSessionAt && (capturedSessionAt < startedAt || capturedSessionAt > completedAt)) {
+  if (capturedSessionAt && capturedSessionAt > completedAt) {
     invalid("manifest_captured_at_invalid");
   }
   const status = oneOf(input.status, ["success", "partial", "failed"] as const, "manifest_status_invalid");
