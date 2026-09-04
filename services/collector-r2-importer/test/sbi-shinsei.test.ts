@@ -184,6 +184,99 @@ describe("SBI Shinsei staged-run importer", () => {
     expect(rejected.requests).toHaveLength(0);
   });
 
+  test("accepts a capture-bounded legacy window when the provider omits toDate", async () => {
+    const bucket = new FakeBucket();
+    const { manifest } = await storeSuccessRun(bucket, {
+      legacyWindow: true,
+      legacyMetadata: true,
+    });
+    const top = manifest.artifacts.find((artifact) =>
+      artifact.dataset === "top-accounts-balance-and-activity"
+    )!;
+    const payload = JSON.parse(decode(bucket.objects.get(top.key)!.body));
+    const activity = topActivity(payload);
+    activity.fromDate = "2026-07-01";
+    activity.toDate = "";
+    await replaceArtifact(
+      bucket,
+      "top-accounts-balance-and-activity",
+      encode(JSON.stringify(payload)),
+    );
+
+    const central = new FakeCentral();
+    await expect(importRun(bucket, central)).resolves.toMatchObject({ sealed: true });
+    const topDescriptor = central.requests
+      .filter((request) => /\/artifacts$/u.test(request.path))
+      .map((request) => JSON.parse(request.body) as Record<string, unknown>)
+      .find((body) => body.dataset === "top-accounts-balance-and-activity")!;
+    expect(topDescriptor).not.toHaveProperty("ranges");
+  });
+
+  test("rejects unsafe legacy empty-toDate window boundaries", async () => {
+    const cases: Array<{
+      name: string;
+      mutateActivity?: (activity: ReturnType<typeof topActivity>) => void;
+      mutateManifest?: (manifest: TestManifest) => void;
+    }> = [
+      {
+        name: "raw fromDate after the declared window start",
+        mutateActivity: (activity) => {
+          activity.fromDate = "2026-08-02";
+        },
+      },
+      {
+        name: "posting date before the raw response start",
+        mutateActivity: (activity) => {
+          activity.fromDate = "2026-08-01";
+          activity.activityDetails[0]!.postingDate = "2026-07-31";
+        },
+      },
+      {
+        name: "posting date after the capture date",
+        mutateActivity: (activity) => {
+          activity.activityDetails[0]!.postingDate = "2026-09-01";
+        },
+      },
+      {
+        name: "window end different from the capture date",
+        mutateManifest: (manifest) => {
+          manifest.window!.to = "2026-08-30";
+        },
+      },
+    ];
+
+    for (const fixture of cases) {
+      const bucket = new FakeBucket();
+      const entries = await successEntries();
+      const topEntry = entries.find((entry) =>
+        entry.dataset === "top-accounts-balance-and-activity"
+      )!;
+      const activity = topActivity(topEntry.body);
+      activity.fromDate = "2026-07-01";
+      activity.toDate = "";
+      fixture.mutateActivity?.(activity);
+      const manifest = await storeManifest(
+        bucket,
+        entries.filter((entry) => entry.dataset !== "normalized"),
+        [{
+          operation: "derive:normalized",
+          errorType: "DerivationError",
+          message: "normalized_derivation_failed",
+        }],
+        { legacyWindow: true, legacyMetadata: true },
+      );
+      fixture.mutateManifest?.(manifest);
+      if (fixture.mutateManifest) await replaceManifest(bucket, manifest, true);
+
+      const central = new FakeCentral();
+      await expect(importRun(bucket, central), fixture.name).rejects.toMatchObject({
+        status: 409,
+        code: "manifest_window_payload_mismatch",
+      });
+      expect(central.requests, fixture.name).toHaveLength(0);
+    }
+  });
+
   test("accepts the deployed no-window shape with legacy metadata independently", async () => {
     const bucket = new FakeBucket();
     await storeSuccessRun(bucket, { legacyMetadata: true });
@@ -601,6 +694,24 @@ async function replaceManifest(
 
 function readManifest(bucket: FakeBucket): TestManifest {
   return JSON.parse(decode(bucket.objects.get(MANIFEST_KEY)!.body)) as TestManifest;
+}
+
+function topActivity(value: unknown): {
+  fromDate: unknown;
+  toDate: unknown;
+  activityDetails: Array<{ postingDate: unknown }>;
+} {
+  return (value as {
+    responseParam: {
+      activity: {
+        responseParam: {
+          fromDate: unknown;
+          toDate: unknown;
+          activityDetails: Array<{ postingDate: unknown }>;
+        };
+      };
+    };
+  }).responseParam.activity.responseParam;
 }
 
 function importRun(bucket: FakeBucket, central: FakeCentral) {

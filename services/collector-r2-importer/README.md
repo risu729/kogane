@@ -118,7 +118,7 @@ SBI新生銀行はContainer内の銀行ページ自身のlogin処理を通した
 
 top取得後のprovider read失敗は`read:<dataset>`で表し、後続の未実行datasetを含めて保存済みartifactとの完全な補集合にする。これにより、exchange rate等の後半readが失敗しても、それ以前に取得・検証できたtopや残高summaryを捨てず、`provider-read-incomplete`のpartial evidenceとしてsealできる。自由形式のprovider error本文は中央へ渡さない。
 
-導入前に保存されたrunには、現在の型から削除済みの`window`がmanifestに含まれる。互換経路は「windowなしの現行shape」と「windowだけを追加した旧shape」の2種類に限定し、top artifactが保存されている場合は旧windowをactivityの`fromDate`/`toDate`と一致させる。collect失敗またはtopのR2書込み失敗でtop自体がないrunは、windowを取得済み範囲とは扱わず、失敗証拠をそのままcatalogueする。任意fieldの追加は許可しない。
+導入前に保存されたrunには、現在の型から削除済みの`window`がmanifestに含まれる。互換経路は「windowなしの現行shape」と「windowだけを追加した旧shape」の2種類に限定する。top artifactのactivity `toDate`がある旧runは、従来どおり`fromDate`/`toDate`をwindowと完全一致させる。deployed旧variantが`toDate: ""`を返す場合だけ、window終端がstarted/completed日の双方と一致し、raw `fromDate`がwindow開始以前で、全posting dateがraw開始以上かつwindow終端以下である場合に限って受理する。この旧windowはproviderが宣言した完全な取得範囲ではないため、中央artifactに`ranges`は発行しない。collect失敗またはtopのR2書込み失敗でtop自体がないrunも、windowを取得済み範囲とは扱わず、失敗証拠をそのままcatalogueする。任意fieldの追加は許可しない。
 
 R2 custom metadataは、既存の2/3-key形とこのPR以後のsource/run/hash付き4-key形を、それぞれ完全一致で受理する。manifestのwindow削除とmetadata強化は別時期の変更なので両者を不必要に結合せず、追加keyを含む曖昧なshapeは拒否する。
 

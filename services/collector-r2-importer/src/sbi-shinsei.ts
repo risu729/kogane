@@ -489,12 +489,42 @@ function validateCrossArtifactMeaning(
       throw new ImportError(409, "normalized_payload_mismatch");
     }
   }
-  if (manifest.legacyWindow) {
+  const legacyWindow = manifest.legacyWindow;
+  if (legacyWindow) {
     if (top) {
-      const actual = topWindow(top);
-      if (actual.from !== manifest.legacyWindow.from || actual.to !== manifest.legacyWindow.to) {
-        throw new ImportError(409, "manifest_window_payload_mismatch");
-      }
+      validateLegacyWindow(manifest, legacyWindow, top);
+    }
+  }
+}
+
+function validateLegacyWindow(
+  manifest: SbiShinseiManifest,
+  legacyWindow: { from: string; to: string },
+  top: JsonObject,
+): void {
+  const actual = topWindow(top);
+  if (actual.to !== null) {
+    if (actual.from !== legacyWindow.from || actual.to !== legacyWindow.to) {
+      throw new ImportError(409, "manifest_window_payload_mismatch");
+    }
+    return;
+  }
+
+  const startedDate = manifest.startedAt.slice(0, 10);
+  const completedDate = manifest.completedAt.slice(0, 10);
+  if (
+    legacyWindow.to !== startedDate ||
+    legacyWindow.to !== completedDate ||
+    actual.from > legacyWindow.from
+  ) {
+    throw new ImportError(409, "manifest_window_payload_mismatch");
+  }
+
+  for (const value of actual.activityDetails) {
+    const item = recordConflict(value, "artifact_schema_invalid");
+    const postingDate = compactDate(item.postingDate);
+    if (postingDate < actual.from || postingDate > legacyWindow.to) {
+      throw new ImportError(409, "manifest_window_payload_mismatch");
     }
   }
 }
@@ -586,13 +616,18 @@ function normalizeTop(top: JsonObject, capturedAt: string): NormalizedSnapshot {
   return { schemaVersion: "sbi-shinsei-v1", capturedAt, balances, transactions };
 }
 
-function topWindow(top: JsonObject): { from: string; to: string } {
+function topWindow(top: JsonObject): {
+  from: string;
+  to: string | null;
+  activityDetails: unknown[];
+} {
   const response = recordConflict(top.responseParam, "artifact_schema_invalid");
   const activity = recordConflict(response.activity, "artifact_schema_invalid");
   const detail = recordConflict(activity.responseParam, "artifact_schema_invalid");
   return {
     from: compactDate(detail.fromDate),
-    to: compactDate(detail.toDate),
+    to: detail.toDate === "" ? null : compactDate(detail.toDate),
+    activityDetails: detail.activityDetails as unknown[],
   };
 }
 
