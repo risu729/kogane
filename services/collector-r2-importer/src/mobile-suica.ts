@@ -681,7 +681,7 @@ async function dataDescriptor(options: {
       ? "mobile-suica-sf-history-html-cp932-sanitized"
       : normalized ? "mobile-suica-sf-history-json" : "mobile-suica-collection-summary-json",
     formatVersion: options.manifest.schemaVersion,
-    declaredMediaType: options.entry.manifest.mediaType,
+    declaredMediaType: html ? "text/html" : options.entry.manifest.mediaType,
     mediaTypeBasis: "manifest",
     fetchedAtMs: Date.parse(options.manifest.completedAt),
     fetchedAtBasis: "manifest",

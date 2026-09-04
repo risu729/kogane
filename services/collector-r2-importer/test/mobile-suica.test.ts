@@ -207,6 +207,7 @@ describe("Mobile Suica R2 importer", () => {
       artifactRole: "sanitized_provider_capture",
       payloadFidelity: "transformed",
       lineageDisposition: "source_not_retained_for_security",
+      declaredMediaType: "text/html",
       pageGroupId: 20,
       pageIndex: 0,
     });
