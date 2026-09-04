@@ -126,7 +126,7 @@ top取得後のprovider read失敗は`read:<dataset>`で表し、後続の未実
 
 R2 custom metadataは、既存の2/3-key形とこのPR以後のsource/run/hash付き4-key形を、それぞれ完全一致で受理する。manifestのwindow削除とmetadata強化は別時期の変更なので両者を不必要に結合せず、追加keyを含む曖昧なshapeは拒否する。
 
-raw 4件はresponse textへのtransport decode後、top-level `header.newToken`を取り除いて再encodeし、`sanitized_provider_capture / transformed / source_not_retained_for_security`として登録する。normalizedは`collector_derived / transformed`としてtop responseへlineageを張り、manifestは`collector_manifest / generated`として登録する。導入前のR2 objectに一時CSRF値が含まれていても、その値を中央へ複製しない。中央ではcanonical source `sbi-shinsei-bank`へaliasを解決し、`collector-r2-sbi-shinsei`専用credential/routeだけを許可する。元R2は即時import・backfillの成否にかかわらず変更・削除しない。
+raw 4件はresponse textへのtransport decode後、top-level `header.newToken`を取り除いて再encodeし、`sanitized_provider_capture / transformed / source_not_retained_for_security`として登録する。normalizedは`collector_derived / transformed`としてtop responseへlineageを張り、manifestは`collector_derived / transformed / source_not_retained_for_security`として登録する。導入前のR2 objectに一時CSRF値が含まれていても、その値を中央へ複製しない。中央ではcanonical source `sbi-shinsei-bank`へaliasを解決し、`collector-r2-sbi-shinsei`専用credential/routeだけを許可する。元R2は即時import・backfillの成否にかかわらず変更・削除しない。
 
 ## Sony銀行の境界
 
