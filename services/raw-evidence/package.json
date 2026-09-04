@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "bun@1.4.0",
   "scripts": {
-    "test": "vitest run && bash test/verify-sbi-shinsei-route.test.sh",
+    "test": "vitest run && bash test/verify-sbi-shinsei-route.test.sh && bash test/verify-mobile-suica-route.test.sh",
     "typecheck": "wrangler types && tsc --noEmit",
     "check:importer": "bun build scripts/ingest-file.ts --target=bun --outfile=/tmp/kogane-ingest-file-check.js",
     "cf:types": "wrangler types",

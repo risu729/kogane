@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { encode } from "iconv-lite";
-import { historySearchBody, parseHistoryRows, parseSessionEnvelope } from "../src/mobile-suica";
+import {
+  collectionCompleteness,
+  historySearchBody,
+  parseHistoryRows,
+  parseSessionEnvelope,
+} from "../src/mobile-suica";
 
 describe("Mobile Suica session replay", () => {
   test("validates the source-scoped envelope", () => {
@@ -47,5 +52,12 @@ describe("Mobile Suica session replay", () => {
   test("does not decode generated entity text a second time", () => {
     const row = `<tr><td></td><td>08/30</td><td>物販</td><td>&amp;#38;</td><td></td><td></td><td>\\1</td><td>-1</td></tr>`;
     expect(parseHistoryRows(`<table>${row}</table>`, "2026-08-31")[0]?.placeFrom).toBe("&#38;");
+  });
+
+  test("treats only a sub-100 single page as complete", () => {
+    expect(collectionCompleteness(0)).toBe(true);
+    expect(collectionCompleteness(99)).toBe(true);
+    expect(collectionCompleteness(100)).toBe(false);
+    expect(() => collectionCompleteness(101)).toThrow("history_row_count_invalid");
   });
 });

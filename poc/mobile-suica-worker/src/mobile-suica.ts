@@ -1,9 +1,9 @@
 import { decode } from "iconv-lite";
+import { sanitizeHistoryHtml } from "./sanitize";
 import type { HistoryRow, RawArtifact, SessionEnvelope } from "./types";
 
 const historyUrl = "https://www.mobilesuica.com/iq/ir/SuicaDisp.aspx";
 const maxResponseBytes = 2 * 1024 * 1024;
-const maxPages = 10;
 const historyPageLimit = 100;
 const requiredCookieNames = ["ASP.NET_SessionId", "sc_auth", "TS0184138d"];
 
@@ -39,65 +39,50 @@ export function parseSessionEnvelope(input: string): SessionEnvelope {
 export async function collectMobileSuica(options: {
   session: SessionEnvelope;
   asOfDateJst: string;
-}): Promise<{ artifacts: RawArtifact[]; rows: HistoryRow[]; pageCount: number }> {
+}): Promise<{ artifacts: RawArtifact[]; rows: HistoryRow[]; pageCount: 1; complete: boolean }> {
   const cookieJar = parseCookieHeader(options.session.cookieHeader);
   const initialFields = new URLSearchParams(options.session.formBody);
-  let baseVariable = requiredString(initialFields.get("baseVariable"), "baseVariable");
-  let cursor = options.asOfDateJst;
-  const pages: Array<{ cursor: string; bytes: Uint8Array; rows: HistoryRow[] }> = [];
-
-  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-    const response = await fetch(historyUrl, {
-      method: "POST",
-      redirect: "manual",
-      headers: {
-        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "accept-language": "ja-JP,ja;q=0.9,en;q=0.8",
-        "content-type": "application/x-www-form-urlencoded",
-        cookie: serializeCookies(cookieJar),
-        origin: "https://www.mobilesuica.com",
-        referer: `${historyUrl}?returnId=SFRCMMEPC03`,
-        "user-agent": options.session.userAgent,
-      },
-      body: historySearchBody(baseVariable, cursor),
-    });
-    updateCookies(cookieJar, response.headers.getSetCookie());
-    if (response.status !== 200) {
-      throw new Error(`Mobile Suica history request failed with HTTP ${response.status}`);
-    }
-    const bytes = await readBounded(response, maxResponseBytes);
-    const html = decode(bytes, "shift_jis");
-    if (isLoginPage(html)) throw new Error("Mobile Suica session expired; local passkey bootstrap is required");
-    const rows = parseHistoryRows(html, cursor);
-    if (rows.length === 0 && !isHistoryPage(html)) {
-      throw new Error("Mobile Suica response was not the SF history page");
-    }
-    pages.push({ cursor, bytes, rows });
-    if (rows.length < historyPageLimit) break;
-    const oldest = rows.at(-1)?.date;
-    if (!oldest) break;
-    cursor = dayBefore(oldest);
-    baseVariable = inputValue(html, "baseVariable") ?? baseVariable;
-    if (pageIndex === maxPages - 1) {
-      throw new Error(`Mobile Suica history exceeded ${maxPages} pages`);
-    }
+  const baseVariable = requiredString(initialFields.get("baseVariable"), "baseVariable");
+  const response = await fetch(historyUrl, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "accept-language": "ja-JP,ja;q=0.9,en;q=0.8",
+      "content-type": "application/x-www-form-urlencoded",
+      cookie: serializeCookies(cookieJar),
+      origin: "https://www.mobilesuica.com",
+      referer: `${historyUrl}?returnId=SFRCMMEPC03`,
+      "user-agent": options.session.userAgent,
+    },
+    body: historySearchBody(baseVariable, options.asOfDateJst),
+  });
+  updateCookies(cookieJar, response.headers.getSetCookie());
+  if (response.status !== 200) throw new Error("history_request_failed");
+  const responseBytes = await readBounded(response, maxResponseBytes);
+  const html = decode(responseBytes, "shift_jis");
+  if (isLoginPage(html)) throw new Error("history_session_expired");
+  const collectedRows = parseHistoryRows(html, options.asOfDateJst);
+  if (collectedRows.length === 0 && !isHistoryPage(html)) {
+    throw new Error("history_response_invalid");
   }
-
-  const collectedRows = pages.flatMap((page) => page.rows);
-  const artifacts: RawArtifact[] = pages.map((page, index) => ({
+  const complete = collectionCompleteness(collectedRows.length);
+  const sanitizedBytes = sanitizeHistoryHtml(html);
+  const artifacts: RawArtifact[] = [{
     dataset: "sf-history-html",
-    filename: `sf-history-page-${String(index + 1).padStart(4, "0")}.html`,
+    filename: "sf-history-page-0001.html",
     mediaType: "text/html; charset=shift_jis",
-    body: page.bytes,
-  }));
+    body: sanitizedBytes,
+  }];
   artifacts.push({
     dataset: "sf-history",
     filename: "sf-history.json",
     mediaType: "application/json",
     body: JSON.stringify({
       asOfDateJst: options.asOfDateJst,
-      pageCount: pages.length,
+      pageCount: 1,
       transactionCount: collectedRows.length,
+      complete,
       rows: collectedRows,
     }),
   });
@@ -107,13 +92,21 @@ export async function collectMobileSuica(options: {
     mediaType: "application/json",
     body: JSON.stringify({
       asOfDateJst: options.asOfDateJst,
-      pageCount: pages.length,
+      pageCount: 1,
       transactionCount: collectedRows.length,
+      complete,
       cookieNames: [...cookieJar.keys()].sort(),
       capturedSessionAt: options.session.capturedAt,
     }),
   });
-  return { artifacts, rows: collectedRows, pageCount: pages.length };
+  return { artifacts, rows: collectedRows, pageCount: 1, complete };
+}
+
+export function collectionCompleteness(rowCount: number): boolean {
+  if (!Number.isSafeInteger(rowCount) || rowCount < 0 || rowCount > historyPageLimit) {
+    throw new Error("history_row_count_invalid");
+  }
+  return rowCount < historyPageLimit;
 }
 
 export function parseHistoryRows(html: string, cursorDate: string): HistoryRow[] {
@@ -183,18 +176,6 @@ function textContent(html: string): string {
     })
     .replace(/\s+/gu, " ")
     .trim();
-}
-
-function inputValue(html: string, name: string): string | undefined {
-  const tag = [...html.matchAll(/<input\b[^>]*>/giu)].find((match) =>
-    new RegExp(`\\bname=["']${escapeRegex(name)}["']`, "iu").test(match[0]),
-  )?.[0];
-  return tag ? attribute(tag, "value") : undefined;
-}
-
-function attribute(tag: string, name: string): string | undefined {
-  const value = new RegExp(`\\b${escapeRegex(name)}=["']([^"']*)["']`, "iu").exec(tag)?.[1];
-  return value?.replace(/&amp;/giu, "&");
 }
 
 function parseAmount(value: string): number | null {
@@ -271,11 +252,6 @@ function isLoginPage(html: string): boolean {
   return /name=["']MailAddress["']/iu.test(html) || /WebCaptcha/i.test(html);
 }
 
-function dayBefore(date: string): string {
-  const time = Date.parse(`${date}T00:00:00+09:00`) - 86_400_000;
-  return new Date(time + 9 * 3_600_000).toISOString().slice(0, 10);
-}
-
 function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -287,10 +263,6 @@ function requiredString(value: unknown, name: string): string {
 
 function rejectHeaderInjection(value: string, name: string): void {
   if (/\r|\n/u.test(value)) throw new Error(`${name} contains a newline`);
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

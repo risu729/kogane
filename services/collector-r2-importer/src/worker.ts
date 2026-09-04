@@ -1,4 +1,5 @@
 import { ImportError } from "./error";
+import { importMobileSuicaRun } from "./mobile-suica";
 import { importSbiRun } from "./sbi";
 import { importSbiShinseiRun } from "./sbi-shinsei";
 import { importSbiVcRun } from "./sbi-vc";
@@ -15,6 +16,67 @@ export default {
         service: "collector-r2-importer",
         version: env.IMPORTER_VERSION,
       });
+    }
+    if (request.method === "POST" && url.pathname === "/v1/mobile-suica/import-run" &&
+        url.search === "") {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["manifestKey"]);
+        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
+        return json(await importOneMobileSuica(env, manifestKey));
+      } catch (error) {
+        return errorResponse(error);
+      }
+    }
+    if (request.method === "POST" && url.pathname === "/v1/mobile-suica/backfill-page" &&
+        url.search === "") {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["cursor", "limit"]);
+        const cursor = input.cursor === undefined
+          ? undefined
+          : requiredString(input.cursor, "cursor_invalid", 4_096);
+        if (input.limit !== undefined && input.limit !== 1) {
+          throw new ImportError(400, "backfill_limit_must_be_one");
+        }
+        const listed = await env.MOBILE_SUICA_SNAPSHOTS.list({
+          prefix: "raw/mobile-suica/",
+          limit: 1,
+          ...(cursor ? { cursor } : {}),
+        });
+        const object = listed.objects[0];
+        let importedManifestCount = 0;
+        let skippedManifestCount = 0;
+        let failedManifestCount = 0;
+        let failureCode: string | undefined;
+        let result: Awaited<ReturnType<typeof importOneMobileSuica>> | undefined;
+        if (object?.key.endsWith("/manifest.json")) {
+          try {
+            result = await importOneMobileSuica(env, object.key);
+            importedManifestCount = 1;
+          } catch (error) {
+            failedManifestCount = 1;
+            failureCode = safeCode(error);
+          }
+        } else if (object) {
+          skippedManifestCount = 1;
+        }
+        return json({
+          source: "mobile-suica",
+          scannedObjectCount: listed.objects.length,
+          importedManifestCount,
+          skippedManifestCount,
+          deferredManifestCount: 0,
+          failedManifestCount,
+          nextCursor: listed.truncated ? listed.cursor ?? null : null,
+          truncated: listed.truncated,
+          ...(failureCode ? { failureCode } : {}),
+          ...(failedManifestCount === 1 && object ? { failedManifestKey: object.key } : {}),
+          ...(result ? { result } : {}),
+        });
+      } catch (error) {
+        return errorResponse(error);
+      }
     }
     if (request.method === "POST" && url.pathname === "/v1/sbi-securities/import-run" &&
         url.search === "") {
@@ -241,6 +303,17 @@ function importOne(env: Env, manifestKey: string) {
     bucket: env.SBI_SNAPSHOTS,
     centralService: env.RAW_EVIDENCE,
     centralToken: env.RAW_EVIDENCE_TOKEN,
+    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
+    importerVersion: env.IMPORTER_VERSION,
+    manifestKey,
+  });
+}
+
+function importOneMobileSuica(env: Env, manifestKey: string) {
+  return importMobileSuicaRun({
+    bucket: env.MOBILE_SUICA_SNAPSHOTS,
+    centralService: env.RAW_EVIDENCE,
+    centralToken: env.RAW_EVIDENCE_TOKEN_MOBILE_SUICA,
     fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
     importerVersion: env.IMPORTER_VERSION,
     manifestKey,

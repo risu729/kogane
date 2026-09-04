@@ -447,6 +447,7 @@ describe("0001 raw-evidence schema", () => {
       WHERE producer_id = 'collector-r2-importer' ORDER BY external_source_id
     `).all<{ external_source_id: string; source_id: string }>();
     expect(aliases.results).toEqual([
+      { external_source_id: "mobile-suica", source_id: "mobile-suica" },
       { external_source_id: "moneyforward-me", source_id: "moneyforward-me" },
       { external_source_id: "prestia-globalpass", source_id: "global-pass" },
       { external_source_id: "sbi-securities", source_id: "sbi-securities" },
@@ -513,6 +514,20 @@ describe("0001 raw-evidence schema", () => {
       producer_id: "collector-r2-importer",
       source_id: "sbi-shinsei-bank",
     }]);
+    const mobileSuicaRoute = await env.DB.prepare(`
+      SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes
+      WHERE ingest_client_id = 'collector-r2-mobile-suica'
+      ORDER BY producer_id, source_id
+    `).all<{
+      ingest_client_id: string;
+      producer_id: string;
+      source_id: string;
+    }>();
+    expect(mobileSuicaRoute.results).toEqual([{
+      ingest_client_id: "collector-r2-mobile-suica",
+      producer_id: "collector-r2-importer",
+      source_id: "mobile-suica",
+    }]);
     const sbiPolicies = await env.DB.prepare(`
       SELECT template, redaction_version, fingerprint_key_version
       FROM origin_template_policies
@@ -566,6 +581,20 @@ describe("0001 raw-evidence schema", () => {
     }>();
     expect(sbiShinseiPolicies.results).toEqual([{
       template: "raw/sbi-shinsei/{date}/{run-id}/{artifact}",
+      redaction_version: "v1",
+      fingerprint_key_version: "collector-r2-v1",
+    }]);
+    const mobileSuicaPolicies = await env.DB.prepare(`
+      SELECT template, redaction_version, fingerprint_key_version
+      FROM origin_template_policies
+      WHERE source_id = 'mobile-suica' AND origin_kind = 'storage' AND active = 1
+    `).all<{
+      template: string;
+      redaction_version: string;
+      fingerprint_key_version: string;
+    }>();
+    expect(mobileSuicaPolicies.results).toEqual([{
+      template: "raw/mobile-suica/{date}/{run-id}/{artifact}",
       redaction_version: "v1",
       fingerprint_key_version: "collector-r2-v1",
     }]);

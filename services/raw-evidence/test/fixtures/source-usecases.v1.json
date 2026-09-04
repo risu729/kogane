@@ -51,8 +51,9 @@
     },
     "mobileSuicaCp932": {
       "sourceId": "mobile-suica",
-      "sessionId": "fixture-mobile-suica-cp932",
-      "cp932Hex": "979a97f02c8d8096da0d0a89cb8bf32c82c882b50d0a"
+      "sessionId": "fixture-mobile-suica-sanitized-cp932",
+      "redactionSentinel": "__KOGANE_REDACTED_BASE_VARIABLE__",
+      "sanitizedCp932Hex": "3c68746d6c3e3c626f64793e97989770979a97f03c696e70757420747970653d2268696464656e22206e616d653d22626173655661726961626c65222076616c75653d225f5f4b4f47414e455f52454441435445445f424153455f5641524941424c455f5f223e3c2f626f64793e3c2f68746d6c3e"
     },
     "vPointEmptyPage": {
       "sourceId": "v-point",

@@ -12,6 +12,7 @@ describe("collector R2 importer deployment scripts", () => {
       "RAW_EVIDENCE_TOKEN_SBI_VC",
       "RAW_EVIDENCE_TOKEN_SONY",
       "RAW_EVIDENCE_TOKEN_SBI_SHINSEI",
+      "RAW_EVIDENCE_TOKEN_MOBILE_SUICA",
       "ORIGIN_FINGERPRINT_KEY",
     ];
 

@@ -8,6 +8,7 @@ export function runPrefix(startedAt: string, runId: string): string {
 export async function storeArtifact(options: {
   bucket: R2Bucket;
   prefix: string;
+  runId: string;
   artifact: RawArtifact;
 }): Promise<StoredArtifact> {
   if (!/^[a-z0-9-]+$/u.test(options.artifact.dataset)) throw new Error("Unsafe dataset name");
@@ -20,7 +21,12 @@ export async function storeArtifact(options: {
   const key = `${options.prefix}/${options.artifact.filename}`;
   await options.bucket.put(key, options.artifact.body, {
     httpMetadata: { contentType: options.artifact.mediaType },
-    customMetadata: { dataset: options.artifact.dataset, sha256 },
+    customMetadata: {
+      source: "mobile-suica",
+      runId: options.runId,
+      dataset: options.artifact.dataset,
+      sha256,
+    },
   });
   return {
     dataset: options.artifact.dataset,

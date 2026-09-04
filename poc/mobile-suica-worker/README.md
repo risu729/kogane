@@ -14,8 +14,10 @@ Workerで日次実行するPoCである。BitwardenはWorkerから参照しな�
    処理とWebAuthn ceremonyを実行する。
 4. 会員メニューの「SF（電子マネー）利用履歴」をクリックし、履歴画面の短命な
    Cookieと`baseVariable`をWorker内部だけで受け取る。
-5. 以降の期間走査はplain Worker `fetch`で行い、raw Shift_JIS HTML、正規化JSON、
-   summary、manifestをprivate R2へ保存する。
+5. plain Worker `fetch`で履歴を1ページだけ取得する。HTMLをparseした後、唯一の
+   `baseVariable`を`__KOGANE_REDACTED_BASE_VARIABLE__`へ置換し、CP932へ再encodeした
+   sanitized HTML、正規化JSON、summary、manifestをprivate R2へ保存する。
+6. manifest保存直後にService Binding経由で中央raw-evidenceへimportする。
 
 Bitwarden vault、master password、`BW_SESSION`、JRE ID password、Cookie、raw
 WebAuthn assertionはR2、ログ、manifest、Gitへ保存しない。
@@ -48,11 +50,16 @@ raw/mobile-suica/YYYY/MM/DD/<run-id>/manifest.json
 ```
 
 HTMLとJSONには本人の交通・購買履歴、残高、金額が含まれる。R2 bucketはpublicに
-しない。raw HTMLには公式レスポンスの短命な`baseVariable`が残るため、session
-失効前は認証素材に近い機密性で扱う。
+しない。保存するHTMLは`baseVariable`を固定sentinelへ置換済みであり、元の値をR2へ
+保存しない。Cookie、passkey、WebAuthn assertionも保存しない。
 
-日付検索は「指定日以前」で、1ページ最大100件である。100件なら最古日の前日を
-次cursorにする。1日だけで100件に達した場合は完全性を証明できないため失敗する。
+日付検索は「指定日以前」で、1ページ最大100件である。v2は1ページだけを取得し、
+100件未満ならcomplete success、100件ちょうどなら3 artifactを保存した上で
+`partial` / `history_boundary_unproven`とする。前日cursorへ進めず、完全取得を主張しない。
+manual triggerはpartialをHTTP 502、scheduled runはthrowとして可観測にする。
+
+各artifactのR2 custom metadataは`source`, `runId`, `dataset`, `sha256`の4項目だけである。
+manifest metadataは安全な`source`, `status`, `runId`の3項目だけを保存する。
 
 ## Bitwardenからのローカル同期
 
@@ -88,11 +95,19 @@ bun run cf:deploy
 `ADMIN_TRIGGER_TOKEN`はデプロイ完了後に設定する。Secret変更とcode deployは別version
 として反映されるため、診断・手動実行に使うローカル値とWorker側の値を最後に揃える。
 
+過去runはsecure token fileを読み、1回にmanifest 1件だけを中央へ送る。source R2 objectは
+削除・移動しない。
+
+```sh
+./scripts/backfill-raw-evidence.sh
+```
+
 ## resourceとcleanup
 
 - Worker: `kogane-mobile-suica-collector-poc`
 - Browser binding: `BROWSER`
 - R2 bucket: `kogane-mobile-suica-collector-poc`
+- Service binding: `RAW_EVIDENCE_IMPORTER` → `kogane-collector-r2-importer`
 - Cron: `10 21 * * *`
 - Secrets: `ADMIN_TRIGGER_TOKEN`, `JRE_ID_CREDENTIAL_JSON`
 

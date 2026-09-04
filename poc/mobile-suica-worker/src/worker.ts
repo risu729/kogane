@@ -1,7 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { collectMobileSuica, parseSessionEnvelope } from "./mobile-suica";
+import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
-import type { CollectionFailure, CollectionManifest, CollectionResult } from "./types";
+import type { CollectionFailure, CollectionManifest, CollectionResult, StoredArtifact } from "./types";
 import { checkStoredJreCredential, parseStoredJreCredential } from "./webauthn";
 import {
   bootstrapMobileSuicaSessionWithBrowser,
@@ -98,6 +99,20 @@ export default {
         }, { status: 502 });
       }
     }
+    if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
+      if (!authorized(request, secretBinding(env, "ADMIN_TRIGGER_TOKEN"))) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      if (url.searchParams.get("limit") !== "1") {
+        return Response.json({ error: "limit_must_be_one" }, { status: 400 });
+      }
+      try {
+        const cursor = url.searchParams.get("cursor") ?? undefined;
+        return Response.json(await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, cursor));
+      } catch {
+        return Response.json({ error: "raw_evidence_backfill_failed" }, { status: 502 });
+      }
+    }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
@@ -110,14 +125,14 @@ export default {
     }
     const result = await runCollection(env, asOfDateJst);
     return Response.json(publicResult(result), {
-      status: result.status === "failed" ? 502 : 200,
+      status: result.status === "success" ? 200 : 502,
     });
   },
 
   async scheduled(_controller, env): Promise<void> {
     const result = await runCollection(env, tokyoDate(new Date()));
-    if (result.status === "failed") {
-      throw new Error(`Mobile Suica collection failed; manifest=${result.manifestKey}`);
+    if (result.status !== "success") {
+      throw new Error(`Mobile Suica collection incomplete; manifest=${result.manifestKey}`);
     }
   },
 } satisfies ExportedHandler<Env>;
@@ -126,10 +141,11 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionR
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const prefix = runPrefix(startedAt, runId);
-  const artifacts = [];
+  const artifacts: StoredArtifact[] = [];
   const failures: CollectionFailure[] = [];
   let transactionCount = 0;
   let pageCount = 0;
+  let complete = false;
   let capturedSessionAt: string | undefined;
 
   try {
@@ -143,15 +159,23 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionR
     const collection = await collectMobileSuica({ session, asOfDateJst });
     transactionCount = collection.rows.length;
     pageCount = collection.pageCount;
+    complete = collection.complete;
+    if (!collection.complete) {
+      failures.push({
+        operation: "pagination",
+        errorType: "HistoryBoundaryError",
+        errorCode: "history_boundary_unproven",
+      });
+    }
     for (const artifact of collection.artifacts) {
       try {
-        artifacts.push(await storeArtifact({ bucket: env.SNAPSHOTS, prefix, artifact }));
+        artifacts.push(await storeArtifact({ bucket: env.SNAPSHOTS, prefix, runId, artifact }));
       } catch (error) {
-        failures.push(failure(`r2:${artifact.dataset}`, error));
+        failures.push(failure("r2", error, "artifact_store_failed", artifact.filename));
       }
     }
   } catch (error) {
-    failures.push(failure("collect", error));
+    failures.push(failure("collect", error, "collection_failed"));
   }
 
   const completedAt = new Date().toISOString();
@@ -167,10 +191,12 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionR
     ...(capturedSessionAt ? { capturedSessionAt } : {}),
     transactionCount,
     pageCount,
+    complete,
     artifacts,
     failures,
   };
   const manifestKey = await storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest });
+  const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey);
   console.log(JSON.stringify({
     event: "mobile-suica-collection-stored",
     runId,
@@ -180,8 +206,10 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionR
     artifactCount: artifacts.length,
     failureCount: failures.length,
     manifestKey,
+    centralStatus: central.status,
+    centralRunId: central.centralRunId,
   }));
-  return { ...manifest, manifestKey };
+  return { ...manifest, manifestKey, central };
 }
 
 function authorized(request: Request, expected: string | undefined): boolean {
@@ -211,11 +239,17 @@ function validDate(value: string): boolean {
     new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
 }
 
-function failure(operation: string, error: unknown): CollectionFailure {
+function failure(
+  operation: CollectionFailure["operation"],
+  error: unknown,
+  errorCode: CollectionFailure["errorCode"],
+  artifactKey?: string,
+): CollectionFailure {
   return {
     operation,
     errorType: error instanceof Error ? error.name : "UnknownError",
-    message: publicError(error),
+    errorCode,
+    ...(artifactKey ? { artifactKey } : {}),
   };
 }
 
@@ -236,5 +270,10 @@ function publicResult(result: CollectionResult): object {
     artifactCount: result.artifacts.length,
     failureCount: result.failures.length,
     manifestKey: result.manifestKey,
+    central: {
+      status: result.central.status,
+      centralRunId: result.central.centralRunId,
+      sealed: result.central.sealed,
+    },
   };
 }
