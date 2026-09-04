@@ -95,6 +95,26 @@ Cloudflare secret として設定します。値を repository、`.dev.vars`、l
 - `ADMIN_TRIGGER_TOKEN`
 - `RELAY_TOKEN`
 
+`ADMIN_TRIGGER_TOKEN`はCloudflareから値を読み戻せないため、collector専用スクリプトでローカルfileとWorker secretを同じ値へ同期する。初回作成またはrotationは次を実行する。このスクリプトは32-byteの乱数を生成し、current user所有・mode 0600のregular non-symlink fileだけを使用する。token値はstdout、stderr、Wrangler引数へ出さない。
+
+```bash
+bash poc/sbi-shinsei-worker/scripts/sync-admin-trigger-token.sh --rotate
+```
+
+rotationは保護されたtemporary fileから同じdirectoryの`.pending`を原子的に作り、その値をstdinで`ADMIN_TRIGGER_TOKEN`へ同期する。Wrangler成功後だけ`.pending`を既定pathへatomic renameする。同期結果が不明または失敗した場合は、既存のlocal tokenを変更せず`.pending`を残す。新しいtokenを生成せず、次で同じ値を再送して回復する。
+
+```bash
+bash poc/sbi-shinsei-worker/scripts/sync-admin-trigger-token.sh --resume
+```
+
+既存local tokenをrotationせずWorkerへ再同期する場合だけ`--sync`を使う。`.pending`が存在する間は`--sync`と新しい`--rotate`を拒否する。成功出力はsecret名とlocal pathだけであり、直後にcanaryを実行する。
+
+```bash
+bash poc/sbi-shinsei-worker/scripts/sync-admin-trigger-token.sh --sync
+KOGANE_STOP_AFTER_MANIFEST=1 \
+  poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
+```
+
 ローカルCLIは次の順でcredentialを読みます。
 
 1. `--credential-stdin` の標準入力（captureからdiskを介さず引き渡す検証用）
