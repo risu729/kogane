@@ -675,11 +675,56 @@ or integrity check can be supplied dynamically. The manifest permits
 cleartext traffic, although every banking route found here is HTTPS.
 
 The biometric plugin has an explicit `UserData` model containing ID/password
-and invokes Android biometric APIs. Because the storage/key-handling classes
-are heavily obfuscated and no runtime was used, the exact Android Keystore
-binding, ciphertext location, migration behavior, and exportability remain
-unconfirmed. Kogane should use the user's normal ID/password bootstrap rather
-than attempt to copy biometric state.
+and invokes Android biometric APIs. Static tracing confirms that the app
+encrypts those credentials with Android Keystore, stores ciphertext plus IV in
+SharedPreferences, and decrypts them after the local biometric gate before
+performing the same normal sign-on. No WebAuthn, FIDO, Credential Manager or
+server-side passkey flow was found. Kogane should therefore use the user's
+normal ID/password bootstrap rather than attempt to copy biometric state.
+
+### Browserless mobile replay validation: 2026-08-30
+
+A separate WSL-native worktree added a guarded PoC under
+`poc/prestia-mobile-html/`. It uses an in-memory cookie jar, reproduces the
+mobile hidden-form transition, accepts credentials only through a masked
+prompt or one-shot stdin JSON, and emits only value-free structural summaries.
+It never writes an authenticated body, cookie, token, ID, account number or
+balance. OTP, Access Denied, or a returned login form is a hard stop without
+automatic retry.
+
+The bounded live results were:
+
+| Step | Result | Interpretation |
+| --- | --- | --- |
+| Android-WebView-shaped bootstrap GET from WSL | HTTP 200, six cookies, `PRESTIAHEADERFORM` and `POSNIN1` present | The mobile entry is reachable without Chrome from the current egress; Akamai did not block this request. |
+| First credential POST | HTTP 200, login form returned | The initial PoC incorrectly left the two display-field copies empty; this did not reproduce the official page's `submitProc()`. |
+| Second credential POST with both visible/hidden credential pairs populated | HTTP 200, login form returned again; no redirect, OTP, home form or `hashedCIF` | The edge accepted the request shape and did not return Akamai denial, but the response did not establish a session. Repeated credential submissions were stopped. Current evidence does not distinguish invalid/currently changed credentials, a missing app fraud/client condition, or another request-shape difference. |
+| Full packaged Web bundle under headless Chrome | Did not reach the client-config initialization before the obfuscated startup occupied the page execution thread | Do not treat whole-app headless execution as a practical config extractor. Isolate the config module or capture the official app runtime instead. |
+
+The public sign-on page's `submitProc()` copies `dispuserId` and
+`disppassword` into `userId` and `password`, then makes `_TARGETID` equal to
+`_FRAMEID` before posting. The captured bootstrap already had equal target and
+frame values, and the revised PoC now enforces the assignment explicitly. It
+also refuses every redirect after the credential POST, follows only same-host
+credential-free bootstrap GET redirects while retaining each hop's cookies,
+and implements the packaged login → home GET → balance POST order. The Android
+app itself appears to build the request from hidden form state plus the two
+credential fields and adds several app-specific transport signals:
+
+- `User-Agent`, `X-FORWARDED-UA` header, and an encoded
+  `X-FORWARDED-UA` cookie;
+- a small `via` marker;
+- host-scoped application Basic-auth configuration embedded in the app;
+- Caulis FraudAlert initialization before sign-on, a user-derived hash around
+  the attempt, and `hashedCIF` association after an accepted sign-on.
+
+The Basic-auth values and all account secrets remain outside this public
+repository. Caulis does not explain bootstrap blocking because the bootstrap
+already returns 200 before the fraud call. It may still influence credential
+acceptance. A future live attempt must first establish a materially different
+condition: either confirm the credentials through the dedicated Kogane Capture
+browser, or capture one official-app request and reproduce its header/form
+shape. Do not guess-and-retry passwords or fraud payloads.
 
 The only GLOBAL PASS activity route found in the packaged Web assets is the
 separate member-site login URL on `www.debit.vpass.ne.jp`. No GLOBAL PASS card
@@ -687,6 +732,39 @@ activity model or 15-month API was found. The banking app remains useful for
 the posted settlement-account debit, but it does not replace the separate
 GLOBAL PASS collector for merchant, pending, authorization, fee, or family-card
 detail.
+
+### Android Emulator runtime comparison: 2026-08-30
+
+A bounded local runtime comparison used new Pixel 10 AVDs and never reached an
+authenticated banking request. The result rules out the generated re-signed
+APK as a reliable protocol oracle and also shows that an x86 host's ARM native
+bridge is not a valid substitute for an ARM device for this protected build.
+
+| Runtime and package | Result | Interpretation |
+| --- | --- | --- |
+| Android 17 / API 37.1, x86_64 AVD with `arm64-v8a` native bridge, re-signed 1.4.1 with a user-CA Network Security Config | Startup failed with `ClassNotFoundException` for `View$OnUnhandledKeyEventListener` from the obfuscated/AppCompat path | Rebuilding and re-signing changes protected runtime behavior; do not use this APK for capture. |
+| Android 15 / API 35, 4 KiB-page x86_64 AVD with `arm64-v8a` native bridge, the same re-signed 1.4.1 | The same `ClassNotFoundException` occurred | The API 37 and 16 KiB-page combination was not the cause. |
+| Android 15 / API 35, same AVD, unmodified and bank-signed 1.4.1 split set | Startup advanced further, then failed with an NPE in the obfuscated `xw.lvz` invocation thread | Signature preservation changed the failure mode but did not make ARM-on-x86 execution stable. |
+| Android 11 / API 30, x86_64 AVD advertising `armeabi-v7a`, unmodified and bank-signed 1.4.0 split set | Startup failed with divide-by-zero in obfuscated `xw.kDq` code | Using the older 32-bit ARM build and bridge did not solve the protected-runtime incompatibility. |
+
+The API 35 AVD successfully loaded the arm64 native split before the Java-side
+failure, while the API 30 AVD exposed the full `x86_64,x86,arm64-v8a,
+armeabi-v7a,armeabi` ABI list. These were not package-install failures. Static
+analysis still finds ordinary DEX plus a native library and heavily obfuscated
+reflection threads; the differing impossible-looking Java failures are
+consistent with the protected/obfuscated runtime producing invalid state under
+native translation. They are not evidence that the app is broken on a normal
+ARM phone.
+
+No PRESTIA origin request reached the sanitized capture log, so this experiment
+reveals nothing new about credential fields, cookies, Caulis payloads, account
+data, or the acceptance of a user-installed CA. The next capture must use the
+current Play-delivered split set on an owned physical ARM device. First test the
+unmodified app with the dedicated proxy and user CA. If its custom HTTP stack
+rejects the user CA, stop rather than re-sign: use an explicitly authorized
+rooted ARM test device/system-CA route or another runtime hook that preserves
+the bank signature. Keep only value-free request structure in the diagnostic
+log.
 
 ## Third-party clients and implementation evidence
 
@@ -749,10 +827,12 @@ other.
 All steps are read-only. Do not enter a transfer, FX trade, time deposit,
 limit, card-control, registration, or settings screen except to leave it.
 
-1. Upgrade provenance by extracting the current Play-delivered split set from
-   an owned device and compare package/version/signers before treating the
-   1.4.0 static snapshot as current official evidence.
-2. Implement the app-observed mobile GET/bootstrap and one balance-summary
+1. Connect an owned physical ARM Android device, install the app through
+   Google Play, extract the complete current split set and compare
+   package/version/signers. Run one launch with the dedicated proxy and user
+   CA. Stop if TLS fails; do not rebuild or re-sign the protected APK.
+2. From a successful physical-device capture, implement the app-observed
+   mobile GET/bootstrap and one balance-summary
    request locally, using a fresh in-memory cookie jar and the packaged Caulis
    login flow. Print only status/schema summaries. Stop on OTP, rejection or
    any write page; do not repeat credential submissions without a materially
