@@ -763,7 +763,7 @@ async function manifestDescriptor(options: {
 }): Promise<JsonObject> {
   return {
     artifactKey: "manifest.json",
-    artifactRole: "collector_manifest",
+    artifactRole: "collector_derived",
     payloadFidelity: "transformed",
     containerKind: "single",
     lineageDisposition: "source_not_retained_for_security",

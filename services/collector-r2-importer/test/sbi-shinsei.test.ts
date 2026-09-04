@@ -248,6 +248,7 @@ describe("SBI Shinsei staged-run importer", () => {
           .map((request) => JSON.parse(request.body) as Record<string, unknown>)
           .find((value) => value.dataset === "collector-manifest");
         expect(descriptor).toMatchObject({
+          artifactRole: "collector_derived",
           payloadFidelity: "transformed",
           lineageDisposition: "source_not_retained_for_security",
           transformSteps: [
