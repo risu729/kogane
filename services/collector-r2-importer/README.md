@@ -110,6 +110,10 @@ poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
 
 source R2はbackfill完了後も自動削除しない。
 
+### 2026-09-05 本番検証
+
+canary後に旧captureとの互換不一致を修正し、中断地点から再開したfull backfillと、完了後に先頭から行った再走査はいずれも完走した。中断地点からの再開は32 pagesで12 manifests、先頭からの再走査は37 pagesで17 manifestsを処理した。最終D1集計は17 runs、17 sealed、0 unsealed、37 artifactsで、再走査の前後で件数は変化しなかった。source R2のobjectは変更・削除していない。
+
 ## SBI新生銀行の境界
 
 SBI新生銀行はContainer内の銀行ページ自身のlogin処理を通した後、strict validation済みのcore response 4件とcollector生成の`normalized.json`をprivate R2へ保存する。importerはlogin、cookie、Authorization、CSRF、CAFIS materialを受け取らず、保存済みrunだけを読む。
