@@ -1,6 +1,6 @@
 # Collector R2 importer
 
-各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行に対応する。
+各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行に対応する。
 
 ## SBI証券の境界
 
@@ -28,6 +28,8 @@ SBI VC TradeのmanifestはSBI証券とは共有せず、`sbi-vc-trade-worker-poc
 
 SBI証券の完全な1 runは中央Workerを最大約23回呼ぶ。Cloudflareの1 requestに連なるWorker呼び出し上限へ抵触しないよう、`backfill-page`は1回につきR2 objectを1件だけ走査し、manifestを見つけた場合も1 runだけを転送する。SBI VC Tradeはdata artifact 11件を超えるmanifestを`sync_import_worker_chain_limit`で中央state作成前に停止する。backfillではこの既知の上限を失敗でなくdeferredとして数え、R2 cursorを先へ進めるため、後続runをpoison pillとして遮断しない。大きなrun自体は後続Queue reconcilerがartifact単位で処理する。
 
+SBI新生銀行はmanifest込み最大6 objectで、中央呼び出しは最大17回に収まる。`backfill-page`は他sourceと同様にR2 objectを1件ずつ走査し、manifestを見つけたページだけ同期転送する。cursorはcollector側のローカルstateへ原子的に保存し、失敗manifestでは進めない。
+
 ## 検証とデプロイ
 
 ```sh
@@ -37,28 +39,90 @@ bun run typecheck
 bun run cf:check
 ```
 
-中央schema `0007`を先にデプロイした後、次を実行する。
+SBI新生銀行を有効化する本番作業は、必ず次の順で直列実行する。Service Bindingのtargetをcallerより先にdeployし、collector deployが有効化するdaily cronより前に依存先を検証する。
 
-```sh
-bash scripts/deploy.sh
-```
+1. 中央raw-evidenceへremote D1 migration `0008`を適用してWorkerをdeployする。
 
-`sync-secrets.sh`はローカルのsystemd credentialから必要な値だけをWorker secretへ渡す。値は表示しない。
+   ```sh
+   (
+     cd services/raw-evidence
+     bash scripts/deploy.sh
+   )
+   ```
+
+   このscriptは不変のdatabase名`kogane-raw-evidence`を指定し、deploy後にhealth、synthetic round trip、SBI新生route/policyが各1件であることを件数だけで検証する。D1確認でrun ID、object key、hash、本文、金額は出力しない。
+
+2. importerのpreflight後、secretを先に同期・名前だけ検証してからimporterをdeployする。
+
+   ```sh
+   (
+     cd services/collector-r2-importer
+     bash scripts/deploy.sh
+   )
+   ```
+
+   `deploy.sh`は`test`、`typecheck`、dry-runの後に`sync-secrets.sh`を実行し、その成功後にだけ`wrangler deploy`へ進む。`sync-secrets.sh`はローカルのsystemd credentialから5 secretを単一bulk requestで作成・更新する。指定外の既存secretは削除せず、検証出力には次の名前だけを含めて値は表示しない。
 
 - `RAW_EVIDENCE_TOKEN`: `collector-r2-sbi`専用Bearer
 - `RAW_EVIDENCE_TOKEN_SBI_VC`: `collector-r2-sbi-vc`専用Bearer
 - `RAW_EVIDENCE_TOKEN_SONY`: `collector-r2-sony-bank`専用Bearer
+- `RAW_EVIDENCE_TOKEN_SBI_SHINSEI`: `collector-r2-sbi-shinsei`専用Bearer
 - `ORIGIN_FINGERPRINT_KEY`: storage keyを不可逆HMACへ変換する共通鍵
 
-SBI collector側のhistorical outboxは次で再送する。
+3. target importerのdeploy成功後にSBI新生collectorをdeployする。これはService Bindingとdaily cronを有効化するため、`0 21 * * *`の直前を避け、次回cronまでに以降の確認を完了する。
+
+   ```sh
+   (
+     cd poc/sbi-shinsei-worker
+     bun install --frozen-lockfile
+     bun test
+     bun run typecheck
+     bun run cf:check
+     npx wrangler deploy
+   )
+   curl --fail-with-body --silent --show-error \
+     https://kogane-sbi-shinsei-collector-poc.takuanimal.workers.dev/health
+   ```
+
+4. historical outboxは、最初に1 manifestだけcanary importする。canaryはobject key、hash、本文を出力せず、manifest件数だけを返す。canaryはmanifest page後のcursorを保存しないため、full backfillは同じmanifestを意図的に冪等再送する。
+
+   ```sh
+   KOGANE_STOP_AFTER_MANIFEST=1 \
+     poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
+   ```
+
+5. canary後に中央D1のSBI新生run数、seal数、artifact数を`COUNT`だけで記録し、full backfillを実行する。
+
+   ```sh
+   poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
+   ```
+
+6. cursorが完了時に削除された後、full backfillをもう一度実行する。中央のrun数、seal数、artifact数が不変であることを確認する。再送attempt数は増えてよい。2回のscan page数も比較し、途中に新規収集がなければ同数であることを確認する。
+
+他collector側のhistorical outboxも次で再送できる。
 
 ```sh
 poc/sbi-securities-worker/scripts/backfill-raw-evidence.sh
 poc/sbi-vc-trade-worker/scripts/backfill-raw-evidence.sh
 poc/sony-bank-worker/scripts/backfill-raw-evidence.sh
+poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
 ```
 
 source R2はbackfill完了後も自動削除しない。
+
+## SBI新生銀行の境界
+
+SBI新生銀行はContainer内の銀行ページ自身のlogin処理を通した後、strict validation済みのcore response 4件とcollector生成の`normalized.json`をprivate R2へ保存する。importerはlogin、cookie、Authorization、CSRF、CAFIS materialを受け取らず、保存済みrunだけを読む。
+
+`sbi-shinsei-worker-poc-v1`専用validatorは、固定5 datasetとfilename・順序、success/partial/failedと`r2:<dataset>`失敗の完全な補集合、prefix内の完全inventory、JSON media type、size、custom metadata、native/計算SHA-256を検証する。raw 4件はcollectorから独立して複製したresponse schemaで再検証し、`normalized.json`はtop responseから再計算した残高・明細とcanonical一致する場合だけ受理する。
+
+top取得後のprovider read失敗は`read:<dataset>`で表し、後続の未実行datasetを含めて保存済みartifactとの完全な補集合にする。これにより、exchange rate等の後半readが失敗しても、それ以前に取得・検証できたtopや残高summaryを捨てず、`provider-read-incomplete`のpartial evidenceとしてsealできる。自由形式のprovider error本文は中央へ渡さない。
+
+導入前に保存されたrunには、現在の型から削除済みの`window`がmanifestに含まれる。互換経路は「windowなしの現行shape」と「windowだけを追加した旧shape」の2種類に限定し、top artifactが保存されている場合は旧windowをactivityの`fromDate`/`toDate`と一致させる。collect失敗またはtopのR2書込み失敗でtop自体がないrunは、windowを取得済み範囲とは扱わず、失敗証拠をそのままcatalogueする。任意fieldの追加は許可しない。
+
+R2 custom metadataは、既存の2/3-key形とこのPR以後のsource/run/hash付き4-key形を、それぞれ完全一致で受理する。manifestのwindow削除とmetadata強化は別時期の変更なので両者を不必要に結合せず、追加keyを含む曖昧なshapeは拒否する。
+
+raw 4件はresponse textへのtransport decode後、top-level `header.newToken`を取り除いて再encodeし、`sanitized_provider_capture / transformed / source_not_retained_for_security`として登録する。normalizedは`collector_derived / transformed`としてtop responseへlineageを張り、manifestは`collector_manifest / generated`として登録する。導入前のR2 objectに一時CSRF値が含まれていても、その値を中央へ複製しない。中央ではcanonical source `sbi-shinsei-bank`へaliasを解決し、`collector-r2-sbi-shinsei`専用credential/routeだけを許可する。元R2は即時import・backfillの成否にかかわらず変更・削除しない。
 
 ## Sony銀行の境界
 

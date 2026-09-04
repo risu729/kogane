@@ -10,5 +10,5 @@ bun install --frozen-lockfile
 bun test
 bun run typecheck
 bun run cf:check
-npx wrangler deploy
 bash scripts/sync-secrets.sh
+npx wrangler deploy

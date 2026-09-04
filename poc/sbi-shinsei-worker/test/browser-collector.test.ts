@@ -37,6 +37,35 @@ describe("SBI Shinsei Container handoff", () => {
       "raw-yen-deposit-account.json",
       "normalized.json",
     ]);
+    expect(result.failures).toEqual([]);
+  });
+
+  test("returns validated partial artifacts without retrying a later read", async () => {
+    const fixtures = await Bun.file(fixturePath).json() as Record<string, unknown>;
+    const result = await collectSbiShinsei({
+      credentialJson,
+      now: () => new Date("2026-08-31T00:00:00.000Z"),
+      collectHandoff: async () => JSON.stringify({
+        ok: true,
+        responses: {
+          topBalances: JSON.stringify(fixtures.topBalances),
+          balanceSummary: JSON.stringify(fixtures.balanceSummary),
+        },
+        failure: {
+          dataset: "exchange-rate",
+          stage: "exchange-rate-http-503",
+        },
+      }),
+    });
+    expect(result.artifacts.map((artifact) => artifact.dataset)).toEqual([
+      "top-accounts-balance-and-activity",
+      "balance-summary-and-stage",
+      "normalized",
+    ]);
+    expect(result.failures.map((failure) => failure.operation)).toEqual([
+      "read:exchange-rate",
+      "read:yen-deposit-account",
+    ]);
   });
 
   test("does not retry a rejected login", async () => {

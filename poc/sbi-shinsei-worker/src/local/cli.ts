@@ -36,6 +36,11 @@ async function main(): Promise<void> {
   const startedAt = new Date().toISOString();
   const credential = parseCredential(credentialJson);
   const result = await new WindowsChromeContextCollector().collect(credential);
+  if (!result.normalized) {
+    throw new Error(
+      "SBI Shinsei local collection was partial; use the Worker outbox to preserve it",
+    );
+  }
   const runDirectory = await createPrivateRunDirectory(options.outputDirectory);
   const artifacts = await storePrivateArtifacts({
     runDirectory,

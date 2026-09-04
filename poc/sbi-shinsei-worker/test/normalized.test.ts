@@ -35,4 +35,15 @@ describe("SBI Shinsei normalized fixture", () => {
       "exactly one of debit or credit",
     );
   });
+
+  test("rejects an out-of-range date without leaking RangeError", async () => {
+    const input = await Bun.file(fixturePath).json() as {
+      transactions: Array<Record<string, unknown>>;
+    };
+    const changed = structuredClone(input);
+    changed.transactions[0]!.transactionDate = "9999-99-99";
+    expect(() => parseNormalizedSnapshot(changed)).toThrow(
+      "transactionDate must be a valid YYYY-MM-DD date",
+    );
+  });
 });

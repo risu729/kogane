@@ -13,6 +13,7 @@ SBI新生銀行 PowerDirect の read-only collector を Kogane 内で独立実�
 - route catalog は exact-origin / exact-path / exact-method です。2026-08-31 の Kuebiko captureとローカル自動実行で成功したbootstrap 2件とcore read 4件だけが `productionEnabled: true` です。公開 bundle だけの候補は到達不能です。
 - direct HTTP transport はproduction routeでも常に拒否します。Workerからpage外へ出るのは4件のraw JSONを包む単一JSON stringだけで、credential、CAFIS `jsc`、cookie、Authorization、CSRF、sessionStorageは出しません。
 - Container/browserは成功・拒否・unknown responseの全経路で終了・破棄し、credential retryを行いません。
+- top read成功後に後続core readが失敗した場合は、成功済みresponseとtop由来normalizedをpartial manifestへ残し、失敗したdatasetと未実行datasetを固定コードで記録します。top自体の失敗は従来どおりartifactなしのfailed manifestです。
 - unknown content type、oversize body、JSON parse failure、未登録 schema は保存・解釈せず停止します。
 - transfer、振込、振替、FX、定期預金作成・解約、memo/settings 等の write route は catalog に存在せず、path denylist でも拒否します。
 
@@ -52,7 +53,8 @@ TAMIA経路のCloudflare live run `0e999a32-6994-450e-a495-2daff0e7aeb1` は `st
 | --- | --- |
 | `GET /health` | schema version、source、live-read readiness のみ返す。 |
 | `POST /trigger` | `Authorization: Bearer <ADMIN_TRIGGER_TOKEN>` 必須。実行時点のsnapshotを1回収集し、validated artifactとmanifestをR2へ保存。期間指定は受け付けない。 |
-| Cron `0 21 * * *` | 毎日 06:00 JSTに同じContainer収集を1回実行。収集失敗はfailure manifestを保存した上でinvocationを失敗させる。 |
+| `POST /backfill-raw-evidence?limit=1&cursor=...` | 同じadmin認証でprivate Service Bindingへ1ページだけ転送する。cursorは任意、limitは1固定。 |
+| Cron `0 21 * * *` | 毎日 06:00 JSTに同じContainer収集を1回実行。全失敗はfailure manifestを保存した上でinvocationを失敗させ、部分取得はpartial evidenceとして保存・中央sealする。 |
 
 R2 key:
 
@@ -61,9 +63,26 @@ raw/sbi-shinsei/YYYY/MM/DD/<run-id>/manifest.json
 raw/sbi-shinsei/YYYY/MM/DD/<run-id>/<verified artifact>
 ```
 
-unknown response や authentication response body は R2 に保存しません。4件のcore responseはauthenticated captureとローカル実行で検証し、strict schemaを通過した場合だけ保存します。
+unknown response や authentication response body は R2 に保存しません。4件のcore responseはauthenticated captureとローカル実行で検証し、strict schemaを通過した場合だけ保存します。read継続に使うtop-level `header.newToken`は同一page内でrotationした後、Containerから出す前に削除してJSONを再encodeします。
 
 現在の4 readはtop page由来のsnapshotです。manifestの`startedAt` / `completedAt`は実行時刻を表し、過去期間を取得済みとは記録しません。期間履歴を追加する場合は、期間を実際に送るread routeと取得範囲を別途検証してから導入します。
+
+manifestを最後に不変条件付きで保存した後、private Service Binding経由で中央raw-evidenceへ即時importする。中央側は元bytes、hash、metadata、schema、normalizedの再計算結果を検証してからsealする。中央が失敗してもsource R2はoutboxとして残るため、次でcursor付き再送できる。
+
+```bash
+poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
+```
+
+初回本番確認は1 manifestだけで停止する。
+
+```bash
+KOGANE_STOP_AFTER_MANIFEST=1 \
+  poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
+```
+
+スクリプトはR2 objectを1件ずつ走査し、失敗manifestでは停止する。canaryと通常完了の出力は件数だけで、object key、hash、本文を含めない。canaryはmanifest page後のcursorを保存しないため、その後のfull backfillで同じmanifestを冪等再送する。完了してもsource R2を削除しない。
+
+backfillのadmin token fileは、current user所有のregular file、非symlink、mode 0600でなければ拒否する。file descriptorを`O_NOFOLLOW`で開き、同じdescriptorを`fstat`してから読み取る。
 
 Kuebiko capture で得た core response の field-name topology は synthetic fixture と strict validator に反映済みです。1 sample だけなので known field を optional として扱う箇所がありますが、unknown field、unknown nested item、unknown schema は拒否します。validator実装だけでは route を有効化せず、exact request builder とaccepted browser-contextでの実行成功も必要です。
 

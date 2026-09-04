@@ -15,6 +15,15 @@
       "head_sampling_rate": 1
     }
   },
+  "secrets": {
+    "required": [
+      "RAW_EVIDENCE_TOKEN",
+      "RAW_EVIDENCE_TOKEN_SBI_VC",
+      "RAW_EVIDENCE_TOKEN_SONY",
+      "RAW_EVIDENCE_TOKEN_SBI_SHINSEI",
+      "ORIGIN_FINGERPRINT_KEY"
+    ]
+  },
   "r2_buckets": [
     {
       "binding": "SBI_SNAPSHOTS",
@@ -27,6 +36,10 @@
     {
       "binding": "SONY_SNAPSHOTS",
       "bucket_name": "kogane-sony-bank-collector-poc"
+    },
+    {
+      "binding": "SBI_SHINSEI_SNAPSHOTS",
+      "bucket_name": "kogane-sbi-shinsei-collector-poc"
     }
   ],
   "services": [
@@ -36,6 +49,6 @@
     }
   ],
   "vars": {
-    "IMPORTER_VERSION": "collector-r2-importer-v4"
+    "IMPORTER_VERSION": "collector-r2-importer-v5"
   }
 }

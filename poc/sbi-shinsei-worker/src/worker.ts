@@ -2,6 +2,11 @@ import { Container, getContainer } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { collectSbiShinsei } from "./collector";
 import { liveReadsEnabled } from "./read-allowlist";
+import {
+  backfillRawEvidence,
+  importRawEvidence,
+  RawEvidenceImportError,
+} from "./raw-evidence";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import type {
   CollectionFailure,
@@ -58,6 +63,27 @@ export default {
     ) {
       return relayTcp(request, env, ctx, url);
     }
+    if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
+      if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      try {
+        const cursor = url.searchParams.get("cursor") ?? undefined;
+        const limit = parseBackfillLimit(url.searchParams.get("limit"));
+        return Response.json(await backfillRawEvidence({
+          importer: env.RAW_EVIDENCE_IMPORTER,
+          ...(cursor ? { cursor } : {}),
+          ...(limit ? { limit } : {}),
+        }));
+      } catch (error) {
+        return Response.json(
+          { error: error instanceof RawEvidenceImportError
+            ? "raw_evidence_import_failed"
+            : "backfill_request_invalid" },
+          { status: error instanceof RawEvidenceImportError ? 502 : 400 },
+        );
+      }
+    }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
@@ -77,7 +103,10 @@ export default {
         status: result.status === "failed" ? 503 : 200,
       });
     } catch (error) {
-      return Response.json({ error: publicError(error) }, { status: 400 });
+      return Response.json(
+        { error: publicError(error) },
+        { status: error instanceof RawEvidenceImportError ? 502 : 400 },
+      );
     }
   },
 
@@ -119,11 +148,13 @@ async function runCollection(env: Env): Promise<CollectionResult> {
         return readBoundedText(response, MAX_CONTAINER_RESPONSE_BYTES);
       },
     });
+    failures.push(...output.failures);
     for (const artifact of output.artifacts) {
       try {
         artifacts.push(await storeArtifact({
           bucket: env.SNAPSHOTS,
           prefix,
+          runId,
           artifact,
         }));
       } catch (error) {
@@ -171,6 +202,19 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     prefix,
     manifest,
   });
+  try {
+    await importRawEvidence({
+      importer: env.RAW_EVIDENCE_IMPORTER,
+      manifestKey,
+    });
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "sbi-shinsei-raw-evidence-import-failed",
+      runId,
+      errorCode: "raw_evidence_import_failed",
+    }));
+    throw error;
+  }
   console.log(JSON.stringify({
     event: "sbi-shinsei-collection-stored",
     runId,
@@ -329,7 +373,9 @@ function failure(operation: string, error: unknown): CollectionFailure {
   return {
     operation,
     errorType: error instanceof Error ? error.name : "UnknownError",
-    message: publicError(error),
+    message: operation === "collect"
+      ? "collector_request_failed"
+      : "staging_write_failed",
   };
 }
 
@@ -353,4 +399,10 @@ function publicResult(result: CollectionResult): object {
     failureCount: result.failures.length,
     manifestKey: result.manifestKey,
   };
+}
+
+function parseBackfillLimit(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  if (value !== "1") throw new Error("backfill_limit_must_be_one");
+  return 1;
 }

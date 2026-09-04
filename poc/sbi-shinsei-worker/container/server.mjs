@@ -115,17 +115,41 @@ function validateHandoff(value) {
     }
     return failure("handoff-shape");
   }
-  if (
-    parsed.ok !== true ||
-    Object.keys(parsed).sort().join(",") !== "ok,responses" ||
-    !parsed.responses ||
-    typeof parsed.responses !== "object" ||
-    Array.isArray(parsed.responses) ||
-    Object.keys(parsed.responses).sort().join(",") !==
-      "balanceSummary,exchangeRate,topBalances,yenDeposit" ||
-    Object.values(parsed.responses).some((entry) => typeof entry !== "string")
-  ) {
+  const envelopeKeys = Object.keys(parsed).sort().join(",");
+  if (parsed.ok !== true ||
+      (envelopeKeys !== "ok,responses" && envelopeKeys !== "failure,ok,responses") ||
+      !parsed.responses || typeof parsed.responses !== "object" ||
+      Array.isArray(parsed.responses)) {
     return failure("handoff-shape");
+  }
+  const plans = [
+    ["topBalances", "top-accounts-balance-and-activity"],
+    ["balanceSummary", "balance-summary-and-stage"],
+    ["exchangeRate", "exchange-rate"],
+    ["yenDeposit", "yen-deposit-account"],
+  ];
+  const responseKeys = Object.keys(parsed.responses).sort();
+  const expectedKeys = plans.slice(0, responseKeys.length)
+    .map(([key]) => key)
+    .sort();
+  if (responseKeys.length < 1 || responseKeys.length > plans.length ||
+      responseKeys.some((key, index) => key !== expectedKeys[index]) ||
+      Object.values(parsed.responses).some((entry) => typeof entry !== "string")) {
+    return failure("handoff-shape");
+  }
+  if (parsed.failure === undefined) {
+    if (responseKeys.length !== plans.length) return failure("handoff-shape");
+  } else {
+    const next = plans[responseKeys.length];
+    if (!next || responseKeys.length === plans.length ||
+        !parsed.failure || typeof parsed.failure !== "object" ||
+        Array.isArray(parsed.failure) ||
+        Object.keys(parsed.failure).sort().join(",") !== "dataset,stage" ||
+        parsed.failure.dataset !== next[1] ||
+        typeof parsed.failure.stage !== "string" ||
+        !/^[a-z0-9-]{1,80}$/u.test(parsed.failure.stage)) {
+      return failure("handoff-shape");
+    }
   }
   return value;
 }
@@ -241,7 +265,15 @@ async function collectAuthenticatedReadsInPage(session) {
         csrfToken = nextToken;
       }
     }
-    return { raw, data };
+    const stored = JSON.parse(JSON.stringify(data));
+    if (
+      stored.header &&
+      typeof stored.header === "object" &&
+      !Array.isArray(stored.header)
+    ) {
+      delete stored.header.newToken;
+    }
+    return { raw: JSON.stringify(stored), data };
   };
 
   try {
@@ -259,42 +291,60 @@ async function collectAuthenticatedReadsInPage(session) {
       return fail("validate-token-result");
     }
     csrfToken = validation.data.header.newToken;
-    const topBalances = await read(
-      "/SFC/app/IFTP_TopAdapter/getAccountsBalanceAndActivity",
-      undefined,
-      "top-balances",
-    );
-    const balanceSummary = await read(
-      "/SFC/app/IFTP_TopAdapter/getBalanceSummaryAndStage",
-      undefined,
-      "balance-summary",
-    );
-    const exchangeRate = await read(
-      "/SFC/app/IFCM_CommonAdapter/getExchangeRate",
-      undefined,
-      "exchange-rate",
-    );
-    const yenDeposit = await read(
-      "/SFC/app/AIYD_YenDepositAdapter/getYenDepositAccount",
-      { requestParam: { screenGroupID: "CTYD0004" } },
-      "yen-deposit",
-    );
-    for (const result of [topBalances, balanceSummary, exchangeRate, yenDeposit]) {
-      if (
-        !result.data.header ||
-        result.data.header.adapterResultCode !== "0"
-      ) {
-        return fail("core-read-result-code");
+    const responses = {};
+    const plans = [
+      {
+        key: "topBalances",
+        dataset: "top-accounts-balance-and-activity",
+        path: "/SFC/app/IFTP_TopAdapter/getAccountsBalanceAndActivity",
+        body: undefined,
+        stage: "top-balances",
+      },
+      {
+        key: "balanceSummary",
+        dataset: "balance-summary-and-stage",
+        path: "/SFC/app/IFTP_TopAdapter/getBalanceSummaryAndStage",
+        body: undefined,
+        stage: "balance-summary",
+      },
+      {
+        key: "exchangeRate",
+        dataset: "exchange-rate",
+        path: "/SFC/app/IFCM_CommonAdapter/getExchangeRate",
+        body: undefined,
+        stage: "exchange-rate",
+      },
+      {
+        key: "yenDeposit",
+        dataset: "yen-deposit-account",
+        path: "/SFC/app/AIYD_YenDepositAdapter/getYenDepositAccount",
+        body: { requestParam: { screenGroupID: "CTYD0004" } },
+        stage: "yen-deposit",
+      },
+    ];
+    for (const [index, plan] of plans.entries()) {
+      let result;
+      try {
+        result = await read(plan.path, plan.body, plan.stage);
+        if (!result.data.header || result.data.header.adapterResultCode !== "0") {
+          throw { stage: `${plan.stage}-result-code` };
+        }
+      } catch (error) {
+        if (index === 0) return fail(error?.stage ?? "top-balances-failed");
+        return JSON.stringify({
+          ok: true,
+          responses,
+          failure: {
+            dataset: plan.dataset,
+            stage: error?.stage ?? `${plan.stage}-failed`,
+          },
+        });
       }
+      responses[plan.key] = result.raw;
     }
     return JSON.stringify({
       ok: true,
-      responses: {
-        topBalances: topBalances.raw,
-        balanceSummary: balanceSummary.raw,
-        exchangeRate: exchangeRate.raw,
-        yenDeposit: yenDeposit.raw,
-      },
+      responses,
     });
   } catch (error) {
     return fail(error?.stage ?? "read-failed");
