@@ -26,6 +26,7 @@
       "GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST",
       "RAW_EVIDENCE_TOKEN_MYJCB",
       "RAW_EVIDENCE_TOKEN_VPOINT",
+      "RAW_EVIDENCE_TOKEN_SMBC_DIRECT",
       "ORIGIN_FINGERPRINT_KEY"
     ]
   },
@@ -65,6 +66,10 @@
     {
       "binding": "VPOINT_PAY_SNAPSHOTS",
       "bucket_name": "kogane-vpoint-pay-collector-poc"
+    },
+    {
+      "binding": "SMBC_DIRECT_SNAPSHOTS",
+      "bucket_name": "kogane-smbc-direct-backfill-poc"
     }
   ],
   "services": [

@@ -68,7 +68,7 @@ describe("raw-evidence Worker", () => {
       ok: true,
       service: "kogane-ingest",
       apiVersion: "v1",
-      schemaVersion: "0012",
+      schemaVersion: "0013",
     });
     const denied = await post("/v1/runs", {});
     expect(denied.status).toBe(400);

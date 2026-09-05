@@ -21,6 +21,12 @@
       "bucket_name": "kogane-smbc-direct-backfill-poc"
     }
   ],
+  "services": [
+    {
+      "binding": "RAW_EVIDENCE_IMPORTER",
+      "service": "kogane-collector-r2-importer"
+    }
+  ],
   "vpc_networks": [
     {
       "binding": "TAMIA",
