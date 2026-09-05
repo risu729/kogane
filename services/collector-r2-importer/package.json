@@ -2,6 +2,9 @@
   "name": "@kogane/collector-r2-importer",
   "private": true,
   "type": "module",
+  "dependencies": {
+    "iconv-lite": "0.7.0"
+  },
   "scripts": {
     "test": "bun test",
     "typecheck": "wrangler types && tsc --noEmit",

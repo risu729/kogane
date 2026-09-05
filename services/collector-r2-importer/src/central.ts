@@ -27,6 +27,15 @@ export class CentralClient {
     return requiredInteger(result.unitId, "central_unit_id_missing");
   }
 
+  async addRunRange(runId: number, input: JsonObject): Promise<void> {
+    await this.json(`/v1/runs/${runId}/ranges`, input);
+  }
+
+  async addPageGroup(runId: number, input: JsonObject): Promise<number> {
+    const result = await this.json(`/v1/runs/${runId}/page-groups`, input);
+    return requiredInteger(result.pageGroupId, "central_page_group_id_missing");
+  }
+
   async addUnitReport(unitId: number, input: JsonObject): Promise<void> {
     await this.json(`/v1/units/${unitId}/reports`, input);
   }

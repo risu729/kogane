@@ -8,6 +8,7 @@ const PRODUCER = "collector-r2-importer";
 const STORAGE_TEMPLATE = "runs/{redacted}/artifact";
 const FINGERPRINT_VERSION = "fixture-hmac-v1";
 const SBI_STORAGE_TEMPLATE = "raw/sbi-securities/{date}/{run-id}/{artifact}.json";
+const MOBILE_SUICA_STORAGE_TEMPLATE = "raw/mobile-suica/{date}/{run-id}/{artifact}";
 const SBI_FINGERPRINT_VERSION = "collector-r2-v1";
 const cases = fixture.cases;
 
@@ -83,6 +84,19 @@ async function sbiStorageOrigin(artifactKey: string) {
     objectKeyTemplate: SBI_STORAGE_TEMPLATE,
     objectKeyFingerprint: await sha256Hex(
       new TextEncoder().encode(`fixture-sbi:${artifactKey}`),
+    ),
+    fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
+    redactionVersion: "v1",
+  };
+}
+
+async function mobileSuicaStorageOrigin(artifactKey: string) {
+  return {
+    storageKind: "r2",
+    containerName: "kogane-mobile-suica-collector-poc",
+    objectKeyTemplate: MOBILE_SUICA_STORAGE_TEMPLATE,
+    objectKeyFingerprint: await sha256Hex(
+      new TextEncoder().encode(`fixture-mobile-suica:${artifactKey}`),
     ),
     fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
     redactionVersion: "v1",
@@ -543,21 +557,66 @@ describe("sanitized source-usecase contract", () => {
     await seal(runId, artifacts, "myjcb");
   });
 
-  it("stores Mobile Suica CP932 bytes exactly with explicit format metadata", async () => {
+  it("stores only fixed-redaction Mobile Suica CP932 bytes with explicit transformation lineage", async () => {
     const value = cases.mobileSuicaCp932;
-    const body = Uint8Array.from(value.cp932Hex.match(/../g)!.map((pair) => Number.parseInt(pair, 16)));
+    expect(value.redactionSentinel).toBe("__KOGANE_REDACTED_BASE_VARIABLE__");
+    expect(value.sanitizedCp932Hex).toContain("626173655661726961626c65");
+    expect(value.sanitizedCp932Hex).toContain("5f5f4b4f47414e455f52454441435445445f424153455f5641524941424c455f5f");
+    const body = Uint8Array.from(
+      value.sanitizedCp932Hex.match(/../g)!.map((pair) => Number.parseInt(pair, 16)),
+    );
     const { runId } = await createRun(value.sourceId, value.sessionId);
-    const artifact = await catalogue(runId, "history.cp932.csv", body, {
-      artifactRole: "provider_export",
-      formatId: "mobile-suica-cp932-csv",
-      formatVersion: "fixture-v1",
-      declaredMediaType: "text/csv",
+    const artifact = await catalogue(runId, "sf-history-page-0001.sanitized.html", body, {
+      artifactRole: "sanitized_provider_capture",
+      payloadFidelity: "transformed",
+      lineageDisposition: "source_not_retained_for_security",
+      dataset: "sf-history-page",
+      formatId: "mobile-suica-sf-history-html-cp932-sanitized",
+      formatVersion: "v1",
+      declaredMediaType: "text/html",
       mediaTypeBasis: "manifest",
+      storage: await mobileSuicaStorageOrigin("sf-history-page-0001.html"),
+      transformSteps: [
+        {
+          stepIndex: 0,
+          stepKind: "redacted",
+          transformerId: "mobile-suica-history-sanitizer",
+          transformerVersion: "v1",
+        },
+        {
+          stepIndex: 1,
+          stepKind: "reencoded",
+          transformerId: "mobile-suica-history-sanitizer",
+          transformerVersion: "v1",
+        },
+      ],
     });
     await terminal(runId, 1);
-    await seal(runId, [artifact], "mobile-suica-cp932");
+    await seal(runId, [artifact], "mobile-suica-sanitized-cp932");
     const stored = await env.EVIDENCE.get(`objects/${artifact.sha256.slice(0, 2)}/${artifact.sha256}`);
     expect(new Uint8Array(await stored!.arrayBuffer())).toEqual(body);
+
+    const descriptor = await env.DB.prepare(`
+      SELECT artifact_role, payload_fidelity, lineage_disposition
+      FROM fetch_artifacts WHERE fetch_run_id = ? AND artifact_key = ?
+    `).bind(runId, artifact.artifactKey).first();
+    expect(descriptor).toEqual({
+      artifact_role: "sanitized_provider_capture",
+      payload_fidelity: "transformed",
+      lineage_disposition: "source_not_retained_for_security",
+    });
+    const steps = await env.DB.prepare(`
+      SELECT step_index, step_kind, transformer_id, transformer_version
+      FROM artifact_transform_steps
+      WHERE fetch_artifact_id = (
+        SELECT id FROM fetch_artifacts WHERE fetch_run_id = ? AND artifact_key = ?
+      )
+      ORDER BY step_index
+    `).bind(runId, artifact.artifactKey).all();
+    expect(steps.results).toEqual([
+      { step_index: 0, step_kind: "redacted", transformer_id: "mobile-suica-history-sanitizer", transformer_version: "v1" },
+      { step_index: 1, step_kind: "reencoded", transformer_id: "mobile-suica-history-sanitizer", transformer_version: "v1" },
+    ]);
   });
 
   it("retains a V Point empty page as positive evidence", async () => {

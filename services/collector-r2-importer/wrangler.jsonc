@@ -21,6 +21,7 @@
       "RAW_EVIDENCE_TOKEN_SBI_VC",
       "RAW_EVIDENCE_TOKEN_SONY",
       "RAW_EVIDENCE_TOKEN_SBI_SHINSEI",
+      "RAW_EVIDENCE_TOKEN_MOBILE_SUICA",
       "ORIGIN_FINGERPRINT_KEY"
     ]
   },
@@ -40,6 +41,10 @@
     {
       "binding": "SBI_SHINSEI_SNAPSHOTS",
       "bucket_name": "kogane-sbi-shinsei-collector-poc"
+    },
+    {
+      "binding": "MOBILE_SUICA_SNAPSHOTS",
+      "bucket_name": "kogane-mobile-suica-collector-poc"
     }
   ],
   "services": [
@@ -49,6 +54,6 @@
     }
   ],
   "vars": {
-    "IMPORTER_VERSION": "collector-r2-importer-v5"
+    "IMPORTER_VERSION": "collector-r2-importer-v6"
   }
 }

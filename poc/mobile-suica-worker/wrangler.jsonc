@@ -27,12 +27,18 @@
       "bucket_name": "kogane-mobile-suica-collector-poc"
     }
   ],
+  "services": [
+    {
+      "binding": "RAW_EVIDENCE_IMPORTER",
+      "service": "kogane-collector-r2-importer"
+    }
+  ],
   "browser": {
     "binding": "BROWSER",
     "remote": true
   },
   "vars": {
-    "COLLECTOR_SCHEMA_VERSION": "mobile-suica-worker-poc-v1"
+    "COLLECTOR_SCHEMA_VERSION": "mobile-suica-worker-poc-v2"
   },
   "triggers": {
     "crons": ["10 21 * * *"]

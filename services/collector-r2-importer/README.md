@@ -1,6 +1,14 @@
 # Collector R2 importer
 
-各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行に対応する。
+各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suicaに対応する。
+
+## Mobile Suicaの境界
+
+Mobile Suicaは1 runにつきSF履歴HTML 1 page、normalized JSON、collection summary、manifestの最大4 objectだけを扱う。100行未満の1 pageはcompleteなsuccessとして、v2のちょうど100行は`history_boundary_unproven`を伴うpartial evidenceとして取り込む。v1の100行success、複数page、期間coverageの推測は中央state作成前に拒否する。
+
+旧`mobile-suica-worker-poc-v1`のShift_JIS/CP932 HTMLには短命な`baseVariable`が残る。Importerはsource R2の元bytes/hashを検証した後、正確に1つの非空hidden valueを固定sentinelへ置換し、CP932へ再encodeした派生物だけを中央へ送る。新`mobile-suica-worker-poc-v2`は同じsanitizerをR2保存前に実行し、Importerはsentinel済みであることを再検証する。どちらも中央では`sanitized_provider_capture / transformed / source_not_retained_for_security`であり、provider-original exact bytesとは扱わない。normalized JSONはHTMLが保存されたrunではsanitized HTMLへのinput lineageを持つ。HTMLのR2保存だけが失敗したrunではnormalized JSONを独立に厳密検証し、入力関係を捏造せず`source_not_retained_for_security`として登録する。
+
+`POST /v1/mobile-suica/import-run`はmanifestを1件importし、`POST /v1/mobile-suica/backfill-page`は`raw/mobile-suica/`を1 objectだけ走査する。最大4 artifactなのでchunk/Queueは不要で、32 Worker invocation上限内で同期sealできる。source R2は成功後も削除しない。
 
 ## SBI証券の境界
 

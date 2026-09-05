@@ -14,8 +14,10 @@ Workerで日次実行するPoCである。BitwardenはWorkerから参照しな�
    処理とWebAuthn ceremonyを実行する。
 4. 会員メニューの「SF（電子マネー）利用履歴」をクリックし、履歴画面の短命な
    Cookieと`baseVariable`をWorker内部だけで受け取る。
-5. 以降の期間走査はplain Worker `fetch`で行い、raw Shift_JIS HTML、正規化JSON、
-   summary、manifestをprivate R2へ保存する。
+5. plain Worker `fetch`で履歴を1ページだけ取得する。HTMLをparseした後、唯一の
+   `baseVariable`を`__KOGANE_REDACTED_BASE_VARIABLE__`へ置換し、CP932へ再encodeした
+   sanitized HTML、正規化JSON、summary、manifestをprivate R2へ保存する。
+6. manifest保存直後にService Binding経由で中央raw-evidenceへimportする。
 
 Bitwarden vault、master password、`BW_SESSION`、JRE ID password、Cookie、raw
 WebAuthn assertionはR2、ログ、manifest、Gitへ保存しない。
@@ -38,6 +40,27 @@ WebAuthn assertionはR2、ログ、manifest、Gitへ保存しない。
 - Browserから得たsessionをplain Worker fetchへ引き継ぎ、15件・1ページ・3 artifact・
   failure 0をprivate R2へ保存した。R2 manifestを再取得して保存完了も確認した。
 
+## 2026-09-05 production raw-evidence verification
+
+- 中央`kogane-ingest`はschema `0009`、version
+  `cd26355d-36b0-4eb9-b93f-57b588113429`、Importerの最終versionは
+  `72067520-54bc-414b-81d7-2861746f96e4`、collector v2はversion
+  `dccc680b-f365-4ede-9071-2370a9138baf`で検証した。Cronは`10 21 * * *`を維持した。
+- source R2は40 object / 10 manifestだった。事前検証で1 pageを処理した後、initial
+  resumeは残り39 pageを処理し、合計40 page / 10 manifestへ到達した。続くfull replayも
+  40 page / 10 manifestを走査した。
+- 中央はbackfill前の0 runから、10 run / 10 sealed / 0 unsealed / 40 artifactになった。
+  full replay後も同じ件数で、冪等再送により追加runやartifactは作られなかった。
+- 中央のHTML 10件はすべてCP932として有効で、固定sentinelが各1件、`baseVariable`の値は
+  sentinelだけだった。実object key、hash、履歴本文は記録しない。
+- backfillとreplayの前後でsource R2の40 objectは変更・削除されなかった。
+- 旧v1の実shapeに対しては、同一browser sessionをrunより前にcaptureした
+  `capturedSessionAt`をcanonical ISOかつ`completedAt`以下に限って受理し、R2で厳密検証する
+  parameter付きHTML media typeを中央descriptorでは`text/html`へ正規化する狭い互換だけを
+  追加した。
+- manual live v2 canaryは未実施である。既存scheduleを変更せず、次回06:10 JSTのscheduled
+  runを次のcanaryとして確認する。
+
 ## 収集物
 
 ```text
@@ -48,11 +71,16 @@ raw/mobile-suica/YYYY/MM/DD/<run-id>/manifest.json
 ```
 
 HTMLとJSONには本人の交通・購買履歴、残高、金額が含まれる。R2 bucketはpublicに
-しない。raw HTMLには公式レスポンスの短命な`baseVariable`が残るため、session
-失効前は認証素材に近い機密性で扱う。
+しない。保存するHTMLは`baseVariable`を固定sentinelへ置換済みであり、元の値をR2へ
+保存しない。Cookie、passkey、WebAuthn assertionも保存しない。
 
-日付検索は「指定日以前」で、1ページ最大100件である。100件なら最古日の前日を
-次cursorにする。1日だけで100件に達した場合は完全性を証明できないため失敗する。
+日付検索は「指定日以前」で、1ページ最大100件である。v2は1ページだけを取得し、
+100件未満ならcomplete success、100件ちょうどなら3 artifactを保存した上で
+`partial` / `history_boundary_unproven`とする。前日cursorへ進めず、完全取得を主張しない。
+manual triggerはpartialをHTTP 502、scheduled runはthrowとして可観測にする。
+
+各artifactのR2 custom metadataは`source`, `runId`, `dataset`, `sha256`の4項目だけである。
+manifest metadataは安全な`source`, `status`, `runId`の3項目だけを保存する。
 
 ## Bitwardenからのローカル同期
 
@@ -88,11 +116,19 @@ bun run cf:deploy
 `ADMIN_TRIGGER_TOKEN`はデプロイ完了後に設定する。Secret変更とcode deployは別version
 として反映されるため、診断・手動実行に使うローカル値とWorker側の値を最後に揃える。
 
+過去runはsecure token fileを読み、1回にmanifest 1件だけを中央へ送る。source R2 objectは
+削除・移動しない。
+
+```sh
+./scripts/backfill-raw-evidence.sh
+```
+
 ## resourceとcleanup
 
 - Worker: `kogane-mobile-suica-collector-poc`
 - Browser binding: `BROWSER`
 - R2 bucket: `kogane-mobile-suica-collector-poc`
+- Service binding: `RAW_EVIDENCE_IMPORTER` → `kogane-collector-r2-importer`
 - Cron: `10 21 * * *`
 - Secrets: `ADMIN_TRIGGER_TOKEN`, `JRE_ID_CREDENTIAL_JSON`
 
