@@ -180,7 +180,7 @@ export default {
         return Response.json({ error: "limit_must_be_one" }, { status: 400 });
       }
       const cursor = url.searchParams.get("cursor") ?? undefined;
-      if (cursor !== undefined && !safeOpaque(cursor)) {
+      if (cursor !== undefined && !safeBackfillCursor(cursor)) {
         return Response.json({ error: "cursor_invalid" }, { status: 400 });
       }
       try {
@@ -827,8 +827,8 @@ function exactKeys(
     required.every((key) => Object.hasOwn(value, key));
 }
 
-function safeOpaque(value: string): boolean {
-  return value.length > 0 && value.length <= 500 && !/[\x00-\x20\x7f]/u.test(value);
+export function safeBackfillCursor(value: string): boolean {
+  return value.length > 0 && value.length <= 12_000 && !/[\x00-\x20\x7f]/u.test(value);
 }
 
 function publicCollectionResult(result: CollectionResult): object {

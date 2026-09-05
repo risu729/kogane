@@ -3,7 +3,7 @@ import type { CollectionManifest } from "../src/model";
 
 let container: { startAndWaitForPorts(): Promise<void>; fetch(request: Request): Promise<Response>; destroy(): Promise<void> };
 mock.module("@cloudflare/containers", () => ({ Container: class {}, getContainer: () => container }));
-const { default: worker } = await import("../src/worker");
+const { default: worker, safeBackfillCursor } = await import("../src/worker");
 const spies: ReturnType<typeof spyOn>[] = [];
 afterEach(() => { for (const spy of spies.splice(0)) spy.mockRestore(); });
 
@@ -63,6 +63,13 @@ async function run(records: unknown[], options: { httpStatus?: number; teardownE
 }
 
 describe("GLOBAL PASS diagnostics preserve the current collection contract", () => {
+  test("accepts staged importer cursors at the collector boundary", () => {
+    expect(safeBackfillCursor("a".repeat(569))).toBe(true);
+    expect(safeBackfillCursor("a".repeat(12_000))).toBe(true);
+    expect(safeBackfillCursor("a".repeat(12_001))).toBe(false);
+    expect(safeBackfillCursor("has space")).toBe(false);
+  });
+
   test("retains sanitized partial evidence and a deferred central result", async () => {
     const r = await run([metadata, artifact, { type: "error", operation: "browser-collection", errorType: "Error", errorCode: "browser_collection_failed" }], { centralDeferred: true });
     expect(r.response.status).toBe(502);
