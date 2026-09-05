@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "bun test && bash test/admin-token-sync.test.sh && bun run test:relay",
-    "test:relay": "node --test container/relay-lifecycle.node-test.mjs",
+    "test:relay": "node --test container/relay-lifecycle.node-test.mjs container/child-lifecycle.node-test.mjs",
     "typecheck": "wrangler types && tsc --noEmit",
     "cf:types": "wrangler types",
     "cf:check": "wrangler deploy --dry-run",

@@ -1,4 +1,5 @@
 import { createStageDiagnostics } from "./stage-diagnostics.mjs";
+import { observeChildProcess } from "./child-lifecycle.mjs";
 import http from "node:http";
 import { spawn } from "node:child_process";
 import net from "node:net";
@@ -27,8 +28,10 @@ const xvfb = spawn(
   [":99", "-screen", "0", "1365x768x24", "-nolisten", "tcp"],
   { stdio: "ignore" },
 );
+const xvfbLifecycle = observeChildProcess(xvfb, "xvfb");
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => {
+    xvfbLifecycle.stopping();
     xvfb.kill("SIGTERM");
     process.exit(0);
   });
@@ -157,9 +160,7 @@ function validateHandoff(value) {
 
 async function waitForXvfb() {
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (xvfb.exitCode !== null) {
-      throw new Error(`Xvfb exited with code ${xvfb.exitCode}`);
-    }
+    xvfbLifecycle.assertRunning();
     try {
       await access("/tmp/.X11-unix/X99");
       return;
@@ -184,11 +185,9 @@ async function availableLocalPort() {
   return port;
 }
 
-async function waitForChromeEndpoint(endpoint, child) {
+async function waitForChromeEndpoint(endpoint, lifecycle) {
   for (let attempt = 0; attempt < 150; attempt += 1) {
-    if (child.exitCode !== null) {
-      throw new Error(`Google Chrome exited with code ${child.exitCode}`);
-    }
+    lifecycle.assertRunning();
     try {
       const response = await fetch(`${endpoint}/json/version`);
       if (response.ok) return;
@@ -198,8 +197,9 @@ async function waitForChromeEndpoint(endpoint, child) {
   throw new Error("Google Chrome CDP endpoint did not become ready");
 }
 
-async function stopChild(child) {
-  if (child.exitCode !== null) return;
+async function stopChild(child, lifecycle) {
+  if (lifecycle.isStopped()) return;
+  lifecycle.stopping();
   child.kill("SIGTERM");
   await Promise.race([
     once(child, "exit").catch(() => undefined),
@@ -369,6 +369,7 @@ async function collect({ credential, relayToken, relayUrl }) {
   let authenticationAttempted = false;
   let relay;
   let child;
+  let childLifecycle;
   let browser;
   try {
     advance("relay-start");
@@ -399,7 +400,8 @@ async function collect({ credential, relayToken, relayUrl }) {
         stdio: "ignore",
       },
     );
-    await waitForChromeEndpoint(endpoint, child);
+    childLifecycle = observeChildProcess(child, "chrome", { relayUrl });
+    await waitForChromeEndpoint(endpoint, childLifecycle);
     const remaining = 25_000 - (Date.now() - startedAt);
     if (remaining > 0) {
       await new Promise((resolve) => setTimeout(resolve, remaining));
@@ -550,7 +552,7 @@ async function collect({ credential, relayToken, relayUrl }) {
   } finally {
     credential.powerDirectPassword = "";
     if (browser) await diagnostic.cleanup("browser-close", () => browser.close());
-    if (child) await diagnostic.cleanup("chrome-stop", () => stopChild(child));
+    if (child && childLifecycle) await diagnostic.cleanup("chrome-stop", () => stopChild(child, childLifecycle));
     if (relay) await diagnostic.cleanup("relay-close", () => relay.close());
     await diagnostic.cleanup("profile-remove", () => rm(profileDirectory, { recursive: true, force: true }));
   }
