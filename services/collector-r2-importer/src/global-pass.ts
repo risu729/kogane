@@ -66,6 +66,7 @@ const LEGACY_ACTIVITY_TABLE_HEADER_GROUPS = [
   ["Transaction Currency and Amount", "Transaction Detail"],
   ["Transaction Currency and Amount", "Transaction Fee"],
 ] as const;
+const LEGACY_EMPTY_ACTIVITY_MARKER = "Transaction dates are showed in ascending order.";
 const LEGACY_RESPONSIVE_ONCLICK =
   /^if\s*\(\s*window\.innerWidth\s*&lt;\s*\d+\s*\)\s*\{\s*\$\(\s*this\.parentNode\s*\)\.toggleClass\(\s*(?:"[^"]*"|'[^']*')\s*\);\s*\}\s*else\s*\{\s*\$\(\s*(?:"[^"]*"|'[^']*')\s*\)\[\d+\]\.click\(\s*\);\s*\}\s*return\s+false;\s*$/u;
 const FORBIDDEN_INLINE = /(?:;jsessionid|token|csrf|turnstile|session|localStorage)/iu;
@@ -158,6 +159,7 @@ export async function importGlobalPassRun(options: {
   fingerprintKey: string;
   importerVersion: string;
   manifestKey: string;
+  legacyEmptyArtifactSha256: ReadonlySet<string>;
   offset?: number;
   immediate?: boolean;
 }): Promise<ImportGlobalPassResult> {
@@ -192,7 +194,11 @@ export async function importGlobalPassRun(options: {
         artifact,
         manifest,
       );
-      const centralBytes = sanitizeGlobalPassHtml(sourceBytes, manifest.schemaVersion);
+      const centralBytes = sanitizeGlobalPassHtml(
+        sourceBytes,
+        manifest.schemaVersion,
+        options.legacyEmptyArtifactSha256.has(artifact.sha256),
+      );
       verified.push({
         artifact,
         centralBytes,
@@ -253,7 +259,12 @@ export async function importGlobalPassRun(options: {
       const end = Math.min(offset + GLOBAL_PASS_TRANSFER_CHUNK_SIZE, plans.length);
       const chunkInventory: CentralInventoryItem[] = [];
       for (const plan of plans.slice(offset, end)) {
-        const centralBytes = await currentCentralBytes(options.bucket, plan, manifest);
+        const centralBytes = await currentCentralBytes(
+          options.bucket,
+          plan,
+          manifest,
+          options.legacyEmptyArtifactSha256,
+        );
         phase = "object_upload";
         const reused = await central.uploadObject(centralRunId, plan.sha256, centralBytes);
         if (reused) reusedArtifactCount += 1;
@@ -287,7 +298,12 @@ export async function importGlobalPassRun(options: {
     const inventory: CentralInventoryItem[] = [];
     for (const plan of plans) {
       phase = "object_upload";
-      const centralBytes = await currentCentralBytes(options.bucket, plan, manifest);
+      const centralBytes = await currentCentralBytes(
+        options.bucket,
+        plan,
+        manifest,
+        options.legacyEmptyArtifactSha256,
+      );
       const reused = await central.uploadObject(centralRunId, plan.sha256, centralBytes);
       if (reused) reusedArtifactCount += 1;
       else acceptedArtifactCount += 1;
@@ -661,6 +677,7 @@ function validateManifestContract(input: {
 export function sanitizeGlobalPassHtml(
   bytes: Uint8Array,
   schemaVersion: SchemaVersion,
+  allowAuditedLegacyEmpty = false,
 ): Uint8Array {
   let html: string;
   try {
@@ -670,7 +687,7 @@ export function sanitizeGlobalPassHtml(
   }
   if (html.length === 0 || html.length > MAX_ARTIFACT_BYTES ||
       !/^\s*<!doctype\s+html(?:\s[^>]*)?>/iu.test(html) ||
-      !hasActivityMarker(html, schemaVersion)) {
+      !hasActivityMarker(html, schemaVersion, allowAuditedLegacyEmpty)) {
     throw new ImportError(409, "html_activity_contract_invalid");
   }
   if (FORBIDDEN_INLINE.test(html) || countInputs(html, (tag) =>
@@ -778,18 +795,79 @@ function visibleTextForActivityMarker(html: string): string {
     .replace(/&(?:nbsp|#160|#x0*a0);/giu, " ");
 }
 
-function hasActivityMarker(html: string, schemaVersion: SchemaVersion): boolean {
+function hasActivityMarker(
+  html: string,
+  schemaVersion: SchemaVersion,
+  allowAuditedLegacyEmpty: boolean,
+): boolean {
   if (CURRENT_ACTIVITY_MARKER.test(visibleTextForActivityMarker(html))) return true;
   if (schemaVersion !== V1) return false;
   const activityHeaders = new Set<string>(LEGACY_ACTIVITY_TABLE_HEADER_GROUPS.flat());
+  const tableHeaders = visibleTableHeaders(html);
   const observedGroups = new Set(
-    [...visibleTableHeaders(html).values()].map((headers) =>
+    [...tableHeaders.values()].map((headers) =>
       [...headers].filter((header) => activityHeaders.has(header)).sort().join("\n")
     ),
   );
-  return LEGACY_ACTIVITY_TABLE_HEADER_GROUPS.every((group) =>
-    observedGroups.has([...group].sort().join("\n"))
-  );
+  if (LEGACY_ACTIVITY_TABLE_HEADER_GROUPS.every((group) =>
+    observedGroups.has([...group].sort().join("\n")))) return true;
+  return allowAuditedLegacyEmpty && hasVisibleLegacyEmptyActivityEvidence(html);
+}
+
+function hasVisibleLegacyEmptyActivityEvidence(html: string): boolean {
+  const rendered = html
+    .replace(/<!--[\s\S]*?-->/gu, " ")
+    .replace(/<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/giu, " ");
+  if (/<th\b/iu.test(rendered)) return false;
+  const stack: Array<{ name: string; hidden: boolean; textNotice: boolean }> = [];
+  const voidElements = new Set([
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+    "meta", "param", "source", "track", "wbr",
+  ]);
+  let visibleNote = false;
+  let visibleStatementForm = false;
+  for (const match of rendered.matchAll(/<\/?[A-Za-z][^>]*>|[^<]+/gu)) {
+    const token = match[0]!;
+    if (!token.startsWith("<")) {
+      const parent = stack.at(-1);
+      if (parent && !parent.hidden && parent.textNotice &&
+          token.replace(/\s+/gu, " ").includes(LEGACY_EMPTY_ACTIVITY_MARKER)) {
+        visibleNote = true;
+      }
+      continue;
+    }
+    if (/^<\//u.test(token)) {
+      const closingName = /^<\/([A-Za-z][A-Za-z0-9:-]*)/u.exec(token)?.[1]?.toLowerCase();
+      if (!closingName) continue;
+      let index = stack.length - 1;
+      while (index >= 0 && stack[index]!.name !== closingName) index -= 1;
+      if (index >= 0) stack.splice(index);
+      continue;
+    }
+    const name = tagName(token);
+    if (!name) continue;
+    const parent = stack.at(-1);
+    const ownHidden = parsedAttributes(token).some((item) =>
+      item.name === "hidden" ||
+      item.name === "aria-hidden" && item.value?.trim().toLowerCase() === "true" ||
+      item.name === "style" &&
+        /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:!important\s*)?(?:;|$)/iu
+          .test(item.value ?? "")
+    );
+    const hidden = Boolean(parent?.hidden) || ownHidden;
+    if (name === "form" && !hidden &&
+        [STATIC_FORM_ACTION_PATH, `${SAME_HOST}${STATIC_FORM_ACTION_PATH}`]
+          .includes(attribute(token, "action"))) {
+      visibleStatementForm = true;
+    }
+    const classNames = attribute(token, "class").split(/\s+/u);
+    const textNotice = Boolean(parent?.textNotice) ||
+      name === "p" && classNames.includes("textNotice");
+    if (!voidElements.has(name) && !/\/>\s*$/u.test(token)) {
+      stack.push({ name, hidden, textNotice });
+    }
+  }
+  return visibleNote && visibleStatementForm;
 }
 
 function visibleTableHeaders(html: string): Map<number, Set<string>> {
@@ -952,11 +1030,13 @@ async function currentCentralBytes(
   bucket: R2Bucket,
   plan: ArtifactPlan,
   manifest: Manifest,
+  legacyEmptyArtifactSha256: ReadonlySet<string>,
 ): Promise<Uint8Array> {
   const current = plan.source
     ? sanitizeGlobalPassHtml(
       await readVerifiedArtifact(bucket, plan.source, manifest),
       manifest.schemaVersion,
+      legacyEmptyArtifactSha256.has(plan.source.sha256),
     )
     : plan.centralBytes;
   if (current.byteLength !== plan.centralBytes.byteLength ||

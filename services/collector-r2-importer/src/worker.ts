@@ -351,6 +351,9 @@ function importOneGlobalPass(
     fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
     importerVersion: env.IMPORTER_VERSION,
     manifestKey,
+    legacyEmptyArtifactSha256: parseGlobalPassLegacyEmptyAllowlist(
+      env.GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST,
+    ),
     offset,
     immediate,
   });
@@ -796,6 +799,16 @@ function requiredString(value: unknown, code: string, max: number): string {
     throw new ImportError(400, code);
   }
   return value;
+}
+
+export function parseGlobalPassLegacyEmptyAllowlist(value: string): ReadonlySet<string> {
+  const hashes = value.split(",");
+  if (hashes.length === 0 || hashes.length > 15 ||
+      hashes.some((hash) => !/^[0-9a-f]{64}$/u.test(hash)) ||
+      new Set(hashes).size !== hashes.length) {
+    throw new ImportError(500, "global_pass_legacy_empty_allowlist_invalid");
+  }
+  return new Set(hashes);
 }
 
 function errorResponse(error: unknown): Response {
