@@ -1,14 +1,15 @@
 # 三井住友銀行: SMBCダイレクト / Oliveの銀行口座側
 
-調査日: 2026-08-26
+調査日: 2026-08-26、追試: 2026-08-31
 
 ## 結論
 
 - **推奨データ源は公式WebのSMBCダイレクト**。普通預金のMVPは、公式Webが内部で使うフォームとJSONエンドポイントを読み取り専用で呼び出す方式が最短である。
 - **Oliveは別の銀行APIではない**。銀行口座側はSMBCダイレクトとWeb通帳を含むパッケージであり、Olive専用画面よりもSMBCダイレクトの口座一覧・明細を正本とする。
 - `pnsk-lab/mnie` の `provider-smbc-direct` は、普通預金1口座について、アプリ承認付きログイン、残高、期間指定の入出金明細、セッション再利用まで実装している。ブラウザを起動せず通常のHTTPリクエストで動くため、MVPの有力な土台になる。
+- 2026-08-31の実口座追試では、WSLの通常`fetch`とCookie jarだけでログイン要求、Safety Pass承認、認証済みトップ、JPY残高取得まで成功した。ブラウザやTLS fingerprint偽装は不要だった。明細要求は日曜21時から月曜7時のサービス時間制限で拒否され、認証/Akamai失敗ではなかった。
 - SMBCセーフティパス登録済みの契約では、登録端末での生体認証が**ログインの都度**必要になる。したがって現時点の自動化見込みは、**人がQR/アプリ承認した後の収集は自動化可能、期限切れ後の再ログインは有人**である。
-- Safety Passは銀行側の登録受理、契約者番号と登録端末の紐付け、解除・失効状態を含む。未改変の公式アプリによる有人承認を支援して正規sessionを受け取る構成を運用上は推奨する。一方、**独自clientでどこまで標準機構を再現でき、どこから端末/銀行登録に拘束されるかの難度評価は将来調査の対象**とする。credential/署名/attestationの偽造やsecurity-control bypassは実装しない。
+- Safety Passは銀行側の登録受理、契約者番号と登録端末の紐付け、解除・失効状態を含む。Android 12.8.0候補の静的解析では、契約IDをaliasとするEC秘密鍵を`AndroidKeyStore`内で生成し、毎回のサーバーchallengeを`BiometricPrompt.CryptoObject`で生体認証後に署名する実装を確認した。秘密鍵exportはなく、profile/app dataのコピーでは移植できない。
 - ログイン側の `direct.smbc.co.jp` と取引側の `direct3.smbc.co.jp` がAkamai edgeを使うことは確認できた。Bot Manager系の保護も有力だが、具体的なWAFポリシーと認証後エンドポイントでの判定条件は未確認である。
 - 個人口座向け公式APIは存在するが、契約済みの電子決済等代行業者向けであり、個人開発者が自己口座用トークンを直接発行する公開経路は確認できなかった。本プロジェクトではaggregatorを避けるため採用しない。
 
@@ -23,7 +24,7 @@
 - 非目標: Vpass、Oliveフレキシブルペイのカード明細、他行・証券連携、振込、振替、設定変更、電子決済等代行業者経由の集約
 - 安全境界: 読み取り専用。振込先、振込手数料計算など、収集に不要な転送関連画面にも遷移しない。公式split APK/公開JSの静的解析、未改変公式アプリを本人が操作する際のruntime metadata観測、独自client再現難度の評価は対象とするが、秘密抽出、credential/署名/attestation偽造、pinning/integrity回避は行わない
 
-この調査ではログイン、実口座へのアクセス、APKの取得・実行、認証済みリクエストを行っていない。秘密、口座番号、氏名その他の個人識別子は記録していない。
+2026-08-26の初回調査ではログインやAPK取得を行わなかった。2026-08-31の追試では、本人のSafety Pass承認を伴う読み取りログイン、残高、明細要求まで実行し、第三者再配布APK候補をオフライン静的解析した。資格情報、Cookie、challenge、認証済みHTML、残高、明細、口座番号、氏名その他の個人データは保存・コミットしていない。APKとJADX成果物は非公開アーカイブにだけ保存し、本リポジトリにはsanitize済みの結論だけを残す。
 
 ## 調査方法
 
@@ -98,24 +99,23 @@ SMBCダイレクトではOliveの対象普通預金が「残高別普通」「�
 
 以上から、Safety Passは単なるローカル生体認証画面ではなく、少なくとも**銀行側が受理する登録、契約者番号と登録端末の紐付け、解除・失効状態**を含む認証機構である。なお、解除・再登録は設定変更に当たるため、本調査および読み取り専用の実装検証では実行しない。
 
-### Safety Pass内部機構: 確認事実と推測
+### Safety Pass内部機構: 2026-08-31静的解析
 
 #### 確認できた事実
 
 - 利用規定は、生体情報の照合が端末内で行われ、生体情報自体は銀行に送信・保存されないと明記している。
 - 銀行側には、申し込みの受理、契約者番号と登録端末の対応、解除・失効を管理する状態がある。
 - PC/別端末ログインでは、登録端末に表示された情報を利用者が確認し、銀行所定の手続きと生体認証で承認する。
-- `mnie` の公開コードでは、Web側が生成した `userId`、`confirmationNumber`、`createdTime` を `smbcdirectapp:///biometrics/ADBA` deep linkへ渡し、公式アプリ承認後にWebの完了処理を行う。これは短寿命challengeとサーバー側session issuanceを伴う構成と整合するが、アプリ内部の署名方式までは示さない。
+- `mnie` の公開コードでは、Web側が生成した `userId`、`confirmationNumber`、`createdTime` を `smbcdirectapp:///biometrics/ADBA` deep linkへ渡し、公式アプリ承認後にWebの完了処理を行う。
 - 公式掲載は、root化履歴のある端末で正常動作しない場合があること、AndroidでUSBデバッグが有効だと起動しないことを明記している。
+- Android 12.8.0候補には`BioPreConfirmationREQ/RES`、`BioLoginREQ`、`BCATA01/02/03`があり、QR承認と生体ログインの現行フローを構成する。
+- `NewBioLoginApprovalFragment`はサーバーchallengeを受け取り、`BiometricUseCase.doSignature`を呼び、署名済みデータを結果APIへ渡す。
+- `BiometricUseCase`は契約IDをaliasとしてEC署名鍵を`AndroidKeyStore`に生成し、公開鍵だけをexportする。秘密鍵export処理はない。
+- 鍵はuser authentication必須で、Android 11以降の復元された呼び出しは`setUserAuthenticationParameters(0, BIOMETRIC_STRONG)`に対応する。署名用`Signature`は`BiometricPrompt.CryptoObject`へ渡され、生体認証成功後にchallengeへ署名する。
+- 生体登録変更や鍵失効時の削除・再登録経路もある。したがってapp data、ブラウザprofile、公開鍵だけを別端末/サーバーへコピーしても承認は再現できない。
+- アプリには別系統のTransmit Security pre/post loginとattestation payload、root検知も含まれる。エミュレータ案は生体UIだけでなくdevice-integrity層も扱う必要があり、Workers/Containersへ移す近道にはならない。
 
-#### 推測・未確認
-
-- 登録端末の秘密鍵または同等のcredentialをAndroid Keystore、iOS Keychain/Secure Enclave等に保存し、対応する公開鍵またはcredential IDを銀行側登録に結び付けている可能性が高い。ただし鍵形式、alias、hardware-backed要件は未確認である。
-- QR/deep linkは短寿命のchallengeを指し、アプリが登録credentialに束縛されたresponseを返すchallenge-response方式である可能性が高い。ただしnonce、署名対象、アルゴリズム、リプレイ防止方式は未確認である。
-- root/USBデバッグ制限から端末integrityを検査していることは推定できるが、Google Play Integrity、Apple App Attest/DeviceCheck、独自attestationの利用は確認できていない。
-- 証明書ピンニングが実装されている可能性はあるが未確認である。通常のOS trust storeだけを使う構成も排除できない。
-
-銀行側に登録credential、端末状態、失効状態があることは確認できるが、そのcredentialがhardware-backed秘密鍵、端末installation secret、push enrollment、server-side device recordのどれであるかは未確認である。APKから画面遷移やschemaが分かっても、銀行側登録との対応が必要ならpayload模倣だけでは足りない可能性が高い。一方、正規登録フローが標準Android Keystore/BiometricPromptと公開challenge-responseだけで構成され、独自client用credentialを正規に登録できる余地があるかも未確認である。したがって現段階で「完全再現は不可能」とも「容易」とも断定せず、拘束点を実物から切り分ける。
+未確認なのは、鍵がTEE/StrongBoxでhardware-backedか、署名対象のcanonicalizationとalgorithm、server側の公開鍵登録payload、challengeの厳密な有効期限/一回性、Transmit attestationの適用条件である。これらは独自clientの完全無人化可否ではなく、拘束点の詳細を詰めるための事項である。
 
 ### Future work: 正規承認の支援と再現調査の境界
 
@@ -168,6 +168,8 @@ APK静的解析で分かるのは、宣言されたcomponent、文字列/host、
 
 公式サイトは「本来想定された利用形態と異なる極端な利用」でSMBCダイレクトを停止する場合があると明記している。常時keep-aliveは避け、低頻度の同期と自然失効後の有人再承認を前提にする。[公式SMBCダイレクト案内](https://www.smbc.co.jp/kojin/direct/)
 
+Koganeで保存するsession capsuleは、`mnie`のexportをそのまま使わない。暗号化したCookieと継続に必要な最小フォーム状態、発行/最終成功時刻、固定User-Agentだけを含め、ログイン暗証、契約番号、認証済みトップHTMLを除外する。同一sessionの処理は直列化し、自然失効時は`interaction_required`へ遷移する。1回の承認後に複数回収集できる可能性は高いが、公式ガイドは無操作で自動終了するとしており、無期限keep-aliveを回避策にしない。
+
 ## Akamai / anti-bot
 
 ### 確認できた事実
@@ -180,6 +182,7 @@ APK静的解析で分かるのは、宣言されたcomponent、文字列/host、
 - 公開ログインHTMLはShift_JISで、未認証の単発GETにJavaScriptチャレンジやCAPTCHAは表示されなかった。
 - 公開loginは `JSESSIONID` (`Secure; HttpOnly`)、`DIRECTUUID`、hidden `_TOKEN`/`_FORMID`/`_FRAMEID` を発行し、login pre-stepとして `/loginlogout/LLDLDILnextPreTS` を使う。cookie/tokenの値は保存していない。
 - login pageは [Caulis](https://static.fraud-alert.net/Caulis.smbc_v2.min.js) を読み込み、同assetは `p.fraud-alert.net`/`sb.fraud-alert.net`、local session ID、CORS/XHR送信を含む。また `ib.smbc.co.jp` から公開の [RSA](https://ib.smbc.co.jp/js/rsa.js)、[AES](https://ib.smbc.co.jp/js/aes.js)、[password-loader](https://ib.smbc.co.jp/js/pwcload.js) を動的loadする。Safety Pass以前にもsession、anti-bot/risk、credential protectionが別層で存在する。
+- 2026-08-31の実口座追試では、WSL/LinuxからNode系の通常`fetch`、Cookie jar、Linux Chrome型User-AgentだけでSafety Pass承認後のログインと残高取得に成功した。ブラウザ実行、Akamai sensor生成、TLS fingerprint偽装、住宅回線egressは使っていない。
 
 したがって、Akamai CDN/edgeの利用は確定である。AkamaiはBot ManagerがCookieとブラウザテレメトリを使って自動リクエストを識別する仕組みを提供している。[Akamai Bot Management docs](https://techdocs.akamai.com/security-ctr/docs/dimensions-new)
 
@@ -187,30 +190,17 @@ APK静的解析で分かるのは、宣言されたcomponent、文字列/host、
 
 - `_abck` と `bm_sz` の組合せから、Akamai Bot Managerまたは同系統の自動化判定が有効である可能性が高い。
 - ただし、ログインPOSTや認証後AJAXに対する具体的なWAF/Bot Managerアクション、レート制限、データセンターIPの評価は外部から確定できない。
-- `mnie` が通常の`fetch`とCookie jarだけで現行フローを実装しているため、少なくとも採取時点の本人操作を伴う低頻度フローでは、完全なブラウザ指紋生成が必須ではなかったと推定できる。実口座での再検証が必要である。
+- 同じ低頻度フローがCloudflare Workers/ContainersやOCIのegressでも継続的に通るか、IP/セッション移動に反応するかは未確認である。ローカルで通ったため、最初からChrome/TLS impersonationを組み込む根拠はない。
 
 ## APKと静的解析
 
-公式の公開入手経路はGoogle Playであり、銀行サイトから直接配布される単体APKは確認できなかった。[公式Playページ](https://play.google.com/store/apps/details?id=jp.co.smbc.direct) は package `jp.co.smbc.direct`、developer `SUMITOMO MITSUI BANKING CORPORATION`、更新日 2026-08-12 を表示したが、公開HTMLから現行 `versionName`/`versionCode` は確定できなかった。review投稿者のversionは配布最新版の証拠にしない。
+公式の公開入手経路はGoogle Playであり、銀行サイトから直接配布される単体APKは確認できなかった。[公式Playページ](https://play.google.com/store/apps/details?id=jp.co.smbc.direct) は package `jp.co.smbc.direct`、developer `SUMITOMO MITSUI BANKING CORPORATION`、更新日 2026-08-12 を表示した。
 
-このworkspaceにAPK/APKS/AABはなく、接続済みADB環境もなかった。`direct.smbc.co.jp`/`www.smbc.co.jp` の `/.well-known/assetlinks.json` はJSONを返さず、公式domainからsigning fingerprintも得られなかった。よってpackage以外のversion、split構成、signer、manifestは未確認である。第三者ミラーは初期経路にせず、次の正規取得を行う。
+2026-08-31に第三者APKPure再配布の12.8.0 (`versionCode 593`)候補を取得し、実行せず静的解析した。base、ARM64、MDPI splitは同一SMBC signerでv2/v3署名を検証できた。Google source-stamp metadataは存在したがローカル`apksig`ではverifiedにならず、現行Google Play配布物とのbyte identityは未確認である。この来歴の限界を維持し、実行用の公式物とは扱わない。
 
-1. 利用者所有の通常Android端末でGoogle Playから公式appをinstall/updateする。
-2. Git外の隔離一時領域で `adb shell pm path jp.co.smbc.direct` によりbaseと全split pathを列挙し、各pathを `adb pull` する。
-3. `adb shell dumpsys package jp.co.smbc.direct` の `versionName`/`versionCode`、全split SHA-256だけを記録する。
-4. `apksigner verify --print-certs base.apk` でsigner certificateを採取し、同じ端末のPlay再install前後で一致を確認する。第三者配布物を実行して比較しない。
+JADX 1.5.6は28,925 classを処理し514 error、34,920 source fileを生成した。Safety PassのDTO、QR承認fragment、Keystore/BiometricPrompt署名use case、Transmit Security pre/post login、attestation payload、root検知は読めた。apktool 2.7.0-dirtyはtarget SDK 36のresource table decodeを大量に誤り中止したため、partial treeを成果物にしていない。
 
-公式掲載は、root化履歴のある端末で正常動作しない場合があること、USBデバッグが有効だと起動しないことを明記している。よって動的解析は実機/エミュレータ検知、証明書ピンニング、難読化の影響を受ける可能性がある。
-
-静的解析はWeb経路の不足有無にかかわらず、Safety Pass再現難度の評価に必要である。
-
-1. `apkanalyzer manifest print`/`apktool d` でmanifest、`smbcdirectapp` deep link、exported component、permission、`networkSecurityConfig`を確認する。
-2. `jadx --deobf` にbaseと全splitを同時入力し、`/biometrics/ADBA`、`userId`、`confirmationNumber`、`createdTime`のsource/sink、poll/session handoff、host/route/schemaを追う。
-3. `AndroidKeyStore`, `KeyGenParameterSpec`, `BiometricPrompt`, `Signature`, `Cipher`, key attestation/StrongBox、Play Integrity/SafetyNet/Firebase App Check等のcall-siteを確認する。
-4. OkHttp `CertificatePinner`、Cronet、WebView、custom TrustManager、native library/stringsを棚卸しし、pinning候補と通常OS trustを分ける。
-5. 難読化・reflection・JNIで追えない箇所は「不在」ではなく不足とし、本人操作runtime metadataでhost/順序だけを照合する。
-
-本人操作runtimeでは、未改変公式appと正常端末で既存Safety Pass loginだけを行い、deep link遷移、時刻、期限、UI state、DNS/SNI、method、host、値を除いたpath template、status/content-type、session切替時点を記録する。headers/body/cookie/token/口座値は保存しない。通常のOS/network toolingでTLS内容を見られなければ、それ自体をpinning/非debuggable等の観測障壁として記録し、CA追加、hook、root、Frida、TrustManager改変、attestation偽造へ進まない。
+候補XAPK、split hash、signer、再構成/再解析手順、JADX出力はprivate `risu729/android-app-decompiled`の`android/smbc/12.8.0/`に保存した。資格情報、認証済み通信、account dataは含まない。次のprovenance強化は、所有端末のPlay配布splitを`adb pull`し、version、hash、signerを候補と照合することである。
 
 ## 3rd party client
 
@@ -306,9 +296,14 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 | Webブラウザで公式CSVを取得 | 3/5 | アプリ承認は有人、その後は自動 | Web通帳普通・外貨等、画面が対応する科目 | 検算・fallbackとして有用 |
 | Web内部プロトコルを複数口座・外貨・定期へ拡張 | 4/5 | 認証後は自動 | 口座一覧、複数科目、預入ロット | 普通預金MVP後に実施 |
 | 公式アプリをUI自動化 | 5/5 | 生体認証で有人、端末保守も必要 | アプリ表示全般 | 非推奨 |
-| 公式split APK/static + read-only runtime調査 | 3–4/5 | 調査のみ | app host/schema、Safety Pass拘束点 | Web調査と並行する。pinning/integrity/attestation回避はしない |
-| Safety Pass独自client再現難度評価 | 5/5以上 | 未評価 | 認証機構 | **将来調査対象**。標準機構/端末拘束を分類し、credential/署名/attestation偽造は実装しない |
+| Safety Passを公式手順で解除 | 1/5 | 資格情報ログインが継続する間は完全無人 | Webで読める範囲 | 唯一の直接的な完全無人案だが、明示的なsecurity downgradeと設定変更。既定では不採用 |
+| Safety Pass登録端末/profileをコピー | 5/5以上 | 不成立 | 認証機構 | Keystore秘密鍵がnon-exportableかつ毎回生体認証。**不採用** |
+| 専用Android emulator | 5/5以上 | 生体/attestationで無人化できない | アプリ表示全般 | Keystore、BiometricPrompt、Transmit attestation、root検知があり、serverless経路にならない |
 | 契約済みaggregator API | Kogane側1/5 | 高い | 広い | 方針により不採用 |
+| 個人向け公式外部連携token | Kogane側1/5 | 高い | 残高・明細等 | 仕組みは理想的だが、production接続は契約済み電子決済等代行業者に限定。self-service tokenなし |
+| [LINE残高照会](https://www.smbc.co.jp/sns/line/service.html) | 2/5 | 初回連携後は一定期間無人 | 主口座、直近1週間・最大100件という公開仕様 | 現行提供をlive確認してから補助候補。完全ledger/backfillには不足 |
+| [店番号・口座・キャッシュカード暗証の残高照会](https://direct3.smbc.co.jp/aib/aibgsjsw1k12.jsp) | 1/5 | 高い | 現在残高のみ | 一部利用者は制限、明細なし。暗証保存を増やすため不採用 |
+| [メール/push通知](https://www.smbc.co.jp/kojin/direct/service/resources/pdf/goriyou_tebiki.pdf?version=260601)の取込 | 2/5 | 高い | 振込入金や引落予定など一部event | Global Service/SMBC Debit等の除外があり補助sourceに限定 |
 
 ## 推奨方針
 
@@ -320,18 +315,20 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 6. サーバー側セッションを低頻度で再利用するが、常時keep-aliveはしない。失効時は再承認する。
 7. 普通預金が安定してから、トップページの口座一覧解析、複数口座、外貨、定期預入明細を別PRで追加する。
 
+完全無人を必須にする場合の選択肢は、ユーザーが明示的にSafety Passを解除するか、方針を変更して契約済みaggregatorを利用するかの実質2つである。前者は設定変更とsecurity downgrade、後者は第三者依存であるため、現方針では**有人承認を稀なinteractionとして扱い、その間の同期をsession再利用で自動化する**。
+
 ## 次の検証手順
 
 実装PRでは次を、読み取り専用かつ実口座情報をコミット・ログへ残さず検証する。
 
-1. ユーザー操作でSMBCダイレクトWebへログインし、SMBCセーフティパスのQR承認手順と承認待ち時間を確認する。
+1. 7時以降の通常サービス時間に、2026-08-31と同じ読み取り専用フローで1か月明細が取得できることを確認する。ログインとJPY残高までは確認済み。
 2. Web通帳のCSVを1か月分だけ手動取得し、列、文字コード、明細ID相当の有無、摘要、残高粒度を確認する。
-3. forkした`mnie`で、普通預金残高と同じ1か月の明細だけを取得する。振込関連メソッドはコードから無効化してから実行する。
+3. Kogane用isolated clientへ、確認済みのlogin、Safety Pass poll、残高、明細だけを移植する。`mnie` packageを依存または再利用せず、振込関連routeを含めない。
 4. JSONと公式CSVの件数、入金合計、出金合計、期末残高を照合する。
 5. keep-aliveなしで、15分、1時間、翌日の順にexport/importの有効性を測る。失効を検知したら再ログイン要求へ落とす。
 6. 同一セッションをローカルとOCIのそれぞれで新規作成し、AkamaiによるHTTP 403/429、チャレンジ、Cookie追加、IP変更時の失効を記録する。セッションを環境間で移動して検証しない。
 7. 口座一覧に普通預金以外がある場合は、科目名とmasked identifierだけを記録し、次の専用PRで外貨・定期のread endpointを調査する。
-8. Web検証と並行して、所有端末のPlay配布splitを正規取得し、version/signer/splits/manifest/deep link/host/schema/Keystore/BiometricPrompt/integrity/pinning候補を静的解析する。
+8. 所有端末のPlay配布splitを正規取得し、12.8.0候補のversion/hash/signerと照合する。第三者候補の静的解析自体は完了済み。
 9. 本人が未改変公式appで既存Safety Pass loginを行う間だけ、read-only runtime metadataを観測し、challenge発行、app承認、Web poll、session rotationの順序を値なしで記録する。write endpoint、登録/解除、取引承認へ遷移しない。
 10. static/runtimeの結果から「標準Android APIで再現可能」「銀行側登録またはnon-exportable keyに拘束」「server attestationで拘束」「不明」をcomponent単位で判定し、次に必要な正規実験を列挙する。回避実験へは進まない。
 
@@ -343,7 +340,7 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 - 定期・積立の預入ロット項目と履歴保存期間
 - 外貨CSV/内部JSONの通貨、小数桁、適用レート、取引後残高の正確なschema
 - Web通帳の貯蓄預金について、現行FAQと旧ヘルプで異なる履歴期間の実挙動
-- 公式Play配布物の現行version/signer/分割APK構成、manifest、難読化、証明書ピンニング、アプリ用anti-bot SDK
-- Safety Passの登録credentialが端末secure storageにどう保存され、銀行側登録と何で対応付けられるか
-- challenge-responseの署名方式、有効期限、一回性、リプレイ防止、鍵rotation
-- Google Play Integrity、Apple App Attest/DeviceCheck、独自attestationの採否
+- 公式Play配布物と12.8.0第三者候補のbyte/hash identity
+- Safety Pass EC鍵がTEE/StrongBoxでhardware-backedか、銀行側の公開鍵登録payload
+- challenge-responseの署名algorithm/canonicalization、有効期限、一回性、リプレイ防止、鍵rotation
+- Transmit Security attestationの適用条件と、Google Play Integrity等の追加層の有無
