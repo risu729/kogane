@@ -19,7 +19,42 @@ export const SMBC_DIRECT_TRANSFER_CHUNK_SIZE = 10;
 const DIRECT_ARTIFACT_LIMIT = 12;
 const MANIFEST_KEY = /^raw\/smbc-direct\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
-const SAFE_FAILURE_CODE = /^[a-z][a-z0-9_]{0,99}$/u;
+const FIXED_FAILURE_CODES = new Set([
+  "_formid_field_missing",
+  "_token_field_missing",
+  "account_detail_body_missing",
+  "account_detail_body_too_large",
+  "aifcdt3_form_missing",
+  "aifcdtl_form_missing",
+  "balance_body_missing",
+  "balance_body_too_large",
+  "balance_invalid",
+  "balance_value_missing",
+  "continue_session_body_missing",
+  "continue_session_body_too_large",
+  "crypto_error",
+  "deposits_total_invalid",
+  "directheaderform_form_missing",
+  "json_parse_failed",
+  "logout_failed",
+  "session_missing",
+  "tpaltop_form_missing",
+  "transaction_amount_invalid",
+  "transaction_balance_invalid",
+  "transaction_count_invalid",
+  "transaction_date_invalid",
+  "transaction_direction_invalid",
+  "transactions_body_missing",
+  "transactions_body_too_large",
+  "transactions_json_invalid",
+  "transactions_rejected",
+  "transactions_service_time_unavailable",
+  "transactions_stop_flag_invalid",
+  "type_error",
+  "unexpected_error",
+  "withdrawals_total_invalid",
+]);
+const HTTP_FAILURE_CODE = /^(?:account_detail|balance|continue_session|transactions)_http_[1-5][0-9]{2}$/u;
 const RAW_MEDIA_TYPE = "application/json;charset=Shift_JIS";
 const JSON_MEDIA_TYPE = "application/json; charset=utf-8";
 const BALANCE_RESPONSE_KEYS = [
@@ -215,7 +250,12 @@ export async function importSmbcDirectRun(options: {
     const validated = await validateSmbcDirectRun(options.bucket, options.manifestKey);
     expectedArtifactCount = validated.artifacts.length + 1;
     const offset = options.offset ?? 0;
-    if (!Number.isSafeInteger(offset) || offset < 0 || offset > expectedArtifactCount) {
+    if (!Number.isSafeInteger(offset) || offset < 0 ||
+        (offset !== 0 && (
+          options.immediate !== false ||
+          offset % SMBC_DIRECT_TRANSFER_CHUNK_SIZE !== 0 ||
+          offset >= expectedArtifactCount
+        ))) {
       throw new ImportError(400, "transfer_offset_invalid");
     }
     if (expectedArtifactCount > 10_000) {
@@ -537,7 +577,7 @@ export function parseSmbcDirectManifest(bytes: Uint8Array, manifestKey: string):
   const prefix = manifestKey.slice(0, -"manifest.json".length);
   const artifacts = input.artifacts.map((value) => parseArtifact(value, prefix));
   if (!Array.isArray(input.failureCodes) || input.failureCodes.length > 20 ||
-      input.failureCodes.some((value) => typeof value !== "string" || !SAFE_FAILURE_CODE.test(value)) ||
+      input.failureCodes.some((value) => typeof value !== "string" || !validFailureCode(value)) ||
       new Set(input.failureCodes as string[]).size !== input.failureCodes.length) {
     invalid("manifest_failure_codes_invalid");
   }
@@ -688,6 +728,13 @@ function parseRawTransactions(input: JsonObject, artifact: Artifact): Transactio
   if (!Array.isArray(response.meisai) || response.meisai.length > 100_000) {
     throw new ImportError(409, "transactions_raw_rows_invalid");
   }
+  const declaredCount = observedCount(response.accntHstCount, "transactions_raw_count_invalid");
+  if (declaredCount !== response.meisai.length || declaredCount !== artifact.transactionCount) {
+    throw new ImportError(409, "transactions_raw_count_mismatch");
+  }
+  if (response.shoukaiServerStopFlag !== "0") {
+    throw new ImportError(409, "transactions_raw_stop_flag_invalid");
+  }
   const transactions = response.meisai.map((value) => {
     const entry = record(value, "transactions_raw_row_invalid", 409);
     exactShape(entry, [
@@ -702,13 +749,19 @@ function parseRawTransactions(input: JsonObject, artifact: Artifact): Transactio
       "torihikigobalance",
     ], "transactions_raw_row_shape_invalid", 409);
     for (const key of Object.keys(entry)) scalar(entry[key], "transactions_raw_row_scalar_invalid");
+    const direction = oneOf(
+      entry.depositWithdrawTypeFlag,
+      ["1", "2"] as const,
+      "transactions_raw_direction_invalid",
+      409,
+    );
     return {
       id: boundedString(String(entry.meisaiId ?? ""), "transactions_raw_id_invalid"),
       date: transactionDate(entry.dispDate, compact(artifact.range!.end)),
       amount: Math.abs(parseYen(entry.amount, "transactions_raw_amount_invalid")),
       balanceAfter: parseYen(entry.torihikigobalance, "transactions_raw_balance_invalid"),
       description: boundedString(String(entry.comment ?? ""), "transactions_raw_description_invalid"),
-      direction: entry.depositWithdrawTypeFlag === "1"
+      direction: direction === "1"
         ? "debit" as const
         : "credit" as const,
     };
@@ -798,6 +851,9 @@ function validateCompleteness(
     expected.push(balanceNormalized);
   }
   if (manifest.completedChunks > 0 && expected.length !== 2) {
+    throw new ImportError(409, "manifest_balance_complement_mismatch");
+  }
+  if (keys.some((key) => key.startsWith(prefix + "transactions/")) && expected.length !== 2) {
     throw new ImportError(409, "manifest_balance_complement_mismatch");
   }
   for (let index = 0; index < manifest.completedChunks; index += 1) {
@@ -916,7 +972,6 @@ async function artifactPlans(
   const descriptor = await manifestDescriptor(
     validated,
     manifestKey,
-    unitId,
     fingerprintKey,
   );
   plans.push({
@@ -948,7 +1003,7 @@ async function dataDescriptor(
   return normalizedDescriptor({
     artifactKey,
     artifactRole: normalized ? "collector_derived" : "provider_response",
-    payloadFidelity: normalized ? "generated" : "exact",
+    payloadFidelity: normalized ? "transformed" : "exact",
     lineageDisposition: normalized ? "linked" : "not_applicable",
     dataset: verified.artifact.dataset,
     formatId: formatId(verified.artifact.dataset),
@@ -979,7 +1034,6 @@ async function dataDescriptor(
 async function manifestDescriptor(
   validated: ValidatedRun,
   key: string,
-  unitId: number,
   fingerprintKey: string,
 ): Promise<JsonObject> {
   return normalizedDescriptor({
@@ -992,7 +1046,7 @@ async function manifestDescriptor(
     formatVersion: validated.manifest.schemaVersion,
     declaredMediaType: "application/json",
     fetchedAtMs: Date.parse(validated.manifest.completedAt),
-    fetchUnitId: unitId,
+    fetchUnitId: null,
     sequence: validated.artifacts.length,
     sha256: validated.manifestSha256,
     byteSize: validated.manifestBytes.byteLength,
@@ -1013,7 +1067,7 @@ function normalizedDescriptor(input: {
   formatVersion: string;
   declaredMediaType: string;
   fetchedAtMs: number;
-  fetchUnitId: number;
+  fetchUnitId: number | null;
   sequence: number;
   sha256: string;
   byteSize: number;
@@ -1282,6 +1336,17 @@ function parseYen(value: unknown, code: string): number {
   const amount = Number(normalized);
   if (!Number.isSafeInteger(amount)) throw new ImportError(409, code);
   return amount;
+}
+
+function observedCount(value: unknown, code: string): number {
+  if (typeof value !== "string" || !/^(?:0|[1-9][0-9]{0,5})$/u.test(value)) {
+    throw new ImportError(409, code);
+  }
+  return Number(value);
+}
+
+function validFailureCode(value: string): boolean {
+  return FIXED_FAILURE_CODES.has(value) || HTTP_FAILURE_CODE.test(value);
 }
 
 function scalar(value: unknown, code: string): void {
