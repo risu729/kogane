@@ -327,7 +327,11 @@ Workers内でdownloadした任意JavaScriptを`eval`せず、保護scriptを手�
 
 一接続のfull cookie jarだけで5 KBを超え得るため、`session` modeは5 KB以内だけのPoCである。実用案はlocal sync CLIでclient-side AES-GCM暗号化したsession envelopeをprivate R2へ置き、Worker secretには小さいwrapping keyだけを置く構成だが、本PRでは未実装であり5 KB超sessionはblockerとする。
 
-R2は`raw/myjcb/YYYY/MM/DD/<run-id>/<connection-id>/...`へsource-preserving artifact、normalized ledger、manifestをappend-only保存する。login/mypage/protection source、credential、protected POST body、cookie値は保存しない。HTMLはtoken候補と16桁card番号をredactしてから保存し、runtime errorはtyped codeと固定public messageに正規化する。discoveryにはcookie名を残さずcountだけを置く。
+R2は`raw/myjcb/YYYY/MM/DD/<run-id>/<connection-id>/...`へsanitized provider capture、normalized ledger、manifestをappend-only保存する。login/mypage/protection source、credential、protected POST body、cookie値は保存しない。HTMLはactive/embedded要素、event/data/navigation/form属性、全value/textarea、token/session類似属性、16桁card番号を除去・置換してから保存し、runtime errorはtyped codeと固定public messageに正規化する。discoveryにはcookie名を残さずcountだけを置く。
+
+Layer Aの中央取込は`services/collector-r2-importer`に実装した。source R2を変更せず、manifest/prefix/metadata/checksumとHTML・past-month JSON・ledger・discoveryのmeaningを中央state作成前に検証する。既存HTMLは追加の`myjcb-central-sanitized-v2`変換を行い、active surfaceとtoken/navigation属性を中央へ複製しない。manifestもfailure/blocker自由文を固定codeへ置換した中央専用bytesを作り、source manifestの自由文をそのまま複製しない。最大16 connectionsのterminal reportを残すため、完全inventoryを固定して5 artifactずつstaged transferし、HMAC付きcontinuationから再開する。専用credential、route、source alias、storage policyはmigration `0011`で分離する。2026-09-05時点のprivate R2監査では22 manifests / 142 objectsを確認したが、本文・値・key・個別hashは公開記録へ出していない。最終validatorでは22 manifests全件が通り、72 HTML全件が中央用bytesへ変換された。実例が存在したdatasetはcredit menu、past-month JSON、credit detail、parsed ledger、discoveryだけであり、CSV/PDF/OFX/debitはartifactもR2 failure宣言も受理しない。実例のsafe structureを監査して契約・negative testを追加するまでfail closedを維持する。
+
+同一manifestのbackfill retryは中央で冪等だが、collectorが別run IDで重複収集した場合は別runとして保存する。実R2の6 success runはpayload fingerprintが互いに異なり、content deduplicationで収集runを統合する根拠はない。既知のCron/manual overlapはcollector側lockの課題であり、raw-evidence取込でscheduled実行を追加・変更しない。
 
 日次実行は`0 21 * * *`のCloudflare CronからWorker `scheduled()`を直接呼び、GitHub Actions cronを使わない。手動`POST /trigger`のBearerはSHA-256で固定長化してから`crypto.subtle.timingSafeEqual`で比較する。ただしCron/manual overlap lockは未実装で、同一IDの同時login/readを防ぐDurable Object lockまたはQueue直列化をdeploy/merge前要件とする。
 

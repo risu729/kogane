@@ -1,6 +1,20 @@
 # Collector R2 importer
 
-各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suica、GLOBAL PASSに対応する。
+各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suica、GLOBAL PASS、MyJCBに対応する。
+
+## MyJCBの境界
+
+MyJCBはprivate R2の`raw/myjcb/YYYY/MM/DD/<run-id>/`以下をcanonical source `myjcb`へ取り込む。専用credential `collector-r2-myjcb`、source alias、storage policyをmigration `0011`で分離し、他collectorのtokenは受理しない。`POST /v1/myjcb/import-run`はmanifest 1件を、`POST /v1/myjcb/backfill-page`はprefixを1 objectずつ走査する。collectorの管理Bearer付き`POST /backfill-raw-evidence?limit=1`からService Bindingで呼び、source R2は成功時も変更・削除しない。
+
+Importerは中央runを作る前に、manifestのexact schema、日付とUUIDを含むprefix、connectionとartifactの順序・件数、status/failure関係、全objectの完全inventory、content type、exact custom metadata、R2 native checksum（存在時）と再計算SHA-256を検証する。HTMLはcollectorが保存前にredactしたUTF-8 source bytesを検証したうえで、script/style/meta、埋込み要素、event/data属性、navigation URL、form action、全value/textarea、token/session類似属性を決定的に除去・置換した`myjcb-central-sanitized-v2`だけを中央へ送る。password control、16桁card番号、MyJCB/detail画面markerも再検証し、正規化後にactive surfaceが残れば拒否する。過去月JSON-RPC、parsed ledger、discoveryも独立したstrict schemaで検証する。CSV/PDF/OFXとdebit artifactは2026-09-05の実R2監査で一件も観測されなかったため、単なるsignature検査では受理せず、artifactと`r2:<dataset>` failureの双方を契約化までfail closedとする。
+
+最大16 connectionsのterminal reportと中央Workerの1 request当たり32回のService Binding上限を両立するため、完全inventoryを先に固定し、一request最大5 artifactずつstaged transferする。継続tokenはmanifest key、中央run/unit/inventory、inventory digest、offsetをHMACで束縛する。最後のchunkだけconnection/run terminal reportを登録してsealする。同じmanifest/run IDの再送は同じ中央run、units、inventoryへ収束し、objectとcatalogueを冪等再利用する。一方、collector側でcron/manual overlap等により**別run IDの収集が重複実行された場合は別の取得事実**であり、Importerは内容hashが同じでもrunを統合しない。収集の重複防止はDurable Object lockまたはQueueでcollector側に実装すべき別問題である。この変更はMyJCBのscheduled triggerを追加・有効化・変更しない。
+
+同期source検証は1 request 512 data artifactsをhard limitとする。現在の実runは20件で十分な余裕がある。16 connectionsすべてで全月・全exportが同時に現れてこの上限を超える場合は、中央stateを作らずfail closedにし、manifest inventoryの検証自体をQueueへ分割する独立変更が必要である。
+
+### private R2の構造監査（2026-09-05）
+
+本文、値、object key、個別hash、secretを表示せず、読み取り専用bindingで件数とshapeだけを監査した。22 manifests、142 objectsで、statusはsuccess 6 / failed 16、triggerはmanual 17 / scheduled 5だった。6 success runsのdata artifactは計120件で、内訳はcredit menu 6、past-month JSON 6、credit detail HTML 66、parsed ledger 36、discovery 6である。manifest/artifactのkey set、prefix、run ID、件数、size、checksum、metadataに不一致はなかった。全HTMLはXML/HTML/MyJCB/detail markerを持ち、入力値はすべてredact済みだった。最終validatorを同じread-only bindingで全22 manifestsへ適用し、22件すべてがstrict source validationを通過、72 HTML artifactすべてが中央用v2 bytesへ決定的に変換されることを確認した。6 success runsのpayload fingerprintは互いに異なり、内容重複を根拠にrunを潰せないことも確認した。legacyを含むfailure/blockerの自由文は中央manifestへコピーせず、connection statusとoperationから固定codeへ置換する。
 
 ## GLOBAL PASSの境界
 
@@ -97,6 +111,7 @@ SBI新生銀行を有効化する本番作業は、必ず次の順で直列実�
 - `RAW_EVIDENCE_TOKEN_SBI_SHINSEI`: `collector-r2-sbi-shinsei`専用Bearer
 - `RAW_EVIDENCE_TOKEN_MOBILE_SUICA`: `collector-r2-mobile-suica`専用Bearer
 - `RAW_EVIDENCE_TOKEN_GLOBAL_PASS`: `collector-r2-global-pass`専用Bearer
+- `RAW_EVIDENCE_TOKEN_MYJCB`: `collector-r2-myjcb`専用Bearer
 - `ORIGIN_FINGERPRINT_KEY`: storage keyを不可逆HMACへ変換する共通鍵
 
 3. target importerのdeploy成功後にSBI新生collectorをdeployする。これはService Bindingとdaily cronを有効化するため、`0 21 * * *`の直前を避け、次回cronまでに以降の確認を完了する。
@@ -226,9 +241,23 @@ poc/sony-bank-worker/scripts/backfill-raw-evidence.sh
 poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
 poc/mobile-suica-worker/scripts/backfill-raw-evidence.sh
 poc/globalpass-worker/scripts/backfill-raw-evidence.sh
+poc/myjcb-worker/scripts/backfill-raw-evidence.sh
 ```
 
 source R2はbackfill完了後も自動削除しない。
+
+### MyJCBの本番適用
+
+このPRはdeployせず、既存MyJCB Cronも変更しない。本番適用時は次を直列に行う。
+
+1. 中央raw-evidenceへmigration `0011`を適用して`kogane-ingest`をdeployし、`verify-myjcb-route.sh`で専用route/policy/aliasが各1件であることだけを確認する。
+2. `collector-r2-myjcb` credentialを生成し、Importerへ`RAW_EVIDENCE_TOKEN_MYJCB`として同期した後、`collector-r2-importer-v11`をdeployする。他source tokenは流用しない。
+3. MyJCB collectorをService Binding追加版へdeployする。この変更は既存`0 21 * * *`を追加・削除・変更しない。deploy前後でCronが1件だけであることを確認する。
+4. source R2の事前inventoryをobject件数、manifest件数、集約checksumだけで記録する。object key、個別hash、本文、値は出力しない。最初のmanifestをbounded backfillでsealし、中央のrun/seal/artifact件数だけをcanary確認する。
+5. `poc/myjcb-worker/scripts/backfill-raw-evidence.sh`を完走し、全manifestがterminal reportと完全inventoryを持ってsealされたことを確認する。failed/human-requiredのmanifest-only runもprovider成功へ昇格させず、失敗証拠としてsealする。
+6. cursorが完了時に削除された状態から再走査し、中央run/seal/artifact件数が不変であることを確認する。attempt/reuse記録は増えてよい。source R2の事前・事後inventoryは一致しなければならない。
+
+backfill前後に新しいscheduled runが作られた場合は、その新規objectとImporterによる変更を混同しない。Importerはsource R2へwrite/deleteしないが、collectorの既存Cronは別途動作するためである。既知の重複実行対策はこのrolloutに便乗して推測実装せず、collector lockの独立変更として扱う。
 
 ### 2026-09-05 本番検証
 

@@ -24,6 +24,7 @@
       "RAW_EVIDENCE_TOKEN_MOBILE_SUICA",
       "RAW_EVIDENCE_TOKEN_GLOBAL_PASS",
       "GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST",
+      "RAW_EVIDENCE_TOKEN_MYJCB",
       "ORIGIN_FINGERPRINT_KEY"
     ]
   },
@@ -51,6 +52,10 @@
     {
       "binding": "GLOBAL_PASS_SNAPSHOTS",
       "bucket_name": "kogane-globalpass-collector-poc"
+    },
+    {
+      "binding": "MYJCB_SNAPSHOTS",
+      "bucket_name": "kogane-myjcb-collector-poc"
     }
   ],
   "services": [
@@ -60,6 +65,6 @@
     }
   ],
   "vars": {
-    "IMPORTER_VERSION": "collector-r2-importer-v10"
+    "IMPORTER_VERSION": "collector-r2-importer-v11"
   }
 }

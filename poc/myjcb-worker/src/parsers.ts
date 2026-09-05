@@ -1,6 +1,6 @@
 import type { DiscoveredCard, DiscoveredPeriod, StatementState } from "./types";
 import { StopConditionError } from "./types";
-import { parse, type DefaultTreeAdapterMap } from "parse5";
+import { parse, serialize, type DefaultTreeAdapterMap } from "parse5";
 
 type HtmlNode = DefaultTreeAdapterMap["node"];
 type HtmlElement = DefaultTreeAdapterMap["element"];
@@ -259,16 +259,77 @@ export function statementState(value: string): StatementState {
 }
 
 export function redactedStatementHtml(html: string): string {
-  return html
-    .replace(
-      /(<input\b[^>]*\bvalue=["'])[^"']*(["'])/giu,
-      "$1[redacted]$2",
-    )
-    .replace(
-      /(<textarea\b[^>]*(?:name|id)=["'][^"']*(?:token|csrf|password|userid|user_id|session|otp|secret)[^"']*["'][^>]*>)[\s\S]*?(<\/textarea>)/giu,
-      "$1[redacted]$2",
-    )
-    .replace(/\b\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b/gu, "[card-number-redacted]");
+  const document = parse(html);
+  sanitizeHtmlTree(document);
+  return serialize(document);
+}
+
+const REMOVED_HTML_ELEMENTS = new Set([
+  "script",
+  "style",
+  "noscript",
+  "template",
+  "iframe",
+  "object",
+  "embed",
+  "meta",
+  "base",
+  "link",
+  "textarea",
+]);
+
+const REMOVED_HTML_ATTRIBUTES = new Set([
+  "style",
+  "srcdoc",
+  "srcset",
+  "integrity",
+  "nonce",
+  "href",
+  "xlink:href",
+  "src",
+  "action",
+  "formaction",
+  "poster",
+  "background",
+  "cite",
+  "ping",
+  "manifest",
+]);
+
+function sanitizeHtmlTree(node: HtmlNode): void {
+  if ("childNodes" in node) {
+    for (let index = node.childNodes.length - 1; index >= 0; index -= 1) {
+      const child = node.childNodes[index]!;
+      if (child.nodeName === "#comment" || (isElement(child) && REMOVED_HTML_ELEMENTS.has(child.tagName))) {
+        node.childNodes.splice(index, 1);
+      } else {
+        sanitizeHtmlTree(child);
+      }
+    }
+  }
+  if (isElement(node)) {
+    node.attrs = node.attrs.flatMap((attribute) => {
+      const name = attribute.name.toLowerCase();
+      if (
+        name.startsWith("on") ||
+        name.startsWith("data-") ||
+        name.endsWith(":href") ||
+        REMOVED_HTML_ATTRIBUTES.has(name)
+      ) {
+        return [];
+      }
+      if (
+        name === "value" ||
+        /(?:token|csrf|session|auth|credential|secret|password|nonce|userid|user-id|user_id|cookie)/u.test(name)
+      ) return [{ ...attribute, value: "[redacted]" }];
+      return [attribute];
+    });
+  } else if (node.nodeName === "#text") {
+    node.value = node.value.replace(
+      /\b\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b/gu,
+      "[card-number-redacted]",
+    );
+  }
 }
 
 function exportKindsNear(
