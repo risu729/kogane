@@ -1,3 +1,4 @@
+import { ContainerResponseError, emitDiagnostic, failure, safeErrorType } from "./diagnostics";
 import { Container, getContainer } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { collectSbiShinsei } from "./collector";
@@ -31,18 +32,18 @@ export class SbiShinseiCollectorContainer extends Container<Env> {
   override envVars = { TZ: "Asia/Tokyo" };
 
   override onStart(): void {
-    console.log(JSON.stringify({ event: "sbi-shinsei-container-start" }));
+    emitDiagnostic("log", { event: "sbi-shinsei-container-start" });
   }
 
   override onStop(): void {
-    console.log(JSON.stringify({ event: "sbi-shinsei-container-stop" }));
+    emitDiagnostic("log", { event: "sbi-shinsei-container-stop" });
   }
 
   override onError(error: unknown): void {
-    console.error(JSON.stringify({
+    emitDiagnostic("error", {
       event: "sbi-shinsei-container-error",
-      errorType: error instanceof Error ? error.name : "UnknownError",
-    }));
+      errorType: safeErrorType(error),
+    });
   }
 }
 
@@ -128,24 +129,32 @@ async function runCollection(env: Env): Promise<CollectionResult> {
   const failures: CollectionFailure[] = [];
   const container = getContainer(env.COLLECTOR_CONTAINER, `run-${runId}`);
 
+  let stage = "credential-validation";
   try {
     const output = await collectSbiShinsei({
       credentialJson: env.SBI_SHINSEI_CREDENTIAL_JSON,
       collectHandoff: async (credentialJson) => {
+        stage = "container-start";
         await container.startAndWaitForPorts();
+        stage = "container-request";
+        const relayUrl = new URL(env.RELAY_PUBLIC_URL);
+        relayUrl.searchParams.set("runId", runId);
         const response = await container.fetch(new Request("http://container/collect", {
           method: "POST",
           headers: { "content-type": "application/json; charset=utf-8" },
           body: JSON.stringify({
             credentialJson,
             relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
-            relayUrl: env.RELAY_PUBLIC_URL,
+            relayUrl: relayUrl.href,
           }),
         }));
         if (!response.ok) {
-          throw new Error(`SBI Shinsei container failed with HTTP ${response.status}`);
+          throw new ContainerResponseError(response.status);
         }
-        return readBoundedText(response, MAX_CONTAINER_RESPONSE_BYTES);
+        stage = "container-response";
+        const handoff = await readBoundedText(response, MAX_CONTAINER_RESPONSE_BYTES);
+        stage = "browser-handoff";
+        return handoff;
       },
     });
     failures.push(...output.failures);
@@ -162,20 +171,27 @@ async function runCollection(env: Env): Promise<CollectionResult> {
       }
     }
   } catch (error) {
-    failures.push(failure("collect", error));
+    failures.push(failure("collect", error, stage));
   } finally {
+    // Emit before teardown and before central import so a later failure cannot hide the cause.
+    for (const entry of failures) {
+      emitDiagnostic("error", { event: "sbi-shinsei-collection-failure", runId, phase: "collection", ...entry });
+    }
+    emitDiagnostic("log", { event: "sbi-shinsei-container-teardown-start", runId, phase: "teardown", collectionFailed: failures.length > 0 });
     try {
       await container.destroy();
-      console.log(JSON.stringify({
+      emitDiagnostic("log", {
         event: "sbi-shinsei-container-destroyed",
         runId,
-      }));
+        phase: "teardown",
+      });
     } catch (error) {
-      console.warn(JSON.stringify({
+      emitDiagnostic("warn", {
         event: "sbi-shinsei-container-destroy-failed",
         runId,
-        errorType: error instanceof Error ? error.name : "UnknownError",
-      }));
+        phase: "teardown",
+        errorType: safeErrorType(error),
+      });
     }
   }
 
@@ -201,6 +217,9 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     bucket: env.SNAPSHOTS,
     prefix,
     manifest,
+  }).catch(() => {
+    emitDiagnostic("error", { event: "sbi-shinsei-manifest-write-failed", runId, phase: "manifest-write" });
+    throw new Error("manifest_write_failed");
   });
   try {
     await importRawEvidence({
@@ -208,14 +227,15 @@ async function runCollection(env: Env): Promise<CollectionResult> {
       manifestKey,
     });
   } catch (error) {
-    console.error(JSON.stringify({
+    emitDiagnostic("error", {
       event: "sbi-shinsei-raw-evidence-import-failed",
       runId,
+      phase: "raw-evidence-import",
       errorCode: "raw_evidence_import_failed",
-    }));
+    });
     throw error;
   }
-  console.log(JSON.stringify({
+  emitDiagnostic("log", {
     event: "sbi-shinsei-collection-stored",
     runId,
     status,
@@ -223,7 +243,7 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     failureCount: failures.length,
     liveReadsEnabled: manifest.liveReadsEnabled,
     manifestKey,
-  }));
+  });
   return { ...manifest, manifestKey };
 }
 
@@ -283,6 +303,11 @@ async function relayTcp(
     return Response.json({ error: "Target denied" }, { status: 403 });
   }
 
+  // Only the collector-generated UUID is eligible for correlation, never a URL/token.
+  const runIdValue = url.searchParams.get("runId");
+  const runId = runIdValue && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(runIdValue)
+    ? runIdValue : undefined;
+  let peerClosed = false;
   const pair = new WebSocketPair();
   const client = pair[0];
   const server = pair[1];
@@ -301,10 +326,13 @@ async function relayTcp(
           server.send(value);
         }
       } catch (error) {
-        console.error(JSON.stringify({
+        emitDiagnostic("error", {
           event: "sbi-shinsei-relay-read-error",
-          errorType: error instanceof Error ? error.name : "UnknownError",
-        }));
+          phase: "relay",
+          ...(runId ? { runId } : {}),
+          peerClosed,
+          errorType: safeErrorType(error),
+        });
       } finally {
         reader.releaseLock();
         try {
@@ -320,14 +348,18 @@ async function relayTcp(
     });
     ctx.waitUntil(
       writeChain.catch((error) =>
-        console.error(JSON.stringify({
+        emitDiagnostic("error", {
           event: "sbi-shinsei-relay-write-error",
-          errorType: error instanceof Error ? error.name : "UnknownError",
-        })),
+          phase: "relay",
+          ...(runId ? { runId } : {}),
+          peerClosed,
+          errorType: safeErrorType(error),
+        }),
       ),
     );
   });
   server.addEventListener("close", () => {
+    peerClosed = true;
     ctx.waitUntil(
       writeChain
         .then(() => writer.close())
@@ -367,16 +399,6 @@ interface VpcNetworkBinding extends Fetcher {
 function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
-}
-
-function failure(operation: string, error: unknown): CollectionFailure {
-  return {
-    operation,
-    errorType: error instanceof Error ? error.name : "UnknownError",
-    message: operation === "collect"
-      ? "collector_request_failed"
-      : "staging_write_failed",
-  };
 }
 
 function publicError(error: unknown): string {

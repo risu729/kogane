@@ -1,3 +1,4 @@
+import { safeErrorDetails } from "../../collector-diagnostics/src/index";
 import { decodeMyJcbHtml, MyJcbReadClient, type ReadResponse } from "./client";
 import { CookieJar } from "./cookie-jar";
 import { loginWithBitwardenPasskey, loginWithOfficialProtection } from "./login-protection";
@@ -27,6 +28,7 @@ export interface ConnectionCollection {
 }
 
 export async function collectConnection(options: {
+  diagnostic?: ReturnType<typeof import("../../collector-diagnostics/src/index").createDiagnostics>;
   browserBinding: BrowserRun;
   credential: MyJcbCredential;
 }): Promise<ConnectionCollection> {
@@ -96,7 +98,8 @@ export async function collectConnection(options: {
       artifacts,
     };
   } finally {
-    await login.close();
+    if (options.diagnostic) await options.diagnostic.step("browser-close", () => login.close());
+    else await login.close();
   }
 }
 
@@ -108,7 +111,7 @@ async function collectionStage<T>(
     return await action();
   } catch (error) {
     if (error instanceof StopConditionError && error.code !== "unknown-upstream-state") throw error;
-    throw new StopConditionError(`MyJCB collection stopped at ${code}`, code);
+    throw Object.assign(new StopConditionError(`MyJCB collection stopped at ${code}`, code), { httpStatus: safeErrorDetails(error).httpStatus });
   }
 }
 

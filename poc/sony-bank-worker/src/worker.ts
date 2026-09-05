@@ -1,3 +1,4 @@
+import { atStage, emitDiagnostic, failure } from "./diagnostics";
 import { timingSafeEqual } from "node:crypto";
 import { collectSonyBank, parseCredential } from "./sony-bank";
 import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
@@ -73,9 +74,9 @@ async function runCollection(
   let transactionCount = 0;
 
   try {
-    const credential = parseCredential(
+    const credential = await atStage("credential", async () => parseCredential(
       requiredSecret(env.SONY_BANK_CREDENTIAL_JSON, "SONY_BANK_CREDENTIAL_JSON"),
-    );
+    ));
     const collection = await collectSonyBank({
       credential,
       from: window.from,
@@ -98,6 +99,9 @@ async function runCollection(
     failures.push(failure("collect", error));
   }
 
+  for (const entry of failures) {
+    emitDiagnostic("error", { event: "sony-bank-collection-failure", runId, phase: "collection", ...entry });
+  }
   const completedAt = new Date().toISOString();
   const status =
     failures.length === 0
@@ -121,9 +125,15 @@ async function runCollection(
     bucket: env.SNAPSHOTS,
     prefix,
     manifest,
+  }).catch(() => {
+    emitDiagnostic("error", { event: "sony-bank-manifest-write-failed", runId, phase: "manifest-write" });
+    throw new Error("manifest_write_failed");
   });
-  const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey);
-  console.log(JSON.stringify({
+  const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey).catch(() => {
+    emitDiagnostic("error", { event: "sony-bank-raw-evidence-import-failed", runId, phase: "raw-evidence-import" });
+    throw new Error("raw_evidence_import_failed");
+  });
+  emitDiagnostic("log", {
     event: "sony-bank-collection-stored",
     runId,
     status,
@@ -133,7 +143,7 @@ async function runCollection(
     manifestKey,
     centralStatus: central.status,
     ...(central.status === "sealed" ? { centralRunId: central.centralRunId } : {}),
-  }));
+  });
   return { ...manifest, manifestKey, central };
 }
 
@@ -184,14 +194,6 @@ function authorized(request: Request, expected: string | undefined): boolean {
 function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
-}
-
-function failure(operation: string, error: unknown): CollectionFailure {
-  return {
-    operation,
-    errorType: error instanceof Error ? error.name : "UnknownError",
-    message: operation === "collect" ? "collector_request_failed" : "staging_write_failed",
-  };
 }
 
 function publicError(error: unknown): string {

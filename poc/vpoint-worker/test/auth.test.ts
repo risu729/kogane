@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { logAuthTrace } from "../src/diagnostics";
+afterEach(() => mock.restore());
 import {
   beginVPointEmailLogin,
   completeVPointEmailLogin,
@@ -24,7 +26,8 @@ describe("V Point email login inputs", () => {
 });
 
 describe("V Point email login flow", () => {
-  test("replays the observed form chain and returns an authenticated cookie", async () => {
+  test.each([false, true])("replays the form chain with logging unavailable=%s", async (loggingUnavailable) => {
+    if (loggingUnavailable) spyOn(console, "log").mockImplementation(() => { throw new Error("logger unavailable"); });
     const requests: Array<{ path: string; method: string; form: URLSearchParams }> = [];
     const fetcher = async (
       input: string | URL | Request,
@@ -74,11 +77,13 @@ describe("V Point email login flow", () => {
       memberNumber: "9234-5678-9012-3456",
       fetcher,
       now: () => new Date("2026-08-31T00:00:00.000Z"),
+      onTrace: (trace) => logAuthTrace("test-auth-run", trace),
     });
     expect(challenge.requestedAt).toBe("2026-08-31T00:00:00.000Z");
 
     const serializedState = JSON.parse(JSON.stringify(challenge.state));
     const result = await completeVPointEmailLogin({
+      onTrace: (trace) => logAuthTrace("test-auth-run", trace),
       state: serializedState,
       code: "1234",
       fetcher,

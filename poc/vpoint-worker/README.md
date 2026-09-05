@@ -206,3 +206,19 @@ row fingerprintを参照するだけで、メール原本、正規化event、V�
 exact照合は、比較可能34件中11件matched、23件unmatched、0件ambiguous、51件not-comparable
 だった。不一致23件は推測で修正していない。VポイントPay app履歴はlive credential消失後のため
 未取得で、email対appの照合は実行していない。
+
+## 段階別の運用ログ
+
+`collector-stage-started` / `collector-stage-failed`はrunIdで同一実行を関連付け、
+残高・SMFGポイント・Vポイント履歴・Vマネー履歴・R2保存・メール照合・manifest保存を
+区別する。失敗には固定の`failureCode`、許可した`errorType`、確認できたHTTP status、
+4桁のapplication code、ページ不整合の`reasonCode`だけを残す。部分失敗も個別に記録し、
+manifest自体が保存できない場合もrunIdをログに残す。
+
+再認証は`vpoint-auth-step`でメール要求・コード送信・session確認までを区別する。
+通知メールには独立したrunIdがあり、parse・保存・転送・コード処理を追跡できる。
+認証後の収集は`vpoint-post-auth-collection`のparentRunIdでメール処理へ結び付く。
+
+例外message/stack、レスポンス本文、URL、Cookie、token、認証コード、メール宛先・本文は
+ログへ流さない。公式raw dataのR2保存、失敗/部分成功、メール再転送防止の挙動は維持する。
+VポイントPayのapp API Workerは別途停止されており、このWorkerの通知メール収集は継続する。

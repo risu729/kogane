@@ -1,3 +1,4 @@
+import { browserDiagnostics } from "../diagnostics";
 import { fileURLToPath } from "node:url";
 import { JscAcquisitionError, UnknownResponseShapeError } from "../errors";
 import { normalizeCoreResponses } from "../normalized";
@@ -202,6 +203,7 @@ export function parseCollectionHandoff(
     });
   }
   if (partial) {
+    const stage = (root.failure as { stage: string }).stage;
     for (const [index, plan] of RESPONSE_PLAN.slice(responseKeys.length).entries()) {
       failures.push({
         operation: `read:${plan.dataset}`,
@@ -209,6 +211,7 @@ export function parseCollectionHandoff(
         message: index === 0
           ? "provider_read_failed"
           : "provider_read_not_attempted",
+        ...(index === 0 ? { diagnostics: browserDiagnostics(stage) } : {}),
       });
     }
   }

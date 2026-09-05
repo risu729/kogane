@@ -52,7 +52,7 @@ export default {
       const errorCode = classifyError(error);
       console.error(JSON.stringify({
         message: "smbc_backfill_request_failed",
-        path: url.pathname,
+        operation: url.pathname === "/api/start" ? "start" : url.pathname === "/api/finish" ? "finish" : "request",
         errorCode,
       }));
       return json({ errorCode }, 400);

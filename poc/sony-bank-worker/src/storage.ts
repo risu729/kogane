@@ -1,3 +1,4 @@
+import { manifestFailure } from "./diagnostics";
 import type {
   CollectionManifest,
   RawArtifact,
@@ -54,7 +55,10 @@ export async function storeManifest(options: {
   manifest: CollectionManifest;
 }): Promise<string> {
   const key = `${options.prefix}/manifest.json`;
-  const bytes = new TextEncoder().encode(JSON.stringify(options.manifest));
+  const bytes = new TextEncoder().encode(JSON.stringify({
+    ...options.manifest,
+    failures: options.manifest.failures.map(manifestFailure),
+  }));
   const sha256 = await sha256Hex(bytes);
   const stored = await options.bucket.put(key, bytes, {
     onlyIf: { etagDoesNotMatch: "*" },

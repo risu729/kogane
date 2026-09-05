@@ -105,3 +105,24 @@ wrangler secret put ADMIN_TRIGGER_TOKEN
 - Worker secrets: 上記2件
 
 PoCを廃棄するときは、R2の必要なraw artifactを退避した後にWorker、bucketの順で削除する。R2 bucketの削除は保存データを回復不能にするため、内容を確認してから行う。
+
+
+### Failure diagnostics
+
+Collection failures emit a structured `*-collection-failure` event before teardown,
+manifest storage, or central import. Join on `runId`; use `phase` to distinguish
+collection from manifest-write, raw-evidence-import, teardown, and relay events.
+The source R2 manifest retains the same three failure fields (`operation`,
+`errorType`, `message`). Its bounded message includes the safe stage and available
+HTTP status; structured logs expose these as `diagnostics` fields. The central
+importer continues to normalize failure messages, so use the source manifest or
+Worker logs for diagnosis.
+
+No exception message, stack, cause, request URL, credential, response body, or
+unrecognized provider text is logged. Sony logs only fixed operation IDs/currencies
+and the count of provider errors (no provider codes are currently approved for
+logging). Shinsei accepts only known browser stages and records whether authentication
+was attempted. Its relay events include `runId` and `peerClosed`; compare them with
+`*-container-teardown-start` before attributing a connection error to collection.
+An unknown stage stays `unknown-browser-stage`; a failed read is separate from
+subsequent `NotAttempted` reads. No retries or collection requests are added.

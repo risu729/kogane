@@ -58,7 +58,7 @@ export async function collectMobileSuica(options: {
     body: historySearchBody(baseVariable, options.asOfDateJst),
   });
   updateCookies(cookieJar, response.headers.getSetCookie());
-  if (response.status !== 200) throw new Error("history_request_failed");
+  if (response.status !== 200) throw Object.assign(new Error("history_request_failed"), { httpStatus: response.status });
   const responseBytes = await readBounded(response, maxResponseBytes);
   const html = decode(responseBytes, "shift_jis");
   if (isLoginPage(html)) throw new Error("history_session_expired");

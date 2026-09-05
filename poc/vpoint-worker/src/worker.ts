@@ -1,3 +1,4 @@
+import { logEvent, logFailure, logStage, type CollectionStage } from "./diagnostics";
 import { timingSafeEqual } from "node:crypto";
 import { extractVPointEmailCode, isCollectorRecipient } from "./email";
 import { VPointSession } from "./session";
@@ -48,63 +49,81 @@ export default {
   },
 
   async email(message, env): Promise<void> {
-    const isTarget = isCollectorRecipient(message.to, [
-      requiredSecret(env.VPOINT_EMAIL_RECIPIENT, "VPOINT_EMAIL_RECIPIENT"),
-      requiredSecret(
-        env.VPOINT_PAY_EMAIL_RECIPIENT,
-        "VPOINT_PAY_EMAIL_RECIPIENT",
-      ),
-    ]);
-    const raw = isTarget
-      ? await new Response(message.raw).arrayBuffer()
-      : null;
-    const payEmail = raw ? await parseVPointPayEmail(raw) : null;
-    if (payEmail) {
-      const stored = await storeVPointPayEmail({
-        bucket: env.VPOINT_PAY_SNAPSHOTS,
-        parsed: payEmail,
-      });
-      console.log(JSON.stringify({
-        event: "vpoint-pay-email-stored",
-        eventType: stored.event.eventType,
-        duplicate: stored.duplicate,
-        rawKey: stored.rawKey,
-      }));
-    }
-
-    let forwardError: unknown = null;
-    if (shouldForwardToMailbox(payEmail)) {
-      try {
-        await message.forward(requiredSecret(
-          env.VPOINT_EMAIL_FORWARD_TO,
-          "VPOINT_EMAIL_FORWARD_TO",
-        ));
-      } catch (error) {
-        forwardError = error;
+    const emailRunId = crypto.randomUUID();
+    let stage: CollectionStage = "email-receive";
+    const onStage = (next: CollectionStage) => { stage = next; logStage(emailRunId, stage); };
+    onStage(stage);
+    try {
+      const isTarget = isCollectorRecipient(message.to, [
+        requiredSecret(env.VPOINT_EMAIL_RECIPIENT, "VPOINT_EMAIL_RECIPIENT"),
+        requiredSecret(
+          env.VPOINT_PAY_EMAIL_RECIPIENT,
+          "VPOINT_PAY_EMAIL_RECIPIENT",
+        ),
+      ]);
+      const raw = isTarget
+        ? await new Response(message.raw).arrayBuffer()
+        : null;
+      onStage("email-parse");
+      const payEmail = raw ? await parseVPointPayEmail(raw) : null;
+      if (payEmail) {
+        onStage("email-store");
+        const stored = await storeVPointPayEmail({
+          bucket: env.VPOINT_PAY_SNAPSHOTS,
+          parsed: payEmail,
+        });
+        logEvent({
+          event: "vpoint-pay-email-stored",
+          runId: emailRunId,
+          eventType: stored.event.eventType,
+          duplicate: stored.duplicate,
+          rawKey: stored.rawKey,
+        });
       }
-    }
 
-    if (raw) {
-      const code = await extractVPointEmailCode(raw);
-      if (code) {
-        const session = sessionStub(env);
-        if (await session.hasPendingChallenge()) {
-          await session.completeEmailCode(code);
-          const result = await runCollection(env);
-          if (result.status === "failed") {
-            throw new Error(
-              `V Point post-auth collection failed; manifest=${result.manifestKey}`,
-            );
+      let forwardError: unknown = null;
+      if (shouldForwardToMailbox(payEmail)) {
+        try {
+          onStage("email-forward");
+          await message.forward(requiredSecret(
+            env.VPOINT_EMAIL_FORWARD_TO,
+            "VPOINT_EMAIL_FORWARD_TO",
+          ));
+        } catch (error) {
+          forwardError = error;
+          logFailure(emailRunId, stage, error);
+        }
+      }
+
+      if (raw) {
+        onStage("email-code-parse");
+        const code = await extractVPointEmailCode(raw);
+        if (code) {
+          const session = sessionStub(env);
+          if (await session.hasPendingChallenge()) {
+            onStage("email-auth-complete");
+            await session.completeEmailCode(code, emailRunId);
+            onStage("post-auth-collection");
+            const result = await runCollection(env, emailRunId);
+            if (result.status === "failed") {
+              throw new Error(
+                `V Point post-auth collection failed; manifest=${result.manifestKey}`,
+              );
+            }
           }
         }
       }
-    }
 
-    if (forwardError) throw forwardError;
+      if (forwardError) { stage = "email-forward"; throw forwardError; }
+      logEvent({ event: "vpoint-email-handled", runId: emailRunId, status: "success" });
+    } catch (error) {
+      if (stage !== "email-forward") logFailure(emailRunId, stage, error);
+      throw new Error(`V Point email handling failed; runId=${emailRunId}; stage=${stage}`);
+    }
   },
 } satisfies ExportedHandler<Env>;
 
-async function runCollection(env: Env): Promise<CollectionResult> {
+async function runCollection(env: Env, parentRunId?: string): Promise<CollectionResult> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const prefix = runPrefix(startedAt, runId);
@@ -116,20 +135,27 @@ async function runCollection(env: Env): Promise<CollectionResult> {
   let vMoneyHistoryPageCount = 0;
   let emailReconciliation;
   const session = sessionStub(env);
+  let stage: CollectionStage = "session-load";
+  const onStage = (next: CollectionStage) => { stage = next; logStage(runId, stage); };
+  onStage(stage);
+  if (parentRunId) logEvent({ event: "vpoint-post-auth-collection", runId, parentRunId });
 
   try {
     const sessionCookie = await session.getSession();
     if (!sessionCookie) {
-      await session.ensureEmailChallenge();
+      onStage("email-challenge-request");
+      await session.ensureEmailChallenge(runId);
       throw new VPointReauthenticationPendingError();
     }
     const collection = await collectVPoint({
       sessionCookie,
+      onStage,
     });
     historyTotal = collection.historyTotal;
     historyPageCount = collection.historyPageCount;
     vMoneyHistoryTotal = collection.vMoneyHistoryTotal;
     vMoneyHistoryPageCount = collection.vMoneyHistoryPageCount;
+    onStage("artifact-store");
     for (const artifact of collection.artifacts) {
       try {
         artifacts.push(await storeArtifact({
@@ -138,10 +164,11 @@ async function runCollection(env: Env): Promise<CollectionResult> {
           artifact,
         }));
       } catch (error) {
-        failures.push(failure(`r2:${artifact.dataset}`, error));
+        failures.push(failure(`r2:${artifact.dataset}`, error, runId, stage));
       }
     }
     try {
+      onStage("email-reconcile");
       emailReconciliation = await reconcileVPointPayEmails({
         bucket: env.VPOINT_PAY_SNAPSHOTS,
         vPointArtifacts: collection.artifacts,
@@ -149,14 +176,20 @@ async function runCollection(env: Env): Promise<CollectionResult> {
         completedAt: new Date().toISOString(),
       });
     } catch (error) {
-      failures.push(failure("reconcile:vpoint-pay-email", error));
+      failures.push(failure("reconcile:vpoint-pay-email", error, runId, stage));
     }
   } catch (error) {
+    failures.push(failure("collect", error, runId, stage));
     if (error instanceof VPointSessionExpiredError) {
-      await session.invalidateSession();
-      await session.ensureEmailChallenge();
+      try {
+        onStage("session-invalidate");
+        await session.invalidateSession();
+        onStage("email-challenge-request");
+        await session.ensureEmailChallenge(runId);
+      } catch (authError) {
+        failures.push(failure("reauthenticate", authError, runId, stage));
+      }
     }
-    failures.push(failure("collect", error));
   }
 
   const completedAt = new Date().toISOString();
@@ -180,12 +213,15 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     failures,
     emailReconciliation,
   };
-  const manifestKey = await storeManifest({
-    bucket: env.SNAPSHOTS,
-    prefix,
-    manifest,
-  });
-  console.log(JSON.stringify({
+  onStage("manifest-store");
+  let manifestKey: string;
+  try {
+    manifestKey = await storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest });
+  } catch (error) {
+    logFailure(runId, stage, error);
+    throw new Error(`V Point manifest storage failed; runId=${runId}`);
+  }
+  logEvent({
     event: "vpoint-collection-stored",
     runId,
     status,
@@ -197,7 +233,7 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     failureCount: failures.length,
     emailReconciliation,
     manifestKey,
-  }));
+  });
   return { ...manifest, manifestKey };
 }
 
@@ -220,19 +256,9 @@ function requiredSecret(value: string | undefined, name: string): string {
   return value;
 }
 
-function failure(operation: string, error: unknown): CollectionFailure {
-  return {
-    operation,
-    errorType: error instanceof Error ? error.name : "UnknownError",
-    message: publicError(error),
-  };
-}
-
-function publicError(error: unknown): string {
-  const value = error instanceof Error ? error.message : "Unknown error";
-  return value
-    .replace(/(cookie|session|token)=?[^\s,;]+/giu, "$1=[redacted]")
-    .slice(0, 300);
+function failure(operation: string, error: unknown, runId: string, stage: CollectionStage): CollectionFailure {
+  const detail = logFailure(runId, stage, error);
+  return { operation, ...detail, message: detail.failureCode, stage };
 }
 
 function publicResult(result: CollectionResult): object {

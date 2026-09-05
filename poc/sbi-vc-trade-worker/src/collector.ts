@@ -10,6 +10,7 @@ const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export async function collectSbiVcTrade(options: {
+  diagnostic?: ReturnType<typeof import("../../collector-diagnostics/src/index").createDiagnostics>;
   session: SessionMaterial;
   fetcher?: Fetcher;
   onSession: (session: SessionMaterial) => Promise<void>;
@@ -19,7 +20,10 @@ export async function collectSbiVcTrade(options: {
   let session = structuredClone(options.session);
 
   const collect = async (dataset: string, event: ReadEvent, data: Record<string, unknown>): Promise<unknown> => {
-    const result = await readGateway(fetcher, session, event, data);
+    const stage = `gateway-${dataset.replace(/-page-[0-9]+$/u, "")}`;
+    const result = options.diagnostic
+      ? await options.diagnostic.step(stage, () => readGateway(fetcher, session, event, data))
+      : await readGateway(fetcher, session, event, data);
     session = result.session;
     await options.onSession(session);
     await options.onArtifact({ dataset, body: result.sanitizedBody });

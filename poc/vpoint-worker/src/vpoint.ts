@@ -1,3 +1,4 @@
+import type { CollectionStage } from "./diagnostics";
 import type { JsonObject, RawArtifact } from "./types";
 
 const ORIGIN = "https://mypage.tsite.jp";
@@ -33,12 +34,17 @@ interface HistoryCollection {
 export async function collectVPoint(options: {
   sessionCookie: string;
   fetcher?: Fetcher;
+  onStage?: (stage: CollectionStage) => void;
 }): Promise<VPointCollection> {
   const sessionCookie = parseSessionCookie(options.sessionCookie);
   const client = new VPointClient(options.fetcher ?? defaultFetch, sessionCookie);
+  options.onStage?.("balance-read");
   const balance = await client.requestJson(BALANCE_PATH);
+  options.onStage?.("smfg-read");
   const smfg = await client.requestJson(SMFG_PATH);
+  options.onStage?.("history-read");
   const history = await client.history();
+  options.onStage?.("vmoney-history-read");
   const vMoneyHistory = await client.vMoneyHistory();
   const artifacts: RawArtifact[] = [
     {
@@ -164,10 +170,10 @@ class VPointClient {
     try {
       json = JSON.parse(rawText);
     } catch {
-      throw new Error(`V Point ${path} returned non-JSON`);
+      throw new VPointProtocolError("invalid-json");
     }
     if (!isObject(json)) {
-      throw new Error(`V Point ${path} returned invalid JSON`);
+      throw new VPointProtocolError("invalid-json");
     }
     const status = json.status;
     const code = isObject(status) && typeof status.code === "string"
@@ -175,9 +181,7 @@ class VPointClient {
       : null;
     if (code !== "0000") {
       if (code === "0010") throw new VPointSessionExpiredError();
-      throw new Error(
-        `V Point ${path} returned application status ${code ?? "unknown"}`,
-      );
+      throw new VPointApplicationError(code);
     }
     return { rawText, json };
   }
@@ -211,7 +215,7 @@ class VPointClient {
         return { pages, total: 0 };
       }
       if (!isObject(results)) {
-        throw new Error(`${path} returned no results object`);
+        throw new VPointProtocolError("missing-results");
       }
       const rows = Array.isArray(results.history) ? results.history.length : 0;
       const total = countValue(results.total);
@@ -219,10 +223,10 @@ class VPointClient {
         declaredTotal = total;
         pageSize = rows;
         if (declaredTotal > 0 && pageSize === 0) {
-          throw new Error("V Point history declared rows but returned an empty first page");
+          throw new VPointProtocolError("empty-first-page");
         }
       } else if (total !== declaredTotal) {
-        throw new Error("V Point history total changed during pagination");
+        throw new VPointProtocolError("pagination-total-changed");
       }
       pages.push(response);
       observedRows += rows;
@@ -230,15 +234,15 @@ class VPointClient {
         return { pages, total: declaredTotal };
       }
       if (pageSize !== null && rows < pageSize) {
-        throw new Error("V Point history ended before the declared total");
+        throw new VPointProtocolError("premature-end");
       }
     }
-    throw new Error("V Point history exceeded the bounded page limit");
+    throw new VPointProtocolError("page-limit");
   }
 }
 
 class VPointError extends Error {
-  constructor(operation: string, status: number) {
+  constructor(operation: string, readonly status: number) {
     super(`V Point ${operation} failed with HTTP ${status}`);
     this.name = "VPointError";
   }
@@ -254,7 +258,7 @@ export class VPointSessionExpiredError extends Error {
 function countValue(value: unknown): number {
   const count = typeof value === "number" ? value : Number(value);
   if (!Number.isSafeInteger(count) || count < 0) {
-    throw new Error("V Point history total is invalid");
+    throw new VPointProtocolError("invalid-total");
   }
   return count;
 }
@@ -268,4 +272,16 @@ function defaultFetch(
   init?: RequestInit,
 ): Promise<Response> {
   return fetch(input, init);
+}
+
+class VPointProtocolError extends Error {
+  constructor(readonly reasonCode: string) { super("V Point provider response was invalid"); this.name = "VPointProtocolError"; }
+}
+class VPointApplicationError extends Error {
+  readonly applicationCode?: string;
+  constructor(code: string | null) {
+    super("V Point provider returned an application error");
+    this.name = "VPointApplicationError";
+    if (code && /^\d{4}$/u.test(code)) this.applicationCode = code;
+  }
 }

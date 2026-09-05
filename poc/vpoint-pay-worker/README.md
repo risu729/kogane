@@ -23,6 +23,23 @@ authorization、settlement、refund、chargeを同一状態として潰さずraw
 残高応答の`inquiry_period`はアプリが月選択肢の最古月として使う。PoCもこの値から
 JST当月までをinclusiveに走査し、想定外応答に対して120か月の安全上限を置く。
 
+## 停止状態
+
+app API collectorは停止している。Cronはなく、手動の`/trigger`、`/probe`、
+`/reset-credentials`はHTTP 410を返す。遅延配送されたscheduled eventも収集しない。
+`/health`は`collectionEnabled: false`と`status: "disabled"`を返す。
+R2原本、Durable Object、既存secretsは保持する。VポイントPay通知メールは
+`poc/vpoint-worker/`で引き続き収集する。以下の認証・デプロイ説明は研究記録である。
+
+認証不要の`/probe`による到達確認は、残高・明細取得の成功を意味しない。
+APIの認証には同じセッション由来の実UUIDとrefresh tokenが必要で、仮UUIDでは代用しない。
+端末アプリとの同時利用やtoken更新の競合は未検証であり、自動的な再登録・端末移行は行わない。
+
+管理token付き`POST /credential-status`は、実行時に選ばれる認証元、欠けた項目、
+UUID形式の不備だけを返す。値は返さず、Durable Objectへの書き込みやAPI呼び出し、
+token更新も行わない。`structurallyReady: true`は形式確認だけで、認証成功を意味しない。
+停止中の`/trigger`は認証状態によらずHTTP 410で拒否する。
+
 ## 認証とWorker化
 
 初回だけ正規アプリの電話番号/SMS/6桁app passcodeを使う。アプリが得たrefresh

@@ -66,7 +66,7 @@ export async function requestPasskeyAccessToken(options: {
     cookies,
   );
   if (!entry.ok) {
-    throw new Error(`SBI passkey entry failed with HTTP ${entry.status}`);
+    throw Object.assign(new Error(`SBI passkey entry failed with HTTP ${entry.status}`), { httpStatus: entry.status });
   }
   const entryHtml = await entry.text();
   const pageCsrfToken = extractCsrfToken(entryHtml);
@@ -89,9 +89,7 @@ export async function requestPasskeyAccessToken(options: {
     cookies,
   );
   if (!challengeResponse.ok) {
-    throw new Error(
-      `SBI passkey challenge failed with HTTP ${challengeResponse.status}`,
-    );
+    throw Object.assign(new Error(`SBI passkey challenge failed with HTTP ${challengeResponse.status}`), { httpStatus: challengeResponse.status });
   }
   const request = normalizeCredentialRequest(
     await challengeResponse.json(),
@@ -130,9 +128,7 @@ export async function requestPasskeyAccessToken(options: {
     cookies,
   );
   if (assertionResponse.status < 300 || assertionResponse.status >= 400) {
-    throw new Error(
-      `SBI passkey assertion returned unexpected HTTP ${assertionResponse.status}`,
-    );
+    throw Object.assign(new Error(`SBI passkey assertion returned unexpected HTTP ${assertionResponse.status}`), { httpStatus: assertionResponse.status });
   }
 
   const channelUrl = new URL(
@@ -153,9 +149,7 @@ export async function requestPasskeyAccessToken(options: {
     cookies,
   );
   if (!callbackResponse.ok) {
-    throw new Error(
-      `SBI passkey callback failed with HTTP ${callbackResponse.status}`,
-    );
+    throw Object.assign(new Error(`SBI passkey callback failed with HTTP ${callbackResponse.status}`), { httpStatus: callbackResponse.status });
   }
   const callbackUrl = extractCallbackUrl(await callbackResponse.text());
   if (!callbackUrl) {

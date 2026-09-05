@@ -1,3 +1,4 @@
+import { atStage, SonyBankError } from "./diagnostics";
 import type {
   JsonObject,
   RawArtifact,
@@ -137,9 +138,9 @@ export async function collectSonyBank(options: {
 }): Promise<SonyBankCollection> {
   const fetcher = options.fetcher ?? fetch;
   const client = new SonyBankClient(fetcher, options.credential);
-  await client.login();
+  await atStage("login", () => client.login());
 
-  const gross = await client.requestJson(
+  const gross = await atStage("gross-balance", async () => client.requestJson(
     GROSS_BALANCE_PATH,
     { branchNum: options.credential.branchNum, accountNum: options.credential.accountNum },
     {
@@ -149,21 +150,21 @@ export async function collectSonyBank(options: {
       screenId: "DAYA010AM1f",
       eventId: "DAYA010AM1fE13",
     },
-  );
+  ));
 
-  const history = await client.history("JPY", options.from, options.to);
-  const csv = await client.historyCsv("JPY", options.from, options.to);
+  const history = await atStage("history", () => client.history("JPY", options.from, options.to));
+  const csv = await atStage("history-csv", () => client.historyCsv("JPY", options.from, options.to));
   const foreign = [];
   let foreignTransactionCount = 0;
   for (const currency of FOREIGN_CURRENCY_CODES) {
-    const currencyHistory = await client.history(currency, options.from, options.to);
+    const currencyHistory = await atStage("history", () => client.history(currency, options.from, options.to));
     const currencyCsv = currencyHistory.transactionCount > 0
-      ? await client.historyCsv(currency, options.from, options.to)
+      ? await atStage("history-csv", () => client.historyCsv(currency, options.from, options.to))
       : null;
     foreignTransactionCount += currencyHistory.transactionCount;
     foreign.push({ currency, history: currencyHistory, csv: currencyCsv });
   }
-  const wallet = await client.walletHistory();
+  const wallet = await atStage("wallet", () => client.walletHistory());
   const artifacts: RawArtifact[] = [
     {
       dataset: "gross-balance",
@@ -239,8 +240,13 @@ class SonyBankClient {
     this.fetcher = (input, init) => fetcher(input, init);
   }
 
+  private async request(operation: string, input: string | URL | Request, init?: RequestInit): Promise<Response> {
+    try { return await this.fetcher(input, init); }
+    catch { throw new SonyBankError(operation, undefined, 0, "network_error"); }
+  }
+
   async login(): Promise<void> {
-    const page = await this.fetcher(LOGIN_PAGE, { redirect: "follow" });
+    const page = await this.request("login-page", LOGIN_PAGE, { redirect: "follow" });
     if (!page.ok) {
       throw new SonyBankError("login-page", page.status);
     }
@@ -285,7 +291,7 @@ class SonyBankClient {
   async revision(area: "db" | "da" | "ea" | "ja"): Promise<string> {
     const cached = this.#revisions.get(area);
     if (cached) return cached;
-    const response = await this.fetcher(
+    const response = await this.request(`revision-${area}`,
       `${ORIGIN}/pages/config/revisions/${area}/revision.json`,
       { headers: { accept: "application/json" } },
     );
@@ -308,7 +314,7 @@ class SonyBankClient {
     includeCsrf = true,
   ): Promise<RawJsonResponse> {
     const headers = this.headers(context, includeCsrf);
-    const response = await this.fetcher(`${ORIGIN}${path}`, {
+    const response = await this.request(context.eventId, `${ORIGIN}${path}`, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
@@ -319,16 +325,16 @@ class SonyBankClient {
     if (nextCsrf) this.#csrf = nextCsrf;
     const rawText = await response.text();
     if (!response.ok) {
-      throw new SonyBankError(context.eventId, response.status, errorCodes(rawText));
+      throw new SonyBankError(context.eventId, response.status, errorCodeCount(rawText));
     }
     let json: unknown;
     try {
       json = JSON.parse(rawText);
     } catch {
-      throw new Error(`Sony Bank ${context.eventId} returned non-JSON`);
+      throw new SonyBankError(context.eventId, response.status, 0, "response_invalid");
     }
     if (!isObject(json)) {
-      throw new Error(`Sony Bank ${context.eventId} returned invalid JSON`);
+      throw new SonyBankError(context.eventId, response.status, 0, "response_invalid");
     }
     assertNoErrors(context.eventId, json);
     return { rawText, json };
@@ -394,7 +400,7 @@ class SonyBankClient {
       screenId: "EABA0600S1f",
       eventId: "EABA0600S1fE12",
     };
-    const response = await this.fetcher(`${ORIGIN}${HISTORY_CSV_PATH}`, {
+    const response = await this.request(`${context.eventId}:${currency}`, `${ORIGIN}${HISTORY_CSV_PATH}`, {
       method: "POST",
       headers: this.headers(context, true),
       body: JSON.stringify({
@@ -416,7 +422,7 @@ class SonyBankClient {
       throw new SonyBankError(
         `${context.eventId}:${currency}`,
         response.status,
-        errorCodes(body),
+        errorCodeCount(body),
       );
     }
     return {
@@ -450,7 +456,7 @@ class SonyBankClient {
       throw new Error("Sony Bank WALLET SSO returned no message");
     }
 
-    const gatewayResponse = await this.fetcher(WALLET_GATEWAY_URL, {
+    const gatewayResponse = await this.request("wallet-gateway", WALLET_GATEWAY_URL, {
       method: "POST",
       headers: {
         accept: "text/html",
@@ -471,7 +477,7 @@ class SonyBankClient {
     }
 
     const walletCookies = new CookieBag();
-    let page = await this.fetcher(new URL(action, WALLET_CARD_ORIGIN), {
+    let page = await this.request("wallet-statement", new URL(action, WALLET_CARD_ORIGIN), {
       method: "POST",
       headers: {
         accept: "text/html",
@@ -502,7 +508,7 @@ class SonyBankClient {
         });
         const cookie = walletCookies.header();
         if (cookie) headers.set("cookie", cookie);
-        page = await this.fetcher(new URL(state.action, WALLET_CARD_ORIGIN), {
+        page = await this.request("wallet-statement", new URL(state.action, WALLET_CARD_ORIGIN), {
           method: "POST",
           headers,
           body: state.body,
@@ -510,9 +516,7 @@ class SonyBankClient {
         });
         walletCookies.absorb(page.headers);
         if (!page.ok) {
-          throw new Error(
-            `Sony Bank WALLET month ${month.value} failed with HTTP ${page.status}; cookieNames=${walletCookies.names().join(",")}`,
-          );
+          throw new SonyBankError("wallet-statement", page.status);
         }
         html = await responseText(page);
         walletPageUrl = page.url || new URL(state.action, WALLET_CARD_ORIGIN).href;
@@ -583,38 +587,16 @@ export function validateHistoryPage(
   };
 }
 
-class SonyBankError extends Error {
-  constructor(operation: string, status: number, codes: string[] = []) {
-    super(
-      `Sony Bank ${operation} failed with HTTP ${status}` +
-        (codes.length > 0 ? ` (${codes.join(",")})` : ""),
-    );
-    this.name = "SonyBankError";
-  }
-}
-
 function assertNoErrors(operation: string, value: JsonObject): void {
   if (!Array.isArray(value.errors) || value.errors.length === 0) return;
-  const codes = value.errors
-    .map((error) => (isObject(error) && typeof error.code === "string" ? error.code : null))
-    .filter((code): code is string => code !== null);
-  throw new Error(
-    `Sony Bank ${operation} returned business errors` +
-      (codes.length > 0 ? ` (${codes.join(",")})` : ""),
-  );
+  throw new SonyBankError(operation, 200, value.errors.length, "provider_business_error");
 }
 
-function errorCodes(rawText: string): string[] {
+function errorCodeCount(rawText: string): number {
   try {
     const value: unknown = JSON.parse(rawText);
-    if (!isObject(value) || !Array.isArray(value.errors)) return [];
-    return value.errors
-      .map((error) => (isObject(error) && typeof error.code === "string" ? error.code : null))
-      .filter((code): code is string => code !== null)
-      .slice(0, 5);
-  } catch {
-    return [];
-  }
+    return isObject(value) && Array.isArray(value.errors) ? value.errors.length : 0;
+  } catch { return 0; }
 }
 
 function countValue(value: unknown): number | null {
