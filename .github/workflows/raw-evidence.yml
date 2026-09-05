@@ -9,6 +9,7 @@ on:
       - "poc/sony-bank-worker/**"
       - "poc/sbi-shinsei-worker/**"
       - "poc/mobile-suica-worker/**"
+      - "poc/globalpass-worker/**"
       - "docs/raw-store.md"
       - "docs/roadmap.md"
       - ".github/workflows/raw-evidence.yml"
@@ -21,6 +22,7 @@ on:
       - "poc/sony-bank-worker/**"
       - "poc/sbi-shinsei-worker/**"
       - "poc/mobile-suica-worker/**"
+      - "poc/globalpass-worker/**"
       - "docs/raw-store.md"
       - "docs/roadmap.md"
       - ".github/workflows/raw-evidence.yml"
@@ -107,3 +109,16 @@ jobs:
       - run: bun run test
       - run: bun run typecheck
       - run: bun run cf:check
+
+  globalpass-worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: poc/globalpass-worker
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      - run: bun run typecheck
+      - run: bun run deploy:dry

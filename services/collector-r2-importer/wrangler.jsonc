@@ -22,6 +22,7 @@
       "RAW_EVIDENCE_TOKEN_SONY",
       "RAW_EVIDENCE_TOKEN_SBI_SHINSEI",
       "RAW_EVIDENCE_TOKEN_MOBILE_SUICA",
+      "RAW_EVIDENCE_TOKEN_GLOBAL_PASS",
       "ORIGIN_FINGERPRINT_KEY"
     ]
   },
@@ -45,6 +46,10 @@
     {
       "binding": "MOBILE_SUICA_SNAPSHOTS",
       "bucket_name": "kogane-mobile-suica-collector-poc"
+    },
+    {
+      "binding": "GLOBAL_PASS_SNAPSHOTS",
+      "bucket_name": "kogane-globalpass-collector-poc"
     }
   ],
   "services": [
@@ -54,6 +59,6 @@
     }
   ],
   "vars": {
-    "IMPORTER_VERSION": "collector-r2-importer-v6"
+    "IMPORTER_VERSION": "collector-r2-importer-v7"
   }
 }

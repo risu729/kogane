@@ -22,13 +22,19 @@
     }
   },
   "vars": {
-    "COLLECTOR_SCHEMA_VERSION": "globalpass-browser-poc-v1",
+    "COLLECTOR_SCHEMA_VERSION": "globalpass-browser-poc-v2",
     "RELAY_PUBLIC_URL": "wss://kogane-globalpass-collector-poc.takuanimal.workers.dev/tcp"
   },
   "r2_buckets": [
     {
       "binding": "SNAPSHOTS",
       "bucket_name": "kogane-globalpass-collector-poc"
+    }
+  ],
+  "services": [
+    {
+      "binding": "RAW_EVIDENCE_IMPORTER",
+      "service": "kogane-collector-r2-importer"
     }
   ],
   "browser": {

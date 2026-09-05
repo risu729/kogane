@@ -9,6 +9,7 @@ const STORAGE_TEMPLATE = "runs/{redacted}/artifact";
 const FINGERPRINT_VERSION = "fixture-hmac-v1";
 const SBI_STORAGE_TEMPLATE = "raw/sbi-securities/{date}/{run-id}/{artifact}.json";
 const MOBILE_SUICA_STORAGE_TEMPLATE = "raw/mobile-suica/{date}/{run-id}/{artifact}";
+const GLOBAL_PASS_STORAGE_TEMPLATE = "raw/prestia-globalpass/{date}/{run-id}/{artifact}";
 const SBI_FINGERPRINT_VERSION = "collector-r2-v1";
 const cases = fixture.cases;
 
@@ -97,6 +98,19 @@ async function mobileSuicaStorageOrigin(artifactKey: string) {
     objectKeyTemplate: MOBILE_SUICA_STORAGE_TEMPLATE,
     objectKeyFingerprint: await sha256Hex(
       new TextEncoder().encode(`fixture-mobile-suica:${artifactKey}`),
+    ),
+    fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
+    redactionVersion: "v1",
+  };
+}
+
+async function globalPassStorageOrigin(artifactKey: string) {
+  return {
+    storageKind: "r2",
+    containerName: "kogane-globalpass-collector-poc",
+    objectKeyTemplate: GLOBAL_PASS_STORAGE_TEMPLATE,
+    objectKeyFingerprint: await sha256Hex(
+      new TextEncoder().encode(`fixture-global-pass:${artifactKey}`),
     ),
     fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
     redactionVersion: "v1",
@@ -617,6 +631,56 @@ describe("sanitized source-usecase contract", () => {
       { step_index: 0, step_kind: "redacted", transformer_id: "mobile-suica-history-sanitizer", transformer_version: "v1" },
       { step_index: 1, step_kind: "reencoded", transformer_id: "mobile-suica-history-sanitizer", transformer_version: "v1" },
     ]);
+  });
+
+  it("stores only sanitized GLOBAL PASS HTML with explicit redaction lineage", async () => {
+    const value = cases.globalPassSanitizedHtml;
+    expect(value.redactionSentinel).toBe("__KOGANE_REDACTED_DYNAMIC_VALUE__");
+    expect(value.sanitizedBody).toContain(value.redactionSentinel);
+    expect(value.sanitizedBody).not.toContain("http://");
+    expect(value.sanitizedBody).not.toContain("https://");
+    const { runId } = await createRun(value.sourceId, value.sessionId);
+    const artifact = await catalogue(
+      runId,
+      "activity-2026-08.html",
+      value.sanitizedBody,
+      {
+        artifactRole: "sanitized_provider_capture",
+        payloadFidelity: "transformed",
+        lineageDisposition: "source_not_retained_for_security",
+        dataset: "global-pass-activity",
+        formatId: "global-pass-activity-html-utf8-sanitized",
+        formatVersion: "v1",
+        declaredMediaType: "text/html",
+        mediaTypeBasis: "manifest",
+        storage: await globalPassStorageOrigin("activity-2026-08.html"),
+        transformSteps: [
+          {
+            stepIndex: 0,
+            stepKind: "redacted",
+            transformerId: "global-pass-html-sanitizer",
+            transformerVersion: "v1",
+          },
+          {
+            stepIndex: 1,
+            stepKind: "reencoded",
+            transformerId: "global-pass-html-sanitizer",
+            transformerVersion: "v1",
+          },
+        ],
+      },
+    );
+    await terminal(runId, 1);
+    await seal(runId, [artifact], "global-pass-sanitized-html");
+    const descriptor = await env.DB.prepare(`
+      SELECT artifact_role, payload_fidelity, lineage_disposition
+      FROM fetch_artifacts WHERE fetch_run_id = ? AND artifact_key = ?
+    `).bind(runId, artifact.artifactKey).first();
+    expect(descriptor).toEqual({
+      artifact_role: "sanitized_provider_capture",
+      payload_fidelity: "transformed",
+      lineage_disposition: "source_not_retained_for_security",
+    });
   });
 
   it("retains a V Point empty page as positive evidence", async () => {
