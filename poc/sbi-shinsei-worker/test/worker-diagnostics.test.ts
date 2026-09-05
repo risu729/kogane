@@ -5,6 +5,7 @@ let destroyFails = false;
 let relayUrl = "";
 let fetchFails = false;
 let destroyCalls = 0;
+let responseStatus = 200;
 mock.module("@cloudflare/containers", () => ({
   Container: class {},
   getContainer: () => ({
@@ -12,13 +13,13 @@ mock.module("@cloudflare/containers", () => ({
     fetch: async (request: Request) => {
       relayUrl = (await request.json() as { relayUrl: string }).relayUrl;
       if (fetchFails) throw new Error("Bearer synthetic-secret");
-      return new Response(handoff);
+      return new Response(handoff, { status: responseStatus });
     },
     destroy: async () => { destroyCalls++; if (destroyFails) throw new Error("Bearer synthetic-secret"); },
   }),
 }));
 const { default: worker } = await import("../src/worker");
-afterEach(() => { destroyFails = false; fetchFails = false; destroyCalls = 0; });
+afterEach(() => { destroyFails = false; fetchFails = false; destroyCalls = 0; responseStatus = 200; });
 
 async function trigger(loggingFails = false) {
   const logs: Record<string, unknown>[] = [];
@@ -63,6 +64,26 @@ describe("Shinsei Worker failure logging", () => {
     const { logs } = await trigger();
     expect(logs.find((entry) => entry.event === "sbi-shinsei-collection-failure")).toMatchObject({ diagnostics: { stage: "container-request" } });
     expect(JSON.stringify(logs)).not.toContain("synthetic-secret");
+  });
+
+  test("a rejected container HTTP response is not logged as a successful request", async () => {
+    responseStatus = 503;
+    const { response, logs } = await trigger();
+    expect(response.status).toBe(503);
+    expect(logs).toContainEqual(expect.objectContaining({ event: "sbi-shinsei-stage", stage: "container-request", outcome: "failed" }));
+    expect(logs).not.toContainEqual(expect.objectContaining({ event: "sbi-shinsei-stage", stage: "container-request", outcome: "success" }));
+    expect(logs).toContainEqual(expect.objectContaining({ event: "sbi-shinsei-collection-failure", diagnostics: { stage: "container-request", httpStatus: 503 } }));
+  });
+
+  test("a validated prefix with a failed later read logs partial collection and terminal outcomes", async () => {
+    const fixtures = await Bun.file(`${import.meta.dir}/fixtures/core-responses.json`).json();
+    handoff = JSON.stringify({ ok: true, responses: { topBalances: JSON.stringify(fixtures.topBalances), balanceSummary: JSON.stringify(fixtures.balanceSummary) }, failure: { dataset: "exchange-rate", stage: "exchange-rate-http-503" } });
+    const { response, result, logs } = await trigger();
+    expect(response.status).toBe(200);
+    expect(result.status).toBe("partial");
+    expect(logs).toContainEqual(expect.objectContaining({ event: "sbi-shinsei-stage", stage: "collection", outcome: "partial" }));
+    expect(logs).toContainEqual(expect.objectContaining({ event: "sbi-shinsei-stage", stage: "terminal", outcome: "partial" }));
+    expect(logs).not.toContainEqual(expect.objectContaining({ event: "sbi-shinsei-stage", stage: "collection", outcome: "success" }));
   });
 
   test("teardown errors stay separate and do not turn a successful collection into a failure", async () => {

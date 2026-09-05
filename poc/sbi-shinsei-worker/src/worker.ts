@@ -1,4 +1,5 @@
-import { ContainerResponseError, emitDiagnostic, failure, safeErrorType } from "./diagnostics";
+import { startTcpRelay } from "./tcp-relay";
+import { ContainerResponseError, emitDiagnostic, failure, safeErrorType, stageDiagnostics } from "./diagnostics";
 import { Container, getContainer } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { collectSbiShinsei } from "./collector";
@@ -124,6 +125,7 @@ export default {
 async function runCollection(env: Env): Promise<CollectionResult> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
+  const diagnostic = stageDiagnostics(runId);
   const prefix = runPrefix(startedAt, runId);
   const artifacts = [];
   const failures: CollectionFailure[] = [];
@@ -131,15 +133,16 @@ async function runCollection(env: Env): Promise<CollectionResult> {
 
   let stage = "credential-validation";
   try {
-    const output = await collectSbiShinsei({
+    const output = await diagnostic.step("collection", () => collectSbiShinsei({
       credentialJson: env.SBI_SHINSEI_CREDENTIAL_JSON,
       collectHandoff: async (credentialJson) => {
         stage = "container-start";
-        await container.startAndWaitForPorts();
+        await diagnostic.step(stage, () => container.startAndWaitForPorts());
         stage = "container-request";
         const relayUrl = new URL(env.RELAY_PUBLIC_URL);
         relayUrl.searchParams.set("runId", runId);
-        const response = await container.fetch(new Request("http://container/collect", {
+        const response = await diagnostic.step(stage, async () => {
+          const response = await container.fetch(new Request("http://container/collect", {
           method: "POST",
           headers: { "content-type": "application/json; charset=utf-8" },
           body: JSON.stringify({
@@ -147,25 +150,25 @@ async function runCollection(env: Env): Promise<CollectionResult> {
             relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
             relayUrl: relayUrl.href,
           }),
-        }));
-        if (!response.ok) {
-          throw new ContainerResponseError(response.status);
-        }
+          }));
+          if (!response.ok) throw new ContainerResponseError(response.status);
+          return response;
+        });
         stage = "container-response";
-        const handoff = await readBoundedText(response, MAX_CONTAINER_RESPONSE_BYTES);
+        const handoff = await diagnostic.step(stage, () => readBoundedText(response, MAX_CONTAINER_RESPONSE_BYTES));
         stage = "browser-handoff";
         return handoff;
       },
-    });
+    }), value => value.failures.length === 0 ? "success" : value.artifacts.length === 0 ? "failed" : "partial");
     failures.push(...output.failures);
     for (const artifact of output.artifacts) {
       try {
-        artifacts.push(await storeArtifact({
+        artifacts.push(await diagnostic.step("staging-write", () => storeArtifact({
           bucket: env.SNAPSHOTS,
           prefix,
           runId,
           artifact,
-        }));
+        })));
       } catch (error) {
         failures.push(failure(`r2:${artifact.dataset}`, error));
       }
@@ -179,7 +182,7 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     }
     emitDiagnostic("log", { event: "sbi-shinsei-container-teardown-start", runId, phase: "teardown", collectionFailed: failures.length > 0 });
     try {
-      await container.destroy();
+      await diagnostic.step("teardown", () => container.destroy());
       emitDiagnostic("log", {
         event: "sbi-shinsei-container-destroyed",
         runId,
@@ -213,19 +216,22 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     artifacts,
     failures,
   };
-  const manifestKey = await storeManifest({
+  const manifestKey = await diagnostic.step("manifest-write", () => storeManifest({
     bucket: env.SNAPSHOTS,
     prefix,
     manifest,
-  }).catch(() => {
+  })).catch(() => {
     emitDiagnostic("error", { event: "sbi-shinsei-manifest-write-failed", runId, phase: "manifest-write" });
+    diagnostic.terminal("failed");
     throw new Error("manifest_write_failed");
   });
+  // Source collection and central import are separate outcomes.
+  diagnostic.terminal(status);
   try {
-    await importRawEvidence({
+    await diagnostic.step("raw-evidence-import", () => importRawEvidence({
       importer: env.RAW_EVIDENCE_IMPORTER,
       manifestKey,
-    });
+    }));
   } catch (error) {
     emitDiagnostic("error", {
       event: "sbi-shinsei-raw-evidence-import-failed",
@@ -307,77 +313,14 @@ async function relayTcp(
   const runIdValue = url.searchParams.get("runId");
   const runId = runIdValue && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(runIdValue)
     ? runIdValue : undefined;
-  let peerClosed = false;
   const pair = new WebSocketPair();
   const client = pair[0];
   const server = pair[1];
   server.accept();
   const socket = (env.MESH as VpcNetworkBinding).connect({ hostname, port });
-  const writer = socket.writable.getWriter();
-  let writeChain = Promise.resolve();
-
-  ctx.waitUntil(
-    (async () => {
-      const reader = socket.readable.getReader();
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          server.send(value);
-        }
-      } catch (error) {
-        emitDiagnostic("error", {
-          event: "sbi-shinsei-relay-read-error",
-          phase: "relay",
-          ...(runId ? { runId } : {}),
-          peerClosed,
-          errorType: safeErrorType(error),
-        });
-      } finally {
-        reader.releaseLock();
-        try {
-          server.close(1000, "upstream closed");
-        } catch {}
-      }
-    })(),
-  );
-
-  server.addEventListener("message", (event) => {
-    writeChain = writeChain.then(async () => {
-      await writer.write(await websocketBytes(event.data));
-    });
-    ctx.waitUntil(
-      writeChain.catch((error) =>
-        emitDiagnostic("error", {
-          event: "sbi-shinsei-relay-write-error",
-          phase: "relay",
-          ...(runId ? { runId } : {}),
-          peerClosed,
-          errorType: safeErrorType(error),
-        }),
-      ),
-    );
-  });
-  server.addEventListener("close", () => {
-    peerClosed = true;
-    ctx.waitUntil(
-      writeChain
-        .then(() => writer.close())
-        .catch(() => undefined)
-        .finally(() => socket.close()),
-    );
-  });
+  startTcpRelay({ socket, server, waitUntil: promise => ctx.waitUntil(promise), ...(runId ? { runId } : {}) });
   return new Response(null, { status: 101, webSocket: client });
 }
-
-async function websocketBytes(
-  data: string | ArrayBuffer | Blob,
-): Promise<Uint8Array> {
-  if (typeof data === "string") return new TextEncoder().encode(data);
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  return new Uint8Array(await data.arrayBuffer());
-}
-
 async function validRelayBearer(
   request: Request,
   expected: string | undefined,

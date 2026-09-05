@@ -187,7 +187,17 @@ No exception message, stack, cause, request URL, credential, response body, or
 unrecognized provider text is logged. Sony logs only fixed operation IDs/currencies
 and the count of provider errors (no provider codes are currently approved for
 logging). Shinsei accepts only known browser stages and records whether authentication
-was attempted. Its relay events include `runId` and `peerClosed`; compare them with
-`*-container-teardown-start` before attributing a connection error to collection.
+was attempted. Relay events include `runId`, a relay-specific `relayId`, stage,
+duration, and close reason. A transport error observed before close remains an
+error. Socket/stream rejections after peer or upstream closure are informational
+`expected-close` cleanup events, rather than collection failures. Every socket and
+stream lifecycle promise is observed, and cleanup releases readers and writers.
 An unknown stage stays `unknown-browser-stage`; a failed read is separate from
 subsequent `NotAttempted` reads. No retries or collection requests are added.
+
+Worker `sbi-shinsei-stage` and Container `sbi-shinsei-container-stage` events provide
+stage start/end durations, including browser login, authenticated reads, storage,
+central import and teardown. A validated partial handoff logs `partial`, and the
+source terminal outcome remains distinct from central import and cleanup. The
+Container image must be rebuilt to include `stage-diagnostics.mjs`; deploying only
+the Worker updates relay cleanup but does not update browser-side stage logging.

@@ -40,6 +40,12 @@ export class ContainerResponseError extends Error {
 }
 
 export function safeErrorType(error: unknown): string {
+  try {
+    return inspectErrorType(error);
+  } catch { return "UnknownError"; }
+}
+
+function inspectErrorType(error: unknown): string {
   if (error instanceof BrowserCollectionError) return "BrowserCollectionError";
   if (error instanceof ContainerResponseError) return "ContainerResponseError";
   // Constructor membership, never an arbitrary error.name supplied by a dependency.
@@ -81,4 +87,28 @@ export function manifestFailure(entry: CollectionFailure): CollectionFailure {
 export function emitDiagnostic(level: "log" | "warn" | "error", record: Record<string, unknown>): void {
   try { console[level](JSON.stringify(record)); }
   catch { /* Best effort, including serialization and logger failures. */ }
+}
+
+/** Static stage labels only; never serialize an exception or request. */
+export function stageDiagnostics(runId: string) {
+  const startedAt = Date.now();
+  return {
+    async step<T>(stage: string, action: () => Promise<T>, resultOutcome?: (value: T) => "success" | "partial" | "failed"): Promise<T> {
+      const safeStage = WORKER_STAGES.has(stage) || stage === "collection" ? stage : "unknown-worker-stage";
+      const start = Date.now();
+      emitDiagnostic("log", { event: "sbi-shinsei-stage", runId, stage: safeStage, outcome: "started", durationMs: 0 });
+      try {
+        const value = await action();
+        const outcome = resultOutcome?.(value) ?? "success";
+        emitDiagnostic(outcome === "failed" ? "error" : outcome === "partial" ? "warn" : "log", { event: "sbi-shinsei-stage", runId, stage: safeStage, outcome, durationMs: Math.max(0, Date.now() - start) });
+        return value;
+      } catch (error) {
+        emitDiagnostic(stage === "teardown" ? "warn" : "error", { event: "sbi-shinsei-stage", runId, stage: safeStage, outcome: "failed", durationMs: Math.max(0, Date.now() - start), errorType: safeErrorType(error) });
+        throw error;
+      }
+    },
+    terminal(status: "success" | "partial" | "failed"): void {
+      emitDiagnostic("log", { event: "sbi-shinsei-stage", runId, stage: "terminal", outcome: status, durationMs: Math.max(0, Date.now() - startedAt) });
+    },
+  };
 }
