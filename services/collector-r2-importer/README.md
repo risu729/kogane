@@ -12,6 +12,14 @@ GLOBAL PASSはprivate R2の`prestia-globalpass`を、中央canonical source `glo
 
 v2はavailable/selected month、daily先頭2か月またはbackfill全月、保存artifactと月別failureの補集合、status/captureCompleteを完全一致で検証する。v1のsuccessも期待月の完全一致を要求する一方、既存のpartial/failed runは成功へ昇格させず、manifestが宣言した観測inventoryとしてsealする。failed manifest-only runも0件のprovider artifactを持つ失敗証拠としてcatalogueする。dailyのHTML 2件とmanifestはdirect sealする。最大15か月のHTMLとmanifestの計16 artifactは中央Worker呼出上限を超えるため、完全inventoryを先に固定し、10 artifactずつ転送してoffset cursorから再開し、最終chunkだけterminal reportとsealを行う。Queueは使用しない。
 
+## Sony銀行の空明細と取り込みログ
+
+v2の円明細CSVは、保存済みの公式JSONで取引件数0を検証できる場合だけ省略を許容する。manifestの件数だけでは省略を認めず、件数・実際の行数・ページ数の整合も確認する。以前のCSVを含む0件runとlegacy v1の既存契約は引き続き受け付ける。
+
+`sony-bank-import-diagnostic`は収集run IDと取り込みattempt IDを相関キーに、処理段階、所要時間、予定・新規転送・再利用件数、保留理由、次の転送位置を記録する。例外本文、認証情報、storage key、取引本文はログに出さない。ログ出力の失敗は取り込み結果に影響しない。
+
+`deferred / worker_invocation_limit / nextOffset:0`は取り込み失敗ではなく、同期呼び出し上限を超えるrunの分割待ちを表す。既存のSony backfillは別requestごとに最大10 objectを転送し、最後にsealする。同じ収集を再実行してもこの保留は解消しないため、保存済みmanifestのbackfillを再開する。
+
 ## Mobile Suicaの境界
 
 Mobile Suicaは1 runにつきSF履歴HTML 1 page、normalized JSON、collection summary、manifestの最大4 objectだけを扱う。100行未満の1 pageはcompleteなsuccessとして、v2のちょうど100行は`history_boundary_unproven`を伴うpartial evidenceとして取り込む。v1の100行success、複数page、期間coverageの推測は中央state作成前に拒否する。
