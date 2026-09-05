@@ -1,4 +1,4 @@
-import { atStage, SonyBankError } from "./diagnostics";
+import { SonyBankDiagnostics, SonyBankError } from "./diagnostics";
 import type {
   JsonObject,
   RawArtifact,
@@ -55,6 +55,8 @@ interface RequestContext {
   screenId: string;
   eventId: string;
   providerKey?: string;
+  currency?: string;
+  page?: number;
 }
 
 export interface SonyBankCollection {
@@ -135,12 +137,14 @@ export async function collectSonyBank(options: {
   from: string;
   to: string;
   fetcher?: Fetcher;
+  runId?: string;
 }): Promise<SonyBankCollection> {
   const fetcher = options.fetcher ?? fetch;
-  const client = new SonyBankClient(fetcher, options.credential);
-  await atStage("login", () => client.login());
+  const diagnostics = new SonyBankDiagnostics(options.runId);
+  const client = new SonyBankClient(fetcher, options.credential, diagnostics);
+  await diagnostics.stage("login", () => client.login());
 
-  const gross = await atStage("gross-balance", async () => client.requestJson(
+  const gross = await diagnostics.stage("gross-balance", async () => client.requestJson(
     GROSS_BALANCE_PATH,
     { branchNum: options.credential.branchNum, accountNum: options.credential.accountNum },
     {
@@ -152,19 +156,23 @@ export async function collectSonyBank(options: {
     },
   ));
 
-  const history = await atStage("history", () => client.history("JPY", options.from, options.to));
-  const csv = await atStage("history-csv", () => client.historyCsv("JPY", options.from, options.to));
+  const history = await diagnostics.stage("history", () => client.history("JPY", options.from, options.to), { currency: "JPY" });
+  const csv = history.transactionCount > 0
+    ? await diagnostics.stage("history-csv", () => client.historyCsv("JPY", options.from, options.to), { currency: "JPY", transactionCount: history.transactionCount })
+    : null;
+  if (!csv) diagnostics.record("EABA0600S1fE12:JPY", "skipped", { transactionCount: 0, reason: "zero_transactions" });
   const foreign = [];
   let foreignTransactionCount = 0;
   for (const currency of FOREIGN_CURRENCY_CODES) {
-    const currencyHistory = await atStage("history", () => client.history(currency, options.from, options.to));
+    const currencyHistory = await diagnostics.stage("history", () => client.history(currency, options.from, options.to), { currency });
     const currencyCsv = currencyHistory.transactionCount > 0
-      ? await atStage("history-csv", () => client.historyCsv(currency, options.from, options.to))
+      ? await diagnostics.stage("history-csv", () => client.historyCsv(currency, options.from, options.to), { currency, transactionCount: currencyHistory.transactionCount })
       : null;
+    if (!currencyCsv) diagnostics.record(`EABA0600S1fE12:${currency}`, "skipped", { transactionCount: 0, reason: "zero_transactions" });
     foreignTransactionCount += currencyHistory.transactionCount;
     foreign.push({ currency, history: currencyHistory, csv: currencyCsv });
   }
-  const wallet = await atStage("wallet", () => client.walletHistory());
+  const wallet = await diagnostics.stage("wallet", () => client.walletHistory());
   const artifacts: RawArtifact[] = [
     {
       dataset: "gross-balance",
@@ -178,12 +186,12 @@ export async function collectSonyBank(options: {
       mediaType: "application/json",
       body: page.rawText,
     })),
-    {
+    ...(csv ? [{
       dataset: "yen-history-csv",
       filename: "yen-history.csv",
       mediaType: csv.mediaType,
       body: csv.body,
-    },
+    }] : []),
     ...foreign.flatMap(({ currency, history: currencyHistory, csv: currencyCsv }) => [
       ...currencyHistory.pages.map((page, index) => ({
         dataset: `foreign-history-${currency.toLowerCase()}-page-${String(index + 1).padStart(4, "0")}`,
@@ -236,13 +244,25 @@ class SonyBankClient {
   constructor(
     fetcher: Fetcher,
     private readonly credential: SonyBankCredential,
+    private readonly diagnostics: SonyBankDiagnostics,
   ) {
     this.fetcher = (input, init) => fetcher(input, init);
   }
 
-  private async request(operation: string, input: string | URL | Request, init?: RequestInit): Promise<Response> {
-    try { return await this.fetcher(input, init); }
-    catch { throw new SonyBankError(operation, undefined, 0, "network_error"); }
+  private async request(operation: string, input: string | URL | Request, init?: RequestInit, metadata: { currency?: string; page?: number } = {}): Promise<Response> {
+    const started = Date.now();
+    this.diagnostics.record(operation, "started", { ...metadata, phase: "request" });
+    let response: Response;
+    try { response = await this.fetcher(input, init); }
+    catch {
+      this.diagnostics.record(operation, "failed", { ...metadata, phase: "request", reason: "network_error", durationMs: Date.now() - started });
+      throw new SonyBankError(operation, undefined, 0, "network_error");
+    }
+    this.diagnostics.record(operation, response.ok ? "completed" : "failed", {
+      ...metadata, phase: "request", httpStatus: response.status, durationMs: Date.now() - started,
+      ...(response.ok ? {} : { reason: "http_error" }),
+    });
+    return response;
   }
 
   async login(): Promise<void> {
@@ -319,7 +339,7 @@ class SonyBankClient {
       headers,
       body: JSON.stringify(body),
       redirect: "manual",
-    });
+    }, context);
     this.#cookies.absorb(response.headers);
     const nextCsrf = response.headers.get("bff-csrf");
     if (nextCsrf) this.#csrf = nextCsrf;
@@ -372,12 +392,18 @@ class SonyBankClient {
           pageUrl: HISTORY_PAGE,
           screenId: "EABA0600S1f",
           eventId: first ? "EABA0600S1fE10" : "EABA0600S1fE11",
+          currency,
+          page: pageIndex + 1,
         },
       );
       pages.push(page);
       const pageInfo = validateHistoryPage(page.json, pageIndex, declaredTotal);
+      this.diagnostics.record(first ? "EABA0600S1fE10" : "EABA0600S1fE11", "completed", {
+        currency, page: pageIndex + 1, rowCount: pageInfo.rowCount, transactionCount: pageInfo.total,
+      });
       declaredTotal = pageInfo.total;
       if (pageInfo.terminal) {
+        this.diagnostics.record("history", "completed", { currency, transactionCount: declaredTotal, pageCount: pages.length });
         return {
           pages,
           transactionCount: declaredTotal,
@@ -526,6 +552,7 @@ class SonyBankClient {
         throw new Error("Sony Bank WALLET selected month mismatch");
       }
       artifacts.push({ ...month, html: sanitizeWalletHtml(html) });
+      this.diagnostics.record("wallet-statement", "completed", { page: artifacts.length, pageCount: months.length });
     }
     return { months: artifacts };
   }

@@ -48,7 +48,7 @@ describe("safe Sony diagnostics", () => {
           if (path.endsWith("csrf-token/get")) return Response.json({}, { headers: { "bff-csrf": "secret" } });
           if (path.endsWith("to-customers/login")) return Response.json({ accountInfo: [{}] });
           if (path.endsWith("gross-balance/acq")) return Response.json({});
-          if (path.endsWith("ordinary-deposit-transaction-histories")) return Response.json({ transactionHistInfo: [], countCnt: 0 });
+          if (path.endsWith("ordinary-deposit-transaction-histories")) return Response.json({ transactionHistInfo: [{}], countCnt: 1 });
           if (path.endsWith("csv/load")) return Response.json({ errors: [{ code: "Bearer synthetic-secret" }] }, { status: 500 });
           throw new Error("unexpected request");
         } });

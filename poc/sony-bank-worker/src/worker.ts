@@ -81,6 +81,7 @@ async function runCollection(
       credential,
       from: window.from,
       to: window.to,
+      runId,
     });
     transactionCount = collection.transactionCount;
     for (const artifact of collection.artifacts) {

@@ -90,3 +90,57 @@ export function emitDiagnostic(level: "log" | "warn" | "error", record: Record<s
   try { console[level](JSON.stringify(record)); }
   catch { /* Best effort, including serialization and logger failures. */ }
 }
+
+interface ProgressFields {
+  phase?: "collection" | "request";
+  currency?: string;
+  page?: number;
+  pageCount?: number;
+  rowCount?: number;
+  transactionCount?: number;
+  httpStatus?: number;
+  durationMs?: number;
+  reason?: string;
+}
+
+/** Only bounded metadata enters logs; never serialize a request, response or error. */
+export class SonyBankDiagnostics {
+  constructor(private readonly runId?: string) {}
+
+  record(operation: string, outcome: "started" | "completed" | "failed" | "skipped", fields: ProgressFields = {}): void {
+    try {
+      const [event, currency] = operation.split(":");
+      const stage = event && Object.hasOwn(OPERATIONS, event) ? OPERATIONS[event] : STAGES.has(operation) ? operation : "collect";
+      const record: Record<string, unknown> = { event: "sony-bank-progress", phase: fields.phase === "request" ? "request" : "collection", stage, outcome };
+      if (this.runId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(this.runId)) record.runId = this.runId;
+      if (event && Object.hasOwn(OPERATIONS, event)) record.providerOperation = event;
+      const selectedCurrency = fields.currency ?? currency;
+      if (selectedCurrency && CURRENCIES.has(selectedCurrency)) record.currency = selectedCurrency;
+      for (const key of ["page", "pageCount", "rowCount", "transactionCount", "durationMs"] as const) {
+        const value = fields[key];
+        if (Number.isSafeInteger(value) && value! >= 0) record[key] = value;
+      }
+      const status = fields.httpStatus;
+      if (Number.isInteger(status) && status! >= 100 && status! <= 599) record.httpStatus = status;
+      const reason = fields.reason;
+      if (reason && (REASONS.has(reason) || reason === "zero_transactions")) record.reason = reason;
+      emitDiagnostic(outcome === "failed" ? "error" : "log", record);
+    } catch { /* Metadata inspection and logging are best effort. */ }
+  }
+
+  async stage<T>(stage: string, task: () => Promise<T>, fields: ProgressFields = {}): Promise<T> {
+    const started = Date.now();
+    this.record(stage, "started", fields);
+    try {
+      const result = await atStage(stage, task);
+      this.record(stage, "completed", { ...fields, durationMs: Date.now() - started });
+      return result;
+    } catch (error) {
+      try {
+        const details = failure("collect", error).diagnostics;
+        this.record(stage, "failed", { ...fields, ...details, durationMs: Date.now() - started });
+      } catch { /* Never replace the original collection failure. */ }
+      throw error;
+    }
+  }
+}
