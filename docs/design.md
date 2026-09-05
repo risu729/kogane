@@ -73,14 +73,14 @@ Layer transitions have different rules:
 
 ### Mutation Policy
 
-| Class | Examples | Policy |
-| --- | --- | --- |
-| Immutable | raw objects, fetch history, source observations, historical price observations | Append-only. Never updated or deleted. |
-| Versioned / corrigible | identity mappings, observation links, event interpretation, classification | May be corrected; corrections are tracked. |
-| Derived / disposable | current balances, positions, P&L, net worth, tax calculations, dashboards | Freely regenerated from the layers above. |
+| Class                  | Examples                                                                       | Policy                                     |
+| ---------------------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
+| Immutable              | raw objects, fetch history, source observations, historical price observations | Append-only. Never updated or deleted.     |
+| Versioned / corrigible | identity mappings, observation links, event interpretation, classification     | May be corrected; corrections are tracked. |
+| Derived / disposable   | current balances, positions, P&L, net worth, tax calculations, dashboards      | Freely regenerated from the layers above.  |
 
 Evidence is not "the truth" — providers correct their own data. Evidence is a
-record of *what a source claimed at a point in time*. That is why nothing
+record of _what a source claimed at a point in time_. That is why nothing
 overwrites it, and why multiple conflicting claims can coexist.
 
 ## Architecture
@@ -150,7 +150,7 @@ tickers change and migrate.
 ### Balances are measurements, not columns
 
 There is no `accounts.balance` column. A balance is a time-series
-measurement: *subject, metric, value, as_of, source, method*. Providers
+measurement: _subject, metric, value, as_of, source, method_. Providers
 report several distinct balance metrics (ledger, available, pending, credit
 limit); each is its own measurement. Later fetches append new measurements
 rather than updating old ones.
@@ -174,7 +174,7 @@ event: buy AAPL           event: reward conversion
 
 This is double-entry thinking without exposing bookkeeping to users, and it
 prevents card payments and inter-account transfers from being double-counted
-as spending. However, events are *not* required to balance at the raw or
+as spending. However, events are _not_ required to balance at the raw or
 reconciliation stage: a cross-currency transfer where only both endpoints are
 known ("-1,000 AUD, +94,300 JPY") is stored with the gap unexplained rather
 than forcing an invented fee.
@@ -191,7 +191,7 @@ method, confidence, calculation_version
 Concretely:
 
 - An FX fee the provider itemized is an explicit fee. A gap between the
-  settlement rate and a reference rate is an *estimated spread*, stored
+  settlement rate and a reference rate is an _estimated spread_, stored
   separately with its estimation method. The two are never conflated.
 - A broker's reported market value, cost basis, and unrealized P&L are stored
   as provider-reported measurements. Our own computed valuation is stored as
@@ -260,9 +260,9 @@ Reward units get four separated concerns:
 2. Lots and expiry — expiry models differ fundamentally:
    `FIXED_LOT` (each earn expires on its own date, possibly in limited-use
    groups), `INACTIVITY` (whole balance expires after N months without
-   eligible activity), `FIXED_ACCOUNT`, `NO_EXPIRY`. Expiry *rules* are
+   eligible activity), `FIXED_ACCOUNT`, `NO_EXPIRY`. Expiry _rules_ are
    stored as dated snapshots of program terms, separately from provider-shown
-   expiry *observations* and from our derived expiry *estimates*.
+   expiry _observations_ and from our derived expiry _estimates_.
 3. Conversion rules — a conversion graph with offers (ratio, minimum,
    increment, campaign window, cash fees), not an FX table.
 4. Valuations — multiple named methodologies per unit

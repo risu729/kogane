@@ -31,9 +31,7 @@ class FakeBucket {
       size: value.body.byteLength,
       customMetadata: value.customMetadata,
       httpMetadata: { contentType: value.contentType },
-      checksums: value.nativeSha256
-        ? { sha256: hexBytes(value.nativeSha256).buffer }
-        : {},
+      checksums: value.nativeSha256 ? { sha256: hexBytes(value.nativeSha256).buffer } : {},
       arrayBuffer: async () => ownedArrayBuffer(value.body),
     } as unknown as R2ObjectBody;
   }
@@ -88,13 +86,17 @@ class FakeCentral {
     }
     if (/\/units$/u.test(path)) return Response.json({ unitId: 10 }, { status: 201 });
     if (/\/inventories$/u.test(path)) return Response.json({ inventoryId: 20 }, { status: 201 });
-    if (/\/inventories\/20\/items$/u.test(path)) return Response.json({ ok: true }, { status: 201 });
+    if (/\/inventories\/20\/items$/u.test(path))
+      return Response.json({ ok: true }, { status: 201 });
     if (/\/artifacts$/u.test(path)) {
       const parsed = centralNormalizedDescriptor(JSON.parse(body));
       const descriptor = this.mutateParsedDescriptor?.(parsed) ?? parsed;
-      return Response.json({ descriptorSha256: await normalizedDescriptorSha256(descriptor) }, {
-        status: 201,
-      });
+      return Response.json(
+        { descriptorSha256: await normalizedDescriptorSha256(descriptor) },
+        {
+          status: 201,
+        },
+      );
     }
     if (/\/reports$/u.test(path)) {
       const previous = this.terminalReports.get(path);
@@ -102,9 +104,12 @@ class FakeCentral {
         return Response.json({ error: "immutable report conflict" }, { status: 409 });
       }
       this.terminalReports.set(path, body);
-      return Response.json({ reused: previous !== undefined }, {
-        status: previous === undefined ? 201 : 200,
-      });
+      return Response.json(
+        { reused: previous !== undefined },
+        {
+          status: previous === undefined ? 201 : 200,
+        },
+      );
     }
     if (/\/seal$/u.test(path)) return Response.json({ sealed: true }, { status: 201 });
     return Response.json({ ok: true }, { status: 201 });
@@ -117,14 +122,13 @@ describe("GLOBAL PASS R2 importer", () => {
       variantA(["one", "two", "three", "four", "", ""]),
       variantB(["one", "two", "three", ""]),
     ]) {
-      const sanitized = decode(sanitizeGlobalPassHtml(
-        encode(html),
-        "globalpass-browser-poc-v1",
-      ));
-      expect(sanitized.match(new RegExp(SENTINEL, "gu")))
-        .toHaveLength(html.includes("W131301.referenceDate") ? 4 : 3);
-      expect(sanitized.match(/name="nablarch_hidden" value=""/gu))
-        .toHaveLength(html.includes("W131301.referenceDate") ? 2 : 1);
+      const sanitized = decode(sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v1"));
+      expect(sanitized.match(new RegExp(SENTINEL, "gu"))).toHaveLength(
+        html.includes("W131301.referenceDate") ? 4 : 3,
+      );
+      expect(sanitized.match(/name="nablarch_hidden" value=""/gu)).toHaveLength(
+        html.includes("W131301.referenceDate") ? 2 : 1,
+      );
     }
   });
 
@@ -145,22 +149,19 @@ describe("GLOBAL PASS R2 importer", () => {
         'onclick="if (window.innerWidth &lt; 640) { $(this.parentNode).toggleClass(' +
           "'.open'); } else { $('.target')[0].click(); } return false;\"",
       );
-    const output = decode(sanitizeGlobalPassHtml(
-      encode(html),
-      "globalpass-browser-poc-v1",
-    ));
+    const output = decode(sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v1"));
     expect(output).toContain('href="https://www.debit.vpass.ne.jp/"');
     expect(output).toContain(
       'action="https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301"',
     );
-    expect(() => sanitizeGlobalPassHtml(
-      encode(html),
-      "globalpass-browser-poc-v2",
-    )).toThrow("html_activity_contract_invalid");
+    expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v2")).toThrow(
+      "html_activity_contract_invalid",
+    );
   });
 
   test("accepts an empty English legacy page only with audited artifact authorization", () => {
-    const note = '<p class="textNotice"><span>&lt;Note&gt;<br>' +
+    const note =
+      '<p class="textNotice"><span>&lt;Note&gt;<br>' +
       " - Transaction dates are showed in ascending order.<br></span></p>";
     const html = variantA(["one", "two", "three", "four", "", ""])
       .replace("利用明細", "Account")
@@ -169,22 +170,19 @@ describe("GLOBAL PASS R2 importer", () => {
         "https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301",
         "/p/statementInquiry/RW1313010301",
       );
-    expect(() => sanitizeGlobalPassHtml(
-      encode(html),
-      "globalpass-browser-poc-v1",
-    )).toThrow("html_activity_contract_invalid");
-    expect(() => sanitizeGlobalPassHtml(
-      encode(html),
-      "globalpass-browser-poc-v1",
-      true,
-    )).not.toThrow();
-    expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v2", true))
-      .toThrow("html_activity_contract_invalid");
+    expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v1")).toThrow(
+      "html_activity_contract_invalid",
+    );
+    expect(() =>
+      sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v1", true),
+    ).not.toThrow();
+    expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v2", true)).toThrow(
+      "html_activity_contract_invalid",
+    );
   });
 
   test("does not accept legacy activity words outside the exact table header set", () => {
-    const base = variantA(["one", "two", "three", "four", "", ""])
-      .replace("利用明細", "Account");
+    const base = variantA(["one", "two", "three", "four", "", ""]).replace("利用明細", "Account");
     for (const marker of [
       `<!-- ${legacyEnglishActivityTables()} -->`,
       `<script>const marker = ${JSON.stringify(legacyEnglishActivityTables())};</script>`,
@@ -197,20 +195,14 @@ describe("GLOBAL PASS R2 importer", () => {
       "<th>Transaction Detail</th>",
     ]) {
       const html = base.replace("</body>", `${marker}</body>`);
-      expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v1"))
-        .toThrow("html_activity_contract_invalid");
+      expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v1")).toThrow(
+        "html_activity_contract_invalid",
+      );
     }
   });
 
   test("rejects legacy relative navigation in canonical v2 HTML", () => {
-    const canonical = canonicalV2(variantA([
-      SENTINEL,
-      SENTINEL,
-      SENTINEL,
-      SENTINEL,
-      "",
-      "",
-    ]));
+    const canonical = canonicalV2(variantA([SENTINEL, SENTINEL, SENTINEL, SENTINEL, "", ""]));
     for (const html of [
       canonical.replace("<body>", '<body><a href="/">Home</a>'),
       canonical.replace(
@@ -218,8 +210,9 @@ describe("GLOBAL PASS R2 importer", () => {
         "/p/statementInquiry/RW1313010301",
       ),
     ]) {
-      expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v2"))
-        .toThrow("html_url_attribute_invalid");
+      expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v2")).toThrow(
+        "html_url_attribute_invalid",
+      );
     }
   });
 
@@ -228,11 +221,13 @@ describe("GLOBAL PASS R2 importer", () => {
     const originalHtml = variantA(["opaque-a", "opaque-b", "opaque-c", "opaque-d", "", ""]);
     const manifest = await storeRun(bucket, "v1", originalHtml);
     manifest.status = "partial";
-    manifest.failures = [{
-      operation: "r2:2026-08",
-      errorType: "Error",
-      message: "synthetic sensitive diagnostic must not be copied",
-    }];
+    manifest.failures = [
+      {
+        operation: "r2:2026-08",
+        errorType: "Error",
+        message: "synthetic sensitive diagnostic must not be copied",
+      },
+    ];
     manifest.availableMonths = ["2026-09", "2026-08"];
     await replaceManifest(bucket, manifest);
 
@@ -269,7 +264,8 @@ describe("GLOBAL PASS R2 importer", () => {
       .map((request) => JSON.parse(request.body) as Record<string, unknown>)
       .find((value) => value.dataset === "globalpass-activity")!;
     const uploadedHtml = [...central.uploaded.values()].find((value) =>
-      decode(value).startsWith("<!doctype html"))!;
+      decode(value).startsWith("<!doctype html"),
+    )!;
     expect(descriptor).toMatchObject({
       artifactRole: "sanitized_provider_capture",
       payloadFidelity: "transformed",
@@ -348,8 +344,7 @@ describe("GLOBAL PASS R2 importer", () => {
       pageGroupId: 99,
       pageIndex: 0,
     }));
-    await expect(importRun(bucket, driftedCentral))
-      .rejects.toThrow("central_descriptor_mismatch");
+    await expect(importRun(bucket, driftedCentral)).rejects.toThrow("central_descriptor_mismatch");
   });
 
   test("accepts the producer sanitizer output as canonical v2 HTML", () => {
@@ -366,22 +361,28 @@ describe("GLOBAL PASS R2 importer", () => {
     manifest.status = "failed";
     manifest.availableMonths = [];
     manifest.artifacts = [];
-    manifest.failures = [{
-      operation: "browser-collection",
-      errorType: "Error",
-      message: "synthetic diagnostic",
-    }];
+    manifest.failures = [
+      {
+        operation: "browser-collection",
+        errorType: "Error",
+        message: "synthetic diagnostic",
+      },
+    ];
     await putManifest(bucket, manifest);
     const central = new FakeCentral();
     const result = await importRun(bucket, central);
     expect(result).toMatchObject({ artifactCount: 1, sealed: true });
-    const unitReport = central.requests.find((request) => /\/units\/10\/reports$/u.test(request.path))!;
+    const unitReport = central.requests.find((request) =>
+      /\/units\/10\/reports$/u.test(request.path),
+    )!;
     expect(JSON.parse(unitReport.body)).toMatchObject({
       normalizedOutcome: "failed",
       declaredArtifactCount: 0,
       safeFailureCode: "browser-collection-failed",
     });
-    const runReport = central.requests.find((request) => /\/runs\/1\/reports$/u.test(request.path))!;
+    const runReport = central.requests.find((request) =>
+      /\/runs\/1\/reports$/u.test(request.path),
+    )!;
     expect(JSON.parse(runReport.body)).toMatchObject({
       producerVersion: "global-pass-r2-v3",
       normalizedOutcome: "failed",
@@ -400,11 +401,13 @@ describe("GLOBAL PASS R2 importer", () => {
     manifest.status = "failed";
     manifest.availableMonths = [];
     manifest.artifacts = [];
-    manifest.failures = [{
-      operation: "browser-collection",
-      errorType: "Error",
-      message: "synthetic diagnostic",
-    }];
+    manifest.failures = [
+      {
+        operation: "browser-collection",
+        errorType: "Error",
+        message: "synthetic diagnostic",
+      },
+    ];
     await putManifest(bucket, manifest);
     const central = new FakeCentral();
     central.seedRun("activity-global-pass-r2-v1", 1);
@@ -413,10 +416,12 @@ describe("GLOBAL PASS R2 importer", () => {
     const replay = await importRun(bucket, central);
     expect(first).toMatchObject({ centralRunId: 2, sealed: true });
     expect(replay).toMatchObject({ centralRunId: 2, sealed: true });
-    expect(central.runIdsBySourceKey).toEqual(new Map([
-      ["activity-global-pass-r2-v1", 1],
-      ["activity-global-pass-r2-v3", 2],
-    ]));
+    expect(central.runIdsBySourceKey).toEqual(
+      new Map([
+        ["activity-global-pass-r2-v1", 1],
+        ["activity-global-pass-r2-v3", 2],
+      ]),
+    );
   });
 
   test("defers a 15-month immediate run and resumes staged backfill in chunks", async () => {
@@ -465,35 +470,39 @@ describe("GLOBAL PASS R2 importer", () => {
       ),
       valid.replace("/js/run.js", "/js/run.js?unknown=1"),
       valid.replace('onclick="click()"', 'onload="click()"'),
-      valid.replace("</body>",
-        '<img src="/en/01006/img/logo.jpg" srcset="https://unsafe.invalid/x 1x"></body>'),
-      valid.replace("</body>",
-        '<a href="#activity" ping="https://unsafe.invalid/p">x</a></body>'),
-      valid.replace("</body>",
-        '<div style="background:url(https://unsafe.invalid/x)"></div></body>'),
-      valid.replace("</body>",
-        '<meta http-equiv="refresh" content="0;url=https://unsafe.invalid/x"></body>'),
-      valid.replace("</body>",
-        '<svg><use href="https://unsafe.invalid/x"></use></svg></body>'),
+      valid.replace(
+        "</body>",
+        '<img src="/en/01006/img/logo.jpg" srcset="https://unsafe.invalid/x 1x"></body>',
+      ),
+      valid.replace("</body>", '<a href="#activity" ping="https://unsafe.invalid/p">x</a></body>'),
+      valid.replace(
+        "</body>",
+        '<div style="background:url(https://unsafe.invalid/x)"></div></body>',
+      ),
+      valid.replace(
+        "</body>",
+        '<meta http-equiv="refresh" content="0;url=https://unsafe.invalid/x"></body>',
+      ),
+      valid.replace("</body>", '<svg><use href="https://unsafe.invalid/x"></use></svg></body>'),
       valid.replace("</body>", '<base href="https://unsafe.invalid/"></body>'),
       valid.replace("</body>", '<object data="https://unsafe.invalid/x"></object></body>'),
       valid.replace("</body>", '<iframe src="https://unsafe.invalid/x"></iframe></body>'),
     ]) {
-      expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v1"))
-        .toThrow();
+      expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v1")).toThrow();
     }
-    expect(() => sanitizeGlobalPassHtml(
-      encode(canonicalV2(variantB(["not-redacted", SENTINEL, SENTINEL, ""]))),
-      "globalpass-browser-poc-v2",
-    )).toThrow("html_nablarch_hidden_not_redacted");
+    expect(() =>
+      sanitizeGlobalPassHtml(
+        encode(canonicalV2(variantB(["not-redacted", SENTINEL, SENTINEL, ""]))),
+        "globalpass-browser-poc-v2",
+      ),
+    ).toThrow("html_nablarch_hidden_not_redacted");
     const canonical = canonicalV2(variantB([SENTINEL, SENTINEL, SENTINEL, ""]));
     for (const html of [
       canonical.replace('href="#"', 'href="#activity"'),
       canonical.replace('onclick="return false;"', 'onclick="click()"'),
       canonical.replace('onchange="return false;"', 'onchange="sel_submit(this)"'),
     ]) {
-      expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v2"))
-        .toThrow();
+      expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v2")).toThrow();
     }
   });
 
@@ -505,44 +514,53 @@ describe("GLOBAL PASS R2 importer", () => {
       selectedMonths: [],
       captureComplete: false,
       artifacts: [],
-      failures: [{
-        operation: "browser-collection",
-        errorType: "Error",
-        errorCode: "browser_collection_failed",
-      }],
+      failures: [
+        {
+          operation: "browser-collection",
+          errorType: "Error",
+          errorCode: "browser_collection_failed",
+        },
+      ],
     });
-    expect(() => parseGlobalPassManifest(encode(JSON.stringify(allowed)), MANIFEST_KEY))
-      .not.toThrow();
+    expect(() =>
+      parseGlobalPassManifest(encode(JSON.stringify(allowed)), MANIFEST_KEY),
+    ).not.toThrow();
     const twoFailures = structuredClone(allowed);
     twoFailures.failures.push({
       operation: "contract",
       errorType: "Error",
       errorCode: "container_contract_invalid",
     });
-    expect(() => parseGlobalPassManifest(encode(JSON.stringify(twoFailures)), MANIFEST_KEY))
-      .toThrow("manifest_empty_available_failure_invalid");
+    expect(() =>
+      parseGlobalPassManifest(encode(JSON.stringify(twoFailures)), MANIFEST_KEY),
+    ).toThrow("manifest_empty_available_failure_invalid");
     const artifactFailure = structuredClone(allowed);
-    artifactFailure.failures = [{
-      operation: "r2",
-      errorType: "Error",
-      errorCode: "artifact_store_failed",
-      artifactKey: "activity-2026-09.html",
-    }];
-    expect(() => parseGlobalPassManifest(encode(JSON.stringify(artifactFailure)), MANIFEST_KEY))
-      .toThrow("manifest_empty_available_failure_invalid");
+    artifactFailure.failures = [
+      {
+        operation: "r2",
+        errorType: "Error",
+        errorCode: "artifact_store_failed",
+        artifactKey: "activity-2026-09.html",
+      },
+    ];
+    expect(() =>
+      parseGlobalPassManifest(encode(JSON.stringify(artifactFailure)), MANIFEST_KEY),
+    ).toThrow("manifest_empty_available_failure_invalid");
   });
 
   test("rejects status spoofing, missing-month complement drift and unknown fields", async () => {
     const bucket = new FakeBucket();
-    const manifest = await storeRun(
-      bucket,
-      "v2",
-      variantB([SENTINEL, SENTINEL, SENTINEL, ""]),
-    );
+    const manifest = await storeRun(bucket, "v2", variantB([SENTINEL, SENTINEL, SENTINEL, ""]));
     for (const mutate of [
-      (value: Record<string, any>) => { value.status = "partial"; },
-      (value: Record<string, any>) => { value.captureComplete = false; },
-      (value: Record<string, any>) => { value.unknown = true; },
+      (value: Record<string, any>) => {
+        value.status = "partial";
+      },
+      (value: Record<string, any>) => {
+        value.captureComplete = false;
+      },
+      (value: Record<string, any>) => {
+        value.unknown = true;
+      },
     ]) {
       const copy = structuredClone(manifest);
       mutate(copy);
@@ -553,11 +571,7 @@ describe("GLOBAL PASS R2 importer", () => {
   test("rejects metadata, checksum and prefix inventory drift before central state", async () => {
     for (const mutation of ["metadata", "checksum", "prefix"] as const) {
       const bucket = new FakeBucket();
-      const manifest = await storeRun(
-        bucket,
-        "v2",
-        variantB([SENTINEL, SENTINEL, SENTINEL, ""]),
-      );
+      const manifest = await storeRun(bucket, "v2", variantB([SENTINEL, SENTINEL, SENTINEL, ""]));
       const artifact = manifest.artifacts[0];
       if (mutation === "metadata") {
         bucket.objects.get(artifact.key)!.customMetadata.extra = "unsafe";
@@ -597,15 +611,31 @@ async function importRun(
 
 async function storeBackfillRun(bucket: FakeBucket): Promise<void> {
   const months = [
-    "2026-09", "2026-08", "2026-07", "2026-06", "2026-05",
-    "2026-04", "2026-03", "2026-02", "2026-01", "2025-12",
-    "2025-11", "2025-10", "2025-09", "2025-08", "2025-07",
+    "2026-09",
+    "2026-08",
+    "2026-07",
+    "2026-06",
+    "2026-05",
+    "2026-04",
+    "2026-03",
+    "2026-02",
+    "2026-01",
+    "2025-12",
+    "2025-11",
+    "2025-10",
+    "2025-09",
+    "2025-08",
+    "2025-07",
   ];
   const artifacts = [];
   for (const month of months) {
     const key = `${PREFIX}activity-${month}.html`;
-    const body = encode(canonicalV2(variantB([SENTINEL, SENTINEL, SENTINEL, ""]))
-      .replace("</body>", `<span>${month}</span></body>`));
+    const body = encode(
+      canonicalV2(variantB([SENTINEL, SENTINEL, SENTINEL, ""])).replace(
+        "</body>",
+        `<span>${month}</span></body>`,
+      ),
+    );
     const sha256 = await sha256Hex(body);
     bucket.objects.set(key, {
       body,
@@ -644,19 +674,22 @@ async function storeRun(bucket: FakeBucket, version: "v1" | "v2", html: string) 
   bucket.objects.set(key, {
     body,
     contentType: "text/html; charset=utf-8",
-    customMetadata: version === "v1"
-      ? { dataset: "globalpass-activity", month, sha256 }
-      : { source: "prestia-globalpass", runId: RUN_ID, dataset: "globalpass-activity", sha256 },
+    customMetadata:
+      version === "v1"
+        ? { dataset: "globalpass-activity", month, sha256 }
+        : { source: "prestia-globalpass", runId: RUN_ID, dataset: "globalpass-activity", sha256 },
     nativeSha256: sha256,
   });
-  const manifest = baseManifest(version, [{
-    ...(version === "v2" ? { dataset: "globalpass-activity" } : {}),
-    month,
-    key,
-    ...(version === "v2" ? { mediaType: "text/html" } : {}),
-    bytes: body.byteLength,
-    sha256,
-  }]);
+  const manifest = baseManifest(version, [
+    {
+      ...(version === "v2" ? { dataset: "globalpass-activity" } : {}),
+      month,
+      key,
+      ...(version === "v2" ? { mediaType: "text/html" } : {}),
+      bytes: body.byteLength,
+      sha256,
+    },
+  ]);
   await putManifest(bucket, manifest);
   return manifest;
 }
@@ -672,11 +705,13 @@ function baseManifest(version: "v1" | "v2", artifacts: any[]) {
     completedAt: "2026-09-05T00:00:01.000Z",
     status: "success",
     availableMonths: ["2026-09"],
-    ...(version === "v2" ? {
-      selectedMonths: ["2026-09"],
-      captureComplete: true,
-      paginationStatus: "unproven",
-    } : {}),
+    ...(version === "v2"
+      ? {
+          selectedMonths: ["2026-09"],
+          captureComplete: true,
+          paginationStatus: "unproven",
+        }
+      : {}),
     artifacts,
     failures: [],
   } as Record<string, any>;
@@ -708,13 +743,15 @@ function variantB(values: string[]): string {
 }
 
 function canonicalV2(html: string): string {
-  return html.replace('href="#activity"', 'href="#"')
+  return html
+    .replace('href="#activity"', 'href="#"')
     .replace('onclick="click()"', 'onclick="return false;"')
     .replace('onchange="sel_submit(this)"', 'onchange="return false;"');
 }
 
 function legacyEnglishActivityTables(): string {
-  return "<table><thead><tr>" +
+  return (
+    "<table><thead><tr>" +
     "<th>Transaction Date</th>" +
     "<th>Transaction Detail</th>" +
     "<th>Transaction Fee</th>" +
@@ -726,7 +763,8 @@ function legacyEnglishActivityTables(): string {
     "<table><thead><tr>" +
     "<th>Transaction Currency and Amount</th>" +
     "<th>Transaction Fee</th>" +
-    "</tr></thead><tbody></tbody></table>";
+    "</tr></thead><tbody></tbody></table>"
+  );
 }
 
 function htmlVariant(options: {
@@ -736,29 +774,39 @@ function htmlVariant(options: {
   referenceDate: number;
   values: string[];
 }): string {
-  const forms = Array.from({ length: options.forms }, (_, index) =>
-    `<form${index < options.actions
-      ? ' action="https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301"'
-      : ""}></form>`
+  const forms = Array.from(
+    { length: options.forms },
+    (_, index) =>
+      `<form${
+        index < options.actions
+          ? ' action="https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301"'
+          : ""
+      }></form>`,
   ).join("");
-  const nablarch = options.values.map((value) =>
-    `<input type="hidden" name="nablarch_hidden" value="${value}">`
+  const nablarch = options.values
+    .map((value) => `<input type="hidden" name="nablarch_hidden" value="${value}">`)
+    .join("");
+  const submits = Array.from(
+    { length: options.submits },
+    () => '<input type="hidden" name="nablarch_submit" value="1">',
   ).join("");
-  const submits = Array.from({ length: options.submits }, () =>
-    '<input type="hidden" name="nablarch_submit" value="1">').join("");
-  return `<!doctype html><html><head><title>利用明細</title>` +
+  return (
+    `<!doctype html><html><head><title>利用明細</title>` +
     '<link rel="stylesheet" href="/en//01006/css/master.css">' +
     '<script src="/js/run.js"></script></head><body>' +
     '<a href="#activity" onclick="click()">明細</a>' +
-    '<select onchange="sel_submit(this)"></select>' + forms +
+    '<select onchange="sel_submit(this)"></select>' +
+    forms +
     '<input type="hidden" name="cc" value="">' +
     '<input type="hidden" name="engUseFlg" value="">' +
     '<input type="hidden" name="nablarch_needs_hidden_encryption" value="1">' +
-    nablarch + submits +
+    nablarch +
+    submits +
     (options.referenceDate === 1
       ? '<input type="hidden" name="W131301.referenceDate" value="">'
       : "") +
-    '<table data-fixture="activity"><tbody></tbody></table></body></html>';
+    '<table data-fixture="activity"><tbody></tbody></table></body></html>'
+  );
 }
 
 function encode(value: string): Uint8Array {
@@ -774,9 +822,7 @@ async function sha256Hex(value: Uint8Array): Promise<string> {
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-function centralNormalizedDescriptor(
-  descriptor: Record<string, unknown>,
-): Record<string, unknown> {
+function centralNormalizedDescriptor(descriptor: Record<string, unknown>): Record<string, unknown> {
   const { http, storage, file, email, ...fields } = descriptor;
   return {
     ...fields,
@@ -804,18 +850,18 @@ function centralNormalizedDescriptor(
   };
 }
 
-async function normalizedDescriptorSha256(
-  descriptor: Record<string, unknown>,
-): Promise<string> {
+async function normalizedDescriptorSha256(descriptor: Record<string, unknown>): Promise<string> {
   return sha256Hex(encode(JSON.stringify(canonical(descriptor))));
 }
 
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value !== null && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
-      .map(([key, child]) => [key, canonical(child)]));
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, child]) => [key, canonical(child)]),
+    );
   }
   return value;
 }

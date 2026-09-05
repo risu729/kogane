@@ -10,8 +10,7 @@ import { chromium } from "playwright";
 
 import { startConnectRelay } from "./connect-relay.mjs";
 
-const LOGIN_URL =
-  "https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006";
+const LOGIN_URL = "https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006";
 const GLOBALPASS_HOST = "www.debit.vpass.ne.jp";
 const TURNSTILE_HOST = "challenges.cloudflare.com";
 const TURNSTILE_HELPER_HOST = "brunhild.challenges.cloudflare.com";
@@ -160,7 +159,7 @@ async function openActivity(page) {
       elements
         .map((element) => {
           const text = (element.textContent ?? "").replace(/\s+/gu, " ").trim();
-          if (!activityPattern || !(new RegExp(activityPattern, "iu")).test(text)) {
+          if (!activityPattern || !new RegExp(activityPattern, "iu").test(text)) {
             return null;
           }
           const style = getComputedStyle(element);
@@ -199,9 +198,7 @@ async function openActivity(page) {
 }
 
 async function visibleLoginButton(page) {
-  const candidates = page.locator(
-    "button[name=nablarch_form1_2],button[name=nablarch_form1_5]",
-  );
+  const candidates = page.locator("button[name=nablarch_form1_2],button[name=nablarch_form1_5]");
   const count = await candidates.count();
   for (let index = 0; index < count; index += 1) {
     const candidate = candidates.nth(index);
@@ -227,9 +224,7 @@ async function selectMonth(page, index, value) {
     if ((await form.count()) !== 1) {
       throw new Error("GLOBAL PASS month selector has no enclosing form");
     }
-    const submits = form.locator(
-      'button[type="submit"],input[type="submit"]',
-    );
+    const submits = form.locator('button[type="submit"],input[type="submit"]');
     let clicked = false;
     const count = await submits.count();
     for (let submitIndex = 0; submitIndex < count; submitIndex += 1) {
@@ -283,9 +278,7 @@ function normalizeDiagnosticPath(url) {
     }
     return "/cdn-cgi/challenge-platform/<redacted>";
   }
-  return url.pathname
-    .replace(/;jsessionid=[^/;]+/giu, ";jsessionid=<redacted>")
-    .slice(0, 120);
+  return url.pathname.replace(/;jsessionid=[^/;]+/giu, ";jsessionid=<redacted>").slice(0, 120);
 }
 
 function probeConfiguration(variant) {
@@ -401,9 +394,7 @@ function probeContextOptions(config) {
     locale: config.windows ? "en-US" : "ja-JP",
     timezoneId: "Asia/Tokyo",
     viewport: { width: 1365, height: 768 },
-    ...(config.windows
-      ? { userAgent: windowsUserAgent(windowsVersion) }
-      : {}),
+    ...(config.windows ? { userAgent: windowsUserAgent(windowsVersion) } : {}),
   };
 }
 
@@ -432,9 +423,7 @@ function diagnosticConsoleSignal(message) {
 function probeProxy(config, proxyPort) {
   if (config.egress === "direct") return undefined;
   const bypass =
-    config.egress === "split"
-      ? `${TURNSTILE_HOST},${TURNSTILE_HELPER_HOST}`
-      : undefined;
+    config.egress === "split" ? `${TURNSTILE_HOST},${TURNSTILE_HELPER_HOST}` : undefined;
   return {
     server: `http://127.0.0.1:${proxyPort}`,
     ...(bypass ? { bypass } : {}),
@@ -443,11 +432,9 @@ function probeProxy(config, proxyPort) {
 
 async function ensureXvfb() {
   if (xvfbProcess && xvfbProcess.exitCode === null) return ":99";
-  xvfbProcess = spawn(
-    "Xvfb",
-    [":99", "-screen", "0", "1365x768x24", "-nolisten", "tcp"],
-    { stdio: "ignore" },
-  );
+  xvfbProcess = spawn("Xvfb", [":99", "-screen", "0", "1365x768x24", "-nolisten", "tcp"], {
+    stdio: "ignore",
+  });
   await new Promise((resolve, reject) => {
     xvfbProcess.once("error", reject);
     const check = async (attempt) => {
@@ -473,9 +460,7 @@ async function ensureXvfb() {
 
 async function launchProbeContext(config, proxyPort) {
   const browserType = config.patchright ? patchrightChromium : chromium;
-  const args = config.patchright
-    ? ["--no-sandbox"]
-    : ["--no-sandbox", "--disable-dev-shm-usage"];
+  const args = config.patchright ? ["--no-sandbox"] : ["--no-sandbox", "--disable-dev-shm-usage"];
   if (config.webdriverFalse && !config.patchright) {
     args.push("--disable-blink-features=AutomationControlled");
   }
@@ -486,17 +471,13 @@ async function launchProbeContext(config, proxyPort) {
     args,
     ...(config.chromeStable ? { channel: "chrome" } : {}),
     ...(display ? { env: { ...process.env, DISPLAY: display } } : {}),
-    ...(probeProxy(config, proxyPort)
-      ? { proxy: probeProxy(config, proxyPort) }
-      : {}),
+    ...(probeProxy(config, proxyPort) ? { proxy: probeProxy(config, proxyPort) } : {}),
   };
   let browser;
   let context;
   let profileDirectory;
   if (config.persistent) {
-    profileDirectory = await mkdtemp(
-      path.join(os.tmpdir(), "kogane-globalpass-profile-"),
-    );
+    profileDirectory = await mkdtemp(path.join(os.tmpdir(), "kogane-globalpass-profile-"));
     context = await browserType.launchPersistentContext(profileDirectory, {
       ...launchOptions,
       ...probeContextOptions(config),
@@ -578,9 +559,7 @@ async function inspectProbePage(page) {
       },
       loginFormVisible: Boolean(document.querySelector("#usrId")),
       denied: /Access Denied|アクセスが拒否/iu.test(body),
-      challengeErrorCodes: [
-        ...new Set(body.match(/\b(?:1|2|3|4|6)\d{5}\b/gu) ?? []),
-      ].slice(0, 8),
+      challengeErrorCodes: [...new Set(body.match(/\b(?:1|2|3|4|6)\d{5}\b/gu) ?? [])].slice(0, 8),
       tokenLength: input && "value" in input ? input.value.length : 0,
       frames: [...document.querySelectorAll("iframe")]
         .map((frame) => {
@@ -611,9 +590,7 @@ async function probeDirectChrome(payload, config, proxyPort, startedAt) {
   const endpoint = "http://127.0.0.1:" + debuggingPort;
   const attachedAfterMs = 25_000;
   const proxyArguments =
-    config.egress === "direct"
-      ? []
-      : ["--proxy-server=http://127.0.0.1:" + proxyPort];
+    config.egress === "direct" ? [] : ["--proxy-server=http://127.0.0.1:" + proxyPort];
   const child = spawn(
     "/usr/bin/google-chrome",
     [
@@ -734,10 +711,7 @@ async function probeTurnstile(payload) {
     const { browser, context } = launched;
     await context.route("**/*", async (route) => {
       const url = new URL(route.request().url());
-      if (
-        ["about:", "blob:", "data:"].includes(url.protocol) ||
-        RELAY_HOSTS.has(url.hostname)
-      ) {
+      if (["about:", "blob:", "data:"].includes(url.protocol) || RELAY_HOSTS.has(url.hostname)) {
         await route.continue();
       } else {
         await route.abort("blockedbyclient");
@@ -745,11 +719,7 @@ async function probeTurnstile(payload) {
     });
     const page = await context.newPage();
     if (config.windows) {
-      await configureWindowsFingerprint(
-        context,
-        page,
-        config.windowsVersion ?? "153.0.0.0",
-      );
+      await configureWindowsFingerprint(context, page, config.windowsVersion ?? "153.0.0.0");
     }
     const consoleSignals = [];
     page.on("console", (message) => {
@@ -826,9 +796,7 @@ async function probeTurnstile(payload) {
       egress,
       page: pageState,
       consoleSignals,
-      brunhildRequested: network.some(
-        (entry) => entry.host === TURNSTILE_HELPER_HOST,
-      ),
+      brunhildRequested: network.some((entry) => entry.host === TURNSTILE_HELPER_HOST),
       network,
     };
   } finally {
@@ -846,13 +814,17 @@ async function collect(payload, response) {
 }
 
 async function collectBrowser(payload, response, diagnostics) {
-  const relay = await diagnostics.step("relay-start", () => startConnectRelay({
-    relayToken: payload.relayToken,
-    relayUrl: payload.relayUrl,
-    allowedHosts: RELAY_HOSTS,
-  }));
+  const relay = await diagnostics.step("relay-start", () =>
+    startConnectRelay({
+      relayToken: payload.relayToken,
+      relayUrl: payload.relayUrl,
+      allowedHosts: RELAY_HOSTS,
+    }),
+  );
   const config = probeConfiguration("chrome-stable-no-ua-all-tamia");
-  const launched = await diagnostics.step("browser-launch", () => launchProbeContext(config, relay.port));
+  const launched = await diagnostics.step("browser-launch", () =>
+    launchProbeContext(config, relay.port),
+  );
   const { browser, context } = launched;
   let page;
   const networkDiagnostic = [];
@@ -862,10 +834,7 @@ async function collectBrowser(payload, response, diagnostics) {
   try {
     await context.route("**/*", async (route) => {
       const url = new URL(route.request().url());
-      if (
-        ["about:", "blob:", "data:"].includes(url.protocol) ||
-        RELAY_HOSTS.has(url.hostname)
-      ) {
+      if (["about:", "blob:", "data:"].includes(url.protocol) || RELAY_HOSTS.has(url.hostname)) {
         await route.continue();
       } else {
         await route.abort("blockedbyclient");
@@ -894,12 +863,16 @@ async function collectBrowser(payload, response, diagnostics) {
       });
     });
     page.setDefaultTimeout(45_000);
-    await diagnostics.step("login-page", () => page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" }));
+    await diagnostics.step("login-page", () =>
+      page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" }),
+    );
     try {
-      await diagnostics.step("challenge", () => page.waitForFunction(() => {
-        const input = document.querySelector("[name=cf-turnstile-response]");
-        return Boolean(input && "value" in input && input.value.length > 20);
-      }));
+      await diagnostics.step("challenge", () =>
+        page.waitForFunction(() => {
+          const input = document.querySelector("[name=cf-turnstile-response]");
+          return Boolean(input && "value" in input && input.value.length > 20);
+        }),
+      );
     } catch (error) {
       const diagnostic = await page.evaluate(() => {
         const response = document.querySelector("[name=cf-turnstile-response]");
@@ -908,8 +881,7 @@ async function collectBrowser(payload, response, diagnostics) {
           urlHost: location.hostname,
           title: document.title.slice(0, 80),
           responseField: response?.tagName ?? null,
-          responseLength:
-            response && "value" in response ? response.value.length : 0,
+          responseLength: response && "value" in response ? response.value.length : 0,
           loginFormVisible: Boolean(document.querySelector("#usrId")),
           denied: /Access Denied|アクセスが拒否/iu.test(body),
           frames: [...document.querySelectorAll("iframe")]
@@ -940,7 +912,12 @@ async function collectBrowser(payload, response, diagnostics) {
       if (/Access Denied|アクセスが拒否/iu.test(body)) {
         throw new Error("GLOBAL PASS login was denied by the edge");
       }
-      if (await page.locator("#usrId").isVisible().catch(() => false)) {
+      if (
+        await page
+          .locator("#usrId")
+          .isVisible()
+          .catch(() => false)
+      ) {
         throw new Error("GLOBAL PASS login returned to the credential form");
       }
     });
@@ -953,9 +930,7 @@ async function collectBrowser(payload, response, diagnostics) {
     }
     const availableMonths = [...byMonth.keys()].sort().reverse();
     const selectedMonths =
-      payload.mode === "backfill"
-        ? availableMonths
-        : availableMonths.slice(0, DAILY_MONTHS);
+      payload.mode === "backfill" ? availableMonths : availableMonths.slice(0, DAILY_MONTHS);
     await writeLine(response, {
       type: "metadata",
       runtimeRevision: RUNTIME_REVISION,

@@ -51,9 +51,13 @@ export async function importStoredRecord(
   recordKey: string,
   continuation?: string,
 ): Promise<RawEvidenceImportResult> {
-  if (!safeRecordKey(recordKey) ||
-      !(continuation === undefined ||
-        (safeOpaque(continuation, 16_000) && continuation.startsWith("vpass-transfer-v1.")))) {
+  if (
+    !safeRecordKey(recordKey) ||
+    !(
+      continuation === undefined ||
+      (safeOpaque(continuation, 16_000) && continuation.startsWith("vpass-transfer-v1."))
+    )
+  ) {
     throw new Error("raw_evidence_import_job_invalid");
   }
   const response = await importer.fetch(
@@ -85,11 +89,22 @@ export async function backfillStoredRuns(
 }
 
 function validateBackfillResult(value: unknown): RawEvidenceBackfillPageResult {
-  const input = exactRecord(value, [
-    "source", "scannedObjectCount", "importedRecordCount", "skippedRecordCount",
-    "deferredRecordCount", "failedRecordCount", "nextCursor", "truncated",
-    "failureCode", "result",
-  ], ["failureCode", "result"]);
+  const input = exactRecord(
+    value,
+    [
+      "source",
+      "scannedObjectCount",
+      "importedRecordCount",
+      "skippedRecordCount",
+      "deferredRecordCount",
+      "failedRecordCount",
+      "nextCursor",
+      "truncated",
+      "failureCode",
+      "result",
+    ],
+    ["failureCode", "result"],
+  );
   if (
     input.source !== "vpass" ||
     !boundedInteger(input.scannedObjectCount, 1) ||
@@ -100,10 +115,15 @@ function validateBackfillResult(value: unknown): RawEvidenceBackfillPageResult {
     !(input.nextCursor === null || safeOpaque(input.nextCursor, 24_000)) ||
     typeof input.truncated !== "boolean" ||
     !(input.failureCode === undefined || safeCode(input.failureCode))
-  ) throw new Error("raw_evidence_importer_invalid_response");
-  const outcomes = input.importedRecordCount + input.skippedRecordCount +
-    input.deferredRecordCount + input.failedRecordCount;
-  const resultStatus = input.result === undefined ? undefined : validateImportResult(input.result).status;
+  )
+    throw new Error("raw_evidence_importer_invalid_response");
+  const outcomes =
+    input.importedRecordCount +
+    input.skippedRecordCount +
+    input.deferredRecordCount +
+    input.failedRecordCount;
+  const resultStatus =
+    input.result === undefined ? undefined : validateImportResult(input.result).status;
   if (
     outcomes > 1 ||
     (input.scannedObjectCount === 1 && outcomes !== 1) ||
@@ -115,7 +135,8 @@ function validateBackfillResult(value: unknown): RawEvidenceBackfillPageResult {
     (input.deferredRecordCount === 1) !== (resultStatus === "deferred") ||
     input.truncated !== (input.nextCursor !== null) ||
     (input.failedRecordCount === 1) !== (input.failureCode !== undefined)
-  ) throw new Error("raw_evidence_importer_invalid_response");
+  )
+    throw new Error("raw_evidence_importer_invalid_response");
   return {
     source: "vpass",
     scannedObjectCount: input.scannedObjectCount,
@@ -133,31 +154,49 @@ function validateImportResult(value: unknown): RawEvidenceImportResult {
   if (!isRecord(value) || (value.status !== "sealed" && value.status !== "deferred")) {
     throw new Error("raw_evidence_importer_invalid_response");
   }
-  const input = value.status === "sealed"
-    ? exactRecord(value, [
-        "source", "recordKey", "status", "centralRunId", "artifactCount", "sealed",
-        "finalChunkAllObjectsReused",
-      ])
-    : exactRecord(value, [
-        "source", "recordKey", "status", "reason", "artifactCount", "nextOffset",
-        "continuation",
-      ]);
-  if (input.source !== "vpass" || !safeRecordKey(input.recordKey) ||
-      !boundedPositiveInteger(input.artifactCount, 512)) {
+  const input =
+    value.status === "sealed"
+      ? exactRecord(value, [
+          "source",
+          "recordKey",
+          "status",
+          "centralRunId",
+          "artifactCount",
+          "sealed",
+          "finalChunkAllObjectsReused",
+        ])
+      : exactRecord(value, [
+          "source",
+          "recordKey",
+          "status",
+          "reason",
+          "artifactCount",
+          "nextOffset",
+          "continuation",
+        ]);
+  if (
+    input.source !== "vpass" ||
+    !safeRecordKey(input.recordKey) ||
+    !boundedPositiveInteger(input.artifactCount, 512)
+  ) {
     throw new Error("raw_evidence_importer_invalid_response");
   }
   if (input.status === "sealed") {
-    if (input.sealed !== true ||
-        !boundedPositiveInteger(input.centralRunId, Number.MAX_SAFE_INTEGER) ||
-        typeof input.finalChunkAllObjectsReused !== "boolean") {
+    if (
+      input.sealed !== true ||
+      !boundedPositiveInteger(input.centralRunId, Number.MAX_SAFE_INTEGER) ||
+      typeof input.finalChunkAllObjectsReused !== "boolean"
+    ) {
       throw new Error("raw_evidence_importer_invalid_response");
     }
     return { status: "sealed" };
   }
-  if (input.reason !== "worker_invocation_limit" ||
-      !boundedPositiveInteger(input.nextOffset, input.artifactCount as number) ||
-      !safeOpaque(input.continuation, 16_000) ||
-      !input.continuation.startsWith("vpass-transfer-v1.")) {
+  if (
+    input.reason !== "worker_invocation_limit" ||
+    !boundedPositiveInteger(input.nextOffset, input.artifactCount as number) ||
+    !safeOpaque(input.continuation, 16_000) ||
+    !input.continuation.startsWith("vpass-transfer-v1.")
+  ) {
     throw new Error("raw_evidence_importer_invalid_response");
   }
   return { status: "deferred", continuation: input.continuation as string };
@@ -168,10 +207,13 @@ function validateImportJob(value: unknown): VpassImportJob {
   if (
     input.v !== 1 ||
     !safeRecordKey(input.recordKey) ||
-    !(input.continuation === undefined ||
+    !(
+      input.continuation === undefined ||
       (safeOpaque(input.continuation, 16_000) &&
-       input.continuation.startsWith("vpass-transfer-v1.")))
-  ) throw new Error("raw_evidence_import_job_invalid");
+        input.continuation.startsWith("vpass-transfer-v1."))
+    )
+  )
+    throw new Error("raw_evidence_import_job_invalid");
   return {
     v: 1,
     recordKey: input.recordKey,
@@ -180,8 +222,11 @@ function validateImportJob(value: unknown): VpassImportJob {
 }
 
 async function responseJson(response: Response): Promise<unknown> {
-  if (response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !==
-      "application/json") throw new Error("raw_evidence_importer_invalid_response");
+  if (
+    response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !==
+    "application/json"
+  )
+    throw new Error("raw_evidence_importer_invalid_response");
   const body = await boundedText(response, MAX_RESPONSE_BYTES);
   try {
     return JSON.parse(body);
@@ -190,11 +235,17 @@ async function responseJson(response: Response): Promise<unknown> {
   }
 }
 
-function exactRecord(value: unknown, allowed: string[], optional: string[] = []): Record<string, unknown> {
+function exactRecord(
+  value: unknown,
+  allowed: string[],
+  optional: string[] = [],
+): Record<string, unknown> {
   if (!isRecord(value)) throw new Error("raw_evidence_importer_invalid_response");
   const keys = Object.keys(value);
-  if (keys.some((key) => !allowed.includes(key)) ||
-      allowed.some((key) => !optional.includes(key) && !Object.hasOwn(value, key))) {
+  if (
+    keys.some((key) => !allowed.includes(key)) ||
+    allowed.some((key) => !optional.includes(key) && !Object.hasOwn(value, key))
+  ) {
     throw new Error("raw_evidence_importer_invalid_response");
   }
   return value;
@@ -209,8 +260,12 @@ function boundedPositiveInteger(value: unknown, maximum: number): value is numbe
 }
 
 function safeOpaque(value: unknown, maximum: number): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= maximum &&
-    !/[\x00-\x20\x7f]/u.test(value);
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= maximum &&
+    !/[\x00-\x20\x7f]/u.test(value)
+  );
 }
 
 function safeCode(value: unknown): value is string {
@@ -218,8 +273,12 @@ function safeCode(value: unknown): value is string {
 }
 
 function safeRecordKey(value: unknown): value is string {
-  return typeof value === "string" &&
-    /^vpass\/\d{4}\/\d{2}\/\d{2}\/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:\/card-\d{3})?\/(?:manifest|error)\.json$/u.test(value);
+  return (
+    typeof value === "string" &&
+    /^vpass\/\d{4}\/\d{2}\/\d{2}\/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:\/card-\d{3})?\/(?:manifest|error)\.json$/u.test(
+      value,
+    )
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -89,34 +89,42 @@ export class SbiVcSessionState extends DurableObject<Env> {
       try {
         const session = await diagnostic.step("session-load", () => this.loadSession(startedAt));
         operation = "collect";
-        await diagnostic.step("collection", () => collectSbiVcTrade({
-          session,
-          diagnostic,
-          onSession: async (updated) => {
-            operation = "persist_session";
-            await diagnostic.step("session-persist", async () => this.ctx.storage.put("session", await encryptSession(updated, this.env.SESSION_ENCRYPTION_KEY)));
-            operation = "collect";
-          },
-          onArtifact: async (artifact) => {
-            operation = `r2_${artifact.dataset}`;
-            artifacts.push(await diagnostic.step("artifact-write", () => storeArtifact({
-              bucket: this.env.SNAPSHOTS,
-              prefix,
-              runId,
-              artifact,
-            })));
-            operation = "collect";
-          },
-        }));
+        await diagnostic.step("collection", () =>
+          collectSbiVcTrade({
+            session,
+            diagnostic,
+            onSession: async (updated) => {
+              operation = "persist_session";
+              await diagnostic.step("session-persist", async () =>
+                this.ctx.storage.put(
+                  "session",
+                  await encryptSession(updated, this.env.SESSION_ENCRYPTION_KEY),
+                ),
+              );
+              operation = "collect";
+            },
+            onArtifact: async (artifact) => {
+              operation = `r2_${artifact.dataset}`;
+              artifacts.push(
+                await diagnostic.step("artifact-write", () =>
+                  storeArtifact({
+                    bucket: this.env.SNAPSHOTS,
+                    prefix,
+                    runId,
+                    artifact,
+                  }),
+                ),
+              );
+              operation = "collect";
+            },
+          }),
+        );
       } catch (error) {
         failures.push({ operation, errorCode: classifyError(error) });
       }
       const completedAt = new Date().toISOString();
-      const status: CollectionManifest["status"] = failures.length === 0
-        ? "success"
-        : artifacts.length === 0
-          ? "failed"
-          : "partial";
+      const status: CollectionManifest["status"] =
+        failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
       const manifest: CollectionManifest = {
         schemaVersion: this.env.COLLECTOR_SCHEMA_VERSION,
         source: "sbi-vc-trade",
@@ -127,25 +135,32 @@ export class SbiVcSessionState extends DurableObject<Env> {
         artifacts,
         failures,
       };
-      const manifestKey = await diagnostic.step("manifest-write", () => storeManifest({ bucket: this.env.SNAPSHOTS, prefix, manifest }));
-      const central = artifacts.length <= MAX_SYNCHRONOUS_RAW_EVIDENCE_ARTIFACTS
-        ? await diagnostic.step("central-import", () => importStoredRun(this.env.RAW_EVIDENCE_IMPORTER, manifestKey))
-        : {
-            deferred: true as const,
-            reason: "worker-invocation-chain-limit" as const,
-            artifactCount: artifacts.length + 1,
-          };
-      console.log(JSON.stringify({
-        message: "sbi_vc_collection",
-        runId,
-        status,
-        artifactCount: artifacts.length,
-        failureCount: failures.length,
-        manifestKey,
-        ...("deferred" in central
-          ? { centralDeferred: true, centralDeferredReason: central.reason }
-          : { centralRunId: central.centralRunId, centralSealed: central.sealed }),
-      }));
+      const manifestKey = await diagnostic.step("manifest-write", () =>
+        storeManifest({ bucket: this.env.SNAPSHOTS, prefix, manifest }),
+      );
+      const central =
+        artifacts.length <= MAX_SYNCHRONOUS_RAW_EVIDENCE_ARTIFACTS
+          ? await diagnostic.step("central-import", () =>
+              importStoredRun(this.env.RAW_EVIDENCE_IMPORTER, manifestKey),
+            )
+          : {
+              deferred: true as const,
+              reason: "worker-invocation-chain-limit" as const,
+              artifactCount: artifacts.length + 1,
+            };
+      console.log(
+        JSON.stringify({
+          message: "sbi_vc_collection",
+          runId,
+          status,
+          artifactCount: artifacts.length,
+          failureCount: failures.length,
+          manifestKey,
+          ...("deferred" in central
+            ? { centralDeferred: true, centralDeferredReason: central.reason }
+            : { centralRunId: central.centralRunId, centralSealed: central.sealed }),
+        }),
+      );
       diagnostic.finish(status);
       return {
         runId,
@@ -243,7 +258,13 @@ export class SbiVcSessionState extends DurableObject<Env> {
       stage = "parse_gateway";
       const meta = parseGatewayMeta(parsed);
       if (meta.status !== "OK") {
-        return await this.recordFailure(previous, attemptAt, response.status, "gateway_rejected", meta.status);
+        return await this.recordFailure(
+          previous,
+          attemptAt,
+          response.status,
+          "gateway_rejected",
+          meta.status,
+        );
       }
       stage = "apply_cookie";
       const updated = applySessionUpdates(session, response.headers.getSetCookie(), meta);
@@ -261,7 +282,14 @@ export class SbiVcSessionState extends DurableObject<Env> {
         lastErrorCode: null,
       };
       await this.ctx.storage.put({ session: encrypted, health });
-      console.log(JSON.stringify({ message: "sbi_vc_keepalive", outcome: "success", httpStatus: response.status, cookieUpdateCount: updated.updateCount }));
+      console.log(
+        JSON.stringify({
+          message: "sbi_vc_keepalive",
+          outcome: "success",
+          httpStatus: response.status,
+          cookieUpdateCount: updated.updateCount,
+        }),
+      );
       return health;
     } catch (error) {
       const code = `${stage}_${classifyError(error)}`;
@@ -272,7 +300,8 @@ export class SbiVcSessionState extends DurableObject<Env> {
   private async loadSession(initializedAt: string): Promise<SessionMaterial> {
     const encrypted = await this.ctx.storage.get<EncryptedSession>("session");
     if (encrypted) return decryptSession(encrypted, this.env.SESSION_ENCRYPTION_KEY);
-    if (typeof this.env.SESSION_SEED !== "string" || !this.env.SESSION_SEED) throw new Error("missing_session_seed");
+    if (typeof this.env.SESSION_SEED !== "string" || !this.env.SESSION_SEED)
+      throw new Error("missing_session_seed");
     if (typeof this.env.SESSION_ENCRYPTION_KEY !== "string" || !this.env.SESSION_ENCRYPTION_KEY) {
       throw new Error("missing_encryption_key");
     }
@@ -287,6 +316,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
     try {
       stored = await encryptSession(session, this.env.SESSION_ENCRYPTION_KEY);
     } catch (error) {
+      // oxlint-disable-next-line preserve-caught-error -- Only the classified crypto error may cross the RPC boundary.
       throw new Error(classifyCryptoError(error));
     }
     const health = await this.getHealth();
@@ -315,7 +345,9 @@ export class SbiVcSessionState extends DurableObject<Env> {
       lastErrorCode: errorCode,
     };
     await this.ctx.storage.put("health", health);
-    console.error(JSON.stringify({ message: "sbi_vc_keepalive", outcome: "failure", httpStatus, errorCode }));
+    console.error(
+      JSON.stringify({ message: "sbi_vc_keepalive", outcome: "failure", httpStatus, errorCode }),
+    );
     return health;
   }
 }
@@ -329,19 +361,23 @@ export default {
       try {
         const cursor = url.searchParams.get("cursor") ?? undefined;
         const limit = parseBackfillLimit(url.searchParams.get("limit"));
-        return Response.json(await backfillStoredRuns(
-          env.RAW_EVIDENCE_IMPORTER,
-          { ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) },
-        ));
+        return Response.json(
+          await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, {
+            ...(cursor ? { cursor } : {}),
+            ...(limit ? { limit } : {}),
+          }),
+        );
       } catch (error) {
         return Response.json({ error: safeError(error) }, { status: 502 });
       }
     }
     const stub = env.SESSION_STATE.getByName("singleton");
-    if (request.method === "POST" && path === "/run") return Response.json(await stub.runKeepAlive());
+    if (request.method === "POST" && path === "/run")
+      return Response.json(await stub.runKeepAlive());
     if (request.method === "POST" && path === "/reauth") {
       const reauthenticated = await stub.runReauthenticate(true);
-      if (reauthenticated.lastReauthErrorCode !== null) return Response.json(reauthenticated, { status: 502 });
+      if (reauthenticated.lastReauthErrorCode !== null)
+        return Response.json(reauthenticated, { status: 502 });
       return Response.json(await stub.runKeepAlive());
     }
     if (request.method === "POST" && path === "/collect") {
@@ -350,7 +386,8 @@ export default {
       const result = await stub.runCollection();
       return Response.json(result, { status: result.status === "success" ? 200 : 502 });
     }
-    if (request.method === "GET" && path === "/health") return Response.json(await stub.getHealth());
+    if (request.method === "GET" && path === "/health")
+      return Response.json(await stub.getHealth());
     return new Response(null, { status: 404 });
   },
 
@@ -392,8 +429,8 @@ async function ensureHealthySession(
   const previousReauthSuccessAt = health.lastReauthSuccessAt;
   const reauthenticated = await stub.runReauthenticate(false);
   if (
-    reauthenticated.lastReauthErrorCode === null
-    && reauthenticated.lastReauthSuccessAt !== previousReauthSuccessAt
+    reauthenticated.lastReauthErrorCode === null &&
+    reauthenticated.lastReauthSuccessAt !== previousReauthSuccessAt
   ) {
     health = await stub.runKeepAlive();
   } else {
@@ -403,10 +440,12 @@ async function ensureHealthySession(
 }
 
 function shouldReauthenticate(health: HealthState): boolean {
-  return health.lastHttpStatus === 401
-    || health.lastHttpStatus === 403
-    || health.lastErrorCode === "gateway_rejected"
-    || health.lastErrorCode === "load_session_missing_session_seed";
+  return (
+    health.lastHttpStatus === 401 ||
+    health.lastHttpStatus === 403 ||
+    health.lastErrorCode === "gateway_rejected" ||
+    health.lastErrorCode === "load_session_missing_session_seed"
+  );
 }
 
 function classifyError(error: unknown): string {
@@ -422,11 +461,16 @@ function classifyError(error: unknown): string {
 function classifyCryptoError(error: unknown): string {
   if (!(error instanceof DOMException)) return "session_encrypt_failed";
   switch (error.name) {
-    case "DataError": return "crypto_data_error";
-    case "InvalidAccessError": return "crypto_invalid_access";
-    case "NotSupportedError": return "crypto_not_supported";
-    case "OperationError": return "crypto_operation_error";
-    default: return "crypto_error";
+    case "DataError":
+      return "crypto_data_error";
+    case "InvalidAccessError":
+      return "crypto_invalid_access";
+    case "NotSupportedError":
+      return "crypto_not_supported";
+    case "OperationError":
+      return "crypto_operation_error";
+    default:
+      return "crypto_error";
   }
 }
 

@@ -26,7 +26,15 @@ DESTINATIONS = {
 
 
 def wrangler_secret(project_dir: Path, action: str, token: str | None = None) -> None:
-    command = ["bunx", "wrangler", "secret", action, "BRIDGE_TOKEN", "--name", WORKER_NAME]
+    command = [
+        "bunx",
+        "wrangler",
+        "secret",
+        action,
+        "BRIDGE_TOKEN",
+        "--name",
+        WORKER_NAME,
+    ]
     input_text = f"{token}\n" if token is not None else "y\n"
     result = subprocess.run(
         command,
@@ -38,7 +46,9 @@ def wrangler_secret(project_dir: Path, action: str, token: str | None = None) ->
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"wrangler secret {action} failed with code {result.returncode}")
+        raise RuntimeError(
+            f"wrangler secret {action} failed with code {result.returncode}"
+        )
 
 
 def read_connect_request(client: socket.socket) -> tuple[str, bytes]:
@@ -61,7 +71,9 @@ def read_connect_request(client: socket.socket) -> tuple[str, bytes]:
     return authority, trailing
 
 
-def client_to_worker(client: socket.socket, worker: websocket.WebSocket, trailing: bytes) -> None:
+def client_to_worker(
+    client: socket.socket, worker: websocket.WebSocket, trailing: bytes
+) -> None:
     try:
         if trailing:
             worker.send_binary(trailing)
@@ -106,7 +118,14 @@ def handle_client(
             if not isinstance(message, bytes):
                 raise TypeError("bridge returned a non-binary frame")
             client.sendall(message)
-    except (ConnectionError, OSError, PermissionError, TypeError, ValueError, websocket.WebSocketException):
+    except (
+        ConnectionError,
+        OSError,
+        PermissionError,
+        TypeError,
+        ValueError,
+        websocket.WebSocketException,
+    ):
         try:
             client.sendall(b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n")
         except OSError:
@@ -136,9 +155,14 @@ def main() -> int:
     signal.signal(signal.SIGTERM, request_stop)
 
     wrangler_secret(project_dir, "put", token)
-    print(f"bridge proxy listening on {LISTEN_HOST}:{LISTEN_PORT}; secret installed", flush=True)
+    print(
+        f"bridge proxy listening on {LISTEN_HOST}:{LISTEN_PORT}; secret installed",
+        flush=True,
+    )
     try:
-        with socket.create_server((LISTEN_HOST, LISTEN_PORT), reuse_port=False) as server:
+        with socket.create_server(
+            (LISTEN_HOST, LISTEN_PORT), reuse_port=False
+        ) as server:
             server.settimeout(0.5)
             while not stop.is_set():
                 try:
@@ -157,7 +181,10 @@ def main() -> int:
             wrangler_secret(project_dir, "delete")
             print("bridge secret deleted", flush=True)
         except RuntimeError:
-            print("bridge secret deletion failed; run the cleanup ledger command", flush=True)
+            print(
+                "bridge secret deletion failed; run the cleanup ledger command",
+                flush=True,
+            )
     return 0
 
 

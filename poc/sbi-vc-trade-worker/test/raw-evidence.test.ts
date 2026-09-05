@@ -22,10 +22,7 @@ describe("raw evidence importer binding", () => {
         allObjectsReused: false,
       });
     });
-    const result = await importStoredRun(
-      importer,
-      "raw/sbi-vc-trade/2026/09/03/run/manifest.json",
-    );
+    const result = await importStoredRun(importer, "raw/sbi-vc-trade/2026/09/03/run/manifest.json");
     expect(result.centralRunId).toBe(24);
     expect(result.sealed).toBe(true);
   });
@@ -51,9 +48,10 @@ describe("raw evidence importer binding", () => {
 
   test("surfaces only the importer's stable error code", async () => {
     const importer = fakeFetcher(() =>
-      Response.json({ error: "manifest_failure_complement_mismatch" }, { status: 409 })
+      Response.json({ error: "manifest_failure_complement_mismatch" }, { status: 409 }),
     );
-    await expect(importStoredRun(importer, "raw/sbi-vc/manifest.json"))
-      .rejects.toThrow("HTTP 409: manifest_failure_complement_mismatch");
+    await expect(importStoredRun(importer, "raw/sbi-vc/manifest.json")).rejects.toThrow(
+      "HTTP 409: manifest_failure_complement_mismatch",
+    );
   });
 });

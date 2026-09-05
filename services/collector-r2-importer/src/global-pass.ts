@@ -14,8 +14,7 @@ const STORAGE_TEMPLATE = "raw/prestia-globalpass/{date}/{run-id}/{artifact}";
 const FINGERPRINT_VERSION = "collector-r2-v1";
 const DATASET = "globalpass-activity" as const;
 const SENTINEL = "__KOGANE_REDACTED_DYNAMIC_VALUE__";
-const STATIC_FORM_ACTION =
-  "https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301";
+const STATIC_FORM_ACTION = "https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301";
 const STATIC_FORM_ACTION_PATH = "/p/statementInquiry/RW1313010301";
 const SAME_HOST = "https://www.debit.vpass.ne.jp";
 const ALLOWED_LINK_HREF_PATHS = new Set([
@@ -38,9 +37,7 @@ const ALLOWED_ANCHOR_HREF_PATHS = new Set([
   "/p/statementInquiry/RW1313010101",
   "/p/statementInquiry/RW1313010201",
 ]);
-const ALLOWED_IMG_SRC_PATHS = new Set([
-  "/en/01006/img/logo.jpg",
-]);
+const ALLOWED_IMG_SRC_PATHS = new Set(["/en/01006/img/logo.jpg"]);
 const ALLOWED_SCRIPT_SRC_PATHS = new Set([
   "/js/jquery.js",
   "/js/run.js",
@@ -48,15 +45,28 @@ const ALLOWED_SCRIPT_SRC_PATHS = new Set([
   "/js/W131301.js",
 ]);
 const BLOCKED_NETWORK_ELEMENTS = new Set([
-  "applet", "audio", "base", "embed", "fencedframe", "frame", "frameset",
-  "iframe", "object", "portal", "source", "svg", "track", "video",
+  "applet",
+  "audio",
+  "base",
+  "embed",
+  "fencedframe",
+  "frame",
+  "frameset",
+  "iframe",
+  "object",
+  "portal",
+  "source",
+  "svg",
+  "track",
+  "video",
 ]);
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const MAX_MONTHS = 15;
 export const GLOBAL_PASS_TRANSFER_CHUNK_SIZE = 10;
 const GLOBAL_PASS_DIRECT_ARTIFACT_LIMIT = 12;
-const MANIFEST_KEY = /^raw\/prestia-globalpass\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
+const MANIFEST_KEY =
+  /^raw\/prestia-globalpass\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SAFE_ERROR_TYPE = /^[A-Za-z][A-Za-z0-9]{0,79}$/u;
 const SAFE_CODE = /^[a-z][a-z0-9_]{0,99}$/u;
@@ -89,8 +99,12 @@ interface Artifact {
 interface Failure {
   operation: "browser-collection" | "contract" | "sanitization" | "r2";
   errorType: string;
-  errorCode: "browser_collection_failed" | "container_contract_invalid" |
-    "html_sanitization_failed" | "artifact_store_failed" | "selected_month_missing";
+  errorCode:
+    | "browser_collection_failed"
+    | "container_contract_invalid"
+    | "html_sanitization_failed"
+    | "artifact_store_failed"
+    | "selected_month_missing";
   artifactKey?: string;
 }
 
@@ -189,11 +203,7 @@ export async function importGlobalPassRun(options: {
     phase = "artifact_validation";
     const verified: VerifiedArtifact[] = [];
     for (const artifact of manifest.artifacts) {
-      const sourceBytes = await readVerifiedArtifact(
-        options.bucket,
-        artifact,
-        manifest,
-      );
+      const sourceBytes = await readVerifiedArtifact(options.bucket, artifact, manifest);
       const centralBytes = sanitizeGlobalPassHtml(
         sourceBytes,
         manifest.schemaVersion,
@@ -210,8 +220,11 @@ export async function importGlobalPassRun(options: {
       options.manifestKey,
     ]);
 
-    if (options.immediate !== false && offset === 0 &&
-        expectedArtifactCount > GLOBAL_PASS_DIRECT_ARTIFACT_LIMIT) {
+    if (
+      options.immediate !== false &&
+      offset === 0 &&
+      expectedArtifactCount > GLOBAL_PASS_DIRECT_ARTIFACT_LIMIT
+    ) {
       return deferredResult(options.manifestKey, expectedArtifactCount, 0);
     }
 
@@ -245,9 +258,9 @@ export async function importGlobalPassRun(options: {
     );
     const staged = options.immediate === false;
     if (staged) {
-      const inventory = plans.map((plan) => plan.inventory).sort((left, right) =>
-        binaryCompare(left.artifactKey, right.artifactKey)
-      );
+      const inventory = plans
+        .map((plan) => plan.inventory)
+        .sort((left, right) => binaryCompare(left.artifactKey, right.artifactKey));
       const inventorySha256 = await sha256Hex(
         new TextEncoder().encode(canonicalJson(inventory as unknown as JsonValue)),
       );
@@ -318,8 +331,12 @@ export async function importGlobalPassRun(options: {
     await addTerminalReports(central, centralRunId, unitId, manifest, plans.length);
     phase = "seal";
     await central.seal(centralRunId, inventory, attemptId, startedAtMs);
-    return sealedResult(options.manifestKey, centralRunId, inventory.length,
-      acceptedArtifactCount === 0);
+    return sealedResult(
+      options.manifestKey,
+      centralRunId,
+      inventory.length,
+      acceptedArtifactCount === 0,
+    );
   } catch (error) {
     if (centralRunId !== undefined) {
       try {
@@ -434,14 +451,17 @@ async function loadManifest(bucket: R2Bucket, manifestKey: string): Promise<Load
   const sourceSha256 = await sha256Hex(sourceBytes);
   assertNativeSha256(object, sourceSha256);
   const manifest = parseGlobalPassManifest(sourceBytes, manifestKey);
-  assertExactMetadata(object.customMetadata, {
-    source: EXTERNAL_SOURCE,
-    status: manifest.status,
-    runId: manifest.runId,
-  }, "manifest_metadata_mismatch");
-  const centralBytes = manifest.schemaVersion === V1
-    ? sanitizeLegacyManifest(manifest)
-    : sourceBytes;
+  assertExactMetadata(
+    object.customMetadata,
+    {
+      source: EXTERNAL_SOURCE,
+      status: manifest.status,
+      runId: manifest.runId,
+    },
+    "manifest_metadata_mismatch",
+  );
+  const centralBytes =
+    manifest.schemaVersion === V1 ? sanitizeLegacyManifest(manifest) : sourceBytes;
   return {
     manifest,
     centralBytes,
@@ -455,12 +475,24 @@ export function parseGlobalPassManifest(bytes: Uint8Array, manifestKey: string):
   const input = parseJson(bytes, "manifest_json_invalid");
   const version = oneOf(input.schemaVersion, [V1, V2] as const, "manifest_schema_invalid");
   const v2 = version === V2;
-  exactShape(input, [
-    "schemaVersion", "source", "runtimeRevision", "runId", "mode",
-    "startedAt", "completedAt", "status", "availableMonths",
-    ...(v2 ? ["selectedMonths", "captureComplete", "paginationStatus"] : []),
-    "artifacts", "failures",
-  ], ["runtimeRevision"]);
+  exactShape(
+    input,
+    [
+      "schemaVersion",
+      "source",
+      "runtimeRevision",
+      "runId",
+      "mode",
+      "startedAt",
+      "completedAt",
+      "status",
+      "availableMonths",
+      ...(v2 ? ["selectedMonths", "captureComplete", "paginationStatus"] : []),
+      "artifacts",
+      "failures",
+    ],
+    ["runtimeRevision"],
+  );
   if (input.source !== EXTERNAL_SOURCE || input.runId !== key[4]) {
     invalid("manifest_identity_mismatch");
   }
@@ -469,11 +501,14 @@ export function parseGlobalPassManifest(bytes: Uint8Array, manifestKey: string):
   if (completedAt < startedAt || startedAt.slice(0, 10) !== `${key[1]}-${key[2]}-${key[3]}`) {
     invalid("manifest_time_invalid");
   }
-  const runtimeRevision = input.runtimeRevision === undefined
-    ? undefined
-    : safeRuntime(input.runtimeRevision);
+  const runtimeRevision =
+    input.runtimeRevision === undefined ? undefined : safeRuntime(input.runtimeRevision);
   const mode = oneOf(input.mode, ["daily", "backfill"] as const, "manifest_mode_invalid");
-  const status = oneOf(input.status, ["success", "partial", "failed"] as const, "manifest_status_invalid");
+  const status = oneOf(
+    input.status,
+    ["success", "partial", "failed"] as const,
+    "manifest_status_invalid",
+  );
   const availableMonths = months(input.availableMonths, true, "manifest_available_months_invalid");
   const selectedMonths = v2
     ? months(input.selectedMonths, true, "manifest_selected_months_invalid")
@@ -490,9 +525,9 @@ export function parseGlobalPassManifest(bytes: Uint8Array, manifestKey: string):
   }
   const prefix = manifestKey.slice(0, -"manifest.json".length);
   const artifacts = input.artifacts.map((value) => parseArtifact(value, prefix, version));
-  const failures = input.failures.map((value) => v2
-    ? parseV2Failure(value)
-    : parseV1Failure(value));
+  const failures = input.failures.map((value) =>
+    v2 ? parseV2Failure(value) : parseV1Failure(value),
+  );
   validateManifestContract({
     version,
     mode,
@@ -523,9 +558,12 @@ export function parseGlobalPassManifest(bytes: Uint8Array, manifestKey: string):
 
 function parseArtifact(value: unknown, prefix: string, version: SchemaVersion): Artifact {
   const input = record(value, "manifest_artifact_invalid");
-  exactShape(input, version === V2
-    ? ["dataset", "month", "key", "mediaType", "bytes", "sha256"]
-    : ["month", "key", "bytes", "sha256"]);
+  exactShape(
+    input,
+    version === V2
+      ? ["dataset", "month", "key", "mediaType", "bytes", "sha256"]
+      : ["month", "key", "bytes", "sha256"],
+  );
   const month = safeMonth(input.month, "manifest_artifact_month_invalid");
   const key = `${prefix}activity-${month}.html`;
   if (input.key !== key) invalid("manifest_artifact_key_mismatch");
@@ -535,7 +573,12 @@ function parseArtifact(value: unknown, prefix: string, version: SchemaVersion): 
   if (typeof input.sha256 !== "string" || !SHA256.test(input.sha256)) {
     invalid("manifest_artifact_sha256_invalid");
   }
-  const bytes = boundedInteger(input.bytes, 1, MAX_ARTIFACT_BYTES, "manifest_artifact_bytes_invalid");
+  const bytes = boundedInteger(
+    input.bytes,
+    1,
+    MAX_ARTIFACT_BYTES,
+    "manifest_artifact_bytes_invalid",
+  );
   return {
     dataset: DATASET,
     month,
@@ -552,7 +595,11 @@ function parseV1Failure(value: unknown): Failure {
   if (typeof input.errorType !== "string" || !SAFE_ERROR_TYPE.test(input.errorType)) {
     invalid("manifest_failure_type_invalid");
   }
-  if (typeof input.message !== "string" || input.message.length < 1 || input.message.length > 2_000) {
+  if (
+    typeof input.message !== "string" ||
+    input.message.length < 1 ||
+    input.message.length > 2_000
+  ) {
     invalid("manifest_failure_message_invalid");
   }
   if (input.operation === "browser-collection") {
@@ -562,7 +609,10 @@ function parseV1Failure(value: unknown): Failure {
       errorCode: "browser_collection_failed",
     };
   }
-  if (typeof input.operation === "string" && /^r2:20\d{2}-(?:0[1-9]|1[0-2])$/u.test(input.operation)) {
+  if (
+    typeof input.operation === "string" &&
+    /^r2:20\d{2}-(?:0[1-9]|1[0-2])$/u.test(input.operation)
+  ) {
     const month = input.operation.slice(3);
     return {
       operation: "r2",
@@ -597,11 +647,15 @@ function parseV2Failure(value: unknown): Failure {
   if (!allowed[operation].includes(input.errorCode as Failure["errorCode"])) {
     invalid("manifest_failure_code_invalid");
   }
-  const requiresArtifact = operation === "sanitization" || operation === "r2" ||
+  const requiresArtifact =
+    operation === "sanitization" ||
+    operation === "r2" ||
     input.errorCode === "selected_month_missing";
   if (requiresArtifact) {
-    if (typeof input.artifactKey !== "string" ||
-        !/^activity-20\d{2}-(?:0[1-9]|1[0-2])\.html$/u.test(input.artifactKey)) {
+    if (
+      typeof input.artifactKey !== "string" ||
+      !/^activity-20\d{2}-(?:0[1-9]|1[0-2])\.html$/u.test(input.artifactKey)
+    ) {
       invalid("manifest_failure_artifact_invalid");
     }
   } else if (input.artifactKey !== undefined) {
@@ -626,14 +680,22 @@ function validateManifestContract(input: {
   failures: Failure[];
 }): void {
   if (input.availableMonths.length === 0) {
-    if (input.selectedMonths.length !== 0 || input.artifacts.length !== 0 ||
-        input.status !== "failed" || input.captureComplete || input.failures.length === 0) {
+    if (
+      input.selectedMonths.length !== 0 ||
+      input.artifacts.length !== 0 ||
+      input.status !== "failed" ||
+      input.captureComplete ||
+      input.failures.length === 0
+    ) {
       invalid("manifest_terminal_state_invalid");
     }
-    if (input.version === V2 &&
-        (input.failures.length !== 1 || input.failures[0]!.artifactKey !== undefined ||
-          (input.failures[0]!.operation !== "browser-collection" &&
-            input.failures[0]!.operation !== "contract"))) {
+    if (
+      input.version === V2 &&
+      (input.failures.length !== 1 ||
+        input.failures[0]!.artifactKey !== undefined ||
+        (input.failures[0]!.operation !== "browser-collection" &&
+          input.failures[0]!.operation !== "contract"))
+    ) {
       invalid("manifest_empty_available_failure_invalid");
     }
     return;
@@ -643,31 +705,38 @@ function validateManifestContract(input: {
     invalid("manifest_selected_months_mismatch");
   }
   const artifactMonths = input.artifacts.map((artifact) => artifact.month);
-  if (new Set(artifactMonths).size !== artifactMonths.length ||
-      artifactMonths.some((month) => !input.selectedMonths.includes(month))) {
+  if (
+    new Set(artifactMonths).size !== artifactMonths.length ||
+    artifactMonths.some((month) => !input.selectedMonths.includes(month))
+  ) {
     invalid("manifest_artifact_months_invalid");
   }
-  const expectedStoredOrder = input.selectedMonths.filter((month) => artifactMonths.includes(month));
+  const expectedStoredOrder = input.selectedMonths.filter((month) =>
+    artifactMonths.includes(month),
+  );
   if (!sameStrings(artifactMonths, expectedStoredOrder)) {
     invalid("manifest_artifact_order_invalid");
   }
   const missingKeys = input.selectedMonths
     .filter((month) => !artifactMonths.includes(month))
     .map((month) => `activity-${month}.html`);
-  const failedKeys = input.failures.flatMap((failure) => failure.artifactKey ? [failure.artifactKey] : []);
-  if (new Set(failedKeys).size !== failedKeys.length ||
-      failedKeys.some((key) => !missingKeys.includes(key))) {
+  const failedKeys = input.failures.flatMap((failure) =>
+    failure.artifactKey ? [failure.artifactKey] : [],
+  );
+  if (
+    new Set(failedKeys).size !== failedKeys.length ||
+    failedKeys.some((key) => !missingKeys.includes(key))
+  ) {
     invalid("manifest_failure_artifact_mismatch");
   }
   if (input.version === V2 && !sameStringSet(missingKeys, failedKeys)) {
     invalid("manifest_failure_complement_mismatch");
   }
-  const expectedStatus: Status = input.failures.length === 0
-    ? "success"
-    : input.artifacts.length === 0 ? "failed" : "partial";
+  const expectedStatus: Status =
+    input.failures.length === 0 ? "success" : input.artifacts.length === 0 ? "failed" : "partial";
   if (input.status !== expectedStatus) invalid("manifest_status_mismatch");
-  const expectedComplete = expectedStatus === "success" &&
-    sameStrings(artifactMonths, input.selectedMonths);
+  const expectedComplete =
+    expectedStatus === "success" && sameStrings(artifactMonths, input.selectedMonths);
   if (input.captureComplete !== expectedComplete) invalid("manifest_capture_complete_mismatch");
   if (input.version === V1 && input.status !== "success" && input.failures.length === 0) {
     invalid("manifest_failure_missing");
@@ -685,37 +754,58 @@ export function sanitizeGlobalPassHtml(
   } catch {
     throw new ImportError(409, "html_utf8_invalid");
   }
-  if (html.length === 0 || html.length > MAX_ARTIFACT_BYTES ||
-      !/^\s*<!doctype\s+html(?:\s[^>]*)?>/iu.test(html) ||
-      !hasActivityMarker(html, schemaVersion, allowAuditedLegacyEmpty)) {
+  if (
+    html.length === 0 ||
+    html.length > MAX_ARTIFACT_BYTES ||
+    !/^\s*<!doctype\s+html(?:\s[^>]*)?>/iu.test(html) ||
+    !hasActivityMarker(html, schemaVersion, allowAuditedLegacyEmpty)
+  ) {
     throw new ImportError(409, "html_activity_contract_invalid");
   }
-  if (FORBIDDEN_INLINE.test(html) || countInputs(html, (tag) =>
-    attribute(tag, "type").toLowerCase() === "password") !== 0 ||
-      countInputs(html, (tag) => /^(?:usrid|loginid|user(?:name|id))$/iu.test(attribute(tag, "name")) ||
-        /^(?:usrid|loginid|user(?:name|id))$/iu.test(attribute(tag, "id"))) !== 0) {
+  if (
+    FORBIDDEN_INLINE.test(html) ||
+    countInputs(html, (tag) => attribute(tag, "type").toLowerCase() === "password") !== 0 ||
+    countInputs(
+      html,
+      (tag) =>
+        /^(?:usrid|loginid|user(?:name|id))$/iu.test(attribute(tag, "name")) ||
+        /^(?:usrid|loginid|user(?:name|id))$/iu.test(attribute(tag, "id")),
+    ) !== 0
+  ) {
     throw new ImportError(409, "html_secret_marker_present");
   }
 
   for (const tag of inputTags(html)) {
-    assertNoDuplicateAttributes(tag, ["id", "name", "type", "value"],
-      "html_input_attribute_duplicate");
+    assertNoDuplicateAttributes(
+      tag,
+      ["id", "name", "type", "value"],
+      "html_input_attribute_duplicate",
+    );
   }
   for (const tag of formTags(html)) {
     assertNoDuplicateAttributes(tag, ["action"], "html_form_attribute_duplicate");
   }
   assertUrlAndEventContract(html, schemaVersion === V2);
 
-  const nablarchTags = inputTags(html).filter((tag) =>
-    attribute(tag, "name").toLowerCase() === "nablarch_hidden");
-  const hiddenTags = inputTags(html).filter((tag) =>
-    attribute(tag, "type").toLowerCase() === "hidden");
-  if (hiddenTags.some((tag) => {
-    const name = attribute(tag, "name").toLowerCase();
-    return name !== "cc" && name !== "enguseflg" && name !== "nablarch_hidden" &&
-      name !== "nablarch_needs_hidden_encryption" && name !== "nablarch_submit" &&
-      name !== "w131301.referencedate";
-  })) {
+  const nablarchTags = inputTags(html).filter(
+    (tag) => attribute(tag, "name").toLowerCase() === "nablarch_hidden",
+  );
+  const hiddenTags = inputTags(html).filter(
+    (tag) => attribute(tag, "type").toLowerCase() === "hidden",
+  );
+  if (
+    hiddenTags.some((tag) => {
+      const name = attribute(tag, "name").toLowerCase();
+      return (
+        name !== "cc" &&
+        name !== "enguseflg" &&
+        name !== "nablarch_hidden" &&
+        name !== "nablarch_needs_hidden_encryption" &&
+        name !== "nablarch_submit" &&
+        name !== "w131301.referencedate"
+      );
+    })
+  ) {
     throw new ImportError(409, "html_hidden_field_inventory_invalid");
   }
   const counts = {
@@ -723,25 +813,45 @@ export function sanitizeGlobalPassHtml(
     eng: hiddenTags.filter((tag) => attribute(tag, "name").toLowerCase() === "enguseflg").length,
     nablarch: nablarchTags.length,
     nonempty: nablarchTags.filter((tag) => attribute(tag, "value") !== "").length,
-    needs: hiddenTags.filter((tag) =>
-      attribute(tag, "name").toLowerCase() === "nablarch_needs_hidden_encryption").length,
-    submit: hiddenTags.filter((tag) =>
-      attribute(tag, "name").toLowerCase() === "nablarch_submit").length,
-    referenceDate: hiddenTags.filter((tag) =>
-      attribute(tag, "name").toLowerCase() === "w131301.referencedate").length,
+    needs: hiddenTags.filter(
+      (tag) => attribute(tag, "name").toLowerCase() === "nablarch_needs_hidden_encryption",
+    ).length,
+    submit: hiddenTags.filter((tag) => attribute(tag, "name").toLowerCase() === "nablarch_submit")
+      .length,
+    referenceDate: hiddenTags.filter(
+      (tag) => attribute(tag, "name").toLowerCase() === "w131301.referencedate",
+    ).length,
   };
   const forms = formTags(html);
   const actions = forms.map((tag) => attribute(tag, "action")).filter((value) => value !== "");
-  if (actions.some((value) => value !== STATIC_FORM_ACTION &&
-      (schemaVersion !== V1 || value !== STATIC_FORM_ACTION_PATH))) {
+  if (
+    actions.some(
+      (value) =>
+        value !== STATIC_FORM_ACTION && (schemaVersion !== V1 || value !== STATIC_FORM_ACTION_PATH),
+    )
+  ) {
     throw new ImportError(409, "html_form_action_invalid");
   }
-  const variantA = counts.cc === 1 && counts.eng === 1 && counts.nablarch === 6 &&
-    counts.nonempty === 4 && counts.needs === 1 && counts.submit === 6 &&
-    counts.referenceDate === 1 && forms.length === 6 && actions.length === 1;
-  const variantB = counts.cc === 1 && counts.eng === 1 && counts.nablarch === 4 &&
-    counts.nonempty === 3 && counts.needs === 1 && counts.submit === 4 &&
-    counts.referenceDate === 0 && forms.length === 5 && actions.length === 0;
+  const variantA =
+    counts.cc === 1 &&
+    counts.eng === 1 &&
+    counts.nablarch === 6 &&
+    counts.nonempty === 4 &&
+    counts.needs === 1 &&
+    counts.submit === 6 &&
+    counts.referenceDate === 1 &&
+    forms.length === 6 &&
+    actions.length === 1;
+  const variantB =
+    counts.cc === 1 &&
+    counts.eng === 1 &&
+    counts.nablarch === 4 &&
+    counts.nonempty === 3 &&
+    counts.needs === 1 &&
+    counts.submit === 4 &&
+    counts.referenceDate === 0 &&
+    forms.length === 5 &&
+    actions.length === 0;
   if (!variantA && !variantB) throw new ImportError(409, "html_variant_invalid");
 
   const originals: string[] = [];
@@ -770,18 +880,25 @@ export function sanitizeGlobalPassHtml(
   for (const original of originals) {
     if (output.includes(original)) throw new ImportError(409, "html_redaction_incomplete");
   }
-  const after = inputTags(output).filter((tag) =>
-    attribute(tag, "name").toLowerCase() === "nablarch_hidden");
-  if (after.filter((tag) => attribute(tag, "value") === SENTINEL).length !== counts.nonempty ||
-      after.filter((tag) => attribute(tag, "value") === "").length !== counts.nablarch - counts.nonempty) {
+  const after = inputTags(output).filter(
+    (tag) => attribute(tag, "name").toLowerCase() === "nablarch_hidden",
+  );
+  if (
+    after.filter((tag) => attribute(tag, "value") === SENTINEL).length !== counts.nonempty ||
+    after.filter((tag) => attribute(tag, "value") === "").length !==
+      counts.nablarch - counts.nonempty
+  ) {
     throw new ImportError(409, "html_redaction_incomplete");
   }
   const encoded = new TextEncoder().encode(output);
   if (new TextDecoder("utf-8", { fatal: true }).decode(encoded) !== output) {
     throw new ImportError(409, "html_utf8_round_trip_failed");
   }
-  if (schemaVersion === V2 &&
-      (encoded.byteLength !== bytes.byteLength || encoded.some((value, index) => value !== bytes[index]))) {
+  if (
+    schemaVersion === V2 &&
+    (encoded.byteLength !== bytes.byteLength ||
+      encoded.some((value, index) => value !== bytes[index]))
+  ) {
     throw new ImportError(409, "html_v2_not_canonical_utf8");
   }
   return encoded;
@@ -806,11 +923,18 @@ function hasActivityMarker(
   const tableHeaders = visibleTableHeaders(html);
   const observedGroups = new Set(
     [...tableHeaders.values()].map((headers) =>
-      [...headers].filter((header) => activityHeaders.has(header)).sort().join("\n")
+      [...headers]
+        .filter((header) => activityHeaders.has(header))
+        .sort()
+        .join("\n"),
     ),
   );
-  if (LEGACY_ACTIVITY_TABLE_HEADER_GROUPS.every((group) =>
-    observedGroups.has([...group].sort().join("\n")))) return true;
+  if (
+    LEGACY_ACTIVITY_TABLE_HEADER_GROUPS.every((group) =>
+      observedGroups.has([...group].sort().join("\n")),
+    )
+  )
+    return true;
   return allowAuditedLegacyEmpty && hasVisibleLegacyEmptyActivityEvidence(html);
 }
 
@@ -821,8 +945,20 @@ function hasVisibleLegacyEmptyActivityEvidence(html: string): boolean {
   if (/<th\b/iu.test(rendered)) return false;
   const stack: Array<{ name: string; hidden: boolean; textNotice: boolean }> = [];
   const voidElements = new Set([
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
-    "meta", "param", "source", "track", "wbr",
+    "area",
+    "base",
+    "br",
+    "col",
+    "embed",
+    "hr",
+    "img",
+    "input",
+    "link",
+    "meta",
+    "param",
+    "source",
+    "track",
+    "wbr",
   ]);
   let visibleNote = false;
   let visibleStatementForm = false;
@@ -830,8 +966,12 @@ function hasVisibleLegacyEmptyActivityEvidence(html: string): boolean {
     const token = match[0]!;
     if (!token.startsWith("<")) {
       const parent = stack.at(-1);
-      if (parent && !parent.hidden && parent.textNotice &&
-          token.replace(/\s+/gu, " ").includes(LEGACY_EMPTY_ACTIVITY_MARKER)) {
+      if (
+        parent &&
+        !parent.hidden &&
+        parent.textNotice &&
+        token.replace(/\s+/gu, " ").includes(LEGACY_EMPTY_ACTIVITY_MARKER)
+      ) {
         visibleNote = true;
       }
       continue;
@@ -847,22 +987,28 @@ function hasVisibleLegacyEmptyActivityEvidence(html: string): boolean {
     const name = tagName(token);
     if (!name) continue;
     const parent = stack.at(-1);
-    const ownHidden = parsedAttributes(token).some((item) =>
-      item.name === "hidden" ||
-      item.name === "aria-hidden" && item.value?.trim().toLowerCase() === "true" ||
-      item.name === "style" &&
-        /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:!important\s*)?(?:;|$)/iu
-          .test(item.value ?? "")
+    const ownHidden = parsedAttributes(token).some(
+      (item) =>
+        item.name === "hidden" ||
+        (item.name === "aria-hidden" && item.value?.trim().toLowerCase() === "true") ||
+        (item.name === "style" &&
+          /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:!important\s*)?(?:;|$)/iu.test(
+            item.value ?? "",
+          )),
     );
     const hidden = Boolean(parent?.hidden) || ownHidden;
-    if (name === "form" && !hidden &&
-        [STATIC_FORM_ACTION_PATH, `${SAME_HOST}${STATIC_FORM_ACTION_PATH}`]
-          .includes(attribute(token, "action"))) {
+    if (
+      name === "form" &&
+      !hidden &&
+      [STATIC_FORM_ACTION_PATH, `${SAME_HOST}${STATIC_FORM_ACTION_PATH}`].includes(
+        attribute(token, "action"),
+      )
+    ) {
       visibleStatementForm = true;
     }
     const classNames = attribute(token, "class").split(/\s+/u);
-    const textNotice = Boolean(parent?.textNotice) ||
-      name === "p" && classNames.includes("textNotice");
+    const textNotice =
+      Boolean(parent?.textNotice) || (name === "p" && classNames.includes("textNotice"));
     if (!voidElements.has(name) && !/\/>\s*$/u.test(token)) {
       stack.push({ name, hidden, textNotice });
     }
@@ -882,8 +1028,20 @@ function visibleTableHeaders(html: string): Map<number, Set<string>> {
     text: string | null;
   }> = [];
   const voidElements = new Set([
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
-    "meta", "param", "source", "track", "wbr",
+    "area",
+    "base",
+    "br",
+    "col",
+    "embed",
+    "hr",
+    "img",
+    "input",
+    "link",
+    "meta",
+    "param",
+    "source",
+    "track",
+    "wbr",
   ]);
   let nextTableId = 0;
   for (const match of rendered.matchAll(/<\/?[A-Za-z][^>]*>|[^<]+/gu)) {
@@ -916,14 +1074,16 @@ function visibleTableHeaders(html: string): Map<number, Set<string>> {
     const name = tagName(token);
     if (!name) continue;
     const parent = stack.at(-1);
-    const ownHidden = parsedAttributes(token).some((attribute) =>
-      attribute.name === "hidden" ||
-      attribute.name === "aria-hidden" && attribute.value?.trim().toLowerCase() === "true" ||
-      attribute.name === "style" &&
-        /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:!important\s*)?(?:;|$)/iu
-          .test(attribute.value ?? "")
+    const ownHidden = parsedAttributes(token).some(
+      (attribute) =>
+        attribute.name === "hidden" ||
+        (attribute.name === "aria-hidden" && attribute.value?.trim().toLowerCase() === "true") ||
+        (attribute.name === "style" &&
+          /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:!important\s*)?(?:;|$)/iu.test(
+            attribute.value ?? "",
+          )),
     );
-    const tableId = name === "table" ? nextTableId++ : parent?.tableId ?? null;
+    const tableId = name === "table" ? nextTableId++ : (parent?.tableId ?? null);
     const entry = {
       name,
       hidden: Boolean(parent?.hidden) || ownHidden,
@@ -966,7 +1126,7 @@ async function readVerifiedArtifact(
   }
   const bytes = new Uint8Array(await object.arrayBuffer());
   assertNativeSha256(object, artifact.sha256);
-  if (await sha256Hex(bytes) !== artifact.sha256) {
+  if ((await sha256Hex(bytes)) !== artifact.sha256) {
     throw new ImportError(409, "artifact_checksum_mismatch");
   }
   return bytes;
@@ -1034,13 +1194,15 @@ async function currentCentralBytes(
 ): Promise<Uint8Array> {
   const current = plan.source
     ? sanitizeGlobalPassHtml(
-      await readVerifiedArtifact(bucket, plan.source, manifest),
-      manifest.schemaVersion,
-      legacyEmptyArtifactSha256.has(plan.source.sha256),
-    )
+        await readVerifiedArtifact(bucket, plan.source, manifest),
+        manifest.schemaVersion,
+        legacyEmptyArtifactSha256.has(plan.source.sha256),
+      )
     : plan.centralBytes;
-  if (current.byteLength !== plan.centralBytes.byteLength ||
-      await sha256Hex(current) !== plan.sha256) {
+  if (
+    current.byteLength !== plan.centralBytes.byteLength ||
+    (await sha256Hex(current)) !== plan.sha256
+  ) {
     throw new ImportError(409, "artifact_changed_during_import");
   }
   return current;
@@ -1118,20 +1280,22 @@ async function manifestDescriptor(options: {
     byteSize: options.bytes,
     storage: await storageOrigin(options.key, options.fingerprintKey),
     ranges: [],
-    transformSteps: legacy ? [
-      {
-        stepIndex: 0,
-        stepKind: "redacted",
-        transformerId: "global-pass-manifest-sanitizer",
-        transformerVersion: "v1",
-      },
-      {
-        stepIndex: 1,
-        stepKind: "reencoded",
-        transformerId: "global-pass-manifest-sanitizer",
-        transformerVersion: "v1",
-      },
-    ] : [],
+    transformSteps: legacy
+      ? [
+          {
+            stepIndex: 0,
+            stepKind: "redacted",
+            transformerId: "global-pass-manifest-sanitizer",
+            transformerVersion: "v1",
+          },
+          {
+            stepIndex: 1,
+            stepKind: "reencoded",
+            transformerId: "global-pass-manifest-sanitizer",
+            transformerVersion: "v1",
+          },
+        ]
+      : [],
   });
 }
 
@@ -1185,30 +1349,33 @@ function normalizedDescriptor(input: {
 }
 
 function sanitizeLegacyManifest(manifest: Manifest): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify({
-    schemaVersion: manifest.schemaVersion,
-    source: manifest.source,
-    ...(manifest.runtimeRevision ? { runtimeRevision: manifest.runtimeRevision } : {}),
-    runId: manifest.runId,
-    mode: manifest.mode,
-    startedAt: manifest.startedAt,
-    completedAt: manifest.completedAt,
-    status: manifest.status,
-    availableMonths: manifest.availableMonths,
-    artifacts: manifest.artifacts.map((artifact) => ({
-      month: artifact.month,
-      key: artifact.key,
-      bytes: artifact.bytes,
-      sha256: artifact.sha256,
-    })),
-    failures: manifest.failures.map((failure) => ({
-      operation: failure.operation === "r2" && failure.artifactKey
-        ? `r2:${failure.artifactKey.slice("activity-".length, -".html".length)}`
-        : "browser-collection",
-      errorType: failure.errorType,
-      message: failure.errorCode,
-    })),
-  }));
+  return new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: manifest.schemaVersion,
+      source: manifest.source,
+      ...(manifest.runtimeRevision ? { runtimeRevision: manifest.runtimeRevision } : {}),
+      runId: manifest.runId,
+      mode: manifest.mode,
+      startedAt: manifest.startedAt,
+      completedAt: manifest.completedAt,
+      status: manifest.status,
+      availableMonths: manifest.availableMonths,
+      artifacts: manifest.artifacts.map((artifact) => ({
+        month: artifact.month,
+        key: artifact.key,
+        bytes: artifact.bytes,
+        sha256: artifact.sha256,
+      })),
+      failures: manifest.failures.map((failure) => ({
+        operation:
+          failure.operation === "r2" && failure.artifactKey
+            ? `r2:${failure.artifactKey.slice("activity-".length, -".html".length)}`
+            : "browser-collection",
+        errorType: failure.errorType,
+        message: failure.errorCode,
+      })),
+    }),
+  );
 }
 
 async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonObject> {
@@ -1222,11 +1389,7 @@ async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonO
     false,
     ["sign"],
   );
-  const signature = await crypto.subtle.sign(
-    "HMAC",
-    cryptoKey,
-    new TextEncoder().encode(key),
-  );
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(key));
   return {
     storageKind: "r2",
     containerName: STORAGE_CONTAINER,
@@ -1309,11 +1472,7 @@ function parsedAttributes(tag: string): ParsedAttribute[] {
   return attributes;
 }
 
-function assertNoDuplicateAttributes(
-  tag: string,
-  names: readonly string[],
-  code: string,
-): void {
+function assertNoDuplicateAttributes(tag: string, names: readonly string[], code: string): void {
   const attributes = parsedAttributes(tag);
   for (const name of names) {
     if (attributes.filter((attribute) => attribute.name === name).length > 1) {
@@ -1327,10 +1486,29 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
     throw new ImportError(409, "html_css_url_sink_invalid");
   }
   const extraUrlAttributes = new Set([
-    "archive", "background", "cite", "code", "codebase", "data", "datasrc",
-    "dynsrc", "formaction", "icon", "imagesrcset", "longdesc", "lowsrc",
-    "manifest", "ping", "poster", "profile", "srcdoc", "srcset", "usemap",
-    "xlink:href", "xmlns", "xmlns:xlink",
+    "archive",
+    "background",
+    "cite",
+    "code",
+    "codebase",
+    "data",
+    "datasrc",
+    "dynsrc",
+    "formaction",
+    "icon",
+    "imagesrcset",
+    "longdesc",
+    "lowsrc",
+    "manifest",
+    "ping",
+    "poster",
+    "profile",
+    "srcdoc",
+    "srcset",
+    "usemap",
+    "xlink:href",
+    "xmlns",
+    "xmlns:xlink",
   ]);
   for (const tag of startTags(html)) {
     const attributes = parsedAttributes(tag);
@@ -1339,9 +1517,17 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
       throw new ImportError(409, "html_network_element_invalid");
     }
     const sensitiveNames = new Set(
-      attributes.map((attribute) => attribute.name).filter((name) =>
-        name === "href" || name === "src" || name === "action" ||
-        name === "http-equiv" || extraUrlAttributes.has(name) || name.startsWith("on")),
+      attributes
+        .map((attribute) => attribute.name)
+        .filter(
+          (name) =>
+            name === "href" ||
+            name === "src" ||
+            name === "action" ||
+            name === "http-equiv" ||
+            extraUrlAttributes.has(name) ||
+            name.startsWith("on"),
+        ),
     );
     for (const name of sensitiveNames) {
       if (attributes.filter((attribute) => attribute.name === name).length !== 1) {
@@ -1351,11 +1537,20 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
     const httpEquiv = attributes.find((attribute) => attribute.name === "http-equiv");
     if (httpEquiv) {
       const allowed = new Set([
-        "cache-control", "content-language", "content-script-type",
-        "content-style-type", "content-type", "expires", "pragma", "x-ua-compatible",
+        "cache-control",
+        "content-language",
+        "content-script-type",
+        "content-style-type",
+        "content-type",
+        "expires",
+        "pragma",
+        "x-ua-compatible",
       ]);
-      if (element !== "meta" || httpEquiv.value === undefined ||
-          !allowed.has(httpEquiv.value.trim().toLowerCase())) {
+      if (
+        element !== "meta" ||
+        httpEquiv.value === undefined ||
+        !allowed.has(httpEquiv.value.trim().toLowerCase())
+      ) {
         throw new ImportError(409, "html_meta_refresh_invalid");
       }
     }
@@ -1365,8 +1560,12 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
         throw new ImportError(409, "html_url_attribute_invalid");
       }
       if (attribute.name === "action") {
-        if (element !== "form" || value !== "" && value !== STATIC_FORM_ACTION &&
-            (canonical || value !== STATIC_FORM_ACTION_PATH)) {
+        if (
+          element !== "form" ||
+          (value !== "" &&
+            value !== STATIC_FORM_ACTION &&
+            (canonical || value !== STATIC_FORM_ACTION_PATH))
+        ) {
           throw new ImportError(409, "html_url_attribute_invalid");
         }
       } else if (attribute.name === "href") {
@@ -1374,9 +1573,12 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
           throw new ImportError(409, "html_url_attribute_invalid");
         }
       } else if (attribute.name === "src") {
-        const allowed = element === "img"
-          ? ALLOWED_IMG_SRC_PATHS
-          : element === "script" ? ALLOWED_SCRIPT_SRC_PATHS : null;
+        const allowed =
+          element === "img"
+            ? ALLOWED_IMG_SRC_PATHS
+            : element === "script"
+              ? ALLOWED_SCRIPT_SRC_PATHS
+              : null;
         if (value === undefined || allowed === null || !allowedSameHostPath(value, allowed)) {
           throw new ImportError(409, "html_url_attribute_invalid");
         }
@@ -1419,8 +1621,8 @@ function canonicalizeInteractiveAttributes(html: string): string {
     }
     let output = tag;
     for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
-      output = output.slice(0, replacement.start) + replacement.value +
-        output.slice(replacement.end);
+      output =
+        output.slice(0, replacement.start) + replacement.value + output.slice(replacement.end);
     }
     return output;
   });
@@ -1429,11 +1631,14 @@ function canonicalizeInteractiveAttributes(html: string): string {
 function allowedHref(element: string, value: string, canonical: boolean): boolean {
   if (element === "link") return allowedSameHostPath(value, ALLOWED_LINK_HREF_PATHS);
   if (element !== "a") return false;
-  return (!canonical && value === "/") || value === `${SAME_HOST}/` ||
+  return (
+    (!canonical && value === "/") ||
+    value === `${SAME_HOST}/` ||
     value === "https://www.smbctb.co.jp/" ||
     (canonical ? value === "#" : /^#[A-Za-z0-9._:-]*$/u.test(value)) ||
     /^javascript:void\(0\);?$/u.test(value) ||
-    allowedSameHostPath(value, ALLOWED_ANCHOR_HREF_PATHS);
+    allowedSameHostPath(value, ALLOWED_ANCHOR_HREF_PATHS)
+  );
 }
 
 function allowedSameHostPath(value: string, allowed: ReadonlySet<string>): boolean {
@@ -1445,48 +1650,63 @@ function allowedSameHostPath(value: string, allowed: ReadonlySet<string>): boole
   } catch {
     return false;
   }
-  return parsed.origin === SAME_HOST && parsed.username === "" && parsed.password === "" &&
-    parsed.search === "" && parsed.hash === "" && allowed.has(parsed.pathname);
+  return (
+    parsed.origin === SAME_HOST &&
+    parsed.username === "" &&
+    parsed.password === "" &&
+    parsed.search === "" &&
+    parsed.hash === "" &&
+    allowed.has(parsed.pathname)
+  );
 }
 
 function allowedEventHandler(name: string, value: string, canonical: boolean): boolean {
   if (canonical) {
     return (name === "onclick" || name === "onchange") && value === "return false;";
   }
-  if (/https?:|javascript:|data:|fetch|xmlhttprequest|document|cookie|storage|eval|function|=>/iu
-      .test(value)) return false;
+  if (
+    /https?:|javascript:|data:|fetch|xmlhttprequest|document|cookie|storage|eval|function|=>/iu.test(
+      value,
+    )
+  )
+    return false;
   if (name === "onclick" && LEGACY_RESPONSIVE_ONCLICK.test(value)) return true;
-  const functionNames = [...value.matchAll(
-    /\b(?:window\.)?[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*(?=\s*\()/gu,
-  )].map((match) => match[0]!);
-  const allowedFunctions = name === "onchange"
-    ? new Set(["sel_submit"])
-    : name === "onclick"
-    ? new Set(["click", "toggleClass", "window.nablarch_submit"])
-    : null;
-  if (!allowedFunctions || functionNames.length === 0 ||
-      functionNames.some((functionName) => !allowedFunctions.has(functionName))) return false;
+  const functionNames = [
+    ...value.matchAll(
+      /\b(?:window\.)?[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*(?=\s*\()/gu,
+    ),
+  ].map((match) => match[0]!);
+  const allowedFunctions =
+    name === "onchange"
+      ? new Set(["sel_submit"])
+      : name === "onclick"
+        ? new Set(["click", "toggleClass", "window.nablarch_submit"])
+        : null;
+  if (
+    !allowedFunctions ||
+    functionNames.length === 0 ||
+    functionNames.some((functionName) => !allowedFunctions.has(functionName))
+  )
+    return false;
   const withoutStrings = value.replace(/"[^"]*"|'[^']*'/gu, "");
   const identifiers = withoutStrings.match(/[A-Za-z_$][A-Za-z0-9_$]*/gu) ?? [];
   const allowedIdentifiers = new Set([
-    "click", "event", "false", "nablarch_submit", "return", "sel_submit",
-    "this", "toggleClass", "true", "window",
+    "click",
+    "event",
+    "false",
+    "nablarch_submit",
+    "return",
+    "sel_submit",
+    "this",
+    "toggleClass",
+    "true",
+    "window",
   ]);
   return identifiers.every((identifier) => allowedIdentifiers.has(identifier));
 }
 
 function countInputs(html: string, predicate: (tag: string) => boolean): number {
   return inputTags(html).filter(predicate).length;
-}
-
-function countSubmitControls(html: string): number {
-  const inputs = countInputs(html, (tag) =>
-    attribute(tag, "type").toLowerCase() === "submit");
-  const buttons = (html.match(/<button\b[^>]*>/giu) ?? []).filter((tag) => {
-    const type = attribute(tag, "type").toLowerCase();
-    return type === "" || type === "submit";
-  }).length;
-  return inputs + buttons;
 }
 
 interface AttributeMatch {
@@ -1498,8 +1718,7 @@ interface AttributeMatch {
 function uniqueAttribute(tag: string, name: string): AttributeMatch | null {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const regex = new RegExp(
-    "(?:^|\\s)" + escaped +
-      "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))",
+    "(?:^|\\s)" + escaped + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))",
     "giu",
   );
   const matches = [...tag.matchAll(regex)];
@@ -1536,8 +1755,10 @@ function assertExactMetadata(
 ): void {
   const actualKeys = Object.keys(actual ?? {}).sort();
   const expectedKeys = Object.keys(expected).sort();
-  if (actualKeys.length !== expectedKeys.length ||
-      actualKeys.some((key, index) => key !== expectedKeys[index] || actual?.[key] !== expected[key])) {
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    actualKeys.some((key, index) => key !== expectedKeys[index] || actual?.[key] !== expected[key])
+  ) {
     throw new ImportError(409, code);
   }
 }
@@ -1565,8 +1786,10 @@ function exactShape(
   optional: readonly string[] = [],
 ): void {
   const keys = Object.keys(value);
-  if (keys.some((key) => !allowed.includes(key)) ||
-      allowed.some((key) => !optional.includes(key) && !Object.hasOwn(value, key))) {
+  if (
+    keys.some((key) => !allowed.includes(key)) ||
+    allowed.some((key) => !optional.includes(key) && !Object.hasOwn(value, key))
+  ) {
     invalid("manifest_unknown_field");
   }
 }
@@ -1606,8 +1829,10 @@ function months(value: unknown, allowEmpty: boolean, code: string): string[] {
     invalid(code);
   }
   const parsed = value.map((month) => safeMonth(month, code));
-  if (new Set(parsed).size !== parsed.length ||
-      !sameStrings(parsed, [...parsed].sort().reverse())) {
+  if (
+    new Set(parsed).size !== parsed.length ||
+    !sameStrings(parsed, [...parsed].sort().reverse())
+  ) {
     invalid(code);
   }
   for (let index = 1; index < parsed.length; index += 1) {
@@ -1666,7 +1891,8 @@ function canonical(value: JsonValue): JsonValue {
   if (Array.isArray(value)) return value.map(canonical);
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).sort(([left], [right]) => binaryCompare(left, right))
+      Object.entries(value)
+        .sort(([left], [right]) => binaryCompare(left, right))
         .map(([key, child]) => [key, canonical(child)]),
     );
   }
@@ -1691,10 +1917,7 @@ async function descriptorSha256(descriptor: JsonObject): Promise<string> {
 }
 
 async function sha256Hex(value: Uint8Array): Promise<string> {
-  return bytesHex(new Uint8Array(await crypto.subtle.digest(
-    "SHA-256",
-    ownedArrayBuffer(value),
-  )));
+  return bytesHex(new Uint8Array(await crypto.subtle.digest("SHA-256", ownedArrayBuffer(value))));
 }
 
 function hexBytes(value: string): Uint8Array {

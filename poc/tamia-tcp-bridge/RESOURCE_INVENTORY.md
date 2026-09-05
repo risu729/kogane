@@ -6,10 +6,10 @@ removed on `2026-08-26 AEST`.
 
 ## Owned by this probe
 
-| Kind | Name | ID | Status | Delete command |
-| --- | --- | --- | --- | --- |
-| Worker | `kogane-tamia-tcp-bridge-20260825` | active version `a700afb3-4de3-4e0e-b36f-3a18a487816d` | deleted; API now reports code `10007` | completed |
-| Worker secret | `BRIDGE_TOKEN` | none retained | deleted and verified with `wrangler secret list` | no action required |
+| Kind          | Name                               | ID                                                    | Status                                           | Delete command     |
+| ------------- | ---------------------------------- | ----------------------------------------------------- | ------------------------------------------------ | ------------------ |
+| Worker        | `kogane-tamia-tcp-bridge-20260825` | active version `a700afb3-4de3-4e0e-b36f-3a18a487816d` | deleted; API now reports code `10007`            | completed          |
+| Worker secret | `BRIDGE_TOKEN`                     | none retained                                         | deleted and verified with `wrangler secret list` | no action required |
 
 Public URL:
 
@@ -36,8 +36,8 @@ All versions belong to the one Worker above and are removed with that Worker:
 
 ## Referenced but not owned
 
-| Kind | Name / ID | Purpose | Cleanup |
-| --- | --- | --- | --- |
+| Kind                            | Name / ID                                        | Purpose                                                | Cleanup                                                                       |
+| ------------------------------- | ------------------------------------------------ | ------------------------------------------------------ | ----------------------------------------------------------------------------- |
 | Cloudflare Tunnel / VPC network | `tamia` / `6b0ccf30-68b2-494e-baa8-f4f9f3e46b33` | Fixed raw TCP egress through the Japanese home network | **Never delete from this probe.** It is pre-existing personal infrastructure. |
 
 ## Local-only artifacts

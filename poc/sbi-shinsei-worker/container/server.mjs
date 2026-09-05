@@ -23,11 +23,9 @@ const PROXY_HOSTS = new Set([
 ]);
 let collecting = false;
 process.env.DISPLAY = ":99";
-const xvfb = spawn(
-  "Xvfb",
-  [":99", "-screen", "0", "1365x768x24", "-nolisten", "tcp"],
-  { stdio: "ignore" },
-);
+const xvfb = spawn("Xvfb", [":99", "-screen", "0", "1365x768x24", "-nolisten", "tcp"], {
+  stdio: "ignore",
+});
 const xvfbLifecycle = observeChildProcess(xvfb, "xvfb");
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => {
@@ -53,8 +51,7 @@ function parseCredentialRequest(value) {
     !value ||
     typeof value !== "object" ||
     Array.isArray(value) ||
-    Object.keys(value).sort().join(",") !==
-      "credentialJson,relayToken,relayUrl" ||
+    Object.keys(value).sort().join(",") !== "credentialJson,relayToken,relayUrl" ||
     typeof value.credentialJson !== "string" ||
     typeof value.relayToken !== "string" ||
     value.relayToken.length < 32 ||
@@ -68,8 +65,7 @@ function parseCredentialRequest(value) {
     !credential ||
     typeof credential !== "object" ||
     Array.isArray(credential) ||
-    Object.keys(credential).sort().join(",") !==
-      "accountNumber,branchNumber,powerDirectPassword" ||
+    Object.keys(credential).sort().join(",") !== "accountNumber,branchNumber,powerDirectPassword" ||
     typeof credential.branchNumber !== "string" ||
     !/^\d{3}$/u.test(credential.branchNumber) ||
     typeof credential.accountNumber !== "string" ||
@@ -92,10 +88,7 @@ function failure(stage, authenticationAttempted = false) {
 }
 
 function validateHandoff(value) {
-  if (
-    typeof value !== "string" ||
-    Buffer.byteLength(value, "utf8") > MAX_RESPONSE_BYTES
-  ) {
+  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > MAX_RESPONSE_BYTES) {
     return failure("handoff-size");
   }
   let parsed;
@@ -120,10 +113,13 @@ function validateHandoff(value) {
     return failure("handoff-shape");
   }
   const envelopeKeys = Object.keys(parsed).sort().join(",");
-  if (parsed.ok !== true ||
-      (envelopeKeys !== "ok,responses" && envelopeKeys !== "failure,ok,responses") ||
-      !parsed.responses || typeof parsed.responses !== "object" ||
-      Array.isArray(parsed.responses)) {
+  if (
+    parsed.ok !== true ||
+    (envelopeKeys !== "ok,responses" && envelopeKeys !== "failure,ok,responses") ||
+    !parsed.responses ||
+    typeof parsed.responses !== "object" ||
+    Array.isArray(parsed.responses)
+  ) {
     return failure("handoff-shape");
   }
   const plans = [
@@ -133,25 +129,33 @@ function validateHandoff(value) {
     ["yenDeposit", "yen-deposit-account"],
   ];
   const responseKeys = Object.keys(parsed.responses).sort();
-  const expectedKeys = plans.slice(0, responseKeys.length)
+  const expectedKeys = plans
+    .slice(0, responseKeys.length)
     .map(([key]) => key)
     .sort();
-  if (responseKeys.length < 1 || responseKeys.length > plans.length ||
-      responseKeys.some((key, index) => key !== expectedKeys[index]) ||
-      Object.values(parsed.responses).some((entry) => typeof entry !== "string")) {
+  if (
+    responseKeys.length < 1 ||
+    responseKeys.length > plans.length ||
+    responseKeys.some((key, index) => key !== expectedKeys[index]) ||
+    Object.values(parsed.responses).some((entry) => typeof entry !== "string")
+  ) {
     return failure("handoff-shape");
   }
   if (parsed.failure === undefined) {
     if (responseKeys.length !== plans.length) return failure("handoff-shape");
   } else {
     const next = plans[responseKeys.length];
-    if (!next || responseKeys.length === plans.length ||
-        !parsed.failure || typeof parsed.failure !== "object" ||
-        Array.isArray(parsed.failure) ||
-        Object.keys(parsed.failure).sort().join(",") !== "dataset,stage" ||
-        parsed.failure.dataset !== next[1] ||
-        typeof parsed.failure.stage !== "string" ||
-        !/^[a-z0-9-]{1,80}$/u.test(parsed.failure.stage)) {
+    if (
+      !next ||
+      responseKeys.length === plans.length ||
+      !parsed.failure ||
+      typeof parsed.failure !== "object" ||
+      Array.isArray(parsed.failure) ||
+      Object.keys(parsed.failure).sort().join(",") !== "dataset,stage" ||
+      parsed.failure.dataset !== next[1] ||
+      typeof parsed.failure.stage !== "string" ||
+      !/^[a-z0-9-]{1,80}$/u.test(parsed.failure.stage)
+    ) {
       return failure("handoff-shape");
     }
   }
@@ -210,8 +214,7 @@ async function stopChild(child, lifecycle) {
 
 async function collectAuthenticatedReadsInPage(session) {
   const maximumBytes = 2 * 1024 * 1024;
-  const fail = (stage) =>
-    JSON.stringify({ ok: false, stage, authenticationAttempted: true });
+  const fail = (stage) => JSON.stringify({ ok: false, stage, authenticationAttempted: true });
   let csrfToken = session.csrfToken;
   const read = async (path, body, stage) => {
     let response;
@@ -267,11 +270,7 @@ async function collectAuthenticatedReadsInPage(session) {
       }
     }
     const stored = JSON.parse(JSON.stringify(data));
-    if (
-      stored.header &&
-      typeof stored.header === "object" &&
-      !Array.isArray(stored.header)
-    ) {
+    if (stored.header && typeof stored.header === "object" && !Array.isArray(stored.header)) {
       delete stored.header.newToken;
     }
     return { raw: JSON.stringify(stored), data };
@@ -357,15 +356,16 @@ async function collectAuthenticatedReadsInPage(session) {
 }
 
 async function collect({ credential, relayToken, relayUrl }) {
-  const profileDirectory = await mkdtemp(
-    path.join(os.tmpdir(), "kogane-sbi-shinsei-profile-"),
-  );
+  const profileDirectory = await mkdtemp(path.join(os.tmpdir(), "kogane-sbi-shinsei-profile-"));
   const debuggingPort = await availableLocalPort();
   const endpoint = `http://127.0.0.1:${debuggingPort}`;
   const startedAt = Date.now();
   const diagnostic = createStageDiagnostics(relayUrl);
   let currentStage = "chrome-start";
-  const advance = (stage) => { currentStage = stage; diagnostic.begin(stage); };
+  const advance = (stage) => {
+    currentStage = stage;
+    diagnostic.begin(stage);
+  };
   let authenticationAttempted = false;
   let relay;
   let child;
@@ -411,29 +411,29 @@ async function collect({ credential, relayToken, relayUrl }) {
     const pages = browser.contexts().flatMap((context) => context.pages());
     const page = pages.find((candidate) => {
       try {
-        return new URL(candidate.url()).hostname ===
-          "bk.web.sbishinseibank.co.jp";
+        return new URL(candidate.url()).hostname === "bk.web.sbishinseibank.co.jp";
       } catch {
         return false;
       }
     });
     if (!page) return diagnostic.finish(failure("navigation-page-unavailable"));
     advance("navigation-final-url");
-    await page.waitForURL(
-      (url) =>
-        url.hostname === "bk.web.sbishinseibank.co.jp" &&
-        url.pathname.endsWith("/index.html") &&
-        url.searchParams.get("mode") === "1",
-      { waitUntil: "domcontentloaded", timeout: 20_000 },
-    ).catch(() => undefined);
+    await page
+      .waitForURL(
+        (url) =>
+          url.hostname === "bk.web.sbishinseibank.co.jp" &&
+          url.pathname.endsWith("/index.html") &&
+          url.searchParams.get("mode") === "1",
+        { waitUntil: "domcontentloaded", timeout: 20_000 },
+      )
+      .catch(() => undefined);
     await page.waitForTimeout(1_500);
     advance("navigation-cafis");
     try {
       await page.waitForFunction(
         () =>
           Boolean(document.getElementById("dtokeninfo")) &&
-          typeof globalThis.CAFISBrainRiskCollector?.getDeviceTokenInfoV3 ===
-            "function",
+          typeof globalThis.CAFISBrainRiskCollector?.getDeviceTokenInfoV3 === "function",
         null,
         { timeout: 45_000 },
       );
@@ -443,8 +443,8 @@ async function collect({ credential, relayToken, relayUrl }) {
     advance("ui-input");
     const userId = `${credential.branchNumber}${credential.accountNumber}`;
     const userIdInput = page.locator('input[name="nationalId"]').first();
-    const passwordInput = page.locator('#loginPassword').first();
-    const loginButton = page.locator('#authForm p.btnSpace button').first();
+    const passwordInput = page.locator("#loginPassword").first();
+    const loginButton = page.locator("#authForm p.btnSpace button").first();
     if (
       !(await userIdInput.isVisible().catch(() => false)) ||
       !(await passwordInput.isVisible().catch(() => false)) ||
@@ -468,13 +468,14 @@ async function collect({ credential, relayToken, relayUrl }) {
       return diagnostic.finish(failure("login-button-disabled"));
     }
     advance("ui-waiters");
-    const loginResponse = page.waitForResponse(
-      (response) =>
-        response.url().endsWith(
-          "/SFC/app/ShinseiAuthenticatorRealm/login_auth_request_url",
-        ) && response.request().method() === "POST",
-      { timeout: 45_000 },
-    ).catch(() => null);
+    const loginResponse = page
+      .waitForResponse(
+        (response) =>
+          response.url().endsWith("/SFC/app/ShinseiAuthenticatorRealm/login_auth_request_url") &&
+          response.request().method() === "POST",
+        { timeout: 45_000 },
+      )
+      .catch(() => null);
     const securityResponse = page
       .waitForResponse(
         (candidate) => {
@@ -552,69 +553,74 @@ async function collect({ credential, relayToken, relayUrl }) {
   } finally {
     credential.powerDirectPassword = "";
     if (browser) await diagnostic.cleanup("browser-close", () => browser.close());
-    if (child && childLifecycle) await diagnostic.cleanup("chrome-stop", () => stopChild(child, childLifecycle));
+    if (child && childLifecycle)
+      await diagnostic.cleanup("chrome-stop", () => stopChild(child, childLifecycle));
     if (relay) await diagnostic.cleanup("relay-close", () => relay.close());
-    await diagnostic.cleanup("profile-remove", () => rm(profileDirectory, { recursive: true, force: true }));
+    await diagnostic.cleanup("profile-remove", () =>
+      rm(profileDirectory, { recursive: true, force: true }),
+    );
   }
 }
 
-http.createServer(async (request, response) => {
-  if (request.method === "GET" && request.url === "/health") {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end('{"ok":true}');
-    return;
-  }
-  if (request.method !== "POST" || request.url !== "/collect") {
-    response.writeHead(404, { "content-type": "application/json" });
-    response.end('{"error":"not found"}');
-    return;
-  }
-  if (collecting) {
-    response.writeHead(409, { "content-type": "application/json" });
-    response.end(failure("container-busy"));
-    return;
-  }
-  collecting = true;
-  let payload;
-  try {
-    let requestJson;
+http
+  .createServer(async (request, response) => {
+    if (request.method === "GET" && request.url === "/health") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"ok":true}');
+      return;
+    }
+    if (request.method !== "POST" || request.url !== "/collect") {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end('{"error":"not found"}');
+      return;
+    }
+    if (collecting) {
+      response.writeHead(409, { "content-type": "application/json" });
+      response.end(failure("container-busy"));
+      return;
+    }
+    collecting = true;
+    let payload;
     try {
-      requestJson = await readJson(request);
+      let requestJson;
+      try {
+        requestJson = await readJson(request);
+      } catch {
+        response.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store",
+        });
+        response.end(failure("request-json"));
+        return;
+      }
+      try {
+        payload = parseCredentialRequest(requestJson);
+      } catch {
+        response.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+          "cache-control": "no-store",
+        });
+        response.end(failure("request-shape"));
+        return;
+      }
+      const result = await collect(payload);
+      response.writeHead(200, {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+      });
+      response.end(result);
     } catch {
       response.writeHead(200, {
         "content-type": "application/json; charset=utf-8",
         "cache-control": "no-store",
       });
-      response.end(failure("request-json"));
-      return;
+      response.end(failure("container-internal"));
+    } finally {
+      if (payload) {
+        payload.credential.powerDirectPassword = "";
+        payload.relayToken = "";
+      }
+      collecting = false;
     }
-    try {
-      payload = parseCredentialRequest(requestJson);
-    } catch {
-      response.writeHead(200, {
-        "content-type": "application/json; charset=utf-8",
-        "cache-control": "no-store",
-      });
-      response.end(failure("request-shape"));
-      return;
-    }
-    const result = await collect(payload);
-    response.writeHead(200, {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    });
-    response.end(result);
-  } catch {
-    response.writeHead(200, {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    });
-    response.end(failure("container-internal"));
-  } finally {
-    if (payload) {
-      payload.credential.powerDirectPassword = "";
-      payload.relayToken = "";
-    }
-    collecting = false;
-  }
-}).listen(8080, "0.0.0.0");
+  })
+  .listen(8080, "0.0.0.0");

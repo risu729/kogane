@@ -19,9 +19,7 @@ export interface BrowserCollectionFailure {
 export type BrowserCollectionHandoff = BrowserCollectionSuccess | BrowserCollectionFailure;
 
 /** Runs wholly in the bank page. Session and risk material are never returned. */
-export async function collectInBankPage(
-  credential: SbiShinseiCredential,
-): Promise<string> {
+export async function collectInBankPage(credential: SbiShinseiCredential): Promise<string> {
   type PageInput = { value: string };
   type CafisResult = { deviceTokenInfo?: unknown } | null | undefined;
   type PageGlobal = {
@@ -40,8 +38,9 @@ export async function collectInBankPage(
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
     const actual = Object.keys(value).sort();
     const expected = [...keys].sort();
-    return actual.length === expected.length &&
-      actual.every((key, index) => key === expected[index]);
+    return (
+      actual.length === expected.length && actual.every((key, index) => key === expected[index])
+    );
   };
   const fail = (stage: string, authenticationAttempted = false): string =>
     JSON.stringify({ ok: false, stage, authenticationAttempted });
@@ -109,13 +108,17 @@ export async function collectInBankPage(
       throw { stage: `${stage}-network`, authenticationAttempted } satisfies PageFailure;
     }
     if (!response.ok || response.redirected || response.type === "opaqueredirect") {
-      throw { stage: `${stage}-http-${response.status}`, authenticationAttempted } satisfies PageFailure;
+      throw {
+        stage: `${stage}-http-${response.status}`,
+        authenticationAttempted,
+      } satisfies PageFailure;
     }
-    const mediaType = (response.headers.get("content-type") ?? "")
-      .split(";", 1)[0]?.trim().toLowerCase() ?? "";
-    const accepted = stage === "login"
-      ? ["application/octet-stream", "application/json", "text/json"].includes(mediaType)
-      : mediaType === "application/json";
+    const mediaType =
+      (response.headers.get("content-type") ?? "").split(";", 1)[0]?.trim().toLowerCase() ?? "";
+    const accepted =
+      stage === "login"
+        ? ["application/octet-stream", "application/json", "text/json"].includes(mediaType)
+        : mediaType === "application/json";
     if (!accepted) {
       throw { stage: `${stage}-content-type`, authenticationAttempted } satisfies PageFailure;
     }
@@ -219,7 +222,10 @@ export async function collectInBankPage(
       const nextToken = (header as Record<string, unknown>).newToken;
       if (nextToken !== undefined) {
         if (typeof nextToken !== "string" || nextToken.length === 0) {
-          throw { stage: `${stage}-invalid-token`, authenticationAttempted: true } satisfies PageFailure;
+          throw {
+            stage: `${stage}-invalid-token`,
+            authenticationAttempted: true,
+          } satisfies PageFailure;
         }
         csrfToken = nextToken;
       }
@@ -229,19 +235,28 @@ export async function collectInBankPage(
 
   try {
     const security = await read(
-      "/SFC/app/IFCM_CommonAdapter/securityConnect", undefined, "security-connect",
+      "/SFC/app/IFCM_CommonAdapter/securityConnect",
+      undefined,
+      "security-connect",
     );
     if (
       !exactKeys(security.data, ["userId", "attributes"]) ||
       !exactKeys(security.data.attributes, [
-        "lastLoginTime", "createtime", "nationalId", "systemCode",
-        "langCode", "AILG04_Login", "sessionId",
+        "lastLoginTime",
+        "createtime",
+        "nationalId",
+        "systemCode",
+        "langCode",
+        "AILG04_Login",
+        "sessionId",
       ])
     ) {
       return fail("security-connect-shape", true);
     }
     const validation = await read(
-      "/SFC/app/IFCM_CommonAdapter/validateToken", undefined, "validate-token",
+      "/SFC/app/IFCM_CommonAdapter/validateToken",
+      undefined,
+      "validate-token",
     );
     if (
       !exactKeys(validation.data, ["header"]) ||
@@ -263,13 +278,19 @@ export async function collectInBankPage(
     csrfToken = validationHeader.newToken;
 
     const topBalances = await read(
-      "/SFC/app/IFTP_TopAdapter/getAccountsBalanceAndActivity", undefined, "top-balances",
+      "/SFC/app/IFTP_TopAdapter/getAccountsBalanceAndActivity",
+      undefined,
+      "top-balances",
     );
     const balanceSummary = await read(
-      "/SFC/app/IFTP_TopAdapter/getBalanceSummaryAndStage", undefined, "balance-summary",
+      "/SFC/app/IFTP_TopAdapter/getBalanceSummaryAndStage",
+      undefined,
+      "balance-summary",
     );
     const exchangeRate = await read(
-      "/SFC/app/IFCM_CommonAdapter/getExchangeRate", undefined, "exchange-rate",
+      "/SFC/app/IFCM_CommonAdapter/getExchangeRate",
+      undefined,
+      "exchange-rate",
     );
     const yenDeposit = await read(
       "/SFC/app/AIYD_YenDepositAdapter/getYenDepositAccount",
@@ -279,7 +300,9 @@ export async function collectInBankPage(
     for (const result of [topBalances, balanceSummary, exchangeRate, yenDeposit]) {
       const header = result.data.header;
       if (
-        !header || typeof header !== "object" || Array.isArray(header) ||
+        !header ||
+        typeof header !== "object" ||
+        Array.isArray(header) ||
         (header as Record<string, unknown>).adapterResultCode !== "0"
       ) {
         return fail("core-read-result-code", true);

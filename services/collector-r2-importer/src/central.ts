@@ -7,10 +7,12 @@ export class CentralClient {
   readonly #token: string;
 
   constructor(service: Fetcher, token: string, expectedClientId: string) {
-    if (!/^[a-z0-9-]{1,100}$/u.test(expectedClientId) ||
-        !token.startsWith(`${expectedClientId}.`) ||
-        token.slice(expectedClientId.length + 1).length < 20 ||
-        /\s/u.test(token)) {
+    if (
+      !/^[a-z0-9-]{1,100}$/u.test(expectedClientId) ||
+      !token.startsWith(`${expectedClientId}.`) ||
+      token.slice(expectedClientId.length + 1).length < 20 ||
+      /\s/u.test(token)
+    ) {
       throw new Error("central_auth_configuration_invalid");
     }
     this.#service = service;
@@ -40,22 +42,17 @@ export class CentralClient {
     await this.json(`/v1/units/${unitId}/reports`, input);
   }
 
-  async uploadObject(
-    runId: number,
-    sha256: string,
-    bytes: Uint8Array,
-  ): Promise<boolean> {
-    const response = await this.#service.fetch(new Request(
-      `https://kogane-ingest.internal/v1/runs/${runId}/objects/${sha256}`,
-      {
+  async uploadObject(runId: number, sha256: string, bytes: Uint8Array): Promise<boolean> {
+    const response = await this.#service.fetch(
+      new Request(`https://kogane-ingest.internal/v1/runs/${runId}/objects/${sha256}`, {
         method: "PUT",
         headers: {
           authorization: `Bearer ${this.#token}`,
           "x-kogane-byte-size": String(bytes.byteLength),
         },
         body: ownedArrayBuffer(bytes),
-      },
-    ));
+      }),
+    );
     if (!response.ok) throw await centralError(response);
     return response.status === 200;
   }
@@ -92,10 +89,10 @@ export class CentralClient {
     externalAttemptId: string,
     startedAtMs: number,
   ): Promise<void> {
-    const result = await this.json(
-      `/v1/runs/${runId}/inventories/${inventoryId}/seal`,
-      { externalAttemptId, startedAtMs },
-    );
+    const result = await this.json(`/v1/runs/${runId}/inventories/${inventoryId}/seal`, {
+      externalAttemptId,
+      startedAtMs,
+    });
     if (result.sealed !== true) throw new Error("central_seal_missing");
   }
 
@@ -123,17 +120,16 @@ export class CentralClient {
   }
 
   private async json(path: string, body: JsonObject): Promise<JsonObject> {
-    const response = await this.#service.fetch(new Request(
-      `https://kogane-ingest.internal${path}`,
-      {
+    const response = await this.#service.fetch(
+      new Request(`https://kogane-ingest.internal${path}`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${this.#token}`,
           "content-type": "application/json",
         },
         body: JSON.stringify(body),
-      },
-    ));
+      }),
+    );
     if (!response.ok) throw await centralError(response);
     const parsed: unknown = await response.json();
     if (!isRecord(parsed)) throw new Error("central_response_invalid");
@@ -151,8 +147,11 @@ async function centralError(response: Response): Promise<Error> {
   let code = "request_failed";
   try {
     const parsed: unknown = await response.json();
-    if (isRecord(parsed) && typeof parsed.error === "string" &&
-        /^[a-z0-9_-]{1,100}$/u.test(parsed.error)) {
+    if (
+      isRecord(parsed) &&
+      typeof parsed.error === "string" &&
+      /^[a-z0-9_-]{1,100}$/u.test(parsed.error)
+    ) {
       code = parsed.error;
     }
   } catch {

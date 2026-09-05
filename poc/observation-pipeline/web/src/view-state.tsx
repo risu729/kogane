@@ -23,11 +23,7 @@ const Context = createContext<{
 } | null>(null);
 
 /** Keep list controls while visiting a record. Nothing enters URLs or storage. */
-export function ViewStateProvider({
-  children,
-}: {
-  children: ReactNode;
-}): ReactNode {
+export function ViewStateProvider({ children }: { children: ReactNode }): ReactNode {
   const [state, setState] = useState<ViewState>(() => ({
     "transactions.filters": { ...EMPTY_FILTERS },
     "transactions.search": "",
@@ -35,9 +31,7 @@ export function ViewStateProvider({
     "transactions.sorting": [],
     "balances.filters": { ...EMPTY_FILTERS },
   }));
-  return (
-    <Context.Provider value={{ state, setState }}>{children}</Context.Provider>
-  );
+  return <Context.Provider value={{ state, setState }}>{children}</Context.Provider>;
 }
 
 export function useViewState<K extends keyof ViewState>(

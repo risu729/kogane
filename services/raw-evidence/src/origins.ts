@@ -23,8 +23,12 @@ function safeDomain(value: unknown, field: string, optional = false): string | n
   const domain = stringValue(value, field, { optional, max: 253 });
   if (domain === null) return null;
   const normalized = domain.toLowerCase();
-  if (!/^[a-z0-9.-]+$/.test(normalized) || normalized.startsWith(".") ||
-      normalized.endsWith(".") || normalized.includes("..")) {
+  if (
+    !/^[a-z0-9.-]+$/.test(normalized) ||
+    normalized.startsWith(".") ||
+    normalized.endsWith(".") ||
+    normalized.includes("..")
+  ) {
     throw new ApiError(400, `invalid_${field}`);
   }
   return normalized;
@@ -32,8 +36,12 @@ function safeDomain(value: unknown, field: string, optional = false): string | n
 
 function safeTemplate(value: unknown, field: string, max: number, basename = false): string {
   const template = stringValue(value, field, { max })!;
-  if (/[\r\n]/.test(template) || template.includes("?") || template.includes("#") ||
-      (basename && /[\\/]/.test(template))) {
+  if (
+    /[\r\n]/.test(template) ||
+    template.includes("?") ||
+    template.includes("#") ||
+    (basename && /[\\/]/.test(template))
+  ) {
     throw new ApiError(400, `invalid_${field}`);
   }
   return template;
@@ -60,11 +68,19 @@ export function parseOrigins(input: RecordValue): Origins {
 function parseHttp(value: RecordValue | null): RecordValue | null {
   if (!value) return null;
   exactKeys(value, [
-    "method", "status", "scheme", "host", "port", "pathTemplate", "queryNames",
-    "redactionVersion", "urlFingerprint", "fingerprintKeyVersion",
+    "method",
+    "status",
+    "scheme",
+    "host",
+    "port",
+    "pathTemplate",
+    "queryNames",
+    "redactionVersion",
+    "urlFingerprint",
+    "fingerprintKeyVersion",
   ]);
   const queryNames = arrayValue(value.queryNames, "query_names").map((entry) =>
-    stringValue(entry, "query_name", { max: 100 })!
+    stringValue(entry, "query_name", { max: 100 })!,
   );
   if (queryNames.some((name) => !/^[A-Za-z][A-Za-z0-9_.-]{0,99}$/.test(name))) {
     throw new ApiError(400, "invalid_query_name");
@@ -84,7 +100,8 @@ function parseHttp(value: RecordValue | null): RecordValue | null {
   const method = stringValue(value.method, "http_method", { optional: true, max: 20 });
   if (method !== null && !/^[A-Z]+$/.test(method)) throw new ApiError(400, "invalid_http_method");
   const status = integerValue(value.status, "http_status", true);
-  if (status !== null && (status < 100 || status > 599)) throw new ApiError(400, "invalid_http_status");
+  if (status !== null && (status < 100 || status > 599))
+    throw new ApiError(400, "invalid_http_status");
   const port = integerValue(value.port, "http_port", true);
   if (port !== null && (port < 1 || port > 65535)) throw new ApiError(400, "invalid_http_port");
   const pathTemplate = safeTemplate(value.pathTemplate, "path_template", 1000);
@@ -106,9 +123,16 @@ function parseHttp(value: RecordValue | null): RecordValue | null {
 function parseStorage(value: RecordValue | null): RecordValue | null {
   if (!value) return null;
   exactKeys(value, [
-    "storageKind", "containerName", "objectKeyTemplate", "objectKeyFingerprint",
-    "fingerprintKeyVersion", "redactionVersion", "objectVersion", "etag",
-    "lastModifiedAtMs", "lastModifiedAtBasis",
+    "storageKind",
+    "containerName",
+    "objectKeyTemplate",
+    "objectKeyFingerprint",
+    "fingerprintKeyVersion",
+    "redactionVersion",
+    "objectVersion",
+    "etag",
+    "lastModifiedAtMs",
+    "lastModifiedAtBasis",
   ]);
   const lastModifiedAtMs = integerValue(value.lastModifiedAtMs, "last_modified_at_ms", true);
   const lastModifiedAtBasis = enumValue(
@@ -130,8 +154,12 @@ function parseStorage(value: RecordValue | null): RecordValue | null {
       }
       return template;
     })(),
-    objectKeyFingerprint: stringValue(value.objectKeyFingerprint, "object_key_fingerprint", { pattern: SHA256 }),
-    fingerprintKeyVersion: stringValue(value.fingerprintKeyVersion, "fingerprint_key_version", { max: 100 }),
+    objectKeyFingerprint: stringValue(value.objectKeyFingerprint, "object_key_fingerprint", {
+      pattern: SHA256,
+    }),
+    fingerprintKeyVersion: stringValue(value.fingerprintKeyVersion, "fingerprint_key_version", {
+      max: 100,
+    }),
     redactionVersion: stringValue(value.redactionVersion, "redaction_version", { max: 100 }),
     objectVersion: stringValue(value.objectVersion, "object_version", { optional: true, max: 500 }),
     etag: stringValue(value.etag, "etag", { optional: true, max: 500 }),
@@ -143,13 +171,20 @@ function parseStorage(value: RecordValue | null): RecordValue | null {
 function parseFile(value: RecordValue | null): RecordValue | null {
   if (!value) return null;
   exactKeys(value, [
-    "basenameTemplate", "filenameFingerprint", "fingerprintKeyVersion",
-    "redactionVersion", "sourceModifiedAtMs",
+    "basenameTemplate",
+    "filenameFingerprint",
+    "fingerprintKeyVersion",
+    "redactionVersion",
+    "sourceModifiedAtMs",
   ]);
   return {
     basenameTemplate: safeTemplate(value.basenameTemplate, "basename_template", 500, true),
-    filenameFingerprint: stringValue(value.filenameFingerprint, "filename_fingerprint", { pattern: SHA256 }),
-    fingerprintKeyVersion: stringValue(value.fingerprintKeyVersion, "fingerprint_key_version", { max: 100 }),
+    filenameFingerprint: stringValue(value.filenameFingerprint, "filename_fingerprint", {
+      pattern: SHA256,
+    }),
+    fingerprintKeyVersion: stringValue(value.fingerprintKeyVersion, "fingerprint_key_version", {
+      max: 100,
+    }),
     redactionVersion: stringValue(value.redactionVersion, "redaction_version", { max: 100 }),
     sourceModifiedAtMs: integerValue(value.sourceModifiedAtMs, "source_modified_at_ms", true),
   };
@@ -158,32 +193,60 @@ function parseFile(value: RecordValue | null): RecordValue | null {
 function parseEmail(value: RecordValue | null): RecordValue | null {
   if (!value) return null;
   exactKeys(value, [
-    "transportShape", "senderDomain", "receivedAtMs", "receivedAtBasis", "messageIdSha256",
-    "partIndex", "mimePartPath", "innerMessageSha256", "innerSenderDomain", "filenameTemplate",
-    "filenameFingerprint", "fingerprintKeyVersion", "redactionVersion",
+    "transportShape",
+    "senderDomain",
+    "receivedAtMs",
+    "receivedAtBasis",
+    "messageIdSha256",
+    "partIndex",
+    "mimePartPath",
+    "innerMessageSha256",
+    "innerSenderDomain",
+    "filenameTemplate",
+    "filenameFingerprint",
+    "fingerprintKeyVersion",
+    "redactionVersion",
   ]);
   const receivedAtMs = integerValue(value.receivedAtMs, "received_at_ms", true);
-  const receivedAtBasis = enumValue(value.receivedAtBasis, "received_at_basis", [
-    "delivery_internal_date", "rfc_date", "forwarded_inner_date", "operator", "unknown",
-  ] as const, true);
-  const filenameTemplate = value.filenameTemplate === undefined || value.filenameTemplate === null
-    ? null
-    : safeTemplate(value.filenameTemplate, "filename_template", 500, true);
-  const filenameFingerprint = stringValue(value.filenameFingerprint, "filename_fingerprint", { optional: true, pattern: SHA256 });
-  const fingerprintKeyVersion = stringValue(value.fingerprintKeyVersion, "fingerprint_key_version", { optional: true, max: 100 });
-  if ((receivedAtMs === null) !== (receivedAtBasis === null) ||
-      (filenameTemplate === null) !== (filenameFingerprint === null) ||
-      (filenameFingerprint === null) !== (fingerprintKeyVersion === null)) {
+  const receivedAtBasis = enumValue(
+    value.receivedAtBasis,
+    "received_at_basis",
+    ["delivery_internal_date", "rfc_date", "forwarded_inner_date", "operator", "unknown"] as const,
+    true,
+  );
+  const filenameTemplate =
+    value.filenameTemplate === undefined || value.filenameTemplate === null
+      ? null
+      : safeTemplate(value.filenameTemplate, "filename_template", 500, true);
+  const filenameFingerprint = stringValue(value.filenameFingerprint, "filename_fingerprint", {
+    optional: true,
+    pattern: SHA256,
+  });
+  const fingerprintKeyVersion = stringValue(
+    value.fingerprintKeyVersion,
+    "fingerprint_key_version",
+    { optional: true, max: 100 },
+  );
+  if (
+    (receivedAtMs === null) !== (receivedAtBasis === null) ||
+    (filenameTemplate === null) !== (filenameFingerprint === null) ||
+    (filenameFingerprint === null) !== (fingerprintKeyVersion === null)
+  ) {
     throw new ApiError(400, "email_field_pair_mismatch");
   }
   return {
     transportShape: enumValue(value.transportShape, "transport_shape", [
-      "direct", "forwarded_rfc822", "unknown",
+      "direct",
+      "forwarded_rfc822",
+      "unknown",
     ] as const),
     senderDomain: safeDomain(value.senderDomain, "sender_domain", true),
     receivedAtMs,
     receivedAtBasis,
-    messageIdSha256: stringValue(value.messageIdSha256, "message_id_sha256", { optional: true, pattern: SHA256 }),
+    messageIdSha256: stringValue(value.messageIdSha256, "message_id_sha256", {
+      optional: true,
+      pattern: SHA256,
+    }),
     partIndex: integerValue(value.partIndex, "part_index", true),
     mimePartPath: (() => {
       const path = stringValue(value.mimePartPath, "mime_part_path", { optional: true, max: 200 });
@@ -192,7 +255,10 @@ function parseEmail(value: RecordValue | null): RecordValue | null {
       }
       return path;
     })(),
-    innerMessageSha256: stringValue(value.innerMessageSha256, "inner_message_sha256", { optional: true, pattern: SHA256 }),
+    innerMessageSha256: stringValue(value.innerMessageSha256, "inner_message_sha256", {
+      optional: true,
+      pattern: SHA256,
+    }),
     innerSenderDomain: safeDomain(value.innerSenderDomain, "inner_sender_domain", true),
     filenameTemplate,
     filenameFingerprint,
@@ -212,20 +278,25 @@ async function httpScopeAllowed(
   const result = await env.DB.prepare(`
     SELECT action, scheme, host, include_subdomains, port, path_prefix
     FROM http_scope_rules WHERE source_id IS NULL OR source_id = ?
-  `).bind(sourceId).all<{
-    action: "allow" | "deny";
-    scheme: string | null;
-    host: string;
-    include_subdomains: number;
-    port: number | null;
-    path_prefix: string;
-  }>();
+  `)
+    .bind(sourceId)
+    .all<{
+      action: "allow" | "deny";
+      scheme: string | null;
+      host: string;
+      include_subdomains: number;
+      port: number | null;
+      path_prefix: string;
+    }>();
   let allowed = false;
   for (const rule of result.results) {
-    const hostMatches = host === rule.host ||
-      (rule.include_subdomains === 1 && host.endsWith(`.${rule.host}`));
-    const matches = hostMatches && (!rule.scheme || rule.scheme === scheme) &&
-      (rule.port === null || rule.port === port) && path.startsWith(rule.path_prefix);
+    const hostMatches =
+      host === rule.host || (rule.include_subdomains === 1 && host.endsWith(`.${rule.host}`));
+    const matches =
+      hostMatches &&
+      (!rule.scheme || rule.scheme === scheme) &&
+      (rule.port === null || rule.port === port) &&
+      path.startsWith(rule.path_prefix);
     if (matches && rule.action === "deny") return false;
     if (matches && rule.action === "allow") allowed = true;
   }
@@ -239,39 +310,58 @@ export async function validateOriginScope(
 ): Promise<void> {
   if (origins.http) {
     const value = origins.http;
-    if (!await httpScopeAllowed(
+    if (
+      !(await httpScopeAllowed(
+        env,
+        sourceId,
+        value.scheme as string,
+        value.host as string,
+        value.port as number | null,
+        value.pathTemplate as string,
+      ))
+    )
+      throw new ApiError(403, "http_scope_denied");
+    await requireTemplatePolicy(
       env,
       sourceId,
-      value.scheme as string,
-      value.host as string,
-      value.port as number | null,
+      "http",
       value.pathTemplate as string,
-    )) throw new ApiError(403, "http_scope_denied");
-    await requireTemplatePolicy(
-      env, sourceId, "http", value.pathTemplate as string,
-      value.redactionVersion as string, (value.fingerprintKeyVersion as string | null) ?? "",
+      value.redactionVersion as string,
+      (value.fingerprintKeyVersion as string | null) ?? "",
       JSON.stringify(value.queryNames),
     );
   }
   if (origins.storage) {
     const value = origins.storage;
     await requireTemplatePolicy(
-      env, sourceId, "storage", value.objectKeyTemplate as string,
-      value.redactionVersion as string, value.fingerprintKeyVersion as string,
+      env,
+      sourceId,
+      "storage",
+      value.objectKeyTemplate as string,
+      value.redactionVersion as string,
+      value.fingerprintKeyVersion as string,
     );
   }
   if (origins.file) {
     const value = origins.file;
     await requireTemplatePolicy(
-      env, sourceId, "file", value.basenameTemplate as string,
-      value.redactionVersion as string, value.fingerprintKeyVersion as string,
+      env,
+      sourceId,
+      "file",
+      value.basenameTemplate as string,
+      value.redactionVersion as string,
+      value.fingerprintKeyVersion as string,
     );
   }
   if (origins.email?.filenameTemplate) {
     const value = origins.email;
     await requireTemplatePolicy(
-      env, sourceId, "email", value.filenameTemplate as string,
-      value.redactionVersion as string, value.fingerprintKeyVersion as string,
+      env,
+      sourceId,
+      "email",
+      value.filenameTemplate as string,
+      value.redactionVersion as string,
+      value.fingerprintKeyVersion as string,
     );
   }
 }
@@ -290,9 +380,9 @@ async function requireTemplatePolicy(
     WHERE source_id = ? AND origin_kind = ? AND template = ?
       AND redaction_version = ? AND fingerprint_key_version = ? AND active = 1
       AND query_names_json = ?
-  `).bind(
-    sourceId, originKind, template, redactionVersion, fingerprintKeyVersion, queryNamesJson,
-  ).first<{ ok: number }>();
+  `)
+    .bind(sourceId, originKind, template, redactionVersion, fingerprintKeyVersion, queryNamesJson)
+    .first<{ ok: number }>();
   if (!allowed) throw new ApiError(403, "origin_template_denied");
 }
 
@@ -305,30 +395,33 @@ export function originStatements(
   const statements: D1PreparedStatement[] = [];
   if (origins.http) {
     const value = origins.http;
-    statements.push(env.DB.prepare(`
+    statements.push(
+      env.DB.prepare(`
       INSERT INTO artifact_http_metadata (
         fetch_artifact_id, method, status, scheme, host, port, path_template,
         query_names_json, redaction_version, url_fingerprint, fingerprint_key_version
       ) SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM fetch_artifacts
       WHERE fetch_run_id = ? AND artifact_key = ?
     `).bind(
-      value.method,
-      value.status,
-      value.scheme,
-      value.host,
-      value.port,
-      value.pathTemplate,
-      JSON.stringify(value.queryNames),
-      value.redactionVersion,
-      value.urlFingerprint,
-      value.fingerprintKeyVersion,
-      runId,
-      artifactKey,
-    ));
+        value.method,
+        value.status,
+        value.scheme,
+        value.host,
+        value.port,
+        value.pathTemplate,
+        JSON.stringify(value.queryNames),
+        value.redactionVersion,
+        value.urlFingerprint,
+        value.fingerprintKeyVersion,
+        runId,
+        artifactKey,
+      ),
+    );
   }
   if (origins.storage) {
     const value = origins.storage;
-    statements.push(env.DB.prepare(`
+    statements.push(
+      env.DB.prepare(`
       INSERT INTO artifact_storage_metadata (
         fetch_artifact_id, storage_kind, container_name, object_key_template,
         object_key_fingerprint, fingerprint_key_version, redaction_version,
@@ -336,41 +429,45 @@ export function originStatements(
       ) SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM fetch_artifacts
       WHERE fetch_run_id = ? AND artifact_key = ?
     `).bind(
-      value.storageKind,
-      value.containerName,
-      value.objectKeyTemplate,
-      value.objectKeyFingerprint,
-      value.fingerprintKeyVersion,
-      value.redactionVersion,
-      value.objectVersion,
-      value.etag,
-      value.lastModifiedAtMs,
-      value.lastModifiedAtBasis,
-      runId,
-      artifactKey,
-    ));
+        value.storageKind,
+        value.containerName,
+        value.objectKeyTemplate,
+        value.objectKeyFingerprint,
+        value.fingerprintKeyVersion,
+        value.redactionVersion,
+        value.objectVersion,
+        value.etag,
+        value.lastModifiedAtMs,
+        value.lastModifiedAtBasis,
+        runId,
+        artifactKey,
+      ),
+    );
   }
   if (origins.file) {
     const value = origins.file;
-    statements.push(env.DB.prepare(`
+    statements.push(
+      env.DB.prepare(`
       INSERT INTO artifact_file_metadata (
         fetch_artifact_id, basename_template, filename_fingerprint,
         fingerprint_key_version, redaction_version, source_modified_at_ms
       ) SELECT id, ?, ?, ?, ?, ? FROM fetch_artifacts
       WHERE fetch_run_id = ? AND artifact_key = ?
     `).bind(
-      value.basenameTemplate,
-      value.filenameFingerprint,
-      value.fingerprintKeyVersion,
-      value.redactionVersion,
-      value.sourceModifiedAtMs,
-      runId,
-      artifactKey,
-    ));
+        value.basenameTemplate,
+        value.filenameFingerprint,
+        value.fingerprintKeyVersion,
+        value.redactionVersion,
+        value.sourceModifiedAtMs,
+        runId,
+        artifactKey,
+      ),
+    );
   }
   if (origins.email) {
     const value = origins.email;
-    statements.push(env.DB.prepare(`
+    statements.push(
+      env.DB.prepare(`
       INSERT INTO artifact_email_metadata (
         fetch_artifact_id, transport_shape, sender_domain, received_at_ms, received_at_basis,
         message_id_sha256, part_index, mime_part_path, inner_message_sha256, inner_sender_domain,
@@ -378,22 +475,23 @@ export function originStatements(
       ) SELECT id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM fetch_artifacts
       WHERE fetch_run_id = ? AND artifact_key = ?
     `).bind(
-      value.transportShape,
-      value.senderDomain,
-      value.receivedAtMs,
-      value.receivedAtBasis,
-      value.messageIdSha256,
-      value.partIndex,
-      value.mimePartPath,
-      value.innerMessageSha256,
-      value.innerSenderDomain,
-      value.filenameTemplate,
-      value.filenameFingerprint,
-      value.fingerprintKeyVersion,
-      value.redactionVersion,
-      runId,
-      artifactKey,
-    ));
+        value.transportShape,
+        value.senderDomain,
+        value.receivedAtMs,
+        value.receivedAtBasis,
+        value.messageIdSha256,
+        value.partIndex,
+        value.mimePartPath,
+        value.innerMessageSha256,
+        value.innerSenderDomain,
+        value.filenameTemplate,
+        value.filenameFingerprint,
+        value.fingerprintKeyVersion,
+        value.redactionVersion,
+        runId,
+        artifactKey,
+      ),
+    );
   }
   return statements;
 }

@@ -15,7 +15,10 @@ function argument(name: string, envName: string): string {
 
 function outputRoot(): string {
   const configured = argument("--output", "VPASS_OUTPUT");
-  const stamp = new Date().toISOString().replaceAll(":", "-").replace(/\.\d{3}Z$/, "Z");
+  const stamp = new Date()
+    .toISOString()
+    .replaceAll(":", "-")
+    .replace(/\.\d{3}Z$/, "Z");
   return resolve(configured || `output/mobile-${stamp}`);
 }
 
@@ -30,7 +33,10 @@ async function credential(envName: string, prompt: string, masked: boolean): Pro
   if (fromEnvironment) return fromEnvironment;
   const result = masked
     ? await password({ message: prompt, validate: (value) => (value ? undefined : "Required") })
-    : await text({ message: prompt, validate: (value) => (value?.trim() ? undefined : "Required") });
+    : await text({
+        message: prompt,
+        validate: (value) => (value?.trim() ? undefined : "Required"),
+      });
   if (isCancel(result)) throw new Error("Cancelled");
   return masked ? result : result.trim();
 }
@@ -105,9 +111,7 @@ async function main(): Promise<void> {
   }
   manifest.completedAt = new Date().toISOString();
   await writeFile(resolve(root, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
-  outro(
-    `Saved ${manifest.transactionCount} rows across ${manifest.cardCount} cards to ${root}`,
-  );
+  outro(`Saved ${manifest.transactionCount} rows across ${manifest.cardCount} cards to ${root}`);
   if (manifest.transactionCount === 0) process.exitCode = 2;
 }
 

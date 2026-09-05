@@ -21,44 +21,48 @@ export default {
         version: env.IMPORTER_VERSION,
       });
     }
-    if (request.method === "POST" && url.pathname === "/v1/myjcb/import-run" &&
-        url.search === "") {
+    if (request.method === "POST" && url.pathname === "/v1/myjcb/import-run" && url.search === "") {
       try {
         const input = await readJson(request);
         exactKeys(input, ["manifestKey", "continuation"]);
         const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
-        const continuation = input.continuation === undefined
-          ? undefined
-          : requiredString(input.continuation, "continuation_invalid", 8_000);
+        const continuation =
+          input.continuation === undefined
+            ? undefined
+            : requiredString(input.continuation, "continuation_invalid", 8_000);
         const result = await importOneMyJcb(env, manifestKey, continuation);
         return json(result, result.status === "deferred" ? 202 : 200);
       } catch (error) {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/vpass/import-run" &&
-        url.search === "") {
+    if (request.method === "POST" && url.pathname === "/v1/vpass/import-run" && url.search === "") {
       try {
         const input = await readJson(request);
         exactKeys(input, ["recordKey", "continuation"]);
         const recordKey = requiredString(input.recordKey, "record_key_invalid", 500);
-        const continuation = input.continuation === undefined
-          ? undefined
-          : requiredString(input.continuation, "continuation_invalid", 16_000);
+        const continuation =
+          input.continuation === undefined
+            ? undefined
+            : requiredString(input.continuation, "continuation_invalid", 16_000);
         const result = await importOneVpass(env, recordKey, continuation);
         return json(result, result.status === "deferred" ? 202 : 200);
       } catch (error) {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/vpass/backfill-page" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/vpass/backfill-page" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["cursor", "limit"]);
-        const cursor = input.cursor === undefined
-          ? undefined
-          : requiredString(input.cursor, "cursor_invalid", 24_000);
+        const cursor =
+          input.cursor === undefined
+            ? undefined
+            : requiredString(input.cursor, "cursor_invalid", 24_000);
         if (input.limit !== undefined && input.limit !== 1) {
           throw new ImportError(400, "backfill_limit_must_be_one");
         }
@@ -67,14 +71,18 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/myjcb/backfill-page" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/myjcb/backfill-page" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["cursor", "limit"]);
-        const cursor = input.cursor === undefined
-          ? undefined
-          : requiredString(input.cursor, "cursor_invalid", 16_000);
+        const cursor =
+          input.cursor === undefined
+            ? undefined
+            : requiredString(input.cursor, "cursor_invalid", 16_000);
         if (input.limit !== undefined && input.limit !== 1) {
           throw new ImportError(400, "backfill_limit_must_be_one");
         }
@@ -83,8 +91,11 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/prestia-globalpass/import-run" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/prestia-globalpass/import-run" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["manifestKey"]);
@@ -95,14 +106,18 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/prestia-globalpass/backfill-page" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/prestia-globalpass/backfill-page" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["cursor", "limit"]);
-        const cursor = input.cursor === undefined
-          ? undefined
-          : requiredString(input.cursor, "cursor_invalid", 12_000);
+        const cursor =
+          input.cursor === undefined
+            ? undefined
+            : requiredString(input.cursor, "cursor_invalid", 12_000);
         if (input.limit !== undefined && input.limit !== 1) {
           throw new ImportError(400, "backfill_limit_must_be_one");
         }
@@ -111,8 +126,11 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/mobile-suica/import-run" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/mobile-suica/import-run" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["manifestKey"]);
@@ -122,8 +140,11 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/v-point/import-run" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/v-point/import-run" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["manifestKey"]);
@@ -134,14 +155,18 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/v-point/backfill-page" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/v-point/backfill-page" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["cursor", "limit"]);
-        const cursor = input.cursor === undefined
-          ? undefined
-          : requiredString(input.cursor, "cursor_invalid", 12_000);
+        const cursor =
+          input.cursor === undefined
+            ? undefined
+            : requiredString(input.cursor, "cursor_invalid", 12_000);
         if (input.limit !== undefined && input.limit !== 1) {
           throw new ImportError(400, "backfill_limit_must_be_one");
         }
@@ -150,14 +175,18 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/mobile-suica/backfill-page" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/mobile-suica/backfill-page" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["cursor", "limit"]);
-        const cursor = input.cursor === undefined
-          ? undefined
-          : requiredString(input.cursor, "cursor_invalid", 4_096);
+        const cursor =
+          input.cursor === undefined
+            ? undefined
+            : requiredString(input.cursor, "cursor_invalid", 4_096);
         if (input.limit !== undefined && input.limit !== 1) {
           throw new ImportError(400, "backfill_limit_must_be_one");
         }
@@ -190,7 +219,7 @@ export default {
           skippedManifestCount,
           deferredManifestCount: 0,
           failedManifestCount,
-          nextCursor: listed.truncated ? listed.cursor ?? null : null,
+          nextCursor: listed.truncated ? (listed.cursor ?? null) : null,
           truncated: listed.truncated,
           ...(failureCode ? { failureCode } : {}),
           ...(failedManifestCount === 1 && object ? { failedManifestKey: object.key } : {}),
@@ -200,8 +229,11 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/sbi-securities/import-run" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/sbi-securities/import-run" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["manifestKey"]);
@@ -211,14 +243,18 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/sbi-securities/backfill-page" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/sbi-securities/backfill-page" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["cursor", "limit"]);
-        const cursor = input.cursor === undefined
-          ? undefined
-          : requiredString(input.cursor, "cursor_invalid", 4_096);
+        const cursor =
+          input.cursor === undefined
+            ? undefined
+            : requiredString(input.cursor, "cursor_invalid", 4_096);
         if (input.limit !== undefined && input.limit !== 1) {
           throw new ImportError(400, "backfill_limit_must_be_one");
         }
@@ -250,7 +286,7 @@ export default {
           importedManifestCount,
           skippedManifestCount,
           failedManifestCount,
-          nextCursor: listed.truncated ? listed.cursor ?? null : null,
+          nextCursor: listed.truncated ? (listed.cursor ?? null) : null,
           truncated: listed.truncated,
           ...(failureCode ? { failureCode } : {}),
           ...(result ? { result } : {}),
@@ -259,8 +295,11 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/sbi-vc-trade/import-run" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/sbi-vc-trade/import-run" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["manifestKey"]);
@@ -270,8 +309,11 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/sbi-shinsei/import-run" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/sbi-shinsei/import-run" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["manifestKey"]);
@@ -281,14 +323,18 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/sbi-shinsei/backfill-page" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/sbi-shinsei/backfill-page" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["cursor", "limit"]);
-        const cursor = input.cursor === undefined
-          ? undefined
-          : requiredString(input.cursor, "cursor_invalid", 4_096);
+        const cursor =
+          input.cursor === undefined
+            ? undefined
+            : requiredString(input.cursor, "cursor_invalid", 4_096);
         if (input.limit !== undefined && input.limit !== 1) {
           throw new ImportError(400, "backfill_limit_must_be_one");
         }
@@ -320,7 +366,7 @@ export default {
           importedManifestCount,
           skippedManifestCount,
           failedManifestCount,
-          nextCursor: listed.truncated ? listed.cursor ?? null : null,
+          nextCursor: listed.truncated ? (listed.cursor ?? null) : null,
           truncated: listed.truncated,
           ...(failureCode ? { failureCode } : {}),
           ...(failedManifestCount === 1 && object ? { failedManifestKey: object.key } : {}),
@@ -330,14 +376,18 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/sbi-vc-trade/backfill-page" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/sbi-vc-trade/backfill-page" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["cursor", "limit"]);
-        const cursor = input.cursor === undefined
-          ? undefined
-          : requiredString(input.cursor, "cursor_invalid", 4_096);
+        const cursor =
+          input.cursor === undefined
+            ? undefined
+            : requiredString(input.cursor, "cursor_invalid", 4_096);
         if (input.limit !== undefined && input.limit !== 1) {
           throw new ImportError(400, "backfill_limit_must_be_one");
         }
@@ -378,7 +428,7 @@ export default {
           skippedManifestCount,
           deferredManifestCount,
           failedManifestCount,
-          nextCursor: listed.truncated ? listed.cursor ?? null : null,
+          nextCursor: listed.truncated ? (listed.cursor ?? null) : null,
           truncated: listed.truncated,
           ...(failureCode ? { failureCode } : {}),
           ...(deferredReason ? { deferredReason } : {}),
@@ -388,8 +438,11 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/sony-bank/import-run" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/sony-bank/import-run" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["manifestKey"]);
@@ -400,14 +453,18 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/sony-bank/backfill-page" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/sony-bank/backfill-page" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["cursor", "limit"]);
-        const cursor = input.cursor === undefined
-          ? undefined
-          : requiredString(input.cursor, "cursor_invalid", 12_000);
+        const cursor =
+          input.cursor === undefined
+            ? undefined
+            : requiredString(input.cursor, "cursor_invalid", 12_000);
         if (input.limit !== undefined && input.limit !== 1) {
           throw new ImportError(400, "backfill_limit_must_be_one");
         }
@@ -469,7 +526,7 @@ export async function backfillVpass(
 ): Promise<JsonObject> {
   const state = encodedCursor
     ? await decodeVpassCursor(encodedCursor, env.ORIGIN_FINGERPRINT_KEY)
-    : { v: 1, scanCursor: null, scanDone: false } satisfies VpassBackfillCursor;
+    : ({ v: 1, scanCursor: null, scanDone: false } satisfies VpassBackfillCursor);
   if (state.recordKey !== undefined) {
     try {
       const result = await importOneVpass(env, state.recordKey, state.transfer);
@@ -584,11 +641,16 @@ async function nextVpassScanCursor(
   state: VpassBackfillCursor,
   key: string,
 ): Promise<string | null> {
-  return state.scanDone ? null : encodeVpassCursor({
-    v: 1,
-    scanCursor: state.scanCursor,
-    scanDone: false,
-  }, key);
+  return state.scanDone
+    ? null
+    : encodeVpassCursor(
+        {
+          v: 1,
+          scanCursor: state.scanCursor,
+          scanDone: false,
+        },
+        key,
+      );
 }
 
 async function encodeVpassCursor(value: VpassBackfillCursor, key: string): Promise<string> {
@@ -624,18 +686,28 @@ async function decodeVpassCursor(value: string, key: string): Promise<VpassBackf
 function assertVpassCursor(value: VpassBackfillCursor): void {
   const scanStateValid = value.scanDone
     ? value.scanCursor === null
-    : value.scanCursor === null || (typeof value.scanCursor === "string" &&
-      value.scanCursor.length > 0 && value.scanCursor.length <= 4_096 &&
-      !/[\x00-\x20\x7f]/u.test(value.scanCursor));
+    : value.scanCursor === null ||
+      (typeof value.scanCursor === "string" &&
+        value.scanCursor.length > 0 &&
+        value.scanCursor.length <= 4_096 &&
+        !/[\x00-\x20\x7f]/u.test(value.scanCursor));
   const hasRecord = value.recordKey !== undefined;
   const hasTransfer = value.transfer !== undefined;
-  if (value.v !== 1 || typeof value.scanDone !== "boolean" || !scanStateValid ||
-      hasRecord !== hasTransfer || (hasRecord &&
-        (typeof value.recordKey !== "string" || value.recordKey.length > 500 ||
-          !/^vpass\/\d{4}\/\d{2}\/\d{2}\/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:\/card-\d{3})?\/(?:manifest|error)\.json$/u
-            .test(value.recordKey) ||
-          typeof value.transfer !== "string" || value.transfer.length === 0 ||
-          value.transfer.length > 16_000))) {
+  if (
+    value.v !== 1 ||
+    typeof value.scanDone !== "boolean" ||
+    !scanStateValid ||
+    hasRecord !== hasTransfer ||
+    (hasRecord &&
+      (typeof value.recordKey !== "string" ||
+        value.recordKey.length > 500 ||
+        !/^vpass\/\d{4}\/\d{2}\/\d{2}\/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:\/card-\d{3})?\/(?:manifest|error)\.json$/u.test(
+          value.recordKey,
+        ) ||
+        typeof value.transfer !== "string" ||
+        value.transfer.length === 0 ||
+        value.transfer.length > 16_000))
+  ) {
     throw new ImportError(400, "cursor_invalid");
   }
 }
@@ -681,10 +753,7 @@ interface MyJcbBackfillCursor {
   transfer?: string;
 }
 
-async function backfillMyJcb(
-  env: Env,
-  encodedCursor: string | undefined,
-): Promise<JsonObject> {
+async function backfillMyJcb(env: Env, encodedCursor: string | undefined): Promise<JsonObject> {
   const state = encodedCursor ? decodeMyJcbCursor(encodedCursor) : null;
   if (state?.manifestKey !== undefined) {
     const result = await importOneMyJcb(env, state.manifestKey, state.transfer);
@@ -792,11 +861,13 @@ function myJcbBackfillResponse(input: {
 }
 
 function nextMyJcbScanCursor(state: MyJcbBackfillCursor): string | null {
-  return state.scanDone ? null : encodeMyJcbCursor({
-    v: 1,
-    scanCursor: state.scanCursor,
-    scanDone: false,
-  });
+  return state.scanDone
+    ? null
+    : encodeMyJcbCursor({
+        v: 1,
+        scanCursor: state.scanCursor,
+        scanDone: false,
+      });
 }
 
 function encodeMyJcbCursor(value: MyJcbBackfillCursor): string {
@@ -832,27 +903,31 @@ function decodeMyJcbCursor(value: string): MyJcbBackfillCursor {
 function assertMyJcbCursor(value: MyJcbBackfillCursor): void {
   const scanStateValid = value.scanDone
     ? value.scanCursor === null
-    : typeof value.scanCursor === "string" && value.scanCursor.length > 0 &&
-      value.scanCursor.length <= 4_096 && !/[\x00-\x20\x7f]/u.test(value.scanCursor);
+    : typeof value.scanCursor === "string" &&
+      value.scanCursor.length > 0 &&
+      value.scanCursor.length <= 4_096 &&
+      !/[\x00-\x20\x7f]/u.test(value.scanCursor);
   const hasManifest = value.manifestKey !== undefined;
   const hasTransfer = value.transfer !== undefined;
-  if (value.v !== 1 || typeof value.scanDone !== "boolean" || !scanStateValid ||
-      hasManifest !== hasTransfer ||
-      (hasManifest &&
-        (typeof value.manifestKey !== "string" || !/^raw\/myjcb\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/manifest\.json$/u
-          .test(value.manifestKey) ||
-          typeof value.transfer !== "string" || value.transfer.length < 1 ||
-          value.transfer.length > 8_000))) {
+  if (
+    value.v !== 1 ||
+    typeof value.scanDone !== "boolean" ||
+    !scanStateValid ||
+    hasManifest !== hasTransfer ||
+    (hasManifest &&
+      (typeof value.manifestKey !== "string" ||
+        !/^raw\/myjcb\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/manifest\.json$/u.test(
+          value.manifestKey,
+        ) ||
+        typeof value.transfer !== "string" ||
+        value.transfer.length < 1 ||
+        value.transfer.length > 8_000))
+  ) {
     throw new ImportError(400, "cursor_invalid");
   }
 }
 
-function importOneGlobalPass(
-  env: Env,
-  manifestKey: string,
-  offset: number,
-  immediate: boolean,
-) {
+function importOneGlobalPass(env: Env, manifestKey: string, offset: number, immediate: boolean) {
   return importGlobalPassRun({
     bucket: env.GLOBAL_PASS_SNAPSHOTS,
     centralService: env.RAW_EVIDENCE,
@@ -987,11 +1062,13 @@ function globalPassBackfillResponse(input: {
 }
 
 function nextGlobalPassScanCursor(state: GlobalPassBackfillCursor): string | null {
-  return state.scanDone ? null : encodeGlobalPassCursor({
-    v: 2,
-    scanCursor: state.scanCursor,
-    scanDone: false,
-  });
+  return state.scanDone
+    ? null
+    : encodeGlobalPassCursor({
+        v: 2,
+        scanCursor: state.scanCursor,
+        scanDone: false,
+      });
 }
 
 function encodeGlobalPassCursor(value: GlobalPassBackfillCursor): string {
@@ -1027,18 +1104,27 @@ function decodeGlobalPassCursor(value: string): GlobalPassBackfillCursor {
 function assertGlobalPassCursor(value: GlobalPassBackfillCursor): void {
   const scanStateValid = value.scanDone
     ? value.scanCursor === null
-    : typeof value.scanCursor === "string" && value.scanCursor.length > 0 &&
-      value.scanCursor.length <= 4_096 && !/[\x00-\x20\x7f]/u.test(value.scanCursor);
+    : typeof value.scanCursor === "string" &&
+      value.scanCursor.length > 0 &&
+      value.scanCursor.length <= 4_096 &&
+      !/[\x00-\x20\x7f]/u.test(value.scanCursor);
   const hasManifest = value.manifestKey !== undefined;
   const hasOffset = value.offset !== undefined;
-  if (value.v !== 2 || typeof value.scanDone !== "boolean" || !scanStateValid ||
-      hasManifest !== hasOffset ||
-      (hasManifest &&
-        (typeof value.manifestKey !== "string" ||
-          !/^raw\/prestia-globalpass\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/manifest\.json$/u
-            .test(value.manifestKey) ||
-          typeof value.offset !== "number" || !Number.isSafeInteger(value.offset) ||
-          value.offset <= 0 || value.offset >= 16))) {
+  if (
+    value.v !== 2 ||
+    typeof value.scanDone !== "boolean" ||
+    !scanStateValid ||
+    hasManifest !== hasOffset ||
+    (hasManifest &&
+      (typeof value.manifestKey !== "string" ||
+        !/^raw\/prestia-globalpass\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/manifest\.json$/u.test(
+          value.manifestKey,
+        ) ||
+        typeof value.offset !== "number" ||
+        !Number.isSafeInteger(value.offset) ||
+        value.offset <= 0 ||
+        value.offset >= 16))
+  ) {
     throw new ImportError(400, "cursor_invalid");
   }
 }
@@ -1054,12 +1140,7 @@ function importOneMobileSuica(env: Env, manifestKey: string) {
   });
 }
 
-function importOneVPoint(
-  env: Env,
-  manifestKey: string,
-  offset: number,
-  immediate: boolean,
-) {
+function importOneVPoint(env: Env, manifestKey: string, offset: number, immediate: boolean) {
   return importVPointRun({
     bucket: env.VPOINT_SNAPSHOTS,
     reconciliationBucket: env.VPOINT_PAY_SNAPSHOTS,
@@ -1081,10 +1162,7 @@ interface VPointBackfillCursor {
   offset?: number;
 }
 
-async function backfillVPoint(
-  env: Env,
-  encodedCursor: string | undefined,
-): Promise<JsonObject> {
+async function backfillVPoint(env: Env, encodedCursor: string | undefined): Promise<JsonObject> {
   const state = encodedCursor
     ? await decodeVPointCursor(encodedCursor, env.RAW_EVIDENCE_TOKEN_VPOINT)
     : null;
@@ -1136,10 +1214,7 @@ async function backfillVPoint(
     return vPointBackfillResponse({
       scannedObjectCount: 1,
       skippedManifestCount: 1,
-      nextCursor: await nextVPointScanCursor(
-        continuation,
-        env.RAW_EVIDENCE_TOKEN_VPOINT,
-      ),
+      nextCursor: await nextVPointScanCursor(continuation, env.RAW_EVIDENCE_TOKEN_VPOINT),
     });
   }
   try {
@@ -1149,21 +1224,21 @@ async function backfillVPoint(
       return vPointBackfillResponse({
         scannedObjectCount: 1,
         deferredManifestCount: 1,
-        nextCursor: await encodeVPointCursor({
-          ...continuation,
-          manifestKey: object.key,
-          offset: result.nextOffset,
-        }, env.RAW_EVIDENCE_TOKEN_VPOINT),
+        nextCursor: await encodeVPointCursor(
+          {
+            ...continuation,
+            manifestKey: object.key,
+            offset: result.nextOffset,
+          },
+          env.RAW_EVIDENCE_TOKEN_VPOINT,
+        ),
         result,
       });
     }
     return vPointBackfillResponse({
       scannedObjectCount: 1,
       importedManifestCount: 1,
-      nextCursor: await nextVPointScanCursor(
-        continuation,
-        env.RAW_EVIDENCE_TOKEN_VPOINT,
-      ),
+      nextCursor: await nextVPointScanCursor(continuation, env.RAW_EVIDENCE_TOKEN_VPOINT),
       result,
     });
   } catch (error) {
@@ -1171,10 +1246,7 @@ async function backfillVPoint(
       scannedObjectCount: 1,
       failedManifestCount: 1,
       failureCode: safeCode(error),
-      nextCursor: await nextVPointScanCursor(
-        continuation,
-        env.RAW_EVIDENCE_TOKEN_VPOINT,
-      ),
+      nextCursor: await nextVPointScanCursor(continuation, env.RAW_EVIDENCE_TOKEN_VPOINT),
     });
   }
 }
@@ -1207,35 +1279,35 @@ async function nextVPointScanCursor(
   state: VPointBackfillCursor,
   secret: string,
 ): Promise<string | null> {
-  return state.scanDone ? null : encodeVPointCursor({
-    v: 4,
-    scanCursor: state.scanCursor,
-    scanDone: false,
-  }, secret);
+  return state.scanDone
+    ? null
+    : encodeVPointCursor(
+        {
+          v: 4,
+          scanCursor: state.scanCursor,
+          scanDone: false,
+        },
+        secret,
+      );
 }
 
-async function encodeVPointCursor(
-  value: VPointBackfillCursor,
-  secret: string,
-): Promise<string> {
+async function encodeVPointCursor(value: VPointBackfillCursor, secret: string): Promise<string> {
   assertVPointCursor(value);
   const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify(value)));
   const signature = await cursorSignature(payload, secret);
   return `vpoint-v4.${payload}.${signature}`;
 }
 
-async function decodeVPointCursor(
-  value: string,
-  secret: string,
-): Promise<VPointBackfillCursor> {
+async function decodeVPointCursor(value: string, secret: string): Promise<VPointBackfillCursor> {
   const match = /^vpoint-v4\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/u.exec(value);
-  if (!match?.[1] || !match[2] ||
-      !await verifyCursorSignature(match[1], match[2], secret)) {
+  if (!match?.[1] || !match[2] || !(await verifyCursorSignature(match[1], match[2], secret))) {
     throw new ImportError(400, "cursor_invalid");
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(base64UrlDecode(match[1])));
+    parsed = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(base64UrlDecode(match[1])),
+    );
   } catch {
     throw new ImportError(400, "cursor_invalid");
   }
@@ -1252,18 +1324,27 @@ async function decodeVPointCursor(
 function assertVPointCursor(value: VPointBackfillCursor): void {
   const scanStateValid = value.scanDone
     ? value.scanCursor === null
-    : typeof value.scanCursor === "string" && value.scanCursor.length > 0 &&
-      value.scanCursor.length <= 4_096 && !/[\x00-\x20\x7f]/u.test(value.scanCursor);
+    : typeof value.scanCursor === "string" &&
+      value.scanCursor.length > 0 &&
+      value.scanCursor.length <= 4_096 &&
+      !/[\x00-\x20\x7f]/u.test(value.scanCursor);
   const hasManifest = value.manifestKey !== undefined;
   const hasOffset = value.offset !== undefined;
-  if (value.v !== 4 || typeof value.scanDone !== "boolean" || !scanStateValid ||
-      hasManifest !== hasOffset ||
-      (hasManifest &&
-        (typeof value.manifestKey !== "string" ||
-          !/^raw\/v-point\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/manifest\.json$/u
-            .test(value.manifestKey) ||
-          typeof value.offset !== "number" || !Number.isSafeInteger(value.offset) ||
-          value.offset <= 0 || value.offset > 405))) {
+  if (
+    value.v !== 4 ||
+    typeof value.scanDone !== "boolean" ||
+    !scanStateValid ||
+    hasManifest !== hasOffset ||
+    (hasManifest &&
+      (typeof value.manifestKey !== "string" ||
+        !/^raw\/v-point\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/manifest\.json$/u.test(
+          value.manifestKey,
+        ) ||
+        typeof value.offset !== "number" ||
+        !Number.isSafeInteger(value.offset) ||
+        value.offset <= 0 ||
+        value.offset > 405))
+  ) {
     throw new ImportError(400, "cursor_invalid");
   }
 }
@@ -1276,11 +1357,11 @@ async function cursorSignature(payload: string, secret: string): Promise<string>
     false,
     ["sign"],
   );
-  return base64UrlEncode(new Uint8Array(await crypto.subtle.sign(
-    "HMAC",
-    key,
-    new TextEncoder().encode(`vpoint-v4.${payload}`),
-  )));
+  return base64UrlEncode(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`vpoint-v4.${payload}`)),
+    ),
+  );
 }
 
 async function verifyCursorSignature(
@@ -1353,12 +1434,7 @@ function importOneSbiShinsei(env: Env, manifestKey: string) {
   });
 }
 
-function importOneSony(
-  env: Env,
-  manifestKey: string,
-  offset: number,
-  immediate: boolean,
-) {
+function importOneSony(env: Env, manifestKey: string, offset: number, immediate: boolean) {
   return importSonyRun({
     bucket: env.SONY_SNAPSHOTS,
     centralService: env.RAW_EVIDENCE,
@@ -1491,11 +1567,13 @@ function sonyBackfillResponse(input: {
 }
 
 function nextSonyScanCursor(state: SonyBackfillCursor): string | null {
-  return state.scanDone ? null : encodeSonyCursor({
-    v: 1,
-    scanCursor: state.scanCursor,
-    scanDone: false,
-  });
+  return state.scanDone
+    ? null
+    : encodeSonyCursor({
+        v: 1,
+        scanCursor: state.scanCursor,
+        scanDone: false,
+      });
 }
 
 function encodeSonyCursor(value: SonyBackfillCursor): string {
@@ -1522,14 +1600,17 @@ function decodeSonyCursor(value: string): SonyBackfillCursor {
   }
   const input = parsed as JsonObject;
   exactKeys(input, ["v", "scanCursor", "scanDone", "manifestKey", "offset"]);
-  if (input.v !== 1 || typeof input.scanDone !== "boolean" ||
-      !(input.scanCursor === null || typeof input.scanCursor === "string") ||
-      (typeof input.scanCursor === "string" && input.scanCursor.length > 4_096) ||
-      (input.manifestKey !== undefined &&
-        (typeof input.manifestKey !== "string" || input.manifestKey.length > 500)) ||
-      (input.offset !== undefined &&
-        (!Number.isSafeInteger(input.offset) || (input.offset as number) < 0)) ||
-      ((input.manifestKey === undefined) !== (input.offset === undefined))) {
+  if (
+    input.v !== 1 ||
+    typeof input.scanDone !== "boolean" ||
+    !(input.scanCursor === null || typeof input.scanCursor === "string") ||
+    (typeof input.scanCursor === "string" && input.scanCursor.length > 4_096) ||
+    (input.manifestKey !== undefined &&
+      (typeof input.manifestKey !== "string" || input.manifestKey.length > 500)) ||
+    (input.offset !== undefined &&
+      (!Number.isSafeInteger(input.offset) || (input.offset as number) < 0)) ||
+    (input.manifestKey === undefined) !== (input.offset === undefined)
+  ) {
     throw new ImportError(400, "cursor_invalid");
   }
   return input as unknown as SonyBackfillCursor;
@@ -1589,25 +1670,28 @@ function requiredString(value: unknown, code: string, max: number): string {
 
 export function parseGlobalPassLegacyEmptyAllowlist(value: string): ReadonlySet<string> {
   const hashes = value.split(",");
-  if (hashes.length === 0 || hashes.length > 15 ||
-      hashes.some((hash) => !/^[0-9a-f]{64}$/u.test(hash)) ||
-      new Set(hashes).size !== hashes.length) {
+  if (
+    hashes.length === 0 ||
+    hashes.length > 15 ||
+    hashes.some((hash) => !/^[0-9a-f]{64}$/u.test(hash)) ||
+    new Set(hashes).size !== hashes.length
+  ) {
     throw new ImportError(500, "global_pass_legacy_empty_allowlist_invalid");
   }
   return new Set(hashes);
 }
 
 function errorResponse(error: unknown): Response {
-  return json(
-    { error: safeCode(error) },
-    error instanceof ImportError ? error.status : 502,
-  );
+  return json({ error: safeCode(error) }, error instanceof ImportError ? error.status : 502);
 }
 
 function safeCode(error: unknown): string {
-  const candidate = error instanceof ImportError
-    ? error.code
-    : error instanceof Error ? error.message : "request_failed";
+  const candidate =
+    error instanceof ImportError
+      ? error.code
+      : error instanceof Error
+        ? error.message
+        : "request_failed";
   return /^[a-z0-9_-]{1,100}$/u.test(candidate) ? candidate : "request_failed";
 }
 

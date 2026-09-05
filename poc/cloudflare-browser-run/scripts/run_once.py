@@ -14,7 +14,15 @@ WORKER_URL = "https://kogane-vpass-browser-run-20260825.takuanimal.workers.dev"
 
 
 def secret_command(project: Path, action: str, value: str | None = None) -> None:
-    command = ["bunx", "wrangler", "secret", action, "PROBE_TOKEN", "--name", WORKER_NAME]
+    command = [
+        "bunx",
+        "wrangler",
+        "secret",
+        action,
+        "PROBE_TOKEN",
+        "--name",
+        WORKER_NAME,
+    ]
     input_text = f"{value}\n" if value is not None else "y\n"
     result = subprocess.run(
         command,
@@ -26,7 +34,9 @@ def secret_command(project: Path, action: str, value: str | None = None) -> None
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"wrangler secret {action} failed with code {result.returncode}")
+        raise RuntimeError(
+            f"wrangler secret {action} failed with code {result.returncode}"
+        )
 
 
 def deploy_final(project: Path) -> None:

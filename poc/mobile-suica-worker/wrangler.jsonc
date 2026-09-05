@@ -16,10 +16,7 @@
     }
   },
   "secrets": {
-    "required": [
-      "ADMIN_TRIGGER_TOKEN",
-      "JRE_ID_CREDENTIAL_JSON"
-    ]
+    "required": ["ADMIN_TRIGGER_TOKEN", "JRE_ID_CREDENTIAL_JSON"]
   },
   "r2_buckets": [
     {

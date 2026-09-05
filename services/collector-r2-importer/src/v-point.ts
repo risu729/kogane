@@ -11,8 +11,7 @@ const CENTRAL_CLIENT_ID = "collector-r2-v-point";
 const STORAGE_CONTAINER = "kogane-vpoint-collector-poc";
 const STORAGE_TEMPLATE = "raw/v-point/{date}/{run-id}/{artifact}.json";
 const RECONCILIATION_CONTAINER = "kogane-vpoint-pay-collector-poc";
-const RECONCILIATION_TEMPLATE =
-  "derived/v-point-pay-email-reconciliation/{date}/{run-id}.json";
+const RECONCILIATION_TEMPLATE = "derived/v-point-pay-email-reconciliation/{date}/{run-id}.json";
 const FINGERPRINT_VERSION = "collector-r2-v1";
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_ARTIFACT_BYTES = 4 * 1024 * 1024;
@@ -60,9 +59,7 @@ interface ReconciliationSummary {
   ambiguousCount: number;
   unmatchedCount: number;
   notComparableCount: number;
-  appLedgerStatus:
-    | "unavailable-no-live-snapshot"
-    | "available-not-compared";
+  appLedgerStatus: "unavailable-no-live-snapshot" | "available-not-compared";
 }
 
 interface Manifest {
@@ -216,11 +213,14 @@ export async function importVPointRun(options: ImportVPointOptions): Promise<Imp
     const loaded = await readManifest(options.bucket, options.manifestKey);
     const manifest = loaded.manifest;
     const prefix = options.manifestKey.slice(0, -"manifest.json".length);
-    expectedArtifactCount = manifest.artifacts.length +
-      (manifest.emailReconciliation ? 1 : 0) + 1;
+    expectedArtifactCount = manifest.artifacts.length + (manifest.emailReconciliation ? 1 : 0) + 1;
     const offset = options.offset ?? 0;
-    if (!Number.isSafeInteger(offset) || offset < 0 || offset >= expectedArtifactCount ||
-        (options.immediate !== false && offset !== 0)) {
+    if (
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      offset >= expectedArtifactCount ||
+      (options.immediate !== false && offset !== 0)
+    ) {
       throw new ImportError(400, "transfer_offset_invalid");
     }
 
@@ -277,18 +277,20 @@ export async function importVPointRun(options: ImportVPointOptions): Promise<Imp
       unitKey: "account",
       terminalReportRequired: true,
     });
-    const historyGroupId = manifest.historyPageCount > 0
-      ? await central.addPageGroup(centralRunId, {
-          pageGroupKey: "point-history",
-          declaredPageCount: manifest.historyPageCount,
-        })
-      : undefined;
-    const vMoneyGroupId = manifest.vMoneyHistoryPageCount > 0
-      ? await central.addPageGroup(centralRunId, {
-          pageGroupKey: "vmoney-history",
-          declaredPageCount: manifest.vMoneyHistoryPageCount,
-        })
-      : undefined;
+    const historyGroupId =
+      manifest.historyPageCount > 0
+        ? await central.addPageGroup(centralRunId, {
+            pageGroupKey: "point-history",
+            declaredPageCount: manifest.historyPageCount,
+          })
+        : undefined;
+    const vMoneyGroupId =
+      manifest.vMoneyHistoryPageCount > 0
+        ? await central.addPageGroup(centralRunId, {
+            pageGroupKey: "vmoney-history",
+            declaredPageCount: manifest.vMoneyHistoryPageCount,
+          })
+        : undefined;
 
     phase = "inventory_plan";
     const plans = await artifactPlans({
@@ -305,9 +307,9 @@ export async function importVPointRun(options: ImportVPointOptions): Promise<Imp
     });
 
     if (options.immediate === false) {
-      const inventory = plans.map((plan) => plan.inventory).sort((left, right) =>
-        binaryCompare(left.artifactKey, right.artifactKey)
-      );
+      const inventory = plans
+        .map((plan) => plan.inventory)
+        .sort((left, right) => binaryCompare(left.artifactKey, right.artifactKey));
       const inventorySha256 = await sha256Hex(
         new TextEncoder().encode(canonicalJson(inventory as unknown as JsonValue)),
       );
@@ -509,17 +511,19 @@ async function currentPlanBytes(
     current = await readVerifiedArtifact(options.bucket, plan.source.artifact);
     validateArtifactPayload(plan.source.artifact.dataset, current);
   } else if (plan.source.kind === "reconciliation") {
-    current = (await readVerifiedReport(
-      options.reconciliationBucket,
-      manifest,
-      plan.source.summary,
-      verified,
-    )).bytes;
+    current = (
+      await readVerifiedReport(
+        options.reconciliationBucket,
+        manifest,
+        plan.source.summary,
+        verified,
+      )
+    ).bytes;
   } else {
     const loaded = await readManifest(options.bucket, options.manifestKey);
     current = sanitizeManifest(loaded.bytes, loaded.manifest);
   }
-  if (current.byteLength !== plan.byteSize || await sha256Hex(current) !== plan.sha256) {
+  if (current.byteLength !== plan.byteSize || (await sha256Hex(current)) !== plan.sha256) {
     throw new ImportError(409, "artifact_changed_during_import");
   }
   return current;
@@ -601,30 +605,54 @@ export function parseVPointManifest(bytes: Uint8Array, manifestKey: string): Man
   if (!keyMatch) invalid("manifest_key_invalid");
   const input = parseJson(bytes, "manifest_json_invalid");
   const schemaVersion = oneOf(input.schemaVersion, [V1, V2] as const, "manifest_schema_invalid");
-  exactShape(input, [
-    "schemaVersion", "source", "runId", "startedAt", "completedAt", "status",
-    "historyTotal", "historyPageCount",
-    ...(schemaVersion === V2 ? ["vMoneyHistoryTotal", "vMoneyHistoryPageCount"] : []),
-    "artifacts", "failures", ...(schemaVersion === V2 ? ["emailReconciliation"] : []),
-  ], schemaVersion === V2 ? ["emailReconciliation"] : []);
+  exactShape(
+    input,
+    [
+      "schemaVersion",
+      "source",
+      "runId",
+      "startedAt",
+      "completedAt",
+      "status",
+      "historyTotal",
+      "historyPageCount",
+      ...(schemaVersion === V2 ? ["vMoneyHistoryTotal", "vMoneyHistoryPageCount"] : []),
+      "artifacts",
+      "failures",
+      ...(schemaVersion === V2 ? ["emailReconciliation"] : []),
+    ],
+    schemaVersion === V2 ? ["emailReconciliation"] : [],
+  );
   if (input.source !== SOURCE || input.runId !== keyMatch[4]) {
     invalid("manifest_identity_mismatch");
   }
   const startedAt = instant(input.startedAt, "manifest_started_at_invalid");
   const completedAt = instant(input.completedAt, "manifest_completed_at_invalid");
-  if (completedAt < startedAt ||
-      startedAt.slice(0, 10) !== `${keyMatch[1]}-${keyMatch[2]}-${keyMatch[3]}`) {
+  if (
+    completedAt < startedAt ||
+    startedAt.slice(0, 10) !== `${keyMatch[1]}-${keyMatch[2]}-${keyMatch[3]}`
+  ) {
     invalid("manifest_time_invalid");
   }
-  const status = oneOf(input.status, ["success", "partial", "failed"] as const, "manifest_status_invalid");
+  const status = oneOf(
+    input.status,
+    ["success", "partial", "failed"] as const,
+    "manifest_status_invalid",
+  );
   const historyTotal = count(input.historyTotal, 1_000_000, "manifest_history_total_invalid");
-  const historyPageCount = count(input.historyPageCount, MAX_HISTORY_PAGES, "manifest_history_pages_invalid");
-  const vMoneyHistoryTotal = schemaVersion === V2
-    ? count(input.vMoneyHistoryTotal, 1_000_000, "manifest_vmoney_total_invalid")
-    : 0;
-  const vMoneyHistoryPageCount = schemaVersion === V2
-    ? count(input.vMoneyHistoryPageCount, MAX_HISTORY_PAGES, "manifest_vmoney_pages_invalid")
-    : 0;
+  const historyPageCount = count(
+    input.historyPageCount,
+    MAX_HISTORY_PAGES,
+    "manifest_history_pages_invalid",
+  );
+  const vMoneyHistoryTotal =
+    schemaVersion === V2
+      ? count(input.vMoneyHistoryTotal, 1_000_000, "manifest_vmoney_total_invalid")
+      : 0;
+  const vMoneyHistoryPageCount =
+    schemaVersion === V2
+      ? count(input.vMoneyHistoryPageCount, MAX_HISTORY_PAGES, "manifest_vmoney_pages_invalid")
+      : 0;
   if (!Array.isArray(input.artifacts) || input.artifacts.length > 403) {
     invalid("manifest_artifacts_invalid");
   }
@@ -634,9 +662,10 @@ export function parseVPointManifest(bytes: Uint8Array, manifestKey: string): Man
   const prefix = manifestKey.slice(0, -"manifest.json".length);
   const artifacts = input.artifacts.map((value) => parseArtifact(value, prefix, schemaVersion));
   const failures = input.failures.map((value) => parseFailure(value, schemaVersion));
-  const emailReconciliation = input.emailReconciliation === undefined
-    ? undefined
-    : parseReconciliationSummary(input.emailReconciliation, keyMatch[4]!, completedAt);
+  const emailReconciliation =
+    input.emailReconciliation === undefined
+      ? undefined
+      : parseReconciliationSummary(input.emailReconciliation, keyMatch[4]!, completedAt);
   validateManifestContract({
     schemaVersion,
     status,
@@ -694,8 +723,12 @@ function parseFailure(value: unknown, version: SchemaVersion): Failure {
   if (typeof input.errorType !== "string" || !SAFE_ERROR_TYPE.test(input.errorType)) {
     invalid("manifest_failure_type_invalid");
   }
-  if (typeof input.message !== "string" || input.message.length < 1 || input.message.length > 300 ||
-      /[\r\n\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/u.test(input.message)) {
+  if (
+    typeof input.message !== "string" ||
+    input.message.length < 1 ||
+    input.message.length > 300 ||
+    /[\r\n\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/u.test(input.message)
+  ) {
     invalid("manifest_failure_message_invalid");
   }
   if (input.operation === "collect") {
@@ -719,13 +752,23 @@ function parseReconciliationSummary(
 ): ReconciliationSummary {
   const input = record(value, "manifest_reconciliation_invalid");
   exactShape(input, [
-    "reportKey", "emailEventCount", "comparableCount", "matchedCount",
-    "ambiguousCount", "unmatchedCount", "notComparableCount", "appLedgerStatus",
+    "reportKey",
+    "emailEventCount",
+    "comparableCount",
+    "matchedCount",
+    "ambiguousCount",
+    "unmatchedCount",
+    "notComparableCount",
+    "appLedgerStatus",
   ]);
   const escapedRunId = runId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  if (typeof input.reportKey !== "string" ||
-      !new RegExp(`^derived/v-point-pay-email-reconciliation/20\\d{2}/(?:0[1-9]|1[0-2])/(?:0[1-9]|[12]\\d|3[01])/${escapedRunId}\\.json$`, "u")
-        .test(input.reportKey)) {
+  if (
+    typeof input.reportKey !== "string" ||
+    !new RegExp(
+      `^derived/v-point-pay-email-reconciliation/20\\d{2}/(?:0[1-9]|1[0-2])/(?:0[1-9]|[12]\\d|3[01])/${escapedRunId}\\.json$`,
+      "u",
+    ).test(input.reportKey)
+  ) {
     invalid("manifest_reconciliation_key_invalid");
   }
   const result: ReconciliationSummary = {
@@ -735,15 +778,22 @@ function parseReconciliationSummary(
     matchedCount: count(input.matchedCount, 100_000, "manifest_reconciliation_count_invalid"),
     ambiguousCount: count(input.ambiguousCount, 100_000, "manifest_reconciliation_count_invalid"),
     unmatchedCount: count(input.unmatchedCount, 100_000, "manifest_reconciliation_count_invalid"),
-    notComparableCount: count(input.notComparableCount, 100_000, "manifest_reconciliation_count_invalid"),
+    notComparableCount: count(
+      input.notComparableCount,
+      100_000,
+      "manifest_reconciliation_count_invalid",
+    ),
     appLedgerStatus: oneOf(
       input.appLedgerStatus,
       ["unavailable-no-live-snapshot", "available-not-compared"] as const,
       "manifest_reconciliation_status_invalid",
     ),
   };
-  if (result.comparableCount !== result.matchedCount + result.ambiguousCount + result.unmatchedCount ||
-      result.emailEventCount !== result.comparableCount + result.notComparableCount) {
+  if (
+    result.comparableCount !==
+      result.matchedCount + result.ambiguousCount + result.unmatchedCount ||
+    result.emailEventCount !== result.comparableCount + result.notComparableCount
+  ) {
     invalid("manifest_reconciliation_count_mismatch");
   }
   return result;
@@ -762,25 +812,41 @@ function validateManifestContract(input: {
 }): void {
   const collectFailures = input.failures.filter((failure) => failure.operation === "collect");
   if (collectFailures.length > 0) {
-    if (collectFailures.length !== 1 || input.failures.length !== 1 || input.status !== "failed" ||
-        input.artifacts.length !== 0 || input.historyTotal !== 0 || input.historyPageCount !== 0 ||
-        input.vMoneyHistoryTotal !== 0 || input.vMoneyHistoryPageCount !== 0 || input.emailReconciliation) {
+    if (
+      collectFailures.length !== 1 ||
+      input.failures.length !== 1 ||
+      input.status !== "failed" ||
+      input.artifacts.length !== 0 ||
+      input.historyTotal !== 0 ||
+      input.historyPageCount !== 0 ||
+      input.vMoneyHistoryTotal !== 0 ||
+      input.vMoneyHistoryPageCount !== 0 ||
+      input.emailReconciliation
+    ) {
       invalid("manifest_collect_failure_invalid");
     }
     return;
   }
-  if (input.historyPageCount < 1 ||
-      input.historyPageCount !== Math.max(1, Math.ceil(input.historyTotal / PAGE_SIZE))) {
+  if (
+    input.historyPageCount < 1 ||
+    input.historyPageCount !== Math.max(1, Math.ceil(input.historyTotal / PAGE_SIZE))
+  ) {
     invalid("manifest_history_pagination_invalid");
   }
-  if (input.schemaVersion === V2 &&
-      (input.vMoneyHistoryPageCount !== 1 || input.vMoneyHistoryTotal !== 0)) {
+  if (
+    input.schemaVersion === V2 &&
+    (input.vMoneyHistoryPageCount !== 1 || input.vMoneyHistoryTotal !== 0)
+  ) {
     // V Money is explicitly outside the V Point source boundary. The live
     // account has only the observed empty page; non-empty data requires a
     // separately reviewed source contract instead of silent attribution.
     invalid("manifest_vmoney_nonempty_unsupported");
   }
-  const expected = expectedDatasets(input.schemaVersion, input.historyPageCount, input.vMoneyHistoryPageCount);
+  const expected = expectedDatasets(
+    input.schemaVersion,
+    input.historyPageCount,
+    input.vMoneyHistoryPageCount,
+  );
   const actual = input.artifacts.map((artifact) => artifact.dataset);
   if (new Set(actual).size !== actual.length || !isOrderedSubset(actual, expected)) {
     invalid("manifest_dataset_order_invalid");
@@ -788,17 +854,21 @@ function validateManifestContract(input: {
   const r2Failures = input.failures.filter((failure) => failure.operation === "r2");
   const missing = expected.filter((dataset) => !actual.includes(dataset));
   const failedDatasets = r2Failures.map((failure) => failure.artifactDataset!);
-  if (!sameStrings([...missing].sort(), [...failedDatasets].sort()) ||
-      new Set(failedDatasets).size !== failedDatasets.length) {
+  if (
+    !sameStrings([...missing].sort(), [...failedDatasets].sort()) ||
+    new Set(failedDatasets).size !== failedDatasets.length
+  ) {
     invalid("manifest_failure_complement_mismatch");
   }
   const reconcileFailures = input.failures.filter((failure) => failure.operation === "reconcile");
-  if (reconcileFailures.length > 1 || (reconcileFailures.length === 1 && input.emailReconciliation)) {
+  if (
+    reconcileFailures.length > 1 ||
+    (reconcileFailures.length === 1 && input.emailReconciliation)
+  ) {
     invalid("manifest_reconciliation_state_invalid");
   }
-  const expectedStatus = input.failures.length === 0
-    ? "success"
-    : input.artifacts.length === 0 ? "failed" : "partial";
+  const expectedStatus =
+    input.failures.length === 0 ? "success" : input.artifacts.length === 0 ? "failed" : "partial";
   if (input.status !== expectedStatus) invalid("manifest_status_mismatch");
 }
 
@@ -830,31 +900,52 @@ function validateApiStatus(input: JsonObject): void {
   exactShapeConflict(input, ["status", "results"], "artifact_envelope_invalid");
   const status = recordConflict(input.status, "artifact_status_invalid");
   exactShapeConflict(status, ["code", "response"], "artifact_status_invalid");
-  if (status.code !== "0000" || typeof status.response !== "string" || status.response.length > 1_000) {
+  if (
+    status.code !== "0000" ||
+    typeof status.response !== "string" ||
+    status.response.length > 1_000
+  ) {
     throw new ImportError(409, "artifact_status_invalid");
   }
 }
 
 function validateBalance(input: JsonObject): void {
   const results = recordConflict(input.results, "balance_results_invalid");
-  exactShapeConflict(results, ["common", "get_month", "store", "tmoney"], "balance_results_invalid");
-  if (!Array.isArray(results.common) || results.common.length > 100 ||
-      !Array.isArray(results.store) || results.store.length > 1_000 ||
-      !nonNegativeInteger(results.get_month) || !isRecord(results.tmoney) ||
-      Object.keys(results.tmoney).length !== 0) {
+  exactShapeConflict(
+    results,
+    ["common", "get_month", "store", "tmoney"],
+    "balance_results_invalid",
+  );
+  if (
+    !Array.isArray(results.common) ||
+    results.common.length > 100 ||
+    !Array.isArray(results.store) ||
+    results.store.length > 1_000 ||
+    !nonNegativeInteger(results.get_month) ||
+    !isRecord(results.tmoney) ||
+    Object.keys(results.tmoney).length !== 0
+  ) {
     throw new ImportError(409, "balance_results_invalid");
   }
   for (const value of results.common) {
     const row = recordConflict(value, "balance_common_invalid");
     exactShapeConflict(row, ["expiration", "point", "point_type"], "balance_common_invalid");
-    if (!safeText(row.expiration, 100) || !integer(row.point) || !nonNegativeInteger(row.point_type)) {
+    if (
+      !safeText(row.expiration, 100) ||
+      !integer(row.point) ||
+      !nonNegativeInteger(row.point_type)
+    ) {
       throw new ImportError(409, "balance_common_invalid");
     }
   }
   for (const value of results.store) {
     const row = recordConflict(value, "balance_store_invalid");
     exactShapeConflict(row, ["alliance_name", "items"], "balance_store_invalid");
-    if (!safeText(row.alliance_name, 500) || !Array.isArray(row.items) || row.items.length > 1_000) {
+    if (
+      !safeText(row.alliance_name, 500) ||
+      !Array.isArray(row.items) ||
+      row.items.length > 1_000
+    ) {
       throw new ImportError(409, "balance_store_invalid");
     }
     for (const itemValue of row.items) {
@@ -889,8 +980,11 @@ function validateHistory(
     pointHistory ? ["graph", "history", "total"] : ["history", "total"],
     "history_results_invalid",
   );
-  if (!Array.isArray(results.history) || results.history.length > PAGE_SIZE ||
-      !nonNegativeInteger(results.total)) {
+  if (
+    !Array.isArray(results.history) ||
+    results.history.length > PAGE_SIZE ||
+    !nonNegativeInteger(results.total)
+  ) {
     throw new ImportError(409, "history_results_invalid");
   }
   if (!pointHistory && (results.total !== 0 || results.history.length !== 0 || index !== 1)) {
@@ -924,17 +1018,36 @@ function validateHistory(
 
 function validateHistoryRow(value: unknown): JsonObject {
   const row = recordConflict(value, "history_row_invalid");
-  exactShapeConflict(row, [
-    "date_reflect", "date_use", "is_use_mbo", "point", "point_div",
-    "point_type", "reason", "store_alliance_name", "store_category",
-    "store_company", "store_name",
-  ], "history_row_invalid");
-  if (!dateText(row.date_reflect) || !dateText(row.date_use) ||
-      typeof row.is_use_mbo !== "boolean" || !integer(row.point) ||
-      !nonNegativeInteger(row.point_div) || !nonNegativeInteger(row.point_type) ||
-      !safeText(row.reason, 2_000) || !safeText(row.store_alliance_name, 2_000) ||
-      !safeText(row.store_category, 2_000) || !safeText(row.store_company, 2_000) ||
-      !safeText(row.store_name, 2_000)) {
+  exactShapeConflict(
+    row,
+    [
+      "date_reflect",
+      "date_use",
+      "is_use_mbo",
+      "point",
+      "point_div",
+      "point_type",
+      "reason",
+      "store_alliance_name",
+      "store_category",
+      "store_company",
+      "store_name",
+    ],
+    "history_row_invalid",
+  );
+  if (
+    !dateText(row.date_reflect) ||
+    !dateText(row.date_use) ||
+    typeof row.is_use_mbo !== "boolean" ||
+    !integer(row.point) ||
+    !nonNegativeInteger(row.point_div) ||
+    !nonNegativeInteger(row.point_type) ||
+    !safeText(row.reason, 2_000) ||
+    !safeText(row.store_alliance_name, 2_000) ||
+    !safeText(row.store_category, 2_000) ||
+    !safeText(row.store_company, 2_000) ||
+    !safeText(row.store_name, 2_000)
+  ) {
     throw new ImportError(409, "history_row_invalid");
   }
   return row;
@@ -946,39 +1059,61 @@ function validateSummary(input: JsonObject): SummaryInfo {
     ["vpoint-collection-summary-v1", "vpoint-collection-summary-v2"] as const,
     "summary_schema_invalid",
   );
-  exactShapeConflict(input, [
-    "schemaVersion", "historyTotal", "historyPageCount",
-    ...(version.endsWith("v2") ? ["vMoneyHistoryTotal", "vMoneyHistoryPageCount"] : []),
-  ], "summary_shape_invalid");
-  if (!nonNegativeInteger(input.historyTotal) || !nonNegativeInteger(input.historyPageCount) ||
-      (version.endsWith("v2") &&
-        (!nonNegativeInteger(input.vMoneyHistoryTotal) || !nonNegativeInteger(input.vMoneyHistoryPageCount)))) {
+  exactShapeConflict(
+    input,
+    [
+      "schemaVersion",
+      "historyTotal",
+      "historyPageCount",
+      ...(version.endsWith("v2") ? ["vMoneyHistoryTotal", "vMoneyHistoryPageCount"] : []),
+    ],
+    "summary_shape_invalid",
+  );
+  if (
+    !nonNegativeInteger(input.historyTotal) ||
+    !nonNegativeInteger(input.historyPageCount) ||
+    (version.endsWith("v2") &&
+      (!nonNegativeInteger(input.vMoneyHistoryTotal) ||
+        !nonNegativeInteger(input.vMoneyHistoryPageCount)))
+  ) {
     throw new ImportError(409, "summary_count_invalid");
   }
   return {
     version,
     historyTotal: input.historyTotal,
     historyPageCount: input.historyPageCount,
-    vMoneyHistoryTotal: version.endsWith("v2") ? input.vMoneyHistoryTotal as number : 0,
-    vMoneyHistoryPageCount: version.endsWith("v2") ? input.vMoneyHistoryPageCount as number : 0,
+    vMoneyHistoryTotal: version.endsWith("v2") ? (input.vMoneyHistoryTotal as number) : 0,
+    vMoneyHistoryPageCount: version.endsWith("v2") ? (input.vMoneyHistoryPageCount as number) : 0,
   };
 }
 
 function validateSemantics(manifest: Manifest, artifacts: VerifiedArtifact[]): void {
-  const pointPages = artifacts.flatMap((entry) => entry.page?.group === "history" ? [entry.page] : []);
-  const vMoneyPages = artifacts.flatMap((entry) => entry.page?.group === "vmoney-history" ? [entry.page] : []);
+  const pointPages = artifacts.flatMap((entry) =>
+    entry.page?.group === "history" ? [entry.page] : [],
+  );
+  const vMoneyPages = artifacts.flatMap((entry) =>
+    entry.page?.group === "vmoney-history" ? [entry.page] : [],
+  );
   validatePageSubset(pointPages, manifest.historyTotal, manifest.historyPageCount, "history");
-  validatePageSubset(vMoneyPages, manifest.vMoneyHistoryTotal, manifest.vMoneyHistoryPageCount, "vmoney-history");
+  validatePageSubset(
+    vMoneyPages,
+    manifest.vMoneyHistoryTotal,
+    manifest.vMoneyHistoryPageCount,
+    "vmoney-history",
+  );
   const summaryEntry = artifacts.find((entry) => entry.artifact.dataset === "collection-summary");
   if (summaryEntry?.summary) {
-    const expectedVersion = manifest.schemaVersion === V1
-      ? "vpoint-collection-summary-v1"
-      : "vpoint-collection-summary-v2";
-    if (summaryEntry.summary.version !== expectedVersion ||
-        summaryEntry.summary.historyTotal !== manifest.historyTotal ||
-        summaryEntry.summary.historyPageCount !== manifest.historyPageCount ||
-        summaryEntry.summary.vMoneyHistoryTotal !== manifest.vMoneyHistoryTotal ||
-        summaryEntry.summary.vMoneyHistoryPageCount !== manifest.vMoneyHistoryPageCount) {
+    const expectedVersion =
+      manifest.schemaVersion === V1
+        ? "vpoint-collection-summary-v1"
+        : "vpoint-collection-summary-v2";
+    if (
+      summaryEntry.summary.version !== expectedVersion ||
+      summaryEntry.summary.historyTotal !== manifest.historyTotal ||
+      summaryEntry.summary.historyPageCount !== manifest.historyPageCount ||
+      summaryEntry.summary.vMoneyHistoryTotal !== manifest.vMoneyHistoryTotal ||
+      summaryEntry.summary.vMoneyHistoryPageCount !== manifest.vMoneyHistoryPageCount
+    ) {
       invalid("summary_manifest_mismatch");
     }
   }
@@ -991,7 +1126,12 @@ function validatePageSubset(
   group: PageInfo["group"],
 ): void {
   for (const page of pages) {
-    if (page.group !== group || page.total !== total || page.index < 1 || page.index > declaredPages) {
+    if (
+      page.group !== group ||
+      page.total !== total ||
+      page.index < 1 ||
+      page.index > declaredPages
+    ) {
       invalid("artifact_pagination_mismatch");
     }
     const expectedRows = Math.min(PAGE_SIZE, Math.max(total - (page.index - 1) * PAGE_SIZE, 0));
@@ -999,7 +1139,10 @@ function validatePageSubset(
   }
 }
 
-async function readManifest(bucket: R2Bucket, manifestKey: string): Promise<{
+async function readManifest(
+  bucket: R2Bucket,
+  manifestKey: string,
+): Promise<{
   manifest: Manifest;
   bytes: Uint8Array;
 }> {
@@ -1013,11 +1156,15 @@ async function readManifest(bucket: R2Bucket, manifestKey: string): Promise<{
   const bytes = new Uint8Array(await object.arrayBuffer());
   assertNativeSha256(object, await sha256Hex(bytes));
   const manifest = parseVPointManifest(bytes, manifestKey);
-  assertExactMetadata(object.customMetadata, {
-    source: SOURCE,
-    status: manifest.status,
-    runId: manifest.runId,
-  }, "manifest_metadata_mismatch");
+  assertExactMetadata(
+    object.customMetadata,
+    {
+      source: SOURCE,
+      status: manifest.status,
+      runId: manifest.runId,
+    },
+    "manifest_metadata_mismatch",
+  );
   return { manifest, bytes };
 }
 
@@ -1031,13 +1178,17 @@ async function readVerifiedArtifact(
     throw new ImportError(409, "artifact_size_mismatch");
   }
   assertJsonContentType(object, "artifact_content_type_mismatch");
-  assertExactMetadata(object.customMetadata, {
-    dataset: artifact.dataset,
-    sha256: artifact.sha256,
-  }, "artifact_metadata_mismatch");
+  assertExactMetadata(
+    object.customMetadata,
+    {
+      dataset: artifact.dataset,
+      sha256: artifact.sha256,
+    },
+    "artifact_metadata_mismatch",
+  );
   const bytes = new Uint8Array(await object.arrayBuffer());
   assertNativeSha256(object, artifact.sha256);
-  if (await sha256Hex(bytes) !== artifact.sha256) {
+  if ((await sha256Hex(bytes)) !== artifact.sha256) {
     throw new ImportError(409, "artifact_checksum_mismatch");
   }
   return bytes;
@@ -1055,10 +1206,14 @@ async function readVerifiedReport(
     throw new ImportError(409, "reconciliation_report_size_invalid");
   }
   assertJsonContentType(object, "reconciliation_report_content_type_mismatch");
-  assertExactMetadata(object.customMetadata, {
-    source: "v-point-pay-email-reconciliation",
-    runId: manifest.runId,
-  }, "reconciliation_report_metadata_mismatch");
+  assertExactMetadata(
+    object.customMetadata,
+    {
+      source: "v-point-pay-email-reconciliation",
+      runId: manifest.runId,
+    },
+    "reconciliation_report_metadata_mismatch",
+  );
   const bytes = new Uint8Array(await object.arrayBuffer());
   const sha256 = await sha256Hex(bytes);
   assertNativeSha256(object, sha256);
@@ -1077,10 +1232,15 @@ async function validateReconciliationReport(
   summary: ReconciliationSummary,
   verified: VerifiedArtifact[],
 ): Promise<void> {
-  exactShapeConflict(input, ["schemaVersion", "runId", "completedAt", "policy", "sources", "entries"],
-    "reconciliation_report_shape_invalid");
-  if (input.schemaVersion !== "vpoint-pay-email-reconciliation-v1" ||
-      input.runId !== manifest.runId) {
+  exactShapeConflict(
+    input,
+    ["schemaVersion", "runId", "completedAt", "policy", "sources", "entries"],
+    "reconciliation_report_shape_invalid",
+  );
+  if (
+    input.schemaVersion !== "vpoint-pay-email-reconciliation-v1" ||
+    input.runId !== manifest.runId
+  ) {
     throw new ImportError(409, "reconciliation_report_identity_mismatch");
   }
   let reportCompletedAt: string;
@@ -1090,64 +1250,105 @@ async function validateReconciliationReport(
     throw new ImportError(409, "reconciliation_report_time_invalid");
   }
   const reportDate = reportCompletedAt.slice(0, 10).replaceAll("-", "/");
-  if (!summary.reportKey.includes(`/${reportDate}/${manifest.runId}.json`) ||
-      reportCompletedAt < manifest.startedAt || reportCompletedAt > manifest.completedAt) {
+  if (
+    !summary.reportKey.includes(`/${reportDate}/${manifest.runId}.json`) ||
+    reportCompletedAt < manifest.startedAt ||
+    reportCompletedAt > manifest.completedAt
+  ) {
     throw new ImportError(409, "reconciliation_report_time_mismatch");
   }
   const policy = recordConflict(input.policy, "reconciliation_policy_invalid");
-  exactShapeConflict(policy, ["match", "mutation", "ambiguousMatchesRemainUnresolved"],
-    "reconciliation_policy_invalid");
-  if (typeof policy.match !== "string" ||
-      !RECONCILIATION_MATCH_POLICIES.includes(
-        policy.match as typeof RECONCILIATION_MATCH_POLICIES[number],
-      ) ||
-      policy.mutation !== "none" || policy.ambiguousMatchesRemainUnresolved !== true) {
+  exactShapeConflict(
+    policy,
+    ["match", "mutation", "ambiguousMatchesRemainUnresolved"],
+    "reconciliation_policy_invalid",
+  );
+  if (
+    typeof policy.match !== "string" ||
+    !RECONCILIATION_MATCH_POLICIES.includes(
+      policy.match as (typeof RECONCILIATION_MATCH_POLICIES)[number],
+    ) ||
+    policy.mutation !== "none" ||
+    policy.ambiguousMatchesRemainUnresolved !== true
+  ) {
     throw new ImportError(409, "reconciliation_policy_invalid");
   }
   const sources = recordConflict(input.sources, "reconciliation_sources_invalid");
-  exactShapeConflict(sources, ["vPointHistory", "vPointPayEmail", "vPointPayApp"],
-    "reconciliation_sources_invalid");
-  if (sources.vPointHistory !== "current collector run" ||
-      sources.vPointPayEmail !== "all normalized archived notifications" ||
-      sources.vPointPayApp !== summary.appLedgerStatus) {
+  exactShapeConflict(
+    sources,
+    ["vPointHistory", "vPointPayEmail", "vPointPayApp"],
+    "reconciliation_sources_invalid",
+  );
+  if (
+    sources.vPointHistory !== "current collector run" ||
+    sources.vPointPayEmail !== "all normalized archived notifications" ||
+    sources.vPointPayApp !== summary.appLedgerStatus
+  ) {
     throw new ImportError(409, "reconciliation_sources_invalid");
   }
-  if (!Array.isArray(input.entries) || input.entries.length !== summary.emailEventCount ||
-      input.entries.length > 100_000) {
+  if (
+    !Array.isArray(input.entries) ||
+    input.entries.length !== summary.emailEventCount ||
+    input.entries.length > 100_000
+  ) {
     throw new ImportError(409, "reconciliation_entries_invalid");
   }
   const counts = { matched: 0, ambiguous: 0, unmatched: 0, "not-comparable": 0 };
   const ids = new Set<string>();
-  const historyFiles = new Map(verified.flatMap((entry) =>
-    entry.page?.group === "history" && entry.historyRows
-      ? [[filename(entry.artifact.key), entry.historyRows] as const]
-      : []));
+  const historyFiles = new Map(
+    verified.flatMap((entry) =>
+      entry.page?.group === "history" && entry.historyRows
+        ? [[filename(entry.artifact.key), entry.historyRows] as const]
+        : [],
+    ),
+  );
   for (const value of input.entries) {
     const entry = recordConflict(value, "reconciliation_entry_invalid");
-    exactShapeConflict(entry, ["emailEventId", "status", "candidateRows"], "reconciliation_entry_invalid");
-    if (typeof entry.emailEventId !== "string" || !SHA256.test(entry.emailEventId) ||
-        ids.has(entry.emailEventId) || !Array.isArray(entry.candidateRows) || entry.candidateRows.length > 100) {
+    exactShapeConflict(
+      entry,
+      ["emailEventId", "status", "candidateRows"],
+      "reconciliation_entry_invalid",
+    );
+    if (
+      typeof entry.emailEventId !== "string" ||
+      !SHA256.test(entry.emailEventId) ||
+      ids.has(entry.emailEventId) ||
+      !Array.isArray(entry.candidateRows) ||
+      entry.candidateRows.length > 100
+    ) {
       throw new ImportError(409, "reconciliation_entry_invalid");
     }
     ids.add(entry.emailEventId);
-    const status = oneOfConflict(entry.status,
+    const status = oneOfConflict(
+      entry.status,
       ["matched", "ambiguous", "unmatched", "not-comparable"] as const,
-      "reconciliation_entry_status_invalid");
+      "reconciliation_entry_status_invalid",
+    );
     counts[status] += 1;
-    if ((status === "matched" && entry.candidateRows.length !== 1) ||
-        (status === "ambiguous" && entry.candidateRows.length < 2) ||
-        ((status === "unmatched" || status === "not-comparable") && entry.candidateRows.length !== 0)) {
+    if (
+      (status === "matched" && entry.candidateRows.length !== 1) ||
+      (status === "ambiguous" && entry.candidateRows.length < 2) ||
+      ((status === "unmatched" || status === "not-comparable") && entry.candidateRows.length !== 0)
+    ) {
       throw new ImportError(409, "reconciliation_candidate_count_invalid");
     }
     const candidateIdentities = new Set<string>();
     for (const candidateValue of entry.candidateRows) {
       const candidate = recordConflict(candidateValue, "reconciliation_candidate_invalid");
-      exactShapeConflict(candidate, ["source", "index", "fingerprint"], "reconciliation_candidate_invalid");
-      const rows = typeof candidate.source === "string"
-        ? historyFiles.get(candidate.source)
-        : undefined;
-      if (!rows || !nonNegativeInteger(candidate.index) || candidate.index >= rows.length ||
-          typeof candidate.fingerprint !== "string" || !SHA256.test(candidate.fingerprint)) {
+      exactShapeConflict(
+        candidate,
+        ["source", "index", "fingerprint"],
+        "reconciliation_candidate_invalid",
+      );
+      const rows =
+        typeof candidate.source === "string" ? historyFiles.get(candidate.source) : undefined;
+      if (
+        !rows ||
+        !nonNegativeInteger(candidate.index) ||
+        candidate.index >= rows.length ||
+        typeof candidate.fingerprint !== "string" ||
+        !SHA256.test(candidate.fingerprint)
+      ) {
         throw new ImportError(409, "reconciliation_candidate_invalid");
       }
       const identity = `${candidate.source}\u0000${candidate.index}`;
@@ -1163,9 +1364,12 @@ async function validateReconciliationReport(
       }
     }
   }
-  if (counts.matched !== summary.matchedCount || counts.ambiguous !== summary.ambiguousCount ||
-      counts.unmatched !== summary.unmatchedCount ||
-      counts["not-comparable"] !== summary.notComparableCount) {
+  if (
+    counts.matched !== summary.matchedCount ||
+    counts.ambiguous !== summary.ambiguousCount ||
+    counts.unmatched !== summary.unmatchedCount ||
+    counts["not-comparable"] !== summary.notComparableCount
+  ) {
     throw new ImportError(409, "reconciliation_report_count_mismatch");
   }
 }
@@ -1192,9 +1396,12 @@ async function dataDescriptor(options: {
   fingerprintKey: string;
 }): Promise<JsonObject> {
   const summary = options.artifact.dataset === "collection-summary";
-  const pageGroupId = options.page?.group === "history"
-    ? options.historyGroupId
-    : options.page?.group === "vmoney-history" ? options.vMoneyGroupId : undefined;
+  const pageGroupId =
+    options.page?.group === "history"
+      ? options.historyGroupId
+      : options.page?.group === "vmoney-history"
+        ? options.vMoneyGroupId
+        : undefined;
   return {
     artifactKey: filename(options.artifact.key),
     artifactRole: summary ? "collector_summary" : "collector_derived",
@@ -1209,10 +1416,12 @@ async function dataDescriptor(options: {
     fetchedAtMs: Date.parse(options.completedAt),
     fetchedAtBasis: "manifest",
     fetchUnitId: options.fetchUnitId,
-    ...(pageGroupId === undefined ? {} : {
-      pageGroupId,
-      pageIndex: (options.page?.index ?? 1) - 1,
-    }),
+    ...(pageGroupId === undefined
+      ? {}
+      : {
+          pageGroupId,
+          pageIndex: (options.page?.index ?? 1) - 1,
+        }),
     sequence: options.sequence,
     sha256: options.artifact.sha256,
     byteSize: options.artifact.bytes,
@@ -1222,14 +1431,16 @@ async function dataDescriptor(options: {
       STORAGE_TEMPLATE,
       options.fingerprintKey,
     ),
-    ...(summary ? {} : {
-      transformSteps: ["transport_decoded", "reencoded"].map((stepKind, stepIndex) => ({
-        stepIndex,
-        stepKind,
-        transformerId: "vpoint-worker",
-        transformerVersion: options.schemaVersion,
-      })),
-    }),
+    ...(summary
+      ? {}
+      : {
+          transformSteps: ["transport_decoded", "reencoded"].map((stepKind, stepIndex) => ({
+            stepIndex,
+            stepKind,
+            transformerId: "vpoint-worker",
+            transformerVersion: options.schemaVersion,
+          })),
+        }),
   };
 }
 
@@ -1316,11 +1527,7 @@ async function storageOrigin(
     false,
     ["sign"],
   );
-  const signature = await crypto.subtle.sign(
-    "HMAC",
-    cryptoKey,
-    new TextEncoder().encode(key),
-  );
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(key));
   return {
     storageKind: "r2",
     containerName,
@@ -1341,15 +1548,23 @@ function safeFailureCode(failures: Failure[]): string {
   return "collector-request-failed";
 }
 
-function expectedDatasets(version: SchemaVersion, historyPages: number, vMoneyPages: number): string[] {
+function expectedDatasets(
+  version: SchemaVersion,
+  historyPages: number,
+  vMoneyPages: number,
+): string[] {
   return [
     "balance-info",
     "smfg-point",
-    ...Array.from({ length: historyPages }, (_, index) =>
-      `history-page-${String(index + 1).padStart(4, "0")}`),
+    ...Array.from(
+      { length: historyPages },
+      (_, index) => `history-page-${String(index + 1).padStart(4, "0")}`,
+    ),
     ...(version === V2
-      ? Array.from({ length: vMoneyPages }, (_, index) =>
-          `vmoney-history-page-${String(index + 1).padStart(4, "0")}`)
+      ? Array.from(
+          { length: vMoneyPages },
+          (_, index) => `vmoney-history-page-${String(index + 1).padStart(4, "0")}`,
+        )
       : []),
     "collection-summary",
   ];
@@ -1360,8 +1575,12 @@ function validDataset(value: string, version: SchemaVersion): boolean {
   const history = HISTORY_DATASET.exec(value);
   if (history) return Number(history[1]) >= 1 && Number(history[1]) <= MAX_HISTORY_PAGES;
   const vMoney = VMONEY_DATASET.exec(value);
-  return version === V2 && vMoney !== null && Number(vMoney[1]) >= 1 &&
-    Number(vMoney[1]) <= MAX_HISTORY_PAGES;
+  return (
+    version === V2 &&
+    vMoney !== null &&
+    Number(vMoney[1]) >= 1 &&
+    Number(vMoney[1]) <= MAX_HISTORY_PAGES
+  );
 }
 
 function isOrderedSubset(actual: string[], expected: string[]): boolean {
@@ -1374,7 +1593,11 @@ function isOrderedSubset(actual: string[], expected: string[]): boolean {
   return true;
 }
 
-async function assertExactPrefix(bucket: R2Bucket, prefix: string, expectedKeys: string[]): Promise<void> {
+async function assertExactPrefix(
+  bucket: R2Bucket,
+  prefix: string,
+  expectedKeys: string[],
+): Promise<void> {
   const actual: string[] = [];
   let cursor: string | undefined;
   const seenCursors = new Set<string>();
@@ -1415,8 +1638,10 @@ function assertExactMetadata(
   if (!actual) throw new ImportError(409, code);
   const actualKeys = Object.keys(actual).sort();
   const expectedKeys = Object.keys(expected).sort();
-  if (actualKeys.length !== expectedKeys.length ||
-      actualKeys.some((key, index) => key !== expectedKeys[index] || actual[key] !== expected[key])) {
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    actualKeys.some((key, index) => key !== expectedKeys[index] || actual[key] !== expected[key])
+  ) {
     throw new ImportError(409, code);
   }
 }
@@ -1443,7 +1668,10 @@ function parseJson(bytes: Uint8Array, code: string): JsonObject {
 
 function parseJsonConflict(bytes: Uint8Array, code: string): JsonObject {
   try {
-    return recordConflict(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)), code);
+    return recordConflict(
+      JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
+      code,
+    );
   } catch (error) {
     if (error instanceof ImportError) throw error;
     throw new ImportError(409, code);
@@ -1463,8 +1691,11 @@ function recordConflict(value: unknown, code: string): JsonObject {
 function exactShape(value: JsonObject, keys: string[], optional: string[] = []): void {
   const actual = Object.keys(value).sort();
   const allowed = [...keys].sort();
-  if (actual.some((key) => !allowed.includes(key)) || keys.some((key) =>
-    !optional.includes(key) && !Object.hasOwn(value, key))) invalid("manifest_unknown_field");
+  if (
+    actual.some((key) => !allowed.includes(key)) ||
+    keys.some((key) => !optional.includes(key) && !Object.hasOwn(value, key))
+  )
+    invalid("manifest_unknown_field");
 }
 
 function exactShapeConflict(value: JsonObject, keys: string[], code: string): void {
@@ -1473,7 +1704,11 @@ function exactShapeConflict(value: JsonObject, keys: string[], code: string): vo
   if (!sameStrings(actual, expected)) throw new ImportError(409, code);
 }
 
-function oneOf<const T extends readonly string[]>(value: unknown, choices: T, code: string): T[number] {
+function oneOf<const T extends readonly string[]>(
+  value: unknown,
+  choices: T,
+  code: string,
+): T[number] {
   if (typeof value !== "string" || !choices.includes(value)) invalid(code);
   return value as T[number];
 }
@@ -1488,7 +1723,8 @@ function oneOfConflict<const T extends readonly string[]>(
 }
 
 function count(value: unknown, max: number, code: string, min = 0): number {
-  if (!Number.isSafeInteger(value) || (value as number) < min || (value as number) > max) invalid(code);
+  if (!Number.isSafeInteger(value) || (value as number) < min || (value as number) > max)
+    invalid(code);
   return value as number;
 }
 
@@ -1500,8 +1736,11 @@ function instant(value: unknown, code: string): string {
 }
 
 function safeText(value: unknown, max: number): value is string {
-  return typeof value === "string" && value.length <= max &&
-    !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/u.test(value);
+  return (
+    typeof value === "string" &&
+    value.length <= max &&
+    !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/u.test(value)
+  );
 }
 
 function dateText(value: unknown): value is string {
@@ -1544,7 +1783,8 @@ function canonical(value: JsonValue): JsonValue {
   if (Array.isArray(value)) return value.map(canonical);
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).sort(([left], [right]) => binaryCompare(left, right))
+      Object.entries(value)
+        .sort(([left], [right]) => binaryCompare(left, right))
         .map(([key, child]) => [key, canonical(child)]),
     );
   }
@@ -1573,9 +1813,16 @@ function normalizedStorageOrigin(value: unknown): JsonValue {
 
 export async function descriptorSha256(descriptor: JsonObject): Promise<string> {
   const {
-    http, storage, file, email,
-    fetchUnitId, pageGroupId, pageIndex,
-    ranges, transformSteps, relations,
+    http,
+    storage,
+    file,
+    email,
+    fetchUnitId,
+    pageGroupId,
+    pageIndex,
+    ranges,
+    transformSteps,
+    relations,
     ...fields
   } = descriptor;
   const normalized = {
@@ -1597,9 +1844,7 @@ export async function descriptorSha256(descriptor: JsonObject): Promise<string> 
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  return bytesHex(new Uint8Array(
-    await crypto.subtle.digest("SHA-256", ownedArrayBuffer(bytes)),
-  ));
+  return bytesHex(new Uint8Array(await crypto.subtle.digest("SHA-256", ownedArrayBuffer(bytes))));
 }
 
 function hexBytes(value: string): Uint8Array {

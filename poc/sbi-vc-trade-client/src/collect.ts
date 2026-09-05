@@ -26,26 +26,32 @@ export async function collectSbiVcTrade(
       historical: false,
     }),
   });
-  artifacts.push(...await collectPages({
-    name: "executions-historical",
-    pageSize,
-    maxPages,
-    fetchPage: (pageNumber) => client.executions({
-      pageNumber,
+  artifacts.push(
+    ...(await collectPages({
+      name: "executions-historical",
       pageSize,
-      historical: true,
-    }),
-  }));
-  artifacts.push(...await collectPages({
-    name: "cashflows-historical",
-    pageSize,
-    maxPages,
-    fetchPage: (pageNumber) => client.cashflows({
-      pageNumber,
+      maxPages,
+      fetchPage: (pageNumber) =>
+        client.executions({
+          pageNumber,
+          pageSize,
+          historical: true,
+        }),
+    })),
+  );
+  artifacts.push(
+    ...(await collectPages({
+      name: "cashflows-historical",
       pageSize,
-      historical: true,
-    }),
-  }));
+      maxPages,
+      fetchPage: (pageNumber) =>
+        client.cashflows({
+          pageNumber,
+          pageSize,
+          historical: true,
+        }),
+    })),
+  );
   return artifacts;
 }
 

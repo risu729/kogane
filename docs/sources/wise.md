@@ -127,17 +127,17 @@ Platform の card transaction model は次を区別する。
 
 公式 Web/app の statement は currency と Jar を対象にする。
 
-| 項目 | 確認結果 |
-| --- | --- |
-| 期間 | 1 ファイル最大 365 日。全期間は 365 日以下に分割する |
-| 内容 | Wise currency account 内の全取引。hidden activity も含む |
-| 対象外 | 外部 payment method を含む全 transfer は Transactions export を使う |
-| Web 形式 | PDF、XLSX、CSV、MT940、QIF、CAMT.053 version 10 |
-| app 形式 | PDF、CSV、XLSX |
+| 項目     | 確認結果                                                                          |
+| -------- | --------------------------------------------------------------------------------- |
+| 期間     | 1 ファイル最大 365 日。全期間は 365 日以下に分割する                              |
+| 内容     | Wise currency account 内の全取引。hidden activity も含む                          |
+| 対象外   | 外部 payment method を含む全 transfer は Transactions export を使う               |
+| Web 形式 | PDF、XLSX、CSV、MT940、QIF、CAMT.053 version 10                                   |
+| app 形式 | PDF、CSV、XLSX                                                                    |
 | 複数対象 | Web と Android は複数 currency/Jar を一括選択。大きい場合は zip またはメール link |
-| 手数料 | accounting statement で fee を別表示できる |
-| 再認証 | download の確定時に Wise password の入力が必要と公式案内にある |
-| 件数 | 公開された row 上限は確認できない |
+| 手数料   | accounting statement で fee を別表示できる                                        |
+| 再認証   | download の確定時に Wise password の入力が必要と公式案内にある                    |
+| 件数     | 公開された row 上限は確認できない                                                 |
 
 公式根拠:
 
@@ -306,11 +306,11 @@ Wise Open Banking は認可済み AISP/TPP 向けに `accounts` scope の balanc
 
 ## 7. app と Web の役割
 
-| Surface | 読み取り用途 | export | 認証上の役割 |
-| --- | --- | --- | --- |
-| Web | Home、balances、Jars/Assets、Cards、Activity、Transactions | 全形式、transfer list、複数 currency/Jar に最適 | passkey/password、security settings、download 時 password |
-| app | 同じ口座状態、即時通知、card 状態、Activity | PDF/CSV/XLSX。transfer list download は不可 | trusted-device notification、生体、passkey/2-step |
-| Platform API | 契約 scope 内の balance/statement/card data | JSON と statement formats | bearer OAuth/personal Business token、場合により SCA/mTLS |
+| Surface      | 読み取り用途                                               | export                                          | 認証上の役割                                              |
+| ------------ | ---------------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------- |
+| Web          | Home、balances、Jars/Assets、Cards、Activity、Transactions | 全形式、transfer list、複数 currency/Jar に最適 | passkey/password、security settings、download 時 password |
+| app          | 同じ口座状態、即時通知、card 状態、Activity                | PDF/CSV/XLSX。transfer list download は不可     | trusted-device notification、生体、passkey/2-step         |
+| Platform API | 契約 scope 内の balance/statement/card data                | JSON と statement formats                       | bearer OAuth/personal Business token、場合により SCA/mTLS |
 
 収集目的では Web export が最も広く、app は notification/2-step と spot check に向く。
 
@@ -335,13 +335,13 @@ minified file が指す source map は公式 origin で 403 だったため、�
 公開 Platform API と personal internal API は別物として扱う。前者の path/schema を後者へ
 当てはめない。認証後の passive trace で次の UI 操作が発生させる request を一つずつ対応付ける。
 
-| UI read | 必要な schema | 取り込まないもの |
-| --- | --- | --- |
-| Home | currency balance、reserved/available、Jar、Assets の有無 | profile/account ID、氏名、住所 |
-| Activity 一覧/詳細 | stable ID の有無、timestamp、amount/currency、status、type、pagination | counterparty 名、口座番号、reference/free text |
-| card pending/completed | authorization/posted/cancelled/refund、reserved と settled の差 | card number/token、merchant location の詳細 |
-| conversion/fee 表示 | source/target amount/currency、rate、fee、同一 event の関連付け | quote/conversion の作成 request |
-| statement/transfer list | period、format、生成済み document の read | recipient filter 値、PDF/CSV の実データ |
+| UI read                 | 必要な schema                                                          | 取り込まないもの                               |
+| ----------------------- | ---------------------------------------------------------------------- | ---------------------------------------------- |
+| Home                    | currency balance、reserved/available、Jar、Assets の有無               | profile/account ID、氏名、住所                 |
+| Activity 一覧/詳細      | stable ID の有無、timestamp、amount/currency、status、type、pagination | counterparty 名、口座番号、reference/free text |
+| card pending/completed  | authorization/posted/cancelled/refund、reserved と settled の差        | card number/token、merchant location の詳細    |
+| conversion/fee 表示     | source/target amount/currency、rate、fee、同一 event の関連付け        | quote/conversion の作成 request                |
+| statement/transfer list | period、format、生成済み document の read                              | recipient filter 値、PDF/CSV の実データ        |
 
 recipient 一覧・作成・編集 route は収集対象外で、`recipient`/`beneficiary` 専用 path にはアクセス
 しない。Activity response に相手情報が同居しても、collector は必要な取引状態だけを schema
@@ -501,13 +501,13 @@ read-only collector は Wise client library 全体を渡さず、次のような
 
 ## 10. runtime 適性
 
-| Runtime | 適性 | 理由 |
-| --- | --- | --- |
-| Cloudflare Workers | 条件付き | 承認済み bearer REST の GET には軽量。個人口座 token がなく、passkey/browser login は実行不可 |
-| Cloudflare Containers | C/D 実験のみ | full browser を置けるが Cloudflare egress、ephemeral disk、bot protection、再認証が不安定要因 |
-| 通常の OCI container | C/D 実験の第一候補 | Playwright と固定した browser build、local encrypted session を管理しやすい |
-| Kubernetes | 不適 | 単一個人口座では運用面が過剰。IP/session の分散は fraud 判定を悪化させ得る |
-| ローカル対話 browser | live validation に最適 | passkey/2-step/password 再入力を本人が行い、UI 状態を確認できる |
+| Runtime               | 適性                   | 理由                                                                                          |
+| --------------------- | ---------------------- | --------------------------------------------------------------------------------------------- |
+| Cloudflare Workers    | 条件付き               | 承認済み bearer REST の GET には軽量。個人口座 token がなく、passkey/browser login は実行不可 |
+| Cloudflare Containers | C/D 実験のみ           | full browser を置けるが Cloudflare egress、ephemeral disk、bot protection、再認証が不安定要因 |
+| 通常の OCI container  | C/D 実験の第一候補     | Playwright と固定した browser build、local encrypted session を管理しやすい                   |
+| Kubernetes            | 不適                   | 単一個人口座では運用面が過剰。IP/session の分散は fraud 判定を悪化させ得る                    |
+| ローカル対話 browser  | live validation に最適 | passkey/2-step/password 再入力を本人が行い、UI 状態を確認できる                               |
 
 Workers は V8 isolate と Fetch API で REST GET を扱えるが、global state に session を置かない。
 契約 OAuth が mTLS を要求する場合、Cloudflare Workers の mTLS binding は候補になるものの、
@@ -535,14 +535,14 @@ PR #5 の共通定義だけを使う。
 
 ### 現在の評価
 
-| 経路 | Level | Cost | 判定 |
-| --- | --- | ---: | --- |
-| Web/app 手動 export | **E** | **1** | 推奨。公式、広い形式、365 日 chunk |
-| 個人セルフサービス API | — | — | token/OAuth 発行経路を確認できない |
-| 契約 OAuth/Open Banking | A | 3–5 | 技術的には最良だが partnership/regulatory cost。個人 MVP 対象外 |
-| authenticated Web replay | C 候補 | 4 | 公開 login transport は確認、personal read path/session renewal は未確認 |
-| full browser automation | D | 4 | Cloudflare/fraud signals、passkey/2-step、password 再入力 |
-| 公式 Android app replay | D 候補 | 5 | split APK/transport/device binding/pinning/integrity を未確認 |
+| 経路                     | Level  |  Cost | 判定                                                                     |
+| ------------------------ | ------ | ----: | ------------------------------------------------------------------------ |
+| Web/app 手動 export      | **E**  | **1** | 推奨。公式、広い形式、365 日 chunk                                       |
+| 個人セルフサービス API   | —      |     — | token/OAuth 発行経路を確認できない                                       |
+| 契約 OAuth/Open Banking  | A      |   3–5 | 技術的には最良だが partnership/regulatory cost。個人 MVP 対象外          |
+| authenticated Web replay | C 候補 |     4 | 公開 login transport は確認、personal read path/session renewal は未確認 |
+| full browser automation  | D      |     4 | Cloudflare/fraud signals、passkey/2-step、password 再入力                |
+| 公式 Android app replay  | D 候補 |     5 | split APK/transport/device binding/pinning/integrity を未確認            |
 
 **source record の代表値は E / cost 1** とする。
 
@@ -578,7 +578,7 @@ PR #5 の共通定義だけを使う。
 9. 公式 Play app の全 split と signer/versionCode を 7.3 の手順で確認し、static host/path/schema/
    session/device/integrity/pinning 候補を inventory 化する。runtime は 7.4 の metadata に限る。
 10. もし export sample が必要なら、本人がローカルで作った完全に sanitized な header-only
-   sample を使う。実取引ファイルを repository や issue に置かない。
+    sample を使う。実取引ファイルを repository や issue に置かない。
 
 ### stop 条件
 

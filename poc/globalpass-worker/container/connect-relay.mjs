@@ -50,9 +50,7 @@ export function startConnectRelay({
     socket.pause();
     const address = parseConnectAuthority(request.url ?? "");
     if (!address || address.port !== 443 || !allowedHosts.has(address.hostname)) {
-      socket.end(
-        "HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
-      );
+      socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
       return;
     }
 
@@ -68,9 +66,7 @@ export function startConnectRelay({
     const rejectConnect = (status) => {
       if (responseSent || socket.destroyed) return;
       responseSent = true;
-      socket.end(
-        `HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
-      );
+      socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     };
     const timeout = setTimeout(() => {
       if (!established) rejectConnect("504 Gateway Timeout");

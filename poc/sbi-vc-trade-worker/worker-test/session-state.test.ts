@@ -22,11 +22,10 @@ describe("SbiVcSessionState", () => {
   });
 
   test("creates a DER WebAuthn assertion in the Workers runtime", async () => {
-    const pair = await crypto.subtle.generateKey(
-      { name: "ECDSA", namedCurve: "P-256" },
-      true,
-      ["sign", "verify"],
-    );
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+      "sign",
+      "verify",
+    ]);
     const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
     const credential = parsePasskeyCredential({
       credentialId: "00112233-4455-6677-8899-aabbccddeeff",
@@ -57,12 +56,14 @@ describe("SbiVcSessionState", () => {
     expect(await object!.json()).toEqual({ ok: true });
     expect(stored.sha256).toMatch(/^[0-9a-f]{64}$/u);
     expect(object!.checksums.sha256).toBeInstanceOf(ArrayBuffer);
-    await expect(storeArtifact({
-      bucket: env.SNAPSHOTS,
-      prefix,
-      runId,
-      artifact: { dataset: "synthetic", body: JSON.stringify({ overwritten: true }) },
-    })).rejects.toThrow("artifact_key_already_exists");
+    await expect(
+      storeArtifact({
+        bucket: env.SNAPSHOTS,
+        prefix,
+        runId,
+        artifact: { dataset: "synthetic", body: JSON.stringify({ overwritten: true }) },
+      }),
+    ).rejects.toThrow("artifact_key_already_exists");
     await env.SNAPSHOTS.delete(stored.key);
   });
 });

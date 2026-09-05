@@ -22,12 +22,7 @@ describe("V Point Pay device header", () => {
 
 describe("V Point Pay history months", () => {
   test("walks an inclusive year boundary", () => {
-    expect(enumerateMonths("202511", "202602")).toEqual([
-      "202511",
-      "202512",
-      "202601",
-      "202602",
-    ]);
+    expect(enumerateMonths("202511", "202602")).toEqual(["202511", "202512", "202601", "202602"]);
   });
 });
 

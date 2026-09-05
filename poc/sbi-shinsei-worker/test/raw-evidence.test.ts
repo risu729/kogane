@@ -36,10 +36,12 @@ describe("SBI Shinsei raw evidence Service Binding", () => {
       { source: "sbi-shinsei-bank", manifestKey: MANIFEST_KEY, sealed: true },
       { source: "sbi-shinsei", manifestKey: `${MANIFEST_KEY}.other`, sealed: true },
     ]) {
-      await expect(importRawEvidence({
-        importer: fetcher(async () => Response.json(body)),
-        manifestKey: MANIFEST_KEY,
-      })).rejects.toBeInstanceOf(RawEvidenceImportError);
+      await expect(
+        importRawEvidence({
+          importer: fetcher(async () => Response.json(body)),
+          manifestKey: MANIFEST_KEY,
+        }),
+      ).rejects.toBeInstanceOf(RawEvidenceImportError);
     }
   });
 
@@ -76,9 +78,11 @@ describe("SBI Shinsei raw evidence Service Binding", () => {
       new Response("x".repeat(16 * 1024 + 1), { status: 200 }),
       new Response("{}", { status: 200, headers: { "content-length": "invalid" } }),
     ]) {
-      await expect(backfillRawEvidence({
-        importer: fetcher(async () => response.clone()),
-      })).rejects.toBeInstanceOf(RawEvidenceImportError);
+      await expect(
+        backfillRawEvidence({
+          importer: fetcher(async () => response.clone()),
+        }),
+      ).rejects.toBeInstanceOf(RawEvidenceImportError);
     }
   });
 });

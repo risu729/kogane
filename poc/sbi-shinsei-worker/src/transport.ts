@@ -13,11 +13,7 @@ import type {
   TransportRequest,
 } from "./types";
 
-const JSON_MEDIA_TYPES = new Set([
-  "application/json",
-  "application/javascript",
-  "text/json",
-]);
+const JSON_MEDIA_TYPES = new Set(["application/json", "application/javascript", "text/json"]);
 
 /**
  * MobileFirst/WLClient-style read transport.
@@ -29,10 +25,7 @@ const JSON_MEDIA_TYPES = new Set([
 export class SbiShinseiReadTransport {
   constructor(
     private readonly options: {
-      fetch: (
-        input: RequestInfo | URL,
-        init?: RequestInit,
-      ) => Promise<Response>;
+      fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
       session: SessionStateStore;
       executionProfile?: ReadExecutionProfile;
       userAgent?: string;
@@ -46,11 +39,14 @@ export class SbiShinseiReadTransport {
   async callWithRaw(request: TransportRequest): Promise<ReadTransportResult> {
     const candidate = getReadRoute(request.operation);
     const url = `${candidate.origin}${candidate.path}`;
-    const route = assertReadAllowed({
-      operation: request.operation,
-      method: candidate.method,
-      url,
-    }, this.options.executionProfile ?? "direct-http-diagnostic");
+    const route = assertReadAllowed(
+      {
+        operation: request.operation,
+        method: candidate.method,
+        url,
+      },
+      this.options.executionProfile ?? "direct-http-diagnostic",
+    );
 
     const authorization = this.options.session.getAuthorization();
     const csrfToken = this.options.session.getCsrfToken();
@@ -87,9 +83,7 @@ export class SbiShinseiReadTransport {
       );
     }
     if (!response.ok) {
-      throw new UnknownResponseShapeError(
-        `PowerDirect read returned HTTP ${response.status}`,
-      );
+      throw new UnknownResponseShapeError(`PowerDirect read returned HTTP ${response.status}`);
     }
 
     const contentType = response.headers
@@ -98,9 +92,7 @@ export class SbiShinseiReadTransport {
       ?.trim()
       .toLowerCase();
     if (!contentType || !JSON_MEDIA_TYPES.has(contentType)) {
-      throw new UnknownResponseShapeError(
-        "PowerDirect read returned an unrecognized content type",
-      );
+      throw new UnknownResponseShapeError("PowerDirect read returned an unrecognized content type");
     }
 
     const body = await readLimited(response, route.maxResponseBytes);
@@ -109,9 +101,7 @@ export class SbiShinseiReadTransport {
     try {
       parsed = JSON.parse(rawBody);
     } catch {
-      throw new UnknownResponseShapeError(
-        "PowerDirect read returned invalid JSON",
-      );
+      throw new UnknownResponseShapeError("PowerDirect read returned invalid JSON");
     }
 
     const validated = validateKnownResponse(route.responseSchema, parsed);
@@ -124,16 +114,11 @@ export class SbiShinseiReadTransport {
   }
 }
 
-export function rotateCsrfTokenIfPresent(
-  session: SessionStateStore,
-  response: JsonObject,
-): void {
+export function rotateCsrfTokenIfPresent(session: SessionStateStore, response: JsonObject): void {
   const header = response.header;
   if (header === undefined) return;
   if (typeof header !== "object" || header === null || Array.isArray(header)) {
-    throw new UnknownResponseShapeError(
-      "Validated PowerDirect response omitted its header object",
-    );
+    throw new UnknownResponseShapeError("Validated PowerDirect response omitted its header object");
   }
   const nextToken = (header as JsonObject).newToken;
   if (nextToken === undefined) return;
@@ -145,10 +130,7 @@ export function rotateCsrfTokenIfPresent(
   session.rotateCsrfToken(nextToken);
 }
 
-async function readLimited(
-  response: Response,
-  maximumBytes: number,
-): Promise<Uint8Array> {
+async function readLimited(response: Response, maximumBytes: number): Promise<Uint8Array> {
   const declaredLength = response.headers.get("content-length");
   if (
     declaredLength !== null &&
@@ -169,9 +151,7 @@ async function readLimited(
       total += value.byteLength;
       if (total > maximumBytes) {
         await reader.cancel();
-        throw new ResponseTooLargeError(
-          "PowerDirect response exceeded size limit",
-        );
+        throw new ResponseTooLargeError("PowerDirect response exceeded size limit");
       }
       chunks.push(value);
     }

@@ -138,7 +138,12 @@ export interface CollectionFailure {
   operation: string;
   errorType: string;
   message: string;
-  diagnostics?: { stage: string; httpStatus?: number; authenticationAttempted?: boolean; responseReason?: string };
+  diagnostics?: {
+    stage: string;
+    httpStatus?: number;
+    authenticationAttempted?: boolean;
+    responseReason?: string;
+  };
 }
 
 export interface CollectionManifest {

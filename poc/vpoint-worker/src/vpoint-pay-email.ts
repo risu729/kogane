@@ -3,11 +3,7 @@ import PostalMime, { type Email } from "postal-mime";
 const VPOINT_PAY_SENDER = "info@prepaid.smbc-card.com";
 const MAX_RFC822_DEPTH = 2;
 
-export type VPointPayEmailEventType =
-  | "usage"
-  | "charge"
-  | "balance-addition"
-  | "declined";
+export type VPointPayEmailEventType = "usage" | "charge" | "balance-addition" | "declined";
 
 export interface VPointPayEmailEvent {
   schemaVersion: "vpoint-pay-email-event-v1";
@@ -42,9 +38,7 @@ export async function parseVPointPayEmail(
   return parseCandidate(toBytes(raw), 0);
 }
 
-export function shouldForwardToMailbox(
-  parsed: ParsedVPointPayEmail | null,
-): boolean {
+export function shouldForwardToMailbox(parsed: ParsedVPointPayEmail | null): boolean {
   return parsed === null || parsed.delivery === "direct";
 }
 
@@ -62,20 +56,20 @@ export async function storeVPointPayEmail(options: {
     duplicate
       ? Promise.resolve()
       : options.bucket.put(rawKey, raw, {
-        httpMetadata: { contentType: "message/rfc822" },
-        customMetadata: {
-          source: "v-point-pay-email",
-          eventType: event.eventType,
-          sha256: event.id,
-        },
-      }),
+          httpMetadata: { contentType: "message/rfc822" },
+          customMetadata: {
+            source: "v-point-pay-email",
+            eventType: event.eventType,
+            sha256: event.id,
+          },
+        }),
     options.bucket.put(normalizedKey, JSON.stringify(event), {
-        httpMetadata: { contentType: "application/json" },
-        customMetadata: {
-          source: "v-point-pay-email",
-          eventType: event.eventType,
-          sha256: event.id,
-        },
+      httpMetadata: { contentType: "application/json" },
+      customMetadata: {
+        source: "v-point-pay-email",
+        eventType: event.eventType,
+        sha256: event.id,
+      },
     }),
   ]);
   return { event, rawKey, normalizedKey, duplicate };
@@ -95,9 +89,10 @@ async function parseCandidate(
   if (depth >= MAX_RFC822_DEPTH) return null;
   for (const attachment of email.attachments) {
     if (attachment.mimeType.toLowerCase() !== "message/rfc822") continue;
-    const content = typeof attachment.content === "string"
-      ? new TextEncoder().encode(attachment.content)
-      : new Uint8Array(attachment.content);
+    const content =
+      typeof attachment.content === "string"
+        ? new TextEncoder().encode(attachment.content)
+        : new Uint8Array(attachment.content);
     const nested = await parseCandidate(content, depth + 1);
     if (nested) return nested;
   }
@@ -117,18 +112,20 @@ async function normalize(
   if (!Number.isFinite(occurredAt.getTime())) return null;
   const id = await sha256Hex(raw);
   const text = normalizeText(email.text);
-  const amountLabel = eventType === "usage"
-    ? "利用金額"
-    : eventType === "charge"
-      ? "チャージ金額"
+  const amountLabel =
+    eventType === "usage"
+      ? "利用金額"
+      : eventType === "charge"
+        ? "チャージ金額"
+        : eventType === "balance-addition"
+          ? "加算額"
+          : "利用金額";
+  const balanceLabel =
+    eventType === "charge"
+      ? "チャージ後の残高"
       : eventType === "balance-addition"
-        ? "加算額"
-        : "利用金額";
-  const balanceLabel = eventType === "charge"
-    ? "チャージ後の残高"
-    : eventType === "balance-addition"
-      ? "加算後のプリペイド残高"
-      : "利用後の残高";
+        ? "加算後のプリペイド残高"
+        : "利用後の残高";
   const event: VPointPayEmailEvent = {
     schemaVersion: "vpoint-pay-email-event-v1",
     id,
@@ -150,9 +147,7 @@ async function normalize(
 }
 
 function senderAddress(email: Email): string | null {
-  const address = email.from && "address" in email.from
-    ? email.from.address
-    : undefined;
+  const address = email.from && "address" in email.from ? email.from.address : undefined;
   return address?.trim().toLowerCase() ?? null;
 }
 
@@ -165,7 +160,8 @@ function classifySubject(subject: string): VPointPayEmailEventType | null {
   if (
     subject.includes("ご利用不可のお知らせ") ||
     subject.includes("カードがご利用頂けませんでした")
-  ) return "declined";
+  )
+    return "declined";
   return null;
 }
 
@@ -207,7 +203,5 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   const digest = await crypto.subtle.digest("SHA-256", copy.buffer);
-  return [...new Uint8Array(digest)]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }

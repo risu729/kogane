@@ -32,12 +32,12 @@ MyJCB はアプリ専用ではなく、Web 版が明細・利用可能額・ポ�
 
 ## 対象カード別の経路と発行会社差
 
-| 対象 | 明細の主経路 | 追加カード／支払 | ポイント・特典経路 | おまとめ上の注意 | 推奨取得 |
-|---|---|---|---|---|---|
-| JCB W | MyJCB Web／アプリ | クレジット。家族・ETC・QUICPay を親明細内で識別 | [JCB W](https://www.jcb.co.jp/ordercard/kojin_card/os_card_w2.html)は 200 円につき 2 J-POINT。MyJCB／確定明細で残高・失効等を確認 | JCB 発行のルート ID。ナンバーレスの初期登録・番号確認はアプリだが、明細取得は Web 可 | 確定 CSV／OFX 月次。未確定が必要な場合だけ Web 表示 |
-| リクルートカード（JCB） | [リクルートカード利用案内](https://recruit-card.jp/guide/)から JCB 会員ページ＝MyJCB | 本会員明細に家族利用を合算 | 通常還元 1.2%。[JCB 公式ポイント案内](https://www.jcb.co.jp/myjcb/pop/recruit-point.html)上、リクルートポイントは J-POINT ではなく、残高照会はリクルート側マイページ。MyJCB だけでは完結しない | JCB 版のみ。Visa／Mastercard は別 backend。JCB 発行カードとして候補だが、既存おまとめ状態は live で確認する | 明細は MyJCB。ポイントは別 connection とし、混ぜない |
-| みずほ JCB デビット | MyJCB、または [みずほ Wallet](https://www.faq.mizuhobank.co.jp/faq/show/3774?site_domain=default) | 即時引落、一回払いのみ。家族カード最大 8 枚、親口座に合算 | [みずほ公式](https://www.mizuhobank.co.jp/jcbdebit/info/index.html)では J-POINT でなく利用額帯別 0.2–0.4% の口座キャッシュバック。Wallet に次回率表示 | みずほ **Smart Debit** とは別商品。Smart Debit はおまとめ・パスキー等の公式除外あり。通常のみずほ JCB デビットまで除外と一般化しない | MyJCB デビット明細＋差額明細。銀行残高は対象外 |
-| 京銀 JCB デビット | [京都銀行公式](https://www.kyotobank.co.jp/kojin/jcbdebit/)から MyJCB（京銀アプリは deep link） | 即時引落、一回払いのみ。家族カードあり、ETC なし | 200 円で 1 J-POINT。MyJCB でポイント照会。2026 年に Oki Doki から J-POINT へ移行 | 京都銀行は [JCB グループ一覧](https://www.jcb.co.jp/pop/group-list.html)に掲載。ただし MyJCB の口座残高表示サービスは京都銀行／京銀カードサービスを明示除外 | MyJCB デビット明細＋差額明細。銀行残高は対象外 |
+| 対象                    | 明細の主経路                                                                                      | 追加カード／支払                                          | ポイント・特典経路                                                                                                                                                                             | おまとめ上の注意                                                                                                                                            | 推奨取得                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| JCB W                   | MyJCB Web／アプリ                                                                                 | クレジット。家族・ETC・QUICPay を親明細内で識別           | [JCB W](https://www.jcb.co.jp/ordercard/kojin_card/os_card_w2.html)は 200 円につき 2 J-POINT。MyJCB／確定明細で残高・失効等を確認                                                              | JCB 発行のルート ID。ナンバーレスの初期登録・番号確認はアプリだが、明細取得は Web 可                                                                        | 確定 CSV／OFX 月次。未確定が必要な場合だけ Web 表示  |
+| リクルートカード（JCB） | [リクルートカード利用案内](https://recruit-card.jp/guide/)から JCB 会員ページ＝MyJCB              | 本会員明細に家族利用を合算                                | 通常還元 1.2%。[JCB 公式ポイント案内](https://www.jcb.co.jp/myjcb/pop/recruit-point.html)上、リクルートポイントは J-POINT ではなく、残高照会はリクルート側マイページ。MyJCB だけでは完結しない | JCB 版のみ。Visa／Mastercard は別 backend。JCB 発行カードとして候補だが、既存おまとめ状態は live で確認する                                                 | 明細は MyJCB。ポイントは別 connection とし、混ぜない |
+| みずほ JCB デビット     | MyJCB、または [みずほ Wallet](https://www.faq.mizuhobank.co.jp/faq/show/3774?site_domain=default) | 即時引落、一回払いのみ。家族カード最大 8 枚、親口座に合算 | [みずほ公式](https://www.mizuhobank.co.jp/jcbdebit/info/index.html)では J-POINT でなく利用額帯別 0.2–0.4% の口座キャッシュバック。Wallet に次回率表示                                          | みずほ **Smart Debit** とは別商品。Smart Debit はおまとめ・パスキー等の公式除外あり。通常のみずほ JCB デビットまで除外と一般化しない                        | MyJCB デビット明細＋差額明細。銀行残高は対象外       |
+| 京銀 JCB デビット       | [京都銀行公式](https://www.kyotobank.co.jp/kojin/jcbdebit/)から MyJCB（京銀アプリは deep link）   | 即時引落、一回払いのみ。家族カードあり、ETC なし          | 200 円で 1 J-POINT。MyJCB でポイント照会。2026 年に Oki Doki から J-POINT へ移行                                                                                                               | 京都銀行は [JCB グループ一覧](https://www.jcb.co.jp/pop/group-list.html)に掲載。ただし MyJCB の口座残高表示サービスは京都銀行／京銀カードサービスを明示除外 | MyJCB デビット明細＋差額明細。銀行残高は対象外       |
 
 カード名だけで issuer を推定しない。カード裏面表示／MyJCB の一般化された発行会社名を利用者が確認し、実値は記録しない。おまとめ済みのカード一覧を read-only に列挙し、未設定カードを collector が追加してはならない。
 
@@ -73,12 +73,12 @@ MyJCB はアプリ専用ではなく、Web 版が明細・利用可能額・ポ�
 
 対象カードごとの passkey 境界は次のとおり。カード番号自体は取得せず、既存画面が passkey を提示するかで最終確認する。
 
-| 対象 | 公式条件との関係 | 現時点の判定 |
-|---|---|---|
-| JCB W | 354 系個人クレジット/JCB 発行の通常対象と整合 | 対象候補。既存 ID の提示で確認 |
-| リクルートカード（JCB） | JCB 発行・番号/契約条件を満たす場合に対象 | 商品名だけでは確定しない。Visa/Mastercard は完全に別 |
-| みずほ JCB デビット | 357 系個人デビット条件と整合。公式除外は「みずほ Smart Debit」で、通常 JCB デビットを一括除外していない | 対象候補だが issuer 実画面で未確認 |
-| 京銀 JCB デビット | 357 系個人デビットかつ京都銀行は JCB group issuer 一覧に掲載、明示除外なし | 対象候補だが issuer 実画面で未確認 |
+| 対象                    | 公式条件との関係                                                                                        | 現時点の判定                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| JCB W                   | 354 系個人クレジット/JCB 発行の通常対象と整合                                                           | 対象候補。既存 ID の提示で確認                       |
+| リクルートカード（JCB） | JCB 発行・番号/契約条件を満たす場合に対象                                                               | 商品名だけでは確定しない。Visa/Mastercard は完全に別 |
+| みずほ JCB デビット     | 357 系個人デビット条件と整合。公式除外は「みずほ Smart Debit」で、通常 JCB デビットを一括除外していない | 対象候補だが issuer 実画面で未確認                   |
+| 京銀 JCB デビット       | 357 系個人デビットかつ京都銀行は JCB group issuer 一覧に掲載、明示除外なし                              | 対象候補だが issuer 実画面で未確認                   |
 
 passkey 登録済み ID は password login を使えないため、Okura の ID/password flow と排他的になり得る。おまとめ済み複数 ID のうち一つだけ passkey の場合、root login、切替先、再認証要求の組合せを live で確認し、全カードへ一般化しない。
 
@@ -136,17 +136,17 @@ direct clientは既存Browser bootstrapと別modeにし、fresh challenge、一�
 
 ### read/export/おまとめ切替の transport 候補
 
-| 機能 | 現時点の具体的候補 | 確度と次の確認 |
-|---|---|---|
-| デビット read | Okura の `debitDetailMenu.html?link_id=...` → `debitDetail.html?seq=N` | 現行公開 code。みずほ/京銀 issuer と passkey 未登録 ID での live 成功は未確認 |
-| クレジット read | `/iss-pc/member/details_inquiry/detailMenu.html?link_id=...` → `detail.html?detailMonth=N&output=web` | 2026-08-31 の本人操作で現行 GET を確認。初期 HTML は `0..8`、過去月 API は `9..17` のうち account ごとの available 月だけを返した |
-| 過去月 availability | `POST /iss-pc/general_json/member/details_inquiry/detailPastJson.json` | `detailAPI.js` と本人操作で JSON-RPC contract を確認。hidden discriminator 欠落／API failure では停止し、blind scan しない |
-| PDF export | `/iss-pc/member/details_inquiry/detailDbPdf.html?detailMonth=N&output=pdf` | 2026-08-31 に確定月の GET と `%PDF-1.4` signature を確認。`detailNewspdf.html` は notice であり statement ではない |
-| CSV export | `detail.html?detailMonth=N&output=csv` | 2026-08-31 に GET、Windows-31J/CP932、metadata 行後の exact 12-column header を確認 |
-| OFX export | `detail.html?detailMonth=N&output=money` | 2026-08-31 に GET、OFX 1.x credit-card statement group を確認 |
-| おまとめ済みカード列挙 | mypage の「ID切替」→表示カード切替画面 | 公式 UI の存在は確認済み。カード名/ID/番号を保存せず route と一般 issuer/type だけ確認 |
-| おまとめ済み ID 切替 | 既存切替画面の card-select action | 金融取引ではなく session の current-card context 変更候補。method、hidden field、CSRF、戻り先を確認してから 1 回だけ replay |
-| おまとめ設定追加/解除・初期表示変更 | 設定画面 | write。transport 調査で見えても呼ばない |
+| 機能                                | 現時点の具体的候補                                                                                    | 確度と次の確認                                                                                                                    |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| デビット read                       | Okura の `debitDetailMenu.html?link_id=...` → `debitDetail.html?seq=N`                                | 現行公開 code。みずほ/京銀 issuer と passkey 未登録 ID での live 成功は未確認                                                     |
+| クレジット read                     | `/iss-pc/member/details_inquiry/detailMenu.html?link_id=...` → `detail.html?detailMonth=N&output=web` | 2026-08-31 の本人操作で現行 GET を確認。初期 HTML は `0..8`、過去月 API は `9..17` のうち account ごとの available 月だけを返した |
+| 過去月 availability                 | `POST /iss-pc/general_json/member/details_inquiry/detailPastJson.json`                                | `detailAPI.js` と本人操作で JSON-RPC contract を確認。hidden discriminator 欠落／API failure では停止し、blind scan しない        |
+| PDF export                          | `/iss-pc/member/details_inquiry/detailDbPdf.html?detailMonth=N&output=pdf`                            | 2026-08-31 に確定月の GET と `%PDF-1.4` signature を確認。`detailNewspdf.html` は notice であり statement ではない                |
+| CSV export                          | `detail.html?detailMonth=N&output=csv`                                                                | 2026-08-31 に GET、Windows-31J/CP932、metadata 行後の exact 12-column header を確認                                               |
+| OFX export                          | `detail.html?detailMonth=N&output=money`                                                              | 2026-08-31 に GET、OFX 1.x credit-card statement group を確認                                                                     |
+| おまとめ済みカード列挙              | mypage の「ID切替」→表示カード切替画面                                                                | 公式 UI の存在は確認済み。カード名/ID/番号を保存せず route と一般 issuer/type だけ確認                                            |
+| おまとめ済み ID 切替                | 既存切替画面の card-select action                                                                     | 金融取引ではなく session の current-card context 変更候補。method、hidden field、CSRF、戻り先を確認してから 1 回だけ replay       |
+| おまとめ設定追加/解除・初期表示変更 | 設定画面                                                                                              | write。transport 調査で見えても呼ばない                                                                                           |
 
 クレジット read/export path は 2026-08-31 に current contract として再確認した。確認は第一 ID の一時点に限るため、別 issuer／ID では link、schema、export control を毎回検査する。`detailMonth` は HTML／availability API に実在する値だけを取得し、card selector や financial value は公開記録へ保存しない。
 
@@ -211,14 +211,14 @@ HTTP method だけで read/write を決めない。login POST、公式 export PO
 
 ## 実行環境適性
 
-| 環境 | 適性 | 理由 |
-|---|---|---|
-| Cloudflare Workers（fetch のみ） | 条件付き | 旧式な HTTP replay や確定 export 取得は可能だが、現行 protection JS は Node VM／Worker 相当の限定 DOM を要求し、秘密の合い言葉、OTP、passkey を完結できない。金融 session を edge KV やログへ置かない。 |
-| Cloudflare Browser Run | 条件付き | [session reuse](https://developers.cloudflare.com/browser-run/features/reuse-sessions/)と Durable Objects、Playwright/Puppeteer、人手介入が使えるため C 経路に合う。ただし session idle 終了、共有 browser の cookie 分離、passkey/QR、金融 PII の運用リスクがある。匿名 dev test 以外は第一候補にしない。 |
-| Cloudflare Containers | 適 | [公式](https://developers.cloudflare.com/containers/)は Linux/amd64 の任意 runtime・filesystem を提供。Deno/Node parser、隔離 worker、browser を包装できる。cold start と instance lifecycle を跨ぐ session は外部暗号化 store が必要。 |
-| OCI container | 適 | parser と browser を固定 digest の image に閉じ込められる。secret は image／環境変数に焼かず、実行時 secret store、tmpfs、egress allowlist を使う。 |
-| Kubernetes | 過剰だが適 | [Kubernetes image](https://kubernetes.io/docs/concepts/containers/images/)で digest pin、Secret、NetworkPolicy、CronJob、専用 namespace を構成できる。少数カードには運用費が大きい。rootless、read-only FS、ephemeral volume、1 connection/Pod を推奨。 |
-| 管理下 Android 実機 | 調査に適、full UI automation は高コスト | 正規 APK 取得、manifest/host/schema 静的解析、本人操作の read-only tracing、passkey/issuer 境界確認に適する。定常 UI automation は端末拘束、画面変更、attestation、write UI 隣接により D/cost 5。 |
+| 環境                             | 適性                                    | 理由                                                                                                                                                                                                                                                                                                       |
+| -------------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare Workers（fetch のみ） | 条件付き                                | 旧式な HTTP replay や確定 export 取得は可能だが、現行 protection JS は Node VM／Worker 相当の限定 DOM を要求し、秘密の合い言葉、OTP、passkey を完結できない。金融 session を edge KV やログへ置かない。                                                                                                    |
+| Cloudflare Browser Run           | 条件付き                                | [session reuse](https://developers.cloudflare.com/browser-run/features/reuse-sessions/)と Durable Objects、Playwright/Puppeteer、人手介入が使えるため C 経路に合う。ただし session idle 終了、共有 browser の cookie 分離、passkey/QR、金融 PII の運用リスクがある。匿名 dev test 以外は第一候補にしない。 |
+| Cloudflare Containers            | 適                                      | [公式](https://developers.cloudflare.com/containers/)は Linux/amd64 の任意 runtime・filesystem を提供。Deno/Node parser、隔離 worker、browser を包装できる。cold start と instance lifecycle を跨ぐ session は外部暗号化 store が必要。                                                                    |
+| OCI container                    | 適                                      | parser と browser を固定 digest の image に閉じ込められる。secret は image／環境変数に焼かず、実行時 secret store、tmpfs、egress allowlist を使う。                                                                                                                                                        |
+| Kubernetes                       | 過剰だが適                              | [Kubernetes image](https://kubernetes.io/docs/concepts/containers/images/)で digest pin、Secret、NetworkPolicy、CronJob、専用 namespace を構成できる。少数カードには運用費が大きい。rootless、read-only FS、ephemeral volume、1 connection/Pod を推奨。                                                    |
+| 管理下 Android 実機              | 調査に適、full UI automation は高コスト | 正規 APK 取得、manifest/host/schema 静的解析、本人操作の read-only tracing、passkey/issuer 境界確認に適する。定常 UI automation は端末拘束、画面変更、attestation、write UI 隣接により D/cost 5。                                                                                                          |
 
 どの cloud runtime でも、session／cookie／OTP／明細実値を application log、trace、crash dump、analytics に出さない。issuer／product も必要最小限の一般名だけを tag にする。
 
@@ -233,15 +233,15 @@ HTTP method だけで read/write を決めない。login POST、公式 export PO
 - E: manual capture remains safe default
 - Cost: 1 = small wrapper、5 = device-bound/adversarial
 
-| 経路 | Level | Cost | 判断 |
-|---|---:|---:|---|
-| 確定 PDF／CSV／OFX を人が月次 download、offline import | E | 1 | 公式 export だが手動。最も安全。15 か月 retention のため月次保存が必要。 |
-| 既存 Web session から確定 export を自動 download | C | 3 | session bootstrap 後の replay は plausible。export endpoint とカード切替は live 確認が必要。 |
-| クレジット未確定明細（JCB W／Recruit JCB）HTML | C | 4 | export 不可、可変 DOM、カード切替・追加認証・保護 script 依存。 |
-| みずほ／京銀 JCB デビット HTML＋差額明細 | C | 4 | 公開実装が transport を具体化したが、issuer・passkey・追加認証互換は未確認。 |
-| Recruit ポイント残高／履歴 | C | 4 | MyJCB ではなく Recruit 側 session。別 source として評価・実装する。 |
-| MyJCB アプリ／銀行アプリ UI 自動化 | D | 5 | OTP、生体／passkey、端末、app version、write UI に拘束。 |
-| MyJCB family 全体の既定 | **C** | **4** | API ではないが Web bootstrap＋session replay が具体的に plausible。運用上の safe default は E/cost 1。 |
+| 経路                                                   | Level |  Cost | 判断                                                                                                   |
+| ------------------------------------------------------ | ----: | ----: | ------------------------------------------------------------------------------------------------------ |
+| 確定 PDF／CSV／OFX を人が月次 download、offline import |     E |     1 | 公式 export だが手動。最も安全。15 か月 retention のため月次保存が必要。                               |
+| 既存 Web session から確定 export を自動 download       |     C |     3 | session bootstrap 後の replay は plausible。export endpoint とカード切替は live 確認が必要。           |
+| クレジット未確定明細（JCB W／Recruit JCB）HTML         |     C |     4 | export 不可、可変 DOM、カード切替・追加認証・保護 script 依存。                                        |
+| みずほ／京銀 JCB デビット HTML＋差額明細               |     C |     4 | 公開実装が transport を具体化したが、issuer・passkey・追加認証互換は未確認。                           |
+| Recruit ポイント残高／履歴                             |     C |     4 | MyJCB ではなく Recruit 側 session。別 source として評価・実装する。                                    |
+| MyJCB アプリ／銀行アプリ UI 自動化                     |     D |     5 | OTP、生体／passkey、端末、app version、write UI に拘束。                                               |
+| MyJCB family 全体の既定                                | **C** | **4** | API ではないが Web bootstrap＋session replay が具体的に plausible。運用上の safe default は E/cost 1。 |
 
 A は公開 API がないため不適、B は非公式 HTML と動的 login protection を「stable internal API」と呼べないため不適。passkey 登録済み ID、未知 challenge、issuer 非対応では C が成立せず、その connection だけ D/E へ downgrade する。
 

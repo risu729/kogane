@@ -115,12 +115,12 @@ Check all of the following:
 
 For the recorded releases, the checkpoints are:
 
-| Item | 5.1.1 | 5.12.0 |
-| --- | --- | --- |
-| Version code | `511000` | `5120009` |
-| APK SHA-256 | `80b1e4e699c9390c31271dc5778b73b0caf6ff2a63864a6a8ca0061f070c230e` | `6b9df70c5f3a40c840fd45573385690bd777e6b341134f1e585ad3b87ba95a9a` |
-| Minimum / target SDK | 23 / 34 | 24 / 36 |
-| Signer certificate SHA-256 | `10:18:A2:EB:10:EF:51:1F:52:F8:48:4B:11:39:42:FE:99:12:41:26:C0:E1:AF:16:D9:95:3E:AC:5B:84:76:2C` | same |
+| Item                       | 5.1.1                                                                                             | 5.12.0                                                             |
+| -------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Version code               | `511000`                                                                                          | `5120009`                                                          |
+| APK SHA-256                | `80b1e4e699c9390c31271dc5778b73b0caf6ff2a63864a6a8ca0061f070c230e`                                | `6b9df70c5f3a40c840fd45573385690bd777e6b341134f1e585ad3b87ba95a9a` |
+| Minimum / target SDK       | 23 / 34                                                                                           | 24 / 36                                                            |
+| Signer certificate SHA-256 | `10:18:A2:EB:10:EF:51:1F:52:F8:48:4B:11:39:42:FE:99:12:41:26:C0:E1:AF:16:D9:95:3E:AC:5B:84:76:2C` | same                                                               |
 
 A matching signer establishes that both APKs were signed by the same key. It
 does not make the third-party host trusted, establish source-code correctness,
@@ -251,13 +251,13 @@ Do not accept only a `dex\n` prefix. Validate all DEX header invariants:
 
 The known-good offline recovery checkpoints are:
 
-| Item | 5.1.1 | 5.12.0 |
-| --- | --- | --- |
-| Encrypted asset bytes | 18,784 | 29,664 |
+| Item                    | 5.1.1                                                              | 5.12.0                                                             |
+| ----------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Encrypted asset bytes   | 18,784                                                             | 29,664                                                             |
 | Encrypted asset SHA-256 | `822b010432f649063bb36a26b321ed13b27d988bd51006aba733e6642443f687` | `0c9b51a9fed041e6ada9b2e03866ad3f55b2531219de8c2233b44292c4588380` |
-| DEX version | 035 | 037 |
-| Recovered DEX bytes | 18,776 | 29,652 |
-| Recovered DEX SHA-256 | `30cb2267a3e6e62a31491c419421dd04d2c42e0a36b48b04d2832827e77c9dbe` | `f0b8817b4107698cb79f9803646a1048b87cd117e9da8bd151ad7bc1970ffada` |
+| DEX version             | 035                                                                | 037                                                                |
+| Recovered DEX bytes     | 18,776                                                             | 29,652                                                             |
+| Recovered DEX SHA-256   | `30cb2267a3e6e62a31491c419421dd04d2c42e0a36b48b04d2832827e77c9dbe` | `f0b8817b4107698cb79f9803646a1048b87cd117e9da8bd151ad7bc1970ffada` |
 
 The 5.12.0 padding length was 12 bytes. Matching these values reproduces the
 recorded recovery; a later app version is expected to have different APK,

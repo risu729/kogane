@@ -55,5 +55,7 @@ console.log(JSON.stringify({ outputPath, capturedAt: envelope.capturedAt, cookie
 function captureTimestamp(path) {
   const name = path.replaceAll("\\", "/").split("/").at(-1) ?? "";
   const match = /^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3})Z/u.exec(name);
-  return match ? `${match[1].replace(/T(\d{2})-(\d{2})-(\d{2})-(\d{3})$/u, "T$1:$2:$3.$4")}Z` : undefined;
+  return match
+    ? `${match[1].replace(/T(\d{2})-(\d{2})-(\d{2})-(\d{3})$/u, "T$1:$2:$3.$4")}Z`
+    : undefined;
 }

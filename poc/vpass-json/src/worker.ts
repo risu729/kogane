@@ -1,5 +1,4 @@
 import { createDiagnostics, safeErrorDetails } from "../../collector-diagnostics/src/index";
-import { randomUUID } from "node:crypto";
 import {
   AUTH_KEY_SHA256,
   CONFIG_KEY_SHA256,
@@ -145,12 +144,9 @@ function pairMonths(value: unknown): string[] {
 }
 
 function cardKeys(response: unknown): string[] {
-  const list = objectAt(
-    response,
-    "body",
-    "content",
-    "DropdownListInitDisplayServiceBean",
-  )?.["multiCardInfoList"];
+  const list = objectAt(response, "body", "content", "DropdownListInitDisplayServiceBean")?.[
+    "multiCardInfoList"
+  ];
   if (!Array.isArray(list)) return [];
   return list.flatMap((item) => {
     if (!isObject(item)) return [];
@@ -208,7 +204,10 @@ function errorMessage(error: unknown): string {
 
 async function jsonResponse(response: Response, label: string): Promise<RawJsonResponse> {
   const rawText = await response.text();
-  if (!response.ok) throw Object.assign(new Error(`${label} failed with HTTP ${response.status}`), { httpStatus: response.status });
+  if (!response.ok)
+    throw Object.assign(new Error(`${label} failed with HTTP ${response.status}`), {
+      httpStatus: response.status,
+    });
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawText);
@@ -220,7 +219,10 @@ async function jsonResponse(response: Response, label: string): Promise<RawJsonR
 }
 
 async function authenticate(env: Env, cookies: CookieBag): Promise<void> {
-  const authKey = Buffer.from(requireSecret(env.VPASS_AUTH_PUBLIC_KEY_B64, "VPASS_AUTH_PUBLIC_KEY_B64"), "base64");
+  const authKey = Buffer.from(
+    requireSecret(env.VPASS_AUTH_PUBLIC_KEY_B64, "VPASS_AUTH_PUBLIC_KEY_B64"),
+    "base64",
+  );
   const configKey = Buffer.from(
     requireSecret(env.VPASS_CONFIG_PUBLIC_KEY_B64, "VPASS_CONFIG_PUBLIC_KEY_B64"),
     "base64",
@@ -285,7 +287,11 @@ async function authenticate(env: Env, cookies: CookieBag): Promise<void> {
   }
 }
 
-async function memberPost(cookies: CookieBag, path: string, content: JsonObject): Promise<RawJsonResponse> {
+async function memberPost(
+  cookies: CookieBag,
+  path: string,
+  content: JsonObject,
+): Promise<RawJsonResponse> {
   const response = await fetch(MEMBER_BASE_URL + path, {
     method: "POST",
     headers: {
@@ -350,10 +356,7 @@ async function putCardError(
   );
 }
 
-async function collectMonth(
-  cookies: CookieBag,
-  month: string,
-): Promise<MonthCapture> {
+async function collectMonth(cookies: CookieBag, month: string): Promise<MonthCapture> {
   // The Android app always supplies p03=1 for the first finalized-statement
   // page. Omitting p03 returns only the display/header bean with zero rows.
   let current = await memberPost(cookies, MEISAI_TOP_PATH, { p01: month, p03: "1" });
@@ -379,7 +382,8 @@ async function collectMonth(
         return { pages, transactionCount: transactions };
       }
       const candidate = detail?.["nextPageRow"];
-      const cursor = typeof candidate === "string" || typeof candidate === "number" ? String(candidate) : "";
+      const cursor =
+        typeof candidate === "string" || typeof candidate === "number" ? String(candidate) : "";
       if (!cursor || seen.has(cursor)) throw new Error(`${month} returned an invalid page cursor`);
       seen.add(cursor);
       current = await memberPost(cookies, MEISAI_TOP_PATH, { p01: month, p03: cursor });
@@ -433,8 +437,7 @@ async function captureCard(
   runId: string,
 ): Promise<RunSummary> {
   const cardLabel = `card-${String(selectedCardZeroBased + 1).padStart(3, "0")}`;
-  const prefix =
-    `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}/${cardLabel}`;
+  const prefix = `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}/${cardLabel}`;
   const { cookies, cardList, cards } = session;
   const diagnostic = createDiagnostics("vpass", runId);
   let stage = "card-selection";
@@ -526,8 +529,7 @@ async function collectOneCard(
   const started = new Date(scheduledTime);
   const runId = safeRunId(started);
   const cardLabel = `card-${String(selectedCardZeroBased + 1).padStart(3, "0")}`;
-  const prefix =
-    `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}/${cardLabel}`;
+  const prefix = `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}/${cardLabel}`;
   const diagnostic = createDiagnostics("vpass", runId);
   let session: VpassSession;
   try {
@@ -543,7 +545,9 @@ async function collectOneCard(
     throw error;
   }
   try {
-    const result = await diagnostic.step("card-collection", () => captureCard(env, session, selectedCardZeroBased, started, runId));
+    const result = await diagnostic.step("card-collection", () =>
+      captureCard(env, session, selectedCardZeroBased, started, runId),
+    );
     diagnostic.finish("success");
     return result;
   } catch (error) {
@@ -555,8 +559,7 @@ async function collectOneCard(
 async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCardsRunSummary> {
   const started = new Date(scheduledTime);
   const runId = safeRunId(started);
-  const runPrefix =
-    `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}`;
+  const runPrefix = `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}`;
   const diagnostic = createDiagnostics("vpass", runId);
   let session: VpassSession;
   try {
@@ -591,7 +594,11 @@ async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCard
   const failures: number[] = [];
   for (let index = 0; index < session.cards.length; index += 1) {
     try {
-      summaries.push(await diagnostic.step("card-collection", () => captureCard(env, session, index, started, runId)));
+      summaries.push(
+        await diagnostic.step("card-collection", () =>
+          captureCard(env, session, index, started, runId),
+        ),
+      );
     } catch {
       failures.push(index + 1);
     }
@@ -610,7 +617,9 @@ async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCard
     objectCount: summaries.reduce((total, item) => total + item.objectCount, 0) + failures.length,
   };
   console.log(JSON.stringify({ event: "vpass-daily-collection-complete", ...summary }));
-  diagnostic.finish(failures.length === 0 ? "success" : summaries.length === 0 ? "failed" : "partial");
+  diagnostic.finish(
+    failures.length === 0 ? "success" : summaries.length === 0 ? "failed" : "partial",
+  );
   if (failures.length > 0) {
     throw new Error(`${failures.length} of ${session.cards.length} card collections failed`);
   }
@@ -637,18 +646,22 @@ export default {
       return Response.json({ ok: true, service: "kogane-vpass-collector-poc" });
     }
     if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
-      if (!await authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
+      if (!(await authorized(request, env.ADMIN_TRIGGER_TOKEN))) {
         return new Response("Unauthorized", { status: 401 });
       }
-      if ([...url.searchParams.keys()].some((key) => key !== "cursor" && key !== "limit") ||
-          url.searchParams.getAll("cursor").length > 1 ||
-          url.searchParams.getAll("limit").length > 1 ||
-          (url.searchParams.has("limit") && url.searchParams.get("limit") !== "1")) {
+      if (
+        [...url.searchParams.keys()].some((key) => key !== "cursor" && key !== "limit") ||
+        url.searchParams.getAll("cursor").length > 1 ||
+        url.searchParams.getAll("limit").length > 1 ||
+        (url.searchParams.has("limit") && url.searchParams.get("limit") !== "1")
+      ) {
         return Response.json({ error: "invalid backfill query" }, { status: 400 });
       }
       const cursor = url.searchParams.get("cursor") ?? undefined;
-      if (cursor !== undefined &&
-          (cursor.length === 0 || cursor.length > 24_000 || /[\x00-\x20\x7f]/u.test(cursor))) {
+      if (
+        cursor !== undefined &&
+        (cursor.length === 0 || cursor.length > 24_000 || /[\x00-\x20\x7f]/u.test(cursor))
+      ) {
         return Response.json({ error: "invalid backfill cursor" }, { status: 400 });
       }
       try {
@@ -656,10 +669,13 @@ export default {
           headers: { "cache-control": "no-store" },
         });
       } catch {
-        return Response.json({ error: "raw evidence backfill failed" }, {
-          status: 502,
-          headers: { "cache-control": "no-store" },
-        });
+        return Response.json(
+          { error: "raw evidence backfill failed" },
+          {
+            status: 502,
+            headers: { "cache-control": "no-store" },
+          },
+        );
       }
     }
     if (
@@ -668,7 +684,7 @@ export default {
     ) {
       return new Response("Not found", { status: 404 });
     }
-    if (!await authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
+    if (!(await authorized(request, env.ADMIN_TRIGGER_TOKEN))) {
       return new Response("Unauthorized", { status: 401 });
     }
     if (url.pathname === "/__collect-all") {

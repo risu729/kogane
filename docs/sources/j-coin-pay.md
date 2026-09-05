@@ -36,15 +36,15 @@ J-Coin取引履歴を本source、普通預金残高・銀行通帳・振込・�
 
 ## 3. 公式app/webとread範囲
 
-| surface | readできる範囲 | 粒度/state | 期間・件数・export | tradeoff |
-| --- | --- | --- | --- | --- |
-| J-Coin Pay app home | J-Coin残高、接続口座、主要機能入口 | wallet単位。銀行残高の正本ではない | 残高snapshot | 公式正本だがAndroid/iOS端末に拘束 |
-| app取引履歴 | 支払、送金/受取、チャージ、口座戻し等 | event単位。相手/加盟店、日時、額、状態のexact schemaはlive未確認 | 参加銀行FAQは10年前まで確認可。件数/pagination/filter未確認 | 長期retentionは強いがCSV/PDF/printなし |
-| 支払detail | 店舗支払と取消/返金状態 | 即時残高減算が基本とみられるがpending/settled fieldは未確認 | app内表示のみ | merchant/card receiptとは別 |
-| 送金detail | 送金、受取待ち、受取、期限切れ返戻 | 受取待ちはpending。72時間未受取なら送金者残高へ戻る | app内表示のみ | pending→settled/returnedを追える可能性 |
-| charge/口座戻しdetail | 接続銀行↔J-Coin wallet移動 | J-Coin側event。銀行側posting時刻とは別 | app内表示のみ | 両sourceで重複排除が必要 |
-| 公式公開web | 説明、guide、規約、campaign、加盟店情報 | account ledgerではない | 公開資料 | `web.jcoin-pay.jp`のconsumer account roleは未確認 |
-| 接続銀行app/web | 預金残高と通帳明細 | 銀行側settled/pending規則 | 銀行sourceごと | J-Coinの相手/加盟店detailを代替しない |
+| surface               | readできる範囲                          | 粒度/state                                                       | 期間・件数・export                                          | tradeoff                                          |
+| --------------------- | --------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------- |
+| J-Coin Pay app home   | J-Coin残高、接続口座、主要機能入口      | wallet単位。銀行残高の正本ではない                               | 残高snapshot                                                | 公式正本だがAndroid/iOS端末に拘束                 |
+| app取引履歴           | 支払、送金/受取、チャージ、口座戻し等   | event単位。相手/加盟店、日時、額、状態のexact schemaはlive未確認 | 参加銀行FAQは10年前まで確認可。件数/pagination/filter未確認 | 長期retentionは強いがCSV/PDF/printなし            |
+| 支払detail            | 店舗支払と取消/返金状態                 | 即時残高減算が基本とみられるがpending/settled fieldは未確認      | app内表示のみ                                               | merchant/card receiptとは別                       |
+| 送金detail            | 送金、受取待ち、受取、期限切れ返戻      | 受取待ちはpending。72時間未受取なら送金者残高へ戻る              | app内表示のみ                                               | pending→settled/returnedを追える可能性            |
+| charge/口座戻しdetail | 接続銀行↔J-Coin wallet移動              | J-Coin側event。銀行側posting時刻とは別                           | app内表示のみ                                               | 両sourceで重複排除が必要                          |
+| 公式公開web           | 説明、guide、規約、campaign、加盟店情報 | account ledgerではない                                           | 公開資料                                                    | `web.jcoin-pay.jp`のconsumer account roleは未確認 |
+| 接続銀行app/web       | 預金残高と通帳明細                      | 銀行側settled/pending規則                                        | 銀行sourceごと                                              | J-Coinの相手/加盟店detailを代替しない             |
 
 公式参加銀行FAQは履歴を10年前まで表示できる一方、取引明細の発行・print機能はないと明記する。
 公開情報からCSV、PDF、OFX、API exportは確認できない。したがって「10年」はUI retentionであり、
@@ -117,14 +117,14 @@ authであり、本人wallet履歴APIとして転用しない。公開third-part
 
 ## 9. Runtime適性
 
-| runtime | 適性 | 判断 |
-| --- | --- | --- |
-| 所有Android端末 | 調査・公式表示に最適 | SMS/生体/device state、正規APK、read-only観測に必要。定常UI automationは脆い |
-| Local Windows/WSL | parserに適 | redacted artifact処理、APK静的解析。app/session bootstrapは不可 |
-| Cloudflare Workers | 低〜条件付き | proven token replayならfetch可能。端末認証/pinning、binary protocol、secret運用に不向き |
-| Cloudflare Containers | 条件付き | full Linux parser/proxyを隔離可能。Android/device trustは提供しない |
-| OCI container | 条件付き | digest固定、secret store、egress allowlistでreplay実験しやすい |
-| Kubernetes | 過剰 | CronJob/Secret/NetworkPolicyは可能だが単一walletに運用cost過大 |
+| runtime               | 適性                 | 判断                                                                                    |
+| --------------------- | -------------------- | --------------------------------------------------------------------------------------- |
+| 所有Android端末       | 調査・公式表示に最適 | SMS/生体/device state、正規APK、read-only観測に必要。定常UI automationは脆い            |
+| Local Windows/WSL     | parserに適           | redacted artifact処理、APK静的解析。app/session bootstrapは不可                         |
+| Cloudflare Workers    | 低〜条件付き         | proven token replayならfetch可能。端末認証/pinning、binary protocol、secret運用に不向き |
+| Cloudflare Containers | 条件付き             | full Linux parser/proxyを隔離可能。Android/device trustは提供しない                     |
+| OCI container         | 条件付き             | digest固定、secret store、egress allowlistでreplay実験しやすい                          |
+| Kubernetes            | 過剰                 | CronJob/Secret/NetworkPolicyは可能だが単一walletに運用cost過大                          |
 
 ## 10. PR #5共通 A-E / cost
 
@@ -135,13 +135,13 @@ authであり、本人wallet履歴APIとして転用しない。公開third-part
 - E: manual capture remains safe default
 - Cost: 1 = small wrapper、5 = device-bound/adversarial
 
-| 経路 | Level | Cost | 判定 |
-| --- | ---: | ---: | --- |
-| app履歴を人手で確認しschema/countだけ記録 | E | 1 | 安全だがexport不可、実データ収集には不十分 |
-| app画面のlocal UI capture | D | 4 | 10年履歴は有用だがpagination/画面変更/PII redactionが重い |
-| app bootstrap後のread-only API replay | C候補 | 4-5 | transport/token/device binding未確認。確認後のみC |
-| stable read API + renewable session | B候補 | 4 | 現時点で証拠なし。APK/runtime実験が必要 |
-| documented consumer API/export | A該当なし | 5 | CSV/PDF/print/APIなし |
+| 経路                                      |     Level | Cost | 判定                                                      |
+| ----------------------------------------- | --------: | ---: | --------------------------------------------------------- |
+| app履歴を人手で確認しschema/countだけ記録 |         E |    1 | 安全だがexport不可、実データ収集には不十分                |
+| app画面のlocal UI capture                 |         D |    4 | 10年履歴は有用だがpagination/画面変更/PII redactionが重い |
+| app bootstrap後のread-only API replay     |     C候補 |  4-5 | transport/token/device binding未確認。確認後のみC         |
+| stable read API + renewable session       |     B候補 |    4 | 現時点で証拠なし。APK/runtime実験が必要                   |
+| documented consumer API/export            | A該当なし |    5 | CSV/PDF/print/APIなし                                     |
 
 総合評価は **D/cost 4**、安全な既定は **E/cost 1**。static/dynamic調査でread APIと更新可能session、
 read/write scopeが確認できればCへ上げる。

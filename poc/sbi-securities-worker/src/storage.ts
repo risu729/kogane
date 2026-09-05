@@ -1,10 +1,6 @@
 import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
-import type {
-  Artifact,
-  ArtifactManifest,
-  CollectionManifest,
-} from "./types";
+import type { Artifact, ArtifactManifest, CollectionManifest } from "./types";
 
 export async function storeArtifact(options: {
   bucket: R2Bucket;
@@ -27,9 +23,7 @@ export async function storeArtifact(options: {
     key,
     sha256,
     bytes,
-    ...(options.artifact.window
-      ? { window: options.artifact.window }
-      : {}),
+    ...(options.artifact.window ? { window: options.artifact.window } : {}),
   };
 }
 

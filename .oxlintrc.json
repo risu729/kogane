@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "react"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error"
+  },
+  "rules": {
+    // Vite uses React's automatic JSX runtime.
+    "react/react-in-jsx-scope": "allow",
+    // Protocol validators intentionally reject control characters.
+    "eslint/no-control-regex": "allow",
+    "eslint/no-shadow": "allow",
+    "eslint/no-underscore-dangle": "allow",
+    "eslint/no-unused-vars": [
+      "error",
+      { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["**/test/**", "**/tests/**"],
+      "rules": { "typescript/no-extraneous-class": "allow" }
+    }
+  ],
+  "ignorePatterns": ["data/**", "**/fixtures/**", "**/worker-configuration.d.ts"]
+}

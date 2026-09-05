@@ -94,8 +94,10 @@ describe("SBI VC Trade read-only gateway", () => {
   });
 
   test("does not leak session values in HTTP errors", async () => {
-    const client = new SbiVcTradeClient(session, async () =>
-      new Response("blocked", { status: 403 }));
+    const client = new SbiVcTradeClient(
+      session,
+      async () => new Response("blocked", { status: 403 }),
+    );
     await expect(client.accountMargin()).rejects.toThrow("HTTP 403");
     try {
       await client.accountMargin();
@@ -129,15 +131,19 @@ describe("SBI VC Trade read-only gateway", () => {
   });
 
   test("rejects non-JSON and non-OK gateway envelopes", async () => {
-    const html = new SbiVcTradeClient(session, async () =>
-      new Response("<html>maintenance</html>", {
-        status: 200,
-        headers: { "content-type": "text/html" },
-      }));
+    const html = new SbiVcTradeClient(
+      session,
+      async () =>
+        new Response("<html>maintenance</html>", {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        }),
+    );
     await expect(html.accountMargin()).rejects.toThrow("non-JSON");
 
     const validation = new SbiVcTradeClient(session, async () =>
-      json({ meta: { status: "VALIDATION_ERROR" }, body: {} }));
+      json({ meta: { status: "VALIDATION_ERROR" }, body: {} }),
+    );
     await expect(validation.accountMargin()).rejects.toThrow("VALIDATION_ERROR");
   });
 

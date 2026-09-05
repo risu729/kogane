@@ -1,7 +1,4 @@
-import {
-  UnsafeReadRequestError,
-  UnverifiedReadRouteError,
-} from "./errors";
+import { UnsafeReadRequestError, UnverifiedReadRouteError } from "./errors";
 import type {
   ReadOperationId,
   ReadExecutionProfile,
@@ -52,10 +49,7 @@ export const READ_ROUTE_CATALOG = [
     "common.account-information-list",
     "/SFC/app/IFCM_CommonAdapter/getAccountInformationListDisplay",
   ),
-  route(
-    "common.product-description",
-    "/SFC/app/IFCM_CommonAdapter/getProductDescription",
-  ),
+  route("common.product-description", "/SFC/app/IFCM_CommonAdapter/getProductDescription"),
   route(
     "account.information-others",
     "/SFC/app/IFAI_AccountAdapter/getAccountInformationOthersDisplay",
@@ -64,35 +58,17 @@ export const READ_ROUTE_CATALOG = [
     "account.casa-activity-specific-period",
     "/SFC/app/IFAI_AccountAdapter/getCasaAccountActivitySpecificPeriod",
   ),
-  route(
-    "account.account-list",
-    "/SFC/app/AIAI_AccountInfomationAdapter/getAccountList",
-  ),
-  capturedRoute(
-    "account.inbox-list",
-    "/SFC/app/AIAI_AccountInfomationAdapter/getInboxList",
-  ),
-  capturedRoute(
-    "common.uiux-flag",
-    "/SFC/app/AICM_CommonAdapter/getUiuxFlag",
-  ),
-  capturedRoute(
-    "email.address",
-    "/SFC/app/IFEM_EmailAdapter/getEmailAddress",
-  ),
-  route(
-    "yen-deposit.product-details",
-    "/SFC/app/AIYD_YenDepositAdapter/getYenProductDetails",
-  ),
+  route("account.account-list", "/SFC/app/AIAI_AccountInfomationAdapter/getAccountList"),
+  capturedRoute("account.inbox-list", "/SFC/app/AIAI_AccountInfomationAdapter/getInboxList"),
+  capturedRoute("common.uiux-flag", "/SFC/app/AICM_CommonAdapter/getUiuxFlag"),
+  capturedRoute("email.address", "/SFC/app/IFEM_EmailAdapter/getEmailAddress"),
+  route("yen-deposit.product-details", "/SFC/app/AIYD_YenDepositAdapter/getYenProductDetails"),
   capturedRoute(
     "yen-deposit.account",
     "/SFC/app/AIYD_YenDepositAdapter/getYenDepositAccount",
     "sbi-shinsei-yen-deposit-account-v1",
   ),
-  route(
-    "csv.download",
-    "/SFC/adapters/IFAI_CsvDownloadAdapter/csvDownload/getCsv",
-  ),
+  route("csv.download", "/SFC/adapters/IFAI_CsvDownloadAdapter/csvDownload/getCsv"),
 ] as const satisfies readonly ReadRoute[];
 
 const FORBIDDEN_PATH_TERMS = [
@@ -113,17 +89,12 @@ const FORBIDDEN_PATH_TERMS = [
 
 export function liveReadsEnabled(): boolean {
   return READ_ROUTE_CATALOG.some(
-    (entry) =>
-      entry.liveValidated &&
-      entry.productionEnabled &&
-      entry.responseSchema !== "unknown",
+    (entry) => entry.liveValidated && entry.productionEnabled && entry.responseSchema !== "unknown",
   );
 }
 
 export function getReadRoute(operation: ReadOperationId): ReadRoute {
-  const entry = READ_ROUTE_CATALOG.find(
-    (candidate) => candidate.operation === operation,
-  );
+  const entry = READ_ROUTE_CATALOG.find((candidate) => candidate.operation === operation);
   if (!entry) {
     throw new UnsafeReadRequestError("Read operation is not allowlisted");
   }
@@ -155,9 +126,7 @@ export function assertReadAllowed(
     parsed.username !== "" ||
     parsed.password !== ""
   ) {
-    throw new UnsafeReadRequestError(
-      "Read request does not exactly match the allowlist",
-    );
+    throw new UnsafeReadRequestError("Read request does not exactly match the allowlist");
   }
   if (!route.liveValidated) {
     throw new UnverifiedReadRouteError(
@@ -174,10 +143,7 @@ export function assertReadAllowed(
       "Direct HTTP reads are disabled; use the same-page browser collector",
     );
   }
-  if (
-    executionProfile === "worker-production" &&
-    !route.productionEnabled
-  ) {
+  if (executionProfile === "worker-production" && !route.productionEnabled) {
     throw new UnverifiedReadRouteError(
       `Read operation ${route.operation} is not enabled for production`,
     );

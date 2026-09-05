@@ -6,17 +6,17 @@ Vpass runtime experiment. The temporary resources were removed on
 
 ## Owned by this probe
 
-| Kind | Name | ID / digest | Created | Status | Delete command |
-| --- | --- | --- | --- | --- | --- |
-| Worker | `kogane-vpass-runtime-probe-20260825` | version `99fea156-df18-4b3c-83e3-58113a298b8a` | `2026-08-25T08:59:21.377Z` | deleted; API now reports code `10007` | completed |
-| Durable Object namespace | `RuntimeProbeContainer` migration `v1` | `eeaa4940178541ab95d64100fdaedf6f` | `2026-08-25` | deleted with the Worker; account inventory verified empty | completed |
-| Container application | `RuntimeProbeContainer` | none | `2026-08-25` | not created: Workers Paid is required | no Cloudflare cleanup required |
-| Container image | deployment-generated | none | `2026-08-25` | local build only; Cloudflare upload rejected, so no registry artifact ever existed | no Cloudflare cleanup required |
+| Kind                     | Name                                   | ID / digest                                    | Created                    | Status                                                                             | Delete command                 |
+| ------------------------ | -------------------------------------- | ---------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------- | ------------------------------ |
+| Worker                   | `kogane-vpass-runtime-probe-20260825`  | version `99fea156-df18-4b3c-83e3-58113a298b8a` | `2026-08-25T08:59:21.377Z` | deleted; API now reports code `10007`                                              | completed                      |
+| Durable Object namespace | `RuntimeProbeContainer` migration `v1` | `eeaa4940178541ab95d64100fdaedf6f`             | `2026-08-25`               | deleted with the Worker; account inventory verified empty                          | completed                      |
+| Container application    | `RuntimeProbeContainer`                | none                                           | `2026-08-25`               | not created: Workers Paid is required                                              | no Cloudflare cleanup required |
+| Container image          | deployment-generated                   | none                                           | `2026-08-25`               | local build only; Cloudflare upload rejected, so no registry artifact ever existed | no Cloudflare cleanup required |
 
 ## Referenced but not owned
 
-| Kind | Name | Purpose | Cleanup |
-| --- | --- | --- | --- |
+| Kind              | Name    | Purpose                                          | Cleanup                                                                         |
+| ----------------- | ------- | ------------------------------------------------ | ------------------------------------------------------------------------------- |
 | Cloudflare Tunnel | `tamia` | Compare VPC `fetch()` and raw `connect()` egress | **Never delete from this probe.** Pre-existing personal routing infrastructure. |
 
 ## Public probe URL

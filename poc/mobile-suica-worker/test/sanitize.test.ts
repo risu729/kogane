@@ -16,8 +16,9 @@ describe("Mobile Suica history sanitizer", () => {
   });
 
   test("rejects a missing baseVariable input", () => {
-    expect(() => sanitizeHistoryHtml("<html><body>履歴</body></html>"))
-      .toThrow("history_base_variable_count_invalid");
+    expect(() => sanitizeHistoryHtml("<html><body>履歴</body></html>")).toThrow(
+      "history_base_variable_count_invalid",
+    );
   });
 
   test("rejects multiple baseVariable inputs", () => {
@@ -26,43 +27,54 @@ describe("Mobile Suica history sanitizer", () => {
   });
 
   test("rejects an empty baseVariable value", () => {
-    expect(() => sanitizeHistoryHtml(`<input type="hidden" name="baseVariable" value="">`))
-      .toThrow("history_base_variable_empty");
+    expect(() => sanitizeHistoryHtml(`<input type="hidden" name="baseVariable" value="">`)).toThrow(
+      "history_base_variable_empty",
+    );
   });
 
   test("rejects duplicate value attributes without leaving a secret behind", () => {
-    expect(() => sanitizeHistoryHtml(
-      `<input type="hidden" name="baseVariable" value="first-secret" value="second-secret">`,
-    )).toThrow("history_base_variable_value_count_invalid");
+    expect(() =>
+      sanitizeHistoryHtml(
+        `<input type="hidden" name="baseVariable" value="first-secret" value="second-secret">`,
+      ),
+    ).toThrow("history_base_variable_value_count_invalid");
   });
 
   test("rejects a baseVariable value repeated elsewhere in the provider HTML", () => {
-    expect(() => sanitizeHistoryHtml(
-      `<input type="hidden" name="baseVariable" value="repeated-secret"><script>repeated-secret</script>`,
-    )).toThrow("history_base_variable_redaction_incomplete");
+    expect(() =>
+      sanitizeHistoryHtml(
+        `<input type="hidden" name="baseVariable" value="repeated-secret"><script>repeated-secret</script>`,
+      ),
+    ).toThrow("history_base_variable_redaction_incomplete");
   });
 
   test("rejects a non-hidden baseVariable input", () => {
-    expect(() => sanitizeHistoryHtml(
-      `<input type="text" name="baseVariable" value="sensitive-state">`,
-    )).toThrow("history_base_variable_type_invalid");
+    expect(() =>
+      sanitizeHistoryHtml(`<input type="text" name="baseVariable" value="sensitive-state">`),
+    ).toThrow("history_base_variable_type_invalid");
   });
 
   test("rejects duplicate type attributes", () => {
-    expect(() => sanitizeHistoryHtml(
-      `<input type="hidden" type="text" name="baseVariable" value="sensitive-state">`,
-    )).toThrow("history_base_variable_type_invalid");
+    expect(() =>
+      sanitizeHistoryHtml(
+        `<input type="hidden" type="text" name="baseVariable" value="sensitive-state">`,
+      ),
+    ).toThrow("history_base_variable_type_invalid");
   });
 
   test("rejects duplicate name attributes", () => {
-    expect(() => sanitizeHistoryHtml(
-      `<input type="hidden" name="baseVariable" name="other" value="sensitive-state">`,
-    )).toThrow("history_base_variable_name_invalid");
+    expect(() =>
+      sanitizeHistoryHtml(
+        `<input type="hidden" name="baseVariable" name="other" value="sensitive-state">`,
+      ),
+    ).toThrow("history_base_variable_name_invalid");
   });
 
   test("finds baseVariable in any name attribute and fails closed", () => {
-    expect(() => sanitizeHistoryHtml(
-      `<input type="hidden" name="other" name="baseVariable" value="sensitive-state">`,
-    )).toThrow("history_base_variable_name_invalid");
+    expect(() =>
+      sanitizeHistoryHtml(
+        `<input type="hidden" name="other" name="baseVariable" value="sensitive-state">`,
+      ),
+    ).toThrow("history_base_variable_name_invalid");
   });
 });

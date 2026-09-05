@@ -36,9 +36,7 @@ export function OverviewPage(): ReactNode {
       <div className="page-head">
         <p className="page-eyebrow">あなたの記録を、ひとつの場所に</p>
         <h1>ホーム</h1>
-        <p className="lede">
-          取得元と最近の収集状況を確認し、気になる記録の原本までたどれます。
-        </p>
+        <p className="lede">取得元と最近の収集状況を確認し、気になる記録の原本までたどれます。</p>
       </div>
       <QueryBoundary query={query} label="ホーム">
         {(data) => <OverviewBody data={data} />}
@@ -52,10 +50,7 @@ function OverviewBody({ data }: { data: Overview }): ReactNode {
     [...data.fetchRuns].sort((a, b) => b.id - a.id),
     page,
   );
-  const artifactCount = data.sources.reduce(
-    (count, source) => count + source.artifact_count,
-    0,
-  );
+  const artifactCount = data.sources.reduce((count, source) => count + source.artifact_count, 0);
   return (
     <>
       <div className="overview-grid">
@@ -71,9 +66,7 @@ function OverviewBody({ data }: { data: Overview }): ReactNode {
         </div>
         <div className="overview-stat">
           <span className="overview-stat-label">収集の記録</span>
-          <strong className="overview-stat-value">
-            {data.fetchRuns.length}
-          </strong>
+          <strong className="overview-stat-value">{data.fetchRuns.length}</strong>
           <span>保存済みの実行履歴</span>
         </div>
       </div>
@@ -128,10 +121,7 @@ function OverviewBody({ data }: { data: Overview }): ReactNode {
                     </td>
                     <td>{run.started_at}</td>
                     <td>
-                      <Nullable
-                        value={run.completed_at}
-                        placeholder="完了日時未記録"
-                      />
+                      <Nullable value={run.completed_at} placeholder="完了日時未記録" />
                     </td>
                     <td>
                       <details>
@@ -163,9 +153,7 @@ function OverviewBody({ data }: { data: Overview }): ReactNode {
             {data.counts.map((entry) => (
               <div className="tile" key={entry.table}>
                 <div className="tile-value">{entry.rows}</div>
-                <div className="tile-label">
-                  {displayLabel(TABLE_LABELS, entry.table)}
-                </div>
+                <div className="tile-label">{displayLabel(TABLE_LABELS, entry.table)}</div>
                 <code>{entry.table}</code>
               </div>
             ))}
@@ -183,23 +171,12 @@ function ParseHistory({ data }: { data: Overview }): ReactNode {
     page,
   );
   return (
-    <Panel
-      id="parse-runs"
-      title="解析の履歴"
-      count={`${data.parseRuns.length}件`}
-    >
+    <Panel id="parse-runs" title="解析の履歴" count={`${data.parseRuns.length}件`}>
       <div className="table-scroll">
         <table>
           <thead>
             <tr>
-              {[
-                "原本",
-                "解析方法",
-                "解析日時",
-                "結果",
-                "履歴",
-                "注意・エラー",
-              ].map((label) => (
+              {["原本", "解析方法", "解析日時", "結果", "履歴", "注意・エラー"].map((label) => (
                 <th scope="col" key={label}>
                   {label}
                 </th>
@@ -210,9 +187,7 @@ function ParseHistory({ data }: { data: Overview }): ReactNode {
             {view.rows.map((run) => (
               <tr
                 key={run.id}
-                className={
-                  run.superseded_by_parse_run_id === null ? "" : "is-superseded"
-                }
+                className={run.superseded_by_parse_run_id === null ? "" : "is-superseded"}
               >
                 <td>
                   <Link to={`/artifacts/${run.fetch_artifact_id}`}>

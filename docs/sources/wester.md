@@ -49,24 +49,24 @@ MUFG Card / My Digital Connect系の別sourceを参照するだけとし、proto
 
 ## 3. 公式経路、粒度、期間、export
 
-| 経路 | read範囲 | 粒度/state | 期間/件数/export | tradeoff |
-| --- | --- | --- | --- | --- |
-| WESTER portal会員support | point種別残高、付与・利用履歴、期限、紐づけICOCAのpoint履歴 | point event / expiry bucket | 通常pointの履歴期間・row上限・paginationは公開確認できず。CSV/PDF未確認 | Web bootstrap/replay候補。全サービス横断のpoint正本 |
-| WESTER app | point残高/利用、キャンペーン、card ICOCA残高、ICOCA app/e5489等への導線 | mobile summary/detail | 履歴期間/件数/export未確認 | 広いfront doorでwrite/予約UIが隣接 |
-| Wesmo! app | 出金可/不可残高、決済、charge、send/receive、出金、point利用/付与履歴 | wallet event、送金link/request state | 保持期間・最大件数・pagination・CSV/PDF未確認 | Wesmo!のprimary route。device-bound、多要素認証 |
-| J-WEST issuer Web | card利用・請求・返金、家族/追加card | issuerのauthorization/請求event | MyJCBまたはMy Digital ConnectでPDF等 | 別source。WESTER ID/passwordと別credential |
-| ICOCA app/member Web | SF残高、鉄道/物販/charge履歴 | ICOCA event | member Webは前日から26週、最大100件。明細/領収PDFは当日から1年前月初まで | ICOCA別source。WESTER point履歴と混ぜない |
-| 券売機 | ICOCA SF履歴、ICOCA利用由来point履歴 | device/card上の直近event、月次point | SFは通常20件、係員は最大50件、26週まで。pointは前月から過去6か月を表示/印字 | cloud収集不可、manual evidence |
+| 経路                     | read範囲                                                                | 粒度/state                           | 期間/件数/export                                                            | tradeoff                                            |
+| ------------------------ | ----------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- | --------------------------------------------------- |
+| WESTER portal会員support | point種別残高、付与・利用履歴、期限、紐づけICOCAのpoint履歴             | point event / expiry bucket          | 通常pointの履歴期間・row上限・paginationは公開確認できず。CSV/PDF未確認     | Web bootstrap/replay候補。全サービス横断のpoint正本 |
+| WESTER app               | point残高/利用、キャンペーン、card ICOCA残高、ICOCA app/e5489等への導線 | mobile summary/detail                | 履歴期間/件数/export未確認                                                  | 広いfront doorでwrite/予約UIが隣接                  |
+| Wesmo! app               | 出金可/不可残高、決済、charge、send/receive、出金、point利用/付与履歴   | wallet event、送金link/request state | 保持期間・最大件数・pagination・CSV/PDF未確認                               | Wesmo!のprimary route。device-bound、多要素認証     |
+| J-WEST issuer Web        | card利用・請求・返金、家族/追加card                                     | issuerのauthorization/請求event      | MyJCBまたはMy Digital ConnectでPDF等                                        | 別source。WESTER ID/passwordと別credential          |
+| ICOCA app/member Web     | SF残高、鉄道/物販/charge履歴                                            | ICOCA event                          | member Webは前日から26週、最大100件。明細/領収PDFは当日から1年前月初まで    | ICOCA別source。WESTER point履歴と混ぜない           |
+| 券売機                   | ICOCA SF履歴、ICOCA利用由来point履歴                                    | device/card上の直近event、月次point  | SFは通常20件、係員は最大50件、26週まで。pointは前月から過去6か月を表示/印字 | cloud収集不可、manual evidence                      |
 
 ### WESTERポイント
 
 公式は3種を明示する。
 
-| 種別 | 有効期限 | 主な用途と収集上の注意 |
-| --- | --- | --- |
-| 基本 | 獲得年度の翌年度末（3月31日） | 店頭/Web、対象商品、ICOCA charge等。年度bucketを保持する |
-| 期間・用途限定 | campaign/付与ごと | common期限を推測せず、表示expiryと利用可能scopeをevent/lotに保持する |
-| チャージ専用 | 無期限 | ICOCA charge専用。ICOCAごとに付与対象履歴があり、通常pointと用途が異なる |
+| 種別           | 有効期限                      | 主な用途と収集上の注意                                                   |
+| -------------- | ----------------------------- | ------------------------------------------------------------------------ |
+| 基本           | 獲得年度の翌年度末（3月31日） | 店頭/Web、対象商品、ICOCA charge等。年度bucketを保持する                 |
+| 期間・用途限定 | campaign/付与ごと             | common期限を推測せず、表示expiryと利用可能scopeをevent/lotに保持する     |
+| チャージ専用   | 無期限                        | ICOCA charge専用。ICOCAごとに付与対象履歴があり、通常pointと用途が異なる |
 
 Wesmo!決済に関するpoint付与・利用履歴はWesmo! app、それ以外を含む横断履歴はWESTER portalで確認すると
 公式FAQが案内する。同じWesmo!決済がwallet eventとpoint eventの双方に現れるため、`source_event_id`相当が
@@ -183,15 +183,15 @@ point/Wesmo read endpointのhost/path/method/schema、app token、refresh、devi
 
 ## 9. Runtime適性
 
-| runtime | 適性 | 判断 |
-| --- | --- | --- |
-| owner browser/device | 最適 | passkey/OTP/電話発信bootstrap、official UI確認、redacted observation |
-| Local WSL | 適 | public JS/APK static analysis、sanitized DOM/schema parser |
-| Cloudflare Workers | 低〜条件付き | proven GET/token replayなら軽量。WebAuthn/Akamai/device bindingは不向き |
-| Cloudflare Containers | 条件付き | browser/parserを隔離可能だがAndroid device trustは提供しない |
-| OCI container | 条件付き | digest固定、secret store、read-only FS、egress allowlistでreplay候補を試験可能 |
-| Kubernetes | 過剰 | CronJob/Secret/NetworkPolicyは可能だが単一会員collectorには運用cost過大 |
-| Android実機 | Wesmo!調査に必須 | 正規app/device state。定常UI automationは更新とwrite UI隣接で脆い |
+| runtime               | 適性             | 判断                                                                           |
+| --------------------- | ---------------- | ------------------------------------------------------------------------------ |
+| owner browser/device  | 最適             | passkey/OTP/電話発信bootstrap、official UI確認、redacted observation           |
+| Local WSL             | 適               | public JS/APK static analysis、sanitized DOM/schema parser                     |
+| Cloudflare Workers    | 低〜条件付き     | proven GET/token replayなら軽量。WebAuthn/Akamai/device bindingは不向き        |
+| Cloudflare Containers | 条件付き         | browser/parserを隔離可能だがAndroid device trustは提供しない                   |
+| OCI container         | 条件付き         | digest固定、secret store、read-only FS、egress allowlistでreplay候補を試験可能 |
+| Kubernetes            | 過剰             | CronJob/Secret/NetworkPolicyは可能だが単一会員collectorには運用cost過大        |
+| Android実機           | Wesmo!調査に必須 | 正規app/device state。定常UI automationは更新とwrite UI隣接で脆い              |
 
 Workersへcredential/bootstrapを移さず、owner deviceで得たsource-scoped、短命、read-only相当sessionのrenewabilityが
 実証された場合だけ検討する。full browserはContainers/OCI、app-only transportはAndroidを調査用に使い、K8sは
@@ -206,15 +206,15 @@ Workersへcredential/bootstrapを移さず、owner deviceで得たsource-scoped�
 - E: manual capture remains safe default
 - Cost: 1 = small wrapper、5 = device-bound/adversarial
 
-| route | Level | Cost | 判定 |
-| --- | ---: | ---: | --- |
-| WESTER portal/appのmanual sanitized capture | E | 1-2 | 安全。履歴保持/exportは未確認 |
-| Wesmo! app manual balance/history capture | E | 2 | official primary、残高bucketを保持。外部export未確認 |
-| WESTER browser bootstrap + read replay | C候補 | 4 | 公開login transportは確認、read API/session renewalは未確認 |
-| WESTER app bootstrap + API replay | C候補 | 5 | APK/host/token/device metadata未確認 |
-| Wesmo! app bootstrap + API replay | C候補 | 5 | 多要素・電話発信・別device再認証・device binding |
-| full app UI automation | D | 5 | write control隣接、app更新、端末認証で脆い |
-| documented consumer/export API | A該当なし | 5 | 公開公式API/CSV/PDF exportを確認できず |
+| route                                       |     Level | Cost | 判定                                                        |
+| ------------------------------------------- | --------: | ---: | ----------------------------------------------------------- |
+| WESTER portal/appのmanual sanitized capture |         E |  1-2 | 安全。履歴保持/exportは未確認                               |
+| Wesmo! app manual balance/history capture   |         E |    2 | official primary、残高bucketを保持。外部export未確認        |
+| WESTER browser bootstrap + read replay      |     C候補 |    4 | 公開login transportは確認、read API/session renewalは未確認 |
+| WESTER app bootstrap + API replay           |     C候補 |    5 | APK/host/token/device metadata未確認                        |
+| Wesmo! app bootstrap + API replay           |     C候補 |    5 | 多要素・電話発信・別device再認証・device binding            |
+| full app UI automation                      |         D |    5 | write control隣接、app更新、端末認証で脆い                  |
+| documented consumer/export API              | A該当なし |    5 | 公開公式API/CSV/PDF exportを確認できず                      |
 
 総合は **D/cost 5**、安全な既定は **E/cost 1-2**。WESTER Webで安定したread endpointとrenewable scoped sessionが
 実証されればCからB候補へ、Wesmo!はdevice/integrity非依存が確認できるまでC候補に留める。

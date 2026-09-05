@@ -9,10 +9,12 @@ describe("private artifact writer", () => {
     const directory = await mkdtemp(join(tmpdir(), "sbi-vc-artifacts-"));
     try {
       await chmod(directory, 0o755);
-      await writeArtifacts(directory, [{
-        name: "result.json",
-        response: { meta: { status: "OK" }, body: { synthetic: true } },
-      }]);
+      await writeArtifacts(directory, [
+        {
+          name: "result.json",
+          response: { meta: { status: "OK" }, body: { synthetic: true } },
+        },
+      ]);
 
       expect((await lstat(directory)).mode & 0o777).toBe(0o700);
       expect((await lstat(join(directory, "result.json"))).mode & 0o777).toBe(0o600);
@@ -28,9 +30,11 @@ describe("private artifact writer", () => {
       await writeFile(target, "unchanged", { mode: 0o600 });
       await symlink(target, join(directory, "result.json"));
 
-      await expect(writeArtifacts(directory, [
-        { name: "result.json", response: { meta: { status: "OK" }, body: { synthetic: true } } },
-      ])).rejects.toMatchObject({ code: "EEXIST" });
+      await expect(
+        writeArtifacts(directory, [
+          { name: "result.json", response: { meta: { status: "OK" }, body: { synthetic: true } } },
+        ]),
+      ).rejects.toMatchObject({ code: "EEXIST" });
       expect(await readFile(target, "utf8")).toBe("unchanged");
     } finally {
       await rm(directory, { force: true, recursive: true });
@@ -40,10 +44,14 @@ describe("private artifact writer", () => {
   test("rejects artifact names that escape the output directory", async () => {
     const directory = await mkdtemp(join(tmpdir(), "sbi-vc-artifacts-"));
     try {
-      await expect(writeArtifacts(directory, [{
-        name: "../outside.json",
-        response: { meta: { status: "OK" }, body: {} },
-      }])).rejects.toThrow("invalid artifact name");
+      await expect(
+        writeArtifacts(directory, [
+          {
+            name: "../outside.json",
+            response: { meta: { status: "OK" }, body: {} },
+          },
+        ]),
+      ).rejects.toThrow("invalid artifact name");
     } finally {
       await rm(directory, { force: true, recursive: true });
     }

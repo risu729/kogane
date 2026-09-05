@@ -60,7 +60,7 @@ class FakeCentral {
       return Response.json({ unitId: this.nextUnitId++ }, { status: 201 });
     }
     if (/\/artifacts$/u.test(path)) {
-      const body = await request.json() as { artifactKey: string };
+      const body = (await request.json()) as { artifactKey: string };
       const byte = body.artifactKey === "manifest.json" ? "b" : "a";
       return Response.json({ descriptorSha256: byte.repeat(64) }, { status: 201 });
     }
@@ -84,7 +84,7 @@ describe("SBI staged-run importer", () => {
     const bucket = new FakeBucket();
     const artifacts = [];
     for (const [index, dataset] of datasets.entries()) {
-      const body = new TextEncoder().encode(`{ \"dataset\": \"${dataset}\", \"index\": ${index} }\n`);
+      const body = new TextEncoder().encode(`{ "dataset": "${dataset}", "index": ${index} }\n`);
       const sha256 = await digest(body);
       const key = `${PREFIX}${dataset}.json`;
       bucket.objects.set(key, { body, customMetadata: { dataset, sha256 } });
@@ -112,8 +112,8 @@ describe("SBI staged-run importer", () => {
     });
 
     expect(result).toMatchObject({ centralRunId: 1, artifactCount: 8, sealed: true });
-    const runReport = central.requests.find((request) =>
-      new URL(request.url).pathname === "/v1/runs/1/reports"
+    const runReport = central.requests.find(
+      (request) => new URL(request.url).pathname === "/v1/runs/1/reports",
     );
     expect(runReport ? JSON.parse(runReport.body) : undefined).toMatchObject({
       producerVersion: "sbi-r2-v3",
@@ -131,26 +131,29 @@ describe("SBI staged-run importer", () => {
       artifactRole: "collector_manifest",
       payloadFidelity: "generated",
     });
-    expect(artifactBodies.find((body) => body.artifactKey === "foreign-trade-records.json"))
-      .toMatchObject({ containerKind: "bundle" });
-    await expect(importSbiRun({
-      bucket: bucket as unknown as R2Bucket,
-      centralService: central as unknown as Fetcher,
-      centralToken: TOKEN,
-      fingerprintKey: FINGERPRINT_KEY,
-      importerVersion: "collector-r2-importer-v99",
-      manifestKey: KEY,
-    })).resolves.toMatchObject({ centralRunId: 1, sealed: true });
+    expect(
+      artifactBodies.find((body) => body.artifactKey === "foreign-trade-records.json"),
+    ).toMatchObject({ containerKind: "bundle" });
+    await expect(
+      importSbiRun({
+        bucket: bucket as unknown as R2Bucket,
+        centralService: central as unknown as Fetcher,
+        centralToken: TOKEN,
+        fingerprintKey: FINGERPRINT_KEY,
+        importerVersion: "collector-r2-importer-v99",
+        manifestKey: KEY,
+      }),
+    ).resolves.toMatchObject({ centralRunId: 1, sealed: true });
   });
 
   test("rejects a corrupted source object before creating central state", async () => {
     const dataset = "domestic-cash-positions";
-    const body = new TextEncoder().encode("{\"value\":1}");
+    const body = new TextEncoder().encode('{"value":1}');
     const declared = await digest(body);
     const bucket = new FakeBucket();
     const key = `${PREFIX}${dataset}.json`;
     bucket.objects.set(key, {
-      body: new TextEncoder().encode("{\"value\":2}"),
+      body: new TextEncoder().encode('{"value":2}'),
       customMetadata: { dataset, sha256: declared },
     });
     bucket.objects.set(KEY, {
@@ -158,25 +161,29 @@ describe("SBI staged-run importer", () => {
         scope: "domestic",
         status: "partial",
         artifacts: [{ dataset, key, sha256: declared, bytes: body.byteLength }],
-        failures: [{
-          scope: "domestic",
-          operation: "main-site",
-          errorType: "Error",
-          message: "sanitized failure",
-        }],
+        failures: [
+          {
+            scope: "domestic",
+            operation: "main-site",
+            errorType: "Error",
+            message: "sanitized failure",
+          },
+        ],
       }),
       customMetadata: manifestMetadata("partial"),
     });
     const central = new FakeCentral();
 
-    await expect(importSbiRun({
-      bucket: bucket as unknown as R2Bucket,
-      centralService: central as unknown as Fetcher,
-      centralToken: TOKEN,
-      fingerprintKey: FINGERPRINT_KEY,
-      importerVersion: "collector-r2-importer-v1",
-      manifestKey: KEY,
-    })).rejects.toMatchObject({ code: "artifact_checksum_mismatch" });
+    await expect(
+      importSbiRun({
+        bucket: bucket as unknown as R2Bucket,
+        centralService: central as unknown as Fetcher,
+        centralToken: TOKEN,
+        fingerprintKey: FINGERPRINT_KEY,
+        importerVersion: "collector-r2-importer-v1",
+        manifestKey: KEY,
+      }),
+    ).rejects.toMatchObject({ code: "artifact_checksum_mismatch" });
     expect(central.requests).toHaveLength(0);
   });
 
@@ -186,12 +193,14 @@ describe("SBI staged-run importer", () => {
       scope: "domestic",
       status: "failed",
       artifacts: [],
-      failures: [{
-        scope: "domestic",
-        operation: "passkey-mts",
-        errorType: "Error",
-        message: "sanitized failure",
-      }],
+      failures: [
+        {
+          scope: "domestic",
+          operation: "passkey-mts",
+          errorType: "Error",
+          message: "sanitized failure",
+        },
+      ],
     });
     bucket.objects.set(KEY, {
       body: manifest,
@@ -208,9 +217,9 @@ describe("SBI staged-run importer", () => {
     });
     expect(result.artifactCount).toBe(1);
     expect(central.requests).toHaveLength(7);
-    const unitReport = central.requests.find((request) => /\/units\/\d+\/reports$/u.test(
-      new URL(request.url).pathname,
-    ));
+    const unitReport = central.requests.find((request) =>
+      /\/units\/\d+\/reports$/u.test(new URL(request.url).pathname),
+    );
     expect(unitReport ? JSON.parse(unitReport.body) : undefined).toMatchObject({
       normalizedOutcome: "failed",
       declaredArtifactCount: 0,
@@ -220,45 +229,57 @@ describe("SBI staged-run importer", () => {
 
   test("strictly rejects unknown fields, mismatched scope, and extra prefix objects", async () => {
     const valid = JSON.parse(new TextDecoder().decode(manifestBytes())) as Record<string, unknown>;
-    expect(() => parseSbiManifest(manifestBytes(), KEY))
-      .toThrow("manifest_dataset_completeness_mismatch");
-    expect(() => parseSbiManifest(
-      new TextEncoder().encode(JSON.stringify({ ...valid, unexpected: true })),
-      KEY,
-    )).toThrow(ImportError);
+    expect(() => parseSbiManifest(manifestBytes(), KEY)).toThrow(
+      "manifest_dataset_completeness_mismatch",
+    );
+    expect(() =>
+      parseSbiManifest(
+        new TextEncoder().encode(JSON.stringify({ ...valid, unexpected: true })),
+        KEY,
+      ),
+    ).toThrow(ImportError);
 
     const dataset = "foreign-cash-balances";
     const body = new TextEncoder().encode("{}");
     const sha256 = await digest(body);
-    expect(() => parseSbiManifest(manifestBytes({
-      scope: "domestic",
-      artifacts: [{ dataset, key: `${PREFIX}${dataset}.json`, sha256, bytes: 2 }],
-    }), KEY)).toThrow("manifest_artifact_scope_mismatch");
+    expect(() =>
+      parseSbiManifest(
+        manifestBytes({
+          scope: "domestic",
+          artifacts: [{ dataset, key: `${PREFIX}${dataset}.json`, sha256, bytes: 2 }],
+        }),
+        KEY,
+      ),
+    ).toThrow("manifest_artifact_scope_mismatch");
 
     const bucket = new FakeBucket();
     bucket.objects.set(KEY, {
       body: manifestBytes({
         scope: "domestic",
         status: "failed",
-        failures: [{
-          scope: "domestic",
-          operation: "passkey-mts",
-          errorType: "Error",
-          message: "sanitized failure",
-        }],
+        failures: [
+          {
+            scope: "domestic",
+            operation: "passkey-mts",
+            errorType: "Error",
+            message: "sanitized failure",
+          },
+        ],
       }),
       customMetadata: manifestMetadata("failed"),
     });
     bucket.objects.set(`${PREFIX}unexpected.json`, { body });
     const central = new FakeCentral();
-    await expect(importSbiRun({
-      bucket: bucket as unknown as R2Bucket,
-      centralService: central as unknown as Fetcher,
-      centralToken: TOKEN,
-      fingerprintKey: FINGERPRINT_KEY,
-      importerVersion: "collector-r2-importer-v1",
-      manifestKey: KEY,
-    })).rejects.toMatchObject({ code: "prefix_inventory_mismatch" });
+    await expect(
+      importSbiRun({
+        bucket: bucket as unknown as R2Bucket,
+        centralService: central as unknown as Fetcher,
+        centralToken: TOKEN,
+        fingerprintKey: FINGERPRINT_KEY,
+        importerVersion: "collector-r2-importer-v1",
+        manifestKey: KEY,
+      }),
+    ).rejects.toMatchObject({ code: "prefix_inventory_mismatch" });
     expect(central.requests).toHaveLength(0);
   });
 });
@@ -269,9 +290,12 @@ function immutableReport(reports: Map<string, string>, path: string, body: strin
     return Response.json({ error: "immutable report conflict" }, { status: 409 });
   }
   reports.set(path, body);
-  return Response.json({ reused: previous !== undefined }, {
-    status: previous === undefined ? 201 : 200,
-  });
+  return Response.json(
+    { reused: previous !== undefined },
+    {
+      status: previous === undefined ? 201 : 200,
+    },
+  );
 }
 
 function manifestMetadata(status = "success"): Record<string, string> {
@@ -279,18 +303,20 @@ function manifestMetadata(status = "success"): Record<string, string> {
 }
 
 function manifestBytes(overrides: Record<string, unknown> = {}): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify({
-    schemaVersion: "sbi-worker-poc-v1",
-    source: "sbi-securities",
-    runId: RUN_ID,
-    scope: "all",
-    startedAt: "2026-09-03T00:00:00.000Z",
-    completedAt: "2026-09-03T00:00:01.000Z",
-    status: "success",
-    artifacts: [],
-    failures: [],
-    ...overrides,
-  }));
+  return new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: "sbi-worker-poc-v1",
+      source: "sbi-securities",
+      runId: RUN_ID,
+      scope: "all",
+      startedAt: "2026-09-03T00:00:00.000Z",
+      completedAt: "2026-09-03T00:00:01.000Z",
+      status: "success",
+      artifacts: [],
+      failures: [],
+      ...overrides,
+    }),
+  );
 }
 
 async function digest(bytes: Uint8Array): Promise<string> {

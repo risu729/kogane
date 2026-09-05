@@ -80,7 +80,7 @@ used_query_ranges                       fetch-run watermarking
 ```
 
 Its "redecode" operation is Kogane's re-parse: on upgrade, rotki re-reads the
-*stored* receipts and logs and regenerates events with newer decoder code. The
+_stored_ receipts and logs and regenerates events with newer decoder code. The
 operation `docs/roadmap.md` calls first-class from day one runs in production
 there, on real user data. That is genuine reassurance the design is viable.
 
@@ -164,7 +164,7 @@ table, no content-addressed store. `Order` — the activity record — carries
 account, currency, date, fee, quantity, symbol, type, unit price, comment and
 tags; provenance for a transaction is the free-text `comment`. `MarketData` is
 keyed on `(dataSource, date, symbol)` and stores the price, so a price carries
-a provider *enum* but not the response it came from. FX is not a separate
+a provider _enum_ but not the response it came from. FX is not a separate
 concept: currency pairs live in the same `MarketData` table and cross-rates are
 derived through the base currency. `AccountBalance` is one mutable row per
 account per day, not an append-only measurement stream.
@@ -204,7 +204,7 @@ before Kogane finalizes layers A to C:
 
 - `plaid_items.raw_payload`, `plaid_accounts.raw_payload`,
   `raw_transactions_payload`, `raw_investments_payload`,
-  `raw_liabilities_payload` — real raw retention, but as *current-state*
+  `raw_liabilities_payload` — real raw retention, but as _current-state_
   columns overwritten on each sync rather than an append-only artifact log.
 - `imports.raw_file_str` **and** `normalized_csv_str`, plus `column_mappings`,
   separator, date format, number format, signage convention, and per-field
@@ -212,7 +212,7 @@ before Kogane finalizes layers A to C:
   Original bytes, the parse configuration, and the typed rows, all retained —
   close to Kogane's A→B split.
 - `data_enrichments(enrichable_type, enrichable_id, source, attribute_name,
-  value, metadata)`, unique per (record, source, attribute). Literally "source
+value, metadata)`, unique per (record, source, attribute). Literally "source
   S claims attribute A of record R is V" — Kogane's layer-C origin tracking,
   implemented.
 - `entries.locked_attributes` records which fields a human overrode, so a later
@@ -224,7 +224,7 @@ Still a finished ledger: balances and holdings are materialized, no parser
 version is stamped anywhere, and re-deriving from `raw_*_payload` is not a
 supported operation.
 
-**Verdict.** No code — Rails, AGPL, archived. But the highest-value *schema*
+**Verdict.** No code — Rails, AGPL, archived. But the highest-value _schema_
 reference in this survey, and because it is archived it is a stable citation
 that will not move under a footnote.
 
@@ -366,7 +366,7 @@ no parser version.
 **Genuinely liftable.** `@wealthfolio/ui` is **MIT and published on npm**,
 separate from the AGPL application: a shadcn/Radix/Tailwind component set for
 React 19 with a Recharts chart export, TanStack Table and Virtual, money
-formatting and animated numerals. If Kogane builds a React *product* UI this is
+formatting and animated numerals. If Kogane builds a React _product_ UI this is
 a real candidate, and it is finance-shaped in a way generic shadcn is not. Two
 caveats: it version-locks to an AGPL application at 3.x and could relicense or
 disappear, and its i18next peer dependency drags in a translation stack.
@@ -405,8 +405,8 @@ structure of the entry plus balances immediately before and after it. Documents
 are linked to accounts and dates by directive and tagged `#linked` or
 `#discovered`.
 
-The caveat `docs/design.md` already notes: the immutable evidence here is *the
-user's own text file*, not the provider's payload. Beancount has no concept of
+The caveat `docs/design.md` already notes: the immutable evidence here is _the
+user's own text file_, not the provider's payload. Beancount has no concept of
 what the bank's API returned — that lives outside, in whatever importer wrote
 the file. And a plain-text canonical file is hostile to concurrent writes from
 Workers.
@@ -431,7 +431,7 @@ which adapts directly to "is this source fresh, and does its last snapshot
 reconcile?" And **drag a PDF onto a journal row** to file it and attach a
 `document:` reference to that transaction, which beats any upload dialog.
 
-Finally, Fava is the one project here that could be *used* rather than copied:
+Finally, Fava is the one project here that could be _used_ rather than copied:
 if Kogane ever exports a Beancount read model, as `docs/design.md` suggests,
 pointing Fava at it yields a full reporting UI for free under a compatible
 licence.
@@ -440,15 +440,15 @@ licence.
 
 Alive, modern, and surveyed; none keeps raw evidence.
 
-| Project | License | Stack | Note |
-| --- | --- | --- | --- |
-| ezbookkeeping | MIT | Go 1.26 + Vue 3 + Vuetify/Framework7 | Best-engineered conventional self-hosted manager found. Uses `decimal.js` and character-set detection for arbitrary statement encodings — Kogane's Shift-JIS problem, solved pragmatically. |
-| Kresus | AGPL-3.0 | Node + Express 5 + TypeORM + React 19 | Delegates scraping to **woob**, an external Python suite. Instructive: delegation buys scraper maintenance and **costs the evidence**, because the scraper returns records, not bytes. A concrete argument for Kogane's direct-source policy. |
-| Portfolio Performance | EPL-1.0 | Java, Eclipse RCP desktop | Deepest performance analytics in open source. Its **importer test methodology is the takeaway**: ~90 bank and broker PDF importers, each with anonymized extracted-text fixtures, plus a built-in anonymizer that replaces your name with random characters. That is a working answer to "build a regression corpus of real financial documents you cannot commit" — precisely Kogane's fixture problem. |
-| Paisa | AGPL-3.0 | Go + SvelteKit | A read/analyze layer over a ledger-cli or beancount journal. Its importer converts CSV/PDF into transactions via Handlebars templates and applies a learned account classifier **at import time** — an interpretation baked irreversibly into the record. For Kogane that is the anti-pattern: layers B and C collapsed into the import step. |
-| hledger / hledger-web | GPL-3.0 | Haskell | Journal is the record; CSV import does not retain the CSV. Worth noting that hledger-web has **no access control and binds loopback by default**, telling you to use a proxy — the identical posture `docs/evidence-browser.md` arrived at independently, in a fifteen-year-old project. |
-| Wallos, Cashew, GnuCash, MoneyManagerEX, bigcapital, whisper-money, budget-board, BeeCount, sossoldi, openmonetis | various | PHP / Flutter / C++ / TypeScript / Laravel | Conventional managers. None retains source evidence. |
-| OpenBB | NOASSERTION | Python | An integration layer over ~100 data vendors that **explicitly does not persist anything** — no ledger, no accounts, no provenance. Not relevant to layers A–B; possibly relevant much later as a price-source abstraction, and even then a direct vendor call is simpler. Note it moved off plain AGPL. |
+| Project                                                                                                           | License     | Stack                                      | Note                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ezbookkeeping                                                                                                     | MIT         | Go 1.26 + Vue 3 + Vuetify/Framework7       | Best-engineered conventional self-hosted manager found. Uses `decimal.js` and character-set detection for arbitrary statement encodings — Kogane's Shift-JIS problem, solved pragmatically.                                                                                                                                                                                                              |
+| Kresus                                                                                                            | AGPL-3.0    | Node + Express 5 + TypeORM + React 19      | Delegates scraping to **woob**, an external Python suite. Instructive: delegation buys scraper maintenance and **costs the evidence**, because the scraper returns records, not bytes. A concrete argument for Kogane's direct-source policy.                                                                                                                                                            |
+| Portfolio Performance                                                                                             | EPL-1.0     | Java, Eclipse RCP desktop                  | Deepest performance analytics in open source. Its **importer test methodology is the takeaway**: ~90 bank and broker PDF importers, each with anonymized extracted-text fixtures, plus a built-in anonymizer that replaces your name with random characters. That is a working answer to "build a regression corpus of real financial documents you cannot commit" — precisely Kogane's fixture problem. |
+| Paisa                                                                                                             | AGPL-3.0    | Go + SvelteKit                             | A read/analyze layer over a ledger-cli or beancount journal. Its importer converts CSV/PDF into transactions via Handlebars templates and applies a learned account classifier **at import time** — an interpretation baked irreversibly into the record. For Kogane that is the anti-pattern: layers B and C collapsed into the import step.                                                            |
+| hledger / hledger-web                                                                                             | GPL-3.0     | Haskell                                    | Journal is the record; CSV import does not retain the CSV. Worth noting that hledger-web has **no access control and binds loopback by default**, telling you to use a proxy — the identical posture `docs/evidence-browser.md` arrived at independently, in a fifteen-year-old project.                                                                                                                 |
+| Wallos, Cashew, GnuCash, MoneyManagerEX, bigcapital, whisper-money, budget-board, BeeCount, sossoldi, openmonetis | various     | PHP / Flutter / C++ / TypeScript / Laravel | Conventional managers. None retains source evidence.                                                                                                                                                                                                                                                                                                                                                     |
+| OpenBB                                                                                                            | NOASSERTION | Python                                     | An integration layer over ~100 data vendors that **explicitly does not persist anything** — no ledger, no accounts, no provenance. Not relevant to layers A–B; possibly relevant much later as a price-source abstraction, and even then a direct vendor call is simpler. Note it moved off plain AGPL.                                                                                                  |
 
 Names checked and not found as personal-finance projects: `sunrise`, `nolus`
 (a DeFi protocol, unrelated), and "Wallet by Zellyn". Kubera and Finary have no
@@ -459,15 +459,15 @@ Wealthfolio.
 
 The four columns are the properties `docs/design.md` treats as load-bearing.
 
-| Project | Raw evidence kept | Re-derive from raw | Parser version recorded | Prior output preserved |
-| --- | --- | --- | --- | --- |
-| **rotki** | yes, on-chain only | yes, "redecode" | no | no, destructive |
-| **tackler** | yes, journal in git | yes, any git ref | n/a | yes, via git and checksums |
-| **beancount-import** | links to it, does not own it | idempotent re-import | no | no |
-| **Maybe** (archived) | partial, overwritten per sync | not supported | no | no |
-| **Actual** | bank sync only, not file imports | no | no | no |
-| Wealthfolio | no | no | no | no |
-| Ghostfolio, Firefly III, Fava, Paisa, hledger, ezbookkeeping, Kresus, and the rest | no | no | no | no |
+| Project                                                                            | Raw evidence kept                | Re-derive from raw   | Parser version recorded | Prior output preserved     |
+| ---------------------------------------------------------------------------------- | -------------------------------- | -------------------- | ----------------------- | -------------------------- |
+| **rotki**                                                                          | yes, on-chain only               | yes, "redecode"      | no                      | no, destructive            |
+| **tackler**                                                                        | yes, journal in git              | yes, any git ref     | n/a                     | yes, via git and checksums |
+| **beancount-import**                                                               | links to it, does not own it     | idempotent re-import | no                      | no                         |
+| **Maybe** (archived)                                                               | partial, overwritten per sync    | not supported        | no                      | no                         |
+| **Actual**                                                                         | bank sync only, not file imports | no                   | no                      | no                         |
+| Wealthfolio                                                                        | no                               | no                   | no                      | no                         |
+| Ghostfolio, Firefly III, Fava, Paisa, hledger, ezbookkeeping, Kresus, and the rest | no                               | no                   | no                      | no                         |
 
 No project surveyed satisfies all four. Kogane's design is not redundant.
 
@@ -478,7 +478,7 @@ No project surveyed satisfies all four. Kogane's design is not redundant.
 1. **Nothing, for the evidence browser.** It is a five-page read-only operator
    tool with no dependencies beyond React and TanStack. Adding a component
    library to it would be weight without benefit.
-2. **`@wealthfolio/ui`** (MIT, npm) *if and when* a product UI is built in
+2. **`@wealthfolio/ui`** (MIT, npm) _if and when_ a product UI is built in
    React — finance-shaped components rather than generic ones. Vendor the few
    needed rather than depending on a package that version-locks to an AGPL
    application.

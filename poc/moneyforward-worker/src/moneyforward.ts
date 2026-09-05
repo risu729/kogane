@@ -29,13 +29,15 @@ export async function collectMoneyForward(options: {
 }): Promise<MoneyForwardCollection> {
   const fetcher = options.fetcher ?? ((input, init) => fetch(input, init));
   const cookies = new CookieJar();
-  const onStage = (stage: Stage) => { try { options.onStage?.(stage); } catch { /* Diagnostics are best effort. */ } };
+  const onStage = (stage: Stage) => {
+    try {
+      options.onStage?.(stage);
+    } catch {
+      /* Diagnostics are best effort. */
+    }
+  };
   onStage("login-entry");
-  const signIn = await followGetRedirects(
-    new URL("/sign_in", ID_ORIGIN),
-    cookies,
-    fetcher,
-  );
+  const signIn = await followGetRedirects(new URL("/sign_in", ID_ORIGIN), cookies, fetcher);
   if (signIn.url.hostname !== "id.moneyforward.com" || signIn.response.status !== 200) {
     throw new MoneyForwardProtocolError("unexpected-redirect", signIn.response.status);
   }
@@ -132,14 +134,17 @@ export async function collectMoneyForward(options: {
   }
   onStage("accounts-index");
   const accountsHtml = await accounts.response.text();
-  if (looksSignedOut(accountsHtml)) throw new MoneyForwardProtocolError("session-not-authenticated");
+  if (looksSignedOut(accountsHtml))
+    throw new MoneyForwardProtocolError("session-not-authenticated");
   const detailPaths = extractAccountDetailPaths(accountsHtml);
-  const artifacts: RawArtifact[] = [{
-    dataset: "accounts-index",
-    filename: "accounts.html",
-    mediaType: "text/html; charset=utf-8",
-    body: accountsHtml,
-  }];
+  const artifacts: RawArtifact[] = [
+    {
+      dataset: "accounts-index",
+      filename: "accounts.html",
+      mediaType: "text/html; charset=utf-8",
+      body: accountsHtml,
+    },
+  ];
   let monthlyFragmentCount = 0;
   for (const [index, path] of detailPaths.entries()) {
     onStage("account-detail");
@@ -251,7 +256,10 @@ export function extractAccountContext(html: string): {
   };
 }
 
-export function recentMonths(now: Date, count: number): Array<{
+export function recentMonths(
+  now: Date,
+  count: number,
+): Array<{
   year: number;
   month: number;
   label: string;
@@ -259,11 +267,7 @@ export function recentMonths(now: Date, count: number): Array<{
   const tokyoNow = new Date(now.getTime() + 9 * 60 * 60 * 1_000);
   const result = [];
   for (let offset = 0; offset < count; offset += 1) {
-    const date = new Date(Date.UTC(
-      tokyoNow.getUTCFullYear(),
-      tokyoNow.getUTCMonth() - offset,
-      1,
-    ));
+    const date = new Date(Date.UTC(tokyoNow.getUTCFullYear(), tokyoNow.getUTCMonth() - offset, 1));
     const year = date.getUTCFullYear();
     const month = date.getUTCMonth() + 1;
     result.push({ year, month, label: `${year}-${String(month).padStart(2, "0")}` });
@@ -355,15 +359,16 @@ function htmlDecode(value: string): string {
   return value.replaceAll("&quot;", '"').replaceAll("&#39;", "'").replaceAll("&amp;", "&");
 }
 
-function objectValue(value: unknown, name: string): Record<string, unknown> {
+function objectValue(value: unknown, _name: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new MoneyForwardProtocolError("invalid-response");
   }
   return value as Record<string, unknown>;
 }
 
-function requiredString(value: unknown, name: string): string {
-  if (typeof value !== "string" || value.length === 0) throw new MoneyForwardProtocolError("invalid-response");
+function requiredString(value: unknown, _name: string): string {
+  if (typeof value !== "string" || value.length === 0)
+    throw new MoneyForwardProtocolError("invalid-response");
   return value;
 }
 

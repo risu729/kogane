@@ -23,10 +23,12 @@ const MAX_SYNCHRONOUS_ARTIFACTS = 11;
 const STORAGE_TEMPLATE = "raw/sbi-vc-trade/{date}/{run-id}/{artifact}.json";
 const STORAGE_CONTAINER = "kogane-sbi-vc-trade-poc";
 const FINGERPRINT_VERSION = "collector-r2-v1";
-const MANIFEST_KEY = /^raw\/sbi-vc-trade\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
+const MANIFEST_KEY =
+  /^raw\/sbi-vc-trade\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const ERROR_CODE = /^[a-z0-9_]{1,100}$/u;
-const PAGINATION_EVIDENCE_ERROR = /^(?:executions_historical|cashflows_historical)_(?:invalid_pagination|pagination_total_changed|pagination_length_mismatch)$/u;
+const PAGINATION_EVIDENCE_ERROR =
+  /^(?:executions_historical|cashflows_historical)_(?:invalid_pagination|pagination_total_changed|pagination_length_mismatch)$/u;
 const STATIC_DATASETS = [
   "cash-balances",
   "account-margin",
@@ -87,11 +89,15 @@ export async function importSbiVcRun(options: {
     const manifestBytes = new Uint8Array(await manifestObject.arrayBuffer());
     assertNativeSha256(manifestObject, await sha256Hex(manifestBytes));
     const manifest = parseSbiVcManifest(manifestBytes, options.manifestKey);
-    assertExactMetadata(manifestObject.customMetadata, {
-      source: manifest.source,
-      runId: manifest.runId,
-      status: manifest.status,
-    }, "manifest_metadata_mismatch");
+    assertExactMetadata(
+      manifestObject.customMetadata,
+      {
+        source: manifest.source,
+        runId: manifest.runId,
+        status: manifest.status,
+      },
+      "manifest_metadata_mismatch",
+    );
     expectedArtifactCount = manifest.artifacts.length + 1;
     const prefix = options.manifestKey.slice(0, -"manifest.json".length);
 
@@ -106,9 +112,10 @@ export async function importSbiVcRun(options: {
     phase = "artifact_validation";
     const verifiedArtifacts: VerifiedArtifact[] = [];
     const collectFailureEvidenceIndex =
-      manifest.failures.length === 1 && manifest.failures[0]?.operation === "collect" &&
-        PAGINATION_EVIDENCE_ERROR.test(manifest.failures[0].errorCode) &&
-        manifest.artifacts.length > 0
+      manifest.failures.length === 1 &&
+      manifest.failures[0]?.operation === "collect" &&
+      PAGINATION_EVIDENCE_ERROR.test(manifest.failures[0].errorCode) &&
+      manifest.artifacts.length > 0
         ? manifest.artifacts.length - 1
         : -1;
     for (const [index, artifact] of manifest.artifacts.entries()) {
@@ -162,11 +169,7 @@ export async function importSbiVcRun(options: {
       // A second bounded read prevents validation from retaining the source
       // payload and rechecks hash/metadata immediately before upload.
       const bytes = await readVerifiedArtifact(options.bucket, verified.artifact);
-      const reused = await central.uploadObject(
-        centralRunId,
-        verified.artifact.sha256,
-        bytes,
-      );
+      const reused = await central.uploadObject(centralRunId, verified.artifact.sha256, bytes);
       if (reused) reusedArtifactCount += 1;
       else acceptedArtifactCount += 1;
 
@@ -190,11 +193,7 @@ export async function importSbiVcRun(options: {
 
     phase = "manifest_upload";
     const manifestSha256 = await sha256Hex(manifestBytes);
-    const manifestReused = await central.uploadObject(
-      centralRunId,
-      manifestSha256,
-      manifestBytes,
-    );
+    const manifestReused = await central.uploadObject(centralRunId, manifestSha256, manifestBytes);
     if (manifestReused) reusedArtifactCount += 1;
     else acceptedArtifactCount += 1;
 
@@ -300,8 +299,14 @@ export function parseSbiVcManifest(bytes: Uint8Array, manifestKey: string): SbiV
   }
   const input = record(parsed, "manifest_shape_invalid");
   exactKeys(input, [
-    "schemaVersion", "source", "runId", "startedAt", "completedAt",
-    "status", "artifacts", "failures",
+    "schemaVersion",
+    "source",
+    "runId",
+    "startedAt",
+    "completedAt",
+    "status",
+    "artifacts",
+    "failures",
   ]);
   if (input.schemaVersion !== SCHEMA_VERSION) invalid("manifest_schema_invalid");
   if (input.source !== SOURCE) invalid("manifest_source_invalid");
@@ -330,9 +335,8 @@ export function parseSbiVcManifest(bytes: Uint8Array, manifestKey: string): SbiV
     invalid("manifest_duplicate_dataset");
   }
   validateDatasetOrder(artifacts);
-  const expectedStatus = failures.length === 0
-    ? "success"
-    : artifacts.length === 0 ? "failed" : "partial";
+  const expectedStatus =
+    failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
   if (status !== expectedStatus) invalid("manifest_status_mismatch");
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -358,8 +362,11 @@ function parseArtifact(value: unknown, prefix: string): SbiVcArtifactManifest {
   if (typeof input.sha256 !== "string" || !SHA256.test(input.sha256)) {
     invalid("manifest_artifact_sha_invalid");
   }
-  if (!Number.isSafeInteger(input.bytes) || (input.bytes as number) < 1 ||
-      (input.bytes as number) > MAX_ARTIFACT_BYTES) {
+  if (
+    !Number.isSafeInteger(input.bytes) ||
+    (input.bytes as number) < 1 ||
+    (input.bytes as number) > MAX_ARTIFACT_BYTES
+  ) {
     invalid("manifest_artifact_size_invalid");
   }
   return {
@@ -373,9 +380,15 @@ function parseArtifact(value: unknown, prefix: string): SbiVcArtifactManifest {
 function parseFailure(value: unknown): SbiVcFailure {
   const input = record(value, "manifest_failure_invalid");
   exactKeys(input, ["operation", "errorCode"]);
-  if (typeof input.operation !== "string" ||
-      !(input.operation === "load_session" || input.operation === "collect" ||
-        input.operation === "persist_session" || input.operation.startsWith("r2_"))) {
+  if (
+    typeof input.operation !== "string" ||
+    !(
+      input.operation === "load_session" ||
+      input.operation === "collect" ||
+      input.operation === "persist_session" ||
+      input.operation.startsWith("r2_")
+    )
+  ) {
     invalid("manifest_failure_operation_invalid");
   }
   if (typeof input.errorCode !== "string" || !ERROR_CODE.test(input.errorCode)) {
@@ -415,10 +428,7 @@ function validateDatasetOrder(artifacts: SbiVcArtifactManifest[]): void {
   }
 }
 
-function validateFailureComplement(
-  manifest: SbiVcManifest,
-  artifacts: VerifiedArtifact[],
-): void {
+function validateFailureComplement(manifest: SbiVcManifest, artifacts: VerifiedArtifact[]): void {
   if (manifest.failures.length === 0) {
     const nextDataset = nextExpectedDataset(artifacts);
     if (nextDataset !== null) invalid("manifest_dataset_completeness_mismatch");
@@ -426,9 +436,11 @@ function validateFailureComplement(
   }
   const operation = manifest.failures[0]!.operation;
   const last = artifacts.at(-1);
-  if (operation === "collect" &&
-      PAGINATION_EVIDENCE_ERROR.test(manifest.failures[0]!.errorCode) &&
-      last?.failureEvidence) {
+  if (
+    operation === "collect" &&
+    PAGINATION_EVIDENCE_ERROR.test(manifest.failures[0]!.errorCode) &&
+    last?.failureEvidence
+  ) {
     const expected = nextExpectedDataset(artifacts.slice(0, -1));
     if (expected !== last.artifact.dataset) {
       invalid("manifest_failure_complement_mismatch");
@@ -452,15 +464,11 @@ function nextExpectedDataset(artifacts: VerifiedArtifact[]): string | null {
   if (artifacts.length < STATIC_DATASETS.length) {
     return STATIC_DATASETS[artifacts.length]!;
   }
-  const executions = artifacts.filter((entry) =>
-    HISTORICAL_EXECUTION.test(entry.artifact.dataset)
-  );
+  const executions = artifacts.filter((entry) => HISTORICAL_EXECUTION.test(entry.artifact.dataset));
   if (executions.length === 0) return pageDataset("executions-historical", 1);
   assertPageChain(executions);
   const lastExecution = requiredPage(executions.at(-1));
-  const cashflows = artifacts.filter((entry) =>
-    HISTORICAL_CASHFLOW.test(entry.artifact.dataset)
-  );
+  const cashflows = artifacts.filter((entry) => HISTORICAL_CASHFLOW.test(entry.artifact.dataset));
   if (!pageIsTerminal(lastExecution)) {
     if (cashflows.length !== 0) invalid("manifest_execution_page_terminal_invalid");
     return pageDataset("executions-historical", lastExecution.index + 1);
@@ -506,10 +514,7 @@ function pageDataset(group: PageGroup, index: number): string {
   return `${group}-page-${String(index).padStart(4, "0")}`;
 }
 
-function parseStoredEnvelope(
-  bytes: Uint8Array,
-  dataset: string,
-): { page?: PageInfo } {
+function parseStoredEnvelope(bytes: Uint8Array, dataset: string): { page?: PageInfo } {
   const envelope = storedEnvelope(bytes);
   const group = pageGroup(dataset);
   const recentExecution = dataset === "executions-recent-page-0001";
@@ -522,8 +527,9 @@ function parseStoredEnvelope(
   if (totalSize === null) throw new ImportError(409, "artifact_page_payload_invalid");
   if (recentExecution) return {};
   if (!group) return {};
-  const match = (group === "executions-historical" ? HISTORICAL_EXECUTION : HISTORICAL_CASHFLOW)
-    .exec(dataset);
+  const match = (
+    group === "executions-historical" ? HISTORICAL_EXECUTION : HISTORICAL_CASHFLOW
+  ).exec(dataset);
   if (!match) throw new ImportError(409, "artifact_page_dataset_invalid");
   return {
     page: {
@@ -594,7 +600,7 @@ async function readVerifiedArtifact(
   assertJsonContentType(object, "artifact_content_type_mismatch");
   const bytes = new Uint8Array(await object.arrayBuffer());
   assertNativeSha256(object, artifact.sha256);
-  if (await sha256Hex(bytes) !== artifact.sha256) {
+  if ((await sha256Hex(bytes)) !== artifact.sha256) {
     throw new ImportError(409, "artifact_checksum_mismatch");
   }
   return bytes;
@@ -632,14 +638,12 @@ async function dataDescriptor(options: {
     sha256: options.artifact.sha256,
     byteSize: options.artifact.bytes,
     storage: await storageOrigin(options.artifact.key, options.fingerprintKey),
-    transformSteps: ["transport_decoded", "redacted", "reencoded"].map(
-      (stepKind, stepIndex) => ({
-        stepIndex,
-        stepKind,
-        transformerId: "sbi-vc-trade-worker",
-        transformerVersion: SCHEMA_VERSION,
-      }),
-    ),
+    transformSteps: ["transport_decoded", "redacted", "reencoded"].map((stepKind, stepIndex) => ({
+      stepIndex,
+      stepKind,
+      transformerId: "sbi-vc-trade-worker",
+      transformerVersion: SCHEMA_VERSION,
+    })),
   };
 }
 
@@ -682,11 +686,7 @@ async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonO
     false,
     ["sign"],
   );
-  const signature = await crypto.subtle.sign(
-    "HMAC",
-    cryptoKey,
-    new TextEncoder().encode(key),
-  );
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(key));
   return {
     storageKind: "r2",
     containerName: STORAGE_CONTAINER,
@@ -718,9 +718,7 @@ function pageGroup(value: string): PageGroup | null {
 
 function nonNegativeInteger(value: unknown): number | null {
   const number = typeof value === "string" && /^\d+$/u.test(value) ? Number(value) : value;
-  return typeof number === "number" && Number.isSafeInteger(number) && number >= 0
-    ? number
-    : null;
+  return typeof number === "number" && Number.isSafeInteger(number) && number >= 0 ? number : null;
 }
 
 function assertExactMetadata(
@@ -731,8 +729,10 @@ function assertExactMetadata(
   if (!actual) throw new ImportError(409, code);
   const actualKeys = Object.keys(actual).sort();
   const expectedKeys = Object.keys(expected).sort();
-  if (actualKeys.length !== expectedKeys.length ||
-      actualKeys.some((key, index) => key !== expectedKeys[index] || actual[key] !== expected[key])) {
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    actualKeys.some((key, index) => key !== expectedKeys[index] || actual[key] !== expected[key])
+  ) {
     throw new ImportError(409, code);
   }
 }
@@ -751,10 +751,10 @@ function assertArtifactMetadata(
   const matches = (expected: Record<string, string>) => {
     const actualKeys = Object.keys(actual).sort();
     const expectedKeys = Object.keys(expected).sort();
-    return actualKeys.length === expectedKeys.length &&
-      actualKeys.every((key, index) =>
-        key === expectedKeys[index] && actual[key] === expected[key]
-      );
+    return (
+      actualKeys.length === expectedKeys.length &&
+      actualKeys.every((key, index) => key === expectedKeys[index] && actual[key] === expected[key])
+    );
   };
   if (!matches(legacy) && !matches(current)) {
     throw new ImportError(409, "artifact_metadata_mismatch");
@@ -805,9 +805,7 @@ function invalid(code: string): never {
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  return bytesHex(new Uint8Array(
-    await crypto.subtle.digest("SHA-256", ownedArrayBuffer(bytes)),
-  ));
+  return bytesHex(new Uint8Array(await crypto.subtle.digest("SHA-256", ownedArrayBuffer(bytes))));
 }
 
 function hexBytes(value: string): Uint8Array {

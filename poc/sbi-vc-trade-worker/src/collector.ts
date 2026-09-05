@@ -19,7 +19,11 @@ export async function collectSbiVcTrade(options: {
   const fetcher = options.fetcher ?? fetch;
   let session = structuredClone(options.session);
 
-  const collect = async (dataset: string, event: ReadEvent, data: Record<string, unknown>): Promise<unknown> => {
+  const collect = async (
+    dataset: string,
+    event: ReadEvent,
+    data: Record<string, unknown>,
+  ): Promise<unknown> => {
     const stage = `gateway-${dataset.replace(/-page-[0-9]+$/u, "")}`;
     const result = options.diagnostic
       ? await options.diagnostic.step(stage, () => readGateway(fetcher, session, event, data))
@@ -37,27 +41,29 @@ export async function collectSbiVcTrade(options: {
 
   await collectPages({
     prefix: "executions-historical",
-    collect: (dataset, pageNumber) => collect(
-      dataset,
-      "executionList",
-      executionData(session, pageNumber, true),
-    ),
+    collect: (dataset, pageNumber) =>
+      collect(dataset, "executionList", executionData(session, pageNumber, true)),
   });
   await collectPages({
     prefix: "cashflows-historical",
-    collect: (dataset, pageNumber) => collect(dataset, "getCashflowList", {
-      secureKey: session.secureKey,
-      pageNumber: String(pageNumber),
-      pageSize: String(PAGE_SIZE),
-      historical: "true",
-      currency: ["JPY"],
-      cashflowType: ["REMITTANCE_DEPOSIT", "REMITTANCE_WITHDRAW"],
-    }),
+    collect: (dataset, pageNumber) =>
+      collect(dataset, "getCashflowList", {
+        secureKey: session.secureKey,
+        pageNumber: String(pageNumber),
+        pageSize: String(PAGE_SIZE),
+        historical: "true",
+        currency: ["JPY"],
+        cashflowType: ["REMITTANCE_DEPOSIT", "REMITTANCE_WITHDRAW"],
+      }),
   });
   return session;
 }
 
-function executionData(session: SessionMaterial, pageNumber: number, historical: boolean): Record<string, unknown> {
+function executionData(
+  session: SessionMaterial,
+  pageNumber: number,
+  historical: boolean,
+): Record<string, unknown> {
   return {
     secureKey: session.secureKey,
     pageNumber: String(pageNumber),
@@ -113,7 +119,7 @@ async function readGateway(
     body: JSON.stringify({ event, data }),
   });
   if (!response.ok) throw new Error(`collector_http_${response.status}`);
-  if (!(response.headers.get("content-type")?.toLowerCase().includes("application/json"))) {
+  if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
     throw new Error("collector_non_json_response");
   }
   const text = await readBoundedText(response, MAX_RESPONSE_BYTES);

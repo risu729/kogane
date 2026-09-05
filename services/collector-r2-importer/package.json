@@ -2,10 +2,6 @@
   "name": "@kogane/collector-r2-importer",
   "private": true,
   "type": "module",
-  "dependencies": {
-    "iconv-lite": "0.7.0",
-    "parse5": "8.0.1"
-  },
   "scripts": {
     "test": "bun test",
     "typecheck": "wrangler types && tsc --noEmit",
@@ -13,6 +9,10 @@
     "cf:check:audit-vpoint": "wrangler deploy --dry-run --config wrangler.audit-v-point.jsonc",
     "audit:vpoint-r2": "bash scripts/audit-v-point-r2.sh",
     "cf:deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "iconv-lite": "0.7.0",
+    "parse5": "8.0.1"
   },
   "devDependencies": {
     "@types/bun": "1.3.8",

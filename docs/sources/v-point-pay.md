@@ -17,11 +17,11 @@ random device UUIDを安全に引き継げれば、標準Cloudflare Workers `fet
 
 確認したAPI:
 
-| Method | Path | 用途 |
-| --- | --- | --- |
-| POST | `/vpoint/api/v2/token` | authorization code / refresh token grant |
-| GET | `/vpoint/api/v2/prepaid/balance` | currency、残高、charge limit、最古照会月 |
-| GET | `/vpoint/api/v1/prepaid/transaction?target_month=yyyyMM` | 月別明細 |
+| Method | Path                                                     | 用途                                     |
+| ------ | -------------------------------------------------------- | ---------------------------------------- |
+| POST   | `/vpoint/api/v2/token`                                   | authorization code / refresh token grant |
+| GET    | `/vpoint/api/v2/prepaid/balance`                         | currency、残高、charge limit、最古照会月 |
+| GET    | `/vpoint/api/v1/prepaid/transaction?target_month=yyyyMM` | 月別明細                                 |
 
 token応答はaccess token、生成時刻、有効秒数、rotated refresh tokenを含む。認証readは
 `X-Vapp-Access-Token`を使う。共通headerはアプリversion、Android OS、WebView系

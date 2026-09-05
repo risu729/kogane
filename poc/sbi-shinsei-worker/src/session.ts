@@ -7,9 +7,7 @@ export class InMemorySessionState implements SessionStateStore {
 
   constructor(session: LoginSession) {
     if (!session.authorization || !session.csrfToken) {
-      throw new AuthenticationBoundaryError(
-        "A complete PowerDirect session is required",
-      );
+      throw new AuthenticationBoundaryError("A complete PowerDirect session is required");
     }
     this.#authorization = session.authorization;
     this.#csrfToken = session.csrfToken;
@@ -25,9 +23,7 @@ export class InMemorySessionState implements SessionStateStore {
 
   rotateCsrfToken(nextToken: string): void {
     if (!nextToken || nextToken.length > 16_384) {
-      throw new AuthenticationBoundaryError(
-        "PowerDirect supplied an invalid CSRF token",
-      );
+      throw new AuthenticationBoundaryError("PowerDirect supplied an invalid CSRF token");
     }
     this.#csrfToken = nextToken;
   }

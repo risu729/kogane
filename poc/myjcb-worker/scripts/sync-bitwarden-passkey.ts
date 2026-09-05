@@ -13,19 +13,15 @@ if (!process.env.BW_SESSION) {
 }
 
 const bw = process.env.BW_BIN ?? "bw";
-const itemProcess = Bun.spawn([
-  bw,
-  "get",
-  "item",
-  options.itemId,
-  "--session",
-  process.env.BW_SESSION,
-], {
-  stdout: "pipe",
-  stderr: "inherit",
-  stdin: "inherit",
-  env: process.env,
-});
+const itemProcess = Bun.spawn(
+  [bw, "get", "item", options.itemId, "--session", process.env.BW_SESSION],
+  {
+    stdout: "pipe",
+    stderr: "inherit",
+    stdin: "inherit",
+    env: process.env,
+  },
+);
 const [itemOutput, itemExit] = await Promise.all([
   new Response(itemProcess.stdout).text(),
   itemProcess.exited,
@@ -61,16 +57,18 @@ if (parsedPayload.rpId !== "my.jcb.co.jp" && parsedPayload.rpId !== "jcb.co.jp")
 }
 
 if (!options.put) {
-  console.log(JSON.stringify({
-    ok: true,
-    connectionId: options.connectionId,
-    secretName: options.secretName,
-    rpId: parsedPayload.rpId,
-    counter: parsedPayload.counter,
-    discoverable: parsedPayload.discoverable,
-    bytes: new TextEncoder().encode(payload).byteLength,
-    written: false,
-  }));
+  console.log(
+    JSON.stringify({
+      ok: true,
+      connectionId: options.connectionId,
+      secretName: options.secretName,
+      rpId: parsedPayload.rpId,
+      counter: parsedPayload.counter,
+      discoverable: parsedPayload.discoverable,
+      bytes: new TextEncoder().encode(payload).byteLength,
+      written: false,
+    }),
+  );
   process.exit(0);
 }
 
@@ -82,13 +80,15 @@ const wrangler = Bun.spawn(["bunx", "wrangler", "secret", "put", options.secretN
 });
 const wranglerExit = await wrangler.exited;
 if (wranglerExit !== 0) throw new Error("wrangler secret put failed");
-console.log(JSON.stringify({
-  ok: true,
-  connectionId: options.connectionId,
-  secretName: options.secretName,
-  bytes: new TextEncoder().encode(payload).byteLength,
-  written: true,
-}));
+console.log(
+  JSON.stringify({
+    ok: true,
+    connectionId: options.connectionId,
+    secretName: options.secretName,
+    bytes: new TextEncoder().encode(payload).byteLength,
+    written: true,
+  }),
+);
 
 function parseArgs(args: readonly string[]): CliOptions {
   const values = new Map<string, string>();

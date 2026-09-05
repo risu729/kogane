@@ -153,7 +153,8 @@ function propertyName(expression) {
     ts.isElementAccessExpression(expression) &&
     expression.argumentExpression &&
     ts.isStringLiteralLike(expression.argumentExpression)
-  ) return expression.argumentExpression.text;
+  )
+    return expression.argumentExpression.text;
   return null;
 }
 
@@ -177,8 +178,7 @@ function identifierName(node) {
 
 function isVoidLike(node) {
   const current = unwrapParentheses(node);
-  return ts.isVoidExpression(current) ||
-    (ts.isIdentifier(current) && current.text === "undefined");
+  return ts.isVoidExpression(current) || (ts.isIdentifier(current) && current.text === "undefined");
 }
 
 function enclosingFunctionOf(node) {
@@ -188,13 +188,16 @@ function enclosingFunctionOf(node) {
 }
 
 export function detectVmPropertyResolvers(source) {
-  const sourceFile = ts.createSourceFile("rch-vm.js", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const sourceFile = ts.createSourceFile(
+    "rch-vm.js",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.JS,
+  );
   const sites = [];
   const visit = (node) => {
-    if (
-      ts.isBinaryExpression(node) &&
-      node.operatorToken.kind === ts.SyntaxKind.EqualsToken
-    ) {
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       const targetName = identifierName(node.left);
       const conditional = unwrapParentheses(node.right);
       if (targetName && ts.isConditionalExpression(conditional)) {
@@ -203,7 +206,9 @@ export function detectVmPropertyResolvers(source) {
         const whenFalse = unwrapParentheses(conditional.whenFalse);
         if (
           ts.isBinaryExpression(condition) &&
-          [ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.EqualsEqualsEqualsToken].includes(condition.operatorToken.kind) &&
+          [ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.EqualsEqualsEqualsToken].includes(
+            condition.operatorToken.kind,
+          ) &&
           whenTrue &&
           ts.isElementAccessExpression(whenFalse)
         ) {
@@ -225,16 +230,20 @@ export function detectVmPropertyResolvers(source) {
                 if (ts.isCallExpression(candidate)) {
                   if (identifierName(candidate.expression) === targetName) directCalls += 1;
                   if (
-                    (ts.isPropertyAccessExpression(candidate.expression) || ts.isElementAccessExpression(candidate.expression)) &&
+                    (ts.isPropertyAccessExpression(candidate.expression) ||
+                      ts.isElementAccessExpression(candidate.expression)) &&
                     ["call", "apply"].includes(propertyName(candidate.expression)) &&
                     identifierName(candidate.expression.expression) === targetName
-                  ) callApplyCalls += 1;
+                  )
+                    callApplyCalls += 1;
                 }
                 ts.forEachChild(candidate, inspectUse);
               };
               inspectUse(enclosingFunction);
             }
-            const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile, false));
+            const position = sourceFile.getLineAndCharacterOfPosition(
+              node.getStart(sourceFile, false),
+            );
             sites.push({
               position: { line: position.line + 1, column: position.character + 1 },
               hostVoidFallback: true,
@@ -269,7 +278,13 @@ export function knownTokenCounts(source) {
 }
 
 export function positionAnalysis(source, frame) {
-  const sourceFile = ts.createSourceFile("rch-source.js", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const sourceFile = ts.createSourceFile(
+    "rch-source.js",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.JS,
+  );
   if (!Number.isInteger(frame.lineNumber) || !Number.isInteger(frame.columnNumber)) return null;
   if (frame.lineNumber >= sourceFile.getLineStarts().length) return null;
   const position = sourceFile.getPositionOfLineAndCharacter(frame.lineNumber, frame.columnNumber);
@@ -304,7 +319,8 @@ export function positionAnalysis(source, frame) {
         parameterCount: deepestFunction.parameters?.length ?? 0,
         subtree: subtreeShape(deepestFunction),
         lexicalKnownTokens: knownTokenCounts(deepestFunction.getText(sourceFile)),
-        features: analyzeSource(deepestFunction.getText(sourceFile), "rch-frame-function.js").features,
+        features: analyzeSource(deepestFunction.getText(sourceFile), "rch-frame-function.js")
+          .features,
       }
     : null;
   return {
@@ -336,7 +352,8 @@ function bodySummary(text) {
     sha256: sha256(text),
     byteLength: Buffer.byteLength(text),
     entropyBitsPerByte: entropy(text),
-    base64Like: compact.length > 0 && compact.length % 4 === 0 && /^[A-Za-z0-9+/_=-]+$/u.test(compact),
+    base64Like:
+      compact.length > 0 && compact.length % 4 === 0 && /^[A-Za-z0-9+/_=-]+$/u.test(compact),
   };
 }
 
@@ -344,7 +361,8 @@ async function loadWebcrack() {
   const modulePath = process.env.WEBCRACK_MODULE;
   if (!modulePath) return null;
   const module = await import(pathToFileURL(path.resolve(modulePath)).href);
-  if (typeof module.webcrack !== "function") throw new Error("WEBCRACK_MODULE does not export webcrack()");
+  if (typeof module.webcrack !== "function")
+    throw new Error("WEBCRACK_MODULE does not export webcrack()");
   return module.webcrack;
 }
 
@@ -395,14 +413,19 @@ async function inspectCapture(filename, webcrack) {
   for (const [index, request] of posts.entries()) {
     const topFrame = request.initiator?.stack?.callFrames?.[0] ?? null;
     const script = topFrame
-      ? scripts.find((candidate) => candidate.sessionId === request.sessionId && candidate.url === topFrame.url)
+      ? scripts.find(
+          (candidate) =>
+            candidate.sessionId === request.sessionId && candidate.url === topFrame.url,
+        )
       : null;
     const inspectedScript = script ? await inspectScript(script) : null;
     const responseText = typeof request.responseBody === "string" ? request.responseBody : "";
     const postText = typeof request.requestPostData === "string" ? request.requestPostData : "";
     const responseDigest = sha256(responseText);
     const exactResponseScriptMatches = scripts.filter(
-      (candidate) => typeof candidate.scriptSource === "string" && sha256(candidate.scriptSource) === responseDigest,
+      (candidate) =>
+        typeof candidate.scriptSource === "string" &&
+        sha256(candidate.scriptSource) === responseDigest,
     ).length;
     const frameAnalyses = (request.initiator?.stack?.callFrames ?? []).map((frame) => {
       const frameScript = scripts.find(
@@ -424,12 +447,15 @@ async function inspectCapture(filename, webcrack) {
       initiatorFrameCount: request.initiator?.stack?.callFrames?.length ?? 0,
       topFrameMapped: Boolean(script),
       topFrame: topFrame && script ? positionAnalysis(script.scriptSource, topFrame) : null,
-      frames: frameAnalyses.map((frame) => frame && ({
-        ...frame,
-        inVmPropertyResolverFunction: Boolean(
-          frame.functionAncestorShapes.some((shape) => vmFunctionShapes.has(shape.shapeSha256)),
-        ),
-      })),
+      frames: frameAnalyses.map(
+        (frame) =>
+          frame && {
+            ...frame,
+            inVmPropertyResolverFunction: Boolean(
+              frame.functionAncestorShapes.some((shape) => vmFunctionShapes.has(shape.shapeSha256)),
+            ),
+          },
+      ),
       senderScript: inspectedScript,
       exactResponseScriptMatches,
     });
@@ -440,7 +466,8 @@ async function inspectCapture(filename, webcrack) {
     if (
       typeof script.scriptSource !== "string" ||
       (!isTurnstileUrl(script.url) && !isTurnstileUrl(script.targetUrl))
-    ) continue;
+    )
+      continue;
     const nonWhitespaceCharacters = script.scriptSource.replace(/\s/gu, "").length;
     if (nonWhitespaceCharacters <= 100) continue;
     const digest = sha256(script.scriptSource);
@@ -483,7 +510,8 @@ function compare(left, right) {
         stage: index + 1,
         bothPresent: Boolean(leftStage && rightStage),
         sameSenderSource: Boolean(
-          leftStage?.senderScript?.sha256 && leftStage.senderScript.sha256 === rightStage?.senderScript?.sha256,
+          leftStage?.senderScript?.sha256 &&
+          leftStage.senderScript.sha256 === rightStage?.senderScript?.sha256,
         ),
         sameSenderAstShape: Boolean(
           leftStage?.senderScript?.astShapeSha256 &&
@@ -492,16 +520,22 @@ function compare(left, right) {
         sameTopFrameLocation: Boolean(
           leftStage?.topFrame &&
           rightStage?.topFrame &&
-          JSON.stringify(leftStage.topFrame.position) === JSON.stringify(rightStage.topFrame.position),
+          JSON.stringify(leftStage.topFrame.position) ===
+            JSON.stringify(rightStage.topFrame.position),
         ),
         sameTopCallShape: Boolean(
           leftStage?.topFrame?.call?.subtree?.shapeSha256 &&
-          leftStage.topFrame.call.subtree.shapeSha256 === rightStage?.topFrame?.call?.subtree?.shapeSha256,
+          leftStage.topFrame.call.subtree.shapeSha256 ===
+            rightStage?.topFrame?.call?.subtree?.shapeSha256,
         ),
         requestBodyByteLengthDelta:
-          leftStage && rightStage ? rightStage.requestBody.byteLength - leftStage.requestBody.byteLength : null,
+          leftStage && rightStage
+            ? rightStage.requestBody.byteLength - leftStage.requestBody.byteLength
+            : null,
         responseBodyByteLengthDelta:
-          leftStage && rightStage ? rightStage.responseBody.byteLength - leftStage.responseBody.byteLength : null,
+          leftStage && rightStage
+            ? rightStage.responseBody.byteLength - leftStage.responseBody.byteLength
+            : null,
       };
     }),
   };
@@ -517,20 +551,26 @@ async function main(argv) {
   const webcrack = await loadWebcrack();
   const captures = [];
   for (const filename of argv) captures.push(await inspectCapture(filename, webcrack));
-  process.stdout.write(`${JSON.stringify({
-    schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
-    safety: {
-      rawSourcesIncluded: false,
-      rawBodiesIncluded: false,
-      rawHeadersIncluded: false,
-      arbitraryIdentifiersIncluded: false,
-      challengeIdentifiersRedacted: true,
-      webcrackUsed: Boolean(webcrack),
-    },
-    captures,
-    comparison: captures.length === 2 ? compare(captures[0], captures[1]) : null,
-  }, null, 2)}\n`);
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        safety: {
+          rawSourcesIncluded: false,
+          rawBodiesIncluded: false,
+          rawHeadersIncluded: false,
+          arbitraryIdentifiersIncluded: false,
+          challengeIdentifiersRedacted: true,
+          webcrackUsed: Boolean(webcrack),
+        },
+        captures,
+        comparison: captures.length === 2 ? compare(captures[0], captures[1]) : null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : null;

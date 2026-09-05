@@ -1,11 +1,7 @@
 import type { RawArtifact } from "./types";
 import type { VPointPayEmailEvent } from "./vpoint-pay-email";
 
-export type ReconciliationStatus =
-  | "matched"
-  | "ambiguous"
-  | "unmatched"
-  | "not-comparable";
+export type ReconciliationStatus = "matched" | "ambiguous" | "unmatched" | "not-comparable";
 
 export interface EmailReconciliationSummary {
   reportKey: string;
@@ -56,16 +52,13 @@ export async function reconcileVPointPayEmails(options: {
       continue;
     }
     const date = jstDate(event.occurredAt);
-    const candidates = rows.filter((row) =>
-      row.date === date && row.points === -Math.abs(pointAmount)
+    const candidates = rows.filter(
+      (row) => row.date === date && row.points === -Math.abs(pointAmount),
     );
     entries.push({
       emailEventId: event.id,
-      status: candidates.length === 1
-        ? "matched"
-        : candidates.length > 1
-          ? "ambiguous"
-          : "unmatched",
+      status:
+        candidates.length === 1 ? "matched" : candidates.length > 1 ? "ambiguous" : "unmatched",
       candidateRows: candidates.map(({ source, index, fingerprint }) => ({
         source,
         index,
@@ -73,7 +66,7 @@ export async function reconcileVPointPayEmails(options: {
       })),
     });
   }
-  const appLedgerStatus = await hasLiveAppSnapshot(options.bucket)
+  const appLedgerStatus = (await hasLiveAppSnapshot(options.bucket))
     ? "available-not-compared"
     : "unavailable-no-live-snapshot";
   const counts = (status: ReconciliationStatus) =>
@@ -83,7 +76,8 @@ export async function reconcileVPointPayEmails(options: {
     runId: options.runId,
     completedAt: options.completedAt,
     policy: {
-      match: "exact JST date and explicit V Point amount, including an explicitly V Point-funded charge",
+      match:
+        "exact JST date and explicit V Point amount, including an explicitly V Point-funded charge",
       mutation: "none",
       ambiguousMatchesRemainUnresolved: true,
     },
@@ -95,8 +89,7 @@ export async function reconcileVPointPayEmails(options: {
     entries,
   };
   const date = options.completedAt.slice(0, 10).replaceAll("-", "/");
-  const reportKey =
-    `derived/v-point-pay-email-reconciliation/${date}/${options.runId}.json`;
+  const reportKey = `derived/v-point-pay-email-reconciliation/${date}/${options.runId}.json`;
   await options.bucket.put(reportKey, JSON.stringify(report), {
     httpMetadata: { contentType: "application/json" },
     customMetadata: {
@@ -122,7 +115,8 @@ function comparablePointAmount(event: VPointPayEmailEvent): number | null {
     event.eventType === "charge" &&
     event.detail?.includes("ポイント") &&
     event.amountYen !== null
-  ) return event.amountYen;
+  )
+    return event.amountYen;
   return null;
 }
 
@@ -179,13 +173,15 @@ async function hasLiveAppSnapshot(bucket: R2Bucket): Promise<boolean> {
 
 function isEmailEvent(value: unknown): value is VPointPayEmailEvent {
   if (!isObject(value)) return false;
-  return value.schemaVersion === "vpoint-pay-email-event-v1" &&
+  return (
+    value.schemaVersion === "vpoint-pay-email-event-v1" &&
     typeof value.id === "string" &&
     typeof value.occurredAt === "string" &&
     ["usage", "charge", "balance-addition", "declined"].includes(
       typeof value.eventType === "string" ? value.eventType : "",
     ) &&
-    (value.usedPoints === null || Number.isSafeInteger(value.usedPoints));
+    (value.usedPoints === null || Number.isSafeInteger(value.usedPoints))
+  );
 }
 
 function normalizedDate(value: unknown): string | null {
@@ -194,7 +190,9 @@ function normalizedDate(value: unknown): string | null {
   if (compact?.[1] && compact[2] && compact[3]) {
     return `${compact[1]}-${compact[2]}-${compact[3]}`;
   }
-  const match = value.match(/(20[0-9]{2})[\/.\-年](0?[1-9]|1[0-2])[\/.\-月](0?[1-9]|[12][0-9]|3[01])/u);
+  const match = value.match(
+    /(20[0-9]{2})[/.\-年](0?[1-9]|1[0-2])[/.\-月](0?[1-9]|[12][0-9]|3[01])/u,
+  );
   if (!match?.[1] || !match[2] || !match[3]) return null;
   return `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
 }
@@ -224,11 +222,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return [...new Uint8Array(digest)]
-    .map((part) => part.toString(16).padStart(2, "0"))
-    .join("");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((part) => part.toString(16).padStart(2, "0")).join("");
 }

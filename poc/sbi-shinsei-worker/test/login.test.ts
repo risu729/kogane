@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  AuthenticationBoundaryError,
-  LoginResponseError,
-} from "../src/errors";
+import { AuthenticationBoundaryError, LoginResponseError } from "../src/errors";
 import { SbiShinseiLoginTransport } from "../src/login";
 import type { JscMaterial, SbiShinseiCredential } from "../src/types";
 
@@ -23,18 +20,21 @@ describe("SBI Shinsei login transport", () => {
     const transport = new SbiShinseiLoginTransport({
       fetch: async (input, init) => {
         calls.push({ url: String(input), init: init ?? {} });
-        return new Response(JSON.stringify({
-          responseJSON: {
-            authStatus: "success",
-            token: "synthetic-csrf",
+        return new Response(
+          JSON.stringify({
+            responseJSON: {
+              authStatus: "success",
+              token: "synthetic-csrf",
+            },
+          }),
+          {
+            status: 200,
+            headers: {
+              authorization: "synthetic-authorization",
+              "content-type": "application/octet-stream",
+            },
           },
-        }), {
-          status: 200,
-          headers: {
-            authorization: "synthetic-authorization",
-            "content-type": "application/octet-stream",
-          },
-        });
+        );
       },
     });
 
@@ -71,15 +71,18 @@ describe("SBI Shinsei login transport", () => {
     const transport = new SbiShinseiLoginTransport({
       fetch: async () => {
         calls += 1;
-        return new Response(JSON.stringify({
-          responseJSON: { authStatus: "rejected", token: "" },
-        }), {
-          status: 200,
-          headers: {
-            authorization: "synthetic-authorization",
-            "content-type": "application/octet-stream",
+        return new Response(
+          JSON.stringify({
+            responseJSON: { authStatus: "rejected", token: "" },
+          }),
+          {
+            status: 200,
+            headers: {
+              authorization: "synthetic-authorization",
+              "content-type": "application/octet-stream",
+            },
           },
-        });
+        );
       },
     });
     await expect(transport.login(credential, material)).rejects.toBeInstanceOf(
@@ -90,21 +93,23 @@ describe("SBI Shinsei login transport", () => {
 
   test("rejects an unknown success response before returning session state", async () => {
     const transport = new SbiShinseiLoginTransport({
-      fetch: async () => new Response(JSON.stringify({
-        responseJSON: {
-          authStatus: "success",
-          token: "synthetic-csrf",
-          unknown: true,
-        },
-      }), {
-        headers: {
-          authorization: "synthetic-authorization",
-          "content-type": "application/octet-stream",
-        },
-      }),
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            responseJSON: {
+              authStatus: "success",
+              token: "synthetic-csrf",
+              unknown: true,
+            },
+          }),
+          {
+            headers: {
+              authorization: "synthetic-authorization",
+              "content-type": "application/octet-stream",
+            },
+          },
+        ),
     });
-    await expect(transport.login(credential, material)).rejects.toBeInstanceOf(
-      LoginResponseError,
-    );
+    await expect(transport.login(credential, material)).rejects.toBeInstanceOf(LoginResponseError);
   });
 });

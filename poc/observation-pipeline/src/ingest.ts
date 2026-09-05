@@ -71,9 +71,7 @@ export function ingestRunDirectory(
     }
     const dataset = entry["dataset"];
     if (seenDatasets.has(dataset)) {
-      throw new Error(
-        `${directory}/manifest.json lists dataset ${dataset} more than once`,
-      );
+      throw new Error(`${directory}/manifest.json lists dataset ${dataset} more than once`);
     }
     seenDatasets.add(dataset);
     const bytes = readFileSync(join(directory, `${dataset}.json`));

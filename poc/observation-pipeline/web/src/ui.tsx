@@ -44,9 +44,7 @@ export function Amount({
 }): ReactNode {
   const formatted = formatAmount(minor, unit, text);
   if (formatted === "") return <span className="null">金額未記録</span>;
-  return (
-    <span className={`amount amount-${amountSign(minor)}`}>{formatted}</span>
-  );
+  return <span className={`amount amount-${amountSign(minor)}`}>{formatted}</span>;
 }
 
 /** A nullable column. An absent value is shown as absent, never as blank. */
@@ -65,28 +63,17 @@ export function Nullable({
 
 /** An arbitrary stored cell, for pages that render whatever columns exist. */
 export function CellValue({ value }: { value: unknown }): ReactNode {
-  if (value === null || value === undefined)
-    return <span className="null">未記録</span>;
+  if (value === null || value === undefined) return <span className="null">未記録</span>;
   if (typeof value === "string") {
     return value === "" ? <span className="null">空文字</span> : <>{value}</>;
   }
-  if (
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    typeof value === "bigint"
-  ) {
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
     return <>{String(value)}</>;
   }
   return <>{JSON.stringify(value)}</>;
 }
 
-export function Sha({
-  value,
-  full = false,
-}: {
-  value: string;
-  full?: boolean;
-}): ReactNode {
+export function Sha({ value, full = false }: { value: string; full?: boolean }): ReactNode {
   return (
     <span className="hash" title={value}>
       {full ? value : `${value.slice(0, 12)}…`}
@@ -162,17 +149,10 @@ export function KindBadge({ kind }: { kind: ObservationKind }): ReactNode {
  * Supersession is the one lineage fact that must never be inferred from
  * absence, so it gets its own explicit marker in both directions.
  */
-export function LineageBadge({
-  supersededBy,
-}: {
-  supersededBy: number | null;
-}): ReactNode {
+export function LineageBadge({ supersededBy }: { supersededBy: number | null }): ReactNode {
   if (supersededBy === null) return <Badge tone="neutral">現行の解析</Badge>;
   return (
-    <Badge
-      tone="superseded"
-      title="同じ原本を再解析した記録に置き換えられています。"
-    >
+    <Badge tone="superseded" title="同じ原本を再解析した記録に置き換えられています。">
       旧解析 · 解析 #{supersededBy} に置換済み
     </Badge>
   );
@@ -235,13 +215,7 @@ export function ArtifactLink({ id }: { id: number }): ReactNode {
  * with `Content-Security-Policy: sandbox`, which only holds if the browser is
  * the thing that navigates to it.
  */
-export function RawLink({
-  sha256,
-  children,
-}: {
-  sha256: string;
-  children?: ReactNode;
-}): ReactNode {
+export function RawLink({ sha256, children }: { sha256: string; children?: ReactNode }): ReactNode {
   return (
     <a href={rawUrl(sha256)} target="_blank" rel="noreferrer noopener">
       {children ?? "原本を開く ↗"}
@@ -255,13 +229,7 @@ export function Kv({ children }: { children: ReactNode }): ReactNode {
   return <dl className="kv">{children}</dl>;
 }
 
-export function KvRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}): ReactNode {
+export function KvRow({ label, children }: { label: string; children: ReactNode }): ReactNode {
   return (
     <>
       <dt>{label}</dt>
@@ -322,9 +290,7 @@ export function ErrorState({
   retrying?: boolean;
 }): ReactNode {
   const status =
-    error instanceof ApiError && error.status >= 400
-      ? ` (HTTP ${String(error.status)})`
-      : "";
+    error instanceof ApiError && error.status >= 400 ? ` (HTTP ${String(error.status)})` : "";
   return (
     <div className="state state-error" role="alert">
       <span className="state-title">
@@ -381,12 +347,7 @@ export function QueryBoundary<T>({
   if (query.data === undefined) {
     if (query.isError)
       return (
-        <ErrorState
-          error={query.error}
-          label={label}
-          onRetry={retry}
-          retrying={query.isFetching}
-        />
+        <ErrorState error={query.error} label={label} onRetry={retry} retrying={query.isFetching} />
       );
     return <Loading label={label} />;
   }
@@ -395,14 +356,8 @@ export function QueryBoundary<T>({
     <>
       {query.isError ? (
         <div className="query-notice query-warning" role="alert">
-          <span>
-            更新できませんでした。前回読み込んだ{label}を表示しています。
-          </span>
-          <button
-            className="button"
-            onClick={retry}
-            disabled={query.isFetching}
-          >
+          <span>更新できませんでした。前回読み込んだ{label}を表示しています。</span>
+          <button className="button" onClick={retry} disabled={query.isFetching}>
             {query.isFetching ? "再試行中…" : "再試行"}
           </button>
         </div>

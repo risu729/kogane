@@ -1,0 +1,7 @@
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+.yamlfmt text eol=lf
+data/** -text
+**/fixtures/** -text
+**/patches/** -text

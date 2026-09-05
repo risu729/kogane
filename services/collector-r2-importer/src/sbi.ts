@@ -1,11 +1,6 @@
 import { CentralClient } from "./central";
 import { ImportError } from "./error";
-import type {
-  CentralInventoryItem,
-  SbiArtifactManifest,
-  SbiFailure,
-  SbiManifest,
-} from "./types";
+import type { CentralInventoryItem, SbiArtifactManifest, SbiFailure, SbiManifest } from "./types";
 
 const SOURCE = "sbi-securities" as const;
 const PRODUCER = "collector-r2-importer";
@@ -17,7 +12,8 @@ const STORAGE_TEMPLATE = "raw/sbi-securities/{date}/{run-id}/{artifact}.json";
 const STORAGE_CONTAINER = "kogane-sbi-collector-poc";
 const FINGERPRINT_VERSION = "collector-r2-v1";
 const CENTRAL_CLIENT_ID = "collector-r2-sbi";
-const MANIFEST_KEY = /^raw\/sbi-securities\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
+const MANIFEST_KEY =
+  /^raw\/sbi-securities\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SAFE_TEXT = /^[A-Za-z0-9._:/-]{1,200}$/u;
 const DATASETS = new Set([
@@ -36,11 +32,7 @@ const EXPECTED_DATASETS: Record<Scope, readonly string[]> = {
     "yen-detail-history",
     "domestic-trade-records",
   ],
-  foreign: [
-    "foreign-cash-positions",
-    "foreign-cash-balances",
-    "foreign-trade-records",
-  ],
+  foreign: ["foreign-cash-positions", "foreign-cash-balances", "foreign-trade-records"],
 };
 
 type Scope = "domestic" | "foreign";
@@ -81,9 +73,11 @@ export async function importSbiRun(options: {
     }
     const manifestBytes = new Uint8Array(await manifestObject.arrayBuffer());
     const manifest = parseSbiManifest(manifestBytes, options.manifestKey);
-    if (manifestObject.customMetadata?.source !== manifest.source ||
-        manifestObject.customMetadata?.status !== manifest.status ||
-        manifestObject.customMetadata?.runId !== manifest.runId) {
+    if (
+      manifestObject.customMetadata?.source !== manifest.source ||
+      manifestObject.customMetadata?.status !== manifest.status ||
+      manifestObject.customMetadata?.runId !== manifest.runId
+    ) {
       throw new ImportError(409, "manifest_metadata_mismatch");
     }
     expectedArtifactCount = manifest.artifacts.length + 1;
@@ -96,10 +90,12 @@ export async function importSbiRun(options: {
     ]);
 
     // Validate every source object before creating immutable central state.
-    const verifiedArtifacts = await Promise.all(manifest.artifacts.map(async (artifact) => ({
-      artifact,
-      bytes: await readVerifiedArtifact(options.bucket, artifact),
-    })));
+    const verifiedArtifacts = await Promise.all(
+      manifest.artifacts.map(async (artifact) => ({
+        artifact,
+        bytes: await readVerifiedArtifact(options.bucket, artifact),
+      })),
+    );
 
     phase = "central_create";
     const central = new CentralClient(
@@ -118,11 +114,14 @@ export async function importSbiRun(options: {
     const units = new Map<Scope, number>();
     for (const scope of scopesFor(manifest.scope)) {
       phase = "unit_catalogue";
-      units.set(scope, await central.addUnit(centralRunId, {
-        unitKind: "scope",
-        unitKey: scope,
-        terminalReportRequired: true,
-      }));
+      units.set(
+        scope,
+        await central.addUnit(centralRunId, {
+          unitKind: "scope",
+          unitKey: scope,
+          terminalReportRequired: true,
+        }),
+      );
     }
 
     const inventory: CentralInventoryItem[] = [];
@@ -153,11 +152,7 @@ export async function importSbiRun(options: {
 
     phase = "manifest_upload";
     const manifestSha256 = await sha256Hex(manifestBytes);
-    const manifestReused = await central.uploadObject(
-      centralRunId,
-      manifestSha256,
-      manifestBytes,
-    );
+    const manifestReused = await central.uploadObject(centralRunId, manifestSha256, manifestBytes);
     if (manifestReused) reusedArtifactCount += 1;
     else acceptedArtifactCount += 1;
 
@@ -185,9 +180,8 @@ export async function importSbiRun(options: {
       const artifactCount = manifest.artifacts.filter(
         (artifact) => datasetScope(artifact.dataset) === scope,
       ).length;
-      const outcome = failures.length === 0
-        ? "success"
-        : artifactCount === 0 ? "failed" : "partial";
+      const outcome =
+        failures.length === 0 ? "success" : artifactCount === 0 ? "failed" : "partial";
       await central.addUnitReport(requiredUnit(units, scope), {
         reportKey: "terminal",
         reportKind: "terminal",
@@ -199,9 +193,7 @@ export async function importSbiRun(options: {
         completedAtBasis: "manifest",
         declaredArtifactCount: artifactCount,
         artifactCountScope: "direct",
-        ...(failures.length > 0
-          ? { safeFailureCode: safeFailureCode(failures) }
-          : {}),
+        ...(failures.length > 0 ? { safeFailureCode: safeFailureCode(failures) } : {}),
       });
     }
 
@@ -272,19 +264,34 @@ export function parseSbiManifest(bytes: Uint8Array, manifestKey: string): SbiMan
   }
   const value = record(input, "manifest_shape_invalid");
   exactKeys(value, [
-    "schemaVersion", "source", "runId", "scope", "startedAt", "completedAt",
-    "status", "artifacts", "failures",
+    "schemaVersion",
+    "source",
+    "runId",
+    "scope",
+    "startedAt",
+    "completedAt",
+    "status",
+    "artifacts",
+    "failures",
   ]);
   if (value.schemaVersion !== SCHEMA_VERSION) invalid("manifest_schema_invalid");
   if (value.source !== SOURCE) invalid("manifest_source_invalid");
   if (value.runId !== keyMatch[4]) invalid("manifest_run_id_mismatch");
-  const scope = oneOf(value.scope, ["all", "domestic", "foreign"] as const, "manifest_scope_invalid");
+  const scope = oneOf(
+    value.scope,
+    ["all", "domestic", "foreign"] as const,
+    "manifest_scope_invalid",
+  );
   const startedAt = instant(value.startedAt, "manifest_started_at_invalid");
   const completedAt = instant(value.completedAt, "manifest_completed_at_invalid");
   if (completedAt < startedAt) invalid("manifest_time_reversed");
   const expectedDate = `${keyMatch[1]}-${keyMatch[2]}-${keyMatch[3]}`;
   if (startedAt.slice(0, 10) !== expectedDate) invalid("manifest_date_mismatch");
-  const status = oneOf(value.status, ["success", "partial", "failed"] as const, "manifest_status_invalid");
+  const status = oneOf(
+    value.status,
+    ["success", "partial", "failed"] as const,
+    "manifest_status_invalid",
+  );
   if (!Array.isArray(value.artifacts) || value.artifacts.length > DATASETS.size) {
     invalid("manifest_artifacts_invalid");
   }
@@ -297,13 +304,14 @@ export function parseSbiManifest(bytes: Uint8Array, manifestKey: string): SbiMan
   if (new Set(artifacts.map((artifact) => artifact.dataset)).size !== artifacts.length) {
     invalid("manifest_duplicate_dataset");
   }
-  if (new Set(failures.map((failure) => `${failure.scope}:${failure.operation}`)).size !==
-      failures.length) {
+  if (
+    new Set(failures.map((failure) => `${failure.scope}:${failure.operation}`)).size !==
+    failures.length
+  ) {
     invalid("manifest_duplicate_failure");
   }
-  const expectedStatus = failures.length === 0
-    ? "success"
-    : artifacts.length === 0 ? "failed" : "partial";
+  const expectedStatus =
+    failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
   if (status !== expectedStatus) invalid("manifest_status_mismatch");
   validateCompleteness(scope, artifacts, failures);
   return {
@@ -350,18 +358,24 @@ async function readVerifiedArtifact(
   if (object.size !== artifact.bytes || object.size > MAX_ARTIFACT_BYTES) {
     throw new ImportError(409, "artifact_size_mismatch");
   }
-  if (object.customMetadata?.sha256 !== artifact.sha256 ||
-      object.customMetadata?.dataset !== artifact.dataset) {
+  if (
+    object.customMetadata?.sha256 !== artifact.sha256 ||
+    object.customMetadata?.dataset !== artifact.dataset
+  ) {
     throw new ImportError(409, "artifact_metadata_mismatch");
   }
   const bytes = new Uint8Array(await object.arrayBuffer());
-  if (await sha256Hex(bytes) !== artifact.sha256) {
+  if ((await sha256Hex(bytes)) !== artifact.sha256) {
     throw new ImportError(409, "artifact_checksum_mismatch");
   }
   return bytes;
 }
 
-function parseArtifact(value: unknown, prefix: string, scope: SbiManifest["scope"]): SbiArtifactManifest {
+function parseArtifact(
+  value: unknown,
+  prefix: string,
+  scope: SbiManifest["scope"],
+): SbiArtifactManifest {
   const input = record(value, "manifest_artifact_invalid");
   exactKeys(input, ["dataset", "key", "sha256", "bytes", "window"]);
   if (typeof input.dataset !== "string" || !DATASETS.has(input.dataset)) {
@@ -375,13 +389,16 @@ function parseArtifact(value: unknown, prefix: string, scope: SbiManifest["scope
   if (typeof input.sha256 !== "string" || !SHA256.test(input.sha256)) {
     invalid("manifest_artifact_sha_invalid");
   }
-  if (!Number.isSafeInteger(input.bytes) || (input.bytes as number) < 0 ||
-      (input.bytes as number) > MAX_ARTIFACT_BYTES) {
+  if (
+    !Number.isSafeInteger(input.bytes) ||
+    (input.bytes as number) < 0 ||
+    (input.bytes as number) > MAX_ARTIFACT_BYTES
+  ) {
     invalid("manifest_artifact_size_invalid");
   }
   const window = input.window === undefined ? undefined : parseWindow(input.window);
-  const historyDataset = dataset === "domestic-trade-records" ||
-    dataset === "foreign-trade-records";
+  const historyDataset =
+    dataset === "domestic-trade-records" || dataset === "foreign-trade-records";
   if (historyDataset !== (window !== undefined)) {
     invalid("manifest_artifact_window_mismatch");
   }
@@ -397,20 +414,25 @@ function parseArtifact(value: unknown, prefix: string, scope: SbiManifest["scope
 function parseFailure(value: unknown, scope: SbiManifest["scope"]): SbiFailure {
   const input = record(value, "manifest_failure_invalid");
   exactKeys(input, ["scope", "operation", "errorType", "message"]);
-  const failureScope = oneOf(input.scope, ["domestic", "foreign"] as const, "manifest_failure_scope_invalid");
+  const failureScope = oneOf(
+    input.scope,
+    ["domestic", "foreign"] as const,
+    "manifest_failure_scope_invalid",
+  );
   if (scope !== "all" && failureScope !== scope) invalid("manifest_failure_scope_mismatch");
   for (const [field, item] of [
     ["operation", input.operation],
     ["error_type", input.errorType],
   ] as const) {
-    if (typeof item !== "string" || !SAFE_TEXT.test(item)) invalid(`manifest_failure_${field}_invalid`);
+    if (typeof item !== "string" || !SAFE_TEXT.test(item))
+      invalid(`manifest_failure_${field}_invalid`);
   }
   if (typeof input.message !== "string" || input.message.length > 300) {
     invalid("manifest_failure_message_invalid");
   }
   const operation = input.operation as string;
-  const known = (failureScope === "domestic" &&
-      (operation === "passkey-mts" || operation === "main-site")) ||
+  const known =
+    (failureScope === "domestic" && (operation === "passkey-mts" || operation === "main-site")) ||
     (failureScope === "foreign" && operation === "passkey-graphql") ||
     operation.startsWith("r2:");
   if (!known) invalid("manifest_failure_operation_invalid");
@@ -434,8 +456,10 @@ function parseWindow(value: unknown): { from: string; to: string } {
   const from = date(input.from, "manifest_window_invalid");
   const to = date(input.to, "manifest_window_invalid");
   if (from > to) invalid("manifest_window_reversed");
-  const days = Math.floor((Date.parse(`${to}T00:00:00.000Z`) -
-    Date.parse(`${from}T00:00:00.000Z`)) / 86_400_000) + 1;
+  const days =
+    Math.floor(
+      (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / 86_400_000,
+    ) + 1;
   if (days > 90) invalid("manifest_window_too_large");
   return { from, to };
 }
@@ -465,31 +489,33 @@ async function dataDescriptor(options: {
     sha256: options.artifact.sha256,
     byteSize: options.artifact.bytes,
     storage: await storageOrigin(options.artifact.key, options.fingerprintKey),
-    ...(options.artifact.window ? {
-      ranges: [{
-        rangeKey: "requested-window",
-        rangeKind: "requested",
-        precision: "date",
-        startValue: options.artifact.window.from,
-        endValue: options.artifact.window.to,
-        startInclusive: true,
-        endInclusive: true,
-        basis: "manifest",
-      }],
-    } : {}),
+    ...(options.artifact.window
+      ? {
+          ranges: [
+            {
+              rangeKey: "requested-window",
+              rangeKind: "requested",
+              precision: "date",
+              startValue: options.artifact.window.from,
+              endValue: options.artifact.window.to,
+              startInclusive: true,
+              endInclusive: true,
+              basis: "manifest",
+            },
+          ],
+        }
+      : {}),
     transformSteps: [
       "transport_decoded",
       "extracted",
       ...(options.artifact.dataset === "foreign-trade-records" ? ["bundled"] : []),
       "reencoded",
-    ].map(
-      (stepKind, stepIndex) => ({
-        stepIndex,
-        stepKind,
-        transformerId: "sbi-securities-worker",
-        transformerVersion: SCHEMA_VERSION,
-      }),
-    ),
+    ].map((stepKind, stepIndex) => ({
+      stepIndex,
+      stepKind,
+      transformerId: "sbi-securities-worker",
+      transformerVersion: SCHEMA_VERSION,
+    })),
   };
 }
 
@@ -506,8 +532,9 @@ function validateCompleteness(
       if (failure.operation === "passkey-mts") {
         EXPECTED_DATASETS.domestic.forEach((dataset) => requiredMissing.add(dataset));
       } else if (failure.operation === "main-site") {
-        ["account-assets-current", "yen-detail-history", "domestic-trade-records"]
-          .forEach((dataset) => requiredMissing.add(dataset));
+        ["account-assets-current", "yen-detail-history", "domestic-trade-records"].forEach(
+          (dataset) => requiredMissing.add(dataset),
+        );
       } else if (failure.operation === "passkey-graphql") {
         EXPECTED_DATASETS.foreign.forEach((dataset) => requiredMissing.add(dataset));
       } else if (failure.operation.startsWith("r2:")) {
@@ -561,11 +588,7 @@ async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonO
     false,
     ["sign"],
   );
-  const signature = await crypto.subtle.sign(
-    "HMAC",
-    cryptoKey,
-    new TextEncoder().encode(key),
-  );
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(key));
   return {
     storageKind: "r2",
     containerName: STORAGE_CONTAINER,

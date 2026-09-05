@@ -7,11 +7,10 @@ export function parseCredential(value: string): SbiShinseiCredential {
   } catch {
     throw new Error("SBI Shinsei credential secret is not valid JSON");
   }
-  if (!isRecord(parsed) || !hasExactKeys(parsed, [
-    "branchNumber",
-    "accountNumber",
-    "powerDirectPassword",
-  ])) {
+  if (
+    !isRecord(parsed) ||
+    !hasExactKeys(parsed, ["branchNumber", "accountNumber", "powerDirectPassword"])
+  ) {
     throw new Error("SBI Shinsei credential secret has an invalid shape");
   }
   if (
@@ -37,12 +36,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function hasExactKeys(
-  value: Record<string, unknown>,
-  expected: readonly string[],
-): boolean {
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
   const wanted = [...expected].sort();
-  return actual.length === wanted.length &&
-    actual.every((key, index) => key === wanted[index]);
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
 }

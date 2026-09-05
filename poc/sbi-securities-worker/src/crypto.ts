@@ -8,12 +8,7 @@ import {
   timingSafeEqual,
 } from "node:crypto";
 import { Buffer } from "node:buffer";
-import type {
-  SbiCredential,
-  SbiHandshakeKey,
-  WebAuthnAssertion,
-  WebAuthnRequest,
-} from "./types";
+import type { SbiCredential, SbiHandshakeKey, WebAuthnAssertion, WebAuthnRequest } from "./types";
 
 export function parseHandshakeKey(value: string): SbiHandshakeKey {
   let parsed: unknown;
@@ -41,19 +36,13 @@ export function parseHandshakeKey(value: string): SbiHandshakeKey {
 }
 
 export function base64Url(value: Buffer | Uint8Array | string, keepPadding = false): string {
-  const encoded = Buffer.from(value)
-    .toString("base64")
-    .replaceAll("+", "-")
-    .replaceAll("/", "_");
+  const encoded = Buffer.from(value).toString("base64").replaceAll("+", "-").replaceAll("/", "_");
   return keepPadding ? encoded : encoded.replace(/=+$/u, "");
 }
 
 export function base64UrlBuffer(value: string): Buffer {
   const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
-  return Buffer.from(
-    normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="),
-    "base64",
-  );
+  return Buffer.from(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="), "base64");
 }
 
 export function parseBitwardenCredentialId(value: string): Buffer {
@@ -101,9 +90,7 @@ export function createBitwardenAssertion(
     clientDataJSON: base64Url(clientDataJSON),
     authenticatorData: base64Url(authenticatorData),
     signature: base64Url(sign("sha256", signatureBase, privateKey)),
-    userHandle: credential.userHandle
-      ? base64Url(base64UrlBuffer(credential.userHandle))
-      : "",
+    userHandle: credential.userHandle ? base64Url(base64UrlBuffer(credential.userHandle)) : "",
   };
 }
 
@@ -123,10 +110,7 @@ export function generateHandshakeKey(): {
   };
 }
 
-export function decryptPasskeyToken(
-  encryptedToken: string,
-  privateKeyPem: string,
-): string {
+export function decryptPasskeyToken(encryptedToken: string, privateKeyPem: string): string {
   const encodedMessage = privateDecrypt(
     {
       key: privateKeyPem,

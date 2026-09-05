@@ -45,12 +45,12 @@ above captured the definitive 403 response; no further login was attempted.
 
 ## Comparison
 
-| Client | Egress | JavaScript | Vpass login result |
-| --- | --- | --- | --- |
-| Real Chrome 153 on Windows | host route observed as Cloudflare WARP/Gateway, AU | yes | success: 302 and `x-loginresult: 0` |
-| upstream `impit` Chrome 151 Windows | Japanese home via `tamia` | no | Akamai 403 before Vpass result |
-| `curl_cffi 0.16.1` Chrome 150 | Japanese home via `tamia` | no | Akamai 403 before Vpass result |
-| Cloudflare Browser Run + Windows Chrome 153 network UA | Cloudflare | yes | Akamai 403 before Vpass result |
+| Client                                                 | Egress                                             | JavaScript | Vpass login result                  |
+| ------------------------------------------------------ | -------------------------------------------------- | ---------- | ----------------------------------- |
+| Real Chrome 153 on Windows                             | host route observed as Cloudflare WARP/Gateway, AU | yes        | success: 302 and `x-loginresult: 0` |
+| upstream `impit` Chrome 151 Windows                    | Japanese home via `tamia`                          | no         | Akamai 403 before Vpass result      |
+| `curl_cffi 0.16.1` Chrome 150                          | Japanese home via `tamia`                          | no         | Akamai 403 before Vpass result      |
+| Cloudflare Browser Run + Windows Chrome 153 network UA | Cloudflare                                         | yes        | Akamai 403 before Vpass result      |
 
 The combined evidence shows that neither a Japanese source IP, transport
 impersonation, nor JavaScript execution in Cloudflare's identifiable automated

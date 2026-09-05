@@ -65,7 +65,10 @@ try {
   if (!traceResponse?.ok()) throw new Error(`Cloudflare trace failed: ${traceResponse?.status()}`);
   const trace = await page.locator("body").innerText();
   const fields = Object.fromEntries(
-    trace.split("\n").map((line) => line.split("=", 2)).filter((pair) => pair.length === 2),
+    trace
+      .split("\n")
+      .map((line) => line.split("=", 2))
+      .filter((pair) => pair.length === 2),
   );
   result.egress = { ip: fields.ip, loc: fields.loc, warp: fields.warp, gateway: fields.gateway };
 
@@ -84,13 +87,18 @@ try {
     status: loginPageResponse?.status(),
     url: redactUrl(page.url()),
     title: await page.title(),
-    hasIdInput: await page.locator("input#id_input, input[placeholder*='ID'], input[aria-label*='ID']").count() > 0,
-    hasPasswordInput: await page.locator("input[type='password']").count() > 0,
+    hasIdInput:
+      (await page
+        .locator("input#id_input, input[placeholder*='ID'], input[aria-label*='ID']")
+        .count()) > 0,
+    hasPasswordInput: (await page.locator("input[type='password']").count()) > 0,
   };
 
   if (authenticate) {
     credentials = await readCredentials();
-    const idInput = page.locator("input#id_input, input[placeholder*='ID'], input[aria-label*='ID']").first();
+    const idInput = page
+      .locator("input#id_input, input[placeholder*='ID'], input[aria-label*='ID']")
+      .first();
     const passwordInput = page.locator("input#pw_input, input[type='password']").first();
     await idInput.fill(credentials.id);
     await passwordInput.fill(credentials.password);
@@ -98,21 +106,26 @@ try {
     credentials.password = "";
     credentials = undefined;
 
-    const loginResponsePromise = page.waitForResponse(
-      (response) => {
-        try {
-          return new URL(response.url()).pathname === "/memapi/jaxrs/xt_login/agree/v1";
-        } catch {
-          return false;
-        }
-      },
-      { timeout: 30_000 },
-    ).catch(() => undefined);
+    const loginResponsePromise = page
+      .waitForResponse(
+        (response) => {
+          try {
+            return new URL(response.url()).pathname === "/memapi/jaxrs/xt_login/agree/v1";
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 30_000 },
+      )
+      .catch(() => undefined);
     await page.getByRole("button", { name: "ログイン", exact: true }).click();
     const loginResponse = await loginResponsePromise;
     await page.waitForTimeout(5_000);
 
-    const bodyText = await page.locator("body").innerText().catch(() => "");
+    const bodyText = await page
+      .locator("body")
+      .innerText()
+      .catch(() => "");
     result.login = {
       responseStatus: loginResponse?.status(),
       responseUrl: loginResponse ? redactUrl(loginResponse.url()) : undefined,

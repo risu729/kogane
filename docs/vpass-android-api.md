@@ -11,15 +11,15 @@ in [Reproducing the Vpass Android static analysis](vpass-android-reproduction.md
 
 ## Artifact
 
-| Field | Value |
-| --- | --- |
-| Package | `com.smbc_card.vpass` |
-| Version | `5.12.0` (`versionCode 5120009`) |
-| APK SHA-256 | `6b9df70c5f3a40c840fd45573385690bd777e6b341134f1e585ad3b87ba95a9a` |
+| Field                       | Value                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------- |
+| Package                     | `com.smbc_card.vpass`                                                                             |
+| Version                     | `5.12.0` (`versionCode 5120009`)                                                                  |
+| APK SHA-256                 | `6b9df70c5f3a40c840fd45573385690bd777e6b341134f1e585ad3b87ba95a9a`                                |
 | Signing certificate SHA-256 | `10:18:A2:EB:10:EF:51:1F:52:F8:48:4B:11:39:42:FE:99:12:41:26:C0:E1:AF:16:D9:95:3E:AC:5B:84:76:2C` |
-| Decompiled with | JADX 1.5.6; 106 reported errors |
-| Protected asset | `assets/fjcnwlye`; 29,664 bytes |
-| Recovered DEX | DEX 037; 29,652 bytes; SHA-256 `f0b8817b4107698cb79f9803646a1048b87cd117e9da8bd151ad7bc1970ffada` |
+| Decompiled with             | JADX 1.5.6; 106 reported errors                                                                   |
+| Protected asset             | `assets/fjcnwlye`; 29,664 bytes                                                                   |
+| Recovered DEX               | DEX 037; 29,652 bytes; SHA-256 `f0b8817b4107698cb79f9803646a1048b87cd117e9da8bd151ad7bc1970ffada` |
 
 The package, version, and signing certificate were checked locally before
 analysis. This is an unofficial reverse-engineering snapshot, not an SMCC API
@@ -34,18 +34,18 @@ the actual file URL on that page was hosted by Microsoft SharePoint. The file
 was treated as untrusted until `apksigner` verified the same SMCC signing
 certificate as the Google Play artifact.
 
-| Field | Archived 5.1.1 | Current 5.12.0 |
-| --- | --- | --- |
-| Version code | `511000` | `5120009` |
-| APK SHA-256 | `80b1e4e699c9390c31271dc5778b73b0caf6ff2a63864a6a8ca0061f070c230e` | `6b9df70c5f3a40c840fd45573385690bd777e6b341134f1e585ad3b87ba95a9a` |
-| Minimum / target SDK | 23 / 34 | 24 / 36 |
-| JADX errors | 26 | 106 |
-| Signing certificate | Same SMCC certificate | Same SMCC certificate |
-| Protected login classes present in ordinary DEX | No | No |
-| Encrypted asset size | 18,784 bytes | 29,664 bytes |
-| Recovered DEX | DEX 035; 18,776 bytes | DEX 037; 29,652 bytes |
-| Request RSA padding | PKCS#1 v1.5 | OAEP SHA-256 / MGF1-SHA-256 |
-| Auth key / IV randomness | `java.util.Random` | `java.security.SecureRandom` |
+| Field                                           | Archived 5.1.1                                                     | Current 5.12.0                                                     |
+| ----------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Version code                                    | `511000`                                                           | `5120009`                                                          |
+| APK SHA-256                                     | `80b1e4e699c9390c31271dc5778b73b0caf6ff2a63864a6a8ca0061f070c230e` | `6b9df70c5f3a40c840fd45573385690bd777e6b341134f1e585ad3b87ba95a9a` |
+| Minimum / target SDK                            | 23 / 34                                                            | 24 / 36                                                            |
+| JADX errors                                     | 26                                                                 | 106                                                                |
+| Signing certificate                             | Same SMCC certificate                                              | Same SMCC certificate                                              |
+| Protected login classes present in ordinary DEX | No                                                                 | No                                                                 |
+| Encrypted asset size                            | 18,784 bytes                                                       | 29,664 bytes                                                       |
+| Recovered DEX                                   | DEX 035; 18,776 bytes                                              | DEX 037; 29,652 bytes                                              |
+| Request RSA padding                             | PKCS#1 v1.5                                                        | OAEP SHA-256 / MGF1-SHA-256                                        |
+| Auth key / IV randomness                        | `java.util.Random`                                                 | `java.security.SecureRandom`                                       |
 
 Both releases use the same `Fauth`/`Vauth` request model and contain the same
 four byte-identical RSA-2048 public-key PEM files. The protected asset and
@@ -222,12 +222,12 @@ fields already handled by the JSON PoC. Therefore no CSV conversion is needed.
 On 2026-08-26, plain `curl` from an Australian Cloudflare/WARP egress reached
 all of these endpoints without browser execution:
 
-| Request | Result |
-| --- | --- |
+| Request                                             | Result                                            |
+| --------------------------------------------------- | ------------------------------------------------- |
 | Empty `web_meisai_top/v1` request without a session | HTTP 401 JSON, normal Vpass forced-login response |
-| `common/Config` with an empty `auth` | HTTP 202 JSON, application-level parameter error |
-| `Vauth` with an empty `auth` | HTTP 400 JSON, application-level parameter error |
-| `Fauth` with an empty `auth` | HTTP 400 JSON, application-level parameter error |
+| `common/Config` with an empty `auth`                | HTTP 202 JSON, application-level parameter error  |
+| `Vauth` with an empty `auth`                        | HTTP 400 JSON, application-level parameter error  |
+| `Fauth` with an empty `auth`                        | HTTP 400 JSON, application-level parameter error  |
 
 The responses set some Akamai-named cookies, but none was an Akamai HTML
 `Access Denied` response. This demonstrates only reachability and application

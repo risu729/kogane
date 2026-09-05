@@ -1,0 +1,120 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_call:
+  workflow_dispatch:
+concurrency:
+  group: ci-${{ case(github.event_name == 'pull_request', github.event.pull_request.number, github.ref) }}
+  cancel-in-progress: true
+permissions: {}
+defaults:
+  run:
+    shell: bash
+env:
+  CI: "true"
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.1
+      - name: Run lint
+        run: mise run check --lint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+  packages:
+    name: Package (${{ matrix.package }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - poc/cloudflare-browser-run
+          - poc/cloudflare-runtime-probe
+          - poc/globalpass-worker
+          - poc/mobile-suica-worker
+          - poc/moneyforward-worker
+          - poc/myjcb-worker
+          - poc/observation-pipeline
+          - poc/sbi-securities-worker
+          - poc/sbi-shinsei-worker
+          - poc/sbi-vc-trade-client
+          - poc/sbi-vc-trade-worker
+          - poc/smbc-direct-backfill-worker
+          - poc/sony-bank-worker
+          - poc/tamia-tcp-bridge
+          - poc/vpass-json
+          - poc/vpoint-pay-worker
+          - poc/vpoint-worker
+          - services/collector-r2-importer
+          - services/raw-evidence
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.1
+      - name: Install frozen dependencies and run offline package checks
+        run: mise run ci:package "${CI_PACKAGE}"
+        env:
+          CI_PACKAGE: ${{ matrix.package }}
+  standalone:
+    name: Standalone checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.1
+      - name: Test shared helpers and CI inventory; check OCI probe syntax
+        run: mise run ci:standalone
+  ci-check:
+    name: CI Check
+    needs:
+      - lint
+      - packages
+      - standalone
+    if: ${{ !cancelled() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - run: exit 1
+  actions-timeline:
+    name: Generate Actions Timeline
+    needs:
+      - ci-check
+    if: always() && !cancelled()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read # Required by actions-timeline to read this workflow run's jobs.
+    steps:
+      - name: actions-timeline
+        uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0

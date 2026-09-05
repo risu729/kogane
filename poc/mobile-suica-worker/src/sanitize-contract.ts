@@ -5,8 +5,9 @@ export function sanitizeHistoryHtmlText(html: string): {
   originalValue: string;
 } {
   const matches = [...html.matchAll(/<input\b[^>]*>/giu)].filter((match) =>
-    attributeMatches(match[0], "name")
-      .some((attribute) => attributeValue(attribute).toLowerCase() === "basevariable")
+    attributeMatches(match[0], "name").some(
+      (attribute) => attributeValue(attribute).toLowerCase() === "basevariable",
+    ),
   );
   if (matches.length !== 1) throw new Error("history_base_variable_count_invalid");
   const match = matches[0];
@@ -29,25 +30,28 @@ export function sanitizeHistoryHtmlText(html: string): {
   }
   const originalValue = attributeValue(valueMatch);
   if (!originalValue) throw new Error("history_base_variable_empty");
-  const replacement = valueMatch[1] !== undefined
-    ? `value="${REDACTED_BASE_VARIABLE}"`
-    : valueMatch[2] !== undefined
-      ? `value='${REDACTED_BASE_VARIABLE}'`
-      : `value=${REDACTED_BASE_VARIABLE}`;
-  const sanitizedTag = `${tag.slice(0, valueMatch.index)}${replacement}${
-    tag.slice(valueMatch.index + valueMatch[0].length)
-  }`;
+  const replacement =
+    valueMatch[1] !== undefined
+      ? `value="${REDACTED_BASE_VARIABLE}"`
+      : valueMatch[2] !== undefined
+        ? `value='${REDACTED_BASE_VARIABLE}'`
+        : `value=${REDACTED_BASE_VARIABLE}`;
+  const sanitizedTag = `${tag.slice(0, valueMatch.index)}${replacement}${tag.slice(
+    valueMatch.index + valueMatch[0].length,
+  )}`;
   const sanitized = `${html.slice(0, match.index)}${sanitizedTag}${html.slice(match.index + tag.length)}`;
-  if (sanitized.includes(originalValue)) throw new Error("history_base_variable_redaction_incomplete");
+  if (sanitized.includes(originalValue))
+    throw new Error("history_base_variable_redaction_incomplete");
   return { sanitized, originalValue };
 }
 
 function attributeMatches(tag: string, name: string): RegExpMatchArray[] {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  return [...tag.matchAll(new RegExp(
-    `\\b${escaped}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\u0060]+))`,
-    "giu",
-  ))];
+  return [
+    ...tag.matchAll(
+      new RegExp(`\\b${escaped}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'=<>\u0060]+))`, "giu"),
+    ),
+  ];
 }
 
 function attributeValue(match: RegExpMatchArray | undefined): string {

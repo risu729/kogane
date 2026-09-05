@@ -456,9 +456,12 @@ function immutableReport(reports: Map<string, string>, path: string, body: strin
     return Response.json({ error: "immutable report conflict" }, { status: 409 });
   }
   reports.set(path, body);
-  return Response.json({ reused: previous !== undefined }, {
-    status: previous === undefined ? 201 : 200,
-  });
+  return Response.json(
+    { reused: previous !== undefined },
+    {
+      status: previous === undefined ? 201 : 200,
+    },
+  );
 }
 
 async function storeSuccessRun(bucket: FakeBucket): Promise<void> {

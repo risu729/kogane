@@ -2,20 +2,9 @@ import { createDiagnostics, safeErrorDetails } from "../../collector-diagnostics
 import { parseCredential } from "./auth";
 import { parseHandshakeKey, secretEquals } from "./crypto";
 import { collectMainSiteArtifacts } from "./main-site";
-import {
-  collectDomesticArtifacts,
-  collectForeignArtifacts,
-} from "./sbi";
-import {
-  runPrefix,
-  storeArtifact,
-  storeManifest,
-} from "./storage";
-import {
-  backfillStoredRuns,
-  importStoredRun,
-  type ImportRunResult,
-} from "./raw-evidence";
+import { collectDomesticArtifacts, collectForeignArtifacts } from "./sbi";
+import { runPrefix, storeArtifact, storeManifest } from "./storage";
+import { backfillStoredRuns, importStoredRun, type ImportRunResult } from "./raw-evidence";
 import type {
   Artifact,
   CollectionFailure,
@@ -48,10 +37,12 @@ export default {
       try {
         const cursor = url.searchParams.get("cursor") ?? undefined;
         const limit = parseBackfillLimit(url.searchParams.get("limit"));
-        return Response.json(await backfillStoredRuns(
-          env.RAW_EVIDENCE_IMPORTER,
-          { ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) },
-        ));
+        return Response.json(
+          await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, {
+            ...(cursor ? { cursor } : {}),
+            ...(limit ? { limit } : {}),
+          }),
+        );
       } catch (error) {
         return Response.json(
           { error: safeError(error, "Raw evidence backfill failed") },
@@ -67,10 +58,7 @@ export default {
     }
     try {
       const scope = parseScope(url.searchParams.get("scope"));
-      const window = parseWindow(
-        url.searchParams.get("from"),
-        url.searchParams.get("to"),
-      );
+      const window = parseWindow(url.searchParams.get("from"), url.searchParams.get("to"));
       const result = await runCollection(env, scope, window);
       return Response.json(result, {
         status: result.status === "failed" ? 502 : 200,
@@ -79,9 +67,7 @@ export default {
       return Response.json(
         {
           error:
-            error instanceof Error
-              ? redactError(error.message).slice(0, 300)
-              : "Collection failed",
+            error instanceof Error ? redactError(error.message).slice(0, 300) : "Collection failed",
         },
         { status: 400 },
       );
@@ -97,42 +83,48 @@ async function runCollection(
   env: Env,
   scope: CollectionScope,
   window?: { from: string; to: string },
-): Promise<CollectionManifest & {
-  manifestKey: string;
-  central: ImportRunResult;
-}> {
+): Promise<
+  CollectionManifest & {
+    manifestKey: string;
+    central: ImportRunResult;
+  }
+> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const diagnostic = createDiagnostics("sbi-securities", runId);
   try {
     const prefix = runPrefix(startedAt, runId);
     const endpoints = SBI_ENDPOINTS;
-    const credential = await diagnostic.step("configuration", () => parseCredential(
-      requiredSecret(env.SBI_CREDENTIAL_JSON, "SBI_CREDENTIAL_JSON"),
-    ));
-    const handshakeKey = await diagnostic.step("configuration", () => parseHandshakeKey(
-      requiredSecret(env.SBI_HANDSHAKE_KEY_JSON, "SBI_HANDSHAKE_KEY_JSON"),
-    ));
+    const credential = await diagnostic.step("configuration", () =>
+      parseCredential(requiredSecret(env.SBI_CREDENTIAL_JSON, "SBI_CREDENTIAL_JSON")),
+    );
+    const handshakeKey = await diagnostic.step("configuration", () =>
+      parseHandshakeKey(requiredSecret(env.SBI_HANDSHAKE_KEY_JSON, "SBI_HANDSHAKE_KEY_JSON")),
+    );
     const artifacts: Artifact[] = [];
     const failures: CollectionFailure[] = [];
 
     if (scope === "all" || scope === "domestic") {
       try {
-        const domestic = await diagnostic.step("domestic-collection", () => collectDomesticArtifacts({
-          endpoints,
-          credential,
-          handshakeKey,
-        }));
+        const domestic = await diagnostic.step("domestic-collection", () =>
+          collectDomesticArtifacts({
+            endpoints,
+            credential,
+            handshakeKey,
+          }),
+        );
         artifacts.push(...domestic.artifacts);
         const mainSiteBaseUrl = endpoints.mainSiteBaseUrl;
         if (mainSiteBaseUrl) {
           try {
             artifacts.push(
-              ...(await diagnostic.step("main-site-collection", () => collectMainSiteArtifacts({
-                session: domestic.session,
-                mainSiteBaseUrl,
-                ...(window ?? {}),
-              }))),
+              ...(await diagnostic.step("main-site-collection", () =>
+                collectMainSiteArtifacts({
+                  session: domestic.session,
+                  mainSiteBaseUrl,
+                  ...(window ?? {}),
+                }),
+              )),
             );
           } catch (error) {
             failures.push(failure("domestic", "main-site", error));
@@ -146,12 +138,14 @@ async function runCollection(
     if (scope === "all" || scope === "foreign") {
       try {
         artifacts.push(
-          ...(await diagnostic.step("foreign-collection", () => collectForeignArtifacts({
-            endpoints,
-            credential,
-            handshakeKey,
-            ...(window ?? {}),
-          }))),
+          ...(await diagnostic.step("foreign-collection", () =>
+            collectForeignArtifacts({
+              endpoints,
+              credential,
+              handshakeKey,
+              ...(window ?? {}),
+            }),
+          )),
         );
       } catch (error) {
         failures.push(failure("foreign", "passkey-graphql", error));
@@ -162,11 +156,13 @@ async function runCollection(
     for (const artifact of artifacts) {
       try {
         artifactManifests.push(
-          await diagnostic.step("artifact-write", () => storeArtifact({
-            bucket: env.SNAPSHOTS,
-            prefix,
-            artifact,
-          })),
+          await diagnostic.step("artifact-write", () =>
+            storeArtifact({
+              bucket: env.SNAPSHOTS,
+              prefix,
+              artifact,
+            }),
+          ),
         );
       } catch (error) {
         failures.push(
@@ -180,11 +176,7 @@ async function runCollection(
     }
     const completedAt = new Date().toISOString();
     const status =
-      failures.length === 0
-        ? "success"
-        : artifactManifests.length === 0
-          ? "failed"
-          : "partial";
+      failures.length === 0 ? "success" : artifactManifests.length === 0 ? "failed" : "partial";
     const manifest: CollectionManifest = {
       schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       source: "sbi-securities",
@@ -196,12 +188,16 @@ async function runCollection(
       artifacts: artifactManifests,
       failures,
     };
-    const manifestKey = await diagnostic.step("manifest-write", () => storeManifest({
-      bucket: env.SNAPSHOTS,
-      prefix,
-      manifest,
-    }));
-    const central = await diagnostic.step("central-import", () => importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey));
+    const manifestKey = await diagnostic.step("manifest-write", () =>
+      storeManifest({
+        bucket: env.SNAPSHOTS,
+        prefix,
+        manifest,
+      }),
+    );
+    const central = await diagnostic.step("central-import", () =>
+      importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey),
+    );
     console.log(
       JSON.stringify({
         event: "sbi-collection-stored",
@@ -224,9 +220,7 @@ async function runCollection(
 }
 
 function authorized(request: Request, expected: string | undefined): boolean {
-  const provided = request.headers
-    .get("authorization")
-    ?.match(/^Bearer\s+(.+)$/iu)?.[1];
+  const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
   return Boolean(provided && expected && secretEquals(provided, expected));
 }
 
@@ -255,18 +249,12 @@ function parseWindow(
 ): { from: string; to: string } | undefined {
   if (from === null && to === null) return undefined;
   if (!from || !to) throw new Error("from and to must be specified together");
-  if (
-    !/^\d{4}-\d{2}-\d{2}$/u.test(from) ||
-    !/^\d{4}-\d{2}-\d{2}$/u.test(to) ||
-    from > to
-  ) {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(from) || !/^\d{4}-\d{2}-\d{2}$/u.test(to) || from > to) {
     throw new Error("from and to must be a valid YYYY-MM-DD range");
   }
   const days =
     Math.floor(
-      (Date.parse(`${to}T00:00:00.000Z`) -
-        Date.parse(`${from}T00:00:00.000Z`)) /
-        86_400_000,
+      (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / 86_400_000,
     ) + 1;
   if (days > 90) throw new Error("a trigger window must not exceed 90 days");
   return { from, to };
@@ -292,7 +280,5 @@ function redactError(value: string): string {
 }
 
 function safeError(error: unknown, fallback: string): string {
-  return error instanceof Error
-    ? redactError(error.message).slice(0, 300)
-    : fallback;
+  return error instanceof Error ? redactError(error.message).slice(0, 300) : fallback;
 }

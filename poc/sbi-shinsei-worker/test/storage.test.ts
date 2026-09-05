@@ -9,10 +9,7 @@ interface PutCall {
 
 describe("SBI Shinsei raw storage", () => {
   test("uses a source/date/run isolated prefix", () => {
-    expect(runPrefix(
-      "2026-08-31T01:02:03.000Z",
-      "00000000-0000-4000-8000-000000000000",
-    )).toBe(
+    expect(runPrefix("2026-08-31T01:02:03.000Z", "00000000-0000-4000-8000-000000000000")).toBe(
       "raw/sbi-shinsei/2026/08/31/00000000-0000-4000-8000-000000000000",
     );
   });
@@ -26,11 +23,12 @@ describe("SBI Shinsei raw storage", () => {
         options: R2PutOptions,
       ) => {
         calls.push({ key, options });
-        const bytes = typeof value === "string"
-          ? new TextEncoder().encode(value)
-          : value instanceof ArrayBuffer
-            ? new Uint8Array(value)
-            : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+        const bytes =
+          typeof value === "string"
+            ? new TextEncoder().encode(value)
+            : value instanceof ArrayBuffer
+              ? new Uint8Array(value)
+              : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
         const sha256 = options.sha256 as Uint8Array;
         return {
           key,

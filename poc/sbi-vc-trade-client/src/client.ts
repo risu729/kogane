@@ -1,8 +1,4 @@
-import type {
-  GatewayEnvelope,
-  JsonObject,
-  SessionMaterial,
-} from "./types";
+import type { GatewayEnvelope, JsonObject, SessionMaterial } from "./types";
 
 const ORIGIN = "https://simple.sbivc.co.jp";
 const TRADE_PATH = "/api/cccmdipresen/gw/trade";
@@ -18,10 +14,7 @@ const READ_EVENTS = {
 
 export type ReadEvent = keyof typeof READ_EVENTS;
 
-type Fetcher = (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => Promise<Response>;
+type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export interface PageOptions {
   pageNumber: number;
@@ -133,7 +126,7 @@ export class SbiVcTradeClient {
     if (!contentType.toLowerCase().includes("application/json")) {
       throw new GatewayError("gateway returned a non-JSON response", response.status);
     }
-    const parsed = await response.json() as unknown;
+    const parsed = (await response.json()) as unknown;
     if (!isEnvelope(parsed)) {
       throw new GatewayError("gateway response envelope is invalid", response.status);
     }
@@ -145,7 +138,10 @@ export class SbiVcTradeClient {
 }
 
 export class GatewayError extends Error {
-  constructor(message: string, readonly httpStatus?: number) {
+  constructor(
+    message: string,
+    readonly httpStatus?: number,
+  ) {
     super(message);
     this.name = "GatewayError";
   }

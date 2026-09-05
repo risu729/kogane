@@ -16,7 +16,7 @@ valuations, reward expiry).
 The "see real data before freezing a schema" principle applies to the raw
 layer itself. Which artifact metadata is worth keeping, how the source
 allowlist should be structured, and what the ingestion tables look like are
-all modeling decisions — so they are made *after* real captures have been
+all modeling decisions — so they are made _after_ real captures have been
 inspected, not before.
 
 This is possible because a Kuebiko capture directory is already a complete

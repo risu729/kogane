@@ -1,0 +1,8 @@
+**/node_modules/
+**/.wrangler/
+**/dist/
+**/__pycache__/
+**/.ruff_cache/
+hk.local.pkl
+mise.local.toml
+mise.local.lock

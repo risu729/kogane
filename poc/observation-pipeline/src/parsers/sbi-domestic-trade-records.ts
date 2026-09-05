@@ -25,18 +25,13 @@ export const sbiDomesticTradeRecords: Parser = {
   version: "0.2.0",
 
   accepts(artifact: ArtifactMeta): boolean {
-    return (
-      artifact.sourceId === "sbi-securities" &&
-      artifact.dataset === "domestic-trade-records"
-    );
+    return artifact.sourceId === "sbi-securities" && artifact.dataset === "domestic-trade-records";
   },
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
     const body: unknown = JSON.parse(decodeUtf8(bytes));
     if (!isObject(body) || !Array.isArray(body["records"])) {
-      throw new Error(
-        `artifact ${artifact.sha256} is not a domestic-trade-records body`,
-      );
+      throw new Error(`artifact ${artifact.sha256} is not a domestic-trade-records body`);
     }
     const warnings: string[] = [];
     const observations: Observation[] = body["records"].map(
@@ -67,8 +62,7 @@ export const sbiDomesticTradeRecords: Parser = {
             : typeof rawAmount === "number"
               ? (decimalText(rawAmount)?.text ?? "")
               : "";
-        const amountMinor =
-          amountText === "" ? undefined : amountToMinorUnits(amountText, "JPY");
+        const amountMinor = amountText === "" ? undefined : amountToMinorUnits(amountText, "JPY");
         if (amountMinor === undefined) {
           warnings.push(
             `records[${index}]: amount ${JSON.stringify(rawAmount)} did not resolve to JPY minor units`,
@@ -80,11 +74,8 @@ export const sbiDomesticTradeRecords: Parser = {
           ? (record["rawCells"] as unknown[])
           : undefined;
         const description =
-          typeof rawCells?.[1] === "string"
-            ? rawCells[1]
-            : String(record["issueName"] ?? "");
-        const tradeDate =
-          typeof record["tradeDate"] === "string" ? record["tradeDate"] : undefined;
+          typeof rawCells?.[1] === "string" ? rawCells[1] : String(record["issueName"] ?? "");
+        const tradeDate = typeof record["tradeDate"] === "string" ? record["tradeDate"] : undefined;
         const externalId = typeof record["id"] === "string" ? record["id"] : undefined;
         return {
           kind: "transaction",

@@ -65,20 +65,23 @@ export class WindowsChromeContextCollector {
     if (converted.exitCode !== 0) {
       throw new JscAcquisitionError("Could not resolve the collection helper path");
     }
-    const child = Bun.spawn([
-      "powershell.exe",
-      "-NoProfile",
-      "-NonInteractive",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-File",
-      converted.stdout.toString().trim(),
-    ], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      env: process.env,
-    });
+    const child = Bun.spawn(
+      [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        converted.stdout.toString().trim(),
+      ],
+      {
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        env: process.env,
+      },
+    );
     child.stdin.write(JSON.stringify(credential));
     child.stdin.end();
     const timeout = setTimeout(() => child.kill(), 90_000);
@@ -108,17 +111,13 @@ export function parseCollectionResult(
 ): ChromeContextCollectorResult {
   const trimmed = value.trim();
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-    throw new UnknownResponseShapeError(
-      "Chrome-context collector returned non-object output",
-    );
+    throw new UnknownResponseShapeError("Chrome-context collector returned non-object output");
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(trimmed);
   } catch {
-    throw new UnknownResponseShapeError(
-      "Chrome-context collector returned invalid JSON",
-    );
+    throw new UnknownResponseShapeError("Chrome-context collector returned invalid JSON");
   }
   return parseCollectionHandoff(parsed as BrowserCollectionHandoff, capturedAt);
 }
@@ -142,8 +141,11 @@ export function parseCollectionHandoff(
   const expectedKeys = RESPONSE_PLAN.slice(0, responseKeys.length)
     .map((entry) => entry.key)
     .sort();
-  if (responseKeys.length < 1 || responseKeys.length > RESPONSE_PLAN.length ||
-      responseKeys.some((key, index) => key !== expectedKeys[index])) {
+  if (
+    responseKeys.length < 1 ||
+    responseKeys.length > RESPONSE_PLAN.length ||
+    responseKeys.some((key, index) => key !== expectedKeys[index])
+  ) {
     throw new UnknownResponseShapeError("collector.responses was not an ordered prefix");
   }
   if (!partial && responseKeys.length !== RESPONSE_PLAN.length) {
@@ -155,8 +157,11 @@ export function parseCollectionHandoff(
     }
     const failure = exactObject(root.failure, ["dataset", "stage"], "collector.failure");
     const next = RESPONSE_PLAN[responseKeys.length]!;
-    if (failure.dataset !== next.dataset || typeof failure.stage !== "string" ||
-        !/^[a-z0-9-]{1,80}$/u.test(failure.stage)) {
+    if (
+      failure.dataset !== next.dataset ||
+      typeof failure.stage !== "string" ||
+      !/^[a-z0-9-]{1,80}$/u.test(failure.stage)
+    ) {
       throw new UnknownResponseShapeError("collector failure did not match the next dataset");
     }
   }
@@ -179,8 +184,7 @@ export function parseCollectionHandoff(
       });
     }
   }
-  const topBalances = validated.find(({ plan }) => plan.key === "topBalances")
-    ?.response;
+  const topBalances = validated.find(({ plan }) => plan.key === "topBalances")?.response;
   let normalized: NormalizedSnapshot | undefined;
   if (topBalances) {
     try {
@@ -208,9 +212,7 @@ export function parseCollectionHandoff(
       failures.push({
         operation: `read:${plan.dataset}`,
         errorType: index === 0 ? "ProviderReadError" : "NotAttempted",
-        message: index === 0
-          ? "provider_read_failed"
-          : "provider_read_not_attempted",
+        message: index === 0 ? "provider_read_failed" : "provider_read_not_attempted",
         ...(index === 0 ? { diagnostics: browserDiagnostics(stage) } : {}),
       });
     }
@@ -218,8 +220,7 @@ export function parseCollectionHandoff(
   return {
     ...(normalized ? { normalized } : {}),
     artifacts: [
-      ...validated.map(({ plan, response }) =>
-        artifact(plan.dataset, plan.filename, response.raw)),
+      ...validated.map(({ plan, response }) => artifact(plan.dataset, plan.filename, response.raw)),
       ...(normalized
         ? [artifact("normalized", "normalized.json", `${JSON.stringify(normalized, null, 2)}\n`)]
         : []),
@@ -245,21 +246,14 @@ function validateRaw(
   return { raw: value, data: validateKnownResponse(schema, parsed) };
 }
 
-function exactObject(
-  value: unknown,
-  keys: readonly string[],
-  label: string,
-): JsonObject {
+function exactObject(value: unknown, keys: readonly string[], label: string): JsonObject {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new UnknownResponseShapeError(`${label} must be an object`);
   }
   const result = value as JsonObject;
   const actual = Object.keys(result).sort();
   const expected = [...keys].sort();
-  if (
-    actual.length !== expected.length ||
-    !actual.every((key, index) => key === expected[index])
-  ) {
+  if (actual.length !== expected.length || !actual.every((key, index) => key === expected[index])) {
     throw new UnknownResponseShapeError(`${label} has an unknown shape`);
   }
   return result;

@@ -16,9 +16,7 @@ export function isDecimalMinorUnit(value: unknown): value is string {
 }
 
 export function minorUnitExponent(currency: string): number | undefined {
-  return Object.hasOwn(MINOR_UNIT_EXPONENT, currency)
-    ? MINOR_UNIT_EXPONENT[currency]
-    : undefined;
+  return Object.hasOwn(MINOR_UNIT_EXPONENT, currency) ? MINOR_UNIT_EXPONENT[currency] : undefined;
 }
 
 function groupDigits(digits: string): string {
@@ -54,8 +52,7 @@ export function formatAmount(
 ): string {
   const suffix = unit ? ` ${unit}` : "";
   if (amountMinor === null || amountMinor === undefined) {
-    if (amountText === null || amountText === undefined || amountText === "")
-      return "";
+    if (amountText === null || amountText === undefined || amountText === "") return "";
     return `${amountText}${suffix}`;
   }
   if (typeof amountMinor === "number" && !Number.isInteger(amountMinor)) {
@@ -81,8 +78,7 @@ export function formatAmount(
   const padded = digits.padStart(exponent + 1, "0");
   const whole = padded.slice(0, padded.length - exponent);
   const fraction = exponent > 0 ? padded.slice(padded.length - exponent) : "";
-  const body =
-    fraction === "" ? groupDigits(whole) : `${groupDigits(whole)}.${fraction}`;
+  const body = fraction === "" ? groupDigits(whole) : `${groupDigits(whole)}.${fraction}`;
   return `${negative ? "-" : ""}${body}${suffix}`;
 }
 

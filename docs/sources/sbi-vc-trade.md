@@ -289,14 +289,14 @@ Web側は上記のsame-origin event gatewayまで確認できた。アプリ側�
 - E: 手動captureが安全な既定
 - cost 1: 小さなwrapper程度 ～ cost 5: 端末拘束・対botを伴う自動化
 
-| 方式 | 評価 | 判断 |
-|---|---:|---|
-| 手動PDF/ZIP取得 + ローカル解析 | **E / 1** | 公式exportを使い、秘密を処理系から隔離できる。推奨。 |
-| 将来の公式read-only API | 未評価（A候補） | 現在は仕様未公開。scope・endpoint・rate limit確認後に再調査。 |
-| 非公開Web API + passkey無人再認証 | **B / 3** | Worker-onlyで新規passkey session、15分rolling更新、日次read収集、private R2保存に成功。残課題は長期運用。 |
-| Web完全自動化 | **D / 5（不採用）** | Worker-only経路が成立したため不要。書き込み隣接の危険も増える。 |
-| アプリ静的解析 + read-only動的観測 | **C候補 / 4-5** | 正規split取得、署名、host/schema、token/session、pinning/integrity候補を確認する次段階。 |
-| アプリ/端末完全自動化 | **D / 5** | 端末認証とread/write操作面の混在。解析結果に基づき再評価する。 |
+| 方式                               |                評価 | 判断                                                                                                      |
+| ---------------------------------- | ------------------: | --------------------------------------------------------------------------------------------------------- |
+| 手動PDF/ZIP取得 + ローカル解析     |           **E / 1** | 公式exportを使い、秘密を処理系から隔離できる。推奨。                                                      |
+| 将来の公式read-only API            |     未評価（A候補） | 現在は仕様未公開。scope・endpoint・rate limit確認後に再調査。                                             |
+| 非公開Web API + passkey無人再認証  |           **B / 3** | Worker-onlyで新規passkey session、15分rolling更新、日次read収集、private R2保存に成功。残課題は長期運用。 |
+| Web完全自動化                      | **D / 5（不採用）** | Worker-only経路が成立したため不要。書き込み隣接の危険も増える。                                           |
+| アプリ静的解析 + read-only動的観測 |     **C候補 / 4-5** | 正規split取得、署名、host/schema、token/session、pinning/integrity候補を確認する次段階。                  |
+| アプリ/端末完全自動化              |           **D / 5** | 端末認証とread/write操作面の混在。解析結果に基づき再評価する。                                            |
 
 ## 11. read-only live検証計画とstop条件
 
@@ -337,25 +337,25 @@ PR #23で調べた公開artifactが現行deployでも使われているか、認
 
 `/login`から直接または実行時に観測した現行chunkは次の5件だった。
 
-| artifact | bytes | SHA-256 |
-|---|---:|---|
-| `b21877a.js` | 33,499 | `d68fba0d820170d325466a639f2aa2e52a8b95e9b0ca015561d38dca3e9fe3c5` |
-| `138abe1.js` | 4,128 | `21f1333fc473cab7db5d1bacb4627919fc9e6ea756bc13b003342e9df19cb602` |
-| `70aeb42.js` | 300,940 | `78e0f0c8a551be815eeafc77133f10ce1e77545bf1af5466bb57b8802e020ad4` |
+| artifact     |     bytes | SHA-256                                                            |
+| ------------ | --------: | ------------------------------------------------------------------ |
+| `b21877a.js` |    33,499 | `d68fba0d820170d325466a639f2aa2e52a8b95e9b0ca015561d38dca3e9fe3c5` |
+| `138abe1.js` |     4,128 | `21f1333fc473cab7db5d1bacb4627919fc9e6ea756bc13b003342e9df19cb602` |
+| `70aeb42.js` |   300,940 | `78e0f0c8a551be815eeafc77133f10ce1e77545bf1af5466bb57b8802e020ad4` |
 | `85a3155.js` | 1,564,956 | `4bf32b912ad1b72cfab6e9a2bfde4601d53ccac45b06966dae6b97775ca3dbf6` |
-| `f89914f.js` | 496,749 | `ff7856cdbd3080d87c8bfba7f45fb6b2982fdf26699114a57bd7089a3f87582f` |
+| `f89914f.js` |   496,749 | `ff7856cdbd3080d87c8bfba7f45fb6b2982fdf26699114a57bd7089a3f87582f` |
 
 全5件の`.map`もHTTP 200だった。`f89914f.js.map`は882,355 bytes、SHA-256 `2c7c20685a71b1e9748e48e7cd8cb7d9e00271a9f68a4feccf22e5a3f69492fe`で、PR #23時点と同じmain bundle/source内容だった。`serverAPIClient.ts`から再確認した最小read schemaは次のとおり。
 
 login page map `b21877a.js.map`は91,166 bytes、SHA-256 `d5c3e578f302981163acf19289631468cb0185b4229c231cd5c5c69a7fe2935a`、配布`simplewebauthn-browser.min.js`は9,234 bytes、SHA-256 `7597a071cdf7634156e2185a61b6e3f535fe544c23d3bad1be7f599c0a3b4cfa`だった。sourceは`@simplewebauthn/browser@13.2.2`に対応する。ここに記録した主要artifactの`Last-Modified`はすべて2026-08-05だった。
 
-| event | path | request dataの必須要素 | 用途 |
-|---|---|---|---|
-| `cashBalanceList` | `/api/cccmdipresen/gw/trade` | `secureKey` | 日本円・暗号資産残高 |
-| `accountMargin` | 同上 | `secureKey` | 純資産、証拠金等の口座詳細 |
-| `positionSummaryList` | 同上 | `secureKey` | 保有ポジションsummary |
-| `executionList` | 同上 | `secureKey`, page, sort, `historical` | 約定履歴。recent/historicalが別view |
-| `getCashflowList` | 同上 | `secureKey`, page, `historical`, currency/type filters | 日本円入出金等のcashflow |
+| event                 | path                         | request dataの必須要素                                 | 用途                                |
+| --------------------- | ---------------------------- | ------------------------------------------------------ | ----------------------------------- |
+| `cashBalanceList`     | `/api/cccmdipresen/gw/trade` | `secureKey`                                            | 日本円・暗号資産残高                |
+| `accountMargin`       | 同上                         | `secureKey`                                            | 純資産、証拠金等の口座詳細          |
+| `positionSummaryList` | 同上                         | `secureKey`                                            | 保有ポジションsummary               |
+| `executionList`       | 同上                         | `secureKey`, page, sort, `historical`                  | 約定履歴。recent/historicalが別view |
+| `getCashflowList`     | 同上                         | `secureKey`, page, `historical`, currency/type filters | 日本円入出金等のcashflow            |
 
 約定履歴pageの実行時chunkは`32085e8.js`（23,308 bytes、SHA-256 `5669689931bf53e76a3cd98d4f4144ce70e5fb70e7feef9a74722085bee867c3`）、mapは61,277 bytes、SHA-256 `78b0bcfdaf5c37d72a8b79220c784286fe5dd5363e520e5187e6248d369867aa`だった。source `pages/trade-history.vue`は`sortKey: "executionDatetime"`、`sortAsc: "false"`、page size 30を使う。最初にhistorical pageを取得し、page 0だけrecent viewも取得してclient側でmergeする。page 1以降はhistorical viewだけである。PoCもこの順序と値へ合わせ、推測のsort keyやrecent全page走査を行わない。
 
@@ -380,17 +380,17 @@ login resultの`isAgreed`がfalseの場合、現行UIは`setAgreement` write eve
 
 2026-08-31、本人が**Kogane Capture Chrome profile**でBitwardenに保存していた既存passkeyを選択しloginに成功した。以下の認証済みnetwork/schema evidenceはすべてこのprofileで取得した。秘密、request/response bodyの実値、Cookie値、口座ID、残高、IPは保存していない。
 
-| 順序 | sanitized metadata | 結果 |
-|---:|---|---|
-| 1 | 未認証`accountMargin` / `positionSummaryList` | HTTP 403 `text/html` |
-| 2 | `initiateLoginWithPasskey` | HTTP 200 JSON |
-| 3 | WebAuthn assertionを本人が承認し`loginWithPasskey` | HTTP 200 JSON |
-| 4 | 認証後`accountMargin` | HTTP 200 JSON |
-| 5 | `informationTitle`, `getAuthStatus`, `getPasskeyList` | すべてHTTP 200 JSON |
-| 6 | read-onlyの保有資産画面 | `positionSummaryList`と`accountMargin`がHTTP 200 JSON |
-| 7 | read-onlyの取引履歴画面 | `executionList`をrecent/historical各1回、どちらもHTTP 200 JSON |
-| 8 | read-onlyの取引報告書一覧 | `tradeReportList`を2回、どちらもHTTP 200 JSON |
-| 9 | page reload | `/login#verifyGa`へredirect |
+| 順序 | sanitized metadata                                    | 結果                                                           |
+| ---: | ----------------------------------------------------- | -------------------------------------------------------------- |
+|    1 | 未認証`accountMargin` / `positionSummaryList`         | HTTP 403 `text/html`                                           |
+|    2 | `initiateLoginWithPasskey`                            | HTTP 200 JSON                                                  |
+|    3 | WebAuthn assertionを本人が承認し`loginWithPasskey`    | HTTP 200 JSON                                                  |
+|    4 | 認証後`accountMargin`                                 | HTTP 200 JSON                                                  |
+|    5 | `informationTitle`, `getAuthStatus`, `getPasskeyList` | すべてHTTP 200 JSON                                            |
+|    6 | read-onlyの保有資産画面                               | `positionSummaryList`と`accountMargin`がHTTP 200 JSON          |
+|    7 | read-onlyの取引履歴画面                               | `executionList`をrecent/historical各1回、どちらもHTTP 200 JSON |
+|    8 | read-onlyの取引報告書一覧                             | `tradeReportList`を2回、どちらもHTTP 200 JSON                  |
+|    9 | page reload                                           | `/login#verifyGa`へredirect                                    |
 
 liveの`loginWithPasskey` request keyは公開DTOどおりchallenge、credential ID、authenticator data、client data JSON、signature、user handleで、Turnstile fieldはなかった。全fieldはpaddingなしbase64urlだった。`clientDataJSON`は`webauthn.get`、origin `https://simple.sbivc.co.jp`、`crossOrigin: false`、authenticator dataは37 bytes、RP ID hash一致、flags `0x1d`（UP/UV/BE/BS）、counter 0、signatureはP-256 ECDSAのASN.1 DERだった。Bitwarden保存credential IDはUUIDをraw 16 bytesへ変換するとrequest値と一致し、user handleも一致した。
 
@@ -438,13 +438,13 @@ synthetic testでは、request shape、recent/historical分離、pagination停�
 
 ### runtime候補の優先順位
 
-| runtime | 現時点の判断 | 次に証明すること |
-|---|---|---|
-| Worker-only + 既存Bitwarden passkey | **採用** | Cloudflare IPから新規login、8 Cookie/`secureKey`構築、read確認まで成功 |
-| Worker keepalive | **採用** | 15分CronとCookie rotation成功。実際のabsolute expiry到達時fallbackを長期観測 |
-| Container + full Chrome | 不採用 | Worker-only認証が成立したため不要 |
-| Worker-only + password | 非推奨 | DOM Turnstileとsingle-use tokenを別runtimeへ渡す不安定性が大きい |
-| Browser Rendering | 後順位 | current CDP schemaでWebAuthn virtual authenticatorを使えるか未確認 |
+| runtime                             | 現時点の判断 | 次に証明すること                                                             |
+| ----------------------------------- | ------------ | ---------------------------------------------------------------------------- |
+| Worker-only + 既存Bitwarden passkey | **採用**     | Cloudflare IPから新規login、8 Cookie/`secureKey`構築、read確認まで成功       |
+| Worker keepalive                    | **採用**     | 15分CronとCookie rotation成功。実際のabsolute expiry到達時fallbackを長期観測 |
+| Container + full Chrome             | 不採用       | Worker-only認証が成立したため不要                                            |
+| Worker-only + password              | 非推奨       | DOM Turnstileとsingle-use tokenを別runtimeへ渡す不安定性が大きい             |
+| Browser Rendering                   | 後順位       | current CDP schemaでWebAuthn virtual authenticatorを使えるか未確認           |
 
 ### third-party client再調査
 
@@ -484,15 +484,15 @@ login responseの属性では、`vct_bff_sid`と`__cf_bm`の`Expires`が約30分
 
 `accountMargin`だけを使ったleave-one-out試験では次の結果になった。
 
-| Cookie subset | 結果 |
-|---|---|
-| `vct_bff_sid` + `JSESSIONID`だけ | application側403 |
-| 上記2個 + `AWSALBAPP-0..3` | 初回は200、後の再試験では403。routing先依存で再現性なし |
-| 上記成功集合から`AWSALBAPP` fragmentを1個ずつ除外 | 4通りすべてapplication側403 |
-| `AWSALBAPP-0..3` + `JSESSIONID`（`vct_bff_sid`なし） | application側403 |
-| `AWSALBAPP-0..3` + `vct_bff_sid`（`JSESSIONID`なし） | application側403 |
-| 完全headerから`__cf_bm`を除外 | HTTP 200 / gateway `OK` |
-| 完全headerから`AWSALB`/`AWSALBCORS`/`AWSALBAPP-*`を除外 | application側403 |
+| Cookie subset                                           | 結果                                                    |
+| ------------------------------------------------------- | ------------------------------------------------------- |
+| `vct_bff_sid` + `JSESSIONID`だけ                        | application側403                                        |
+| 上記2個 + `AWSALBAPP-0..3`                              | 初回は200、後の再試験では403。routing先依存で再現性なし |
+| 上記成功集合から`AWSALBAPP` fragmentを1個ずつ除外       | 4通りすべてapplication側403                             |
+| `AWSALBAPP-0..3` + `JSESSIONID`（`vct_bff_sid`なし）    | application側403                                        |
+| `AWSALBAPP-0..3` + `vct_bff_sid`（`JSESSIONID`なし）    | application側403                                        |
+| 完全headerから`__cf_bm`を除外                           | HTTP 200 / gateway `OK`                                 |
+| 完全headerから`AWSALB`/`AWSALBCORS`/`AWSALBAPP-*`を除外 | application側403                                        |
 
 6 cookieだけで通った試行はあったが再現しなかったため、production入力から`AWSALB`と`AWSALBCORS`を除外してはならない。今回再現できた集合は、`vct_bff_sid`、`JSESSIONID`、分割された`AWSALBAPP-0..3`、`AWSALB`、`AWSALBCORS`の8 cookieである。`__cf_bm`は除外しても成功し、Bun既定User-AgentとChrome User-Agentの両方で完全headerは成功した。したがってCloudflare Bot Management cookieやChrome UAは同一host replayの必須条件ではない。一方、AWS routing cookieは頻繁にrotationするため、長時間collectorではresponseの`Set-Cookie`を追従するcookie jarが必要になる可能性がある。別IP/regionでも同じとはまだ断定しない。
 

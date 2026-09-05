@@ -10,13 +10,9 @@ export class WindowsChromeCdpJscProvider implements JscProvider {
 
   async acquire(): Promise<JscMaterial> {
     if (process.platform !== "linux" || !process.env.WSL_DISTRO_NAME) {
-      throw new JscAcquisitionError(
-        "Windows Chrome CDP handoff requires WSL",
-      );
+      throw new JscAcquisitionError("Windows Chrome CDP handoff requires WSL");
     }
-    const scriptPath = fileURLToPath(
-      new URL("../../scripts/windows-cdp-jsc.ps1", import.meta.url),
-    );
+    const scriptPath = fileURLToPath(new URL("../../scripts/windows-cdp-jsc.ps1", import.meta.url));
     const converted = Bun.spawnSync(["wslpath", "-w", scriptPath], {
       stdout: "pipe",
       stderr: "pipe",
@@ -29,19 +25,22 @@ export class WindowsChromeCdpJscProvider implements JscProvider {
       throw new JscAcquisitionError("CDP helper path was empty");
     }
 
-    const child = Bun.spawn([
-      "powershell.exe",
-      "-NoProfile",
-      "-NonInteractive",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-File",
-      windowsScriptPath,
-    ], {
-      stdout: "pipe",
-      stderr: "pipe",
-      env: process.env,
-    });
+    const child = Bun.spawn(
+      [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        windowsScriptPath,
+      ],
+      {
+        stdout: "pipe",
+        stderr: "pipe",
+        env: process.env,
+      },
+    );
     const timeout = setTimeout(() => child.kill(), 55_000);
     try {
       const [exitCode, stdout] = await Promise.all([
@@ -50,9 +49,7 @@ export class WindowsChromeCdpJscProvider implements JscProvider {
         new Response(child.stderr).arrayBuffer(),
       ]).then(([code, output]) => [code, new Uint8Array(output)] as const);
       if (exitCode !== 0) {
-        throw new JscAcquisitionError(
-          `Chrome CDP helper failed with exit code ${exitCode}`,
-        );
+        throw new JscAcquisitionError(`Chrome CDP helper failed with exit code ${exitCode}`);
       }
       if (stdout.byteLength === 0 || stdout.byteLength > MAX_HELPER_OUTPUT_BYTES) {
         throw new JscAcquisitionError("Chrome CDP helper output was invalid");
@@ -81,11 +78,7 @@ function parseMaterial(value: string): JscMaterial {
   } catch {
     throw new JscAcquisitionError("Chrome CDP helper returned invalid JSON");
   }
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    Array.isArray(parsed)
-  ) {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new JscAcquisitionError("Chrome CDP helper returned an invalid shape");
   }
   const record = parsed as Record<string, unknown>;

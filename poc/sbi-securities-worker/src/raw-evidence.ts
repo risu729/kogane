@@ -23,11 +23,9 @@ export async function importStoredRun(
   importer: Fetcher,
   manifestKey: string,
 ): Promise<ImportRunResult> {
-  return await importerRequest<ImportRunResult>(
-    importer,
-    "/v1/sbi-securities/import-run",
-    { manifestKey },
-  );
+  return await importerRequest<ImportRunResult>(importer, "/v1/sbi-securities/import-run", {
+    manifestKey,
+  });
 }
 
 export async function backfillStoredRuns(
@@ -41,11 +39,7 @@ export async function backfillStoredRuns(
   );
 }
 
-async function importerRequest<T>(
-  importer: Fetcher,
-  path: string,
-  body: unknown,
-): Promise<T> {
+async function importerRequest<T>(importer: Fetcher, path: string, body: unknown): Promise<T> {
   const response = await importer.fetch(
     new Request(`https://collector-r2-importer.internal${path}`, {
       method: "POST",
@@ -61,12 +55,9 @@ async function importerRequest<T>(
     throw new Error(`Raw evidence importer returned HTTP ${response.status}`);
   }
   if (!response.ok) {
-    const code = isRecord(parsed) && typeof parsed.error === "string"
-      ? parsed.error
-      : "request_failed";
-    throw new Error(
-      `Raw evidence importer failed with HTTP ${response.status}: ${code}`,
-    );
+    const code =
+      isRecord(parsed) && typeof parsed.error === "string" ? parsed.error : "request_failed";
+    throw new Error(`Raw evidence importer failed with HTTP ${response.status}: ${code}`);
   }
   return parsed as T;
 }

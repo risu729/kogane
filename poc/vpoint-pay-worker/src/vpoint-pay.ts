@@ -1,9 +1,4 @@
-import type {
-  ApiCollection,
-  JsonObject,
-  RawArtifact,
-  VPointPayCredential,
-} from "./types";
+import type { ApiCollection, JsonObject, RawArtifact, VPointPayCredential } from "./types";
 
 const ORIGIN = "https://vpoint.smbc-card.com";
 const TOKEN_PATH = "/vpoint/api/v2/token";
@@ -18,10 +13,7 @@ const USER_AGENT =
   "Mozilla/5.0 (Linux; Android 16; Mobile) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36";
 
-type Fetcher = (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => Promise<Response>;
+type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 interface RawJsonResponse {
   rawText: string;
@@ -33,10 +25,12 @@ interface TokenResponse {
   refreshToken: string;
 }
 
-export async function probeVPointPayApi(options: {
-  fetcher?: Fetcher;
-  deviceUuid?: string;
-} = {}): Promise<void> {
+export async function probeVPointPayApi(
+  options: {
+    fetcher?: Fetcher;
+    deviceUuid?: string;
+  } = {},
+): Promise<void> {
   await requestJson({
     path: COMMON_SETTINGS_PATH,
     deviceUuid: options.deviceUuid ?? crypto.randomUUID(),
@@ -64,10 +58,7 @@ export async function collectVPointPay(options: {
     deviceUuid: options.credential.deviceUuid,
     fetcher,
   });
-  const earliestMonth = requiredMonth(
-    balance.json.inquiry_period,
-    "balance inquiry_period",
-  );
+  const earliestMonth = requiredMonth(balance.json.inquiry_period, "balance inquiry_period");
   const latestMonth = currentJstMonth(options.now ?? new Date());
   const months = enumerateMonths(earliestMonth, latestMonth);
   const artifacts: RawArtifact[] = [
@@ -89,9 +80,7 @@ export async function collectVPointPay(options: {
     });
     const list = response.json.tran_list;
     if (!Array.isArray(list)) {
-      throw new VPointPayProtocolError(
-        `transaction ${month} returned no tran_list`,
-      );
+      throw new VPointPayProtocolError(`transaction ${month} returned no tran_list`);
     }
     transactionCount += list.length;
     artifacts.push({
@@ -143,8 +132,10 @@ async function refreshAccessToken(options: {
   const accessToken = response.json.access_token;
   const refreshToken = response.json.refresh_token;
   if (
-    typeof accessToken !== "string" || accessToken.length === 0 ||
-    typeof refreshToken !== "string" || refreshToken.length === 0
+    typeof accessToken !== "string" ||
+    accessToken.length === 0 ||
+    typeof refreshToken !== "string" ||
+    refreshToken.length === 0
   ) {
     throw new VPointPayProtocolError("token response omitted rotated tokens");
   }
@@ -210,10 +201,7 @@ function requestHeaders(options: {
   return headers;
 }
 
-export function makeDeviceId(
-  uuid: string,
-  epochSeconds = Math.floor(Date.now() / 1000),
-): string {
+export function makeDeviceId(uuid: string, epochSeconds = Math.floor(Date.now() / 1000)): string {
   validateDeviceUuid(uuid);
   if (!Number.isSafeInteger(epochSeconds) || epochSeconds <= 0) {
     throw new Error("V Point Pay epoch seconds must be a positive integer");
@@ -229,8 +217,8 @@ export function makeDeviceId(
   const remainder = weighted % 13;
   const checkDigit = remainder < 4 ? 0 : 13 - remainder;
   const withoutSecondHyphen = normalized.slice(0, 13) + normalized.slice(14);
-  const checked = withoutSecondHyphen.slice(0, 28) +
-    String(checkDigit) + withoutSecondHyphen.slice(28);
+  const checked =
+    withoutSecondHyphen.slice(0, 28) + String(checkDigit) + withoutSecondHyphen.slice(28);
   const epochAsHex = BigInt(`0x${epochSeconds.toString(10)}`);
   const transformed = checked
     .split("-")
@@ -247,9 +235,7 @@ export function enumerateMonths(start: string, end: string): string[] {
   }
   const count = endValue - startValue + 1;
   if (count > MAX_HISTORY_MONTHS) {
-    throw new VPointPayProtocolError(
-      `inquiry period exceeds ${MAX_HISTORY_MONTHS} months`,
-    );
+    throw new VPointPayProtocolError(`inquiry period exceeds ${MAX_HISTORY_MONTHS} months`);
   }
   return Array.from({ length: count }, (_, offset) => {
     const value = startValue + offset;
@@ -306,10 +292,7 @@ function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function defaultFetch(
-  input: string | URL | Request,
-  init?: RequestInit,
-): Promise<Response> {
+function defaultFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
   return fetch(input, init);
 }
 

@@ -22,16 +22,16 @@ const unsafeWallet = wallet.filter(
   (artifact) =>
     typeof artifact.body === "string" &&
     (/;jsessionid=/iu.test(artifact.body) ||
-      /<input\b[^>]*\btype=["']hidden["'][^>]*\bvalue=["'][^"']+/iu.test(
-        artifact.body,
-      )),
+      /<input\b[^>]*\btype=["']hidden["'][^>]*\bvalue=["'][^"']+/iu.test(artifact.body)),
 );
 
-console.log(JSON.stringify({
-  window: { from, to },
-  artifactCount: result.artifacts.length,
-  yenTransactionCount: result.transactionCount,
-  foreignArtifactCount: foreign.length,
-  walletMonthCount: wallet.length,
-  unsafeWalletArtifactCount: unsafeWallet.length,
-}));
+console.log(
+  JSON.stringify({
+    window: { from, to },
+    artifactCount: result.artifacts.length,
+    yenTransactionCount: result.transactionCount,
+    foreignArtifactCount: foreign.length,
+    walletMonthCount: wallet.length,
+    unsafeWalletArtifactCount: unsafeWallet.length,
+  }),
+);

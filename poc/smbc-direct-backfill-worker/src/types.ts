@@ -66,11 +66,7 @@ export interface BackfillProgress {
 }
 
 export interface StoredArtifact {
-  dataset:
-    | "balance-raw"
-    | "balance-normalized"
-    | "transactions-raw"
-    | "transactions-normalized";
+  dataset: "balance-raw" | "balance-normalized" | "transactions-raw" | "transactions-normalized";
   key: string;
   mediaType: string;
   bytes: number;

@@ -11,6 +11,7 @@ different rules.
 - [Observation layer](docs/observations.md)
 - [Evidence browser](docs/evidence-browser.md)
 - [Frontend stack and API handoff](docs/frontend.md)
+- [Development checks and CI](docs/ci.md)
 - [Authenticated collectors](docs/authenticated-collectors.md)
 - [Credential delivery](docs/credentials.md)
 - [Existing tools and reuse](docs/tooling.md)

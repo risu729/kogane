@@ -75,12 +75,7 @@ export function runParsers(
         // Only a successful run changes what is current. An error run never
         // supersedes anything, so a transient failure cannot empty the
         // current view.
-        summary.superseded += supersedeOlderParseRuns(
-          store,
-          artifact.id,
-          parser.name,
-          parseRunId,
-        );
+        summary.superseded += supersedeOlderParseRuns(store, artifact.id, parser.name, parseRunId);
       } catch (error) {
         insertParseRun(store, {
           artifactId: artifact.id,

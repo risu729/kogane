@@ -42,14 +42,14 @@ limit、certificate pinning、端末 integrity/attestation 等の security contr
 
 ## 3. 正本と境界
 
-| 記録 | 正本候補 | 主な read surface | 強み | 境界/欠落 |
-| --- | --- | --- | --- | --- |
-| 発車前の有効予約 | スマートEX予約台帳 | Web/EXアプリの「予約確認/変更/払戻」 | 商品、乗車日、区間、列車、設備/座席、人数、IC指定、決済カードの識別を確認 | 変更/払戻 button が同居し最も危険。過去全履歴の代替ではない |
-| 購入・変更・払戻 | スマートEX利用履歴 | Web「ご利用履歴・領収書の発行」、app「購入履歴・領収書」 | 予約、変更、払戻を別 event として照合。最大15か月 | きっぷ受取後の駅払戻等が表示されない場合がある。公式 CSV/API なし |
-| 領収書/払戻明細/手数料 | スマートEX表示文書 | Web/app の領収書表示 | インボイス対応、購入と払戻/手数料をお預かり番号で照合 | 1枚の net statement ではない。PDFは端末依存。宛名/実値を含む |
-| 実際のカード請求/返金 | カード発行会社 | カード確定明細 | authorization/settlement、締め日を跨ぐ返金の最終正本 | スマートEXの乗車日とカードの利用日は一致しない場合がある |
-| 新幹線の乗車権/改札利用 | スマートEX運送/改札記録 | 予約詳細、改札のEXご利用票 | IC指定と乗車時の列車/座席案内 | 公開UIで独立したgate入出場履歴/exportは未確認 |
-| IC残高・在来線利用 | IC発行者 | Suica/ICOCA等のapp/履歴 | 在来線運賃・IC残高の正本 | スマートEX代金はIC残高から引かれない。Smart EX履歴と混ぜない |
+| 記録                    | 正本候補                | 主な read surface                                        | 強み                                                                      | 境界/欠落                                                         |
+| ----------------------- | ----------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| 発車前の有効予約        | スマートEX予約台帳      | Web/EXアプリの「予約確認/変更/払戻」                     | 商品、乗車日、区間、列車、設備/座席、人数、IC指定、決済カードの識別を確認 | 変更/払戻 button が同居し最も危険。過去全履歴の代替ではない       |
+| 購入・変更・払戻        | スマートEX利用履歴      | Web「ご利用履歴・領収書の発行」、app「購入履歴・領収書」 | 予約、変更、払戻を別 event として照合。最大15か月                         | きっぷ受取後の駅払戻等が表示されない場合がある。公式 CSV/API なし |
+| 領収書/払戻明細/手数料  | スマートEX表示文書      | Web/app の領収書表示                                     | インボイス対応、購入と払戻/手数料をお預かり番号で照合                     | 1枚の net statement ではない。PDFは端末依存。宛名/実値を含む      |
+| 実際のカード請求/返金   | カード発行会社          | カード確定明細                                           | authorization/settlement、締め日を跨ぐ返金の最終正本                      | スマートEXの乗車日とカードの利用日は一致しない場合がある          |
+| 新幹線の乗車権/改札利用 | スマートEX運送/改札記録 | 予約詳細、改札のEXご利用票                               | IC指定と乗車時の列車/座席案内                                             | 公開UIで独立したgate入出場履歴/exportは未確認                     |
+| IC残高・在来線利用      | IC発行者                | Suica/ICOCA等のapp/履歴                                  | 在来線運賃・IC残高の正本                                                  | スマートEX代金はIC残高から引かれない。Smart EX履歴と混ぜない      |
 
 `reservation`、`purchase_event`、`refund_event`、`receipt_document`、`boarding_assignment`、
 `card_settlement`、`transit_ic_event` を別 object とする。お預かり番号は Smart EX 内の照合候補だが、
@@ -218,12 +218,12 @@ WESTER passkeyからSmart EXへの実際のlogin、EXアプリbiometricのcreden
 
 2026-08-26のログアウト状態の低頻度観測:
 
-| 公開入口 | 結果 | 言えること / 言えないこと |
-| --- | --- | --- |
-| `https://smart-ex.jp/` | `301`後`200`、HSTS、public HTML | marketing/help surface。auth originと同じ防御とは限らない |
+| 公開入口                                                       | 結果                                                  | 言えること / 言えないこと                                           |
+| -------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------- |
+| `https://smart-ex.jp/`                                         | `301`後`200`、HSTS、public HTML                       | marketing/help surface。auth originと同じ防御とは限らない           |
 | `https://shinkansen2.jr-central.co.jp/RSV_P/S_smart_index.htm` | `200`、`X-Akamai-Transformed`、`_abck`/`bm_sz` cookie | Smart EX auth surfaceにAkamai介在。bot-management系cookieの強い候補 |
-| `https://shinkansen2.jr-central.co.jp/RSV_P/smart_index.htm` | 同じく`200`、Akamai header/cookie | smartphone loginも同じclassic form backend候補 |
-| `https://faq.expy.jp/?site_domain=smart-ex` | `200`、`Server: nginx` | FAQは別surface。auth protectionの根拠にならない |
+| `https://shinkansen2.jr-central.co.jp/RSV_P/smart_index.htm`   | 同じく`200`、Akamai header/cookie                     | smartphone loginも同じclassic form backend候補                      |
+| `https://faq.expy.jp/?site_domain=smart-ex`                    | `200`、`Server: nginx`                                | FAQは別surface。auth protectionの根拠にならない                     |
 
 Akamaiの[bot管理説明](https://techdocs.akamai.com/cloud-security/docs/about-bots) はlogin/transactional path
 をbehavioral detectionで保護する用途を説明する。今回のheader/cookie観測はAkamaiとbot管理の介在候補
@@ -438,15 +438,15 @@ denylist:
 - **D**: full browser/device UI automationが継続的に必要
 - **E**: 手動capture/import
 
-| route | 現時点の判定 | cost | 根拠/昇格条件 |
-| --- | --- | ---: | --- |
-| 公式領収書/払戻文書の手動print | **E** | **1** | 最大15か月、回数制限なし。PDF化は端末依存、bulk/CSV/APIなし |
-| Web利用履歴・領収書Playwright | **C候補** | **3-4** | 公開第三者実装でsession付きUI/PDFを具体化。Akamai/OTP、hidden action、privacy hardening、払戻文書追加が必要 |
-| Web予約一覧/IC指定状態 | **D** | **4** | 変更/払戻/IC writeが隣接し、pathも共通。read actionの厳密allowlistをlive確認できればC/4 |
-| internal `ClientService`直接replay | **C候補、B未達** | **4** | classic form/session/action IDは確認。renewal、read-only action、schema stability、Akamai受容は未確認 |
-| EXアプリ | **D** | **5** | shared service app、device/biometric、APK transport未確認、write隣接 |
-| email通知parse | **C補助** | **2** | login不要にできるが二次通知で不完全。正本/領収書/IC/settlementを置換しない |
-| Smart EX全体 | **D** | **4** | receiptはC候補だが、予約/IC/実乗車境界と安全なwrite隔離にfull browser確認が残る |
+| route                              | 現時点の判定     |    cost | 根拠/昇格条件                                                                                               |
+| ---------------------------------- | ---------------- | ------: | ----------------------------------------------------------------------------------------------------------- |
+| 公式領収書/払戻文書の手動print     | **E**            |   **1** | 最大15か月、回数制限なし。PDF化は端末依存、bulk/CSV/APIなし                                                 |
+| Web利用履歴・領収書Playwright      | **C候補**        | **3-4** | 公開第三者実装でsession付きUI/PDFを具体化。Akamai/OTP、hidden action、privacy hardening、払戻文書追加が必要 |
+| Web予約一覧/IC指定状態             | **D**            |   **4** | 変更/払戻/IC writeが隣接し、pathも共通。read actionの厳密allowlistをlive確認できればC/4                     |
+| internal `ClientService`直接replay | **C候補、B未達** |   **4** | classic form/session/action IDは確認。renewal、read-only action、schema stability、Akamai受容は未確認       |
+| EXアプリ                           | **D**            |   **5** | shared service app、device/biometric、APK transport未確認、write隣接                                        |
+| email通知parse                     | **C補助**        |   **2** | login不要にできるが二次通知で不完全。正本/領収書/IC/settlementを置換しない                                  |
+| Smart EX全体                       | **D**            |   **4** | receiptはC候補だが、予約/IC/実乗車境界と安全なwrite隔離にfull browser確認が残る                             |
 
 Aは選ばない。公式にHTML/print viewはあるが、documented machine API/CSV/bulk exportではない。Bへの
 昇格は、利用履歴/receipt専用read action ID、renewable session、Akamaiに許容される低頻度replay、

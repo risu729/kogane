@@ -20,13 +20,13 @@ WEB に表示された4桁コードを公式アプリへ入力して認可する
 
 一次評価は次のとおり。Level は `docs/source-research.md` の共通基準を使う。
 
-| 経路 | Level | コスト (1-5) | 現時点の評価 |
-| --- | --- | ---: | --- |
-| 公式アプリから預金取引明細 PDF を手動保存 | **E** | **1-2** | 安全な既定。月次または年次で保存し、ローカル parser が取り込む。 |
-| 公式 BaaS Accounts API | **A（制度上）** | **4-5** | headless に適するが、提携審査、契約、mTLS クライアント証明書が必要。個人 collector の自己登録経路ではない。 |
-| 公式 Android アプリの UI 自動化 | **D** | **5** | 登録端末1台、端末固有情報、生体/パスワード、SMS 端末認証がある。実機常駐が必要になりやすい。 |
-| アプリで bootstrap した session の read-only replay | **C（候補）** | **4** | API-first / Apigee 構成から技術的には plausible だが、endpoint、token、端末/IP拘束、pinning は未確認。 |
-| 安定した非公開 read API client | **B** | — | 現在は根拠なし。公開クライアントも見つからない。 |
+| 経路                                                | Level           | コスト (1-5) | 現時点の評価                                                                                                |
+| --------------------------------------------------- | --------------- | -----------: | ----------------------------------------------------------------------------------------------------------- |
+| 公式アプリから預金取引明細 PDF を手動保存           | **E**           |      **1-2** | 安全な既定。月次または年次で保存し、ローカル parser が取り込む。                                            |
+| 公式 BaaS Accounts API                              | **A（制度上）** |      **4-5** | headless に適するが、提携審査、契約、mTLS クライアント証明書が必要。個人 collector の自己登録経路ではない。 |
+| 公式 Android アプリの UI 自動化                     | **D**           |        **5** | 登録端末1台、端末固有情報、生体/パスワード、SMS 端末認証がある。実機常駐が必要になりやすい。                |
+| アプリで bootstrap した session の read-only replay | **C（候補）**   |        **4** | API-first / Apigee 構成から技術的には plausible だが、endpoint、token、端末/IP拘束、pinning は未確認。      |
+| 安定した非公開 read API client                      | **B**           |            — | 現在は根拠なし。公開クライアントも見つからない。                                                            |
 
 **このソースの現在値は E / cost 1-2** とする。正式 BaaS 契約が成立した場合だけ A に
 切り替えられる。APK / 実機の read-only 検証で再利用可能 session と表示 API が確認できれば、
@@ -46,16 +46,16 @@ C へ再評価する。公開情報だけで B や C を確定しない。
 
 ## 公式の入口と app-only 境界
 
-| 入口 | 確認できる用途 | 判定 |
-| --- | --- | --- |
-| [公式サービスサイト](https://www.minna-no-ginko.com/) | 商品説明、ユーザーガイド、公式アプリへの導線 | 公開情報。個人残高・明細のログイン入口ではない。 |
-| [公式 Google Play (`com.MinnaNoGinko.bankapp`)](https://play.google.com/store/apps/details?id=com.MinnaNoGinko.bankapp&hl=ja) | Android アプリの正規配布 | 個人向け主チャネル。2026-07-22 更新、100万+ downloads 表示を確認。 |
-| [公式 App Store (`id1521392854`)](https://apps.apple.com/jp/app/id1521392854) | iPhone アプリの正規配布 | 個人向け主チャネル。iPhone のみ対応表示。 |
-| [利用できる端末・機種](https://cs-faq.minna-no-ginko.com/faq/show/613) | iOS 15+ / Android 8+ | スマートフォン向け。タブレットは正常動作しない可能性。 |
-| [スマートフォン専用 FAQ](https://cs-faq.minna-no-ginko.com/faq/show/148) | タブレット利用の扱い | 公式がアプリを「スマートフォン専用」と明記。 |
-| [複数端末 FAQ](https://cs-faq.minna-no-ginko.com/faq/show/147) | 登録可能端末数 | 利用できるスマートフォンは1台だけ。 |
-| [BaaS API 一覧](https://baas.minna-no-ginko.com/service/api/list/) | 提携事業者向け REST/HTTPS/JSON API | 個人のセルフサービス API ではない。 |
-| [Money Forward ME 連携手順](https://support.me.moneyforward.com/hc/ja/articles/12172814934425-%E3%81%BF%E3%82%93%E3%81%AA%E3%81%AE%E9%8A%80%E8%A1%8C%E3%81%AE%E9%80%A3%E6%90%BA%E6%96%B9%E6%B3%95) | 実運用中の参照系 API 認可例 | アプリ間遷移、または PC WEB + 4桁コード + 公式アプリ承認。 |
+| 入口                                                                                                                                                                                               | 確認できる用途                               | 判定                                                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------ |
+| [公式サービスサイト](https://www.minna-no-ginko.com/)                                                                                                                                              | 商品説明、ユーザーガイド、公式アプリへの導線 | 公開情報。個人残高・明細のログイン入口ではない。                   |
+| [公式 Google Play (`com.MinnaNoGinko.bankapp`)](https://play.google.com/store/apps/details?id=com.MinnaNoGinko.bankapp&hl=ja)                                                                      | Android アプリの正規配布                     | 個人向け主チャネル。2026-07-22 更新、100万+ downloads 表示を確認。 |
+| [公式 App Store (`id1521392854`)](https://apps.apple.com/jp/app/id1521392854)                                                                                                                      | iPhone アプリの正規配布                      | 個人向け主チャネル。iPhone のみ対応表示。                          |
+| [利用できる端末・機種](https://cs-faq.minna-no-ginko.com/faq/show/613)                                                                                                                             | iOS 15+ / Android 8+                         | スマートフォン向け。タブレットは正常動作しない可能性。             |
+| [スマートフォン専用 FAQ](https://cs-faq.minna-no-ginko.com/faq/show/148)                                                                                                                           | タブレット利用の扱い                         | 公式がアプリを「スマートフォン専用」と明記。                       |
+| [複数端末 FAQ](https://cs-faq.minna-no-ginko.com/faq/show/147)                                                                                                                                     | 登録可能端末数                               | 利用できるスマートフォンは1台だけ。                                |
+| [BaaS API 一覧](https://baas.minna-no-ginko.com/service/api/list/)                                                                                                                                 | 提携事業者向け REST/HTTPS/JSON API           | 個人のセルフサービス API ではない。                                |
+| [Money Forward ME 連携手順](https://support.me.moneyforward.com/hc/ja/articles/12172814934425-%E3%81%BF%E3%82%93%E3%81%AA%E3%81%AE%E9%8A%80%E8%A1%8C%E3%81%AE%E9%80%A3%E6%90%BA%E6%96%B9%E6%B3%95) | 実運用中の参照系 API 認可例                  | アプリ間遷移、または PC WEB + 4桁コード + 公式アプリ承認。         |
 
 公式トップは「スマホひとつでお金のすべてが完結」、公式 FAQ はスマートフォン専用・1台のみ
 と説明する。これは**直接の個人向けチャネル**についての app-only 根拠である。
@@ -93,16 +93,16 @@ Kogane では Wallet / Saving / 各 Box を別 `source_account` 候補として�
 
 公式 FAQ による確認済み粒度は次のとおり。
 
-| 項目 | 公開仕様 |
-| --- | --- |
-| 対象取引 | 振込、振替、入金、出金など |
-| 明細の確認項目 | 取引日時、取引金額 |
-| 一度に指定できる期間 | 1年以内 |
-| 一度に表示できる件数 | 最大1,000件 |
-| 複数年 | 1年以内の期間へ分割して表示/出力 |
-| 預金取引明細 export | 個人アプリから PDF |
-| CSV / OFX / QIF | 個人向け公開情報では確認できず |
-| 振込1件の証明 | 対象の振込出金明細から PDF 発行可能 |
+| 項目                 | 公開仕様                            |
+| -------------------- | ----------------------------------- |
+| 対象取引             | 振込、振替、入金、出金など          |
+| 明細の確認項目       | 取引日時、取引金額                  |
+| 一度に指定できる期間 | 1年以内                             |
+| 一度に表示できる件数 | 最大1,000件                         |
+| 複数年               | 1年以内の期間へ分割して表示/出力    |
+| 預金取引明細 export  | 個人アプリから PDF                  |
+| CSV / OFX / QIF      | 個人向け公開情報では確認できず      |
+| 振込1件の証明        | 対象の振込出金明細から PDF 発行可能 |
 
 根拠:
 
@@ -309,14 +309,14 @@ schema、端末 binding を限定すること**である。certificate pinning /
 
 ## 実行基盤の適性
 
-| 基盤 | 適性 | 評価 |
-| --- | --- | --- |
-| 登録済み Android 実機 | **最良（bootstrap / manual capture）** | 公式が想定する1台のスマートフォン、SMS、画面ロック、生体を満たす。初期 PDF export と構造確認に使う。 |
-| ローカル Android emulator | 低〜条件付き | phone number/SMS、device binding、Play Integrity、Play Services、root/emulator 判定が未確認。実機の代替と仮定しない。 |
-| Cloudflare Workers | 正式 API なら技術的候補 | Workers は outbound mTLS certificate binding を持つため、契約済み BaaS client の REST/JSON consumer には適合し得る。個人アプリ login/bootstrap は不可。 |
-| Cloudflare Containers | replay の PoC 候補 | Linux/amd64 container と browser/tooling は動かせるが、Android phone、SIM/SMS、生体、登録端末を提供しない。session replay が確認された後だけ検討。 |
-| OCI VM / Kubernetes | replay / Android lab の候補 | 永続 volume、egress、browser、ADB、self-hosted emulator を制御できる。端末認証・attestationを満たす保証はなく、初回は物理 Android を使う。 |
-| hosted Android device farm | 低 | ephemeral device と電話番号、端末 reputation、秘密の持込みが問題。銀行 login 用の常設 issuer にしない。 |
+| 基盤                       | 適性                                   | 評価                                                                                                                                                    |
+| -------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 登録済み Android 実機      | **最良（bootstrap / manual capture）** | 公式が想定する1台のスマートフォン、SMS、画面ロック、生体を満たす。初期 PDF export と構造確認に使う。                                                    |
+| ローカル Android emulator  | 低〜条件付き                           | phone number/SMS、device binding、Play Integrity、Play Services、root/emulator 判定が未確認。実機の代替と仮定しない。                                   |
+| Cloudflare Workers         | 正式 API なら技術的候補                | Workers は outbound mTLS certificate binding を持つため、契約済み BaaS client の REST/JSON consumer には適合し得る。個人アプリ login/bootstrap は不可。 |
+| Cloudflare Containers      | replay の PoC 候補                     | Linux/amd64 container と browser/tooling は動かせるが、Android phone、SIM/SMS、生体、登録端末を提供しない。session replay が確認された後だけ検討。      |
+| OCI VM / Kubernetes        | replay / Android lab の候補            | 永続 volume、egress、browser、ADB、self-hosted emulator を制御できる。端末認証・attestationを満たす保証はなく、初回は物理 Android を使う。              |
+| hosted Android device farm | 低                                     | ephemeral device と電話番号、端末 reputation、秘密の持込みが問題。銀行 login 用の常設 issuer にしない。                                                 |
 
 Cloudflare Workers の outbound mTLS は、証明書 binding の `fetch()` で client certificate を提示できる。
 正式 API との protocol fit は良いが、銀行から client credential/certificate を発行される提携関係が

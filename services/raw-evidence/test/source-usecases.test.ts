@@ -54,18 +54,15 @@ function bytes(value: string | Uint8Array): Uint8Array {
 async function upload(runId: number, value: string | Uint8Array) {
   const body = bytes(value);
   const sha256 = await sha256Hex(body);
-  const response = await SELF.fetch(
-    `https://example.test/v1/runs/${runId}/objects/${sha256}`,
-    {
-      method: "PUT",
-      headers: {
-        authorization: AUTH,
-        "content-length": String(body.byteLength),
-        "x-kogane-byte-size": String(body.byteLength),
-      },
-      body,
+  const response = await SELF.fetch(`https://example.test/v1/runs/${runId}/objects/${sha256}`, {
+    method: "PUT",
+    headers: {
+      authorization: AUTH,
+      "content-length": String(body.byteLength),
+      "x-kogane-byte-size": String(body.byteLength),
     },
-  );
+    body,
+  });
   expect([200, 201]).toContain(response.status);
   return { sha256, byteSize: body.byteLength };
 }
@@ -86,9 +83,7 @@ async function sbiStorageOrigin(artifactKey: string) {
     storageKind: "r2",
     containerName: "kogane-sbi-collector-poc",
     objectKeyTemplate: SBI_STORAGE_TEMPLATE,
-    objectKeyFingerprint: await sha256Hex(
-      new TextEncoder().encode(`fixture-sbi:${artifactKey}`),
-    ),
+    objectKeyFingerprint: await sha256Hex(new TextEncoder().encode(`fixture-sbi:${artifactKey}`)),
     fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
     redactionVersion: "v1",
   };
@@ -125,9 +120,7 @@ async function myJcbStorageOrigin(artifactKey: string) {
     storageKind: "r2",
     containerName: "kogane-myjcb-collector-poc",
     objectKeyTemplate: MYJCB_STORAGE_TEMPLATE,
-    objectKeyFingerprint: await sha256Hex(
-      new TextEncoder().encode(`fixture-myjcb:${artifactKey}`),
-    ),
+    objectKeyFingerprint: await sha256Hex(new TextEncoder().encode(`fixture-myjcb:${artifactKey}`)),
     fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
     redactionVersion: "v1",
   };
@@ -138,9 +131,7 @@ async function vpassStorageOrigin(artifactKey: string) {
     storageKind: "r2",
     containerName: "kogane-vpass-collector-poc",
     objectKeyTemplate: VPASS_STORAGE_TEMPLATE,
-    objectKeyFingerprint: await sha256Hex(
-      new TextEncoder().encode(`fixture-vpass:${artifactKey}`),
-    ),
+    objectKeyFingerprint: await sha256Hex(new TextEncoder().encode(`fixture-vpass:${artifactKey}`)),
     fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
     redactionVersion: "v1",
   };
@@ -226,23 +217,39 @@ async function unitTerminal(
 }
 
 beforeAll(async () => {
-  const sourceIds = [...new Set(Object.values(cases).flatMap((entry) => {
-    const value = entry as { sourceId: string; reconciliationSourceId?: string };
-    return [value.sourceId, ...(value.reconciliationSourceId ? [value.reconciliationSourceId] : [])];
-  }))];
+  const sourceIds = [
+    ...new Set(
+      Object.values(cases).flatMap((entry) => {
+        const value = entry as { sourceId: string; reconciliationSourceId?: string };
+        return [
+          value.sourceId,
+          ...(value.reconciliationSourceId ? [value.reconciliationSourceId] : []),
+        ];
+      }),
+    ),
+  ];
   await env.DB.batch([
-    env.DB.prepare("INSERT INTO ingest_clients (id, display_name) VALUES ('test', 'Sanitized fixture client')"),
-    env.DB.prepare("INSERT INTO ingest_client_producers (ingest_client_id, producer_id) VALUES ('test', ?)")
-      .bind(PRODUCER),
-    ...sourceIds.map((sourceId) => env.DB.prepare(`
+    env.DB.prepare(
+      "INSERT INTO ingest_clients (id, display_name) VALUES ('test', 'Sanitized fixture client')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO ingest_client_producers (ingest_client_id, producer_id) VALUES ('test', ?)",
+    ).bind(PRODUCER),
+    ...sourceIds.map((sourceId) =>
+      env.DB.prepare(`
       INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id)
       VALUES ('test', ?, ?)
-    `).bind(PRODUCER, sourceId)),
-    ...sourceIds.filter((sourceId) => sourceId !== "vpass").map((sourceId) => env.DB.prepare(`
+    `).bind(PRODUCER, sourceId),
+    ),
+    ...sourceIds
+      .filter((sourceId) => sourceId !== "vpass")
+      .map((sourceId) =>
+        env.DB.prepare(`
       INSERT INTO origin_template_policies (
         source_id, origin_kind, template, redaction_version, fingerprint_key_version
       ) VALUES (?, 'storage', ?, 'v1', ?)
-    `).bind(sourceId, STORAGE_TEMPLATE, FINGERPRINT_VERSION)),
+    `).bind(sourceId, STORAGE_TEMPLATE, FINGERPRINT_VERSION),
+      ),
     env.DB.prepare(`
       INSERT INTO origin_template_policies (
         source_id, origin_kind, template, redaction_version, fingerprint_key_version
@@ -258,53 +265,63 @@ describe("sanitized source-usecase contract", () => {
     const artifacts: InventoryItem[] = [];
     for (const cardKey of value.cardKeys) {
       const unitId = await unit(runId, "card", cardKey);
-      artifacts.push(await catalogue(runId, `${cardKey}/snapshot.json`, value.snapshotBody, {
-        fetchUnitId: unitId,
-        artifactRole: "collector_derived",
-        payloadFidelity: "transformed",
-        containerKind: "single",
-        lineageDisposition: "source_not_retained_for_security",
-        dataset: "statement-snapshot",
-        formatId: "vpass-snapshot-json",
-        formatVersion: "vpass-central-sanitized-v1",
-        declaredMediaType: "application/json",
-        mediaTypeBasis: "operator",
-        storage: await vpassStorageOrigin(`${cardKey}/snapshot.json`),
-        transformSteps: [{
-          stepIndex: 0,
-          stepKind: "redacted",
-          transformerId: "vpass-json-sanitizer",
-          transformerVersion: "v1",
-        }, {
-          stepIndex: 1,
-          stepKind: "reencoded",
-          transformerId: "vpass-json-sanitizer",
-          transformerVersion: "v1",
-        }],
-      }));
-      artifacts.push(await catalogue(runId, `${cardKey}/manifest.json`, value.manifestBody, {
-        fetchUnitId: unitId,
-        artifactRole: "collector_derived",
-        payloadFidelity: "transformed",
-        lineageDisposition: "source_not_retained_for_security",
-        dataset: "collector-manifest",
-        formatId: "vpass-collector-manifest-json",
-        formatVersion: "vpass-central-sanitized-v1",
-        declaredMediaType: "application/json",
-        mediaTypeBasis: "operator",
-        storage: await vpassStorageOrigin(`${cardKey}/manifest.json`),
-        transformSteps: [{
-          stepIndex: 0,
-          stepKind: "redacted",
-          transformerId: "vpass-json-sanitizer",
-          transformerVersion: "v1",
-        }, {
-          stepIndex: 1,
-          stepKind: "reencoded",
-          transformerId: "vpass-json-sanitizer",
-          transformerVersion: "v1",
-        }],
-      }));
+      artifacts.push(
+        await catalogue(runId, `${cardKey}/snapshot.json`, value.snapshotBody, {
+          fetchUnitId: unitId,
+          artifactRole: "collector_derived",
+          payloadFidelity: "transformed",
+          containerKind: "single",
+          lineageDisposition: "source_not_retained_for_security",
+          dataset: "statement-snapshot",
+          formatId: "vpass-snapshot-json",
+          formatVersion: "vpass-central-sanitized-v1",
+          declaredMediaType: "application/json",
+          mediaTypeBasis: "operator",
+          storage: await vpassStorageOrigin(`${cardKey}/snapshot.json`),
+          transformSteps: [
+            {
+              stepIndex: 0,
+              stepKind: "redacted",
+              transformerId: "vpass-json-sanitizer",
+              transformerVersion: "v1",
+            },
+            {
+              stepIndex: 1,
+              stepKind: "reencoded",
+              transformerId: "vpass-json-sanitizer",
+              transformerVersion: "v1",
+            },
+          ],
+        }),
+      );
+      artifacts.push(
+        await catalogue(runId, `${cardKey}/manifest.json`, value.manifestBody, {
+          fetchUnitId: unitId,
+          artifactRole: "collector_derived",
+          payloadFidelity: "transformed",
+          lineageDisposition: "source_not_retained_for_security",
+          dataset: "collector-manifest",
+          formatId: "vpass-collector-manifest-json",
+          formatVersion: "vpass-central-sanitized-v1",
+          declaredMediaType: "application/json",
+          mediaTypeBasis: "operator",
+          storage: await vpassStorageOrigin(`${cardKey}/manifest.json`),
+          transformSteps: [
+            {
+              stepIndex: 0,
+              stepKind: "redacted",
+              transformerId: "vpass-json-sanitizer",
+              transformerVersion: "v1",
+            },
+            {
+              stepIndex: 1,
+              stepKind: "reencoded",
+              transformerId: "vpass-json-sanitizer",
+              transformerVersion: "v1",
+            },
+          ],
+        }),
+      );
       await unitTerminal(unitId, 2);
     }
     await terminal(runId, artifacts.length);
@@ -326,13 +343,15 @@ describe("sanitized source-usecase contract", () => {
       startedAt: value.startedAt,
       completedAt: value.completedAt,
       status: "partial",
-      artifacts: [{
-        dataset: "domestic-trade-records",
-        key: `raw/sbi-securities/2026/08/27/${value.sessionId}/domestic-trade-records.json`,
-        sha256: successSha256,
-        bytes: successBytes.byteLength,
-        window: value.window,
-      }],
+      artifacts: [
+        {
+          dataset: "domestic-trade-records",
+          key: `raw/sbi-securities/2026/08/27/${value.sessionId}/domestic-trade-records.json`,
+          sha256: successSha256,
+          bytes: successBytes.byteLength,
+          window: value.window,
+        },
+      ],
       failures: [value.failure],
     });
     const artifacts = [
@@ -347,16 +366,18 @@ describe("sanitized source-usecase contract", () => {
         declaredMediaType: "application/json",
         mediaTypeBasis: "operator",
         storage: await sbiStorageOrigin("domestic-trade-records.json"),
-        ranges: [{
-          rangeKey: "requested-window",
-          rangeKind: "requested",
-          precision: "date",
-          startValue: value.window.from,
-          endValue: value.window.to,
-          startInclusive: true,
-          endInclusive: true,
-          basis: "manifest",
-        }],
+        ranges: [
+          {
+            rangeKey: "requested-window",
+            rangeKind: "requested",
+            precision: "date",
+            startValue: value.window.from,
+            endValue: value.window.to,
+            startInclusive: true,
+            endInclusive: true,
+            basis: "manifest",
+          },
+        ],
         transformSteps: [
           {
             stepIndex: 0,
@@ -397,12 +418,14 @@ describe("sanitized source-usecase contract", () => {
     const stored = await env.DB.prepare(`
       SELECT artifact_key, artifact_role, payload_fidelity, lineage_disposition
       FROM fetch_artifacts WHERE fetch_run_id = ? ORDER BY artifact_key
-    `).bind(runId).all<{
-      artifact_key: string;
-      artifact_role: string;
-      payload_fidelity: string;
-      lineage_disposition: string;
-    }>();
+    `)
+      .bind(runId)
+      .all<{
+        artifact_key: string;
+        artifact_role: string;
+        payload_fidelity: string;
+        lineage_disposition: string;
+      }>();
     expect(stored.results).toEqual([
       {
         artifact_key: "domestic-trade-records.json",
@@ -435,37 +458,65 @@ describe("sanitized source-usecase contract", () => {
     ];
     const artifacts: InventoryItem[] = [];
     for (const [sequence, dataset] of datasets.entries()) {
-      artifacts.push(await catalogue(runId, `${dataset}.json`, `{"dataset":"${dataset}"}`, {
-        fetchUnitId: dataset.startsWith("foreign-") ? foreign : domestic,
-        artifactRole: "collector_derived",
-        payloadFidelity: "transformed",
-        lineageDisposition: "source_bytes_not_available",
-        dataset,
-        formatId: `sbi-${dataset}-json`,
+      artifacts.push(
+        await catalogue(runId, `${dataset}.json`, `{"dataset":"${dataset}"}`, {
+          fetchUnitId: dataset.startsWith("foreign-") ? foreign : domestic,
+          artifactRole: "collector_derived",
+          payloadFidelity: "transformed",
+          lineageDisposition: "source_bytes_not_available",
+          dataset,
+          formatId: `sbi-${dataset}-json`,
+          formatVersion: "sbi-worker-poc-v1",
+          declaredMediaType: "application/json",
+          mediaTypeBasis: "operator",
+          sequence,
+          storage: await sbiStorageOrigin(`${dataset}.json`),
+          transformSteps: [
+            {
+              stepIndex: 0,
+              stepKind: "transport_decoded",
+              transformerId: "sbi-securities-worker",
+              transformerVersion: "sbi-worker-poc-v1",
+            },
+            {
+              stepIndex: 1,
+              stepKind: "extracted",
+              transformerId: "sbi-securities-worker",
+              transformerVersion: "sbi-worker-poc-v1",
+            },
+            ...(dataset === "foreign-trade-records"
+              ? [
+                  {
+                    stepIndex: 2,
+                    stepKind: "bundled",
+                    transformerId: "sbi-securities-worker",
+                    transformerVersion: "sbi-worker-poc-v1",
+                  },
+                ]
+              : []),
+            {
+              stepIndex: dataset === "foreign-trade-records" ? 3 : 2,
+              stepKind: "reencoded",
+              transformerId: "sbi-securities-worker",
+              transformerVersion: "sbi-worker-poc-v1",
+            },
+          ],
+        }),
+      );
+    }
+    artifacts.push(
+      await catalogue(runId, "manifest.json", '{"status":"success"}', {
+        artifactRole: "collector_manifest",
+        payloadFidelity: "generated",
+        dataset: "collector-manifest",
+        formatId: "sbi-collector-manifest-json",
         formatVersion: "sbi-worker-poc-v1",
         declaredMediaType: "application/json",
         mediaTypeBasis: "operator",
-        sequence,
-        storage: await sbiStorageOrigin(`${dataset}.json`),
-        transformSteps: [
-          { stepIndex: 0, stepKind: "transport_decoded", transformerId: "sbi-securities-worker", transformerVersion: "sbi-worker-poc-v1" },
-          { stepIndex: 1, stepKind: "extracted", transformerId: "sbi-securities-worker", transformerVersion: "sbi-worker-poc-v1" },
-          ...(dataset === "foreign-trade-records" ? [{ stepIndex: 2, stepKind: "bundled", transformerId: "sbi-securities-worker", transformerVersion: "sbi-worker-poc-v1" }] : []),
-          { stepIndex: dataset === "foreign-trade-records" ? 3 : 2, stepKind: "reencoded", transformerId: "sbi-securities-worker", transformerVersion: "sbi-worker-poc-v1" },
-        ],
-      }));
-    }
-    artifacts.push(await catalogue(runId, "manifest.json", "{\"status\":\"success\"}", {
-      artifactRole: "collector_manifest",
-      payloadFidelity: "generated",
-      dataset: "collector-manifest",
-      formatId: "sbi-collector-manifest-json",
-      formatVersion: "sbi-worker-poc-v1",
-      declaredMediaType: "application/json",
-      mediaTypeBasis: "operator",
-      sequence: 7,
-      storage: await sbiStorageOrigin("manifest.json"),
-    }));
+        sequence: 7,
+        storage: await sbiStorageOrigin("manifest.json"),
+      }),
+    );
     await unitTerminal(domestic, 4);
     await unitTerminal(foreign, 3);
     await terminal(runId, artifacts.length);
@@ -487,23 +538,30 @@ describe("sanitized source-usecase contract", () => {
       dataset: "history-normalized",
       declaredMediaType: "application/json",
       mediaTypeBasis: "manifest",
-      transformSteps: [{
-        stepIndex: 0,
-        stepKind: "extracted",
-        transformerId: "sbi-shinsei-normalizer",
-        transformerVersion: "fixture-v1",
-      }],
-      relations: [{
-        parentArtifactKey: raw.artifactKey,
-        relation: "input",
-        transformerId: "sbi-shinsei-normalizer",
-        transformerVersion: "fixture-v1",
-      }],
+      transformSteps: [
+        {
+          stepIndex: 0,
+          stepKind: "extracted",
+          transformerId: "sbi-shinsei-normalizer",
+          transformerVersion: "fixture-v1",
+        },
+      ],
+      relations: [
+        {
+          parentArtifactKey: raw.artifactKey,
+          relation: "input",
+          transformerId: "sbi-shinsei-normalizer",
+          transformerVersion: "fixture-v1",
+        },
+      ],
     });
     await terminal(runId, 2);
     await seal(runId, [raw, normalized], "sbi-shinsei");
-    expect(await env.DB.prepare("SELECT count(*) AS count FROM artifact_relations")
-      .first<{ count: number }>()).toMatchObject({ count: 1 });
+    expect(
+      await env.DB.prepare("SELECT count(*) AS count FROM artifact_relations").first<{
+        count: number;
+      }>(),
+    ).toMatchObject({ count: 1 });
   });
 
   it("accepts a sanitized SBI Shinsei failure manifest as derived evidence", async () => {
@@ -519,11 +577,13 @@ describe("sanitized source-usecase contract", () => {
       JSON.stringify({
         schemaVersion: "sbi-shinsei-worker-poc-v1",
         status: "failed",
-        failures: [{
-          operation: "collect",
-          errorType: "Error",
-          message: "collector_request_failed",
-        }],
+        failures: [
+          {
+            operation: "collect",
+            errorType: "Error",
+            message: "collector_request_failed",
+          },
+        ],
       }),
       {
         artifactRole: "collector_derived",
@@ -560,10 +620,14 @@ describe("sanitized source-usecase contract", () => {
     await terminal(runId, 1, "failed");
     await seal(runId, [artifact], "sbi-shinsei-sanitized-failure-manifest");
 
-    expect(await env.DB.prepare(`
+    expect(
+      await env.DB.prepare(`
       SELECT artifact_role, payload_fidelity, lineage_disposition
       FROM fetch_artifacts WHERE fetch_run_id = ? AND artifact_key = 'manifest.json'
-    `).bind(runId).first()).toEqual({
+    `)
+        .bind(runId)
+        .first(),
+    ).toEqual({
       artifact_role: "collector_derived",
       payload_fidelity: "transformed",
       lineage_disposition: "source_not_retained_for_security",
@@ -579,13 +643,15 @@ describe("sanitized source-usecase contract", () => {
     });
     const artifacts: InventoryItem[] = [];
     for (const [pageIndex, body] of value.pageBodies.entries()) {
-      artifacts.push(await catalogue(runId, `asset-history/page-${pageIndex}.json`, body, {
-        pageGroupId: Number(pageGroup.pageGroupId),
-        pageIndex,
-        dataset: "asset-history",
-        declaredMediaType: "application/json",
-        mediaTypeBasis: "manifest",
-      }));
+      artifacts.push(
+        await catalogue(runId, `asset-history/page-${pageIndex}.json`, body, {
+          pageGroupId: Number(pageGroup.pageGroupId),
+          pageIndex,
+          dataset: "asset-history",
+          declaredMediaType: "application/json",
+          mediaTypeBasis: "manifest",
+        }),
+      );
     }
     await terminal(runId, artifacts.length);
     await seal(runId, artifacts, "sbi-vc-pagination");
@@ -611,13 +677,33 @@ describe("sanitized source-usecase contract", () => {
         sequence: 0,
         storage: await myJcbStorageOrigin(detailKey),
         transformSteps: [
-          { stepIndex: 0, stepKind: "redacted", transformerId: "myjcb-sanitizer", transformerVersion: "v1" },
-          { stepIndex: 1, stepKind: "reencoded", transformerId: "myjcb-sanitizer", transformerVersion: "v1" },
-          { stepIndex: 2, stepKind: "redacted", transformerId: "myjcb-central-html-sanitizer", transformerVersion: "v2" },
-          { stepIndex: 3, stepKind: "reencoded", transformerId: "myjcb-central-html-sanitizer", transformerVersion: "v2" },
+          {
+            stepIndex: 0,
+            stepKind: "redacted",
+            transformerId: "myjcb-sanitizer",
+            transformerVersion: "v1",
+          },
+          {
+            stepIndex: 1,
+            stepKind: "reencoded",
+            transformerId: "myjcb-sanitizer",
+            transformerVersion: "v1",
+          },
+          {
+            stepIndex: 2,
+            stepKind: "redacted",
+            transformerId: "myjcb-central-html-sanitizer",
+            transformerVersion: "v2",
+          },
+          {
+            stepIndex: 3,
+            stepKind: "reencoded",
+            transformerId: "myjcb-central-html-sanitizer",
+            transformerVersion: "v2",
+          },
         ],
       }),
-      await catalogue(runId, `${connectionKey}/credit-past-months.json`, "{\"jsonrpc\":\"2.0\"}", {
+      await catalogue(runId, `${connectionKey}/credit-past-months.json`, '{"jsonrpc":"2.0"}', {
         fetchUnitId: unitId,
         artifactRole: "provider_response",
         payloadFidelity: "exact",
@@ -630,7 +716,7 @@ describe("sanitized source-usecase contract", () => {
         sequence: 1,
         storage: await myJcbStorageOrigin(`${connectionKey}/credit-past-months.json`),
       }),
-      await catalogue(runId, `${connectionKey}/credit-ledger-00.json`, "{\"entries\":[]}", {
+      await catalogue(runId, `${connectionKey}/credit-ledger-00.json`, '{"entries":[]}', {
         fetchUnitId: unitId,
         artifactRole: "collector_derived",
         payloadFidelity: "transformed",
@@ -643,18 +729,30 @@ describe("sanitized source-usecase contract", () => {
         sequence: 2,
         storage: await myJcbStorageOrigin(`${connectionKey}/credit-ledger-00.json`),
         transformSteps: [
-          { stepIndex: 0, stepKind: "extracted", transformerId: "myjcb-ledger-parser", transformerVersion: "v1" },
-          { stepIndex: 1, stepKind: "generated", transformerId: "myjcb-ledger-parser", transformerVersion: "v1" },
+          {
+            stepIndex: 0,
+            stepKind: "extracted",
+            transformerId: "myjcb-ledger-parser",
+            transformerVersion: "v1",
+          },
+          {
+            stepIndex: 1,
+            stepKind: "generated",
+            transformerId: "myjcb-ledger-parser",
+            transformerVersion: "v1",
+          },
         ],
-        relations: [{
-          parentRunId: runId,
-          parentArtifactKey: detailKey,
-          relation: "input",
-          transformerId: "myjcb-ledger-parser",
-          transformerVersion: "v1",
-        }],
+        relations: [
+          {
+            parentRunId: runId,
+            parentArtifactKey: detailKey,
+            relation: "input",
+            transformerId: "myjcb-ledger-parser",
+            transformerVersion: "v1",
+          },
+        ],
       }),
-      await catalogue(runId, `${connectionKey}/discovery.json`, "{\"cards\":[]}", {
+      await catalogue(runId, `${connectionKey}/discovery.json`, '{"cards":[]}', {
         fetchUnitId: unitId,
         artifactRole: "collector_derived",
         payloadFidelity: "transformed",
@@ -667,11 +765,21 @@ describe("sanitized source-usecase contract", () => {
         sequence: 3,
         storage: await myJcbStorageOrigin(`${connectionKey}/discovery.json`),
         transformSteps: [
-          { stepIndex: 0, stepKind: "extracted", transformerId: "myjcb-discovery-parser", transformerVersion: "v1" },
-          { stepIndex: 1, stepKind: "generated", transformerId: "myjcb-discovery-parser", transformerVersion: "v1" },
+          {
+            stepIndex: 0,
+            stepKind: "extracted",
+            transformerId: "myjcb-discovery-parser",
+            transformerVersion: "v1",
+          },
+          {
+            stepIndex: 1,
+            stepKind: "generated",
+            transformerId: "myjcb-discovery-parser",
+            transformerVersion: "v1",
+          },
         ],
       }),
-      await catalogue(runId, "manifest.json", "{\"status\":\"success\"}", {
+      await catalogue(runId, "manifest.json", '{"status":"success"}', {
         artifactRole: "collector_manifest",
         payloadFidelity: "generated",
         lineageDisposition: "source_bytes_not_available",
@@ -691,31 +799,68 @@ describe("sanitized source-usecase contract", () => {
     const stored = await env.DB.prepare(`
       SELECT artifact_key, artifact_role, payload_fidelity, lineage_disposition
       FROM fetch_artifacts WHERE fetch_run_id = ? ORDER BY sequence
-    `).bind(runId).all();
+    `)
+      .bind(runId)
+      .all();
     expect(stored.results).toEqual([
-      { artifact_key: detailKey, artifact_role: "sanitized_provider_capture", payload_fidelity: "transformed", lineage_disposition: "source_not_retained_for_security" },
-      { artifact_key: `${connectionKey}/credit-past-months.json`, artifact_role: "provider_response", payload_fidelity: "exact", lineage_disposition: "not_applicable" },
-      { artifact_key: `${connectionKey}/credit-ledger-00.json`, artifact_role: "collector_derived", payload_fidelity: "transformed", lineage_disposition: "linked" },
-      { artifact_key: `${connectionKey}/discovery.json`, artifact_role: "collector_derived", payload_fidelity: "transformed", lineage_disposition: "source_bytes_not_available" },
-      { artifact_key: "manifest.json", artifact_role: "collector_manifest", payload_fidelity: "generated", lineage_disposition: "source_bytes_not_available" },
+      {
+        artifact_key: detailKey,
+        artifact_role: "sanitized_provider_capture",
+        payload_fidelity: "transformed",
+        lineage_disposition: "source_not_retained_for_security",
+      },
+      {
+        artifact_key: `${connectionKey}/credit-past-months.json`,
+        artifact_role: "provider_response",
+        payload_fidelity: "exact",
+        lineage_disposition: "not_applicable",
+      },
+      {
+        artifact_key: `${connectionKey}/credit-ledger-00.json`,
+        artifact_role: "collector_derived",
+        payload_fidelity: "transformed",
+        lineage_disposition: "linked",
+      },
+      {
+        artifact_key: `${connectionKey}/discovery.json`,
+        artifact_role: "collector_derived",
+        payload_fidelity: "transformed",
+        lineage_disposition: "source_bytes_not_available",
+      },
+      {
+        artifact_key: "manifest.json",
+        artifact_role: "collector_manifest",
+        payload_fidelity: "generated",
+        lineage_disposition: "source_bytes_not_available",
+      },
     ]);
-    expect(await env.DB.prepare(`
+    expect(
+      await env.DB.prepare(`
       SELECT COUNT(*) AS count FROM artifact_transform_steps AS step
       JOIN fetch_artifacts AS artifact ON artifact.id = step.fetch_artifact_id
       WHERE artifact.fetch_run_id = ?
-    `).bind(runId).first()).toEqual({ count: 8 });
-    expect(await env.DB.prepare(`
+    `)
+        .bind(runId)
+        .first(),
+    ).toEqual({ count: 8 });
+    expect(
+      await env.DB.prepare(`
       SELECT COUNT(*) AS count FROM artifact_relations AS relation
       JOIN fetch_artifacts AS artifact ON artifact.id = relation.child_artifact_id
       WHERE artifact.fetch_run_id = ?
-    `).bind(runId).first()).toEqual({ count: 1 });
+    `)
+        .bind(runId)
+        .first(),
+    ).toEqual({ count: 1 });
   });
 
   it("stores only fixed-redaction Mobile Suica CP932 bytes with explicit transformation lineage", async () => {
     const value = cases.mobileSuicaCp932;
     expect(value.redactionSentinel).toBe("__KOGANE_REDACTED_BASE_VARIABLE__");
     expect(value.sanitizedCp932Hex).toContain("626173655661726961626c65");
-    expect(value.sanitizedCp932Hex).toContain("5f5f4b4f47414e455f52454441435445445f424153455f5641524941424c455f5f");
+    expect(value.sanitizedCp932Hex).toContain(
+      "5f5f4b4f47414e455f52454441435445445f424153455f5641524941424c455f5f",
+    );
     const body = Uint8Array.from(
       value.sanitizedCp932Hex.match(/../g)!.map((pair) => Number.parseInt(pair, 16)),
     );
@@ -747,13 +892,17 @@ describe("sanitized source-usecase contract", () => {
     });
     await terminal(runId, 1);
     await seal(runId, [artifact], "mobile-suica-sanitized-cp932");
-    const stored = await env.EVIDENCE.get(`objects/${artifact.sha256.slice(0, 2)}/${artifact.sha256}`);
+    const stored = await env.EVIDENCE.get(
+      `objects/${artifact.sha256.slice(0, 2)}/${artifact.sha256}`,
+    );
     expect(new Uint8Array(await stored!.arrayBuffer())).toEqual(body);
 
     const descriptor = await env.DB.prepare(`
       SELECT artifact_role, payload_fidelity, lineage_disposition
       FROM fetch_artifacts WHERE fetch_run_id = ? AND artifact_key = ?
-    `).bind(runId, artifact.artifactKey).first();
+    `)
+      .bind(runId, artifact.artifactKey)
+      .first();
     expect(descriptor).toEqual({
       artifact_role: "sanitized_provider_capture",
       payload_fidelity: "transformed",
@@ -766,10 +915,22 @@ describe("sanitized source-usecase contract", () => {
         SELECT id FROM fetch_artifacts WHERE fetch_run_id = ? AND artifact_key = ?
       )
       ORDER BY step_index
-    `).bind(runId, artifact.artifactKey).all();
+    `)
+      .bind(runId, artifact.artifactKey)
+      .all();
     expect(steps.results).toEqual([
-      { step_index: 0, step_kind: "redacted", transformer_id: "mobile-suica-history-sanitizer", transformer_version: "v1" },
-      { step_index: 1, step_kind: "reencoded", transformer_id: "mobile-suica-history-sanitizer", transformer_version: "v1" },
+      {
+        step_index: 0,
+        step_kind: "redacted",
+        transformer_id: "mobile-suica-history-sanitizer",
+        transformer_version: "v1",
+      },
+      {
+        step_index: 1,
+        step_kind: "reencoded",
+        transformer_id: "mobile-suica-history-sanitizer",
+        transformer_version: "v1",
+      },
     ]);
   });
 
@@ -780,42 +941,39 @@ describe("sanitized source-usecase contract", () => {
     expect(value.sanitizedBody).not.toContain("http://");
     expect(value.sanitizedBody).not.toContain("https://");
     const { runId } = await createRun(value.sourceId, value.sessionId);
-    const artifact = await catalogue(
-      runId,
-      "activity-2026-08.html",
-      value.sanitizedBody,
-      {
-        artifactRole: "sanitized_provider_capture",
-        payloadFidelity: "transformed",
-        lineageDisposition: "source_not_retained_for_security",
-        dataset: "global-pass-activity",
-        formatId: "global-pass-activity-html-utf8-sanitized",
-        formatVersion: "v1",
-        declaredMediaType: "text/html",
-        mediaTypeBasis: "manifest",
-        storage: await globalPassStorageOrigin("activity-2026-08.html"),
-        transformSteps: [
-          {
-            stepIndex: 0,
-            stepKind: "redacted",
-            transformerId: "global-pass-html-sanitizer",
-            transformerVersion: "v1",
-          },
-          {
-            stepIndex: 1,
-            stepKind: "reencoded",
-            transformerId: "global-pass-html-sanitizer",
-            transformerVersion: "v1",
-          },
-        ],
-      },
-    );
+    const artifact = await catalogue(runId, "activity-2026-08.html", value.sanitizedBody, {
+      artifactRole: "sanitized_provider_capture",
+      payloadFidelity: "transformed",
+      lineageDisposition: "source_not_retained_for_security",
+      dataset: "global-pass-activity",
+      formatId: "global-pass-activity-html-utf8-sanitized",
+      formatVersion: "v1",
+      declaredMediaType: "text/html",
+      mediaTypeBasis: "manifest",
+      storage: await globalPassStorageOrigin("activity-2026-08.html"),
+      transformSteps: [
+        {
+          stepIndex: 0,
+          stepKind: "redacted",
+          transformerId: "global-pass-html-sanitizer",
+          transformerVersion: "v1",
+        },
+        {
+          stepIndex: 1,
+          stepKind: "reencoded",
+          transformerId: "global-pass-html-sanitizer",
+          transformerVersion: "v1",
+        },
+      ],
+    });
     await terminal(runId, 1);
     await seal(runId, [artifact], "global-pass-sanitized-html");
     const descriptor = await env.DB.prepare(`
       SELECT artifact_role, payload_fidelity, lineage_disposition
       FROM fetch_artifacts WHERE fetch_run_id = ? AND artifact_key = ?
-    `).bind(runId, artifact.artifactKey).first();
+    `)
+      .bind(runId, artifact.artifactKey)
+      .first();
     expect(descriptor).toEqual({
       artifact_role: "sanitized_provider_capture",
       payload_fidelity: "transformed",
@@ -840,11 +998,21 @@ describe("sanitized source-usecase contract", () => {
       declaredMediaType: "application/json",
       mediaTypeBasis: "manifest",
       transformSteps: [
-        { stepIndex: 0, stepKind: "transport_decoded", transformerId: "vpoint-worker", transformerVersion: "vpoint-worker-poc-v2" },
-        { stepIndex: 1, stepKind: "reencoded", transformerId: "vpoint-worker", transformerVersion: "vpoint-worker-poc-v2" },
+        {
+          stepIndex: 0,
+          stepKind: "transport_decoded",
+          transformerId: "vpoint-worker",
+          transformerVersion: "vpoint-worker-poc-v2",
+        },
+        {
+          stepIndex: 1,
+          stepKind: "reencoded",
+          transformerId: "vpoint-worker",
+          transformerVersion: "vpoint-worker-poc-v2",
+        },
       ],
     });
-    const manifest = await catalogue(runId, "manifest.json", "{\"status\":\"success\"}", {
+    const manifest = await catalogue(runId, "manifest.json", '{"status":"success"}', {
       artifactRole: "collector_manifest",
       payloadFidelity: "generated",
       lineageDisposition: "source_bytes_not_available",
@@ -860,16 +1028,28 @@ describe("sanitized source-usecase contract", () => {
     const stored = await env.DB.prepare(`
       SELECT artifact_key, artifact_role, payload_fidelity, lineage_disposition
       FROM fetch_artifacts WHERE fetch_run_id = ? ORDER BY sequence
-    `).bind(runId).all();
+    `)
+      .bind(runId)
+      .all();
     expect(stored.results).toEqual([
-      { artifact_key: "point-history/page-0.json", artifact_role: "collector_derived", payload_fidelity: "transformed", lineage_disposition: "source_bytes_not_available" },
-      { artifact_key: "manifest.json", artifact_role: "collector_manifest", payload_fidelity: "generated", lineage_disposition: "source_bytes_not_available" },
+      {
+        artifact_key: "point-history/page-0.json",
+        artifact_role: "collector_derived",
+        payload_fidelity: "transformed",
+        lineage_disposition: "source_bytes_not_available",
+      },
+      {
+        artifact_key: "manifest.json",
+        artifact_role: "collector_manifest",
+        payload_fidelity: "generated",
+        lineage_disposition: "source_bytes_not_available",
+      },
     ]);
   });
 
   it("returns the same normalized descriptor hash the V Point importer inventories", async () => {
     const { runId } = await createRun("v-point", "fixture-v-point-descriptor-hash");
-    const body = "{\"items\":[]}";
+    const body = '{"items":[]}';
     const object = await upload(runId, body);
     const descriptor = {
       artifactKey: "history-page-0001.json",
@@ -889,15 +1069,29 @@ describe("sanitized source-usecase contract", () => {
       byteSize: object.byteSize,
       storage: await storageOrigin("history-page-0001.json"),
       transformSteps: [
-        { stepIndex: 0, stepKind: "transport_decoded", transformerId: "vpoint-worker", transformerVersion: "vpoint-worker-poc-v2" },
-        { stepIndex: 1, stepKind: "reencoded", transformerId: "vpoint-worker", transformerVersion: "vpoint-worker-poc-v2" },
+        {
+          stepIndex: 0,
+          stepKind: "transport_decoded",
+          transformerId: "vpoint-worker",
+          transformerVersion: "vpoint-worker-poc-v2",
+        },
+        {
+          stepIndex: 1,
+          stepKind: "reencoded",
+          transformerId: "vpoint-worker",
+          transformerVersion: "vpoint-worker-poc-v2",
+        },
       ],
     };
     const response = await expectPost(`/v1/runs/${runId}/artifacts`, descriptor);
     const expected = await vPointDescriptorSha256(descriptor);
     expect(response.descriptorSha256).toBe(expected);
     await terminal(runId, 1);
-    await seal(runId, [{ artifactKey: descriptor.artifactKey, sha256: object.sha256, descriptorSha256: expected }], "v-point-descriptor-hash");
+    await seal(
+      runId,
+      [{ artifactKey: descriptor.artifactKey, sha256: object.sha256, descriptorSha256: expected }],
+      "v-point-descriptor-hash",
+    );
   });
 
   it("maps V Point Pay mail and keeps reconciliation as a V Point generated report", async () => {
@@ -914,29 +1108,38 @@ describe("sanitized source-usecase contract", () => {
 
     const mailRun = await createRun(value.sourceId, value.sessionId, "mail");
     const mailArtifacts: InventoryItem[] = [];
-    for (const [kind, body] of [["direct", value.directBody], ["forwarded", value.forwardedBody]] as const) {
+    for (const [kind, body] of [
+      ["direct", value.directBody],
+      ["forwarded", value.forwardedBody],
+    ] as const) {
       const fingerprint = await sha256Hex(new TextEncoder().encode(`fixture-mail:${kind}`));
-      mailArtifacts.push(await catalogue(mailRun.runId, `mail/${kind}.eml`, body, {
-        artifactRole: "provider_message",
-        dataset: "notification-mail",
-        declaredMediaType: "message/rfc822",
-        mediaTypeBasis: "manifest",
-        email: {
-          transportShape: kind === "direct" ? "direct" : "forwarded_rfc822",
-          senderDomain: kind === "direct" ? "provider.example" : "example.invalid",
-          messageIdSha256: fingerprint,
-          ...(kind === "forwarded" ? {
-            partIndex: 0,
-            mimePartPath: "1",
-            innerMessageSha256: await sha256Hex(new TextEncoder().encode("fixture-inner-message")),
-            innerSenderDomain: "provider.example",
-          } : {}),
-          filenameTemplate: "{redacted}.{extension}",
-          filenameFingerprint: fingerprint,
-          fingerprintKeyVersion: FINGERPRINT_VERSION,
-          redactionVersion: "v1",
-        },
-      }));
+      mailArtifacts.push(
+        await catalogue(mailRun.runId, `mail/${kind}.eml`, body, {
+          artifactRole: "provider_message",
+          dataset: "notification-mail",
+          declaredMediaType: "message/rfc822",
+          mediaTypeBasis: "manifest",
+          email: {
+            transportShape: kind === "direct" ? "direct" : "forwarded_rfc822",
+            senderDomain: kind === "direct" ? "provider.example" : "example.invalid",
+            messageIdSha256: fingerprint,
+            ...(kind === "forwarded"
+              ? {
+                  partIndex: 0,
+                  mimePartPath: "1",
+                  innerMessageSha256: await sha256Hex(
+                    new TextEncoder().encode("fixture-inner-message"),
+                  ),
+                  innerSenderDomain: "provider.example",
+                }
+              : {}),
+            filenameTemplate: "{redacted}.{extension}",
+            filenameFingerprint: fingerprint,
+            fingerprintKeyVersion: FINGERPRINT_VERSION,
+            redactionVersion: "v1",
+          },
+        }),
+      );
     }
     await terminal(mailRun.runId, mailArtifacts.length);
     await seal(mailRun.runId, mailArtifacts, "v-point-pay-mail");
@@ -973,12 +1176,14 @@ describe("sanitized source-usecase contract", () => {
       dataset: "account-snapshot",
       declaredMediaType: "text/html",
       mediaTypeBasis: "manifest",
-      transformSteps: [{
-        stepIndex: 0,
-        stepKind: "redacted",
-        transformerId: "sony-sanitizer",
-        transformerVersion: "fixture-v1",
-      }],
+      transformSteps: [
+        {
+          stepIndex: 0,
+          stepKind: "redacted",
+          transformerId: "sony-sanitizer",
+          transformerVersion: "fixture-v1",
+        },
+      ],
     });
     await terminal(runId, 1);
     await seal(runId, [artifact], "sony-non-retention");
@@ -989,20 +1194,26 @@ describe("sanitized source-usecase contract", () => {
     const { runId } = await createRun(value.sourceId, value.sessionId);
     const artifacts: InventoryItem[] = [];
     for (const [sequence, body] of value.bodies.entries()) {
-      artifacts.push(await catalogue(runId, `capture/${2 - sequence}.json`, body, {
-        sequence,
-        dataset: "ordered-capture",
-        declaredMediaType: "application/json",
-        mediaTypeBasis: "manifest",
-      }));
+      artifacts.push(
+        await catalogue(runId, `capture/${2 - sequence}.json`, body, {
+          sequence,
+          dataset: "ordered-capture",
+          declaredMediaType: "application/json",
+          mediaTypeBasis: "manifest",
+        }),
+      );
     }
     await terminal(runId, artifacts.length);
     await seal(runId, artifacts, "moneyforward-ordering");
     const rows = await env.DB.prepare(`
       SELECT artifact_key FROM fetch_artifacts WHERE fetch_run_id = ? ORDER BY sequence
-    `).bind(runId).all<{ artifact_key: string }>();
+    `)
+      .bind(runId)
+      .all<{ artifact_key: string }>();
     expect(rows.results.map((row) => row.artifact_key)).toEqual([
-      "capture/2.json", "capture/1.json", "capture/0.json",
+      "capture/2.json",
+      "capture/1.json",
+      "capture/0.json",
     ]);
   });
 
@@ -1019,12 +1230,14 @@ describe("sanitized source-usecase contract", () => {
     });
     const artifacts: InventoryItem[] = [];
     const firstUnit = await unit(runId, "chunk", value.chunkKeys[0]);
-    artifacts.push(await catalogue(runId, `${value.chunkKeys[0]}.json`, value.chunkBody, {
-      fetchUnitId: firstUnit,
-      dataset: "account-history",
-      declaredMediaType: "application/json",
-      mediaTypeBasis: "manifest",
-    }));
+    artifacts.push(
+      await catalogue(runId, `${value.chunkKeys[0]}.json`, value.chunkBody, {
+        fetchUnitId: firstUnit,
+        dataset: "account-history",
+        declaredMediaType: "application/json",
+        mediaTypeBasis: "manifest",
+      }),
+    );
     await unitTerminal(firstUnit, 1);
     await expectPost(`/v1/runs/${runId}/attempts`, {
       externalAttemptId: "fixture-smbc-interrupted",
@@ -1048,18 +1261,22 @@ describe("sanitized source-usecase contract", () => {
       reportKind: "progress",
       normalizedOutcome: "human_required",
     });
-    artifacts.push(await catalogue(runId, `${value.chunkKeys[1]}.json`, value.chunkBody, {
-      fetchUnitId: secondUnit,
-      dataset: "account-history",
-      declaredMediaType: "application/json",
-      mediaTypeBasis: "manifest",
-    }));
+    artifacts.push(
+      await catalogue(runId, `${value.chunkKeys[1]}.json`, value.chunkBody, {
+        fetchUnitId: secondUnit,
+        dataset: "account-history",
+        declaredMediaType: "application/json",
+        mediaTypeBasis: "manifest",
+      }),
+    );
     await unitTerminal(secondUnit, 1);
     await terminal(runId, artifacts.length);
     await seal(runId, artifacts, "smbc-resumed");
     const attempts = await env.DB.prepare(`
       SELECT outcome FROM ingestion_attempts WHERE fetch_run_id = ? ORDER BY id
-    `).bind(runId).all<{ outcome: string }>();
+    `)
+      .bind(runId)
+      .all<{ outcome: string }>();
     expect(attempts.results.map((row) => row.outcome)).toEqual(["incomplete", "complete"]);
   });
 
@@ -1073,12 +1290,15 @@ describe("sanitized source-usecase contract", () => {
         { length: Math.min(25, value.itemCount - offset) },
         (_, index) => offset + index,
       );
-      artifacts.push(...await Promise.all(chunk.map((index) => catalogueUploaded(
-        runId,
-        `large/item-${String(index).padStart(4, "0")}.json`,
-        object,
-        { dataset: "large-inventory-fixture" },
-      ))));
+      artifacts.push(
+        ...(await Promise.all(
+          chunk.map((index) =>
+            catalogueUploaded(runId, `large/item-${String(index).padStart(4, "0")}.json`, object, {
+              dataset: "large-inventory-fixture",
+            }),
+          ),
+        )),
+      );
     }
     artifacts.sort((left, right) => left.artifactKey.localeCompare(right.artifactKey));
     await terminal(runId, artifacts.length);
@@ -1105,8 +1325,12 @@ describe("sanitized source-usecase contract", () => {
       externalAttemptId: "fixture-large-staged",
     });
     expect(sealed.sealed).toBe(true);
-    expect(await env.DB.prepare(`
+    expect(
+      await env.DB.prepare(`
       SELECT count(*) AS count FROM run_inventory_items WHERE inventory_id = ?
-    `).bind(inventoryId).first<{ count: number }>()).toEqual({ count: value.itemCount });
+    `)
+        .bind(inventoryId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: value.itemCount });
   }, 180_000);
 });

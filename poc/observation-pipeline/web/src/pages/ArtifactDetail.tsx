@@ -43,9 +43,7 @@ export function ArtifactDetailPage({ id }: { id: number }): ReactNode {
           <Link to="/artifacts">原本</Link> / #{id}
         </div>
         <h1>原本 #{id}</h1>
-        <p className="lede">
-          保存された資料と、この資料から読み取った記録を確認できます。
-        </p>
+        <p className="lede">保存された資料と、この資料から読み取った記録を確認できます。</p>
       </div>
       <QueryBoundary query={query} label={`原本 #${id}`}>
         {(data) => (
@@ -63,9 +61,7 @@ export function ArtifactDetailPage({ id }: { id: number }): ReactNode {
                   </dd>
                   <dt>原本データ</dt>
                   <dd>
-                    <RawLink sha256={data.artifact.sha256}>
-                      保存された原本を開く ↗
-                    </RawLink>
+                    <RawLink sha256={data.artifact.sha256}>保存された原本を開く ↗</RawLink>
                   </dd>
                 </dl>
               </div>
@@ -96,9 +92,7 @@ export function ArtifactDetailPage({ id }: { id: number }): ReactNode {
             >
               <div className="panel-body">
                 {data.parseRuns.length ? (
-                  data.parseRuns.map((run) => (
-                    <ParseRunCard key={run.id} run={run} />
-                  ))
+                  data.parseRuns.map((run) => <ParseRunCard key={run.id} run={run} />)
                 ) : (
                   <p>この原本はまだ解析されていません。</p>
                 )}
@@ -132,9 +126,7 @@ function ParseRunCard({ run }: { run: ParseRunDetail }): ReactNode {
             {run.parser_name}@{run.parser_version}
           </code>
         </details>
-        {run.error === null ? null : (
-          <p className="state state-error">{run.error}</p>
-        )}
+        {run.error === null ? null : <p className="state state-error">{run.error}</p>}
         <WarningList warnings={run.warnings} />
         <h4>読み取った記録（{run.observations.length}件）</h4>
         {view.rows.length ? (

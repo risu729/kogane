@@ -144,16 +144,16 @@ vault-reading commands still require `bw unlock` and a decryption session.
 
 ## Alternatives
 
-| Option | Cloud credential | Scope | Decision |
-| --- | --- | --- | --- |
-| Local `bw` -> accepted persistent browser issuer | Only Vpass ID/password | One source issuer | Use only after the selected issuer passes repeated bootstrap; store no master password. |
-| Encrypted issuer -> consumer envelope | One Vpass bearer session | One source and generation | **Use for replay PoC.** Rotate on refresh and validate before every run. |
-| Local `bw` -> Worker secrets | Only Vpass ID/password | One Worker | Do not use now; reconsider only if a cloud password bootstrap passes independently. |
-| Local `bw` -> Secrets Store | Only selected fields | Account-level bindings | Same bootstrap gate applies; beta today. |
-| Bitwarden Secrets Manager | Machine access token | Selected Secrets Manager project | Revisit for project-scoped runtime reads, revocation, or multiple consumers; Password Manager values still need a separate sync. |
-| Password Manager API key + unlock | API key plus master/decryption secret | Personal vault | Reject for runtime use. |
-| Copied `data.json` / encrypted export | Master/export password or equivalent | Whole vault | Reject. |
-| `bw serve` behind Tunnel | Long-lived unlocked session | Most CLI/vault actions | Reject. |
+| Option                                           | Cloud credential                      | Scope                            | Decision                                                                                                                         |
+| ------------------------------------------------ | ------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Local `bw` -> accepted persistent browser issuer | Only Vpass ID/password                | One source issuer                | Use only after the selected issuer passes repeated bootstrap; store no master password.                                          |
+| Encrypted issuer -> consumer envelope            | One Vpass bearer session              | One source and generation        | **Use for replay PoC.** Rotate on refresh and validate before every run.                                                         |
+| Local `bw` -> Worker secrets                     | Only Vpass ID/password                | One Worker                       | Do not use now; reconsider only if a cloud password bootstrap passes independently.                                              |
+| Local `bw` -> Secrets Store                      | Only selected fields                  | Account-level bindings           | Same bootstrap gate applies; beta today.                                                                                         |
+| Bitwarden Secrets Manager                        | Machine access token                  | Selected Secrets Manager project | Revisit for project-scoped runtime reads, revocation, or multiple consumers; Password Manager values still need a separate sync. |
+| Password Manager API key + unlock                | API key plus master/decryption secret | Personal vault                   | Reject for runtime use.                                                                                                          |
+| Copied `data.json` / encrypted export            | Master/export password or equivalent  | Whole vault                      | Reject.                                                                                                                          |
+| `bw serve` behind Tunnel                         | Long-lived unlocked session           | Most CLI/vault actions           | Reject.                                                                                                                          |
 
 Bitwarden Secrets Manager is materially safer than exposing Password Manager:
 a machine account can be limited to one project and its token can read only

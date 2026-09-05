@@ -10,7 +10,15 @@ const FINGERPRINT_KEY = "ab".repeat(32);
 const CONTENT_TYPE = "application/json; charset=utf-8";
 
 class FakeBucket {
-  readonly values = new Map<string, { bytes: Uint8Array; contentType: string; metadata: Record<string, string>; native?: Uint8Array }>();
+  readonly values = new Map<
+    string,
+    {
+      bytes: Uint8Array;
+      contentType: string;
+      metadata: Record<string, string>;
+      native?: Uint8Array;
+    }
+  >();
   readonly listCursors: Array<string | undefined> = [];
 
   putJson(
@@ -41,7 +49,12 @@ class FakeBucket {
       httpMetadata: { contentType: stored.contentType },
       customMetadata: stored.metadata,
       range: undefined,
-      body: new ReadableStream({ start(controller) { controller.enqueue(stored.bytes); controller.close(); } }),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(stored.bytes);
+          controller.close();
+        },
+      }),
       bodyUsed: false,
       arrayBuffer: async () => stored.bytes.slice().buffer,
       text: async () => new TextDecoder().decode(stored.bytes),
@@ -57,16 +70,19 @@ class FakeBucket {
     const allObjects = [...this.values]
       .filter(([key]) => key.startsWith(prefix))
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, stored]) => ({
-        key,
-        version: "test",
-        size: stored.bytes.byteLength,
-        etag: "test",
-        httpEtag: '"test"',
-        uploaded: new Date("2026-09-05T00:01:00.000Z"),
-        storageClass: "Standard",
-        checksums: {},
-      } as R2Object));
+      .map(
+        ([key, stored]) =>
+          ({
+            key,
+            version: "test",
+            size: stored.bytes.byteLength,
+            etag: "test",
+            httpEtag: '"test"',
+            uploaded: new Date("2026-09-05T00:01:00.000Z"),
+            storageClass: "Standard",
+            checksums: {},
+          }) as R2Object,
+      );
     const offset = options?.cursor ? Number(options.cursor.slice(2)) : 0;
     const limit = options?.limit ?? 1_000;
     const objects = allObjects.slice(offset, offset + limit);
@@ -87,9 +103,7 @@ class FakeCentral {
 
   fetch = async (request: Request): Promise<Response> => {
     const path = new URL(request.url).pathname;
-    const body = request.method === "PUT"
-      ? ""
-      : await request.text();
+    const body = request.method === "PUT" ? "" : await request.text();
     this.requests.push({ path, method: request.method, body });
     if (request.method === "PUT") {
       const sha = path.split("/").at(-1)!;
@@ -112,11 +126,17 @@ class FakeCentral {
     if (/\/units$/u.test(path)) return Response.json({ unitId: 10 }, { status: 201 });
     if (/\/page-groups$/u.test(path)) {
       const parsed = JSON.parse(body) as { pageGroupKey: string };
-      return Response.json({ pageGroupId: 100 + Number(parsed.pageGroupKey.slice(-2)) }, { status: 201 });
+      return Response.json(
+        { pageGroupId: 100 + Number(parsed.pageGroupKey.slice(-2)) },
+        { status: 201 },
+      );
     }
     if (/\/inventories$/u.test(path)) return Response.json({ inventoryId: 20 }, { status: 201 });
     if (/\/artifacts$/u.test(path)) {
-      return Response.json({ descriptorSha256: await descriptorSha256(JSON.parse(body)) }, { status: 201 });
+      return Response.json(
+        { descriptorSha256: await descriptorSha256(JSON.parse(body)) },
+        { status: 201 },
+      );
     }
     if (/\/reports$/u.test(path)) {
       const previous = this.terminalReports.get(path);
@@ -251,16 +271,24 @@ describe("Vpass R2 importer", () => {
   test("fails closed before central state on inventory, metadata, checksum, status, and pagination drift", async () => {
     const mutations: Array<(bucket: FakeBucket) => void> = [
       (bucket) => bucket.putJson(`${CARD_PREFIX}unexpected.json`, {}),
-      (bucket) => { bucket.values.get(CARD_RECORD)!.contentType = "application/json"; },
-      (bucket) => { bucket.values.get(CARD_RECORD)!.metadata = { source: "vpass" }; },
-      (bucket) => { bucket.values.get(CARD_RECORD)!.native = new Uint8Array(32); },
+      (bucket) => {
+        bucket.values.get(CARD_RECORD)!.contentType = "application/json";
+      },
+      (bucket) => {
+        bucket.values.get(CARD_RECORD)!.metadata = { source: "vpass" };
+      },
+      (bucket) => {
+        bucket.values.get(CARD_RECORD)!.native = new Uint8Array(32);
+      },
       (bucket) => {
         const value = JSON.parse(new TextDecoder().decode(bucket.values.get(CARD_RECORD)!.bytes));
         value.status = "partial";
         bucket.putJson(CARD_RECORD, value);
       },
       (bucket) => {
-        const value = JSON.parse(new TextDecoder().decode(bucket.values.get(`${CARD_PREFIX}snapshot.json`)!.bytes));
+        const value = JSON.parse(
+          new TextDecoder().decode(bucket.values.get(`${CARD_PREFIX}snapshot.json`)!.bytes),
+        );
         value.months["202609"].pages[1].index = 2;
         bucket.putJson(`${CARD_PREFIX}snapshot.json`, value);
       },
@@ -281,10 +309,12 @@ describe("Vpass R2 importer", () => {
     expect(first.status).toBe("deferred");
     if (first.status !== "deferred") throw new Error("expected deferred");
     const tampered = `${first.continuation.slice(0, -1)}${first.continuation.endsWith("a") ? "b" : "a"}`;
-    await expect(importVpassRun({
-      ...importOptions(bucket, central, CARD_RECORD),
-      continuation: tampered,
-    })).rejects.toThrow("transfer_token_invalid");
+    await expect(
+      importVpassRun({
+        ...importOptions(bucket, central, CARD_RECORD),
+        continuation: tampered,
+      }),
+    ).rejects.toThrow("transfer_token_invalid");
   });
 
   test("does not advance the R2 scan cursor until a staged record seals", async () => {
@@ -451,7 +481,12 @@ async function descriptorSha256(value: Record<string, unknown>): Promise<string>
   const { http, storage, file, email, ...fields } = value;
   const normalized = {
     ...fields,
-    origins: { http: http ?? null, storage: storage ?? null, file: file ?? null, email: email ?? null },
+    origins: {
+      http: http ?? null,
+      storage: storage ?? null,
+      file: file ?? null,
+      email: email ?? null,
+    },
   };
   const bytes = new TextEncoder().encode(JSON.stringify(canonical(normalized)));
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));

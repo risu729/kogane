@@ -8,19 +8,8 @@ import {
   useTable,
 } from "@tanstack/react-table";
 import { useTransactions, type TransactionRow } from "../api.ts";
-import {
-  Amount,
-  Nullable,
-  ObservationLink,
-  Panel,
-  QueryBoundary,
-} from "../ui.tsx";
-import {
-  EMPTY_FILTERS,
-  matchesDates,
-  matchesSourceAccount,
-  pageWindow,
-} from "../filters.ts";
+import { Amount, Nullable, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
+import { EMPTY_FILTERS, matchesDates, matchesSourceAccount, pageWindow } from "../filters.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
 import { useViewState } from "../view-state.tsx";
 const features = tableFeatures({
@@ -126,9 +115,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
               row.source_id,
               row.source_account,
             ].some((value) =>
-              value
-                ?.toLocaleLowerCase()
-                .includes(search.trim().toLocaleLowerCase()),
+              value?.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
             )),
       ),
     [rows, filters, search],
@@ -146,11 +133,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
   });
   const view = pageWindow(table.getRowModel().rows, page);
   return (
-    <Panel
-      id="transactions"
-      title="取引の記録"
-      count={`受信した${rows.length}件から絞り込み`}
-    >
+    <Panel id="transactions" title="取引の記録" count={`受信した${rows.length}件から絞り込み`}>
       <div className="panel-body">
         <RecordControls
           rows={rows}
@@ -208,11 +191,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
                       scope="col"
                       className={header.column.id === "amount" ? "num" : ""}
                       aria-sort={
-                        sorted === "asc"
-                          ? "ascending"
-                          : sorted === "desc"
-                            ? "descending"
-                            : "none"
+                        sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : "none"
                       }
                     >
                       {header.column.getCanSort() ? (
@@ -223,11 +202,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
                         >
                           <table.FlexRender header={header} />
                           <span aria-hidden="true">
-                            {sorted === "asc"
-                              ? " ↑"
-                              : sorted === "desc"
-                                ? " ↓"
-                                : " ↕"}
+                            {sorted === "asc" ? " ↑" : sorted === "desc" ? " ↓" : " ↕"}
                           </span>
                         </button>
                       ) : (
@@ -279,9 +254,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
         <p>
           日付は取得元の基準日（as_of）をそのまま表示します。期間指定時は記録された年月日で比較し、日付不明の記録は除外します。タイムゾーンの換算はしません。金額は保存値を保ち、異なる通貨での並べ替え・合算は行いません。
         </p>
-        <p>
-          取引番号・解析方法・原本への経路は各記録の「詳細」で確認できます。
-        </p>
+        <p>取引番号・解析方法・原本への経路は各記録の「詳細」で確認できます。</p>
       </details>
     </Panel>
   );

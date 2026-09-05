@@ -18,7 +18,9 @@ class FakeBucket {
   readonly objects = new Map<string, Stored>();
 
   async put(key: string, value: unknown, metadata: Record<string, string>): Promise<void> {
-    const body = new TextEncoder().encode(typeof value === "string" ? value : JSON.stringify(value));
+    const body = new TextEncoder().encode(
+      typeof value === "string" ? value : JSON.stringify(value),
+    );
     this.objects.set(key, {
       body,
       metadata,
@@ -42,8 +44,10 @@ class FakeBucket {
 
   async list(options: R2ListOptions = {}): Promise<R2Objects> {
     return {
-      objects: [...this.objects.keys()].filter((key) => key.startsWith(options.prefix ?? ""))
-        .sort().map((key) => ({ key })),
+      objects: [...this.objects.keys()]
+        .filter((key) => key.startsWith(options.prefix ?? ""))
+        .sort()
+        .map((key) => ({ key })),
       truncated: false,
     } as unknown as R2Objects;
   }
@@ -68,10 +72,14 @@ class FakeCentral {
     }
     if (path === "/v1/runs") return Response.json({ runId: 1 }, { status: 201 });
     if (path.endsWith("/units")) return Response.json({ unitId: 10 }, { status: 201 });
-    if (path.endsWith("/page-groups")) return Response.json({ pageGroupId: path.includes("unused") ? 21 : 20 }, { status: 201 });
+    if (path.endsWith("/page-groups"))
+      return Response.json({ pageGroupId: path.includes("unused") ? 21 : 20 }, { status: 201 });
     if (path.endsWith("/inventories")) return Response.json({ inventoryId: 20 }, { status: 201 });
     if (path.endsWith("/artifacts")) {
-      return Response.json({ descriptorSha256: await descriptorHash(JSON.parse(body)) }, { status: 201 });
+      return Response.json(
+        { descriptorSha256: await descriptorHash(JSON.parse(body)) },
+        { status: 201 },
+      );
     }
     if (path.endsWith("/reports")) {
       const report = JSON.stringify(JSON.parse(body));
@@ -92,8 +100,14 @@ describe("V Point R2 importer", () => {
     const { source, reconciliation } = await successRun();
     const central = new FakeCentral();
     const first = await importRun(source, reconciliation, central);
-    expect(first).toMatchObject({ source: "v-point", artifactCount: 7, sealed: true, allObjectsReused: false });
-    const descriptors = central.requests.filter((request) => request.path.endsWith("/artifacts"))
+    expect(first).toMatchObject({
+      source: "v-point",
+      artifactCount: 7,
+      sealed: true,
+      allObjectsReused: false,
+    });
+    const descriptors = central.requests
+      .filter((request) => request.path.endsWith("/artifacts"))
       .map((request) => JSON.parse(request.body) as Record<string, unknown>);
     expect(descriptors.find((value) => value.dataset === "history-page-0001")).toMatchObject({
       artifactRole: "collector_derived",
@@ -103,7 +117,9 @@ describe("V Point R2 importer", () => {
       pageIndex: 0,
       formatVersion: "vpoint-worker-poc-v2",
     });
-    expect(descriptors.find((value) => value.dataset === "v-point-pay-email-reconciliation")).toMatchObject({
+    expect(
+      descriptors.find((value) => value.dataset === "v-point-pay-email-reconciliation"),
+    ).toMatchObject({
       artifactRole: "collector_summary",
       payloadFidelity: "generated",
     });
@@ -124,11 +140,15 @@ describe("V Point R2 importer", () => {
       vMoneyHistoryTotal: 0,
       vMoneyHistoryPageCount: 0,
       artifacts: [],
-      failures: [{ operation: "collect", errorType: "TypeError", message: "dummy-sensitive-detail" }],
+      failures: [
+        { operation: "collect", errorType: "TypeError", message: "dummy-sensitive-detail" },
+      ],
     });
     await source.put(MANIFEST_KEY, manifest, manifestMetadata("failed"));
     const central = new FakeCentral();
-    await expect(importRun(source, reconciliation, central)).resolves.toMatchObject({ artifactCount: 1 });
+    await expect(importRun(source, reconciliation, central)).resolves.toMatchObject({
+      artifactCount: 1,
+    });
     const uploaded = new TextDecoder().decode([...central.uploads.values()][0]);
     expect(uploaded).toContain("failure_redacted");
     expect(uploaded).not.toContain("dummy-sensitive-detail");
@@ -148,13 +168,16 @@ describe("V Point R2 importer", () => {
   test("replays across importer deployments without changing immutable terminal reports", async () => {
     const { source, reconciliation } = await successRun();
     const central = new FakeCentral();
-    await expect(importRun(source, reconciliation, central, 0, true, "deployment-a"))
-      .resolves.toMatchObject({ status: "sealed" });
-    await expect(importRun(source, reconciliation, central, 0, true, "deployment-b"))
-      .resolves.toMatchObject({ status: "sealed", allObjectsReused: true });
-    const runReport = JSON.parse(
-      central.reports.get("/v1/runs/1/reports") ?? "null",
-    ) as Record<string, unknown>;
+    await expect(
+      importRun(source, reconciliation, central, 0, true, "deployment-a"),
+    ).resolves.toMatchObject({ status: "sealed" });
+    await expect(
+      importRun(source, reconciliation, central, 0, true, "deployment-b"),
+    ).resolves.toMatchObject({ status: "sealed", allObjectsReused: true });
+    const runReport = JSON.parse(central.reports.get("/v1/runs/1/reports") ?? "null") as Record<
+      string,
+      unknown
+    >;
     expect(runReport.producerVersion).toBe("vpoint-r2-v3");
     const createRun = central.requests.find((request) => request.path === "/v1/runs");
     expect(JSON.parse(createRun?.body ?? "null")).toMatchObject({
@@ -181,24 +204,38 @@ describe("V Point R2 importer", () => {
     delete manifest.emailReconciliation;
     await source.put(MANIFEST_KEY, manifest, manifestMetadata("success"));
     const central = new FakeCentral();
-    await expect(importRun(source, reconciliation, central)).resolves.toMatchObject({ artifactCount: 5 });
-    const descriptors = central.requests.filter((request) => request.path.endsWith("/artifacts"))
+    await expect(importRun(source, reconciliation, central)).resolves.toMatchObject({
+      artifactCount: 5,
+    });
+    const descriptors = central.requests
+      .filter((request) => request.path.endsWith("/artifacts"))
       .map((request) => JSON.parse(request.body) as Record<string, unknown>);
-    expect(descriptors.every((descriptor) =>
-      descriptor.artifactKey === "manifest.json"
-        ? descriptor.formatVersion === "vpoint-central-manifest-v2"
-        : descriptor.formatVersion === "vpoint-worker-poc-v1")).toBe(true);
+    expect(
+      descriptors.every((descriptor) =>
+        descriptor.artifactKey === "manifest.json"
+          ? descriptor.formatVersion === "vpoint-central-manifest-v2"
+          : descriptor.formatVersion === "vpoint-worker-poc-v1",
+      ),
+    ).toBe(true);
   });
 
   test("rejects unknown manifest fields and exact-prefix drift before central writes", async () => {
     const { source, reconciliation, manifest } = await successRun();
     const central = new FakeCentral();
-    expect(() => parseVPointManifest(
-      new TextEncoder().encode(JSON.stringify({ ...manifest, unexpected: true })),
-      MANIFEST_KEY,
-    )).toThrow("manifest_unknown_field");
-    await source.put(`${PREFIX}unexpected.json`, {}, { dataset: "unexpected", sha256: "0".repeat(64) });
-    await expect(importRun(source, reconciliation, central)).rejects.toThrow("prefix_inventory_mismatch");
+    expect(() =>
+      parseVPointManifest(
+        new TextEncoder().encode(JSON.stringify({ ...manifest, unexpected: true })),
+        MANIFEST_KEY,
+      ),
+    ).toThrow("manifest_unknown_field");
+    await source.put(
+      `${PREFIX}unexpected.json`,
+      {},
+      { dataset: "unexpected", sha256: "0".repeat(64) },
+    );
+    await expect(importRun(source, reconciliation, central)).rejects.toThrow(
+      "prefix_inventory_mismatch",
+    );
     expect(central.requests).toHaveLength(0);
   });
 
@@ -206,29 +243,35 @@ describe("V Point R2 importer", () => {
     const { source, reconciliation } = await successRun();
     const central = new FakeCentral();
     let calls = 0;
-    source.list = async () => ({
-      objects: calls++ === 0 ? [{ key: MANIFEST_KEY }] : [],
-      truncated: true,
-      cursor: "stuck",
-    }) as unknown as R2Objects;
-    await expect(importRun(source, reconciliation, central)).rejects.toThrow("prefix_cursor_stalled");
+    source.list = async () =>
+      ({
+        objects: calls++ === 0 ? [{ key: MANIFEST_KEY }] : [],
+        truncated: true,
+        cursor: "stuck",
+      }) as unknown as R2Objects;
+    await expect(importRun(source, reconciliation, central)).rejects.toThrow(
+      "prefix_cursor_stalled",
+    );
     expect(central.requests).toHaveLength(0);
   });
 
   test("bounds an overlong R2 inventory before central writes", async () => {
     const { source, reconciliation } = await successRun();
     const central = new FakeCentral();
-    source.list = async (options: R2ListOptions = {}) => ({
-      objects: [
-        ...[...source.objects.keys()]
-          .filter((key) => key.startsWith(options.prefix ?? ""))
-          .sort()
-          .map((key) => ({ key })),
-        { key: `${PREFIX}unexpected.json` },
-      ],
-      truncated: false,
-    }) as unknown as R2Objects;
-    await expect(importRun(source, reconciliation, central)).rejects.toThrow("prefix_inventory_mismatch");
+    source.list = async (options: R2ListOptions = {}) =>
+      ({
+        objects: [
+          ...[...source.objects.keys()]
+            .filter((key) => key.startsWith(options.prefix ?? ""))
+            .sort()
+            .map((key) => ({ key })),
+          { key: `${PREFIX}unexpected.json` },
+        ],
+        truncated: false,
+      }) as unknown as R2Objects;
+    await expect(importRun(source, reconciliation, central)).rejects.toThrow(
+      "prefix_inventory_mismatch",
+    );
     expect(central.requests).toHaveLength(0);
   });
 
@@ -240,15 +283,22 @@ describe("V Point R2 importer", () => {
     manifest.artifacts = manifest.artifacts.filter(
       (artifact: Record<string, unknown>) => artifact.dataset !== "collection-summary",
     );
-    manifest.failures = [{ operation: "r2:collection-summary", errorType: "Error", message: "write failed" }];
+    manifest.failures = [
+      { operation: "r2:collection-summary", errorType: "Error", message: "write failed" },
+    ];
     await source.put(MANIFEST_KEY, manifest, manifestMetadata("partial"));
-    await expect(importRun(source, reconciliation, new FakeCentral()))
-      .resolves.toMatchObject({ artifactCount: 6, sealed: true });
+    await expect(importRun(source, reconciliation, new FakeCentral())).resolves.toMatchObject({
+      artifactCount: 6,
+      sealed: true,
+    });
 
-    manifest.failures = [{ operation: "r2:balance-info", errorType: "Error", message: "write failed" }];
+    manifest.failures = [
+      { operation: "r2:balance-info", errorType: "Error", message: "write failed" },
+    ];
     await source.put(MANIFEST_KEY, manifest, manifestMetadata("partial"));
-    await expect(importRun(source, reconciliation, new FakeCentral()))
-      .rejects.toThrow("manifest_failure_complement_mismatch");
+    await expect(importRun(source, reconciliation, new FakeCentral())).rejects.toThrow(
+      "manifest_failure_complement_mismatch",
+    );
   });
 
   test("rejects checksum drift, pagination drift, and non-empty V Money", async () => {
@@ -260,12 +310,16 @@ describe("V Point R2 importer", () => {
     {
       const { source, reconciliation } = await successRun();
       await replaceArtifact(source, "history-page-0001", history(2, 1));
-      await expect(importRun(source, reconciliation, new FakeCentral())).rejects.toThrow("artifact_pagination_mismatch");
+      await expect(importRun(source, reconciliation, new FakeCentral())).rejects.toThrow(
+        "artifact_pagination_mismatch",
+      );
     }
     {
       const { source, reconciliation } = await successRun();
       await replaceArtifact(source, "vmoney-history-page-0001", vmoney(1));
-      await expect(importRun(source, reconciliation, new FakeCentral())).rejects.toThrow("vmoney_nonempty_unsupported");
+      await expect(importRun(source, reconciliation, new FakeCentral())).rejects.toThrow(
+        "vmoney_nonempty_unsupported",
+      );
     }
   });
 
@@ -287,7 +341,13 @@ describe("V Point R2 importer", () => {
       const body = new TextEncoder().encode(JSON.stringify(value));
       const hash = await sha256(body);
       await source.put(`${PREFIX}${dataset}.json`, value, { dataset, sha256: hash });
-      additions.push({ dataset, key: `${PREFIX}${dataset}.json`, mediaType: "application/json", sha256: hash, bytes: body.byteLength });
+      additions.push({
+        dataset,
+        key: `${PREFIX}${dataset}.json`,
+        mediaType: "application/json",
+        sha256: hash,
+        bytes: body.byteLength,
+      });
     }
     manifest.historyTotal = 270;
     manifest.historyPageCount = 9;
@@ -306,15 +366,22 @@ describe("V Point R2 importer", () => {
     expect(firstChunk).toMatchObject({ status: "deferred", nextOffset: 8, artifactCount: 14 });
     const finalChunk = await importRun(source, reconciliation, central, 8, false);
     expect(finalChunk).toMatchObject({ status: "sealed", artifactCount: 14, sealed: true });
-    const inventories = central.requests.filter((request) => request.path.endsWith("/inventories"))
+    const inventories = central.requests
+      .filter((request) => request.path.endsWith("/inventories"))
       .map((request) => JSON.parse(request.body) as Record<string, unknown>);
     expect(inventories).toHaveLength(2);
     expect(new Set(inventories.map((inventory) => inventory.inventorySha256))).toHaveLength(1);
     expect(inventories.every((inventory) => inventory.expectedArtifactCount === 14)).toBe(true);
-    const itemChunks = central.requests.filter((request) => request.path.endsWith("/items"))
-      .map((request) => (JSON.parse(request.body) as {
-        items: Array<{ artifactKey: string }>;
-      }).items);
+    const itemChunks = central.requests
+      .filter((request) => request.path.endsWith("/items"))
+      .map(
+        (request) =>
+          (
+            JSON.parse(request.body) as {
+              items: Array<{ artifactKey: string }>;
+            }
+          ).items,
+      );
     expect(itemChunks.map((items) => items.length)).toEqual([8, 6]);
     expect(new Set(itemChunks.flat().map((item) => item.artifactKey))).toHaveLength(14);
     expect(central.requests.filter((request) => request.path.endsWith("/seal"))).toHaveLength(1);
@@ -322,15 +389,29 @@ describe("V Point R2 importer", () => {
 
   test("binds every reconciliation candidate to a unique validated history row", async () => {
     for (const [mutate, code] of [
-      [(candidate: Record<string, unknown>) => { candidate.source = "history-page-0002.json"; },
-        "reconciliation_candidate_invalid"],
-      [(candidate: Record<string, unknown>) => { candidate.index = 1; },
-        "reconciliation_candidate_invalid"],
-      [(candidate: Record<string, unknown>) => { candidate.fingerprint = "0".repeat(64); },
-        "reconciliation_candidate_fingerprint_mismatch"],
+      [
+        (candidate: Record<string, unknown>) => {
+          candidate.source = "history-page-0002.json";
+        },
+        "reconciliation_candidate_invalid",
+      ],
+      [
+        (candidate: Record<string, unknown>) => {
+          candidate.index = 1;
+        },
+        "reconciliation_candidate_invalid",
+      ],
+      [
+        (candidate: Record<string, unknown>) => {
+          candidate.fingerprint = "0".repeat(64);
+        },
+        "reconciliation_candidate_fingerprint_mismatch",
+      ],
     ] as const) {
       const { source, reconciliation } = await successRun();
-      const report = JSON.parse(new TextDecoder().decode(reconciliation.objects.get(REPORT_KEY)!.body));
+      const report = JSON.parse(
+        new TextDecoder().decode(reconciliation.objects.get(REPORT_KEY)!.body),
+      );
       mutate(report.entries[0].candidateRows[0]);
       await reconciliation.put(REPORT_KEY, report, {
         source: "v-point-pay-email-reconciliation",
@@ -340,37 +421,57 @@ describe("V Point R2 importer", () => {
     }
 
     const { source, reconciliation } = await successRun();
-    const report = JSON.parse(new TextDecoder().decode(reconciliation.objects.get(REPORT_KEY)!.body));
+    const report = JSON.parse(
+      new TextDecoder().decode(reconciliation.objects.get(REPORT_KEY)!.body),
+    );
     report.entries[0].status = "ambiguous";
     report.entries[0].candidateRows.push({ ...report.entries[0].candidateRows[0] });
     await reconciliation.put(REPORT_KEY, report, {
       source: "v-point-pay-email-reconciliation",
       runId: RUN_ID,
     });
-    await expect(importRun(source, reconciliation, new FakeCentral()))
-      .rejects.toThrow("reconciliation_candidate_duplicate");
+    await expect(importRun(source, reconciliation, new FakeCentral())).rejects.toThrow(
+      "reconciliation_candidate_duplicate",
+    );
   });
 
   test("rejects a reconciliation count mismatch", async () => {
     const { source, reconciliation } = await successRun();
-    const report = JSON.parse(new TextDecoder().decode(reconciliation.objects.get(REPORT_KEY)!.body));
+    const report = JSON.parse(
+      new TextDecoder().decode(reconciliation.objects.get(REPORT_KEY)!.body),
+    );
     report.entries[0].status = "unmatched";
     report.entries[0].candidateRows = [];
-    await reconciliation.put(REPORT_KEY, report, { source: "v-point-pay-email-reconciliation", runId: RUN_ID });
-    await expect(importRun(source, reconciliation, new FakeCentral()))
-      .rejects.toThrow("reconciliation_report_count_mismatch");
+    await reconciliation.put(REPORT_KEY, report, {
+      source: "v-point-pay-email-reconciliation",
+      runId: RUN_ID,
+    });
+    await expect(importRun(source, reconciliation, new FakeCentral())).rejects.toThrow(
+      "reconciliation_report_count_mismatch",
+    );
   });
 
   test("accepts the exact audited legacy reconciliation match policy", async () => {
     const { source, reconciliation } = await successRun();
-    const report = JSON.parse(new TextDecoder().decode(reconciliation.objects.get(REPORT_KEY)!.body));
+    const report = JSON.parse(
+      new TextDecoder().decode(reconciliation.objects.get(REPORT_KEY)!.body),
+    );
     report.policy.match = "exact JST date and explicit V Point amount";
-    await reconciliation.put(REPORT_KEY, report, { source: "v-point-pay-email-reconciliation", runId: RUN_ID });
-    await expect(importRun(source, reconciliation, new FakeCentral())).resolves.toMatchObject({ sealed: true });
+    await reconciliation.put(REPORT_KEY, report, {
+      source: "v-point-pay-email-reconciliation",
+      runId: RUN_ID,
+    });
+    await expect(importRun(source, reconciliation, new FakeCentral())).resolves.toMatchObject({
+      sealed: true,
+    });
   });
 });
 
-async function successRun(): Promise<{ source: FakeBucket; reconciliation: FakeBucket; manifest: Record<string, unknown> }> {
+async function successRun(): Promise<{
+  source: FakeBucket;
+  reconciliation: FakeBucket;
+  manifest: Record<string, unknown>;
+}> {
   const source = new FakeBucket();
   const reconciliation = new FakeBucket();
   const payloads: Array<[string, unknown]> = [
@@ -378,20 +479,29 @@ async function successRun(): Promise<{ source: FakeBucket; reconciliation: FakeB
     ["smfg-point", smfg()],
     ["history-page-0001", history(1, 1)],
     ["vmoney-history-page-0001", vmoney(0)],
-    ["collection-summary", {
-      schemaVersion: "vpoint-collection-summary-v2",
-      historyTotal: 1,
-      historyPageCount: 1,
-      vMoneyHistoryTotal: 0,
-      vMoneyHistoryPageCount: 1,
-    }],
+    [
+      "collection-summary",
+      {
+        schemaVersion: "vpoint-collection-summary-v2",
+        historyTotal: 1,
+        historyPageCount: 1,
+        vMoneyHistoryTotal: 0,
+        vMoneyHistoryPageCount: 1,
+      },
+    ],
   ];
   const artifacts = [];
   for (const [dataset, value] of payloads) {
     const body = new TextEncoder().encode(JSON.stringify(value));
     const hash = await sha256(body);
     await source.put(`${PREFIX}${dataset}.json`, value, { dataset, sha256: hash });
-    artifacts.push({ dataset, key: `${PREFIX}${dataset}.json`, mediaType: "application/json", sha256: hash, bytes: body.byteLength });
+    artifacts.push({
+      dataset,
+      key: `${PREFIX}${dataset}.json`,
+      mediaType: "application/json",
+      sha256: hash,
+      bytes: body.byteLength,
+    });
   }
   const manifest = baseManifest({
     status: "success",
@@ -413,32 +523,45 @@ async function successRun(): Promise<{ source: FakeBucket; reconciliation: FakeB
     },
   });
   await source.put(MANIFEST_KEY, manifest, manifestMetadata("success"));
-  await reconciliation.put(REPORT_KEY, {
-    schemaVersion: "vpoint-pay-email-reconciliation-v1",
-    runId: RUN_ID,
-    completedAt: "2026-09-05T00:00:02.000Z",
-    policy: {
-      match: "exact JST date and explicit V Point amount, including an explicitly V Point-funded charge",
-      mutation: "none",
-      ambiguousMatchesRemainUnresolved: true,
+  await reconciliation.put(
+    REPORT_KEY,
+    {
+      schemaVersion: "vpoint-pay-email-reconciliation-v1",
+      runId: RUN_ID,
+      completedAt: "2026-09-05T00:00:02.000Z",
+      policy: {
+        match:
+          "exact JST date and explicit V Point amount, including an explicitly V Point-funded charge",
+        mutation: "none",
+        ambiguousMatchesRemainUnresolved: true,
+      },
+      sources: {
+        vPointHistory: "current collector run",
+        vPointPayEmail: "all normalized archived notifications",
+        vPointPayApp: "unavailable-no-live-snapshot",
+      },
+      entries: [
+        {
+          emailEventId: "e".repeat(64),
+          status: "matched",
+          candidateRows: [
+            {
+              source: "history-page-0001.json",
+              index: 0,
+              fingerprint: await sha256(
+                new TextEncoder().encode(
+                  JSON.stringify(
+                    (payloads[2]![1] as { results: { history: unknown[] } }).results.history[0],
+                  ),
+                ),
+              ),
+            },
+          ],
+        },
+      ],
     },
-    sources: {
-      vPointHistory: "current collector run",
-      vPointPayEmail: "all normalized archived notifications",
-      vPointPayApp: "unavailable-no-live-snapshot",
-    },
-    entries: [{
-      emailEventId: "e".repeat(64),
-      status: "matched",
-      candidateRows: [{
-        source: "history-page-0001.json",
-        index: 0,
-        fingerprint: await sha256(new TextEncoder().encode(JSON.stringify(
-          ((payloads[2]?.[1] as { results: { history: unknown[] } }).results.history[0]),
-        ))),
-      }],
-    }],
-  }, { source: "v-point-pay-email-reconciliation", runId: RUN_ID });
+    { source: "v-point-pay-email-reconciliation", runId: RUN_ID },
+  );
   return { source, reconciliation, manifest };
 }
 
@@ -462,7 +585,12 @@ function envelope(results: unknown): unknown {
 }
 
 function balance(): unknown {
-  return envelope({ common: [{ expiration: "", point: 10, point_type: 1 }], get_month: 1, store: [], tmoney: {} });
+  return envelope({
+    common: [{ expiration: "", point: 10, point_type: 1 }],
+    get_month: 1,
+    store: [],
+    tmoney: {},
+  });
 }
 
 function smfg(): unknown {
@@ -473,9 +601,17 @@ function history(total: number, rows: number): unknown {
   return envelope({
     graph: { monthly: [{ label: "2026-09", point: 1 }], yearly: [] },
     history: Array.from({ length: rows }, () => ({
-      date_reflect: "20260905", date_use: "20260905", is_use_mbo: false, point: -1,
-      point_div: 1, point_type: 1, reason: "", store_alliance_name: "",
-      store_category: "", store_company: "", store_name: "",
+      date_reflect: "20260905",
+      date_use: "20260905",
+      is_use_mbo: false,
+      point: -1,
+      point_div: 1,
+      point_type: 1,
+      reason: "",
+      store_alliance_name: "",
+      store_category: "",
+      store_company: "",
+      store_name: "",
     })),
     total,
   });
@@ -491,7 +627,9 @@ async function replaceArtifact(bucket: FakeBucket, dataset: string, value: unkno
   const hash = await sha256(body);
   await bucket.put(key, value, { dataset, sha256: hash });
   const manifest = JSON.parse(new TextDecoder().decode(bucket.objects.get(MANIFEST_KEY)!.body));
-  const artifact = manifest.artifacts.find((candidate: Record<string, unknown>) => candidate.dataset === dataset);
+  const artifact = manifest.artifacts.find(
+    (candidate: Record<string, unknown>) => candidate.dataset === dataset,
+  );
   artifact.sha256 = hash;
   artifact.bytes = body.byteLength;
   await bucket.put(MANIFEST_KEY, manifest, manifestMetadata(manifest.status));
@@ -525,32 +663,47 @@ async function sha256(bytes: Uint8Array): Promise<string> {
 
 async function descriptorHash(descriptor: Record<string, unknown>): Promise<string> {
   const {
-    http, storage, file, email,
-    fetchUnitId, pageGroupId, pageIndex,
-    ranges, transformSteps, relations,
+    http,
+    storage,
+    file,
+    email,
+    fetchUnitId,
+    pageGroupId,
+    pageIndex,
+    ranges,
+    transformSteps,
+    relations,
     ...fields
   } = descriptor;
-  return sha256(new TextEncoder().encode(canonicalJson({
-    ...fields,
-    fetchUnitId: fetchUnitId ?? null,
-    pageGroupId: pageGroupId ?? null,
-    pageIndex: pageIndex ?? null,
-    origins: {
-      http: http ?? null,
-      storage: storage === undefined || storage === null ? null : {
-        ...(storage as Record<string, unknown>),
-        objectVersion: (storage as Record<string, unknown>).objectVersion ?? null,
-        etag: (storage as Record<string, unknown>).etag ?? null,
-        lastModifiedAtMs: (storage as Record<string, unknown>).lastModifiedAtMs ?? null,
-        lastModifiedAtBasis: (storage as Record<string, unknown>).lastModifiedAtBasis ?? null,
-      },
-      file: file ?? null,
-      email: email ?? null,
-    },
-    ranges: ranges ?? [],
-    transformSteps: transformSteps ?? [],
-    relations: relations ?? [],
-  })));
+  return sha256(
+    new TextEncoder().encode(
+      canonicalJson({
+        ...fields,
+        fetchUnitId: fetchUnitId ?? null,
+        pageGroupId: pageGroupId ?? null,
+        pageIndex: pageIndex ?? null,
+        origins: {
+          http: http ?? null,
+          storage:
+            storage === undefined || storage === null
+              ? null
+              : {
+                  ...(storage as Record<string, unknown>),
+                  objectVersion: (storage as Record<string, unknown>).objectVersion ?? null,
+                  etag: (storage as Record<string, unknown>).etag ?? null,
+                  lastModifiedAtMs: (storage as Record<string, unknown>).lastModifiedAtMs ?? null,
+                  lastModifiedAtBasis:
+                    (storage as Record<string, unknown>).lastModifiedAtBasis ?? null,
+                },
+          file: file ?? null,
+          email: email ?? null,
+        },
+        ranges: ranges ?? [],
+        transformSteps: transformSteps ?? [],
+        relations: relations ?? [],
+      }),
+    ),
+  );
 }
 
 function canonicalJson(value: unknown): string {
@@ -560,9 +713,11 @@ function canonicalJson(value: unknown): string {
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value !== null && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).sort(([left], [right]) =>
-      left < right ? -1 : left > right ? 1 : 0
-    ).map(([key, child]) => [key, canonical(child)]));
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, child]) => [key, canonical(child)]),
+    );
   }
   return value;
 }

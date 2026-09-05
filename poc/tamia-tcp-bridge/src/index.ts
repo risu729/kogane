@@ -28,13 +28,8 @@ async function digest(value: string): Promise<ArrayBuffer> {
 
 async function validBearer(request: Request, expected: string): Promise<boolean> {
   const authorization = request.headers.get("authorization") ?? "";
-  const provided = authorization.startsWith("Bearer ")
-    ? authorization.slice("Bearer ".length)
-    : "";
-  const [providedHash, expectedHash] = await Promise.all([
-    digest(provided),
-    digest(expected),
-  ]);
+  const provided = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
+  const [providedHash, expectedHash] = await Promise.all([digest(provided), digest(expected)]);
   return crypto.subtle.timingSafeEqual(providedHash, expectedHash);
 }
 
@@ -182,11 +177,7 @@ async function bridge(
   return new Response(null, { status: 101, webSocket: client });
 }
 
-async function handleRequest(
-  request: Request,
-  env: Env,
-  ctx: ExecutionContext,
-): Promise<Response> {
+async function handleRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   if (request.method !== "GET" || url.search !== "") {
     return jsonResponse({ error: "not found" }, 404);
@@ -204,11 +195,7 @@ async function handleRequest(
 }
 
 export default {
-  async fetch(
-    request: Request,
-    env: Env,
-    ctx: ExecutionContext,
-  ): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     try {
       return await handleRequest(request, env, ctx);
     } catch (error) {

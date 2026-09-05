@@ -1,12 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { usePositions, type PositionWithValuations } from "../api.ts";
-import {
-  Amount,
-  Badge,
-  Nullable,
-  ObservationLink,
-  QueryBoundary,
-} from "../ui.tsx";
+import { Amount, Badge, Nullable, ObservationLink, QueryBoundary } from "../ui.tsx";
 import { pageWindow } from "../filters.ts";
 import { Pager } from "./ViewControls.tsx";
 export function PositionsPage(): ReactNode {
@@ -15,9 +9,7 @@ export function PositionsPage(): ReactNode {
     <>
       <div className="page-head">
         <h1>保有資産</h1>
-        <p className="lede">
-          取得元が報告した保有数量と評価額を、通貨ごとに確認できます。
-        </p>
+        <p className="lede">取得元が報告した保有数量と評価額を、通貨ごとに確認できます。</p>
       </div>
       <details className="detail-disclosure">
         <summary>評価額の対応関係について</summary>
@@ -36,11 +28,7 @@ export function PositionsPage(): ReactNode {
     </>
   );
 }
-function PositionList({
-  entries,
-}: {
-  entries: PositionWithValuations[];
-}): ReactNode {
+function PositionList({ entries }: { entries: PositionWithValuations[] }): ReactNode {
   const [page, setPage] = useState(0);
   const view = pageWindow(entries, page);
   return (

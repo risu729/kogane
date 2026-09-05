@@ -1,0 +1,43 @@
+amends "https://raw.githubusercontent.com/risu729/hk-config/v1.1.0/presets.pkl"
+
+import "https://raw.githubusercontent.com/risu729/hk-config/v1.1.0/helpers.pkl"
+import "package://github.com/jdx/hk/releases/download/v1.51.0/hk@1.51.0#/Config.pkl"
+
+// Evidence and parser fixtures retain their exact committed bytes.
+exclude = List("data/**", "**/fixtures/**", "**/patches/**", "**/worker-configuration.d.ts")
+
+local picked = (helpers.pick(new Listing {
+  "oxlint"
+  "oxfmt"
+  "github-actions"
+  "tombi"
+  "yaml"
+  "typos"
+  "newlines"
+  "trailing-whitespace"
+  "mixed-line-ending"
+  "byte-order-marker"
+  "check-merge-conflict"
+  "check-case-conflict"
+  "check-symlinks"
+  "check-executables-have-shebangs"
+  "shellcheck"
+})) {
+  // Direct exit status also works on Windows; the preset's diff wrapper is Bash.
+  ["typos"] = new Config.Step {
+    check = "typos --force-exclude {{ files }}"
+    fix = "typos --force-exclude --write-changes {{ files }}"
+  }
+  ["ruff"] = new Config.Step {
+    glob = "**/*.py"
+    check = "ruff check {{ files }}"
+    fix = "ruff check --fix {{ files }}"
+  }
+  ["ruff-format"] = new Config.Step {
+    glob = "**/*.py"
+    check_diff = "ruff format --check --diff {{ files }}"
+    fix = "ruff format {{ files }}"
+  }
+}
+
+hooks = helpers.standardHooks(picked)

@@ -3,11 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { collectSonyBank, parseCredential } from "./sony-bank";
 import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
-import type {
-  CollectionFailure,
-  CollectionManifest,
-  CollectionResult,
-} from "./types";
+import type { CollectionFailure, CollectionManifest, CollectionResult } from "./types";
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -26,10 +22,12 @@ export default {
       try {
         const cursor = url.searchParams.get("cursor") ?? undefined;
         const limit = parseBackfillLimit(url.searchParams.get("limit"));
-        return Response.json(await backfillStoredRuns(
-          env.RAW_EVIDENCE_IMPORTER,
-          { ...(cursor ? { cursor } : {}), ...(limit ? { limit } : {}) },
-        ));
+        return Response.json(
+          await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, {
+            ...(cursor ? { cursor } : {}),
+            ...(limit ? { limit } : {}),
+          }),
+        );
       } catch (error) {
         return Response.json({ error: stableError(error) }, { status: 502 });
       }
@@ -38,19 +36,13 @@ export default {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
     try {
-      const window = parseWindow(
-        url.searchParams.get("from"),
-        url.searchParams.get("to"),
-      );
+      const window = parseWindow(url.searchParams.get("from"), url.searchParams.get("to"));
       const result = await runCollection(env, window);
       return Response.json(publicResult(result), {
         status: result.status === "failed" ? 502 : 200,
       });
     } catch (error) {
-      return Response.json(
-        { error: publicError(error) },
-        { status: 400 },
-      );
+      return Response.json({ error: publicError(error) }, { status: 400 });
     }
   },
 
@@ -74,9 +66,9 @@ async function runCollection(
   let transactionCount = 0;
 
   try {
-    const credential = await atStage("credential", async () => parseCredential(
-      requiredSecret(env.SONY_BANK_CREDENTIAL_JSON, "SONY_BANK_CREDENTIAL_JSON"),
-    ));
+    const credential = await atStage("credential", async () =>
+      parseCredential(requiredSecret(env.SONY_BANK_CREDENTIAL_JSON, "SONY_BANK_CREDENTIAL_JSON")),
+    );
     const collection = await collectSonyBank({
       credential,
       from: window.from,
@@ -86,12 +78,14 @@ async function runCollection(
     transactionCount = collection.transactionCount;
     for (const artifact of collection.artifacts) {
       try {
-        artifacts.push(await storeArtifact({
-          bucket: env.SNAPSHOTS,
-          prefix,
-          runId,
-          artifact,
-        }));
+        artifacts.push(
+          await storeArtifact({
+            bucket: env.SNAPSHOTS,
+            prefix,
+            runId,
+            artifact,
+          }),
+        );
       } catch (error) {
         failures.push(failure(`r2:${artifact.dataset}`, error));
       }
@@ -101,15 +95,15 @@ async function runCollection(
   }
 
   for (const entry of failures) {
-    emitDiagnostic("error", { event: "sony-bank-collection-failure", runId, phase: "collection", ...entry });
+    emitDiagnostic("error", {
+      event: "sony-bank-collection-failure",
+      runId,
+      phase: "collection",
+      ...entry,
+    });
   }
   const completedAt = new Date().toISOString();
-  const status =
-    failures.length === 0
-      ? "success"
-      : artifacts.length === 0
-        ? "failed"
-        : "partial";
+  const status = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
   const manifest: CollectionManifest = {
     schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
     source: "sony-bank",
@@ -127,11 +121,19 @@ async function runCollection(
     prefix,
     manifest,
   }).catch(() => {
-    emitDiagnostic("error", { event: "sony-bank-manifest-write-failed", runId, phase: "manifest-write" });
+    emitDiagnostic("error", {
+      event: "sony-bank-manifest-write-failed",
+      runId,
+      phase: "manifest-write",
+    });
     throw new Error("manifest_write_failed");
   });
   const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey).catch(() => {
-    emitDiagnostic("error", { event: "sony-bank-raw-evidence-import-failed", runId, phase: "raw-evidence-import" });
+    emitDiagnostic("error", {
+      event: "sony-bank-raw-evidence-import-failed",
+      runId,
+      phase: "raw-evidence-import",
+    });
     throw new Error("raw_evidence_import_failed");
   });
   emitDiagnostic("log", {
@@ -148,10 +150,7 @@ async function runCollection(
   return { ...manifest, manifestKey, central };
 }
 
-function parseWindow(
-  from: string | null,
-  to: string | null,
-): { from: string; to: string } {
+function parseWindow(from: string | null, to: string | null): { from: string; to: string } {
   if (from === null && to === null) return defaultWindow(new Date());
   if (!from || !to) throw new Error("from and to must be specified together");
   if (
@@ -165,9 +164,7 @@ function parseWindow(
   }
   const days =
     Math.floor(
-      (Date.parse(`${to}T00:00:00.000Z`) -
-        Date.parse(`${from}T00:00:00.000Z`)) /
-        86_400_000,
+      (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / 86_400_000,
     ) + 1;
   if (days > 366) throw new Error("a trigger window must not exceed 366 days");
   return { from, to };
@@ -183,9 +180,7 @@ function validDate(value: string): boolean {
 }
 
 function authorized(request: Request, expected: string | undefined): boolean {
-  const provided = request.headers
-    .get("authorization")
-    ?.match(/^Bearer\s+(.+)$/iu)?.[1];
+  const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
   if (!provided || !expected) return false;
   const left = new TextEncoder().encode(provided);
   const right = new TextEncoder().encode(expected);
@@ -214,17 +209,18 @@ function publicResult(result: CollectionResult): object {
     artifactCount: result.artifacts.length,
     failureCount: result.failures.length,
     manifestKey: result.manifestKey,
-    central: result.central.status === "sealed"
-      ? {
-          status: result.central.status,
-          centralRunId: result.central.centralRunId,
-          sealed: result.central.sealed,
-        }
-      : {
-          status: result.central.status,
-          reason: result.central.reason,
-          nextOffset: result.central.nextOffset,
-        },
+    central:
+      result.central.status === "sealed"
+        ? {
+            status: result.central.status,
+            centralRunId: result.central.centralRunId,
+            sealed: result.central.sealed,
+          }
+        : {
+            status: result.central.status,
+            reason: result.central.reason,
+            nextOffset: result.central.nextOffset,
+          },
   };
 }
 

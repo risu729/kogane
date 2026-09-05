@@ -25,8 +25,7 @@ export function recordedDate(value: string | null): string | null {
     day = Number(match[3]);
   const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
   const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  if (month < 1 || month > 12 || day < 1 || day > (days[month - 1] ?? 0))
-    return null;
+  if (month < 1 || month > 12 || day < 1 || day > (days[month - 1] ?? 0)) return null;
   return value.slice(0, 10);
 }
 export function matchesSourceAccount(
@@ -35,15 +34,10 @@ export function matchesSourceAccount(
 ): boolean {
   return (
     (!filters.source || row.source_id === filters.source) &&
-    (!filters.account ||
-      JSON.stringify([row.source_id, row.source_account]) === filters.account)
+    (!filters.account || JSON.stringify([row.source_id, row.source_account]) === filters.account)
   );
 }
-export function matchesDates(
-  value: string | null,
-  from: string,
-  to: string,
-): boolean {
+export function matchesDates(value: string | null, from: string, to: string): boolean {
   if (!from && !to) return true;
   const date = recordedDate(value);
   return date !== null && (!from || date >= from) && (!to || date <= to);

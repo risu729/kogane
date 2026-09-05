@@ -21,7 +21,8 @@ const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const MONTH = /^\d{6}$/u;
 const PAGE_GROUP_KEY = /^(?:\d{6}|card-\d{3}-\d{6})$/u;
 const RUN_ID = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/u;
-const RECORD_KEY = /^vpass\/(\d{4})\/(\d{2})\/(\d{2})\/(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)(?:\/(card-(\d{3})))?\/(manifest|error)\.json$/u;
+const RECORD_KEY =
+  /^vpass\/(\d{4})\/(\d{2})\/(\d{2})\/(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)(?:\/(card-(\d{3})))?\/(manifest|error)\.json$/u;
 
 type JsonObject = Record<string, unknown>;
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
@@ -233,10 +234,7 @@ export async function importVpassRun(options: {
         reason: "worker_invocation_limit",
         artifactCount: plans.length,
         nextOffset: end,
-        continuation: await encodeTransferState(
-          { ...state, offset: end },
-          options.fingerprintKey,
-        ),
+        continuation: await encodeTransferState({ ...state, offset: end }, options.fingerprintKey),
       };
     }
 
@@ -377,9 +375,7 @@ async function loadErrorRecord(
   );
   const startedAt = requiredIso(value.startedAt, "error_started_at_invalid");
   const failedAt = requiredIso(value.failedAt, "error_failed_at_invalid");
-  const expectedObjectCount = !path.cardLabel && prefixKeys.length > 1
-    ? prefixKeys.length - 2
-    : 1;
+  const expectedObjectCount = !path.cardLabel && prefixKeys.length > 1 ? prefixKeys.length - 2 : 1;
   if (
     value.runId !== path.runId ||
     startedAt !== runIdToIso(path.runId) ||
@@ -391,17 +387,10 @@ async function loadErrorRecord(
     throw new ImportError(409, "error_semantics_invalid");
   }
   if (!path.cardLabel && prefixKeys.length > 1) {
-    return loadLegacyPartialError(
-      bucket,
-      value,
-      recordKey,
-      path,
-      prefixKeys,
-      startedAt,
-      failedAt,
-    );
+    return loadLegacyPartialError(bucket, value, recordKey, path, prefixKeys, startedAt, failedAt);
   }
-  if (!sameStrings(prefixKeys, [recordKey])) throw new ImportError(409, "prefix_inventory_mismatch");
+  if (!sameStrings(prefixKeys, [recordKey]))
+    throw new ImportError(409, "prefix_inventory_mismatch");
   const safeDetails = parseSafeError(value.message);
   const centralValue = {
     schemaVersion: "vpass-worker-error-v1",
@@ -427,13 +416,15 @@ async function loadErrorRecord(
       schemaVersion: "vpass-worker-error-v1",
       sourceArtifactCount: 1,
     },
-    artifacts: [{
-      artifactKey: "error.json",
-      dataset: "collector-error",
-      sourceKey: recordKey,
-      bytes,
-      sha256: await sha256Hex(bytes),
-    }],
+    artifacts: [
+      {
+        artifactKey: "error.json",
+        dataset: "collector-error",
+        sourceKey: recordKey,
+        bytes,
+        sha256: await sha256Hex(bytes),
+      },
+    ],
     pageGroups: [],
   };
 }
@@ -447,17 +438,17 @@ async function loadLegacyPartialError(
   startedAt: string,
   failedAt: string,
 ): Promise<LoadedRun> {
-  if (typeof value.message !== "string" || value.message.length < 1 || value.message.length > 2_000 ||
-      /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/u.test(value.message)) {
+  if (
+    typeof value.message !== "string" ||
+    value.message.length < 1 ||
+    value.message.length > 2_000 ||
+    /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/u.test(value.message)
+  ) {
     throw new ImportError(409, "error_message_invalid");
   }
   const cardListKey = `${path.prefix}session/card-list.json`;
   if (!prefixKeys.includes(cardListKey)) throw new ImportError(409, "legacy_card_list_missing");
-  const cardListObject = await readSourceObject(
-    bucket,
-    cardListKey,
-    MAX_SOURCE_OBJECT_BYTES,
-  );
+  const cardListObject = await readSourceObject(bucket, cardListKey, MAX_SOURCE_OBJECT_BYTES);
   const cardList = parseEnvelopeBytes(cardListObject.bytes, "card_list_json_invalid");
   const cards = cardListEntries(cardList);
   const cardObject = new RegExp(
@@ -484,7 +475,11 @@ async function loadLegacyPartialError(
     const match = direct ?? page!;
     const index = Number(match[2]);
     const label = match[1]!;
-    if (!Number.isSafeInteger(index) || index < 1 || label !== `card-${String(index).padStart(3, "0")}`) {
+    if (
+      !Number.isSafeInteger(index) ||
+      index < 1 ||
+      label !== `card-${String(index).padStart(3, "0")}`
+    ) {
       throw new ImportError(409, "legacy_card_inventory_invalid");
     }
     const group: LegacyCard = groups.get(index) ?? {
@@ -509,8 +504,13 @@ async function loadLegacyPartialError(
     groups.set(index, group);
   }
   const ordered = [...groups.values()].sort((left, right) => left.index - right.index);
-  if (ordered.length < 1 || ordered.length > cards.length ||
-      ordered.some((group, index) => group.index !== index + 1 || !group.selectKey || !group.discoveryKey)) {
+  if (
+    ordered.length < 1 ||
+    ordered.length > cards.length ||
+    ordered.some(
+      (group, index) => group.index !== index + 1 || !group.selectKey || !group.discoveryKey,
+    )
+  ) {
     throw new ImportError(409, "legacy_card_inventory_invalid");
   }
 
@@ -525,7 +525,11 @@ async function loadLegacyPartialError(
   );
   const pageGroups: Array<{ key: string; count: number }> = [];
   for (const [cardOffset, group] of ordered.entries()) {
-    const selectionObject = await readSourceObject(bucket, group.selectKey!, MAX_SOURCE_OBJECT_BYTES);
+    const selectionObject = await readSourceObject(
+      bucket,
+      group.selectKey!,
+      MAX_SOURCE_OBJECT_BYTES,
+    );
     const selection = parseEnvelopeBytes(selectionObject.bytes, "card_selection_json_invalid");
     await addSanitizedEnvelope(
       artifacts,
@@ -534,7 +538,11 @@ async function loadLegacyPartialError(
       group.selectKey!,
       selection,
     );
-    const discoveryObject = await readSourceObject(bucket, group.discoveryKey!, MAX_SOURCE_OBJECT_BYTES);
+    const discoveryObject = await readSourceObject(
+      bucket,
+      group.discoveryKey!,
+      MAX_SOURCE_OBJECT_BYTES,
+    );
     const discovery = parseEnvelopeBytes(discoveryObject.bytes, "month_discovery_json_invalid");
     await addSanitizedEnvelope(
       artifacts,
@@ -545,8 +553,10 @@ async function loadLegacyPartialError(
     );
     const discovered = availableMonths(discovery);
     const captured = discovered.filter((month) => group.pages.has(month));
-    if (!sameStrings([...group.pages.keys()].sort(), captured.slice().sort()) ||
-        captured.some((month, index) => month !== discovered[index])) {
+    if (
+      !sameStrings([...group.pages.keys()].sort(), captured.slice().sort()) ||
+      captured.some((month, index) => month !== discovered[index])
+    ) {
       throw new ImportError(409, "legacy_month_complement_invalid");
     }
     const isFinalCard = cardOffset === ordered.length - 1;
@@ -568,13 +578,19 @@ async function loadLegacyPartialError(
         (total, page) => total + statementPage(page.envelope, page.kind).rows,
         0,
       );
-      const mayBeIncomplete = isFinalCard && monthOffset === captured.length - 1 &&
-        captured.length === discovered.length;
+      const mayBeIncomplete =
+        isFinalCard && monthOffset === captured.length - 1 && captured.length === discovered.length;
       try {
         validateMonthPages(month, pages, { pages: pages.length, transactions }, transactions);
       } catch (error) {
-        if (!(mayBeIncomplete && error instanceof ImportError &&
-            error.code === "statement_pagination_incomplete")) throw error;
+        if (
+          !(
+            mayBeIncomplete &&
+            error instanceof ImportError &&
+            error.code === "statement_pagination_incomplete"
+          )
+        )
+          throw error;
       }
       const pageGroupKey = `${group.label}-${month}`;
       pageGroups.push({ key: pageGroupKey, count: pages.length });
@@ -642,15 +658,19 @@ async function loadCardSnapshotManifest(
   if (manifest.objectCount !== 2) throw new ImportError(409, "manifest_object_count_mismatch");
   const snapshotObject = await readSourceObject(bucket, snapshotKey, MAX_SOURCE_OBJECT_BYTES);
   const snapshot = parseJsonBytes(snapshotObject.bytes, "snapshot_json_invalid");
-  exactObjectKeys(snapshot, [
-    "format",
-    "runId",
-    "selectedCardIndex",
-    "cardListRawJson",
-    "selectCardRawJson",
-    "webMeisaiTopRawJson",
-    "months",
-  ], "snapshot_schema_invalid");
+  exactObjectKeys(
+    snapshot,
+    [
+      "format",
+      "runId",
+      "selectedCardIndex",
+      "cardListRawJson",
+      "selectCardRawJson",
+      "webMeisaiTopRawJson",
+      "months",
+    ],
+    "snapshot_schema_invalid",
+  );
   if (
     snapshot.format !== "kogane-vpass-r2-snapshot/v1" ||
     snapshot.runId !== path.runId ||
@@ -664,7 +684,10 @@ async function loadCardSnapshotManifest(
     throw new ImportError(409, "card_inventory_mismatch");
   }
   const selection = parseEnvelopeString(snapshot.selectCardRawJson, "card_selection_json_invalid");
-  const discovery = parseEnvelopeString(snapshot.webMeisaiTopRawJson, "month_discovery_json_invalid");
+  const discovery = parseEnvelopeString(
+    snapshot.webMeisaiTopRawJson,
+    "month_discovery_json_invalid",
+  );
   if (!sameStrings(availableMonths(discovery), Object.keys(manifest.months).sort().reverse())) {
     throw new ImportError(409, "month_discovery_mismatch");
   }
@@ -674,8 +697,20 @@ async function loadCardSnapshotManifest(
   }
   const artifacts: VerifiedArtifact[] = [];
   await addSanitizedEnvelope(artifacts, "card-list.json", "card-list", snapshotKey, cardList, true);
-  await addSanitizedEnvelope(artifacts, "select-card.json", "card-selection", snapshotKey, selection);
-  await addSanitizedEnvelope(artifacts, "web-meisai-top.json", "month-discovery", snapshotKey, discovery);
+  await addSanitizedEnvelope(
+    artifacts,
+    "select-card.json",
+    "card-selection",
+    snapshotKey,
+    selection,
+  );
+  await addSanitizedEnvelope(
+    artifacts,
+    "web-meisai-top.json",
+    "month-discovery",
+    snapshotKey,
+    discovery,
+  );
   for (const month of Object.keys(manifest.months).sort().reverse()) {
     const capture = requiredRecord(months[month], "snapshot_month_invalid");
     exactObjectKeys(capture, ["pages", "transactionCount"], "snapshot_month_invalid");
@@ -719,7 +754,10 @@ async function loadCardSnapshotManifest(
   return {
     record: sourceRecord(manifest, recordKey, path, "vpass-worker-card-v1"),
     artifacts,
-    pageGroups: Object.entries(manifest.months).map(([key, summary]) => ({ key, count: summary.pages })),
+    pageGroups: Object.entries(manifest.months).map(([key, summary]) => ({
+      key,
+      count: summary.pages,
+    })),
   };
 }
 
@@ -760,7 +798,13 @@ async function loadDiscreteManifest(
     throw new ImportError(409, "month_discovery_mismatch");
   }
   const artifacts: VerifiedArtifact[] = [];
-  await addSanitizedEnvelope(artifacts, "web-meisai-top.json", "month-discovery", discoveryKey, discovery);
+  await addSanitizedEnvelope(
+    artifacts,
+    "web-meisai-top.json",
+    "month-discovery",
+    discoveryKey,
+    discovery,
+  );
   for (const month of Object.keys(manifest.months).sort().reverse()) {
     const descriptors = grouped.get(month)!.sort((left, right) => left.index - right.index);
     const pages: Array<{ kind: "top" | "answer"; index: number; envelope: JsonObject }> = [];
@@ -797,7 +841,10 @@ async function loadDiscreteManifest(
   return {
     record: sourceRecord(manifest, recordKey, path, "vpass-worker-single-card-v1"),
     artifacts,
-    pageGroups: Object.entries(manifest.months).map(([key, summary]) => ({ key, count: summary.pages })),
+    pageGroups: Object.entries(manifest.months).map(([key, summary]) => ({
+      key,
+      count: summary.pages,
+    })),
   };
 }
 
@@ -857,7 +904,10 @@ function parseSuccessManifest(
     if (!MONTH.test(month)) throw new ImportError(409, "manifest_month_invalid");
     const summary = requiredRecord(summaryValue, "manifest_month_invalid");
     exactObjectKeys(summary, ["pages", "transactions"], "manifest_month_invalid");
-    if (!boundedInteger(summary.pages, 0, 100) || !boundedInteger(summary.transactions, 0, 100_000)) {
+    if (
+      !boundedInteger(summary.pages, 0, 100) ||
+      !boundedInteger(summary.transactions, 0, 100_000)
+    ) {
       throw new ImportError(409, "manifest_month_invalid");
     }
     months[month] = { pages: summary.pages, transactions: summary.transactions };
@@ -893,7 +943,9 @@ function parseSuccessManifest(
     pageCount: value.pageCount,
     transactionCount: value.transactionCount,
     objectCount: value.objectCount,
-    ...(cardScoped ? { cardCount: cardCount as number, selectedCardIndex: selectedCardIndex as number } : {}),
+    ...(cardScoped
+      ? { cardCount: cardCount as number, selectedCardIndex: selectedCardIndex as number }
+      : {}),
     months,
   };
 }
@@ -926,10 +978,13 @@ function sanitizedManifestBytes(
   const months: Record<string, JsonValue> = Object.fromEntries(
     Object.entries(manifest.months)
       .sort(([left], [right]) => binaryCompare(left, right))
-      .map(([month, summary]) => [month, {
-        pages: summary.pages,
-        transactions: summary.transactions,
-      }]),
+      .map(([month, summary]) => [
+        month,
+        {
+          pages: summary.pages,
+          transactions: summary.transactions,
+        },
+      ]),
   );
   return encodeCanonical({
     schemaVersion,
@@ -975,8 +1030,10 @@ function parseSafeError(value: unknown): Record<string, JsonValue> {
     typeof details.errorType !== "string" ||
     !/^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(details.errorType) ||
     !(details.httpStatus === undefined || boundedInteger(details.httpStatus, 100, 599)) ||
-    !(details.code === undefined ||
-      (typeof details.code === "string" && /^[a-z0-9_-]{1,100}$/u.test(details.code)))
+    !(
+      details.code === undefined ||
+      (typeof details.code === "string" && /^[a-z0-9_-]{1,100}$/u.test(details.code))
+    )
   ) {
     throw new ImportError(409, "error_message_invalid");
   }
@@ -1019,8 +1076,8 @@ function validateMonthPages(
     const seen = new Set<string>();
     for (const [index, page] of parsed.entries()) {
       const terminal =
-        page.allCount !== null && page.nextPageRow !== null && page.allCount < page.nextPageRow ||
-        page.rows === 0 && index > 0;
+        (page.allCount !== null && page.nextPageRow !== null && page.allCount < page.nextPageRow) ||
+        (page.rows === 0 && index > 0);
       if (index === parsed.length - 1) {
         if (!terminal) throw new ImportError(409, "statement_pagination_incomplete");
       } else {
@@ -1106,12 +1163,7 @@ function sanitizeEnvelope(envelope: JsonObject, cardList: boolean): JsonValue {
   const sanitized = sanitizeJson(envelope, false);
   if (!isRecord(sanitized)) throw new ImportError(409, "sanitizer_output_invalid");
   if (cardList) {
-    const bean = objectAt(
-      sanitized,
-      "body",
-      "content",
-      "DropdownListInitDisplayServiceBean",
-    );
+    const bean = objectAt(sanitized, "body", "content", "DropdownListInitDisplayServiceBean");
     const list = bean?.multiCardInfoList;
     if (!Array.isArray(list)) throw new ImportError(409, "card_inventory_invalid");
     bean!.multiCardInfoList = list.map((entry, index) => {
@@ -1151,7 +1203,9 @@ function sanitizeJson(value: unknown, sensitiveContext: boolean): JsonValue {
 }
 
 function sensitiveKey(key: string): boolean {
-  return /(?:auth|token|session|cookie|password|userid|device|csrf|card.*(?:key|id)|identify)/iu.test(key);
+  return /(?:auth|token|session|cookie|password|userid|device|csrf|card.*(?:key|id)|identify)/iu.test(
+    key,
+  );
 }
 
 function assertSanitized(value: JsonValue, cardList: boolean): void {
@@ -1176,10 +1230,15 @@ function assertSanitized(value: JsonValue, cardList: boolean): void {
       "content",
       "DropdownListInitDisplayServiceBean",
     )?.multiCardInfoList;
-    if (!Array.isArray(list) || list.some((entry, index) =>
-      !isRecord(entry) ||
-      entry.name !== `card-${String(index + 1).padStart(3, "0")}` ||
-      entry.value !== "<redacted-card-reference>")) {
+    if (
+      !Array.isArray(list) ||
+      list.some(
+        (entry, index) =>
+          !isRecord(entry) ||
+          entry.name !== `card-${String(index + 1).padStart(3, "0")}` ||
+          entry.value !== "<redacted-card-reference>",
+      )
+    ) {
       throw new ImportError(409, "sanitizer_card_reference_retained");
     }
   }
@@ -1226,8 +1285,12 @@ function cardListEntries(envelope: JsonObject): JsonObject[] {
   return entries.map((entry) => {
     const card = requiredRecord(entry, "card_inventory_invalid");
     if (
-      typeof card.name !== "string" || card.name.length < 1 || card.name.length > 500 ||
-      typeof card.value !== "string" || card.value.length < 1 || card.value.length > 2_000
+      typeof card.name !== "string" ||
+      card.name.length < 1 ||
+      card.name.length > 500 ||
+      typeof card.value !== "string" ||
+      card.value.length < 1 ||
+      card.value.length > 2_000
     ) {
       throw new ImportError(409, "card_inventory_invalid");
     }
@@ -1276,7 +1339,8 @@ async function readSourceObject(
 ): Promise<{ bytes: Uint8Array; sha256: string }> {
   const object = await bucket.get(key);
   if (!object) throw new ImportError(409, "source_object_missing");
-  if (object.size < 1 || object.size > maximum) throw new ImportError(409, "source_object_size_invalid");
+  if (object.size < 1 || object.size > maximum)
+    throw new ImportError(409, "source_object_size_invalid");
   if (object.httpMetadata?.contentType !== SOURCE_CONTENT_TYPE) {
     throw new ImportError(409, "source_content_type_mismatch");
   }
@@ -1317,19 +1381,21 @@ async function artifactPlans(
 ): Promise<ArtifactPlan[]> {
   const plans: ArtifactPlan[] = [];
   for (const [sequence, artifact] of validated.artifacts.entries()) {
-    const pageGroupId = artifact.pageGroupKey === undefined
-      ? null
-      : pageGroups.find((entry) => entry.key === artifact.pageGroupKey)?.id;
+    const pageGroupId =
+      artifact.pageGroupKey === undefined
+        ? null
+        : pageGroups.find((entry) => entry.key === artifact.pageGroupKey)?.id;
     if (pageGroupId === undefined) throw new ImportError(400, "transfer_page_group_mismatch");
     const descriptor = normalizedDescriptor({
       artifactKey: artifact.artifactKey,
-      artifactRole: artifact.dataset === "collector-manifest"
-        ? "collector_derived"
-        : artifact.dataset === "collector-error"
-          ? "collector_report"
-          : artifact.dataset === "statement-page"
-            ? "provider_response"
-            : "collector_context",
+      artifactRole:
+        artifact.dataset === "collector-manifest"
+          ? "collector_derived"
+          : artifact.dataset === "collector-error"
+            ? "collector_report"
+            : artifact.dataset === "statement-page"
+              ? "provider_response"
+              : "collector_context",
       dataset: artifact.dataset,
       formatId: `vpass-${artifact.dataset}-json`,
       fetchedAtMs: Date.parse(validated.record.completedAt),
@@ -1464,16 +1530,20 @@ async function decodeTransferState(token: string, keyHex: string): Promise<Trans
     throw new ImportError(400, "transfer_token_invalid");
   }
   const input = requiredRecord(parsed, "transfer_token_invalid");
-  exactObjectKeys(input, [
-    "v",
-    "recordKey",
-    "centralRunId",
-    "unitId",
-    "pageGroups",
-    "inventoryId",
-    "inventorySha256",
-    "offset",
-  ], "transfer_token_invalid");
+  exactObjectKeys(
+    input,
+    [
+      "v",
+      "recordKey",
+      "centralRunId",
+      "unitId",
+      "pageGroups",
+      "inventoryId",
+      "inventorySha256",
+      "offset",
+    ],
+    "transfer_token_invalid",
+  );
   if (
     input.v !== 1 ||
     typeof input.recordKey !== "string" ||
@@ -1492,13 +1562,19 @@ async function decodeTransferState(token: string, keyHex: string): Promise<Trans
   const pageGroups = input.pageGroups.map((entry): PageGroupReference => {
     const value = requiredRecord(entry, "transfer_token_invalid");
     exactObjectKeys(value, ["key", "id"], "transfer_token_invalid");
-    if (typeof value.key !== "string" || !PAGE_GROUP_KEY.test(value.key) || !positiveInteger(value.id)) {
+    if (
+      typeof value.key !== "string" ||
+      !PAGE_GROUP_KEY.test(value.key) ||
+      !positiveInteger(value.id)
+    ) {
       throw new ImportError(400, "transfer_token_invalid");
     }
     return { key: value.key, id: value.id as number };
   });
-  if (new Set(pageGroups.map((entry) => entry.key)).size !== pageGroups.length ||
-      new Set(pageGroups.map((entry) => entry.id)).size !== pageGroups.length) {
+  if (
+    new Set(pageGroups.map((entry) => entry.key)).size !== pageGroups.length ||
+    new Set(pageGroups.map((entry) => entry.id)).size !== pageGroups.length
+  ) {
     throw new ImportError(400, "transfer_token_invalid");
   }
   return {
@@ -1518,7 +1594,10 @@ function validateTransferState(state: TransferState, loaded: LoadedRun, recordKe
   if (
     state.recordKey !== recordKey ||
     state.offset > loaded.artifacts.length ||
-    !sameStrings(state.pageGroups.map((entry) => entry.key), keys)
+    !sameStrings(
+      state.pageGroups.map((entry) => entry.key),
+      keys,
+    )
   ) {
     throw new ImportError(400, "transfer_state_mismatch");
   }
@@ -1554,8 +1633,9 @@ function timingSafeHexEqual(left: string, right: string): boolean {
 }
 
 function sortedInventory(plans: ArtifactPlan[]): CentralInventoryItem[] {
-  return plans.map((plan) => plan.inventory).sort((left, right) =>
-    binaryCompare(left.artifactKey, right.artifactKey));
+  return plans
+    .map((plan) => plan.inventory)
+    .sort((left, right) => binaryCompare(left.artifactKey, right.artifactKey));
 }
 
 function descriptorSha256(descriptor: JsonObject): Promise<string> {
@@ -1635,13 +1715,10 @@ function integer(value: unknown): number | null {
   return null;
 }
 
-function boundedInteger(
-  value: unknown,
-  minimum: number,
-  maximum: number,
-): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) &&
-    value >= minimum && value <= maximum;
+function boundedInteger(value: unknown, minimum: number, maximum: number): value is number {
+  return (
+    typeof value === "number" && Number.isSafeInteger(value) && value >= minimum && value <= maximum
+  );
 }
 
 function positiveInteger(value: unknown): boolean {

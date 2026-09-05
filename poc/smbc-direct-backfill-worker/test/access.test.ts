@@ -10,7 +10,9 @@ describe("accessJwtSubject", () => {
   test("rejects malformed and subject-free assertions", () => {
     expect(accessJwtSubject(null)).toBeNull();
     expect(accessJwtSubject("not-a-jwt")).toBeNull();
-    const payload = Buffer.from(JSON.stringify({ email: "user@example.com" })).toString("base64url");
+    const payload = Buffer.from(JSON.stringify({ email: "user@example.com" })).toString(
+      "base64url",
+    );
     expect(accessJwtSubject(`header.${payload}.signature`)).toBeNull();
   });
 });

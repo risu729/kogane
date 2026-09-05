@@ -66,9 +66,12 @@ class FakeCentral {
     }
     if (/\/artifacts$/u.test(path)) {
       const value = this.nextDescriptor++;
-      return Response.json({
-        descriptorSha256: value.toString(16).padStart(64, "0"),
-      }, { status: 201 });
+      return Response.json(
+        {
+          descriptorSha256: value.toString(16).padStart(64, "0"),
+        },
+        { status: 201 },
+      );
     }
     if (/\/reports$/u.test(path)) return immutableReport(this.reports, path, requestBody);
     if (/\/seal$/u.test(path)) return Response.json({ sealed: true }, { status: 201 });
@@ -80,14 +83,19 @@ describe("SBI VC Trade staged-run importer", () => {
   test("validates the complete run, preserves exact bytes, and replays idempotently", async () => {
     const bucket = new FakeBucket();
     const bodies = new Map<string, Uint8Array>();
-    const manifest = await storeRun(bucket, [
-      staticArtifact("cash-balances"),
-      staticArtifact("account-margin"),
-      staticArtifact("position-summary"),
-      staticArtifact("executions-recent-page-0001"),
-      pageArtifact("executions-historical-page-0001", 1, 1),
-      pageArtifact("cashflows-historical-page-0001", 0, 0),
-    ], [], bodies);
+    const manifest = await storeRun(
+      bucket,
+      [
+        staticArtifact("cash-balances"),
+        staticArtifact("account-margin"),
+        staticArtifact("position-summary"),
+        staticArtifact("executions-recent-page-0001"),
+        pageArtifact("executions-historical-page-0001", 1, 1),
+        pageArtifact("cashflows-historical-page-0001", 0, 0),
+      ],
+      [],
+      bodies,
+    );
     const legacyArtifact = bucket.objects.get(manifest.artifacts[0]!.key)!;
     delete legacyArtifact.customMetadata.source;
     delete legacyArtifact.customMetadata.runId;
@@ -124,13 +132,17 @@ describe("SBI VC Trade staged-run importer", () => {
 
   test("accepts a partial prefix only when the R2 failure names the exact next dataset", async () => {
     const bucket = new FakeBucket();
-    await storeRun(bucket, [
-      staticArtifact("cash-balances"),
-      staticArtifact("account-margin"),
-      staticArtifact("position-summary"),
-      staticArtifact("executions-recent-page-0001"),
-      pageArtifact("executions-historical-page-0001", 1, 1),
-    ], [{ operation: "r2_cashflows-historical-page-0001", errorCode: "r2_put_failed" }]);
+    await storeRun(
+      bucket,
+      [
+        staticArtifact("cash-balances"),
+        staticArtifact("account-margin"),
+        staticArtifact("position-summary"),
+        staticArtifact("executions-recent-page-0001"),
+        pageArtifact("executions-historical-page-0001", 1, 1),
+      ],
+      [{ operation: "r2_cashflows-historical-page-0001", errorCode: "r2_put_failed" }],
+    );
     await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({
       artifactCount: 6,
       sealed: true,
@@ -149,15 +161,19 @@ describe("SBI VC Trade staged-run importer", () => {
 
   test("rejects a page after a terminal page before creating central state", async () => {
     const bucket = new FakeBucket();
-    await storeRun(bucket, [
-      staticArtifact("cash-balances"),
-      staticArtifact("account-margin"),
-      staticArtifact("position-summary"),
-      staticArtifact("executions-recent-page-0001"),
-      pageArtifact("executions-historical-page-0001", 1, 1),
-      pageArtifact("executions-historical-page-0002", 0, 1),
-      pageArtifact("cashflows-historical-page-0001", 0, 0),
-    ], []);
+    await storeRun(
+      bucket,
+      [
+        staticArtifact("cash-balances"),
+        staticArtifact("account-margin"),
+        staticArtifact("position-summary"),
+        staticArtifact("executions-recent-page-0001"),
+        pageArtifact("executions-historical-page-0001", 1, 1),
+        pageArtifact("executions-historical-page-0002", 0, 1),
+        pageArtifact("cashflows-historical-page-0001", 0, 0),
+      ],
+      [],
+    );
     const central = new FakeCentral();
     await expect(importRun(bucket, central)).rejects.toMatchObject({
       status: 400,
@@ -168,23 +184,32 @@ describe("SBI VC Trade staged-run importer", () => {
 
   test("catalogues the final response that caused a collect pagination failure", async () => {
     for (const pages of [
-      [pageArtifact("executions-historical-page-0001", 30, 31),
-        pageArtifact("executions-historical-page-0002", 1, 32)],
+      [
+        pageArtifact("executions-historical-page-0001", 30, 31),
+        pageArtifact("executions-historical-page-0002", 1, 32),
+      ],
       [pageArtifact("executions-historical-page-0001", 1, 31)],
     ]) {
       const bucket = new FakeBucket();
-      await storeRun(bucket, [
-        staticArtifact("cash-balances"),
-        staticArtifact("account-margin"),
-        staticArtifact("position-summary"),
-        staticArtifact("executions-recent-page-0001"),
-        ...pages,
-      ], [{
-        operation: "collect",
-        errorCode: pages.length === 1
-          ? "executions_historical_pagination_length_mismatch"
-          : "executions_historical_pagination_total_changed",
-      }]);
+      await storeRun(
+        bucket,
+        [
+          staticArtifact("cash-balances"),
+          staticArtifact("account-margin"),
+          staticArtifact("position-summary"),
+          staticArtifact("executions-recent-page-0001"),
+          ...pages,
+        ],
+        [
+          {
+            operation: "collect",
+            errorCode:
+              pages.length === 1
+                ? "executions_historical_pagination_length_mismatch"
+                : "executions_historical_pagination_total_changed",
+          },
+        ],
+      );
       const central = new FakeCentral();
       await expect(importRun(bucket, central)).resolves.toMatchObject({
         sealed: true,
@@ -196,13 +221,17 @@ describe("SBI VC Trade staged-run importer", () => {
 
   test("does not waive semantic validation for a non-pagination collect failure", async () => {
     const bucket = new FakeBucket();
-    await storeRun(bucket, [
-      staticArtifact("cash-balances"),
-      staticArtifact("account-margin"),
-      staticArtifact("position-summary"),
-      staticArtifact("executions-recent-page-0001"),
-      pageArtifact("executions-historical-page-0001", 1, 31),
-    ], [{ operation: "collect", errorCode: "collector_http_503" }]);
+    await storeRun(
+      bucket,
+      [
+        staticArtifact("cash-balances"),
+        staticArtifact("account-margin"),
+        staticArtifact("position-summary"),
+        staticArtifact("executions-recent-page-0001"),
+        pageArtifact("executions-historical-page-0001", 1, 31),
+      ],
+      [{ operation: "collect", errorCode: "collector_http_503" }],
+    );
     const central = new FakeCentral();
     await expect(importRun(bucket, central)).rejects.toMatchObject({
       status: 400,
@@ -214,10 +243,13 @@ describe("SBI VC Trade staged-run importer", () => {
   test("rejects unexpected prefix objects and exact custom metadata mismatches", async () => {
     const bucket = new FakeBucket();
     await storeRun(bucket, [], [{ operation: "load_session", errorCode: "missing_session_seed" }]);
-    bucket.objects.set(`${PREFIX}unexpected.json`, stored(encode("{}"), {
-      dataset: "unexpected",
-      sha256: "0".repeat(64),
-    }));
+    bucket.objects.set(
+      `${PREFIX}unexpected.json`,
+      stored(encode("{}"), {
+        dataset: "unexpected",
+        sha256: "0".repeat(64),
+      }),
+    );
     const firstCentral = new FakeCentral();
     await expect(importRun(bucket, firstCentral)).rejects.toMatchObject({
       status: 409,
@@ -243,16 +275,15 @@ describe("SBI VC Trade staged-run importer", () => {
       staticArtifact("position-summary"),
       staticArtifact("executions-recent-page-0001"),
       ...Array.from({ length: 100 }, (_, index) =>
-        pageArtifact(
-          `executions-historical-page-${String(index + 1).padStart(4, "0")}`,
-          30,
-          3_001,
-        )),
+        pageArtifact(`executions-historical-page-${String(index + 1).padStart(4, "0")}`, 30, 3_001),
+      ),
     ];
-    await storeRun(bucket, entries, [{
-      operation: "collect",
-      errorCode: "executions_historical_page_limit_exceeded",
-    }]);
+    await storeRun(bucket, entries, [
+      {
+        operation: "collect",
+        errorCode: "executions_historical_page_limit_exceeded",
+      },
+    ]);
     const central = new FakeCentral();
     await expect(importRun(bucket, central)).rejects.toMatchObject({
       status: 409,
@@ -263,9 +294,11 @@ describe("SBI VC Trade staged-run importer", () => {
 
   test("rejects a checksum mismatch before central state is created", async () => {
     const bucket = new FakeBucket();
-    await storeRun(bucket, [
-      staticArtifact("cash-balances"),
-    ], [{ operation: "collect", errorCode: "collector_http_503" }]);
+    await storeRun(
+      bucket,
+      [staticArtifact("cash-balances")],
+      [{ operation: "collect", errorCode: "collector_http_503" }],
+    );
     const artifact = [...bucket.objects.values()][0]!;
     artifact.body[0] = artifact.body[0]! ^ 1;
     const central = new FakeCentral();
@@ -278,41 +311,45 @@ describe("SBI VC Trade staged-run importer", () => {
 
   test("parser rejects non-contiguous datasets and unknown manifest fields", async () => {
     const bucket = new FakeBucket();
-    await storeRun(bucket, [
-      staticArtifact("cash-balances"),
-      staticArtifact("position-summary"),
-    ], [{ operation: "collect", errorCode: "collector_http_503" }]);
-    expect(() => parseSbiVcManifest(
-      bucket.objects.get(MANIFEST_KEY)!.body,
-      MANIFEST_KEY,
-    )).toThrow("manifest_dataset_order_invalid");
+    await storeRun(
+      bucket,
+      [staticArtifact("cash-balances"), staticArtifact("position-summary")],
+      [{ operation: "collect", errorCode: "collector_http_503" }],
+    );
+    expect(() => parseSbiVcManifest(bucket.objects.get(MANIFEST_KEY)!.body, MANIFEST_KEY)).toThrow(
+      "manifest_dataset_order_invalid",
+    );
 
     const manifest = JSON.parse(decode(bucket.objects.get(MANIFEST_KEY)!.body));
     manifest.extra = true;
-    expect(() => parseSbiVcManifest(encode(JSON.stringify(manifest)), MANIFEST_KEY))
-      .toThrow("manifest_unknown_field");
+    expect(() => parseSbiVcManifest(encode(JSON.stringify(manifest)), MANIFEST_KEY)).toThrow(
+      "manifest_unknown_field",
+    );
   });
 
   test("does not accept an SBI Securities credential for the SBI VC route", async () => {
     const bucket = new FakeBucket();
     await storeRun(bucket, [], [{ operation: "load_session", errorCode: "missing_session_seed" }]);
-    await expect(importSbiVcRun({
-      bucket: bucket as unknown as R2Bucket,
-      centralService: new FakeCentral() as unknown as Fetcher,
-      centralToken: `collector-r2-sbi.${"s".repeat(32)}`,
-      fingerprintKey: FINGERPRINT_KEY,
-      importerVersion: "test-v1",
-      manifestKey: MANIFEST_KEY,
-    })).rejects.toThrow("central_auth_configuration_invalid");
+    await expect(
+      importSbiVcRun({
+        bucket: bucket as unknown as R2Bucket,
+        centralService: new FakeCentral() as unknown as Fetcher,
+        centralToken: `collector-r2-sbi.${"s".repeat(32)}`,
+        fingerprintKey: FINGERPRINT_KEY,
+        importerVersion: "test-v1",
+        manifestKey: MANIFEST_KEY,
+      }),
+    ).rejects.toThrow("central_auth_configuration_invalid");
   });
 });
 
 function staticArtifact(dataset: string) {
   return {
     dataset,
-    body: dataset === "executions-recent-page-0001"
-      ? { list: [{ synthetic: true }], totalSize: "1" }
-      : { synthetic: true, dataset },
+    body:
+      dataset === "executions-recent-page-0001"
+        ? { list: [{ synthetic: true }], totalSize: "1" }
+        : { synthetic: true, dataset },
   };
 }
 
@@ -334,16 +371,19 @@ async function storeRun(
 ) {
   const artifacts = [];
   for (const entry of entries) {
-    const body = encode(`{\"meta\":{\"status\":\"OK\"},\"body\":${JSON.stringify(entry.body)}}\n`);
+    const body = encode(`{"meta":{"status":"OK"},"body":${JSON.stringify(entry.body)}}\n`);
     const sha256 = await digest(body);
     const key = `${PREFIX}${entry.dataset}.json`;
     bodies.set(entry.dataset, body);
-    bucket.objects.set(key, stored(body, {
-      source: "sbi-vc-trade",
-      runId: RUN_ID,
-      dataset: entry.dataset,
-      sha256,
-    }));
+    bucket.objects.set(
+      key,
+      stored(body, {
+        source: "sbi-vc-trade",
+        runId: RUN_ID,
+        dataset: entry.dataset,
+        sha256,
+      }),
+    );
     artifacts.push({ dataset: entry.dataset, key, sha256, bytes: body.byteLength });
   }
   const manifest = {
@@ -362,11 +402,14 @@ async function storeRun(
 
 function replaceManifest(bucket: FakeBucket, manifest: Record<string, unknown>) {
   const body = encode(JSON.stringify(manifest));
-  bucket.objects.set(MANIFEST_KEY, stored(body, {
-    source: "sbi-vc-trade",
-    runId: RUN_ID,
-    status: String(manifest.status),
-  }));
+  bucket.objects.set(
+    MANIFEST_KEY,
+    stored(body, {
+      source: "sbi-vc-trade",
+      runId: RUN_ID,
+      status: String(manifest.status),
+    }),
+  );
 }
 
 function stored(body: Uint8Array, customMetadata: Record<string, string>): StoredObject {
@@ -390,9 +433,12 @@ function immutableReport(reports: Map<string, string>, path: string, body: strin
     return Response.json({ error: "immutable report conflict" }, { status: 409 });
   }
   reports.set(path, body);
-  return Response.json({ reused: previous !== undefined }, {
-    status: previous === undefined ? 201 : 200,
-  });
+  return Response.json(
+    { reused: previous !== undefined },
+    {
+      status: previous === undefined ? 201 : 200,
+    },
+  );
 }
 
 async function digest(body: Uint8Array): Promise<string> {

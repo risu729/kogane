@@ -9,10 +9,14 @@ type ResponseSchemaId =
 
 export function validateSbiShinseiResponse(schema: ResponseSchemaId, value: unknown): JsonObject {
   switch (schema) {
-    case "sbi-shinsei-top-balances-v1": return validateTopBalances(value);
-    case "sbi-shinsei-balance-summary-v1": return validateBalanceSummary(value);
-    case "sbi-shinsei-exchange-rate-v1": return validateExchangeRate(value);
-    case "sbi-shinsei-yen-deposit-account-v1": return validateYenDeposit(value);
+    case "sbi-shinsei-top-balances-v1":
+      return validateTopBalances(value);
+    case "sbi-shinsei-balance-summary-v1":
+      return validateBalanceSummary(value);
+    case "sbi-shinsei-exchange-rate-v1":
+      return validateExchangeRate(value);
+    case "sbi-shinsei-yen-deposit-account-v1":
+      return validateYenDeposit(value);
   }
 }
 
@@ -41,16 +45,20 @@ function validateTopBalances(value: unknown): JsonObject {
     ],
     ["savingsDetails"],
   );
-  optionalScalars(overviewResponse, [
-    "totalCreditBalance",
-    "totalDebitBalance",
-    "savingsBalance",
-    "tdBalance",
-    "sdBalance",
-    "debuntureBalance",
-    "loanBalance",
-    "hyperYokinStatus",
-  ], "topBalances.overview.responseParam");
+  optionalScalars(
+    overviewResponse,
+    [
+      "totalCreditBalance",
+      "totalDebitBalance",
+      "savingsBalance",
+      "tdBalance",
+      "sdBalance",
+      "debuntureBalance",
+      "loanBalance",
+      "hyperYokinStatus",
+    ],
+    "topBalances.overview.responseParam",
+  );
   objectArray(
     overviewResponse.savingsDetails,
     "topBalances.overview.responseParam.savingsDetails",
@@ -73,15 +81,11 @@ function validateTopBalances(value: unknown): JsonObject {
     ],
     ["activityDetails"],
   );
-  optionalScalars(activityResponse, [
-    "type",
-    "fromDate",
-    "toDate",
-    "purgeflag",
-    "currentBalance",
-    "accountNo",
-    "currency",
-  ], "topBalances.activity.responseParam");
+  optionalScalars(
+    activityResponse,
+    ["type", "fromDate", "toDate", "purgeflag", "currentBalance", "accountNo", "currency"],
+    "topBalances.activity.responseParam",
+  );
   objectArray(
     activityResponse.activityDetails,
     "topBalances.activity.responseParam.activityDetails",
@@ -121,7 +125,11 @@ function validateBalanceSummary(value: unknown): JsonObject {
     ],
     [],
   );
-  optionalScalars(summaryResponse, Object.keys(summaryResponse), "balanceSummary.summary.responseParam");
+  optionalScalars(
+    summaryResponse,
+    Object.keys(summaryResponse),
+    "balanceSummary.summary.responseParam",
+  );
 
   const category = wrapper(response.category, "balanceSummary.category");
   const categoryResponse = exactObject(
@@ -136,7 +144,11 @@ function validateBalanceSummary(value: unknown): JsonObject {
     ],
     [],
   );
-  optionalScalars(categoryResponse, Object.keys(categoryResponse), "balanceSummary.category.responseParam");
+  optionalScalars(
+    categoryResponse,
+    Object.keys(categoryResponse),
+    "balanceSummary.category.responseParam",
+  );
 
   const branch = wrapper(response.branchFetch, "balanceSummary.branchFetch");
   const branchResponse = exactObject(
@@ -145,7 +157,11 @@ function validateBalanceSummary(value: unknown): JsonObject {
     ["branchCode", "branchName"],
     [],
   );
-  optionalScalars(branchResponse, Object.keys(branchResponse), "balanceSummary.branchFetch.responseParam");
+  optionalScalars(
+    branchResponse,
+    Object.keys(branchResponse),
+    "balanceSummary.branchFetch.responseParam",
+  );
   if (response.mutualFundBalance !== undefined) {
     if (
       typeof response.mutualFundBalance === "object" &&
@@ -181,19 +197,15 @@ function validateExchangeRate(value: unknown): JsonObject {
   if (informationResponse.transactionTime !== undefined) {
     scalar(informationResponse.transactionTime, "exchangeRate.transactionTime");
   }
-  objectArray(
-    informationResponse.exchangeRates,
-    "exchangeRate.exchangeRates",
-    (item, label) => {
-      const rate = exactObject(
-        item,
-        label,
-        ["currency", "customerCategory", "buyRate", "sellRate", "midRate"],
-        ["currency", "buyRate", "sellRate", "midRate"],
-      );
-      optionalScalars(rate, Object.keys(rate), label);
-    },
-  );
+  objectArray(informationResponse.exchangeRates, "exchangeRate.exchangeRates", (item, label) => {
+    const rate = exactObject(
+      item,
+      label,
+      ["currency", "customerCategory", "buyRate", "sellRate", "midRate"],
+      ["currency", "buyRate", "sellRate", "midRate"],
+    );
+    optionalScalars(rate, Object.keys(rate), label);
+  });
   return root;
 }
 
@@ -220,40 +232,40 @@ function validateYenDeposit(value: unknown): JsonObject {
     ],
     ["debitAccountDetails", "productDetails", "savingsDetails", "moduleDetails"],
   );
-  optionalScalars(response, [
-    "postingDate",
-    "transactionTime",
-    "customerCategory",
-    "sdBalance",
-    "fcyCASABalance",
-    "newCustStatus",
-  ], "yenDeposit.responseParam");
-  objectArray(response.savingsDetails, "yenDeposit.savingsDetails", validateSavings);
-  objectArray(
-    response.debitAccountDetails,
-    "yenDeposit.debitAccountDetails",
-    (item, label) => {
-      const debit = exactObject(
-        item,
-        label,
-        [
-          "accountNo",
-          "balance",
-          "currency",
-          "productCode",
-          "accountStatus",
-          "moduleCode",
-          "unitNo",
-          "maturityDate",
-          "valueDate",
-          "replicateFlag",
-          "productDescription",
-        ],
-        ["accountNo", "balance", "currency", "productCode"],
-      );
-      optionalScalars(debit, Object.keys(debit), label);
-    },
+  optionalScalars(
+    response,
+    [
+      "postingDate",
+      "transactionTime",
+      "customerCategory",
+      "sdBalance",
+      "fcyCASABalance",
+      "newCustStatus",
+    ],
+    "yenDeposit.responseParam",
   );
+  objectArray(response.savingsDetails, "yenDeposit.savingsDetails", validateSavings);
+  objectArray(response.debitAccountDetails, "yenDeposit.debitAccountDetails", (item, label) => {
+    const debit = exactObject(
+      item,
+      label,
+      [
+        "accountNo",
+        "balance",
+        "currency",
+        "productCode",
+        "accountStatus",
+        "moduleCode",
+        "unitNo",
+        "maturityDate",
+        "valueDate",
+        "replicateFlag",
+        "productDescription",
+      ],
+      ["accountNo", "balance", "currency", "productCode"],
+    );
+    optionalScalars(debit, Object.keys(debit), label);
+  });
   objectArray(response.productDetails, "yenDeposit.productDetails", (item, label) => {
     const product = exactObject(
       item,
@@ -444,15 +456,7 @@ function validateActivity(value: unknown, label: string): void {
   const activity = exactObject(
     value,
     label,
-    [
-      "txnReferenceNo",
-      "description",
-      "credit",
-      "debit",
-      "postingDate",
-      "balance",
-      "tradeTypeCode",
-    ],
+    ["txnReferenceNo", "description", "credit", "debit", "postingDate", "balance", "tradeTypeCode"],
     ["txnReferenceNo", "description", "postingDate", "balance"],
   );
   optionalScalars(activity, Object.keys(activity), label);
@@ -490,11 +494,7 @@ function objectArray(
   value.forEach((item, index) => validator(item, `${label}[${index}]`));
 }
 
-function optionalScalars(
-  value: JsonObject,
-  keys: readonly string[],
-  label: string,
-): void {
+function optionalScalars(value: JsonObject, keys: readonly string[], label: string): void {
   for (const key of keys) {
     if (value[key] !== undefined) scalar(value[key], `${label}.${key}`);
   }

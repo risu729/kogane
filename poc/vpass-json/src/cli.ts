@@ -33,7 +33,10 @@ interface RunManifest {
 }
 
 function defaultOutputDirectory(): string {
-  const stamp = new Date().toISOString().replaceAll(":", "-").replace(/\.\d{3}Z$/, "Z");
+  const stamp = new Date()
+    .toISOString()
+    .replaceAll(":", "-")
+    .replace(/\.\d{3}Z$/, "Z");
   return resolve("output", stamp);
 }
 

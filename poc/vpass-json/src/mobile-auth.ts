@@ -8,13 +8,10 @@ import {
   randomInt,
 } from "node:crypto";
 
-const RANDOM_ALPHABET =
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@+*<>?!#$%&'()=~|_-^";
+const RANDOM_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@+*<>?!#$%&'()=~|_-^";
 
-export const AUTH_KEY_SHA256 =
-  "6519fb233bf377b097ac4577d43db7782920ae649bb449db8daae9b6b1d0099e";
-export const CONFIG_KEY_SHA256 =
-  "43a1c7611ed69ceb1bcdedcb1c8093b0e411411adb31aaecbb12ca0a006c41ef";
+export const AUTH_KEY_SHA256 = "6519fb233bf377b097ac4577d43db7782920ae649bb449db8daae9b6b1d0099e";
+export const CONFIG_KEY_SHA256 = "43a1c7611ed69ceb1bcdedcb1c8093b0e411411adb31aaecbb12ca0a006c41ef";
 
 export interface FirstLoginAuthInput {
   loginId: string;
@@ -39,7 +36,11 @@ function sha256Hex(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-export function assertPublicKeyHash(pem: string | Uint8Array, expected: string, label: string): void {
+export function assertPublicKeyHash(
+  pem: string | Uint8Array,
+  expected: string,
+  label: string,
+): void {
   const actual = sha256Hex(pem);
   if (actual !== expected) {
     throw new Error(`${label} SHA-256 mismatch: expected ${expected}, got ${actual}`);
@@ -50,7 +51,9 @@ export function transformDeviceId(deviceId: string): string {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(deviceId)) {
     throw new Error("deviceId must be a UUID");
   }
-  const decimal = BigInt(`0x${deviceId.replaceAll("-", "")}`).toString(10).padStart(39, "0");
+  const decimal = BigInt(`0x${deviceId.replaceAll("-", "")}`)
+    .toString(10)
+    .padStart(39, "0");
   let sum = 0;
   let weight = 2;
   for (let index = decimal.length - 1; index >= 0; index -= 1) {
@@ -85,7 +88,7 @@ export function buildConfigPlaintext(input: ConfigAuthInput): string {
   const timestamp = input.timestampMilliseconds ?? Date.now();
   const companyCode = input.companyCode ?? "001";
   const deviceToken = input.deviceToken ?? "";
-  const digest = sha256Hex("" + "" + companyCode + CONFIG_AUTH_CONSTANT + timestamp);
+  const digest = sha256Hex(companyCode + CONFIG_AUTH_CONSTANT + timestamp);
   return [
     "",
     "",

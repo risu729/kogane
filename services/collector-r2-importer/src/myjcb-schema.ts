@@ -15,8 +15,6 @@ const MANIFEST_KEY =
   /^raw\/myjcb\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
 const CREDIT_PERIOD =
   /^(?:detailMonth-(?:[0-9]|1[0-7])|[0-9０-９年月日度お支払い分／/().（）.\-\s]{1,32})$/u;
-const DEBIT_PERIOD =
-  /^(?:seq-(?:[0-9]|1[0-4])|[0-9０-９年月日度未確定お振替差額発生デビット／/().（）.\-\s]{1,64})$/u;
 const UNOBSERVED_DATASETS = new Set([
   "debit-menu",
   "debit-detail",

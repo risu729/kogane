@@ -76,7 +76,12 @@ function isJavaScriptRequest(request) {
 }
 
 function tokenShapeSha256(source) {
-  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.Standard, source);
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.Latest,
+    false,
+    ts.LanguageVariant.Standard,
+    source,
+  );
   const hash = createHash("sha256");
   let token;
   do {
@@ -153,7 +158,9 @@ function charClasses(text) {
 
 function delimiterCounts(text) {
   const delimiters = ["&", "=", ":", ",", '"', ".", "-", "_", "/", "+"];
-  return Object.fromEntries(delimiters.map((delimiter) => [delimiter, text.split(delimiter).length - 1]));
+  return Object.fromEntries(
+    delimiters.map((delimiter) => [delimiter, text.split(delimiter).length - 1]),
+  );
 }
 
 function jsonShape(value, depth = 0) {
@@ -164,7 +171,9 @@ function jsonShape(value, depth = 0) {
     return {
       type: "array",
       length: value.length,
-      itemShapeHashes: [...new Set(itemShapes.map((shape) => sha256(JSON.stringify(shape))))].sort(),
+      itemShapeHashes: [
+        ...new Set(itemShapes.map((shape) => sha256(JSON.stringify(shape)))),
+      ].sort(),
     };
   }
   if (typeof value === "object") {
@@ -176,7 +185,11 @@ function jsonShape(value, depth = 0) {
     };
   }
   if (typeof value === "string") {
-    return { type: "string", byteLength: Buffer.byteLength(value), shapeSha256: textShapeSha256(value) };
+    return {
+      type: "string",
+      byteLength: Buffer.byteLength(value),
+      shapeSha256: textShapeSha256(value),
+    };
   }
   return { type: typeof value };
 }
@@ -206,7 +219,8 @@ function bodyStructure(body, contentType) {
     encoding = "urlencoded";
   }
   const compact = trimmed.replace(/\s/gu, "");
-  const base64Like = compact.length > 0 && compact.length % 4 === 0 && /^[A-Za-z0-9+/_=-]+$/u.test(compact);
+  const base64Like =
+    compact.length > 0 && compact.length % 4 === 0 && /^[A-Za-z0-9+/_=-]+$/u.test(compact);
   return {
     sha256: sha256(body),
     byteLength: body.byteLength,
@@ -255,7 +269,8 @@ function functionName(node) {
     return node.parent.name.text;
   }
   if (node.parent && ts.isPropertyAssignment(node.parent)) {
-    if (ts.isIdentifier(node.parent.name) || ts.isStringLiteralLike(node.parent.name)) return node.parent.name.text;
+    if (ts.isIdentifier(node.parent.name) || ts.isStringLiteralLike(node.parent.name))
+      return node.parent.name.text;
   }
   return null;
 }
@@ -279,10 +294,14 @@ function summarizeInitiatorFrame(frame, artifactsByUrl, sessionId) {
     functionNameLength: frame.functionName ? frame.functionName.length : 0,
   };
   const artifact = artifactLookup(artifactsByUrl, sessionId, frame.url);
-  if (!artifact || !Number.isInteger(frame.lineNumber) || !Number.isInteger(frame.columnNumber)) return summary;
+  if (!artifact || !Number.isInteger(frame.lineNumber) || !Number.isInteger(frame.columnNumber))
+    return summary;
   if (frame.lineNumber >= artifact.sourceFile.getLineStarts().length) return summary;
 
-  const position = artifact.sourceFile.getPositionOfLineAndCharacter(frame.lineNumber, frame.columnNumber);
+  const position = artifact.sourceFile.getPositionOfLineAndCharacter(
+    frame.lineNumber,
+    frame.columnNumber,
+  );
   let deepestFunction = null;
   let deepestCall = null;
   const visit = (node) => {
@@ -295,7 +314,9 @@ function summarizeInitiatorFrame(frame, artifactsByUrl, sessionId) {
 
   if (deepestCall) summary.call = safeCallee(deepestCall.expression);
   if (deepestFunction) {
-    const start = artifact.sourceFile.getLineAndCharacterOfPosition(deepestFunction.getStart(artifact.sourceFile, false));
+    const start = artifact.sourceFile.getLineAndCharacterOfPosition(
+      deepestFunction.getStart(artifact.sourceFile, false),
+    );
     const end = artifact.sourceFile.getLineAndCharacterOfPosition(deepestFunction.end);
     const name = functionName(deepestFunction);
     const functionAnalysis = analyzeSource(
@@ -307,7 +328,9 @@ function summarizeInitiatorFrame(frame, artifactsByUrl, sessionId) {
       startLine: start.line + 1,
       endLine: end.line + 1,
       parameterCount: deepestFunction.parameters?.length ?? 0,
-      async: Boolean(deepestFunction.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)),
+      async: Boolean(
+        deepestFunction.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword),
+      ),
       generator: Boolean(deepestFunction.asteriskToken),
       nameSha256: name ? sha256(name) : null,
       nameLength: name?.length ?? 0,
@@ -336,7 +359,9 @@ function challengeHeaderSummary(headers) {
 export async function analyzeProbe(filename) {
   const raw = await readFile(filename);
   const probe = JSON.parse(raw.toString("utf8"));
-  const requests = Array.isArray(probe.requests) ? probe.requests.filter((request) => isTurnstileUrl(request.url)) : [];
+  const requests = Array.isArray(probe.requests)
+    ? probe.requests.filter((request) => isTurnstileUrl(request.url))
+    : [];
   const scriptArtifacts = [];
   const artifactsByUrl = new Map();
   const debuggerArtifactsBySha256 = new Map();
@@ -345,7 +370,8 @@ export async function analyzeProbe(filename) {
     if (
       (!isTurnstileUrl(script.url) && !isTurnstileUrl(script.targetUrl)) ||
       typeof script.scriptSource !== "string"
-    ) continue;
+    )
+      continue;
     const body = Buffer.from(script.scriptSource, "utf8");
     const digest = sha256(body);
     const nonWhitespaceCharacters = script.scriptSource.replace(/\s/gu, "").length;
@@ -468,17 +494,23 @@ export async function analyzeProbe(filename) {
     .filter((request) => request.method === "POST")
     .map((request) => {
       const body = requestBodyBuffer(request) ?? Buffer.alloc(0);
-      const contentType = headerValue(request.requestHeadersExtra, "content-type") ?? headerValue(request.requestHeaders, "content-type");
+      const contentType =
+        headerValue(request.requestHeadersExtra, "content-type") ??
+        headerValue(request.requestHeaders, "content-type");
       return {
         url: sanitizeUrl(request.url),
         resourceType: request.resourceType ?? null,
         status: Number.isFinite(request.status) ? request.status : null,
         contentType,
         body: bodyStructure(body, contentType?.toLowerCase() ?? null),
-        requestHeaderNames: [...new Set([
-          ...Object.keys(request.requestHeaders ?? {}),
-          ...Object.keys(request.requestHeadersExtra ?? {}),
-        ].map((name) => name.toLowerCase()))].sort(),
+        requestHeaderNames: [
+          ...new Set(
+            [
+              ...Object.keys(request.requestHeaders ?? {}),
+              ...Object.keys(request.requestHeadersExtra ?? {}),
+            ].map((name) => name.toLowerCase()),
+          ),
+        ].sort(),
         challengeHeaders: challengeHeaderSummary({
           ...(request.requestHeaders ?? {}),
           ...(request.requestHeadersExtra ?? {}),
@@ -488,11 +520,11 @@ export async function analyzeProbe(filename) {
     });
 
   const allInitiatorFrames = posts.flatMap((post) => post.initiatorFrames);
-  const missingInitiatorSourceUrls = [...new Set(
-    allInitiatorFrames
-      .filter((frame) => !frame.enclosingFunction)
-      .map((frame) => frame.url),
-  )].sort();
+  const missingInitiatorSourceUrls = [
+    ...new Set(
+      allInitiatorFrames.filter((frame) => !frame.enclosingFunction).map((frame) => frame.url),
+    ),
+  ].sort();
   const missingResponseBodies = requests
     .filter((request) => typeof request.responseBody !== "string" && request.responseBodyError)
     .map((request) => ({
@@ -513,7 +545,8 @@ export async function analyzeProbe(filename) {
       sourceCoverage: {
         initiatorFrames: allInitiatorFrames.length,
         mappedInitiatorFrames: allInitiatorFrames.filter((frame) => frame.enclosingFunction).length,
-        unmappedInitiatorFrames: allInitiatorFrames.filter((frame) => !frame.enclosingFunction).length,
+        unmappedInitiatorFrames: allInitiatorFrames.filter((frame) => !frame.enclosingFunction)
+          .length,
         missingInitiatorSourceUrls,
         missingResponseBodies,
       },
@@ -523,24 +556,38 @@ export async function analyzeProbe(filename) {
 
 function compareArraysByIndex(left, right, comparator) {
   const count = Math.max(left.length, right.length);
-  return Array.from({ length: count }, (_, index) => comparator(left[index] ?? null, right[index] ?? null, index));
+  return Array.from({ length: count }, (_, index) =>
+    comparator(left[index] ?? null, right[index] ?? null, index),
+  );
 }
 
 function featureVector(features) {
-  return Object.fromEntries((features ?? []).map((feature) => [`${feature.category}:${feature.symbol}`, feature.count]));
+  return Object.fromEntries(
+    (features ?? []).map((feature) => [`${feature.category}:${feature.symbol}`, feature.count]),
+  );
 }
 
 function compareReports(left, right) {
-  const scripts = compareArraysByIndex(left.scriptArtifacts, right.scriptArtifacts, (a, b, index) => ({
-    index,
-    bothPresent: Boolean(a && b),
-    sameRawSha256: Boolean(a && b && a.sha256 === b.sha256),
-    sameAstShapeSha256: Boolean(a?.ast && b?.ast && a.ast.shapeSha256 === b.ast.shapeSha256),
-    sameTokenShapeSha256: Boolean(a?.tokenShapeSha256 && b?.tokenShapeSha256 && a.tokenShapeSha256 === b.tokenShapeSha256),
-    sameFeatureVector: Boolean(a && b && JSON.stringify(featureVector(a.features)) === JSON.stringify(featureVector(b.features))),
-    byteLengthDelta: a && b ? b.byteLength - a.byteLength : null,
-    astNodeDelta: a?.ast && b?.ast ? b.ast.nodes - a.ast.nodes : null,
-  }));
+  const scripts = compareArraysByIndex(
+    left.scriptArtifacts,
+    right.scriptArtifacts,
+    (a, b, index) => ({
+      index,
+      bothPresent: Boolean(a && b),
+      sameRawSha256: Boolean(a && b && a.sha256 === b.sha256),
+      sameAstShapeSha256: Boolean(a?.ast && b?.ast && a.ast.shapeSha256 === b.ast.shapeSha256),
+      sameTokenShapeSha256: Boolean(
+        a?.tokenShapeSha256 && b?.tokenShapeSha256 && a.tokenShapeSha256 === b.tokenShapeSha256,
+      ),
+      sameFeatureVector: Boolean(
+        a &&
+        b &&
+        JSON.stringify(featureVector(a.features)) === JSON.stringify(featureVector(b.features)),
+      ),
+      byteLengthDelta: a && b ? b.byteLength - a.byteLength : null,
+      astNodeDelta: a?.ast && b?.ast ? b.ast.nodes - a.ast.nodes : null,
+    }),
+  );
   const posts = compareArraysByIndex(left.posts, right.posts, (a, b, index) => ({
     index,
     bothPresent: Boolean(a && b),
@@ -549,8 +596,11 @@ function compareReports(left, right) {
     sameBodyShapeSha256: Boolean(a && b && a.body.shapeSha256 === b.body.shapeSha256),
     sameEncoding: Boolean(a && b && a.body.encoding === b.body.encoding),
     bodyByteLengthDelta: a && b ? b.body.byteLength - a.body.byteLength : null,
-    entropyDelta: a && b ? Number((b.body.entropyBitsPerByte - a.body.entropyBitsPerByte).toFixed(4)) : null,
-    sameRequestHeaderNames: Boolean(a && b && JSON.stringify(a.requestHeaderNames) === JSON.stringify(b.requestHeaderNames)),
+    entropyDelta:
+      a && b ? Number((b.body.entropyBitsPerByte - a.body.entropyBitsPerByte).toFixed(4)) : null,
+    sameRequestHeaderNames: Boolean(
+      a && b && JSON.stringify(a.requestHeaderNames) === JSON.stringify(b.requestHeaderNames),
+    ),
     sameInitiatorFrameLocations: Boolean(
       a &&
       b &&
@@ -565,11 +615,14 @@ function compareReports(left, right) {
     ),
   }));
   return {
-    sameCapturedScriptBuild: scripts.length > 0 && scripts.every(
-      (item) => item.bothPresent && item.sameAstShapeSha256 && item.sameTokenShapeSha256,
-    ),
+    sameCapturedScriptBuild:
+      scripts.length > 0 &&
+      scripts.every(
+        (item) => item.bothPresent && item.sameAstShapeSha256 && item.sameTokenShapeSha256,
+      ),
     challengeExecutionSourcesCaptured:
-      left.sourceCoverage.unmappedInitiatorFrames === 0 && right.sourceCoverage.unmappedInitiatorFrames === 0,
+      left.sourceCoverage.unmappedInitiatorFrames === 0 &&
+      right.sourceCoverage.unmappedInitiatorFrames === 0,
     scripts,
     posts,
   };

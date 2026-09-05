@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  importSbiShinseiRun,
-  parseSbiShinseiManifest,
-} from "../src/sbi-shinsei";
+import { importSbiShinseiRun, parseSbiShinseiManifest } from "../src/sbi-shinsei";
 
 const RUN_ID = "123e4567-e89b-42d3-a456-426614174000";
 const PREFIX = `raw/sbi-shinsei/2026/08/31/${RUN_ID}/`;
@@ -61,9 +58,7 @@ class FakeBucket {
       size: value.body.byteLength,
       customMetadata: value.customMetadata,
       httpMetadata: { contentType: value.contentType },
-      checksums: value.nativeSha256
-        ? { sha256: hexBytes(value.nativeSha256).buffer }
-        : {},
+      checksums: value.nativeSha256 ? { sha256: hexBytes(value.nativeSha256).buffer } : {},
       arrayBuffer: async () => ownedArrayBuffer(value.body),
     } as unknown as R2ObjectBody;
   }
@@ -122,18 +117,20 @@ describe("SBI Shinsei staged-run importer", () => {
       allObjectsReused: false,
     });
     for (const artifact of manifest.artifacts) {
-      expect(central.uploaded.get(`/v1/runs/1/objects/${artifact.sha256}`))
-        .toEqual(bodies.get(artifact.dataset));
+      expect(central.uploaded.get(`/v1/runs/1/objects/${artifact.sha256}`)).toEqual(
+        bodies.get(artifact.dataset),
+      );
     }
     expect(central.requests).toHaveLength(17);
-    expect(JSON.parse(central.requests.find((request) => request.path === "/v1/runs")!.body))
-      .toEqual({
-        producerId: "collector-r2-importer",
-        sourceId: "sbi-shinsei-bank",
-        externalIdNamespace: "sbi-shinsei-worker-poc-v1",
-        externalSessionId: RUN_ID,
-        sourceRunKey: "current-snapshot-sbi-shinsei-r2-v2",
-      });
+    expect(
+      JSON.parse(central.requests.find((request) => request.path === "/v1/runs")!.body),
+    ).toEqual({
+      producerId: "collector-r2-importer",
+      sourceId: "sbi-shinsei-bank",
+      externalIdNamespace: "sbi-shinsei-worker-poc-v1",
+      externalSessionId: RUN_ID,
+      sourceRunKey: "current-snapshot-sbi-shinsei-r2-v2",
+    });
     const runReport = central.requests.find((request) => request.path === "/v1/runs/1/reports");
     expect(runReport ? JSON.parse(runReport.body) : undefined).toMatchObject({
       producerVersion: "sbi-shinsei-r2-v2",
@@ -196,8 +193,8 @@ describe("SBI Shinsei staged-run importer", () => {
       legacyWindow: true,
       legacyMetadata: true,
     });
-    const top = manifest.artifacts.find((artifact) =>
-      artifact.dataset === "top-accounts-balance-and-activity"
+    const top = manifest.artifacts.find(
+      (artifact) => artifact.dataset === "top-accounts-balance-and-activity",
     )!;
     const payload = JSON.parse(decode(bucket.objects.get(top.key)!.body));
     const activity = topActivity(payload);
@@ -254,8 +251,8 @@ describe("SBI Shinsei staged-run importer", () => {
     for (const fixture of cases) {
       const bucket = new FakeBucket();
       const entries = await successEntries();
-      const topEntry = entries.find((entry) =>
-        entry.dataset === "top-accounts-balance-and-activity"
+      const topEntry = entries.find(
+        (entry) => entry.dataset === "top-accounts-balance-and-activity",
       )!;
       const activity = topActivity(topEntry.body);
       activity.fromDate = "2026-07-01";
@@ -264,11 +261,13 @@ describe("SBI Shinsei staged-run importer", () => {
       const manifest = await storeManifest(
         bucket,
         entries.filter((entry) => entry.dataset !== "normalized"),
-        [{
-          operation: "derive:normalized",
-          errorType: "DerivationError",
-          message: "normalized_derivation_failed",
-        }],
+        [
+          {
+            operation: "derive:normalized",
+            errorType: "DerivationError",
+            message: "normalized_derivation_failed",
+          },
+        ],
         { legacyWindow: true, legacyMetadata: true },
       );
       fixture.mutateManifest?.(manifest);
@@ -291,11 +290,17 @@ describe("SBI Shinsei staged-run importer", () => {
 
   test("seals a terminal browser failure containing only its manifest", async () => {
     const bucket = new FakeBucket();
-    await storeManifest(bucket, [], [{
-      operation: "collect",
-      errorType: "Error",
-      message: "collector_request_failed",
-    }]);
+    await storeManifest(
+      bucket,
+      [],
+      [
+        {
+          operation: "collect",
+          errorType: "Error",
+          message: "collector_request_failed",
+        },
+      ],
+    );
     const central = new FakeCentral();
     await expect(importRun(bucket, central)).resolves.toMatchObject({
       artifactCount: 1,
@@ -339,8 +344,9 @@ describe("SBI Shinsei staged-run importer", () => {
           .map((bytes) => JSON.parse(decode(bytes)) as Record<string, unknown>)
           .find((value) => value.source === "sbi-shinsei" && Array.isArray(value.failures));
         expect(centralManifest).toBeDefined();
-        expect((centralManifest!.failures as TestManifest["failures"])[0]!.message)
-          .toBe(partial ? "staging_write_failed" : "collector_request_failed");
+        expect((centralManifest!.failures as TestManifest["failures"])[0]!.message).toBe(
+          partial ? "staging_write_failed" : "collector_request_failed",
+        );
 
         const descriptor = central.requests
           .filter((request) => /\/artifacts$/u.test(request.path))
@@ -376,21 +382,25 @@ describe("SBI Shinsei staged-run importer", () => {
     const wrong = readManifest(partial);
     wrong.failures[0]!.operation = "r2:yen-deposit-account";
     await replaceManifest(partial, wrong);
-    expect(() => parseSbiShinseiManifest(
-      partial.objects.get(MANIFEST_KEY)!.body,
-      MANIFEST_KEY,
-    )).toThrow("manifest_failure_complement_mismatch");
+    expect(() =>
+      parseSbiShinseiManifest(partial.objects.get(MANIFEST_KEY)!.body, MANIFEST_KEY),
+    ).toThrow("manifest_failure_complement_mismatch");
 
     const unsafe = new FakeBucket();
-    await storeManifest(unsafe, [], [{
-      operation: "collect",
-      errorType: "Error",
-      message: "token=fixture-secret",
-    }]);
-    expect(() => parseSbiShinseiManifest(
-      unsafe.objects.get(MANIFEST_KEY)!.body,
-      MANIFEST_KEY,
-    )).toThrow("manifest_failure_message_invalid");
+    await storeManifest(
+      unsafe,
+      [],
+      [
+        {
+          operation: "collect",
+          errorType: "Error",
+          message: "token=fixture-secret",
+        },
+      ],
+    );
+    expect(() =>
+      parseSbiShinseiManifest(unsafe.objects.get(MANIFEST_KEY)!.body, MANIFEST_KEY),
+    ).toThrow("manifest_failure_message_invalid");
   });
 
   test("catalogues a validated provider-read prefix as partial evidence", async () => {
@@ -398,8 +408,9 @@ describe("SBI Shinsei staged-run importer", () => {
     const entries = await successEntries();
     await storeManifest(
       bucket,
-      entries.filter((entry) =>
-        entry.dataset !== "exchange-rate" && entry.dataset !== "yen-deposit-account"),
+      entries.filter(
+        (entry) => entry.dataset !== "exchange-rate" && entry.dataset !== "yen-deposit-account",
+      ),
       [
         {
           operation: "read:exchange-rate",
@@ -430,9 +441,10 @@ describe("SBI Shinsei staged-run importer", () => {
     const entries = await successEntries();
     await storeManifest(
       bucket,
-      entries.filter((entry) =>
-        entry.dataset !== "top-accounts-balance-and-activity" &&
-        entry.dataset !== "normalized"),
+      entries.filter(
+        (entry) =>
+          entry.dataset !== "top-accounts-balance-and-activity" && entry.dataset !== "normalized",
+      ),
       [
         {
           operation: "read:top-accounts-balance-and-activity",
@@ -465,11 +477,13 @@ describe("SBI Shinsei staged-run importer", () => {
     await storeManifest(
       bucket,
       entries.filter((entry) => entry.dataset !== "normalized"),
-      [{
-        operation: "derive:normalized",
-        errorType: "DerivationError",
-        message: "normalized_derivation_failed",
-      }],
+      [
+        {
+          operation: "derive:normalized",
+          errorType: "DerivationError",
+          message: "normalized_derivation_failed",
+        },
+      ],
     );
     const central = new FakeCentral();
     await expect(importRun(bucket, central)).resolves.toMatchObject({
@@ -488,16 +502,18 @@ describe("SBI Shinsei staged-run importer", () => {
     const bucket = new FakeBucket();
     const entries = await successEntries();
     const normalized = entries.find((entry) => entry.dataset === "normalized")!;
-    (normalized.body as { balances: Array<{ asOf: string }> })
-      .balances[0]!.asOf = "2026-08-31T00:00:31.000Z";
+    (normalized.body as { balances: Array<{ asOf: string }> }).balances[0]!.asOf =
+      "2026-08-31T00:00:31.000Z";
     await storeManifest(
       bucket,
       entries.filter((entry) => entry.dataset !== "top-accounts-balance-and-activity"),
-      [{
-        operation: "r2:top-accounts-balance-and-activity",
-        errorType: "Error",
-        message: "staging_write_failed",
-      }],
+      [
+        {
+          operation: "r2:top-accounts-balance-and-activity",
+          errorType: "Error",
+          message: "staging_write_failed",
+        },
+      ],
     );
     await expect(importRun(bucket, new FakeCentral())).rejects.toMatchObject({
       status: 409,
@@ -513,7 +529,10 @@ describe("SBI Shinsei staged-run importer", () => {
       {
         code: "prefix_inventory_too_large",
         mutate: (bucket) => {
-          bucket.objects.set(`${PREFIX}unexpected.json`, stored(encode("{}"), {}, "application/json"));
+          bucket.objects.set(
+            `${PREFIX}unexpected.json`,
+            stored(encode("{}"), {}, "application/json"),
+          );
         },
       },
       {
@@ -551,22 +570,23 @@ describe("SBI Shinsei staged-run importer", () => {
   test("does not accept another collector credential", async () => {
     const bucket = new FakeBucket();
     await storeSuccessRun(bucket);
-    await expect(importSbiShinseiRun({
-      bucket: bucket as unknown as R2Bucket,
-      centralService: new FakeCentral() as unknown as Fetcher,
-      centralToken: `collector-r2-sbi.${"s".repeat(32)}`,
-      fingerprintKey: FINGERPRINT_KEY,
-      importerVersion: "test-v1",
-      manifestKey: MANIFEST_KEY,
-    })).rejects.toThrow("central_auth_configuration_invalid");
+    await expect(
+      importSbiShinseiRun({
+        bucket: bucket as unknown as R2Bucket,
+        centralService: new FakeCentral() as unknown as Fetcher,
+        centralToken: `collector-r2-sbi.${"s".repeat(32)}`,
+        fingerprintKey: FINGERPRINT_KEY,
+        importerVersion: "test-v1",
+        manifestKey: MANIFEST_KEY,
+      }),
+    ).rejects.toThrow("central_auth_configuration_invalid");
   });
 });
 
 async function successEntries() {
-  const core = await Bun.file(new URL(
-    "../../../poc/sbi-shinsei-worker/test/fixtures/core-responses.json",
-    import.meta.url,
-  )).json() as Record<string, unknown>;
+  const core = (await Bun.file(
+    new URL("../../../poc/sbi-shinsei-worker/test/fixtures/core-responses.json", import.meta.url),
+  ).json()) as Record<string, unknown>;
   const capturedAt = "2026-08-31T00:00:30.000Z";
   return [
     { dataset: DATASETS[0], body: core.topBalances },
@@ -596,15 +616,17 @@ async function successEntries() {
             asOf: capturedAt,
           },
         ],
-        transactions: [{
-          accountKey: "synthetic-account-1",
-          transactionDate: "2026-08-30",
-          description: "SYNTHETIC CREDIT",
-          debit: null,
-          credit: "1000",
-          balance: "100000",
-          currency: "JPY",
-        }],
+        transactions: [
+          {
+            accountKey: "synthetic-account-1",
+            transactionDate: "2026-08-30",
+            description: "SYNTHETIC CREDIT",
+            debit: null,
+            credit: "1000",
+            balance: "100000",
+            currency: "JPY",
+          },
+        ],
       },
     },
   ];
@@ -635,10 +657,16 @@ async function storeManifest(
     const body = encode(JSON.stringify(entry.body));
     const sha256 = await digest(body);
     const key = `${PREFIX}${FILENAMES[entry.dataset as keyof typeof FILENAMES]}`;
-    bucket.objects.set(key, stored(body, options.legacyMetadata
-      ? { dataset: entry.dataset, sha256 }
-      : { source: "sbi-shinsei", runId: RUN_ID, dataset: entry.dataset, sha256 },
-    "application/json"));
+    bucket.objects.set(
+      key,
+      stored(
+        body,
+        options.legacyMetadata
+          ? { dataset: entry.dataset, sha256 }
+          : { source: "sbi-shinsei", runId: RUN_ID, dataset: entry.dataset, sha256 },
+        "application/json",
+      ),
+    );
     artifacts.push({
       dataset: entry.dataset,
       key,
@@ -657,9 +685,7 @@ async function storeManifest(
     liveReadsEnabled: true,
     artifacts,
     failures,
-    ...(options.legacyWindow
-      ? { window: { from: "2026-08-01", to: "2026-08-31" } }
-      : {}),
+    ...(options.legacyWindow ? { window: { from: "2026-08-01", to: "2026-08-31" } } : {}),
   };
   await replaceManifest(bucket, manifest, options.legacyMetadata);
   return manifest;
@@ -674,11 +700,16 @@ async function replaceArtifact(
   const artifact = manifest.artifacts.find((value) => value.dataset === dataset)!;
   const sha256 = await digest(body);
   const previous = bucket.objects.get(artifact.key)!;
-  bucket.objects.set(artifact.key, stored(body,
-    Object.hasOwn(previous.customMetadata, "source")
-      ? { source: "sbi-shinsei", runId: RUN_ID, dataset, sha256 }
-      : { dataset, sha256 },
-    "application/json"));
+  bucket.objects.set(
+    artifact.key,
+    stored(
+      body,
+      Object.hasOwn(previous.customMetadata, "source")
+        ? { source: "sbi-shinsei", runId: RUN_ID, dataset, sha256 }
+        : { dataset, sha256 },
+      "application/json",
+    ),
+  );
   artifact.sha256 = sha256;
   artifact.bytes = body.byteLength;
   await replaceManifest(bucket, manifest);
@@ -692,10 +723,16 @@ async function replaceManifest(
 ): Promise<void> {
   const body = encode(JSON.stringify(manifest));
   const sha256 = await digest(body);
-  bucket.objects.set(MANIFEST_KEY, stored(body, legacyMetadata
-    ? { source: "sbi-shinsei", status: manifest.status, runId: RUN_ID }
-    : { source: "sbi-shinsei", status: manifest.status, runId: RUN_ID, sha256 },
-  "application/json"));
+  bucket.objects.set(
+    MANIFEST_KEY,
+    stored(
+      body,
+      legacyMetadata
+        ? { source: "sbi-shinsei", status: manifest.status, runId: RUN_ID }
+        : { source: "sbi-shinsei", status: manifest.status, runId: RUN_ID, sha256 },
+      "application/json",
+    ),
+  );
 }
 
 function readManifest(bucket: FakeBucket): TestManifest {
@@ -707,17 +744,19 @@ function topActivity(value: unknown): {
   toDate: unknown;
   activityDetails: Array<{ postingDate: unknown }>;
 } {
-  return (value as {
-    responseParam: {
-      activity: {
-        responseParam: {
-          fromDate: unknown;
-          toDate: unknown;
-          activityDetails: Array<{ postingDate: unknown }>;
+  return (
+    value as {
+      responseParam: {
+        activity: {
+          responseParam: {
+            fromDate: unknown;
+            toDate: unknown;
+            activityDetails: Array<{ postingDate: unknown }>;
+          };
         };
       };
-    };
-  }).responseParam.activity.responseParam;
+    }
+  ).responseParam.activity.responseParam;
 }
 
 function importRun(bucket: FakeBucket, central: FakeCentral, importerVersion = "test-v1") {
@@ -737,9 +776,12 @@ function immutableReport(reports: Map<string, string>, path: string, body: strin
     return Response.json({ error: "immutable report conflict" }, { status: 409 });
   }
   reports.set(path, body);
-  return Response.json({ reused: previous !== undefined }, {
-    status: previous === undefined ? 201 : 200,
-  });
+  return Response.json(
+    { reused: previous !== undefined },
+    {
+      status: previous === undefined ? 201 : 200,
+    },
+  );
 }
 
 function stored(

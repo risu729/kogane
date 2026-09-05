@@ -10,7 +10,7 @@ describe("V Point aggregate-only R2 audit", () => {
     });
     const response = await auditWorker.fetch(auditRequest(), environment(bucket));
     expect(response.status).toBe(200);
-    const body = await response.json() as Record<string, unknown>;
+    const body = (await response.json()) as Record<string, unknown>;
     expect(body).toEqual({
       schemaVersion: "vpoint-r2-aggregate-audit-v1",
       scannedObjectCount: 1,
@@ -26,15 +26,17 @@ describe("V Point aggregate-only R2 audit", () => {
   test("reduces manifest validation failures to a stable aggregate code", async () => {
     const bucket = {
       ...listBucket({
-        objects: [{
-          key: "raw/v-point/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
-        }],
+        objects: [
+          {
+            key: "raw/v-point/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
+          },
+        ],
         truncated: false,
       }),
       get: async () => null,
     } as unknown as R2Bucket;
     const response = await auditWorker.fetch(auditRequest(), environment(bucket));
-    const body = await response.json() as Record<string, unknown>;
+    const body = (await response.json()) as Record<string, unknown>;
     expect(body).toMatchObject({
       scannedObjectCount: 1,
       auditedManifestCount: 0,
@@ -47,10 +49,9 @@ describe("V Point aggregate-only R2 audit", () => {
 
   test("the repeatable audit stays local, remote-read-only, and never deploys", () => {
     const script = readFileSync(new URL("../scripts/audit-v-point-r2.sh", import.meta.url), "utf8");
-    const config = JSON.parse(readFileSync(
-      new URL("../wrangler.audit-v-point.jsonc", import.meta.url),
-      "utf8",
-    )) as Record<string, unknown>;
+    const config = JSON.parse(
+      readFileSync(new URL("../wrangler.audit-v-point.jsonc", import.meta.url), "utf8"),
+    ) as Record<string, unknown>;
     expect(script).toContain("wrangler dev");
     expect(script).toContain("--ip 127.0.0.1");
     expect(script).not.toMatch(/wrangler\s+deploy/u);

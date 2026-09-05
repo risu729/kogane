@@ -95,12 +95,7 @@ export function Link({
 
 // ── route table ──────────────────────────────────────────────────────
 
-export const OBSERVATION_KINDS = [
-  "transaction",
-  "balance",
-  "position",
-  "valuation",
-] as const;
+export const OBSERVATION_KINDS = ["transaction", "balance", "position", "valuation"] as const;
 
 export type ObservationKind = (typeof OBSERVATION_KINDS)[number];
 

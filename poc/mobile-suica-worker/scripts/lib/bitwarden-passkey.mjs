@@ -51,12 +51,14 @@ export function credentialEnvelope(credential) {
 }
 
 export function createAssertion(credential, challenge) {
-  const clientDataJSON = Buffer.from(JSON.stringify({
-    type: "webauthn.get",
-    challenge,
-    origin: "https://id.jreast.co.jp",
-    crossOrigin: false,
-  }));
+  const clientDataJSON = Buffer.from(
+    JSON.stringify({
+      type: "webauthn.get",
+      challenge,
+      origin: "https://id.jreast.co.jp",
+      crossOrigin: false,
+    }),
+  );
   const authenticatorData = Buffer.concat([
     createHash("sha256").update(credential.rpId).digest(),
     Buffer.from([0x1d]),
@@ -81,7 +83,9 @@ export function createAssertion(credential, challenge) {
         clientDataJSON: clientDataJSON.toString("base64url"),
         signature: sign("sha256", signedData, privateKey).toString("base64url"),
         userHandle: credential.userHandle
-          ? Buffer.from(credential.userHandle.replace(/=+$/u, ""), "base64url").toString("base64url")
+          ? Buffer.from(credential.userHandle.replace(/=+$/u, ""), "base64url").toString(
+              "base64url",
+            )
           : "",
       },
     },
@@ -97,10 +101,8 @@ export function verifyLocalCredential(credential) {
   return {
     verified: verify("sha256", signedData, createPublicKey(privateKey), signature),
     credentialIdBytes: Buffer.from(assertion.rawId, "base64url").byteLength,
-    authenticatorDataBytes: Buffer.from(
-      assertion.response.authenticatorData,
-      "base64url",
-    ).byteLength,
+    authenticatorDataBytes: Buffer.from(assertion.response.authenticatorData, "base64url")
+      .byteLength,
     flags: Buffer.from(assertion.response.authenticatorData, "base64url")[32],
     counter: credential.counter,
   };

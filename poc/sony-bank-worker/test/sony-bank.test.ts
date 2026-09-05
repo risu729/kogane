@@ -22,9 +22,7 @@ describe("Sony Bank credential", () => {
 describe("Sony Bank cookie handling", () => {
   test("does not split the comma inside Expires", () => {
     expect(
-      splitSetCookie(
-        "FSID=a; Expires=Mon, 31 Aug 2026 00:00:00 GMT; Path=/, ct1=b; Path=/",
-      ),
+      splitSetCookie("FSID=a; Expires=Mon, 31 Aug 2026 00:00:00 GMT; Path=/, ct1=b; Path=/"),
     ).toHaveLength(2);
   });
 
@@ -68,7 +66,7 @@ describe("Sony Bank WALLET HTML", () => {
         </select>
       </form>
     `;
-    expect(walletMonths(html)[0]?.label).toBe('A&quot;B');
+    expect(walletMonths(html)[0]?.label).toBe("A&quot;B");
   });
 
   test("identifies the actual selected month, including HTML default selection", () => {
@@ -80,33 +78,55 @@ describe("Sony Bank WALLET HTML", () => {
     `;
     expect(selectedWalletMonth(explicit)).toBe("20260731");
     expect(selectedWalletMonth(explicit.replace(' selected="selected"', ""))).toBe("20260831");
-    expect(selectedWalletMonth(explicit.replace(
-      '<option value="20260831">',
-      '<option selected value="20260831">',
-    ))).toBeNull();
+    expect(
+      selectedWalletMonth(
+        explicit.replace('<option value="20260831">', '<option selected value="20260831">'),
+      ),
+    ).toBeNull();
   });
 });
 
 describe("Sony Bank history pagination", () => {
   test("accepts exact pages and rejects total changes and short pages", () => {
-    const first = validateHistoryPage({
-      transactionHistInfo: [{}, {}, {}],
-      countCnt: "4",
-    }, 0, null);
+    const first = validateHistoryPage(
+      {
+        transactionHistInfo: [{}, {}, {}],
+        countCnt: "4",
+      },
+      0,
+      null,
+    );
     expect(first).toEqual({ rowCount: 3, total: 4, terminal: false });
-    expect(validateHistoryPage({
-      transactionHistInfo: [{}],
-      countCnt: 4,
-    }, 1, first.total)).toEqual({ rowCount: 1, total: 4, terminal: true });
-    expect(() => validateHistoryPage({
-      transactionHistInfo: [{}],
-      countCnt: 5,
-    }, 1, first.total)).toThrow("pagination_total_changed");
-    expect(() => validateHistoryPage({
-      transactionHistInfo: [{}],
-      countCnt: 4,
-    }, 0, null)).toThrow("pagination_length_mismatch");
-    expect(() => validateHistoryPage({ countCnt: 0 }, 0, null))
-      .toThrow("pagination_invalid");
+    expect(
+      validateHistoryPage(
+        {
+          transactionHistInfo: [{}],
+          countCnt: 4,
+        },
+        1,
+        first.total,
+      ),
+    ).toEqual({ rowCount: 1, total: 4, terminal: true });
+    expect(() =>
+      validateHistoryPage(
+        {
+          transactionHistInfo: [{}],
+          countCnt: 5,
+        },
+        1,
+        first.total,
+      ),
+    ).toThrow("pagination_total_changed");
+    expect(() =>
+      validateHistoryPage(
+        {
+          transactionHistInfo: [{}],
+          countCnt: 4,
+        },
+        0,
+        null,
+      ),
+    ).toThrow("pagination_length_mismatch");
+    expect(() => validateHistoryPage({ countCnt: 0 }, 0, null)).toThrow("pagination_invalid");
   });
 });

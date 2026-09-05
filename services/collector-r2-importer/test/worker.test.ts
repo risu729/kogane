@@ -10,11 +10,11 @@ describe("collector R2 importer routes", () => {
   test("the GLOBAL PASS legacy empty allowlist is exact and bounded", () => {
     const first = "a".repeat(64);
     const second = "b".repeat(64);
-    expect([...parseGlobalPassLegacyEmptyAllowlist(`${first},${second}`)])
-      .toEqual([first, second]);
+    expect([...parseGlobalPassLegacyEmptyAllowlist(`${first},${second}`)]).toEqual([first, second]);
     for (const value of ["", "A".repeat(64), `${first},${first}`, `${first}, ${second}`]) {
-      expect(() => parseGlobalPassLegacyEmptyAllowlist(value))
-        .toThrow("global_pass_legacy_empty_allowlist_invalid");
+      expect(() => parseGlobalPassLegacyEmptyAllowlist(value)).toThrow(
+        "global_pass_legacy_empty_allowlist_invalid",
+      );
     }
   });
 
@@ -24,12 +24,12 @@ describe("collector R2 importer routes", () => {
       list: async (options: R2ListOptions) => {
         calls.push(options);
         return options.cursor === "next"
-          ? { objects: [], truncated: false } as unknown as R2Objects
-          : {
+          ? ({ objects: [], truncated: false } as unknown as R2Objects)
+          : ({
               objects: [{ key: "raw/v-point/2026/09/05/run/balance-info.json" }],
               truncated: true,
               cursor: "next",
-            } as unknown as R2Objects;
+            } as unknown as R2Objects);
       },
     } as unknown as R2Bucket;
     const response = await worker.fetch(
@@ -39,13 +39,18 @@ describe("collector R2 importer routes", () => {
         body: JSON.stringify({ limit: 1 }),
       }) as Parameters<typeof worker.fetch>[0],
       environment(
-        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
-        {} as R2Bucket, {} as R2Bucket, bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        bucket,
       ),
     );
     expect(response.status).toBe(200);
     expect(calls).toEqual([{ prefix: "raw/v-point/", limit: 1 }]);
-    const body = await response.json() as Record<string, unknown>;
+    const body = (await response.json()) as Record<string, unknown>;
     expect(body).toMatchObject({
       source: "v-point",
       scannedObjectCount: 1,
@@ -65,8 +70,13 @@ describe("collector R2 importer routes", () => {
         body: JSON.stringify({ cursor: body.nextCursor, limit: 1 }),
       }) as Parameters<typeof worker.fetch>[0],
       environment(
-        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
-        {} as R2Bucket, {} as R2Bucket, bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        bucket,
       ),
     );
     expect(final.status).toBe(200);
@@ -74,7 +84,11 @@ describe("collector R2 importer routes", () => {
   });
 
   test("the V Point backfill route rejects invalid limits and tampered or stalled cursors", async () => {
-    const never = { list: async () => { throw new Error("must_not_list"); } } as unknown as R2Bucket;
+    const never = {
+      list: async () => {
+        throw new Error("must_not_list");
+      },
+    } as unknown as R2Bucket;
     const invalidLimit = await worker.fetch(
       new Request("https://importer.internal/v1/v-point/backfill-page", {
         method: "POST",
@@ -82,12 +96,17 @@ describe("collector R2 importer routes", () => {
         body: JSON.stringify({ limit: 2 }),
       }) as Parameters<typeof worker.fetch>[0],
       environment(
-        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
-        {} as R2Bucket, {} as R2Bucket, never,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        never,
       ),
     );
     expect(invalidLimit.status).toBe(400);
-    expect(await invalidLimit.json() as unknown).toEqual({ error: "backfill_limit_must_be_one" });
+    expect((await invalidLimit.json()) as unknown).toEqual({ error: "backfill_limit_must_be_one" });
 
     const invalidCursor = await worker.fetch(
       new Request("https://importer.internal/v1/v-point/backfill-page", {
@@ -96,12 +115,17 @@ describe("collector R2 importer routes", () => {
         body: JSON.stringify({ cursor: "not opaque", limit: 1 }),
       }) as Parameters<typeof worker.fetch>[0],
       environment(
-        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
-        {} as R2Bucket, {} as R2Bucket, never,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        never,
       ),
     );
     expect(invalidCursor.status).toBe(400);
-    expect(await invalidCursor.json() as unknown).toEqual({ error: "cursor_invalid" });
+    expect((await invalidCursor.json()) as unknown).toEqual({ error: "cursor_invalid" });
 
     const legacyCursor = await worker.fetch(
       new Request("https://importer.internal/v1/v-point/backfill-page", {
@@ -110,19 +134,25 @@ describe("collector R2 importer routes", () => {
         body: JSON.stringify({ cursor: `vpoint-v3.e30.${"A".repeat(43)}`, limit: 1 }),
       }) as Parameters<typeof worker.fetch>[0],
       environment(
-        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
-        {} as R2Bucket, {} as R2Bucket, never,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        never,
       ),
     );
     expect(legacyCursor.status).toBe(400);
-    expect(await legacyCursor.json() as unknown).toEqual({ error: "cursor_invalid" });
+    expect((await legacyCursor.json()) as unknown).toEqual({ error: "cursor_invalid" });
 
     const seed = {
-      list: async () => ({
-        objects: [{ key: "raw/v-point/ignored.json" }],
-        truncated: true,
-        cursor: "same",
-      } as unknown as R2Objects),
+      list: async () =>
+        ({
+          objects: [{ key: "raw/v-point/ignored.json" }],
+          truncated: true,
+          cursor: "same",
+        }) as unknown as R2Objects,
     } as unknown as R2Bucket;
     const seeded = await worker.fetch(
       new Request("https://importer.internal/v1/v-point/backfill-page", {
@@ -131,11 +161,16 @@ describe("collector R2 importer routes", () => {
         body: JSON.stringify({ limit: 1 }),
       }) as Parameters<typeof worker.fetch>[0],
       environment(
-        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
-        {} as R2Bucket, {} as R2Bucket, seed,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        seed,
       ),
     );
-    const signed = (await seeded.json() as { nextCursor: string }).nextCursor;
+    const signed = ((await seeded.json()) as { nextCursor: string }).nextCursor;
     const tampered = `${signed.slice(0, -1)}${signed.endsWith("A") ? "B" : "A"}`;
     const tamperedResponse = await worker.fetch(
       new Request("https://importer.internal/v1/v-point/backfill-page", {
@@ -144,14 +179,19 @@ describe("collector R2 importer routes", () => {
         body: JSON.stringify({ cursor: tampered, limit: 1 }),
       }) as Parameters<typeof worker.fetch>[0],
       environment(
-        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
-        {} as R2Bucket, {} as R2Bucket, never,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        never,
       ),
     );
     expect(tamperedResponse.status).toBe(400);
 
     const stalled = {
-      list: async () => ({ objects: [], truncated: true, cursor: "same" } as unknown as R2Objects),
+      list: async () => ({ objects: [], truncated: true, cursor: "same" }) as unknown as R2Objects,
     } as unknown as R2Bucket;
     const stalledResponse = await worker.fetch(
       new Request("https://importer.internal/v1/v-point/backfill-page", {
@@ -160,8 +200,13 @@ describe("collector R2 importer routes", () => {
         body: JSON.stringify({ cursor: signed, limit: 1 }),
       }) as Parameters<typeof worker.fetch>[0],
       environment(
-        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
-        {} as R2Bucket, {} as R2Bucket, stalled,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        stalled,
       ),
     );
     expect(stalledResponse.status).toBe(409);
@@ -188,11 +233,13 @@ describe("collector R2 importer routes", () => {
       environment({} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket),
     );
     expect(response.status).toBe(200);
-    expect(calls).toEqual([{
-      prefix: "raw/prestia-globalpass/",
-      limit: 1,
-    }]);
-    const body = await response.json() as Record<string, unknown>;
+    expect(calls).toEqual([
+      {
+        prefix: "raw/prestia-globalpass/",
+        limit: 1,
+      },
+    ]);
+    const body = (await response.json()) as Record<string, unknown>;
     expect(body).toMatchObject({
       source: "prestia-globalpass",
       scannedObjectCount: 1,
@@ -208,7 +255,9 @@ describe("collector R2 importer routes", () => {
 
   test("the GLOBAL PASS backfill route rejects limits above one", async () => {
     const bucket = {
-      list: async () => { throw new Error("must_not_list"); },
+      list: async () => {
+        throw new Error("must_not_list");
+      },
     } as unknown as R2Bucket;
     const response = await worker.fetch(
       new Request("https://importer.internal/v1/prestia-globalpass/backfill-page", {
@@ -219,12 +268,14 @@ describe("collector R2 importer routes", () => {
       environment({} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket),
     );
     expect(response.status).toBe(400);
-    expect(await response.json() as unknown).toEqual({ error: "backfill_limit_must_be_one" });
+    expect((await response.json()) as unknown).toEqual({ error: "backfill_limit_must_be_one" });
   });
 
   test("the GLOBAL PASS backfill route rejects an untrusted cursor before listing", async () => {
     const bucket = {
-      list: async () => { throw new Error("must_not_list"); },
+      list: async () => {
+        throw new Error("must_not_list");
+      },
     } as unknown as R2Bucket;
     const response = await worker.fetch(
       new Request("https://importer.internal/v1/prestia-globalpass/backfill-page", {
@@ -235,21 +286,28 @@ describe("collector R2 importer routes", () => {
       environment({} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket),
     );
     expect(response.status).toBe(400);
-    expect(await response.json() as unknown).toEqual({ error: "cursor_invalid" });
+    expect((await response.json()) as unknown).toEqual({ error: "cursor_invalid" });
   });
 
   test("the GLOBAL PASS backfill route rejects a v1 continuation before listing", async () => {
     const bucket = {
-      list: async () => { throw new Error("must_not_list"); },
+      list: async () => {
+        throw new Error("must_not_list");
+      },
     } as unknown as R2Bucket;
-    const legacy = `global-pass-v1.${btoa(JSON.stringify({
-      v: 1,
-      scanCursor: null,
-      scanDone: true,
-      manifestKey:
-        "raw/prestia-globalpass/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
-      offset: 10,
-    })).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "")}`;
+    const legacy = `global-pass-v1.${btoa(
+      JSON.stringify({
+        v: 1,
+        scanCursor: null,
+        scanDone: true,
+        manifestKey:
+          "raw/prestia-globalpass/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
+        offset: 10,
+      }),
+    )
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replace(/=+$/u, "")}`;
     const response = await worker.fetch(
       new Request("https://importer.internal/v1/prestia-globalpass/backfill-page", {
         method: "POST",
@@ -259,12 +317,14 @@ describe("collector R2 importer routes", () => {
       environment({} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket),
     );
     expect(response.status).toBe(400);
-    expect(await response.json() as unknown).toEqual({ error: "cursor_invalid" });
+    expect((await response.json()) as unknown).toEqual({ error: "cursor_invalid" });
   });
 
   test("the GLOBAL PASS cursor enforces scan and manifest-offset state invariants", async () => {
     const bucket = {
-      list: async () => { throw new Error("must_not_list"); },
+      list: async () => {
+        throw new Error("must_not_list");
+      },
     } as unknown as R2Bucket;
     const manifestKey =
       "raw/prestia-globalpass/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json";
@@ -286,17 +346,18 @@ describe("collector R2 importer routes", () => {
         environment({} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket),
       );
       expect(response.status).toBe(400);
-      expect(await response.json() as unknown).toEqual({ error: "cursor_invalid" });
+      expect((await response.json()) as unknown).toEqual({ error: "cursor_invalid" });
     }
   });
 
   test("the GLOBAL PASS route rejects an unchanged R2 scan cursor", async () => {
     const bucket = {
-      list: async () => ({
-        objects: [{ key: "raw/prestia-globalpass/2026/09/05/run/activity-2026-09.html" }],
-        truncated: true,
-        cursor: "same-r2-cursor",
-      } as unknown as R2Objects),
+      list: async () =>
+        ({
+          objects: [{ key: "raw/prestia-globalpass/2026/09/05/run/activity-2026-09.html" }],
+          truncated: true,
+          cursor: "same-r2-cursor",
+        }) as unknown as R2Objects,
     } as unknown as R2Bucket;
     const response = await worker.fetch(
       new Request("https://importer.internal/v1/prestia-globalpass/backfill-page", {
@@ -310,7 +371,7 @@ describe("collector R2 importer routes", () => {
       environment({} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket),
     );
     expect(response.status).toBe(409);
-    expect(await response.json() as unknown).toEqual({ error: "prefix_cursor_did_not_advance" });
+    expect((await response.json()) as unknown).toEqual({ error: "prefix_cursor_did_not_advance" });
   });
 
   test("the MyJCB backfill page scans exactly one source object", async () => {
@@ -354,7 +415,9 @@ describe("collector R2 importer routes", () => {
 
   test("the MyJCB backfill route rejects malformed cursors before listing", async () => {
     const bucket = {
-      list: async () => { throw new Error("must_not_list"); },
+      list: async () => {
+        throw new Error("must_not_list");
+      },
     } as unknown as R2Bucket;
     const response = await worker.fetch(
       new Request("https://importer.internal/v1/myjcb/backfill-page", {
@@ -372,7 +435,7 @@ describe("collector R2 importer routes", () => {
       ),
     );
     expect(response.status).toBe(400);
-    expect(await response.json() as unknown).toEqual({ error: "cursor_invalid" });
+    expect((await response.json()) as unknown).toEqual({ error: "cursor_invalid" });
   });
 
   test("the Mobile Suica backfill page scans exactly one source object", async () => {
@@ -408,7 +471,11 @@ describe("collector R2 importer routes", () => {
   });
 
   test("the Mobile Suica backfill route rejects limits above one", async () => {
-    const bucket = { list: async () => { throw new Error("must_not_list"); } } as unknown as R2Bucket;
+    const bucket = {
+      list: async () => {
+        throw new Error("must_not_list");
+      },
+    } as unknown as R2Bucket;
     const response = await worker.fetch(
       new Request("https://importer.internal/v1/mobile-suica/backfill-page", {
         method: "POST",
@@ -418,7 +485,7 @@ describe("collector R2 importer routes", () => {
       environment({} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket),
     );
     expect(response.status).toBe(400);
-    expect(await response.json() as unknown).toEqual({ error: "backfill_limit_must_be_one" });
+    expect((await response.json()) as unknown).toEqual({ error: "backfill_limit_must_be_one" });
   });
   test("the Sony backfill page scans one non-manifest object without central writes", async () => {
     const calls: R2ListOptions[] = [];
@@ -494,11 +561,13 @@ describe("collector R2 importer routes", () => {
       environment(bucket),
     );
     expect(response.status).toBe(200);
-    expect(calls).toEqual([{
-      prefix: "raw/sbi-vc-trade/",
-      limit: 1,
-      cursor: "prior",
-    }]);
+    expect(calls).toEqual([
+      {
+        prefix: "raw/sbi-vc-trade/",
+        limit: 1,
+        cursor: "prior",
+      },
+    ]);
     expect(await response.json()).toMatchObject({
       scannedObjectCount: 1,
       importedManifestCount: 0,
@@ -524,7 +593,7 @@ describe("collector R2 importer routes", () => {
       environment(bucket),
     );
     expect(response.status).toBe(400);
-    const body = await response.json() as { error: string };
+    const body = (await response.json()) as { error: string };
     expect(body).toEqual({ error: "backfill_limit_must_be_one" });
   });
 
@@ -549,11 +618,13 @@ describe("collector R2 importer routes", () => {
       environment({} as R2Bucket, {} as R2Bucket, bucket),
     );
     expect(response.status).toBe(200);
-    expect(calls).toEqual([{
-      prefix: "raw/sbi-shinsei/",
-      limit: 1,
-      cursor: "prior",
-    }]);
+    expect(calls).toEqual([
+      {
+        prefix: "raw/sbi-shinsei/",
+        limit: 1,
+        cursor: "prior",
+      },
+    ]);
     expect(await response.json()).toMatchObject({
       source: "sbi-shinsei",
       scannedObjectCount: 1,
@@ -567,17 +638,15 @@ describe("collector R2 importer routes", () => {
 
   test("the Mobile Suica backfill response passes the collector contract validator", async () => {
     const bucket = {
-      list: async () => ({
-        objects: [{ key: "raw/mobile-suica/2026/09/05/run/sf-history.json" }],
-        truncated: false,
-      }) as unknown as R2Objects,
+      list: async () =>
+        ({
+          objects: [{ key: "raw/mobile-suica/2026/09/05/run/sf-history.json" }],
+          truncated: false,
+        }) as unknown as R2Objects,
     } as unknown as R2Bucket;
     const env = environment({} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket);
     const importer = {
-      fetch: (request: Request) => worker.fetch(
-        request as Parameters<typeof worker.fetch>[0],
-        env,
-      ),
+      fetch: (request: Request) => worker.fetch(request as Parameters<typeof worker.fetch>[0], env),
     } as Fetcher;
     await expect(backfillStoredRuns(importer)).resolves.toEqual({
       source: "mobile-suica",
@@ -592,15 +661,13 @@ describe("collector R2 importer routes", () => {
   });
 
   test("classifies the synchronous chain limit as deferred, not failed", () => {
-    expect(classifySbiVcBackfillError(
-      new ImportError(409, "sync_import_worker_chain_limit"),
-    )).toEqual({
+    expect(
+      classifySbiVcBackfillError(new ImportError(409, "sync_import_worker_chain_limit")),
+    ).toEqual({
       deferred: true,
       code: "sync_import_worker_chain_limit",
     });
-    expect(classifySbiVcBackfillError(
-      new ImportError(409, "artifact_checksum_mismatch"),
-    )).toEqual({
+    expect(classifySbiVcBackfillError(new ImportError(409, "artifact_checksum_mismatch"))).toEqual({
       deferred: false,
       code: "artifact_checksum_mismatch",
     });
@@ -608,8 +675,10 @@ describe("collector R2 importer routes", () => {
 });
 
 function globalPassCursor(value: unknown): string {
-  return `global-pass-v2.${btoa(JSON.stringify(value)).replaceAll("+", "-")
-    .replaceAll("/", "_").replace(/=+$/u, "")}`;
+  return `global-pass-v2.${btoa(JSON.stringify(value))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/u, "")}`;
 }
 
 function environment(

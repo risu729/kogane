@@ -39,13 +39,13 @@ Mable は終了済みで、後継 Money Canvas は Moneytree を使って金融�
 
 ## 公式入口
 
-| 経路 | 入口 | 読み取り可能な主なデータ | 出力／自動化上の位置付け |
-| --- | --- | --- | --- |
-| 三菱UFJダイレクト（ブラウザ） | [公式トップ](https://direct.bk.mufg.jp/index.html)、[現在のPCログイン画面](https://directg.s.bk.mufg.jp/APL/LGP_P_01/PU/LG_0001/LG_0001_PC01) | 代表口座とサービス指定口座、残高、円入出金、定期預金明細、外貨預金、取引記録、直近の銀行ポイント加算実績 | **推奨**。CSV/PDF/印刷を持ち、Playwright等の通常ブラウザで観測しやすい。ログインはスマホ承認を要する可能性が高い。 |
-| 公式「三菱UFJ銀行」アプリ | [Google Play (`jp.mufg.bk.applisp.app`)](https://play.google.com/store/apps/details?id=jp.mufg.bk.applisp.app&hl=ja)、[公式案内](https://direct.bk.mufg.jp/btm/banking/sp_appli.html) | 残高、入出金明細、定期預金、外貨預金等。スマホ版明細は最大200件 | 表示確認と認証発行元として重要。ただし円明細の印刷ボタンがなく、公式CSVもPCブラウザ限定。端末紐付け・root検知があり、主収集器には不向き。 |
-| 三菱UFJダイレクト API | [サービス説明](https://direct.bk.mufg.jp/btm/ser_naiyo/api.html)、[利用規定](https://direct.bk.mufg.jp/btm/kitei/api.html)、[開発者ポータルFAQ](https://developer.portal.bk.mufg.jp/btmu/openapitrial/faq) | 口座情報、入出金明細、定期預金明細等。アクセストークン方式 | 公式かつ理想的だが、対象サービス提供会社との連携が前提。体験環境から個人用本番クライアントへ進む公開セルフサービス経路は確認できない。初期コスト **5/5**。 |
-| Mable | [公式終了案内](https://www.bk.mufg.jp/tsukau/app/lp/mable/moneycanvas/index.html) | 旧家計管理・つかいわけ口座操作 | **2024-03-27終了**。既存ユーザーもアプリは利用不可。収集経路にしない。 |
-| Money Canvas | [Mableとの差分・移行FAQ](https://faq01.bk.mufg.jp/faq/show/4980?site_domain=moneycanvas)、[更新遅延FAQ](https://faq01.bk.mufg.jp/faq/show/4979?site_domain=moneycanvas) | 資産・明細・推移。Mableデータの一部を移行可能 | 銀行提供サービスだが、金融機関明細は Moneytree サービスで取得する。つかいわけ口座操作・各種入出金通知も移行されない。aggregator 回避条件に反する。 |
+| 経路                          | 入口                                                                                                                                                                                                       | 読み取り可能な主なデータ                                                                                 | 出力／自動化上の位置付け                                                                                                                                   |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 三菱UFJダイレクト（ブラウザ） | [公式トップ](https://direct.bk.mufg.jp/index.html)、[現在のPCログイン画面](https://directg.s.bk.mufg.jp/APL/LGP_P_01/PU/LG_0001/LG_0001_PC01)                                                              | 代表口座とサービス指定口座、残高、円入出金、定期預金明細、外貨預金、取引記録、直近の銀行ポイント加算実績 | **推奨**。CSV/PDF/印刷を持ち、Playwright等の通常ブラウザで観測しやすい。ログインはスマホ承認を要する可能性が高い。                                         |
+| 公式「三菱UFJ銀行」アプリ     | [Google Play (`jp.mufg.bk.applisp.app`)](https://play.google.com/store/apps/details?id=jp.mufg.bk.applisp.app&hl=ja)、[公式案内](https://direct.bk.mufg.jp/btm/banking/sp_appli.html)                      | 残高、入出金明細、定期預金、外貨預金等。スマホ版明細は最大200件                                          | 表示確認と認証発行元として重要。ただし円明細の印刷ボタンがなく、公式CSVもPCブラウザ限定。端末紐付け・root検知があり、主収集器には不向き。                  |
+| 三菱UFJダイレクト API         | [サービス説明](https://direct.bk.mufg.jp/btm/ser_naiyo/api.html)、[利用規定](https://direct.bk.mufg.jp/btm/kitei/api.html)、[開発者ポータルFAQ](https://developer.portal.bk.mufg.jp/btmu/openapitrial/faq) | 口座情報、入出金明細、定期預金明細等。アクセストークン方式                                               | 公式かつ理想的だが、対象サービス提供会社との連携が前提。体験環境から個人用本番クライアントへ進む公開セルフサービス経路は確認できない。初期コスト **5/5**。 |
+| Mable                         | [公式終了案内](https://www.bk.mufg.jp/tsukau/app/lp/mable/moneycanvas/index.html)                                                                                                                          | 旧家計管理・つかいわけ口座操作                                                                           | **2024-03-27終了**。既存ユーザーもアプリは利用不可。収集経路にしない。                                                                                     |
+| Money Canvas                  | [Mableとの差分・移行FAQ](https://faq01.bk.mufg.jp/faq/show/4980?site_domain=moneycanvas)、[更新遅延FAQ](https://faq01.bk.mufg.jp/faq/show/4979?site_domain=moneycanvas)                                    | 資産・明細・推移。Mableデータの一部を移行可能                                                            | 銀行提供サービスだが、金融機関明細は Moneytree サービスで取得する。つかいわけ口座操作・各種入出金通知も移行されない。aggregator 回避条件に反する。         |
 
 ## 口座列挙と残高
 
@@ -255,14 +255,14 @@ OTP、通知、カード等の別機能が同居するため、runtime観測で�
 現行の認証済みinternal JSON APIを直接呼ぶ保守中クライアントは見つからなかった。銀行の公開ログインJSから
 JSON BFF transport自体は確認できたが、これは第三者clientでも認証後read endpointでもない。
 
-| 実装 | 最終確認 | 方式 | 評価 |
-| --- | --- | --- | --- |
-| [4noha/openmoney `plugins/mufg/scraper.py`](https://github.com/4noha/openmoney/blob/7fa001a411549f3b55ec766701dd4c07b45c8c98/plugins/mufg/scraper.py) | 対象ファイルのcommit 2026-05-09 | Playwrightで現行ログインURLを開き、契約番号・パスワードを入力。MUFGあんしんパスのQRをユーザーへ送り、承認待ち後に円明細画面を月別・最大25カ月、100件単位でDOM解析 | 現行方式の強い参考。完全無人ではなくスマホ承認を明示。残高・外貨・定期・CSV raw evidenceは未充足。 |
-| [nakaomote/financial `ufj_download.py`](https://github.com/nakaomote/financial/blob/1565e12aab81c4ac08687e405869f5681ede20ca/ufj_download.py) | 対象ファイルのcommit 2025-04-20 | headless Seleniumでログインし、円明細CSVをダウンロード | あんしんパス導入前で、旧画面セレクタを含む。現在動作は未確認。 |
-| [yusuke1225math2/my-finance `ufj_driver.py`](https://github.com/yusuke1225math2/my-finance/blob/ea552e35974d6c6efbf9936e88800eaf80c9a5ab/ufj/ufj_driver.py) | 対象ファイルのcommit 2024-05-30 | headless Selenium、過去30日CSV | 認証と画面変更に弱い旧例。 |
-| [shinichy/get_statement `get_statement.py`](https://github.com/shinichy/get_statement/blob/6f9730162d72eb9d14fa950767fdbcc8836676c1/get_statement.py) | 2018-12-01 | Seleniumで旧画像ボタンを操作しCSV | 歴史資料のみ。 |
-| [Finance::Bank::JP::MUFG](https://github.com/gitpan/Finance-Bank-JP-MUFG/blob/7a19f150108c58153167eda612ff44f54bee04e0/lib/Finance/Bank/JP/MUFG.pm) | 2012-10-21 | `WWW::Mechanize`でHTMLフォーム`_TRANID`を直接POSTし、口座・取引・CSVを解析 | ブラウザ不要HTTP clientの先例だが、現行認証・Angular UIよりはるかに古く再利用不可。 |
-| [Zaim CSV Converter](https://github.com/yukihiko-shinoda/zaim-csv-converter) | repo更新 2026-08-20 | ユーザーが公式Webから落としたCSVをローカル変換 | CSV parser設計の参考。ログインもinternal APIも扱わない。 |
+| 実装                                                                                                                                                        | 最終確認                        | 方式                                                                                                                                                              | 評価                                                                                               |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| [4noha/openmoney `plugins/mufg/scraper.py`](https://github.com/4noha/openmoney/blob/7fa001a411549f3b55ec766701dd4c07b45c8c98/plugins/mufg/scraper.py)       | 対象ファイルのcommit 2026-05-09 | Playwrightで現行ログインURLを開き、契約番号・パスワードを入力。MUFGあんしんパスのQRをユーザーへ送り、承認待ち後に円明細画面を月別・最大25カ月、100件単位でDOM解析 | 現行方式の強い参考。完全無人ではなくスマホ承認を明示。残高・外貨・定期・CSV raw evidenceは未充足。 |
+| [nakaomote/financial `ufj_download.py`](https://github.com/nakaomote/financial/blob/1565e12aab81c4ac08687e405869f5681ede20ca/ufj_download.py)               | 対象ファイルのcommit 2025-04-20 | headless Seleniumでログインし、円明細CSVをダウンロード                                                                                                            | あんしんパス導入前で、旧画面セレクタを含む。現在動作は未確認。                                     |
+| [yusuke1225math2/my-finance `ufj_driver.py`](https://github.com/yusuke1225math2/my-finance/blob/ea552e35974d6c6efbf9936e88800eaf80c9a5ab/ufj/ufj_driver.py) | 対象ファイルのcommit 2024-05-30 | headless Selenium、過去30日CSV                                                                                                                                    | 認証と画面変更に弱い旧例。                                                                         |
+| [shinichy/get_statement `get_statement.py`](https://github.com/shinichy/get_statement/blob/6f9730162d72eb9d14fa950767fdbcc8836676c1/get_statement.py)       | 2018-12-01                      | Seleniumで旧画像ボタンを操作しCSV                                                                                                                                 | 歴史資料のみ。                                                                                     |
+| [Finance::Bank::JP::MUFG](https://github.com/gitpan/Finance-Bank-JP-MUFG/blob/7a19f150108c58153167eda612ff44f54bee04e0/lib/Finance/Bank/JP/MUFG.pm)         | 2012-10-21                      | `WWW::Mechanize`でHTMLフォーム`_TRANID`を直接POSTし、口座・取引・CSVを解析                                                                                        | ブラウザ不要HTTP clientの先例だが、現行認証・Angular UIよりはるかに古く再利用不可。                |
+| [Zaim CSV Converter](https://github.com/yukihiko-shinoda/zaim-csv-converter)                                                                                | repo更新 2026-08-20             | ユーザーが公式Webから落としたCSVをローカル変換                                                                                                                    | CSV parser設計の参考。ログインもinternal APIも扱わない。                                           |
 
 `openmoney` の実例は、MUFG銀行において「ログイン後のWeb画面取得」は現実的だが、あんしんパス承認を
 人間ループから外せないことを示す。ログインBFFのrequest shapeは公開JSから一部確定した一方、認証後read BFFと
@@ -270,12 +270,12 @@ session replay可否は確定しないため、Kuebikoで本人操作の実通�
 
 ## 実行基盤の適性
 
-| 基盤 | 適性 | 理由 |
-| --- | --- | --- |
-| Cloudflare Worker（isolate） | 低 | フルChromeもAndroidアプリも動かせない。認証後の単純HTTP APIが特定・再生可能になった場合のcoordinator／ingestには適する。 |
-| Cloudflare Container | 中 | Linux Playwrightは動かせるが、短命コンテナ単体では登録スマホの生体承認を完結できない。まず承認済みセッションのimport/replayが通るかを試す。セッションが再生できる場合のみ収集器候補。 |
-| OCI VM／Kubernetes | 中〜高 | 永続Chrome profile、固定実行環境、長い承認待ちを保ちやすい。完全無人化は保証しないが、スマホ承認を含むbrowser issuerにはContainerより扱いやすい。 |
-| ローカルの可視Chrome | 高（初期） | ユーザーが登録スマホで承認しやすく、Bitwardenから秘密を安全に入力でき、Kuebikoで全通信を観測できる。最初のissuer／fallbackにする。 |
+| 基盤                         | 適性       | 理由                                                                                                                                                                                  |
+| ---------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare Worker（isolate） | 低         | フルChromeもAndroidアプリも動かせない。認証後の単純HTTP APIが特定・再生可能になった場合のcoordinator／ingestには適する。                                                              |
+| Cloudflare Container         | 中         | Linux Playwrightは動かせるが、短命コンテナ単体では登録スマホの生体承認を完結できない。まず承認済みセッションのimport/replayが通るかを試す。セッションが再生できる場合のみ収集器候補。 |
+| OCI VM／Kubernetes           | 中〜高     | 永続Chrome profile、固定実行環境、長い承認待ちを保ちやすい。完全無人化は保証しないが、スマホ承認を含むbrowser issuerにはContainerより扱いやすい。                                     |
+| ローカルの可視Chrome         | 高（初期） | ユーザーが登録スマホで承認しやすく、Bitwardenから秘密を安全に入力でき、Kuebikoで全通信を観測できる。最初のissuer／fallbackにする。                                                    |
 
 推奨分割は、可視Chromeを **session issuer**、短命Linux実行環境を **read-only consumer** とする構成である。
 ただしsession replayが通らなければ、OCI等の永続ブラウザでユーザー承認付き半自動収集を採用し、
@@ -283,14 +283,14 @@ Cloudflareはraw evidence受信・保存だけに限定する。
 
 ## 実装コストと推奨順
 
-| 経路 | コスト (1-5) | 自動化見込み | 採否 |
-| --- | ---: | --- | --- |
-| 手動ブラウザ + 公式CSV/PDF + Kuebiko | 2 | 定期操作は手動、取得後処理は高 | **今すぐ採用**。最も正確でraw evidenceを失わない。 |
-| 可視Playwright + ユーザーのあんしんパス承認 + DOM/CSV | 4 | 半自動は高、完全無人は低〜中 | **第一PoC**。既存の2026年実装例あり。 |
-| 承認済みWebセッションのinternal API replay | 3（発見後） | 成功すれば高 | **最優先の技術検証**。login BFFは判明、認証後read endpointは未確認。 |
-| 公式ダイレクトAPI | 5 | 契約できれば非常に高 | 外部サービス会社としての本番接続条件が重く、当面見送る。 |
-| 正規Android splitの静的解析＋本人操作runtime metadata観測 | 5 | 低〜中 | **並行調査**。実機／artifactが揃い次第実施し、security controlが妨げた時点で停止。 |
-| Money Canvas/Moneytree | 2 | 高 | aggregator回避条件に反するため不採用。 |
+| 経路                                                      | コスト (1-5) | 自動化見込み                   | 採否                                                                               |
+| --------------------------------------------------------- | -----------: | ------------------------------ | ---------------------------------------------------------------------------------- |
+| 手動ブラウザ + 公式CSV/PDF + Kuebiko                      |            2 | 定期操作は手動、取得後処理は高 | **今すぐ採用**。最も正確でraw evidenceを失わない。                                 |
+| 可視Playwright + ユーザーのあんしんパス承認 + DOM/CSV     |            4 | 半自動は高、完全無人は低〜中   | **第一PoC**。既存の2026年実装例あり。                                              |
+| 承認済みWebセッションのinternal API replay                |  3（発見後） | 成功すれば高                   | **最優先の技術検証**。login BFFは判明、認証後read endpointは未確認。               |
+| 公式ダイレクトAPI                                         |            5 | 契約できれば非常に高           | 外部サービス会社としての本番接続条件が重く、当面見送る。                           |
+| 正規Android splitの静的解析＋本人操作runtime metadata観測 |            5 | 低〜中                         | **並行調査**。実機／artifactが揃い次第実施し、security controlが妨げた時点で停止。 |
+| Money Canvas/Moneytree                                    |            2 | 高                             | aggregator回避条件に反するため不採用。                                             |
 
 ## 次の検証手順
 

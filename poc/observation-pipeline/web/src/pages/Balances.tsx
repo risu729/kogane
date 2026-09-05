@@ -1,9 +1,5 @@
 import { useState, type ReactNode } from "react";
-import {
-  useBalances,
-  type BalanceHistoryRow,
-  type BalanceRow,
-} from "../api.ts";
+import { useBalances, type BalanceHistoryRow, type BalanceRow } from "../api.ts";
 import {
   Amount,
   Badge,
@@ -47,11 +43,7 @@ function BalancesBody({
       <section className="panel">
         <div className="panel-body">
           <RecordControls rows={rows} filters={filters} onChange={setFilters} />
-          <button
-            className="button"
-            type="button"
-            onClick={() => setFilters(EMPTY_FILTERS)}
-          >
+          <button className="button" type="button" onClick={() => setFilters(EMPTY_FILTERS)}>
             条件をクリア
           </button>
         </div>
@@ -113,11 +105,7 @@ function BalanceTable({
                 ...(history ? ["解析・履歴"] : []),
                 "記録",
               ].map((label) => (
-                <th
-                  scope="col"
-                  key={label}
-                  className={label === "金額" ? "num" : ""}
-                >
+                <th scope="col" key={label} className={label === "金額" ? "num" : ""}>
                   {label}
                 </th>
               ))}
@@ -129,8 +117,7 @@ function BalanceTable({
                 <tr
                   key={row.id}
                   className={
-                    "superseded_by_parse_run_id" in row &&
-                    row.superseded_by_parse_run_id !== null
+                    "superseded_by_parse_run_id" in row && row.superseded_by_parse_run_id !== null
                       ? "is-superseded"
                       : ""
                   }
@@ -143,11 +130,7 @@ function BalanceTable({
                     {row.metric} <Badge>{row.instrument}</Badge>
                   </td>
                   <td className="num">
-                    <Amount
-                      minor={row.amount_minor}
-                      unit={row.instrument}
-                      text={row.amount_text}
-                    />
+                    <Amount minor={row.amount_minor} unit={row.instrument} text={row.amount_text} />
                   </td>
                   <td>
                     <Nullable value={row.as_of} />
@@ -158,9 +141,7 @@ function BalanceTable({
                   {history && "parse_status" in row ? (
                     <td>
                       <StatusBadge status={row.parse_status} />
-                      <LineageBadge
-                        supersededBy={row.superseded_by_parse_run_id}
-                      />
+                      <LineageBadge supersededBy={row.superseded_by_parse_run_id} />
                     </td>
                   ) : null}
                   <td>

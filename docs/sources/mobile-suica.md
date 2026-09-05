@@ -91,14 +91,14 @@ were recorded.
 
 ## Official data routes
 
-| Route | Officially available data | Window / limit | Timing and granularity | Automation assessment |
-| --- | --- | --- | --- | --- |
-| Mobile Suica Android/iOS app | Current SF balance and SF use history | History: within 26 weeks, at most 100 entries | App history includes the current day's use; rail rows show station names where available, bus rows show operator, and auto-charge is labelled | Best user display, but poor cloud collector: tied to a supported device and app state |
-| Mobile Suica member website (PC), via current JRE ID | SF history, balance after each row, printable history | Official UI says within 26 weeks and at most 100 entries per search | Through the previous day; available 05:00 to 00:50 JST | Preferred primary route; unattended Browser Rendering login and plain Worker replay are both live-proven |
-| Google Wallet on Android | SF balance and a card transaction-history view; Google documents purchases, card/store charges and gifts for Japanese e-money, and generic transit views expose station names, dates and times | No fixed Suica count/window found; Google warns that details can be omitted after many transactions in a short period | Device-local official platform view; current-day behavior and exact Suica row fields need live capture | Useful secondary snapshot/cross-check. No documented consumer read API; app/UI automation is device-bound and likely brittle |
-| Mobile Suica app, JRE POINT menu | JRE POINT current holdings; also write operations that Kogane must never call | Current point balance only is documented | No point-history feature is documented on this route | Low-value balance snapshot; do not use for reward history |
-| JRE POINT Web/app | Total point balance and point history | Point history: previous one year | History marks distinguish rail, Suica purchase, View Card, and other sources; exact live columns still need capture | Preferred reward route, but authentication/anti-abuse is materially harder |
-| JRE ID | Authentication and SSO only | JR East says SSO persists for an unspecified "certain time" | Passkey, SMS, and password login are supported | Authentication layer, not a financial data source |
+| Route                                                | Officially available data                                                                                                                                                                      | Window / limit                                                                                                        | Timing and granularity                                                                                                                        | Automation assessment                                                                                                        |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Mobile Suica Android/iOS app                         | Current SF balance and SF use history                                                                                                                                                          | History: within 26 weeks, at most 100 entries                                                                         | App history includes the current day's use; rail rows show station names where available, bus rows show operator, and auto-charge is labelled | Best user display, but poor cloud collector: tied to a supported device and app state                                        |
+| Mobile Suica member website (PC), via current JRE ID | SF history, balance after each row, printable history                                                                                                                                          | Official UI says within 26 weeks and at most 100 entries per search                                                   | Through the previous day; available 05:00 to 00:50 JST                                                                                        | Preferred primary route; unattended Browser Rendering login and plain Worker replay are both live-proven                     |
+| Google Wallet on Android                             | SF balance and a card transaction-history view; Google documents purchases, card/store charges and gifts for Japanese e-money, and generic transit views expose station names, dates and times | No fixed Suica count/window found; Google warns that details can be omitted after many transactions in a short period | Device-local official platform view; current-day behavior and exact Suica row fields need live capture                                        | Useful secondary snapshot/cross-check. No documented consumer read API; app/UI automation is device-bound and likely brittle |
+| Mobile Suica app, JRE POINT menu                     | JRE POINT current holdings; also write operations that Kogane must never call                                                                                                                  | Current point balance only is documented                                                                              | No point-history feature is documented on this route                                                                                          | Low-value balance snapshot; do not use for reward history                                                                    |
+| JRE POINT Web/app                                    | Total point balance and point history                                                                                                                                                          | Point history: previous one year                                                                                      | History marks distinguish rail, Suica purchase, View Card, and other sources; exact live columns still need capture                           | Preferred reward route, but authentication/anti-abuse is materially harder                                                   |
+| JRE ID                                               | Authentication and SSO only                                                                                                                                                                    | JR East says SSO persists for an unspecified "certain time"                                                           | Passkey, SMS, and password login are supported                                                                                                | Authentication layer, not a financial data source                                                                            |
 
 Official Mobile Suica details:
 
@@ -625,13 +625,13 @@ exists.
 
 ## Runtime suitability
 
-| Runtime | Mobile Suica SF through current JRE ID | JRE POINT | Google Wallet secondary view | Why |
-| --- | --- | --- | --- | --- |
-| Local Windows/WSL | High for credential sync, capture and replay tests | Medium | Medium for UI/export capture | Bitwarden is unlocked only for occasional source-scoped sync; no daily local job is needed |
-| Cloudflare Worker + Browser Rendering | High | Low | Very low | Fresh JRE passkey login, Mobile Suica session bootstrap, plain fetch history collection and private R2 storage are all live-proven |
-| Cloudflare Container | Unnecessary for this source | Medium | Very low | Full Linux browser adds operational cost without improving the proven Browser Rendering path |
-| Generic OCI / Kubernetes | Unnecessary for this source | Medium | Very low | Useful only as a fallback experiment; the working collector is serverless |
-| Owner's Android device | High for official app view, low as a server job | Medium-high for point app | High for viewing, low-medium for local UI automation | Has the live Osaifu-Keitai/Wallet state; unattended orchestration, screen unlock and upgrades make it fragile |
+| Runtime                               | Mobile Suica SF through current JRE ID             | JRE POINT                 | Google Wallet secondary view                         | Why                                                                                                                                |
+| ------------------------------------- | -------------------------------------------------- | ------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Local Windows/WSL                     | High for credential sync, capture and replay tests | Medium                    | Medium for UI/export capture                         | Bitwarden is unlocked only for occasional source-scoped sync; no daily local job is needed                                         |
+| Cloudflare Worker + Browser Rendering | High                                               | Low                       | Very low                                             | Fresh JRE passkey login, Mobile Suica session bootstrap, plain fetch history collection and private R2 storage are all live-proven |
+| Cloudflare Container                  | Unnecessary for this source                        | Medium                    | Very low                                             | Full Linux browser adds operational cost without improving the proven Browser Rendering path                                       |
+| Generic OCI / Kubernetes              | Unnecessary for this source                        | Medium                    | Very low                                             | Useful only as a fallback experiment; the working collector is serverless                                                          |
+| Owner's Android device                | High for official app view, low as a server job    | Medium-high for point app | High for viewing, low-medium for local UI automation | Has the live Osaifu-Keitai/Wallet state; unattended orchestration, screen unlock and upgrades make it fragile                      |
 
 Cloudflare's current docs describe Workers as V8 isolates with Web APIs and only
 a subset/polyfill set of Node APIs; Containers run a full Linux/container image.
@@ -649,17 +649,17 @@ session, encoding and egress/Fraud Defense issues.
 
 Scale: 1 = nearly direct export; 5 = fragile, device-bound or major protocol work.
 
-| Deliverable | Cost | Expected automation | Confidence |
-| --- | ---: | --- | --- |
-| Current Mobile Suica SF, Worker + Browser Rendering + stored passkey credential | 2/5 | Fully unattended daily collection; local `bw:sync` only after credential changes | High; live login, 15-row collection and R2 manifest retrieval succeeded |
-| Current Mobile Suica SF, direct Worker JRE API | 4/5 | Rejected at `AUTH_FS2` with `CO-AT5000`, both direct and TAMIA VPC | High for the observed rejection; exact Fraud Defense signal remains unknown |
-| Current Mobile Suica SF, imported short-lived session replay | 2/5 | Useful for diagnostics only; not the daily bootstrap | High for replay, deliberately superseded by fresh Browser Rendering login |
-| Legacy Mobile Suica-ID fetch | 2/5 | Existing CAPTCHA flow and parser, but not applicable to the confirmed current account | High on implementation, irrelevant as the production bootstrap |
-| JRE POINT balance + one-year point history | 4/5 | Semi-automatic bootstrap, second-password step, then replay if proven; otherwise browser collection | Medium-low |
-| Google Wallet one-time app/Takeout snapshot | 2/5 | Manual or owner-triggered local capture; good for comparison, not scheduling | Medium; exact exported Suica fields are unknown |
-| Google Wallet recurring Android UI capture | 4/5 | Device-bound UI automation with screen/device state and undocumented omission risk | Medium-low |
-| App/API discovery via APK static analysis | 4/5 | Useful research, not itself an operational collector | Medium |
-| Full Mobile Suica app automation in cloud | 5/5 | Not recommended | High |
+| Deliverable                                                                     | Cost | Expected automation                                                                                 | Confidence                                                                  |
+| ------------------------------------------------------------------------------- | ---: | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Current Mobile Suica SF, Worker + Browser Rendering + stored passkey credential |  2/5 | Fully unattended daily collection; local `bw:sync` only after credential changes                    | High; live login, 15-row collection and R2 manifest retrieval succeeded     |
+| Current Mobile Suica SF, direct Worker JRE API                                  |  4/5 | Rejected at `AUTH_FS2` with `CO-AT5000`, both direct and TAMIA VPC                                  | High for the observed rejection; exact Fraud Defense signal remains unknown |
+| Current Mobile Suica SF, imported short-lived session replay                    |  2/5 | Useful for diagnostics only; not the daily bootstrap                                                | High for replay, deliberately superseded by fresh Browser Rendering login   |
+| Legacy Mobile Suica-ID fetch                                                    |  2/5 | Existing CAPTCHA flow and parser, but not applicable to the confirmed current account               | High on implementation, irrelevant as the production bootstrap              |
+| JRE POINT balance + one-year point history                                      |  4/5 | Semi-automatic bootstrap, second-password step, then replay if proven; otherwise browser collection | Medium-low                                                                  |
+| Google Wallet one-time app/Takeout snapshot                                     |  2/5 | Manual or owner-triggered local capture; good for comparison, not scheduling                        | Medium; exact exported Suica fields are unknown                             |
+| Google Wallet recurring Android UI capture                                      |  4/5 | Device-bound UI automation with screen/device state and undocumented omission risk                  | Medium-low                                                                  |
+| App/API discovery via APK static analysis                                       |  4/5 | Useful research, not itself an operational collector                                                | Medium                                                                      |
+| Full Mobile Suica app automation in cloud                                       |  5/5 | Not recommended                                                                                     | High                                                                        |
 
 Overall recommendation: use the now-proven Worker + Browser Rendering collector.
 Keep Bitwarden access local and occasional, but accept that the selected
@@ -707,16 +707,17 @@ longer-lived, lossy rewards path.
    if Fraud Defense requires repeated interactive/browser state; do not work
    around account locks or security challenges.
 10. **Provenance and read-only app transport experiment.** Pull Mobile Suica 6.6.0
-   or the then-current version from an owned device with `adb shell pm path` and
-   `adb pull`, verify the JR East signer, and compare split names/hashes with the
-   third-party XAPK. On that same device, perform one already-intended history
-   refresh while recording only host, path, method, status, header names and
-   redacted JSON keys. First allow only `ssl.mobilesuica.com` plus the five
-   static read paths; abort before any unmatched path. If TLS pinning prevents
-   observation, record that barrier and stop rather than disabling or bypassing
-   the control. Determine whether `sfLog` is device input, its item count, and
-   whether 401 causes exactly one token renewal/retry. Never record IDm, Cid,
-   tokens, device identifiers, balances or transaction values.
+    or the then-current version from an owned device with `adb shell pm path` and
+    `adb pull`, verify the JR East signer, and compare split names/hashes with the
+    third-party XAPK. On that same device, perform one already-intended history
+    refresh while recording only host, path, method, status, header names and
+    redacted JSON keys. First allow only `ssl.mobilesuica.com` plus the five
+    static read paths; abort before any unmatched path. If TLS pinning prevents
+    observation, record that barrier and stop rather than disabling or bypassing
+    the control. Determine whether `sfLog` is device input, its item count, and
+    whether 401 causes exactly one token renewal/retry. Never record IDm, Cid,
+    tokens, device identifiers, balances or transaction values.
+
 ## Open questions
 
 - Whether JRE ID will continue to accept the Browser Rendering virtual

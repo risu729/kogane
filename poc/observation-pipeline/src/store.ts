@@ -30,8 +30,7 @@ export function openStore(stateDir?: string): Store {
   mkdirSync(blobDir, { recursive: true });
   const db = new Database(join(root, "kogane-poc.sqlite"), { create: true });
   db.exec("PRAGMA foreign_keys = ON;");
-  const found = (db.query("PRAGMA user_version").get() as { user_version: number })
-    .user_version;
+  const found = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
   if (found !== 0 && found !== SCHEMA_VERSION) {
     throw new Error(
       `${root} was created with schema version ${found}, but this build expects ${SCHEMA_VERSION}. ` +
@@ -74,14 +73,10 @@ export function insertFetchRun(
   // An empty external run id is treated as absent throughout, so that a
   // manifest with `"runId": ""` cannot claim a distinct run identity.
   const externalRunId =
-    run.externalRunId !== undefined && run.externalRunId !== ""
-      ? run.externalRunId
-      : undefined;
+    run.externalRunId !== undefined && run.externalRunId !== "" ? run.externalRunId : undefined;
   const existing = externalRunId
     ? (store.db
-        .query(
-          "SELECT id FROM fetch_runs WHERE source_id = ?1 AND external_run_id = ?2",
-        )
+        .query("SELECT id FROM fetch_runs WHERE source_id = ?1 AND external_run_id = ?2")
         .get(run.sourceId, externalRunId) as { id: number } | null)
     : null;
   if (existing) return existing.id;
@@ -118,17 +113,15 @@ export function putRawObject(
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, bytes);
   store.db
-    .query(
-      "INSERT INTO raw_objects (sha256, size, content_type, blob_key) VALUES (?1, ?2, ?3, ?4)",
-    )
+    .query("INSERT INTO raw_objects (sha256, size, content_type, blob_key) VALUES (?1, ?2, ?3, ?4)")
     .run(digest, bytes.byteLength, contentType, blobKey);
   return { sha256: digest, deduplicated: false };
 }
 
 export function readRawObject(store: Store, sha256: string): Uint8Array {
-  const row = store.db
-    .query("SELECT blob_key FROM raw_objects WHERE sha256 = ?1")
-    .get(sha256) as { blob_key: string } | null;
+  const row = store.db.query("SELECT blob_key FROM raw_objects WHERE sha256 = ?1").get(sha256) as {
+    blob_key: string;
+  } | null;
   if (!row) throw new Error(`raw object not found: ${sha256}`);
   const path = join(store.blobDir, ...row.blob_key.split("/"));
   if (!existsSync(path)) throw new Error(`blob missing on disk: ${path}`);

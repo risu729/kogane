@@ -8,10 +8,7 @@ const VMONEY_HISTORY_PATH = "/api/tmoney_history";
 const SMFG_PATH = "/api/smfg_point";
 const MAX_HISTORY_PAGES = 200;
 
-type Fetcher = (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => Promise<Response>;
+type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 interface RawJsonResponse {
   rawText: string;
@@ -176,9 +173,7 @@ class VPointClient {
       throw new VPointProtocolError("invalid-json");
     }
     const status = json.status;
-    const code = isObject(status) && typeof status.code === "string"
-      ? status.code
-      : null;
+    const code = isObject(status) && typeof status.code === "string" ? status.code : null;
     if (code !== "0000") {
       if (code === "0010") throw new VPointSessionExpiredError();
       throw new VPointApplicationError(code);
@@ -242,7 +237,10 @@ class VPointClient {
 }
 
 class VPointError extends Error {
-  constructor(operation: string, readonly status: number) {
+  constructor(
+    operation: string,
+    readonly status: number,
+  ) {
     super(`V Point ${operation} failed with HTTP ${status}`);
     this.name = "VPointError";
   }
@@ -267,15 +265,15 @@ function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function defaultFetch(
-  input: string | URL | Request,
-  init?: RequestInit,
-): Promise<Response> {
+function defaultFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
   return fetch(input, init);
 }
 
 class VPointProtocolError extends Error {
-  constructor(readonly reasonCode: string) { super("V Point provider response was invalid"); this.name = "VPointProtocolError"; }
+  constructor(readonly reasonCode: string) {
+    super("V Point provider response was invalid");
+    this.name = "VPointProtocolError";
+  }
 }
 class VPointApplicationError extends Error {
   readonly applicationCode?: string;

@@ -41,10 +41,13 @@ export class VPointPayCredentialState extends DurableObject<Env> {
     if (refreshToken && deviceUuid) {
       return inspectCredential({ refreshToken, deviceUuid }, "durable-object");
     }
-    return inspectCredential({
-      refreshToken: this.environment.VPOINT_PAY_REFRESH_TOKEN,
-      deviceUuid: this.environment.VPOINT_PAY_DEVICE_UUID,
-    }, "worker-secrets");
+    return inspectCredential(
+      {
+        refreshToken: this.environment.VPOINT_PAY_REFRESH_TOKEN,
+        deviceUuid: this.environment.VPOINT_PAY_DEVICE_UUID,
+      },
+      "worker-secrets",
+    );
   }
 
   async resetFromSecrets(): Promise<{ status: "reset" }> {
@@ -95,11 +98,13 @@ export class VPointPayCredentialState extends DurableObject<Env> {
       transactionCount = collection.transactionCount;
       for (const artifact of collection.artifacts) {
         try {
-          artifacts.push(await storeArtifact({
-            bucket: this.environment.SNAPSHOTS,
-            prefix,
-            artifact,
-          }));
+          artifacts.push(
+            await storeArtifact({
+              bucket: this.environment.SNAPSHOTS,
+              prefix,
+              artifact,
+            }),
+          );
         } catch (error) {
           failures.push(failure(`r2:${artifact.dataset}`, error));
         }
@@ -109,11 +114,8 @@ export class VPointPayCredentialState extends DurableObject<Env> {
     }
 
     const completedAt = new Date().toISOString();
-    const status = failures.length === 0
-      ? "success"
-      : artifacts.length === 0
-        ? "failed"
-        : "partial";
+    const status =
+      failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
     const manifest: CollectionManifest = {
       schemaVersion: this.environment.COLLECTOR_SCHEMA_VERSION,
       source: "v-point-pay",
@@ -133,18 +135,20 @@ export class VPointPayCredentialState extends DurableObject<Env> {
       prefix,
       manifest,
     });
-    console.log(JSON.stringify({
-      event: "vpoint-pay-collection-stored",
-      runId,
-      status,
-      earliestMonth,
-      latestMonth,
-      transactionMonthCount,
-      transactionCount,
-      artifactCount: artifacts.length,
-      failureCount: failures.length,
-      manifestKey,
-    }));
+    console.log(
+      JSON.stringify({
+        event: "vpoint-pay-collection-stored",
+        runId,
+        status,
+        earliestMonth,
+        latestMonth,
+        transactionMonthCount,
+        transactionCount,
+        artifactCount: artifacts.length,
+        failureCount: failures.length,
+        manifestKey,
+      }),
+    );
     return { ...manifest, manifestKey };
   }
 }

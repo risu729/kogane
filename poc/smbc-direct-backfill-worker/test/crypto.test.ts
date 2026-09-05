@@ -22,7 +22,8 @@ describe("parseCredentials", () => {
   });
 
   test("rejects invalid account identifiers", () => {
-    expect(() => parseCredentials(JSON.stringify({ user: "bad", password: "test" })))
-      .toThrow("smbc_credentials_user_invalid");
+    expect(() => parseCredentials(JSON.stringify({ user: "bad", password: "test" }))).toThrow(
+      "smbc_credentials_user_invalid",
+    );
   });
 });

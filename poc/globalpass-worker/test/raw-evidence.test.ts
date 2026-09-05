@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  backfillStoredRuns,
-  importStoredRun,
-  type RawEvidenceImporter,
-} from "../src/raw-evidence";
+import { backfillStoredRuns, importStoredRun, type RawEvidenceImporter } from "../src/raw-evidence";
 
 describe("GLOBAL PASS raw evidence service binding", () => {
   test("imports one exact manifest through the private binding", async () => {
@@ -28,9 +24,7 @@ describe("GLOBAL PASS raw evidence service binding", () => {
     } satisfies RawEvidenceImporter;
     const result = await importStoredRun(importer, manifestKey);
     expect(result.status).toBe("sealed");
-    expect(new URL(observedUrl).pathname).toBe(
-      "/v1/prestia-globalpass/import-run",
-    );
+    expect(new URL(observedUrl).pathname).toBe("/v1/prestia-globalpass/import-run");
     expect(observedBody).toEqual({ manifestKey });
   });
 
@@ -39,14 +33,17 @@ describe("GLOBAL PASS raw evidence service binding", () => {
       "raw/prestia-globalpass/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json";
     const importer = {
       async fetch() {
-        return Response.json({
-          source: "prestia-globalpass",
-          manifestKey,
-          status: "deferred",
-          reason: "worker_invocation_limit",
-          artifactCount: 16,
-          nextOffset: 0,
-        }, { status: 202 });
+        return Response.json(
+          {
+            source: "prestia-globalpass",
+            manifestKey,
+            status: "deferred",
+            reason: "worker_invocation_limit",
+            artifactCount: 16,
+            nextOffset: 0,
+          },
+          { status: 202 },
+        );
       },
     } satisfies RawEvidenceImporter;
     await expect(importStoredRun(importer, manifestKey)).resolves.toEqual({
@@ -96,10 +93,12 @@ describe("GLOBAL PASS raw evidence service binding", () => {
         });
       },
     } satisfies RawEvidenceImporter;
-    await expect(importStoredRun(
-      importer,
-      "raw/prestia-globalpass/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
-    )).rejects.toThrow("raw_evidence_importer_invalid_response");
+    await expect(
+      importStoredRun(
+        importer,
+        "raw/prestia-globalpass/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
+      ),
+    ).rejects.toThrow("raw_evidence_importer_invalid_response");
   });
 
   test("rejects internally inconsistent backfill outcomes", async () => {
@@ -147,7 +146,8 @@ describe("GLOBAL PASS raw evidence service binding", () => {
         });
       },
     } satisfies RawEvidenceImporter;
-    await expect(backfillStoredRuns(importer, `global-pass-v1.${"b".repeat(600)}`))
-      .resolves.toMatchObject({ deferredManifestCount: 1, scannedObjectCount: 0 });
+    await expect(
+      backfillStoredRuns(importer, `global-pass-v1.${"b".repeat(600)}`),
+    ).resolves.toMatchObject({ deferredManifestCount: 1, scannedObjectCount: 0 });
   });
 });

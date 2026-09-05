@@ -67,14 +67,14 @@
 
 ## 公式入口と取得できるデータ
 
-| 公式経路 | 入口 | 読み取りデータ | 自動化上の位置付け |
-| --- | --- | --- | --- |
-| みずほダイレクト Web | [公式案内](https://www.mizuhobank.co.jp/direct/index.html)、[正規ログインURL案内](https://www.mizuhobank.co.jp/crime/info110520.html) | 利用口座、現在残高、普通/貯蓄/外貨普通/カードローン明細、定期・積立・外貨定期・グローバル口座の残高/預入明細、各種取引結果 | 主経路。desktopでCSV、PDFも取得できる |
-| みずほダイレクト通帳 | [公式サービス](https://www.mizuhobank.co.jp/direct/about/service/directpassbook/index.html) | 申込後に保存された普通・貯蓄・外貨普通の古い明細を最大10年 | 構造化backfillの主経路。ただし利用中かどうかだけを確認し、申込はしない |
-| みずほダイレクトアプリ | [公式機能](https://www.mizuhobank.co.jp/direct/app/index.html)、[Google Play](https://play.google.com/store/apps/details?id=jp.co.mizuhobank.banking) | 現在残高、入出金明細、取引ごとの残高、端末内履歴、収支レポート、ポイント入口 | 手動確認/認証補助。端末保存と生体認証のためcloud workerには不向き |
-| グローバル口座専用画面 | [公式商品ページ](https://www.mizuhobank.co.jp/direct/about/service/global/index.html) | 円定期、6通貨の外貨定期、預入明細、参考円換算、取引結果 | 通常口座一覧だけでなく専用画面を別収集する |
-| みずほポイントモール | [公式案内](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/index.html)、[操作ガイド](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/ebook/) | みずほポイント残高、獲得/利用履歴、有効期限、みずほギフト残高/履歴 | 銀行公式だがアプリの`P`マーク起点の別Web surface。第二段階 |
-| 個人向け銀行API | [銀行のAPI方針](https://www.mizuhobank.co.jp/company/activity/api/policy/index.html) | REST/JSON/OAuth 2.0で残高・明細APIは整備済み | 契約した電子決済等代行業者向け。自己口座用の公開developer tokenは確認できず、aggregator回避方針により不採用 |
+| 公式経路               | 入口                                                                                                                                                  | 読み取りデータ                                                                                                             | 自動化上の位置付け                                                                                          |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| みずほダイレクト Web   | [公式案内](https://www.mizuhobank.co.jp/direct/index.html)、[正規ログインURL案内](https://www.mizuhobank.co.jp/crime/info110520.html)                 | 利用口座、現在残高、普通/貯蓄/外貨普通/カードローン明細、定期・積立・外貨定期・グローバル口座の残高/預入明細、各種取引結果 | 主経路。desktopでCSV、PDFも取得できる                                                                       |
+| みずほダイレクト通帳   | [公式サービス](https://www.mizuhobank.co.jp/direct/about/service/directpassbook/index.html)                                                           | 申込後に保存された普通・貯蓄・外貨普通の古い明細を最大10年                                                                 | 構造化backfillの主経路。ただし利用中かどうかだけを確認し、申込はしない                                      |
+| みずほダイレクトアプリ | [公式機能](https://www.mizuhobank.co.jp/direct/app/index.html)、[Google Play](https://play.google.com/store/apps/details?id=jp.co.mizuhobank.banking) | 現在残高、入出金明細、取引ごとの残高、端末内履歴、収支レポート、ポイント入口                                               | 手動確認/認証補助。端末保存と生体認証のためcloud workerには不向き                                           |
+| グローバル口座専用画面 | [公式商品ページ](https://www.mizuhobank.co.jp/direct/about/service/global/index.html)                                                                 | 円定期、6通貨の外貨定期、預入明細、参考円換算、取引結果                                                                    | 通常口座一覧だけでなく専用画面を別収集する                                                                  |
+| みずほポイントモール   | [公式案内](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/index.html)、[操作ガイド](https://www.mizuhobank.co.jp/mmc/mizuhopointmall/ebook/)        | みずほポイント残高、獲得/利用履歴、有効期限、みずほギフト残高/履歴                                                         | 銀行公式だがアプリの`P`マーク起点の別Web surface。第二段階                                                  |
+| 個人向け銀行API        | [銀行のAPI方針](https://www.mizuhobank.co.jp/company/activity/api/policy/index.html)                                                                  | REST/JSON/OAuth 2.0で残高・明細APIは整備済み                                                                               | 契約した電子決済等代行業者向け。自己口座用の公開developer tokenは確認できず、aggregator回避方針により不採用 |
 
 公開ログイン入口の正規URLは
 `https://web.ib.mizuhobank.co.jp/servlet/LOGBNK0000000B.do` である。ログイン後は
@@ -87,17 +87,17 @@ hostを1つに固定せず、銀行が返すoriginとcookie domainを尊重す�
 と[利用口座登録FAQ](https://www.faq.mizuhobank.co.jp/faq/show/246?site_domain=default)
 から、残高照会・利用口座の対象は次の通りである。
 
-| 口座科目 | 列挙/残高の単位 | 明細の扱い |
-| --- | --- | --- |
-| 普通預金（総合口座普通を含む） | 店・口座単位の現在残高。代表利用口座と追加利用口座 | 入出金明細、直近download、ダイレクト通帳の対象 |
-| 貯蓄預金 | 店・口座単位の現在残高 | 普通預金と同じ入出金/ダイレクト通帳対象 |
-| 定期預金（総合口座定期を含む） | 口座合計と預入明細単位 | 現在の預入明細と、解約/継続済み明細を過去1年。取引型ledgerではなくlotとして扱う |
-| 積立定期預金（総合口座積立を含む） | 契約/口座と預入明細単位 | 残高・預入明細、取引結果。普通預金CSVだけでは列挙できない |
-| 外貨普通預金 | 口座・通貨単位。USD/EUR/GBP/CHF/AUD/NZDをWebで確認可能 | 入出金明細、ダイレクト通帳対象 |
-| 外貨定期預金 | 口座・通貨・預入明細単位。Web明細はUSD/EUR/GBP/CHF | AUD/NZDの外貨定期明細はWeb非対応。現在/過去1年の解約・継続明細は対応通貨をlive確認 |
-| みずほグローバル口座 | 1つのマルチカレンシー口座内の円定期と6通貨の外貨定期を、通貨・預入明細単位 | 専用残高・結果画面。通常の外貨普通口座とは別商品 |
-| 当座預金 | 利用口座登録は可能 | 個人Webでは振込/振替の引出口座としてのみと案内。残高列挙対象には含まれないためread supportは未確認 |
-| カードローン | 契約/口座単位 | 残高・入出金明細対象だが本MVPでは除外可能 |
+| 口座科目                           | 列挙/残高の単位                                                            | 明細の扱い                                                                                         |
+| ---------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 普通預金（総合口座普通を含む）     | 店・口座単位の現在残高。代表利用口座と追加利用口座                         | 入出金明細、直近download、ダイレクト通帳の対象                                                     |
+| 貯蓄預金                           | 店・口座単位の現在残高                                                     | 普通預金と同じ入出金/ダイレクト通帳対象                                                            |
+| 定期預金（総合口座定期を含む）     | 口座合計と預入明細単位                                                     | 現在の預入明細と、解約/継続済み明細を過去1年。取引型ledgerではなくlotとして扱う                    |
+| 積立定期預金（総合口座積立を含む） | 契約/口座と預入明細単位                                                    | 残高・預入明細、取引結果。普通預金CSVだけでは列挙できない                                          |
+| 外貨普通預金                       | 口座・通貨単位。USD/EUR/GBP/CHF/AUD/NZDをWebで確認可能                     | 入出金明細、ダイレクト通帳対象                                                                     |
+| 外貨定期預金                       | 口座・通貨・預入明細単位。Web明細はUSD/EUR/GBP/CHF                         | AUD/NZDの外貨定期明細はWeb非対応。現在/過去1年の解約・継続明細は対応通貨をlive確認                 |
+| みずほグローバル口座               | 1つのマルチカレンシー口座内の円定期と6通貨の外貨定期を、通貨・預入明細単位 | 専用残高・結果画面。通常の外貨普通口座とは別商品                                                   |
+| 当座預金                           | 利用口座登録は可能                                                         | 個人Webでは振込/振替の引出口座としてのみと案内。残高列挙対象には含まれないためread supportは未確認 |
+| カードローン                       | 契約/口座単位                                                              | 残高・入出金明細対象だが本MVPでは除外可能                                                          |
 
 みずほグローバル口座は開設時に自動で利用口座登録される。通常の利用口座追加
 画面から追加する対象ではない。また、本人が複数のお客さま番号を持つ場合、公式
@@ -152,15 +152,15 @@ pending authorization列はなく、反映済みledgerとみなす。未確定�
 
 ### 公式artifactの比較
 
-| artifact | 期間/対象 | 粒度 | 推奨用途 |
-| --- | --- | --- | --- |
-| 直近明細HTML | 約3カ月、普通/貯蓄/外貨普通 | 日付、摘要、入出金、取引後残高 | 増分収集と最新残高 |
-| 直近明細PDF | 約3カ月 | 公式表示の保存版。正確な列はlive確認 | audit、CSVとの差分検査 |
-| 直近明細CSV（PC） | 約3カ月 | 構造化可能。encoding/header/残高列は未確認 | MVPのprimary transaction artifact |
-| ダイレクト通帳PDF/CSV | 申込後の古い期間、最大10年 | 取引ごとの残高なし | backfill、長期audit |
-| 定期/外貨/グローバル残高HTML | 現在の預入明細 | 通貨、元金、満期等のlot。exact fields未確認 | current positions |
-| 定期/外貨/グローバル結果HTML | 3～18カ月または5/10件 | 受付状況を含むoperation history | lot lifecycleの補完 |
-| アプリ端末内履歴 | 起動のたび約3カ月を追加保存 | 取引後残高、収支カテゴリ等 | gap検出/manual fallback。raw DB抽出をMVPにしない |
+| artifact                     | 期間/対象                   | 粒度                                        | 推奨用途                                         |
+| ---------------------------- | --------------------------- | ------------------------------------------- | ------------------------------------------------ |
+| 直近明細HTML                 | 約3カ月、普通/貯蓄/外貨普通 | 日付、摘要、入出金、取引後残高              | 増分収集と最新残高                               |
+| 直近明細PDF                  | 約3カ月                     | 公式表示の保存版。正確な列はlive確認        | audit、CSVとの差分検査                           |
+| 直近明細CSV（PC）            | 約3カ月                     | 構造化可能。encoding/header/残高列は未確認  | MVPのprimary transaction artifact                |
+| ダイレクト通帳PDF/CSV        | 申込後の古い期間、最大10年  | 取引ごとの残高なし                          | backfill、長期audit                              |
+| 定期/外貨/グローバル残高HTML | 現在の預入明細              | 通貨、元金、満期等のlot。exact fields未確認 | current positions                                |
+| 定期/外貨/グローバル結果HTML | 3～18カ月または5/10件       | 受付状況を含むoperation history             | lot lifecycleの補完                              |
+| アプリ端末内履歴             | 起動のたび約3カ月を追加保存 | 取引後残高、収支カテゴリ等                  | gap検出/manual fallback。raw DB抽出をMVPにしない |
 
 ## みずほポイント
 
@@ -330,13 +330,13 @@ network method／WebView navigation／DB openのmetadata観測へ使える。roo
 
 ### appとWebのread coverage差
 
-| read surface | Web | app | 自動化上の結論 |
-| --- | --- | --- | --- |
-| 普通・貯蓄・外貨普通 | 残高、直近約3カ月HTML/PDF/CSV | 残高、明細、取引後残高、端末内履歴 | Web artifactを正本、app localをgap検出候補にする |
-| 長期明細 | 申込済みダイレクト通帳PDF/CSV、最大10年 | 継続起動で3カ月超を端末へ蓄積。未起動gap／移行lossあり | app DBは独自価値があるが、完全なbackfillとは扱わない |
-| 定期・積立・外貨定期・グローバル | 専用残高／lot／結果画面を公式説明で確認 | native表示かWeb遷移か未確認 | static/runtimeでroute差を確定する |
-| export | PC WebのPDF/CSV | app単独CSVは確認できない | 自動取込はWeb優位 |
-| みずほポイント | desktop Web homeからの入口は未確認 | `P`から公式ポイントpageへ遷移 | app固有の重要read route。銀行明細とはsession/sourceを分離する |
+| read surface                     | Web                                     | app                                                    | 自動化上の結論                                                |
+| -------------------------------- | --------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------- |
+| 普通・貯蓄・外貨普通             | 残高、直近約3カ月HTML/PDF/CSV           | 残高、明細、取引後残高、端末内履歴                     | Web artifactを正本、app localをgap検出候補にする              |
+| 長期明細                         | 申込済みダイレクト通帳PDF/CSV、最大10年 | 継続起動で3カ月超を端末へ蓄積。未起動gap／移行lossあり | app DBは独自価値があるが、完全なbackfillとは扱わない          |
+| 定期・積立・外貨定期・グローバル | 専用残高／lot／結果画面を公式説明で確認 | native表示かWeb遷移か未確認                            | static/runtimeでroute差を確定する                             |
+| export                           | PC WebのPDF/CSV                         | app単独CSVは確認できない                               | 自動取込はWeb優位                                             |
+| みずほポイント                   | desktop Web homeからの入口は未確認      | `P`から公式ポイントpageへ遷移                          | app固有の重要read route。銀行明細とはsession/sourceを分離する |
 
 appはlong-history local schemaとpoint routeの解明価値がある一方、公式exportと再現可能な長期backfillはWebが優位である。
 従って主収集器はWebのままにし、app解析を延期せずcoverage補完とtransport特定へ使う。
@@ -345,11 +345,11 @@ appはlong-history local schemaとpoint routeの解明価値がある一方、�
 
 現行の公式画面に対応すると確認できたbank-only clientは見つからなかった。
 
-| 実装 | 最終的な機能更新 | 方式 | 現在の扱い |
-| --- | --- | --- | --- |
-| [`kimoto/mizuho_bank`](https://github.com/kimoto/mizuho_bank) | 2012、MIT | Ruby Mechanize。お客さま番号、password、合言葉で旧HTML formへloginし、残高/明細HTMLをparse | endpoint/UIとも旧式。設計参考のみ |
+| 実装                                                                                            | 最終的な機能更新                                               | 方式                                                                                           | 現在の扱い                                                                                           |
+| ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| [`kimoto/mizuho_bank`](https://github.com/kimoto/mizuho_bank)                                   | 2012、MIT                                                      | Ruby Mechanize。お客さま番号、password、合言葉で旧HTML formへloginし、残高/明細HTMLをparse     | endpoint/UIとも旧式。設計参考のみ                                                                    |
 | [`binzume/gobanking/mizuho`](https://github.com/binzume/gobanking/blob/master/mizuho/mizuho.go) | login/historyの実質更新は2018～2021、repoは2024に依存更新、MIT | Go `net/http`、cookie jar、Shift_JIS、POSTKEY/form ID。残高・日付・摘要・入出金をHTMLからparse | 現行loginに似たform architectureの参考。ただし現在動作する証拠なし。write methodは絶対に再利用しない |
-| [`Finance::Bank::JP::Mizuho`](https://github.com/gitpan/Finance-Bank-JP-Mizuho) | 2011 | Perl LWP/cookie。旧口座一覧をparseし、銀行のOFX download endpointを取得 | 現行公式はPDF/CSVのみを案内。OFX routeは廃止済みとみなしliveで期待しない |
+| [`Finance::Bank::JP::Mizuho`](https://github.com/gitpan/Finance-Bank-JP-Mizuho)                 | 2011                                                           | Perl LWP/cookie。旧口座一覧をparseし、銀行のOFX download endpointを取得                        | 現行公式はPDF/CSVのみを案内。OFX routeは廃止済みとみなしliveで期待しない                             |
 
 共通してbrowser automationではなく、HTML formとcookieを直接送る方式だった。これは
 HTTP collectorが理論上可能であることを示すが、旧合言葉、旧page ID、旧OFXを含む。
@@ -357,13 +357,13 @@ HTTP collectorが理論上可能であることを示すが、旧合言葉、旧
 
 ## 実行基盤の適性
 
-| 基盤 | 適性 | 理由 |
-| --- | --- | --- |
-| Kuebiko/通常Chrome + persistent profile | **最適** | Bitwarden/ユーザー操作、step-up、第1暗証番号、download、Akamai/device fingerprintを正規browserで扱える。認証後readだけ自動化しやすい |
-| Cloudflare Workers | login collector **低**、orchestrator **高** | cookie付きHTTPとscheduleは可能だが、通常Chrome profile、extension、desktop download、生体操作がない。Akamai/datacenter edgeとの相性も未確認 |
-| Cloudflare Containers / Browser Rendering | **中** | Playwrightとpersistent storageを用意できるが、headless/datacenter fingerprint、session persistence、download暗号化が課題。MVPの第1候補ではない |
-| OCI VM/Containers | **中～高** | 通常Chrome/Playwright、固定disk、secrets brokerを構成しやすい。bank loginは日本国内利用を前提とするため、region/egressと実利用条件を確認する必要がある |
-| OCI Kubernetes | **中** | 定期jobと隔離は容易だが、browser profileをpodに安定保持し、同時loginを避ける設計が必要。1口座MVPには運用過剰 |
+| 基盤                                      | 適性                                        | 理由                                                                                                                                                   |
+| ----------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Kuebiko/通常Chrome + persistent profile   | **最適**                                    | Bitwarden/ユーザー操作、step-up、第1暗証番号、download、Akamai/device fingerprintを正規browserで扱える。認証後readだけ自動化しやすい                   |
+| Cloudflare Workers                        | login collector **低**、orchestrator **高** | cookie付きHTTPとscheduleは可能だが、通常Chrome profile、extension、desktop download、生体操作がない。Akamai/datacenter edgeとの相性も未確認            |
+| Cloudflare Containers / Browser Rendering | **中**                                      | Playwrightとpersistent storageを用意できるが、headless/datacenter fingerprint、session persistence、download暗号化が課題。MVPの第1候補ではない         |
+| OCI VM/Containers                         | **中～高**                                  | 通常Chrome/Playwright、固定disk、secrets brokerを構成しやすい。bank loginは日本国内利用を前提とするため、region/egressと実利用条件を確認する必要がある |
+| OCI Kubernetes                            | **中**                                      | 定期jobと隔離は容易だが、browser profileをpodに安定保持し、同時loginを避ける設計が必要。1口座MVPには運用過剰                                           |
 
 銀行の[利用環境](https://www.mizuhobank.co.jp/direct/goriyo/notice/index.html)は、日本国内
 利用を前提とすると明記する。海外・不定region・毎回変わるIPからの完全無人loginは

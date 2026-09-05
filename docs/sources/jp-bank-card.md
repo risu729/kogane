@@ -32,21 +32,21 @@ collector が許可するのは、既存 session の確認、カード種別の�
 
 [JP BANK Card WEB の公式説明](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb.html) は VISA/Mastercard 会員向けと明記する。[ゆうちょ銀行のカード top](https://www.jp-bank.japanpost.jp/kojin/card/credit/kj_crd_cdt_top_index.html) も、VISA/Mastercard を JP BANK Card WEB、JCB を MyJCB に分けている。
 
-| source | 対象 | 本資料での扱い |
-| --- | --- | --- |
-| JP BANK Card WEB | JP BANK VISA / Mastercard | 対象 |
-| MyJCB | JP BANK JCB / EXTAGE 等 | 別 source、対象外 |
-| ゆうちょダイレクト / ゆうちょ通帳 app | 預金口座残高・入出金 | 別 source、引落照合だけ |
+| source                                | 対象                      | 本資料での扱い          |
+| ------------------------------------- | ------------------------- | ----------------------- |
+| JP BANK Card WEB                      | JP BANK VISA / Mastercard | 対象                    |
+| MyJCB                                 | JP BANK JCB / EXTAGE 等   | 別 source、対象外       |
+| ゆうちょダイレクト / ゆうちょ通帳 app | 預金口座残高・入出金      | 別 source、引落照合だけ |
 
 ### 本会員 root
 
 [カード比較表](https://www.jp-bank.japanpost.jp/kojin/card/credit/lineup/kj_crd_cdt_lu_popup.html) と [一般カード](https://www.jp-bank.japanpost.jp/kojin/card/credit/lineup/ippan/kj_crd_cdt_lu_ipn_index.html) から、少なくとも次を列挙できる。
 
-| product family | brand | 形態 | 状態 |
-| --- | --- | --- | --- |
-| JP BANK VISA ALente | Visa | product 条件に応じキャッシュカード一体型/単体型 | 確認済み |
-| JP BANK VISA/Mastercard 一般 | Visa/Mastercard | 一体型/単体型 | 確認済み |
-| JP BANK VISA/Mastercard ゴールド | Visa/Mastercard | product 固有の一体型/単体型 | 確認済み |
+| product family                   | brand           | 形態                                            | 状態     |
+| -------------------------------- | --------------- | ----------------------------------------------- | -------- |
+| JP BANK VISA ALente              | Visa            | product 条件に応じキャッシュカード一体型/単体型 | 確認済み |
+| JP BANK VISA/Mastercard 一般     | Visa/Mastercard | 一体型/単体型                                   | 確認済み |
+| JP BANK VISA/Mastercard ゴールド | Visa/Mastercard | product 固有の一体型/単体型                     | 確認済み |
 
 raw card 名、番号、suffix、名義を保存せず、内部で生成した opaque `card_root_id` と一般化した `product_family` / `brand` だけを保持する。
 
@@ -100,17 +100,17 @@ data model は `instrument_kind = primary | family | etc | other_addon | unknown
 
 ## 3. 期間・件数・CSV/PDF/export
 
-| 項目 | 調査結果 | 確度 |
-| --- | --- | --- |
-| 履歴期間 | 最新から過去 15 か月 | 公式確認済み |
-| 区切り | 請求/月単位 | 公式確認済み |
-| 画面 1 回の件数、pagination | 公開記載なし | 未確認 |
-| 明細 data download | あり | 公式確認済み |
-| CSV | 過去の sanitized login 済み観測で control を確認 | 観測済み、再確認要 |
-| CSV encoding/schema | 公開記載なし | 未確認 |
-| native PDF download | 根拠を確認できず | 未確認 |
-| 印刷/browser PDF | 印刷は公式、PDF は browser rendering | 印刷確認済み |
-| OFX/QIF | 公式経路を確認できず | 根拠なし |
+| 項目                        | 調査結果                                         | 確度               |
+| --------------------------- | ------------------------------------------------ | ------------------ |
+| 履歴期間                    | 最新から過去 15 か月                             | 公式確認済み       |
+| 区切り                      | 請求/月単位                                      | 公式確認済み       |
+| 画面 1 回の件数、pagination | 公開記載なし                                     | 未確認             |
+| 明細 data download          | あり                                             | 公式確認済み       |
+| CSV                         | 過去の sanitized login 済み観測で control を確認 | 観測済み、再確認要 |
+| CSV encoding/schema         | 公開記載なし                                     | 未確認             |
+| native PDF download         | 根拠を確認できず                                 | 未確認             |
+| 印刷/browser PDF            | 印刷は公式、PDF は browser rendering             | 印刷確認済み       |
+| OFX/QIF                     | 公式経路を確認できず                             | 根拠なし           |
 
 [WEB 明細案内](https://wwws.jp-bank.japanpost.jp/credit1/oshiharai/web_meisai_about.html) は page 印刷と明細 data download を案内する。[特約](https://wwws.jp-bank.japanpost.jp/credit1/service/cardweb05.html) は download data の形式等を銀行が指定するとするが、公開案内では形式を明記していない。したがって CSV は強い実装候補だが documented API contract ではない。browser print-to-PDF は `rendered copy` と表示し、銀行発行 PDF と呼ばない。
 
@@ -219,14 +219,14 @@ read に POST を使う可能性はあるため HTTP method だけで write と�
 
 ## 10. Workers / Browser Run / Containers / OCI / Kubernetes
 
-| runtime | 適性 | 判断 |
-| --- | --- | --- |
-| Cloudflare Workers `fetch` のみ | 低い | 非 browser request が Akamai 403。通常 browser/bootstrap を提供できない |
-| Cloudflare Browser Run | 検証候補 | Puppeteer/Playwright/CDP session 再利用は可能だが、cloud egress と Akamai acceptance は未証明 |
-| Cloudflare Containers | 技術的には可能 | `linux/amd64` full browser/parser は動くが、login handoff、egress identity、WAF は解決しない |
-| controlled host の OCI image | packaging に適する | browser/parser を再現可能にする。session は host-bound encrypted store が必要 |
-| Kubernetes | 可能だが過剰 | scheduled Pod は可能でも secret/egress/storage/concurrency の運用面が増える |
-| local 公式推奨 browser | 初回実験に最適 | visible handoff、local credential、CSV download が可能で、公式環境に最も近い |
+| runtime                         | 適性               | 判断                                                                                          |
+| ------------------------------- | ------------------ | --------------------------------------------------------------------------------------------- |
+| Cloudflare Workers `fetch` のみ | 低い               | 非 browser request が Akamai 403。通常 browser/bootstrap を提供できない                       |
+| Cloudflare Browser Run          | 検証候補           | Puppeteer/Playwright/CDP session 再利用は可能だが、cloud egress と Akamai acceptance は未証明 |
+| Cloudflare Containers           | 技術的には可能     | `linux/amd64` full browser/parser は動くが、login handoff、egress identity、WAF は解決しない  |
+| controlled host の OCI image    | packaging に適する | browser/parser を再現可能にする。session は host-bound encrypted store が必要                 |
+| Kubernetes                      | 可能だが過剰       | scheduled Pod は可能でも secret/egress/storage/concurrency の運用面が増える                   |
+| local 公式推奨 browser          | 初回実験に最適     | visible handoff、local credential、CSV download が可能で、公式環境に最も近い                  |
 
 [Cloudflare Browser Run](https://developers.cloudflare.com/browser-run/features/reuse-sessions/) は reconnectable session を、[session management](https://developers.cloudflare.com/browser-run/cdp/session-management/) は keep-alive を案内する。[Cloudflare Containers](https://developers.cloudflare.com/containers/platform-details/architecture/) は isolated VM と `linux/amd64` image を案内する。[OCI Image Specification](https://specs.opencontainers.org/image-spec/) と [Kubernetes Images](https://kubernetes.io/docs/concepts/containers/images/) は portable image/container 実行の根拠である。runtime capability は origin が自動化を許容する根拠ではない。
 
@@ -241,13 +241,13 @@ PR #5 の共通定義を変更せず使用する。
 - **E:** manual capture remains safe default。
 - cost は 1（small wrapper）から 5（device-bound/adversarial）。
 
-| 経路 | level | cost | 判断 |
-| --- | --- | ---: | --- |
-| 確定明細 data/CSV の手動 download → local import | E | 1 | 現時点の推奨。CSV format は再確認 |
-| 手動 browser print-to-PDF → import | E | 2 | 非構造で native bank PDF ではない fallback |
-| visible local browser login + controlled CSV download | D | 3 | human handoff、selector、session challenge、subcard/schema 検証が必要 |
-| browser bootstrap 後の read-only replay | C candidate | 4 | adjacent transport はあるが JP BANK Card endpoint/session は未確認 |
-| cloud/container から unattended login | D | 5 | full browser と Akamai 対応が必要で brittle |
+| 経路                                                  | level       | cost | 判断                                                                  |
+| ----------------------------------------------------- | ----------- | ---: | --------------------------------------------------------------------- |
+| 確定明細 data/CSV の手動 download → local import      | E           |    1 | 現時点の推奨。CSV format は再確認                                     |
+| 手動 browser print-to-PDF → import                    | E           |    2 | 非構造で native bank PDF ではない fallback                            |
+| visible local browser login + controlled CSV download | D           |    3 | human handoff、selector、session challenge、subcard/schema 検証が必要 |
+| browser bootstrap 後の read-only replay               | C candidate |    4 | adjacent transport はあるが JP BANK Card endpoint/session は未確認    |
+| cloud/container から unattended login                 | D           |    5 | full browser と Akamai 対応が必要で brittle                           |
 
 **現時点の source 評価は D / cost 4。** unattended collector には full browser が必要と考えられる。安定した read-only transport と renewable/reusable session を redacted live 観測で確認できた場合に限り **C / cost 4 candidate** へ更新する。A/B の根拠はない。production-first MVP は **manual CSV: E / cost 1** とする。
 

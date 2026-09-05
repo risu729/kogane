@@ -1,20 +1,21 @@
 import { startTcpRelay } from "./tcp-relay";
-import { ContainerResponseError, containerLifecycleDetails, containerResponseReason, containerStopDetails, emitDiagnostic, failure, safeErrorType, stageDiagnostics } from "./diagnostics";
+import {
+  ContainerResponseError,
+  containerLifecycleDetails,
+  containerResponseReason,
+  containerStopDetails,
+  emitDiagnostic,
+  failure,
+  safeErrorType,
+  stageDiagnostics,
+} from "./diagnostics";
 import { Container, getContainer, type StopParams } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { collectSbiShinsei } from "./collector";
 import { liveReadsEnabled } from "./read-allowlist";
-import {
-  backfillRawEvidence,
-  importRawEvidence,
-  RawEvidenceImportError,
-} from "./raw-evidence";
+import { backfillRawEvidence, importRawEvidence, RawEvidenceImportError } from "./raw-evidence";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
-import type {
-  CollectionFailure,
-  CollectionManifest,
-  CollectionResult,
-} from "./types";
+import type { CollectionFailure, CollectionManifest, CollectionResult } from "./types";
 
 const MAX_CONTAINER_RESPONSE_BYTES = 10 * 1024 * 1024;
 const RELAY_HOSTS = new Set([
@@ -38,7 +39,10 @@ export class SbiShinseiCollectorContainer extends Container<Env> {
 
   override onStop(params: StopParams): void {
     const details = containerStopDetails(params);
-    emitDiagnostic(details.exitCode === 0 ? "log" : "warn", { event: "sbi-shinsei-container-stop", ...details });
+    emitDiagnostic(details.exitCode === 0 ? "log" : "warn", {
+      event: "sbi-shinsei-container-stop",
+      ...details,
+    });
   }
 
   override onError(error: unknown): void {
@@ -60,10 +64,7 @@ export default {
         liveReadsEnabled: liveReadsEnabled(),
       });
     }
-    if (
-      request.headers.get("upgrade")?.toLowerCase() === "websocket" &&
-      url.pathname === "/tcp"
-    ) {
+    if (request.headers.get("upgrade")?.toLowerCase() === "websocket" && url.pathname === "/tcp") {
       return relayTcp(request, env, ctx, url);
     }
     if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
@@ -73,16 +74,21 @@ export default {
       try {
         const cursor = url.searchParams.get("cursor") ?? undefined;
         const limit = parseBackfillLimit(url.searchParams.get("limit"));
-        return Response.json(await backfillRawEvidence({
-          importer: env.RAW_EVIDENCE_IMPORTER,
-          ...(cursor ? { cursor } : {}),
-          ...(limit ? { limit } : {}),
-        }));
+        return Response.json(
+          await backfillRawEvidence({
+            importer: env.RAW_EVIDENCE_IMPORTER,
+            ...(cursor ? { cursor } : {}),
+            ...(limit ? { limit } : {}),
+          }),
+        );
       } catch (error) {
         return Response.json(
-          { error: error instanceof RawEvidenceImportError
-            ? "raw_evidence_import_failed"
-            : "backfill_request_invalid" },
+          {
+            error:
+              error instanceof RawEvidenceImportError
+                ? "raw_evidence_import_failed"
+                : "backfill_request_invalid",
+          },
           { status: error instanceof RawEvidenceImportError ? 502 : 400 },
         );
       }
@@ -116,9 +122,7 @@ export default {
   async scheduled(_controller, env): Promise<void> {
     const result = await runCollection(env);
     if (result.status === "failed") {
-      throw new Error(
-        `SBI Shinsei collection failed; manifest=${result.manifestKey}`,
-      );
+      throw new Error(`SBI Shinsei collection failed; manifest=${result.manifestKey}`);
     }
   },
 } satisfies ExportedHandler<Env>;
@@ -134,49 +138,69 @@ async function runCollection(env: Env): Promise<CollectionResult> {
 
   let stage = "credential-validation";
   try {
-    const output = await diagnostic.step("collection", () => collectSbiShinsei({
-      credentialJson: env.SBI_SHINSEI_CREDENTIAL_JSON,
-      collectHandoff: async (credentialJson) => {
-        stage = "container-start";
-        await diagnostic.step(stage, () => container.startAndWaitForPorts());
-        stage = "container-request";
-        const relayUrl = new URL(env.RELAY_PUBLIC_URL);
-        relayUrl.searchParams.set("runId", runId);
-        const response = await diagnostic.step(stage, async () => {
-          const response = await container.fetch(new Request("http://container/collect", {
-          method: "POST",
-          headers: { "content-type": "application/json; charset=utf-8" },
-          body: JSON.stringify({
-            credentialJson,
-            relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
-            relayUrl: relayUrl.href,
-          }),
-          }));
-          if (!response.ok) {
-            const reason = await containerResponseReason(response);
-            emitDiagnostic("error", {
-              event: "sbi-shinsei-container-response-failure", runId,
-              httpStatus: response.status, reason,
+    const output = await diagnostic.step(
+      "collection",
+      () =>
+        collectSbiShinsei({
+          credentialJson: env.SBI_SHINSEI_CREDENTIAL_JSON,
+          collectHandoff: async (credentialJson) => {
+            stage = "container-start";
+            await diagnostic.step(stage, () => container.startAndWaitForPorts());
+            stage = "container-request";
+            const relayUrl = new URL(env.RELAY_PUBLIC_URL);
+            relayUrl.searchParams.set("runId", runId);
+            const response = await diagnostic.step(stage, async () => {
+              const response = await container.fetch(
+                new Request("http://container/collect", {
+                  method: "POST",
+                  headers: { "content-type": "application/json; charset=utf-8" },
+                  body: JSON.stringify({
+                    credentialJson,
+                    relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
+                    relayUrl: relayUrl.href,
+                  }),
+                }),
+              );
+              if (!response.ok) {
+                const reason = await containerResponseReason(response);
+                emitDiagnostic("error", {
+                  event: "sbi-shinsei-container-response-failure",
+                  runId,
+                  httpStatus: response.status,
+                  reason,
+                });
+                throw new ContainerResponseError(response.status, reason);
+              }
+              return response;
             });
-            throw new ContainerResponseError(response.status, reason);
-          }
-          return response;
-        });
-        stage = "container-response";
-        const handoff = await diagnostic.step(stage, () => readBoundedText(response, MAX_CONTAINER_RESPONSE_BYTES));
-        stage = "browser-handoff";
-        return handoff;
-      },
-    }), value => value.failures.length === 0 ? "success" : value.artifacts.length === 0 ? "failed" : "partial");
+            stage = "container-response";
+            const handoff = await diagnostic.step(stage, () =>
+              readBoundedText(response, MAX_CONTAINER_RESPONSE_BYTES),
+            );
+            stage = "browser-handoff";
+            return handoff;
+          },
+        }),
+      (value) =>
+        value.failures.length === 0
+          ? "success"
+          : value.artifacts.length === 0
+            ? "failed"
+            : "partial",
+    );
     failures.push(...output.failures);
     for (const artifact of output.artifacts) {
       try {
-        artifacts.push(await diagnostic.step("staging-write", () => storeArtifact({
-          bucket: env.SNAPSHOTS,
-          prefix,
-          runId,
-          artifact,
-        })));
+        artifacts.push(
+          await diagnostic.step("staging-write", () =>
+            storeArtifact({
+              bucket: env.SNAPSHOTS,
+              prefix,
+              runId,
+              artifact,
+            }),
+          ),
+        );
       } catch (error) {
         failures.push(failure(`r2:${artifact.dataset}`, error));
       }
@@ -186,9 +210,19 @@ async function runCollection(env: Env): Promise<CollectionResult> {
   } finally {
     // Emit before teardown and before central import so a later failure cannot hide the cause.
     for (const entry of failures) {
-      emitDiagnostic("error", { event: "sbi-shinsei-collection-failure", runId, phase: "collection", ...entry });
+      emitDiagnostic("error", {
+        event: "sbi-shinsei-collection-failure",
+        runId,
+        phase: "collection",
+        ...entry,
+      });
     }
-    emitDiagnostic("log", { event: "sbi-shinsei-container-teardown-start", runId, phase: "teardown", collectionFailed: failures.length > 0 });
+    emitDiagnostic("log", {
+      event: "sbi-shinsei-container-teardown-start",
+      runId,
+      phase: "teardown",
+      collectionFailed: failures.length > 0,
+    });
     try {
       await diagnostic.step("teardown", () => container.destroy());
       emitDiagnostic("log", {
@@ -207,12 +241,7 @@ async function runCollection(env: Env): Promise<CollectionResult> {
   }
 
   const completedAt = new Date().toISOString();
-  const status =
-    failures.length === 0
-      ? "success"
-      : artifacts.length === 0
-        ? "failed"
-        : "partial";
+  const status = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
   const manifest: CollectionManifest = {
     schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
     source: "sbi-shinsei",
@@ -224,22 +253,32 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     artifacts,
     failures,
   };
-  const manifestKey = await diagnostic.step("manifest-write", () => storeManifest({
-    bucket: env.SNAPSHOTS,
-    prefix,
-    manifest,
-  })).catch(() => {
-    emitDiagnostic("error", { event: "sbi-shinsei-manifest-write-failed", runId, phase: "manifest-write" });
-    diagnostic.terminal("failed");
-    throw new Error("manifest_write_failed");
-  });
+  const manifestKey = await diagnostic
+    .step("manifest-write", () =>
+      storeManifest({
+        bucket: env.SNAPSHOTS,
+        prefix,
+        manifest,
+      }),
+    )
+    .catch(() => {
+      emitDiagnostic("error", {
+        event: "sbi-shinsei-manifest-write-failed",
+        runId,
+        phase: "manifest-write",
+      });
+      diagnostic.terminal("failed");
+      throw new Error("manifest_write_failed");
+    });
   // Source collection and central import are separate outcomes.
   diagnostic.terminal(status);
   try {
-    await diagnostic.step("raw-evidence-import", () => importRawEvidence({
-      importer: env.RAW_EVIDENCE_IMPORTER,
-      manifestKey,
-    }));
+    await diagnostic.step("raw-evidence-import", () =>
+      importRawEvidence({
+        importer: env.RAW_EVIDENCE_IMPORTER,
+        manifestKey,
+      }),
+    );
   } catch (error) {
     emitDiagnostic("error", {
       event: "sbi-shinsei-raw-evidence-import-failed",
@@ -261,10 +300,7 @@ async function runCollection(env: Env): Promise<CollectionResult> {
   return { ...manifest, manifestKey };
 }
 
-async function readBoundedText(
-  response: Response,
-  maximumBytes: number,
-): Promise<string> {
+async function readBoundedText(response: Response, maximumBytes: number): Promise<string> {
   const declared = response.headers.get("content-length");
   if (declared && Number(declared) > maximumBytes) {
     throw new Error("SBI Shinsei container response exceeded byte limit");
@@ -293,9 +329,7 @@ async function readBoundedText(
 }
 
 function authorized(request: Request, expected: string | undefined): boolean {
-  const provided = request.headers
-    .get("authorization")
-    ?.match(/^Bearer\s+(.+)$/iu)?.[1];
+  const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
   if (!provided || !expected) return false;
   const left = new TextEncoder().encode(provided);
   const right = new TextEncoder().encode(expected);
@@ -319,27 +353,34 @@ async function relayTcp(
 
   // Only the collector-generated UUID is eligible for correlation, never a URL/token.
   const runIdValue = url.searchParams.get("runId");
-  const runId = runIdValue && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(runIdValue)
-    ? runIdValue : undefined;
+  const runId =
+    runIdValue &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(runIdValue)
+      ? runIdValue
+      : undefined;
   const relayIdValue = url.searchParams.get("relayId");
-  const relayId = relayIdValue && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(relayIdValue)
-    ? relayIdValue : undefined;
+  const relayId =
+    relayIdValue &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(relayIdValue)
+      ? relayIdValue
+      : undefined;
   const pair = new WebSocketPair();
   const client = pair[0];
   const server = pair[1];
   server.accept();
-  startTcpRelay({ connect: () => (env.MESH as VpcNetworkBinding).connect({ hostname, port }), server, waitUntil: promise => ctx.waitUntil(promise), ...(runId ? { runId } : {}), ...(relayId ? { relayId } : {}) });
+  startTcpRelay({
+    connect: () => (env.MESH as VpcNetworkBinding).connect({ hostname, port }),
+    server,
+    waitUntil: (promise) => ctx.waitUntil(promise),
+    ...(runId ? { runId } : {}),
+    ...(relayId ? { relayId } : {}),
+  });
   return new Response(null, { status: 101, webSocket: client });
 }
-async function validRelayBearer(
-  request: Request,
-  expected: string | undefined,
-): Promise<boolean> {
+async function validRelayBearer(request: Request, expected: string | undefined): Promise<boolean> {
   if (!expected || expected.length < 32) return false;
   const authorization = request.headers.get("authorization") ?? "";
-  const provided = authorization.startsWith("Bearer ")
-    ? authorization.slice(7)
-    : "";
+  const provided = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
   const providedHash = createHash("sha256").update(provided).digest();
   const expectedHash = createHash("sha256").update(expected).digest();
   return timingSafeEqual(providedHash, expectedHash);

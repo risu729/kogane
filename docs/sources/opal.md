@@ -50,14 +50,14 @@ security設定変更を行わない。card/account/payment/device ID、PAN、sec
 
 ## 3. 公式経路、列挙範囲、粒度、期間、export
 
-| 経路 | read範囲 | 粒度/state | 期間/件数/export | tradeoff |
-| --- | --- | --- | --- | --- |
-| registered Opal Web | account内の複数card、card state/nickname、balance/pending、activity | card単位のtrip/top-up/reversal/adjustment等 | cardごと最大18か月。公式はdownload可能とするが公開pageから形式未確認 | 最も広いofficial Web。write UIが隣接 |
-| unregistered Opal Web | 1 cardのbalance/activity | trip/top-up/reversalの直近event | 直近10件 | account不要だが16桁card numberと4桁security codeが必要。自動化に不向き |
-| Opal Travel app | linked cards、balance/activity、top-up/auto top-up、contactless activity | card/contactless別のsummary/detail | 期間・件数・download形式はpublic listingから未確認 | official mobile front door。write controlが隣接 |
-| Transport Connect | 登録したphysical/digital payment cardのtrip、運賃、benefit/discount | contactless trip + payment情報 | 最大18か月、download可能。公開pageからCSV/PDF等の形式未確認 | Opal stored-valueとは別account/ledger |
-| unregistered contactless Web | payment cardの最近のtrip | mode、tap on/off日時、fare | 原則直近10件。privacy policyは直近精算日分または10件の多い方と記載 | PAN/expiry/CVVと毎回の$1事前承認がありlive検証対象外 |
-| bank statement | contactlessのsettled請求 | 4:00から翌3:59までの日次集約 | issuerの保持/exportに依存 | 個別tripではなく日次請求。Opal activityの代用にならない |
+| 経路                         | read範囲                                                                 | 粒度/state                                  | 期間/件数/export                                                     | tradeoff                                                               |
+| ---------------------------- | ------------------------------------------------------------------------ | ------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| registered Opal Web          | account内の複数card、card state/nickname、balance/pending、activity      | card単位のtrip/top-up/reversal/adjustment等 | cardごと最大18か月。公式はdownload可能とするが公開pageから形式未確認 | 最も広いofficial Web。write UIが隣接                                   |
+| unregistered Opal Web        | 1 cardのbalance/activity                                                 | trip/top-up/reversalの直近event             | 直近10件                                                             | account不要だが16桁card numberと4桁security codeが必要。自動化に不向き |
+| Opal Travel app              | linked cards、balance/activity、top-up/auto top-up、contactless activity | card/contactless別のsummary/detail          | 期間・件数・download形式はpublic listingから未確認                   | official mobile front door。write controlが隣接                        |
+| Transport Connect            | 登録したphysical/digital payment cardのtrip、運賃、benefit/discount      | contactless trip + payment情報              | 最大18か月、download可能。公開pageからCSV/PDF等の形式未確認          | Opal stored-valueとは別account/ledger                                  |
+| unregistered contactless Web | payment cardの最近のtrip                                                 | mode、tap on/off日時、fare                  | 原則直近10件。privacy policyは直近精算日分または10件の多い方と記載   | PAN/expiry/CVVと毎回の$1事前承認がありlive検証対象外                   |
+| bank statement               | contactlessのsettled請求                                                 | 4:00から翌3:59までの日次集約                | issuerの保持/exportに依存                                            | 個別tripではなく日次請求。Opal activityの代用にならない                |
 
 ### Opal card/account
 
@@ -136,11 +136,11 @@ pagination、token storeをcall siteと照合する。ただしsource mapの非�
 
 現行public bundleと公開third-party clientを照合して確認したread route:
 
-| method/path | 目的 | 確認済みresponse概略 |
-| --- | --- | --- |
-| `GET /api/opal/api/customer/smartcards/` | account内card列挙 | `SmartcardDetails` |
-| `GET /api/opal/api/smartcard/details/{cardId}` | 1 cardのbalance/state/detail | `SVBalance`、`SVPending`等 |
-| `GET /api/opal/api/smartcard/activity/{cardId}?start={offset}&nr={count}&from=YYYY-MM-DD&to=YYYY-MM-DD&sort=desc` | card activity | `HasMoreResults`、`SmartcardActivityDetail[]` |
+| method/path                                                                                                       | 目的                         | 確認済みresponse概略                          |
+| ----------------------------------------------------------------------------------------------------------------- | ---------------------------- | --------------------------------------------- |
+| `GET /api/opal/api/customer/smartcards/`                                                                          | account内card列挙            | `SmartcardDetails`                            |
+| `GET /api/opal/api/smartcard/details/{cardId}`                                                                    | 1 cardのbalance/state/detail | `SVBalance`、`SVPending`等                    |
+| `GET /api/opal/api/smartcard/activity/{cardId}?start={offset}&nr={count}&from=YYYY-MM-DD&to=YYYY-MM-DD&sort=desc` | card activity                | `HasMoreResults`、`SmartcardActivityDetail[]` |
 
 これらはundocumented consumer Web APIで、互換性、利用条件、rate limit、token refreshを公式が保証したものではない。
 login POSTは本人bootstrap境界であり、collectorのread allowlistへ汎用POST能力を渡さない。
@@ -198,15 +198,15 @@ consumer API/SDK、OAuth delegation、scoped read token、token renewalを備え
 
 ## 9. Runtime適性
 
-| runtime | 適性 | 判断 |
-| --- | --- | --- |
-| owner browser/device | 最適 | official UI/download、本人bootstrap、redacted network観測 |
-| Local WSL | 適 | public JS/APK static analysis、sanitized parser、manual export import |
-| Cloudflare Workers | 条件付き | proven bearer GET replayなら軽量だがpassword login、WAF、refresh/reauthには不向き |
-| Cloudflare Containers | 条件付き | browser bootstrap/parser隔離は可能。mobile device trustは提供しない |
-| OCI container | 条件付き | digest固定、secret store、read-only FS、egress allowlistでWeb replay試験可能 |
-| Kubernetes | 過剰 | CronJob/Secret/NetworkPolicyは可能だが単一Opal collectorには運用cost過大 |
-| Android実機 | app調査に適 | 正規app/device state。定常UI automationはwrite隣接と更新で脆い |
+| runtime               | 適性        | 判断                                                                              |
+| --------------------- | ----------- | --------------------------------------------------------------------------------- |
+| owner browser/device  | 最適        | official UI/download、本人bootstrap、redacted network観測                         |
+| Local WSL             | 適          | public JS/APK static analysis、sanitized parser、manual export import             |
+| Cloudflare Workers    | 条件付き    | proven bearer GET replayなら軽量だがpassword login、WAF、refresh/reauthには不向き |
+| Cloudflare Containers | 条件付き    | browser bootstrap/parser隔離は可能。mobile device trustは提供しない               |
+| OCI container         | 条件付き    | digest固定、secret store、read-only FS、egress allowlistでWeb replay試験可能      |
+| Kubernetes            | 過剰        | CronJob/Secret/NetworkPolicyは可能だが単一Opal collectorには運用cost過大          |
+| Android実機           | app調査に適 | 正規app/device state。定常UI automationはwrite隣接と更新で脆い                    |
 
 Workersへpassword/card security codeを置かない。owner browserで得たsource-scoped、短命、read-only相当sessionが安全にrenewできると
 実証された場合だけWeb GET replayを検討する。full browserはContainers/OCI、app-only transportはAndroidを調査用に使い、K8sは
@@ -221,16 +221,16 @@ Workersへpassword/card security codeを置かない。owner browserで得たsou
 - E: manual capture remains safe default
 - Cost: 1 = small wrapper、5 = device-bound/adversarial
 
-| route | Level | Cost | 判定 |
-| --- | ---: | ---: | --- |
-| registered Opal official download + sanitized import | E | 1 | 最大18か月。download形式/自動化適性は未確認 |
-| unregistered Opal直近10件のmanual capture | E | 1 | 少量だがcard number/security codeを扱うためcloud非推奨 |
-| Opal Web bearer GET replay | C候補 | 3 | concrete read APIあり。token renewal/安定性/terms未確認 |
-| Opal Travel app bootstrap + read replay | C候補 | 4 | packageのみ確認。APK/host/token/device metadata未確認 |
-| full browser/app UI automation | D | 4-5 | write control隣接、WAF/reCAPTCHA、UI/app更新で脆い |
-| Transport Connect manual download | E | 1-2 | contactless別ledger、最大18か月。format未確認 |
-| Transport Connect headless replay | C候補 | 4 | auth/API/token/device-card mapping未確認 |
-| documented scheduled consumer API | A該当なし | 5 | public official API/OAuth/scoped tokenを確認できず |
+| route                                                |     Level | Cost | 判定                                                    |
+| ---------------------------------------------------- | --------: | ---: | ------------------------------------------------------- |
+| registered Opal official download + sanitized import |         E |    1 | 最大18か月。download形式/自動化適性は未確認             |
+| unregistered Opal直近10件のmanual capture            |         E |    1 | 少量だがcard number/security codeを扱うためcloud非推奨  |
+| Opal Web bearer GET replay                           |     C候補 |    3 | concrete read APIあり。token renewal/安定性/terms未確認 |
+| Opal Travel app bootstrap + read replay              |     C候補 |    4 | packageのみ確認。APK/host/token/device metadata未確認   |
+| full browser/app UI automation                       |         D |  4-5 | write control隣接、WAF/reCAPTCHA、UI/app更新で脆い      |
+| Transport Connect manual download                    |         E |  1-2 | contactless別ledger、最大18か月。format未確認           |
+| Transport Connect headless replay                    |     C候補 |    4 | auth/API/token/device-card mapping未確認                |
+| documented scheduled consumer API                    | A該当なし |    5 | public official API/OAuth/scoped tokenを確認できず      |
 
 総合は **C候補/cost 3**、安全な既定は **E/cost 1**。現行Web APIはstructured GETが具体化しているが、renewable session、
 rate limit、schema stability、利用条件が実証されるまでBへ上げない。contactlessは別collectorとして独立評価する。

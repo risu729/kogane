@@ -34,11 +34,11 @@ session/token、実残高、実請求額、実加盟店名を取得物、HAR、�
 
 ## 3. 正本と取得経路の trade-off
 
-| 資産/記録 | 正本候補 | 主な read surface | 強み | 主な欠落/危険 |
-| --- | --- | --- | --- | --- |
-| カード請求・利用 | 楽天 e-NAVI | PC web、楽天カードアプリ | 確定月は PC で CSV/PDF。家族/ETC を利用者別に確認可能 | 通知は未確定かつ項目不足。アプリには支払調整等の write が同居 |
-| 楽天ポイント | 楽天 PointClub | PointClub web/app | 通常/期間限定、利用可能/獲得予定、期限、増減履歴を分離 | 公開資料に公式 CSV/PDF なし。履歴は 1 年 |
-| 楽天キャッシュ | PointClub の履歴 + 楽天ペイの現在残高 | PointClub web、楽天ペイアプリ | PointClub でポイントと Cash の状態別履歴、Pay で現在残高 | Pay は支払/チャージ/送付/出金と密接。公式 CSV/PDF は未確認 |
+| 資産/記録        | 正本候補                              | 主な read surface             | 強み                                                     | 主な欠落/危険                                                 |
+| ---------------- | ------------------------------------- | ----------------------------- | -------------------------------------------------------- | ------------------------------------------------------------- |
+| カード請求・利用 | 楽天 e-NAVI                           | PC web、楽天カードアプリ      | 確定月は PC で CSV/PDF。家族/ETC を利用者別に確認可能    | 通知は未確定かつ項目不足。アプリには支払調整等の write が同居 |
+| 楽天ポイント     | 楽天 PointClub                        | PointClub web/app             | 通常/期間限定、利用可能/獲得予定、期限、増減履歴を分離   | 公開資料に公式 CSV/PDF なし。履歴は 1 年                      |
+| 楽天キャッシュ   | PointClub の履歴 + 楽天ペイの現在残高 | PointClub web、楽天ペイアプリ | PointClub でポイントと Cash の状態別履歴、Pay で現在残高 | Pay は支払/チャージ/送付/出金と密接。公式 CSV/PDF は未確認    |
 
 カードアプリの「総保有ポイント」を PointClub のポイント/Cash 台帳の代替にしない。逆に
 PointClub のポイント履歴からカード請求明細を再構成しない。カード CSV/PDF、PointClub 履歴、
@@ -75,13 +75,13 @@ Pay 残高は、取得時刻を持つ別 source record として後段で照合�
 
 ### 4.2 確定、未確定、取消/返金、分割/リボ
 
-| 状態 | 公式 surface で確認できる粒度 | 解釈上の注意 |
-| --- | --- | --- |
-| 利用通知/速報 | 楽天カードアプリの利用金額・利用日時等 | 正式な明細ではなく、店名がまだない場合がある |
-| 売上データ待ち | 加盟店データ到着前の通知 | 通知から明細反映まで 2 日以上かかる場合がある |
+| 状態              | 公式 surface で確認できる粒度                                | 解釈上の注意                                     |
+| ----------------- | ------------------------------------------------------------ | ------------------------------------------------ |
+| 利用通知/速報     | 楽天カードアプリの利用金額・利用日時等                       | 正式な明細ではなく、店名がまだない場合がある     |
+| 売上データ待ち    | 加盟店データ到着前の通知                                     | 通知から明細反映まで 2 日以上かかる場合がある    |
 | 請求予定/確定明細 | 利用日、利用先、利用者、支払方法、利用金額を中心とする明細行 | 加盟店送信時期に依存し、利用日直後の完全性はない |
-| 取消/返金/調整 | キャンセル、返金額、`金額調整あり` 等 | 原取引との安定 ID は公開資料で確認できない |
-| 分割/ボーナス | 初月は元の利用金額と当月請求額、後続月は当月請求額 | 元金、各月請求、手数料を一つの金額列へ潰さない |
+| 取消/返金/調整    | キャンセル、返金額、`金額調整あり` 等                        | 原取引との安定 ID は公開資料で確認できない       |
+| 分割/ボーナス     | 初月は元の利用金額と当月請求額、後続月は当月請求額           | 元金、各月請求、手数料を一つの金額列へ潰さない   |
 
 [利用通知 FAQ](https://support.rakuten-card.jp/faq/show/5535?site_domain=guest) と
 [通知と明細の違い](https://support.rakuten-card.jp/faq/show/179048?site_domain=guest) は、通知が
@@ -237,14 +237,14 @@ ID/password、第2パスワード、メール/SMS OTP、電話番号を一つの
 
 2026-08-26 のログアウト状態の低頻度 HTTP 観測:
 
-| 公開入口 | 結果 | 言えること / 言えないこと |
-| --- | --- | --- |
-| `www.rakuten-card.co.jp/` | browser-like UA を含め `403`; `X-Akamai-Transformed` | 公開カード入口で Akamai の介在を確認。login 後判定や bot product/score は未確認 |
-| `support.rakuten-card.jp/` | `200`, `Server: nginx` | FAQ origin の公開応答。e-NAVI auth origin と同じ保護とは限らない |
-| `point.rakuten.co.jp/` | `200`, `Server: Apache`, HSTS/CSP | 公開 PointClub。履歴は楽天 ID OIDC authorization へ 302 |
-| `pay.rakuten.co.jp/` | `200`, `Server: Apache`, HSTS/CSP | 公開 Pay content。app API/WAF は不明 |
-| `cash.rakuten.co.jp/` | `200`, `Server: nginx`, HSTS/CSP | 公開 Cash content。残高/history auth origin は不明 |
-| `login.account.rakuten.com` discovery | `200`, `Server: istio-envoy` | OIDC metadata は取得可能。authorization/login 防御は未評価 |
+| 公開入口                              | 結果                                                 | 言えること / 言えないこと                                                       |
+| ------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `www.rakuten-card.co.jp/`             | browser-like UA を含め `403`; `X-Akamai-Transformed` | 公開カード入口で Akamai の介在を確認。login 後判定や bot product/score は未確認 |
+| `support.rakuten-card.jp/`            | `200`, `Server: nginx`                               | FAQ origin の公開応答。e-NAVI auth origin と同じ保護とは限らない                |
+| `point.rakuten.co.jp/`                | `200`, `Server: Apache`, HSTS/CSP                    | 公開 PointClub。履歴は楽天 ID OIDC authorization へ 302                         |
+| `pay.rakuten.co.jp/`                  | `200`, `Server: Apache`, HSTS/CSP                    | 公開 Pay content。app API/WAF は不明                                            |
+| `cash.rakuten.co.jp/`                 | `200`, `Server: nginx`, HSTS/CSP                     | 公開 Cash content。残高/history auth origin は不明                              |
+| `login.account.rakuten.com` discovery | `200`, `Server: istio-envoy`                         | OIDC metadata は取得可能。authorization/login 防御は未評価                      |
 
 Card 公開 root の 403 は、単純な Worker `fetch()`/curl collector が e-NAVI に適する根拠がないことを
 示す。ただし、これだけで browser automation も拒否される、Akamai が全 Rakuten surface を守る、
@@ -259,11 +259,11 @@ challenge/CAPTCHA を意図的に誘発せず、401/403/429、challenge/intersti
 
 ### 9.1 公式 app と web の役割
 
-| 公式 app | Google Play package | 2026-08-26 に Play metadata で確認した version | 主な read 役割 |
-| --- | --- | --- | --- |
-| [楽天カード](https://play.google.com/store/apps/details?id=jp.co.rakuten.kc.rakutencardapp.android) | `jp.co.rakuten.kc.rakutencardapp.android` | `7.76.0` | 請求/明細、通知、利用可能額、総保有ポイント。支払調整等 write も同居 |
-| [楽天 PointClub](https://play.google.com/store/apps/details?id=jp.co.rakuten.pointclub.android) | `jp.co.rakuten.pointclub.android` | `6.6.0` | ポイント残高/実績/予定/期限。獲得/運用/campaign 導線も同居 |
-| [楽天ペイ](https://play.google.com/store/apps/details?id=jp.co.rakuten.pay) | `jp.co.rakuten.pay` | `9.17.0` | Point/Cash 現在残高。支払/チャージ/送付/出金 write が中心に同居 |
+| 公式 app                                                                                            | Google Play package                       | 2026-08-26 に Play metadata で確認した version | 主な read 役割                                                       |
+| --------------------------------------------------------------------------------------------------- | ----------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------- |
+| [楽天カード](https://play.google.com/store/apps/details?id=jp.co.rakuten.kc.rakutencardapp.android) | `jp.co.rakuten.kc.rakutencardapp.android` | `7.76.0`                                       | 請求/明細、通知、利用可能額、総保有ポイント。支払調整等 write も同居 |
+| [楽天 PointClub](https://play.google.com/store/apps/details?id=jp.co.rakuten.pointclub.android)     | `jp.co.rakuten.pointclub.android`         | `6.6.0`                                        | ポイント残高/実績/予定/期限。獲得/運用/campaign 導線も同居           |
+| [楽天ペイ](https://play.google.com/store/apps/details?id=jp.co.rakuten.pay)                         | `jp.co.rakuten.pay`                       | `9.17.0`                                       | Point/Cash 現在残高。支払/チャージ/送付/出金 write が中心に同居      |
 
 version は可変なので、解析 artifact ごとに package、versionCode/versionName、取得日時、SHA-256、
 signer certificate digest を記録する。公式 standalone APK 配布は確認できない。この環境には
@@ -368,14 +368,14 @@ content-type/size 上限を併用する。`POST` が query/read に使われる�
 
 ## 11. Workers / Browser Run / Containers / OCI / Kubernetes 適性
 
-| Runtime | 適性 | 理由 |
-| --- | --- | --- |
-| Cloudflare Workers | export 受領/parser には高い。直接 login は低い | [Fetch API](https://developers.cloudflare.com/workers/runtime-apis/fetch/) で download/parser orchestration は可能。Akamai、interactive MFA、browser profile、APK/toolchain には不向き |
-| Cloudflare Browser Run | e-NAVI/PointClub web の C/D 実験候補 | [Browser Run](https://developers.cloudflare.com/browser-run/) は browser session と CDP を扱える。金融 session/PII の cloud 搬出、Akamai acceptance、human OTP、write 混在を別途解決する必要がある |
-| Cloudflare Containers | headless browser/解析 worker 候補 | [Containers](https://developers.cloudflare.com/containers/) は full filesystem/任意 runtime/OCI image を実行できる。Paid、secret 配送、persistent profile、egress/reputation、監査が必要 |
-| 一般 OCI container | CSV/PDF/HTML parser と web replay に適する | Playwright、sanitizer、PDF parser、secret scanner を version 固定できる。正規 Android app/device identity は通常 container だけでは再現できない |
-| Kubernetes | 多 source 運用には適するが楽天単体の初期 capture には過大 | CronJob、NetworkPolicy、read-only FS、Secret CSI、監査、source 別 job を使えるが、MFA/Akamai/device binding は解決しない |
-| ユーザー管理 PC/Android | 初回 live/静的・動的観測に最適 | 正規 browser/app、human MFA、Play provenance を保ち、秘密の外部搬出を避けやすい。完全無人化にはならない |
+| Runtime                 | 適性                                                      | 理由                                                                                                                                                                                               |
+| ----------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare Workers      | export 受領/parser には高い。直接 login は低い            | [Fetch API](https://developers.cloudflare.com/workers/runtime-apis/fetch/) で download/parser orchestration は可能。Akamai、interactive MFA、browser profile、APK/toolchain には不向き             |
+| Cloudflare Browser Run  | e-NAVI/PointClub web の C/D 実験候補                      | [Browser Run](https://developers.cloudflare.com/browser-run/) は browser session と CDP を扱える。金融 session/PII の cloud 搬出、Akamai acceptance、human OTP、write 混在を別途解決する必要がある |
+| Cloudflare Containers   | headless browser/解析 worker 候補                         | [Containers](https://developers.cloudflare.com/containers/) は full filesystem/任意 runtime/OCI image を実行できる。Paid、secret 配送、persistent profile、egress/reputation、監査が必要           |
+| 一般 OCI container      | CSV/PDF/HTML parser と web replay に適する                | Playwright、sanitizer、PDF parser、secret scanner を version 固定できる。正規 Android app/device identity は通常 container だけでは再現できない                                                    |
+| Kubernetes              | 多 source 運用には適するが楽天単体の初期 capture には過大 | CronJob、NetworkPolicy、read-only FS、Secret CSI、監査、source 別 job を使えるが、MFA/Akamai/device binding は解決しない                                                                           |
+| ユーザー管理 PC/Android | 初回 live/静的・動的観測に最適                            | 正規 browser/app、human MFA、Play provenance を保ち、秘密の外部搬出を避けやすい。完全無人化にはならない                                                                                            |
 
 推奨初期構成は、PC からカード月次 CSV/PDF を手動 export し、ユーザー端末上の監査済み
 PointClub exporter で 1 年履歴を保存し、parser/sanitizer だけを Worker/OCI に置く。transport と
@@ -392,14 +392,14 @@ PR #5 の共通定義のみを使う。
 - **D**: full browser/device automation が必要
 - **E**: manual capture が安全な既定
 
-| 経路 | Level | Cost (1-5) | 判定 |
-| --- | --- | ---: | --- |
-| e-NAVI PC 月次 CSV/PDF を手動取得 | E | 1 | 公式で最も安全。15 か月 rolling archive、CSV 欠落を PDF で補う |
-| PointClub web 履歴を人手/監査済み local bookmarklet で保存 | E | 1-2 | 公式 export は未確認。1 年、pagination、Cash 状態の live 確認が必要 |
-| e-NAVI/PointClub full browser automation | D | 4 | 共通 ID、MFA、Akamai、複数カード、write 導線、session 未確認 |
-| 観測済み web read endpoint の bootstrap + replay | C 候補 | 4 | PointClub は OIDC + HTML pagination の公開実装があるが、session 更新/read scope/e-NAVI は未実証 |
-| 公式 app transport replay/UI automation | D | 5 | Play artifact、device binding、integrity/pinning、write proximity、token scope が未確認 |
-| Cash 現在残高の手動 spot check | E | 1 | Pay app の read 画面だけ。履歴は PointClub を使う |
+| 経路                                                       | Level  | Cost (1-5) | 判定                                                                                            |
+| ---------------------------------------------------------- | ------ | ---------: | ----------------------------------------------------------------------------------------------- |
+| e-NAVI PC 月次 CSV/PDF を手動取得                          | E      |          1 | 公式で最も安全。15 か月 rolling archive、CSV 欠落を PDF で補う                                  |
+| PointClub web 履歴を人手/監査済み local bookmarklet で保存 | E      |        1-2 | 公式 export は未確認。1 年、pagination、Cash 状態の live 確認が必要                             |
+| e-NAVI/PointClub full browser automation                   | D      |          4 | 共通 ID、MFA、Akamai、複数カード、write 導線、session 未確認                                    |
+| 観測済み web read endpoint の bootstrap + replay           | C 候補 |          4 | PointClub は OIDC + HTML pagination の公開実装があるが、session 更新/read scope/e-NAVI は未実証 |
+| 公式 app transport replay/UI automation                    | D      |          5 | Play artifact、device binding、integrity/pinning、write proximity、token scope が未確認         |
+| Cash 現在残高の手動 spot check                             | E      |          1 | Pay app の read 画面だけ。履歴は PointClub を使う                                               |
 
 **総合評価: E（C 候補）、cost 1-2（replay 研究は 4、app/device は 5）。** カードは公式月次
 export があるが scheduled API ではないため A ではない。Point/Cash は公式 public export/API を確認

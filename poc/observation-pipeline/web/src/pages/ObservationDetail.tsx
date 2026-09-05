@@ -1,9 +1,5 @@
 import type { ReactNode } from "react";
-import {
-  useObservation,
-  type ObservationDetail,
-  type Provenance,
-} from "../api.ts";
+import { useObservation, type ObservationDetail, type Provenance } from "../api.ts";
 import { Link, type ObservationKind } from "../router.tsx";
 import { formatAmount } from "../money.ts";
 import {
@@ -67,9 +63,7 @@ export function ObservationDetailPage({
           </h1>
           <KindBadge kind={kind} />
         </div>
-        <p className="lede">
-          記録された値と、その根拠になった原本を確認できます。
-        </p>
+        <p className="lede">記録された値と、その根拠になった原本を確認できます。</p>
       </div>
       <QueryBoundary query={query} label={`${KIND_LABELS[kind]}の詳細 #${id}`}>
         {(data) => <ObservationBody detail={data} />}
@@ -100,9 +94,7 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
             <div className="quantity">
               <Amount minor={minor} unit={unit} text={text} />
             </div>
-            <p className="footnote">
-              取得元の単位と保存された精度を保って表示しています。
-            </p>
+            <p className="footnote">取得元の単位と保存された精度を保って表示しています。</p>
           </div>
         </Panel>
       ) : null}
@@ -145,9 +137,7 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
             ) : (
               <pre>
                 <code>
-                  {detail.extraParsed
-                    ? JSON.stringify(detail.extra, null, 2)
-                    : detail.extraRaw}
+                  {detail.extraParsed ? JSON.stringify(detail.extra, null, 2) : detail.extraRaw}
                 </code>
               </pre>
             )}
@@ -170,9 +160,7 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
       <h2 className="section-gap" id="provenance">
         記録の根拠をたどる
       </h2>
-      <p className="footnote">
-        記録 → 解析 → 原本 → 収集の順に、保存された情報を確認できます。
-      </p>
+      <p className="footnote">記録 → 解析 → 原本 → 収集の順に、保存された情報を確認できます。</p>
       {provenance == null ? (
         <div className="state state-error" role="alert">
           <span className="state-title">原本へのつながりを確認できません</span>
@@ -224,10 +212,7 @@ function ProvenanceChain({
           </dd>
           <dt>原本内の位置</dt>
           <dd>
-            <Nullable
-              value={stringAt(detail.row, "raw_locator")}
-              placeholder="位置未記録"
-            />
+            <Nullable value={stringAt(detail.row, "raw_locator")} placeholder="位置未記録" />
           </dd>
         </dl>
         <p className="footnote">
@@ -266,9 +251,7 @@ function ProvenanceChain({
           <dd>{p.fetched_at}</dd>
           <dt>解析履歴</dt>
           <dd>
-            <Link to={`/artifacts/${p.artifact_id}`}>
-              この原本のすべての解析を見る
-            </Link>
+            <Link to={`/artifacts/${p.artifact_id}`}>この原本のすべての解析を見る</Link>
           </dd>
         </dl>
         <details>

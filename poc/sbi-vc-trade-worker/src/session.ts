@@ -90,13 +90,37 @@ export function parseGatewayMeta(value: unknown): GatewayMeta {
 function setCookie(session: SessionMaterial, name: string, value: string): boolean {
   switch (name) {
     case "vct_bff_sid":
-      return replace(() => session.cookies.vctBffSid, (next) => { session.cookies.vctBffSid = next; }, value);
+      return replace(
+        () => session.cookies.vctBffSid,
+        (next) => {
+          session.cookies.vctBffSid = next;
+        },
+        value,
+      );
     case "JSESSIONID":
-      return replace(() => session.cookies.jSessionId, (next) => { session.cookies.jSessionId = next; }, value);
+      return replace(
+        () => session.cookies.jSessionId,
+        (next) => {
+          session.cookies.jSessionId = next;
+        },
+        value,
+      );
     case "AWSALB":
-      return replace(() => session.cookies.awsAlb, (next) => { session.cookies.awsAlb = next; }, value);
+      return replace(
+        () => session.cookies.awsAlb,
+        (next) => {
+          session.cookies.awsAlb = next;
+        },
+        value,
+      );
     case "AWSALBCORS":
-      return replace(() => session.cookies.awsAlbCors, (next) => { session.cookies.awsAlbCors = next; }, value);
+      return replace(
+        () => session.cookies.awsAlbCors,
+        (next) => {
+          session.cookies.awsAlbCors = next;
+        },
+        value,
+      );
     default: {
       const match = /^AWSALBAPP-([0-3])$/u.exec(name);
       if (!match) return false;

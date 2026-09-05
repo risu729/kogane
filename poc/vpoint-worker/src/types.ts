@@ -47,9 +47,7 @@ export interface CollectionManifest {
     ambiguousCount: number;
     unmatchedCount: number;
     notComparableCount: number;
-    appLedgerStatus:
-      | "unavailable-no-live-snapshot"
-      | "available-not-compared";
+    appLedgerStatus: "unavailable-no-live-snapshot" | "available-not-compared";
   };
 }
 

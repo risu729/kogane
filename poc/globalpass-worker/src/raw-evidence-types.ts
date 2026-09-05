@@ -1,6 +1,4 @@
-export type RawEvidenceImportResult =
-  | RawEvidenceImportSealed
-  | RawEvidenceImportDeferred;
+export type RawEvidenceImportResult = RawEvidenceImportSealed | RawEvidenceImportDeferred;
 
 export interface RawEvidenceImportSealed {
   source: "prestia-globalpass";

@@ -47,11 +47,7 @@ async function sanitizeFingerprint(route: string, response: JsonResponseLike) {
     ja3Hash: stringAt(value, "tls", "ja3_hash"),
     ja4: stringAt(value, "tls", "ja4"),
     akamaiFingerprint: stringAt(value, "http2", "akamai_fingerprint"),
-    akamaiFingerprintHash: stringAt(
-      value,
-      "http2",
-      "akamai_fingerprint_hash",
-    ),
+    akamaiFingerprintHash: stringAt(value, "http2", "akamai_fingerprint_hash"),
   };
 }
 

@@ -10,11 +10,7 @@ import {
   storeVPointPayEmail,
 } from "./vpoint-pay-email";
 import { reconcileVPointPayEmails } from "./vpoint-pay-reconcile";
-import type {
-  CollectionFailure,
-  CollectionManifest,
-  CollectionResult,
-} from "./types";
+import type { CollectionFailure, CollectionManifest, CollectionResult } from "./types";
 import { collectVPoint, VPointSessionExpiredError } from "./vpoint";
 
 export { VPointSession };
@@ -34,22 +30,23 @@ export default {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
       const queryNames = [...url.searchParams.keys()];
-      if (queryNames.some((name) => name !== "limit" && name !== "cursor") ||
-          url.searchParams.getAll("limit").length !== 1 ||
-          url.searchParams.getAll("cursor").length > 1 ||
-          url.searchParams.get("limit") !== "1") {
+      if (
+        queryNames.some((name) => name !== "limit" && name !== "cursor") ||
+        url.searchParams.getAll("limit").length !== 1 ||
+        url.searchParams.getAll("cursor").length > 1 ||
+        url.searchParams.get("limit") !== "1"
+      ) {
         return Response.json({ error: "limit_must_be_one" }, { status: 400 });
       }
       const cursor = url.searchParams.get("cursor") ?? undefined;
-      if (cursor !== undefined && (cursor.length === 0 || cursor.length > 4_096 ||
-          /[\x00-\x20\x7f]/u.test(cursor))) {
+      if (
+        cursor !== undefined &&
+        (cursor.length === 0 || cursor.length > 4_096 || /[\x00-\x20\x7f]/u.test(cursor))
+      ) {
         return Response.json({ error: "cursor_invalid" }, { status: 400 });
       }
       try {
-        return Response.json(await backfillStoredRuns(
-          env.RAW_EVIDENCE_IMPORTER,
-          cursor,
-        ));
+        return Response.json(await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, cursor));
       } catch {
         return Response.json({ error: "raw_evidence_backfill_failed" }, { status: 502 });
       }
@@ -77,19 +74,17 @@ export default {
   async email(message, env): Promise<void> {
     const emailRunId = crypto.randomUUID();
     let stage: CollectionStage = "email-receive";
-    const onStage = (next: CollectionStage) => { stage = next; logStage(emailRunId, stage); };
+    const onStage = (next: CollectionStage) => {
+      stage = next;
+      logStage(emailRunId, stage);
+    };
     onStage(stage);
     try {
       const isTarget = isCollectorRecipient(message.to, [
         requiredSecret(env.VPOINT_EMAIL_RECIPIENT, "VPOINT_EMAIL_RECIPIENT"),
-        requiredSecret(
-          env.VPOINT_PAY_EMAIL_RECIPIENT,
-          "VPOINT_PAY_EMAIL_RECIPIENT",
-        ),
+        requiredSecret(env.VPOINT_PAY_EMAIL_RECIPIENT, "VPOINT_PAY_EMAIL_RECIPIENT"),
       ]);
-      const raw = isTarget
-        ? await new Response(message.raw).arrayBuffer()
-        : null;
+      const raw = isTarget ? await new Response(message.raw).arrayBuffer() : null;
       onStage("email-parse");
       const payEmail = raw ? await parseVPointPayEmail(raw) : null;
       if (payEmail) {
@@ -111,10 +106,9 @@ export default {
       if (shouldForwardToMailbox(payEmail)) {
         try {
           onStage("email-forward");
-          await message.forward(requiredSecret(
-            env.VPOINT_EMAIL_FORWARD_TO,
-            "VPOINT_EMAIL_FORWARD_TO",
-          ));
+          await message.forward(
+            requiredSecret(env.VPOINT_EMAIL_FORWARD_TO, "VPOINT_EMAIL_FORWARD_TO"),
+          );
         } catch (error) {
           forwardError = error;
           logFailure(emailRunId, stage, error);
@@ -140,10 +134,14 @@ export default {
         }
       }
 
-      if (forwardError) { stage = "email-forward"; throw forwardError; }
+      if (forwardError) {
+        stage = "email-forward";
+        throw forwardError;
+      }
       logEvent({ event: "vpoint-email-handled", runId: emailRunId, status: "success" });
     } catch (error) {
       if (stage !== "email-forward") logFailure(emailRunId, stage, error);
+      // oxlint-disable-next-line preserve-caught-error -- Raw mail/provider exceptions must not cross the handler boundary; safe diagnostics are already logged.
       throw new Error(`V Point email handling failed; runId=${emailRunId}; stage=${stage}`);
     }
   },
@@ -162,7 +160,10 @@ async function runCollection(env: Env, parentRunId?: string): Promise<Collection
   let emailReconciliation;
   const session = sessionStub(env);
   let stage: CollectionStage = "session-load";
-  const onStage = (next: CollectionStage) => { stage = next; logStage(runId, stage); };
+  const onStage = (next: CollectionStage) => {
+    stage = next;
+    logStage(runId, stage);
+  };
   onStage(stage);
   if (parentRunId) logEvent({ event: "vpoint-post-auth-collection", runId, parentRunId });
 
@@ -184,11 +185,13 @@ async function runCollection(env: Env, parentRunId?: string): Promise<Collection
     onStage("artifact-store");
     for (const artifact of collection.artifacts) {
       try {
-        artifacts.push(await storeArtifact({
-          bucket: env.SNAPSHOTS,
-          prefix,
-          artifact,
-        }));
+        artifacts.push(
+          await storeArtifact({
+            bucket: env.SNAPSHOTS,
+            prefix,
+            artifact,
+          }),
+        );
       } catch (error) {
         failures.push(failure(`r2:${artifact.dataset}`, error, runId, stage));
       }
@@ -219,11 +222,7 @@ async function runCollection(env: Env, parentRunId?: string): Promise<Collection
   }
 
   const completedAt = new Date().toISOString();
-  const status = failures.length === 0
-    ? "success"
-    : artifacts.length === 0
-      ? "failed"
-      : "partial";
+  const status = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
   const manifest: CollectionManifest = {
     schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
     source: "v-point",
@@ -245,6 +244,7 @@ async function runCollection(env: Env, parentRunId?: string): Promise<Collection
     manifestKey = await storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest });
   } catch (error) {
     logFailure(runId, stage, error);
+    // oxlint-disable-next-line preserve-caught-error -- logFailure records safe diagnostics without exposing the original provider error.
     throw new Error(`V Point manifest storage failed; runId=${runId}`);
   }
   onStage("central-import");
@@ -272,9 +272,7 @@ function sessionStub(env: Env): DurableObjectStub<VPointSession> {
 }
 
 function authorized(request: Request, expected: string | undefined): boolean {
-  const provided = request.headers
-    .get("authorization")
-    ?.match(/^Bearer\s+(.+)$/iu)?.[1];
+  const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
   if (!provided || !expected) return false;
   const left = new TextEncoder().encode(provided);
   const right = new TextEncoder().encode(expected);
@@ -286,7 +284,12 @@ function requiredSecret(value: string | undefined, name: string): string {
   return value;
 }
 
-function failure(operation: string, error: unknown, runId: string, stage: CollectionStage): CollectionFailure {
+function failure(
+  operation: string,
+  error: unknown,
+  runId: string,
+  stage: CollectionStage,
+): CollectionFailure {
   const detail = logFailure(runId, stage, error);
   return { operation, ...detail, message: detail.failureCode, stage };
 }
@@ -310,12 +313,13 @@ function publicResult(result: CollectionResult): object {
 }
 
 function awaitingReauthentication(result: CollectionResult): boolean {
-  return result.status === "failed" &&
+  return (
+    result.status === "failed" &&
     result.failures.length === 1 &&
-    [
-      "VPointReauthenticationPendingError",
-      "VPointSessionExpiredError",
-    ].includes(result.failures[0]?.errorType ?? "");
+    ["VPointReauthenticationPendingError", "VPointSessionExpiredError"].includes(
+      result.failures[0]?.errorType ?? "",
+    )
+  );
 }
 
 class VPointReauthenticationPendingError extends Error {

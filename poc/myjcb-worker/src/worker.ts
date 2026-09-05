@@ -27,15 +27,17 @@ export default {
       });
     }
     if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
-      if (!await authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
+      if (!(await authorized(request, env.ADMIN_TRIGGER_TOKEN))) {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
       if (url.searchParams.get("limit") !== "1") {
         return Response.json({ error: "limit_must_be_one" }, { status: 400 });
       }
       const cursor = url.searchParams.get("cursor") ?? undefined;
-      if (cursor !== undefined &&
-          (cursor.length === 0 || cursor.length > 16_000 || /[\x00-\x20\x7f]/u.test(cursor))) {
+      if (
+        cursor !== undefined &&
+        (cursor.length === 0 || cursor.length > 16_000 || /[\x00-\x20\x7f]/u.test(cursor))
+      ) {
         return Response.json({ error: "cursor_invalid" }, { status: 400 });
       }
       try {
@@ -49,23 +51,26 @@ export default {
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
-    if (!await authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
+    if (!(await authorized(request, env.ADMIN_TRIGGER_TOKEN))) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
     const result = await runCollection(env, "manual");
-    return Response.json({
-      runId: result.manifest.runId,
-      status: result.manifest.status,
-      connectionCount: result.manifest.connections.length,
-      artifactCount: result.manifest.artifacts.length,
-      failureCount: result.manifest.failures.length,
-      blockers: result.manifest.connections.flatMap((connection) =>
-        connection.blocker === undefined
-          ? []
-          : [{ connectionId: connection.connectionId, code: connection.blocker }]
-      ),
-      manifestKey: result.manifestKey,
-    }, { status: result.manifest.status === "failed" ? 502 : 200 });
+    return Response.json(
+      {
+        runId: result.manifest.runId,
+        status: result.manifest.status,
+        connectionCount: result.manifest.connections.length,
+        artifactCount: result.manifest.artifacts.length,
+        failureCount: result.manifest.failures.length,
+        blockers: result.manifest.connections.flatMap((connection) =>
+          connection.blocker === undefined
+            ? []
+            : [{ connectionId: connection.connectionId, code: connection.blocker }],
+        ),
+        manifestKey: result.manifestKey,
+      },
+      { status: result.manifest.status === "failed" ? 502 : 200 },
+    );
   },
 
   async scheduled(_controller, env): Promise<void> {
@@ -85,27 +90,35 @@ async function runCollection(
   const diagnostic = createDiagnostics("myjcb", runId);
   try {
     const prefix = runPrefix(startedAt, runId);
-    const credentials = await diagnostic.step("configuration", () => parseCredentialSecrets(connectionSecretValues(env)));
+    const credentials = await diagnostic.step("configuration", () =>
+      parseCredentialSecrets(connectionSecretValues(env)),
+    );
     const artifacts: StoredArtifact[] = [];
     const connections: ConnectionSummary[] = [];
     const failures: CollectionFailure[] = [];
 
     for (const credential of credentials) {
       try {
-        const collected = await diagnostic.step("connection-collection", () => collectConnection({
-          browserBinding: env.BROWSER,
-          credential,
-          diagnostic,
-        }));
+        const collected = await diagnostic.step("connection-collection", () =>
+          collectConnection({
+            browserBinding: env.BROWSER,
+            credential,
+            diagnostic,
+          }),
+        );
         let stored = 0;
         for (const artifact of collected.artifacts) {
           try {
-            artifacts.push(await diagnostic.step("artifact-write", () => storeArtifact({
-              bucket: env.SNAPSHOTS,
-              prefix,
-              connectionId: credential.connectionId,
-              artifact,
-            })));
+            artifacts.push(
+              await diagnostic.step("artifact-write", () =>
+                storeArtifact({
+                  bucket: env.SNAPSHOTS,
+                  prefix,
+                  connectionId: credential.connectionId,
+                  artifact,
+                }),
+              ),
+            );
             stored += 1;
           } catch (error) {
             failures.push(failure(credential.connectionId, `r2:${artifact.dataset}`, error));
@@ -144,16 +157,20 @@ async function runCollection(
       artifacts,
       failures,
     };
-    const manifestKey = await diagnostic.step("manifest-write", () => storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest }));
-    console.log(JSON.stringify({
-      event: "myjcb-collection-stored",
-      runId,
-      status: manifest.status,
-      connectionCount: connections.length,
-      artifactCount: artifacts.length,
-      failureCount: failures.length,
-      manifestKey,
-    }));
+    const manifestKey = await diagnostic.step("manifest-write", () =>
+      storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest }),
+    );
+    console.log(
+      JSON.stringify({
+        event: "myjcb-collection-stored",
+        runId,
+        status: manifest.status,
+        connectionCount: connections.length,
+        artifactCount: artifacts.length,
+        failureCount: failures.length,
+        manifestKey,
+      }),
+    );
     diagnostic.finish(manifest.status);
     return { manifest, manifestKey };
   } catch (error) {
@@ -176,9 +193,7 @@ async function authorized(request: Request, expected: string | undefined): Promi
   return crypto.subtle.timingSafeEqual(left, right);
 }
 
-function hasTimingSafeEqual(
-  subtle: SubtleCrypto,
-): subtle is SubtleCrypto & {
+function hasTimingSafeEqual(subtle: SubtleCrypto): subtle is SubtleCrypto & {
   timingSafeEqual(left: ArrayBuffer, right: ArrayBuffer): boolean;
 } {
   return typeof Reflect.get(subtle, "timingSafeEqual") === "function";
@@ -190,10 +205,10 @@ function requiredSecret(value: string | undefined, name: string): string {
 }
 
 function connectionSecretValues(env: MyJcbEnv): string[] {
-  const names = env.MYJCB_CONNECTION_SECRET_NAMES
-    ?.split(",")
-    .map((name) => name.trim())
-    .filter(Boolean) ?? [];
+  const names =
+    env.MYJCB_CONNECTION_SECRET_NAMES?.split(",")
+      .map((name) => name.trim())
+      .filter(Boolean) ?? [];
   if (names.length === 0) {
     return [requiredSecret(env.MYJCB_CONNECTIONS_JSON, "MYJCB_CONNECTIONS_JSON")];
   }
@@ -212,11 +227,7 @@ function connectionSecretValues(env: MyJcbEnv): string[] {
   });
 }
 
-function failure(
-  connectionId: string,
-  operation: string,
-  error: unknown,
-): CollectionFailure {
+function failure(connectionId: string, operation: string, error: unknown): CollectionFailure {
   return {
     connectionId,
     operation,

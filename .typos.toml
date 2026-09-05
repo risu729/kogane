@@ -1,0 +1,21 @@
+[files]
+extend-exclude = ["data/**", "**/fixtures/**", "**/patches/**", "**/worker-configuration.d.ts", "**/*lock*"]
+
+[default.extend-words]
+# Provider identifiers, product names, literal captures, and accepted spelling.
+unparseable = "unparseable"
+aas = "aas"
+ba = "ba"
+mis = "mis"
+relese = "relese"
+freee = "freee"
+OT = "OT"
+abck = "abck"
+anser = "anser"
+Secur = "Secur"
+ede = "ede"
+TPE = "TPE"
+fo = "fo"
+regist = "regist"
+Metrix = "Metrix"
+Infomation = "Infomation"

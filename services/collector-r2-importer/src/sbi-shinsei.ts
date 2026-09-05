@@ -19,7 +19,8 @@ const MAX_ARTIFACT_BYTES = 4 * 1024 * 1024;
 const STORAGE_TEMPLATE = "raw/sbi-shinsei/{date}/{run-id}/{artifact}";
 const STORAGE_CONTAINER = "kogane-sbi-shinsei-collector-poc";
 const FINGERPRINT_VERSION = "collector-r2-v1";
-const MANIFEST_KEY = /^raw\/sbi-shinsei\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
+const MANIFEST_KEY =
+  /^raw\/sbi-shinsei\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const DATASETS = [
   "top-accounts-balance-and-activity",
@@ -113,19 +114,16 @@ export async function importSbiShinseiRun(options: {
       const bytes = await readVerifiedArtifact(options.bucket, artifact, manifest.runId);
       const parsed = parseJson(bytes, "artifact_json_invalid");
       validateDatasetPayload(artifact.dataset as Dataset, parsed);
-      const centralBytes = artifact.dataset === "normalized"
-        ? bytes
-        : sanitizeProviderResponse(parsed);
+      const centralBytes =
+        artifact.dataset === "normalized" ? bytes : sanitizeProviderResponse(parsed);
       verified.push({
         manifest: artifact,
         centralSha256: await sha256Hex(centralBytes),
         centralByteSize: centralBytes.byteLength,
-        ...(
-          artifact.dataset === "top-accounts-balance-and-activity" ||
-          artifact.dataset === "normalized"
-            ? { semantic: parsed }
-            : {}
-        ),
+        ...(artifact.dataset === "top-accounts-balance-and-activity" ||
+        artifact.dataset === "normalized"
+          ? { semantic: parsed }
+          : {}),
       });
     }
     validateCrossArtifactMeaning(manifest, verified);
@@ -159,30 +157,23 @@ export async function importSbiShinseiRun(options: {
     });
 
     const inventory: CentralInventoryItem[] = [];
-    const hasRawParent = verified.some((entry) =>
-      entry.manifest.dataset === "top-accounts-balance-and-activity"
+    const hasRawParent = verified.some(
+      (entry) => entry.manifest.dataset === "top-accounts-balance-and-activity",
     );
     for (const [sequence, item] of verified.entries()) {
       phase = "object_upload";
-      const sourceBytes = await readVerifiedArtifact(
-        options.bucket,
-        item.manifest,
-        manifest.runId,
-      );
+      const sourceBytes = await readVerifiedArtifact(options.bucket, item.manifest, manifest.runId);
       const parsed = parseJson(sourceBytes, "artifact_json_invalid");
       validateDatasetPayload(item.manifest.dataset as Dataset, parsed);
-      const centralBytes = item.manifest.dataset === "normalized"
-        ? sourceBytes
-        : sanitizeProviderResponse(parsed);
-      if (centralBytes.byteLength !== item.centralByteSize ||
-          await sha256Hex(centralBytes) !== item.centralSha256) {
+      const centralBytes =
+        item.manifest.dataset === "normalized" ? sourceBytes : sanitizeProviderResponse(parsed);
+      if (
+        centralBytes.byteLength !== item.centralByteSize ||
+        (await sha256Hex(centralBytes)) !== item.centralSha256
+      ) {
         throw new ImportError(409, "artifact_changed_during_import");
       }
-      const reused = await central.uploadObject(
-        centralRunId,
-        item.centralSha256,
-        centralBytes,
-      );
+      const reused = await central.uploadObject(centralRunId, item.centralSha256, centralBytes);
       if (reused) reusedArtifactCount += 1;
       else acceptedArtifactCount += 1;
 
@@ -226,9 +217,7 @@ export async function importSbiShinseiRun(options: {
         key: options.manifestKey,
         completedAt: manifest.completedAt,
         fingerprintKey: options.fingerprintKey,
-        formatVersion: manifest.legacyWindow
-          ? `${SCHEMA_VERSION}-legacy-window`
-          : SCHEMA_VERSION,
+        formatVersion: manifest.legacyWindow ? `${SCHEMA_VERSION}-legacy-window` : SCHEMA_VERSION,
       }),
     );
     inventory.push({
@@ -318,11 +307,33 @@ export function parseSbiShinseiManifest(
   if (!keyMatch) invalid("manifest_key_invalid");
   const input = parseJson(bytes, "manifest_json_invalid", 400);
   const hasWindow = Object.hasOwn(input, "window");
-  exactShape(input, hasWindow
-    ? ["schemaVersion", "source", "runId", "startedAt", "completedAt", "status",
-      "liveReadsEnabled", "artifacts", "failures", "window"]
-    : ["schemaVersion", "source", "runId", "startedAt", "completedAt", "status",
-      "liveReadsEnabled", "artifacts", "failures"]);
+  exactShape(
+    input,
+    hasWindow
+      ? [
+          "schemaVersion",
+          "source",
+          "runId",
+          "startedAt",
+          "completedAt",
+          "status",
+          "liveReadsEnabled",
+          "artifacts",
+          "failures",
+          "window",
+        ]
+      : [
+          "schemaVersion",
+          "source",
+          "runId",
+          "startedAt",
+          "completedAt",
+          "status",
+          "liveReadsEnabled",
+          "artifacts",
+          "failures",
+        ],
+  );
   if (input.schemaVersion !== SCHEMA_VERSION) invalid("manifest_schema_invalid");
   if (input.source !== EXTERNAL_SOURCE) invalid("manifest_source_invalid");
   if (input.runId !== keyMatch[4]) invalid("manifest_run_id_mismatch");
@@ -384,8 +395,11 @@ function parseArtifact(value: unknown, prefix: string): SbiShinseiArtifactManife
   if (typeof input.sha256 !== "string" || !SHA256.test(input.sha256)) {
     invalid("manifest_artifact_sha_invalid");
   }
-  if (!Number.isSafeInteger(input.bytes) || (input.bytes as number) < 1 ||
-      (input.bytes as number) > MAX_ARTIFACT_BYTES) {
+  if (
+    !Number.isSafeInteger(input.bytes) ||
+    (input.bytes as number) < 1 ||
+    (input.bytes as number) > MAX_ARTIFACT_BYTES
+  ) {
     invalid("manifest_artifact_size_invalid");
   }
   return {
@@ -400,21 +414,33 @@ function parseArtifact(value: unknown, prefix: string): SbiShinseiArtifactManife
 function parseFailure(value: unknown): SbiShinseiFailure {
   const input = record(value, "manifest_failure_invalid");
   exactShape(input, ["operation", "errorType", "message"]);
-  if (typeof input.operation !== "string" ||
-      !(input.operation === "collect" ||
-        input.operation === "derive:normalized" ||
-        (input.operation.startsWith("r2:") && isDataset(input.operation.slice(3))) ||
-        (input.operation.startsWith("read:") &&
-          input.operation !== "read:normalized" &&
-          isDataset(input.operation.slice(5))))) {
+  if (
+    typeof input.operation !== "string" ||
+    !(
+      input.operation === "collect" ||
+      input.operation === "derive:normalized" ||
+      (input.operation.startsWith("r2:") && isDataset(input.operation.slice(3))) ||
+      (input.operation.startsWith("read:") &&
+        input.operation !== "read:normalized" &&
+        isDataset(input.operation.slice(5)))
+    )
+  ) {
     invalid("manifest_failure_operation_invalid");
   }
-  if (typeof input.errorType !== "string" || !/^[A-Za-z][A-Za-z0-9]{0,79}$/u.test(input.errorType)) {
+  if (
+    typeof input.errorType !== "string" ||
+    !/^[A-Za-z][A-Za-z0-9]{0,79}$/u.test(input.errorType)
+  ) {
     invalid("manifest_failure_type_invalid");
   }
-  if (typeof input.message !== "string" || input.message.length < 1 || input.message.length > 300 ||
-      /Bearer\s+(?!\[redacted\])\S+|(?:password|accountNumber|branchNumber|cookie|csrf|token)\s*=\s*(?!\[redacted\])[^\s,;]+/iu
-        .test(input.message)) {
+  if (
+    typeof input.message !== "string" ||
+    input.message.length < 1 ||
+    input.message.length > 300 ||
+    /Bearer\s+(?!\[redacted\])\S+|(?:password|accountNumber|branchNumber|cookie|csrf|token)\s*=\s*(?!\[redacted\])[^\s,;]+/iu.test(
+      input.message,
+    )
+  ) {
     invalid("manifest_failure_message_invalid");
   }
   return {
@@ -433,9 +459,11 @@ function validateCompleteness(
   const datasetFailures = new Set<string>();
   const collectFailures = failures.filter((failure) => failure.operation === "collect");
   for (const failure of failures) {
-    if (failure.operation.startsWith("r2:") ||
-        failure.operation.startsWith("read:") ||
-        failure.operation === "derive:normalized") {
+    if (
+      failure.operation.startsWith("r2:") ||
+      failure.operation.startsWith("read:") ||
+      failure.operation === "derive:normalized"
+    ) {
       const dataset = failure.operation.slice(failure.operation.indexOf(":") + 1);
       if (datasetFailures.has(dataset)) invalid("manifest_duplicate_failure");
       datasetFailures.add(dataset);
@@ -456,9 +484,8 @@ function validateCompleteness(
   if (artifacts.some((artifact, index) => artifact.dataset !== expectedArtifactOrder[index])) {
     invalid("manifest_dataset_order_invalid");
   }
-  const expectedStatus = failures.length === 0
-    ? "success"
-    : artifacts.length === 0 ? "failed" : "partial";
+  const expectedStatus =
+    failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
   if (status !== expectedStatus) invalid("manifest_status_mismatch");
 }
 
@@ -474,15 +501,18 @@ function validateCrossArtifactMeaning(
   manifest: SbiShinseiManifest,
   artifacts: VerifiedArtifact[],
 ): void {
-  const top = artifacts.find((entry) =>
-    entry.manifest.dataset === "top-accounts-balance-and-activity"
+  const top = artifacts.find(
+    (entry) => entry.manifest.dataset === "top-accounts-balance-and-activity",
   )?.semantic;
-  const normalizedValue = artifacts.find((entry) =>
-    entry.manifest.dataset === "normalized"
+  const normalizedValue = artifacts.find(
+    (entry) => entry.manifest.dataset === "normalized",
   )?.semantic;
   if (normalizedValue) {
     const normalized = parseNormalized(normalizedValue);
-    if (normalized.capturedAt < manifest.startedAt || normalized.capturedAt > manifest.completedAt) {
+    if (
+      normalized.capturedAt < manifest.startedAt ||
+      normalized.capturedAt > manifest.completedAt
+    ) {
       throw new ImportError(409, "normalized_capture_time_mismatch");
     }
     if (top && canonical(normalized) !== canonical(normalizeTop(top, normalized.capturedAt))) {
@@ -531,14 +561,21 @@ function validateLegacyWindow(
 
 function parseNormalized(value: unknown): NormalizedSnapshot {
   const root = recordConflict(value, "normalized_schema_invalid");
-  exactShapeConflict(root, ["schemaVersion", "capturedAt", "balances", "transactions"],
-    "normalized_schema_invalid");
+  exactShapeConflict(
+    root,
+    ["schemaVersion", "capturedAt", "balances", "transactions"],
+    "normalized_schema_invalid",
+  );
   if (root.schemaVersion !== "sbi-shinsei-v1") {
     throw new ImportError(409, "normalized_schema_invalid");
   }
   const capturedAt = instantConflict(root.capturedAt, "normalized_schema_invalid");
-  if (!Array.isArray(root.balances) || root.balances.length > 100 ||
-      !Array.isArray(root.transactions) || root.transactions.length > 1_000) {
+  if (
+    !Array.isArray(root.balances) ||
+    root.balances.length > 100 ||
+    !Array.isArray(root.transactions) ||
+    root.transactions.length > 1_000
+  ) {
     throw new ImportError(409, "normalized_schema_invalid");
   }
   const balances = root.balances.map((entry) => normalizedBalance(entry));
@@ -551,10 +588,17 @@ function parseNormalized(value: unknown): NormalizedSnapshot {
 
 function normalizedBalance(value: unknown): JsonObject {
   const item = recordConflict(value, "normalized_schema_invalid");
-  exactShapeConflict(item, ["accountKey", "product", "currency", "balance", "yenEquivalent", "asOf"],
-    "normalized_schema_invalid");
+  exactShapeConflict(
+    item,
+    ["accountKey", "product", "currency", "balance", "yenEquivalent", "asOf"],
+    "normalized_schema_invalid",
+  );
   nonEmpty(item.accountKey);
-  if (!["yen-savings", "hyper-yokin", "foreign-savings", "term-deposit"].includes(String(item.product))) {
+  if (
+    !["yen-savings", "hyper-yokin", "foreign-savings", "term-deposit"].includes(
+      String(item.product),
+    )
+  ) {
     throw new ImportError(409, "normalized_schema_invalid");
   }
   isoCurrency(item.currency);
@@ -566,8 +610,11 @@ function normalizedBalance(value: unknown): JsonObject {
 
 function normalizedTransaction(value: unknown): JsonObject {
   const item = recordConflict(value, "normalized_schema_invalid");
-  exactShapeConflict(item, ["accountKey", "transactionDate", "description", "debit", "credit", "balance", "currency"],
-    "normalized_schema_invalid");
+  exactShapeConflict(
+    item,
+    ["accountKey", "transactionDate", "description", "debit", "credit", "balance", "currency"],
+    "normalized_schema_invalid",
+  );
   nonEmpty(item.accountKey);
   date(item.transactionDate, "normalized_schema_invalid");
   nonEmpty(item.description);
@@ -592,7 +639,12 @@ function normalizeTop(top: JsonObject, capturedAt: string): NormalizedSnapshot {
     const productCode = String(item.productCode);
     return {
       accountKey: String(item.accountNo),
-      product: currency !== "JPY" ? "foreign-savings" : productCode === "603" ? "hyper-yokin" : "yen-savings",
+      product:
+        currency !== "JPY"
+          ? "foreign-savings"
+          : productCode === "603"
+            ? "hyper-yokin"
+            : "yen-savings",
       currency,
       balance: decimalFromScalar(item.balance),
       yenEquivalent: nullableDecimalFromScalar(item.yenEqui),
@@ -645,7 +697,7 @@ async function readVerifiedArtifact(
   assertJsonContentType(object, "artifact_content_type_mismatch");
   const bytes = new Uint8Array(await object.arrayBuffer());
   assertNativeSha256(object, artifact.sha256);
-  if (await sha256Hex(bytes) !== artifact.sha256) {
+  if ((await sha256Hex(bytes)) !== artifact.sha256) {
     throw new ImportError(409, "artifact_checksum_mismatch");
   }
   return bytes;
@@ -692,7 +744,9 @@ async function dataDescriptor(options: {
     payloadFidelity: "transformed",
     containerKind: "single",
     lineageDisposition: normalized
-      ? options.linkNormalized ? "linked" : "source_bytes_not_available"
+      ? options.linkNormalized
+        ? "linked"
+        : "source_bytes_not_available"
       : "source_not_retained_for_security",
     dataset: options.artifact.dataset,
     formatId: `sbi-shinsei-${options.artifact.dataset}-json`,
@@ -706,48 +760,57 @@ async function dataDescriptor(options: {
     sha256: options.centralSha256,
     byteSize: options.centralBytes,
     storage: await storageOrigin(options.artifact.key, options.fingerprintKey),
-    transformSteps: normalized ? [{
-      stepIndex: 0,
-      stepKind: "extracted",
-      transformerId: "sbi-shinsei-normalizer",
-      transformerVersion: "sbi-shinsei-v1",
-    }] : [
-      {
-        stepIndex: 0,
-        stepKind: "transport_decoded",
-        transformerId: "sbi-shinsei-browser-capture",
-        transformerVersion: SCHEMA_VERSION,
-      },
-      {
-        stepIndex: 1,
-        stepKind: "redacted",
-        transformerId: "sbi-shinsei-token-sanitizer",
-        transformerVersion: "v1",
-      },
-      {
-        stepIndex: 2,
-        stepKind: "reencoded",
-        transformerId: "sbi-shinsei-token-sanitizer",
-        transformerVersion: "v1",
-      },
-    ],
-    ...(normalized ? {
-      ...(options.linkNormalized ? {
-        relations: [{
-          parentArtifactKey: FILENAMES["top-accounts-balance-and-activity"],
-          relation: "input",
-          transformerId: "sbi-shinsei-normalizer",
-          transformerVersion: "sbi-shinsei-v1",
-        }],
-      } : {}),
-    } : {}),
+    transformSteps: normalized
+      ? [
+          {
+            stepIndex: 0,
+            stepKind: "extracted",
+            transformerId: "sbi-shinsei-normalizer",
+            transformerVersion: "sbi-shinsei-v1",
+          },
+        ]
+      : [
+          {
+            stepIndex: 0,
+            stepKind: "transport_decoded",
+            transformerId: "sbi-shinsei-browser-capture",
+            transformerVersion: SCHEMA_VERSION,
+          },
+          {
+            stepIndex: 1,
+            stepKind: "redacted",
+            transformerId: "sbi-shinsei-token-sanitizer",
+            transformerVersion: "v1",
+          },
+          {
+            stepIndex: 2,
+            stepKind: "reencoded",
+            transformerId: "sbi-shinsei-token-sanitizer",
+            transformerVersion: "v1",
+          },
+        ],
+    ...(normalized
+      ? {
+          ...(options.linkNormalized
+            ? {
+                relations: [
+                  {
+                    parentArtifactKey: FILENAMES["top-accounts-balance-and-activity"],
+                    relation: "input",
+                    transformerId: "sbi-shinsei-normalizer",
+                    transformerVersion: "sbi-shinsei-v1",
+                  },
+                ],
+              }
+            : {}),
+        }
+      : {}),
   };
 }
 
 function sanitizeProviderResponse(value: JsonObject): Uint8Array {
   const clean: JsonObject = { ...value };
-  if (value.header !== null && typeof value.header === "object" &&
-      !Array.isArray(value.header)) {
+  if (value.header !== null && typeof value.header === "object" && !Array.isArray(value.header)) {
     const header = { ...(value.header as JsonObject) };
     delete header.newToken;
     clean.header = header;
@@ -756,22 +819,24 @@ function sanitizeProviderResponse(value: JsonObject): Uint8Array {
 }
 
 function sanitizeManifest(manifest: SbiShinseiManifest): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify({
-    schemaVersion: manifest.schemaVersion,
-    source: manifest.source,
-    runId: manifest.runId,
-    startedAt: manifest.startedAt,
-    completedAt: manifest.completedAt,
-    status: manifest.status,
-    liveReadsEnabled: manifest.liveReadsEnabled,
-    artifacts: manifest.artifacts,
-    failures: manifest.failures.map((failure) => ({
-      operation: failure.operation,
-      errorType: failure.errorType,
-      message: sanitizedFailureMessage(failure),
-    })),
-    ...(manifest.legacyWindow ? { window: manifest.legacyWindow } : {}),
-  }));
+  return new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: manifest.schemaVersion,
+      source: manifest.source,
+      runId: manifest.runId,
+      startedAt: manifest.startedAt,
+      completedAt: manifest.completedAt,
+      status: manifest.status,
+      liveReadsEnabled: manifest.liveReadsEnabled,
+      artifacts: manifest.artifacts,
+      failures: manifest.failures.map((failure) => ({
+        operation: failure.operation,
+        errorType: failure.errorType,
+        message: sanitizedFailureMessage(failure),
+      })),
+      ...(manifest.legacyWindow ? { window: manifest.legacyWindow } : {}),
+    }),
+  );
 }
 
 function sanitizedFailureMessage(failure: SbiShinseiFailure): string {
@@ -847,11 +912,7 @@ async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonO
     false,
     ["sign"],
   );
-  const signature = await crypto.subtle.sign(
-    "HMAC",
-    cryptoKey,
-    new TextEncoder().encode(key),
-  );
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(key));
   return {
     storageKind: "r2",
     containerName: STORAGE_CONTAINER,
@@ -879,12 +940,16 @@ function assertArtifactMetadata(
 ): void {
   const legacy = { dataset: artifact.dataset, sha256: artifact.sha256 };
   if (sameMetadata(actual, legacy)) return;
-  assertExactMetadata(actual, {
-    source: EXTERNAL_SOURCE,
-    runId,
-    dataset: artifact.dataset,
-    sha256: artifact.sha256,
-  }, "artifact_metadata_mismatch");
+  assertExactMetadata(
+    actual,
+    {
+      source: EXTERNAL_SOURCE,
+      runId,
+      dataset: artifact.dataset,
+      sha256: artifact.sha256,
+    },
+    "artifact_metadata_mismatch",
+  );
 }
 
 function assertNativeSha256(object: R2ObjectBody, expected: string): void {
@@ -908,9 +973,7 @@ function safeFailureCode(failures: SbiShinseiFailure[]): string {
     return "normalized-derivation-failed";
   }
   if (failures.length > 1) return "multiple-staging-write-failures";
-  return failures[0]?.operation === "collect"
-    ? "collector-browser-failed"
-    : "staging-write-failed";
+  return failures[0]?.operation === "collect" ? "collector-browser-failed" : "staging-write-failed";
 }
 
 function isDataset(value: string): value is Dataset {
@@ -1030,9 +1093,7 @@ function decimalFromScalar(value: unknown): string {
 }
 
 function nullableDecimalFromScalar(value: unknown): string | null {
-  return value === null || value === undefined || value === ""
-    ? null
-    : decimalFromScalar(value);
+  return value === null || value === undefined || value === "" ? null : decimalFromScalar(value);
 }
 
 function nonEmpty(value: unknown): string {
@@ -1053,9 +1114,10 @@ function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value !== null && typeof value === "object") {
     const input = value as JsonObject;
-    return `{${Object.keys(input).sort().map((key) =>
-      `${JSON.stringify(key)}:${canonical(input[key])}`
-    ).join(",")}}`;
+    return `{${Object.keys(input)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonical(input[key])}`)
+      .join(",")}}`;
   }
   return JSON.stringify(value);
 }
@@ -1075,8 +1137,10 @@ function sameMetadata(
   if (!actual) return false;
   const actualKeys = Object.keys(actual).sort();
   const expectedKeys = Object.keys(expected).sort();
-  return actualKeys.length === expectedKeys.length &&
-    actualKeys.every((key, index) => key === expectedKeys[index] && actual[key] === expected[key]);
+  return (
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, index) => key === expectedKeys[index] && actual[key] === expected[key])
+  );
 }
 
 function invalid(code: string): never {
@@ -1084,9 +1148,7 @@ function invalid(code: string): never {
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  return bytesHex(new Uint8Array(
-    await crypto.subtle.digest("SHA-256", ownedArrayBuffer(bytes)),
-  ));
+  return bytesHex(new Uint8Array(await crypto.subtle.digest("SHA-256", ownedArrayBuffer(bytes))));
 }
 
 function hexBytes(value: string): Uint8Array {

@@ -40,16 +40,16 @@
 
 ## 3. 公式経路とデータ範囲
 
-| 経路 | read範囲 | 粒度/state | 期間/件数/export | tradeoff |
-| --- | --- | --- | --- | --- |
-| JMB app / JAL Pay card面 | charge残高、JAL Payポイント、利用明細、積算マイル | wallet event。決済/charge/返金/pointを区別する必要 | 公式固定期間・件数は公開確認できず。CSV/PDF未確認 | JAL Payのprimary route、device-bound |
-| JAL Pay「利用明細」 | payment/charge等のdetail | JMB app card面から表示。pending/settled名称未確認 | app内。pagination/filter/export未確認 | 正本だがwrite導線隣接 |
-| JMB Web | マイルtotal、積算/利用実績、期限別マイル、Life Status | lot/event単位 | filter/row上限/CSV/PDFはlive未確認 | browser bootstrap/replay候補 |
-| JMB app | マイルtotal/期限、会員証、JAL Pay | mobile summary/detail | export未確認 | walletとmileageを同一appで表示、ledgerは別 |
-| Family Club / Card Family Program | 特典時に利用可能なfamily pool | 個人口座の所有・期限を維持する関係 | family全履歴exportではない | 国内居住/海外居住・card条件を混同しない |
-| Global WALLET member Web | legacy/関連wallet管理画面 | JAL Payとの現行範囲は未確認 | login pageあり | primaryにせず境界をlive確認 |
-| JAL予約app/Web | 予約・搭乗・航空券 | booking ledger | 別source | マイル積算根拠にはなるがJMB明細正本ではない |
-| JALカードmember site | card未確定/確定明細・請求 | issuer ledger | 発行会社source | JAL Pay/JMBへ混ぜない |
+| 経路                              | read範囲                                              | 粒度/state                                         | 期間/件数/export                                  | tradeoff                                    |
+| --------------------------------- | ----------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------- | ------------------------------------------- |
+| JMB app / JAL Pay card面          | charge残高、JAL Payポイント、利用明細、積算マイル     | wallet event。決済/charge/返金/pointを区別する必要 | 公式固定期間・件数は公開確認できず。CSV/PDF未確認 | JAL Payのprimary route、device-bound        |
+| JAL Pay「利用明細」               | payment/charge等のdetail                              | JMB app card面から表示。pending/settled名称未確認  | app内。pagination/filter/export未確認             | 正本だがwrite導線隣接                       |
+| JMB Web                           | マイルtotal、積算/利用実績、期限別マイル、Life Status | lot/event単位                                      | filter/row上限/CSV/PDFはlive未確認                | browser bootstrap/replay候補                |
+| JMB app                           | マイルtotal/期限、会員証、JAL Pay                     | mobile summary/detail                              | export未確認                                      | walletとmileageを同一appで表示、ledgerは別  |
+| Family Club / Card Family Program | 特典時に利用可能なfamily pool                         | 個人口座の所有・期限を維持する関係                 | family全履歴exportではない                        | 国内居住/海外居住・card条件を混同しない     |
+| Global WALLET member Web          | legacy/関連wallet管理画面                             | JAL Payとの現行範囲は未確認                        | login pageあり                                    | primaryにせず境界をlive確認                 |
+| JAL予約app/Web                    | 予約・搭乗・航空券                                    | booking ledger                                     | 別source                                          | マイル積算根拠にはなるがJMB明細正本ではない |
+| JALカードmember site              | card未確定/確定明細・請求                             | issuer ledger                                      | 発行会社source                                    | JAL Pay/JMBへ混ぜない                       |
 
 ### JAL Pay
 
@@ -126,15 +126,15 @@ consumer APIとして転用しない。具体的transport/authは公式APK静的
 
 ## 8. Runtime適性
 
-| runtime | 適性 | 判断 |
-| --- | --- | --- |
-| owner browser/device | 最適 | passkey/OTP/SMS bootstrap、公式表示、redacted observation |
-| Local WSL | 適 | APK/JS/DOM parser、sanitized artifact処理 |
-| Cloudflare Workers | 低〜条件付き | proven GET/token replayなら可能。Akamai/passkey/device bindingが課題 |
-| Cloudflare Containers | 条件付き | full browser/parserを隔離可能。mobile trustはない |
-| OCI container | 条件付き | digest固定、secret store、read-only FS、egress allowlistでreplay試験 |
-| Kubernetes | 過剰 | CronJob/Secret/NetworkPolicyは可能だが単一会員にcost過大 |
-| Android実機 | JAL Pay調査に必須 | 正規app/device state。定常UI automationは更新・write UIで脆い |
+| runtime               | 適性              | 判断                                                                 |
+| --------------------- | ----------------- | -------------------------------------------------------------------- |
+| owner browser/device  | 最適              | passkey/OTP/SMS bootstrap、公式表示、redacted observation            |
+| Local WSL             | 適                | APK/JS/DOM parser、sanitized artifact処理                            |
+| Cloudflare Workers    | 低〜条件付き      | proven GET/token replayなら可能。Akamai/passkey/device bindingが課題 |
+| Cloudflare Containers | 条件付き          | full browser/parserを隔離可能。mobile trustはない                    |
+| OCI container         | 条件付き          | digest固定、secret store、read-only FS、egress allowlistでreplay試験 |
+| Kubernetes            | 過剰              | CronJob/Secret/NetworkPolicyは可能だが単一会員にcost過大             |
+| Android実機           | JAL Pay調査に必須 | 正規app/device state。定常UI automationは更新・write UIで脆い        |
 
 ## 9. PR #5共通 A-E / cost
 
@@ -145,14 +145,14 @@ consumer APIとして転用しない。具体的transport/authは公式APK静的
 - E: manual capture remains safe default
 - Cost: 1 = small wrapper、5 = device-bound/adversarial
 
-| route | Level | Cost | 判定 |
-| --- | ---: | ---: | --- |
-| JMB Web/appを人手確認・sanitized capture | E | 1-2 | 安全。公式export/期間は未確認 |
-| JAL Pay app manual capture | E | 2 | 残高bucket/履歴を読めるがapp外export未確認 |
-| JMB browser bootstrap + read replay | C候補 | 4 | passkey/OTP/Akamai/session未確認 |
-| JAL Pay app bootstrap + API replay | C候補 | 5 | transport/token/device binding未確認 |
-| full app UI automation | D | 5 | device/SMS/生体、更新、write UI |
-| documented consumer API | A該当なし | 5 | 公開公式APIなし |
+| route                                    |     Level | Cost | 判定                                       |
+| ---------------------------------------- | --------: | ---: | ------------------------------------------ |
+| JMB Web/appを人手確認・sanitized capture |         E |  1-2 | 安全。公式export/期間は未確認              |
+| JAL Pay app manual capture               |         E |    2 | 残高bucket/履歴を読めるがapp外export未確認 |
+| JMB browser bootstrap + read replay      |     C候補 |    4 | passkey/OTP/Akamai/session未確認           |
+| JAL Pay app bootstrap + API replay       |     C候補 |    5 | transport/token/device binding未確認       |
+| full app UI automation                   |         D |    5 | device/SMS/生体、更新、write UI            |
+| documented consumer API                  | A該当なし |    5 | 公開公式APIなし                            |
 
 総合は **D/cost 5**、安全な既定は **E/cost 1-2**。read APIとrenewable scoped sessionが実証されれば
 JAL PayをCへ、安定性まで確認できればB候補へ更新する。

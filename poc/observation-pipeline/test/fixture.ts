@@ -177,12 +177,7 @@ export function buildFixture(): Fixture {
     extra: {},
   });
 
-  const superseded = supersedeOlderParseRuns(
-    store,
-    artifactId,
-    "demo-statement",
-    currentRunId,
-  );
+  const superseded = supersedeOlderParseRuns(store, artifactId, "demo-statement", currentRunId);
   expect(superseded).toBe(1);
 
   const retiredObservation = store.db
@@ -196,4 +191,3 @@ export function buildFixture(): Fixture {
     retiredObservationId: retiredObservation.id,
   };
 }
-

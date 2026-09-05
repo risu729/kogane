@@ -1,9 +1,5 @@
 import { manifestFailure } from "./diagnostics";
-import type {
-  CollectionManifest,
-  RawArtifact,
-  StoredArtifact,
-} from "./types";
+import type { CollectionManifest, RawArtifact, StoredArtifact } from "./types";
 
 export function runPrefix(startedAt: string, runId: string): string {
   const date = startedAt.slice(0, 10).replaceAll("-", "/");
@@ -58,10 +54,12 @@ export async function storeManifest(options: {
   manifest: CollectionManifest;
 }): Promise<string> {
   const key = `${options.prefix}/manifest.json`;
-  const bytes = new TextEncoder().encode(JSON.stringify({
-    ...options.manifest,
-    failures: options.manifest.failures.map(manifestFailure),
-  }));
+  const bytes = new TextEncoder().encode(
+    JSON.stringify({
+      ...options.manifest,
+      failures: options.manifest.failures.map(manifestFailure),
+    }),
+  );
   const sha256 = await sha256Hex(bytes);
   const stored = await options.bucket.put(key, bytes, {
     onlyIf: { etagDoesNotMatch: "*" },
@@ -87,18 +85,14 @@ function assertStored(object: R2Object | null, bytes: number, sha256: string): v
 }
 
 function knownMediaType(value: string): boolean {
-  return value === "application/json" ||
-    value === "text/csv" ||
-    value === "application/pdf";
+  return value === "application/json" || value === "text/csv" || value === "application/pdf";
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   const digest = await crypto.subtle.digest("SHA-256", copy.buffer);
-  return [...new Uint8Array(digest)]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
 function hexBytes(value: string): Uint8Array {
