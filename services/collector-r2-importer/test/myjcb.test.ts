@@ -118,6 +118,37 @@ describe("MyJCB R2 importer", () => {
     expect(runReport ? JSON.parse(runReport.body) : undefined).toMatchObject({
       producerVersion: "myjcb-r2-v2",
     });
+    const descriptors = central.requests
+      .filter((entry) => entry.path === "/v1/runs/1/artifacts")
+      .map((entry) => JSON.parse(entry.body) as Record<string, unknown>);
+    expect(descriptors.find((entry) => entry.dataset === "credit-ledger")).toMatchObject({
+      artifactRole: "collector_derived",
+      payloadFidelity: "transformed",
+      lineageDisposition: "linked",
+      transformSteps: [
+        { stepIndex: 0, stepKind: "extracted", transformerId: "myjcb-ledger-parser" },
+        { stepIndex: 1, stepKind: "generated", transformerId: "myjcb-ledger-parser" },
+      ],
+      relations: [{ relation: "input", transformerId: "myjcb-ledger-parser" }],
+    });
+    expect(descriptors.find((entry) => entry.dataset === "discovery")).toMatchObject({
+      artifactRole: "collector_derived",
+      payloadFidelity: "transformed",
+      lineageDisposition: "source_bytes_not_available",
+      transformSteps: [
+        { stepIndex: 0, stepKind: "extracted", transformerId: "myjcb-discovery-parser" },
+        { stepIndex: 1, stepKind: "generated", transformerId: "myjcb-discovery-parser" },
+      ],
+      relations: [],
+    });
+    expect(descriptors.find((entry) => entry.dataset === "collector-manifest")).toMatchObject({
+      artifactRole: "collector_manifest",
+      payloadFidelity: "generated",
+      lineageDisposition: "source_bytes_not_available",
+      formatVersion: "myjcb-central-manifest-v2",
+      transformSteps: [],
+      relations: [],
+    });
 
     const replayFirst = await runImport(bucket, central, undefined, "collector-r2-importer-v99");
     if (replayFirst.status !== "deferred") throw new Error("expected deferred replay");

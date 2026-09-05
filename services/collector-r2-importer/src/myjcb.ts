@@ -456,14 +456,12 @@ async function dataDescriptor(options: {
         ? "provider_response"
         : providerExport
           ? "provider_export"
-          : discovery
-            ? "collector_summary"
-            : "collector_derived",
+          : "collector_derived",
     payloadFidelity: html
       ? "transformed"
       : providerResponse || providerExport
         ? "exact"
-        : "generated",
+        : "transformed",
     lineageDisposition: html
       ? "source_not_retained_for_security"
       : ledger
@@ -568,8 +566,8 @@ async function manifestDescriptor(options: {
   return normalizedDescriptor({
     artifactKey: "manifest.json",
     artifactRole: "collector_manifest",
-    payloadFidelity: "transformed",
-    lineageDisposition: "source_not_retained_for_security",
+    payloadFidelity: "generated",
+    lineageDisposition: "source_bytes_not_available",
     dataset: "collector-manifest",
     formatId: "myjcb-collector-manifest-json",
     formatVersion: "myjcb-central-manifest-v2",
@@ -582,20 +580,7 @@ async function manifestDescriptor(options: {
     sha256: options.sha256,
     byteSize: options.bytes,
     storage: await storageOrigin(options.key, options.fingerprintKey),
-    transformSteps: [
-      {
-        stepIndex: 0,
-        stepKind: "redacted",
-        transformerId: "myjcb-central-manifest-sanitizer",
-        transformerVersion: "v2",
-      },
-      {
-        stepIndex: 1,
-        stepKind: "reencoded",
-        transformerId: "myjcb-central-manifest-sanitizer",
-        transformerVersion: "v2",
-      },
-    ],
+    transformSteps: [],
     relations: [],
   });
 }
