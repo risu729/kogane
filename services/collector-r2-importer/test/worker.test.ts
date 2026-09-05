@@ -40,7 +40,7 @@ describe("collector R2 importer routes", () => {
       truncated: true,
     });
     expect(body.nextCursor).toBeString();
-    expect(body.nextCursor as string).toStartWith("global-pass-v1.");
+    expect(body.nextCursor as string).toStartWith("global-pass-v2.");
   });
 
   test("the GLOBAL PASS backfill route rejects limits above one", async () => {
@@ -75,6 +75,30 @@ describe("collector R2 importer routes", () => {
     expect(await response.json() as unknown).toEqual({ error: "cursor_invalid" });
   });
 
+  test("the GLOBAL PASS backfill route rejects a v1 continuation before listing", async () => {
+    const bucket = {
+      list: async () => { throw new Error("must_not_list"); },
+    } as unknown as R2Bucket;
+    const legacy = `global-pass-v1.${btoa(JSON.stringify({
+      v: 1,
+      scanCursor: null,
+      scanDone: true,
+      manifestKey:
+        "raw/prestia-globalpass/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
+      offset: 10,
+    })).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "")}`;
+    const response = await worker.fetch(
+      new Request("https://importer.internal/v1/prestia-globalpass/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cursor: legacy, limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment({} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json() as unknown).toEqual({ error: "cursor_invalid" });
+  });
+
   test("the GLOBAL PASS cursor enforces scan and manifest-offset state invariants", async () => {
     const bucket = {
       list: async () => { throw new Error("must_not_list"); },
@@ -82,13 +106,13 @@ describe("collector R2 importer routes", () => {
     const manifestKey =
       "raw/prestia-globalpass/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json";
     for (const state of [
-      { v: 1, scanCursor: null, scanDone: false },
-      { v: 1, scanCursor: "", scanDone: false },
-      { v: 1, scanCursor: "next", scanDone: true },
-      { v: 1, scanCursor: null, scanDone: true, manifestKey },
-      { v: 1, scanCursor: null, scanDone: true, offset: 10 },
-      { v: 1, scanCursor: null, scanDone: true, manifestKey, offset: 0 },
-      { v: 1, scanCursor: null, scanDone: true, manifestKey, offset: 16 },
+      { v: 2, scanCursor: null, scanDone: false },
+      { v: 2, scanCursor: "", scanDone: false },
+      { v: 2, scanCursor: "next", scanDone: true },
+      { v: 2, scanCursor: null, scanDone: true, manifestKey },
+      { v: 2, scanCursor: null, scanDone: true, offset: 10 },
+      { v: 2, scanCursor: null, scanDone: true, manifestKey, offset: 0 },
+      { v: 2, scanCursor: null, scanDone: true, manifestKey, offset: 16 },
     ]) {
       const response = await worker.fetch(
         new Request("https://importer.internal/v1/prestia-globalpass/backfill-page", {
@@ -116,7 +140,7 @@ describe("collector R2 importer routes", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          cursor: globalPassCursor({ v: 1, scanCursor: "same-r2-cursor", scanDone: false }),
+          cursor: globalPassCursor({ v: 2, scanCursor: "same-r2-cursor", scanDone: false }),
           limit: 1,
         }),
       }) as Parameters<typeof worker.fetch>[0],
@@ -359,7 +383,7 @@ describe("collector R2 importer routes", () => {
 });
 
 function globalPassCursor(value: unknown): string {
-  return `global-pass-v1.${btoa(JSON.stringify(value)).replaceAll("+", "-")
+  return `global-pass-v2.${btoa(JSON.stringify(value)).replaceAll("+", "-")
     .replaceAll("/", "_").replace(/=+$/u, "")}`;
 }
 
@@ -378,7 +402,7 @@ function environment(
     MOBILE_SUICA_SNAPSHOTS: mobileSuicaBucket,
     GLOBAL_PASS_SNAPSHOTS: globalPassBucket,
     RAW_EVIDENCE: {} as Fetcher,
-    IMPORTER_VERSION: "collector-r2-importer-v7",
+    IMPORTER_VERSION: "collector-r2-importer-v8",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_VC: `collector-r2-sbi-vc.${"v".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SONY: `collector-r2-sony-bank.${"o".repeat(32)}`,

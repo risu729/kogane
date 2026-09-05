@@ -52,12 +52,17 @@ class FakeBucket {
 class FakeCentral {
   readonly requests: Array<{ path: string; method: string; body: string }> = [];
   readonly uploaded = new Map<string, Uint8Array>();
+  readonly runIdsBySourceKey = new Map<string, number>();
 
   constructor(
     private readonly mutateParsedDescriptor?: (
       descriptor: Record<string, unknown>,
     ) => Record<string, unknown>,
   ) {}
+
+  seedRun(sourceRunKey: string, runId: number): void {
+    this.runIdsBySourceKey.set(sourceRunKey, runId);
+  }
 
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
@@ -71,7 +76,15 @@ class FakeCentral {
       this.uploaded.set(path, bytes);
       return Response.json({ reused }, { status: reused ? 200 : 201 });
     }
-    if (path === "/v1/runs") return Response.json({ runId: 1 }, { status: 201 });
+    if (path === "/v1/runs") {
+      const sourceRunKey = String((JSON.parse(body) as Record<string, unknown>).sourceRunKey);
+      let runId = this.runIdsBySourceKey.get(sourceRunKey);
+      if (runId === undefined) {
+        runId = Math.max(0, ...this.runIdsBySourceKey.values()) + 1;
+        this.runIdsBySourceKey.set(sourceRunKey, runId);
+      }
+      return Response.json({ runId }, { status: 201 });
+    }
     if (/\/units$/u.test(path)) return Response.json({ unitId: 10 }, { status: 201 });
     if (/\/inventories$/u.test(path)) return Response.json({ inventoryId: 20 }, { status: 201 });
     if (/\/inventories\/20\/items$/u.test(path)) return Response.json({ ok: true }, { status: 201 });
@@ -143,7 +156,7 @@ describe("GLOBAL PASS R2 importer", () => {
       sourceId: "global-pass",
       externalIdNamespace: "globalpass-browser-poc-v1",
       externalSessionId: RUN_ID,
-      sourceRunKey: "activity-global-pass-r2-v1",
+      sourceRunKey: "activity-global-pass-r2-v2",
     });
     const descriptor = central.requests
       .filter((request) => /\/artifacts$/u.test(request.path))
@@ -174,6 +187,12 @@ describe("GLOBAL PASS R2 importer", () => {
       ],
     });
     expect(await sha256Hex(uploadedHtml)).not.toBe(await sha256Hex(encode(originalHtml)));
+
+    const manifestDescriptor = central.requests
+      .filter((request) => /\/artifacts$/u.test(request.path))
+      .map((request) => JSON.parse(request.body) as Record<string, unknown>)
+      .find((value) => value.artifactKey === "manifest.json")!;
+    expect(manifestDescriptor.fetchUnitId).toBeNull();
 
     const replay = await importRun(bucket, central);
     expect(replay.status).toBe("sealed");
@@ -254,6 +273,36 @@ describe("GLOBAL PASS R2 importer", () => {
       declaredArtifactCount: 0,
       safeFailureCode: "browser-collection-failed",
     });
+    const manifestDescriptor = central.requests
+      .filter((request) => /\/artifacts$/u.test(request.path))
+      .map((request) => JSON.parse(request.body) as Record<string, unknown>)
+      .find((value) => value.artifactKey === "manifest.json")!;
+    expect(manifestDescriptor.fetchUnitId).toBeNull();
+  });
+
+  test("moves an invalid v1 central run to one idempotent v2 run", async () => {
+    const bucket = new FakeBucket();
+    const manifest = baseManifest("v1", []);
+    manifest.status = "failed";
+    manifest.availableMonths = [];
+    manifest.artifacts = [];
+    manifest.failures = [{
+      operation: "browser-collection",
+      errorType: "Error",
+      message: "synthetic diagnostic",
+    }];
+    await putManifest(bucket, manifest);
+    const central = new FakeCentral();
+    central.seedRun("activity-global-pass-r2-v1", 1);
+
+    const first = await importRun(bucket, central);
+    const replay = await importRun(bucket, central);
+    expect(first).toMatchObject({ centralRunId: 2, sealed: true });
+    expect(replay).toMatchObject({ centralRunId: 2, sealed: true });
+    expect(central.runIdsBySourceKey).toEqual(new Map([
+      ["activity-global-pass-r2-v1", 1],
+      ["activity-global-pass-r2-v2", 2],
+    ]));
   });
 
   test("defers a 15-month immediate run and resumes staged backfill in chunks", async () => {
@@ -424,7 +473,7 @@ async function importRun(
     centralService: central as unknown as Fetcher,
     centralToken: TOKEN,
     fingerprintKey: FINGERPRINT_KEY,
-    importerVersion: "collector-r2-importer-v7",
+    importerVersion: "collector-r2-importer-v8",
     manifestKey: MANIFEST_KEY,
     ...options,
   });
