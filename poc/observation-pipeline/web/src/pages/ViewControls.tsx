@@ -5,6 +5,24 @@ import {
   type SourceAccount,
   type RecordFilters,
 } from "../filters.ts";
+
+function savedAccountLabel(value: string): string {
+  try {
+    const parts: unknown = JSON.parse(value);
+    if (
+      Array.isArray(parts) &&
+      parts.length === 2 &&
+      typeof parts[0] === "string" &&
+      typeof parts[1] === "string"
+    ) {
+      return `${parts[1] || "口座名未記録"} · ${parts[0]}`;
+    }
+  } catch {
+    // A future state source must not make the selected control unreadable.
+  }
+  return "選択中の口座";
+}
+
 export function RecordControls({
   rows,
   filters,
@@ -16,6 +34,13 @@ export function RecordControls({
   onChange: (value: RecordFilters) => void;
   dates?: boolean;
 }): ReactNode {
+  const sources = sourceOptions(rows);
+  const accounts = accountOptions(rows, filters.source);
+  const missingSource =
+    filters.source !== "" && !sources.includes(filters.source);
+  const missingAccount =
+    filters.account !== "" &&
+    !accounts.some((account) => account.value === filters.account);
   return (
     <div className="filter-grid">
       <label className="filter-field">
@@ -28,7 +53,12 @@ export function RecordControls({
           }
         >
           <option value="">すべての取得元</option>
-          {sourceOptions(rows).map((source) => (
+          {missingSource ? (
+            <option value={filters.source}>
+              {filters.source}（今回の記録に含まれません）
+            </option>
+          ) : null}
+          {sources.map((source) => (
             <option key={source}>{source}</option>
           ))}
         </select>
@@ -43,7 +73,12 @@ export function RecordControls({
           }
         >
           <option value="">すべての口座</option>
-          {accountOptions(rows, filters.source).map((account) => (
+          {missingAccount ? (
+            <option value={filters.account}>
+              {savedAccountLabel(filters.account)}（今回の記録に含まれません）
+            </option>
+          ) : null}
+          {accounts.map((account) => (
             <option key={account.value} value={account.value}>
               {account.label}
             </option>

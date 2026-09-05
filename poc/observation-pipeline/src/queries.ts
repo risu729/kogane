@@ -474,12 +474,12 @@ export function observationDetail(
   // The table name comes from a fixed map keyed by a validated union member,
   // never from the request path.
   const table = OBSERVATION_TABLES[kind];
+  // Positions store a quantity, not an amount. Other kinds need the trailing
+  // CAST to preserve every digit while still returning all stored columns.
+  const columns =
+    kind === "position" ? "*" : "*, CAST(amount_minor AS TEXT) AS amount_minor";
   const row = store.db
-    // The trailing CAST overrides the same column from `*`, so every stored
-    // column is still returned but the amount keeps all of its digits.
-    .query(
-      `SELECT *, CAST(amount_minor AS TEXT) AS amount_minor FROM ${table} WHERE id = ?1`,
-    )
+    .query(`SELECT ${columns} FROM ${table} WHERE id = ?1`)
     .get(id) as Record<string, unknown> | null;
   if (!row) return undefined;
 

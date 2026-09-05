@@ -218,29 +218,95 @@ describe.if(runnable)("evidence browser in a real browser", () => {
   );
 
   test(
-    "the provenance walk reaches the bytes",
+    "the provenance walk reaches the bytes for all four observation kinds",
     async () => {
       const page = await browser.newPage();
-      await page.goto(`${baseUrl}/observations/transaction/1`, {
-        waitUntil: "networkidle",
-      });
-      const text = await page.locator("body").innerText();
-      for (const step of ["解析", "原本", "取得"]) {
-        expect(text).toContain(step);
-      }
-      const href = await page
-        .locator('a[href^="/api/raw/"]')
-        .first()
-        .getAttribute("href");
-      expect(href).toMatch(/^\/api\/raw\/[0-9a-f]{64}$/u);
+      for (const kind of ["transaction", "balance", "position", "valuation"]) {
+        await page.goto(`${baseUrl}/observations/${kind}/1`, {
+          waitUntil: "networkidle",
+        });
+        const text = await page.locator("body").innerText();
+        for (const step of ["解析", "原本", "取得"]) {
+          expect(text).toContain(step);
+        }
+        const href = await page
+          .locator('a[href^="/api/raw/"]')
+          .first()
+          .getAttribute("href");
+        expect(href).toMatch(/^\/api\/raw\/[0-9a-f]{64}$/u);
 
-      // The link is not decoration: it returns the exact stored bytes.
-      const response = await page.request.get(baseUrl + href!);
-      expect(response.status()).toBe(200);
-      const digest = new Bun.CryptoHasher("sha256")
-        .update(new Uint8Array(await response.body()))
-        .digest("hex");
-      expect(href).toBe(`/api/raw/${digest}`);
+        // The link is not decoration: it returns the exact stored bytes.
+        const response = await page.request.get(baseUrl + href!);
+        expect(response.status()).toBe(200);
+        const digest = new Bun.CryptoHasher("sha256")
+          .update(new Uint8Array(await response.body()))
+          .digest("hex");
+        expect(href).toBe(`/api/raw/${digest}`);
+      }
+      await page.close();
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "refresh keeps unavailable source and account filters visible until cleared",
+    async () => {
+      const page = await browser.newPage();
+      for (const path of ["transactions", "balances"]) {
+        let changed = false;
+        await page.route(`**/api/${path}`, async (route) => {
+          const response = await route.fetch();
+          const data = await response.json();
+          if (changed) {
+            for (const key of path === "transactions"
+              ? ["transactions"]
+              : ["latest", "history"]) {
+              data[key] = data[key].map((row: Record<string, unknown>) => ({
+                ...row,
+                source_id: "replacement-bank",
+                source_account: "replacement-account",
+              }));
+            }
+          }
+          await route.fulfill({ response, json: data });
+        });
+        await page.goto(`${baseUrl}/${path}`, { waitUntil: "networkidle" });
+        const source = page.getByLabel("取得元", { exact: true });
+        const account = page.getByLabel("口座", { exact: true });
+        await source.selectOption("demo-bank");
+        const accountValue = await account
+          .locator("option")
+          .nth(1)
+          .getAttribute("value");
+        expect(accountValue).toBeTruthy();
+        await account.selectOption(accountValue!);
+        changed = true;
+        await page
+          .getByRole("button", { name: "表示を更新", exact: true })
+          .click();
+        await source
+          .locator("option", { hasText: "今回の記録に含まれません" })
+          .waitFor({ state: "attached" });
+        expect(await source.inputValue()).toBe("demo-bank");
+        expect(await account.inputValue()).toBe(accountValue!);
+        expect(await account.locator("option:checked").innerText()).toContain(
+          "今回の記録に含まれません",
+        );
+        expect(
+          await page.locator('tbody a[href^="/observations/"]').count(),
+        ).toBe(0);
+        expect(await page.locator("tbody").first().innerText()).toContain(
+          "ありません",
+        );
+        await page
+          .getByRole("button", { name: "条件をクリア", exact: true })
+          .click();
+        expect(await source.inputValue()).toBe("");
+        expect(await account.inputValue()).toBe("");
+        expect(await page.locator("tbody").first().innerText()).toContain(
+          "replacement-account",
+        );
+      }
       await page.close();
     },
     TIMEOUT_MS,

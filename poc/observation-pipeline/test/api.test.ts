@@ -393,6 +393,22 @@ describe("artifacts", () => {
 });
 
 describe("observation detail and provenance", () => {
+  test("all four observation kinds expose their stored values and provenance", async () => {
+    for (const kind of ["transaction", "balance", "position", "valuation"]) {
+      const body = await json(`/api/observations/${kind}/1`);
+      expect(body.kind).toBe(kind);
+      expect(body.row.id).toBe(1);
+      expect(body.provenance.artifact_id).toBe(fixture.artifactId);
+      expect(body.provenance.sha256).toBe(fixture.sha256);
+      if (kind === "position") {
+        expect(body.row.quantity_text).toBe("10.5");
+        expect(Object.hasOwn(body.row, "amount_minor")).toBe(false);
+      } else {
+        expect(typeof body.row.amount_minor).toBe("string");
+      }
+    }
+  });
+
   test("walks observation to parse run to artifact to raw object to fetch run", async () => {
     const body = await json(
       `/api/observations/transaction/${fixture.retiredObservationId}`,
