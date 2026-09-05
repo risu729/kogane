@@ -117,6 +117,78 @@ describe("GLOBAL PASS R2 importer", () => {
     }
   });
 
+  test("accepts only the audited English legacy activity headers for v1", () => {
+    const html = variantA(["one", "two", "three", "four", "", ""])
+      .replace("利用明細", "Account")
+      .replace(
+        '<table data-fixture="activity"><tbody></tbody></table>',
+        legacyEnglishActivityTable(),
+      )
+      .replace("<body>", '<body><a href="/">Home</a>')
+      .replace(
+        "https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301",
+        "/p/statementInquiry/RW1313010301",
+      )
+      .replace(
+        'onclick="click()"',
+        'onclick="if (window.innerWidth &lt; 640) { $(this.parentNode).toggleClass(' +
+          "'.open'); } else { $('.target')[0].click(); } return false;\"",
+      );
+    const output = decode(sanitizeGlobalPassHtml(
+      encode(html),
+      "globalpass-browser-poc-v1",
+    ));
+    expect(output).toContain('href="https://www.debit.vpass.ne.jp/"');
+    expect(output).toContain(
+      'action="https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301"',
+    );
+    expect(() => sanitizeGlobalPassHtml(
+      encode(html),
+      "globalpass-browser-poc-v2",
+    )).toThrow("html_activity_contract_invalid");
+  });
+
+  test("does not accept legacy activity words outside the exact table header set", () => {
+    const base = variantA(["one", "two", "three", "four", "", ""])
+      .replace("利用明細", "Account");
+    for (const marker of [
+      `<!-- ${legacyEnglishActivityTable()} -->`,
+      `<script>const marker = ${JSON.stringify(legacyEnglishActivityTable())};</script>`,
+      '<input type="hidden" value="Transaction Date Transaction Detail Transaction Currency and Amount Transaction Fee">',
+      `<table hidden>${legacyEnglishActivityTable()}</table>`,
+      legacyEnglishActivityTable().replace("<th>", "<th hidden>"),
+      `<div aria-hidden="true">${legacyEnglishActivityTable()}</div>`,
+      `<table style="display: none !important">${legacyEnglishActivityTable()}</table>`,
+      `<div style="visibility:hidden!important">${legacyEnglishActivityTable()}</div>`,
+      "<th>Transaction Detail</th>",
+    ]) {
+      const html = base.replace("</body>", `${marker}</body>`);
+      expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v1"))
+        .toThrow("html_activity_contract_invalid");
+    }
+  });
+
+  test("rejects legacy relative navigation in canonical v2 HTML", () => {
+    const canonical = canonicalV2(variantA([
+      SENTINEL,
+      SENTINEL,
+      SENTINEL,
+      SENTINEL,
+      "",
+      "",
+    ]));
+    for (const html of [
+      canonical.replace("<body>", '<body><a href="/">Home</a>'),
+      canonical.replace(
+        "https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301",
+        "/p/statementInquiry/RW1313010301",
+      ),
+    ]) {
+      expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v2"))
+        .toThrow("html_url_attribute_invalid");
+    }
+  });
+
   test("sanitizes legacy variant A and removes free-form manifest messages", async () => {
     const bucket = new FakeBucket();
     const originalHtml = variantA(["opaque-a", "opaque-b", "opaque-c", "opaque-d", "", ""]);
@@ -473,7 +545,7 @@ async function importRun(
     centralService: central as unknown as Fetcher,
     centralToken: TOKEN,
     fingerprintKey: FINGERPRINT_KEY,
-    importerVersion: "collector-r2-importer-v8",
+    importerVersion: "collector-r2-importer-v9",
     manifestKey: MANIFEST_KEY,
     ...options,
   });
@@ -595,6 +667,15 @@ function canonicalV2(html: string): string {
   return html.replace('href="#activity"', 'href="#"')
     .replace('onclick="click()"', 'onclick="return false;"')
     .replace('onchange="sel_submit(this)"', 'onchange="return false;"');
+}
+
+function legacyEnglishActivityTable(): string {
+  return "<table><thead><tr>" +
+    "<th>Transaction Date</th>" +
+    "<th>Transaction Detail</th>" +
+    "<th>Transaction Currency and Amount</th>" +
+    "<th>Transaction Fee</th>" +
+    "</tr></thead><tbody></tbody></table>";
 }
 
 function htmlVariant(options: {
