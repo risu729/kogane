@@ -1554,7 +1554,24 @@ function canonical(value: JsonValue): JsonValue {
   return value;
 }
 
-async function descriptorSha256(descriptor: JsonObject): Promise<string> {
+function normalizedStorageOrigin(value: unknown): JsonValue {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) throw new TypeError("storage origin must be an object");
+  return {
+    storageKind: value.storageKind,
+    containerName: value.containerName,
+    objectKeyTemplate: value.objectKeyTemplate,
+    objectKeyFingerprint: value.objectKeyFingerprint,
+    fingerprintKeyVersion: value.fingerprintKeyVersion,
+    redactionVersion: value.redactionVersion,
+    objectVersion: value.objectVersion ?? null,
+    etag: value.etag ?? null,
+    lastModifiedAtMs: value.lastModifiedAtMs ?? null,
+    lastModifiedAtBasis: value.lastModifiedAtBasis ?? null,
+  } as unknown as JsonValue;
+}
+
+export async function descriptorSha256(descriptor: JsonObject): Promise<string> {
   const {
     http, storage, file, email,
     fetchUnitId, pageGroupId, pageIndex,
@@ -1568,7 +1585,7 @@ async function descriptorSha256(descriptor: JsonObject): Promise<string> {
     pageIndex: pageIndex ?? null,
     origins: {
       http: http ?? null,
-      storage: storage ?? null,
+      storage: normalizedStorageOrigin(storage),
       file: file ?? null,
       email: email ?? null,
     },

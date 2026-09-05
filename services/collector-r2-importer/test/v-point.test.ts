@@ -537,7 +537,13 @@ async function descriptorHash(descriptor: Record<string, unknown>): Promise<stri
     pageIndex: pageIndex ?? null,
     origins: {
       http: http ?? null,
-      storage: storage ?? null,
+      storage: storage === undefined || storage === null ? null : {
+        ...(storage as Record<string, unknown>),
+        objectVersion: (storage as Record<string, unknown>).objectVersion ?? null,
+        etag: (storage as Record<string, unknown>).etag ?? null,
+        lastModifiedAtMs: (storage as Record<string, unknown>).lastModifiedAtMs ?? null,
+        lastModifiedAtBasis: (storage as Record<string, unknown>).lastModifiedAtBasis ?? null,
+      },
       file: file ?? null,
       email: email ?? null,
     },
