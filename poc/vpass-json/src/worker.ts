@@ -7,6 +7,12 @@ import {
   buildConfigAuth,
   buildFirstLoginAuth,
 } from "./mobile-auth";
+import {
+  backfillStoredRuns,
+  continueStoredRecord,
+  enqueueStoredRecord,
+  type VpassImportJob,
+} from "./raw-evidence";
 
 const AUTH_URL = "https://spap.smbc-card.com/api/v3/Fauth";
 const CONFIG_URL = "https://spap.smbc-card.com/api/v3/common/Config";
@@ -24,6 +30,8 @@ const MOBILE_UA =
 
 interface Env {
   SNAPSHOTS: R2Bucket;
+  RAW_EVIDENCE_IMPORTER: Fetcher;
+  RAW_EVIDENCE_QUEUE: Queue<VpassImportJob>;
   VPASS_ID: string;
   VPASS_PASSWORD: string;
   VPASS_DEVICE_ID: string;
@@ -493,10 +501,19 @@ async function captureCard(
       `${prefix}/manifest.json`,
       JSON.stringify({ ...summary, status: "success", months: monthResults }, null, 2),
     );
+    stage = "central-import";
+    await enqueueStoredRecord(env.RAW_EVIDENCE_QUEUE, `${prefix}/manifest.json`);
     return summary;
   } catch (error) {
     diagnostic.failure(stage, error);
-    await putCardError(env, prefix, runId, started, selectedCardZeroBased, error);
+    if (stage !== "central-import") {
+      await putCardError(env, prefix, runId, started, selectedCardZeroBased, error);
+      try {
+        await enqueueStoredRecord(env.RAW_EVIDENCE_QUEUE, `${prefix}/error.json`);
+      } catch {
+        // The immutable source record remains available for the explicit backfill.
+      }
+    }
     throw error;
   }
 }
@@ -518,6 +535,11 @@ async function collectOneCard(
   } catch (error) {
     diagnostic.finish("failed");
     await putCardError(env, prefix, runId, started, selectedCardZeroBased, error);
+    try {
+      await enqueueStoredRecord(env.RAW_EVIDENCE_QUEUE, `${prefix}/error.json`);
+    } catch {
+      // The immutable source record remains available for the explicit backfill.
+    }
     throw error;
   }
   try {
@@ -557,6 +579,11 @@ async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCard
         2,
       ),
     );
+    try {
+      await enqueueStoredRecord(env.RAW_EVIDENCE_QUEUE, `${runPrefix}/error.json`);
+    } catch {
+      // The immutable source record remains available for the explicit backfill.
+    }
     throw error;
   }
 
@@ -595,10 +622,45 @@ export default {
     await collectAllCards(env, controller.scheduledTime);
   },
 
+  async queue(batch: MessageBatch<VpassImportJob>, env: Env): Promise<void> {
+    if (batch.messages.length !== 1) throw new Error("raw_evidence_import_batch_invalid");
+    await continueStoredRecord(
+      env.RAW_EVIDENCE_IMPORTER,
+      env.RAW_EVIDENCE_QUEUE,
+      batch.messages[0]!.body,
+    );
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health") {
       return Response.json({ ok: true, service: "kogane-vpass-collector-poc" });
+    }
+    if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
+      if (!await authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+      if ([...url.searchParams.keys()].some((key) => key !== "cursor" && key !== "limit") ||
+          url.searchParams.getAll("cursor").length > 1 ||
+          url.searchParams.getAll("limit").length > 1 ||
+          (url.searchParams.has("limit") && url.searchParams.get("limit") !== "1")) {
+        return Response.json({ error: "invalid backfill query" }, { status: 400 });
+      }
+      const cursor = url.searchParams.get("cursor") ?? undefined;
+      if (cursor !== undefined &&
+          (cursor.length === 0 || cursor.length > 24_000 || /[\x00-\x20\x7f]/u.test(cursor))) {
+        return Response.json({ error: "invalid backfill cursor" }, { status: 400 });
+      }
+      try {
+        return Response.json(await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, cursor), {
+          headers: { "cache-control": "no-store" },
+        });
+      } catch {
+        return Response.json({ error: "raw evidence backfill failed" }, {
+          status: 502,
+          headers: { "cache-control": "no-store" },
+        });
+      }
     }
     if (
       request.method !== "POST" ||
@@ -606,8 +668,7 @@ export default {
     ) {
       return new Response("Not found", { status: 404 });
     }
-    const expected = requireSecret(env.ADMIN_TRIGGER_TOKEN, "ADMIN_TRIGGER_TOKEN");
-    if (request.headers.get("authorization") !== `Bearer ${expected}`) {
+    if (!await authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
       return new Response("Unauthorized", { status: 401 });
     }
     if (url.pathname === "/__collect-all") {
@@ -620,4 +681,22 @@ export default {
     const summary = await collectOneCard(env, requestedCard - 1);
     return Response.json(summary);
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<Env, VpassImportJob>;
+
+async function authorized(request: Request, configured: string | undefined): Promise<boolean> {
+  const token = requireSecret(configured, "ADMIN_TRIGGER_TOKEN");
+  const expected = new TextEncoder().encode(`Bearer ${token}`);
+  const actual = new TextEncoder().encode(request.headers.get("authorization") ?? "");
+  if (expected.byteLength !== actual.byteLength) return false;
+  const subtle = crypto.subtle as SubtleCrypto & {
+    timingSafeEqual?: (left: ArrayBuffer, right: ArrayBuffer) => boolean;
+  };
+  if (typeof subtle.timingSafeEqual === "function") {
+    return subtle.timingSafeEqual(new Uint8Array(expected).buffer, new Uint8Array(actual).buffer);
+  }
+  let difference = 0;
+  for (let index = 0; index < expected.byteLength; index += 1) {
+    difference |= expected[index]! ^ actual[index]!;
+  }
+  return difference === 0;
+}

@@ -8,6 +8,8 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "cf:types": "wrangler types",
+    "cf:check": "wrangler deploy --dry-run",
+    "backfill:raw-evidence": "bash scripts/backfill-raw-evidence.sh",
     "cf:deploy": "wrangler deploy"
   },
   "dependencies": {

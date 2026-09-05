@@ -17,6 +17,7 @@ describe("collector R2 importer deployment scripts", () => {
       "GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST",
       "RAW_EVIDENCE_TOKEN_MYJCB",
       "RAW_EVIDENCE_TOKEN_VPOINT",
+      "RAW_EVIDENCE_TOKEN_VPASS",
       "ORIGIN_FINGERPRINT_KEY",
     ];
 

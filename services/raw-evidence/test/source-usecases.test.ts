@@ -12,6 +12,7 @@ const SBI_STORAGE_TEMPLATE = "raw/sbi-securities/{date}/{run-id}/{artifact}.json
 const MOBILE_SUICA_STORAGE_TEMPLATE = "raw/mobile-suica/{date}/{run-id}/{artifact}";
 const GLOBAL_PASS_STORAGE_TEMPLATE = "raw/prestia-globalpass/{date}/{run-id}/{artifact}";
 const MYJCB_STORAGE_TEMPLATE = "raw/myjcb/{date}/{run-id}/{artifact}";
+const VPASS_STORAGE_TEMPLATE = "vpass/{date}/{run-id}/{artifact}";
 const SBI_FINGERPRINT_VERSION = "collector-r2-v1";
 const cases = fixture.cases;
 
@@ -132,6 +133,19 @@ async function myJcbStorageOrigin(artifactKey: string) {
   };
 }
 
+async function vpassStorageOrigin(artifactKey: string) {
+  return {
+    storageKind: "r2",
+    containerName: "kogane-vpass-collector-poc",
+    objectKeyTemplate: VPASS_STORAGE_TEMPLATE,
+    objectKeyFingerprint: await sha256Hex(
+      new TextEncoder().encode(`fixture-vpass:${artifactKey}`),
+    ),
+    fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
+    redactionVersion: "v1",
+  };
+}
+
 async function catalogue(
   runId: number,
   artifactKey: string,
@@ -224,7 +238,7 @@ beforeAll(async () => {
       INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id)
       VALUES ('test', ?, ?)
     `).bind(PRODUCER, sourceId)),
-    ...sourceIds.map((sourceId) => env.DB.prepare(`
+    ...sourceIds.filter((sourceId) => sourceId !== "vpass").map((sourceId) => env.DB.prepare(`
       INSERT INTO origin_template_policies (
         source_id, origin_kind, template, redaction_version, fingerprint_key_version
       ) VALUES (?, 'storage', ?, 'v1', ?)
@@ -248,31 +262,48 @@ describe("sanitized source-usecase contract", () => {
         fetchUnitId: unitId,
         artifactRole: "collector_derived",
         payloadFidelity: "transformed",
-        containerKind: "bundle",
-        lineageDisposition: "embedded_source_bytes",
+        containerKind: "single",
+        lineageDisposition: "source_not_retained_for_security",
         dataset: "statement-snapshot",
         formatId: "vpass-snapshot-json",
+        formatVersion: "vpass-central-sanitized-v1",
         declaredMediaType: "application/json",
-        mediaTypeBasis: "manifest",
+        mediaTypeBasis: "operator",
+        storage: await vpassStorageOrigin(`${cardKey}/snapshot.json`),
         transformSteps: [{
           stepIndex: 0,
-          stepKind: "bundled",
-          transformerId: "vpass-bundler",
-          transformerVersion: "fixture-v1",
+          stepKind: "redacted",
+          transformerId: "vpass-json-sanitizer",
+          transformerVersion: "v1",
         }, {
           stepIndex: 1,
           stepKind: "reencoded",
-          transformerId: "vpass-bundler",
-          transformerVersion: "fixture-v1",
+          transformerId: "vpass-json-sanitizer",
+          transformerVersion: "v1",
         }],
       }));
       artifacts.push(await catalogue(runId, `${cardKey}/manifest.json`, value.manifestBody, {
         fetchUnitId: unitId,
-        artifactRole: "collector_manifest",
-        payloadFidelity: "generated",
+        artifactRole: "collector_derived",
+        payloadFidelity: "transformed",
+        lineageDisposition: "source_not_retained_for_security",
         dataset: "collector-manifest",
+        formatId: "vpass-collector-manifest-json",
+        formatVersion: "vpass-central-sanitized-v1",
         declaredMediaType: "application/json",
-        mediaTypeBasis: "manifest",
+        mediaTypeBasis: "operator",
+        storage: await vpassStorageOrigin(`${cardKey}/manifest.json`),
+        transformSteps: [{
+          stepIndex: 0,
+          stepKind: "redacted",
+          transformerId: "vpass-json-sanitizer",
+          transformerVersion: "v1",
+        }, {
+          stepIndex: 1,
+          stepKind: "reencoded",
+          transformerId: "vpass-json-sanitizer",
+          transformerVersion: "v1",
+        }],
       }));
       await unitTerminal(unitId, 2);
     }

@@ -1,6 +1,6 @@
 # Collector R2 importer
 
-各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suica、GLOBAL PASS、MyJCB、V Pointに対応する。
+各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suica、GLOBAL PASS、MyJCB、V Point、Vpassに対応する。
 
 ## 再走査できる不変run
 
@@ -11,6 +11,16 @@ attemptの診断にだけ使う。SBI証券は`sbi-r2-v3`、SBI VC Trade・Sony�
 Mobile Suica・MyJCBは各`*-r2-v2`へ移行する。旧runは不変証跡として残し、新しい契約の
 runへ全R2を再走査する。同じ契約を別Importerデプロイから再送しても、run/report/artifact/
 sealの件数は変化しない。
+
+## Vpassの境界
+
+Vpassはprivate R2の`vpass/YYYY/MM/DD/<run-id>/`をread-only outboxとして扱う。`collector-r2-vpass`専用credentialと`vpass/{date}/{run-id}/{artifact}` policy以外では中央へ入れない。card単位のsnapshot+success manifest、cardまたはrun単位のerror-only、旧run単位のdiscrete page+success manifest、旧run単位の取得途中artifact+errorを別schemaとして検証し、未知の組合せやmanifestの`partial`は中央state作成前に拒否する。manifest/error keyと全prefix inventory、content type、空custom metadata、R2 native SHA-256（存在時）と再計算SHA-256、UTF-8 JSON、run/date/card、month一覧、page family/index/終了条件、件数、およびsuccess/errorの補集合は完全一致が必要である。旧partial failureはcardとmonthが取得順のprefixであること、完了済みpageが終端条件を満たすこと、未完了pageが最後のcard/月に限られることを確認する。
+
+source snapshotに埋め込まれたprovider JSONは、card reference、session、cookie、token、認証識別子を再帰的かつ決定的に固定sentinelへ置換し、中央には再encodeしたartifactだけを送る。storage originも具体的なobject keyでなくHMAC fingerprintだけを保持する。検証済みの非機密な明細fieldはprovider responseとして保持するが、認証値・card識別値・source本文をログや運用出力へ出さない。
+
+1 requestあたり5 artifactを転送し、開始時に完全inventory digestを固定する。継続tokenはrecord、中央run/unit/page groups、inventory、offsetをHMACで束縛し、最後のchunkでのみterminal reportとsealを行う。run terminal reportの`producerVersion`はmutableなdeployment revisionでなく固定`vpass-r2-v1`であるため、異なるImporter deploymentからのreplayも同じimmutable reportへ収束する。deployment revisionは失敗attemptの監査だけに残る。backfillのscan cursorも署名し、対象recordがsealされるまでsource R2 cursorを進めない。
+
+2026-09-05に本文、key、個別hashを出さないread-only集計監査を行った。355 objectsはmanifest 80、snapshot 78、error 3、旧discrete page等194で、JSON content typeとcustom metadataは契約内だった。card-scoped successは78、旧partial errorは3、旧run-level success manifestは2で、embedded JSON envelope 2,383件は構造上parse可能だった。最終validatorを全83 terminal recordsへread-only適用し、全件がstrict source validationを通過した。この監査はsource R2を変更していない。
 
 ## MyJCBの境界
 
@@ -141,6 +151,7 @@ SBI新生銀行を有効化する本番作業は、必ず次の順で直列実�
 - `RAW_EVIDENCE_TOKEN_GLOBAL_PASS`: `collector-r2-global-pass`専用Bearer
 - `RAW_EVIDENCE_TOKEN_MYJCB`: `collector-r2-myjcb`専用Bearer
 - `RAW_EVIDENCE_TOKEN_VPOINT`: `collector-r2-v-point`専用Bearer
+- `RAW_EVIDENCE_TOKEN_VPASS`: `collector-r2-vpass`専用Bearer
 - `ORIGIN_FINGERPRINT_KEY`: storage keyを不可逆HMACへ変換する共通鍵
 
 3. target importerのdeploy成功後にSBI新生collectorをdeployする。これはService Bindingとdaily cronを有効化するため、`0 21 * * *`の直前を避け、次回cronまでに以降の確認を完了する。
@@ -278,6 +289,7 @@ poc/mobile-suica-worker/scripts/backfill-raw-evidence.sh
 poc/globalpass-worker/scripts/backfill-raw-evidence.sh
 poc/myjcb-worker/scripts/backfill-raw-evidence.sh
 poc/vpoint-worker/scripts/backfill-raw-evidence.sh
+poc/vpass-json/scripts/backfill-raw-evidence.sh
 ```
 
 source R2はbackfill完了後も自動削除しない。
@@ -294,6 +306,12 @@ source R2はbackfill完了後も自動削除しない。
 6. cursorが完了時に削除された状態から再走査し、中央run/seal/artifact件数が不変であることを確認する。attempt/reuse記録は増えてよい。source R2の事前・事後inventoryは一致しなければならない。
 
 backfill前後に新しいscheduled runが作られた場合は、その新規objectとImporterによる変更を混同しない。Importerはsource R2へwrite/deleteしないが、collectorの既存Cronは別途動作するためである。既知の重複実行対策はこのrolloutに便乗して推測実装せず、collector lockの独立変更として扱う。
+
+### Vpassの本番適用
+
+このPRはdeployしない。本番適用時は中央migration `0013`と`verify-vpass-route.sh`を先に適用し、`collector-r2-vpass` credentialを`RAW_EVIDENCE_TOKEN_VPASS`として同期してImporter v16をdeployする。health確認後に`kogane-vpass-raw-evidence-import`とdead-letter queueを作成し、その後にだけVpass collectorのQueue producer/consumer・Service Binding版をdeployする。consumerは1 messageにつき1 chunkだけ処理し、`deferred`の署名continuationを再enqueueして最終`sealed`まで進める。Importer failureまたは不正responseはdelivery失敗としてretryし、完了扱いにしない。GitHub Actions cronは追加せず、既存Worker cronを維持する。
+
+backfill前にsource R2をobject種別件数と集約checksumだけで監査し、本文、key、個別hash、card値、session値を出力しない。`poc/vpass-json/scripts/backfill-raw-evidence.sh`で最初のterminal recordをsealするcanary後、全件を完走する。失敗recordでは署名cursorが対象の手前に残るため、validatorを緩和せず原因を解消して同じ位置から再開する。完了後にcursorを削除した状態から再走査し、中央run/seal/artifact件数が不変であること、source R2の事前・事後inventoryが一致することを確認する。失敗時もmigrationとsource R2は削除・rollbackしない。
 
 ### 2026-09-05 本番検証
 

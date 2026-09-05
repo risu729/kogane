@@ -26,6 +26,7 @@
       "GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST",
       "RAW_EVIDENCE_TOKEN_MYJCB",
       "RAW_EVIDENCE_TOKEN_VPOINT",
+      "RAW_EVIDENCE_TOKEN_VPASS",
       "ORIGIN_FINGERPRINT_KEY"
     ]
   },
@@ -65,6 +66,10 @@
     {
       "binding": "VPOINT_PAY_SNAPSHOTS",
       "bucket_name": "kogane-vpoint-pay-collector-poc"
+    },
+    {
+      "binding": "VPASS_SNAPSHOTS",
+      "bucket_name": "kogane-vpass-collector-poc"
     }
   ],
   "services": [
@@ -74,6 +79,6 @@
     }
   ],
   "vars": {
-    "IMPORTER_VERSION": "collector-r2-importer-v15"
+    "IMPORTER_VERSION": "collector-r2-importer-v16"
   }
 }

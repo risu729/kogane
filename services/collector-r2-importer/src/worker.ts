@@ -7,6 +7,7 @@ import { importSbiShinseiRun } from "./sbi-shinsei";
 import { importSbiVcRun } from "./sbi-vc";
 import { importSonyRun } from "./sony";
 import { importVPointRun } from "./v-point";
+import { importVpassRun } from "./vpass";
 
 type JsonObject = Record<string, unknown>;
 
@@ -31,6 +32,37 @@ export default {
           : requiredString(input.continuation, "continuation_invalid", 8_000);
         const result = await importOneMyJcb(env, manifestKey, continuation);
         return json(result, result.status === "deferred" ? 202 : 200);
+      } catch (error) {
+        return errorResponse(error);
+      }
+    }
+    if (request.method === "POST" && url.pathname === "/v1/vpass/import-run" &&
+        url.search === "") {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["recordKey", "continuation"]);
+        const recordKey = requiredString(input.recordKey, "record_key_invalid", 500);
+        const continuation = input.continuation === undefined
+          ? undefined
+          : requiredString(input.continuation, "continuation_invalid", 16_000);
+        const result = await importOneVpass(env, recordKey, continuation);
+        return json(result, result.status === "deferred" ? 202 : 200);
+      } catch (error) {
+        return errorResponse(error);
+      }
+    }
+    if (request.method === "POST" && url.pathname === "/v1/vpass/backfill-page" &&
+        url.search === "") {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["cursor", "limit"]);
+        const cursor = input.cursor === undefined
+          ? undefined
+          : requiredString(input.cursor, "cursor_invalid", 24_000);
+        if (input.limit !== undefined && input.limit !== 1) {
+          throw new ImportError(400, "backfill_limit_must_be_one");
+        }
+        return json(await backfillVpass(env, cursor));
       } catch (error) {
         return errorResponse(error);
       }
@@ -409,6 +441,236 @@ function importOneMyJcb(env: Env, manifestKey: string, continuation?: string) {
     manifestKey,
     ...(continuation ? { continuation } : {}),
   });
+}
+
+function importOneVpass(env: Env, recordKey: string, continuation?: string) {
+  return importVpassRun({
+    bucket: env.VPASS_SNAPSHOTS,
+    centralService: env.RAW_EVIDENCE,
+    centralToken: env.RAW_EVIDENCE_TOKEN_VPASS,
+    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
+    importerVersion: env.IMPORTER_VERSION,
+    recordKey,
+    ...(continuation ? { continuation } : {}),
+  });
+}
+
+interface VpassBackfillCursor {
+  v: 1;
+  scanCursor: string | null;
+  scanDone: boolean;
+  recordKey?: string;
+  transfer?: string;
+}
+
+export async function backfillVpass(
+  env: Env,
+  encodedCursor: string | undefined,
+): Promise<JsonObject> {
+  const state = encodedCursor
+    ? await decodeVpassCursor(encodedCursor, env.ORIGIN_FINGERPRINT_KEY)
+    : { v: 1, scanCursor: null, scanDone: false } satisfies VpassBackfillCursor;
+  if (state.recordKey !== undefined) {
+    try {
+      const result = await importOneVpass(env, state.recordKey, state.transfer);
+      if (result.status === "deferred") {
+        return vpassBackfillResponse({
+          scannedObjectCount: 0,
+          deferredRecordCount: 1,
+          nextCursor: await encodeVpassCursor(
+            { ...state, transfer: result.continuation },
+            env.ORIGIN_FINGERPRINT_KEY,
+          ),
+          result,
+        });
+      }
+      return vpassBackfillResponse({
+        scannedObjectCount: 0,
+        importedRecordCount: 1,
+        nextCursor: await nextVpassScanCursor(state, env.ORIGIN_FINGERPRINT_KEY),
+        result,
+      });
+    } catch (error) {
+      return vpassBackfillResponse({
+        scannedObjectCount: 0,
+        failedRecordCount: 1,
+        failureCode: safeCode(error),
+        nextCursor: encodedCursor ?? null,
+      });
+    }
+  }
+
+  const listed = await env.VPASS_SNAPSHOTS.list({
+    prefix: "vpass/",
+    limit: 1,
+    ...(state.scanCursor ? { cursor: state.scanCursor } : {}),
+  });
+  const object = listed.objects[0];
+  const scanDone = !listed.truncated;
+  const scanCursor = listed.truncated ? listed.cursor : undefined;
+  if (listed.truncated && !scanCursor) throw new ImportError(409, "prefix_cursor_missing");
+  if (listed.truncated && state.scanCursor === scanCursor) {
+    throw new ImportError(409, "prefix_cursor_did_not_advance");
+  }
+  const afterRecord: VpassBackfillCursor = {
+    v: 1,
+    scanCursor: scanCursor ?? null,
+    scanDone,
+  };
+  if (!object) {
+    return vpassBackfillResponse({ scannedObjectCount: 0, nextCursor: null });
+  }
+  if (!object.key.endsWith("/manifest.json") && !object.key.endsWith("/error.json")) {
+    return vpassBackfillResponse({
+      scannedObjectCount: 1,
+      skippedRecordCount: 1,
+      nextCursor: await nextVpassScanCursor(afterRecord, env.ORIGIN_FINGERPRINT_KEY),
+    });
+  }
+  try {
+    const result = await importOneVpass(env, object.key);
+    if (result.status === "deferred") {
+      return vpassBackfillResponse({
+        scannedObjectCount: 1,
+        deferredRecordCount: 1,
+        nextCursor: await encodeVpassCursor(
+          { ...afterRecord, recordKey: object.key, transfer: result.continuation },
+          env.ORIGIN_FINGERPRINT_KEY,
+        ),
+        result,
+      });
+    }
+    return vpassBackfillResponse({
+      scannedObjectCount: 1,
+      importedRecordCount: 1,
+      nextCursor: await nextVpassScanCursor(afterRecord, env.ORIGIN_FINGERPRINT_KEY),
+      result,
+    });
+  } catch (error) {
+    return vpassBackfillResponse({
+      scannedObjectCount: 1,
+      failedRecordCount: 1,
+      failureCode: safeCode(error),
+      nextCursor: await encodeVpassCursor(state, env.ORIGIN_FINGERPRINT_KEY),
+    });
+  }
+}
+
+function vpassBackfillResponse(input: {
+  scannedObjectCount: number;
+  importedRecordCount?: number;
+  skippedRecordCount?: number;
+  deferredRecordCount?: number;
+  failedRecordCount?: number;
+  failureCode?: string;
+  nextCursor: string | null;
+  result?: unknown;
+}): JsonObject {
+  return {
+    source: "vpass",
+    scannedObjectCount: input.scannedObjectCount,
+    importedRecordCount: input.importedRecordCount ?? 0,
+    skippedRecordCount: input.skippedRecordCount ?? 0,
+    deferredRecordCount: input.deferredRecordCount ?? 0,
+    failedRecordCount: input.failedRecordCount ?? 0,
+    nextCursor: input.nextCursor,
+    truncated: input.nextCursor !== null,
+    ...(input.failureCode ? { failureCode: input.failureCode } : {}),
+    ...(input.result ? { result: input.result } : {}),
+  };
+}
+
+async function nextVpassScanCursor(
+  state: VpassBackfillCursor,
+  key: string,
+): Promise<string | null> {
+  return state.scanDone ? null : encodeVpassCursor({
+    v: 1,
+    scanCursor: state.scanCursor,
+    scanDone: false,
+  }, key);
+}
+
+async function encodeVpassCursor(value: VpassBackfillCursor, key: string): Promise<string> {
+  assertVpassCursor(value);
+  const payload = base64Url(new TextEncoder().encode(JSON.stringify(value)));
+  const signature = base64Url(await hmacSha256(key, new TextEncoder().encode(payload)));
+  return `vpass-scan-v1.${payload}.${signature}`;
+}
+
+async function decodeVpassCursor(value: string, key: string): Promise<VpassBackfillCursor> {
+  const parts = value.split(".");
+  if (parts.length !== 3 || parts[0] !== "vpass-scan-v1") {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  const expected = base64Url(await hmacSha256(key, new TextEncoder().encode(parts[1]!)));
+  if (!constantTimeStringEqual(expected, parts[2]!)) throw new ImportError(400, "cursor_invalid");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(fromBase64Url(parts[1]!)));
+  } catch {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  const input = parsed as JsonObject;
+  exactKeys(input, ["v", "scanCursor", "scanDone", "recordKey", "transfer"]);
+  const cursor = input as unknown as VpassBackfillCursor;
+  assertVpassCursor(cursor);
+  return cursor;
+}
+
+function assertVpassCursor(value: VpassBackfillCursor): void {
+  const scanStateValid = value.scanDone
+    ? value.scanCursor === null
+    : value.scanCursor === null || (typeof value.scanCursor === "string" &&
+      value.scanCursor.length > 0 && value.scanCursor.length <= 4_096 &&
+      !/[\x00-\x20\x7f]/u.test(value.scanCursor));
+  const hasRecord = value.recordKey !== undefined;
+  const hasTransfer = value.transfer !== undefined;
+  if (value.v !== 1 || typeof value.scanDone !== "boolean" || !scanStateValid ||
+      hasRecord !== hasTransfer || (hasRecord &&
+        (typeof value.recordKey !== "string" || value.recordKey.length > 500 ||
+          !/^vpass\/\d{4}\/\d{2}\/\d{2}\/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:\/card-\d{3})?\/(?:manifest|error)\.json$/u
+            .test(value.recordKey) ||
+          typeof value.transfer !== "string" || value.transfer.length === 0 ||
+          value.transfer.length > 16_000))) {
+    throw new ImportError(400, "cursor_invalid");
+  }
+}
+
+async function hmacSha256(key: string, bytes: Uint8Array): Promise<Uint8Array> {
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(key),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, new Uint8Array(bytes).buffer));
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+function fromBase64Url(value: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]+$/u.test(value)) throw new ImportError(400, "cursor_invalid");
+  const standard = value.replaceAll("-", "+").replaceAll("_", "/");
+  const binary = atob(standard.padEnd(Math.ceil(standard.length / 4) * 4, "="));
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function constantTimeStringEqual(left: string, right: string): boolean {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
 }
 
 interface MyJcbBackfillCursor {

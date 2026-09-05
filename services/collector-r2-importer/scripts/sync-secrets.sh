@@ -17,7 +17,7 @@ if ! test -f "${credential_path}" || ! test -f "${fingerprint_path}" ||
   exit 1
 fi
 
-for client_id in collector-r2-sbi collector-r2-sbi-vc collector-r2-sony-bank collector-r2-sbi-shinsei collector-r2-mobile-suica collector-r2-global-pass collector-r2-myjcb collector-r2-v-point; do
+for client_id in collector-r2-sbi collector-r2-sbi-vc collector-r2-sony-bank collector-r2-sbi-shinsei collector-r2-mobile-suica collector-r2-global-pass collector-r2-myjcb collector-r2-v-point collector-r2-vpass; do
   (
     cd -- "${raw_dir}"
     KOGANE_INGEST_CLIENT_ID="${client_id}" bash scripts/sync-ingest-key.sh
@@ -33,6 +33,7 @@ mobile_suica_secret="$(jq -er '."collector-r2-mobile-suica" | select(type == "st
 global_pass_secret="$(jq -er '."collector-r2-global-pass" | select(type == "string" and length >= 20)' <<<"${key_map}")"
 myjcb_secret="$(jq -er '."collector-r2-myjcb" | select(type == "string" and length >= 20)' <<<"${key_map}")"
 vpoint_secret="$(jq -er '."collector-r2-v-point" | select(type == "string" and length >= 20)' <<<"${key_map}")"
+vpass_secret="$(jq -er '."collector-r2-vpass" | select(type == "string" and length >= 20)' <<<"${key_map}")"
 fingerprint_secret="$(sudo systemd-creds decrypt "${fingerprint_path}" -)"
 global_pass_empty_secret="$(sudo systemd-creds decrypt "${global_pass_empty_path}" -)"
 if ! [[ "${fingerprint_secret}" =~ ^[0-9a-f]{64}$ ]]; then
@@ -57,8 +58,9 @@ fi
     --arg globalPassLegacyEmpty "${global_pass_empty_secret}" \
     --arg myjcb "collector-r2-myjcb.${myjcb_secret}" \
     --arg vpoint "collector-r2-v-point.${vpoint_secret}" \
+    --arg vpass "collector-r2-vpass.${vpass_secret}" \
     --arg fingerprint "${fingerprint_secret}" \
-    '{RAW_EVIDENCE_TOKEN:$sbi,RAW_EVIDENCE_TOKEN_SBI_VC:$sbiVc,RAW_EVIDENCE_TOKEN_SONY:$sony,RAW_EVIDENCE_TOKEN_SBI_SHINSEI:$sbiShinsei,RAW_EVIDENCE_TOKEN_MOBILE_SUICA:$mobileSuica,RAW_EVIDENCE_TOKEN_GLOBAL_PASS:$globalPass,GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST:$globalPassLegacyEmpty,RAW_EVIDENCE_TOKEN_MYJCB:$myjcb,RAW_EVIDENCE_TOKEN_VPOINT:$vpoint,ORIGIN_FINGERPRINT_KEY:$fingerprint}')"
+    '{RAW_EVIDENCE_TOKEN:$sbi,RAW_EVIDENCE_TOKEN_SBI_VC:$sbiVc,RAW_EVIDENCE_TOKEN_SONY:$sony,RAW_EVIDENCE_TOKEN_SBI_SHINSEI:$sbiShinsei,RAW_EVIDENCE_TOKEN_MOBILE_SUICA:$mobileSuica,RAW_EVIDENCE_TOKEN_GLOBAL_PASS:$globalPass,GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST:$globalPassLegacyEmpty,RAW_EVIDENCE_TOKEN_MYJCB:$myjcb,RAW_EVIDENCE_TOKEN_VPOINT:$vpoint,RAW_EVIDENCE_TOKEN_VPASS:$vpass,ORIGIN_FINGERPRINT_KEY:$fingerprint}')"
   # A bulk update changes only these non-null names; unrelated Worker secrets remain intact.
   printf '%s' "${secrets_json}" | npx wrangler secret bulk >/dev/null
   unset secrets_json
@@ -73,6 +75,7 @@ fi
     GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST
     RAW_EVIDENCE_TOKEN_MYJCB
     RAW_EVIDENCE_TOKEN_VPOINT
+    RAW_EVIDENCE_TOKEN_VPASS
     ORIGIN_FINGERPRINT_KEY
   )
   secret_inventory="$(npx wrangler secret list --format json)"
@@ -86,4 +89,4 @@ fi
     '{synced:true,worker:"kogane-collector-r2-importer",verifiedSecretNames:$ARGS.positional}' \
     "${required_secret_names[@]}"
 )
-unset key_map sbi_secret sbi_vc_secret sony_secret sbi_shinsei_secret mobile_suica_secret global_pass_secret global_pass_empty_secret myjcb_secret vpoint_secret fingerprint_secret
+unset key_map sbi_secret sbi_vc_secret sony_secret sbi_shinsei_secret mobile_suica_secret global_pass_secret global_pass_empty_secret myjcb_secret vpoint_secret vpass_secret fingerprint_secret
