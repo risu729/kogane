@@ -321,12 +321,14 @@ async function relayTcp(
   const runIdValue = url.searchParams.get("runId");
   const runId = runIdValue && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(runIdValue)
     ? runIdValue : undefined;
+  const relayIdValue = url.searchParams.get("relayId");
+  const relayId = relayIdValue && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(relayIdValue)
+    ? relayIdValue : undefined;
   const pair = new WebSocketPair();
   const client = pair[0];
   const server = pair[1];
   server.accept();
-  const socket = (env.MESH as VpcNetworkBinding).connect({ hostname, port });
-  startTcpRelay({ socket, server, waitUntil: promise => ctx.waitUntil(promise), ...(runId ? { runId } : {}) });
+  startTcpRelay({ connect: () => (env.MESH as VpcNetworkBinding).connect({ hostname, port }), server, waitUntil: promise => ctx.waitUntil(promise), ...(runId ? { runId } : {}), ...(relayId ? { relayId } : {}) });
   return new Response(null, { status: 101, webSocket: client });
 }
 async function validRelayBearer(

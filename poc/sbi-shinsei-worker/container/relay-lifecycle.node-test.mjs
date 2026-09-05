@@ -3,9 +3,34 @@ import { EventEmitter, once } from "node:events";
 import net from "node:net";
 import { test } from "node:test";
 import WebSocket, { WebSocketServer } from "ws";
-import { startConnectRelay, trackRelayClosure } from "./connect-relay.mjs";
+import { relayDiagnostics, startConnectRelay, trackRelayClosure } from "./connect-relay.mjs";
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+test("relay error-code diagnostics read accessors once and safely retain classification", t => {
+  const records = [];
+  const previousLog = console.log;
+  const previousWarn = console.warn;
+  console.log = console.warn = value => records.push(JSON.parse(String(value)));
+  t.after(() => { console.log = previousLog; console.warn = previousWarn; });
+  const diagnostic = relayDiagnostics("11111111-1111-4111-8111-111111111111", undefined, "allowed.invalid");
+  let codeReads = 0;
+  let errorReads = 0;
+  const changing = { get code() { return ++codeReads === 1 ? "ECONNRESET" : "synthetic-private-second-value"; } };
+  diagnostic.mark("local-tcp-error", { bufferedAmount: 0 }, { get error() { errorReads++; return changing; } });
+  assert.equal(codeReads, 1);
+  assert.equal(errorReads, 1);
+  assert.equal(records.at(-1).errorCode, "ECONNRESET");
+  assert.doesNotThrow(() => diagnostic.mark("websocket-error", { bufferedAmount: 0 }, {
+    error: { get code() { throw new Error("synthetic-private-accessor"); } },
+  }));
+  assert.equal(records.at(-1).errorCode, "unclassified");
+  diagnostic.mark("websocket-stream-error", { bufferedAmount: 0 }, { error: { code: { toString() { throw new Error("synthetic-private-coercion"); } } } });
+  assert.equal(records.at(-1).errorCode, "unclassified");
+  assert.doesNotThrow(() => diagnostic.record({ outcome: "closed", closeCode: 1000 }));
+  assert.equal(records.at(-1).outcome, "closed");
+  assert.ok(!JSON.stringify(records).includes("synthetic-private"));
+});
+
 async function upstream(t) {
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await once(server, "listening");
@@ -15,6 +40,86 @@ async function upstream(t) {
   });
   return { server, url: `ws://127.0.0.1:${server.address().port}` };
 }
+
+test("relay diagnostics correlate both directions, count only bytes, and preserve EOF ordering", async t => {
+  const records = [];
+  const previousLog = console.log;
+  const previousWarn = console.warn;
+  console.log = console.warn = value => records.push(JSON.parse(String(value)));
+  t.after(() => { console.log = previousLog; console.warn = previousWarn; });
+  const { server, url } = await upstream(t);
+  const connected = once(server, "connection");
+  const runId = "11111111-1111-4111-8111-111111111111";
+  const proxy = await startConnectRelay({ relayUrl: `${url}?runId=${runId}&relayId=synthetic-untrusted-id`, relayToken: "synthetic-private-token", allowedHosts: new Set(["allowed.invalid"]), closeTimeoutMs: 500 });
+  t.after(() => proxy.close());
+  const client = net.connect(proxy.port, "127.0.0.1");
+  t.after(() => client.destroy());
+  await once(client, "connect");
+  const response = once(client, "data");
+  client.write("CONNECT allowed.invalid:443 HTTP/1.1\r\nHost: allowed.invalid:443\r\n\r\n");
+  const [peer, request] = await connected;
+  await response;
+  const relayId = new URL(request.url, "http://loopback.invalid").searchParams.get("relayId");
+  assert.match(relayId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+  const payload = Buffer.from("synthetic-private-payload");
+  const message = once(peer, "message");
+  client.write(payload);
+  assert.deepEqual((await message)[0], payload);
+  let downstreamBytes = 0;
+  const received = new Promise(resolve => client.on("data", bytes => {
+    downstreamBytes += bytes.length;
+    if (downstreamBytes === 40) resolve();
+  }));
+  peer.send(Buffer.alloc(17, 7));
+  peer.send(Buffer.alloc(23, 7));
+  await received;
+  const peerClosed = once(peer, "close");
+  client.end();
+  assert.equal((await peerClosed)[0], 1000);
+  await proxy.close();
+  const terminal = records.find(record => record.event === "sbi-shinsei-container-relay-closed" && record.relayId === relayId);
+  assert.equal(terminal.runId, runId);
+  assert.equal(terminal.targetClass, "allowed-upstream");
+  assert.equal(terminal.wsSentBytesQueued, payload.length);
+  assert.equal(terminal.wsSentFramesQueued, 1);
+  assert.equal(terminal.wsReceivedBytes, 40);
+  assert.equal(terminal.wsReceivedFrames, 2);
+  assert.equal(terminal.firstCloseEvent, "local-tcp-eof");
+  assert.ok(terminal.bufferedAmountAtClose >= 0);
+  assert.ok(terminal.maxBufferedAmount >= terminal.bufferedAmountAtClose);
+  const timeline = terminal.closeTimeline;
+  assert.ok(timeline.length <= 16);
+  assert.ok(timeline.findIndex(entry => entry.stage === "local-tcp-eof") < timeline.findIndex(entry => entry.stage === "websocket-close-called"));
+  assert.equal(timeline.find(entry => entry.stage === "websocket-close-called").requestedCode, 1000);
+  assert.equal(timeline.find(entry => entry.stage === "websocket-peer-close").receivedCode, 1000);
+  assert.ok(timeline.every((entry, index) => entry.elapsedMs >= 0 && (index === 0 || entry.elapsedMs >= timeline[index - 1].elapsedMs)));
+  const encoded = JSON.stringify(records);
+  for (const secret of ["synthetic-private-token", "synthetic-private-payload", "synthetic-untrusted-id", "allowed.invalid", url]) assert.ok(!encoded.includes(secret));
+});
+
+test("throwing metric loggers preserve proxy data and graceful close", async t => {
+  const previousLog = console.log;
+  const previousWarn = console.warn;
+  console.log = console.warn = () => { throw new Error("synthetic logger failure"); };
+  t.after(() => { console.log = previousLog; console.warn = previousWarn; });
+  const { server, url } = await upstream(t);
+  const connected = once(server, "connection");
+  const proxy = await startConnectRelay({ relayUrl: url, relayToken: "synthetic-only", allowedHosts: new Set(["allowed.invalid"]), closeTimeoutMs: 500 });
+  t.after(() => proxy.close());
+  const client = net.connect(proxy.port, "127.0.0.1");
+  t.after(() => client.destroy());
+  await once(client, "connect");
+  const response = once(client, "data");
+  client.write("CONNECT allowed.invalid:443 HTTP/1.1\r\nHost: allowed.invalid:443\r\n\r\n");
+  const [peer] = await connected;
+  await response;
+  const message = once(peer, "message");
+  const peerClosed = once(peer, "close");
+  client.end("synthetic-payload");
+  assert.equal(String((await message)[0]), "synthetic-payload");
+  assert.equal((await peerClosed)[0], 1000);
+  await proxy.close();
+});
 
 test("normal relay close sends 1000 and waits for the peer's delayed close handshake", async t => {
   const { server, url } = await upstream(t);
@@ -155,6 +260,11 @@ test("a local TCP reset preserves its failure but closes the healthy Worker WebS
   assert.equal((await peerClosed)[0], 1000);
   await proxy.close();
   assert.ok(records.some(record => record.outcome === "failed" && record.failureStage === "local-tcp" && record.closeCode === 1000));
+  const terminal = records.find(record => record.outcome === "failed" && record.failureStage === "local-tcp");
+  assert.equal(terminal.firstCloseEvent, "local-tcp-error");
+  const reset = terminal.closeTimeline.find(entry => entry.stage === "local-tcp-error");
+  assert.equal(reset.errorCode, "ECONNRESET");
+  assert.ok(reset.elapsedMs >= 0);
 });
 
 test("an unresponsive peer has a bounded forced fallback instead of hanging shutdown", async t => {

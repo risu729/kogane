@@ -1,4 +1,5 @@
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 
 import WebSocket, { createWebSocketStream } from "ws";
 
@@ -8,9 +9,83 @@ const DEFAULT_CLOSE_TIMEOUT_MS = 2_000;
 // Keep createWebSocketStream's write flush/finalizer intact while giving its
 // no-argument close a standard status code. Explicit peer/error codes pass through.
 class RelayWebSocket extends WebSocket {
+  constructor(address, options, diagnostic) {
+    super(address, options);
+    this.diagnostic = diagnostic;
+  }
+  send(data, ...args) {
+    const open = this.readyState === WebSocket.OPEN;
+    const result = super.send(data, ...args);
+    if (open) this.diagnostic?.sent(data, this);
+    else this.diagnostic?.mark("websocket-send-not-open", this);
+    return result;
+  }
   close(code = 1000, data) {
+    this.diagnostic?.mark("websocket-close-called", this, { requestedCode: code });
     return super.close(code, data);
   }
+  terminate() {
+    this.diagnostic?.mark("websocket-terminate-called", this);
+    return super.terminate();
+  }
+}
+
+const TARGET_CLASSES = new Map([
+  ["bk.web.sbishinseibank.co.jp", "bank-web"], ["www.sbishinseibank.co.jp", "bank-public"],
+  ["distribute.cafisbrain.com", "cafis-distribute"], ["diproxy.cafisbrain.com", "cafis-proxy"],
+  ["platform-websdk.transmitsecurity.io", "transmit-security"],
+]);
+const SOCKET_ERROR_CODES = new Set(["ECONNRESET", "EPIPE", "ETIMEDOUT", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH", "ERR_STREAM_DESTROYED", "ERR_STREAM_PREMATURE_CLOSE"]);
+
+// Counts describe data messages queued/received at ws's public API, not wire
+// delivery acknowledgements. Only lengths and fixed labels enter these records.
+export function relayDiagnostics(relayId, runId, hostname) {
+  const started = Date.now();
+  const totals = { wsSentBytesQueued: 0, wsSentFramesQueued: 0, wsReceivedBytes: 0, wsReceivedFrames: 0, maxBufferedAmount: 0 };
+  const closeTimeline = [];
+  const seen = new Set();
+  let bufferedAmountAtClose;
+  let firstCloseEvent;
+  const sample = relay => {
+    const amount = relay?.bufferedAmount;
+    if (Number.isSafeInteger(amount) && amount >= 0) totals.maxBufferedAmount = Math.max(totals.maxBufferedAmount, amount);
+    return Number.isSafeInteger(amount) && amount >= 0 ? amount : undefined;
+  };
+  const bytes = data => typeof data === "string" ? Buffer.byteLength(data) :
+    ArrayBuffer.isView(data) || data instanceof ArrayBuffer ? data.byteLength : 0;
+  const safe = action => { try { action(); } catch { /* Diagnostics cannot alter transport behavior. */ } };
+  return {
+    sent(data, relay) { safe(() => { totals.wsSentFramesQueued++; totals.wsSentBytesQueued += bytes(data); sample(relay); }); },
+    received(data, relay) { safe(() => { totals.wsReceivedFrames++; totals.wsReceivedBytes += bytes(data); sample(relay); }); },
+    mark(stage, relay, details = {}) {
+      safe(() => {
+        const amount = sample(relay);
+        if (stage !== "websocket-open" && stage !== "websocket-connect-start" && !firstCloseEvent) { firstCloseEvent = stage; bufferedAmountAtClose = amount; }
+        if (seen.has(stage) || closeTimeline.length >= 16) return;
+        seen.add(stage);
+        const entry = { stage, elapsedMs: Math.max(0, Date.now() - started) };
+        if (Number.isInteger(details.requestedCode) && details.requestedCode >= 1000 && details.requestedCode <= 4999) entry.requestedCode = details.requestedCode;
+        if (Number.isInteger(details.receivedCode) && details.receivedCode >= 1000 && details.receivedCode <= 4999) entry.receivedCode = details.receivedCode;
+        const error = details.error;
+        if (error) {
+          let code;
+          try { code = error.code; } catch { /* An accessor failure remains unclassified. */ }
+          entry.errorCode = typeof code === "string" && SOCKET_ERROR_CODES.has(code) ? code : "unclassified";
+        }
+        closeTimeline.push(entry);
+        console.log(JSON.stringify({ event: "sbi-shinsei-container-relay-stage", relayId,
+          ...(runId ? { runId } : {}), targetClass: TARGET_CLASSES.get(hostname) ?? "allowed-upstream",
+          ...entry, ...totals, firstCloseEvent, bufferedAmountAtClose }));
+      });
+    },
+    record(details) {
+      safe(() => console[details.outcome === "closed" ? "log" : "warn"](JSON.stringify({
+        event: "sbi-shinsei-container-relay-closed", relayId, ...(runId ? { runId } : {}),
+        targetClass: TARGET_CLASSES.get(hostname) ?? "allowed-upstream", ...details, ...totals,
+        durationMs: Math.max(0, Date.now() - started), firstCloseEvent, bufferedAmountAtClose, closeTimeline,
+      })));
+    },
+  };
 }
 
 // A normal local TCP close must finish the WebSocket close handshake. Calling
@@ -142,19 +217,22 @@ export function startConnectRelay({
     const target = new URL(relayUrl);
     target.searchParams.set("host", address.hostname);
     target.searchParams.set("port", String(address.port));
+    const relayId = randomUUID();
+    target.searchParams.set("relayId", relayId);
+    const diagnostic = relayDiagnostics(relayId, runId, address.hostname);
     const relay = new RelayWebSocket(target, {
       headers: { authorization: `Bearer ${relayToken}` },
-    });
+    }, diagnostic);
+    diagnostic.mark("websocket-connect-start", relay);
+    relay.on("message", data => diagnostic.received(data, relay));
+    relay.once("close", code => diagnostic.mark("websocket-peer-close", relay, { receivedCode: code }));
     const lifecycle = trackRelayClosure(relay, {
       timeoutMs: closeTimeoutMs,
       onClosed: details => {
-        try {
-          console[details.outcome === "closed" ? "log" : "warn"](JSON.stringify({
-            event: "sbi-shinsei-container-relay-closed", ...(runId ? { runId } : {}), ...details,
-          }));
-        } catch { /* Best effort. */ }
+        diagnostic.record(details);
       },
     });
+    lifecycle.shutdown = () => { diagnostic.mark("proxy-shutdown", relay); return lifecycle.close(); };
     relays.add(lifecycle);
     void lifecycle.closed.then(() => relays.delete(lifecycle));
     let established = false;
@@ -168,15 +246,17 @@ export function startConnectRelay({
       );
     };
     const timeout = setTimeout(() => {
+      diagnostic.mark("connect-timeout", relay);
       if (!established) rejectConnect("504 Gateway Timeout");
       void lifecycle.abort();
     }, connectTimeoutMs);
 
     const closeRelay = () => {
+      diagnostic.mark("local-tcp-close", relay);
       clearTimeout(timeout);
       void lifecycle.close();
     };
-    const localTcpError = () => { clearTimeout(timeout); void lifecycle.localError(); };
+    const localTcpError = error => { diagnostic.mark("local-tcp-error", relay, { error }); clearTimeout(timeout); void lifecycle.localError(); };
     const fail = () => {
       clearTimeout(timeout);
       if (!established) rejectConnect("502 Bad Gateway");
@@ -184,6 +264,7 @@ export function startConnectRelay({
     };
 
     relay.once("open", () => {
+      diagnostic.mark("websocket-open", relay);
       clearTimeout(timeout);
       if (responseSent) {
         void lifecycle.close();
@@ -192,7 +273,7 @@ export function startConnectRelay({
       established = true;
       responseSent = true;
       relayStream = createWebSocketStream(relay);
-      relayStream.once("error", fail);
+      relayStream.once("error", error => { diagnostic.mark("websocket-stream-error", relay, { error }); fail(); });
       socket.write(
         "HTTP/1.1 200 Connection Established\r\nProxy-Agent: kogane-connect-relay\r\n\r\n",
       );
@@ -200,7 +281,7 @@ export function startConnectRelay({
       socket.pipe(relayStream).pipe(socket);
       socket.resume();
     });
-    relay.once("error", fail);
+    relay.once("error", error => { diagnostic.mark("websocket-error", relay, { error }); fail(); });
     relay.once("close", () => {
       clearTimeout(timeout);
       if (!established) fail();
@@ -210,6 +291,7 @@ export function startConnectRelay({
     // data before sending the normal close frame. Closing here on `end` could
     // discard the last queued TLS record before that flush finishes.
     socket.once("error", localTcpError);
+    socket.once("end", () => diagnostic.mark("local-tcp-eof", relay));
     socket.once("close", closeRelay);
   });
 
@@ -228,7 +310,7 @@ export function startConnectRelay({
           closing = new Promise((done, closeReject) => {
             // Relays can outlive their local TCP sockets. Await all WebSockets,
             // including those already closing after removal from `sockets`.
-            const relayClosures = [...relays].map(lifecycle => lifecycle.close());
+            const relayClosures = [...relays].map(lifecycle => lifecycle.shutdown());
             for (const socket of sockets) socket.destroy();
             server.close((error) => {
               if (error) closeReject(error);

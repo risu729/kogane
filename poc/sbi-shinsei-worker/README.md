@@ -228,6 +228,28 @@ discarded. Unknown or unreadable responses stay unclassified. A 500 alone does
 not prove that the Node process crashed; source completion and central import
 remain separate outcomes. These diagnostic changes do not retry collection.
 
+### Correlate relay activity and unused preconnections
+
+Join Container and Worker relay logs using `runId` and `relayId`: each CONNECT
+relay generates a UUID that the Worker accepts only after validation. Container
+events record fixed target labels, sent/received data-message counts and bytes,
+sampled buffer sizes, requested/received close codes, and an ordered close timeline.
+`firstCloseEvent` is the first observed closing event, not proof of which remote
+component initiated shutdown; later stage events may follow the terminal record.
+Worker counters distinguish WebSocket receipt, completed upstream writes,
+upstream reads, and queued WebSocket replies, with pending-write counts, sequence
+numbers and activity/cleanup timings. Queued bytes do not prove peer delivery,
+and completed socket writes do not prove that the bank processed those bytes.
+
+The HTTPS relay creates its upstream VPC socket only when the first non-empty
+client data reaches the write queue. An unused browser preconnection can therefore
+close normally with `socketCreated=false` and zero upstream traffic; no VPC socket
+was created for that connection. `socketCreated=true` distinguishes a connection
+that reached the upstream transport. The destination allowlist and port443 policy
+remain unchanged. Use these fields to locate a failure boundary; they do not by
+themselves establish the cause of a platform runtime exception. Payloads, tokens,
+URLs and arbitrary exception text remain excluded from diagnostics.
+
 ### Verify the Container rollout before a manual smoke run
 
 A completed Worker deployment does not mean the Container image rollout has
