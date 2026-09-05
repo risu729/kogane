@@ -12,6 +12,7 @@ import {
 } from "./smbc";
 import { runPrefix, storeBytes, storeJson, storeManifest } from "./storage";
 import { isResumable } from "./progress";
+import { importStoredRun } from "./raw-evidence";
 import type {
   AuthenticatedSession,
   BackfillManifest,
@@ -345,6 +346,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           await this.ctx.storage.put({ progress: completed, artifacts, failureCodes });
           await this.ctx.storage.delete("session");
           await this.ctx.storage.deleteAlarm();
+          await this.#importRawEvidence(completed.manifestKey!, completed.runId!);
           diagnostic.finish(completed.phase === "success" ? "success" : "partial");
           console.log(
             JSON.stringify({
@@ -415,6 +417,9 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     await this.ctx.storage.put({ progress: failed, artifacts, failureCodes });
     await this.ctx.storage.delete("session");
     await this.ctx.storage.deleteAlarm();
+    if (failed.manifestKey && failed.runId) {
+      await this.#importRawEvidence(failed.manifestKey, failed.runId);
+    }
     if (failed.runId)
       createDiagnostics("smbc-direct", failed.runId).finish(
         failed.phase === "partial" ? "partial" : "failed",
@@ -478,6 +483,27 @@ export class SmbcBackfillSession extends DurableObject<Env> {
 
   #credentials() {
     return parseCredentials(this.env.SMBC_CREDENTIAL_JSON);
+  }
+
+  async #importRawEvidence(manifestKey: string, runId: string): Promise<void> {
+    try {
+      const result = await importStoredRun(this.env.RAW_EVIDENCE_IMPORTER, manifestKey);
+      console.log(JSON.stringify({
+        message: "smbc_raw_evidence_import",
+        runId,
+        centralStatus: result.status,
+        artifactCount: result.artifactCount,
+        ...(result.status === "sealed"
+          ? { centralRunId: result.centralRunId }
+          : { centralDeferredReason: result.reason, centralNextOffset: result.nextOffset }),
+      }));
+    } catch {
+      console.error(JSON.stringify({
+        message: "smbc_raw_evidence_import_failed",
+        runId,
+        errorCode: "raw_evidence_import_failed",
+      }));
+    }
   }
 
   async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
