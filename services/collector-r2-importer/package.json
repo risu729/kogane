@@ -11,7 +11,9 @@
     "typecheck": "wrangler types && tsc --noEmit",
     "cf:check": "wrangler deploy --dry-run",
     "cf:check:audit-vpoint": "wrangler deploy --dry-run --config wrangler.audit-v-point.jsonc",
+    "cf:check:audit-smbc-direct": "wrangler deploy --dry-run --config wrangler.audit-smbc-direct.jsonc",
     "audit:vpoint-r2": "bash scripts/audit-v-point-r2.sh",
+    "audit:smbc-direct-r2": "bash scripts/audit-smbc-direct-r2.sh",
     "cf:deploy": "wrangler deploy"
   },
   "devDependencies": {

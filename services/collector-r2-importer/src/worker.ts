@@ -1157,7 +1157,7 @@ function importOneSmbcDirect(
 }
 
 interface SmbcDirectBackfillCursor {
-  v: 1;
+  v: 2;
   scanCursor: string | null;
   scanDone: boolean;
   manifestKey?: string;
@@ -1168,7 +1168,9 @@ async function backfillSmbcDirect(
   env: Env,
   encodedCursor: string | undefined,
 ): Promise<JsonObject> {
-  const state = encodedCursor ? decodeSmbcDirectCursor(encodedCursor) : null;
+  const state = encodedCursor
+    ? await decodeSmbcDirectCursor(encodedCursor, env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT)
+    : null;
   if (state?.manifestKey !== undefined) {
     const offset = state.offset ?? 0;
     const result = await importOneSmbcDirect(env, state.manifestKey, offset, false);
@@ -1179,14 +1181,20 @@ async function backfillSmbcDirect(
       return smbcDirectBackfillResponse({
         scannedObjectCount: 0,
         deferredManifestCount: 1,
-        nextCursor: encodeSmbcDirectCursor({ ...state, offset: result.nextOffset }),
+        nextCursor: await encodeSmbcDirectCursor(
+          { ...state, offset: result.nextOffset },
+          env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT,
+        ),
         result,
       });
     }
     return smbcDirectBackfillResponse({
       scannedObjectCount: 0,
       importedManifestCount: 1,
-      nextCursor: nextSmbcDirectScanCursor(state),
+      nextCursor: await nextSmbcDirectScanCursor(
+        state,
+        env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT,
+      ),
       result,
     });
   }
@@ -1206,7 +1214,7 @@ async function backfillSmbcDirect(
     throw new ImportError(409, "prefix_cursor_did_not_advance");
   }
   const continuation: SmbcDirectBackfillCursor = {
-    v: 1,
+    v: 2,
     scanCursor: scanCursor ?? null,
     scanDone,
   };
@@ -1217,7 +1225,10 @@ async function backfillSmbcDirect(
     return smbcDirectBackfillResponse({
       scannedObjectCount: 1,
       skippedManifestCount: 1,
-      nextCursor: nextSmbcDirectScanCursor(continuation),
+      nextCursor: await nextSmbcDirectScanCursor(
+        continuation,
+        env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT,
+      ),
     });
   }
   try {
@@ -1229,18 +1240,24 @@ async function backfillSmbcDirect(
       return smbcDirectBackfillResponse({
         scannedObjectCount: 1,
         deferredManifestCount: 1,
-        nextCursor: encodeSmbcDirectCursor({
-          ...continuation,
-          manifestKey: object.key,
-          offset: result.nextOffset,
-        }),
+        nextCursor: await encodeSmbcDirectCursor(
+          {
+            ...continuation,
+            manifestKey: object.key,
+            offset: result.nextOffset,
+          },
+          env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT,
+        ),
         result,
       });
     }
     return smbcDirectBackfillResponse({
       scannedObjectCount: 1,
       importedManifestCount: 1,
-      nextCursor: nextSmbcDirectScanCursor(continuation),
+      nextCursor: await nextSmbcDirectScanCursor(
+        continuation,
+        env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT,
+      ),
       result,
     });
   } catch (error) {
@@ -1249,7 +1266,10 @@ async function backfillSmbcDirect(
       failedManifestCount: 1,
       failureCode: safeCode(error),
       failedManifestKey: object.key,
-      nextCursor: nextSmbcDirectScanCursor(continuation),
+      nextCursor: await nextSmbcDirectScanCursor(
+        continuation,
+        env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT,
+      ),
     });
   }
 }
@@ -1280,36 +1300,41 @@ function smbcDirectBackfillResponse(input: {
   };
 }
 
-function nextSmbcDirectScanCursor(state: SmbcDirectBackfillCursor): string | null {
+async function nextSmbcDirectScanCursor(
+  state: SmbcDirectBackfillCursor,
+  secret: string,
+): Promise<string | null> {
   return state.scanDone ? null : encodeSmbcDirectCursor({
-    v: 1,
+    v: 2,
     scanCursor: state.scanCursor,
     scanDone: false,
-  });
+  }, secret);
 }
 
-function encodeSmbcDirectCursor(value: SmbcDirectBackfillCursor): string {
+async function encodeSmbcDirectCursor(
+  value: SmbcDirectBackfillCursor,
+  secret: string,
+): Promise<string> {
   assertSmbcDirectCursor(value);
-  const bytes = new TextEncoder().encode(JSON.stringify(value));
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return "smbc-direct-v1." +
-    btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify(value)));
+  const signature = await smbcDirectCursorSignature(payload, secret);
+  return `smbc-direct-v2.${payload}.${signature}`;
 }
 
-function decodeSmbcDirectCursor(value: string): SmbcDirectBackfillCursor {
-  if (!value.startsWith("smbc-direct-v1.")) {
+async function decodeSmbcDirectCursor(
+  value: string,
+  secret: string,
+): Promise<SmbcDirectBackfillCursor> {
+  const match = /^smbc-direct-v2\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/u.exec(value);
+  if (!match?.[1] || !match[2] ||
+      !await verifySmbcDirectCursorSignature(match[1], match[2], secret)) {
     throw new ImportError(400, "cursor_invalid");
   }
-  const encoded = value.slice("smbc-direct-v1.".length)
-    .replaceAll("-", "+")
-    .replaceAll("_", "/");
-  const padded = encoded.padEnd(Math.ceil(encoded.length / 4) * 4, "=");
   let parsed: unknown;
   try {
-    const binary = atob(padded);
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    parsed = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(base64UrlDecode(match[1])),
+    );
   } catch {
     throw new ImportError(400, "cursor_invalid");
   }
@@ -1332,7 +1357,7 @@ function assertSmbcDirectCursor(value: SmbcDirectBackfillCursor): void {
       !/[\x00-\x20\x7f]/u.test(value.scanCursor);
   const hasManifest = value.manifestKey !== undefined;
   const hasOffset = value.offset !== undefined;
-  if (value.v !== 1 ||
+  if (value.v !== 2 ||
       typeof value.scanDone !== "boolean" ||
       !scanStateValid ||
       hasManifest !== hasOffset ||
@@ -1343,10 +1368,52 @@ function assertSmbcDirectCursor(value: SmbcDirectBackfillCursor): void {
         typeof value.offset !== "number" ||
         !Number.isSafeInteger(value.offset) ||
         value.offset <= 0 ||
+        value.offset % 10 !== 0 ||
         value.offset >= 10_000
       ))) {
     throw new ImportError(400, "cursor_invalid");
   }
+}
+
+async function smbcDirectCursorSignature(payload: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return base64UrlEncode(new Uint8Array(await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`smbc-direct-v2.${payload}`),
+  )));
+}
+
+async function verifySmbcDirectCursorSignature(
+  payload: string,
+  signature: string,
+  secret: string,
+): Promise<boolean> {
+  let signatureBytes: Uint8Array;
+  try {
+    signatureBytes = base64UrlDecode(signature);
+  } catch {
+    return false;
+  }
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+  return crypto.subtle.verify(
+    "HMAC",
+    key,
+    ownedArrayBuffer(signatureBytes),
+    new TextEncoder().encode(`smbc-direct-v2.${payload}`),
+  );
 }
 
 interface SonyBackfillCursor {

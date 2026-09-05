@@ -156,7 +156,7 @@ class FakeCentral {
 }
 
 describe("SMBC Direct R2 importer", () => {
-  test("preserves a complete source run and links generated payloads to raw inputs", async () => {
+  test("preserves a complete source run and links transformed payloads to raw inputs", async () => {
     const bucket = new FakeBucket();
     const manifest = await storeSuccessRun(bucket, 2);
     const central = new FakeCentral();
@@ -186,12 +186,21 @@ describe("SMBC Direct R2 importer", () => {
     )!;
     expect(normalized).toMatchObject({
       artifactRole: "collector_derived",
-      payloadFidelity: "generated",
+      payloadFidelity: "transformed",
       lineageDisposition: "linked",
       relations: [{
         parentArtifactKey: "transactions/20260101-20260131.raw.json.sjis",
         relation: "input",
       }],
+    });
+    expect(descriptors.find((value) => value.artifactKey === "manifest.json"))
+      .toMatchObject({ artifactRole: "collector_manifest", fetchUnitId: null });
+    const unitReport = JSON.parse(
+      central.requests.find((request) => request.path === "/v1/units/10/reports")!.body,
+    );
+    expect(unitReport).toMatchObject({
+      declaredArtifactCount: manifest.artifacts.length,
+      artifactCountScope: "direct",
     });
     expect(JSON.stringify(descriptors)).not.toContain(PREFIX);
     expect(JSON.stringify(descriptors)).not.toContain("1234");
@@ -272,7 +281,7 @@ describe("SMBC Direct R2 importer", () => {
     manifest.completedChunks = 2;
     manifest.transactionCount = 2;
     manifest.status = "partial";
-    manifest.failureCodes = ["artifact_write_failed"];
+    manifest.failureCodes = ["transactions_body_missing"];
     manifest.logoutSucceeded = true;
     await replaceManifest(bucket, manifest);
     const central = new FakeCentral();
@@ -312,6 +321,75 @@ describe("SMBC Direct R2 importer", () => {
       value.depositsTotal += 1;
       await replaceArtifact(bucket, manifest, normalized, utf8(JSON.stringify(value)));
       await expectRejected(bucket, "transactions_payload_mismatch");
+    }
+  });
+
+  test("rejects a transaction artifact unless the balance pair is complete", async () => {
+    const bucket = new FakeBucket();
+    const manifest = await storeSuccessRun(bucket, 1);
+    for (const artifact of manifest.artifacts.filter((candidate) =>
+      candidate.dataset.startsWith("balance-") || candidate.dataset === "transactions-normalized"
+    )) {
+      bucket.objects.delete(artifact.key);
+    }
+    manifest.artifacts = manifest.artifacts.filter((artifact) =>
+      artifact.dataset === "transactions-raw"
+    );
+    manifest.completedChunks = 0;
+    manifest.transactionCount = 0;
+    manifest.status = "failed";
+    manifest.failureCodes = ["transactions_body_missing"];
+    manifest.logoutSucceeded = false;
+    await replaceManifest(bucket, manifest);
+    await expectRejected(bucket, "manifest_balance_complement_mismatch");
+  });
+
+  test("closes raw transaction counts and observed provider flags", async () => {
+    for (const [field, value, code] of [
+      ["accntHstCount", "2", "transactions_raw_count_mismatch"],
+      ["shoukaiServerStopFlag", "1", "transactions_raw_stop_flag_invalid"],
+    ] as const) {
+      const bucket = new FakeBucket();
+      const manifest = await storeSuccessRun(bucket, 1);
+      const raw = manifest.artifacts.find((artifact) => artifact.dataset === "transactions-raw")!;
+      const payload = rawTransactionPayload(bucket, raw);
+      (payload.response as Record<string, unknown>)[field] = value;
+      await replaceArtifact(bucket, manifest, raw, shiftJis(JSON.stringify(payload)));
+      await expectRejected(bucket, code);
+    }
+
+    const bucket = new FakeBucket();
+    const manifest = await storeSuccessRun(bucket, 1);
+    const raw = manifest.artifacts.find((artifact) => artifact.dataset === "transactions-raw")!;
+    const payload = rawTransactionPayload(bucket, raw);
+    const rows = (payload.response as { meisai: Array<Record<string, unknown>> }).meisai;
+    rows[0]!.depositWithdrawTypeFlag = "9";
+    await replaceArtifact(bucket, manifest, raw, shiftJis(JSON.stringify(payload)));
+    await expectRejected(bucket, "transactions_raw_direction_invalid");
+  });
+
+  test("rejects collector failure codes outside the observed fixed vocabulary", async () => {
+    const bucket = new FakeBucket();
+    const manifest = await storeSuccessRun(bucket, 1);
+    manifest.status = "partial";
+    manifest.failureCodes = ["arbitrary_safe_code"];
+    await replaceManifest(bucket, manifest);
+    await expectRejected(bucket, "manifest_failure_codes_invalid");
+  });
+
+  test("rejects unaligned, terminal, and direct-mode transfer offsets before central writes", async () => {
+    for (const options of [
+      { immediate: false, offset: 1 },
+      { immediate: false, offset: 10 },
+      { immediate: true, offset: 10 },
+    ]) {
+      const bucket = new FakeBucket();
+      await storeSuccessRun(bucket, options.offset === 10 ? 3 : 1);
+      const central = new FakeCentral();
+      await expect(importRun(bucket, central, options)).rejects.toMatchObject({
+        code: "transfer_offset_invalid",
+      });
+      expect(central.requests).toHaveLength(0);
     }
   });
 
@@ -512,6 +590,15 @@ function rawTransactions(range: { start: string; end: string }, index: number): 
       syukkinGoukei: index % 2 === 0 ? "100" : "0",
     },
   }));
+}
+
+function rawTransactionPayload(
+  bucket: FakeBucket,
+  artifact: TestArtifact,
+): Record<string, unknown> {
+  return JSON.parse(
+    new TextDecoder("shift_jis").decode(bucket.objects.get(artifact.key)!.body),
+  ) as Record<string, unknown>;
 }
 
 function normalizedTransactions(

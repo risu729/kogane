@@ -630,7 +630,9 @@ export class DirectProfile {
     const result = body as {
       success?: unknown;
       response?: {
+        accntHstCount?: unknown;
         nyukinGoukei?: unknown;
+        shoukaiServerStopFlag?: unknown;
         syukkinGoukei?: unknown;
         meisai?: Array<Record<string, unknown>>;
       };
@@ -642,14 +644,27 @@ export class DirectProfile {
       }
       throw new Error("transactions_rejected");
     }
-    const transactions = result.response.meisai.map((entry) => ({
-      id: String(entry.meisaiId ?? ""),
-      date: transactionDate(entry.dispDate, endDate),
-      amount: Math.abs(parseYen(entry.amount, "transaction_amount")),
-      balanceAfter: parseYen(entry.torihikigobalance, "transaction_balance"),
-      description: String(entry.comment ?? ""),
-      direction: entry.depositWithdrawTypeFlag === "1" ? "debit" as const : "credit" as const,
-    }));
+    if (typeof result.response.accntHstCount !== "string" ||
+        !/^(?:0|[1-9][0-9]{0,5})$/u.test(result.response.accntHstCount) ||
+        Number(result.response.accntHstCount) !== result.response.meisai.length) {
+      throw new Error("transaction_count_invalid");
+    }
+    if (result.response.shoukaiServerStopFlag !== "0") {
+      throw new Error("transactions_stop_flag_invalid");
+    }
+    const transactions = result.response.meisai.map((entry) => {
+      if (entry.depositWithdrawTypeFlag !== "1" && entry.depositWithdrawTypeFlag !== "2") {
+        throw new Error("transaction_direction_invalid");
+      }
+      return {
+        id: String(entry.meisaiId ?? ""),
+        date: transactionDate(entry.dispDate, endDate),
+        amount: Math.abs(parseYen(entry.amount, "transaction_amount")),
+        balanceAfter: parseYen(entry.torihikigobalance, "transaction_balance"),
+        description: String(entry.comment ?? ""),
+        direction: entry.depositWithdrawTypeFlag === "1" ? "debit" as const : "credit" as const,
+      };
+    });
     await this.continueSession();
     return {
       range,

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { isResumable } from "../src/progress";
+import { classifyError } from "../src/session";
 import type { BackfillProgress } from "../src/types";
 
 const progress = (phase: BackfillProgress["phase"]): BackfillProgress => ({
@@ -31,5 +32,17 @@ describe("isResumable", () => {
   test("does not resume a completed or identity-free run", () => {
     expect(isResumable({ ...progress("success"), completedChunks: 93 })).toBeFalse();
     expect(isResumable({ ...progress("partial"), runId: null })).toBeFalse();
+  });
+});
+
+describe("collector failure codes", () => {
+  test("keeps only fixed collection codes and bounded HTTP patterns", () => {
+    expect(classifyError(new Error("transactions_http_503"))).toBe("transactions_http_503");
+    expect(classifyError(new Error("transaction_direction_invalid")))
+      .toBe("transaction_direction_invalid");
+    expect(classifyError(new Error("arbitrary_safe_code"))).toBe("unexpected_error");
+    expect(classifyError(new Error("transactions_http_999"))).toBe("unexpected_error");
+    expect(classifyError(new TypeError("arbitrary_safe_code"))).toBe("type_error");
+    expect(classifyError(new SyntaxError("arbitrary_safe_code"))).toBe("json_parse_failed");
   });
 });

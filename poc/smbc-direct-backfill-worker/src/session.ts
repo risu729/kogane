@@ -499,14 +499,48 @@ export class SmbcBackfillSession extends DurableObject<Env> {
   }
 }
 
-function classifyError(error: unknown): string {
-  if (error instanceof DOMException) return `crypto_${error.name.toLowerCase()}`;
-  if (error instanceof Error) {
-    const code = error.message.toLowerCase();
-    if (/^[a-z0-9_]+$/u.test(code)) return code;
-  }
+const FIXED_COLLECTION_FAILURE_CODES = new Set([
+  "_formid_field_missing",
+  "_token_field_missing",
+  "account_detail_body_missing",
+  "account_detail_body_too_large",
+  "aifcdt3_form_missing",
+  "aifcdtl_form_missing",
+  "balance_body_missing",
+  "balance_body_too_large",
+  "balance_invalid",
+  "balance_value_missing",
+  "continue_session_body_missing",
+  "continue_session_body_too_large",
+  "deposits_total_invalid",
+  "directheaderform_form_missing",
+  "tpaltop_form_missing",
+  "transaction_amount_invalid",
+  "transaction_balance_invalid",
+  "transaction_count_invalid",
+  "transaction_date_invalid",
+  "transaction_direction_invalid",
+  "transactions_body_missing",
+  "transactions_body_too_large",
+  "transactions_json_invalid",
+  "transactions_rejected",
+  "transactions_service_time_unavailable",
+  "transactions_stop_flag_invalid",
+  "withdrawals_total_invalid",
+]);
+const COLLECTION_HTTP_FAILURE_CODE =
+  /^(?:account_detail|balance|continue_session|transactions)_http_[1-5][0-9]{2}$/u;
+
+export function classifyError(error: unknown): string {
+  if (error instanceof DOMException) return "crypto_error";
   if (error instanceof SyntaxError) return "json_parse_failed";
   if (error instanceof TypeError) return "type_error";
+  if (error instanceof Error) {
+    const code = error.message.toLowerCase();
+    if (FIXED_COLLECTION_FAILURE_CODES.has(code) || COLLECTION_HTTP_FAILURE_CODE.test(code)) {
+      return code;
+    }
+  }
   return "unexpected_error";
 }
 
