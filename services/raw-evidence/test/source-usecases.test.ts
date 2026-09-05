@@ -693,12 +693,38 @@ describe("sanitized source-usecase contract", () => {
     const artifact = await catalogue(runId, "point-history/page-0.json", value.body, {
       pageGroupId: Number(pageGroup.pageGroupId),
       pageIndex: 0,
+      artifactRole: "collector_derived",
+      payloadFidelity: "transformed",
+      lineageDisposition: "source_bytes_not_available",
       dataset: "point-history",
       declaredMediaType: "application/json",
       mediaTypeBasis: "manifest",
+      transformSteps: [
+        { stepIndex: 0, stepKind: "transport_decoded", transformerId: "vpoint-worker", transformerVersion: "vpoint-worker-poc-v2" },
+        { stepIndex: 1, stepKind: "reencoded", transformerId: "vpoint-worker", transformerVersion: "vpoint-worker-poc-v2" },
+      ],
     });
-    await terminal(runId, 1);
-    await seal(runId, [artifact], "v-point-empty");
+    const manifest = await catalogue(runId, "manifest.json", "{\"status\":\"success\"}", {
+      artifactRole: "collector_manifest",
+      payloadFidelity: "generated",
+      lineageDisposition: "source_bytes_not_available",
+      dataset: "collector-manifest",
+      formatId: "vpoint-collector-manifest-json",
+      formatVersion: "vpoint-central-manifest-v2",
+      declaredMediaType: "application/json",
+      mediaTypeBasis: "operator",
+      sequence: 1,
+    });
+    await terminal(runId, 2);
+    await seal(runId, [artifact, manifest], "v-point-empty");
+    const stored = await env.DB.prepare(`
+      SELECT artifact_key, artifact_role, payload_fidelity, lineage_disposition
+      FROM fetch_artifacts WHERE fetch_run_id = ? ORDER BY sequence
+    `).bind(runId).all();
+    expect(stored.results).toEqual([
+      { artifact_key: "point-history/page-0.json", artifact_role: "collector_derived", payload_fidelity: "transformed", lineage_disposition: "source_bytes_not_available" },
+      { artifact_key: "manifest.json", artifact_role: "collector_manifest", payload_fidelity: "generated", lineage_disposition: "source_bytes_not_available" },
+    ]);
   });
 
   it("maps V Point Pay mail and keeps reconciliation as a V Point generated report", async () => {

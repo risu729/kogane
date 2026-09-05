@@ -6,7 +6,7 @@ const SOURCE = "v-point" as const;
 const PRODUCER = "collector-r2-importer";
 const V1 = "vpoint-worker-poc-v1" as const;
 const V2 = "vpoint-worker-poc-v2" as const;
-const INGEST_CONTRACT_VERSION = "vpoint-r2-v1";
+const INGEST_CONTRACT_VERSION = "vpoint-r2-v2";
 const CENTRAL_CLIENT_ID = "collector-r2-v-point";
 const STORAGE_CONTAINER = "kogane-vpoint-collector-poc";
 const STORAGE_TEMPLATE = "raw/v-point/{date}/{run-id}/{artifact}.json";
@@ -258,8 +258,6 @@ export async function importVPointRun(options: ImportVPointOptions): Promise<Imp
 
     const centralManifestBytes = sanitizeManifest(loaded.bytes, manifest);
     const centralManifestSha256 = await sha256Hex(centralManifestBytes);
-    const manifestTransformed = centralManifestBytes.byteLength !== loaded.bytes.byteLength ||
-      centralManifestSha256 !== await sha256Hex(loaded.bytes);
 
     phase = "central_create";
     const central = new CentralClient(
@@ -298,7 +296,6 @@ export async function importVPointRun(options: ImportVPointOptions): Promise<Imp
       ...(report ? { report } : {}),
       centralManifestBytes,
       centralManifestSha256,
-      manifestTransformed,
       manifest,
       manifestKey: options.manifestKey,
       unitId,
@@ -426,7 +423,6 @@ async function artifactPlans(options: {
   report?: VerifiedReport;
   centralManifestBytes: Uint8Array;
   centralManifestSha256: string;
-  manifestTransformed: boolean;
   manifest: Manifest;
   manifestKey: string;
   unitId: number;
@@ -487,7 +483,6 @@ async function artifactPlans(options: {
     completedAt: options.manifest.completedAt,
     schemaVersion: options.manifest.schemaVersion,
     fingerprintKey: options.fingerprintKey,
-    transformed: options.manifestTransformed,
   });
   plans.push({
     source: { kind: "manifest" },
@@ -1202,7 +1197,7 @@ async function dataDescriptor(options: {
     : options.page?.group === "vmoney-history" ? options.vMoneyGroupId : undefined;
   return {
     artifactKey: filename(options.artifact.key),
-    artifactRole: summary ? "collector_summary" : "provider_response",
+    artifactRole: summary ? "collector_summary" : "collector_derived",
     payloadFidelity: summary ? "generated" : "transformed",
     containerKind: "single",
     lineageDisposition: summary ? "not_applicable" : "source_bytes_not_available",
@@ -1279,17 +1274,16 @@ async function manifestDescriptor(options: {
   completedAt: string;
   schemaVersion: SchemaVersion;
   fingerprintKey: string;
-  transformed: boolean;
 }): Promise<JsonObject> {
   return {
     artifactKey: "manifest.json",
     artifactRole: "collector_manifest",
-    payloadFidelity: options.transformed ? "transformed" : "generated",
+    payloadFidelity: "generated",
     containerKind: "single",
-    lineageDisposition: options.transformed ? "source_not_retained_for_security" : "not_applicable",
+    lineageDisposition: "source_bytes_not_available",
     dataset: "collector-manifest",
     formatId: "vpoint-collector-manifest-json",
-    formatVersion: options.schemaVersion,
+    formatVersion: "vpoint-central-manifest-v2",
     declaredMediaType: "application/json",
     mediaTypeBasis: "operator",
     fetchedAtMs: Date.parse(options.completedAt),
@@ -1303,14 +1297,6 @@ async function manifestDescriptor(options: {
       STORAGE_TEMPLATE,
       options.fingerprintKey,
     ),
-    ...(options.transformed ? {
-      transformSteps: ["redacted", "reencoded"].map((stepKind, stepIndex) => ({
-        stepIndex,
-        stepKind,
-        transformerId: PRODUCER,
-        transformerVersion: INGEST_CONTRACT_VERSION,
-      })),
-    } : {}),
   };
 }
 
