@@ -53,6 +53,7 @@ class FakeCentral {
   readonly requests: Array<{ path: string; method: string; body: string }> = [];
   readonly uploaded = new Map<string, Uint8Array>();
   readonly runIdsBySourceKey = new Map<string, number>();
+  readonly terminalReports = new Map<string, string>();
 
   constructor(
     private readonly mutateParsedDescriptor?: (
@@ -93,6 +94,16 @@ class FakeCentral {
       const descriptor = this.mutateParsedDescriptor?.(parsed) ?? parsed;
       return Response.json({ descriptorSha256: await normalizedDescriptorSha256(descriptor) }, {
         status: 201,
+      });
+    }
+    if (/\/reports$/u.test(path)) {
+      const previous = this.terminalReports.get(path);
+      if (previous !== undefined && previous !== body) {
+        return Response.json({ error: "immutable report conflict" }, { status: 409 });
+      }
+      this.terminalReports.set(path, body);
+      return Response.json({ reused: previous !== undefined }, {
+        status: previous === undefined ? 201 : 200,
       });
     }
     if (/\/seal$/u.test(path)) return Response.json({ sealed: true }, { status: 201 });
@@ -251,7 +262,7 @@ describe("GLOBAL PASS R2 importer", () => {
       sourceId: "global-pass",
       externalIdNamespace: "globalpass-browser-poc-v1",
       externalSessionId: RUN_ID,
-      sourceRunKey: "activity-global-pass-r2-v2",
+      sourceRunKey: "activity-global-pass-r2-v3",
     });
     const descriptor = central.requests
       .filter((request) => /\/artifacts$/u.test(request.path))
@@ -289,7 +300,9 @@ describe("GLOBAL PASS R2 importer", () => {
       .find((value) => value.artifactKey === "manifest.json")!;
     expect(manifestDescriptor.fetchUnitId).toBeNull();
 
-    const replay = await importRun(bucket, central);
+    const replay = await importRun(bucket, central, {
+      importerVersion: "collector-r2-importer-v99",
+    });
     expect(replay.status).toBe("sealed");
     if (replay.status !== "sealed") throw new Error("expected sealed replay");
     expect(replay.finalChunkAllObjectsReused).toBe(true);
@@ -368,6 +381,12 @@ describe("GLOBAL PASS R2 importer", () => {
       declaredArtifactCount: 0,
       safeFailureCode: "browser-collection-failed",
     });
+    const runReport = central.requests.find((request) => /\/runs\/1\/reports$/u.test(request.path))!;
+    expect(JSON.parse(runReport.body)).toMatchObject({
+      producerVersion: "global-pass-r2-v3",
+      normalizedOutcome: "failed",
+      declaredArtifactCount: 1,
+    });
     const manifestDescriptor = central.requests
       .filter((request) => /\/artifacts$/u.test(request.path))
       .map((request) => JSON.parse(request.body) as Record<string, unknown>)
@@ -375,7 +394,7 @@ describe("GLOBAL PASS R2 importer", () => {
     expect(manifestDescriptor.fetchUnitId).toBeNull();
   });
 
-  test("moves an invalid v1 central run to one idempotent v2 run", async () => {
+  test("moves legacy central runs to one deployment-independent v3 run", async () => {
     const bucket = new FakeBucket();
     const manifest = baseManifest("v1", []);
     manifest.status = "failed";
@@ -396,7 +415,7 @@ describe("GLOBAL PASS R2 importer", () => {
     expect(replay).toMatchObject({ centralRunId: 2, sealed: true });
     expect(central.runIdsBySourceKey).toEqual(new Map([
       ["activity-global-pass-r2-v1", 1],
-      ["activity-global-pass-r2-v2", 2],
+      ["activity-global-pass-r2-v3", 2],
     ]));
   });
 
@@ -561,17 +580,18 @@ describe("GLOBAL PASS R2 importer", () => {
 async function importRun(
   bucket: FakeBucket,
   central: FakeCentral,
-  options: { offset?: number; immediate?: boolean } = {},
+  options: { offset?: number; immediate?: boolean; importerVersion?: string } = {},
 ) {
+  const { importerVersion = "collector-r2-importer-v10", ...runOptions } = options;
   return importGlobalPassRun({
     bucket: bucket as unknown as R2Bucket,
     centralService: central as unknown as Fetcher,
     centralToken: TOKEN,
     fingerprintKey: FINGERPRINT_KEY,
-    importerVersion: "collector-r2-importer-v10",
+    importerVersion,
     manifestKey: MANIFEST_KEY,
     legacyEmptyArtifactSha256: new Set(),
-    ...options,
+    ...runOptions,
   });
 }
 

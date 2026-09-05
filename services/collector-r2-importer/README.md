@@ -174,6 +174,12 @@ GLOBAL PASSは次の順序で直列に適用する。backfill中はdaily cronの
 
 4. legacy v1は、空のscan cursorから管理token付き`POST /backfill-raw-evidence?limit=1`を1 pageずつ呼び、最初のmanifestだけをcanaryにする。`deferredManifestCount: 1`なら返されたopaque cursorで同じmanifestの次chunkを続け、`importedManifestCount: 1`とsealed resultを得た時点で停止する。このcanaryではcursor fileを保存しないため、full backfillが同じmanifestを先頭から冪等再送する。失敗時はfull backfillへ進まない。
 
+   GLOBAL PASSの中央runは`activity-global-pass-r2-v3`を使用する。terminal reportの
+   `producerVersion`はデプロイごとに変わる`IMPORTER_VERSION`ではなく、この固定された
+   取り込み契約versionである。Importer更新後も同じsource runを不変のterminal reportで
+   再走査できる。失敗または中断した取り込みattemptには、その時点のデプロイrevisionを
+   記録する。v1/v2の中央runは不変証跡として残し、削除や上書きをしない。
+
 5. canary前後の中央件数を次の集約queryだけで記録し、run 1件がsealedされ、artifact数がmanifest宣言数だけ増えたことを確認する。
 
    ```sh
