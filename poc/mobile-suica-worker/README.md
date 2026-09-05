@@ -40,6 +40,27 @@ WebAuthn assertionはR2、ログ、manifest、Gitへ保存しない。
 - Browserから得たsessionをplain Worker fetchへ引き継ぎ、15件・1ページ・3 artifact・
   failure 0をprivate R2へ保存した。R2 manifestを再取得して保存完了も確認した。
 
+## 2026-09-05 production raw-evidence verification
+
+- 中央`kogane-ingest`はschema `0009`、version
+  `cd26355d-36b0-4eb9-b93f-57b588113429`、Importerの最終versionは
+  `72067520-54bc-414b-81d7-2861746f96e4`、collector v2はversion
+  `9a401036-37e6-4427-884f-e21c6d8313c7`で検証した。Cronは`10 21 * * *`を維持した。
+- source R2は40 object / 10 manifestだった。事前検証で1 pageを処理した後、initial
+  resumeは残り39 pageを処理し、合計40 page / 10 manifestへ到達した。続くfull replayも
+  40 page / 10 manifestを走査した。
+- 中央はbackfill前の0 runから、10 run / 10 sealed / 0 unsealed / 40 artifactになった。
+  full replay後も同じ件数で、冪等再送により追加runやartifactは作られなかった。
+- 中央のHTML 10件はすべてCP932として有効で、固定sentinelが各1件、`baseVariable`の値は
+  sentinelだけだった。実object key、hash、履歴本文は記録しない。
+- backfillとreplayの前後でsource R2の40 objectは変更・削除されなかった。
+- 旧v1の実shapeに対しては、同一browser sessionをrunより前にcaptureした
+  `capturedSessionAt`をcanonical ISOかつ`completedAt`以下に限って受理し、R2で厳密検証する
+  parameter付きHTML media typeを中央descriptorでは`text/html`へ正規化する狭い互換だけを
+  追加した。
+- manual live v2 canaryは未実施である。既存scheduleを変更せず、次回06:10 JSTのscheduled
+  runを次のcanaryとして確認する。
+
 ## 収集物
 
 ```text

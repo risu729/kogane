@@ -8,7 +8,7 @@ import {
   parseMobileSuicaManifest,
   sanitizeHistoryHtml,
 } from "../src/mobile-suica";
-import { sanitizeHistoryHtml as sanitizeCollectorHistoryHtml } from "../../../poc/mobile-suica-worker/src/sanitize";
+import { sanitizeHistoryHtmlText as sanitizeCollectorHistoryHtmlText } from "../../../poc/mobile-suica-worker/src/sanitize-contract";
 import { storeManifest as storeCollectorManifest } from "../../../poc/mobile-suica-worker/src/storage";
 import type { CollectionManifest } from "../../../poc/mobile-suica-worker/src/types";
 
@@ -171,7 +171,8 @@ describe("Mobile Suica R2 importer", () => {
       `<input type="hidden" name="baseVariable" value="short-lived-provider-state">`,
     ];
     for (const html of providerForms) {
-      const collectorBytes = new Uint8Array(sanitizeCollectorHistoryHtml(html));
+      const collectorText = sanitizeCollectorHistoryHtmlText(html).sanitized;
+      const collectorBytes = new Uint8Array(encode(collectorText, "shift_jis"));
       expect(() => sanitizeHistoryHtml(collectorBytes, "mobile-suica-worker-poc-v2")).not.toThrow();
       expect(decode(collectorBytes, "shift_jis")).toContain(SENTINEL);
     }
