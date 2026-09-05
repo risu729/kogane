@@ -155,10 +155,10 @@ describe("V Point R2 importer", () => {
     const runReport = JSON.parse(
       central.reports.get("/v1/runs/1/reports") ?? "null",
     ) as Record<string, unknown>;
-    expect(runReport.producerVersion).toBe("vpoint-r2-v2");
+    expect(runReport.producerVersion).toBe("vpoint-r2-v3");
     const createRun = central.requests.find((request) => request.path === "/v1/runs");
     expect(JSON.parse(createRun?.body ?? "null")).toMatchObject({
-      sourceRunKey: "full-snapshot-vpoint-r2-v2",
+      sourceRunKey: "full-snapshot-vpoint-r2-v3",
     });
     expect(JSON.stringify([...central.reports.values()])).not.toContain("deployment-");
   });
@@ -524,15 +524,26 @@ async function sha256(bytes: Uint8Array): Promise<string> {
 }
 
 async function descriptorHash(descriptor: Record<string, unknown>): Promise<string> {
-  const { http, storage, file, email, ...fields } = descriptor;
+  const {
+    http, storage, file, email,
+    fetchUnitId, pageGroupId, pageIndex,
+    ranges, transformSteps, relations,
+    ...fields
+  } = descriptor;
   return sha256(new TextEncoder().encode(canonicalJson({
     ...fields,
+    fetchUnitId: fetchUnitId ?? null,
+    pageGroupId: pageGroupId ?? null,
+    pageIndex: pageIndex ?? null,
     origins: {
       http: http ?? null,
       storage: storage ?? null,
       file: file ?? null,
       email: email ?? null,
     },
+    ranges: ranges ?? [],
+    transformSteps: transformSteps ?? [],
+    relations: relations ?? [],
   })));
 }
 

@@ -56,7 +56,7 @@ describe("collector R2 importer routes", () => {
       truncated: true,
     });
     expect(body.nextCursor).toBeString();
-    expect(body.nextCursor as string).toStartWith("vpoint-v3.");
+    expect(body.nextCursor as string).toStartWith("vpoint-v4.");
 
     const final = await worker.fetch(
       new Request("https://importer.internal/v1/v-point/backfill-page", {
@@ -107,7 +107,7 @@ describe("collector R2 importer routes", () => {
       new Request("https://importer.internal/v1/v-point/backfill-page", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cursor: `vpoint-v2.e30.${"A".repeat(43)}`, limit: 1 }),
+        body: JSON.stringify({ cursor: `vpoint-v3.e30.${"A".repeat(43)}`, limit: 1 }),
       }) as Parameters<typeof worker.fetch>[0],
       environment(
         {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
@@ -633,7 +633,7 @@ function environment(
     VPOINT_SNAPSHOTS: vPointBucket,
     VPOINT_PAY_SNAPSHOTS: vPointPayBucket,
     RAW_EVIDENCE: {} as Fetcher,
-    IMPORTER_VERSION: "collector-r2-importer-v13",
+    IMPORTER_VERSION: "collector-r2-importer-v14",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_VC: `collector-r2-sbi-vc.${"v".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SONY: `collector-r2-sony-bank.${"o".repeat(32)}`,

@@ -6,7 +6,7 @@ const SOURCE = "v-point" as const;
 const PRODUCER = "collector-r2-importer";
 const V1 = "vpoint-worker-poc-v1" as const;
 const V2 = "vpoint-worker-poc-v2" as const;
-const INGEST_CONTRACT_VERSION = "vpoint-r2-v2";
+const INGEST_CONTRACT_VERSION = "vpoint-r2-v3";
 const CENTRAL_CLIENT_ID = "collector-r2-v-point";
 const STORAGE_CONTAINER = "kogane-vpoint-collector-poc";
 const STORAGE_TEMPLATE = "raw/v-point/{date}/{run-id}/{artifact}.json";
@@ -1555,17 +1555,28 @@ function canonical(value: JsonValue): JsonValue {
 }
 
 async function descriptorSha256(descriptor: JsonObject): Promise<string> {
-  const { http, storage, file, email, ...fields } = descriptor;
+  const {
+    http, storage, file, email,
+    fetchUnitId, pageGroupId, pageIndex,
+    ranges, transformSteps, relations,
+    ...fields
+  } = descriptor;
   const normalized = {
     ...fields,
+    fetchUnitId: fetchUnitId ?? null,
+    pageGroupId: pageGroupId ?? null,
+    pageIndex: pageIndex ?? null,
     origins: {
       http: http ?? null,
       storage: storage ?? null,
       file: file ?? null,
       email: email ?? null,
     },
+    ranges: ranges ?? [],
+    transformSteps: transformSteps ?? [],
+    relations: relations ?? [],
   };
-  return sha256Hex(new TextEncoder().encode(canonicalJson(normalized as JsonValue)));
+  return sha256Hex(new TextEncoder().encode(canonicalJson(normalized as unknown as JsonValue)));
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {

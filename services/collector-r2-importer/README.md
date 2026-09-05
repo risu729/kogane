@@ -32,7 +32,7 @@ V Pointはprivate R2の`raw/v-point/`を中央canonical source `v-point`とし�
 
 provider JSONはcollectorがHTTP response textを取得後に保存したbytesであり、wire上の圧縮・chunk framingまでは残らない。このため中央では`provider_response / transformed / source_bytes_not_available`とする。collection summary、V Point Pay email reconciliation、manifestは生成物として別roleを持つ。自由形式failure messageを含むmanifestは中央保存前に固定値へ置換し、source R2自体は変更しない。V Moneyの非空台帳はV Pointとは別のsource設計が必要なため、監査済みの空pageだけを現契約で受理する。
 
-terminal run reportの`producerVersion`はdeploy revisionではなくsource契約の`vpoint-r2-v2`へ固定する。これによりImporter更新後の再走査でも同一runのimmutable report本文が変わらない。v2はcollectorがtransport decode後に再encodeしたJSONを`collector_derived/transformed`、自由形式failure textを除いた中央manifestを`collector_manifest/generated`として登録し、実D1のdescriptor制約と一致させる。実際の`IMPORTER_VERSION`は失敗・incomplete attemptの診断にだけ記録する。
+terminal run reportの`producerVersion`はdeploy revisionではなくsource契約の`vpoint-r2-v3`へ固定する。これによりImporter更新後の再走査でも同一runのimmutable report本文が変わらない。v3はcollectorがtransport decode後に再encodeしたJSONを`collector_derived/transformed`、自由形式failure textを除いた中央manifestを`collector_manifest/generated`として登録し、中央が補うnullable fieldと空arrayを含むdescriptor hashを事前計算する。実際の`IMPORTER_VERSION`は失敗・incomplete attemptの診断にだけ記録する。
 
 v2 manifestが参照するV Point Pay email reconciliationは、別bucketから同一runの生成reportを読み、key/metadata/checksum、exact policy、source state、candidate参照、全status件数を検証する。各candidateは、検証済みhistory pageの実在filenameと、そのpageの実際のrow count未満のindexへ束縛し、`sha256(JSON.stringify(row))`がreport fingerprintと一致しなければ拒否する。同じentry内の同一source/index重複も拒否する。既存R2にはmatch policyのexactな旧・新2表現があり、意味を推測せず両方を列挙して受理する。report時刻はcollector実装どおりmanifestより少し早くなり得るため、同値ではなく、run開始以後・manifest完了以前・report keyの日付との一致を要求する。
 
@@ -94,7 +94,7 @@ SBI証券の完全な1 runは中央Workerを最大約23回呼ぶ。Cloudflareの
 
 SBI新生銀行はmanifest込み最大6 objectで、中央呼び出しは最大17回に収まる。`backfill-page`は他sourceと同様にR2 objectを1件ずつ走査し、manifestを見つけたページだけ同期転送する。cursorはcollector側のローカルstateへ原子的に保存し、失敗manifestでは進めない。
 
-V Pointは1 objectずつ走査し、小runはmanifest pageで同期sealする。大runは固定したstaged inventoryへ最大8 artifactずつ転送し、HMAC署名済みcursorで同じmanifestのoffsetを再開する。途中chunkではR2 scan cursorを進めず、最終chunkのseal後だけ次のsource objectへ移る。ingest契約v2への変更時にcursor envelopeも`vpoint-v3`へ更新し、旧runの非ゼロoffsetを新runへ適用できないようfail closedにした。failed manifestは自由形式messageを中央へ残さず、失敗証拠1 objectとしてsealする。scriptは管理tokenをmode 0600のローカルfileからだけ読み、opaque cursorをmode 0600で原子的に保存する。
+V Pointは1 objectずつ走査し、小runはmanifest pageで同期sealする。大runは固定したstaged inventoryへ最大8 artifactずつ転送し、HMAC署名済みcursorで同じmanifestのoffsetを再開する。途中chunkではR2 scan cursorを進めず、最終chunkのseal後だけ次のsource objectへ移る。ingest契約v3への変更時にcursor envelopeも`vpoint-v4`へ更新し、旧runの非ゼロoffsetを新runへ適用できないようfail closedにした。failed manifestは自由形式messageを中央へ残さず、失敗証拠1 objectとしてsealする。scriptは管理tokenをmode 0600のローカルfileからだけ読み、opaque cursorをmode 0600で原子的に保存する。
 
 GLOBAL PASSのdaily小runは同期転送する。12 artifactを超える即時importは中央stateを作らず`202 deferred`を返す。backfillはmanifestを見つけたページでstaged inventoryを開始し、1回につき10 artifactを転送する。cursorはR2のscan cursorにmanifest keyとoffsetを加えたopaque値で、同じmanifestの続きではR2を再走査せず、最終chunkをsealしてから次のsource objectへ進む。scriptは`deferredManifestCount`を正常な進捗として数え、cursorが進まない応答を拒否する。
 
@@ -261,7 +261,7 @@ v20のmanual live canaryと次回cronが成功した後は、運用記録の現�
 
 ### V Pointの本番適用
 
-V Pointは中央→importer→collectorの順で直列に適用する。まず`services/raw-evidence/scripts/deploy.sh`で加算migration `0012`を適用し、healthのschemaと`verify-v-point-route.sh`のroute 1件・policy 2件・alias 1件を確認する。次に`services/collector-r2-importer/scripts/deploy.sh`で専用tokenを同期し、healthが`collector-r2-importer-v13`を返すことを確認する。最後にV Point collectorをdeployしてService Bindingを有効にする。GitHub Actions cronは追加せず、既存Worker cronを維持する。
+V Pointは中央→importer→collectorの順で直列に適用する。まず`services/raw-evidence/scripts/deploy.sh`で加算migration `0012`を適用し、healthのschemaと`verify-v-point-route.sh`のroute 1件・policy 2件・alias 1件を確認する。次に`services/collector-r2-importer/scripts/deploy.sh`で専用tokenを同期し、healthが`collector-r2-importer-v14`を返すことを確認する。最後にV Point collectorをdeployしてService Bindingを有効にする。GitHub Actions cronは追加せず、既存Worker cronを維持する。
 
 historical dataは、先に`bun run audit:vpoint-r2`を実行してfailed 0を確認し、`poc/vpoint-worker/scripts/backfill-raw-evidence.sh`で完走する。前後でsource R2のobject件数と集約checksumが不変であること、中央のV Point run/seal/artifactの件数だけが増えることを確認する。cursor削除後に再実行し、中央run/seal/artifact件数が不変なら冪等性確認完了である。失敗時はcollector/importerのrolloutを止めるが、migrationとsource R2はrollback・削除しない。
 
