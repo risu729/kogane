@@ -53,6 +53,12 @@ class FakeCentral {
   readonly requests: Array<{ path: string; method: string; body: string }> = [];
   readonly uploaded = new Map<string, Uint8Array>();
 
+  constructor(
+    private readonly mutateParsedDescriptor?: (
+      descriptor: Record<string, unknown>,
+    ) => Record<string, unknown>,
+  ) {}
+
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
     const path = new URL(request.url).pathname;
@@ -70,7 +76,9 @@ class FakeCentral {
     if (/\/inventories$/u.test(path)) return Response.json({ inventoryId: 20 }, { status: 201 });
     if (/\/inventories\/20\/items$/u.test(path)) return Response.json({ ok: true }, { status: 201 });
     if (/\/artifacts$/u.test(path)) {
-      return Response.json({ descriptorSha256: await centralDescriptorSha256(JSON.parse(body)) }, {
+      const parsed = centralNormalizedDescriptor(JSON.parse(body));
+      const descriptor = this.mutateParsedDescriptor?.(parsed) ?? parsed;
+      return Response.json({ descriptorSha256: await normalizedDescriptorSha256(descriptor) }, {
         status: 201,
       });
     }
@@ -183,6 +191,38 @@ describe("GLOBAL PASS R2 importer", () => {
     const central = new FakeCentral();
     await expect(importRun(bucket, central)).resolves.toMatchObject({ sealed: true });
     expect([...central.uploaded.values()].some((value) => decode(value) === html)).toBe(true);
+  });
+
+  test("hashes the complete central-normalized descriptor and rejects normalized drift", async () => {
+    const bucket = new FakeBucket();
+    const html = canonicalV2(variantB([SENTINEL, SENTINEL, SENTINEL, ""]));
+    await storeRun(bucket, "v2", html);
+
+    const central = new FakeCentral();
+    await expect(importRun(bucket, central)).resolves.toMatchObject({ sealed: true });
+    const descriptors = central.requests
+      .filter((request) => /\/artifacts$/u.test(request.path))
+      .map((request) => JSON.parse(request.body) as Record<string, unknown>);
+    expect(descriptors).toHaveLength(2);
+    for (const descriptor of descriptors) {
+      expect(descriptor).toMatchObject({
+        pageGroupId: null,
+        pageIndex: null,
+        http: null,
+        file: null,
+        email: null,
+        ranges: [],
+        relations: [],
+      });
+    }
+
+    const driftedCentral = new FakeCentral((descriptor) => ({
+      ...descriptor,
+      pageGroupId: 99,
+      pageIndex: 0,
+    }));
+    await expect(importRun(bucket, driftedCentral))
+      .rejects.toThrow("central_descriptor_mismatch");
   });
 
   test("accepts the producer sanitizer output as canonical v2 HTML", () => {
@@ -553,18 +593,40 @@ async function sha256Hex(value: Uint8Array): Promise<string> {
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function centralDescriptorSha256(descriptor: Record<string, unknown>): Promise<string> {
+function centralNormalizedDescriptor(
+  descriptor: Record<string, unknown>,
+): Record<string, unknown> {
   const { http, storage, file, email, ...fields } = descriptor;
-  const normalized = {
+  return {
     ...fields,
+    containerKind: descriptor.containerKind ?? "single",
+    dataset: descriptor.dataset ?? null,
+    formatId: descriptor.formatId ?? null,
+    formatVersion: descriptor.formatVersion ?? null,
+    declaredMediaType: descriptor.declaredMediaType ?? null,
+    mediaTypeBasis: descriptor.mediaTypeBasis ?? null,
+    fetchedAtMs: descriptor.fetchedAtMs ?? null,
+    fetchedAtBasis: descriptor.fetchedAtBasis ?? null,
+    fetchUnitId: descriptor.fetchUnitId ?? null,
+    pageGroupId: descriptor.pageGroupId ?? null,
+    pageIndex: descriptor.pageIndex ?? null,
+    sequence: descriptor.sequence ?? null,
     origins: {
       http: http ?? null,
       storage: storage ?? null,
       file: file ?? null,
       email: email ?? null,
     },
+    ranges: descriptor.ranges ?? [],
+    transformSteps: descriptor.transformSteps ?? [],
+    relations: descriptor.relations ?? [],
   };
-  return sha256Hex(encode(JSON.stringify(canonical(normalized))));
+}
+
+async function normalizedDescriptorSha256(
+  descriptor: Record<string, unknown>,
+): Promise<string> {
+  return sha256Hex(encode(JSON.stringify(canonical(descriptor))));
 }
 
 function canonical(value: unknown): unknown {
