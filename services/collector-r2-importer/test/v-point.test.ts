@@ -52,6 +52,7 @@ class FakeBucket {
 class FakeCentral {
   readonly requests: Array<{ path: string; method: string; body: string }> = [];
   readonly uploads = new Map<string, Uint8Array>();
+  readonly reports = new Map<string, string>();
 
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
@@ -68,7 +69,19 @@ class FakeCentral {
     if (path === "/v1/runs") return Response.json({ runId: 1 }, { status: 201 });
     if (path.endsWith("/units")) return Response.json({ unitId: 10 }, { status: 201 });
     if (path.endsWith("/page-groups")) return Response.json({ pageGroupId: path.includes("unused") ? 21 : 20 }, { status: 201 });
-    if (path.endsWith("/artifacts")) return Response.json({ descriptorSha256: "d".repeat(64) }, { status: 201 });
+    if (path.endsWith("/inventories")) return Response.json({ inventoryId: 20 }, { status: 201 });
+    if (path.endsWith("/artifacts")) {
+      return Response.json({ descriptorSha256: await descriptorHash(JSON.parse(body)) }, { status: 201 });
+    }
+    if (path.endsWith("/reports")) {
+      const report = JSON.stringify(JSON.parse(body));
+      const existing = this.reports.get(path);
+      if (existing !== undefined && existing !== report) {
+        return Response.json({ error: "report_immutable" }, { status: 409 });
+      }
+      this.reports.set(path, report);
+      return Response.json({ ok: true }, { status: existing === undefined ? 201 : 200 });
+    }
     if (path.endsWith("/seal")) return Response.json({ sealed: true }, { status: 201 });
     return Response.json({ ok: true }, { status: 201 });
   };
@@ -94,7 +107,10 @@ describe("V Point R2 importer", () => {
       artifactRole: "collector_summary",
       payloadFidelity: "generated",
     });
-    expect((await importRun(source, reconciliation, central)).allObjectsReused).toBe(true);
+    const replay = await importRun(source, reconciliation, central);
+    expect(replay.status).toBe("sealed");
+    if (replay.status !== "sealed") throw new Error("expected sealed replay");
+    expect(replay.allObjectsReused).toBe(true);
     expect(central.uploads).toHaveLength(7);
   });
 
@@ -116,6 +132,20 @@ describe("V Point R2 importer", () => {
     const uploaded = new TextDecoder().decode([...central.uploads.values()][0]);
     expect(uploaded).toContain("failure_redacted");
     expect(uploaded).not.toContain("dummy-sensitive-detail");
+  });
+
+  test("replays across importer deployments without changing immutable terminal reports", async () => {
+    const { source, reconciliation } = await successRun();
+    const central = new FakeCentral();
+    await expect(importRun(source, reconciliation, central, 0, true, "deployment-a"))
+      .resolves.toMatchObject({ status: "sealed" });
+    await expect(importRun(source, reconciliation, central, 0, true, "deployment-b"))
+      .resolves.toMatchObject({ status: "sealed", allObjectsReused: true });
+    const runReport = JSON.parse(
+      central.reports.get("/v1/runs/1/reports") ?? "null",
+    ) as Record<string, unknown>;
+    expect(runReport.producerVersion).toBe("vpoint-r2-v1");
+    expect(JSON.stringify([...central.reports.values()])).not.toContain("deployment-");
   });
 
   test("imports the audited legacy v1 contract in its own format namespace", async () => {
@@ -157,6 +187,36 @@ describe("V Point R2 importer", () => {
     expect(central.requests).toHaveLength(0);
   });
 
+  test("rejects a stagnant R2 listing cursor before central writes", async () => {
+    const { source, reconciliation } = await successRun();
+    const central = new FakeCentral();
+    let calls = 0;
+    source.list = async () => ({
+      objects: calls++ === 0 ? [{ key: MANIFEST_KEY }] : [],
+      truncated: true,
+      cursor: "stuck",
+    }) as unknown as R2Objects;
+    await expect(importRun(source, reconciliation, central)).rejects.toThrow("prefix_cursor_stalled");
+    expect(central.requests).toHaveLength(0);
+  });
+
+  test("bounds an overlong R2 inventory before central writes", async () => {
+    const { source, reconciliation } = await successRun();
+    const central = new FakeCentral();
+    source.list = async (options: R2ListOptions = {}) => ({
+      objects: [
+        ...[...source.objects.keys()]
+          .filter((key) => key.startsWith(options.prefix ?? ""))
+          .sort()
+          .map((key) => ({ key })),
+        { key: `${PREFIX}unexpected.json` },
+      ],
+      truncated: false,
+    }) as unknown as R2Objects;
+    await expect(importRun(source, reconciliation, central)).rejects.toThrow("prefix_inventory_mismatch");
+    expect(central.requests).toHaveLength(0);
+  });
+
   test("accepts only the exact R2 failure complement", async () => {
     const { source, reconciliation } = await successRun();
     source.objects.delete(`${PREFIX}collection-summary.json`);
@@ -194,7 +254,7 @@ describe("V Point R2 importer", () => {
     }
   });
 
-  test("defers an oversized valid run before creating central state", async () => {
+  test("defers an oversized valid run and seals it through staged offsets", async () => {
     const { source, reconciliation } = await successRun();
     await replaceArtifact(source, "history-page-0001", history(270, 30));
     await replaceArtifact(source, "collection-summary", {
@@ -220,8 +280,60 @@ describe("V Point R2 importer", () => {
     manifest.artifacts.splice(3, 0, ...additions);
     await source.put(MANIFEST_KEY, manifest, manifestMetadata("success"));
     const central = new FakeCentral();
-    await expect(importRun(source, reconciliation, central)).rejects.toThrow("sync_import_worker_chain_limit");
+    await expect(importRun(source, reconciliation, central)).resolves.toMatchObject({
+      status: "deferred",
+      nextOffset: 0,
+      artifactCount: 14,
+    });
     expect(central.requests).toHaveLength(0);
+
+    const firstChunk = await importRun(source, reconciliation, central, 0, false);
+    expect(firstChunk).toMatchObject({ status: "deferred", nextOffset: 8, artifactCount: 14 });
+    const finalChunk = await importRun(source, reconciliation, central, 8, false);
+    expect(finalChunk).toMatchObject({ status: "sealed", artifactCount: 14, sealed: true });
+    const inventories = central.requests.filter((request) => request.path.endsWith("/inventories"))
+      .map((request) => JSON.parse(request.body) as Record<string, unknown>);
+    expect(inventories).toHaveLength(2);
+    expect(new Set(inventories.map((inventory) => inventory.inventorySha256))).toHaveLength(1);
+    expect(inventories.every((inventory) => inventory.expectedArtifactCount === 14)).toBe(true);
+    const itemChunks = central.requests.filter((request) => request.path.endsWith("/items"))
+      .map((request) => (JSON.parse(request.body) as {
+        items: Array<{ artifactKey: string }>;
+      }).items);
+    expect(itemChunks.map((items) => items.length)).toEqual([8, 6]);
+    expect(new Set(itemChunks.flat().map((item) => item.artifactKey))).toHaveLength(14);
+    expect(central.requests.filter((request) => request.path.endsWith("/seal"))).toHaveLength(1);
+  });
+
+  test("binds every reconciliation candidate to a unique validated history row", async () => {
+    for (const [mutate, code] of [
+      [(candidate: Record<string, unknown>) => { candidate.source = "history-page-0002.json"; },
+        "reconciliation_candidate_invalid"],
+      [(candidate: Record<string, unknown>) => { candidate.index = 1; },
+        "reconciliation_candidate_invalid"],
+      [(candidate: Record<string, unknown>) => { candidate.fingerprint = "0".repeat(64); },
+        "reconciliation_candidate_fingerprint_mismatch"],
+    ] as const) {
+      const { source, reconciliation } = await successRun();
+      const report = JSON.parse(new TextDecoder().decode(reconciliation.objects.get(REPORT_KEY)!.body));
+      mutate(report.entries[0].candidateRows[0]);
+      await reconciliation.put(REPORT_KEY, report, {
+        source: "v-point-pay-email-reconciliation",
+        runId: RUN_ID,
+      });
+      await expect(importRun(source, reconciliation, new FakeCentral())).rejects.toThrow(code);
+    }
+
+    const { source, reconciliation } = await successRun();
+    const report = JSON.parse(new TextDecoder().decode(reconciliation.objects.get(REPORT_KEY)!.body));
+    report.entries[0].status = "ambiguous";
+    report.entries[0].candidateRows.push({ ...report.entries[0].candidateRows[0] });
+    await reconciliation.put(REPORT_KEY, report, {
+      source: "v-point-pay-email-reconciliation",
+      runId: RUN_ID,
+    });
+    await expect(importRun(source, reconciliation, new FakeCentral()))
+      .rejects.toThrow("reconciliation_candidate_duplicate");
   });
 
   test("rejects a reconciliation count mismatch", async () => {
@@ -300,7 +412,17 @@ async function successRun(): Promise<{ source: FakeBucket; reconciliation: FakeB
       vPointPayEmail: "all normalized archived notifications",
       vPointPayApp: "unavailable-no-live-snapshot",
     },
-    entries: [{ emailEventId: "e".repeat(64), status: "matched", candidateRows: [{ source: "history-page-0001.json", index: 0, fingerprint: "f".repeat(64) }] }],
+    entries: [{
+      emailEventId: "e".repeat(64),
+      status: "matched",
+      candidateRows: [{
+        source: "history-page-0001.json",
+        index: 0,
+        fingerprint: await sha256(new TextEncoder().encode(JSON.stringify(
+          ((payloads[2]?.[1] as { results: { history: unknown[] } }).results.history[0]),
+        ))),
+      }],
+    }],
   }, { source: "v-point-pay-email-reconciliation", runId: RUN_ID });
   return { source, reconciliation, manifest };
 }
@@ -360,21 +482,57 @@ async function replaceArtifact(bucket: FakeBucket, dataset: string, value: unkno
   await bucket.put(MANIFEST_KEY, manifest, manifestMetadata(manifest.status));
 }
 
-async function importRun(source: FakeBucket, reconciliation: FakeBucket, central: FakeCentral) {
+async function importRun(
+  source: FakeBucket,
+  reconciliation: FakeBucket,
+  central: FakeCentral,
+  offset = 0,
+  immediate = true,
+  importerVersion = "test-v1",
+) {
   return importVPointRun({
     bucket: source as unknown as R2Bucket,
     reconciliationBucket: reconciliation as unknown as R2Bucket,
     centralService: central as unknown as Fetcher,
     centralToken: TOKEN,
     fingerprintKey: "ab".repeat(32),
-    importerVersion: "test-v1",
+    importerVersion,
     manifestKey: MANIFEST_KEY,
+    offset,
+    immediate,
   });
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", owned(bytes));
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+async function descriptorHash(descriptor: Record<string, unknown>): Promise<string> {
+  const { http, storage, file, email, ...fields } = descriptor;
+  return sha256(new TextEncoder().encode(canonicalJson({
+    ...fields,
+    origins: {
+      http: http ?? null,
+      storage: storage ?? null,
+      file: file ?? null,
+      email: email ?? null,
+    },
+  })));
+}
+
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(canonical(value));
+}
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).sort(([left], [right]) =>
+      left < right ? -1 : left > right ? 1 : 0
+    ).map(([key, child]) => [key, canonical(child)]));
+  }
+  return value;
 }
 
 function hexBytes(value: string): Uint8Array {

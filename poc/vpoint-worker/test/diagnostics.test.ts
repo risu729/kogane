@@ -20,6 +20,21 @@ function fixture(session: object, snapshots: object) {
     VPOINT_SESSION: { idFromName: () => "test-id", get: () => session },
     SNAPSHOTS: snapshots,
     VPOINT_PAY_SNAPSHOTS: { list: async () => ({ objects: [], truncated: false }), put: async () => null },
+    RAW_EVIDENCE_IMPORTER: {
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        const body = await request.json() as { manifestKey: string };
+        return Response.json({
+          source: "v-point",
+          manifestKey: body.manifestKey,
+          status: "sealed",
+          centralRunId: 1,
+          artifactCount: 1,
+          sealed: true,
+          allObjectsReused: false,
+        });
+      },
+    },
   });
 }
 function trigger() {

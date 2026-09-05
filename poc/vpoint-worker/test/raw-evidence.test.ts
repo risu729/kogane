@@ -9,6 +9,7 @@ describe("V Point raw-evidence client", () => {
     const fetcher = fakeFetcher({
       source: "v-point",
       manifestKey: MANIFEST_KEY,
+      status: "sealed",
       centralRunId: 4,
       artifactCount: 10,
       sealed: true,
@@ -38,7 +39,7 @@ describe("V Point raw-evidence client", () => {
 
   test("rejects unknown response fields and oversized bodies", async () => {
     await expect(importStoredRun(fakeFetcher({
-      source: "v-point", manifestKey: MANIFEST_KEY, centralRunId: 1,
+      source: "v-point", manifestKey: MANIFEST_KEY, status: "sealed", centralRunId: 1,
       artifactCount: 1, sealed: true, allObjectsReused: false, unexpected: true,
     }), MANIFEST_KEY)).rejects.toThrow("raw_evidence_importer_invalid_response");
     const oversized = {
@@ -46,6 +47,58 @@ describe("V Point raw-evidence client", () => {
     } as unknown as Fetcher;
     await expect(importStoredRun(oversized, MANIFEST_KEY))
       .rejects.toThrow("raw_evidence_importer_response_too_large");
+  });
+
+  test("enforces all one-object backfill response relationships", async () => {
+    const deferred = {
+      source: "v-point",
+      manifestKey: MANIFEST_KEY,
+      status: "deferred",
+      reason: "worker_invocation_limit",
+      artifactCount: 20,
+      nextOffset: 8,
+    };
+    await expect(backfillStoredRuns(fakeFetcher({
+      source: "v-point",
+      scannedObjectCount: 0,
+      importedManifestCount: 0,
+      skippedManifestCount: 0,
+      deferredManifestCount: 1,
+      failedManifestCount: 0,
+      nextCursor: "opaque-continuation",
+      truncated: true,
+      result: deferred,
+    }))).resolves.toMatchObject({ deferredManifestCount: 1 });
+
+    const base = {
+      source: "v-point",
+      scannedObjectCount: 1,
+      importedManifestCount: 0,
+      skippedManifestCount: 1,
+      deferredManifestCount: 0,
+      failedManifestCount: 0,
+      nextCursor: "opaque-next",
+      truncated: true,
+    };
+    for (const invalid of [
+      { ...base, scannedObjectCount: 2 },
+      { ...base, skippedManifestCount: 0 },
+      { ...base, importedManifestCount: 1, skippedManifestCount: 0 },
+      { ...base, failedManifestCount: 1, skippedManifestCount: 0 },
+      { ...base, failureCode: "failed" },
+      { ...base, truncated: false },
+      {
+        ...base,
+        skippedManifestCount: 0,
+        deferredManifestCount: 1,
+        nextCursor: null,
+        truncated: false,
+        result: deferred,
+      },
+    ]) {
+      await expect(backfillStoredRuns(fakeFetcher(invalid)))
+        .rejects.toThrow("raw_evidence_importer_invalid_response");
+    }
   });
 });
 

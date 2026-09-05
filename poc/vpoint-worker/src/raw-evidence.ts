@@ -1,4 +1,8 @@
-import type { RawEvidenceBackfillPageResult, RawEvidenceImportResult } from "./types";
+import type {
+  RawEvidenceBackfillPageResult,
+  RawEvidenceDeferredResult,
+  RawEvidenceImportResult,
+} from "./types";
 
 const MAX_RESPONSE_BYTES = 8 * 1024;
 
@@ -40,9 +44,10 @@ async function importerRequest(importer: Fetcher, path: string, body: unknown): 
 
 function validateImportResult(value: unknown, expectedManifestKey: string): RawEvidenceImportResult {
   const input = exactRecord(value, [
-    "source", "manifestKey", "centralRunId", "artifactCount", "sealed", "allObjectsReused",
+    "source", "manifestKey", "status", "centralRunId", "artifactCount", "sealed", "allObjectsReused",
   ]);
   if (input.source !== "v-point" || input.manifestKey !== expectedManifestKey ||
+      input.status !== "sealed" ||
       !positiveInteger(input.centralRunId) || !positiveInteger(input.artifactCount) ||
       input.sealed !== true || typeof input.allObjectsReused !== "boolean") {
     throw new Error("raw_evidence_importer_invalid_response");
@@ -56,16 +61,32 @@ function validateBackfillResult(value: unknown): RawEvidenceBackfillPageResult {
     "deferredManifestCount", "failedManifestCount", "nextCursor", "truncated",
     "failureCode", "result",
   ], ["failureCode", "result"]);
-  if (input.source !== "v-point" || !nonNegativeInteger(input.scannedObjectCount) ||
-      !nonNegativeInteger(input.importedManifestCount) || !nonNegativeInteger(input.skippedManifestCount) ||
-      !nonNegativeInteger(input.deferredManifestCount) || !nonNegativeInteger(input.failedManifestCount) ||
+  if (input.source !== "v-point" || !zeroOrOne(input.scannedObjectCount) ||
+      !zeroOrOne(input.importedManifestCount) || !zeroOrOne(input.skippedManifestCount) ||
+      !zeroOrOne(input.deferredManifestCount) || !zeroOrOne(input.failedManifestCount) ||
       !(input.nextCursor === null || safeOpaque(input.nextCursor)) || typeof input.truncated !== "boolean" ||
       !(input.failureCode === undefined || safeCode(input.failureCode))) {
     throw new Error("raw_evidence_importer_invalid_response");
   }
   const result = input.result === undefined
     ? undefined
-    : validateImportResult(input.result, manifestKeyFromResult(input.result));
+    : validateBackfillImportResult(input.result);
+  const outcomeCount = input.importedManifestCount + input.skippedManifestCount +
+    input.deferredManifestCount + input.failedManifestCount;
+  const resumedOutcome = input.scannedObjectCount === 0 && result !== undefined ? 1 : 0;
+  const resultMatchesOutcome = result === undefined
+    ? input.importedManifestCount === 0 && input.deferredManifestCount === 0
+    : result.status === "sealed"
+      ? input.importedManifestCount === 1 && input.deferredManifestCount === 0
+      : input.importedManifestCount === 0 && input.deferredManifestCount === 1;
+  if (outcomeCount !== input.scannedObjectCount + resumedOutcome ||
+      !resultMatchesOutcome ||
+      (input.failedManifestCount === 1) !== (input.failureCode !== undefined) ||
+      (input.failedManifestCount === 1 && result !== undefined) ||
+      input.truncated !== (input.nextCursor !== null) ||
+      (input.deferredManifestCount === 1 && !input.truncated)) {
+    throw new Error("raw_evidence_importer_invalid_response");
+  }
   return {
     source: "v-point",
     scannedObjectCount: input.scannedObjectCount,
@@ -78,6 +99,24 @@ function validateBackfillResult(value: unknown): RawEvidenceBackfillPageResult {
     ...(input.failureCode === undefined ? {} : { failureCode: input.failureCode }),
     ...(result === undefined ? {} : { result }),
   };
+}
+
+function validateBackfillImportResult(
+  value: unknown,
+): RawEvidenceImportResult | RawEvidenceDeferredResult {
+  const manifestKey = manifestKeyFromResult(value);
+  if (!isRecord(value)) throw new Error("raw_evidence_importer_invalid_response");
+  if (value.status === "sealed") return validateImportResult(value, manifestKey);
+  const input = exactRecord(value, [
+    "source", "manifestKey", "status", "reason", "artifactCount", "nextOffset",
+  ]);
+  if (input.source !== "v-point" || input.manifestKey !== manifestKey ||
+      input.status !== "deferred" || input.reason !== "worker_invocation_limit" ||
+      !positiveInteger(input.artifactCount) || !positiveInteger(input.nextOffset) ||
+      input.nextOffset >= input.artifactCount) {
+    throw new Error("raw_evidence_importer_invalid_response");
+  }
+  return input as unknown as RawEvidenceDeferredResult;
 }
 
 function manifestKeyFromResult(value: unknown): string {
@@ -104,12 +143,12 @@ function positiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
-function nonNegativeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+function zeroOrOne(value: unknown): value is 0 | 1 {
+  return value === 0 || value === 1;
 }
 
 function safeOpaque(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 4_096 &&
+  return typeof value === "string" && value.length > 0 && value.length <= 12_000 &&
     !/[\x00-\x20\x7f]/u.test(value);
 }
 

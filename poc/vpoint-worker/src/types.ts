@@ -61,10 +61,20 @@ export interface CollectionResult extends CollectionManifest {
 export interface RawEvidenceImportResult {
   source: "v-point";
   manifestKey: string;
+  status: "sealed";
   centralRunId: number;
   artifactCount: number;
   sealed: true;
   allObjectsReused: boolean;
+}
+
+export interface RawEvidenceDeferredResult {
+  source: "v-point";
+  manifestKey: string;
+  status: "deferred";
+  reason: "worker_invocation_limit";
+  artifactCount: number;
+  nextOffset: number;
 }
 
 export interface RawEvidenceBackfillPageResult {
@@ -77,5 +87,5 @@ export interface RawEvidenceBackfillPageResult {
   nextCursor: string | null;
   truncated: boolean;
   failureCode?: string;
-  result?: RawEvidenceImportResult;
+  result?: RawEvidenceImportResult | RawEvidenceDeferredResult;
 }

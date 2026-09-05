@@ -373,7 +373,13 @@ and links to V Point Pay observations, starts in phase 3. The archived direct an
 forwarded messages themselves remain `provider_message` artifacts under
 `v-point-pay`.
 
-Migration `0011` gives the V Point R2 importer a dedicated client route and
+The Layer A validator still proves every reconciliation candidate is structurally
+real: its source names a validated history page, its index is within that page's
+actual row count, and its fingerprint equals SHA-256 of the exact JSON-serialized
+row. Duplicate source/index candidates in one entry fail closed. This integrity
+check does not promote the generated match to financial truth.
+
+Migration `0012` gives the V Point R2 importer a dedicated client route and
 enables only the reviewed `raw/v-point/{date}/{run-id}/{artifact}.json` and
 `derived/v-point-pay-email-reconciliation/{date}/{run-id}.json` storage
 templates. The point collector outbox and generated reconciliation bucket are

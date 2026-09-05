@@ -74,6 +74,6 @@
     }
   ],
   "vars": {
-    "IMPORTER_VERSION": "collector-r2-importer-v11"
+    "IMPORTER_VERSION": "collector-r2-importer-v12"
   }
 }

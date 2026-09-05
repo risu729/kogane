@@ -21,6 +21,7 @@ const PAGE_SIZE = 30;
 // 2n + 9 <= 32, where n includes every data artifact (including the
 // optional reconciliation report) but excludes the collector manifest.
 const MAX_SYNCHRONOUS_DATA_ARTIFACTS = 11;
+export const VPOINT_TRANSFER_CHUNK_SIZE = 8;
 const MANIFEST_KEY =
   /^raw\/v-point\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
 const HISTORY_DATASET = /^history-page-(\d{4})$/u;
@@ -33,6 +34,7 @@ const RECONCILIATION_MATCH_POLICIES = [
 ] as const;
 
 type JsonObject = Record<string, unknown>;
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 type SchemaVersion = typeof V1 | typeof V2;
 type Status = "success" | "partial" | "failed";
 
@@ -89,6 +91,7 @@ interface PageInfo {
 interface VerifiedArtifact {
   artifact: ArtifactManifest;
   page?: PageInfo;
+  historyRows?: JsonObject[];
   summary?: SummaryInfo;
 }
 
@@ -106,13 +109,50 @@ interface VerifiedReport {
   sha256: string;
 }
 
-export interface ImportVPointResult {
+type ArtifactPlanSource =
+  | { kind: "data"; artifact: ArtifactManifest }
+  | { kind: "reconciliation"; summary: ReconciliationSummary }
+  | { kind: "manifest" };
+
+interface ArtifactPlan {
+  source: ArtifactPlanSource;
+  byteSize: number;
+  sha256: string;
+  descriptor: JsonObject;
+  inventory: CentralInventoryItem;
+}
+
+export type ImportVPointResult = ImportVPointDeferred | ImportVPointSealed;
+
+export interface ImportVPointDeferred {
   source: typeof SOURCE;
   manifestKey: string;
+  status: "deferred";
+  reason: "worker_invocation_limit";
+  artifactCount: number;
+  nextOffset: number;
+}
+
+export interface ImportVPointSealed {
+  source: typeof SOURCE;
+  manifestKey: string;
+  status: "sealed";
   centralRunId: number;
   artifactCount: number;
   sealed: true;
   allObjectsReused: boolean;
+}
+
+interface ImportVPointOptions {
+  bucket: R2Bucket;
+  reconciliationBucket: R2Bucket;
+  centralService: Fetcher;
+  centralToken: string;
+  fingerprintKey: string;
+  importerVersion: string;
+  manifestKey: string;
+  offset?: number;
+  immediate?: boolean;
 }
 
 export interface AuditVPointResult {
@@ -143,7 +183,12 @@ export async function auditVPointRun(options: {
   }
   validateSemantics(manifest, verified);
   if (manifest.emailReconciliation) {
-    await readVerifiedReport(options.reconciliationBucket, manifest, manifest.emailReconciliation);
+    await readVerifiedReport(
+      options.reconciliationBucket,
+      manifest,
+      manifest.emailReconciliation,
+      verified,
+    );
   }
   await assertExactPrefix(options.bucket, prefix, [
     ...manifest.artifacts.map((artifact) => artifact.key),
@@ -158,15 +203,7 @@ export async function auditVPointRun(options: {
   };
 }
 
-export async function importVPointRun(options: {
-  bucket: R2Bucket;
-  reconciliationBucket: R2Bucket;
-  centralService: Fetcher;
-  centralToken: string;
-  fingerprintKey: string;
-  importerVersion: string;
-  manifestKey: string;
-}): Promise<ImportVPointResult> {
+export async function importVPointRun(options: ImportVPointOptions): Promise<ImportVPointResult> {
   const startedAtMs = Date.now();
   const attemptId = `attempt-${crypto.randomUUID()}`;
   let centralRunId: number | undefined;
@@ -181,6 +218,11 @@ export async function importVPointRun(options: {
     const prefix = options.manifestKey.slice(0, -"manifest.json".length);
     expectedArtifactCount = manifest.artifacts.length +
       (manifest.emailReconciliation ? 1 : 0) + 1;
+    const offset = options.offset ?? 0;
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset >= expectedArtifactCount ||
+        (options.immediate !== false && offset !== 0)) {
+      throw new ImportError(400, "transfer_offset_invalid");
+    }
 
     phase = "prefix_validation";
     await assertExactPrefix(options.bucket, prefix, [
@@ -201,6 +243,7 @@ export async function importVPointRun(options: {
           options.reconciliationBucket,
           manifest,
           manifest.emailReconciliation,
+          verified,
         )
       : undefined;
     await assertExactPrefix(options.bucket, prefix, [
@@ -209,8 +252,8 @@ export async function importVPointRun(options: {
     ]);
 
     const dataArtifactCount = verified.length + (report ? 1 : 0);
-    if (dataArtifactCount > MAX_SYNCHRONOUS_DATA_ARTIFACTS) {
-      throw new ImportError(409, "sync_import_worker_chain_limit");
+    if (options.immediate !== false && dataArtifactCount > MAX_SYNCHRONOUS_DATA_ARTIFACTS) {
+      return deferredVPoint(options.manifestKey, expectedArtifactCount, 0);
     }
 
     const centralManifestBytes = sanitizeManifest(loaded.bytes, manifest);
@@ -249,130 +292,105 @@ export async function importVPointRun(options: {
         })
       : undefined;
 
-    const inventory: CentralInventoryItem[] = [];
-    for (const [sequence, entry] of verified.entries()) {
-      phase = "object_upload";
-      const bytes = await readVerifiedArtifact(options.bucket, entry.artifact);
-      validateArtifactPayload(entry.artifact.dataset, bytes);
-      const reused = await central.uploadObject(
-        centralRunId,
-        entry.artifact.sha256,
-        bytes,
-      );
-      if (reused) reusedArtifactCount += 1;
-      else acceptedArtifactCount += 1;
-
-      phase = "artifact_catalogue";
-      const descriptorSha256 = await central.addArtifact(
-        centralRunId,
-        await dataDescriptor({
-          artifact: entry.artifact,
-          sequence,
-          fetchUnitId: unitId,
-          completedAt: manifest.completedAt,
-          schemaVersion: manifest.schemaVersion,
-          fingerprintKey: options.fingerprintKey,
-          ...(entry.page ? { page: entry.page } : {}),
-          ...(historyGroupId === undefined ? {} : { historyGroupId }),
-          ...(vMoneyGroupId === undefined ? {} : { vMoneyGroupId }),
-        }),
-      );
-      inventory.push({
-        artifactKey: filename(entry.artifact.key),
-        sha256: entry.artifact.sha256,
-        descriptorSha256,
-      });
-    }
-
-    if (report) {
-      phase = "reconciliation_upload";
-      const reused = await central.uploadObject(centralRunId, report.sha256, report.bytes);
-      if (reused) reusedArtifactCount += 1;
-      else acceptedArtifactCount += 1;
-      const descriptorSha256 = await central.addArtifact(
-        centralRunId,
-        await reconciliationDescriptor({
-          report,
-          sequence: inventory.length,
-          fetchUnitId: unitId,
-          completedAt: manifest.completedAt,
-          fingerprintKey: options.fingerprintKey,
-        }),
-      );
-      inventory.push({
-        artifactKey: "vpoint-pay-email-reconciliation.json",
-        sha256: report.sha256,
-        descriptorSha256,
-      });
-    }
-
-    phase = "manifest_upload";
-    const manifestReused = await central.uploadObject(
-      centralRunId,
-      centralManifestSha256,
+    phase = "inventory_plan";
+    const plans = await artifactPlans({
+      verified,
+      ...(report ? { report } : {}),
       centralManifestBytes,
-    );
-    if (manifestReused) reusedArtifactCount += 1;
-    else acceptedArtifactCount += 1;
-    const manifestDescriptorSha256 = await central.addArtifact(
-      centralRunId,
-      await manifestDescriptor({
-        bytes: centralManifestBytes.byteLength,
-        sha256: centralManifestSha256,
-        sequence: inventory.length,
-        key: options.manifestKey,
-        completedAt: manifest.completedAt,
-        schemaVersion: manifest.schemaVersion,
-        fingerprintKey: options.fingerprintKey,
-        transformed: manifestTransformed,
-      }),
-    );
-    inventory.push({
-      artifactKey: "manifest.json",
-      sha256: centralManifestSha256,
-      descriptorSha256: manifestDescriptorSha256,
+      centralManifestSha256,
+      manifestTransformed,
+      manifest,
+      manifestKey: options.manifestKey,
+      unitId,
+      ...(historyGroupId === undefined ? {} : { historyGroupId }),
+      ...(vMoneyGroupId === undefined ? {} : { vMoneyGroupId }),
+      fingerprintKey: options.fingerprintKey,
     });
 
+    if (options.immediate === false) {
+      const inventory = plans.map((plan) => plan.inventory).sort((left, right) =>
+        binaryCompare(left.artifactKey, right.artifactKey)
+      );
+      const inventorySha256 = await sha256Hex(
+        new TextEncoder().encode(canonicalJson(inventory as unknown as JsonValue)),
+      );
+      const inventoryId = await central.beginInventory(
+        centralRunId,
+        inventorySha256,
+        inventory.length,
+      );
+      const end = Math.min(offset + VPOINT_TRANSFER_CHUNK_SIZE, plans.length);
+      const chunkInventory: CentralInventoryItem[] = [];
+      for (const plan of plans.slice(offset, end)) {
+        const current = await currentPlanBytes(options, plan, manifest, verified);
+        phase = "object_upload";
+        const reused = await central.uploadObject(centralRunId, plan.sha256, current);
+        if (reused) reusedArtifactCount += 1;
+        else acceptedArtifactCount += 1;
+        phase = "artifact_catalogue";
+        const descriptorSha256 = await central.addArtifact(centralRunId, plan.descriptor);
+        if (descriptorSha256 !== plan.inventory.descriptorSha256) {
+          throw new Error("central_descriptor_mismatch");
+        }
+        chunkInventory.push(plan.inventory);
+      }
+      if (chunkInventory.length > 0) {
+        phase = "inventory_catalogue";
+        await central.addInventoryItems(centralRunId, inventoryId, chunkInventory);
+      }
+      if (end < plans.length) {
+        return deferredVPoint(options.manifestKey, plans.length, end);
+      }
+      phase = "terminal_reports";
+      await addTerminalReports(
+        central,
+        centralRunId,
+        unitId,
+        manifest,
+        dataArtifactCount,
+        plans.length,
+      );
+      phase = "seal";
+      await central.sealStagedInventory(centralRunId, inventoryId, attemptId, startedAtMs);
+      return sealedVPoint(
+        options.manifestKey,
+        centralRunId,
+        plans.length,
+        acceptedArtifactCount === 0,
+      );
+    }
+
+    const inventory: CentralInventoryItem[] = [];
+    for (const plan of plans) {
+      const current = await currentPlanBytes(options, plan, manifest, verified);
+      phase = "object_upload";
+      const reused = await central.uploadObject(centralRunId, plan.sha256, current);
+      if (reused) reusedArtifactCount += 1;
+      else acceptedArtifactCount += 1;
+      phase = "artifact_catalogue";
+      const descriptorSha256 = await central.addArtifact(centralRunId, plan.descriptor);
+      if (descriptorSha256 !== plan.inventory.descriptorSha256) {
+        throw new Error("central_descriptor_mismatch");
+      }
+      inventory.push(plan.inventory);
+    }
     phase = "terminal_reports";
-    await central.addUnitReport(unitId, {
-      reportKey: "terminal",
-      reportKind: "terminal",
-      producerStatus: manifest.status,
-      normalizedOutcome: manifest.status,
-      startedAtMs: Date.parse(manifest.startedAt),
-      startedAtBasis: "manifest",
-      completedAtMs: Date.parse(manifest.completedAt),
-      completedAtBasis: "manifest",
-      declaredArtifactCount: dataArtifactCount,
-      artifactCountScope: "direct",
-      ...(manifest.failures.length > 0
-        ? { safeFailureCode: safeFailureCode(manifest.failures) }
-        : {}),
-    });
-    await central.addRunReport(centralRunId, {
-      reportKey: "terminal",
-      reportKind: "terminal",
-      producerVersion: options.importerVersion,
-      manifestSchemaVersion: manifest.schemaVersion,
-      producerStatus: manifest.status,
-      normalizedOutcome: manifest.status,
-      startedAtMs: Date.parse(manifest.startedAt),
-      startedAtBasis: "manifest",
-      completedAtMs: Date.parse(manifest.completedAt),
-      completedAtBasis: "manifest",
-      declaredArtifactCount: inventory.length,
-      artifactCountScope: "all_catalogued",
-    });
+    await addTerminalReports(
+      central,
+      centralRunId,
+      unitId,
+      manifest,
+      dataArtifactCount,
+      plans.length,
+    );
     phase = "seal";
     await central.seal(centralRunId, inventory, attemptId, startedAtMs);
-    return {
-      source: SOURCE,
-      manifestKey: options.manifestKey,
+    return sealedVPoint(
+      options.manifestKey,
       centralRunId,
-      artifactCount: inventory.length,
-      sealed: true,
-      allObjectsReused: acceptedArtifactCount === 0,
-    };
+      inventory.length,
+      acceptedArtifactCount === 0,
+    );
   } catch (error) {
     if (centralRunId !== undefined) {
       try {
@@ -401,6 +419,186 @@ export async function importVPointRun(options: {
     }
     throw error;
   }
+}
+
+async function artifactPlans(options: {
+  verified: VerifiedArtifact[];
+  report?: VerifiedReport;
+  centralManifestBytes: Uint8Array;
+  centralManifestSha256: string;
+  manifestTransformed: boolean;
+  manifest: Manifest;
+  manifestKey: string;
+  unitId: number;
+  historyGroupId?: number;
+  vMoneyGroupId?: number;
+  fingerprintKey: string;
+}): Promise<ArtifactPlan[]> {
+  const plans: ArtifactPlan[] = [];
+  for (const [sequence, entry] of options.verified.entries()) {
+    const descriptor = await dataDescriptor({
+      artifact: entry.artifact,
+      sequence,
+      fetchUnitId: options.unitId,
+      completedAt: options.manifest.completedAt,
+      schemaVersion: options.manifest.schemaVersion,
+      fingerprintKey: options.fingerprintKey,
+      ...(entry.page ? { page: entry.page } : {}),
+      ...(options.historyGroupId === undefined ? {} : { historyGroupId: options.historyGroupId }),
+      ...(options.vMoneyGroupId === undefined ? {} : { vMoneyGroupId: options.vMoneyGroupId }),
+    });
+    plans.push({
+      source: { kind: "data", artifact: entry.artifact },
+      byteSize: entry.artifact.bytes,
+      sha256: entry.artifact.sha256,
+      descriptor,
+      inventory: {
+        artifactKey: filename(entry.artifact.key),
+        sha256: entry.artifact.sha256,
+        descriptorSha256: await descriptorSha256(descriptor),
+      },
+    });
+  }
+  if (options.report && options.manifest.emailReconciliation) {
+    const descriptor = await reconciliationDescriptor({
+      report: options.report,
+      sequence: plans.length,
+      fetchUnitId: options.unitId,
+      completedAt: options.manifest.completedAt,
+      fingerprintKey: options.fingerprintKey,
+    });
+    plans.push({
+      source: { kind: "reconciliation", summary: options.manifest.emailReconciliation },
+      byteSize: options.report.bytes.byteLength,
+      sha256: options.report.sha256,
+      descriptor,
+      inventory: {
+        artifactKey: "vpoint-pay-email-reconciliation.json",
+        sha256: options.report.sha256,
+        descriptorSha256: await descriptorSha256(descriptor),
+      },
+    });
+  }
+  const manifestDescriptorValue = await manifestDescriptor({
+    bytes: options.centralManifestBytes.byteLength,
+    sha256: options.centralManifestSha256,
+    sequence: plans.length,
+    key: options.manifestKey,
+    completedAt: options.manifest.completedAt,
+    schemaVersion: options.manifest.schemaVersion,
+    fingerprintKey: options.fingerprintKey,
+    transformed: options.manifestTransformed,
+  });
+  plans.push({
+    source: { kind: "manifest" },
+    byteSize: options.centralManifestBytes.byteLength,
+    sha256: options.centralManifestSha256,
+    descriptor: manifestDescriptorValue,
+    inventory: {
+      artifactKey: "manifest.json",
+      sha256: options.centralManifestSha256,
+      descriptorSha256: await descriptorSha256(manifestDescriptorValue),
+    },
+  });
+  return plans;
+}
+
+async function currentPlanBytes(
+  options: ImportVPointOptions,
+  plan: ArtifactPlan,
+  manifest: Manifest,
+  verified: VerifiedArtifact[],
+): Promise<Uint8Array> {
+  let current: Uint8Array;
+  if (plan.source.kind === "data") {
+    current = await readVerifiedArtifact(options.bucket, plan.source.artifact);
+    validateArtifactPayload(plan.source.artifact.dataset, current);
+  } else if (plan.source.kind === "reconciliation") {
+    current = (await readVerifiedReport(
+      options.reconciliationBucket,
+      manifest,
+      plan.source.summary,
+      verified,
+    )).bytes;
+  } else {
+    const loaded = await readManifest(options.bucket, options.manifestKey);
+    current = sanitizeManifest(loaded.bytes, loaded.manifest);
+  }
+  if (current.byteLength !== plan.byteSize || await sha256Hex(current) !== plan.sha256) {
+    throw new ImportError(409, "artifact_changed_during_import");
+  }
+  return current;
+}
+
+async function addTerminalReports(
+  central: CentralClient,
+  centralRunId: number,
+  unitId: number,
+  manifest: Manifest,
+  directArtifactCount: number,
+  allArtifactCount: number,
+): Promise<void> {
+  await central.addUnitReport(unitId, {
+    reportKey: "terminal",
+    reportKind: "terminal",
+    producerStatus: manifest.status,
+    normalizedOutcome: manifest.status,
+    startedAtMs: Date.parse(manifest.startedAt),
+    startedAtBasis: "manifest",
+    completedAtMs: Date.parse(manifest.completedAt),
+    completedAtBasis: "manifest",
+    declaredArtifactCount: directArtifactCount,
+    artifactCountScope: "direct",
+    ...(manifest.failures.length > 0
+      ? { safeFailureCode: safeFailureCode(manifest.failures) }
+      : {}),
+  });
+  await central.addRunReport(centralRunId, {
+    reportKey: "terminal",
+    reportKind: "terminal",
+    producerVersion: INGEST_CONTRACT_VERSION,
+    manifestSchemaVersion: manifest.schemaVersion,
+    producerStatus: manifest.status,
+    normalizedOutcome: manifest.status,
+    startedAtMs: Date.parse(manifest.startedAt),
+    startedAtBasis: "manifest",
+    completedAtMs: Date.parse(manifest.completedAt),
+    completedAtBasis: "manifest",
+    declaredArtifactCount: allArtifactCount,
+    artifactCountScope: "all_catalogued",
+  });
+}
+
+function deferredVPoint(
+  manifestKey: string,
+  artifactCount: number,
+  nextOffset: number,
+): ImportVPointDeferred {
+  return {
+    source: SOURCE,
+    manifestKey,
+    status: "deferred",
+    reason: "worker_invocation_limit",
+    artifactCount,
+    nextOffset,
+  };
+}
+
+function sealedVPoint(
+  manifestKey: string,
+  centralRunId: number,
+  artifactCount: number,
+  allObjectsReused: boolean,
+): ImportVPointSealed {
+  return {
+    source: SOURCE,
+    manifestKey,
+    status: "sealed",
+    centralRunId,
+    artifactCount,
+    sealed: true,
+    allObjectsReused,
+  };
 }
 
 export function parseVPointManifest(bytes: Uint8Array, manifestKey: string): Manifest {
@@ -612,7 +810,7 @@ function validateManifestContract(input: {
 function validateArtifactPayload(
   dataset: string,
   bytes: Uint8Array,
-): { page?: PageInfo; summary?: SummaryInfo } {
+): { page?: PageInfo; historyRows?: JsonObject[]; summary?: SummaryInfo } {
   const input = parseJsonConflict(bytes, "artifact_json_invalid");
   if (dataset === "collection-summary") {
     return { summary: validateSummary(input) };
@@ -627,9 +825,9 @@ function validateArtifactPayload(
     return {};
   }
   const history = HISTORY_DATASET.exec(dataset);
-  if (history) return { page: validateHistory(input, "history", Number(history[1])) };
+  if (history) return validateHistory(input, "history", Number(history[1]));
   const vMoney = VMONEY_DATASET.exec(dataset);
-  if (vMoney) return { page: validateHistory(input, "vmoney-history", Number(vMoney[1])) };
+  if (vMoney) return validateHistory(input, "vmoney-history", Number(vMoney[1]));
   throw new ImportError(409, "artifact_dataset_invalid");
 }
 
@@ -688,7 +886,7 @@ function validateHistory(
   input: JsonObject,
   group: PageInfo["group"],
   index: number,
-): PageInfo {
+): { page: PageInfo; historyRows?: JsonObject[] } {
   const results = recordConflict(input.results, "history_results_invalid");
   const pointHistory = group === "history";
   exactShapeConflict(
@@ -718,17 +916,18 @@ function validateHistory(
         }
       }
     }
-    for (const value of results.history) validateHistoryRow(value);
+    const historyRows = results.history.map(validateHistoryRow);
+    return {
+      page: { group, index, rowCount: historyRows.length, total: results.total },
+      historyRows,
+    };
   }
   return {
-    group,
-    index,
-    rowCount: results.history.length,
-    total: results.total,
+    page: { group, index, rowCount: results.history.length, total: results.total },
   };
 }
 
-function validateHistoryRow(value: unknown): void {
+function validateHistoryRow(value: unknown): JsonObject {
   const row = recordConflict(value, "history_row_invalid");
   exactShapeConflict(row, [
     "date_reflect", "date_use", "is_use_mbo", "point", "point_div",
@@ -743,6 +942,7 @@ function validateHistoryRow(value: unknown): void {
       !safeText(row.store_name, 2_000)) {
     throw new ImportError(409, "history_row_invalid");
   }
+  return row;
 }
 
 function validateSummary(input: JsonObject): SummaryInfo {
@@ -852,6 +1052,7 @@ async function readVerifiedReport(
   bucket: R2Bucket,
   manifest: Manifest,
   summary: ReconciliationSummary,
+  verified: VerifiedArtifact[],
 ): Promise<VerifiedReport> {
   const object = await bucket.get(summary.reportKey);
   if (!object) throw new ImportError(409, "reconciliation_report_missing");
@@ -866,15 +1067,21 @@ async function readVerifiedReport(
   const bytes = new Uint8Array(await object.arrayBuffer());
   const sha256 = await sha256Hex(bytes);
   assertNativeSha256(object, sha256);
-  validateReconciliationReport(parseJsonConflict(bytes, "reconciliation_report_json_invalid"), manifest, summary);
+  await validateReconciliationReport(
+    parseJsonConflict(bytes, "reconciliation_report_json_invalid"),
+    manifest,
+    summary,
+    verified,
+  );
   return { key: summary.reportKey, bytes, sha256 };
 }
 
-function validateReconciliationReport(
+async function validateReconciliationReport(
   input: JsonObject,
   manifest: Manifest,
   summary: ReconciliationSummary,
-): void {
+  verified: VerifiedArtifact[],
+): Promise<void> {
   exactShapeConflict(input, ["schemaVersion", "runId", "completedAt", "policy", "sources", "entries"],
     "reconciliation_report_shape_invalid");
   if (input.schemaVersion !== "vpoint-pay-email-reconciliation-v1" ||
@@ -916,9 +1123,10 @@ function validateReconciliationReport(
   }
   const counts = { matched: 0, ambiguous: 0, unmatched: 0, "not-comparable": 0 };
   const ids = new Set<string>();
-  const historyFiles = new Set(manifest.artifacts
-    .filter((artifact) => HISTORY_DATASET.test(artifact.dataset))
-    .map((artifact) => filename(artifact.key)));
+  const historyFiles = new Map(verified.flatMap((entry) =>
+    entry.page?.group === "history" && entry.historyRows
+      ? [[filename(entry.artifact.key), entry.historyRows] as const]
+      : []));
   for (const value of input.entries) {
     const entry = recordConflict(value, "reconciliation_entry_invalid");
     exactShapeConflict(entry, ["emailEventId", "status", "candidateRows"], "reconciliation_entry_invalid");
@@ -936,13 +1144,27 @@ function validateReconciliationReport(
         ((status === "unmatched" || status === "not-comparable") && entry.candidateRows.length !== 0)) {
       throw new ImportError(409, "reconciliation_candidate_count_invalid");
     }
+    const candidateIdentities = new Set<string>();
     for (const candidateValue of entry.candidateRows) {
       const candidate = recordConflict(candidateValue, "reconciliation_candidate_invalid");
       exactShapeConflict(candidate, ["source", "index", "fingerprint"], "reconciliation_candidate_invalid");
-      if (typeof candidate.source !== "string" || !historyFiles.has(candidate.source) ||
-          !nonNegativeInteger(candidate.index) || candidate.index >= PAGE_SIZE ||
+      const rows = typeof candidate.source === "string"
+        ? historyFiles.get(candidate.source)
+        : undefined;
+      if (!rows || !nonNegativeInteger(candidate.index) || candidate.index >= rows.length ||
           typeof candidate.fingerprint !== "string" || !SHA256.test(candidate.fingerprint)) {
         throw new ImportError(409, "reconciliation_candidate_invalid");
+      }
+      const identity = `${candidate.source}\u0000${candidate.index}`;
+      if (candidateIdentities.has(identity)) {
+        throw new ImportError(409, "reconciliation_candidate_duplicate");
+      }
+      candidateIdentities.add(identity);
+      const expectedFingerprint = await sha256Hex(
+        new TextEncoder().encode(JSON.stringify(rows[candidate.index])),
+      );
+      if (candidate.fingerprint !== expectedFingerprint) {
+        throw new ImportError(409, "reconciliation_candidate_fingerprint_mismatch");
       }
     }
   }
@@ -1169,11 +1391,30 @@ function isOrderedSubset(actual: string[], expected: string[]): boolean {
 async function assertExactPrefix(bucket: R2Bucket, prefix: string, expectedKeys: string[]): Promise<void> {
   const actual: string[] = [];
   let cursor: string | undefined;
+  const seenCursors = new Set<string>();
   do {
-    const listed = await bucket.list({ prefix, limit: 1_000, ...(cursor ? { cursor } : {}) });
+    const remaining = expectedKeys.length + 1 - actual.length;
+    if (remaining <= 0) throw new ImportError(409, "prefix_inventory_mismatch");
+    const listed = await bucket.list({
+      prefix,
+      limit: Math.min(1_000, remaining),
+      ...(cursor ? { cursor } : {}),
+    });
     actual.push(...listed.objects.map((object) => object.key));
-    cursor = listed.truncated ? listed.cursor : undefined;
-    if (listed.truncated && !cursor) throw new ImportError(409, "prefix_cursor_missing");
+    if (actual.length > expectedKeys.length) {
+      throw new ImportError(409, "prefix_inventory_mismatch");
+    }
+    if (!listed.truncated) {
+      cursor = undefined;
+      continue;
+    }
+    const nextCursor = listed.cursor;
+    if (!nextCursor) throw new ImportError(409, "prefix_cursor_missing");
+    if (nextCursor === cursor || seenCursors.has(nextCursor)) {
+      throw new ImportError(409, "prefix_cursor_stalled");
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
   } while (cursor);
   actual.sort();
   const expected = [...expectedKeys].sort();
@@ -1303,6 +1544,42 @@ function sameStrings(left: string[], right: string[]): boolean {
 
 function invalid(code: string): never {
   throw new ImportError(400, code);
+}
+
+function binaryCompare(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function canonicalJson(value: JsonValue): string {
+  return JSON.stringify(canonical(value));
+}
+
+function canonical(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).sort(([left], [right]) => binaryCompare(left, right))
+        .map(([key, child]) => [key, canonical(child)]),
+    );
+  }
+  if (typeof value === "number" && !Number.isSafeInteger(value)) {
+    throw new TypeError("canonical numbers must be safe integers");
+  }
+  return value;
+}
+
+async function descriptorSha256(descriptor: JsonObject): Promise<string> {
+  const { http, storage, file, email, ...fields } = descriptor;
+  const normalized = {
+    ...fields,
+    origins: {
+      http: http ?? null,
+      storage: storage ?? null,
+      file: file ?? null,
+      email: email ?? null,
+    },
+  };
+  return sha256Hex(new TextEncoder().encode(canonicalJson(normalized as JsonValue)));
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
