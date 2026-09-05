@@ -103,3 +103,19 @@ PoCを廃止するときは次をまとめて削除します。
 - ローカル照合metadata: `/home/risu/.local/state/kogane/moneyforward-bitwarden-match.json`
 
 R2には実データが入るため、bucket削除前に必要なsnapshotの保持先を確認します。
+
+## Safe operational diagnostics
+
+Each run logs `collector-stage-started` and `collector-stage-failed` with the same
+`runId`. Stages distinguish credential parsing, login entry, passkey options,
+local signing, assertion, redirects, account selection, account pages, monthly
+fragments, artifact storage, and manifest storage. Failure records retain only
+allowlisted error categories, HTTP status and fixed protocol reasons. Partial R2
+failures are logged individually; manifest-write failures remain traceable even
+when no manifest can be saved. Logging is best effort and cannot stop collection.
+
+Exception messages/stacks, provider response bodies, redirect URLs, cookie names
+or values, CSRF/challenge values, account identifiers and passkey material are
+excluded from diagnostics. Raw evidence storage and collection status semantics
+are unchanged. This branch is based on the existing `poc/moneyforward-worker`
+branch, preserving its unmerged collector implementation.

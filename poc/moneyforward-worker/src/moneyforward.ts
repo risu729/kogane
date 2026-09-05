@@ -1,3 +1,4 @@
+import { MoneyForwardHttpError, MoneyForwardProtocolError, type Stage } from "./diagnostics";
 import { CookieJar } from "./cookies";
 import type { MoneyForwardCredential, RawArtifact } from "./types";
 import { createAssertion } from "./webauthn";
@@ -24,19 +25,23 @@ export interface MoneyForwardCollection {
 export async function collectMoneyForward(options: {
   credential: MoneyForwardCredential;
   fetcher?: Fetcher;
+  onStage?: (stage: Stage) => void;
 }): Promise<MoneyForwardCollection> {
   const fetcher = options.fetcher ?? ((input, init) => fetch(input, init));
   const cookies = new CookieJar();
+  const onStage = (stage: Stage) => { try { options.onStage?.(stage); } catch { /* Diagnostics are best effort. */ } };
+  onStage("login-entry");
   const signIn = await followGetRedirects(
     new URL("/sign_in", ID_ORIGIN),
     cookies,
     fetcher,
   );
   if (signIn.url.hostname !== "id.moneyforward.com" || signIn.response.status !== 200) {
-    throw new Error("Money Forward ID sign-in entry did not load");
+    throw new MoneyForwardProtocolError("unexpected-redirect", signIn.response.status);
   }
   const signInHtml = await signIn.response.text();
   const csrf = extractCsrfToken(signInHtml);
+  onStage("passkey-options");
   const requestOptionsResponse = await fetchWithCookies(
     new URL("/webauthn/assertion/options", ID_ORIGIN),
     {
@@ -58,7 +63,7 @@ export async function collectMoneyForward(options: {
     fetcher,
   );
   if (!requestOptionsResponse.ok) {
-    throw new Error(`Money Forward passkey options failed with HTTP ${requestOptionsResponse.status}`);
+    throw new MoneyForwardHttpError(requestOptionsResponse.status);
   }
   const requestOptions = objectValue(
     await requestOptionsResponse.json(),
@@ -66,10 +71,12 @@ export async function collectMoneyForward(options: {
   );
   const challenge = requiredString(requestOptions["challenge"], "passkey challenge");
   const rpId = optionalString(requestOptions["rpId"]);
+  onStage("passkey-sign");
   const assertion = await createAssertion(options.credential, {
     challenge,
     ...(rpId ? { rpId } : {}),
   });
+  onStage("passkey-assert");
   const assertionResponse = await fetchWithCookies(
     new URL("/webauthn/assertion", ID_ORIGIN),
     {
@@ -92,13 +99,14 @@ export async function collectMoneyForward(options: {
     fetcher,
   );
   if (!assertionResponse.ok) {
-    throw new Error(`Money Forward passkey assertion failed with HTTP ${assertionResponse.status}`);
+    throw new MoneyForwardHttpError(assertionResponse.status);
   }
   const assertionResult = objectValue(
     await assertionResponse.json(),
     "Money Forward assertion result",
   );
   const redirectPath = requiredString(assertionResult["redirectPath"], "assertion redirect path");
+  onStage("auth-redirect");
   const postAssertion = await followGetRedirects(
     checkedUrl(redirectPath, ID_ORIGIN),
     cookies,
@@ -109,25 +117,22 @@ export async function collectMoneyForward(options: {
     postAssertion.url.pathname !== "/me" ||
     postAssertion.response.status !== 200
   ) {
-    throw new Error(
-      `Money Forward assertion stopped at ${postAssertion.url.hostname}${postAssertion.url.pathname} ` +
-      `with HTTP ${postAssertion.response.status}`,
-    );
+    throw new MoneyForwardProtocolError("unexpected-redirect", postAssertion.response.status);
   }
+  onStage("accounts-index");
   let accounts = await followGetRedirects(new URL("/accounts", ME_ORIGIN), cookies, fetcher);
+  onStage("account-selector");
   accounts = await selectActiveAccount(accounts, cookies, fetcher);
   if (
     accounts.url.hostname !== "moneyforward.com" ||
     accounts.url.pathname !== "/accounts" ||
     !accounts.response.ok
   ) {
-    throw new Error(
-      `Money Forward accounts page stopped at ${accounts.url.hostname}${accounts.url.pathname} ` +
-      `with HTTP ${accounts.response.status}`,
-    );
+    throw new MoneyForwardProtocolError("unexpected-redirect", accounts.response.status);
   }
+  onStage("accounts-index");
   const accountsHtml = await accounts.response.text();
-  if (looksSignedOut(accountsHtml)) throw new Error("Money Forward ME session was not established");
+  if (looksSignedOut(accountsHtml)) throw new MoneyForwardProtocolError("session-not-authenticated");
   const detailPaths = extractAccountDetailPaths(accountsHtml);
   const artifacts: RawArtifact[] = [{
     dataset: "accounts-index",
@@ -137,6 +142,7 @@ export async function collectMoneyForward(options: {
   }];
   let monthlyFragmentCount = 0;
   for (const [index, path] of detailPaths.entries()) {
+    onStage("account-detail");
     const response = await fetchWithCookies(
       new URL(path, ME_ORIGIN),
       {
@@ -150,7 +156,7 @@ export async function collectMoneyForward(options: {
       fetcher,
     );
     if (!response.ok) {
-      throw new Error(`Money Forward account detail ${index + 1} failed with HTTP ${response.status}`);
+      throw new MoneyForwardHttpError(response.status);
     }
     const detailHtml = await response.text();
     artifacts.push({
@@ -161,6 +167,7 @@ export async function collectMoneyForward(options: {
     });
     const context = extractAccountContext(detailHtml);
     for (const month of recentMonths(new Date(), 12)) {
+      onStage("monthly-detail");
       const fragment = await fetchWithCookies(
         new URL("/cf/fetch", ME_ORIGIN),
         {
@@ -184,9 +191,7 @@ export async function collectMoneyForward(options: {
         fetcher,
       );
       if (!fragment.ok) {
-        throw new Error(
-          `Money Forward monthly detail ${index + 1} ${month.label} failed with HTTP ${fragment.status}`,
-        );
+        throw new MoneyForwardHttpError(fragment.status);
       }
       artifacts.push({
         dataset: "monthly-transactions",
@@ -214,13 +219,13 @@ async function selectActiveAccount(
   }
   const html = await current.response.text();
   const match = html.match(/(?:window\.)?gon\.accounts=(\[[\s\S]*?\]);gon\./u);
-  if (!match?.[1]) throw new Error("Money Forward account selector data was not found");
+  if (!match?.[1]) throw new MoneyForwardProtocolError("invalid-response");
   const value: unknown = JSON.parse(match[1]);
-  if (!Array.isArray(value)) throw new Error("Money Forward account selector data is invalid");
+  if (!Array.isArray(value)) throw new MoneyForwardProtocolError("invalid-response");
   const active = value
     .map((entry) => objectValue(entry, "Money Forward account selector entry"))
     .find((entry) => entry["active"] === true);
-  if (!active) throw new Error("Money Forward account selector has no active account");
+  if (!active) throw new MoneyForwardProtocolError("invalid-response");
   const formAction = requiredString(active["formAction"], "account selector form action");
   return followGetRedirects(checkedUrl(formAction, ID_ORIGIN), cookies, fetcher);
 }
@@ -272,7 +277,6 @@ async function followGetRedirects(
   fetcher: Fetcher,
 ): Promise<{ url: URL; response: Response }> {
   let url = checkedUrl(initialUrl.toString(), initialUrl.origin);
-  const trace: string[] = [];
   for (let index = 0; index < 12; index += 1) {
     const response = await fetchWithCookies(
       url,
@@ -287,20 +291,14 @@ async function followGetRedirects(
       fetcher,
     );
     if (![301, 302, 303, 307, 308].includes(response.status)) {
-      trace.push(`${url.hostname}${url.pathname}:${response.status}[${cookies.safeSummary()}]`);
       return { url, response };
     }
     const location = response.headers.get("location");
-    if (!location) throw new Error("Money Forward redirect omitted Location");
+    if (!location) throw new MoneyForwardProtocolError("missing-location");
     const next = checkedUrl(location, url.toString());
-    const queryKeys = [...next.searchParams.keys()].sort().join(",");
-    trace.push(
-      `${url.hostname}${url.pathname}:${response.status}=>${next.hostname}${next.pathname}` +
-      `${queryKeys ? `?{${queryKeys}}` : ""}[${cookies.safeSummary()}]`,
-    );
     url = next;
   }
-  throw new Error(`Money Forward redirect limit exceeded: ${trace.join(" -> ")}`);
+  throw new MoneyForwardProtocolError("redirect-limit");
 }
 
 async function fetchWithCookies(
@@ -310,7 +308,7 @@ async function fetchWithCookies(
   fetcher: Fetcher,
 ): Promise<Response> {
   if (!ALLOWED_HOSTS.has(url.hostname) || url.protocol !== "https:") {
-    throw new Error("Money Forward request target is not allowed");
+    throw new MoneyForwardProtocolError("unexpected-redirect");
   }
   const headers = new Headers(init.headers);
   const cookie = cookies.header(url);
@@ -323,7 +321,7 @@ async function fetchWithCookies(
 function checkedUrl(value: string, base: string): URL {
   const url = new URL(value, base);
   if (url.protocol !== "https:" || !ALLOWED_HOSTS.has(url.hostname)) {
-    throw new Error("Money Forward returned an unexpected redirect host");
+    throw new MoneyForwardProtocolError("unexpected-redirect");
   }
   return url;
 }
@@ -332,7 +330,7 @@ function extractCsrfToken(html: string): string {
   const match =
     html.match(/<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/iu) ??
     html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']csrf-token["']/iu);
-  if (!match?.[1]) throw new Error("Money Forward sign-in CSRF token was not found");
+  if (!match?.[1]) throw new MoneyForwardProtocolError("missing-csrf");
   return htmlDecode(match[1]);
 }
 
@@ -346,7 +344,7 @@ function extractInputValue(html: string, name: string): string {
     const match = html.match(pattern);
     if (match?.[1]) return htmlDecode(match[1]);
   }
-  throw new Error(`Money Forward account context ${name} was not found`);
+  throw new MoneyForwardProtocolError("missing-account-context");
 }
 
 function looksSignedOut(html: string): boolean {
@@ -359,13 +357,13 @@ function htmlDecode(value: string): string {
 
 function objectValue(value: unknown, name: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error(`${name} is not an object`);
+    throw new MoneyForwardProtocolError("invalid-response");
   }
   return value as Record<string, unknown>;
 }
 
 function requiredString(value: unknown, name: string): string {
-  if (typeof value !== "string" || value.length === 0) throw new Error(`${name} is missing`);
+  if (typeof value !== "string" || value.length === 0) throw new MoneyForwardProtocolError("invalid-response");
   return value;
 }
 

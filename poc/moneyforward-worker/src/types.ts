@@ -26,6 +26,10 @@ export interface CollectionFailure {
   operation: string;
   errorType: string;
   message: string;
+  stage?: string;
+  failureCode?: string;
+  httpStatus?: number;
+  reasonCode?: string;
 }
 
 export interface CollectionManifest {

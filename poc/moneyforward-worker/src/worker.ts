@@ -1,3 +1,4 @@
+import { logEvent, logFailure, logStage, type Stage } from "./diagnostics";
 import { timingSafeEqual } from "node:crypto";
 import { collectMoneyForward } from "./moneyforward";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
@@ -45,8 +46,12 @@ async function runCollection(
   const failures: CollectionFailure[] = [];
   let accountDetailCount = 0;
   let monthlyFragmentCount = 0;
+  let stage: Stage = "credential-load";
+  const onStage = (next: Stage) => { stage = next; logStage(runId, stage); };
+  onStage(stage);
   try {
     const collection = await collectMoneyForward({
+      onStage,
       credential: parseCredential(requiredSecret(
         env.MONEYFORWARD_CREDENTIAL_JSON,
         "MONEYFORWARD_CREDENTIAL_JSON",
@@ -54,15 +59,16 @@ async function runCollection(
     });
     accountDetailCount = collection.accountDetailCount;
     monthlyFragmentCount = collection.monthlyFragmentCount;
+    onStage("artifact-store");
     for (const artifact of collection.artifacts) {
       try {
         artifacts.push(await storeArtifact({ bucket: env.SNAPSHOTS, prefix, artifact }));
       } catch (error) {
-        failures.push(failure(`r2:${artifact.dataset}`, error));
+        failures.push(failure(`r2:${artifact.dataset}`, error, runId, stage));
       }
     }
   } catch (error) {
-    failures.push(failure("collect", error));
+    failures.push(failure("collect", error, runId, stage));
   }
   const completedAt = new Date().toISOString();
   const status = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
@@ -78,8 +84,14 @@ async function runCollection(
     artifacts,
     failures,
   };
-  const manifestKey = await storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest });
-  console.log(JSON.stringify({
+  onStage("manifest-store");
+  let manifestKey: string;
+  try { manifestKey = await storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest }); }
+  catch (error) {
+    logFailure(runId, stage, error);
+    throw new Error(`Money Forward manifest storage failed; runId=${runId}`);
+  }
+  logEvent({
     event: "moneyforward-collection-stored",
     runId,
     status,
@@ -88,7 +100,7 @@ async function runCollection(
     artifactCount: artifacts.length,
     failureCount: failures.length,
     manifestKey,
-  }));
+  });
   return { ...manifest, manifestKey };
 }
 
@@ -105,20 +117,9 @@ function requiredSecret(value: string | undefined, name: string): string {
   return value;
 }
 
-function failure(operation: string, error: unknown): CollectionFailure {
-  return {
-    operation,
-    errorType: error instanceof Error ? error.name : "UnknownError",
-    message: publicError(error),
-  };
-}
-
-function publicError(error: unknown): string {
-  const value = error instanceof Error ? error.message : "Unknown error";
-  return value
-    .replace(/Bearer\s+[^\s,;]+/giu, "Bearer [redacted]")
-    .replace(/(cookie|csrf|token|challenge|credential)=?[^\s,;]+/giu, "$1=[redacted]")
-    .slice(0, 300);
+function failure(operation: string, error: unknown, runId: string, stage: Stage): CollectionFailure {
+  const detail = logFailure(runId, stage, error);
+  return { operation, ...detail, message: detail.failureCode, stage };
 }
 
 function publicResult(result: CollectionManifest & { manifestKey: string }): object {
