@@ -456,6 +456,7 @@ describe("0001 raw-evidence schema", () => {
       { external_source_id: "sbi-vc-trade", source_id: "sbi-vc-trade" },
       { external_source_id: "smbc-direct", source_id: "smbc-bank" },
       { external_source_id: "sony-bank", source_id: "sony-bank" },
+      { external_source_id: "v-point", source_id: "v-point" },
       { external_source_id: "v-point-pay-email", source_id: "v-point-pay" },
       { external_source_id: "v-point-pay-email-reconciliation", source_id: "v-point" },
     ]);
@@ -543,6 +544,20 @@ describe("0001 raw-evidence schema", () => {
       producer_id: "collector-r2-importer",
       source_id: "global-pass",
     }]);
+    const vPointRoute = await env.DB.prepare(`
+      SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes
+      WHERE ingest_client_id = 'collector-r2-v-point'
+      ORDER BY producer_id, source_id
+    `).all<{
+      ingest_client_id: string;
+      producer_id: string;
+      source_id: string;
+    }>();
+    expect(vPointRoute.results).toEqual([{
+      ingest_client_id: "collector-r2-v-point",
+      producer_id: "collector-r2-importer",
+      source_id: "v-point",
+    }]);
     const sbiPolicies = await env.DB.prepare(`
       SELECT template, redaction_version, fingerprint_key_version
       FROM origin_template_policies
@@ -627,6 +642,28 @@ describe("0001 raw-evidence schema", () => {
       redaction_version: "v1",
       fingerprint_key_version: "collector-r2-v1",
     }]);
+    const vPointPolicies = await env.DB.prepare(`
+      SELECT template, redaction_version, fingerprint_key_version
+      FROM origin_template_policies
+      WHERE source_id = 'v-point' AND origin_kind = 'storage' AND active = 1
+      ORDER BY template
+    `).all<{
+      template: string;
+      redaction_version: string;
+      fingerprint_key_version: string;
+    }>();
+    expect(vPointPolicies.results).toEqual([
+      {
+        template: "derived/v-point-pay-email-reconciliation/{date}/{run-id}.json",
+        redaction_version: "v1",
+        fingerprint_key_version: "collector-r2-v1",
+      },
+      {
+        template: "raw/v-point/{date}/{run-id}/{artifact}.json",
+        redaction_version: "v1",
+        fingerprint_key_version: "collector-r2-v1",
+      },
+    ]);
     await env.DB.prepare(`
       UPDATE origin_template_policies SET active = 0
       WHERE source_id = 'kogane-synthetic' AND origin_kind = 'http'

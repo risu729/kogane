@@ -55,4 +55,27 @@ export interface CollectionManifest {
 
 export interface CollectionResult extends CollectionManifest {
   manifestKey: string;
+  central: RawEvidenceImportResult;
+}
+
+export interface RawEvidenceImportResult {
+  source: "v-point";
+  manifestKey: string;
+  centralRunId: number;
+  artifactCount: number;
+  sealed: true;
+  allObjectsReused: boolean;
+}
+
+export interface RawEvidenceBackfillPageResult {
+  source: "v-point";
+  scannedObjectCount: number;
+  importedManifestCount: number;
+  skippedManifestCount: number;
+  deferredManifestCount: number;
+  failedManifestCount: number;
+  nextCursor: string | null;
+  truncated: boolean;
+  failureCode?: string;
+  result?: RawEvidenceImportResult;
 }

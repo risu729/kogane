@@ -39,6 +39,12 @@
       "bucket_name": "kogane-vpoint-pay-collector-poc"
     }
   ],
+  "services": [
+    {
+      "binding": "RAW_EVIDENCE_IMPORTER",
+      "service": "kogane-collector-r2-importer"
+    }
+  ],
   "vars": {
     "COLLECTOR_SCHEMA_VERSION": "vpoint-worker-poc-v2",
     "VPOINT_PAY_EMAIL_RECIPIENT": "vpointpay@takuk.me"

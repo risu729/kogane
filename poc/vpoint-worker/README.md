@@ -5,6 +5,8 @@ Vポイント本体の残高・期限bucket・SMBC由来内訳・最大3年の�
 raw responseとmanifestをprivate R2へ保存するPoCである。VポイントPayとVpass明細は別の
 サービス・認証・台帳であるため含めない。
 
+保存済みrunはService Bindingで内部`kogane-collector-r2-importer`へ通知し、strict validation後に中央raw-evidenceへsealする。source R2は中央転送用のimmutable outboxであり、成功・失敗・backfill後のいずれも変更または削除しない。中央が失敗した場合、collection自体を成功扱いせず、同じmanifestを冪等に再送できる。
+
 ## Runtime profile
 
 - **Browser: なし。** Cloudflare Browser Run、Container Chrome/Chromium、既存browser cookieを使用しない。
@@ -119,11 +121,20 @@ bun run cf:check
 - secret: `VPOINT_EMAIL_RECIPIENT`
 - secret: `VPOINT_EMAIL_FORWARD_TO`
 - secret: `ADMIN_TRIGGER_TOKEN`
+- Service Binding: `RAW_EVIDENCE_IMPORTER` → `kogane-collector-r2-importer`
 - Cron: `15 21 * * *`（毎日06:15 JST）
 
 manual triggerは`POST /trigger`に`Authorization: Bearer <ADMIN_TRIGGER_TOKEN>`を付ける。
 認証メール待ちはHTTP 202と`reauthenticationPending: true`、通常収集はHTTP 200、実エラーは
 HTTP 502を返す。`GET /health`は秘密値や口座データを返さない。
+
+historical outboxは次で1 objectずつbounded scanする。管理tokenはmode 0600のローカルfileから読み、標準出力にはpage・件数・固定failure codeだけを出す。本文、値、source object key、hash、tokenは出力しない。
+
+```bash
+poc/vpoint-worker/scripts/backfill-raw-evidence.sh
+```
+
+2026-09-05のread-only contract auditではsource R2のmanifest 24件（v1 5件、v2 19件、成功13件、失敗11件）とreconciliation参照10件がすべてstrict validatorへ適合した。旧reconciliation 3件は旧exact match policy、残り7件は現行exact policyであり、両方を明示的な互換契約として扱う。
 
 2026-08-31のproduction verificationでは、初回triggerが認証メールを要求し、Email Workerが
 受信・Gmail転送・session生成・再収集を完了した。成功runは履歴149件を5 pageで走査し、

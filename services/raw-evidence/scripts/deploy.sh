@@ -15,3 +15,4 @@ bash scripts/verify-sbi-shinsei-route.sh
 bash scripts/verify-mobile-suica-route.sh
 bash scripts/verify-global-pass-route.sh
 bash scripts/verify-myjcb-route.sh
+bash scripts/verify-v-point-route.sh

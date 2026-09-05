@@ -362,6 +362,7 @@ The registry includes explicit collector-manifest aliases:
 | `moneyforward-me` | `moneyforward-me` |
 | `v-point-pay-email` | `v-point-pay` |
 | `v-point-pay-email-reconciliation` | `v-point` |
+| `v-point` (collector R2 importer) | `v-point` |
 
 `v-point-pay-email-reconciliation` is a generated report emitted by the V Point
 collector while reconciling its own point-history evidence with V Point Pay mail.
@@ -371,6 +372,13 @@ financial match. Any interpretation of its entries, including match confidence
 and links to V Point Pay observations, starts in phase 3. The archived direct and
 forwarded messages themselves remain `provider_message` artifacts under
 `v-point-pay`.
+
+Migration `0011` gives the V Point R2 importer a dedicated client route and
+enables only the reviewed `raw/v-point/{date}/{run-id}/{artifact}.json` and
+`derived/v-point-pay-email-reconciliation/{date}/{run-id}.json` storage
+templates. The point collector outbox and generated reconciliation bucket are
+validated separately; neither policy grants the importer access to the raw
+V Point Pay mail source.
 
 Financial HTTP and storage templates remain default-deny. Each importer PR must
 add a reviewed source-specific scope and exact template-policy migration from

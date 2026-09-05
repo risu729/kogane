@@ -18,6 +18,93 @@ describe("collector R2 importer routes", () => {
     }
   });
 
+  test("the V Point backfill page scans exactly one source object", async () => {
+    const calls: R2ListOptions[] = [];
+    const bucket = {
+      list: async (options: R2ListOptions) => {
+        calls.push(options);
+        return {
+          objects: [{ key: "raw/v-point/2026/09/05/run/balance-info.json" }],
+          truncated: true,
+          cursor: "next",
+        } as unknown as R2Objects;
+      },
+    } as unknown as R2Bucket;
+    const response = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cursor: "prior", limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+        {} as R2Bucket, {} as R2Bucket, bucket,
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ prefix: "raw/v-point/", limit: 1, cursor: "prior" }]);
+    expect(await response.json() as unknown).toEqual({
+      source: "v-point",
+      scannedObjectCount: 1,
+      importedManifestCount: 0,
+      skippedManifestCount: 1,
+      deferredManifestCount: 0,
+      failedManifestCount: 0,
+      nextCursor: "next",
+      truncated: true,
+    });
+  });
+
+  test("the V Point backfill route rejects invalid limits and stalled cursors", async () => {
+    const never = { list: async () => { throw new Error("must_not_list"); } } as unknown as R2Bucket;
+    const invalidLimit = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ limit: 2 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+        {} as R2Bucket, {} as R2Bucket, never,
+      ),
+    );
+    expect(invalidLimit.status).toBe(400);
+    expect(await invalidLimit.json() as unknown).toEqual({ error: "backfill_limit_must_be_one" });
+
+    const invalidCursor = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cursor: "not opaque", limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+        {} as R2Bucket, {} as R2Bucket, never,
+      ),
+    );
+    expect(invalidCursor.status).toBe(400);
+    expect(await invalidCursor.json() as unknown).toEqual({ error: "cursor_invalid" });
+
+    for (const result of [
+      { objects: [], truncated: true },
+      { objects: [], truncated: true, cursor: "same" },
+    ]) {
+      const stalled = { list: async () => result as unknown as R2Objects } as unknown as R2Bucket;
+      const response = await worker.fetch(
+        new Request("https://importer.internal/v1/v-point/backfill-page", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ cursor: "same", limit: 1 }),
+        }) as Parameters<typeof worker.fetch>[0],
+        environment(
+          {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+          {} as R2Bucket, {} as R2Bucket, stalled,
+        ),
+      );
+      expect(response.status).toBe(409);
+    }
+  });
+
   test("the GLOBAL PASS backfill page scans exactly one source object", async () => {
     const calls: R2ListOptions[] = [];
     const bucket = {
@@ -470,6 +557,8 @@ function environment(
   mobileSuicaBucket: R2Bucket = {} as R2Bucket,
   globalPassBucket: R2Bucket = {} as R2Bucket,
   myJcbBucket: R2Bucket = {} as R2Bucket,
+  vPointBucket: R2Bucket = {} as R2Bucket,
+  vPointPayBucket: R2Bucket = {} as R2Bucket,
 ): Env {
   return {
     SBI_SNAPSHOTS: {} as R2Bucket,
@@ -479,6 +568,8 @@ function environment(
     MOBILE_SUICA_SNAPSHOTS: mobileSuicaBucket,
     GLOBAL_PASS_SNAPSHOTS: globalPassBucket,
     MYJCB_SNAPSHOTS: myJcbBucket,
+    VPOINT_SNAPSHOTS: vPointBucket,
+    VPOINT_PAY_SNAPSHOTS: vPointPayBucket,
     RAW_EVIDENCE: {} as Fetcher,
     IMPORTER_VERSION: "collector-r2-importer-v11",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
@@ -489,6 +580,7 @@ function environment(
     RAW_EVIDENCE_TOKEN_GLOBAL_PASS: `collector-r2-global-pass.${"g".repeat(32)}`,
     GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST: "a".repeat(64),
     RAW_EVIDENCE_TOKEN_MYJCB: `collector-r2-myjcb.${"j".repeat(32)}`,
+    RAW_EVIDENCE_TOKEN_VPOINT: `collector-r2-v-point.${"p".repeat(32)}`,
     ORIGIN_FINGERPRINT_KEY: "ab".repeat(32),
   };
 }

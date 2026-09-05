@@ -531,3 +531,11 @@ read-only live 検証項目:
 - V Point internal API の session/CSRF/refresh/rate limit/規約上の扱い、Vpass endpoint の現行 live 応答。
 - V Point Pay/SMBC/V Point APK の host/path/schema、pinning/integrity 候補、Pay の app API/WAF。
 - Bitwarden と V Point iOS passkey のサービス固有互換、Pay/Vpass の passkey availability。
+
+## 16. 2026-09-05 Layer A raw-evidence実装
+
+V Point web collectorは現在、browserなしのWorkers fetchとEmail Worker再認証で定期収集し、private R2をimmutable outboxとして使う。中央取り込みはcollectorとは別の`collector-r2-v-point` credentialとService Bindingに分離した。manifest v1/v2、prefix inventory、metadata、checksum、JSON schema、pagination、failure complement、collection summary、V Point Pay email reconciliationを全件検証してから、専用の中央runを冪等にsealする。
+
+実 R2を変更せずに24 manifestを監査し、v1 5件、v2 19件、成功13件、失敗11件、reconciliation参照10件がstrict contractへ適合した。監査中は本文、値、object key、個別hash、secretを出力していない。reconciliationは旧3件と現行7件でexact policy文字列が異なるため、観測した2値だけを明示的に受理し、任意文字列への緩和はしていない。
+
+V Moneyは同一session/APIで取得されるが別の電子マネー台帳である。現時点の監査済みaccountは全runで空pageなので、Layer AのV Point contractは空のV Money観測だけを保存可能とし、非空になった場合はfail closedする。非空履歴を自動帰属させる前に、独立source ID、asset/account境界、parser、reconciliation方針を別PRで設計する。

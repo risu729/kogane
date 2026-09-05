@@ -25,6 +25,7 @@
       "RAW_EVIDENCE_TOKEN_GLOBAL_PASS",
       "GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST",
       "RAW_EVIDENCE_TOKEN_MYJCB",
+      "RAW_EVIDENCE_TOKEN_VPOINT",
       "ORIGIN_FINGERPRINT_KEY"
     ]
   },
@@ -56,6 +57,14 @@
     {
       "binding": "MYJCB_SNAPSHOTS",
       "bucket_name": "kogane-myjcb-collector-poc"
+    },
+    {
+      "binding": "VPOINT_SNAPSHOTS",
+      "bucket_name": "kogane-vpoint-collector-poc"
+    },
+    {
+      "binding": "VPOINT_PAY_SNAPSHOTS",
+      "bucket_name": "kogane-vpoint-pay-collector-poc"
     }
   ],
   "services": [
