@@ -2,6 +2,7 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { collectMoneyForward } from "../src/moneyforward";
 import { parseCredential } from "../src/webauthn";
+import { safeFailure } from "../src/diagnostics";
 
 const bwCli = process.env.BW_CLI ?? "/home/risu/.local/share/mise/installs/bitwarden/2026.8.0/bw";
 const session = process.env.BW_SESSION;
@@ -13,15 +14,17 @@ const child = Bun.spawn([bwCli, "list", "items", "--session", session], {
   stderr: "pipe",
   env: process.env,
 });
-const [stdout, stderr, exitCode] = await Promise.all([
+const [stdout, , exitCode] = await Promise.all([
   new Response(child.stdout).text(),
   new Response(child.stderr).text(),
   child.exited,
 ]);
 if (exitCode !== 0) {
-  throw new Error(`Bitwarden item listing failed: ${stderr.slice(0, 200)}`);
+  throw new Error("Bitwarden item listing failed");
 }
-const items: unknown = JSON.parse(stdout);
+let items: unknown;
+try { items = JSON.parse(stdout); }
+catch { throw new Error("Bitwarden item listing is not valid JSON"); }
 if (!Array.isArray(items)) throw new Error("Bitwarden item listing is invalid");
 
 const candidates: Array<{
@@ -70,7 +73,7 @@ for (const [candidateIndex, candidate] of candidates.entries()) {
     outcomes.push({
       candidate: candidateIndex + 1,
       matchesMeAccount: false,
-      errorType: error instanceof Error ? error.name : "UnknownError",
+      ...safeFailure(error),
     });
   }
 }
