@@ -881,11 +881,10 @@ async function dataDescriptor(options: {
   schemaVersion: SchemaVersion;
   fingerprintKey: string;
 }): Promise<JsonObject> {
-  return {
+  return normalizedDescriptor({
     artifactKey: filename(options.artifact.key),
     artifactRole: "sanitized_provider_capture",
     payloadFidelity: "transformed",
-    containerKind: "single",
     lineageDisposition: "source_not_retained_for_security",
     dataset: DATASET,
     formatId: "global-pass-activity-html-utf8-sanitized",
@@ -899,6 +898,7 @@ async function dataDescriptor(options: {
     sha256: options.centralSha256,
     byteSize: options.centralBytes,
     storage: await storageOrigin(options.artifact.key, options.fingerprintKey),
+    ranges: [],
     transformSteps: [
       {
         stepIndex: 0,
@@ -913,7 +913,7 @@ async function dataDescriptor(options: {
         transformerVersion: "v1",
       },
     ],
-  };
+  });
 }
 
 async function manifestDescriptor(options: {
@@ -926,11 +926,10 @@ async function manifestDescriptor(options: {
   fingerprintKey: string;
 }): Promise<JsonObject> {
   const legacy = options.manifest.schemaVersion === V1;
-  return {
+  return normalizedDescriptor({
     artifactKey: "manifest.json",
     artifactRole: legacy ? "collector_derived" : "collector_manifest",
     payloadFidelity: legacy ? "transformed" : "generated",
-    containerKind: "single",
     lineageDisposition: legacy ? "source_not_retained_for_security" : "not_applicable",
     dataset: "collector-manifest",
     formatId: "global-pass-collector-manifest-json",
@@ -944,6 +943,7 @@ async function manifestDescriptor(options: {
     sha256: options.sha256,
     byteSize: options.bytes,
     storage: await storageOrigin(options.key, options.fingerprintKey),
+    ranges: [],
     transformSteps: legacy ? [
       {
         stepIndex: 0,
@@ -958,6 +958,55 @@ async function manifestDescriptor(options: {
         transformerVersion: "v1",
       },
     ] : [],
+  });
+}
+
+function normalizedDescriptor(input: {
+  artifactKey: string;
+  artifactRole: string;
+  payloadFidelity: string;
+  lineageDisposition: string;
+  dataset: string;
+  formatId: string;
+  formatVersion: SchemaVersion;
+  declaredMediaType: string;
+  mediaTypeBasis: string;
+  fetchedAtMs: number;
+  fetchedAtBasis: string;
+  fetchUnitId: number;
+  sequence: number;
+  sha256: string;
+  byteSize: number;
+  storage: JsonObject;
+  ranges: JsonObject[];
+  transformSteps: JsonObject[];
+}): JsonObject {
+  return {
+    artifactKey: input.artifactKey,
+    artifactRole: input.artifactRole,
+    payloadFidelity: input.payloadFidelity,
+    containerKind: "single",
+    lineageDisposition: input.lineageDisposition,
+    dataset: input.dataset,
+    formatId: input.formatId,
+    formatVersion: input.formatVersion,
+    declaredMediaType: input.declaredMediaType,
+    mediaTypeBasis: input.mediaTypeBasis,
+    fetchedAtMs: input.fetchedAtMs,
+    fetchedAtBasis: input.fetchedAtBasis,
+    fetchUnitId: input.fetchUnitId,
+    pageGroupId: null,
+    pageIndex: null,
+    sequence: input.sequence,
+    sha256: input.sha256,
+    byteSize: input.byteSize,
+    http: null,
+    storage: input.storage,
+    file: null,
+    email: null,
+    ranges: input.ranges,
+    transformSteps: input.transformSteps,
+    relations: [],
   };
 }
 

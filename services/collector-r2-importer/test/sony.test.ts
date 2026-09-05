@@ -213,6 +213,48 @@ describe("Sony Bank staged-run importer", () => {
     expect(central.requests).toHaveLength(0);
   });
 
+  test("logs correlated import progress without raw keys, credentials, or exception messages", async () => {
+    const bucket = new FakeBucket();
+    const { manifest } = await storeCompleteRun(bucket);
+    const records: Record<string, unknown>[] = [];
+    const original = console.log;
+    const originalError = console.error;
+    console.log = (text: string) => { records.push(JSON.parse(text)); };
+    console.error = console.log;
+    try {
+      await importRun(bucket, new FakeCentral());
+      await importAllChunks(bucket, new FakeCentral(), manifest.artifacts.length + 1);
+      const failingBucket = new FakeBucket();
+      failingBucket.get = async () => { throw new Error("password=private-provider-detail"); };
+      await expect(importRun(failingBucket, new FakeCentral())).rejects.toThrow("password=private-provider-detail");
+    } finally {
+      console.log = original;
+      console.error = originalError;
+    }
+    expect(records).toContainEqual(expect.objectContaining({
+      runId: RUN_ID, outcome: "deferred", reason: "worker_invocation_limit", nextOffset: 0,
+    }));
+    expect(records).toContainEqual(expect.objectContaining({ outcome: "sealed", phase: "seal" }));
+    expect(records).toContainEqual(expect.objectContaining({ outcome: "failed", errorCode: "source_validation_failed" }));
+    expect(records.every((record) => typeof record.durationMs === "number" && typeof record.attemptId === "string")).toBe(true);
+    expect(JSON.stringify(records)).not.toContain("private-provider-detail");
+    expect(JSON.stringify(records)).not.toContain(MANIFEST_KEY);
+    expect(JSON.stringify(records)).not.toContain(TOKEN);
+  });
+
+  test("a broken diagnostic sink does not interrupt a complete import", async () => {
+    const bucket = new FakeBucket();
+    const { manifest } = await storeCompleteRun(bucket);
+    const original = console.log;
+    console.log = () => { throw new Error("logger unavailable"); };
+    try {
+      await expect(importAllChunks(bucket, new FakeCentral(), manifest.artifacts.length + 1))
+        .resolves.toMatchObject({ status: "sealed", sealed: true });
+    } finally {
+      console.log = original;
+    }
+  });
+
   test("defers an inventory above the central hard limit before reading its data objects", async () => {
     const bucket = new FakeBucket();
     const artifacts = [
@@ -452,6 +494,51 @@ describe("Sony Bank staged-run importer", () => {
     const { entries } = completeEntries();
     await storeRun(csvBucket, entries.filter((entry) => entry.dataset !== "foreign-history-usd-csv"));
     await expectRejected(csvBucket, "manifest_foreign_csv_condition_mismatch");
+  });
+
+  test("seals verified zero-row JPY evidence without a CSV and keeps older empty CSV captures valid", async () => {
+    for (const keepCsv of [false, true]) {
+      const bucket = new FakeBucket();
+      const entries = completeEntries().entries
+        .filter((value) => value.dataset !== "yen-history-page-0002" &&
+          (keepCsv || value.dataset !== "yen-history-csv"))
+        .map((value) => value.dataset === "yen-history-page-0001"
+          ? entry(value.dataset, pageBody(0, 0))
+          : value.dataset === "collection-summary"
+            ? entry(value.dataset, summaryBody({ transactionCount: 0, pageCount: 1 }))
+            : value.dataset === "yen-history-csv"
+              ? entry(value.dataset, encode("date,amount\n"), "text/csv")
+              : value);
+      const manifest = await storeRun(bucket, entries, [], { transactionCount: 0 });
+      await expect(importAllChunks(bucket, new FakeCentral(), manifest.artifacts.length + 1))
+        .resolves.toMatchObject({ status: "sealed", sealed: true });
+    }
+  });
+
+  test("requires JPY CSV for nonzero history even when the manifest claims zero", async () => {
+    const bucket = new FakeBucket();
+    await storeRun(bucket, completeEntries().entries.filter((value) => value.dataset !== "yen-history-csv"),
+      [], { transactionCount: 0 });
+    await expectRejected(bucket, "manifest_dataset_completeness_mismatch");
+  });
+
+  test("does not use a zero manifest count as proof when the JPY JSON failed to persist", async () => {
+    const bucket = new FakeBucket();
+    const entries = completeEntries().entries.filter((value) => !value.dataset.startsWith("yen-history-"));
+    await storeRun(bucket, entries, [{
+      operation: "r2:yen-history-page-0001", errorType: "Error", message: "storage failed",
+    }], { transactionCount: 0 });
+    await expectRejected(bucket, "manifest_dataset_completeness_mismatch");
+  });
+
+  test("rejects a zero declared JPY total with actual rows when CSV is omitted", async () => {
+    const bucket = new FakeBucket();
+    const entries = completeEntries().entries
+      .filter((value) => value.dataset !== "yen-history-page-0002" && value.dataset !== "yen-history-csv")
+      .map((value) => value.dataset === "yen-history-page-0001"
+        ? entry(value.dataset, pageBody(1, 0)) : value);
+    await storeRun(bucket, entries, [], { transactionCount: 0 });
+    await expectRejected(bucket, "artifact_page_rows_mismatch");
   });
 
   test("rejects wallet selector sets that do not match the captured months", async () => {

@@ -125,6 +125,25 @@ export async function importSonyRun(options: {
   let reusedArtifactCount = 0;
   let expectedArtifactCount = 0;
   let phase = "source_validation";
+  const runId = options.manifestKey.match(MANIFEST_KEY)?.[4];
+  const log = (outcome: "started" | "deferred" | "sealed" | "failed", nextOffset?: number,
+    reason?: SonyImportDeferred["reason"]) => {
+    try {
+      console[outcome === "failed" ? "error" : "log"](JSON.stringify({
+        event: "sony-bank-import-diagnostic", source: SOURCE, attemptId,
+        ...(runId ? { runId } : {}), phase, outcome,
+        durationMs: Math.max(0, Date.now() - startedAtMs),
+        expectedArtifactCount, acceptedArtifactCount, reusedArtifactCount,
+        ...(centralRunId !== undefined ? { centralRunId } : {}),
+        ...(nextOffset !== undefined ? { nextOffset } : {}),
+        ...(reason ? { reason } : {}),
+        ...(outcome === "failed" ? { errorCode: `${phase}_failed` } : {}),
+      }));
+    } catch {
+      // Logging must never interrupt evidence transfer or replace its failure.
+    }
+  };
+  log("started");
 
   try {
     const loaded = await loadSonyManifest(options.bucket, options.manifestKey);
@@ -134,10 +153,12 @@ export async function importSonyRun(options: {
       throw new ImportError(400, "transfer_offset_invalid");
     }
     if (expectedArtifactCount > MAX_CENTRAL_ARTIFACTS) {
+      log("deferred", offset, "central_inventory_limit");
       return deferred(expectedArtifactCount, options.manifestKey, "central_inventory_limit", offset);
     }
     const validated = await validateLoadedSonyRun(options.bucket, options.manifestKey, loaded);
     if (options.immediate !== false && offset === 0 && expectedArtifactCount > SONY_TRANSFER_CHUNK_SIZE) {
+      log("deferred", 0, "worker_invocation_limit");
       return deferred(expectedArtifactCount, options.manifestKey, "worker_invocation_limit", 0);
     }
 
@@ -188,6 +209,7 @@ export async function importSonyRun(options: {
     }
 
     if (end < plans.length) {
+      log("deferred", end, "worker_invocation_limit");
       return {
         source: SOURCE,
         manifestKey: options.manifestKey,
@@ -231,6 +253,7 @@ export async function importSonyRun(options: {
     });
     phase = "seal";
     await central.sealStagedInventory(centralRunId, inventoryId, attemptId, startedAtMs);
+    log("sealed");
     return {
       source: SOURCE,
       manifestKey: options.manifestKey,
@@ -241,6 +264,7 @@ export async function importSonyRun(options: {
       finalChunkAllObjectsReused: acceptedArtifactCount === 0,
     };
   } catch (error) {
+    log("failed");
     if (centralRunId !== undefined) {
       try {
         const central = new CentralClient(options.centralService, options.centralToken, CENTRAL_CLIENT_ID);
@@ -470,7 +494,15 @@ function validateCompleteness(manifest: SonyManifest, artifacts: VerifiedArtifac
       walletNames.some((name) => !validMonth(name.slice(-6)))) {
     invalid("manifest_wallet_months_invalid");
   }
-  const expected = ["gross-balance", ...yenPages, "yen-history-csv"];
+  const expected = ["gross-balance", ...yenPages];
+  // Sony's UI offers CSV only for non-empty history. Preserve acceptance of
+  // older captures containing an empty CSV, but permit omission only when the
+  // verified source JSON proves there are no JPY transactions. A manifest's
+  // count alone is not evidence (including when the JSON failed to persist).
+  const yenFirst = present.get(yenPages[0] ?? "")?.page;
+  if (legacy || declared.has("yen-history-csv") || yenFirst?.declaredTotal !== 0) {
+    expected.push("yen-history-csv");
+  }
   if (!legacy) {
     for (const currency of CURRENCIES) {
       const pages = foreignPages.get(currency)!;
