@@ -287,3 +287,13 @@ scripts/trigger.sh manifest ~/.local/share/kogane/secrets/globalpass-worker-admi
 - 全月の各HTMLが2 MiB以下か
 - 家族カードlabel、pending/confirmed、authorization numberを正規化する安定key
 - 非hibernating WebSocket relayが全月のbrowser sessionを維持できるか
+
+## Operational diagnostics
+
+Collection logs include a generated run ID, bounded stage name, outcome and duration.
+The Worker distinguishes container startup/request, browser collection, artifact storage,
+manifest storage and container teardown. Browser logs identify challenge/login, activity
+navigation, month discovery and statement reads; HTTP failures contain status only.
+Relay errors include the same vetted run ID, a relay ID and whether its peer had closed,
+so disconnects can be compared with the teardown boundary without treating each log as a failed run.
+New diagnostic logs omit exception text, stack traces, request URLs, credentials and statement bodies.

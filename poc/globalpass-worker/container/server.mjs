@@ -1,3 +1,4 @@
+import { createBrowserDiagnostics } from "./diagnostics.mjs";
 import http from "node:http";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
@@ -840,13 +841,18 @@ async function probeTurnstile(payload) {
 }
 
 async function collect(payload, response) {
-  const relay = await startConnectRelay({
+  const diagnostics = createBrowserDiagnostics(payload.relayUrl);
+  return diagnostics.step("collection", () => collectBrowser(payload, response, diagnostics));
+}
+
+async function collectBrowser(payload, response, diagnostics) {
+  const relay = await diagnostics.step("relay-start", () => startConnectRelay({
     relayToken: payload.relayToken,
     relayUrl: payload.relayUrl,
     allowedHosts: RELAY_HOSTS,
-  });
+  }));
   const config = probeConfiguration("chrome-stable-no-ua-all-tamia");
-  const launched = await launchProbeContext(config, relay.port);
+  const launched = await diagnostics.step("browser-launch", () => launchProbeContext(config, relay.port));
   const { browser, context } = launched;
   let page;
   const networkDiagnostic = [];
@@ -878,6 +884,7 @@ async function collect(payload, response) {
     });
     page.on("response", (pageResponse) => {
       if (pageResponse.status() < 400) return;
+      diagnostics.http(pageResponse.status());
       const url = new URL(pageResponse.url());
       recordNetwork({
         event: "http",
@@ -887,12 +894,12 @@ async function collect(payload, response) {
       });
     });
     page.setDefaultTimeout(45_000);
-    await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" });
+    await diagnostics.step("login-page", () => page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" }));
     try {
-      await page.waitForFunction(() => {
+      await diagnostics.step("challenge", () => page.waitForFunction(() => {
         const input = document.querySelector("[name=cf-turnstile-response]");
         return Boolean(input && "value" in input && input.value.length > 20);
-      });
+      }));
     } catch (error) {
       const diagnostic = await page.evaluate(() => {
         const response = document.querySelector("[name=cf-turnstile-response]");
@@ -925,19 +932,21 @@ async function collect(payload, response) {
     }
     await page.locator("#usrId").fill(payload.user);
     await page.locator("#password").fill(payload.password);
-    await (await visibleLoginButton(page)).click();
-    await page.waitForLoadState("domcontentloaded");
-    await page.waitForTimeout(2_000);
-    const body = await page.locator("body").innerText();
-    if (/Access Denied|アクセスが拒否/iu.test(body)) {
-      throw new Error("GLOBAL PASS login was denied by the edge");
-    }
-    if (await page.locator("#usrId").isVisible().catch(() => false)) {
-      throw new Error("GLOBAL PASS login returned to the credential form");
-    }
+    await diagnostics.step("login-submit", async () => {
+      await (await visibleLoginButton(page)).click();
+      await page.waitForLoadState("domcontentloaded");
+      await page.waitForTimeout(2_000);
+      const body = await page.locator("body").innerText();
+      if (/Access Denied|アクセスが拒否/iu.test(body)) {
+        throw new Error("GLOBAL PASS login was denied by the edge");
+      }
+      if (await page.locator("#usrId").isVisible().catch(() => false)) {
+        throw new Error("GLOBAL PASS login returned to the credential form");
+      }
+    });
 
-    await openActivity(page);
-    const selector = await findMonthSelect(page);
+    await diagnostics.step("activity-open", () => openActivity(page));
+    const selector = await diagnostics.step("month-discovery", () => findMonthSelect(page));
     const byMonth = new Map();
     for (const option of selector.months) {
       if (!byMonth.has(option.month)) byMonth.set(option.month, option.value);
@@ -955,19 +964,21 @@ async function collect(payload, response) {
       browserVersion: browser.version(),
     });
     for (const month of selectedMonths) {
-      await selectMonth(page, selector.index, byMonth.get(month));
-      const html = await page.content();
-      if (Buffer.byteLength(html) > MAX_HTML_BYTES) {
-        throw new Error(`${month} activity HTML exceeded byte limit`);
-      }
-      await writeLine(response, { type: "artifact", month, html });
+      await diagnostics.step("statement-read", async () => {
+        await selectMonth(page, selector.index, byMonth.get(month));
+        const html = await page.content();
+        if (Buffer.byteLength(html) > MAX_HTML_BYTES) {
+          throw new Error(`${month} activity HTML exceeded byte limit`);
+        }
+        await writeLine(response, { type: "artifact", month, html });
+      });
     }
-    await signOut(page);
+    await diagnostics.step("logout", () => signOut(page));
   } finally {
     try {
-      await launched.close();
+      await diagnostics.step("browser-close", () => launched.close());
     } finally {
-      await relay.close();
+      await diagnostics.step("relay-close", () => relay.close());
     }
   }
 }

@@ -1,3 +1,5 @@
+import { createDiagnostics, safeErrorDetails } from "../../collector-diagnostics/src/index";
+import { logEvent, relayRunId, withRunId } from "./log-context";
 import { Container, getContainer } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
@@ -71,10 +73,11 @@ export class GlobalPassCollectorContainer extends Container<Env> {
   }
 
   override onError(error: unknown): void {
-    console.error(
+    logEvent(
+      "error",
       JSON.stringify({
         event: "globalpass-container-error",
-        errorType: error instanceof Error ? error.name : "UnknownError",
+        ...safeErrorDetails(error),
       }),
     );
   }
@@ -304,12 +307,20 @@ async function runCollection(
   const runId = crypto.randomUUID();
   const container = getContainer(env.COLLECTOR_CONTAINER, CONTAINER_ID);
 
+  const diagnostics = createDiagnostics("prestia-globalpass", runId);
   try {
-    return await collectWithContainer(env, mode, container, startedAt, runId);
+    const result = await collectWithContainer(env, mode, container, startedAt, runId, diagnostics);
+    diagnostics.finish(result.status);
+    return result;
+  } catch (error) {
+    diagnostics.failure("collection", error);
+    diagnostics.finish("failed");
+    throw error;
   } finally {
     try {
-      await container.destroy();
-      console.log(
+      await diagnostics.step("container-destroy", () => container.destroy());
+      logEvent(
+        "log",
         JSON.stringify({
           event: "globalpass-collection-container-destroyed",
           runId,
@@ -317,12 +328,13 @@ async function runCollection(
         }),
       );
     } catch (error) {
-      console.warn(
+      logEvent(
+        "warn",
         JSON.stringify({
           event: "globalpass-collection-container-destroy-failed",
           runId,
           mode,
-          errorType: error instanceof Error ? error.name : "UnknownError",
+          ...safeErrorDetails(error),
         }),
       );
     }
@@ -335,6 +347,7 @@ async function collectWithContainer(
   container: DurableObjectStub<GlobalPassCollectorContainer>,
   startedAt: string,
   runId: string,
+  diagnostics: ReturnType<typeof createDiagnostics>,
 ): Promise<CollectionResult> {
   const prefix = runPrefix(startedAt, runId);
   const artifacts: StoredArtifact[] = [];
@@ -348,29 +361,32 @@ async function collectWithContainer(
   const attemptedMonths = new Set<string>();
 
   try {
-    await container.startAndWaitForPorts();
-    const response = await container.fetch(
-      new Request("http://container/collect", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          mode,
-          user: requiredSecret(env.GLOBALPASS_ID, "GLOBALPASS_ID"),
-          password: requiredSecret(
-            env.GLOBALPASS_PASSWORD,
-            "GLOBALPASS_PASSWORD",
-          ),
-          relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
-          relayUrl: env.RELAY_PUBLIC_URL,
+    await diagnostics.step("container-start", () => container.startAndWaitForPorts());
+    const response = await diagnostics.step("container-request", async () => {
+      const result = await container.fetch(
+        new Request("http://container/collect", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            mode,
+            user: requiredSecret(env.GLOBALPASS_ID, "GLOBALPASS_ID"),
+            password: requiredSecret(
+              env.GLOBALPASS_PASSWORD,
+              "GLOBALPASS_PASSWORD",
+            ),
+            relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
+            relayUrl: withRunId(env.RELAY_PUBLIC_URL, runId),
+          }),
         }),
-      }),
-    );
-    if (!response.ok || !response.body) {
-      throw new Error("GLOBAL PASS container request failed");
-    }
+      );
+      if (!result.ok || !result.body) {
+        throw Object.assign(new Error("GLOBAL PASS container request failed"), { httpStatus: result.status });
+      }
+      return result;
+    });
     streamStarted = true;
 
-    for await (const record of readNdjson(response.body)) {
+    for await (const record of readNdjson(response.body!)) {
       if (record.type === "metadata") {
         if (metadataSeen || containerErrorSeen) throw new CollectionContractError();
         try {
@@ -392,6 +408,7 @@ async function collectWithContainer(
       if (record.type === "error") {
         if (containerErrorSeen) throw new CollectionContractError();
         containerErrorSeen = true;
+        diagnostics.failure("browser-collection", Object.assign(new Error(), { name: record.errorType }));
         failures.push({
           operation: record.operation,
           errorType: record.errorType,
@@ -415,6 +432,7 @@ async function collectWithContainer(
       try {
         sanitizedHtml = sanitizeGlobalPassActivityHtml(record.html);
       } catch (error) {
+        diagnostics.failure("artifact-write", error);
         failures.push(collectionFailure(
           "sanitization",
           error,
@@ -424,13 +442,13 @@ async function collectWithContainer(
         continue;
       }
       try {
-        artifacts.push(await storeHtml(
+        artifacts.push(await diagnostics.step("artifact-write", () => storeHtml(
           env.SNAPSHOTS,
           prefix,
           runId,
           month,
           sanitizedHtml,
-        ));
+        )));
       } catch (error) {
         failures.push(collectionFailure(
           "r2",
@@ -441,6 +459,7 @@ async function collectWithContainer(
       }
     }
   } catch (error) {
+    diagnostics.failure("browser-collection", error);
     failures.push(collectionFailure(
       streamStarted ? "contract" : "browser-collection",
       error,
@@ -492,12 +511,13 @@ async function collectWithContainer(
     failures,
   };
   const manifestKey = `${prefix}/manifest.json`;
-  await env.SNAPSHOTS.put(manifestKey, JSON.stringify(manifest), {
+  await diagnostics.step("manifest-write", () => env.SNAPSHOTS.put(manifestKey, JSON.stringify(manifest), {
     httpMetadata: { contentType: "application/json; charset=utf-8" },
     customMetadata: { source: manifest.source, status, runId },
-  });
+  }));
   const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey);
-  console.log(
+  logEvent(
+    "log",
     JSON.stringify({
       event: "globalpass-collection-stored",
       runId,
@@ -665,6 +685,9 @@ async function relayTcp(
     return Response.json({ error: "Network denied" }, { status: 403 });
   }
 
+  const runId = relayRunId(url);
+  const relayId = crypto.randomUUID();
+  let peerClosed = false;
   const pair = new WebSocketPair();
   const client = pair[0];
   const server = pair[1];
@@ -684,10 +707,15 @@ async function relayTcp(
           server.send(value);
         }
       } catch (error) {
-        console.error(
+        logEvent(
+          "error",
           JSON.stringify({
             event: "globalpass-relay-read-error",
-            errorType: error instanceof Error ? error.name : "UnknownError",
+            phase: "relay",
+            runId,
+            relayId,
+            peerClosed,
+            ...safeErrorDetails(error),
           }),
         );
       } finally {
@@ -705,16 +733,22 @@ async function relayTcp(
     });
     ctx.waitUntil(
       writeChain.catch((error) =>
-        console.error(
+        logEvent(
+          "error",
           JSON.stringify({
             event: "globalpass-relay-write-error",
-            errorType: error instanceof Error ? error.name : "UnknownError",
+            phase: "relay",
+            runId,
+            relayId,
+            peerClosed,
+            ...safeErrorDetails(error),
           }),
         ),
       ),
     );
   });
   server.addEventListener("close", () => {
+    peerClosed = true;
     ctx.waitUntil(
       writeChain
         .then(() => writer.close())
