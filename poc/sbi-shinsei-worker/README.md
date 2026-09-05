@@ -212,5 +212,10 @@ in the Cloudflare response pump even after application cleanup promises settle.
 TCP EOF retains the stream's existing data flush and valid empty close frame
 (reported locally as code 1005). An unexpected code 1006 remains `abnormal-close`
 even if the WebSocket did not emit a separate error event.
+Chrome-side TCP resets retain `failureStage=local-tcp`, but an already established
+Worker WebSocket still completes a normal close handshake. Worker relay events
+include only the bounded peer close code and `wasClean` flag, never close reason
+text, so platform-level disconnections can be distinguished from application
+cleanup without exposing connection details.
 Run `bun run test:relay` for loopback WebSocket tests of normal closure, delayed
 handshakes, shutdown, and timeout fallback; these require only the root dev dependency.

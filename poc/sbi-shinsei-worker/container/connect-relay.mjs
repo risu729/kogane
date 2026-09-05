@@ -12,6 +12,7 @@ export function trackRelayClosure(relay, { timeoutMs = DEFAULT_CLOSE_TIMEOUT_MS,
   let closing = false;
   let failed = false;
   let forced = false;
+  let localTcpFailed = false;
   let resolveClosed;
   const closed = new Promise(resolve => { resolveClosed = resolve; });
   let settled = false;
@@ -21,7 +22,7 @@ export function trackRelayClosure(relay, { timeoutMs = DEFAULT_CLOSE_TIMEOUT_MS,
     clearTimeout(timer);
     const closeCode = Number.isInteger(code) && code >= 1000 && code <= 4999 ? code : 1006;
     const normal = closeCode === 1000 || closeCode === 1001 || closeCode === 1005;
-    try { onClosed({ outcome: failed ? "failed" : forced ? "forced-timeout" : normal ? "closed" : "abnormal-close", closeCode }); }
+    try { onClosed({ outcome: failed ? "failed" : forced ? "forced-timeout" : normal ? "closed" : "abnormal-close", closeCode, ...(localTcpFailed ? { failureStage: "local-tcp" } : {}) }); }
     catch { /* Logging must not prevent shutdown. */ }
     resolveClosed();
   }
@@ -57,6 +58,14 @@ export function trackRelayClosure(relay, { timeoutMs = DEFAULT_CLOSE_TIMEOUT_MS,
     abort() {
       if (!settled) { failed = true; force(); }
       return closed;
+    },
+    localError() {
+      failed = true;
+      localTcpFailed = true;
+      // A Chrome-side TCP reset does not mean the Worker WebSocket transport is
+      // broken. Preserve that failure while still completing its close handshake.
+      return relay.readyState === WebSocket.OPEN || relay.readyState === WebSocket.CLOSING
+        ? this.close() : this.abort();
     },
   };
 }
@@ -159,7 +168,7 @@ export function startConnectRelay({
       clearTimeout(timeout);
       void lifecycle.close();
     };
-    const abortRelay = () => { clearTimeout(timeout); void lifecycle.abort(); };
+    const localTcpError = () => { clearTimeout(timeout); void lifecycle.localError(); };
     const fail = () => {
       clearTimeout(timeout);
       if (!established) rejectConnect("502 Bad Gateway");
@@ -192,7 +201,7 @@ export function startConnectRelay({
     // Keep pipe's existing EOF handling: its writable finalizer flushes pending
     // data before sending a valid empty close frame. Closing here on `end` could
     // discard the last queued TLS record before that flush finishes.
-    socket.once("error", abortRelay);
+    socket.once("error", localTcpError);
     socket.once("close", closeRelay);
   });
 

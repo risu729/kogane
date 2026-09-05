@@ -78,6 +78,15 @@ describe("TCP relay lifecycle", () => {
     expect(JSON.stringify(h.logs)).not.toContain("private-");
   });
 
+  test("peer close traces only its bounded protocol code and clean flag, never its reason", async () => {
+    const h = harness();
+    h.peer.dispatchEvent(Object.assign(new Event("close"), { code: 1006, wasClean: false, reason: "private-token-and-url" }));
+    await h.drain();
+    expect(h.logs).toContainEqual(expect.objectContaining({ stage: "websocket-peer-close", outcome: "received", peerCloseCode: 1006, peerWasClean: false }));
+    expect(h.logs).toContainEqual(expect.objectContaining({ stage: "terminal", peerCloseCode: 1006, peerWasClean: false }));
+    expect(JSON.stringify(h.logs)).not.toContain("private-token-and-url");
+  });
+
   test("upstream EOF closes cleanly once and releases both stream locks", async () => {
     const h = harness();
     h.readableController.enqueue(new Uint8Array([1, 2]));

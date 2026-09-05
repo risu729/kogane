@@ -28,6 +28,8 @@ export function startTcpRelay(options: {
   let closeTask: Promise<void> | undefined;
   let writeChain = Promise.resolve();
   let readerReleased = false;
+  let peerCloseCode: number | undefined;
+  let peerWasClean: boolean | undefined;
   const cleanupStages = new Set<string>();
 
   const log = (level: "log" | "warn" | "error", stage: string, outcome: string, error?: unknown) => {
@@ -35,6 +37,8 @@ export function startTcpRelay(options: {
       event: "sbi-shinsei-relay-stage", phase: "relay", ...correlation,
       stage, outcome, durationMs: Math.max(0, Date.now() - startedAt),
       ...(closeReason ? { closeReason } : {}),
+      ...(peerCloseCode === undefined ? {} : { peerCloseCode }),
+      ...(peerWasClean === undefined ? {} : { peerWasClean }),
       transportFailed,
       ...(error === undefined ? {} : { errorType: safeErrorType(error) }),
     });
@@ -123,7 +127,12 @@ export function startTcpRelay(options: {
     }).catch(error => observeFailure("relay-write", error));
     waitUntil(writeChain);
   });
-  server.addEventListener("close", () => { void close("peer-close"); });
+  server.addEventListener("close", event => {
+    if (Number.isInteger(event.code) && event.code >= 1000 && event.code <= 4999) peerCloseCode = event.code;
+    if (typeof event.wasClean === "boolean") peerWasClean = event.wasClean;
+    log("log", "websocket-peer-close", "received");
+    void close("peer-close");
+  });
   server.addEventListener("error", () => observeFailure("websocket-error", new Error("websocket_error")));
 }
 
