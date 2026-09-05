@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "bun test test/model.test.ts test/sanitize.test.ts test/raw-evidence.test.ts test/backfill-script.test.ts test/analyze-turnstile-capture.test.mjs test/analyze-turnstile-debugger-capture.test.mjs test/compare-turnstile-probes.test.mjs && node --test test/connect-relay.node.mjs",
+    "test": "bun test test/diagnostics.test.ts test/worker-collection.test.ts test/model.test.ts test/sanitize.test.ts test/raw-evidence.test.ts test/backfill-script.test.ts test/analyze-turnstile-capture.test.mjs test/analyze-turnstile-debugger-capture.test.mjs test/compare-turnstile-probes.test.mjs && node --test test/connect-relay.node.mjs",
     "typegen": "wrangler types",
     "typecheck": "wrangler types && tsc --noEmit",
     "deploy:dry": "wrangler deploy --dry-run",
