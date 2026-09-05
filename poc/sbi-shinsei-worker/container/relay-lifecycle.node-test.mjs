@@ -60,7 +60,7 @@ test("proxy shutdown waits for a relay whose local TCP socket already closed", a
   peer.resume();
   await shutdown;
   const [code] = await peerClosed;
-  assert.ok(code === 1000 || code === 1005);
+  assert.equal(code, 1000);
 });
 
 test("proxy shutdown closes still-active relays gracefully before returning", async t => {
@@ -98,9 +98,28 @@ test("TCP EOF flushes its final payload before the stream sends a normal close f
   client.end(finalPayload);
   const [code] = await peerClosed;
   assert.deepEqual(Buffer.concat(chunks), finalPayload);
-  assert.ok(code === 1000 || code === 1005);
+  assert.equal(code, 1000);
   await proxy.close();
   client.destroy();
+});
+
+test("proxy preserves an explicit peer close code instead of replacing it with the default", async t => {
+  const { server, url } = await upstream(t);
+  const connected = once(server, "connection");
+  const proxy = await startConnectRelay({ relayUrl: url, relayToken: "synthetic-only", allowedHosts: new Set(["allowed.invalid"]), closeTimeoutMs: 500 });
+  t.after(() => proxy.close());
+  const client = net.connect(proxy.port, "127.0.0.1");
+  t.after(() => client.destroy());
+  await once(client, "connect");
+  const response = once(client, "data");
+  client.write("CONNECT allowed.invalid:443 HTTP/1.1\r\nHost: allowed.invalid:443\r\n\r\n");
+  const [peer] = await connected;
+  await response;
+  const peerClosed = once(peer, "close");
+  peer.close(1001, "synthetic peer shutdown");
+  const [code, reason] = await peerClosed;
+  assert.equal(code, 1001);
+  assert.equal(String(reason), "synthetic peer shutdown");
 });
 
 test("remote termination without an error event remains an abnormal 1006 close", async t => {

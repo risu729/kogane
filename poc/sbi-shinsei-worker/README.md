@@ -209,8 +209,9 @@ connection failures or a two-second close timeout force termination. Abrupt
 termination can otherwise appear as a runtime `Network connection lost` exception
 in the Cloudflare response pump even after application cleanup promises settle.
 `sbi-shinsei-container-relay-closed` records the bounded close code and outcome.
-TCP EOF retains the stream's existing data flush and valid empty close frame
-(reported locally as code 1005). An unexpected code 1006 remains `abnormal-close`
+TCP EOF retains the stream's existing data flush, then sends explicit close code
+1000 through the relay's public WebSocket close method. Explicit peer close codes
+pass through unchanged. An unexpected code 1006 remains `abnormal-close`
 even if the WebSocket did not emit a separate error event.
 Chrome-side TCP resets retain `failureStage=local-tcp`, but an already established
 Worker WebSocket still completes a normal close handshake. Worker relay events

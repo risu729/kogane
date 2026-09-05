@@ -5,6 +5,14 @@ import WebSocket, { createWebSocketStream } from "ws";
 const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
 const DEFAULT_CLOSE_TIMEOUT_MS = 2_000;
 
+// Keep createWebSocketStream's write flush/finalizer intact while giving its
+// no-argument close a standard status code. Explicit peer/error codes pass through.
+class RelayWebSocket extends WebSocket {
+  close(code = 1000, data) {
+    return super.close(code, data);
+  }
+}
+
 // A normal local TCP close must finish the WebSocket close handshake. Calling
 // terminate() here cuts off Cloudflare's response pump outside Worker promises.
 export function trackRelayClosure(relay, { timeoutMs = DEFAULT_CLOSE_TIMEOUT_MS, onClosed = () => {} } = {}) {
@@ -134,7 +142,7 @@ export function startConnectRelay({
     const target = new URL(relayUrl);
     target.searchParams.set("host", address.hostname);
     target.searchParams.set("port", String(address.port));
-    const relay = new WebSocket(target, {
+    const relay = new RelayWebSocket(target, {
       headers: { authorization: `Bearer ${relayToken}` },
     });
     const lifecycle = trackRelayClosure(relay, {
@@ -199,7 +207,7 @@ export function startConnectRelay({
       else if (!socket.destroyed) socket.end();
     });
     // Keep pipe's existing EOF handling: its writable finalizer flushes pending
-    // data before sending a valid empty close frame. Closing here on `end` could
+    // data before sending the normal close frame. Closing here on `end` could
     // discard the last queued TLS record before that flush finishes.
     socket.once("error", localTcpError);
     socket.once("close", closeRelay);
