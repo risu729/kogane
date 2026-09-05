@@ -18,6 +18,8 @@ MyJCBはprivate R2の`raw/myjcb/YYYY/MM/DD/<run-id>/`以下をcanonical source `
 
 Importerは中央runを作る前に、manifestのexact schema、日付とUUIDを含むprefix、connectionとartifactの順序・件数、status/failure関係、全objectの完全inventory、content type、exact custom metadata、R2 native checksum（存在時）と再計算SHA-256を検証する。HTMLはcollectorが保存前にredactしたUTF-8 source bytesを検証したうえで、script/style/meta、埋込み要素、event/data属性、navigation URL、form action、全value/textarea、token/session類似属性を決定的に除去・置換した`myjcb-central-sanitized-v2`だけを中央へ送る。password control、16桁card番号、MyJCB/detail画面markerも再検証し、正規化後にactive surfaceが残れば拒否する。過去月JSON-RPC、parsed ledger、discoveryも独立したstrict schemaで検証する。CSV/PDF/OFXとdebit artifactは2026-09-05の実R2監査で一件も観測されなかったため、単なるsignature検査では受理せず、artifactと`r2:<dataset>` failureの双方を契約化までfail closedとする。
 
+中央catalogueでは、parsed ledgerとdiscoveryを`collector_derived / transformed`として記録し、ledgerは対応するdetail HTMLへ`input` relationを張る。discoveryは元のmypage bytesを保存していないため`source_bytes_not_available`とする。中央用manifestは自由文を除いた新規生成物なので`collector_manifest / generated / source_bytes_not_available`とし、generated artifactにtransform stepを付けない。sanitization contractは`myjcb-central-manifest-v2`で識別する。これら5種類（sanitized HTML、過去月provider response、ledger、discovery、manifest）の組合せは中央Workerの実D1 schema/triggerを使う回帰テストでsealまで検証する。
+
 最大16 connectionsのterminal reportと中央Workerの1 request当たり32回のService Binding上限を両立するため、完全inventoryを先に固定し、一request最大5 artifactずつstaged transferする。継続tokenはmanifest key、中央run/unit/inventory、inventory digest、offsetをHMACで束縛する。最後のchunkだけconnection/run terminal reportを登録してsealする。同じmanifest/run IDの再送は同じ中央run、units、inventoryへ収束し、objectとcatalogueを冪等再利用する。一方、collector側でcron/manual overlap等により**別run IDの収集が重複実行された場合は別の取得事実**であり、Importerは内容hashが同じでもrunを統合しない。収集の重複防止はDurable Object lockまたはQueueでcollector側に実装すべき別問題である。この変更はMyJCBのscheduled triggerを追加・有効化・変更しない。
 
 同期source検証は1 request 512 data artifactsをhard limitとする。現在の実runは20件で十分な余裕がある。16 connectionsすべてで全月・全exportが同時に現れてこの上限を超える場合は、中央stateを作らずfail closedにし、manifest inventoryの検証自体をQueueへ分割する独立変更が必要である。
@@ -261,7 +263,7 @@ v20のmanual live canaryと次回cronが成功した後は、運用記録の現�
 
 ### V Pointの本番適用
 
-V Pointは中央→importer→collectorの順で直列に適用する。まず`services/raw-evidence/scripts/deploy.sh`で加算migration `0012`を適用し、healthのschemaと`verify-v-point-route.sh`のroute 1件・policy 2件・alias 1件を確認する。次に`services/collector-r2-importer/scripts/deploy.sh`で専用tokenを同期し、healthが`collector-r2-importer-v14`を返すことを確認する。最後にV Point collectorをdeployしてService Bindingを有効にする。GitHub Actions cronは追加せず、既存Worker cronを維持する。
+V Pointは中央→importer→collectorの順で直列に適用する。まず`services/raw-evidence/scripts/deploy.sh`で加算migration `0012`を適用し、healthのschemaと`verify-v-point-route.sh`のroute 1件・policy 2件・alias 1件を確認する。次に`services/collector-r2-importer/scripts/deploy.sh`で専用tokenを同期し、healthが`collector-r2-importer-v15`を返すことを確認する。最後にV Point collectorをdeployしてService Bindingを有効にする。GitHub Actions cronは追加せず、既存Worker cronを維持する。
 
 historical dataは、先に`bun run audit:vpoint-r2`を実行してfailed 0を確認し、`poc/vpoint-worker/scripts/backfill-raw-evidence.sh`で完走する。前後でsource R2のobject件数と集約checksumが不変であること、中央のV Point run/seal/artifactの件数だけが増えることを確認する。cursor削除後に再実行し、中央run/seal/artifact件数が不変なら冪等性確認完了である。失敗時はcollector/importerのrolloutを止めるが、migrationとsource R2はrollback・削除しない。
 

@@ -11,6 +11,7 @@ const FINGERPRINT_VERSION = "fixture-hmac-v1";
 const SBI_STORAGE_TEMPLATE = "raw/sbi-securities/{date}/{run-id}/{artifact}.json";
 const MOBILE_SUICA_STORAGE_TEMPLATE = "raw/mobile-suica/{date}/{run-id}/{artifact}";
 const GLOBAL_PASS_STORAGE_TEMPLATE = "raw/prestia-globalpass/{date}/{run-id}/{artifact}";
+const MYJCB_STORAGE_TEMPLATE = "raw/myjcb/{date}/{run-id}/{artifact}";
 const SBI_FINGERPRINT_VERSION = "collector-r2-v1";
 const cases = fixture.cases;
 
@@ -112,6 +113,19 @@ async function globalPassStorageOrigin(artifactKey: string) {
     objectKeyTemplate: GLOBAL_PASS_STORAGE_TEMPLATE,
     objectKeyFingerprint: await sha256Hex(
       new TextEncoder().encode(`fixture-global-pass:${artifactKey}`),
+    ),
+    fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
+    redactionVersion: "v1",
+  };
+}
+
+async function myJcbStorageOrigin(artifactKey: string) {
+  return {
+    storageKind: "r2",
+    containerName: "kogane-myjcb-collector-poc",
+    objectKeyTemplate: MYJCB_STORAGE_TEMPLATE,
+    objectKeyFingerprint: await sha256Hex(
+      new TextEncoder().encode(`fixture-myjcb:${artifactKey}`),
     ),
     fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
     redactionVersion: "v1",
@@ -546,30 +560,124 @@ describe("sanitized source-usecase contract", () => {
     await seal(runId, artifacts, "sbi-vc-pagination");
   });
 
-  it("represents MyJCB multi-connection redaction and re-encoding", async () => {
+  it("accepts the exact MyJCB descriptor combinations through the real D1 triggers", async () => {
     const value = cases.myjcbMultiConnection;
     const { runId } = await createRun(value.sourceId, value.sessionId);
-    const artifacts: InventoryItem[] = [];
-    for (const connectionKey of value.connectionKeys) {
-      const unitId = await unit(runId, "connection", connectionKey);
-      artifacts.push(await catalogue(runId, `${connectionKey}/sanitized.html`, value.sanitizedBody, {
+    const connectionKey = value.connectionKeys[0]!;
+    const unitId = await unit(runId, "connection", connectionKey);
+    const detailKey = `${connectionKey}/credit-detail-00.html`;
+    const artifacts: InventoryItem[] = [
+      await catalogue(runId, detailKey, value.sanitizedBody, {
         fetchUnitId: unitId,
         artifactRole: "sanitized_provider_capture",
         payloadFidelity: "transformed",
         lineageDisposition: "source_not_retained_for_security",
-        dataset: "statement-html",
-        formatId: "myjcb-sanitized-html",
+        dataset: "credit-detail",
+        formatId: "myjcb-credit-detail-html-utf8-sanitized",
+        formatVersion: "myjcb-central-sanitized-v2",
         declaredMediaType: "text/html",
         mediaTypeBasis: "manifest",
+        sequence: 0,
+        storage: await myJcbStorageOrigin(detailKey),
         transformSteps: [
-          { stepIndex: 0, stepKind: "redacted", transformerId: "myjcb-sanitizer", transformerVersion: "fixture-v1" },
-          { stepIndex: 1, stepKind: "reencoded", transformerId: "myjcb-sanitizer", transformerVersion: "fixture-v1" },
+          { stepIndex: 0, stepKind: "redacted", transformerId: "myjcb-sanitizer", transformerVersion: "v1" },
+          { stepIndex: 1, stepKind: "reencoded", transformerId: "myjcb-sanitizer", transformerVersion: "v1" },
+          { stepIndex: 2, stepKind: "redacted", transformerId: "myjcb-central-html-sanitizer", transformerVersion: "v2" },
+          { stepIndex: 3, stepKind: "reencoded", transformerId: "myjcb-central-html-sanitizer", transformerVersion: "v2" },
         ],
-      }));
-      await unitTerminal(unitId, 1);
-    }
+      }),
+      await catalogue(runId, `${connectionKey}/credit-past-months.json`, "{\"jsonrpc\":\"2.0\"}", {
+        fetchUnitId: unitId,
+        artifactRole: "provider_response",
+        payloadFidelity: "exact",
+        lineageDisposition: "not_applicable",
+        dataset: "credit-past-months",
+        formatId: "myjcb-credit-past-months-json-rpc",
+        formatVersion: "myjcb-worker-poc-v1",
+        declaredMediaType: "application/json",
+        mediaTypeBasis: "manifest",
+        sequence: 1,
+        storage: await myJcbStorageOrigin(`${connectionKey}/credit-past-months.json`),
+      }),
+      await catalogue(runId, `${connectionKey}/credit-ledger-00.json`, "{\"entries\":[]}", {
+        fetchUnitId: unitId,
+        artifactRole: "collector_derived",
+        payloadFidelity: "transformed",
+        lineageDisposition: "linked",
+        dataset: "credit-ledger",
+        formatId: "myjcb-credit-ledger-json",
+        formatVersion: "myjcb-worker-poc-v1",
+        declaredMediaType: "application/json",
+        mediaTypeBasis: "manifest",
+        sequence: 2,
+        storage: await myJcbStorageOrigin(`${connectionKey}/credit-ledger-00.json`),
+        transformSteps: [
+          { stepIndex: 0, stepKind: "extracted", transformerId: "myjcb-ledger-parser", transformerVersion: "v1" },
+          { stepIndex: 1, stepKind: "generated", transformerId: "myjcb-ledger-parser", transformerVersion: "v1" },
+        ],
+        relations: [{
+          parentRunId: runId,
+          parentArtifactKey: detailKey,
+          relation: "input",
+          transformerId: "myjcb-ledger-parser",
+          transformerVersion: "v1",
+        }],
+      }),
+      await catalogue(runId, `${connectionKey}/discovery.json`, "{\"cards\":[]}", {
+        fetchUnitId: unitId,
+        artifactRole: "collector_derived",
+        payloadFidelity: "transformed",
+        lineageDisposition: "source_bytes_not_available",
+        dataset: "discovery",
+        formatId: "myjcb-discovery-json",
+        formatVersion: "myjcb-worker-poc-v1",
+        declaredMediaType: "application/json",
+        mediaTypeBasis: "manifest",
+        sequence: 3,
+        storage: await myJcbStorageOrigin(`${connectionKey}/discovery.json`),
+        transformSteps: [
+          { stepIndex: 0, stepKind: "extracted", transformerId: "myjcb-discovery-parser", transformerVersion: "v1" },
+          { stepIndex: 1, stepKind: "generated", transformerId: "myjcb-discovery-parser", transformerVersion: "v1" },
+        ],
+      }),
+      await catalogue(runId, "manifest.json", "{\"status\":\"success\"}", {
+        artifactRole: "collector_manifest",
+        payloadFidelity: "generated",
+        lineageDisposition: "source_bytes_not_available",
+        dataset: "collector-manifest",
+        formatId: "myjcb-collector-manifest-json",
+        formatVersion: "myjcb-central-manifest-v2",
+        declaredMediaType: "application/json",
+        mediaTypeBasis: "manifest",
+        sequence: 4,
+        storage: await myJcbStorageOrigin("manifest.json"),
+      }),
+    ];
+    await unitTerminal(unitId, 4);
     await terminal(runId, artifacts.length);
     await seal(runId, artifacts, "myjcb");
+
+    const stored = await env.DB.prepare(`
+      SELECT artifact_key, artifact_role, payload_fidelity, lineage_disposition
+      FROM fetch_artifacts WHERE fetch_run_id = ? ORDER BY sequence
+    `).bind(runId).all();
+    expect(stored.results).toEqual([
+      { artifact_key: detailKey, artifact_role: "sanitized_provider_capture", payload_fidelity: "transformed", lineage_disposition: "source_not_retained_for_security" },
+      { artifact_key: `${connectionKey}/credit-past-months.json`, artifact_role: "provider_response", payload_fidelity: "exact", lineage_disposition: "not_applicable" },
+      { artifact_key: `${connectionKey}/credit-ledger-00.json`, artifact_role: "collector_derived", payload_fidelity: "transformed", lineage_disposition: "linked" },
+      { artifact_key: `${connectionKey}/discovery.json`, artifact_role: "collector_derived", payload_fidelity: "transformed", lineage_disposition: "source_bytes_not_available" },
+      { artifact_key: "manifest.json", artifact_role: "collector_manifest", payload_fidelity: "generated", lineage_disposition: "source_bytes_not_available" },
+    ]);
+    expect(await env.DB.prepare(`
+      SELECT COUNT(*) AS count FROM artifact_transform_steps AS step
+      JOIN fetch_artifacts AS artifact ON artifact.id = step.fetch_artifact_id
+      WHERE artifact.fetch_run_id = ?
+    `).bind(runId).first()).toEqual({ count: 8 });
+    expect(await env.DB.prepare(`
+      SELECT COUNT(*) AS count FROM artifact_relations AS relation
+      JOIN fetch_artifacts AS artifact ON artifact.id = relation.child_artifact_id
+      WHERE artifact.fetch_run_id = ?
+    `).bind(runId).first()).toEqual({ count: 1 });
   });
 
   it("stores only fixed-redaction Mobile Suica CP932 bytes with explicit transformation lineage", async () => {
