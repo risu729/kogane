@@ -812,7 +812,7 @@ function importOneVPoint(
 }
 
 interface VPointBackfillCursor {
-  v: 2;
+  v: 3;
   scanCursor: string | null;
   scanDone: boolean;
   manifestKey?: string;
@@ -863,7 +863,7 @@ async function backfillVPoint(
     throw new ImportError(409, "prefix_cursor_did_not_advance");
   }
   const continuation: VPointBackfillCursor = {
-    v: 2,
+    v: 3,
     scanCursor: scanCursor ?? null,
     scanDone,
   };
@@ -946,7 +946,7 @@ async function nextVPointScanCursor(
   secret: string,
 ): Promise<string | null> {
   return state.scanDone ? null : encodeVPointCursor({
-    v: 2,
+    v: 3,
     scanCursor: state.scanCursor,
     scanDone: false,
   }, secret);
@@ -959,14 +959,14 @@ async function encodeVPointCursor(
   assertVPointCursor(value);
   const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify(value)));
   const signature = await cursorSignature(payload, secret);
-  return `vpoint-v2.${payload}.${signature}`;
+  return `vpoint-v3.${payload}.${signature}`;
 }
 
 async function decodeVPointCursor(
   value: string,
   secret: string,
 ): Promise<VPointBackfillCursor> {
-  const match = /^vpoint-v2\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/u.exec(value);
+  const match = /^vpoint-v3\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/u.exec(value);
   if (!match?.[1] || !match[2] ||
       !await verifyCursorSignature(match[1], match[2], secret)) {
     throw new ImportError(400, "cursor_invalid");
@@ -994,7 +994,7 @@ function assertVPointCursor(value: VPointBackfillCursor): void {
       value.scanCursor.length <= 4_096 && !/[\x00-\x20\x7f]/u.test(value.scanCursor);
   const hasManifest = value.manifestKey !== undefined;
   const hasOffset = value.offset !== undefined;
-  if (value.v !== 2 || typeof value.scanDone !== "boolean" || !scanStateValid ||
+  if (value.v !== 3 || typeof value.scanDone !== "boolean" || !scanStateValid ||
       hasManifest !== hasOffset ||
       (hasManifest &&
         (typeof value.manifestKey !== "string" ||
@@ -1017,7 +1017,7 @@ async function cursorSignature(payload: string, secret: string): Promise<string>
   return base64UrlEncode(new Uint8Array(await crypto.subtle.sign(
     "HMAC",
     key,
-    new TextEncoder().encode(`vpoint-v2.${payload}`),
+    new TextEncoder().encode(`vpoint-v3.${payload}`),
   )));
 }
 
@@ -1043,7 +1043,7 @@ async function verifyCursorSignature(
     "HMAC",
     key,
     ownedArrayBuffer(signatureBytes),
-    new TextEncoder().encode(`vpoint-v2.${payload}`),
+    new TextEncoder().encode(`vpoint-v3.${payload}`),
   );
 }
 

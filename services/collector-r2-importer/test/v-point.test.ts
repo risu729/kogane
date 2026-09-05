@@ -96,7 +96,7 @@ describe("V Point R2 importer", () => {
     const descriptors = central.requests.filter((request) => request.path.endsWith("/artifacts"))
       .map((request) => JSON.parse(request.body) as Record<string, unknown>);
     expect(descriptors.find((value) => value.dataset === "history-page-0001")).toMatchObject({
-      artifactRole: "provider_response",
+      artifactRole: "collector_derived",
       payloadFidelity: "transformed",
       lineageDisposition: "source_bytes_not_available",
       pageGroupId: 20,
@@ -132,6 +132,17 @@ describe("V Point R2 importer", () => {
     const uploaded = new TextDecoder().decode([...central.uploads.values()][0]);
     expect(uploaded).toContain("failure_redacted");
     expect(uploaded).not.toContain("dummy-sensitive-detail");
+    const centralManifest = central.requests
+      .filter((request) => request.path.endsWith("/artifacts"))
+      .map((request) => JSON.parse(request.body) as Record<string, unknown>)
+      .find((descriptor) => descriptor.artifactKey === "manifest.json");
+    expect(centralManifest).toMatchObject({
+      artifactRole: "collector_manifest",
+      payloadFidelity: "generated",
+      lineageDisposition: "source_bytes_not_available",
+      formatVersion: "vpoint-central-manifest-v2",
+    });
+    expect(centralManifest).not.toHaveProperty("transformSteps");
   });
 
   test("replays across importer deployments without changing immutable terminal reports", async () => {
@@ -144,7 +155,11 @@ describe("V Point R2 importer", () => {
     const runReport = JSON.parse(
       central.reports.get("/v1/runs/1/reports") ?? "null",
     ) as Record<string, unknown>;
-    expect(runReport.producerVersion).toBe("vpoint-r2-v1");
+    expect(runReport.producerVersion).toBe("vpoint-r2-v2");
+    const createRun = central.requests.find((request) => request.path === "/v1/runs");
+    expect(JSON.parse(createRun?.body ?? "null")).toMatchObject({
+      sourceRunKey: "full-snapshot-vpoint-r2-v2",
+    });
     expect(JSON.stringify([...central.reports.values()])).not.toContain("deployment-");
   });
 
@@ -171,8 +186,8 @@ describe("V Point R2 importer", () => {
       .map((request) => JSON.parse(request.body) as Record<string, unknown>);
     expect(descriptors.every((descriptor) =>
       descriptor.artifactKey === "manifest.json"
-        ? descriptor.formatVersion === "vpoint-worker-poc-v1"
-        : true)).toBe(true);
+        ? descriptor.formatVersion === "vpoint-central-manifest-v2"
+        : descriptor.formatVersion === "vpoint-worker-poc-v1")).toBe(true);
   });
 
   test("rejects unknown manifest fields and exact-prefix drift before central writes", async () => {
