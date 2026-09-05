@@ -12,7 +12,7 @@ const EXTERNAL_SOURCE = "sbi-shinsei" as const;
 const CENTRAL_SOURCE = "sbi-shinsei-bank";
 const PRODUCER = "collector-r2-importer";
 const SCHEMA_VERSION = "sbi-shinsei-worker-poc-v1";
-const INGEST_CONTRACT_VERSION = "sbi-shinsei-r2-v1";
+const INGEST_CONTRACT_VERSION = "sbi-shinsei-r2-v2";
 const CENTRAL_CLIENT_ID = "collector-r2-sbi-shinsei";
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_ARTIFACT_BYTES = 4 * 1024 * 1024;
@@ -258,7 +258,7 @@ export async function importSbiShinseiRun(options: {
     await central.addRunReport(centralRunId, {
       reportKey: "terminal",
       reportKind: "terminal",
-      producerVersion: options.importerVersion,
+      producerVersion: INGEST_CONTRACT_VERSION,
       manifestSchemaVersion: manifest.schemaVersion,
       producerStatus: manifest.status,
       normalizedOutcome: manifest.status,

@@ -2,6 +2,16 @@
 
 各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suica、GLOBAL PASS、MyJCBに対応する。
 
+## 再走査できる不変run
+
+中央のterminal reportは作成後に上書きできない。したがって、デプロイごとに変わる
+`IMPORTER_VERSION`をterminal reportの`producerVersion`へ入れてはならない。各sourceは
+`sourceRunKey`にも含めた固定のingest契約versionを記録し、デプロイrevisionは失敗・中断
+attemptの診断にだけ使う。SBI証券は`sbi-r2-v3`、SBI VC Trade・Sony銀行・SBI新生銀行・
+Mobile Suica・MyJCBは各`*-r2-v2`へ移行する。旧runは不変証跡として残し、新しい契約の
+runへ全R2を再走査する。同じ契約を別Importerデプロイから再送しても、run/report/artifact/
+sealの件数は変化しない。
+
 ## MyJCBの境界
 
 MyJCBはprivate R2の`raw/myjcb/YYYY/MM/DD/<run-id>/`以下をcanonical source `myjcb`へ取り込む。専用credential `collector-r2-myjcb`、source alias、storage policyをmigration `0011`で分離し、他collectorのtokenは受理しない。`POST /v1/myjcb/import-run`はmanifest 1件を、`POST /v1/myjcb/backfill-page`はprefixを1 objectずつ走査する。collectorの管理Bearer付き`POST /backfill-raw-evidence?limit=1`からService Bindingで呼び、source R2は成功時も変更・削除しない。

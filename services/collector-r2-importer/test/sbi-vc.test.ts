@@ -43,6 +43,7 @@ class FakeBucket {
 class FakeCentral {
   readonly requests: Array<{ path: string; method: string; body: string }> = [];
   readonly uploaded = new Map<string, Uint8Array>();
+  readonly reports = new Map<string, string>();
   nextUnitId = 10;
   nextDescriptor = 1;
 
@@ -69,6 +70,7 @@ class FakeCentral {
         descriptorSha256: value.toString(16).padStart(64, "0"),
       }, { status: 201 });
     }
+    if (/\/reports$/u.test(path)) return immutableReport(this.reports, path, requestBody);
     if (/\/seal$/u.test(path)) return Response.json({ sealed: true }, { status: 201 });
     return Response.json({ ok: true }, { status: 201 });
   };
@@ -102,7 +104,7 @@ describe("SBI VC Trade staged-run importer", () => {
       expect(upload).toEqual(bodies.get(artifact.dataset));
     }
 
-    const replay = await importRun(bucket, central);
+    const replay = await importRun(bucket, central, "test-v99");
     expect(replay.allObjectsReused).toBe(true);
     expect(central.uploaded.size).toBe(7);
     const runRequests = central.requests.filter((request) => request.path === "/v1/runs");
@@ -112,7 +114,11 @@ describe("SBI VC Trade staged-run importer", () => {
       sourceId: "sbi-vc-trade",
       externalIdNamespace: "sbi-vc-trade-worker-poc-v1",
       externalSessionId: RUN_ID,
-      sourceRunKey: "full-snapshot-sbi-vc-r2-v1",
+      sourceRunKey: "full-snapshot-sbi-vc-r2-v2",
+    });
+    const runReport = central.requests.find((request) => request.path === "/v1/runs/1/reports");
+    expect(runReport ? JSON.parse(runReport.body) : undefined).toMatchObject({
+      producerVersion: "sbi-vc-r2-v2",
     });
   });
 
@@ -367,14 +373,25 @@ function stored(body: Uint8Array, customMetadata: Record<string, string>): Store
   return { body, customMetadata, contentType: "application/json" };
 }
 
-function importRun(bucket: FakeBucket, central: FakeCentral) {
+function importRun(bucket: FakeBucket, central: FakeCentral, importerVersion = "test-v1") {
   return importSbiVcRun({
     bucket: bucket as unknown as R2Bucket,
     centralService: central as unknown as Fetcher,
     centralToken: TOKEN,
     fingerprintKey: FINGERPRINT_KEY,
-    importerVersion: "test-v1",
+    importerVersion,
     manifestKey: MANIFEST_KEY,
+  });
+}
+
+function immutableReport(reports: Map<string, string>, path: string, body: string): Response {
+  const previous = reports.get(path);
+  if (previous !== undefined && previous !== body) {
+    return Response.json({ error: "immutable report conflict" }, { status: 409 });
+  }
+  reports.set(path, body);
+  return Response.json({ reused: previous !== undefined }, {
+    status: previous === undefined ? 201 : 200,
   });
 }
 
