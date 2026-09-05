@@ -34,15 +34,47 @@ describe("MyJCB synthetic parsers", () => {
     expect(redacted).toContain("架空商店");
   });
 
+  test("removes active and navigational HTML surfaces before R2 preservation", () => {
+    const redacted = redactedStatementHtml(`
+      <html><head>
+        <script>window.sessionToken="script-secret"</script>
+        <meta name="csrf-token" content="meta-secret">
+      </head><body>
+        <div data-token="data-secret" onclick="sendSecret()">
+          <a href="/next?token=href-secret">next</a>
+          <form action="/submit?session=action-secret">
+            <input value=unquoted-secret>
+            <textarea>textarea-secret</textarea>
+          </form>
+        </div>
+      </body></html>
+    `);
+    for (const sentinel of [
+      "script-secret",
+      "meta-secret",
+      "data-secret",
+      "sendSecret",
+      "href-secret",
+      "action-secret",
+      "unquoted-secret",
+      "textarea-secret",
+    ]) {
+      expect(redacted).not.toContain(sentinel);
+    }
+    expect(redacted).not.toMatch(/<(?:script|meta)\b|\s(?:data-token|onclick|href|action)\s*=/iu);
+    expect(redacted).toContain('value="[redacted]"');
+  });
+
   test("enumerates only API-reported available older credit months", () => {
-    expect(extractCreditMenuLinkId(fixture("credit-mypage.html")))
-      .toBe("synthetic_credit_menu");
+    expect(extractCreditMenuLinkId(fixture("credit-mypage.html"))).toBe("synthetic_credit_menu");
     expect(parseCreditMenuMonths(fixture("credit-menu.html"))).toEqual([0, 1, 8]);
     const past = parsePastMonthAvailability(fixture("credit-past.json"));
-    expect(past.filter((month) => month.available).map((month) => month.detailMonth))
-      .toEqual([10, 13]);
-    expect(past.find((month) => month.detailMonth === 10)?.settlementYM)
-      .toBe("2025年10月お支払い分");
+    expect(past.filter((month) => month.available).map((month) => month.detailMonth)).toEqual([
+      10, 13,
+    ]);
+    expect(past.find((month) => month.detailMonth === 10)?.settlementYM).toBe(
+      "2025年10月お支払い分",
+    );
   });
 
   test("extracts the hidden discriminator and excludes the notice PDF", () => {
@@ -68,14 +100,17 @@ describe("MyJCB synthetic parsers", () => {
   });
 
   test("accepts a structurally known empty ledger row", () => {
-    const empty = parseCreditLedger(`
+    const empty = parseCreditLedger(
+      `
       <div class="detail-list-01">
         <div class="head">ご利用日 ご利用先など 支払区分 ご利用金額</div>
         <div class="content"><div class="item"><div class="item-cell">
           <div class="cell w-100per">ご利用明細はありません</div>
         </div></div></div>
       </div>
-    `, "confirmed");
+    `,
+      "confirmed",
+    );
     expect(empty?.rows).toEqual([]);
   });
 });

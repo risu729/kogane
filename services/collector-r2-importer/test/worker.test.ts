@@ -164,6 +164,68 @@ describe("collector R2 importer routes", () => {
     expect(await response.json() as unknown).toEqual({ error: "prefix_cursor_did_not_advance" });
   });
 
+  test("the MyJCB backfill page scans exactly one source object", async () => {
+    const calls: R2ListOptions[] = [];
+    const bucket = {
+      list: async (options: R2ListOptions) => {
+        calls.push(options);
+        return {
+          objects: [{ key: "raw/myjcb/2026/09/05/run/primary/credit-menu.html" }],
+          truncated: true,
+          cursor: "next",
+        } as unknown as R2Objects;
+      },
+    } as unknown as R2Bucket;
+    const response = await worker.fetch(
+      new Request("https://importer.internal/v1/myjcb/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        bucket,
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ prefix: "raw/myjcb/", limit: 1 }]);
+    expect(await response.json()).toMatchObject({
+      source: "myjcb",
+      scannedObjectCount: 1,
+      skippedManifestCount: 1,
+      deferredManifestCount: 0,
+      failedManifestCount: 0,
+      truncated: true,
+    });
+  });
+
+  test("the MyJCB backfill route rejects malformed cursors before listing", async () => {
+    const bucket = {
+      list: async () => { throw new Error("must_not_list"); },
+    } as unknown as R2Bucket;
+    const response = await worker.fetch(
+      new Request("https://importer.internal/v1/myjcb/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cursor: "not-a-myjcb-cursor", limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        bucket,
+      ),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json() as unknown).toEqual({ error: "cursor_invalid" });
+  });
+
   test("the Mobile Suica backfill page scans exactly one source object", async () => {
     const calls: R2ListOptions[] = [];
     const bucket = {
@@ -407,6 +469,7 @@ function environment(
   sbiShinseiBucket: R2Bucket = {} as R2Bucket,
   mobileSuicaBucket: R2Bucket = {} as R2Bucket,
   globalPassBucket: R2Bucket = {} as R2Bucket,
+  myJcbBucket: R2Bucket = {} as R2Bucket,
 ): Env {
   return {
     SBI_SNAPSHOTS: {} as R2Bucket,
@@ -415,8 +478,9 @@ function environment(
     SBI_SHINSEI_SNAPSHOTS: sbiShinseiBucket,
     MOBILE_SUICA_SNAPSHOTS: mobileSuicaBucket,
     GLOBAL_PASS_SNAPSHOTS: globalPassBucket,
+    MYJCB_SNAPSHOTS: myJcbBucket,
     RAW_EVIDENCE: {} as Fetcher,
-    IMPORTER_VERSION: "collector-r2-importer-v10",
+    IMPORTER_VERSION: "collector-r2-importer-v11",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_VC: `collector-r2-sbi-vc.${"v".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SONY: `collector-r2-sony-bank.${"o".repeat(32)}`,
@@ -424,6 +488,7 @@ function environment(
     RAW_EVIDENCE_TOKEN_MOBILE_SUICA: `collector-r2-mobile-suica.${"m".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_GLOBAL_PASS: `collector-r2-global-pass.${"g".repeat(32)}`,
     GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST: "a".repeat(64),
+    RAW_EVIDENCE_TOKEN_MYJCB: `collector-r2-myjcb.${"j".repeat(32)}`,
     ORIGIN_FINGERPRINT_KEY: "ab".repeat(32),
   };
 }

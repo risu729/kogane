@@ -1,5 +1,6 @@
 import { createDiagnostics, safeErrorDetails } from "../../collector-diagnostics/src/index";
 import { collectConnection, parseCredentialSecrets } from "./collector";
+import { backfillStoredRuns } from "./raw-evidence";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import type {
   CollectionFailure,
@@ -24,6 +25,26 @@ export default {
         source: "myjcb",
         schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       });
+    }
+    if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
+      if (!await authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      if (url.searchParams.get("limit") !== "1") {
+        return Response.json({ error: "limit_must_be_one" }, { status: 400 });
+      }
+      const cursor = url.searchParams.get("cursor") ?? undefined;
+      if (cursor !== undefined &&
+          (cursor.length === 0 || cursor.length > 16_000 || /[\x00-\x20\x7f]/u.test(cursor))) {
+        return Response.json({ error: "cursor_invalid" }, { status: 400 });
+      }
+      try {
+        return Response.json(await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, cursor), {
+          headers: { "cache-control": "no-store" },
+        });
+      } catch {
+        return Response.json({ error: "raw_evidence_backfill_failed" }, { status: 502 });
+      }
     }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });

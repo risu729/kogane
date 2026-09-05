@@ -449,6 +449,7 @@ describe("0001 raw-evidence schema", () => {
     expect(aliases.results).toEqual([
       { external_source_id: "mobile-suica", source_id: "mobile-suica" },
       { external_source_id: "moneyforward-me", source_id: "moneyforward-me" },
+      { external_source_id: "myjcb", source_id: "myjcb" },
       { external_source_id: "prestia-globalpass", source_id: "global-pass" },
       { external_source_id: "sbi-securities", source_id: "sbi-securities" },
       { external_source_id: "sbi-shinsei", source_id: "sbi-shinsei-bank" },

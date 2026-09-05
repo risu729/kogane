@@ -183,13 +183,13 @@ raw/myjcb/YYYY/MM/DD/<run-id>/
     discovery.json
 ```
 
-HTMLは取得時sourceをUTF-8へdecodeし、token/credentialに見えるhidden input値と16桁card番号をredactしてから保存する。login/mypage HTMLは保存しない。各R2 objectにはSHA-256、dataset、state、periodをmetadataとして持たせる。manifestにはrun/connection/artifact/failureのmetadataだけを入れ、cookie値や実明細値をlogへ出さない。bucketはpublicにしない。
+HTMLは取得時sourceをUTF-8へdecodeし、script/style/metaと埋込み要素、event/data属性、navigation URL、form action、全value/textarea、token/session類似属性、16桁card番号を決定的に除去・置換してから保存する。login/mypage HTMLは保存しない。各R2 objectにはSHA-256、dataset、state、periodをmetadataとして持たせる。manifestにはrun/connection/artifact/failureのmetadataだけを入れ、cookie値や実明細値をlogへ出さない。bucketはpublicにしない。
 
 ## Cronと手動実行
 
 `wrangler.jsonc`のCron `0 21 * * *`（06:00 JST）からWorkerの`scheduled()`を直接呼ぶ。GitHub Actionsをschedulerとして使わない。
 
-手動runは`POST /trigger`だけで、`ADMIN_TRIGGER_TOKEN`が必要。`GET /health`はsecret不要でsource/schemaだけを返す。
+手動runは`POST /trigger`だけで、`ADMIN_TRIGGER_TOKEN`が必要。`GET /health`はsecret不要でsource/schemaだけを返す。保存済みoutboxの中央転送は管理Bearer付き`POST /backfill-raw-evidence?limit=1`からService Bindingで内部Importerを呼ぶ。一回にR2 objectを1件だけ走査し、大きいrunはHMACで束縛されたopaque cursorを使って最大5 artifactずつ再開する。完走後もsource R2は削除しない。
 
 ```sh
 bun install --frozen-lockfile
@@ -203,6 +203,14 @@ live PoCでは`wrangler deploy`、private R2 bucket作成、secret投入、第�
 作成済みpersistent resourceはWorker `kogane-myjcb-collector-poc`、private R2 bucket同名、Cron `0 21 * * *`、admin/connection secret群である。Browser Run sessionはconnection完了時にcloseし、永続profileを作らない。廃棄対象一覧はこの4分類と、debug中にR2へ作られたfailed/success manifests以下のobjectsである。廃棄時は先にR2 object一覧と必要artifactの退避を確認してからWorkerを削除し、最後にR2 bucketを削除する。bucket削除は金融sourceを回復不能にするため自動cleanup scriptにはしない。
 
 Cronとmanual triggerのoverlap lockは未実装である。同一IDの同時login/readを避けるため、Durable Object lockまたはQueueによる一接続一実行の直列化をdeploy/merge前要件とする。本PRのPoCをそのままscheduled運用しない。
+
+中央Importerの冪等性はこのoverlap問題を解決しない。同じmanifest/run IDの再送は同じ中央runへ収束するが、collectorが別UUIDで二回収集した場合は別の取得事実として両方を保持する。したがって内容hashでrunを潰さず、重複実行の抑止はcollectorの実行lockで行う。raw-evidence導入では既存Cronを変更せず、追加のscheduled triggerやGitHub Actions cronも作らない。
+
+historical outboxは次でbounded backfillできる。cursorはowner-only `0600` fileへ原子的に保存され、完了時に削除される。
+
+```sh
+poc/myjcb-worker/scripts/backfill-raw-evidence.sh
+```
 
 ## synthetic test
 

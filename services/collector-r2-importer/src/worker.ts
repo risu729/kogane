@@ -1,5 +1,6 @@
 import { ImportError } from "./error";
 import { importGlobalPassRun } from "./global-pass";
+import { importMyJcbRun } from "./myjcb";
 import { importMobileSuicaRun } from "./mobile-suica";
 import { importSbiRun } from "./sbi";
 import { importSbiShinseiRun } from "./sbi-shinsei";
@@ -17,6 +18,37 @@ export default {
         service: "collector-r2-importer",
         version: env.IMPORTER_VERSION,
       });
+    }
+    if (request.method === "POST" && url.pathname === "/v1/myjcb/import-run" &&
+        url.search === "") {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["manifestKey", "continuation"]);
+        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
+        const continuation = input.continuation === undefined
+          ? undefined
+          : requiredString(input.continuation, "continuation_invalid", 8_000);
+        const result = await importOneMyJcb(env, manifestKey, continuation);
+        return json(result, result.status === "deferred" ? 202 : 200);
+      } catch (error) {
+        return errorResponse(error);
+      }
+    }
+    if (request.method === "POST" && url.pathname === "/v1/myjcb/backfill-page" &&
+        url.search === "") {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["cursor", "limit"]);
+        const cursor = input.cursor === undefined
+          ? undefined
+          : requiredString(input.cursor, "cursor_invalid", 16_000);
+        if (input.limit !== undefined && input.limit !== 1) {
+          throw new ImportError(400, "backfill_limit_must_be_one");
+        }
+        return json(await backfillMyJcb(env, cursor));
+      } catch (error) {
+        return errorResponse(error);
+      }
     }
     if (request.method === "POST" && url.pathname === "/v1/prestia-globalpass/import-run" &&
         url.search === "") {
@@ -336,6 +368,192 @@ function importOne(env: Env, manifestKey: string) {
     importerVersion: env.IMPORTER_VERSION,
     manifestKey,
   });
+}
+
+function importOneMyJcb(env: Env, manifestKey: string, continuation?: string) {
+  return importMyJcbRun({
+    bucket: env.MYJCB_SNAPSHOTS,
+    centralService: env.RAW_EVIDENCE,
+    centralToken: env.RAW_EVIDENCE_TOKEN_MYJCB,
+    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
+    importerVersion: env.IMPORTER_VERSION,
+    manifestKey,
+    ...(continuation ? { continuation } : {}),
+  });
+}
+
+interface MyJcbBackfillCursor {
+  v: 1;
+  scanCursor: string | null;
+  scanDone: boolean;
+  manifestKey?: string;
+  transfer?: string;
+}
+
+async function backfillMyJcb(
+  env: Env,
+  encodedCursor: string | undefined,
+): Promise<JsonObject> {
+  const state = encodedCursor ? decodeMyJcbCursor(encodedCursor) : null;
+  if (state?.manifestKey !== undefined) {
+    const result = await importOneMyJcb(env, state.manifestKey, state.transfer);
+    if (result.status === "deferred") {
+      return myJcbBackfillResponse({
+        scannedObjectCount: 0,
+        deferredManifestCount: 1,
+        nextCursor: encodeMyJcbCursor({
+          ...state,
+          transfer: result.continuation,
+        }),
+        result,
+      });
+    }
+    return myJcbBackfillResponse({
+      scannedObjectCount: 0,
+      importedManifestCount: 1,
+      nextCursor: nextMyJcbScanCursor(state),
+      result,
+    });
+  }
+
+  const listed = await env.MYJCB_SNAPSHOTS.list({
+    prefix: "raw/myjcb/",
+    limit: 1,
+    ...(state?.scanCursor ? { cursor: state.scanCursor } : {}),
+  });
+  const object = listed.objects[0];
+  const scanDone = !listed.truncated;
+  const scanCursor = listed.truncated ? listed.cursor : undefined;
+  if (listed.truncated && !scanCursor) throw new ImportError(409, "prefix_cursor_missing");
+  if (listed.truncated && state?.scanCursor === scanCursor) {
+    throw new ImportError(409, "prefix_cursor_did_not_advance");
+  }
+  const continuation: MyJcbBackfillCursor = {
+    v: 1,
+    scanCursor: scanCursor ?? null,
+    scanDone,
+  };
+  if (!object) {
+    return myJcbBackfillResponse({ scannedObjectCount: 0, nextCursor: null });
+  }
+  if (!object.key.endsWith("/manifest.json")) {
+    return myJcbBackfillResponse({
+      scannedObjectCount: 1,
+      skippedManifestCount: 1,
+      nextCursor: nextMyJcbScanCursor(continuation),
+    });
+  }
+  try {
+    const result = await importOneMyJcb(env, object.key);
+    if (result.status === "deferred") {
+      return myJcbBackfillResponse({
+        scannedObjectCount: 1,
+        deferredManifestCount: 1,
+        nextCursor: encodeMyJcbCursor({
+          ...continuation,
+          manifestKey: object.key,
+          transfer: result.continuation,
+        }),
+        result,
+      });
+    }
+    return myJcbBackfillResponse({
+      scannedObjectCount: 1,
+      importedManifestCount: 1,
+      nextCursor: nextMyJcbScanCursor(continuation),
+      result,
+    });
+  } catch (error) {
+    return myJcbBackfillResponse({
+      scannedObjectCount: 1,
+      failedManifestCount: 1,
+      failureCode: safeCode(error),
+      failedManifestKey: object.key,
+      nextCursor: nextMyJcbScanCursor(continuation),
+    });
+  }
+}
+
+function myJcbBackfillResponse(input: {
+  scannedObjectCount: number;
+  importedManifestCount?: number;
+  skippedManifestCount?: number;
+  deferredManifestCount?: number;
+  failedManifestCount?: number;
+  failureCode?: string;
+  failedManifestKey?: string;
+  nextCursor: string | null;
+  result?: unknown;
+}): JsonObject {
+  return {
+    source: "myjcb",
+    scannedObjectCount: input.scannedObjectCount,
+    importedManifestCount: input.importedManifestCount ?? 0,
+    skippedManifestCount: input.skippedManifestCount ?? 0,
+    deferredManifestCount: input.deferredManifestCount ?? 0,
+    failedManifestCount: input.failedManifestCount ?? 0,
+    nextCursor: input.nextCursor,
+    truncated: input.nextCursor !== null,
+    ...(input.failureCode ? { failureCode: input.failureCode } : {}),
+    ...(input.failedManifestKey ? { failedManifestKey: input.failedManifestKey } : {}),
+    ...(input.result ? { result: input.result } : {}),
+  };
+}
+
+function nextMyJcbScanCursor(state: MyJcbBackfillCursor): string | null {
+  return state.scanDone ? null : encodeMyJcbCursor({
+    v: 1,
+    scanCursor: state.scanCursor,
+    scanDone: false,
+  });
+}
+
+function encodeMyJcbCursor(value: MyJcbBackfillCursor): string {
+  assertMyJcbCursor(value);
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `myjcb-v1.${btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "")}`;
+}
+
+function decodeMyJcbCursor(value: string): MyJcbBackfillCursor {
+  if (!value.startsWith("myjcb-v1.")) throw new ImportError(400, "cursor_invalid");
+  const encoded = value.slice("myjcb-v1.".length).replaceAll("-", "+").replaceAll("_", "/");
+  const padded = encoded.padEnd(Math.ceil(encoded.length / 4) * 4, "=");
+  let parsed: unknown;
+  try {
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  const input = parsed as JsonObject;
+  exactKeys(input, ["v", "scanCursor", "scanDone", "manifestKey", "transfer"]);
+  const cursor = input as unknown as MyJcbBackfillCursor;
+  assertMyJcbCursor(cursor);
+  return cursor;
+}
+
+function assertMyJcbCursor(value: MyJcbBackfillCursor): void {
+  const scanStateValid = value.scanDone
+    ? value.scanCursor === null
+    : typeof value.scanCursor === "string" && value.scanCursor.length > 0 &&
+      value.scanCursor.length <= 4_096 && !/[\x00-\x20\x7f]/u.test(value.scanCursor);
+  const hasManifest = value.manifestKey !== undefined;
+  const hasTransfer = value.transfer !== undefined;
+  if (value.v !== 1 || typeof value.scanDone !== "boolean" || !scanStateValid ||
+      hasManifest !== hasTransfer ||
+      (hasManifest &&
+        (typeof value.manifestKey !== "string" || !/^raw\/myjcb\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/manifest\.json$/u
+          .test(value.manifestKey) ||
+          typeof value.transfer !== "string" || value.transfer.length < 1 ||
+          value.transfer.length > 8_000))) {
+    throw new ImportError(400, "cursor_invalid");
+  }
 }
 
 function importOneGlobalPass(

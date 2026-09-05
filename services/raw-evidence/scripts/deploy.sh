@@ -14,3 +14,4 @@ bash scripts/verify-production.sh
 bash scripts/verify-sbi-shinsei-route.sh
 bash scripts/verify-mobile-suica-route.sh
 bash scripts/verify-global-pass-route.sh
+bash scripts/verify-myjcb-route.sh

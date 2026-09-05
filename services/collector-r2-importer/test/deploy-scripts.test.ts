@@ -15,6 +15,7 @@ describe("collector R2 importer deployment scripts", () => {
       "RAW_EVIDENCE_TOKEN_MOBILE_SUICA",
       "RAW_EVIDENCE_TOKEN_GLOBAL_PASS",
       "GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST",
+      "RAW_EVIDENCE_TOKEN_MYJCB",
       "ORIGIN_FINGERPRINT_KEY",
     ];
 
