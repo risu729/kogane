@@ -810,7 +810,7 @@ function environment(
     VPOINT_PAY_SNAPSHOTS: vPointPayBucket,
     SMBC_DIRECT_SNAPSHOTS: smbcDirectBucket,
     RAW_EVIDENCE: {} as Fetcher,
-    IMPORTER_VERSION: "collector-r2-importer-v13",
+    IMPORTER_VERSION: "collector-r2-importer-v14",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_VC: `collector-r2-sbi-vc.${"v".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SONY: `collector-r2-sony-bank.${"o".repeat(32)}`,

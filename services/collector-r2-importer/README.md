@@ -312,7 +312,7 @@ backfill前後に新しいscheduled runが作られた場合は、その新規ob
 このPRはdeployせず、既存SMBC Direct Cronも変更しない。本番適用時は次を直列に行う。
 
 1. 中央raw-evidenceへmigration `0013`を適用して`kogane-ingest`をdeployし、`verify-smbc-direct-route.sh`で専用route/policy/aliasが各1件であることだけを確認する。
-2. `collector-r2-smbc-direct` credentialを生成し、Importerへ`RAW_EVIDENCE_TOKEN_SMBC_DIRECT`として同期した後、`collector-r2-importer-v13`をdeployする。他source tokenは流用しない。
+2. `collector-r2-smbc-direct` credentialを生成し、Importerへ`RAW_EVIDENCE_TOKEN_SMBC_DIRECT`として同期した後、`collector-r2-importer-v14`をdeployする。他source tokenは流用しない。
 3. SMBC Direct collectorをService Binding追加版へdeployする。既存scheduled triggerは追加・削除・変更せず、deploy前後で同一であることを確認する。
 4. source R2の事前inventoryをobject件数、manifest件数、集約checksumだけで記録する。object key、個別hash、本文、金融値は出力しない。最初のmanifestをbounded backfillでsealし、中央のrun/seal/artifact件数だけをcanary確認する。
 5. `poc/smbc-direct-backfill-worker/scripts/backfill-raw-evidence.sh`を完走し、全terminal manifestが完全inventoryを持ってsealされたことを確認する。partial/failed manifestもprovider成功へ昇格させない。
