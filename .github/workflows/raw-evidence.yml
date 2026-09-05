@@ -10,6 +10,7 @@ on:
       - "poc/sbi-shinsei-worker/**"
       - "poc/mobile-suica-worker/**"
       - "poc/globalpass-worker/**"
+      - "poc/moneyforward-worker/**"
       - "docs/raw-store.md"
       - "docs/roadmap.md"
       - ".github/workflows/raw-evidence.yml"
@@ -23,6 +24,7 @@ on:
       - "poc/sbi-shinsei-worker/**"
       - "poc/mobile-suica-worker/**"
       - "poc/globalpass-worker/**"
+      - "poc/moneyforward-worker/**"
       - "docs/raw-store.md"
       - "docs/roadmap.md"
       - ".github/workflows/raw-evidence.yml"
@@ -122,3 +124,16 @@ jobs:
       - run: bun run test
       - run: bun run typecheck
       - run: bun run deploy:dry
+
+  moneyforward-worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: poc/moneyforward-worker
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      - run: bun run typecheck
+      - run: bun run cf:check
