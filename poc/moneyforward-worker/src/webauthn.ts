@@ -73,7 +73,9 @@ export async function createAssertion(
     privateKey,
     exactArrayBuffer(signedData),
   ));
-  const signature = rawSignature[0] === 0x30 ? rawSignature : p1363ToDer(rawSignature);
+  // Web Crypto ECDSA returns fixed-width r || s, including when r happens to
+  // begin with DER's 0x30 tag. WebAuthn always requires ASN.1 DER encoding.
+  const signature = p1363ToDer(rawSignature);
   const credentialId = base64Url(parseCredentialId(credential.credentialId));
   return {
     id: credentialId,
