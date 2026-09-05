@@ -122,7 +122,7 @@ describe("GLOBAL PASS R2 importer", () => {
       .replace("利用明細", "Account")
       .replace(
         '<table data-fixture="activity"><tbody></tbody></table>',
-        legacyEnglishActivityTable(),
+        legacyEnglishActivityTables(),
       )
       .replace("<body>", '<body><a href="/">Home</a>')
       .replace(
@@ -152,14 +152,14 @@ describe("GLOBAL PASS R2 importer", () => {
     const base = variantA(["one", "two", "three", "four", "", ""])
       .replace("利用明細", "Account");
     for (const marker of [
-      `<!-- ${legacyEnglishActivityTable()} -->`,
-      `<script>const marker = ${JSON.stringify(legacyEnglishActivityTable())};</script>`,
+      `<!-- ${legacyEnglishActivityTables()} -->`,
+      `<script>const marker = ${JSON.stringify(legacyEnglishActivityTables())};</script>`,
       '<input type="hidden" value="Transaction Date Transaction Detail Transaction Currency and Amount Transaction Fee">',
-      `<table hidden>${legacyEnglishActivityTable()}</table>`,
-      legacyEnglishActivityTable().replace("<th>", "<th hidden>"),
-      `<div aria-hidden="true">${legacyEnglishActivityTable()}</div>`,
-      `<table style="display: none !important">${legacyEnglishActivityTable()}</table>`,
-      `<div style="visibility:hidden!important">${legacyEnglishActivityTable()}</div>`,
+      `<table hidden>${legacyEnglishActivityTables()}</table>`,
+      legacyEnglishActivityTables().replace("<th>", "<th hidden>"),
+      `<div aria-hidden="true">${legacyEnglishActivityTables()}</div>`,
+      `<table style="display: none !important">${legacyEnglishActivityTables()}</table>`,
+      `<div style="visibility:hidden!important">${legacyEnglishActivityTables()}</div>`,
       "<th>Transaction Detail</th>",
     ]) {
       const html = base.replace("</body>", `${marker}</body>`);
@@ -669,10 +669,17 @@ function canonicalV2(html: string): string {
     .replace('onchange="sel_submit(this)"', 'onchange="return false;"');
 }
 
-function legacyEnglishActivityTable(): string {
+function legacyEnglishActivityTables(): string {
   return "<table><thead><tr>" +
     "<th>Transaction Date</th>" +
     "<th>Transaction Detail</th>" +
+    "<th>Transaction Fee</th>" +
+    "</tr></thead><tbody></tbody></table>" +
+    "<table><thead><tr>" +
+    "<th>Transaction Currency and Amount</th>" +
+    "<th>Transaction Detail</th>" +
+    "</tr></thead><tbody></tbody></table>" +
+    "<table><thead><tr>" +
     "<th>Transaction Currency and Amount</th>" +
     "<th>Transaction Fee</th>" +
     "</tr></thead><tbody></tbody></table>";

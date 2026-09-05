@@ -61,12 +61,11 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const SAFE_ERROR_TYPE = /^[A-Za-z][A-Za-z0-9]{0,79}$/u;
 const SAFE_CODE = /^[a-z][a-z0-9_]{0,99}$/u;
 const CURRENT_ACTIVITY_MARKER = /(?:ご利用明細|利用明細)/u;
-const LEGACY_ACTIVITY_HEADERS = new Set([
-  "Transaction Currency and Amount",
-  "Transaction Date",
-  "Transaction Detail",
-  "Transaction Fee",
-]);
+const LEGACY_ACTIVITY_TABLE_HEADER_GROUPS = [
+  ["Transaction Date", "Transaction Detail", "Transaction Fee"],
+  ["Transaction Currency and Amount", "Transaction Detail"],
+  ["Transaction Currency and Amount", "Transaction Fee"],
+] as const;
 const LEGACY_RESPONSIVE_ONCLICK =
   /^if\s*\(\s*window\.innerWidth\s*&lt;\s*\d+\s*\)\s*\{\s*\$\(\s*this\.parentNode\s*\)\.toggleClass\(\s*(?:"[^"]*"|'[^']*')\s*\);\s*\}\s*else\s*\{\s*\$\(\s*(?:"[^"]*"|'[^']*')\s*\)\[\d+\]\.click\(\s*\);\s*\}\s*return\s+false;\s*$/u;
 const FORBIDDEN_INLINE = /(?:;jsessionid|token|csrf|turnstile|session|localStorage)/iu;
@@ -782,8 +781,14 @@ function visibleTextForActivityMarker(html: string): string {
 function hasActivityMarker(html: string, schemaVersion: SchemaVersion): boolean {
   if (CURRENT_ACTIVITY_MARKER.test(visibleTextForActivityMarker(html))) return true;
   if (schemaVersion !== V1) return false;
-  return [...visibleTableHeaders(html).values()].some((headers) =>
-    [...LEGACY_ACTIVITY_HEADERS].every((header) => headers.has(header))
+  const activityHeaders = new Set<string>(LEGACY_ACTIVITY_TABLE_HEADER_GROUPS.flat());
+  const observedGroups = new Set(
+    [...visibleTableHeaders(html).values()].map((headers) =>
+      [...headers].filter((header) => activityHeaders.has(header)).sort().join("\n")
+    ),
+  );
+  return LEGACY_ACTIVITY_TABLE_HEADER_GROUPS.every((group) =>
+    observedGroups.has([...group].sort().join("\n"))
   );
 }
 
