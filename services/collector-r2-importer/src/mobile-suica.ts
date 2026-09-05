@@ -7,7 +7,7 @@ const SOURCE = "mobile-suica" as const;
 const PRODUCER = "collector-r2-importer";
 const V1 = "mobile-suica-worker-poc-v1" as const;
 const V2 = "mobile-suica-worker-poc-v2" as const;
-const INGEST_CONTRACT_VERSION = "mobile-suica-r2-v1";
+const INGEST_CONTRACT_VERSION = "mobile-suica-r2-v2";
 const CENTRAL_CLIENT_ID = "collector-r2-mobile-suica";
 const STORAGE_CONTAINER = "kogane-mobile-suica-collector-poc";
 const STORAGE_TEMPLATE = "raw/mobile-suica/{date}/{run-id}/{artifact}";
@@ -255,7 +255,7 @@ export async function importMobileSuicaRun(options: {
     await central.addRunReport(centralRunId, {
       reportKey: "terminal",
       reportKind: "terminal",
-      producerVersion: options.importerVersion,
+      producerVersion: INGEST_CONTRACT_VERSION,
       manifestSchemaVersion: manifest.schemaVersion,
       producerStatus: manifest.status,
       normalizedOutcome: manifest.status,

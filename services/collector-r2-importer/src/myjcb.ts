@@ -14,7 +14,7 @@ import type { CentralInventoryItem } from "./types";
 
 const SOURCE = "myjcb" as const;
 const PRODUCER = "collector-r2-importer";
-const INGEST_CONTRACT_VERSION = "myjcb-r2-v1";
+const INGEST_CONTRACT_VERSION = "myjcb-r2-v2";
 const CENTRAL_CLIENT_ID = "collector-r2-myjcb";
 const STORAGE_CONTAINER = "kogane-myjcb-collector-poc";
 const STORAGE_TEMPLATE = "raw/myjcb/{date}/{run-id}/{artifact}";
@@ -232,7 +232,7 @@ export async function importMyJcbRun(options: {
     await central.addRunReport(state.centralRunId, {
       reportKey: "terminal",
       reportKind: "terminal",
-      producerVersion: options.importerVersion,
+      producerVersion: INGEST_CONTRACT_VERSION,
       manifestSchemaVersion: validated.manifest.schemaVersion,
       producerStatus: validated.manifest.status,
       normalizedOutcome: validated.manifest.status,

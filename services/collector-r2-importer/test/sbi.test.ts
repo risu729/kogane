@@ -40,6 +40,7 @@ class FakeBucket {
 class FakeCentral {
   readonly requests: Array<{ url: string; method: string; body: string }> = [];
   readonly uploaded = new Map<string, Uint8Array>();
+  readonly reports = new Map<string, string>();
   nextUnitId = 10;
 
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -63,6 +64,7 @@ class FakeCentral {
       const byte = body.artifactKey === "manifest.json" ? "b" : "a";
       return Response.json({ descriptorSha256: byte.repeat(64) }, { status: 201 });
     }
+    if (/\/reports$/u.test(path)) return immutableReport(this.reports, path, body);
     if (/\/seal$/u.test(path)) return Response.json({ sealed: true }, { status: 201 });
     return Response.json({ ok: true }, { status: 201 });
   };
@@ -110,6 +112,12 @@ describe("SBI staged-run importer", () => {
     });
 
     expect(result).toMatchObject({ centralRunId: 1, artifactCount: 8, sealed: true });
+    const runReport = central.requests.find((request) =>
+      new URL(request.url).pathname === "/v1/runs/1/reports"
+    );
+    expect(runReport ? JSON.parse(runReport.body) : undefined).toMatchObject({
+      producerVersion: "sbi-r2-v3",
+    });
     expect(central.requests).toHaveLength(23);
     for (const artifact of artifacts) {
       const uploaded = central.uploaded.get(`/v1/runs/1/objects/${artifact.sha256}`);
@@ -125,6 +133,14 @@ describe("SBI staged-run importer", () => {
     });
     expect(artifactBodies.find((body) => body.artifactKey === "foreign-trade-records.json"))
       .toMatchObject({ containerKind: "bundle" });
+    await expect(importSbiRun({
+      bucket: bucket as unknown as R2Bucket,
+      centralService: central as unknown as Fetcher,
+      centralToken: TOKEN,
+      fingerprintKey: FINGERPRINT_KEY,
+      importerVersion: "collector-r2-importer-v99",
+      manifestKey: KEY,
+    })).resolves.toMatchObject({ centralRunId: 1, sealed: true });
   });
 
   test("rejects a corrupted source object before creating central state", async () => {
@@ -246,6 +262,17 @@ describe("SBI staged-run importer", () => {
     expect(central.requests).toHaveLength(0);
   });
 });
+
+function immutableReport(reports: Map<string, string>, path: string, body: string): Response {
+  const previous = reports.get(path);
+  if (previous !== undefined && previous !== body) {
+    return Response.json({ error: "immutable report conflict" }, { status: 409 });
+  }
+  reports.set(path, body);
+  return Response.json({ reused: previous !== undefined }, {
+    status: previous === undefined ? 201 : 200,
+  });
+}
 
 function manifestMetadata(status = "success"): Record<string, string> {
   return { source: "sbi-securities", status, runId: RUN_ID };

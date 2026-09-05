@@ -83,8 +83,9 @@ class FakeBucket {
 class FakeCentral {
   readonly requests: Array<{ path: string; method: string; body: string }> = [];
   readonly uploaded = new Map<string, Uint8Array>();
+  readonly reports = new Map<string, string>();
   private pageGroupDeclared = false;
-  private pageGroupArtifactCount = 0;
+  private readonly pageGroupArtifacts = new Set<string>();
 
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
@@ -106,11 +107,14 @@ class FakeCentral {
     }
     if (path.endsWith("/artifacts")) {
       const descriptor = JSON.parse(body) as Record<string, unknown>;
-      if (descriptor.pageGroupId === 20) this.pageGroupArtifactCount += 1;
+      if (descriptor.pageGroupId === 20) {
+        this.pageGroupArtifacts.add(String(descriptor.artifactKey));
+      }
       return Response.json({ descriptorSha256: "1".repeat(64) }, { status: 201 });
     }
+    if (path.endsWith("/reports")) return immutableReport(this.reports, path, body);
     if (path.endsWith("/seal")) {
-      if (this.pageGroupDeclared && this.pageGroupArtifactCount !== 1) {
+      if (this.pageGroupDeclared && this.pageGroupArtifacts.size !== 1) {
         return Response.json({ error: "page_group_artifact_count_mismatch" }, { status: 409 });
       }
       return Response.json({ sealed: true }, { status: 201 });
@@ -223,7 +227,15 @@ describe("Mobile Suica R2 importer", () => {
       sourceId: "mobile-suica",
       externalIdNamespace: "mobile-suica-worker-poc-v1",
       externalSessionId: RUN_ID,
-      sourceRunKey: "sf-history-mobile-suica-r2-v1",
+      sourceRunKey: "sf-history-mobile-suica-r2-v2",
+    });
+    const runReport = central.requests.find((request) => request.path === "/v1/runs/1/reports");
+    expect(runReport ? JSON.parse(runReport.body) : undefined).toMatchObject({
+      producerVersion: "mobile-suica-r2-v2",
+    });
+    await expect(importRun(bucket, central, "test-v99")).resolves.toMatchObject({
+      status: "sealed",
+      finalChunkAllObjectsReused: true,
     });
   });
 
@@ -572,14 +584,25 @@ function readManifest(bucket: FakeBucket): TestManifest {
   return JSON.parse(new TextDecoder().decode(bucket.objects.get(MANIFEST_KEY)!.body)) as TestManifest;
 }
 
-function importRun(bucket: FakeBucket, central: FakeCentral) {
+function importRun(bucket: FakeBucket, central: FakeCentral, importerVersion = "test-v1") {
   return importMobileSuicaRun({
     bucket: bucket as unknown as R2Bucket,
     centralService: central as unknown as Fetcher,
     centralToken: TOKEN,
     fingerprintKey: FINGERPRINT_KEY,
-    importerVersion: "test-v1",
+    importerVersion,
     manifestKey: MANIFEST_KEY,
+  });
+}
+
+function immutableReport(reports: Map<string, string>, path: string, body: string): Response {
+  const previous = reports.get(path);
+  if (previous !== undefined && previous !== body) {
+    return Response.json({ error: "immutable report conflict" }, { status: 409 });
+  }
+  reports.set(path, body);
+  return Response.json({ reused: previous !== undefined }, {
+    status: previous === undefined ? 201 : 200,
   });
 }
 

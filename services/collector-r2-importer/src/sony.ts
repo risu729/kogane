@@ -13,7 +13,7 @@ const SCHEMA_VERSION = "sony-bank-worker-poc-v2";
 const LEGACY_SCHEMA_VERSION = "sony-bank-worker-poc-v1";
 const SUMMARY_VERSION = "sony-bank-collection-summary-v2";
 const LEGACY_SUMMARY_VERSION = "sony-bank-collection-summary-v1";
-const INGEST_CONTRACT_VERSION = "sony-bank-r2-v1";
+const INGEST_CONTRACT_VERSION = "sony-bank-r2-v2";
 const CENTRAL_CLIENT_ID = "collector-r2-sony-bank";
 const STORAGE_CONTAINER = "kogane-sony-bank-collector-poc";
 const STORAGE_TEMPLATE = "raw/sony-bank/{date}/{run-id}/{artifact}";
@@ -240,7 +240,7 @@ export async function importSonyRun(options: {
     await central.addRunReport(centralRunId, {
       reportKey: "terminal",
       reportKind: "terminal",
-      producerVersion: options.importerVersion,
+      producerVersion: INGEST_CONTRACT_VERSION,
       manifestSchemaVersion: validated.manifest.schemaVersion,
       producerStatus: validated.manifest.status,
       normalizedOutcome: validated.manifest.status,

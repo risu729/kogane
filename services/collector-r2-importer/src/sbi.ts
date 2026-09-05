@@ -10,7 +10,7 @@ import type {
 const SOURCE = "sbi-securities" as const;
 const PRODUCER = "collector-r2-importer";
 const SCHEMA_VERSION = "sbi-worker-poc-v1";
-const INGEST_CONTRACT_VERSION = "sbi-r2-v2";
+const INGEST_CONTRACT_VERSION = "sbi-r2-v3";
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const STORAGE_TEMPLATE = "raw/sbi-securities/{date}/{run-id}/{artifact}.json";
@@ -209,7 +209,7 @@ export async function importSbiRun(options: {
     await central.addRunReport(centralRunId, {
       reportKey: "terminal",
       reportKind: "terminal",
-      producerVersion: options.importerVersion,
+      producerVersion: INGEST_CONTRACT_VERSION,
       manifestSchemaVersion: manifest.schemaVersion,
       producerStatus: manifest.status,
       normalizedOutcome: manifest.status,

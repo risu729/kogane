@@ -48,6 +48,7 @@ class FakeCentral {
   readonly seals: number[] = [];
   readonly uploadedBodies: string[] = [];
   readonly unitIds = new Map<string, number>();
+  readonly reports = new Map<string, string>();
   failNextInventoryItems = false;
 
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -86,6 +87,7 @@ class FakeCentral {
         { status: 201 },
       );
     }
+    if (path.endsWith("/reports")) return immutableReport(this.reports, path, body);
     if (path.endsWith("/seal")) {
       this.seals.push(1);
       return Response.json({ sealed: true }, { status: 201 });
@@ -112,10 +114,19 @@ describe("MyJCB R2 importer", () => {
     });
     expect(central.inventoryItems.size).toBe(8);
     expect(central.seals).toHaveLength(1);
+    const runReport = central.requests.find((entry) => entry.path === "/v1/runs/1/reports");
+    expect(runReport ? JSON.parse(runReport.body) : undefined).toMatchObject({
+      producerVersion: "myjcb-r2-v2",
+    });
 
-    const replayFirst = await runImport(bucket, central);
+    const replayFirst = await runImport(bucket, central, undefined, "collector-r2-importer-v99");
     if (replayFirst.status !== "deferred") throw new Error("expected deferred replay");
-    const replaySecond = await runImport(bucket, central, replayFirst.continuation);
+    const replaySecond = await runImport(
+      bucket,
+      central,
+      replayFirst.continuation,
+      "collector-r2-importer-v99",
+    );
     expect(replaySecond).toMatchObject({ status: "sealed", centralRunId: 1 });
     expect(central.inventoryItems.size).toBe(8);
     expect(central.seals).toHaveLength(2);
@@ -391,15 +402,31 @@ describe("MyJCB R2 importer", () => {
   });
 });
 
-async function runImport(bucket: FakeBucket, central: FakeCentral, continuation?: string) {
+async function runImport(
+  bucket: FakeBucket,
+  central: FakeCentral,
+  continuation?: string,
+  importerVersion = "collector-r2-importer-test",
+) {
   return importMyJcbRun({
     bucket: bucket as unknown as R2Bucket,
     centralService: central as unknown as Fetcher,
     centralToken: TOKEN,
     fingerprintKey: FINGERPRINT_KEY,
-    importerVersion: "collector-r2-importer-test",
+    importerVersion,
     manifestKey: MANIFEST_KEY,
     ...(continuation ? { continuation } : {}),
+  });
+}
+
+function immutableReport(reports: Map<string, string>, path: string, body: string): Response {
+  const previous = reports.get(path);
+  if (previous !== undefined && previous !== body) {
+    return Response.json({ error: "immutable report conflict" }, { status: 409 });
+  }
+  reports.set(path, body);
+  return Response.json({ reused: previous !== undefined }, {
+    status: previous === undefined ? 201 : 200,
   });
 }
 

@@ -89,6 +89,7 @@ class FakeBucket {
 class FakeCentral {
   readonly requests: Array<{ path: string; method: string; body: string }> = [];
   readonly uploaded = new Map<string, Uint8Array>();
+  readonly reports = new Map<string, string>();
 
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
@@ -123,6 +124,7 @@ class FakeCentral {
         descriptorSha256: await digest(encode(canonicalJson(centralNormalized))),
       }, { status: 201 });
     }
+    if (/\/reports$/u.test(path)) return immutableReport(this.reports, path, requestBody);
     if (/\/seal$/u.test(path)) return Response.json({ sealed: true }, { status: 201 });
     return Response.json({ ok: true }, { status: 201 });
   };
@@ -181,7 +183,11 @@ describe("Sony Bank staged-run importer", () => {
       sourceId: "sony-bank",
       externalIdNamespace: "sony-bank-worker-poc-v2",
       externalSessionId: RUN_ID,
-      sourceRunKey: "full-snapshot-sony-bank-r2-v1",
+      sourceRunKey: "full-snapshot-sony-bank-r2-v2",
+    });
+    const runReport = central.requests.find((request) => request.path === "/v1/runs/1/reports");
+    expect(runReport ? JSON.parse(runReport.body) : undefined).toMatchObject({
+      producerVersion: "sony-bank-r2-v2",
     });
   });
 
@@ -192,7 +198,7 @@ describe("Sony Bank staged-run importer", () => {
     await importAllChunks(bucket, central, manifest.artifacts.length + 1);
     const uploadedCount = central.uploaded.size;
 
-    const replay = await importAllChunks(bucket, central, manifest.artifacts.length + 1);
+    const replay = await importAllChunks(bucket, central, manifest.artifacts.length + 1, "test-v99");
     expect(replay).toMatchObject({ status: "sealed", finalChunkAllObjectsReused: true });
     expect(central.uploaded.size).toBe(uploadedCount);
   });
@@ -805,28 +811,45 @@ function stored(
 function importRun(
   bucket: FakeBucket,
   central: FakeCentral,
-  options: { offset?: number; immediate?: boolean } = {},
+  options: { offset?: number; immediate?: boolean; importerVersion?: string } = {},
 ) {
+  const { importerVersion = "test-v1", ...runOptions } = options;
   return importSonyRun({
     bucket: bucket as unknown as R2Bucket,
     centralService: central as unknown as Fetcher,
     centralToken: TOKEN,
     fingerprintKey: FINGERPRINT_KEY,
-    importerVersion: "test-v1",
+    importerVersion,
     manifestKey: MANIFEST_KEY,
-    ...options,
+    ...runOptions,
   });
 }
 
-async function importAllChunks(bucket: FakeBucket, central: FakeCentral, total: number) {
+async function importAllChunks(
+  bucket: FakeBucket,
+  central: FakeCentral,
+  total: number,
+  importerVersion = "test-v1",
+) {
   let offset = 0;
   while (offset < total) {
-    const result = await importRun(bucket, central, { immediate: false, offset });
+    const result = await importRun(bucket, central, { immediate: false, offset, importerVersion });
     if (result.status === "sealed") return result;
     expect(result.nextOffset).toBe(offset + SONY_TRANSFER_CHUNK_SIZE);
     offset = result.nextOffset;
   }
   throw new Error("fixture did not seal");
+}
+
+function immutableReport(reports: Map<string, string>, path: string, body: string): Response {
+  const previous = reports.get(path);
+  if (previous !== undefined && previous !== body) {
+    return Response.json({ error: "immutable report conflict" }, { status: 409 });
+  }
+  reports.set(path, body);
+  return Response.json({ reused: previous !== undefined }, {
+    status: previous === undefined ? 201 : 200,
+  });
 }
 
 async function expectRejected(bucket: FakeBucket, code: string): Promise<void> {

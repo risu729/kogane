@@ -82,6 +82,7 @@ class FakeBucket {
 class FakeCentral {
   readonly requests: Array<{ path: string; method: string; body: string }> = [];
   readonly uploaded = new Map<string, Uint8Array>();
+  readonly reports = new Map<string, string>();
 
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = new Request(input, init);
@@ -101,6 +102,7 @@ class FakeCentral {
     if (/\/artifacts$/u.test(path)) {
       return Response.json({ descriptorSha256: "1".repeat(64) }, { status: 201 });
     }
+    if (/\/reports$/u.test(path)) return immutableReport(this.reports, path, body);
     if (/\/seal$/u.test(path)) return Response.json({ sealed: true }, { status: 201 });
     return Response.json({ ok: true }, { status: 201 });
   };
@@ -130,8 +132,12 @@ describe("SBI Shinsei staged-run importer", () => {
         sourceId: "sbi-shinsei-bank",
         externalIdNamespace: "sbi-shinsei-worker-poc-v1",
         externalSessionId: RUN_ID,
-        sourceRunKey: "current-snapshot-sbi-shinsei-r2-v1",
+        sourceRunKey: "current-snapshot-sbi-shinsei-r2-v2",
       });
+    const runReport = central.requests.find((request) => request.path === "/v1/runs/1/reports");
+    expect(runReport ? JSON.parse(runReport.body) : undefined).toMatchObject({
+      producerVersion: "sbi-shinsei-r2-v2",
+    });
     const topDescriptor = central.requests
       .filter((request) => /\/artifacts$/u.test(request.path))
       .map((request) => JSON.parse(request.body) as Record<string, unknown>)
@@ -142,7 +148,7 @@ describe("SBI Shinsei staged-run importer", () => {
       lineageDisposition: "source_not_retained_for_security",
     });
 
-    const replay = await importRun(bucket, central);
+    const replay = await importRun(bucket, central, "test-v99");
     expect(replay.allObjectsReused).toBe(true);
     expect(central.uploaded.size).toBe(6);
   });
@@ -714,14 +720,25 @@ function topActivity(value: unknown): {
   }).responseParam.activity.responseParam;
 }
 
-function importRun(bucket: FakeBucket, central: FakeCentral) {
+function importRun(bucket: FakeBucket, central: FakeCentral, importerVersion = "test-v1") {
   return importSbiShinseiRun({
     bucket: bucket as unknown as R2Bucket,
     centralService: central as unknown as Fetcher,
     centralToken: TOKEN,
     fingerprintKey: FINGERPRINT_KEY,
-    importerVersion: "test-v1",
+    importerVersion,
     manifestKey: MANIFEST_KEY,
+  });
+}
+
+function immutableReport(reports: Map<string, string>, path: string, body: string): Response {
+  const previous = reports.get(path);
+  if (previous !== undefined && previous !== body) {
+    return Response.json({ error: "immutable report conflict" }, { status: 409 });
+  }
+  reports.set(path, body);
+  return Response.json({ reused: previous !== undefined }, {
+    status: previous === undefined ? 201 : 200,
   });
 }
 
