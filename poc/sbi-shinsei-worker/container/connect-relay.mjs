@@ -60,7 +60,7 @@ export function relayDiagnostics(relayId, runId, hostname) {
     mark(stage, relay, details = {}) {
       safe(() => {
         const amount = sample(relay);
-        if (stage !== "websocket-open" && stage !== "websocket-connect-start" && !firstCloseEvent) { firstCloseEvent = stage; bufferedAmountAtClose = amount; }
+        if (!["websocket-open", "websocket-connect-start", "initial-frame-queued"].includes(stage) && !firstCloseEvent) { firstCloseEvent = stage; bufferedAmountAtClose = amount; }
         if (seen.has(stage) || closeTimeline.length >= 16) return;
         seen.add(stage);
         const entry = { stage, elapsedMs: Math.max(0, Date.now() - started) };
@@ -265,21 +265,42 @@ export function startConnectRelay({
 
     relay.once("open", () => {
       diagnostic.mark("websocket-open", relay);
-      clearTimeout(timeout);
       if (responseSent) {
         void lifecycle.close();
         return;
       }
-      established = true;
-      responseSent = true;
-      relayStream = createWebSocketStream(relay);
-      relayStream.once("error", error => { diagnostic.mark("websocket-stream-error", relay, { error }); fail(); });
-      socket.write(
-        "HTTP/1.1 200 Connection Established\r\nProxy-Agent: kogane-connect-relay\r\n\r\n",
-      );
-      if (head.length) relayStream.write(head);
-      socket.pipe(relayStream).pipe(socket);
-      socket.resume();
+      const initialFailure = error => {
+        diagnostic.mark("initial-frame-error", relay, { error });
+        fail();
+        void lifecycle.abort();
+      };
+      try {
+        // An initial empty binary data frame establishes the message path even
+        // for unused browser preconnections. It contributes zero upstream bytes.
+        // Wait for its local send callback before acknowledging CONNECT or
+        // forwarding any TLS data; the existing deadline still bounds this wait.
+        relay.send(Buffer.alloc(0), error => {
+          if (error) { initialFailure(error); return; }
+          try {
+            if (responseSent || socket.destroyed || relay.readyState !== WebSocket.OPEN) {
+              void lifecycle.close();
+              return;
+            }
+            clearTimeout(timeout);
+            established = true;
+            responseSent = true;
+            relayStream = createWebSocketStream(relay);
+            relayStream.once("error", error => { diagnostic.mark("websocket-stream-error", relay, { error }); fail(); });
+            socket.write(
+              "HTTP/1.1 200 Connection Established\r\nProxy-Agent: kogane-connect-relay\r\n\r\n",
+            );
+            if (head.length) relayStream.write(head);
+            socket.pipe(relayStream).pipe(socket);
+            socket.resume();
+          } catch (error) { initialFailure(error); }
+        });
+        diagnostic.mark("initial-frame-queued", relay);
+      } catch (error) { initialFailure(error); }
     });
     relay.once("error", error => { diagnostic.mark("websocket-error", relay, { error }); fail(); });
     relay.once("close", () => {

@@ -230,6 +230,15 @@ remain separate outcomes. These diagnostic changes do not retry collection.
 
 ### Correlate relay activity and unused preconnections
 
+The Container sends one empty binary WebSocket data frame when the relay opens,
+before acknowledging CONNECT or forwarding TLS data. `initial-frame-queued`
+records this zero-byte frame; it adds one queued frame and no queued bytes, and
+does not count as a closing event. The Worker ignores empty payloads for upstream
+connection creation, so an unused preconnection still creates no VPC socket.
+Initial send failures remain visible and bounded by the connection deadline.
+This preserves TLS byte order and addresses the observed zero-message close
+case; collection success and runtime-error absence still need live verification.
+
 Join Container and Worker relay logs using `runId` and `relayId`: each CONNECT
 relay generates a UUID that the Worker accepts only after validation. Container
 events record fixed target labels, sent/received data-message counts and bytes,

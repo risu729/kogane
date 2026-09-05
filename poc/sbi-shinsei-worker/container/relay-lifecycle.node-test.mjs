@@ -6,6 +6,15 @@ import WebSocket, { WebSocketServer } from "ws";
 import { relayDiagnostics, startConnectRelay, trackRelayClosure } from "./connect-relay.mjs";
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+function nextPayload(peer) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => { peer.off("message", message); peer.off("error", error); };
+    const error = failure => { cleanup(); reject(failure); };
+    const message = (...args) => { if (args[0].byteLength > 0) { cleanup(); resolve(args); } };
+    peer.on("message", message);
+    peer.once("error", error);
+  });
+}
 test("relay error-code diagnostics read accessors once and safely retain classification", t => {
   const records = [];
   const previousLog = console.log;
@@ -62,7 +71,7 @@ test("relay diagnostics correlate both directions, count only bytes, and preserv
   const relayId = new URL(request.url, "http://loopback.invalid").searchParams.get("relayId");
   assert.match(relayId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
   const payload = Buffer.from("synthetic-private-payload");
-  const message = once(peer, "message");
+  const message = nextPayload(peer);
   client.write(payload);
   assert.deepEqual((await message)[0], payload);
   let downstreamBytes = 0;
@@ -81,7 +90,7 @@ test("relay diagnostics correlate both directions, count only bytes, and preserv
   assert.equal(terminal.runId, runId);
   assert.equal(terminal.targetClass, "allowed-upstream");
   assert.equal(terminal.wsSentBytesQueued, payload.length);
-  assert.equal(terminal.wsSentFramesQueued, 1);
+  assert.equal(terminal.wsSentFramesQueued, 2);
   assert.equal(terminal.wsReceivedBytes, 40);
   assert.equal(terminal.wsReceivedFrames, 2);
   assert.equal(terminal.firstCloseEvent, "local-tcp-eof");
@@ -113,12 +122,70 @@ test("throwing metric loggers preserve proxy data and graceful close", async t =
   client.write("CONNECT allowed.invalid:443 HTTP/1.1\r\nHost: allowed.invalid:443\r\n\r\n");
   const [peer] = await connected;
   await response;
-  const message = once(peer, "message");
+  const message = nextPayload(peer);
   const peerClosed = once(peer, "close");
   client.end("synthetic-payload");
   assert.equal(String((await message)[0]), "synthetic-payload");
   assert.equal((await peerClosed)[0], 1000);
   await proxy.close();
+});
+
+test("initial empty binary frame precedes CONNECT head and TLS payload exactly once", async t => {
+  const { server, url } = await upstream(t);
+  const frames = [];
+  server.on("connection", peer => peer.on("message", (bytes, binary) => frames.push({ bytes, binary })));
+  const connected = once(server, "connection");
+  const proxy = await startConnectRelay({ relayUrl: url, relayToken: "synthetic-only", allowedHosts: new Set(["allowed.invalid"]), closeTimeoutMs: 500 });
+  t.after(() => proxy.close());
+  const client = net.connect(proxy.port, "127.0.0.1");
+  t.after(() => client.destroy());
+  await once(client, "connect");
+  const response = once(client, "data");
+  const head = Buffer.from("synthetic-first-tls-head");
+  client.write(Buffer.concat([Buffer.from("CONNECT allowed.invalid:443 HTTP/1.1\r\nHost: allowed.invalid:443\r\n\r\n"), head]));
+  const [peer] = await connected;
+  assert.match(String((await response)[0]), /200 Connection Established/u);
+  const peerClosed = once(peer, "close");
+  const payload = Buffer.alloc(256 * 1024, 7);
+  client.end(payload);
+  assert.equal((await peerClosed)[0], 1000);
+  assert.equal(frames[0].bytes.length, 0);
+  assert.equal(frames[0].binary, true);
+  assert.equal(frames.filter(frame => frame.bytes.length === 0).length, 1);
+  assert.deepEqual(Buffer.concat(frames.slice(1).map(frame => frame.bytes)), Buffer.concat([head, payload]));
+  await proxy.close();
+});
+
+for (const sendFailure of ["throw", "callback", "stall"]) test(`initial frame ${sendFailure} failure is bounded, visible and never acknowledges CONNECT`, async t => {
+  const { server, url } = await upstream(t);
+  const originalSend = WebSocket.prototype.send;
+  const originalWarn = console.warn;
+  const records = [];
+  console.warn = value => records.push(JSON.parse(String(value)));
+  WebSocket.prototype.send = function (data, ...args) {
+    if (Buffer.isBuffer(data) && data.length === 0) {
+      const error = Object.assign(new Error("synthetic-private-initial-error"), { code: "EPIPE" });
+      if (sendFailure === "throw") throw error;
+      if (sendFailure === "stall") return;
+      queueMicrotask(() => args.at(-1)(error));
+      return;
+    }
+    return originalSend.call(this, data, ...args);
+  };
+  t.after(() => { WebSocket.prototype.send = originalSend; console.warn = originalWarn; });
+  const proxy = await startConnectRelay({ relayUrl: url, relayToken: "synthetic-only", allowedHosts: new Set(["allowed.invalid"]), connectTimeoutMs: 100, closeTimeoutMs: 100 });
+  t.after(() => proxy.close());
+  const client = net.connect(proxy.port, "127.0.0.1");
+  t.after(() => client.destroy());
+  await once(client, "connect");
+  const response = once(client, "data");
+  client.write("CONNECT allowed.invalid:443 HTTP/1.1\r\nHost: allowed.invalid:443\r\n\r\n");
+  assert.match(String((await response)[0]), sendFailure === "stall" ? /504 Gateway Timeout/u : /502 Bad Gateway/u);
+  await proxy.close();
+  const terminal = records.find(record => record.event === "sbi-shinsei-container-relay-closed");
+  assert.equal(terminal.outcome, "failed");
+  assert.ok(terminal.closeTimeline.some(entry => sendFailure === "stall" ? entry.stage === "connect-timeout" : entry.stage === "initial-frame-error" && entry.errorCode === "EPIPE"));
+  assert.ok(!JSON.stringify(records).includes("synthetic-private"));
 });
 
 test("normal relay close sends 1000 and waits for the peer's delayed close handshake", async t => {
