@@ -8,7 +8,7 @@ const PRODUCER = "collector-r2-importer";
 const V1 = "globalpass-browser-poc-v1" as const;
 const V2 = "globalpass-browser-poc-v2" as const;
 const CENTRAL_CLIENT_ID = "collector-r2-global-pass";
-const INGEST_CONTRACT_VERSION = "global-pass-r2-v2";
+const INGEST_CONTRACT_VERSION = "global-pass-r2-v3";
 const STORAGE_CONTAINER = "kogane-globalpass-collector-poc";
 const STORAGE_TEMPLATE = "raw/prestia-globalpass/{date}/{run-id}/{artifact}";
 const FINGERPRINT_VERSION = "collector-r2-v1";
@@ -283,8 +283,7 @@ export async function importGlobalPassRun(options: {
       if (end < plans.length) {
         return deferredResult(options.manifestKey, plans.length, end);
       }
-      await addTerminalReports(central, centralRunId, unitId, manifest, plans.length,
-        options.importerVersion);
+      await addTerminalReports(central, centralRunId, unitId, manifest, plans.length);
       phase = "seal";
       await central.sealStagedInventory(centralRunId, inventoryId, attemptId, startedAtMs);
       return sealedResult(
@@ -316,8 +315,7 @@ export async function importGlobalPassRun(options: {
     }
 
     phase = "terminal_reports";
-    await addTerminalReports(central, centralRunId, unitId, manifest, plans.length,
-      options.importerVersion);
+    await addTerminalReports(central, centralRunId, unitId, manifest, plans.length);
     phase = "seal";
     await central.seal(centralRunId, inventory, attemptId, startedAtMs);
     return sealedResult(options.manifestKey, centralRunId, inventory.length,
@@ -390,7 +388,6 @@ async function addTerminalReports(
   unitId: number,
   manifest: Manifest,
   artifactCount: number,
-  importerVersion: string,
 ): Promise<void> {
   await central.addUnitReport(unitId, {
     reportKey: "terminal",
@@ -410,7 +407,10 @@ async function addTerminalReports(
   await central.addRunReport(centralRunId, {
     reportKey: "terminal",
     reportKind: "terminal",
-    producerVersion: importerVersion,
+    // A terminal report is immutable and must replay byte-for-byte across
+    // importer deployments. Deployment revisions belong to ingest attempts;
+    // the report records the stable source-run contract instead.
+    producerVersion: INGEST_CONTRACT_VERSION,
     manifestSchemaVersion: manifest.schemaVersion,
     producerStatus: manifest.status,
     normalizedOutcome: manifest.status,
