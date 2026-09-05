@@ -1,16 +1,21 @@
 # 三井住友銀行: SMBCダイレクト / Oliveの銀行口座側
 
-調査日: 2026-08-26
+調査日: 2026-08-26、追試: 2026-08-31、実装検証: 2026-09-01
+
+本書は初期調査と追試の記録を含む。実装状況は下記の「Kogane Workers PoC live result（2026-09-01）」と[現行PoC README](../../poc/smbc-direct-backfill-worker/README.md)を優先する。2026-09-05の文書統合では、既存の実装・検証記録との整合性を確認した。銀行への再ログインや取得は行っていない。
 
 ## 結論
 
 - **推奨データ源は公式WebのSMBCダイレクト**。普通預金のMVPは、公式Webが内部で使うフォームとJSONエンドポイントを読み取り専用で呼び出す方式が最短である。
 - **Oliveは別の銀行APIではない**。銀行口座側はSMBCダイレクトとWeb通帳を含むパッケージであり、Olive専用画面よりもSMBCダイレクトの口座一覧・明細を正本とする。
-- `pnsk-lab/mnie` の `provider-smbc-direct` は、普通預金1口座について、アプリ承認付きログイン、残高、期間指定の入出金明細、セッション再利用まで実装している。ブラウザを起動せず通常のHTTPリクエストで動くため、MVPの有力な土台になる。
+- `pnsk-lab/mnie` の `provider-smbc-direct` は、普通預金1口座について、アプリ承認付きログイン、残高、期間指定の入出金明細、セッション再利用まで実装している。Koganeはこの調査を参考に必要な読み取り処理を分離し、`mnie`をruntime dependencyにしないWorker PoCを実装済みである。
+- 2026-08-31の実口座追試では、WSLの通常`fetch`とCookie jarだけでSafety Pass承認後のログイン、1口座のJPY残高、2026-08-01から08-31までの明細14件と入出金合計、ログアウトまで成功した。ブラウザやTLS fingerprint偽装は不要だった。先行2回の失敗は承認完了前に`finished2fa`を呼んだタイミング問題で、Akamai、サービス時間、認証情報の拒否ではなかった。
+- 2026-09-01のWorker PoCではTAMIA経由で93/93か月の取得と、途中失効後のQR再承認による再開を確認済みである。通常のWorkers egressは同一条件で`ERRINFO`を返したため、ローカルの成功を通常Workers egressの成功へ一般化しない。
 - SMBCセーフティパス登録済みの契約では、登録端末での生体認証が**ログインの都度**必要になる。したがって現時点の自動化見込みは、**人がQR/アプリ承認した後の収集は自動化可能、期限切れ後の再ログインは有人**である。
-- Safety Passは銀行側の登録受理、契約者番号と登録端末の紐付け、解除・失効状態を含む。未改変の公式アプリによる有人承認を支援して正規sessionを受け取る構成を運用上は推奨する。一方、**独自clientでどこまで標準機構を再現でき、どこから端末/銀行登録に拘束されるかの難度評価は将来調査の対象**とする。credential/署名/attestationの偽造やsecurity-control bypassは実装しない。
+- Safety Passは銀行側の登録受理、契約者番号と登録端末の紐付け、解除・失効状態を含む。Android 12.8.0候補の静的解析では、契約IDをaliasとするEC秘密鍵を`AndroidKeyStore`内で生成し、毎回のサーバーchallengeを`BiometricPrompt.CryptoObject`で生体認証後に署名する実装を確認した。秘密鍵exportはなく、profile/app dataのコピーでは移植できない。
 - ログイン側の `direct.smbc.co.jp` と取引側の `direct3.smbc.co.jp` がAkamai edgeを使うことは確認できた。Bot Manager系の保護も有力だが、具体的なWAFポリシーと認証後エンドポイントでの判定条件は未確認である。
 - 個人口座向け公式APIは存在するが、契約済みの電子決済等代行業者向けであり、個人開発者が自己口座用トークンを直接発行する公開経路は確認できなかった。本プロジェクトではaggregatorを避けるため採用しない。
+- 補助経路として確認した既存Money Forward MEアカウントはSMBCの円・外貨をAPI連携済みであり、WSL上の`bw get item`から取得した既存Bitwarden passkeyを用いて、ブラウザなしのMoney Forward ID loginと認証済み`/me`取得に成功した。aggregator回避方針は維持するが、完全無人性を優先する場合の実動fallbackは成立する。
 
 総合評価は、**普通預金MVPの実装コスト 3/5、複数科目を含む堅牢な実装 4/5、完全無人ログインの見込み 1/5、有人承認後の自動収集 4/5**。
 
@@ -23,7 +28,7 @@
 - 非目標: Vpass、Oliveフレキシブルペイのカード明細、他行・証券連携、振込、振替、設定変更、電子決済等代行業者経由の集約
 - 安全境界: 読み取り専用。振込先、振込手数料計算など、収集に不要な転送関連画面にも遷移しない。公式split APK/公開JSの静的解析、未改変公式アプリを本人が操作する際のruntime metadata観測、独自client再現難度の評価は対象とするが、秘密抽出、credential/署名/attestation偽造、pinning/integrity回避は行わない
 
-この調査ではログイン、実口座へのアクセス、APKの取得・実行、認証済みリクエストを行っていない。秘密、口座番号、氏名その他の個人識別子は記録していない。
+2026-08-26の初回調査ではログインやAPK取得を行わなかった。2026-08-31の追試では、本人のSafety Pass承認を伴う読み取りログイン、残高、1か月分の明細、入出金合計、ログアウトまで実行し、第三者再配布APK候補をオフライン静的解析した。資格情報、Cookie、challenge、認証済みHTML、残高、明細内容、入出金合計値、口座番号、氏名その他の個人データは保存・コミットしていない。APKとJADX成果物は非公開アーカイブにだけ保存し、本リポジトリにはsanitize済みの結論だけを残す。
 
 ## 調査方法
 
@@ -98,28 +103,27 @@ SMBCダイレクトではOliveの対象普通預金が「残高別普通」「�
 
 以上から、Safety Passは単なるローカル生体認証画面ではなく、少なくとも**銀行側が受理する登録、契約者番号と登録端末の紐付け、解除・失効状態**を含む認証機構である。なお、解除・再登録は設定変更に当たるため、本調査および読み取り専用の実装検証では実行しない。
 
-### Safety Pass内部機構: 確認事実と推測
+### Safety Pass内部機構: 2026-08-31静的解析
 
 #### 確認できた事実
 
 - 利用規定は、生体情報の照合が端末内で行われ、生体情報自体は銀行に送信・保存されないと明記している。
 - 銀行側には、申し込みの受理、契約者番号と登録端末の対応、解除・失効を管理する状態がある。
 - PC/別端末ログインでは、登録端末に表示された情報を利用者が確認し、銀行所定の手続きと生体認証で承認する。
-- `mnie` の公開コードでは、Web側が生成した `userId`、`confirmationNumber`、`createdTime` を `smbcdirectapp:///biometrics/ADBA` deep linkへ渡し、公式アプリ承認後にWebの完了処理を行う。これは短寿命challengeとサーバー側session issuanceを伴う構成と整合するが、アプリ内部の署名方式までは示さない。
+- `mnie` の公開コードでは、Web側が生成した `userId`、`confirmationNumber`、`createdTime` を `smbcdirectapp:///biometrics/ADBA` deep linkへ渡し、公式アプリ承認後にWebの完了処理を行う。
 - 公式掲載は、root化履歴のある端末で正常動作しない場合があること、AndroidでUSBデバッグが有効だと起動しないことを明記している。
+- Android 12.8.0候補には`BioPreConfirmationREQ/RES`、`BioLoginREQ`、`BCATA01/02/03`があり、QR承認と生体ログインの現行フローを構成する。
+- `NewBioLoginApprovalFragment`はサーバーchallengeを受け取り、`BiometricUseCase.doSignature`を呼び、署名済みデータを結果APIへ渡す。
+- `BiometricUseCase`は契約IDをaliasとしてEC署名鍵を`AndroidKeyStore`に生成し、公開鍵だけをexportする。秘密鍵export処理はない。
+- 鍵はuser authentication必須で、Android 11以降の復元された呼び出しは`setUserAuthenticationParameters(0, BIOMETRIC_STRONG)`に対応する。署名用`Signature`は`BiometricPrompt.CryptoObject`へ渡され、生体認証成功後にchallengeへ署名する。
+- 生体登録変更や鍵失効時の削除・再登録経路もある。したがってapp data、ブラウザprofile、公開鍵だけを別端末/サーバーへコピーしても承認は再現できない。
+- アプリには別系統のTransmit Security pre/post loginとattestation payload、root検知も含まれる。エミュレータ案は生体UIだけでなくdevice-integrity層も扱う必要があり、Workers/Containersへ移す近道にはならない。
 
-#### 推測・未確認
+未確認なのは、鍵がTEE/StrongBoxでhardware-backedか、署名対象のcanonicalizationとalgorithm、server側の公開鍵登録payload、challengeの厳密な有効期限/一回性、Transmit attestationの適用条件である。これらは独自clientの完全無人化可否ではなく、拘束点の詳細を詰めるための事項である。
 
-- 登録端末の秘密鍵または同等のcredentialをAndroid Keystore、iOS Keychain/Secure Enclave等に保存し、対応する公開鍵またはcredential IDを銀行側登録に結び付けている可能性が高い。ただし鍵形式、alias、hardware-backed要件は未確認である。
-- QR/deep linkは短寿命のchallengeを指し、アプリが登録credentialに束縛されたresponseを返すchallenge-response方式である可能性が高い。ただしnonce、署名対象、アルゴリズム、リプレイ防止方式は未確認である。
-- root/USBデバッグ制限から端末integrityを検査していることは推定できるが、Google Play Integrity、Apple App Attest/DeviceCheck、独自attestationの利用は確認できていない。
-- 証明書ピンニングが実装されている可能性はあるが未確認である。通常のOS trust storeだけを使う構成も排除できない。
+### 初期設計と追加研究: 正規承認の支援と再現調査の境界
 
-銀行側に登録credential、端末状態、失効状態があることは確認できるが、そのcredentialがhardware-backed秘密鍵、端末installation secret、push enrollment、server-side device recordのどれであるかは未確認である。APKから画面遷移やschemaが分かっても、銀行側登録との対応が必要ならpayload模倣だけでは足りない可能性が高い。一方、正規登録フローが標準Android Keystore/BiometricPromptと公開challenge-responseだけで構成され、独自client用credentialを正規に登録できる余地があるかも未確認である。したがって現段階で「完全再現は不可能」とも「容易」とも断定せず、拘束点を実物から切り分ける。
-
-### Future work: 正規承認の支援と再現調査の境界
-
-推奨する将来実装はSafety Passそのもののclone/bypassではなく、**未改変の公式アプリと利用者本人の承認を使った正規のsession issuanceを支援するorchestrator**である。
+初期調査では、**未改変の公式アプリと利用者本人の承認を使った正規のsession issuanceを支援するorchestrator**を推奨した。QR提示・承認後の継続・暗号化session保存・失効後の再開はWorker PoCで実装済みであり、以下は当時の設計と追加研究の境界を記録する。
 
 1. 公式Webへ通常のログイン要求を開始する。
 2. 銀行が発行したQR/deep link、期限、対象ログインを利用者へそのまま表示する。
@@ -168,6 +172,8 @@ APK静的解析で分かるのは、宣言されたcomponent、文字列/host、
 
 公式サイトは「本来想定された利用形態と異なる極端な利用」でSMBCダイレクトを停止する場合があると明記している。常時keep-aliveは避け、低頻度の同期と自然失効後の有人再承認を前提にする。[公式SMBCダイレクト案内](https://www.smbc.co.jp/kojin/direct/)
 
+初期案では認証済みトップHTMLを除く最小session capsuleを想定したが、現行PoCの`export()`はCookieと継続に必要なトップページのHTML・URLを返し、AES-256-GCMで暗号化してDurable Objectへ保存する。ログイン暗証はsessionへ含めずWorker secretから読み、認証済みHTMLやCookieをログ・公開応答へ出さない。同一sessionの処理は直列化し、失効時はpartialを保存して新しいQR承認後に再開する。完了時は公式logoutと保存sessionの削除を行う。HTMLを最小フォーム状態へ縮小することは追加の設計課題であり、実装済みとは扱わない。常時keep-aliveは行わない。
+
 ## Akamai / anti-bot
 
 ### 確認できた事実
@@ -180,6 +186,9 @@ APK静的解析で分かるのは、宣言されたcomponent、文字列/host、
 - 公開ログインHTMLはShift_JISで、未認証の単発GETにJavaScriptチャレンジやCAPTCHAは表示されなかった。
 - 公開loginは `JSESSIONID` (`Secure; HttpOnly`)、`DIRECTUUID`、hidden `_TOKEN`/`_FORMID`/`_FRAMEID` を発行し、login pre-stepとして `/loginlogout/LLDLDILnextPreTS` を使う。cookie/tokenの値は保存していない。
 - login pageは [Caulis](https://static.fraud-alert.net/Caulis.smbc_v2.min.js) を読み込み、同assetは `p.fraud-alert.net`/`sb.fraud-alert.net`、local session ID、CORS/XHR送信を含む。また `ib.smbc.co.jp` から公開の [RSA](https://ib.smbc.co.jp/js/rsa.js)、[AES](https://ib.smbc.co.jp/js/aes.js)、[password-loader](https://ib.smbc.co.jp/js/pwcload.js) を動的loadする。Safety Pass以前にもsession、anti-bot/risk、credential protectionが別層で存在する。
+- 2026-08-31の実口座追試では、WSL/LinuxからNode系の通常`fetch`、Cookie jar、Linux Chrome型User-AgentだけでSafety Pass承認後のログインに成功した。認証済み口座数は1、JPY現在残高を取得し、2026-08-01から08-31までの期間指定明細14件と入金・出金の各合計を数値としてparseできた。最後に公式logoutも成功した。実際の金額、明細内容、口座識別子は記録していない。
+- 先行2回はQR承認後の完了処理に失敗したが、`finished2fa`相当の呼び出しが登録端末側の承認完了より早かったためだった。承認完了を待った再試行では同じHTTP clientが通ったため、この失敗をAkamai判定、通常サービス時間、認証情報拒否の証拠として扱わない。実装では固定sleepではなく、承認待ち状態を保った期限付きpollまたは明示的な利用者完了操作が必要である。
+- この一連の追試で、ブラウザ実行、Akamai sensor生成、TLS fingerprint偽装、住宅回線egressは使っていない。
 
 したがって、Akamai CDN/edgeの利用は確定である。AkamaiはBot ManagerがCookieとブラウザテレメトリを使って自動リクエストを識別する仕組みを提供している。[Akamai Bot Management docs](https://techdocs.akamai.com/security-ctr/docs/dimensions-new)
 
@@ -187,30 +196,17 @@ APK静的解析で分かるのは、宣言されたcomponent、文字列/host、
 
 - `_abck` と `bm_sz` の組合せから、Akamai Bot Managerまたは同系統の自動化判定が有効である可能性が高い。
 - ただし、ログインPOSTや認証後AJAXに対する具体的なWAF/Bot Managerアクション、レート制限、データセンターIPの評価は外部から確定できない。
-- `mnie` が通常の`fetch`とCookie jarだけで現行フローを実装しているため、少なくとも採取時点の本人操作を伴う低頻度フローでは、完全なブラウザ指紋生成が必須ではなかったと推定できる。実口座での再検証が必要である。
+- 通常Workers egressの失敗とTAMIA経由の成功は後述のPoCで確認済みである。Containers/OCIの別egress、長期継続時の判定、IP/セッション移動への反応は未確認である。
 
 ## APKと静的解析
 
-公式の公開入手経路はGoogle Playであり、銀行サイトから直接配布される単体APKは確認できなかった。[公式Playページ](https://play.google.com/store/apps/details?id=jp.co.smbc.direct) は package `jp.co.smbc.direct`、developer `SUMITOMO MITSUI BANKING CORPORATION`、更新日 2026-08-12 を表示したが、公開HTMLから現行 `versionName`/`versionCode` は確定できなかった。review投稿者のversionは配布最新版の証拠にしない。
+公式の公開入手経路はGoogle Playであり、銀行サイトから直接配布される単体APKは確認できなかった。[公式Playページ](https://play.google.com/store/apps/details?id=jp.co.smbc.direct) は package `jp.co.smbc.direct`、developer `SUMITOMO MITSUI BANKING CORPORATION`、更新日 2026-08-12 を表示した。
 
-このworkspaceにAPK/APKS/AABはなく、接続済みADB環境もなかった。`direct.smbc.co.jp`/`www.smbc.co.jp` の `/.well-known/assetlinks.json` はJSONを返さず、公式domainからsigning fingerprintも得られなかった。よってpackage以外のversion、split構成、signer、manifestは未確認である。第三者ミラーは初期経路にせず、次の正規取得を行う。
+2026-08-31に第三者APKPure再配布の12.8.0 (`versionCode 593`)候補を取得し、実行せず静的解析した。base、ARM64、MDPI splitは同一SMBC signerでv2/v3署名を検証できた。Google source-stamp metadataは存在したがローカル`apksig`ではverifiedにならず、現行Google Play配布物とのbyte identityは未確認である。この来歴の限界を維持し、実行用の公式物とは扱わない。
 
-1. 利用者所有の通常Android端末でGoogle Playから公式appをinstall/updateする。
-2. Git外の隔離一時領域で `adb shell pm path jp.co.smbc.direct` によりbaseと全split pathを列挙し、各pathを `adb pull` する。
-3. `adb shell dumpsys package jp.co.smbc.direct` の `versionName`/`versionCode`、全split SHA-256だけを記録する。
-4. `apksigner verify --print-certs base.apk` でsigner certificateを採取し、同じ端末のPlay再install前後で一致を確認する。第三者配布物を実行して比較しない。
+JADX 1.5.6は28,925 classを処理し514 error、34,920 source fileを生成した。Safety PassのDTO、QR承認fragment、Keystore/BiometricPrompt署名use case、Transmit Security pre/post login、attestation payload、root検知は読めた。apktool 2.7.0-dirtyはtarget SDK 36のresource table decodeを大量に誤り中止したため、partial treeを成果物にしていない。
 
-公式掲載は、root化履歴のある端末で正常動作しない場合があること、USBデバッグが有効だと起動しないことを明記している。よって動的解析は実機/エミュレータ検知、証明書ピンニング、難読化の影響を受ける可能性がある。
-
-静的解析はWeb経路の不足有無にかかわらず、Safety Pass再現難度の評価に必要である。
-
-1. `apkanalyzer manifest print`/`apktool d` でmanifest、`smbcdirectapp` deep link、exported component、permission、`networkSecurityConfig`を確認する。
-2. `jadx --deobf` にbaseと全splitを同時入力し、`/biometrics/ADBA`、`userId`、`confirmationNumber`、`createdTime`のsource/sink、poll/session handoff、host/route/schemaを追う。
-3. `AndroidKeyStore`, `KeyGenParameterSpec`, `BiometricPrompt`, `Signature`, `Cipher`, key attestation/StrongBox、Play Integrity/SafetyNet/Firebase App Check等のcall-siteを確認する。
-4. OkHttp `CertificatePinner`、Cronet、WebView、custom TrustManager、native library/stringsを棚卸しし、pinning候補と通常OS trustを分ける。
-5. 難読化・reflection・JNIで追えない箇所は「不在」ではなく不足とし、本人操作runtime metadataでhost/順序だけを照合する。
-
-本人操作runtimeでは、未改変公式appと正常端末で既存Safety Pass loginだけを行い、deep link遷移、時刻、期限、UI state、DNS/SNI、method、host、値を除いたpath template、status/content-type、session切替時点を記録する。headers/body/cookie/token/口座値は保存しない。通常のOS/network toolingでTLS内容を見られなければ、それ自体をpinning/非debuggable等の観測障壁として記録し、CA追加、hook、root、Frida、TrustManager改変、attestation偽造へ進まない。
+候補XAPK、split hash、signer、再構成/再解析手順、JADX出力はprivate `risu729/android-app-decompiled`の`android/smbc/12.8.0/`に保存した。資格情報、認証済み通信、account dataは含まない。次のprovenance強化は、所有端末のPlay配布splitを`adb pull`し、version、hash、signerを候補と照合することである。
 
 ## 3rd party client
 
@@ -285,6 +281,88 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 
 2026-03-31時点の契約先にはMoneytree、Money Forward、freee、Zaim等が含まれる。[公式契約先一覧](https://www.smbc.co.jp/collaboration/keiyakunaiyou.html) これは技術的には最も安定する経路だが、本プロジェクトの「aggregatorをできるだけ回避し、公式サイト/公式アプリを直接データ源とする」方針と合わない。個人開発者向けの公開セルフサービスAPIは確認できなかったため、現フェーズでは候補から外す。
 
+## Money Forward ME API連携の実口座検証（2026-08-31）
+
+### 位置付け
+
+本プロジェクトは公式サイト・公式アプリからの直接取得を優先するが、SMBCセーフティパスにより再ログインが有人になる間の比較対象・補助経路として、契約済み電子決済等代行業者であるMoney Forward MEを本人の既存無料アカウントで確認した。Money Forward公式サポートは、三井住友銀行をスクレイピングではなく**API連携方式**の例として明記している。
+
+Kuebikoの専用Chrome profileで本人がログインした状態を読み取り専用で観測し、次を確認した。口座番号、残高、明細、氏名、メールアドレス、Cookie、CSRF token、WebAuthn challenge/credential値は保存・コミットしていない。
+
+- 三井住友銀行連携は正常状態で、円の「残高別普通」と「外貨」の2科目が同じ銀行連携の配下に表示された。従って、少なくとも現在残高とMoney Forwardへ取り込まれた入出金は円・外貨の両方を単一連携から参照できる。
+- 同じ無料アカウントには三井住友銀行とは別に「三井住友カード (VpassID)」も登録されている。Oliveデビットの銀行引落しは銀行側の入出金として現れ得るが、加盟店名・売上確定状態等のカード粒度がVpass連携から得られるかは今回未検証であり、銀行API連携だけでOliveデビット明細を満たすとは扱わない。
+- 無料会員の連携可能数は4件で、この既存アカウントは表示対象4件を使用中だった。KoganeがMoney Forwardを補助経路にする場合、追加サービスのために既存連携を削除する設計は採らない。
+- 無料会員の画面上の閲覧可能期間は過去1年。Money Forwardは連携時に金融機関/APIで照会可能な期間を取得し、1年より古い取得済みデータも可能な限り保持する方針だが、無料会員のままでは表示できない。Kogane側の定期raw保存を早期に始める価値はある。
+- 無料会員では一括更新と更新頻度アップが提供されない。個別の更新ボタンは表示されたが、本検証では更新要求を実行していない。日次収集の正本として使う前に、Money Forward側の自動更新実測と、Kogane取得時点の最終取得日時をmanifestへ保存する必要がある。
+
+### Kogane PoCの確定結果
+
+2026-08-31に、ローカルWSLとCloudflare Workersの双方から、ブラウザを使わずMoney Forward MEの読み取り専用収集を完走した。認証には既存Bitwarden vault内のpasskeyだけを用い、Money Forward IDのmaster password、Bitwarden master password、`BW_SESSION`、ブラウザCookieはruntimeへ保存していない。
+
+- BitwardenにはRP IDが`id.moneyforward.com`の既存passkeyが2候補あった。両候補ともWebAuthn assertionの署名検証とMoney Forward ID session発行には成功するため、署名成功だけでは対象のME家計を特定できない。
+- Money Forward MEへのOAuth遷移後、account selectorの`active`な候補を選び、`/accounts`と口座詳細へ到達できるかを照合すると、実際のME家計に対応する1候補だけを識別できた。item名や候補順では選ばず、このend-to-end到達確認を選択条件とする。
+- 正しい既存passkeyでは、ローカル収集とWorkers収集の双方で、4口座の詳細、4口座それぞれ直近12か月分の48月次断片、manifestを含む合計53 artifactsを取得し、failureは0件だった。
+- Workersでは毎実行時に新しいMoney Forward ID/ME sessionを作り、取得したraw HTMLを非公開R2へ保存する。公開応答には件数とmanifest keyだけを返す。R2上のmanifestについて、全53 artifactsのbyte countとSHA-256、およびsample objectの再取得hash一致を検証した。
+- 検証途中に追加した一時的なKogane専用passkeyは、既存Bitwarden passkeyで再ログインしてMoney Forward IDから削除した。Windows/WSLに置いた一時private keyも削除済みであり、現在のPoCとWorker Secretは既存Bitwarden passkey由来である。
+
+この実証は、Money Forward MEが公式の個人向けexport APIを提供していることを意味しない。KoganeはMoney Forwardの非公開Web interfaceをread-onlyで観測するPoCであり、routeやHTML変更、利用条件、連携元の更新遅延に影響されるfallbackとして扱う。
+
+### Money Forward経由で欠落・弱化するデータ
+
+実画面と収集artifactから確認できたのは、Money Forwardへ正規化された口座残高、一般的な入出金行、Vpass側の請求・利用行である。次は公式SMBC/Vpassのraw明細と同等には取得できない、または完全性を保証できない。
+
+| 対象 | 欠落または保証できないデータ |
+| --- | --- |
+| SMBC円預金 | 取引後残高、銀行側transaction/reference ID、value date、振込相手の構造化情報、公式CSVまたは銀行APIのraw bytes |
+| SMBC外貨 | 原通貨建て金額、通貨、適用レート、取引後外貨残高を一組として保持した公式粒度 |
+| SMBC定期等 | 預入ロット、満期日など商品固有の詳細。今回の4口座取得成功は、Money Forwardが全科目・全履歴を完全取得する保証ではない |
+| Vpass | 利用中・売上確定・請求確定の状態、一括/分割/リボと回数、請求月、支払日、請求書単位のgrouping、取消/返金と原取引のlink |
+| Vpass海外利用 | 原通貨額、原通貨、換算レート、authorization/sales ID、加盟店国・業種 |
+| Vpass付帯情報 | ポイント情報、および公式明細が持つ可能性のあるsource固有field |
+| Oliveデビット | 銀行連携側では引落し金額を見られても加盟店粒度は得られない。Vpass連携側で一般的な内容・金額が表示されても、全件性、確定状態、公式詳細との一致は保証できない |
+| 共通 | 連携元で未更新・保留中の最新データ、初回backfillの完全性、各明細が連携元から取得された正確な時刻 |
+
+無料会員には4連携、画面上1年、一括更新なし・更新頻度アップなしという追加制約がある。従ってMoney Forward経路は、公式sourceの代替正本ではなく、Safety Passの有人承認なしで高頻度にsnapshotを蓄積する補助経路に限定する。
+
+公式根拠:
+
+- [金融関連サービス口座の登録方法](https://support.me.moneyforward.com/hc/ja/articles/13480029279897-%E9%87%91%E8%9E%8D%E9%96%A2%E9%80%A3%E3%82%B5%E3%83%BC%E3%83%93%E3%82%B9%E5%8F%A3%E5%BA%A7%E3%81%AE%E7%99%BB%E9%8C%B2%E6%96%B9%E6%B3%95): 三井住友銀行をAPI連携方式の例として掲載
+- [コース別対応機能一覧](https://support.me.moneyforward.com/hc/ja/articles/900004382283-%E3%83%97%E3%83%AC%E3%83%9F%E3%82%A2%E3%83%A0%E3%82%B5%E3%83%BC%E3%83%93%E3%82%B9-%E3%82%B3%E3%83%BC%E3%82%B9%E5%88%A5%E5%AF%BE%E5%BF%9C%E6%A9%9F%E8%83%BD%E4%B8%80%E8%A6%A7): 無料会員は過去1年、4連携まで。プレミアムは期間・連携数とも無制限
+- [データの閲覧可能期間](https://support.me.moneyforward.com/hc/ja/articles/900004413423-%E3%83%87%E3%83%BC%E3%82%BF%E3%81%AE%E9%96%B2%E8%A6%A7%E5%8F%AF%E8%83%BD%E6%9C%9F%E9%96%93%E3%81%AB%E3%81%A4%E3%81%84%E3%81%A6%E6%95%99%E3%81%88%E3%81%A6%E3%81%8F%E3%81%A0%E3%81%95%E3%81%84): 初回に連携先で照会可能な期間を取得し、古い取得済みデータも保持
+
+### Money Forward ID認証とBitwardenパスキー再現
+
+Kuebiko capture、WSL上のBitwarden CLI 2026.8.0、Bitwarden公式client sourceを突き合わせ、次を確認した。`bw get item`はlogin itemの`fido2Credentials`を復号して返し、今回の既存credentialには`credentialId`、PKCS#8形式のP-256 private key、RP ID、user handle、counter等が含まれていた。値そのもの、vault session、master password、Cookie、challenge、assertionは保存・コミットしていない。
+
+- WebAuthn RP ID/登録先は双方とも`id.moneyforward.com`で、domain不一致ではない。
+- Bitwardenでパスキーを削除・再作成すると、Money Forwardが`POST /webauthn/assertion/options`で返すemail指定ログイン用`allowCredentials`のcredential IDも新しい値へ変わった。したがってMoney Forward側の再登録は反映されている。
+- assertion optionsは`userVerification: required`、timeout 120秒。パスキーボタンからのdiscoverable loginでは`allowCredentials`が空、メールアドレス入力後は1件に限定された。
+- 再作成後もBitwarden/ChromeはMoney ForwardへWebAuthn assertionを送らなかった。一方、同じKuebiko profileのBitwarden passkeyは別RPで成功しているため、WebAuthn全体の無効化ではなくMoney Forward credentialの提示/選択境界に残る問題である。
+- Google OIDC accountは連携済みで、`POST /auth/google`、Google consent/account chooser、`GET /auth/google/callback`、Money Forward MEの`/auth/mfid` callbackでログインできた。これは有人fallbackとして有効だが、Google sessionをWorkersへ複製する設計は採らない。
+- Chrome 153の直接CDPでは一時的なCTAP2.1 virtual authenticatorの追加、credential一覧取得（初期0件）、削除まで成功した。ただしKogane専用credentialを新規登録する必要はなく、既存Bitwarden credentialを直接利用できた。
+
+#### ブラウザなしログインの実証
+
+2026-08-31に、WSL/LinuxのPython HTTP clientと既存Bitwarden passkeyだけで、Chrome、Bitwarden extension、Google OAuthを使わない新規session loginに成功した。
+
+1. `GET /sign_in`でanonymous session CookieとCSRF tokenを取得する。
+2. `POST /webauthn/assertion/options`へ`{"userIdentifier":{},"authenticationContext":"sign_in"}`を送り、discoverable login用challengeを取得する。実測ではchallengeはbase64url 43文字、`userVerification: required`、timeout 120秒、`allowCredentials: []`だった。RP ID省略時はorigin hostの`id.moneyforward.com`を使う。
+3. `clientDataJSON`を`type: webauthn.get`、取得challenge、origin `https://id.moneyforward.com`、`crossOrigin: false`で生成する。
+4. authenticator dataは`SHA-256(rpId)`、UP/UV/BE/BS flag、credential counterから生成し、`authenticatorData || SHA-256(clientDataJSON)`を保存済みP-256 private keyでECDSA/SHA-256署名する。署名はASN.1 DER形式へ変換する。
+5. `POST /webauthn/assertion`へ`authenticatorResponse`、`authenticationContext: sign_in`、空の`returnUrl`を送る。
+6. 成功時に返るsession Cookieを同じjarで保持する。
+
+最初はBitwarden保存値の36文字`credentialId`をそのままWebAuthn JSONの`id`/`rawId`へ入れ、HTTP 401と`notFoundWebauthnCredentialId`になった。Bitwardenはcredential作成時にUUIDを保存し、assertion時に16-byte raw UUIDへ変換してbase64url化する。公式の[`parseCredentialId`](https://github.com/bitwarden/clients/blob/main/libs/common/src/platform/services/fido2/credential-id-utils.ts)と[`generateAuthData`/`generateSignature`](https://github.com/bitwarden/clients/blob/main/libs/common/src/platform/services/fido2/fido2-authenticator.service.ts)に合わせると、`POST /webauthn/assertion`はHTTP 200と`redirectPath`を返した。さらに同じCookie jarの`GET /me`はHTTP 200になり、対照の未認証jarではHTTP 302で`/sign_in`へ戻ったため、session issuanceまで成立したと判断できる。
+
+この結果から、Money Forward ID認証についてはブラウザprofile、extension UI、Chrome fingerprintの保存は不要である。必要なのはcredential materialと通常のCookie/CSRF jarだけであり、master passwordをserverless runtimeへ置く必要もない。productionでは次の境界にする。
+
+- ローカルWSLでvault unlock済みの`bw get item`を実行し、対象credentialの`credentialId`、`keyValue`、`userHandle`、counter、RP IDだけをKogane用secretへ同期する。vault全体の`data.json`、`BW_SESSION`、master passwordは送らない。
+- WorkersではPKCS#8 P-256 keyをWeb Cryptoへimportして署名し、Web Cryptoが返すP1363 signatureをASN.1 DERへ変換する。UUID credential IDのraw 16-byte変換もBitwarden互換にする。
+- Cookie jarは実行ごとに新規作成できるため、Bitwarden sessionとMoney Forward sessionを永続化しない。日次収集の前に毎回passkey loginし、失敗時だけcredential再同期を要求する。
+- secret rotationは、利用者がBitwarden側でpasskeyを再作成した直後にローカル同期CLIを明示実行する。challenge、assertion、Money Forward Cookie、取得金融データはsecret同期経路へ混ぜない。
+
+Workers Web Cryptoによるassertion生成、Money Forward ME側へのOAuth遷移、SMBC/Vpassを含む4口座詳細と直近12か月の月次走査は、上記PoCで実証済みである。残る検証は、無料会員でのMoney Forward側の実更新頻度、取得済み1年分のbackfill境界、長期運用時のroute/HTML変更検知である。
+
 ## 実行環境の適性
 
 | 環境 | 適性 | 理由 |
@@ -301,16 +379,24 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 
 | 案 | 実装コスト | 自動化レベル | データ範囲 | 判断 |
 | --- | ---: | --- | --- | --- |
-| `mnie`を安全化して普通預金を取得 | 3/5 | 初回/再ログインは有人、認証後は自動 | 普通預金残高・期間明細 | **採用候補** |
-| Safety Pass正規承認orchestrator | 3/5 | QR提示・完了pollは自動、生体承認は常に有人 | 認証済みWeb session | **推奨**。公式アプリを変更しない |
+| `mnie`調査を参考に読み取り処理を分離 | 3/5 | 初回/再ログインは有人、認証後は自動 | 普通預金残高・期間明細 | **Worker PoC実装済み**。`mnie` runtime dependencyなし |
+| Safety Pass正規承認orchestrator | 3/5 | QR提示後の生体承認と完了操作は有人 | 認証済みWeb session | **Worker PoC実装済み**。公式アプリを変更しない |
 | Webブラウザで公式CSVを取得 | 3/5 | アプリ承認は有人、その後は自動 | Web通帳普通・外貨等、画面が対応する科目 | 検算・fallbackとして有用 |
 | Web内部プロトコルを複数口座・外貨・定期へ拡張 | 4/5 | 認証後は自動 | 口座一覧、複数科目、預入ロット | 普通預金MVP後に実施 |
 | 公式アプリをUI自動化 | 5/5 | 生体認証で有人、端末保守も必要 | アプリ表示全般 | 非推奨 |
-| 公式split APK/static + read-only runtime調査 | 3–4/5 | 調査のみ | app host/schema、Safety Pass拘束点 | Web調査と並行する。pinning/integrity/attestation回避はしない |
-| Safety Pass独自client再現難度評価 | 5/5以上 | 未評価 | 認証機構 | **将来調査対象**。標準機構/端末拘束を分類し、credential/署名/attestation偽造は実装しない |
+| Safety Passを公式手順で解除 | 1/5 | 資格情報ログインが継続する間は完全無人 | Webで読める範囲 | 唯一の直接的な完全無人案だが、明示的なsecurity downgradeと設定変更。既定では不採用 |
+| Safety Pass登録端末/profileをコピー | 5/5以上 | 不成立 | 認証機構 | Keystore秘密鍵がnon-exportableかつ毎回生体認証。**不採用** |
+| 専用Android emulator | 5/5以上 | 生体/attestationで無人化できない | アプリ表示全般 | Keystore、BiometricPrompt、Transmit attestation、root検知があり、serverless経路にならない |
 | 契約済みaggregator API | Kogane側1/5 | 高い | 広い | 方針により不採用 |
+| Money Forward既存passkey + SMBC API連携 | 2/5 | 完全無人loginを実証 | Money Forwardへ取得済みの円・外貨残高・明細 | 正本にはしないが、Safety Passなしの実動fallback |
+| 個人向け公式外部連携token | Kogane側1/5 | 高い | 残高・明細等 | 仕組みは理想的だが、production接続は契約済み電子決済等代行業者に限定。self-service tokenなし |
+| [LINE残高照会](https://www.smbc.co.jp/sns/line/service.html) | 2/5 | 初回連携後は一定期間無人 | 主口座、直近1週間・最大100件という公開仕様 | 現行提供をlive確認してから補助候補。完全ledger/backfillには不足 |
+| [店番号・口座・キャッシュカード暗証の残高照会](https://direct3.smbc.co.jp/aib/aibgsjsw1k12.jsp) | 1/5 | 高い | 現在残高のみ | 一部利用者は制限、明細なし。暗証保存を増やすため不採用 |
+| [メール/push通知](https://www.smbc.co.jp/kojin/direct/service/resources/pdf/goriyou_tebiki.pdf?version=260601)の取込 | 2/5 | 高い | 振込入金や引落予定など一部event | Global Service/SMBC Debit等の除外があり補助sourceに限定 |
 
-## 推奨方針
+## 初期調査時の推奨方針と実装後の確認項目
+
+以下は2026-08-31までの設計方針である。読み取りクライアント、QR承認、暗号化session、月次raw保存、失効後resumeは実装済み。CSVとの独立照合、長期運用、複数科目への拡張は引き続き確認対象である。
 
 1. `mnie`の普通預金フローを参考に、Kogane用の**読み取り専用**SMBCダイレクトクライアントを分離する。
 2. ログイン資格情報をSecret Managerから都度読む。セッションartifactにはログイン暗証を含めない。
@@ -320,18 +406,20 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 6. サーバー側セッションを低頻度で再利用するが、常時keep-aliveはしない。失効時は再承認する。
 7. 普通預金が安定してから、トップページの口座一覧解析、複数口座、外貨、定期預入明細を別PRで追加する。
 
-## 次の検証手順
+完全無人を必須にする場合の選択肢は、ユーザーが明示的にSafety Passを解除するか、方針を変更して契約済みaggregatorを利用するかの実質2つである。前者は設定変更とsecurity downgrade、後者は第三者依存であるため、現方針では**有人承認を稀なinteractionとして扱い、その間の同期をsession再利用で自動化する**。
 
-実装PRでは次を、読み取り専用かつ実口座情報をコミット・ログへ残さず検証する。
+## 初期検証計画の履歴
 
-1. ユーザー操作でSMBCダイレクトWebへログインし、SMBCセーフティパスのQR承認手順と承認待ち時間を確認する。
+以下は2026-08-31時点の検証計画であり、未着手一覧ではない。項目1・3のクライアント分離と取得は、その後の93か月backfillで検証済み。現在の再実行手順はPoC READMEを参照し、期間をclientから指定せず最古日から実行当日まで取得する。
+
+1. 確認済みの1か月明細取得をKogane用isolated clientで再実行し、Safety Pass承認完了を待つ状態機械と、14件・入出金合計のparser結果が安定することをfixtureでも検証する。
 2. Web通帳のCSVを1か月分だけ手動取得し、列、文字コード、明細ID相当の有無、摘要、残高粒度を確認する。
-3. forkした`mnie`で、普通預金残高と同じ1か月の明細だけを取得する。振込関連メソッドはコードから無効化してから実行する。
+3. Kogane用isolated clientへ、確認済みのlogin、Safety Pass poll、残高、明細だけを移植する。`mnie` packageを依存または再利用せず、振込関連routeを含めない。
 4. JSONと公式CSVの件数、入金合計、出金合計、期末残高を照合する。
 5. keep-aliveなしで、15分、1時間、翌日の順にexport/importの有効性を測る。失効を検知したら再ログイン要求へ落とす。
 6. 同一セッションをローカルとOCIのそれぞれで新規作成し、AkamaiによるHTTP 403/429、チャレンジ、Cookie追加、IP変更時の失効を記録する。セッションを環境間で移動して検証しない。
 7. 口座一覧に普通預金以外がある場合は、科目名とmasked identifierだけを記録し、次の専用PRで外貨・定期のread endpointを調査する。
-8. Web検証と並行して、所有端末のPlay配布splitを正規取得し、version/signer/splits/manifest/deep link/host/schema/Keystore/BiometricPrompt/integrity/pinning候補を静的解析する。
+8. 所有端末のPlay配布splitを正規取得し、12.8.0候補のversion/hash/signerと照合する。第三者候補の静的解析自体は完了済み。
 9. 本人が未改変公式appで既存Safety Pass loginを行う間だけ、read-only runtime metadataを観測し、challenge発行、app承認、Web poll、session rotationの順序を値なしで記録する。write endpoint、登録/解除、取引承認へ遷移しない。
 10. static/runtimeの結果から「標準Android APIで再現可能」「銀行側登録またはnon-exportable keyに拘束」「server attestationで拘束」「不明」をcomponent単位で判定し、次に必要な正規実験を列挙する。回避実験へは進まない。
 
@@ -339,11 +427,19 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 
 - 現行セッションの無操作・絶対時間上限と、48か月地点の失効が時間・request数・別条件のどれに依存するか
 - TAMIA経由での日次増分取得を長期運用した場合の429、追加認証、session寿命
+- 複数口座・異なる科目で、既定科目コード `2206` への固定を外したときのrouteと識別方法。普通預金1口座の取得は確認済み
 - 実際の複数サービス利用口座一覧を返す内部endpointと、安定した口座識別子
 - 定期・積立の預入ロット項目と履歴保存期間
 - 外貨CSV/内部JSONの通貨、小数桁、適用レート、取引後残高の正確なschema
 - Web通帳の貯蓄預金について、現行FAQと旧ヘルプで異なる履歴期間の実挙動
-- 公式Play配布物の現行version/signer/分割APK構成、manifest、難読化、証明書ピンニング、アプリ用anti-bot SDK
-- Safety Passの登録credentialが端末secure storageにどう保存され、銀行側登録と何で対応付けられるか
-- challenge-responseの署名方式、有効期限、一回性、リプレイ防止、鍵rotation
-- Google Play Integrity、Apple App Attest/DeviceCheck、独自attestationの採否
+- 公式Play配布物と12.8.0第三者候補のbyte/hash identity
+- Safety Pass EC鍵がTEE/StrongBoxでhardware-backedか、銀行側の公開鍵登録payload
+- challenge-responseの署名algorithm/canonicalization、有効期限、一回性、リプレイ防止、鍵rotation
+- Transmit Security attestationの適用条件と、Google Play Integrity等の追加層の有無
+
+## 一時検証artifactのcleanup記録（2026-08-31時点）
+
+以下は初期ローカル追試の終了時点の記録であり、現行WorkerのR2・暗号化session・Secretが存在しないという意味ではない。現在の削除対象は再確認が必要で、稼働中のWorkerや共有TAMIA資源を一括cleanup対象にしない。
+
+- 一時cloneと認証済みsessionは検証プロセス終了に伴い消滅しており、再利用できるCookieや資格情報は残していない。
+- 期限切れのSafety Pass QRを描画したSVGだけが一時artifactとして残存している。QR内のchallengeは失効済みだが、検証用Cloudflare Worker/R2等のcleanupと同じ一覧で削除対象として追跡する。

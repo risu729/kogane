@@ -22,7 +22,7 @@ business integration rather than an API included with the consumer app.
 | freee Accounting | Supported; up to 15 months for SMCC cards | Yes: OAuth 2.0 JSON `wallet_txns` | Starter: JPY 1,780/month or JPY 11,760/year, tax excluded | Best first PoC |
 | Moneytree | Supported with Vpass ID/password; Moneytree reads the SMCC website | Yes only through commercial Moneytree LINK; consumer plans only have interactive CSV/XLSX export | Personal free; Grow JPY 390/month or JPY 3,900/year on web; Work JPY 500/month or JPY 5,400/year | Good API, high commercial barrier |
 | Zaim | Supported as `三井住友カード`; documented as website aggregation rather than a card-company API | Public API is promising but public material does not conclusively say whether aggregated Vpass rows are returned; Premium CSV explicitly includes them | Free sync; Premium JPY 440/month or JPY 4,378/year on web | Cheap decisive PoC |
-| Money Forward ME | Supports `三井住友カード (VpassID)` and `三井住友カード (SMBC ID)` | No documented ME consumer API; Premium has interactive CSV export | Free up to four connections; Standard JPY 540/month or JPY 5,940/year on web | CSV fallback only |
+| Money Forward ME | Supports `三井住友カード (VpassID)` and `三井住友カード (SMBC ID)` | No documented ME consumer API; Premium has interactive CSV export. A read-only Kogane PoC nevertheless verified its private web interface on Workers | Free up to four connections; Standard JPY 540/month or JPY 5,940/year on web | Official route is CSV; private-interface PoC is a working but change-prone fallback |
 
 The prices above are the vendors' direct-web prices where available. App-store
 prices can be higher.
@@ -236,13 +236,46 @@ More importantly, the current ME terms prohibit use through unpublished
 methods and reverse engineering. There is no public evidence that ME itself
 uses Akamai, so its bot-control difficulty is unknown rather than confirmed.
 
+### Read-only Kogane PoC observed on 2026-08-31
+
+Separate from the documented official route, an authorized live-account PoC
+completed a fresh browserless login and collection from both local WSL and a
+Cloudflare Worker. The Bitwarden vault contained two existing passkeys for the
+Money Forward ID relying party. Both produced accepted WebAuthn assertions,
+but only one reached the intended ME household after the OAuth account
+selector. The collector therefore identifies a credential by successful
+end-to-end arrival at `/accounts` and account detail pages, never by vault item
+name or candidate order.
+
+With that existing Bitwarden passkey, each environment collected four account
+detail pages and 48 monthly fragments (12 months for each account), producing
+53 artifacts including the manifest with zero failures. The Worker stored raw
+responses only in private R2 and exposed counts and the manifest key. Artifact
+sizes and hashes, including a re-downloaded sample, were verified. A temporary
+dedicated test passkey was removed from Money Forward ID afterward, its local
+private-key copies were deleted, and the deployed proof now uses only the
+existing Bitwarden credential material synced as a Worker secret.
+
+The PoC does not turn the private interface into an official or complete data
+API. In particular, it does not guarantee SMBC post-transaction balances,
+bank transaction IDs, value dates, structured transfer counterparties,
+official CSV/API bytes, full foreign-currency fields, or term-deposit lots. For
+Vpass it does not guarantee lifecycle state, installment/revolving details,
+billing grouping and payment date, refund linkage, original foreign amount and
+rate, authorization IDs, merchant country/category, or points. The bank-side
+Olive debit row lacks merchant detail; a generic Vpass row still does not prove
+all-record completeness or official-detail parity. Source refresh lag,
+pending rows, backfill completeness, and per-row source fetch time also remain
+unknown.
+
 ### Minimum PoC
 
-1. Link the Vpass/SMBC card and confirm a known row in ME.
+1. Retain the Worker PoC only as a read-only fallback and monitor login, OAuth
+   selection, account-detail, and monthly-fragment counts for structural drift.
 2. During a Premium trial, export the card's monthly CSV and verify its fields
    and pending/posted behavior against Vpass.
-3. Stop there for the official route. Do not begin a private-API collector
-   unless Money Forward provides written partner access and documentation.
+3. Compare both routes with official SMBC/Vpass statements before treating any
+   field as complete; the documented official integration path remains CSV.
 
 Sources: [current supported-service list](https://moneyforward.com/active_services),
 [CSV export capabilities](https://support.me.moneyforward.com/hc/ja/articles/49505374073497-%E5%AE%B6%E8%A8%88%E7%B0%BF%E3%83%87%E3%83%BC%E3%82%BF%E3%81%AF%E3%83%80%E3%82%A6%E3%83%B3%E3%83%AD%E3%83%BC%E3%83%89%E3%81%A7%E3%81%8D%E3%81%BE%E3%81%99%E3%81%8B),
