@@ -227,3 +227,39 @@ proxy-error envelopes using a maximum 2 KiB, one-second read; response text is
 discarded. Unknown or unreadable responses stay unclassified. A 500 alone does
 not prove that the Node process crashed; source completion and central import
 remain separate outcomes. These diagnostic changes do not retry collection.
+
+### Verify the Container rollout before a manual smoke run
+
+A completed Worker deployment does not mean the Container image rollout has
+finished. A newly assigned Durable Object can receive an older prewarmed image
+while that rollout is replacing instances. The platform can then stop that image
+during an authenticated read, producing an SDK HTTP 500 even when the bank login
+succeeded. Do not attribute an unclassified Container HTTP 500 to the bank.
+
+Before manually triggering a smoke run, wait until the latest Container rollout
+is `completed`, its target version/image matches the application's current
+version/image, and any available prewarmed instances match that image. Do not
+deploy another Container revision while the smoke run is in progress. After the
+run, verify the actual assigned instance image as well; a successful run on an
+older image does not validate the newly deployed code.
+
+These read-only Cloudflare API endpoints expose the required metadata. Paths are
+relative to `https://api.cloudflare.com/client/v4`; use the existing authenticated
+operator session and substitute the relevant IDs:
+
+| GET endpoint | Verification |
+| --- | --- |
+| `/accounts/<ACCOUNT_ID>/containers/applications/<APP_ID>` | Current application `version` and `configuration.image`. |
+| `/accounts/<ACCOUNT_ID>/containers/applications/<APP_ID>/rollouts` | Latest rollout by `created_at`: `status`, `target_version`, and `target_configuration.image`. |
+| `/accounts/<ACCOUNT_ID>/containers/dash/applications/<APP_ID>/instances` | Available instances and assigned `durable_objects`; resolve the run's `run-<RUN_ID>` name to its Durable Object ID. |
+| `/accounts/<ACCOUNT_ID>/containers/dash/applications/<APP_ID>/instances/<DURABLE_OBJECT_ID>` | Actual `instance.app_version`, `instance.image`, and historical `placements[].events` / `placements[].status`. This endpoint also retains stopped-instance details omitted from the active instance list. |
+
+For a stopped instance, inspect the `VMStopped` event's `statusChange` fields,
+especially `runtime_reason` and `container_exit_code`, and compare its timestamp
+with the collection failure and teardown logs. A recorded `runtime_reason=rollout`
+identifies replacement by a deployment; a missing exit code is unknown, not zero.
+Memory usage near the instance limit alone does not establish an OOM failure.
+
+Keep inspection output to version/image, event name/time, health, runtime reason,
+and exit code. Instance responses can also contain environment variables and
+secret configuration: never dump the full response into logs, tickets or fixtures.
