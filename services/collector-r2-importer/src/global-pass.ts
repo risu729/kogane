@@ -8,7 +8,7 @@ const PRODUCER = "collector-r2-importer";
 const V1 = "globalpass-browser-poc-v1" as const;
 const V2 = "globalpass-browser-poc-v2" as const;
 const CENTRAL_CLIENT_ID = "collector-r2-global-pass";
-const INGEST_CONTRACT_VERSION = "global-pass-r2-v1";
+const INGEST_CONTRACT_VERSION = "global-pass-r2-v2";
 const STORAGE_CONTAINER = "kogane-globalpass-collector-poc";
 const STORAGE_TEMPLATE = "raw/prestia-globalpass/{date}/{run-id}/{artifact}";
 const FINGERPRINT_VERSION = "collector-r2-v1";
@@ -836,7 +836,6 @@ async function artifactPlans(
     bytes: loaded.centralBytes.byteLength,
     sha256: loaded.centralSha256,
     sequence: verified.length,
-    unitId,
     fingerprintKey,
   });
   plans.push({
@@ -922,7 +921,6 @@ async function manifestDescriptor(options: {
   bytes: number;
   sha256: string;
   sequence: number;
-  unitId: number;
   fingerprintKey: string;
 }): Promise<JsonObject> {
   const legacy = options.manifest.schemaVersion === V1;
@@ -938,7 +936,7 @@ async function manifestDescriptor(options: {
     mediaTypeBasis: "operator",
     fetchedAtMs: Date.parse(options.manifest.completedAt),
     fetchedAtBasis: "manifest",
-    fetchUnitId: options.unitId,
+    fetchUnitId: null,
     sequence: options.sequence,
     sha256: options.sha256,
     byteSize: options.bytes,
@@ -973,7 +971,7 @@ function normalizedDescriptor(input: {
   mediaTypeBasis: string;
   fetchedAtMs: number;
   fetchedAtBasis: string;
-  fetchUnitId: number;
+  fetchUnitId: number | null;
   sequence: number;
   sha256: string;
   byteSize: number;

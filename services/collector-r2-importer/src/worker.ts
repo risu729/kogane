@@ -357,7 +357,7 @@ function importOneGlobalPass(
 }
 
 interface GlobalPassBackfillCursor {
-  v: 1;
+  v: 2;
   scanCursor: string | null;
   scanDone: boolean;
   manifestKey?: string;
@@ -402,7 +402,7 @@ async function backfillGlobalPass(
     throw new ImportError(409, "prefix_cursor_did_not_advance");
   }
   const continuation: GlobalPassBackfillCursor = {
-    v: 1,
+    v: 2,
     scanCursor: scanCursor ?? null,
     scanDone,
   };
@@ -476,7 +476,7 @@ function globalPassBackfillResponse(input: {
 
 function nextGlobalPassScanCursor(state: GlobalPassBackfillCursor): string | null {
   return state.scanDone ? null : encodeGlobalPassCursor({
-    v: 1,
+    v: 2,
     scanCursor: state.scanCursor,
     scanDone: false,
   });
@@ -487,12 +487,12 @@ function encodeGlobalPassCursor(value: GlobalPassBackfillCursor): string {
   const bytes = new TextEncoder().encode(JSON.stringify(value));
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return `global-pass-v1.${btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "")}`;
+  return `global-pass-v2.${btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "")}`;
 }
 
 function decodeGlobalPassCursor(value: string): GlobalPassBackfillCursor {
-  if (!value.startsWith("global-pass-v1.")) throw new ImportError(400, "cursor_invalid");
-  const encoded = value.slice("global-pass-v1.".length).replaceAll("-", "+").replaceAll("_", "/");
+  if (!value.startsWith("global-pass-v2.")) throw new ImportError(400, "cursor_invalid");
+  const encoded = value.slice("global-pass-v2.".length).replaceAll("-", "+").replaceAll("_", "/");
   const padded = encoded.padEnd(Math.ceil(encoded.length / 4) * 4, "=");
   let parsed: unknown;
   try {
@@ -519,7 +519,7 @@ function assertGlobalPassCursor(value: GlobalPassBackfillCursor): void {
       value.scanCursor.length <= 4_096 && !/[\x00-\x20\x7f]/u.test(value.scanCursor);
   const hasManifest = value.manifestKey !== undefined;
   const hasOffset = value.offset !== undefined;
-  if (value.v !== 1 || typeof value.scanDone !== "boolean" || !scanStateValid ||
+  if (value.v !== 2 || typeof value.scanDone !== "boolean" || !scanStateValid ||
       hasManifest !== hasOffset ||
       (hasManifest &&
         (typeof value.manifestKey !== "string" ||
