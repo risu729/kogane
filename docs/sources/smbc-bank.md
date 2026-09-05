@@ -1,13 +1,16 @@
 # 三井住友銀行: SMBCダイレクト / Oliveの銀行口座側
 
-調査日: 2026-08-26、追試: 2026-08-31
+調査日: 2026-08-26、追試: 2026-08-31、実装検証: 2026-09-01
+
+本書は初期調査と追試の記録を含む。実装状況は下記の「Kogane Workers PoC live result（2026-09-01）」と[現行PoC README](../../poc/smbc-direct-backfill-worker/README.md)を優先する。2026-09-05の文書統合では、既存の実装・検証記録との整合性を確認した。銀行への再ログインや取得は行っていない。
 
 ## 結論
 
 - **推奨データ源は公式WebのSMBCダイレクト**。普通預金のMVPは、公式Webが内部で使うフォームとJSONエンドポイントを読み取り専用で呼び出す方式が最短である。
 - **Oliveは別の銀行APIではない**。銀行口座側はSMBCダイレクトとWeb通帳を含むパッケージであり、Olive専用画面よりもSMBCダイレクトの口座一覧・明細を正本とする。
-- `pnsk-lab/mnie` の `provider-smbc-direct` は、普通預金1口座について、アプリ承認付きログイン、残高、期間指定の入出金明細、セッション再利用まで実装している。ブラウザを起動せず通常のHTTPリクエストで動くため、MVPの有力な土台になる。
+- `pnsk-lab/mnie` の `provider-smbc-direct` は、普通預金1口座について、アプリ承認付きログイン、残高、期間指定の入出金明細、セッション再利用まで実装している。Koganeはこの調査を参考に必要な読み取り処理を分離し、`mnie`をruntime dependencyにしないWorker PoCを実装済みである。
 - 2026-08-31の実口座追試では、WSLの通常`fetch`とCookie jarだけでSafety Pass承認後のログイン、1口座のJPY残高、2026-08-01から08-31までの明細14件と入出金合計、ログアウトまで成功した。ブラウザやTLS fingerprint偽装は不要だった。先行2回の失敗は承認完了前に`finished2fa`を呼んだタイミング問題で、Akamai、サービス時間、認証情報の拒否ではなかった。
+- 2026-09-01のWorker PoCではTAMIA経由で93/93か月の取得と、途中失効後のQR再承認による再開を確認済みである。通常のWorkers egressは同一条件で`ERRINFO`を返したため、ローカルの成功を通常Workers egressの成功へ一般化しない。
 - SMBCセーフティパス登録済みの契約では、登録端末での生体認証が**ログインの都度**必要になる。したがって現時点の自動化見込みは、**人がQR/アプリ承認した後の収集は自動化可能、期限切れ後の再ログインは有人**である。
 - Safety Passは銀行側の登録受理、契約者番号と登録端末の紐付け、解除・失効状態を含む。Android 12.8.0候補の静的解析では、契約IDをaliasとするEC秘密鍵を`AndroidKeyStore`内で生成し、毎回のサーバーchallengeを`BiometricPrompt.CryptoObject`で生体認証後に署名する実装を確認した。秘密鍵exportはなく、profile/app dataのコピーでは移植できない。
 - ログイン側の `direct.smbc.co.jp` と取引側の `direct3.smbc.co.jp` がAkamai edgeを使うことは確認できた。Bot Manager系の保護も有力だが、具体的なWAFポリシーと認証後エンドポイントでの判定条件は未確認である。
@@ -118,9 +121,9 @@ SMBCダイレクトではOliveの対象普通預金が「残高別普通」「�
 
 未確認なのは、鍵がTEE/StrongBoxでhardware-backedか、署名対象のcanonicalizationとalgorithm、server側の公開鍵登録payload、challengeの厳密な有効期限/一回性、Transmit attestationの適用条件である。これらは独自clientの完全無人化可否ではなく、拘束点の詳細を詰めるための事項である。
 
-### Future work: 正規承認の支援と再現調査の境界
+### 初期設計と追加研究: 正規承認の支援と再現調査の境界
 
-推奨する将来実装はSafety Passそのもののclone/bypassではなく、**未改変の公式アプリと利用者本人の承認を使った正規のsession issuanceを支援するorchestrator**である。
+初期調査では、**未改変の公式アプリと利用者本人の承認を使った正規のsession issuanceを支援するorchestrator**を推奨した。QR提示・承認後の継続・暗号化session保存・失効後の再開はWorker PoCで実装済みであり、以下は当時の設計と追加研究の境界を記録する。
 
 1. 公式Webへ通常のログイン要求を開始する。
 2. 銀行が発行したQR/deep link、期限、対象ログインを利用者へそのまま表示する。
@@ -169,7 +172,7 @@ APK静的解析で分かるのは、宣言されたcomponent、文字列/host、
 
 公式サイトは「本来想定された利用形態と異なる極端な利用」でSMBCダイレクトを停止する場合があると明記している。常時keep-aliveは避け、低頻度の同期と自然失効後の有人再承認を前提にする。[公式SMBCダイレクト案内](https://www.smbc.co.jp/kojin/direct/)
 
-Koganeで保存するsession capsuleは、`mnie`のexportをそのまま使わない。暗号化したCookieと継続に必要な最小フォーム状態、発行/最終成功時刻、固定User-Agentだけを含め、ログイン暗証、契約番号、認証済みトップHTMLを除外する。同一sessionの処理は直列化し、自然失効時は`interaction_required`へ遷移する。1回の承認後に複数回収集できる可能性は高いが、公式ガイドは無操作で自動終了するとしており、無期限keep-aliveを回避策にしない。
+初期案では認証済みトップHTMLを除く最小session capsuleを想定したが、現行PoCの`export()`はCookieと継続に必要なトップページのHTML・URLを返し、AES-256-GCMで暗号化してDurable Objectへ保存する。ログイン暗証はsessionへ含めずWorker secretから読み、認証済みHTMLやCookieをログ・公開応答へ出さない。同一sessionの処理は直列化し、失効時はpartialを保存して新しいQR承認後に再開する。完了時は公式logoutと保存sessionの削除を行う。HTMLを最小フォーム状態へ縮小することは追加の設計課題であり、実装済みとは扱わない。常時keep-aliveは行わない。
 
 ## Akamai / anti-bot
 
@@ -193,7 +196,7 @@ Koganeで保存するsession capsuleは、`mnie`のexportをそのまま使わ�
 
 - `_abck` と `bm_sz` の組合せから、Akamai Bot Managerまたは同系統の自動化判定が有効である可能性が高い。
 - ただし、ログインPOSTや認証後AJAXに対する具体的なWAF/Bot Managerアクション、レート制限、データセンターIPの評価は外部から確定できない。
-- 同じ低頻度フローがCloudflare Workers/ContainersやOCIのegressでも継続的に通るか、IP/セッション移動に反応するかは未確認である。ローカルで通ったため、最初からChrome/TLS impersonationを組み込む根拠はない。
+- 通常Workers egressの失敗とTAMIA経由の成功は後述のPoCで確認済みである。Containers/OCIの別egress、長期継続時の判定、IP/セッション移動への反応は未確認である。
 
 ## APKと静的解析
 
@@ -376,8 +379,8 @@ Workers Web Cryptoによるassertion生成、Money Forward ME側へのOAuth遷�
 
 | 案 | 実装コスト | 自動化レベル | データ範囲 | 判断 |
 | --- | ---: | --- | --- | --- |
-| `mnie`を安全化して普通預金を取得 | 3/5 | 初回/再ログインは有人、認証後は自動 | 普通預金残高・期間明細 | **採用候補** |
-| Safety Pass正規承認orchestrator | 3/5 | QR提示・完了pollは自動、生体承認は常に有人 | 認証済みWeb session | **推奨**。公式アプリを変更しない |
+| `mnie`調査を参考に読み取り処理を分離 | 3/5 | 初回/再ログインは有人、認証後は自動 | 普通預金残高・期間明細 | **Worker PoC実装済み**。`mnie` runtime dependencyなし |
+| Safety Pass正規承認orchestrator | 3/5 | QR提示後の生体承認と完了操作は有人 | 認証済みWeb session | **Worker PoC実装済み**。公式アプリを変更しない |
 | Webブラウザで公式CSVを取得 | 3/5 | アプリ承認は有人、その後は自動 | Web通帳普通・外貨等、画面が対応する科目 | 検算・fallbackとして有用 |
 | Web内部プロトコルを複数口座・外貨・定期へ拡張 | 4/5 | 認証後は自動 | 口座一覧、複数科目、預入ロット | 普通預金MVP後に実施 |
 | 公式アプリをUI自動化 | 5/5 | 生体認証で有人、端末保守も必要 | アプリ表示全般 | 非推奨 |
@@ -391,7 +394,9 @@ Workers Web Cryptoによるassertion生成、Money Forward ME側へのOAuth遷�
 | [店番号・口座・キャッシュカード暗証の残高照会](https://direct3.smbc.co.jp/aib/aibgsjsw1k12.jsp) | 1/5 | 高い | 現在残高のみ | 一部利用者は制限、明細なし。暗証保存を増やすため不採用 |
 | [メール/push通知](https://www.smbc.co.jp/kojin/direct/service/resources/pdf/goriyou_tebiki.pdf?version=260601)の取込 | 2/5 | 高い | 振込入金や引落予定など一部event | Global Service/SMBC Debit等の除外があり補助sourceに限定 |
 
-## 推奨方針
+## 初期調査時の推奨方針と実装後の確認項目
+
+以下は2026-08-31までの設計方針である。読み取りクライアント、QR承認、暗号化session、月次raw保存、失効後resumeは実装済み。CSVとの独立照合、長期運用、複数科目への拡張は引き続き確認対象である。
 
 1. `mnie`の普通預金フローを参考に、Kogane用の**読み取り専用**SMBCダイレクトクライアントを分離する。
 2. ログイン資格情報をSecret Managerから都度読む。セッションartifactにはログイン暗証を含めない。
@@ -403,9 +408,9 @@ Workers Web Cryptoによるassertion生成、Money Forward ME側へのOAuth遷�
 
 完全無人を必須にする場合の選択肢は、ユーザーが明示的にSafety Passを解除するか、方針を変更して契約済みaggregatorを利用するかの実質2つである。前者は設定変更とsecurity downgrade、後者は第三者依存であるため、現方針では**有人承認を稀なinteractionとして扱い、その間の同期をsession再利用で自動化する**。
 
-## 次の検証手順
+## 初期検証計画の履歴
 
-実装PRでは次を、読み取り専用かつ実口座情報をコミット・ログへ残さず検証する。
+以下は2026-08-31時点の検証計画であり、未着手一覧ではない。項目1・3のクライアント分離と取得は、その後の93か月backfillで検証済み。現在の再実行手順はPoC READMEを参照し、期間をclientから指定せず最古日から実行当日まで取得する。
 
 1. 確認済みの1か月明細取得をKogane用isolated clientで再実行し、Safety Pass承認完了を待つ状態機械と、14件・入出金合計のparser結果が安定することをfixtureでも検証する。
 2. Web通帳のCSVを1か月分だけ手動取得し、列、文字コード、明細ID相当の有無、摘要、残高粒度を確認する。
@@ -432,7 +437,9 @@ Workers Web Cryptoによるassertion生成、Money Forward ME側へのOAuth遷�
 - challenge-responseの署名algorithm/canonicalization、有効期限、一回性、リプレイ防止、鍵rotation
 - Transmit Security attestationの適用条件と、Google Play Integrity等の追加層の有無
 
-## 一時検証artifactのcleanup
+## 一時検証artifactのcleanup記録（2026-08-31時点）
+
+以下は初期ローカル追試の終了時点の記録であり、現行WorkerのR2・暗号化session・Secretが存在しないという意味ではない。現在の削除対象は再確認が必要で、稼働中のWorkerや共有TAMIA資源を一括cleanup対象にしない。
 
 - 一時cloneと認証済みsessionは検証プロセス終了に伴い消滅しており、再利用できるCookieや資格情報は残していない。
 - 期限切れのSafety Pass QRを描画したSVGだけが一時artifactとして残存している。QR内のchallengeは失効済みだが、検証用Cloudflare Worker/R2等のcleanupと同じ一覧で削除対象として追跡する。
