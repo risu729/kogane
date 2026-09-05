@@ -45,7 +45,7 @@ WebAuthn assertionはR2、ログ、manifest、Gitへ保存しない。
 - 中央`kogane-ingest`はschema `0009`、version
   `cd26355d-36b0-4eb9-b93f-57b588113429`、Importerの最終versionは
   `72067520-54bc-414b-81d7-2861746f96e4`、collector v2はversion
-  `9a401036-37e6-4427-884f-e21c6d8313c7`で検証した。Cronは`10 21 * * *`を維持した。
+  `dccc680b-f365-4ede-9071-2370a9138baf`で検証した。Cronは`10 21 * * *`を維持した。
 - source R2は40 object / 10 manifestだった。事前検証で1 pageを処理した後、initial
   resumeは残り39 pageを処理し、合計40 page / 10 manifestへ到達した。続くfull replayも
   40 page / 10 manifestを走査した。
