@@ -7,7 +7,7 @@
 - **推奨データ源は公式WebのSMBCダイレクト**。普通預金のMVPは、公式Webが内部で使うフォームとJSONエンドポイントを読み取り専用で呼び出す方式が最短である。
 - **Oliveは別の銀行APIではない**。銀行口座側はSMBCダイレクトとWeb通帳を含むパッケージであり、Olive専用画面よりもSMBCダイレクトの口座一覧・明細を正本とする。
 - `pnsk-lab/mnie` の `provider-smbc-direct` は、普通預金1口座について、アプリ承認付きログイン、残高、期間指定の入出金明細、セッション再利用まで実装している。ブラウザを起動せず通常のHTTPリクエストで動くため、MVPの有力な土台になる。
-- 2026-08-31の実口座追試では、WSLの通常`fetch`とCookie jarだけでログイン要求、Safety Pass承認、認証済みトップ、JPY残高取得まで成功した。ブラウザやTLS fingerprint偽装は不要だった。明細要求は日曜21時から月曜7時のサービス時間制限で拒否され、認証/Akamai失敗ではなかった。
+- 2026-08-31の実口座追試では、WSLの通常`fetch`とCookie jarだけでSafety Pass承認後のログイン、1口座のJPY残高、2026-08-01から08-31までの明細14件と入出金合計、ログアウトまで成功した。ブラウザやTLS fingerprint偽装は不要だった。先行2回の失敗は承認完了前に`finished2fa`を呼んだタイミング問題で、Akamai、サービス時間、認証情報の拒否ではなかった。
 - SMBCセーフティパス登録済みの契約では、登録端末での生体認証が**ログインの都度**必要になる。したがって現時点の自動化見込みは、**人がQR/アプリ承認した後の収集は自動化可能、期限切れ後の再ログインは有人**である。
 - Safety Passは銀行側の登録受理、契約者番号と登録端末の紐付け、解除・失効状態を含む。Android 12.8.0候補の静的解析では、契約IDをaliasとするEC秘密鍵を`AndroidKeyStore`内で生成し、毎回のサーバーchallengeを`BiometricPrompt.CryptoObject`で生体認証後に署名する実装を確認した。秘密鍵exportはなく、profile/app dataのコピーでは移植できない。
 - ログイン側の `direct.smbc.co.jp` と取引側の `direct3.smbc.co.jp` がAkamai edgeを使うことは確認できた。Bot Manager系の保護も有力だが、具体的なWAFポリシーと認証後エンドポイントでの判定条件は未確認である。
@@ -25,7 +25,7 @@
 - 非目標: Vpass、Oliveフレキシブルペイのカード明細、他行・証券連携、振込、振替、設定変更、電子決済等代行業者経由の集約
 - 安全境界: 読み取り専用。振込先、振込手数料計算など、収集に不要な転送関連画面にも遷移しない。公式split APK/公開JSの静的解析、未改変公式アプリを本人が操作する際のruntime metadata観測、独自client再現難度の評価は対象とするが、秘密抽出、credential/署名/attestation偽造、pinning/integrity回避は行わない
 
-2026-08-26の初回調査ではログインやAPK取得を行わなかった。2026-08-31の追試では、本人のSafety Pass承認を伴う読み取りログイン、残高、明細要求まで実行し、第三者再配布APK候補をオフライン静的解析した。資格情報、Cookie、challenge、認証済みHTML、残高、明細、口座番号、氏名その他の個人データは保存・コミットしていない。APKとJADX成果物は非公開アーカイブにだけ保存し、本リポジトリにはsanitize済みの結論だけを残す。
+2026-08-26の初回調査ではログインやAPK取得を行わなかった。2026-08-31の追試では、本人のSafety Pass承認を伴う読み取りログイン、残高、1か月分の明細、入出金合計、ログアウトまで実行し、第三者再配布APK候補をオフライン静的解析した。資格情報、Cookie、challenge、認証済みHTML、残高、明細内容、入出金合計値、口座番号、氏名その他の個人データは保存・コミットしていない。APKとJADX成果物は非公開アーカイブにだけ保存し、本リポジトリにはsanitize済みの結論だけを残す。
 
 ## 調査方法
 
@@ -183,7 +183,9 @@ Koganeで保存するsession capsuleは、`mnie`のexportをそのまま使わ�
 - 公開ログインHTMLはShift_JISで、未認証の単発GETにJavaScriptチャレンジやCAPTCHAは表示されなかった。
 - 公開loginは `JSESSIONID` (`Secure; HttpOnly`)、`DIRECTUUID`、hidden `_TOKEN`/`_FORMID`/`_FRAMEID` を発行し、login pre-stepとして `/loginlogout/LLDLDILnextPreTS` を使う。cookie/tokenの値は保存していない。
 - login pageは [Caulis](https://static.fraud-alert.net/Caulis.smbc_v2.min.js) を読み込み、同assetは `p.fraud-alert.net`/`sb.fraud-alert.net`、local session ID、CORS/XHR送信を含む。また `ib.smbc.co.jp` から公開の [RSA](https://ib.smbc.co.jp/js/rsa.js)、[AES](https://ib.smbc.co.jp/js/aes.js)、[password-loader](https://ib.smbc.co.jp/js/pwcload.js) を動的loadする。Safety Pass以前にもsession、anti-bot/risk、credential protectionが別層で存在する。
-- 2026-08-31の実口座追試では、WSL/LinuxからNode系の通常`fetch`、Cookie jar、Linux Chrome型User-AgentだけでSafety Pass承認後のログインと残高取得に成功した。ブラウザ実行、Akamai sensor生成、TLS fingerprint偽装、住宅回線egressは使っていない。
+- 2026-08-31の実口座追試では、WSL/LinuxからNode系の通常`fetch`、Cookie jar、Linux Chrome型User-AgentだけでSafety Pass承認後のログインに成功した。認証済み口座数は1、JPY現在残高を取得し、2026-08-01から08-31までの期間指定明細14件と入金・出金の各合計を数値としてparseできた。最後に公式logoutも成功した。実際の金額、明細内容、口座識別子は記録していない。
+- 先行2回はQR承認後の完了処理に失敗したが、`finished2fa`相当の呼び出しが登録端末側の承認完了より早かったためだった。承認完了を待った再試行では同じHTTP clientが通ったため、この失敗をAkamai判定、通常サービス時間、認証情報拒否の証拠として扱わない。実装では固定sleepではなく、承認待ち状態を保った期限付きpollまたは明示的な利用者完了操作が必要である。
+- この一連の追試で、ブラウザ実行、Akamai sensor生成、TLS fingerprint偽装、住宅回線egressは使っていない。
 
 したがって、Akamai CDN/edgeの利用は確定である。AkamaiはBot ManagerがCookieとブラウザテレメトリを使って自動リクエストを識別する仕組みを提供している。[Akamai Bot Management docs](https://techdocs.akamai.com/security-ctr/docs/dimensions-new)
 
@@ -405,7 +407,7 @@ Workers Web Cryptoによるassertion生成、Money Forward ME側へのOAuth遷�
 
 実装PRでは次を、読み取り専用かつ実口座情報をコミット・ログへ残さず検証する。
 
-1. 7時以降の通常サービス時間に、2026-08-31と同じ読み取り専用フローで1か月明細が取得できることを確認する。ログインとJPY残高までは確認済み。
+1. 確認済みの1か月明細取得をKogane用isolated clientで再実行し、Safety Pass承認完了を待つ状態機械と、14件・入出金合計のparser結果が安定することをfixtureでも検証する。
 2. Web通帳のCSVを1か月分だけ手動取得し、列、文字コード、明細ID相当の有無、摘要、残高粒度を確認する。
 3. Kogane用isolated clientへ、確認済みのlogin、Safety Pass poll、残高、明細だけを移植する。`mnie` packageを依存または再利用せず、振込関連routeを含めない。
 4. JSONと公式CSVの件数、入金合計、出金合計、期末残高を照合する。
@@ -420,6 +422,7 @@ Workers Web Cryptoによるassertion生成、Money Forward ME側へのOAuth遷�
 
 - 現行セッションの無操作・絶対時間上限と、48か月地点の失効が時間・request数・別条件のどれに依存するか
 - TAMIA経由での日次増分取得を長期運用した場合の429、追加認証、session寿命
+- 複数口座・異なる科目で、既定科目コード `2206` への固定を外したときのrouteと識別方法。普通預金1口座の取得は確認済み
 - 実際の複数サービス利用口座一覧を返す内部endpointと、安定した口座識別子
 - 定期・積立の預入ロット項目と履歴保存期間
 - 外貨CSV/内部JSONの通貨、小数桁、適用レート、取引後残高の正確なschema
@@ -428,3 +431,8 @@ Workers Web Cryptoによるassertion生成、Money Forward ME側へのOAuth遷�
 - Safety Pass EC鍵がTEE/StrongBoxでhardware-backedか、銀行側の公開鍵登録payload
 - challenge-responseの署名algorithm/canonicalization、有効期限、一回性、リプレイ防止、鍵rotation
 - Transmit Security attestationの適用条件と、Google Play Integrity等の追加層の有無
+
+## 一時検証artifactのcleanup
+
+- 一時cloneと認証済みsessionは検証プロセス終了に伴い消滅しており、再利用できるCookieや資格情報は残していない。
+- 期限切れのSafety Pass QRを描画したSVGだけが一時artifactとして残存している。QR内のchallengeは失効済みだが、検証用Cloudflare Worker/R2等のcleanupと同じ一覧で削除対象として追跡する。
