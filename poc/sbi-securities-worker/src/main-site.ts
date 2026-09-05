@@ -88,9 +88,7 @@ async function createMainSiteAuth(
   updateCookieJar(cookies, etGateResponse, etGateUrl);
   const etGateHtml = decodeShiftJis(await etGateResponse.arrayBuffer());
   if (!etGateResponse.ok) {
-    throw new Error(
-      `SBI main-site ETGate failed with HTTP ${etGateResponse.status}`,
-    );
+    throw Object.assign(new Error(`SBI main-site ETGate failed with HTTP ${etGateResponse.status}`), { httpStatus: etGateResponse.status });
   }
   const form = parseHtmlForm(etGateHtml, etGateUrl);
   const switchResponse = await fetch(form.action, {
@@ -126,9 +124,7 @@ async function createMainSiteAuth(
   });
   updateCookieJar(cookies, assetsResponse, assetsUrl);
   if (!assetsResponse.ok) {
-    throw new Error(
-      `SBI main-site assets page failed with HTTP ${assetsResponse.status}`,
-    );
+    throw Object.assign(new Error(`SBI main-site assets page failed with HTTP ${assetsResponse.status}`), { httpStatus: assetsResponse.status });
   }
   return {
     baseUrl,
@@ -152,9 +148,7 @@ async function fetchAssets(auth: MainSiteAuth): Promise<Record<string, unknown>>
   });
   const text = await response.text();
   if (!response.ok) {
-    throw new Error(
-      `SBI account assets failed with HTTP ${response.status}`,
-    );
+    throw Object.assign(new Error(`SBI account assets failed with HTTP ${response.status}`), { httpStatus: response.status });
   }
   return parseJsonObject(text, "SBI account assets");
 }
@@ -176,9 +170,7 @@ async function fetchYenHistory(
   const page = await fetchMainSiteAuthenticatedPage(session, auth, entryUrl);
   const html = await page.response.text();
   if (!page.response.ok) {
-    throw new Error(
-      `SBI yen history page failed with HTTP ${page.response.status}`,
-    );
+    throw Object.assign(new Error(`SBI yen history page failed with HTTP ${page.response.status}`), { httpStatus: page.response.status });
   }
   if (html.includes("臨時メンテナンス")) {
     throw new Error("SBI yen history is under maintenance");
@@ -203,9 +195,7 @@ async function fetchYenHistory(
   });
   const text = await response.text();
   if (!response.ok) {
-    throw new Error(
-      `SBI yen history API failed with HTTP ${response.status}`,
-    );
+    throw Object.assign(new Error(`SBI yen history API failed with HTTP ${response.status}`), { httpStatus: response.status });
   }
   return parseJsonObject(text, "SBI yen history API");
 }
@@ -236,9 +226,7 @@ async function fetchDomesticTradeHistory(options: {
   let response = initial.response;
   let html = decodeShiftJis(await response.arrayBuffer());
   if (!response.ok) {
-    throw new Error(
-      `SBI domestic trade history failed with HTTP ${response.status}`,
-    );
+    throw Object.assign(new Error(`SBI domestic trade history failed with HTTP ${response.status}`), { httpStatus: response.status });
   }
   if (titleText(html)?.includes("メンテナンス")) {
     throw new Error("SBI domestic trade history is under maintenance");
@@ -289,9 +277,7 @@ async function fetchDomesticTradeHistory(options: {
   }
   html = decodeShiftJis(await response.arrayBuffer());
   if (!response.ok) {
-    throw new Error(
-      `SBI domestic trade-history search failed with HTTP ${response.status}`,
-    );
+    throw Object.assign(new Error(`SBI domestic trade-history search failed with HTTP ${response.status}`), { httpStatus: response.status });
   }
   return parseDomesticTradeRecords(html);
 }
@@ -331,9 +317,7 @@ async function fetchMainSiteAuthenticatedPage(
   } else {
     const loginHtml = decodeShiftJis(await loginResponse.arrayBuffer());
     if (!loginResponse.ok) {
-      throw new Error(
-        `SBI main-site session switch failed with HTTP ${loginResponse.status}`,
-      );
+      throw Object.assign(new Error(`SBI main-site session switch failed with HTTP ${loginResponse.status}`), { httpStatus: loginResponse.status });
     }
     const form = parseHtmlForm(loginHtml, loginUrl);
     const switchResponse = await fetch(form.action, {
@@ -676,9 +660,7 @@ function setCookieHeaders(headers: Headers): string[] {
 function responseLocationUrl(response: Response, baseUrl: URL): URL {
   const location = response.headers.get("location");
   if (!location) {
-    throw new Error(
-      `SBI main-site expected redirect but received HTTP ${response.status}`,
-    );
+    throw Object.assign(new Error(`SBI main-site expected redirect but received HTTP ${response.status}`), { httpStatus: response.status });
   }
   return new URL(location, baseUrl);
 }

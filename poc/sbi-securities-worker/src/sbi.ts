@@ -177,7 +177,7 @@ export async function callMts(
     throw new Error(`SBI MTS ${trCode} failed with result ${header.resultCode}`);
   }
   if (!response.ok) {
-    throw new Error(`SBI MTS ${trCode} failed with HTTP ${response.status}`);
+    throw Object.assign(new Error(`SBI MTS ${trCode} failed with HTTP ${response.status}`), { httpStatus: response.status });
   }
   return {
     httpStatus: response.status,
@@ -202,7 +202,7 @@ async function loginDomestic(
   const buffer = Buffer.from(await response.arrayBuffer());
   const header = parseMtsHeader(buffer);
   if (!response.ok) {
-    throw new Error(`SBI MTS login failed with HTTP ${response.status}`);
+    throw Object.assign(new Error(`SBI MTS login failed with HTTP ${response.status}`), { httpStatus: response.status });
   }
   if (header.resultCode && header.resultCode !== "000000") {
     throw new Error(`SBI MTS login failed with result ${header.resultCode}`);
@@ -253,7 +253,7 @@ async function loginForeign(
   );
   const text = await response.text();
   if (!response.ok) {
-    throw new Error(`SBI foreign SSO failed with HTTP ${response.status}`);
+    throw Object.assign(new Error(`SBI foreign SSO failed with HTTP ${response.status}`), { httpStatus: response.status });
   }
   const body = parseJsonObject(text, "SBI foreign SSO");
   const sessionId =
@@ -291,7 +291,7 @@ async function fetchForeignHash(options: {
   });
   const text = await response.text();
   if (!response.ok) {
-    throw new Error(`SBI foreign hash request failed with HTTP ${response.status}`);
+    throw Object.assign(new Error(`SBI foreign hash request failed with HTTP ${response.status}`), { httpStatus: response.status });
   }
   const body = parseJsonObject(text, "SBI foreign hash");
   const hash = optionalString(body["hashValue"]);

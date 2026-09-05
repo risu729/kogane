@@ -35,15 +35,13 @@ export class MyJcbReadClient {
     const response = await fetch(url, { headers, redirect: "manual" });
     this.jar.updateFromResponse(response, url);
     if (response.status >= 300 && response.status < 400) {
-      throw new StopConditionError(
-        `MyJCB ${operation} returned an unexpected redirect (${response.status})`,
-      );
+      throw Object.assign(new StopConditionError(`MyJCB ${operation} returned an unexpected redirect (${response.status})`), { httpStatus: response.status });
     }
     if (response.status === 401 || response.status === 403 || response.status === 429) {
-      throw new StopConditionError(`MyJCB ${operation} stopped at HTTP ${response.status}`);
+      throw Object.assign(new StopConditionError(`MyJCB ${operation} stopped at HTTP ${response.status}`), { httpStatus: response.status });
     }
     if (!response.ok) {
-      throw new StopConditionError(`MyJCB ${operation} returned HTTP ${response.status}`);
+      throw Object.assign(new StopConditionError(`MyJCB ${operation} returned HTTP ${response.status}`), { httpStatus: response.status });
     }
     const length = Number(response.headers.get("content-length") ?? "0");
     if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) {
@@ -104,7 +102,7 @@ export class MyJcbReadClient {
     });
     this.jar.updateFromResponse(response, url);
     if (response.status !== 200) {
-      throw new StopConditionError(`MyJCB ${operation} returned HTTP ${response.status}`);
+      throw Object.assign(new StopConditionError(`MyJCB ${operation} returned HTTP ${response.status}`), { httpStatus: response.status });
     }
     const contentType = response.headers.get("content-type") ?? "";
     if (!/^application\/json(?:;|$)/iu.test(contentType)) {

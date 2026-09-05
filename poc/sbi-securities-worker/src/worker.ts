@@ -1,3 +1,4 @@
+import { createDiagnostics, safeErrorDetails } from "../../collector-diagnostics/src/index";
 import { parseCredential } from "./auth";
 import { parseHandshakeKey, secretEquals } from "./crypto";
 import { collectMainSiteArtifacts } from "./main-site";
@@ -102,116 +103,124 @@ async function runCollection(
 }> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
-  const prefix = runPrefix(startedAt, runId);
-  const endpoints = SBI_ENDPOINTS;
-  const credential = parseCredential(
-    requiredSecret(env.SBI_CREDENTIAL_JSON, "SBI_CREDENTIAL_JSON"),
-  );
-  const handshakeKey = parseHandshakeKey(
-    requiredSecret(env.SBI_HANDSHAKE_KEY_JSON, "SBI_HANDSHAKE_KEY_JSON"),
-  );
-  const artifacts: Artifact[] = [];
-  const failures: CollectionFailure[] = [];
+  const diagnostic = createDiagnostics("sbi-securities", runId);
+  try {
+    const prefix = runPrefix(startedAt, runId);
+    const endpoints = SBI_ENDPOINTS;
+    const credential = await diagnostic.step("configuration", () => parseCredential(
+      requiredSecret(env.SBI_CREDENTIAL_JSON, "SBI_CREDENTIAL_JSON"),
+    ));
+    const handshakeKey = await diagnostic.step("configuration", () => parseHandshakeKey(
+      requiredSecret(env.SBI_HANDSHAKE_KEY_JSON, "SBI_HANDSHAKE_KEY_JSON"),
+    ));
+    const artifacts: Artifact[] = [];
+    const failures: CollectionFailure[] = [];
 
-  if (scope === "all" || scope === "domestic") {
-    try {
-      const domestic = await collectDomesticArtifacts({
-        endpoints,
-        credential,
-        handshakeKey,
-      });
-      artifacts.push(...domestic.artifacts);
-      if (endpoints.mainSiteBaseUrl) {
-        try {
-          artifacts.push(
-            ...(await collectMainSiteArtifacts({
-              session: domestic.session,
-              mainSiteBaseUrl: endpoints.mainSiteBaseUrl,
-              ...(window ?? {}),
-            })),
-          );
-        } catch (error) {
-          failures.push(failure("domestic", "main-site", error));
-        }
-      }
-    } catch (error) {
-      failures.push(failure("domestic", "passkey-mts", error));
-    }
-  }
-
-  if (scope === "all" || scope === "foreign") {
-    try {
-      artifacts.push(
-        ...(await collectForeignArtifacts({
+    if (scope === "all" || scope === "domestic") {
+      try {
+        const domestic = await diagnostic.step("domestic-collection", () => collectDomesticArtifacts({
           endpoints,
           credential,
           handshakeKey,
-          ...(window ?? {}),
-        })),
-      );
-    } catch (error) {
-      failures.push(failure("foreign", "passkey-graphql", error));
+        }));
+        artifacts.push(...domestic.artifacts);
+        const mainSiteBaseUrl = endpoints.mainSiteBaseUrl;
+        if (mainSiteBaseUrl) {
+          try {
+            artifacts.push(
+              ...(await diagnostic.step("main-site-collection", () => collectMainSiteArtifacts({
+                session: domestic.session,
+                mainSiteBaseUrl,
+                ...(window ?? {}),
+              }))),
+            );
+          } catch (error) {
+            failures.push(failure("domestic", "main-site", error));
+          }
+        }
+      } catch (error) {
+        failures.push(failure("domestic", "passkey-mts", error));
+      }
     }
-  }
 
-  const artifactManifests = [];
-  for (const artifact of artifacts) {
-    try {
-      artifactManifests.push(
-        await storeArtifact({
-          bucket: env.SNAPSHOTS,
-          prefix,
-          artifact,
-        }),
-      );
-    } catch (error) {
-      failures.push(
-        failure(
-          artifact.dataset.startsWith("foreign") ? "foreign" : "domestic",
-          `r2:${artifact.dataset}`,
-          error,
-        ),
-      );
+    if (scope === "all" || scope === "foreign") {
+      try {
+        artifacts.push(
+          ...(await diagnostic.step("foreign-collection", () => collectForeignArtifacts({
+            endpoints,
+            credential,
+            handshakeKey,
+            ...(window ?? {}),
+          }))),
+        );
+      } catch (error) {
+        failures.push(failure("foreign", "passkey-graphql", error));
+      }
     }
-  }
-  const completedAt = new Date().toISOString();
-  const status =
-    failures.length === 0
-      ? "success"
-      : artifactManifests.length === 0
-        ? "failed"
-        : "partial";
-  const manifest: CollectionManifest = {
-    schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
-    source: "sbi-securities",
-    runId,
-    scope,
-    startedAt,
-    completedAt,
-    status,
-    artifacts: artifactManifests,
-    failures,
-  };
-  const manifestKey = await storeManifest({
-    bucket: env.SNAPSHOTS,
-    prefix,
-    manifest,
-  });
-  const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey);
-  console.log(
-    JSON.stringify({
-      event: "sbi-collection-stored",
+
+    const artifactManifests = [];
+    for (const artifact of artifacts) {
+      try {
+        artifactManifests.push(
+          await diagnostic.step("artifact-write", () => storeArtifact({
+            bucket: env.SNAPSHOTS,
+            prefix,
+            artifact,
+          })),
+        );
+      } catch (error) {
+        failures.push(
+          failure(
+            artifact.dataset.startsWith("foreign") ? "foreign" : "domestic",
+            `r2:${artifact.dataset}`,
+            error,
+          ),
+        );
+      }
+    }
+    const completedAt = new Date().toISOString();
+    const status =
+      failures.length === 0
+        ? "success"
+        : artifactManifests.length === 0
+          ? "failed"
+          : "partial";
+    const manifest: CollectionManifest = {
+      schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
+      source: "sbi-securities",
       runId,
       scope,
+      startedAt,
+      completedAt,
       status,
-      artifactCount: artifactManifests.length,
-      failureCount: failures.length,
-      manifestKey,
-      centralRunId: central.centralRunId,
-      centralSealed: central.sealed,
-    }),
-  );
-  return { ...manifest, manifestKey, central };
+      artifacts: artifactManifests,
+      failures,
+    };
+    const manifestKey = await diagnostic.step("manifest-write", () => storeManifest({
+      bucket: env.SNAPSHOTS,
+      prefix,
+      manifest,
+    }));
+    const central = await diagnostic.step("central-import", () => importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey));
+    console.log(
+      JSON.stringify({
+        event: "sbi-collection-stored",
+        runId,
+        scope,
+        status,
+        artifactCount: artifactManifests.length,
+        failureCount: failures.length,
+        manifestKey,
+        centralRunId: central.centralRunId,
+        centralSealed: central.sealed,
+      }),
+    );
+    diagnostic.finish(status);
+    return { ...manifest, manifestKey, central };
+  } catch (error) {
+    diagnostic.finish("failed");
+    throw error;
+  }
 }
 
 function authorized(request: Request, expected: string | undefined): boolean {
@@ -271,11 +280,8 @@ function failure(
   return {
     scope,
     operation,
-    errorType: error instanceof Error ? error.name : "UnknownError",
-    message:
-      error instanceof Error
-        ? redactError(error.message).slice(0, 300)
-        : "Unknown error",
+    errorType: safeErrorDetails(error).errorType,
+    message: JSON.stringify(safeErrorDetails(error)),
   };
 }
 

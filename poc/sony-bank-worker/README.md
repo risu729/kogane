@@ -105,3 +105,54 @@ wrangler secret put ADMIN_TRIGGER_TOKEN
 - Worker secrets: 上記2件
 
 PoCを廃棄するときは、R2の必要なraw artifactを退避した後にWorker、bucketの順で削除する。R2 bucketの削除は保存データを回復不能にするため、内容を確認してから行う。
+
+
+### Failure diagnostics
+
+Collection failures emit a structured `*-collection-failure` event before teardown,
+manifest storage, or central import. Join on `runId`; use `phase` to distinguish
+collection from manifest-write, raw-evidence-import, teardown, and relay events.
+The source R2 manifest retains the same three failure fields (`operation`,
+`errorType`, `message`). Its bounded message includes the safe stage and available
+HTTP status; structured logs expose these as `diagnostics` fields. The central
+importer continues to normalize failure messages, so use the source manifest or
+Worker logs for diagnosis.
+
+No exception message, stack, cause, request URL, credential, response body, or
+unrecognized provider text is logged. Sony logs only fixed operation IDs/currencies
+and the count of provider errors (no provider codes are currently approved for
+logging). Shinsei accepts only known browser stages and records whether authentication
+was attempted. Its relay events include `runId` and `peerClosed`; compare them with
+`*-container-teardown-start` before attributing a connection error to collection.
+An unknown stage stays `unknown-browser-stage`; a failed read is separate from
+subsequent `NotAttempted` reads. No retries or collection requests are added.
+
+### Empty JPY history and progress logs
+
+JPY now follows the same zero-transaction CSV rule as foreign currencies: after
+validating every official history JSON page, request CSV only when the total is
+positive. Keep the original zero-row JSON, balance and WALLET evidence; do not
+fabricate an empty CSV. A positive-history CSV error still fails collection.
+The central importer permits missing JPY CSV only with validated zero-row history
+evidence; the manifest and collection-summary field shapes remain unchanged.
+
+This matches Sony's public `eaba0600/search` frontend: its `csvdlBtn` section is
+rendered only after a successful history response with `countCnt !== 0`.
+Verified on 2026-09-05 in the official
+[history page module](https://sonybank.jp/pages/ea/_next/static/chunks/53a82944a612014e935388c108002b83322cace3.58e22f343a3103820839.js).
+The prior unconditional JPY CSV request could hit the same HTTP 500 behavior
+already observed for empty foreign-currency history.
+
+`sony-bank-progress` records use the run's `runId`, allowlisted stage/event and
+currency, page index/count, validated row/transaction counts, HTTP status,
+duration, and `zero_transactions` skip reason. `phase=request` records HTTP
+transport completion; `phase=collection` records validated collection steps.
+Thus HTTP 200 alone does not imply a valid JSON/history response. Validated
+counts are logged before requesting CSV, even if a later step fails. No URLs,
+credentials, financial bodies or free-text provider errors enter these records.
+Log emission is best effort and cannot replace a collection result or failure.
+
+Artifacts are still persisted after full collection returns. A failure midway
+does not yet preserve earlier fetched artifacts, so the failure manifest's
+default transaction count is not evidence that JPY history was empty; use the
+validated progress count instead.

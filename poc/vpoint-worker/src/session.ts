@@ -1,3 +1,4 @@
+import { logAuthTrace } from "./diagnostics";
 import { DurableObject } from "cloudflare:workers";
 import {
   beginVPointEmailLogin,
@@ -43,7 +44,7 @@ export class VPointSession extends DurableObject<Env> {
     return Boolean(pending && isFresh(pending.requestedAt));
   }
 
-  async ensureEmailChallenge(): Promise<EmailChallengeResult> {
+  async ensureEmailChallenge(runId = crypto.randomUUID()): Promise<EmailChallengeResult> {
     const existing = await this.state.storage.get<VPointEmailChallengeState>(
       PENDING_KEY,
     );
@@ -51,7 +52,7 @@ export class VPointSession extends DurableObject<Env> {
       return { status: "pending", requestedAt: existing.requestedAt };
     }
     if (this.authInFlight) return this.authInFlight;
-    this.authInFlight = this.createEmailChallenge();
+    this.authInFlight = this.createEmailChallenge(runId);
     try {
       return await this.authInFlight;
     } finally {
@@ -59,7 +60,7 @@ export class VPointSession extends DurableObject<Env> {
     }
   }
 
-  async completeEmailCode(code: string): Promise<{ status: "authenticated" }> {
+  async completeEmailCode(code: string, runId = crypto.randomUUID()): Promise<{ status: "authenticated" }> {
     const pending = await this.state.storage.get<VPointEmailChallengeState>(
       PENDING_KEY,
     );
@@ -68,7 +69,7 @@ export class VPointSession extends DurableObject<Env> {
       throw new Error("No current V Point email challenge");
     }
     try {
-      const result = await completeVPointEmailLogin({ state: pending, code });
+      const result = await completeVPointEmailLogin({ state: pending, code, onTrace: (trace) => logAuthTrace(runId, trace) });
       await this.state.storage.put(SESSION_KEY, result.sessionCookie);
       await this.state.storage.delete(PENDING_KEY);
       return { status: "authenticated" };
@@ -78,13 +79,13 @@ export class VPointSession extends DurableObject<Env> {
     }
   }
 
-  private async createEmailChallenge(): Promise<EmailChallengeResult> {
+  private async createEmailChallenge(runId: string): Promise<EmailChallengeResult> {
     await this.state.storage.delete(PENDING_KEY);
     const memberNumber = this.environment.VPOINT_MEMBER_NUMBER;
     if (!memberNumber) {
       throw new Error("Missing Worker secret: VPOINT_MEMBER_NUMBER");
     }
-    const challenge = await beginVPointEmailLogin({ memberNumber });
+    const challenge = await beginVPointEmailLogin({ memberNumber, onTrace: (trace) => logAuthTrace(runId, trace) });
     await this.state.storage.put(PENDING_KEY, challenge.state);
     return { status: "created", requestedAt: challenge.requestedAt };
   }

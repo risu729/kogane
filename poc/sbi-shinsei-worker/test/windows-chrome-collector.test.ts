@@ -43,6 +43,7 @@ describe("SBI Shinsei same-Chrome-context handoff", () => {
         operation: "read:balance-summary-and-stage",
         errorType: "ProviderReadError",
         message: "provider_read_failed",
+        diagnostics: { stage: "balance-summary-http-503", httpStatus: 503 },
       },
       {
         operation: "read:exchange-rate",

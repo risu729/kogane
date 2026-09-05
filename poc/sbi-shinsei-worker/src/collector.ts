@@ -1,3 +1,4 @@
+import { BrowserCollectionError } from "./diagnostics";
 import { parseCredential } from "./credential";
 import { UnknownResponseShapeError } from "./errors";
 import { parseCollectionResult } from "./local/windows-chrome-collector";
@@ -30,9 +31,7 @@ export async function collectSbiShinsei(options: {
     credential.powerDirectPassword = "";
     const handoff = parseHandoffEnvelope(handoffJson);
     if (handoff.ok !== true) {
-      throw new Error(
-        `SBI Shinsei browser collection stopped at ${handoff.stage}`,
-      );
+      throw new BrowserCollectionError(handoff.stage, handoff.authenticationAttempted);
     }
     const result = parseCollectionResult(
       handoffJson,
@@ -46,7 +45,7 @@ export async function collectSbiShinsei(options: {
 
 function parseHandoffEnvelope(value: unknown):
   | { ok: true }
-  | { ok: false; stage: string } {
+  | { ok: false; stage: string; authenticationAttempted: boolean } {
   if (typeof value !== "string" || value.length > 10 * 1024 * 1024) {
     throw new UnknownResponseShapeError(
       "Browser collection handoff was not bounded JSON text",
@@ -70,7 +69,7 @@ function parseHandoffEnvelope(value: unknown):
     typeof record.authenticationAttempted === "boolean" &&
     Object.keys(record).length === 3
   ) {
-    return { ok: false, stage: record.stage };
+    return { ok: false, stage: record.stage, authenticationAttempted: record.authenticationAttempted };
   }
   throw new UnknownResponseShapeError(
     "Browser collection handoff had an unknown envelope",

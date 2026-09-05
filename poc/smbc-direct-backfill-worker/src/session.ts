@@ -1,3 +1,4 @@
+import { createDiagnostics } from "../../collector-diagnostics/src/index";
 import { DurableObject } from "cloudflare:workers";
 import { decryptJson, encryptJson, parseCredentials } from "./crypto";
 import { japanToday, monthRanges, validateDate } from "./dates";
@@ -166,6 +167,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
 
       const startedAt = new Date().toISOString();
       const runId = crypto.randomUUID();
+      const diagnostic = createDiagnostics("smbc-direct", runId);
       const prefix = runPrefix(startedAt, runId);
       const artifacts: StoredArtifact[] = [];
       const session = await encryptJson(profile.export(), this.env.SESSION_ENCRYPTION_KEY);
@@ -188,7 +190,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
       });
       await this.ctx.storage.delete("challenge");
       try {
-        const balance = await profile.getBalance();
+        const balance = await diagnostic.step("balance-collection", () => profile.getBalance());
         upsertArtifact(artifacts, await storeBytes({
           bucket: this.env.SNAPSHOTS,
           key: `${prefix}/balance.raw.json.sjis`,
@@ -243,13 +245,17 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         await decryptJson<AuthenticatedSession>(encrypted, this.env.SESSION_ENCRYPTION_KEY),
         this.env.TAMIA,
       );
+      const diagnostic = createDiagnostics("smbc-direct", progress.runId);
       const prefix = runPrefix(progress.startedAt, progress.runId);
+      let stage = "transactions-collection";
       try {
         for (let index = 0; index < CHUNKS_PER_ALARM; index += 1) {
           const range = ranges[progress.completedChunks];
           if (!range) break;
-          const result = await profile.getTransactions(range);
+          stage = "transactions-collection";
+          const result = await diagnostic.step(stage, () => profile.getTransactions(range));
           const rangeName = `${range.start.replaceAll("-", "")}-${range.end.replaceAll("-", "")}`;
+          stage = "artifact-write";
           const rawArtifact = await storeBytes({
             bucket: this.env.SNAPSHOTS,
             key: `${prefix}/transactions/${rangeName}.raw.json.sjis`,
@@ -287,11 +293,13 @@ export class SmbcBackfillSession extends DurableObject<Env> {
             retryCount: 0,
             lastErrorCode: null,
           };
+          stage = "progress-persist";
           await this.ctx.storage.put({
             progress,
             artifacts,
             session: await encryptJson(profile.export(), this.env.SESSION_ENCRYPTION_KEY),
           });
+          stage = "manifest-write";
           progress.manifestKey = await storeManifest(
             this.env.SNAPSHOTS,
             prefix,
@@ -303,7 +311,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         if (progress.completedChunks >= ranges.length) {
           let logoutSucceeded = false;
           try {
-            await profile.logout();
+            await diagnostic.step("logout", () => profile.logout());
             logoutSucceeded = true;
           } catch {
             failureCodes.push("logout_failed");
@@ -323,6 +331,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           await this.ctx.storage.put({ progress: completed, artifacts, failureCodes });
           await this.ctx.storage.delete("session");
           await this.ctx.storage.deleteAlarm();
+          diagnostic.finish(completed.phase === "success" ? "success" : "partial");
           console.log(JSON.stringify({
             message: "smbc_backfill_complete",
             runId: completed.runId,
@@ -336,6 +345,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
 
         await this.ctx.storage.setAlarm(Date.now());
       } catch (error) {
+        if (stage !== "transactions-collection") diagnostic.failure(stage, error);
         const errorCode = classifyError(error);
         const retryCount = progress.retryCount + 1;
         const retrying: BackfillProgress = { ...progress, retryCount, lastErrorCode: errorCode };
@@ -344,6 +354,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           artifacts,
           session: await encryptJson(profile.export(), this.env.SESSION_ENCRYPTION_KEY),
         });
+        diagnostic.retry(stage, retryCount, retryCount <= MAX_RETRIES);
         if (retryCount <= MAX_RETRIES) {
           await this.ctx.storage.setAlarm(Date.now() + 2 ** retryCount * 2_000);
           return;
@@ -388,6 +399,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     await this.ctx.storage.put({ progress: failed, artifacts, failureCodes });
     await this.ctx.storage.delete("session");
     await this.ctx.storage.deleteAlarm();
+    if (failed.runId) createDiagnostics("smbc-direct", failed.runId).finish(failed.phase === "partial" ? "partial" : "failed");
     console.error(JSON.stringify({
       message: "smbc_backfill_failed",
       runId: failed.runId,

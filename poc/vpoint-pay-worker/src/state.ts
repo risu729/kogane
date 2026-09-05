@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { credentialFromSecrets, inspectCredential, type CredentialStatus } from "./credentials";
 import { collectVPointPay } from "./vpoint-pay";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import type {
@@ -30,6 +31,20 @@ export class VPointPayCredentialState extends DurableObject<Env> {
     } finally {
       this.collectionInFlight = null;
     }
+  }
+
+  async credentialStatus(): Promise<CredentialStatus> {
+    const [refreshToken, deviceUuid] = await Promise.all([
+      this.state.storage.get<string>(REFRESH_TOKEN_KEY),
+      this.state.storage.get<string>(DEVICE_UUID_KEY),
+    ]);
+    if (refreshToken && deviceUuid) {
+      return inspectCredential({ refreshToken, deviceUuid }, "durable-object");
+    }
+    return inspectCredential({
+      refreshToken: this.environment.VPOINT_PAY_REFRESH_TOKEN,
+      deviceUuid: this.environment.VPOINT_PAY_DEVICE_UUID,
+    }, "worker-secrets");
   }
 
   async resetFromSecrets(): Promise<{ status: "reset" }> {
@@ -132,23 +147,6 @@ export class VPointPayCredentialState extends DurableObject<Env> {
     }));
     return { ...manifest, manifestKey };
   }
-}
-
-function credentialFromSecrets(env: Env): VPointPayCredential {
-  const refreshToken = requiredSecret(
-    env.VPOINT_PAY_REFRESH_TOKEN,
-    "VPOINT_PAY_REFRESH_TOKEN",
-  );
-  const deviceUuid = requiredSecret(
-    env.VPOINT_PAY_DEVICE_UUID,
-    "VPOINT_PAY_DEVICE_UUID",
-  );
-  return { refreshToken, deviceUuid };
-}
-
-function requiredSecret(value: string | undefined, name: string): string {
-  if (!value) throw new Error(`Missing Worker secret: ${name}`);
-  return value;
 }
 
 function failure(operation: string, error: unknown): CollectionFailure {

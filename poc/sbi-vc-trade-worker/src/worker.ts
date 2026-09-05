@@ -1,3 +1,4 @@
+import { createDiagnostics } from "../../collector-diagnostics/src/index";
 import { DurableObject } from "cloudflare:workers";
 import { collectSbiVcTrade } from "./collector";
 import { decryptSession, encryptSession } from "./crypto";
@@ -79,77 +80,85 @@ export class SbiVcSessionState extends DurableObject<Env> {
   async #performCollection(): Promise<CollectionSummary> {
     const startedAt = new Date().toISOString();
     const runId = crypto.randomUUID();
-    const prefix = runPrefix(startedAt, runId);
-    const artifacts: StoredArtifact[] = [];
-    const failures: CollectionFailure[] = [];
-    let operation = "load_session";
+    const diagnostic = createDiagnostics("sbi-vc-trade", runId);
     try {
-      const session = await this.loadSession(startedAt);
-      operation = "collect";
-      await collectSbiVcTrade({
-        session,
-        onSession: async (updated) => {
-          operation = "persist_session";
-          await this.ctx.storage.put("session", await encryptSession(updated, this.env.SESSION_ENCRYPTION_KEY));
-          operation = "collect";
-        },
-        onArtifact: async (artifact) => {
-          operation = `r2_${artifact.dataset}`;
-          artifacts.push(await storeArtifact({
-            bucket: this.env.SNAPSHOTS,
-            prefix,
-            runId,
-            artifact,
-          }));
-          operation = "collect";
-        },
-      });
+      const prefix = runPrefix(startedAt, runId);
+      const artifacts: StoredArtifact[] = [];
+      const failures: CollectionFailure[] = [];
+      let operation = "load_session";
+      try {
+        const session = await diagnostic.step("session-load", () => this.loadSession(startedAt));
+        operation = "collect";
+        await diagnostic.step("collection", () => collectSbiVcTrade({
+          session,
+          diagnostic,
+          onSession: async (updated) => {
+            operation = "persist_session";
+            await diagnostic.step("session-persist", async () => this.ctx.storage.put("session", await encryptSession(updated, this.env.SESSION_ENCRYPTION_KEY)));
+            operation = "collect";
+          },
+          onArtifact: async (artifact) => {
+            operation = `r2_${artifact.dataset}`;
+            artifacts.push(await diagnostic.step("artifact-write", () => storeArtifact({
+              bucket: this.env.SNAPSHOTS,
+              prefix,
+              runId,
+              artifact,
+            })));
+            operation = "collect";
+          },
+        }));
+      } catch (error) {
+        failures.push({ operation, errorCode: classifyError(error) });
+      }
+      const completedAt = new Date().toISOString();
+      const status: CollectionManifest["status"] = failures.length === 0
+        ? "success"
+        : artifacts.length === 0
+          ? "failed"
+          : "partial";
+      const manifest: CollectionManifest = {
+        schemaVersion: this.env.COLLECTOR_SCHEMA_VERSION,
+        source: "sbi-vc-trade",
+        runId,
+        startedAt,
+        completedAt,
+        status,
+        artifacts,
+        failures,
+      };
+      const manifestKey = await diagnostic.step("manifest-write", () => storeManifest({ bucket: this.env.SNAPSHOTS, prefix, manifest }));
+      const central = artifacts.length <= MAX_SYNCHRONOUS_RAW_EVIDENCE_ARTIFACTS
+        ? await diagnostic.step("central-import", () => importStoredRun(this.env.RAW_EVIDENCE_IMPORTER, manifestKey))
+        : {
+            deferred: true as const,
+            reason: "worker-invocation-chain-limit" as const,
+            artifactCount: artifacts.length + 1,
+          };
+      console.log(JSON.stringify({
+        message: "sbi_vc_collection",
+        runId,
+        status,
+        artifactCount: artifacts.length,
+        failureCount: failures.length,
+        manifestKey,
+        ...("deferred" in central
+          ? { centralDeferred: true, centralDeferredReason: central.reason }
+          : { centralRunId: central.centralRunId, centralSealed: central.sealed }),
+      }));
+      diagnostic.finish(status);
+      return {
+        runId,
+        status,
+        artifactCount: artifacts.length,
+        failureCount: failures.length,
+        manifestKey,
+        central,
+      };
     } catch (error) {
-      failures.push({ operation, errorCode: classifyError(error) });
+      diagnostic.finish("failed");
+      throw error;
     }
-    const completedAt = new Date().toISOString();
-    const status: CollectionManifest["status"] = failures.length === 0
-      ? "success"
-      : artifacts.length === 0
-        ? "failed"
-        : "partial";
-    const manifest: CollectionManifest = {
-      schemaVersion: this.env.COLLECTOR_SCHEMA_VERSION,
-      source: "sbi-vc-trade",
-      runId,
-      startedAt,
-      completedAt,
-      status,
-      artifacts,
-      failures,
-    };
-    const manifestKey = await storeManifest({ bucket: this.env.SNAPSHOTS, prefix, manifest });
-    const central = artifacts.length <= MAX_SYNCHRONOUS_RAW_EVIDENCE_ARTIFACTS
-      ? await importStoredRun(this.env.RAW_EVIDENCE_IMPORTER, manifestKey)
-      : {
-          deferred: true as const,
-          reason: "worker-invocation-chain-limit" as const,
-          artifactCount: artifacts.length + 1,
-        };
-    console.log(JSON.stringify({
-      message: "sbi_vc_collection",
-      runId,
-      status,
-      artifactCount: artifacts.length,
-      failureCount: failures.length,
-      manifestKey,
-      ...("deferred" in central
-        ? { centralDeferred: true, centralDeferredReason: central.reason }
-        : { centralRunId: central.centralRunId, centralSealed: central.sealed }),
-    }));
-    return {
-      runId,
-      status,
-      artifactCount: artifacts.length,
-      failureCount: failures.length,
-      manifestKey,
-      central,
-    };
   }
 
   async #performReauthenticate(force: boolean): Promise<HealthState> {

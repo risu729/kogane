@@ -1,3 +1,4 @@
+import { createDiagnostics, safeErrorDetails } from "../../collector-diagnostics/src/index";
 import { timingSafeEqual } from "node:crypto";
 import { collectMobileSuica, parseSessionEnvelope } from "./mobile-suica";
 import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
@@ -140,76 +141,84 @@ export default {
 async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionResult> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
-  const prefix = runPrefix(startedAt, runId);
-  const artifacts: StoredArtifact[] = [];
-  const failures: CollectionFailure[] = [];
-  let transactionCount = 0;
-  let pageCount = 0;
-  let complete = false;
-  let capturedSessionAt: string | undefined;
-
+  const diagnostic = createDiagnostics("mobile-suica", runId);
   try {
-    const credential = parseStoredJreCredential(
-      requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
-    );
-    const session = parseSessionEnvelope(JSON.stringify(
-      await bootstrapMobileSuicaSessionWithBrowser(env.BROWSER, credential),
-    ));
-    capturedSessionAt = session.capturedAt;
-    const collection = await collectMobileSuica({ session, asOfDateJst });
-    transactionCount = collection.rows.length;
-    pageCount = collection.pageCount;
-    complete = collection.complete;
-    if (!collection.complete) {
-      failures.push({
-        operation: "pagination",
-        errorType: "HistoryBoundaryError",
-        errorCode: "history_boundary_unproven",
-      });
-    }
-    for (const artifact of collection.artifacts) {
-      try {
-        artifacts.push(await storeArtifact({ bucket: env.SNAPSHOTS, prefix, runId, artifact }));
-      } catch (error) {
-        failures.push(failure("r2", error, "artifact_store_failed", artifact.filename));
-      }
-    }
-  } catch (error) {
-    failures.push(failure("collect", error, "collection_failed"));
-  }
+    const prefix = runPrefix(startedAt, runId);
+    const artifacts: StoredArtifact[] = [];
+    const failures: CollectionFailure[] = [];
+    let transactionCount = 0;
+    let pageCount = 0;
+    let complete = false;
+    let capturedSessionAt: string | undefined;
 
-  const completedAt = new Date().toISOString();
-  const status = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
-  const manifest: CollectionManifest = {
-    schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
-    source: "mobile-suica",
-    runId,
-    startedAt,
-    completedAt,
-    status,
-    asOfDateJst,
-    ...(capturedSessionAt ? { capturedSessionAt } : {}),
-    transactionCount,
-    pageCount,
-    complete,
-    artifacts,
-    failures,
-  };
-  const manifestKey = await storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest });
-  const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey);
-  console.log(JSON.stringify({
-    event: "mobile-suica-collection-stored",
-    runId,
-    status,
-    transactionCount,
-    pageCount,
-    artifactCount: artifacts.length,
-    failureCount: failures.length,
-    manifestKey,
-    centralStatus: central.status,
-    centralRunId: central.centralRunId,
-  }));
-  return { ...manifest, manifestKey, central };
+    try {
+      const credential = await diagnostic.step("configuration", () => parseStoredJreCredential(
+        requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
+      ));
+      const session = await diagnostic.step("browser-bootstrap", async () => parseSessionEnvelope(JSON.stringify(
+        await bootstrapMobileSuicaSessionWithBrowser(env.BROWSER, credential),
+      )));
+      capturedSessionAt = session.capturedAt;
+      const collection = await diagnostic.step("history-collection", () => collectMobileSuica({ session, asOfDateJst }));
+      transactionCount = collection.rows.length;
+      pageCount = collection.pageCount;
+      complete = collection.complete;
+      if (!collection.complete) {
+        diagnostic.failure("pagination", new Error("history_boundary_unproven"));
+        failures.push({
+          operation: "pagination",
+          errorType: "HistoryBoundaryError",
+          errorCode: "history_boundary_unproven",
+        });
+      }
+      for (const artifact of collection.artifacts) {
+        try {
+          artifacts.push(await diagnostic.step("artifact-write", () => storeArtifact({ bucket: env.SNAPSHOTS, prefix, runId, artifact })));
+        } catch (error) {
+          failures.push(failure("r2", error, "artifact_store_failed", artifact.filename));
+        }
+      }
+    } catch (error) {
+      failures.push(failure("collect", error, "collection_failed"));
+    }
+
+    const completedAt = new Date().toISOString();
+    const status = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
+    const manifest: CollectionManifest = {
+      schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
+      source: "mobile-suica",
+      runId,
+      startedAt,
+      completedAt,
+      status,
+      asOfDateJst,
+      ...(capturedSessionAt ? { capturedSessionAt } : {}),
+      transactionCount,
+      pageCount,
+      complete,
+      artifacts,
+      failures,
+    };
+    const manifestKey = await diagnostic.step("manifest-write", () => storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest }));
+    const central = await diagnostic.step("central-import", () => importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey));
+    console.log(JSON.stringify({
+      event: "mobile-suica-collection-stored",
+      runId,
+      status,
+      transactionCount,
+      pageCount,
+      artifactCount: artifacts.length,
+      failureCount: failures.length,
+      manifestKey,
+      centralStatus: central.status,
+      centralRunId: central.centralRunId,
+    }));
+    diagnostic.finish(status);
+    return { ...manifest, manifestKey, central };
+  } catch (error) {
+    diagnostic.finish("failed");
+    throw error;
+  }
 }
 
 function authorized(request: Request, expected: string | undefined): boolean {
@@ -247,7 +256,7 @@ function failure(
 ): CollectionFailure {
   return {
     operation,
-    errorType: error instanceof Error ? error.name : "UnknownError",
+    errorType: safeErrorDetails(error).errorType,
     errorCode,
     ...(artifactKey ? { artifactKey } : {}),
   };

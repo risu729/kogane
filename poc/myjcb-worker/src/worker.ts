@@ -1,3 +1,4 @@
+import { createDiagnostics, safeErrorDetails } from "../../collector-diagnostics/src/index";
 import { collectConnection, parseCredentialSecrets } from "./collector";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import type {
@@ -60,82 +61,84 @@ async function runCollection(
 ): Promise<{ manifest: CollectionManifest; manifestKey: string }> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
-  const prefix = runPrefix(startedAt, runId);
-  const credentials = parseCredentialSecrets(connectionSecretValues(env));
-  const artifacts: StoredArtifact[] = [];
-  const connections: ConnectionSummary[] = [];
-  const failures: CollectionFailure[] = [];
+  const diagnostic = createDiagnostics("myjcb", runId);
+  try {
+    const prefix = runPrefix(startedAt, runId);
+    const credentials = await diagnostic.step("configuration", () => parseCredentialSecrets(connectionSecretValues(env)));
+    const artifacts: StoredArtifact[] = [];
+    const connections: ConnectionSummary[] = [];
+    const failures: CollectionFailure[] = [];
 
-  for (const credential of credentials) {
-    try {
-      const collected = await collectConnection({
-        browserBinding: env.BROWSER,
-        credential,
-      });
-      let stored = 0;
-      for (const artifact of collected.artifacts) {
-        try {
-          artifacts.push(await storeArtifact({
-            bucket: env.SNAPSHOTS,
-            prefix,
-            connectionId: credential.connectionId,
-            artifact,
-          }));
-          stored += 1;
-        } catch (error) {
-          failures.push(failure(credential.connectionId, `r2:${artifact.dataset}`, error));
+    for (const credential of credentials) {
+      try {
+        const collected = await diagnostic.step("connection-collection", () => collectConnection({
+          browserBinding: env.BROWSER,
+          credential,
+          diagnostic,
+        }));
+        let stored = 0;
+        for (const artifact of collected.artifacts) {
+          try {
+            artifacts.push(await diagnostic.step("artifact-write", () => storeArtifact({
+              bucket: env.SNAPSHOTS,
+              prefix,
+              connectionId: credential.connectionId,
+              artifact,
+            })));
+            stored += 1;
+          } catch (error) {
+            failures.push(failure(credential.connectionId, `r2:${artifact.dataset}`, error));
+          }
         }
+        connections.push({
+          ...collected.summary,
+          status: stored === collected.artifacts.length ? "success" : "partial",
+          artifactCount: stored,
+        });
+      } catch (error) {
+        const humanRequired = error instanceof HumanRequiredError;
+        connections.push({
+          connectionId: credential.connectionId,
+          bootstrapMode: credential.bootstrapMode,
+          status: humanRequired ? "human-required" : "failed",
+          cardCount: 0,
+          periodCount: 0,
+          artifactCount: 0,
+          blocker: publicError(error),
+        });
+        failures.push(failure(credential.connectionId, "collect", error));
       }
-      connections.push({
-        ...collected.summary,
-        status: stored === collected.artifacts.length ? "success" : "partial",
-        artifactCount: stored,
-      });
-    } catch (error) {
-      const humanRequired = error instanceof HumanRequiredError;
-      console.warn(JSON.stringify({
-        event: "myjcb-connection-failed",
-        connectionId: credential.connectionId,
-        bootstrapMode: credential.bootstrapMode,
-        code: publicError(error),
-      }));
-      connections.push({
-        connectionId: credential.connectionId,
-        bootstrapMode: credential.bootstrapMode,
-        status: humanRequired ? "human-required" : "failed",
-        cardCount: 0,
-        periodCount: 0,
-        artifactCount: 0,
-        blocker: publicError(error),
-      });
-      failures.push(failure(credential.connectionId, "collect", error));
     }
-  }
 
-  const completedAt = new Date().toISOString();
-  const manifest: CollectionManifest = {
-    schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
-    source: "myjcb",
-    runId,
-    startedAt,
-    completedAt,
-    status: failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial",
-    trigger,
-    connections,
-    artifacts,
-    failures,
-  };
-  const manifestKey = await storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest });
-  console.log(JSON.stringify({
-    event: "myjcb-collection-stored",
-    runId,
-    status: manifest.status,
-    connectionCount: connections.length,
-    artifactCount: artifacts.length,
-    failureCount: failures.length,
-    manifestKey,
-  }));
-  return { manifest, manifestKey };
+    const completedAt = new Date().toISOString();
+    const manifest: CollectionManifest = {
+      schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
+      source: "myjcb",
+      runId,
+      startedAt,
+      completedAt,
+      status: failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial",
+      trigger,
+      connections,
+      artifacts,
+      failures,
+    };
+    const manifestKey = await diagnostic.step("manifest-write", () => storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest }));
+    console.log(JSON.stringify({
+      event: "myjcb-collection-stored",
+      runId,
+      status: manifest.status,
+      connectionCount: connections.length,
+      artifactCount: artifacts.length,
+      failureCount: failures.length,
+      manifestKey,
+    }));
+    diagnostic.finish(manifest.status);
+    return { manifest, manifestKey };
+  } catch (error) {
+    diagnostic.finish("failed");
+    throw error;
+  }
 }
 
 async function authorized(request: Request, expected: string | undefined): Promise<boolean> {
@@ -196,7 +199,7 @@ function failure(
   return {
     connectionId,
     operation,
-    errorType: error instanceof Error ? error.name : "UnknownError",
+    errorType: safeErrorDetails(error).errorType,
     message: publicError(error),
   };
 }

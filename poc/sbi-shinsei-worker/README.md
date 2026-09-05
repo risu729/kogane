@@ -170,3 +170,127 @@ PoCを廃止するときは、次をまとめて削除します。現在はlive�
 - Container applicationとimage revisions;
 - TAMIAの`tunnel_id`を直接指定するVPC binding設定;
 - local Docker test container/image（検証終了後に削除）。
+
+
+### Failure diagnostics
+
+Collection failures emit a structured `*-collection-failure` event before teardown,
+manifest storage, or central import. Join on `runId`; use `phase` to distinguish
+collection from manifest-write, raw-evidence-import, teardown, and relay events.
+The source R2 manifest retains the same three failure fields (`operation`,
+`errorType`, `message`). Its bounded message includes the safe stage and available
+HTTP status; structured logs expose these as `diagnostics` fields. The central
+importer continues to normalize failure messages, so use the source manifest or
+Worker logs for diagnosis.
+
+No exception message, stack, cause, request URL, credential, response body, or
+unrecognized provider text is logged. Sony logs only fixed operation IDs/currencies
+and the count of provider errors (no provider codes are currently approved for
+logging). Shinsei accepts only known browser stages and records whether authentication
+was attempted. Relay events include `runId`, a relay-specific `relayId`, stage,
+duration, and close reason. A transport error observed before close remains an
+error. Socket/stream rejections after peer or upstream closure are informational
+`expected-close` cleanup events, rather than collection failures. Every socket and
+stream lifecycle promise is observed, and cleanup releases readers and writers.
+An unknown stage stays `unknown-browser-stage`; a failed read is separate from
+subsequent `NotAttempted` reads. No retries or collection requests are added.
+
+Worker `sbi-shinsei-stage` and Container `sbi-shinsei-container-stage` events provide
+stage start/end durations, including browser login, authenticated reads, storage,
+central import and teardown. A validated partial handoff logs `partial`, and the
+source terminal outcome remains distinct from central import and cleanup. The
+Container image must be rebuilt to include `stage-diagnostics.mjs`; deploying only
+the Worker updates relay cleanup but does not update browser-side stage logging.
+
+The Container CONNECT proxy now sends a normal WebSocket close (code 1000) on
+local TCP closure and waits for all active relay handshakes before returning
+from shutdown, including relays whose TCP socket has already disappeared. Only
+connection failures or a two-second close timeout force termination. Abrupt
+termination can otherwise appear as a runtime `Network connection lost` exception
+in the Cloudflare response pump even after application cleanup promises settle.
+`sbi-shinsei-container-relay-closed` records the bounded close code and outcome.
+TCP EOF retains the stream's existing data flush, then sends explicit close code
+1000 through the relay's public WebSocket close method. Explicit peer close codes
+pass through unchanged. An unexpected code 1006 remains `abnormal-close`
+even if the WebSocket did not emit a separate error event.
+Chrome-side TCP resets retain `failureStage=local-tcp`, but an already established
+Worker WebSocket still completes a normal close handshake. Worker relay events
+include only the bounded peer close code and `wasClean` flag, never close reason
+text, so platform-level disconnections can be distinguished from application
+cleanup without exposing connection details.
+Run `bun run test:relay` for loopback WebSocket tests of normal closure, delayed
+handshakes, shutdown, and timeout fallback; these require only the root dev dependency.
+
+Container lifecycle hooks retain bounded exit codes and fixed stop/error reasons.
+HTTP 500 diagnostics distinguish the SDK's startup, disconnected-transport and
+proxy-error envelopes using a maximum 2 KiB, one-second read; response text is
+discarded. Unknown or unreadable responses stay unclassified. A 500 alone does
+not prove that the Node process crashed; source completion and central import
+remain separate outcomes. These diagnostic changes do not retry collection.
+
+### Correlate relay activity and unused preconnections
+
+The Container sends one empty binary WebSocket data frame when the relay opens,
+before acknowledging CONNECT or forwarding TLS data. `initial-frame-queued`
+records this zero-byte frame; it adds one queued frame and no queued bytes, and
+does not count as a closing event. The Worker ignores empty payloads for upstream
+connection creation, so an unused preconnection still creates no VPC socket.
+Initial send failures remain visible and bounded by the connection deadline.
+This preserves TLS byte order and addresses the observed zero-message close
+case; collection success and runtime-error absence still need live verification.
+
+Join Container and Worker relay logs using `runId` and `relayId`: each CONNECT
+relay generates a UUID that the Worker accepts only after validation. Container
+events record fixed target labels, sent/received data-message counts and bytes,
+sampled buffer sizes, requested/received close codes, and an ordered close timeline.
+`firstCloseEvent` is the first observed closing event, not proof of which remote
+component initiated shutdown; later stage events may follow the terminal record.
+Worker counters distinguish WebSocket receipt, completed upstream writes,
+upstream reads, and queued WebSocket replies, with pending-write counts, sequence
+numbers and activity/cleanup timings. Queued bytes do not prove peer delivery,
+and completed socket writes do not prove that the bank processed those bytes.
+
+The HTTPS relay creates its upstream VPC socket only when the first non-empty
+client data reaches the write queue. An unused browser preconnection can therefore
+close normally with `socketCreated=false` and zero upstream traffic; no VPC socket
+was created for that connection. `socketCreated=true` distinguishes a connection
+that reached the upstream transport. The destination allowlist and port443 policy
+remain unchanged. Use these fields to locate a failure boundary; they do not by
+themselves establish the cause of a platform runtime exception. Payloads, tokens,
+URLs and arbitrary exception text remain excluded from diagnostics.
+
+### Verify the Container rollout before a manual smoke run
+
+A completed Worker deployment does not mean the Container image rollout has
+finished. A newly assigned Durable Object can receive an older prewarmed image
+while that rollout is replacing instances. The platform can then stop that image
+during an authenticated read, producing an SDK HTTP 500 even when the bank login
+succeeded. Do not attribute an unclassified Container HTTP 500 to the bank.
+
+Before manually triggering a smoke run, wait until the latest Container rollout
+is `completed`, its target version/image matches the application's current
+version/image, and any available prewarmed instances match that image. Do not
+deploy another Container revision while the smoke run is in progress. After the
+run, verify the actual assigned instance image as well; a successful run on an
+older image does not validate the newly deployed code.
+
+These read-only Cloudflare API endpoints expose the required metadata. Paths are
+relative to `https://api.cloudflare.com/client/v4`; use the existing authenticated
+operator session and substitute the relevant IDs:
+
+| GET endpoint | Verification |
+| --- | --- |
+| `/accounts/<ACCOUNT_ID>/containers/applications/<APP_ID>` | Current application `version` and `configuration.image`. |
+| `/accounts/<ACCOUNT_ID>/containers/applications/<APP_ID>/rollouts` | Latest rollout by `created_at`: `status`, `target_version`, and `target_configuration.image`. |
+| `/accounts/<ACCOUNT_ID>/containers/dash/applications/<APP_ID>/instances` | Available instances and assigned `durable_objects`; resolve the run's `run-<RUN_ID>` name to its Durable Object ID. |
+| `/accounts/<ACCOUNT_ID>/containers/dash/applications/<APP_ID>/instances/<DURABLE_OBJECT_ID>` | Actual `instance.app_version`, `instance.image`, and historical `placements[].events` / `placements[].status`. This endpoint also retains stopped-instance details omitted from the active instance list. |
+
+For a stopped instance, inspect the `VMStopped` event's `statusChange` fields,
+especially `runtime_reason` and `container_exit_code`, and compare its timestamp
+with the collection failure and teardown logs. A recorded `runtime_reason=rollout`
+identifies replacement by a deployment; a missing exit code is unknown, not zero.
+Memory usage near the instance limit alone does not establish an OOM failure.
+
+Keep inspection output to version/image, event name/time, health, runtime reason,
+and exit code. Instance responses can also contain environment variables and
+secret configuration: never dump the full response into logs, tickets or fixtures.

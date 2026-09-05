@@ -25,6 +25,14 @@ export interface CollectionFailure {
   operation: string;
   errorType: string;
   message: string;
+  diagnostics?: {
+    stage: string;
+    reason: string;
+    providerOperation?: string;
+    currency?: string;
+    httpStatus?: number;
+    providerErrorCount?: number;
+  };
 }
 
 export interface CollectionManifest {

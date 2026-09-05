@@ -1,3 +1,4 @@
+import { createDiagnostics, safeErrorDetails } from "../../collector-diagnostics/src/index";
 import { randomUUID } from "node:crypto";
 import {
   AUTH_KEY_SHA256,
@@ -194,12 +195,12 @@ function requireSecret(value: string | undefined, name: string): string {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message.slice(0, 500) : "Unknown error";
+  return JSON.stringify(safeErrorDetails(error));
 }
 
 async function jsonResponse(response: Response, label: string): Promise<RawJsonResponse> {
   const rawText = await response.text();
-  if (!response.ok) throw new Error(`${label} failed with HTTP ${response.status}`);
+  if (!response.ok) throw Object.assign(new Error(`${label} failed with HTTP ${response.status}`), { httpStatus: response.status });
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawText);
@@ -427,6 +428,8 @@ async function captureCard(
   const prefix =
     `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}/${cardLabel}`;
   const { cookies, cardList, cards } = session;
+  const diagnostic = createDiagnostics("vpass", runId);
+  let stage = "card-selection";
   try {
     const selectedCard = cards[selectedCardZeroBased];
     if (!selectedCard) {
@@ -438,6 +441,7 @@ async function captureCard(
     const selection = await memberPost(cookies, CARD_SELECT_PATH, {
       cardIdentifyKey: selectedCard,
     });
+    stage = "statement-discovery";
     const top = await memberPost(cookies, MEISAI_TOP_PATH, {});
     const months = availableMonths(top.json);
     if (months.length === 0) throw new Error(`${cardLabel} returned no available statement months`);
@@ -447,6 +451,7 @@ async function captureCard(
     const monthResults: Record<string, { pages: number; transactions: number }> = {};
     const captures: Record<string, MonthCapture> = {};
     for (const month of months) {
+      stage = "statement-collection";
       const result = await collectMonth(cookies, month);
       captures[month] = result;
       monthResults[month] = {
@@ -468,6 +473,7 @@ async function captureCard(
       transactionCount,
       objectCount: 2,
     };
+    stage = "artifact-write";
     await putJson(
       env,
       `${prefix}/snapshot.json`,
@@ -481,6 +487,7 @@ async function captureCard(
         months: captures,
       }),
     );
+    stage = "manifest-write";
     await putJson(
       env,
       `${prefix}/manifest.json`,
@@ -488,6 +495,7 @@ async function captureCard(
     );
     return summary;
   } catch (error) {
+    diagnostic.failure(stage, error);
     await putCardError(env, prefix, runId, started, selectedCardZeroBased, error);
     throw error;
   }
@@ -503,14 +511,23 @@ async function collectOneCard(
   const cardLabel = `card-${String(selectedCardZeroBased + 1).padStart(3, "0")}`;
   const prefix =
     `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}/${cardLabel}`;
+  const diagnostic = createDiagnostics("vpass", runId);
   let session: VpassSession;
   try {
-    session = await openSession(env);
+    session = await diagnostic.step("session-open", () => openSession(env));
   } catch (error) {
+    diagnostic.finish("failed");
     await putCardError(env, prefix, runId, started, selectedCardZeroBased, error);
     throw error;
   }
-  return captureCard(env, session, selectedCardZeroBased, started, runId);
+  try {
+    const result = await diagnostic.step("card-collection", () => captureCard(env, session, selectedCardZeroBased, started, runId));
+    diagnostic.finish("success");
+    return result;
+  } catch (error) {
+    diagnostic.finish("failed");
+    throw error;
+  }
 }
 
 async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCardsRunSummary> {
@@ -518,10 +535,12 @@ async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCard
   const runId = safeRunId(started);
   const runPrefix =
     `vpass/${started.toISOString().slice(0, 10).replaceAll("-", "/")}/${runId}`;
+  const diagnostic = createDiagnostics("vpass", runId);
   let session: VpassSession;
   try {
-    session = await openSession(env);
+    session = await diagnostic.step("session-open", () => openSession(env));
   } catch (error) {
+    diagnostic.finish("failed");
     await putJson(
       env,
       `${runPrefix}/error.json`,
@@ -545,7 +564,7 @@ async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCard
   const failures: number[] = [];
   for (let index = 0; index < session.cards.length; index += 1) {
     try {
-      summaries.push(await captureCard(env, session, index, started, runId));
+      summaries.push(await diagnostic.step("card-collection", () => captureCard(env, session, index, started, runId)));
     } catch {
       failures.push(index + 1);
     }
@@ -564,6 +583,7 @@ async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCard
     objectCount: summaries.reduce((total, item) => total + item.objectCount, 0) + failures.length,
   };
   console.log(JSON.stringify({ event: "vpass-daily-collection-complete", ...summary }));
+  diagnostic.finish(failures.length === 0 ? "success" : summaries.length === 0 ? "failed" : "partial");
   if (failures.length > 0) {
     throw new Error(`${failures.length} of ${session.cards.length} card collections failed`);
   }

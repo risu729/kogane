@@ -66,6 +66,8 @@ describe("SBI Shinsei Container handoff", () => {
       "read:exchange-rate",
       "read:yen-deposit-account",
     ]);
+    expect(result.failures[0]?.diagnostics).toEqual({ stage: "exchange-rate-http-503", httpStatus: 503 });
+    expect(result.failures[1]?.diagnostics).toBeUndefined();
   });
 
   test("does not retry a rejected login", async () => {

@@ -1,4 +1,6 @@
-import { Container, getContainer } from "@cloudflare/containers";
+import { startTcpRelay } from "./tcp-relay";
+import { ContainerResponseError, containerLifecycleDetails, containerResponseReason, containerStopDetails, emitDiagnostic, failure, safeErrorType, stageDiagnostics } from "./diagnostics";
+import { Container, getContainer, type StopParams } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { collectSbiShinsei } from "./collector";
 import { liveReadsEnabled } from "./read-allowlist";
@@ -31,18 +33,19 @@ export class SbiShinseiCollectorContainer extends Container<Env> {
   override envVars = { TZ: "Asia/Tokyo" };
 
   override onStart(): void {
-    console.log(JSON.stringify({ event: "sbi-shinsei-container-start" }));
+    emitDiagnostic("log", { event: "sbi-shinsei-container-start" });
   }
 
-  override onStop(): void {
-    console.log(JSON.stringify({ event: "sbi-shinsei-container-stop" }));
+  override onStop(params: StopParams): void {
+    const details = containerStopDetails(params);
+    emitDiagnostic(details.exitCode === 0 ? "log" : "warn", { event: "sbi-shinsei-container-stop", ...details });
   }
 
   override onError(error: unknown): void {
-    console.error(JSON.stringify({
+    emitDiagnostic("error", {
       event: "sbi-shinsei-container-error",
-      errorType: error instanceof Error ? error.name : "UnknownError",
-    }));
+      ...containerLifecycleDetails(error),
+    });
   }
 }
 
@@ -123,59 +126,83 @@ export default {
 async function runCollection(env: Env): Promise<CollectionResult> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
+  const diagnostic = stageDiagnostics(runId);
   const prefix = runPrefix(startedAt, runId);
   const artifacts = [];
   const failures: CollectionFailure[] = [];
   const container = getContainer(env.COLLECTOR_CONTAINER, `run-${runId}`);
 
+  let stage = "credential-validation";
   try {
-    const output = await collectSbiShinsei({
+    const output = await diagnostic.step("collection", () => collectSbiShinsei({
       credentialJson: env.SBI_SHINSEI_CREDENTIAL_JSON,
       collectHandoff: async (credentialJson) => {
-        await container.startAndWaitForPorts();
-        const response = await container.fetch(new Request("http://container/collect", {
+        stage = "container-start";
+        await diagnostic.step(stage, () => container.startAndWaitForPorts());
+        stage = "container-request";
+        const relayUrl = new URL(env.RELAY_PUBLIC_URL);
+        relayUrl.searchParams.set("runId", runId);
+        const response = await diagnostic.step(stage, async () => {
+          const response = await container.fetch(new Request("http://container/collect", {
           method: "POST",
           headers: { "content-type": "application/json; charset=utf-8" },
           body: JSON.stringify({
             credentialJson,
             relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
-            relayUrl: env.RELAY_PUBLIC_URL,
+            relayUrl: relayUrl.href,
           }),
-        }));
-        if (!response.ok) {
-          throw new Error(`SBI Shinsei container failed with HTTP ${response.status}`);
-        }
-        return readBoundedText(response, MAX_CONTAINER_RESPONSE_BYTES);
+          }));
+          if (!response.ok) {
+            const reason = await containerResponseReason(response);
+            emitDiagnostic("error", {
+              event: "sbi-shinsei-container-response-failure", runId,
+              httpStatus: response.status, reason,
+            });
+            throw new ContainerResponseError(response.status, reason);
+          }
+          return response;
+        });
+        stage = "container-response";
+        const handoff = await diagnostic.step(stage, () => readBoundedText(response, MAX_CONTAINER_RESPONSE_BYTES));
+        stage = "browser-handoff";
+        return handoff;
       },
-    });
+    }), value => value.failures.length === 0 ? "success" : value.artifacts.length === 0 ? "failed" : "partial");
     failures.push(...output.failures);
     for (const artifact of output.artifacts) {
       try {
-        artifacts.push(await storeArtifact({
+        artifacts.push(await diagnostic.step("staging-write", () => storeArtifact({
           bucket: env.SNAPSHOTS,
           prefix,
           runId,
           artifact,
-        }));
+        })));
       } catch (error) {
         failures.push(failure(`r2:${artifact.dataset}`, error));
       }
     }
   } catch (error) {
-    failures.push(failure("collect", error));
+    failures.push(failure("collect", error, stage));
   } finally {
+    // Emit before teardown and before central import so a later failure cannot hide the cause.
+    for (const entry of failures) {
+      emitDiagnostic("error", { event: "sbi-shinsei-collection-failure", runId, phase: "collection", ...entry });
+    }
+    emitDiagnostic("log", { event: "sbi-shinsei-container-teardown-start", runId, phase: "teardown", collectionFailed: failures.length > 0 });
     try {
-      await container.destroy();
-      console.log(JSON.stringify({
+      await diagnostic.step("teardown", () => container.destroy());
+      emitDiagnostic("log", {
         event: "sbi-shinsei-container-destroyed",
         runId,
-      }));
+        phase: "teardown",
+      });
     } catch (error) {
-      console.warn(JSON.stringify({
+      emitDiagnostic("warn", {
         event: "sbi-shinsei-container-destroy-failed",
         runId,
-        errorType: error instanceof Error ? error.name : "UnknownError",
-      }));
+        phase: "teardown",
+        errorType: safeErrorType(error),
+      });
     }
   }
 
@@ -197,25 +224,32 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     artifacts,
     failures,
   };
-  const manifestKey = await storeManifest({
+  const manifestKey = await diagnostic.step("manifest-write", () => storeManifest({
     bucket: env.SNAPSHOTS,
     prefix,
     manifest,
+  })).catch(() => {
+    emitDiagnostic("error", { event: "sbi-shinsei-manifest-write-failed", runId, phase: "manifest-write" });
+    diagnostic.terminal("failed");
+    throw new Error("manifest_write_failed");
   });
+  // Source collection and central import are separate outcomes.
+  diagnostic.terminal(status);
   try {
-    await importRawEvidence({
+    await diagnostic.step("raw-evidence-import", () => importRawEvidence({
       importer: env.RAW_EVIDENCE_IMPORTER,
       manifestKey,
-    });
+    }));
   } catch (error) {
-    console.error(JSON.stringify({
+    emitDiagnostic("error", {
       event: "sbi-shinsei-raw-evidence-import-failed",
       runId,
+      phase: "raw-evidence-import",
       errorCode: "raw_evidence_import_failed",
-    }));
+    });
     throw error;
   }
-  console.log(JSON.stringify({
+  emitDiagnostic("log", {
     event: "sbi-shinsei-collection-stored",
     runId,
     status,
@@ -223,7 +257,7 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     failureCount: failures.length,
     liveReadsEnabled: manifest.liveReadsEnabled,
     manifestKey,
-  }));
+  });
   return { ...manifest, manifestKey };
 }
 
@@ -283,69 +317,20 @@ async function relayTcp(
     return Response.json({ error: "Target denied" }, { status: 403 });
   }
 
+  // Only the collector-generated UUID is eligible for correlation, never a URL/token.
+  const runIdValue = url.searchParams.get("runId");
+  const runId = runIdValue && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(runIdValue)
+    ? runIdValue : undefined;
+  const relayIdValue = url.searchParams.get("relayId");
+  const relayId = relayIdValue && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(relayIdValue)
+    ? relayIdValue : undefined;
   const pair = new WebSocketPair();
   const client = pair[0];
   const server = pair[1];
   server.accept();
-  const socket = (env.MESH as VpcNetworkBinding).connect({ hostname, port });
-  const writer = socket.writable.getWriter();
-  let writeChain = Promise.resolve();
-
-  ctx.waitUntil(
-    (async () => {
-      const reader = socket.readable.getReader();
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          server.send(value);
-        }
-      } catch (error) {
-        console.error(JSON.stringify({
-          event: "sbi-shinsei-relay-read-error",
-          errorType: error instanceof Error ? error.name : "UnknownError",
-        }));
-      } finally {
-        reader.releaseLock();
-        try {
-          server.close(1000, "upstream closed");
-        } catch {}
-      }
-    })(),
-  );
-
-  server.addEventListener("message", (event) => {
-    writeChain = writeChain.then(async () => {
-      await writer.write(await websocketBytes(event.data));
-    });
-    ctx.waitUntil(
-      writeChain.catch((error) =>
-        console.error(JSON.stringify({
-          event: "sbi-shinsei-relay-write-error",
-          errorType: error instanceof Error ? error.name : "UnknownError",
-        })),
-      ),
-    );
-  });
-  server.addEventListener("close", () => {
-    ctx.waitUntil(
-      writeChain
-        .then(() => writer.close())
-        .catch(() => undefined)
-        .finally(() => socket.close()),
-    );
-  });
+  startTcpRelay({ connect: () => (env.MESH as VpcNetworkBinding).connect({ hostname, port }), server, waitUntil: promise => ctx.waitUntil(promise), ...(runId ? { runId } : {}), ...(relayId ? { relayId } : {}) });
   return new Response(null, { status: 101, webSocket: client });
 }
-
-async function websocketBytes(
-  data: string | ArrayBuffer | Blob,
-): Promise<Uint8Array> {
-  if (typeof data === "string") return new TextEncoder().encode(data);
-  if (data instanceof ArrayBuffer) return new Uint8Array(data);
-  return new Uint8Array(await data.arrayBuffer());
-}
-
 async function validRelayBearer(
   request: Request,
   expected: string | undefined,
@@ -367,16 +352,6 @@ interface VpcNetworkBinding extends Fetcher {
 function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
-}
-
-function failure(operation: string, error: unknown): CollectionFailure {
-  return {
-    operation,
-    errorType: error instanceof Error ? error.name : "UnknownError",
-    message: operation === "collect"
-      ? "collector_request_failed"
-      : "staging_write_failed",
-  };
 }
 
 function publicError(error: unknown): string {

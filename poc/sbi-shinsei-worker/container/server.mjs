@@ -1,3 +1,5 @@
+import { createStageDiagnostics } from "./stage-diagnostics.mjs";
+import { observeChildProcess } from "./child-lifecycle.mjs";
 import http from "node:http";
 import { spawn } from "node:child_process";
 import net from "node:net";
@@ -26,8 +28,10 @@ const xvfb = spawn(
   [":99", "-screen", "0", "1365x768x24", "-nolisten", "tcp"],
   { stdio: "ignore" },
 );
+const xvfbLifecycle = observeChildProcess(xvfb, "xvfb");
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => {
+    xvfbLifecycle.stopping();
     xvfb.kill("SIGTERM");
     process.exit(0);
   });
@@ -156,9 +160,7 @@ function validateHandoff(value) {
 
 async function waitForXvfb() {
   for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (xvfb.exitCode !== null) {
-      throw new Error(`Xvfb exited with code ${xvfb.exitCode}`);
-    }
+    xvfbLifecycle.assertRunning();
     try {
       await access("/tmp/.X11-unix/X99");
       return;
@@ -183,11 +185,9 @@ async function availableLocalPort() {
   return port;
 }
 
-async function waitForChromeEndpoint(endpoint, child) {
+async function waitForChromeEndpoint(endpoint, lifecycle) {
   for (let attempt = 0; attempt < 150; attempt += 1) {
-    if (child.exitCode !== null) {
-      throw new Error(`Google Chrome exited with code ${child.exitCode}`);
-    }
+    lifecycle.assertRunning();
     try {
       const response = await fetch(`${endpoint}/json/version`);
       if (response.ok) return;
@@ -197,8 +197,9 @@ async function waitForChromeEndpoint(endpoint, child) {
   throw new Error("Google Chrome CDP endpoint did not become ready");
 }
 
-async function stopChild(child) {
-  if (child.exitCode !== null) return;
+async function stopChild(child, lifecycle) {
+  if (lifecycle.isStopped()) return;
+  lifecycle.stopping();
   child.kill("SIGTERM");
   await Promise.race([
     once(child, "exit").catch(() => undefined),
@@ -362,18 +363,22 @@ async function collect({ credential, relayToken, relayUrl }) {
   const debuggingPort = await availableLocalPort();
   const endpoint = `http://127.0.0.1:${debuggingPort}`;
   const startedAt = Date.now();
+  const diagnostic = createStageDiagnostics(relayUrl);
   let currentStage = "chrome-start";
+  const advance = (stage) => { currentStage = stage; diagnostic.begin(stage); };
   let authenticationAttempted = false;
   let relay;
   let child;
+  let childLifecycle;
   let browser;
   try {
-    currentStage = "relay-start";
+    advance("relay-start");
     relay = await startConnectRelay({
       relayToken,
       relayUrl,
       allowedHosts: PROXY_HOSTS,
     });
+    advance("chrome-start");
     await waitForXvfb();
     child = spawn(
       "/usr/bin/google-chrome",
@@ -395,12 +400,13 @@ async function collect({ credential, relayToken, relayUrl }) {
         stdio: "ignore",
       },
     );
-    await waitForChromeEndpoint(endpoint, child);
+    childLifecycle = observeChildProcess(child, "chrome", { relayUrl });
+    await waitForChromeEndpoint(endpoint, childLifecycle);
     const remaining = 25_000 - (Date.now() - startedAt);
     if (remaining > 0) {
       await new Promise((resolve) => setTimeout(resolve, remaining));
     }
-    currentStage = "chrome-attach";
+    advance("chrome-attach");
     browser = await chromium.connectOverCDP(endpoint);
     const pages = browser.contexts().flatMap((context) => context.pages());
     const page = pages.find((candidate) => {
@@ -411,8 +417,8 @@ async function collect({ credential, relayToken, relayUrl }) {
         return false;
       }
     });
-    if (!page) return failure("navigation-page-unavailable");
-    currentStage = "navigation-final-url";
+    if (!page) return diagnostic.finish(failure("navigation-page-unavailable"));
+    advance("navigation-final-url");
     await page.waitForURL(
       (url) =>
         url.hostname === "bk.web.sbishinseibank.co.jp" &&
@@ -421,7 +427,7 @@ async function collect({ credential, relayToken, relayUrl }) {
       { waitUntil: "domcontentloaded", timeout: 20_000 },
     ).catch(() => undefined);
     await page.waitForTimeout(1_500);
-    currentStage = "navigation-cafis";
+    advance("navigation-cafis");
     try {
       await page.waitForFunction(
         () =>
@@ -432,9 +438,9 @@ async function collect({ credential, relayToken, relayUrl }) {
         { timeout: 45_000 },
       );
     } catch {
-      return failure("navigation-cafis-unavailable");
+      return diagnostic.finish(failure("navigation-cafis-unavailable"));
     }
-    currentStage = "ui-input";
+    advance("ui-input");
     const userId = `${credential.branchNumber}${credential.accountNumber}`;
     const userIdInput = page.locator('input[name="nationalId"]').first();
     const passwordInput = page.locator('#loginPassword').first();
@@ -444,7 +450,7 @@ async function collect({ credential, relayToken, relayUrl }) {
       !(await passwordInput.isVisible().catch(() => false)) ||
       !(await loginButton.isVisible().catch(() => false))
     ) {
-      return failure("login-form-unavailable");
+      return diagnostic.finish(failure("login-form-unavailable"));
     }
     await page.mouse.move(260, 220, { steps: 8 });
     await userIdInput.click();
@@ -459,16 +465,16 @@ async function collect({ credential, relayToken, relayUrl }) {
       await userIdInput.fill("").catch(() => undefined);
       await passwordInput.fill("").catch(() => undefined);
       credential.powerDirectPassword = "";
-      return failure("login-button-disabled");
+      return diagnostic.finish(failure("login-button-disabled"));
     }
-    currentStage = "ui-waiters";
+    advance("ui-waiters");
     const loginResponse = page.waitForResponse(
       (response) =>
         response.url().endsWith(
           "/SFC/app/ShinseiAuthenticatorRealm/login_auth_request_url",
         ) && response.request().method() === "POST",
       { timeout: 45_000 },
-    );
+    ).catch(() => null);
     const securityResponse = page
       .waitForResponse(
         (candidate) => {
@@ -482,7 +488,7 @@ async function collect({ credential, relayToken, relayUrl }) {
         { timeout: 30_000 },
       )
       .catch(() => null);
-    currentStage = "ui-click";
+    advance("ui-click");
     await page.mouse.move(480, 460, { steps: 10 });
     const clicked = await loginButton
       .click({ noWaitAfter: true, timeout: 5_000 })
@@ -492,19 +498,19 @@ async function collect({ credential, relayToken, relayUrl }) {
       await userIdInput.fill("").catch(() => undefined);
       await passwordInput.fill("").catch(() => undefined);
       credential.powerDirectPassword = "";
-      return failure("login-button-click-failed");
+      return diagnostic.finish(failure("login-button-click-failed"));
     }
     authenticationAttempted = true;
-    currentStage = "ui-login-response";
+    advance("ui-login-response");
     const response = await loginResponse.catch(() => null);
     await userIdInput.fill("").catch(() => undefined);
     await passwordInput.fill("").catch(() => undefined);
     credential.powerDirectPassword = "";
-    if (!response) return failure("ui-login-response-timeout", true);
+    if (!response) return diagnostic.finish(failure("ui-login-response-timeout", true));
     if (!response.ok()) {
-      return failure(`login-http-${response.status()}`, true);
+      return diagnostic.finish(failure(`login-http-${response.status()}`, true));
     }
-    currentStage = "login-session";
+    advance("login-session");
     const loginHeaders = await response.allHeaders();
     let authorization = loginHeaders.authorization;
     let loginRaw = await response.text();
@@ -512,7 +518,7 @@ async function collect({ credential, relayToken, relayUrl }) {
     try {
       loginData = JSON.parse(loginRaw);
     } catch {
-      return failure("login-json", true);
+      return diagnostic.finish(failure("login-json", true));
     }
     let csrfToken = loginData?.responseJSON?.token;
     if (
@@ -522,35 +528,33 @@ async function collect({ credential, relayToken, relayUrl }) {
       typeof csrfToken !== "string" ||
       csrfToken.length === 0
     ) {
-      return failure("login-shape", true);
+      return diagnostic.finish(failure("login-shape", true));
     }
-    currentStage = "security-connect";
+    advance("security-connect");
     loginRaw = "";
     loginData = null;
     const security = await securityResponse;
-    if (!security) return failure("security-connect-timeout", true);
+    if (!security) return diagnostic.finish(failure("security-connect-timeout", true));
     if (!security.ok()) {
-      return failure(`security-connect-http-${security.status()}`, true);
+      return diagnostic.finish(failure(`security-connect-http-${security.status()}`, true));
     }
-    currentStage = "authenticated-reads";
+    advance("authenticated-reads");
     const handoff = await page.evaluate(collectAuthenticatedReadsInPage, {
       authorization,
       csrfToken,
     });
     authorization = "";
     csrfToken = "";
-    currentStage = "handoff";
-    return validateHandoff(handoff);
+    advance("handoff");
+    return diagnostic.finish(validateHandoff(handoff));
   } catch {
-    return failure(`container-${currentStage}`, authenticationAttempted);
+    return diagnostic.finish(failure(`container-${currentStage}`, authenticationAttempted));
   } finally {
     credential.powerDirectPassword = "";
-    if (browser) await browser.close().catch(() => undefined);
-    if (child) await stopChild(child).catch(() => undefined);
-    if (relay) await relay.close().catch(() => undefined);
-    await rm(profileDirectory, { recursive: true, force: true }).catch(
-      () => undefined,
-    );
+    if (browser) await diagnostic.cleanup("browser-close", () => browser.close());
+    if (child && childLifecycle) await diagnostic.cleanup("chrome-stop", () => stopChild(child, childLifecycle));
+    if (relay) await diagnostic.cleanup("relay-close", () => relay.close());
+    await diagnostic.cleanup("profile-remove", () => rm(profileDirectory, { recursive: true, force: true }));
   }
 }
 
