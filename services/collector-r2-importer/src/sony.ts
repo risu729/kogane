@@ -129,7 +129,7 @@ export async function importSonyRun(options: {
   const log = (outcome: "started" | "deferred" | "sealed" | "failed", nextOffset?: number,
     reason?: SonyImportDeferred["reason"]) => {
     try {
-      console.log(JSON.stringify({
+      console[outcome === "failed" ? "error" : "log"](JSON.stringify({
         event: "sony-bank-import-diagnostic", source: SOURCE, attemptId,
         ...(runId ? { runId } : {}), phase, outcome,
         durationMs: Math.max(0, Date.now() - startedAtMs),

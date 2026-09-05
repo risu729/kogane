@@ -218,7 +218,9 @@ describe("Sony Bank staged-run importer", () => {
     const { manifest } = await storeCompleteRun(bucket);
     const records: Record<string, unknown>[] = [];
     const original = console.log;
+    const originalError = console.error;
     console.log = (text: string) => { records.push(JSON.parse(text)); };
+    console.error = console.log;
     try {
       await importRun(bucket, new FakeCentral());
       await importAllChunks(bucket, new FakeCentral(), manifest.artifacts.length + 1);
@@ -227,6 +229,7 @@ describe("Sony Bank staged-run importer", () => {
       await expect(importRun(failingBucket, new FakeCentral())).rejects.toThrow("password=private-provider-detail");
     } finally {
       console.log = original;
+      console.error = originalError;
     }
     expect(records).toContainEqual(expect.objectContaining({
       runId: RUN_ID, outcome: "deferred", reason: "worker_invocation_limit", nextOffset: 0,
