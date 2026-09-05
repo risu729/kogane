@@ -1,9 +1,6 @@
 import { createHash } from "node:crypto";
 import { callMts } from "./sbi";
-import type {
-  Artifact,
-  DomesticSession,
-} from "./types";
+import type { Artifact, DomesticSession } from "./types";
 
 const MAIN_SITE_USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
@@ -33,10 +30,7 @@ export async function collectMainSiteArtifacts(options: {
   const to = options.to ?? jstDate(new Date());
   const from = options.from ?? addUtcDays(to, -89);
   assertDateRange(from, to);
-  const auth = await createMainSiteAuth(
-    options.session,
-    options.mainSiteBaseUrl,
-  );
+  const auth = await createMainSiteAuth(options.session, options.mainSiteBaseUrl);
   const artifacts: Artifact[] = [];
 
   const assets = await fetchAssets(auth);
@@ -88,7 +82,10 @@ async function createMainSiteAuth(
   updateCookieJar(cookies, etGateResponse, etGateUrl);
   const etGateHtml = decodeShiftJis(await etGateResponse.arrayBuffer());
   if (!etGateResponse.ok) {
-    throw Object.assign(new Error(`SBI main-site ETGate failed with HTTP ${etGateResponse.status}`), { httpStatus: etGateResponse.status });
+    throw Object.assign(
+      new Error(`SBI main-site ETGate failed with HTTP ${etGateResponse.status}`),
+      { httpStatus: etGateResponse.status },
+    );
   }
   const form = parseHtmlForm(etGateHtml, etGateUrl);
   const switchResponse = await fetch(form.action, {
@@ -124,7 +121,10 @@ async function createMainSiteAuth(
   });
   updateCookieJar(cookies, assetsResponse, assetsUrl);
   if (!assetsResponse.ok) {
-    throw Object.assign(new Error(`SBI main-site assets page failed with HTTP ${assetsResponse.status}`), { httpStatus: assetsResponse.status });
+    throw Object.assign(
+      new Error(`SBI main-site assets page failed with HTTP ${assetsResponse.status}`),
+      { httpStatus: assetsResponse.status },
+    );
   }
   return {
     baseUrl,
@@ -134,10 +134,7 @@ async function createMainSiteAuth(
 }
 
 async function fetchAssets(auth: MainSiteAuth): Promise<Record<string, unknown>> {
-  const requestUrl = new URL(
-    "/account/api/assets/valuations/current",
-    auth.assetsUrl,
-  );
+  const requestUrl = new URL("/account/api/assets/valuations/current", auth.assetsUrl);
   const response = await fetch(requestUrl, {
     headers: {
       accept: "application/json, text/plain, */*",
@@ -148,7 +145,9 @@ async function fetchAssets(auth: MainSiteAuth): Promise<Record<string, unknown>>
   });
   const text = await response.text();
   if (!response.ok) {
-    throw Object.assign(new Error(`SBI account assets failed with HTTP ${response.status}`), { httpStatus: response.status });
+    throw Object.assign(new Error(`SBI account assets failed with HTTP ${response.status}`), {
+      httpStatus: response.status,
+    });
   }
   return parseJsonObject(text, "SBI account assets");
 }
@@ -170,32 +169,31 @@ async function fetchYenHistory(
   const page = await fetchMainSiteAuthenticatedPage(session, auth, entryUrl);
   const html = await page.response.text();
   if (!page.response.ok) {
-    throw Object.assign(new Error(`SBI yen history page failed with HTTP ${page.response.status}`), { httpStatus: page.response.status });
+    throw Object.assign(
+      new Error(`SBI yen history page failed with HTTP ${page.response.status}`),
+      { httpStatus: page.response.status },
+    );
   }
   if (html.includes("臨時メンテナンス")) {
     throw new Error("SBI yen history is under maintenance");
   }
   const csrfToken = extractCsrfToken(html);
   if (!csrfToken) throw new Error("SBI yen history page omitted CSRF token");
-  const requestUrl = new URL(
-    "/banking/api/yen/detail/init",
-    MEMBER_SITE_ORIGIN,
-  );
+  const requestUrl = new URL("/banking/api/yen/detail/init", MEMBER_SITE_ORIGIN);
   const response = await fetch(requestUrl, {
     headers: {
       accept: "application/json, text/plain, */*",
       cookie: page.cookieHeader,
-      referer: new URL(
-        "/banking/yen/detail-history",
-        MEMBER_SITE_ORIGIN,
-      ).toString(),
+      referer: new URL("/banking/yen/detail-history", MEMBER_SITE_ORIGIN).toString(),
       "user-agent": MAIN_SITE_USER_AGENT,
       "x-csrf-token": csrfToken,
     },
   });
   const text = await response.text();
   if (!response.ok) {
-    throw Object.assign(new Error(`SBI yen history API failed with HTTP ${response.status}`), { httpStatus: response.status });
+    throw Object.assign(new Error(`SBI yen history API failed with HTTP ${response.status}`), {
+      httpStatus: response.status,
+    });
   }
   return parseJsonObject(text, "SBI yen history API");
 }
@@ -216,9 +214,7 @@ async function fetchDomesticTradeHistory(options: {
         ),
       ][0]?.[1];
       if (!historyLink) {
-        throw new Error(
-          "SBI authenticated page omitted the domestic trade-history link",
-        );
+        throw new Error("SBI authenticated page omitted the domestic trade-history link");
       }
       return new URL(historyLink.replaceAll("&amp;", "&"), responseUrl);
     },
@@ -226,17 +222,16 @@ async function fetchDomesticTradeHistory(options: {
   let response = initial.response;
   let html = decodeShiftJis(await response.arrayBuffer());
   if (!response.ok) {
-    throw Object.assign(new Error(`SBI domestic trade history failed with HTTP ${response.status}`), { httpStatus: response.status });
+    throw Object.assign(
+      new Error(`SBI domestic trade history failed with HTTP ${response.status}`),
+      { httpStatus: response.status },
+    );
   }
   if (titleText(html)?.includes("メンテナンス")) {
     throw new Error("SBI domestic trade history is under maintenance");
   }
 
-  const form = parseHtmlFormContaining(
-    html,
-    new URL(response.url),
-    "ACT_search",
-  );
+  const form = parseHtmlFormContaining(html, new URL(response.url), "ACT_search");
   const [fromYear, fromMonth, fromDay] = options.from.split("-");
   const [toYear, toMonth, toDay] = options.to.split("-");
   const fields = new URLSearchParams(form.fields);
@@ -277,7 +272,10 @@ async function fetchDomesticTradeHistory(options: {
   }
   html = decodeShiftJis(await response.arrayBuffer());
   if (!response.ok) {
-    throw Object.assign(new Error(`SBI domestic trade-history search failed with HTTP ${response.status}`), { httpStatus: response.status });
+    throw Object.assign(
+      new Error(`SBI domestic trade-history search failed with HTTP ${response.status}`),
+      { httpStatus: response.status },
+    );
   }
   return parseDomesticTradeRecords(html);
 }
@@ -285,9 +283,7 @@ async function fetchDomesticTradeHistory(options: {
 async function fetchMainSiteAuthenticatedPage(
   session: DomesticSession,
   auth: MainSiteAuth,
-  entry:
-    | URL
-    | ((authenticatedHtml: string, responseUrl: URL) => URL),
+  entry: URL | ((authenticatedHtml: string, responseUrl: URL) => URL),
 ): Promise<{
   response: Response;
   cookieHeader: string;
@@ -317,7 +313,10 @@ async function fetchMainSiteAuthenticatedPage(
   } else {
     const loginHtml = decodeShiftJis(await loginResponse.arrayBuffer());
     if (!loginResponse.ok) {
-      throw Object.assign(new Error(`SBI main-site session switch failed with HTTP ${loginResponse.status}`), { httpStatus: loginResponse.status });
+      throw Object.assign(
+        new Error(`SBI main-site session switch failed with HTTP ${loginResponse.status}`),
+        { httpStatus: loginResponse.status },
+      );
     }
     const form = parseHtmlForm(loginHtml, loginUrl);
     const switchResponse = await fetch(form.action, {
@@ -337,18 +336,9 @@ async function fetchMainSiteAuthenticatedPage(
   }
 
   const authenticated = await followRedirects(requestUrl, referer, cookies);
-  const authenticatedHtml = decodeShiftJis(
-    await authenticated.response.arrayBuffer(),
-  );
-  requestUrl =
-    typeof entry === "function"
-      ? entry(authenticatedHtml, authenticated.url)
-      : entry;
-  const result = await followRedirects(
-    requestUrl,
-    auth.assetsUrl,
-    cookies,
-  );
+  const authenticatedHtml = decodeShiftJis(await authenticated.response.arrayBuffer());
+  requestUrl = typeof entry === "function" ? entry(authenticatedHtml, authenticated.url) : entry;
+  const result = await followRedirects(requestUrl, auth.assetsUrl, cookies);
   return {
     response: result.response,
     cookieHeader: cookieHeader(cookies, result.url),
@@ -382,14 +372,11 @@ async function followRedirects(
   throw new Error("SBI main-site navigation exceeded 10 redirects");
 }
 
-async function fetchMainSiteLinkParam(
-  session: DomesticSession,
-): Promise<string> {
+async function fetchMainSiteLinkParam(session: DomesticSession): Promise<string> {
   const response = await callMts(
     session,
     "F1132",
-    fixedAscii(session.branchCode, 3) +
-      fixedAscii(session.accountNumber, 7),
+    fixedAscii(session.branchCode, 3) + fixedAscii(session.accountNumber, 7),
   );
   const value = decodeShiftJis(response.payload.subarray(0, 1000)).trim();
   if (!value) throw new Error("SBI MTS F1132 omitted the main-site link");
@@ -412,15 +399,15 @@ interface DomesticTradeRecord {
   rawCells: string[];
 }
 
-function parseDomesticTradeRecords(
-  html: string,
-): { records: DomesticTradeRecord[]; hasMore: boolean } {
+function parseDomesticTradeRecords(html: string): {
+  records: DomesticTradeRecord[];
+  hasMore: boolean;
+} {
   const table = [...html.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/giu)]
     .map((match) => match[1] ?? "")
     .find(
       (candidate) =>
-        htmlText(candidate).includes("約定日") &&
-        htmlText(candidate).includes("約定数量"),
+        htmlText(candidate).includes("約定日") && htmlText(candidate).includes("約定数量"),
     );
   if (!table) {
     if (/\bname=["']ACT_search["']/iu.test(html)) {
@@ -432,24 +419,17 @@ function parseDomesticTradeRecords(
   const occurrences = new Map<string, number>();
   const records = [...table.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/giu)]
     .map((row) =>
-      [...(row[1] ?? "").matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/giu)].map(
-        (cell) => htmlText(cell[1] ?? ""),
+      [...(row[1] ?? "").matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/giu)].map((cell) =>
+        htmlText(cell[1] ?? ""),
       ),
     )
-    .filter(
-      (cells) =>
-        cells.length === 7 && /^\d{2}\/\d{2}\/\d{2}$/u.test(cells[0] ?? ""),
-    )
+    .filter((cells) => cells.length === 7 && /^\d{2}\/\d{2}\/\d{2}$/u.test(cells[0] ?? ""))
     .map((cells) => {
       const issue = cells[1] ?? "";
       const issueMatch = issue.match(/^(.+?)\s+([0-9A-Z]{4})\s+(.+)$/u);
       const trade = (cells[2] ?? "").match(/^(.+?)\s+([^/]+)\/\s*(.*)$/u);
-      const quantityPrice = (cells[3] ?? "").match(
-        /^([\d,.+-]+)\s+([\d,.+-]+)$/u,
-      );
-      const valueAmount = (cells[5] ?? "").match(
-        /^(\d{2}\/\d{2}\/\d{2})\s+([\d,.+△()-]+)$/u,
-      );
+      const quantityPrice = (cells[3] ?? "").match(/^([\d,.+-]+)\s+([\d,.+-]+)$/u);
+      const valueAmount = (cells[5] ?? "").match(/^(\d{2}\/\d{2}\/\d{2})\s+([\d,.+△()-]+)$/u);
       const fingerprint = createHash("sha256")
         .update(cells.join("\u001f"))
         .digest("hex")
@@ -483,8 +463,7 @@ function mainSiteAssetLoginParams(siteLinkParam: string): Record<string, string>
     _PageID: "WPLETlgR001Rlgn20",
     _DataStoreID: "DSWPLETlgR001Control",
     _ActionID: "NoActionID",
-    _ReturnPageInfo:
-      "WPLETsmR001Control/WPLETsmR001Sdtl18/NoActionID/DSWPLETsmR001Control",
+    _ReturnPageInfo: "WPLETsmR001Control/WPLETsmR001Sdtl18/NoActionID/DSWPLETsmR001Control",
     getFlg: "on",
     sw_param1: "account",
     sw_param2: "assets",
@@ -522,19 +501,13 @@ function parseHtmlFormContaining(
   method: string;
   fields: Array<[string, string]>;
 } {
-  const match = [...html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/giu)].find(
-    (candidate) =>
-      new RegExp(`\\bname=["']${controlName}["']`, "iu").test(
-        candidate[2] ?? "",
-      ),
+  const match = [...html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/giu)].find((candidate) =>
+    new RegExp(`\\bname=["']${controlName}["']`, "iu").test(candidate[2] ?? ""),
   );
   if (!match) throw new Error(`SBI main-site response omitted ${controlName}`);
   const opening = `<form${match[1] ?? ""}>`;
   const body = match[2] ?? "";
-  const action = new URL(
-    attributeValue(opening, "action") ?? baseUrl.toString(),
-    baseUrl,
-  );
+  const action = new URL(attributeValue(opening, "action") ?? baseUrl.toString(), baseUrl);
   const method = (attributeValue(opening, "method") ?? "GET").toUpperCase();
   const fields: Array<[string, string]> = [];
   for (const input of body.matchAll(/<input\b[^>]*>/giu)) {
@@ -542,49 +515,30 @@ function parseHtmlFormContaining(
     const name = attributeValue(tag, "name");
     if (!name || /\bdisabled\b/iu.test(tag)) continue;
     const type = (attributeValue(tag, "type") ?? "text").toLowerCase();
-    if (
-      (type === "checkbox" || type === "radio") &&
-      !/\bchecked\b/iu.test(tag)
-    ) {
+    if ((type === "checkbox" || type === "radio") && !/\bchecked\b/iu.test(tag)) {
       continue;
     }
-    if (
-      (type === "submit" || type === "button") &&
-      name !== controlName
-    ) {
+    if ((type === "submit" || type === "button") && name !== controlName) {
       continue;
     }
     fields.push([name, attributeValue(tag, "value") ?? ""]);
   }
-  for (const select of body.matchAll(
-    /<select\b([^>]*)>([\s\S]*?)<\/select>/giu,
-  )) {
+  for (const select of body.matchAll(/<select\b([^>]*)>([\s\S]*?)<\/select>/giu)) {
     const name = attributeValue(`<select${select[1] ?? ""}>`, "name");
     if (!name || /\bdisabled\b/iu.test(select[1] ?? "")) continue;
-    const entries = [
-      ...(select[2] ?? "").matchAll(
-        /<option\b([^>]*)>([\s\S]*?)<\/option>/giu,
-      ),
-    ];
-    const selected =
-      entries.find((entry) => /\bselected\b/iu.test(entry[1] ?? "")) ??
-      entries[0];
+    const entries = [...(select[2] ?? "").matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/giu)];
+    const selected = entries.find((entry) => /\bselected\b/iu.test(entry[1] ?? "")) ?? entries[0];
     if (selected) {
       fields.push([
         name,
-        attributeValue(`<option${selected[1] ?? ""}>`, "value") ??
-          htmlText(selected[2] ?? ""),
+        attributeValue(`<option${selected[1] ?? ""}>`, "value") ?? htmlText(selected[2] ?? ""),
       ]);
     }
   }
   return { action, method, fields };
 }
 
-function updateCookieJar(
-  jar: ScopedCookie[],
-  response: Response,
-  requestUrl: URL,
-): void {
+function updateCookieJar(jar: ScopedCookie[], response: Response, requestUrl: URL): void {
   for (const header of setCookieHeaders(response.headers)) {
     const parts = header.split(";").map((part) => part.trim());
     const nameValue = parts[0];
@@ -596,15 +550,9 @@ function updateCookieJar(
       const name = (
         attributeSeparator < 0 ? part : part.slice(0, attributeSeparator)
       ).toLowerCase();
-      attributes.set(
-        name,
-        attributeSeparator < 0 ? "" : part.slice(attributeSeparator + 1),
-      );
+      attributes.set(name, attributeSeparator < 0 ? "" : part.slice(attributeSeparator + 1));
     }
-    const domainAttribute = attributes
-      .get("domain")
-      ?.replace(/^\./u, "")
-      .toLowerCase();
+    const domainAttribute = attributes.get("domain")?.replace(/^\./u, "").toLowerCase();
     const cookie: ScopedCookie = {
       name: nameValue.slice(0, separator),
       value: nameValue.slice(separator + 1),
@@ -615,9 +563,7 @@ function updateCookieJar(
     };
     const existing = jar.findIndex(
       (entry) =>
-        entry.name === cookie.name &&
-        entry.domain === cookie.domain &&
-        entry.path === cookie.path,
+        entry.name === cookie.name && entry.domain === cookie.domain && entry.path === cookie.path,
     );
     if (existing >= 0) jar.splice(existing, 1);
     if (cookie.value && attributes.get("max-age") !== "0") jar.push(cookie);
@@ -630,18 +576,11 @@ function cookieHeader(jar: ScopedCookie[], requestUrl: URL): string {
       const hostname = requestUrl.hostname.toLowerCase();
       const domainMatches = cookie.hostOnly
         ? hostname === cookie.domain
-        : hostname === cookie.domain ||
-          hostname.endsWith(`.${cookie.domain}`);
+        : hostname === cookie.domain || hostname.endsWith(`.${cookie.domain}`);
       const pathMatches =
         requestUrl.pathname === cookie.path ||
-        requestUrl.pathname.startsWith(
-          cookie.path.endsWith("/") ? cookie.path : `${cookie.path}/`,
-        );
-      return (
-        domainMatches &&
-        pathMatches &&
-        (!cookie.secure || requestUrl.protocol === "https:")
-      );
+        requestUrl.pathname.startsWith(cookie.path.endsWith("/") ? cookie.path : `${cookie.path}/`);
+      return domainMatches && pathMatches && (!cookie.secure || requestUrl.protocol === "https:");
     })
     .sort((left, right) => right.path.length - left.path.length)
     .map((cookie) => `${cookie.name}=${cookie.value}`)
@@ -650,37 +589,30 @@ function cookieHeader(jar: ScopedCookie[], requestUrl: URL): string {
 
 function setCookieHeaders(headers: Headers): string[] {
   const extended = headers as Headers & { getSetCookie?: () => string[] };
-  return (
-    extended.getSetCookie?.() ??
-    headers.get("set-cookie")?.split(/,(?=\s*[^;,]+=)/gu) ??
-    []
-  );
+  return extended.getSetCookie?.() ?? headers.get("set-cookie")?.split(/,(?=\s*[^;,]+=)/gu) ?? [];
 }
 
 function responseLocationUrl(response: Response, baseUrl: URL): URL {
   const location = response.headers.get("location");
   if (!location) {
-    throw Object.assign(new Error(`SBI main-site expected redirect but received HTTP ${response.status}`), { httpStatus: response.status });
+    throw Object.assign(
+      new Error(`SBI main-site expected redirect but received HTTP ${response.status}`),
+      { httpStatus: response.status },
+    );
   }
   return new URL(location, baseUrl);
 }
 
 function attributeValue(tag: string, name: string): string | undefined {
-  const match = tag.match(
-    new RegExp(`${name}=(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "iu"),
-  );
+  const match = tag.match(new RegExp(`${name}=(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "iu"));
   const value = match?.[1] ?? match?.[2] ?? match?.[3];
   return value === undefined ? undefined : decodeHtml(value);
 }
 
 function extractCsrfToken(html: string): string | undefined {
   return (
-    html.match(
-      /<meta[^>]+name=["']_csrf["'][^>]+content=["']([^"']+)["']/iu,
-    )?.[1] ??
-    html.match(
-      /<input[^>]+name=["']_csrf["'][^>]+value=["']([^"']+)["']/iu,
-    )?.[1] ??
+    html.match(/<meta[^>]+name=["']_csrf["'][^>]+content=["']([^"']+)["']/iu)?.[1] ??
+    html.match(/<input[^>]+name=["']_csrf["'][^>]+value=["']([^"']+)["']/iu)?.[1] ??
     html.match(/["']_csrf["']\s*:\s*["']([^"']+)["']/u)?.[1] ??
     html.match(/csrfToken["']?\s*[:=]\s*["']([^"']+)["']/u)?.[1]
   );
@@ -789,18 +721,12 @@ function parseJsonObject(text: string, label: string): Record<string, unknown> {
 }
 
 function assertDateRange(from: string, to: string): void {
-  if (
-    !/^\d{4}-\d{2}-\d{2}$/u.test(from) ||
-    !/^\d{4}-\d{2}-\d{2}$/u.test(to) ||
-    from > to
-  ) {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(from) || !/^\d{4}-\d{2}-\d{2}$/u.test(to) || from > to) {
     throw new Error("SBI history window must be a valid YYYY-MM-DD range");
   }
   const days =
     Math.floor(
-      (Date.parse(`${to}T00:00:00.000Z`) -
-        Date.parse(`${from}T00:00:00.000Z`)) /
-        86_400_000,
+      (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / 86_400_000,
     ) + 1;
   if (days > 90) throw new Error("SBI history window must not exceed 90 days");
 }

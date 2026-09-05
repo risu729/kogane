@@ -23,18 +23,18 @@
 
 Westpac は無認証の REST Product API を公開し、transaction/savings accounts、term deposits、credit cards、mortgages、personal loans を例示している。2026-08-26 の read-only `GET` では `x-v: 5` が受理され、Westpac brand の 64 products、3 pages を確認した。カテゴリ別 snapshot は次のとおりで、件数は将来変わり得る。
 
-| CDR `productCategory` | 件数 | この調査での扱い |
-| --- | ---: | --- |
-| `TRANS_AND_SAVINGS_ACCOUNTS` | 17 | transaction / savings |
-| `TERM_DEPOSITS` | 4 | term deposit |
-| `CRED_AND_CHRG_CARDS` | 13 | credit / charge card |
-| `RESIDENTIAL_MORTGAGES` | 11 | home loan / mortgage |
-| `PERS_LOANS` | 3 | personal loan |
-| `BUSINESS_LOANS` | 6 | Westpac 商品だが personal collector の優先対象外 |
-| `MARGIN_LOANS` | 3 | 同上 |
-| `OVERDRAFTS` | 2 | 同上 |
-| `LEASES` | 2 | 同上 |
-| `REGULATED_TRUST_ACCOUNTS` | 3 | 同上 |
+| CDR `productCategory`        | 件数 | この調査での扱い                                 |
+| ---------------------------- | ---: | ------------------------------------------------ |
+| `TRANS_AND_SAVINGS_ACCOUNTS` |   17 | transaction / savings                            |
+| `TERM_DEPOSITS`              |    4 | term deposit                                     |
+| `CRED_AND_CHRG_CARDS`        |   13 | credit / charge card                             |
+| `RESIDENTIAL_MORTGAGES`      |   11 | home loan / mortgage                             |
+| `PERS_LOANS`                 |    3 | personal loan                                    |
+| `BUSINESS_LOANS`             |    6 | Westpac 商品だが personal collector の優先対象外 |
+| `MARGIN_LOANS`               |    3 | 同上                                             |
+| `OVERDRAFTS`                 |    2 | 同上                                             |
+| `LEASES`                     |    2 | 同上                                             |
+| `REGULATED_TRUST_ACCOUNTS`   |    3 | 同上                                             |
 
 Public Product API: `GET https://digital-api.westpac.com.au/cds-au/v1/banking/products`。公式説明では HTTP GET、REST、CDR standards 準拠で security header 不要とされる。実測では standard pagination (`page`, `page-size`) と `x-v` version header が必要だった。[Westpac Product API](https://www.westpac.com.au/about-westpac/innovation/open-banking/product-api/) / [CDR standards](https://consumerdatastandardsaustralia.github.io/standards/)
 
@@ -54,15 +54,15 @@ Public Product API: `GET https://digital-api.westpac.com.au/cds-au/v1/banking/pr
 
 ## 2. 明細粒度、期間、件数、export
 
-| surface | 期間 / 件数 | 形式・粒度 | 確認状況 |
-| --- | --- | --- | --- |
-| Online Banking / Westpac App transaction search | 最大 3 年 | date、description、amount、debit/credit、過去 balance で検索 | 公式確認 |
-| credit card current transaction view | 過去 100 日 | card balance と card transactions | 公式確認。全口座の 3 年 search とは別の表示制限 |
-| desktop Online Banking export | 最大 3 年の範囲内。公開情報に 1 export あたりの件数上限なし | CSV / QBO / QIF / OFX。QBO/OFX は 1 account 選択時のみ | 公式確認 |
-| Westpac App recent transaction download | 任意の account と transaction period を選択 | download 可能。app 側の format 選択肢は公開説明だけでは未確認 | 公式確認 |
-| eStatements | eligible accounts で最大 7 年 | PDF view / print / download。selected savings/transaction、mortgage、credit card 等。一部 product は非対象 | 公式確認 |
-| Proof of Balance / Transactions Report | transaction report は 30/90/120 days、last statement 以降、custom 最大 12 months | PDF。氏名、住所、口座番号、current balance 等の PII を含む | 公式確認。研究 fixture にしない |
-| CDR transactions | `oldest-time` 省略時の既定 window は 90 日。明示期間は consent/holder availability に依存 | JSON、default page 1 / page-size 25。date、amount、text filter、pending/posted、merchant detail 等 | 標準確認。Westpac customer call は未実施 |
+| surface                                         | 期間 / 件数                                                                               | 形式・粒度                                                                                                 | 確認状況                                        |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Online Banking / Westpac App transaction search | 最大 3 年                                                                                 | date、description、amount、debit/credit、過去 balance で検索                                               | 公式確認                                        |
+| credit card current transaction view            | 過去 100 日                                                                               | card balance と card transactions                                                                          | 公式確認。全口座の 3 年 search とは別の表示制限 |
+| desktop Online Banking export                   | 最大 3 年の範囲内。公開情報に 1 export あたりの件数上限なし                               | CSV / QBO / QIF / OFX。QBO/OFX は 1 account 選択時のみ                                                     | 公式確認                                        |
+| Westpac App recent transaction download         | 任意の account と transaction period を選択                                               | download 可能。app 側の format 選択肢は公開説明だけでは未確認                                              | 公式確認                                        |
+| eStatements                                     | eligible accounts で最大 7 年                                                             | PDF view / print / download。selected savings/transaction、mortgage、credit card 等。一部 product は非対象 | 公式確認                                        |
+| Proof of Balance / Transactions Report          | transaction report は 30/90/120 days、last statement 以降、custom 最大 12 months          | PDF。氏名、住所、口座番号、current balance 等の PII を含む                                                 | 公式確認。研究 fixture にしない                 |
+| CDR transactions                                | `oldest-time` 省略時の既定 window は 90 日。明示期間は consent/holder availability に依存 | JSON、default page 1 / page-size 25。date、amount、text filter、pending/posted、merchant detail 等         | 標準確認。Westpac customer call は未実施        |
 
 公式 export 手順は desktop の `Overview > Exports and reports > Transactions` から account/date range/format を選ぶ。personal と business で手順が同じであることも公式 FAQ に記載される。[Export detailed transaction history](https://www.westpac.com.au/faq/business-how-export-detailed-transaction-history/) / [Export file types](https://www.westpac.com.au/business-banking/online-banking/support-faqs/export-files/)
 
@@ -94,11 +94,11 @@ OFX/QIF は user-directed file export であり、Westpac が personal OFX Direc
 
 2026-08-26 に未認証の DNS、HTTP headers、公開 login HTML/JavaScript と runtime の request metadata を read-only で観測した。login submit、credential入力、OTP送信は行っていない。
 
-| host | 観測 | 判定限界 |
-| --- | --- | --- |
-| `www.westpac.com.au` | DNS は CloudFront distribution、response は `server: CloudFront` | 公開 content CDN は確認。WAF 製品は不明 |
-| `banking.westpac.com.au` | DNS canonical name は `*.akamaiedge.net`、response に `x-aka-grn`、login handler へ redirect | Akamai edge 利用は確認。Akamai WAF/Bot Manager の具体構成は未確認 |
-| `digital-api.westpac.com.au` | CloudFront、Amazon API Gateway headers。root は 403 `MissingAuthenticationToken`; product route は GET 成功 | API front door を確認。WAF 製品は不明 |
+| host                         | 観測                                                                                                        | 判定限界                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `www.westpac.com.au`         | DNS は CloudFront distribution、response は `server: CloudFront`                                            | 公開 content CDN は確認。WAF 製品は不明                           |
+| `banking.westpac.com.au`     | DNS canonical name は `*.akamaiedge.net`、response に `x-aka-grn`、login handler へ redirect                | Akamai edge 利用は確認。Akamai WAF/Bot Manager の具体構成は未確認 |
+| `digital-api.westpac.com.au` | CloudFront、Amazon API Gateway headers。root は 403 `MissingAuthenticationToken`; product route は GET 成功 | API front door を確認。WAF 製品は不明                             |
 
 公開 login は `https://banking.westpac.com.au/wbc/banking/handler?TAM_OP=login` に着地し、IBM Security Verify Access/WebSEAL 系の `TAM_OP` と `PD-S-SESSION-ID` (`Secure; HttpOnly`)、load-balancer cookie を使う。ページは AppDynamics beacon、BioCatch facade (`wup-2ffe60ee.westpac.com.au/client/v3.1/web/wup`, `log-2ffe60ee.westpac.com.au/api/v1/sendLogs`)、browser/device fingerprint code をロードする。BioCatch facade は `setCustomerSessionId`, `changeContext`, `flush` と Native bridge を公開しており、単純な credential POST だけでは session/device context を再現できない。
 
@@ -171,12 +171,12 @@ ACCC の現行案内によれば、ADR accreditation には少なくとも以下
 
 ## 8. Workers / Containers / OCI / Kubernetes 適性
 
-| runtime | Public Product API | CDR consumer data | Web/app automation |
-| --- | --- | --- | --- |
-| Cloudflare Workers | **適**。`fetch` + Cron Trigger で小さい stateless collector を構成可能 | **技術的候補、制度面未充足**。Workers は outbound mTLS certificate binding を提供し、JWT/WebCrypto を実装できるが、CDR certificates、DCR、callback、key rotation、conformance を Westpac/Registry と実証していない | **不適**。stateful browser/device、interactive MFA、Akamai challenge に向かない |
-| Cloudflare Containers | product API には過剰 | **候補**。Linux/amd64 container と full runtime は CDR client library/PKI運用に向くが、accreditation は別問題 | browser を動かせても安全性・規約・MFA問題は解決しない |
-| portable OCI container | 適だが過剰 | **適性高**。crypto library、certificate store、callback server、audit/rotation を portable image に封じ込められる | 技術的に可能でも本番経路として非推奨 |
-| Kubernetes | 小規模用途には過剰 | **組織 ADR なら適**。CronJob/Deployment、secret integration、network policy、audit/rollout に向く | device-bound interactive flow には非推奨 |
+| runtime                | Public Product API                                                     | CDR consumer data                                                                                                                                                                                                  | Web/app automation                                                              |
+| ---------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| Cloudflare Workers     | **適**。`fetch` + Cron Trigger で小さい stateless collector を構成可能 | **技術的候補、制度面未充足**。Workers は outbound mTLS certificate binding を提供し、JWT/WebCrypto を実装できるが、CDR certificates、DCR、callback、key rotation、conformance を Westpac/Registry と実証していない | **不適**。stateful browser/device、interactive MFA、Akamai challenge に向かない |
+| Cloudflare Containers  | product API には過剰                                                   | **候補**。Linux/amd64 container と full runtime は CDR client library/PKI運用に向くが、accreditation は別問題                                                                                                      | browser を動かせても安全性・規約・MFA問題は解決しない                           |
+| portable OCI container | 適だが過剰                                                             | **適性高**。crypto library、certificate store、callback server、audit/rotation を portable image に封じ込められる                                                                                                  | 技術的に可能でも本番経路として非推奨                                            |
+| Kubernetes             | 小規模用途には過剰                                                     | **組織 ADR なら適**。CronJob/Deployment、secret integration、network policy、audit/rollout に向く                                                                                                                  | device-bound interactive flow には非推奨                                        |
 
 Cloudflare Workers は現在 outbound mTLS binding と scheduled handler を公式サポートする。[Workers mTLS](https://developers.cloudflare.com/workers/runtime-apis/bindings/mtls/) / [Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)。Cloudflare Containers は Dockerfile または supported registry image を Linux/amd64 で動かせる。[Cloudflare Containers](https://developers.cloudflare.com/containers/get-started/) / [Image management](https://developers.cloudflare.com/containers/platform-details/image-management/)。OCI image は portable image format、Kubernetes CronJob は repeating Job の標準機構である。[OCI Image Spec](https://specs.opencontainers.org/image-spec/) / [Kubernetes CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/)
 
@@ -193,14 +193,14 @@ CDRで Workers を採用できるという記述は **platform capability から
 - **E** — manual capture remains the safe default
 - **Cost 1–5** — 1 は small wrapper、5 は device-bound or adversarial automation
 
-| 経路 | Level | Cost | 根拠 |
-| --- | --- | ---: | --- |
-| Public Product API | A | 1 | documented unauthenticated GET。ただし商品参照のみ |
-| user-exported CSV/QBO/QIF/OFX/PDF ingest | E | 1 | capture 自体は手動、parser は小さい wrapper |
-| accredited CDR | A | 5 | documented headless API だが accreditation/PKI/consent/compliance が必要 |
-| authenticated private API replay | C | 4 | EAM bootstrap、匿名session、secure start route、pending/posted UI model は確認。認証後 read route/schema/renewal は未確認 |
-| full Web automation | D | 4 | interactive login/MFA/Akamai、write controls との隣接 |
-| official app/device automation | D | 5 | biometric/passcode/push/device state、app-only enrolment、更新追従 |
+| 経路                                     | Level | Cost | 根拠                                                                                                                      |
+| ---------------------------------------- | ----- | ---: | ------------------------------------------------------------------------------------------------------------------------- |
+| Public Product API                       | A     |    1 | documented unauthenticated GET。ただし商品参照のみ                                                                        |
+| user-exported CSV/QBO/QIF/OFX/PDF ingest | E     |    1 | capture 自体は手動、parser は小さい wrapper                                                                               |
+| accredited CDR                           | A     |    5 | documented headless API だが accreditation/PKI/consent/compliance が必要                                                  |
+| authenticated private API replay         | C     |    4 | EAM bootstrap、匿名session、secure start route、pending/posted UI model は確認。認証後 read route/schema/renewal は未確認 |
+| full Web automation                      | D     |    4 | interactive login/MFA/Akamai、write controls との隣接                                                                     |
+| official app/device automation           | D     |    5 | biometric/passcode/push/device state、app-only enrolment、更新追従                                                        |
 
 `B` を付けられる経路は現時点でない。公開面の private transport evidence は得たが、認証後 read API と renewable/reusable session の実証がないためである。主要 recommendation は E/Cost 1 の手動 export ingest、制度投資が正当化できる組織だけ A/Cost 5 の CDR である。ただし、この運用上の推奨は first-party transport RE の打切りを意味しない。CDRの存在は private Web/app 経路のlevel/cost評価を変えない。[kogane PR #5](https://github.com/risu729/kogane/pull/5)
 

@@ -6,25 +6,25 @@ test_dir="$(mktemp -d)"
 trap 'rm -rf -- "${test_dir}"' EXIT
 
 mock_wrangler="${test_dir}/wrangler"
-printf '%s\n' \
-  '#!/usr/bin/env bash' \
-  'saw_command=false' \
-  'for arg in "$@"; do' \
-  '  if [[ "${arg}" == "--file" ]]; then' \
-  '    printf "route verifier must use --command, not --file\\n" >&2' \
-  '    exit 98' \
-  '  fi' \
-  '  if [[ "${arg}" == "--command" ]]; then' \
-  '    saw_command=true' \
-  '  fi' \
-  'done' \
-  'if [[ "${saw_command}" != "true" ]]; then' \
-  '  printf "route verifier did not pass --command\\n" >&2' \
-  '  exit 97' \
-  'fi' \
-  'printf "npm notice simulated diagnostic\\n" >&2' \
-  'echo '\''[{"results":[{"route_count":1,"policy_count":1}],"success":true}]'\''' \
-  >"${mock_wrangler}"
+cat >"${mock_wrangler}" <<'MOCK_WRANGLER'
+#!/usr/bin/env bash
+saw_command=false
+for arg in "$@"; do
+  if [[ "${arg}" == "--file" ]]; then
+    printf "route verifier must use --command, not --file\\n" >&2
+    exit 98
+  fi
+  if [[ "${arg}" == "--command" ]]; then
+    saw_command=true
+  fi
+done
+if [[ "${saw_command}" != "true" ]]; then
+  printf "route verifier did not pass --command\\n" >&2
+  exit 97
+fi
+printf "npm notice simulated diagnostic\\n" >&2
+echo '[{"results":[{"route_count":1,"policy_count":1}],"success":true}]'
+MOCK_WRANGLER
 chmod 700 "${mock_wrangler}"
 
 mock_npx="${test_dir}/npx"

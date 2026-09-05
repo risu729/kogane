@@ -21,11 +21,11 @@ as expected when randomized extension order/GREASE changed. The bridge therefore
 preserves the client's useful inner TLS/HTTP2 identity instead of replacing it
 with the Worker or VPC `fetch()` identity.
 
-| Client profile | Platform represented | HTTP | JA4 | Akamai H2 hash | Vpass bootstrap |
-| --- | --- | --- | --- | --- | --- |
-| `curl_cffi 0.16.1` `chrome116` | Windows 10 | h2 | `t13d1516h2_8daaf6152771_f37e75b10bcc` | `a345a694846ad9f6c97bcc3c75adbe26` | 200 for top, device API, and login page; direct and JP bridge |
-| `curl_cffi 0.16.1` `chrome150` | macOS Tahoe | h2 | `t13d1516h2_8daaf6152771_806a8c22fdea` | `52d84b11737d980aef856699f885ca86` | 200 for top, device API, and login page; direct and JP bridge |
-| upstream `impit` `chrome151` | Windows, Chrome 151 | h2 | `t13d1516h2_8daaf6152771_806a8c22fdea` | `72bcd337b9239714736fe0ad43766ce7` | 200 through JP bridge |
+| Client profile                 | Platform represented | HTTP | JA4                                    | Akamai H2 hash                     | Vpass bootstrap                                               |
+| ------------------------------ | -------------------- | ---- | -------------------------------------- | ---------------------------------- | ------------------------------------------------------------- |
+| `curl_cffi 0.16.1` `chrome116` | Windows 10           | h2   | `t13d1516h2_8daaf6152771_f37e75b10bcc` | `a345a694846ad9f6c97bcc3c75adbe26` | 200 for top, device API, and login page; direct and JP bridge |
+| `curl_cffi 0.16.1` `chrome150` | macOS Tahoe          | h2   | `t13d1516h2_8daaf6152771_806a8c22fdea` | `52d84b11737d980aef856699f885ca86` | 200 for top, device API, and login page; direct and JP bridge |
+| upstream `impit` `chrome151`   | Windows, Chrome 151  | h2   | `t13d1516h2_8daaf6152771_806a8c22fdea` | `72bcd337b9239714736fe0ad43766ce7` | 200 through JP bridge                                         |
 
 The published clients did not provide a coherent Chrome 153 Windows profile:
 `curl_cffi 0.16.1`'s newest built-in Chrome profile was Chrome 150 on macOS and

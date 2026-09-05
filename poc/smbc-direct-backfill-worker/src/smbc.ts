@@ -97,8 +97,7 @@ export class CookieJar {
   get(name: string, url?: URL): string | undefined {
     return [...this.#cookies.values()]
       .filter((cookie) => cookie.name === name && (!url || cookieMatches(cookie, url)))
-      .sort((left, right) => right.path.length - left.path.length)[0]
-      ?.value;
+      .sort((left, right) => right.path.length - left.path.length)[0]?.value;
   }
 
   export(): CookieRecord[] {
@@ -107,9 +106,11 @@ export class CookieJar {
 }
 
 function isSmbcDirectCookie(cookie: CookieRecord): boolean {
-  return cookie.domain === "smbc.co.jp"
-    || cookie.domain === "direct.smbc.co.jp"
-    || cookie.domain === "direct3.smbc.co.jp";
+  return (
+    cookie.domain === "smbc.co.jp" ||
+    cookie.domain === "direct.smbc.co.jp" ||
+    cookie.domain === "direct3.smbc.co.jp"
+  );
 }
 
 function cookieKey(cookie: CookieRecord): string {
@@ -131,7 +132,9 @@ function parseSetCookie(requestUrl: URL, value: string): CookieRecord | null {
     if (name === "secure") secure = true;
     attributes.set(name, rawValue.join("="));
   }
-  const domain = (attributes.get("domain") || requestUrl.hostname).replace(/^\./u, "").toLowerCase();
+  const domain = (attributes.get("domain") || requestUrl.hostname)
+    .replace(/^\./u, "")
+    .toLowerCase();
   const path = attributes.get("path") || defaultCookiePath(requestUrl.pathname);
   return {
     domain,
@@ -151,8 +154,9 @@ function defaultCookiePath(pathname: string): string {
 function cookieMatches(cookie: CookieRecord, url: URL): boolean {
   const hostname = url.hostname.toLowerCase();
   const domainMatches = hostname === cookie.domain || hostname.endsWith(`.${cookie.domain}`);
-  const pathMatches = url.pathname === cookie.path
-    || url.pathname.startsWith(cookie.path.endsWith("/") ? cookie.path : `${cookie.path}/`);
+  const pathMatches =
+    url.pathname === cookie.path ||
+    url.pathname.startsWith(cookie.path.endsWith("/") ? cookie.path : `${cookie.path}/`);
   return domainMatches && pathMatches && (!cookie.secure || url.protocol === "https:");
 }
 
@@ -174,7 +178,11 @@ async function fetchWithCookies(
   return response;
 }
 
-async function readBoundedBytes(response: Response, limit: number, name: string): Promise<Uint8Array> {
+async function readBoundedBytes(
+  response: Response,
+  limit: number,
+  name: string,
+): Promise<Uint8Array> {
   if (!response.ok) throw new Error(`${name}_http_${response.status}`);
   if (!response.body) throw new Error(`${name}_body_missing`);
   const reader = response.body.getReader();
@@ -200,7 +208,10 @@ async function readBoundedBytes(response: Response, limit: number, name: string)
   return result;
 }
 
-async function responseShiftJis(response: Response, name: string): Promise<{ bytes: Uint8Array; text: string }> {
+async function responseShiftJis(
+  response: Response,
+  name: string,
+): Promise<{ bytes: Uint8Array; text: string }> {
   const bytes = await readBoundedBytes(response, MAX_HTML_BYTES, name);
   return { bytes, text: iconv.decode(Buffer.from(bytes), "Shift_JIS") };
 }
@@ -216,7 +227,9 @@ type LoginResponseKind =
 function classifyLoginResponse(html: string): LoginResponseKind {
   if (/<form\b[^>]*\bname=["']BCATBCA["']/iu.test(html)) return "confirmation";
   if (/\bAccess Denied\b|\bReference\s*#/iu.test(html)) return "access_denied";
-  if (/サービス(?:時間外|休止中)|ただいま[^<]{0,80}ご利用いただけません|メンテナンス/iu.test(html)) {
+  if (
+    /サービス(?:時間外|休止中)|ただいま[^<]{0,80}ご利用いただけません|メンテナンス/iu.test(html)
+  ) {
     return "service_unavailable";
   }
   if (/<form\b[^>]*\bname=["']LLDLDIL["']/iu.test(html)) return "login_form_returned";
@@ -253,8 +266,10 @@ function required(fields: Record<string, string>, name: string): string {
 
 function inlineVariable(html: string, name: string): string {
   const escapedName = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  const value = new RegExp(`(?:const|let|var)\\s+${escapedName}\\s*=\\s*['"]([^'"]+)['"]`, "u")
-    .exec(html)?.[1];
+  const value = new RegExp(
+    `(?:const|let|var)\\s+${escapedName}\\s*=\\s*['"]([^'"]+)['"]`,
+    "u",
+  ).exec(html)?.[1];
   if (!value) throw new Error(`${name}_variable_missing`);
   return value;
 }
@@ -295,8 +310,10 @@ function normalizeOrigins(origins: DirectOrigins): DirectOrigins {
     baseURL: normalizeOrigin(origins.baseURL),
     loginURL: normalizeOrigin(origins.loginURL),
   };
-  if (normalized.baseURL !== "https://direct3.smbc.co.jp"
-    || normalized.loginURL !== "https://direct.smbc.co.jp") {
+  if (
+    normalized.baseURL !== "https://direct3.smbc.co.jp" ||
+    normalized.loginURL !== "https://direct.smbc.co.jp"
+  ) {
     throw new Error("smbc_origin_not_allowlisted");
   }
   return normalized;
@@ -360,13 +377,15 @@ export async function startLogin(
   const confirmationHtml = confirmationBody.text;
   const responseKind = classifyLoginResponse(confirmationHtml);
   if (responseKind !== "confirmation") {
-    console.warn(JSON.stringify({
-      message: "smbc_login_response_rejected",
-      responseKind,
-      status: confirmation.status,
-      responseBytes: confirmationBody.bytes.byteLength,
-      responseDigest: await loginResponseDigest(confirmationBody.bytes),
-    }));
+    console.warn(
+      JSON.stringify({
+        message: "smbc_login_response_rejected",
+        responseKind,
+        status: confirmation.status,
+        responseBytes: confirmationBody.bytes.byteLength,
+        responseDigest: await loginResponseDigest(confirmationBody.bytes),
+      }),
+    );
     throw new Error(`login_response_${responseKind}`);
   }
   const confirmationForm = formFields(confirmationHtml, "BCATBCA");
@@ -429,7 +448,13 @@ export async function finishLogin(
   const completion = await responseShiftJis(response, "login_completion");
   const sessionAfter = jar.get("JSESSIONID", completionUrl);
   if (!sessionAfter || sessionAfter === sessionBefore) throw new ApprovalNotCompletedError();
-  const topPage = await requestTopPage(origins.baseURL, jar, completion.text, response.url, transport);
+  const topPage = await requestTopPage(
+    origins.baseURL,
+    jar,
+    completion.text,
+    response.url,
+    transport,
+  );
   return new DirectProfile(origins, credentials, jar, topPage, transport);
 }
 
@@ -648,7 +673,7 @@ export class DirectProfile {
       amount: Math.abs(parseYen(entry.amount, "transaction_amount")),
       balanceAfter: parseYen(entry.torihikigobalance, "transaction_balance"),
       description: String(entry.comment ?? ""),
-      direction: entry.depositWithdrawTypeFlag === "1" ? "debit" as const : "credit" as const,
+      direction: entry.depositWithdrawTypeFlag === "1" ? ("debit" as const) : ("credit" as const),
     }));
     await this.continueSession();
     return {

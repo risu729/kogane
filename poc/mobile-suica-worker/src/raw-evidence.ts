@@ -6,11 +6,7 @@ export async function importStoredRun(
   importer: Fetcher,
   manifestKey: string,
 ): Promise<RawEvidenceImportResult> {
-  const value = await importerRequest(
-    importer,
-    "/v1/mobile-suica/import-run",
-    { manifestKey },
-  );
+  const value = await importerRequest(importer, "/v1/mobile-suica/import-run", { manifestKey });
   return validateImportResult(value, manifestKey);
 }
 
@@ -18,20 +14,21 @@ export async function backfillStoredRuns(
   importer: Fetcher,
   cursor?: string,
 ): Promise<RawEvidenceBackfillPageResult> {
-  const value = await importerRequest(
-    importer,
-    "/v1/mobile-suica/backfill-page",
-    { ...(cursor ? { cursor } : {}), limit: 1 },
-  );
+  const value = await importerRequest(importer, "/v1/mobile-suica/backfill-page", {
+    ...(cursor ? { cursor } : {}),
+    limit: 1,
+  });
   return validateBackfillResult(value);
 }
 
 async function importerRequest(importer: Fetcher, path: string, body: unknown): Promise<unknown> {
-  const response = await importer.fetch(new Request(`https://collector-r2-importer.internal${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  }));
+  const response = await importer.fetch(
+    new Request(`https://collector-r2-importer.internal${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
   const responseText = await boundedText(response, MAX_RESPONSE_BYTES);
   let parsed: unknown;
   try {
@@ -43,9 +40,17 @@ async function importerRequest(importer: Fetcher, path: string, body: unknown): 
   return parsed;
 }
 
-function validateImportResult(value: unknown, expectedManifestKey: string): RawEvidenceImportResult {
+function validateImportResult(
+  value: unknown,
+  expectedManifestKey: string,
+): RawEvidenceImportResult {
   const input = exactRecord(value, [
-    "source", "manifestKey", "status", "centralRunId", "artifactCount", "sealed",
+    "source",
+    "manifestKey",
+    "status",
+    "centralRunId",
+    "artifactCount",
+    "sealed",
     "finalChunkAllObjectsReused",
   ]);
   if (
@@ -71,11 +76,23 @@ function validateImportResult(value: unknown, expectedManifestKey: string): RawE
 }
 
 function validateBackfillResult(value: unknown): RawEvidenceBackfillPageResult {
-  const input = exactRecord(value, [
-    "source", "scannedObjectCount", "importedManifestCount", "skippedManifestCount",
-    "deferredManifestCount", "failedManifestCount", "nextCursor", "truncated",
-    "failureCode", "failedManifestKey", "result",
-  ], ["failureCode", "failedManifestKey", "result"]);
+  const input = exactRecord(
+    value,
+    [
+      "source",
+      "scannedObjectCount",
+      "importedManifestCount",
+      "skippedManifestCount",
+      "deferredManifestCount",
+      "failedManifestCount",
+      "nextCursor",
+      "truncated",
+      "failureCode",
+      "failedManifestKey",
+      "result",
+    ],
+    ["failureCode", "failedManifestKey", "result"],
+  );
   if (
     input.source !== "mobile-suica" ||
     !nonNegativeInteger(input.scannedObjectCount) ||
@@ -90,9 +107,10 @@ function validateBackfillResult(value: unknown): RawEvidenceBackfillPageResult {
   ) {
     throw new Error("raw_evidence_importer_invalid_response");
   }
-  const result = input.result === undefined
-    ? undefined
-    : validateImportResult(input.result, manifestKeyFromResult(input.result));
+  const result =
+    input.result === undefined
+      ? undefined
+      : validateImportResult(input.result, manifestKeyFromResult(input.result));
   return {
     source: input.source,
     scannedObjectCount: input.scannedObjectCount,
@@ -103,7 +121,9 @@ function validateBackfillResult(value: unknown): RawEvidenceBackfillPageResult {
     nextCursor: input.nextCursor,
     truncated: input.truncated,
     ...(input.failureCode === undefined ? {} : { failureCode: input.failureCode }),
-    ...(input.failedManifestKey === undefined ? {} : { failedManifestKey: input.failedManifestKey }),
+    ...(input.failedManifestKey === undefined
+      ? {}
+      : { failedManifestKey: input.failedManifestKey }),
     ...(result === undefined ? {} : { result }),
   };
 }
@@ -122,9 +142,10 @@ function exactRecord(
 ): Record<string, unknown> {
   if (!isRecord(value)) throw new Error("raw_evidence_importer_invalid_response");
   const keys = Object.keys(value);
-  if (keys.some((key) => !allowed.includes(key)) || allowed.some(
-    (key) => !optional.includes(key) && !Object.hasOwn(value, key),
-  )) {
+  if (
+    keys.some((key) => !allowed.includes(key)) ||
+    allowed.some((key) => !optional.includes(key) && !Object.hasOwn(value, key))
+  ) {
     throw new Error("raw_evidence_importer_invalid_response");
   }
   return value;
@@ -139,7 +160,12 @@ function nonNegativeInteger(value: unknown): value is number {
 }
 
 function safeOpaque(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 500 && !/[\x00-\x20\x7f]/u.test(value);
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 500 &&
+    !/[\x00-\x20\x7f]/u.test(value)
+  );
 }
 
 function safeCode(value: unknown): value is string {
@@ -147,8 +173,10 @@ function safeCode(value: unknown): value is string {
 }
 
 function safeManifestKey(value: unknown): value is string {
-  return typeof value === "string" &&
-    /^raw\/mobile-suica\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f-]{36}\/manifest\.json$/u.test(value);
+  return (
+    typeof value === "string" &&
+    /^raw\/mobile-suica\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f-]{36}\/manifest\.json$/u.test(value)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -21,24 +21,24 @@ been able to refresh it after expiry.
 
 ## Result matrix
 
-| Source or test profile | Target/runtime | Operation | Result |
-| --- | --- | --- | --- |
-| Established Windows Kuebiko profile, current auth already invalid | Same Windows Chrome 153 profile, visible UI interaction | New password login | Success; My Page loaded without Access Denied |
-| Same successful login, 33 live cookies | Completely new Windows profile | Open My Page | Success |
-| Same successful login, 33 live cookies | WSL, headed official Chrome 151 | Open My Page | Success |
-| Same successful login, 33 live cookies | OCI ARM64, headed official Chrome 151 | Open My Page | Success |
-| Closed Kuebiko capture, 17 cookies including session cookies | OCI ARM64, headed official Chrome 151 | Open My Page | Success |
-| The later-expired 33-cookie set | OCI ARM64, headed official Chrome 151 | Open My Page | Redirected to login |
-| Same expired source profile | A new tab in the original Windows process | Open My Page | Redirected to login; the old rendered tab was stale |
-| Completely fresh Windows profile | Windows Chrome 153 | Password login, then one retry | Returned to the login form both times; no credential-error text or explicit Access Denied page |
-| Fresh Windows profile plus only captured Akamai-named cookies | Windows Chrome 153 | Password login, then one retry | Same result as the fresh control |
-| Completely fresh Linux context | WSL, headed official Chrome 151 | Password login | Access Denied at `/memapi/jaxrs/xt_login/agree/v1` |
-| Fresh Linux context plus only captured Akamai-named cookies | WSL, headed official Chrome 151 | Password login | Same Access Denied result |
-| Persistent WSL profile previously seeded with a valid transported session | WSL, headed official Chrome 151 | Password login after that session expired | Access Denied at the same login endpoint |
-| Camoufox 0.5.5, coherent Windows Firefox 152 fingerprint | Linux Docker, AU/SYD WARP egress | Password login | Login page 200; login POST 403 / Access Denied |
-| Camoufox 0.5.5, coherent macOS Firefox 152 fingerprint | Linux Docker, AU/SYD WARP egress | Password login | No expected login POST; inconclusive |
-| Kameleo 5.1 Chroma, coherent Windows Chrome 152 fingerprint | Linux Docker, AU/SYD WARP egress | Password login | Login page 200; login POST 403 / Access Denied |
-| Persistent Kameleo Windows Chrome, public-site warm-up and human-like input | Same Linux Docker runtime | Password login | Test click did not submit the form; inconclusive |
+| Source or test profile                                                      | Target/runtime                                          | Operation                                 | Result                                                                                         |
+| --------------------------------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Established Windows Kuebiko profile, current auth already invalid           | Same Windows Chrome 153 profile, visible UI interaction | New password login                        | Success; My Page loaded without Access Denied                                                  |
+| Same successful login, 33 live cookies                                      | Completely new Windows profile                          | Open My Page                              | Success                                                                                        |
+| Same successful login, 33 live cookies                                      | WSL, headed official Chrome 151                         | Open My Page                              | Success                                                                                        |
+| Same successful login, 33 live cookies                                      | OCI ARM64, headed official Chrome 151                   | Open My Page                              | Success                                                                                        |
+| Closed Kuebiko capture, 17 cookies including session cookies                | OCI ARM64, headed official Chrome 151                   | Open My Page                              | Success                                                                                        |
+| The later-expired 33-cookie set                                             | OCI ARM64, headed official Chrome 151                   | Open My Page                              | Redirected to login                                                                            |
+| Same expired source profile                                                 | A new tab in the original Windows process               | Open My Page                              | Redirected to login; the old rendered tab was stale                                            |
+| Completely fresh Windows profile                                            | Windows Chrome 153                                      | Password login, then one retry            | Returned to the login form both times; no credential-error text or explicit Access Denied page |
+| Fresh Windows profile plus only captured Akamai-named cookies               | Windows Chrome 153                                      | Password login, then one retry            | Same result as the fresh control                                                               |
+| Completely fresh Linux context                                              | WSL, headed official Chrome 151                         | Password login                            | Access Denied at `/memapi/jaxrs/xt_login/agree/v1`                                             |
+| Fresh Linux context plus only captured Akamai-named cookies                 | WSL, headed official Chrome 151                         | Password login                            | Same Access Denied result                                                                      |
+| Persistent WSL profile previously seeded with a valid transported session   | WSL, headed official Chrome 151                         | Password login after that session expired | Access Denied at the same login endpoint                                                       |
+| Camoufox 0.5.5, coherent Windows Firefox 152 fingerprint                    | Linux Docker, AU/SYD WARP egress                        | Password login                            | Login page 200; login POST 403 / Access Denied                                                 |
+| Camoufox 0.5.5, coherent macOS Firefox 152 fingerprint                      | Linux Docker, AU/SYD WARP egress                        | Password login                            | No expected login POST; inconclusive                                                           |
+| Kameleo 5.1 Chroma, coherent Windows Chrome 152 fingerprint                 | Linux Docker, AU/SYD WARP egress                        | Password login                            | Login page 200; login POST 403 / Access Denied                                                 |
+| Persistent Kameleo Windows Chrome, public-site warm-up and human-like input | Same Linux Docker runtime                               | Password login                            | Test click did not submit the form; inconclusive                                               |
 
 The Akamai-only arms used two captured Akamai-named cookies; one was already
 expired and was not retained by a fresh browser. The browser generated and
@@ -60,13 +60,13 @@ the Australian address `129.94.128.25` to the `tamia` exit node address
 `223.223.22.214` in Japan. The route was verified in both Windows and WSL before
 the trials.
 
-| Profile and operation | AU direct | JP via `tamia` | Interpretation |
-| --- | --- | --- | --- |
-| Completely fresh headed WSL Chrome 151, initial Vpass GET | HTTP 200 login page | HTTP 200 login page | Neither IP was unconditionally blocked. |
-| Previously rejected persistent WSL profile, initial Vpass GET | HTTP 403 | HTTP 403 | That profile/cookie state remained rejected across the IP change. |
-| Completely fresh headed WSL Chrome 151, password login | Previously HTTP 403 at login POST | HTTP 403 at the same login POST | Japanese home egress did not make Linux password login pass. |
-| Completely fresh visible WSL Chrome 151, user typed and clicked manually | Not repeated | Access Denied | Removing CDP/automation input did not make Linux login pass. |
-| Previously successful Windows profile, CDP `Input.insertText` plus dispatched mouse events | Returned to login form | Returned to login form | Changing only the exit IP did not change this automation result. |
+| Profile and operation                                                                      | AU direct                         | JP via `tamia`                  | Interpretation                                                    |
+| ------------------------------------------------------------------------------------------ | --------------------------------- | ------------------------------- | ----------------------------------------------------------------- |
+| Completely fresh headed WSL Chrome 151, initial Vpass GET                                  | HTTP 200 login page               | HTTP 200 login page             | Neither IP was unconditionally blocked.                           |
+| Previously rejected persistent WSL profile, initial Vpass GET                              | HTTP 403                          | HTTP 403                        | That profile/cookie state remained rejected across the IP change. |
+| Completely fresh headed WSL Chrome 151, password login                                     | Previously HTTP 403 at login POST | HTTP 403 at the same login POST | Japanese home egress did not make Linux password login pass.      |
+| Completely fresh visible WSL Chrome 151, user typed and clicked manually                   | Not repeated                      | Access Denied                   | Removing CDP/automation input did not make Linux login pass.      |
+| Previously successful Windows profile, CDP `Input.insertText` plus dispatched mouse events | Returned to login form            | Returned to login form          | Changing only the exit IP did not change this automation result.  |
 
 The Windows CDP trials were not explicit Access Denied pages and did not show a
 credential-error message. Cookies rotated in both cases, but authentication was

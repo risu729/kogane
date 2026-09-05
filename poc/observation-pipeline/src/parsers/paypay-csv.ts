@@ -62,8 +62,7 @@ function mapColumns(header: string[]): {
   const taken = new Set<number>();
   COLUMNS.forEach((column, position) => {
     const found = header.findIndex(
-      (label, at) =>
-        !taken.has(at) && column.match.some((needle) => label.includes(needle)),
+      (label, at) => !taken.has(at) && column.match.some((needle) => label.includes(needle)),
     );
     if (found >= 0) {
       index[column.field] = found;
@@ -121,9 +120,7 @@ export const paypayCsv: Parser = {
     rows.slice(1).forEach((cells, offset) => {
       const rowNumber = offset + 2; // 1-based, counting the header as row 1
       if (cells.length !== header.length) {
-        warnings.push(
-          `row ${rowNumber}: expected ${header.length} columns, got ${cells.length}`,
-        );
+        warnings.push(`row ${rowNumber}: expected ${header.length} columns, got ${cells.length}`);
       }
 
       const outgoing = cellFor(cells, "outgoingJpy").trim();
@@ -151,19 +148,14 @@ export const paypayCsv: Parser = {
           amountMinor = value;
         }
       } else {
-        warnings.push(
-          `row ${rowNumber}: neither an outgoing nor an incoming amount was stated`,
-        );
+        warnings.push(`row ${rowNumber}: neither an outgoing nor an incoming amount was stated`);
       }
-      const normalized =
-        amountVerbatim !== undefined ? decimalText(amountVerbatim) : undefined;
+      const normalized = amountVerbatim !== undefined ? decimalText(amountVerbatim) : undefined;
 
       const datetime = cellFor(cells, "datetime");
       const asOf = toIsoJst(datetime);
       if (asOf === undefined && datetime !== "") {
-        warnings.push(
-          `row ${rowNumber}: datetime ${JSON.stringify(datetime)} not recognized`,
-        );
+        warnings.push(`row ${rowNumber}: datetime ${JSON.stringify(datetime)} not recognized`);
       }
       const transactionNumber = cellFor(cells, "transactionNumber").trim();
       const description = cellFor(cells, "description");

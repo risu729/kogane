@@ -1,42 +1,42 @@
 import { describe, expect, test } from "bun:test";
-import {
-  parseCredentials,
-  parseCredentialSecrets,
-  validateCreditCsvText,
-} from "../src/collector";
+import { parseCredentials, parseCredentialSecrets, validateCreditCsvText } from "../src/collector";
 
 describe("MyJCB connection configuration", () => {
   test("keeps independent password, passkey, and session bootstraps separate", () => {
-    const credentials = parseCredentials(JSON.stringify([
-      {
-        connectionId: "account-one",
-        bootstrapMode: "password",
-        userId: "synthetic-user",
-        password: "synthetic-password",
-      },
-      {
-        connectionId: "account-passkey",
-        bootstrapMode: "passkey",
-        credentialId: "b3fbc8d2-b0fe-4a70-9b2d-f5cb4b321c33",
-        privateKey: "c3ludGhldGljLXBrY3M4",
-        rpId: "my.jcb.co.jp",
-        userHandle: "c3ludGhldGljLXVzZXI",
-        counter: 0,
-        discoverable: true,
-      },
-      {
-        connectionId: "account-two",
-        bootstrapMode: "session",
-        userAgent: "Synthetic Browser",
-        cookies: [{
-          name: "synthetic-session",
-          value: "synthetic-value",
-          domain: "my.jcb.co.jp",
-          path: "/",
-          secure: true,
-        }],
-      },
-    ]));
+    const credentials = parseCredentials(
+      JSON.stringify([
+        {
+          connectionId: "account-one",
+          bootstrapMode: "password",
+          userId: "synthetic-user",
+          password: "synthetic-password",
+        },
+        {
+          connectionId: "account-passkey",
+          bootstrapMode: "passkey",
+          credentialId: "b3fbc8d2-b0fe-4a70-9b2d-f5cb4b321c33",
+          privateKey: "c3ludGhldGljLXBrY3M4",
+          rpId: "my.jcb.co.jp",
+          userHandle: "c3ludGhldGljLXVzZXI",
+          counter: 0,
+          discoverable: true,
+        },
+        {
+          connectionId: "account-two",
+          bootstrapMode: "session",
+          userAgent: "Synthetic Browser",
+          cookies: [
+            {
+              name: "synthetic-session",
+              value: "synthetic-value",
+              domain: "my.jcb.co.jp",
+              path: "/",
+              secure: true,
+            },
+          ],
+        },
+      ]),
+    );
     expect(credentials.map((value) => [value.connectionId, value.bootstrapMode])).toEqual([
       ["account-one", "password"],
       ["account-passkey", "passkey"],
@@ -45,47 +45,61 @@ describe("MyJCB connection configuration", () => {
   });
 
   test("rejects exported passkeys with a stateful signature counter", () => {
-    expect(() => parseCredentials(JSON.stringify([{
-      connectionId: "stateful-passkey",
-      bootstrapMode: "passkey",
-      credentialId: "b3fbc8d2-b0fe-4a70-9b2d-f5cb4b321c33",
-      privateKey: "c3ludGhldGljLXBrY3M4",
-      rpId: "my.jcb.co.jp",
-      userHandle: "c3ludGhldGljLXVzZXI",
-      counter: 1,
-      discoverable: true,
-    }]))).toThrow("stateful passkey counter");
+    expect(() =>
+      parseCredentials(
+        JSON.stringify([
+          {
+            connectionId: "stateful-passkey",
+            bootstrapMode: "passkey",
+            credentialId: "b3fbc8d2-b0fe-4a70-9b2d-f5cb4b321c33",
+            privateKey: "c3ludGhldGljLXBrY3M4",
+            rpId: "my.jcb.co.jp",
+            userHandle: "c3ludGhldGljLXVzZXI",
+            counter: 1,
+            discoverable: true,
+          },
+        ]),
+      ),
+    ).toThrow("stateful passkey counter");
   });
 
   test("accepts Bitwarden legacy GUID-shaped credential IDs", () => {
-    const [credential] = parseCredentials(JSON.stringify([{
-      connectionId: "legacy-guid-passkey",
-      bootstrapMode: "passkey",
-      credentialId: "00112233-4455-0677-0899-aabbccddeeff",
-      privateKey: "c3ludGhldGljLXBrY3M4",
-      rpId: "my.jcb.co.jp",
-      userHandle: "c3ludGhldGljLXVzZXI",
-      counter: 0,
-      discoverable: true,
-    }]));
+    const [credential] = parseCredentials(
+      JSON.stringify([
+        {
+          connectionId: "legacy-guid-passkey",
+          bootstrapMode: "passkey",
+          credentialId: "00112233-4455-0677-0899-aabbccddeeff",
+          privateKey: "c3ludGhldGljLXBrY3M4",
+          rpId: "my.jcb.co.jp",
+          userHandle: "c3ludGhldGljLXVzZXI",
+          counter: 0,
+          discoverable: true,
+        },
+      ]),
+    );
     expect(credential?.bootstrapMode).toBe("passkey");
   });
 
   test("rejects duplicate namespaces", () => {
-    expect(() => parseCredentials(JSON.stringify([
-      {
-        connectionId: "duplicate",
-        bootstrapMode: "password",
-        userId: "one",
-        password: "one",
-      },
-      {
-        connectionId: "duplicate",
-        bootstrapMode: "password",
-        userId: "two",
-        password: "two",
-      },
-    ]))).toThrow("unique");
+    expect(() =>
+      parseCredentials(
+        JSON.stringify([
+          {
+            connectionId: "duplicate",
+            bootstrapMode: "password",
+            userId: "one",
+            password: "one",
+          },
+          {
+            connectionId: "duplicate",
+            bootstrapMode: "password",
+            userId: "two",
+            password: "two",
+          },
+        ]),
+      ),
+    ).toThrow("unique");
   });
 
   test("combines one-account-per-secret payloads", () => {
@@ -121,7 +135,6 @@ describe("MyJCB connection configuration", () => {
       "摘要",
       "備考",
     ].join(",");
-    expect(() => validateCreditCsvText(`お支払い日,2026年1月1日\r\n${header}\r\n`))
-      .not.toThrow();
+    expect(() => validateCreditCsvText(`お支払い日,2026年1月1日\r\n${header}\r\n`)).not.toThrow();
   });
 });

@@ -1,12 +1,10 @@
 import puppeteer, { type Page } from "@cloudflare/puppeteer";
 
-const LOGIN_URL =
-  "https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006";
+const LOGIN_URL = "https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006";
 const GLOBALPASS_HOST = "www.debit.vpass.ne.jp";
 const USER_ID_SELECTOR = "#usrId";
 const PASSWORD_SELECTOR = "#password";
-const SUBMIT_SELECTOR =
-  "button[name=nablarch_form1_2],button[name=nablarch_form1_5]";
+const SUBMIT_SELECTOR = "button[name=nablarch_form1_2],button[name=nablarch_form1_5]";
 const TURNSTILE_SELECTOR = "[name=cf-turnstile-response]";
 const TURNSTILE_HOSTS = new Set([
   "challenges.cloudflare.com",
@@ -109,15 +107,9 @@ async function safePageState(page: Page): Promise<Record<string, unknown>> {
         loginFormVisible: Boolean(document.querySelector(userSelector)),
         turnstileField: turnstile?.tagName ?? null,
         turnstileResponseLength:
-          turnstile && "value" in turnstile
-            ? String(turnstile.value).length
-            : 0,
-        turnstileContainerPresent: Boolean(
-          document.querySelector(".cf-turnstile"),
-        ),
-        turnstileContainerText: (
-          document.querySelector(".cf-turnstile")?.textContent ?? ""
-        )
+          turnstile && "value" in turnstile ? String(turnstile.value).length : 0,
+        turnstileContainerPresent: Boolean(document.querySelector(".cf-turnstile")),
+        turnstileContainerText: (document.querySelector(".cf-turnstile")?.textContent ?? "")
           .trim()
           .slice(0, 120),
         accessDenied: /Access Denied|アクセスが拒否/iu.test(body),
@@ -168,15 +160,11 @@ async function visibleSubmit(page: Page) {
   throw new Error("GLOBAL PASS visible login button was not found");
 }
 
-export async function runGlobalPassBrowserProbe(
-  env: Env,
-): Promise<Record<string, unknown>> {
+export async function runGlobalPassBrowserProbe(env: Env): Promise<Record<string, unknown>> {
   const browserEndpoint = {
     fetch: env.BROWSER.fetch.bind(env.BROWSER),
   };
-  const browser = await puppeteer.launch(
-    browserEndpoint as Parameters<typeof puppeteer.launch>[0],
-  );
+  const browser = await puppeteer.launch(browserEndpoint as Parameters<typeof puppeteer.launch>[0]);
   const diagnostics: NetworkDiagnostic[] = [];
   let stage = "new-page";
   let credentialPostAttempted = false;
@@ -195,9 +183,7 @@ export async function runGlobalPassBrowserProbe(
       await page.waitForFunction(
         (selector) => {
           const input = document.querySelector(selector);
-          return Boolean(
-            input && "value" in input && String(input.value).length > 20,
-          );
+          return Boolean(input && "value" in input && String(input.value).length > 20);
         },
         { timeout: TURNSTILE_TIMEOUT_MS },
         TURNSTILE_SELECTOR,
@@ -239,10 +225,7 @@ export async function runGlobalPassBrowserProbe(
     const postResponse = page.waitForResponse(
       (response) => {
         const url = new URL(response.url());
-        return (
-          response.request().method() === "POST" &&
-          url.hostname === GLOBALPASS_HOST
-        );
+        return response.request().method() === "POST" && url.hostname === GLOBALPASS_HOST;
       },
       { timeout: PAGE_TIMEOUT_MS },
     );
@@ -257,8 +240,7 @@ export async function runGlobalPassBrowserProbe(
     const headers = loginResponse.headers();
     const pageState = await safePageState(page);
     const authenticated =
-      pageState["loginFormVisible"] === false &&
-      pageState["accessDenied"] === false;
+      pageState["loginFormVisible"] === false && pageState["accessDenied"] === false;
     return {
       mode: "login",
       stage,

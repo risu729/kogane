@@ -3,7 +3,12 @@ import { timingSafeEqual } from "node:crypto";
 import { collectMobileSuica, parseSessionEnvelope } from "./mobile-suica";
 import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
-import type { CollectionFailure, CollectionManifest, CollectionResult, StoredArtifact } from "./types";
+import type {
+  CollectionFailure,
+  CollectionManifest,
+  CollectionResult,
+  StoredArtifact,
+} from "./types";
 import { checkStoredJreCredential, parseStoredJreCredential } from "./webauthn";
 import {
   bootstrapMobileSuicaSessionWithBrowser,
@@ -29,16 +34,19 @@ export default {
         requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
       );
       const check = checkStoredJreCredential(credential);
-      return Response.json({
-        ok: check.verified,
-        rpId: credential.rpId,
-        algorithm: "ES256",
-        credentialIdBytes: check.credentialIdBytes,
-        authenticatorDataBytes: check.authenticatorDataBytes,
-        flags: check.flags,
-        signCount: check.signCount,
-        syncedAt: credential.syncedAt,
-      }, { status: check.verified ? 200 : 500 });
+      return Response.json(
+        {
+          ok: check.verified,
+          rpId: credential.rpId,
+          algorithm: "ES256",
+          credentialIdBytes: check.credentialIdBytes,
+          authenticatorDataBytes: check.authenticatorDataBytes,
+          flags: check.flags,
+          signCount: check.signCount,
+          syncedAt: credential.syncedAt,
+        },
+        { status: check.verified ? 200 : 500 },
+      );
     }
     if (request.method === "POST" && url.pathname === "/browser-bootstrap-inspect") {
       if (!authorized(request, secretBinding(env, "ADMIN_TRIGGER_TOKEN"))) {
@@ -50,11 +58,14 @@ export default {
         );
         return Response.json(await inspectBrowserBootstrap(env.BROWSER, credential));
       } catch (error) {
-        return Response.json({
-          ok: false,
-          errorType: error instanceof Error ? error.name : "UnknownError",
-          message: publicError(error),
-        }, { status: 502 });
+        return Response.json(
+          {
+            ok: false,
+            errorType: error instanceof Error ? error.name : "UnknownError",
+            message: publicError(error),
+          },
+          { status: 502 },
+        );
       }
     }
     if (request.method === "POST" && url.pathname === "/browser-login-check") {
@@ -68,11 +79,14 @@ export default {
         const result = await checkBrowserPasskeyLogin(env.BROWSER, credential);
         return Response.json(result, { status: result.ok ? 200 : 502 });
       } catch (error) {
-        return Response.json({
-          ok: false,
-          errorType: error instanceof Error ? error.name : "UnknownError",
-          message: publicError(error),
-        }, { status: 502 });
+        return Response.json(
+          {
+            ok: false,
+            errorType: error instanceof Error ? error.name : "UnknownError",
+            message: publicError(error),
+          },
+          { status: 502 },
+        );
       }
     }
     if (request.method === "POST" && url.pathname === "/browser-session-check") {
@@ -83,21 +97,27 @@ export default {
         const credential = parseStoredJreCredential(
           requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
         );
-        const session = parseSessionEnvelope(JSON.stringify(
-          await bootstrapMobileSuicaSessionWithBrowser(env.BROWSER, credential),
-        ));
+        const session = parseSessionEnvelope(
+          JSON.stringify(await bootstrapMobileSuicaSessionWithBrowser(env.BROWSER, credential)),
+        );
         return Response.json({
           ok: true,
           capturedAt: session.capturedAt,
-          cookieNames: session.cookieHeader.split(";").map((part) => part.split("=", 1)[0]?.trim()).sort(),
+          cookieNames: session.cookieHeader
+            .split(";")
+            .map((part) => part.split("=", 1)[0]?.trim())
+            .sort(),
           hasFormState: new URLSearchParams(session.formBody).has("baseVariable"),
         });
       } catch (error) {
-        return Response.json({
-          ok: false,
-          errorType: error instanceof Error ? error.name : "UnknownError",
-          message: publicError(error),
-        }, { status: 502 });
+        return Response.json(
+          {
+            ok: false,
+            errorType: error instanceof Error ? error.name : "UnknownError",
+            message: publicError(error),
+          },
+          { status: 502 },
+        );
       }
     }
     if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
@@ -152,14 +172,20 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionR
     let capturedSessionAt: string | undefined;
 
     try {
-      const credential = await diagnostic.step("configuration", () => parseStoredJreCredential(
-        requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
-      ));
-      const session = await diagnostic.step("browser-bootstrap", async () => parseSessionEnvelope(JSON.stringify(
-        await bootstrapMobileSuicaSessionWithBrowser(env.BROWSER, credential),
-      )));
+      const credential = await diagnostic.step("configuration", () =>
+        parseStoredJreCredential(
+          requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
+        ),
+      );
+      const session = await diagnostic.step("browser-bootstrap", async () =>
+        parseSessionEnvelope(
+          JSON.stringify(await bootstrapMobileSuicaSessionWithBrowser(env.BROWSER, credential)),
+        ),
+      );
       capturedSessionAt = session.capturedAt;
-      const collection = await diagnostic.step("history-collection", () => collectMobileSuica({ session, asOfDateJst }));
+      const collection = await diagnostic.step("history-collection", () =>
+        collectMobileSuica({ session, asOfDateJst }),
+      );
       transactionCount = collection.rows.length;
       pageCount = collection.pageCount;
       complete = collection.complete;
@@ -173,7 +199,11 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionR
       }
       for (const artifact of collection.artifacts) {
         try {
-          artifacts.push(await diagnostic.step("artifact-write", () => storeArtifact({ bucket: env.SNAPSHOTS, prefix, runId, artifact })));
+          artifacts.push(
+            await diagnostic.step("artifact-write", () =>
+              storeArtifact({ bucket: env.SNAPSHOTS, prefix, runId, artifact }),
+            ),
+          );
         } catch (error) {
           failures.push(failure("r2", error, "artifact_store_failed", artifact.filename));
         }
@@ -183,7 +213,8 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionR
     }
 
     const completedAt = new Date().toISOString();
-    const status = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
+    const status =
+      failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
     const manifest: CollectionManifest = {
       schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       source: "mobile-suica",
@@ -199,20 +230,26 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionR
       artifacts,
       failures,
     };
-    const manifestKey = await diagnostic.step("manifest-write", () => storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest }));
-    const central = await diagnostic.step("central-import", () => importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey));
-    console.log(JSON.stringify({
-      event: "mobile-suica-collection-stored",
-      runId,
-      status,
-      transactionCount,
-      pageCount,
-      artifactCount: artifacts.length,
-      failureCount: failures.length,
-      manifestKey,
-      centralStatus: central.status,
-      centralRunId: central.centralRunId,
-    }));
+    const manifestKey = await diagnostic.step("manifest-write", () =>
+      storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest }),
+    );
+    const central = await diagnostic.step("central-import", () =>
+      importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey),
+    );
+    console.log(
+      JSON.stringify({
+        event: "mobile-suica-collection-stored",
+        runId,
+        status,
+        transactionCount,
+        pageCount,
+        artifactCount: artifacts.length,
+        failureCount: failures.length,
+        manifestKey,
+        centralStatus: central.status,
+        centralRunId: central.centralRunId,
+      }),
+    );
     diagnostic.finish(status);
     return { ...manifest, manifestKey, central };
   } catch (error) {
@@ -244,8 +281,10 @@ function tokyoDate(now: Date): string {
 }
 
 function validDate(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/u.test(value) &&
-    new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
+  return (
+    /^\d{4}-\d{2}-\d{2}$/u.test(value) &&
+    new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value
+  );
 }
 
 function failure(

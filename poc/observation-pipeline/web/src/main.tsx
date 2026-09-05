@@ -22,11 +22,7 @@ const queryClient = new QueryClient({
       // A 404 from this API means the row does not exist, which retrying
       // cannot change. Only a transport or server failure is worth a retry.
       retry: (failureCount: number, error: Error) => {
-        if (
-          error instanceof ApiError &&
-          error.status >= 400 &&
-          error.status < 500
-        ) {
+        if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
           return false;
         }
         return failureCount < 1;

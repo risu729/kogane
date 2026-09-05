@@ -137,8 +137,7 @@ try:
             "title": page.title(),
             "login_form": page.locator("#id_input").count() > 0
             and page.locator("#pw_input").count() > 0,
-            "access_denied": "access denied"
-            in f"{page.title()} {body[:2000]}".lower(),
+            "access_denied": "access denied" in f"{page.title()} {body[:2000]}".lower(),
         }
 
         if authenticate:
@@ -234,9 +233,7 @@ try:
                 ).count()
                 > 0
                 or "操作中のカードを変更する" in body,
-                "blocked": (
-                    login_response is not None and login_response.status == 403
-                )
+                "blocked": (login_response is not None and login_response.status == 403)
                 or "access denied" in body.lower(),
             }
 

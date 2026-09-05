@@ -76,7 +76,8 @@ export class CookieJar {
     if (remove) this.#cookies.delete(key);
     else {
       const previous = this.#cookies.get(key);
-      const revision = previous?.value === cookieValue ? previous.revision : (previous?.revision ?? 0) + 1;
+      const revision =
+        previous?.value === cookieValue ? previous.revision : (previous?.revision ?? 0) + 1;
       this.#cookies.set(key, {
         name,
         value: cookieValue,

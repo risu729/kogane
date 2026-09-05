@@ -30,10 +30,7 @@ const transaction: TransactionRow = {
 function serve(response: Response) {
   fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(response);
 }
-async function errorFor(
-  path = "/api/meta",
-  abortSignal = signal(),
-): Promise<ApiError> {
+async function errorFor(path = "/api/meta", abortSignal = signal()): Promise<ApiError> {
   try {
     await getJson(path, abortSignal);
   } catch (error) {
@@ -45,14 +42,10 @@ async function errorFor(
 
 describe("browser JSON transport", () => {
   test("passes cancellation and disallows cached or automatically redirected financial responses", async () => {
-    const spy = spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json(metadata),
-    );
+    const spy = spyOn(globalThis, "fetch").mockResolvedValue(Response.json(metadata));
     fetchSpy = spy;
     const abortSignal = signal();
-    expect(await getJson<ApiMetadata>("/api/meta", abortSignal)).toEqual(
-      metadata,
-    );
+    expect(await getJson<ApiMetadata>("/api/meta", abortSignal)).toEqual(metadata);
     const init = spy.mock.calls[0]?.[1];
     expect(init?.signal).toBe(abortSignal);
     expect(init?.cache).toBe("no-store");
@@ -107,21 +100,12 @@ describe("browser JSON transport", () => {
       ["/api/transactions", { transactions: null }],
       ["/api/transactions", { transactions: [null] }],
       ["/api/transactions", { transactions: [{}] }],
-      [
-        "/api/transactions",
-        { transactions: [{ ...transaction, source_id: null }] },
-      ],
-      [
-        "/api/transactions",
-        { transactions: [{ ...transaction, amount_minor: 9007199254740992 }] },
-      ],
+      ["/api/transactions", { transactions: [{ ...transaction, source_id: null }] }],
+      ["/api/transactions", { transactions: [{ ...transaction, amount_minor: 9007199254740992 }] }],
       ["/api/balances", { latest: [{}], history: [] }],
       ["/api/artifacts", { artifacts: [{}] }],
       ["/api/positions", { positions: [{ position: {}, valuations: null }] }],
-      [
-        "/api/overview",
-        { counts: [], sources: [], fetchRuns: [], parseRuns: [{}] },
-      ],
+      ["/api/overview", { counts: [], sources: [], fetchRuns: [], parseRuns: [{}] }],
       [
         "/api/overview",
         {
@@ -160,21 +144,16 @@ describe("browser JSON transport", () => {
   test("preserves empty results and exact large minor-unit strings", async () => {
     const body = { transactions: [transaction] };
     serve(Response.json(body));
-    expect(await getJson<typeof body>("/api/transactions", signal())).toEqual(
-      body,
-    );
+    expect(await getJson<typeof body>("/api/transactions", signal())).toEqual(body);
     fetchSpy!.mockRestore();
     serve(Response.json({ artifacts: [] }));
-    expect(
-      await getJson<{ artifacts: unknown[] }>("/api/artifacts", signal()),
-    ).toEqual({ artifacts: [] });
+    expect(await getJson<{ artifacts: unknown[] }>("/api/artifacts", signal())).toEqual({
+      artifacts: [],
+    });
   });
   test("malformed amounts and mismatched detail identities become safe transport errors", async () => {
     for (const [path, body] of [
-      [
-        "/api/transactions",
-        { transactions: [{ ...transaction, amount_minor: " " }] },
-      ],
+      ["/api/transactions", { transactions: [{ ...transaction, amount_minor: " " }] }],
       [
         "/api/observations/transaction/1",
         {
@@ -194,17 +173,15 @@ describe("browser JSON transport", () => {
     }
   });
   test("network errors are safe and cancellation remains an AbortError", async () => {
-    fetchSpy = spyOn(globalThis, "fetch").mockRejectedValue(
-      new Error("private-request-url"),
-    );
+    fetchSpy = spyOn(globalThis, "fetch").mockRejectedValue(new Error("private-request-url"));
     const error = await errorFor();
     expect(error.status).toBe(0);
     expect(error.message).toContain("接続できません");
     expect(error.message).not.toContain("private");
     const controller = new AbortController();
     controller.abort();
-    await expect(getJson("/api/meta", controller.signal)).rejects.toMatchObject(
-      { name: "AbortError" },
-    );
+    await expect(getJson("/api/meta", controller.signal)).rejects.toMatchObject({
+      name: "AbortError",
+    });
   });
 });

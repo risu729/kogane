@@ -36,11 +36,9 @@ export function RecordControls({
 }): ReactNode {
   const sources = sourceOptions(rows);
   const accounts = accountOptions(rows, filters.source);
-  const missingSource =
-    filters.source !== "" && !sources.includes(filters.source);
+  const missingSource = filters.source !== "" && !sources.includes(filters.source);
   const missingAccount =
-    filters.account !== "" &&
-    !accounts.some((account) => account.value === filters.account);
+    filters.account !== "" && !accounts.some((account) => account.value === filters.account);
   return (
     <div className="filter-grid">
       <label className="filter-field">
@@ -48,15 +46,11 @@ export function RecordControls({
         <select
           aria-label="取得元"
           value={filters.source}
-          onChange={(event) =>
-            onChange({ ...filters, source: event.target.value, account: "" })
-          }
+          onChange={(event) => onChange({ ...filters, source: event.target.value, account: "" })}
         >
           <option value="">すべての取得元</option>
           {missingSource ? (
-            <option value={filters.source}>
-              {filters.source}（今回の記録に含まれません）
-            </option>
+            <option value={filters.source}>{filters.source}（今回の記録に含まれません）</option>
           ) : null}
           {sources.map((source) => (
             <option key={source}>{source}</option>
@@ -68,9 +62,7 @@ export function RecordControls({
         <select
           aria-label="口座"
           value={filters.account}
-          onChange={(event) =>
-            onChange({ ...filters, account: event.target.value })
-          }
+          onChange={(event) => onChange({ ...filters, account: event.target.value })}
         >
           <option value="">すべての口座</option>
           {missingAccount ? (
@@ -93,9 +85,7 @@ export function RecordControls({
               type="date"
               aria-label="開始日"
               value={filters.from}
-              onChange={(event) =>
-                onChange({ ...filters, from: event.target.value })
-              }
+              onChange={(event) => onChange({ ...filters, from: event.target.value })}
             />
           </label>
           <label className="filter-field">
@@ -104,9 +94,7 @@ export function RecordControls({
               type="date"
               aria-label="終了日"
               value={filters.to}
-              onChange={(event) =>
-                onChange({ ...filters, to: event.target.value })
-              }
+              onChange={(event) => onChange({ ...filters, to: event.target.value })}
             />
           </label>
         </>

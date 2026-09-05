@@ -172,7 +172,9 @@ function expressionPath(expression) {
     ts.isStringLiteralLike(expression.argumentExpression)
   ) {
     const left = expressionPath(expression.expression);
-    return left ? `${left}.${expression.argumentExpression.text}` : expression.argumentExpression.text;
+    return left
+      ? `${left}.${expression.argumentExpression.text}`
+      : expression.argumentExpression.text;
   }
   return null;
 }
@@ -484,7 +486,12 @@ export function analyzeSource(source, virtualFilename) {
       const method = propertyName(node.expression);
       const root = rootIdentifier(node.expression);
 
-      if (callPath === "fetch" || callPath === "window.fetch" || callPath === "self.fetch" || callPath === "globalThis.fetch") {
+      if (
+        callPath === "fetch" ||
+        callPath === "window.fetch" ||
+        callPath === "self.fetch" ||
+        callPath === "globalThis.fetch"
+      ) {
         hits.add("network", "fetch", node);
       }
       if (callPath === "atob" || callPath === "window.atob" || callPath === "globalThis.atob") {
@@ -520,10 +527,19 @@ export function analyzeSource(source, virtualFilename) {
       if (callPath === "Buffer.from") {
         hits.add("base64", "Buffer.from", node);
       }
-      if (method === "toString" && node.arguments.some((argument) => ts.isStringLiteralLike(argument) && /base64/i.test(argument.text))) {
+      if (
+        method === "toString" &&
+        node.arguments.some(
+          (argument) => ts.isStringLiteralLike(argument) && /base64/i.test(argument.text),
+        )
+      ) {
         hits.add("base64", "toString(base64)", node);
       }
-      if (method && cryptoMethods.has(method) && expressionPath(node.expression.expression)?.includes("subtle")) {
+      if (
+        method &&
+        cryptoMethods.has(method) &&
+        expressionPath(node.expression.expression)?.includes("subtle")
+      ) {
         hits.add("crypto", `subtle.${method}`, node);
       }
       if (method && xhrMethods.has(method) && root && xhrVariables.has(root)) {
@@ -554,8 +570,14 @@ export function analyzeSource(source, virtualFilename) {
       const normalizedPath = accessPath?.replace(/^(?:globalThis|self|window)\./u, "");
       const devicePath = normalizedPath ? devicePaths.get(normalizedPath) : null;
       if (devicePath) hits.add("device-signal", devicePath, node);
-      if (accessPath && storagePaths.has(accessPath)) hits.add("storage", accessPath.replace(/^window\./u, ""), node);
-      if (accessPath === "crypto" || accessPath === "window.crypto" || accessPath === "self.crypto" || accessPath === "globalThis.crypto") {
+      if (accessPath && storagePaths.has(accessPath))
+        hits.add("storage", accessPath.replace(/^window\./u, ""), node);
+      if (
+        accessPath === "crypto" ||
+        accessPath === "window.crypto" ||
+        accessPath === "self.crypto" ||
+        accessPath === "globalThis.crypto"
+      ) {
         hits.add("crypto", "crypto", node);
       }
       if (accessPath?.endsWith(".subtle")) hits.add("crypto", "crypto.subtle", node);
@@ -662,7 +684,9 @@ export async function analyzeCapture(captureDirectory, options = {}) {
   const prettyDirectory = options.prettyDirectory ? path.resolve(options.prettyDirectory) : null;
   if (prettyDirectory) {
     if (isWithin(REPOSITORY_ROOT, prettyDirectory)) {
-      throw new Error("--pretty-dir must be outside the Git worktree because it contains raw response text");
+      throw new Error(
+        "--pretty-dir must be outside the Git worktree because it contains raw response text",
+      );
     }
     await mkdir(prettyDirectory, { recursive: true });
   }
@@ -670,9 +694,13 @@ export async function analyzeCapture(captureDirectory, options = {}) {
   const serializedArtifacts = [];
   for (const artifact of artifacts.values()) {
     if (prettyDirectory) {
-      await writeFile(path.join(prettyDirectory, `${artifact.sha256}.pretty.js`), artifact.prettySource, {
-        mode: 0o600,
-      });
+      await writeFile(
+        path.join(prettyDirectory, `${artifact.sha256}.pretty.js`),
+        artifact.prettySource,
+        {
+          mode: 0o600,
+        },
+      );
     }
     const { prettySource: _prettySource, ...safeArtifact } = artifact;
     safeArtifact.urls = [...new Set(safeArtifact.urls)].sort();

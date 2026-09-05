@@ -1,8 +1,6 @@
 import type { VPointPayCredential } from "./types";
 
-type CredentialSecrets = Partial<Pick<Env,
-  "VPOINT_PAY_REFRESH_TOKEN" | "VPOINT_PAY_DEVICE_UUID"
->>;
+type CredentialSecrets = Partial<Pick<Env, "VPOINT_PAY_REFRESH_TOKEN" | "VPOINT_PAY_DEVICE_UUID">>;
 
 export interface CredentialStatus {
   source: "durable-object" | "worker-secrets";
@@ -20,7 +18,9 @@ export function inspectCredential(
   const invalidFields: CredentialStatus["invalidFields"] = [];
   if (!credential.refreshToken?.trim()) missingFields.push("refresh-token");
   if (!credential.deviceUuid?.trim()) missingFields.push("device-uuid");
-  else if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(credential.deviceUuid)) {
+  else if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(credential.deviceUuid)
+  ) {
     invalidFields.push("device-uuid");
   }
   return {
@@ -49,7 +49,9 @@ export function credentialFromSecrets(env: CredentialSecrets): VPointPayCredenti
 
 export class VPointPayCredentialConfigurationError extends Error {
   constructor(status: CredentialStatus) {
-    super(`V Point Pay credential configuration required: missing=${status.missingFields.join(",") || "none"}; invalid=${status.invalidFields.join(",") || "none"}`);
+    super(
+      `V Point Pay credential configuration required: missing=${status.missingFields.join(",") || "none"}; invalid=${status.invalidFields.join(",") || "none"}`,
+    );
     this.name = "VPointPayCredentialConfigurationError";
   }
 }

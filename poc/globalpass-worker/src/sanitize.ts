@@ -1,5 +1,4 @@
-export const NABLARCH_HIDDEN_SENTINEL =
-  "__KOGANE_REDACTED_DYNAMIC_VALUE__";
+export const NABLARCH_HIDDEN_SENTINEL = "__KOGANE_REDACTED_DYNAMIC_VALUE__";
 
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const INPUT = /<input\b[^>]*>/giu;
@@ -13,8 +12,7 @@ const ALLOWED_HIDDEN_NAMES = new Set([
   "nablarch_submit",
   "w131301.referencedate",
 ]);
-const STATIC_ACTION =
-  "https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301";
+const STATIC_ACTION = "https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301";
 const SAME_HOST = "https://www.debit.vpass.ne.jp";
 const ALLOWED_LINK_HREF_PATHS = new Set([
   "/en//01006/css/master.css",
@@ -36,9 +34,7 @@ const ALLOWED_ANCHOR_HREF_PATHS = new Set([
   "/p/statementInquiry/RW1313010101",
   "/p/statementInquiry/RW1313010201",
 ]);
-const ALLOWED_IMG_SRC_PATHS = new Set([
-  "/en/01006/img/logo.jpg",
-]);
+const ALLOWED_IMG_SRC_PATHS = new Set(["/en/01006/img/logo.jpg"]);
 const ALLOWED_SCRIPT_SRC_PATHS = new Set([
   "/js/jquery.js",
   "/js/run.js",
@@ -46,8 +42,20 @@ const ALLOWED_SCRIPT_SRC_PATHS = new Set([
   "/js/W131301.js",
 ]);
 const BLOCKED_NETWORK_ELEMENTS = new Set([
-  "applet", "audio", "base", "embed", "fencedframe", "frame", "frameset",
-  "iframe", "object", "portal", "source", "svg", "track", "video",
+  "applet",
+  "audio",
+  "base",
+  "embed",
+  "fencedframe",
+  "frame",
+  "frameset",
+  "iframe",
+  "object",
+  "portal",
+  "source",
+  "svg",
+  "track",
+  "video",
 ]);
 
 interface Attribute {
@@ -98,9 +106,7 @@ export function sanitizeGlobalPassActivityHtml(html: string): string {
       throw new Error("globalpass_html_contract_invalid");
     }
     redacted += 1;
-    return tag.slice(0, value.valueStart) +
-      NABLARCH_HIDDEN_SENTINEL +
-      tag.slice(value.valueEnd);
+    return tag.slice(0, value.valueStart) + NABLARCH_HIDDEN_SENTINEL + tag.slice(value.valueEnd);
   });
   if (redacted !== before.nonemptyDynamicCount) {
     throw new Error("globalpass_html_redaction_failed");
@@ -221,10 +227,29 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
     throw new Error("globalpass_html_contract_invalid");
   }
   const extraUrlAttributes = new Set([
-    "archive", "background", "cite", "code", "codebase", "data", "datasrc",
-    "dynsrc", "formaction", "icon", "imagesrcset", "longdesc", "lowsrc",
-    "manifest", "ping", "poster", "profile", "srcdoc", "srcset", "usemap",
-    "xlink:href", "xmlns", "xmlns:xlink",
+    "archive",
+    "background",
+    "cite",
+    "code",
+    "codebase",
+    "data",
+    "datasrc",
+    "dynsrc",
+    "formaction",
+    "icon",
+    "imagesrcset",
+    "longdesc",
+    "lowsrc",
+    "manifest",
+    "ping",
+    "poster",
+    "profile",
+    "srcdoc",
+    "srcset",
+    "usemap",
+    "xlink:href",
+    "xmlns",
+    "xmlns:xlink",
   ]);
   for (const tag of html.match(/<[A-Za-z][^>]*>/gu) ?? []) {
     const attributes = parseAttributes(tag);
@@ -233,9 +258,17 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
       throw new Error("globalpass_html_contract_invalid");
     }
     const sensitiveNames = new Set(
-      attributes.map((attribute) => attribute.name).filter((name) =>
-        name === "href" || name === "src" || name === "action" ||
-        name === "http-equiv" || extraUrlAttributes.has(name) || name.startsWith("on")),
+      attributes
+        .map((attribute) => attribute.name)
+        .filter(
+          (name) =>
+            name === "href" ||
+            name === "src" ||
+            name === "action" ||
+            name === "http-equiv" ||
+            extraUrlAttributes.has(name) ||
+            name.startsWith("on"),
+        ),
     );
     for (const name of sensitiveNames) {
       if (attributes.filter((attribute) => attribute.name === name).length !== 1) {
@@ -245,11 +278,20 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
     const httpEquiv = attributes.find((attribute) => attribute.name === "http-equiv");
     if (httpEquiv) {
       const allowed = new Set([
-        "cache-control", "content-language", "content-script-type",
-        "content-style-type", "content-type", "expires", "pragma", "x-ua-compatible",
+        "cache-control",
+        "content-language",
+        "content-script-type",
+        "content-style-type",
+        "content-type",
+        "expires",
+        "pragma",
+        "x-ua-compatible",
       ]);
-      if (element !== "meta" || httpEquiv.value === undefined ||
-          !allowed.has(httpEquiv.value.trim().toLowerCase())) {
+      if (
+        element !== "meta" ||
+        httpEquiv.value === undefined ||
+        !allowed.has(httpEquiv.value.trim().toLowerCase())
+      ) {
         throw new Error("globalpass_html_contract_invalid");
       }
     }
@@ -259,7 +301,7 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
         throw new Error("globalpass_html_contract_invalid");
       }
       if (attribute.name === "action") {
-        if (element !== "form" || value !== "" && value !== STATIC_ACTION) {
+        if (element !== "form" || (value !== "" && value !== STATIC_ACTION)) {
           throw new Error("globalpass_html_contract_invalid");
         }
       } else if (attribute.name === "href") {
@@ -267,9 +309,12 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
           throw new Error("globalpass_html_contract_invalid");
         }
       } else if (attribute.name === "src") {
-        const allowed = element === "img"
-          ? ALLOWED_IMG_SRC_PATHS
-          : element === "script" ? ALLOWED_SCRIPT_SRC_PATHS : null;
+        const allowed =
+          element === "img"
+            ? ALLOWED_IMG_SRC_PATHS
+            : element === "script"
+              ? ALLOWED_SCRIPT_SRC_PATHS
+              : null;
         if (value === undefined || allowed === null || !allowedSameHostPath(value, allowed)) {
           throw new Error("globalpass_html_contract_invalid");
         }
@@ -290,8 +335,12 @@ function canonicalizeInteractiveAttributes(html: string): string {
   return html.replace(/<[A-Za-z][^>]*>/gu, (tag) => {
     const replacements: Array<{ start: number; end: number; value: string }> = [];
     for (const attribute of parseAttributes(tag)) {
-      if (attribute.valueStart === undefined || attribute.valueEnd === undefined ||
-          attribute.value === undefined) continue;
+      if (
+        attribute.valueStart === undefined ||
+        attribute.valueEnd === undefined ||
+        attribute.value === undefined
+      )
+        continue;
       if (attribute.name === "href" && attribute.value.startsWith("#")) {
         replacements.push({
           start: attribute.valueStart,
@@ -308,8 +357,8 @@ function canonicalizeInteractiveAttributes(html: string): string {
     }
     let output = tag;
     for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
-      output = output.slice(0, replacement.start) + replacement.value +
-        output.slice(replacement.end);
+      output =
+        output.slice(0, replacement.start) + replacement.value + output.slice(replacement.end);
     }
     return output;
   });
@@ -318,10 +367,12 @@ function canonicalizeInteractiveAttributes(html: string): string {
 function allowedHref(element: string, value: string, canonical: boolean): boolean {
   if (element === "link") return allowedSameHostPath(value, ALLOWED_LINK_HREF_PATHS);
   if (element !== "a") return false;
-  return value === "https://www.smbctb.co.jp/" ||
+  return (
+    value === "https://www.smbctb.co.jp/" ||
     (canonical ? value === "#" : /^#[A-Za-z0-9._:-]*$/u.test(value)) ||
     /^javascript:void\(0\);?$/u.test(value) ||
-    allowedSameHostPath(value, ALLOWED_ANCHOR_HREF_PATHS);
+    allowedSameHostPath(value, ALLOWED_ANCHOR_HREF_PATHS)
+  );
 }
 
 function allowedSameHostPath(value: string, allowed: ReadonlySet<string>): boolean {
@@ -333,31 +384,56 @@ function allowedSameHostPath(value: string, allowed: ReadonlySet<string>): boole
   } catch {
     return false;
   }
-  return parsed.origin === SAME_HOST && parsed.username === "" && parsed.password === "" &&
-    parsed.search === "" && parsed.hash === "" && allowed.has(parsed.pathname);
+  return (
+    parsed.origin === SAME_HOST &&
+    parsed.username === "" &&
+    parsed.password === "" &&
+    parsed.search === "" &&
+    parsed.hash === "" &&
+    allowed.has(parsed.pathname)
+  );
 }
 
 function allowedEventHandler(name: string, value: string, canonical: boolean): boolean {
   if (canonical) {
     return (name === "onclick" || name === "onchange") && value === "return false;";
   }
-  if (/https?:|javascript:|data:|fetch|xmlhttprequest|document|cookie|storage|eval|function|=>/iu
-      .test(value)) return false;
-  const functionNames = [...value.matchAll(
-    /\b(?:window\.)?[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*(?=\s*\()/gu,
-  )].map((match) => match[0]!);
-  const allowedFunctions = name === "onchange"
-    ? new Set(["sel_submit"])
-    : name === "onclick"
-    ? new Set(["click", "toggleClass", "window.nablarch_submit"])
-    : null;
-  if (!allowedFunctions || functionNames.length === 0 ||
-      functionNames.some((functionName) => !allowedFunctions.has(functionName))) return false;
+  if (
+    /https?:|javascript:|data:|fetch|xmlhttprequest|document|cookie|storage|eval|function|=>/iu.test(
+      value,
+    )
+  )
+    return false;
+  const functionNames = [
+    ...value.matchAll(
+      /\b(?:window\.)?[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*(?=\s*\()/gu,
+    ),
+  ].map((match) => match[0]!);
+  const allowedFunctions =
+    name === "onchange"
+      ? new Set(["sel_submit"])
+      : name === "onclick"
+        ? new Set(["click", "toggleClass", "window.nablarch_submit"])
+        : null;
+  if (
+    !allowedFunctions ||
+    functionNames.length === 0 ||
+    functionNames.some((functionName) => !allowedFunctions.has(functionName))
+  )
+    return false;
   const withoutStrings = value.replace(/"[^"]*"|'[^']*'/gu, "");
   const identifiers = withoutStrings.match(/[A-Za-z_$][A-Za-z0-9_$]*/gu) ?? [];
   const allowedIdentifiers = new Set([
-    "click", "event", "false", "nablarch_submit", "return", "sel_submit",
-    "this", "toggleClass", "true", "window",
+    "click",
+    "event",
+    "false",
+    "nablarch_submit",
+    "return",
+    "sel_submit",
+    "this",
+    "toggleClass",
+    "true",
+    "window",
   ]);
   return identifiers.every((identifier) => allowedIdentifiers.has(identifier));
 }
@@ -387,10 +463,7 @@ function parseAttributes(tag: string): Attribute[] {
   return attributes;
 }
 
-function attributeValue(
-  attributes: Attribute[],
-  name: string,
-): string | undefined {
+function attributeValue(attributes: Attribute[], name: string): string | undefined {
   const matches = attributes.filter((attribute) => attribute.name === name);
   if (matches.length > 1) throw new Error("globalpass_html_contract_invalid");
   return matches[0]?.value;

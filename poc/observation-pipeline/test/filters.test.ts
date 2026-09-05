@@ -16,9 +16,7 @@ describe("record filters preserve source and date boundaries", () => {
     const options = accountOptions(rows, "");
     expect(options).toHaveLength(2);
     expect(
-      rows.filter((row) =>
-        matchesSourceAccount(row, { source: "", account: options[0]!.value }),
-      ),
+      rows.filter((row) => matchesSourceAccount(row, { source: "", account: options[0]!.value })),
     ).toHaveLength(1);
     expect(accountOptions(rows, "bank-b")).toHaveLength(1);
     expect(
@@ -29,12 +27,8 @@ describe("record filters preserve source and date boundaries", () => {
     ).toBe(false);
   });
   test("date range uses recorded calendar days without timezone conversion", () => {
-    expect(
-      matchesDates("2026-09-05T23:30:00-10:00", "2026-09-05", "2026-09-05"),
-    ).toBe(true);
-    expect(
-      matchesDates("2026-09-06T00:00:00+09:00", "2026-09-05", "2026-09-05"),
-    ).toBe(false);
+    expect(matchesDates("2026-09-05T23:30:00-10:00", "2026-09-05", "2026-09-05")).toBe(true);
+    expect(matchesDates("2026-09-06T00:00:00+09:00", "2026-09-05", "2026-09-05")).toBe(false);
     expect(matchesDates("2026-09-05", "2026-09-05", "2026-09-05")).toBe(true);
     expect(matchesDates(null, "", "")).toBe(true);
     expect(matchesDates(null, "2026-09-01", "")).toBe(false);

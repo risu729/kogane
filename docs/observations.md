@@ -17,7 +17,7 @@ fact.
 
 ## What an observation is
 
-An observation is one statement of the form *source X said Y*. It is
+An observation is one statement of the form _source X said Y_. It is
 produced by reading bytes we already hold, and nothing else.
 
 It is not:
@@ -345,7 +345,7 @@ Practical rules that fall out of this:
   and changed locator formats. Editing a parser without bumping records
   two different programs under one identity, and no query can separate
   them afterwards.
-- To roll back to older behaviour, publish a *higher* version that
+- To roll back to older behaviour, publish a _higher_ version that
   restores it (`0.3.0` restoring `0.1.0` logic). Re-running the literal
   string `0.1.0` would either be skipped as already parsed, or, if that
   run had failed, insert a run that is immediately marked superseded by
@@ -369,14 +369,14 @@ quantity".
 
 Six columns recur across all four shapes:
 
-| column | meaning |
-| --- | --- |
-| `parse_run_id` | the only provenance link an observation has |
+| column           | meaning                                        |
+| ---------------- | ---------------------------------------------- |
+| `parse_run_id`   | the only provenance link an observation has    |
 | `source_account` | which account the parser attributes the row to |
-| `as_of` | the point in time the value describes |
-| `observed_at` | when the source displayed or reported it |
-| `raw_locator` | where inside the raw object this came from |
-| `extra_json` | everything else the source said |
+| `as_of`          | the point in time the value describes          |
+| `observed_at`    | when the source displayed or reported it       |
+| `raw_locator`    | where inside the raw object this came from     |
+| `extra_json`     | everything else the source said                |
 
 `parse_run_id` carries the parser name and version, and transitively the
 artifact, the raw object hash, the R2 key, and the fetch run. Nothing is
@@ -659,21 +659,21 @@ An unknown currency has no exponent, and `amountToMinorUnits` returns
 `undefined` rather than assuming 2. The helper refuses to guess in every
 direction — measured behaviour, from `test/parsers.test.ts`:
 
-| input | currency | result |
-| --- | --- | --- |
-| `1,802` | JPY | `1802` |
-| `△100,000` | JPY | `-100000` |
-| `(1,000)` | JPY | `-1000` |
-| `+300` | JPY | `300` |
-| `1,024.53` | USD | `102453` |
-| `180,200.00` | JPY | `180200` |
-| `1.230` | USD | `123` |
-| `1.5` | JPY | `undefined` (precision would be lost) |
-| `1.231` | USD | `undefined` |
-| `1024,53` | JPY | `undefined` (comma grouping is invalid) |
-| `△-100` | JPY | `undefined` (two negative markers) |
-| `N/A` | JPY | `undefined` |
-| `100` | XYZ | `undefined` (unknown exponent) |
+| input        | currency | result                                  |
+| ------------ | -------- | --------------------------------------- |
+| `1,802`      | JPY      | `1802`                                  |
+| `△100,000`   | JPY      | `-100000`                               |
+| `(1,000)`    | JPY      | `-1000`                                 |
+| `+300`       | JPY      | `300`                                   |
+| `1,024.53`   | USD      | `102453`                                |
+| `180,200.00` | JPY      | `180200`                                |
+| `1.230`      | USD      | `123`                                   |
+| `1.5`        | JPY      | `undefined` (precision would be lost)   |
+| `1.231`      | USD      | `undefined`                             |
+| `1024,53`    | JPY      | `undefined` (comma grouping is invalid) |
+| `△-100`      | JPY      | `undefined` (two negative markers)      |
+| `N/A`        | JPY      | `undefined`                             |
+| `100`        | XYZ      | `undefined` (unknown exponent)          |
 
 Thousands separators, a leading `+` or `-`, the `△`/`▲` negative marker
 used by Japanese financial sites, and parenthesized negatives are all
@@ -735,7 +735,7 @@ The prefix names the byte format and the remainder is a path within it.
 CSV rows are 1-based counting the header as row 1, so the locator matches
 what a spreadsheet shows.
 
-A locator has one job: re-find the value inside *these* bytes. It does not
+A locator has one job: re-find the value inside _these_ bytes. It does not
 have to survive a new fetch, because it never refers to one. Raw objects
 are content-addressed and immutable, so a positional index into
 `records[0]` cannot drift — the same sha256 always has the same element
@@ -933,7 +933,7 @@ run id — where the fixture uses one date segment and a readable run name.
 The fixture also holds three of the seven datasets the collector emits
 (`account-assets-current`, `yen-detail-history`, `domestic-trade-records`,
 `domestic-cash-positions`, `foreign-cash-positions`,
-`foreign-cash-balances`, `foreign-trade-records`). What *is* faithful is
+`foreign-cash-balances`, `foreign-trade-records`). What _is_ faithful is
 the manifest: it carries the collector's own `schemaVersion`
 `sbi-worker-poc-v1`, one entry per artifact with `dataset`, `key`,
 `sha256`, `bytes` and an optional `window`, and its `key` values spell out

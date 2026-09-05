@@ -8,7 +8,7 @@
 -- following docs/roadmap.md phase 3 and docs/design.md.
 --
 -- Conventions enforced here (docs/design.md):
---   * append-only: raw evidence and observations are never UPDATEd, with one
+--   * append-only: raw evidence and observations are never updated, with one
 --     deliberate exception — parse_runs.superseded_by_parse_run_id, which marks
 --     a whole parse run as superseded by a re-parse (supersession is data about
 --     the parse lineage, not a mutation of any observation row);

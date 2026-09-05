@@ -156,9 +156,7 @@ export function App(): ReactNode {
             }}
           >
             <span
-              className={
-                fetching ? "refresh-symbol is-refreshing" : "refresh-symbol"
-              }
+              className={fetching ? "refresh-symbol is-refreshing" : "refresh-symbol"}
               aria-hidden="true"
             >
               ↻
@@ -168,10 +166,7 @@ export function App(): ReactNode {
         </header>
         <div className="source-notice">
           <div className="source-identity">
-            <span
-              className={`connection-dot${connected ? " connected" : ""}`}
-              aria-hidden="true"
-            />
+            <span className={`connection-dot${connected ? " connected" : ""}`} aria-hidden="true" />
             <span role="status">{connectionLabel}</span>
           </div>
           <p>

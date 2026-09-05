@@ -28,9 +28,11 @@ const ALLOWED_PRODUCT_HINTS = [
 ] as const;
 
 export function parseCardInventory(html: string): DiscoveredCard[] {
-  const candidates = [...html.matchAll(
-    /<(?:option|a)\b[^>]*(?:data-card-index|value|href)=["']([^"']+)["'][^>]*>([\s\S]*?)<\/(?:option|a)>/giu,
-  )];
+  const candidates = [
+    ...html.matchAll(
+      /<(?:option|a)\b[^>]*(?:data-card-index|value|href)=["']([^"']+)["'][^>]*>([\s\S]*?)<\/(?:option|a)>/giu,
+    ),
+  ];
   const cards: DiscoveredCard[] = [];
   for (const [index, match] of candidates.entries()) {
     const text = normalizeText(stripTags(match[2] ?? ""));
@@ -51,7 +53,8 @@ export function parseStatementPeriods(html: string): DiscoveredPeriod[] {
   )) {
     const target = decodeHtml(match[1] ?? "");
     const label = normalizeText(stripTags(match[2] ?? ""));
-    const sequence = target.match(/[?&]seq=(\d{1,2})(?:&|$)/u)?.[1] ??
+    const sequence =
+      target.match(/[?&]seq=(\d{1,2})(?:&|$)/u)?.[1] ??
       (/^\d{1,2}$/u.test(target) ? target : undefined);
     if (sequence === undefined && !/(?:\d{4}年\d{1,2}月|未確定|確定)/u.test(label)) continue;
     const numericSequence = sequence === undefined ? undefined : Number(sequence);
@@ -116,30 +119,30 @@ export function parsePastMonthAvailability(json: string): PastMonthAvailability[
     throw new StopConditionError("MyJCB past-month response omitted detailPastJsonInfo");
   }
   const seen = new Set<number>();
-  return items.map((item, index) => {
-    if (!isRecord(item)) {
-      throw new StopConditionError(`MyJCB past-month item ${index + 1} was malformed`);
-    }
-    const detailMonth = numericMonth(item.detailMonth);
-    if (seen.has(detailMonth)) {
-      throw new StopConditionError("MyJCB past-month response contained duplicate months");
-    }
-    seen.add(detailMonth);
-    const available = availabilityFlag(item.detailAvailableFlag);
-    const settlementYM = item.settlementYM;
-    if (settlementYM !== undefined && typeof settlementYM !== "string") {
-      throw new StopConditionError("MyJCB past-month settlementYM was malformed");
-    }
-    return {
-      detailMonth,
-      available,
-      ...(
-        typeof settlementYM === "string" && safeSettlementLabel(settlementYM)
-        ? { settlementYM }
-        : {}
-      ),
-    };
-  }).sort((left, right) => left.detailMonth - right.detailMonth);
+  return items
+    .map((item, index) => {
+      if (!isRecord(item)) {
+        throw new StopConditionError(`MyJCB past-month item ${index + 1} was malformed`);
+      }
+      const detailMonth = numericMonth(item.detailMonth);
+      if (seen.has(detailMonth)) {
+        throw new StopConditionError("MyJCB past-month response contained duplicate months");
+      }
+      seen.add(detailMonth);
+      const available = availabilityFlag(item.detailAvailableFlag);
+      const settlementYM = item.settlementYM;
+      if (settlementYM !== undefined && typeof settlementYM !== "string") {
+        throw new StopConditionError("MyJCB past-month settlementYM was malformed");
+      }
+      return {
+        detailMonth,
+        available,
+        ...(typeof settlementYM === "string" && safeSettlementLabel(settlementYM)
+          ? { settlementYM }
+          : {}),
+      };
+    })
+    .sort((left, right) => left.detailMonth - right.detailMonth);
 }
 
 export function discoverCreditExports(
@@ -153,15 +156,18 @@ export function discoverCreditExports(
     if (
       url.pathname === "/iss-pc/member/details_inquiry/detail.html" &&
       url.searchParams.get("output") === "csv"
-    ) found.add("csv");
+    )
+      found.add("csv");
     if (
       url.pathname === "/iss-pc/member/details_inquiry/detail.html" &&
       url.searchParams.get("output") === "money"
-    ) found.add("ofx");
+    )
+      found.add("ofx");
     if (
       url.pathname === "/iss-pc/member/details_inquiry/detailDbPdf.html" &&
       url.searchParams.get("output") === "pdf"
-    ) found.add("pdf");
+    )
+      found.add("pdf");
   }
   return [...found];
 }
@@ -174,11 +180,13 @@ export function parseCreditLedger(
   const ledger = findElements(document, (element) => hasClass(element, "detail-list-01"))[0];
   if (!ledger) return undefined;
   const header = findElements(ledger, (element) => hasClass(element, "head"))[0];
-  const hasEmptyMarker = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u
-    .test(nodeText(ledger));
-  const headers = state === "unconfirmed"
-    ? ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"]
-    : ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"];
+  const hasEmptyMarker = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u.test(
+    nodeText(ledger),
+  );
+  const headers =
+    state === "unconfirmed"
+      ? ["ご利用日", "ご利用先など", "支払区分", "ご利用金額"]
+      : ["ご利用日", "ご利用先など", "支払区分", "今回のお支払い金額"];
   const headerText = header ? normalizeText(nodeText(header)) : "";
   const requiredCoreHeaders = hasEmptyMarker
     ? ["ご利用日", "ご利用先など"]
@@ -186,20 +194,23 @@ export function parseCreditLedger(
   if (requiredCoreHeaders.some((label) => !headerText.includes(label))) {
     throw new StopConditionError(`MyJCB ${state} ledger headers changed`, "credit-ledger-headers");
   }
-  const expandedLabels = state === "unconfirmed"
-    ? ["今回のお支払い金額", "摘要", "今回回数", "備考", "訂正サイン"]
-    : ["ご利用金額", "摘要", "今回回数", "備考", "訂正サイン"];
+  const expandedLabels =
+    state === "unconfirmed"
+      ? ["今回のお支払い金額", "摘要", "今回回数", "備考", "訂正サイン"]
+      : ["ご利用金額", "摘要", "今回回数", "備考", "訂正サイン"];
   const rows = directElementChildren(ledger)
     .filter((element) => hasClass(element, "content"))
     .flatMap((row) => {
       const itemCell = findElements(row, (element) => hasClass(element, "item-cell"))[0];
       if (!itemCell) {
-        console.warn(JSON.stringify({
-          event: "myjcb-credit-ledger-row-shape",
-          state,
-          rowClasses: safeClassNames(row),
-          childClasses: directElementChildren(row).flatMap(safeClassNames),
-        }));
+        console.warn(
+          JSON.stringify({
+            event: "myjcb-credit-ledger-row-shape",
+            state,
+            rowClasses: safeClassNames(row),
+            childClasses: directElementChildren(row).flatMap(safeClassNames),
+          }),
+        );
         throw new StopConditionError(
           `MyJCB ${state} ledger row omitted item-cell`,
           "credit-ledger-item-cell",
@@ -216,12 +227,14 @@ export function parseCreditLedger(
         return [];
       }
       if (summaryCells.length !== 4) {
-        console.warn(JSON.stringify({
-          event: "myjcb-credit-ledger-cell-shape",
-          state,
-          summaryCellCount: summaryCells.length,
-          childClasses: directElementChildren(itemCell).flatMap(safeClassNames),
-        }));
+        console.warn(
+          JSON.stringify({
+            event: "myjcb-credit-ledger-cell-shape",
+            state,
+            summaryCellCount: summaryCells.length,
+            childClasses: directElementChildren(itemCell).flatMap(safeClassNames),
+          }),
+        );
         throw new StopConditionError(
           `MyJCB ${state} ledger row changed its direct cell count`,
           "credit-ledger-cell-count",
@@ -300,7 +313,10 @@ function sanitizeHtmlTree(node: HtmlNode): void {
   if ("childNodes" in node) {
     for (let index = node.childNodes.length - 1; index >= 0; index -= 1) {
       const child = node.childNodes[index]!;
-      if (child.nodeName === "#comment" || (isElement(child) && REMOVED_HTML_ELEMENTS.has(child.tagName))) {
+      if (
+        child.nodeName === "#comment" ||
+        (isElement(child) && REMOVED_HTML_ELEMENTS.has(child.tagName))
+      ) {
         node.childNodes.splice(index, 1);
       } else {
         sanitizeHtmlTree(child);
@@ -320,8 +336,11 @@ function sanitizeHtmlTree(node: HtmlNode): void {
       }
       if (
         name === "value" ||
-        /(?:token|csrf|session|auth|credential|secret|password|nonce|userid|user-id|user_id|cookie)/u.test(name)
-      ) return [{ ...attribute, value: "[redacted]" }];
+        /(?:token|csrf|session|auth|credential|secret|password|nonce|userid|user-id|user_id|cookie)/u.test(
+          name,
+        )
+      )
+        return [{ ...attribute, value: "[redacted]" }];
       return [attribute];
     });
   } else if (node.nodeName === "#text") {
@@ -332,10 +351,7 @@ function sanitizeHtmlTree(node: HtmlNode): void {
   }
 }
 
-function exportKindsNear(
-  html: string,
-  index: number,
-): readonly ("csv" | "pdf" | "ofx")[] {
+function exportKindsNear(html: string, index: number): readonly ("csv" | "pdf" | "ofx")[] {
   const nearby = html.slice(Math.max(0, index - 600), index + 1200);
   const result: ("csv" | "pdf" | "ofx")[] = [];
   if (/CSV/iu.test(nearby)) result.push("csv");
@@ -367,11 +383,12 @@ function decodeHtml(value: string): string {
     amp: "&",
     lt: "<",
     gt: ">",
-    quot: "\"",
+    quot: '"',
     "#39": "'",
   };
-  return value.replace(/&(amp|lt|gt|quot|#39);/gu, (entity, name: string) =>
-    entities[name] ?? entity
+  return value.replace(
+    /&(amp|lt|gt|quot|#39);/gu,
+    (entity, name: string) => entities[name] ?? entity,
   );
 }
 
@@ -379,10 +396,7 @@ function normalizeText(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
 }
 
-function findElements(
-  node: HtmlNode,
-  predicate: (element: HtmlElement) => boolean,
-): HtmlElement[] {
+function findElements(node: HtmlNode, predicate: (element: HtmlElement) => boolean): HtmlElement[] {
   const result: HtmlElement[] = [];
   if (isElement(node) && predicate(node)) result.push(node);
   for (const child of childNodes(node)) result.push(...findElements(child, predicate));
@@ -415,7 +429,8 @@ function findLabelValue(root: HtmlElement, label: string): string | undefined {
   const candidates = findElements(root, (element) => {
     const text = normalizeText(nodeText(element));
     return text.startsWith(label) && text.length > label.length;
-  }).map((element) => normalizeText(nodeText(element)))
+  })
+    .map((element) => normalizeText(nodeText(element)))
     .sort((left, right) => left.length - right.length);
   const candidate = candidates[0];
   return candidate === undefined ? undefined : candidate.slice(label.length).trim();
@@ -426,11 +441,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function numericMonth(value: unknown): number {
-  const number = typeof value === "number"
-    ? value
-    : typeof value === "string" && /^\d{1,2}$/u.test(value)
-      ? Number(value)
-      : Number.NaN;
+  const number =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && /^\d{1,2}$/u.test(value)
+        ? Number(value)
+        : Number.NaN;
   if (!Number.isInteger(number) || number < 0 || number > 17) {
     throw new StopConditionError("MyJCB past-month detailMonth was outside 0..17");
   }
@@ -448,6 +464,9 @@ function isSuccessErrorId(value: unknown): boolean {
 }
 
 function safeSettlementLabel(value: string): boolean {
-  return value.length > 0 && value.length <= 32 &&
-    /^[0-9０-９年月日度お支払い分／/().（）.\-\s]+$/u.test(value);
+  return (
+    value.length > 0 &&
+    value.length <= 32 &&
+    /^[0-9０-９年月日度お支払い分／/().（）.\-\s]+$/u.test(value)
+  );
 }

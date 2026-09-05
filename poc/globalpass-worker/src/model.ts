@@ -87,9 +87,7 @@ export function parseMode(value: string | null): CollectionMode {
   throw new Error("mode must be daily or backfill");
 }
 
-export function parseContainerProbeVariant(
-  value: string | null,
-): ContainerProbeVariant {
+export function parseContainerProbeVariant(value: string | null): ContainerProbeVariant {
   for (const candidate of CONTAINER_PROBE_VARIANTS) {
     if (value === candidate) return candidate;
   }
@@ -103,10 +101,7 @@ export function safeMonth(value: string): string {
   return value;
 }
 
-export function selectedMonthsForMode(
-  mode: CollectionMode,
-  availableMonths: string[],
-): string[] {
+export function selectedMonthsForMode(mode: CollectionMode, availableMonths: string[]): string[] {
   assertCanonicalMonths(availableMonths, "availableMonths");
   return mode === "backfill" ? [...availableMonths] : availableMonths.slice(0, 2);
 }
@@ -146,9 +141,7 @@ export function strictCollectionStatus(
   if (artifactMonths.some((month) => !selectedMonths.includes(month))) {
     throw new Error("GLOBAL PASS artifact month was not selected");
   }
-  const expectedStoredOrder = selectedMonths.filter((month) =>
-    artifactMonths.includes(month)
-  );
+  const expectedStoredOrder = selectedMonths.filter((month) => artifactMonths.includes(month));
   if (artifactMonths.some((month, index) => month !== expectedStoredOrder[index])) {
     throw new Error("GLOBAL PASS artifacts are not in selected month order");
   }

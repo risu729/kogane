@@ -22,18 +22,24 @@ describe("session material", () => {
   });
 
   test("applies allowlisted Set-Cookie rotation and ignores bot cookies", () => {
-    const result = applySessionUpdates(parseSession(seed), [
-      "AWSALB=rotated; Path=/; Secure",
-      "__cf_bm=ignored; Path=/; Secure",
-      "JSESSIONID=jsession; Path=/; Secure",
-    ], { status: "OK", secureKey: "secure2" });
+    const result = applySessionUpdates(
+      parseSession(seed),
+      [
+        "AWSALB=rotated; Path=/; Secure",
+        "__cf_bm=ignored; Path=/; Secure",
+        "JSESSIONID=jsession; Path=/; Secure",
+      ],
+      { status: "OK", secureKey: "secure2" },
+    );
     expect(result.updateCount).toBe(2);
     expect(result.session.cookies.awsAlb).toBe("rotated");
     expect(result.session.secureKey).toBe("secure2");
   });
 
   test("rejects cookie delimiters", () => {
-    expect(() => parseSession({ ...seed, secureKey: "bad\nvalue" })).toThrow("invalid_session_seed");
+    expect(() => parseSession({ ...seed, secureKey: "bad\nvalue" })).toThrow(
+      "invalid_session_seed",
+    );
   });
 
   test("accepts only a gateway envelope with status", () => {

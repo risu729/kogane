@@ -29,15 +29,21 @@ export function parsePasskeyCredential(value: unknown): PasskeyCredential {
     throw new Error("nonzero_passkey_counter_not_supported");
   }
   if (
-    typeof value.credentialId !== "string"
-    || typeof value.keyValue !== "string"
-    || value.rpId !== "sbivc.co.jp"
-    || typeof value.userHandle !== "string"
-    || counter !== 0
-    || value.keyAlgorithm !== "ECDSA"
-    || value.keyCurve !== "P-256"
-  ) throw new Error("invalid_passkey_credential");
-  if (!value.credentialId || !value.keyValue || !value.userHandle || /[\r\n]/u.test(value.userHandle)) {
+    typeof value.credentialId !== "string" ||
+    typeof value.keyValue !== "string" ||
+    value.rpId !== "sbivc.co.jp" ||
+    typeof value.userHandle !== "string" ||
+    counter !== 0 ||
+    value.keyAlgorithm !== "ECDSA" ||
+    value.keyCurve !== "P-256"
+  )
+    throw new Error("invalid_passkey_credential");
+  if (
+    !value.credentialId ||
+    !value.keyValue ||
+    !value.userHandle ||
+    /[\r\n]/u.test(value.userHandle)
+  ) {
     throw new Error("invalid_passkey_credential");
   }
   return {
@@ -56,13 +62,17 @@ export async function createAssertion(
   challenge: string,
 ): Promise<Record<string, string>> {
   if (!challenge || !isBase64Url(challenge)) throw new Error("invalid_passkey_challenge");
-  const clientDataJSON = new TextEncoder().encode(JSON.stringify({
-    type: "webauthn.get",
-    challenge,
-    origin: ORIGIN,
-    crossOrigin: false,
-  }));
-  const rpIdHash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential.rpId)));
+  const clientDataJSON = new TextEncoder().encode(
+    JSON.stringify({
+      type: "webauthn.get",
+      challenge,
+      origin: ORIGIN,
+      crossOrigin: false,
+    }),
+  );
+  const rpIdHash = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(credential.rpId)),
+  );
   const authenticatorData = new Uint8Array(37);
   authenticatorData.set(rpIdHash, 0);
   authenticatorData[32] = AUTHENTICATOR_FLAGS;
@@ -79,11 +89,9 @@ export async function createAssertion(
     false,
     ["sign"],
   );
-  const rawSignature = new Uint8Array(await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    signedData,
-  ));
+  const rawSignature = new Uint8Array(
+    await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, privateKey, signedData),
+  );
   if (rawSignature.byteLength !== 64) throw new Error("unexpected_passkey_signature_format");
 
   return {
@@ -110,10 +118,10 @@ export async function createPasskeySession(
   applySetCookies(cookies, initiateResponse.response.headers.getSetCookie());
   const initiate = initiateResponse.envelope;
   if (
-    initiate.meta.status !== "OK"
-    || typeof initiate.body.challenge !== "string"
-    || initiate.body.rpId !== credential.rpId
-    || initiate.body.userVerification !== "required"
+    initiate.meta.status !== "OK" ||
+    typeof initiate.body.challenge !== "string" ||
+    initiate.body.rpId !== credential.rpId ||
+    initiate.body.userVerification !== "required"
   ) {
     throw new Error("passkey_initiation_rejected");
   }
@@ -165,11 +173,16 @@ async function postGateway(
     body: JSON.stringify(body),
   });
   if (!response.ok) throw new Error(`passkey_http_${response.status}`);
-  if (!(response.headers.get("content-type")?.toLowerCase().includes("application/json"))) {
+  if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
     throw new Error("passkey_non_json_response");
   }
   const parsed = JSON.parse(await readBoundedText(response.clone(), MAX_RESPONSE_BYTES)) as unknown;
-  if (!isRecord(parsed) || !isRecord(parsed.meta) || typeof parsed.meta.status !== "string" || !isRecord(parsed.body)) {
+  if (
+    !isRecord(parsed) ||
+    !isRecord(parsed.meta) ||
+    typeof parsed.meta.status !== "string" ||
+    !isRecord(parsed.body)
+  ) {
     throw new Error("invalid_passkey_gateway_envelope");
   }
   return { response, envelope: { meta: { status: parsed.meta.status }, body: parsed.body } };

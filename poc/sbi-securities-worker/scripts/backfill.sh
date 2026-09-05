@@ -23,7 +23,7 @@ fi
 
 IFS= read -r admin_token < "$admin_token_file"
 window_from=$from
-while [[ $window_from < $to || $window_from == $to ]]; do
+while [[ $window_from < $to || $window_from == "$to" ]]; do
   window_to=$(date --date="${window_from} +89 days" +%F)
   if [[ $window_to > $to ]]; then window_to=$to; fi
 

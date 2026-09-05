@@ -1,10 +1,36 @@
-export type CollectionStage = "balance-read" | "artifact-store" | "manifest-store" | "central-import" |
-  "session-load" | "email-challenge-request" | "smfg-read" | "history-read" |
-  "vmoney-history-read" | "email-reconcile" | "session-invalidate" |
-  "email-receive" | "email-parse" | "email-store" | "email-forward" |
-  "email-code-parse" | "email-auth-complete" | "post-auth-collection";
+export type CollectionStage =
+  | "balance-read"
+  | "artifact-store"
+  | "manifest-store"
+  | "central-import"
+  | "session-load"
+  | "email-challenge-request"
+  | "smfg-read"
+  | "history-read"
+  | "vmoney-history-read"
+  | "email-reconcile"
+  | "session-invalidate"
+  | "email-receive"
+  | "email-parse"
+  | "email-store"
+  | "email-forward"
+  | "email-code-parse"
+  | "email-auth-complete"
+  | "post-auth-collection";
 
-const KNOWN_ERROR_TYPES = new Set(["Error", "TypeError", "RangeError", "SyntaxError", "AbortError", "TimeoutError", "VPointError", "VPointProtocolError", "VPointApplicationError", "VPointSessionExpiredError", "VPointReauthenticationPendingError"]);
+const KNOWN_ERROR_TYPES = new Set([
+  "Error",
+  "TypeError",
+  "RangeError",
+  "SyntaxError",
+  "AbortError",
+  "TimeoutError",
+  "VPointError",
+  "VPointProtocolError",
+  "VPointApplicationError",
+  "VPointSessionExpiredError",
+  "VPointReauthenticationPendingError",
+]);
 
 export interface SafeFailure {
   errorType: string;
@@ -16,8 +42,11 @@ export interface SafeFailure {
 
 // Raw exception messages, stacks, URLs and provider bodies are never diagnostics.
 export function safeFailure(error: unknown): SafeFailure {
-  try { return inspectFailure(error); }
-  catch { return { errorType: "UnknownError", failureCode: "operation_failed" }; }
+  try {
+    return inspectFailure(error);
+  } catch {
+    return { errorType: "UnknownError", failureCode: "operation_failed" };
+  }
 }
 
 function inspectFailure(error: unknown): SafeFailure {
@@ -26,13 +55,19 @@ function inspectFailure(error: unknown): SafeFailure {
   const errorType = KNOWN_ERROR_TYPES.has(name) ? name : "UnknownError";
   const failureCode = name.includes("CredentialConfiguration")
     ? "credential_configuration_required"
-    : name.includes("ReauthenticationPending") ? "email_authentication_pending"
-    : name.includes("ReauthenticationRequired") || name.includes("SessionExpired")
-      ? "authentication_required"
-      : name.includes("Protocol") ? "provider_protocol_failed"
-      : name.includes("Application") ? "provider_application_failed"
-      : name === "VPointError" || name.includes("HttpError") ? "provider_http_failed"
-      : name === "TypeError" ? "runtime_type_error" : "operation_failed";
+    : name.includes("ReauthenticationPending")
+      ? "email_authentication_pending"
+      : name.includes("ReauthenticationRequired") || name.includes("SessionExpired")
+        ? "authentication_required"
+        : name.includes("Protocol")
+          ? "provider_protocol_failed"
+          : name.includes("Application")
+            ? "provider_application_failed"
+            : name === "VPointError" || name.includes("HttpError")
+              ? "provider_http_failed"
+              : name === "TypeError"
+                ? "runtime_type_error"
+                : "operation_failed";
   const result: SafeFailure = { errorType, failureCode };
   if (error instanceof Error && KNOWN_ERROR_TYPES.has(name)) {
     const status = "status" in error ? error.status : undefined;
@@ -40,10 +75,19 @@ function inspectFailure(error: unknown): SafeFailure {
       result.httpStatus = status;
     }
     const reason = "reasonCode" in error ? error.reasonCode : undefined;
-    if (typeof reason === "string" && new Set([
-      "invalid-json", "missing-results", "empty-first-page", "pagination-total-changed",
-      "premature-end", "page-limit", "invalid-total",
-    ]).has(reason)) result.reasonCode = reason;
+    if (
+      typeof reason === "string" &&
+      new Set([
+        "invalid-json",
+        "missing-results",
+        "empty-first-page",
+        "pagination-total-changed",
+        "premature-end",
+        "page-limit",
+        "invalid-total",
+      ]).has(reason)
+    )
+      result.reasonCode = reason;
     const code = "applicationCode" in error ? error.applicationCode : undefined;
     if (typeof code === "string" && /^\d{4}$/u.test(code)) result.applicationCode = code;
   }
@@ -79,19 +123,29 @@ const AUTH_STEPS: Record<string, string> = {
 
 export function logAuthTrace(runId: string, trace: { pathname: string; status: number }): void {
   try {
-  emit("log", {
-    event: "vpoint-auth-step",
-    source: "v-point",
-    runId,
-    step: Object.hasOwn(AUTH_STEPS, trace.pathname) ? AUTH_STEPS[trace.pathname] : "other",
-    httpStatus: Number.isInteger(trace.status) && trace.status >= 100 && trace.status <= 599 ? trace.status : undefined,
-  });
-  } catch { /* Diagnostics must never interrupt authentication. */ }
+    emit("log", {
+      event: "vpoint-auth-step",
+      source: "v-point",
+      runId,
+      step: Object.hasOwn(AUTH_STEPS, trace.pathname) ? AUTH_STEPS[trace.pathname] : "other",
+      httpStatus:
+        Number.isInteger(trace.status) && trace.status >= 100 && trace.status <= 599
+          ? trace.status
+          : undefined,
+    });
+  } catch {
+    /* Diagnostics must never interrupt authentication. */
+  }
 }
 
-export function logEvent(event: Record<string, unknown>): void { emit("log", event); }
+export function logEvent(event: Record<string, unknown>): void {
+  emit("log", event);
+}
 
 function emit(level: "log" | "error", event: Record<string, unknown>): void {
-  try { console[level](JSON.stringify(event)); }
-  catch { /* Observability failures cannot replace collector outcomes. */ }
+  try {
+    console[level](JSON.stringify(event));
+  } catch {
+    /* Observability failures cannot replace collector outcomes. */
+  }
 }

@@ -9,11 +9,14 @@ export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health") {
-      return Response.json({
-        ok: true,
-        source: "moneyforward-me",
-        schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
-      }, { headers: { "cache-control": "no-store" } });
+      return Response.json(
+        {
+          ok: true,
+          source: "moneyforward-me",
+          schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
+        },
+        { headers: { "cache-control": "no-store" } },
+      );
     }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
@@ -36,9 +39,7 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-async function runCollection(
-  env: Env,
-): Promise<CollectionManifest & { manifestKey: string }> {
+async function runCollection(env: Env): Promise<CollectionManifest & { manifestKey: string }> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const prefix = runPrefix(startedAt, runId);
@@ -47,15 +48,17 @@ async function runCollection(
   let accountDetailCount = 0;
   let monthlyFragmentCount = 0;
   let stage: Stage = "credential-load";
-  const onStage = (next: Stage) => { stage = next; logStage(runId, stage); };
+  const onStage = (next: Stage) => {
+    stage = next;
+    logStage(runId, stage);
+  };
   onStage(stage);
   try {
     const collection = await collectMoneyForward({
       onStage,
-      credential: parseCredential(requiredSecret(
-        env.MONEYFORWARD_CREDENTIAL_JSON,
-        "MONEYFORWARD_CREDENTIAL_JSON",
-      )),
+      credential: parseCredential(
+        requiredSecret(env.MONEYFORWARD_CREDENTIAL_JSON, "MONEYFORWARD_CREDENTIAL_JSON"),
+      ),
     });
     accountDetailCount = collection.accountDetailCount;
     monthlyFragmentCount = collection.monthlyFragmentCount;
@@ -86,9 +89,11 @@ async function runCollection(
   };
   onStage("manifest-store");
   let manifestKey: string;
-  try { manifestKey = await storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest }); }
-  catch (error) {
+  try {
+    manifestKey = await storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest });
+  } catch (error) {
     logFailure(runId, stage, error);
+    // oxlint-disable-next-line preserve-caught-error -- The original cause may contain private provider data; logFailure records safe diagnostics.
     throw new Error(`Money Forward manifest storage failed; runId=${runId}`);
   }
   logEvent({
@@ -117,7 +122,12 @@ function requiredSecret(value: string | undefined, name: string): string {
   return value;
 }
 
-function failure(operation: string, error: unknown, runId: string, stage: Stage): CollectionFailure {
+function failure(
+  operation: string,
+  error: unknown,
+  runId: string,
+  stage: Stage,
+): CollectionFailure {
   const detail = logFailure(runId, stage, error);
   return { operation, ...detail, message: detail.failureCode, stage };
 }

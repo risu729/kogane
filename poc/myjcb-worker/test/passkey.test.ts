@@ -8,8 +8,9 @@ import { StopConditionError } from "../src/types";
 
 describe("Bitwarden passkey conversion", () => {
   test("converts a Bitwarden UUID credential ID to the raw CDP form", () => {
-    expect(bitwardenCredentialIdToBase64("00112233-4455-4677-8899-aabbccddeeff"))
-      .toBe("ABEiM0RVRneImaq7zN3u/w==");
+    expect(bitwardenCredentialIdToBase64("00112233-4455-4677-8899-aabbccddeeff")).toBe(
+      "ABEiM0RVRneImaq7zN3u/w==",
+    );
   });
 
   test("converts Bitwarden base64url fields to padded base64", () => {

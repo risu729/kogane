@@ -49,12 +49,12 @@ TAMIA経路のCloudflare live run `0e999a32-6994-450e-a495-2daff0e7aeb1` は `st
 
 ## Worker surface
 
-| Trigger | Behavior |
-| --- | --- |
-| `GET /health` | schema version、source、live-read readiness のみ返す。 |
-| `POST /trigger` | `Authorization: Bearer <ADMIN_TRIGGER_TOKEN>` 必須。実行時点のsnapshotを1回収集し、validated artifactとmanifestをR2へ保存。期間指定は受け付けない。 |
-| `POST /backfill-raw-evidence?limit=1&cursor=...` | 同じadmin認証でprivate Service Bindingへ1ページだけ転送する。cursorは任意、limitは1固定。 |
-| Cron `0 21 * * *` | 毎日 06:00 JSTに同じContainer収集を1回実行。全失敗はfailure manifestを保存した上でinvocationを失敗させ、部分取得はpartial evidenceとして保存・中央sealする。 |
+| Trigger                                          | Behavior                                                                                                                                                     |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /health`                                    | schema version、source、live-read readiness のみ返す。                                                                                                       |
+| `POST /trigger`                                  | `Authorization: Bearer <ADMIN_TRIGGER_TOKEN>` 必須。実行時点のsnapshotを1回収集し、validated artifactとmanifestをR2へ保存。期間指定は受け付けない。          |
+| `POST /backfill-raw-evidence?limit=1&cursor=...` | 同じadmin認証でprivate Service Bindingへ1ページだけ転送する。cursorは任意、limitは1固定。                                                                    |
+| Cron `0 21 * * *`                                | 毎日 06:00 JSTに同じContainer収集を1回実行。全失敗はfailure manifestを保存した上でinvocationを失敗させ、部分取得はpartial evidenceとして保存・中央sealする。 |
 
 R2 key:
 
@@ -171,7 +171,6 @@ PoCを廃止するときは、次をまとめて削除します。現在はlive�
 - TAMIAの`tunnel_id`を直接指定するVPC binding設定;
 - local Docker test container/image（検証終了後に削除）。
 
-
 ### Failure diagnostics
 
 Collection failures emit a structured `*-collection-failure` event before teardown,
@@ -278,11 +277,11 @@ These read-only Cloudflare API endpoints expose the required metadata. Paths are
 relative to `https://api.cloudflare.com/client/v4`; use the existing authenticated
 operator session and substitute the relevant IDs:
 
-| GET endpoint | Verification |
-| --- | --- |
-| `/accounts/<ACCOUNT_ID>/containers/applications/<APP_ID>` | Current application `version` and `configuration.image`. |
-| `/accounts/<ACCOUNT_ID>/containers/applications/<APP_ID>/rollouts` | Latest rollout by `created_at`: `status`, `target_version`, and `target_configuration.image`. |
-| `/accounts/<ACCOUNT_ID>/containers/dash/applications/<APP_ID>/instances` | Available instances and assigned `durable_objects`; resolve the run's `run-<RUN_ID>` name to its Durable Object ID. |
+| GET endpoint                                                                                 | Verification                                                                                                                                                                                              |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/accounts/<ACCOUNT_ID>/containers/applications/<APP_ID>`                                    | Current application `version` and `configuration.image`.                                                                                                                                                  |
+| `/accounts/<ACCOUNT_ID>/containers/applications/<APP_ID>/rollouts`                           | Latest rollout by `created_at`: `status`, `target_version`, and `target_configuration.image`.                                                                                                             |
+| `/accounts/<ACCOUNT_ID>/containers/dash/applications/<APP_ID>/instances`                     | Available instances and assigned `durable_objects`; resolve the run's `run-<RUN_ID>` name to its Durable Object ID.                                                                                       |
 | `/accounts/<ACCOUNT_ID>/containers/dash/applications/<APP_ID>/instances/<DURABLE_OBJECT_ID>` | Actual `instance.app_version`, `instance.image`, and historical `placements[].events` / `placements[].status`. This endpoint also retains stopped-instance details omitted from the active instance list. |
 
 For a stopped instance, inspect the `VMStopped` event's `statusChange` fields,

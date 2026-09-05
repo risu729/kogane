@@ -6,12 +6,12 @@ pre-existing infrastructure and must not be deleted as probe cleanup.
 
 ## Cleanup completed on `bots`
 
-| Kind | Path or package | Status | Removal |
-| --- | --- | --- | --- |
-| Probe root | `/opt/kogane-browser-probe` | deleted `2026-08-26 AEST` | completed |
-| Google Chrome | `google-chrome-stable` 151.0.7922.173 | purged `2026-08-26 AEST` | completed |
-| Display/font packages | `xvfb`, `fonts-noto-cjk` | purged `2026-08-26 AEST` | completed |
-| Chrome apt source | `/etc/apt/sources.list.d/google-chrome.sources` | deleted `2026-08-26 AEST` | completed |
+| Kind                  | Path or package                                 | Status                    | Removal   |
+| --------------------- | ----------------------------------------------- | ------------------------- | --------- |
+| Probe root            | `/opt/kogane-browser-probe`                     | deleted `2026-08-26 AEST` | completed |
+| Google Chrome         | `google-chrome-stable` 151.0.7922.173           | purged `2026-08-26 AEST`  | completed |
+| Display/font packages | `xvfb`, `fonts-noto-cjk`                        | purged `2026-08-26 AEST`  | completed |
+| Chrome apt source     | `/etc/apt/sources.list.d/google-chrome.sources` | deleted `2026-08-26 AEST` | completed |
 
 `apt autoremove` was not run: other services on `bots` may use packages that
 apt now considers automatic. The host, SSH configuration, network, and future

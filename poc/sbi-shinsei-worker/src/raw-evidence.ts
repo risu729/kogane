@@ -6,14 +6,15 @@ export async function importRawEvidence(options: {
   importer: Fetcher;
   manifestKey: string;
 }): Promise<void> {
-  const parsed = await requestImporter(
-    options.importer,
-    IMPORT_PATH,
-    { manifestKey: options.manifestKey },
-  );
+  const parsed = await requestImporter(options.importer, IMPORT_PATH, {
+    manifestKey: options.manifestKey,
+  });
   const result = parsed as Record<string, unknown>;
-  if (result.source !== "sbi-shinsei" || result.manifestKey !== options.manifestKey ||
-      result.sealed !== true) {
+  if (
+    result.source !== "sbi-shinsei" ||
+    result.manifestKey !== options.manifestKey ||
+    result.sealed !== true
+  ) {
     throw new RawEvidenceImportError();
   }
 }
@@ -23,29 +24,20 @@ export async function backfillRawEvidence(options: {
   cursor?: string;
   limit?: number;
 }): Promise<unknown> {
-  return requestImporter(
-    options.importer,
-    BACKFILL_PATH,
-    {
-      ...(options.cursor ? { cursor: options.cursor } : {}),
-      ...(options.limit ? { limit: options.limit } : {}),
-    },
-  );
+  return requestImporter(options.importer, BACKFILL_PATH, {
+    ...(options.cursor ? { cursor: options.cursor } : {}),
+    ...(options.limit ? { limit: options.limit } : {}),
+  });
 }
 
-async function requestImporter(
-  importer: Fetcher,
-  path: string,
-  body: unknown,
-): Promise<unknown> {
-  const response = await importer.fetch(new Request(
-    `https://kogane-collector-r2-importer.internal${path}`,
-    {
+async function requestImporter(importer: Fetcher, path: string, body: unknown): Promise<unknown> {
+  const response = await importer.fetch(
+    new Request(`https://kogane-collector-r2-importer.internal${path}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-    },
-  ));
+    }),
+  );
   const bytes = await boundedBytes(response);
   let parsed: unknown;
   try {
@@ -61,8 +53,10 @@ async function requestImporter(
 
 async function boundedBytes(response: Response): Promise<Uint8Array> {
   const declaredHeader = response.headers.get("content-length");
-  if (declaredHeader !== null &&
-      (!/^\d+$/u.test(declaredHeader) || Number(declaredHeader) > MAX_RESPONSE_BYTES)) {
+  if (
+    declaredHeader !== null &&
+    (!/^\d+$/u.test(declaredHeader) || Number(declaredHeader) > MAX_RESPONSE_BYTES)
+  ) {
     throw new RawEvidenceImportError();
   }
   if (!response.body) return new Uint8Array();

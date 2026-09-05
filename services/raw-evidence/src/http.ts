@@ -8,7 +8,10 @@ export interface WorkerEnv extends Env {
 export type RecordValue = Record<string, unknown>;
 
 export class ApiError extends Error {
-  constructor(readonly status: number, readonly code: string) {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+  ) {
     super(code);
   }
 }
@@ -49,7 +52,8 @@ export function stringValue(
     throw new ApiError(400, `invalid_${field}`);
   }
   if (
-    typeof value !== "string" || value.length === 0 ||
+    typeof value !== "string" ||
+    value.length === 0 ||
     value.length > (options.max ?? 500) ||
     (options.pattern && !options.pattern.test(value))
   ) {
@@ -150,7 +154,9 @@ export async function authenticate(request: Request, env: WorkerEnv): Promise<st
   }
   const active = await env.DB.prepare(
     "SELECT 1 AS ok FROM ingest_clients WHERE id = ? AND active = 1",
-  ).bind(match[1]).first<{ ok: number }>();
+  )
+    .bind(match[1])
+    .first<{ ok: number }>();
   if (!active) throw new ApiError(403, "inactive_ingest_client");
   return match[1];
 }
@@ -164,7 +170,9 @@ export async function requireRoute(
   const route = await env.DB.prepare(`
     SELECT 1 AS ok FROM active_ingest_routes
     WHERE ingest_client_id = ? AND producer_id = ? AND source_id = ?
-  `).bind(clientId, producerId, sourceId).first<{ ok: number }>();
+  `)
+    .bind(clientId, producerId, sourceId)
+    .first<{ ok: number }>();
   if (!route) throw new ApiError(403, "inactive_ingest_route");
 }
 
@@ -175,7 +183,9 @@ export async function loadRun(
 ): Promise<{ id: number; producer_id: string; source_id: string }> {
   const run = await env.DB.prepare(`
     SELECT id, producer_id, source_id FROM fetch_runs WHERE id = ?
-  `).bind(runId).first<{ id: number; producer_id: string; source_id: string }>();
+  `)
+    .bind(runId)
+    .first<{ id: number; producer_id: string; source_id: string }>();
   if (!run) throw new ApiError(404, "run_not_found");
   await requireRoute(env, clientId, run.producer_id, run.source_id);
   return run;

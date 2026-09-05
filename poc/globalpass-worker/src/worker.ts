@@ -39,8 +39,7 @@ const RELAY_HOSTS = new Set([
 ]);
 const MAX_NDJSON_LINE_BYTES = 3 * 1024 * 1024;
 const CONTAINER_ID = "prestia-globalpass-read-only-v20";
-const CHROMIUM_TIMEZONE_PROBE_ID =
-  "prestia-globalpass-chromium-timezone-probe-v1";
+const CHROMIUM_TIMEZONE_PROBE_ID = "prestia-globalpass-chromium-timezone-probe-v1";
 const STOPPABLE_CONTAINER_IDS = new Map([
   ["v9", "prestia-globalpass-read-only-v9"],
   ["v10", "prestia-globalpass-read-only-v10"],
@@ -105,10 +104,7 @@ export default {
         { headers: { "cache-control": "no-store" } },
       );
     }
-    if (
-      request.headers.get("upgrade")?.toLowerCase() === "websocket" &&
-      url.pathname === "/tcp"
-    ) {
+    if (request.headers.get("upgrade")?.toLowerCase() === "websocket" && url.pathname === "/tcp") {
       return relayTcp(request, env, ctx, url);
     }
     if (request.method === "POST" && url.pathname === "/browser-probe") {
@@ -124,15 +120,10 @@ export default {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
       try {
-        const variant = parseContainerProbeVariant(
-          url.searchParams.get("variant"),
-        );
+        const variant = parseContainerProbeVariant(url.searchParams.get("variant"));
         return await runContainerProbe(env, variant);
       } catch (error) {
-        return Response.json(
-          { error: redactError(error).slice(0, 300) },
-          { status: 400 },
-        );
+        return Response.json({ error: redactError(error).slice(0, 300) }, { status: 400 });
       }
     }
     if (request.method === "POST" && url.pathname === "/container-stop") {
@@ -161,15 +152,9 @@ export default {
         return Response.json({ error: "Unauthorized" }, { status: 401 });
       }
       try {
-        return await latestManifestResponse(
-          env.SNAPSHOTS,
-          url.searchParams.get("date"),
-        );
+        return await latestManifestResponse(env.SNAPSHOTS, url.searchParams.get("date"));
       } catch (error) {
-        return Response.json(
-          { error: redactError(error).slice(0, 300) },
-          { status: 400 },
-        );
+        return Response.json({ error: redactError(error).slice(0, 300) }, { status: 400 });
       }
     }
     if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
@@ -184,15 +169,11 @@ export default {
         return Response.json({ error: "cursor_invalid" }, { status: 400 });
       }
       try {
-        return Response.json(
-          await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, cursor),
-          { headers: { "cache-control": "no-store" } },
-        );
+        return Response.json(await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, cursor), {
+          headers: { "cache-control": "no-store" },
+        });
       } catch {
-        return Response.json(
-          { error: "raw_evidence_backfill_failed" },
-          { status: 502 },
-        );
+        return Response.json({ error: "raw_evidence_backfill_failed" }, { status: 502 });
       }
     }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
@@ -205,10 +186,7 @@ export default {
     try {
       mode = parseMode(url.searchParams.get("mode"));
     } catch (error) {
-      return Response.json(
-        { error: redactError(error).slice(0, 300) },
-        { status: 400 },
-      );
+      return Response.json({ error: redactError(error).slice(0, 300) }, { status: 400 });
     }
     try {
       const result = await runCollection(env, mode);
@@ -217,10 +195,7 @@ export default {
         headers: { "cache-control": "no-store" },
       });
     } catch {
-      return Response.json(
-        { error: "globalpass_collection_failed" },
-        { status: 502 },
-      );
+      return Response.json({ error: "globalpass_collection_failed" }, { status: 502 });
     }
   },
 
@@ -261,14 +236,9 @@ async function latestManifestResponse(
   });
 }
 
-async function runContainerProbe(
-  env: Env,
-  variant: ContainerProbeVariant,
-): Promise<Response> {
+async function runContainerProbe(env: Env, variant: ContainerProbeVariant): Promise<Response> {
   const containerId =
-    variant === "chromium-native-all-tamia"
-      ? CHROMIUM_TIMEZONE_PROBE_ID
-      : CONTAINER_ID;
+    variant === "chromium-native-all-tamia" ? CHROMIUM_TIMEZONE_PROBE_ID : CONTAINER_ID;
   const container = getContainer(env.COLLECTOR_CONTAINER, containerId);
   await container.startAndWaitForPorts();
   const response = await container.fetch(
@@ -299,10 +269,7 @@ type CollectionResult = CollectionManifest & {
   central: RawEvidenceImportResult;
 };
 
-async function runCollection(
-  env: Env,
-  mode: CollectionMode,
-): Promise<CollectionResult> {
+async function runCollection(env: Env, mode: CollectionMode): Promise<CollectionResult> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const container = getContainer(env.COLLECTOR_CONTAINER, CONTAINER_ID);
@@ -370,17 +337,16 @@ async function collectWithContainer(
           body: JSON.stringify({
             mode,
             user: requiredSecret(env.GLOBALPASS_ID, "GLOBALPASS_ID"),
-            password: requiredSecret(
-              env.GLOBALPASS_PASSWORD,
-              "GLOBALPASS_PASSWORD",
-            ),
+            password: requiredSecret(env.GLOBALPASS_PASSWORD, "GLOBALPASS_PASSWORD"),
             relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
             relayUrl: withRunId(env.RELAY_PUBLIC_URL, runId),
           }),
         }),
       );
       if (!result.ok || !result.body) {
-        throw Object.assign(new Error("GLOBAL PASS container request failed"), { httpStatus: result.status });
+        throw Object.assign(new Error("GLOBAL PASS container request failed"), {
+          httpStatus: result.status,
+        });
       }
       return result;
     });
@@ -408,7 +374,10 @@ async function collectWithContainer(
       if (record.type === "error") {
         if (containerErrorSeen) throw new CollectionContractError();
         containerErrorSeen = true;
-        diagnostics.failure("browser-collection", Object.assign(new Error(), { name: record.errorType }));
+        diagnostics.failure(
+          "browser-collection",
+          Object.assign(new Error(), { name: record.errorType }),
+        );
         failures.push({
           operation: record.operation,
           errorType: record.errorType,
@@ -433,50 +402,40 @@ async function collectWithContainer(
         sanitizedHtml = sanitizeGlobalPassActivityHtml(record.html);
       } catch (error) {
         diagnostics.failure("artifact-write", error);
-        failures.push(collectionFailure(
-          "sanitization",
-          error,
-          "html_sanitization_failed",
-          artifactKey,
-        ));
+        failures.push(
+          collectionFailure("sanitization", error, "html_sanitization_failed", artifactKey),
+        );
         continue;
       }
       try {
-        artifacts.push(await diagnostics.step("artifact-write", () => storeHtml(
-          env.SNAPSHOTS,
-          prefix,
-          runId,
-          month,
-          sanitizedHtml,
-        )));
+        artifacts.push(
+          await diagnostics.step("artifact-write", () =>
+            storeHtml(env.SNAPSHOTS, prefix, runId, month, sanitizedHtml),
+          ),
+        );
       } catch (error) {
-        failures.push(collectionFailure(
-          "r2",
-          error,
-          "artifact_store_failed",
-          artifactKey,
-        ));
+        failures.push(collectionFailure("r2", error, "artifact_store_failed", artifactKey));
       }
     }
   } catch (error) {
     diagnostics.failure("browser-collection", error);
-    failures.push(collectionFailure(
-      streamStarted ? "contract" : "browser-collection",
-      error,
-      streamStarted ? "container_contract_invalid" : "browser_collection_failed",
-    ));
+    failures.push(
+      collectionFailure(
+        streamStarted ? "contract" : "browser-collection",
+        error,
+        streamStarted ? "container_contract_invalid" : "browser_collection_failed",
+      ),
+    );
   }
 
   if (!metadataSeen && failures.length === 0) {
-    failures.push(collectionFailure(
-      "contract",
-      new CollectionContractError(),
-      "container_contract_invalid",
-    ));
+    failures.push(
+      collectionFailure("contract", new CollectionContractError(), "container_contract_invalid"),
+    );
   }
   const storedMonths = new Set(artifacts.map((artifact) => artifact.month));
   const failedArtifactKeys = new Set(
-    failures.flatMap((failure) => failure.artifactKey ? [failure.artifactKey] : []),
+    failures.flatMap((failure) => (failure.artifactKey ? [failure.artifactKey] : [])),
   );
   for (const month of selectedMonths) {
     const artifactKey = artifactFilename(month);
@@ -489,11 +448,7 @@ async function collectWithContainer(
       });
     }
   }
-  const { status, captureComplete } = strictCollectionStatus(
-    artifacts,
-    failures,
-    selectedMonths,
-  );
+  const { status, captureComplete } = strictCollectionStatus(artifacts, failures, selectedMonths);
   const manifest: CollectionManifest = {
     schemaVersion: GLOBALPASS_SCHEMA_VERSION,
     source: "prestia-globalpass",
@@ -511,10 +466,12 @@ async function collectWithContainer(
     failures,
   };
   const manifestKey = `${prefix}/manifest.json`;
-  await diagnostics.step("manifest-write", () => env.SNAPSHOTS.put(manifestKey, JSON.stringify(manifest), {
-    httpMetadata: { contentType: "application/json; charset=utf-8" },
-    customMetadata: { source: manifest.source, status, runId },
-  }));
+  await diagnostics.step("manifest-write", () =>
+    env.SNAPSHOTS.put(manifestKey, JSON.stringify(manifest), {
+      httpMetadata: { contentType: "application/json; charset=utf-8" },
+      customMetadata: { source: manifest.source, status, runId },
+    }),
+  );
   const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey);
   logEvent(
     "log",
@@ -527,10 +484,12 @@ async function collectWithContainer(
       failureCount: failures.length,
       manifestKey,
       centralStatus: central.status,
-      ...(central.status === "sealed" ? { centralRunId: central.centralRunId } : {
-        centralDeferredReason: central.reason,
-        centralNextOffset: central.nextOffset,
-      }),
+      ...(central.status === "sealed"
+        ? { centralRunId: central.centralRunId }
+        : {
+            centralDeferredReason: central.reason,
+            centralNextOffset: central.nextOffset,
+          }),
     }),
   );
   return { ...manifest, manifestKey, central };
@@ -565,9 +524,7 @@ async function storeHtml(
   };
 }
 
-async function* readNdjson(
-  stream: ReadableStream<Uint8Array>,
-): AsyncGenerator<ContainerRecord> {
+async function* readNdjson(stream: ReadableStream<Uint8Array>): AsyncGenerator<ContainerRecord> {
   const reader = stream.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "";
@@ -610,12 +567,11 @@ function parseContainerRecord(line: string): ContainerRecord {
   const record: Record<string, unknown> = value;
   if (
     record["type"] === "metadata" &&
-    exactKeys(record, [
-      "type",
-      "availableMonths",
-      "selectedMonths",
-      "browserVersion",
-    ], ["runtimeRevision"]) &&
+    exactKeys(
+      record,
+      ["type", "availableMonths", "selectedMonths", "browserVersion"],
+      ["runtimeRevision"],
+    ) &&
     Array.isArray(record["availableMonths"]) &&
     Array.isArray(record["selectedMonths"]) &&
     record["availableMonths"].every((item) => typeof item === "string") &&
@@ -628,9 +584,7 @@ function parseContainerRecord(line: string): ContainerRecord {
     return {
       type: "metadata",
       runtimeRevision:
-        typeof record["runtimeRevision"] === "string"
-          ? record["runtimeRevision"]
-          : undefined,
+        typeof record["runtimeRevision"] === "string" ? record["runtimeRevision"] : undefined,
       availableMonths: record["availableMonths"],
       selectedMonths: record["selectedMonths"],
       browserVersion: record["browserVersion"],
@@ -759,23 +713,16 @@ async function relayTcp(
   return new Response(null, { status: 101, webSocket: client });
 }
 
-async function websocketBytes(
-  data: string | ArrayBuffer | Blob,
-): Promise<Uint8Array> {
+async function websocketBytes(data: string | ArrayBuffer | Blob): Promise<Uint8Array> {
   if (typeof data === "string") return new TextEncoder().encode(data);
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   return new Uint8Array(await data.arrayBuffer());
 }
 
-async function validBearer(
-  request: Request,
-  expected: string | undefined,
-): Promise<boolean> {
+async function validBearer(request: Request, expected: string | undefined): Promise<boolean> {
   if (!expected || expected.length < 32) return false;
   const authorization = request.headers.get("authorization") ?? "";
-  const provided = authorization.startsWith("Bearer ")
-    ? authorization.slice(7)
-    : "";
+  const provided = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
   const providedHash = createHash("sha256").update(provided).digest();
   const expectedHash = createHash("sha256").update(expected).digest();
   return timingSafeEqual(providedHash, expectedHash);
@@ -806,14 +753,11 @@ function collectionFailure(
 
 function safeErrorType(error: unknown): string {
   const candidate = error instanceof Error ? error.name : "UnknownError";
-  return /^[A-Za-z][A-Za-z0-9]{0,79}$/u.test(candidate)
-    ? candidate
-    : "UnknownError";
+  return /^[A-Za-z][A-Za-z0-9]{0,79}$/u.test(candidate) ? candidate : "UnknownError";
 }
 
 function sameStrings(left: string[], right: string[]): boolean {
-  return left.length === right.length &&
-    left.every((value, index) => value === right[index]);
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function exactKeys(
@@ -823,8 +767,9 @@ function exactKeys(
 ): boolean {
   const allowed = new Set([...required, ...optional]);
   const keys = Object.keys(value);
-  return keys.every((key) => allowed.has(key)) &&
-    required.every((key) => Object.hasOwn(value, key));
+  return (
+    keys.every((key) => allowed.has(key)) && required.every((key) => Object.hasOwn(value, key))
+  );
 }
 
 export function safeBackfillCursor(value: string): boolean {
@@ -848,10 +793,10 @@ function publicCollectionResult(result: CollectionResult): object {
       ...(result.central.status === "sealed"
         ? { centralRunId: result.central.centralRunId, sealed: result.central.sealed }
         : {
-          reason: result.central.reason,
-          artifactCount: result.central.artifactCount,
-          nextOffset: result.central.nextOffset,
-        }),
+            reason: result.central.reason,
+            artifactCount: result.central.artifactCount,
+            nextOffset: result.central.nextOffset,
+          }),
     },
   };
 }
@@ -864,9 +809,7 @@ class CollectionContractError extends Error {
 }
 
 function hex(value: ArrayBuffer): string {
-  return [...new Uint8Array(value)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return [...new Uint8Array(value)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function redactError(error: unknown): string {

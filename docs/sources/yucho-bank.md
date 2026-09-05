@@ -79,14 +79,14 @@ browser collector 3/5、完全無人login 4/5、公式APIの技術実装 2/5・�
 
 ## 公式入口とデータ面
 
-| 公式経路 | 入口 | 読み取りデータ | 自動化上の位置付け |
-| --- | --- | --- | --- |
-| ゆうちょダイレクト Web | [公式案内](https://www.jp-bank.japanpost.jp/direct/pc/dr_pc_index.html)、[login](https://direct.jp-bank.japanpost.jp/tp1web/U010101SCK.do) | 利用口座、現在高、引出可能残高、入出金、入金明細、通帳未記入分、担保定額定期の明細/取引結果 | **主経路**。CSVとHTMLを組み合わせる |
-| ゆうちょダイレクト＋ | [公式案内](https://www.jp-bank.japanpost.jp/direct/pc/plus/dr_pc_pl_index.html) | 最大20年の入出金、通帳イメージ、担保定額定期満期通知 | 既に利用中なら長期backfillの最良経路。切替は収集作業では行わない |
-| ゆうちょ通帳アプリ | [公式案内](https://www.jp-bank.japanpost.jp/app/app_tsucho.html)、[Google Play](https://play.google.com/store/apps/details?id=jp.japanpost.jp_bank.bankbookapp) | 通常/通常貯蓄の残高・入出金、収支graph、担保定額定期の預入残高/明細 | 端末boundのmanual fallbackとWeb coverage比較 |
-| ゆうちょ認証アプリ | [公式案内](https://www.jp-bank.japanpost.jp/direct/pc/guide/dr_pc_gd_nshtouroku.html)、[Google Play](https://play.google.com/store/apps/details?id=jp.japanpost.jp_bank.FIDOapp) | 金融データ自体ではなく、FIDO準拠のWeb/app認証 | 人手bootstrap。collectorが模倣しない |
-| 参照系API | [公式方針](https://www.jp-bank.japanpost.jp/aboutus/activity/api/abt_act_api_houshin.html) | 現在高、入出金、担保定額定期、口座貸越、投信明細 | runtimeは理想的だが契約済み電子決済等代行業者限定 |
-| ゆうID | [日本郵政の連携方針](https://www.post.japanpost.jp/notification/pressrelease/2025/00_honsha/0616_01_01.pdf) | 現時点の銀行明細login入口としては確認できない | グループ共通IDの将来連携。ダイレクトのお客さま番号やFIDO認証と同一視しない |
+| 公式経路               | 入口                                                                                                                                                                             | 読み取りデータ                                                                              | 自動化上の位置付け                                                         |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| ゆうちょダイレクト Web | [公式案内](https://www.jp-bank.japanpost.jp/direct/pc/dr_pc_index.html)、[login](https://direct.jp-bank.japanpost.jp/tp1web/U010101SCK.do)                                       | 利用口座、現在高、引出可能残高、入出金、入金明細、通帳未記入分、担保定額定期の明細/取引結果 | **主経路**。CSVとHTMLを組み合わせる                                        |
+| ゆうちょダイレクト＋   | [公式案内](https://www.jp-bank.japanpost.jp/direct/pc/plus/dr_pc_pl_index.html)                                                                                                  | 最大20年の入出金、通帳イメージ、担保定額定期満期通知                                        | 既に利用中なら長期backfillの最良経路。切替は収集作業では行わない           |
+| ゆうちょ通帳アプリ     | [公式案内](https://www.jp-bank.japanpost.jp/app/app_tsucho.html)、[Google Play](https://play.google.com/store/apps/details?id=jp.japanpost.jp_bank.bankbookapp)                  | 通常/通常貯蓄の残高・入出金、収支graph、担保定額定期の預入残高/明細                         | 端末boundのmanual fallbackとWeb coverage比較                               |
+| ゆうちょ認証アプリ     | [公式案内](https://www.jp-bank.japanpost.jp/direct/pc/guide/dr_pc_gd_nshtouroku.html)、[Google Play](https://play.google.com/store/apps/details?id=jp.japanpost.jp_bank.FIDOapp) | 金融データ自体ではなく、FIDO準拠のWeb/app認証                                               | 人手bootstrap。collectorが模倣しない                                       |
+| 参照系API              | [公式方針](https://www.jp-bank.japanpost.jp/aboutus/activity/api/abt_act_api_houshin.html)                                                                                       | 現在高、入出金、担保定額定期、口座貸越、投信明細                                            | runtimeは理想的だが契約済み電子決済等代行業者限定                          |
+| ゆうID                 | [日本郵政の連携方針](https://www.post.japanpost.jp/notification/pressrelease/2025/00_honsha/0616_01_01.pdf)                                                                      | 現時点の銀行明細login入口としては確認できない                                               | グループ共通IDの将来連携。ダイレクトのお客さま番号やFIDO認証と同一視しない |
 
 `ゆうID`は日本郵政グループの共通IDであり、ゆうちょ口座との連携拡大方針は公表
 されている。しかし、2026-08-26時点のゆうちょダイレクト/通帳アプリの公式手順は、
@@ -102,14 +102,14 @@ browser collector 3/5、完全無人login 4/5、公式APIの技術実装 2/5・�
 列挙する。全口座coverageには、利用口座登録外の本人名義口座がないかをユーザーへ
 確認する必要がある。
 
-| 口座/商品 | 列挙・残高の単位 | 明細の扱い |
-| --- | --- | --- |
-| 通常貯金（総合口座） | 利用口座単位。現在高、うち振替現在高、引出可能残高 | 入出金HTML/CSV。未記帳分照会あり |
-| 通常貯蓄貯金 | 利用口座単位。現在高、引出可能残高 | 入出金HTML/CSV。ダイレクト＋への切替対象外 |
-| 振替口座 | 利用口座単位の現在高 | 入出金/入金CSVは最大15か月。通常払込みの個別画像は別サービス |
-| 担保定額貯金 | 貯金口座と明細/預入lot単位 | 預入状況の明細照会、取引結果照会。CSV/PDFは未確認 |
-| 担保定期貯金 | 貯金口座と明細/預入lot単位 | 預入状況、満期時取扱、取引結果。CSV/PDFは未確認 |
-| 専用通帳/証書の定額・定期 | 公式FAQ上、ダイレクト対象外 | Web/APIでの列挙可否を期待しない |
+| 口座/商品                 | 列挙・残高の単位                                   | 明細の扱い                                                   |
+| ------------------------- | -------------------------------------------------- | ------------------------------------------------------------ |
+| 通常貯金（総合口座）      | 利用口座単位。現在高、うち振替現在高、引出可能残高 | 入出金HTML/CSV。未記帳分照会あり                             |
+| 通常貯蓄貯金              | 利用口座単位。現在高、引出可能残高                 | 入出金HTML/CSV。ダイレクト＋への切替対象外                   |
+| 振替口座                  | 利用口座単位の現在高                               | 入出金/入金CSVは最大15か月。通常払込みの個別画像は別サービス |
+| 担保定額貯金              | 貯金口座と明細/預入lot単位                         | 預入状況の明細照会、取引結果照会。CSV/PDFは未確認            |
+| 担保定期貯金              | 貯金口座と明細/預入lot単位                         | 預入状況、満期時取扱、取引結果。CSV/PDFは未確認              |
+| 専用通帳/証書の定額・定期 | 公式FAQ上、ダイレクト対象外                        | Web/APIでの列挙可否を期待しない                              |
 
 現在高画面の公式定義は次の通りである。
 
@@ -138,13 +138,13 @@ lot field候補とし、exact fieldはlive画面で確定する。
 
 ### 期間と件数
 
-| 対象 | 画面照会期間 | CSV期間 | 件数 |
-| --- | --- | --- | --- |
-| 有通帳の総合口座（通常/通常貯蓄） | 最大2か月（前月1日から） | 同じ | 画面1回100明細、CSV最大30,000明細 |
-| 振替口座 | 最大15か月（14か月前1日から） | 同じ | 画面1回100明細、CSV最大30,000明細 |
-| ダイレクト＋ | 最大20年、ただし2021年3月以降 | 同じ | 画面1回100明細、CSV最大30,000明細 |
-| 通帳未記入分 | 有通帳総合口座で期間を問わず未記帳分 | CSV対象としては公開資料で明記なし | 30行到達で合算表示 |
-| 通帳アプリ | 初回登録/ダイレクト申込/2021年3月の条件で起算日が変わる | app単独CSVは確認できない | 公開上の表示最大件数は未確認 |
+| 対象                              | 画面照会期間                                            | CSV期間                           | 件数                              |
+| --------------------------------- | ------------------------------------------------------- | --------------------------------- | --------------------------------- |
+| 有通帳の総合口座（通常/通常貯蓄） | 最大2か月（前月1日から）                                | 同じ                              | 画面1回100明細、CSV最大30,000明細 |
+| 振替口座                          | 最大15か月（14か月前1日から）                           | 同じ                              | 画面1回100明細、CSV最大30,000明細 |
+| ダイレクト＋                      | 最大20年、ただし2021年3月以降                           | 同じ                              | 画面1回100明細、CSV最大30,000明細 |
+| 通帳未記入分                      | 有通帳総合口座で期間を問わず未記帳分                    | CSV対象としては公開資料で明記なし | 30行到達で合算表示                |
+| 通帳アプリ                        | 初回登録/ダイレクト申込/2021年3月の条件で起算日が変わる | app単独CSVは確認できない          | 公開上の表示最大件数は未確認      |
 
 ダイレクト利用申込書の処理日以前、Web申込の場合は申込時点以前の明細は照会できない。
 ダイレクト＋でも2021年2月以前は最大15か月であり、「20年」は現時点で20年分が既に
@@ -185,13 +185,13 @@ artifact hashを用いる。入出金明細IDは同じartifact内の順序確認
 
 ### PDF、通帳画像、電子交付
 
-| artifact | 対象 | 粒度 | Koganeでの扱い |
-| --- | --- | --- | --- |
-| 入出金CSV | 通常/通常貯蓄/振替、ダイレクト＋ | 構造化row、詳細1/2、出力内ID | primary transaction artifact |
-| 入出金HTML | 同上 | current balance、画面上の摘要、直近5/条件指定 | balance/discoveryとCSV検算 |
-| 通帳イメージ | ダイレクト＋のみ | 氏名、記号番号、店名/店番、預金種目、口座番号等の表紙image | 口座metadataのmanual evidence。取引明細ではない |
-| 振替受払通知票PDF/画像 | 振替口座の通知票/払込票 | 払込人住所・氏名・通信欄等 | 個人の通常貯金MVP外。必要時に別sourceとして扱う |
-| 電子交付 | 主に投資信託等の交付書面 | 帳票単位、検索/閲覧 | 通常貯金入出金の代替ではない |
+| artifact               | 対象                             | 粒度                                                       | Koganeでの扱い                                  |
+| ---------------------- | -------------------------------- | ---------------------------------------------------------- | ----------------------------------------------- |
+| 入出金CSV              | 通常/通常貯蓄/振替、ダイレクト＋ | 構造化row、詳細1/2、出力内ID                               | primary transaction artifact                    |
+| 入出金HTML             | 同上                             | current balance、画面上の摘要、直近5/条件指定              | balance/discoveryとCSV検算                      |
+| 通帳イメージ           | ダイレクト＋のみ                 | 氏名、記号番号、店名/店番、預金種目、口座番号等の表紙image | 口座metadataのmanual evidence。取引明細ではない |
+| 振替受払通知票PDF/画像 | 振替口座の通知票/払込票          | 払込人住所・氏名・通信欄等                                 | 個人の通常貯金MVP外。必要時に別sourceとして扱う |
+| 電子交付               | 主に投資信託等の交付書面         | 帳票単位、検索/閲覧                                        | 通常貯金入出金の代替ではない                    |
 
 ダイレクト＋の「通帳イメージ」はWeb表示と印刷用画面であり、公式guideはPDF download
 とは案内していない。ブラウザ印刷でPDF化はできるが、bank発行のtransaction statement
@@ -314,16 +314,16 @@ Koganeの理想形に近い。browser HTML change、CSV download、Akamai edge�
 未認証表示し、値を読まずにDOM属性と公開JavaScriptだけを確認した。画面はserver-side HTML/Struts
 formを維持している。
 
-| 項目 | 公開画面での確認事実 |
-| --- | --- |
-| 初期document | `GET direct.jp-bank.japanpost.jp/tp1web/U010101SCK.do` |
-| form | `submitData`と`simpleTransitionForm`。いずれも初期actionは同じ`U010101SCK.do`、methodは`POST` |
-| state/CSRF候補 | hidden `org.apache.struts.taglib.html.TOKEN`と`event`。token値は取得・記録していない |
-| お客さま番号 | `okyakusamaBangou1`/`2`/`3`の3 input。value/autofill状態は読んでいない |
-| password login | button `U010103`が`event=U010103`を設定し、`POST https://direct1.jp-bank.japanpost.jp/tp1web/pc/U010901BLC.do`へform submit |
-| app login | button `U010107`が`event=U010107`を設定し、`POST https://direct1.jp-bank.japanpost.jp/tp1web/pc/U011101BLC.do`へform submit |
-| smartphone導線 | `event=U010105`で`https://direct1.jp-bank.japanpost.jp/tp1web/sp/U010101SCK.do`へ遷移 |
-| app deep link | 認証appは`fidoap.jp-bank.japanpost.jp/links/fido/...`、通帳appは同hostの`links/banking/...`。いずれも`redirect_uri=https://direct.jp-bank.japanpost.jp/tp1web/pc/U011401BLC.do`と`loginFuriwakeKubun=1`を渡す |
+| 項目           | 公開画面での確認事実                                                                                                                                                                                          |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 初期document   | `GET direct.jp-bank.japanpost.jp/tp1web/U010101SCK.do`                                                                                                                                                        |
+| form           | `submitData`と`simpleTransitionForm`。いずれも初期actionは同じ`U010101SCK.do`、methodは`POST`                                                                                                                 |
+| state/CSRF候補 | hidden `org.apache.struts.taglib.html.TOKEN`と`event`。token値は取得・記録していない                                                                                                                          |
+| お客さま番号   | `okyakusamaBangou1`/`2`/`3`の3 input。value/autofill状態は読んでいない                                                                                                                                        |
+| password login | button `U010103`が`event=U010103`を設定し、`POST https://direct1.jp-bank.japanpost.jp/tp1web/pc/U010901BLC.do`へform submit                                                                                   |
+| app login      | button `U010107`が`event=U010107`を設定し、`POST https://direct1.jp-bank.japanpost.jp/tp1web/pc/U011101BLC.do`へform submit                                                                                   |
+| smartphone導線 | `event=U010105`で`https://direct1.jp-bank.japanpost.jp/tp1web/sp/U010101SCK.do`へ遷移                                                                                                                         |
+| app deep link  | 認証appは`fidoap.jp-bank.japanpost.jp/links/fido/...`、通帳appは同hostの`links/banking/...`。いずれも`redirect_uri=https://direct.jp-bank.japanpost.jp/tp1web/pc/U011401BLC.do`と`loginFuriwakeKubun=1`を渡す |
 
 同日の公開画面は「QRコード読み取りによるログインを一時的に停止」と表示し、password loginまたは
 スマートフォンからのDirect利用を案内していた。DOM/JavaScriptにapp login routeが残ることは、PCの
@@ -343,16 +343,16 @@ password/OTP flowとのsession共通性は未確認である。Cookie、token、
 公開loginが実際にloadしたartifactを値なしでhash化した。hashは2026-08-26のsnapshotで、安定API契約を
 意味しない。
 
-| artifact | SHA-256 | static inventory |
-| --- | --- | --- |
-| `cache.../run.js?rv=26051` | `8b3c4673af6cfeb824b14914e9821799f7fbda3bde947ada63833ff2d1154b31` | FIDO app launch helper。`redirect_uri`と`loginFuriwakeKubun`を組み立てる |
-| `cache.../dgbaRequestControllerP02.js?rv=26051` | `4d889649c218bde85ab1af95f9779b5cad73578d0033b85027018f4b41c4d647` | 公開pageのrequest/UI controller |
-| `directcss.../HcFwEhqexk.js` | `3fca08de3ca3293ea490d557d7bae615f4a09916d36fce2bf06e2f157663f876` | `sendBeacon`/XHR、device/token/AES語を含むloader候補。役割/vendorは未確定 |
-| `directacct.../aes.js` | `fc7e184beeda61bf6427938a84560f52348976bb55e807b224eb53930e97ef6a` | 公開AES実装。どのfieldに適用するかは未確認 |
-| `directacct.../load.js` | `f8bf373263f5a240e0233345e28bc19c5c56119115d936197d3cc13b3fa8756d` | beacon/XHR、device/token/encrypt/decrypt候補 |
-| `directacct.../dl.js` | `8948fc815424bd77a7692f64b2b8e488295dff14ab2963798e22088a74fdec5b` | loader |
-| `directss.../ig.json` | `0d7c95ddd386ea08185249944e82fa26ee0965bdd13482b46e42baf09b2733c3` | `pwc_loadpljs`を呼ぶbootstrap script |
-| `directss.../js/r.js?ver=21&rev=826202611` | `aaa4679b3b76bfaf83374efe520289d2ccc1752a1c18f20855b9529c2d61cf95` | page ID、FIDO/token、screen/window、localStorage/cookie UUID、public-key encrypt、`dcRequest` hook、XHR/JSONP等のsymbolを持つobfuscated instrumentation候補 |
+| artifact                                        | SHA-256                                                            | static inventory                                                                                                                                            |
+| ----------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cache.../run.js?rv=26051`                      | `8b3c4673af6cfeb824b14914e9821799f7fbda3bde947ada63833ff2d1154b31` | FIDO app launch helper。`redirect_uri`と`loginFuriwakeKubun`を組み立てる                                                                                    |
+| `cache.../dgbaRequestControllerP02.js?rv=26051` | `4d889649c218bde85ab1af95f9779b5cad73578d0033b85027018f4b41c4d647` | 公開pageのrequest/UI controller                                                                                                                             |
+| `directcss.../HcFwEhqexk.js`                    | `3fca08de3ca3293ea490d557d7bae615f4a09916d36fce2bf06e2f157663f876` | `sendBeacon`/XHR、device/token/AES語を含むloader候補。役割/vendorは未確定                                                                                   |
+| `directacct.../aes.js`                          | `fc7e184beeda61bf6427938a84560f52348976bb55e807b224eb53930e97ef6a` | 公開AES実装。どのfieldに適用するかは未確認                                                                                                                  |
+| `directacct.../load.js`                         | `f8bf373263f5a240e0233345e28bc19c5c56119115d936197d3cc13b3fa8756d` | beacon/XHR、device/token/encrypt/decrypt候補                                                                                                                |
+| `directacct.../dl.js`                           | `8948fc815424bd77a7692f64b2b8e488295dff14ab2963798e22088a74fdec5b` | loader                                                                                                                                                      |
+| `directss.../ig.json`                           | `0d7c95ddd386ea08185249944e82fa26ee0965bdd13482b46e42baf09b2733c3` | `pwc_loadpljs`を呼ぶbootstrap script                                                                                                                        |
+| `directss.../js/r.js?ver=21&rev=826202611`      | `aaa4679b3b76bfaf83374efe520289d2ccc1752a1c18f20855b9529c2d61cf95` | page ID、FIDO/token、screen/window、localStorage/cookie UUID、public-key encrypt、`dcRequest` hook、XHR/JSONP等のsymbolを持つobfuscated instrumentation候補 |
 
 公開page loadだけで、`/akam/13/198d305`のscript、同originの動的pathへのGET後POST、
 `directss.jp-bank.japanpost.jp/d`へのCORS preflight/POSTも発生した。body、header、Cookie、token、
@@ -377,10 +377,10 @@ fingerprint値は取得せず、replayもしなかった。Akamai sensorおよ�
 
 2026-08-26に公式Google Play HTMLを直接確認した。
 
-| app | package | version / Play更新日 | read/auth上の役割 |
-| --- | --- | --- | --- |
+| app                                                                                                  | package                            | version / Play更新日    | read/auth上の役割                                        |
+| ---------------------------------------------------------------------------------------------------- | ---------------------------------- | ----------------------- | -------------------------------------------------------- |
 | [ゆうちょ通帳アプリ](https://play.google.com/store/apps/details?id=jp.japanpost.jp_bank.bankbookapp) | `jp.japanpost.jp_bank.bankbookapp` | `21.0.0` / `2026-04-10` | 現在高、入出金、担保定額/定期、最大2口座。取引機能も同居 |
-| [ゆうちょ認証アプリ](https://play.google.com/store/apps/details?id=jp.japanpost.jp_bank.FIDOapp) | `jp.japanpost.jp_bank.FIDOapp` | `18.0.0` / `2026-04-09` | 金融dataは持たず、Direct login/取引時の端末FIDO認証 |
+| [ゆうちょ認証アプリ](https://play.google.com/store/apps/details?id=jp.japanpost.jp_bank.FIDOapp)     | `jp.japanpost.jp_bank.FIDOapp`     | `18.0.0` / `2026-04-09` | 金融dataは持たず、Direct login/取引時の端末FIDO認証      |
 
 銀行siteからのstandalone APK配布は確認できない。第三者mirrorはpackage/version表示だけでも正規splitや
 signer provenanceを保証しないため取得元にしない。この環境にはGoogle Playからinstall済みの管理Android、
@@ -467,12 +467,12 @@ integrity/FIDO bypassが必要になった時点で停止する。
 
 ## 第三者client
 
-| 実装 | 最終更新/時期 | 方式 | 現在の扱い |
-| --- | --- | --- | --- |
-| [`kkosuge/bank_job`](https://github.com/kkosuge/bank_job/blob/0908e082d4c196a0fc8335351855874eb88b1549/lib/bank_job/strategies/bank_job_yucho.rb) | 実装commitは2014 | Ruby Mechanize。`U010101SCK.do`から4-4-5お客さま番号、合言葉、passwordをHTML form送信し、入出金tableをparse | 合言葉廃止前の旧実装。現在動作する根拠なし |
-| [`toc/pogact`](https://github.com/toc/pogact/blob/83c82ef99197c960a4d22ad127dfa14a78a393e8/pogact/RPAbase/JPBankBase.py) | repoは2024更新、JPBank codeは旧画面 | Selenium。お客さま番号、合言葉、passwordを入力し、PhishWall案内をskipしてlogin | browser方式の参考。現行認証/app login未対応 |
-| [`pocke/japan-post-bank-login`](https://github.com/pocke/japan-post-bank-login) | 2016 | Chrome extensionでお客さま番号3欄を自動入力 | 明細clientではない。login補助のみ |
-| [`shinichy/get_statement`](https://github.com/shinichy/get_statement/blob/master/get_statement.py) | 2018 | Python Seleniumで各社CSV/PDFをdownload | ゆうちょ実装なし。対象listにもJP Bankはない |
+| 実装                                                                                                                                              | 最終更新/時期                       | 方式                                                                                                        | 現在の扱い                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| [`kkosuge/bank_job`](https://github.com/kkosuge/bank_job/blob/0908e082d4c196a0fc8335351855874eb88b1549/lib/bank_job/strategies/bank_job_yucho.rb) | 実装commitは2014                    | Ruby Mechanize。`U010101SCK.do`から4-4-5お客さま番号、合言葉、passwordをHTML form送信し、入出金tableをparse | 合言葉廃止前の旧実装。現在動作する根拠なし  |
+| [`toc/pogact`](https://github.com/toc/pogact/blob/83c82ef99197c960a4d22ad127dfa14a78a393e8/pogact/RPAbase/JPBankBase.py)                          | repoは2024更新、JPBank codeは旧画面 | Selenium。お客さま番号、合言葉、passwordを入力し、PhishWall案内をskipしてlogin                              | browser方式の参考。現行認証/app login未対応 |
+| [`pocke/japan-post-bank-login`](https://github.com/pocke/japan-post-bank-login)                                                                   | 2016                                | Chrome extensionでお客さま番号3欄を自動入力                                                                 | 明細clientではない。login補助のみ           |
+| [`shinichy/get_statement`](https://github.com/shinichy/get_statement/blob/master/get_statement.py)                                                | 2018                                | Python Seleniumで各社CSV/PDFをdownload                                                                      | ゆうちょ実装なし。対象listにもJP Bankはない |
 
 古い `bank_job` はbrowserではなくcookie jar付きHTTP clientで、form action/eventを
 JavaScript `onclick`から抽出し、HTML tableをparseしていた。これは当時の内部HTTPが
@@ -485,13 +485,13 @@ JSON APIではなくstateful server-side HTML formだったことを示す。現
 
 ## 実行基盤の適性
 
-| 基盤 | 適性 | 理由 |
-| --- | --- | --- |
-| ユーザー管理下の通常Chrome/Kuebiko | **高** | 正規browser、登録済み端末、app QR、人手認証、CSV downloadを扱える。初回観測とMVPに最適 |
-| Cloudflare Workers | browser login **低**、API/orchestrator **高** | browser/app/FIDOを実行できず、日本国内ISP要件とshared egressも課題。正式API契約後のHTTP collectorには最適 |
-| Cloudflare Containers | **中** | Playwright/Chromeとdownloadは可能。ただしpersistent profile、app QR人手、Akamai、国外/変動egressの検証が必要 |
-| OCI VM/Container（Tokyo/Osaka） | **中～高** | 日本region、固定disk、通常Chrome、download暗号化を構成しやすい。login成功とISP要件適合はlive確認が必要 |
-| OCI Kubernetes | **中** | CronJob、secret隔離、persistent volumeは使えるが、端末bound loginと1口座collectorには運用過剰。並行実行防止が必須 |
+| 基盤                               | 適性                                          | 理由                                                                                                              |
+| ---------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| ユーザー管理下の通常Chrome/Kuebiko | **高**                                        | 正規browser、登録済み端末、app QR、人手認証、CSV downloadを扱える。初回観測とMVPに最適                            |
+| Cloudflare Workers                 | browser login **低**、API/orchestrator **高** | browser/app/FIDOを実行できず、日本国内ISP要件とshared egressも課題。正式API契約後のHTTP collectorには最適         |
+| Cloudflare Containers              | **中**                                        | Playwright/Chromeとdownloadは可能。ただしpersistent profile、app QR人手、Akamai、国外/変動egressの検証が必要      |
+| OCI VM/Container（Tokyo/Osaka）    | **中～高**                                    | 日本region、固定disk、通常Chrome、download暗号化を構成しやすい。login成功とISP要件適合はlive確認が必要            |
+| OCI Kubernetes                     | **中**                                        | CronJob、secret隔離、persistent volumeは使えるが、端末bound loginと1口座collectorには運用過剰。並行実行防止が必須 |
 
 Cloudflare Workers単体は、CSV downloadを含むstateful HTML/browser flowと端末FIDOを扱えない。
 Cloudflare Containerは技術的には可能だが、公式利用環境が「日本国内に所在するISP」を要求

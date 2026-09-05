@@ -14,12 +14,7 @@ import { sbiForeignCashBalances } from "../src/parsers/sbi-foreign-cash-balances
 import { paypayCsv } from "../src/parsers/paypay-csv.ts";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
-const SBI_RUN = join(
-  FIXTURES,
-  "sbi-securities",
-  "2026-08-20",
-  "run-20260820-210000-poc01",
-);
+const SBI_RUN = join(FIXTURES, "sbi-securities", "2026-08-20", "run-20260820-210000-poc01");
 
 function artifact(overrides: Partial<ArtifactMeta>): ArtifactMeta {
   return {
@@ -133,9 +128,9 @@ describe("sbi-domestic-trade-records", () => {
 
   test("accepts only its dataset", () => {
     expect(sbiDomesticTradeRecords.accepts(meta)).toBe(true);
-    expect(
-      sbiDomesticTradeRecords.accepts(artifact({ dataset: "foreign-cash-positions" })),
-    ).toBe(false);
+    expect(sbiDomesticTradeRecords.accepts(artifact({ dataset: "foreign-cash-positions" }))).toBe(
+      false,
+    );
   });
 
   test("golden parse of the fixture", () => {
@@ -175,9 +170,7 @@ describe("sbi-domestic-trade-records", () => {
   });
 
   test("wrong shape throws (parse run becomes an error)", () => {
-    expect(() =>
-      sbiDomesticTradeRecords.parse(new TextEncoder().encode("{}"), meta),
-    ).toThrow();
+    expect(() => sbiDomesticTradeRecords.parse(new TextEncoder().encode("{}"), meta)).toThrow();
   });
 });
 
@@ -273,9 +266,7 @@ describe("sbi-foreign-cash-positions", () => {
   test("a missing securities code is warned about, not silently empty", () => {
     const body = {
       listSecuritiesBalances: {
-        securitiesBalances: [
-          { securitiesQuantity: 1, securities: {}, evaluationProfitLoss: {} },
-        ],
+        securitiesBalances: [{ securitiesQuantity: 1, securities: {}, evaluationProfitLoss: {} }],
       },
     };
     const result = sbiForeignCashPositions.parse(
@@ -405,14 +396,12 @@ describe("paypay-csv", () => {
     // order. A positional mapping would record this payment as income.
     const csv =
       "取引日,入金金額（円）,出金金額（円）,海外出金金額,通貨,変換レート（円）,利用国,取引内容,取引先,取引方法,支払い区分,利用者,取引番号\n" +
-      "2026/08/01 00:00:00,,\"1,180\",,,,,支払い,店,PayPay残高,一括払い,本人,t-1\n";
+      '2026/08/01 00:00:00,,"1,180",,,,,支払い,店,PayPay残高,一括払い,本人,t-1\n';
     const result = paypayCsv.parse(new TextEncoder().encode(csv), meta);
     const observation = result.observations[0]!;
     if (observation.kind !== "transaction") throw new Error("expected transaction");
     expect(observation.amountMinor).toBe(-1180);
-    expect(result.warnings.some((w) => w.includes("not the documented column"))).toBe(
-      true,
-    );
+    expect(result.warnings.some((w) => w.includes("not the documented column"))).toBe(true);
   });
 
   test("an added column is preserved by name as well as by value", () => {
@@ -447,9 +436,9 @@ describe("paypay-csv", () => {
   });
 
   test("missing header throws", () => {
-    expect(() =>
-      paypayCsv.parse(new TextEncoder().encode("a,b,c\n1,2,3\n"), meta),
-    ).toThrow(/取引日/u);
+    expect(() => paypayCsv.parse(new TextEncoder().encode("a,b,c\n1,2,3\n"), meta)).toThrow(
+      /取引日/u,
+    );
   });
 });
 

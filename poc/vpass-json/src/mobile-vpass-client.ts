@@ -55,12 +55,9 @@ function integer(value: unknown): number | null {
 }
 
 function cardsFrom(response: unknown): VpassCard[] {
-  const list = objectAt(
-    response,
-    "body",
-    "content",
-    "DropdownListInitDisplayServiceBean",
-  )?.["multiCardInfoList"];
+  const list = objectAt(response, "body", "content", "DropdownListInitDisplayServiceBean")?.[
+    "multiCardInfoList"
+  ];
   if (!Array.isArray(list)) return [];
   return list.flatMap((item) => {
     if (!isObject(item)) return [];
@@ -126,10 +123,7 @@ export class MobileVpassClient {
         "x-vappsessiontime": sessionTime,
       },
       body: JSON.stringify({
-        auth: buildFirstLoginAuth(
-          { loginId, password, deviceId, deviceToken: "" },
-          authPublicKey,
-        ),
+        auth: buildFirstLoginAuth({ loginId, password, deviceId, deviceToken: "" }, authPublicKey),
         is_first_login: 1,
         push: 0,
         auto_login: 0,
@@ -139,7 +133,10 @@ export class MobileVpassClient {
     });
     await this.#absorbCookies(authResponse);
     const auth = await this.#parseJson(authResponse, "Fauth");
-    if (auth.json["status"] !== 200 || typeof objectAt(auth.json, "data")?.["login_token"] !== "string") {
+    if (
+      auth.json["status"] !== 200 ||
+      typeof objectAt(auth.json, "data")?.["login_token"] !== "string"
+    ) {
       throw new Error("Vpass Fauth rejected the login");
     }
     this.#authenticated = true;

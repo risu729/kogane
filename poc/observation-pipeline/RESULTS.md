@@ -75,7 +75,7 @@ each one is a trap the real implementation would otherwise walk into.
   entire `totalBalance` the schema does not know about. Fixed: enclosing
   account and currency fields are carried into `extra` and warned about.
 
-The general lesson: every one of these failed *silently* and in the
+The general lesson: every one of these failed _silently_ and in the
 direction of looking correct. That is the argument for the evidence browser
 — and for warnings being data, not log lines.
 

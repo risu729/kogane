@@ -8,10 +8,10 @@ selected a recent real-device-derived Windows Chrome fingerprint and ran with
 `disable-dev-shm-usage`, which is compatible with a runtime that cannot set
 Docker's `--shm-size` option.
 
-| Arm | Sanitized runtime | Login page | Password bootstrap |
-| --- | --- | --- | --- |
-| Ephemeral Windows Chrome | Chrome 152, `Win32`, Japanese languages, Intel Direct3D 11 WebGL, `webdriver=false` | HTTP 200 | Login POST returned HTTP 403 / Access Denied. |
-| New persistent Windows Chrome, public SMBC warm-up, per-character keyboard and mouse movement | Same coherent platform family | HTTP 200 | The coordinate click did not reach the login control, so no login POST occurred. Inconclusive; no rejection or success is claimed. |
+| Arm                                                                                           | Sanitized runtime                                                                   | Login page | Password bootstrap                                                                                                                 |
+| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Ephemeral Windows Chrome                                                                      | Chrome 152, `Win32`, Japanese languages, Intel Direct3D 11 WebGL, `webdriver=false` | HTTP 200   | Login POST returned HTTP 403 / Access Denied.                                                                                      |
+| New persistent Windows Chrome, public SMBC warm-up, per-character keyboard and mouse movement | Same coherent platform family                                                       | HTTP 200   | The coordinate click did not reach the login control, so no login POST occurred. Inconclusive; no rejection or success is claimed. |
 
 The first arm is materially different from a simple UA/CDP override and from
 Camoufox: the browser product was Chromium-based Chroma and the Windows Chrome

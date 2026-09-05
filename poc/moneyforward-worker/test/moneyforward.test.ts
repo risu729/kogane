@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { CookieJar } from "../src/cookies";
-import { extractAccountContext, extractAccountDetailPaths, recentMonths } from "../src/moneyforward";
+import {
+  extractAccountContext,
+  extractAccountDetailPaths,
+  recentMonths,
+} from "../src/moneyforward";
 import { parseCredentialId } from "../src/webauthn";
 
 describe("extractAccountDetailPaths", () => {
@@ -11,10 +15,7 @@ describe("extractAccountDetailPaths", () => {
       <a href="/accounts/show/z_2">duplicate</a>
       <a href="https://example.com/accounts/show/no">outside</a>
     `;
-    expect(extractAccountDetailPaths(html)).toEqual([
-      "/accounts/show/a-1",
-      "/accounts/show/z_2",
-    ]);
+    expect(extractAccountDetailPaths(html)).toEqual(["/accounts/show/a-1", "/accounts/show/z_2"]);
   });
 });
 
@@ -69,7 +70,8 @@ describe("CookieJar", () => {
 
 describe("parseCredentialId", () => {
   test("converts Bitwarden UUID credential IDs to the raw 16 bytes", () => {
-    expect(Buffer.from(parseCredentialId("00112233-4455-6677-8899-aabbccddeeff")).toString("hex"))
-      .toBe("00112233445566778899aabbccddeeff");
+    expect(
+      Buffer.from(parseCredentialId("00112233-4455-6677-8899-aabbccddeeff")).toString("hex"),
+    ).toBe("00112233445566778899aabbccddeeff");
   });
 });

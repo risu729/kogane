@@ -6,7 +6,7 @@ const fixturePath = `${import.meta.dir}/fixtures/core-responses.json`;
 
 describe("SBI Shinsei local collector", () => {
   test("uses the captured sequence once and emits raw plus normalized artifacts", async () => {
-    const fixtures = await Bun.file(fixturePath).json() as Record<string, unknown>;
+    const fixtures = (await Bun.file(fixturePath).json()) as Record<string, unknown>;
     const calls: Array<{ path: string; authorization: string | null; csrf: string | null }> = [];
     const provider: JscProvider = {
       name: "synthetic",
@@ -16,10 +16,7 @@ describe("SBI Shinsei local collector", () => {
         jsc: `synthetic-${"j".repeat(80)}`,
       }),
     };
-    const mockFetch = async (
-      input: RequestInfo | URL,
-      init?: RequestInit,
-    ): Promise<Response> => {
+    const mockFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = new URL(String(input));
       const headers = new Headers(init?.headers);
       calls.push({
@@ -28,12 +25,15 @@ describe("SBI Shinsei local collector", () => {
         csrf: headers.get("x-csrf-token"),
       });
       if (url.pathname.endsWith("/login_auth_request_url")) {
-        return jsonResponse({
-          responseJSON: { authStatus: "success", token: "synthetic-initial" },
-        }, {
-          authorization: "synthetic-authorization",
-          "content-type": "application/octet-stream",
-        });
+        return jsonResponse(
+          {
+            responseJSON: { authStatus: "success", token: "synthetic-initial" },
+          },
+          {
+            authorization: "synthetic-authorization",
+            "content-type": "application/octet-stream",
+          },
+        );
       }
       const fixture = fixtureForPath(url.pathname, fixtures);
       return jsonResponse(fixture, { "content-type": "application/json" });
@@ -62,9 +62,9 @@ describe("SBI Shinsei local collector", () => {
     expect(calls[1]?.csrf).toBe("synthetic-initial");
     expect(calls[2]?.csrf).toBe("synthetic-initial");
     expect(calls[3]?.csrf).toBe("synthetic-next-csrf-token");
-    expect(calls.slice(1).every(
-      (call) => call.authorization === "synthetic-authorization",
-    )).toBeTrue();
+    expect(
+      calls.slice(1).every((call) => call.authorization === "synthetic-authorization"),
+    ).toBeTrue();
     expect(result.artifacts.map((artifact) => artifact.filename)).toEqual([
       "raw-top-accounts-balance-and-activity.json",
       "raw-balance-summary-and-stage.json",
@@ -79,17 +79,11 @@ describe("SBI Shinsei local collector", () => {
   });
 });
 
-function jsonResponse(
-  value: unknown,
-  headers: Record<string, string>,
-): Response {
+function jsonResponse(value: unknown, headers: Record<string, string>): Response {
   return new Response(JSON.stringify(value), { status: 200, headers });
 }
 
-function fixtureForPath(
-  path: string,
-  fixtures: Record<string, unknown>,
-): unknown {
+function fixtureForPath(path: string, fixtures: Record<string, unknown>): unknown {
   const mapping: Record<string, string> = {
     "/SFC/app/IFCM_CommonAdapter/securityConnect": "securityConnect",
     "/SFC/app/IFCM_CommonAdapter/validateToken": "validateToken",

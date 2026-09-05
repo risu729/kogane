@@ -1,18 +1,10 @@
 import { parseCredential } from "../credential";
 import { SbiShinseiLoginTransport } from "../login";
 import { normalizeCoreResponses } from "../normalized";
-import {
-  noBodyRequest,
-  YEN_DEPOSIT_SCREEN_GROUP_ID,
-  yenDepositAccountRequest,
-} from "../requests";
+import { noBodyRequest, YEN_DEPOSIT_SCREEN_GROUP_ID, yenDepositAccountRequest } from "../requests";
 import { InMemorySessionState } from "../session";
 import { SbiShinseiReadTransport } from "../transport";
-import type {
-  JscProvider,
-  NormalizedSnapshot,
-  RawArtifact,
-} from "../types";
+import type { JscProvider, NormalizedSnapshot, RawArtifact } from "../types";
 
 export interface LocalCollectorResult {
   artifacts: RawArtifact[];
@@ -29,9 +21,7 @@ export async function collectHybridLocalSbiShinsei(options: {
   const credential = parseCredential(options.credentialJson);
   const material = await options.jscProvider.acquire();
   const login = new SbiShinseiLoginTransport({ fetch: options.fetch });
-  const session = new InMemorySessionState(
-    await login.login(credential, material),
-  );
+  const session = new InMemorySessionState(await login.login(credential, material));
   const transport = new SbiShinseiReadTransport({
     fetch: options.fetch,
     session,
@@ -48,9 +38,7 @@ export async function collectHybridLocalSbiShinsei(options: {
   const balanceSummary = await transport.callWithRaw(
     noBodyRequest("top.balance-summary-and-stage"),
   );
-  const exchangeRate = await transport.callWithRaw(
-    noBodyRequest("common.exchange-rate"),
-  );
+  const exchangeRate = await transport.callWithRaw(noBodyRequest("common.exchange-rate"));
   const yenDeposit = await transport.callWithRaw(
     yenDepositAccountRequest(YEN_DEPOSIT_SCREEN_GROUP_ID),
   );
@@ -73,29 +61,13 @@ export async function collectHybridLocalSbiShinsei(options: {
         "raw-balance-summary-and-stage.json",
         balanceSummary.rawBody,
       ),
-      jsonArtifact(
-        "exchange-rate",
-        "raw-exchange-rate.json",
-        exchangeRate.rawBody,
-      ),
-      jsonArtifact(
-        "yen-deposit-account",
-        "raw-yen-deposit-account.json",
-        yenDeposit.rawBody,
-      ),
-      jsonArtifact(
-        "normalized",
-        "normalized.json",
-        `${JSON.stringify(normalized, null, 2)}\n`,
-      ),
+      jsonArtifact("exchange-rate", "raw-exchange-rate.json", exchangeRate.rawBody),
+      jsonArtifact("yen-deposit-account", "raw-yen-deposit-account.json", yenDeposit.rawBody),
+      jsonArtifact("normalized", "normalized.json", `${JSON.stringify(normalized, null, 2)}\n`),
     ],
   };
 }
 
-function jsonArtifact(
-  dataset: string,
-  filename: string,
-  body: string,
-): RawArtifact {
+function jsonArtifact(dataset: string, filename: string, body: string): RawArtifact {
   return { dataset, filename, mediaType: "application/json", body };
 }

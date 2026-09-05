@@ -30,26 +30,26 @@ session exists, the collection flow is:
 
 Live validation on 2026-08-25 and 2026-08-26 established the following:
 
-| Test | Result |
-| --- | --- |
-| Established Windows Kuebiko profile, visible UI password login | At least one login and one re-login after session expiry passed, but repeated success under fixed conditions has not yet been established. |
-| Fresh Windows Kuebiko profiles, visible UI | Produced both 302/My Page successes and Akamai 403 failures under closely related conditions; locale, window geometry and dwell were not individually sufficient. |
-| Fresh WSL official Chrome 151, with or without copied Akamai-only cookies | Akamai Access Denied at `xt_login/agree/v1`. |
-| Previously session-seeded persistent WSL profile, after expiry | Password re-login still received Access Denied. |
-| `impit@0.14.3` and `curl_cffi`-style impersonation | Did not establish a Vpass login session. |
-| Valid Windows session imported into fresh Windows Chrome | Authenticated My Page passed. |
-| Same valid session imported into WSL Chrome 151 | Authenticated My Page passed. |
-| Same valid session imported into OCI ARM64 Linux Chrome 151 | Authenticated My Page passed. |
-| Cookies captured when the Kuebiko browser closed, then imported into OCI | Passed; closing the source browser did not itself kill the server session. |
-| Two different imported sessions used concurrently | Both passed; a later login did not immediately revoke the older session. |
-| Expired session imported into OCI | Returned to login, matching the expired source profile. |
-| Fresh WSL Chrome through AU direct vs Japanese `tamia` exit | Both reached the login page; password login remained 403 through `tamia`. |
-| Fresh visible WSL Chrome through `tamia`, user typed and clicked manually | Access Denied; Linux rejection was not caused by CDP/Playwright input. |
-| Previously successful Windows profile, identical CDP text/mouse automation through AU vs `tamia` | Both returned to the login form without Access Denied or credential error. |
-| Camoufox 0.5.5 in Linux Docker, coherent Windows Firefox 152 fingerprint | Login page passed; password POST returned 403. |
-| Camoufox 0.5.5 in Linux Docker, coherent macOS Firefox 152 fingerprint | Login page passed; the bounded auth trial did not emit the expected login POST, so the result is inconclusive. |
-| Kameleo 5.1 Chroma in Linux Docker, coherent Windows Chrome 152 fingerprint | Login page passed with `Win32`, Direct3D WebGL and `webdriver=false`; password POST returned 403 through AU/SYD WARP egress. |
-| Persistent Kameleo Windows Chrome profile with public-site warm-up and per-character/mouse input | The bounded trial did not emit the login POST because the test click did not reach the control; stopped without treating it as a pass or rejection. |
+| Test                                                                                             | Result                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Established Windows Kuebiko profile, visible UI password login                                   | At least one login and one re-login after session expiry passed, but repeated success under fixed conditions has not yet been established.                        |
+| Fresh Windows Kuebiko profiles, visible UI                                                       | Produced both 302/My Page successes and Akamai 403 failures under closely related conditions; locale, window geometry and dwell were not individually sufficient. |
+| Fresh WSL official Chrome 151, with or without copied Akamai-only cookies                        | Akamai Access Denied at `xt_login/agree/v1`.                                                                                                                      |
+| Previously session-seeded persistent WSL profile, after expiry                                   | Password re-login still received Access Denied.                                                                                                                   |
+| `impit@0.14.3` and `curl_cffi`-style impersonation                                               | Did not establish a Vpass login session.                                                                                                                          |
+| Valid Windows session imported into fresh Windows Chrome                                         | Authenticated My Page passed.                                                                                                                                     |
+| Same valid session imported into WSL Chrome 151                                                  | Authenticated My Page passed.                                                                                                                                     |
+| Same valid session imported into OCI ARM64 Linux Chrome 151                                      | Authenticated My Page passed.                                                                                                                                     |
+| Cookies captured when the Kuebiko browser closed, then imported into OCI                         | Passed; closing the source browser did not itself kill the server session.                                                                                        |
+| Two different imported sessions used concurrently                                                | Both passed; a later login did not immediately revoke the older session.                                                                                          |
+| Expired session imported into OCI                                                                | Returned to login, matching the expired source profile.                                                                                                           |
+| Fresh WSL Chrome through AU direct vs Japanese `tamia` exit                                      | Both reached the login page; password login remained 403 through `tamia`.                                                                                         |
+| Fresh visible WSL Chrome through `tamia`, user typed and clicked manually                        | Access Denied; Linux rejection was not caused by CDP/Playwright input.                                                                                            |
+| Previously successful Windows profile, identical CDP text/mouse automation through AU vs `tamia` | Both returned to the login form without Access Denied or credential error.                                                                                        |
+| Camoufox 0.5.5 in Linux Docker, coherent Windows Firefox 152 fingerprint                         | Login page passed; password POST returned 403.                                                                                                                    |
+| Camoufox 0.5.5 in Linux Docker, coherent macOS Firefox 152 fingerprint                           | Login page passed; the bounded auth trial did not emit the expected login POST, so the result is inconclusive.                                                    |
+| Kameleo 5.1 Chroma in Linux Docker, coherent Windows Chrome 152 fingerprint                      | Login page passed with `Win32`, Direct3D WebGL and `webdriver=false`; password POST returned 403 through AU/SYD WARP egress.                                      |
+| Persistent Kameleo Windows Chrome profile with public-site warm-up and per-character/mouse input | The bounded trial did not emit the login POST because the test click did not reach the control; stopped without treating it as a pass or rejection.               |
 
 These results split the source into two explicit gates:
 
@@ -351,17 +351,17 @@ stream as expected.
 
 ## Rejected paths
 
-| Path | Reason |
-| --- | --- |
-| Normal Worker password login | Cannot reproduce the established Windows browser/profile context; native `impit` is also unavailable. |
-| Normal Worker post-auth replay | **Not rejected yet.** Test it with a valid session; native impersonation may not be required after login. |
-| Container `interceptHttps` | Re-terminates TLS and replaces the `impit` fingerprint. |
-| VPC binding `fetch()` | Selects a network path but still acts as an HTTP semantic proxy. |
-| Calling `TAMIA.connect()` inside the Container | VPC bindings are Worker bindings and are not injected into the Container process. |
-| Treating `TAMIA.connect()` as the Container default route | It affects only explicitly bridged TCP flows, not the Container network namespace. |
-| Physical Windows scheduled collector | Conflicts with the deployment requirement. The machine remains a diagnostic control only. |
-| Laptop/local scheduled collector | Conflicts with the always-on requirement. The accepted issuer platform remains unresolved. |
-| General open proxy on the mini PC | Unnecessary attack surface; any fallback is localhost-only and destination-allowlisted. |
+| Path                                                      | Reason                                                                                                    |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Normal Worker password login                              | Cannot reproduce the established Windows browser/profile context; native `impit` is also unavailable.     |
+| Normal Worker post-auth replay                            | **Not rejected yet.** Test it with a valid session; native impersonation may not be required after login. |
+| Container `interceptHttps`                                | Re-terminates TLS and replaces the `impit` fingerprint.                                                   |
+| VPC binding `fetch()`                                     | Selects a network path but still acts as an HTTP semantic proxy.                                          |
+| Calling `TAMIA.connect()` inside the Container            | VPC bindings are Worker bindings and are not injected into the Container process.                         |
+| Treating `TAMIA.connect()` as the Container default route | It affects only explicitly bridged TCP flows, not the Container network namespace.                        |
+| Physical Windows scheduled collector                      | Conflicts with the deployment requirement. The machine remains a diagnostic control only.                 |
+| Laptop/local scheduled collector                          | Conflicts with the always-on requirement. The accepted issuer platform remains unresolved.                |
+| General open proxy on the mini PC                         | Unnecessary attack surface; any fallback is localhost-only and destination-allowlisted.                   |
 
 ## Implementation gates
 

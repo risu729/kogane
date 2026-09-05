@@ -114,18 +114,18 @@ secret値をsource、`wrangler.jsonc`、`.dev.vars`のcommit、shell引数、std
 
 active allowlistは次だけである。
 
-| operation | method | path/query | 用途 |
-|---|---|---|---|
-| login page | GET | `/Login` | protection scriptを含む公式login page bootstrap |
-| login submit | POST | `/iss-pc/member/user_manage/Login` | Browser内でform actionを検査して一回だけsubmit |
-| mypage | GET | `/iss-pc/member/mypage/mypage.html` | login landing/session確認 |
-| credit menu | GET | `/iss-pc/member/details_inquiry/detailMenu.html?link_id=<observed>` | 初期`detailMonth`列挙 |
-| credit detail | GET | `/iss-pc/member/details_inquiry/detail.html?detailMonth=0..17&output=web` | 確定／未確定HTML snapshot |
-| older availability | POST JSON-RPC | `/iss-pc/general_json/member/details_inquiry/detailPastJson.json` | hidden discriminatorを使いavailable月だけ列挙 |
-| credit CSV/OFX | GET | `detail.html?detailMonth=N&output=csv|money` | 確定月の公式export |
-| credit PDF | GET | `detailDbPdf.html?detailMonth=N&output=pdf` | 確定月の公式statement PDF |
-| debit menu | GET | `/iss-pc/member/debit/details/debitDetailMenu.html?link_id=myj_main_debitDetailMenu` | period列挙 |
-| debit detail | GET | `/iss-pc/member/debit/details/debitDetail.html?seq=0..14` | 通常／差額明細 |
+| operation          | method        | path/query                                                                           | 用途                                            |
+| ------------------ | ------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| login page         | GET           | `/Login`                                                                             | protection scriptを含む公式login page bootstrap |
+| login submit       | POST          | `/iss-pc/member/user_manage/Login`                                                   | Browser内でform actionを検査して一回だけsubmit  |
+| mypage             | GET           | `/iss-pc/member/mypage/mypage.html`                                                  | login landing/session確認                       |
+| credit menu        | GET           | `/iss-pc/member/details_inquiry/detailMenu.html?link_id=<observed>`                  | 初期`detailMonth`列挙                           |
+| credit detail      | GET           | `/iss-pc/member/details_inquiry/detail.html?detailMonth=0..17&output=web`            | 確定／未確定HTML snapshot                       |
+| older availability | POST JSON-RPC | `/iss-pc/general_json/member/details_inquiry/detailPastJson.json`                    | hidden discriminatorを使いavailable月だけ列挙   |
+| credit CSV/OFX     | GET           | `detail.html?detailMonth=N&output=csv                                                | money`                                          | 確定月の公式export |
+| credit PDF         | GET           | `detailDbPdf.html?detailMonth=N&output=pdf`                                          | 確定月の公式statement PDF                       |
+| debit menu         | GET           | `/iss-pc/member/debit/details/debitDetailMenu.html?link_id=myj_main_debitDetailMenu` | period列挙                                      |
+| debit detail       | GET           | `/iss-pc/member/debit/details/debitDetail.html?seq=0..14`                            | 通常／差額明細                                  |
 
 以下はread candidateだが**無効**である。
 

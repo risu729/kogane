@@ -5,11 +5,10 @@ const encode = (value: Uint8Array): string => Buffer.from(value).toString("base6
 const challenge = encode(crypto.getRandomValues(new Uint8Array(32)));
 
 async function syntheticCredential() {
-  const pair = await crypto.subtle.generateKey(
-    { name: "ECDSA", namedCurve: "P-256" },
-    true,
-    ["sign", "verify"],
-  );
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ]);
   const keyValue = encode(new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey)));
   return parsePasskeyCredential({
     credentialId: "00112233-4455-6677-8899-aabbccddeeff",
@@ -40,7 +39,9 @@ describe("Bitwarden passkey assertion", () => {
     expect(authenticatorData[32]).toBe(0x1d);
     expect(authenticatorData.readUInt32BE(33)).toBe(0);
     expect(Buffer.from(assertion.signature!, "base64url")[0]).toBe(0x30);
-    expect(JSON.parse(Buffer.from(assertion.clientDataJSON!, "base64url").toString("utf8"))).toEqual({
+    expect(
+      JSON.parse(Buffer.from(assertion.clientDataJSON!, "base64url").toString("utf8")),
+    ).toEqual({
       type: "webauthn.get",
       challenge,
       origin: "https://simple.sbivc.co.jp",
@@ -60,10 +61,13 @@ describe("Bitwarden passkey assertion", () => {
         responseHeaders.append("set-cookie", "JSESSIONID=jsession; Secure; HttpOnly");
         responseHeaders.append("set-cookie", "AWSALB=alb; Secure");
         responseHeaders.append("set-cookie", "AWSALBCORS=cors; Secure");
-        return new Response(JSON.stringify({
-          meta: { status: "OK" },
-          body: { challenge, rpId: "sbivc.co.jp", userVerification: "required" },
-        }), { status: 200, headers: responseHeaders });
+        return new Response(
+          JSON.stringify({
+            meta: { status: "OK" },
+            body: { challenge, rpId: "sbivc.co.jp", userVerification: "required" },
+          }),
+          { status: 200, headers: responseHeaders },
+        );
       }
       expect(headers.get("cookie")).toContain("JSESSIONID=jsession");
       const responseHeaders = new Headers({ "content-type": "application/json" });
@@ -71,10 +75,13 @@ describe("Bitwarden passkey assertion", () => {
       for (let index = 0; index < 4; index += 1) {
         responseHeaders.append("set-cookie", `AWSALBAPP-${index}=app${index}; Secure`);
       }
-      return new Response(JSON.stringify({
-        meta: { status: "OK" },
-        body: { accountId: "secure", isAgreed: true },
-      }), { status: 200, headers: responseHeaders });
+      return new Response(
+        JSON.stringify({
+          meta: { status: "OK" },
+          body: { accountId: "secure", isAgreed: true },
+        }),
+        { status: 200, headers: responseHeaders },
+      );
     }) as typeof fetch;
 
     const session = await createPasskeySession(credential, fetcher);

@@ -10,7 +10,6 @@
 export { minorUnitExponent } from "../money.ts";
 import { minorUnitExponent } from "../money.ts";
 
-
 /**
  * Validate digit grouping and remove it. Commas are only accepted as
  * thousands separators in a well-formed group pattern, because a source that
@@ -39,11 +38,7 @@ function stripGrouping(text: string): string | undefined {
  * currency's scale are accepted only when they are all zero — "1.230" USD is
  * exactly 123 cents, while "1.234" USD is not representable and is refused.
  */
-function scaleDecimal(
-  text: string,
-  exponent: number,
-  negative: boolean,
-): number | undefined {
+function scaleDecimal(text: string, exponent: number, negative: boolean): number | undefined {
   const parts = text.split(".");
   const whole = parts[0] ?? "";
   let fraction = parts[1] ?? "";
@@ -64,10 +59,7 @@ function scaleDecimal(
  * Two negative markers on one value are ambiguous and are refused rather
  * than silently resolved.
  */
-export function amountToMinorUnits(
-  raw: string,
-  currency: string,
-): number | undefined {
+export function amountToMinorUnits(raw: string, currency: string): number | undefined {
   const exponent = minorUnitExponent(currency);
   if (exponent === undefined) return undefined;
   let text = raw.trim();
@@ -99,10 +91,7 @@ export function amountToMinorUnits(
  * rather than trusted, because this is exported and an empty string must never
  * become zero yen.
  */
-export function decimalToMinorUnits(
-  text: string,
-  currency: string,
-): number | undefined {
+export function decimalToMinorUnits(text: string, currency: string): number | undefined {
   const exponent = minorUnitExponent(currency);
   if (exponent === undefined) return undefined;
   if (!/^[+-]?\d+(?:\.\d+)?$/u.test(text)) return undefined;
@@ -117,9 +106,7 @@ export function decimalToMinorUnits(
  * `JSON.parse` has already rounded anything larger, so the value on hand is no
  * longer what the provider sent and must not be recorded as if it were.
  */
-export function decimalText(
-  value: unknown,
-): { text: string; scale: number } | undefined {
+export function decimalText(value: unknown): { text: string; scale: number } | undefined {
   let text: string;
   if (typeof value === "string") {
     let unsigned = value.trim();

@@ -50,14 +50,14 @@ security/privacy 運用が必要であり、小規模な自家用 collector の�
 
 ## 公式画面で確認できる対象
 
-| 対象 | 公式に確認できる範囲 | 注意点 |
-| --- | --- | --- |
-| Transaction / savings | dashboard の残高、recent transactions、transaction history、eStatement、残高証明・取引一覧 | proof PDF は氏名・住所・口座番号・残高を含むため、そのままログへ入れない |
-| Debit / credit cards | 残高・明細、pending/confirmed card transaction、credit card eStatement | pending authorisation は確定明細ではない。Digital Card と dynamic CVV は App 固有で収集対象外 |
-| Home loans | App の Details / Internet Banking の Account details で rate、term、repayment frequency、balance、Available funds、eStatement | joint/offset 等では eStatement 対象外の場合がある。closed loan statement は online 閲覧不可 |
-| Personal loans | App の loan account Details、personal-loan eStatement | 公開説明だけでは web/app の全フィールド粒度は不明 |
-| Term deposits | Internet Banking/App で口座を選び、満期通知・更新/払戻指図を管理 | 残高表示の存在は portfolio の一般説明と「select your Term Deposit」から有力だが、個人画面の項目名は live 未確認。満期指図は write なので操作禁止 |
-| Product reference data | 公開 CDR Product API に transaction/savings、term deposits、credit cards に加え、実レスポンスでは residential mortgages、personal/business loans 等 | 顧客保有口座、残高、明細ではない |
+| 対象                   | 公式に確認できる範囲                                                                                                                                | 注意点                                                                                                                                           |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Transaction / savings  | dashboard の残高、recent transactions、transaction history、eStatement、残高証明・取引一覧                                                          | proof PDF は氏名・住所・口座番号・残高を含むため、そのままログへ入れない                                                                         |
+| Debit / credit cards   | 残高・明細、pending/confirmed card transaction、credit card eStatement                                                                              | pending authorisation は確定明細ではない。Digital Card と dynamic CVV は App 固有で収集対象外                                                    |
+| Home loans             | App の Details / Internet Banking の Account details で rate、term、repayment frequency、balance、Available funds、eStatement                       | joint/offset 等では eStatement 対象外の場合がある。closed loan statement は online 閲覧不可                                                      |
+| Personal loans         | App の loan account Details、personal-loan eStatement                                                                                               | 公開説明だけでは web/app の全フィールド粒度は不明                                                                                                |
+| Term deposits          | Internet Banking/App で口座を選び、満期通知・更新/払戻指図を管理                                                                                    | 残高表示の存在は portfolio の一般説明と「select your Term Deposit」から有力だが、個人画面の項目名は live 未確認。満期指図は write なので操作禁止 |
+| Product reference data | 公開 CDR Product API に transaction/savings、term deposits、credit cards に加え、実レスポンスでは residential mortgages、personal/business loans 等 | 顧客保有口座、残高、明細ではない                                                                                                                 |
 
 [Internet Banking](https://www.stgeorge.com.au/online-services/internet-banking) は
 balance、recent transactions、transaction history を web/app 共通機能として説明する。
@@ -88,15 +88,15 @@ response と、Internet Banking/App の内部 schema は未検証である。
 
 ## 明細期間、件数、export
 
-| 経路 | 期間・件数 | 形式 | 確度 |
-| --- | --- | --- | --- |
-| Internet Banking transaction history | `Last 7 days`、`Last 30 days`、`All`、任意 date range。statement cycle が monthly の場合は最後の statement から 3 か月、quarterly/6-month/yearly の場合は 2 statements 分までが FAQ 上の transaction-history window。1 回に最大 500 transactions、表示件数は 25–500/page | 画面。CSV は公式個人向け説明では未発見 | 期間・500件は公式。CSV は第三者実装のみ |
-| App transaction search | date range、description、amount range、debit/credit | 画面 | 公式 |
-| Proof of Balance | 現在時点、複数 account 選択可 | St.George letterhead PDF | 公式 |
-| Transaction Listing | 30 / 90 / 120 days または custom date range | St.George letterhead PDF | 公式 |
-| eStatement | 多くの transaction/savings、credit card、sole home/personal loan。過去 7 年内が online に見つからない場合は archive の可能性。statement frequency は原則 semiannual、要望で monthly/quarterly/semiannual/yearly、loan は 6-month、credit card は monthly 固定 | save/print 可能な statement PDF | 公式 |
-| Previous/interim statement request | 1 request 最大 14 statements。7 年全体を 1 document にはできない。interim は前回 statement から request 日まで、通常 next business day。credit card は interim 不可 | eStatement または郵送 | 公式だが request/Confirm は state change のため自動検証禁止 |
-| CDR transactions | `oldest-time` / `newest-time`; 省略時は最新日から 90 日。2025-03-04 以後、過去 2 年以内は required consumer data、2 年超 7 年未満は voluntary consumer data | paginated JSON | CDR 標準/現行 ACCC guide。St.George が voluntary range を返すかは未確認 |
+| 経路                                 | 期間・件数                                                                                                                                                                                                                                                               | 形式                                   | 確度                                                                    |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------- | ----------------------------------------------------------------------- |
+| Internet Banking transaction history | `Last 7 days`、`Last 30 days`、`All`、任意 date range。statement cycle が monthly の場合は最後の statement から 3 か月、quarterly/6-month/yearly の場合は 2 statements 分までが FAQ 上の transaction-history window。1 回に最大 500 transactions、表示件数は 25–500/page | 画面。CSV は公式個人向け説明では未発見 | 期間・500件は公式。CSV は第三者実装のみ                                 |
+| App transaction search               | date range、description、amount range、debit/credit                                                                                                                                                                                                                      | 画面                                   | 公式                                                                    |
+| Proof of Balance                     | 現在時点、複数 account 選択可                                                                                                                                                                                                                                            | St.George letterhead PDF               | 公式                                                                    |
+| Transaction Listing                  | 30 / 90 / 120 days または custom date range                                                                                                                                                                                                                              | St.George letterhead PDF               | 公式                                                                    |
+| eStatement                           | 多くの transaction/savings、credit card、sole home/personal loan。過去 7 年内が online に見つからない場合は archive の可能性。statement frequency は原則 semiannual、要望で monthly/quarterly/semiannual/yearly、loan は 6-month、credit card は monthly 固定            | save/print 可能な statement PDF        | 公式                                                                    |
+| Previous/interim statement request   | 1 request 最大 14 statements。7 年全体を 1 document にはできない。interim は前回 statement から request 日まで、通常 next business day。credit card は interim 不可                                                                                                      | eStatement または郵送                  | 公式だが request/Confirm は state change のため自動検証禁止             |
+| CDR transactions                     | `oldest-time` / `newest-time`; 省略時は最新日から 90 日。2025-03-04 以後、過去 2 年以内は required consumer data、2 年超 7 年未満は voluntary consumer data                                                                                                              | paginated JSON                         | CDR 標準/現行 ACCC guide。St.George が voluntary range を返すかは未確認 |
 
 [Viewing transactions](https://www.stgeorge.com.au/online-services/internet-banking/view-transactions)、
 [Proof of balance / transaction listing](https://www.stgeorge.com.au/online-services/internet-banking/proof-of-balance)、
@@ -199,11 +199,11 @@ model は公式 UI 説明と CDR standard のもので、Internet Banking intern
 
 2026-08-26 に、credential を送らない DNS/HTTP read-only probe を実施した。
 
-| host | 観測 | 結論できること / できないこと |
-| --- | --- | --- |
-| `www.stgeorge.com.au` | CNAME は `*.cloudfront.net`。response に `via: ...cloudfront.net`、`x-cache`、`x-amz-cf-*` | AWS CloudFront edge。WAF 有無・rule は header だけでは不明 |
-| `ibanking.stgeorge.com.au` | CNAME は `*.edgekey.net`。response に `akamai-grn` と `server-timing: ak_p`。未認証 GET/HEAD で `JSESSIONID` と `PD-S-SESSION-ID` cookie 名 | Akamai edge を利用。cookie 値は記録しない。Akamai Bot Manager/WAF の具体製品・policy は未確認 |
-| `digital-api.stgeorge.com.au` | CNAME は CloudFront。response に `x-amz-apigw-id` / `x-amzn-requestid`; correct `x-v` 付き Product API と discovery status は 200 | CloudFront + AWS API Gateway。public API の version/header validation はあるが、customer API の gateway/auth topology 全体は未確認 |
+| host                          | 観測                                                                                                                                        | 結論できること / できないこと                                                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `www.stgeorge.com.au`         | CNAME は `*.cloudfront.net`。response に `via: ...cloudfront.net`、`x-cache`、`x-amz-cf-*`                                                  | AWS CloudFront edge。WAF 有無・rule は header だけでは不明                                                                         |
+| `ibanking.stgeorge.com.au`    | CNAME は `*.edgekey.net`。response に `akamai-grn` と `server-timing: ak_p`。未認証 GET/HEAD で `JSESSIONID` と `PD-S-SESSION-ID` cookie 名 | Akamai edge を利用。cookie 値は記録しない。Akamai Bot Manager/WAF の具体製品・policy は未確認                                      |
+| `digital-api.stgeorge.com.au` | CNAME は CloudFront。response に `x-amz-apigw-id` / `x-amzn-requestid`; correct `x-v` 付き Product API と discovery status は 200           | CloudFront + AWS API Gateway。public API の version/header validation はあるが、customer API の gateway/auth topology 全体は未確認 |
 
 公開 Product API への通常 GET と login page の未認証取得では CAPTCHA は観測しなかった。
 これは authenticated login automation に challenge がないことを意味しない。公式の adaptive
@@ -247,7 +247,7 @@ integrity/attestation は未確定である。third-party APK mirror を current
    install/update する。Quick Logon 登録済み端末では app data clear/reinstall/device migration
    を行わない。
 2. 本人同意下で USB debugging を一時的に有効化し、`adb shell dumpsys package
-   org.stgeorge.bank` から versionName/versionCode、installer、split 名のみを採る。
+org.stgeorge.bank` から versionName/versionCode、installer、split 名のみを採る。
    `adb shell pm path org.stgeorge.bank` が通常権限で返す全 base/split を private work area
    へ pull する。
 3. 全 split の SHA-256 と `apksigner verify --print-certs` の signer digest を確認する。
@@ -345,12 +345,12 @@ St.George route を先に評価し、aggregator の能力を St.George の固有
 
 ## 公開第三者実装
 
-| 実装 | 時点 | transport / auth / 実装事実 | 評価 |
-| --- | --- | --- | --- |
-| [tekumara/cashgrab `stgeorge-balances.js`](https://github.com/tekumara/cashgrab/blob/main/src/stgeorge-balances.js) | St.George module の最終 commit 2026-04-05 | localhost:9222 の既存 Chrome に Puppeteer/CDP で接続。利用者が St.George Internet Banking に既にログインしている前提で `viewAccountPortfolio.html` へ移動し、`#acctSummaryList > li` から nickname、BSB、account number、current/available balance を DOM parse。口座カードがなければ login page を開いて手動 login を促す | 既ログイン browser bootstrap + read-only balance の現行に近い実証。現状コードは PII/残高を stdout に出すので、そのまま採用禁止。session renewal や transaction export はない |
-| [geofflamrock/ynab-sync St.George package](https://github.com/geofflamrock/ynab-sync/tree/main/packages/st-george-au) | St.George package の最終 commit 2022-12-11、repo push 2023-03-26 | Puppeteer が `loginPage.action` で access number、security number、password を form 入力し portfolio URL を期待。account index から `accountDetails.action`、date range field、search、`#transHistExport` を操作し CSV download。CSV の `Date`, `Debit`, `Credit`, `Description` を YNAB transaction に変換 | CSV と DOM route の具体的 evidence。ただし古く、OTP/adaptive challenge 非対応、credentials を process に渡すため現行 safe design ではない |
-| [yec/bankscripts `stgeorge.pl`](https://github.com/yec/bankscripts/blob/master/stgeorge.pl) | 2012-04-23 | Perl `WWW::Mechanize` で `logonForm` に userid/securityNumber/password、account detail form に `exportFileFormat=CSV` を POST | CSV export が古くから存在した歴史的 evidence のみ。URL/HTML/認証が旧式で再利用不可 |
-| [CDS product comparator demo](https://github.com/ConsumerDataStandardsAustralia/product-comparator-demo/blob/master/src/store/banking/data/actions.js) | 公開 DSB demo | CDR Register から brand base URI を得て、unauthenticated browser GET に `Accept`, `x-v`, `x-min-v`、pagination と product-detail fetch | St.George Product API でも使える A/cost 1 transport。個人口座データは扱わない |
+| 実装                                                                                                                                                   | 時点                                                             | transport / auth / 実装事実                                                                                                                                                                                                                                                                                                | 評価                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [tekumara/cashgrab `stgeorge-balances.js`](https://github.com/tekumara/cashgrab/blob/main/src/stgeorge-balances.js)                                    | St.George module の最終 commit 2026-04-05                        | localhost:9222 の既存 Chrome に Puppeteer/CDP で接続。利用者が St.George Internet Banking に既にログインしている前提で `viewAccountPortfolio.html` へ移動し、`#acctSummaryList > li` から nickname、BSB、account number、current/available balance を DOM parse。口座カードがなければ login page を開いて手動 login を促す | 既ログイン browser bootstrap + read-only balance の現行に近い実証。現状コードは PII/残高を stdout に出すので、そのまま採用禁止。session renewal や transaction export はない |
+| [geofflamrock/ynab-sync St.George package](https://github.com/geofflamrock/ynab-sync/tree/main/packages/st-george-au)                                  | St.George package の最終 commit 2022-12-11、repo push 2023-03-26 | Puppeteer が `loginPage.action` で access number、security number、password を form 入力し portfolio URL を期待。account index から `accountDetails.action`、date range field、search、`#transHistExport` を操作し CSV download。CSV の `Date`, `Debit`, `Credit`, `Description` を YNAB transaction に変換                | CSV と DOM route の具体的 evidence。ただし古く、OTP/adaptive challenge 非対応、credentials を process に渡すため現行 safe design ではない                                    |
+| [yec/bankscripts `stgeorge.pl`](https://github.com/yec/bankscripts/blob/master/stgeorge.pl)                                                            | 2012-04-23                                                       | Perl `WWW::Mechanize` で `logonForm` に userid/securityNumber/password、account detail form に `exportFileFormat=CSV` を POST                                                                                                                                                                                              | CSV export が古くから存在した歴史的 evidence のみ。URL/HTML/認証が旧式で再利用不可                                                                                           |
+| [CDS product comparator demo](https://github.com/ConsumerDataStandardsAustralia/product-comparator-demo/blob/master/src/store/banking/data/actions.js) | 公開 DSB demo                                                    | CDR Register から brand base URI を得て、unauthenticated browser GET に `Accept`, `x-v`, `x-min-v`、pagination と product-detail fetch                                                                                                                                                                                     | St.George Product API でも使える A/cost 1 transport。個人口座データは扱わない                                                                                                |
 
 公開 GitHub code search では、上記以外に St.George 固有の現行 customer-data API client、
 renewable token client、APK reverse-engineered protocol を確認できなかった。Westpac ブランド
@@ -358,13 +358,13 @@ renewable token client、APK reverse-engineered protocol を確認できなか�
 
 ## Runtime 適性
 
-| runtime | Product API | CDR ADR client | Internet Banking C route | App/device route |
-| --- | --- | --- | --- | --- |
-| Cloudflare Workers | 最適。scheduled GET + JSON normalize が容易 | outbound mTLS certificate binding と WebCrypto/JWT は技術的には候補。ただし ADR compliance、key lifecycle、CDR data environment、audit/retention を Workers 単体で満たす設計審査が必要 | 通常 fetch だけでは不可。Browser Run は Puppeteer を提供するが、login bootstrap、session、bank PII、adaptive auth、egress reputation のため第一候補にしない | 不適 |
-| Cloudflare Containers | 過剰 | `linux/amd64` image で通常の OAuth/FAPI stack を置けるが compliance は別問題 | Playwright/Puppeteer を OCI image に含められる。永続 browser profile と human bootstrap の安全な受渡しを別途設計 | APK static toolchain は置けるが Play delivery/本人端末/runtime は別 |
-| Generic OCI container | 容易 | mTLS、HSM/KMS client、JWT、refresh token、監査 sidecar を組みやすい | browser version pin、stable egress、encrypted ephemeral volume を構成しやすい | jadx/apktool 等の static analysis は適合。runtime は Android 実機 bridge が必要 |
-| Kubernetes | 小規模 Product API には過剰 | 最も運用自由度が高く、CronJob、Secrets/KMS、NetworkPolicy、audit/rotation を組める。ただし accreditation cost は下がらない | headful/headless pod と human handoff は可能だが、browser profile を secret と同等に扱う必要 | 実機 farm/ADB を別管理するなら可能だが cost 5 |
-| Non-rooted Android real device | 不要 | 不要 | web route があるため不要 | 正規 split、Quick Logon/device binding、app read transport を検証する第一候補。root/emulator bypass はしない |
+| runtime                        | Product API                                 | CDR ADR client                                                                                                                                                                         | Internet Banking C route                                                                                                                                    | App/device route                                                                                             |
+| ------------------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Cloudflare Workers             | 最適。scheduled GET + JSON normalize が容易 | outbound mTLS certificate binding と WebCrypto/JWT は技術的には候補。ただし ADR compliance、key lifecycle、CDR data environment、audit/retention を Workers 単体で満たす設計審査が必要 | 通常 fetch だけでは不可。Browser Run は Puppeteer を提供するが、login bootstrap、session、bank PII、adaptive auth、egress reputation のため第一候補にしない | 不適                                                                                                         |
+| Cloudflare Containers          | 過剰                                        | `linux/amd64` image で通常の OAuth/FAPI stack を置けるが compliance は別問題                                                                                                           | Playwright/Puppeteer を OCI image に含められる。永続 browser profile と human bootstrap の安全な受渡しを別途設計                                            | APK static toolchain は置けるが Play delivery/本人端末/runtime は別                                          |
+| Generic OCI container          | 容易                                        | mTLS、HSM/KMS client、JWT、refresh token、監査 sidecar を組みやすい                                                                                                                    | browser version pin、stable egress、encrypted ephemeral volume を構成しやすい                                                                               | jadx/apktool 等の static analysis は適合。runtime は Android 実機 bridge が必要                              |
+| Kubernetes                     | 小規模 Product API には過剰                 | 最も運用自由度が高く、CronJob、Secrets/KMS、NetworkPolicy、audit/rotation を組める。ただし accreditation cost は下がらない                                                             | headful/headless pod と human handoff は可能だが、browser profile を secret と同等に扱う必要                                                                | 実機 farm/ADB を別管理するなら可能だが cost 5                                                                |
+| Non-rooted Android real device | 不要                                        | 不要                                                                                                                                                                                   | web route があるため不要                                                                                                                                    | 正規 split、Quick Logon/device binding、app read transport を検証する第一候補。root/emulator bypass はしない |
 
 Cloudflare の現行公式資料では Workers に
 [mTLS certificate binding](https://developers.cloudflare.com/workers/wrangler/configuration/#mtls-certificates)、
@@ -385,14 +385,14 @@ Containers に [linux/amd64 image](https://developers.cloudflare.com/containers/
 - **E** — manual capture remains the safe default
 - **Cost 1–5** — 1 は small wrapper、5 は device-bound/adversarial
 
-| route | Level | Cost | 判定理由 |
-| --- | --- | ---: | --- |
-| 個人 balance/transaction の本線 | **C** | **4** | 2026 public code が logged-in Chrome bootstrap + DOM read を実証し、旧 code が CSV export を実装。renewable session は未確認で、adaptive auth/Akamai/selector drift がある |
-| App bootstrap 後の read-only transport replay 候補 | **C** | **4** | current split/runtime 未取得。renewable session、read endpoint、pinning/device binding を通常端末観測で確認できた場合だけ成立 |
-| 公式 PDF の手動取得と ingestion | **E** | **1** | 公式で安定し安全だが、人が App/Internet Banking から取得する必要がある |
-| 公開 Product API | **A** | **1** | documented unauthenticated REST GET。個人残高・明細なし |
-| accredited/sponsored CDR participant | **A** | **5** | documented machine-readable API、consented scheduled retrieval に適するが accreditation、PKI/mTLS/FAPI、conformance、security/privacy obligations が重い |
-| Android 実機 UI automation | **D** | **5** | biometric/quick logon/device integrity と UI drift を抱える。reverse engineering は調査対象だが、transport replay が成立しなければ full device が必要 |
+| route                                              | Level |  Cost | 判定理由                                                                                                                                                                   |
+| -------------------------------------------------- | ----- | ----: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 個人 balance/transaction の本線                    | **C** | **4** | 2026 public code が logged-in Chrome bootstrap + DOM read を実証し、旧 code が CSV export を実装。renewable session は未確認で、adaptive auth/Akamai/selector drift がある |
+| App bootstrap 後の read-only transport replay 候補 | **C** | **4** | current split/runtime 未取得。renewable session、read endpoint、pinning/device binding を通常端末観測で確認できた場合だけ成立                                              |
+| 公式 PDF の手動取得と ingestion                    | **E** | **1** | 公式で安定し安全だが、人が App/Internet Banking から取得する必要がある                                                                                                     |
+| 公開 Product API                                   | **A** | **1** | documented unauthenticated REST GET。個人残高・明細なし                                                                                                                    |
+| accredited/sponsored CDR participant               | **A** | **5** | documented machine-readable API、consented scheduled retrieval に適するが accreditation、PKI/mTLS/FAPI、conformance、security/privacy obligations が重い                   |
+| Android 実機 UI automation                         | **D** | **5** | biometric/quick logon/device integrity と UI drift を抱える。reverse engineering は調査対象だが、transport replay が成立しなければ full device が必要                      |
 
 ## Read-only live 検証計画
 

@@ -106,7 +106,6 @@ wrangler secret put ADMIN_TRIGGER_TOKEN
 
 PoCを廃棄するときは、R2の必要なraw artifactを退避した後にWorker、bucketの順で削除する。R2 bucketの削除は保存データを回復不能にするため、内容を確認してから行う。
 
-
 ### Failure diagnostics
 
 Collection failures emit a structured `*-collection-failure` event before teardown,

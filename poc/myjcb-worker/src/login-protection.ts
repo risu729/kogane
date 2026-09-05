@@ -2,11 +2,7 @@ import puppeteer, { type BrowserWorker } from "@cloudflare/puppeteer";
 import { CookieJar } from "./cookie-jar";
 import { allowedUrl, assertAllowedRequest, MYJCB_ORIGIN } from "./policy";
 import type { PasskeyCredential, PasswordCredential } from "./types";
-import {
-  HumanRequiredError,
-  StopConditionError,
-  type StopConditionCode,
-} from "./types";
+import { HumanRequiredError, StopConditionError, type StopConditionCode } from "./types";
 
 const LOGIN_TIMEOUT_MS = 45_000;
 
@@ -26,7 +22,7 @@ export async function loginWithOfficialProtection(
   });
   try {
     const pages = await browser.pages();
-    const page = pages[0] ?? await browser.newPage();
+    const page = pages[0] ?? (await browser.newPage());
     await page.setViewport({ width: 1365, height: 768, deviceScaleFactor: 1 });
     await page.goto(allowedUrl("login-page").href, {
       waitUntil: "domcontentloaded",
@@ -35,9 +31,7 @@ export async function loginWithOfficialProtection(
     await assertNoHumanChallenge(await page.content(), page.url(), true);
     const form = await page.evaluate(() => {
       const element = document.querySelector<HTMLFormElement>('form[name="loginForm"][action]');
-      return element
-        ? { action: element.action, method: element.method || "get" }
-        : undefined;
+      return element ? { action: element.action, method: element.method || "get" } : undefined;
     });
     if (!form) throw new StopConditionError("MyJCB login form was not found");
     assertAllowedRequest("login-submit", form.method, form.action);
@@ -49,14 +43,14 @@ export async function loginWithOfficialProtection(
     await page.type(userSelector, credential.userId, { delay: 25 });
     await page.type(passwordSelector, credential.password, { delay: 25 });
 
-    const navigation = page.waitForNavigation({
-      waitUntil: "domcontentloaded",
-      timeout: LOGIN_TIMEOUT_MS,
-    }).catch(() => null);
+    const navigation = page
+      .waitForNavigation({
+        waitUntil: "domcontentloaded",
+        timeout: LOGIN_TIMEOUT_MS,
+      })
+      .catch(() => null);
     await page.evaluate(() => {
-      const formElement = document.querySelector<HTMLFormElement>(
-        'form[name="loginForm"][action]',
-      );
+      const formElement = document.querySelector<HTMLFormElement>('form[name="loginForm"][action]');
       if (!formElement) throw new Error("login form disappeared");
       formElement.requestSubmit();
     });
@@ -88,7 +82,7 @@ export async function loginWithBitwardenPasskey(
   try {
     const { page, cdp } = await passkeyStage("passkey-browser-setup", async () => {
       const pages = await browser.pages();
-      const page = pages[0] ?? await browser.newPage();
+      const page = pages[0] ?? (await browser.newPage());
       await page.setViewport({ width: 1365, height: 768, deviceScaleFactor: 1 });
       return { page, cdp: await page.createCDPSession() };
     });
@@ -97,19 +91,20 @@ export async function loginWithBitwardenPasskey(
     });
     const { authenticatorId } = await passkeyStage(
       "passkey-authenticator-add",
-      async () => await cdp.send("WebAuthn.addVirtualAuthenticator", {
-        options: {
-          protocol: "ctap2",
-          ctap2Version: "ctap2_1",
-          transport: "internal",
-          hasResidentKey: true,
-          hasUserVerification: true,
-          automaticPresenceSimulation: true,
-          isUserVerified: true,
-          defaultBackupEligibility: true,
-          defaultBackupState: true,
-        },
-      }),
+      async () =>
+        await cdp.send("WebAuthn.addVirtualAuthenticator", {
+          options: {
+            protocol: "ctap2",
+            ctap2Version: "ctap2_1",
+            transport: "internal",
+            hasResidentKey: true,
+            hasUserVerification: true,
+            automaticPresenceSimulation: true,
+            isUserVerified: true,
+            defaultBackupEligibility: true,
+            defaultBackupState: true,
+          },
+        }),
     );
     await passkeyStage("passkey-credential-add", async () => {
       await cdp.send("WebAuthn.addCredential", {
@@ -157,17 +152,21 @@ export async function loginWithBitwardenPasskey(
     }
 
     await passkeyStage("passkey-trigger", async () => {
-      const navigation = page.waitForNavigation({
-        waitUntil: "domcontentloaded",
-        timeout: LOGIN_TIMEOUT_MS,
-      }).catch(() => null);
+      const navigation = page
+        .waitForNavigation({
+          waitUntil: "domcontentloaded",
+          timeout: LOGIN_TIMEOUT_MS,
+        })
+        .catch(() => null);
       await page.click(selector);
       await navigation;
-      await page.waitForFunction(
-        (mypagePath) => location.pathname === mypagePath,
-        { timeout: LOGIN_TIMEOUT_MS },
-        allowedUrl("mypage").pathname,
-      ).catch(() => null);
+      await page
+        .waitForFunction(
+          (mypagePath) => location.pathname === mypagePath,
+          { timeout: LOGIN_TIMEOUT_MS },
+          allowedUrl("mypage").pathname,
+        )
+        .catch(() => null);
     });
 
     const current = new URL(page.url());
@@ -192,10 +191,7 @@ export async function loginWithBitwardenPasskey(
   }
 }
 
-async function passkeyStage<T>(
-  code: StopConditionCode,
-  action: () => Promise<T>,
-): Promise<T> {
+async function passkeyStage<T>(code: StopConditionCode, action: () => Promise<T>): Promise<T> {
   try {
     return await action();
   } catch (error) {
@@ -242,10 +238,7 @@ async function assertNoHumanChallenge(
   }
 }
 
-export function humanChallengeReason(
-  html: string,
-  isLoginEntry: boolean,
-): string | undefined {
+export function humanChallengeReason(html: string, isLoginEntry: boolean): string | undefined {
   const text = html.replace(/<[^>]+>/gu, " ").replace(/\s+/gu, " ");
   const challenges: [RegExp, string][] = [
     [/(?:CAPTCHA|私はロボットではありません)/iu, "captcha"],

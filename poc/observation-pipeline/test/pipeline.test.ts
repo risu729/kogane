@@ -9,12 +9,7 @@ import { openStore, type Store } from "../src/store.ts";
 import type { Parser } from "../src/types.ts";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
-const SBI_RUN = join(
-  FIXTURES,
-  "sbi-securities",
-  "2026-08-20",
-  "run-20260820-210000-poc01",
-);
+const SBI_RUN = join(FIXTURES, "sbi-securities", "2026-08-20", "run-20260820-210000-poc01");
 
 function tempStore(): Store {
   return openStore(mkdtempSync(join(tmpdir(), "kogane-poc-")));
@@ -70,9 +65,7 @@ describe("ingestion", () => {
         artifacts: [{ dataset: "some-dataset", sha256, bytes: 2 }],
       });
     writeFileSync(join(directory, "manifest.json"), manifest("f".repeat(64)));
-    expect(() => ingestRunDirectory(store, directory, source)).toThrow(
-      /does not match manifest/u,
-    );
+    expect(() => ingestRunDirectory(store, directory, source)).toThrow(/does not match manifest/u);
     // The failure must not leave a run row, or every later attempt at this run
     // would be a silent no-op.
     expect(count(store, "fetch_runs")).toBe(0);
@@ -98,9 +91,7 @@ describe("ingestion", () => {
         artifacts: [{ dataset: "present" }, { dataset: "absent" }],
       }),
     );
-    expect(() =>
-      ingestRunDirectory(store, directory, { id: "x", provider: "X" }),
-    ).toThrow();
+    expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow();
     expect(count(store, "fetch_runs")).toBe(0);
     expect(count(store, "fetch_artifacts")).toBe(0);
   });
@@ -118,9 +109,9 @@ describe("ingestion", () => {
         artifacts: [{ dataset: "ds" }, { dataset: "ds" }],
       }),
     );
-    expect(() =>
-      ingestRunDirectory(store, directory, { id: "x", provider: "X" }),
-    ).toThrow(/more than once/u);
+    expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
+      /more than once/u,
+    );
     expect(count(store, "fetch_runs")).toBe(0);
   });
 
@@ -154,7 +145,7 @@ function fakeParser(version: string, marker: string): Parser {
     name: "fake-parser",
     version,
     accepts: (artifact) => artifact.sourceId === "fake",
-    parse: (_bytes, artifact) => ({
+    parse: (_bytes, _artifact) => ({
       observations: [
         {
           kind: "transaction",
@@ -232,9 +223,10 @@ describe("parse runs", () => {
     };
     const summary = runParsers(store, [broken]);
     expect(summary.errors).toBe(1);
-    const run = store.db
-      .query("SELECT status, error FROM parse_runs")
-      .get() as { status: string; error: string };
+    const run = store.db.query("SELECT status, error FROM parse_runs").get() as {
+      status: string;
+      error: string;
+    };
     expect(run.status).toBe("error");
     expect(run.error).toBe("boom");
     expect(count(store, "transaction_observations")).toBe(0);
@@ -327,9 +319,7 @@ describe("parse runs", () => {
     expect(summary.parsed).toBe(0);
     // Neither a truncated observation set nor a run claiming success.
     expect(count(store, "transaction_observations")).toBe(0);
-    const run = store.db
-      .query("SELECT status FROM parse_runs")
-      .get() as { status: string };
+    const run = store.db.query("SELECT status FROM parse_runs").get() as { status: string };
     expect(run.status).toBe("error");
   });
 

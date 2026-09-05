@@ -21,7 +21,9 @@ function parseArgs(args: string[]): Options {
   const sourceId = values.get("source");
   const filePath = values.get("file");
   if (!sourceId || !filePath) {
-    throw new Error("usage: ingest-file.sh --source <source-id> --file <path> [--media-type <type>]");
+    throw new Error(
+      "usage: ingest-file.sh --source <source-id> --file <path> [--media-type <type>]",
+    );
   }
   return {
     sourceId,
@@ -52,8 +54,9 @@ async function requestJson(
     redirect: "error",
     signal: AbortSignal.timeout(60_000),
   });
-  const result = await response.json() as Record<string, unknown>;
-  if (!response.ok) throw new Error(`${response.status}: ${String(result.error ?? "request_failed")}`);
+  const result = (await response.json()) as Record<string, unknown>;
+  if (!response.ok)
+    throw new Error(`${response.status}: ${String(result.error ?? "request_failed")}`);
   return result;
 }
 
@@ -101,7 +104,7 @@ try {
     signal: AbortSignal.timeout(300_000),
   });
   if (!put.ok) {
-    const result = await put.json() as Record<string, unknown>;
+    const result = (await put.json()) as Record<string, unknown>;
     throw new Error(`${put.status}: ${String(result.error ?? "object_upload_failed")}`);
   }
   if (put.status === 201) acceptedArtifactCount = 1;
@@ -114,10 +117,12 @@ try {
     payloadFidelity: "unknown",
     containerKind: "single",
     lineageDisposition: "not_applicable",
-    ...(declaredMediaType ? {
-      declaredMediaType,
-      mediaTypeBasis: options.mediaType ? "operator" : "file_metadata",
-    } : {}),
+    ...(declaredMediaType
+      ? {
+          declaredMediaType,
+          mediaTypeBasis: options.mediaType ? "operator" : "file_metadata",
+        }
+      : {}),
     fetchedAtMs: modifiedAtMs,
     fetchedAtBasis: "file_metadata",
     file: {
@@ -154,13 +159,15 @@ try {
     externalAttemptId: `attempt-${sessionId}-${attemptStartedAtMs}`,
     startedAtMs: attemptStartedAtMs,
   });
-  console.log(JSON.stringify({
-    sourceId: options.sourceId,
-    runId,
-    artifactId: artifact.artifactId,
-    inventoryId: seal.inventoryId,
-    sealed: seal.sealed,
-  }));
+  console.log(
+    JSON.stringify({
+      sourceId: options.sourceId,
+      runId,
+      artifactId: artifact.artifactId,
+      inventoryId: seal.inventoryId,
+      sealed: seal.sealed,
+    }),
+  );
 } catch (error) {
   const transferred = acceptedArtifactCount + reusedArtifactCount;
   try {

@@ -5,10 +5,7 @@ import test from "node:test";
 
 import { WebSocketServer } from "ws";
 
-import {
-  parseConnectAuthority,
-  startConnectRelay,
-} from "../container/connect-relay.mjs";
+import { parseConnectAuthority, startConnectRelay } from "../container/connect-relay.mjs";
 
 function readThrough(socket, delimiter) {
   return new Promise((resolve, reject) => {
@@ -108,9 +105,7 @@ test("HTTP CONNECT relays binary bytes over an authenticated WebSocket", async (
     await once(client, "connect");
     client.write(
       Buffer.concat([
-        Buffer.from(
-          "CONNECT ALLOWED.example:443 HTTP/1.1\r\nHost: ALLOWED.example:443\r\n\r\n",
-        ),
+        Buffer.from("CONNECT ALLOWED.example:443 HTTP/1.1\r\nHost: ALLOWED.example:443\r\n\r\n"),
         payload,
       ]),
     );
@@ -140,9 +135,7 @@ test("HTTP CONNECT rejects targets outside the allowlist before opening WSS", as
   const client = net.connect(relay.port, "127.0.0.1");
   try {
     await once(client, "connect");
-    client.write(
-      "CONNECT denied.example:443 HTTP/1.1\r\nHost: denied.example:443\r\n\r\n",
-    );
+    client.write("CONNECT denied.example:443 HTTP/1.1\r\nHost: denied.example:443\r\n\r\n");
     const response = await readThrough(client, Buffer.from("\r\n\r\n"));
     assert.match(response.header.toString("ascii"), /^HTTP\/1\.1 403 /u);
   } finally {
@@ -171,9 +164,7 @@ test("HTTP CONNECT reports an upstream WebSocket failure", async () => {
   const client = net.connect(relay.port, "127.0.0.1");
   try {
     await once(client, "connect");
-    client.write(
-      "CONNECT allowed.example:443 HTTP/1.1\r\nHost: allowed.example:443\r\n\r\n",
-    );
+    client.write("CONNECT allowed.example:443 HTTP/1.1\r\nHost: allowed.example:443\r\n\r\n");
     const response = await readThrough(client, Buffer.from("\r\n\r\n"));
     assert.match(response.header.toString("ascii"), /^HTTP\/1\.1 502 /u);
   } finally {

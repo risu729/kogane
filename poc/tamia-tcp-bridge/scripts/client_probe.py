@@ -176,9 +176,13 @@ class VpassProbe:
         follow = self.session.get(next_url, allow_redirects=True)
         if not 200 <= follow.status_code < 300:
             raise RuntimeError(f"login redirect failed with {follow.status_code}")
-        authenticated_top = self.session.get(BASE_URL + MYPAGE_PATH, allow_redirects=True)
+        authenticated_top = self.session.get(
+            BASE_URL + MYPAGE_PATH, allow_redirects=True
+        )
         if not 200 <= authenticated_top.status_code < 300:
-            raise RuntimeError(f"authenticated top failed with {authenticated_top.status_code}")
+            raise RuntimeError(
+                f"authenticated top failed with {authenticated_top.status_code}"
+            )
         self.authenticated = True
         return summary
 
@@ -216,7 +220,9 @@ class VpassProbe:
         response = self.api_post(CARD_LIST_PATH, {"displayDropdownList": "enable"})
         value: Any = response.json()
         bean = (
-            value.get("body", {}).get("content", {}).get("DropdownListInitDisplayServiceBean", {})
+            value.get("body", {})
+            .get("content", {})
+            .get("DropdownListInitDisplayServiceBean", {})
             if isinstance(value, dict)
             else {}
         )
@@ -243,7 +249,11 @@ class VpassProbe:
                 pairs = current.get(field, []) if isinstance(current, dict) else []
                 for pair in pairs:
                     candidate = pair.get("value") if isinstance(pair, dict) else None
-                    if isinstance(candidate, str) and len(candidate) == 6 and candidate.isdigit():
+                    if (
+                        isinstance(candidate, str)
+                        and len(candidate) == 6
+                        and candidate.isdigit()
+                    ):
                         months.add(candidate)
         return {"cardCount": len(card_values), "availableMonthCount": len(months)}
 

@@ -30,10 +30,7 @@ const METRIC_FIELDS: readonly { field: string; metric: string }[] = [
 ];
 
 /** Copy an object without the child collection the caller walks separately. */
-function withoutChild(
-  value: Record<string, unknown>,
-  child: string,
-): Record<string, unknown> {
+function withoutChild(value: Record<string, unknown>, child: string): Record<string, unknown> {
   const copy: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
     if (key !== child) copy[key] = entry;
@@ -46,10 +43,7 @@ export const sbiForeignCashBalances: Parser = {
   version: "0.2.0",
 
   accepts(artifact: ArtifactMeta): boolean {
-    return (
-      artifact.sourceId === "sbi-securities" &&
-      artifact.dataset === "foreign-cash-balances"
-    );
+    return artifact.sourceId === "sbi-securities" && artifact.dataset === "foreign-cash-balances";
   },
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
@@ -57,9 +51,7 @@ export const sbiForeignCashBalances: Parser = {
     const list = isObject(body) ? body["listForeignScheduleCashBalances"] : undefined;
     const accounts = isObject(list) ? list["foreignCashBalances"] : undefined;
     if (!Array.isArray(accounts)) {
-      throw new Error(
-        `artifact ${artifact.sha256} is not a GetForeignCashBalance data object`,
-      );
+      throw new Error(`artifact ${artifact.sha256} is not a GetForeignCashBalance data object`);
     }
     const warnings: string[] = [];
     const observations: Observation[] = [];
@@ -104,13 +96,10 @@ export const sbiForeignCashBalances: Parser = {
         schedule.forEach((row: unknown, rowIndex: number) => {
           const locator = `${currencyLocator}.foreignScheduleCashBalances[${rowIndex}]`;
           if (!isObject(row)) {
-            warnings.push(
-              `${locator}: expected an object, got ${typeof row}; skipped`,
-            );
+            warnings.push(`${locator}: expected an object, got ${typeof row}; skipped`);
             return;
           }
-          const asOf =
-            typeof row["businessDate"] === "string" ? row["businessDate"] : undefined;
+          const asOf = typeof row["businessDate"] === "string" ? row["businessDate"] : undefined;
           // Fields of the enclosing account and currency entry are carried on
           // every observation, so an unmodelled sibling (a balance the schema
           // does not know about yet) is never lost.

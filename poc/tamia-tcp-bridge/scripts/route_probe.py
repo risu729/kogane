@@ -21,9 +21,7 @@ def main() -> int:
     )
     trace_response.raise_for_status()
     trace = dict(
-        line.split("=", 1)
-        for line in trace_response.text.splitlines()
-        if "=" in line
+        line.split("=", 1) for line in trace_response.text.splitlines() if "=" in line
     )
     ipify_response = session.get(
         "https://api.ipify.org?format=json",

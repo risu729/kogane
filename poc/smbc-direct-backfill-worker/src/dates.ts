@@ -10,9 +10,9 @@ export function validateDate(value: string, name: string): string {
   const day = Number(dayText);
   const date = new Date(Date.UTC(year, month - 1, day));
   if (
-    date.getUTCFullYear() !== year
-    || date.getUTCMonth() !== month - 1
-    || date.getUTCDate() !== day
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
   ) {
     throw new Error(`${name}_invalid`);
   }
@@ -38,9 +38,7 @@ export function monthRanges(from: string, to: string): DateRange[] {
     const year = Number(yearText);
     const month = Number(monthText);
     const nextMonth = new Date(Date.UTC(year, month, 1));
-    const monthEnd = new Date(nextMonth.getTime() - 24 * 60 * 60 * 1000)
-      .toISOString()
-      .slice(0, 10);
+    const monthEnd = new Date(nextMonth.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const end = monthEnd < last ? monthEnd : last;
     ranges.push({ start: cursor, end });
     cursor = nextMonth.toISOString().slice(0, 10);

@@ -8,21 +8,21 @@ trap 'rm -rf -- "${test_dir}"' EXIT
 mock_bin="${test_dir}/bin"
 mkdir -m 700 -- "${mock_bin}"
 mock_openssl="${mock_bin}/openssl"
-printf '%s\n' \
-  '#!/usr/bin/env bash' \
-  '[[ "$1" == "rand" && "$2" == "-hex" && "$3" == "32" ]] || exit 96' \
-  'printf "%s\\n" "${MOCK_GENERATED_TOKEN}"' \
-  >"${mock_openssl}"
+cat >"${mock_openssl}" <<'MOCK_OPENSSL'
+#!/usr/bin/env bash
+[[ "$1" == "rand" && "$2" == "-hex" && "$3" == "32" ]] || exit 96
+printf "%s\\n" "${MOCK_GENERATED_TOKEN}"
+MOCK_OPENSSL
 chmod 700 -- "${mock_openssl}"
 
 mock_wrangler="${mock_bin}/wrangler"
-printf '%s\n' \
-  '#!/usr/bin/env bash' \
-  '[[ "$1" == "secret" && "$2" == "put" && "$3" == "ADMIN_TRIGGER_TOKEN" ]] || exit 95' \
-  'umask 077' \
-  'cat >"${MOCK_CAPTURE_FILE}"' \
-  '[[ "${MOCK_WRANGLER_FAIL:-0}" == "0" ]]' \
-  >"${mock_wrangler}"
+cat >"${mock_wrangler}" <<'MOCK_WRANGLER'
+#!/usr/bin/env bash
+[[ "$1" == "secret" && "$2" == "put" && "$3" == "ADMIN_TRIGGER_TOKEN" ]] || exit 95
+umask 077
+cat >"${MOCK_CAPTURE_FILE}"
+[[ "${MOCK_WRANGLER_FAIL:-0}" == "0" ]]
+MOCK_WRANGLER
 chmod 700 -- "${mock_wrangler}"
 
 token_dir="${test_dir}/secrets"

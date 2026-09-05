@@ -18,32 +18,29 @@ const CASES = [
 describe("SBI Shinsei captured response schemas", () => {
   for (const [fixtureName, schema] of CASES) {
     test(`accepts sanitized ${fixtureName}`, async () => {
-      const fixtures = await Bun.file(fixturePath).json() as Record<string, unknown>;
+      const fixtures = (await Bun.file(fixturePath).json()) as Record<string, unknown>;
       expect(validateKnownResponse(schema, fixtures[fixtureName])).toBeDefined();
     });
   }
 
   test("rejects an unknown field before data is stored", async () => {
-    const fixtures = await Bun.file(fixturePath).json() as Record<string, unknown>;
+    const fixtures = (await Bun.file(fixturePath).json()) as Record<string, unknown>;
     const source = fixtures.topBalances;
     if (typeof source !== "object" || source === null || Array.isArray(source)) {
       throw new Error("fixture is not an object");
     }
     const changed = { ...source, unexpected: true };
-    expect(() => validateKnownResponse(
-      "sbi-shinsei-top-balances-v1",
-      changed,
-    )).toThrow(UnknownResponseShapeError);
-  });
-
-  test("unknown schemas are always rejected", () => {
-    expect(() => validateKnownResponse("unknown", {})).toThrow(
+    expect(() => validateKnownResponse("sbi-shinsei-top-balances-v1", changed)).toThrow(
       UnknownResponseShapeError,
     );
   });
 
+  test("unknown schemas are always rejected", () => {
+    expect(() => validateKnownResponse("unknown", {})).toThrow(UnknownResponseShapeError);
+  });
+
   test("rotates an optional newToken from any known root header", async () => {
-    const fixtures = await Bun.file(fixturePath).json() as Record<string, unknown>;
+    const fixtures = (await Bun.file(fixturePath).json()) as Record<string, unknown>;
     const source = structuredClone(fixtures.topBalances);
     if (typeof source !== "object" || source === null || Array.isArray(source)) {
       throw new Error("fixture is not an object");
@@ -53,16 +50,16 @@ describe("SBI Shinsei captured response schemas", () => {
       throw new Error("fixture header is not an object");
     }
     (header as Record<string, unknown>).newToken = "synthetic-rotated-token";
-    const validated = validateKnownResponse(
-      "sbi-shinsei-top-balances-v1",
-      source,
-    );
+    const validated = validateKnownResponse("sbi-shinsei-top-balances-v1", source);
     const rotations: string[] = [];
-    rotateCsrfTokenIfPresent({
-      getAuthorization: () => "synthetic-authorization",
-      getCsrfToken: () => "synthetic-old-token",
-      rotateCsrfToken: (token) => rotations.push(token),
-    }, validated);
+    rotateCsrfTokenIfPresent(
+      {
+        getAuthorization: () => "synthetic-authorization",
+        getCsrfToken: () => "synthetic-old-token",
+        rotateCsrfToken: (token) => rotations.push(token),
+      },
+      validated,
+    );
     expect(rotations).toEqual(["synthetic-rotated-token"]);
   });
 });

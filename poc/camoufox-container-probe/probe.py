@@ -113,8 +113,9 @@ with Camoufox(**options) as browser:
         login_response = None
         try:
             with page.expect_response(
-                lambda response: urlsplit(response.url).path
-                == "/memapi/jaxrs/xt_login/agree/v1",
+                lambda response: (
+                    urlsplit(response.url).path == "/memapi/jaxrs/xt_login/agree/v1"
+                ),
                 timeout=30_000,
             ) as response_info:
                 page.get_by_role("button", name="ログイン", exact=True).click()

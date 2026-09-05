@@ -33,23 +33,18 @@ export async function collectSbiShinsei(options: {
     if (handoff.ok !== true) {
       throw new BrowserCollectionError(handoff.stage, handoff.authenticationAttempted);
     }
-    const result = parseCollectionResult(
-      handoffJson,
-      options.now?.() ?? new Date(),
-    );
+    const result = parseCollectionResult(handoffJson, options.now?.() ?? new Date());
     return { artifacts: result.artifacts, failures: result.failures };
   } finally {
     credential.powerDirectPassword = "";
   }
 }
 
-function parseHandoffEnvelope(value: unknown):
-  | { ok: true }
-  | { ok: false; stage: string; authenticationAttempted: boolean } {
+function parseHandoffEnvelope(
+  value: unknown,
+): { ok: true } | { ok: false; stage: string; authenticationAttempted: boolean } {
   if (typeof value !== "string" || value.length > 10 * 1024 * 1024) {
-    throw new UnknownResponseShapeError(
-      "Browser collection handoff was not bounded JSON text",
-    );
+    throw new UnknownResponseShapeError("Browser collection handoff was not bounded JSON text");
   }
   let parsed: unknown;
   try {
@@ -69,11 +64,13 @@ function parseHandoffEnvelope(value: unknown):
     typeof record.authenticationAttempted === "boolean" &&
     Object.keys(record).length === 3
   ) {
-    return { ok: false, stage: record.stage, authenticationAttempted: record.authenticationAttempted };
+    return {
+      ok: false,
+      stage: record.stage,
+      authenticationAttempted: record.authenticationAttempted,
+    };
   }
-  throw new UnknownResponseShapeError(
-    "Browser collection handoff had an unknown envelope",
-  );
+  throw new UnknownResponseShapeError("Browser collection handoff had an unknown envelope");
 }
 
 function assertProductionRoutes(): void {

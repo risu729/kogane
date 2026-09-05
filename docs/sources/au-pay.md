@@ -21,13 +21,13 @@ Ponta と au PAY カードは別台帳に分離する。Ponta はポイント残
 - app の read 候補は残高・残高内訳、コード／ネット／プリペイド利用、チャージ、送金・受取、出金、返金・調整、auかんたん決済。支払、チャージ、送金、出金、受取 QR/URL 作成は write であり実行しない。
 - [App Store](https://apps.apple.com/jp/app/id862800897) と [Google Play](https://play.google.com/store/apps/details?id=jp.auone.wallet) は、残高、利用履歴、Ponta、au PAY カード情報、auかんたん決済情報を一つの UI に集約する。Android package は `jp.auone.wallet`。一画面でも backend/ledger が同一とはみなさない。
 
-| 経路 | 確認できた read | 制約・扱い |
-|---|---|---|
-| au PAY app | 残高、履歴、内訳、ポイント、カード概要、かんたん決済、送金先履歴等 | 機能により本人確認・端末状態。write UI 隣接。Web 非対象者は app-only |
-| au PAY Web | wallet/easy-payment の月別履歴・詳細 | au／UQ mobile／povo1.0 契約者のみ。対象者には app-only でない |
-| PC download | `全てのサービスの明細` | PC browser。公開説明は Excel 内の希望ファイルを選ぶとだけ記載 |
-| au Ponta ポータル | point 残高、期限、加算／利用、通常／限定切替 | wallet export ではなく別 reward ledger |
-| au PAY カード会員サイト/app | カード請求・利用明細・利用可能額・PDF/CSV | 別 credit source |
+| 経路                        | 確認できた read                                                    | 制約・扱い                                                           |
+| --------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| au PAY app                  | 残高、履歴、内訳、ポイント、カード概要、かんたん決済、送金先履歴等 | 機能により本人確認・端末状態。write UI 隣接。Web 非対象者は app-only |
+| au PAY Web                  | wallet/easy-payment の月別履歴・詳細                               | au／UQ mobile／povo1.0 契約者のみ。対象者には app-only でない        |
+| PC download                 | `全てのサービスの明細`                                             | PC browser。公開説明は Excel 内の希望ファイルを選ぶとだけ記載        |
+| au Ponta ポータル           | point 残高、期限、加算／利用、通常／限定切替                       | wallet export ではなく別 reward ledger                               |
+| au PAY カード会員サイト/app | カード請求・利用明細・利用可能額・PDF/CSV                          | 別 credit source                                                     |
 
 Web 対象判定に電話番号・契約情報を保存しない。公式 Web に既存状態で履歴画面が出るかを boolean capability とし、対象外表示なら app route へ分岐する。
 
@@ -146,14 +146,14 @@ HTTP methodだけでread/writeを決めない。login/export POSTはread候補�
 
 ## 実行環境適性
 
-| 環境 | 適性 | 理由 |
-|---|---|---|
-| Cloudflare Workers（fetch） | 低〜条件付き | export parser/reconciliation は適するが WebAuthn/MFA/CAPTCHA/device bootstrap不可。cookie/token/PIIをKV/logへ置かない |
-| Cloudflare Browser Run | 条件付き | [session reuse](https://developers.cloudflare.com/browser-run/features/reuse-sessions/) と [storage state](https://developers.cloudflare.com/browser-run/playwright/) は C候補。ただし公式docs上 bot識別され、CAPTCHA/passkey/QR/端末条件を解決しない |
-| Cloudflare Containers | 条件付きで適 | [公式](https://developers.cloudflare.com/containers/platform-details/architecture/) は Linux/amd64 VM。browser/parserを包装できるがMFA/passkey、session永続化、地域/IP変化は別問題 |
-| OCI image | 適 | [OCI spec](https://github.com/opencontainers/image-spec/blob/main/spec.md) でdigest pin。secret/sessionをimage/envへ焼かずruntime store、tmpfs、egress allowlist |
-| Kubernetes | 過剰だが適 | [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) は重複/欠落し得るためidempotent、`Forbid`、digest pin、read-only FS、NetworkPolicy、1 account/Pod |
-| 管理下 Android 実機 | 調査に最適、定常は高コスト | 正規APK、OIDC/host/schema、内訳/送金/Ponta route確認に必要。UI automationは端末、passkey/Integrity、write UI隣接でD/cost4--5 |
+| 環境                        | 適性                       | 理由                                                                                                                                                                                                                                                  |
+| --------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare Workers（fetch） | 低〜条件付き               | export parser/reconciliation は適するが WebAuthn/MFA/CAPTCHA/device bootstrap不可。cookie/token/PIIをKV/logへ置かない                                                                                                                                 |
+| Cloudflare Browser Run      | 条件付き                   | [session reuse](https://developers.cloudflare.com/browser-run/features/reuse-sessions/) と [storage state](https://developers.cloudflare.com/browser-run/playwright/) は C候補。ただし公式docs上 bot識別され、CAPTCHA/passkey/QR/端末条件を解決しない |
+| Cloudflare Containers       | 条件付きで適               | [公式](https://developers.cloudflare.com/containers/platform-details/architecture/) は Linux/amd64 VM。browser/parserを包装できるがMFA/passkey、session永続化、地域/IP変化は別問題                                                                    |
+| OCI image                   | 適                         | [OCI spec](https://github.com/opencontainers/image-spec/blob/main/spec.md) でdigest pin。secret/sessionをimage/envへ焼かずruntime store、tmpfs、egress allowlist                                                                                      |
+| Kubernetes                  | 過剰だが適                 | [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) は重複/欠落し得るためidempotent、`Forbid`、digest pin、read-only FS、NetworkPolicy、1 account/Pod                                                                     |
+| 管理下 Android 実機         | 調査に最適、定常は高コスト | 正規APK、OIDC/host/schema、内訳/送金/Ponta route確認に必要。UI automationは端末、passkey/Integrity、write UI隣接でD/cost4--5                                                                                                                          |
 
 ## 共通 rubric による評価
 
@@ -166,15 +166,15 @@ PR #5 `docs/source-research.md` の定義をそのまま使用する。
 - E: manual capture remains safe default
 - Cost: 1 = small wrapper、5 = device-bound/adversarial
 
-| 経路 | Level | Cost | 判断 |
-|---|---:|---:|---|
-| 公式明細をPCで手動downloadしoffline import | **E** | **1** | 最も安全。exact format/retention/schemaはlive確認 |
-| Web対象契約の既存sessionから履歴/export replay | C candidate | 3 | bootstrap後readはplausible。MFA/WebAuthn/CAPTCHA、renewal、download transport未確認 |
-| Web画面UI automation | D | 4 | DOM/JS/login protection、可変merchant、write UI依存 |
-| Web非対象accountのapp read | D | 4 | full device/app transportまたはUI automation必要 |
-| au Ponta portal残高/履歴 | C candidate | 3 | Webあり、公式scheduled API/exportなし |
-| 公開店舗検索API | 対象外 | 1 | 個人財務台帳を取得しないため評価へ算入しない |
-| family安全既定 | **E** | **1** | 確実なのはmanual export。契約別研究候補はC/D |
+| 経路                                           |       Level |  Cost | 判断                                                                                |
+| ---------------------------------------------- | ----------: | ----: | ----------------------------------------------------------------------------------- |
+| 公式明細をPCで手動downloadしoffline import     |       **E** | **1** | 最も安全。exact format/retention/schemaはlive確認                                   |
+| Web対象契約の既存sessionから履歴/export replay | C candidate |     3 | bootstrap後readはplausible。MFA/WebAuthn/CAPTCHA、renewal、download transport未確認 |
+| Web画面UI automation                           |           D |     4 | DOM/JS/login protection、可変merchant、write UI依存                                 |
+| Web非対象accountのapp read                     |           D |     4 | full device/app transportまたはUI automation必要                                    |
+| au Ponta portal残高/履歴                       | C candidate |     3 | Webあり、公式scheduled API/exportなし                                               |
+| 公開店舗検索API                                |      対象外 |     1 | 個人財務台帳を取得しないため評価へ算入しない                                        |
+| family安全既定                                 |       **E** | **1** | 確実なのはmanual export。契約別研究候補はC/D                                        |
 
 A は個人 wallet 向け documented scheduled API がなく不適。B は現行 read API、renew/reuse、schema stability の証拠がなく不適。historical ofxproxy/public store-searchを根拠にしない。
 

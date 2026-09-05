@@ -1,9 +1,5 @@
 import { SonyBankDiagnostics, SonyBankError } from "./diagnostics";
-import type {
-  JsonObject,
-  RawArtifact,
-  SonyBankCredential,
-} from "./types";
+import type { JsonObject, RawArtifact, SonyBankCredential } from "./types";
 
 const ORIGIN = "https://sonybank.jp";
 const LOGIN_PAGE = `${ORIGIN}/pages/db/dbca0100/input/`;
@@ -13,12 +9,10 @@ const WALLET_CONFIRM_PAGE = `${ORIGIN}/pages/ja/jada160a/confirm1/`;
 const LOGIN_PATH = "/custom-web00/dbca/cust-web/to-customers/login";
 const CSRF_PATH = "/custom-web00/dbca/csrf-token/get";
 const GROSS_BALANCE_PATH = "/custom-web00/dcba/cust-web/gross-balance/acq";
-const HISTORY_PATH =
-  "/custom-web00/eaba/cust-web/ordinary-deposit-transaction-histories";
+const HISTORY_PATH = "/custom-web00/eaba/cust-web/ordinary-deposit-transaction-histories";
 const HISTORY_PAGER_PATH =
   "/custom-web00/eaba/cust-web/ordinary-deposit-transaction-histories-pager";
-const HISTORY_CSV_PATH =
-  "/custom-web00/eaba/ordinary-deposit-transaction-histories/csv/load";
+const HISTORY_CSV_PATH = "/custom-web00/eaba/ordinary-deposit-transaction-histories/csv/load";
 const WALLET_SSO_PATH = "/custom-web00/jada/debit-sso/login-usage-dtl-inq";
 const WALLET_GATEWAY_URL = "https://igw.sonybank.jp/vcfb/vcfb02001";
 const WALLET_CARD_ORIGIN = "https://dc.sonybank.jp";
@@ -43,10 +37,7 @@ interface RawJsonResponse {
   json: JsonObject;
 }
 
-type Fetcher = (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => Promise<Response>;
+type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 interface RequestContext {
   area: "db" | "da" | "ea" | "ja";
@@ -80,8 +71,9 @@ export class CookieBag {
 
   absorb(headers: Headers): void {
     const extended = headers as Headers & { getSetCookie?: () => string[] };
-    const sources = (extended.getSetCookie?.() ?? [headers.get("set-cookie")])
-      .flatMap((value) => splitSetCookie(value));
+    const sources = (extended.getSetCookie?.() ?? [headers.get("set-cookie")]).flatMap((value) =>
+      splitSetCookie(value),
+    );
     for (const source of sources) {
       const pair = source.split(";", 1)[0]?.trim();
       const separator = pair?.indexOf("=") ?? -1;
@@ -91,9 +83,7 @@ export class CookieBag {
   }
 
   header(): string {
-    return [...this.#values]
-      .map(([name, value]) => `${name}=${value}`)
-      .join("; ");
+    return [...this.#values].map(([name, value]) => `${name}=${value}`).join("; ");
   }
 
   names(): string[] {
@@ -144,31 +134,59 @@ export async function collectSonyBank(options: {
   const client = new SonyBankClient(fetcher, options.credential, diagnostics);
   await diagnostics.stage("login", () => client.login());
 
-  const gross = await diagnostics.stage("gross-balance", async () => client.requestJson(
-    GROSS_BALANCE_PATH,
-    { branchNum: options.credential.branchNum, accountNum: options.credential.accountNum },
-    {
-      area: "da",
-      revision: await client.revision("da"),
-      pageUrl: DASHBOARD_PAGE,
-      screenId: "DAYA010AM1f",
-      eventId: "DAYA010AM1fE13",
-    },
-  ));
+  const gross = await diagnostics.stage("gross-balance", async () =>
+    client.requestJson(
+      GROSS_BALANCE_PATH,
+      { branchNum: options.credential.branchNum, accountNum: options.credential.accountNum },
+      {
+        area: "da",
+        revision: await client.revision("da"),
+        pageUrl: DASHBOARD_PAGE,
+        screenId: "DAYA010AM1f",
+        eventId: "DAYA010AM1fE13",
+      },
+    ),
+  );
 
-  const history = await diagnostics.stage("history", () => client.history("JPY", options.from, options.to), { currency: "JPY" });
-  const csv = history.transactionCount > 0
-    ? await diagnostics.stage("history-csv", () => client.historyCsv("JPY", options.from, options.to), { currency: "JPY", transactionCount: history.transactionCount })
-    : null;
-  if (!csv) diagnostics.record("EABA0600S1fE12:JPY", "skipped", { transactionCount: 0, reason: "zero_transactions" });
+  const history = await diagnostics.stage(
+    "history",
+    () => client.history("JPY", options.from, options.to),
+    { currency: "JPY" },
+  );
+  const csv =
+    history.transactionCount > 0
+      ? await diagnostics.stage(
+          "history-csv",
+          () => client.historyCsv("JPY", options.from, options.to),
+          { currency: "JPY", transactionCount: history.transactionCount },
+        )
+      : null;
+  if (!csv)
+    diagnostics.record("EABA0600S1fE12:JPY", "skipped", {
+      transactionCount: 0,
+      reason: "zero_transactions",
+    });
   const foreign = [];
   let foreignTransactionCount = 0;
   for (const currency of FOREIGN_CURRENCY_CODES) {
-    const currencyHistory = await diagnostics.stage("history", () => client.history(currency, options.from, options.to), { currency });
-    const currencyCsv = currencyHistory.transactionCount > 0
-      ? await diagnostics.stage("history-csv", () => client.historyCsv(currency, options.from, options.to), { currency, transactionCount: currencyHistory.transactionCount })
-      : null;
-    if (!currencyCsv) diagnostics.record(`EABA0600S1fE12:${currency}`, "skipped", { transactionCount: 0, reason: "zero_transactions" });
+    const currencyHistory = await diagnostics.stage(
+      "history",
+      () => client.history(currency, options.from, options.to),
+      { currency },
+    );
+    const currencyCsv =
+      currencyHistory.transactionCount > 0
+        ? await diagnostics.stage(
+            "history-csv",
+            () => client.historyCsv(currency, options.from, options.to),
+            { currency, transactionCount: currencyHistory.transactionCount },
+          )
+        : null;
+    if (!currencyCsv)
+      diagnostics.record(`EABA0600S1fE12:${currency}`, "skipped", {
+        transactionCount: 0,
+        reason: "zero_transactions",
+      });
     foreignTransactionCount += currencyHistory.transactionCount;
     foreign.push({ currency, history: currencyHistory, csv: currencyCsv });
   }
@@ -186,12 +204,16 @@ export async function collectSonyBank(options: {
       mediaType: "application/json",
       body: page.rawText,
     })),
-    ...(csv ? [{
-      dataset: "yen-history-csv",
-      filename: "yen-history.csv",
-      mediaType: csv.mediaType,
-      body: csv.body,
-    }] : []),
+    ...(csv
+      ? [
+          {
+            dataset: "yen-history-csv",
+            filename: "yen-history.csv",
+            mediaType: csv.mediaType,
+            body: csv.body,
+          },
+        ]
+      : []),
     ...foreign.flatMap(({ currency, history: currencyHistory, csv: currencyCsv }) => [
       ...currencyHistory.pages.map((page, index) => ({
         dataset: `foreign-history-${currency.toLowerCase()}-page-${String(index + 1).padStart(4, "0")}`,
@@ -199,12 +221,16 @@ export async function collectSonyBank(options: {
         mediaType: "application/json",
         body: page.rawText,
       })),
-      ...(currencyCsv ? [{
-        dataset: `foreign-history-${currency.toLowerCase()}-csv`,
-        filename: `foreign-history-${currency.toLowerCase()}.csv`,
-        mediaType: currencyCsv.mediaType,
-        body: currencyCsv.body,
-      }] : []),
+      ...(currencyCsv
+        ? [
+            {
+              dataset: `foreign-history-${currency.toLowerCase()}-csv`,
+              filename: `foreign-history-${currency.toLowerCase()}.csv`,
+              mediaType: currencyCsv.mediaType,
+              body: currencyCsv.body,
+            },
+          ]
+        : []),
     ]),
     ...wallet.months.map((month) => ({
       dataset: `wallet-history-${month.value.slice(0, 6)}`,
@@ -223,10 +249,7 @@ export async function collectSonyBank(options: {
         pageCount: history.pages.length,
         foreignCurrencyCount: FOREIGN_CURRENCY_CODES.length,
         foreignTransactionCount,
-        foreignPageCount: foreign.reduce(
-          (count, entry) => count + entry.history.pages.length,
-          0,
-        ),
+        foreignPageCount: foreign.reduce((count, entry) => count + entry.history.pages.length, 0),
         walletMonthCount: wallet.months.length,
         cookieNames: client.cookieNames(),
       }),
@@ -249,17 +272,31 @@ class SonyBankClient {
     this.fetcher = (input, init) => fetcher(input, init);
   }
 
-  private async request(operation: string, input: string | URL | Request, init?: RequestInit, metadata: { currency?: string; page?: number } = {}): Promise<Response> {
+  private async request(
+    operation: string,
+    input: string | URL | Request,
+    init?: RequestInit,
+    metadata: { currency?: string; page?: number } = {},
+  ): Promise<Response> {
     const started = Date.now();
     this.diagnostics.record(operation, "started", { ...metadata, phase: "request" });
     let response: Response;
-    try { response = await this.fetcher(input, init); }
-    catch {
-      this.diagnostics.record(operation, "failed", { ...metadata, phase: "request", reason: "network_error", durationMs: Date.now() - started });
+    try {
+      response = await this.fetcher(input, init);
+    } catch {
+      this.diagnostics.record(operation, "failed", {
+        ...metadata,
+        phase: "request",
+        reason: "network_error",
+        durationMs: Date.now() - started,
+      });
       throw new SonyBankError(operation, undefined, 0, "network_error");
     }
     this.diagnostics.record(operation, response.ok ? "completed" : "failed", {
-      ...metadata, phase: "request", httpStatus: response.status, durationMs: Date.now() - started,
+      ...metadata,
+      phase: "request",
+      httpStatus: response.status,
+      durationMs: Date.now() - started,
       ...(response.ok ? {} : { reason: "http_error" }),
     });
     return response;
@@ -290,18 +327,14 @@ class SonyBankClient {
       throw new Error("Sony Bank did not issue CSRF and FSID");
     }
 
-    const login = await this.requestJson(
-      LOGIN_PATH,
-      this.credential,
-      {
-        area: "db",
-        revision: dbRevision,
-        pageUrl: LOGIN_PAGE,
-        screenId: "DBCA0100I1f",
-        eventId: "DBCA0100I1fE15",
-        providerKey: "CustomAuth",
-      },
-    );
+    const login = await this.requestJson(LOGIN_PATH, this.credential, {
+      area: "db",
+      revision: dbRevision,
+      pageUrl: LOGIN_PAGE,
+      screenId: "DBCA0100I1f",
+      eventId: "DBCA0100I1fE15",
+      providerKey: "CustomAuth",
+    });
     assertNoErrors("login", login.json);
     if (!Array.isArray(login.json.accountInfo) || login.json.accountInfo.length === 0) {
       throw new Error("Sony Bank login returned no account information");
@@ -311,7 +344,8 @@ class SonyBankClient {
   async revision(area: "db" | "da" | "ea" | "ja"): Promise<string> {
     const cached = this.#revisions.get(area);
     if (cached) return cached;
-    const response = await this.request(`revision-${area}`,
+    const response = await this.request(
+      `revision-${area}`,
       `${ORIGIN}/pages/config/revisions/${area}/revision.json`,
       { headers: { accept: "application/json" } },
     );
@@ -334,12 +368,17 @@ class SonyBankClient {
     includeCsrf = true,
   ): Promise<RawJsonResponse> {
     const headers = this.headers(context, includeCsrf);
-    const response = await this.request(context.eventId, `${ORIGIN}${path}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      redirect: "manual",
-    }, context);
+    const response = await this.request(
+      context.eventId,
+      `${ORIGIN}${path}`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        redirect: "manual",
+      },
+      context,
+    );
     this.#cookies.absorb(response.headers);
     const nextCsrf = response.headers.get("bff-csrf");
     if (nextCsrf) this.#csrf = nextCsrf;
@@ -360,11 +399,7 @@ class SonyBankClient {
     return { rawText, json };
   }
 
-  async history(
-    currency: string,
-    from: string,
-    to: string,
-  ): Promise<HistoryCollection> {
+  async history(currency: string, from: string, to: string): Promise<HistoryCollection> {
     const revision = await this.revision("ea");
     const pages: RawJsonResponse[] = [];
     let acquisitionStart = 1;
@@ -399,11 +434,18 @@ class SonyBankClient {
       pages.push(page);
       const pageInfo = validateHistoryPage(page.json, pageIndex, declaredTotal);
       this.diagnostics.record(first ? "EABA0600S1fE10" : "EABA0600S1fE11", "completed", {
-        currency, page: pageIndex + 1, rowCount: pageInfo.rowCount, transactionCount: pageInfo.total,
+        currency,
+        page: pageIndex + 1,
+        rowCount: pageInfo.rowCount,
+        transactionCount: pageInfo.total,
       });
       declaredTotal = pageInfo.total;
       if (pageInfo.terminal) {
-        this.diagnostics.record("history", "completed", { currency, transactionCount: declaredTotal, pageCount: pages.length });
+        this.diagnostics.record("history", "completed", {
+          currency,
+          transactionCount: declaredTotal,
+          pageCount: pages.length,
+        });
         return {
           pages,
           transactionCount: declaredTotal,
@@ -426,20 +468,24 @@ class SonyBankClient {
       screenId: "EABA0600S1f",
       eventId: "EABA0600S1fE12",
     };
-    const response = await this.request(`${context.eventId}:${currency}`, `${ORIGIN}${HISTORY_CSV_PATH}`, {
-      method: "POST",
-      headers: this.headers(context, true),
-      body: JSON.stringify({
-        branchNum: this.credential.branchNum,
-        accountNum: this.credential.accountNum,
-        currencyCd: currency,
-        inquiryStrtdtCat: from,
-        inquiryEnddtCat: to,
-        sortSelect: "00001",
-        detailDispSg: "1",
-      }),
-      redirect: "manual",
-    });
+    const response = await this.request(
+      `${context.eventId}:${currency}`,
+      `${ORIGIN}${HISTORY_CSV_PATH}`,
+      {
+        method: "POST",
+        headers: this.headers(context, true),
+        body: JSON.stringify({
+          branchNum: this.credential.branchNum,
+          accountNum: this.credential.accountNum,
+          currencyCd: currency,
+          inquiryStrtdtCat: from,
+          inquiryEnddtCat: to,
+          sortSelect: "00001",
+          detailDispSg: "1",
+        }),
+        redirect: "manual",
+      },
+    );
     this.#cookies.absorb(response.headers);
     const nextCsrf = response.headers.get("bff-csrf");
     if (nextCsrf) this.#csrf = nextCsrf;
@@ -552,7 +598,10 @@ class SonyBankClient {
         throw new Error("Sony Bank WALLET selected month mismatch");
       }
       artifacts.push({ ...month, html: sanitizeWalletHtml(html) });
-      this.diagnostics.record("wallet-statement", "completed", { page: artifacts.length, pageCount: months.length });
+      this.diagnostics.record("wallet-statement", "completed", {
+        page: artifacts.length,
+        pageCount: months.length,
+      });
     }
     return { months: artifacts };
   }
@@ -592,10 +641,13 @@ export function validateHistoryPage(
   pageIndex: number,
   expectedTotal: number | null,
 ): { rowCount: number; total: number; terminal: boolean } {
-  const rowCount = Array.isArray(json.transactionHistInfo)
-    ? json.transactionHistInfo.length
-    : null;
-  if (rowCount === null || rowCount > PAGE_SIZE || !Number.isSafeInteger(pageIndex) || pageIndex < 0) {
+  const rowCount = Array.isArray(json.transactionHistInfo) ? json.transactionHistInfo.length : null;
+  if (
+    rowCount === null ||
+    rowCount > PAGE_SIZE ||
+    !Number.isSafeInteger(pageIndex) ||
+    pageIndex < 0
+  ) {
     throw new Error("sony_bank_history_pagination_invalid");
   }
   const total = countValue(json.countCnt);
@@ -603,7 +655,7 @@ export function validateHistoryPage(
   if (expectedTotal !== null && total !== expectedTotal) {
     throw new Error("sony_bank_history_pagination_total_changed");
   }
-  const expectedRows = Math.max(0, Math.min(PAGE_SIZE, total - (pageIndex * PAGE_SIZE)));
+  const expectedRows = Math.max(0, Math.min(PAGE_SIZE, total - pageIndex * PAGE_SIZE));
   if (rowCount !== expectedRows) {
     throw new Error("sony_bank_history_pagination_length_mismatch");
   }
@@ -623,7 +675,9 @@ function errorCodeCount(rawText: string): number {
   try {
     const value: unknown = JSON.parse(rawText);
     return isObject(value) && Array.isArray(value.errors) ? value.errors.length : 0;
-  } catch { return 0; }
+  } catch {
+    return 0;
+  }
 }
 
 function countValue(value: unknown): number | null {
@@ -638,14 +692,12 @@ function countValue(value: unknown): number | null {
 }
 
 export function sanitizeWalletHtml(html: string): string {
-  return html
-    .replace(/;jsessionid=[^?"'<>\s]+/giu, "")
-    .replace(/<input\b[^>]*>/giu, (tag) => {
-      const type = attributeValue(tag, "type").toLowerCase();
-      const name = attributeValue(tag, "name");
-      if (type !== "hidden" && name !== "cc") return tag;
-      return tag.replace(/\svalue\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/iu, ' value=""');
-    });
+  return html.replace(/;jsessionid=[^?"'<>\s]+/giu, "").replace(/<input\b[^>]*>/giu, (tag) => {
+    const type = attributeValue(tag, "type").toLowerCase();
+    const name = attributeValue(tag, "name");
+    if (type !== "hidden" && name !== "cc") return tag;
+    return tag.replace(/\svalue\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/iu, ' value=""');
+  });
 }
 
 export function walletMonths(html: string): WalletMonth[] {
@@ -654,7 +706,9 @@ export function walletMonths(html: string): WalletMonth[] {
     /<select\b[^>]*\bname\s*=\s*["']W131301\.referenceDate["'][^>]*>([\s\S]*?)<\/select>/iu,
   )?.[1];
   if (!select) return [];
-  return [...select.matchAll(/<option\b[^>]*\bvalue\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/option>/giu)]
+  return [
+    ...select.matchAll(/<option\b[^>]*\bvalue\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/option>/giu),
+  ]
     .map((match, index) => ({
       value: decodeHtml(match[1] ?? ""),
       label: stripTags(decodeHtml(match[2] ?? "")),
@@ -669,12 +723,14 @@ export function selectedWalletMonth(html: string): string | null {
     /<select\b[^>]*\bname\s*=\s*["']W131301\.referenceDate["'][^>]*>([\s\S]*?)<\/select>/iu,
   )?.[1];
   if (!select) return null;
-  const options = [...select.matchAll(/<option\b([^>]*)\bvalue\s*=\s*["'](\d{8})["']([^>]*)>/giu)]
-    .map((match) => ({
-      value: match[2]!,
-      selected: /(?:^|\s)selected(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?(?=\s|$)/iu
-        .test(`${match[1] ?? ""} ${match[3] ?? ""}`),
-    }));
+  const options = [
+    ...select.matchAll(/<option\b([^>]*)\bvalue\s*=\s*["'](\d{8})["']([^>]*)>/giu),
+  ].map((match) => ({
+    value: match[2]!,
+    selected: /(?:^|\s)selected(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?(?=\s|$)/iu.test(
+      `${match[1] ?? ""} ${match[3] ?? ""}`,
+    ),
+  }));
   const selected = options.filter((option) => option.selected);
   if (selected.length > 1) return null;
   return (selected[0] ?? options[0])?.value ?? null;
@@ -720,25 +776,35 @@ function formAction(html: string, name: string): string {
 }
 
 function formBlock(html: string, name: string): string {
-  return html.match(
-    new RegExp(
-      `<form\\b[^>]*\\bname\\s*=\\s*["']${escapeRegExp(name)}["'][^>]*>([\\s\\S]*?)<\\/form>`,
-      "iu",
-    ),
-  )?.[1] ?? "";
+  return (
+    html.match(
+      new RegExp(
+        `<form\\b[^>]*\\bname\\s*=\\s*["']${escapeRegExp(name)}["'][^>]*>([\\s\\S]*?)<\\/form>`,
+        "iu",
+      ),
+    )?.[1] ?? ""
+  );
 }
 
 function attributeValue(tag: string, name: string): string {
-  return tag.match(
-    new RegExp(`\\b${escapeRegExp(name)}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "iu"),
-  )?.slice(1).find((value) => value !== undefined) ?? "";
+  return (
+    tag
+      .match(
+        new RegExp(`\\b${escapeRegExp(name)}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "iu"),
+      )
+      ?.slice(1)
+      .find((value) => value !== undefined) ?? ""
+  );
 }
 
 function assertWalletPage(status: number, html: string): void {
   if (status < 200 || status >= 300) {
     throw new SonyBankError("wallet-statement", status);
   }
-  if (!html.includes("W131301.referenceDate") || /<title>\s*(?:システムエラー|ページが見つかりません)\s*<\/title>/iu.test(html)) {
+  if (
+    !html.includes("W131301.referenceDate") ||
+    /<title>\s*(?:システムエラー|ページが見つかりません)\s*<\/title>/iu.test(html)
+  ) {
     throw new Error("Sony Bank WALLET statement page was invalid");
   }
 }
@@ -764,7 +830,10 @@ function decodeHtml(value: string): string {
 }
 
 function stripTags(value: string): string {
-  return value.replace(/<[^>]+>/gu, " ").replace(/\s+/gu, " ").trim();
+  return value
+    .replace(/<[^>]+>/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
 }
 
 function delay(milliseconds: number): Promise<void> {

@@ -28,9 +28,7 @@ type ClientResult =
 
 /** A resolved path is inside the client directory, separator included. */
 function isInside(candidate: string): boolean {
-  return (
-    candidate === CLIENT_DIR || candidate.startsWith(`${CLIENT_DIR}${sep}`)
-  );
+  return candidate === CLIENT_DIR || candidate.startsWith(`${CLIENT_DIR}${sep}`);
 }
 
 function clientHandler(): (request: Request) => Promise<ClientResult> {
@@ -93,18 +91,13 @@ function clientHandler(): (request: Request) => Promise<ClientResult> {
 // It cannot relabel an existing store, even if state/ contains real evidence.
 const demo = process.argv.includes("--demo");
 const temporaryRoot = resolve(tmpdir());
-const previewDir = demo
-  ? mkdtempSync(join(temporaryRoot, "kogane-preview-"))
-  : undefined;
+const previewDir = demo ? mkdtempSync(join(temporaryRoot, "kogane-preview-")) : undefined;
 const store = openStore(previewDir);
 if (previewDir !== undefined) {
   process.on("exit", () => {
     store.db.close();
     const target = resolve(previewDir);
-    if (
-      dirname(target) === temporaryRoot &&
-      basename(target).startsWith("kogane-preview-")
-    ) {
+    if (dirname(target) === temporaryRoot && basename(target).startsWith("kogane-preview-")) {
       rmSync(target, { recursive: true, force: true });
     }
   });
@@ -172,7 +165,5 @@ for (const host of ["127.0.0.1", "localhost", "[::1]"]) {
 
 console.log(`kogane evidence browser on http://${HOSTNAME}:${server.port}/`);
 if (!existsSync(CLIENT_DIR)) {
-  console.log(
-    "client not built: run `bun run build`, or `bun run dev` for hot reload",
-  );
+  console.log("client not built: run `bun run build`, or `bun run dev` for hot reload");
 }

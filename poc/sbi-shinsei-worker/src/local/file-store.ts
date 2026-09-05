@@ -41,9 +41,10 @@ export async function storePrivateArtifacts(options: {
     if (artifact.mediaType !== "application/json") {
       throw new Error("Local artifact media type is not allowlisted");
     }
-    const bytes = typeof artifact.body === "string"
-      ? new TextEncoder().encode(artifact.body)
-      : new Uint8Array(artifact.body);
+    const bytes =
+      typeof artifact.body === "string"
+        ? new TextEncoder().encode(artifact.body)
+        : new Uint8Array(artifact.body);
     const handle = await open(join(options.runDirectory, artifact.filename), "wx", 0o600);
     try {
       await handle.writeFile(bytes);
@@ -68,16 +69,20 @@ export async function storePrivateManifest(options: {
   balanceCount: number;
   transactionCount: number;
 }): Promise<void> {
-  const body = `${JSON.stringify({
-    schemaVersion: "sbi-shinsei-local-run-v1",
-    source: "sbi-shinsei",
-    startedAt: options.startedAt,
-    completedAt: options.completedAt,
-    status: "success",
-    balanceCount: options.balanceCount,
-    transactionCount: options.transactionCount,
-    artifacts: options.artifacts,
-  }, null, 2)}\n`;
+  const body = `${JSON.stringify(
+    {
+      schemaVersion: "sbi-shinsei-local-run-v1",
+      source: "sbi-shinsei",
+      startedAt: options.startedAt,
+      completedAt: options.completedAt,
+      status: "success",
+      balanceCount: options.balanceCount,
+      transactionCount: options.transactionCount,
+      artifacts: options.artifacts,
+    },
+    null,
+    2,
+  )}\n`;
   const handle = await open(join(options.runDirectory, "manifest.json"), "wx", 0o600);
   try {
     await handle.writeFile(body, { encoding: "utf8" });

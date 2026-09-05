@@ -44,12 +44,12 @@ Cookie、OTP、app passcode、session/token、passkey private key、実残高、
 
 ## 3. 台帳の正本と経路別 trade-off
 
-| 資産/記録 | 正本候補 | read surface | 強み | 主な欠落/危険 |
-| --- | --- | --- | --- | --- |
-| 統合後 V Point 残高・通常/固定期限/ストア限定・履歴 | V Point サイト/アプリ | My Page、V Point アプリ | 期限 bucket と統合後履歴を一箇所で確認。公開 JS に具体的な内部 API/schema | 公式 CSV/PDF は公開資料で未確認。電話認証/passkey/Cloudflare session が絡む |
-| 三井住友カード由来ポイント | Vpass | Vpass Web/app | カード側付与、Olive クレジットモード、統合前/未連携の確認 | 未連携履歴は 1 年かつ 100 件。full history endpoint は静的解析 snapshot で未確認 |
-| SMBC/Olive の銀行・デビット由来ポイント | SMBC アプリ/ダイレクト | V POINT/サービス画面 | 銀行・デビット・銀行プログラムの由来確認 | 銀行残高等の対象外 PII が近い。クレジット付与は Vpass が正本候補 |
-| V Point Pay 残高・利用/返金/チャージ | V Point Pay app | app home、利用明細 | Pay の現在残高と authorization/settlement/refund の表示 | 支払/チャージ write と密接。保持期間、件数、export、内部 transport は未確認 |
+| 資産/記録                                           | 正本候補               | read surface            | 強み                                                                      | 主な欠落/危険                                                                    |
+| --------------------------------------------------- | ---------------------- | ----------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| 統合後 V Point 残高・通常/固定期限/ストア限定・履歴 | V Point サイト/アプリ  | My Page、V Point アプリ | 期限 bucket と統合後履歴を一箇所で確認。公開 JS に具体的な内部 API/schema | 公式 CSV/PDF は公開資料で未確認。電話認証/passkey/Cloudflare session が絡む      |
+| 三井住友カード由来ポイント                          | Vpass                  | Vpass Web/app           | カード側付与、Olive クレジットモード、統合前/未連携の確認                 | 未連携履歴は 1 年かつ 100 件。full history endpoint は静的解析 snapshot で未確認 |
+| SMBC/Olive の銀行・デビット由来ポイント             | SMBC アプリ/ダイレクト | V POINT/サービス画面    | 銀行・デビット・銀行プログラムの由来確認                                  | 銀行残高等の対象外 PII が近い。クレジット付与は Vpass が正本候補                 |
+| V Point Pay 残高・利用/返金/チャージ                | V Point Pay app        | app home、利用明細      | Pay の現在残高と authorization/settlement/refund の表示                   | 支払/チャージ write と密接。保持期間、件数、export、内部 transport は未確認      |
 
 同じ「Vポイント」表示でも、V Point 台帳と V Point Pay のプリペイド残高を足し合わせない。ポイントを
 Pay へ移行するとポイント側の減少と Pay 側の増加という二つの ledger event が生じるため、同一資産の
@@ -237,15 +237,15 @@ MFA 条件、V Point passkey の Bitwarden iOS provider 互換、Pay/Vpass app d
 
 2026-08-26 のログアウト状態の低頻度観測:
 
-| 公開入口 | 結果 | 言えること / 言えないこと |
-| --- | --- | --- |
-| `https://vpoint.net/` | `302` で `https://tsite.jp/`、`Server: nginx` | 旧/案内入口の redirect。認証 origin の防御を示さない |
-| `https://web.tsite.jp/` | `200`、CloudFront の `X-Cache`/`Via`/`X-Amz-Cf-*` | 公開コンテンツに CloudFront が介在 |
-| `https://mypage.tsite.jp/tpoint/?hid=1` | `200`、`Server: cloudflare`、`CF-Cache-Status: DYNAMIC`、Sydney の `CF-Ray` | 認証 My Page SPA の front door は Cloudflare。WAF/bot product/score は不明 |
-| `https://www.smbc-card.com/mem/index.jsp` | `403`、`Server: AkamaiGHost` | Vpass 公開入口に Akamai が介在。匿名 curl 403 の理由は未確認 |
-| `https://www.smbc-card.com/mem/for_vpointapp/index.jsp` | `403`、`Server: AkamaiGHost` | カード側 V Point app 導線も Akamai。login 後挙動は不明 |
-| `https://qa.smbc-card.com/` | `200`、`Server: Apache` | FAQ は取得可能。Vpass/app API と同じ保護とは限らない |
-| `https://direct.smbc.co.jp/aib/aibgsjsw5001.jsp` | `200`、`X-Akamai-Transformed` | SMBC Direct 公開入口で Akamai 介在を確認 |
+| 公開入口                                                | 結果                                                                        | 言えること / 言えないこと                                                  |
+| ------------------------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `https://vpoint.net/`                                   | `302` で `https://tsite.jp/`、`Server: nginx`                               | 旧/案内入口の redirect。認証 origin の防御を示さない                       |
+| `https://web.tsite.jp/`                                 | `200`、CloudFront の `X-Cache`/`Via`/`X-Amz-Cf-*`                           | 公開コンテンツに CloudFront が介在                                         |
+| `https://mypage.tsite.jp/tpoint/?hid=1`                 | `200`、`Server: cloudflare`、`CF-Cache-Status: DYNAMIC`、Sydney の `CF-Ray` | 認証 My Page SPA の front door は Cloudflare。WAF/bot product/score は不明 |
+| `https://www.smbc-card.com/mem/index.jsp`               | `403`、`Server: AkamaiGHost`                                                | Vpass 公開入口に Akamai が介在。匿名 curl 403 の理由は未確認               |
+| `https://www.smbc-card.com/mem/for_vpointapp/index.jsp` | `403`、`Server: AkamaiGHost`                                                | カード側 V Point app 導線も Akamai。login 後挙動は不明                     |
+| `https://qa.smbc-card.com/`                             | `200`、`Server: Apache`                                                     | FAQ は取得可能。Vpass/app API と同じ保護とは限らない                       |
+| `https://direct.smbc.co.jp/aib/aibgsjsw5001.jsp`        | `200`、`X-Akamai-Transformed`                                               | SMBC Direct 公開入口で Akamai 介在を確認                                   |
 
 これらは CDN/front-door header の観測であり、WAF の製品設定、bot 判定、app API の防御、login 後の
 challenge、Cloudflare/Akamai の全 surface 適用を証明しない。V Point My Page 自体が Cloudflare
@@ -260,12 +260,12 @@ pinning/integrity bypass を行わない。
 
 ### 8.1 公式 app と web の役割
 
-| 公式 app | Google Play package | 2026-08-26 の Play metadata version | 主な read 役割 |
-| --- | --- | --- | --- |
-| [V Point](https://play.google.com/store/apps/details?id=jp.co.ccc.Tsite) | `jp.co.ccc.Tsite` | `3.7.3` | 統合ポイント残高、種類、期限、履歴。獲得/利用/交換等 write 導線も同居 |
-| [V Point Pay](https://play.google.com/store/apps/details?id=com.smbc_card.vpoint) | `com.smbc_card.vpoint` | `2.5.0` | Pay 残高、利用/settlement/refund/charge。支払/チャージが中心に同居 |
-| [Vpass](https://play.google.com/store/apps/details?id=com.smbc_card.vpass) | `com.smbc_card.vpass` | `5.12.0` | カード由来ポイント/連携状態、Olive credit provenance |
-| [三井住友銀行](https://play.google.com/store/apps/details?id=jp.co.smbc.direct) | `jp.co.smbc.direct` | `12.7.0` | SMBC/Olive bank/debit provenance。預金等の対象外データが近い |
+| 公式 app                                                                          | Google Play package    | 2026-08-26 の Play metadata version | 主な read 役割                                                        |
+| --------------------------------------------------------------------------------- | ---------------------- | ----------------------------------- | --------------------------------------------------------------------- |
+| [V Point](https://play.google.com/store/apps/details?id=jp.co.ccc.Tsite)          | `jp.co.ccc.Tsite`      | `3.7.3`                             | 統合ポイント残高、種類、期限、履歴。獲得/利用/交換等 write 導線も同居 |
+| [V Point Pay](https://play.google.com/store/apps/details?id=com.smbc_card.vpoint) | `com.smbc_card.vpoint` | `2.5.0`                             | Pay 残高、利用/settlement/refund/charge。支払/チャージが中心に同居    |
+| [Vpass](https://play.google.com/store/apps/details?id=com.smbc_card.vpass)        | `com.smbc_card.vpass`  | `5.12.0`                            | カード由来ポイント/連携状態、Olive credit provenance                  |
+| [三井住友銀行](https://play.google.com/store/apps/details?id=jp.co.smbc.direct)   | `jp.co.smbc.direct`    | `12.7.0`                            | SMBC/Olive bank/debit provenance。預金等の対象外データが近い          |
 
 Web は V Point の履歴 pagination/schema と Vpass legacy route の観測に向く。アプリは device-bound
 認証、Pay の current ledger、first-party app API の同定に向くが、write との近さが強い。最初から
@@ -279,12 +279,12 @@ certificate digest を記録する。公式 standalone APK 配布は確認でき
 匿名取得できる [V Point My Page SPA](https://mypage.tsite.jp/tpoint/?hid=1) の 2026-08-26 時点の
 Nuxt chunk `/_nuxt/64c5c08.js` を静的解析し、次の same-origin first-party transport を確認した。
 
-| method/path | client が使う request/response schema | 解釈 |
-| --- | --- | --- |
-| `POST /api/balance_info` | `status`; `results.common[] {point, expiration, point_type}`; `results.store[] {alliance_name, items[] {point, expiration}}`; `get_month` | 通常/期限固定/ストア限定の残高・期限 bucket |
-| `POST /api/tpoint_history` | multipart: `page`, `get_graph`, `sort`, 各種 filter, `filter_date`; response `results.total/history/graph` | V Point 履歴 pagination と graph。内部名 `tpoint` は legacy naming |
-| `POST /api/smfg_point` | `results.get_point.point_smbc`, `point_smcc` | SMBC bank/card 側のポイント分離表示候補 |
-| `POST /api/tmoney_history` | V Money 履歴 | **V Point Pay ではないため対象外** |
+| method/path                | client が使う request/response schema                                                                                                     | 解釈                                                               |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `POST /api/balance_info`   | `status`; `results.common[] {point, expiration, point_type}`; `results.store[] {alliance_name, items[] {point, expiration}}`; `get_month` | 通常/期限固定/ストア限定の残高・期限 bucket                        |
+| `POST /api/tpoint_history` | multipart: `page`, `get_graph`, `sort`, 各種 filter, `filter_date`; response `results.total/history/graph`                                | V Point 履歴 pagination と graph。内部名 `tpoint` は legacy naming |
+| `POST /api/smfg_point`     | `results.get_point.point_smbc`, `point_smcc`                                                                                              | SMBC bank/card 側のポイント分離表示候補                            |
+| `POST /api/tmoney_history` | V Money 履歴                                                                                                                              | **V Point Pay ではないため対象外**                                 |
 
 `tpoint_history` の filter は獲得、利用、取消、失効、移行、訂正、期限延長、再発行、その他と、
 利用日/反映日 sort を含む。client は `results.total` と収集行数を比較して pagination する。これは
@@ -368,12 +368,12 @@ Kogane Capture Chromeでユーザーが通常loginしたsessionを使い、値�
 観測した。Web画面のV会員番号はmaskされたままだったが、API requestには会員番号fieldがなく、session
 だけで以下が成功した。
 
-| endpoint | HTTP / application status | liveで確認した範囲 |
-| --- | --- | --- |
-| `POST /api/balance_info` | `200` / `0000` | `results.get_month/common/store/tmoney`; `common[]`の`point/expiration/point_type` |
-| `POST /api/tpoint_history` | `200` / `0000` | `total=149`; page 1-4各30件、page 5は29件、page 6は0件。全件走査と終端を確認 |
-| `POST /api/smfg_point` | `200` / `0000` | `point_smbc`, `point_smcc` |
-| `POST /api/rank_info` | `200` / `0000` | transportだけ確認。collector対象外 |
+| endpoint                   | HTTP / application status | liveで確認した範囲                                                                 |
+| -------------------------- | ------------------------- | ---------------------------------------------------------------------------------- |
+| `POST /api/balance_info`   | `200` / `0000`            | `results.get_month/common/store/tmoney`; `common[]`の`point/expiration/point_type` |
+| `POST /api/tpoint_history` | `200` / `0000`            | `total=149`; page 1-4各30件、page 5は29件、page 6は0件。全件走査と終端を確認       |
+| `POST /api/smfg_point`     | `200` / `0000`            | `point_smbc`, `point_smcc`                                                         |
+| `POST /api/rank_info`      | `200` / `0000`            | transportだけ確認。collector対象外                                                 |
 
 履歴requestは`page`、`get_graph=1`、`sort=use`、獲得/利用/取消/失効/移行/訂正/期限延長/
 再発行filter、`filter_date=""`のmultipartである。PoCは`results.total`へ達した時点で停止し、空の
@@ -460,13 +460,13 @@ write とは決めつけない。実際に V Point の read API は `POST` で�
 - **D**: full browser/device UI automation が継続的に必要
 - **E**: 手動 capture/import
 
-| route | 現時点の判定 | cost | 根拠/昇格条件 |
-| --- | --- | ---: | --- |
-| V Point web | **C 候補** | **3-4** | 公開 JS で具体的な same-origin read POST/schema/pagination を確認。session renewal、MFA、Cloudflare、規約、schema stability を live 証明できれば B/3。公式 export/API は未確認 |
-| Vpass app のポイント残高 | **C 候補** | **4** | 現行 5.12.0 の host/path/model/auth envelope は具体化したが device/cookie/session/Akamai が必要。全履歴 endpoint は未確認 |
-| Vpass/SMBC/Olive web/app provenance | **D** | **4** | 複数 ID、端末認証、legacy/linked route、銀行データ隔離が必要。限定 route の安定 API が確認できれば C |
-| V Point Pay | **D** | **5** | app-only に近く、write と同居。保持期間/schema/transport/session/pinning/integrity は未確認 |
-| family 全体 | **D**（ポイント側は C 候補） | **4-5** | Point と Pay を別台帳で完全に取るには device が残る。安全な初期 route は E/1 |
+| route                               | 現時点の判定                 |    cost | 根拠/昇格条件                                                                                                                                                                  |
+| ----------------------------------- | ---------------------------- | ------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| V Point web                         | **C 候補**                   | **3-4** | 公開 JS で具体的な same-origin read POST/schema/pagination を確認。session renewal、MFA、Cloudflare、規約、schema stability を live 証明できれば B/3。公式 export/API は未確認 |
+| Vpass app のポイント残高            | **C 候補**                   |   **4** | 現行 5.12.0 の host/path/model/auth envelope は具体化したが device/cookie/session/Akamai が必要。全履歴 endpoint は未確認                                                      |
+| Vpass/SMBC/Olive web/app provenance | **D**                        |   **4** | 複数 ID、端末認証、legacy/linked route、銀行データ隔離が必要。限定 route の安定 API が確認できれば C                                                                           |
+| V Point Pay                         | **D**                        |   **5** | app-only に近く、write と同居。保持期間/schema/transport/session/pinning/integrity は未確認                                                                                    |
+| family 全体                         | **D**（ポイント側は C 候補） | **4-5** | Point と Pay を別台帳で完全に取るには device が残る。安全な初期 route は E/1                                                                                                   |
 
 現時点で A は選ばない。公式 CSV/PDF/public personal API が確認できず、V Point web/Vpass endpoint は
 internal implementation である。まず E/1 の sanitized sample で schema と二重計上防止を確定し、

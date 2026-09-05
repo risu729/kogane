@@ -64,14 +64,14 @@ SMBCダイレクトではOliveの対象普通預金が「残高別普通」「�
 
 通常サービス時間と、日曜21時から月曜7時の制限時間では表示範囲が異なる。制限時間中は日曜21時時点の普通、貯蓄、当座、カードローンのみ、前月1日以降の最大2か月・300件となる。[公式利用時間](https://www.smbc.co.jp/kojin/direct/jikan/)
 
-| 科目 | 取得粒度 | 通常時の履歴・上限 | 備考 |
-| --- | --- | --- | --- |
-| 普通預金・Web通帳 | 現在残高、日付、入金/出金額、摘要、取引後残高 | 2019-01-01以降。最大30年、1照会2,000件 | 期間を短く分割すれば全件収集可能。未指定時は当月・前月のみ |
-| 普通預金・紙通帳 | 同上 | 24か月前の1日以降。最大25か月、300件 | それ以前は店頭で有料発行 |
-| 貯蓄・当座・カードローン | 残高、入出金明細 | 現行FAQでは前月1日以降 | 古い口座照会ヘルプには総合口座のWeb通帳貯蓄を30年とする記載もあり、実口座で要確認 |
-| 外貨普通預金 | 通貨別現在残高、日付、入出金、摘要、取引後残高、条件により適用レート | 3か月前の1日以降から本日まで、最大4か月・300件 | CSVあり。外貨間振替や外国送金では相手・商品情報が省略される場合がある |
-| 定期・積立 | 口座残高、預入明細、積立内容 | 公開ヘルプに一律の履歴保存期間は見当たらない | 取引イベント列ではなく預入ロット/満期情報としてモデル化するのが適切 |
-| 投資信託 | 残高・取引明細 | 前年同月1日以降 | 本調査の実装対象外だが、口座一覧に現れる可能性がある |
+| 科目                     | 取得粒度                                                             | 通常時の履歴・上限                             | 備考                                                                              |
+| ------------------------ | -------------------------------------------------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------- |
+| 普通預金・Web通帳        | 現在残高、日付、入金/出金額、摘要、取引後残高                        | 2019-01-01以降。最大30年、1照会2,000件         | 期間を短く分割すれば全件収集可能。未指定時は当月・前月のみ                        |
+| 普通預金・紙通帳         | 同上                                                                 | 24か月前の1日以降。最大25か月、300件           | それ以前は店頭で有料発行                                                          |
+| 貯蓄・当座・カードローン | 残高、入出金明細                                                     | 現行FAQでは前月1日以降                         | 古い口座照会ヘルプには総合口座のWeb通帳貯蓄を30年とする記載もあり、実口座で要確認 |
+| 外貨普通預金             | 通貨別現在残高、日付、入出金、摘要、取引後残高、条件により適用レート | 3か月前の1日以降から本日まで、最大4か月・300件 | CSVあり。外貨間振替や外国送金では相手・商品情報が省略される場合がある             |
+| 定期・積立               | 口座残高、預入明細、積立内容                                         | 公開ヘルプに一律の履歴保存期間は見当たらない   | 取引イベント列ではなく預入ロット/満期情報としてモデル化するのが適切               |
+| 投資信託                 | 残高・取引明細                                                       | 前年同月1日以降                                | 本調査の実装対象外だが、口座一覧に現れる可能性がある                              |
 
 期間の主根拠は2026-01-15公開の[公式FAQ](https://qa.smbc.co.jp/faq/show/1468?site_domain=default)。外貨の粒度と上限は[公式外貨入出金明細ヘルプ](https://www.smbc.co.jp/direct/sousa/help_gaikatorihiki/49.html)、定期は[公式サービス内容一覧](https://www.smbc.co.jp/direct/sousa/help_teiki/2.html)による。
 
@@ -135,25 +135,25 @@ SMBCダイレクトではOliveの対象普通預金が「残高別普通」「�
 
 将来調査では次を事実・推測・不足に分ける。
 
-| 論点 | 現在の事実 | 次に確認するもの | 難度への意味 |
-| --- | --- | --- | --- |
-| 生体認証 | 生体情報照合は端末内 | `BiometricPrompt`/CryptoObject等のcall-site | 標準APIだけならUI再現は比較的容易だが、鍵利用条件が別途残る |
-| credential/鍵 | 銀行は契約者番号と登録端末を対応付ける | Keystore alias、key generation/import可否、hardware-backed/StrongBox、server登録payload | non-exportable keyや既存server登録必須なら別client移植は難しい |
-| challenge/署名 | deep linkに `userId`, `confirmationNumber`, `createdTime` | nonce、canonicalization、署名algorithm、expiry、one-shot/replay処理 | 公開challengeでも登録鍵署名が必須ならtransport模倣だけでは足りない |
-| app-to-Web handoff | 公式app承認後にWeb完了処理/JSESSIONID変化 | poll endpoint、承認状態schema、session rotation/cookie scope | 本人承認orchestratorは成立し得るが、完全無人化とは別 |
-| integrity/attestation | root履歴/USB debugging制限を公式掲載 | Play Integrity/SafetyNet/独自SDK、requestへのattestation添付箇所 | server必須attestationなら独自client難度が高い |
-| pinning | 未確認 | manifest network config、OkHttp/Cronet/WebView/native trust code | pinningがあっても存在確認は可能。解除はせずmetadata観測へ後退 |
+| 論点                  | 現在の事実                                                | 次に確認するもの                                                                        | 難度への意味                                                       |
+| --------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 生体認証              | 生体情報照合は端末内                                      | `BiometricPrompt`/CryptoObject等のcall-site                                             | 標準APIだけならUI再現は比較的容易だが、鍵利用条件が別途残る        |
+| credential/鍵         | 銀行は契約者番号と登録端末を対応付ける                    | Keystore alias、key generation/import可否、hardware-backed/StrongBox、server登録payload | non-exportable keyや既存server登録必須なら別client移植は難しい     |
+| challenge/署名        | deep linkに `userId`, `confirmationNumber`, `createdTime` | nonce、canonicalization、署名algorithm、expiry、one-shot/replay処理                     | 公開challengeでも登録鍵署名が必須ならtransport模倣だけでは足りない |
+| app-to-Web handoff    | 公式app承認後にWeb完了処理/JSESSIONID変化                 | poll endpoint、承認状態schema、session rotation/cookie scope                            | 本人承認orchestratorは成立し得るが、完全無人化とは別               |
+| integrity/attestation | root履歴/USB debugging制限を公式掲載                      | Play Integrity/SafetyNet/独自SDK、requestへのattestation添付箇所                        | server必須attestationなら独自client難度が高い                      |
+| pinning               | 未確認                                                    | manifest network config、OkHttp/Cronet/WebView/native trust code                        | pinningがあっても存在確認は可能。解除はせずmetadata観測へ後退      |
 
 #### 段階的な検証計画
 
-| 段階 | 内容 | 予想コスト | リスク | 成功判定 | 中止・後退条件 |
-| --- | --- | ---: | --- | --- | --- |
-| 0. 文書・公開コードの状態機械化 | 公式手順、利用規定、`mnie`から登録済み/未登録、challenge発行、承認待ち、session発行、失効を図式化 | 1/5 | 低 | Webとアプリの責務、未確認事項、読み取り専用境界を説明できる | なし。個人情報を使わない |
-| 1. 署名確認済みAPKの静的解析 | manifest、deep link、exported component、host、network security config、難読化/native library、Keystore API、Play Integrity/App Attest系SDKの参照を棚卸し | 2–3/5 | 低～中 | componentと保護機構の「候補」を特定し、事実/推測を更新できる | Play配布物との署名・来歴を確認できない場合。秘密鍵やtoken抽出が必要になった場合 |
-| 2. 正常な実機でのblack-box観測 | 本人が未改変公式アプリを操作し、本人名義口座のログインだけを行う。deep link遷移、表示、時刻、期限、retry、session発行前後を記録 | 3/5 | 中 | challengeの寿命、承認待ち状態、session切替を、設定変更や取引なしで再現できる | 登録/解除、生体設定変更、振込・設定画面への遷移が必要になった場合 |
-| 3. Kuebiko/受動proxy観測 | DNS/TLSの接続先、要求時刻等を観測し、アプリが通常のユーザーCAを受け入れる場合に限ってHTTP sequenceを確認 | 3–4/5 | 中 | login challengeからsession issuanceまでの要求順序を把握できる | pinning/integrity/anti-debugに阻止された時点。pinning解除、hook、root、Frida、trust manager改変、attestation回避へ進まない |
-| 4. 正規承認orchestrator | QR/deep link表示、利用者通知、期限付きpoll、承認後sessionの暗号化保存、read endpoint実行 | 3/5 | 低～中 | 未改変公式アプリで本人承認した場合だけsessionを取得し、残高・明細だけ読める | 無人化にcredential抽出、challenge replay/forge、保護機構回避が必要と判明した場合 |
-| 独自client再現難度評価 | 登録credential、署名challenge、attestation、session handoffの標準性/端末拘束を実物から評価 | 4–5/5 | 中～高 | 標準機構、server-bound state、移植不能要素を根拠付きで分類できる | 秘密抽出、偽造、pinning/integrity/attestation回避が必要になった時点で実装せず観測結果を記録 |
+| 段階                            | 内容                                                                                                                                                      | 予想コスト | リスク | 成功判定                                                                     | 中止・後退条件                                                                                                             |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------: | ------ | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 0. 文書・公開コードの状態機械化 | 公式手順、利用規定、`mnie`から登録済み/未登録、challenge発行、承認待ち、session発行、失効を図式化                                                         |        1/5 | 低     | Webとアプリの責務、未確認事項、読み取り専用境界を説明できる                  | なし。個人情報を使わない                                                                                                   |
+| 1. 署名確認済みAPKの静的解析    | manifest、deep link、exported component、host、network security config、難読化/native library、Keystore API、Play Integrity/App Attest系SDKの参照を棚卸し |      2–3/5 | 低～中 | componentと保護機構の「候補」を特定し、事実/推測を更新できる                 | Play配布物との署名・来歴を確認できない場合。秘密鍵やtoken抽出が必要になった場合                                            |
+| 2. 正常な実機でのblack-box観測  | 本人が未改変公式アプリを操作し、本人名義口座のログインだけを行う。deep link遷移、表示、時刻、期限、retry、session発行前後を記録                           |        3/5 | 中     | challengeの寿命、承認待ち状態、session切替を、設定変更や取引なしで再現できる | 登録/解除、生体設定変更、振込・設定画面への遷移が必要になった場合                                                          |
+| 3. Kuebiko/受動proxy観測        | DNS/TLSの接続先、要求時刻等を観測し、アプリが通常のユーザーCAを受け入れる場合に限ってHTTP sequenceを確認                                                  |      3–4/5 | 中     | login challengeからsession issuanceまでの要求順序を把握できる                | pinning/integrity/anti-debugに阻止された時点。pinning解除、hook、root、Frida、trust manager改変、attestation回避へ進まない |
+| 4. 正規承認orchestrator         | QR/deep link表示、利用者通知、期限付きpoll、承認後sessionの暗号化保存、read endpoint実行                                                                  |        3/5 | 低～中 | 未改変公式アプリで本人承認した場合だけsessionを取得し、残高・明細だけ読める  | 無人化にcredential抽出、challenge replay/forge、保護機構回避が必要と判明した場合                                           |
+| 独自client再現難度評価          | 登録credential、署名challenge、attestation、session handoffの標準性/端末拘束を実物から評価                                                                |      4–5/5 | 中～高 | 標準機構、server-bound state、移植不能要素を根拠付きで分類できる             | 秘密抽出、偽造、pinning/integrity/attestation回避が必要になった時点で実装せず観測結果を記録                                |
 
 APK静的解析で分かるのは、宣言されたcomponent、文字列/host、SDK参照、network security設定、Keystore API使用箇所等であり、hardware-backed秘密鍵、実際の銀行側登録状態、サーバーのrisk ruleは分からない。難読化されていれば、参照の存在だけで採用方式を確定してはならない。
 
@@ -242,12 +242,12 @@ JADX 1.5.6は28,925 classを処理し514 error、34,920 source fileを生成し�
 
 ### その他の公開実装
 
-| 実装 | 最終関連更新 | 方式 | 評価 |
-| --- | --- | --- | --- |
-| [`yokwe/yokwe-root`](https://github.com/yokwe/yokwe-root/blob/70f8602122b5618480cd52d5b8c16ed0777b8860/yokwe-finance/src/main/java/yokwe/finance/account/smbc/UpdateAssetSMBC.java) | 2025-05-14 | Selenium/Safari、追加認証時に60秒待機、公式CSV保存 | 現行UIに近い参考。認証完了のポーリングが粗く、サーバー運用には重い |
-| [`t-bucchi/accagg`](https://github.com/t-bucchi/accagg/blob/d28e0ec153b478ea1edf384c9b108a0c91faf027/accagg/bank/smbc.py) | 2019-09-23 | Selenium/Firefox、普通預金CSV | SMBCセーフティパス以前。セレクタとログイン方式は陳腐化 |
-| [`shinichy/get_statement`](https://github.com/shinichy/get_statement/blob/6f9730162d72eb9d14fa950767fdbcc8836676c1/get_statement.py) | 2018-12-01 | Selenium/Chrome、前月CSV | 過去の経路確認のみ |
-| [`kkosuge/bank_job`](https://github.com/kkosuge/bank_job/blob/0908e082d4c196a0fc8335351855874eb88b1549/lib/bank_job/strategies/bank_job_smbc.rb) | 2014-03-03 | Mechanize、HTML表解析 | 現行方式には使用不可 |
+| 実装                                                                                                                                                                                | 最終関連更新 | 方式                                               | 評価                                                               |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------------- | ------------------------------------------------------------------ |
+| [`yokwe/yokwe-root`](https://github.com/yokwe/yokwe-root/blob/70f8602122b5618480cd52d5b8c16ed0777b8860/yokwe-finance/src/main/java/yokwe/finance/account/smbc/UpdateAssetSMBC.java) | 2025-05-14   | Selenium/Safari、追加認証時に60秒待機、公式CSV保存 | 現行UIに近い参考。認証完了のポーリングが粗く、サーバー運用には重い |
+| [`t-bucchi/accagg`](https://github.com/t-bucchi/accagg/blob/d28e0ec153b478ea1edf384c9b108a0c91faf027/accagg/bank/smbc.py)                                                           | 2019-09-23   | Selenium/Firefox、普通預金CSV                      | SMBCセーフティパス以前。セレクタとログイン方式は陳腐化             |
+| [`shinichy/get_statement`](https://github.com/shinichy/get_statement/blob/6f9730162d72eb9d14fa950767fdbcc8836676c1/get_statement.py)                                                | 2018-12-01   | Selenium/Chrome、前月CSV                           | 過去の経路確認のみ                                                 |
+| [`kkosuge/bank_job`](https://github.com/kkosuge/bank_job/blob/0908e082d4c196a0fc8335351855874eb88b1549/lib/bank_job/strategies/bank_job_smbc.rb)                                    | 2014-03-03   | Mechanize、HTML表解析                              | 現行方式には使用不可                                               |
 
 GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnextPreTS` を実装する公開コードは`mnie`以外に見つからなかった。従って、現在再利用価値があるのは実質的に`mnie`で、他はCSV fallbackの設計資料である。
 
@@ -257,10 +257,10 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 
 同一code・credentialsでegressだけを比較した結果:
 
-| Egress | Login pre-step | 判定 |
-| --- | --- | --- |
-| 通常のWorkers `fetch()` | HTTP 200だがSMBC `ERRINFO` form | Safety Pass challengeへ進めない |
-| 既存TAMIA Tunnelを直接指定したVPC bindingの`fetch()` | `BCATBCA` formとSafety Pass QR生成 | 採用 |
+| Egress                                               | Login pre-step                     | 判定                            |
+| ---------------------------------------------------- | ---------------------------------- | ------------------------------- |
+| 通常のWorkers `fetch()`                              | HTTP 200だがSMBC `ERRINFO` form    | Safety Pass challengeへ進めない |
+| 既存TAMIA Tunnelを直接指定したVPC bindingの`fetch()` | `BCATBCA` formとSafety Pass QR生成 | 採用                            |
 
 `direct.smbc.co.jp`と`direct3.smbc.co.jp`だけをcode上のexact allowlistに固定して`TAMIA.fetch()`へ渡す。任意host、client指定destination、Tailscale、hostname route、Container、Browser Renderingは使わない。これは通常のWorkers TLS/HTTP fingerprintを家庭回線側へ移す経路であり、Chrome fingerprintを保存するopaque TCP bridgeではないが、SMBC Directの今回のHTTP flowには十分だった。
 
@@ -311,16 +311,16 @@ Kuebikoの専用Chrome profileで本人がログインした状態を読み取�
 
 実画面と収集artifactから確認できたのは、Money Forwardへ正規化された口座残高、一般的な入出金行、Vpass側の請求・利用行である。次は公式SMBC/Vpassのraw明細と同等には取得できない、または完全性を保証できない。
 
-| 対象 | 欠落または保証できないデータ |
-| --- | --- |
-| SMBC円預金 | 取引後残高、銀行側transaction/reference ID、value date、振込相手の構造化情報、公式CSVまたは銀行APIのraw bytes |
-| SMBC外貨 | 原通貨建て金額、通貨、適用レート、取引後外貨残高を一組として保持した公式粒度 |
-| SMBC定期等 | 預入ロット、満期日など商品固有の詳細。今回の4口座取得成功は、Money Forwardが全科目・全履歴を完全取得する保証ではない |
-| Vpass | 利用中・売上確定・請求確定の状態、一括/分割/リボと回数、請求月、支払日、請求書単位のgrouping、取消/返金と原取引のlink |
-| Vpass海外利用 | 原通貨額、原通貨、換算レート、authorization/sales ID、加盟店国・業種 |
-| Vpass付帯情報 | ポイント情報、および公式明細が持つ可能性のあるsource固有field |
+| 対象          | 欠落または保証できないデータ                                                                                                                                |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SMBC円預金    | 取引後残高、銀行側transaction/reference ID、value date、振込相手の構造化情報、公式CSVまたは銀行APIのraw bytes                                               |
+| SMBC外貨      | 原通貨建て金額、通貨、適用レート、取引後外貨残高を一組として保持した公式粒度                                                                                |
+| SMBC定期等    | 預入ロット、満期日など商品固有の詳細。今回の4口座取得成功は、Money Forwardが全科目・全履歴を完全取得する保証ではない                                        |
+| Vpass         | 利用中・売上確定・請求確定の状態、一括/分割/リボと回数、請求月、支払日、請求書単位のgrouping、取消/返金と原取引のlink                                       |
+| Vpass海外利用 | 原通貨額、原通貨、換算レート、authorization/sales ID、加盟店国・業種                                                                                        |
+| Vpass付帯情報 | ポイント情報、および公式明細が持つ可能性のあるsource固有field                                                                                               |
 | Oliveデビット | 銀行連携側では引落し金額を見られても加盟店粒度は得られない。Vpass連携側で一般的な内容・金額が表示されても、全件性、確定状態、公式詳細との一致は保証できない |
-| 共通 | 連携元で未更新・保留中の最新データ、初回backfillの完全性、各明細が連携元から取得された正確な時刻 |
+| 共通          | 連携元で未更新・保留中の最新データ、初回backfillの完全性、各明細が連携元から取得された正確な時刻                                                            |
 
 無料会員には4連携、画面上1年、一括更新なし・更新頻度アップなしという追加制約がある。従ってMoney Forward経路は、公式sourceの代替正本ではなく、Safety Passの有人承認なしで高頻度にsnapshotを蓄積する補助経路に限定する。
 
@@ -365,34 +365,34 @@ Workers Web Cryptoによるassertion生成、Money Forward ME側へのOAuth遷�
 
 ## 実行環境の適性
 
-| 環境 | 適性 | 理由 |
-| --- | --- | --- |
-| ユーザーのローカル端末 | 5/5 | QR/deep link承認が簡単で、通常の家庭・モバイル回線に近い。最初の実証に最適 |
-| OCI VM / 単一コンテナ | 4/5 | 固定egress、Node/Bun、暗号化ストレージを用意しやすい。承認URL/QRを安全にユーザーへ返す必要がある |
-| OCI Kubernetes | 3/5 | CronJobとSecret管理は可能だが、単一個人口座には過剰。Pod再配置でegressやセッション保存が変わらないよう設計が必要 |
-| Cloudflare Containers | 4/5 | 現行のNode/Bun互換コードを載せやすい。人の承認待ちとセッション永続化を別の状態ストアで扱う必要がある |
-| Cloudflare Workers + TAMIA VPC binding | 5/5 | Node互換、Shift_JIS、Cookie jar、暗号化DO、R2、Access、QR再承認後resumeを実口座で完走確認。通常Workers egressだけではSMBC `ERRINFO` |
+| 環境                                   | 適性 | 理由                                                                                                                                |
+| -------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| ユーザーのローカル端末                 | 5/5  | QR/deep link承認が簡単で、通常の家庭・モバイル回線に近い。最初の実証に最適                                                          |
+| OCI VM / 単一コンテナ                  | 4/5  | 固定egress、Node/Bun、暗号化ストレージを用意しやすい。承認URL/QRを安全にユーザーへ返す必要がある                                    |
+| OCI Kubernetes                         | 3/5  | CronJobとSecret管理は可能だが、単一個人口座には過剰。Pod再配置でegressやセッション保存が変わらないよう設計が必要                    |
+| Cloudflare Containers                  | 4/5  | 現行のNode/Bun互換コードを載せやすい。人の承認待ちとセッション永続化を別の状態ストアで扱う必要がある                                |
+| Cloudflare Workers + TAMIA VPC binding | 5/5  | Node互換、Shift_JIS、Cookie jar、暗号化DO、R2、Access、QR再承認後resumeを実口座で完走確認。通常Workers egressだけではSMBC `ERRINFO` |
 
 採用PoCはCloudflare Workers + 既存TAMIA VPC bindingである。収集処理は1 Access identity・1 Durable Object・1実行に直列化し、同じセッションを複数runから同時使用しない。通常Workers egress失敗とTAMIA成功のA/Bが取れたため、2つのSMBC hostだけをTAMIAへ固定する。
 
 ## コストと自動化見込み
 
-| 案 | 実装コスト | 自動化レベル | データ範囲 | 判断 |
-| --- | ---: | --- | --- | --- |
-| `mnie`調査を参考に読み取り処理を分離 | 3/5 | 初回/再ログインは有人、認証後は自動 | 普通預金残高・期間明細 | **Worker PoC実装済み**。`mnie` runtime dependencyなし |
-| Safety Pass正規承認orchestrator | 3/5 | QR提示後の生体承認と完了操作は有人 | 認証済みWeb session | **Worker PoC実装済み**。公式アプリを変更しない |
-| Webブラウザで公式CSVを取得 | 3/5 | アプリ承認は有人、その後は自動 | Web通帳普通・外貨等、画面が対応する科目 | 検算・fallbackとして有用 |
-| Web内部プロトコルを複数口座・外貨・定期へ拡張 | 4/5 | 認証後は自動 | 口座一覧、複数科目、預入ロット | 普通預金MVP後に実施 |
-| 公式アプリをUI自動化 | 5/5 | 生体認証で有人、端末保守も必要 | アプリ表示全般 | 非推奨 |
-| Safety Passを公式手順で解除 | 1/5 | 資格情報ログインが継続する間は完全無人 | Webで読める範囲 | 唯一の直接的な完全無人案だが、明示的なsecurity downgradeと設定変更。既定では不採用 |
-| Safety Pass登録端末/profileをコピー | 5/5以上 | 不成立 | 認証機構 | Keystore秘密鍵がnon-exportableかつ毎回生体認証。**不採用** |
-| 専用Android emulator | 5/5以上 | 生体/attestationで無人化できない | アプリ表示全般 | Keystore、BiometricPrompt、Transmit attestation、root検知があり、serverless経路にならない |
-| 契約済みaggregator API | Kogane側1/5 | 高い | 広い | 方針により不採用 |
-| Money Forward既存passkey + SMBC API連携 | 2/5 | 完全無人loginを実証 | Money Forwardへ取得済みの円・外貨残高・明細 | 正本にはしないが、Safety Passなしの実動fallback |
-| 個人向け公式外部連携token | Kogane側1/5 | 高い | 残高・明細等 | 仕組みは理想的だが、production接続は契約済み電子決済等代行業者に限定。self-service tokenなし |
-| [LINE残高照会](https://www.smbc.co.jp/sns/line/service.html) | 2/5 | 初回連携後は一定期間無人 | 主口座、直近1週間・最大100件という公開仕様 | 現行提供をlive確認してから補助候補。完全ledger/backfillには不足 |
-| [店番号・口座・キャッシュカード暗証の残高照会](https://direct3.smbc.co.jp/aib/aibgsjsw1k12.jsp) | 1/5 | 高い | 現在残高のみ | 一部利用者は制限、明細なし。暗証保存を増やすため不採用 |
-| [メール/push通知](https://www.smbc.co.jp/kojin/direct/service/resources/pdf/goriyou_tebiki.pdf?version=260601)の取込 | 2/5 | 高い | 振込入金や引落予定など一部event | Global Service/SMBC Debit等の除外があり補助sourceに限定 |
+| 案                                                                                                                   |  実装コスト | 自動化レベル                           | データ範囲                                  | 判断                                                                                         |
+| -------------------------------------------------------------------------------------------------------------------- | ----------: | -------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `mnie`調査を参考に読み取り処理を分離                                                                                 |         3/5 | 初回/再ログインは有人、認証後は自動    | 普通預金残高・期間明細                      | **Worker PoC実装済み**。`mnie` runtime dependencyなし                                        |
+| Safety Pass正規承認orchestrator                                                                                      |         3/5 | QR提示後の生体承認と完了操作は有人     | 認証済みWeb session                         | **Worker PoC実装済み**。公式アプリを変更しない                                               |
+| Webブラウザで公式CSVを取得                                                                                           |         3/5 | アプリ承認は有人、その後は自動         | Web通帳普通・外貨等、画面が対応する科目     | 検算・fallbackとして有用                                                                     |
+| Web内部プロトコルを複数口座・外貨・定期へ拡張                                                                        |         4/5 | 認証後は自動                           | 口座一覧、複数科目、預入ロット              | 普通預金MVP後に実施                                                                          |
+| 公式アプリをUI自動化                                                                                                 |         5/5 | 生体認証で有人、端末保守も必要         | アプリ表示全般                              | 非推奨                                                                                       |
+| Safety Passを公式手順で解除                                                                                          |         1/5 | 資格情報ログインが継続する間は完全無人 | Webで読める範囲                             | 唯一の直接的な完全無人案だが、明示的なsecurity downgradeと設定変更。既定では不採用           |
+| Safety Pass登録端末/profileをコピー                                                                                  |     5/5以上 | 不成立                                 | 認証機構                                    | Keystore秘密鍵がnon-exportableかつ毎回生体認証。**不採用**                                   |
+| 専用Android emulator                                                                                                 |     5/5以上 | 生体/attestationで無人化できない       | アプリ表示全般                              | Keystore、BiometricPrompt、Transmit attestation、root検知があり、serverless経路にならない    |
+| 契約済みaggregator API                                                                                               | Kogane側1/5 | 高い                                   | 広い                                        | 方針により不採用                                                                             |
+| Money Forward既存passkey + SMBC API連携                                                                              |         2/5 | 完全無人loginを実証                    | Money Forwardへ取得済みの円・外貨残高・明細 | 正本にはしないが、Safety Passなしの実動fallback                                              |
+| 個人向け公式外部連携token                                                                                            | Kogane側1/5 | 高い                                   | 残高・明細等                                | 仕組みは理想的だが、production接続は契約済み電子決済等代行業者に限定。self-service tokenなし |
+| [LINE残高照会](https://www.smbc.co.jp/sns/line/service.html)                                                         |         2/5 | 初回連携後は一定期間無人               | 主口座、直近1週間・最大100件という公開仕様  | 現行提供をlive確認してから補助候補。完全ledger/backfillには不足                              |
+| [店番号・口座・キャッシュカード暗証の残高照会](https://direct3.smbc.co.jp/aib/aibgsjsw1k12.jsp)                      |         1/5 | 高い                                   | 現在残高のみ                                | 一部利用者は制限、明細なし。暗証保存を増やすため不採用                                       |
+| [メール/push通知](https://www.smbc.co.jp/kojin/direct/service/resources/pdf/goriyou_tebiki.pdf?version=260601)の取込 |         2/5 | 高い                                   | 振込入金や引落予定など一部event             | Global Service/SMBC Debit等の除外があり補助sourceに限定                                      |
 
 ## 初期調査時の推奨方針と実装後の確認項目
 

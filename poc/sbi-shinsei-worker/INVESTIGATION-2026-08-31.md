@@ -18,19 +18,19 @@ This is transport evidence only. It does not prove that a token can be moved to 
 
 ### Read candidates found in the public bundle
 
-| Operation ID | Exact path | Intended UI family | Current state |
-| --- | --- | --- | --- |
-| `top.accounts-balance-and-activity` | `/SFC/app/IFTP_TopAdapter/getAccountsBalanceAndActivity` | top-page balances/activity | authenticated 200; strict schema; enabled in same-page collector |
-| `top.balance-summary-and-stage` | `/SFC/app/IFTP_TopAdapter/getBalanceSummaryAndStage` | summary/stage | authenticated 200; strict schema; enabled in same-page collector |
-| `common.account-information-list` | `/SFC/app/IFCM_CommonAdapter/getAccountInformationListDisplay` | account information list | disabled; response unknown |
-| `common.product-description` | `/SFC/app/IFCM_CommonAdapter/getProductDescription` | product labels/descriptions | disabled; response unknown |
-| `account.information-others` | `/SFC/app/IFAI_AccountAdapter/getAccountInformationOthersDisplay` | other account information | disabled; response unknown |
-| `account.casa-activity-specific-period` | `/SFC/app/IFAI_AccountAdapter/getCasaAccountActivitySpecificPeriod` | selected-period savings activity | disabled; response unknown |
-| `account.account-list` | `/SFC/app/AIAI_AccountInfomationAdapter/getAccountList` | account list | disabled; response unknown |
-| `account.inbox-list` | `/SFC/app/AIAI_AccountInfomationAdapter/getInboxList` | inbox/notices | disabled; response unknown |
-| `yen-deposit.product-details` | `/SFC/app/AIYD_YenDepositAdapter/getYenProductDetails` | yen deposit holdings | disabled; response unknown |
-| `yen-deposit.account` | `/SFC/app/AIYD_YenDepositAdapter/getYenDepositAccount` | yen deposit account | authenticated 200; strict schema; enabled in same-page collector |
-| `csv.download` | `/SFC/adapters/IFAI_CsvDownloadAdapter/csvDownload/getCsv` | desktop CSV export | disabled; response/body unknown |
+| Operation ID                            | Exact path                                                          | Intended UI family               | Current state                                                    |
+| --------------------------------------- | ------------------------------------------------------------------- | -------------------------------- | ---------------------------------------------------------------- |
+| `top.accounts-balance-and-activity`     | `/SFC/app/IFTP_TopAdapter/getAccountsBalanceAndActivity`            | top-page balances/activity       | authenticated 200; strict schema; enabled in same-page collector |
+| `top.balance-summary-and-stage`         | `/SFC/app/IFTP_TopAdapter/getBalanceSummaryAndStage`                | summary/stage                    | authenticated 200; strict schema; enabled in same-page collector |
+| `common.account-information-list`       | `/SFC/app/IFCM_CommonAdapter/getAccountInformationListDisplay`      | account information list         | disabled; response unknown                                       |
+| `common.product-description`            | `/SFC/app/IFCM_CommonAdapter/getProductDescription`                 | product labels/descriptions      | disabled; response unknown                                       |
+| `account.information-others`            | `/SFC/app/IFAI_AccountAdapter/getAccountInformationOthersDisplay`   | other account information        | disabled; response unknown                                       |
+| `account.casa-activity-specific-period` | `/SFC/app/IFAI_AccountAdapter/getCasaAccountActivitySpecificPeriod` | selected-period savings activity | disabled; response unknown                                       |
+| `account.account-list`                  | `/SFC/app/AIAI_AccountInfomationAdapter/getAccountList`             | account list                     | disabled; response unknown                                       |
+| `account.inbox-list`                    | `/SFC/app/AIAI_AccountInfomationAdapter/getInboxList`               | inbox/notices                    | disabled; response unknown                                       |
+| `yen-deposit.product-details`           | `/SFC/app/AIYD_YenDepositAdapter/getYenProductDetails`              | yen deposit holdings             | disabled; response unknown                                       |
+| `yen-deposit.account`                   | `/SFC/app/AIYD_YenDepositAdapter/getYenDepositAccount`              | yen deposit account              | authenticated 200; strict schema; enabled in same-page collector |
+| `csv.download`                          | `/SFC/adapters/IFAI_CsvDownloadAdapter/csvDownload/getCsv`          | desktop CSV export               | disabled; response/body unknown                                  |
 
 `AIAI_AccountInfomationAdapter` retains the spelling observed in the public client. It is not corrected because the catalog requires exact paths.
 

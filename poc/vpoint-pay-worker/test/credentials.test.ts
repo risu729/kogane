@@ -15,8 +15,9 @@ describe("V Point Pay credential diagnostics", () => {
   });
 
   test("rejects missing UUID before credentials can be seeded", () => {
-    expect(() => credentialFromSecrets({ VPOINT_PAY_REFRESH_TOKEN: "private-test-token" }))
-      .toThrow("missing=device-uuid");
+    expect(() => credentialFromSecrets({ VPOINT_PAY_REFRESH_TOKEN: "private-test-token" })).toThrow(
+      "missing=device-uuid",
+    );
   });
 
   test("malformed UUID errors never include either secret value", () => {
@@ -47,14 +48,17 @@ describe("V Point Pay credential diagnostics", () => {
     });
     expect(JSON.stringify(status)).not.toContain(credential.refreshToken);
     expect(JSON.stringify(status)).not.toContain(UUID);
-    expect(credentialFromSecrets({
-      VPOINT_PAY_REFRESH_TOKEN: credential.refreshToken,
-      VPOINT_PAY_DEVICE_UUID: credential.deviceUuid,
-    })).toEqual(credential);
+    expect(
+      credentialFromSecrets({
+        VPOINT_PAY_REFRESH_TOKEN: credential.refreshToken,
+        VPOINT_PAY_DEVICE_UUID: credential.deviceUuid,
+      }),
+    ).toEqual(credential);
   });
 
   test("blank configuration is reported as missing", () => {
-    expect(inspectCredential({ refreshToken: "  ", deviceUuid: " " }, "worker-secrets").missingFields)
-      .toEqual(["refresh-token", "device-uuid"]);
+    expect(
+      inspectCredential({ refreshToken: "  ", deviceUuid: " " }, "worker-secrets").missingFields,
+    ).toEqual(["refresh-token", "device-uuid"]);
   });
 });

@@ -66,7 +66,7 @@ portable to Workers as-is.
   observation, and stop discarding unrecognized note lines (`log.warn`) —
   carry them into the observation instead.
 - **Adapt `downloader.ts`.** As written it deletes the source file
-  (`unlink`) and decodes Shift-JIS + `normalize("NFKC")` *before* saving.
+  (`unlink`) and decodes Shift-JIS + `normalize("NFKC")` _before_ saving.
   Kogane needs the opposite order: save the raw bytes first
   (`exports/<date>/smcc-card/`, content-addressed), then decode in the
   parser. This is exactly the "browser downloads are not reliably captured
@@ -122,7 +122,7 @@ SBI Securities, SMBC, Mobile Suica, and PayPay balances.
 to typed objects; the response bytes are not retained (its only SHA-256 use
 is hashing an account id). That violates Kogane's first principle. Because
 the transport is plain `fetch`, the fix is small: wrap `fetch` so the raw
-response is written to `raw_objects` (keyed by SHA-256) *before* the
+response is written to `raw_objects` (keyed by SHA-256) _before_ the
 provider parses it. A Playwright-based tool could not be adapted this way;
 mnie can.
 
@@ -165,7 +165,7 @@ Go + Playwright.
   hybrid deposit).
 - **Not adopted**: Go does not run on Workers, and Playwright is browser
   automation (the lowest-preference collection method, and hard to run on
-  Cron). Read it for *which DOM nodes / endpoints hold which data*, then
+  Cron). Read it for _which DOM nodes / endpoints hold which data_, then
   implement via replayed internal APIs where possible.
 
 ## Type model as prior art
@@ -250,5 +250,5 @@ existing tools change what "cheapest" means per source:
 2. Replayed internal API — **already implemented** by mnie for SBI Sec,
    SMBC, Mobile Suica, PayPay; by smcc-meisai-scraper for the Vpass card.
 3. Email statements.
-4. Browser automation — acctf as a *reference* for what to extract.
+4. Browser automation — acctf as a _reference_ for what to extract.
 5. Manual entry / kuebiko-only capture for long-tail sources.

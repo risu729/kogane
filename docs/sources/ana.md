@@ -38,14 +38,14 @@
 
 ## 3. 公式経路、粒度、期間、export
 
-| 経路 | read範囲 | 粒度/state | 期間/件数/export | tradeoff |
-| --- | --- | --- | --- | --- |
-| ANA Mileage Club app / ANA Pay home | ANA Pay残高、利用履歴、チャージ、決済 | wallet event。取消・返金/cashbackを含む | 原則12か月。iOS最大999件、Android全履歴表示。app外確認・印刷不可 | 公式正本だがdevice-bound |
-| ANA Pay internal read API候補 | 残高、登録source状態、履歴 | JSON event、pageNumber/pageSize | 公開実装はpaginationを実装。公式APIではない | headless候補だがdevice ID/token境界が重い |
-| AMC Web | グループ別マイル残高、積算/利用実績、有効期限、PP、SKY コイン | accrual/redemption単位。用途・期間限定groupを分離 | live UIの選択期間/件数上限は未確認。公式CSV/PDF未確認 | browser bootstrap後のDOM/export候補 |
-| AMC app | マイル/期限/PP、ANA Pay入口、デジタル会員証 | mobile summary/detail | export未確認 | account統合表示は便利、UI automationは高コスト |
-| 公式通知/email | 積算/期限等の通知 | event通知、ledgerではない | 網羅性なし | 補助証拠のみ |
-| ANAカードファミリーマイル | 特典利用時の家族合算可能額 | 個人口座の所有権/期限を維持したpool | family全履歴exportではない | 家族明細をprime会員個人口座に混ぜない |
+| 経路                                | read範囲                                                      | 粒度/state                                        | 期間/件数/export                                                 | tradeoff                                       |
+| ----------------------------------- | ------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------- |
+| ANA Mileage Club app / ANA Pay home | ANA Pay残高、利用履歴、チャージ、決済                         | wallet event。取消・返金/cashbackを含む           | 原則12か月。iOS最大999件、Android全履歴表示。app外確認・印刷不可 | 公式正本だがdevice-bound                       |
+| ANA Pay internal read API候補       | 残高、登録source状態、履歴                                    | JSON event、pageNumber/pageSize                   | 公開実装はpaginationを実装。公式APIではない                      | headless候補だがdevice ID/token境界が重い      |
+| AMC Web                             | グループ別マイル残高、積算/利用実績、有効期限、PP、SKY コイン | accrual/redemption単位。用途・期間限定groupを分離 | live UIの選択期間/件数上限は未確認。公式CSV/PDF未確認            | browser bootstrap後のDOM/export候補            |
+| AMC app                             | マイル/期限/PP、ANA Pay入口、デジタル会員証                   | mobile summary/detail                             | export未確認                                                     | account統合表示は便利、UI automationは高コスト |
+| 公式通知/email                      | 積算/期限等の通知                                             | event通知、ledgerではない                         | 網羅性なし                                                       | 補助証拠のみ                                   |
+| ANAカードファミリーマイル           | 特典利用時の家族合算可能額                                    | 個人口座の所有権/期限を維持したpool               | family全履歴exportではない                                       | 家族明細をprime会員個人口座に混ぜない          |
 
 ### ANA Pay
 
@@ -139,15 +139,15 @@ form送信や全期間paginationは別途live確認する。
 
 ## 8. Runtime適性
 
-| runtime | 適性 | 判断 |
-| --- | --- | --- |
-| local browser / owner device | 最適 | OTP/device bootstrap、公式表示、redacted observation |
-| Local WSL | 適 | APK/JS/DOM parser、暗号化artifact処理 |
-| Cloudflare Workers | 条件付き | proven ANA Pay GET/AMC replayなら可能。bootstrap、Akamai、device ID/token運用が課題 |
-| Cloudflare Containers | 適 | browser/parserを隔離できるがdevice trustはない |
-| OCI container | 適 | digest固定、secret store、read-only FS、egress allowlistでreplay実験向き |
-| Kubernetes | 過剰 | CronJob/Secret/NetworkPolicyは可能だが単一accountにはcost大 |
-| Android実機 | ANA Pay調査に必須 | 正規app/device state。定常UI automationは更新・生体・write UIで脆い |
+| runtime                      | 適性              | 判断                                                                                |
+| ---------------------------- | ----------------- | ----------------------------------------------------------------------------------- |
+| local browser / owner device | 最適              | OTP/device bootstrap、公式表示、redacted observation                                |
+| Local WSL                    | 適                | APK/JS/DOM parser、暗号化artifact処理                                               |
+| Cloudflare Workers           | 条件付き          | proven ANA Pay GET/AMC replayなら可能。bootstrap、Akamai、device ID/token運用が課題 |
+| Cloudflare Containers        | 適                | browser/parserを隔離できるがdevice trustはない                                      |
+| OCI container                | 適                | digest固定、secret store、read-only FS、egress allowlistでreplay実験向き            |
+| Kubernetes                   | 過剰              | CronJob/Secret/NetworkPolicyは可能だが単一accountにはcost大                         |
+| Android実機                  | ANA Pay調査に必須 | 正規app/device state。定常UI automationは更新・生体・write UIで脆い                 |
 
 ## 9. PR #5共通 A-E / cost
 
@@ -158,14 +158,14 @@ form送信や全期間paginationは別途live確認する。
 - E: manual capture remains safe default
 - Cost: 1 = small wrapper、5 = device-bound/adversarial
 
-| route | Level | Cost | 判定 |
-| --- | ---: | ---: | --- |
-| AMC表示明細をuserscript/manual CSV化 | E | 1-2 | 安全な初期経路。表示期間/retention未確認 |
-| ANA Pay app履歴manual capture | E | 2 | 12か月・platform件数制限。公式exportなし |
-| ANA Pay local bootstrap + GET replay | C候補 | 4 | endpoint/schema具体的。token renewal/device binding未確認 |
-| AMC browser bootstrap + DOM/read replay | C | 3-4 | 現行DOM実装あり。OTP/Akamai/session寿命が課題 |
-| ANA Pay/AMC app UI automation | D | 5 | device、生体、頻繁な更新、write隣接 |
-| documented consumer API | A該当なし | 5 | 公開公式API/exportなし |
+| route                                   |     Level | Cost | 判定                                                      |
+| --------------------------------------- | --------: | ---: | --------------------------------------------------------- |
+| AMC表示明細をuserscript/manual CSV化    |         E |  1-2 | 安全な初期経路。表示期間/retention未確認                  |
+| ANA Pay app履歴manual capture           |         E |    2 | 12か月・platform件数制限。公式exportなし                  |
+| ANA Pay local bootstrap + GET replay    |     C候補 |    4 | endpoint/schema具体的。token renewal/device binding未確認 |
+| AMC browser bootstrap + DOM/read replay |         C |  3-4 | 現行DOM実装あり。OTP/Akamai/session寿命が課題             |
+| ANA Pay/AMC app UI automation           |         D |    5 | device、生体、頻繁な更新、write隣接                       |
+| documented consumer API                 | A該当なし |    5 | 公開公式API/exportなし                                    |
 
 総合は **C候補/cost 4**。安全な初期経路はAMCがE/cost 1-2、ANA PayがE/cost 2。ANA Pay read APIの
 renewalとscope/device bindingを実証できればB候補へ再評価する。

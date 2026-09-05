@@ -1,8 +1,6 @@
 import { Impit } from "impit";
 
-const response = await new Impit({ browser: "chrome142" }).fetch(
-  "https://tls.peet.ws/api/all",
-);
+const response = await new Impit({ browser: "chrome142" }).fetch("https://tls.peet.ws/api/all");
 if (!response.ok) throw new Error(`Fingerprint endpoint returned ${response.status}`);
 const value: unknown = await response.json();
 

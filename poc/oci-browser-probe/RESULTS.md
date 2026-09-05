@@ -6,20 +6,20 @@ repository or probe output.
 
 ## Results
 
-| Runtime | Browser surface | Egress observed by that browser | Login page | Authentication |
-| --- | --- | --- | --- | --- |
-| Windows Kuebiko, existing dedicated profile | Chrome 153, `Win32`, `webdriver=false`, five configured languages | host route was Cloudflare WARP/Gateway, AU; the capture tab's exact egress could not be queried because Kuebiko blocked the test endpoint | 200 | success; authenticated statement page rendered |
-| Windows Kuebiko, completely new profile | same Chrome 153, `Win32`, `webdriver=false`, default `en-US` language | same host and route class as the successful run | 200 | 403 from `/memapi/jaxrs/xt_login/agree/v1` |
-| Windows Kuebiko, new `ja-JP` profile, normal 1920x1080 window | same Chrome 153, `Win32`, `webdriver=false`; OS-level input | same Windows host and route class | 200 | success; native form returned 302 and the authenticated My Page loaded |
-| OCI Playwright launch | official Chrome 151, headless, `Linux x86_64`, `webdriver=true` | `138.2.53.208`, JP | 403 | not attempted |
-| OCI headed CDP | official Chrome 151, `Linux x86_64`, `webdriver=false` | `138.2.53.208`, JP | 200 | 403 from `/memapi/jaxrs/xt_login/agree/v1` |
-| OCI Playwright launch | bundled Chromium 151, headless, `Linux x86_64`, `webdriver=true` | `138.2.53.208`, JP | 403 | not attempted |
-| OCI headed CDP | bundled Chromium 151, `Linux x86_64`, `webdriver=false` | `138.2.53.208`, JP | 200 | 403 from `/memapi/jaxrs/xt_login/agree/v1` |
-| local WSL headed CDP | official Chrome 151, `Linux x86_64`, `webdriver=false` | `104.28.196.200`, Cloudflare WARP/Gateway, AU | 200 | 403 from `/memapi/jaxrs/xt_login/agree/v1` |
-| local Linux Docker | Camoufox Firefox 152 with coherent Windows fingerprint, `Win32`, Direct3D-style WebGL, `webdriver=false` | Cloudflare WARP/Gateway, AU/SYD | 200 | 403 from `/memapi/jaxrs/xt_login/agree/v1` |
-| local Linux Docker | Camoufox Firefox 152 with coherent macOS fingerprint, `MacIntel`, Apple M1-style WebGL, `webdriver=false` | Cloudflare WARP/Gateway, AU/SYD | 200 | no expected login POST; inconclusive |
-| local Linux Docker | Kameleo Chroma 152 with coherent Windows Chrome fingerprint, `Win32`, Direct3D 11 WebGL, `webdriver=false` | Cloudflare WARP/Gateway, AU/SYD | 200 | 403 from `/memapi/jaxrs/xt_login/agree/v1` |
-| local Linux Docker, persistent profile | same Kameleo Windows Chrome family, public-site warm-up and human-like input | Cloudflare WARP/Gateway, AU/SYD | 200 | test click did not submit; inconclusive |
+| Runtime                                                       | Browser surface                                                                                            | Egress observed by that browser                                                                                                           | Login page | Authentication                                                         |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------------------- |
+| Windows Kuebiko, existing dedicated profile                   | Chrome 153, `Win32`, `webdriver=false`, five configured languages                                          | host route was Cloudflare WARP/Gateway, AU; the capture tab's exact egress could not be queried because Kuebiko blocked the test endpoint | 200        | success; authenticated statement page rendered                         |
+| Windows Kuebiko, completely new profile                       | same Chrome 153, `Win32`, `webdriver=false`, default `en-US` language                                      | same host and route class as the successful run                                                                                           | 200        | 403 from `/memapi/jaxrs/xt_login/agree/v1`                             |
+| Windows Kuebiko, new `ja-JP` profile, normal 1920x1080 window | same Chrome 153, `Win32`, `webdriver=false`; OS-level input                                                | same Windows host and route class                                                                                                         | 200        | success; native form returned 302 and the authenticated My Page loaded |
+| OCI Playwright launch                                         | official Chrome 151, headless, `Linux x86_64`, `webdriver=true`                                            | `138.2.53.208`, JP                                                                                                                        | 403        | not attempted                                                          |
+| OCI headed CDP                                                | official Chrome 151, `Linux x86_64`, `webdriver=false`                                                     | `138.2.53.208`, JP                                                                                                                        | 200        | 403 from `/memapi/jaxrs/xt_login/agree/v1`                             |
+| OCI Playwright launch                                         | bundled Chromium 151, headless, `Linux x86_64`, `webdriver=true`                                           | `138.2.53.208`, JP                                                                                                                        | 403        | not attempted                                                          |
+| OCI headed CDP                                                | bundled Chromium 151, `Linux x86_64`, `webdriver=false`                                                    | `138.2.53.208`, JP                                                                                                                        | 200        | 403 from `/memapi/jaxrs/xt_login/agree/v1`                             |
+| local WSL headed CDP                                          | official Chrome 151, `Linux x86_64`, `webdriver=false`                                                     | `104.28.196.200`, Cloudflare WARP/Gateway, AU                                                                                             | 200        | 403 from `/memapi/jaxrs/xt_login/agree/v1`                             |
+| local Linux Docker                                            | Camoufox Firefox 152 with coherent Windows fingerprint, `Win32`, Direct3D-style WebGL, `webdriver=false`   | Cloudflare WARP/Gateway, AU/SYD                                                                                                           | 200        | 403 from `/memapi/jaxrs/xt_login/agree/v1`                             |
+| local Linux Docker                                            | Camoufox Firefox 152 with coherent macOS fingerprint, `MacIntel`, Apple M1-style WebGL, `webdriver=false`  | Cloudflare WARP/Gateway, AU/SYD                                                                                                           | 200        | no expected login POST; inconclusive                                   |
+| local Linux Docker                                            | Kameleo Chroma 152 with coherent Windows Chrome fingerprint, `Win32`, Direct3D 11 WebGL, `webdriver=false` | Cloudflare WARP/Gateway, AU/SYD                                                                                                           | 200        | 403 from `/memapi/jaxrs/xt_login/agree/v1`                             |
+| local Linux Docker, persistent profile                        | same Kameleo Windows Chrome family, public-site warm-up and human-like input                               | Cloudflare WARP/Gateway, AU/SYD                                                                                                           | 200        | test click did not submit; inconclusive                                |
 
 The Windows host and WSL shared the same Cloudflare WARP/Gateway route and AU
 country classification at test time. A Japanese residential egress is therefore
@@ -40,16 +40,16 @@ Each row below used a distinct profile and exactly one real login POST. Aborted
 runs with no login POST are excluded. Dwell is measured from the saved login-page
 response to the saved form request.
 
-| Capture | Locale | Initial window | Dwell | Result |
-| --- | --- | --- | ---: | --- |
-| `11-23-06` | `ja-JP,ja,en-US,en` | normal | 157.3 s | 302 success |
-| `12-02-09` | `ja-JP,ja,en-US,en` | normal | 203.8 s | 302 success |
-| `12-07-07` | `en-US,en` | normal | 490.5 s | 302 success |
-| `12-19-53` | `en-US,en` | normal | 30.1 s | Akamai 403 |
-| `12-22-45` | `en-US,en` | minimized, `outer=0x0` | 210.7 s | 302 success |
-| `12-27-24` | `en-US,en` | normal | 94.5 s | Akamai 403 |
-| `12-31-27` | `en-US,en` | normal | 139.4 s | Akamai 403 |
-| `12-34-58` | `en-US,en` | normal | 171.1 s | Akamai 403 |
+| Capture    | Locale              | Initial window         |   Dwell | Result      |
+| ---------- | ------------------- | ---------------------- | ------: | ----------- |
+| `11-23-06` | `ja-JP,ja,en-US,en` | normal                 | 157.3 s | 302 success |
+| `12-02-09` | `ja-JP,ja,en-US,en` | normal                 | 203.8 s | 302 success |
+| `12-07-07` | `en-US,en`          | normal                 | 490.5 s | 302 success |
+| `12-19-53` | `en-US,en`          | normal                 |  30.1 s | Akamai 403  |
+| `12-22-45` | `en-US,en`          | minimized, `outer=0x0` | 210.7 s | 302 success |
+| `12-27-24` | `en-US,en`          | normal                 |  94.5 s | Akamai 403  |
+| `12-31-27` | `en-US,en`          | normal                 | 139.4 s | Akamai 403  |
+| `12-34-58` | `en-US,en`          | normal                 | 171.1 s | Akamai 403  |
 
 This rules out Japanese locale, normal initial geometry and the Tailscale exit
 node as individually necessary conditions. Longer dwell strongly improves the

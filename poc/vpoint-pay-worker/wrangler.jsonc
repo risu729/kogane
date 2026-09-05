@@ -39,11 +39,7 @@
     "COLLECTOR_SCHEMA_VERSION": "vpoint-pay-worker-poc-v1"
   },
   "secrets": {
-    "required": [
-      "VPOINT_PAY_REFRESH_TOKEN",
-      "VPOINT_PAY_DEVICE_UUID",
-      "ADMIN_TRIGGER_TOKEN"
-    ]
+    "required": ["VPOINT_PAY_REFRESH_TOKEN", "VPOINT_PAY_DEVICE_UUID", "ADMIN_TRIGGER_TOKEN"]
   },
   "triggers": {
     "crons": []

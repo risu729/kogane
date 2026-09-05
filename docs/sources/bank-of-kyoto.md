@@ -23,11 +23,11 @@ Reverse engineering、deobfuscation、本人操作下の read-only runtime traci
 
 京都銀行の [電子決済等代行業者との連携及び協働に係る方針](https://www.kyotobank.co.jp/api/policy/) は、個人契約者向け API の対象を次のように列挙している。
 
-| 機能 | 対象 |
-| --- | --- |
-| 残高照会 | 普通預金、貯蓄預金、定期預金、積立式定期預金、外貨普通預金、投資信託 |
-| 入出金明細照会 | 普通預金、貯蓄預金、外貨普通預金 |
-| 定期明細照会 | 定期預金、積立式定期預金、外貨定期預金 |
+| 機能           | 対象                                                                 |
+| -------------- | -------------------------------------------------------------------- |
+| 残高照会       | 普通預金、貯蓄預金、定期預金、積立式定期預金、外貨普通預金、投資信託 |
+| 入出金明細照会 | 普通預金、貯蓄預金、外貨普通預金                                     |
+| 定期明細照会   | 定期預金、積立式定期預金、外貨定期預金                               |
 
 キャッシュカード保有者向けの事前登録不要型 API については、普通預金の残高・入出金明細・同一名義口座間振替のみが示されている。Kogane は取引 API を使用しない。
 
@@ -107,12 +107,12 @@ Reverse engineering、deobfuscation、本人操作下の read-only runtime traci
 
 ## 5. 公式 APK / アプリ / Web の役割
 
-| 面 | 確認できた役割 | collector 観点 |
-| --- | --- | --- |
+| 面                 | 確認できた役割                                                                                                                                                                                                                                                                                                                                                                                                                             | collector 観点                                                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Android 公式アプリ | 京都銀行の[公式アプリページ](https://www.kyotobank.co.jp/kojin/kyoginapp/)から遷移する Google Play package [`jp.co.kyoto.bankingappli`](https://play.google.com/store/apps/details?id=jp.co.kyoto.bankingappli&hl=ja&gl=JP)。2026-08-26 取得の Play metadata は version **10.0.0**、更新日 **2026-02-19**、developer **THE BANK OF KYOTO, LTD.**。口座照会、スマート通帳、CSV/PDF、振込等、OTP、口座開設、My Number/NFC、スマホ ATM を提供 | 手動 CSV/PDF の正式出口。static/runtime analysis で native/WebView、read transport、local history storage、export schema を切り分ける。OTP・端末登録等の write 面は触らない |
-| iOS 公式アプリ | App Store ID [`1211133839`](https://apps.apple.com/jp/app/id1211133839) | Android と同じ利用者向け役割。自動 collector の実行基盤にはしない |
-| Web | [京銀ダイレクトバンキング](https://www.kyotobank.co.jp/kojin/directb/) から NTT DATA AnserParaSOL へ遷移し、口座/明細/各種取引を提供 | 公開資料で CSV は確認できず、短期照会と印刷は確認。HTML replay は非公式で fragile |
-| 公式 Open API | 契約済み電子決済等代行業者へ口座・残高・明細・定期・投信等を JSON 提供 | 最も構造化されるが、契約と審査が必要 |
+| iOS 公式アプリ     | App Store ID [`1211133839`](https://apps.apple.com/jp/app/id1211133839)                                                                                                                                                                                                                                                                                                                                                                    | Android と同じ利用者向け役割。自動 collector の実行基盤にはしない                                                                                                           |
+| Web                | [京銀ダイレクトバンキング](https://www.kyotobank.co.jp/kojin/directb/) から NTT DATA AnserParaSOL へ遷移し、口座/明細/各種取引を提供                                                                                                                                                                                                                                                                                                       | 公開資料で CSV は確認できず、短期照会と印刷は確認。HTML replay は非公式で fragile                                                                                           |
+| 公式 Open API      | 契約済み電子決済等代行業者へ口座・残高・明細・定期・投信等を JSON 提供                                                                                                                                                                                                                                                                                                                                                                     | 最も構造化されるが、契約と審査が必要                                                                                                                                        |
 
 ### 公式 Android artifact の取得状況と再現手順
 
@@ -135,12 +135,12 @@ Reverse engineering、deobfuscation、本人操作下の read-only runtime traci
 
 ### Web と app の read coverage
 
-| read 対象 | Web | app | 未確認点 |
-| --- | --- | --- | --- |
-| 普通・貯蓄の残高/入出金 | 対応。公開上の期間は前々月 1 日〜当日、印刷あり | 対応。スマート通帳は最大 1,000 明細、CSV/PDF | Web の CSV/PDF/件数、app の日付期間と schema |
-| 過去の普通・貯蓄明細 | 即時照会は上記短期。有料 10 年明細は申込であり write | 端末変更後も最大 1,000 明細を再記帳 | 1,000 件が server 再取得上限か local 保存上限か |
-| 外貨普通/外貨定期 | 対応。外貨普通は登録当初最大 6 か月、後に最大 13 か月 | 対応を公式案内 | app 内期間/export、native/API/WebView の別 |
-| 定期/積立式定期/投信/ローン | 各 read surface あり。投信は残高・損益・履歴等 | 各サービスを公式案内 | app が同一 transport か WebView 遷移か、export 可否 |
+| read 対象                   | Web                                                   | app                                          | 未確認点                                            |
+| --------------------------- | ----------------------------------------------------- | -------------------------------------------- | --------------------------------------------------- |
+| 普通・貯蓄の残高/入出金     | 対応。公開上の期間は前々月 1 日〜当日、印刷あり       | 対応。スマート通帳は最大 1,000 明細、CSV/PDF | Web の CSV/PDF/件数、app の日付期間と schema        |
+| 過去の普通・貯蓄明細        | 即時照会は上記短期。有料 10 年明細は申込であり write  | 端末変更後も最大 1,000 明細を再記帳          | 1,000 件が server 再取得上限か local 保存上限か     |
+| 外貨普通/外貨定期           | 対応。外貨普通は登録当初最大 6 か月、後に最大 13 か月 | 対応を公式案内                               | app 内期間/export、native/API/WebView の別          |
+| 定期/積立式定期/投信/ローン | 各 read surface あり。投信は残高・損益・履歴等        | 各サービスを公式案内                         | app が同一 transport か WebView 遷移か、export 可否 |
 
 ### 本人操作による read-only runtime metadata 観測
 
@@ -166,13 +166,13 @@ pinning、root/integrity/debug 検知、app 停止、追加認証、端末再登
 
 ## 7. Workers / Containers / OCI / Kubernetes 適性
 
-| 方式 | Workers | Cloudflare Containers | OCI/Kubernetes | 評価 |
-| --- | --- | --- | --- | --- |
-| 手動 CSV/PDF → upload/import | ◎ upload API、R2、D1、parser に適する | 不要 | 不要 | 認証を cloud に置かない。初期案 |
-| 契約済み公式 Open API | ○ HTTPS/OAuth/JSON は適する | 通常不要 | 通常不要 | client secret/refresh token を source-scoped secret として隔離。mTLS、固定 IP、HSM 要件は契約後確認 |
-| AnserParaSOL HTML browser automation | × DOM browser と対話認証が必要 | △ Playwright は可能だが、profile/OTP/追加認証/risk collector/保守が重い | △ 技術的には可能、運用上過剰 | static JS 調査済み。本人 local browser で read-only bootstrap/replay 境界を次に観測 |
-| Android static/runtime research | × | × 正規 split と本人端末が前提 | △ local Android toolchain container は補助に使えるが、端末操作は cluster に移せない | binary の jadx/apktool 等は container/OCI 可。runtime は user-owned physical Android が第一候補 |
-| Android UI automation | × | ×〜△ emulator、NFC/生体/端末 binding/integrity が障害 | △ emulator は可能でも高リスク | D/cost 5。static/runtime 証拠を取っても read API replay が成立しない場合のみ再評価 |
+| 方式                                 | Workers                               | Cloudflare Containers                                                   | OCI/Kubernetes                                                                      | 評価                                                                                                |
+| ------------------------------------ | ------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 手動 CSV/PDF → upload/import         | ◎ upload API、R2、D1、parser に適する | 不要                                                                    | 不要                                                                                | 認証を cloud に置かない。初期案                                                                     |
+| 契約済み公式 Open API                | ○ HTTPS/OAuth/JSON は適する           | 通常不要                                                                | 通常不要                                                                            | client secret/refresh token を source-scoped secret として隔離。mTLS、固定 IP、HSM 要件は契約後確認 |
+| AnserParaSOL HTML browser automation | × DOM browser と対話認証が必要        | △ Playwright は可能だが、profile/OTP/追加認証/risk collector/保守が重い | △ 技術的には可能、運用上過剰                                                        | static JS 調査済み。本人 local browser で read-only bootstrap/replay 境界を次に観測                 |
+| Android static/runtime research      | ×                                     | × 正規 split と本人端末が前提                                           | △ local Android toolchain container は補助に使えるが、端末操作は cluster に移せない | binary の jadx/apktool 等は container/OCI 可。runtime は user-owned physical Android が第一候補     |
+| Android UI automation                | ×                                     | ×〜△ emulator、NFC/生体/端末 binding/integrity が障害                   | △ emulator は可能でも高リスク                                                       | D/cost 5。static/runtime 証拠を取っても read API replay が成立しない場合のみ再評価                  |
 
 OCI/Kubernetes は長時間 browser/emulator と persistent volume を動かせるが、それは適性ではなく「実行できる」に過ぎない。個人口座の認証秘密を常駐 cluster へ移すコストと攻撃面が利益を上回る。
 
@@ -180,15 +180,15 @@ OCI/Kubernetes は長時間 browser/emulator と persistent volume を動かせ�
 
 共通評価は、A=documented/export API による scheduled headless、B=renewable/reusable session を使う安定した read-only internal API、C=browser/app bootstrap 後の headless replay、D=full browser/device UI automation、E=manual capture を安全な既定とする。コストは 1=小、5=契約/高保守/高リスク。
 
-| 候補 | 自動化 | コスト | 判断 |
-| --- | --- | --- | --- |
-| スマート通帳 CSV を手動出力し local importer へ渡す | E | 1 | 今すぐの推奨。最大 1,000 明細を定期保存 |
-| 利用者の手動 Web/app 閲覧を受動 metadata capture（body/認証 header 除外） | E | 2 | endpoint/schema discovery 用。method/origin/path template/status/field 名だけを即時 redaction する |
-| 契約済み事業者が提供する公式 API を Kogane が正規利用 | A | 3 | vendor の再提供 API、費用、規約次第。aggregator を初期経路にはしない |
-| 京都銀行と直接契約する AnserParaSOL API | A | 5 | transport は最良だが、電子決済等代行業者登録・審査・契約が個人プロジェクトの障壁 |
-| 認証済み AnserParaSOL read replay | C | 4 | dynamic state、fingerprint/ACSiON/CAFIS Brain/PWC、合言葉、OTP、session renewal、UI 変更の確認が必要。full browser 操作が残るなら D |
-| Android app transport を本人 bootstrap 後に read-only replay | C | 4 | static/runtime 証拠が未取得。renewable/reusable session と read endpoint が確認できなければ C は成立しない |
-| Android app の full device/UI automation | D | 5 | 端末 binding、NFC/生体、OTP、ストア更新、integrity/pinning 候補の保守が必要。調査対象だが安全な既定ではない |
+| 候補                                                                      | 自動化 | コスト | 判断                                                                                                                                |
+| ------------------------------------------------------------------------- | ------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| スマート通帳 CSV を手動出力し local importer へ渡す                       | E      | 1      | 今すぐの推奨。最大 1,000 明細を定期保存                                                                                             |
+| 利用者の手動 Web/app 閲覧を受動 metadata capture（body/認証 header 除外） | E      | 2      | endpoint/schema discovery 用。method/origin/path template/status/field 名だけを即時 redaction する                                  |
+| 契約済み事業者が提供する公式 API を Kogane が正規利用                     | A      | 3      | vendor の再提供 API、費用、規約次第。aggregator を初期経路にはしない                                                                |
+| 京都銀行と直接契約する AnserParaSOL API                                   | A      | 5      | transport は最良だが、電子決済等代行業者登録・審査・契約が個人プロジェクトの障壁                                                    |
+| 認証済み AnserParaSOL read replay                                         | C      | 4      | dynamic state、fingerprint/ACSiON/CAFIS Brain/PWC、合言葉、OTP、session renewal、UI 変更の確認が必要。full browser 操作が残るなら D |
+| Android app transport を本人 bootstrap 後に read-only replay              | C      | 4      | static/runtime 証拠が未取得。renewable/reusable session と read endpoint が確認できなければ C は成立しない                          |
+| Android app の full device/UI automation                                  | D      | 5      | 端末 binding、NFC/生体、OTP、ストア更新、integrity/pinning 候補の保守が必要。調査対象だが安全な既定ではない                         |
 
 ## 9. read-only live 検証計画と stop 条件
 

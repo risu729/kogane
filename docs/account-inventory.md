@@ -27,13 +27,13 @@ and conclusions attributable to the correct source.
 
 ### P0 — investigate first
 
-| Research unit | Direct official surfaces | Why first |
-| --- | --- | --- |
-| Mobile Suica / JRE ID / JRE POINT | Mobile Suica and JRE POINT; Google Wallet as an auxiliary view | SF history is time-limited; compare route coverage without treating Wallet as the source of record |
-| SMBC bank | SMBC Direct / Olive | Bank settlement and balances complement the existing Vpass collector |
-| SBI Securities | SBI Securities web/app | Broker source needed; strong existing client prior art |
-| PayPay | PayPay app | Stored value and points are separate observations |
-| Sumishin SBI Net Bank / DOCOMO SMTB Net Bank | Official app/web | Purpose accounts and hybrid deposit are separate balances |
+| Research unit                                | Direct official surfaces                                       | Why first                                                                                          |
+| -------------------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Mobile Suica / JRE ID / JRE POINT            | Mobile Suica and JRE POINT; Google Wallet as an auxiliary view | SF history is time-limited; compare route coverage without treating Wallet as the source of record |
+| SMBC bank                                    | SMBC Direct / Olive                                            | Bank settlement and balances complement the existing Vpass collector                               |
+| SBI Securities                               | SBI Securities web/app                                         | Broker source needed; strong existing client prior art                                             |
+| PayPay                                       | PayPay app                                                     | Stored value and points are separate observations                                                  |
+| Sumishin SBI Net Bank / DOCOMO SMTB Net Bank | Official app/web                                               | Purpose accounts and hybrid deposit are separate balances                                          |
 
 ### P1 — direct banks, brokers, and multi-currency accounts
 

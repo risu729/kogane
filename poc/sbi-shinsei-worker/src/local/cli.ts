@@ -29,10 +29,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const credentialJson = await loadCredentialJson(
-    options.credentialFile,
-    options.credentialStdin,
-  );
+  const credentialJson = await loadCredentialJson(options.credentialFile, options.credentialStdin);
   const startedAt = new Date().toISOString();
   const credential = parseCredential(credentialJson);
   const result = await new WindowsChromeContextCollector().collect(credential);
@@ -112,10 +109,7 @@ async function loadCredentialJson(
   }
   const environmentValue = process.env.SBI_SHINSEI_CREDENTIAL_JSON;
   if (environmentValue) return environmentValue;
-  const handle = await open(
-    credentialFile,
-    constants.O_RDONLY | constants.O_NOFOLLOW,
-  );
+  const handle = await open(credentialFile, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const metadata = await handle.stat();
     if (!metadata.isFile()) {
@@ -149,10 +143,12 @@ function publicError(error: unknown): string {
 }
 
 main().catch((error: unknown) => {
-  console.error(JSON.stringify({
-    event: "sbi-shinsei-local-failed",
-    errorType: error instanceof Error ? error.name : "UnknownError",
-    message: publicError(error),
-  }));
+  console.error(
+    JSON.stringify({
+      event: "sbi-shinsei-local-failed",
+      errorType: error instanceof Error ? error.name : "UnknownError",
+      message: publicError(error),
+    }),
+  );
   process.exitCode = 1;
 });

@@ -11,13 +11,18 @@ describe("Sony Bank immutable R2 storage", () => {
   test("binds new artifacts to their source and run and writes the manifest last", async () => {
     const calls: PutCall[] = [];
     const bucket = {
-      put: async (key: string, value: string | ArrayBuffer | ArrayBufferView, options: R2PutOptions) => {
+      put: async (
+        key: string,
+        value: string | ArrayBuffer | ArrayBufferView,
+        options: R2PutOptions,
+      ) => {
         calls.push({ key, options });
-        const bytes = typeof value === "string"
-          ? new TextEncoder().encode(value)
-          : value instanceof ArrayBuffer
-            ? new Uint8Array(value)
-            : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+        const bytes =
+          typeof value === "string"
+            ? new TextEncoder().encode(value)
+            : value instanceof ArrayBuffer
+              ? new Uint8Array(value)
+              : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
         const sha256 = options.sha256 as Uint8Array;
         return {
           key,

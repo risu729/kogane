@@ -55,13 +55,13 @@ runtime behavior remain provisional.
 
 ## Official entry points
 
-| Surface | Official entry | Read-only data | Important constraint |
-| --- | --- | --- | --- |
-| PRESTIA Online (desktop) | [`login.smbctb.co.jp`](https://login.smbctb.co.jp/ib/portal/POSNIN1prestiatop.prst?LOCALE=ja_JP) | Balance summary, account details/activity, PDF statements, domestic-transfer acceptance history, overseas-remittance history | Only official channel that downloads account activity as CSV. |
-| PRESTIA Mobile (mobile web) | [`mlogin.smbctb.co.jp`](https://mlogin.smbctb.co.jp/ib/portal/POSNIN1prestiatop.prst?LOCALE=ja_JP) | Balances, activity and statements broadly matching Online | No account-activity download. |
-| SMBC Trust Bank app | [Official feature page](https://www.smbctb.co.jp/service/app/banking/), [Google Play](https://play.google.com/store/apps/details?id=jp.co.smbctb.prestia_app) | Bank-account balance, details/activity, statements and mobile banking menus | First sign-on needs Online ID/password; later biometric sign-on is device-oriented; no account-activity download. Official materials do not list full GLOBAL PASS Visa-card activity as an app function. |
-| GLOBAL PASS member website | Current official short entry [`http://vpass.jp/globalpass/`](http://vpass.jp/globalpass/) via the bank's [official guide](https://www.smbctb.co.jp/product/globalpass/guide.html); observed login host [`www.debit.vpass.ne.jp`](https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006) | Visa debit shopping/overseas-ATM detail, pending status, limits and card controls | Separate member credentials; login includes Turnstile and Nablarch form state. Collection must never visit write controls. |
-| Contracted account-information API | [Bank API policy](https://www.smbctb.co.jp/eaea/) | Account list, yen/FX/structured-deposit/fund balances, account activity, FX rates | Available to contracted electronic-payment intermediary operators, not published as a personal developer API. Current partners are listed on the bank's [contract page](https://www.smbctb.co.jp/dendai/detail.html). This path is intentionally excluded. |
+| Surface                            | Official entry                                                                                                                                                                                                                                                                                | Read-only data                                                                                                               | Important constraint                                                                                                                                                                                                                                       |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PRESTIA Online (desktop)           | [`login.smbctb.co.jp`](https://login.smbctb.co.jp/ib/portal/POSNIN1prestiatop.prst?LOCALE=ja_JP)                                                                                                                                                                                              | Balance summary, account details/activity, PDF statements, domestic-transfer acceptance history, overseas-remittance history | Only official channel that downloads account activity as CSV.                                                                                                                                                                                              |
+| PRESTIA Mobile (mobile web)        | [`mlogin.smbctb.co.jp`](https://mlogin.smbctb.co.jp/ib/portal/POSNIN1prestiatop.prst?LOCALE=ja_JP)                                                                                                                                                                                            | Balances, activity and statements broadly matching Online                                                                    | No account-activity download.                                                                                                                                                                                                                              |
+| SMBC Trust Bank app                | [Official feature page](https://www.smbctb.co.jp/service/app/banking/), [Google Play](https://play.google.com/store/apps/details?id=jp.co.smbctb.prestia_app)                                                                                                                                 | Bank-account balance, details/activity, statements and mobile banking menus                                                  | First sign-on needs Online ID/password; later biometric sign-on is device-oriented; no account-activity download. Official materials do not list full GLOBAL PASS Visa-card activity as an app function.                                                   |
+| GLOBAL PASS member website         | Current official short entry [`http://vpass.jp/globalpass/`](http://vpass.jp/globalpass/) via the bank's [official guide](https://www.smbctb.co.jp/product/globalpass/guide.html); observed login host [`www.debit.vpass.ne.jp`](https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006) | Visa debit shopping/overseas-ATM detail, pending status, limits and card controls                                            | Separate member credentials; login includes Turnstile and Nablarch form state. Collection must never visit write controls.                                                                                                                                 |
+| Contracted account-information API | [Bank API policy](https://www.smbctb.co.jp/eaea/)                                                                                                                                                                                                                                             | Account list, yen/FX/structured-deposit/fund balances, account activity, FX rates                                            | Available to contracted electronic-payment intermediary operators, not published as a personal developer API. Current partners are listed on the bank's [contract page](https://www.smbctb.co.jp/dendai/detail.html). This path is intentionally excluded. |
 
 The bank documents that desktop, mobile web, and the app share most online
 banking menus, but explicitly excludes activity downloads from mobile web and
@@ -76,8 +76,7 @@ vanity host itself serves the application.
 
 ## Live transport validation: 2026-08-27
 
-The checks used the dedicated Kogane Capture profile on Windows Chrome Beta
-153. The network exited through Cloudflare WARP/Gateway in Sydney, Australia.
+The checks used the dedicated Kogane Capture profile on Windows Chrome Beta 153. The network exited through Cloudflare WARP/Gateway in Sydney, Australia.
 At the time of this authenticated check, the user's Zero Trust hostname routes
 had no rule matching either service, so this traffic did not use the
 home/TAMIA tunnel. A later pre-login routing probe used an already-existing
@@ -85,14 +84,14 @@ Abema route; it did not add a GLOBAL PASS or PRESTIA route. Exact addresses,
 credentials, tokens, cookies, hidden values, and account data are intentionally
 omitted.
 
-| Check | Result | Consequence |
-| --- | --- | --- |
-| PRESTIA login page | Initial GET returned 200 | Public browser access alone does not establish accepted authentication. |
-| PRESTIA credential POST | The first and only POST returned Akamai/Edgesuite 403. The form was ordinary URL-encoded ID/password input; a Caulis fraud-detection script was also loaded. | Stop repeated web-password tests. Analyze the official app transport before investing in browser fingerprint tuning. |
-| GLOBAL PASS official entry | The bank's current `vpass.jp/globalpass/` link opened `www.debit.vpass.ne.jp` | Document both the stable official entry and the concrete service host. |
-| GLOBAL PASS direct login | GET and POST returned 200; no visible challenge or user gesture was required | Automated browser login is a viable PoC path on the Sydney WARP egress. |
-| GLOBAL PASS login state | The POST included `cf-turnstile-response`, `nablarch_hidden`, and standard Nablarch form fields | A plain HTTP rewrite must reproduce more than headers, cookies and TLS appearance. |
-| GLOBAL PASS activity | Authenticated read and month-selection POSTs returned 200; the selector exposed 15 months, from the current month through 14 prior months | Implement month-by-month server-rendered HTML ingestion; no JSON API or CSV export was observed. |
+| Check                      | Result                                                                                                                                                       | Consequence                                                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| PRESTIA login page         | Initial GET returned 200                                                                                                                                     | Public browser access alone does not establish accepted authentication.                                              |
+| PRESTIA credential POST    | The first and only POST returned Akamai/Edgesuite 403. The form was ordinary URL-encoded ID/password input; a Caulis fraud-detection script was also loaded. | Stop repeated web-password tests. Analyze the official app transport before investing in browser fingerprint tuning. |
+| GLOBAL PASS official entry | The bank's current `vpass.jp/globalpass/` link opened `www.debit.vpass.ne.jp`                                                                                | Document both the stable official entry and the concrete service host.                                               |
+| GLOBAL PASS direct login   | GET and POST returned 200; no visible challenge or user gesture was required                                                                                 | Automated browser login is a viable PoC path on the Sydney WARP egress.                                              |
+| GLOBAL PASS login state    | The POST included `cf-turnstile-response`, `nablarch_hidden`, and standard Nablarch form fields                                                              | A plain HTTP rewrite must reproduce more than headers, cookies and TLS appearance.                                   |
+| GLOBAL PASS activity       | Authenticated read and month-selection POSTs returned 200; the selector exposed 15 months, from the current month through 14 prior months                    | Implement month-by-month server-rendered HTML ingestion; no JSON API or CSV export was observed.                     |
 
 The live activity page exposed transaction date/detail, transaction and funded
 currency amounts, transaction/ATM/FX fees, status, authorization number,
@@ -114,12 +113,12 @@ lists these balance groups:
 
 For the user's core deposit accounts, the expected identifiers and grain are:
 
-| Account family | Enumeration grain | Evidence and qualification |
-| --- | --- | --- |
-| 7-digit yen savings / settlement account | One row with account type, 7-digit account number, JPY and balance/available amount | This is the representative account shown on Home and the Japanese settlement account used by GLOBAL PASS. See the bank's [account structure](https://www.smbctb.co.jp/service/welcome/account_structure.html) and [Home help](https://www.smbctb.co.jp/ib_help/myhome/myhome.html). |
-| 8-digit PRESTIA MultiMoney yen savings | Separate JPY row under the investment MultiMoney account | It cannot be the GLOBAL PASS yen settlement account. The distinction is explicit in [FAQ 960](https://faq.smbctb.co.jp/faq/show/960?site_domain=smbctbjp). |
-| PRESTIA MultiMoney foreign-currency savings | One row per held/displayed currency; every currency shares the same 8-digit MultiMoney account number | [FAQ 1364](https://faq.smbctb.co.jp/faq/show/1364?site_domain=smbctbjp) says unused currencies may be absent and the bank supports 17 currencies after foreign-currency activation. |
-| Yen/foreign-currency time deposits | Summary group plus detail per deposit | A current HTML parser demonstrates separate foreign time-deposit rows with account number, five-digit sequence, date, currency and amount. Exact current labels and whether every yen deposit has the same keys require a live capture. |
+| Account family                              | Enumeration grain                                                                                     | Evidence and qualification                                                                                                                                                                                                                                                          |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 7-digit yen savings / settlement account    | One row with account type, 7-digit account number, JPY and balance/available amount                   | This is the representative account shown on Home and the Japanese settlement account used by GLOBAL PASS. See the bank's [account structure](https://www.smbctb.co.jp/service/welcome/account_structure.html) and [Home help](https://www.smbctb.co.jp/ib_help/myhome/myhome.html). |
+| 8-digit PRESTIA MultiMoney yen savings      | Separate JPY row under the investment MultiMoney account                                              | It cannot be the GLOBAL PASS yen settlement account. The distinction is explicit in [FAQ 960](https://faq.smbctb.co.jp/faq/show/960?site_domain=smbctbjp).                                                                                                                          |
+| PRESTIA MultiMoney foreign-currency savings | One row per held/displayed currency; every currency shares the same 8-digit MultiMoney account number | [FAQ 1364](https://faq.smbctb.co.jp/faq/show/1364?site_domain=smbctbjp) says unused currencies may be absent and the bank supports 17 currencies after foreign-currency activation.                                                                                                 |
+| Yen/foreign-currency time deposits          | Summary group plus detail per deposit                                                                 | A current HTML parser demonstrates separate foreign time-deposit rows with account number, five-digit sequence, date, currency and amount. Exact current labels and whether every yen deposit has the same keys require a live capture.                                             |
 
 Two independent browser clients corroborate the HTML grain. The current
 [`bank_scrapers` PRESTIA driver](https://github.com/eebette/bank_scrapers/blob/master/bank_scrapers/scrapers/smbc_prestia/driver.py)
@@ -255,13 +254,13 @@ owner of every non-cash reward.
 
 The available routes have different family-card fidelity:
 
-| Route | Confirmed family-card visibility | Remaining uncertainty |
-| --- | --- | --- |
-| GLOBAL PASS member website as primary member | Primary and family activity are visible together; the official example shows a card/user label, pending/confirmed state and card-detail fields | Whether the service can filter/export by card or user; stable opaque card identifiers; pagination and transition behavior |
-| GLOBAL PASS member website as family member | The family member sees only their own activity | Do not automate a separate family login; collection should use only the user's authorized primary-member view |
-| PRESTIA Online/app account ledger | The resulting cash movement appears in the primary member's yen or MultiMoney foreign-currency account | No public source proves the ledger carries family-card identity, authorization state, or a card-level filter |
-| PRESTIA Online CSV | The posted principal-account debit is within the account export route | The bank does not publish a family-card field list; the current third-party parser has only four generic columns. Confirm rather than assume that card identity is absent |
-| PDF statement | Principal-account posted activity is retained through the statement route | No public example confirms whether a cardholder/card label is printed; verify one sanitized family-card transaction live |
+| Route                                        | Confirmed family-card visibility                                                                                                               | Remaining uncertainty                                                                                                                                                     |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GLOBAL PASS member website as primary member | Primary and family activity are visible together; the official example shows a card/user label, pending/confirmed state and card-detail fields | Whether the service can filter/export by card or user; stable opaque card identifiers; pagination and transition behavior                                                 |
+| GLOBAL PASS member website as family member  | The family member sees only their own activity                                                                                                 | Do not automate a separate family login; collection should use only the user's authorized primary-member view                                                             |
+| PRESTIA Online/app account ledger            | The resulting cash movement appears in the primary member's yen or MultiMoney foreign-currency account                                         | No public source proves the ledger carries family-card identity, authorization state, or a card-level filter                                                              |
+| PRESTIA Online CSV                           | The posted principal-account debit is within the account export route                                                                          | The bank does not publish a family-card field list; the current third-party parser has only four generic columns. Confirm rather than assume that card identity is absent |
+| PDF statement                                | Principal-account posted activity is retained through the statement route                                                                      | No public example confirms whether a cardholder/card label is printed; verify one sanitized family-card transaction live                                                  |
 
 For rewards, the bank's [benefit page](https://www.smbctb.co.jp/product/globalpass/benefits/)
 says cashback is paid in JPY into the account and miles are posted later. The
@@ -296,15 +295,15 @@ activity:
 
 ## Route trade-offs
 
-| Route | Retention and detail | Automation trade-off | Use |
-| --- | --- | --- | --- |
-| PRESTIA Online CSV | 180 days; date, description, signed currency amount and account identifier; 250/150 caps | Best structured official artifact, but desktop browser and download handling are required | Primary account-activity source |
-| PRESTIA Online HTML | Current balances and 180-day activity, plus specialized transfer histories | Existing browser implementations prove selectors are tractable; HTML is more brittle than export | Primary balances; discovery and gap checks |
-| PRESTIA PDF statements | Up to six years; balances and ledger detail | Stable audit artifact but parsing/OCR and issue-date dedupe add cost | Historical backfill and audit |
-| PRESTIA Mobile / official app | Same core balances, activity and PDF access | Convenient manual biometric access; no CSV, and app/device state is harder to operate in cloud | Fallback/manual validation, not the first collector |
-| GLOBAL PASS member website | 15 months, merchant/card/fee/authorization/pending detail; primary view includes family activity | Separate service and credentials, no found third-party client/export; card/user filtering is unconfirmed; SSO from PRESTIA Online may reduce repeated login friction | Primary card-detail and family-attribution source |
-| Deposit ledger for GLOBAL PASS | 180-day CSV and six-year PDFs, posted cash movement | Already collected with bank accounts but has less card detail | Reconciliation and long-term history |
-| Contracted bank API | Account list/balances/activity and FX rates | Requires a contracted regulated intermediary; this is the aggregator route the project is avoiding | Exclude |
+| Route                          | Retention and detail                                                                             | Automation trade-off                                                                                                                                                 | Use                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| PRESTIA Online CSV             | 180 days; date, description, signed currency amount and account identifier; 250/150 caps         | Best structured official artifact, but desktop browser and download handling are required                                                                            | Primary account-activity source                     |
+| PRESTIA Online HTML            | Current balances and 180-day activity, plus specialized transfer histories                       | Existing browser implementations prove selectors are tractable; HTML is more brittle than export                                                                     | Primary balances; discovery and gap checks          |
+| PRESTIA PDF statements         | Up to six years; balances and ledger detail                                                      | Stable audit artifact but parsing/OCR and issue-date dedupe add cost                                                                                                 | Historical backfill and audit                       |
+| PRESTIA Mobile / official app  | Same core balances, activity and PDF access                                                      | Convenient manual biometric access; no CSV, and app/device state is harder to operate in cloud                                                                       | Fallback/manual validation, not the first collector |
+| GLOBAL PASS member website     | 15 months, merchant/card/fee/authorization/pending detail; primary view includes family activity | Separate service and credentials, no found third-party client/export; card/user filtering is unconfirmed; SSO from PRESTIA Online may reduce repeated login friction | Primary card-detail and family-attribution source   |
+| Deposit ledger for GLOBAL PASS | 180-day CSV and six-year PDFs, posted cash movement                                              | Already collected with bank accounts but has less card detail                                                                                                        | Reconciliation and long-term history                |
+| Contracted bank API            | Account list/balances/activity and FX rates                                                      | Requires a contracted regulated intermediary; this is the aggregator route the project is avoiding                                                                   | Exclude                                             |
 
 ## Authentication and session behavior
 
@@ -417,15 +416,15 @@ TAMIA.connect() -> destination`
 
 The measured results were:
 
-| Probe | Result | Interpretation |
-| --- | --- | --- |
-| `TAMIA.fetch()` to an AWS IP reflector | HTTP 200 and TAMIA public IPv4 | HTTP-level VPC routing through the existing Tunnel works. |
-| Container Chromium -> local SOCKS5 -> egress Worker | SOCKS negotiation and WebSocket upgrade succeeded | The Container, Chromium proxy configuration and Worker relay were not the first failure. |
-| `TAMIA.connect()` to Cloudflare-hosted `icanhazip.com:443` | Socket became readable EOF with zero response bytes; Chromium timed out | Initially suggested the documented Workers restriction on outbound TCP to Cloudflare IP ranges, but this was only a hypothesis. |
-| `TAMIA.connect()` to AWS-hosted `checkip.amazonaws.com` on 80 and 443 | Same zero-byte EOF | Falsifies “Cloudflare-owned destination alone caused the EOF.” Public raw-TCP egress through this direct `tunnel_id` binding is not established. |
-| Direct read-only TCP/TLS from TAMIA to both reflectors | Successful | The public destinations and TAMIA's ordinary IPv4 Internet access were healthy. |
-| `TAMIA.connect("100.64.1.254:22")` | Zero-byte EOF | TAMIA's LAN-side address was not reachable as an announced route through this binding. |
-| `TAMIA.connect("127.0.0.1:22")` | Returned the TAMIA OpenSSH banner | Raw TCP over the VPC binding works for a service local to the `cloudflared` host. |
+| Probe                                                                 | Result                                                                  | Interpretation                                                                                                                                   |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `TAMIA.fetch()` to an AWS IP reflector                                | HTTP 200 and TAMIA public IPv4                                          | HTTP-level VPC routing through the existing Tunnel works.                                                                                        |
+| Container Chromium -> local SOCKS5 -> egress Worker                   | SOCKS negotiation and WebSocket upgrade succeeded                       | The Container, Chromium proxy configuration and Worker relay were not the first failure.                                                         |
+| `TAMIA.connect()` to Cloudflare-hosted `icanhazip.com:443`            | Socket became readable EOF with zero response bytes; Chromium timed out | Initially suggested the documented Workers restriction on outbound TCP to Cloudflare IP ranges, but this was only a hypothesis.                  |
+| `TAMIA.connect()` to AWS-hosted `checkip.amazonaws.com` on 80 and 443 | Same zero-byte EOF                                                      | Falsifies “Cloudflare-owned destination alone caused the EOF.” Public raw-TCP egress through this direct `tunnel_id` binding is not established. |
+| Direct read-only TCP/TLS from TAMIA to both reflectors                | Successful                                                              | The public destinations and TAMIA's ordinary IPv4 Internet access were healthy.                                                                  |
+| `TAMIA.connect("100.64.1.254:22")`                                    | Zero-byte EOF                                                           | TAMIA's LAN-side address was not reachable as an announced route through this binding.                                                           |
+| `TAMIA.connect("127.0.0.1:22")`                                       | Returned the TAMIA OpenSSH banner                                       | Raw TCP over the VPC binding works for a service local to the `cloudflared` host.                                                                |
 
 Here, EOF means the Worker's `ReadableStream` completed with `done: true`
 before returning any application bytes. It is not an HTTP status and does not
@@ -486,12 +485,12 @@ Cloudflare documents that a `cf1:network` binding can reach account hostname
 routes and public Internet destinations through Gateway, while a direct
 `tunnel_id` binding represents one Tunnel. The measured follow-up was:
 
-| Probe | Measured result | What it establishes |
-| --- | --- | --- |
-| `MESH.fetch("https://abema.tv/")` | HTTP 200 | Worker HTTP routing through `cf1:network` and the existing route worked. It does not preserve Chromium's TLS fingerprint because the Worker originates this HTTPS request. |
-| `MESH.connect("abema.tv:80")` | `HTTP/1.1 301 Moved Permanently`, 434 response bytes | Public raw TCP returned application bytes over the hostname-route path; the earlier direct-Tunnel zero-byte EOF is not a general public-TCP limitation of `cf1:network`. |
-| Read-only observation on TAMIA during the probes | Outbound TCP connections from TAMIA to the resolved Abema addresses on ports 80 and 443 | The existing hostname route selected TAMIA rather than ordinary Worker egress. |
-| Container Playwright Chromium 128 through the WebSocket/TCP relay | Main document HTTP 200 with the expected ABEMA title | Container Chromium, the local SOCKS layer, Worker relay, `MESH.connect()`, hostname route and TAMIA formed a complete browser path. |
+| Probe                                                             | Measured result                                                                         | What it establishes                                                                                                                                                        |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MESH.fetch("https://abema.tv/")`                                 | HTTP 200                                                                                | Worker HTTP routing through `cf1:network` and the existing route worked. It does not preserve Chromium's TLS fingerprint because the Worker originates this HTTPS request. |
+| `MESH.connect("abema.tv:80")`                                     | `HTTP/1.1 301 Moved Permanently`, 434 response bytes                                    | Public raw TCP returned application bytes over the hostname-route path; the earlier direct-Tunnel zero-byte EOF is not a general public-TCP limitation of `cf1:network`.   |
+| Read-only observation on TAMIA during the probes                  | Outbound TCP connections from TAMIA to the resolved Abema addresses on ports 80 and 443 | The existing hostname route selected TAMIA rather than ordinary Worker egress.                                                                                             |
+| Container Playwright Chromium 128 through the WebSocket/TCP relay | Main document HTTP 200 with the expected ABEMA title                                    | Container Chromium, the local SOCKS layer, Worker relay, `MESH.connect()`, hostname route and TAMIA formed a complete browser path.                                        |
 
 The browser path is:
 
@@ -568,15 +567,15 @@ was never installed or executed. The artifact is useful static evidence, but
 it is **not yet proven byte-identical to the package currently delivered to
 this account/device by Google Play**.
 
-| Field | Observed value |
-| --- | --- |
-| Package / version | `jp.co.smbctb.prestia_app`, `1.4.0` (`1040010`) |
-| SDK | minimum 26, target 35 |
-| XAPK | base plus `config.armeabi_v7a`, `config.en`, `config.mdpi`, and `config.zh`; 71,102,422 bytes; SHA-256 `2227d396b074d3b7dd141c33ba72231c8ba964be2a2de9d5d3f193319cc34cdc` |
-| Base APK | 69,969,786 bytes; SHA-256 `3a52b82f336b9ccf2d014693f04d0050c612f1a2a3cd50bdf3ce29b8ad7ec129` |
-| Signer | every split verified with APK Signature Schemes v2/v3 and the same certificate; SHA-256 `0130f6487f9bf21ee0b2b888707c851057136e7dae1b97b893ae71f2136af086`; subject names SMBC Trust Bank Ltd. |
-| Source stamp | the APK set carries Google source-stamp signer metadata, but `apksigner` did not report a verified SourceStamp |
-| Decompilers | JADX 1.5.6 and apktool 3.0.3, on WSL-native storage |
+| Field             | Observed value                                                                                                                                                                                 |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Package / version | `jp.co.smbctb.prestia_app`, `1.4.0` (`1040010`)                                                                                                                                                |
+| SDK               | minimum 26, target 35                                                                                                                                                                          |
+| XAPK              | base plus `config.armeabi_v7a`, `config.en`, `config.mdpi`, and `config.zh`; 71,102,422 bytes; SHA-256 `2227d396b074d3b7dd141c33ba72231c8ba964be2a2de9d5d3f193319cc34cdc`                      |
+| Base APK          | 69,969,786 bytes; SHA-256 `3a52b82f336b9ccf2d014693f04d0050c612f1a2a3cd50bdf3ce29b8ad7ec129`                                                                                                   |
+| Signer            | every split verified with APK Signature Schemes v2/v3 and the same certificate; SHA-256 `0130f6487f9bf21ee0b2b888707c851057136e7dae1b97b893ae71f2136af086`; subject names SMBC Trust Bank Ltd. |
+| Source stamp      | the APK set carries Google source-stamp signer metadata, but `apksigner` did not report a verified SourceStamp                                                                                 |
+| Decompilers       | JADX 1.5.6 and apktool 3.0.3, on WSL-native storage                                                                                                                                            |
 
 The signer subject and source-stamp metadata make the third-party copy a
 plausible Play-origin candidate. They do not replace comparison with an
@@ -637,17 +636,17 @@ schemas. `plugin.kamiressapi.KamiressApi` executes them with
 `HttpsURLConnection`, retains response headers/cookies, and converts returned
 HTML into structured values for the local Vue UI. Important read paths are:
 
-| Purpose | Packaged route and response handling |
-| --- | --- |
-| Bootstrap | `GET https://mlogin.smbctb.co.jp/ib/portal/POSNIN1prestiatop.prst`; extracts the sign-on form's hidden inputs |
-| Sign-on transition | `POST https://mobile.smbctb.co.jp/ib/portal/POSNIN1next.prst`; extracts `hashedCIF` and hidden parameters for the home, authentication and related forms |
-| Optional OTP | `POST https://mobile.smbctb.co.jp/ib/authentication/AUOTIN1next1.prst` |
-| Home | `GET https://mobile.smbctb.co.jp/ib/portal/POSNIN1prestiatop.prst`; parses user/account summary and carried hidden state |
-| Balance/account enumeration | `POST https://mobile.smbctb.co.jp/ib/top/TOMETOPaccountinfokozazandaka.prst`; parses deposit, foreign-currency, structured-deposit, investment and commingled-trust totals plus account rows/links |
-| Account detail and first history page | `POST https://mobile.smbctb.co.jp/ib/accountinfo/ACKZDSPkozashosai.prst` |
-| History paging/query | `POST https://mobile.smbctb.co.jp/ib/accountinfo/ACKSDSPpages.prst` and `ACKSDSPnext2.prst`; parses account metadata and repeated history cells |
-| Mutual-fund bridge/list | mobile `TOMETOPbpdirect.prst` / `ACKZDSPbpdirect.prst`, then `POST https://bp-direct-mb.smbctb.co.jp/Login/0/login/ipan_web/exec`; parses HTML totals and account rows |
-| Sign-off | `POST https://mobile.smbctb.co.jp/ib/top/TOMETOPportalsignoff.prst` |
+| Purpose                               | Packaged route and response handling                                                                                                                                                               |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bootstrap                             | `GET https://mlogin.smbctb.co.jp/ib/portal/POSNIN1prestiatop.prst`; extracts the sign-on form's hidden inputs                                                                                      |
+| Sign-on transition                    | `POST https://mobile.smbctb.co.jp/ib/portal/POSNIN1next.prst`; extracts `hashedCIF` and hidden parameters for the home, authentication and related forms                                           |
+| Optional OTP                          | `POST https://mobile.smbctb.co.jp/ib/authentication/AUOTIN1next1.prst`                                                                                                                             |
+| Home                                  | `GET https://mobile.smbctb.co.jp/ib/portal/POSNIN1prestiatop.prst`; parses user/account summary and carried hidden state                                                                           |
+| Balance/account enumeration           | `POST https://mobile.smbctb.co.jp/ib/top/TOMETOPaccountinfokozazandaka.prst`; parses deposit, foreign-currency, structured-deposit, investment and commingled-trust totals plus account rows/links |
+| Account detail and first history page | `POST https://mobile.smbctb.co.jp/ib/accountinfo/ACKZDSPkozashosai.prst`                                                                                                                           |
+| History paging/query                  | `POST https://mobile.smbctb.co.jp/ib/accountinfo/ACKSDSPpages.prst` and `ACKSDSPnext2.prst`; parses account metadata and repeated history cells                                                    |
+| Mutual-fund bridge/list               | mobile `TOMETOPbpdirect.prst` / `ACKZDSPbpdirect.prst`, then `POST https://bp-direct-mb.smbctb.co.jp/Login/0/login/ipan_web/exec`; parses HTML totals and account rows                             |
+| Sign-off                              | `POST https://mobile.smbctb.co.jp/ib/top/TOMETOPportalsignoff.prst`                                                                                                                                |
 
 This materially changes the implementation decision: the Android app does not
 reveal a separate stable balance/history JSON API. It packages an explicit
@@ -716,14 +715,14 @@ rather than a stable public consumer API.
 
 ## Runtime assessment
 
-| Runtime | Fit | Reason |
-| --- | --- | --- |
-| Local Windows Kuebiko / persistent Chrome | **Verified for GLOBAL PASS discovery; rejected once for PRESTIA login** | GLOBAL PASS direct login and 15-month activity navigation succeeded. PRESTIA's first credential POST received Akamai 403. |
-| OCI VM or Kubernetes pod with persistent browser profile | **Best first unattended GLOBAL PASS PoC; medium-high confidence** | Full Chrome/Xvfb/Patchright and durable profile are straightforward; the remaining question is whether a fresh Linux/cloud browser earns an accepted Turnstile token. |
-| Cloudflare Container | **End-to-end browser transport through TAMIA verified; GLOBAL PASS login untested; medium-high confidence** | Playwright Chromium 128 loaded Abema with HTTP 200 through a WebSocket relay, `cf1:network`, an existing hostname route and TAMIA. The relay preserves Chromium-originated TLS bytes. GLOBAL PASS still needs its own minimal hostname inventory, routes and bounded login test. |
-| Cloudflare Browser Rendering | **Plausible without TAMIA; not validated for this relay** | It can execute browser code, but the verified SOCKS/WebSocket/hostname-route path is the Container design. Use only after independently proving compatible proxy and profile behavior. |
-| Cloudflare Worker isolate | **Unproven for GLOBAL PASS login; unsuitable for PRESTIA login** | `fetch()` cannot itself execute the Turnstile browser widget, and PRESTIA rejected the tested browser credential POST. Use only for orchestration/storage or after a compliant browserless token and authenticated read flow are demonstrated. |
-| Official Android app-derived mobile transport | **Best next PRESTIA PoC; medium confidence** | Static analysis identifies ordinary mobile HTML routes and XPath schemas rather than a native JSON API. A guarded local replay must still validate form state, Caulis fraud signaling, OTP, cookies, and accepted egress. |
+| Runtime                                                  | Fit                                                                                                         | Reason                                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local Windows Kuebiko / persistent Chrome                | **Verified for GLOBAL PASS discovery; rejected once for PRESTIA login**                                     | GLOBAL PASS direct login and 15-month activity navigation succeeded. PRESTIA's first credential POST received Akamai 403.                                                                                                                                                        |
+| OCI VM or Kubernetes pod with persistent browser profile | **Best first unattended GLOBAL PASS PoC; medium-high confidence**                                           | Full Chrome/Xvfb/Patchright and durable profile are straightforward; the remaining question is whether a fresh Linux/cloud browser earns an accepted Turnstile token.                                                                                                            |
+| Cloudflare Container                                     | **End-to-end browser transport through TAMIA verified; GLOBAL PASS login untested; medium-high confidence** | Playwright Chromium 128 loaded Abema with HTTP 200 through a WebSocket relay, `cf1:network`, an existing hostname route and TAMIA. The relay preserves Chromium-originated TLS bytes. GLOBAL PASS still needs its own minimal hostname inventory, routes and bounded login test. |
+| Cloudflare Browser Rendering                             | **Plausible without TAMIA; not validated for this relay**                                                   | It can execute browser code, but the verified SOCKS/WebSocket/hostname-route path is the Container design. Use only after independently proving compatible proxy and profile behavior.                                                                                           |
+| Cloudflare Worker isolate                                | **Unproven for GLOBAL PASS login; unsuitable for PRESTIA login**                                            | `fetch()` cannot itself execute the Turnstile browser widget, and PRESTIA rejected the tested browser credential POST. Use only for orchestration/storage or after a compliant browserless token and authenticated read flow are demonstrated.                                   |
+| Official Android app-derived mobile transport            | **Best next PRESTIA PoC; medium confidence**                                                                | Static analysis identifies ordinary mobile HTML routes and XPath schemas rather than a native JSON API. A guarded local replay must still validate form state, Caulis fraud signaling, OTP, cookies, and accepted egress.                                                        |
 
 Keep `prestia-bank` and `prestia-globalpass` as separate collector identities,
 credential scopes, session generations, host allowlists and health checks.
@@ -733,16 +732,16 @@ other.
 
 ## Cost and automation rating
 
-| Capability | Cost (1-5) | Automation outlook | Main risk |
-| --- | ---: | --- | --- |
-| Monthly balances via PRESTIA Online HTML | 4 | Low until an accepted bootstrap exists | Akamai denied the first tested credential POST |
-| 180-day PRESTIA account CSV collection | 3 | High only after an accepted bank session exists | Bootstrap, per-account/currency selection, range row caps and downloads |
-| Six-year PRESTIA PDF statement backfill | 3 | High only after an accepted bank session exists | Bootstrap, issue cadence/catalog and PDF parsing |
-| Domestic/overseas PRESTIA transfer histories | 4 | Medium after bootstrap | Login, pagination and overlapping representations |
-| GLOBAL PASS detailed activity in Chrome | 3 | Medium-high; login and month navigation verified | Turnstile/browser runtime, HTML drift and pending-row identity |
-| Browserless GLOBAL PASS Worker | 4 / unproven | Unknown | Fresh accepted Turnstile token and Nablarch state |
-| App-derived PRESTIA Mobile HTML extraction | 4 | Medium after one accepted bootstrap | Hidden form state, Caulis fraud signal, optional OTP, HTML drift and no CSV |
-| Contracted API | 5 / not applicable | Technically high, operationally unavailable | Regulated intermediary contract and aggregator dependency |
+| Capability                                   |         Cost (1-5) | Automation outlook                               | Main risk                                                                   |
+| -------------------------------------------- | -----------------: | ------------------------------------------------ | --------------------------------------------------------------------------- |
+| Monthly balances via PRESTIA Online HTML     |                  4 | Low until an accepted bootstrap exists           | Akamai denied the first tested credential POST                              |
+| 180-day PRESTIA account CSV collection       |                  3 | High only after an accepted bank session exists  | Bootstrap, per-account/currency selection, range row caps and downloads     |
+| Six-year PRESTIA PDF statement backfill      |                  3 | High only after an accepted bank session exists  | Bootstrap, issue cadence/catalog and PDF parsing                            |
+| Domestic/overseas PRESTIA transfer histories |                  4 | Medium after bootstrap                           | Login, pagination and overlapping representations                           |
+| GLOBAL PASS detailed activity in Chrome      |                  3 | Medium-high; login and month navigation verified | Turnstile/browser runtime, HTML drift and pending-row identity              |
+| Browserless GLOBAL PASS Worker               |       4 / unproven | Unknown                                          | Fresh accepted Turnstile token and Nablarch state                           |
+| App-derived PRESTIA Mobile HTML extraction   |                  4 | Medium after one accepted bootstrap              | Hidden form state, Caulis fraud signal, optional OTP, HTML drift and no CSV |
+| Contracted API                               | 5 / not applicable | Technically high, operationally unavailable      | Regulated intermediary contract and aggregator dependency                   |
 
 ## Next bounded validation
 

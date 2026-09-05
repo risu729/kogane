@@ -7,29 +7,25 @@ if (!outputPath) {
   throw new Error("usage: node capture-turnstile-cdp.mjs <port> <output.json>");
 }
 
-const loginUrl =
-  "https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006";
+const loginUrl = "https://www.debit.vpass.ne.jp/p/login/RW1312010001?cc=01006";
 const relevantHost = (rawUrl) => {
   try {
     const hostname = new URL(rawUrl).hostname;
     return (
-      hostname === "challenges.cloudflare.com" ||
-      hostname === "brunhild.challenges.cloudflare.com"
+      hostname === "challenges.cloudflare.com" || hostname === "brunhild.challenges.cloudflare.com"
     );
   } catch {
     return false;
   }
 };
 
-const version = await fetch(`http://127.0.0.1:${port}/json/version`).then(
-  (response) => response.json(),
+const version = await fetch(`http://127.0.0.1:${port}/json/version`).then((response) =>
+  response.json(),
 );
-const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then(
-  (response) => response.json(),
+const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((response) =>
+  response.json(),
 );
-const page = targets.find(
-  (target) => target.type === "page" && target.url === "about:blank",
-);
+const page = targets.find((target) => target.type === "page" && target.url === "about:blank");
 if (!page) throw new Error("about:blank page target not found");
 
 const socket = new WebSocket(version.webSocketDebuggerUrl);
@@ -110,17 +106,12 @@ function configureSession(sessionId, targetInfo, waitingForDebugger = false) {
         { instrumentation: "beforeScriptExecution" },
         sessionId,
       );
-      instrumentationBreakpointBySession.set(
-        sessionId,
-        instrumentation.breakpointId,
-      );
+      instrumentationBreakpointBySession.set(sessionId, instrumentation.breakpointId);
     } catch {
       // Older protocol builds can omit instrumentation breakpoints.
     }
     if (waitingForDebugger) {
-      await send("Runtime.runIfWaitingForDebugger", {}, sessionId).catch(
-        () => {},
-      );
+      await send("Runtime.runIfWaitingForDebugger", {}, sessionId).catch(() => {});
     }
   })();
   sessionSetup.set(sessionId, setup);
@@ -130,17 +121,9 @@ function configureSession(sessionId, targetInfo, waitingForDebugger = false) {
 function scheduleScriptSource(sessionId, params) {
   const targetInfo = sessions.get(sessionId);
   if (!relevantHost(params.url) && !relevantHost(targetInfo?.url)) return;
-  const task = send(
-    "Debugger.getScriptSource",
-    { scriptId: params.scriptId },
-    sessionId,
-  )
+  const task = send("Debugger.getScriptSource", { scriptId: params.scriptId }, sessionId)
     .then((result) => {
-      void scheduleVmBreakpoints(
-        sessionId,
-        params.scriptId,
-        result.scriptSource,
-      );
+      void scheduleVmBreakpoints(sessionId, params.scriptId, result.scriptSource);
       scripts.push({
         sessionId,
         targetType: targetInfo?.type,
@@ -169,11 +152,7 @@ function scheduleScriptSource(sessionId, params) {
 
 async function scheduleVmBreakpoints(sessionId, scriptId, source) {
   const scriptKey = `${sessionId}:${scriptId}`;
-  if (
-    vmScriptsProcessed.has(scriptKey) ||
-    typeof source !== "string" ||
-    source.length < 100_000
-  ) {
+  if (vmScriptsProcessed.has(scriptKey) || typeof source !== "string" || source.length < 100_000) {
     return 0;
   }
   const pattern = /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)===void 0\?([A-Za-z_$][\w$]*):\2\[\3\]/g;
@@ -269,8 +248,7 @@ function schedulePauseTrace(sessionId, params) {
         }
       }
       if (breakpointCount > 0) {
-        const instrumentationBreakpointId =
-          instrumentationBreakpointBySession.get(sessionId);
+        const instrumentationBreakpointId = instrumentationBreakpointBySession.get(sessionId);
         if (instrumentationBreakpointId) {
           await send(
             "Debugger.removeBreakpoint",
@@ -306,10 +284,7 @@ function schedulePauseTrace(sessionId, params) {
           );
           for (const property of properties.result || []) {
             const value = property.value?.value;
-            if (
-              typeof value === "string" &&
-              /^[A-Za-z_$][A-Za-z0-9_$.-]{0,80}$/.test(value)
-            ) {
+            if (typeof value === "string" && /^[A-Za-z_$][A-Za-z0-9_$.-]{0,80}$/.test(value)) {
               safeStrings.add(value);
             }
           }
@@ -401,9 +376,13 @@ function schedulePauseTrace(sessionId, params) {
 async function collectBodies(record) {
   if (record.method === "POST" && record.requestPostData === undefined) {
     try {
-      const result = await send("Network.getRequestPostData", {
-        requestId: record.requestId,
-      }, record.sessionId);
+      const result = await send(
+        "Network.getRequestPostData",
+        {
+          requestId: record.requestId,
+        },
+        record.sessionId,
+      );
       record.requestPostData = result.postData;
     } catch (error) {
       record.requestPostDataError = String(error.message || error);
@@ -414,9 +393,13 @@ async function collectBodies(record) {
     ["Document", "Script", "Fetch", "XHR"].includes(record.resourceType)
   ) {
     try {
-      const result = await send("Network.getResponseBody", {
-        requestId: record.requestId,
-      }, record.sessionId);
+      const result = await send(
+        "Network.getResponseBody",
+        {
+          requestId: record.requestId,
+        },
+        record.sessionId,
+      );
       record.responseBody = result.body;
       record.responseBodyBase64Encoded = result.base64Encoded;
     } catch (error) {
@@ -433,9 +416,7 @@ socket.addEventListener("message", (event) => {
     clearTimeout(waiter.timer);
     pending.delete(message.id);
     if (message.error) {
-      waiter.reject(
-        new Error(`${waiter.method}: ${message.error.message || "failed"}`),
-      );
+      waiter.reject(new Error(`${waiter.method}: ${message.error.message || "failed"}`));
     } else {
       waiter.resolve(message.result || {});
     }
@@ -444,11 +425,7 @@ socket.addEventListener("message", (event) => {
 
   const { method, params, sessionId } = message;
   if (method === "Target.attachedToTarget") {
-    configureSession(
-      params.sessionId,
-      params.targetInfo,
-      params.waitingForDebugger,
-    );
+    configureSession(params.sessionId, params.targetInfo, params.waitingForDebugger);
     return;
   }
   if (method === "Target.targetInfoChanged") {
@@ -552,8 +529,10 @@ let pageState = null;
 for (let attempt = 0; attempt < 450; attempt += 1) {
   await new Promise((resolve) => setTimeout(resolve, 100));
   try {
-    const result = await send("Runtime.evaluate", {
-      expression: `(() => ({
+    const result = await send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => ({
         title: document.title,
         tokenLength: String(document.querySelector('input[name="cf-turnstile-response"]')?.value || '').length,
         widgetPresent: Boolean(document.querySelector('.cf-turnstile')),
@@ -571,8 +550,10 @@ for (let attempt = 0; attempt < 450; attempt += 1) {
           devicePixelRatio
         }
       }))()`,
-      returnByValue: true,
-    }, pageSessionId);
+        returnByValue: true,
+      },
+      pageSessionId,
+    );
     pageState = result.result?.value || null;
     if (pageState?.tokenLength > 20) break;
   } catch {
@@ -588,9 +569,7 @@ for (const record of requests.values()) {
   await collectBodies(record);
 }
 
-const relevantRequests = [...requests.values()].filter(
-  (request) => request.relevant,
-);
+const relevantRequests = [...requests.values()].filter((request) => request.relevant);
 
 const capture = {
   capturedAt: new Date().toISOString(),
@@ -618,17 +597,10 @@ console.log(
     postBodies: capture.requests.filter(
       (request) => request.method === "POST" && request.requestPostData,
     ).length,
-    responseBodies: capture.requests.filter(
-      (request) => request.responseBody !== undefined,
-    ).length,
-    scriptSources: capture.scripts.filter(
-      (script) => script.scriptSource !== undefined,
-    ).length,
-    senderPauses: capture.runtimeTraces.filter(
-      (trace) => trace.kind === "sender-pause",
-    ).length,
-    vmPropertyPauses: capture.runtimeTraces.filter(
-      (trace) => trace.kind === "vm-property-pause",
-    ).length,
+    responseBodies: capture.requests.filter((request) => request.responseBody !== undefined).length,
+    scriptSources: capture.scripts.filter((script) => script.scriptSource !== undefined).length,
+    senderPauses: capture.runtimeTraces.filter((trace) => trace.kind === "sender-pause").length,
+    vmPropertyPauses: capture.runtimeTraces.filter((trace) => trace.kind === "vm-property-pause")
+      .length,
   }),
 );

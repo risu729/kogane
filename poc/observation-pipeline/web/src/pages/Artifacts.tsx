@@ -39,27 +39,20 @@ function ArtifactTable({ rows }: { rows: ArtifactRow[] }): ReactNode {
         <table>
           <thead>
             <tr>
-              {[
-                "原本",
-                "取得元",
-                "資料の種類",
-                "取得日時",
-                "解析された記録",
-                "原本データ",
-              ].map((label) => (
-                <th scope="col" key={label}>
-                  {label}
-                </th>
-              ))}
+              {["原本", "取得元", "資料の種類", "取得日時", "解析された記録", "原本データ"].map(
+                (label) => (
+                  <th scope="col" key={label}>
+                    {label}
+                  </th>
+                ),
+              )}
             </tr>
           </thead>
           <tbody>
             {view.rows.map((artifact) => (
               <tr key={artifact.id}>
                 <th scope="row">
-                  <Link to={`/artifacts/${artifact.id}`}>
-                    原本 #{artifact.id}
-                  </Link>
+                  <Link to={`/artifacts/${artifact.id}`}>原本 #{artifact.id}</Link>
                 </th>
                 <td>{artifact.source_id}</td>
                 <td>
@@ -68,11 +61,9 @@ function ArtifactTable({ rows }: { rows: ArtifactRow[] }): ReactNode {
                 </td>
                 <td>{artifact.fetched_at}</td>
                 <td>
-                  取引 {artifact.transaction_count} / 残高{" "}
-                  {artifact.balance_count}
+                  取引 {artifact.transaction_count} / 残高 {artifact.balance_count}
                   <br />
-                  保有 {artifact.position_count} / 評価{" "}
-                  {artifact.valuation_count}
+                  保有 {artifact.position_count} / 評価 {artifact.valuation_count}
                   <div className="dim">解析 {artifact.parse_run_count}回</div>
                 </td>
                 <td>

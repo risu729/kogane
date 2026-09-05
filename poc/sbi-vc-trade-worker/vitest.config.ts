@@ -7,7 +7,8 @@ export default defineConfig({
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
         serviceBindings: {
-          RAW_EVIDENCE_IMPORTER: () => Response.json({ error: "not_used_in_runtime_tests" }, { status: 503 }),
+          RAW_EVIDENCE_IMPORTER: () =>
+            Response.json({ error: "not_used_in_runtime_tests" }, { status: 503 }),
         },
       },
     }),

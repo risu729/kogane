@@ -1,12 +1,5 @@
-import {
-  createBitwardenAssertion,
-  decryptPasskeyToken,
-} from "./crypto";
-import type {
-  SbiCredential,
-  SbiHandshakeKey,
-  WebAuthnRequest,
-} from "./types";
+import { createBitwardenAssertion, decryptPasskeyToken } from "./crypto";
+import type { SbiCredential, SbiHandshakeKey, WebAuthnRequest } from "./types";
 
 const BROWSER_HEADERS = {
   "accept-language": "ja,en-US;q=0.9,en;q=0.8",
@@ -28,10 +21,7 @@ export function parseCredential(value: string): SbiCredential {
   return {
     rpId: requiredString(object["rpId"], "SBI credential rpId"),
     origin: requiredHttpsOrigin(object["origin"], "SBI credential origin"),
-    credentialId: requiredString(
-      object["credentialId"],
-      "SBI credential credentialId",
-    ),
+    credentialId: requiredString(object["credentialId"], "SBI credential credentialId"),
     keyValue: requiredString(object["keyValue"], "SBI credential keyValue"),
     ...(userHandle ? { userHandle } : {}),
     counter: nonNegativeInteger(object["counter"], "SBI credential counter"),
@@ -66,7 +56,9 @@ export async function requestPasskeyAccessToken(options: {
     cookies,
   );
   if (!entry.ok) {
-    throw Object.assign(new Error(`SBI passkey entry failed with HTTP ${entry.status}`), { httpStatus: entry.status });
+    throw Object.assign(new Error(`SBI passkey entry failed with HTTP ${entry.status}`), {
+      httpStatus: entry.status,
+    });
   }
   const entryHtml = await entry.text();
   const pageCsrfToken = extractCsrfToken(entryHtml);
@@ -89,7 +81,10 @@ export async function requestPasskeyAccessToken(options: {
     cookies,
   );
   if (!challengeResponse.ok) {
-    throw Object.assign(new Error(`SBI passkey challenge failed with HTTP ${challengeResponse.status}`), { httpStatus: challengeResponse.status });
+    throw Object.assign(
+      new Error(`SBI passkey challenge failed with HTTP ${challengeResponse.status}`),
+      { httpStatus: challengeResponse.status },
+    );
   }
   const request = normalizeCredentialRequest(
     await challengeResponse.json(),
@@ -128,12 +123,14 @@ export async function requestPasskeyAccessToken(options: {
     cookies,
   );
   if (assertionResponse.status < 300 || assertionResponse.status >= 400) {
-    throw Object.assign(new Error(`SBI passkey assertion returned unexpected HTTP ${assertionResponse.status}`), { httpStatus: assertionResponse.status });
+    throw Object.assign(
+      new Error(`SBI passkey assertion returned unexpected HTTP ${assertionResponse.status}`),
+      { httpStatus: assertionResponse.status },
+    );
   }
 
   const channelUrl = new URL(
-    assertionResponse.headers.get("location") ??
-      `/sso/channel?cccid=${options.channel}`,
+    assertionResponse.headers.get("location") ?? `/sso/channel?cccid=${options.channel}`,
     entryUrl,
   );
   const callbackResponse = await fetchWithCookies(
@@ -149,7 +146,10 @@ export async function requestPasskeyAccessToken(options: {
     cookies,
   );
   if (!callbackResponse.ok) {
-    throw Object.assign(new Error(`SBI passkey callback failed with HTTP ${callbackResponse.status}`), { httpStatus: callbackResponse.status });
+    throw Object.assign(
+      new Error(`SBI passkey callback failed with HTTP ${callbackResponse.status}`),
+      { httpStatus: callbackResponse.status },
+    );
   }
   const callbackUrl = extractCallbackUrl(await callbackResponse.text());
   if (!callbackUrl) {
@@ -169,9 +169,7 @@ export class CookieBag {
     const headers = response.headers as Headers & {
       getSetCookie?: () => string[];
     };
-    const values =
-      headers.getSetCookie?.() ??
-      splitSetCookie(response.headers.get("set-cookie"));
+    const values = headers.getSetCookie?.() ?? splitSetCookie(response.headers.get("set-cookie"));
     for (const value of values) {
       const pair = value.split(";", 1)[0]?.trim();
       const separator = pair?.indexOf("=") ?? -1;
@@ -181,9 +179,7 @@ export class CookieBag {
   }
 
   header(): string {
-    return [...this.#values]
-      .map(([name, value]) => `${name}=${value}`)
-      .join("; ");
+    return [...this.#values].map(([name, value]) => `${name}=${value}`).join("; ");
   }
 }
 
@@ -200,10 +196,7 @@ async function fetchWithCookies(
   return response;
 }
 
-function normalizeCredentialRequest(
-  value: unknown,
-  defaultRpId: string,
-): WebAuthnRequest {
+function normalizeCredentialRequest(value: unknown, defaultRpId: string): WebAuthnRequest {
   const root = objectValue(value, "SBI passkey challenge");
   const data =
     optionalObject(root["data"]) ??
@@ -214,9 +207,7 @@ function normalizeCredentialRequest(
     optionalObject(data["publicKey"]) ??
     optionalObject(data["publicKeyCredentialRequestOptions"]) ??
     data;
-  const challenge =
-    optionalString(publicKey["challenge"]) ??
-    optionalString(data["challenge"]);
+  const challenge = optionalString(publicKey["challenge"]) ?? optionalString(data["challenge"]);
   if (!challenge) throw new Error("SBI passkey challenge is missing challenge");
   const csrfToken =
     optionalString(root["csrfToken"]) ??

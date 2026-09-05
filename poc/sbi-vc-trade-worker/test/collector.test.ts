@@ -19,23 +19,33 @@ describe("Worker collector", () => {
     const artifacts: CollectorArtifact[] = [];
     const sessions: SessionMaterial[] = [];
     const fetcher = (async (_input: string | URL | Request, init?: RequestInit) => {
-      const request = JSON.parse(String(init?.body)) as { event: string; data: Record<string, unknown> };
+      const request = JSON.parse(String(init?.body)) as {
+        event: string;
+        data: Record<string, unknown>;
+      };
       requests.push(request);
       const paged = request.event === "executionList" || request.event === "getCashflowList";
       const responseHeaders = new Headers({ "content-type": "application/json" });
       responseHeaders.append("set-cookie", "AWSALB=rotated; Secure");
       responseHeaders.append("set-cookie", "__cf_bm=ignored; Secure");
-      return new Response(JSON.stringify({
-        meta: { status: "OK", secureKey: "next-secure", timestamp: "synthetic" },
-        body: paged ? { list: [{ synthetic: true }], totalSize: "1" } : { synthetic: true },
-      }), { status: 200, headers: responseHeaders });
+      return new Response(
+        JSON.stringify({
+          meta: { status: "OK", secureKey: "next-secure", timestamp: "synthetic" },
+          body: paged ? { list: [{ synthetic: true }], totalSize: "1" } : { synthetic: true },
+        }),
+        { status: 200, headers: responseHeaders },
+      );
     }) as typeof fetch;
 
     const finalSession = await collectSbiVcTrade({
       session: seed,
       fetcher,
-      onSession: async (session) => { sessions.push(structuredClone(session)); },
-      onArtifact: async (artifact) => { artifacts.push(artifact); },
+      onSession: async (session) => {
+        sessions.push(structuredClone(session));
+      },
+      onArtifact: async (artifact) => {
+        artifacts.push(artifact);
+      },
     });
 
     expect(requests.map((request) => request.event)).toEqual([
@@ -70,9 +80,12 @@ describe("Worker collector", () => {
   test("rejects malformed pagination metadata instead of silently truncating history", async () => {
     const artifacts: CollectorArtifact[] = [];
     const fetcher = (async (_input: string | URL | Request, init?: RequestInit) => {
-      const request = JSON.parse(String(init?.body)) as { event: string; data: Record<string, unknown> };
-      const isMalformedHistoricalExecution = request.event === "executionList"
-        && request.data.historical === "true";
+      const request = JSON.parse(String(init?.body)) as {
+        event: string;
+        data: Record<string, unknown>;
+      };
+      const isMalformedHistoricalExecution =
+        request.event === "executionList" && request.data.historical === "true";
       return Response.json({
         meta: { status: "OK", secureKey: "next-secure" },
         body: isMalformedHistoricalExecution
@@ -81,21 +94,28 @@ describe("Worker collector", () => {
       });
     }) as typeof fetch;
 
-    await expect(collectSbiVcTrade({
-      session: seed,
-      fetcher,
-      onSession: async () => undefined,
-      onArtifact: async (artifact) => { artifacts.push(artifact); },
-    })).rejects.toThrow("executions-historical_invalid_pagination");
+    await expect(
+      collectSbiVcTrade({
+        session: seed,
+        fetcher,
+        onSession: async () => undefined,
+        onArtifact: async (artifact) => {
+          artifacts.push(artifact);
+        },
+      }),
+    ).rejects.toThrow("executions-historical_invalid_pagination");
 
     expect(artifacts.at(-1)?.dataset).toBe("executions-historical-page-0001");
   });
 
   test("rejects a short non-terminal page instead of skipping history", async () => {
     const fetcher = (async (_input: string | URL | Request, init?: RequestInit) => {
-      const request = JSON.parse(String(init?.body)) as { event: string; data: Record<string, unknown> };
-      const isHistoricalExecution = request.event === "executionList"
-        && request.data.historical === "true";
+      const request = JSON.parse(String(init?.body)) as {
+        event: string;
+        data: Record<string, unknown>;
+      };
+      const isHistoricalExecution =
+        request.event === "executionList" && request.data.historical === "true";
       return Response.json({
         meta: { status: "OK", secureKey: "next-secure" },
         body: isHistoricalExecution
@@ -104,11 +124,13 @@ describe("Worker collector", () => {
       });
     }) as typeof fetch;
 
-    await expect(collectSbiVcTrade({
-      session: seed,
-      fetcher,
-      onSession: async () => undefined,
-      onArtifact: async () => undefined,
-    })).rejects.toThrow("executions-historical_pagination_length_mismatch");
+    await expect(
+      collectSbiVcTrade({
+        session: seed,
+        fetcher,
+        onSession: async () => undefined,
+        onArtifact: async () => undefined,
+      }),
+    ).rejects.toThrow("executions-historical_pagination_length_mismatch");
   });
 });

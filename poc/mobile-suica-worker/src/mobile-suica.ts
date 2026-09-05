@@ -58,7 +58,8 @@ export async function collectMobileSuica(options: {
     body: historySearchBody(baseVariable, options.asOfDateJst),
   });
   updateCookies(cookieJar, response.headers.getSetCookie());
-  if (response.status !== 200) throw Object.assign(new Error("history_request_failed"), { httpStatus: response.status });
+  if (response.status !== 200)
+    throw Object.assign(new Error("history_request_failed"), { httpStatus: response.status });
   const responseBytes = await readBounded(response, maxResponseBytes);
   const html = decode(responseBytes, "shift_jis");
   if (isLoginPage(html)) throw new Error("history_session_expired");
@@ -68,12 +69,14 @@ export async function collectMobileSuica(options: {
   }
   const complete = collectionCompleteness(collectedRows.length);
   const sanitizedBytes = sanitizeHistoryHtml(html);
-  const artifacts: RawArtifact[] = [{
-    dataset: "sf-history-html",
-    filename: "sf-history-page-0001.html",
-    mediaType: "text/html; charset=shift_jis",
-    body: sanitizedBytes,
-  }];
+  const artifacts: RawArtifact[] = [
+    {
+      dataset: "sf-history-html",
+      filename: "sf-history-page-0001.html",
+      mediaType: "text/html; charset=shift_jis",
+      body: sanitizedBytes,
+    },
+  ];
   artifacts.push({
     dataset: "sf-history",
     filename: "sf-history.json",
@@ -219,7 +222,8 @@ function updateCookies(cookies: Map<string, string>, setCookies: string[]): void
 
 async function readBounded(response: Response, limit: number): Promise<Uint8Array> {
   const length = Number(response.headers.get("content-length"));
-  if (Number.isFinite(length) && length > limit) throw new Error("Mobile Suica response is too large");
+  if (Number.isFinite(length) && length > limit)
+    throw new Error("Mobile Suica response is too large");
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -244,8 +248,7 @@ async function readBounded(response: Response, limit: number): Promise<Uint8Arra
 }
 
 function isHistoryPage(html: string): boolean {
-  return /name=["']baseVariable["']/iu.test(html) &&
-    /name=["']specifyYearMonth["']/iu.test(html);
+  return /name=["']baseVariable["']/iu.test(html) && /name=["']specifyYearMonth["']/iu.test(html);
 }
 
 function isLoginPage(html: string): boolean {

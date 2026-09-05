@@ -7,12 +7,12 @@ manual collection/probe/reset routes return HTTP 410. Existing R2 data, DO state
 and secrets are retained. V Point Pay email collection in `poc/vpoint-worker/`
 remains active. The retained resources are:
 
-| Resource | Name | Current purpose |
-| --- | --- | --- |
-| Worker | `kogane-vpoint-pay-collector-poc` | Disabled app API; health and authenticated credential diagnostics |
-| R2 bucket | `kogane-vpoint-pay-collector-poc` | Private raw response and manifest storage |
-| Durable Object class | `VPointPayCredentialState` | Rotated refresh token and device UUID state |
-| Cron | None | Scheduled app collection disabled |
+| Resource             | Name                              | Current purpose                                                   |
+| -------------------- | --------------------------------- | ----------------------------------------------------------------- |
+| Worker               | `kogane-vpoint-pay-collector-poc` | Disabled app API; health and authenticated credential diagnostics |
+| R2 bucket            | `kogane-vpoint-pay-collector-poc` | Private raw response and manifest storage                         |
+| Durable Object class | `VPointPayCredentialState`        | Rotated refresh token and device UUID state                       |
+| Cron                 | None                              | Scheduled app collection disabled                                 |
 
 Worker URL: `https://kogane-vpoint-pay-collector-poc.takuanimal.workers.dev`
 

@@ -33,13 +33,8 @@ async function digest(value: string): Promise<ArrayBuffer> {
 
 async function validBearer(request: Request, expected: string): Promise<boolean> {
   const authorization = request.headers.get("authorization") ?? "";
-  const provided = authorization.startsWith("Bearer ")
-    ? authorization.slice("Bearer ".length)
-    : "";
-  const [providedHash, expectedHash] = await Promise.all([
-    digest(provided),
-    digest(expected),
-  ]);
+  const provided = authorization.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : "";
+  const [providedHash, expectedHash] = await Promise.all([digest(provided), digest(expected)]);
   return crypto.subtle.timingSafeEqual(providedHash, expectedHash);
 }
 
@@ -117,7 +112,11 @@ async function loginWithBrowser(env: Env): Promise<Response> {
     const page = await browser.newPage();
     page.on("request", (request) => {
       const url = new URL(request.url());
-      if (request.method() === "POST" && url.hostname === "www.smbc-card.com" && url.pathname === LOGIN_PATH) {
+      if (
+        request.method() === "POST" &&
+        url.hostname === "www.smbc-card.com" &&
+        url.pathname === LOGIN_PATH
+      ) {
         loginPostSeen = true;
       }
     });
@@ -165,7 +164,9 @@ async function loginWithBrowser(env: Env): Promise<Response> {
         status,
         loginResult,
         contentType: headers["content-type"] ?? null,
-        location: headers["location"] ? safeUrl(new URL(headers["location"], BASE_URL).toString()) : null,
+        location: headers["location"]
+          ? safeUrl(new URL(headers["location"], BASE_URL).toString())
+          : null,
       },
       authenticated,
       page: await safePageState(page),

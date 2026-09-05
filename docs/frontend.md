@@ -9,15 +9,15 @@ cross-currency totals, reconciled transactions, or P&L.
 
 Continue the existing, lockfile-pinned stack:
 
-| Responsibility | Library |
-| --- | --- |
-| UI | React 19 + TypeScript |
-| Development and bundling | Vite 8 |
-| API requests, cache, cancellation, refresh | TanStack Query 5 |
-| Transaction table | TanStack Table 9 |
-| Local read-only API | Hono 4 on Bun |
-| Verification | Bun tests + Playwright in Chromium |
-| Presentation | Shared React components and CSS design tokens |
+| Responsibility                             | Library                                       |
+| ------------------------------------------ | --------------------------------------------- |
+| UI                                         | React 19 + TypeScript                         |
+| Development and bundling                   | Vite 8                                        |
+| API requests, cache, cancellation, refresh | TanStack Query 5                              |
+| Transaction table                          | TanStack Table 9                              |
+| Local read-only API                        | Hono 4 on Bun                                 |
+| Verification                               | Bun tests + Playwright in Chromium            |
+| Presentation                               | Shared React components and CSS design tokens |
 
 No additional component, state, or chart library is required for this scope.
 Navigation keeps the existing small History API router. Monetary values stay

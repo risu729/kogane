@@ -3,15 +3,25 @@ import { parseSession } from "./session";
 
 const AAD = new TextEncoder().encode("kogane-sbi-vc-session-v1");
 
-export async function encryptSession(session: SessionMaterial, encodedKey: string): Promise<EncryptedSession> {
+export async function encryptSession(
+  session: SessionMaterial,
+  encodedKey: string,
+): Promise<EncryptedSession> {
   const key = await importKey(encodedKey);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const plaintext = new TextEncoder().encode(JSON.stringify(session));
-  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: AAD }, key, plaintext);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv, additionalData: AAD },
+    key,
+    plaintext,
+  );
   return { version: 1, iv: toBase64(iv), ciphertext: toBase64(new Uint8Array(ciphertext)) };
 }
 
-export async function decryptSession(value: EncryptedSession, encodedKey: string): Promise<SessionMaterial> {
+export async function decryptSession(
+  value: EncryptedSession,
+  encodedKey: string,
+): Promise<SessionMaterial> {
   if (value.version !== 1) throw new Error("unsupported_session_version");
   const key = await importKey(encodedKey);
   const plaintext = await crypto.subtle.decrypt(

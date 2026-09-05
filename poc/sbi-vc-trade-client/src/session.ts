@@ -27,13 +27,15 @@ function isSessionMaterial(value: unknown): value is SessionMaterial {
     return false;
   }
   const cookies = value.cookies;
-  return typeof cookies.vctBffSid === "string" &&
+  return (
+    typeof cookies.vctBffSid === "string" &&
     typeof cookies.jSessionId === "string" &&
     typeof cookies.awsAlb === "string" &&
     typeof cookies.awsAlbCors === "string" &&
     Array.isArray(cookies.awsAlbApp) &&
     cookies.awsAlbApp.length === 4 &&
-    cookies.awsAlbApp.every((part) => typeof part === "string");
+    cookies.awsAlbApp.every((part) => typeof part === "string")
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

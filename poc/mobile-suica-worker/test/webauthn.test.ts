@@ -38,7 +38,9 @@ describe("JRE ID WebAuthn credential", () => {
   test("preserves the exact JRE clientData fields", () => {
     const credential = parseStoredJreCredential(JSON.stringify(fixture()));
     const assertion = createJreAssertion(credential, Buffer.alloc(32, 7).toString("base64url"));
-    expect(JSON.parse(Buffer.from(assertion.response.clientDataJSON, "base64url").toString())).toEqual({
+    expect(
+      JSON.parse(Buffer.from(assertion.response.clientDataJSON, "base64url").toString()),
+    ).toEqual({
       type: "webauthn.get",
       challenge: Buffer.alloc(32, 7).toString("base64url"),
       origin: "https://id.jreast.co.jp",

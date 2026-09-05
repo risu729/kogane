@@ -84,32 +84,49 @@ export async function checkBrowserPasskeyLogin(
         formKeys: body ? [...new URLSearchParams(body).keys()].sort() : [],
       });
     });
-    const challengeResponsePromise = page.waitForResponse(
-      (response) => isJreLoginResponse(response.url(), response.request().method(), response.request().postData(), false),
-      { timeout: 30_000 },
-    ).catch(() => undefined);
-    const assertionResponsePromise = page.waitForResponse(
-      (response) => isJreLoginResponse(response.url(), response.request().method(), response.request().postData(), true),
-      { timeout: 45_000 },
-    ).catch(() => undefined);
+    const challengeResponsePromise = page
+      .waitForResponse(
+        (response) =>
+          isJreLoginResponse(
+            response.url(),
+            response.request().method(),
+            response.request().postData(),
+            false,
+          ),
+        { timeout: 30_000 },
+      )
+      .catch(() => undefined);
+    const assertionResponsePromise = page
+      .waitForResponse(
+        (response) =>
+          isJreLoginResponse(
+            response.url(),
+            response.request().method(),
+            response.request().postData(),
+            true,
+          ),
+        { timeout: 45_000 },
+      )
+      .catch(() => undefined);
     const switched = await page.evaluate(() => {
-      const button = [...document.querySelectorAll<HTMLButtonElement>("button")]
-        .find((candidate) => candidate.textContent?.replace(/\s+/gu, "").includes("パスキーでログインする"));
+      const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find((candidate) =>
+        candidate.textContent?.replace(/\s+/gu, "").includes("パスキーでログインする"),
+      );
       if (button && !button.disabled) button.click();
       return Boolean(button && !button.disabled);
     });
     if (!switched) throw new Error("JRE ID passkey screen switch was not available");
-    await page.waitForFunction(
-      () => document.title.includes("パスキーでログイン"),
-      { timeout: 10_000 },
-    );
+    await page.waitForFunction(() => document.title.includes("パスキーでログイン"), {
+      timeout: 10_000,
+    });
     await page.waitForSelector('input[name="id"]', { visible: true, timeout: 10_000 });
     await page.type('input[name="id"]', credential.username, { delay: 20 });
     const clickState = await page.evaluate((expectedLength) => {
       const input = document.querySelector<HTMLInputElement>('input[name="id"]');
       const buttons = [...document.querySelectorAll<HTMLButtonElement>("button")];
-      const button = buttons
-        .find((candidate) => candidate.textContent?.replace(/\s+/gu, "") === "パスキーでログインする");
+      const button = buttons.find(
+        (candidate) => candidate.textContent?.replace(/\s+/gu, "") === "パスキーでログインする",
+      );
       if (button && !button.disabled) button.click();
       return {
         inputLengthMatches: input?.value.length === expectedLength,
@@ -120,7 +137,9 @@ export async function checkBrowserPasskeyLogin(
             const rect = candidate.getBoundingClientRect();
             return rect.width > 0 && rect.height > 0;
           })
-          .map((candidate) => candidate.textContent?.replace(/\s+/gu, " ").trim().slice(0, 100) ?? ""),
+          .map(
+            (candidate) => candidate.textContent?.replace(/\s+/gu, " ").trim().slice(0, 100) ?? "",
+          ),
       };
     }, credential.username.length);
     if (!clickState.passkeyButtonFound) {
@@ -241,19 +260,33 @@ export async function bootstrapMobileSuicaSessionWithBrowser(
 
 async function performPasskeyLogin(page: Page, credential: StoredJreCredential): Promise<void> {
   const challengeResponsePromise = page.waitForResponse(
-    (response) => isJreLoginResponse(response.url(), response.request().method(), response.request().postData(), false),
+    (response) =>
+      isJreLoginResponse(
+        response.url(),
+        response.request().method(),
+        response.request().postData(),
+        false,
+      ),
     { timeout: 30_000 },
   );
   const assertionResponsePromise = page.waitForResponse(
-    (response) => isJreLoginResponse(response.url(), response.request().method(), response.request().postData(), true),
+    (response) =>
+      isJreLoginResponse(
+        response.url(),
+        response.request().method(),
+        response.request().postData(),
+        true,
+      ),
     { timeout: 45_000 },
   );
   const switched = await clickButton(page, "パスキーでログインする");
   if (!switched) throw new Error("JRE ID passkey screen switch was not available");
-  await page.waitForFunction(() => document.title.includes("パスキーでログイン"), { timeout: 10_000 });
+  await page.waitForFunction(() => document.title.includes("パスキーでログイン"), {
+    timeout: 10_000,
+  });
   await page.waitForSelector('input[name="id"]', { visible: true, timeout: 10_000 });
   await page.type('input[name="id"]', credential.username, { delay: 20 });
-  if (!await clickButton(page, "パスキーでログインする")) {
+  if (!(await clickButton(page, "パスキーでログインする"))) {
     throw new Error("JRE ID passkey submit button was not available");
   }
   const challengeResultCode = await responseResultCode(await challengeResponsePromise);
@@ -265,14 +298,19 @@ async function performPasskeyLogin(page: Page, credential: StoredJreCredential):
     throw new Error(`JRE ID passkey challenge failed; resultCode=${challengeResultCode}`);
   }
   await assertionResponsePromise;
-  await page.waitForFunction((origin) => location.origin === origin, { timeout: 45_000 }, mobileSuicaOrigin);
+  await page.waitForFunction(
+    (origin) => location.origin === origin,
+    { timeout: 45_000 },
+    mobileSuicaOrigin,
+  );
   await page.waitForNetworkIdle({ idleTime: 500, timeout: 10_000 }).catch(() => undefined);
 }
 
 async function clickButton(page: Page, text: string): Promise<boolean> {
   return page.evaluate((expected) => {
-    const button = [...document.querySelectorAll<HTMLButtonElement>("button")]
-      .find((candidate) => candidate.textContent?.replace(/\s+/gu, "") === expected.replace(/\s+/gu, ""));
+    const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      (candidate) => candidate.textContent?.replace(/\s+/gu, "") === expected.replace(/\s+/gu, ""),
+    );
     if (button && !button.disabled) button.click();
     return Boolean(button && !button.disabled);
   }, text);
@@ -282,29 +320,36 @@ async function mobileSuicaUrlFromPage(page: Page, pathname: string): Promise<str
   const value = await page.evaluate((expectedPath) => {
     const html = document.documentElement.outerHTML;
     const escapedPath = expectedPath.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-    const match = new RegExp(`(?:https:\\/\\/www\\.mobilesuica\\.com)?${escapedPath}[^'"<>\\s)]*`, "u").exec(html)?.[0];
+    const match = new RegExp(
+      `(?:https:\\/\\/www\\.mobilesuica\\.com)?${escapedPath}[^'"<>\\s)]*`,
+      "u",
+    ).exec(html)?.[0];
     return match?.replaceAll("&amp;", "&");
   }, pathname);
   if (!value) {
     const summary = await page.evaluate(() => ({
       pathname: location.pathname,
       title: document.title.replace(/\s+/gu, " ").trim().slice(0, 100),
-      internalPaths: [...new Set(
-        [...document.querySelectorAll<HTMLAnchorElement>("a[href]")]
-          .map((link) => {
-            try {
-              const url = new URL(link.href, location.href);
-              return url.origin === location.origin ? url.pathname : undefined;
-            } catch {
-              return undefined;
-            }
-          })
-          .filter((entry): entry is string => Boolean(entry)),
-      )].sort().slice(0, 30),
+      internalPaths: [
+        ...new Set(
+          [...document.querySelectorAll<HTMLAnchorElement>("a[href]")]
+            .map((link) => {
+              try {
+                const url = new URL(link.href, location.href);
+                return url.origin === location.origin ? url.pathname : undefined;
+              } catch {
+                return undefined;
+              }
+            })
+            .filter((entry): entry is string => Boolean(entry)),
+        ),
+      ]
+        .sort()
+        .slice(0, 30),
     }));
     throw new Error(
       `Mobile Suica page did not contain ${pathname}; ` +
-      `current=${summary.pathname}; title=${summary.title}; paths=${summary.internalPaths.join("|")}`,
+        `current=${summary.pathname}; title=${summary.title}; paths=${summary.internalPaths.join("|")}`,
     );
   }
   const url = new URL(value, mobileSuicaOrigin);
@@ -343,13 +388,14 @@ async function submitMobileSuicaForm(page: Page, pathname: string): Promise<void
 async function clickMobileSuicaHistoryApplication(page: Page): Promise<void> {
   const navigation = page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30_000 });
   const clicked = await page.evaluate(() => {
-    const link = [...document.querySelectorAll<HTMLAnchorElement>("a[href]")]
-      .find((candidate) => {
-        const source = candidate.getAttribute("href") ?? "";
-        return source.includes("/ka/lg/SuicaChangeTransfer.aspx") &&
-          source.includes("LoginTransferId=SFRIQIRPC22") &&
-          source.includes("returnId=SFRCMMEPC03");
-      });
+    const link = [...document.querySelectorAll<HTMLAnchorElement>("a[href]")].find((candidate) => {
+      const source = candidate.getAttribute("href") ?? "";
+      return (
+        source.includes("/ka/lg/SuicaChangeTransfer.aspx") &&
+        source.includes("LoginTransferId=SFRIQIRPC22") &&
+        source.includes("returnId=SFRCMMEPC03")
+      );
+    });
     link?.click();
     return Boolean(link);
   });
@@ -359,7 +405,10 @@ async function clickMobileSuicaHistoryApplication(page: Page): Promise<void> {
   }
   await navigation;
   const current = new URL(page.url());
-  if (current.origin !== mobileSuicaOrigin || current.pathname !== "/ka/lg/SuicaChangeTransfer.aspx") {
+  if (
+    current.origin !== mobileSuicaOrigin ||
+    current.pathname !== "/ka/lg/SuicaChangeTransfer.aspx"
+  ) {
     throw new Error(`Mobile Suica SF history application reached ${current.pathname}`);
   }
   await page.waitForNetworkIdle({ idleTime: 500, timeout: 10_000 }).catch(() => undefined);
@@ -378,7 +427,10 @@ async function openJreLoginPage(
     const links = [...document.querySelectorAll<HTMLAnchorElement>("a[href]")];
     const link = links.find((candidate) => {
       const source = `${candidate.getAttribute("href") ?? ""} ${candidate.getAttribute("onclick") ?? ""}`;
-      return source.includes("/ka/lg/RequestIdpAuthentication.aspx") && source.includes("returnId=SFRKALGPC02");
+      return (
+        source.includes("/ka/lg/RequestIdpAuthentication.aspx") &&
+        source.includes("returnId=SFRKALGPC02")
+      );
     });
     const source = `${link?.getAttribute("href") ?? ""} ${link?.getAttribute("onclick") ?? ""}`;
     return /https:\/\/www\.mobilesuica\.com\/ka\/lg\/RequestIdpAuthentication\.aspx\?[^'"\s)]+/u
@@ -441,12 +493,19 @@ async function installVirtualAuthenticator(
   });
 }
 
-async function inspectLoginDom(page: Page): Promise<Omit<BrowserBootstrapInspection, "ok" | "stage">> {
+async function inspectLoginDom(
+  page: Page,
+): Promise<Omit<BrowserBootstrapInspection, "ok" | "stage">> {
   return page.evaluate(() => {
     const visible = (element: Element): boolean => {
       const rect = element.getBoundingClientRect();
       const style = getComputedStyle(element);
-      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+      return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        style.visibility !== "hidden" &&
+        style.display !== "none"
+      );
     };
     const clean = (value: string | null | undefined): string =>
       (value ?? "").replace(/\s+/gu, " ").trim().slice(0, 100);
@@ -461,7 +520,9 @@ async function inspectLoginDom(page: Page): Promise<Omit<BrowserBootstrapInspect
         placeholder: clean(input.placeholder),
         visible: visible(input),
       })),
-      buttons: [...document.querySelectorAll<HTMLElement>("button, [role=button], input[type=submit]")].map((button) => ({
+      buttons: [
+        ...document.querySelectorAll<HTMLElement>("button, [role=button], input[type=submit]"),
+      ].map((button) => ({
         tag: button.tagName.toLowerCase(),
         type: clean(button.getAttribute("type")),
         text: clean(button.textContent),

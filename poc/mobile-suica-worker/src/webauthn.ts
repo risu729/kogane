@@ -64,7 +64,10 @@ export function parseStoredJreCredential(input: string): StoredJreCredential {
     format: "der",
     type: "pkcs8",
   });
-  if (privateKey.asymmetricKeyType !== "ec" || privateKey.asymmetricKeyDetails?.namedCurve !== "prime256v1") {
+  if (
+    privateKey.asymmetricKeyType !== "ec" ||
+    privateKey.asymmetricKeyDetails?.namedCurve !== "prime256v1"
+  ) {
     throw new Error("JRE ID credential private key is not P-256");
   }
   credentialIdBytes(credential.credentialId);
@@ -78,12 +81,14 @@ export function createJreAssertion(
   if (!challenge || Buffer.from(challenge, "base64url").byteLength === 0) {
     throw new Error("JRE ID WebAuthn challenge is invalid");
   }
-  const clientDataJSON = Buffer.from(JSON.stringify({
-    type: "webauthn.get",
-    challenge,
-    origin: "https://id.jreast.co.jp",
-    crossOrigin: false,
-  }));
+  const clientDataJSON = Buffer.from(
+    JSON.stringify({
+      type: "webauthn.get",
+      challenge,
+      origin: "https://id.jreast.co.jp",
+      crossOrigin: false,
+    }),
+  );
   const authenticatorData = Buffer.concat([
     createHash("sha256").update(credential.rpId).digest(),
     Buffer.from([0x1d]),

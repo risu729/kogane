@@ -46,12 +46,14 @@ export async function createAssertion(
 ): Promise<Record<string, unknown>> {
   const rpId = options.rpId ?? credential.rpId;
   if (rpId !== credential.rpId) throw new Error("Passkey RP ID mismatch");
-  const clientData = Buffer.from(JSON.stringify({
-    type: "webauthn.get",
-    challenge: options.challenge,
-    origin: credential.origin,
-    crossOrigin: false,
-  }));
+  const clientData = Buffer.from(
+    JSON.stringify({
+      type: "webauthn.get",
+      challenge: options.challenge,
+      origin: credential.origin,
+      crossOrigin: false,
+    }),
+  );
   const authenticatorData = Buffer.concat([
     Buffer.from(await crypto.subtle.digest("SHA-256", Buffer.from(rpId))),
     Buffer.from([0x1d]),
@@ -68,11 +70,13 @@ export async function createAssertion(
     false,
     ["sign"],
   );
-  const rawSignature = new Uint8Array(await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    privateKey,
-    exactArrayBuffer(signedData),
-  ));
+  const rawSignature = new Uint8Array(
+    await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      privateKey,
+      exactArrayBuffer(signedData),
+    ),
+  );
   // Web Crypto ECDSA returns fixed-width r || s, including when r happens to
   // begin with DER's 0x30 tag. WebAuthn always requires ASN.1 DER encoding.
   const signature = p1363ToDer(rawSignature);

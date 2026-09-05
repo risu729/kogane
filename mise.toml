@@ -1,0 +1,49 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tools]
+bun = "1.4.0"
+node = "26.8.1"
+hk = "1.57.0"
+oxlint = "1.72.0"
+oxfmt = "0.66.0"
+actionlint = "1.7.12"
+shellcheck = "0.11.0"
+ghalint = "1.5.6"
+pinact = "4.1.1"
+zizmor = "1.29.0"
+tombi = "1.5.1"
+yamlfmt = "0.21.0"
+uv = "0.12.10"
+yamllint = "1.38.0"
+typos = "1.50.1"
+ruff = "0.16.6"
+
+[settings]
+experimental = true
+lockfile = true
+lockfile_platforms = ["linux-x64", "windows-x64"]
+
+[settings.npm]
+package_manager = "bun"
+
+[tasks.check]
+description = "Run the shared hk linters and formatters."
+usage = '''
+flag "--lint" help="Check without changing files"
+'''
+run = "hk {% if usage.lint %}check{% else %}fix{% endif %} --all --no-progress --no-fail-fast"
+
+[tasks."ci:package"]
+description = "Install locked dependencies and run one package's offline checks."
+usage = '''
+arg "<package>" help="An explicitly supported package directory"
+'''
+run = "bun run scripts/ci-package.ts"
+
+[tasks."ci:standalone"]
+description = "Check standalone diagnostics, CI coverage, and probe syntax without collecting."
+run = "bun run scripts/ci-package.ts --standalone"
+
+[tasks."hooks:install"]
+description = "Install the shared hk pre-commit hook using mise."
+run = "hk install --mise"

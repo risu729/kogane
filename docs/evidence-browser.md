@@ -558,7 +558,7 @@ behaviour that would break the most important route here.
 
 With a Worker script, `assets.not_found_handling` configured, and a
 compatibility date of 2025-04-01 or later (which selects
-`assets_navigation_prefers_asset_serving`), a *navigation request* — one
+`assets_navigation_prefers_asset_serving`), a _navigation request_ — one
 carrying the `Sec-Fetch-Mode: navigate` header, which browsers attach when
 a URL is typed or followed into the address bar — does not invoke the
 Worker at all. It is answered from the asset store, which under
@@ -584,8 +584,8 @@ opts those paths out of the `Sec-Fetch-Mode` heuristic:
     "directory": "./web/dist/",
     "not_found_handling": "single-page-application",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*"]
-  }
+    "run_worker_first": ["/api/*"],
+  },
 }
 ```
 

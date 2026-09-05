@@ -27,21 +27,15 @@ describe("GLOBAL PASS collection model", () => {
 
   test("derives the exact selected month set for daily and backfill", () => {
     const available = ["2026-09", "2026-08", "2026-07"];
-    expect(selectedMonthsForMode("daily", available)).toEqual([
-      "2026-09",
-      "2026-08",
-    ]);
+    expect(selectedMonthsForMode("daily", available)).toEqual(["2026-09", "2026-08"]);
     expect(selectedMonthsForMode("backfill", available)).toEqual(available);
     expect(artifactFilename("2026-09")).toBe("activity-2026-09.html");
   });
 
   test("rejects duplicate, unordered, discontinuous and oversized selectors", () => {
-    expect(() => assertCanonicalMonths(["2026-09", "2026-09"], "months"))
-      .toThrow();
-    expect(() => assertCanonicalMonths(["2026-08", "2026-09"], "months"))
-      .toThrow();
-    expect(() => assertCanonicalMonths(["2026-09", "2026-07"], "months"))
-      .toThrow();
+    expect(() => assertCanonicalMonths(["2026-09", "2026-09"], "months")).toThrow();
+    expect(() => assertCanonicalMonths(["2026-08", "2026-09"], "months")).toThrow();
+    expect(() => assertCanonicalMonths(["2026-09", "2026-07"], "months")).toThrow();
     expect(() => assertCanonicalMonths([], "months")).toThrow();
   });
 
@@ -54,31 +48,39 @@ describe("GLOBAL PASS collection model", () => {
       bytes: 10,
       sha256: "a".repeat(64),
     });
-    expect(strictCollectionStatus(
-      [stored("2026-09"), stored("2026-08")],
-      [],
-      ["2026-09", "2026-08"],
-    )).toEqual({ status: "success", captureComplete: true });
-    expect(strictCollectionStatus(
-      [stored("2026-09")],
-      [{
-        operation: "contract",
-        errorType: "CollectionContractError",
-        errorCode: "selected_month_missing",
-        artifactKey: "activity-2026-08.html",
-      }],
-      ["2026-09", "2026-08"],
-    )).toEqual({ status: "partial", captureComplete: false });
-    expect(strictCollectionStatus([], [{
-      operation: "browser-collection",
-      errorType: "Error",
-      errorCode: "browser_collection_failed",
-    }], [])).toEqual({ status: "failed", captureComplete: false });
-    expect(() => strictCollectionStatus(
-      [stored("2026-08"), stored("2026-09")],
-      [],
-      ["2026-09", "2026-08"],
-    )).toThrow("not in selected month order");
+    expect(
+      strictCollectionStatus([stored("2026-09"), stored("2026-08")], [], ["2026-09", "2026-08"]),
+    ).toEqual({ status: "success", captureComplete: true });
+    expect(
+      strictCollectionStatus(
+        [stored("2026-09")],
+        [
+          {
+            operation: "contract",
+            errorType: "CollectionContractError",
+            errorCode: "selected_month_missing",
+            artifactKey: "activity-2026-08.html",
+          },
+        ],
+        ["2026-09", "2026-08"],
+      ),
+    ).toEqual({ status: "partial", captureComplete: false });
+    expect(
+      strictCollectionStatus(
+        [],
+        [
+          {
+            operation: "browser-collection",
+            errorType: "Error",
+            errorCode: "browser_collection_failed",
+          },
+        ],
+        [],
+      ),
+    ).toEqual({ status: "failed", captureComplete: false });
+    expect(() =>
+      strictCollectionStatus([stored("2026-08"), stored("2026-09")], [], ["2026-09", "2026-08"]),
+    ).toThrow("not in selected month order");
   });
 
   test("uses the source-specific private R2 prefix", () => {

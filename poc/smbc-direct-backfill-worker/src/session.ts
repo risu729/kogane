@@ -17,7 +17,6 @@ import type {
   BackfillManifest,
   BackfillProgress,
   ChallengeState,
-  DateRange,
   EncryptedPayload,
   FinishChallengeResult,
   StartChallengeResult,
@@ -81,9 +80,10 @@ export class SmbcBackfillSession extends DurableObject<Env> {
             createdAt: state.createdAt,
             challengeExpiresAt: state.expiresAt,
             completedAt: null,
-            nextRange: progress.from && progress.to
-              ? monthRanges(progress.from, progress.to)[progress.completedChunks] ?? null
-              : null,
+            nextRange:
+              progress.from && progress.to
+                ? (monthRanges(progress.from, progress.to)[progress.completedChunks] ?? null)
+                : null,
             retryCount: 0,
             lastErrorCode: null,
             logoutSucceeded: null,
@@ -137,12 +137,14 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         throw error;
       }
 
-      if (isResumable(current)
-        && current.from === from
-        && current.to === to
-        && current.runId
-        && current.startedAt) {
-        const artifacts = await this.ctx.storage.get<StoredArtifact[]>("artifacts") ?? [];
+      if (
+        isResumable(current) &&
+        current.from === from &&
+        current.to === to &&
+        current.runId &&
+        current.startedAt
+      ) {
+        const artifacts = (await this.ctx.storage.get<StoredArtifact[]>("artifacts")) ?? [];
         const resumed: BackfillProgress = {
           ...current,
           phase: "running",
@@ -191,23 +193,29 @@ export class SmbcBackfillSession extends DurableObject<Env> {
       await this.ctx.storage.delete("challenge");
       try {
         const balance = await diagnostic.step("balance-collection", () => profile.getBalance());
-        upsertArtifact(artifacts, await storeBytes({
-          bucket: this.env.SNAPSHOTS,
-          key: `${prefix}/balance.raw.json.sjis`,
-          bytes: balance.rawBytes,
-          mediaType: balance.rawContentType,
-          artifact: { dataset: "balance-raw" },
-        }));
-        upsertArtifact(artifacts, await storeJson({
-          bucket: this.env.SNAPSHOTS,
-          key: `${prefix}/balance.normalized.json`,
-          value: {
-            observedAt: startedAt,
-            currency: balance.currency,
-            amount: balance.amount,
-          },
-          artifact: { dataset: "balance-normalized" },
-        }));
+        upsertArtifact(
+          artifacts,
+          await storeBytes({
+            bucket: this.env.SNAPSHOTS,
+            key: `${prefix}/balance.raw.json.sjis`,
+            bytes: balance.rawBytes,
+            mediaType: balance.rawContentType,
+            artifact: { dataset: "balance-raw" },
+          }),
+        );
+        upsertArtifact(
+          artifacts,
+          await storeJson({
+            bucket: this.env.SNAPSHOTS,
+            key: `${prefix}/balance.normalized.json`,
+            value: {
+              observedAt: startedAt,
+              currency: balance.currency,
+              amount: balance.amount,
+            },
+            artifact: { dataset: "balance-normalized" },
+          }),
+        );
         progress.artifactCount = artifacts.length;
         progress.manifestKey = await storeManifest(
           this.env.SNAPSHOTS,
@@ -227,12 +235,18 @@ export class SmbcBackfillSession extends DurableObject<Env> {
   override async alarm(): Promise<void> {
     await this.#exclusive(async () => {
       let progress = await this.getStatus();
-      if (progress.phase !== "running" || !progress.from || !progress.to || !progress.startedAt || !progress.runId) {
+      if (
+        progress.phase !== "running" ||
+        !progress.from ||
+        !progress.to ||
+        !progress.startedAt ||
+        !progress.runId
+      ) {
         return;
       }
       const ranges = monthRanges(progress.from, progress.to);
-      const artifacts = await this.ctx.storage.get<StoredArtifact[]>("artifacts") ?? [];
-      const failureCodes = await this.ctx.storage.get<string[]>("failureCodes") ?? [];
+      const artifacts = (await this.ctx.storage.get<StoredArtifact[]>("artifacts")) ?? [];
+      const failureCodes = (await this.ctx.storage.get<string[]>("failureCodes")) ?? [];
       const encrypted = await this.ctx.storage.get<EncryptedPayload>("session");
       if (!encrypted) {
         await this.#fail(progress, artifacts, [...failureCodes, "session_missing"]);
@@ -332,14 +346,16 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           await this.ctx.storage.delete("session");
           await this.ctx.storage.deleteAlarm();
           diagnostic.finish(completed.phase === "success" ? "success" : "partial");
-          console.log(JSON.stringify({
-            message: "smbc_backfill_complete",
-            runId: completed.runId,
-            status: completed.phase,
-            completedChunks: completed.completedChunks,
-            transactionCount: completed.transactionCount,
-            artifactCount: completed.artifactCount,
-          }));
+          console.log(
+            JSON.stringify({
+              message: "smbc_backfill_complete",
+              runId: completed.runId,
+              status: completed.phase,
+              completedChunks: completed.completedChunks,
+              transactionCount: completed.transactionCount,
+              artifactCount: completed.artifactCount,
+            }),
+          );
           return;
         }
 
@@ -399,13 +415,18 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     await this.ctx.storage.put({ progress: failed, artifacts, failureCodes });
     await this.ctx.storage.delete("session");
     await this.ctx.storage.deleteAlarm();
-    if (failed.runId) createDiagnostics("smbc-direct", failed.runId).finish(failed.phase === "partial" ? "partial" : "failed");
-    console.error(JSON.stringify({
-      message: "smbc_backfill_failed",
-      runId: failed.runId,
-      status: failed.phase,
-      errorCode: failed.lastErrorCode,
-    }));
+    if (failed.runId)
+      createDiagnostics("smbc-direct", failed.runId).finish(
+        failed.phase === "partial" ? "partial" : "failed",
+      );
+    console.error(
+      JSON.stringify({
+        message: "smbc_backfill_failed",
+        runId: failed.runId,
+        status: failed.phase,
+        errorCode: failed.lastErrorCode,
+      }),
+    );
   }
 
   #manifest(
@@ -416,13 +437,14 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     if (!progress.runId || !progress.startedAt || !progress.from || !progress.to) {
       throw new Error("manifest_progress_invalid");
     }
-    const status: BackfillManifest["status"] = progress.phase === "success"
-      ? "success"
-      : progress.phase === "partial"
-        ? "partial"
-        : progress.phase === "failed"
-          ? "failed"
-          : "running";
+    const status: BackfillManifest["status"] =
+      progress.phase === "success"
+        ? "success"
+        : progress.phase === "partial"
+          ? "partial"
+          : progress.phase === "failed"
+            ? "failed"
+            : "running";
     return {
       schemaVersion: this.env.COLLECTOR_SCHEMA_VERSION,
       source: "smbc-direct",

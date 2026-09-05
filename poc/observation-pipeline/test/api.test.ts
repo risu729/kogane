@@ -16,12 +16,7 @@ import {
   upsertSource,
 } from "../src/store.ts";
 import { formatAmount, amountSign } from "../src/money.ts";
-import {
-  buildFixture,
-  HOSTILE_DESCRIPTION,
-  RETIRED_DESCRIPTION,
-  type Fixture,
-} from "./fixture.ts";
+import { buildFixture, HOSTILE_DESCRIPTION, RETIRED_DESCRIPTION, type Fixture } from "./fixture.ts";
 
 const fixture: Fixture = buildFixture();
 const app = createApi(fixture.store);
@@ -41,9 +36,7 @@ async function json(path: string): Promise<any> {
 describe("shared response validators", () => {
   test("detail identities must match the requested safe integer, including zero", async () => {
     const artifact = await json(`/api/artifacts/${fixture.artifactId}`);
-    const observation = await json(
-      `/api/observations/transaction/${fixture.retiredObservationId}`,
-    );
+    const observation = await json(`/api/observations/transaction/${fixture.retiredObservationId}`);
     for (const id of [0, Number.MAX_SAFE_INTEGER]) {
       expect(
         validApiResponse(`/api/artifacts/${id}`, {
@@ -72,9 +65,7 @@ describe("shared response validators", () => {
         }),
       ).toBe(false);
     }
-    expect(
-      validApiResponse(`/api/artifacts/${fixture.artifactId + 1}`, artifact),
-    ).toBe(false);
+    expect(validApiResponse(`/api/artifacts/${fixture.artifactId + 1}`, artifact)).toBe(false);
     expect(
       validApiResponse(
         `/api/observations/transaction/${fixture.retiredObservationId + 1}`,
@@ -100,12 +91,7 @@ describe("shared response validators", () => {
         }),
       ).toBe(false);
     }
-    for (const sha256 of [
-      "",
-      "../transactions",
-      "a".repeat(63),
-      "A".repeat(64),
-    ]) {
+    for (const sha256 of ["", "../transactions", "a".repeat(63), "A".repeat(64)]) {
       expect(
         validApiResponse(observationPath, {
           ...observation,
@@ -119,16 +105,7 @@ describe("shared response validators", () => {
     const transactions = await json("/api/transactions");
     const observationPath = `/api/observations/transaction/${fixture.retiredObservationId}`;
     const observation = await json(observationPath);
-    for (const amount_minor of [
-      "",
-      " ",
-      "0x10",
-      "0b10",
-      "+1",
-      "1e3",
-      "1.5",
-      "1\n",
-    ]) {
+    for (const amount_minor of ["", " ", "0x10", "0b10", "+1", "1e3", "1.5", "1\n"]) {
       expect(
         validApiResponse("/api/transactions", {
           transactions: [{ ...transactions.transactions[0], amount_minor }],
@@ -153,28 +130,20 @@ describe("shared response validators", () => {
   test("validate real query results and reject malformed nested details", async () => {
     const artifactPath = `/api/artifacts/${fixture.artifactId}`;
     const detail = await json(artifactPath);
-    expect(validApiResponse(artifactPath, { ...detail, parseRuns: [{}] })).toBe(
-      false,
-    );
+    expect(validApiResponse(artifactPath, { ...detail, parseRuns: [{}] })).toBe(false);
     const badWarnings = structuredClone(detail);
     badWarnings.parseRuns[0].warnings.list = [null];
     expect(validApiResponse(artifactPath, badWarnings)).toBe(false);
     const badReference = structuredClone(detail);
-    badReference.parseRuns[0].observations = [
-      { kind: "unknown", id: 1, summary: "sample" },
-    ];
+    badReference.parseRuns[0].observations = [{ kind: "unknown", id: 1, summary: "sample" }];
     expect(validApiResponse(artifactPath, badReference)).toBe(false);
     const observationPath = `/api/observations/transaction/${fixture.retiredObservationId}`;
     const observation = await json(observationPath);
-    expect(
-      validApiResponse(observationPath, { ...observation, provenance: {} }),
-    ).toBe(false);
+    expect(validApiResponse(observationPath, { ...observation, provenance: {} })).toBe(false);
     const missingProvenance = { ...observation };
     delete missingProvenance.provenance;
     expect(validApiResponse(observationPath, missingProvenance)).toBe(true);
-    expect(
-      validApiResponse(observationPath, { ...observation, provenance: null }),
-    ).toBe(false);
+    expect(validApiResponse(observationPath, { ...observation, provenance: null })).toBe(false);
   });
 });
 
@@ -198,16 +167,11 @@ describe("API metadata", () => {
     const demoApi = createApi(fixture.store, {
       dataClassification: "synthetic",
     });
-    const response = await demoApi.fetch(
-      new Request("http://api.test/api/meta"),
-    );
+    const response = await demoApi.fetch(new Request("http://api.test/api/meta"));
     expect(
-      ((await response.json()) as { source: { classification: string } }).source
-        .classification,
+      ((await response.json()) as { source: { classification: string } }).source.classification,
     ).toBe("synthetic");
-    const denied = await demoApi.fetch(
-      new Request("http://api.test/api/meta", { method: "POST" }),
-    );
+    const denied = await demoApi.fetch(new Request("http://api.test/api/meta", { method: "POST" }));
     expect(denied.status).toBe(405);
   });
 });
@@ -215,9 +179,7 @@ describe("API metadata", () => {
 describe("amount formatting", () => {
   test("prototype-shaped unknown currencies never turn a nonzero amount into zero", () => {
     for (const currency of ["__proto__", "constructor", "toString"]) {
-      expect(formatAmount("123456", currency)).toBe(
-        `123,456 ${currency} (minor units)`,
-      );
+      expect(formatAmount("123456", currency)).toBe(`123,456 ${currency} (minor units)`);
     }
   });
   test("formats minor units without floating point", () => {
@@ -232,19 +194,13 @@ describe("amount formatting", () => {
   test("an amount beyond the safe integer range keeps every digit", () => {
     // The API serialises large amounts as strings; formatting must not route
     // them through a double.
-    expect(formatAmount("9007199254740993", "JPY")).toBe(
-      "9,007,199,254,740,993 JPY",
-    );
-    expect(formatAmount(9007199254740993n, "JPY")).toBe(
-      "9,007,199,254,740,993 JPY",
-    );
+    expect(formatAmount("9007199254740993", "JPY")).toBe("9,007,199,254,740,993 JPY");
+    expect(formatAmount(9007199254740993n, "JPY")).toBe("9,007,199,254,740,993 JPY");
   });
 
   test("an unknown instrument is labelled, never given an invented scale", () => {
     expect(formatAmount(12345, "XYZ")).toBe("12,345 XYZ (minor units)");
-    expect(formatAmount(12345, "ANA_MILE")).toBe(
-      "12,345 ANA_MILE (minor units)",
-    );
+    expect(formatAmount(12345, "ANA_MILE")).toBe("12,345 ANA_MILE (minor units)");
   });
 
   test("a null amount falls back to the stored text verbatim", () => {
@@ -274,9 +230,7 @@ describe("amount formatting", () => {
 describe("read-only enforcement", () => {
   test("every write method is refused before routing", async () => {
     for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
-      const response = await app.fetch(
-        new Request("http://api.test/api/overview", { method }),
-      );
+      const response = await app.fetch(new Request("http://api.test/api/overview", { method }));
       expect(response.status).toBe(405);
     }
   });
@@ -293,10 +247,7 @@ describe("overview", () => {
   test("reports row counts, sources, and both parse runs", async () => {
     const body = await json("/api/overview");
     const counts = Object.fromEntries(
-      body.counts.map((entry: { table: string; rows: number }) => [
-        entry.table,
-        entry.rows,
-      ]),
+      body.counts.map((entry: { table: string; rows: number }) => [entry.table, entry.rows]),
     );
     expect(counts["sources"]).toBe(1);
     expect(counts["transaction_observations"]).toBe(3); // 1 retired + 2 current
@@ -319,9 +270,7 @@ describe("overview", () => {
 describe("current views", () => {
   test("transactions exclude superseded parse runs", async () => {
     const body = await json("/api/transactions");
-    const descriptions = body.transactions.map(
-      (row: { description: string }) => row.description,
-    );
+    const descriptions = body.transactions.map((row: { description: string }) => row.description);
     expect(descriptions).toContain(HOSTILE_DESCRIPTION);
     expect(descriptions).not.toContain(RETIRED_DESCRIPTION);
   });
@@ -385,9 +334,7 @@ describe("artifacts", () => {
     expect(retired.superseded_by_parse_run_id).not.toBeNull();
     // The retired observation is unreachable from current views but stays
     // reachable here, which is what makes a re-parse auditable.
-    const summaries = retired.observations.map(
-      (o: { summary: string }) => o.summary,
-    );
+    const summaries = retired.observations.map((o: { summary: string }) => o.summary);
     expect(summaries.join(" ")).toContain(RETIRED_DESCRIPTION);
   });
 });
@@ -410,9 +357,7 @@ describe("observation detail and provenance", () => {
   });
 
   test("walks observation to parse run to artifact to raw object to fetch run", async () => {
-    const body = await json(
-      `/api/observations/transaction/${fixture.retiredObservationId}`,
-    );
+    const body = await json(`/api/observations/transaction/${fixture.retiredObservationId}`);
     expect(body.kind).toBe("transaction");
     expect(body.row.raw_locator).toBe("json:$.rows[0]");
     const provenance = body.provenance;
@@ -433,9 +378,7 @@ describe("observation detail and provenance", () => {
 
   test("an unknown kind or id is a 404, never a 500", async () => {
     expect((await get("/api/observations/nonsense/1")).status).toBe(404);
-    expect((await get("/api/observations/transaction/999999")).status).toBe(
-      404,
-    );
+    expect((await get("/api/observations/transaction/999999")).status).toBe(404);
     expect((await get("/api/artifacts/999999")).status).toBe(404);
   });
 
@@ -469,9 +412,7 @@ describe("raw evidence", () => {
     expect((await get("/api/raw/not-a-digest")).status).toBe(404);
     expect((await get(`/api/raw/${"f".repeat(64)}`)).status).toBe(404);
     // uppercase is not the stored form
-    expect((await get(`/api/raw/${fixture.sha256.toUpperCase()}`)).status).toBe(
-      404,
-    );
+    expect((await get(`/api/raw/${fixture.sha256.toUpperCase()}`)).status).toBe(404);
   });
 });
 
@@ -490,9 +431,7 @@ describe("routing", () => {
     const served = createApi(fixture.store, {
       serveClient: () => new Response("CLIENT", { status: 200 }),
     });
-    const page = await served.fetch(
-      new Request("http://api.test/transactions"),
-    );
+    const page = await served.fetch(new Request("http://api.test/transactions"));
     expect(await page.text()).toBe("CLIENT");
     // the API still wins for /api paths
     const api = await served.fetch(new Request("http://api.test/api/nope"));
@@ -554,14 +493,8 @@ describe("invariants that a shared label could break", () => {
     }
     const latest = latestBalances(store);
     expect(latest).toHaveLength(2);
-    expect(latest.map((row) => row.source_id).sort()).toEqual([
-      "bank-a",
-      "bank-b",
-    ]);
-    expect(latest.map((row) => row.amount_minor).sort()).toEqual([
-      "111",
-      "222",
-    ]);
+    expect(latest.map((row) => row.source_id).sort()).toEqual(["bank-a", "bank-b"]);
+    expect(latest.map((row) => row.amount_minor).sort()).toEqual(["111", "222"]);
   });
 
   test("a content type carrying CRLF cannot reach the response header", async () => {
@@ -586,14 +519,10 @@ describe("invariants that a shared label could break", () => {
       sha256: stored.sha256,
     });
     const api = createApi(store);
-    const response = await api.fetch(
-      new Request(`http://api.test/api/raw/${stored.sha256}`),
-    );
+    const response = await api.fetch(new Request(`http://api.test/api/raw/${stored.sha256}`));
     expect(response.status).toBe(200);
     expect(response.headers.get("x-injected")).toBeNull();
-    expect(response.headers.get("content-type")).toBe(
-      "application/octet-stream",
-    );
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
     // the bytes themselves are still exact
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
   });
@@ -715,12 +644,9 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
   test("a superseded position and valuation are absent from current views", async () => {
     const { store, artifactId } = storeWithRetiredAndFailed();
     const api = createApi(store);
-    const positions = await (
-      await api.fetch(new Request("http://t/api/positions"))
-    ).json();
+    const positions = await (await api.fetch(new Request("http://t/api/positions"))).json();
     const codes = positions.positions.map(
-      (entry: { position: { security_code: string } }) =>
-        entry.position.security_code,
+      (entry: { position: { security_code: string } }) => entry.position.security_code,
     );
     expect(codes).toContain("CURRENT_POS");
     expect(codes).not.toContain("RETIRED_POS");
@@ -730,9 +656,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
       await api.fetch(new Request(`http://t/api/artifacts/${artifactId}`))
     ).json();
     const summaries = detail.parseRuns
-      .flatMap(
-        (run: { observations: { summary: string }[] }) => run.observations,
-      )
+      .flatMap((run: { observations: { summary: string }[] }) => run.observations)
       .map((observation: { summary: string }) => observation.summary)
       .join(" ");
     expect(summaries).toContain("RETIRED_POS");
@@ -741,9 +665,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
   test("an error parse run's observations never reach a current view", async () => {
     const { store } = storeWithRetiredAndFailed();
     const api = createApi(store);
-    const positions = await (
-      await api.fetch(new Request("http://t/api/positions"))
-    ).json();
+    const positions = await (await api.fetch(new Request("http://t/api/positions"))).json();
     const blob = JSON.stringify(positions);
     expect(blob).not.toContain("FAILED_POS");
   });
@@ -760,11 +682,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
       startedAt: "2026-08-20T00:00:00Z",
       status: "success",
     });
-    const stored = putRawObject(
-      store,
-      new TextEncoder().encode("{}"),
-      "application/json",
-    );
+    const stored = putRawObject(store, new TextEncoder().encode("{}"), "application/json");
     const artifactId = insertFetchArtifact(store, {
       fetchRunId,
       sourceId: "s",
@@ -790,9 +708,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
       .run(parseRunId);
 
     const api = createApi(store);
-    const body = await (
-      await api.fetch(new Request("http://t/api/transactions"))
-    ).json();
+    const body = await (await api.fetch(new Request("http://t/api/transactions"))).json();
     expect(body.transactions[0].amount_minor).toBe("9223372036854775807");
     expect(formatAmount(body.transactions[0].amount_minor, "JPY")).toBe(
       "9,223,372,036,854,775,807 JPY",
@@ -809,11 +725,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
       startedAt: "2026-08-20T00:00:00Z",
       status: "success",
     });
-    const stored = putRawObject(
-      store,
-      new TextEncoder().encode("{}"),
-      "application/json",
-    );
+    const stored = putRawObject(store, new TextEncoder().encode("{}"), "application/json");
     const artifactId = insertFetchArtifact(store, {
       fetchRunId,
       sourceId: "s",
@@ -834,9 +746,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
       .run("{ truncated", parseRunId);
 
     const api = createApi(store);
-    const body = await (
-      await api.fetch(new Request("http://t/api/overview"))
-    ).json();
+    const body = await (await api.fetch(new Request("http://t/api/overview"))).json();
     const run = body.parseRuns[0];
     expect(run.warnings.parsed).toBe(false);
     expect(run.warnings.raw).toBe("{ truncated");
@@ -844,11 +754,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
 
   test("raw bytes that no longer match their digest are refused", async () => {
     const store = openStore(mkdtempSync(join(tmpdir(), "kogane-tamper-")));
-    const stored = putRawObject(
-      store,
-      new TextEncoder().encode("original evidence"),
-      "text/plain",
-    );
+    const stored = putRawObject(store, new TextEncoder().encode("original evidence"), "text/plain");
     // Replace the blob on disk, leaving the row claiming the original digest.
     const row = store.db
       .query("SELECT blob_key FROM raw_objects WHERE sha256 = ?1")
@@ -856,9 +762,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
     writeFileSync(join(store.blobDir, ...row.blob_key.split("/")), "tampered");
 
     const api = createApi(store);
-    const response = await api.fetch(
-      new Request(`http://t/api/raw/${stored.sha256}`),
-    );
+    const response = await api.fetch(new Request(`http://t/api/raw/${stored.sha256}`));
     expect(response.status).toBe(500);
     expect((await response.json()).error).toContain("does not match");
   });

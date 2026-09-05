@@ -6,12 +6,7 @@ import type {
 } from "./types";
 
 export function parseNormalizedSnapshot(value: unknown): NormalizedSnapshot {
-  const root = exactRecord(value, [
-    "schemaVersion",
-    "capturedAt",
-    "balances",
-    "transactions",
-  ]);
+  const root = exactRecord(value, ["schemaVersion", "capturedAt", "balances", "transactions"]);
   if (root.schemaVersion !== "sbi-shinsei-v1") {
     throw new Error("Unknown SBI Shinsei normalized schema version");
   }
@@ -52,11 +47,12 @@ export function normalizeCoreResponses(options: {
     const productCode = nonEmptyString(item.productCode, "productCode");
     return {
       accountKey,
-      product: nativeCurrency !== "JPY"
-        ? "foreign-savings"
-        : productCode === "603"
-          ? "hyper-yokin"
-          : "yen-savings",
+      product:
+        nativeCurrency !== "JPY"
+          ? "foreign-savings"
+          : productCode === "603"
+            ? "hyper-yokin"
+            : "yen-savings",
       currency: nativeCurrency,
       balance: decimalFromScalar(item.balance, "balance"),
       yenEquivalent: nullableDecimalFromScalar(item.yenEqui, "yenEqui"),
@@ -80,9 +76,7 @@ export function normalizeCoreResponses(options: {
     const debit = nullableDecimalFromScalar(item.debit, "debit");
     const credit = nullableDecimalFromScalar(item.credit, "credit");
     if ((debit === null) === (credit === null)) {
-      throw new Error(
-        `activityDetails[${index}] must contain exactly one debit or credit`,
-      );
+      throw new Error(`activityDetails[${index}] must contain exactly one debit or credit`);
     }
     return {
       accountKey: activityAccount,
@@ -126,9 +120,7 @@ function parseBalance(value: unknown): NormalizedBalance {
     currency: currency(record.currency),
     balance: decimal(record.balance, "balance"),
     yenEquivalent:
-      record.yenEquivalent === null
-        ? null
-        : decimal(record.yenEquivalent, "yenEquivalent"),
+      record.yenEquivalent === null ? null : decimal(record.yenEquivalent, "yenEquivalent"),
     asOf: isoInstant(record.asOf, "asOf"),
   };
 }
@@ -159,20 +151,14 @@ function parseTransaction(value: unknown): NormalizedTransaction {
   };
 }
 
-function exactRecord(
-  value: unknown,
-  expected: readonly string[],
-): Record<string, unknown> {
+function exactRecord(value: unknown, expected: readonly string[]): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Expected an object");
   }
   const record = value as Record<string, unknown>;
   const actual = Object.keys(record).sort();
   const wanted = [...expected].sort();
-  if (
-    actual.length !== wanted.length ||
-    !actual.every((key, index) => key === wanted[index])
-  ) {
+  if (actual.length !== wanted.length || !actual.every((key, index) => key === wanted[index])) {
     throw new Error("Object keys do not match the known schema");
   }
   return record;
@@ -206,10 +192,7 @@ function decimalFromScalar(value: unknown, field: string): string {
   return decimal(value.replaceAll(",", "").trim(), field);
 }
 
-function nullableDecimalFromScalar(
-  value: unknown,
-  field: string,
-): string | null {
+function nullableDecimalFromScalar(value: unknown, field: string): string | null {
   if (value === null || value === undefined || value === "") return null;
   return decimalFromScalar(value, field);
 }
@@ -222,9 +205,10 @@ function currency(value: unknown): string {
 }
 
 function date(value: unknown, field: string): string {
-  const parsed = typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value)
-    ? Date.parse(`${value}T00:00:00.000Z`)
-    : Number.NaN;
+  const parsed =
+    typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value)
+      ? Date.parse(`${value}T00:00:00.000Z`)
+      : Number.NaN;
   if (
     typeof value !== "string" ||
     Number.isNaN(parsed) ||
@@ -241,10 +225,7 @@ function compactDate(value: unknown, field: string): string {
   }
   const trimmed = value.trim();
   if (/^\d{8}$/u.test(trimmed)) {
-    return date(
-      `${trimmed.slice(0, 4)}-${trimmed.slice(4, 6)}-${trimmed.slice(6, 8)}`,
-      field,
-    );
+    return date(`${trimmed.slice(0, 4)}-${trimmed.slice(4, 6)}-${trimmed.slice(6, 8)}`, field);
   }
   return date(trimmed.replaceAll("/", "-"), field);
 }

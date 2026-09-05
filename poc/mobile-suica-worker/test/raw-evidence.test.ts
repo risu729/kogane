@@ -62,7 +62,8 @@ describe("raw evidence service binding", () => {
         });
       },
     } as Fetcher;
-    await expect(importStoredRun(importer, "raw/mobile-suica/run/manifest.json"))
-      .rejects.toThrow("raw_evidence_importer_invalid_response");
+    await expect(importStoredRun(importer, "raw/mobile-suica/run/manifest.json")).rejects.toThrow(
+      "raw_evidence_importer_invalid_response",
+    );
   });
 });

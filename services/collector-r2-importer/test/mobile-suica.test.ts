@@ -38,7 +38,13 @@ interface TestManifest {
   transactionCount: number;
   pageCount: number;
   complete?: boolean;
-  artifacts: Array<{ dataset: string; key: string; mediaType: string; sha256: string; bytes: number }>;
+  artifacts: Array<{
+    dataset: string;
+    key: string;
+    mediaType: string;
+    sha256: string;
+    bytes: number;
+  }>;
   failures: Array<Record<string, unknown>>;
 }
 
@@ -48,14 +54,20 @@ class FakeBucket {
   async put(
     key: string,
     value: string | Uint8Array,
-    options: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> } = {},
+    options: {
+      httpMetadata?: { contentType?: string };
+      customMetadata?: Record<string, string>;
+    } = {},
   ): Promise<void> {
     const body = typeof value === "string" ? new TextEncoder().encode(value) : value;
-    this.objects.set(key, stored(
-      body,
-      options.customMetadata ?? {},
-      options.httpMetadata?.contentType ?? "application/octet-stream",
-    ));
+    this.objects.set(
+      key,
+      stored(
+        body,
+        options.customMetadata ?? {},
+        options.httpMetadata?.contentType ?? "application/octet-stream",
+      ),
+    );
   }
 
   async get(key: string) {
@@ -73,8 +85,10 @@ class FakeBucket {
 
   async list(options: R2ListOptions = {}) {
     return {
-      objects: [...this.objects.keys()].filter((key) => key.startsWith(options.prefix ?? ""))
-        .sort().map((key) => ({ key })),
+      objects: [...this.objects.keys()]
+        .filter((key) => key.startsWith(options.prefix ?? ""))
+        .sort()
+        .map((key) => ({ key })),
       truncated: false,
     } as unknown as R2Objects;
   }
@@ -136,13 +150,18 @@ describe("Mobile Suica R2 importer", () => {
 
   test("rejects absent, duplicate, empty, and pre-redacted legacy baseVariable", () => {
     const cases = [
-      encode("<html><input name=\"other\" value=\"x\"></html>", "shift_jis"),
-      encode(`<input type="hidden" name="baseVariable" value="x"><input type="hidden" name="baseVariable" value="y">`, "shift_jis"),
-      encode("<input type=\"hidden\" name=\"baseVariable\" value=\"\">", "shift_jis"),
+      encode('<html><input name="other" value="x"></html>', "shift_jis"),
+      encode(
+        `<input type="hidden" name="baseVariable" value="x"><input type="hidden" name="baseVariable" value="y">`,
+        "shift_jis",
+      ),
+      encode('<input type="hidden" name="baseVariable" value="">', "shift_jis"),
       historyHtml(SENTINEL, 1),
     ];
     for (const value of cases) {
-      expect(() => sanitizeHistoryHtml(new Uint8Array(value), "mobile-suica-worker-poc-v1")).toThrow();
+      expect(() =>
+        sanitizeHistoryHtml(new Uint8Array(value), "mobile-suica-worker-poc-v1"),
+      ).toThrow();
     }
   });
 
@@ -154,8 +173,12 @@ describe("Mobile Suica R2 importer", () => {
       `<input type="hidden" name="baseVariable" value="first-secret">first-secret`,
     ];
     for (const html of invalidV1) {
-      expect(() => sanitizeHistoryHtml(new Uint8Array(encode(html, "shift_jis")), "mobile-suica-worker-poc-v1"))
-        .toThrow();
+      expect(() =>
+        sanitizeHistoryHtml(
+          new Uint8Array(encode(html, "shift_jis")),
+          "mobile-suica-worker-poc-v1",
+        ),
+      ).toThrow();
     }
     const invalidV2 = [
       `<input type="hidden" name="baseVariable" value="${SENTINEL}" value="second-secret">`,
@@ -163,8 +186,12 @@ describe("Mobile Suica R2 importer", () => {
       `<input type="hidden" name="baseVariable" name="other" value="${SENTINEL}">`,
     ];
     for (const html of invalidV2) {
-      expect(() => sanitizeHistoryHtml(new Uint8Array(encode(html, "shift_jis")), "mobile-suica-worker-poc-v2"))
-        .toThrow();
+      expect(() =>
+        sanitizeHistoryHtml(
+          new Uint8Array(encode(html, "shift_jis")),
+          "mobile-suica-worker-poc-v2",
+        ),
+      ).toThrow();
     }
   });
 
@@ -187,8 +214,9 @@ describe("Mobile Suica R2 importer", () => {
     const malformed = new Uint8Array(valid.byteLength + 1);
     malformed.set(valid);
     malformed[valid.byteLength] = 0x82;
-    expect(() => sanitizeHistoryHtml(malformed, "mobile-suica-worker-poc-v2"))
-      .toThrow("html_cp932_round_trip_failed");
+    expect(() => sanitizeHistoryHtml(malformed, "mobile-suica-worker-poc-v2")).toThrow(
+      "html_cp932_round_trip_failed",
+    );
   });
 
   test("imports legacy v1 without copying baseVariable or free failure text", async () => {
@@ -204,9 +232,12 @@ describe("Mobile Suica R2 importer", () => {
       finalChunkAllObjectsReused: false,
     });
     expect(central.requests).toHaveLength(15);
-    const allCentralText = [...central.uploaded.values()].map((value) => decode(value, "shift_jis")).join("\n");
+    const allCentralText = [...central.uploaded.values()]
+      .map((value) => decode(value, "shift_jis"))
+      .join("\n");
     expect(allCentralText).not.toContain("opaque-session-value");
-    const descriptors = central.requests.filter((request) => request.path.endsWith("/artifacts"))
+    const descriptors = central.requests
+      .filter((request) => request.path.endsWith("/artifacts"))
       .map((request) => JSON.parse(request.body) as Record<string, unknown>);
     expect(descriptors.find((value) => value.dataset === "sf-history-html")).toMatchObject({
       artifactRole: "sanitized_provider_capture",
@@ -263,7 +294,9 @@ describe("Mobile Suica R2 importer", () => {
       prefix: PREFIX.slice(0, -1),
       manifest,
     });
-    expect(JSON.parse(decode(bucket.objects.get(MANIFEST_KEY)!.body))).toMatchObject({ complete: true });
+    expect(JSON.parse(decode(bucket.objects.get(MANIFEST_KEY)!.body))).toMatchObject({
+      complete: true,
+    });
     await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({ status: "sealed" });
   });
 
@@ -272,7 +305,9 @@ describe("Mobile Suica R2 importer", () => {
       const bucket = new FakeBucket();
       const manifest = await storeRun(bucket, { version, rows: 1 });
       manifest.capturedSessionAt = "2026-09-04T23:36:27.538Z";
-      const summary = JSON.parse(decode(bucket.objects.get(`${PREFIX}collection-summary.json`)!.body));
+      const summary = JSON.parse(
+        decode(bucket.objects.get(`${PREFIX}collection-summary.json`)!.body),
+      );
       summary.capturedSessionAt = manifest.capturedSessionAt;
       await replaceArtifact(
         bucket,
@@ -281,14 +316,18 @@ describe("Mobile Suica R2 importer", () => {
         new TextEncoder().encode(JSON.stringify(summary)),
         version,
       );
-      await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({ status: "sealed" });
+      await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({
+        status: "sealed",
+      });
 
       const future = new FakeBucket();
       const futureManifest = await storeRun(future, { version, rows: 1 });
       futureManifest.capturedSessionAt = "2026-09-05T00:01:00.001Z";
       await replaceManifest(future, futureManifest, version);
       const central = new FakeCentral();
-      await expect(importRun(future, central)).rejects.toMatchObject({ code: "manifest_captured_at_invalid" });
+      await expect(importRun(future, central)).rejects.toMatchObject({
+        code: "manifest_captured_at_invalid",
+      });
       expect(central.requests).toHaveLength(0);
     }
   });
@@ -297,14 +336,18 @@ describe("Mobile Suica R2 importer", () => {
     const bucket = new FakeBucket();
     await storeRun(bucket, { version: 2, rows: 100, boundary: true });
     const central = new FakeCentral();
-    await expect(importRun(bucket, central)).resolves.toMatchObject({ artifactCount: 4, sealed: true });
+    await expect(importRun(bucket, central)).resolves.toMatchObject({
+      artifactCount: 4,
+      sealed: true,
+    });
     const report = central.requests.find((request) => request.path === "/v1/units/10/reports")!;
     expect(JSON.parse(report.body)).toMatchObject({
       producerStatus: "partial",
       normalizedOutcome: "partial",
       safeFailureCode: "history-boundary-unproven",
     });
-    const manifestDescriptor = central.requests.filter((request) => request.path.endsWith("/artifacts"))
+    const manifestDescriptor = central.requests
+      .filter((request) => request.path.endsWith("/artifacts"))
       .map((request) => JSON.parse(request.body) as Record<string, unknown>)
       .find((value) => value.dataset === "collector-manifest");
     expect(manifestDescriptor).toMatchObject({
@@ -318,7 +361,9 @@ describe("Mobile Suica R2 importer", () => {
     const boundary = new FakeBucket();
     await storeRun(boundary, { version: 1, rows: 100 });
     const firstCentral = new FakeCentral();
-    await expect(importRun(boundary, firstCentral)).rejects.toMatchObject({ code: "history_boundary_unproven" });
+    await expect(importRun(boundary, firstCentral)).rejects.toMatchObject({
+      code: "history_boundary_unproven",
+    });
     expect(firstCentral.requests).toHaveLength(0);
 
     const multi = new FakeBucket();
@@ -327,7 +372,9 @@ describe("Mobile Suica R2 importer", () => {
     manifest.pageCount = 2;
     await replaceManifest(multi, manifest, 1);
     const secondCentral = new FakeCentral();
-    await expect(importRun(multi, secondCentral)).rejects.toMatchObject({ code: "manifest_page_count_invalid" });
+    await expect(importRun(multi, secondCentral)).rejects.toMatchObject({
+      code: "manifest_page_count_invalid",
+    });
     expect(secondCentral.requests).toHaveLength(0);
   });
 
@@ -339,24 +386,38 @@ describe("Mobile Suica R2 importer", () => {
     html.body = new Uint8Array(encode("<html></html>", "shift_jis"));
     const manifest = readManifest(bucket);
     await replaceArtifact(bucket, manifest, "sf-history-html", html.body, 2);
-    await expect(importRun(bucket, new FakeCentral())).rejects.toMatchObject({ code: "html_base_variable_invalid" });
+    await expect(importRun(bucket, new FakeCentral())).rejects.toMatchObject({
+      code: "html_base_variable_invalid",
+    });
   });
 
   test("validates v2 R2 failure artifact complement and rejects unredacted v2 bytes", async () => {
     const bucket = new FakeBucket();
     await storeRun(bucket, { version: 2, rows: 1, omitSummary: true });
-    await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({ artifactCount: 3, sealed: true });
+    await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({
+      artifactCount: 3,
+      sealed: true,
+    });
     const wrong = readManifest(bucket);
     wrong.failures[0]!.artifactKey = "sf-history.json";
     await replaceManifest(bucket, wrong, 2);
-    expect(() => parseMobileSuicaManifest(bucket.objects.get(MANIFEST_KEY)!.body, MANIFEST_KEY))
-      .toThrow("manifest_failure_complement_mismatch");
+    expect(() =>
+      parseMobileSuicaManifest(bucket.objects.get(MANIFEST_KEY)!.body, MANIFEST_KEY),
+    ).toThrow("manifest_failure_complement_mismatch");
 
     const unsafe = new FakeBucket();
     await storeRun(unsafe, { version: 2, rows: 1 });
     const unsafeManifest = readManifest(unsafe);
-    await replaceArtifact(unsafe, unsafeManifest, "sf-history-html", historyHtml("not-redacted", 1), 2);
-    await expect(importRun(unsafe, new FakeCentral())).rejects.toMatchObject({ code: "html_base_variable_not_redacted" });
+    await replaceArtifact(
+      unsafe,
+      unsafeManifest,
+      "sf-history-html",
+      historyHtml("not-redacted", 1),
+      2,
+    );
+    await expect(importRun(unsafe, new FakeCentral())).rejects.toMatchObject({
+      code: "html_base_variable_not_redacted",
+    });
   });
 
   test("seals v1 and v2 partial runs when normalized survives an HTML R2 failure", async () => {
@@ -369,7 +430,8 @@ describe("Mobile Suica R2 importer", () => {
         artifactCount: 3,
         sealed: true,
       });
-      const normalizedDescriptor = central.requests.filter((request) => request.path.endsWith("/artifacts"))
+      const normalizedDescriptor = central.requests
+        .filter((request) => request.path.endsWith("/artifacts"))
         .map((request) => JSON.parse(request.body) as Record<string, unknown>)
         .find((value) => value.dataset === "sf-history");
       expect(normalizedDescriptor).toMatchObject({
@@ -397,11 +459,18 @@ describe("Mobile Suica R2 importer", () => {
       });
       const manifest = readManifest(bucket);
       expect(manifest.status).toBe("failed");
-      expect(manifest.failures.filter((failure) =>
-        typeof failure.operation === "string" && (failure.operation === "r2" || failure.operation.startsWith("r2:"))
-      )).toHaveLength(3);
+      expect(
+        manifest.failures.filter(
+          (failure) =>
+            typeof failure.operation === "string" &&
+            (failure.operation === "r2" || failure.operation.startsWith("r2:")),
+        ),
+      ).toHaveLength(3);
       const central = new FakeCentral();
-      await expect(importRun(bucket, central)).resolves.toMatchObject({ artifactCount: 1, sealed: true });
+      await expect(importRun(bucket, central)).resolves.toMatchObject({
+        artifactCount: 1,
+        sealed: true,
+      });
       expect(central.requests.some((request) => request.path.endsWith("/page-groups"))).toBe(false);
     }
   });
@@ -413,19 +482,35 @@ describe("Mobile Suica R2 importer", () => {
       manifest.status = "partial";
       await replaceManifest(bucket, manifest, version);
       const central = new FakeCentral();
-      await expect(importRun(bucket, central)).rejects.toMatchObject({ code: "manifest_status_mismatch" });
+      await expect(importRun(bucket, central)).rejects.toMatchObject({
+        code: "manifest_status_mismatch",
+      });
       expect(central.requests).toHaveLength(0);
     }
   });
 
   test("strictly validates normalized dates without an HTML artifact", async () => {
-    for (const dates of [["2026-09-06", "2026-09-04"], ["2026-09-04", "2026-09-05"], ["2026-02-30", "2026-02-28"]]) {
+    for (const dates of [
+      ["2026-09-06", "2026-09-04"],
+      ["2026-09-04", "2026-09-05"],
+      ["2026-02-30", "2026-02-28"],
+    ]) {
       const bucket = new FakeBucket();
-      const manifest = await storeRun(bucket, { version: 2, rows: 2, missing: ["sf-history-html"] });
+      const manifest = await storeRun(bucket, {
+        version: 2,
+        rows: 2,
+        missing: ["sf-history-html"],
+      });
       const normalized = JSON.parse(decode(bucket.objects.get(`${PREFIX}sf-history.json`)!.body));
       normalized.rows[0].date = dates[0];
       normalized.rows[1].date = dates[1];
-      await replaceArtifact(bucket, manifest, "sf-history", new TextEncoder().encode(JSON.stringify(normalized)), 2);
+      await replaceArtifact(
+        bucket,
+        manifest,
+        "sf-history",
+        new TextEncoder().encode(JSON.stringify(normalized)),
+        2,
+      );
       const central = new FakeCentral();
       await expect(importRun(bucket, central)).rejects.toBeDefined();
       expect(central.requests).toHaveLength(0);
@@ -445,11 +530,23 @@ describe("Mobile Suica R2 importer", () => {
       } else if (mutation === "semantic") {
         const normalized = JSON.parse(decode(bucket.objects.get(`${PREFIX}sf-history.json`)!.body));
         normalized.rows[0].amount = -999;
-        await replaceArtifact(bucket, manifest, "sf-history", new TextEncoder().encode(JSON.stringify(normalized)), 2);
+        await replaceArtifact(
+          bucket,
+          manifest,
+          "sf-history",
+          new TextEncoder().encode(JSON.stringify(normalized)),
+          2,
+        );
       } else {
         const normalized = JSON.parse(decode(bucket.objects.get(`${PREFIX}sf-history.json`)!.body));
         normalized.rows[1].date = "2026-09-06";
-        await replaceArtifact(bucket, manifest, "sf-history", new TextEncoder().encode(JSON.stringify(normalized)), 2);
+        await replaceArtifact(
+          bucket,
+          manifest,
+          "sf-history",
+          new TextEncoder().encode(JSON.stringify(normalized)),
+          2,
+        );
       }
       const central = new FakeCentral();
       await expect(importRun(bucket, central)).rejects.toBeDefined();
@@ -460,25 +557,33 @@ describe("Mobile Suica R2 importer", () => {
   test("rejects another collector credential", async () => {
     const bucket = new FakeBucket();
     await storeRun(bucket, { version: 2, rows: 1 });
-    await expect(importMobileSuicaRun({
-      bucket: bucket as unknown as R2Bucket,
-      centralService: new FakeCentral() as unknown as Fetcher,
-      centralToken: `collector-r2-sbi.${"s".repeat(32)}`,
-      fingerprintKey: FINGERPRINT_KEY,
-      importerVersion: "test-v1",
-      manifestKey: MANIFEST_KEY,
-    })).rejects.toThrow("central_auth_configuration_invalid");
+    await expect(
+      importMobileSuicaRun({
+        bucket: bucket as unknown as R2Bucket,
+        centralService: new FakeCentral() as unknown as Fetcher,
+        centralToken: `collector-r2-sbi.${"s".repeat(32)}`,
+        fingerprintKey: FINGERPRINT_KEY,
+        importerVersion: "test-v1",
+        manifestKey: MANIFEST_KEY,
+      }),
+    ).rejects.toThrow("central_auth_configuration_invalid");
   });
 });
 
-async function storeRun(bucket: FakeBucket, options: {
-  version: 1 | 2;
-  rows: number;
-  boundary?: boolean;
-  omitSummary?: boolean;
-  missing?: Array<"sf-history-html" | "sf-history" | "collection-summary">;
-}): Promise<TestManifest> {
-  const htmlBody = historyHtml(options.version === 1 ? "opaque-session-value" : SENTINEL, options.rows);
+async function storeRun(
+  bucket: FakeBucket,
+  options: {
+    version: 1 | 2;
+    rows: number;
+    boundary?: boolean;
+    omitSummary?: boolean;
+    missing?: Array<"sf-history-html" | "sf-history" | "collection-summary">;
+  },
+): Promise<TestManifest> {
+  const htmlBody = historyHtml(
+    options.version === 1 ? "opaque-session-value" : SENTINEL,
+    options.rows,
+  );
   const htmlRows = parseHistoryRows(decode(htmlBody, "shift_jis"), "2026-09-05");
   const complete = options.rows < 100;
   const normalized = {
@@ -496,21 +601,48 @@ async function storeRun(bucket: FakeBucket, options: {
     cookieNames: ["ASP.NET_SessionId", "TS0184138d", "sc_auth"],
     capturedSessionAt: "2026-09-05T00:00:10.000Z",
   };
-  const missing = new Set(options.missing ?? (options.omitSummary ? ["collection-summary" as const] : []));
+  const missing = new Set(
+    options.missing ?? (options.omitSummary ? ["collection-summary" as const] : []),
+  );
   const entries = [
-    { dataset: "sf-history-html", filename: "sf-history-page-0001.html", mediaType: "text/html; charset=shift_jis", body: htmlBody },
-    { dataset: "sf-history", filename: "sf-history.json", mediaType: "application/json", body: new TextEncoder().encode(JSON.stringify(normalized)) },
-    { dataset: "collection-summary", filename: "collection-summary.json", mediaType: "application/json", body: new TextEncoder().encode(JSON.stringify(summary)) },
-  ].filter((entry) => !missing.has(entry.dataset as "sf-history-html" | "sf-history" | "collection-summary"));
+    {
+      dataset: "sf-history-html",
+      filename: "sf-history-page-0001.html",
+      mediaType: "text/html; charset=shift_jis",
+      body: htmlBody,
+    },
+    {
+      dataset: "sf-history",
+      filename: "sf-history.json",
+      mediaType: "application/json",
+      body: new TextEncoder().encode(JSON.stringify(normalized)),
+    },
+    {
+      dataset: "collection-summary",
+      filename: "collection-summary.json",
+      mediaType: "application/json",
+      body: new TextEncoder().encode(JSON.stringify(summary)),
+    },
+  ].filter(
+    (entry) =>
+      !missing.has(entry.dataset as "sf-history-html" | "sf-history" | "collection-summary"),
+  );
   const artifacts = [];
   for (const entry of entries) {
     const sha256 = await digest(entry.body);
     const key = `${PREFIX}${entry.filename}`;
-    const metadata = options.version === 1
-      ? { dataset: entry.dataset, sha256 }
-      : { source: "mobile-suica", runId: RUN_ID, dataset: entry.dataset, sha256 };
+    const metadata =
+      options.version === 1
+        ? { dataset: entry.dataset, sha256 }
+        : { source: "mobile-suica", runId: RUN_ID, dataset: entry.dataset, sha256 };
     bucket.objects.set(key, stored(entry.body, metadata, entry.mediaType));
-    artifacts.push({ dataset: entry.dataset, key, mediaType: entry.mediaType, sha256, bytes: entry.body.byteLength });
+    artifacts.push({
+      dataset: entry.dataset,
+      key,
+      mediaType: entry.mediaType,
+      sha256,
+      bytes: entry.body.byteLength,
+    });
   }
   const artifactKey = {
     "sf-history-html": "sf-history-page-0001.html",
@@ -519,11 +651,24 @@ async function storeRun(bucket: FakeBucket, options: {
   } as const;
   const failures: Array<Record<string, unknown>> = [
     ...(options.boundary
-      ? [{ operation: "pagination", errorType: "HistoryBoundaryUnproven", errorCode: "history_boundary_unproven" }]
+      ? [
+          {
+            operation: "pagination",
+            errorType: "HistoryBoundaryUnproven",
+            errorCode: "history_boundary_unproven",
+          },
+        ]
       : []),
-    ...[...missing].map((dataset) => options.version === 1
-      ? { operation: `r2:${dataset}`, errorType: "Error", message: "write failed" }
-      : { operation: "r2", errorType: "Error", errorCode: "artifact_store_failed", artifactKey: artifactKey[dataset] }),
+    ...[...missing].map((dataset) =>
+      options.version === 1
+        ? { operation: `r2:${dataset}`, errorType: "Error", message: "write failed" }
+        : {
+            operation: "r2",
+            errorType: "Error",
+            errorCode: "artifact_store_failed",
+            artifactKey: artifactKey[dataset],
+          },
+    ),
   ];
   const manifest: TestManifest = {
     schemaVersion: `mobile-suica-worker-poc-v${options.version}`,
@@ -549,10 +694,12 @@ function historyHtml(baseVariable: string, rows: number): Uint8Array {
     const day = String(5 - Math.min(index, 4)).padStart(2, "0");
     return `<tr><td></td><td>09/${day}</td><td>物販</td><td>店舗</td><td></td><td></td><td>\\1,234</td><td>-100</td></tr>`;
   }).join("");
-  return new Uint8Array(encode(
-    `<html><input type="hidden" name="baseVariable" value="${baseVariable}"><input name="specifyYearMonth" value="2026/09"><table>${body}</table></html>`,
-    "shift_jis",
-  ));
+  return new Uint8Array(
+    encode(
+      `<html><input type="hidden" name="baseVariable" value="${baseVariable}"><input name="specifyYearMonth" value="2026/09"><table>${body}</table></html>`,
+      "shift_jis",
+    ),
+  );
 }
 
 async function replaceArtifact(
@@ -566,22 +713,28 @@ async function replaceArtifact(
   const sha256 = await digest(body);
   artifact.sha256 = sha256;
   artifact.bytes = body.byteLength;
-  const metadata = version === 1
-    ? { dataset, sha256 }
-    : { source: "mobile-suica", runId: RUN_ID, dataset, sha256 };
+  const metadata =
+    version === 1
+      ? { dataset, sha256 }
+      : { source: "mobile-suica", runId: RUN_ID, dataset, sha256 };
   bucket.objects.set(artifact.key, stored(body, metadata, artifact.mediaType));
   await replaceManifest(bucket, manifest, version);
 }
 
-async function replaceManifest(bucket: FakeBucket, manifest: TestManifest, version: 1 | 2): Promise<void> {
+async function replaceManifest(
+  bucket: FakeBucket,
+  manifest: TestManifest,
+  _version: 1 | 2,
+): Promise<void> {
   const body = new TextEncoder().encode(JSON.stringify(manifest));
-  const sha256 = await digest(body);
   const metadata = { source: "mobile-suica", status: manifest.status, runId: RUN_ID };
   bucket.objects.set(MANIFEST_KEY, stored(body, metadata, "application/json"));
 }
 
 function readManifest(bucket: FakeBucket): TestManifest {
-  return JSON.parse(new TextDecoder().decode(bucket.objects.get(MANIFEST_KEY)!.body)) as TestManifest;
+  return JSON.parse(
+    new TextDecoder().decode(bucket.objects.get(MANIFEST_KEY)!.body),
+  ) as TestManifest;
 }
 
 function importRun(bucket: FakeBucket, central: FakeCentral, importerVersion = "test-v1") {
@@ -601,12 +754,20 @@ function immutableReport(reports: Map<string, string>, path: string, body: strin
     return Response.json({ error: "immutable report conflict" }, { status: 409 });
   }
   reports.set(path, body);
-  return Response.json({ reused: previous !== undefined }, {
-    status: previous === undefined ? 201 : 200,
-  });
+  return Response.json(
+    { reused: previous !== undefined },
+    {
+      status: previous === undefined ? 201 : 200,
+    },
+  );
 }
 
-function stored(body: Uint8Array, customMetadata: Record<string, string>, contentType: string, nativeSha256?: string): StoredObject {
+function stored(
+  body: Uint8Array,
+  customMetadata: Record<string, string>,
+  contentType: string,
+  nativeSha256?: string,
+): StoredObject {
   return { body, customMetadata, contentType, ...(nativeSha256 ? { nativeSha256 } : {}) };
 }
 

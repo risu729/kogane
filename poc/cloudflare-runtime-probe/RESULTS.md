@@ -32,13 +32,13 @@ identify which individual signal triggered the decision.
 All successful network probes used the same fixed Chrome 142 User-Agent. IP
 addresses below were retained only as hashes.
 
-| Path | Runs | Result | HTTP | Stable JA4 | HTTP/2 Akamai hash | IP-hash behavior |
-| --- | ---: | --- | --- | --- | --- | --- |
-| Worker `fetch()` | 3 | 200 each | h2 | `t13d1312h2_a44d0ee8b3cc_485d6013ba69` | `175a6d4585f5a5c52b0f6fcca2977cd0` | changed each request |
-| `TAMIA.fetch()` | 3 | 200 each | HTTP/1.1 | `t13d1510_8daaf6152771_78e6aca7449b` | none | changed each request |
-| `TAMIA.connect()` to `api.ipify.org:80` | 3 | 200 each | raw TCP | not applicable | not applicable | stable across all runs |
-| local Docker native `fetch()` | 1 | 200 | HTTP/1.1 | `t13d1714h1_5b57614c22b0_6a3d802a7139` | none | recorded as hash only |
-| local Docker `impit` | 1 | 200 | h2 | `t13d1516h2_8daaf6152771_d8a2da3f94cd` | `948837f50c4abc75e8d2cca62287ad4d` | recorded as hash only |
+| Path                                    | Runs | Result   | HTTP     | Stable JA4                             | HTTP/2 Akamai hash                 | IP-hash behavior       |
+| --------------------------------------- | ---: | -------- | -------- | -------------------------------------- | ---------------------------------- | ---------------------- |
+| Worker `fetch()`                        |    3 | 200 each | h2       | `t13d1312h2_a44d0ee8b3cc_485d6013ba69` | `175a6d4585f5a5c52b0f6fcca2977cd0` | changed each request   |
+| `TAMIA.fetch()`                         |    3 | 200 each | HTTP/1.1 | `t13d1510_8daaf6152771_78e6aca7449b`   | none                               | changed each request   |
+| `TAMIA.connect()` to `api.ipify.org:80` |    3 | 200 each | raw TCP  | not applicable                         | not applicable                     | stable across all runs |
+| local Docker native `fetch()`           |    1 | 200      | HTTP/1.1 | `t13d1714h1_5b57614c22b0_6a3d802a7139` | none                               | recorded as hash only  |
+| local Docker `impit`                    |    1 | 200      | h2       | `t13d1516h2_8daaf6152771_d8a2da3f94cd` | `948837f50c4abc75e8d2cca62287ad4d` | recorded as hash only  |
 
 The fixed User-Agent did not make any of the TLS/HTTP stacks equivalent.
 `TAMIA.fetch()` produced a different fingerprint from both Worker `fetch()` and

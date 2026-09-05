@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  importSonyRun,
-  parseSonyManifest,
-  SONY_TRANSFER_CHUNK_SIZE,
-} from "../src/sony";
+import { importSonyRun, parseSonyManifest, SONY_TRANSFER_CHUNK_SIZE } from "../src/sony";
 
 const RUN_ID = "123e4567-e89b-42d3-a456-426614174000";
 const PREFIX = `raw/sony-bank/2026/09/03/${RUN_ID}/`;
@@ -12,9 +8,7 @@ const TOKEN = `collector-r2-sony-bank.${"o".repeat(32)}`;
 const FINGERPRINT_KEY = "ef".repeat(32);
 const WINDOW = { from: "2025-09-04", to: "2026-09-03" };
 const WALLET_MONTHS = ["202608", "202607"];
-const CURRENCIES = [
-  "usd", "eur", "gbp", "aud", "nzd", "cad", "chf", "hkd", "zar", "sek",
-] as const;
+const CURRENCIES = ["usd", "eur", "gbp", "aud", "nzd", "cad", "chf", "hkd", "zar", "sek"] as const;
 
 interface StoredObject {
   body: Uint8Array;
@@ -68,9 +62,7 @@ class FakeBucket {
       size: stored.body.byteLength,
       customMetadata: stored.customMetadata,
       httpMetadata: { contentType: stored.contentType },
-      checksums: nativeSha256
-        ? { sha256: hexBytes(nativeSha256).buffer }
-        : {},
+      checksums: nativeSha256 ? { sha256: hexBytes(nativeSha256).buffer } : {},
       arrayBuffer: async () => ownedArrayBuffer(stored.body),
     } as unknown as R2ObjectBody;
   }
@@ -120,9 +112,12 @@ class FakeCentral {
           email: email ?? null,
         },
       };
-      return Response.json({
-        descriptorSha256: await digest(encode(canonicalJson(centralNormalized))),
-      }, { status: 201 });
+      return Response.json(
+        {
+          descriptorSha256: await digest(encode(canonicalJson(centralNormalized))),
+        },
+        { status: 201 },
+      );
     }
     if (/\/reports$/u.test(path)) return immutableReport(this.reports, path, requestBody);
     if (/\/seal$/u.test(path)) return Response.json({ sealed: true }, { status: 201 });
@@ -166,18 +161,23 @@ describe("Sony Bank staged-run importer", () => {
     expect(central.requests.length - secondStart).toBeLessThanOrEqual(27);
 
     for (const artifact of manifest.artifacts) {
-      expect(central.uploaded.get(`/v1/runs/1/objects/${artifact.sha256}`))
-        .toEqual(bodies.get(artifact.dataset));
+      expect(central.uploaded.get(`/v1/runs/1/objects/${artifact.sha256}`)).toEqual(
+        bodies.get(artifact.dataset),
+      );
     }
     const manifestBody = bucket.objects.get(MANIFEST_KEY)!.body;
     const manifestSha256 = await digest(manifestBody);
     expect(central.uploaded.get(`/v1/runs/1/objects/${manifestSha256}`)).toEqual(manifestBody);
 
     const inventoryRequests = central.requests.filter((request) => /\/items$/u.test(request.path));
-    expect(inventoryRequests.map((request) =>
-      (JSON.parse(request.body) as { items: unknown[] }).items.length
-    )).toEqual([10, manifest.artifacts.length + 1 - 10]);
-    const createRun = JSON.parse(central.requests.find((request) => request.path === "/v1/runs")!.body);
+    expect(
+      inventoryRequests.map(
+        (request) => (JSON.parse(request.body) as { items: unknown[] }).items.length,
+      ),
+    ).toEqual([10, manifest.artifacts.length + 1 - 10]);
+    const createRun = JSON.parse(
+      central.requests.find((request) => request.path === "/v1/runs")!.body,
+    );
     expect(createRun).toEqual({
       producerId: "collector-r2-importer",
       sourceId: "sony-bank",
@@ -198,7 +198,12 @@ describe("Sony Bank staged-run importer", () => {
     await importAllChunks(bucket, central, manifest.artifacts.length + 1);
     const uploadedCount = central.uploaded.size;
 
-    const replay = await importAllChunks(bucket, central, manifest.artifacts.length + 1, "test-v99");
+    const replay = await importAllChunks(
+      bucket,
+      central,
+      manifest.artifacts.length + 1,
+      "test-v99",
+    );
     expect(replay).toMatchObject({ status: "sealed", finalChunkAllObjectsReused: true });
     expect(central.uploaded.size).toBe(uploadedCount);
   });
@@ -225,24 +230,41 @@ describe("Sony Bank staged-run importer", () => {
     const records: Record<string, unknown>[] = [];
     const original = console.log;
     const originalError = console.error;
-    console.log = (text: string) => { records.push(JSON.parse(text)); };
+    console.log = (text: string) => {
+      records.push(JSON.parse(text));
+    };
     console.error = console.log;
     try {
       await importRun(bucket, new FakeCentral());
       await importAllChunks(bucket, new FakeCentral(), manifest.artifacts.length + 1);
       const failingBucket = new FakeBucket();
-      failingBucket.get = async () => { throw new Error("password=private-provider-detail"); };
-      await expect(importRun(failingBucket, new FakeCentral())).rejects.toThrow("password=private-provider-detail");
+      failingBucket.get = async () => {
+        throw new Error("password=private-provider-detail");
+      };
+      await expect(importRun(failingBucket, new FakeCentral())).rejects.toThrow(
+        "password=private-provider-detail",
+      );
     } finally {
       console.log = original;
       console.error = originalError;
     }
-    expect(records).toContainEqual(expect.objectContaining({
-      runId: RUN_ID, outcome: "deferred", reason: "worker_invocation_limit", nextOffset: 0,
-    }));
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        runId: RUN_ID,
+        outcome: "deferred",
+        reason: "worker_invocation_limit",
+        nextOffset: 0,
+      }),
+    );
     expect(records).toContainEqual(expect.objectContaining({ outcome: "sealed", phase: "seal" }));
-    expect(records).toContainEqual(expect.objectContaining({ outcome: "failed", errorCode: "source_validation_failed" }));
-    expect(records.every((record) => typeof record.durationMs === "number" && typeof record.attemptId === "string")).toBe(true);
+    expect(records).toContainEqual(
+      expect.objectContaining({ outcome: "failed", errorCode: "source_validation_failed" }),
+    );
+    expect(
+      records.every(
+        (record) => typeof record.durationMs === "number" && typeof record.attemptId === "string",
+      ),
+    ).toBe(true);
     expect(JSON.stringify(records)).not.toContain("private-provider-detail");
     expect(JSON.stringify(records)).not.toContain(MANIFEST_KEY);
     expect(JSON.stringify(records)).not.toContain(TOKEN);
@@ -252,10 +274,13 @@ describe("Sony Bank staged-run importer", () => {
     const bucket = new FakeBucket();
     const { manifest } = await storeCompleteRun(bucket);
     const original = console.log;
-    console.log = () => { throw new Error("logger unavailable"); };
+    console.log = () => {
+      throw new Error("logger unavailable");
+    };
     try {
-      await expect(importAllChunks(bucket, new FakeCentral(), manifest.artifacts.length + 1))
-        .resolves.toMatchObject({ status: "sealed", sealed: true });
+      await expect(
+        importAllChunks(bucket, new FakeCentral(), manifest.artifacts.length + 1),
+      ).resolves.toMatchObject({ status: "sealed", sealed: true });
     } finally {
       console.log = original;
     }
@@ -309,11 +334,18 @@ describe("Sony Bank staged-run importer", () => {
 
   test("seals a terminal collect failure containing only its manifest", async () => {
     const bucket = new FakeBucket();
-    await storeRun(bucket, [], [{
-      operation: "collect",
-      errorType: "CollectorHttpError",
-      message: "provider request failed",
-    }], { transactionCount: 0 });
+    await storeRun(
+      bucket,
+      [],
+      [
+        {
+          operation: "collect",
+          errorType: "CollectorHttpError",
+          message: "provider request failed",
+        },
+      ],
+      { transactionCount: 0 },
+    );
     const central = new FakeCentral();
     await expect(importRun(bucket, central)).resolves.toMatchObject({
       status: "sealed",
@@ -321,7 +353,9 @@ describe("Sony Bank staged-run importer", () => {
       sealed: true,
     });
     expect(central.uploaded.size).toBe(1);
-    const unitReport = central.requests.find((request) => /\/units\/10\/reports$/u.test(request.path));
+    const unitReport = central.requests.find((request) =>
+      /\/units\/10\/reports$/u.test(request.path),
+    );
     expect(JSON.parse(unitReport!.body)).toMatchObject({
       producerStatus: "failed",
       safeFailureCode: "collector-request-failed",
@@ -338,8 +372,9 @@ describe("Sony Bank staged-run importer", () => {
       entries.filter((entry) => !missing.has(entry.dataset)),
       [{ operation: "r2:foreign-history-usd-csv", errorType: "Error", message: "R2 write failed" }],
     );
-    await expect(importRun(bucket, new FakeCentral(), { immediate: false }))
-      .resolves.toMatchObject({ status: "deferred", nextOffset: 10 });
+    await expect(importRun(bucket, new FakeCentral(), { immediate: false })).resolves.toMatchObject(
+      { status: "deferred", nextOffset: 10 },
+    );
 
     const manifest = readManifest(bucket);
     manifest.failures[0]!.operation = "r2:foreign-history-eur-csv";
@@ -353,11 +388,13 @@ describe("Sony Bank staged-run importer", () => {
     await storeRun(
       pageBucket,
       entries.filter((entry) => entry.dataset !== "foreign-history-usd-page-0001"),
-      [{
-        operation: "r2:foreign-history-usd-page-0001",
-        errorType: "Error",
-        message: "R2 write failed",
-      }],
+      [
+        {
+          operation: "r2:foreign-history-usd-page-0001",
+          errorType: "Error",
+          message: "R2 write failed",
+        },
+      ],
     );
     const pageManifest = readManifest(pageBucket);
     const pageResult = await importAllChunks(
@@ -390,10 +427,17 @@ describe("Sony Bank staged-run importer", () => {
   test("rejects prefix and exact metadata mismatches before central state", async () => {
     const prefixBucket = new FakeBucket();
     await storeCompleteRun(prefixBucket);
-    prefixBucket.objects.set(`${PREFIX}unexpected.json`, stored(encode("{}"), {
-      dataset: "unexpected",
-      sha256: "0".repeat(64),
-    }, "application/json"));
+    prefixBucket.objects.set(
+      `${PREFIX}unexpected.json`,
+      stored(
+        encode("{}"),
+        {
+          dataset: "unexpected",
+          sha256: "0".repeat(64),
+        },
+        "application/json",
+      ),
+    );
     await expectRejected(prefixBucket, "prefix_inventory_mismatch");
 
     const metadataBucket = new FakeBucket();
@@ -412,7 +456,9 @@ describe("Sony Bank staged-run importer", () => {
       dataset: manifest.artifacts[0]!.dataset,
       sha256: manifest.artifacts[0]!.sha256,
     };
-    await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({ status: "deferred" });
+    await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({
+      status: "deferred",
+    });
   });
 
   test("rejects content, checksum, and media mismatches before central state", async () => {
@@ -441,19 +487,31 @@ describe("Sony Bank staged-run importer", () => {
 
     const walletBucket = new FakeBucket();
     await storeCompleteRun(walletBucket);
-    await replaceArtifact(walletBucket, "wallet-history-202608", encode(
-      `${walletHtml(WALLET_MONTHS)}<input type="hidden" name="csrf" value="fixture-secret">`,
-    ));
+    await replaceArtifact(
+      walletBucket,
+      "wallet-history-202608",
+      encode(
+        `${walletHtml(WALLET_MONTHS)}<input type="hidden" name="csrf" value="fixture-secret">`,
+      ),
+    );
     await expectRejected(walletBucket, "wallet_html_not_sanitized");
 
     const failureBucket = new FakeBucket();
-    await storeRun(failureBucket, [], [{
-      operation: "collect",
-      errorType: "Error",
-      message: "password=fixture-secret",
-    }], { transactionCount: 0 });
-    expect(() => parseSonyManifest(failureBucket.objects.get(MANIFEST_KEY)!.body, MANIFEST_KEY))
-      .toThrow("manifest_failure_message_invalid");
+    await storeRun(
+      failureBucket,
+      [],
+      [
+        {
+          operation: "collect",
+          errorType: "Error",
+          message: "password=fixture-secret",
+        },
+      ],
+      { transactionCount: 0 },
+    );
+    expect(() =>
+      parseSonyManifest(failureBucket.objects.get(MANIFEST_KEY)!.body, MANIFEST_KEY),
+    ).toThrow("manifest_failure_message_invalid");
   });
 
   test("rejects inconsistent pagination totals and row counts", async () => {
@@ -484,7 +542,8 @@ describe("Sony Bank staged-run importer", () => {
     await storeCompleteRun(orderBucket);
     const orderManifest = readManifest(orderBucket);
     [orderManifest.artifacts[0], orderManifest.artifacts[1]] = [
-      orderManifest.artifacts[1]!, orderManifest.artifacts[0]!,
+      orderManifest.artifacts[1]!,
+      orderManifest.artifacts[0]!,
     ];
     await replaceManifest(orderBucket, orderManifest);
     await expectRejected(orderBucket, "manifest_dataset_order_invalid");
@@ -493,56 +552,87 @@ describe("Sony Bank staged-run importer", () => {
   test("rejects summary and foreign CSV condition mismatches", async () => {
     const summaryBucket = new FakeBucket();
     await storeCompleteRun(summaryBucket);
-    await replaceArtifact(summaryBucket, "collection-summary", summaryBody({ walletMonthCount: 1 }));
+    await replaceArtifact(
+      summaryBucket,
+      "collection-summary",
+      summaryBody({ walletMonthCount: 1 }),
+    );
     await expectRejected(summaryBucket, "summary_manifest_mismatch");
 
     const csvBucket = new FakeBucket();
     const { entries } = completeEntries();
-    await storeRun(csvBucket, entries.filter((entry) => entry.dataset !== "foreign-history-usd-csv"));
+    await storeRun(
+      csvBucket,
+      entries.filter((entry) => entry.dataset !== "foreign-history-usd-csv"),
+    );
     await expectRejected(csvBucket, "manifest_foreign_csv_condition_mismatch");
   });
 
   test("seals verified zero-row JPY evidence without a CSV and keeps older empty CSV captures valid", async () => {
     for (const keepCsv of [false, true]) {
       const bucket = new FakeBucket();
-      const entries = completeEntries().entries
-        .filter((value) => value.dataset !== "yen-history-page-0002" &&
-          (keepCsv || value.dataset !== "yen-history-csv"))
-        .map((value) => value.dataset === "yen-history-page-0001"
-          ? entry(value.dataset, pageBody(0, 0))
-          : value.dataset === "collection-summary"
-            ? entry(value.dataset, summaryBody({ transactionCount: 0, pageCount: 1 }))
-            : value.dataset === "yen-history-csv"
-              ? entry(value.dataset, encode("date,amount\n"), "text/csv")
-              : value);
+      const entries = completeEntries()
+        .entries.filter(
+          (value) =>
+            value.dataset !== "yen-history-page-0002" &&
+            (keepCsv || value.dataset !== "yen-history-csv"),
+        )
+        .map((value) =>
+          value.dataset === "yen-history-page-0001"
+            ? entry(value.dataset, pageBody(0, 0))
+            : value.dataset === "collection-summary"
+              ? entry(value.dataset, summaryBody({ transactionCount: 0, pageCount: 1 }))
+              : value.dataset === "yen-history-csv"
+                ? entry(value.dataset, encode("date,amount\n"), "text/csv")
+                : value,
+        );
       const manifest = await storeRun(bucket, entries, [], { transactionCount: 0 });
-      await expect(importAllChunks(bucket, new FakeCentral(), manifest.artifacts.length + 1))
-        .resolves.toMatchObject({ status: "sealed", sealed: true });
+      await expect(
+        importAllChunks(bucket, new FakeCentral(), manifest.artifacts.length + 1),
+      ).resolves.toMatchObject({ status: "sealed", sealed: true });
     }
   });
 
   test("requires JPY CSV for nonzero history even when the manifest claims zero", async () => {
     const bucket = new FakeBucket();
-    await storeRun(bucket, completeEntries().entries.filter((value) => value.dataset !== "yen-history-csv"),
-      [], { transactionCount: 0 });
+    await storeRun(
+      bucket,
+      completeEntries().entries.filter((value) => value.dataset !== "yen-history-csv"),
+      [],
+      { transactionCount: 0 },
+    );
     await expectRejected(bucket, "manifest_dataset_completeness_mismatch");
   });
 
   test("does not use a zero manifest count as proof when the JPY JSON failed to persist", async () => {
     const bucket = new FakeBucket();
-    const entries = completeEntries().entries.filter((value) => !value.dataset.startsWith("yen-history-"));
-    await storeRun(bucket, entries, [{
-      operation: "r2:yen-history-page-0001", errorType: "Error", message: "storage failed",
-    }], { transactionCount: 0 });
+    const entries = completeEntries().entries.filter(
+      (value) => !value.dataset.startsWith("yen-history-"),
+    );
+    await storeRun(
+      bucket,
+      entries,
+      [
+        {
+          operation: "r2:yen-history-page-0001",
+          errorType: "Error",
+          message: "storage failed",
+        },
+      ],
+      { transactionCount: 0 },
+    );
     await expectRejected(bucket, "manifest_dataset_completeness_mismatch");
   });
 
   test("rejects a zero declared JPY total with actual rows when CSV is omitted", async () => {
     const bucket = new FakeBucket();
-    const entries = completeEntries().entries
-      .filter((value) => value.dataset !== "yen-history-page-0002" && value.dataset !== "yen-history-csv")
-      .map((value) => value.dataset === "yen-history-page-0001"
-        ? entry(value.dataset, pageBody(1, 0)) : value);
+    const entries = completeEntries()
+      .entries.filter(
+        (value) => value.dataset !== "yen-history-page-0002" && value.dataset !== "yen-history-csv",
+      )
+      .map((value) =>
+        value.dataset === "yen-history-page-0001" ? entry(value.dataset, pageBody(1, 0)) : value,
+      );
     await storeRun(bucket, entries, [], { transactionCount: 0 });
     await expectRejected(bucket, "artifact_page_rows_mismatch");
   });
@@ -569,17 +659,34 @@ describe("Sony Bank staged-run importer", () => {
     const oneMonthBucket = new FakeBucket();
     const oneMonthEntries = completeEntries(["202608"]).entries;
     await storeRun(oneMonthBucket, oneMonthEntries);
-    await expect(importRun(oneMonthBucket, new FakeCentral()))
-      .resolves.toMatchObject({ status: "deferred", reason: "worker_invocation_limit" });
+    await expect(importRun(oneMonthBucket, new FakeCentral())).resolves.toMatchObject({
+      status: "deferred",
+      reason: "worker_invocation_limit",
+    });
 
     const fifteenMonths = [
-      "202608", "202607", "202606", "202605", "202604", "202603", "202602", "202601",
-      "202512", "202511", "202510", "202509", "202508", "202507", "202506",
+      "202608",
+      "202607",
+      "202606",
+      "202605",
+      "202604",
+      "202603",
+      "202602",
+      "202601",
+      "202512",
+      "202511",
+      "202510",
+      "202509",
+      "202508",
+      "202507",
+      "202506",
     ];
     const fifteenMonthBucket = new FakeBucket();
     await storeRun(fifteenMonthBucket, completeEntries(fifteenMonths).entries);
-    await expect(importRun(fifteenMonthBucket, new FakeCentral()))
-      .resolves.toMatchObject({ status: "deferred", reason: "worker_invocation_limit" });
+    await expect(importRun(fifteenMonthBucket, new FakeCentral())).resolves.toMatchObject({
+      status: "deferred",
+      reason: "worker_invocation_limit",
+    });
 
     const zeroMonthBucket = new FakeBucket();
     await storeRun(zeroMonthBucket, completeEntries([]).entries);
@@ -592,39 +699,52 @@ describe("Sony Bank staged-run importer", () => {
 
   test("does not accept another collector credential for the Sony route", async () => {
     const bucket = new FakeBucket();
-    await storeRun(bucket, [], [{
-      operation: "collect",
-      errorType: "Error",
-      message: "provider request failed",
-    }], { transactionCount: 0 });
-    await expect(importSonyRun({
-      bucket: bucket as unknown as R2Bucket,
-      centralService: new FakeCentral() as unknown as Fetcher,
-      centralToken: `collector-r2-sbi.${"s".repeat(32)}`,
-      fingerprintKey: FINGERPRINT_KEY,
-      importerVersion: "test-v1",
-      manifestKey: MANIFEST_KEY,
-    })).rejects.toThrow("central_auth_configuration_invalid");
+    await storeRun(
+      bucket,
+      [],
+      [
+        {
+          operation: "collect",
+          errorType: "Error",
+          message: "provider request failed",
+        },
+      ],
+      { transactionCount: 0 },
+    );
+    await expect(
+      importSonyRun({
+        bucket: bucket as unknown as R2Bucket,
+        centralService: new FakeCentral() as unknown as Fetcher,
+        centralToken: `collector-r2-sbi.${"s".repeat(32)}`,
+        fingerprintKey: FINGERPRINT_KEY,
+        importerVersion: "test-v1",
+        manifestKey: MANIFEST_KEY,
+      }),
+    ).rejects.toThrow("central_auth_configuration_invalid");
   });
 
   test("imports the legacy yen-only v1 contract in its own namespace and rejects v2 datasets", async () => {
     const { entries } = completeEntries();
     const legacyEntries = entries
-      .filter((value) =>
-        value.dataset === "gross-balance" ||
-        value.dataset.startsWith("yen-history-") ||
-        value.dataset === "collection-summary"
+      .filter(
+        (value) =>
+          value.dataset === "gross-balance" ||
+          value.dataset.startsWith("yen-history-") ||
+          value.dataset === "collection-summary",
       )
-      .map((value) => value.dataset === "collection-summary"
-        ? entry("collection-summary", legacySummaryBody())
-        : value);
+      .map((value) =>
+        value.dataset === "collection-summary"
+          ? entry("collection-summary", legacySummaryBody())
+          : value,
+      );
     const bucket = new FakeBucket();
     const manifest = await storeRun(bucket, legacyEntries, [], {
       schemaVersion: "sony-bank-worker-poc-v1",
     });
     const central = new FakeCentral();
-    await expect(importAllChunks(bucket, central, manifest.artifacts.length + 1))
-      .resolves.toMatchObject({ status: "sealed", sealed: true });
+    await expect(
+      importAllChunks(bucket, central, manifest.artifacts.length + 1),
+    ).resolves.toMatchObject({ status: "sealed", sealed: true });
     const createRun = JSON.parse(
       central.requests.find((request) => request.path === "/v1/runs")!.body,
     ) as { externalIdNamespace: string };
@@ -636,16 +756,24 @@ describe("Sony Bank staged-run importer", () => {
     expect(new Set(descriptorVersions)).toEqual(new Set(["sony-bank-worker-poc-v1"]));
 
     const invalidBucket = new FakeBucket();
-    await storeRun(invalidBucket, [
-      ...legacyEntries.slice(0, -1),
-      entry("foreign-history-usd-page-0001", pageBody(0, 0)),
-      legacyEntries.at(-1)!,
-    ], [], { schemaVersion: "sony-bank-worker-poc-v1" });
+    await storeRun(
+      invalidBucket,
+      [
+        ...legacyEntries.slice(0, -1),
+        entry("foreign-history-usd-page-0001", pageBody(0, 0)),
+        legacyEntries.at(-1)!,
+      ],
+      [],
+      { schemaVersion: "sony-bank-worker-poc-v1" },
+    );
     await expectRejected(invalidBucket, "manifest_dataset_completeness_mismatch");
   });
 });
 
-function completeEntries(walletMonths = WALLET_MONTHS): { entries: Entry[]; bodies: Map<string, Uint8Array> } {
+function completeEntries(walletMonths = WALLET_MONTHS): {
+  entries: Entry[];
+  bodies: Map<string, Uint8Array>;
+} {
   const entries: Entry[] = [
     entry("gross-balance", jsonBody({ balance: "fixture" })),
     entry("yen-history-page-0001", pageBody(3, 4)),
@@ -656,19 +784,23 @@ function completeEntries(walletMonths = WALLET_MONTHS): { entries: Entry[]; bodi
     const count = currency === "usd" ? 2 : 0;
     entries.push(entry(`foreign-history-${currency}-page-0001`, pageBody(count, count)));
     if (count > 0) {
-      entries.push(entry(
-        `foreign-history-${currency}-csv`,
-        encode("date,amount\n2026-09-03,1\n"),
-        "application/octet-stream",
-      ));
+      entries.push(
+        entry(
+          `foreign-history-${currency}-csv`,
+          encode("date,amount\n2026-09-03,1\n"),
+          "application/octet-stream",
+        ),
+      );
     }
   }
   for (const month of walletMonths) {
-    entries.push(entry(
-      `wallet-history-${month}`,
-      encode(walletHtml(walletMonths, month)),
-      "text/html; charset=UTF-8",
-    ));
+    entries.push(
+      entry(
+        `wallet-history-${month}`,
+        encode(walletHtml(walletMonths, month)),
+        "text/html; charset=UTF-8",
+      ),
+    );
   }
   entries.push(entry("collection-summary", summaryBody({ walletMonthCount: walletMonths.length })));
   return { entries, bodies: new Map(entries.map((value) => [value.dataset, value.body])) };
@@ -693,7 +825,10 @@ async function storeRun(
   for (const value of entries) {
     const sha256 = await digest(value.body);
     const key = `${PREFIX}${filenameFor(value.dataset)}`;
-    bucket.objects.set(key, stored(value.body, { dataset: value.dataset, sha256 }, value.mediaType));
+    bucket.objects.set(
+      key,
+      stored(value.body, { dataset: value.dataset, sha256 }, value.mediaType),
+    );
     artifacts.push({
       dataset: value.dataset,
       key,
@@ -718,7 +853,11 @@ async function storeRun(
   return manifest;
 }
 
-async function replaceArtifact(bucket: FakeBucket, dataset: string, body: Uint8Array): Promise<void> {
+async function replaceArtifact(
+  bucket: FakeBucket,
+  dataset: string,
+  body: Uint8Array,
+): Promise<void> {
   const manifest = readManifest(bucket);
   const artifact = manifest.artifacts.find((value) => value.dataset === dataset);
   if (!artifact) throw new Error(`missing fixture artifact ${dataset}`);
@@ -733,12 +872,19 @@ async function replaceArtifact(bucket: FakeBucket, dataset: string, body: Uint8A
 async function replaceManifest(bucket: FakeBucket, manifest: TestManifest): Promise<void> {
   const body = encode(JSON.stringify(manifest));
   const sha256 = await digest(body);
-  bucket.objects.set(MANIFEST_KEY, stored(body, {
-    source: "sony-bank",
-    status: manifest.status,
-    runId: RUN_ID,
-    sha256,
-  }, "application/json"));
+  bucket.objects.set(
+    MANIFEST_KEY,
+    stored(
+      body,
+      {
+        source: "sony-bank",
+        status: manifest.status,
+        runId: RUN_ID,
+        sha256,
+      },
+      "application/json",
+    ),
+  );
 }
 
 function readManifest(bucket: FakeBucket): TestManifest {
@@ -782,9 +928,12 @@ function legacySummaryBody(): Uint8Array {
 }
 
 function walletHtml(months: string[], selectedMonth = months[0]): string {
-  return `<html><select name="W131301.referenceDate">${months.map((month) =>
-    `<option value="${month}01"${month === selectedMonth ? " selected" : ""}>${month}</option>`
-  ).join("")}</select></html>`;
+  return `<html><select name="W131301.referenceDate">${months
+    .map(
+      (month) =>
+        `<option value="${month}01"${month === selectedMonth ? " selected" : ""}>${month}</option>`,
+    )
+    .join("")}</select></html>`;
 }
 
 function jsonBody(value: unknown): Uint8Array {
@@ -847,9 +996,12 @@ function immutableReport(reports: Map<string, string>, path: string, body: strin
     return Response.json({ error: "immutable report conflict" }, { status: 409 });
   }
   reports.set(path, body);
-  return Response.json({ reused: previous !== undefined }, {
-    status: previous === undefined ? 201 : 200,
-  });
+  return Response.json(
+    { reused: previous !== undefined },
+    {
+      status: previous === undefined ? 201 : 200,
+    },
+  );
 }
 
 async function expectRejected(bucket: FakeBucket, code: string): Promise<void> {
@@ -888,9 +1040,11 @@ function canonicalJson(value: unknown): string {
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical);
   if (value !== null && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
-      .map(([key, child]) => [key, canonical(child)]));
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, child]) => [key, canonical(child)]),
+    );
   }
   return value;
 }

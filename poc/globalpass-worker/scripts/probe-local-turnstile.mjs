@@ -3,9 +3,7 @@ const targets = await fetch(`http://127.0.0.1:${port}/json/list`).then((response
   response.json(),
 );
 const page = targets.find(
-  (target) =>
-    target.type === "page" &&
-    target.url.includes("www.debit.vpass.ne.jp/p/login/"),
+  (target) => target.type === "page" && target.url.includes("www.debit.vpass.ne.jp/p/login/"),
 );
 if (!page) throw new Error("GLOBAL PASS login target not found");
 

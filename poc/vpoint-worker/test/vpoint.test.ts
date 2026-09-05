@@ -1,16 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import {
-  collectVPoint,
-  historyForm,
-  parseSessionCookie,
-  vMoneyHistoryForm,
-} from "../src/vpoint";
+import { collectVPoint, historyForm, parseSessionCookie, vMoneyHistoryForm } from "../src/vpoint";
 
 describe("V Point session", () => {
   test("accepts a Cookie header without logging or splitting it", () => {
-    expect(parseSessionCookie("session=value; other=value2")).toBe(
-      "session=value; other=value2",
-    );
+    expect(parseSessionCookie("session=value; other=value2")).toBe("session=value; other=value2");
     expect(() => parseSessionCookie("")).toThrow();
     expect(() => parseSessionCookie("session=value\r\nInjected: yes")).toThrow();
   });
@@ -115,14 +108,17 @@ describe("V Point collection", () => {
   });
 
   test("reports an expired session without persisting the response", async () => {
-    const fetcher = async () => jsonResponse({
-      status: { code: "0010" },
-      results: {},
-    });
-    await expect(collectVPoint({
-      sessionCookie: "session=value",
-      fetcher,
-    })).rejects.toThrow("expired");
+    const fetcher = async () =>
+      jsonResponse({
+        status: { code: "0010" },
+        results: {},
+      });
+    await expect(
+      collectVPoint({
+        sessionCookie: "session=value",
+        fetcher,
+      }),
+    ).rejects.toThrow("expired");
   });
 
   test("stores an empty V Money response for accounts without history", async () => {
@@ -145,9 +141,9 @@ describe("V Point collection", () => {
     });
     expect(result.vMoneyHistoryTotal).toBe(0);
     expect(result.vMoneyHistoryPageCount).toBe(1);
-    expect(result.artifacts.some((artifact) =>
-      artifact.filename === "vmoney-history-page-0001.json"
-    )).toBe(true);
+    expect(
+      result.artifacts.some((artifact) => artifact.filename === "vmoney-history-page-0001.json"),
+    ).toBe(true);
   });
 });
 

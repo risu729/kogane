@@ -72,10 +72,7 @@ export const sbiForeignCashPositions: Parser = {
   version: "0.2.0",
 
   accepts(artifact: ArtifactMeta): boolean {
-    return (
-      artifact.sourceId === "sbi-securities" &&
-      artifact.dataset === "foreign-cash-positions"
-    );
+    return artifact.sourceId === "sbi-securities" && artifact.dataset === "foreign-cash-positions";
   },
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
@@ -83,9 +80,7 @@ export const sbiForeignCashPositions: Parser = {
     const list = isObject(body) ? body["listSecuritiesBalances"] : undefined;
     const balances = isObject(list) ? list["securitiesBalances"] : undefined;
     if (!Array.isArray(balances)) {
-      throw new Error(
-        `artifact ${artifact.sha256} is not a GetSecuritiesBalanceList data object`,
-      );
+      throw new Error(`artifact ${artifact.sha256} is not a GetSecuritiesBalanceList data object`);
     }
     const warnings: string[] = [];
     const observations: Observation[] = [];
@@ -133,9 +128,7 @@ export const sbiForeignCashPositions: Parser = {
         ...(typeof securities["securitiesName"] === "string"
           ? { securityName: securities["securitiesName"] }
           : {}),
-        ...(typeof market["marketCode"] === "string"
-          ? { market: market["marketCode"] }
-          : {}),
+        ...(typeof market["marketCode"] === "string" ? { market: market["marketCode"] } : {}),
         quantityText: quantity?.text ?? "",
         quantityScale: quantity?.scale ?? 0,
         ...(currency !== undefined ? { currency } : {}),

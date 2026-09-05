@@ -16,9 +16,10 @@ export async function storeArtifact(options: {
   if (!/^[a-z0-9.-]+$/u.test(options.artifact.filename)) {
     throw new Error("MyJCB artifact filename contains unsafe characters");
   }
-  const bytes = typeof options.artifact.body === "string"
-    ? new TextEncoder().encode(options.artifact.body)
-    : new Uint8Array(options.artifact.body);
+  const bytes =
+    typeof options.artifact.body === "string"
+      ? new TextEncoder().encode(options.artifact.body)
+      : new Uint8Array(options.artifact.body);
   const sha256 = await sha256Hex(bytes);
   const key = `${options.prefix}/${options.connectionId}/${options.artifact.filename}`;
   await options.bucket.put(key, options.artifact.body, {
@@ -39,9 +40,7 @@ export async function storeArtifact(options: {
     mediaType: options.artifact.mediaType,
     sha256,
     bytes: bytes.byteLength,
-    ...(options.artifact.statementState
-      ? { statementState: options.artifact.statementState }
-      : {}),
+    ...(options.artifact.statementState ? { statementState: options.artifact.statementState } : {}),
     ...(options.artifact.period ? { period: options.artifact.period } : {}),
   };
 }
@@ -73,7 +72,5 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   const digest = await crypto.subtle.digest("SHA-256", copy.buffer);
-  return [...new Uint8Array(digest)]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }

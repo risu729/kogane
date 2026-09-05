@@ -15,16 +15,20 @@ try {
       console.error(JSON.stringify({ event: "VPOINT_LOGIN_TRACE", ...trace }));
     },
   });
-  console.log(JSON.stringify({
-    event: "VPOINT_EMAIL_CODE_REQUIRED",
-    requestedAt: challenge.requestedAt,
-  }));
+  console.log(
+    JSON.stringify({
+      event: "VPOINT_EMAIL_CODE_REQUIRED",
+      requestedAt: challenge.requestedAt,
+    }),
+  );
   const code = await input.question("");
   const result = await challenge.complete(code);
-  console.log(JSON.stringify({
-    event: "VPOINT_EMAIL_LOGIN_SUCCEEDED",
-    applicationStatus: result.applicationStatus,
-  }));
+  console.log(
+    JSON.stringify({
+      event: "VPOINT_EMAIL_LOGIN_SUCCEEDED",
+      applicationStatus: result.applicationStatus,
+    }),
+  );
 } finally {
   input.close();
 }

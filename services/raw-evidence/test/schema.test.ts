@@ -1,20 +1,31 @@
 import { env } from "cloudflare:workers";
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 const NOW = 1_788_324_000_000;
 
 async function seed(scope = "a") {
   await env.DB.batch([
-    env.DB.prepare("INSERT INTO sources (id, provider, display_name) VALUES (?, ?, ?)")
-      .bind(`source-${scope}`, "Provider", `Source ${scope}`),
-    env.DB.prepare("INSERT INTO producers (id, kind, display_name) VALUES (?, ?, ?)")
-      .bind(`producer-${scope}`, "collector", `Producer ${scope}`),
-    env.DB.prepare("INSERT INTO producer_sources (producer_id, source_id) VALUES (?, ?)")
-      .bind(`producer-${scope}`, `source-${scope}`),
-    env.DB.prepare("INSERT INTO ingest_clients (id, display_name) VALUES (?, ?)")
-      .bind(`client-${scope}`, `Client ${scope}`),
-    env.DB.prepare("INSERT INTO ingest_client_producers (ingest_client_id, producer_id) VALUES (?, ?)")
-      .bind(`client-${scope}`, `producer-${scope}`),
+    env.DB.prepare("INSERT INTO sources (id, provider, display_name) VALUES (?, ?, ?)").bind(
+      `source-${scope}`,
+      "Provider",
+      `Source ${scope}`,
+    ),
+    env.DB.prepare("INSERT INTO producers (id, kind, display_name) VALUES (?, ?, ?)").bind(
+      `producer-${scope}`,
+      "collector",
+      `Producer ${scope}`,
+    ),
+    env.DB.prepare("INSERT INTO producer_sources (producer_id, source_id) VALUES (?, ?)").bind(
+      `producer-${scope}`,
+      `source-${scope}`,
+    ),
+    env.DB.prepare("INSERT INTO ingest_clients (id, display_name) VALUES (?, ?)").bind(
+      `client-${scope}`,
+      `Client ${scope}`,
+    ),
+    env.DB.prepare(
+      "INSERT INTO ingest_client_producers (ingest_client_id, producer_id) VALUES (?, ?)",
+    ).bind(`client-${scope}`, `producer-${scope}`),
     env.DB.prepare(`
       INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id)
       VALUES (?, ?, ?)
@@ -30,7 +41,8 @@ async function seedRun(scope = "a") {
        external_session_id, first_recorded_at_ms)
     VALUES (?, ?, 'test', ?, ?)
     RETURNING id
-  `).bind(`producer-${scope}`, `client-${scope}`, `session-${scope}`, NOW)
+  `)
+    .bind(`producer-${scope}`, `client-${scope}`, `session-${scope}`, NOW)
     .first<{ id: number }>();
   const run = await env.DB.prepare(`
     INSERT INTO fetch_runs
@@ -38,9 +50,8 @@ async function seedRun(scope = "a") {
        first_recorded_by_client_id, first_recorded_at_ms)
     VALUES (?, ?, ?, ?, ?)
     RETURNING id
-  `).bind(
-    session!.id, `producer-${scope}`, `source-${scope}`, `client-${scope}`, NOW
-  )
+  `)
+    .bind(session!.id, `producer-${scope}`, `source-${scope}`, `client-${scope}`, NOW)
     .first<{ id: number }>();
   return run!.id;
 }
@@ -52,14 +63,16 @@ async function addTerminal(runId: number, scope: string, declaredCount?: number)
       normalized_outcome, completed_at_ms, completed_at_basis,
       declared_artifact_count, artifact_count_scope, recorded_at_ms
     ) VALUES (?, 'terminal', 'terminal', ?, 'success', ?, 'manifest', ?, ?, ?)
-  `).bind(
-    runId,
-    `client-${scope}`,
-    NOW,
-    declaredCount ?? null,
-    declaredCount === undefined ? null : "all_catalogued",
-    NOW,
-  ).run();
+  `)
+    .bind(
+      runId,
+      `client-${scope}`,
+      NOW,
+      declaredCount ?? null,
+      declaredCount === undefined ? null : "all_catalogued",
+      NOW,
+    )
+    .run();
 }
 
 interface ArtifactFixture {
@@ -80,7 +93,9 @@ async function addArtifact(runId: number, scope: string, fixture: ArtifactFixtur
     INSERT INTO raw_objects
       (sha256, byte_size, blob_key, first_stored_at_ms)
     VALUES (?, 3, ?, ?)
-  `).bind(fixture.sha, `objects/${fixture.sha.slice(0, 2)}/${fixture.sha}`, NOW).run();
+  `)
+    .bind(fixture.sha, `objects/${fixture.sha.slice(0, 2)}/${fixture.sha}`, NOW)
+    .run();
   return (await env.DB.prepare(`
     INSERT INTO fetch_artifacts (
       fetch_run_id, producer_id, source_id, first_ingested_by_client_id,
@@ -89,23 +104,25 @@ async function addArtifact(runId: number, scope: string, fixture: ArtifactFixtur
       descriptor_sha256, recorded_at_ms
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 3, 'v1', ?, ?)
     RETURNING id
-  `).bind(
-    runId,
-    `producer-${scope}`,
-    `source-${scope}`,
-    `client-${scope}`,
-    fixture.pageGroupId ?? null,
-    fixture.pageIndex ?? null,
-    fixture.sequence ?? null,
-    fixture.key,
-    fixture.role ?? "provider_response",
-    fixture.fidelity ?? "exact",
-    fixture.container ?? "single",
-    fixture.lineage ?? "not_applicable",
-    fixture.sha,
-    fixture.descriptorSha,
-    NOW,
-  ).first<{ id: number }>())!.id;
+  `)
+    .bind(
+      runId,
+      `producer-${scope}`,
+      `source-${scope}`,
+      `client-${scope}`,
+      fixture.pageGroupId ?? null,
+      fixture.pageIndex ?? null,
+      fixture.sequence ?? null,
+      fixture.key,
+      fixture.role ?? "provider_response",
+      fixture.fidelity ?? "exact",
+      fixture.container ?? "single",
+      fixture.lineage ?? "not_applicable",
+      fixture.sha,
+      fixture.descriptorSha,
+      NOW,
+    )
+    .first<{ id: number }>())!.id;
 }
 
 async function addInventory(
@@ -119,14 +136,17 @@ async function addInventory(
       fetch_run_id, inventory_sha256, expected_artifact_count,
       declaration_basis, created_at_ms, created_by_client_id
     ) VALUES (?, ?, ?, 'directory_scan', ?, ?) RETURNING id
-  `).bind(runId, digest, items.length, NOW, `client-${scope}`)
+  `)
+    .bind(runId, digest, items.length, NOW, `client-${scope}`)
     .first<{ id: number }>();
   for (const item of items) {
     await env.DB.prepare(`
       INSERT INTO run_inventory_items
         (inventory_id, fetch_run_id, artifact_key, sha256, descriptor_sha256)
       VALUES (?, ?, ?, ?, ?)
-    `).bind(inventory!.id, runId, item.key, item.sha, item.descriptorSha).run();
+    `)
+      .bind(inventory!.id, runId, item.key, item.sha, item.descriptorSha)
+      .run();
   }
   return inventory!.id;
 }
@@ -136,7 +156,9 @@ async function sealRun(runId: number, inventoryId: number, scope: string) {
     INSERT INTO fetch_run_seals
       (inventory_id, fetch_run_id, sealed_at_ms, sealed_by_client_id)
     VALUES (?, ?, ?, ?)
-  `).bind(inventoryId, runId, NOW, `client-${scope}`).run();
+  `)
+    .bind(inventoryId, runId, NOW, `client-${scope}`)
+    .run();
 }
 
 describe("0001 raw-evidence schema", () => {
@@ -159,11 +181,16 @@ describe("0001 raw-evidence schema", () => {
   it("keeps registry rows mutable but acquisition history append-only", async () => {
     const runId = await seedRun("mutation");
     await env.DB.prepare("UPDATE sources SET display_name = ? WHERE id = ?")
-      .bind("Renamed", "source-mutation").run();
-    await expect(env.DB.prepare("UPDATE fetch_runs SET source_run_key = ? WHERE id = ?")
-      .bind("changed", runId).run()).rejects.toThrow(/append-only/);
-    await expect(env.DB.prepare("DELETE FROM fetch_runs WHERE id = ?")
-      .bind(runId).run()).rejects.toThrow(/append-only/);
+      .bind("Renamed", "source-mutation")
+      .run();
+    await expect(
+      env.DB.prepare("UPDATE fetch_runs SET source_run_key = ? WHERE id = ?")
+        .bind("changed", runId)
+        .run(),
+    ).rejects.toThrow(/append-only/);
+    await expect(
+      env.DB.prepare("DELETE FROM fetch_runs WHERE id = ?").bind(runId).run(),
+    ).rejects.toThrow(/append-only/);
   });
 
   it("rejects producer and ingest-client attribution outside reviewed scopes", async () => {
@@ -174,17 +201,19 @@ describe("0001 raw-evidence schema", () => {
         (producer_id, first_recorded_by_client_id, external_id_namespace,
          external_session_id, first_recorded_at_ms)
       VALUES (?, ?, 'test', ?, ?) RETURNING id
-    `).bind("producer-scope-a", "client-scope-a", "cross-scope", NOW)
+    `)
+      .bind("producer-scope-a", "client-scope-a", "cross-scope", NOW)
       .first<{ id: number }>();
-    await expect(env.DB.prepare(`
+    await expect(
+      env.DB.prepare(`
       INSERT INTO fetch_runs
         (acquisition_session_id, producer_id, source_id,
          first_recorded_by_client_id, first_recorded_at_ms)
       VALUES (?, ?, ?, ?, ?)
-    `).bind(
-      session!.id, "producer-scope-a", "source-scope-b", "client-scope-a", NOW
-    ).run())
-      .rejects.toThrow(/inactive_ingest_route|FOREIGN KEY/);
+    `)
+        .bind(session!.id, "producer-scope-a", "source-scope-b", "client-scope-a", NOW)
+        .run(),
+    ).rejects.toThrow(/inactive_ingest_route|FOREIGN KEY/);
   });
 
   it("does not seal an incomplete inventory", async () => {
@@ -194,12 +223,18 @@ describe("0001 raw-evidence schema", () => {
         (fetch_run_id, inventory_sha256, expected_artifact_count,
          declaration_basis, created_at_ms, created_by_client_id)
       VALUES (?, ?, 1, 'directory_scan', ?, 'client-incomplete') RETURNING id
-    `).bind(runId, "a".repeat(64), NOW).first<{ id: number }>();
-    await expect(env.DB.prepare(
-      `INSERT INTO fetch_run_seals
+    `)
+      .bind(runId, "a".repeat(64), NOW)
+      .first<{ id: number }>();
+    await expect(
+      env.DB.prepare(
+        `INSERT INTO fetch_run_seals
         (inventory_id, fetch_run_id, sealed_at_ms, sealed_by_client_id)
-       VALUES (?, ?, ?, 'client-incomplete')`
-    ).bind(inventory!.id, runId, NOW).run()).rejects.toThrow(/run_inventory_incomplete/);
+       VALUES (?, ?, ?, 'client-incomplete')`,
+      )
+        .bind(inventory!.id, runId, NOW)
+        .run(),
+    ).rejects.toThrow(/run_inventory_incomplete/);
   });
 
   it("seals a terminal failed run with a zero-artifact inventory", async () => {
@@ -211,21 +246,29 @@ describe("0001 raw-evidence schema", () => {
         completed_at_basis, recorded_at_ms
       ) VALUES (?, 'terminal', 'terminal', 'client-empty', 'failed',
                 'failed', ?, 'manifest', ?)
-    `).bind(runId, NOW, NOW).run();
+    `)
+      .bind(runId, NOW, NOW)
+      .run();
     const inventory = await env.DB.prepare(`
       INSERT INTO run_inventories
         (fetch_run_id, inventory_sha256, expected_artifact_count,
          declaration_basis, created_at_ms, created_by_client_id)
       VALUES (?, ?, 0, 'directory_scan', ?, 'client-empty') RETURNING id
-    `).bind(runId, "b".repeat(64), NOW).first<{ id: number }>();
+    `)
+      .bind(runId, "b".repeat(64), NOW)
+      .first<{ id: number }>();
     await env.DB.prepare(
       `INSERT INTO fetch_run_seals
         (inventory_id, fetch_run_id, sealed_at_ms, sealed_by_client_id)
-       VALUES (?, ?, ?, 'client-empty')`
-    ).bind(inventory!.id, runId, NOW).run();
+       VALUES (?, ?, ?, 'client-empty')`,
+    )
+      .bind(inventory!.id, runId, NOW)
+      .run();
     const seal = await env.DB.prepare(
-      "SELECT sealed_at_ms FROM fetch_run_seals WHERE inventory_id = ?"
-    ).bind(inventory!.id).first<{ sealed_at_ms: number }>();
+      "SELECT sealed_at_ms FROM fetch_run_seals WHERE inventory_id = ?",
+    )
+      .bind(inventory!.id)
+      .first<{ sealed_at_ms: number }>();
     expect(seal?.sealed_at_ms).toBe(NOW);
   });
 
@@ -243,9 +286,10 @@ describe("0001 raw-evidence schema", () => {
         fetch_run_id, inventory_sha256, expected_artifact_count,
         declaration_basis, created_at_ms, created_by_client_id
       ) VALUES (?, ?, 0, 'directory_scan', ?, ?) RETURNING id
-    `).bind(runId, "3".repeat(64), NOW, `client-${scope}`).first<{ id: number }>();
-    await expect(sealRun(runId, inventory!.id, scope))
-      .rejects.toThrow(/run_inventory_incomplete/);
+    `)
+      .bind(runId, "3".repeat(64), NOW, `client-${scope}`)
+      .first<{ id: number }>();
+    await expect(sealRun(runId, inventory!.id, scope)).rejects.toThrow(/run_inventory_incomplete/);
   });
 
   it("models MyJCB redaction followed by re-encoding without retaining secrets", async () => {
@@ -266,7 +310,9 @@ describe("0001 raw-evidence schema", () => {
           fetch_artifact_id, step_index, step_kind, transformer_id,
           transformer_version, recorded_by_client_id, recorded_at_ms
         ) VALUES (?, ?, ?, 'myjcb-worker', 'v1', ?, ?)
-      `).bind(artifactId, index, kind, `client-${scope}`, NOW).run();
+      `)
+        .bind(artifactId, index, kind, `client-${scope}`, NOW)
+        .run();
     }
     await addTerminal(runId, scope, 1);
     const inventoryId = await addInventory(runId, scope, "6".repeat(64), [fixture]);
@@ -292,7 +338,9 @@ describe("0001 raw-evidence schema", () => {
           fetch_artifact_id, step_index, step_kind, transformer_id,
           transformer_version, recorded_by_client_id, recorded_at_ms
         ) VALUES (?, ?, ?, 'vpass-worker', 'v1', ?, ?)
-      `).bind(artifactId, index, kind, `client-${scope}`, NOW).run();
+      `)
+        .bind(artifactId, index, kind, `client-${scope}`, NOW)
+        .run();
     }
     await addTerminal(runId, scope, 1);
     const inventoryId = await addInventory(runId, scope, "9".repeat(64), [fixture]);
@@ -323,7 +371,9 @@ describe("0001 raw-evidence schema", () => {
         fetch_run_id, page_group_key, declared_page_count,
         recorded_by_client_id, recorded_at_ms
       ) VALUES (?, 'history', 2, ?, ?) RETURNING id
-    `).bind(runId, `client-${scope}`, NOW).first<{ id: number }>();
+    `)
+      .bind(runId, `client-${scope}`, NOW)
+      .first<{ id: number }>();
     const fixture = {
       key: "page-0.json",
       sha: "d".repeat(64),
@@ -334,8 +384,7 @@ describe("0001 raw-evidence schema", () => {
     await addArtifact(runId, scope, fixture);
     await addTerminal(runId, scope, 1);
     const inventoryId = await addInventory(runId, scope, "f".repeat(64), [fixture]);
-    await expect(sealRun(runId, inventoryId, scope))
-      .rejects.toThrow(/run_inventory_incomplete/);
+    await expect(sealRun(runId, inventoryId, scope)).rejects.toThrow(/run_inventory_incomplete/);
   });
 
   it("rejects query values and append-only replacement, but permits guarded replay", async () => {
@@ -347,30 +396,35 @@ describe("0001 raw-evidence schema", () => {
       descriptorSha: "1".repeat(64),
     };
     const artifactId = await addArtifact(runId, scope, fixture);
-    await expect(env.DB.prepare(`
+    await expect(
+      env.DB.prepare(`
       INSERT INTO artifact_http_metadata (
         fetch_artifact_id, scheme, host, path_template,
         query_names_json, redaction_version
       ) VALUES (?, 'https', 'example.com', '/api', '["token=secret"]', 'v1')
-    `).bind(artifactId).run()).rejects.toThrow(/query_name_contains_value/);
-    await expect(env.DB.prepare(`
+    `)
+        .bind(artifactId)
+        .run(),
+    ).rejects.toThrow(/query_name_contains_value/);
+    await expect(
+      env.DB.prepare(`
       INSERT OR REPLACE INTO raw_objects
         (sha256, byte_size, blob_key, first_stored_at_ms)
       VALUES (?, 4, 'objects/replaced', ?)
-    `).bind(fixture.sha, NOW).run()).rejects.toThrow(/immutable_duplicate_insert/);
+    `)
+        .bind(fixture.sha, NOW)
+        .run(),
+    ).rejects.toThrow(/immutable_duplicate_insert/);
     await env.DB.prepare(`
       INSERT INTO raw_objects (sha256, byte_size, blob_key, first_stored_at_ms)
       SELECT ?, 3, ?, ?
       WHERE NOT EXISTS (SELECT 1 FROM raw_objects WHERE sha256 = ?)
-    `).bind(
-      fixture.sha,
-      `objects/${fixture.sha.slice(0, 2)}/${fixture.sha}`,
-      NOW,
-      fixture.sha,
-    ).run();
-    const count = await env.DB.prepare(
-      "SELECT count(*) AS count FROM raw_objects WHERE sha256 = ?"
-    ).bind(fixture.sha).first<{ count: number }>();
+    `)
+      .bind(fixture.sha, `objects/${fixture.sha.slice(0, 2)}/${fixture.sha}`, NOW, fixture.sha)
+      .run();
+    const count = await env.DB.prepare("SELECT count(*) AS count FROM raw_objects WHERE sha256 = ?")
+      .bind(fixture.sha)
+      .first<{ count: number }>();
     expect(count?.count).toBe(1);
   });
 
@@ -386,8 +440,11 @@ describe("0001 raw-evidence schema", () => {
     await env.DB.prepare(`
       INSERT INTO raw_objects (sha256, byte_size, blob_key, first_stored_at_ms)
       VALUES (?, 3, ?, ?)
-    `).bind("24".repeat(32), `objects/${"24".repeat(32)}`, NOW).run();
-    await expect(env.DB.prepare(`
+    `)
+      .bind("24".repeat(32), `objects/${"24".repeat(32)}`, NOW)
+      .run();
+    await expect(
+      env.DB.prepare(`
       INSERT OR REPLACE INTO fetch_artifacts (
         fetch_run_id, producer_id, source_id, first_ingested_by_client_id,
         artifact_key, artifact_role, payload_fidelity, container_kind,
@@ -395,17 +452,27 @@ describe("0001 raw-evidence schema", () => {
         descriptor_version, descriptor_sha256, recorded_at_ms
       ) VALUES (?, ?, ?, ?, 'sequence-replacement.json', 'provider_response',
                 'exact', 'single', 'not_applicable', 0, ?, 3, 'v1', ?, ?)
-    `).bind(
-      runId, `producer-${scope}`, `source-${scope}`, `client-${scope}`,
-      "24".repeat(32), "25".repeat(32), NOW,
-    ).run()).rejects.toThrow(/immutable_duplicate_insert/);
+    `)
+        .bind(
+          runId,
+          `producer-${scope}`,
+          `source-${scope}`,
+          `client-${scope}`,
+          "24".repeat(32),
+          "25".repeat(32),
+          NOW,
+        )
+        .run(),
+    ).rejects.toThrow(/immutable_duplicate_insert/);
 
     const group = await env.DB.prepare(`
       INSERT INTO fetch_page_groups (
         fetch_run_id, page_group_key, declared_page_count,
         recorded_by_client_id, recorded_at_ms
       ) VALUES (?, 'history', 2, ?, ?) RETURNING id
-    `).bind(runId, `client-${scope}`, NOW).first<{ id: number }>();
+    `)
+      .bind(runId, `client-${scope}`, NOW)
+      .first<{ id: number }>();
     await addArtifact(runId, scope, {
       key: "page-original.json",
       sha: "6".repeat(64),
@@ -416,8 +483,11 @@ describe("0001 raw-evidence schema", () => {
     await env.DB.prepare(`
       INSERT INTO raw_objects (sha256, byte_size, blob_key, first_stored_at_ms)
       VALUES (?, 3, ?, ?)
-    `).bind("68".repeat(32), `objects/${"68".repeat(32)}`, NOW).run();
-    await expect(env.DB.prepare(`
+    `)
+      .bind("68".repeat(32), `objects/${"68".repeat(32)}`, NOW)
+      .run();
+    await expect(
+      env.DB.prepare(`
       INSERT OR REPLACE INTO fetch_artifacts (
         fetch_run_id, producer_id, source_id, first_ingested_by_client_id,
         page_group_id, page_index, artifact_key, artifact_role, payload_fidelity,
@@ -425,22 +495,35 @@ describe("0001 raw-evidence schema", () => {
         descriptor_version, descriptor_sha256, recorded_at_ms
       ) VALUES (?, ?, ?, ?, ?, 0, 'page-replacement.json', 'provider_response',
                 'exact', 'single', 'not_applicable', ?, 3, 'v1', ?, ?)
-    `).bind(
-      runId, `producer-${scope}`, `source-${scope}`, `client-${scope}`,
-      group!.id, "68".repeat(32), "69".repeat(32), NOW,
-    ).run()).rejects.toThrow(/immutable_duplicate_insert/);
+    `)
+        .bind(
+          runId,
+          `producer-${scope}`,
+          `source-${scope}`,
+          `client-${scope}`,
+          group!.id,
+          "68".repeat(32),
+          "69".repeat(32),
+          NOW,
+        )
+        .run(),
+    ).rejects.toThrow(/immutable_duplicate_insert/);
 
     const artifacts = await env.DB.prepare(`
       SELECT artifact_key FROM fetch_artifacts WHERE fetch_run_id = ? ORDER BY artifact_key
-    `).bind(runId).all<{ artifact_key: string }>();
+    `)
+      .bind(runId)
+      .all<{ artifact_key: string }>();
     expect(artifacts.results.map((row) => row.artifact_key)).toEqual([
-      "page-original.json", "sequence-original.json",
+      "page-original.json",
+      "sequence-original.json",
     ]);
   });
 
   it("applies the runtime registry migrations and permits reviewed policy revocation", async () => {
-    const columns = await env.DB.prepare("PRAGMA table_info(run_inventories)")
-      .all<{ name: string }>();
+    const columns = await env.DB.prepare("PRAGMA table_info(run_inventories)").all<{
+      name: string;
+    }>();
     expect(columns.results.map((row) => row.name)).toContain("inventory_digest_version");
     const aliases = await env.DB.prepare(`
       SELECT external_source_id, source_id FROM source_external_ids
@@ -470,11 +553,13 @@ describe("0001 raw-evidence schema", () => {
       producer_id: string;
       source_id: string;
     }>();
-    expect(sbiRoute.results).toEqual([{
-      ingest_client_id: "collector-r2-sbi",
-      producer_id: "collector-r2-importer",
-      source_id: "sbi-securities",
-    }]);
+    expect(sbiRoute.results).toEqual([
+      {
+        ingest_client_id: "collector-r2-sbi",
+        producer_id: "collector-r2-importer",
+        source_id: "sbi-securities",
+      },
+    ]);
     const sbiVcRoute = await env.DB.prepare(`
       SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes
       WHERE ingest_client_id = 'collector-r2-sbi-vc'
@@ -484,11 +569,13 @@ describe("0001 raw-evidence schema", () => {
       producer_id: string;
       source_id: string;
     }>();
-    expect(sbiVcRoute.results).toEqual([{
-      ingest_client_id: "collector-r2-sbi-vc",
-      producer_id: "collector-r2-importer",
-      source_id: "sbi-vc-trade",
-    }]);
+    expect(sbiVcRoute.results).toEqual([
+      {
+        ingest_client_id: "collector-r2-sbi-vc",
+        producer_id: "collector-r2-importer",
+        source_id: "sbi-vc-trade",
+      },
+    ]);
     const sonyRoute = await env.DB.prepare(`
       SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes
       WHERE ingest_client_id = 'collector-r2-sony-bank'
@@ -498,11 +585,13 @@ describe("0001 raw-evidence schema", () => {
       producer_id: string;
       source_id: string;
     }>();
-    expect(sonyRoute.results).toEqual([{
-      ingest_client_id: "collector-r2-sony-bank",
-      producer_id: "collector-r2-importer",
-      source_id: "sony-bank",
-    }]);
+    expect(sonyRoute.results).toEqual([
+      {
+        ingest_client_id: "collector-r2-sony-bank",
+        producer_id: "collector-r2-importer",
+        source_id: "sony-bank",
+      },
+    ]);
     const sbiShinseiRoute = await env.DB.prepare(`
       SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes
       WHERE ingest_client_id = 'collector-r2-sbi-shinsei'
@@ -512,11 +601,13 @@ describe("0001 raw-evidence schema", () => {
       producer_id: string;
       source_id: string;
     }>();
-    expect(sbiShinseiRoute.results).toEqual([{
-      ingest_client_id: "collector-r2-sbi-shinsei",
-      producer_id: "collector-r2-importer",
-      source_id: "sbi-shinsei-bank",
-    }]);
+    expect(sbiShinseiRoute.results).toEqual([
+      {
+        ingest_client_id: "collector-r2-sbi-shinsei",
+        producer_id: "collector-r2-importer",
+        source_id: "sbi-shinsei-bank",
+      },
+    ]);
     const mobileSuicaRoute = await env.DB.prepare(`
       SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes
       WHERE ingest_client_id = 'collector-r2-mobile-suica'
@@ -526,11 +617,13 @@ describe("0001 raw-evidence schema", () => {
       producer_id: string;
       source_id: string;
     }>();
-    expect(mobileSuicaRoute.results).toEqual([{
-      ingest_client_id: "collector-r2-mobile-suica",
-      producer_id: "collector-r2-importer",
-      source_id: "mobile-suica",
-    }]);
+    expect(mobileSuicaRoute.results).toEqual([
+      {
+        ingest_client_id: "collector-r2-mobile-suica",
+        producer_id: "collector-r2-importer",
+        source_id: "mobile-suica",
+      },
+    ]);
     const globalPassRoute = await env.DB.prepare(`
       SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes
       WHERE ingest_client_id = 'collector-r2-global-pass'
@@ -540,11 +633,13 @@ describe("0001 raw-evidence schema", () => {
       producer_id: string;
       source_id: string;
     }>();
-    expect(globalPassRoute.results).toEqual([{
-      ingest_client_id: "collector-r2-global-pass",
-      producer_id: "collector-r2-importer",
-      source_id: "global-pass",
-    }]);
+    expect(globalPassRoute.results).toEqual([
+      {
+        ingest_client_id: "collector-r2-global-pass",
+        producer_id: "collector-r2-importer",
+        source_id: "global-pass",
+      },
+    ]);
     const vPointRoute = await env.DB.prepare(`
       SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes
       WHERE ingest_client_id = 'collector-r2-v-point'
@@ -554,11 +649,13 @@ describe("0001 raw-evidence schema", () => {
       producer_id: string;
       source_id: string;
     }>();
-    expect(vPointRoute.results).toEqual([{
-      ingest_client_id: "collector-r2-v-point",
-      producer_id: "collector-r2-importer",
-      source_id: "v-point",
-    }]);
+    expect(vPointRoute.results).toEqual([
+      {
+        ingest_client_id: "collector-r2-v-point",
+        producer_id: "collector-r2-importer",
+        source_id: "v-point",
+      },
+    ]);
     const sbiPolicies = await env.DB.prepare(`
       SELECT template, redaction_version, fingerprint_key_version
       FROM origin_template_policies
@@ -568,11 +665,13 @@ describe("0001 raw-evidence schema", () => {
       redaction_version: string;
       fingerprint_key_version: string;
     }>();
-    expect(sbiPolicies.results).toEqual([{
-      template: "raw/sbi-securities/{date}/{run-id}/{artifact}.json",
-      redaction_version: "v1",
-      fingerprint_key_version: "collector-r2-v1",
-    }]);
+    expect(sbiPolicies.results).toEqual([
+      {
+        template: "raw/sbi-securities/{date}/{run-id}/{artifact}.json",
+        redaction_version: "v1",
+        fingerprint_key_version: "collector-r2-v1",
+      },
+    ]);
     const sbiVcPolicies = await env.DB.prepare(`
       SELECT template, redaction_version, fingerprint_key_version
       FROM origin_template_policies
@@ -582,11 +681,13 @@ describe("0001 raw-evidence schema", () => {
       redaction_version: string;
       fingerprint_key_version: string;
     }>();
-    expect(sbiVcPolicies.results).toEqual([{
-      template: "raw/sbi-vc-trade/{date}/{run-id}/{artifact}.json",
-      redaction_version: "v1",
-      fingerprint_key_version: "collector-r2-v1",
-    }]);
+    expect(sbiVcPolicies.results).toEqual([
+      {
+        template: "raw/sbi-vc-trade/{date}/{run-id}/{artifact}.json",
+        redaction_version: "v1",
+        fingerprint_key_version: "collector-r2-v1",
+      },
+    ]);
     const sonyPolicies = await env.DB.prepare(`
       SELECT template, redaction_version, fingerprint_key_version
       FROM origin_template_policies
@@ -596,11 +697,13 @@ describe("0001 raw-evidence schema", () => {
       redaction_version: string;
       fingerprint_key_version: string;
     }>();
-    expect(sonyPolicies.results).toEqual([{
-      template: "raw/sony-bank/{date}/{run-id}/{artifact}",
-      redaction_version: "v1",
-      fingerprint_key_version: "collector-r2-v1",
-    }]);
+    expect(sonyPolicies.results).toEqual([
+      {
+        template: "raw/sony-bank/{date}/{run-id}/{artifact}",
+        redaction_version: "v1",
+        fingerprint_key_version: "collector-r2-v1",
+      },
+    ]);
     const sbiShinseiPolicies = await env.DB.prepare(`
       SELECT template, redaction_version, fingerprint_key_version
       FROM origin_template_policies
@@ -610,11 +713,13 @@ describe("0001 raw-evidence schema", () => {
       redaction_version: string;
       fingerprint_key_version: string;
     }>();
-    expect(sbiShinseiPolicies.results).toEqual([{
-      template: "raw/sbi-shinsei/{date}/{run-id}/{artifact}",
-      redaction_version: "v1",
-      fingerprint_key_version: "collector-r2-v1",
-    }]);
+    expect(sbiShinseiPolicies.results).toEqual([
+      {
+        template: "raw/sbi-shinsei/{date}/{run-id}/{artifact}",
+        redaction_version: "v1",
+        fingerprint_key_version: "collector-r2-v1",
+      },
+    ]);
     const mobileSuicaPolicies = await env.DB.prepare(`
       SELECT template, redaction_version, fingerprint_key_version
       FROM origin_template_policies
@@ -624,11 +729,13 @@ describe("0001 raw-evidence schema", () => {
       redaction_version: string;
       fingerprint_key_version: string;
     }>();
-    expect(mobileSuicaPolicies.results).toEqual([{
-      template: "raw/mobile-suica/{date}/{run-id}/{artifact}",
-      redaction_version: "v1",
-      fingerprint_key_version: "collector-r2-v1",
-    }]);
+    expect(mobileSuicaPolicies.results).toEqual([
+      {
+        template: "raw/mobile-suica/{date}/{run-id}/{artifact}",
+        redaction_version: "v1",
+        fingerprint_key_version: "collector-r2-v1",
+      },
+    ]);
     const globalPassPolicies = await env.DB.prepare(`
       SELECT template, redaction_version, fingerprint_key_version
       FROM origin_template_policies
@@ -638,11 +745,13 @@ describe("0001 raw-evidence schema", () => {
       redaction_version: string;
       fingerprint_key_version: string;
     }>();
-    expect(globalPassPolicies.results).toEqual([{
-      template: "raw/prestia-globalpass/{date}/{run-id}/{artifact}",
-      redaction_version: "v1",
-      fingerprint_key_version: "collector-r2-v1",
-    }]);
+    expect(globalPassPolicies.results).toEqual([
+      {
+        template: "raw/prestia-globalpass/{date}/{run-id}/{artifact}",
+        redaction_version: "v1",
+        fingerprint_key_version: "collector-r2-v1",
+      },
+    ]);
     const vPointPolicies = await env.DB.prepare(`
       SELECT template, redaction_version, fingerprint_key_version
       FROM origin_template_policies
@@ -681,22 +790,31 @@ describe("0001 raw-evidence schema", () => {
     const producerId = "producer-financial-view";
     const realSourceId = "source-financial-view";
     await env.DB.batch([
-      env.DB.prepare("INSERT INTO ingest_clients (id, display_name) VALUES (?, 'Financial view client')")
-        .bind(clientId),
-      env.DB.prepare("INSERT INTO producers (id, kind, display_name) VALUES (?, 'test', 'Financial view producer')")
-        .bind(producerId),
-      env.DB.prepare("INSERT INTO ingest_client_producers (ingest_client_id, producer_id) VALUES (?, ?)")
-        .bind(clientId, producerId),
-      env.DB.prepare("INSERT INTO sources (id, provider, display_name) VALUES (?, 'Fixture', 'Financial view source')")
-        .bind(realSourceId),
-      env.DB.prepare("INSERT INTO producer_sources (producer_id, source_id) VALUES (?, ?)")
-        .bind(producerId, realSourceId),
-      env.DB.prepare("INSERT INTO producer_sources (producer_id, source_id) VALUES (?, 'kogane-synthetic')")
-        .bind(producerId),
-      env.DB.prepare("INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id) VALUES (?, ?, ?)")
-        .bind(clientId, producerId, realSourceId),
-      env.DB.prepare("INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id) VALUES (?, ?, 'kogane-synthetic')")
-        .bind(clientId, producerId),
+      env.DB.prepare(
+        "INSERT INTO ingest_clients (id, display_name) VALUES (?, 'Financial view client')",
+      ).bind(clientId),
+      env.DB.prepare(
+        "INSERT INTO producers (id, kind, display_name) VALUES (?, 'test', 'Financial view producer')",
+      ).bind(producerId),
+      env.DB.prepare(
+        "INSERT INTO ingest_client_producers (ingest_client_id, producer_id) VALUES (?, ?)",
+      ).bind(clientId, producerId),
+      env.DB.prepare(
+        "INSERT INTO sources (id, provider, display_name) VALUES (?, 'Fixture', 'Financial view source')",
+      ).bind(realSourceId),
+      env.DB.prepare("INSERT INTO producer_sources (producer_id, source_id) VALUES (?, ?)").bind(
+        producerId,
+        realSourceId,
+      ),
+      env.DB.prepare(
+        "INSERT INTO producer_sources (producer_id, source_id) VALUES (?, 'kogane-synthetic')",
+      ).bind(producerId),
+      env.DB.prepare(
+        "INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id) VALUES (?, ?, ?)",
+      ).bind(clientId, producerId, realSourceId),
+      env.DB.prepare(
+        "INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id) VALUES (?, ?, 'kogane-synthetic')",
+      ).bind(clientId, producerId),
     ]);
     const addRun = async (sourceId: string, sessionId: string) => {
       const session = await env.DB.prepare(`
@@ -704,19 +822,25 @@ describe("0001 raw-evidence schema", () => {
           producer_id, first_recorded_by_client_id, external_id_namespace,
           external_session_id, first_recorded_at_ms
         ) VALUES (?, ?, 'test', ?, ?) RETURNING id
-      `).bind(producerId, clientId, sessionId, NOW).first<{ id: number }>();
+      `)
+        .bind(producerId, clientId, sessionId, NOW)
+        .first<{ id: number }>();
       return env.DB.prepare(`
         INSERT INTO fetch_runs (
           acquisition_session_id, producer_id, source_id,
           first_recorded_by_client_id, first_recorded_at_ms
         ) VALUES (?, ?, ?, ?, ?) RETURNING id
-      `).bind(session!.id, producerId, sourceId, clientId, NOW).first<{ id: number }>();
+      `)
+        .bind(session!.id, producerId, sourceId, clientId, NOW)
+        .first<{ id: number }>();
     };
     const realRun = await addRun(realSourceId, "financial-view-real");
     const syntheticRun = await addRun("kogane-synthetic", "financial-view-synthetic");
     const visible = await env.DB.prepare(`
       SELECT id FROM financial_fetch_runs WHERE id IN (?, ?) ORDER BY id
-    `).bind(realRun!.id, syntheticRun!.id).all<{ id: number }>();
+    `)
+      .bind(realRun!.id, syntheticRun!.id)
+      .all<{ id: number }>();
     expect(visible.results).toEqual([{ id: realRun!.id }]);
   });
 
@@ -736,12 +860,14 @@ describe("0001 raw-evidence schema", () => {
     await addArtifact(runId, scope, first);
     await addArtifact(runId, scope, second);
     const inventoryId = await addInventory(runId, scope, "af".repeat(32), [first]);
-    await expect(env.DB.prepare(`
+    await expect(
+      env.DB.prepare(`
       INSERT INTO run_inventory_items (
         inventory_id, fetch_run_id, artifact_key, sha256, descriptor_sha256
       ) VALUES (?, ?, ?, ?, ?)
-    `).bind(
-      inventoryId, runId, second.key, second.sha, second.descriptorSha,
-    ).run()).rejects.toThrow(/inventory_overflow/);
+    `)
+        .bind(inventoryId, runId, second.key, second.sha, second.descriptorSha)
+        .run(),
+    ).rejects.toThrow(/inventory_overflow/);
   });
 });

@@ -12,11 +12,11 @@
 インベントリからは次を候補とする。ただし、インベントリで商品未確認のものを、公開情報
 だけでユーザー保有カードと確定してはならない。
 
-| インベントリ上の候補 | 請求・利用明細の正本候補 | 特典残高の正本候補 | live 確認事項 |
-| --- | --- | --- | --- |
-| 三菱UFJカード | MDC | MDC のグローバルポイント | 券面ブランド、MDC マーク、カードごとのログイン ID |
-| JALカード（MUFG発行） | MDC | JMB（マイルはカード明細に表示されない） | Visa / Mastercard / TOKYU POINT ClubQ 等、発行会社と MDC マーク |
-| J-WESTカード（MUFG発行） | MDC | WESTER | Visa / Mastercard であること。JCB は MyJCB なので本記録の対象外 |
+| インベントリ上の候補     | 請求・利用明細の正本候補 | 特典残高の正本候補                      | live 確認事項                                                   |
+| ------------------------ | ------------------------ | --------------------------------------- | --------------------------------------------------------------- |
+| 三菱UFJカード            | MDC                      | MDC のグローバルポイント                | 券面ブランド、MDC マーク、カードごとのログイン ID               |
+| JALカード（MUFG発行）    | MDC                      | JMB（マイルはカード明細に表示されない） | Visa / Mastercard / TOKYU POINT ClubQ 等、発行会社と MDC マーク |
+| J-WESTカード（MUFG発行） | MDC                      | WESTER                                  | Visa / Mastercard であること。JCB は MyJCB なので本記録の対象外 |
 
 JAL と J-WEST は請求と特典の正本が異なる。MDC の請求データを JMB マイルや WESTER
 ポイントの完全な代替にしない。
@@ -96,14 +96,14 @@ MDC は預金残高ではなく、カードごとの請求・利用・利用可�
 [MDC 画面ガイド](https://www.cr.mufg.jp/mufgcard/contact/guide/detail_inquiry/index.html) と FAQ から
 確認できる範囲は次のとおりである。
 
-| データ | 粒度/状態 | 確認できる項目 | 制約 |
-| --- | --- | --- | --- |
-| 請求確定分 | 月次請求と利用明細行 | 支払日、請求額、支払口座表示、利用者、利用日、加盟店名、支払区分/回数、金額 | 口座表示・実額は収集しない。カード/利用者識別子は匿名ローカルキーへ変換 |
-| 未確定分 | 売上データ到着後の利用行 | 利用日、加盟店、支払区分、金額等 | 即時性はない。締日から請求確定まで表示に空白があり得る |
-| 返金/取消 | 確定明細上のマイナス行等 | 加盟店、調整額、ポイント調整 | 未確定段階の取消反映時期や原取引との機械的 link は未確認 |
-| 分割/リボ | 行と月次支払内訳 | 当月支払額、支払総額、手数料等 | PC とスマホで表示差がある。支払方法変更は write なので禁止 |
-| 利用可能額 | 現在値 | 利用可能枠/額 | 資産残高ではない。収集対象にする必要性を別途判断 |
-| グローバルポイント | 本会員単位の残高/付与 | 獲得・残高、対応カードでは交換導線 | 提携カードの JMB/WESTER を代替しない。交換は write |
+| データ             | 粒度/状態                | 確認できる項目                                                              | 制約                                                                    |
+| ------------------ | ------------------------ | --------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| 請求確定分         | 月次請求と利用明細行     | 支払日、請求額、支払口座表示、利用者、利用日、加盟店名、支払区分/回数、金額 | 口座表示・実額は収集しない。カード/利用者識別子は匿名ローカルキーへ変換 |
+| 未確定分           | 売上データ到着後の利用行 | 利用日、加盟店、支払区分、金額等                                            | 即時性はない。締日から請求確定まで表示に空白があり得る                  |
+| 返金/取消          | 確定明細上のマイナス行等 | 加盟店、調整額、ポイント調整                                                | 未確定段階の取消反映時期や原取引との機械的 link は未確認                |
+| 分割/リボ          | 行と月次支払内訳         | 当月支払額、支払総額、手数料等                                              | PC とスマホで表示差がある。支払方法変更は write なので禁止              |
+| 利用可能額         | 現在値                   | 利用可能枠/額                                                               | 資産残高ではない。収集対象にする必要性を別途判断                        |
+| グローバルポイント | 本会員単位の残高/付与    | 獲得・残高、対応カードでは交換導線                                          | 提携カードの JMB/WESTER を代替しない。交換は write                      |
 
 [明細反映 FAQ](https://faq.cr.mufg.jp/mufgcard/detail?id=236) は、加盟店から売上データを受信
 してから表示するため時期が加盟店ごとに異なるとする。毎月15日の締め後から概ね21日の請求
@@ -192,11 +192,11 @@ ID/パスワード入力補助と、カード別 URI/item の分離は技術的�
 
 2026-08-26 のログアウト状態の HEAD 観測では次を確認した。
 
-| 公開入口 | 観測 | 言えること / 言えないこと |
-| --- | --- | --- |
-| `www.cr.mufg.jp/mufgcard/` | `200`, `Via: ...cloudfront.net`, `X-Cache`, `X-Amz-Cf-*` | 公開ページは Amazon CloudFront 経由。認証域の構成は未確認 |
-| `faq.cr.mufg.jp/mufgcard/` | `200`, `Server: Apache` | FAQ の公開応答。WAF 不在の証拠ではない |
-| `www2.cr.mufg.jp/newsplus/` | `200`, `Server: nginx`, `PHPSESSID`, `X-PUBLIS-Status`, CloudFront | 動的 session/redirect がある。Cookie 値は保存しない |
+| 公開入口                    | 観測                                                               | 言えること / 言えないこと                                 |
+| --------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------- |
+| `www.cr.mufg.jp/mufgcard/`  | `200`, `Via: ...cloudfront.net`, `X-Cache`, `X-Amz-Cf-*`           | 公開ページは Amazon CloudFront 経由。認証域の構成は未確認 |
+| `faq.cr.mufg.jp/mufgcard/`  | `200`, `Server: Apache`                                            | FAQ の公開応答。WAF 不在の証拠ではない                    |
+| `www2.cr.mufg.jp/newsplus/` | `200`, `Server: nginx`, `PHPSESSID`, `X-PUBLIS-Status`, CloudFront | 動的 session/redirect がある。Cookie 値は保存しない       |
 
 この範囲では Cloudflare/Akamai 固有ヘッダーを観測しなかった。しかし CDN ヘッダーだけから WAF
 製品や bot detection の有無を断定できない。ログイン後の別 origin、JavaScript challenge、
@@ -289,14 +289,14 @@ denylist:
 
 ## 11. runtime 適性
 
-| Runtime | 適性 | 理由 |
-| --- | --- | --- |
-| Cloudflare Workers | 手動 export の受領・解析には高い。直接ログインには低い | Workers の [Fetch API](https://developers.cloudflare.com/workers/runtime-apis/fetch/) で HTTP ingestion は可能。通常 isolate は card別 browser session、追加確認、download UI の保持に向かない |
-| Cloudflare Browser Run | web UI 自動化候補 | [Browser Run](https://developers.cloudflare.com/browser-run/) は Playwright/Puppeteer/CDP と session reuse を提供する。ただし金融 session/PII を cloud browser に置く設計判断、card別ログイン、追加確認、read/write 混在が残る |
-| Cloudflare Containers | headless browser/解析 worker 候補 | [Containers](https://developers.cloudflare.com/containers/) は full filesystem と任意 runtime/OCI image を実行できる。秘密配送、persistent profile、地域/IP、sleep/再起動、監査を別設計する必要がある |
-| 一般 OCI container | 適する | Playwright、PDF/CSV parser、sanitizer を再現可能に固定できる。profile/credential は image に入れず、短命 secret mount と暗号化 volume を使う |
-| Kubernetes | 多数 source の運用基盤としては適するが、初期 MUFG 単体には過大 | CronJob、NetworkPolicy、read-only filesystem、Secret CSI、監査を使える。card別 job と egress allowlist は明確になるが運用コストが高い |
-| ユーザー管理端末 | 初回 live 検証と app 観測に最適 | 既存の正規 app/browser と人手追加確認を使え、秘密を外部 runtime へ搬出しない。完全無人化にはならない |
+| Runtime                | 適性                                                           | 理由                                                                                                                                                                                                                           |
+| ---------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Cloudflare Workers     | 手動 export の受領・解析には高い。直接ログインには低い         | Workers の [Fetch API](https://developers.cloudflare.com/workers/runtime-apis/fetch/) で HTTP ingestion は可能。通常 isolate は card別 browser session、追加確認、download UI の保持に向かない                                 |
+| Cloudflare Browser Run | web UI 自動化候補                                              | [Browser Run](https://developers.cloudflare.com/browser-run/) は Playwright/Puppeteer/CDP と session reuse を提供する。ただし金融 session/PII を cloud browser に置く設計判断、card別ログイン、追加確認、read/write 混在が残る |
+| Cloudflare Containers  | headless browser/解析 worker 候補                              | [Containers](https://developers.cloudflare.com/containers/) は full filesystem と任意 runtime/OCI image を実行できる。秘密配送、persistent profile、地域/IP、sleep/再起動、監査を別設計する必要がある                          |
+| 一般 OCI container     | 適する                                                         | Playwright、PDF/CSV parser、sanitizer を再現可能に固定できる。profile/credential は image に入れず、短命 secret mount と暗号化 volume を使う                                                                                   |
+| Kubernetes             | 多数 source の運用基盤としては適するが、初期 MUFG 単体には過大 | CronJob、NetworkPolicy、read-only filesystem、Secret CSI、監査を使える。card別 job と egress allowlist は明確になるが運用コストが高い                                                                                          |
+| ユーザー管理端末       | 初回 live 検証と app 観測に最適                                | 既存の正規 app/browser と人手追加確認を使え、秘密を外部 runtime へ搬出しない。完全無人化にはならない                                                                                                                           |
 
 推奨構成は、当初はユーザー端末から月次 CSV/PDF を手動取得し、Workers/OCI の read-only parser へ
 渡す。web transport が安全に分離できると確認できた場合だけ、ユーザー端末または隔離 OCI/
@@ -313,12 +313,12 @@ PR #5 共通定義のみを用いる。
 - **D**: full browser/device automation が必要
 - **E**: manual capture が安全な既定
 
-| 選択肢 | Level | Cost (1-5) | 判定 |
-| --- | --- | ---: | --- |
-| PC から月次 CSV/PDF を手動 export、parser へ投入 | E | 1-2 | 公式で提供され、最初の実装に推奨。card別ログインとファイル redaction で 2 になり得る |
-| MDC web の card別 read-only browser automation | D | 4 | ID/追加確認、複数カード、状態遷移、write 導線混在、session/WAF 未確認。CSV 取得は可能性が高い |
-| 観測済み read endpoint の bootstrap + replay | C 候補 | 4-5 | endpoint/session が未確認で B とは評価できない。read/write scope と credential 更新の分離確認が前提 |
-| 公式アプリ UI/device automation | D | 5 | 家族/一部カード対象外、端末生体/パスコード、write 導線、transport/attestation 未確認。web より先に選ばない |
+| 選択肢                                           | Level  | Cost (1-5) | 判定                                                                                                       |
+| ------------------------------------------------ | ------ | ---------: | ---------------------------------------------------------------------------------------------------------- |
+| PC から月次 CSV/PDF を手動 export、parser へ投入 | E      |        1-2 | 公式で提供され、最初の実装に推奨。card別ログインとファイル redaction で 2 になり得る                       |
+| MDC web の card別 read-only browser automation   | D      |          4 | ID/追加確認、複数カード、状態遷移、write 導線混在、session/WAF 未確認。CSV 取得は可能性が高い              |
+| 観測済み read endpoint の bootstrap + replay     | C 候補 |        4-5 | endpoint/session が未確認で B とは評価できない。read/write scope と credential 更新の分離確認が前提        |
+| 公式アプリ UI/device automation                  | D      |          5 | 家族/一部カード対象外、端末生体/パスコード、write 導線、transport/attestation 未確認。web より先に選ばない |
 
 **総合評価: D、cost 4。安全な初期経路は E、cost 1-2。** documented personal API は確認できず、
 安定した read-only internal API もまだ観測していないため A/B にはしない。将来の静的解析・動的観測

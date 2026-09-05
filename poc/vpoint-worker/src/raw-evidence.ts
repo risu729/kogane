@@ -26,11 +26,13 @@ export async function backfillStoredRuns(
 }
 
 async function importerRequest(importer: Fetcher, path: string, body: unknown): Promise<unknown> {
-  const response = await importer.fetch(new Request(`https://collector-r2-importer.internal${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  }));
+  const response = await importer.fetch(
+    new Request(`https://collector-r2-importer.internal${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
   const responseText = await boundedText(response, MAX_RESPONSE_BYTES);
   let parsed: unknown;
   try {
@@ -42,49 +44,85 @@ async function importerRequest(importer: Fetcher, path: string, body: unknown): 
   return parsed;
 }
 
-function validateImportResult(value: unknown, expectedManifestKey: string): RawEvidenceImportResult {
+function validateImportResult(
+  value: unknown,
+  expectedManifestKey: string,
+): RawEvidenceImportResult {
   const input = exactRecord(value, [
-    "source", "manifestKey", "status", "centralRunId", "artifactCount", "sealed", "allObjectsReused",
+    "source",
+    "manifestKey",
+    "status",
+    "centralRunId",
+    "artifactCount",
+    "sealed",
+    "allObjectsReused",
   ]);
-  if (input.source !== "v-point" || input.manifestKey !== expectedManifestKey ||
-      input.status !== "sealed" ||
-      !positiveInteger(input.centralRunId) || !positiveInteger(input.artifactCount) ||
-      input.sealed !== true || typeof input.allObjectsReused !== "boolean") {
+  if (
+    input.source !== "v-point" ||
+    input.manifestKey !== expectedManifestKey ||
+    input.status !== "sealed" ||
+    !positiveInteger(input.centralRunId) ||
+    !positiveInteger(input.artifactCount) ||
+    input.sealed !== true ||
+    typeof input.allObjectsReused !== "boolean"
+  ) {
     throw new Error("raw_evidence_importer_invalid_response");
   }
   return input as unknown as RawEvidenceImportResult;
 }
 
 function validateBackfillResult(value: unknown): RawEvidenceBackfillPageResult {
-  const input = exactRecord(value, [
-    "source", "scannedObjectCount", "importedManifestCount", "skippedManifestCount",
-    "deferredManifestCount", "failedManifestCount", "nextCursor", "truncated",
-    "failureCode", "result",
-  ], ["failureCode", "result"]);
-  if (input.source !== "v-point" || !zeroOrOne(input.scannedObjectCount) ||
-      !zeroOrOne(input.importedManifestCount) || !zeroOrOne(input.skippedManifestCount) ||
-      !zeroOrOne(input.deferredManifestCount) || !zeroOrOne(input.failedManifestCount) ||
-      !(input.nextCursor === null || safeOpaque(input.nextCursor)) || typeof input.truncated !== "boolean" ||
-      !(input.failureCode === undefined || safeCode(input.failureCode))) {
+  const input = exactRecord(
+    value,
+    [
+      "source",
+      "scannedObjectCount",
+      "importedManifestCount",
+      "skippedManifestCount",
+      "deferredManifestCount",
+      "failedManifestCount",
+      "nextCursor",
+      "truncated",
+      "failureCode",
+      "result",
+    ],
+    ["failureCode", "result"],
+  );
+  if (
+    input.source !== "v-point" ||
+    !zeroOrOne(input.scannedObjectCount) ||
+    !zeroOrOne(input.importedManifestCount) ||
+    !zeroOrOne(input.skippedManifestCount) ||
+    !zeroOrOne(input.deferredManifestCount) ||
+    !zeroOrOne(input.failedManifestCount) ||
+    !(input.nextCursor === null || safeOpaque(input.nextCursor)) ||
+    typeof input.truncated !== "boolean" ||
+    !(input.failureCode === undefined || safeCode(input.failureCode))
+  ) {
     throw new Error("raw_evidence_importer_invalid_response");
   }
-  const result = input.result === undefined
-    ? undefined
-    : validateBackfillImportResult(input.result);
-  const outcomeCount = input.importedManifestCount + input.skippedManifestCount +
-    input.deferredManifestCount + input.failedManifestCount;
+  const result =
+    input.result === undefined ? undefined : validateBackfillImportResult(input.result);
+  const outcomeCount =
+    input.importedManifestCount +
+    input.skippedManifestCount +
+    input.deferredManifestCount +
+    input.failedManifestCount;
   const resumedOutcome = input.scannedObjectCount === 0 && result !== undefined ? 1 : 0;
-  const resultMatchesOutcome = result === undefined
-    ? input.importedManifestCount === 0 && input.deferredManifestCount === 0
-    : result.status === "sealed"
-      ? input.importedManifestCount === 1 && input.deferredManifestCount === 0
-      : input.importedManifestCount === 0 && input.deferredManifestCount === 1;
-  if (outcomeCount !== input.scannedObjectCount + resumedOutcome ||
-      !resultMatchesOutcome ||
-      (input.failedManifestCount === 1) !== (input.failureCode !== undefined) ||
-      (input.failedManifestCount === 1 && result !== undefined) ||
-      input.truncated !== (input.nextCursor !== null) ||
-      (input.deferredManifestCount === 1 && !input.truncated)) {
+  const resultMatchesOutcome =
+    result === undefined
+      ? input.importedManifestCount === 0 && input.deferredManifestCount === 0
+      : result.status === "sealed"
+        ? input.importedManifestCount === 1 && input.deferredManifestCount === 0
+        : input.importedManifestCount === 0 && input.deferredManifestCount === 1;
+  if (
+    outcomeCount !== input.scannedObjectCount + resumedOutcome ||
+    !resultMatchesOutcome ||
+    (input.failedManifestCount === 1) !== (input.failureCode !== undefined) ||
+    (input.failedManifestCount === 1 && result !== undefined) ||
+    input.truncated !== (input.nextCursor !== null) ||
+    (input.deferredManifestCount === 1 && !input.truncated)
+  ) {
     throw new Error("raw_evidence_importer_invalid_response");
   }
   return {
@@ -108,12 +146,22 @@ function validateBackfillImportResult(
   if (!isRecord(value)) throw new Error("raw_evidence_importer_invalid_response");
   if (value.status === "sealed") return validateImportResult(value, manifestKey);
   const input = exactRecord(value, [
-    "source", "manifestKey", "status", "reason", "artifactCount", "nextOffset",
+    "source",
+    "manifestKey",
+    "status",
+    "reason",
+    "artifactCount",
+    "nextOffset",
   ]);
-  if (input.source !== "v-point" || input.manifestKey !== manifestKey ||
-      input.status !== "deferred" || input.reason !== "worker_invocation_limit" ||
-      !positiveInteger(input.artifactCount) || !positiveInteger(input.nextOffset) ||
-      input.nextOffset >= input.artifactCount) {
+  if (
+    input.source !== "v-point" ||
+    input.manifestKey !== manifestKey ||
+    input.status !== "deferred" ||
+    input.reason !== "worker_invocation_limit" ||
+    !positiveInteger(input.artifactCount) ||
+    !positiveInteger(input.nextOffset) ||
+    input.nextOffset >= input.artifactCount
+  ) {
     throw new Error("raw_evidence_importer_invalid_response");
   }
   return input as unknown as RawEvidenceDeferredResult;
@@ -133,9 +181,11 @@ function exactRecord(
 ): Record<string, unknown> {
   if (!isRecord(value)) throw new Error("raw_evidence_importer_invalid_response");
   const keys = Object.keys(value);
-  if (keys.some((key) => !allowed.includes(key)) || allowed.some(
-    (key) => !optional.includes(key) && !Object.hasOwn(value, key),
-  )) throw new Error("raw_evidence_importer_invalid_response");
+  if (
+    keys.some((key) => !allowed.includes(key)) ||
+    allowed.some((key) => !optional.includes(key) && !Object.hasOwn(value, key))
+  )
+    throw new Error("raw_evidence_importer_invalid_response");
   return value;
 }
 
@@ -148,8 +198,12 @@ function zeroOrOne(value: unknown): value is 0 | 1 {
 }
 
 function safeOpaque(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 12_000 &&
-    !/[\x00-\x20\x7f]/u.test(value);
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 12_000 &&
+    !/[\x00-\x20\x7f]/u.test(value)
+  );
 }
 
 function safeCode(value: unknown): value is string {
@@ -157,8 +211,10 @@ function safeCode(value: unknown): value is string {
 }
 
 function safeManifestKey(value: unknown): value is string {
-  return typeof value === "string" &&
-    /^raw\/v-point\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f-]{36}\/manifest\.json$/u.test(value);
+  return (
+    typeof value === "string" &&
+    /^raw\/v-point\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f-]{36}\/manifest\.json$/u.test(value)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -117,13 +117,7 @@ export function extractAvailableMonths(response: unknown): string[] {
 }
 
 function topTransactions(response: unknown): unknown[] {
-  return arrayAt(
-    response,
-    "body",
-    "content",
-    "WebMeisaiTopDisplayServiceBean",
-    "meisaiList",
-  );
+  return arrayAt(response, "body", "content", "WebMeisaiTopDisplayServiceBean", "meisaiList");
 }
 
 function customizedTransactions(response: unknown): unknown[] {
@@ -204,12 +198,7 @@ export class VpassClient {
     const evidence = await this.#apiPost(CARD_LIST_PATH, {
       displayDropdownList: "enable",
     });
-    const bean = objectAt(
-      evidence.json,
-      "body",
-      "content",
-      "DropdownListInitDisplayServiceBean",
-    );
+    const bean = objectAt(evidence.json, "body", "content", "DropdownListInitDisplayServiceBean");
     const cards = pairList(bean?.["multiCardInfoList"]);
     if (cards.length === 0) throw new Error("Vpass returned no cards");
     return { cards, evidence };
@@ -243,10 +232,7 @@ export class VpassClient {
     throw new Error("Unknown Vpass statement response shape");
   }
 
-  async #fetchWebMeisaiTopPages(
-    yyyymm: string,
-    first: RawJsonResponse,
-  ): Promise<StatementMonth> {
+  async #fetchWebMeisaiTopPages(yyyymm: string, first: RawJsonResponse): Promise<StatementMonth> {
     const pages: StatementPage[] = [];
     let current = first;
     const seenCursors = new Set<string>();
@@ -261,12 +247,7 @@ export class VpassClient {
         transactionCount: transactions.length,
       });
 
-      const bean = objectAt(
-        current.json,
-        "body",
-        "content",
-        "WebMeisaiTopDisplayServiceBean",
-      );
+      const bean = objectAt(current.json, "body", "content", "WebMeisaiTopDisplayServiceBean");
       const detail = objectAt(bean, "webMeisaiTopK3Vo");
       const allCount = toInteger(detail?.["allCnt"]);
       const nextPageRow = toInteger(detail?.["nextPageRow"]);
@@ -298,10 +279,7 @@ export class VpassClient {
     };
   }
 
-  async #fetchCustomizedPages(
-    yyyymm: string,
-    first: RawJsonResponse,
-  ): Promise<StatementMonth> {
+  async #fetchCustomizedPages(yyyymm: string, first: RawJsonResponse): Promise<StatementMonth> {
     const firstTransactions = customizedTransactions(first.json);
     const pages: StatementPage[] = [
       {
@@ -311,12 +289,7 @@ export class VpassClient {
         transactionCount: firstTransactions.length,
       },
     ];
-    const bean = objectAt(
-      first.json,
-      "body",
-      "content",
-      "CustomizedMeisaiAnsDisplayServiceBean",
-    );
+    const bean = objectAt(first.json, "body", "content", "CustomizedMeisaiAnsDisplayServiceBean");
     const total = toInteger(bean?.["total"]) ?? firstTransactions.length;
     const pageSize = Math.max(1, toInteger(bean?.["pageSize"]) ?? 100);
     let start = firstTransactions.length;
@@ -381,10 +354,7 @@ export class VpassClient {
     return { rawBytes, rawText, json: parsed };
   }
 
-  async #expectOk(
-    response: Awaited<ReturnType<Impit["fetch"]>>,
-    label: string,
-  ): Promise<void> {
+  async #expectOk(response: Awaited<ReturnType<Impit["fetch"]>>, label: string): Promise<void> {
     if (response.status === 401 || response.status === 403) {
       throw new Error(`${label} was rejected (${response.status}); stopping without retry`);
     }

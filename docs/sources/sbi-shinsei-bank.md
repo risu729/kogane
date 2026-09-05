@@ -67,14 +67,14 @@ product/statement screens**, and **unproven for cloud-side login**.
 
 ### Current blocker matrix
 
-| Question | Evidence as of 2026-08-31 | Decision impact |
-| --- | --- | --- |
-| Is Akamai in front of PowerDirect? | Yes. The login hostname CNAMEs through `edgekey.net` to `akamaiedge.net`. | Expect edge policy and possible fingerprint/IP sensitivity. |
-| Is Akamai browser telemetry proved? | Yes. The public login loads an Akamai sensor path under `/akam/13/...`. The exact Akamai product/rule and cookie behavior are not yet identified. | Browser telemetry exists, but do not equate it with a proved rejection decision. |
-| Is Turnstile present? | Not observed. Successful normal-Chrome and Kuebiko logins showed no Turnstile step, asset or challenge. | Do not carry the GLOBAL PASS Turnstile architecture into this collector unless another environment actually receives a challenge. |
+| Question                                                            | Evidence as of 2026-08-31                                                                                                                                                             | Decision impact                                                                                                                                                                        |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Is Akamai in front of PowerDirect?                                  | Yes. The login hostname CNAMEs through `edgekey.net` to `akamaiedge.net`.                                                                                                             | Expect edge policy and possible fingerprint/IP sensitivity.                                                                                                                            |
+| Is Akamai browser telemetry proved?                                 | Yes. The public login loads an Akamai sensor path under `/akam/13/...`. The exact Akamai product/rule and cookie behavior are not yet identified.                                     | Browser telemetry exists, but do not equate it with a proved rejection decision.                                                                                                       |
+| Is Turnstile present?                                               | Not observed. Successful normal-Chrome and Kuebiko logins showed no Turnstile step, asset or challenge.                                                                               | Do not carry the GLOBAL PASS Turnstile architecture into this collector unless another environment actually receives a challenge.                                                      |
 | Is registered-device approval required for read-only browser login? | No in two successful runs: ordinary Chrome and the dedicated Kuebiko profile both reached read adapters with branch/account number plus PowerDirect password and without OTP or FIDO. | Unlike SMBC Safety Pass, registered-device approval is not a blocker to the observed read-only Web login. Risk-triggered behavior on other networks/headless clients remains untested. |
-| Can a Worker perform the login today? | Not proved. Accepted Chrome topology is captured, but plain Windows/WSL HTTP timed out and CAFIS needs browser surfaces. | Validate the one-context Chrome client, then move that boundary to Browser Run or a Container before attempting to remove the browser. |
-| Is the app an easier path? | No. Current app login is biometric/FIDO, one registered phone per account, and device replacement/reinstall repeats identity verification. | Keep app static analysis separate; prefer Web for collection. |
+| Can a Worker perform the login today?                               | Not proved. Accepted Chrome topology is captured, but plain Windows/WSL HTTP timed out and CAFIS needs browser surfaces.                                                              | Validate the one-context Chrome client, then move that boundary to Browser Run or a Container before attempting to remove the browser.                                                 |
+| Is the app an easier path?                                          | No. Current app login is biometric/FIDO, one registered phone per account, and device replacement/reinstall repeats identity verification.                                            | Keep app static analysis separate; prefer Web for collection.                                                                                                                          |
 
 ## Official surfaces and data coverage
 
@@ -91,15 +91,15 @@ The bank's [service matrix](https://www.sbishinseibank.co.jp/service/newpd/servi
 and [operation-guide index](https://www.sbishinseibank.co.jp/service/newpd/guide/)
 establish the following read coverage:
 
-| Data family | Official read surface | Initial collection interpretation |
-| --- | --- | --- |
-| 円普通預金 | Top-page/account balance; account activity | Current balance plus latest 10 or a selected period; desktop CSV exists. |
-| SBIハイパー預金 | Dedicated top-page balance and account-activity link | Treat as a separate balance and history stream. Do not merge it into 円普通預金. |
-| 2週間満期預金 | 円預金保有商品照会 / deposit menu | Enumerate holdings from product detail; no official per-product CSV was found. |
-| パワーフレックス円定期 / パワーダイレクト円定期 / other held yen deposits | 円預金保有商品照会 | Enumerate each holding and retain product-detail evidence; monthly report is the durable fallback. |
-| 外貨普通預金 | Account balance/list and per-currency activity | Preserve native currency and the bank's displayed yen equivalent separately; desktop CSV exists. |
-| 2週間満期外貨預金 / 外貨定期 / other held foreign deposits | 外貨預金保有商品照会 | Enumerate holdings from product list/detail; no official per-product CSV was found. |
-| Legacy/structured deposits still held | 仕組預金保有商品照会 | Read held products only; do not assume a currently sold product catalog is the account inventory. |
+| Data family                                                               | Official read surface                                | Initial collection interpretation                                                                  |
+| ------------------------------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 円普通預金                                                                | Top-page/account balance; account activity           | Current balance plus latest 10 or a selected period; desktop CSV exists.                           |
+| SBIハイパー預金                                                           | Dedicated top-page balance and account-activity link | Treat as a separate balance and history stream. Do not merge it into 円普通預金.                   |
+| 2週間満期預金                                                             | 円預金保有商品照会 / deposit menu                    | Enumerate holdings from product detail; no official per-product CSV was found.                     |
+| パワーフレックス円定期 / パワーダイレクト円定期 / other held yen deposits | 円預金保有商品照会                                   | Enumerate each holding and retain product-detail evidence; monthly report is the durable fallback. |
+| 外貨普通預金                                                              | Account balance/list and per-currency activity       | Preserve native currency and the bank's displayed yen equivalent separately; desktop CSV exists.   |
+| 2週間満期外貨預金 / 外貨定期 / other held foreign deposits                | 外貨預金保有商品照会                                 | Enumerate holdings from product list/detail; no official per-product CSV was found.                |
+| Legacy/structured deposits still held                                     | 仕組預金保有商品照会                                 | Read held products only; do not assume a currently sold product catalog is the account inventory.  |
 
 The [account-information guide](https://www.sbishinseibank.co.jp/service/newpd/guide/koza.html)
 says the top page shows balances and the balance list leads to native-currency
@@ -438,24 +438,24 @@ HTML tables.
 
 The authenticated Kuebiko run observed HTTP 200 for the following read families:
 
-| Adapter family | Observed procedures |
-| --- | --- |
-| `IFCM` | `securityConnect`, `validateToken`, `getExchangeRate`, `getApplicationInformationList` |
-| `AIAI` | `getInboxList` |
-| `AICM` | `getUiuxFlag` |
-| `IFTP` | `getAccountsBalanceAndActivity`, `getBalanceSummaryAndStage` |
-| `IFEM` | `getEmailAddress` |
-| `AIYD` | `getYenDepositAccount` |
+| Adapter family | Observed procedures                                                                    |
+| -------------- | -------------------------------------------------------------------------------------- |
+| `IFCM`         | `securityConnect`, `validateToken`, `getExchangeRate`, `getApplicationInformationList` |
+| `AIAI`         | `getInboxList`                                                                         |
+| `AICM`         | `getUiuxFlag`                                                                          |
+| `IFTP`         | `getAccountsBalanceAndActivity`, `getBalanceSummaryAndStage`                           |
+| `IFEM`         | `getEmailAddress`                                                                      |
+| `AIYD`         | `getYenDepositAccount`                                                                 |
 
 Public JavaScript names additional read-looking procedures. They remain
 allowlist candidates until authenticated validation:
 
-| Adapter | Observed read-looking procedures |
-| --- | --- |
-| `IFCM_CommonAdapter` | `getAccountInformationListDisplay`, `getProductDescription` |
-| `IFAI_AccountAdapter` | `getAccountInformationOthersDisplay`, `getCasaAccountActivitySpecificPeriod` |
-| `AIAI_AccountInfomationAdapter` | `getAccountList` |
-| `AIYD_YenDepositAdapter` | `getYenProductDetails` |
+| Adapter                         | Observed read-looking procedures                                             |
+| ------------------------------- | ---------------------------------------------------------------------------- |
+| `IFCM_CommonAdapter`            | `getAccountInformationListDisplay`, `getProductDescription`                  |
+| `IFAI_AccountAdapter`           | `getAccountInformationOthersDisplay`, `getCasaAccountActivitySpecificPeriod` |
+| `AIAI_AccountInfomationAdapter` | `getAccountList`                                                             |
+| `AIYD_YenDepositAdapter`        | `getYenProductDetails`                                                       |
 
 Only sanitized field topology crossed into fixtures. The top read contains
 `savingsDetails` and `activityDetails`; the yen-deposit read returns separate
@@ -550,17 +550,20 @@ depending on the bank controller's unbound global `event`. In a real page, the
 minimum safe bridge is conceptually:
 
 ```js
-await page.evaluate(() => new Promise((resolve, reject) => {
-  CAFISBrainRiskCollector.getDeviceTokenInfoV3((result) => {
-    const value = result?.deviceTokenInfo;
-    if (typeof value !== "string" || value.length === 0) {
-      reject(new Error("CAFIS device token was not generated"));
-      return;
-    }
-    document.querySelector("#dtokeninfo").value = value;
-    resolve(true); // never return the value across the browser boundary
-  });
-}));
+await page.evaluate(
+  () =>
+    new Promise((resolve, reject) => {
+      CAFISBrainRiskCollector.getDeviceTokenInfoV3((result) => {
+        const value = result?.deviceTokenInfo;
+        if (typeof value !== "string" || value.length === 0) {
+          reject(new Error("CAFIS device token was not generated"));
+          return;
+        }
+        document.querySelector("#dtokeninfo").value = value;
+        resolve(true); // never return the value across the browser boundary
+      });
+    }),
+);
 ```
 
 Production automation should first wait briefly for the bank controller to
@@ -596,13 +599,13 @@ probe is used in the `CBRU` version-3 path, but it explains why the opaque
 
 #### Runtime fit for generating `jsc`
 
-| Runtime | Can run the public SDK faithfully? | Implementation decision |
-| --- | --- | --- |
-| Plain Cloudflare Worker isolate | No. It has `fetch`, but not a page DOM, Chrome canvas/WebGL/audio/font/plugin surfaces or the browser worker/storage environment expected by this collector. | Do not port the minified collector or synthesize its opaque encrypted `content`. A direct POST to diproxy is not an equivalent client. |
-| Bare Node.js or DOM shim | No for production. A shim can expose the three wrapper methods but produces synthetic/missing fingerprint inputs. | Use only for static wrapper inspection, never for authentication. |
-| Cloudflare Browser Run | Yes at the API level: it supplies a managed Chromium controlled from a Worker through Puppeteer/Playwright. | Bounded trials timed out before CAFIS became ready and before any credential POST, so it is no longer the active PoC runtime. |
-| Cloudflare Container + Chrome | Yes, with a full browser and more control over profile, flags and proxy/egress. | Current deployed PoC runtime. Direct APAC egress returned login 403; the same image completed a full live run through the allowlisted TAMIA/VPC relay path. |
-| OCI/Kubernetes + Chrome/Playwright | Yes, with the most control over the browser build, persistent volume and egress. | Operational fallback, not needed until both direct fetch and Browser Run have a bounded result. |
+| Runtime                            | Can run the public SDK faithfully?                                                                                                                           | Implementation decision                                                                                                                                     |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plain Cloudflare Worker isolate    | No. It has `fetch`, but not a page DOM, Chrome canvas/WebGL/audio/font/plugin surfaces or the browser worker/storage environment expected by this collector. | Do not port the minified collector or synthesize its opaque encrypted `content`. A direct POST to diproxy is not an equivalent client.                      |
+| Bare Node.js or DOM shim           | No for production. A shim can expose the three wrapper methods but produces synthetic/missing fingerprint inputs.                                            | Use only for static wrapper inspection, never for authentication.                                                                                           |
+| Cloudflare Browser Run             | Yes at the API level: it supplies a managed Chromium controlled from a Worker through Puppeteer/Playwright.                                                  | Bounded trials timed out before CAFIS became ready and before any credential POST, so it is no longer the active PoC runtime.                               |
+| Cloudflare Container + Chrome      | Yes, with a full browser and more control over profile, flags and proxy/egress.                                                                              | Current deployed PoC runtime. Direct APAC egress returned login 403; the same image completed a full live run through the allowlisted TAMIA/VPC relay path. |
+| OCI/Kubernetes + Chrome/Playwright | Yes, with the most control over the browser build, persistent volume and egress.                                                                             | Operational fallback, not needed until both direct fetch and Browser Run have a bounded result.                                                             |
 
 Cloudflare officially exposes Browser Run as a Chromium browser binding with
 [Puppeteer](https://developers.cloudflare.com/browser-run/puppeteer/) or
@@ -720,12 +723,12 @@ client for the 2026 Web adapter or app/FIDO stack. A GitHub code search for the
 current `sbishinseibank.co.jp/SFC` host found only this assessment. The useful
 public historical/CSV evidence is:
 
-| Project | Last activity observed | Implementation confirmed in code | Reuse value |
-| --- | --- | --- | --- |
-| [`rlan/beancount-multitool`](https://github.com/rlan/beancount-multitool/blob/d135cdb2775421d587656b4024e3a5f33841dbd7/src/beancount_multitool/ShinseiBank.py) | 2025-10 | Reads a user-supplied official CSV with Japanese or English headers and parses date, description, debit, credit and balance. It does not log in. | High as a CSV-shape hint; copy no schema assumption until a 2026 export is checked. |
-| [`t-bucchi/accagg`](https://github.com/t-bucchi/accagg/blob/3bb5786a84387795ffaa1bdd4f0ab7d22bb72708/accagg/bank/shinseibank.py) | 2021-03 | Selenium/Firefox browser automation, DOM table parsing and pagination against the pre-brand URL; requests a two-year period. | Architectural precedent only. Selectors, URL and authentication are stale. |
-| [`knshiro/shinseibank-ruby`](https://github.com/knshiro/shinseibank-ruby/blob/45099a9262a78aa56df87795e116756e86015c99/lib/shinseibank.rb) | 2017-07 | Direct form POSTs to the old `MfcISAPICommand` application, parses JavaScript variables, keeps a server session ID, requests accounts, downloads a tab-separated statement and reads transfer statuses. Login requires the retired security-code card model. | Strong evidence that an old internal API existed; not a present client. Do not revive transaction methods. |
-| [`apparition47` userscript](https://gist.github.com/apparition47/e8671954c614385b78ed9e8b2cde98e6) | 2018-06 | Browser userscript that fills the old login/security-card form. | Obsolete and unsafe for current credential handling. |
+| Project                                                                                                                                                        | Last activity observed | Implementation confirmed in code                                                                                                                                                                                                                             | Reuse value                                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| [`rlan/beancount-multitool`](https://github.com/rlan/beancount-multitool/blob/d135cdb2775421d587656b4024e3a5f33841dbd7/src/beancount_multitool/ShinseiBank.py) | 2025-10                | Reads a user-supplied official CSV with Japanese or English headers and parses date, description, debit, credit and balance. It does not log in.                                                                                                             | High as a CSV-shape hint; copy no schema assumption until a 2026 export is checked.                        |
+| [`t-bucchi/accagg`](https://github.com/t-bucchi/accagg/blob/3bb5786a84387795ffaa1bdd4f0ab7d22bb72708/accagg/bank/shinseibank.py)                               | 2021-03                | Selenium/Firefox browser automation, DOM table parsing and pagination against the pre-brand URL; requests a two-year period.                                                                                                                                 | Architectural precedent only. Selectors, URL and authentication are stale.                                 |
+| [`knshiro/shinseibank-ruby`](https://github.com/knshiro/shinseibank-ruby/blob/45099a9262a78aa56df87795e116756e86015c99/lib/shinseibank.rb)                     | 2017-07                | Direct form POSTs to the old `MfcISAPICommand` application, parses JavaScript variables, keeps a server session ID, requests accounts, downloads a tab-separated statement and reads transfer statuses. Login requires the retired security-code card model. | Strong evidence that an old internal API existed; not a present client. Do not revive transaction methods. |
+| [`apparition47` userscript](https://gist.github.com/apparition47/e8671954c614385b78ed9e8b2cde98e6)                                                             | 2018-06                | Browser userscript that fills the old login/security-card form.                                                                                                                                                                                              | Obsolete and unsafe for current credential handling.                                                       |
 
 The old Ruby client is especially important for classification: it is neither
 an official Open API client nor simple HTML scraping. It called the legacy
@@ -736,15 +739,15 @@ used for validation.
 
 ## Automation and runtime fit
 
-| Route/runtime | Fit | Cost (1 low - 5 high) | Decision |
-| --- | --- | ---: | --- |
-| Visible local/physical Chrome + official CSV/PDF | High | 2 | Best initial evidence path. User logs in; collector performs only verified read/download navigation. |
-| Persistent local browser automation | Medium-high | 3 | Promising if read-only login and downloads repeat after restart; requires safe secret delivery and session tests. |
-| Official PowerDirect API as a contracted provider | Potentially high | 5 | Most supportable long-term route, but availability/fields/contract are unknown and onboarding is disproportionate for the first personal prototype. |
-| Cloudflare Workers isolate | Low for login | 3 | The JSON reads fit Workers after bootstrap, but direct-fetch login returned 403. Keep the accepted login/browser state in Chrome; use the Worker for scheduling, relay policy, validation and storage. |
-| Cloudflare Containers with Chrome + scoped TAMIA/VPC relay | High for current PoC | 4 | Deployed Worker/Container/R2/Cron completed one live run with four raw and one normalized artifact. Direct APAC Container egress still returned login 403. |
-| OCI VM or Kubernetes with Chromium + encrypted persistent volume | Medium-high | 4 | Best cloud control over browser, storage and egress, but operationally heavier. A stable IP does not guarantee Akamai acceptance. |
-| Reverse-engineered Android app API | Low | 5 | FIDO/device binding, app attestation/pinning risk and rapid drift. Static inventory only; not the recommended collector. |
+| Route/runtime                                                    | Fit                  | Cost (1 low - 5 high) | Decision                                                                                                                                                                                               |
+| ---------------------------------------------------------------- | -------------------- | --------------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Visible local/physical Chrome + official CSV/PDF                 | High                 |                     2 | Best initial evidence path. User logs in; collector performs only verified read/download navigation.                                                                                                   |
+| Persistent local browser automation                              | Medium-high          |                     3 | Promising if read-only login and downloads repeat after restart; requires safe secret delivery and session tests.                                                                                      |
+| Official PowerDirect API as a contracted provider                | Potentially high     |                     5 | Most supportable long-term route, but availability/fields/contract are unknown and onboarding is disproportionate for the first personal prototype.                                                    |
+| Cloudflare Workers isolate                                       | Low for login        |                     3 | The JSON reads fit Workers after bootstrap, but direct-fetch login returned 403. Keep the accepted login/browser state in Chrome; use the Worker for scheduling, relay policy, validation and storage. |
+| Cloudflare Containers with Chrome + scoped TAMIA/VPC relay       | High for current PoC |                     4 | Deployed Worker/Container/R2/Cron completed one live run with four raw and one normalized artifact. Direct APAC Container egress still returned login 403.                                             |
+| OCI VM or Kubernetes with Chromium + encrypted persistent volume | Medium-high          |                     4 | Best cloud control over browser, storage and egress, but operationally heavier. A stable IP does not guarantee Akamai acceptance.                                                                      |
+| Reverse-engineered Android app API                               | Low                  |                     5 | FIDO/device binding, app attestation/pinning risk and rapid drift. Static inventory only; not the recommended collector.                                                                               |
 
 The accepted unattended architecture keeps the official form/login path and
 session bootstrap inside Container Chrome, sends only the five exact HTTPS host
@@ -805,9 +808,9 @@ CSV/PDF validation and session lifetime remain open.
    publish the reproducible procedure and sanitized findings here. Do not hook
    biometrics, bypass device checks or exercise transaction APIs.
 10. If a supported direct API is still desirable, contact the bank's published
-   retail API channel for documentation, sandbox/onboarding conditions, exact
-   balance/product/history coverage, consent lifetime and read-only scope. Keep
-   this track independent of aggregator ingestion.
+    retail API channel for documentation, sandbox/onboarding conditions, exact
+    balance/product/history coverage, consent lifetime and read-only scope. Keep
+    this track independent of aggregator ingestion.
 
 ## Open questions
 

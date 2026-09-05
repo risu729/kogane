@@ -24,20 +24,18 @@ describe("SBI Shinsei normalized fixture", () => {
   });
 
   test("rejects ambiguous debit and credit", async () => {
-    const input = await Bun.file(fixturePath).json() as {
+    const input = (await Bun.file(fixturePath).json()) as {
       transactions: Array<Record<string, unknown>>;
     };
     const changed = structuredClone(input);
     const first = changed.transactions[0];
     if (!first) throw new Error("fixture has no transaction");
     first.debit = "1";
-    expect(() => parseNormalizedSnapshot(changed)).toThrow(
-      "exactly one of debit or credit",
-    );
+    expect(() => parseNormalizedSnapshot(changed)).toThrow("exactly one of debit or credit");
   });
 
   test("rejects an out-of-range date without leaking RangeError", async () => {
-    const input = await Bun.file(fixturePath).json() as {
+    const input = (await Bun.file(fixturePath).json()) as {
       transactions: Array<Record<string, unknown>>;
     };
     const changed = structuredClone(input);

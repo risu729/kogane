@@ -44,15 +44,15 @@ Amazon 注文と Vpass の `AMAZON.CO.JP` 等を額だけで自動同一視せ�
 
 ## 3. 公式経路とデータ比較
 
-| 経路 | 取得できる情報 | 粒度・状態 | 期間/件数/export | tradeoff |
-| --- | --- | --- | --- | --- |
-| Amazon Web 注文履歴 | 注文日、注文単位合計、商品行、配送/キャンセル/返品/返金状態、領収書等 | 注文→商品→配送/返金。カード請求行ではない | UIは期間filterとpaginationを持つ。consumer向け一括CSV/APIは公開確認できず、領収書等は注文別print/PDF相当 | 最も詳細だがPIIが多く、write導線が隣接 |
-| Amazon Shopping app | Webに近い注文、配送、返品/返金、ギフト/ポイント残高 | mobile UI。通知や配送状態は便利 | 固定retention/全件exportは未確認 | 端末/session/画面変更に拘束。最初のcollectorにしない |
-| ギフトカード残高ページ | 現在残高、チャージ/登録/注文利用/返金等の増減、期限 | 残高ledger。注文内訳とは別 | 公式固定件数、pagination、CSV/PDFは公開確認できず。細則上、有効期限は原則発行から10年 | reconciliationに有用だが登録・購入導線が同居 |
-| Amazonポイントページ | 利用可能、獲得予定、期間限定、履歴、期限 | point増減。注文確定/発送/取消で予定と確定が変化し得る | standard point は原則、最後の購入または獲得から1年で期限更新。期間限定pointは個別期限。CSV/PDF/APIは未確認 | reward ledgerであり現金・カードledgerではない |
-| 注文別領収書/購入明細 | 注文番号、日付、商品、税、支払内訳等 | 注文別document | 個別print/download。全注文一括exportとは別 | evidenceは強いが一件ずつで高コスト |
-| Privacy Central request | Amazonが保有するaccount dataの請求 | 非同期snapshot。カテゴリ/schemaはlive確認が必要 | scheduled incremental APIではない。生成時間・形式・retention未確認 | 最も包括的な公式export候補だが低頻度/manual |
-| Vpass | Amazon Mastercardを含むカード未確定/確定明細・請求 | issuer/card ledger | Vpass family sourceで調査 | 本sourceへ混ぜない |
+| 経路                    | 取得できる情報                                                        | 粒度・状態                                            | 期間/件数/export                                                                                           | tradeoff                                             |
+| ----------------------- | --------------------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Amazon Web 注文履歴     | 注文日、注文単位合計、商品行、配送/キャンセル/返品/返金状態、領収書等 | 注文→商品→配送/返金。カード請求行ではない             | UIは期間filterとpaginationを持つ。consumer向け一括CSV/APIは公開確認できず、領収書等は注文別print/PDF相当   | 最も詳細だがPIIが多く、write導線が隣接               |
+| Amazon Shopping app     | Webに近い注文、配送、返品/返金、ギフト/ポイント残高                   | mobile UI。通知や配送状態は便利                       | 固定retention/全件exportは未確認                                                                           | 端末/session/画面変更に拘束。最初のcollectorにしない |
+| ギフトカード残高ページ  | 現在残高、チャージ/登録/注文利用/返金等の増減、期限                   | 残高ledger。注文内訳とは別                            | 公式固定件数、pagination、CSV/PDFは公開確認できず。細則上、有効期限は原則発行から10年                      | reconciliationに有用だが登録・購入導線が同居         |
+| Amazonポイントページ    | 利用可能、獲得予定、期間限定、履歴、期限                              | point増減。注文確定/発送/取消で予定と確定が変化し得る | standard point は原則、最後の購入または獲得から1年で期限更新。期間限定pointは個別期限。CSV/PDF/APIは未確認 | reward ledgerであり現金・カードledgerではない        |
+| 注文別領収書/購入明細   | 注文番号、日付、商品、税、支払内訳等                                  | 注文別document                                        | 個別print/download。全注文一括exportとは別                                                                 | evidenceは強いが一件ずつで高コスト                   |
+| Privacy Central request | Amazonが保有するaccount dataの請求                                    | 非同期snapshot。カテゴリ/schemaはlive確認が必要       | scheduled incremental APIではない。生成時間・形式・retention未確認                                         | 最も包括的な公式export候補だが低頻度/manual          |
+| Vpass                   | Amazon Mastercardを含むカード未確定/確定明細・請求                    | issuer/card ledger                                    | Vpass family sourceで調査                                                                                  | 本sourceへ混ぜない                                   |
 
 ### 注文・返金と残高の関係
 
@@ -130,14 +130,14 @@ Amazon Selling Partner API、Product Advertising API、Amazon Pay APIはseller/�
 
 ## 8. Runtime 適性
 
-| Runtime | 適性 | 判断 |
-| --- | --- | --- |
-| Local browser/WSL | 最適 | passkey/MFA handoffと同一origin session観測、manual exportに適する |
-| Cloudflare Workers | 条件付き | 確立済みGET replayとparserは可能。browser/passkey、cookie運用、Amazon egress差に不向き |
-| Cloudflare Containers | 適 | browser/parserを隔離できる。sessionはimage/logに置かずsecret store+tmpfs、egress allowlist |
-| OCI container | 適 | digest固定browser、Cron、encrypted session、read-only FSを組みやすい。egress再認証を検証 |
-| Kubernetes | 過剰 | CronJob/Secret/NetworkPolicyは適合するが単一accountには運用costが大きい |
-| Android実機 | 調査に適 | 公式app表示/APK/本人操作のread-only tracingに必要。定常UI automationは脆い |
+| Runtime               | 適性     | 判断                                                                                       |
+| --------------------- | -------- | ------------------------------------------------------------------------------------------ |
+| Local browser/WSL     | 最適     | passkey/MFA handoffと同一origin session観測、manual exportに適する                         |
+| Cloudflare Workers    | 条件付き | 確立済みGET replayとparserは可能。browser/passkey、cookie運用、Amazon egress差に不向き     |
+| Cloudflare Containers | 適       | browser/parserを隔離できる。sessionはimage/logに置かずsecret store+tmpfs、egress allowlist |
+| OCI container         | 適       | digest固定browser、Cron、encrypted session、read-only FSを組みやすい。egress再認証を検証   |
+| Kubernetes            | 過剰     | CronJob/Secret/NetworkPolicyは適合するが単一accountには運用costが大きい                    |
+| Android実機           | 調査に適 | 公式app表示/APK/本人操作のread-only tracingに必要。定常UI automationは脆い                 |
 
 ## 9. PR #5共通 A-E / Cost
 
@@ -148,14 +148,14 @@ Amazon Selling Partner API、Product Advertising API、Amazon Pay APIはseller/�
 - E: manual capture remains safe default
 - Cost: 1 = small wrapper、5 = device-bound/adversarial
 
-| 経路 | Level | Cost | 判定 |
-| --- | ---: | ---: | --- |
-| 注文別領収書/Privacy Centralを人手取得してoffline import | E | 1-2 | 公式で安全。incremental自動化ではない |
-| ログイン済みbrowserで注文HTMLを同一origin巡回 | D | 3 | 公開実装あり。PII/write UI/session変化に注意 |
-| local bootstrap後、注文GETをheadless replay | C候補 | 3-4 | endpointは具体的。session renewal/WAF/再認証をlive確認するまでBではない |
-| ギフト残高/ポイント internal read replay | C候補 | 4 | endpoint/schema/pagination未確認。残高変動stateの検証が必要 |
-| Amazon Shopping app UI/device automation | D | 5 | device trust、画面変更、write導線、広い権限 |
-| buyer向け公式scheduled API | A該当なし | 5 | consumer注文/ギフト/points APIを確認できない |
+| 経路                                                     |     Level | Cost | 判定                                                                    |
+| -------------------------------------------------------- | --------: | ---: | ----------------------------------------------------------------------- |
+| 注文別領収書/Privacy Centralを人手取得してoffline import |         E |  1-2 | 公式で安全。incremental自動化ではない                                   |
+| ログイン済みbrowserで注文HTMLを同一origin巡回            |         D |    3 | 公開実装あり。PII/write UI/session変化に注意                            |
+| local bootstrap後、注文GETをheadless replay              |     C候補 |  3-4 | endpointは具体的。session renewal/WAF/再認証をlive確認するまでBではない |
+| ギフト残高/ポイント internal read replay                 |     C候補 |    4 | endpoint/schema/pagination未確認。残高変動stateの検証が必要             |
+| Amazon Shopping app UI/device automation                 |         D |    5 | device trust、画面変更、write導線、広い権限                             |
+| buyer向け公式scheduled API                               | A該当なし |    5 | consumer注文/ギフト/points APIを確認できない                            |
 
 総合は **C候補/cost 4**、安全な初期経路は **E/cost 1-2**。注文履歴だけは公開実装によりCへの道筋が
 具体的だが、gift/pointsはまだD寄りである。

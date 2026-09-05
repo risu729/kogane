@@ -4,11 +4,11 @@ This is the deletion ledger for the Browser Run experiment.
 
 ## Owned by this probe
 
-| Kind | Name | ID | Status | Delete command |
-| --- | --- | --- | --- | --- |
-| Worker | `kogane-vpass-browser-run-20260825` | active version `b1c16e46-a5b2-4fdf-9907-93b6a5c71e8f` | deleted `2026-08-26 AEST`; API now reports code `10007` | completed |
-| Browser Run sessions | account-scoped | none active after test | verified with `wrangler browser list --json` | no action required |
-| Worker secrets | `PROBE_TOKEN`, `VPASS_ID`, `VPASS_PASSWORD` | none retained | all deleted and verified with `wrangler secret list` | no action required |
+| Kind                 | Name                                        | ID                                                    | Status                                                  | Delete command     |
+| -------------------- | ------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------- | ------------------ |
+| Worker               | `kogane-vpass-browser-run-20260825`         | active version `b1c16e46-a5b2-4fdf-9907-93b6a5c71e8f` | deleted `2026-08-26 AEST`; API now reports code `10007` | completed          |
+| Browser Run sessions | account-scoped                              | none active after test                                | verified with `wrangler browser list --json`            | no action required |
+| Worker secrets       | `PROBE_TOKEN`, `VPASS_ID`, `VPASS_PASSWORD` | none retained                                         | all deleted and verified with `wrangler secret list`    | no action required |
 
 Public URL:
 

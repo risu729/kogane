@@ -50,10 +50,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function getJson<T>(
-  path: string,
-  signal: AbortSignal,
-): Promise<T> {
+export async function getJson<T>(path: string, signal: AbortSignal): Promise<T> {
   let response: Response;
   try {
     response = await fetch(path, {
@@ -70,10 +67,7 @@ export async function getJson<T>(
       "接続できませんでした。接続先の起動状態やネットワークを確認して、再試行してください。",
     );
   }
-  if (
-    response.type === "opaqueredirect" ||
-    (response.status >= 300 && response.status < 400)
-  ) {
+  if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
     throw new ApiError(
       401,
       "認証または接続先の確認が必要です。ログイン状態を確認して、再読み込みしてください。",
@@ -93,11 +87,8 @@ export async function getJson<T>(
     throw new ApiError(response.status, message);
   }
   if (
-    response.headers
-      .get("content-type")
-      ?.split(";", 1)[0]
-      ?.trim()
-      .toLowerCase() !== "application/json"
+    response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !==
+    "application/json"
   ) {
     throw new ApiError(
       response.status,
@@ -143,10 +134,7 @@ export function useOverview(): UseQueryResult<Overview, Error> {
   });
 }
 
-export function useTransactions(): UseQueryResult<
-  { transactions: TransactionRow[] },
-  Error
-> {
+export function useTransactions(): UseQueryResult<{ transactions: TransactionRow[] }, Error> {
   return useQuery({
     queryKey: ["transactions"],
     queryFn: ({ signal }) =>
@@ -161,43 +149,29 @@ export function useBalances(): UseQueryResult<
   return useQuery({
     queryKey: ["balances"],
     queryFn: ({ signal }) =>
-      getJson<{ latest: BalanceRow[]; history: BalanceHistoryRow[] }>(
-        "/api/balances",
-        signal,
-      ),
+      getJson<{ latest: BalanceRow[]; history: BalanceHistoryRow[] }>("/api/balances", signal),
   });
 }
 
-export function usePositions(): UseQueryResult<
-  { positions: PositionWithValuations[] },
-  Error
-> {
+export function usePositions(): UseQueryResult<{ positions: PositionWithValuations[] }, Error> {
   return useQuery({
     queryKey: ["positions"],
     queryFn: ({ signal }) =>
-      getJson<{ positions: PositionWithValuations[] }>(
-        "/api/positions",
-        signal,
-      ),
+      getJson<{ positions: PositionWithValuations[] }>("/api/positions", signal),
   });
 }
 
-export function useArtifacts(): UseQueryResult<
-  { artifacts: ArtifactRow[] },
-  Error
-> {
+export function useArtifacts(): UseQueryResult<{ artifacts: ArtifactRow[] }, Error> {
   return useQuery({
     queryKey: ["artifacts"],
-    queryFn: ({ signal }) =>
-      getJson<{ artifacts: ArtifactRow[] }>("/api/artifacts", signal),
+    queryFn: ({ signal }) => getJson<{ artifacts: ArtifactRow[] }>("/api/artifacts", signal),
   });
 }
 
 export function useArtifact(id: number): UseQueryResult<ArtifactDetail, Error> {
   return useQuery({
     queryKey: ["artifact", id],
-    queryFn: ({ signal }) =>
-      getJson<ArtifactDetail>(`/api/artifacts/${String(id)}`, signal),
+    queryFn: ({ signal }) => getJson<ArtifactDetail>(`/api/artifacts/${String(id)}`, signal),
   });
 }
 
@@ -208,9 +182,6 @@ export function useObservation(
   return useQuery({
     queryKey: ["observation", kind, id],
     queryFn: ({ signal }) =>
-      getJson<ObservationDetail>(
-        `/api/observations/${kind}/${String(id)}`,
-        signal,
-      ),
+      getJson<ObservationDetail>(`/api/observations/${kind}/${String(id)}`, signal),
   });
 }

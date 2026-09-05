@@ -9,11 +9,14 @@ import {
 
 describe("Mobile Suica session replay", () => {
   test("validates the source-scoped envelope", () => {
-    const envelope = parseSessionEnvelope(JSON.stringify({
-      cookieHeader: "ASP.NET_SessionId=a; sc_auth=b; TS0184138d=c",
-      formBody: "baseVariable=opaque&specifyYearMonth=2026%2F08&specifyDay=30&SEARCH=%8C%9F%8D%F5",
-      userAgent: "test-agent",
-    }));
+    const envelope = parseSessionEnvelope(
+      JSON.stringify({
+        cookieHeader: "ASP.NET_SessionId=a; sc_auth=b; TS0184138d=c",
+        formBody:
+          "baseVariable=opaque&specifyYearMonth=2026%2F08&specifyDay=30&SEARCH=%8C%9F%8D%F5",
+        userAgent: "test-agent",
+      }),
+    );
     expect(envelope.userAgent).toBe("test-agent");
   });
 

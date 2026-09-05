@@ -18,10 +18,7 @@ export class MyJcbReadClient {
     private readonly userAgent: string,
   ) {}
 
-  async get(
-    operation: GetOperation,
-    query?: URLSearchParams,
-  ): Promise<ReadResponse> {
+  async get(operation: GetOperation, query?: URLSearchParams): Promise<ReadResponse> {
     const url = allowedUrl(operation, query);
     assertAllowedRequest(operation, "GET", url);
     const cookie = this.jar.header(url);
@@ -35,13 +32,24 @@ export class MyJcbReadClient {
     const response = await fetch(url, { headers, redirect: "manual" });
     this.jar.updateFromResponse(response, url);
     if (response.status >= 300 && response.status < 400) {
-      throw Object.assign(new StopConditionError(`MyJCB ${operation} returned an unexpected redirect (${response.status})`), { httpStatus: response.status });
+      throw Object.assign(
+        new StopConditionError(
+          `MyJCB ${operation} returned an unexpected redirect (${response.status})`,
+        ),
+        { httpStatus: response.status },
+      );
     }
     if (response.status === 401 || response.status === 403 || response.status === 429) {
-      throw Object.assign(new StopConditionError(`MyJCB ${operation} stopped at HTTP ${response.status}`), { httpStatus: response.status });
+      throw Object.assign(
+        new StopConditionError(`MyJCB ${operation} stopped at HTTP ${response.status}`),
+        { httpStatus: response.status },
+      );
     }
     if (!response.ok) {
-      throw Object.assign(new StopConditionError(`MyJCB ${operation} returned HTTP ${response.status}`), { httpStatus: response.status });
+      throw Object.assign(
+        new StopConditionError(`MyJCB ${operation} returned HTTP ${response.status}`),
+        { httpStatus: response.status },
+      );
     }
     const length = Number(response.headers.get("content-length") ?? "0");
     if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) {
@@ -102,7 +110,10 @@ export class MyJcbReadClient {
     });
     this.jar.updateFromResponse(response, url);
     if (response.status !== 200) {
-      throw Object.assign(new StopConditionError(`MyJCB ${operation} returned HTTP ${response.status}`), { httpStatus: response.status });
+      throw Object.assign(
+        new StopConditionError(`MyJCB ${operation} returned HTTP ${response.status}`),
+        { httpStatus: response.status },
+      );
     }
     const contentType = response.headers.get("content-type") ?? "";
     if (!/^application\/json(?:;|$)/iu.test(contentType)) {
@@ -119,26 +130,22 @@ export class MyJcbReadClient {
 function refererFor(operation: GetOperation, query?: URLSearchParams): string {
   if (operation === "credit-csv" || operation === "credit-ofx" || operation === "credit-pdf") {
     const month = query?.get("detailMonth") ?? "0";
-    return allowedUrl(
-      "credit-detail",
-      new URLSearchParams({ detailMonth: month, output: "web" }),
-    ).href;
+    return allowedUrl("credit-detail", new URLSearchParams({ detailMonth: month, output: "web" }))
+      .href;
   }
   if (operation === "credit-detail") return allowedUrl("mypage").href;
   if (operation === "credit-menu") return allowedUrl("mypage").href;
   if (operation === "debit-detail") {
-    return allowedUrl(
-      "debit-menu",
-      new URLSearchParams({ link_id: "myj_main_debitDetailMenu" }),
-    ).href;
+    return allowedUrl("debit-menu", new URLSearchParams({ link_id: "myj_main_debitDetailMenu" }))
+      .href;
   }
   if (operation === "debit-menu") return allowedUrl("mypage").href;
   return allowedUrl("login-page").href;
 }
 
 export function decodeMyJcbHtml(body: ArrayBuffer, contentType: string): string {
-  const charset = contentType.match(/charset\s*=\s*([^;\s]+)/iu)?.[1]?.replace(/["']/gu, "") ??
-    "shift_jis";
+  const charset =
+    contentType.match(/charset\s*=\s*([^;\s]+)/iu)?.[1]?.replace(/["']/gu, "") ?? "shift_jis";
   try {
     return new TextDecoder(charset).decode(body);
   } catch {

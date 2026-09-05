@@ -16,11 +16,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { createApi } from "../src/api.ts";
-import {
-  insertObservation,
-  insertParseRun,
-  supersedeOlderParseRuns,
-} from "../src/store.ts";
+import { insertObservation, insertParseRun, supersedeOlderParseRuns } from "../src/store.ts";
 import { buildFixture, RETIRED_DESCRIPTION } from "./fixture.ts";
 
 const CLIENT_DIR = join(import.meta.dir, "..", "web", "dist");
@@ -114,12 +110,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       rawLocator: "json:$",
       extra: {},
     });
-    supersedeOlderParseRuns(
-      fixture.store,
-      fixture.artifactId,
-      "browser-probe",
-      freshRunId,
-    );
+    supersedeOlderParseRuns(fixture.store, fixture.artifactId, "browser-probe", freshRunId);
 
     const app = createApi(fixture.store, {
       serveClient: async (request) => {
@@ -147,17 +138,12 @@ describe.if(runnable)("evidence browser in a real browser", () => {
   async function open(path: string): Promise<{ text: string; xss: boolean }> {
     const page = await browser.newPage();
     page.on("console", (message) => {
-      if (message.type() === "error")
-        consoleErrors.push(`${path}: ${message.text()}`);
+      if (message.type() === "error") consoleErrors.push(`${path}: ${message.text()}`);
     });
-    page.on("pageerror", (error) =>
-      consoleErrors.push(`${path}: ${error.message}`),
-    );
+    page.on("pageerror", (error) => consoleErrors.push(`${path}: ${error.message}`));
     await page.goto(baseUrl + path, { waitUntil: "networkidle" });
     const text = await page.locator("body").innerText();
-    const xss = await page.evaluate(
-      () => (globalThis as { __xss?: boolean }).__xss === true,
-    );
+    const xss = await page.evaluate(() => (globalThis as { __xss?: boolean }).__xss === true);
     await page.close();
     return { text, xss };
   }
@@ -229,10 +215,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         for (const step of ["解析", "原本", "取得"]) {
           expect(text).toContain(step);
         }
-        const href = await page
-          .locator('a[href^="/api/raw/"]')
-          .first()
-          .getAttribute("href");
+        const href = await page.locator('a[href^="/api/raw/"]').first().getAttribute("href");
         expect(href).toMatch(/^\/api\/raw\/[0-9a-f]{64}$/u);
 
         // The link is not decoration: it returns the exact stored bytes.
@@ -258,9 +241,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
           const response = await route.fetch();
           const data = await response.json();
           if (changed) {
-            for (const key of path === "transactions"
-              ? ["transactions"]
-              : ["latest", "history"]) {
+            for (const key of path === "transactions" ? ["transactions"] : ["latest", "history"]) {
               data[key] = data[key].map((row: Record<string, unknown>) => ({
                 ...row,
                 source_id: "replacement-bank",
@@ -274,16 +255,11 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         const source = page.getByLabel("取得元", { exact: true });
         const account = page.getByLabel("口座", { exact: true });
         await source.selectOption("demo-bank");
-        const accountValue = await account
-          .locator("option")
-          .nth(1)
-          .getAttribute("value");
+        const accountValue = await account.locator("option").nth(1).getAttribute("value");
         expect(accountValue).toBeTruthy();
         await account.selectOption(accountValue!);
         changed = true;
-        await page
-          .getByRole("button", { name: "表示を更新", exact: true })
-          .click();
+        await page.getByRole("button", { name: "表示を更新", exact: true }).click();
         await source
           .locator("option", { hasText: "今回の記録に含まれません" })
           .waitFor({ state: "attached" });
@@ -292,20 +268,12 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         expect(await account.locator("option:checked").innerText()).toContain(
           "今回の記録に含まれません",
         );
-        expect(
-          await page.locator('tbody a[href^="/observations/"]').count(),
-        ).toBe(0);
-        expect(await page.locator("tbody").first().innerText()).toContain(
-          "ありません",
-        );
-        await page
-          .getByRole("button", { name: "条件をクリア", exact: true })
-          .click();
+        expect(await page.locator('tbody a[href^="/observations/"]').count()).toBe(0);
+        expect(await page.locator("tbody").first().innerText()).toContain("ありません");
+        await page.getByRole("button", { name: "条件をクリア", exact: true }).click();
         expect(await source.inputValue()).toBe("");
         expect(await account.inputValue()).toBe("");
-        expect(await page.locator("tbody").first().innerText()).toContain(
-          "replacement-account",
-        );
+        expect(await page.locator("tbody").first().innerText()).toContain("replacement-account");
       }
       await page.close();
     },
@@ -317,18 +285,14 @@ describe.if(runnable)("evidence browser in a real browser", () => {
     async () => {
       const page = await browser.newPage();
       await page.goto(`${baseUrl}/transactions`, { waitUntil: "networkidle" });
-      await page
-        .getByLabel("取得元", { exact: true })
-        .selectOption("demo-bank");
+      await page.getByLabel("取得元", { exact: true }).selectOption("demo-bank");
       await page.getByLabel("開始日", { exact: true }).fill("2026-08-20");
       await page.getByLabel("終了日", { exact: true }).fill("2026-08-20");
       const rows = page.locator("tbody");
       expect(await rows.innerText()).toContain("Inbound transfer");
       expect(await rows.innerText()).not.toContain("BROWSER_FRESH");
       expect(await rows.innerText()).not.toContain("Coffee");
-      await page
-        .getByRole("button", { name: "条件をクリア", exact: true })
-        .click();
+      await page.getByRole("button", { name: "条件をクリア", exact: true }).click();
       expect(await rows.innerText()).toContain("BROWSER_FRESH");
       await page.close();
     },
@@ -352,15 +316,10 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       });
       await page.goto(`${baseUrl}/transactions`);
       await page.locator("main").getByRole("alert").waitFor();
-      expect(await page.locator("body").innerText()).not.toContain(
-        "private-upstream-diagnostic",
-      );
+      expect(await page.locator("body").innerText()).not.toContain("private-upstream-diagnostic");
       expect(await page.locator("tbody").count()).toBe(0);
       fail = false;
-      await page
-        .locator("main")
-        .getByRole("button", { name: "再試行", exact: true })
-        .click();
+      await page.locator("main").getByRole("button", { name: "再試行", exact: true }).click();
       await page.getByText("BROWSER_FRESH", { exact: false }).waitFor();
       await page.close();
     },
@@ -373,13 +332,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       const page = await browser.newPage({
         viewport: { width: 390, height: 844 },
       });
-      for (const path of [
-        "/",
-        "/transactions",
-        "/balances",
-        "/positions",
-        "/artifacts",
-      ]) {
+      for (const path of ["/", "/transactions", "/balances", "/positions", "/artifacts"]) {
         await page.goto(baseUrl + path, { waitUntil: "networkidle" });
         const dimensions = await page.evaluate(() => ({
           width: window.innerWidth,
@@ -410,29 +363,14 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       await page.goto(`${baseUrl}/transactions`, { waitUntil: "networkidle" });
       expect(await page.locator("tbody tr").count()).toBe(50);
       await page.getByRole("button", { name: "次へ", exact: true }).click();
-      expect(await page.locator("tbody").innerText()).toContain(
-        "Pagination item 51",
-      );
-      await page
-        .getByRole("navigation")
-        .getByRole("link", { name: "残高", exact: true })
-        .click();
+      expect(await page.locator("tbody").innerText()).toContain("Pagination item 51");
+      await page.getByRole("navigation").getByRole("link", { name: "残高", exact: true }).click();
       await page.goBack({ waitUntil: "networkidle" });
-      expect(await page.locator("tbody").innerText()).toContain(
-        "Pagination item 51",
-      );
-      await page
-        .getByLabel("内容を検索", { exact: true })
-        .fill("Pagination item 125");
+      expect(await page.locator("tbody").innerText()).toContain("Pagination item 51");
+      await page.getByLabel("内容を検索", { exact: true }).fill("Pagination item 125");
       expect(await page.locator("tbody tr").count()).toBe(1);
-      expect(await page.locator("tbody").innerText()).toContain(
-        "Pagination item 125",
-      );
-      expect(
-        await page
-          .getByRole("button", { name: "前へ", exact: true })
-          .isDisabled(),
-      ).toBe(true);
+      expect(await page.locator("tbody").innerText()).toContain("Pagination item 125");
+      expect(await page.getByRole("button", { name: "前へ", exact: true }).isDisabled()).toBe(true);
       await page.close();
     },
     TIMEOUT_MS,
@@ -453,25 +391,13 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       });
       await page.goto(`${baseUrl}/transactions`, { waitUntil: "networkidle" });
       fail = true;
-      await page
-        .getByRole("button", { name: "表示を更新", exact: true })
-        .click();
+      await page.getByRole("button", { name: "表示を更新", exact: true }).click();
       await page.locator("main").getByRole("alert").waitFor();
-      expect(
-        await page.locator("main").getByRole("alert").innerText(),
-      ).toContain("前回");
-      expect(await page.locator("tbody").innerText()).toContain(
-        "BROWSER_FRESH",
-      );
+      expect(await page.locator("main").getByRole("alert").innerText()).toContain("前回");
+      expect(await page.locator("tbody").innerText()).toContain("BROWSER_FRESH");
       fail = false;
-      await page
-        .locator("main")
-        .getByRole("button", { name: "再試行", exact: true })
-        .click();
-      await page
-        .locator("main")
-        .getByRole("alert")
-        .waitFor({ state: "detached" });
+      await page.locator("main").getByRole("button", { name: "再試行", exact: true }).click();
+      await page.locator("main").getByRole("alert").waitFor({ state: "detached" });
       await page.close();
     },
     TIMEOUT_MS,
@@ -483,25 +409,19 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       const page = await browser.newPage();
       await page.goto(baseUrl, { waitUntil: "networkidle" });
       expect(await page.title()).toBe("ホーム | kogane");
-      const link = page
-        .getByRole("navigation")
-        .getByRole("link", { name: "取引", exact: true });
+      const link = page.getByRole("navigation").getByRole("link", { name: "取引", exact: true });
       await link.focus();
       await page.keyboard.press("Enter");
       await page.waitForFunction(
-        () =>
-          document.title === "取引 | kogane" &&
-          document.activeElement?.tagName === "H1",
+        () => document.title === "取引 | kogane" && document.activeElement?.tagName === "H1",
       );
       await page.getByLabel("内容を検索", { exact: true }).fill("Inbound");
-      expect(
-        await page.evaluate(() => document.activeElement?.getAttribute("type")),
-      ).toBe("search");
+      expect(await page.evaluate(() => document.activeElement?.getAttribute("type"))).toBe(
+        "search",
+      );
       await page.goBack({ waitUntil: "networkidle" });
       expect(await page.title()).toBe("ホーム | kogane");
-      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe(
-        "H1",
-      );
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("H1");
       await page.close();
     },
     TIMEOUT_MS,
@@ -512,56 +432,34 @@ describe.if(runnable)("evidence browser in a real browser", () => {
     async () => {
       const page = await browser.newPage();
       await page.goto(`${baseUrl}/transactions`, { waitUntil: "networkidle" });
-      await page
-        .getByLabel("取得元", { exact: true })
-        .selectOption("demo-bank");
+      await page.getByLabel("取得元", { exact: true }).selectOption("demo-bank");
       await page.getByLabel("開始日", { exact: true }).fill("2026-08-20");
       await page.getByLabel("終了日", { exact: true }).fill("2026-08-20");
-      await page
-        .getByLabel("内容を検索", { exact: true })
-        .fill("Inbound transfer");
+      await page.getByLabel("内容を検索", { exact: true }).fill("Inbound transfer");
       const sort = page.getByRole("button", {
         name: "取引の基準日",
         exact: false,
       });
       await sort.click();
-      const sortState = await page
-        .locator("th")
-        .first()
-        .getAttribute("aria-sort");
-      await page
-        .locator("tbody")
-        .getByRole("link", { name: "詳細", exact: true })
-        .click();
+      const sortState = await page.locator("th").first().getAttribute("aria-sort");
+      await page.locator("tbody").getByRole("link", { name: "詳細", exact: true }).click();
       await page.locator('a[href^="/api/raw/"]').first().waitFor();
       await page.goBack({ waitUntil: "networkidle" });
-      expect(
-        await page.getByLabel("取得元", { exact: true }).inputValue(),
-      ).toBe("demo-bank");
-      expect(
-        await page.getByLabel("開始日", { exact: true }).inputValue(),
-      ).toBe("2026-08-20");
-      expect(
-        await page.getByLabel("終了日", { exact: true }).inputValue(),
-      ).toBe("2026-08-20");
-      expect(
-        await page.getByLabel("内容を検索", { exact: true }).inputValue(),
-      ).toBe("Inbound transfer");
-      expect(await page.locator("th").first().getAttribute("aria-sort")).toBe(
-        sortState,
+      expect(await page.getByLabel("取得元", { exact: true }).inputValue()).toBe("demo-bank");
+      expect(await page.getByLabel("開始日", { exact: true }).inputValue()).toBe("2026-08-20");
+      expect(await page.getByLabel("終了日", { exact: true }).inputValue()).toBe("2026-08-20");
+      expect(await page.getByLabel("内容を検索", { exact: true }).inputValue()).toBe(
+        "Inbound transfer",
       );
+      expect(await page.locator("th").first().getAttribute("aria-sort")).toBe(sortState);
       expect(await page.locator("tbody tr").count()).toBe(1);
       expect(new URL(page.url()).search).toBe("");
-      expect(
-        await page.evaluate(() => [localStorage.length, sessionStorage.length]),
-      ).toEqual([0, 0]);
+      expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([
+        0, 0,
+      ]);
       await page.reload({ waitUntil: "networkidle" });
-      expect(
-        await page.getByLabel("内容を検索", { exact: true }).inputValue(),
-      ).toBe("");
-      expect(
-        await page.getByLabel("取得元", { exact: true }).inputValue(),
-      ).toBe("");
+      expect(await page.getByLabel("内容を検索", { exact: true }).inputValue()).toBe("");
+      expect(await page.getByLabel("取得元", { exact: true }).inputValue()).toBe("");
       await page.close();
     },
     TIMEOUT_MS,
@@ -580,9 +478,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       });
       await page.goto(`${baseUrl}/observations/transaction/1`);
       await page.locator("main").getByRole("alert").waitFor();
-      expect(await page.locator("body").innerText()).not.toContain(
-        "WRONG_RECORD_MUST_NOT_APPEAR",
-      );
+      expect(await page.locator("body").innerText()).not.toContain("WRONG_RECORD_MUST_NOT_APPEAR");
       expect(await page.locator('a[href^="/api/raw/"]').count()).toBe(0);
       await page.close();
     },

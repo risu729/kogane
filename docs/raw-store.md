@@ -94,17 +94,17 @@ differences rather than hiding them in JSON blobs.
 
 ### Mutable reviewed configuration
 
-| Entity | Meaning |
-| --- | --- |
-| `sources` | Financial or official data surface, independent of acquisition method |
-| `producers` | Collector, capture importer, file importer, or other byte producer |
-| `producer_sources` | Sources a producer is allowed to claim |
-| `ingest_clients` | Identity selected by a Worker secret |
-| `ingest_client_producers` | Producers a client may speak for |
-| `ingest_client_routes` | Exact client + producer + source authorization |
-| `http_scope_rules` | Sanitized host/path allow and deny rules; deny wins |
+| Entity                     | Meaning                                                                      |
+| -------------------------- | ---------------------------------------------------------------------------- |
+| `sources`                  | Financial or official data surface, independent of acquisition method        |
+| `producers`                | Collector, capture importer, file importer, or other byte producer           |
+| `producer_sources`         | Sources a producer is allowed to claim                                       |
+| `ingest_clients`           | Identity selected by a Worker secret                                         |
+| `ingest_client_producers`  | Producers a client may speak for                                             |
+| `ingest_client_routes`     | Exact client + producer + source authorization                               |
+| `http_scope_rules`         | Sanitized host/path allow and deny rules; deny wins                          |
 | `origin_template_policies` | Exact reviewed templates and redaction/HMAC-key versions accepted per source |
-| `source_external_ids` | Reviewed manifest/capture name to canonical source mapping |
+| `source_external_ids`      | Reviewed manifest/capture name to canonical source mapping                   |
 
 Deactivating any component prevents new history without invalidating old
 foreign keys. `0002_registry.sql` seeds every source currently represented by
@@ -117,24 +117,24 @@ already implemented.
 
 ### Immutable acquisition history
 
-| Entity | Meaning |
-| --- | --- |
-| `acquisition_sessions` | One producer invocation or capture directory; may contain multiple sources |
-| `fetch_runs` | One source-specific ledger within a session |
-| `fetch_units` | Optional account/card/connection/chunk hierarchy |
-| `fetch_unit_reports` | Append-only progress and terminal claims for a unit |
-| `fetch_page_groups` | Page sets, including a declared zero-page set |
-| `fetch_run_reports` | Append-only producer progress and one terminal outcome |
-| `fetch_run_ranges` | Requested, selector, or declared coverage at instant/date/month precision |
-| `raw_objects` | SHA-256, byte size, and content-addressed R2 key only |
-| `fetch_artifacts` | One appearance of bytes in a source run |
-| typed metadata tables | Sanitized HTTP, storage, file, email, and artifact range facts |
-| `artifact_relations` | Input and manifest/description edges between artifacts |
-| `artifact_transform_steps` | Ordered decoding, decryption, redaction, re-encoding, bundling, rendering, or extraction |
-| `run_inventories` / items | Sender-declared complete artifact set |
-| `fetch_run_seals` | Server-validated proof that the full run is centrally present |
-| `ingestion_attempts` | Central transfer outcome, separate from provider outcome |
-| `raw_object_verification_events` | Append-only later R2 integrity checks |
+| Entity                           | Meaning                                                                                  |
+| -------------------------------- | ---------------------------------------------------------------------------------------- |
+| `acquisition_sessions`           | One producer invocation or capture directory; may contain multiple sources               |
+| `fetch_runs`                     | One source-specific ledger within a session                                              |
+| `fetch_units`                    | Optional account/card/connection/chunk hierarchy                                         |
+| `fetch_unit_reports`             | Append-only progress and terminal claims for a unit                                      |
+| `fetch_page_groups`              | Page sets, including a declared zero-page set                                            |
+| `fetch_run_reports`              | Append-only producer progress and one terminal outcome                                   |
+| `fetch_run_ranges`               | Requested, selector, or declared coverage at instant/date/month precision                |
+| `raw_objects`                    | SHA-256, byte size, and content-addressed R2 key only                                    |
+| `fetch_artifacts`                | One appearance of bytes in a source run                                                  |
+| typed metadata tables            | Sanitized HTTP, storage, file, email, and artifact range facts                           |
+| `artifact_relations`             | Input and manifest/description edges between artifacts                                   |
+| `artifact_transform_steps`       | Ordered decoding, decryption, redaction, re-encoding, bundling, rendering, or extraction |
+| `run_inventories` / items        | Sender-declared complete artifact set                                                    |
+| `fetch_run_seals`                | Server-validated proof that the full run is centrally present                            |
+| `ingestion_attempts`             | Central transfer outcome, separate from provider outcome                                 |
+| `raw_object_verification_events` | Append-only later R2 integrity checks                                                    |
 
 All acquisition-history tables reject updates and deletes. Duplicate-insert
 guards also reject SQLite `INSERT OR REPLACE` on every uniqueness path,
@@ -259,24 +259,24 @@ file reads but is not a security boundary against WSL root or offline access to
 the host-key storage. This is acceptable only for the local bootstrap assumed
 here; a future Bitwarden-backed sync should remain the authoritative copy.
 
-| Request | Purpose |
-| --- | --- |
-| `GET /health` | Non-sensitive liveness and schema version |
-| `PUT /v1/runs/:id/objects/:sha256` | Stream bytes to R2 after run-scoped authorization; requires exact byte size |
-| `POST /v1/runs/:id/objects/:sha256/verify` | Append a route-scoped R2 integrity check after the object is catalogued in the run; reuse a recent same-client result |
-| `POST /v1/runs` | Idempotently create an acquisition session and source run |
-| `POST /v1/runs/:id/reports` | Append progress or terminal producer report |
-| `POST /v1/runs/:id/ranges` | Append a validated instant/date/month run range |
-| `POST /v1/runs/:id/page-groups` | Declare a known or unknown-size page set |
-| `POST /v1/runs/:id/units` | Append a root or child account/card/chunk unit |
-| `POST /v1/units/:id/reports` | Append progress or terminal unit report |
-| `POST /v1/runs/:id/artifacts` | Catalogue an R2 object, ranges, origins, transforms, and relations |
-| `POST /v1/runs/:id/attempts` | Idempotently record an incomplete/failed central transfer |
-| `POST /v1/runs/:id/seal` | Verify exact inventory, create seal and complete ingest attempt |
-| `POST /v1/runs/:id/inventories` | Begin/reuse a resumable inventory with expected count and digest |
-| `POST /v1/runs/:id/inventories/:inventory/items` | Append an idempotent chunk of at most 30 exact items |
-| `GET /v1/runs/:id/inventories/:inventory` | Read expected/received counts and seal state |
-| `POST /v1/runs/:id/inventories/:inventory/seal` | Recompute a staged inventory digest and atomically seal it with a complete attempt |
+| Request                                          | Purpose                                                                                                               |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `GET /health`                                    | Non-sensitive liveness and schema version                                                                             |
+| `PUT /v1/runs/:id/objects/:sha256`               | Stream bytes to R2 after run-scoped authorization; requires exact byte size                                           |
+| `POST /v1/runs/:id/objects/:sha256/verify`       | Append a route-scoped R2 integrity check after the object is catalogued in the run; reuse a recent same-client result |
+| `POST /v1/runs`                                  | Idempotently create an acquisition session and source run                                                             |
+| `POST /v1/runs/:id/reports`                      | Append progress or terminal producer report                                                                           |
+| `POST /v1/runs/:id/ranges`                       | Append a validated instant/date/month run range                                                                       |
+| `POST /v1/runs/:id/page-groups`                  | Declare a known or unknown-size page set                                                                              |
+| `POST /v1/runs/:id/units`                        | Append a root or child account/card/chunk unit                                                                        |
+| `POST /v1/units/:id/reports`                     | Append progress or terminal unit report                                                                               |
+| `POST /v1/runs/:id/artifacts`                    | Catalogue an R2 object, ranges, origins, transforms, and relations                                                    |
+| `POST /v1/runs/:id/attempts`                     | Idempotently record an incomplete/failed central transfer                                                             |
+| `POST /v1/runs/:id/seal`                         | Verify exact inventory, create seal and complete ingest attempt                                                       |
+| `POST /v1/runs/:id/inventories`                  | Begin/reuse a resumable inventory with expected count and digest                                                      |
+| `POST /v1/runs/:id/inventories/:inventory/items` | Append an idempotent chunk of at most 30 exact items                                                                  |
+| `GET /v1/runs/:id/inventories/:inventory`        | Read expected/received counts and seal state                                                                          |
+| `POST /v1/runs/:id/inventories/:inventory/seal`  | Recompute a staged inventory digest and atomically seal it with a complete attempt                                    |
 
 JSON request bodies are bounded. Raw bodies are streamed directly to R2 and are
 never read with `arrayBuffer()`, `text()`, or `formData()`. The default direct
@@ -305,22 +305,22 @@ every `docs/sources/*.md`, current collector manifest shapes, and adversarial
 D1/API behavior. A schema is not called frozen until the final fixed-hash
 review reports no P0/P1 issue. Covered cases include:
 
-| Case | Representation |
-| --- | --- |
-| Kuebiko with multiple sites | one acquisition session, multiple source runs |
-| Multiple cards/connections/accounts | hierarchical units and source-scoped runs |
-| Paginated history | page group plus page-indexed artifacts; zero/known/unknown counts |
-| Backfill and resume | run/unit progress reports, requested/coverage ranges, immutable retries |
-| Pending then posted/corrected data | separate evidence runs; interpretation deferred |
-| Composite Vpass snapshot | bundle with embedded-source lineage and ordered transforms |
-| Sanitized MyJCB/Sony HTML | transformed capture, redaction step, explicit source non-retention |
-| API JSON and browser HTML | provider-response role with HTTP origin metadata |
-| CSV/PDF/OFX/XLSX/manual files | provider export/document or user capture with file origin |
-| Direct/forwarded V Point Pay mail | provider message with email transport and MIME path |
-| Collector manifest/error/summary | generated roles, counted in all-catalogued inventory |
-| Legacy evidence with weak metadata | unknown fidelity/container and explicit time basis |
-| Same bytes fetched repeatedly | one R2 object, separate artifact appearances |
-| Parser re-run | raw object and descriptor remain stable; phase 3 adds versioned observations |
+| Case                                | Representation                                                               |
+| ----------------------------------- | ---------------------------------------------------------------------------- |
+| Kuebiko with multiple sites         | one acquisition session, multiple source runs                                |
+| Multiple cards/connections/accounts | hierarchical units and source-scoped runs                                    |
+| Paginated history                   | page group plus page-indexed artifacts; zero/known/unknown counts            |
+| Backfill and resume                 | run/unit progress reports, requested/coverage ranges, immutable retries      |
+| Pending then posted/corrected data  | separate evidence runs; interpretation deferred                              |
+| Composite Vpass snapshot            | bundle with embedded-source lineage and ordered transforms                   |
+| Sanitized MyJCB/Sony HTML           | transformed capture, redaction step, explicit source non-retention           |
+| API JSON and browser HTML           | provider-response role with HTTP origin metadata                             |
+| CSV/PDF/OFX/XLSX/manual files       | provider export/document or user capture with file origin                    |
+| Direct/forwarded V Point Pay mail   | provider message with email transport and MIME path                          |
+| Collector manifest/error/summary    | generated roles, counted in all-catalogued inventory                         |
+| Legacy evidence with weak metadata  | unknown fidelity/container and explicit time basis                           |
+| Same bytes fetched repeatedly       | one R2 object, separate artifact appearances                                 |
+| Parser re-run                       | raw object and descriptor remain stable; phase 3 adds versioned observations |
 
 Account identity, family-card ownership, canonical instruments, transaction
 state changes, matching, OCR meaning, reward expiry, prices, FX, P&L, and tax
@@ -354,15 +354,15 @@ claim compatibility with the Free-plan 50-query limit.
 
 The registry includes explicit collector-manifest aliases:
 
-| External ID | Canonical source |
-| --- | --- |
-| `sbi-shinsei` | `sbi-shinsei-bank` |
-| `prestia-globalpass` | `global-pass` |
-| `smbc-direct` | `smbc-bank` |
-| `moneyforward-me` | `moneyforward-me` |
-| `v-point-pay-email` | `v-point-pay` |
-| `v-point-pay-email-reconciliation` | `v-point` |
-| `v-point` (collector R2 importer) | `v-point` |
+| External ID                        | Canonical source   |
+| ---------------------------------- | ------------------ |
+| `sbi-shinsei`                      | `sbi-shinsei-bank` |
+| `prestia-globalpass`               | `global-pass`      |
+| `smbc-direct`                      | `smbc-bank`        |
+| `moneyforward-me`                  | `moneyforward-me`  |
+| `v-point-pay-email`                | `v-point-pay`      |
+| `v-point-pay-email-reconciliation` | `v-point`          |
+| `v-point` (collector R2 importer)  | `v-point`          |
 
 `v-point-pay-email-reconciliation` is a generated report emitted by the V Point
 collector while reconciling its own point-history evidence with V Point Pay mail.

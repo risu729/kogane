@@ -17,8 +17,7 @@ import { adler32, extractAvailableMonths, isObject, objectAt } from "./vpass-cli
 
 const AUTH_URL = "https://spap.smbc-card.com/api/v3/Fauth";
 const CONFIG_URL = "https://spap.smbc-card.com/api/v3/common/Config";
-const MEMBER_URL =
-  "https://www.smbc-card.com/memapi/jaxrs/web_meisai/web_meisai_top/v1";
+const MEMBER_URL = "https://www.smbc-card.com/memapi/jaxrs/web_meisai/web_meisai_top/v1";
 const APP_VERSION = "5.12.0";
 const MOBILE_UA =
   `com.smbc_card.vpass.android_v${APP_VERSION} ` +

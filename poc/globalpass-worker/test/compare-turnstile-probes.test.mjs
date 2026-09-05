@@ -35,7 +35,9 @@ function syntheticProbe(challengeIdentifier, payloadSuffix) {
         requestPostData: JSON.stringify({ payload: `value-${payloadSuffix}` }),
         initiator: {
           stack: {
-            callFrames: [{ functionName: "transmit", url: scriptUrl, lineNumber: 3, columnNumber: 6 }],
+            callFrames: [
+              { functionName: "transmit", url: scriptUrl, lineNumber: 3, columnNumber: 6 },
+            ],
           },
         },
       },
@@ -61,5 +63,8 @@ test("compareProbeFiles compares structure without emitting private values", asy
   assert.equal(report.comparison.sameCapturedScriptBuild, true);
   assert.equal(report.comparison.challengeExecutionSourcesCaptured, true);
   assert.equal(report.comparison.posts[0].sameRawBodySha256, false);
-  assert.equal(report.left.posts[0].initiatorFrames[0].enclosingFunction.kind, "FunctionDeclaration");
+  assert.equal(
+    report.left.posts[0].initiatorFrames[0].enclosingFunction.kind,
+    "FunctionDeclaration",
+  );
 });

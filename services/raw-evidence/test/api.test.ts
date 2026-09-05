@@ -20,10 +20,13 @@ async function createTestRun(sessionId: string): Promise<number> {
     externalSessionId: sessionId,
   });
   expect(response.status).toBe(201);
-  return Number((await response.json() as { runId: number }).runId);
+  return Number(((await response.json()) as { runId: number }).runId);
 }
 
-async function uploadText(runId: number, text: string): Promise<{ sha256: string; byteSize: number }> {
+async function uploadText(
+  runId: number,
+  text: string,
+): Promise<{ sha256: string; byteSize: number }> {
   const bytes = new TextEncoder().encode(text);
   const sha256 = await sha256Hex(bytes);
   const response = await SELF.fetch(`https://example.test/v1/runs/${runId}/objects/${sha256}`, {
@@ -41,22 +44,52 @@ async function uploadText(runId: number, text: string): Promise<{ sha256: string
 
 beforeAll(async () => {
   await env.DB.batch([
-    env.DB.prepare("INSERT INTO sources (id, provider, display_name) VALUES ('api-source', 'Provider', 'API Source')"),
-    env.DB.prepare("INSERT INTO producers (id, kind, display_name) VALUES ('api-producer', 'collector', 'API Producer')"),
-    env.DB.prepare("INSERT INTO producer_sources (producer_id, source_id) VALUES ('api-producer', 'api-source')"),
+    env.DB.prepare(
+      "INSERT INTO sources (id, provider, display_name) VALUES ('api-source', 'Provider', 'API Source')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO producers (id, kind, display_name) VALUES ('api-producer', 'collector', 'API Producer')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO producer_sources (producer_id, source_id) VALUES ('api-producer', 'api-source')",
+    ),
     env.DB.prepare("INSERT INTO ingest_clients (id, display_name) VALUES ('test', 'Test client')"),
-    env.DB.prepare("INSERT INTO ingest_client_producers (ingest_client_id, producer_id) VALUES ('test', 'api-producer')"),
-    env.DB.prepare("INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id) VALUES ('test', 'api-producer', 'api-source')"),
-    env.DB.prepare("INSERT INTO http_scope_rules (source_id, action, scheme, host, path_prefix) VALUES ('api-source', 'allow', 'https', 'api.example.test', '/v1/')"),
-    env.DB.prepare("INSERT INTO origin_template_policies (source_id, origin_kind, template, redaction_version, query_names_json) VALUES ('api-source', 'http', '/v1/history/{month}', 'v1', '[\"month\",\"page\"]')"),
-    env.DB.prepare("INSERT INTO origin_template_policies (source_id, origin_kind, template, redaction_version, query_names_json) VALUES ('api-source', 'http', '/v1/history/{month}', 'v1', '[]')"),
-    env.DB.prepare("INSERT INTO origin_template_policies (source_id, origin_kind, template, redaction_version, fingerprint_key_version) VALUES ('api-source', 'file', '{redacted}', 'v1', 'test-hmac-v1')"),
-    env.DB.prepare("INSERT INTO origin_template_policies (source_id, origin_kind, template, redaction_version, fingerprint_key_version) VALUES ('api-source', 'file', '{redacted}.{extension}', 'v1', 'test-hmac-v1')"),
-    env.DB.prepare("INSERT INTO origin_template_policies (source_id, origin_kind, template, redaction_version, fingerprint_key_version) VALUES ('api-source', 'storage', 'runs/{redacted}/artifact', 'v1', 'test-hmac-v1')"),
-    env.DB.prepare("INSERT INTO origin_template_policies (source_id, origin_kind, template, redaction_version, fingerprint_key_version) VALUES ('api-source', 'email', '{redacted}.{extension}', 'v1', 'test-hmac-v1')"),
-    env.DB.prepare("INSERT INTO sources (id, provider, display_name) VALUES ('api-source-2', 'Provider', 'API Source 2')"),
-    env.DB.prepare("INSERT INTO producer_sources (producer_id, source_id) VALUES ('api-producer', 'api-source-2')"),
-    env.DB.prepare("INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id) VALUES ('test', 'api-producer', 'api-source-2')"),
+    env.DB.prepare(
+      "INSERT INTO ingest_client_producers (ingest_client_id, producer_id) VALUES ('test', 'api-producer')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id) VALUES ('test', 'api-producer', 'api-source')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO http_scope_rules (source_id, action, scheme, host, path_prefix) VALUES ('api-source', 'allow', 'https', 'api.example.test', '/v1/')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO origin_template_policies (source_id, origin_kind, template, redaction_version, query_names_json) VALUES ('api-source', 'http', '/v1/history/{month}', 'v1', '[\"month\",\"page\"]')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO origin_template_policies (source_id, origin_kind, template, redaction_version, query_names_json) VALUES ('api-source', 'http', '/v1/history/{month}', 'v1', '[]')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO origin_template_policies (source_id, origin_kind, template, redaction_version, fingerprint_key_version) VALUES ('api-source', 'file', '{redacted}', 'v1', 'test-hmac-v1')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO origin_template_policies (source_id, origin_kind, template, redaction_version, fingerprint_key_version) VALUES ('api-source', 'file', '{redacted}.{extension}', 'v1', 'test-hmac-v1')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO origin_template_policies (source_id, origin_kind, template, redaction_version, fingerprint_key_version) VALUES ('api-source', 'storage', 'runs/{redacted}/artifact', 'v1', 'test-hmac-v1')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO origin_template_policies (source_id, origin_kind, template, redaction_version, fingerprint_key_version) VALUES ('api-source', 'email', '{redacted}.{extension}', 'v1', 'test-hmac-v1')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO sources (id, provider, display_name) VALUES ('api-source-2', 'Provider', 'API Source 2')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO producer_sources (producer_id, source_id) VALUES ('api-producer', 'api-source-2')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO ingest_client_routes (ingest_client_id, producer_id, source_id) VALUES ('test', 'api-producer', 'api-source-2')",
+    ),
   ]);
 });
 
@@ -88,25 +121,26 @@ describe("raw-evidence Worker", () => {
     };
     const runResponse = await post("/v1/runs", runPayload);
     expect(runResponse.status).toBe(201);
-    const { runId } = await runResponse.json() as { runId: number };
-    const put = () => SELF.fetch(`https://example.test/v1/runs/${runId}/objects/${sha256}`, {
-      method: "PUT",
-      headers: {
-        authorization: AUTH,
-        "content-length": String(bytes.byteLength),
-        "x-kogane-byte-size": String(bytes.byteLength),
-      },
-      body: bytes,
-    });
+    const { runId } = (await runResponse.json()) as { runId: number };
+    const put = () =>
+      SELF.fetch(`https://example.test/v1/runs/${runId}/objects/${sha256}`, {
+        method: "PUT",
+        headers: {
+          authorization: AUTH,
+          "content-length": String(bytes.byteLength),
+          "x-kogane-byte-size": String(bytes.byteLength),
+        },
+        body: bytes,
+      });
     const firstPut = await put();
     expect(firstPut.status).toBe(201);
-    expect((await firstPut.json() as { reused: boolean }).reused).toBe(false);
+    expect(((await firstPut.json()) as { reused: boolean }).reused).toBe(false);
     const secondPut = await put();
     expect(secondPut.status).toBe(200);
-    expect((await secondPut.json() as { reused: boolean }).reused).toBe(true);
+    expect(((await secondPut.json()) as { reused: boolean }).reused).toBe(true);
 
     const replayRun = await post("/v1/runs", runPayload);
-    expect((await replayRun.json() as { runId: number }).runId).toBe(runId);
+    expect(((await replayRun.json()) as { runId: number }).runId).toBe(runId);
 
     const artifactPayload = {
       artifactKey: "response.json",
@@ -134,11 +168,12 @@ describe("raw-evidence Worker", () => {
     };
     const artifactResponse = await post(`/v1/runs/${runId}/artifacts`, artifactPayload);
     expect(artifactResponse.status).toBe(201);
-    const artifact = await artifactResponse.json() as { descriptorSha256: string };
+    const artifact = (await artifactResponse.json()) as { descriptorSha256: string };
     expect(artifact.descriptorSha256).toMatch(/^[0-9a-f]{64}$/);
     const replayArtifact = await post(`/v1/runs/${runId}/artifacts`, artifactPayload);
-    expect((await replayArtifact.json() as { descriptorSha256: string }).descriptorSha256)
-      .toBe(artifact.descriptorSha256);
+    expect(((await replayArtifact.json()) as { descriptorSha256: string }).descriptorSha256).toBe(
+      artifact.descriptorSha256,
+    );
 
     const report = await post(`/v1/runs/${runId}/reports`, {
       reportKey: "terminal",
@@ -152,14 +187,16 @@ describe("raw-evidence Worker", () => {
     expect(report.status).toBe(201);
 
     const sealPayload = {
-      artifacts: [{ artifactKey: "response.json", sha256, descriptorSha256: artifact.descriptorSha256 }],
+      artifacts: [
+        { artifactKey: "response.json", sha256, descriptorSha256: artifact.descriptorSha256 },
+      ],
       declarationBasis: "producer_manifest",
       externalAttemptId: "attempt-001",
       startedAtMs: 1_788_323_900_000,
     };
     const seal = await post(`/v1/runs/${runId}/seal`, sealPayload);
     expect(seal.status).toBe(201);
-    expect((await seal.json() as { sealed: boolean }).sealed).toBe(true);
+    expect(((await seal.json()) as { sealed: boolean }).sealed).toBe(true);
     const replaySeal = await post(`/v1/runs/${runId}/seal`, sealPayload);
     expect(replaySeal.status).toBe(201);
     const laterAttempt = await post(`/v1/runs/${runId}/seal`, {
@@ -170,11 +207,13 @@ describe("raw-evidence Worker", () => {
     const attempts = await env.DB.prepare(`
       SELECT external_attempt_id, accepted_artifact_count, reused_artifact_count
       FROM ingestion_attempts WHERE fetch_run_id = ? ORDER BY external_attempt_id
-    `).bind(runId).all<{
-      external_attempt_id: string;
-      accepted_artifact_count: number;
-      reused_artifact_count: number;
-    }>();
+    `)
+      .bind(runId)
+      .all<{
+        external_attempt_id: string;
+        accepted_artifact_count: number;
+        reused_artifact_count: number;
+      }>();
     expect(attempts.results).toEqual([
       { external_attempt_id: "attempt-001", accepted_artifact_count: 1, reused_artifact_count: 0 },
       { external_attempt_id: "attempt-002", accepted_artifact_count: 0, reused_artifact_count: 1 },
@@ -188,19 +227,23 @@ describe("raw-evidence Worker", () => {
       externalIdNamespace: "test",
       externalSessionId: "api-session-bad-digest",
     });
-    const { runId } = await run.json() as { runId: number };
-    const response = await SELF.fetch(`https://example.test/v1/runs/${runId}/objects/${"0".repeat(64)}`, {
-      method: "PUT",
-      headers: {
-        authorization: AUTH,
-        "content-length": "3",
-        "x-kogane-byte-size": "3",
+    const { runId } = (await run.json()) as { runId: number };
+    const response = await SELF.fetch(
+      `https://example.test/v1/runs/${runId}/objects/${"0".repeat(64)}`,
+      {
+        method: "PUT",
+        headers: {
+          authorization: AUTH,
+          "content-length": "3",
+          "x-kogane-byte-size": "3",
+        },
+        body: "abc",
       },
-      body: "abc",
-    });
+    );
     expect(response.status).toBe(422);
     const row = await env.DB.prepare("SELECT 1 AS ok FROM raw_objects WHERE sha256 = ?")
-      .bind("0".repeat(64)).first();
+      .bind("0".repeat(64))
+      .first();
     expect(row).toBeNull();
   });
 
@@ -211,13 +254,15 @@ describe("raw-evidence Worker", () => {
       externalIdNamespace: "test",
       externalSessionId: "api-session-empty",
     });
-    const { runId } = await run.json() as { runId: number };
+    const { runId } = (await run.json()) as { runId: number };
     const response = await post(`/v1/runs/${runId}/seal`, {
-      artifacts: [{
-        artifactKey: "not-present.json",
-        sha256: "1".repeat(64),
-        descriptorSha256: "2".repeat(64),
-      }],
+      artifacts: [
+        {
+          artifactKey: "not-present.json",
+          sha256: "1".repeat(64),
+          descriptorSha256: "2".repeat(64),
+        },
+      ],
       declarationBasis: "operator",
       externalAttemptId: "attempt-mismatch",
     });
@@ -234,7 +279,7 @@ describe("raw-evidence Worker", () => {
       externalIdNamespace: "test",
       externalSessionId: "api-session-structure",
     });
-    const { runId } = await runResponse.json() as { runId: number };
+    const { runId } = (await runResponse.json()) as { runId: number };
     const put = await SELF.fetch(`https://example.test/v1/runs/${runId}/objects/${sha256}`, {
       method: "PUT",
       headers: {
@@ -258,13 +303,13 @@ describe("raw-evidence Worker", () => {
       pageGroupKey: "history",
       declaredPageCount: 1,
     });
-    const { pageGroupId } = await pageGroup.json() as { pageGroupId: number };
+    const { pageGroupId } = (await pageGroup.json()) as { pageGroupId: number };
     const unit = await post(`/v1/runs/${runId}/units`, {
       unitKind: "account",
       unitKey: "account-001",
       terminalReportRequired: true,
     });
-    const { unitId } = await unit.json() as { unitId: number };
+    const { unitId } = (await unit.json()) as { unitId: number };
     const artifactResponse = await post(`/v1/runs/${runId}/artifacts`, {
       artifactKey: "history/page-0000.json",
       artifactRole: "provider_response",
@@ -276,17 +321,19 @@ describe("raw-evidence Worker", () => {
       pageIndex: 0,
       sha256,
       byteSize: bytes.byteLength,
-      ranges: [{
-        rangeKey: "coverage",
-        rangeKind: "declared_coverage",
-        precision: "date",
-        startValue: "2026-08-01",
-        endValue: "2026-08-31",
-        basis: "source",
-      }],
+      ranges: [
+        {
+          rangeKey: "coverage",
+          rangeKind: "declared_coverage",
+          precision: "date",
+          startValue: "2026-08-01",
+          endValue: "2026-08-31",
+          basis: "source",
+        },
+      ],
     });
     expect(artifactResponse.status).toBe(201);
-    const artifact = await artifactResponse.json() as { descriptorSha256: string };
+    const artifact = (await artifactResponse.json()) as { descriptorSha256: string };
     const unitReport = await post(`/v1/units/${unitId}/reports`, {
       reportKey: "terminal",
       reportKind: "terminal",
@@ -303,11 +350,13 @@ describe("raw-evidence Worker", () => {
       artifactCountScope: "all_catalogued",
     });
     const seal = await post(`/v1/runs/${runId}/seal`, {
-      artifacts: [{
-        artifactKey: "history/page-0000.json",
-        sha256,
-        descriptorSha256: artifact.descriptorSha256,
-      }],
+      artifacts: [
+        {
+          artifactKey: "history/page-0000.json",
+          sha256,
+          descriptorSha256: artifact.descriptorSha256,
+        },
+      ],
       declarationBasis: "producer_manifest",
       externalAttemptId: "attempt-structure",
     });
@@ -337,21 +386,37 @@ describe("raw-evidence Worker", () => {
       },
     });
     expect(denied.status).toBe(403);
-    expect(await env.DB.prepare(
-      "SELECT count(*) AS count FROM fetch_artifacts WHERE fetch_run_id = ?",
-    ).bind(runId).first<{ count: number }>()).toEqual({ count: 0 });
+    expect(
+      await env.DB.prepare("SELECT count(*) AS count FROM fetch_artifacts WHERE fetch_run_id = ?")
+        .bind(runId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
 
     const duplicate = await post(`/v1/runs/${runId}/artifacts`, {
       ...base,
       ranges: [
-        { rangeKey: "coverage", rangeKind: "selector", precision: "month", startValue: "2026-01", basis: "request" },
-        { rangeKey: "coverage", rangeKind: "selector", precision: "month", startValue: "2026-02", basis: "request" },
+        {
+          rangeKey: "coverage",
+          rangeKind: "selector",
+          precision: "month",
+          startValue: "2026-01",
+          basis: "request",
+        },
+        {
+          rangeKey: "coverage",
+          rangeKind: "selector",
+          precision: "month",
+          startValue: "2026-02",
+          basis: "request",
+        },
       ],
     });
     expect(duplicate.status).toBe(400);
-    expect(await env.DB.prepare(
-      "SELECT count(*) AS count FROM fetch_artifacts WHERE fetch_run_id = ?",
-    ).bind(runId).first<{ count: number }>()).toEqual({ count: 0 });
+    expect(
+      await env.DB.prepare("SELECT count(*) AS count FROM fetch_artifacts WHERE fetch_run_id = ?")
+        .bind(runId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
 
     const corrected = await post(`/v1/runs/${runId}/artifacts`, {
       ...base,
@@ -378,10 +443,14 @@ describe("raw-evidence Worker", () => {
       sha256: exactObject.sha256,
       byteSize: exactObject.byteSize,
     };
-    const exactStatuses = (await Promise.all([
-      post(`/v1/runs/${exactRunId}/artifacts`, exactPayload),
-      post(`/v1/runs/${exactRunId}/artifacts`, exactPayload),
-    ])).map((response) => response.status).sort();
+    const exactStatuses = (
+      await Promise.all([
+        post(`/v1/runs/${exactRunId}/artifacts`, exactPayload),
+        post(`/v1/runs/${exactRunId}/artifacts`, exactPayload),
+      ])
+    )
+      .map((response) => response.status)
+      .sort();
     expect(exactStatuses).toEqual([201, 201]);
 
     const conflictRunId = await createTestRun("api-session-artifact-race-conflict");
@@ -391,10 +460,14 @@ describe("raw-evidence Worker", () => {
       sha256: conflictObject.sha256,
       byteSize: conflictObject.byteSize,
     };
-    const conflictStatuses = (await Promise.all([
-      post(`/v1/runs/${conflictRunId}/artifacts`, { ...conflictBase, dataset: "left" }),
-      post(`/v1/runs/${conflictRunId}/artifacts`, { ...conflictBase, dataset: "right" }),
-    ])).map((response) => response.status).sort();
+    const conflictStatuses = (
+      await Promise.all([
+        post(`/v1/runs/${conflictRunId}/artifacts`, { ...conflictBase, dataset: "left" }),
+        post(`/v1/runs/${conflictRunId}/artifacts`, { ...conflictBase, dataset: "right" }),
+      ])
+    )
+      .map((response) => response.status)
+      .sort();
     expect(conflictStatuses).toEqual([201, 409]);
   });
 
@@ -410,13 +483,16 @@ describe("raw-evidence Worker", () => {
       sha256: content.sha256,
       byteSize: content.byteSize,
     };
-    const batchSpy = vi.spyOn(env.DB, "batch")
+    const batchSpy = vi
+      .spyOn(env.DB, "batch")
       .mockRejectedValueOnce(new Error("synthetic transient D1 failure"));
     expect((await post(`/v1/runs/${runId}/artifacts`, payload)).status).toBe(500);
     batchSpy.mockRestore();
-    expect(await env.DB.prepare(
-      "SELECT count(*) AS count FROM fetch_artifacts WHERE fetch_run_id = ?",
-    ).bind(runId).first<{ count: number }>()).toEqual({ count: 0 });
+    expect(
+      await env.DB.prepare("SELECT count(*) AS count FROM fetch_artifacts WHERE fetch_run_id = ?")
+        .bind(runId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
     expect((await post(`/v1/runs/${runId}/artifacts`, payload)).status).toBe(201);
   });
 
@@ -434,9 +510,11 @@ describe("raw-evidence Worker", () => {
     };
     const privateDiagnostic = "synthetic-private-diagnostic-3bb73dca";
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    const batchSpy = vi.spyOn(env.DB, "batch").mockRejectedValueOnce(new Error(
-      `D1_ERROR: CHECK constraint failed: fetch_artifacts ${privateDiagnostic}`,
-    ));
+    const batchSpy = vi
+      .spyOn(env.DB, "batch")
+      .mockRejectedValueOnce(
+        new Error(`D1_ERROR: CHECK constraint failed: fetch_artifacts ${privateDiagnostic}`),
+      );
     const response = await post(`/v1/runs/${runId}/artifacts`, payload);
     batchSpy.mockRestore();
     errorSpy.mockRestore();
@@ -446,9 +524,11 @@ describe("raw-evidence Worker", () => {
     expect(JSON.parse(responseText)).toEqual({ error: "catalogue_conflict" });
     expect(responseText).not.toContain(privateDiagnostic);
     expect(errorSpy).not.toHaveBeenCalled();
-    expect(await env.DB.prepare(
-      "SELECT count(*) AS count FROM fetch_artifacts WHERE fetch_run_id = ?",
-    ).bind(runId).first<{ count: number }>()).toEqual({ count: 0 });
+    expect(
+      await env.DB.prepare("SELECT count(*) AS count FROM fetch_artifacts WHERE fetch_run_id = ?")
+        .bind(runId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
     expect((await post(`/v1/runs/${runId}/artifacts`, payload)).status).toBe(201);
   });
 
@@ -467,19 +547,28 @@ describe("raw-evidence Worker", () => {
       externalAttemptId: "attempt-seal-transient",
       startedAtMs: 1_788_323_900_000,
     };
-    const batchSpy = vi.spyOn(env.DB, "batch")
+    const batchSpy = vi
+      .spyOn(env.DB, "batch")
       .mockRejectedValueOnce(new Error("synthetic transient D1 seal failure"));
     expect((await post(`/v1/runs/${runId}/seal`, payload)).status).toBe(500);
     batchSpy.mockRestore();
-    expect(await env.DB.prepare(
-      "SELECT count(*) AS count FROM run_inventories WHERE fetch_run_id = ?",
-    ).bind(runId).first<{ count: number }>()).toEqual({ count: 0 });
-    expect(await env.DB.prepare(
-      "SELECT count(*) AS count FROM fetch_run_seals WHERE fetch_run_id = ?",
-    ).bind(runId).first<{ count: number }>()).toEqual({ count: 0 });
-    expect(await env.DB.prepare(
-      "SELECT count(*) AS count FROM ingestion_attempts WHERE fetch_run_id = ?",
-    ).bind(runId).first<{ count: number }>()).toEqual({ count: 0 });
+    expect(
+      await env.DB.prepare("SELECT count(*) AS count FROM run_inventories WHERE fetch_run_id = ?")
+        .bind(runId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
+    expect(
+      await env.DB.prepare("SELECT count(*) AS count FROM fetch_run_seals WHERE fetch_run_id = ?")
+        .bind(runId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS count FROM ingestion_attempts WHERE fetch_run_id = ?",
+      )
+        .bind(runId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
     expect((await post(`/v1/runs/${runId}/seal`, payload)).status).toBe(201);
   });
 
@@ -525,9 +614,11 @@ describe("raw-evidence Worker", () => {
       mediaTypeBasis: "response_header",
     });
     expect(mimeParameter.status).toBe(400);
-    expect(await env.DB.prepare(
-      "SELECT count(*) AS count FROM fetch_artifacts WHERE fetch_run_id = ?",
-    ).bind(runId).first<{ count: number }>()).toEqual({ count: 0 });
+    expect(
+      await env.DB.prepare("SELECT count(*) AS count FROM fetch_artifacts WHERE fetch_run_id = ?")
+        .bind(runId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
   });
 
   it("preserves same-source lineage across acquisition sessions", async () => {
@@ -554,19 +645,23 @@ describe("raw-evidence Worker", () => {
       lineageDisposition: "linked",
       sha256: childObject.sha256,
       byteSize: childObject.byteSize,
-      transformSteps: [{
-        stepIndex: 0,
-        stepKind: "extracted",
-        transformerId: "fixture-transformer",
-        transformerVersion: "v1",
-      }],
-      relations: [{
-        parentRunId,
-        parentArtifactKey: "parent.json",
-        relation: "input",
-        transformerId: "fixture-transformer",
-        transformerVersion: "v1",
-      }],
+      transformSteps: [
+        {
+          stepIndex: 0,
+          stepKind: "extracted",
+          transformerId: "fixture-transformer",
+          transformerVersion: "v1",
+        },
+      ],
+      relations: [
+        {
+          parentRunId,
+          parentArtifactKey: "parent.json",
+          relation: "input",
+          transformerId: "fixture-transformer",
+          transformerVersion: "v1",
+        },
+      ],
     });
     expect(childResponse.status).toBe(201);
     const relation = await env.DB.prepare(`
@@ -575,7 +670,9 @@ describe("raw-evidence Worker", () => {
       JOIN fetch_artifacts parent ON parent.id = relation.parent_artifact_id
       JOIN fetch_artifacts child ON child.id = relation.child_artifact_id
       WHERE child.fetch_run_id = ?
-    `).bind(childRunId).first();
+    `)
+      .bind(childRunId)
+      .first();
     expect(relation).toEqual({ parent_run_id: parentRunId, child_run_id: childRunId });
   });
 
@@ -595,10 +692,14 @@ describe("raw-evidence Worker", () => {
     };
     expect((await post(`/v1/runs/${runId}/attempts`, attempt)).status).toBe(201);
     expect((await post(`/v1/runs/${runId}/attempts`, attempt)).status).toBe(201);
-    expect((await post(`/v1/runs/${runId}/attempts`, {
-      ...attempt,
-      completedAtMs: attempt.completedAtMs + 1,
-    })).status).toBe(409);
+    expect(
+      (
+        await post(`/v1/runs/${runId}/attempts`, {
+          ...attempt,
+          completedAtMs: attempt.completedAtMs + 1,
+        })
+      ).status,
+    ).toBe(409);
     await post(`/v1/runs/${runId}/reports`, {
       reportKey: "terminal",
       reportKind: "terminal",
@@ -613,12 +714,16 @@ describe("raw-evidence Worker", () => {
       startedAtMs: attempt.startedAtMs,
     });
     expect(seal.status).toBe(409);
-    expect(await env.DB.prepare(
-      "SELECT count(*) AS count FROM fetch_run_seals WHERE fetch_run_id = ?",
-    ).bind(runId).first<{ count: number }>()).toEqual({ count: 0 });
-    expect(await env.DB.prepare(
-      "SELECT count(*) AS count FROM run_inventories WHERE fetch_run_id = ?",
-    ).bind(runId).first<{ count: number }>()).toEqual({ count: 0 });
+    expect(
+      await env.DB.prepare("SELECT count(*) AS count FROM fetch_run_seals WHERE fetch_run_id = ?")
+        .bind(runId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
+    expect(
+      await env.DB.prepare("SELECT count(*) AS count FROM run_inventories WHERE fetch_run_id = ?")
+        .bind(runId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
   });
 
   it("serializes concurrent exact and conflicting seals without partial attempts", async () => {
@@ -635,14 +740,22 @@ describe("raw-evidence Worker", () => {
       declarationBasis: "operator",
       externalAttemptId: "attempt-race-exact",
     };
-    const exactStatuses = (await Promise.all([
-      post(`/v1/runs/${exactRunId}/seal`, exactPayload),
-      post(`/v1/runs/${exactRunId}/seal`, exactPayload),
-    ])).map((response) => response.status).sort();
+    const exactStatuses = (
+      await Promise.all([
+        post(`/v1/runs/${exactRunId}/seal`, exactPayload),
+        post(`/v1/runs/${exactRunId}/seal`, exactPayload),
+      ])
+    )
+      .map((response) => response.status)
+      .sort();
     expect(exactStatuses).toEqual([201, 201]);
-    expect(await env.DB.prepare(`
+    expect(
+      await env.DB.prepare(`
       SELECT count(*) AS count FROM ingestion_attempts WHERE fetch_run_id = ?
-    `).bind(exactRunId).first<{ count: number }>()).toEqual({ count: 1 });
+    `)
+        .bind(exactRunId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 1 });
 
     const conflictRunId = await createTestRun("api-session-seal-race-conflict");
     await post(`/v1/runs/${conflictRunId}/reports`, {
@@ -652,18 +765,30 @@ describe("raw-evidence Worker", () => {
       declaredArtifactCount: 0,
       artifactCountScope: "all_catalogued",
     });
-    const conflictStatuses = (await Promise.all([
-      post(`/v1/runs/${conflictRunId}/seal`, {
-        artifacts: [], declarationBasis: "operator", externalAttemptId: "attempt-left",
-      }),
-      post(`/v1/runs/${conflictRunId}/seal`, {
-        artifacts: [], declarationBasis: "directory_scan", externalAttemptId: "attempt-right",
-      }),
-    ])).map((response) => response.status).sort();
+    const conflictStatuses = (
+      await Promise.all([
+        post(`/v1/runs/${conflictRunId}/seal`, {
+          artifacts: [],
+          declarationBasis: "operator",
+          externalAttemptId: "attempt-left",
+        }),
+        post(`/v1/runs/${conflictRunId}/seal`, {
+          artifacts: [],
+          declarationBasis: "directory_scan",
+          externalAttemptId: "attempt-right",
+        }),
+      ])
+    )
+      .map((response) => response.status)
+      .sort();
     expect(conflictStatuses).toEqual([201, 409]);
-    expect(await env.DB.prepare(`
+    expect(
+      await env.DB.prepare(`
       SELECT count(*) AS count FROM ingestion_attempts WHERE fetch_run_id = ?
-    `).bind(conflictRunId).first<{ count: number }>()).toEqual({ count: 1 });
+    `)
+        .bind(conflictRunId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 1 });
   });
 
   it("keeps a transient staged-item batch failure retryable without residue", async () => {
@@ -679,7 +804,7 @@ describe("raw-evidence Worker", () => {
       byteSize: object.byteSize,
     });
     const descriptorSha256 = String(
-      (await artifactResponse.json() as { descriptorSha256: string }).descriptorSha256,
+      ((await artifactResponse.json()) as { descriptorSha256: string }).descriptorSha256,
     );
     const items = [{ artifactKey: "staged-item.json", sha256: object.sha256, descriptorSha256 }];
     const inventorySha256 = await sha256Hex(canonicalJson(items));
@@ -688,17 +813,24 @@ describe("raw-evidence Worker", () => {
       expectedArtifactCount: 1,
       declarationBasis: "capture_index",
     });
-    const { inventoryId } = await begin.json() as { inventoryId: number };
-    const batchSpy = vi.spyOn(env.DB, "batch")
+    const { inventoryId } = (await begin.json()) as { inventoryId: number };
+    const batchSpy = vi
+      .spyOn(env.DB, "batch")
       .mockRejectedValueOnce(new Error("synthetic transient D1 staged-item failure"));
-    expect((await post(`/v1/runs/${runId}/inventories/${inventoryId}/items`, { items })).status)
-      .toBe(500);
+    expect(
+      (await post(`/v1/runs/${runId}/inventories/${inventoryId}/items`, { items })).status,
+    ).toBe(500);
     batchSpy.mockRestore();
-    expect(await env.DB.prepare(
-      "SELECT count(*) AS count FROM run_inventory_items WHERE inventory_id = ?",
-    ).bind(inventoryId).first<{ count: number }>()).toEqual({ count: 0 });
-    expect((await post(`/v1/runs/${runId}/inventories/${inventoryId}/items`, { items })).status)
-      .toBe(201);
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS count FROM run_inventory_items WHERE inventory_id = ?",
+      )
+        .bind(inventoryId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
+    expect(
+      (await post(`/v1/runs/${runId}/inventories/${inventoryId}/items`, { items })).status,
+    ).toBe(201);
   });
 
   it("resumes a staged inventory and seals it after exact chunk replay", async () => {
@@ -709,7 +841,7 @@ describe("raw-evidence Worker", () => {
       terminalReportRequired: true,
     });
     expect(unitResponse.status).toBe(201);
-    const { unitId } = await unitResponse.json() as { unitId: number };
+    const { unitId } = (await unitResponse.json()) as { unitId: number };
     const object = await uploadText(runId, "staged");
     const artifacts: Array<{ artifactKey: string; sha256: string; descriptorSha256: string }> = [];
     for (let index = 0; index < 35; index += 1) {
@@ -729,7 +861,9 @@ describe("raw-evidence Worker", () => {
       artifacts.push({
         artifactKey,
         sha256: object.sha256,
-        descriptorSha256: String((await response.json() as { descriptorSha256: string }).descriptorSha256),
+        descriptorSha256: String(
+          ((await response.json()) as { descriptorSha256: string }).descriptorSha256,
+        ),
       });
     }
     const inventorySha256 = await sha256Hex(canonicalJson(artifacts));
@@ -739,15 +873,21 @@ describe("raw-evidence Worker", () => {
       declarationBasis: "capture_index",
     });
     expect(begin.status).toBe(201);
-    const { inventoryId } = await begin.json() as { inventoryId: number };
+    const { inventoryId } = (await begin.json()) as { inventoryId: number };
     const firstChunk = { items: artifacts.slice(0, 30) };
-    expect((await post(`/v1/runs/${runId}/inventories/${inventoryId}/items`, firstChunk)).status).toBe(201);
+    expect(
+      (await post(`/v1/runs/${runId}/inventories/${inventoryId}/items`, firstChunk)).status,
+    ).toBe(201);
     const replay = await post(`/v1/runs/${runId}/inventories/${inventoryId}/items`, firstChunk);
     expect(replay.status).toBe(201);
-    expect((await replay.json() as { accepted: number }).accepted).toBe(0);
-    expect((await post(`/v1/runs/${runId}/inventories/${inventoryId}/items`, {
-      items: artifacts.slice(30),
-    })).status).toBe(201);
+    expect(((await replay.json()) as { accepted: number }).accepted).toBe(0);
+    expect(
+      (
+        await post(`/v1/runs/${runId}/inventories/${inventoryId}/items`, {
+          items: artifacts.slice(30),
+        })
+      ).status,
+    ).toBe(201);
     const status = await SELF.fetch(
       `https://example.test/v1/runs/${runId}/inventories/${inventoryId}`,
       { headers: { authorization: AUTH } },
@@ -775,13 +915,13 @@ describe("raw-evidence Worker", () => {
       externalAttemptId: "attempt-staged",
     });
     expect(seal.status).toBe(201);
-    expect((await seal.json() as { sealed: boolean }).sealed).toBe(true);
+    expect(((await seal.json()) as { sealed: boolean }).sealed).toBe(true);
     const sealedReplay = await post(
       `/v1/runs/${runId}/inventories/${inventoryId}/items`,
       firstChunk,
     );
     expect(sealedReplay.status).toBe(201);
-    expect((await sealedReplay.json() as { accepted: number }).accepted).toBe(0);
+    expect(((await sealedReplay.json()) as { accepted: number }).accepted).toBe(0);
   }, 30_000);
 
   it("keeps one acquisition session across multiple source-specific runs", async () => {
@@ -803,10 +943,12 @@ describe("raw-evidence Worker", () => {
     const ids = await env.DB.prepare(`
       SELECT acquisition_session_id FROM fetch_runs
       WHERE id IN (?, ?) ORDER BY id
-    `).bind(
-      Number((await first.json() as { runId: number }).runId),
-      Number((await second.json() as { runId: number }).runId),
-    ).all<{ acquisition_session_id: number }>();
+    `)
+      .bind(
+        Number(((await first.json()) as { runId: number }).runId),
+        Number(((await second.json()) as { runId: number }).runId),
+      )
+      .all<{ acquisition_session_id: number }>();
     expect(new Set(ids.results.map((row) => row.acquisition_session_id)).size).toBe(1);
   });
 

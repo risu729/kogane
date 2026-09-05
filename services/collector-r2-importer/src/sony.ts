@@ -25,15 +25,18 @@ const MAX_CENTRAL_ARTIFACTS = 10_000;
 const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
 const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
 export const SONY_TRANSFER_CHUNK_SIZE = 10;
-const CURRENCIES = [
-  "usd", "eur", "gbp", "aud", "nzd", "cad", "chf", "hkd", "zar", "sek",
-] as const;
-const MANIFEST_KEY = /^raw\/sony-bank\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
+const CURRENCIES = ["usd", "eur", "gbp", "aud", "nzd", "cad", "chf", "hkd", "zar", "sek"] as const;
+const MANIFEST_KEY =
+  /^raw\/sony-bank\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const DATASET = /^[a-z0-9-]{1,200}$/u;
 const COOKIE_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,100}$/u;
 const CSV_MEDIA = new Set([
-  "application/csv", "application/octet-stream", "application/x-csv", "text/csv", "text/plain",
+  "application/csv",
+  "application/octet-stream",
+  "application/x-csv",
+  "text/csv",
+  "text/plain",
 ]);
 
 type JsonObject = Record<string, unknown>;
@@ -126,19 +129,30 @@ export async function importSonyRun(options: {
   let expectedArtifactCount = 0;
   let phase = "source_validation";
   const runId = options.manifestKey.match(MANIFEST_KEY)?.[4];
-  const log = (outcome: "started" | "deferred" | "sealed" | "failed", nextOffset?: number,
-    reason?: SonyImportDeferred["reason"]) => {
+  const log = (
+    outcome: "started" | "deferred" | "sealed" | "failed",
+    nextOffset?: number,
+    reason?: SonyImportDeferred["reason"],
+  ) => {
     try {
-      console[outcome === "failed" ? "error" : "log"](JSON.stringify({
-        event: "sony-bank-import-diagnostic", source: SOURCE, attemptId,
-        ...(runId ? { runId } : {}), phase, outcome,
-        durationMs: Math.max(0, Date.now() - startedAtMs),
-        expectedArtifactCount, acceptedArtifactCount, reusedArtifactCount,
-        ...(centralRunId !== undefined ? { centralRunId } : {}),
-        ...(nextOffset !== undefined ? { nextOffset } : {}),
-        ...(reason ? { reason } : {}),
-        ...(outcome === "failed" ? { errorCode: `${phase}_failed` } : {}),
-      }));
+      console[outcome === "failed" ? "error" : "log"](
+        JSON.stringify({
+          event: "sony-bank-import-diagnostic",
+          source: SOURCE,
+          attemptId,
+          ...(runId ? { runId } : {}),
+          phase,
+          outcome,
+          durationMs: Math.max(0, Date.now() - startedAtMs),
+          expectedArtifactCount,
+          acceptedArtifactCount,
+          reusedArtifactCount,
+          ...(centralRunId !== undefined ? { centralRunId } : {}),
+          ...(nextOffset !== undefined ? { nextOffset } : {}),
+          ...(reason ? { reason } : {}),
+          ...(outcome === "failed" ? { errorCode: `${phase}_failed` } : {}),
+        }),
+      );
     } catch {
       // Logging must never interrupt evidence transfer or replace its failure.
     }
@@ -154,16 +168,29 @@ export async function importSonyRun(options: {
     }
     if (expectedArtifactCount > MAX_CENTRAL_ARTIFACTS) {
       log("deferred", offset, "central_inventory_limit");
-      return deferred(expectedArtifactCount, options.manifestKey, "central_inventory_limit", offset);
+      return deferred(
+        expectedArtifactCount,
+        options.manifestKey,
+        "central_inventory_limit",
+        offset,
+      );
     }
     const validated = await validateLoadedSonyRun(options.bucket, options.manifestKey, loaded);
-    if (options.immediate !== false && offset === 0 && expectedArtifactCount > SONY_TRANSFER_CHUNK_SIZE) {
+    if (
+      options.immediate !== false &&
+      offset === 0 &&
+      expectedArtifactCount > SONY_TRANSFER_CHUNK_SIZE
+    ) {
       log("deferred", 0, "worker_invocation_limit");
       return deferred(expectedArtifactCount, options.manifestKey, "worker_invocation_limit", 0);
     }
 
     phase = "central_create";
-    const central = new CentralClient(options.centralService, options.centralToken, CENTRAL_CLIENT_ID);
+    const central = new CentralClient(
+      options.centralService,
+      options.centralToken,
+      CENTRAL_CLIENT_ID,
+    );
     centralRunId = await central.createRun({
       producerId: PRODUCER,
       sourceId: SOURCE,
@@ -178,12 +205,21 @@ export async function importSonyRun(options: {
     });
 
     phase = "inventory_plan";
-    const plans = await artifactPlans(validated, unitId, options.fingerprintKey, options.manifestKey);
-    const inventory = plans.map((plan) => plan.inventory).sort((left, right) =>
-      binaryCompare(left.artifactKey, right.artifactKey)
+    const plans = await artifactPlans(
+      validated,
+      unitId,
+      options.fingerprintKey,
+      options.manifestKey,
     );
+    const inventory = plans
+      .map((plan) => plan.inventory)
+      .sort((left, right) => binaryCompare(left.artifactKey, right.artifactKey));
     const inventorySha256 = await sha256Hex(canonicalJson(inventory as unknown as JsonValue));
-    const inventoryId = await central.beginInventory(centralRunId, inventorySha256, inventory.length);
+    const inventoryId = await central.beginInventory(
+      centralRunId,
+      inventorySha256,
+      inventory.length,
+    );
 
     const end = Math.min(offset + SONY_TRANSFER_CHUNK_SIZE, plans.length);
     const chunkInventory: CentralInventoryItem[] = [];
@@ -267,7 +303,11 @@ export async function importSonyRun(options: {
     log("failed");
     if (centralRunId !== undefined) {
       try {
-        const central = new CentralClient(options.centralService, options.centralToken, CENTRAL_CLIENT_ID);
+        const central = new CentralClient(
+          options.centralService,
+          options.centralToken,
+          CENTRAL_CLIENT_ID,
+        );
         const transferred = acceptedArtifactCount + reusedArtifactCount;
         await central.recordAttempt(centralRunId, {
           externalAttemptId: attemptId,
@@ -306,7 +346,10 @@ function deferred(
   };
 }
 
-export async function validateSonyRun(bucket: R2Bucket, manifestKey: string): Promise<ValidatedRun> {
+export async function validateSonyRun(
+  bucket: R2Bucket,
+  manifestKey: string,
+): Promise<ValidatedRun> {
   return validateLoadedSonyRun(bucket, manifestKey, await loadSonyManifest(bucket, manifestKey));
 }
 
@@ -356,8 +399,16 @@ export function parseSonyManifest(bytes: Uint8Array, manifestKey: string): SonyM
   }
   const input = record(parsed, "manifest_shape_invalid");
   exactKeys(input, [
-    "schemaVersion", "source", "runId", "startedAt", "completedAt", "status",
-    "window", "transactionCount", "artifacts", "failures",
+    "schemaVersion",
+    "source",
+    "runId",
+    "startedAt",
+    "completedAt",
+    "status",
+    "window",
+    "transactionCount",
+    "artifacts",
+    "failures",
   ]);
   if (input.schemaVersion !== SCHEMA_VERSION && input.schemaVersion !== LEGACY_SCHEMA_VERSION) {
     invalid("manifest_schema_invalid");
@@ -373,7 +424,11 @@ export function parseSonyManifest(bytes: Uint8Array, manifestKey: string): SonyM
   const window = parseWindow(input.window);
   const transactionCount = nonNegativeInteger(input.transactionCount);
   if (transactionCount === null) invalid("manifest_transaction_count_invalid");
-  const status = oneOf(input.status, ["success", "partial", "failed"] as const, "manifest_status_invalid");
+  const status = oneOf(
+    input.status,
+    ["success", "partial", "failed"] as const,
+    "manifest_status_invalid",
+  );
   if (!Array.isArray(input.artifacts) || input.artifacts.length > MAX_SOURCE_ARTIFACTS) {
     invalid("manifest_artifacts_invalid");
   }
@@ -385,12 +440,17 @@ export function parseSonyManifest(bytes: Uint8Array, manifestKey: string): SonyM
   const failures = input.failures.map(parseFailure);
   const artifactNames = artifacts.map((artifact) => artifact.dataset);
   if (new Set(artifactNames).size !== artifactNames.length) invalid("manifest_duplicate_dataset");
-  const r2Names = failures.filter((failure) => failure.operation.startsWith("r2:"))
+  const r2Names = failures
+    .filter((failure) => failure.operation.startsWith("r2:"))
     .map((failure) => failure.operation.slice(3));
-  if (new Set(r2Names).size !== r2Names.length || r2Names.some((name) => artifactNames.includes(name))) {
+  if (
+    new Set(r2Names).size !== r2Names.length ||
+    r2Names.some((name) => artifactNames.includes(name))
+  ) {
     invalid("manifest_failure_dataset_conflict");
   }
-  const expectedStatus = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
+  const expectedStatus =
+    failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
   if (status !== expectedStatus) invalid("manifest_status_mismatch");
   return {
     schemaVersion: input.schemaVersion as SonyManifest["schemaVersion"],
@@ -411,7 +471,10 @@ function parseWindow(value: unknown): { from: string; to: string } {
   exactKeys(input, ["from", "to"]);
   const from = date(input.from, "manifest_window_invalid");
   const to = date(input.to, "manifest_window_invalid");
-  const days = Math.floor((Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / 86_400_000) + 1;
+  const days =
+    Math.floor(
+      (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / 86_400_000,
+    ) + 1;
   if (days < 1 || days > 366) invalid("manifest_window_invalid");
   return { from, to };
 }
@@ -430,8 +493,11 @@ function parseArtifact(value: unknown, prefix: string): SonyArtifactManifest {
   if (typeof input.sha256 !== "string" || !SHA256.test(input.sha256)) {
     invalid("manifest_artifact_sha_invalid");
   }
-  if (!Number.isSafeInteger(input.bytes) || (input.bytes as number) < 0 ||
-      (input.bytes as number) > MAX_ARTIFACT_BYTES) {
+  if (
+    !Number.isSafeInteger(input.bytes) ||
+    (input.bytes as number) < 0 ||
+    (input.bytes as number) > MAX_ARTIFACT_BYTES
+  ) {
     invalid("manifest_artifact_size_invalid");
   }
   return {
@@ -446,14 +512,26 @@ function parseArtifact(value: unknown, prefix: string): SonyArtifactManifest {
 function parseFailure(value: unknown): SonyFailure {
   const input = record(value, "manifest_failure_invalid");
   exactKeys(input, ["operation", "errorType", "message"]);
-  if (typeof input.operation !== "string" ||
-      !(input.operation === "collect" || (input.operation.startsWith("r2:") && DATASET.test(input.operation.slice(3))))) {
+  if (
+    typeof input.operation !== "string" ||
+    !(
+      input.operation === "collect" ||
+      (input.operation.startsWith("r2:") && DATASET.test(input.operation.slice(3)))
+    )
+  ) {
     invalid("manifest_failure_operation_invalid");
   }
-  if (typeof input.errorType !== "string" || !/^[A-Za-z][A-Za-z0-9_.-]{0,99}$/u.test(input.errorType)) {
+  if (
+    typeof input.errorType !== "string" ||
+    !/^[A-Za-z][A-Za-z0-9_.-]{0,99}$/u.test(input.errorType)
+  ) {
     invalid("manifest_failure_type_invalid");
   }
-  if (typeof input.message !== "string" || input.message.length > 300 || secretText(input.message)) {
+  if (
+    typeof input.message !== "string" ||
+    input.message.length > 300 ||
+    secretText(input.message)
+  ) {
     invalid("manifest_failure_message_invalid");
   }
   return { operation: input.operation, errorType: input.errorType, message: input.message };
@@ -462,8 +540,13 @@ function parseFailure(value: unknown): SonyFailure {
 function validateCompleteness(manifest: SonyManifest, artifacts: VerifiedArtifact[]): void {
   const collectFailures = manifest.failures.filter((failure) => failure.operation === "collect");
   if (collectFailures.length > 0) {
-    if (collectFailures.length !== 1 || manifest.failures.length !== 1 || artifacts.length !== 0 ||
-        manifest.transactionCount !== 0 || manifest.status !== "failed") {
+    if (
+      collectFailures.length !== 1 ||
+      manifest.failures.length !== 1 ||
+      artifacts.length !== 0 ||
+      manifest.transactionCount !== 0 ||
+      manifest.status !== "failed"
+    ) {
       invalid("manifest_collect_failure_mismatch");
     }
     return;
@@ -480,18 +563,24 @@ function validateCompleteness(manifest: SonyManifest, artifacts: VerifiedArtifac
   const foreignPages = new Map<string, string[]>();
   if (!legacy) {
     for (const currency of CURRENCIES) {
-      foreignPages.set(currency, pageNames(
-        declared,
-        new RegExp(`^foreign-history-${currency}-page-(\\d{4})$`, "u"),
-        `foreign-history-${currency}-page`,
-      ));
+      foreignPages.set(
+        currency,
+        pageNames(
+          declared,
+          new RegExp(`^foreign-history-${currency}-page-(\\d{4})$`, "u"),
+          `foreign-history-${currency}-page`,
+        ),
+      );
     }
   }
   const walletNames = [...declared].filter((name) => /^wallet-history-\d{6}$/u.test(name));
   walletNames.sort((left, right) => right.localeCompare(left));
-  if ((!legacy && walletNames.length < 1) || walletNames.length > 15 ||
-      new Set(walletNames).size !== walletNames.length ||
-      walletNames.some((name) => !validMonth(name.slice(-6)))) {
+  if (
+    (!legacy && walletNames.length < 1) ||
+    walletNames.length > 15 ||
+    new Set(walletNames).size !== walletNames.length ||
+    walletNames.some((name) => !validMonth(name.slice(-6)))
+  ) {
     invalid("manifest_wallet_months_invalid");
   }
   const expected = ["gross-balance", ...yenPages];
@@ -521,7 +610,12 @@ function validateCompleteness(manifest: SonyManifest, artifacts: VerifiedArtifac
     invalid("manifest_dataset_completeness_mismatch");
   }
   const expectedPresent = expected.filter((name) => present.has(name));
-  if (!sameStrings(expectedPresent, artifacts.map((artifact) => artifact.artifact.dataset))) {
+  if (
+    !sameStrings(
+      expectedPresent,
+      artifacts.map((artifact) => artifact.artifact.dataset),
+    )
+  ) {
     invalid("manifest_dataset_order_invalid");
   }
   const expectedFailed = expected.filter((name) => !present.has(name));
@@ -538,46 +632,60 @@ function validateCompleteness(manifest: SonyManifest, artifacts: VerifiedArtifac
   if (summaries.length > 1) invalid("summary_duplicate");
   const summary = summaries[0]?.summary;
   if (summary) {
-    if (!sameWindow(summary.window, manifest.window) ||
-        summary.transactionCount !== manifest.transactionCount ||
-        summary.pageCount !== yenPages.length ||
-        (!legacy && summary.foreignCurrencyCount !== CURRENCIES.length) ||
-        (!legacy && summary.foreignPageCount !== [...foreignPages.values()].reduce((sum, pages) => sum + pages.length, 0)) ||
-        (!legacy && summary.walletMonthCount !== walletNames.length)) {
+    if (
+      !sameWindow(summary.window, manifest.window) ||
+      summary.transactionCount !== manifest.transactionCount ||
+      summary.pageCount !== yenPages.length ||
+      (!legacy && summary.foreignCurrencyCount !== CURRENCIES.length) ||
+      (!legacy &&
+        summary.foreignPageCount !==
+          [...foreignPages.values()].reduce((sum, pages) => sum + pages.length, 0)) ||
+      (!legacy && summary.walletMonthCount !== walletNames.length)
+    ) {
       invalid("summary_manifest_mismatch");
     }
     if (!legacy) {
-      const totals = CURRENCIES.map((currency) =>
-        present.get(foreignPages.get(currency)![0] ?? "")?.page?.declaredTotal ?? null
+      const totals = CURRENCIES.map(
+        (currency) =>
+          present.get(foreignPages.get(currency)![0] ?? "")?.page?.declaredTotal ?? null,
       );
-      if (totals.every((value): value is number => value !== null) &&
-          totals.reduce((sum, value) => sum + value, 0) !== summary.foreignTransactionCount) {
+      if (
+        totals.every((value): value is number => value !== null) &&
+        totals.reduce((sum, value) => sum + value, 0) !== summary.foreignTransactionCount
+      ) {
         invalid("summary_foreign_count_mismatch");
       }
     }
   }
 
   const selectorSets = artifacts.flatMap((artifact) =>
-    artifact.walletMonths ? [artifact.walletMonths] : []
+    artifact.walletMonths ? [artifact.walletMonths] : [],
   );
   for (const set of selectorSets) {
     if (!sameStrings(set, walletNames)) invalid("wallet_selector_mismatch");
   }
   for (const artifact of artifacts) {
-    if (artifact.walletSelectedMonth !== undefined &&
-        artifact.walletSelectedMonth !== artifact.artifact.dataset.slice(-6)) {
+    if (
+      artifact.walletSelectedMonth !== undefined &&
+      artifact.walletSelectedMonth !== artifact.artifact.dataset.slice(-6)
+    ) {
       invalid("wallet_selected_month_mismatch");
     }
   }
 }
 
 function pageNames(declared: Set<string>, pattern: RegExp, prefix: string): string[] {
-  const indices = [...declared].flatMap((name) => {
-    const match = pattern.exec(name);
-    return match ? [Number(match[1])] : [];
-  }).sort((left, right) => left - right);
-  if (indices.length < 1 || indices.length > MAX_HISTORY_PAGES ||
-      indices.some((value, index) => value !== index + 1)) {
+  const indices = [...declared]
+    .flatMap((name) => {
+      const match = pattern.exec(name);
+      return match ? [Number(match[1])] : [];
+    })
+    .sort((left, right) => left - right);
+  if (
+    indices.length < 1 ||
+    indices.length > MAX_HISTORY_PAGES ||
+    indices.some((value, index) => value !== index + 1)
+  ) {
     invalid("manifest_page_sequence_invalid");
   }
   return indices.map((index) => `${prefix}-${String(index).padStart(4, "0")}`);
@@ -589,8 +697,12 @@ function validatePageGroup(
   manifestTotal: number | null,
   _group: string,
 ): void {
-  const parsed = names.flatMap((name) => present.get(name)?.page ? [present.get(name)!.page!] : []);
-  const totals = parsed.flatMap((page) => page.declaredTotal === null ? [] : [page.declaredTotal]);
+  const parsed = names.flatMap((name) =>
+    present.get(name)?.page ? [present.get(name)!.page!] : [],
+  );
+  const totals = parsed.flatMap((page) =>
+    page.declaredTotal === null ? [] : [page.declaredTotal],
+  );
   if (new Set(totals).size > 1) invalid("artifact_page_total_mismatch");
   const declaredTotal = totals[0] ?? null;
   if (manifestTotal !== null && declaredTotal !== null && manifestTotal !== declaredTotal) {
@@ -601,7 +713,10 @@ function validatePageGroup(
     const expectedPages = Math.max(1, Math.ceil(effectiveTotal / PAGE_SIZE));
     if (names.length !== expectedPages) invalid("artifact_page_count_mismatch");
     for (const page of parsed) {
-      const expectedRows = Math.max(0, Math.min(PAGE_SIZE, effectiveTotal - ((page.index - 1) * PAGE_SIZE)));
+      const expectedRows = Math.max(
+        0,
+        Math.min(PAGE_SIZE, effectiveTotal - (page.index - 1) * PAGE_SIZE),
+      );
       if (page.rowCount !== expectedRows) invalid("artifact_page_rows_mismatch");
     }
   }
@@ -673,12 +788,23 @@ function parseArtifactPayload(
 function parseSummary(value: unknown, schemaVersion: SonyManifest["schemaVersion"]): Summary {
   const input = conflictRecord(value, "summary_invalid");
   const legacy = schemaVersion === LEGACY_SCHEMA_VERSION;
-  conflictExactKeys(input, legacy
-    ? ["schemaVersion", "window", "transactionCount", "pageCount", "cookieNames"]
-    : [
-        "schemaVersion", "window", "transactionCount", "pageCount", "foreignCurrencyCount",
-        "foreignTransactionCount", "foreignPageCount", "walletMonthCount", "cookieNames",
-      ], "summary_invalid");
+  conflictExactKeys(
+    input,
+    legacy
+      ? ["schemaVersion", "window", "transactionCount", "pageCount", "cookieNames"]
+      : [
+          "schemaVersion",
+          "window",
+          "transactionCount",
+          "pageCount",
+          "foreignCurrencyCount",
+          "foreignTransactionCount",
+          "foreignPageCount",
+          "walletMonthCount",
+          "cookieNames",
+        ],
+    "summary_invalid",
+  );
   const expectedSummaryVersion = legacy ? LEGACY_SUMMARY_VERSION : SUMMARY_VERSION;
   if (input.schemaVersion !== expectedSummaryVersion) {
     throw new ImportError(409, "summary_schema_invalid");
@@ -686,19 +812,36 @@ function parseSummary(value: unknown, schemaVersion: SonyManifest["schemaVersion
   const window = conflictWindow(input.window);
   const transactionCount = requiredCount(input.transactionCount, "summary_count_invalid");
   const pageCount = requiredCount(input.pageCount, "summary_count_invalid");
-  const foreignCurrencyCount = legacy ? 0 : requiredCount(input.foreignCurrencyCount, "summary_count_invalid");
-  const foreignTransactionCount = legacy ? 0 : requiredCount(input.foreignTransactionCount, "summary_count_invalid");
-  const foreignPageCount = legacy ? 0 : requiredCount(input.foreignPageCount, "summary_count_invalid");
-  const walletMonthCount = legacy ? 0 : requiredCount(input.walletMonthCount, "summary_count_invalid");
-  if (!Array.isArray(input.cookieNames) || input.cookieNames.length > 100 ||
-      input.cookieNames.some((name) => typeof name !== "string" || !COOKIE_NAME.test(name)) ||
-      !sameStrings(input.cookieNames as string[], [...(input.cookieNames as string[])].sort()) ||
-      new Set(input.cookieNames as string[]).size !== input.cookieNames.length) {
+  const foreignCurrencyCount = legacy
+    ? 0
+    : requiredCount(input.foreignCurrencyCount, "summary_count_invalid");
+  const foreignTransactionCount = legacy
+    ? 0
+    : requiredCount(input.foreignTransactionCount, "summary_count_invalid");
+  const foreignPageCount = legacy
+    ? 0
+    : requiredCount(input.foreignPageCount, "summary_count_invalid");
+  const walletMonthCount = legacy
+    ? 0
+    : requiredCount(input.walletMonthCount, "summary_count_invalid");
+  if (
+    !Array.isArray(input.cookieNames) ||
+    input.cookieNames.length > 100 ||
+    input.cookieNames.some((name) => typeof name !== "string" || !COOKIE_NAME.test(name)) ||
+    !sameStrings(input.cookieNames as string[], [...(input.cookieNames as string[])].sort()) ||
+    new Set(input.cookieNames as string[]).size !== input.cookieNames.length
+  ) {
     throw new ImportError(409, "summary_cookie_names_invalid");
   }
   return {
-    window, transactionCount, pageCount, foreignCurrencyCount, foreignTransactionCount,
-    foreignPageCount, walletMonthCount, cookieNames: input.cookieNames as string[],
+    window,
+    transactionCount,
+    pageCount,
+    foreignCurrencyCount,
+    foreignTransactionCount,
+    foreignPageCount,
+    walletMonthCount,
+    cookieNames: input.cookieNames as string[],
   };
 }
 
@@ -729,12 +872,7 @@ async function artifactPlans(
       },
     });
   }
-  const descriptor = await manifestDescriptor(
-    validated,
-    manifestKey,
-    unitId,
-    fingerprintKey,
-  );
+  const descriptor = await manifestDescriptor(validated, manifestKey, unitId, fingerprintKey);
   plans.push({
     source: null,
     bytes: validated.manifestBytes.byteLength,
@@ -760,25 +898,54 @@ async function dataDescriptor(
   const csv = dataset.endsWith("-csv");
   const wallet = dataset.startsWith("wallet-history-");
   const summary = dataset === "collection-summary";
-  const role = summary ? "collector_summary" : wallet ? "sanitized_provider_capture" : csv ? "provider_export" : "provider_response";
-  const fidelity = summary ? "generated" : wallet ? "transformed" : csv ? "exact" : "transport_decoded";
+  const role = summary
+    ? "collector_summary"
+    : wallet
+      ? "sanitized_provider_capture"
+      : csv
+        ? "provider_export"
+        : "provider_response";
+  const fidelity = summary
+    ? "generated"
+    : wallet
+      ? "transformed"
+      : csv
+        ? "exact"
+        : "transport_decoded";
   const lineage = wallet ? "source_not_retained_for_security" : "not_applicable";
   const ranges = wallet
-    ? [{
-        rangeKey: "statement-month", rangeKind: "selector", precision: "month",
-        startValue: `${dataset.slice(-6, -2)}-${dataset.slice(-2)}`, endValue: `${dataset.slice(-6, -2)}-${dataset.slice(-2)}`,
-        startInclusive: 1, endInclusive: 1, basis: "source",
-      }]
-    : (dataset.includes("history") || summary)
-      ? [{
-          rangeKey: "request-window", rangeKind: "requested", precision: "date",
-          startValue: manifest.window.from, endValue: manifest.window.to,
-          startInclusive: 1, endInclusive: 1, basis: "manifest",
-        }]
+    ? [
+        {
+          rangeKey: "statement-month",
+          rangeKind: "selector",
+          precision: "month",
+          startValue: `${dataset.slice(-6, -2)}-${dataset.slice(-2)}`,
+          endValue: `${dataset.slice(-6, -2)}-${dataset.slice(-2)}`,
+          startInclusive: 1,
+          endInclusive: 1,
+          basis: "source",
+        },
+      ]
+    : dataset.includes("history") || summary
+      ? [
+          {
+            rangeKey: "request-window",
+            rangeKind: "requested",
+            precision: "date",
+            startValue: manifest.window.from,
+            endValue: manifest.window.to,
+            startInclusive: 1,
+            endInclusive: 1,
+            basis: "manifest",
+          },
+        ]
       : [];
   const transformSteps = wallet
     ? ["transport_decoded", "redacted", "reencoded"].map((stepKind, stepIndex) => ({
-        stepIndex, stepKind, transformerId: "sony-bank-worker", transformerVersion: manifest.schemaVersion,
+        stepIndex,
+        stepKind,
+        transformerId: "sony-bank-worker",
+        transformerVersion: manifest.schemaVersion,
       }))
     : [];
   return normalizedDescriptor({
@@ -880,7 +1047,11 @@ function normalizedDescriptor(input: {
 async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonObject> {
   if (!SHA256.test(fingerprintKey)) throw new ImportError(500, "fingerprint_configuration_invalid");
   const cryptoKey = await crypto.subtle.importKey(
-    "raw", ownedArrayBuffer(hexBytes(fingerprintKey)), { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+    "raw",
+    ownedArrayBuffer(hexBytes(fingerprintKey)),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
   );
   const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(key));
   return {
@@ -913,11 +1084,16 @@ async function readVerifiedArtifact(
   }
   const bytes = new Uint8Array(await object.arrayBuffer());
   assertNativeSha256(object, artifact.sha256);
-  if (await sha256Hex(bytes) !== artifact.sha256) throw new ImportError(409, "artifact_checksum_mismatch");
+  if ((await sha256Hex(bytes)) !== artifact.sha256)
+    throw new ImportError(409, "artifact_checksum_mismatch");
   return bytes;
 }
 
-async function assertExactPrefix(bucket: R2Bucket, prefix: string, expectedKeys: string[]): Promise<void> {
+async function assertExactPrefix(
+  bucket: R2Bucket,
+  prefix: string,
+  expectedKeys: string[],
+): Promise<void> {
   const actual: string[] = [];
   let cursor: string | undefined;
   do {
@@ -925,7 +1101,8 @@ async function assertExactPrefix(bucket: R2Bucket, prefix: string, expectedKeys:
     actual.push(...listed.objects.map((object) => object.key));
     cursor = listed.truncated ? listed.cursor : undefined;
     if (listed.truncated && !cursor) throw new ImportError(409, "prefix_cursor_missing");
-    if (actual.length > MAX_SOURCE_ARTIFACTS + 1) throw new ImportError(409, "prefix_inventory_too_large");
+    if (actual.length > MAX_SOURCE_ARTIFACTS + 1)
+      throw new ImportError(409, "prefix_inventory_too_large");
   } while (cursor);
   actual.sort();
   const expected = [...expectedKeys].sort();
@@ -933,7 +1110,11 @@ async function assertExactPrefix(bucket: R2Bucket, prefix: string, expectedKeys:
 }
 
 function filenameFor(dataset: string): string | null {
-  if (dataset === "gross-balance" || dataset === "collection-summary" || /-page-\d{4}$/u.test(dataset)) {
+  if (
+    dataset === "gross-balance" ||
+    dataset === "collection-summary" ||
+    /-page-\d{4}$/u.test(dataset)
+  ) {
     return `${dataset}.json`;
   }
   if (dataset === "yen-history-csv") return "yen-history.csv";
@@ -942,12 +1123,17 @@ function filenameFor(dataset: string): string | null {
     return `foreign-history-${foreignCsv[1]}.csv`;
   }
   const wallet = /^wallet-history-(\d{4})(\d{2})$/u.exec(dataset);
-  if (wallet && validMonth(`${wallet[1]}${wallet[2]}`)) return `wallet-history-${wallet[1]}-${wallet[2]}.html`;
+  if (wallet && validMonth(`${wallet[1]}${wallet[2]}`))
+    return `wallet-history-${wallet[1]}-${wallet[2]}.html`;
   return null;
 }
 
 function validMediaType(dataset: string, value: string): boolean {
-  if (/^(gross-balance|collection-summary|(yen-history|foreign-history-[a-z]{3})-page-\d{4})$/u.test(dataset)) {
+  if (
+    /^(gross-balance|collection-summary|(yen-history|foreign-history-[a-z]{3})-page-\d{4})$/u.test(
+      dataset,
+    )
+  ) {
     return value === "application/json";
   }
   if (dataset.startsWith("wallet-history-")) return value === "text/html; charset=UTF-8";
@@ -956,7 +1142,12 @@ function validMediaType(dataset: string, value: string): boolean {
 }
 
 function safeMediaType(value: string): boolean {
-  return value.length <= 255 && /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+(?:\s*;\s*charset=(?:[a-z0-9._-]+|"[a-z0-9._-]+"))?$/iu.test(value);
+  return (
+    value.length <= 255 &&
+    /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+(?:\s*;\s*charset=(?:[a-z0-9._-]+|"[a-z0-9._-]+"))?$/iu.test(
+      value,
+    )
+  );
 }
 
 function mediaTypeBase(value: string): string {
@@ -972,7 +1163,9 @@ function formatId(dataset: string): string {
 }
 
 function walletMonths(html: string): string[] {
-  const select = html.match(/<select\b[^>]*\bname\s*=\s*["']W131301\.referenceDate["'][^>]*>([\s\S]*?)<\/select>/iu)?.[1];
+  const select = html.match(
+    /<select\b[^>]*\bname\s*=\s*["']W131301\.referenceDate["'][^>]*>([\s\S]*?)<\/select>/iu,
+  )?.[1];
   if (!select) return [];
   const months: string[] = [];
   for (const match of select.matchAll(/<option\b[^>]*\bvalue\s*=\s*["'](\d{8})["'][^>]*>/giu)) {
@@ -984,14 +1177,18 @@ function walletMonths(html: string): string[] {
 }
 
 function walletSelectedMonth(html: string): string | null {
-  const select = html.match(/<select\b[^>]*\bname\s*=\s*["']W131301\.referenceDate["'][^>]*>([\s\S]*?)<\/select>/iu)?.[1];
+  const select = html.match(
+    /<select\b[^>]*\bname\s*=\s*["']W131301\.referenceDate["'][^>]*>([\s\S]*?)<\/select>/iu,
+  )?.[1];
   if (!select) return null;
-  const options = [...select.matchAll(/<option\b([^>]*)\bvalue\s*=\s*["'](\d{8})["']([^>]*)>/giu)]
-    .map((match) => ({
-      month: match[2]!.slice(0, 6),
-      selected: /(?:^|\s)selected(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?(?=\s|$)/iu
-        .test(`${match[1] ?? ""} ${match[3] ?? ""}`),
-    }));
+  const options = [
+    ...select.matchAll(/<option\b([^>]*)\bvalue\s*=\s*["'](\d{8})["']([^>]*)>/giu),
+  ].map((match) => ({
+    month: match[2]!.slice(0, 6),
+    selected: /(?:^|\s)selected(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?(?=\s|$)/iu.test(
+      `${match[1] ?? ""} ${match[3] ?? ""}`,
+    ),
+  }));
   const selected = options.filter((option) => option.selected);
   if (selected.length > 1) return null;
   return (selected[0] ?? options[0])?.month ?? null;
@@ -1009,24 +1206,34 @@ function unsafeHiddenInput(html: string): boolean {
 
 function attribute(tag: string, name: string): string {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  const match = tag.match(new RegExp(`\\b${escaped}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "iu"));
+  const match = tag.match(
+    new RegExp(`\\b${escaped}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "iu"),
+  );
   return match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
 }
 
 function containsSecretField(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsSecretField);
   if (value === null || typeof value !== "object") return false;
-  return Object.entries(value as JsonObject).some(([key, child]) =>
-    /^(loginpwd|password|csrf|debitssobindat|messagecheck)$/iu.test(key) || containsSecretField(child)
+  return Object.entries(value as JsonObject).some(
+    ([key, child]) =>
+      /^(loginpwd|password|csrf|debitssobindat|messagecheck)$/iu.test(key) ||
+      containsSecretField(child),
   );
 }
 
 function secretText(value: string): boolean {
-  return /Bearer\s+(?!\[redacted\])\S+/iu.test(value) ||
-    /(?:password|loginPwd|cookie|csrf|token)\s*=\s*(?!\[redacted\])\S+/iu.test(value);
+  return (
+    /Bearer\s+(?!\[redacted\])\S+/iu.test(value) ||
+    /(?:password|loginPwd|cookie|csrf|token)\s*=\s*(?!\[redacted\])\S+/iu.test(value)
+  );
 }
 
-function assertManifestMetadata(actual: Record<string, string> | undefined, manifest: SonyManifest, sha256: string): void {
+function assertManifestMetadata(
+  actual: Record<string, string> | undefined,
+  manifest: SonyManifest,
+  sha256: string,
+): void {
   const legacy = { source: manifest.source, status: manifest.status, runId: manifest.runId };
   if (sameMetadata(actual, legacy)) return;
   assertExactMetadata(actual, { ...legacy, sha256 }, "manifest_metadata_mismatch");
@@ -1039,24 +1246,37 @@ function assertArtifactMetadata(
 ): void {
   const legacy = { dataset: artifact.dataset, sha256: artifact.sha256 };
   if (sameMetadata(actual, legacy)) return;
-  assertExactMetadata(actual, {
-    source: SOURCE,
-    runId,
-    dataset: artifact.dataset,
-    sha256: artifact.sha256,
-  }, "artifact_metadata_mismatch");
+  assertExactMetadata(
+    actual,
+    {
+      source: SOURCE,
+      runId,
+      dataset: artifact.dataset,
+      sha256: artifact.sha256,
+    },
+    "artifact_metadata_mismatch",
+  );
 }
 
-function assertExactMetadata(actual: Record<string, string> | undefined, expected: Record<string, string>, code: string): void {
+function assertExactMetadata(
+  actual: Record<string, string> | undefined,
+  expected: Record<string, string>,
+  code: string,
+): void {
   if (!sameMetadata(actual, expected)) throw new ImportError(409, code);
 }
 
-function sameMetadata(actual: Record<string, string> | undefined, expected: Record<string, string>): boolean {
+function sameMetadata(
+  actual: Record<string, string> | undefined,
+  expected: Record<string, string>,
+): boolean {
   if (!actual) return false;
   const actualKeys = Object.keys(actual).sort();
   const expectedKeys = Object.keys(expected).sort();
-  return actualKeys.length === expectedKeys.length &&
-    actualKeys.every((key, index) => key === expectedKeys[index] && actual[key] === expected[key]);
+  return (
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, index) => key === expectedKeys[index] && actual[key] === expected[key])
+  );
 }
 
 function assertNativeSha256(object: R2ObjectBody, expected: string): void {
@@ -1084,12 +1304,16 @@ function conflictWindow(value: unknown): { from: string; to: string } {
   }
 }
 
-function sameWindow(left: { from: string; to: string }, right: { from: string; to: string }): boolean {
+function sameWindow(
+  left: { from: string; to: string },
+  right: { from: string; to: string },
+): boolean {
   return left.from === right.from && left.to === right.to;
 }
 
 function safeFailureCode(failures: SonyFailure[]): string {
-  if (failures.some((failure) => failure.operation === "collect")) return "collector-request-failed";
+  if (failures.some((failure) => failure.operation === "collect"))
+    return "collector-request-failed";
   return "staging-write-failed";
 }
 
@@ -1100,8 +1324,12 @@ function validMonth(value: string): boolean {
 }
 
 function date(value: unknown, code: string): string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value) ||
-      new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) !== value) invalid(code);
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(value) ||
+    new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) !== value
+  )
+    invalid(code);
   return value;
 }
 
@@ -1123,7 +1351,8 @@ function record(value: unknown, code: string): JsonObject {
 }
 
 function conflictRecord(value: unknown, code: string): JsonObject {
-  if (value === null || Array.isArray(value) || typeof value !== "object") throw new ImportError(409, code);
+  if (value === null || Array.isArray(value) || typeof value !== "object")
+    throw new ImportError(409, code);
   return value as JsonObject;
 }
 
@@ -1134,12 +1363,19 @@ function exactKeys(value: JsonObject, allowed: readonly string[]): void {
 
 function conflictExactKeys(value: JsonObject, allowed: readonly string[], code: string): void {
   const set = new Set(allowed);
-  if (Object.keys(value).some((key) => !set.has(key)) || Object.keys(value).length !== allowed.length) {
+  if (
+    Object.keys(value).some((key) => !set.has(key)) ||
+    Object.keys(value).length !== allowed.length
+  ) {
     throw new ImportError(409, code);
   }
 }
 
-function oneOf<const T extends readonly string[]>(value: unknown, choices: T, code: string): T[number] {
+function oneOf<const T extends readonly string[]>(
+  value: unknown,
+  choices: T,
+  code: string,
+): T[number] {
   if (typeof value !== "string" || !choices.includes(value)) invalid(code);
   return value as T[number];
 }
@@ -1164,7 +1400,8 @@ function canonical(value: JsonValue): JsonValue {
   if (Array.isArray(value)) return value.map(canonical);
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).sort(([left], [right]) => binaryCompare(left, right))
+      Object.entries(value)
+        .sort(([left], [right]) => binaryCompare(left, right))
         .map(([key, child]) => [key, canonical(child)]),
     );
   }

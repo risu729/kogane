@@ -56,19 +56,11 @@ function stringAt(value: unknown, ...path: string[]): string | null {
 }
 
 async function sha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function sanitizeFingerprint(
-  route: string,
-  response: Response,
-): Promise<FingerprintProbe> {
+async function sanitizeFingerprint(route: string, response: Response): Promise<FingerprintProbe> {
   if (!response.ok) {
     throw new Error(`${route} fingerprint endpoint returned ${response.status}`);
   }
@@ -84,11 +76,7 @@ async function sanitizeFingerprint(
     ja3Hash: stringAt(value, "tls", "ja3_hash"),
     ja4: stringAt(value, "tls", "ja4"),
     akamaiFingerprint: stringAt(value, "http2", "akamai_fingerprint"),
-    akamaiFingerprintHash: stringAt(
-      value,
-      "http2",
-      "akamai_fingerprint_hash",
-    ),
+    akamaiFingerprintHash: stringAt(value, "http2", "akamai_fingerprint_hash"),
   };
 }
 
@@ -137,9 +125,7 @@ async function tamiaConnectIp(env: Env): Promise<Response> {
   const writer = socket.writable.getWriter();
   await writer.write(
     new TextEncoder().encode(
-      "GET /?format=json HTTP/1.1\r\n" +
-        "Host: api.ipify.org\r\n" +
-        "Connection: close\r\n\r\n",
+      "GET /?format=json HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n",
     ),
   );
   writer.releaseLock();

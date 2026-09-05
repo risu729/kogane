@@ -20,9 +20,7 @@ export function NotFoundPage({ path }: { path: string }): ReactNode {
     <>
       <div className="page-head">
         <h1>ページが見つかりません</h1>
-        <p className="lede">
-          リンク先をご確認いただくか、下の一覧からお進みください。
-        </p>
+        <p className="lede">リンク先をご確認いただくか、下の一覧からお進みください。</p>
       </div>
       <section className="panel">
         <div className="panel-body">

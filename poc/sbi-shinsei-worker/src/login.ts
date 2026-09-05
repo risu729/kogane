@@ -1,19 +1,9 @@
-import {
-  AuthenticationBoundaryError,
-  LoginResponseError,
-  ResponseTooLargeError,
-} from "./errors";
-import type {
-  JscMaterial,
-  LoginSession,
-  SbiShinseiCredential,
-} from "./types";
+import { AuthenticationBoundaryError, LoginResponseError, ResponseTooLargeError } from "./errors";
+import type { JscMaterial, LoginSession, SbiShinseiCredential } from "./types";
 
 const ORIGIN = "https://bk.web.sbishinseibank.co.jp" as const;
-const LOGIN_URL =
-  `${ORIGIN}/SFC/app/ShinseiAuthenticatorRealm/login_auth_request_url`;
-const LOGIN_REFERER =
-  `${ORIGIN}/SFC/apps/services/www/SFC/desktopbrowser/default/`;
+const LOGIN_URL = `${ORIGIN}/SFC/app/ShinseiAuthenticatorRealm/login_auth_request_url`;
+const LOGIN_REFERER = `${ORIGIN}/SFC/apps/services/www/SFC/desktopbrowser/default/`;
 const MAX_LOGIN_RESPONSE_BYTES = 64 * 1024;
 const ACCEPTED_LOGIN_MEDIA_TYPES = new Set([
   "application/octet-stream",
@@ -22,19 +12,13 @@ const ACCEPTED_LOGIN_MEDIA_TYPES = new Set([
 ]);
 
 export interface LoginTransportOptions {
-  fetch: (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ) => Promise<Response>;
+  fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }
 
 export class SbiShinseiLoginTransport {
   constructor(private readonly options: LoginTransportOptions) {}
 
-  async login(
-    credential: SbiShinseiCredential,
-    material: JscMaterial,
-  ): Promise<LoginSession> {
+  async login(credential: SbiShinseiCredential, material: JscMaterial): Promise<LoginSession> {
     validateJscMaterial(material);
     const nationalId = `${credential.branchNumber}${credential.accountNumber}`;
     const form = new URLSearchParams();
@@ -65,25 +49,15 @@ export class SbiShinseiLoginTransport {
       response.status === 403 ||
       (response.status >= 300 && response.status < 400)
     ) {
-      throw new AuthenticationBoundaryError(
-        `PowerDirect login stopped at HTTP ${response.status}`,
-      );
+      throw new AuthenticationBoundaryError(`PowerDirect login stopped at HTTP ${response.status}`);
     }
     if (!response.ok) {
-      throw new LoginResponseError(
-        `PowerDirect login returned HTTP ${response.status}`,
-      );
+      throw new LoginResponseError(`PowerDirect login returned HTTP ${response.status}`);
     }
 
-    const mediaType = response.headers
-      .get("content-type")
-      ?.split(";", 1)[0]
-      ?.trim()
-      .toLowerCase();
+    const mediaType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
     if (!mediaType || !ACCEPTED_LOGIN_MEDIA_TYPES.has(mediaType)) {
-      throw new LoginResponseError(
-        "PowerDirect login returned an unrecognized content type",
-      );
+      throw new LoginResponseError("PowerDirect login returned an unrecognized content type");
     }
 
     const authorization = response.headers.get("authorization");
@@ -92,9 +66,7 @@ export class SbiShinseiLoginTransport {
       authorization.length === 0 ||
       authorization.length > 16_384
     ) {
-      throw new LoginResponseError(
-        "PowerDirect login did not return a valid authorization header",
-      );
+      throw new LoginResponseError("PowerDirect login did not return a valid authorization header");
     }
 
     const raw = await readLimited(response, MAX_LOGIN_RESPONSE_BYTES);
@@ -113,11 +85,7 @@ function validateJscMaterial(material: JscMaterial): void {
   if (material.sourceOrigin !== ORIGIN) {
     throw new LoginResponseError("CAFIS material came from an unexpected origin");
   }
-  if (
-    material.jsc.length < 64 ||
-    material.jsc.length > 16_384 ||
-    /[\r\n\0]/u.test(material.jsc)
-  ) {
+  if (material.jsc.length < 64 || material.jsc.length > 16_384 || /[\r\n\0]/u.test(material.jsc)) {
     throw new LoginResponseError("CAFIS device token has an invalid shape");
   }
   if (
@@ -131,11 +99,7 @@ function validateJscMaterial(material: JscMaterial): void {
 
 function validateLoginBody(value: unknown): string {
   const root = exactRecord(value, ["responseJSON"], "login");
-  const response = exactRecord(
-    root.responseJSON,
-    ["authStatus", "token"],
-    "login.responseJSON",
-  );
+  const response = exactRecord(root.responseJSON, ["authStatus", "token"], "login.responseJSON");
   if (response.authStatus !== "success") {
     throw new AuthenticationBoundaryError("PowerDirect rejected the login");
   }
@@ -144,9 +108,7 @@ function validateLoginBody(value: unknown): string {
     response.token.length === 0 ||
     response.token.length > 16_384
   ) {
-    throw new LoginResponseError(
-      "PowerDirect login did not return a valid CSRF token",
-    );
+    throw new LoginResponseError("PowerDirect login did not return a valid CSRF token");
   }
   return response.token;
 }
@@ -162,19 +124,13 @@ function exactRecord(
   const result = value as Record<string, unknown>;
   const actual = Object.keys(result).sort();
   const expected = [...allowedKeys].sort();
-  if (
-    actual.length !== expected.length ||
-    !actual.every((key, index) => key === expected[index])
-  ) {
+  if (actual.length !== expected.length || !actual.every((key, index) => key === expected[index])) {
     throw new LoginResponseError(`${label} has an unknown shape`);
   }
   return result;
 }
 
-async function readLimited(
-  response: Response,
-  maximumBytes: number,
-): Promise<Uint8Array> {
+async function readLimited(response: Response, maximumBytes: number): Promise<Uint8Array> {
   const declaredLength = response.headers.get("content-length");
   if (
     declaredLength !== null &&
@@ -194,9 +150,7 @@ async function readLimited(
       total += value.byteLength;
       if (total > maximumBytes) {
         await reader.cancel();
-        throw new ResponseTooLargeError(
-          "PowerDirect login response exceeded size limit",
-        );
+        throw new ResponseTooLargeError("PowerDirect login response exceeded size limit");
       }
       chunks.push(value);
     }

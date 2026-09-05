@@ -6,7 +6,8 @@ import { safeFailure } from "../src/diagnostics";
 
 const bwCli = process.env.BW_CLI ?? "/home/risu/.local/share/mise/installs/bitwarden/2026.8.0/bw";
 const session = process.env.BW_SESSION;
-const outputPath = process.argv[2] ?? "/home/risu/.local/state/kogane/moneyforward-bitwarden-match.json";
+const outputPath =
+  process.argv[2] ?? "/home/risu/.local/state/kogane/moneyforward-bitwarden-match.json";
 if (!session) throw new Error("BW_SESSION is required");
 
 const child = Bun.spawn([bwCli, "list", "items", "--session", session], {
@@ -23,8 +24,11 @@ if (exitCode !== 0) {
   throw new Error("Bitwarden item listing failed");
 }
 let items: unknown;
-try { items = JSON.parse(stdout); }
-catch { throw new Error("Bitwarden item listing is not valid JSON"); }
+try {
+  items = JSON.parse(stdout);
+} catch {
+  throw new Error("Bitwarden item listing is not valid JSON");
+}
 if (!Array.isArray(items)) throw new Error("Bitwarden item listing is invalid");
 
 const candidates: Array<{
@@ -40,7 +44,8 @@ for (const rawItem of items) {
   const credentials = (login as Record<string, unknown>)["fido2Credentials"];
   if (!Array.isArray(credentials)) continue;
   for (const [credentialIndex, rawCredential] of credentials.entries()) {
-    if (!rawCredential || typeof rawCredential !== "object" || Array.isArray(rawCredential)) continue;
+    if (!rawCredential || typeof rawCredential !== "object" || Array.isArray(rawCredential))
+      continue;
     const credential = rawCredential as Record<string, unknown>;
     if (credential["rpId"] !== "id.moneyforward.com") continue;
     if (typeof item["id"] !== "string") continue;
@@ -52,10 +57,12 @@ const matches: Array<{ itemId: string; credentialIndex: number }> = [];
 const outcomes = [];
 for (const [candidateIndex, candidate] of candidates.entries()) {
   try {
-    const credential = parseCredential(JSON.stringify({
-      ...candidate.credential,
-      origin: "https://id.moneyforward.com",
-    }));
+    const credential = parseCredential(
+      JSON.stringify({
+        ...candidate.credential,
+        origin: "https://id.moneyforward.com",
+      }),
+    );
     const collection = await collectMoneyForward({ credential });
     const matchesMeAccount = collection.accountDetailCount > 0;
     outcomes.push({
@@ -78,15 +85,21 @@ for (const [candidateIndex, candidate] of candidates.entries()) {
   }
 }
 if (matches.length !== 1) {
-  console.error(JSON.stringify({ candidateCount: candidates.length, matchCount: matches.length, outcomes }));
-  throw new Error("Expected exactly one Bitwarden passkey linked to the active Money Forward ME account");
+  console.error(
+    JSON.stringify({ candidateCount: candidates.length, matchCount: matches.length, outcomes }),
+  );
+  throw new Error(
+    "Expected exactly one Bitwarden passkey linked to the active Money Forward ME account",
+  );
 }
 await mkdir(dirname(outputPath), { recursive: true, mode: 0o700 });
 await writeFile(outputPath, `${JSON.stringify(matches[0])}\n`, { mode: 0o600 });
 await chmod(outputPath, 0o600);
-console.log(JSON.stringify({
-  candidateCount: candidates.length,
-  matchCount: matches.length,
-  outcomes,
-  matchMetadataSaved: true,
-}));
+console.log(
+  JSON.stringify({
+    candidateCount: candidates.length,
+    matchCount: matches.length,
+    outcomes,
+    matchMetadataSaved: true,
+  }),
+);

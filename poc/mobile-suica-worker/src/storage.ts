@@ -12,7 +12,8 @@ export async function storeArtifact(options: {
   artifact: RawArtifact;
 }): Promise<StoredArtifact> {
   if (!/^[a-z0-9-]+$/u.test(options.artifact.dataset)) throw new Error("Unsafe dataset name");
-  if (!/^[a-z0-9.-]+$/u.test(options.artifact.filename)) throw new Error("Unsafe artifact filename");
+  if (!/^[a-z0-9.-]+$/u.test(options.artifact.filename))
+    throw new Error("Unsafe artifact filename");
   const bytes =
     typeof options.artifact.body === "string"
       ? new TextEncoder().encode(options.artifact.body)
@@ -58,7 +59,5 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   const digest = await crypto.subtle.digest("SHA-256", copy.buffer);
-  return [...new Uint8Array(digest)]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }

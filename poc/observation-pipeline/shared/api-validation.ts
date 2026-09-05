@@ -22,20 +22,16 @@ import type {
 
 type Check<T> = (value: unknown) => value is T;
 type Shape<T> = { [K in keyof T]-?: Check<T[K]> };
-const text: Check<string> = (value): value is string =>
-  typeof value === "string";
+const text: Check<string> = (value): value is string => typeof value === "string";
 const number: Check<number> = (value): value is number =>
   typeof value === "number" && Number.isFinite(value);
 const identifier: Check<number> = (value): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 const hash: Check<string> = (value): value is string =>
   typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
-const boolean: Check<boolean> = (value): value is boolean =>
-  typeof value === "boolean";
+const boolean: Check<boolean> = (value): value is boolean => typeof value === "boolean";
 const unknown: Check<unknown> = (_value): _value is unknown => true;
-const record: Check<Record<string, unknown>> = (
-  value,
-): value is Record<string, unknown> =>
+const record: Check<Record<string, unknown>> = (value): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 function nullable<T>(check: Check<T>): Check<T | null> {
   return (value): value is T | null => value === null || check(value);
@@ -46,28 +42,19 @@ function optional<T>(check: Check<T>): Check<T | undefined> {
 function array<T>(check: Check<T>): Check<T[]> {
   return (value): value is T[] => Array.isArray(value) && value.every(check);
 }
-function literal<T extends string | number | boolean>(
-  ...choices: T[]
-): Check<T> {
+function literal<T extends string | number | boolean>(...choices: T[]): Check<T> {
   return (value): value is T => choices.some((choice) => choice === value);
 }
 function object<T>(shape: Shape<T>): Check<T> {
   return (value): value is T =>
     record(value) &&
-    (Object.keys(shape) as (keyof T & string)[]).every((key) =>
-      shape[key](value[key]),
-    );
+    (Object.keys(shape) as (keyof T & string)[]).every((key) => shape[key](value[key]));
 }
 const nullableText = nullable(text);
 const nullableNumber = nullable(number);
 const nullableIdentifier = nullable(identifier);
 const minorUnit = nullable(isDecimalMinorUnit);
-const observationKind = literal<ObservationKind>(
-  "transaction",
-  "balance",
-  "position",
-  "valuation",
-);
+const observationKind = literal<ObservationKind>("transaction", "balance", "position", "valuation");
 const warnings = object<Warnings>({
   list: array(text),
   raw: nullableText,
@@ -171,9 +158,7 @@ const parseFields = {
   superseded_by_parse_run_id: nullableIdentifier,
 };
 const overview = object<Overview>({
-  counts: array(
-    object<Overview["counts"][number]>({ table: text, rows: number }),
-  ),
+  counts: array(object<Overview["counts"][number]>({ table: text, rows: number })),
   sources: array(
     object<Overview["sources"][number]>({
       id: text,
@@ -283,11 +268,7 @@ export function validApiResponse(path: string, value: unknown): boolean {
     const id = Number(path.split("/")[3]);
     return identifier(id) && artifactDetail(value) && value.artifact.id === id;
   }
-  if (
-    /^\/api\/observations\/(transaction|balance|position|valuation)\/\d+$/u.test(
-      path,
-    )
-  ) {
+  if (/^\/api\/observations\/(transaction|balance|position|valuation)\/\d+$/u.test(path)) {
     const id = Number(path.split("/")[4]);
     return (
       identifier(id) &&

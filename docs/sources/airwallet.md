@@ -46,15 +46,15 @@ COIN+ QR/Visa支払い履歴を本人操作で読むことと、その read path
 
 ### 3.2 残高、銀行、カード、ポイントを混ぜない
 
-| surface | 正本/範囲 | AirWalletから確認できると公開情報で分かること | 混同してはいけないもの |
-| --- | --- | --- | --- |
-| COIN+残高 | COIN+共通残高 | 現在残高、チャージ/支払い/送金/受取/出金による増減 | 連携銀行の預金残高 |
-| 登録金融機関 | COIN+に登録した本人名義口座 | チャージ元/出金先の選択、複数口座間移動の経路 | 銀行明細、銀行口座の完全な残高/属性 |
-| COIN+ QR支払い | COIN+決済台帳 | 支払い先、支払い額を履歴で確認 | Airペイ加盟店の売上台帳 |
-| AirWallet Visa | チャージ式Visaカード | Visa支払い先/額、カード画面、支払い管理 | COIN+ QRと同じ承認/取消schemaだという仮定 |
-| リクルートID | ID連携/campaign境界 | 一部キャンペーン条件としてCOIN+アカウントへ連携 | COIN+ログインID、ポイント残高 |
-| 特典 | 多くはCOIN+残高として加算 | 残高/履歴上の入金候補 | リクルートポイント/Pontaポイント |
-| クイックローン | GeNiEの別ローン | 借入金がCOIN+残高へ入ることがある | COIN+通常履歴の自動化対象 |
+| surface        | 正本/範囲                   | AirWalletから確認できると公開情報で分かること      | 混同してはいけないもの                    |
+| -------------- | --------------------------- | -------------------------------------------------- | ----------------------------------------- |
+| COIN+残高      | COIN+共通残高               | 現在残高、チャージ/支払い/送金/受取/出金による増減 | 連携銀行の預金残高                        |
+| 登録金融機関   | COIN+に登録した本人名義口座 | チャージ元/出金先の選択、複数口座間移動の経路      | 銀行明細、銀行口座の完全な残高/属性       |
+| COIN+ QR支払い | COIN+決済台帳               | 支払い先、支払い額を履歴で確認                     | Airペイ加盟店の売上台帳                   |
+| AirWallet Visa | チャージ式Visaカード        | Visa支払い先/額、カード画面、支払い管理            | COIN+ QRと同じ承認/取消schemaだという仮定 |
+| リクルートID   | ID連携/campaign境界         | 一部キャンペーン条件としてCOIN+アカウントへ連携    | COIN+ログインID、ポイント残高             |
+| 特典           | 多くはCOIN+残高として加算   | 残高/履歴上の入金候補                              | リクルートポイント/Pontaポイント          |
+| クイックローン | GeNiEの別ローン             | 借入金がCOIN+残高へ入ることがある                  | COIN+通常履歴の自動化対象                 |
 
 [AirWallet Visa公式説明](https://airwallet.jp/visa-card/)は、Visa支払い時にCOIN+残高が
 Visaカード残高へ自動変換されるとし、支払先/支払額が履歴に残るとする。したがって実装では
@@ -70,14 +70,14 @@ Visaカード残高へ自動変換されるとし、支払先/支払額が履歴
 
 ### 4.1 公開情報で確認できるread範囲
 
-| データ | 粒度/表示 | 確認事実 | 未確認 |
-| --- | --- | --- | --- |
-| COIN+残高 | 現在値 | 公式ストア画像/公式説明のトップに表示 | available/heldの内訳、更新timestamp |
-| 利用履歴 | イベント行 | 三菱UFJ銀行の[公式campaign FAQ](https://www.bk.mufg.jp/tsukau/lp/coin_202606_2/index.html)も、銀行別チャージ実績をAirWalletの「利用履歴」で確認するよう案内 | 行field、status、pagination、最古日 |
-| 取引レポート | 種別別集計 | 公式Google Play画像にチャージ/出金/支払いの回数と合計額、および個別行が表示 | 集計期間選択、送金/受取/Visaの扱い |
-| 支払い管理 | 月次集計 | Google Play 2026-07-29更新説明は、今月支払額、予算使用状況graph、過去月の支払い結果を表示 | 遡及月数、QR/Visa区分、budgetが端末内かserverか |
-| Visa履歴 | 支払い行 | 公式Visaページは支払先と支払額がすべて履歴に残るとする | 承認/売上/取消/返金、原取引link、foreign currency |
-| 出金結果 | 完了画面 | [即時出金公式説明](https://coinplus.jp/realtime-withdraw/)は条件適用結果を出金完了画面で確認するとする | pending/processing/failedのコード、履歴反映時刻 |
+| データ       | 粒度/表示  | 確認事実                                                                                                                                                    | 未確認                                            |
+| ------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| COIN+残高    | 現在値     | 公式ストア画像/公式説明のトップに表示                                                                                                                       | available/heldの内訳、更新timestamp               |
+| 利用履歴     | イベント行 | 三菱UFJ銀行の[公式campaign FAQ](https://www.bk.mufg.jp/tsukau/lp/coin_202606_2/index.html)も、銀行別チャージ実績をAirWalletの「利用履歴」で確認するよう案内 | 行field、status、pagination、最古日               |
+| 取引レポート | 種別別集計 | 公式Google Play画像にチャージ/出金/支払いの回数と合計額、および個別行が表示                                                                                 | 集計期間選択、送金/受取/Visaの扱い                |
+| 支払い管理   | 月次集計   | Google Play 2026-07-29更新説明は、今月支払額、予算使用状況graph、過去月の支払い結果を表示                                                                   | 遡及月数、QR/Visa区分、budgetが端末内かserverか   |
+| Visa履歴     | 支払い行   | 公式Visaページは支払先と支払額がすべて履歴に残るとする                                                                                                      | 承認/売上/取消/返金、原取引link、foreign currency |
+| 出金結果     | 完了画面   | [即時出金公式説明](https://coinplus.jp/realtime-withdraw/)は条件適用結果を出金完了画面で確認するとする                                                      | pending/processing/failedのコード、履歴反映時刻   |
 
 [COIN+取扱上限](https://coinplus.jp/terms/limit/)は、本人確認/銀行口座登録済みの
 COIN+（スタンダード）だけが銀行出金とアカウント間送金を利用できるとする。ライト/スタンダードは
@@ -148,10 +148,10 @@ Bitwardenで使えるかはplatform/APIとアプリ実装をlive確認するま�
 
 2026-08-26のログアウト状態の少数HEAD/GET観測:
 
-| 入口 | 観測 | 言えること / 言えないこと |
-| --- | --- | --- |
-| `airwallet.jp` | `Server: AmazonS3`, `Via: ...cloudfront.net`, `X-Cache`, `X-Amz-Cf-*` | marketing siteはS3/CloudFront配信。個人APIの構成ではない |
-| `coinplus.jp` | 同じくS3/CloudFront | 公開ブランド/規約/store検索の配信。個人APIのWAFは不明 |
+| 入口              | 観測                                                                   | 言えること / 言えないこと                                                      |
+| ----------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `airwallet.jp`    | `Server: AmazonS3`, `Via: ...cloudfront.net`, `X-Cache`, `X-Amz-Cf-*`  | marketing siteはS3/CloudFront配信。個人APIの構成ではない                       |
+| `coinplus.jp`     | 同じくS3/CloudFront                                                    | 公開ブランド/規約/store検索の配信。個人APIのWAFは不明                          |
 | `faq.coinplus.jp` | `Server: cloudflare`, `CF-Ray`; CNAMEはSalesforce Siteforce/Cloudflare | FAQはSalesforce Experience/AuraをCloudflare経由で配信。COIN+ account APIとは別 |
 
 公開HTMLが読む主scriptは`airwallet.jp/assets/js/main.js`、`coinplus.jp/assets/js/main.js`等のmarketing
@@ -228,15 +228,15 @@ queryの可能性、`GET`でも副作用の可能性があるため、実観測�
 
 ## 10. runtime適性
 
-| Runtime | 適性 | 理由 |
-| --- | --- | --- |
-| Cloudflare Workers | 取得済みsanitized export/JSONのparseには適する。直接取得は現状不適 | mobile app bootstrap、SMS、端末binding、未知tokenをisolateだけで扱えない。personal APIがread-only replay可能と実証された後だけ再評価 |
-| Cloudflare Browser Run | 公開FAQ調査には使えるが個人データ取得には不適 | [Playwright](https://developers.cloudflare.com/browser-run/playwright/)と[session reuse](https://developers.cloudflare.com/browser-run/features/reuse-sessions/)はあるが、個人web dashboardがなくmobile app sessionをbootstrapできない |
-| [Cloudflare Containers](https://developers.cloudflare.com/containers/platform-details/architecture/) | parser/secretless replay候補。Android UIには不向き | containerで任意runtime/filesystemは使えるが、Play端末、SMS、hardware-backed state、accelerated Android emulatorは別問題 |
-| 一般[OCI container](https://github.com/opencontainers/runtime-spec) | static analysis/parser、実証後のHTTP replayには適する | jadx/apktool/parserを再現可能に固定できる。APK/secret/profileはimageへ含めず短命mountを使う |
-| [Kubernetes](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) | 多数sourceのparser/replay orchestrationには適するがAirWallet単体には過大 | CronJob/NetworkPolicy/Secret分離は有用。Android emulator/device routingと人手SMSを解決しない |
-| Android emulator | 初期候補だが実機より劣る | 公式Android文書はVM accelerationにhost hypervisor/KVMを要求し、VM内/Docker内のaccelerated emulatorを制限する。Play Integrity/device bindingの挙動も実機と異なり得る |
-| 本人管理Android実機 | static artifact取得とlive read観測に最適 | 正規Play install、既存登録端末、本人SMSを使え、secretをcloudへ搬出しない。完全無人化にはならない |
+| Runtime                                                                                              | 適性                                                                     | 理由                                                                                                                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare Workers                                                                                   | 取得済みsanitized export/JSONのparseには適する。直接取得は現状不適       | mobile app bootstrap、SMS、端末binding、未知tokenをisolateだけで扱えない。personal APIがread-only replay可能と実証された後だけ再評価                                                                                                   |
+| Cloudflare Browser Run                                                                               | 公開FAQ調査には使えるが個人データ取得には不適                            | [Playwright](https://developers.cloudflare.com/browser-run/playwright/)と[session reuse](https://developers.cloudflare.com/browser-run/features/reuse-sessions/)はあるが、個人web dashboardがなくmobile app sessionをbootstrapできない |
+| [Cloudflare Containers](https://developers.cloudflare.com/containers/platform-details/architecture/) | parser/secretless replay候補。Android UIには不向き                       | containerで任意runtime/filesystemは使えるが、Play端末、SMS、hardware-backed state、accelerated Android emulatorは別問題                                                                                                                |
+| 一般[OCI container](https://github.com/opencontainers/runtime-spec)                                  | static analysis/parser、実証後のHTTP replayには適する                    | jadx/apktool/parserを再現可能に固定できる。APK/secret/profileはimageへ含めず短命mountを使う                                                                                                                                            |
+| [Kubernetes](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/)                   | 多数sourceのparser/replay orchestrationには適するがAirWallet単体には過大 | CronJob/NetworkPolicy/Secret分離は有用。Android emulator/device routingと人手SMSを解決しない                                                                                                                                           |
+| Android emulator                                                                                     | 初期候補だが実機より劣る                                                 | 公式Android文書はVM accelerationにhost hypervisor/KVMを要求し、VM内/Docker内のaccelerated emulatorを制限する。Play Integrity/device bindingの挙動も実機と異なり得る                                                                    |
+| 本人管理Android実機                                                                                  | static artifact取得とlive read観測に最適                                 | 正規Play install、既存登録端末、本人SMSを使え、secretをcloudへ搬出しない。完全無人化にはならない                                                                                                                                       |
 
 推奨は本人管理実機で1回のread-only schema確認を行い、手動redacted captureをlocal parserへ渡す構成。
 API replayが実証される前にWorkers/OCI/Kubernetesへ認証情報を配らない。
@@ -252,13 +252,13 @@ PR #5の共通定義だけを用いる。
 - **E**: manual capture remains safe default
 - costは1（small wrapper）から5（device-bound/adversarial）
 
-| 経路 | Level | Cost | 判定 |
-| --- | --- | ---: | --- |
-| 本人がAirWalletの残高/履歴/取引レポートを手動captureしredact、parserへ渡す | E | 1-2 | 現時点の安全な既定。公式export未確認で、複数画面/OCRなら2 |
-| 公式exportがliveで見つかった場合の手動download+ingest | E | 1 | 公式手動exportだけなら共通rubric上E。現時点では存在自体未確認 |
-| app UI/device automation | D | 5 | app-only、SMS/端末紐づけ、write UI同居、session/integrity未確認 |
-| 本人端末bootstrap後のsanitized read endpoint replay | C候補 | 4-5 | transport/token renewal/read-write分離が未実証。pinning/integrity bypass不要の場合だけ候補 |
-| 安定したread API直接取得 | B候補 | 3-4 | stable endpointと再利用/更新可能sessionを観測していないため現状Bではない |
+| 経路                                                                       | Level | Cost | 判定                                                                                       |
+| -------------------------------------------------------------------------- | ----- | ---: | ------------------------------------------------------------------------------------------ |
+| 本人がAirWalletの残高/履歴/取引レポートを手動captureしredact、parserへ渡す | E     |  1-2 | 現時点の安全な既定。公式export未確認で、複数画面/OCRなら2                                  |
+| 公式exportがliveで見つかった場合の手動download+ingest                      | E     |    1 | 公式手動exportだけなら共通rubric上E。現時点では存在自体未確認                              |
+| app UI/device automation                                                   | D     |    5 | app-only、SMS/端末紐づけ、write UI同居、session/integrity未確認                            |
+| 本人端末bootstrap後のsanitized read endpoint replay                        | C候補 |  4-5 | transport/token renewal/read-write分離が未実証。pinning/integrity bypass不要の場合だけ候補 |
+| 安定したread API直接取得                                                   | B候補 |  3-4 | stable endpointと再利用/更新可能sessionを観測していないため現状Bではない                   |
 
 **総合評価: E、cost 1-2。full automationはD、cost 5。transport実証後のみC候補、cost 4-5。**
 documented personal API/export APIがないためAではなく、stable read-only internal APIとsession更新も未観測

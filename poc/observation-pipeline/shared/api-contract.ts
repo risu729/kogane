@@ -1,10 +1,6 @@
 // Browser-safe HTTP contracts. No database, runtime, or UI imports.
 // Amount strings retain exact minor units; formatting never changes these values.
-export type ObservationKind =
-  | "transaction"
-  | "balance"
-  | "position"
-  | "valuation";
+export type ObservationKind = "transaction" | "balance" | "position" | "valuation";
 
 export interface ApiMetadata {
   apiVersion: 1;

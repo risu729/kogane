@@ -20,16 +20,19 @@ export class CookieJar {
     for (const cookie of cookies) {
       if (!cookie.name || cookie.value === undefined) continue;
       const domain = normalizeDomain(cookie.domain ?? baseUrl.hostname);
-      this.#set({
-        name: cookie.name,
-        value: cookie.value,
-        domain,
-        path: cookie.path || "/",
-        secure: cookie.secure ?? true,
-        ...(typeof cookie.expires === "number" && cookie.expires > 0
-          ? { expiresAt: cookie.expires * 1000 }
-          : {}),
-      }, baseUrl);
+      this.#set(
+        {
+          name: cookie.name,
+          value: cookie.value,
+          domain,
+          path: cookie.path || "/",
+          secure: cookie.secure ?? true,
+          ...(typeof cookie.expires === "number" && cookie.expires > 0
+            ? { expiresAt: cookie.expires * 1000 }
+            : {}),
+        },
+        baseUrl,
+      );
     }
   }
 
@@ -42,11 +45,12 @@ export class CookieJar {
 
   header(url: URL, now = Date.now()): string {
     const values = [...this.#cookies.values()]
-      .filter((cookie) =>
-        (cookie.expiresAt === undefined || cookie.expiresAt > now) &&
-        domainMatches(url.hostname, cookie.domain) &&
-        pathMatches(url.pathname, cookie.path) &&
-        (!cookie.secure || url.protocol === "https:")
+      .filter(
+        (cookie) =>
+          (cookie.expiresAt === undefined || cookie.expiresAt > now) &&
+          domainMatches(url.hostname, cookie.domain) &&
+          pathMatches(url.pathname, cookie.path) &&
+          (!cookie.secure || url.protocol === "https:"),
       )
       .sort((left, right) => right.path.length - left.path.length)
       .map((cookie) => `${cookie.name}=${cookie.value}`);
@@ -135,8 +139,10 @@ function domainMatches(hostname: string, domain: string): boolean {
 }
 
 function pathMatches(pathname: string, cookiePath: string): boolean {
-  return pathname === cookiePath ||
-    pathname.startsWith(cookiePath.endsWith("/") ? cookiePath : `${cookiePath}/`);
+  return (
+    pathname === cookiePath ||
+    pathname.startsWith(cookiePath.endsWith("/") ? cookiePath : `${cookiePath}/`)
+  );
 }
 
 function defaultPath(pathname: string): string {

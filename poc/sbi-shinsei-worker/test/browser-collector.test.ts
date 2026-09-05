@@ -10,7 +10,7 @@ const credentialJson = JSON.stringify({
 
 describe("SBI Shinsei Container handoff", () => {
   test("passes the isolated credential once and returns only validated artifacts", async () => {
-    const fixtures = await Bun.file(fixturePath).json() as Record<string, unknown>;
+    const fixtures = (await Bun.file(fixturePath).json()) as Record<string, unknown>;
     let calls = 0;
     const result = await collectSbiShinsei({
       credentialJson,
@@ -41,21 +41,22 @@ describe("SBI Shinsei Container handoff", () => {
   });
 
   test("returns validated partial artifacts without retrying a later read", async () => {
-    const fixtures = await Bun.file(fixturePath).json() as Record<string, unknown>;
+    const fixtures = (await Bun.file(fixturePath).json()) as Record<string, unknown>;
     const result = await collectSbiShinsei({
       credentialJson,
       now: () => new Date("2026-08-31T00:00:00.000Z"),
-      collectHandoff: async () => JSON.stringify({
-        ok: true,
-        responses: {
-          topBalances: JSON.stringify(fixtures.topBalances),
-          balanceSummary: JSON.stringify(fixtures.balanceSummary),
-        },
-        failure: {
-          dataset: "exchange-rate",
-          stage: "exchange-rate-http-503",
-        },
-      }),
+      collectHandoff: async () =>
+        JSON.stringify({
+          ok: true,
+          responses: {
+            topBalances: JSON.stringify(fixtures.topBalances),
+            balanceSummary: JSON.stringify(fixtures.balanceSummary),
+          },
+          failure: {
+            dataset: "exchange-rate",
+            stage: "exchange-rate-http-503",
+          },
+        }),
     });
     expect(result.artifacts.map((artifact) => artifact.dataset)).toEqual([
       "top-accounts-balance-and-activity",
@@ -66,37 +67,46 @@ describe("SBI Shinsei Container handoff", () => {
       "read:exchange-rate",
       "read:yen-deposit-account",
     ]);
-    expect(result.failures[0]?.diagnostics).toEqual({ stage: "exchange-rate-http-503", httpStatus: 503 });
+    expect(result.failures[0]?.diagnostics).toEqual({
+      stage: "exchange-rate-http-503",
+      httpStatus: 503,
+    });
     expect(result.failures[1]?.diagnostics).toBeUndefined();
   });
 
   test("does not retry a rejected login", async () => {
     let calls = 0;
-    await expect(collectSbiShinsei({
-      credentialJson,
-      collectHandoff: async () => {
-        calls += 1;
-        return JSON.stringify({
-          ok: false,
-          stage: "login-rejected",
-          authenticationAttempted: true,
-        });
-      },
-    })).rejects.toThrow("stopped at login-rejected");
+    await expect(
+      collectSbiShinsei({
+        credentialJson,
+        collectHandoff: async () => {
+          calls += 1;
+          return JSON.stringify({
+            ok: false,
+            stage: "login-rejected",
+            authenticationAttempted: true,
+          });
+        },
+      }),
+    ).rejects.toThrow("stopped at login-rejected");
     expect(calls).toBe(1);
   });
 
   test("rejects a non-object or unknown handoff before storage", async () => {
-    await expect(collectSbiShinsei({
-      credentialJson,
-      collectHandoff: async () => "[]",
-    })).rejects.toThrow("handoff was not an object");
+    await expect(
+      collectSbiShinsei({
+        credentialJson,
+        collectHandoff: async () => "[]",
+      }),
+    ).rejects.toThrow("handoff was not an object");
   });
 
   test("bounds the handoff before parsing", async () => {
-    await expect(collectSbiShinsei({
-      credentialJson,
-      collectHandoff: async () => "x".repeat(10 * 1024 * 1024 + 1),
-    })).rejects.toThrow("handoff was not bounded JSON text");
+    await expect(
+      collectSbiShinsei({
+        credentialJson,
+        collectHandoff: async () => "x".repeat(10 * 1024 * 1024 + 1),
+      }),
+    ).rejects.toThrow("handoff was not bounded JSON text");
   });
 });

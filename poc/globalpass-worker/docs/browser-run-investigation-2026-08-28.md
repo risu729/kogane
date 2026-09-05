@@ -35,43 +35,43 @@ credential、cookie value、request/response body、Turnstileの動的識別子�
 
 2026-08-28 AESTに3回実行した。追加診断のためrunを分けたが、全runでTurnstile tokenが未生成だったため、資格情報の入力とGLOBAL PASSへのlogin POSTは0回である。
 
-| 項目 | 観測値 |
-| --- | --- |
-| GLOBAL PASS login page | HTTP 200 |
-| title / form | `ログイン` / formあり |
-| Access Denied | false |
-| cookies | `JSESSIONID`、`TS01dfe944`の名前だけ確認 |
-| page JavaScript UA | `Cloudflare-Workers` |
-| platform / webdriver / language | `Linux x86_64` / `true` / `en-US` |
-| Turnstile API | 302からbuild版200 |
-| challenge document | 200 |
-| challenge XHR POST | 2回、どちらも200 |
-| challenge image | 200 |
-| cross-origin challenge frame | あり |
-| `cf-turnstile-response` after 30s | 0文字 |
-| `brunhild.challenges.cloudflare.com` | requestなし |
-| HTTP 4xx/5xx / request failure | なし |
-| credential POST | なし |
+| 項目                                 | 観測値                                   |
+| ------------------------------------ | ---------------------------------------- |
+| GLOBAL PASS login page               | HTTP 200                                 |
+| title / form                         | `ログイン` / formあり                    |
+| Access Denied                        | false                                    |
+| cookies                              | `JSESSIONID`、`TS01dfe944`の名前だけ確認 |
+| page JavaScript UA                   | `Cloudflare-Workers`                     |
+| platform / webdriver / language      | `Linux x86_64` / `true` / `en-US`        |
+| Turnstile API                        | 302からbuild版200                        |
+| challenge document                   | 200                                      |
+| challenge XHR POST                   | 2回、どちらも200                         |
+| challenge image                      | 200                                      |
+| cross-origin challenge frame         | あり                                     |
+| `cf-turnstile-response` after 30s    | 0文字                                    |
+| `brunhild.challenges.cloudflare.com` | requestなし                              |
+| HTTP 4xx/5xx / request failure       | なし                                     |
+| credential POST                      | なし                                     |
 
 ## 通常Chrome/Kuebikoとの比較
 
 2026-08-28 AESTに、スタートメニューの`kogane capture`から新規起動したKuebikoプロファイルで同じGLOBAL PASS login URLを開いた。capture runは`2026-08-27T21-46-51`（UTC）で、Kuebiko 1.3.0がnetlog、response metadata、body、storageをローカルに保存した。生captureにはcookie等が含まれ得るためGitには入れず、以下のsanitized観測値だけを残す。資格情報は入力せず、login POSTも行っていない。
 
-| 項目 | Cloudflare Browser Run | 通常Chrome/Kuebiko |
-| --- | --- | --- |
-| login page | HTTP 200 / `ログイン` | HTTP 200 / `Sign On` |
-| form / Access Denied | formあり / false | form 1件 / false |
-| page JavaScript UA | `Cloudflare-Workers` | Windows Chrome 153 |
-| platform | `Linux x86_64` | `Win32` |
-| `navigator.webdriver` | `true` | `false` |
-| language | `en-US` | `en-US`（languagesには`ja`も含む） |
-| Turnstile API | 302後にbuild版200 | 302後にbuild版200 |
-| challenge document | 200 | 200 |
-| `cf-turnstile-response` | 30秒後も0文字 | 約15秒以内に773文字 |
-| challenge frame | 30秒後も存在 | token観測時にはiframeなし |
-| `brunhild.challenges.cloudflare.com` | requestなし | structured CDP/Kuebiko metadata上はrequestなし |
-| HTTP 4xx/5xx / request failure | なし | 4xx/5xxなし。未使用CSS 1件が`ERR_ABORTED`、challenge failureなし |
-| credential/login POST | なし | なし |
+| 項目                                 | Cloudflare Browser Run | 通常Chrome/Kuebiko                                               |
+| ------------------------------------ | ---------------------- | ---------------------------------------------------------------- |
+| login page                           | HTTP 200 / `ログイン`  | HTTP 200 / `Sign On`                                             |
+| form / Access Denied                 | formあり / false       | form 1件 / false                                                 |
+| page JavaScript UA                   | `Cloudflare-Workers`   | Windows Chrome 153                                               |
+| platform                             | `Linux x86_64`         | `Win32`                                                          |
+| `navigator.webdriver`                | `true`                 | `false`                                                          |
+| language                             | `en-US`                | `en-US`（languagesには`ja`も含む）                               |
+| Turnstile API                        | 302後にbuild版200      | 302後にbuild版200                                                |
+| challenge document                   | 200                    | 200                                                              |
+| `cf-turnstile-response`              | 30秒後も0文字          | 約15秒以内に773文字                                              |
+| challenge frame                      | 30秒後も存在           | token観測時にはiframeなし                                        |
+| `brunhild.challenges.cloudflare.com` | requestなし            | structured CDP/Kuebiko metadata上はrequestなし                   |
+| HTTP 4xx/5xx / request failure       | なし                   | 4xx/5xxなし。未使用CSS 1件が`ERR_ABORTED`、challenge failureなし |
+| credential/login POST                | なし                   | なし                                                             |
 
 Kuebiko側はremote debugging port付きのChrome Betaだが、`--enable-automation`は使わず、pageからは`navigator.webdriver=false`に見えた。つまりCDP接続や通信capture自体がTurnstile token生成を妨げるわけではない。一方Browser Runはnetwork headerのUAをWindows Chrome 153相当にしても、page JavaScript fingerprintとCloudflareが付与する削除不能header/Web Bot Auth署名は通常Chromeにならない。
 
@@ -81,14 +81,14 @@ Kuebiko側はremote debugging port付きのChrome Betaだが、`--enable-automat
 
 同日、Cloudflare ContainerのGLOBAL PASS通信を全runで同じTAMIA Tunnel経路に固定し、browser側だけを1段階ずつ変更した。Turnstileの2 hostはContainerの通常internet egressを使う。各runはログイン画面を1回開き、tokenを最大30秒待つだけで、資格情報の入力、login POST、cookieの再利用、R2への書き込みは行っていない。
 
-| variant | 追加した条件 | page上の主な観測値 | token |
-| --- | --- | --- | --- |
-| `baseline` | なし | Linux / HeadlessChrome 151 / `webdriver=true` / `ja-JP` | 0文字 |
-| `webdriver-false` | AutomationControlledを無効化 | Linux / HeadlessChrome 151 / `webdriver=false` / `ja-JP` | 0文字 |
-| `windows` | Windows Chrome 153 UA・Client Hints・platform・languages | Win32 / Chrome 153相当 / `webdriver=false` / `en-US` | 0文字 |
-| `headed-windows` | Xvfb上のheaded Chromium | 上記Windows情報、headed | 0文字 |
-| `headed-persistent-windows` | fresh profileのpersistent context | 上記Windows情報、headed、persistent | 0文字 |
-| `chrome-stable-headed-persistent-windows` | 実行binaryだけをブランド版Google Chrome Stableへ変更 | Google Chrome 152.0.7977.64、上記Windows情報、headed、persistent | 0文字 |
+| variant                                   | 追加した条件                                             | page上の主な観測値                                               | token |
+| ----------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------- | ----- |
+| `baseline`                                | なし                                                     | Linux / HeadlessChrome 151 / `webdriver=true` / `ja-JP`          | 0文字 |
+| `webdriver-false`                         | AutomationControlledを無効化                             | Linux / HeadlessChrome 151 / `webdriver=false` / `ja-JP`         | 0文字 |
+| `windows`                                 | Windows Chrome 153 UA・Client Hints・platform・languages | Win32 / Chrome 153相当 / `webdriver=false` / `en-US`             | 0文字 |
+| `headed-windows`                          | Xvfb上のheaded Chromium                                  | 上記Windows情報、headed                                          | 0文字 |
+| `headed-persistent-windows`               | fresh profileのpersistent context                        | 上記Windows情報、headed、persistent                              | 0文字 |
+| `chrome-stable-headed-persistent-windows` | 実行binaryだけをブランド版Google Chrome Stableへ変更     | Google Chrome 152.0.7977.64、上記Windows情報、headed、persistent | 0文字 |
 
 全runでlogin pageはHTTP 200、formあり、`Access Denied`なしだった。Turnstile APIは302からbuild版200、challenge documentは200、XHR POSTは2回とも200、imageも200だった。一方で共通してchallenge fetchが401、`brunhild.challenges.cloudflare.com`が204の直後に`net::ERR_ABORTED`となり、tokenは完成しなかった。最初の5 runはChromium `151.0.7922.34`、6 run目はブランド版Google Chrome `152.0.7977.64`である。Windows variantではいずれもJS/Client Hints上だけChrome 153に見せている。
 
@@ -118,18 +118,18 @@ diagnostic path sanitizerも変更し、動的pathを漏らさずにPATだけは
 
 親pageとTurnstileを同一TAMIA出口へ統一した条件、全通信をContainer直通にした条件、従来のsplit条件を比較した。すべてGoogle Chrome Stable 152.0.7977.64、headed、fresh persistent profileである。各runはtokenを最大30秒待つだけで、資格情報入力、login POST、cookie再利用、R2書き込みは0回である。
 
-| variant | browser側差分 | egress | token |
-| --- | --- | --- | --- |
-| chrome-stable-no-ua-all-tamia | native Linux、webdriver=false | 全通信TAMIA | 0 |
-| chrome-stable-no-ua-all-tamia-default-automation | Playwright既定、webdriver=true | 全通信TAMIA | 0 |
-| patchright-chrome-native-all-tamia | Patchright 1.62.2 | 全通信TAMIA | 0 |
-| chrome-direct-process-attach-late-all-tamia | Chromeを通常process起動、25秒後だけCDP接続 | 全通信TAMIA | 0 |
-| chrome-stable-windows-matched-all-tamia | Windows/Chrome 152 UA・Client Hints・platformを一致 | 全通信TAMIA | 0 |
-| chrome-stable-no-ua-direct | native Linux、webdriver=false | 全通信Container直通 | 0 |
-| patchright-chrome-native-direct | Patchright 1.62.2 | 全通信Container直通 | 0 |
-| chrome-direct-process-attach-late-direct | Chromeを通常process起動、25秒後だけCDP接続 | 全通信Container直通 | 0 |
-| chrome-stable-windows-matched-direct | Windows/Chrome 152 UA・Client Hints・platformを一致 | 全通信Container直通 | 0 |
-| chrome-stable-no-ua-split | native Linux、webdriver=false | 親page=TAMIA、Turnstile=直通 | 0 |
+| variant                                          | browser側差分                                       | egress                       | token |
+| ------------------------------------------------ | --------------------------------------------------- | ---------------------------- | ----- |
+| chrome-stable-no-ua-all-tamia                    | native Linux、webdriver=false                       | 全通信TAMIA                  | 0     |
+| chrome-stable-no-ua-all-tamia-default-automation | Playwright既定、webdriver=true                      | 全通信TAMIA                  | 0     |
+| patchright-chrome-native-all-tamia               | Patchright 1.62.2                                   | 全通信TAMIA                  | 0     |
+| chrome-direct-process-attach-late-all-tamia      | Chromeを通常process起動、25秒後だけCDP接続          | 全通信TAMIA                  | 0     |
+| chrome-stable-windows-matched-all-tamia          | Windows/Chrome 152 UA・Client Hints・platformを一致 | 全通信TAMIA                  | 0     |
+| chrome-stable-no-ua-direct                       | native Linux、webdriver=false                       | 全通信Container直通          | 0     |
+| patchright-chrome-native-direct                  | Patchright 1.62.2                                   | 全通信Container直通          | 0     |
+| chrome-direct-process-attach-late-direct         | Chromeを通常process起動、25秒後だけCDP接続          | 全通信Container直通          | 0     |
+| chrome-stable-windows-matched-direct             | Windows/Chrome 152 UA・Client Hints・platformを一致 | 全通信Container直通          | 0     |
+| chrome-stable-no-ua-split                        | native Linux、webdriver=false                       | 親page=TAMIA、Turnstile=直通 | 0     |
 
 TAMIA統一runの送信元は223.223.22.214、国JP、Cloudflare colo KIX、ASN 18144、HTTP/2と確認した。Container直通runは国SG、colo SIN、ASN 13335、IPv6のCloudflare egressだった。split runでは親pageの確認endpointはTAMIAを示した一方、Turnstileは直通であり、challenge imageがHTTP 400になったrunがある。これはsplitを避ける根拠になるが、同一出口に直してもtokenは生成されなかった。
 
@@ -164,12 +164,12 @@ captureはcookie等を含み得るためGitには入れない。
 を使用した。Node.js 22以降で`node scripts/probe-local-turnstile.mjs <CDP port>`
 として実行する。scriptはtoken本文を返さず、長さと非機密のpage状態だけを出す。
 
-| OS / Chrome | profile | token | page上の観測 |
-| --- | --- | ---: | --- |
-| Windows / Chrome Beta 153 | 既存Kuebiko profileの同一Windows内copy | 794 | `Win32`、`webdriver=false`、formあり、Access Deniedなし |
-| Windows / Chrome Beta 153 | 完全なfresh profile | 752 | 同上 |
-| WSL / Google Chrome 152 | Windows Kuebiko profileをWSL ext4へcopy | 773 | `Linux x86_64`、`webdriver=false`、formあり、Access Deniedなし |
-| WSL / Google Chrome 152 | 完全なfresh profile | 730 | 同上 |
+| OS / Chrome               | profile                                 | token | page上の観測                                                   |
+| ------------------------- | --------------------------------------- | ----: | -------------------------------------------------------------- |
+| Windows / Chrome Beta 153 | 既存Kuebiko profileの同一Windows内copy  |   794 | `Win32`、`webdriver=false`、formあり、Access Deniedなし        |
+| Windows / Chrome Beta 153 | 完全なfresh profile                     |   752 | 同上                                                           |
+| WSL / Google Chrome 152   | Windows Kuebiko profileをWSL ext4へcopy |   773 | `Linux x86_64`、`webdriver=false`、formあり、Access Deniedなし |
+| WSL / Google Chrome 152   | 完全なfresh profile                     |   730 | 同上                                                           |
 
 計測時のCloudflare traceはWindowsがIPv6、WSLがIPv4だったが、どちらも
 WARP有効、`loc=JP`、`colo=NRT`だった。これはGLOBAL PASS originが同じ値を
@@ -218,12 +218,12 @@ OCIの通常internet出口は`138.2.53.208`、`loc=JP`、`colo=KIX`、HTTP/2、
 `warp=off`だった。次の4条件はすべてSign On画面、login form、300x68のTurnstile
 widgetを表示し、Access Deniedではなかったが、最大30秒待ってもtokenは0文字だった。
 
-| profile / graphics | 結果 |
-| --- | --- |
-| OCI上のfresh persistent profile、Xvfb既定graphics | token 0。Chrome logでWebGL 1/2がblocklistされた |
-| local WSLでtoken生成・認証POSTに成功したprofileのLinux-to-Linux copy | login状態は移送されずSign Onへ戻り、token 0 |
-| OCI上の別fresh profile、ANGLE SwiftShader WebGLを明示的に有効化 | WebGL context生成をlogで確認したがtoken 0 |
-| OCI上の別fresh profile、SwiftShader、全browser通信を既存Worker relay経由でTAMIAへ固定 | token 0 |
+| profile / graphics                                                                    | 結果                                            |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| OCI上のfresh persistent profile、Xvfb既定graphics                                     | token 0。Chrome logでWebGL 1/2がblocklistされた |
+| local WSLでtoken生成・認証POSTに成功したprofileのLinux-to-Linux copy                  | login状態は移送されずSign Onへ戻り、token 0     |
+| OCI上の別fresh profile、ANGLE SwiftShader WebGLを明示的に有効化                       | WebGL context生成をlogで確認したがtoken 0       |
+| OCI上の別fresh profile、SwiftShader、全browser通信を既存Worker relay経由でTAMIAへ固定 | token 0                                         |
 
 最後の条件はTailscaleを使用していない。Cloudflare Tunnel経由の`ssh bots`は
 `forward_tcpip`を許可しないため、SSH reverse SOCKSは接続時点で拒否された。
@@ -256,10 +256,10 @@ Google Chrome Stable 152.0.7977.64、完全なfresh profile、1365x768 windowで
 native `Linux x86_64`、`navigator.webdriver=false`に見えた。CDPはtokenの長さと
 非機密なpage状態を読むためだけに使った。
 
-| local WSL Chromeの出口 | profile | token | page状態 |
-| --- | --- | ---: | --- |
-| local WARP、`104.28.211.106`、JP/NRT | fresh | 752 | Sign On、form/widgetあり、Access Deniedなし |
-| host allowlist付きWorker relay経由のTAMIA、`223.223.22.214`、JP/KIX、ASN 18144 | fresh | 794 | 同上 |
+| local WSL Chromeの出口                                                         | profile | token | page状態                                    |
+| ------------------------------------------------------------------------------ | ------- | ----: | ------------------------------------------- |
+| local WARP、`104.28.211.106`、JP/NRT                                           | fresh   |   752 | Sign On、form/widgetあり、Access Deniedなし |
+| host allowlist付きWorker relay経由のTAMIA、`223.223.22.214`、JP/KIX、ASN 18144 | fresh   |   794 | 同上                                        |
 
 TAMIA runはTailscaleを使わず、[`scripts/run-bots-tamia-socks.mjs`](../scripts/run-bots-tamia-socks.mjs)
 をWSL localhostで起動し、GLOBAL PASSと2個のTurnstile hostだけを既存Worker relayへ流した。
@@ -300,14 +300,14 @@ Cloudflare Containersのlocal developmentはCloudflare本番Container bindingへ
 使った。variantはGoogle Chromeを直接spawnし25秒後までCDP attachしない
 `chrome-direct-process-attach-late-all-tamia`で、資格情報入力とlogin POSTは全runで0回である。
 
-| 同一WSL host上の条件 | token | 解釈 |
-| --- | ---: | --- |
-| native Chrome、fresh profile、Xvfb、TAMIA | 794 | current successful control |
-| 上記へ`--no-sandbox --disable-dev-shm-usage`を追加 | 794 | Container用flagは単独blockerではない |
-| exact image、0.25 CPU / 1 GiB | 0 | Cloudflare `basic`相当 |
-| exact image、resource制限なし | 0 | CPU/memory starvationは単独blockerではない |
-| exact image、UID/GID 1000 | 0 | root実行は単独blockerではない |
-| exact image、host network | 0 | Docker bridge network namespaceは単独blockerではない |
+| 同一WSL host上の条件                               | token | 解釈                                                 |
+| -------------------------------------------------- | ----: | ---------------------------------------------------- |
+| native Chrome、fresh profile、Xvfb、TAMIA          |   794 | current successful control                           |
+| 上記へ`--no-sandbox --disable-dev-shm-usage`を追加 |   794 | Container用flagは単独blockerではない                 |
+| exact image、0.25 CPU / 1 GiB                      |     0 | Cloudflare `basic`相当                               |
+| exact image、resource制限なし                      |     0 | CPU/memory starvationは単独blockerではない           |
+| exact image、UID/GID 1000                          |     0 | root実行は単独blockerではない                        |
+| exact image、host network                          |     0 | Docker bridge network namespaceは単独blockerではない |
 
 hostとimage内のChromeはどちらもGoogle Chrome Stable `152.0.7977.64-1`であり、実体
 `/opt/google/chrome/chrome`のSHA-256は同じ
@@ -332,18 +332,18 @@ deploy image内Chromeを、GLOBAL PASSへ接続しないlocalhost診断pageで�
 Chrome 152、Xvfb `1365x768x24`である。raw font/canvas/audio値はGitへ入れず、差分の
 集計だけを残す。
 
-| 項目 | WSL native | exact image | 比較 |
-| --- | --- | --- | --- |
-| timezone | `Asia/Tokyo` | `UTC` | 差あり |
-| font files / families | 155 / 32 | 50 / 20 | 差あり |
-| font metrics | baseline | Latin 16/20、CJK/emoji 20/20候補で差 | 差あり |
-| `enumerateDevices()` | audio input 1 / output 1 | すべて0 | 差あり |
-| UA / platform / languages | Linux Chrome 152 / `en-US,en` | 同一 | 一致 |
-| `navigator.webdriver` | `false` | `false` | 一致 |
-| CPU / memory / screen / DPR | 16 / 16 GiB / 1365x768 / 1 | 同一 | 一致 |
-| speech voices / codec / plugins | baseline | 同一 | 一致 |
-| standard canvas / OfflineAudioContext hash | private comparison | 同一 | 一致 |
-| WebGL | unavailable | unavailable | 一致 |
+| 項目                                       | WSL native                    | exact image                          | 比較   |
+| ------------------------------------------ | ----------------------------- | ------------------------------------ | ------ |
+| timezone                                   | `Asia/Tokyo`                  | `UTC`                                | 差あり |
+| font files / families                      | 155 / 32                      | 50 / 20                              | 差あり |
+| font metrics                               | baseline                      | Latin 16/20、CJK/emoji 20/20候補で差 | 差あり |
+| `enumerateDevices()`                       | audio input 1 / output 1      | すべて0                              | 差あり |
+| UA / platform / languages                  | Linux Chrome 152 / `en-US,en` | 同一                                 | 一致   |
+| `navigator.webdriver`                      | `false`                       | `false`                              | 一致   |
+| CPU / memory / screen / DPR                | 16 / 16 GiB / 1365x768 / 1    | 同一                                 | 一致   |
+| speech voices / codec / plugins            | baseline                      | 同一                                 | 一致   |
+| standard canvas / OfflineAudioContext hash | private comparison            | 同一                                 | 一致   |
+| WebGL                                      | unavailable                   | unavailable                          | 一致   |
 
 hostのfont directoryと`/etc/fonts`をread-only bind mountし、ephemeral cacheを更新すると、
 Containerのfamily数とdefault font matchはhostと一致した。しかし同じChrome/TAMIA条件の
@@ -357,11 +357,11 @@ rendering libraryやmetric差一般を否定する試験ではない。
 を再buildせず、Chrome 152.0.7977.64、Xvfb、fresh profile、25秒後CDP attach、全通信TAMIA
 を固定してtimezoneだけを変更した。各runで資格情報入力とlogin POSTは0回である。
 
-| timezone条件 | Chrome Intl timezone | token | 結果 |
-| --- | --- | ---: | --- |
-| image default | `UTC` | 0 | 失敗control |
-| `TZ=Asia/Tokyo` + `/etc/localtime` mount | `Asia/Tokyo` | 794 | formあり、Access Deniedなし |
-| `TZ=Asia/Tokyo` envだけ | `Asia/Tokyo` | 794 | 同上 |
+| timezone条件                             | Chrome Intl timezone | token | 結果                        |
+| ---------------------------------------- | -------------------- | ----: | --------------------------- |
+| image default                            | `UTC`                |     0 | 失敗control                 |
+| `TZ=Asia/Tokyo` + `/etc/localtime` mount | `Asia/Tokyo`         |   794 | formあり、Access Deniedなし |
+| `TZ=Asia/Tokyo` envだけ                  | `Asia/Tokyo`         |   794 | 同上                        |
 
 `/etc/localtime` mountは不要で、Container環境変数だけで0文字から794文字へ変化した。同一
 image、Chrome、display、profile種別、TAMIA経路のcontrolled A/Bではtimezone不一致が
@@ -382,10 +382,10 @@ timezone修正前のdirect失敗には`UTC`という交絡があったため、�
 persistent profile、`TZ=Asia/Tokyo`、native Linux情報、`navigator.webdriver=false`は固定した。
 資格情報入力、login POST、cookie再利用、R2書き込みは0回である。
 
-| egress | 回数 | login page | Turnstile token | challenge image | 出口 |
-| --- | ---: | --- | ---: | --- | --- |
-| Container直通 | 2 | いずれもHTTP 200、formあり、Access Deniedなし | 0 / 0 | いずれもHTTP 400 | SG/SIN、ASN 13335、Cloudflare IPv6 |
-| 全通信TAMIA | 1（同時刻control） | HTTP 200、formあり、Access Deniedなし | 794 | HTTP 200 | `223.223.22.214`、JP/KIX、ASN 18144 |
+| egress        |               回数 | login page                                    | Turnstile token | challenge image  | 出口                                |
+| ------------- | -----------------: | --------------------------------------------- | --------------: | ---------------- | ----------------------------------- |
+| Container直通 |                  2 | いずれもHTTP 200、formあり、Access Deniedなし |           0 / 0 | いずれもHTTP 400 | SG/SIN、ASN 13335、Cloudflare IPv6  |
+| 全通信TAMIA   | 1（同時刻control） | HTTP 200、formあり、Access Deniedなし         |             794 | HTTP 200         | `223.223.22.214`、JP/KIX、ASN 18144 |
 
 このcontrolled A/Bでは出口だけで結果が再現し、現行ContainerからのCloudflare直通egressは
 Turnstileを通過しなかった。Chromeやtimezoneだけでは十分ではなく、productionはGLOBAL PASS、
@@ -484,10 +484,10 @@ timezone発見前のChromium比較には`UTC`やsplit egressなどの交絡が�
 `TZ=Asia/Tokyo`、Xvfb headed、fresh persistent profile、native Linux情報、
 `navigator.webdriver=false`、GLOBAL PASS・Turnstile・helperの全通信TAMIAである。
 
-| binary | 回数 | HTTP | Turnstile token | browser version | elapsed |
-| --- | ---: | ---: | --- | --- | --- |
-| Playwright同梱Chromium | 3 | 200 / 200 / 200 | 0 / 0 / 0文字 | 151.0.7922.34 | 38.8 / 40.6 / 41.6秒 |
-| Google Chrome Stable control | 1 | 200 | 794文字 | 152.0.7977.64 | 32.0秒 |
+| binary                       | 回数 |            HTTP | Turnstile token | browser version | elapsed              |
+| ---------------------------- | ---: | --------------: | --------------- | --------------- | -------------------- |
+| Playwright同梱Chromium       |    3 | 200 / 200 / 200 | 0 / 0 / 0文字   | 151.0.7922.34   | 38.8 / 40.6 / 41.6秒 |
+| Google Chrome Stable control |    1 |             200 | 794文字         | 152.0.7977.64   | 32.0秒               |
 
 4 runともTAMIAの同じ日本出口とCloudflare KIXで観測され、Brunhild requestも発生した。
 Chromiumの3 runは各回fresh profileである。tokenが一度も生成されなかったため、Chromium側では

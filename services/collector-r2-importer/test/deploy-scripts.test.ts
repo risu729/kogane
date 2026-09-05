@@ -21,8 +21,9 @@ describe("collector R2 importer deployment scripts", () => {
       "ORIGIN_FINGERPRINT_KEY",
     ];
 
-    expect(deploy.indexOf("bash scripts/sync-secrets.sh"))
-      .toBeLessThan(deploy.indexOf("npx wrangler deploy"));
+    expect(deploy.indexOf("bash scripts/sync-secrets.sh")).toBeLessThan(
+      deploy.indexOf("npx wrangler deploy"),
+    );
     expect(sync).toContain("wrangler secret bulk");
     expect(sync).toContain("wrangler secret list --format json");
     expect(sync).not.toContain("wrangler secret delete");

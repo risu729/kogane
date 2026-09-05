@@ -12,10 +12,7 @@ const EMAIL_CODE = "/tm/pc/login/STKIp0002042.do";
 const EMAIL_COMPLETE = "/tm/pc/login/STKIp0002045.do";
 const MAX_REDIRECTS = 8;
 
-type Fetcher = (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => Promise<Response>;
+type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export interface StoredCookie {
   name: string;
@@ -73,10 +70,7 @@ export async function beginVPointEmailLogin(options: {
   onTrace?: (trace: VPointLoginTrace) => void;
 }): Promise<VPointEmailChallenge> {
   const memberNumber = normalizeMemberNumber(options.memberNumber);
-  const client = new VPointLoginClient(
-    options.fetcher ?? defaultFetch,
-    options.onTrace,
-  );
+  const client = new VPointLoginClient(options.fetcher ?? defaultFetch, options.onTrace);
   const entry = await client.get(`${SITE_ORIGIN}${LOGIN_ENTRY}`);
   const numberPage = await client.postForm(entry, NUMBER_ENTRY);
   assertFormField(numberPage.html, "TID", NUMBER_ENTRY);
@@ -159,9 +153,7 @@ export async function completeVPointEmailLogin(options: {
   } catch {
     throw new Error("V Point session probe returned non-JSON");
   }
-  const status = isObject(json) && isObject(json.status)
-    ? json.status.code
-    : null;
+  const status = isObject(json) && isObject(json.status) ? json.status.code : null;
   if (status !== "0000") {
     throw new Error(
       `V Point email login did not create an authenticated session (${String(status)})`,
@@ -211,12 +203,7 @@ class VPointLoginClient {
     path: string,
     overrides: Record<string, string> = {},
   ): Promise<PageResponse> {
-    return this.postFormEntries(
-      page.url,
-      [...parseForm(page.html).entries()],
-      path,
-      overrides,
-    );
+    return this.postFormEntries(page.url, [...parseForm(page.html).entries()], path, overrides);
   }
 
   async postFormEntries(
@@ -274,18 +261,14 @@ class VPointLoginClient {
       origin: responseUrl.origin,
       pathname: responseUrl.pathname,
       status: response.status,
-      redirect: redirectUrl
-        ? { origin: redirectUrl.origin, pathname: redirectUrl.pathname }
-        : null,
-      sentCookieNames: cookie
-        ? cookie.split("; ").map((pair) => pair.split("=", 1)[0] ?? "")
-        : [],
+      redirect: redirectUrl ? { origin: redirectUrl.origin, pathname: redirectUrl.pathname } : null,
+      sentCookieNames: cookie ? cookie.split("; ").map((pair) => pair.split("=", 1)[0] ?? "") : [],
       receivedCookies: setCookies.flatMap((value) =>
         setCookieParser.parse(value).map((received) => ({
           name: received.name,
           domain: received.domain ?? null,
           path: received.path ?? null,
-        }))
+        })),
       ),
     });
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -304,9 +287,7 @@ class VPointLoginClient {
       .filter((cookie) => {
         if (cookie.expiresAt !== null && cookie.expiresAt <= now) return false;
         if (cookie.secure && url.protocol !== "https:") return false;
-        const domain = cookie.domain.startsWith(".")
-          ? cookie.domain.slice(1)
-          : cookie.domain;
+        const domain = cookie.domain.startsWith(".") ? cookie.domain.slice(1) : cookie.domain;
         if (url.hostname !== domain && !url.hostname.endsWith(`.${domain}`)) {
           return false;
         }
@@ -339,9 +320,7 @@ class VPointLoginClient {
           domain,
           path,
           secure: parsed.secure ?? false,
-          expiresAt: parsed.expires instanceof Date
-            ? parsed.expires.getTime()
-            : null,
+          expiresAt: parsed.expires instanceof Date ? parsed.expires.getTime() : null,
         });
       }
     }
@@ -354,16 +333,14 @@ function cookieKey(cookie: Pick<StoredCookie, "name" | "domain" | "path">): stri
 
 function getSetCookieValues(headers: Headers): string[] {
   const extended = headers as Headers & { getSetCookie?: () => string[] };
-  return extended.getSetCookie?.() ?? setCookieParser.splitCookiesString(
-    headers.get("set-cookie") ?? "",
+  return (
+    extended.getSetCookie?.() ?? setCookieParser.splitCookiesString(headers.get("set-cookie") ?? "")
   );
 }
 
 function parseForm(html: string): URLSearchParams {
   const $ = loadHtml(html);
-  const form = $("form#form").first().length > 0
-    ? $("form#form").first()
-    : $("form").first();
+  const form = $("form#form").first().length > 0 ? $("form#form").first() : $("form").first();
   if (form.length === 0) throw new Error("V Point response contained no form");
   const values = new URLSearchParams();
   form.find("input[name], select[name], textarea[name]").each((_index, element) => {
@@ -401,9 +378,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function defaultFetch(
-  input: string | URL | Request,
-  init?: RequestInit,
-): Promise<Response> {
+function defaultFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
   return fetch(input, init);
 }

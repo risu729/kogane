@@ -7,20 +7,24 @@ export { SmbcBackfillSession };
 export default {
   async fetch(request, env, ctx): Promise<Response> {
     if (!ctx.access) {
-      console.warn(JSON.stringify({
-        message: "access_context_missing",
-        hasAssertion: request.headers.has("cf-access-jwt-assertion"),
-      }));
+      console.warn(
+        JSON.stringify({
+          message: "access_context_missing",
+          hasAssertion: request.headers.has("cf-access-jwt-assertion"),
+        }),
+      );
       return new Response("Cloudflare Access authentication required", { status: 403 });
     }
     const identity = await ctx.access.getIdentity();
     const assertionSubject = accessJwtSubject(request.headers.get("cf-access-jwt-assertion"));
     const identityKey = identity?.user_uuid ?? identity?.email ?? assertionSubject;
     if (!identityKey) {
-      console.warn(JSON.stringify({
-        message: "access_identity_missing",
-        hasAssertion: request.headers.has("cf-access-jwt-assertion"),
-      }));
+      console.warn(
+        JSON.stringify({
+          message: "access_identity_missing",
+          hasAssertion: request.headers.has("cf-access-jwt-assertion"),
+        }),
+      );
       return new Response("Cloudflare Access identity required", { status: 403 });
     }
 
@@ -50,18 +54,27 @@ export default {
       return new Response(null, { status: 404 });
     } catch (error) {
       const errorCode = classifyError(error);
-      console.error(JSON.stringify({
-        message: "smbc_backfill_request_failed",
-        operation: url.pathname === "/api/start" ? "start" : url.pathname === "/api/finish" ? "finish" : "request",
-        errorCode,
-      }));
+      console.error(
+        JSON.stringify({
+          message: "smbc_backfill_request_failed",
+          operation:
+            url.pathname === "/api/start"
+              ? "start"
+              : url.pathname === "/api/finish"
+                ? "finish"
+                : "request",
+          errorCode,
+        }),
+      );
       return json({ errorCode }, 400);
     }
   },
 } satisfies ExportedHandler<Env>;
 
 async function identityHash(value: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
+  );
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
@@ -98,7 +111,8 @@ async function readJsonObject(request: Request): Promise<Record<string, unknown>
     throw new Error("content_type_invalid");
   }
   const declaredLength = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declaredLength) && declaredLength > 4096) throw new Error("request_body_too_large");
+  if (Number.isFinite(declaredLength) && declaredLength > 4096)
+    throw new Error("request_body_too_large");
   if (!request.body) throw new Error("json_body_invalid");
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -121,7 +135,8 @@ async function readJsonObject(request: Request): Promise<Record<string, unknown>
     offset += chunk.byteLength;
   }
   const body = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
-  if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("json_body_invalid");
+  if (!body || typeof body !== "object" || Array.isArray(body))
+    throw new Error("json_body_invalid");
   return body as Record<string, unknown>;
 }
 
