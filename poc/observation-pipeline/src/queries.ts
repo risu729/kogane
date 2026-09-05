@@ -16,7 +16,38 @@
 
 import type { Store } from "./store.ts";
 
-export type ObservationKind = "transaction" | "balance" | "position" | "valuation";
+import type {
+  ObservationKind,
+  Warnings,
+  Overview,
+  TransactionRow,
+  BalanceRow,
+  BalanceHistoryRow,
+  PositionRow,
+  ValuationRow,
+  PositionWithValuations,
+  ArtifactRow,
+  ParseRunDetail,
+  ArtifactDetail,
+  Provenance,
+  ObservationDetail,
+} from "../shared/api-contract.ts";
+export type {
+  ObservationKind,
+  Warnings,
+  Overview,
+  TransactionRow,
+  BalanceRow,
+  BalanceHistoryRow,
+  PositionRow,
+  ValuationRow,
+  PositionWithValuations,
+  ArtifactRow,
+  ParseRunDetail,
+  ArtifactDetail,
+  Provenance,
+  ObservationDetail,
+} from "../shared/api-contract.ts";
 
 export const OBSERVATION_TABLES: Record<ObservationKind, string> = {
   transaction: "transaction_observations",
@@ -46,14 +77,6 @@ const CURRENT = "p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'";
 
 const SEPARATOR = " · ";
 
-export interface Warnings {
-  /** Parsed warning strings, empty when the stored value was not an array. */
-  list: string[];
-  /** The stored text, so an unreadable value is visible rather than silent. */
-  raw: string | null;
-  parsed: boolean;
-}
-
 /**
  * Read a stored warnings array. A malformed value must not quietly become
  * "no warnings": warnings are the parser's record of what it could not read,
@@ -68,7 +91,11 @@ export function parseWarnings(warningsJson: string | null): Warnings {
     if (!Array.isArray(value)) {
       return { list: [], raw: warningsJson, parsed: false };
     }
-    return { list: value.map((entry) => String(entry)), raw: warningsJson, parsed: true };
+    return {
+      list: value.map((entry) => String(entry)),
+      raw: warningsJson,
+      parsed: true,
+    };
   } catch {
     return { list: [], raw: warningsJson, parsed: false };
   }
@@ -78,35 +105,14 @@ function summarize(parts: (string | null)[]): string {
   return parts.filter((part) => part !== null && part !== "").join(SEPARATOR);
 }
 
-export interface Overview {
-  counts: { table: string; rows: number }[];
-  sources: { id: string; provider: string; ingestion: string; artifact_count: number }[];
-  fetchRuns: {
-    id: number;
-    source_id: string;
-    tool: string;
-    external_run_id: string | null;
-    status: string;
-    started_at: string;
-    completed_at: string | null;
-  }[];
-  parseRuns: {
-    id: number;
-    fetch_artifact_id: number;
-    parser_name: string;
-    parser_version: string;
-    parsed_at: string;
-    status: string;
-    warnings: Warnings;
-    error: string | null;
-    superseded_by_parse_run_id: number | null;
-  }[];
-}
-
 export function overview(store: Store): Overview {
   const counts = COUNTED_TABLES.map((table) => ({
     table,
-    rows: (store.db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n,
+    rows: (
+      store.db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as {
+        n: number;
+      }
+    ).n,
   }));
   const sources = store.db
     .query(
@@ -140,21 +146,6 @@ export function overview(store: Store): Overview {
   return { counts, sources, fetchRuns, parseRuns };
 }
 
-export interface TransactionRow {
-  id: number;
-  source_id: string;
-  source_account: string;
-  as_of: string | null;
-  amount_minor: string | null;
-  amount_text: string | null;
-  currency: string | null;
-  description: string | null;
-  counterparty: string | null;
-  external_id: string | null;
-  status: string | null;
-  parser: string;
-}
-
 export function currentTransactions(store: Store): TransactionRow[] {
   return store.db
     .query(
@@ -169,19 +160,6 @@ export function currentTransactions(store: Store): TransactionRow[] {
        ORDER BY COALESCE(t.as_of, '') DESC, t.id DESC`,
     )
     .all() as TransactionRow[];
-}
-
-export interface BalanceRow {
-  id: number;
-  source_id: string;
-  source_account: string;
-  metric: string;
-  instrument: string;
-  amount_minor: string | null;
-  amount_text: string | null;
-  as_of: string | null;
-  observed_at: string | null;
-  parser: string;
 }
 
 /**
@@ -219,11 +197,6 @@ export function latestBalances(store: Store): BalanceRow[] {
     .all() as BalanceRow[];
 }
 
-export interface BalanceHistoryRow extends BalanceRow {
-  superseded_by_parse_run_id: number | null;
-  parse_status: string;
-}
-
 /** The full append-only history, superseded rows included and marked. */
 export function balanceHistory(store: Store): BalanceHistoryRow[] {
   return store.db
@@ -239,33 +212,6 @@ export function balanceHistory(store: Store): BalanceHistoryRow[] {
        ORDER BY COALESCE(b.as_of, b.observed_at, '') DESC, b.id DESC`,
     )
     .all() as BalanceHistoryRow[];
-}
-
-export interface PositionRow {
-  id: number;
-  source_id: string;
-  source_account: string;
-  security_code: string;
-  security_name: string | null;
-  market: string | null;
-  quantity_text: string;
-  quantity_scale: number;
-  currency: string | null;
-  as_of: string | null;
-  parser: string;
-}
-
-export interface ValuationRow {
-  id: number;
-  source_id: string;
-  source_account: string;
-  subject: string;
-  metric: string;
-  amount_minor: string | null;
-  amount_text: string | null;
-  currency: string;
-  as_of: string | null;
-  parser: string;
 }
 
 export function currentPositions(store: Store): PositionRow[] {
@@ -299,11 +245,6 @@ export function currentValuations(store: Store): ValuationRow[] {
     .all() as ValuationRow[];
 }
 
-export interface PositionWithValuations {
-  position: PositionRow;
-  valuations: ValuationRow[];
-}
-
 /**
  * Positions with the provider-reported valuations that describe them.
  *
@@ -312,7 +253,9 @@ export interface PositionWithValuations {
  * currency; they are never summed or converted, because a JPY figure and a USD
  * figure are two separate claims by the source.
  */
-export function positionsWithValuations(store: Store): PositionWithValuations[] {
+export function positionsWithValuations(
+  store: Store,
+): PositionWithValuations[] {
   const bySubject = new Map<string, ValuationRow[]>();
   const key = (source: string, account: string, subject: string): string =>
     JSON.stringify([source, account, subject]);
@@ -331,24 +274,13 @@ export function positionsWithValuations(store: Store): PositionWithValuations[] 
     position,
     valuations:
       bySubject.get(
-        key(position.source_id, position.source_account, position.security_code),
+        key(
+          position.source_id,
+          position.source_account,
+          position.security_code,
+        ),
       ) ?? [],
   }));
-}
-
-export interface ArtifactRow {
-  id: number;
-  source_id: string;
-  dataset: string | null;
-  url: string | null;
-  mime: string;
-  fetched_at: string;
-  sha256: string;
-  parse_run_count: number;
-  transaction_count: number;
-  balance_count: number;
-  position_count: number;
-  valuation_count: number;
 }
 
 export function artifacts(store: Store): ArtifactRow[] {
@@ -375,48 +307,16 @@ export function artifacts(store: Store): ArtifactRow[] {
     .all() as ArtifactRow[];
 }
 
-export interface ParseRunDetail {
-  id: number;
-  parser_name: string;
-  parser_version: string;
-  parsed_at: string;
-  status: string;
-  error: string | null;
-  warnings: Warnings;
-  superseded_by_parse_run_id: number | null;
-  observations: { kind: ObservationKind; id: number; summary: string }[];
-}
-
-export interface ArtifactDetail {
-  artifact: {
-    id: number;
-    source_id: string;
-    dataset: string | null;
-    url: string | null;
-    method: string | null;
-    http_status: number | null;
-    mime: string;
-    fetched_at: string;
-    sha256: string;
-    size: number;
-    content_type: string;
-    fetch_run_id: number;
-    tool: string;
-    external_run_id: string | null;
-    fetch_status: string;
-    started_at: string;
-    completed_at: string | null;
-  };
-  parseRuns: ParseRunDetail[];
-}
-
 /**
  * One artifact with EVERY parse run over it, superseded ones included. This is
  * the page that makes re-parsing auditable: it is the only place a retired
  * observation stays visible, which is what lets someone see what a parser
  * change actually did.
  */
-export function artifactDetail(store: Store, id: number): ArtifactDetail | undefined {
+export function artifactDetail(
+  store: Store,
+  id: number,
+): ArtifactDetail | undefined {
   const artifact = store.db
     .query(
       `SELECT a.id, a.source_id, a.dataset, a.url, a.method, a.http_status, a.mime,
@@ -500,7 +400,12 @@ export function observationsForParseRun(
     out.push({
       kind: "balance",
       id: row.id,
-      summary: summarize([row.source_account, row.metric, row.instrument, row.as_of]),
+      summary: summarize([
+        row.source_account,
+        row.metric,
+        row.instrument,
+        row.as_of,
+      ]),
     });
   }
 
@@ -519,7 +424,11 @@ export function observationsForParseRun(
     out.push({
       kind: "position",
       id: row.id,
-      summary: summarize([row.source_account, row.security_code, row.security_name]),
+      summary: summarize([
+        row.source_account,
+        row.security_code,
+        row.security_name,
+      ]),
     });
   }
 
@@ -539,46 +448,16 @@ export function observationsForParseRun(
     out.push({
       kind: "valuation",
       id: row.id,
-      summary: summarize([row.source_account, row.subject, row.metric, row.currency]),
+      summary: summarize([
+        row.source_account,
+        row.subject,
+        row.metric,
+        row.currency,
+      ]),
     });
   }
 
   return out;
-}
-
-export interface Provenance {
-  parse_run_id: number;
-  parser_name: string;
-  parser_version: string;
-  parsed_at: string;
-  parse_status: string;
-  error: string | null;
-  warnings: Warnings;
-  superseded_by_parse_run_id: number | null;
-  artifact_id: number;
-  source_id: string;
-  dataset: string | null;
-  url: string | null;
-  mime: string;
-  fetched_at: string;
-  sha256: string;
-  size: number;
-  content_type: string;
-  fetch_run_id: number;
-  tool: string;
-  external_run_id: string | null;
-  fetch_status: string;
-  started_at: string;
-  completed_at: string | null;
-}
-
-export interface ObservationDetail {
-  kind: ObservationKind;
-  row: Record<string, unknown>;
-  extra: unknown;
-  extraRaw: string;
-  extraParsed: boolean;
-  provenance: Provenance | undefined;
 }
 
 /**
@@ -595,14 +474,17 @@ export function observationDetail(
   // The table name comes from a fixed map keyed by a validated union member,
   // never from the request path.
   const table = OBSERVATION_TABLES[kind];
+  // Positions store a quantity, not an amount. Other kinds need the trailing
+  // CAST to preserve every digit while still returning all stored columns.
+  const columns =
+    kind === "position" ? "*" : "*, CAST(amount_minor AS TEXT) AS amount_minor";
   const row = store.db
-    // The trailing CAST overrides the same column from `*`, so every stored
-    // column is still returned but the amount keeps all of its digits.
-    .query(`SELECT *, CAST(amount_minor AS TEXT) AS amount_minor FROM ${table} WHERE id = ?1`)
+    .query(`SELECT ${columns} FROM ${table} WHERE id = ?1`)
     .get(id) as Record<string, unknown> | null;
   if (!row) return undefined;
 
-  const extraRaw = typeof row["extra_json"] === "string" ? row["extra_json"] : "";
+  const extraRaw =
+    typeof row["extra_json"] === "string" ? row["extra_json"] : "";
   let extra: unknown = extraRaw;
   let extraParsed = false;
   try {
@@ -613,7 +495,8 @@ export function observationDetail(
     // shape the store does not have.
   }
 
-  const parseRunId = typeof row["parse_run_id"] === "number" ? row["parse_run_id"] : 0;
+  const parseRunId =
+    typeof row["parse_run_id"] === "number" ? row["parse_run_id"] : 0;
   const provenanceRow = store.db
     .query(
       `SELECT p.id AS parse_run_id, p.parser_name, p.parser_version, p.parsed_at,
@@ -647,9 +530,14 @@ export interface RawObjectRow {
   size: number;
 }
 
-export function rawObjectMeta(store: Store, sha256: string): RawObjectRow | undefined {
+export function rawObjectMeta(
+  store: Store,
+  sha256: string,
+): RawObjectRow | undefined {
   const row = store.db
-    .query("SELECT sha256, content_type, size FROM raw_objects WHERE sha256 = ?1")
+    .query(
+      "SELECT sha256, content_type, size FROM raw_objects WHERE sha256 = ?1",
+    )
     .get(sha256) as RawObjectRow | null;
   return row ?? undefined;
 }

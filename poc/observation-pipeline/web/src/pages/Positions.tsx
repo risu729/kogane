@@ -1,93 +1,60 @@
-// Positions — what the broker says we hold, and what the broker says it is
-// worth, side by side.
-//
-// The single most important rule on this page is that valuations are never
-// summed and never converted. A JPY figure and a USD figure for the same
-// holding are two separate claims by the source, and the layout says so: each
-// valuation is its own labelled figure with its own currency chip, and there
-// is no total anywhere, per position or per page.
-//
-// The pairing of a position with its valuations is this client's one
-// interpretive act. It is an exact string match on the provider's own
-// (source, account, subject) labels, made by the API at display time and
-// stored nowhere. It is stated on the page rather than presented as a fact the
-// data carries.
-
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { usePositions, type PositionWithValuations } from "../api.ts";
 import {
-  usePositions,
-  type PositionWithValuations,
-  type ValuationRow,
-} from "../api.ts";
-import { Amount, Badge, Nullable, ObservationLink, QueryBoundary } from "../ui.tsx";
-
+  Amount,
+  Badge,
+  Nullable,
+  ObservationLink,
+  QueryBoundary,
+} from "../ui.tsx";
+import { pageWindow } from "../filters.ts";
+import { Pager } from "./ViewControls.tsx";
 export function PositionsPage(): ReactNode {
   const query = usePositions();
   return (
     <>
       <div className="page-head">
-        <h1>Positions</h1>
+        <h1>保有資産</h1>
         <p className="lede">
-          Current position observations with the provider-reported valuations that
-          describe them. Kogane computes no valuation of its own; everything here
-          is what the source stated.
+          取得元が報告した保有数量と評価額を、通貨ごとに確認できます。
         </p>
       </div>
-
-      <div className="panel">
-        <div className="panel-note derived-note">
-          <strong>No figure below is added to any other.</strong> Each valuation
-          keeps the currency the provider stated, and a JPY figure and a USD figure
-          for the same holding are two separate claims — not two views of one
-          number. There is no total on this page, per position or overall, and no
-          conversion between currencies anywhere in this client.
-        </div>
-        <div className="panel-note">
-          Positions and valuations are paired by an exact match on the provider&apos;s
-          own <code>(source, account, subject)</code> labels, made at display time
-          and stored nowhere. It is a decision the data does not carry: a recorded
-          link with a relation, method and confidence is a later phase.
-        </div>
-      </div>
-
+      <details className="detail-disclosure">
+        <summary>評価額の対応関係について</summary>
+        <p>
+          口座・取得元・銘柄のラベルが一致する評価額を表示しています。日付の一致や、同じ時点の評価であることは保証されません。それぞれの基準日をご確認ください。金額は取得元の報告値を保ち、合算や為替換算はしていません。
+        </p>
+      </details>
       <QueryBoundary
         query={query}
-        label="positions"
+        label="保有資産"
         isEmpty={(data) => data.positions.length === 0}
-        empty="No current position observations."
+        empty="表示できる保有資産がまだありません。"
       >
-        {(data) => (
-          <>
-            {data.positions.map((entry) => (
-              <PositionCard key={entry.position.id} entry={entry} />
-            ))}
-          </>
-        )}
+        {(data) => <PositionList entries={data.positions} />}
       </QueryBoundary>
     </>
   );
 }
-
-/**
- * Bucket valuations by the currency the provider stated, keeping first-seen
- * order. The grouping is what stops the page from reading as one set of
- * figures waiting to be added up: two currencies are two blocks, always.
- */
-function groupByCurrency(valuations: ValuationRow[]): [string, ValuationRow[]][] {
-  const groups = new Map<string, ValuationRow[]>();
-  for (const valuation of valuations) {
-    const bucket = groups.get(valuation.currency);
-    if (bucket) bucket.push(valuation);
-    else groups.set(valuation.currency, [valuation]);
-  }
-  return [...groups.entries()];
+function PositionList({
+  entries,
+}: {
+  entries: PositionWithValuations[];
+}): ReactNode {
+  const [page, setPage] = useState(0);
+  const view = pageWindow(entries, page);
+  return (
+    <>
+      {view.rows.map((entry) => (
+        <PositionCard key={entry.position.id} entry={entry} />
+      ))}
+      <Pager {...view} total={entries.length} onChange={setPage} />
+    </>
+  );
 }
-
 function PositionCard({ entry }: { entry: PositionWithValuations }): ReactNode {
   const { position, valuations } = entry;
-  const groups = groupByCurrency(valuations);
-  const currencies = groups.map(([currency]) => currency);
-
+  const currencies = [...new Set(valuations.map((value) => value.currency))];
   return (
     <article className="position-card">
       <div className="position-facts">
@@ -95,117 +62,81 @@ function PositionCard({ entry }: { entry: PositionWithValuations }): ReactNode {
           <span className="security-code">{position.security_code}</span>
           <Badge>{position.source_id}</Badge>
         </div>
-        <div className="security-name">
-          <Nullable value={position.security_name} placeholder="no security name" />
-        </div>
-
-        <div style={{ margin: "0.6rem 0" }}>
-          <div className="quantity">{position.quantity_text}</div>
-          <div className="figure-metric">
-            quantity · scale {position.quantity_scale} · verbatim decimal string
-          </div>
-        </div>
-
+        <h2 className="security-name">
+          <Nullable value={position.security_name} placeholder="銘柄名未記録" />
+        </h2>
+        <div className="quantity">{position.quantity_text}</div>
+        <div className="figure-metric">保有数量（取得元の表記）</div>
         <dl className="kv">
-          <dt>account</dt>
+          <dt>口座</dt>
           <dd>{position.source_account}</dd>
-          <dt>market</dt>
+          <dt>市場</dt>
           <dd>
             <Nullable value={position.market} />
           </dd>
-          <dt>currency</dt>
+          <dt>通貨</dt>
           <dd>
             <Nullable value={position.currency} />
           </dd>
-          <dt>as_of</dt>
+          <dt>基準日</dt>
           <dd>
             <Nullable value={position.as_of} />
           </dd>
-          <dt>parser</dt>
-          <dd>{position.parser}</dd>
-          <dt>observation</dt>
+          <dt>記録</dt>
           <dd>
-            <ObservationLink kind="position" id={position.id} />
+            <ObservationLink kind="position" id={position.id}>
+              詳細・原本を確認
+            </ObservationLink>
           </dd>
         </dl>
-      </div>
-
-      <div className="position-valuations">
-        <div className="position-title">
-          <h3>Provider-reported valuations</h3>
-          <span className="count dim">
-            {valuations.length} figure{valuations.length === 1 ? "" : "s"}
-            {currencies.length > 0
-              ? ` in ${String(currencies.length)} currenc${currencies.length === 1 ? "y" : "ies"}: ${currencies.join(", ")}`
-              : ""}
-          </span>
-        </div>
-
-        {valuations.length === 0 ? (
-          <p className="footnote">
-            No provider-reported valuation observation matches this position. That
-            is an assertion about the match rule above, not about the provider:
-            the source may well have reported one under a label that does not
-            match this security code.
+        <details className="detail-disclosure">
+          <summary>数量・解析の情報</summary>
+          <p>
+            小数桁数: {position.quantity_scale} / 解析: {position.parser}
           </p>
-        ) : (
-          <>
-            {groups.map(([currency, group]) => (
-              <div className="currency-group" key={currency}>
-                <div className="currency-group-head">
-                  <span className="currency-label">{currency}</span>
-                  <span className="count">
-                    {group.length} figure{group.length === 1 ? "" : "s"} stated in{" "}
-                    {currency}
-                  </span>
-                </div>
-                <div className="currency-group-body">
-                  <div className="figures">
-                    {group.map((valuation) => (
-                      <Figure key={valuation.id} valuation={valuation} />
-                    ))}
-                  </div>
-                </div>
+        </details>
+      </div>
+      <div className="position-valuations">
+        <h3>取得元の評価額</h3>
+        {valuations.length ? (
+          currencies.map((currency) => (
+            <section className="currency-group" key={currency}>
+              <div className="currency-group-head">
+                <span>{currency}</span>
+                <span>通貨別の報告値</span>
               </div>
-            ))}
-            {currencies.length > 1 ? (
-              <p className="footnote">
-                These {valuations.length} figures span {currencies.length} currencies
-                ({currencies.join(", ")}), so they sit in {currencies.length} separate
-                blocks. They are not commensurable: adding them, or converting one
-                into the other, would invent a number the source never reported.
-              </p>
-            ) : null}
-          </>
+              <div className="figures">
+                {valuations
+                  .filter((value) => value.currency === currency)
+                  .map((value) => (
+                    <div className="figure" key={value.id}>
+                      <div className="figure-metric">{value.metric}</div>
+                      <div className="figure-amount">
+                        <Amount
+                          minor={value.amount_minor}
+                          unit={value.currency}
+                          text={value.amount_text}
+                        />
+                      </div>
+                      <div className="figure-foot">
+                        <span>
+                          基準日: <Nullable value={value.as_of} />
+                        </span>
+                        <ObservationLink kind="valuation" id={value.id}>
+                          詳細
+                        </ObservationLink>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </section>
+          ))
+        ) : (
+          <p className="footnote">
+            この銘柄のラベルに一致する評価額がありません。評価額がゼロであることや、取得元に情報がないことを意味しません。
+          </p>
         )}
       </div>
     </article>
-  );
-}
-
-function Figure({ valuation }: { valuation: ValuationRow }): ReactNode {
-  return (
-    <div className="figure">
-      <div className="figure-metric">{valuation.metric}</div>
-      <div className="figure-amount">
-        <Amount
-          minor={valuation.amount_minor}
-          unit={valuation.currency}
-          text={valuation.amount_text}
-        />
-      </div>
-      <div className="figure-foot">
-        <span className="figure-currency" title={`stated in ${valuation.currency}`}>
-          {valuation.currency}
-        </span>
-        {/* The pairing above is made on labels alone, with no time alignment,
-            so the date each figure describes is the thing most worth showing:
-            a valuation from another day is not a view of today's position. */}
-        <span className="figure-asof" title="the date this figure describes">
-          {valuation.as_of ?? "no as_of"}
-        </span>
-        <ObservationLink kind="valuation" id={valuation.id} />
-      </div>
-    </div>
   );
 }

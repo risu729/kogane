@@ -15,6 +15,7 @@
 //     document. See the /api/raw handler.
 
 import { Hono } from "hono";
+import type { ApiMetadata } from "../shared/api-contract.ts";
 import { readRawObject, sha256Hex, type Store } from "./store.ts";
 import {
   artifactDetail,
@@ -30,6 +31,8 @@ import {
 } from "./queries.ts";
 
 export interface ApiOptions {
+  /** Set only when startup created an isolated store entirely from known fixtures. */
+  dataClassification?: "synthetic";
   /** Serves the built client. Omitted in tests, which exercise the API alone. */
   serveClient?: (request: Request) => Response | Promise<Response> | undefined;
 }
@@ -60,15 +63,34 @@ export function createApi(store: Store, options: ApiOptions = {}): Hono {
     }
   });
 
+  app.get("/api/meta", (c) =>
+    c.json({
+      apiVersion: 1,
+      source: {
+        kind: "local-store",
+        classification: options.dataClassification ?? "unknown",
+      },
+      capabilities: {
+        readOnly: true,
+        rawEvidence: true,
+        liveCollectors: false,
+      },
+    } satisfies ApiMetadata),
+  );
+
   app.get("/api/overview", (c) => c.json(overview(store)));
 
-  app.get("/api/transactions", (c) => c.json({ transactions: currentTransactions(store) }));
+  app.get("/api/transactions", (c) =>
+    c.json({ transactions: currentTransactions(store) }),
+  );
 
   app.get("/api/balances", (c) =>
     c.json({ latest: latestBalances(store), history: balanceHistory(store) }),
   );
 
-  app.get("/api/positions", (c) => c.json({ positions: positionsWithValuations(store) }));
+  app.get("/api/positions", (c) =>
+    c.json({ positions: positionsWithValuations(store) }),
+  );
 
   app.get("/api/artifacts", (c) => c.json({ artifacts: artifacts(store) }));
 
@@ -86,9 +108,11 @@ export function createApi(store: Store, options: ApiOptions = {}): Hono {
       return c.json({ error: `unknown observation kind: ${kind}` }, 404);
     }
     const id = parseId(c.req.param("id"));
-    if (id === undefined) return c.json({ error: "not an observation id" }, 404);
+    if (id === undefined)
+      return c.json({ error: "not an observation id" }, 404);
     const detail = observationDetail(store, kind, id);
-    if (!detail) return c.json({ error: `no ${kind} observation with id ${id}` }, 404);
+    if (!detail)
+      return c.json({ error: `no ${kind} observation with id ${id}` }, 404);
     return c.json(detail);
   });
 
@@ -106,7 +130,8 @@ export function createApi(store: Store, options: ApiOptions = {}): Hono {
       return c.json({ error: "not a sha256 digest" }, 404);
     }
     const meta = rawObjectMeta(store, sha256);
-    if (!meta) return c.json({ error: `no raw object with sha256 ${sha256}` }, 404);
+    if (!meta)
+      return c.json({ error: `no raw object with sha256 ${sha256}` }, 404);
     let bytes: Uint8Array;
     try {
       bytes = readRawObject(store, meta.sha256);
@@ -136,7 +161,9 @@ export function createApi(store: Store, options: ApiOptions = {}): Hono {
     // The stored content type is provider-derived and reaches a header, so it
     // is validated first: a CR or LF in it would otherwise split the response.
     const declared = meta.content_type.trim();
-    const contentType = /^[ -~]+$/u.test(declared) ? declared : "application/octet-stream";
+    const contentType = /^[ -~]+$/u.test(declared)
+      ? declared
+      : "application/octet-stream";
     // An exact copy of the view's bytes: `readRawObject` returns a Buffer whose
     // underlying pool may be larger than the object, so the range matters.
     const body = bytes.buffer.slice(

@@ -20,13 +20,27 @@ implements, and `RESULTS.md` for what it settled and what it did not.
 
 ```sh
 bun install
+bun run preview       # build + isolated synthetic-data browser (no existing state access)
 bun run demo          # ingest the fixtures, parse them, print row counts
 bun run build         # build the client into web/dist
 bun run serve         # API + built client on http://127.0.0.1:8787/
 bun run dev           # Vite dev server on 5173, proxying /api to 8787
-bun test              # 80 tests across 4 files
+bun test              # pipeline/API tests; browser tests require Chromium and a build
 bun run typecheck
 ```
+
+The frontend now provides Japanese navigation, responsive layouts, source
+and date filters, and explicit loading/error/retry states. See
+[Frontend foundation](../../docs/frontend.md) for the stack decision and
+production API handoff. `/api/meta` distinguishes a verified synthetic
+preview from a normal local store whose data classification is unknown.
+Neither is connected to the production D1/R2 store yet.
+
+`bun run preview` uses only committed synthetic fixtures in a fresh temporary
+store and removes that store on normal shutdown. Use it to review the UI
+without opening `state/` or running a collector. `bun run demo` retains its
+older behavior of ingesting fixtures into `state/`, so it is not a data-mode
+switch and does not mark that store synthetic.
 
 `bun run serve` binds loopback only and has no authentication: it renders
 real financial evidence and must never be reachable from a network. The

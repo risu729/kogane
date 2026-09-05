@@ -1,70 +1,42 @@
-// Unknown route. The URL space is small and mirrors the API's, so the honest
-// response is to say what exists rather than to guess where the operator meant
-// to go.
-
 import type { ReactNode } from "react";
 import { Link } from "../router.tsx";
-
-const ROUTES: { path: string; description: string }[] = [
-  { path: "/", description: "row counts, sources, fetch runs, parse runs" },
-  { path: "/transactions", description: "current transaction observations" },
-  { path: "/balances", description: "latest per key, then the full history" },
-  { path: "/positions", description: "positions with provider-reported valuations" },
-  { path: "/artifacts", description: "every artifact and its observation counts" },
+const ROUTES = [
+  { path: "/", label: "ホーム", description: "取得元と最近の収集状況" },
+  { path: "/transactions", label: "取引", description: "入出金の記録を検索" },
+  { path: "/balances", label: "残高", description: "口座ごとの残高と履歴" },
+  {
+    path: "/positions",
+    label: "保有資産",
+    description: "保有数量と取得元の評価額",
+  },
+  {
+    path: "/artifacts",
+    label: "原本",
+    description: "保存された資料と解析の記録",
+  },
 ];
-
 export function NotFoundPage({ path }: { path: string }): ReactNode {
   return (
     <>
       <div className="page-head">
-        <h1>404 — no such view</h1>
+        <h1>ページが見つかりません</h1>
         <p className="lede">
-          Nothing in this client is served at <code>{path}</code>.
+          リンク先をご確認いただくか、下の一覧からお進みください。
         </p>
       </div>
-
-      <section className="panel" aria-labelledby="routes">
-        <div className="panel-head">
-          <h2 id="routes">Views this client serves</h2>
-        </div>
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">
-                  <span className="th-label">path</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">what it shows</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {ROUTES.map((route) => (
-                <tr key={route.path}>
-                  <th scope="row">
-                    <Link to={route.path}>{route.path}</Link>
-                  </th>
-                  <td>{route.description}</td>
-                </tr>
-              ))}
-              <tr>
-                <th scope="row" className="dim">
-                  /artifacts/:id
-                </th>
-                <td>one artifact and every parse run over it, superseded included</td>
-              </tr>
-              <tr>
-                <th scope="row" className="dim">
-                  /observations/:kind/:id
-                </th>
-                <td>
-                  one observation and its provenance walk; kind is transaction,
-                  balance, position or valuation
-                </td>
-              </tr>
-            </tbody>
-          </table>
+      <section className="panel">
+        <div className="panel-body">
+          <ul>
+            {ROUTES.map((route) => (
+              <li key={route.path}>
+                <Link to={route.path}>{route.label}</Link> — {route.description}
+              </li>
+            ))}
+          </ul>
+          <details className="detail-disclosure">
+            <summary>指定されたページ</summary>
+            <code>{path}</code>
+          </details>
         </div>
       </section>
     </>

@@ -1,211 +1,146 @@
-// Balances — a derived view above the record it is derived from.
-//
-// The first table is the latest observation per
-// (source, source_account, metric, instrument), computed by a window function
-// on the request that asks for it and stored nowhere. The second is the
-// append-only history it was derived from, superseded rows included and
-// marked. The order on the page is deliberate: the derived thing never appears
-// without the record underneath it.
-
-import type { ReactNode } from "react";
-import { useBalances, type BalanceHistoryRow, type BalanceRow } from "../api.ts";
+import { useState, type ReactNode } from "react";
+import {
+  useBalances,
+  type BalanceHistoryRow,
+  type BalanceRow,
+} from "../api.ts";
 import {
   Amount,
   Badge,
   LineageBadge,
   Nullable,
+  ObservationLink,
   Panel,
   QueryBoundary,
+  StatusBadge,
 } from "../ui.tsx";
-import { ObservationLink } from "../ui.tsx";
-
+import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
+import { Pager, RecordControls } from "./ViewControls.tsx";
+import { useViewState } from "../view-state.tsx";
 export function BalancesPage(): ReactNode {
   const query = useBalances();
   return (
     <>
       <div className="page-head">
-        <h1>Balances</h1>
+        <h1>残高</h1>
         <p className="lede">
-          A balance is a measurement, so each metric an institution reports is its
-          own row. Nothing is collapsed into one number per account, and no two
-          rows are ever added together.
+          口座ごとに、取得元が報告した残高を確認できます。通貨や残高の種類を分けて表示しています。
         </p>
       </div>
-
-      <QueryBoundary query={query} label="balances">
-        {(data) => (
-          <>
-            <LatestTable rows={data.latest} />
-            <HistoryTable rows={data.history} />
-          </>
-        )}
+      <QueryBoundary query={query} label="残高">
+        {(data) => <BalancesBody latest={data.latest} history={data.history} />}
       </QueryBoundary>
     </>
   );
 }
-
-function LatestTable({ rows }: { rows: BalanceRow[] }): ReactNode {
+function BalancesBody({
+  latest,
+  history,
+}: {
+  latest: BalanceRow[];
+  history: BalanceHistoryRow[];
+}): ReactNode {
+  const [filters, setFilters] = useViewState("balances.filters");
+  const rows = [...latest, ...history];
   return (
-    <section className="panel" aria-labelledby="latest-balances">
-      <div className="panel-head">
-        <h2 id="latest-balances">Latest per (source, account, metric, instrument)</h2>
-        <span className="count">{rows.length} rows</span>
-      </div>
-      <div className="panel-note derived-note">
-        <strong>Derived on request, stored nowhere.</strong> This table is a
-        <code> ROW_NUMBER()</code> over the current rows in the history below,
-        recomputed on every request. There is no “latest balance” row in the
-        store, no cache, and no snapshot table — reload the page and it is
-        computed again from scratch.
-      </div>
-      {rows.length === 0 ? (
-        <div className="panel-body dim">No current balance observations.</div>
-      ) : (
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">
-                  <span className="th-label">obs</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">source</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">account</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">metric</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">instrument</span>
-                </th>
-                <th scope="col" className="num">
-                  <span className="th-label">amount</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">as_of</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">observed_at</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">parser</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.id}>
-                  <th scope="row">
-                    <ObservationLink kind="balance" id={row.id} />
-                  </th>
-                  <td>{row.source_id}</td>
-                  <td>{row.source_account}</td>
-                  <td>{row.metric}</td>
-                  <td>
-                    <Badge>{row.instrument}</Badge>
-                  </td>
-                  <td className="num">
-                    <Amount
-                      minor={row.amount_minor}
-                      unit={row.instrument}
-                      text={row.amount_text}
-                    />
-                  </td>
-                  <td className="nowrap">
-                    <Nullable value={row.as_of} />
-                  </td>
-                  <td className="nowrap">
-                    <Nullable value={row.observed_at} />
-                  </td>
-                  <td className="nowrap">{row.parser}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <>
+      <section className="panel">
+        <div className="panel-body">
+          <RecordControls rows={rows} filters={filters} onChange={setFilters} />
+          <button
+            className="button"
+            type="button"
+            onClick={() => setFilters(EMPTY_FILTERS)}
+          >
+            条件をクリア
+          </button>
         </div>
-      )}
-      <p className="footnote" style={{ padding: "0.5rem 0.75rem" }}>
-        “Latest” ranks by <code>COALESCE(as_of, observed_at, &apos;&apos;) DESC</code>,
-        then by row id. <code>as_of</code> is the point in time a value describes;{" "}
-        <code>observed_at</code> is when the source displayed it. Ranking one
-        against the other treats two different kinds of time as the same kind, so
-        this ordering is a display convenience, not a claim about which
-        measurement is the most recent.
-      </p>
-    </section>
+      </section>
+      <BalanceTable
+        key={`latest:${filters.source}:${filters.account}`}
+        rows={latest.filter((row) => matchesSourceAccount(row, filters))}
+      />
+      <details className="detail-disclosure">
+        <summary>過去の残高・再解析の履歴</summary>
+        <BalanceTable
+          key={`history:${filters.source}:${filters.account}`}
+          rows={history.filter((row) => matchesSourceAccount(row, filters))}
+          history
+        />
+      </details>
+      <details className="detail-disclosure">
+        <summary>「最新」の選び方と表示範囲</summary>
+        <p>
+          取得元・口座・残高の種類・通貨や単位が同じ記録から、基準日（as_of）、基準日がない場合は取得元での観測日時（observed_at）を使って選んでいます。同じ日時は記録番号で並べます。両日時は意味が異なるため、実際の測定時刻が最も新しいことを保証するものではありません。
+        </p>
+        <p>
+          過去の履歴には旧解析の記録も残っています。金額は合算・換算せず、保存値をそのまま表示します。APIの全件応答をブラウザー内で絞り込み、各表は50件ずつ表示します。金融機関の全履歴が揃っていることを表す件数ではありません。
+        </p>
+      </details>
+    </>
   );
 }
-
-function HistoryTable({ rows }: { rows: BalanceHistoryRow[] }): ReactNode {
-  const supersededCount = rows.filter(
-    (row) => row.superseded_by_parse_run_id !== null,
-  ).length;
-
+function BalanceTable({
+  rows,
+  history = false,
+}: {
+  rows: BalanceRow[] | BalanceHistoryRow[];
+  history?: boolean;
+}): ReactNode {
+  const [page, setPage] = useState(0);
+  const view = pageWindow<BalanceRow | BalanceHistoryRow>(rows, page);
   return (
     <Panel
-      id="balance-history"
-      title="Append-only history"
-      count={`${String(rows.length)} rows · ${String(supersededCount)} superseded`}
-      note="Every balance observation ever written, in the order the ranking above reads them. Rows from a superseded parse run are kept and marked, never deleted: that is what makes a re-parse auditable."
+      id={history ? "balance-history" : "latest-balances"}
+      title={history ? "保存された残高の履歴" : "項目ごとの最新の記録"}
+      count={`${rows.length}件`}
+      note={
+        history
+          ? "旧解析の記録も、根拠を確認できるように保持しています。"
+          : "種類や通貨が異なる残高は、それぞれ独立した記録です。"
+      }
     >
-      {rows.length === 0 ? (
-        <div className="panel-body dim">No balance observations.</div>
-      ) : (
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">
-                  <span className="th-label">obs</span>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              {[
+                "取得元・口座",
+                "残高の種類",
+                "金額",
+                "基準日",
+                "取得元の観測日時",
+                ...(history ? ["解析・履歴"] : []),
+                "記録",
+              ].map((label) => (
+                <th
+                  scope="col"
+                  key={label}
+                  className={label === "金額" ? "num" : ""}
+                >
+                  {label}
                 </th>
-                <th scope="col">
-                  <span className="th-label">source</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">account</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">metric</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">instrument</span>
-                </th>
-                <th scope="col" className="num">
-                  <span className="th-label">amount</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">as_of</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">observed_at</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">parser</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">parse status</span>
-                </th>
-                <th scope="col">
-                  <span className="th-label">lineage</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {view.rows.length ? (
+              view.rows.map((row) => (
                 <tr
                   key={row.id}
-                  className={row.superseded_by_parse_run_id === null ? "" : "is-superseded"}
+                  className={
+                    "superseded_by_parse_run_id" in row &&
+                    row.superseded_by_parse_run_id !== null
+                      ? "is-superseded"
+                      : ""
+                  }
                 >
-                  <th scope="row">
-                    <ObservationLink kind="balance" id={row.id} />
-                  </th>
-                  <td>{row.source_id}</td>
-                  <td>{row.source_account}</td>
-                  <td>{row.metric}</td>
                   <td>
-                    <Badge>{row.instrument}</Badge>
+                    {row.source_id}
+                    <div className="dim">{row.source_account}</div>
+                  </td>
+                  <td>
+                    {row.metric} <Badge>{row.instrument}</Badge>
                   </td>
                   <td className="num">
                     <Amount
@@ -214,27 +149,38 @@ function HistoryTable({ rows }: { rows: BalanceHistoryRow[] }): ReactNode {
                       text={row.amount_text}
                     />
                   </td>
-                  <td className="nowrap">
+                  <td>
                     <Nullable value={row.as_of} />
                   </td>
-                  <td className="nowrap">
+                  <td>
                     <Nullable value={row.observed_at} />
                   </td>
-                  <td className="nowrap">{row.parser}</td>
+                  {history && "parse_status" in row ? (
+                    <td>
+                      <StatusBadge status={row.parse_status} />
+                      <LineageBadge
+                        supersededBy={row.superseded_by_parse_run_id}
+                      />
+                    </td>
+                  ) : null}
                   <td>
-                    <Badge tone={row.parse_status === "ok" ? "ok" : "bad"}>
-                      {row.parse_status}
-                    </Badge>
-                  </td>
-                  <td>
-                    <LineageBadge supersededBy={row.superseded_by_parse_run_id} />
+                    <ObservationLink kind="balance" id={row.id}>
+                      詳細
+                    </ObservationLink>
                   </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              ))
+            ) : (
+              <tr>
+                <td colSpan={history ? 7 : 6}>
+                  表示できる残高がありません。口座や取得元の条件をご確認ください。
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Pager {...view} total={rows.length} onChange={setPage} />
     </Panel>
   );
 }

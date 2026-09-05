@@ -1,223 +1,212 @@
-// Transactions — every current transaction observation.
-//
-// "Current" is the parse run predicate the API applies for us:
-// `superseded_by_parse_run_id IS NULL AND status = 'ok'`. Nothing superseded
-// reaches this page; superseded rows stay reachable, and marked, through the
-// artifact they came from.
-//
-// Sorting and filtering happen in the browser over the rows the API already
-// returned. Neither is a query, so neither can change which observations count
-// as current.
-
-import { useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
-  columnFilteringFeature,
   createColumnHelper,
-  createFilteredRowModel,
   createSortedRowModel,
-  filterFn_includesString,
-  globalFilteringFeature,
   rowSortingFeature,
-  sortFn_basic,
   sortFn_text,
   tableFeatures,
   useTable,
-  type SortingState,
 } from "@tanstack/react-table";
 import { useTransactions, type TransactionRow } from "../api.ts";
-import { Amount, Nullable, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
-
+import {
+  Amount,
+  Nullable,
+  ObservationLink,
+  Panel,
+  QueryBoundary,
+} from "../ui.tsx";
+import {
+  EMPTY_FILTERS,
+  matchesDates,
+  matchesSourceAccount,
+  pageWindow,
+} from "../filters.ts";
+import { Pager, RecordControls } from "./ViewControls.tsx";
+import { useViewState } from "../view-state.tsx";
 const features = tableFeatures({
-  columnFilteringFeature,
-  globalFilteringFeature,
   rowSortingFeature,
-  filteredRowModel: createFilteredRowModel(),
   sortedRowModel: createSortedRowModel(),
-  filterFns: { includesString: filterFn_includesString },
-  sortFns: { basic: sortFn_basic, text: sortFn_text },
+  sortFns: { text: sortFn_text },
 });
-
 const helper = createColumnHelper<typeof features, TransactionRow>();
-
-// Accessors coerce a null to "" for sorting and filtering only; every cell
-// renders the stored value, so an absent field still reads as absent.
-// `helper.columns` keeps each column's own value type instead of widening the
-// array to one shared TValue.
 const columns = helper.columns([
-  helper.display({
-    id: "obs",
-    header: "obs",
-    cell: (info) => <ObservationLink kind="transaction" id={info.row.original.id} />,
+  helper.accessor((row) => row.as_of ?? "", {
+    id: "date",
+    header: "取引の基準日",
+    sortFn: "text",
+    cell: (info) => <Nullable value={info.row.original.as_of} />,
+  }),
+  helper.accessor((row) => row.description ?? "", {
+    id: "description",
+    header: "内容",
+    sortFn: "text",
+    cell: (info) => (
+      <>
+        <Nullable value={info.row.original.description} />
+        {info.row.original.counterparty ? (
+          <div className="dim">{info.row.original.counterparty}</div>
+        ) : null}
+      </>
+    ),
   }),
   helper.accessor((row) => row.source_id, {
     id: "source",
-    header: "source",
+    header: "取得元",
     sortFn: "text",
     cell: (info) => info.row.original.source_id,
   }),
   helper.accessor((row) => row.source_account, {
     id: "account",
-    header: "account",
+    header: "口座",
     sortFn: "text",
     cell: (info) => info.row.original.source_account,
   }),
-  helper.accessor((row) => row.as_of ?? "", {
-    id: "as_of",
-    header: "as_of",
-    sortFn: "text",
-    cell: (info) => <Nullable value={info.row.original.as_of} />,
-  }),
-  helper.accessor((row) => row.amount_minor, {
+  helper.display({
     id: "amount",
-    header: "amount",
-    sortFn: "basic",
-    enableGlobalFilter: false,
-    cell: (info) => {
-      const row = info.row.original;
-      return <Amount minor={row.amount_minor} unit={row.currency} text={row.amount_text} />;
-    },
+    header: "金額",
+    cell: (info) => (
+      <Amount
+        minor={info.row.original.amount_minor}
+        unit={info.row.original.currency}
+        text={info.row.original.amount_text}
+      />
+    ),
   }),
-  helper.accessor((row) => row.currency ?? "", {
-    id: "currency",
-    header: "ccy",
+  helper.accessor((row) => row.status ?? "", {
+    id: "status",
+    header: "取得元の状態",
     sortFn: "text",
-    cell: (info) => <Nullable value={info.row.original.currency} />,
+    cell: (info) => <Nullable value={info.row.original.status} />,
   }),
-  helper.accessor((row) => row.description ?? "", {
-    id: "description",
-    header: "description",
-    sortFn: "text",
-    cell: (info) => <Nullable value={info.row.original.description} />,
-  }),
-  helper.accessor((row) => row.counterparty ?? "", {
-    id: "counterparty",
-    header: "counterparty",
-    sortFn: "text",
-    cell: (info) => <Nullable value={info.row.original.counterparty} />,
-  }),
-  helper.accessor((row) => row.external_id ?? "", {
-    id: "external_id",
-    header: "external_id",
-    sortFn: "text",
-    cell: (info) => <Nullable value={info.row.original.external_id} />,
-  }),
-  helper.accessor((row) => row.parser, {
-    id: "parser",
-    header: "parser",
-    sortFn: "text",
-    cell: (info) => info.row.original.parser,
+  helper.display({
+    id: "detail",
+    header: "記録",
+    cell: (info) => (
+      <ObservationLink kind="transaction" id={info.row.original.id}>
+        詳細
+      </ObservationLink>
+    ),
   }),
 ]);
-
-const NUMERIC_COLUMNS = new Set(["amount"]);
-const WIDE_COLUMNS = new Set(["description", "counterparty"]);
-// Identifiers and timestamps are read character by character, so a wrap in the
-// middle of one is a misreading waiting to happen.
-const NOWRAP_COLUMNS = new Set([
-  "obs",
-  "source",
-  "account",
-  "as_of",
-  "currency",
-  "external_id",
-  "parser",
-]);
-
-const SORT_ARROW: Record<string, string> = { asc: "▲", desc: "▼" };
-
 export function TransactionsPage(): ReactNode {
   const query = useTransactions();
   return (
     <>
       <div className="page-head">
-        <h1>Transactions</h1>
-        <p className="lede">
-          Current transaction observations: those whose parse run succeeded and
-          which nothing has superseded.
-        </p>
+        <h1>取引</h1>
+        <p className="lede">入出金の記録を、取得元・口座・日付から探せます。</p>
       </div>
       <QueryBoundary
         query={query}
-        label="transactions"
+        label="取引"
         isEmpty={(data) => data.transactions.length === 0}
-        empty="No current transaction observations. Run bun run demo to populate the store."
+        empty="表示できる取引がまだありません。取り込んだ記録はここに表示されます。"
       >
         {(data) => <TransactionsTable rows={data.transactions} />}
       </QueryBoundary>
     </>
   );
 }
-
 function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
-  const [sorting, setSorting] = useState<SortingState>([]);
-  const [globalFilter, setGlobalFilter] = useState("");
-
+  const [filters, setFilters] = useViewState("transactions.filters");
+  const [search, setSearch] = useViewState("transactions.search");
+  const [page, setPage] = useViewState("transactions.page");
+  const [sorting, setSorting] = useViewState("transactions.sorting");
+  const filtered = useMemo(
+    () =>
+      rows.filter(
+        (row) =>
+          matchesSourceAccount(row, filters) &&
+          matchesDates(row.as_of, filters.from, filters.to) &&
+          (!search.trim() ||
+            [
+              row.description,
+              row.counterparty,
+              row.external_id,
+              row.source_id,
+              row.source_account,
+            ].some((value) =>
+              value
+                ?.toLocaleLowerCase()
+                .includes(search.trim().toLocaleLowerCase()),
+            )),
+      ),
+    [rows, filters, search],
+  );
   const table = useTable({
     features,
     columns,
-    data: rows,
-    state: { sorting, globalFilter },
-    onSortingChange: setSorting,
-    onGlobalFilterChange: setGlobalFilter,
-    globalFilterFn: "includesString",
+    data: filtered,
+    state: { sorting },
+    onSortingChange: (update) => {
+      setSorting(update);
+      setPage(0);
+    },
     enableSortingRemoval: true,
   });
-
-  const visible = table.getRowModel().rows;
-
+  const view = pageWindow(table.getRowModel().rows, page);
   return (
     <Panel
       id="transactions"
-      title="Current transaction observations"
-      count={`${String(visible.length)} of ${String(rows.length)} rows`}
+      title="取引の記録"
+      count={`受信した${rows.length}件から絞り込み`}
     >
-      <div className="toolbar">
-        <label htmlFor="tx-filter" className="mono">
-          filter
-        </label>
-        <input
-          id="tx-filter"
-          className="filter-input"
-          type="search"
-          value={globalFilter}
-          placeholder="substring across all text columns"
-          onChange={(event) => {
-            setGlobalFilter(event.target.value);
+      <div className="panel-body">
+        <RecordControls
+          rows={rows}
+          filters={filters}
+          dates
+          onChange={(value) => {
+            setFilters(value);
+            setPage(0);
           }}
         />
-        <button
-          type="button"
-          className="button"
-          onClick={() => {
-            setGlobalFilter("");
-            setSorting([]);
-          }}
-        >
-          reset
-        </button>
-        <span className="count">click a column heading to sort</span>
+        <div className="toolbar">
+          <label className="filter-field">
+            内容を検索
+            <input
+              className="filter-input"
+              type="search"
+              value={search}
+              placeholder="内容・相手先・識別番号"
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(0);
+              }}
+            />
+          </label>
+          <button
+            className="button"
+            type="button"
+            onClick={() => {
+              setFilters(EMPTY_FILTERS);
+              setSearch("");
+              setSorting([]);
+              setPage(0);
+            }}
+          >
+            条件をクリア
+          </button>
+        </div>
+        {filters.from && filters.to && filters.from > filters.to ? (
+          <p role="alert">開始日を終了日以前にしてください。</p>
+        ) : null}
       </div>
-
       <div className="table-scroll">
         <table>
           <caption className="dim">
-            Current transaction observations, one row per observation. Sorting the
-            amount column orders by integer minor units, which are not comparable
-            between currencies; the currency column is shown beside it for that
-            reason.
+            解析済みの現行データです。同じ取引に由来する記録が複数含まれる場合があります。
           </caption>
           <thead>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id}>
-                {headerGroup.headers.map((header) => {
+            {table.getHeaderGroups().map((group) => (
+              <tr key={group.id}>
+                {group.headers.map((header) => {
                   const sorted = header.column.getIsSorted();
-                  const canSort = header.column.getCanSort();
-                  const className = NUMERIC_COLUMNS.has(header.column.id) ? "num" : "";
                   return (
                     <th
                       key={header.id}
                       scope="col"
-                      className={className}
+                      className={header.column.id === "amount" ? "num" : ""}
                       aria-sort={
                         sorted === "asc"
                           ? "ascending"
@@ -226,21 +215,23 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
                             : "none"
                       }
                     >
-                      {header.isPlaceholder ? null : canSort ? (
+                      {header.column.getCanSort() ? (
                         <button
-                          type="button"
                           className="sort-button"
+                          type="button"
                           onClick={header.column.getToggleSortingHandler()}
                         >
                           <table.FlexRender header={header} />
-                          <span className="sort-arrow" aria-hidden="true">
-                            {sorted === false ? "↕" : (SORT_ARROW[sorted] ?? "↕")}
+                          <span aria-hidden="true">
+                            {sorted === "asc"
+                              ? " ↑"
+                              : sorted === "desc"
+                                ? " ↓"
+                                : " ↕"}
                           </span>
                         </button>
                       ) : (
-                        <span className="th-label">
-                          <table.FlexRender header={header} />
-                        </span>
+                        <table.FlexRender header={header} />
                       )}
                     </th>
                   );
@@ -249,42 +240,49 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
             ))}
           </thead>
           <tbody>
-            {visible.length === 0 ? (
-              <tr>
-                <td colSpan={columns.length} className="dim">
-                  No row matches “{globalFilter}”.
-                </td>
-              </tr>
-            ) : (
-              visible.map((row) => (
+            {view.rows.length ? (
+              view.rows.map((row) => (
                 <tr key={row.id}>
-                  {row.getAllCells().map((cell) => {
-                    const id = cell.column.id;
-                    const className = NUMERIC_COLUMNS.has(id)
-                      ? "num"
-                      : WIDE_COLUMNS.has(id)
-                        ? "wrap"
-                        : NOWRAP_COLUMNS.has(id)
-                          ? "nowrap"
-                          : "";
-                    return (
-                      <td key={cell.id} className={className}>
-                        <table.FlexRender cell={cell} />
-                      </td>
-                    );
-                  })}
+                  {row.getAllCells().map((cell) => (
+                    <td
+                      key={cell.id}
+                      className={
+                        cell.column.id === "amount"
+                          ? "num"
+                          : cell.column.id === "description"
+                            ? "wrap"
+                            : ""
+                      }
+                    >
+                      <table.FlexRender cell={cell} />
+                    </td>
+                  ))}
                 </tr>
               ))
+            ) : (
+              <tr>
+                <td colSpan={columns.length}>
+                  条件に合う取引がありません。条件を変えてお試しください。
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
       </div>
-      <p className="footnote" style={{ padding: "0.5rem 0.75rem" }}>
-        <code>external_id</code> is what the provider said, not a logical identity. A
-        pending row and its posted row are related by a recorded link, never by an
-        update — and no such link exists yet, so two rows here may describe one
-        event.
-      </p>
+      <Pager {...view} total={filtered.length} onChange={setPage} />
+      <details className="detail-disclosure">
+        <summary>表示範囲と日付について</summary>
+        <p>
+          APIから受信した全{rows.length}
+          件をブラウザー内で絞り込み、50件ずつ表示しています。サーバーから次の50件を取得する仕組みではありません。この件数だけでは金融機関の全履歴が揃っているかは判断できません。
+        </p>
+        <p>
+          日付は取得元の基準日（as_of）をそのまま表示します。期間指定時は記録された年月日で比較し、日付不明の記録は除外します。タイムゾーンの換算はしません。金額は保存値を保ち、異なる通貨での並べ替え・合算は行いません。
+        </p>
+        <p>
+          取引番号・解析方法・原本への経路は各記録の「詳細」で確認できます。
+        </p>
+      </details>
     </Panel>
   );
 }

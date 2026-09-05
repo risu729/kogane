@@ -1,21 +1,22 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f7f6f2" />
     <meta name="referrer" content="no-referrer" />
     <meta
       name="description"
-      content="Read-only evidence browser for the Kogane observation pipeline: raw evidence, typed observations, and the provenance between them."
+      content="取引・残高・保有資産の保存記録から、取得時の証跡と原本までたどる、閲覧専用の Kogane ライブラリ。"
     />
-    <title>Kogane evidence browser</title>
+    <title>kogane — 記録と原本のライブラリ</title>
   </head>
   <body>
     <div id="root"></div>
     <noscript>
-      This client renders the read-only JSON API at /api with JavaScript. The
-      API itself is reachable without it.
+      この画面を表示するには JavaScript
+      を有効にしてください。保存された記録を読み取り専用で表示します。
     </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -1,211 +1,162 @@
-// Artifact detail — the only page where a retired observation stays visible.
-//
-// Every parse run over these bytes is listed, superseded ones included and
-// marked, each with the observations it produced. This is what makes
-// "re-parse everything" a button someone will actually press: the old parse
-// run's rows sit next to the new one's, and the difference is readable.
-
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useArtifact, type ParseRunDetail } from "../api.ts";
 import { Link } from "../router.tsx";
 import {
-  Badge,
+  CellValue,
   KindBadge,
   LineageBadge,
-  Nullable,
   ObservationLink,
   Panel,
   QueryBoundary,
   RawLink,
-  Sha,
   StatusBadge,
   WarningList,
 } from "../ui.tsx";
-
+import { pageWindow } from "../filters.ts";
+import { Pager } from "./ViewControls.tsx";
+import { displayLabel } from "../labels.ts";
+const LABELS: Record<string, string> = {
+  id: "原本番号",
+  source_id: "取得元",
+  dataset: "資料の種類",
+  url: "取得URL（参照用）",
+  method: "HTTPメソッド",
+  http_status: "HTTP応答",
+  mime: "資料形式",
+  fetched_at: "取得日時",
+  sha256: "SHA-256",
+  size: "サイズ（バイト）",
+  content_type: "保存形式",
+  fetch_run_id: "収集実行番号",
+  tool: "収集ツール",
+  external_run_id: "外部実行番号",
+  fetch_status: "収集結果",
+  started_at: "開始日時",
+  completed_at: "完了日時",
+};
 export function ArtifactDetailPage({ id }: { id: number }): ReactNode {
   const query = useArtifact(id);
   return (
     <>
       <div className="page-head">
         <div className="breadcrumb">
-          <Link to="/artifacts">artifacts</Link> / #{id}
+          <Link to="/artifacts">原本</Link> / #{id}
         </div>
-        <h1>Artifact #{id}</h1>
+        <h1>原本 #{id}</h1>
         <p className="lede">
-          The layer A record for these bytes, then every parse run over them.
+          保存された資料と、この資料から読み取った記録を確認できます。
         </p>
       </div>
-
-      <QueryBoundary query={query} label={`artifact #${String(id)}`}>
-        {(data) => {
-          const artifact = data.artifact;
-          const superseded = data.parseRuns.filter(
-            (run) => run.superseded_by_parse_run_id !== null,
-          ).length;
-          return (
-            <>
-              <Panel id="artifact-record" title="Layer A record">
-                <div className="panel-body">
-                  <dl className="kv">
-                    <dt>artifact id</dt>
-                    <dd>{artifact.id}</dd>
-                    <dt>source</dt>
-                    <dd>{artifact.source_id}</dd>
-                    <dt>dataset</dt>
-                    <dd>
-                      <Nullable value={artifact.dataset} />
-                    </dd>
-                    <dt>url</dt>
-                    <dd>
-                      <Nullable value={artifact.url} />
-                    </dd>
-                    <dt>method</dt>
-                    <dd>
-                      <Nullable value={artifact.method} />
-                    </dd>
-                    <dt>http_status</dt>
-                    <dd>
-                      <Nullable value={artifact.http_status} />
-                    </dd>
-                    <dt>mime</dt>
-                    <dd>{artifact.mime}</dd>
-                    <dt>fetched_at</dt>
-                    <dd>{artifact.fetched_at}</dd>
-                  </dl>
-                </div>
-              </Panel>
-
-              <Panel
-                id="raw-object"
-                title="Raw object"
-                note="The bytes are served verbatim, but never as an active document: the API sends them with Content-Security-Policy: sandbox and X-Content-Type-Options: nosniff, because captured evidence can be attacker-authored HTML."
-              >
-                <div className="panel-body">
-                  <dl className="kv">
-                    <dt>sha256</dt>
-                    <dd>
-                      <Sha value={artifact.sha256} full />
-                    </dd>
-                    <dt>size</dt>
-                    <dd>{artifact.size} bytes</dd>
-                    <dt>content_type</dt>
-                    <dd>{artifact.content_type}</dd>
-                    <dt>bytes</dt>
-                    <dd>
-                      <RawLink sha256={artifact.sha256}>
-                        /api/raw/{artifact.sha256.slice(0, 12)}… ↗
-                      </RawLink>
-                    </dd>
-                  </dl>
-                </div>
-              </Panel>
-
-              <Panel id="fetch-run" title="Fetch run">
-                <div className="panel-body">
-                  <dl className="kv">
-                    <dt>fetch run id</dt>
-                    <dd>{artifact.fetch_run_id}</dd>
-                    <dt>tool</dt>
-                    <dd>{artifact.tool}</dd>
-                    <dt>external_run_id</dt>
-                    <dd>
-                      <Nullable value={artifact.external_run_id} />
-                    </dd>
-                    <dt>status</dt>
-                    <dd>
-                      <StatusBadge status={artifact.fetch_status} />
-                    </dd>
-                    <dt>started_at</dt>
-                    <dd>{artifact.started_at}</dd>
-                    <dt>completed_at</dt>
-                    <dd>
-                      <Nullable value={artifact.completed_at} placeholder="not completed" />
-                    </dd>
-                  </dl>
-                </div>
-              </Panel>
-
-              <Panel
-                id="parse-runs"
-                title="Every parse run over these bytes"
-                count={`${String(data.parseRuns.length)} runs · ${String(superseded)} superseded`}
-                note="Superseded runs are shown here and nowhere else. No observation row is ever updated or deleted, so a retired parse run's output remains readable next to what replaced it."
-              >
-                {data.parseRuns.length === 0 ? (
-                  <div className="panel-body dim">
-                    No parser has run over this artifact yet.
-                  </div>
+      <QueryBoundary query={query} label={`原本 #${id}`}>
+        {(data) => (
+          <>
+            <Panel id="artifact-record" title="取得した資料">
+              <div className="panel-body">
+                <dl className="kv">
+                  <dt>取得元</dt>
+                  <dd>{data.artifact.source_id}</dd>
+                  <dt>取得日時</dt>
+                  <dd>{data.artifact.fetched_at}</dd>
+                  <dt>収集結果</dt>
+                  <dd>
+                    <StatusBadge status={data.artifact.fetch_status} />
+                  </dd>
+                  <dt>原本データ</dt>
+                  <dd>
+                    <RawLink sha256={data.artifact.sha256}>
+                      保存された原本を開く ↗
+                    </RawLink>
+                  </dd>
+                </dl>
+              </div>
+            </Panel>
+            <details className="detail-disclosure">
+              <summary>原本・収集の技術情報</summary>
+              <div className="panel-body">
+                <dl className="kv">
+                  {Object.entries(data.artifact).map(([key, value]) => (
+                    <div key={key} className="kv-entry">
+                      <dt>{displayLabel(LABELS, key)}</dt>
+                      <dd>
+                        <CellValue value={value} />
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <p>
+                  URLは取得時の記録として表示しています。原本データは保存時のバイト列で提供され、隔離された表示と形式判定の保護が適用されます。
+                </p>
+              </div>
+            </details>
+            <Panel
+              id="parse-runs"
+              title="この原本の解析履歴"
+              count={`${data.parseRuns.length}回`}
+              note="置き換えられた旧解析も残しています。各記録から保存された値と原本内の位置を確認できます。"
+            >
+              <div className="panel-body">
+                {data.parseRuns.length ? (
+                  data.parseRuns.map((run) => (
+                    <ParseRunCard key={run.id} run={run} />
+                  ))
                 ) : (
-                  <div className="panel-body">
-                    {data.parseRuns.map((run) => (
-                      <ParseRunCard key={run.id} run={run} />
-                    ))}
-                  </div>
+                  <p>この原本はまだ解析されていません。</p>
                 )}
-              </Panel>
-            </>
-          );
-        }}
+              </div>
+            </Panel>
+          </>
+        )}
       </QueryBoundary>
     </>
   );
 }
-
 function ParseRunCard({ run }: { run: ParseRunDetail }): ReactNode {
-  const isSuperseded = run.superseded_by_parse_run_id !== null;
+  const [page, setPage] = useState(0);
+  const view = pageWindow(run.observations, page);
+  const old = run.superseded_by_parse_run_id !== null;
   return (
     <section
-      className={isSuperseded ? "chain-card is-superseded" : "chain-card"}
-      aria-label={`parse run ${String(run.id)}${isSuperseded ? ", superseded" : ""}`}
+      className={`chain-card${old ? " is-superseded" : ""}`}
+      aria-label={`解析 #${run.id}${old ? "（旧解析）" : ""}`}
     >
       <div className="chain-card-head">
-        <span className="chain-stage">parse run</span>
-        <span className="chain-title">
-          #{run.id} · {run.parser_name}
-          <span className="dim">@</span>
-          {run.parser_version}
-        </span>
+        <h3>解析 #{run.id}</h3>
         <StatusBadge status={run.status} />
         <LineageBadge supersededBy={run.superseded_by_parse_run_id} />
-        <span className="count">{run.parsed_at}</span>
       </div>
       <div className="chain-body">
+        <p>{run.parsed_at}</p>
+        <details>
+          <summary>解析方法・バージョン</summary>
+          <code>
+            {run.parser_name}@{run.parser_version}
+          </code>
+        </details>
         {run.error === null ? null : (
-          <p className="state state-error" style={{ marginBottom: "0.5rem" }}>
-            {run.error}
-          </p>
+          <p className="state state-error">{run.error}</p>
         )}
         <WarningList warnings={run.warnings} />
-
-        <h3 style={{ marginTop: run.warnings.list.length > 0 ? "0.6rem" : 0 }}>
-          Observations{" "}
-          <span className="count dim">
-            ({run.observations.length}
-            {isSuperseded ? ", retired" : ""})
-          </span>
-        </h3>
-        {run.observations.length === 0 ? (
-          <p className="footnote">
-            This parse run produced no observations. An error run is written on its
-            own, with none.
-          </p>
-        ) : (
+        <h4>読み取った記録（{run.observations.length}件）</h4>
+        {view.rows.length ? (
           <ul className="obs-list">
-            {run.observations.map((observation) => (
-              <li key={`${observation.kind}:${String(observation.id)}`}>
+            {view.rows.map((observation) => (
+              <li key={`${observation.kind}:${observation.id}`}>
                 <KindBadge kind={observation.kind} />
                 <ObservationLink kind={observation.kind} id={observation.id} />
                 <span className="obs-summary">{observation.summary}</span>
               </li>
             ))}
           </ul>
+        ) : (
+          <p>
+            この解析から作成された記録はありません。収集範囲の完全性や残高ゼロを示すものではありません。
+          </p>
         )}
-        {isSuperseded ? (
+        <Pager {...view} total={run.observations.length} onChange={setPage} />
+        {old ? (
           <p className="footnote">
-            These observations are retired: they never appear in the transactions,
-            balances or positions views, and are reachable only from this page.
-            They were replaced by parse run #{run.superseded_by_parse_run_id}{" "}
-            <Badge tone="superseded">over the same bytes</Badge>.
+            同じ原本の解析 #{run.superseded_by_parse_run_id}
+            に置き換えられた記録です。現行の値として扱わず、変更履歴の確認にお使いください。
           </p>
         ) : null}
       </div>
