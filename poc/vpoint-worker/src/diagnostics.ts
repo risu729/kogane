@@ -1,4 +1,4 @@
-export type CollectionStage = "balance-read" | "artifact-store" | "manifest-store" |
+export type CollectionStage = "balance-read" | "artifact-store" | "manifest-store" | "central-import" |
   "session-load" | "email-challenge-request" | "smfg-read" | "history-read" |
   "vmoney-history-read" | "email-reconcile" | "session-invalidate" |
   "email-receive" | "email-parse" | "email-store" | "email-forward" |

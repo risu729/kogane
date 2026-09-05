@@ -1,6 +1,6 @@
 # Collector R2 importer
 
-各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suica、GLOBAL PASS、MyJCBに対応する。
+各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suica、GLOBAL PASS、MyJCB、V Pointに対応する。
 
 ## 再走査できる不変run
 
@@ -25,6 +25,20 @@ Importerは中央runを作る前に、manifestのexact schema、日付とUUIDを
 ### private R2の構造監査（2026-09-05）
 
 本文、値、object key、個別hash、secretを表示せず、読み取り専用bindingで件数とshapeだけを監査した。22 manifests、142 objectsで、statusはsuccess 6 / failed 16、triggerはmanual 17 / scheduled 5だった。6 success runsのdata artifactは計120件で、内訳はcredit menu 6、past-month JSON 6、credit detail HTML 66、parsed ledger 36、discovery 6である。manifest/artifactのkey set、prefix、run ID、件数、size、checksum、metadataに不一致はなかった。全HTMLはXML/HTML/MyJCB/detail markerを持ち、入力値はすべてredact済みだった。最終validatorを同じread-only bindingで全22 manifestsへ適用し、22件すべてがstrict source validationを通過、72 HTML artifactすべてが中央用v2 bytesへ決定的に変換されることを確認した。6 success runsのpayload fingerprintは互いに異なり、内容重複を根拠にrunを潰せないことも確認した。legacyを含むfailure/blockerの自由文は中央manifestへコピーせず、connection statusとoperationから固定codeへ置換する。
+
+## V Pointの境界
+
+V Pointはprivate R2の`raw/v-point/`を中央canonical source `v-point`として取り込む。manifest v1/v2、日付とrun IDを含むkey、完全一致metadata、JSON media type、R2 native checksum、宣言SHA-256とbyte size、prefix内の完全inventoryを検証してから中央runを作る。残高、SMFG内訳、履歴page、collection summaryのJSON shapeを未知fieldも含めてfail closedで検証し、manifest件数、summary件数、全pageのtotalと30行境界を相互照合する。R2保存失敗は期待datasetとの正確な補集合でなければ受理しない。
+
+provider JSONはcollectorがHTTP response textを取得後に保存したbytesであり、wire上の圧縮・chunk framingまでは残らない。このため中央では`provider_response / transformed / source_bytes_not_available`とする。collection summary、V Point Pay email reconciliation、manifestは生成物として別roleを持つ。自由形式failure messageを含むmanifestは中央保存前に固定値へ置換し、source R2自体は変更しない。V Moneyの非空台帳はV Pointとは別のsource設計が必要なため、監査済みの空pageだけを現契約で受理する。
+
+terminal run reportの`producerVersion`はdeploy revisionではなくsource契約の`vpoint-r2-v1`へ固定する。これによりImporter更新後の再走査でも同一runのimmutable report本文が変わらない。実際の`IMPORTER_VERSION`は失敗・incomplete attemptの診断にだけ記録する。
+
+v2 manifestが参照するV Point Pay email reconciliationは、別bucketから同一runの生成reportを読み、key/metadata/checksum、exact policy、source state、candidate参照、全status件数を検証する。各candidateは、検証済みhistory pageの実在filenameと、そのpageの実際のrow count未満のindexへ束縛し、`sha256(JSON.stringify(row))`がreport fingerprintと一致しなければ拒否する。同じentry内の同一source/index重複も拒否する。既存R2にはmatch policyのexactな旧・新2表現があり、意味を推測せず両方を列挙して受理する。report時刻はcollector実装どおりmanifestより少し早くなり得るため、同値ではなく、run開始以後・manifest完了以前・report keyの日付との一致を要求する。
+
+`POST /v1/v-point/import-run`はmanifest 1件を同期importし、`POST /v1/v-point/backfill-page`は1 requestにつきsource R2 objectを1件だけ走査する。現存runの最大はdata artifact 10件とreconciliation 1件で同期呼出上限内である。将来data artifactが11件を超えた即時runは中央state作成前に`202 deferred`とし、backfillでは完全inventoryを先に固定して最大8 artifactずつ冪等転送する。HMAC署名済みcursorがR2 scan位置、処理中manifest、artifact offsetを保持し、最終chunkのseal成功後だけscan位置を進める。専用credential `collector-r2-v-point`だけがrouteを利用でき、他source tokenと共有しない。
+
+2026-09-05の本番R2読み取り専用監査ではmanifest 24件、成功13件、失敗11件を検査し、本文・値・object key・個別hashを出力せず、全24件がstrict contractへ適合した。内訳はv1 5件、v2 19件、reconciliation参照10件である。`bun run audit:vpoint-r2`はlocalhostだけで動く一時Workerとremote read-only R2 bindingを使い、この集約監査を再実行する。標準出力は件数だけで、source R2を更新・削除せず、恒久Workerもdeployしない。
 
 ## GLOBAL PASSの境界
 
@@ -80,6 +94,8 @@ SBI証券の完全な1 runは中央Workerを最大約23回呼ぶ。Cloudflareの
 
 SBI新生銀行はmanifest込み最大6 objectで、中央呼び出しは最大17回に収まる。`backfill-page`は他sourceと同様にR2 objectを1件ずつ走査し、manifestを見つけたページだけ同期転送する。cursorはcollector側のローカルstateへ原子的に保存し、失敗manifestでは進めない。
 
+V Pointは1 objectずつ走査し、小runはmanifest pageで同期sealする。大runは固定したstaged inventoryへ最大8 artifactずつ転送し、HMAC署名済みcursorで同じmanifestのoffsetを再開する。途中chunkではR2 scan cursorを進めず、最終chunkのseal後だけ次のsource objectへ移る。failed manifestは自由形式messageを中央へ残さず、失敗証拠1 objectとしてsealする。scriptは管理tokenをmode 0600のローカルfileからだけ読み、opaque cursorをmode 0600で原子的に保存する。
+
 GLOBAL PASSのdaily小runは同期転送する。12 artifactを超える即時importは中央stateを作らず`202 deferred`を返す。backfillはmanifestを見つけたページでstaged inventoryを開始し、1回につき10 artifactを転送する。cursorはR2のscan cursorにmanifest keyとoffsetを加えたopaque値で、同じmanifestの続きではR2を再走査せず、最終chunkをsealしてから次のsource objectへ進む。scriptは`deferredManifestCount`を正常な進捗として数え、cursorが進まない応答を拒否する。
 
 ## 検証とデプロイ
@@ -122,6 +138,7 @@ SBI新生銀行を有効化する本番作業は、必ず次の順で直列実�
 - `RAW_EVIDENCE_TOKEN_MOBILE_SUICA`: `collector-r2-mobile-suica`専用Bearer
 - `RAW_EVIDENCE_TOKEN_GLOBAL_PASS`: `collector-r2-global-pass`専用Bearer
 - `RAW_EVIDENCE_TOKEN_MYJCB`: `collector-r2-myjcb`専用Bearer
+- `RAW_EVIDENCE_TOKEN_VPOINT`: `collector-r2-v-point`専用Bearer
 - `ORIGIN_FINGERPRINT_KEY`: storage keyを不可逆HMACへ変換する共通鍵
 
 3. target importerのdeploy成功後にSBI新生collectorをdeployする。これはService Bindingとdaily cronを有効化するため、`0 21 * * *`の直前を避け、次回cronまでに以降の確認を完了する。
@@ -242,6 +259,12 @@ v20のmanual live canaryまたは次回cronが失敗した場合は、新しい�
 
 v20のmanual live canaryと次回cronが成功した後は、運用記録の現行値を実際のWorker version、新Container image digest、runtime revision `timezone-collector-v7`へ更新する。更新時もdigest以外のsource object情報や認証値は記録しない。
 
+### V Pointの本番適用
+
+V Pointは中央→importer→collectorの順で直列に適用する。まず`services/raw-evidence/scripts/deploy.sh`で加算migration `0012`を適用し、healthのschemaと`verify-v-point-route.sh`のroute 1件・policy 2件・alias 1件を確認する。次に`services/collector-r2-importer/scripts/deploy.sh`で専用tokenを同期し、healthが`collector-r2-importer-v12`を返すことを確認する。最後にV Point collectorをdeployしてService Bindingを有効にする。GitHub Actions cronは追加せず、既存Worker cronを維持する。
+
+historical dataは、先に`bun run audit:vpoint-r2`を実行してfailed 0を確認し、`poc/vpoint-worker/scripts/backfill-raw-evidence.sh`で完走する。前後でsource R2のobject件数と集約checksumが不変であること、中央のV Point run/seal/artifactの件数だけが増えることを確認する。cursor削除後に再実行し、中央run/seal/artifact件数が不変なら冪等性確認完了である。失敗時はcollector/importerのrolloutを止めるが、migrationとsource R2はrollback・削除しない。
+
 他collector側のhistorical outboxも次で再送できる。
 
 ```sh
@@ -252,6 +275,7 @@ poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
 poc/mobile-suica-worker/scripts/backfill-raw-evidence.sh
 poc/globalpass-worker/scripts/backfill-raw-evidence.sh
 poc/myjcb-worker/scripts/backfill-raw-evidence.sh
+poc/vpoint-worker/scripts/backfill-raw-evidence.sh
 ```
 
 source R2はbackfill完了後も自動削除しない。

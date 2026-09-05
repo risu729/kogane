@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { extractVPointEmailCode, isCollectorRecipient } from "./email";
 import { VPointSession } from "./session";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
+import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
 import {
   parseVPointPayEmail,
   shouldForwardToMailbox,
@@ -27,6 +28,31 @@ export default {
         source: "v-point",
         schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       });
+    }
+    if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
+      if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      const queryNames = [...url.searchParams.keys()];
+      if (queryNames.some((name) => name !== "limit" && name !== "cursor") ||
+          url.searchParams.getAll("limit").length !== 1 ||
+          url.searchParams.getAll("cursor").length > 1 ||
+          url.searchParams.get("limit") !== "1") {
+        return Response.json({ error: "limit_must_be_one" }, { status: 400 });
+      }
+      const cursor = url.searchParams.get("cursor") ?? undefined;
+      if (cursor !== undefined && (cursor.length === 0 || cursor.length > 4_096 ||
+          /[\x00-\x20\x7f]/u.test(cursor))) {
+        return Response.json({ error: "cursor_invalid" }, { status: 400 });
+      }
+      try {
+        return Response.json(await backfillStoredRuns(
+          env.RAW_EVIDENCE_IMPORTER,
+          cursor,
+        ));
+      } catch {
+        return Response.json({ error: "raw_evidence_backfill_failed" }, { status: 502 });
+      }
     }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
@@ -221,6 +247,8 @@ async function runCollection(env: Env, parentRunId?: string): Promise<Collection
     logFailure(runId, stage, error);
     throw new Error(`V Point manifest storage failed; runId=${runId}`);
   }
+  onStage("central-import");
+  const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey);
   logEvent({
     event: "vpoint-collection-stored",
     runId,
@@ -233,8 +261,10 @@ async function runCollection(env: Env, parentRunId?: string): Promise<Collection
     failureCount: failures.length,
     emailReconciliation,
     manifestKey,
+    centralStatus: "sealed",
+    centralRunId: central.centralRunId,
   });
-  return { ...manifest, manifestKey };
+  return { ...manifest, manifestKey, central };
 }
 
 function sessionStub(env: Env): DurableObjectStub<VPointSession> {
@@ -272,6 +302,10 @@ function publicResult(result: CollectionResult): object {
     emailReconciliation: result.emailReconciliation,
     reauthenticationPending: awaitingReauthentication(result),
     manifestKey: result.manifestKey,
+    central: {
+      centralRunId: result.central.centralRunId,
+      sealed: result.central.sealed,
+    },
   };
 }
 

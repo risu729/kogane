@@ -11,6 +11,7 @@ on:
       - "poc/mobile-suica-worker/**"
       - "poc/globalpass-worker/**"
       - "poc/moneyforward-worker/**"
+      - "poc/vpoint-worker/**"
       - "docs/raw-store.md"
       - "docs/roadmap.md"
       - ".github/workflows/raw-evidence.yml"
@@ -25,6 +26,7 @@ on:
       - "poc/mobile-suica-worker/**"
       - "poc/globalpass-worker/**"
       - "poc/moneyforward-worker/**"
+      - "poc/vpoint-worker/**"
       - "docs/raw-store.md"
       - "docs/roadmap.md"
       - ".github/workflows/raw-evidence.yml"
@@ -59,6 +61,7 @@ jobs:
       - run: bun run test
       - run: bun run typecheck
       - run: bun run cf:check
+      - run: bun run cf:check:audit-vpoint
 
   sbi-vc-trade-worker:
     runs-on: ubuntu-latest
@@ -133,6 +136,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      - run: bun run typecheck
+      - run: bun run cf:check
+
+  vpoint-worker:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: poc/vpoint-worker
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - run: bun install --frozen-lockfile
       - run: bun run test
       - run: bun run typecheck

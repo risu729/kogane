@@ -18,6 +18,141 @@ describe("collector R2 importer routes", () => {
     }
   });
 
+  test("the V Point backfill page scans exactly one source object", async () => {
+    const calls: R2ListOptions[] = [];
+    const bucket = {
+      list: async (options: R2ListOptions) => {
+        calls.push(options);
+        return options.cursor === "next"
+          ? { objects: [], truncated: false } as unknown as R2Objects
+          : {
+              objects: [{ key: "raw/v-point/2026/09/05/run/balance-info.json" }],
+              truncated: true,
+              cursor: "next",
+            } as unknown as R2Objects;
+      },
+    } as unknown as R2Bucket;
+    const response = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+        {} as R2Bucket, {} as R2Bucket, bucket,
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ prefix: "raw/v-point/", limit: 1 }]);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toMatchObject({
+      source: "v-point",
+      scannedObjectCount: 1,
+      importedManifestCount: 0,
+      skippedManifestCount: 1,
+      deferredManifestCount: 0,
+      failedManifestCount: 0,
+      truncated: true,
+    });
+    expect(body.nextCursor).toBeString();
+    expect(body.nextCursor as string).toStartWith("vpoint-v2.");
+
+    const final = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cursor: body.nextCursor, limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+        {} as R2Bucket, {} as R2Bucket, bucket,
+      ),
+    );
+    expect(final.status).toBe(200);
+    expect(calls[1]).toEqual({ prefix: "raw/v-point/", limit: 1, cursor: "next" });
+  });
+
+  test("the V Point backfill route rejects invalid limits and tampered or stalled cursors", async () => {
+    const never = { list: async () => { throw new Error("must_not_list"); } } as unknown as R2Bucket;
+    const invalidLimit = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ limit: 2 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+        {} as R2Bucket, {} as R2Bucket, never,
+      ),
+    );
+    expect(invalidLimit.status).toBe(400);
+    expect(await invalidLimit.json() as unknown).toEqual({ error: "backfill_limit_must_be_one" });
+
+    const invalidCursor = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cursor: "not opaque", limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+        {} as R2Bucket, {} as R2Bucket, never,
+      ),
+    );
+    expect(invalidCursor.status).toBe(400);
+    expect(await invalidCursor.json() as unknown).toEqual({ error: "cursor_invalid" });
+
+    const seed = {
+      list: async () => ({
+        objects: [{ key: "raw/v-point/ignored.json" }],
+        truncated: true,
+        cursor: "same",
+      } as unknown as R2Objects),
+    } as unknown as R2Bucket;
+    const seeded = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+        {} as R2Bucket, {} as R2Bucket, seed,
+      ),
+    );
+    const signed = (await seeded.json() as { nextCursor: string }).nextCursor;
+    const tampered = `${signed.slice(0, -1)}${signed.endsWith("A") ? "B" : "A"}`;
+    const tamperedResponse = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cursor: tampered, limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+        {} as R2Bucket, {} as R2Bucket, never,
+      ),
+    );
+    expect(tamperedResponse.status).toBe(400);
+
+    const stalled = {
+      list: async () => ({ objects: [], truncated: true, cursor: "same" } as unknown as R2Objects),
+    } as unknown as R2Bucket;
+    const stalledResponse = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cursor: signed, limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+        {} as R2Bucket, {} as R2Bucket, stalled,
+      ),
+    );
+    expect(stalledResponse.status).toBe(409);
+  });
+
   test("the GLOBAL PASS backfill page scans exactly one source object", async () => {
     const calls: R2ListOptions[] = [];
     const bucket = {
@@ -470,6 +605,8 @@ function environment(
   mobileSuicaBucket: R2Bucket = {} as R2Bucket,
   globalPassBucket: R2Bucket = {} as R2Bucket,
   myJcbBucket: R2Bucket = {} as R2Bucket,
+  vPointBucket: R2Bucket = {} as R2Bucket,
+  vPointPayBucket: R2Bucket = {} as R2Bucket,
 ): Env {
   return {
     SBI_SNAPSHOTS: {} as R2Bucket,
@@ -479,8 +616,10 @@ function environment(
     MOBILE_SUICA_SNAPSHOTS: mobileSuicaBucket,
     GLOBAL_PASS_SNAPSHOTS: globalPassBucket,
     MYJCB_SNAPSHOTS: myJcbBucket,
+    VPOINT_SNAPSHOTS: vPointBucket,
+    VPOINT_PAY_SNAPSHOTS: vPointPayBucket,
     RAW_EVIDENCE: {} as Fetcher,
-    IMPORTER_VERSION: "collector-r2-importer-v11",
+    IMPORTER_VERSION: "collector-r2-importer-v12",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_VC: `collector-r2-sbi-vc.${"v".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SONY: `collector-r2-sony-bank.${"o".repeat(32)}`,
@@ -489,6 +628,7 @@ function environment(
     RAW_EVIDENCE_TOKEN_GLOBAL_PASS: `collector-r2-global-pass.${"g".repeat(32)}`,
     GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST: "a".repeat(64),
     RAW_EVIDENCE_TOKEN_MYJCB: `collector-r2-myjcb.${"j".repeat(32)}`,
+    RAW_EVIDENCE_TOKEN_VPOINT: `collector-r2-v-point.${"p".repeat(32)}`,
     ORIGIN_FINGERPRINT_KEY: "ab".repeat(32),
   };
 }

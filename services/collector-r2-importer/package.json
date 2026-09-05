@@ -10,6 +10,8 @@
     "test": "bun test",
     "typecheck": "wrangler types && tsc --noEmit",
     "cf:check": "wrangler deploy --dry-run",
+    "cf:check:audit-vpoint": "wrangler deploy --dry-run --config wrangler.audit-v-point.jsonc",
+    "audit:vpoint-r2": "bash scripts/audit-v-point-r2.sh",
     "cf:deploy": "wrangler deploy"
   },
   "devDependencies": {
