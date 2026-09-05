@@ -146,7 +146,7 @@ GLOBAL PASSは次の順序で直列に適用する。backfill中はdaily cronの
 
    deploy後にhealthのschemaが`0010`であること、`collector-r2-global-pass → collector-r2-importer → global-pass`のactive routeと`raw/prestia-globalpass/{date}/{run-id}/{artifact}` policyが各1件であることを`verify-global-pass-route.sh`で確認する。
 
-2. `RAW_EVIDENCE_TOKEN_GLOBAL_PASS`を他source tokenと共有せず同期し、`collector-r2-importer-v8`をdeployする。
+2. `RAW_EVIDENCE_TOKEN_GLOBAL_PASS`を他source tokenと共有せず同期し、`collector-r2-importer-v9`をdeployする。
 
    ```sh
    (
@@ -205,7 +205,7 @@ GLOBAL PASSは次の順序で直列に適用する。backfill中はdaily cronの
 
 9. 次のcron `17 18 * * *`後に、新しいv2 manifestが1件作られ、同じrunが中央でsealedされ、失敗ログがないことを確認する。cronによる意図した新規object増加と、historical backfillによるsource R2変更を混同しない。ここまで完了してGLOBAL PASS rolloutを完了とする。
 
-v20のmanual live canaryまたは次回cronが失敗した場合は、新しい収集を止め、collector WorkerとContainer imageだけを適用前に記録したv19相当へrollbackする。加算migration `0010`と`collector-r2-importer-v8`は後方互換の中央受入境界として残し、rollbackしない。source R2 objectも変更・削除しない。rollback後はcronが1件だけであること、TAMIA Tunnel bindingが維持されていること、不要な旧・失敗Container instanceがinactiveであることを再確認してからdailyを再開する。
+v20のmanual live canaryまたは次回cronが失敗した場合は、新しい収集を止め、collector WorkerとContainer imageだけを適用前に記録したv19相当へrollbackする。加算migration `0010`と`collector-r2-importer-v9`は後方互換の中央受入境界として残し、rollbackしない。source R2 objectも変更・削除しない。rollback後はcronが1件だけであること、TAMIA Tunnel bindingが維持されていること、不要な旧・失敗Container instanceがinactiveであることを再確認してからdailyを再開する。
 
 v20のmanual live canaryと次回cronが成功した後は、運用記録の現行値を実際のWorker version、新Container image digest、runtime revision `timezone-collector-v7`へ更新する。更新時もdigest以外のsource object情報や認証値は記録しない。
 

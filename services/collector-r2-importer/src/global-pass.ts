@@ -16,6 +16,7 @@ const DATASET = "globalpass-activity" as const;
 const SENTINEL = "__KOGANE_REDACTED_DYNAMIC_VALUE__";
 const STATIC_FORM_ACTION =
   "https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301";
+const STATIC_FORM_ACTION_PATH = "/p/statementInquiry/RW1313010301";
 const SAME_HOST = "https://www.debit.vpass.ne.jp";
 const ALLOWED_LINK_HREF_PATHS = new Set([
   "/en//01006/css/master.css",
@@ -59,7 +60,15 @@ const MANIFEST_KEY = /^raw\/prestia-globalpass\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SAFE_ERROR_TYPE = /^[A-Za-z][A-Za-z0-9]{0,79}$/u;
 const SAFE_CODE = /^[a-z][a-z0-9_]{0,99}$/u;
-const ACTIVITY_MARKER = /(?:ご利用明細|利用明細)/u;
+const CURRENT_ACTIVITY_MARKER = /(?:ご利用明細|利用明細)/u;
+const LEGACY_ACTIVITY_HEADERS = new Set([
+  "Transaction Currency and Amount",
+  "Transaction Date",
+  "Transaction Detail",
+  "Transaction Fee",
+]);
+const LEGACY_RESPONSIVE_ONCLICK =
+  /^if\s*\(\s*window\.innerWidth\s*&lt;\s*\d+\s*\)\s*\{\s*\$\(\s*this\.parentNode\s*\)\.toggleClass\(\s*(?:"[^"]*"|'[^']*')\s*\);\s*\}\s*else\s*\{\s*\$\(\s*(?:"[^"]*"|'[^']*')\s*\)\[\d+\]\.click\(\s*\);\s*\}\s*return\s+false;\s*$/u;
 const FORBIDDEN_INLINE = /(?:;jsessionid|token|csrf|turnstile|session|localStorage)/iu;
 
 type JsonObject = Record<string, unknown>;
@@ -662,7 +671,7 @@ export function sanitizeGlobalPassHtml(
   }
   if (html.length === 0 || html.length > MAX_ARTIFACT_BYTES ||
       !/^\s*<!doctype\s+html(?:\s[^>]*)?>/iu.test(html) ||
-      !ACTIVITY_MARKER.test(html)) {
+      !hasActivityMarker(html, schemaVersion)) {
     throw new ImportError(409, "html_activity_contract_invalid");
   }
   if (FORBIDDEN_INLINE.test(html) || countInputs(html, (tag) =>
@@ -707,7 +716,8 @@ export function sanitizeGlobalPassHtml(
   };
   const forms = formTags(html);
   const actions = forms.map((tag) => attribute(tag, "action")).filter((value) => value !== "");
-  if (actions.some((value) => value !== STATIC_FORM_ACTION)) {
+  if (actions.some((value) => value !== STATIC_FORM_ACTION &&
+      (schemaVersion !== V1 || value !== STATIC_FORM_ACTION_PATH))) {
     throw new ImportError(409, "html_form_action_invalid");
   }
   const variantA = counts.cc === 1 && counts.eng === 1 && counts.nablarch === 6 &&
@@ -759,6 +769,87 @@ export function sanitizeGlobalPassHtml(
     throw new ImportError(409, "html_v2_not_canonical_utf8");
   }
   return encoded;
+}
+
+function visibleTextForActivityMarker(html: string): string {
+  return html
+    .replace(/<!--[\s\S]*?-->/gu, " ")
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/giu, " ")
+    .replace(/<[^>]+>/gu, " ")
+    .replace(/&(?:nbsp|#160|#x0*a0);/giu, " ");
+}
+
+function hasActivityMarker(html: string, schemaVersion: SchemaVersion): boolean {
+  if (CURRENT_ACTIVITY_MARKER.test(visibleTextForActivityMarker(html))) return true;
+  if (schemaVersion !== V1) return false;
+  return [...visibleTableHeaders(html).values()].some((headers) =>
+    [...LEGACY_ACTIVITY_HEADERS].every((header) => headers.has(header))
+  );
+}
+
+function visibleTableHeaders(html: string): Map<number, Set<string>> {
+  const rendered = html
+    .replace(/<!--[\s\S]*?-->/gu, " ")
+    .replace(/<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/giu, " ");
+  const headers = new Map<number, Set<string>>();
+  const stack: Array<{
+    name: string;
+    hidden: boolean;
+    tableId: number | null;
+    text: string | null;
+  }> = [];
+  const voidElements = new Set([
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+    "meta", "param", "source", "track", "wbr",
+  ]);
+  let nextTableId = 0;
+  for (const match of rendered.matchAll(/<\/?[A-Za-z][^>]*>|[^<]+/gu)) {
+    const token = match[0]!;
+    if (!token.startsWith("<")) {
+      for (let index = stack.length - 1; index >= 0; index -= 1) {
+        if (stack[index]!.text !== null) {
+          stack[index]!.text += token;
+          break;
+        }
+      }
+      continue;
+    }
+    if (/^<\//u.test(token)) {
+      const closingName = /^<\/([A-Za-z][A-Za-z0-9:-]*)/u.exec(token)?.[1]?.toLowerCase();
+      if (!closingName) continue;
+      let index = stack.length - 1;
+      while (index >= 0 && stack[index]!.name !== closingName) index -= 1;
+      if (index < 0) continue;
+      const entry = stack[index]!;
+      if (entry.name === "th" && !entry.hidden && entry.tableId !== null) {
+        const text = (entry.text ?? "").replace(/\s+/gu, " ").trim();
+        const tableHeaders = headers.get(entry.tableId) ?? new Set<string>();
+        tableHeaders.add(text);
+        headers.set(entry.tableId, tableHeaders);
+      }
+      stack.splice(index);
+      continue;
+    }
+    const name = tagName(token);
+    if (!name) continue;
+    const parent = stack.at(-1);
+    const ownHidden = parsedAttributes(token).some((attribute) =>
+      attribute.name === "hidden" ||
+      attribute.name === "aria-hidden" && attribute.value?.trim().toLowerCase() === "true" ||
+      attribute.name === "style" &&
+        /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:!important\s*)?(?:;|$)/iu
+          .test(attribute.value ?? "")
+    );
+    const tableId = name === "table" ? nextTableId++ : parent?.tableId ?? null;
+    const entry = {
+      name,
+      hidden: Boolean(parent?.hidden) || ownHidden,
+      tableId,
+      text: name === "th" ? "" : null,
+    };
+    if (!voidElements.has(name) && !/\/>\s*$/u.test(token)) stack.push(entry);
+  }
+  return headers;
 }
 
 async function readVerifiedArtifact(
@@ -1189,7 +1280,8 @@ function assertUrlAndEventContract(html: string, canonical: boolean): void {
         throw new ImportError(409, "html_url_attribute_invalid");
       }
       if (attribute.name === "action") {
-        if (element !== "form" || value !== "" && value !== STATIC_FORM_ACTION) {
+        if (element !== "form" || value !== "" && value !== STATIC_FORM_ACTION &&
+            (canonical || value !== STATIC_FORM_ACTION_PATH)) {
           throw new ImportError(409, "html_url_attribute_invalid");
         }
       } else if (attribute.name === "href") {
@@ -1224,6 +1316,14 @@ function canonicalizeInteractiveAttributes(html: string): string {
       if (!match) continue;
       if (attribute.name === "href" && match.value.startsWith("#")) {
         replacements.push({ start: match.valueStart, end: match.valueEnd, value: "#" });
+      } else if (attribute.name === "href" && match.value === "/") {
+        replacements.push({ start: match.valueStart, end: match.valueEnd, value: `${SAME_HOST}/` });
+      } else if (attribute.name === "action" && match.value === STATIC_FORM_ACTION_PATH) {
+        replacements.push({
+          start: match.valueStart,
+          end: match.valueEnd,
+          value: STATIC_FORM_ACTION,
+        });
       } else if (attribute.name === "onclick" || attribute.name === "onchange") {
         replacements.push({
           start: match.valueStart,
@@ -1244,7 +1344,8 @@ function canonicalizeInteractiveAttributes(html: string): string {
 function allowedHref(element: string, value: string, canonical: boolean): boolean {
   if (element === "link") return allowedSameHostPath(value, ALLOWED_LINK_HREF_PATHS);
   if (element !== "a") return false;
-  return value === "https://www.smbctb.co.jp/" ||
+  return (!canonical && value === "/") || value === `${SAME_HOST}/` ||
+    value === "https://www.smbctb.co.jp/" ||
     (canonical ? value === "#" : /^#[A-Za-z0-9._:-]*$/u.test(value)) ||
     /^javascript:void\(0\);?$/u.test(value) ||
     allowedSameHostPath(value, ALLOWED_ANCHOR_HREF_PATHS);
@@ -1269,6 +1370,7 @@ function allowedEventHandler(name: string, value: string, canonical: boolean): b
   }
   if (/https?:|javascript:|data:|fetch|xmlhttprequest|document|cookie|storage|eval|function|=>/iu
       .test(value)) return false;
+  if (name === "onclick" && LEGACY_RESPONSIVE_ONCLICK.test(value)) return true;
   const functionNames = [...value.matchAll(
     /\b(?:window\.)?[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*(?=\s*\()/gu,
   )].map((match) => match[0]!);
