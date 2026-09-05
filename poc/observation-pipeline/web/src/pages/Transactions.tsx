@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   createColumnHelper,
   createSortedRowModel,
@@ -6,7 +6,6 @@ import {
   sortFn_text,
   tableFeatures,
   useTable,
-  type SortingState,
 } from "@tanstack/react-table";
 import { useTransactions, type TransactionRow } from "../api.ts";
 import {
@@ -23,6 +22,7 @@ import {
   pageWindow,
 } from "../filters.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
+import { useViewState } from "../view-state.tsx";
 const features = tableFeatures({
   rowSortingFeature,
   sortedRowModel: createSortedRowModel(),
@@ -108,10 +108,10 @@ export function TransactionsPage(): ReactNode {
   );
 }
 function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(0);
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [filters, setFilters] = useViewState("transactions.filters");
+  const [search, setSearch] = useViewState("transactions.search");
+  const [page, setPage] = useViewState("transactions.page");
+  const [sorting, setSorting] = useViewState("transactions.sorting");
   const filtered = useMemo(
     () =>
       rows.filter(

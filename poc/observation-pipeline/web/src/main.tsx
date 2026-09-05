@@ -9,6 +9,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "./api.ts";
 import { App } from "./app.tsx";
+import { ViewStateProvider } from "./view-state.tsx";
 import "./styles.css";
 
 const queryClient = new QueryClient({
@@ -42,7 +43,9 @@ if (!container) {
 createRoot(container).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <ViewStateProvider>
+        <App />
+      </ViewStateProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

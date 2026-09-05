@@ -16,6 +16,7 @@ import {
 } from "../ui.tsx";
 import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
+import { useViewState } from "../view-state.tsx";
 export function BalancesPage(): ReactNode {
   const query = useBalances();
   return (
@@ -39,7 +40,7 @@ function BalancesBody({
   latest: BalanceRow[];
   history: BalanceHistoryRow[];
 }): ReactNode {
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [filters, setFilters] = useViewState("balances.filters");
   const rows = [...latest, ...history];
   return (
     <>

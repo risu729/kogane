@@ -1,5 +1,6 @@
 // Runtime checks for the shared HTTP contract; no database or UI dependencies.
 // Shape<T> requires a validator for every declared field when contracts evolve.
+import { isDecimalMinorUnit } from "../src/money.ts";
 import type {
   ApiMetadata,
   ArtifactDetail,
@@ -25,6 +26,10 @@ const text: Check<string> = (value): value is string =>
   typeof value === "string";
 const number: Check<number> = (value): value is number =>
   typeof value === "number" && Number.isFinite(value);
+const identifier: Check<number> = (value): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const hash: Check<string> = (value): value is string =>
+  typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
 const boolean: Check<boolean> = (value): value is boolean =>
   typeof value === "boolean";
 const unknown: Check<unknown> = (_value): _value is unknown => true;
@@ -55,6 +60,8 @@ function object<T>(shape: Shape<T>): Check<T> {
 }
 const nullableText = nullable(text);
 const nullableNumber = nullable(number);
+const nullableIdentifier = nullable(identifier);
+const minorUnit = nullable(isDecimalMinorUnit);
 const observationKind = literal<ObservationKind>(
   "transaction",
   "balance",
@@ -79,11 +86,11 @@ const metadata = object<ApiMetadata>({
   }),
 });
 const transaction = object<TransactionRow>({
-  id: number,
+  id: identifier,
   source_id: text,
   source_account: text,
   as_of: nullableText,
-  amount_minor: nullableText,
+  amount_minor: minorUnit,
   amount_text: nullableText,
   currency: nullableText,
   description: nullableText,
@@ -93,12 +100,12 @@ const transaction = object<TransactionRow>({
   parser: text,
 });
 const balanceFields = {
-  id: number,
+  id: identifier,
   source_id: text,
   source_account: text,
   metric: text,
   instrument: text,
-  amount_minor: nullableText,
+  amount_minor: minorUnit,
   amount_text: nullableText,
   as_of: nullableText,
   observed_at: nullableText,
@@ -107,11 +114,11 @@ const balanceFields = {
 const balance = object<BalanceRow>(balanceFields);
 const balanceHistory = object<BalanceHistoryRow>({
   ...balanceFields,
-  superseded_by_parse_run_id: nullableNumber,
+  superseded_by_parse_run_id: nullableIdentifier,
   parse_status: text,
 });
 const position = object<PositionRow>({
-  id: number,
+  id: identifier,
   source_id: text,
   source_account: text,
   security_code: text,
@@ -124,12 +131,12 @@ const position = object<PositionRow>({
   parser: text,
 });
 const valuation = object<ValuationRow>({
-  id: number,
+  id: identifier,
   source_id: text,
   source_account: text,
   subject: text,
   metric: text,
-  amount_minor: nullableText,
+  amount_minor: minorUnit,
   amount_text: nullableText,
   currency: text,
   as_of: nullableText,
@@ -140,13 +147,13 @@ const positionWithValuations = object<PositionWithValuations>({
   valuations: array(valuation),
 });
 const artifact = object<ArtifactRow>({
-  id: number,
+  id: identifier,
   source_id: text,
   dataset: nullableText,
   url: nullableText,
   mime: text,
   fetched_at: text,
-  sha256: text,
+  sha256: hash,
   parse_run_count: number,
   transaction_count: number,
   balance_count: number,
@@ -154,14 +161,14 @@ const artifact = object<ArtifactRow>({
   valuation_count: number,
 });
 const parseFields = {
-  id: number,
+  id: identifier,
   parser_name: text,
   parser_version: text,
   parsed_at: text,
   status: text,
   warnings,
   error: nullableText,
-  superseded_by_parse_run_id: nullableNumber,
+  superseded_by_parse_run_id: nullableIdentifier,
 };
 const overview = object<Overview>({
   counts: array(
@@ -177,7 +184,7 @@ const overview = object<Overview>({
   ),
   fetchRuns: array(
     object<Overview["fetchRuns"][number]>({
-      id: number,
+      id: identifier,
       source_id: text,
       tool: text,
       external_run_id: nullableText,
@@ -189,13 +196,13 @@ const overview = object<Overview>({
   parseRuns: array(
     object<Overview["parseRuns"][number]>({
       ...parseFields,
-      fetch_artifact_id: number,
+      fetch_artifact_id: identifier,
     }),
   ),
 });
 const observationRef = object<ObservationRef>({
   kind: observationKind,
-  id: number,
+  id: identifier,
   summary: text,
 });
 const parseRun = object<ParseRunDetail>({
@@ -208,10 +215,10 @@ const provenanceFields = {
   url: nullableText,
   mime: text,
   fetched_at: text,
-  sha256: text,
+  sha256: hash,
   size: number,
   content_type: text,
-  fetch_run_id: number,
+  fetch_run_id: identifier,
   tool: text,
   external_run_id: nullableText,
   fetch_status: text,
@@ -221,7 +228,7 @@ const provenanceFields = {
 const artifactDetail = object<ArtifactDetail>({
   artifact: object<ArtifactDetail["artifact"]>({
     ...provenanceFields,
-    id: number,
+    id: identifier,
     method: nullableText,
     http_status: nullableNumber,
   }),
@@ -229,19 +236,22 @@ const artifactDetail = object<ArtifactDetail>({
 });
 const provenance = object<Provenance>({
   ...provenanceFields,
-  parse_run_id: number,
+  parse_run_id: identifier,
   parser_name: text,
   parser_version: text,
   parsed_at: text,
   parse_status: text,
   error: nullableText,
   warnings,
-  superseded_by_parse_run_id: nullableNumber,
-  artifact_id: number,
+  superseded_by_parse_run_id: nullableIdentifier,
+  artifact_id: identifier,
 });
 const observation = object<ObservationDetail>({
   kind: observationKind,
-  row: record,
+  row: (value): value is Record<string, unknown> =>
+    record(value) &&
+    identifier(value.id) &&
+    (!Object.hasOwn(value, "amount_minor") || minorUnit(value.amount_minor)),
   extra: unknown,
   extraRaw: text,
   extraParsed: boolean,
@@ -269,13 +279,22 @@ const endpoints: Record<string, Check<unknown>> = {
 export function validApiResponse(path: string, value: unknown): boolean {
   const check = Object.hasOwn(endpoints, path) ? endpoints[path] : undefined;
   if (check) return check(value);
-  if (/^\/api\/artifacts\/\d+$/u.test(path)) return artifactDetail(value);
+  if (/^\/api\/artifacts\/\d+$/u.test(path)) {
+    const id = Number(path.split("/")[3]);
+    return identifier(id) && artifactDetail(value) && value.artifact.id === id;
+  }
   if (
     /^\/api\/observations\/(transaction|balance|position|valuation)\/\d+$/u.test(
       path,
     )
   ) {
-    return observation(value) && value.kind === path.split("/")[3];
+    const id = Number(path.split("/")[4]);
+    return (
+      identifier(id) &&
+      observation(value) &&
+      value.kind === path.split("/")[3] &&
+      value.row.id === id
+    );
   }
   return false;
 }

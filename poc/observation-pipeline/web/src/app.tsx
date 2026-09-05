@@ -1,7 +1,7 @@
 // Read-only navigation. Connection metadata describes the API, not freshness
 // of financial observations or whether a collector is currently running.
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { useMetadata } from "./api.ts";
 import { Link, useRoute, usePath, type Route } from "./router.tsx";
@@ -71,6 +71,19 @@ function View({ route }: { route: Route }): ReactNode {
 export function App(): ReactNode {
   const route = useRoute();
   const path = usePath();
+  const main = useRef<HTMLElement>(null);
+  const previousPath = useRef(path);
+  useEffect(() => {
+    const heading = main.current?.querySelector("h1");
+    document.title = `${heading?.textContent ?? "記録と原本"} | kogane`;
+    if (heading) {
+      heading.tabIndex = -1;
+      // Navigation starts reading at the new view. Refresh and typing never
+      // move focus, and browser back/forward may restore their own scroll.
+      if (previousPath.current !== path) heading.focus({ preventScroll: true });
+    }
+    previousPath.current = path;
+  }, [path]);
   const metadata = useMetadata();
   const client = useQueryClient();
   const fetching = useIsFetching() > 0;
@@ -182,7 +195,7 @@ export function App(): ReactNode {
             {metadata.isError && metadata.data ? "（前回の接続情報）" : ""}
           </p>
         </div>
-        <main id="main" tabIndex={-1}>
+        <main id="main" ref={main} tabIndex={-1}>
           <View route={route} />
         </main>
         <footer className="workspace-footer">

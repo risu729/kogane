@@ -24,6 +24,17 @@ Navigation keeps the existing small History API router. Monetary values stay
 as decimal strings and use the shared exact formatter; provider text remains
 escaped React text. The frontend never reads SQLite or R2 directly.
 
+Transaction filters, search, sort, and page selection, plus balance filters,
+survive visits to detail pages within the current tab. They reset on reload
+and are never written to URL parameters, browser history state, localStorage,
+or sessionStorage. Route changes update the document title and focus the new
+heading; typing and API refreshes do not move focus.
+
+Response validation requires decimal-integer minor units, safe nonnegative
+numeric identifiers, matching requested/detail identifiers, and lowercase
+64-character SHA-256 hashes. Malformed responses produce an error rather than
+displaying a different record or converting a blank amount to zero.
+
 ## Safe preview
 
 From `poc/observation-pipeline`:

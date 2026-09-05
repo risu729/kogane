@@ -10,6 +10,11 @@ const MINOR_UNIT_EXPONENT: Record<string, number> = {
   AUD: 2,
 };
 
+/** The API represents minor units as decimal integers, never JS numeric syntax. */
+export function isDecimalMinorUnit(value: unknown): value is string {
+  return typeof value === "string" && /^-?\d+$/u.test(value);
+}
+
 export function minorUnitExponent(currency: string): number | undefined {
   return Object.hasOwn(MINOR_UNIT_EXPONENT, currency)
     ? MINOR_UNIT_EXPONENT[currency]
@@ -56,6 +61,9 @@ export function formatAmount(
   if (typeof amountMinor === "number" && !Number.isInteger(amountMinor)) {
     return `${String(amountMinor)}${suffix}`; // not a minor-unit integer; show as stored
   }
+  if (typeof amountMinor === "string" && !isDecimalMinorUnit(amountMinor)) {
+    return `${amountMinor}${suffix}`;
+  }
   // A JSON body carries an integer amount as a string when it might exceed the
   // safe range, so a malformed one is shown verbatim rather than coerced.
   let value: bigint;
@@ -83,6 +91,9 @@ export function amountSign(
   amountMinor: number | bigint | string | null | undefined,
 ): "positive" | "negative" | "zero" | "unknown" {
   if (amountMinor === null || amountMinor === undefined) return "unknown";
+  if (typeof amountMinor === "string" && !isDecimalMinorUnit(amountMinor)) {
+    return "unknown";
+  }
   try {
     const value = BigInt(amountMinor);
     if (value > 0n) return "positive";

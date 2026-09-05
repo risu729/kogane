@@ -169,6 +169,30 @@ describe("browser JSON transport", () => {
       await getJson<{ artifacts: unknown[] }>("/api/artifacts", signal()),
     ).toEqual({ artifacts: [] });
   });
+  test("malformed amounts and mismatched detail identities become safe transport errors", async () => {
+    for (const [path, body] of [
+      [
+        "/api/transactions",
+        { transactions: [{ ...transaction, amount_minor: " " }] },
+      ],
+      [
+        "/api/observations/transaction/1",
+        {
+          kind: "transaction",
+          row: { id: 2, description: "private-other-record" },
+          extra: {},
+          extraRaw: "{}",
+          extraParsed: true,
+        },
+      ],
+    ] as const) {
+      fetchSpy?.mockRestore();
+      serve(Response.json(body));
+      const error = await errorFor(path);
+      expect(error.message).toContain("形式");
+      expect(error.message).not.toContain("private-other-record");
+    }
+  });
   test("network errors are safe and cancellation remains an AbortError", async () => {
     fetchSpy = spyOn(globalThis, "fetch").mockRejectedValue(
       new Error("private-request-url"),

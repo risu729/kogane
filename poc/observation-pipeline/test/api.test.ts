@@ -39,6 +39,117 @@ async function json(path: string): Promise<any> {
 }
 
 describe("shared response validators", () => {
+  test("detail identities must match the requested safe integer, including zero", async () => {
+    const artifact = await json(`/api/artifacts/${fixture.artifactId}`);
+    const observation = await json(
+      `/api/observations/transaction/${fixture.retiredObservationId}`,
+    );
+    for (const id of [0, Number.MAX_SAFE_INTEGER]) {
+      expect(
+        validApiResponse(`/api/artifacts/${id}`, {
+          ...artifact,
+          artifact: { ...artifact.artifact, id },
+        }),
+      ).toBe(true);
+      expect(
+        validApiResponse(`/api/observations/transaction/${id}`, {
+          ...observation,
+          row: { ...observation.row, id },
+        }),
+      ).toBe(true);
+    }
+    for (const id of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, "1", undefined]) {
+      expect(
+        validApiResponse("/api/artifacts/1", {
+          ...artifact,
+          artifact: { ...artifact.artifact, id },
+        }),
+      ).toBe(false);
+      expect(
+        validApiResponse("/api/observations/transaction/1", {
+          ...observation,
+          row: { ...observation.row, id },
+        }),
+      ).toBe(false);
+    }
+    expect(
+      validApiResponse(`/api/artifacts/${fixture.artifactId + 1}`, artifact),
+    ).toBe(false);
+    expect(
+      validApiResponse(
+        `/api/observations/transaction/${fixture.retiredObservationId + 1}`,
+        observation,
+      ),
+    ).toBe(false);
+  });
+
+  test("list and provenance identifiers and raw-byte hashes retain their exact identity", async () => {
+    const transactions = await json("/api/transactions");
+    const observationPath = `/api/observations/transaction/${fixture.retiredObservationId}`;
+    const observation = await json(observationPath);
+    for (const id of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(
+        validApiResponse("/api/transactions", {
+          transactions: [{ ...transactions.transactions[0], id }],
+        }),
+      ).toBe(false);
+      expect(
+        validApiResponse(observationPath, {
+          ...observation,
+          provenance: { ...observation.provenance, artifact_id: id },
+        }),
+      ).toBe(false);
+    }
+    for (const sha256 of [
+      "",
+      "../transactions",
+      "a".repeat(63),
+      "A".repeat(64),
+    ]) {
+      expect(
+        validApiResponse(observationPath, {
+          ...observation,
+          provenance: { ...observation.provenance, sha256 },
+        }),
+      ).toBe(false);
+    }
+  });
+
+  test("minor-unit fields accept only exact decimal integer strings or null", async () => {
+    const transactions = await json("/api/transactions");
+    const observationPath = `/api/observations/transaction/${fixture.retiredObservationId}`;
+    const observation = await json(observationPath);
+    for (const amount_minor of [
+      "",
+      " ",
+      "0x10",
+      "0b10",
+      "+1",
+      "1e3",
+      "1.5",
+      "1\n",
+    ]) {
+      expect(
+        validApiResponse("/api/transactions", {
+          transactions: [{ ...transactions.transactions[0], amount_minor }],
+        }),
+      ).toBe(false);
+      expect(
+        validApiResponse(observationPath, {
+          ...observation,
+          row: { ...observation.row, amount_minor },
+        }),
+      ).toBe(false);
+    }
+    for (const amount_minor of [null, "0", "-0", "0001", "-9007199254740993"]) {
+      expect(
+        validApiResponse("/api/transactions", {
+          transactions: [{ ...transactions.transactions[0], amount_minor }],
+        }),
+      ).toBe(true);
+    }
+  });
+
   test("validate real query results and reject malformed nested details", async () => {
     const artifactPath = `/api/artifacts/${fixture.artifactId}`;
     const detail = await json(artifactPath);
@@ -145,6 +256,10 @@ describe("amount formatting", () => {
   test("a malformed amount is shown as stored rather than coerced", () => {
     expect(formatAmount("not-a-number", "JPY")).toBe("not-a-number JPY");
     expect(formatAmount(1.5, "JPY")).toBe("1.5 JPY");
+    for (const value of ["", " ", "0x10", "0b10", "+1", "1e3", "1\n"]) {
+      expect(formatAmount(value, "JPY")).toBe(`${value} JPY`);
+      expect(amountSign(value)).toBe("unknown");
+    }
   });
 
   test("amountSign never does arithmetic on a bad value", () => {

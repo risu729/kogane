@@ -348,6 +348,14 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         "Pagination item 51",
       );
       await page
+        .getByRole("navigation")
+        .getByRole("link", { name: "残高", exact: true })
+        .click();
+      await page.goBack({ waitUntil: "networkidle" });
+      expect(await page.locator("tbody").innerText()).toContain(
+        "Pagination item 51",
+      );
+      await page
         .getByLabel("内容を検索", { exact: true })
         .fill("Pagination item 125");
       expect(await page.locator("tbody tr").count()).toBe(1);
@@ -398,6 +406,118 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         .locator("main")
         .getByRole("alert")
         .waitFor({ state: "detached" });
+      await page.close();
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "keyboard navigation updates the title and starts reading at the new heading",
+    async () => {
+      const page = await browser.newPage();
+      await page.goto(baseUrl, { waitUntil: "networkidle" });
+      expect(await page.title()).toBe("ホーム | kogane");
+      const link = page
+        .getByRole("navigation")
+        .getByRole("link", { name: "取引", exact: true });
+      await link.focus();
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        () =>
+          document.title === "取引 | kogane" &&
+          document.activeElement?.tagName === "H1",
+      );
+      await page.getByLabel("内容を検索", { exact: true }).fill("Inbound");
+      expect(
+        await page.evaluate(() => document.activeElement?.getAttribute("type")),
+      ).toBe("search");
+      await page.goBack({ waitUntil: "networkidle" });
+      expect(await page.title()).toBe("ホーム | kogane");
+      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe(
+        "H1",
+      );
+      await page.close();
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "returning from a record preserves filters and sort only in the current tab",
+    async () => {
+      const page = await browser.newPage();
+      await page.goto(`${baseUrl}/transactions`, { waitUntil: "networkidle" });
+      await page
+        .getByLabel("取得元", { exact: true })
+        .selectOption("demo-bank");
+      await page.getByLabel("開始日", { exact: true }).fill("2026-08-20");
+      await page.getByLabel("終了日", { exact: true }).fill("2026-08-20");
+      await page
+        .getByLabel("内容を検索", { exact: true })
+        .fill("Inbound transfer");
+      const sort = page.getByRole("button", {
+        name: "取引の基準日",
+        exact: false,
+      });
+      await sort.click();
+      const sortState = await page
+        .locator("th")
+        .first()
+        .getAttribute("aria-sort");
+      await page
+        .locator("tbody")
+        .getByRole("link", { name: "詳細", exact: true })
+        .click();
+      await page.locator('a[href^="/api/raw/"]').first().waitFor();
+      await page.goBack({ waitUntil: "networkidle" });
+      expect(
+        await page.getByLabel("取得元", { exact: true }).inputValue(),
+      ).toBe("demo-bank");
+      expect(
+        await page.getByLabel("開始日", { exact: true }).inputValue(),
+      ).toBe("2026-08-20");
+      expect(
+        await page.getByLabel("終了日", { exact: true }).inputValue(),
+      ).toBe("2026-08-20");
+      expect(
+        await page.getByLabel("内容を検索", { exact: true }).inputValue(),
+      ).toBe("Inbound transfer");
+      expect(await page.locator("th").first().getAttribute("aria-sort")).toBe(
+        sortState,
+      );
+      expect(await page.locator("tbody tr").count()).toBe(1);
+      expect(new URL(page.url()).search).toBe("");
+      expect(
+        await page.evaluate(() => [localStorage.length, sessionStorage.length]),
+      ).toEqual([0, 0]);
+      await page.reload({ waitUntil: "networkidle" });
+      expect(
+        await page.getByLabel("内容を検索", { exact: true }).inputValue(),
+      ).toBe("");
+      expect(
+        await page.getByLabel("取得元", { exact: true }).inputValue(),
+      ).toBe("");
+      await page.close();
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "a mismatched detail ID is rejected without showing another record",
+    async () => {
+      const page = await browser.newPage();
+      await page.route("**/api/observations/transaction/1", async (route) => {
+        const original = await route.fetch();
+        const detail = await original.json();
+        detail.row.id = 2;
+        detail.row.description = "WRONG_RECORD_MUST_NOT_APPEAR";
+        await route.fulfill({ response: original, json: detail });
+      });
+      await page.goto(`${baseUrl}/observations/transaction/1`);
+      await page.locator("main").getByRole("alert").waitFor();
+      expect(await page.locator("body").innerText()).not.toContain(
+        "WRONG_RECORD_MUST_NOT_APPEAR",
+      );
+      expect(await page.locator('a[href^="/api/raw/"]').count()).toBe(0);
       await page.close();
     },
     TIMEOUT_MS,
