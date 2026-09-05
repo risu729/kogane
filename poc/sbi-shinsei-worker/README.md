@@ -201,3 +201,16 @@ central import and teardown. A validated partial handoff logs `partial`, and the
 source terminal outcome remains distinct from central import and cleanup. The
 Container image must be rebuilt to include `stage-diagnostics.mjs`; deploying only
 the Worker updates relay cleanup but does not update browser-side stage logging.
+
+The Container CONNECT proxy now sends a normal WebSocket close (code 1000) on
+local TCP closure and waits for all active relay handshakes before returning
+from shutdown, including relays whose TCP socket has already disappeared. Only
+connection failures or a two-second close timeout force termination. Abrupt
+termination can otherwise appear as a runtime `Network connection lost` exception
+in the Cloudflare response pump even after application cleanup promises settle.
+`sbi-shinsei-container-relay-closed` records the bounded close code and outcome.
+TCP EOF retains the stream's existing data flush and valid empty close frame
+(reported locally as code 1005). An unexpected code 1006 remains `abnormal-close`
+even if the WebSocket did not emit a separate error event.
+Run `bun run test:relay` for loopback WebSocket tests of normal closure, delayed
+handshakes, shutdown, and timeout fallback; these require only the root dev dependency.

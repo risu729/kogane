@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "bun test && bash test/admin-token-sync.test.sh",
+    "test": "bun test && bash test/admin-token-sync.test.sh && bun run test:relay",
+    "test:relay": "node --test container/relay-lifecycle.node-test.mjs",
     "typecheck": "wrangler types && tsc --noEmit",
     "cf:types": "wrangler types",
     "cf:check": "wrangler deploy --dry-run",
@@ -19,6 +20,7 @@
     "@types/bun": "1.3.8",
     "@types/node": "24.3.0",
     "typescript": "5.9.3",
-    "wrangler": "4.127.1"
+    "wrangler": "4.127.1",
+    "ws": "8.21.3"
   }
 }

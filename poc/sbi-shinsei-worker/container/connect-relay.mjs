@@ -3,6 +3,63 @@ import http from "node:http";
 import WebSocket, { createWebSocketStream } from "ws";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
+const DEFAULT_CLOSE_TIMEOUT_MS = 2_000;
+
+// A normal local TCP close must finish the WebSocket close handshake. Calling
+// terminate() here cuts off Cloudflare's response pump outside Worker promises.
+export function trackRelayClosure(relay, { timeoutMs = DEFAULT_CLOSE_TIMEOUT_MS, onClosed = () => {} } = {}) {
+  let timer;
+  let closing = false;
+  let failed = false;
+  let forced = false;
+  let resolveClosed;
+  const closed = new Promise(resolve => { resolveClosed = resolve; });
+  let settled = false;
+  function settle(code) {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    const closeCode = Number.isInteger(code) && code >= 1000 && code <= 4999 ? code : 1006;
+    const normal = closeCode === 1000 || closeCode === 1001 || closeCode === 1005;
+    try { onClosed({ outcome: failed ? "failed" : forced ? "forced-timeout" : normal ? "closed" : "abnormal-close", closeCode }); }
+    catch { /* Logging must not prevent shutdown. */ }
+    resolveClosed();
+  }
+  function force() {
+    try { if (relay.readyState !== WebSocket.CLOSED) relay.terminate(); }
+    catch { failed = true; }
+    finally { settle(1006); }
+  }
+  const sendClose = () => {
+    try {
+      if (relay.readyState === WebSocket.OPEN) relay.close(1000, "proxy connection complete");
+    } catch {
+      failed = true;
+      force();
+    }
+  };
+  relay.once("close", code => settle(code));
+  // The caller still handles connection errors. This marks the lifecycle outcome
+  // without propagating any provider error message into operational logs.
+  relay.once("error", () => { failed = true; });
+  return {
+    closed,
+    close() {
+      if (settled || closing) return closed;
+      closing = true;
+      if (relay.readyState === WebSocket.CLOSED) { settle(1000); return closed; }
+      timer = setTimeout(() => { forced = true; force(); }, timeoutMs);
+      timer.unref?.();
+      if (relay.readyState === WebSocket.CONNECTING) relay.once("open", sendClose);
+      else sendClose();
+      return closed;
+    },
+    abort() {
+      if (!settled) { failed = true; force(); }
+      return closed;
+    },
+  };
+}
 
 export function parseConnectAuthority(authority) {
   try {
@@ -31,8 +88,16 @@ export function startConnectRelay({
   relayUrl,
   allowedHosts,
   connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
+  closeTimeoutMs = DEFAULT_CLOSE_TIMEOUT_MS,
 }) {
   const sockets = new Set();
+  const relays = new Set();
+  let closing;
+  let runId;
+  try {
+    const value = new URL(relayUrl).searchParams.get("runId");
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value ?? "")) runId = value;
+  } catch { /* Credentials and relay URLs never enter logs. */ }
   const server = http.createServer((_request, response) => {
     response.writeHead(405, {
       connection: "close",
@@ -48,6 +113,7 @@ export function startConnectRelay({
 
   server.on("connect", (request, socket, head) => {
     socket.pause();
+    if (closing) { socket.destroy(); return; }
     const address = parseConnectAuthority(request.url ?? "");
     if (!address || address.port !== 443 || !allowedHosts.has(address.hostname)) {
       socket.end(
@@ -62,6 +128,18 @@ export function startConnectRelay({
     const relay = new WebSocket(target, {
       headers: { authorization: `Bearer ${relayToken}` },
     });
+    const lifecycle = trackRelayClosure(relay, {
+      timeoutMs: closeTimeoutMs,
+      onClosed: details => {
+        try {
+          console[details.outcome === "closed" ? "log" : "warn"](JSON.stringify({
+            event: "sbi-shinsei-container-relay-closed", ...(runId ? { runId } : {}), ...details,
+          }));
+        } catch { /* Best effort. */ }
+      },
+    });
+    relays.add(lifecycle);
+    void lifecycle.closed.then(() => relays.delete(lifecycle));
     let established = false;
     let responseSent = false;
     let relayStream;
@@ -74,13 +152,14 @@ export function startConnectRelay({
     };
     const timeout = setTimeout(() => {
       if (!established) rejectConnect("504 Gateway Timeout");
-      if (relay.readyState < WebSocket.CLOSED) relay.terminate();
+      void lifecycle.abort();
     }, connectTimeoutMs);
 
     const closeRelay = () => {
       clearTimeout(timeout);
-      if (relay.readyState < WebSocket.CLOSED) relay.terminate();
+      void lifecycle.close();
     };
+    const abortRelay = () => { clearTimeout(timeout); void lifecycle.abort(); };
     const fail = () => {
       clearTimeout(timeout);
       if (!established) rejectConnect("502 Bad Gateway");
@@ -90,7 +169,7 @@ export function startConnectRelay({
     relay.once("open", () => {
       clearTimeout(timeout);
       if (responseSent) {
-        relay.terminate();
+        void lifecycle.close();
         return;
       }
       established = true;
@@ -110,7 +189,10 @@ export function startConnectRelay({
       if (!established) fail();
       else if (!socket.destroyed) socket.end();
     });
-    socket.once("error", closeRelay);
+    // Keep pipe's existing EOF handling: its writable finalizer flushes pending
+    // data before sending a valid empty close frame. Closing here on `end` could
+    // discard the last queued TLS record before that flush finishes.
+    socket.once("error", abortRelay);
     socket.once("close", closeRelay);
   });
 
@@ -124,14 +206,20 @@ export function startConnectRelay({
       }
       resolve({
         port: address.port,
-        close: () =>
-          new Promise((done, closeReject) => {
+        close: () => {
+          if (closing) return closing;
+          closing = new Promise((done, closeReject) => {
+            // Relays can outlive their local TCP sockets. Await all WebSockets,
+            // including those already closing after removal from `sockets`.
+            const relayClosures = [...relays].map(lifecycle => lifecycle.close());
             for (const socket of sockets) socket.destroy();
             server.close((error) => {
               if (error) closeReject(error);
-              else done();
+              else Promise.all(relayClosures).then(done, closeReject);
             });
-          }),
+          });
+          return closing;
+        },
       });
     });
   });
