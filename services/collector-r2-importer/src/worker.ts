@@ -1,4 +1,5 @@
 import { ImportError } from "./error";
+import { importGlobalPassRun } from "./global-pass";
 import { importMobileSuicaRun } from "./mobile-suica";
 import { importSbiRun } from "./sbi";
 import { importSbiShinseiRun } from "./sbi-shinsei";
@@ -16,6 +17,34 @@ export default {
         service: "collector-r2-importer",
         version: env.IMPORTER_VERSION,
       });
+    }
+    if (request.method === "POST" && url.pathname === "/v1/prestia-globalpass/import-run" &&
+        url.search === "") {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["manifestKey"]);
+        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
+        const result = await importOneGlobalPass(env, manifestKey, 0, true);
+        return json(result, result.status === "deferred" ? 202 : 200);
+      } catch (error) {
+        return errorResponse(error);
+      }
+    }
+    if (request.method === "POST" && url.pathname === "/v1/prestia-globalpass/backfill-page" &&
+        url.search === "") {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["cursor", "limit"]);
+        const cursor = input.cursor === undefined
+          ? undefined
+          : requiredString(input.cursor, "cursor_invalid", 12_000);
+        if (input.limit !== undefined && input.limit !== 1) {
+          throw new ImportError(400, "backfill_limit_must_be_one");
+        }
+        return json(await backfillGlobalPass(env, cursor));
+      } catch (error) {
+        return errorResponse(error);
+      }
     }
     if (request.method === "POST" && url.pathname === "/v1/mobile-suica/import-run" &&
         url.search === "") {
@@ -307,6 +336,199 @@ function importOne(env: Env, manifestKey: string) {
     importerVersion: env.IMPORTER_VERSION,
     manifestKey,
   });
+}
+
+function importOneGlobalPass(
+  env: Env,
+  manifestKey: string,
+  offset: number,
+  immediate: boolean,
+) {
+  return importGlobalPassRun({
+    bucket: env.GLOBAL_PASS_SNAPSHOTS,
+    centralService: env.RAW_EVIDENCE,
+    centralToken: env.RAW_EVIDENCE_TOKEN_GLOBAL_PASS,
+    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
+    importerVersion: env.IMPORTER_VERSION,
+    manifestKey,
+    offset,
+    immediate,
+  });
+}
+
+interface GlobalPassBackfillCursor {
+  v: 1;
+  scanCursor: string | null;
+  scanDone: boolean;
+  manifestKey?: string;
+  offset?: number;
+}
+
+async function backfillGlobalPass(
+  env: Env,
+  encodedCursor: string | undefined,
+): Promise<JsonObject> {
+  const state = encodedCursor ? decodeGlobalPassCursor(encodedCursor) : null;
+  if (state?.manifestKey !== undefined) {
+    const offset = state.offset ?? 0;
+    const result = await importOneGlobalPass(env, state.manifestKey, offset, false);
+    if (result.status === "deferred") {
+      if (result.nextOffset <= offset) throw new ImportError(409, result.reason);
+      return globalPassBackfillResponse({
+        scannedObjectCount: 0,
+        deferredManifestCount: 1,
+        nextCursor: encodeGlobalPassCursor({ ...state, offset: result.nextOffset }),
+        result,
+      });
+    }
+    return globalPassBackfillResponse({
+      scannedObjectCount: 0,
+      importedManifestCount: 1,
+      nextCursor: nextGlobalPassScanCursor(state),
+      result,
+    });
+  }
+
+  const listed = await env.GLOBAL_PASS_SNAPSHOTS.list({
+    prefix: "raw/prestia-globalpass/",
+    limit: 1,
+    ...(state?.scanCursor ? { cursor: state.scanCursor } : {}),
+  });
+  const object = listed.objects[0];
+  const scanDone = !listed.truncated;
+  const scanCursor = listed.truncated ? listed.cursor : undefined;
+  if (listed.truncated && !scanCursor) throw new ImportError(409, "prefix_cursor_missing");
+  if (listed.truncated && state?.scanCursor === scanCursor) {
+    throw new ImportError(409, "prefix_cursor_did_not_advance");
+  }
+  const continuation: GlobalPassBackfillCursor = {
+    v: 1,
+    scanCursor: scanCursor ?? null,
+    scanDone,
+  };
+  if (!object) {
+    return globalPassBackfillResponse({ scannedObjectCount: 0, nextCursor: null });
+  }
+  if (!object.key.endsWith("/manifest.json")) {
+    return globalPassBackfillResponse({
+      scannedObjectCount: 1,
+      skippedManifestCount: 1,
+      nextCursor: nextGlobalPassScanCursor(continuation),
+    });
+  }
+  try {
+    const result = await importOneGlobalPass(env, object.key, 0, false);
+    if (result.status === "deferred") {
+      if (result.nextOffset <= 0) throw new ImportError(409, result.reason);
+      return globalPassBackfillResponse({
+        scannedObjectCount: 1,
+        deferredManifestCount: 1,
+        nextCursor: encodeGlobalPassCursor({
+          ...continuation,
+          manifestKey: object.key,
+          offset: result.nextOffset,
+        }),
+        result,
+      });
+    }
+    return globalPassBackfillResponse({
+      scannedObjectCount: 1,
+      importedManifestCount: 1,
+      nextCursor: nextGlobalPassScanCursor(continuation),
+      result,
+    });
+  } catch (error) {
+    return globalPassBackfillResponse({
+      scannedObjectCount: 1,
+      failedManifestCount: 1,
+      failureCode: safeCode(error),
+      failedManifestKey: object.key,
+      nextCursor: nextGlobalPassScanCursor(continuation),
+    });
+  }
+}
+
+function globalPassBackfillResponse(input: {
+  scannedObjectCount: number;
+  importedManifestCount?: number;
+  skippedManifestCount?: number;
+  deferredManifestCount?: number;
+  failedManifestCount?: number;
+  failureCode?: string;
+  failedManifestKey?: string;
+  nextCursor: string | null;
+  result?: unknown;
+}): JsonObject {
+  return {
+    source: "prestia-globalpass",
+    scannedObjectCount: input.scannedObjectCount,
+    importedManifestCount: input.importedManifestCount ?? 0,
+    skippedManifestCount: input.skippedManifestCount ?? 0,
+    deferredManifestCount: input.deferredManifestCount ?? 0,
+    failedManifestCount: input.failedManifestCount ?? 0,
+    nextCursor: input.nextCursor,
+    truncated: input.nextCursor !== null,
+    ...(input.failureCode ? { failureCode: input.failureCode } : {}),
+    ...(input.failedManifestKey ? { failedManifestKey: input.failedManifestKey } : {}),
+    ...(input.result ? { result: input.result } : {}),
+  };
+}
+
+function nextGlobalPassScanCursor(state: GlobalPassBackfillCursor): string | null {
+  return state.scanDone ? null : encodeGlobalPassCursor({
+    v: 1,
+    scanCursor: state.scanCursor,
+    scanDone: false,
+  });
+}
+
+function encodeGlobalPassCursor(value: GlobalPassBackfillCursor): string {
+  assertGlobalPassCursor(value);
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `global-pass-v1.${btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "")}`;
+}
+
+function decodeGlobalPassCursor(value: string): GlobalPassBackfillCursor {
+  if (!value.startsWith("global-pass-v1.")) throw new ImportError(400, "cursor_invalid");
+  const encoded = value.slice("global-pass-v1.".length).replaceAll("-", "+").replaceAll("_", "/");
+  const padded = encoded.padEnd(Math.ceil(encoded.length / 4) * 4, "=");
+  let parsed: unknown;
+  try {
+    const binary = atob(padded);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  const input = parsed as JsonObject;
+  exactKeys(input, ["v", "scanCursor", "scanDone", "manifestKey", "offset"]);
+  const cursor = input as unknown as GlobalPassBackfillCursor;
+  assertGlobalPassCursor(cursor);
+  return cursor;
+}
+
+function assertGlobalPassCursor(value: GlobalPassBackfillCursor): void {
+  const scanStateValid = value.scanDone
+    ? value.scanCursor === null
+    : typeof value.scanCursor === "string" && value.scanCursor.length > 0 &&
+      value.scanCursor.length <= 4_096 && !/[\x00-\x20\x7f]/u.test(value.scanCursor);
+  const hasManifest = value.manifestKey !== undefined;
+  const hasOffset = value.offset !== undefined;
+  if (value.v !== 1 || typeof value.scanDone !== "boolean" || !scanStateValid ||
+      hasManifest !== hasOffset ||
+      (hasManifest &&
+        (typeof value.manifestKey !== "string" ||
+          !/^raw\/prestia-globalpass\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/manifest\.json$/u
+            .test(value.manifestKey) ||
+          typeof value.offset !== "number" || !Number.isSafeInteger(value.offset) ||
+          value.offset <= 0 || value.offset >= 16))) {
+    throw new ImportError(400, "cursor_invalid");
+  }
 }
 
 function importOneMobileSuica(env: Env, manifestKey: string) {

@@ -18,7 +18,7 @@ async function route(request: Request, env: WorkerEnv): Promise<Response> {
   const url = new URL(request.url);
   if (url.search) throw new ApiError(400, "query_string_not_allowed");
   if (request.method === "GET" && url.pathname === "/health") {
-    return json({ ok: true, service: "kogane-ingest", apiVersion: "v1", schemaVersion: "0009" });
+    return json({ ok: true, service: "kogane-ingest", apiVersion: "v1", schemaVersion: "0010" });
   }
 
   const clientId = await authenticate(request, env);

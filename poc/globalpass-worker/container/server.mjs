@@ -25,7 +25,7 @@ const RELAY_HOSTS = new Set([
 const MAX_REQUEST_BYTES = 16 * 1024;
 const MAX_HTML_BYTES = 2 * 1024 * 1024;
 const DAILY_MONTHS = 2;
-const RUNTIME_REVISION = "timezone-collector-v6";
+const RUNTIME_REVISION = "timezone-collector-v7";
 const ACTIVITY_LABEL =
   /ご利用明細|利用明細|account activity|transaction(?:s| history)?|usage details|card activity|statement/iu;
 const PROBE_VARIANTS = [
@@ -1022,9 +1022,9 @@ http
       } catch (error) {
         await writeLine(response, {
           type: "error",
+          operation: "browser-collection",
           errorType: error instanceof Error ? error.name : "UnknownError",
-          message:
-            error instanceof Error ? error.message : "Collection failed",
+          errorCode: "browser_collection_failed",
         });
       }
       response.end();
