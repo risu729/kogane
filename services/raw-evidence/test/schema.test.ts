@@ -459,6 +459,7 @@ describe("0001 raw-evidence schema", () => {
       { external_source_id: "v-point", source_id: "v-point" },
       { external_source_id: "v-point-pay-email", source_id: "v-point-pay" },
       { external_source_id: "v-point-pay-email-reconciliation", source_id: "v-point" },
+      { external_source_id: "vpass", source_id: "vpass" },
     ]);
     const sbiRoute = await env.DB.prepare(`
       SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes

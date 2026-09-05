@@ -632,8 +632,9 @@ function environment(
     MYJCB_SNAPSHOTS: myJcbBucket,
     VPOINT_SNAPSHOTS: vPointBucket,
     VPOINT_PAY_SNAPSHOTS: vPointPayBucket,
+    VPASS_SNAPSHOTS: {} as R2Bucket,
     RAW_EVIDENCE: {} as Fetcher,
-    IMPORTER_VERSION: "collector-r2-importer-v15",
+    IMPORTER_VERSION: "collector-r2-importer-v16",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_VC: `collector-r2-sbi-vc.${"v".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SONY: `collector-r2-sony-bank.${"o".repeat(32)}`,
@@ -643,6 +644,7 @@ function environment(
     GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST: "a".repeat(64),
     RAW_EVIDENCE_TOKEN_MYJCB: `collector-r2-myjcb.${"j".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_VPOINT: `collector-r2-v-point.${"p".repeat(32)}`,
+    RAW_EVIDENCE_TOKEN_VPASS: `collector-r2-vpass.${"v".repeat(32)}`,
     ORIGIN_FINGERPRINT_KEY: "ab".repeat(32),
   };
 }
