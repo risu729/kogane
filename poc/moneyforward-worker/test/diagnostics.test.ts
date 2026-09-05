@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { logFailure, MoneyForwardHttpError, safeFailure } from "../src/diagnostics";
+import { logFailure, MoneyForwardHttpError, MoneyForwardProtocolError, safeFailure } from "../src/diagnostics";
 import { collectMoneyForward } from "../src/moneyforward";
 import worker from "../src/worker";
 import type { MoneyForwardCredential } from "../src/types";
@@ -124,5 +124,27 @@ describe("Money Forward safe stage diagnostics", () => {
     expect(failures.map((item) => item.stage)).toEqual(["credential-load", "manifest-store"]);
     expect(failures[0].runId).toBe(failures[1].runId);
     expect(logs.join()).not.toContain(PRIVATE);
+  });
+});
+
+
+describe("diagnostics snapshot error properties once", () => {
+  test("stateful allowed-first name, status and reason getters never leak later values", () => {
+    let nameReads = 0;
+    const generic = new Error(PRIVATE);
+    Object.defineProperty(generic, "name", { get: () => ++nameReads === 1 ? "Error" : PRIVATE });
+    expect(safeFailure(generic)).toEqual({ errorType: "Error", failureCode: "operation_failed" });
+    expect(nameReads).toBe(1);
+
+    let statusReads = 0;
+    let reasonReads = 0;
+    const protocol = new MoneyForwardProtocolError("invalid-response", 503);
+    Object.defineProperty(protocol, "status", { get: () => ++statusReads === 1 ? 503 : PRIVATE });
+    Object.defineProperty(protocol, "reasonCode", { get: () => ++reasonReads === 1 ? "invalid-response" : PRIVATE });
+    const detail = safeFailure(protocol);
+    expect(detail).toEqual({ errorType: "MoneyForwardProtocolError", failureCode: "provider_protocol_failed", httpStatus: 503, reasonCode: "invalid-response" });
+    expect(statusReads).toBe(1);
+    expect(reasonReads).toBe(1);
+    expect(JSON.stringify(detail)).not.toContain(PRIVATE);
   });
 });

@@ -19,13 +19,16 @@ export function safeFailure(error: unknown): SafeFailure {
     if (error instanceof MoneyForwardHttpError || error instanceof MoneyForwardProtocolError) {
       result.errorType = error instanceof MoneyForwardHttpError ? "MoneyForwardHttpError" : "MoneyForwardProtocolError";
       result.failureCode = error instanceof MoneyForwardHttpError ? "provider_http_failed" : "provider_protocol_failed";
-      if (typeof error.status === "number" && Number.isInteger(error.status) && error.status >= 100 && error.status <= 599) result.httpStatus = error.status;
-      if (error instanceof MoneyForwardProtocolError && new Set([
+      const status = error.status;
+      if (typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599) result.httpStatus = status;
+      const reason = error instanceof MoneyForwardProtocolError ? error.reasonCode : undefined;
+      if (reason !== undefined && new Set([
         "unexpected-redirect", "redirect-limit", "missing-location", "invalid-response",
         "missing-csrf", "missing-account-context", "session-not-authenticated",
-      ]).has(error.reasonCode)) result.reasonCode = error.reasonCode;
-    } else if (error instanceof Error && ["Error", "TypeError", "SyntaxError", "RangeError", "AbortError", "TimeoutError"].includes(error.name)) {
-      result.errorType = error.name;
+      ]).has(reason)) result.reasonCode = reason;
+    } else if (error instanceof Error) {
+      const name = error.name;
+      if (typeof name === "string" && ["Error", "TypeError", "SyntaxError", "RangeError", "AbortError", "TimeoutError"].includes(name)) result.errorType = name;
     }
     return result;
   } catch { return { errorType: "UnknownError", failureCode: "operation_failed" }; }
