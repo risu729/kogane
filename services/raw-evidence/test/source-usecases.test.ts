@@ -1,6 +1,7 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { canonicalJson, sha256Hex } from "../src/canonical";
+import { descriptorSha256 as vPointDescriptorSha256 } from "../../collector-r2-importer/src/v-point";
 import fixture from "./fixtures/source-usecases.v1.json";
 
 const AUTH = "Bearer test.test-secret-at-least-twenty-chars";
@@ -725,6 +726,39 @@ describe("sanitized source-usecase contract", () => {
       { artifact_key: "point-history/page-0.json", artifact_role: "collector_derived", payload_fidelity: "transformed", lineage_disposition: "source_bytes_not_available" },
       { artifact_key: "manifest.json", artifact_role: "collector_manifest", payload_fidelity: "generated", lineage_disposition: "source_bytes_not_available" },
     ]);
+  });
+
+  it("returns the same normalized descriptor hash the V Point importer inventories", async () => {
+    const { runId } = await createRun("v-point", "fixture-v-point-descriptor-hash");
+    const body = "{\"items\":[]}";
+    const object = await upload(runId, body);
+    const descriptor = {
+      artifactKey: "history-page-0001.json",
+      artifactRole: "collector_derived",
+      payloadFidelity: "transformed",
+      containerKind: "single",
+      lineageDisposition: "source_bytes_not_available",
+      dataset: "history-page-0001",
+      formatId: "vpoint-json",
+      formatVersion: "vpoint-worker-poc-v2",
+      declaredMediaType: "application/json",
+      mediaTypeBasis: "manifest",
+      fetchedAtMs: 1_787_862_400_000,
+      fetchedAtBasis: "manifest",
+      sequence: 0,
+      sha256: object.sha256,
+      byteSize: object.byteSize,
+      storage: await storageOrigin("history-page-0001.json"),
+      transformSteps: [
+        { stepIndex: 0, stepKind: "transport_decoded", transformerId: "vpoint-worker", transformerVersion: "vpoint-worker-poc-v2" },
+        { stepIndex: 1, stepKind: "reencoded", transformerId: "vpoint-worker", transformerVersion: "vpoint-worker-poc-v2" },
+      ],
+    };
+    const response = await expectPost(`/v1/runs/${runId}/artifacts`, descriptor);
+    const expected = await vPointDescriptorSha256(descriptor);
+    expect(response.descriptorSha256).toBe(expected);
+    await terminal(runId, 1);
+    await seal(runId, [{ artifactKey: descriptor.artifactKey, sha256: object.sha256, descriptorSha256: expected }], "v-point-descriptor-hash");
   });
 
   it("maps V Point Pay mail and keeps reconciliation as a V Point generated report", async () => {

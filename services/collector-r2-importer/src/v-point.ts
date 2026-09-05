@@ -6,7 +6,7 @@ const SOURCE = "v-point" as const;
 const PRODUCER = "collector-r2-importer";
 const V1 = "vpoint-worker-poc-v1" as const;
 const V2 = "vpoint-worker-poc-v2" as const;
-const INGEST_CONTRACT_VERSION = "vpoint-r2-v2";
+const INGEST_CONTRACT_VERSION = "vpoint-r2-v3";
 const CENTRAL_CLIENT_ID = "collector-r2-v-point";
 const STORAGE_CONTAINER = "kogane-vpoint-collector-poc";
 const STORAGE_TEMPLATE = "raw/v-point/{date}/{run-id}/{artifact}.json";
@@ -1554,18 +1554,46 @@ function canonical(value: JsonValue): JsonValue {
   return value;
 }
 
-async function descriptorSha256(descriptor: JsonObject): Promise<string> {
-  const { http, storage, file, email, ...fields } = descriptor;
+function normalizedStorageOrigin(value: unknown): JsonValue {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) throw new TypeError("storage origin must be an object");
+  return {
+    storageKind: value.storageKind,
+    containerName: value.containerName,
+    objectKeyTemplate: value.objectKeyTemplate,
+    objectKeyFingerprint: value.objectKeyFingerprint,
+    fingerprintKeyVersion: value.fingerprintKeyVersion,
+    redactionVersion: value.redactionVersion,
+    objectVersion: value.objectVersion ?? null,
+    etag: value.etag ?? null,
+    lastModifiedAtMs: value.lastModifiedAtMs ?? null,
+    lastModifiedAtBasis: value.lastModifiedAtBasis ?? null,
+  } as unknown as JsonValue;
+}
+
+export async function descriptorSha256(descriptor: JsonObject): Promise<string> {
+  const {
+    http, storage, file, email,
+    fetchUnitId, pageGroupId, pageIndex,
+    ranges, transformSteps, relations,
+    ...fields
+  } = descriptor;
   const normalized = {
     ...fields,
+    fetchUnitId: fetchUnitId ?? null,
+    pageGroupId: pageGroupId ?? null,
+    pageIndex: pageIndex ?? null,
     origins: {
       http: http ?? null,
-      storage: storage ?? null,
+      storage: normalizedStorageOrigin(storage),
       file: file ?? null,
       email: email ?? null,
     },
+    ranges: ranges ?? [],
+    transformSteps: transformSteps ?? [],
+    relations: relations ?? [],
   };
-  return sha256Hex(new TextEncoder().encode(canonicalJson(normalized as JsonValue)));
+  return sha256Hex(new TextEncoder().encode(canonicalJson(normalized as unknown as JsonValue)));
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {

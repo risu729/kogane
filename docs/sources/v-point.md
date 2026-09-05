@@ -536,7 +536,7 @@ read-only live 検証項目:
 
 V Point web collectorは現在、browserなしのWorkers fetchとEmail Worker再認証で定期収集し、private R2をimmutable outboxとして使う。中央取り込みはcollectorとは別の`collector-r2-v-point` credentialとService Bindingに分離した。manifest v1/v2、prefix inventory、metadata、checksum、JSON schema、pagination、failure complement、collection summary、V Point Pay email reconciliationを全件検証してから、専用の中央runを冪等にsealする。大runは完全inventoryを固定し、HMAC署名済みcontinuationで最大8 artifactずつ転送し、seal後だけR2 scan位置を進める。
 
-terminal run reportの`producerVersion`には固定source契約`vpoint-r2-v2`を使う。Importerのdeploy revisionをimmutable reportへ混ぜないため、異なる`IMPORTER_VERSION`で同じrunを再走査してもreport本文は変化しない。v2ではcollectorがtransport decode後に再encodeしたJSONを`collector_derived/transformed`、自由形式failure textを除いた中央manifestを`collector_manifest/generated`として登録し、実D1制約でcatalogueからsealまで回帰検証する。deploy revisionは失敗・incomplete attemptの診断に限って保持する。
+terminal run reportの`producerVersion`には固定source契約`vpoint-r2-v3`を使う。Importerのdeploy revisionをimmutable reportへ混ぜないため、異なる`IMPORTER_VERSION`で同じrunを再走査してもreport本文は変化しない。v3ではcollectorがtransport decode後に再encodeしたJSONを`collector_derived/transformed`、自由形式failure textを除いた中央manifestを`collector_manifest/generated`として登録し、中央が補うnullable fieldと空arrayを含むdescriptor hashまで実D1契約へ一致させる。deploy revisionは失敗・incomplete attemptの診断に限って保持する。
 
 実 R2を変更せずに24 manifestを監査し、v1 5件、v2 19件、成功13件、失敗11件、reconciliation参照10件がstrict contractへ適合した。`bun run audit:vpoint-r2`で同じaggregate-only監査を再実行でき、本文、値、object key、個別hash、secretを出力しない。reconciliationは旧3件と現行7件でexact policy文字列が異なるため、観測した2値だけを明示的に受理し、任意文字列への緩和はしていない。candidateは実在history page・実row count内index・`sha256(JSON.stringify(row))`へ束縛し、entry内重複を拒否する。
 
