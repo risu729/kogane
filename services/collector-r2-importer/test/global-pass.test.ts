@@ -148,6 +148,29 @@ describe("GLOBAL PASS R2 importer", () => {
     )).toThrow("html_activity_contract_invalid");
   });
 
+  test("accepts an empty English legacy page only with audited artifact authorization", () => {
+    const note = '<p class="textNotice"><span>&lt;Note&gt;<br>' +
+      " - Transaction dates are showed in ascending order.<br></span></p>";
+    const html = variantA(["one", "two", "three", "four", "", ""])
+      .replace("利用明細", "Account")
+      .replace('<table data-fixture="activity"><tbody></tbody></table>', note)
+      .replace(
+        "https://www.debit.vpass.ne.jp/p/statementInquiry/RW1313010301",
+        "/p/statementInquiry/RW1313010301",
+      );
+    expect(() => sanitizeGlobalPassHtml(
+      encode(html),
+      "globalpass-browser-poc-v1",
+    )).toThrow("html_activity_contract_invalid");
+    expect(() => sanitizeGlobalPassHtml(
+      encode(html),
+      "globalpass-browser-poc-v1",
+      true,
+    )).not.toThrow();
+    expect(() => sanitizeGlobalPassHtml(encode(html), "globalpass-browser-poc-v2", true))
+      .toThrow("html_activity_contract_invalid");
+  });
+
   test("does not accept legacy activity words outside the exact table header set", () => {
     const base = variantA(["one", "two", "three", "four", "", ""])
       .replace("利用明細", "Account");
@@ -545,8 +568,9 @@ async function importRun(
     centralService: central as unknown as Fetcher,
     centralToken: TOKEN,
     fingerprintKey: FINGERPRINT_KEY,
-    importerVersion: "collector-r2-importer-v9",
+    importerVersion: "collector-r2-importer-v10",
     manifestKey: MANIFEST_KEY,
+    legacyEmptyArtifactSha256: new Set(),
     ...options,
   });
 }

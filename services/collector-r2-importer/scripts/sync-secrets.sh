@@ -9,8 +9,10 @@ user_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
 config_dir="${KOGANE_CONFIG_DIR:-${user_home}/.config/kogane}"
 credential_path="${config_dir}/ingest-client-keys.cred"
 fingerprint_path="${config_dir}/origin-fingerprint.cred"
+global_pass_empty_path="${config_dir}/globalpass-legacy-empty-sha256.cred"
 
-if ! test -f "${credential_path}" || ! test -f "${fingerprint_path}"; then
+if ! test -f "${credential_path}" || ! test -f "${fingerprint_path}" ||
+    ! test -f "${global_pass_empty_path}"; then
   printf 'required local systemd credentials are missing\n' >&2
   exit 1
 fi
@@ -30,8 +32,14 @@ sbi_shinsei_secret="$(jq -er '."collector-r2-sbi-shinsei" | select(type == "stri
 mobile_suica_secret="$(jq -er '."collector-r2-mobile-suica" | select(type == "string" and length >= 20)' <<<"${key_map}")"
 global_pass_secret="$(jq -er '."collector-r2-global-pass" | select(type == "string" and length >= 20)' <<<"${key_map}")"
 fingerprint_secret="$(sudo systemd-creds decrypt "${fingerprint_path}" -)"
+global_pass_empty_secret="$(sudo systemd-creds decrypt "${global_pass_empty_path}" -)"
 if ! [[ "${fingerprint_secret}" =~ ^[0-9a-f]{64}$ ]]; then
   printf 'origin fingerprint credential is invalid\n' >&2
+  exit 1
+fi
+if ! [[ "${global_pass_empty_secret}" =~ ^[0-9a-f]{64}(,[0-9a-f]{64}){0,14}$ ]] ||
+    [[ "$(tr ',' '\n' <<<"${global_pass_empty_secret}" | sort | uniq -d | wc -l)" -ne 0 ]]; then
+  printf 'GLOBAL PASS legacy empty allowlist credential is invalid\n' >&2
   exit 1
 fi
 
@@ -44,8 +52,9 @@ fi
     --arg sbiShinsei "collector-r2-sbi-shinsei.${sbi_shinsei_secret}" \
     --arg mobileSuica "collector-r2-mobile-suica.${mobile_suica_secret}" \
     --arg globalPass "collector-r2-global-pass.${global_pass_secret}" \
+    --arg globalPassLegacyEmpty "${global_pass_empty_secret}" \
     --arg fingerprint "${fingerprint_secret}" \
-    '{RAW_EVIDENCE_TOKEN:$sbi,RAW_EVIDENCE_TOKEN_SBI_VC:$sbiVc,RAW_EVIDENCE_TOKEN_SONY:$sony,RAW_EVIDENCE_TOKEN_SBI_SHINSEI:$sbiShinsei,RAW_EVIDENCE_TOKEN_MOBILE_SUICA:$mobileSuica,RAW_EVIDENCE_TOKEN_GLOBAL_PASS:$globalPass,ORIGIN_FINGERPRINT_KEY:$fingerprint}')"
+    '{RAW_EVIDENCE_TOKEN:$sbi,RAW_EVIDENCE_TOKEN_SBI_VC:$sbiVc,RAW_EVIDENCE_TOKEN_SONY:$sony,RAW_EVIDENCE_TOKEN_SBI_SHINSEI:$sbiShinsei,RAW_EVIDENCE_TOKEN_MOBILE_SUICA:$mobileSuica,RAW_EVIDENCE_TOKEN_GLOBAL_PASS:$globalPass,GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST:$globalPassLegacyEmpty,ORIGIN_FINGERPRINT_KEY:$fingerprint}')"
   # A bulk update changes only these non-null names; unrelated Worker secrets remain intact.
   printf '%s' "${secrets_json}" | npx wrangler secret bulk >/dev/null
   unset secrets_json
@@ -57,6 +66,7 @@ fi
     RAW_EVIDENCE_TOKEN_SBI_SHINSEI
     RAW_EVIDENCE_TOKEN_MOBILE_SUICA
     RAW_EVIDENCE_TOKEN_GLOBAL_PASS
+    GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST
     ORIGIN_FINGERPRINT_KEY
   )
   secret_inventory="$(npx wrangler secret list --format json)"
@@ -70,4 +80,4 @@ fi
     '{synced:true,worker:"kogane-collector-r2-importer",verifiedSecretNames:$ARGS.positional}' \
     "${required_secret_names[@]}"
 )
-unset key_map sbi_secret sbi_vc_secret sony_secret sbi_shinsei_secret mobile_suica_secret global_pass_secret fingerprint_secret
+unset key_map sbi_secret sbi_vc_secret sony_secret sbi_shinsei_secret mobile_suica_secret global_pass_secret global_pass_empty_secret fingerprint_secret

@@ -1,9 +1,23 @@
 import { describe, expect, test } from "bun:test";
-import worker, { classifySbiVcBackfillError } from "../src/worker";
+import worker, {
+  classifySbiVcBackfillError,
+  parseGlobalPassLegacyEmptyAllowlist,
+} from "../src/worker";
 import { ImportError } from "../src/error";
 import { backfillStoredRuns } from "../../../poc/mobile-suica-worker/src/raw-evidence";
 
 describe("collector R2 importer routes", () => {
+  test("the GLOBAL PASS legacy empty allowlist is exact and bounded", () => {
+    const first = "a".repeat(64);
+    const second = "b".repeat(64);
+    expect([...parseGlobalPassLegacyEmptyAllowlist(`${first},${second}`)])
+      .toEqual([first, second]);
+    for (const value of ["", "A".repeat(64), `${first},${first}`, `${first}, ${second}`]) {
+      expect(() => parseGlobalPassLegacyEmptyAllowlist(value))
+        .toThrow("global_pass_legacy_empty_allowlist_invalid");
+    }
+  });
+
   test("the GLOBAL PASS backfill page scans exactly one source object", async () => {
     const calls: R2ListOptions[] = [];
     const bucket = {
@@ -402,13 +416,14 @@ function environment(
     MOBILE_SUICA_SNAPSHOTS: mobileSuicaBucket,
     GLOBAL_PASS_SNAPSHOTS: globalPassBucket,
     RAW_EVIDENCE: {} as Fetcher,
-    IMPORTER_VERSION: "collector-r2-importer-v9",
+    IMPORTER_VERSION: "collector-r2-importer-v10",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_VC: `collector-r2-sbi-vc.${"v".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SONY: `collector-r2-sony-bank.${"o".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_SHINSEI: `collector-r2-sbi-shinsei.${"n".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_MOBILE_SUICA: `collector-r2-mobile-suica.${"m".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_GLOBAL_PASS: `collector-r2-global-pass.${"g".repeat(32)}`,
+    GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST: "a".repeat(64),
     ORIGIN_FINGERPRINT_KEY: "ab".repeat(32),
   };
 }
