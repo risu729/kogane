@@ -1,4 +1,4 @@
-import { CentralClient } from "./central";
+import { CentralClient, centralDescriptorSha256 } from "./central";
 import { ImportError } from "./error";
 import type { CentralInventoryItem } from "./types";
 
@@ -1794,53 +1794,8 @@ function canonical(value: JsonValue): JsonValue {
   return value;
 }
 
-function normalizedStorageOrigin(value: unknown): JsonValue {
-  if (value === undefined || value === null) return null;
-  if (!isRecord(value)) throw new TypeError("storage origin must be an object");
-  return {
-    storageKind: value.storageKind,
-    containerName: value.containerName,
-    objectKeyTemplate: value.objectKeyTemplate,
-    objectKeyFingerprint: value.objectKeyFingerprint,
-    fingerprintKeyVersion: value.fingerprintKeyVersion,
-    redactionVersion: value.redactionVersion,
-    objectVersion: value.objectVersion ?? null,
-    etag: value.etag ?? null,
-    lastModifiedAtMs: value.lastModifiedAtMs ?? null,
-    lastModifiedAtBasis: value.lastModifiedAtBasis ?? null,
-  } as unknown as JsonValue;
-}
-
 export async function descriptorSha256(descriptor: JsonObject): Promise<string> {
-  const {
-    http,
-    storage,
-    file,
-    email,
-    fetchUnitId,
-    pageGroupId,
-    pageIndex,
-    ranges,
-    transformSteps,
-    relations,
-    ...fields
-  } = descriptor;
-  const normalized = {
-    ...fields,
-    fetchUnitId: fetchUnitId ?? null,
-    pageGroupId: pageGroupId ?? null,
-    pageIndex: pageIndex ?? null,
-    origins: {
-      http: http ?? null,
-      storage: normalizedStorageOrigin(storage),
-      file: file ?? null,
-      email: email ?? null,
-    },
-    ranges: ranges ?? [],
-    transformSteps: transformSteps ?? [],
-    relations: relations ?? [],
-  };
-  return sha256Hex(new TextEncoder().encode(canonicalJson(normalized as unknown as JsonValue)));
+  return centralDescriptorSha256(descriptor);
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {

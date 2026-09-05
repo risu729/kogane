@@ -513,7 +513,7 @@ function importOneVpass(env: Env, recordKey: string, continuation?: string) {
 }
 
 interface VpassBackfillCursor {
-  v: 1;
+  v: 2;
   scanCursor: string | null;
   scanDone: boolean;
   recordKey?: string;
@@ -526,7 +526,7 @@ export async function backfillVpass(
 ): Promise<JsonObject> {
   const state = encodedCursor
     ? await decodeVpassCursor(encodedCursor, env.ORIGIN_FINGERPRINT_KEY)
-    : ({ v: 1, scanCursor: null, scanDone: false } satisfies VpassBackfillCursor);
+    : ({ v: 2, scanCursor: null, scanDone: false } satisfies VpassBackfillCursor);
   if (state.recordKey !== undefined) {
     try {
       const result = await importOneVpass(env, state.recordKey, state.transfer);
@@ -570,7 +570,7 @@ export async function backfillVpass(
     throw new ImportError(409, "prefix_cursor_did_not_advance");
   }
   const afterRecord: VpassBackfillCursor = {
-    v: 1,
+    v: 2,
     scanCursor: scanCursor ?? null,
     scanDone,
   };
@@ -645,7 +645,7 @@ async function nextVpassScanCursor(
     ? null
     : encodeVpassCursor(
         {
-          v: 1,
+          v: 2,
           scanCursor: state.scanCursor,
           scanDone: false,
         },
@@ -657,12 +657,12 @@ async function encodeVpassCursor(value: VpassBackfillCursor, key: string): Promi
   assertVpassCursor(value);
   const payload = base64Url(new TextEncoder().encode(JSON.stringify(value)));
   const signature = base64Url(await hmacSha256(key, new TextEncoder().encode(payload)));
-  return `vpass-scan-v1.${payload}.${signature}`;
+  return `vpass-scan-v2.${payload}.${signature}`;
 }
 
 async function decodeVpassCursor(value: string, key: string): Promise<VpassBackfillCursor> {
   const parts = value.split(".");
-  if (parts.length !== 3 || parts[0] !== "vpass-scan-v1") {
+  if (parts.length !== 3 || parts[0] !== "vpass-scan-v2") {
     throw new ImportError(400, "cursor_invalid");
   }
   const expected = base64Url(await hmacSha256(key, new TextEncoder().encode(parts[1]!)));
@@ -694,7 +694,7 @@ function assertVpassCursor(value: VpassBackfillCursor): void {
   const hasRecord = value.recordKey !== undefined;
   const hasTransfer = value.transfer !== undefined;
   if (
-    value.v !== 1 ||
+    value.v !== 2 ||
     typeof value.scanDone !== "boolean" ||
     !scanStateValid ||
     hasRecord !== hasTransfer ||

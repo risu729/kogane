@@ -19,14 +19,48 @@ describe("Vpass raw-evidence service binding", () => {
         reason: "worker_invocation_limit",
         artifactCount: 6,
         nextOffset: 5,
-        continuation: "vpass-transfer-v1.fixture.signature",
+        continuation: "vpass-transfer-v2.fixture.signature",
       },
       202,
     );
     await expect(importStoredRecord(fetcher, RECORD_KEY)).resolves.toEqual({
       status: "deferred",
-      continuation: "vpass-transfer-v1.fixture.signature",
+      continuation: "vpass-transfer-v2.fixture.signature",
     });
+  });
+
+  test("rejects stale transfer and scan cursor envelopes", async () => {
+    await expect(
+      importStoredRecord(
+        jsonFetcher(
+          {
+            source: "vpass",
+            recordKey: RECORD_KEY,
+            status: "deferred",
+            reason: "worker_invocation_limit",
+            artifactCount: 6,
+            nextOffset: 5,
+            continuation: "vpass-transfer-v1.fixture.signature",
+          },
+          202,
+        ),
+        RECORD_KEY,
+      ),
+    ).rejects.toThrow("raw_evidence_importer_invalid_response");
+    await expect(
+      backfillStoredRuns(
+        jsonFetcher({
+          source: "vpass",
+          scannedObjectCount: 0,
+          importedRecordCount: 0,
+          skippedRecordCount: 0,
+          deferredRecordCount: 0,
+          failedRecordCount: 0,
+          nextCursor: "vpass-scan-v1.fixture.signature",
+          truncated: true,
+        }),
+      ),
+    ).rejects.toThrow("raw_evidence_importer_invalid_response");
   });
 
   test("durably requeues every deferred continuation until the Service Binding seals", async () => {
@@ -40,7 +74,7 @@ describe("Vpass raw-evidence service binding", () => {
         reason: "worker_invocation_limit",
         artifactCount: 6,
         nextOffset: 5,
-        continuation: "vpass-transfer-v1.fixture.signature",
+        continuation: "vpass-transfer-v2.fixture.signature",
       },
       {
         source: "vpass",
@@ -75,14 +109,14 @@ describe("Vpass raw-evidence service binding", () => {
       {
         v: 1,
         recordKey: RECORD_KEY,
-        continuation: "vpass-transfer-v1.fixture.signature",
+        continuation: "vpass-transfer-v2.fixture.signature",
       },
     ]);
     await expect(continueStoredRecord(importer, queue, sent.shift())).resolves.toBe("sealed");
     expect(sent).toEqual([]);
     expect(requests).toEqual([
       { recordKey: RECORD_KEY },
-      { recordKey: RECORD_KEY, continuation: "vpass-transfer-v1.fixture.signature" },
+      { recordKey: RECORD_KEY, continuation: "vpass-transfer-v2.fixture.signature" },
     ]);
   });
 
@@ -140,7 +174,7 @@ describe("Vpass raw-evidence service binding", () => {
       skippedRecordCount: 0,
       deferredRecordCount: 0,
       failedRecordCount: 0,
-      nextCursor: "vpass-scan-v1.fixture.signature",
+      nextCursor: "vpass-scan-v2.fixture.signature",
       truncated: true,
       result: {
         source: "vpass",
@@ -160,7 +194,7 @@ describe("Vpass raw-evidence service binding", () => {
       skippedRecordCount: 0,
       deferredRecordCount: 0,
       failedRecordCount: 0,
-      nextCursor: "vpass-scan-v1.fixture.signature",
+      nextCursor: "vpass-scan-v2.fixture.signature",
       truncated: true,
     });
   });

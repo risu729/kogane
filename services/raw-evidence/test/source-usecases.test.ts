@@ -1,7 +1,7 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { canonicalJson, sha256Hex } from "../src/canonical";
-import { descriptorSha256 as vPointDescriptorSha256 } from "../../collector-r2-importer/src/v-point";
+import { centralDescriptorSha256 } from "../../collector-r2-importer/src/central";
 import fixture from "./fixtures/source-usecases.v1.json";
 
 const AUTH = "Bearer test.test-secret-at-least-twenty-chars";
@@ -259,73 +259,164 @@ beforeAll(async () => {
 });
 
 describe("sanitized source-usecase contract", () => {
-  it("represents a Vpass multi-card bundle with complete per-card units", async () => {
+  it("accepts Vpass descriptor semantics through D1 terminal reports and seal", async () => {
     const value = cases.vpassMultiCard;
-    const { runId } = await createRun(value.sourceId, value.sessionId);
+    const { runId } = await createRun(value.sourceId, value.sessionId, "card-001-vpass-r2-v2");
+    const unitId = await unit(runId, "card", "card-001");
+    const group = await expectPost(`/v1/runs/${runId}/page-groups`, {
+      pageGroupKey: "202609",
+      declaredPageCount: 1,
+    });
     const artifacts: InventoryItem[] = [];
-    for (const cardKey of value.cardKeys) {
-      const unitId = await unit(runId, "card", cardKey);
-      artifacts.push(
-        await catalogue(runId, `${cardKey}/snapshot.json`, value.snapshotBody, {
-          fetchUnitId: unitId,
-          artifactRole: "collector_derived",
-          payloadFidelity: "transformed",
-          containerKind: "single",
-          lineageDisposition: "source_not_retained_for_security",
-          dataset: "statement-snapshot",
-          formatId: "vpass-snapshot-json",
-          formatVersion: "vpass-central-sanitized-v1",
-          declaredMediaType: "application/json",
-          mediaTypeBasis: "operator",
-          storage: await vpassStorageOrigin(`${cardKey}/snapshot.json`),
-          transformSteps: [
-            {
-              stepIndex: 0,
-              stepKind: "redacted",
-              transformerId: "vpass-json-sanitizer",
-              transformerVersion: "v1",
-            },
-            {
-              stepIndex: 1,
-              stepKind: "reencoded",
-              transformerId: "vpass-json-sanitizer",
-              transformerVersion: "v1",
-            },
-          ],
-        }),
-      );
-      artifacts.push(
-        await catalogue(runId, `${cardKey}/manifest.json`, value.manifestBody, {
-          fetchUnitId: unitId,
-          artifactRole: "collector_derived",
+    for (const [artifactKey, body, fields] of [
+      [
+        "card-list.json",
+        value.snapshotBody,
+        {
+          artifactRole: "sanitized_provider_capture",
           payloadFidelity: "transformed",
           lineageDisposition: "source_not_retained_for_security",
+          dataset: "card-list",
+          formatId: "vpass-card-list-json",
+        },
+      ],
+      [
+        "months/202609/top-000.json",
+        value.snapshotBody,
+        {
+          artifactRole: "provider_response",
+          payloadFidelity: "transformed",
+          lineageDisposition: "source_bytes_not_available",
+          dataset: "statement-page",
+          formatId: "vpass-statement-page-json",
+          pageGroupId: Number(group.pageGroupId),
+          pageIndex: 0,
+        },
+      ],
+      [
+        "manifest.json",
+        value.manifestBody,
+        {
+          artifactRole: "collector_manifest",
+          payloadFidelity: "generated",
+          lineageDisposition: "source_bytes_not_available",
           dataset: "collector-manifest",
           formatId: "vpass-collector-manifest-json",
-          formatVersion: "vpass-central-sanitized-v1",
-          declaredMediaType: "application/json",
-          mediaTypeBasis: "operator",
-          storage: await vpassStorageOrigin(`${cardKey}/manifest.json`),
-          transformSteps: [
-            {
-              stepIndex: 0,
-              stepKind: "redacted",
-              transformerId: "vpass-json-sanitizer",
-              transformerVersion: "v1",
-            },
-            {
-              stepIndex: 1,
-              stepKind: "reencoded",
-              transformerId: "vpass-json-sanitizer",
-              transformerVersion: "v1",
-            },
-          ],
-        }),
-      );
-      await unitTerminal(unitId, 2);
+        },
+      ],
+    ] as const) {
+      const object = await upload(runId, body);
+      const descriptor = {
+        artifactKey,
+        fetchUnitId: unitId,
+        containerKind: "single",
+        formatVersion: "vpass-central-sanitized-v1",
+        declaredMediaType: "application/json",
+        mediaTypeBasis: "operator",
+        fetchedAtMs: 1_788_534_060_000,
+        fetchedAtBasis: "manifest",
+        sequence: artifacts.length,
+        storage: await vpassStorageOrigin(artifactKey),
+        transformSteps:
+          fields.payloadFidelity === "generated"
+            ? []
+            : fields.artifactRole === "provider_response"
+              ? [
+                  {
+                    stepIndex: 0,
+                    stepKind: "extracted",
+                    transformerId: "vpass-json-sanitizer",
+                    transformerVersion: "v1",
+                  },
+                ]
+              : [
+                  {
+                    stepIndex: 0,
+                    stepKind: "redacted",
+                    transformerId: "vpass-json-sanitizer",
+                    transformerVersion: "v1",
+                  },
+                  {
+                    stepIndex: 1,
+                    stepKind: "reencoded",
+                    transformerId: "vpass-json-sanitizer",
+                    transformerVersion: "v1",
+                  },
+                ],
+        ...fields,
+        sha256: object.sha256,
+        byteSize: object.byteSize,
+      };
+      const response = await expectPost(`/v1/runs/${runId}/artifacts`, descriptor);
+      const expected = await centralDescriptorSha256(descriptor);
+      expect(response.descriptorSha256).toBe(expected);
+      artifacts.push({ artifactKey, sha256: object.sha256, descriptorSha256: expected });
     }
+    await unitTerminal(unitId, artifacts.length);
     await terminal(runId, artifacts.length);
-    await seal(runId, artifacts, "vpass");
+    await seal(runId, artifacts, "vpass-descriptor-contract");
+    const stored = await env.DB.prepare(`
+      SELECT artifact_key, artifact_role, payload_fidelity, lineage_disposition
+      FROM fetch_artifacts WHERE fetch_run_id = ? ORDER BY sequence
+    `)
+      .bind(runId)
+      .all();
+    expect(stored.results).toEqual([
+      {
+        artifact_key: "card-list.json",
+        artifact_role: "sanitized_provider_capture",
+        payload_fidelity: "transformed",
+        lineage_disposition: "source_not_retained_for_security",
+      },
+      {
+        artifact_key: "months/202609/top-000.json",
+        artifact_role: "provider_response",
+        payload_fidelity: "transformed",
+        lineage_disposition: "source_bytes_not_available",
+      },
+      {
+        artifact_key: "manifest.json",
+        artifact_role: "collector_manifest",
+        payload_fidelity: "generated",
+        lineage_disposition: "source_bytes_not_available",
+      },
+    ]);
+  });
+
+  it("accepts a Vpass collector error through D1 failed terminal reports and seal", async () => {
+    const { runId } = await createRun("vpass", "fixture-vpass-error", "run-vpass-r2-v2");
+    const unitId = await unit(runId, "card", "run");
+    const artifact = await catalogue(runId, "error.json", '{"status":"failed"}', {
+      fetchUnitId: unitId,
+      artifactRole: "collector_error",
+      payloadFidelity: "generated",
+      containerKind: "single",
+      lineageDisposition: "source_bytes_not_available",
+      dataset: "collector-error",
+      formatId: "vpass-collector-error-json",
+      formatVersion: "vpass-central-sanitized-v1",
+      declaredMediaType: "application/json",
+      mediaTypeBasis: "operator",
+      fetchedAtMs: 1_788_534_060_000,
+      fetchedAtBasis: "manifest",
+      sequence: 0,
+      storage: await vpassStorageOrigin("error.json"),
+      transformSteps: [],
+    });
+    await unitTerminal(unitId, 1, "failed", "collector-failed");
+    await terminal(runId, 1, "failed");
+    await seal(runId, [artifact], "vpass-error-descriptor-contract");
+    const stored = await env.DB.prepare(`
+      SELECT artifact_role, payload_fidelity, lineage_disposition
+      FROM fetch_artifacts WHERE fetch_run_id = ?
+    `)
+      .bind(runId)
+      .first();
+    expect(stored).toEqual({
+      artifact_role: "collector_error",
+      payload_fidelity: "generated",
+      lineage_disposition: "source_bytes_not_available",
+    });
   });
 
   it("seals SBI Securities partial evidence without losing a failed scope", async () => {
@@ -1084,7 +1175,7 @@ describe("sanitized source-usecase contract", () => {
       ],
     };
     const response = await expectPost(`/v1/runs/${runId}/artifacts`, descriptor);
-    const expected = await vPointDescriptorSha256(descriptor);
+    const expected = await centralDescriptorSha256(descriptor);
     expect(response.descriptorSha256).toBe(expected);
     await terminal(runId, 1);
     await seal(

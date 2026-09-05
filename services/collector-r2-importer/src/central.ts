@@ -1,6 +1,7 @@
 import type { CentralInventoryItem } from "./types";
 
 type JsonObject = Record<string, unknown>;
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 export class CentralClient {
   readonly #service: Fetcher;
@@ -135,6 +136,84 @@ export class CentralClient {
     if (!isRecord(parsed)) throw new Error("central_response_invalid");
     return parsed;
   }
+}
+
+/**
+ * Hash the exact storage-origin descriptor shape persisted by raw-evidence
+ * after its schema parser has supplied optional origin fields and empty
+ * collection defaults. Importers use this before staging inventory so a
+ * parser-normalization drift fails closed before any terminal report or seal.
+ * HTTP, file, and email importers must add their nested origin normalization
+ * here before sharing this helper.
+ */
+export async function centralDescriptorSha256(descriptor: JsonObject): Promise<string> {
+  const {
+    http,
+    storage,
+    file,
+    email,
+    fetchUnitId,
+    pageGroupId,
+    pageIndex,
+    ranges,
+    transformSteps,
+    relations,
+    ...fields
+  } = descriptor;
+  const normalized = {
+    ...fields,
+    fetchUnitId: fetchUnitId ?? null,
+    pageGroupId: pageGroupId ?? null,
+    pageIndex: pageIndex ?? null,
+    origins: {
+      http: http ?? null,
+      storage: normalizedStorageOrigin(storage),
+      file: file ?? null,
+      email: email ?? null,
+    },
+    ranges: ranges ?? [],
+    transformSteps: transformSteps ?? [],
+    relations: relations ?? [],
+  };
+  const bytes = new TextEncoder().encode(canonicalJson(normalized as unknown as JsonValue));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", ownedArrayBuffer(bytes)));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function normalizedStorageOrigin(value: unknown): JsonValue {
+  if (value === undefined || value === null) return null;
+  if (!isRecord(value)) throw new TypeError("storage origin must be an object");
+  return {
+    storageKind: value.storageKind,
+    containerName: value.containerName,
+    objectKeyTemplate: value.objectKeyTemplate,
+    objectKeyFingerprint: value.objectKeyFingerprint,
+    fingerprintKeyVersion: value.fingerprintKeyVersion,
+    redactionVersion: value.redactionVersion,
+    objectVersion: value.objectVersion ?? null,
+    etag: value.etag ?? null,
+    lastModifiedAtMs: value.lastModifiedAtMs ?? null,
+    lastModifiedAtBasis: value.lastModifiedAtBasis ?? null,
+  } as unknown as JsonValue;
+}
+
+function canonicalJson(value: JsonValue): string {
+  return JSON.stringify(canonical(value));
+}
+
+function canonical(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, child]) => [key, canonical(child)]),
+    );
+  }
+  if (typeof value === "number" && !Number.isSafeInteger(value)) {
+    throw new TypeError("canonical numbers must be safe integers");
+  }
+  return value;
 }
 
 function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {

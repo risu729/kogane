@@ -18,9 +18,11 @@ Vpassはprivate R2の`vpass/YYYY/MM/DD/<run-id>/`をread-only outboxとして扱
 
 source snapshotに埋め込まれたprovider JSONは、card reference、session、cookie、token、認証識別子を再帰的かつ決定的に固定sentinelへ置換し、中央には再encodeしたartifactだけを送る。storage originも具体的なobject keyでなくHMAC fingerprintだけを保持する。検証済みの非機密な明細fieldはprovider responseとして保持するが、認証値・card識別値・source本文をログや運用出力へ出さない。
 
-1 requestあたり5 artifactを転送し、開始時に完全inventory digestを固定する。継続tokenはrecord、中央run/unit/page groups、inventory、offsetをHMACで束縛し、最後のchunkでのみterminal reportとsealを行う。run terminal reportの`producerVersion`はmutableなdeployment revisionでなく固定`vpass-r2-v1`であるため、異なるImporter deploymentからのreplayも同じimmutable reportへ収束する。deployment revisionは失敗attemptの監査だけに残る。backfillのscan cursorも署名し、対象recordがsealされるまでsource R2 cursorを進めない。
+1 requestあたり5 artifactを転送し、開始時に完全inventory digestを固定する。継続tokenはrecord、中央run/unit/page groups、inventory、offsetをHMACで束縛し、最後のchunkでのみterminal reportとsealを行う。run terminal reportの`producerVersion`はmutableなdeployment revisionでなく固定`vpass-r2-v2`であるため、異なるImporter deploymentからのreplayも同じimmutable reportへ収束する。v2ではcollector manifest/errorを中央のgenerated roleへ、明細pageをprovider responseへ、認証面を除去したcard/month contextをsanitized provider captureへ厳密に分類する。また中央parserが補うstorage originのnullable fieldを含めてdescriptorを正規化する。これにより旧v1の失敗runと衝突せず、全R2を新しいsource contractへ再走査できる。deployment revisionは失敗attemptの監査だけに残る。transfer tokenとbackfill scan cursorもv2 envelopeで署名し、対象recordがsealされるまでsource R2 cursorを進めない。
 
 2026-09-05に本文、key、個別hashを出さないread-only集計監査を行った。355 objectsはmanifest 80、snapshot 78、error 3、旧discrete page等194で、JSON content typeとcustom metadataは契約内だった。card-scoped successは78、旧partial errorは3、旧run-level success manifestは2で、embedded JSON envelope 2,383件は構造上parse可能だった。最終validatorを全83 terminal recordsへread-only適用し、全件がstrict source validationを通過した。この監査はsource R2を変更していない。
+
+2026-09-07の再監査では379 objects、95 terminal records（card manifest 90、error 3、legacy manifest 2）を確認し、監査前後の件数は一致した。3形状から各1件を選んだstrict validatorもすべて通過した。本文、key、個別hash、card値、session値は出力せず、source R2へのwrite/deleteも行っていない。
 
 ## MyJCBの境界
 
@@ -309,9 +311,9 @@ backfill前後に新しいscheduled runが作られた場合は、その新規ob
 
 ### Vpassの本番適用
 
-このPRはdeployしない。本番適用時は中央migration `0013`と`verify-vpass-route.sh`を先に適用し、`collector-r2-vpass` credentialを`RAW_EVIDENCE_TOKEN_VPASS`として同期してImporter v16をdeployする。health確認後に`kogane-vpass-raw-evidence-import`とdead-letter queueを作成し、その後にだけVpass collectorのQueue producer/consumer・Service Binding版をdeployする。consumerは1 messageにつき1 chunkだけ処理し、`deferred`の署名continuationを再enqueueして最終`sealed`まで進める。Importer failureまたは不正responseはdelivery失敗としてretryし、完了扱いにしない。GitHub Actions cronは追加せず、既存Worker cronを維持する。
+このPRはdeployしない。本hotfixにはmigrationを追加せず、既に適用済みの中央migration `0013`と`verify-vpass-route.sh`を維持する。`collector-r2-vpass` credentialを`RAW_EVIDENCE_TOKEN_VPASS`として同期してImporter v17をdeployし、health確認後にVpass collectorをdeployする。既存queueとdead-letter queueは再作成しない。consumerは1 messageにつき1 chunkだけ処理し、`deferred`の署名continuationを再enqueueして最終`sealed`まで進める。Importer failureまたは不正responseはdelivery失敗としてretryし、完了扱いにしない。GitHub Actions cronは追加せず、既存Worker cronを維持する。
 
-backfill前にsource R2をobject種別件数と集約checksumだけで監査し、本文、key、個別hash、card値、session値を出力しない。`poc/vpass-json/scripts/backfill-raw-evidence.sh`で最初のterminal recordをsealするcanary後、全件を完走する。失敗recordでは署名cursorが対象の手前に残るため、validatorを緩和せず原因を解消して同じ位置から再開する。完了後にcursorを削除した状態から再走査し、中央run/seal/artifact件数が不変であること、source R2の事前・事後inventoryが一致することを確認する。失敗時もmigrationとsource R2は削除・rollbackしない。
+backfill前にsource R2をobject種別件数と集約checksumだけで監査し、本文、key、個別hash、card値、session値を出力しない。v1の永続cursorはv2 envelopeでは再開できないため、旧cursor fileだけを退避または削除して先頭から再走査する。失敗した中央v1 runは不変証跡として残す。`poc/vpass-json/scripts/backfill-raw-evidence.sh`で最初のterminal recordをsealするcanary後、全件を完走する。失敗recordでは署名cursorが対象の手前に残るため、validatorを緩和せず原因を解消して同じ位置から再開する。完了後にcursorを削除した状態から再走査し、中央run/seal/artifact件数が不変であること、source R2の事前・事後inventoryが一致することを確認する。失敗時もmigrationとsource R2は削除・rollbackしない。
 
 ### 2026-09-05 本番検証
 
