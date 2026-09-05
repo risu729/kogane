@@ -167,6 +167,140 @@ describe("collector R2 importer routes", () => {
     expect(stalledResponse.status).toBe(409);
   });
 
+  test("the SMBC Direct backfill page scans exactly one source object", async () => {
+    const calls: R2ListOptions[] = [];
+    const bucket = {
+      list: async (options: R2ListOptions) => {
+        calls.push(options);
+        if (options.cursor === "next") {
+          return { objects: [], truncated: false } as unknown as R2Objects;
+        }
+        return {
+          objects: [{
+            key: "raw/smbc-direct/2026/09/05/123e4567-e89b-42d3-a456-426614174000/balance.raw.json.sjis",
+          }],
+          truncated: true,
+          cursor: "next",
+        } as unknown as R2Objects;
+      },
+    } as unknown as R2Bucket;
+    const response = await worker.fetch(
+      new Request("https://importer.internal/v1/smbc-direct/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket,
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ prefix: "raw/smbc-direct/", limit: 1 }]);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toMatchObject({
+      source: "smbc-direct",
+      scannedObjectCount: 1,
+      skippedManifestCount: 1,
+      deferredManifestCount: 0,
+      failedManifestCount: 0,
+      truncated: true,
+    });
+    expect(body.nextCursor).toBeString();
+    expect(body.nextCursor).toStartWith("smbc-direct-v2.");
+
+    const resumed = await worker.fetch(
+      new Request("https://importer.internal/v1/smbc-direct/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cursor: body.nextCursor, limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket,
+      ),
+    );
+    expect(resumed.status).toBe(200);
+    expect(calls[1]).toEqual({ prefix: "raw/smbc-direct/", limit: 1, cursor: "next" });
+  });
+
+  test("the SMBC Direct route rejects invalid limits and cursor states before listing", async () => {
+    const bucket = {
+      list: async () => {
+        throw new Error("list_must_not_be_called");
+      },
+    } as unknown as R2Bucket;
+    const validTransfer = await smbcDirectCursor({
+      v: 2,
+      scanCursor: null,
+      scanDone: true,
+      manifestKey:
+        "raw/smbc-direct/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
+      offset: 10,
+    });
+    const invalidBodies = [
+      { limit: 2 },
+      { cursor: "not-an-smbc-cursor", limit: 1 },
+      { cursor: "smbc-direct-v1.e30", limit: 1 },
+      {
+        cursor: await smbcDirectCursor({
+          v: 2,
+          scanCursor: null,
+          scanDone: false,
+        }),
+        limit: 1,
+      },
+      {
+        cursor: await smbcDirectCursor({
+          v: 2,
+          scanCursor: null,
+          scanDone: true,
+          manifestKey:
+            "raw/smbc-direct/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
+          offset: 0,
+        }),
+        limit: 1,
+      },
+      {
+        cursor: await smbcDirectCursor({
+          v: 2,
+          scanCursor: null,
+          scanDone: true,
+          manifestKey:
+            "raw/smbc-direct/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
+          offset: 11,
+        }),
+        limit: 1,
+      },
+      { cursor: tamperSmbcDirectCursor(validTransfer, { scanDone: false }), limit: 1 },
+      {
+        cursor: tamperSmbcDirectCursor(validTransfer, {
+          manifestKey:
+            "raw/smbc-direct/2026/09/05/223e4567-e89b-42d3-a456-426614174000/manifest.json",
+        }),
+        limit: 1,
+      },
+      { cursor: tamperSmbcDirectCursor(validTransfer, { offset: 20 }), limit: 1 },
+    ];
+    for (const body of invalidBodies) {
+      const response = await worker.fetch(
+        new Request("https://importer.internal/v1/smbc-direct/backfill-page", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }) as Parameters<typeof worker.fetch>[0],
+        environment(
+          {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
+          {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket,
+        ),
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json() as unknown).toEqual({
+        error: body.limit === 2 ? "backfill_limit_must_be_one" : "cursor_invalid",
+      });
+    }
+  });
+
   test("the GLOBAL PASS backfill page scans exactly one source object", async () => {
     const calls: R2ListOptions[] = [];
     const bucket = {
@@ -612,6 +746,47 @@ function globalPassCursor(value: unknown): string {
     .replaceAll("/", "_").replace(/=+$/u, "")}`;
 }
 
+async function smbcDirectCursor(value: unknown): Promise<string> {
+  const payload = base64Url(new TextEncoder().encode(JSON.stringify(value)));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode("collector-r2-smbc-direct." + "d".repeat(32)),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = new Uint8Array(await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(`smbc-direct-v2.${payload}`),
+  ));
+  return `smbc-direct-v2.${payload}.${base64Url(signature)}`;
+}
+
+function tamperSmbcDirectCursor(
+  cursor: string,
+  changes: Record<string, unknown>,
+): string {
+  const [prefix, payload, signature] = cursor.split(".");
+  const parsed = JSON.parse(new TextDecoder().decode(base64UrlBytes(payload!))) as Record<string, unknown>;
+  return `${prefix}.${base64Url(new TextEncoder().encode(JSON.stringify({
+    ...parsed,
+    ...changes,
+  })))}.${signature}`;
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+function base64UrlBytes(value: string): Uint8Array {
+  const padded = value.replaceAll("-", "+").replaceAll("_", "/")
+    .padEnd(Math.ceil(value.length / 4) * 4, "=");
+  return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+}
+
 function environment(
   bucket: R2Bucket,
   sonyBucket: R2Bucket = {} as R2Bucket,
@@ -621,6 +796,7 @@ function environment(
   myJcbBucket: R2Bucket = {} as R2Bucket,
   vPointBucket: R2Bucket = {} as R2Bucket,
   vPointPayBucket: R2Bucket = {} as R2Bucket,
+  smbcDirectBucket: R2Bucket = {} as R2Bucket,
 ): Env {
   return {
     SBI_SNAPSHOTS: {} as R2Bucket,
@@ -632,8 +808,9 @@ function environment(
     MYJCB_SNAPSHOTS: myJcbBucket,
     VPOINT_SNAPSHOTS: vPointBucket,
     VPOINT_PAY_SNAPSHOTS: vPointPayBucket,
+    SMBC_DIRECT_SNAPSHOTS: smbcDirectBucket,
     RAW_EVIDENCE: {} as Fetcher,
-    IMPORTER_VERSION: "collector-r2-importer-v13",
+    IMPORTER_VERSION: "collector-r2-importer-v14",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_VC: `collector-r2-sbi-vc.${"v".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SONY: `collector-r2-sony-bank.${"o".repeat(32)}`,
@@ -643,6 +820,7 @@ function environment(
     GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST: "a".repeat(64),
     RAW_EVIDENCE_TOKEN_MYJCB: `collector-r2-myjcb.${"j".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_VPOINT: `collector-r2-v-point.${"p".repeat(32)}`,
+    RAW_EVIDENCE_TOKEN_SMBC_DIRECT: "collector-r2-smbc-direct." + "d".repeat(32),
     ORIGIN_FINGERPRINT_KEY: "ab".repeat(32),
   };
 }

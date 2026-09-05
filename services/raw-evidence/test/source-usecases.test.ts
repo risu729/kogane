@@ -10,6 +10,7 @@ const FINGERPRINT_VERSION = "fixture-hmac-v1";
 const SBI_STORAGE_TEMPLATE = "raw/sbi-securities/{date}/{run-id}/{artifact}.json";
 const MOBILE_SUICA_STORAGE_TEMPLATE = "raw/mobile-suica/{date}/{run-id}/{artifact}";
 const GLOBAL_PASS_STORAGE_TEMPLATE = "raw/prestia-globalpass/{date}/{run-id}/{artifact}";
+const SMBC_DIRECT_STORAGE_TEMPLATE = "raw/smbc-direct/{date}/{run-id}/{artifact}";
 const SBI_FINGERPRINT_VERSION = "collector-r2-v1";
 const cases = fixture.cases;
 
@@ -111,6 +112,19 @@ async function globalPassStorageOrigin(artifactKey: string) {
     objectKeyTemplate: GLOBAL_PASS_STORAGE_TEMPLATE,
     objectKeyFingerprint: await sha256Hex(
       new TextEncoder().encode(`fixture-global-pass:${artifactKey}`),
+    ),
+    fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
+    redactionVersion: "v1",
+  };
+}
+
+async function smbcDirectStorageOrigin(artifactKey: string) {
+  return {
+    storageKind: "r2",
+    containerName: "kogane-smbc-direct-backfill-poc",
+    objectKeyTemplate: SMBC_DIRECT_STORAGE_TEMPLATE,
+    objectKeyFingerprint: await sha256Hex(
+      new TextEncoder().encode(`fixture-smbc-direct:${artifactKey}`),
     ),
     fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
     redactionVersion: "v1",
@@ -888,6 +902,92 @@ describe("sanitized source-usecase contract", () => {
       SELECT outcome FROM ingestion_attempts WHERE fetch_run_id = ? ORDER BY id
     `).bind(runId).all<{ outcome: string }>();
     expect(attempts.results.map((row) => row.outcome)).toEqual(["incomplete", "complete"]);
+  });
+
+  it("seals SMBC Direct transformed evidence with a run-level manifest", async () => {
+    const { runId } = await createRun(
+      "smbc-bank",
+      "fixture-smbc-direct-descriptor",
+      "account-history-smbc-direct-r2-v1",
+    );
+    const unitId = await unit(runId, "collection", "account");
+    const rawKey = "transactions/20260101-20260131.raw.json.sjis";
+    const normalizedKey = "transactions/20260101-20260131.normalized.json";
+    const raw = await catalogue(runId, rawKey, "fixture raw bytes", {
+      fetchUnitId: unitId,
+      dataset: "transactions-raw",
+      formatId: "smbc-direct-transactions-json-shift-jis",
+      formatVersion: "smbc-direct-backfill-worker-poc-v1",
+      declaredMediaType: "application/json",
+      mediaTypeBasis: "manifest",
+      storage: await smbcDirectStorageOrigin(rawKey),
+    });
+    const normalized = await catalogue(runId, normalizedKey, "fixture normalized bytes", {
+      artifactRole: "collector_derived",
+      payloadFidelity: "transformed",
+      lineageDisposition: "linked",
+      fetchUnitId: unitId,
+      dataset: "transactions-normalized",
+      formatId: "smbc-direct-transactions-normalized-json",
+      formatVersion: "smbc-direct-backfill-worker-poc-v1",
+      declaredMediaType: "application/json",
+      mediaTypeBasis: "manifest",
+      storage: await smbcDirectStorageOrigin(normalizedKey),
+      transformSteps: [{
+        stepIndex: 0,
+        stepKind: "generated",
+        transformerId: "smbc-direct-backfill-worker",
+        transformerVersion: "smbc-direct-backfill-worker-poc-v1",
+      }],
+      relations: [{
+        parentArtifactKey: rawKey,
+        relation: "input",
+        transformerId: "smbc-direct-backfill-worker",
+        transformerVersion: "smbc-direct-backfill-worker-poc-v1",
+      }],
+    });
+    const manifest = await catalogue(runId, "manifest.json", "fixture manifest bytes", {
+      artifactRole: "collector_manifest",
+      payloadFidelity: "generated",
+      lineageDisposition: "not_applicable",
+      dataset: "collector-manifest",
+      formatId: "smbc-direct-collector-manifest-json",
+      formatVersion: "smbc-direct-backfill-worker-poc-v1",
+      declaredMediaType: "application/json",
+      mediaTypeBasis: "manifest",
+      storage: await smbcDirectStorageOrigin("manifest.json"),
+    });
+    await unitTerminal(unitId, 2);
+    await terminal(runId, 3);
+    await seal(runId, [raw, normalized, manifest], "smbc-direct-descriptors");
+
+    const descriptors = await env.DB.prepare(`
+      SELECT artifact_key, fetch_unit_id, artifact_role, payload_fidelity, lineage_disposition
+      FROM fetch_artifacts WHERE fetch_run_id = ? ORDER BY artifact_key
+    `).bind(runId).all();
+    expect(descriptors.results).toEqual([
+      {
+        artifact_key: "manifest.json",
+        fetch_unit_id: null,
+        artifact_role: "collector_manifest",
+        payload_fidelity: "generated",
+        lineage_disposition: "not_applicable",
+      },
+      {
+        artifact_key: normalizedKey,
+        fetch_unit_id: unitId,
+        artifact_role: "collector_derived",
+        payload_fidelity: "transformed",
+        lineage_disposition: "linked",
+      },
+      {
+        artifact_key: rawKey,
+        fetch_unit_id: unitId,
+        artifact_role: "provider_response",
+        payload_fidelity: "exact",
+        lineage_disposition: "not_applicable",
+      },
+    ]);
   });
 
   it("uses resumable staged inventory above the direct-seal item limit", async () => {

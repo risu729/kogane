@@ -43,13 +43,27 @@ printf '%s\n' '<item-id>' > /home/risu/.local/state/kogane/smbc-direct-bitwarden
 ```
 
 `SESSION_ENCRYPTION_KEY` は初回同期時に32 byteで生成し、ローカルの `smbc-direct-session-encryption-key` とWorker secretへ保存する。
+第三引数の管理token fileは未作成ならowner-onlyで生成され、`ADMIN_TRIGGER_TOKEN`として同期される。認証値は標準出力へ出さない。
+
+## 中央raw-evidenceへの転送
+
+terminal manifestを保存した直後、`RAW_EVIDENCE_IMPORTER` Service Bindingで中央Importerをbest effort呼び出す。中央転送の失敗はsource収集結果を成功へ昇格・失敗へ降格させず、保存済みR2を後から再送できる。管理Bearer付き`POST /backfill-raw-evidence?limit=1`は1回につきsource R2を1 objectだけ走査し、大きいrunはopaque cursorで10 artifactずつ継続する。
+
+historical outboxはローカルのowner-only token fileとcursor fileを使って再送する。
+
+```bash
+poc/smbc-direct-backfill-worker/scripts/backfill-raw-evidence.sh
+```
+
+scriptは1 pageずつ処理し、失敗manifestでは停止する。cursorはrepository外へ原子的に保存し、全件完了時に削除する。source R2は転送後も削除しない。GitHub Actions cron、Queue、追加scheduled triggerは使わない。
 
 ## Cloudflare resources
 
 - Worker: `kogane-smbc-direct-backfill-poc`
 - Durable Object: `SmbcBackfillSession`
 - private R2: `kogane-smbc-direct-backfill-poc`
-- Worker secrets: `SMBC_CREDENTIAL_JSON`, `SESSION_ENCRYPTION_KEY`
+- Worker secrets: `SMBC_CREDENTIAL_JSON`, `SESSION_ENCRYPTION_KEY`, `ADMIN_TRIGGER_TOKEN`
+- Service Binding: `RAW_EVIDENCE_IMPORTER` → `kogane-collector-r2-importer`
 - Worker-level Cloudflare Access: productionとpreviewを保護（preview自体は無効）
 
 Access未認証requestはWorker側でも403にする。POSTは同一originとcustom action headerを要求する。

@@ -12,6 +12,7 @@ import {
 } from "./smbc";
 import { runPrefix, storeBytes, storeJson, storeManifest } from "./storage";
 import { isResumable } from "./progress";
+import { importStoredRun } from "./raw-evidence";
 import type {
   AuthenticatedSession,
   BackfillManifest,
@@ -331,6 +332,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           await this.ctx.storage.put({ progress: completed, artifacts, failureCodes });
           await this.ctx.storage.delete("session");
           await this.ctx.storage.deleteAlarm();
+          await this.#importRawEvidence(completed.manifestKey!, completed.runId!);
           diagnostic.finish(completed.phase === "success" ? "success" : "partial");
           console.log(JSON.stringify({
             message: "smbc_backfill_complete",
@@ -399,6 +401,9 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     await this.ctx.storage.put({ progress: failed, artifacts, failureCodes });
     await this.ctx.storage.delete("session");
     await this.ctx.storage.deleteAlarm();
+    if (failed.manifestKey && failed.runId) {
+      await this.#importRawEvidence(failed.manifestKey, failed.runId);
+    }
     if (failed.runId) createDiagnostics("smbc-direct", failed.runId).finish(failed.phase === "partial" ? "partial" : "failed");
     console.error(JSON.stringify({
       message: "smbc_backfill_failed",
@@ -458,6 +463,27 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     return parseCredentials(this.env.SMBC_CREDENTIAL_JSON);
   }
 
+  async #importRawEvidence(manifestKey: string, runId: string): Promise<void> {
+    try {
+      const result = await importStoredRun(this.env.RAW_EVIDENCE_IMPORTER, manifestKey);
+      console.log(JSON.stringify({
+        message: "smbc_raw_evidence_import",
+        runId,
+        centralStatus: result.status,
+        artifactCount: result.artifactCount,
+        ...(result.status === "sealed"
+          ? { centralRunId: result.centralRunId }
+          : { centralDeferredReason: result.reason, centralNextOffset: result.nextOffset }),
+      }));
+    } catch {
+      console.error(JSON.stringify({
+        message: "smbc_raw_evidence_import_failed",
+        runId,
+        errorCode: "raw_evidence_import_failed",
+      }));
+    }
+  }
+
   async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const previous = this.#operationTail;
     let release!: () => void;
@@ -473,14 +499,48 @@ export class SmbcBackfillSession extends DurableObject<Env> {
   }
 }
 
-function classifyError(error: unknown): string {
-  if (error instanceof DOMException) return `crypto_${error.name.toLowerCase()}`;
-  if (error instanceof Error) {
-    const code = error.message.toLowerCase();
-    if (/^[a-z0-9_]+$/u.test(code)) return code;
-  }
+const FIXED_COLLECTION_FAILURE_CODES = new Set([
+  "_formid_field_missing",
+  "_token_field_missing",
+  "account_detail_body_missing",
+  "account_detail_body_too_large",
+  "aifcdt3_form_missing",
+  "aifcdtl_form_missing",
+  "balance_body_missing",
+  "balance_body_too_large",
+  "balance_invalid",
+  "balance_value_missing",
+  "continue_session_body_missing",
+  "continue_session_body_too_large",
+  "deposits_total_invalid",
+  "directheaderform_form_missing",
+  "tpaltop_form_missing",
+  "transaction_amount_invalid",
+  "transaction_balance_invalid",
+  "transaction_count_invalid",
+  "transaction_date_invalid",
+  "transaction_direction_invalid",
+  "transactions_body_missing",
+  "transactions_body_too_large",
+  "transactions_json_invalid",
+  "transactions_rejected",
+  "transactions_service_time_unavailable",
+  "transactions_stop_flag_invalid",
+  "withdrawals_total_invalid",
+]);
+const COLLECTION_HTTP_FAILURE_CODE =
+  /^(?:account_detail|balance|continue_session|transactions)_http_[1-5][0-9]{2}$/u;
+
+export function classifyError(error: unknown): string {
+  if (error instanceof DOMException) return "crypto_error";
   if (error instanceof SyntaxError) return "json_parse_failed";
   if (error instanceof TypeError) return "type_error";
+  if (error instanceof Error) {
+    const code = error.message.toLowerCase();
+    if (FIXED_COLLECTION_FAILURE_CODES.has(code) || COLLECTION_HTTP_FAILURE_CODE.test(code)) {
+      return code;
+    }
+  }
   return "unexpected_error";
 }
 

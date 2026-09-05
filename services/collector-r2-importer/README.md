@@ -1,6 +1,18 @@
 # Collector R2 importer
 
-各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suica、GLOBAL PASS、MyJCB、V Pointに対応する。
+各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suica、GLOBAL PASS、MyJCB、V Point、SMBC Directに対応する。
+
+## SMBC Directの境界
+
+SMBC Directはprivate R2の`raw/smbc-direct/YYYY/MM/DD/<run-id>/`以下をcanonical source `smbc-bank`へ取り込む。専用credential `collector-r2-smbc-direct`、既存source alias、storage policyをmigration `0013`で分離し、他collectorのtokenは受理しない。`POST /v1/smbc-direct/import-run`はmanifest 1件を、`POST /v1/smbc-direct/backfill-page`はprefixを1 objectずつ走査する。collectorの管理Bearer付き`POST /backfill-raw-evidence?limit=1`からService Bindingで呼び、source R2は成功時も変更・削除しない。
+
+Importerは中央runを作る前にmanifest/payload/failureのexact schema、日付とUUIDを含むprefix、月次range、artifact順序・件数、terminal statusとfailure補集合を検証する。全prefix inventory、content type、exact custom metadata、manifest宣言SHA-256、R2 native SHA-256（存在時）、再計算SHA-256を一致させる。Shift_JIS raw JSONはdecode後の意味だけでなく同じencodingへのround tripも検証し、残高・入出金明細・期間・件数・合計をnormalized JSONと突合する。rawの`accntHstCount`、manifest artifact件数、実row件数を三者一致させ、観測済みの入出金flag `1`/`2`と停止flag `0`以外はfail closedとする。銀行レスポンスの日付境界は実際の`YYYY年M月D日`表現とlegacy compact表現を厳密に暦日へ正規化する。raw bytesはprovider responseとしてそのまま中央へ保存し、normalized artifactは`collector_derived / transformed / linked`として対応するraw artifactへのinput lineageを付ける。manifestはrun-level artifactとし、unit terminal件数にはdata artifactだけ、run terminal件数にはmanifestを含む全artifactを宣言する。failure codeはcollectorが生成できる固定語彙とbounded HTTP status pattern以外を受理しない。
+
+manifest込み13 artifact以上の即時importは全source validation後、中央stateを作らず`202 deferred`を返す。historical backfillは完全inventoryを先に固定し、1 request最大10 artifactを転送する。opaque cursorはversioned HMACでR2 scan位置、manifest、10-artifact境界のoffsetを束縛し、改変、manifest差替え、offset jump、旧unsigned cursorを中央書込み前に拒否する。最終chunkだけterminal reportとsealを行う。同じmanifestの再送は同じ中央run、artifact、inventoryへ冪等に収束する。terminal reportの`producerVersion`はdeploy revisionではなく固定のsource契約`smbc-direct-r2-v1`を使うため、Importer更新後の再走査でもimmutable reportと競合しない。deploy revisionは失敗・中断attemptの`ingestClientVersion`だけに記録する。GitHub Actions cron、Queue、追加scheduled triggerは導入せず、既存collector cronも変更しない。
+
+### private R2の構造監査（2026-09-05）
+
+本文、金融値、object key、個別hash、secretを表示せず、読み取り専用bindingで構造だけを監査した。1 manifest、189 objectsで、data artifactはraw 94件とnormalized 94件だった。うちraw transaction artifactは93件、rowは合計1,069件で、`accntHstCount`・manifest宣言・実row件数の不一致は0件、観測した入出金flagは`1`/`2`、停止flagは`0`だけだった。manifest/artifactのprefix、size、宣言SHA-256、custom metadata、content type、完全inventoryに不一致はなく、legacy objectにnative SHA-256がないことも明示的に確認した。最終validatorを同じread-only bindingで適用し、全189 objectsのstrict validation後に中央stateを作らず、想定どおりstaged backfill待ちへ遷移した。source R2へのwrite/deleteは行っていない。再実行は`bun run audit:smbc-direct-r2`で行い、local-only workerがremote R2を読み取って集約結果だけを出す。
 
 ## 再走査できる不変run
 
@@ -139,6 +151,7 @@ SBI新生銀行を有効化する本番作業は、必ず次の順で直列実�
 - `RAW_EVIDENCE_TOKEN_GLOBAL_PASS`: `collector-r2-global-pass`専用Bearer
 - `RAW_EVIDENCE_TOKEN_MYJCB`: `collector-r2-myjcb`専用Bearer
 - `RAW_EVIDENCE_TOKEN_VPOINT`: `collector-r2-v-point`専用Bearer
+- `RAW_EVIDENCE_TOKEN_SMBC_DIRECT`: `collector-r2-smbc-direct`専用Bearer
 - `ORIGIN_FINGERPRINT_KEY`: storage keyを不可逆HMACへ変換する共通鍵
 
 3. target importerのdeploy成功後にSBI新生collectorをdeployする。これはService Bindingとdaily cronを有効化するため、`0 21 * * *`の直前を避け、次回cronまでに以降の確認を完了する。
@@ -276,6 +289,7 @@ poc/mobile-suica-worker/scripts/backfill-raw-evidence.sh
 poc/globalpass-worker/scripts/backfill-raw-evidence.sh
 poc/myjcb-worker/scripts/backfill-raw-evidence.sh
 poc/vpoint-worker/scripts/backfill-raw-evidence.sh
+poc/smbc-direct-backfill-worker/scripts/backfill-raw-evidence.sh
 ```
 
 source R2はbackfill完了後も自動削除しない。
@@ -292,6 +306,17 @@ source R2はbackfill完了後も自動削除しない。
 6. cursorが完了時に削除された状態から再走査し、中央run/seal/artifact件数が不変であることを確認する。attempt/reuse記録は増えてよい。source R2の事前・事後inventoryは一致しなければならない。
 
 backfill前後に新しいscheduled runが作られた場合は、その新規objectとImporterによる変更を混同しない。Importerはsource R2へwrite/deleteしないが、collectorの既存Cronは別途動作するためである。既知の重複実行対策はこのrolloutに便乗して推測実装せず、collector lockの独立変更として扱う。
+
+### SMBC Directの本番適用
+
+このPRはdeployせず、既存SMBC Direct Cronも変更しない。本番適用時は次を直列に行う。
+
+1. 中央raw-evidenceへmigration `0013`を適用して`kogane-ingest`をdeployし、`verify-smbc-direct-route.sh`で専用route/policy/aliasが各1件であることだけを確認する。
+2. `collector-r2-smbc-direct` credentialを生成し、Importerへ`RAW_EVIDENCE_TOKEN_SMBC_DIRECT`として同期した後、`collector-r2-importer-v14`をdeployする。他source tokenは流用しない。
+3. SMBC Direct collectorをService Binding追加版へdeployする。既存scheduled triggerは追加・削除・変更せず、deploy前後で同一であることを確認する。
+4. source R2の事前inventoryをobject件数、manifest件数、集約checksumだけで記録する。object key、個別hash、本文、金融値は出力しない。最初のmanifestをbounded backfillでsealし、中央のrun/seal/artifact件数だけをcanary確認する。
+5. `poc/smbc-direct-backfill-worker/scripts/backfill-raw-evidence.sh`を完走し、全terminal manifestが完全inventoryを持ってsealされたことを確認する。partial/failed manifestもprovider成功へ昇格させない。
+6. cursorが完了時に削除された状態から再走査し、中央run/seal/artifact件数が不変であること、source R2の事前・事後inventoryが一致することを確認する。attempt/reuse記録は増えてよい。
 
 ### 2026-09-05 本番検証
 

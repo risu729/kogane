@@ -375,6 +375,14 @@ Workers Web Cryptoによるassertion生成、Money Forward ME側へのOAuth遷�
 
 採用PoCはCloudflare Workers + 既存TAMIA VPC bindingである。収集処理は1 Access identity・1 Durable Object・1実行に直列化し、同じセッションを複数runから同時使用しない。通常Workers egress失敗とTAMIA成功のA/Bが取れたため、2つのSMBC hostだけをTAMIAへ固定する。
 
+## Layer A raw-evidence取込（2026-09-05）
+
+private R2をdurable outboxとして残したまま、中央`kogane-ingest`へ取り込むstrict importerを実装した。manifest、balance/transactionsのraw Shift_JIS JSONとnormalized JSON、failure補集合、prefix内の完全inventory、exact metadata、native checksum（存在時）と再計算SHA-256を中央state作成前に検証する。rawとnormalizedの残高・期間・明細・合計も相互照合し、未知fieldや説明できない欠落・追加objectはfail closedにする。
+
+中央canonical sourceは`smbc-direct`ではなく既存registryの`smbc-bank`である。専用credential `collector-r2-smbc-direct`だけにこのproducer/source routeを許可し、storage originは具体的なobject keyを保存せず、review済みtemplateと不可逆fingerprintで表現する。大きなhistorical runは完全inventoryを固定して10 artifactずつ継続し、同じmanifestの再送は冪等に収束する。source R2へのwrite/delete、GitHub Actions cron、Queue、追加scheduled triggerは行わない。
+
+読み取り専用監査では、1件のterminal manifestと189 objectsを確認し、raw/normalized data artifactは各94件だった。prefix、size、metadata、content type、宣言checksum、再計算checksumに不一致はなかった。実R2の全objectを最終validatorへ通し、中央stateを作らない即時deferまで確認した。本文、金融値、object key、個別hash、認証値は記録していない。
+
 ## コストと自動化見込み
 
 | 案 | 実装コスト | 自動化レベル | データ範囲 | 判断 |
