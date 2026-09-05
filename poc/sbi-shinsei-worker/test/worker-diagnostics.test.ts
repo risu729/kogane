@@ -75,6 +75,20 @@ describe("Shinsei Worker failure logging", () => {
     expect(logs).toContainEqual(expect.objectContaining({ event: "sbi-shinsei-collection-failure", diagnostics: { stage: "container-request", httpStatus: 503 } }));
   });
 
+  test("SDK HTTP500 reason survives in the strict source manifest without leaking body text", async () => {
+    responseStatus = 500;
+    handoff = "Failed to start container: synthetic-secret";
+    const { response, logs, stored } = await trigger();
+    expect(response.status).toBe(503);
+    expect(logs).toContainEqual(expect.objectContaining({ event: "sbi-shinsei-container-response-failure", httpStatus: 500, reason: "startup-failed" }));
+    const manifest = JSON.parse(new TextDecoder().decode(stored.at(-1)!.body));
+    expect(Object.keys(manifest.failures[0]).sort()).toEqual(["errorType", "message", "operation"]);
+    expect(manifest.failures[0].errorType).toBe("ContainerResponseError");
+    expect(manifest.failures[0].message).toContain("responseReason=startup-failed");
+    expect(JSON.stringify(logs)).not.toContain("synthetic-secret");
+    expect(JSON.stringify(manifest)).not.toContain("synthetic-secret");
+  });
+
   test("a validated prefix with a failed later read logs partial collection and terminal outcomes", async () => {
     const fixtures = await Bun.file(`${import.meta.dir}/fixtures/core-responses.json`).json();
     handoff = JSON.stringify({ ok: true, responses: { topBalances: JSON.stringify(fixtures.topBalances), balanceSummary: JSON.stringify(fixtures.balanceSummary) }, failure: { dataset: "exchange-rate", stage: "exchange-rate-http-503" } });

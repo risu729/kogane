@@ -219,3 +219,10 @@ text, so platform-level disconnections can be distinguished from application
 cleanup without exposing connection details.
 Run `bun run test:relay` for loopback WebSocket tests of normal closure, delayed
 handshakes, shutdown, and timeout fallback; these require only the root dev dependency.
+
+Container lifecycle hooks retain bounded exit codes and fixed stop/error reasons.
+HTTP 500 diagnostics distinguish the SDK's startup, disconnected-transport and
+proxy-error envelopes using a maximum 2 KiB, one-second read; response text is
+discarded. Unknown or unreadable responses stay unclassified. A 500 alone does
+not prove that the Node process crashed; source completion and central import
+remain separate outcomes. These diagnostic changes do not retry collection.

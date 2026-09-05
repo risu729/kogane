@@ -1,8 +1,49 @@
 import { describe, expect, test } from "bun:test";
-import { BrowserCollectionError, browserDiagnostics, ContainerResponseError, failure, manifestFailure } from "../src/diagnostics";
+import { BrowserCollectionError, browserDiagnostics, ContainerResponseError, containerLifecycleDetails, containerResponseReason, containerStopDetails, failure, manifestFailure } from "../src/diagnostics";
 import { collectSbiShinsei } from "../src/collector";
 
 describe("safe SBI Shinsei diagnostics", () => {
+  test("classifies only bounded SDK HTTP500 envelopes and keeps provider text private", async () => {
+    for (const [body, reason] of [
+      ["Container suddenly disconnected, try again", "transport-disconnected"],
+      ["Failed to start container: secret provider error", "startup-failed"],
+      ["Error proxying request to container: secret provider error", "proxy-failed"],
+      ["secret Container suddenly disconnected, try again", "unclassified-response"],
+      ["Container suddenly disconnected, try again secret", "unclassified-response"],
+      ["unknown secret provider body", "unclassified-response"],
+      ["Failed to start container: " + "x".repeat(2048), "unclassified-response"],
+    ]) {
+      expect(await containerResponseReason(new Response(body, { status: 500 }))).toBe(reason!);
+    }
+    const untouched = new Response("secret success payload");
+    expect(await containerResponseReason(untouched)).toBe("unclassified-response");
+    expect(await untouched.text()).toBe("secret success payload");
+    const locked = new Response("secret", { status: 500 });
+    locked.body!.getReader();
+    expect(await containerResponseReason(locked)).toBe("unclassified-response");
+    let canceled = false;
+    const never = new Response(new ReadableStream({ cancel() { canceled = true; throw new Error("secret"); } }), { status: 500 });
+    expect(await containerResponseReason(never, 5)).toBe("unclassified-response");
+    expect(canceled).toBe(true);
+    const broken = new Response(new ReadableStream({ start(controller) { controller.error(new Error("secret")); } }), { status: 500 });
+    expect(await containerResponseReason(broken)).toBe("unclassified-response");
+    expect(failure("collect", new ContainerResponseError(500, "secret"), "container-request").diagnostics?.responseReason).toBeUndefined();
+  });
+  test("container lifecycle keeps only exact known reasons and bounded exit codes", () => {
+    expect(containerLifecycleDetails(new Error("container exited with unexpected exit code: 1"))).toEqual({ errorType: "Error", reason: "process-exit", exitCode: 1 });
+    expect(containerLifecycleDetails(new Error("runtime signalled the container to exit: 137"))).toEqual({ errorType: "Error", reason: "runtime-signal", exitCode: 137 });
+    expect(containerLifecycleDetails(new Error("Network connection lost."))).toEqual({ errorType: "Error", reason: "transport-disconnected" });
+    expect(containerStopDetails({ exitCode: 137, reason: "runtime_signal" })).toEqual({ exitCode: 137, reason: "runtime_signal" });
+    for (const message of ["container exited with unexpected exit code: 999", "secret container exited with unexpected exit code: 1", "container exited with unexpected exit code: 1 token=secret", "constructor", "token=secret"]) {
+      expect(containerLifecycleDetails(new Error(message))).toEqual({ errorType: "Error", reason: "unknown-lifecycle-error" });
+    }
+    expect(containerStopDetails({ exitCode: "137", reason: "token=secret" })).toEqual({ reason: "unknown-stop" });
+    expect(containerStopDetails({ exitCode: 256, reason: "exit" })).toEqual({ reason: "exit" });
+    const hostile = new Error();
+    Object.defineProperty(hostile, "message", { get() { throw new Error("secret"); } });
+    expect(containerLifecycleDetails(hostile)).toEqual({ errorType: "Error", reason: "unknown-lifecycle-error" });
+    expect(containerStopDetails(new Proxy({}, { get() { throw new Error("secret"); } }))).toEqual({ reason: "unknown-stop" });
+  });
   test("retains actual failed browser stage and authentication attempt from the handoff", async () => {
     let caught: unknown;
     try {

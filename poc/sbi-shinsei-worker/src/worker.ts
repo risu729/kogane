@@ -1,6 +1,6 @@
 import { startTcpRelay } from "./tcp-relay";
-import { ContainerResponseError, emitDiagnostic, failure, safeErrorType, stageDiagnostics } from "./diagnostics";
-import { Container, getContainer } from "@cloudflare/containers";
+import { ContainerResponseError, containerLifecycleDetails, containerResponseReason, containerStopDetails, emitDiagnostic, failure, safeErrorType, stageDiagnostics } from "./diagnostics";
+import { Container, getContainer, type StopParams } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { collectSbiShinsei } from "./collector";
 import { liveReadsEnabled } from "./read-allowlist";
@@ -36,14 +36,15 @@ export class SbiShinseiCollectorContainer extends Container<Env> {
     emitDiagnostic("log", { event: "sbi-shinsei-container-start" });
   }
 
-  override onStop(): void {
-    emitDiagnostic("log", { event: "sbi-shinsei-container-stop" });
+  override onStop(params: StopParams): void {
+    const details = containerStopDetails(params);
+    emitDiagnostic(details.exitCode === 0 ? "log" : "warn", { event: "sbi-shinsei-container-stop", ...details });
   }
 
   override onError(error: unknown): void {
     emitDiagnostic("error", {
       event: "sbi-shinsei-container-error",
-      errorType: safeErrorType(error),
+      ...containerLifecycleDetails(error),
     });
   }
 }
@@ -151,7 +152,14 @@ async function runCollection(env: Env): Promise<CollectionResult> {
             relayUrl: relayUrl.href,
           }),
           }));
-          if (!response.ok) throw new ContainerResponseError(response.status);
+          if (!response.ok) {
+            const reason = await containerResponseReason(response);
+            emitDiagnostic("error", {
+              event: "sbi-shinsei-container-response-failure", runId,
+              httpStatus: response.status, reason,
+            });
+            throw new ContainerResponseError(response.status, reason);
+          }
           return response;
         });
         stage = "container-response";
