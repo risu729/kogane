@@ -1,10 +1,8 @@
 // Entry point.
 //
-// One QueryClient, configured so that nothing this client shows outlives the
-// response it came from: every view refetches on mount, nothing is written to
-// localStorage or sessionStorage, and no financial figure is persisted
-// anywhere in the browser. React Query's cache is an in-memory read cache for
-// the life of the tab and nothing more.
+// One in-memory QueryClient. Views refetch on mount/focus, while cached data
+// remains visible with a notice during refresh or after a refresh failure.
+// No financial figure is written to localStorage or sessionStorage.
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -16,14 +14,18 @@ import "./styles.css";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Always stale: an operator checking a parser against the bytes should
-      // never be shown a figure the store may have moved past.
+      // Immediately eligible for refresh; this does not imply that the
+      // underlying collector or observation itself is current.
       staleTime: 0,
       refetchOnWindowFocus: true,
       // A 404 from this API means the row does not exist, which retrying
       // cannot change. Only a transport or server failure is worth a retry.
       retry: (failureCount: number, error: Error) => {
-        if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+        if (
+          error instanceof ApiError &&
+          error.status >= 400 &&
+          error.status < 500
+        ) {
           return false;
         }
         return failureCount < 1;

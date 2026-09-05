@@ -1,126 +1,95 @@
-// Artifacts — one row per retrieved thing, with the observation counts each
-// artifact has produced across all four kinds.
-//
-// The counts include observations from superseded parse runs, because they
-// count what was derived from these bytes, not what is current. The artifact
-// detail page is where that distinction is drawn.
-
-import type { ReactNode } from "react";
-import { useArtifacts } from "../api.ts";
+import { useState, type ReactNode } from "react";
+import { useArtifacts, type ArtifactRow } from "../api.ts";
 import { Link } from "../router.tsx";
-import { Nullable, Panel, QueryBoundary, RawLink, Sha } from "../ui.tsx";
-
+import { Nullable, Panel, QueryBoundary, RawLink } from "../ui.tsx";
+import { pageWindow } from "../filters.ts";
+import { Pager } from "./ViewControls.tsx";
 export function ArtifactsPage(): ReactNode {
   const query = useArtifacts();
   return (
     <>
       <div className="page-head">
-        <h1>Artifacts</h1>
+        <h1>原本</h1>
         <p className="lede">
-          Layer A: the bytes a source actually sent, content-addressed by SHA-256.
-          Evidence is immutable — a wrong parser is superseded, an artifact never
-          is.
+          取得時の資料を保存しています。各原本から、解析された記録とその履歴を確認できます。
         </p>
       </div>
-
       <QueryBoundary
         query={query}
-        label="artifacts"
+        label="原本"
         isEmpty={(data) => data.artifacts.length === 0}
-        empty="No artifacts ingested. Run bun run demo to populate the store."
+        empty="保存された原本がまだありません。"
       >
-        {(data) => (
-          <Panel
-            id="artifacts"
-            title="Fetch artifacts"
-            count={`${String(data.artifacts.length)} rows`}
-            note="Observation counts are per kind and include every parse run over the bytes, superseded ones included."
-          >
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th scope="col" className="num">
-                      <span className="th-label">#</span>
-                    </th>
-                    <th scope="col">
-                      <span className="th-label">source</span>
-                    </th>
-                    <th scope="col">
-                      <span className="th-label">dataset</span>
-                    </th>
-                    <th scope="col">
-                      <span className="th-label">url</span>
-                    </th>
-                    <th scope="col">
-                      <span className="th-label">mime</span>
-                    </th>
-                    <th scope="col">
-                      <span className="th-label">fetched_at</span>
-                    </th>
-                    <th scope="col">
-                      <span className="th-label">sha256</span>
-                    </th>
-                    <th scope="col" className="num">
-                      <span className="th-label">parse runs</span>
-                    </th>
-                    <th scope="col" className="num">
-                      <span className="th-label">tx</span>
-                    </th>
-                    <th scope="col" className="num">
-                      <span className="th-label">bal</span>
-                    </th>
-                    <th scope="col" className="num">
-                      <span className="th-label">pos</span>
-                    </th>
-                    <th scope="col" className="num">
-                      <span className="th-label">val</span>
-                    </th>
-                    <th scope="col">
-                      <span className="th-label">bytes</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.artifacts.map((artifact) => (
-                    <tr key={artifact.id}>
-                      <th scope="row" className="num">
-                        <Link to={`/artifacts/${String(artifact.id)}`}>#{artifact.id}</Link>
-                      </th>
-                      <td>{artifact.source_id}</td>
-                      <td>
-                        <Nullable value={artifact.dataset} />
-                      </td>
-                      <td className="trunc" title={artifact.url ?? undefined}>
-                        <Nullable value={artifact.url} />
-                      </td>
-                      <td>{artifact.mime}</td>
-                      <td className="nowrap">{artifact.fetched_at}</td>
-                      <td>
-                        <Link to={`/artifacts/${String(artifact.id)}`}>
-                          <Sha value={artifact.sha256} />
-                        </Link>
-                      </td>
-                      <td className="num">{artifact.parse_run_count}</td>
-                      <td className="num">{artifact.transaction_count}</td>
-                      <td className="num">{artifact.balance_count}</td>
-                      <td className="num">{artifact.position_count}</td>
-                      <td className="num">{artifact.valuation_count}</td>
-                      <td>
-                        <RawLink sha256={artifact.sha256}>raw ↗</RawLink>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="footnote" style={{ padding: "0.5rem 0.75rem" }}>
-              tx / bal / pos / val are the four observation tables this store
-              defines: transaction, balance, position, valuation.
-            </p>
-          </Panel>
-        )}
+        {(data) => <ArtifactTable rows={data.artifacts} />}
       </QueryBoundary>
     </>
+  );
+}
+function ArtifactTable({ rows }: { rows: ArtifactRow[] }): ReactNode {
+  const [page, setPage] = useState(0);
+  const view = pageWindow(rows, page);
+  return (
+    <Panel
+      id="artifacts"
+      title="保存された原本"
+      count={`${rows.length}件`}
+      note="解析件数には旧解析の記録も含みます。現行の取引件数とは異なる場合があります。"
+    >
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              {[
+                "原本",
+                "取得元",
+                "資料の種類",
+                "取得日時",
+                "解析された記録",
+                "原本データ",
+              ].map((label) => (
+                <th scope="col" key={label}>
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {view.rows.map((artifact) => (
+              <tr key={artifact.id}>
+                <th scope="row">
+                  <Link to={`/artifacts/${artifact.id}`}>
+                    原本 #{artifact.id}
+                  </Link>
+                </th>
+                <td>{artifact.source_id}</td>
+                <td>
+                  <Nullable value={artifact.dataset} />
+                  <div className="dim">{artifact.mime}</div>
+                </td>
+                <td>{artifact.fetched_at}</td>
+                <td>
+                  取引 {artifact.transaction_count} / 残高{" "}
+                  {artifact.balance_count}
+                  <br />
+                  保有 {artifact.position_count} / 評価{" "}
+                  {artifact.valuation_count}
+                  <div className="dim">解析 {artifact.parse_run_count}回</div>
+                </td>
+                <td>
+                  <RawLink sha256={artifact.sha256}>原本を開く ↗</RawLink>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager {...view} total={rows.length} onChange={setPage} />
+      <details className="detail-disclosure">
+        <summary>保存と表示の仕組み</summary>
+        <p>
+          取得URL・SHA-256・解析方法は各原本の詳細で確認できます。原本データは画面に埋め込まず、専用の保護された経路で開きます。現在はAPIから受信した全件を50件ずつ表示しています。
+        </p>
+      </details>
+    </Panel>
   );
 }

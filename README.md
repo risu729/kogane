@@ -10,6 +10,7 @@ different rules.
 - [Raw evidence store](docs/raw-store.md)
 - [Observation layer](docs/observations.md)
 - [Evidence browser](docs/evidence-browser.md)
+- [Frontend stack and API handoff](docs/frontend.md)
 - [Authenticated collectors](docs/authenticated-collectors.md)
 - [Credential delivery](docs/credentials.md)
 - [Existing tools and reuse](docs/tooling.md)

@@ -1,5 +1,10 @@
 # Evidence browser
 
+The current local frontend has Japanese navigation, responsive layouts,
+explicit connection/data classification, and an isolated synthetic preview.
+See [Frontend foundation](frontend.md) for the adopted stack, commands, and
+the production API handoff. Production D1/R2 connectivity is still pending.
+
 A read-only web view over layers A and B — raw evidence and observations,
 nothing above them. Its purpose is narrow: let a human check what a parser
 produced against the exact bytes it produced them from, and walk the
@@ -636,7 +641,7 @@ should ever depend on it.
   local entrypoint should open its own connection read-only instead of
   calling `openStore()`. Either would make read-only a property of the
   process rather than only of the handler.
-- Pagination and filtering. Every endpoint returns everything, and no
+- Server-side pagination and filtering. Every endpoint returns everything, and no
   query in `src/queries.ts` carries a `LIMIT`. The demo store is 28
   observations and a real store is not: both live collectors run daily on
   a Cloudflare Cron trigger (`poc/sbi-securities-worker`,
@@ -645,7 +650,9 @@ should ever depend on it.
   The transaction list sorts and filters in the browser now, which helps a
   reader and bounds nothing: the whole result set is still serialized,
   sent, and held in memory. The bound belongs in SQL, with a
-  source/account/date filter beside it. Neither is implemented.
+  source/account/date filter beside it. The frontend now has source/account/date
+  filters and renders transactions in bounded pages; it still downloads the full
+  API result, so the server-side bound remains unimplemented.
 - Whether a deployed instance should serve raw bytes through the Worker at
   all, or hand out a short-lived R2 URL instead. Serving through the
   Worker means the Worker streams financial documents; handing out a URL

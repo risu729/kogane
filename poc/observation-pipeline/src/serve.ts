@@ -5,10 +5,13 @@
 // network. A deployed version belongs behind Cloudflare Access or the same
 // bearer token as the ingestion API — see docs/evidence-browser.md.
 
-import { existsSync, realpathSync } from "node:fs";
-import { join, sep } from "node:path";
+import { existsSync, realpathSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { createApi } from "./api.ts";
 import { openStore } from "./store.ts";
+import { ingestFixtures } from "./ingest.ts";
+import { runParsers } from "./parse.ts";
 
 const CLIENT_DIR = join(import.meta.dir, "..", "web", "dist");
 const HOSTNAME = "127.0.0.1";
@@ -25,7 +28,9 @@ type ClientResult =
 
 /** A resolved path is inside the client directory, separator included. */
 function isInside(candidate: string): boolean {
-  return candidate === CLIENT_DIR || candidate.startsWith(`${CLIENT_DIR}${sep}`);
+  return (
+    candidate === CLIENT_DIR || candidate.startsWith(`${CLIENT_DIR}${sep}`)
+  );
 }
 
 function clientHandler(): (request: Request) => Promise<ClientResult> {
@@ -56,7 +61,10 @@ function clientHandler(): (request: Request) => Promise<ClientResult> {
           return { kind: "rejected", reason: "unresolvable path" };
         }
         if (!isInside(resolved)) {
-          return { kind: "rejected", reason: "symlink outside the client build" };
+          return {
+            kind: "rejected",
+            reason: "symlink outside the client build",
+          };
         }
         return { kind: "response", response: new Response(file) };
       }
@@ -81,7 +89,30 @@ function clientHandler(): (request: Request) => Promise<ClientResult> {
   };
 }
 
-const store = openStore();
+// Preview always creates a fresh store from committed synthetic fixtures.
+// It cannot relabel an existing store, even if state/ contains real evidence.
+const demo = process.argv.includes("--demo");
+const temporaryRoot = resolve(tmpdir());
+const previewDir = demo
+  ? mkdtempSync(join(temporaryRoot, "kogane-preview-"))
+  : undefined;
+const store = openStore(previewDir);
+if (previewDir !== undefined) {
+  process.on("exit", () => {
+    store.db.close();
+    const target = resolve(previewDir);
+    if (
+      dirname(target) === temporaryRoot &&
+      basename(target).startsWith("kogane-preview-")
+    ) {
+      rmSync(target, { recursive: true, force: true });
+    }
+  });
+  process.on("SIGINT", () => process.exit(0));
+  process.on("SIGTERM", () => process.exit(0));
+  ingestFixtures(store, join(import.meta.dir, "..", "fixtures"));
+  runParsers(store);
+}
 // Defence in depth for the read-only rule. The API refuses a write method
 // before routing, but that is one middleware over a read-write handle; this
 // makes a write impossible at the database rather than merely unrouted.
@@ -89,6 +120,7 @@ store.db.exec("PRAGMA query_only = ON");
 
 const serveClient = clientHandler();
 const app = createApi(store, {
+  ...(demo ? { dataClassification: "synthetic" as const } : {}),
   serveClient: async (request) => {
     const result = await serveClient(request);
     if (result.kind === "response") return result.response;
@@ -114,11 +146,7 @@ const PORT = Number(process.env["PORT"] ?? 8787);
  * hostname re-resolves to 127.0.0.1: the browser would treat it as
  * same-origin and could read every balance here. Checking Host closes that.
  */
-const ALLOWED_HOSTS = new Set([
-  `127.0.0.1:${PORT}`,
-  `localhost:${PORT}`,
-  `[::1]:${PORT}`,
-]);
+const ALLOWED_HOSTS = new Set<string>();
 
 const server = Bun.serve({
   port: PORT,
@@ -128,14 +156,23 @@ const server = Bun.serve({
     if (host !== null && !ALLOWED_HOSTS.has(host)) {
       return new Response(
         `403 forbidden: this server answers only ${[...ALLOWED_HOSTS].join(", ")}\n`,
-        { status: 403, headers: { "content-type": "text/plain; charset=utf-8" } },
+        {
+          status: 403,
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        },
       );
     }
     return app.fetch(request);
   },
 });
 
+for (const host of ["127.0.0.1", "localhost", "[::1]"]) {
+  ALLOWED_HOSTS.add(`${host}:${server.port}`);
+}
+
 console.log(`kogane evidence browser on http://${HOSTNAME}:${server.port}/`);
 if (!existsSync(CLIENT_DIR)) {
-  console.log("client not built: run `bun run build`, or `bun run dev` for hot reload");
+  console.log(
+    "client not built: run `bun run build`, or `bun run dev` for hot reload",
+  );
 }

@@ -1,210 +1,36 @@
-// The client's view of the read-only JSON API.
-//
-// Every interface here mirrors an interface exported by src/queries.ts, field
-// for field and nullability for nullability. They are restated rather than
-// imported because src/queries.ts pulls in bun:sqlite through src/store.ts,
-// which has no business in a browser bundle. When a query shape changes, this
-// file is the one place the client has to follow it.
-//
-export interface Warnings {
-  /** Parsed warning strings; empty when the stored value could not be read. */
-  list: string[];
-  /** The stored text, so an unreadable value can be shown rather than hidden. */
-  raw: string | null;
-  parsed: boolean;
-}
-
-// Amounts are never widened here. `amount_minor` is carried as the integer
-// minor-unit value the API sent and `amount_text` as the provider's verbatim
-// string; both go to src/money.ts untouched.
-
+// Shared HTTP contracts keep the UI independent of the local store implementation.
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import type { ObservationKind } from "./router.tsx";
-
-export type { ObservationKind };
-
-// ── response shapes (mirroring src/queries.ts) ───────────────────────
-
-export interface Overview {
-  counts: { table: string; rows: number }[];
-  sources: { id: string; provider: string; ingestion: string; artifact_count: number }[];
-  fetchRuns: {
-    id: number;
-    source_id: string;
-    tool: string;
-    external_run_id: string | null;
-    status: string;
-    started_at: string;
-    completed_at: string | null;
-  }[];
-  parseRuns: {
-    id: number;
-    fetch_artifact_id: number;
-    parser_name: string;
-    parser_version: string;
-    parsed_at: string;
-    status: string;
-    warnings: Warnings;
-    error: string | null;
-    superseded_by_parse_run_id: number | null;
-  }[];
-}
-
-export interface TransactionRow {
-  id: number;
-  source_id: string;
-  source_account: string;
-  as_of: string | null;
-  amount_minor: string | null;
-  amount_text: string | null;
-  currency: string | null;
-  description: string | null;
-  counterparty: string | null;
-  external_id: string | null;
-  status: string | null;
-  parser: string;
-}
-
-export interface BalanceRow {
-  id: number;
-  source_id: string;
-  source_account: string;
-  metric: string;
-  instrument: string;
-  amount_minor: string | null;
-  amount_text: string | null;
-  as_of: string | null;
-  observed_at: string | null;
-  parser: string;
-}
-
-export interface BalanceHistoryRow extends BalanceRow {
-  superseded_by_parse_run_id: number | null;
-  parse_status: string;
-}
-
-export interface PositionRow {
-  id: number;
-  source_id: string;
-  source_account: string;
-  security_code: string;
-  security_name: string | null;
-  market: string | null;
-  quantity_text: string;
-  quantity_scale: number;
-  currency: string | null;
-  as_of: string | null;
-  parser: string;
-}
-
-export interface ValuationRow {
-  id: number;
-  source_id: string;
-  source_account: string;
-  subject: string;
-  metric: string;
-  amount_minor: string | null;
-  amount_text: string | null;
-  currency: string;
-  as_of: string | null;
-  parser: string;
-}
-
-export interface PositionWithValuations {
-  position: PositionRow;
-  valuations: ValuationRow[];
-}
-
-export interface ArtifactRow {
-  id: number;
-  source_id: string;
-  dataset: string | null;
-  url: string | null;
-  mime: string;
-  fetched_at: string;
-  sha256: string;
-  parse_run_count: number;
-  transaction_count: number;
-  balance_count: number;
-  position_count: number;
-  valuation_count: number;
-}
-
-export interface ObservationRef {
-  kind: ObservationKind;
-  id: number;
-  summary: string;
-}
-
-export interface ParseRunDetail {
-  id: number;
-  parser_name: string;
-  parser_version: string;
-  parsed_at: string;
-  status: string;
-  error: string | null;
-  warnings: Warnings;
-  superseded_by_parse_run_id: number | null;
-  observations: ObservationRef[];
-}
-
-export interface ArtifactDetail {
-  artifact: {
-    id: number;
-    source_id: string;
-    dataset: string | null;
-    url: string | null;
-    method: string | null;
-    http_status: number | null;
-    mime: string;
-    fetched_at: string;
-    sha256: string;
-    size: number;
-    content_type: string;
-    fetch_run_id: number;
-    tool: string;
-    external_run_id: string | null;
-    fetch_status: string;
-    started_at: string;
-    completed_at: string | null;
-  };
-  parseRuns: ParseRunDetail[];
-}
-
-export interface Provenance {
-  parse_run_id: number;
-  parser_name: string;
-  parser_version: string;
-  parsed_at: string;
-  parse_status: string;
-  error: string | null;
-  warnings: Warnings;
-  superseded_by_parse_run_id: number | null;
-  artifact_id: number;
-  source_id: string;
-  dataset: string | null;
-  url: string | null;
-  mime: string;
-  fetched_at: string;
-  sha256: string;
-  size: number;
-  content_type: string;
-  fetch_run_id: number;
-  tool: string;
-  external_run_id: string | null;
-  fetch_status: string;
-  started_at: string;
-  completed_at: string | null;
-}
-
-export interface ObservationDetail {
-  kind: ObservationKind;
-  row: Record<string, unknown>;
-  extra: unknown;
-  extraRaw: string;
-  extraParsed: boolean;
-  provenance: Provenance | undefined;
-}
+import { validApiResponse } from "../../shared/api-validation.ts";
+import type {
+  ObservationKind,
+  Overview,
+  TransactionRow,
+  BalanceRow,
+  BalanceHistoryRow,
+  PositionWithValuations,
+  ArtifactRow,
+  ArtifactDetail,
+  ObservationDetail,
+  ApiMetadata,
+} from "../../shared/api-contract.ts";
+export type {
+  ObservationKind,
+  Warnings,
+  Overview,
+  TransactionRow,
+  BalanceRow,
+  BalanceHistoryRow,
+  PositionRow,
+  ValuationRow,
+  PositionWithValuations,
+  ArtifactRow,
+  ObservationRef,
+  ParseRunDetail,
+  ArtifactDetail,
+  Provenance,
+  ObservationDetail,
+  ApiMetadata,
+} from "../../shared/api-contract.ts";
 
 // ── transport ────────────────────────────────────────────────────────
 
@@ -213,10 +39,7 @@ export function rawUrl(sha256: string): string {
   return `/api/raw/${sha256}`;
 }
 
-/**
- * A 404 body from this API is `{error: string}`. That string is the useful
- * half of the failure, so it is surfaced instead of the status line.
- */
+/** UI-safe errors contain fixed messages, never a response body or status text. */
 export class ApiError extends Error {
   readonly status: number;
 
@@ -227,29 +50,77 @@ export class ApiError extends Error {
   }
 }
 
-async function getJson<T>(path: string, signal: AbortSignal): Promise<T> {
-  const response = await fetch(path, {
-    signal,
-    headers: { accept: "application/json" },
-  });
+export async function getJson<T>(
+  path: string,
+  signal: AbortSignal,
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      signal,
+      headers: { accept: "application/json" },
+      credentials: "same-origin",
+      cache: "no-store",
+      redirect: "manual",
+    });
+  } catch {
+    if (signal.aborted) throw new DOMException("Request aborted", "AbortError");
+    throw new ApiError(
+      0,
+      "接続できませんでした。接続先の起動状態やネットワークを確認して、再試行してください。",
+    );
+  }
+  if (
+    response.type === "opaqueredirect" ||
+    (response.status >= 300 && response.status < 400)
+  ) {
+    throw new ApiError(
+      401,
+      "認証または接続先の確認が必要です。ログイン状態を確認して、再読み込みしてください。",
+    );
+  }
   if (!response.ok) {
-    let message = `${String(response.status)} ${response.statusText}`.trim();
-    try {
-      const body: unknown = await response.json();
-      if (
-        typeof body === "object" &&
-        body !== null &&
-        "error" in body &&
-        typeof (body as { error: unknown }).error === "string"
-      ) {
-        message = (body as { error: string }).error;
-      }
-    } catch {
-      // A non-JSON error body tells us nothing the status line does not.
-    }
+    const message =
+      response.status === 401
+        ? "認証が必要です。接続先でログインし直してから、再読み込みしてください。"
+        : response.status === 403
+          ? "このデータを表示する権限がありません。接続先のアクセス権を確認してください。"
+          : response.status === 404
+            ? "指定されたデータが見つかりません。一覧を更新して確認してください。"
+            : response.status === 429
+              ? "リクエストが集中しています。少し待ってから再試行してください。"
+              : "データを取得できませんでした。時間をおいて再試行してください。";
     throw new ApiError(response.status, message);
   }
-  return (await response.json()) as T;
+  if (
+    response.headers
+      .get("content-type")
+      ?.split(";", 1)[0]
+      ?.trim()
+      .toLowerCase() !== "application/json"
+  ) {
+    throw new ApiError(
+      response.status,
+      "データではなく別の応答が返されました。接続先やログイン状態を確認してください。",
+    );
+  }
+  let value: unknown;
+  try {
+    value = await response.json();
+  } catch {
+    if (signal.aborted) throw new DOMException("Request aborted", "AbortError");
+    throw new ApiError(
+      response.status,
+      "受信したデータを読み取れませんでした。再読み込みしてください。",
+    );
+  }
+  if (!validApiResponse(path, value)) {
+    throw new ApiError(
+      response.status,
+      "受信したデータの形式が対応していません。接続先を確認してください。",
+    );
+  }
+  return value as T;
 }
 
 // ── hooks ────────────────────────────────────────────────────────────
@@ -258,6 +129,13 @@ async function getJson<T>(path: string, signal: AbortSignal): Promise<T> {
 // persisted across a reload, and no figure on a page outlives the response it
 // came from.
 
+export function useMetadata(): UseQueryResult<ApiMetadata, Error> {
+  return useQuery({
+    queryKey: ["metadata"],
+    queryFn: ({ signal }) => getJson<ApiMetadata>("/api/meta", signal),
+  });
+}
+
 export function useOverview(): UseQueryResult<Overview, Error> {
   return useQuery({
     queryKey: ["overview"],
@@ -265,7 +143,10 @@ export function useOverview(): UseQueryResult<Overview, Error> {
   });
 }
 
-export function useTransactions(): UseQueryResult<{ transactions: TransactionRow[] }, Error> {
+export function useTransactions(): UseQueryResult<
+  { transactions: TransactionRow[] },
+  Error
+> {
   return useQuery({
     queryKey: ["transactions"],
     queryFn: ({ signal }) =>
@@ -294,21 +175,29 @@ export function usePositions(): UseQueryResult<
   return useQuery({
     queryKey: ["positions"],
     queryFn: ({ signal }) =>
-      getJson<{ positions: PositionWithValuations[] }>("/api/positions", signal),
+      getJson<{ positions: PositionWithValuations[] }>(
+        "/api/positions",
+        signal,
+      ),
   });
 }
 
-export function useArtifacts(): UseQueryResult<{ artifacts: ArtifactRow[] }, Error> {
+export function useArtifacts(): UseQueryResult<
+  { artifacts: ArtifactRow[] },
+  Error
+> {
   return useQuery({
     queryKey: ["artifacts"],
-    queryFn: ({ signal }) => getJson<{ artifacts: ArtifactRow[] }>("/api/artifacts", signal),
+    queryFn: ({ signal }) =>
+      getJson<{ artifacts: ArtifactRow[] }>("/api/artifacts", signal),
   });
 }
 
 export function useArtifact(id: number): UseQueryResult<ArtifactDetail, Error> {
   return useQuery({
     queryKey: ["artifact", id],
-    queryFn: ({ signal }) => getJson<ArtifactDetail>(`/api/artifacts/${String(id)}`, signal),
+    queryFn: ({ signal }) =>
+      getJson<ArtifactDetail>(`/api/artifacts/${String(id)}`, signal),
   });
 }
 
@@ -319,6 +208,9 @@ export function useObservation(
   return useQuery({
     queryKey: ["observation", kind, id],
     queryFn: ({ signal }) =>
-      getJson<ObservationDetail>(`/api/observations/${kind}/${String(id)}`, signal),
+      getJson<ObservationDetail>(
+        `/api/observations/${kind}/${String(id)}`,
+        signal,
+      ),
   });
 }

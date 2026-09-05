@@ -1,9 +1,5 @@
-// Overview — what is in the store, where it came from, and which parser
-// versions are live. Row counts are the only aggregate this client computes at
-// all, and counting rows is not a claim about money.
-
-import type { ReactNode } from "react";
-import { useOverview } from "../api.ts";
+import { useState, type ReactNode } from "react";
+import { useOverview, type Overview } from "../api.ts";
 import { Link } from "../router.tsx";
 import {
   Badge,
@@ -12,213 +8,237 @@ import {
   Panel,
   QueryBoundary,
   StatusBadge,
-  WarningBadge,
+  WarningList,
 } from "../ui.tsx";
-
+import { pageWindow } from "../filters.ts";
+import { Pager } from "./ViewControls.tsx";
+import { displayLabel } from "../labels.ts";
+const TABLE_LABELS: Record<string, string> = {
+  source: "取得元",
+  sources: "取得元",
+  fetch_run: "収集の実行",
+  fetch_runs: "収集の実行",
+  fetch_artifact: "取得した原本",
+  fetch_artifacts: "取得した原本",
+  raw_object: "原本データ",
+  raw_objects: "原本データ",
+  parse_run: "解析の実行",
+  parse_runs: "解析の実行",
+  transaction_observations: "取引の保存記録",
+  balance_observations: "残高の保存記録",
+  position_observations: "保有資産の保存記録",
+  valuation_observations: "評価額の保存記録",
+};
 export function OverviewPage(): ReactNode {
   const query = useOverview();
   return (
     <>
       <div className="page-head">
-        <h1>Overview</h1>
+        <p className="page-eyebrow">あなたの記録を、ひとつの場所に</p>
+        <h1>ホーム</h1>
         <p className="lede">
-          Layer A evidence and layer B observations, as the store holds them. Every
-          figure below is counted on request and stored nowhere.
+          取得元と最近の収集状況を確認し、気になる記録の原本までたどれます。
         </p>
       </div>
-
-      <QueryBoundary query={query} label="the overview">
-        {(data) => (
-          <>
-            <Panel
-              id="counts"
-              title="Row counts"
-              count={`${String(data.counts.length)} tables`}
-            >
-              <div className="tiles">
-                {data.counts.map((entry) => (
-                  <div className="tile" key={entry.table}>
-                    <div className="tile-value">{entry.rows}</div>
-                    <div className="tile-label">{entry.table}</div>
-                  </div>
-                ))}
-              </div>
-            </Panel>
-
-            <Panel
-              id="sources"
-              title="Sources"
-              count={`${String(data.sources.length)} rows`}
-              note="source_account labels are the provider's own and carry no institution identity, so the source is part of every key in this client."
-            >
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th scope="col">
-                        <span className="th-label">id</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">provider</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">ingestion</span>
-                      </th>
-                      <th scope="col" className="num">
-                        <span className="th-label">artifacts</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.sources.map((source) => (
-                      <tr key={source.id}>
-                        <th scope="row">{source.id}</th>
-                        <td>{source.provider}</td>
-                        <td>
-                          <Badge>{source.ingestion}</Badge>
-                        </td>
-                        <td className="num">{source.artifact_count}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Panel>
-
-            <Panel
-              id="fetch-runs"
-              title="Fetch runs"
-              count={`${String(data.fetchRuns.length)} rows`}
-            >
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th scope="col" className="num">
-                        <span className="th-label">#</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">source</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">tool</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">external run id</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">status</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">started_at</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">completed_at</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.fetchRuns.map((run) => (
-                      <tr key={run.id}>
-                        <th scope="row" className="num">
-                          {run.id}
-                        </th>
-                        <td>{run.source_id}</td>
-                        <td>{run.tool}</td>
-                        <td>
-                          <Nullable value={run.external_run_id} />
-                        </td>
-                        <td>
-                          <StatusBadge status={run.status} />
-                        </td>
-                        <td className="nowrap">{run.started_at}</td>
-                        <td className="nowrap">
-                          <Nullable value={run.completed_at} placeholder="not completed" />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Panel>
-
-            <Panel
-              id="parse-runs"
-              title="Parse runs"
-              count={`${String(data.parseRuns.length)} rows`}
-              note="Every parse run ever recorded, superseded ones included. A superseded run's observations are still reachable through its artifact; nothing is ever deleted."
-            >
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th scope="col" className="num">
-                        <span className="th-label">#</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">artifact</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">parser@version</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">parsed_at</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">status</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">warnings</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">lineage</span>
-                      </th>
-                      <th scope="col">
-                        <span className="th-label">error</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.parseRuns.map((run) => (
-                      <tr
-                        key={run.id}
-                        className={run.superseded_by_parse_run_id === null ? "" : "is-superseded"}
-                      >
-                        <th scope="row" className="num">
-                          {run.id}
-                        </th>
-                        <td>
-                          <Link to={`/artifacts/${String(run.fetch_artifact_id)}`}>
-                            #{run.fetch_artifact_id}
-                          </Link>
-                        </td>
-                        <td className="nowrap">
-                          {run.parser_name}
-                          <span className="dim">@</span>
-                          {run.parser_version}
-                        </td>
-                        <td className="nowrap">{run.parsed_at}</td>
-                        <td>
-                          <StatusBadge status={run.status} />
-                        </td>
-                        <td>
-                          <WarningBadge count={run.warnings.list.length} />
-                        </td>
-                        <td>
-                          <LineageBadge supersededBy={run.superseded_by_parse_run_id} />
-                        </td>
-                        <td className="wrap">
-                          <Nullable value={run.error} placeholder="—" />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Panel>
-          </>
-        )}
+      <QueryBoundary query={query} label="ホーム">
+        {(data) => <OverviewBody data={data} />}
       </QueryBoundary>
     </>
+  );
+}
+function OverviewBody({ data }: { data: Overview }): ReactNode {
+  const [page, setPage] = useState(0);
+  const view = pageWindow(
+    [...data.fetchRuns].sort((a, b) => b.id - a.id),
+    page,
+  );
+  const artifactCount = data.sources.reduce(
+    (count, source) => count + source.artifact_count,
+    0,
+  );
+  return (
+    <>
+      <div className="overview-grid">
+        <div className="overview-stat">
+          <span className="overview-stat-label">登録されている取得元</span>
+          <strong className="overview-stat-value">{data.sources.length}</strong>
+          <span>保存された記録の取得元</span>
+        </div>
+        <div className="overview-stat">
+          <span className="overview-stat-label">取得した原本</span>
+          <strong className="overview-stat-value">{artifactCount}</strong>
+          <Link to="/artifacts">原本を見る →</Link>
+        </div>
+        <div className="overview-stat">
+          <span className="overview-stat-label">収集の記録</span>
+          <strong className="overview-stat-value">
+            {data.fetchRuns.length}
+          </strong>
+          <span>保存済みの実行履歴</span>
+        </div>
+      </div>
+      <Panel
+        id="sources"
+        title="取得元"
+        count={`${data.sources.length}件`}
+        note="保存された原本を、取得元ごとに確認できます。"
+      >
+        <div className="source-grid">
+          {data.sources.length ? (
+            data.sources.map((source) => (
+              <article className="source-card" key={source.id}>
+                <h3>{source.provider}</h3>
+                <p className="dim">{source.id}</p>
+                <strong>{source.artifact_count}件の原本</strong>
+                <details className="detail-disclosure">
+                  <summary>取込方法</summary>
+                  <Badge>{source.ingestion}</Badge>
+                </details>
+              </article>
+            ))
+          ) : (
+            <p className="panel-body">取得元がまだ登録されていません。</p>
+          )}
+        </div>
+      </Panel>
+      <Panel
+        id="fetch-runs"
+        title="最近の収集履歴"
+        count={`${data.fetchRuns.length}件`}
+        note="登録の新しい順に、実行ごとの結果と日時を表示しています。"
+      >
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">取得元</th>
+                <th scope="col">結果</th>
+                <th scope="col">開始日時</th>
+                <th scope="col">完了日時</th>
+                <th scope="col">実行の詳細</th>
+              </tr>
+            </thead>
+            <tbody>
+              {view.rows.length ? (
+                view.rows.map((run) => (
+                  <tr key={run.id}>
+                    <td>{run.source_id}</td>
+                    <td>
+                      <StatusBadge status={run.status} />
+                    </td>
+                    <td>{run.started_at}</td>
+                    <td>
+                      <Nullable
+                        value={run.completed_at}
+                        placeholder="完了日時未記録"
+                      />
+                    </td>
+                    <td>
+                      <details>
+                        <summary>実行 #{run.id}</summary>
+                        <p>{run.tool}</p>
+                        <Nullable value={run.external_run_id} />
+                      </details>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={5}>収集の履歴がまだありません。</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <Pager {...view} total={data.fetchRuns.length} onChange={setPage} />
+      </Panel>
+      <details className="detail-disclosure">
+        <summary>保存件数・解析の詳細</summary>
+        <Panel
+          id="counts"
+          title="データベースの保存件数"
+          note="旧解析を含む保存行の件数です。画面に表示される現行データの件数とは異なる場合があります。"
+        >
+          <div className="tiles">
+            {data.counts.map((entry) => (
+              <div className="tile" key={entry.table}>
+                <div className="tile-value">{entry.rows}</div>
+                <div className="tile-label">
+                  {displayLabel(TABLE_LABELS, entry.table)}
+                </div>
+                <code>{entry.table}</code>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <ParseHistory data={data} />
+      </details>
+    </>
+  );
+}
+function ParseHistory({ data }: { data: Overview }): ReactNode {
+  const [page, setPage] = useState(0);
+  const view = pageWindow(
+    [...data.parseRuns].sort((a, b) => b.id - a.id),
+    page,
+  );
+  return (
+    <Panel
+      id="parse-runs"
+      title="解析の履歴"
+      count={`${data.parseRuns.length}件`}
+    >
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              {[
+                "原本",
+                "解析方法",
+                "解析日時",
+                "結果",
+                "履歴",
+                "注意・エラー",
+              ].map((label) => (
+                <th scope="col" key={label}>
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {view.rows.map((run) => (
+              <tr
+                key={run.id}
+                className={
+                  run.superseded_by_parse_run_id === null ? "" : "is-superseded"
+                }
+              >
+                <td>
+                  <Link to={`/artifacts/${run.fetch_artifact_id}`}>
+                    原本 #{run.fetch_artifact_id}
+                  </Link>
+                </td>
+                <td>
+                  {run.parser_name}@{run.parser_version}
+                </td>
+                <td>{run.parsed_at}</td>
+                <td>
+                  <StatusBadge status={run.status} />
+                </td>
+                <td>
+                  <LineageBadge supersededBy={run.superseded_by_parse_run_id} />
+                </td>
+                <td>
+                  <WarningList warnings={run.warnings} />
+                  <Nullable value={run.error} placeholder="エラー未記録" />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager {...view} total={data.parseRuns.length} onChange={setPage} />
+    </Panel>
   );
 }
