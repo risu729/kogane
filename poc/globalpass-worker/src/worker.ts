@@ -1,10 +1,18 @@
 import { Container, getContainer } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
+  artifactFilename,
+  assertCanonicalMonths,
+  GLOBALPASS_DATASET,
+  GLOBALPASS_MEDIA_TYPE,
+  GLOBALPASS_PAGINATION_STATUS,
+  GLOBALPASS_SCHEMA_VERSION,
   parseMode,
   parseContainerProbeVariant,
   runPrefix,
   safeMonth,
+  selectedMonthsForMode,
+  strictCollectionStatus,
   type CollectionFailure,
   type CollectionManifest,
   type CollectionMode,
@@ -13,6 +21,9 @@ import {
   type StoredArtifact,
 } from "./model";
 import { runGlobalPassBrowserProbe } from "./browser-probe";
+import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
+import type { RawEvidenceImportResult } from "./raw-evidence-types";
+import { sanitizeGlobalPassActivityHtml } from "./sanitize";
 
 const GLOBALPASS_HOST = "www.debit.vpass.ne.jp";
 const TURNSTILE_HOST = "challenges.cloudflare.com";
@@ -25,7 +36,7 @@ const RELAY_HOSTS = new Set([
   PROBE_EGRESS_HOST,
 ]);
 const MAX_NDJSON_LINE_BYTES = 3 * 1024 * 1024;
-const CONTAINER_ID = "prestia-globalpass-read-only-v19";
+const CONTAINER_ID = "prestia-globalpass-read-only-v20";
 const CHROMIUM_TIMEZONE_PROBE_ID =
   "prestia-globalpass-chromium-timezone-probe-v1";
 const STOPPABLE_CONTAINER_IDS = new Map([
@@ -39,7 +50,8 @@ const STOPPABLE_CONTAINER_IDS = new Map([
   ["v16", "prestia-globalpass-read-only-v16"],
   ["v17", "prestia-globalpass-read-only-v17"],
   ["v18", "prestia-globalpass-read-only-v18"],
-  ["v19", CONTAINER_ID],
+  ["v19", "prestia-globalpass-read-only-v19"],
+  ["v20", CONTAINER_ID],
   ["chromium-timezone", CHROMIUM_TIMEZONE_PROBE_ID],
 ]);
 
@@ -157,28 +169,63 @@ export default {
         );
       }
     }
+    if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
+      if (!(await validBearer(request, env.ADMIN_TRIGGER_TOKEN))) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      if (url.searchParams.get("limit") !== "1") {
+        return Response.json({ error: "limit_must_be_one" }, { status: 400 });
+      }
+      const cursor = url.searchParams.get("cursor") ?? undefined;
+      if (cursor !== undefined && !safeOpaque(cursor)) {
+        return Response.json({ error: "cursor_invalid" }, { status: 400 });
+      }
+      try {
+        return Response.json(
+          await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, cursor),
+          { headers: { "cache-control": "no-store" } },
+        );
+      } catch {
+        return Response.json(
+          { error: "raw_evidence_backfill_failed" },
+          { status: 502 },
+        );
+      }
+    }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
     if (!(await validBearer(request, env.ADMIN_TRIGGER_TOKEN))) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
+    let mode: CollectionMode;
     try {
-      const mode = parseMode(url.searchParams.get("mode"));
-      const result = await runCollection(env, mode);
-      return Response.json(result, {
-        status: result.status === "failed" ? 502 : 200,
-      });
+      mode = parseMode(url.searchParams.get("mode"));
     } catch (error) {
       return Response.json(
         { error: redactError(error).slice(0, 300) },
         { status: 400 },
       );
     }
+    try {
+      const result = await runCollection(env, mode);
+      return Response.json(publicCollectionResult(result), {
+        status: result.status === "success" ? 200 : 502,
+        headers: { "cache-control": "no-store" },
+      });
+    } catch {
+      return Response.json(
+        { error: "globalpass_collection_failed" },
+        { status: 502 },
+      );
+    }
   },
 
   async scheduled(_controller, env): Promise<void> {
-    await runCollection(env, "daily");
+    const result = await runCollection(env, "daily");
+    if (result.status !== "success") {
+      throw new Error(`GLOBAL PASS collection incomplete; manifest=${result.manifestKey}`);
+    }
   },
 } satisfies ExportedHandler<Env>;
 
@@ -244,10 +291,15 @@ async function runContainerProbe(
   });
 }
 
+type CollectionResult = CollectionManifest & {
+  manifestKey: string;
+  central: RawEvidenceImportResult;
+};
+
 async function runCollection(
   env: Env,
   mode: CollectionMode,
-): Promise<CollectionManifest & { manifestKey: string }> {
+): Promise<CollectionResult> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const container = getContainer(env.COLLECTOR_CONTAINER, CONTAINER_ID);
@@ -283,74 +335,148 @@ async function collectWithContainer(
   container: DurableObjectStub<GlobalPassCollectorContainer>,
   startedAt: string,
   runId: string,
-): Promise<CollectionManifest & { manifestKey: string }> {
+): Promise<CollectionResult> {
   const prefix = runPrefix(startedAt, runId);
   const artifacts: StoredArtifact[] = [];
   const failures: CollectionFailure[] = [];
   let availableMonths: string[] = [];
+  let selectedMonths: string[] = [];
   let runtimeRevision: string | undefined;
+  let metadataSeen = false;
+  let containerErrorSeen = false;
+  let streamStarted = false;
+  const attemptedMonths = new Set<string>();
 
-  await container.startAndWaitForPorts();
-  const response = await container.fetch(
-    new Request("http://container/collect", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        mode,
-        user: requiredSecret(env.GLOBALPASS_ID, "GLOBALPASS_ID"),
-        password: requiredSecret(
-          env.GLOBALPASS_PASSWORD,
-          "GLOBALPASS_PASSWORD",
-        ),
-        relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
-        relayUrl: env.RELAY_PUBLIC_URL,
+  try {
+    await container.startAndWaitForPorts();
+    const response = await container.fetch(
+      new Request("http://container/collect", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode,
+          user: requiredSecret(env.GLOBALPASS_ID, "GLOBALPASS_ID"),
+          password: requiredSecret(
+            env.GLOBALPASS_PASSWORD,
+            "GLOBALPASS_PASSWORD",
+          ),
+          relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
+          relayUrl: env.RELAY_PUBLIC_URL,
+        }),
       }),
-    }),
-  );
-  if (!response.ok || !response.body) {
-    throw new Error(`GLOBAL PASS container failed with HTTP ${response.status}`);
-  }
+    );
+    if (!response.ok || !response.body) {
+      throw new Error("GLOBAL PASS container request failed");
+    }
+    streamStarted = true;
 
-  for await (const record of readNdjson(response.body)) {
-    if (record.type === "metadata") {
-      availableMonths = record.availableMonths.map(safeMonth);
-      runtimeRevision = record.runtimeRevision;
-      continue;
-    }
-    if (record.type === "error") {
-      failures.push({
-        operation: "browser-collection",
-        errorType: record.errorType,
-        message: redactText(record.message).slice(0, 2_000),
-      });
-      continue;
-    }
-    try {
-      artifacts.push(
-        await storeHtml(
+    for await (const record of readNdjson(response.body)) {
+      if (record.type === "metadata") {
+        if (metadataSeen || containerErrorSeen) throw new CollectionContractError();
+        try {
+          assertCanonicalMonths(record.availableMonths, "availableMonths");
+          assertCanonicalMonths(record.selectedMonths, "selectedMonths");
+        } catch {
+          throw new CollectionContractError();
+        }
+        const expected = selectedMonthsForMode(mode, record.availableMonths);
+        if (!sameStrings(record.selectedMonths, expected)) {
+          throw new CollectionContractError();
+        }
+        availableMonths = [...record.availableMonths];
+        selectedMonths = [...record.selectedMonths];
+        runtimeRevision = record.runtimeRevision;
+        metadataSeen = true;
+        continue;
+      }
+      if (record.type === "error") {
+        if (containerErrorSeen) throw new CollectionContractError();
+        containerErrorSeen = true;
+        failures.push({
+          operation: record.operation,
+          errorType: record.errorType,
+          errorCode: record.errorCode,
+        });
+        continue;
+      }
+      if (!metadataSeen || containerErrorSeen) throw new CollectionContractError();
+      const month = safeMonth(record.month);
+      const expectedMonth = selectedMonths[attemptedMonths.size];
+      if (
+        month !== expectedMonth ||
+        !selectedMonths.includes(month) ||
+        attemptedMonths.has(month)
+      ) {
+        throw new CollectionContractError();
+      }
+      attemptedMonths.add(month);
+      const artifactKey = artifactFilename(month);
+      let sanitizedHtml: string;
+      try {
+        sanitizedHtml = sanitizeGlobalPassActivityHtml(record.html);
+      } catch (error) {
+        failures.push(collectionFailure(
+          "sanitization",
+          error,
+          "html_sanitization_failed",
+          artifactKey,
+        ));
+        continue;
+      }
+      try {
+        artifacts.push(await storeHtml(
           env.SNAPSHOTS,
           prefix,
-          safeMonth(record.month),
-          record.html,
-        ),
-      );
-    } catch (error) {
+          runId,
+          month,
+          sanitizedHtml,
+        ));
+      } catch (error) {
+        failures.push(collectionFailure(
+          "r2",
+          error,
+          "artifact_store_failed",
+          artifactKey,
+        ));
+      }
+    }
+  } catch (error) {
+    failures.push(collectionFailure(
+      streamStarted ? "contract" : "browser-collection",
+      error,
+      streamStarted ? "container_contract_invalid" : "browser_collection_failed",
+    ));
+  }
+
+  if (!metadataSeen && failures.length === 0) {
+    failures.push(collectionFailure(
+      "contract",
+      new CollectionContractError(),
+      "container_contract_invalid",
+    ));
+  }
+  const storedMonths = new Set(artifacts.map((artifact) => artifact.month));
+  const failedArtifactKeys = new Set(
+    failures.flatMap((failure) => failure.artifactKey ? [failure.artifactKey] : []),
+  );
+  for (const month of selectedMonths) {
+    const artifactKey = artifactFilename(month);
+    if (!storedMonths.has(month) && !failedArtifactKeys.has(artifactKey)) {
       failures.push({
-        operation: `r2:${record.month}`,
-        errorType: error instanceof Error ? error.name : "UnknownError",
-        message: redactError(error).slice(0, 300),
+        operation: "contract",
+        errorType: "CollectionContractError",
+        errorCode: "selected_month_missing",
+        artifactKey,
       });
     }
   }
-
-  const status =
-    failures.length === 0
-      ? "success"
-      : artifacts.length === 0
-        ? "failed"
-        : "partial";
+  const { status, captureComplete } = strictCollectionStatus(
+    artifacts,
+    failures,
+    selectedMonths,
+  );
   const manifest: CollectionManifest = {
-    schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
+    schemaVersion: GLOBALPASS_SCHEMA_VERSION,
     source: "prestia-globalpass",
     runtimeRevision,
     runId,
@@ -359,6 +485,9 @@ async function collectWithContainer(
     completedAt: new Date().toISOString(),
     status,
     availableMonths,
+    selectedMonths,
+    captureComplete,
+    paginationStatus: GLOBALPASS_PAGINATION_STATUS,
     artifacts,
     failures,
   };
@@ -367,6 +496,7 @@ async function collectWithContainer(
     httpMetadata: { contentType: "application/json; charset=utf-8" },
     customMetadata: { source: manifest.source, status, runId },
   });
+  const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey);
   console.log(
     JSON.stringify({
       event: "globalpass-collection-stored",
@@ -376,32 +506,50 @@ async function collectWithContainer(
       artifactCount: artifacts.length,
       failureCount: failures.length,
       manifestKey,
+      centralStatus: central.status,
+      ...(central.status === "sealed" ? { centralRunId: central.centralRunId } : {
+        centralDeferredReason: central.reason,
+        centralNextOffset: central.nextOffset,
+      }),
     }),
   );
-  return { ...manifest, manifestKey };
+  return { ...manifest, manifestKey, central };
 }
 
 async function storeHtml(
   bucket: R2Bucket,
   prefix: string,
+  runId: string,
   month: string,
   html: string,
 ): Promise<StoredArtifact> {
   const body = new TextEncoder().encode(html);
   const sha256 = hex(await crypto.subtle.digest("SHA-256", body));
-  const key = `${prefix}/activity-${month}.html`;
+  const key = `${prefix}/${artifactFilename(month)}`;
   await bucket.put(key, body, {
     httpMetadata: { contentType: "text/html; charset=utf-8" },
-    customMetadata: { dataset: "globalpass-activity", month, sha256 },
+    customMetadata: {
+      source: "prestia-globalpass",
+      runId,
+      dataset: GLOBALPASS_DATASET,
+      sha256,
+    },
   });
-  return { month, key, bytes: body.byteLength, sha256 };
+  return {
+    dataset: GLOBALPASS_DATASET,
+    month,
+    key,
+    mediaType: GLOBALPASS_MEDIA_TYPE,
+    bytes: body.byteLength,
+    sha256,
+  };
 }
 
 async function* readNdjson(
   stream: ReadableStream<Uint8Array>,
 ): AsyncGenerator<ContainerRecord> {
   const reader = stream.getReader();
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
   let buffer = "";
   try {
     while (true) {
@@ -442,6 +590,12 @@ function parseContainerRecord(line: string): ContainerRecord {
   const record: Record<string, unknown> = value;
   if (
     record["type"] === "metadata" &&
+    exactKeys(record, [
+      "type",
+      "availableMonths",
+      "selectedMonths",
+      "browserVersion",
+    ], ["runtimeRevision"]) &&
     Array.isArray(record["availableMonths"]) &&
     Array.isArray(record["selectedMonths"]) &&
     record["availableMonths"].every((item) => typeof item === "string") &&
@@ -464,6 +618,7 @@ function parseContainerRecord(line: string): ContainerRecord {
   }
   if (
     record["type"] === "artifact" &&
+    exactKeys(record, ["type", "month", "html"]) &&
     typeof record["month"] === "string" &&
     typeof record["html"] === "string"
   ) {
@@ -475,13 +630,17 @@ function parseContainerRecord(line: string): ContainerRecord {
   }
   if (
     record["type"] === "error" &&
+    exactKeys(record, ["type", "operation", "errorType", "errorCode"]) &&
+    record["operation"] === "browser-collection" &&
     typeof record["errorType"] === "string" &&
-    typeof record["message"] === "string"
+    /^[A-Za-z][A-Za-z0-9]{0,79}$/u.test(record["errorType"]) &&
+    record["errorCode"] === "browser_collection_failed"
   ) {
     return {
       type: "error",
+      operation: record["operation"],
       errorType: record["errorType"],
-      message: record["message"],
+      errorCode: record["errorCode"],
     };
   }
   throw new Error("GLOBAL PASS container returned an invalid record shape");
@@ -595,6 +754,79 @@ interface VpcNetworkBinding extends Fetcher {
 function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
+}
+
+function collectionFailure(
+  operation: CollectionFailure["operation"],
+  error: unknown,
+  errorCode: CollectionFailure["errorCode"],
+  artifactKey?: string,
+): CollectionFailure {
+  return {
+    operation,
+    errorType: safeErrorType(error),
+    errorCode,
+    ...(artifactKey ? { artifactKey } : {}),
+  };
+}
+
+function safeErrorType(error: unknown): string {
+  const candidate = error instanceof Error ? error.name : "UnknownError";
+  return /^[A-Za-z][A-Za-z0-9]{0,79}$/u.test(candidate)
+    ? candidate
+    : "UnknownError";
+}
+
+function sameStrings(left: string[], right: string[]): boolean {
+  return left.length === right.length &&
+    left.every((value, index) => value === right[index]);
+}
+
+function exactKeys(
+  value: Record<string, unknown>,
+  required: string[],
+  optional: string[] = [],
+): boolean {
+  const allowed = new Set([...required, ...optional]);
+  const keys = Object.keys(value);
+  return keys.every((key) => allowed.has(key)) &&
+    required.every((key) => Object.hasOwn(value, key));
+}
+
+function safeOpaque(value: string): boolean {
+  return value.length > 0 && value.length <= 500 && !/[\x00-\x20\x7f]/u.test(value);
+}
+
+function publicCollectionResult(result: CollectionResult): object {
+  return {
+    runId: result.runId,
+    mode: result.mode,
+    status: result.status,
+    captureComplete: result.captureComplete,
+    paginationStatus: result.paginationStatus,
+    availableMonthCount: result.availableMonths.length,
+    selectedMonthCount: result.selectedMonths.length,
+    artifactCount: result.artifacts.length,
+    failureCount: result.failures.length,
+    manifestKey: result.manifestKey,
+    central: {
+      status: result.central.status,
+      ...(result.central.status === "sealed"
+        ? { centralRunId: result.central.centralRunId, sealed: result.central.sealed }
+        : {
+          reason: result.central.reason,
+          artifactCount: result.central.artifactCount,
+          nextOffset: result.central.nextOffset,
+        }),
+    },
+  };
+}
+
+class CollectionContractError extends Error {
+  constructor() {
+    super("GLOBAL PASS container contract invalid");
+    this.name = "CollectionContractError";
+  }
 }
 
 function hex(value: ArrayBuffer): string {

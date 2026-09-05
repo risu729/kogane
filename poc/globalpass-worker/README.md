@@ -52,6 +52,22 @@ HTMLはContainerからNDJSONとして月ごとにstreamし、Workerは1件ずつ
 
 WebSocket TCP relayは非hibernating接続である。対応するupstream TCP socketを復元できないため、このopaque tunnelをDurable Object WebSocket Hibernationで休止させない。isolate・network・Tunnelが切れたrunは部分失敗として記録し、次回に再取得する。
 
+### Raw evidence v2 contract
+
+`globalpass-browser-poc-v2`では、ContainerのNDJSONを厳密な契約として扱う。metadataは必ず1回だけ受け取り、`availableMonths`は最大15か月の連続した降順、`selectedMonths`はdailyなら先頭2か月、backfillなら全月との完全一致を要求する。manifestには`selectedMonths`、`captureComplete`、`paginationStatus: "unproven"`、固定形のfailureを記録し、選択月と保存artifactが完全一致してfailureが0件のrunだけを`success`とする。失敗runも、R2自体へmanifestを書ける限り保存する。
+
+保存前には35件の既存HTML監査で確認した2種類の画面shapeだけを許可する。変動する非空の`nablarch_hidden`だけを`__KOGANE_REDACTED_DYNAMIC_VALUE__`へ置換し、空値は空のまま、明細選択に必要な`W131301.referenceDate`などは保持する。これとは別に、current-document fragmentの`href`は`#`へ、許可された`onclick`/`onchange`の値全体は`return false;`へ固定し、元fragmentやhandler引数をR2へ残さない。hidden field、inputの`id/name/type/value`重複、form action重複、URL-bearing attribute、inline event handlerは監査済みのexact inventoryだけを許可する。query付きURL、未知host/path/scheme、`formaction`、data URL、`srcset`、`ping`、CSSの`url()`/`@import`、meta refresh、SVG URL属性、`base`/`object`/`embed`/`iframe`などの未監査network/navigation sink、未知event属性・関数、ログイン画面、session/token文字列、UTF-8不整合を検出した場合はfail closedとし、そのHTMLをR2へ保存しない。Importerはこのcanonical HTML以外を拒否し、受理時もbytesを変更しない。artifact metadataは`source`、`runId`、`dataset`、`sha256`の4項目だけを持つ。
+
+manifest保存直後、private Service Binding `RAW_EVIDENCE_IMPORTER`の`/v1/prestia-globalpass/import-run`へ同期的に渡す。daily小runはsealed応答を厳密に検証する。12 artifactを超えるbackfill runの即時応答は中央stateを作らない`deferred`として受理し、管理token必須の`POST /backfill-raw-evidence?limit=1`で完全inventoryを10 artifactずつ転送する。`scripts/backfill-raw-evidence.sh`は所有者本人・mode 0600・symlink不可のtoken fileだけを読み、R2 scan cursorとmanifest内offsetを含むopaque cursorをローカルstateへ保存する。`deferredManifestCount`は失敗でなく進捗として扱い、最終chunkのseal後に次のsource objectへ進む。元R2 objectは削除しない。
+
+```sh
+scripts/backfill-raw-evidence.sh
+```
+
+既定のtoken fileは既存運用と同じ`~/.local/share/kogane/secrets/globalpass-worker-admin-token`である。別pathを使う場合だけ第1引数で指定する。
+
+1 runは最大15 HTML + 1 manifestで、実測も15分枠内に収まるためQueueは導入しない。Queue分割するとbrowser loginとTurnstileを月ごとに繰り返し、完全性の境界も複雑になる。時間上限超過が実測された場合にだけ再検討する。
+
 ## Secret
 
 - `GLOBALPASS_ID`

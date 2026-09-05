@@ -55,6 +55,12 @@
       "redactionSentinel": "__KOGANE_REDACTED_BASE_VARIABLE__",
       "sanitizedCp932Hex": "3c68746d6c3e3c626f64793e97989770979a97f03c696e70757420747970653d2268696464656e22206e616d653d22626173655661726961626c65222076616c75653d225f5f4b4f47414e455f52454441435445445f424153455f5641524941424c455f5f223e3c2f626f64793e3c2f68746d6c3e"
     },
+    "globalPassSanitizedHtml": {
+      "sourceId": "global-pass",
+      "sessionId": "fixture-global-pass-sanitized-html",
+      "redactionSentinel": "__KOGANE_REDACTED_DYNAMIC_VALUE__",
+      "sanitizedBody": "<html><body data-fixture=\"global-pass-sanitized\"><input type=\"hidden\" name=\"fixture-state\" value=\"__KOGANE_REDACTED_DYNAMIC_VALUE__\"><table data-fixture-month=\"2026-08\"><tbody></tbody></table></body></html>"
+    },
     "vPointEmptyPage": {
       "sourceId": "v-point",
       "sessionId": "fixture-v-point-empty-page",
