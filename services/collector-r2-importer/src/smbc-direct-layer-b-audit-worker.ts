@@ -57,6 +57,7 @@ export default {
             runStatus: validated.manifest.status,
             runFailureCount: validated.manifest.failureCodes.length,
             dataset: entry.artifact.dataset,
+            artifactKey: entry.artifact.key.slice(object.key.length - "manifest.json".length),
             url: null,
             mime: entry.artifact.mediaType.split(";", 1)[0]!.trim(),
             fetchedAt: validated.manifest.completedAt,

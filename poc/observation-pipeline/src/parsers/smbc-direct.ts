@@ -41,6 +41,7 @@ export const smbcDirectBalance: Parser = {
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
     requireSuccessfulRun(artifact);
+    requireArtifactKey(artifact, "balance.normalized.json");
     const input = parseObject(bytes, "balance-normalized");
     exactKeys(input, ["amount", "currency", "observedAt"], "balance-normalized");
     const amount = safeInteger(input["amount"], "balance-normalized.amount");
@@ -87,6 +88,10 @@ export const smbcDirectTransactions: Parser = {
     const input = parseObject(bytes, "transactions-normalized");
     exactKeys(input, ROOT_KEYS, "transactions-normalized");
     const range = parseRange(input["range"]);
+    requireArtifactKey(
+      artifact,
+      `transactions/${range.start.replaceAll("-", "")}-${range.end.replaceAll("-", "")}.normalized.json`,
+    );
     const depositsTotal = nonNegativeInteger(
       input["depositsTotal"],
       "transactions-normalized.depositsTotal",
@@ -156,7 +161,23 @@ export const smbcDirectTransactions: Parser = {
 };
 
 function accepts(artifact: ArtifactMeta, dataset: string): boolean {
-  return artifact.sourceId === SOURCE_ID && artifact.dataset === dataset && artifact.mime === MIME;
+  const keyMatches =
+    dataset === "balance-normalized"
+      ? artifact.artifactKey === "balance.normalized.json"
+      : typeof artifact.artifactKey === "string" &&
+        /^transactions\/\d{8}-\d{8}\.normalized\.json$/u.test(artifact.artifactKey);
+  return (
+    artifact.sourceId === SOURCE_ID &&
+    artifact.dataset === dataset &&
+    artifact.mime === MIME &&
+    keyMatches
+  );
+}
+
+function requireArtifactKey(artifact: ArtifactMeta, expected: string): void {
+  if (artifact.artifactKey !== expected) {
+    throw new Error("SMBC Direct artifact key does not match its canonical dataset shape");
+  }
 }
 
 function requireSuccessfulRun(artifact: ArtifactMeta): void {

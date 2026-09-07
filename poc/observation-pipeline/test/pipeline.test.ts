@@ -664,26 +664,39 @@ describe("parse runs", () => {
     expect(count(store, "transaction_observations")).toBe(2);
   });
 
-  test("current SMBC Direct transactions collapse repeated provider identities", () => {
+  test("current SMBC Direct transactions use the latest fetched complete range snapshot", () => {
     const store = tempStore();
     const directory = mkdtempSync(join(tmpdir(), "kogane-smbc-direct-refetch-"));
-    writeFileSync(join(directory, "first.json"), "{}");
-    writeFileSync(join(directory, "second.json"), "{}");
+    writeFileSync(join(directory, "newer.json"), "{}");
+    writeFileSync(join(directory, "stale.json"), "{}");
+    writeFileSync(join(directory, "empty.json"), "{}");
     const source = { id: "smbc-bank", provider: "SMBC Direct" };
-    ingestFile(store, join(directory, "first.json"), {
+    ingestFile(store, join(directory, "newer.json"), {
       source,
       mime: "application/json",
-      fetchedAt: "2026-09-07T00:00:00Z",
+      fetchedAt: "2026-09-07T00:00:02Z",
     });
-    ingestFile(store, join(directory, "second.json"), {
+    ingestFile(store, join(directory, "stale.json"), {
       source,
       mime: "application/json",
       fetchedAt: "2026-09-07T00:00:01Z",
     });
+    ingestFile(store, join(directory, "empty.json"), {
+      source,
+      mime: "application/json",
+      fetchedAt: "2026-09-07T00:00:03Z",
+    });
+    store.db
+      .query(
+        `UPDATE fetch_artifacts
+         SET dataset = 'transactions-normalized',
+             artifact_key = 'transactions/20260801-20260831.normalized.json'`,
+      )
+      .run();
     const artifacts = store.db.query("SELECT id FROM fetch_artifacts ORDER BY id").all() as {
       id: number;
     }[];
-    for (const [index, description] of ["older", "newer"].entries()) {
+    for (const [index, description] of ["newer", "stale"].entries()) {
       const artifactRow = artifacts[index];
       if (artifactRow === undefined) throw new Error("missing test artifact");
       const parseRunId = insertParseRun(store, {
@@ -704,6 +717,18 @@ describe("parse runs", () => {
       });
     }
     expect(currentTransactions(store).map((row) => row.description)).toEqual(["newer"]);
+    expect(count(store, "transaction_observations")).toBe(2);
+    const emptyArtifact = artifacts[2];
+    if (emptyArtifact === undefined) throw new Error("missing empty test artifact");
+    insertParseRun(store, {
+      artifactId: emptyArtifact.id,
+      parserName: "smbc-direct-transactions",
+      parserVersion: "1.0.0",
+      parsedAt: "2026-09-07T00:01:02Z",
+      status: "ok",
+      warnings: [],
+    });
+    expect(currentTransactions(store)).toEqual([]);
     expect(count(store, "transaction_observations")).toBe(2);
   });
 

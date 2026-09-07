@@ -318,6 +318,7 @@ exposing keys, hashes, bodies, identifiers, or financial values. Non-empty
 ledger and displayed past-month shapes are therefore observed. Multiple
 connections, CSV/PDF/OFX, and debit were not observed, so they are not claimed
 as production-validated Layer B routes.
+
 ### SMBC Direct normalized parsing
 
 SMBC Direct stores a Shift-JIS provider response and a UTF-8 normalized partner
@@ -331,13 +332,16 @@ posted JPY transactions under `smbc-bank:ordinary-yen`, using the provider ID
 as `externalId` and the explicit credit/debit field as the sole sign source.
 The provider's unsigned amount, post-transaction balance, range, two totals and
 row fields remain in `extra`; every observation points to its JSON array index.
+The manifest-relative filename is required to match the payload's exact range.
 
 Parsing fails closed on a non-success or failure-bearing run, media/schema drift,
 invalid calendar dates, dates outside the artifact range, changed provider
 order, duplicate/empty IDs, unsafe integers, or totals that do not equal the
-exact row sums. The current query collapses repeated refetches by
-`(source, sourceAccount, externalId)` for this parser only. Stored observations
-are not removed, so earlier evidence remains available through provenance.
+exact row sums. For each canonical monthly range, the current query selects the
+latest successful artifact by provider fetch time, including an empty artifact,
+then collapses any cross-range overlap by `(source, sourceAccount, externalId)`.
+Stored observations are not removed, so earlier evidence remains available
+through provenance.
 
 The checked-in local canary first calls the same Layer-A
 `validateSmbcDirectRun`, then requires exactly one parser for every normalized

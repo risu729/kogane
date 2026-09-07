@@ -8,12 +8,19 @@ import type { ArtifactMeta } from "../src/types.ts";
 const FIXTURE_DIR = join(import.meta.dir, "..", "fixtures", "smbc-direct-parser-boundaries");
 
 function artifact(dataset: string, overrides: Partial<ArtifactMeta> = {}): ArtifactMeta {
+  const artifactKey =
+    dataset === "balance-normalized"
+      ? "balance.normalized.json"
+      : dataset === "transactions-normalized"
+        ? "transactions/20260801-20260831.normalized.json"
+        : null;
   return {
     id: 1,
     sourceId: "smbc-bank",
     runStatus: "success",
     runFailureCount: 0,
     dataset,
+    artifactKey,
     url: null,
     mime: "application/json",
     fetchedAt: "2026-09-05T00:01:00.000Z",
@@ -47,6 +54,11 @@ describe("SMBC Direct canonical Layer-B routing", () => {
     expect(
       PARSERS.filter((parser) =>
         parser.accepts(artifact("balance-normalized", { sourceId: "smbc-direct" })),
+      ),
+    ).toEqual([]);
+    expect(
+      PARSERS.filter((parser) =>
+        parser.accepts(artifact("transactions-normalized", { artifactKey: null })),
       ),
     ).toEqual([]);
     expect(
@@ -189,6 +201,14 @@ describe("SMBC Direct canonical Layer-B routing", () => {
         smbcDirectTransactions.parse(encode(input), artifact("transactions-normalized")),
       ).toThrow();
     }
+    expect(() =>
+      smbcDirectTransactions.parse(
+        fixture("transactions-normalized"),
+        artifact("transactions-normalized", {
+          artifactKey: "transactions/20260701-20260731.normalized.json",
+        }),
+      ),
+    ).toThrow(/artifact key/u);
   });
 
   test("accepts an exact empty monthly statement", () => {

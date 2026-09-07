@@ -288,3 +288,7 @@ the parsers. On 2026-09-07 it scanned 189 objects and one successful manifest:
 94 canonical normalized artifacts produced 1,069 transactions and one balance,
 while all 94 raw partners were intentionally ignored by Layer B. It returned
 aggregate counts only and performed no R2 write or delete.
+Each normalized transaction artifact is bound to its manifest-relative monthly
+range key. The current view selects the newest successfully parsed artifact for
+that range by fetch time, so a late-imported stale run cannot replace newer
+evidence and a newer empty statement removes older rows from the current view.
