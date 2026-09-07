@@ -1,6 +1,7 @@
 import { logEvent, logFailure, logStage, type Stage } from "./diagnostics";
 import { timingSafeEqual } from "node:crypto";
 import { collectMoneyForward } from "./moneyforward";
+import { backfillStoredRuns } from "./raw-evidence";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import type { CollectionFailure, CollectionManifest } from "./types";
 import { parseCredential } from "./webauthn";
@@ -18,6 +19,37 @@ export default {
         { headers: { "cache-control": "no-store" } },
       );
     }
+    if (request.method === "POST" && url.pathname === "/backfill-raw-evidence") {
+      if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      const queryNames = [...url.searchParams.keys()];
+      if (
+        queryNames.some((name) => name !== "limit" && name !== "cursor") ||
+        url.searchParams.getAll("limit").length !== 1 ||
+        url.searchParams.getAll("cursor").length > 1 ||
+        url.searchParams.get("limit") !== "1"
+      ) {
+        return Response.json({ error: "limit_must_be_one" }, { status: 400 });
+      }
+      const cursor = url.searchParams.get("cursor") ?? undefined;
+      if (
+        cursor !== undefined &&
+        (cursor.length === 0 || cursor.length > 12_000 || /[\x00-\x20\x7f]/u.test(cursor))
+      ) {
+        return Response.json({ error: "cursor_invalid" }, { status: 400 });
+      }
+      try {
+        return Response.json(await backfillStoredRuns(env.RAW_EVIDENCE_IMPORTER, cursor), {
+          headers: { "cache-control": "no-store" },
+        });
+      } catch {
+        return Response.json(
+          { error: "raw_evidence_backfill_failed" },
+          { status: 502, headers: { "cache-control": "no-store" } },
+        );
+      }
+    }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
@@ -34,7 +66,7 @@ export default {
   async scheduled(_controller, env): Promise<void> {
     const result = await runCollection(env);
     if (result.status === "failed") {
-      throw new Error(`Money Forward collection failed; manifest=${result.manifestKey}`);
+      throw new Error("Money Forward collection failed");
     }
   },
 } satisfies ExportedHandler<Env>;
@@ -104,7 +136,6 @@ async function runCollection(env: Env): Promise<CollectionManifest & { manifestK
     monthlyFragmentCount,
     artifactCount: artifacts.length,
     failureCount: failures.length,
-    manifestKey,
   });
   return { ...manifest, manifestKey };
 }
@@ -140,6 +171,5 @@ function publicResult(result: CollectionManifest & { manifestKey: string }): obj
     monthlyFragmentCount: result.monthlyFragmentCount,
     artifactCount: result.artifacts.length,
     failureCount: result.failures.length,
-    manifestKey: result.manifestKey,
   };
 }

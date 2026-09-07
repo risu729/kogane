@@ -640,6 +640,22 @@ describe("0001 raw-evidence schema", () => {
         source_id: "global-pass",
       },
     ]);
+    const moneyForwardRoute = await env.DB.prepare(`
+      SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes
+      WHERE ingest_client_id = 'collector-r2-moneyforward'
+      ORDER BY producer_id, source_id
+    `).all<{
+      ingest_client_id: string;
+      producer_id: string;
+      source_id: string;
+    }>();
+    expect(moneyForwardRoute.results).toEqual([
+      {
+        ingest_client_id: "collector-r2-moneyforward",
+        producer_id: "collector-r2-importer",
+        source_id: "moneyforward-me",
+      },
+    ]);
     const vPointRoute = await env.DB.prepare(`
       SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes
       WHERE ingest_client_id = 'collector-r2-v-point'
@@ -748,6 +764,22 @@ describe("0001 raw-evidence schema", () => {
     expect(globalPassPolicies.results).toEqual([
       {
         template: "raw/prestia-globalpass/{date}/{run-id}/{artifact}",
+        redaction_version: "v1",
+        fingerprint_key_version: "collector-r2-v1",
+      },
+    ]);
+    const moneyForwardPolicies = await env.DB.prepare(`
+      SELECT template, redaction_version, fingerprint_key_version
+      FROM origin_template_policies
+      WHERE source_id = 'moneyforward-me' AND origin_kind = 'storage' AND active = 1
+    `).all<{
+      template: string;
+      redaction_version: string;
+      fingerprint_key_version: string;
+    }>();
+    expect(moneyForwardPolicies.results).toEqual([
+      {
+        template: "raw/moneyforward/{date}/{run-id}/{artifact}",
         redaction_version: "v1",
         fingerprint_key_version: "collector-r2-v1",
       },

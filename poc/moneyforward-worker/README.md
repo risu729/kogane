@@ -47,6 +47,25 @@ bun run cf:deploy
 
 Cronは毎日 `21:15 UTC`（日本時間06:15）です。GitHub Actionsはスケジューラに使いません。Money Forward側の銀行・カード更新を要求する処理はなく、最後にMoney Forwardへ同期済みの内容だけを保存します。
 
+## 中央raw-evidenceへのbackfill
+
+collectorの管理Bearer付き`POST /backfill-raw-evidence?limit=1`は、公開URLを経由せずService
+Bindingで`kogane-collector-r2-importer`を呼びます。Importerは専用の中央credentialとsource
+policyを使い、private R2をread-only outboxとして1 objectずつ走査します。通常runは53 data
+artifactsとmanifestを持つため、5 artifactsずつ分割し、最終chunkだけterminal reportとsealを
+登録します。収集直後の自動importは行わず、historical replayは次のbounded scriptで明示的に
+実行します。
+
+```bash
+./scripts/backfill-raw-evidence.sh
+```
+
+scriptはAES-256-GCMで暗号化・認証されたcursorだけをmode 0600のlocal stateへ保存し、10万page上限とcursor
+stagnation guardを適用します。応答とログにはsource object key、hash、本文、金融値、認証値を
+含めません。専用client tokenまたはfingerprint keyをrotationした場合は旧cursorが拒否されるため、
+cursor fileを削除して先頭からidempotentに再走査します。中央へsealできた後もsource R2を変更・
+削除しません。
+
 ## 2026-08-31の実データ検証
 
 - Bitwarden内のMoney Forwardパスキー候補: 2件
@@ -117,5 +136,5 @@ when no manifest can be saved. Logging is best effort and cannot stop collection
 Exception messages/stacks, provider response bodies, redirect URLs, cookie names
 or values, CSRF/challenge values, account identifiers and passkey material are
 excluded from diagnostics. Raw evidence storage and collection status semantics
-are unchanged. This branch is based on the existing `poc/moneyforward-worker`
-branch, preserving its unmerged collector implementation.
+are unchanged. The central backfill path is separately authenticated, bounded,
+and read-only against the collector R2.

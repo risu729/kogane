@@ -146,6 +146,7 @@ describe("Money Forward safe stage diagnostics", () => {
       }),
     );
     expect(response.status).toBe(502);
+    expect(await response.json()).not.toHaveProperty("manifestKey");
     expect(JSON.parse(manifest).failures[0]).toMatchObject({
       stage: "credential-load",
       failureCode: "credential_configuration_required",
@@ -190,6 +191,7 @@ describe("Money Forward safe stage diagnostics", () => {
     });
     const response = await worker.fetch(trigger(), env);
     expect(response.status).toBe(200);
+    expect(await response.json()).not.toHaveProperty("manifestKey");
     const parsed = JSON.parse(manifest);
     expect(parsed.status).toBe("partial");
     expect(parsed.monthlyFragmentCount).toBe(12);
@@ -202,6 +204,10 @@ describe("Money Forward safe stage diagnostics", () => {
       .filter((line) => line.event === "collector-stage-failed");
     expect(failures).toHaveLength(1);
     expect(failures[0].runId).toBe(parsed.runId);
+    const stored = logs
+      .map((line) => JSON.parse(line))
+      .find((line) => line.event === "moneyforward-collection-stored");
+    expect(stored).not.toHaveProperty("manifestKey");
     expect(logs.join()).not.toContain(PRIVATE);
     expect(logs.join()).not.toContain(keyValue);
     expect(manifest).not.toContain(PRIVATE);

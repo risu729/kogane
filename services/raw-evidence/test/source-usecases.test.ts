@@ -12,6 +12,7 @@ const SBI_STORAGE_TEMPLATE = "raw/sbi-securities/{date}/{run-id}/{artifact}.json
 const MOBILE_SUICA_STORAGE_TEMPLATE = "raw/mobile-suica/{date}/{run-id}/{artifact}";
 const GLOBAL_PASS_STORAGE_TEMPLATE = "raw/prestia-globalpass/{date}/{run-id}/{artifact}";
 const MYJCB_STORAGE_TEMPLATE = "raw/myjcb/{date}/{run-id}/{artifact}";
+const MONEYFORWARD_STORAGE_TEMPLATE = "raw/moneyforward/{date}/{run-id}/{artifact}";
 const VPASS_STORAGE_TEMPLATE = "vpass/{date}/{run-id}/{artifact}";
 const SBI_FINGERPRINT_VERSION = "collector-r2-v1";
 const cases = fixture.cases;
@@ -123,6 +124,23 @@ async function myJcbStorageOrigin(artifactKey: string) {
     objectKeyFingerprint: await sha256Hex(new TextEncoder().encode(`fixture-myjcb:${artifactKey}`)),
     fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
     redactionVersion: "v1",
+  };
+}
+
+async function moneyForwardStorageOrigin(artifactKey: string) {
+  return {
+    storageKind: "r2",
+    containerName: "kogane-moneyforward-collector-poc",
+    objectKeyTemplate: MONEYFORWARD_STORAGE_TEMPLATE,
+    objectKeyFingerprint: await sha256Hex(
+      new TextEncoder().encode(`fixture-moneyforward:${artifactKey}`),
+    ),
+    fingerprintKeyVersion: SBI_FINGERPRINT_VERSION,
+    redactionVersion: "v1",
+    objectVersion: null,
+    etag: null,
+    lastModifiedAtMs: null,
+    lastModifiedAtBasis: null,
   };
 }
 
@@ -1306,6 +1324,92 @@ describe("sanitized source-usecase contract", () => {
       "capture/1.json",
       "capture/0.json",
     ]);
+  });
+
+  it("accepts the MoneyForward importer descriptor, terminal reports, and seal in real D1", async () => {
+    const { runId } = await createRun(
+      "moneyforward-me",
+      "fixture-moneyforward-descriptor",
+      "full-snapshot-moneyforward-r2-v1",
+    );
+    const unitId = await unit(runId, "collection", "account");
+    const artifact = await catalogue(runId, "accounts.html", "<html><body></body></html>", {
+      artifactRole: "provider_response",
+      payloadFidelity: "exact",
+      containerKind: "single",
+      lineageDisposition: "not_applicable",
+      dataset: "accounts-index",
+      formatId: "moneyforward-accounts-index-html",
+      formatVersion: "moneyforward-worker-poc-v1",
+      declaredMediaType: "text/html",
+      mediaTypeBasis: "manifest",
+      fetchedAtMs: 1_788_544_860_000,
+      fetchedAtBasis: "manifest",
+      fetchUnitId: unitId,
+      pageGroupId: null,
+      pageIndex: null,
+      sequence: 0,
+      http: null,
+      storage: await moneyForwardStorageOrigin("accounts.html"),
+      file: null,
+      email: null,
+      ranges: [],
+      transformSteps: [],
+      relations: [],
+    });
+    await expectPost(`/v1/units/${unitId}/reports`, {
+      reportKey: "terminal",
+      reportKind: "terminal",
+      producerStatus: "success",
+      normalizedOutcome: "success",
+      startedAtMs: 1_788_544_800_000,
+      startedAtBasis: "manifest",
+      completedAtMs: 1_788_544_860_000,
+      completedAtBasis: "manifest",
+      declaredArtifactCount: 1,
+      artifactCountScope: "direct",
+    });
+    await expectPost(`/v1/runs/${runId}/reports`, {
+      reportKey: "terminal",
+      reportKind: "terminal",
+      producerVersion: "moneyforward-r2-v1",
+      manifestSchemaVersion: "moneyforward-worker-poc-v1",
+      producerStatus: "success",
+      normalizedOutcome: "success",
+      startedAtMs: 1_788_544_800_000,
+      startedAtBasis: "manifest",
+      completedAtMs: 1_788_544_860_000,
+      completedAtBasis: "manifest",
+      declaredArtifactCount: 1,
+      artifactCountScope: "all_catalogued",
+    });
+    await seal(runId, [artifact], "moneyforward-descriptor");
+
+    const row = await env.DB.prepare(`
+      SELECT artifact.artifact_role, artifact.format_id,
+             report.producer_version, report.producer_revision,
+             CASE WHEN seal.fetch_run_id IS NULL THEN 0 ELSE 1 END AS sealed
+      FROM fetch_artifacts AS artifact
+      JOIN fetch_run_reports AS report ON report.fetch_run_id = artifact.fetch_run_id
+      LEFT JOIN fetch_run_seals AS seal ON seal.fetch_run_id = artifact.fetch_run_id
+      WHERE artifact.fetch_run_id = ? AND artifact.artifact_key = 'accounts.html'
+        AND report.report_key = 'terminal'
+    `)
+      .bind(runId)
+      .first<{
+        artifact_role: string;
+        format_id: string;
+        producer_version: string;
+        producer_revision: string | null;
+        sealed: number;
+      }>();
+    expect(row).toEqual({
+      artifact_role: "provider_response",
+      format_id: "moneyforward-accounts-index-html",
+      producer_version: "moneyforward-r2-v1",
+      producer_revision: null,
+      sealed: 1,
+    });
   });
 
   it("resumes an SMBC bounded backfill after a recorded incomplete transfer", async () => {

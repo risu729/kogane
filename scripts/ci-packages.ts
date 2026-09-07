@@ -34,7 +34,7 @@ export const CI_PACKAGES: PackagePolicy[] = [
   {
     path: "services/raw-evidence",
     scripts: {
-      test: "vitest run && bash test/verify-sbi-shinsei-route.test.sh && bash test/verify-mobile-suica-route.test.sh && bash test/verify-global-pass-route.test.sh && bash test/verify-myjcb-route.test.sh && bash test/verify-v-point-route.test.sh && bash test/verify-vpass-route.test.sh",
+      test: "vitest run && bash test/verify-sbi-shinsei-route.test.sh && bash test/verify-mobile-suica-route.test.sh && bash test/verify-global-pass-route.test.sh && bash test/verify-myjcb-route.test.sh && bash test/verify-moneyforward-route.test.sh && bash test/verify-v-point-route.test.sh && bash test/verify-vpass-route.test.sh",
       typecheck,
       "check:importer":
         "bun build scripts/ingest-file.ts --target=bun --outfile=/tmp/kogane-ingest-file-check.js",
@@ -48,9 +48,16 @@ export const CI_PACKAGES: PackagePolicy[] = [
       test,
       typecheck,
       "cf:check": dryRun,
+      "cf:check:audit-moneyforward": `${dryRun} --config wrangler.audit-moneyforward.jsonc`,
       "cf:check:audit-vpoint": `${dryRun} --config wrangler.audit-v-point.jsonc`,
     },
-    checks: ["test", "typecheck", "cf:check", "cf:check:audit-vpoint"],
+    checks: [
+      "test",
+      "typecheck",
+      "cf:check",
+      "cf:check:audit-moneyforward",
+      "cf:check:audit-vpoint",
+    ],
   },
   worker("mobile-suica-worker"),
   worker("vpoint-worker"),
