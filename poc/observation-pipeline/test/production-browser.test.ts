@@ -181,7 +181,9 @@ describe.if(runnable)("combined production client", () => {
     expect(await page.locator("main").count()).toBe(1);
     expect(await page.locator(".nav a[aria-current='page']").innerText()).toBe("取得履歴");
     expect(await page.title()).toBe("取得履歴と原本 | kogane");
-    expect(await page.evaluate(() => document.activeElement === document.querySelector("h1"))).toBe(true);
+    expect(await page.evaluate(() => document.activeElement === document.querySelector("h1"))).toBe(
+      true,
+    );
     expect(await page.locator("body").innerText()).not.toContain("解析結果はまだ提供していません");
     for (const name of ["取引", "残高", "保有資産", "原本・証跡", "ホーム"])
       expect(
