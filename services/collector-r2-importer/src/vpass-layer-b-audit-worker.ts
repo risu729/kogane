@@ -1,0 +1,378 @@
+import { ImportError } from "./error";
+import { validateVpassRun } from "./vpass";
+
+interface AuditEnv {
+  VPASS_SNAPSHOTS: R2Bucket;
+}
+
+type Counts = Record<string, number>;
+
+export default {
+  async fetch(request: Request, env: AuditEnv): Promise<Response> {
+    const url = new URL(request.url);
+    if (
+      request.method === "GET" &&
+      url.pathname === "/health" &&
+      url.search === ""
+    ) {
+      return response({ ok: true, service: "vpass-r2-layer-b-audit" });
+    }
+    if (
+      request.method !== "POST" ||
+      url.pathname !== "/audit-page" ||
+      url.search !== ""
+    ) {
+      return response({ error: "not_found" }, 404);
+    }
+    try {
+      const input = (await request.json()) as unknown;
+      if (
+        !isRecord(input) ||
+        Object.keys(input).some((key) => key !== "cursor") ||
+        !(input.cursor === undefined || safeCursor(input.cursor))
+      ) {
+        throw new ImportError(400, "cursor_invalid");
+      }
+      const listed = await env.VPASS_SNAPSHOTS.list({
+        prefix: "vpass/",
+        limit: 1_000,
+        ...(typeof input.cursor === "string" ? { cursor: input.cursor } : {}),
+      });
+      const nextCursor = listed.truncated ? listed.cursor : undefined;
+      if (listed.truncated && !nextCursor)
+        throw new ImportError(409, "prefix_cursor_missing");
+      if (listed.truncated && nextCursor === input.cursor) {
+        throw new ImportError(409, "prefix_cursor_did_not_advance");
+      }
+      const aggregate = emptyAggregate();
+      aggregate.scanned = listed.objects.length;
+      for (const object of listed.objects) {
+        if (!/(?:\/manifest|\/error)\.json$/u.test(object.key)) {
+          aggregate.skipped += 1;
+          continue;
+        }
+        try {
+          const audited = await auditRecord(env.VPASS_SNAPSHOTS, object.key);
+          aggregate.audited += 1;
+          increment(aggregate.statuses, audited.recordStatus);
+          increment(aggregate.schemas, audited.recordSchemaVersion);
+          aggregate.artifacts += audited.artifactCount;
+          aggregate.statementArtifacts += audited.statementArtifactCount;
+          aggregate.rows += audited.statementRowCount;
+          aggregate.webRows += audited.webRowCount;
+          aggregate.customizedRows += audited.customizedRowCount;
+          mergeCounts(aggregate.webShapes, audited.webShapes);
+          mergeCounts(aggregate.customizedShapes, audited.customizedShapes);
+          mergeCounts(aggregate.webRowKeyShapes, audited.webRowKeyShapes);
+          mergeCounts(
+            aggregate.customizedRowKeyShapes,
+            audited.customizedRowKeyShapes,
+          );
+          mergeCounts(aggregate.webBeanKeyShapes, audited.webBeanKeyShapes);
+          mergeCounts(
+            aggregate.customizedBeanKeyShapes,
+            audited.customizedBeanKeyShapes,
+          );
+        } catch (error) {
+          aggregate.failed += 1;
+          increment(aggregate.failures, safeCode(error));
+        }
+      }
+      return auditResponse({ ...aggregate, nextCursor: nextCursor ?? null });
+    } catch (error) {
+      return response(
+        { error: safeCode(error) },
+        error instanceof ImportError ? error.status : 502,
+      );
+    }
+  },
+};
+
+async function auditRecord(bucket: R2Bucket, recordKey: string) {
+  const validated = await validateVpassRun(bucket, recordKey);
+  const webShapes: Counts = {};
+  const customizedShapes: Counts = {};
+  const webRowKeyShapes: Counts = {};
+  const customizedRowKeyShapes: Counts = {};
+  const webBeanKeyShapes: Counts = {};
+  const customizedBeanKeyShapes: Counts = {};
+  let statementArtifactCount = 0;
+  let statementRowCount = 0;
+  let webRowCount = 0;
+  let customizedRowCount = 0;
+  for (const artifact of validated.artifacts) {
+    if (artifact.dataset !== "statement-page") continue;
+    statementArtifactCount += 1;
+    const root = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(artifact.bytes),
+    );
+    if (!isRecord(root)) throw new Error("statement_root_invalid");
+    const header = objectAt(root, "header");
+    const content = objectAt(root, "body", "content");
+    if (!content) throw new Error("statement_content_invalid");
+    const web = objectAt(content, "WebMeisaiTopDisplayServiceBean");
+    const customized = objectAt(
+      content,
+      "CustomizedMeisaiAnsDisplayServiceBean",
+    );
+    if ((web === undefined) === (customized === undefined)) {
+      throw new Error("statement_family_invalid");
+    }
+    if (web) {
+      increment(webBeanKeyShapes, Object.keys(web).sort().join(","));
+      const rows = statementRows(web.meisaiList, "web_rows_invalid");
+      const transit = safeProviderCode(header?.transitTo);
+      webRowCount += rows.length;
+      statementRowCount += rows.length;
+      for (const value of rows) {
+        if (!isRecord(value)) throw new Error("web_row_invalid");
+        increment(webRowKeyShapes, Object.keys(value).sort().join(","));
+        const data = boundedStringArray(value.data, "web_row_data_invalid");
+        const shape = [
+          transit,
+          safeProviderCode(value.rowType),
+          safeProviderCode(data[0]),
+          safeProviderCode(data[1]),
+          String(data.length),
+          dateShape(data[3]),
+          amountShape(data[3]),
+          dateShape(data[5]),
+          amountShape(data[5]),
+          safeProviderCode(data[6]),
+        ].join("|");
+        increment(webShapes, shape);
+      }
+    } else {
+      increment(
+        customizedBeanKeyShapes,
+        Object.keys(customized!).sort().join(","),
+      );
+      const rows = statementRows(
+        customized!.meisaiList,
+        "customized_rows_invalid",
+      );
+      customizedRowCount += rows.length;
+      statementRowCount += rows.length;
+      for (const value of rows) {
+        if (!isRecord(value)) throw new Error("customized_row_invalid");
+        increment(customizedRowKeyShapes, Object.keys(value).sort().join(","));
+        const shape = [
+          safeProviderCode(value.uriageKbn),
+          dateShape(value.riyouDate),
+          amountShape(value.riyouKin),
+          amountShape(value.shiharaiTotal),
+          amountShape(value.tesuWariKin),
+          amountShape(value.genchiKin),
+          safeProviderCode(value.tukaRyaku),
+        ].join("|");
+        increment(customizedShapes, shape);
+      }
+    }
+  }
+  return {
+    recordStatus: validated.record.status,
+    recordSchemaVersion: validated.record.schemaVersion,
+    artifactCount: validated.artifacts.length,
+    statementArtifactCount,
+    statementRowCount,
+    webRowCount,
+    customizedRowCount,
+    webShapes,
+    customizedShapes,
+    webRowKeyShapes,
+    customizedRowKeyShapes,
+    webBeanKeyShapes,
+    customizedBeanKeyShapes,
+  };
+}
+
+function boundedArray(value: unknown, code: string): unknown[] {
+  if (!Array.isArray(value) || value.length > 10_000) throw new Error(code);
+  return value;
+}
+
+function statementRows(value: unknown, code: string): unknown[] {
+  return value === undefined || value === null ? [] : boundedArray(value, code);
+}
+
+function boundedStringArray(value: unknown, code: string): string[] {
+  const array = boundedArray(value, code);
+  if (
+    array.some((entry) => typeof entry !== "string" || entry.length > 5_000)
+  ) {
+    throw new Error(code);
+  }
+  return array as string[];
+}
+
+function dateShape(value: unknown): string {
+  if (typeof value !== "string") return "non_string";
+  if (value === "") return "empty";
+  const normalized = value.normalize("NFKC").trim();
+  const weekday = "(?:\\([^0-9()]{1,3}\\))?";
+  if (
+    new RegExp(`^\\d{4}/\\d{1,2}/\\d{1,2}${weekday}$`, "u").test(normalized)
+  ) {
+    return "yyyy_mm_dd";
+  }
+  if (new RegExp(`^\\d{1,2}/\\d{1,2}${weekday}$`, "u").test(normalized))
+    return "mm_dd";
+  if (
+    new RegExp(`^\\d{4}年\\d{1,2}月\\d{1,2}日${weekday}$`, "u").test(normalized)
+  ) {
+    return "yyyy_jp_md";
+  }
+  if (new RegExp(`^\\d{1,2}月\\d{1,2}日${weekday}$`, "u").test(normalized))
+    return "jp_md";
+  if (/^\d{8}$/u.test(normalized)) return "yyyymmdd";
+  if (/^\d{4}$/u.test(normalized)) return "mmdd";
+  return `other_${dateMask(normalized)}`;
+}
+
+function dateMask(value: string): string {
+  return [...value]
+    .map((character) => {
+      if (/\d/u.test(character)) return "d";
+      if (/[/().-]/u.test(character)) return character;
+      if (/\s/u.test(character)) return "_";
+      return "x";
+    })
+    .join("")
+    .slice(0, 64);
+}
+
+function amountShape(value: unknown): string {
+  if (typeof value !== "string") return "non_string";
+  if (value === "") return "empty";
+  const normalized = value.normalize("NFKC").replaceAll(",", "").trim();
+  if (/^-?\d+$/u.test(normalized))
+    return normalized.startsWith("-") ? "negative" : "unsigned";
+  return "other";
+}
+
+function safeProviderCode(value: unknown): string {
+  return typeof value === "string" && /^[A-Za-z0-9._-]{0,64}$/u.test(value)
+    ? value || "empty"
+    : "other";
+}
+
+function increment(counts: Counts, key: string): void {
+  counts[key] = (counts[key] ?? 0) + 1;
+}
+
+function mergeCounts(target: Counts, values: Counts): void {
+  for (const [key, value] of Object.entries(values)) {
+    target[key] = (target[key] ?? 0) + value;
+  }
+}
+
+function emptyAggregate() {
+  return {
+    scanned: 0,
+    audited: 0,
+    skipped: 0,
+    failed: 0,
+    statuses: {} as Counts,
+    schemas: {} as Counts,
+    artifacts: 0,
+    statementArtifacts: 0,
+    rows: 0,
+    webRows: 0,
+    customizedRows: 0,
+    webShapes: {} as Counts,
+    customizedShapes: {} as Counts,
+    webRowKeyShapes: {} as Counts,
+    customizedRowKeyShapes: {} as Counts,
+    webBeanKeyShapes: {} as Counts,
+    customizedBeanKeyShapes: {} as Counts,
+    failures: {} as Counts,
+  };
+}
+
+function objectAt(
+  root: Record<string, unknown>,
+  ...path: string[]
+): Record<string, unknown> | undefined {
+  let value: unknown = root;
+  for (const key of path) {
+    if (!isRecord(value)) return undefined;
+    value = value[key];
+  }
+  return isRecord(value) ? value : undefined;
+}
+
+function auditResponse(input: {
+  scanned: number;
+  audited: number;
+  skipped: number;
+  failed: number;
+  statuses: Counts;
+  schemas: Counts;
+  artifacts: number;
+  statementArtifacts: number;
+  rows: number;
+  webRows: number;
+  customizedRows: number;
+  webShapes: Counts;
+  customizedShapes: Counts;
+  webRowKeyShapes: Counts;
+  customizedRowKeyShapes: Counts;
+  webBeanKeyShapes: Counts;
+  customizedBeanKeyShapes: Counts;
+  failures: Counts;
+  nextCursor: string | null;
+}): Response {
+  return response({
+    schemaVersion: "vpass-r2-layer-b-structural-audit-v1",
+    scannedObjectCount: input.scanned,
+    auditedRecordCount: input.audited,
+    skippedObjectCount: input.skipped,
+    failedRecordCount: input.failed,
+    nextCursor: input.nextCursor,
+    truncated: input.nextCursor !== null,
+    recordStatusCounts: input.statuses,
+    recordSchemaCounts: input.schemas,
+    artifactCount: input.artifacts,
+    statementArtifactCount: input.statementArtifacts,
+    statementRowCount: input.rows,
+    webRowCount: input.webRows,
+    customizedRowCount: input.customizedRows,
+    observedWebShapes: input.webShapes,
+    observedCustomizedShapes: input.customizedShapes,
+    observedWebRowKeyShapes: input.webRowKeyShapes,
+    observedCustomizedRowKeyShapes: input.customizedRowKeyShapes,
+    observedWebBeanKeyShapes: input.webBeanKeyShapes,
+    observedCustomizedBeanKeyShapes: input.customizedBeanKeyShapes,
+    failureCodeCounts: input.failures,
+  });
+}
+
+function safeCursor(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 4_096 &&
+    !/[\x00-\x20\x7f]/u.test(value)
+  );
+}
+
+function safeCode(error: unknown): string {
+  const candidate =
+    error instanceof ImportError
+      ? error.code
+      : error instanceof Error
+        ? error.message
+        : "request_failed";
+  return /^[a-z0-9_-]{1,100}$/u.test(candidate) ? candidate : "request_failed";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function response(value: unknown, status = 200): Response {
+  return Response.json(value, {
+    status,
+    headers: { "cache-control": "no-store" },
+  });
+}

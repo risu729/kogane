@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "kogane-vpass-r2-layer-b-audit-local",
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "main": "src/vpass-layer-b-audit-worker.ts",
+  "compatibility_date": "2026-09-07",
+  "workers_dev": false,
+  "preview_urls": false,
+  "r2_buckets": [
+    {
+      "binding": "VPASS_SNAPSHOTS",
+      "bucket_name": "kogane-vpass-collector-poc",
+      "remote": true,
+    },
+  ],
+}
