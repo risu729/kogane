@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { parseVPointPayEmail, shouldForwardToMailbox } from "../src/vpoint-pay-email";
+import {
+  parseVPointPayEmail,
+  shouldForwardToMailbox,
+  storeVPointPayEmail,
+} from "../src/vpoint-pay-email";
 
 describe("V Point Pay notification email", () => {
   test("normalizes an explicit point-funded usage without changing signs", async () => {
@@ -60,7 +64,171 @@ describe("V Point Pay notification email", () => {
     expect(await parseVPointPayEmail(new TextEncoder().encode(text))).toBeNull();
     expect(shouldForwardToMailbox(null)).toBeTrue();
   });
+
+  test("stores both evidence objects with exact native SHA-256 checksums", async () => {
+    const parsed = await parseVPointPayEmail(notification("◇利用金額：1円"));
+    expect(parsed).not.toBeNull();
+    const puts: Array<{
+      key: string;
+      body: Uint8Array;
+      options: R2PutOptions;
+    }> = [];
+    const bucket = {
+      head: async () => null,
+      put: async (key: string, body: Uint8Array, options: R2PutOptions) => {
+        puts.push({ key, body, options });
+        return null;
+      },
+    } as unknown as R2Bucket;
+    const stored = await storeVPointPayEmail({
+      bucket,
+      parsed: parsed!,
+      envelopeFrom: "info@prepaid.smbc-card.com",
+      envelopeTo: "vpointpay@takuk.me",
+      expectedRecipient: "vpointpay@takuk.me",
+    });
+    expect(puts).toHaveLength(2);
+    for (const put of puts) {
+      expect(put.options.sha256).toBe(await sha256Hex(put.body));
+    }
+    expect(stored.event).toMatchObject({
+      schemaVersion: "vpoint-pay-email-event-v2",
+      sourceProvenance: {
+        delivery: "direct",
+        storedMessageScope: "smtp-message",
+        sourceVerification: "source_unverified",
+        envelopeFrom: "info@prepaid.smbc-card.com",
+        envelopeTo: "vpointpay@takuk.me",
+        authenticationProvenance: "not-exposed-by-cloudflare-email-event",
+      },
+    });
+  });
+
+  test("fails closed before storage when the direct SMTP envelope sender is a lookalike", async () => {
+    const parsed = await parseVPointPayEmail(notification("◇利用金額：1円"));
+    const puts: string[] = [];
+    const bucket = {
+      head: async () => null,
+      put: async (key: string) => {
+        puts.push(key);
+        return null;
+      },
+    } as unknown as R2Bucket;
+    await expect(
+      storeVPointPayEmail({
+        bucket,
+        parsed: parsed!,
+        envelopeFrom: "attacker@example.invalid",
+        envelopeTo: "vpointpay@takuk.me",
+        expectedRecipient: "vpointpay@takuk.me",
+      }),
+    ).rejects.toThrow("vpoint_pay_email_envelope_sender_invalid");
+    expect(puts).toHaveLength(0);
+  });
+
+  test("does not rewrite an immutable duplicate pair", async () => {
+    const parsed = await parseVPointPayEmail(notification("◇利用金額：1円"));
+    const memory = memoryBucket();
+    await store(memory.bucket, parsed!);
+    memory.puts.length = 0;
+    await expect(store(memory.bucket, parsed!)).resolves.toMatchObject({
+      duplicate: true,
+    });
+    expect(memory.puts).toHaveLength(0);
+  });
+
+  for (const failedSuffix of [".eml", ".json"] as const) {
+    test(`repairs a verified pair after the first ${failedSuffix} PUT fails`, async () => {
+      const parsed = await parseVPointPayEmail(notification("◇利用金額：1円"));
+      const memory = memoryBucket(failedSuffix);
+      await expect(store(memory.bucket, parsed!)).rejects.toThrow("synthetic_put_failure");
+      expect(memory.objects).toHaveLength(1);
+      const retainedKey = memory.objects[0]!.key;
+
+      await expect(store(memory.bucket, parsed!)).resolves.toMatchObject({
+        duplicate: false,
+      });
+      expect(memory.objects).toHaveLength(2);
+      expect(memory.puts.filter((key) => key === retainedKey)).toHaveLength(1);
+      await expect(store(memory.bucket, parsed!)).resolves.toMatchObject({
+        duplicate: true,
+      });
+    });
+  }
+
+  test("fails closed when the retained side of a partial pair was tampered", async () => {
+    const parsed = await parseVPointPayEmail(notification("◇利用金額：1円"));
+    const tampering: Array<{
+      mutate(object: MemoryObject): void;
+      error: string;
+    }> = [
+      {
+        mutate: (object) => {
+          object.size += 1;
+        },
+        error: "vpoint_pay_email_existing_object_size_mismatch",
+      },
+      {
+        mutate: (object) => {
+          object.httpMetadata = { contentType: "application/octet-stream" };
+        },
+        error: "vpoint_pay_email_existing_object_content_type_mismatch",
+      },
+      {
+        mutate: (object) => {
+          object.customMetadata = { ...object.customMetadata, eventType: "tampered" };
+        },
+        error: "vpoint_pay_email_existing_object_metadata_mismatch",
+      },
+      {
+        mutate: (object) => {
+          object.checksums = { sha256: new Uint8Array(32).buffer } as R2Checksums;
+        },
+        error: "vpoint_pay_email_existing_object_native_checksum_mismatch",
+      },
+    ];
+
+    for (const tamper of tampering) {
+      const memory = memoryBucket(".json");
+      await expect(store(memory.bucket, parsed!)).rejects.toThrow("synthetic_put_failure");
+      tamper.mutate(memory.objects[0]!);
+      await expect(store(memory.bucket, parsed!)).rejects.toThrow(tamper.error);
+      expect(memory.puts).toHaveLength(2);
+    }
+  });
+
+  test("does not treat an RFC Authentication-Results header as trusted EmailEvent provenance", async () => {
+    const raw = new TextEncoder().encode(
+      new TextDecoder()
+        .decode(notification("◇利用金額：1円"))
+        .replace(
+          "From: V Point Pay",
+          "Authentication-Results: attacker.invalid; dkim=pass header.d=prepaid.smbc-card.com\r\nFrom: V Point Pay",
+        ),
+    );
+    const parsed = await parseVPointPayEmail(raw);
+    const bucket = {
+      head: async () => null,
+      put: async () => null,
+    } as unknown as R2Bucket;
+    const stored = await storeVPointPayEmail({
+      bucket,
+      parsed: parsed!,
+      envelopeFrom: "info@prepaid.smbc-card.com",
+      envelopeTo: "vpointpay@takuk.me",
+      expectedRecipient: "vpointpay@takuk.me",
+    });
+    expect(stored.event.sourceProvenance).toMatchObject({
+      sourceVerification: "source_unverified",
+      authenticationProvenance: "not-exposed-by-cloudflare-email-event",
+    });
+  });
 });
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
 
 function notification(text: string, subject = "【VポイントPay】ご利用のお知らせ"): Uint8Array {
   return new TextEncoder().encode(
@@ -77,4 +245,61 @@ function notification(text: string, subject = "【VポイントPay】ご利用�
       text,
     ].join("\r\n"),
   );
+}
+
+function store(
+  bucket: R2Bucket,
+  parsed: NonNullable<Awaited<ReturnType<typeof parseVPointPayEmail>>>,
+) {
+  return storeVPointPayEmail({
+    bucket,
+    parsed,
+    envelopeFrom: "info@prepaid.smbc-card.com",
+    envelopeTo: "vpointpay@takuk.me",
+    expectedRecipient: "vpointpay@takuk.me",
+  });
+}
+
+interface MemoryObject {
+  key: string;
+  size: number;
+  httpMetadata: R2HTTPMetadata;
+  customMetadata: Record<string, string>;
+  checksums: R2Checksums;
+}
+
+function memoryBucket(failOnceSuffix?: ".eml" | ".json"): {
+  bucket: R2Bucket;
+  puts: string[];
+  objects: MemoryObject[];
+} {
+  const objects: MemoryObject[] = [];
+  const puts: string[] = [];
+  let pendingFailure = failOnceSuffix;
+  const bucket = {
+    head: async (key: string) =>
+      (objects.find((object) => object.key === key) ?? null) as unknown as R2Object,
+    put: async (key: string, body: Uint8Array, options: R2PutOptions) => {
+      puts.push(key);
+      if (pendingFailure && key.endsWith(pendingFailure)) {
+        pendingFailure = undefined;
+        throw new Error("synthetic_put_failure");
+      }
+      const checksum = options.sha256;
+      if (typeof checksum !== "string") throw new Error("test_requires_hex_sha256");
+      objects.push({
+        key,
+        size: body.byteLength,
+        httpMetadata: options.httpMetadata as R2HTTPMetadata,
+        customMetadata: { ...(options.customMetadata ?? {}) },
+        checksums: { sha256: hexToArrayBuffer(checksum) } as R2Checksums,
+      });
+      return null;
+    },
+  } as unknown as R2Bucket;
+  return { bucket, puts, objects };
+}
+
+function hexToArrayBuffer(value: string): ArrayBuffer {
+  return Uint8Array.from(value.match(/.{2}/gu) ?? [], (byte) => Number.parseInt(byte, 16)).buffer;
 }

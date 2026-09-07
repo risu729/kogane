@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run && bash test/verify-sbi-shinsei-route.test.sh && bash test/verify-mobile-suica-route.test.sh && bash test/verify-global-pass-route.test.sh && bash test/verify-myjcb-route.test.sh && bash test/verify-moneyforward-route.test.sh && bash test/verify-v-point-route.test.sh && bash test/verify-vpass-route.test.sh",
+    "test": "vitest run && bash test/verify-sbi-shinsei-route.test.sh && bash test/verify-mobile-suica-route.test.sh && bash test/verify-global-pass-route.test.sh && bash test/verify-myjcb-route.test.sh && bash test/verify-moneyforward-route.test.sh && bash test/verify-v-point-route.test.sh && bash test/verify-vpass-route.test.sh && bash test/verify-v-point-pay-email-route.test.sh",
     "typecheck": "wrangler types && tsc --noEmit",
     "check:importer": "bun build scripts/ingest-file.ts --target=bun --outfile=/tmp/kogane-ingest-file-check.js",
     "cf:types": "wrangler types",

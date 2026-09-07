@@ -366,6 +366,27 @@ source R2はbackfill完了後も自動削除しない。
 失敗時はvalidatorやsource policyを緩和せず、そのmanifestの手前に残ったcursorから再開する。
 migrationとsource R2はrollback・削除しない。
 
+### V Point Pay通知メールの本番適用
+
+このPRはdeployせず、停止済み`poc/vpoint-pay-worker` app pollingも再有効化しない。本番適用時は
+中央migration、Importer、`poc/vpoint-worker`の順で直列に適用する。中央では
+`collector-r2-v-point-pay-email`専用credential/routeと
+`raw/v-point-pay-email/{date}/{message-sha256}.{extension}`だけを許可するstorage policyを確認する。
+Importerは専用tokenを他sourceと共有せず、collectorは既存Service Bindingを使う。
+
+導入前に`bun run audit:vpoint-pay-email-r2`を実行し、raw/normalized件数が一致しfailed 0である
+ことだけを確認する。native checksum有無もaggregate件数だけを出す。既存履歴の欠落はbounded
+bodyから再計算したchecksumで検証し、checksumが記録済みなら一致を必須とする。次に
+`poc/vpoint-worker/scripts/backfill-vpoint-pay-email-raw-evidence.sh`を完走し、中央の
+`v-point-pay` run/seal/artifact集計だけを確認する。cursor消去後にdeployment revisionだけを変えた
+Importerで再走査しても、固定`vpoint-pay-email-r2-v2`契約によりrun・artifact・seal件数は不変で
+なければならない。attempt数は増えてよい。前後でsource R2のaggregate inventoryを比較し、
+変更・削除がないことを確認する。本文、値、object key、個別hash、credentialは出力しない。
+
+メールpairはcanonical `v-point-pay`、既存reconciliationはcanonical `v-point`であり混ぜない。
+app snapshotは対象外である。GitHub Actions cronは追加せず、既存Email Routing・V Point cronの
+変更もこのrolloutに含めない。
+
 ### MyJCBの本番適用
 
 このPRはdeployせず、既存MyJCB Cronも変更しない。本番適用時は次を直列に行う。

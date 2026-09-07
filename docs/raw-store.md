@@ -379,8 +379,10 @@ Layer A therefore catalogues the bytes as a `collector_summary` in the `v-point`
 source run that produced it; it does not claim cross-source raw lineage or a
 financial match. Any interpretation of its entries, including match confidence
 and links to V Point Pay observations, starts in phase 3. The archived direct and
-forwarded messages themselves remain `provider_message` artifacts under
-`v-point-pay`.
+forwarded messages are `user_capture / unknown` artifacts under `v-point-pay`:
+new mail records the SMTP envelope and retained-message boundary, but EmailEvent
+does not expose trusted authentication results and legacy mail has no saved
+envelope provenance. Neither path is promoted to a provider-source claim.
 
 The Layer A validator still proves every reconciliation candidate is structurally
 real: its source names a validated history page, its index is within that page's
@@ -394,6 +396,16 @@ enables only the reviewed `raw/v-point/{date}/{run-id}/{artifact}.json` and
 templates. The point collector outbox and generated reconciliation bucket are
 validated separately; neither policy grants the importer access to the raw
 V Point Pay mail source.
+
+The V Point Pay email importer has a separate least-privilege client route to
+canonical source `v-point-pay`. It accepts only the exact
+`raw/v-point-pay-email/{date}/{message-sha256}.{extension}` storage template and
+catalogues each validated EML/normalized-JSON pair as a two-artifact
+`email_batch`. It never reads the reconciliation prefix, which remains a
+`v-point` collector summary, and it never treats the disabled app polling
+prefix as email evidence. Its one-object backfill cursor is HMAC authenticated;
+public responses contain aggregate counts and fixed codes, not source keys or
+individual hashes.
 
 Financial HTTP and storage templates remain default-deny. Each importer PR must
 add a reviewed source-specific scope and exact template-policy migration from

@@ -200,10 +200,15 @@ async function terminal(runId: number, count: number, outcome = "success") {
   });
 }
 
-async function seal(runId: number, artifacts: InventoryItem[], suffix: string) {
+async function seal(
+  runId: number,
+  artifacts: InventoryItem[],
+  suffix: string,
+  declarationBasis = "producer_manifest",
+) {
   const response = await expectPost(`/v1/runs/${runId}/seal`, {
     artifacts,
-    declarationBasis: "producer_manifest",
+    declarationBasis,
     externalAttemptId: `fixture-${suffix}`,
   });
   expect(response.sealed).toBe(true);
@@ -1281,6 +1286,150 @@ describe("sanitized source-usecase contract", () => {
     );
     await terminal(reconciliationRun.runId, 1);
     await seal(reconciliationRun.runId, [report], "v-point-reconciliation");
+  });
+
+  it("catalogues and seals the strict V Point Pay email pair descriptor in real D1", async () => {
+    const { runId } = await createRun(
+      "v-point-pay",
+      "fixture-v-point-pay-email-pair",
+      "email-pair-vpoint-pay-email-r2-v2",
+    );
+    const unitId = await unit(runId, "message", "notification");
+    const rawBytes =
+      "From: V Point Pay <info@prepaid.smbc-card.com>\r\nSubject: fixture\r\n\r\nbody";
+    const normalizedBytes = JSON.stringify({
+      schemaVersion: "vpoint-pay-email-event-v1",
+      eventType: "usage",
+      occurredAt: "2026-08-31T03:00:00.000Z",
+    });
+    const raw = await upload(runId, rawBytes);
+    const normalized = await upload(runId, normalizedBytes);
+    const storage = async (suffix: string) => ({
+      storageKind: "r2",
+      containerName: "kogane-vpoint-pay-collector-poc",
+      objectKeyTemplate: "raw/v-point-pay-email/{date}/{message-sha256}.{extension}",
+      objectKeyFingerprint: await sha256Hex(
+        new TextEncoder().encode(`fixture-vpoint-pay:${suffix}`),
+      ),
+      fingerprintKeyVersion: "collector-r2-v1",
+      redactionVersion: "v1",
+      objectVersion: null,
+      etag: null,
+      lastModifiedAtMs: null,
+      lastModifiedAtBasis: null,
+    });
+    const rawDescriptor = {
+      artifactKey: "notification.eml",
+      artifactRole: "user_capture",
+      payloadFidelity: "unknown",
+      containerKind: "single",
+      lineageDisposition: "not_applicable",
+      dataset: "notification-mail",
+      formatId: "internet-message-format",
+      formatVersion: "rfc822",
+      declaredMediaType: "message/rfc822",
+      mediaTypeBasis: "file_metadata",
+      fetchedAtMs: 1_788_164_000_000,
+      fetchedAtBasis: "source",
+      fetchUnitId: unitId,
+      pageGroupId: null,
+      pageIndex: null,
+      sequence: 0,
+      sha256: raw.sha256,
+      byteSize: raw.byteSize,
+      http: null,
+      storage: await storage("eml"),
+      file: null,
+      email: {
+        transportShape: "unknown",
+        senderDomain: null,
+        receivedAtMs: 1_788_164_000_000,
+        receivedAtBasis: "rfc_date",
+        messageIdSha256: await sha256Hex(new TextEncoder().encode("fixture-message-id")),
+        partIndex: null,
+        mimePartPath: null,
+        innerMessageSha256: null,
+        innerSenderDomain: null,
+        filenameTemplate: null,
+        filenameFingerprint: null,
+        fingerprintKeyVersion: null,
+        redactionVersion: "v1",
+      },
+      ranges: [],
+      transformSteps: [],
+      relations: [],
+    };
+    const rawResult = await expectPost(`/v1/runs/${runId}/artifacts`, rawDescriptor);
+    const normalizedDescriptor = {
+      artifactKey: "normalized-event.json",
+      artifactRole: "collector_derived",
+      payloadFidelity: "transformed",
+      containerKind: "single",
+      lineageDisposition: "linked",
+      dataset: "notification-event",
+      formatId: "vpoint-pay-email-event-json",
+      formatVersion: "vpoint-pay-email-event-v1",
+      declaredMediaType: "application/json",
+      mediaTypeBasis: "file_metadata",
+      fetchedAtMs: 1_788_164_000_000,
+      fetchedAtBasis: "source",
+      fetchUnitId: unitId,
+      pageGroupId: null,
+      pageIndex: null,
+      sequence: 1,
+      sha256: normalized.sha256,
+      byteSize: normalized.byteSize,
+      http: null,
+      storage: await storage("json"),
+      file: null,
+      email: null,
+      ranges: [],
+      transformSteps: [
+        {
+          stepIndex: 0,
+          stepKind: "extracted",
+          transformerId: "vpoint-pay-email-parser",
+          transformerVersion: "vpoint-pay-email-event-v1",
+        },
+      ],
+      relations: [
+        {
+          parentRunId: null,
+          parentArtifactKey: "notification.eml",
+          relation: "input",
+          transformerId: "vpoint-pay-email-parser",
+          transformerVersion: "vpoint-pay-email-event-v1",
+        },
+      ],
+    };
+    const normalizedResult = await expectPost(`/v1/runs/${runId}/artifacts`, normalizedDescriptor);
+    await unitTerminal(unitId, 2);
+    await terminal(runId, 2);
+    await seal(
+      runId,
+      [
+        {
+          artifactKey: "notification.eml",
+          sha256: raw.sha256,
+          descriptorSha256: String(rawResult.descriptorSha256),
+        },
+        {
+          artifactKey: "normalized-event.json",
+          sha256: normalized.sha256,
+          descriptorSha256: String(normalizedResult.descriptorSha256),
+        },
+      ],
+      "v-point-pay-email-strict-pair",
+      "email_batch",
+    );
+
+    const stored = await env.DB.prepare(`
+      SELECT declaration_basis, expected_artifact_count
+      FROM run_inventories WHERE fetch_run_id = ?
+    `)
+      .bind(runId)
+      .first<{ declaration_basis: string; expected_artifact_count: number }>();
+    expect(stored).toEqual({ declaration_basis: "email_batch", expected_artifact_count: 2 });
   });
 
   it("records Sony sanitized evidence without claiming retained source bytes", async () => {

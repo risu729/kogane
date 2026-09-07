@@ -9,6 +9,7 @@ import { importSbiVcRun } from "./sbi-vc";
 import { importSonyRun } from "./sony";
 import { importVPointRun } from "./v-point";
 import { importVpassRun } from "./vpass";
+import { importVPointPayEmailPair } from "./v-point-pay-email";
 
 type JsonObject = Record<string, unknown>;
 
@@ -211,6 +212,40 @@ export default {
           throw new ImportError(400, "backfill_limit_must_be_one");
         }
         return json(await backfillVPoint(env, cursor));
+      } catch (error) {
+        return errorResponse(error);
+      }
+    }
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/v-point-pay-email/import-run" &&
+      url.search === ""
+    ) {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["normalizedKey"]);
+        const normalizedKey = requiredString(input.normalizedKey, "normalized_key_invalid", 500);
+        return json(await importOneVPointPayEmail(env, normalizedKey));
+      } catch (error) {
+        return errorResponse(error);
+      }
+    }
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/v-point-pay-email/backfill-page" &&
+      url.search === ""
+    ) {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["cursor", "limit"]);
+        const cursor =
+          input.cursor === undefined
+            ? undefined
+            : requiredString(input.cursor, "cursor_invalid", 4_096);
+        if (input.limit !== undefined && input.limit !== 1) {
+          throw new ImportError(400, "backfill_limit_must_be_one");
+        }
+        return json(await backfillVPointPayEmail(env, cursor));
       } catch (error) {
         return errorResponse(error);
       }
@@ -1491,6 +1526,242 @@ function importOneVPoint(env: Env, manifestKey: string, offset: number, immediat
     offset,
     immediate,
   });
+}
+
+function importOneVPointPayEmail(env: Env, normalizedKey: string) {
+  return importVPointPayEmailPair({
+    bucket: env.VPOINT_PAY_SNAPSHOTS,
+    centralService: env.RAW_EVIDENCE,
+    centralToken: env.RAW_EVIDENCE_TOKEN_VPOINT_PAY_EMAIL,
+    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
+    importerVersion: env.IMPORTER_VERSION,
+    normalizedKey,
+  });
+}
+
+interface VPointPayEmailBackfillCursor {
+  v: 1;
+  scanCursor: string | null;
+  scanDone: boolean;
+}
+
+async function backfillVPointPayEmail(
+  env: Env,
+  encodedCursor: string | undefined,
+): Promise<JsonObject> {
+  const cursorSecret = dedicatedVPointPayEmailToken(env.RAW_EVIDENCE_TOKEN_VPOINT_PAY_EMAIL);
+  const state = encodedCursor
+    ? await decodeVPointPayEmailCursor(encodedCursor, cursorSecret)
+    : null;
+  const listed = await env.VPOINT_PAY_SNAPSHOTS.list({
+    prefix: "raw/v-point-pay-email/",
+    limit: 1,
+    ...(state?.scanCursor ? { cursor: state.scanCursor } : {}),
+  });
+  if (listed.objects.length > 1) throw new ImportError(409, "prefix_page_too_large");
+  const object = listed.objects[0];
+  const scanDone = !listed.truncated;
+  const scanCursor = listed.truncated ? listed.cursor : undefined;
+  if (listed.truncated && !scanCursor) throw new ImportError(409, "prefix_cursor_missing");
+  if (listed.truncated && state?.scanCursor === scanCursor) {
+    throw new ImportError(409, "prefix_cursor_did_not_advance");
+  }
+  const continuation: VPointPayEmailBackfillCursor = {
+    v: 1,
+    scanCursor: scanCursor ?? null,
+    scanDone,
+  };
+  const nextCursor = await nextVPointPayEmailScanCursor(continuation, cursorSecret);
+  if (!object) {
+    return vPointPayEmailBackfillResponse({ scannedObjectCount: 0, nextCursor });
+  }
+  if (!object.key.endsWith(".json")) {
+    return vPointPayEmailBackfillResponse({
+      scannedObjectCount: 1,
+      skippedObjectCount: 1,
+      nextCursor,
+    });
+  }
+  try {
+    return vPointPayEmailBackfillResponse({
+      scannedObjectCount: 1,
+      importedPairCount: 1,
+      nextCursor,
+      result: await importOneVPointPayEmail(env, object.key),
+    });
+  } catch (error) {
+    return vPointPayEmailBackfillResponse({
+      scannedObjectCount: 1,
+      failedPairCount: 1,
+      failureCode: safeCode(error),
+      // A failed pair must be retried from the caller's unchanged cursor.
+      nextCursor: null,
+    });
+  }
+}
+
+function vPointPayEmailBackfillResponse(input: {
+  scannedObjectCount: number;
+  importedPairCount?: number;
+  skippedObjectCount?: number;
+  failedPairCount?: number;
+  failureCode?: string;
+  nextCursor: string | null;
+  result?: unknown;
+}): JsonObject {
+  return {
+    source: "v-point-pay-email",
+    scannedObjectCount: input.scannedObjectCount,
+    importedPairCount: input.importedPairCount ?? 0,
+    skippedObjectCount: input.skippedObjectCount ?? 0,
+    failedPairCount: input.failedPairCount ?? 0,
+    nextCursor: input.nextCursor,
+    truncated: input.nextCursor !== null,
+    ...(input.failureCode ? { failureCode: input.failureCode } : {}),
+    ...(input.result ? { result: input.result } : {}),
+  };
+}
+
+async function nextVPointPayEmailScanCursor(
+  state: VPointPayEmailBackfillCursor,
+  secret: string,
+): Promise<string | null> {
+  return state.scanDone
+    ? null
+    : encodeVPointPayEmailCursor(
+        {
+          v: 1,
+          scanCursor: state.scanCursor,
+          scanDone: false,
+        },
+        secret,
+      );
+}
+
+async function encodeVPointPayEmailCursor(
+  value: VPointPayEmailBackfillCursor,
+  secret: string,
+): Promise<string> {
+  assertVPointPayEmailCursor(value);
+  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify(value)));
+  const signature = await scopedCursorSignature("vpoint-pay-email-v1", payload, secret);
+  return `vpoint-pay-email-v1.${payload}.${signature}`;
+}
+
+async function decodeVPointPayEmailCursor(
+  value: string,
+  secret: string,
+): Promise<VPointPayEmailBackfillCursor> {
+  const match = /^vpoint-pay-email-v1\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/u.exec(value);
+  if (
+    !match?.[1] ||
+    !match[2] ||
+    !(await verifyScopedCursorSignature("vpoint-pay-email-v1", match[1], match[2], secret))
+  ) {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(base64UrlDecode(match[1])),
+    );
+  } catch {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  const input = parsed as JsonObject;
+  exactKeys(input, ["v", "scanCursor", "scanDone"]);
+  const scanCursor = input.scanCursor;
+  const scanDone = input.scanDone;
+  if (input.v !== 1 || typeof scanDone !== "boolean") {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  if (scanDone) {
+    if (scanCursor !== null) throw new ImportError(400, "cursor_invalid");
+  } else if (
+    typeof scanCursor !== "string" ||
+    scanCursor.length === 0 ||
+    scanCursor.length > 4_096 ||
+    /[\x00-\x20\x7f]/u.test(scanCursor)
+  ) {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  return { v: 1, scanCursor, scanDone };
+}
+
+function assertVPointPayEmailCursor(value: VPointPayEmailBackfillCursor): void {
+  const scanStateValid = value.scanDone
+    ? value.scanCursor === null
+    : typeof value.scanCursor === "string" &&
+      value.scanCursor.length > 0 &&
+      value.scanCursor.length <= 4_096 &&
+      !/[\x00-\x20\x7f]/u.test(value.scanCursor);
+  if (value.v !== 1 || typeof value.scanDone !== "boolean" || !scanStateValid) {
+    throw new ImportError(400, "cursor_invalid");
+  }
+}
+
+function dedicatedVPointPayEmailToken(secret: string): string {
+  if (
+    !secret.startsWith("collector-r2-v-point-pay-email.") ||
+    secret.slice("collector-r2-v-point-pay-email.".length).length < 20 ||
+    /\s/u.test(secret)
+  ) {
+    throw new ImportError(500, "cursor_configuration_invalid");
+  }
+  return secret;
+}
+
+async function scopedCursorSignature(
+  scope: string,
+  payload: string,
+  secret: string,
+): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return base64UrlEncode(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${scope}.${payload}`)),
+    ),
+  );
+}
+
+async function verifyScopedCursorSignature(
+  scope: string,
+  payload: string,
+  signature: string,
+  secret: string,
+): Promise<boolean> {
+  try {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+    return crypto.subtle.verify(
+      "HMAC",
+      key,
+      ownedBytes(base64UrlDecode(signature)),
+      new TextEncoder().encode(`${scope}.${payload}`),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function ownedBytes(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
 }
 
 interface VPointBackfillCursor {

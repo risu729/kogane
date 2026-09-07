@@ -18,6 +18,252 @@ describe("collector R2 importer routes", () => {
     }
   });
 
+  test("the V Point Pay email backfill scans one object with an opaque HMAC cursor", async () => {
+    const calls: R2ListOptions[] = [];
+    const bucket = {
+      list: async (options: R2ListOptions) => {
+        calls.push(options);
+        return options.cursor === "next"
+          ? ({ objects: [], truncated: false } as unknown as R2Objects)
+          : ({
+              objects: [{ key: `raw/v-point-pay-email/2026/08/31/${"a".repeat(64)}.eml` }],
+              truncated: true,
+              cursor: "next",
+            } as unknown as R2Objects);
+      },
+    } as unknown as R2Bucket;
+    const response = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point-pay-email/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        bucket,
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(calls).toEqual([{ prefix: "raw/v-point-pay-email/", limit: 1 }]);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      source: "v-point-pay-email",
+      scannedObjectCount: 1,
+      importedPairCount: 0,
+      skippedObjectCount: 1,
+      failedPairCount: 0,
+      truncated: true,
+    });
+    expect(body.nextCursor).toBeString();
+    expect(body.nextCursor as string).toStartWith("vpoint-pay-email-v1.");
+    expect(JSON.stringify(body)).not.toContain("raw/v-point-pay-email/");
+    expect(JSON.stringify(body)).not.toContain(".eml");
+
+    const final = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point-pay-email/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cursor: body.nextCursor, limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        bucket,
+      ),
+    );
+    expect(final.status).toBe(200);
+    expect(calls[1]).toEqual({ prefix: "raw/v-point-pay-email/", limit: 1, cursor: "next" });
+  });
+
+  test("the V Point Pay email backfill rejects tampered, legacy, and stalled cursors", async () => {
+    const never = {
+      list: async () => {
+        throw new Error("must_not_list");
+      },
+    } as unknown as R2Bucket;
+    for (const cursor of ["not-opaque", `vpoint-pay-email-v0.e30.${"A".repeat(43)}`]) {
+      const response = await worker.fetch(
+        new Request("https://importer.internal/v1/v-point-pay-email/backfill-page", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ cursor, limit: 1 }),
+        }) as Parameters<typeof worker.fetch>[0],
+        environment(
+          {} as R2Bucket,
+          {} as R2Bucket,
+          {} as R2Bucket,
+          {} as R2Bucket,
+          {} as R2Bucket,
+          {} as R2Bucket,
+          {} as R2Bucket,
+          never,
+        ),
+      );
+      expect(response.status).toBe(400);
+      expect((await response.json()) as unknown).toEqual({ error: "cursor_invalid" });
+    }
+
+    const seed = {
+      list: async () =>
+        ({
+          objects: [{ key: `raw/v-point-pay-email/2026/08/31/${"a".repeat(64)}.eml` }],
+          truncated: true,
+          cursor: "same",
+        }) as unknown as R2Objects,
+    } as unknown as R2Bucket;
+    const seeded = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point-pay-email/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        seed,
+      ),
+    );
+    const signed = ((await seeded.json()) as { nextCursor: string }).nextCursor;
+    const tampered = `${signed.slice(0, -1)}${signed.endsWith("A") ? "B" : "A"}`;
+    const tamperedResponse = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point-pay-email/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cursor: tampered, limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        never,
+      ),
+    );
+    expect(tamperedResponse.status).toBe(400);
+
+    const stalled = {
+      list: async () => ({ objects: [], truncated: true, cursor: "same" }) as unknown as R2Objects,
+    } as unknown as R2Bucket;
+    const stalledResponse = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point-pay-email/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cursor: signed, limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        stalled,
+      ),
+    );
+    expect(stalledResponse.status).toBe(409);
+  });
+
+  test("the V Point Pay email backfill preserves a progressing empty R2 page", async () => {
+    const bucket = {
+      list: async () => ({ objects: [], truncated: true, cursor: "next" }) as unknown as R2Objects,
+    } as unknown as R2Bucket;
+    const response = await worker.fetch(
+      new Request("https://importer.internal/v1/v-point-pay-email/backfill-page", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ limit: 1 }),
+      }) as Parameters<typeof worker.fetch>[0],
+      environment(
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        bucket,
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()) as unknown).toMatchObject({
+      scannedObjectCount: 0,
+      nextCursor: expect.stringContaining("vpoint-pay-email-v1."),
+      truncated: true,
+    });
+  });
+
+  test("the V Point Pay email backfill returns no continuation and retries the same failed pair", async () => {
+    const normalizedKey = `raw/v-point-pay-email/2026/08/31/${"a".repeat(64)}.json`;
+    const calls: R2ListOptions[] = [];
+    const bucket = {
+      list: async (options: R2ListOptions) => {
+        calls.push(options);
+        if (options.prefix === "raw/v-point-pay-email/") {
+          return {
+            objects: [{ key: normalizedKey }],
+            truncated: true,
+            cursor: "must-not-escape",
+          } as unknown as R2Objects;
+        }
+        return {
+          objects: [{ key: normalizedKey }],
+          truncated: false,
+        } as unknown as R2Objects;
+      },
+    } as unknown as R2Bucket;
+    const env = environment(
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      bucket,
+    );
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await worker.fetch(
+        new Request("https://importer.internal/v1/v-point-pay-email/backfill-page", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ limit: 1 }),
+        }) as Parameters<typeof worker.fetch>[0],
+        env,
+      );
+      expect(response.status).toBe(200);
+      expect((await response.json()) as unknown).toMatchObject({
+        scannedObjectCount: 1,
+        failedPairCount: 1,
+        nextCursor: null,
+        truncated: false,
+      });
+    }
+    expect(calls.filter((call) => call.prefix === "raw/v-point-pay-email/")).toEqual([
+      { prefix: "raw/v-point-pay-email/", limit: 1 },
+      { prefix: "raw/v-point-pay-email/", limit: 1 },
+    ]);
+  });
+
   test("the V Point backfill page scans exactly one source object", async () => {
     const calls: R2ListOptions[] = [];
     const bucket = {
@@ -704,7 +950,7 @@ function environment(
     VPOINT_PAY_SNAPSHOTS: vPointPayBucket,
     VPASS_SNAPSHOTS: {} as R2Bucket,
     RAW_EVIDENCE: {} as Fetcher,
-    IMPORTER_VERSION: "collector-r2-importer-v17",
+    IMPORTER_VERSION: "collector-r2-importer-v18",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_VC: `collector-r2-sbi-vc.${"v".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SONY: `collector-r2-sony-bank.${"o".repeat(32)}`,
@@ -716,6 +962,7 @@ function environment(
     RAW_EVIDENCE_TOKEN_MONEYFORWARD: `collector-r2-moneyforward.${"f".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_VPOINT: `collector-r2-v-point.${"p".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_VPASS: `collector-r2-vpass.${"v".repeat(32)}`,
+    RAW_EVIDENCE_TOKEN_VPOINT_PAY_EMAIL: `collector-r2-v-point-pay-email.${"e".repeat(32)}`,
     ORIGIN_FINGERPRINT_KEY: "ab".repeat(32),
   };
 }
