@@ -43,20 +43,16 @@ export function parseSbiVcEnvelope(bytes: Uint8Array, dataset: string): SbiVcEnv
     throw new Error(`${dataset}: gateway envelope body and meta must be objects`);
   }
   const meta = parsed["meta"];
-  const metaKeys = Object.keys(meta).sort();
-  const expectedMeta = ["sessUpdTime", "status", "timestamp"];
-  if (
-    metaKeys.length !== expectedMeta.length ||
-    metaKeys.some((key, index) => key !== expectedMeta[index])
-  ) {
-    throw new Error(`${dataset}: gateway meta fields do not match the sanitized contract`);
+  if (Object.hasOwn(meta, "secureKey")) {
+    throw new Error(`${dataset}: sanitized gateway meta must not contain secureKey`);
   }
-  if (
-    meta["status"] !== "OK" ||
-    typeof meta["sessUpdTime"] !== "string" ||
-    typeof meta["timestamp"] !== "string"
-  ) {
+  if (meta["status"] !== "OK") {
     throw new Error(`${dataset}: gateway meta values do not match the sanitized contract`);
+  }
+  for (const field of ["sessUpdTime", "timestamp"] as const) {
+    if (meta[field] !== undefined && typeof meta[field] !== "string") {
+      throw new Error(`${dataset}: gateway meta values do not match the sanitized contract`);
+    }
   }
   return { meta, body: parsed["body"] };
 }
@@ -134,6 +130,18 @@ export function requireString(
   if (typeof candidate === "string") return candidate;
   warnings.push(`${locator}.${field}: expected a string; raw value preserved`);
   return undefined;
+}
+
+export function requireNonEmptyString(
+  value: Record<string, unknown>,
+  field: string,
+  locator: string,
+): string {
+  const candidate = value[field];
+  if (typeof candidate !== "string" || candidate.trim() === "") {
+    throw new Error(`${locator}.${field}: expected a non-empty string`);
+  }
+  return candidate;
 }
 
 export function warnNonStringFields(
@@ -258,5 +266,8 @@ export function collisionFreeTuple(first: string, second: string): string {
 }
 
 function nonNegativeInteger(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  const number = typeof value === "string" && /^\d+$/u.test(value) ? Number(value) : value;
+  return typeof number === "number" && Number.isSafeInteger(number) && number >= 0
+    ? number
+    : undefined;
 }

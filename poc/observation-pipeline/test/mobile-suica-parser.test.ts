@@ -23,12 +23,13 @@ const MORE_KINDS_FIXTURE = join(
 function artifact(
   dataset = "sf-history",
   mime = "application/json",
-  runStatus = "success",
+  runStatus: ArtifactMeta["runStatus"] = "success",
 ): ArtifactMeta {
   return {
     id: 1,
     sourceId: "mobile-suica",
     runStatus,
+    runFailureCount: runStatus === "success" ? 0 : 1,
     dataset,
     url: null,
     mime,

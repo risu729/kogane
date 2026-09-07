@@ -240,9 +240,20 @@ All SBI VC Trade rows use `sbi-vc-trade:main` as source identity. Provider
 account identifiers remain in `extra`, never in the join key. Every row has a
 JSON locator and retains sanitized gateway/page context without copying the
 whole sibling list. The synthetic fixtures mirror the audited shape; a
-production R2 read-only canary confirmed aggregate one-parser-per-artifact and
-zero parse failures without emitting object keys, hashes, bodies, financial
-values, account identifiers, or secrets.
+checked-in, localhost-only production R2 canary confirmed nine of nine
+successful manifests had one parser per artifact and zero parse failures
+without emitting object keys, hashes, bodies, financial values, account
+identifiers, or secrets. Those runs had empty position and recent-execution
+views and one historical page per dataset, so production evidence does not yet
+prove non-empty position/recent shapes, multi-page chains, or cross-view
+identity overlap; anonymous tests cover those contracts without relabelling
+them as observations.
+
+Layer B also carries the parent fetch-run status and failure count on every
+artifact. Parsers run only for a successful parent with zero failure evidence,
+and all current-state queries repeat that predicate. A partial pagination run
+therefore remains inspectable raw evidence but cannot publish financial
+observations or supersede a prior successful state.
 
 ### How a parser becomes live
 

@@ -201,7 +201,16 @@ questions only real payloads can close.
 
 The SBI VC Trade fixture set mirrors all six source-separated collector
 artifacts. Its shape was checked against the current public client models and
-with a production R2 read-only canary. The canary disclosed only aggregate
-pass/fail counts: every artifact in the latest successful run matched exactly
-one registered parser and parsed successfully. Object keys, hashes, response
-bodies, provider values, and account identifiers were not emitted.
+with the checked-in `services/collector-r2-importer/scripts/audit-sbi-vc-r2.sh`
+production R2 read-only canary. The canary disclosed only aggregate pass/fail
+counts and shape-evidence booleans: all nine successful manifests parsed
+completely. Object keys, hashes, response bodies, provider values, and account
+identifiers were not emitted. The observed runs did not prove non-empty
+position/recent records, multi-page history, or cross-view overlap; those
+remain synthetic-test coverage.
+
+Artifacts now carry their parent fetch-run outcome and failure count. A
+non-success run is retained as evidence but is blocked before every parser,
+and current queries independently require a successful, failure-free parent.
+The schema migrates existing v2 stores in place; old non-success rows are
+conservatively backfilled with one failure.

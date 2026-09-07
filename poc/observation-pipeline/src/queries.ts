@@ -5,7 +5,8 @@
 //
 //   * "Current" means produced by a parse run that succeeded and that nothing
 //     has superseded. That is the predicate
-//     `p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'`, applied to
+//     `p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'`, plus a
+//     successful parent fetch run with no failure evidence, applied to
 //     every current-state view. Superseded observations are never deleted, so
 //     they stay reachable through the artifact they came from.
 //   * Nothing here writes. The browser observes the store; a handler that
@@ -72,7 +73,9 @@ const COUNTED_TABLES = [
 ] as const;
 
 /** Only a parse run that succeeded and that nothing has superseded is current. */
-const CURRENT = "p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'";
+const CURRENT =
+  "p.superseded_by_parse_run_id IS NULL AND p.status = 'ok' " +
+  "AND f.status = 'success' AND f.failure_count = 0";
 
 const SEPARATOR = " · ";
 
@@ -155,6 +158,7 @@ export function currentTransactions(store: Store): TransactionRow[] {
        FROM transaction_observations t
        JOIN parse_runs p ON p.id = t.parse_run_id
        JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+       JOIN fetch_runs f ON f.id = fa.fetch_run_id
        WHERE ${CURRENT}
        ORDER BY COALESCE(t.as_of, '') DESC, t.id DESC`,
     )
@@ -188,6 +192,7 @@ export function latestBalances(store: Store): BalanceRow[] {
          FROM balance_observations b
          JOIN parse_runs p ON p.id = b.parse_run_id
          JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+         JOIN fetch_runs f ON f.id = fa.fetch_run_id
          WHERE ${CURRENT}
        )
        WHERE rank_in_group = 1
@@ -222,6 +227,7 @@ export function currentPositions(store: Store): PositionRow[] {
        FROM position_observations po
        JOIN parse_runs p ON p.id = po.parse_run_id
        JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+       JOIN fetch_runs f ON f.id = fa.fetch_run_id
        WHERE ${CURRENT}
        ORDER BY fa.source_id, po.source_account, po.security_code, po.id`,
     )
@@ -238,6 +244,7 @@ export function currentValuations(store: Store): ValuationRow[] {
        FROM valuation_observations v
        JOIN parse_runs p ON p.id = v.parse_run_id
        JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+       JOIN fetch_runs f ON f.id = fa.fetch_run_id
        WHERE ${CURRENT}
        ORDER BY fa.source_id, v.source_account, v.subject, v.metric, v.id`,
     )

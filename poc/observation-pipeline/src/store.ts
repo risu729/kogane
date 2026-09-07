@@ -18,11 +18,11 @@ export interface Store {
 /**
  * Bumped whenever schema.sql changes shape. The DDL uses IF NOT EXISTS, so
  * without this check an existing database would silently keep an older shape
- * and fail later at an unrelated INSERT. The PoC has no migrations: a version
- * mismatch is reported, and the operator deletes the state directory and
- * re-ingests, which is cheap precisely because evidence is re-processable.
+ * and fail later at an unrelated INSERT. Version 2 has an explicit compatible
+ * migration because fetch-run outcome is required to interpret existing
+ * observations; other unknown versions remain fail-closed.
  */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export function openStore(stateDir?: string): Store {
   const root = stateDir ?? join(POC_ROOT, "state");
@@ -31,11 +31,22 @@ export function openStore(stateDir?: string): Store {
   const db = new Database(join(root, "kogane-poc.sqlite"), { create: true });
   db.exec("PRAGMA foreign_keys = ON;");
   const found = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-  if (found !== 0 && found !== SCHEMA_VERSION) {
+  if (found !== 0 && found !== 2 && found !== SCHEMA_VERSION) {
     throw new Error(
       `${root} was created with schema version ${found}, but this build expects ${SCHEMA_VERSION}. ` +
         "The PoC has no migrations: delete the state directory and re-ingest.",
     );
+  }
+  if (found === 2) {
+    db.transaction(() => {
+      db.exec(
+        "ALTER TABLE fetch_runs ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0 CHECK (failure_count >= 0);",
+      );
+      // v2 did not persist failure evidence. Preserve the conservative outcome:
+      // every known non-success run has at least one failure.
+      db.exec("UPDATE fetch_runs SET failure_count = 1 WHERE status <> 'success';");
+      db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+    })();
   }
   db.exec(readFileSync(join(POC_ROOT, "schema.sql"), "utf8"));
   if (found === 0) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
@@ -67,13 +78,22 @@ export function insertFetchRun(
     tool: string;
     startedAt: string;
     completedAt?: string;
-    status: string;
+    status: "success" | "partial" | "failed";
+    failureCount?: number;
   },
 ): number {
   // An empty external run id is treated as absent throughout, so that a
   // manifest with `"runId": ""` cannot claim a distinct run identity.
   const externalRunId =
     run.externalRunId !== undefined && run.externalRunId !== "" ? run.externalRunId : undefined;
+  const failureCount = run.failureCount ?? (run.status === "success" ? 0 : 1);
+  if (
+    !Number.isSafeInteger(failureCount) ||
+    failureCount < 0 ||
+    (run.status === "success") !== (failureCount === 0)
+  ) {
+    throw new Error("fetch-run status and failure evidence are inconsistent");
+  }
   const existing = externalRunId
     ? (store.db
         .query("SELECT id FROM fetch_runs WHERE source_id = ?1 AND external_run_id = ?2")
@@ -82,8 +102,9 @@ export function insertFetchRun(
   if (existing) return existing.id;
   const result = store.db
     .query(
-      `INSERT INTO fetch_runs (source_id, external_run_id, tool, started_at, completed_at, status)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+      `INSERT INTO fetch_runs
+         (source_id, external_run_id, tool, started_at, completed_at, status, failure_count)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
     )
     .run(
       run.sourceId,
@@ -92,6 +113,7 @@ export function insertFetchRun(
       run.startedAt,
       run.completedAt ?? null,
       run.status,
+      failureCount,
     );
   return Number(result.lastInsertRowid);
 }
@@ -165,16 +187,18 @@ export function insertFetchArtifact(
 export function listArtifacts(store: Store): ArtifactMeta[] {
   const rows = store.db
     .query(
-      `SELECT a.id, a.source_id, r.status AS run_status, a.dataset, a.url,
-              a.mime, a.fetched_at, a.sha256
-       FROM fetch_artifacts AS a
-       JOIN fetch_runs AS r ON r.id = a.fetch_run_id
+      `SELECT a.id, a.source_id, f.status AS run_status,
+              f.failure_count AS run_failure_count,
+              a.dataset, a.url, a.mime, a.fetched_at, a.sha256
+       FROM fetch_artifacts a
+       JOIN fetch_runs f ON f.id = a.fetch_run_id
        ORDER BY a.id`,
     )
     .all() as {
     id: number;
     source_id: string;
-    run_status: string;
+    run_status: "success" | "partial" | "failed";
+    run_failure_count: number;
     dataset: string | null;
     url: string | null;
     mime: string;
@@ -185,6 +209,7 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
     id: row.id,
     sourceId: row.source_id,
     runStatus: row.run_status,
+    runFailureCount: row.run_failure_count,
     dataset: row.dataset,
     url: row.url,
     mime: row.mime,

@@ -1,13 +1,17 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ingestFile, ingestRunDirectory } from "../src/ingest.ts";
 import { runParsers } from "../src/parse.ts";
+import { currentTransactions } from "../src/queries.ts";
 import {
   insertFetchArtifact,
   insertFetchRun,
+  insertObservation,
+  insertParseRun,
   openStore,
   putRawObject,
   upsertSource,
@@ -46,6 +50,41 @@ describe("ingestion", () => {
       expect(count(store, "fetch_runs")).toBe(0);
       expect(count(store, "fetch_artifacts")).toBe(0);
     }
+  });
+
+  test("migrates v2 fetch runs without making legacy partial output current", () => {
+    const directory = mkdtempSync(join(tmpdir(), "kogane-v2-store-"));
+    const db = new Database(join(directory, "kogane-poc.sqlite"), { create: true });
+    db.exec(`
+      CREATE TABLE sources (
+        id TEXT PRIMARY KEY, provider TEXT NOT NULL, ingestion TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE fetch_runs (
+        id INTEGER PRIMARY KEY,
+        source_id TEXT NOT NULL REFERENCES sources(id),
+        external_run_id TEXT,
+        tool TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        status TEXT NOT NULL,
+        UNIQUE (source_id, external_run_id)
+      ) STRICT;
+      INSERT INTO sources VALUES ('legacy', 'Legacy', 'collector-r2');
+      INSERT INTO fetch_runs
+        (source_id, external_run_id, tool, started_at, status)
+      VALUES ('legacy', 'partial-1', 'import-run', '2026-09-01T00:00:00Z', 'partial');
+      PRAGMA user_version = 2;
+    `);
+    db.close();
+    const store = openStore(directory);
+    const row = store.db.query("SELECT status, failure_count FROM fetch_runs").get() as {
+      status: string;
+      failure_count: number;
+    };
+    expect(row).toEqual({ status: "partial", failure_count: 1 });
+    expect(
+      (store.db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
+    ).toBe(3);
   });
 
   test("run-directory ingestion is idempotent", () => {
@@ -244,11 +283,87 @@ describe("parse runs", () => {
         sha256: raw.sha256,
       });
       const summary = runParsers(store, [fakeParser("0.1.0", "must-not-run")]);
-      expect(summary).toMatchObject({ parsed: 0, skipped: 1, observations: 0, errors: 0 });
+      expect(summary).toMatchObject({
+        parsed: 0,
+        blocked: 1,
+        observations: 0,
+        errors: 0,
+      });
       expect(count(store, "parse_runs")).toBe(0);
       expect(count(store, "transaction_observations")).toBe(0);
       expect(count(store, "fetch_artifacts")).toBe(1);
     }
+  });
+
+  test("pagination-total-changed partial runs produce zero current observations", () => {
+    const store = tempStore();
+    const directory = mkdtempSync(join(tmpdir(), "kogane-partial-page-"));
+    const dataset = "executions-historical-page-0002";
+    const bytes = new TextEncoder().encode(
+      JSON.stringify({
+        meta: { status: "OK", timestamp: "2026/09/07 09:00:06" },
+        body: {
+          list: [{ CExecutionId: "synthetic", CExecutionIdSubNo: "1" }],
+          pageNumber: 1,
+          pageSize: 30,
+          totalNumOfPages: 2,
+          totalSize: 32,
+        },
+      }),
+    );
+    writeFileSync(join(directory, `${dataset}.json`), bytes);
+    writeFileSync(
+      join(directory, "manifest.json"),
+      JSON.stringify({
+        runId: "partial-pagination-total-changed",
+        startedAt: "2026-09-07T00:00:00.000Z",
+        completedAt: "2026-09-07T00:00:06.000Z",
+        status: "partial",
+        artifacts: [
+          {
+            dataset,
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+            bytes: bytes.byteLength,
+          },
+        ],
+        failures: [
+          {
+            operation: "collect",
+            errorCode: "executions_historical_pagination_total_changed",
+          },
+        ],
+      }),
+    );
+    const ingested = ingestRunDirectory(store, directory, {
+      id: "sbi-vc-trade",
+      provider: "SBI VC Trade",
+    });
+    const summary = runParsers(store);
+    expect(summary).toMatchObject({ parsed: 0, errors: 0, blocked: 1, observations: 0 });
+    expect(count(store, "parse_runs")).toBe(0);
+    expect(currentTransactions(store)).toEqual([]);
+
+    // Defense in depth for stores produced by the pre-policy parser: even an
+    // old successful parse attached to a partial fetch run is not current.
+    const artifactId = (store.db.query("SELECT id FROM fetch_artifacts").get() as { id: number })
+      .id;
+    const parseRunId = insertParseRun(store, {
+      artifactId,
+      parserName: "legacy-sbi-vc-executions",
+      parserVersion: "0.1.0",
+      parsedAt: "2026-09-07T00:01:00.000Z",
+      status: "ok",
+      warnings: [],
+    });
+    insertObservation(store, parseRunId, {
+      kind: "transaction",
+      sourceAccount: "sbi-vc-trade:main",
+      externalId: "legacy-partial-observation",
+      rawLocator: "json:$.body.list[0]",
+      extra: {},
+    });
+    expect(ingested.artifacts).toBe(1);
+    expect(currentTransactions(store)).toEqual([]);
   });
 
   test("a newer parser version supersedes, never deletes", () => {

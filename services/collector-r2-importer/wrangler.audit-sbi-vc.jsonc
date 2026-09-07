@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "kogane-sbi-vc-r2-layer-b-audit-local",
+  "main": "src/sbi-vc-audit-worker.ts",
+  "compatibility_date": "2026-09-07",
+  "workers_dev": false,
+  "preview_urls": false,
+  "r2_buckets": [
+    {
+      "binding": "SBI_VC_SNAPSHOTS",
+      "bucket_name": "kogane-sbi-vc-trade-poc",
+      "remote": true
+    }
+  ]
+}

@@ -29,8 +29,10 @@ nullable and pushed the meaning into a type column.
 **Supersession works as a marker on the parse run, not on observations.**
 Re-parsing an artifact with a bumped parser version leaves both observation
 sets intact and flips one nullable column on the older run. "Current" is
-then a two-condition join, which the browser uses on every page. Nothing
-about the append-only rule had to be relaxed.
+then a current-state join, which the browser uses on every page. Nothing
+about the append-only rule had to be relaxed. Current state additionally
+requires the parent fetch run to be successful and free of failure evidence;
+partial raw evidence remains browsable but cannot replace financial state.
 
 **Provider-reported valuations sit naturally beside positions.** SBI reports
 evaluation amount and profit/loss in both JPY and the trading currency. As
@@ -60,6 +62,13 @@ each one is a trap the real implementation would otherwise walk into.
 - **A failed observation insert left a run marked `ok` with a truncated
   observation set** — indistinguishable from a source that really said less.
   Fixed: the parse run and its observations commit together.
+- **A partial collector run could still publish current observations.** A
+  pagination-total change preserved the final response correctly, but Layer B
+  had no parent-run outcome and could parse that failure evidence as account
+  state. Fixed by carrying status and failure count into `ArtifactMeta`,
+  blocking all parsers centrally, and repeating the predicate in every current
+  query. A v2-to-v3 in-place migration preserves old stores and marks legacy
+  non-success runs conservatively.
 - **PayPay columns were mapped positionally.** A swapped outgoing/incoming
   header recorded a payment as income, with no warning, and
   `docs/sources/paypay.md` explicitly lists the current column set as

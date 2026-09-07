@@ -227,6 +227,96 @@ describe("SBI VC Trade staged-run importer", () => {
     }
   });
 
+  test("accepts digit-string pagination and collector-preserved safe meta fields", async () => {
+    const bucket = new FakeBucket();
+    const manifest = await storeRun(
+      bucket,
+      [
+        staticArtifact("cash-balances"),
+        staticArtifact("account-margin"),
+        staticArtifact("position-summary"),
+        staticArtifact("executions-recent-page-0001"),
+      ],
+      [{ operation: "collect", errorCode: "collector_http_503" }],
+    );
+    const recent = [...bucket.objects.entries()].find(([key]) =>
+      key.endsWith("/executions-recent-page-0001.json"),
+    );
+    if (!recent) throw new Error("recent fixture missing");
+    const envelope = JSON.parse(decode(recent[1].body)) as {
+      meta: Record<string, unknown>;
+      body: Record<string, unknown>;
+    };
+    envelope.meta["providerTrace"] = "safe-context";
+    for (const field of ["pageNumber", "pageSize", "totalNumOfPages", "totalSize"]) {
+      envelope.body[field] = String(envelope.body[field]);
+    }
+    await replaceArtifact(bucket, recent[0], envelope, manifest);
+    await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({
+      sealed: true,
+      artifactCount: 5,
+    });
+  });
+
+  test("rejects duplicate provider identities within one page", async () => {
+    const bucket = new FakeBucket();
+    const recent = staticArtifact("executions-recent-page-0001");
+    recent.body = {
+      list: [
+        { CExecutionId: "execution-1", CExecutionIdSubNo: "1" },
+        { CExecutionId: "execution-1", CExecutionIdSubNo: "1" },
+      ],
+      pageNumber: 0,
+      pageSize: 30,
+      totalNumOfPages: 1,
+      totalSize: 2,
+    };
+    await storeRun(
+      bucket,
+      [
+        staticArtifact("cash-balances"),
+        staticArtifact("account-margin"),
+        staticArtifact("position-summary"),
+        recent,
+      ],
+      [{ operation: "collect", errorCode: "collector_http_503" }],
+    );
+    const central = new FakeCentral();
+    await expect(importRun(bucket, central)).rejects.toMatchObject({
+      status: 409,
+      code: "artifact_duplicate_provider_identity",
+    });
+    expect(central.requests).toHaveLength(0);
+  });
+
+  test("rejects duplicate provider identities across historical pages", async () => {
+    const bucket = new FakeBucket();
+    const first = pageArtifact("executions-historical-page-0001", 30, 31);
+    const second = pageArtifact("executions-historical-page-0002", 1, 31);
+    const firstList = (first.body as { list: Record<string, unknown>[] }).list;
+    const secondList = (second.body as { list: Record<string, unknown>[] }).list;
+    secondList[0] = { ...firstList[0] };
+    await storeRun(
+      bucket,
+      [
+        staticArtifact("cash-balances"),
+        staticArtifact("account-margin"),
+        staticArtifact("position-summary"),
+        staticArtifact("executions-recent-page-0001"),
+        first,
+        second,
+        pageArtifact("cashflows-historical-page-0001", 0, 0),
+      ],
+      [],
+    );
+    const central = new FakeCentral();
+    await expect(importRun(bucket, central)).rejects.toMatchObject({
+      status: 409,
+      code: "artifact_duplicate_provider_identity",
+    });
+    expect(central.requests).toHaveLength(0);
+  });
+
   test("catalogues the final response that caused a collect pagination failure", async () => {
     for (const pages of [
       [
@@ -421,21 +511,31 @@ function staticArtifact(dataset: string): { dataset: string; body: unknown } {
     body:
       dataset === "executions-recent-page-0001"
         ? {
-            list: [{ synthetic: true }],
+            list: [{ CExecutionId: "recent-execution-1", CExecutionIdSubNo: "1" }],
             pageNumber: 0,
             pageSize: 30,
             totalNumOfPages: 1,
             totalSize: 1,
           }
-        : { synthetic: true, dataset },
+        : dataset === "position-summary"
+          ? { BTC: { "0": { productId: "BTCJPY" } } }
+          : { synthetic: true, dataset },
   };
 }
 
 function pageArtifact(dataset: string, listLength: number, totalSize: number) {
+  const execution = dataset.startsWith("executions-");
   return {
     dataset,
     body: {
-      list: Array.from({ length: listLength }, (_, index) => ({ synthetic: index })),
+      list: Array.from({ length: listLength }, (_, index) =>
+        execution
+          ? {
+              CExecutionId: `${dataset}-execution-${index}`,
+              CExecutionIdSubNo: "1",
+            }
+          : { cashflowID: `${dataset}-cashflow-${index}` },
+      ),
       pageNumber: Number(dataset.slice(-4)) - 1,
       pageSize: 30,
       totalNumOfPages: Math.ceil(totalSize / 30),

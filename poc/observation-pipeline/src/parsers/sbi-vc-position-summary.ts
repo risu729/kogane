@@ -5,7 +5,7 @@ import {
   parseSbiVcEnvelope,
   providerExtra,
   providerTimestamp,
-  requireString,
+  requireNonEmptyString,
   SBI_VC_SOURCE_ACCOUNT,
   warnNonStringFields,
   warnUnknownFields,
@@ -17,7 +17,7 @@ const ITEM_FIELDS = ["productId", "totalAmount", "evaluationPl"] as const;
 
 export const sbiVcPositionSummary: Parser = {
   name: "sbi-vc-position-summary",
-  version: "0.1.0",
+  version: "0.2.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return acceptsSbiVcDataset(artifact, DATASET);
@@ -28,32 +28,38 @@ export const sbiVcPositionSummary: Parser = {
     const warnings: string[] = [];
     const observations: Observation[] = [];
     const observedAt = providerTimestamp(envelope.meta["timestamp"]);
+    const productIds = new Set<string>();
 
     for (const [groupName, group] of Object.entries(envelope.body)) {
       const groupLocator = `json:$.body${jsonPathProperty(groupName)}`;
       if (!isObject(group)) {
-        warnings.push(`${groupLocator}: expected a position group object; group skipped`);
-        continue;
+        throw new Error(`${groupLocator}: expected a position group object`);
       }
       for (const [positionKey, entry] of Object.entries(group)) {
         const locator = `${groupLocator}${jsonPathProperty(positionKey)}`;
         if (!isObject(entry)) {
-          warnings.push(`${locator}: expected a position object; element skipped`);
-          continue;
+          throw new Error(`${locator}: expected a position object`);
         }
         warnUnknownFields(entry, ITEM_FIELDS, locator, warnings);
         warnNonStringFields(entry, ["totalAmount", "evaluationPl"], locator, warnings);
-        const productId = requireString(entry, "productId", locator, warnings) ?? "";
+        const productId = requireNonEmptyString(entry, "productId", locator);
+        if (productIds.has(productId)) {
+          throw new Error(`${locator}: duplicate position identity`);
+        }
+        productIds.add(productId);
         const quantity = decimalText(entry["totalAmount"]);
         if (!quantity) {
-          warnings.push(`${locator}.totalAmount: expected an exact decimal; raw value preserved`);
+          throw new Error(`${locator}.totalAmount: expected an exact decimal`);
+        }
+        if (!decimalText(entry["evaluationPl"])) {
+          throw new Error(`${locator}.evaluationPl: expected an exact decimal`);
         }
         observations.push({
           kind: "position",
           sourceAccount: SBI_VC_SOURCE_ACCOUNT,
           securityCode: productId,
-          quantityText: quantity?.text ?? "",
-          quantityScale: quantity?.scale ?? 0,
+          quantityText: quantity.text,
+          quantityScale: quantity.scale,
           ...(observedAt !== undefined ? { observedAt } : {}),
           rawLocator: locator,
           extra: providerExtra(entry, envelope, Object.keys(envelope.body), {

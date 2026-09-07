@@ -30,6 +30,8 @@ function artifact(dataset: string): ArtifactMeta {
   return {
     id: 1,
     sourceId: "sbi-vc-trade",
+    runStatus: "success",
+    runFailureCount: 0,
     dataset,
     url: null,
     mime: "application/json",
@@ -105,7 +107,7 @@ describe("SBI VC Trade envelope and balance schemas", () => {
     ).toBe(false);
   });
 
-  test("rejects unsanitized or extended gateway envelopes", () => {
+  test("rejects unsanitized envelopes but accepts collector-preserved safe meta", () => {
     const valid = JSON.parse(new TextDecoder().decode(fixture("cash-balances"))) as Record<
       string,
       unknown
@@ -122,7 +124,13 @@ describe("SBI VC Trade envelope and balance schemas", () => {
         encode({ ...valid, meta: { ...meta, secureKey: "forbidden" } }),
         artifact("cash-balances"),
       ),
-    ).toThrow(/sanitized contract/u);
+    ).toThrow(/secureKey/u);
+    expect(() =>
+      sbiVcCashBalances.parse(
+        encode({ ...valid, meta: { ...meta, providerTrace: "safe-context" } }),
+        artifact("cash-balances"),
+      ),
+    ).not.toThrow();
   });
 });
 
@@ -157,6 +165,43 @@ describe("SBI VC Trade positions", () => {
       warnings: [],
     });
   });
+
+  test("rejects malformed position rows and duplicate provider identities", () => {
+    type PositionFixture = {
+      meta: Record<string, unknown>;
+      body: Record<string, Record<string, unknown>>;
+    };
+    for (const field of ["productId", "totalAmount", "evaluationPl"]) {
+      const value = JSON.parse(
+        new TextDecoder().decode(fixture("position-summary")),
+      ) as PositionFixture;
+      const group = Object.keys(value.body)[0]!;
+      const key = Object.keys(value.body[group]!)[0]!;
+      const row = value.body[group]![key] as Record<string, unknown>;
+      delete row[field];
+      expect(() =>
+        sbiVcPositionSummary.parse(encode(value), artifact("position-summary")),
+      ).toThrow();
+    }
+    const nonObject = JSON.parse(
+      new TextDecoder().decode(fixture("position-summary")),
+    ) as PositionFixture;
+    const nonObjectGroup = Object.keys(nonObject.body)[0]!;
+    const nonObjectKey = Object.keys(nonObject.body[nonObjectGroup]!)[0]!;
+    nonObject.body[nonObjectGroup]![nonObjectKey] = "not-an-object";
+    expect(() =>
+      sbiVcPositionSummary.parse(encode(nonObject), artifact("position-summary")),
+    ).toThrow(/position object/u);
+    const duplicate = JSON.parse(
+      new TextDecoder().decode(fixture("position-summary")),
+    ) as PositionFixture;
+    const group = Object.keys(duplicate.body)[0]!;
+    const row = Object.values(duplicate.body[group]!)[0] as Record<string, unknown>;
+    duplicate.body["duplicate"] = { "1": { ...row } };
+    expect(() =>
+      sbiVcPositionSummary.parse(encode(duplicate), artifact("position-summary")),
+    ).toThrow(/duplicate position identity/u);
+  });
 });
 
 describe("SBI VC Trade execution pages", () => {
@@ -183,6 +228,15 @@ describe("SBI VC Trade execution pages", () => {
     expect(sellKogane["direction"]).toBe("sell");
     expect(buyKogane["quantity"]).toEqual({ text: "0.01000000", scale: 8, currency: "BTC" });
     expect(buyKogane["price"]).toEqual({ text: "8000000", scale: 0, currency: "JPY" });
+
+    const sameTupleHistorical = sbiVcExecutions.parse(
+      fixture("executions-recent-page-0001"),
+      artifact("executions-historical-page-0001"),
+    );
+    const same = transaction(sameTupleHistorical.observations[0]);
+    expect(same.externalId).toBe(buy.externalId);
+    expect((same.extra["_kogane"] as Record<string, unknown>)["sourceView"]).toBe("historical");
+    expect(buyKogane["sourceView"]).toBe("recent");
   });
 
   test("fails closed on suffix, page cardinality, and recent truncation", () => {
@@ -220,7 +274,6 @@ describe("SBI VC Trade execution pages", () => {
     };
     for (const body of [
       { ...original.body, list: {} },
-      { ...original.body, pageNumber: "0" },
       { ...original.body, pageSize: 29 },
       { ...original.body, totalNumOfPages: 2 },
       { ...original.body, totalSize: 2 },
@@ -232,18 +285,67 @@ describe("SBI VC Trade execution pages", () => {
         ),
       ).toThrow();
     }
+    const stringPage = {
+      ...original,
+      body: {
+        ...original.body,
+        pageNumber: "0",
+        pageSize: "30",
+        totalNumOfPages: "1",
+        totalSize: "1",
+      },
+    };
+    expect(() =>
+      sbiVcExecutions.parse(encode(stringPage), artifact("executions-recent-page-0001")),
+    ).not.toThrow();
     original.body.list[0]!["isCloseOrder"] = { attribute: 7, value: true };
-    original.body.list[0]!["executionPrice"] = { malformed: true };
     const result = sbiVcExecutions.parse(encode(original), artifact("executions-recent-page-0001"));
     expect(result.observations).toHaveLength(1);
     expect(result.warnings.some((warning) => warning.includes("isCloseOrder.attribute"))).toBe(
       true,
     );
-    expect(result.warnings.some((warning) => warning.includes("executionPrice"))).toBe(true);
     expect(transaction(result.observations[0]).extra["isCloseOrder"]).toEqual({
       attribute: 7,
       value: true,
     });
+  });
+
+  test("throws on incomplete execution rows and same-page duplicate identities", () => {
+    for (const field of [
+      "CExecutionId",
+      "CExecutionIdSubNo",
+      "productId",
+      "currencyPair",
+      "executionAmount",
+      "executionPrice",
+      "executionDatetime",
+      "buySellType",
+    ]) {
+      const page = JSON.parse(new TextDecoder().decode(fixture("executions-recent-page-0001"))) as {
+        body: { list: Record<string, unknown>[] };
+      };
+      delete page.body.list[0]![field];
+      expect(() =>
+        sbiVcExecutions.parse(encode(page), artifact("executions-recent-page-0001")),
+      ).toThrow();
+    }
+    for (const row of ["not-an-object", { currencyPair: "invalid" }]) {
+      const page = JSON.parse(new TextDecoder().decode(fixture("executions-recent-page-0001"))) as {
+        body: Record<string, unknown> & { list: unknown[] };
+      };
+      page.body.list = [row];
+      expect(() =>
+        sbiVcExecutions.parse(encode(page), artifact("executions-recent-page-0001")),
+      ).toThrow();
+    }
+    const duplicate = JSON.parse(
+      new TextDecoder().decode(fixture("executions-recent-page-0001")),
+    ) as { body: Record<string, unknown> & { list: Record<string, unknown>[] } };
+    duplicate.body.list.push({ ...duplicate.body.list[0]! });
+    duplicate.body.totalSize = 2;
+    expect(() =>
+      sbiVcExecutions.parse(encode(duplicate), artifact("executions-recent-page-0001")),
+    ).toThrow(/duplicate composite execution identity/u);
   });
 });
 
@@ -274,6 +376,47 @@ describe("SBI VC Trade cashflow pages", () => {
     const result = sbiVcCashflows.parse(encode(page), artifact("cashflows-historical-page-0001"));
     expect(transaction(result.observations[0]).amountMinor).toBe(1000);
     expect(result.warnings.some((warning) => warning.includes("amount sign retained"))).toBe(true);
+  });
+
+  test("throws on incomplete cashflow rows and same-page duplicate identities", () => {
+    for (const field of [
+      "cashflowID",
+      "currency",
+      "cashflowAmount",
+      "cashbalance",
+      "cashflowType",
+      "processStatusType",
+      "eventDatetime",
+    ]) {
+      const page = JSON.parse(
+        new TextDecoder().decode(fixture("cashflows-historical-page-0001")),
+      ) as { body: { list: Record<string, unknown>[] } };
+      delete page.body.list[0]![field];
+      expect(() =>
+        sbiVcCashflows.parse(encode(page), artifact("cashflows-historical-page-0001")),
+      ).toThrow();
+    }
+    const wrongCurrency = JSON.parse(
+      new TextDecoder().decode(fixture("cashflows-historical-page-0001")),
+    ) as { body: { list: Record<string, unknown>[] } };
+    wrongCurrency.body.list[0]!["currency"] = "USD";
+    expect(() =>
+      sbiVcCashflows.parse(encode(wrongCurrency), artifact("cashflows-historical-page-0001")),
+    ).toThrow(/audited JPY/u);
+    const nonObject = JSON.parse(
+      new TextDecoder().decode(fixture("cashflows-historical-page-0001")),
+    ) as { body: { list: unknown[] } };
+    nonObject.body.list[0] = null;
+    expect(() =>
+      sbiVcCashflows.parse(encode(nonObject), artifact("cashflows-historical-page-0001")),
+    ).toThrow(/cashflow object/u);
+    const duplicate = JSON.parse(
+      new TextDecoder().decode(fixture("cashflows-historical-page-0001")),
+    ) as { body: Record<string, unknown> & { list: Record<string, unknown>[] } };
+    duplicate.body.list[1]!["cashflowID"] = duplicate.body.list[0]!["cashflowID"];
+    expect(() =>
+      sbiVcCashflows.parse(encode(duplicate), artifact("cashflows-historical-page-0001")),
+    ).toThrow(/duplicate cashflow identity/u);
   });
 });
 

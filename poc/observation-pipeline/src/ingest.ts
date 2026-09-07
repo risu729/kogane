@@ -66,6 +66,14 @@ export function ingestRunDirectory(
   if (status !== "success" && status !== "partial" && status !== "failed") {
     throw new Error(`${directory}/manifest.json has an unknown run status`);
   }
+  const failures = manifest["failures"];
+  if (failures !== undefined && !Array.isArray(failures)) {
+    throw new Error(`${directory}/manifest.json failures must be an array`);
+  }
+  const failureCount = failures?.length ?? 0;
+  if ((status === "success") !== (failureCount === 0)) {
+    throw new Error(`${directory}/manifest.json run status and failure evidence are inconsistent`);
+  }
 
   // Read and verify every artifact BEFORE writing anything. A run row written
   // ahead of a failure would make the run look ingested, and every later
@@ -100,6 +108,7 @@ export function ingestRunDirectory(
       startedAt,
       ...(completedAt !== undefined ? { completedAt } : {}),
       status,
+      failureCount,
     });
     for (const { dataset, bytes } of pending) {
       const stored = putRawObject(store, bytes, "application/json");

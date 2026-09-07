@@ -5,7 +5,7 @@ import {
   parseSbiVcPage,
   providerExtra,
   providerTimestamp,
-  requireString,
+  requireNonEmptyString,
   SBI_VC_MAX_PAGES,
   SBI_VC_SOURCE_ACCOUNT,
   warnAttributeValueObject,
@@ -56,7 +56,7 @@ const ITEM_FIELDS = [
 
 export const sbiVcExecutions: Parser = {
   name: "sbi-vc-executions",
-  version: "0.1.0",
+  version: "0.2.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (
@@ -85,31 +85,12 @@ export const sbiVcExecutions: Parser = {
     const warnings: string[] = [];
     const observations: Observation[] = [];
     const observedAt = providerTimestamp(page.meta["timestamp"]);
+    const externalIds = new Set<string>();
 
     page.list.forEach((entry: unknown, index: number) => {
       const locator = `json:$.body.list[${index}]`;
       if (!isObject(entry)) {
-        warnings.push(`${locator}: expected an execution object; raw element preserved`);
-        observations.push({
-          kind: "transaction",
-          sourceAccount: SBI_VC_SOURCE_ACCOUNT,
-          ...(observedAt !== undefined ? { observedAt } : {}),
-          rawLocator: locator,
-          extra: {
-            _kogane: {
-              unparsedElement: entry,
-              sourceView,
-              providerContext: {
-                meta: { ...page.meta },
-                pageNumber: page.pageNumber,
-                pageSize: page.pageSize,
-                totalNumOfPages: page.totalNumOfPages,
-                totalSize: page.totalSize,
-              },
-            },
-          },
-        });
-        return;
+        throw new Error(`${locator}: expected an execution object`);
       }
       warnUnknownFields(entry, ITEM_FIELDS, locator, warnings);
       warnNonStringFields(
@@ -141,72 +122,54 @@ export const sbiVcExecutions: Parser = {
       }
       warnAttributeValueObject(entry["isCloseOrder"], `${locator}.isCloseOrder`, warnings);
       warnAttributeValueObject(entry["isExOrder"], `${locator}.isExOrder`, warnings);
-      const executionId = requireString(entry, "CExecutionId", locator, warnings);
-      const executionSubNumber = requireString(entry, "CExecutionIdSubNo", locator, warnings);
-      const productId = requireString(entry, "productId", locator, warnings);
-      const currencyPair = requireString(entry, "currencyPair", locator, warnings);
-      const pairMatch = currencyPair?.match(/^([A-Z0-9]+)\/([A-Z0-9]+)$/u);
+      const executionId = requireNonEmptyString(entry, "CExecutionId", locator);
+      const executionSubNumber = requireNonEmptyString(entry, "CExecutionIdSubNo", locator);
+      const productId = requireNonEmptyString(entry, "productId", locator);
+      const currencyPair = requireNonEmptyString(entry, "currencyPair", locator);
+      const pairMatch = currencyPair.match(/^([A-Z0-9]+)\/([A-Z0-9]+)$/u);
       if (!pairMatch) {
-        warnings.push(`${locator}.currencyPair: expected the audited BASE/QUOTE form`);
+        throw new Error(`${locator}.currencyPair: expected the audited BASE/QUOTE form`);
       }
       const quantity = decimalText(entry["executionAmount"]);
       const price = decimalText(entry["executionPrice"]);
       if (!quantity) {
-        warnings.push(`${locator}.executionAmount: expected an exact decimal; raw value preserved`);
+        throw new Error(`${locator}.executionAmount: expected an exact decimal`);
       }
       if (!price) {
-        warnings.push(`${locator}.executionPrice: expected an exact decimal; raw value preserved`);
+        throw new Error(`${locator}.executionPrice: expected an exact decimal`);
       }
       const buySell = entry["buySellType"];
       const buySellValue = warnAttributeValueObject(buySell, `${locator}.buySellType`, warnings)
         ? buySell["value"]
         : undefined;
-      let direction: "buy" | "sell" | undefined;
+      let direction: "buy" | "sell";
       if (buySellValue === "3") direction = "buy";
       else if (buySellValue === "1") direction = "sell";
-      else warnings.push(`${locator}.buySellType.value: unknown direction; raw value preserved`);
+      else throw new Error(`${locator}.buySellType.value: unknown execution direction`);
       const asOf = providerTimestamp(entry["executionDatetime"]);
       if (asOf === undefined) {
-        warnings.push(`${locator}.executionDatetime: timestamp format is not recognized`);
+        throw new Error(`${locator}.executionDatetime: timestamp format is not recognized`);
       }
-      const externalId =
-        executionId !== undefined && executionSubNumber !== undefined
-          ? collisionFreeTuple(executionId, executionSubNumber)
-          : undefined;
-      if (externalId === undefined) {
-        warnings.push(`${locator}: composite execution identity is incomplete`);
+      const externalId = collisionFreeTuple(executionId, executionSubNumber);
+      if (externalIds.has(externalId)) {
+        throw new Error(`${locator}: duplicate composite execution identity`);
       }
+      externalIds.add(externalId);
       observations.push({
         kind: "transaction",
         sourceAccount: SBI_VC_SOURCE_ACCOUNT,
-        ...(externalId !== undefined ? { externalId } : {}),
-        ...(productId !== undefined ? { description: productId } : {}),
-        ...(asOf !== undefined ? { asOf } : {}),
+        externalId,
+        description: productId,
+        asOf,
         ...(observedAt !== undefined ? { observedAt } : {}),
         rawLocator: locator,
         extra: providerExtra(entry, page, ["list"], {
           sourceView,
-          ...(executionId !== undefined && executionSubNumber !== undefined
-            ? { externalIdComponents: [executionId, executionSubNumber] }
-            : {}),
-          ...(direction !== undefined ? { direction } : {}),
-          ...(quantity !== undefined
-            ? {
-                quantity: {
-                  ...quantity,
-                  ...(pairMatch?.[1] ? { currency: pairMatch[1] } : {}),
-                },
-              }
-            : {}),
-          ...(price !== undefined
-            ? {
-                price: {
-                  ...price,
-                  ...(pairMatch?.[2] ? { currency: pairMatch[2] } : {}),
-                },
-              }
-            : {}),
-          ...(pairMatch ? { currencyPair: { base: pairMatch[1], quote: pairMatch[2] } } : {}),
+          externalIdComponents: [executionId, executionSubNumber],
+          direction,
+          quantity: { ...quantity, currency: pairMatch[1] },
+          price: { ...price, currency: pairMatch[2] },
+          currencyPair: { base: pairMatch[1], quote: pairMatch[2] },
         }),
       });
     });
