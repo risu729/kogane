@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { displayLabel } from "../web/src/labels.ts";
-import { StatusBadge } from "../web/src/ui.tsx";
+import { StatusBadge, TransactionStatus } from "../web/src/ui.tsx";
 
 test("prototype-shaped source values render as their original text", () => {
   const labels = { success: "成功" };
@@ -23,4 +23,20 @@ test("own labels take precedence and unknown markup-shaped values remain escaped
   const markup = renderToStaticMarkup(createElement(StatusBadge, { status: value }));
   expect(markup).toContain("&lt;script&gt;privateSourceValue&lt;/script&gt;");
   expect(markup).not.toContain("<script>");
+});
+
+test("transaction state separates unconfirmed, absent and provider unknown values", () => {
+  const render = (status: string | null | undefined) =>
+    renderToStaticMarkup(createElement(TransactionStatus, { status }));
+  expect(render("unconfirmed")).toContain(">未確定</span>");
+  expect(render("confirmed")).toContain(">確定</span>");
+  expect(render("posted")).toContain(">記帳済み</span>");
+  expect(render("declined")).toContain(">利用拒否</span>");
+  expect(render("notified")).toContain(">利用通知</span>");
+  expect(render("unknown")).toContain(">状態不明</span>");
+  for (const value of [null, undefined, ""])
+    expect(render(value)).toContain(">状態情報なし</span>");
+  for (const value of ["future_state", "__proto__", "constructor"])
+    expect(render(value)).toContain(`>${value}</span>`);
+  expect(render("<script>unsafe</script>")).not.toContain("<script>");
 });

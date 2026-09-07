@@ -8,7 +8,14 @@ import {
   useTable,
 } from "@tanstack/react-table";
 import { useMetadata, useTransactions, type TransactionRow } from "../api.ts";
-import { Amount, Nullable, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
+import {
+  Amount,
+  Nullable,
+  ObservationLink,
+  Panel,
+  QueryBoundary,
+  TransactionStatus,
+} from "../ui.tsx";
 import {
   EMPTY_FILTERS,
   matchesDates,
@@ -71,7 +78,7 @@ const columns = helper.columns([
     id: "status",
     header: "取得元の状態",
     sortFn: "text",
-    cell: (info) => <Nullable value={info.row.original.status} />,
+    cell: (info) => <TransactionStatus status={info.row.original.status} />,
   }),
   helper.display({
     id: "detail",

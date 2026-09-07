@@ -61,6 +61,29 @@ export function Nullable({
   return <>{String(value)}</>;
 }
 
+/** Provider transaction state is not a collection/parse result. */
+export function TransactionStatus({ status }: { status: string | null | undefined }): ReactNode {
+  if (status == null || status === "") {
+    return (
+      <span
+        className="null"
+        title="取得元の状態情報が保存されていません。未確定という意味ではありません。"
+      >
+        状態情報なし
+      </span>
+    );
+  }
+  const labels: Record<string, string> = {
+    confirmed: "確定",
+    unconfirmed: "未確定",
+    posted: "記帳済み",
+    declined: "利用拒否",
+    notified: "利用通知",
+    unknown: "状態不明",
+  };
+  return <span title={`取得元の値: ${status}`}>{displayLabel(labels, status)}</span>;
+}
+
 /** An arbitrary stored cell, for pages that render whatever columns exist. */
 export function CellValue({ value }: { value: unknown }): ReactNode {
   if (value === null || value === undefined) return <span className="null">未記録</span>;
