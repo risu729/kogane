@@ -1,16 +1,9 @@
 import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry";
 import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types";
-import { parseSbiShinseiManifest, parseSbiShinseiNormalized } from "./sbi-shinsei";
-import { validateSbiShinseiResponse } from "./sbi-shinsei-schema";
+import { validateSbiShinseiRun } from "./sbi-shinsei";
 
 type AuditEnv = Pick<Env, "SBI_SHINSEI_SNAPSHOTS">;
 const PREFIX = "raw/sbi-shinsei/";
-const RAW_SCHEMAS = {
-  "top-accounts-balance-and-activity": "sbi-shinsei-top-balances-v1",
-  "balance-summary-and-stage": "sbi-shinsei-balance-summary-v1",
-  "exchange-rate": "sbi-shinsei-exchange-rate-v1",
-  "yen-deposit-account": "sbi-shinsei-yen-deposit-account-v1",
-} as const;
 const PARSED = new Set(["top-accounts-balance-and-activity", "yen-deposit-account"]);
 
 export default {
@@ -75,17 +68,7 @@ export default {
 };
 
 async function auditManifest(bucket: R2Bucket, manifestKey: string) {
-  const manifestObject = await bucket.get(manifestKey);
-  if (!manifestObject) throw new Error("manifest_missing");
-  assertJson(manifestObject);
-  const manifest = parseSbiShinseiManifest(
-    new Uint8Array(await manifestObject.arrayBuffer()),
-    manifestKey,
-  );
-  await assertExactPrefix(bucket, manifestKey, [
-    manifestKey,
-    ...manifest.artifacts.map((artifact) => artifact.key),
-  ]);
+  const { manifest, artifacts } = await validateSbiShinseiRun({ bucket, manifestKey });
   let matchedArtifactCount = 0;
   let parsedArtifactCount = 0;
   let decisionCoveredArtifactCount = 0;
@@ -94,20 +77,8 @@ async function auditManifest(bucket: R2Bucket, manifestKey: string) {
   let hasNonEmptyYenAccounts = false;
   let hasMultipleCurrencies = false;
   let hasUnclassifiedProduct = false;
-  for (const artifact of manifest.artifacts) {
-    const object = await bucket.get(artifact.key);
-    if (!object || object.size !== artifact.bytes) throw new Error("artifact_size_invalid");
-    assertJson(object);
-    const bytes = new Uint8Array(await object.arrayBuffer());
-    if ((await sha256Hex(bytes)) !== artifact.sha256) throw new Error("artifact_digest_invalid");
-    const value = parseRecord(bytes);
-    if (artifact.dataset === "normalized") {
-      parseSbiShinseiNormalized(value);
-    } else {
-      const schema = RAW_SCHEMAS[artifact.dataset as keyof typeof RAW_SCHEMAS];
-      if (!schema) throw new Error("dataset_route_invalid");
-      validateSbiShinseiResponse(schema, value);
-    }
+  for (const validatedArtifact of artifacts) {
+    const { manifest: artifact, value } = validatedArtifact;
     if (manifest.status !== "success") continue;
     const meta: ArtifactMeta = {
       id: 0,
@@ -176,11 +147,6 @@ async function auditManifest(bucket: R2Bucket, manifestKey: string) {
   };
 }
 
-function parseRecord(bytes: Uint8Array): Record<string, unknown> {
-  const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
-  if (!isRecord(value)) throw new Error("artifact_json_invalid");
-  return value;
-}
 function sanitizeProviderResponse(value: Record<string, unknown>): Uint8Array {
   const clean = { ...value };
   if (isRecord(value["header"])) {
@@ -189,38 +155,6 @@ function sanitizeProviderResponse(value: Record<string, unknown>): Uint8Array {
     clean["header"] = header;
   }
   return new TextEncoder().encode(JSON.stringify(clean));
-}
-async function assertExactPrefix(
-  bucket: R2Bucket,
-  manifestKey: string,
-  expected: string[],
-): Promise<void> {
-  const prefix = manifestKey.slice(0, -"manifest.json".length);
-  const actual: string[] = [];
-  let cursor: string | undefined;
-  do {
-    const listed = await bucket.list({
-      prefix,
-      limit: 1_000,
-      ...(cursor ? { cursor } : {}),
-    });
-    actual.push(...listed.objects.map((object) => object.key));
-    cursor = listed.truncated ? listed.cursor : undefined;
-    if (listed.truncated && !cursor) throw new Error("run_cursor_missing");
-  } while (cursor);
-  actual.sort();
-  expected.sort();
-  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index]))
-    throw new Error("run_inventory_invalid");
-}
-function assertJson(object: R2ObjectBody): void {
-  if (object.httpMetadata?.contentType?.split(";", 1)[0]?.trim() !== "application/json")
-    throw new Error("content_type_invalid");
-}
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const copy = new Uint8Array(bytes);
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", copy.buffer));
-  return [...digest].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 function auditResponse(input: {
   scanned: 0 | 1;

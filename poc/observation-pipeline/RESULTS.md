@@ -223,7 +223,12 @@ snapshot balance, and signed transactions whose sign provenance is the
 mutually exclusive debit/credit field. The yen-deposit parser preserves its
 two account arrays as distinct metrics. Both reject unknown fields, excessive
 cardinality, duplicate provider identities, invalid dates/currencies, and
-known-fiat decimals that cannot be represented exactly.
+known-fiat decimals that cannot be represented exactly. Successful wrappers
+with provider error fields, non-exact JSON media types, invalid provider clock
+components, reversed/out-of-window activity dates, and unknown nested product
+detail fields also fail closed. Aggregate overview siblings and validated
+product/module/detail sections remain in provider context; row balances stay
+explicit raw evidence because their post-transaction meaning is not yet proven.
 
 Three success artifacts have deliberate no-parser decisions. `normalized` is
 derived only from the top response and would duplicate observations while
@@ -241,7 +246,9 @@ manifest was available, so the canary exited non-zero and did not use failed
 evidence as parser proof. It validates every raw and derived schema before
 exercising Layer B, requires a complete decision for all five successful
 artifacts, and emits no object name, digest, body, account identifier, or
-financial value. Partial and failed manifests remain validated raw evidence
+financial value. The canary directly reuses the importer Layer A validator for
+object bounds, exact metadata/content types, native and recomputed checksums,
+inventory pagination, and raw/normalized semantic equality. Partial and failed manifests remain validated raw evidence
 but never enter parsers. Anonymous fixtures cover non-empty,
 multi-currency, opaque product-code, debit/credit, duplicate-identity,
 cardinality, and unknown-field boundaries without committing production data.

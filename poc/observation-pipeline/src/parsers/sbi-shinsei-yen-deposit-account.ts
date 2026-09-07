@@ -73,19 +73,17 @@ export const sbiShinseiYenDepositAccount: Parser = {
     const observedAt = providerTimestamp(response["transactionTime"]);
     const context = Object.fromEntries(
       Object.entries(response).filter(
-        ([key]) =>
-          ![
-            "debitAccountDetails",
-            "savingsDetails",
-            "productDetails",
-            "moduleDetails",
-            "tdDetails",
-            "sdDetails",
-            "debuntureDetails",
-            "loanDetails",
-          ].includes(key),
+        ([key]) => !["debitAccountDetails", "savingsDetails"].includes(key),
       ),
     );
+    const preservedContextSections = [
+      "productDetails",
+      "moduleDetails",
+      "tdDetails",
+      "sdDetails",
+      "debuntureDetails",
+      "loanDetails",
+    ].filter((field) => Object.hasOwn(context, field));
     const observations: Observation[] = [];
     const identities = new Set<string>();
     const parseDetails = (field: "debitAccountDetails" | "savingsDetails", metric: string) => {
@@ -122,6 +120,7 @@ export const sbiShinseiYenDepositAccount: Parser = {
               extra: providerExtra(row, context, {
                 sourceView: field,
                 productCode,
+                preservedContextSections,
               }),
             }),
           );
@@ -141,19 +140,10 @@ export const sbiShinseiYenDepositAccount: Parser = {
           ["productCode"],
         );
         nonEmptyString(row["productCode"], `${locator}.productCode`);
-        for (const field of ["tdProductDetail", "pdProductDetail"] as const) {
-          const detail = row[field];
-          if (
-            detail !== undefined &&
-            detail !== null &&
-            typeof detail !== "string" &&
-            typeof detail !== "number" &&
-            typeof detail !== "boolean" &&
-            (typeof detail !== "object" || Array.isArray(detail))
-          ) {
-            throw new Error(`${locator}.${field}: invalid product detail`);
-          }
-        }
+        if (row["tdProductDetail"] !== undefined)
+          validateTermDepositProduct(row["tdProductDetail"], `${locator}.tdProductDetail`);
+        if (row["pdProductDetail"] !== undefined)
+          validateScalarOrEmptyObject(row["pdProductDetail"], `${locator}.pdProductDetail`);
       },
     );
     exactArray(response["moduleDetails"], `${DATASET}.responseParam.moduleDetails`, 100).forEach(
@@ -175,3 +165,87 @@ export const sbiShinseiYenDepositAccount: Parser = {
     return { observations, warnings: [] };
   },
 };
+
+function validateTermDepositProduct(value: unknown, label: string): void {
+  if (!isRecord(value)) {
+    validateScalar(value, label);
+    return;
+  }
+  const detail = exactObject(
+    value,
+    label,
+    [
+      "bookingMaturityCode",
+      "bookingMaturityDesc",
+      "changeMaturityCode",
+      "changeMaturityDesc",
+      "currency",
+      "customerCategoryDetails",
+      "maxDepositAmount",
+      "maxDepositTerm",
+      "minDepositAmount",
+      "minDepositTerm",
+      "moduleCode",
+      "otameshiAmount",
+      "otameshiDepositTerm",
+      "otameshiInitialInterestRate",
+      "productCode",
+      "productName",
+      "productRiskLevel",
+      "productType",
+      "redemptionFlag",
+    ],
+    [],
+  );
+  scalarFields(
+    detail,
+    Object.keys(detail).filter((key) => key !== "customerCategoryDetails"),
+    label,
+  );
+  if (detail["customerCategoryDetails"] === undefined) return;
+  exactArray(detail["customerCategoryDetails"], `${label}.customerCategoryDetails`, 100).forEach(
+    (categoryValue, categoryIndex) => {
+      const categoryLabel = `${label}.customerCategoryDetails[${categoryIndex}]`;
+      const category = exactObject(
+        categoryValue,
+        categoryLabel,
+        ["customerCategory", "term"],
+        ["customerCategory", "term"],
+      );
+      validateScalar(category["customerCategory"], `${categoryLabel}.customerCategory`);
+      exactArray(category["term"], `${categoryLabel}.term`, 100).forEach((termValue, termIndex) => {
+        const termLabel = `${categoryLabel}.term[${termIndex}]`;
+        const term = exactObject(
+          termValue,
+          termLabel,
+          ["months", "days", "interest"],
+          ["months", "days", "interest"],
+        );
+        scalarFields(term, Object.keys(term), termLabel);
+      });
+    },
+  );
+}
+
+function validateScalarOrEmptyObject(value: unknown, label: string): void {
+  if (isRecord(value)) {
+    exactObject(value, label, [], []);
+    return;
+  }
+  validateScalar(value, label);
+}
+
+function validateScalar(value: unknown, label: string): void {
+  if (
+    value !== null &&
+    typeof value !== "string" &&
+    typeof value !== "number" &&
+    typeof value !== "boolean"
+  ) {
+    throw new Error(`${label}: expected a scalar`);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}

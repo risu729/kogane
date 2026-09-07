@@ -10,7 +10,11 @@ import {
 export const SBI_SHINSEI_SOURCE_ID = "sbi-shinsei-bank";
 
 export function acceptsSbiShinseiDataset(artifact: ArtifactMeta, dataset: string): boolean {
-  return artifact.sourceId === SBI_SHINSEI_SOURCE_ID && artifact.dataset === dataset;
+  return (
+    artifact.sourceId === SBI_SHINSEI_SOURCE_ID &&
+    artifact.dataset === dataset &&
+    artifact.mime === "application/json"
+  );
 }
 
 export function assertSuccessfulRun(artifact: ArtifactMeta): void {
@@ -71,6 +75,12 @@ export function wrapper(value: unknown, label: string): Record<string, unknown> 
       [],
     );
     scalarFields(error, Object.keys(error), `${label}.errorInfo`);
+    for (const field of ["statusID", "statusMessage"] as const) {
+      const value = error[field];
+      if (value !== undefined && value !== null && value !== "") {
+        throw new Error(`${label}.errorInfo.${field}: successful wrapper contains an error`);
+      }
+    }
   }
   return object(result["responseParam"], `${label}.responseParam`);
 }
@@ -127,7 +137,7 @@ export function nonEmptyString(value: unknown, label: string): string {
 
 export function currency(value: unknown, label: string): string {
   const result = nonEmptyString(value, label);
-  if (!/^[A-Z0-9]{2,10}$/u.test(result)) throw new Error(`${label}: invalid provider currency`);
+  if (!/^[A-Z]{3}$/u.test(result)) throw new Error(`${label}: invalid provider currency`);
   return result;
 }
 
@@ -182,8 +192,27 @@ export function providerTimestamp(value: unknown): string | undefined {
   if (typeof value !== "string") throw new Error("provider timestamp must be a string");
   const match = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/u.exec(value);
   if (!match) throw new Error("provider timestamp format is not recognized");
+  const parts = match.slice(1).map(Number);
+  const [year, month, day, hour, minute, second] = parts as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const roundTrip = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  if (
+    roundTrip.getUTCFullYear() !== year ||
+    roundTrip.getUTCMonth() !== month - 1 ||
+    roundTrip.getUTCDate() !== day ||
+    roundTrip.getUTCHours() !== hour ||
+    roundTrip.getUTCMinutes() !== minute ||
+    roundTrip.getUTCSeconds() !== second
+  ) {
+    throw new Error("provider timestamp is invalid");
+  }
   const result = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}+09:00`;
-  if (Number.isNaN(Date.parse(result))) throw new Error("provider timestamp is invalid");
   return result;
 }
 

@@ -163,13 +163,15 @@ SBI VC TradeのmanifestはSBI証券とは共有せず、`sbi-vc-trade-worker-poc
 
 `bun run audit:sbi-shinsei-r2`はdeployせず、localhost限定のWrangler dev
 processからremote R2 bindingをread-onlyで参照する。1 pageにつき1 objectを
-走査し、manifestを見つけた場合は完全prefix、size、JSON content type、
-SHA-256、全5 dataset schemaを再検証する。成功runでは
+走査し、manifestを見つけた場合はimporter本体と同じLayer A validatorで
+manifest上限、完全prefix、stagnant cursor、exact metadata、native/recomputed
+SHA-256、exact JSON content type、全5 dataset schema、raw/normalized整合を再検証する。成功runでは
 `top-accounts-balance-and-activity`と`yen-deposit-account`だけをLayer B parserへ
 渡し、`balance-summary-and-stage`、`exchange-rate`、`normalized`は明示的な
 no-parser decisionとして数える。出力は件数とshape booleanだけで、object key、
 hash、本文、account identifier、金額は含めない。scriptとWorkerにはR2の
-put/delete経路がなく、元bucketを変更しない。
+put/delete経路がなく、元bucketを変更しない。partial/failed runはLayer A
+検証だけを行い、Layer B parserには渡さない。
 
 ## backfillの分割
 

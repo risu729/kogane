@@ -15,66 +15,13 @@ const FILENAMES = {
   "yen-deposit-account": "raw-yen-deposit-account.json",
   normalized: "normalized.json",
 } as const;
+type Dataset = keyof typeof FILENAMES;
 
 describe("SBI Shinsei aggregate-only R2 Layer B audit", () => {
-  test("validates every success artifact, parses only semantic routes, and emits aggregates", async () => {
-    const payloads: Record<keyof typeof FILENAMES, Uint8Array> = {
-      "top-accounts-balance-and-activity": withToken("top-accounts-balance-and-activity"),
-      "balance-summary-and-stage": encode({
-        responseParam: {
-          summary: { responseParam: {} },
-          category: { responseParam: {} },
-          branchFetch: { responseParam: {} },
-        },
-        header: { adapterResultCode: "0", newToken: "SYNTHETIC" },
-      }),
-      "exchange-rate": encode({
-        responseParam: {
-          exchangeRateInformation: { responseParam: { exchangeRates: [] } },
-        },
-        header: { adapterResultCode: "0", newToken: "SYNTHETIC" },
-      }),
-      "yen-deposit-account": withToken("yen-deposit-account"),
-      normalized: encode({
-        schemaVersion: "sbi-shinsei-v1",
-        capturedAt: "2026-09-07T00:02:00.000Z",
-        balances: [],
-        transactions: [],
-      }),
-    };
-    const objects = new Map<string, StoredObject>();
-    const artifacts = [];
-    for (const dataset of Object.keys(FILENAMES) as (keyof typeof FILENAMES)[]) {
-      const bytes = payloads[dataset];
-      const key = `${PREFIX}${FILENAMES[dataset]}`;
-      objects.set(key, stored(bytes));
-      artifacts.push({
-        dataset,
-        key,
-        mediaType: "application/json",
-        sha256: await digest(bytes),
-        bytes: bytes.byteLength,
-      });
-    }
-    const manifestKey = `${PREFIX}manifest.json`;
-    objects.set(
-      manifestKey,
-      stored(
-        encode({
-          schemaVersion: "sbi-shinsei-worker-poc-v1",
-          source: "sbi-shinsei",
-          runId: RUN_ID,
-          startedAt: "2026-09-07T00:00:00.000Z",
-          completedAt: "2026-09-07T00:02:00.000Z",
-          status: "success",
-          liveReadsEnabled: true,
-          artifacts,
-          failures: [],
-        }),
-      ),
-    );
+  test("reuses the complete Layer A contract, parses success routes, and emits aggregates", async () => {
+    const run = await successRun();
     const response = await auditWorker.fetch(auditRequest(), {
-      SBI_SHINSEI_SNAPSHOTS: fakeBucket(objects, manifestKey),
+      SBI_SHINSEI_SNAPSHOTS: fakeBucket(run.objects, run.manifestKey),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
@@ -96,7 +43,124 @@ describe("SBI Shinsei aggregate-only R2 Layer B audit", () => {
     expect(forbiddenFields(body)).toEqual([]);
   });
 
-  test("the harness is local, remote-read-only, and never deploys or mutates R2", () => {
+  test("fails closed on size, metadata, native checksum, content type, and cross-artifact drift", async () => {
+    const cases: ((run: Awaited<ReturnType<typeof successRun>>) => void | Promise<void>)[] = [
+      (run) => {
+        run.objects.get(run.manifestKey)!.size = 256 * 1024 + 1;
+      },
+      (run) => {
+        run.objects.get(`${PREFIX}${FILENAMES["yen-deposit-account"]}`)!.customMetadata = {
+          dataset: "yen-deposit-account",
+          sha256: run.artifacts.find((item) => item.dataset === "yen-deposit-account")!.sha256,
+          unknown: "drift",
+        };
+      },
+      (run) => {
+        run.objects.get(`${PREFIX}${FILENAMES["exchange-rate"]}`)!.checksums.sha256 =
+          new Uint8Array(32).buffer;
+      },
+      (run) => {
+        run.objects.get(`${PREFIX}${FILENAMES["balance-summary-and-stage"]}`)!.httpMetadata = {
+          contentType: "application/json; charset=utf-8",
+        };
+      },
+      (run) =>
+        replacePayload(
+          run,
+          "normalized",
+          encode({
+            schemaVersion: "sbi-shinsei-v1",
+            capturedAt: "2026-09-07T00:02:00.000Z",
+            balances: [],
+            transactions: [],
+          }),
+        ),
+    ];
+    for (const mutate of cases) {
+      const run = await successRun();
+      await mutate(run);
+      const response = await auditWorker.fetch(auditRequest(), {
+        SBI_SHINSEI_SNAPSHOTS: fakeBucket(run.objects, run.manifestKey),
+      });
+      expect(await response.json()).toMatchObject({
+        auditedManifestCount: 0,
+        failedManifestCount: 1,
+        failureCode: "contract_validation_failed",
+      });
+    }
+  });
+
+  test("fails closed on double-prefixed inventory and a stagnant run cursor", async () => {
+    const extra = await successRun();
+    extra.objects.set(`${PREFIX}raw/sbi-shinsei/unexpected.json`, stored(encode({})));
+    const extraResponse = await auditWorker.fetch(auditRequest(), {
+      SBI_SHINSEI_SNAPSHOTS: fakeBucket(extra.objects, extra.manifestKey),
+    });
+    expect(await extraResponse.json()).toMatchObject({
+      auditedManifestCount: 0,
+      failedManifestCount: 1,
+    });
+
+    const stagnant = await successRun();
+    const stagnantResponse = await auditWorker.fetch(auditRequest(), {
+      SBI_SHINSEI_SNAPSHOTS: fakeBucket(stagnant.objects, stagnant.manifestKey, true),
+    });
+    expect(await stagnantResponse.json()).toMatchObject({
+      auditedManifestCount: 0,
+      failedManifestCount: 1,
+    });
+  });
+
+  test("never invokes Layer B parsers for a partial or failed manifest", async () => {
+    const top = withToken("top-accounts-balance-and-activity");
+    const topValue = JSON.parse(new TextDecoder().decode(top)) as Record<string, unknown>;
+    const activity = (
+      (
+        (topValue["responseParam"] as Record<string, unknown>)["activity"] as Record<
+          string,
+          unknown
+        >
+      )["responseParam"] as Record<string, unknown>
+    )["activityDetails"] as Record<string, unknown>[];
+    activity[1]!["txnReferenceNo"] = activity[0]!["txnReferenceNo"];
+    const run = await buildRun({
+      payloads: { "top-accounts-balance-and-activity": encode(topValue) },
+      status: "partial",
+      failures: [
+        failure("read:balance-summary-and-stage"),
+        failure("read:exchange-rate"),
+        failure("read:yen-deposit-account"),
+        failure("derive:normalized"),
+      ],
+    });
+    const response = await auditWorker.fetch(auditRequest(), {
+      SBI_SHINSEI_SNAPSHOTS: fakeBucket(run.objects, run.manifestKey),
+    });
+    expect(await response.json()).toMatchObject({
+      auditedManifestCount: 1,
+      failedManifestCount: 0,
+      manifestStatus: "partial",
+      matchedArtifactCount: 0,
+      parsedArtifactCount: 0,
+      decisionCoveredArtifactCount: 0,
+    });
+
+    const failed = await buildRun({
+      payloads: {},
+      status: "failed",
+      failures: [{ operation: "collect", errorType: "SyntheticFailure", message: "failed" }],
+    });
+    const failedResponse = await auditWorker.fetch(auditRequest(), {
+      SBI_SHINSEI_SNAPSHOTS: fakeBucket(failed.objects, failed.manifestKey),
+    });
+    expect(await failedResponse.json()).toMatchObject({
+      auditedManifestCount: 1,
+      manifestStatus: "failed",
+      parsedArtifactCount: 0,
+    });
+  });
+
+  test("the harness is local, bounded, remote-read-only, and never deploys or mutates R2", () => {
     const script = readFileSync(
       new URL("../scripts/audit-sbi-shinsei-r2.sh", import.meta.url),
       "utf8",
@@ -106,6 +170,7 @@ describe("SBI Shinsei aggregate-only R2 Layer B audit", () => {
     ) as Record<string, unknown>;
     expect(script).toContain("wrangler dev");
     expect(script).toContain("--ip 127.0.0.1");
+    expect(script).toContain("pages > 100000");
     expect(script).not.toMatch(/wrangler\s+deploy/u);
     expect(script).not.toMatch(/r2\s+object\s+(?:put|delete)/u);
     expect(config).toMatchObject({ workers_dev: false, preview_urls: false });
@@ -119,19 +184,183 @@ describe("SBI Shinsei aggregate-only R2 Layer B audit", () => {
   });
 });
 
+async function successRun() {
+  return buildRun({
+    payloads: {
+      "top-accounts-balance-and-activity": withToken("top-accounts-balance-and-activity"),
+      "balance-summary-and-stage": encode({
+        responseParam: {
+          summary: { responseParam: {} },
+          category: { responseParam: {} },
+          branchFetch: { responseParam: {} },
+        },
+        header: { adapterResultCode: "0", newToken: "SYNTHETIC" },
+      }),
+      "exchange-rate": encode({
+        responseParam: { exchangeRateInformation: { responseParam: { exchangeRates: [] } } },
+        header: { adapterResultCode: "0", newToken: "SYNTHETIC" },
+      }),
+      "yen-deposit-account": withToken("yen-deposit-account"),
+      normalized: encode({
+        schemaVersion: "sbi-shinsei-v1",
+        capturedAt: "2026-09-07T00:02:00.000Z",
+        balances: [
+          {
+            accountKey: "SYNTHETIC-001",
+            product: "yen-savings",
+            currency: "JPY",
+            balance: "123456",
+            yenEquivalent: "123456",
+            asOf: "2026-09-07T00:02:00.000Z",
+          },
+          {
+            accountKey: "SYNTHETIC-002",
+            product: "foreign-savings",
+            currency: "USD",
+            balance: "12.3400",
+            yenEquivalent: "9876",
+            asOf: "2026-09-07T00:02:00.000Z",
+          },
+        ],
+        transactions: [
+          {
+            accountKey: "SYNTHETIC-001",
+            transactionDate: "2026-09-06",
+            description: "Synthetic debit",
+            debit: "1200",
+            credit: null,
+            balance: "122256",
+            currency: "JPY",
+          },
+          {
+            accountKey: "SYNTHETIC-001",
+            transactionDate: "2026-09-07",
+            description: "Synthetic credit",
+            debit: null,
+            credit: "2500",
+            balance: "124756",
+            currency: "JPY",
+          },
+        ],
+      }),
+    },
+    status: "success",
+    failures: [],
+  });
+}
+
+async function buildRun(options: {
+  payloads: Partial<Record<Dataset, Uint8Array>>;
+  status: "success" | "partial" | "failed";
+  failures: Record<string, unknown>[];
+}) {
+  const objects = new Map<string, StoredObject>();
+  const artifacts: Array<{
+    dataset: Dataset;
+    key: string;
+    mediaType: "application/json";
+    sha256: string;
+    bytes: number;
+  }> = [];
+  for (const dataset of Object.keys(FILENAMES) as Dataset[]) {
+    const bytes = options.payloads[dataset];
+    if (!bytes) continue;
+    const key = `${PREFIX}${FILENAMES[dataset]}`;
+    const sha256 = await digest(bytes);
+    objects.set(key, stored(bytes, { dataset, sha256 }, sha256));
+    artifacts.push({
+      dataset,
+      key,
+      mediaType: "application/json",
+      sha256,
+      bytes: bytes.byteLength,
+    });
+  }
+  const manifestKey = `${PREFIX}manifest.json`;
+  const manifestBytes = encode({
+    schemaVersion: "sbi-shinsei-worker-poc-v1",
+    source: "sbi-shinsei",
+    runId: RUN_ID,
+    startedAt: "2026-09-07T00:00:00.000Z",
+    completedAt: "2026-09-07T00:02:00.000Z",
+    status: options.status,
+    liveReadsEnabled: true,
+    artifacts,
+    failures: options.failures,
+  });
+  const manifestSha256 = await digest(manifestBytes);
+  objects.set(
+    manifestKey,
+    stored(
+      manifestBytes,
+      { source: "sbi-shinsei", status: options.status, runId: RUN_ID, sha256: manifestSha256 },
+      manifestSha256,
+    ),
+  );
+  return { objects, manifestKey, artifacts };
+}
+
+async function replacePayload(
+  run: Awaited<ReturnType<typeof buildRun>>,
+  dataset: Dataset,
+  body: Uint8Array,
+): Promise<void> {
+  const artifact = run.artifacts.find((item) => item.dataset === dataset)!;
+  artifact.sha256 = await digest(body);
+  artifact.bytes = body.byteLength;
+  run.objects.set(
+    artifact.key,
+    stored(body, { dataset, sha256: artifact.sha256 }, artifact.sha256),
+  );
+
+  const currentManifest = run.objects.get(run.manifestKey)!;
+  const manifest = JSON.parse(new TextDecoder().decode(currentManifest.body)) as Record<
+    string,
+    unknown
+  >;
+  manifest["artifacts"] = run.artifacts;
+  const manifestBytes = encode(manifest);
+  const manifestSha256 = await digest(manifestBytes);
+  run.objects.set(
+    run.manifestKey,
+    stored(
+      manifestBytes,
+      {
+        source: "sbi-shinsei",
+        status: String(manifest["status"]),
+        runId: RUN_ID,
+        sha256: manifestSha256,
+      },
+      manifestSha256,
+    ),
+  );
+}
+
 interface StoredObject {
   body: Uint8Array;
   size: number;
   httpMetadata: { contentType: string };
+  customMetadata?: Record<string, string>;
+  checksums: { sha256?: ArrayBuffer };
 }
-function stored(body: Uint8Array): StoredObject {
+function stored(
+  body: Uint8Array,
+  customMetadata?: Record<string, string>,
+  nativeSha256?: string,
+): StoredObject {
   return {
     body,
     size: body.byteLength,
     httpMetadata: { contentType: "application/json" },
+    ...(customMetadata ? { customMetadata } : {}),
+    checksums: { ...(nativeSha256 ? { sha256: hexBuffer(nativeSha256) } : {}) },
   };
 }
-function fakeBucket(objects: Map<string, StoredObject>, manifestKey: string): R2Bucket {
+function fakeBucket(
+  objects: Map<string, StoredObject>,
+  manifestKey: string,
+  stagnantRunCursor = false,
+): R2Bucket {
   return {
     get: async (key: string) => {
       const object = objects.get(key);
@@ -143,11 +372,16 @@ function fakeBucket(objects: Map<string, StoredObject>, manifestKey: string): R2
         : null;
     },
     list: async (options: R2ListOptions) => {
-      if (options.prefix === "raw/sbi-shinsei/" && options.limit === 1)
+      if (options.prefix === "raw/sbi-shinsei/" && options.limit === 1) {
+        return { objects: [{ key: manifestKey }], truncated: false } as unknown as R2Objects;
+      }
+      if (stagnantRunCursor && options.prefix === PREFIX) {
         return {
-          objects: [{ key: manifestKey }],
-          truncated: false,
+          objects: [],
+          truncated: true,
+          cursor: options.cursor ?? "SYNTHETIC-STAGNANT",
         } as unknown as R2Objects;
+      }
       const entries = [...objects.keys()]
         .filter((key) => key.startsWith(options.prefix ?? ""))
         .sort()
@@ -168,11 +402,11 @@ function withToken(name: string): Uint8Array {
     string,
     unknown
   >;
-  value["header"] = {
-    ...(value["header"] as Record<string, unknown>),
-    newToken: "SYNTHETIC",
-  };
+  value["header"] = { ...(value["header"] as Record<string, unknown>), newToken: "SYNTHETIC" };
   return encode(value);
+}
+function failure(operation: string): Record<string, unknown> {
+  return { operation, errorType: "NotAttempted", message: "not attempted" };
 }
 function encode(value: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(value));
@@ -181,6 +415,14 @@ async function digest(body: Uint8Array): Promise<string> {
   const copy = new Uint8Array(body);
   const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", copy.buffer));
   return [...hash].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+function hexBuffer(value: string): ArrayBuffer {
+  const result = new ArrayBuffer(value.length / 2);
+  const bytes = new Uint8Array(result);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(value.slice(index * 2, index * 2 + 2), 16);
+  }
+  return result;
 }
 function forbiddenFields(value: unknown, path = "$"): string[] {
   if (Array.isArray(value))

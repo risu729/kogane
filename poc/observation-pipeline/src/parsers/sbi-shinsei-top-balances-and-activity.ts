@@ -59,6 +59,9 @@ export const sbiShinseiTopBalancesAndActivity: Parser = {
     );
     const observations: Observation[] = [];
     const accountIds = new Set<string>();
+    const overviewContext = Object.fromEntries(
+      Object.entries(overview).filter(([key]) => key !== "savingsDetails"),
+    );
     exactArray(
       overview["savingsDetails"],
       `${DATASET}.overview.responseParam.savingsDetails`,
@@ -87,7 +90,10 @@ export const sbiShinseiTopBalancesAndActivity: Parser = {
           asOf: artifact.fetchedAt,
           ...(observedAt ? { observedAt } : {}),
           locator: `${locator}.balance`,
-          extra: providerExtra(row, {}, { sourceView: "top_overview", productCode }),
+          extra: providerExtra(row, overviewContext, {
+            sourceView: "top_overview",
+            productCode,
+          }),
         }),
       );
       if (row["yenEqui"] !== undefined && row["yenEqui"] !== null && row["yenEqui"] !== "") {
@@ -99,15 +105,11 @@ export const sbiShinseiTopBalancesAndActivity: Parser = {
           asOf: artifact.fetchedAt,
           ...(observedAt ? { observedAt } : {}),
           locator: `${locator}.yenEqui`,
-          extra: providerExtra(
-            row,
-            {},
-            {
-              sourceView: "top_overview",
-              productCode,
-              subjectCurrency: nativeCurrency,
-            },
-          ),
+          extra: providerExtra(row, overviewContext, {
+            sourceView: "top_overview",
+            productCode,
+            subjectCurrency: nativeCurrency,
+          }),
         });
         observations.push({
           ...yen,
@@ -143,6 +145,24 @@ export const sbiShinseiTopBalancesAndActivity: Parser = {
       `${DATASET}.activity.responseParam.activityDetails`,
       1_000,
     );
+    const fromPresent =
+      activity["fromDate"] !== undefined &&
+      activity["fromDate"] !== null &&
+      activity["fromDate"] !== "";
+    const toPresent =
+      activity["toDate"] !== undefined && activity["toDate"] !== null && activity["toDate"] !== "";
+    if (fromPresent !== toPresent || (details.length > 0 && !fromPresent)) {
+      throw new Error(`${DATASET}.activity.responseParam: incomplete activity window`);
+    }
+    const fromDate = fromPresent
+      ? compactDate(activity["fromDate"], `${DATASET}.activity.responseParam.fromDate`)
+      : undefined;
+    const toDate = toPresent
+      ? compactDate(activity["toDate"], `${DATASET}.activity.responseParam.toDate`)
+      : undefined;
+    if (fromDate !== undefined && toDate !== undefined && fromDate > toDate) {
+      throw new Error(`${DATASET}.activity.responseParam: activity window is reversed`);
+    }
     if (
       details.length > 0 ||
       (activity["currentBalance"] !== undefined &&
@@ -224,6 +244,14 @@ export const sbiShinseiTopBalancesAndActivity: Parser = {
             `${locator}.${sourceField}: not exactly representable in ${nativeCurrency}`,
           );
         decimal(row["balance"], `${locator}.balance`);
+        const postingDate = compactDate(row["postingDate"], `${locator}.postingDate`);
+        if (
+          fromDate !== undefined &&
+          toDate !== undefined &&
+          (postingDate < fromDate || postingDate > toDate)
+        ) {
+          throw new Error(`${locator}.postingDate: outside declared activity window`);
+        }
         observations.push({
           kind: "transaction",
           sourceAccount: `sbi-shinsei:${accountNo}`,
@@ -233,12 +261,13 @@ export const sbiShinseiTopBalancesAndActivity: Parser = {
           amountScale: unsigned.scale,
           currency: nativeCurrency,
           description,
-          asOf: compactDate(row["postingDate"], `${locator}.postingDate`),
+          asOf: postingDate,
           ...(observedAt ? { observedAt } : {}),
           rawLocator: locator,
           extra: providerExtra(row, context, {
             sourceView: "top_activity",
             amountSignSource: sourceField,
+            rowBalanceDisposition: "preserved_provider_value_semantics_unverified",
           }),
         });
       });
