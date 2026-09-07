@@ -1,10 +1,21 @@
-import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry";
+import {
+  sonyBankGrossBalance,
+  sonyBankHistoryCsv,
+  sonyBankHistoryJson,
+  sonyBankWalletHistory,
+} from "../../../poc/observation-pipeline/src/parsers/sony-bank";
 import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types";
 import { validateSonyRun } from "./sony";
 
 type AuditEnv = Pick<Env, "SONY_SNAPSHOTS">;
 
 const PREFIX = "raw/sony-bank/";
+const PARSERS = [
+  sonyBankGrossBalance,
+  sonyBankHistoryJson,
+  sonyBankHistoryCsv,
+  sonyBankWalletHistory,
+] as const;
 
 export default {
   async fetch(request: Request, env: AuditEnv): Promise<Response> {

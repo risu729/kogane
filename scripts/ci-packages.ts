@@ -57,6 +57,7 @@ export const CI_PACKAGES: PackagePolicy[] = [
       "cf:check:audit-smbc-direct": `${dryRun} --config wrangler.audit-smbc-direct.jsonc`,
       "cf:check:audit-smbc-direct-layer-b": `${dryRun} --config wrangler.audit-smbc-direct-layer-b.jsonc`,
       "cf:check:audit-sbi-shinsei": `${dryRun} --config wrangler.audit-sbi-shinsei.jsonc`,
+      "cf:check:audit-global-pass-layer-b": `${dryRun} --config wrangler.audit-global-pass-layer-b.jsonc`,
     },
     checks: [
       "test",
@@ -71,6 +72,7 @@ export const CI_PACKAGES: PackagePolicy[] = [
       "cf:check:audit-smbc-direct",
       "cf:check:audit-smbc-direct-layer-b",
       "cf:check:audit-sbi-shinsei",
+      "cf:check:audit-global-pass-layer-b",
     ],
   },
   worker("mobile-suica-worker"),

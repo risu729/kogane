@@ -1,10 +1,21 @@
-import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry";
+import { sbiVcAccountMargin } from "../../../poc/observation-pipeline/src/parsers/sbi-vc-account-margin";
+import { sbiVcCashBalances } from "../../../poc/observation-pipeline/src/parsers/sbi-vc-cash-balances";
+import { sbiVcCashflows } from "../../../poc/observation-pipeline/src/parsers/sbi-vc-cashflows";
+import { sbiVcExecutions } from "../../../poc/observation-pipeline/src/parsers/sbi-vc-executions";
+import { sbiVcPositionSummary } from "../../../poc/observation-pipeline/src/parsers/sbi-vc-position-summary";
 import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types";
 import { parseSbiVcManifest } from "./sbi-vc";
 
 type AuditEnv = Pick<Env, "SBI_VC_SNAPSHOTS">;
 
 const PREFIX = "raw/sbi-vc-trade/";
+const PARSERS = [
+  sbiVcCashBalances,
+  sbiVcAccountMargin,
+  sbiVcPositionSummary,
+  sbiVcExecutions,
+  sbiVcCashflows,
+] as const;
 
 export default {
   async fetch(request: Request, env: AuditEnv): Promise<Response> {
