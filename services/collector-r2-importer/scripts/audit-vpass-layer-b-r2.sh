@@ -42,7 +42,7 @@ if [[ "${ready}" != true ]]; then
   exit 1
 fi
 
-summary='{"scanned":0,"audited":0,"skipped":0,"failed":0,"statuses":{},"schemas":{},"artifacts":0,"statementArtifacts":0,"rows":0,"webRows":0,"customizedRows":0,"webShapes":{},"customizedShapes":{},"webRowKeyShapes":{},"customizedRowKeyShapes":{},"webBeanKeyShapes":{},"customizedBeanKeyShapes":{},"failures":{}}'
+summary='{"scanned":0,"audited":0,"skipped":0,"failed":0,"statuses":{},"schemas":{},"artifacts":0,"statementArtifacts":0,"rows":0,"webRows":0,"customizedRows":0,"parsedStatementArtifacts":0,"parsedTransactions":0,"parserWarnings":0,"blockedStatementArtifacts":0,"webShapes":{},"customizedShapes":{},"webRowKeyShapes":{},"customizedRowKeyShapes":{},"webBeanKeyShapes":{},"customizedBeanKeyShapes":{},"rootKeyShapes":{},"headerKeyShapes":{},"bodyKeyShapes":{},"contentKeyShapes":{},"failures":{}}'
 cursor=""
 pages=0
 while true; do
@@ -65,6 +65,8 @@ while true; do
     ([.recordStatusCounts,.recordSchemaCounts,.observedWebShapes,
       .observedCustomizedShapes,.observedWebRowKeyShapes,.observedCustomizedRowKeyShapes,
       .observedWebBeanKeyShapes,.observedCustomizedBeanKeyShapes,
+      .observedRootKeyShapes,.observedHeaderKeyShapes,.observedBodyKeyShapes,
+      .observedContentKeyShapes,
       .failureCodeCounts] | all(type == "object"))
   ' <<<"${page}" >/dev/null || {
     printf 'audit worker returned an invalid aggregate response\n' >&2
@@ -84,12 +86,20 @@ while true; do
     | .rows += $p.statementRowCount
     | .webRows += $p.webRowCount
     | .customizedRows += $p.customizedRowCount
+    | .parsedStatementArtifacts += $p.parsedStatementArtifactCount
+    | .parsedTransactions += $p.parsedTransactionCount
+    | .parserWarnings += $p.parserWarningCount
+    | .blockedStatementArtifacts += $p.blockedStatementArtifactCount
     | .webShapes = addmap(.webShapes; $p.observedWebShapes)
     | .customizedShapes = addmap(.customizedShapes; $p.observedCustomizedShapes)
     | .webRowKeyShapes = addmap(.webRowKeyShapes; $p.observedWebRowKeyShapes)
     | .customizedRowKeyShapes = addmap(.customizedRowKeyShapes; $p.observedCustomizedRowKeyShapes)
     | .webBeanKeyShapes = addmap(.webBeanKeyShapes; $p.observedWebBeanKeyShapes)
     | .customizedBeanKeyShapes = addmap(.customizedBeanKeyShapes; $p.observedCustomizedBeanKeyShapes)
+    | .rootKeyShapes = addmap(.rootKeyShapes; $p.observedRootKeyShapes)
+    | .headerKeyShapes = addmap(.headerKeyShapes; $p.observedHeaderKeyShapes)
+    | .bodyKeyShapes = addmap(.bodyKeyShapes; $p.observedBodyKeyShapes)
+    | .contentKeyShapes = addmap(.contentKeyShapes; $p.observedContentKeyShapes)
     | .failures = addmap(.failures; $p.failureCodeCounts)
   ')"
   cursor="$(jq -r '.nextCursor // ""' <<<"${page}")"
@@ -101,9 +111,14 @@ jq -nc --argjson s "${summary}" '{schemaVersion:"vpass-r2-layer-b-structural-aud
   failedRecordCount:$s.failed,recordStatusCounts:$s.statuses,recordSchemaCounts:$s.schemas,
   artifactCount:$s.artifacts,statementArtifactCount:$s.statementArtifacts,
   statementRowCount:$s.rows,webRowCount:$s.webRows,customizedRowCount:$s.customizedRows,
+  parsedStatementArtifactCount:$s.parsedStatementArtifacts,
+  parsedTransactionCount:$s.parsedTransactions,parserWarningCount:$s.parserWarnings,
+  blockedStatementArtifactCount:$s.blockedStatementArtifacts,
   observedWebShapes:$s.webShapes,observedCustomizedShapes:$s.customizedShapes,
   observedWebRowKeyShapes:$s.webRowKeyShapes,
   observedCustomizedRowKeyShapes:$s.customizedRowKeyShapes,
   observedWebBeanKeyShapes:$s.webBeanKeyShapes,
   observedCustomizedBeanKeyShapes:$s.customizedBeanKeyShapes,
+  observedRootKeyShapes:$s.rootKeyShapes,observedHeaderKeyShapes:$s.headerKeyShapes,
+  observedBodyKeyShapes:$s.bodyKeyShapes,observedContentKeyShapes:$s.contentKeyShapes,
   failureCodeCounts:$s.failures}'

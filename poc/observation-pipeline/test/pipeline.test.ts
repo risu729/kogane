@@ -26,15 +26,27 @@ import {
 import type { Parser } from "../src/types.ts";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
-const SBI_RUN = join(FIXTURES, "sbi-securities", "2026-08-20", "run-20260820-210000-poc01");
-const SBI_VC_RUN = join(FIXTURES, "sbi-vc-trade", "2026-09-07", "run-20260907-synthetic01");
+const SBI_RUN = join(
+  FIXTURES,
+  "sbi-securities",
+  "2026-08-20",
+  "run-20260820-210000-poc01",
+);
+const SBI_VC_RUN = join(
+  FIXTURES,
+  "sbi-vc-trade",
+  "2026-09-07",
+  "run-20260907-synthetic01",
+);
 
 function tempStore(): Store {
   return openStore(mkdtempSync(join(tmpdir(), "kogane-poc-")));
 }
 
 function count(store: Store, table: string): number {
-  return (store.db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+  return (
+    store.db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }
+  ).n;
 }
 
 describe("ingestion", () => {
@@ -50,9 +62,9 @@ describe("ingestion", () => {
       };
       if (status !== undefined) manifest.status = status;
       writeFileSync(join(directory, "manifest.json"), JSON.stringify(manifest));
-      expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
-        /explicit run status|unknown run status/u,
-      );
+      expect(() =>
+        ingestRunDirectory(store, directory, { id: "x", provider: "X" }),
+      ).toThrow(/explicit run status|unknown run status/u);
       expect(count(store, "fetch_runs")).toBe(0);
       expect(count(store, "fetch_artifacts")).toBe(0);
     }
@@ -86,7 +98,9 @@ describe("ingestion", () => {
     db.close();
     const store = openStore(directory);
     const row = store.db
-      .query("SELECT status, failure_count, window_start, window_end FROM fetch_runs")
+      .query(
+        "SELECT status, failure_count, window_start, window_end FROM fetch_runs",
+      )
       .get() as {
       status: string;
       failure_count: number;
@@ -100,13 +114,16 @@ describe("ingestion", () => {
       window_end: null,
     });
     expect(
-      (store.db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(5);
+      (store.db.query("PRAGMA user_version").get() as { user_version: number })
+        .user_version,
+    ).toBe(6);
   });
 
   test("migrates v3 artifact rows with nullable collector identity", () => {
     const directory = mkdtempSync(join(tmpdir(), "kogane-v3-store-"));
-    const db = new Database(join(directory, "kogane-poc.sqlite"), { create: true });
+    const db = new Database(join(directory, "kogane-poc.sqlite"), {
+      create: true,
+    });
     db.exec(`
       CREATE TABLE sources (
         id TEXT PRIMARY KEY, provider TEXT NOT NULL, ingestion TEXT NOT NULL
@@ -153,17 +170,26 @@ describe("ingestion", () => {
     db.close();
     const store = openStore(directory);
     const row = store.db
-      .query("SELECT artifact_key, statement_state, period FROM fetch_artifacts")
+      .query(
+        "SELECT artifact_key, statement_state, period FROM fetch_artifacts",
+      )
       .get() as { artifact_key: null; statement_state: null; period: null };
-    expect(row).toEqual({ artifact_key: null, statement_state: null, period: null });
+    expect(row).toEqual({
+      artifact_key: null,
+      statement_state: null,
+      period: null,
+    });
     expect(
-      (store.db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(5);
+      (store.db.query("PRAGMA user_version").get() as { user_version: number })
+        .user_version,
+    ).toBe(6);
   });
 
   test("migrates v4 collector identity without losing it when adding run windows", () => {
     const directory = mkdtempSync(join(tmpdir(), "kogane-v4-store-"));
-    const db = new Database(join(directory, "kogane-poc.sqlite"), { create: true });
+    const db = new Database(join(directory, "kogane-poc.sqlite"), {
+      create: true,
+    });
     db.exec(`
       CREATE TABLE sources (
         id TEXT PRIMARY KEY, provider TEXT NOT NULL, ingestion TEXT NOT NULL
@@ -213,20 +239,68 @@ describe("ingestion", () => {
     `);
     db.close();
     const store = openStore(directory);
-    expect(store.db.query("SELECT window_start, window_end FROM fetch_runs").get()).toEqual({
+    expect(
+      store.db.query("SELECT window_start, window_end FROM fetch_runs").get(),
+    ).toEqual({
       window_start: null,
       window_end: null,
     });
     expect(
-      store.db.query("SELECT artifact_key, statement_state, period FROM fetch_artifacts").get(),
+      store.db
+        .query(
+          "SELECT artifact_key, statement_state, period FROM fetch_artifacts",
+        )
+        .get(),
     ).toEqual({
       artifact_key: "connection/ledger.json",
       statement_state: "confirmed",
       period: "2026-09",
     });
     expect(
-      (store.db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(5);
+      (store.db.query("PRAGMA user_version").get() as { user_version: number })
+        .user_version,
+    ).toBe(6);
+  });
+
+  test("migrates a v5 store by adding the Layer-A fetch unit key", () => {
+    const directory = mkdtempSync(join(tmpdir(), "kogane-v5-store-"));
+    const db = new Database(join(directory, "kogane-poc.sqlite"), {
+      create: true,
+    });
+    db.exec(`
+      CREATE TABLE sources (
+        id TEXT PRIMARY KEY, provider TEXT NOT NULL, ingestion TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE fetch_runs (
+        id INTEGER PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id),
+        external_run_id TEXT, tool TEXT NOT NULL, started_at TEXT NOT NULL,
+        completed_at TEXT, status TEXT NOT NULL, failure_count INTEGER NOT NULL DEFAULT 0,
+        window_start TEXT, window_end TEXT, UNIQUE (source_id, external_run_id)
+      ) STRICT;
+      CREATE TABLE raw_objects (
+        sha256 TEXT PRIMARY KEY, size INTEGER NOT NULL, content_type TEXT NOT NULL,
+        blob_key TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE fetch_artifacts (
+        id INTEGER PRIMARY KEY, fetch_run_id INTEGER NOT NULL REFERENCES fetch_runs(id),
+        source_id TEXT NOT NULL REFERENCES sources(id), dataset TEXT, artifact_key TEXT,
+        statement_state TEXT, period TEXT, url TEXT, method TEXT, http_status INTEGER,
+        mime TEXT NOT NULL, fetched_at TEXT NOT NULL, sha256 TEXT NOT NULL REFERENCES raw_objects(sha256)
+      ) STRICT;
+      PRAGMA user_version = 5;
+    `);
+    db.close();
+    const store = openStore(directory);
+    const columns = store.db
+      .query("PRAGMA table_info(fetch_artifacts)")
+      .all() as { name: string }[];
+    expect(
+      columns.some((column) => column.name === "fetch_unit_key"),
+    ).toBeTrue();
+    expect(
+      (store.db.query("PRAGMA user_version").get() as { user_version: number })
+        .user_version,
+    ).toBe(6);
   });
 
   test("run-directory ingestion is idempotent", () => {
@@ -255,15 +329,22 @@ describe("ingestion", () => {
     };
     writeFileSync(join(directory, "manifest.json"), JSON.stringify(manifest));
     const store = tempStore();
-    ingestRunDirectory(store, directory, { id: "window-source", provider: "Window Source" });
-    expect(store.db.query("SELECT window_start, window_end FROM fetch_runs").get()).toEqual({
+    ingestRunDirectory(store, directory, {
+      id: "window-source",
+      provider: "Window Source",
+    });
+    expect(
+      store.db.query("SELECT window_start, window_end FROM fetch_runs").get(),
+    ).toEqual({
       window_start: "2026-09-01",
       window_end: "2026-09-30",
     });
     store.db.exec("UPDATE fetch_runs SET window_end = NULL;");
     expect(() => listArtifacts(store)).toThrow("window is incomplete");
 
-    const invalidDirectory = mkdtempSync(join(tmpdir(), "kogane-run-window-invalid-"));
+    const invalidDirectory = mkdtempSync(
+      join(tmpdir(), "kogane-run-window-invalid-"),
+    );
     writeFileSync(join(invalidDirectory, "artifact.json"), "{}");
     writeFileSync(
       join(invalidDirectory, "manifest.json"),
@@ -290,7 +371,9 @@ describe("ingestion", () => {
       deduplicated: 0,
       skippedExisting: false,
     });
-    expect(ingestRunDirectory(store, SBI_VC_RUN, source).skippedExisting).toBe(true);
+    expect(ingestRunDirectory(store, SBI_VC_RUN, source).skippedExisting).toBe(
+      true,
+    );
     expect(count(store, "fetch_artifacts")).toBe(6);
   });
 
@@ -310,7 +393,9 @@ describe("ingestion", () => {
     expect(count(store, "fetch_artifacts")).toBe(2); // both fetches are history
     expect(count(store, "raw_objects")).toBe(1); // one content-addressed blob
     // re-ingesting the same file is a no-op
-    expect(ingestFile(store, join(directory, "a.csv"), options).skippedExisting).toBe(true);
+    expect(
+      ingestFile(store, join(directory, "a.csv"), options).skippedExisting,
+    ).toBe(true);
   });
 
   test("a rejected run leaves nothing behind and can be re-ingested", () => {
@@ -327,7 +412,9 @@ describe("ingestion", () => {
         artifacts: [{ dataset: "some-dataset", sha256, bytes: 2 }],
       });
     writeFileSync(join(directory, "manifest.json"), manifest("f".repeat(64)));
-    expect(() => ingestRunDirectory(store, directory, source)).toThrow(/does not match manifest/u);
+    expect(() => ingestRunDirectory(store, directory, source)).toThrow(
+      /does not match manifest/u,
+    );
     // The failure must not leave a run row, or every later attempt at this run
     // would be a silent no-op.
     expect(count(store, "fetch_runs")).toBe(0);
@@ -354,7 +441,9 @@ describe("ingestion", () => {
         artifacts: [{ dataset: "present" }, { dataset: "absent" }],
       }),
     );
-    expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow();
+    expect(() =>
+      ingestRunDirectory(store, directory, { id: "x", provider: "X" }),
+    ).toThrow();
     expect(count(store, "fetch_runs")).toBe(0);
     expect(count(store, "fetch_artifacts")).toBe(0);
   });
@@ -373,9 +462,9 @@ describe("ingestion", () => {
         artifacts: [{ dataset: "ds" }, { dataset: "ds" }],
       }),
     );
-    expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
-      /more than once/u,
-    );
+    expect(() =>
+      ingestRunDirectory(store, directory, { id: "x", provider: "X" }),
+    ).toThrow(/more than once/u);
     expect(count(store, "fetch_runs")).toBe(0);
   });
 
@@ -388,25 +477,42 @@ describe("ingestion", () => {
       startedAt: "2026-09-07T00:00:00Z",
       artifacts: [{ dataset: "ds" }],
     };
-    writeFileSync(join(directory, "manifest.json"), JSON.stringify({ ...base, failures: [] }));
-    expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
-      /unknown run status/u,
+    writeFileSync(
+      join(directory, "manifest.json"),
+      JSON.stringify({ ...base, failures: [] }),
     );
-    writeFileSync(join(directory, "manifest.json"), JSON.stringify({ ...base, status: "success" }));
-    expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
-      /failures must be an array/u,
+    expect(() =>
+      ingestRunDirectory(store, directory, { id: "x", provider: "X" }),
+    ).toThrow(/unknown run status/u);
+    writeFileSync(
+      join(directory, "manifest.json"),
+      JSON.stringify({ ...base, status: "success" }),
     );
+    expect(() =>
+      ingestRunDirectory(store, directory, { id: "x", provider: "X" }),
+    ).toThrow(/failures must be an array/u);
     expect(count(store, "fetch_runs")).toBe(0);
     expect(count(store, "fetch_artifacts")).toBe(0);
 
-    const valid = { ...base, runId: "existing-outcome", status: "success", failures: [] };
+    const valid = {
+      ...base,
+      runId: "existing-outcome",
+      status: "success",
+      failures: [],
+    };
     writeFileSync(join(directory, "manifest.json"), JSON.stringify(valid));
-    expect(ingestRunDirectory(store, directory, { id: "x", provider: "X" }).artifacts).toBe(1);
+    expect(
+      ingestRunDirectory(store, directory, { id: "x", provider: "X" })
+        .artifacts,
+    ).toBe(1);
     const { status: _status, ...missingStatus } = valid;
-    writeFileSync(join(directory, "manifest.json"), JSON.stringify(missingStatus));
-    expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
-      /unknown run status/u,
+    writeFileSync(
+      join(directory, "manifest.json"),
+      JSON.stringify(missingStatus),
     );
+    expect(() =>
+      ingestRunDirectory(store, directory, { id: "x", provider: "X" }),
+    ).toThrow(/unknown run status/u);
   });
 
   test("re-fetching an unchanged export records a second confirmation", () => {
@@ -482,7 +588,11 @@ describe("parse runs", () => {
   test("partial and failed fetch runs remain raw evidence and never become observations", () => {
     for (const status of ["partial", "failed"] as const) {
       const store = tempStore();
-      upsertSource(store, { id: "fake", provider: "Fake", ingestion: "collector-r2" });
+      upsertSource(store, {
+        id: "fake",
+        provider: "Fake",
+        ingestion: "collector-r2",
+      });
       const fetchRunId = insertFetchRun(store, {
         sourceId: "fake",
         externalRunId: `run-${status}`,
@@ -491,7 +601,11 @@ describe("parse runs", () => {
         completedAt: "2026-08-21T00:01:00Z",
         status,
       });
-      const raw = putRawObject(store, new TextEncoder().encode("{}"), "application/json");
+      const raw = putRawObject(
+        store,
+        new TextEncoder().encode("{}"),
+        "application/json",
+      );
       insertFetchArtifact(store, {
         fetchRunId,
         sourceId: "fake",
@@ -568,8 +682,9 @@ describe("parse runs", () => {
 
     // Defense in depth for stores produced by the pre-policy parser: even an
     // old successful parse attached to a partial fetch run is not current.
-    const artifactId = (store.db.query("SELECT id FROM fetch_artifacts").get() as { id: number })
-      .id;
+    const artifactId = (
+      store.db.query("SELECT id FROM fetch_artifacts").get() as { id: number }
+    ).id;
     const parseRunId = insertParseRun(store, {
       artifactId,
       parserName: "legacy-sbi-vc-executions",
@@ -637,7 +752,9 @@ describe("parse runs", () => {
       mime: "application/json",
       fetchedAt: "2026-09-07T00:00:01Z",
     });
-    const artifacts = store.db.query("SELECT id FROM fetch_artifacts ORDER BY id").all() as {
+    const artifacts = store.db
+      .query("SELECT id FROM fetch_artifacts ORDER BY id")
+      .all() as {
       id: number;
     }[];
     for (const [index, sourceView] of ["recent", "historical"].entries()) {
@@ -660,13 +777,17 @@ describe("parse runs", () => {
         extra: { _kogane: { sourceView } },
       });
     }
-    expect(currentTransactions(store).map((row) => row.description)).toEqual(["historical"]);
+    expect(currentTransactions(store).map((row) => row.description)).toEqual([
+      "historical",
+    ]);
     expect(count(store, "transaction_observations")).toBe(2);
   });
 
   test("current SMBC Direct transactions use the latest fetched complete range snapshot", () => {
     const store = tempStore();
-    const directory = mkdtempSync(join(tmpdir(), "kogane-smbc-direct-refetch-"));
+    const directory = mkdtempSync(
+      join(tmpdir(), "kogane-smbc-direct-refetch-"),
+    );
     writeFileSync(join(directory, "newer.json"), "{}");
     writeFileSync(join(directory, "stale.json"), "{}");
     writeFileSync(join(directory, "empty.json"), "{}");
@@ -693,7 +814,9 @@ describe("parse runs", () => {
              artifact_key = 'transactions/20260801-20260831.normalized.json'`,
       )
       .run();
-    const artifacts = store.db.query("SELECT id FROM fetch_artifacts ORDER BY id").all() as {
+    const artifacts = store.db
+      .query("SELECT id FROM fetch_artifacts ORDER BY id")
+      .all() as {
       id: number;
     }[];
     for (const [index, description] of ["newer", "stale"].entries()) {
@@ -716,10 +839,13 @@ describe("parse runs", () => {
         extra: {},
       });
     }
-    expect(currentTransactions(store).map((row) => row.description)).toEqual(["newer"]);
+    expect(currentTransactions(store).map((row) => row.description)).toEqual([
+      "newer",
+    ]);
     expect(count(store, "transaction_observations")).toBe(2);
     const emptyArtifact = artifacts[2];
-    if (emptyArtifact === undefined) throw new Error("missing empty test artifact");
+    if (emptyArtifact === undefined)
+      throw new Error("missing empty test artifact");
     insertParseRun(store, {
       artifactId: emptyArtifact.id,
       parserName: "smbc-direct-transactions",
@@ -940,7 +1066,9 @@ describe("parse runs", () => {
          JOIN parse_runs s ON s.id = p.superseded_by_parse_run_id`,
       )
       .all() as { parser_version: string; by_version: string }[];
-    expect(superseded).toEqual([{ parser_version: "0.1.0", by_version: "0.2.0" }]);
+    expect(superseded).toEqual([
+      { parser_version: "0.1.0", by_version: "0.2.0" },
+    ]);
   });
 
   test("a throwing parser records an error parse run", () => {
@@ -955,7 +1083,9 @@ describe("parse runs", () => {
     };
     const summary = runParsers(store, [broken]);
     expect(summary.errors).toBe(1);
-    const run = store.db.query("SELECT status, error FROM parse_runs").get() as {
+    const run = store.db
+      .query("SELECT status, error FROM parse_runs")
+      .get() as {
       status: string;
       error: string;
     };
@@ -1074,7 +1204,9 @@ describe("parse runs", () => {
       fetchedAt: "2026-08-21T01:00:00Z",
     });
     const blobKey = (
-      store.db.query("SELECT blob_key FROM raw_objects ORDER BY sha256").get() as {
+      store.db
+        .query("SELECT blob_key FROM raw_objects ORDER BY sha256")
+        .get() as {
         blob_key: string;
       }
     ).blob_key;

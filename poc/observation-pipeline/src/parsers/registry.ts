@@ -1,7 +1,11 @@
 import type { Parser } from "../types.ts";
 import { paypayCsv } from "./paypay-csv.ts";
 import { mobileSuicaSfHistory } from "./mobile-suica-sf-history.ts";
-import { myJcbCreditLedger, myJcbEvidenceOnly, myJcbPastMonthBalances } from "./myjcb.ts";
+import {
+  myJcbCreditLedger,
+  myJcbEvidenceOnly,
+  myJcbPastMonthBalances,
+} from "./myjcb.ts";
 import {
   sonyBankGrossBalance,
   sonyBankHistoryCsv,
@@ -26,6 +30,7 @@ import { sbiShinseiTopBalancesAndActivity } from "./sbi-shinsei-top-balances-and
 import { sbiShinseiYenDepositAccount } from "./sbi-shinsei-yen-deposit-account.ts";
 import { vPointBalanceInfo, vPointHistoryPage, vPointSmfgPoint } from "./v-point.ts";
 import { vPointPayNotificationEvent } from "./v-point-pay.ts";
+import { vpassStatementPage } from "./vpass.ts";
 
 export const PARSERS: readonly Parser[] = [
   globalPassActivity,
@@ -57,5 +62,6 @@ export const PARSERS: readonly Parser[] = [
   vPointSmfgPoint,
   vPointHistoryPage,
   vPointPayNotificationEvent,
+  vpassStatementPage,
   paypayCsv,
 ];

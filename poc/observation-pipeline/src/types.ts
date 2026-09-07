@@ -17,6 +17,8 @@ export interface ArtifactMeta {
   dataset: string | null;
   /** Run-relative collector artifact key, when the source manifest declares one. */
   artifactKey?: string | null;
+  /** Stable collector unit key (for example a card label), when declared by Layer A. */
+  fetchUnitKey?: string | null;
   /** Provider/collector statement state attached to this specific artifact. */
   statementState?: string | null;
   /** Provider statement period attached to this specific artifact. */

@@ -234,6 +234,47 @@ export function currentTransactions(store: Store): TransactionRow[] {
          SELECT fetch_run_id
          FROM ranked_vpoint_runs
          WHERE snapshot_rank = 1
+       ), eligible_vpass_snapshots AS (
+         SELECT fa.fetch_run_id, fa.source_id, fa.fetch_unit_key,
+                CASE WHEN substr(fa.artifact_key, 1, 7) = 'months/'
+                  THEN substr(fa.artifact_key, 8, 6)
+                  ELSE substr(fa.artifact_key, 23, 6)
+                END AS statement_month,
+                MAX(fa.fetched_at) AS fetched_at
+         FROM parse_runs p
+         JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+         JOIN fetch_runs f ON f.id = fa.fetch_run_id
+         WHERE ${CURRENT}
+           AND p.parser_name = 'vpass-statement-page'
+           AND fa.dataset = 'statement-page'
+           AND fa.fetch_unit_key IS NOT NULL
+         GROUP BY fa.fetch_run_id, fa.source_id, fa.fetch_unit_key, statement_month
+         HAVING COUNT(DISTINCT fa.id) = (
+           SELECT COUNT(*)
+           FROM fetch_artifacts expected_fa
+           WHERE expected_fa.fetch_run_id = fa.fetch_run_id
+             AND expected_fa.source_id = fa.source_id
+             AND expected_fa.dataset = 'statement-page'
+             AND expected_fa.fetch_unit_key = fa.fetch_unit_key
+             AND CASE WHEN substr(expected_fa.artifact_key, 1, 7) = 'months/'
+                   THEN substr(expected_fa.artifact_key, 8, 6)
+                   ELSE substr(expected_fa.artifact_key, 23, 6)
+                 END = CASE WHEN substr(fa.artifact_key, 1, 7) = 'months/'
+                   THEN substr(fa.artifact_key, 8, 6)
+                   ELSE substr(fa.artifact_key, 23, 6)
+                 END
+         )
+       ), ranked_vpass_snapshots AS (
+         SELECT fetch_run_id, source_id, fetch_unit_key, statement_month, fetched_at,
+                ROW_NUMBER() OVER (
+                  PARTITION BY source_id, fetch_unit_key, statement_month
+                  ORDER BY fetched_at DESC, fetch_run_id DESC
+                ) AS snapshot_rank
+         FROM eligible_vpass_snapshots
+       ), current_vpass_snapshots AS (
+         SELECT fetch_run_id, source_id, fetch_unit_key, statement_month
+         FROM ranked_vpass_snapshots
+         WHERE snapshot_rank = 1
        )
        SELECT id, source_id, source_account, as_of, amount_minor, amount_text,
               currency, description, counterparty, external_id, status, parser
@@ -290,6 +331,21 @@ export function currentTransactions(store: Store): TransactionRow[] {
            AND (
              p.parser_name <> 'v-point-history-page'
              OR f.id IN (SELECT fetch_run_id FROM current_vpoint_runs)
+           )
+           AND (
+             p.parser_name <> 'vpass-statement-page'
+             OR EXISTS (
+               SELECT 1
+               FROM current_vpass_snapshots snapshot
+               WHERE snapshot.fetch_run_id = fa.fetch_run_id
+                 AND snapshot.source_id = fa.source_id
+                 AND snapshot.fetch_unit_key = fa.fetch_unit_key
+                 AND snapshot.statement_month = CASE
+                   WHEN substr(fa.artifact_key, 1, 7) = 'months/'
+                     THEN substr(fa.artifact_key, 8, 6)
+                   ELSE substr(fa.artifact_key, 23, 6)
+                 END
+             )
            )
        )
        WHERE rank_in_identity = 1
@@ -457,7 +513,9 @@ export function currentValuations(store: Store): ValuationRow[] {
  * currency; they are never summed or converted, because a JPY figure and a USD
  * figure are two separate claims by the source.
  */
-export function positionsWithValuations(store: Store): PositionWithValuations[] {
+export function positionsWithValuations(
+  store: Store,
+): PositionWithValuations[] {
   const bySubject = new Map<string, ValuationRow[]>();
   const key = (source: string, account: string, subject: string): string =>
     JSON.stringify([source, account, subject]);
@@ -467,14 +525,21 @@ export function positionsWithValuations(store: Store): PositionWithValuations[] 
     );
     if (bucket) bucket.push(valuation);
     else
-      bySubject.set(key(valuation.source_id, valuation.source_account, valuation.subject), [
-        valuation,
-      ]);
+      bySubject.set(
+        key(valuation.source_id, valuation.source_account, valuation.subject),
+        [valuation],
+      );
   }
   return currentPositions(store).map((position) => ({
     position,
     valuations:
-      bySubject.get(key(position.source_id, position.source_account, position.security_code)) ?? [],
+      bySubject.get(
+        key(
+          position.source_id,
+          position.source_account,
+          position.security_code,
+        ),
+      ) ?? [],
   }));
 }
 
@@ -508,7 +573,10 @@ export function artifacts(store: Store): ArtifactRow[] {
  * observation stays visible, which is what lets someone see what a parser
  * change actually did.
  */
-export function artifactDetail(store: Store, id: number): ArtifactDetail | undefined {
+export function artifactDetail(
+  store: Store,
+  id: number,
+): ArtifactDetail | undefined {
   const artifact = store.db
     .query(
       `SELECT a.id, a.source_id, a.dataset, a.url, a.method, a.http_status, a.mime,
@@ -592,7 +660,12 @@ export function observationsForParseRun(
     out.push({
       kind: "balance",
       id: row.id,
-      summary: summarize([row.source_account, row.metric, row.instrument, row.as_of]),
+      summary: summarize([
+        row.source_account,
+        row.metric,
+        row.instrument,
+        row.as_of,
+      ]),
     });
   }
 
@@ -611,7 +684,11 @@ export function observationsForParseRun(
     out.push({
       kind: "position",
       id: row.id,
-      summary: summarize([row.source_account, row.security_code, row.security_name]),
+      summary: summarize([
+        row.source_account,
+        row.security_code,
+        row.security_name,
+      ]),
     });
   }
 
@@ -631,7 +708,12 @@ export function observationsForParseRun(
     out.push({
       kind: "valuation",
       id: row.id,
-      summary: summarize([row.source_account, row.subject, row.metric, row.currency]),
+      summary: summarize([
+        row.source_account,
+        row.subject,
+        row.metric,
+        row.currency,
+      ]),
     });
   }
 
@@ -654,14 +736,15 @@ export function observationDetail(
   const table = OBSERVATION_TABLES[kind];
   // Positions store a quantity, not an amount. Other kinds need the trailing
   // CAST to preserve every digit while still returning all stored columns.
-  const columns = kind === "position" ? "*" : "*, CAST(amount_minor AS TEXT) AS amount_minor";
-  const row = store.db.query(`SELECT ${columns} FROM ${table} WHERE id = ?1`).get(id) as Record<
-    string,
-    unknown
-  > | null;
+  const columns =
+    kind === "position" ? "*" : "*, CAST(amount_minor AS TEXT) AS amount_minor";
+  const row = store.db
+    .query(`SELECT ${columns} FROM ${table} WHERE id = ?1`)
+    .get(id) as Record<string, unknown> | null;
   if (!row) return undefined;
 
-  const extraRaw = typeof row["extra_json"] === "string" ? row["extra_json"] : "";
+  const extraRaw =
+    typeof row["extra_json"] === "string" ? row["extra_json"] : "";
   let extra: unknown = extraRaw;
   let extraParsed = false;
   try {
@@ -672,7 +755,8 @@ export function observationDetail(
     // shape the store does not have.
   }
 
-  const parseRunId = typeof row["parse_run_id"] === "number" ? row["parse_run_id"] : 0;
+  const parseRunId =
+    typeof row["parse_run_id"] === "number" ? row["parse_run_id"] : 0;
   const provenanceRow = store.db
     .query(
       `SELECT p.id AS parse_run_id, p.parser_name, p.parser_version, p.parsed_at,
@@ -688,7 +772,8 @@ export function observationDetail(
        JOIN fetch_runs f ON f.id = a.fetch_run_id
        WHERE p.id = ?1`,
     )
-    .get(parseRunId) as (Omit<Provenance, "warnings"> & { warnings_json: string | null }) | null;
+    .get(parseRunId) as
+    (Omit<Provenance, "warnings"> & { warnings_json: string | null }) | null;
 
   const provenance = provenanceRow
     ? { ...provenanceRow, warnings: parseWarnings(provenanceRow.warnings_json) }
@@ -704,9 +789,14 @@ export interface RawObjectRow {
   size: number;
 }
 
-export function rawObjectMeta(store: Store, sha256: string): RawObjectRow | undefined {
+export function rawObjectMeta(
+  store: Store,
+  sha256: string,
+): RawObjectRow | undefined {
   const row = store.db
-    .query("SELECT sha256, content_type, size FROM raw_objects WHERE sha256 = ?1")
+    .query(
+      "SELECT sha256, content_type, size FROM raw_objects WHERE sha256 = ?1",
+    )
     .get(sha256) as RawObjectRow | null;
   return row ?? undefined;
 }

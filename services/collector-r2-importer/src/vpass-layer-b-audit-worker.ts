@@ -1,5 +1,6 @@
 import { ImportError } from "./error";
 import { validateVpassRun } from "./vpass";
+import { vpassStatementPage } from "../../../poc/observation-pipeline/src/parsers/vpass";
 
 interface AuditEnv {
   VPASS_SNAPSHOTS: R2Bucket;
@@ -35,7 +36,9 @@ export default {
       }
       const listed = await env.VPASS_SNAPSHOTS.list({
         prefix: "vpass/",
-        limit: 1_000,
+        // Keep each local-worker request below the remote R2/Workers wall-time
+        // boundary; the harness follows the opaque cursor until completion.
+        limit: 50,
         ...(typeof input.cursor === "string" ? { cursor: input.cursor } : {}),
       });
       const nextCursor = listed.truncated ? listed.cursor : undefined;
@@ -61,6 +64,10 @@ export default {
           aggregate.rows += audited.statementRowCount;
           aggregate.webRows += audited.webRowCount;
           aggregate.customizedRows += audited.customizedRowCount;
+          aggregate.parsedStatementArtifacts += audited.parsedStatementArtifactCount;
+          aggregate.parsedTransactions += audited.parsedTransactionCount;
+          aggregate.parserWarnings += audited.parserWarningCount;
+          aggregate.blockedStatementArtifacts += audited.blockedStatementArtifactCount;
           mergeCounts(aggregate.webShapes, audited.webShapes);
           mergeCounts(aggregate.customizedShapes, audited.customizedShapes);
           mergeCounts(aggregate.webRowKeyShapes, audited.webRowKeyShapes);
@@ -73,6 +80,10 @@ export default {
             aggregate.customizedBeanKeyShapes,
             audited.customizedBeanKeyShapes,
           );
+          mergeCounts(aggregate.rootKeyShapes, audited.rootKeyShapes);
+          mergeCounts(aggregate.headerKeyShapes, audited.headerKeyShapes);
+          mergeCounts(aggregate.bodyKeyShapes, audited.bodyKeyShapes);
+          mergeCounts(aggregate.contentKeyShapes, audited.contentKeyShapes);
         } catch (error) {
           aggregate.failed += 1;
           increment(aggregate.failures, safeCode(error));
@@ -96,10 +107,17 @@ async function auditRecord(bucket: R2Bucket, recordKey: string) {
   const customizedRowKeyShapes: Counts = {};
   const webBeanKeyShapes: Counts = {};
   const customizedBeanKeyShapes: Counts = {};
+  const rootKeyShapes: Counts = {};
+  const headerKeyShapes: Counts = {};
+  const bodyKeyShapes: Counts = {};
+  const contentKeyShapes: Counts = {};
   let statementArtifactCount = 0;
   let statementRowCount = 0;
   let webRowCount = 0;
   let customizedRowCount = 0;
+  let parsedStatementArtifactCount = 0;
+  let parsedTransactionCount = 0;
+  let parserWarningCount = 0;
   for (const artifact of validated.artifacts) {
     if (artifact.dataset !== "statement-page") continue;
     statementArtifactCount += 1;
@@ -107,9 +125,15 @@ async function auditRecord(bucket: R2Bucket, recordKey: string) {
       new TextDecoder("utf-8", { fatal: true }).decode(artifact.bytes),
     );
     if (!isRecord(root)) throw new Error("statement_root_invalid");
+    increment(rootKeyShapes, Object.keys(root).sort().join(","));
     const header = objectAt(root, "header");
+    const body = objectAt(root, "body");
     const content = objectAt(root, "body", "content");
-    if (!content) throw new Error("statement_content_invalid");
+    if (!header || !body || !content)
+      throw new Error("statement_content_invalid");
+    increment(headerKeyShapes, Object.keys(header).sort().join(","));
+    increment(bodyKeyShapes, Object.keys(body).sort().join(","));
+    increment(contentKeyShapes, Object.keys(content).sort().join(","));
     const web = objectAt(content, "WebMeisaiTopDisplayServiceBean");
     const customized = objectAt(
       content,
@@ -117,6 +141,26 @@ async function auditRecord(bucket: R2Bucket, recordKey: string) {
     );
     if ((web === undefined) === (customized === undefined)) {
       throw new Error("statement_family_invalid");
+    }
+    if (validated.record.status === "success") {
+      const parsed = vpassStatementPage.parse(artifact.bytes, {
+        id: 0,
+        sourceId: "vpass",
+        runStatus: "success",
+        runFailureCount: 0,
+        dataset: artifact.dataset,
+        artifactKey: artifact.artifactKey,
+        fetchUnitKey: validated.record.cardLabel,
+        statementState: null,
+        period: null,
+        url: null,
+        mime: "application/json",
+        fetchedAt: validated.record.completedAt,
+        sha256: artifact.sha256,
+      });
+      parsedStatementArtifactCount += 1;
+      parsedTransactionCount += parsed.observations.length;
+      parserWarningCount += parsed.warnings.length;
     }
     if (web) {
       increment(webBeanKeyShapes, Object.keys(web).sort().join(","));
@@ -177,12 +221,21 @@ async function auditRecord(bucket: R2Bucket, recordKey: string) {
     statementRowCount,
     webRowCount,
     customizedRowCount,
+    parsedStatementArtifactCount,
+    parsedTransactionCount,
+    parserWarningCount,
+    blockedStatementArtifactCount:
+      validated.record.status === "success" ? 0 : statementArtifactCount,
     webShapes,
     customizedShapes,
     webRowKeyShapes,
     customizedRowKeyShapes,
     webBeanKeyShapes,
     customizedBeanKeyShapes,
+    rootKeyShapes,
+    headerKeyShapes,
+    bodyKeyShapes,
+    contentKeyShapes,
   };
 }
 
@@ -279,12 +332,20 @@ function emptyAggregate() {
     rows: 0,
     webRows: 0,
     customizedRows: 0,
+    parsedStatementArtifacts: 0,
+    parsedTransactions: 0,
+    parserWarnings: 0,
+    blockedStatementArtifacts: 0,
     webShapes: {} as Counts,
     customizedShapes: {} as Counts,
     webRowKeyShapes: {} as Counts,
     customizedRowKeyShapes: {} as Counts,
     webBeanKeyShapes: {} as Counts,
     customizedBeanKeyShapes: {} as Counts,
+    rootKeyShapes: {} as Counts,
+    headerKeyShapes: {} as Counts,
+    bodyKeyShapes: {} as Counts,
+    contentKeyShapes: {} as Counts,
     failures: {} as Counts,
   };
 }
@@ -313,12 +374,20 @@ function auditResponse(input: {
   rows: number;
   webRows: number;
   customizedRows: number;
+  parsedStatementArtifacts: number;
+  parsedTransactions: number;
+  parserWarnings: number;
+  blockedStatementArtifacts: number;
   webShapes: Counts;
   customizedShapes: Counts;
   webRowKeyShapes: Counts;
   customizedRowKeyShapes: Counts;
   webBeanKeyShapes: Counts;
   customizedBeanKeyShapes: Counts;
+  rootKeyShapes: Counts;
+  headerKeyShapes: Counts;
+  bodyKeyShapes: Counts;
+  contentKeyShapes: Counts;
   failures: Counts;
   nextCursor: string | null;
 }): Response {
@@ -337,12 +406,20 @@ function auditResponse(input: {
     statementRowCount: input.rows,
     webRowCount: input.webRows,
     customizedRowCount: input.customizedRows,
+    parsedStatementArtifactCount: input.parsedStatementArtifacts,
+    parsedTransactionCount: input.parsedTransactions,
+    parserWarningCount: input.parserWarnings,
+    blockedStatementArtifactCount: input.blockedStatementArtifacts,
     observedWebShapes: input.webShapes,
     observedCustomizedShapes: input.customizedShapes,
     observedWebRowKeyShapes: input.webRowKeyShapes,
     observedCustomizedRowKeyShapes: input.customizedRowKeyShapes,
     observedWebBeanKeyShapes: input.webBeanKeyShapes,
     observedCustomizedBeanKeyShapes: input.customizedBeanKeyShapes,
+    observedRootKeyShapes: input.rootKeyShapes,
+    observedHeaderKeyShapes: input.headerKeyShapes,
+    observedBodyKeyShapes: input.bodyKeyShapes,
+    observedContentKeyShapes: input.contentKeyShapes,
     failureCodeCounts: input.failures,
   });
 }
@@ -357,6 +434,34 @@ function safeCursor(value: unknown): value is string {
 }
 
 function safeCode(error: unknown): string {
+  if (error instanceof Error) {
+    const message = error.message;
+    const parserCodes: Array<[RegExp, string]> = [
+      [/fetch unit/u, "parser_fetch_unit_invalid"],
+      [/artifact key/u, "parser_artifact_key_invalid"],
+      [/web bean has schema drift/u, "parser_web_bean_schema_drift"],
+      [/web content has schema drift/u, "parser_web_content_schema_drift"],
+      [/web row .*\.columnsSize/u, "parser_web_columns_size_invalid"],
+      [/web row .*\.maxIndex/u, "parser_web_max_index_invalid"],
+      [/web row .*\.columnsSizeS/u, "parser_web_columns_size_s_invalid"],
+      [/web row .*\.rowType/u, "parser_web_row_type_invalid"],
+      [
+        /web row .*\.shiharaiPatternFlag/u,
+        "parser_web_payment_pattern_invalid",
+      ],
+      [/web row .*\.data must/u, "parser_web_data_container_invalid"],
+      [/web row .*\.data has schema drift/u, "parser_web_data_schema_drift"],
+      [/unsupported provider subtype/u, "parser_web_subtype_unknown"],
+      [/provider YY\/MM\/DD/u, "parser_date_shape_invalid"],
+      [/calendar date/u, "parser_calendar_date_invalid"],
+      [/exact JPY integer/u, "parser_amount_invalid"],
+      [/must contain exactly one supported family/u, "parser_family_invalid"],
+      [/has schema drift/u, "parser_schema_drift"],
+    ];
+    for (const [pattern, code] of parserCodes) {
+      if (pattern.test(message)) return code;
+    }
+  }
   const candidate =
     error instanceof ImportError
       ? error.code

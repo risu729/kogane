@@ -75,7 +75,7 @@ transaction / balance / position / valuation observations   layer B
 evidence browser (React client in web/, served by serve.ts)
 ```
 
-Thirty parsers are registered against shapes the collectors already produce:
+Thirty-one parsers are registered against shapes the collectors already produce:
 
 | Parser                                  | Artifact                                           | Emits                                        |
 | --------------------------------------- | -------------------------------------------------- | -------------------------------------------- |
@@ -109,6 +109,7 @@ Thirty parsers are registered against shapes the collectors already produce:
 | `v-point-smfg-point`                    | V Point SMFG display breakdown                     | separately scoped point balances             |
 | `v-point-history-page`                  | V Point complete paginated history                 | signed point transactions                    |
 | `v-point-pay-notification-event`        | V Point Pay normalized notification event          | transactions and source-separated balances   |
+| `vpass-statement-page`                  | Vpass sanitized statement JSON pages               | posted/unconfirmed card transactions         |
 
 V Point registers only the three financial Layer-A artifact families.
 `vmoney-history-page-*` is the observed empty boundary for a separate asset,
@@ -165,6 +166,17 @@ separate funding leg. Only `balanceYen` becomes a snapshot under
 `v-point-pay:prepaid-yen`. Event identity collapses replayed notifications in
 the current transaction view, and current balances use the newest successful
 event time rather than import order.
+
+Vpass also has one canonical financial route: sanitized JSON
+`statement-page`. Layer A supplies the stable card unit key separately from the
+redacted payload. Known presentation-only rows are validated but not emitted;
+known settled and unsettled transaction rows retain their complete source row,
+and unknown subtypes fail closed. Purchases and refunds receive exactly one
+explicit credit-liability sign inversion. The current view chooses the latest
+successful snapshot per card and statement month, including a latest empty
+snapshot, but only after every statement artifact in that card-month fetch unit
+has a current successful parse. A newer interrupted parse therefore cannot hide
+the last complete snapshot.
 
 The demo ingests 11 artifacts from 3 sources and produces 49 observations:
 14 transaction, 24 balance, 3 position, 8 valuation.
