@@ -8,6 +8,16 @@ export interface ApiCoverage {
   truncated: boolean;
   /** Artifact pages use a descending, immutable artifact-id cursor. */
   nextCursor?: string | null;
+  /** Derived observation pages use deterministic ordering; reset on scope changes. */
+  nextOffset?: number | null;
+  latestNextOffset?: number | null;
+}
+
+export interface FilterOptions {
+  sources: string[];
+  accounts: { source_id: string; source_account: string }[];
+  instruments: string[];
+  metrics: string[];
 }
 
 export interface ApiMetadata {

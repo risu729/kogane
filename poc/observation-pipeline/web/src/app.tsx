@@ -16,6 +16,7 @@ import { ObservationDetailPage } from "./pages/ObservationDetail.tsx";
 import { NotFoundPage } from "./pages/NotFound.tsx";
 import { EvidenceApp } from "./evidence-app.tsx";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
+import { CollectionControls } from "./collection-controls.tsx";
 
 const NAV: { to: string; label: string; icon: string }[] = [
   {
@@ -105,7 +106,7 @@ export function App(): ReactNode {
       : "接続を確認できません";
 
   if (production && (path === "/evidence" || path.startsWith("/runs/")))
-    return <EvidenceApp parsingHealth={metadata.data?.parsingHealth} />;
+    return <EvidenceApp observationsAvailable parsingHealth={metadata.data?.parsingHealth} />;
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">
@@ -211,7 +212,15 @@ export function App(): ReactNode {
         <main id="main" ref={main} tabIndex={-1}>
           {production ? <ParsingHealthNotice health={metadata.data?.parsingHealth} /> : null}
           <QueryBoundary query={metadata} label="接続情報">
-            {() => <View route={route} />}
+            {() => (
+              <>
+                {production &&
+                ["transactions", "balances", "positions", "artifacts"].includes(route.name) ? (
+                  <CollectionControls kind={route.name} />
+                ) : null}
+                <View key={path + window.location.search} route={route} />
+              </>
+            )}
           </QueryBoundary>
         </main>
         <footer className="workspace-footer">

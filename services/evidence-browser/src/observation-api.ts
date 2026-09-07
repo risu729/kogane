@@ -3,7 +3,7 @@ import { HttpError, json } from "./http";
 import { raw } from "./read";
 import type { ApiMetadata } from "../../../poc/observation-pipeline/shared/api-contract";
 
-export function boundedCollections(value: Record<string, unknown>): Response {
+export function boundedCollections(value: Record<string, unknown>, offset?: number): Response {
   let truncated = false;
   const bounded = Object.fromEntries(
     Object.entries(value).map(([key, rows]) => {
@@ -12,7 +12,14 @@ export function boundedCollections(value: Record<string, unknown>): Response {
       return [key, rows.slice(0, 500)];
     }),
   );
-  return json({ ...bounded, coverage: { limit: 500, truncated } });
+  return json({
+    ...bounded,
+    coverage: {
+      limit: 500,
+      truncated,
+      ...(offset === undefined ? {} : { nextOffset: truncated ? offset + 500 : null }),
+    },
+  });
 }
 
 // Called only after the existing Access JWT gate and read-only method check.
@@ -23,19 +30,68 @@ export async function observationApi(
 ): Promise<Response | null> {
   const path = url.pathname;
   if (
-    !/^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw)(\/|$)/.test(
+    !/^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw|filter-options)(\/|$)/.test(
       path,
     )
   )
     return null;
-  if (
-    url.search &&
-    (path !== "/api/artifacts" ||
-      [...url.searchParams.keys()].some((key) => key !== "cursor") ||
-      url.searchParams.getAll("cursor").length !== 1)
-  )
-    throw new HttpError(400, "invalid_query");
+  const paged = ["/api/transactions", "/api/balances", "/api/positions"].includes(path);
+  const allowed = paged
+    ? [
+        "source",
+        "account",
+        "offset",
+        ...(path === "/api/transactions" ? ["from", "to", "q"] : []),
+        ...(path === "/api/balances" ? ["instrument", "metric", "latestOffset"] : []),
+      ]
+    : path === "/api/artifacts"
+      ? ["source", "cursor"]
+      : path === "/api/filter-options"
+        ? ["kind"]
+        : [];
+  for (const key of url.searchParams.keys()) {
+    const value = url.searchParams.get(key)!;
+    if (
+      !allowed.includes(key) ||
+      url.searchParams.getAll(key).length !== 1 ||
+      !value ||
+      value.length > 512 ||
+      /[\u0000-\u001f]/.test(value)
+    )
+      throw new HttpError(400, "invalid_query");
+  }
+  const offsetText = url.searchParams.get("offset") ?? "0";
+  const offset = Number(offsetText);
+  if (!/^(0|[1-9]\d*)$/.test(offsetText) || !Number.isSafeInteger(offset) || offset > 1_000_000)
+    throw new HttpError(400, "invalid_offset");
+  const filter = {
+    source: url.searchParams.get("source") ?? undefined,
+    account: url.searchParams.get("account") ?? undefined,
+    offset,
+    from: url.searchParams.get("from") ?? undefined,
+    to: url.searchParams.get("to") ?? undefined,
+    q: url.searchParams.get("q")?.trim() || undefined,
+    instrument: url.searchParams.get("instrument") ?? undefined,
+    metric: url.searchParams.get("metric") ?? undefined,
+  };
+  for (const date of [filter.from, filter.to]) {
+    if (
+      date &&
+      (!/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+        !Number.isFinite(Date.parse(date)) ||
+        new Date(date).toISOString().slice(0, 10) !== date)
+    )
+      throw new HttpError(400, "invalid_date");
+  }
+  if (filter.from && filter.to && filter.from > filter.to)
+    throw new HttpError(400, "invalid_date_range");
   const store = queries.observationStore(env.DB);
+  if (path === "/api/filter-options") {
+    const kind = url.searchParams.get("kind");
+    if (!kind || !["transactions", "balances", "positions", "artifacts"].includes(kind))
+      throw new HttpError(400, "invalid_query");
+    return json(await queries.filterOptions(store, kind));
+  }
   if (path === "/api/meta") {
     await env.DB.prepare("SELECT id FROM observation_fetch_artifacts LIMIT 1").first();
     const jobs =
@@ -65,20 +121,43 @@ export async function observationApi(
   }
   if (path === "/api/overview") return boundedCollections({ ...(await queries.overview(store)) });
   if (path === "/api/transactions")
-    return boundedCollections({ transactions: await queries.currentTransactions(store) });
-  if (path === "/api/balances")
-    return boundedCollections({
-      latest: await queries.latestBalances(store),
-      history: await queries.balanceHistory(store),
+    return boundedCollections(
+      { transactions: await queries.currentTransactions(store, filter) },
+      offset,
+    );
+  if (path === "/api/balances") {
+    const value = url.searchParams.get("latestOffset") ?? "0";
+    const latestOffset = Number(value);
+    if (
+      !/^(0|[1-9]\d*)$/.test(value) ||
+      !Number.isSafeInteger(latestOffset) ||
+      latestOffset > 1_000_000
+    )
+      throw new HttpError(400, "invalid_offset");
+    const latest = await queries.latestBalances(store, { ...filter, offset: latestOffset });
+    const history = await queries.balanceHistory(store, filter);
+    return json({
+      latest: latest.slice(0, 500),
+      history: history.slice(0, 500),
+      coverage: {
+        limit: 500,
+        truncated: latest.length > 500 || history.length > 500,
+        nextOffset: history.length > 500 ? offset + 500 : null,
+        latestNextOffset: latest.length > 500 ? latestOffset + 500 : null,
+      },
     });
+  }
   if (path === "/api/positions")
-    return boundedCollections({ positions: await queries.positionsWithValuations(store) });
+    return boundedCollections(
+      { positions: await queries.positionsWithValuations(store, filter) },
+      offset,
+    );
   if (path === "/api/artifacts") {
     const cursor = url.searchParams.get("cursor");
     const before = cursor === null ? Number.MAX_SAFE_INTEGER : Number(cursor);
     if ((cursor !== null && !/^[1-9]\d*$/.test(cursor)) || !Number.isSafeInteger(before))
       throw new HttpError(400, "invalid_cursor");
-    const rows = await queries.artifacts(store, before);
+    const rows = await queries.artifacts(store, before, filter.source);
     return json({
       artifacts: rows.slice(0, 500),
       coverage: {

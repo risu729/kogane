@@ -1,6 +1,7 @@
 // Shared HTTP contracts keep the UI independent of the local store implementation.
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { validApiResponse } from "../../shared/api-validation.ts";
+import { useLocation } from "./router.tsx";
 import type {
   ObservationKind,
   Overview,
@@ -137,10 +138,11 @@ export function useOverview(): UseQueryResult<Overview, Error> {
 }
 
 export function useTransactions(): UseQueryResult<{ transactions: TransactionRow[] }, Error> {
+  const suffix = useCollectionSearch();
   return useQuery({
-    queryKey: ["transactions"],
+    queryKey: ["transactions", suffix],
     queryFn: ({ signal }) =>
-      getJson<{ transactions: TransactionRow[] }>("/api/transactions", signal),
+      getJson<{ transactions: TransactionRow[] }>(`/api/transactions${suffix}`, signal),
   });
 }
 
@@ -148,28 +150,39 @@ export function useBalances(): UseQueryResult<
   { latest: BalanceRow[]; history: BalanceHistoryRow[] },
   Error
 > {
+  const suffix = useCollectionSearch();
   return useQuery({
-    queryKey: ["balances"],
+    queryKey: ["balances", suffix],
     queryFn: ({ signal }) =>
-      getJson<{ latest: BalanceRow[]; history: BalanceHistoryRow[] }>("/api/balances", signal),
+      getJson<{ latest: BalanceRow[]; history: BalanceHistoryRow[] }>(
+        `/api/balances${suffix}`,
+        signal,
+      ),
   });
 }
 
 export function usePositions(): UseQueryResult<{ positions: PositionWithValuations[] }, Error> {
+  const suffix = useCollectionSearch();
   return useQuery({
-    queryKey: ["positions"],
+    queryKey: ["positions", suffix],
     queryFn: ({ signal }) =>
-      getJson<{ positions: PositionWithValuations[] }>("/api/positions", signal),
+      getJson<{ positions: PositionWithValuations[] }>(`/api/positions${suffix}`, signal),
   });
 }
 
 export function useArtifacts(): UseQueryResult<{ artifacts: ArtifactRow[] }, Error> {
-  const cursor = new URLSearchParams(window.location.search).get("cursor");
-  const path = `/api/artifacts${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`;
+  const suffix = useCollectionSearch();
+  const path = `/api/artifacts${suffix}`;
   return useQuery({
-    queryKey: ["artifacts", cursor],
+    queryKey: ["artifacts", suffix],
     queryFn: ({ signal }) => getJson<{ artifacts: ArtifactRow[] }>(path, signal),
   });
+}
+
+function useCollectionSearch(): string {
+  const location = useLocation();
+  const search = location.split("?")[1];
+  return search ? `?${search}` : "";
 }
 
 export function useArtifact(id: number): UseQueryResult<ArtifactDetail, Error> {

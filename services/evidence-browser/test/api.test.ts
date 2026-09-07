@@ -8,6 +8,211 @@ import { boundedCollections } from "../src/observation-api";
 
 const prefix = "/api/evidence/v1";
 describe("production observation API", () => {
+  it("filters before paging and discovers accounts beyond the global first 500 rows", async () => {
+    const run = await seedRun({ count: 1, source: "other-test" });
+    const parse = await env.DB.prepare(`INSERT INTO parse_runs
+      (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+      VALUES (?,'large-fixture','1','2026-09-07','ok','[]') RETURNING id`)
+      .bind(run.artifacts[0].id)
+      .first<{ id: number }>();
+    await env.DB.prepare(`INSERT INTO transaction_observations
+      (parse_run_id,source_account,external_id,as_of,amount_minor,currency,raw_locator,extra_json,description)
+      WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<1003)
+      SELECT ?, CASE WHEN x<=1001 THEN 'large-account' ELSE 'older-account' END,
+        CAST(x AS TEXT), CASE WHEN x<=1001 THEN '2026-09-07' ELSE '2020-01-01' END,
+        9007199254740993,'JPY',CAST(x AS TEXT),'{}',
+        CASE WHEN x=1002 THEN 'synthetic text longer than fifty characters with literal percent % and underscore _' ELSE NULL END FROM n`)
+      .bind(parse!.id)
+      .run();
+    const options = await (await call("/api/filter-options?kind=transactions")).json();
+    expect(validApiResponse("/api/filter-options", options)).toBe(true);
+    expect(options).toMatchObject({
+      accounts: expect.arrayContaining([
+        { source_id: "other-test", source_account: "older-account" },
+      ]),
+    });
+    const small = await (
+      await call("/api/transactions?source=other-test&account=older-account")
+    ).json();
+    expect(small).toMatchObject({
+      transactions: [expect.anything(), expect.anything()],
+      coverage: { truncated: false, nextOffset: null },
+    });
+    const ids: number[] = [];
+    for (const offset of [0, 500, 1000]) {
+      const response = await call(
+        `/api/transactions?source=other-test&account=large-account&offset=${offset}`,
+      );
+      expect(response.status).toBe(200);
+      const page = (await response.json()) as {
+        transactions: { id: number; amount_minor: string }[];
+        coverage: { nextOffset: number | null };
+      };
+      expect(validApiResponse("/api/transactions", page)).toBe(true);
+      expect(page.transactions.length).toBe(offset === 1000 ? 1 : 500);
+      expect(page.coverage.nextOffset).toBe(offset === 1000 ? null : offset + 500);
+      expect(page.transactions.every((row) => row.amount_minor === "9007199254740993")).toBe(true);
+      ids.push(...page.transactions.map((row) => row.id));
+    }
+    expect(new Set(ids).size).toBe(1001);
+    expect(ids).toEqual([...ids].sort((a, b) => b - a));
+    for (const query of ["from=2020-01-01&to=2020-01-01", "q=older-account"]) {
+      const matching = (await (
+        await call(`/api/transactions?source=other-test&${query}`)
+      ).json()) as { transactions: unknown[] };
+      expect(matching.transactions).toHaveLength(2);
+    }
+    for (const q of [
+      "%",
+      "synthetic text longer than fifty characters with literal percent % and underscore _",
+    ]) {
+      const matching = (await (
+        await call(`/api/transactions?source=other-test&q=${encodeURIComponent(q)}`)
+      ).json()) as { transactions: { id: number }[] };
+      expect(matching.transactions).toHaveLength(1);
+      const detailPath = `/api/observations/transaction/${matching.transactions[0].id}`;
+      const detail = await (await call(detailPath)).json();
+      expect(validApiResponse(detailPath, detail)).toBe(true);
+      expect(detail).toMatchObject({ row: { amount_minor: "9007199254740993" } });
+    }
+    for (const query of [
+      "offset=-1",
+      "offset=1.2",
+      "offset=1000001",
+      "source=a&source=b",
+      "account=",
+      "unexpected=x",
+      "from=2026-02-30",
+      "from=2026-09-01&to=2020-01-01",
+    ])
+      expect((await call(`/api/transactions?${query}`)).status).toBe(400);
+    expect((await call("/api/filter-options?kind=raw")).status).toBe(400);
+    await env.DB.prepare(
+      "INSERT INTO fetch_run_annotations VALUES (?, 'exclude_from_financial_views', 'test-finished', 0)",
+    )
+      .bind(run.id)
+      .run();
+  });
+
+  it("filters all balance dimensions before independent latest and history paging", async () => {
+    const run = await seedRun({ count: 1, source: "other-test" });
+    const parse = await env.DB.prepare(`INSERT INTO parse_runs
+      (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+      VALUES (?,'large-balance-fixture','1','2026-09-07','ok','[]') RETURNING id`)
+      .bind(run.artifacts[0].id)
+      .first<{ id: number }>();
+    await env.DB.prepare(`INSERT INTO balance_observations
+      (parse_run_id,source_account,metric,instrument,amount_minor,as_of,raw_locator,extra_json)
+      WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<1003)
+      SELECT ?,'large-balance-account',printf('metric-%04d',x),CASE WHEN x<=1001 THEN 'JPY' ELSE 'USD' END,
+        9007199254740993,'2026-09-07',CAST(x AS TEXT),'{}' FROM n`)
+      .bind(parse!.id)
+      .run();
+    const base = "/api/balances?source=other-test&account=large-balance-account";
+    const first = (await (await call(base)).json()) as {
+      latest: { id: number }[];
+      history: { id: number }[];
+    };
+    const second = (await (await call(`${base}&offset=500`)).json()) as typeof first;
+    expect(second.latest).toEqual(first.latest);
+    expect(new Set([...first.history, ...second.history].map((row) => row.id)).size).toBe(1000);
+    const last = (await (
+      await call(`${base}&offset=1000&latestOffset=1000`)
+    ).json()) as typeof first;
+    expect(last.latest).toHaveLength(3);
+    expect(last.history).toHaveLength(3);
+    const selected = (await (
+      await call(`${base}&instrument=USD&metric=metric-1002`)
+    ).json()) as typeof first;
+    expect(selected.latest).toHaveLength(1);
+    expect(selected.history).toHaveLength(1);
+    const options = await (await call("/api/filter-options?kind=balances")).json();
+    expect(validApiResponse("/api/filter-options", options)).toBe(true);
+    expect(options).toMatchObject({
+      instruments: expect.arrayContaining(["USD"]),
+      metrics: expect.arrayContaining(["metric-1003"]),
+    });
+    const replacement = await env.DB.prepare(`INSERT INTO parse_runs
+      (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+      VALUES (?,'large-balance-fixture','2','2026-09-08','ok','[]') RETURNING id`)
+      .bind(run.artifacts[0].id)
+      .first<{ id: number }>();
+    await env.DB.prepare("UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE id=?")
+      .bind(replacement!.id, parse!.id)
+      .run();
+    const historicalOptions = await (await call("/api/filter-options?kind=balances")).json();
+    expect(historicalOptions).toMatchObject({
+      accounts: expect.arrayContaining([
+        { source_id: "other-test", source_account: "large-balance-account" },
+      ]),
+      instruments: expect.arrayContaining(["USD"]),
+      metrics: expect.arrayContaining(["metric-1003"]),
+    });
+    const historical = (await (
+      await call(`${base}&instrument=USD&metric=metric-1002`)
+    ).json()) as typeof first;
+    expect(historical.latest).toHaveLength(0);
+    expect(historical.history).toHaveLength(1);
+    expect((await call(`${base}&latestOffset=-1`)).status).toBe(400);
+    const artifactPage = (await (await call("/api/artifacts?source=other-test")).json()) as {
+      artifacts: { source_id: string }[];
+    };
+    expect(artifactPage.artifacts.every((row) => row.source_id === "other-test")).toBe(true);
+    await env.DB.prepare(
+      "INSERT INTO fetch_run_annotations VALUES (?, 'exclude_from_financial_views', 'test-finished', 0)",
+    )
+      .bind(run.id)
+      .run();
+  });
+
+  it("pages current positions before fetching valuations even with more than 5000 current rows", async () => {
+    const run = await seedRun({ count: 1, source: "other-test" });
+    const parse = await env.DB.prepare(`INSERT INTO parse_runs
+      (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+      VALUES (?,'large-position-fixture','1','2026-09-07','ok','[]') RETURNING id`)
+      .bind(run.artifacts[0].id)
+      .first<{ id: number }>();
+    await env.DB.prepare(`INSERT INTO position_observations
+      (parse_run_id,source_account,security_code,quantity_text,quantity_scale,raw_locator,extra_json)
+      WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<5002)
+      SELECT ?,CASE WHEN x=5002 THEN 'z-last-account' ELSE 'a-first-account' END,
+        CAST(x AS TEXT),'1',0,CAST(x AS TEXT),'{}' FROM n`)
+      .bind(parse!.id)
+      .run();
+    await env.DB.prepare(`INSERT INTO valuation_observations
+      (parse_run_id,source_account,subject,metric,amount_minor,currency,raw_locator,extra_json)
+      SELECT parse_run_id,source_account,security_code,'value',9007199254740993,'JPY',raw_locator,'{}'
+      FROM position_observations WHERE parse_run_id=?`)
+      .bind(parse!.id)
+      .run();
+    const response = await call("/api/positions?source=other-test&account=z-last-account");
+    expect(response.status).toBe(200);
+    const page = (await response.json()) as {
+      positions: { position: { id: number }; valuations: { id: number; amount_minor: string }[] }[];
+    };
+    expect(validApiResponse("/api/positions", page)).toBe(true);
+    expect(page.positions).toHaveLength(1);
+    expect(page.positions[0].valuations).toHaveLength(1);
+    expect(page.positions[0].valuations[0].amount_minor).toBe("9007199254740993");
+    const global = await call("/api/positions");
+    expect(global.status).toBe(200);
+    expect(await global.json()).toMatchObject({ coverage: { nextOffset: 500, truncated: true } });
+    for (const [kind, id] of [
+      ["position", page.positions[0].position.id],
+      ["valuation", page.positions[0].valuations[0].id],
+    ]) {
+      const detail = await (await call(`/api/observations/${kind}/${id}`)).json();
+      expect(validApiResponse(`/api/observations/${kind}/${id}`, detail)).toBe(true);
+      if (kind === "valuation")
+        expect(detail).toMatchObject({ row: { amount_minor: "9007199254740993" } });
+    }
+    await env.DB.prepare(
+      "INSERT INTO fetch_run_annotations VALUES (?, 'exclude_from_financial_views', 'test-finished', 0)",
+    )
+      .bind(run.id)
+      .run();
+  });
+
   it("reports registered parsing backlog and failures as aggregate health", async () => {
     const run = await seedRun({ count: 1 });
     for (const status of ["pending", "running", "failed", "done"]) {

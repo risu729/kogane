@@ -11,7 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:evidence": "vite build --mode evidence --outDir dist-evidence",
-    "build:production": "vite build --mode production --outDir dist-evidence",
+    "build:production": "vite build --mode production --outDir dist-production",
     "export:demo": "bun run src/export-demo.ts ../../services/evidence-browser/demo-snapshot.json",
     "test": "bun test",
     "typecheck": "tsc --noEmit"

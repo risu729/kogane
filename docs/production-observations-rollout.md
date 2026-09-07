@@ -7,6 +7,40 @@ observations and the existing protected Workers UI. This does not implement
 Layer C cross-source reconciliation or Layer D financial calculations.
 Source R2 objects and existing Layer A records are not modified or deleted.
 
+## UI repair: local-first regression work (2026-09-08)
+
+The initial deployment checks were insufficient: successful HTTP responses and
+basic headings did not establish that navigation and filtering worked with
+production-sized collections. The old browser suites covered a synthetic
+observation app and the Sony raw-only app, not their production integration.
+
+Confirmed defects repaired in this PR:
+
+- Legacy and production builds shared `web/dist-evidence`; a legacy build could
+  overwrite the deployable app. Production now has `web/dist-production`, and
+  CI explicitly builds and validates all three isolated asset targets.
+- Routing observed only the pathname. Query-only pagination changes were not
+  reactive, and returning to the same list could retain its cursor.
+- The embedded acquisition-history app replaced the navigation shell and
+  incorrectly said parsed observations were unavailable. The raw-only app also
+  advertised observation routes its API did not provide.
+- Collection limits were applied before browser filtering. A source or account
+  absent from the first 500 rows could not be discovered or displayed through
+  those filters despite having stored observations.
+
+Repairs are reproduced with local synthetic data and the actual production
+bundle before deployment. Browser operation against the deployed site is reserved
+for final verification. No collector, raw evidence, Access policy, or database
+migration is changed by this UI repair.
+
+Local verification: 338 observation/frontend tests passed, including the new
+production-mode suite under CSP at desktop and mobile widths; 26 Workers-runtime
+API tests passed, including 1,003-row pagination and 5,002-position regressions;
+16 CI-policy tests passed. Typecheck, formatting/lint hooks, and both production
+and demo deployment dry runs passed. Independent reviewers checked the API and
+UI contracts, source/account identity, historical filter options, and build
+isolation. These tests use synthetic data, not exported financial records.
+
 ## Deployment checks (2026-09-07 UTC)
 
 - PR #105 merged as `ceb2bf3b52ad3387137eaf12add5dcf3ade855ee`.

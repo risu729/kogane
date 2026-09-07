@@ -13,9 +13,12 @@ raw bytes remain checksum-verified downloads with sandbox headers.
 
 Apply raw-evidence migration 0017 and deploy the parser before switching the UI.
 From `poc/observation-pipeline`, run `bun run build:production`; this writes the
-existing `web/dist-evidence` asset directory. Deploy only the existing production
+isolated `web/dist-production` asset directory. Deploy only the existing production
 evidence-browser config. `build:evidence` retains the older raw-only UI build;
 the isolated synthetic demo continues to use its separate config and snapshot.
+These three builds have separate output directories; running the legacy tests
+cannot replace the deployable production application. CI builds all three before
+testing, and production-mode browser tests exercise the production asset bundle.
 
 `/api/meta` identifies `source.kind=central-store` and
 `source.classification=financial`. This describes the backing store, not freshness
@@ -33,16 +36,26 @@ views and excludes pending publication. Excluding a parent run later also hides
 its earlier parses, observations, counts and downloads. No browser persistence
 contains financial values.
 
-Collection responses expose `{coverage:{limit:500,truncated:boolean}}`; the UI
-warns that filtering and counts concern only displayed records when truncated.
+Collection responses expose `{coverage:{limit:500,truncated:boolean}}`. Source
+and account filters are applied to the complete derived result before paging;
+snapshot completeness and source deduplication are not evaluated on page fragments.
+Transaction date/text filters and balance instrument/metric filters are also
+server-side. `/api/filter-options?kind=transactions|balances|positions|artifacts`
+provides eligible source/account choices independently of the current page.
+
 Artifacts use descending immutable ID paging: `?cursor=<id>` and
-`coverage.nextCursor`, with a visible next-page link. Transactions and balance
-history currently show the first 500 records with explicit partial coverage;
-they are not a complete export. SQL limits the final ordered list to 501 rows.
-Complex intermediate reads are bounded at 5,001 and fail with 413 rather than
-silently corrupting a derived result. Detailed records remain independently
-addressable. Full server paging for non-artifact financial views remains future
-work.
+`coverage.nextCursor`, preserving the source filter. Transactions, positions, and
+balance history use explicit offsets with `coverage.nextOffset`. Latest balances
+have an independent `latestOffset`/`coverage.latestNextOffset`, so browsing history
+does not remove the current balances. SQL reads at most 501 final rows for each
+page; the extra row indicates another page. Counts on a page are not lifetime
+totals. Offset pages reflect current data at request time, not a frozen export
+snapshot: concurrent new collector data can change page boundaries.
+
+Complex intermediate reads remain bounded at 5,001 and fail with 413 rather than
+silently corrupting a derived result. Position valuation lookup is scoped to the
+positions on the requested page, not the global historical position population.
+Detailed records remain independently addressable.
 
 Before/after deployment, verify an authenticated enrolled-WARP browser and a
 separate off-WARP request. A local WARP curl returning 200 is authenticated

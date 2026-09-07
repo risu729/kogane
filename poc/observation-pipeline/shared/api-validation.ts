@@ -269,12 +269,39 @@ const endpoints: Record<string, Check<unknown>> = {
 
 /** Additive fields are allowed; required fields and their nullability are checked. */
 export function validApiResponse(path: string, value: unknown): boolean {
+  if (path === "/api/filter-options") {
+    return (
+      record(value) &&
+      Array.isArray(value.sources) &&
+      value.sources.every(text) &&
+      Array.isArray(value.instruments) &&
+      value.instruments.every(text) &&
+      Array.isArray(value.metrics) &&
+      value.metrics.every(text) &&
+      Array.isArray(value.accounts) &&
+      value.accounts.every((row) => record(row) && text(row.source_id) && text(row.source_account))
+    );
+  }
   if (record(value) && Object.hasOwn(value, "coverage")) {
     const c = value.coverage;
     if (
       !record(c) ||
       !identifier(c.limit) ||
       !boolean(c.truncated) ||
+      !(
+        c.nextOffset === undefined ||
+        c.nextOffset === null ||
+        (Number.isSafeInteger(c.nextOffset) &&
+          typeof c.nextOffset === "number" &&
+          c.nextOffset >= 0)
+      ) ||
+      !(
+        c.latestNextOffset === undefined ||
+        c.latestNextOffset === null ||
+        (Number.isSafeInteger(c.latestNextOffset) &&
+          typeof c.latestNextOffset === "number" &&
+          c.latestNextOffset >= 0)
+      ) ||
       !(
         c.nextCursor === undefined ||
         c.nextCursor === null ||

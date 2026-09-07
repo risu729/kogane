@@ -30,7 +30,7 @@ function subscribe(onStoreChange: () => void): () => void {
 }
 
 function readPath(): string {
-  return window.location.pathname;
+  return window.location.pathname + window.location.search;
 }
 
 export function navigate(to: string): void {
@@ -41,6 +41,11 @@ export function navigate(to: string): void {
 }
 
 export function usePath(): string {
+  return useLocation().split("?", 1)[0]!;
+}
+
+/** Query-only navigation and browser history must notify list consumers too. */
+export function useLocation(): string {
   return useSyncExternalStore(subscribe, readPath, readPath);
 }
 

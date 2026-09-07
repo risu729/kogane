@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { usePositions, type PositionWithValuations } from "../api.ts";
+import { useMetadata, usePositions, type PositionWithValuations } from "../api.ts";
 import { Amount, Badge, EmptyState, Nullable, ObservationLink, QueryBoundary } from "../ui.tsx";
 import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
@@ -25,38 +25,41 @@ export function PositionsPage(): ReactNode {
   );
 }
 function PositionList({ entries }: { entries: PositionWithValuations[] }): ReactNode {
+  const production = useMetadata().data?.source.kind === "central-store";
   const [page, setPage] = useViewState("positions.page");
   const [filters, setFilters] = useViewState("positions.filters");
   const filtered = entries.filter((entry) => matchesSourceAccount(entry.position, filters));
   const view = pageWindow(filtered, page);
   return (
     <>
-      <section className="panel">
-        <div className="panel-body">
-          <RecordControls
-            rows={entries.map((entry) => entry.position)}
-            filters={filters}
-            onChange={(next) => {
-              setFilters(next);
-              setPage(0);
-            }}
-          />
-          <button
-            className="button"
-            type="button"
-            onClick={() => {
-              setFilters(EMPTY_FILTERS);
-              setPage(0);
-            }}
-          >
-            条件をクリア
-          </button>
-          <p className="footnote">
-            保存された保有資産 {entries.length}件中 {filtered.length}
-            件が条件に一致しています。取得元の全保有資産が揃っていることを示す件数ではありません。
-          </p>
-        </div>
-      </section>
+      {!production ? (
+        <section className="panel">
+          <div className="panel-body">
+            <RecordControls
+              rows={entries.map((entry) => entry.position)}
+              filters={filters}
+              onChange={(next) => {
+                setFilters(next);
+                setPage(0);
+              }}
+            />
+            <button
+              className="button"
+              type="button"
+              onClick={() => {
+                setFilters(EMPTY_FILTERS);
+                setPage(0);
+              }}
+            >
+              条件をクリア
+            </button>
+            <p className="footnote">
+              保存された保有資産 {entries.length}件中 {filtered.length}
+              件が条件に一致しています。取得元の全保有資産が揃っていることを示す件数ではありません。
+            </p>
+          </div>
+        </section>
+      ) : null}
       {filtered.length === 0 ? (
         <EmptyState>
           {entries.length > 0

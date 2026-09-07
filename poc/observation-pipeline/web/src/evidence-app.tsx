@@ -27,7 +27,11 @@ function routeFor(path: string) {
 
 export function EvidenceApp({
   parsingHealth,
-}: { parsingHealth?: ApiMetadata["parsingHealth"] } = {}): ReactNode {
+  observationsAvailable = false,
+}: {
+  parsingHealth?: ApiMetadata["parsingHealth"];
+  observationsAvailable?: boolean;
+} = {}): ReactNode {
   const path = usePath();
   const route = routeFor(path);
   const metadata = useEvidenceMeta();
@@ -64,12 +68,18 @@ export function EvidenceApp({
         </Link>
         <p className="nav-label">ライブラリ</p>
         <nav className="nav" aria-label="メインナビゲーション">
+          {observationsAvailable ? (
+            <>
+              <Link to="/">ホーム</Link>
+              <Link to="/transactions">取引</Link>
+              <Link to="/balances">残高</Link>
+              <Link to="/positions">保有資産</Link>
+              <Link to="/artifacts">原本・証跡</Link>
+            </>
+          ) : null}
           <Link to="/evidence" current={route.kind === "history"}>
-            取得履歴・原本
+            {observationsAvailable ? "取得履歴" : "取得履歴・原本"}
           </Link>
-          <Link to="/transactions">取引</Link>
-          <Link to="/balances">残高</Link>
-          <Link to="/positions">保有資産</Link>
         </nav>
         <div className="sidebar-note">
           <strong>記録と、その根拠。</strong>
@@ -131,7 +141,7 @@ export function EvidenceApp({
           <EvidenceBoundary query={metadata} label="接続情報">
             {(meta) => (
               <>
-                {!meta.capabilities.parsedObservations ? (
+                {!observationsAvailable && !meta.capabilities.parsedObservations ? (
                   <p className="query-notice">
                     この画面は原本・証跡の閲覧用です。取引・残高としての解析結果はまだ提供していません。
                   </p>
@@ -149,7 +159,7 @@ export function EvidenceApp({
                   />
                 ) : (
                   <EmptyState>
-                    このURLに対応するページはありません。<Link to="/">取得履歴へ戻る</Link>
+                    このURLに対応するページはありません。<Link to="/evidence">取得履歴へ戻る</Link>
                   </EmptyState>
                 )}
               </>

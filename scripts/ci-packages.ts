@@ -192,10 +192,11 @@ export const CI_PACKAGES: PackagePolicy[] = [
       typecheck: "tsc --noEmit",
       build: "vite build",
       "build:evidence": "vite build --mode evidence --outDir dist-evidence",
+      "build:production": "vite build --mode production --outDir dist-production",
       "export:demo":
         "bun run src/export-demo.ts ../../services/evidence-browser/demo-snapshot.json",
     },
-    checks: ["typecheck", "build", "build:evidence", "test"],
+    checks: ["typecheck", "build", "build:evidence", "build:production", "test"],
     browser: true,
   },
 ];

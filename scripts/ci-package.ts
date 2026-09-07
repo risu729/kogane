@@ -91,6 +91,7 @@ export function packagePlan(name: string, options: PlanOptions): Step[] {
     if (policy.evidenceAssets)
       steps.push(
         { cwd: frontend, command: ["bun", "run", "build:evidence"] },
+        { cwd: frontend, command: ["bun", "run", "build:production"] },
         { cwd: frontend, command: ["bun", "run", "build"] },
         { cwd: frontend, command: ["bun", "run", "export:demo"] },
       );

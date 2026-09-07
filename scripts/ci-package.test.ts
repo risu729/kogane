@@ -133,6 +133,8 @@ describe("offline CI coverage", () => {
     expect(plan).toContain("node node_modules/playwright/cli.js install --with-deps chromium");
     expect(plan.indexOf("bun run build")).toBeLessThan(plan.indexOf("bun run test"));
     expect(plan.indexOf("bun run build:evidence")).toBeLessThan(plan.indexOf("bun run test"));
+    expect(plan.indexOf("bun run build:production")).toBeGreaterThan(-1);
+    expect(plan.indexOf("bun run build:production")).toBeLessThan(plan.indexOf("bun run test"));
     const local = packagePlan("poc/observation-pipeline", { ...options, ci: false }).map((step) =>
       step.command.join(" "),
     );
@@ -151,7 +153,18 @@ describe("offline CI coverage", () => {
       ),
     ).toBe(false);
   });
-  test("reader CI builds both frontends and synthetic data before Worker checks", () => {
+  test("reader CI builds all three isolated frontends and synthetic data before Worker checks", () => {
+    const productionConfig = JSON.parse(
+      readFileSync(join(REPO_ROOT, "services/evidence-browser/wrangler.jsonc"), "utf8"),
+    );
+    expect(productionConfig.assets.directory).toBe(
+      "../../poc/observation-pipeline/web/dist-production",
+    );
+    expect(productionConfig.assets.run_worker_first).toBe(true);
+    expect(productionConfig.preview_urls).toBe(false);
+    expect(selectPolicy("poc/observation-pipeline").scripts["build:production"]).toBe(
+      "vite build --mode production --outDir dist-production",
+    );
     const plan = packagePlan("services/evidence-browser", options);
     const assetBuild = plan.findIndex(
       (step) => step.command.join(" ") === "bun run build:evidence",
@@ -165,7 +178,7 @@ describe("offline CI coverage", () => {
     const firstWorkerCheck = plan.findIndex(
       (step) => step.command.join(" ") === "bun run typecheck",
     );
-    for (const command of ["build:evidence", "build", "export:demo"]) {
+    for (const command of ["build:evidence", "build:production", "build", "export:demo"]) {
       const producer = plan.findIndex((step) => step.command.join(" ") === `bun run ${command}`);
       expect(producer).toBeGreaterThan(0);
       expect(producer).toBeLessThan(firstWorkerCheck);
@@ -187,7 +200,7 @@ describe("offline CI coverage", () => {
       }
       const manifestPath = join(root, "poc/observation-pipeline/package.json");
       const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-      for (const name of ["build:evidence", "build", "export:demo"]) {
+      for (const name of ["build:evidence", "build:production", "build", "export:demo"]) {
         const changed = { ...manifest, scripts: { ...manifest.scripts } };
         changed.scripts[name] = "bun run live-collector";
         writeFileSync(manifestPath, JSON.stringify(changed));

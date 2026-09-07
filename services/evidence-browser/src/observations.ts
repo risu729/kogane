@@ -25,6 +25,69 @@ interface Store {
     };
   };
 }
+export interface CollectionFilter {
+  source?: string;
+  account?: string;
+  offset?: number;
+  from?: string;
+  to?: string;
+  q?: string;
+  instrument?: string;
+  metric?: string;
+}
+
+// Apply scope to the complete derived result, before paging. In particular,
+// never filter a globally truncated set or change snapshot completeness tests.
+function collectionStore(store: Store, filter: CollectionFilter, order: string): Store {
+  return {
+    db: {
+      query(sql) {
+        const predicates: string[] = [];
+        const args: unknown[] = [];
+        for (const [column, value] of [
+          ["source_id", filter.source],
+          ["source_account", filter.account],
+          ["instrument", filter.instrument],
+          ["metric", filter.metric],
+        ] as const) {
+          if (value !== undefined) {
+            predicates.push(`${column} = ?`);
+            args.push(value);
+          }
+        }
+        if (filter.from || filter.to) {
+          predicates.push("date(substr(as_of,1,10), '+0 days') = substr(as_of,1,10)");
+          if (filter.from) {
+            predicates.push("substr(as_of,1,10) >= ?");
+            args.push(filter.from);
+          }
+          if (filter.to) {
+            predicates.push("substr(as_of,1,10) <= ?");
+            args.push(filter.to);
+          }
+        }
+        if (filter.q) {
+          predicates.push(
+            "(" +
+              ["description", "counterparty", "external_id", "source_id", "source_account"]
+                .map((column) => `instr(lower(coalesce(${column},'')), lower(?)) > 0`)
+                .join(" OR ") +
+              ")",
+          );
+          args.push(...Array(5).fill(filter.q));
+        }
+        const scoped = `SELECT * FROM (${sql.replace(/\s+LIMIT 501\s*$/, "")})
+      WHERE ${predicates.join(" AND ") || "1"}
+      ORDER BY ${order} LIMIT 501 OFFSET ?`;
+        args.push(filter.offset ?? 0);
+        return {
+          all: () => store.db.query(scoped).all(...args),
+          get: () => store.db.query(scoped).get(...args),
+        };
+      },
+    },
+  };
+}
 export function observationStore(db: D1Database): Store {
   const visibleParses = `(SELECT p.* FROM parse_runs p JOIN observation_fetch_artifacts a
     ON a.id = p.fetch_artifact_id WHERE p.status <> 'pending')`;
@@ -203,7 +266,11 @@ export async function overview(store: Store): Promise<Overview> {
   return { counts, sources, fetchRuns, parseRuns };
 }
 
-export async function currentTransactions(store: Store): Promise<TransactionRow[]> {
+export async function currentTransactions(
+  store: Store,
+  filter: CollectionFilter = {},
+): Promise<TransactionRow[]> {
+  store = collectionStore(store, filter, "COALESCE(as_of, '') DESC, id DESC");
   return (await store.db
     .query(
       `WITH ranked_myjcb_snapshots AS (
@@ -447,7 +514,11 @@ export async function currentTransactions(store: Store): Promise<TransactionRow[
  * Computed on request and stored nowhere. It is a derived view; the
  * append-only history below it remains the record.
  */
-export async function latestBalances(store: Store): Promise<BalanceRow[]> {
+export async function latestBalances(
+  store: Store,
+  filter: CollectionFilter = {},
+): Promise<BalanceRow[]> {
+  store = collectionStore(store, filter, "source_id, source_account, metric, instrument, id");
   return (await store.db
     .query(
       `WITH ${SNAPSHOT_CTES}, ranked_myjcb_snapshots AS (
@@ -545,7 +616,11 @@ export async function latestBalances(store: Store): Promise<BalanceRow[]> {
 }
 
 /** The full append-only history, superseded rows included and marked. */
-export async function balanceHistory(store: Store): Promise<BalanceHistoryRow[]> {
+export async function balanceHistory(
+  store: Store,
+  filter: CollectionFilter = {},
+): Promise<BalanceHistoryRow[]> {
+  store = collectionStore(store, filter, "COALESCE(as_of, observed_at, '') DESC, id DESC");
   return (await store.db
     .query(
       `SELECT b.id, fa.source_id, b.source_account, b.metric, b.instrument,
@@ -561,7 +636,11 @@ export async function balanceHistory(store: Store): Promise<BalanceHistoryRow[]>
     .all()) as BalanceHistoryRow[];
 }
 
-export async function currentPositions(store: Store): Promise<PositionRow[]> {
+export async function currentPositions(
+  store: Store,
+  filter: CollectionFilter = {},
+): Promise<PositionRow[]> {
+  store = collectionStore(store, filter, "source_id, source_account, security_code, id");
   return (await store.db
     .query(
       `WITH ${SNAPSHOT_CTES}
@@ -603,21 +682,28 @@ export async function currentValuations(store: Store): Promise<ValuationRow[]> {
  * currency; they are never summed or converted, because a JPY figure and a USD
  * figure are two separate claims by the source.
  */
-export async function positionsWithValuations(store: Store): Promise<PositionWithValuations[]> {
-  const valuations = new Map((await currentValuations(store)).map((row) => [row.id, row]));
+export async function positionsWithValuations(
+  store: Store,
+  filter: CollectionFilter = {},
+): Promise<PositionWithValuations[]> {
+  const positions = await currentPositions(store, filter);
+  if (positions.length === 0) return [];
   // Internal observation/parse identities never become API row fields. The
   // source-specific locator guards also separate equal codes in two markets.
   const pairs = (await store.db
     .query(`
     WITH ${SNAPSHOT_CTES}
-    SELECT po.id AS position_id, v.id AS valuation_id
+    SELECT po.id AS position_id, v.id, fa.source_id, v.source_account, v.subject, v.metric,
+      CAST(v.amount_minor AS TEXT) AS amount_minor, v.amount_text, v.currency, v.as_of,
+      p.parser_name || '@' || p.parser_version AS parser
     FROM position_observations po
     JOIN valuation_observations v ON v.parse_run_id = po.parse_run_id
       AND v.source_account = po.source_account AND v.subject = po.security_code
     JOIN parse_runs p ON p.id = po.parse_run_id
     JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
     JOIN fetch_runs f ON f.id = fa.fetch_run_id
-    WHERE ${CURRENT} AND ${CURRENT_SNAPSHOT} AND CASE p.parser_name
+    WHERE po.id IN (SELECT value FROM json_each(?1))
+      AND ${CURRENT} AND ${CURRENT_SNAPSHOT} AND CASE p.parser_name
       WHEN 'sbi-foreign-cash-positions'
         THEN v.raw_locator = po.raw_locator || '.evaluationProfitLoss'
       WHEN 'sbi-domestic-cash-positions'
@@ -627,16 +713,17 @@ export async function positionsWithValuations(store: Store): Promise<PositionWit
       ELSE 1
     END
   `)
-    .all()) as { position_id: number; valuation_id: number }[];
+    .all(JSON.stringify(positions.slice(0, 500).map((row) => row.id)))) as (ValuationRow & {
+    position_id: number;
+  })[];
   const byPosition = new Map<number, ValuationRow[]>();
   for (const pair of pairs) {
-    const valuation = valuations.get(pair.valuation_id);
-    if (!valuation) continue;
+    const { position_id: _positionId, ...valuation } = pair;
     const bucket = byPosition.get(pair.position_id) ?? [];
     bucket.push(valuation);
     byPosition.set(pair.position_id, bucket);
   }
-  return (await currentPositions(store)).map((position) => ({
+  return positions.map((position) => ({
     position,
     valuations: byPosition.get(position.id) ?? [],
   }));
@@ -645,6 +732,7 @@ export async function positionsWithValuations(store: Store): Promise<PositionWit
 export async function artifacts(
   store: Store,
   before = Number.MAX_SAFE_INTEGER,
+  source?: string,
 ): Promise<ArtifactRow[]> {
   return (await store.db
     .query(
@@ -664,9 +752,51 @@ export async function artifacts(
                  JOIN parse_runs p ON p.id = v.parse_run_id
                 WHERE p.fetch_artifact_id = a.id) AS valuation_count
        FROM fetch_artifacts a
-       WHERE a.id < ?1 ORDER BY a.id DESC LIMIT 501`,
+       WHERE a.id < ?1 AND (?2 IS NULL OR a.source_id = ?2) ORDER BY a.id DESC LIMIT 501`,
     )
-    .all(before)) as ArtifactRow[];
+    .all(before, source ?? null)) as ArtifactRow[];
+}
+
+export async function filterOptions(store: Store, kind: string) {
+  const tables =
+    kind === "transactions"
+      ? ["transaction_observations"]
+      : kind === "balances"
+        ? ["balance_observations"]
+        : kind === "positions"
+          ? ["position_observations"]
+          : [];
+  const sources = (await store.db
+    .query(`SELECT DISTINCT source_id FROM fetch_artifacts ORDER BY source_id`)
+    .all()) as { source_id: string }[];
+  const accounts =
+    tables.length === 0
+      ? []
+      : ((await store.db
+          .query(`
+    SELECT DISTINCT fa.source_id, o.source_account FROM ${tables[0]} o
+    JOIN parse_runs p ON p.id=o.parse_run_id
+    JOIN fetch_artifacts fa ON fa.id=p.fetch_artifact_id
+    JOIN fetch_runs f ON f.id=fa.fetch_run_id
+    WHERE ${kind === "balances" ? "1" : CURRENT} ORDER BY fa.source_id, o.source_account`)
+          .all()) as { source_id: string; source_account: string }[]);
+  const dimensions =
+    kind !== "balances"
+      ? []
+      : ((await store.db
+          .query(`
+    SELECT DISTINCT o.instrument, o.metric FROM balance_observations o
+    JOIN parse_runs p ON p.id=o.parse_run_id
+    JOIN fetch_artifacts fa ON fa.id=p.fetch_artifact_id
+    JOIN fetch_runs f ON f.id=fa.fetch_run_id
+    `)
+          .all()) as { instrument: string; metric: string }[]);
+  return {
+    sources: sources.map((row) => row.source_id),
+    accounts,
+    instruments: [...new Set(dimensions.map((row) => row.instrument))].sort(),
+    metrics: [...new Set(dimensions.map((row) => row.metric))].sort(),
+  };
 }
 
 /**

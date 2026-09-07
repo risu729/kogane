@@ -7,7 +7,7 @@ import {
   tableFeatures,
   useTable,
 } from "@tanstack/react-table";
-import { useTransactions, type TransactionRow } from "../api.ts";
+import { useMetadata, useTransactions, type TransactionRow } from "../api.ts";
 import { Amount, Nullable, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
 import {
   EMPTY_FILTERS,
@@ -103,6 +103,7 @@ export function TransactionsPage(): ReactNode {
   );
 }
 function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
+  const production = useMetadata().data?.source.kind === "central-store";
   const [filters, setFilters] = useViewState("transactions.filters");
   const [search, setSearch] = useViewState("transactions.search");
   const [page, setPage] = useViewState("transactions.page");
@@ -148,52 +149,54 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
   const view = pageWindow(table.getRowModel().rows, page);
   return (
     <Panel id="transactions" title="取引の記録" count={`受信した${rows.length}件から絞り込み`}>
-      <div className="panel-body">
-        <RecordControls
-          rows={rows}
-          filters={filters}
-          dates
-          onChange={(value) => {
-            setFilters(value);
-            setPage(0);
-          }}
-        />
-        <div className="toolbar">
-          <label className="filter-field">
-            内容を検索
-            <input
-              className="filter-input"
-              type="search"
-              value={search}
-              placeholder="内容・相手先・識別番号"
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setPage(0);
-              }}
-            />
-          </label>
-          <button
-            className="button"
-            type="button"
-            onClick={() => {
-              setFilters(EMPTY_FILTERS);
-              setSearch("");
-              setSorting([]);
+      {!production ? (
+        <div className="panel-body">
+          <RecordControls
+            rows={rows}
+            filters={filters}
+            dates
+            onChange={(value) => {
+              setFilters(value);
               setPage(0);
             }}
-          >
-            条件をクリア
-          </button>
+          />
+          <div className="toolbar">
+            <label className="filter-field">
+              内容を検索
+              <input
+                className="filter-input"
+                type="search"
+                value={search}
+                placeholder="内容・相手先・識別番号"
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(0);
+                }}
+              />
+            </label>
+            <button
+              className="button"
+              type="button"
+              onClick={() => {
+                setFilters(EMPTY_FILTERS);
+                setSearch("");
+                setSorting([]);
+                setPage(0);
+              }}
+            >
+              条件をクリア
+            </button>
+          </div>
+          <p className="dim" role="status" aria-live="polite" aria-atomic="true">
+            {invalidDates
+              ? "日付の条件を修正すると、該当する取引を表示します。"
+              : `受信した${rows.length}件のうち、条件に合う取引は${filtered.length}件です。`}
+            {!invalidDates && excludedUnknownDates > 0
+              ? ` 日付が不明な${excludedUnknownDates}件は期間指定により除外しています。`
+              : null}
+          </p>
         </div>
-        <p className="dim" role="status" aria-live="polite" aria-atomic="true">
-          {invalidDates
-            ? "日付の条件を修正すると、該当する取引を表示します。"
-            : `受信した${rows.length}件のうち、条件に合う取引は${filtered.length}件です。`}
-          {!invalidDates && excludedUnknownDates > 0
-            ? ` 日付が不明な${excludedUnknownDates}件は期間指定により除外しています。`
-            : null}
-        </p>
-      </div>
+      ) : null}
       <div className="table-scroll">
         <table>
           <caption className="dim">
@@ -213,7 +216,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
                         sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : "none"
                       }
                     >
-                      {header.column.getCanSort() ? (
+                      {!production && header.column.getCanSort() ? (
                         <button
                           className="sort-button"
                           type="button"
@@ -270,7 +273,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
         <summary>表示範囲と日付について</summary>
         <p>
           APIから受信した全{rows.length}
-          件をブラウザー内で絞り込み、50件ずつ表示しています。サーバーから次の50件を取得する仕組みではありません。この件数だけでは金融機関の全履歴が揃っているかは判断できません。
+          件を50件ずつ表示しています。続きがある場合は「次の500件」で次のページを読み込みます。この件数だけでは金融機関の全履歴が揃っているかは判断できません。
         </p>
         <p>
           日付は取得元の基準日（as_of）をそのまま表示します。期間指定時は記録された年月日で比較し、日付不明の記録は除外します。タイムゾーンの換算はしません。金額は保存値を保ち、異なる通貨での並べ替え・合算は行いません。

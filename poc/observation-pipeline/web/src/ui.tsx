@@ -359,17 +359,42 @@ export function QueryBoundary<T>({
   const data = query.data;
   const coverage =
     typeof data === "object" && data !== null && "coverage" in data
-      ? (data.coverage as { truncated?: boolean; nextCursor?: string | null })
+      ? (data.coverage as {
+          truncated?: boolean;
+          nextCursor?: string | null;
+          nextOffset?: number | null;
+          latestNextOffset?: number | null;
+        })
       : undefined;
   return (
     <>
       {coverage?.truncated ? (
         <div className="query-notice query-warning" role="status">
-          このページは各一覧の最大500件を表示しています。絞り込み・件数は表示中の記録が対象で、全記録ではありません。
-          {coverage.nextCursor ? (
-            <a className="button" href={`?cursor=${encodeURIComponent(coverage.nextCursor)}`}>
-              次の500件
-            </a>
+          このページは各一覧の最大500件を表示しています。続きの記録があります。表示件数は全記録の総数ではありません。
+          {coverage.nextCursor || coverage.nextOffset != null ? (
+            <Link
+              className="button"
+              to={(() => {
+                const params = new URLSearchParams(window.location.search);
+                if (coverage.nextCursor) params.set("cursor", coverage.nextCursor);
+                else params.set("offset", String(coverage.nextOffset));
+                return `${window.location.pathname}?${params}`;
+              })()}
+            >
+              {window.location.pathname === "/balances" ? "履歴の次の500件" : "次の500件"}
+            </Link>
+          ) : null}
+          {coverage.latestNextOffset != null ? (
+            <Link
+              className="button"
+              to={(() => {
+                const params = new URLSearchParams(window.location.search);
+                params.set("latestOffset", String(coverage.latestNextOffset));
+                return `${window.location.pathname}?${params}`;
+              })()}
+            >
+              最新残高の次の500件
+            </Link>
           ) : null}
         </div>
       ) : null}
