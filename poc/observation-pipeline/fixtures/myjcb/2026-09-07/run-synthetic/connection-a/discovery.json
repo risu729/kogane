@@ -1,0 +1,1 @@
+{"schemaVersion":1,"bootstrapMode":"session","cards":[{"localId":"card-001","productHint":"JCB W","switchCandidate":false}],"periodCount":2,"cookieCount":2,"limitations":["Root-card switching remains discovery-only until its current POST contract is observed.","Passkey renewal remains human-operated; session bootstrap is short-lived."]}

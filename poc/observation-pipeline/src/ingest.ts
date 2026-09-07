@@ -81,25 +81,70 @@ export function ingestRunDirectory(
   // Read and verify every artifact BEFORE writing anything. A run row written
   // ahead of a failure would make the run look ingested, and every later
   // attempt a silent no-op.
-  const pending: { dataset: string; bytes: Uint8Array }[] = [];
-  const seenDatasets = new Set<string>();
+  const pending: {
+    dataset: string;
+    artifactKey: string;
+    statementState?: string;
+    period?: string;
+    mime: string;
+    bytes: Uint8Array;
+  }[] = [];
+  const seenArtifactKeys = new Set<string>();
+  const manifestPrefix = `raw/${source.id}/${startedAt.slice(0, 10).replaceAll("-", "/")}/${manifest["runId"]}/`;
   for (const entry of manifest["artifacts"]) {
     if (!isObject(entry) || typeof entry["dataset"] !== "string") {
       throw new Error(`${directory}/manifest.json has a malformed artifact entry`);
     }
     const dataset = entry["dataset"];
-    if (seenDatasets.has(dataset)) {
-      throw new Error(`${directory}/manifest.json lists dataset ${dataset} more than once`);
+    const declaredKey = entry["key"];
+    if (declaredKey !== undefined && typeof declaredKey !== "string") {
+      throw new Error(`${directory}/manifest.json has a malformed artifact key`);
     }
-    seenDatasets.add(dataset);
-    const bytes = readFileSync(join(directory, `${dataset}.json`));
+    const artifactKey =
+      declaredKey === undefined
+        ? `${dataset}.json`
+        : declaredKey.startsWith(manifestPrefix)
+          ? declaredKey.slice(manifestPrefix.length)
+          : "";
+    if (!/^(?:[a-z0-9][a-z0-9-]{0,63}\/)?[a-z0-9][a-z0-9.-]{0,127}$/u.test(artifactKey)) {
+      throw new Error(`${directory}/manifest.json artifact key is outside its run prefix`);
+    }
+    if (seenArtifactKeys.has(artifactKey)) {
+      throw new Error(
+        `${directory}/manifest.json lists artifact key ${artifactKey} more than once`,
+      );
+    }
+    seenArtifactKeys.add(artifactKey);
+    const mediaType = entry["mediaType"];
+    if (mediaType !== undefined && (typeof mediaType !== "string" || mediaType.length === 0)) {
+      throw new Error(`${directory}/manifest.json has a malformed artifact media type`);
+    }
+    const statementState = entry["statementState"];
+    if (
+      statementState !== undefined &&
+      (typeof statementState !== "string" || statementState.length === 0)
+    ) {
+      throw new Error(`${directory}/manifest.json has a malformed statement state`);
+    }
+    const period = entry["period"];
+    if (period !== undefined && (typeof period !== "string" || period.length === 0)) {
+      throw new Error(`${directory}/manifest.json has a malformed statement period`);
+    }
+    const bytes = readFileSync(join(directory, ...artifactKey.split("/")));
     const digest = sha256Hex(bytes);
     if (typeof entry["sha256"] === "string" && entry["sha256"] !== digest) {
       throw new Error(
         `${dataset}: bytes hash ${digest} does not match manifest sha256 ${entry["sha256"]}`,
       );
     }
-    pending.push({ dataset, bytes });
+    pending.push({
+      dataset,
+      artifactKey,
+      ...(statementState === undefined ? {} : { statementState }),
+      ...(period === undefined ? {} : { period }),
+      mime: mediaType ?? "application/json",
+      bytes,
+    });
   }
 
   let deduplicated = 0;
@@ -113,14 +158,17 @@ export function ingestRunDirectory(
       status,
       failureCount,
     });
-    for (const { dataset, bytes } of pending) {
-      const stored = putRawObject(store, bytes, "application/json");
+    for (const { dataset, artifactKey, statementState, period, mime, bytes } of pending) {
+      const stored = putRawObject(store, bytes, mime);
       if (stored.deduplicated) deduplicated += 1;
       insertFetchArtifact(store, {
         fetchRunId: insertedRunId,
         sourceId: source.id,
         dataset,
-        mime: "application/json",
+        artifactKey,
+        ...(statementState === undefined ? {} : { statementState }),
+        ...(period === undefined ? {} : { period }),
+        mime,
         fetchedAt: completedAt ?? startedAt,
         sha256: stored.sha256,
       });
@@ -176,6 +224,7 @@ export function ingestFile(
     insertFetchArtifact(store, {
       fetchRunId: insertedRunId,
       sourceId: options.source.id,
+      artifactKey: basename(path),
       url: `file:${basename(path)}`,
       mime: options.mime,
       fetchedAt: options.fetchedAt,

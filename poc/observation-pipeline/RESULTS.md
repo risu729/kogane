@@ -223,6 +223,52 @@ Deposit type is included in the source-account identity so that otherwise
 identical security codes in specific, general, and NISA holdings do not join
 to one another's valuations.
 
+### MyJCB Layer B validation (2026-09-07)
+
+A checked-in, aggregate-only canary replayed the production MyJCB source
+contract through the importer normalizer and the Layer B registry. It scanned
+184 private-R2 objects and audited 24 manifests without printing or retaining
+an object key, digest, body, connection identifier, merchant, financial value,
+credential, or session value. The manifests were 8 successful and 16 failed;
+all 24 passed the strict source contract, and every artifact in all 8 successful
+runs selected exactly one Layer B parser and parsed without error. The result
+contained 181 transaction observations and 16 provider-reported statement
+payment metrics. The source bucket was not written or deleted.
+
+`credit-ledger` is the sole transaction-bearing route. Production evidence
+showed internal whitespace in provider dates and also showed that the payment
+type and exact JPY display can occupy either of summary cells 2 and 3. The
+parser removes only Unicode whitespace from the date before validating the
+calendar date, then requires exactly one of those two cells to be an exact JPY
+display. Provider liability-positive amounts become observation
+outflow-negative amounts; refunds therefore remain positive inflows. Duplicate
+identical rows receive deterministic occurrence suffixes rather than colliding.
+Across collection runs, the current view selects the newest complete snapshot
+per confirmed period and the newest complete unconfirmed snapshot overall, so
+repeated statements collapse and a disappeared pending row does not remain
+current.
+
+`credit-past-months` emits only displayed, available `payAmount` values as the
+provider's monthly statement-payment metric. Sanitized menu/detail HTML and
+collector discovery are validated evidence boundaries and emit no financial
+observation, which prevents HTML and normalized ledger double counting. The
+provider settlement label supplies a year-month `asOf`, preventing insertion
+order from making an older month the latest statement metric. Accepted relative
+fallback labels remain warning-bearing observations with no invented date and
+are ranked by provider `detailMonth` only after selecting the latest complete
+artifact. The
+current production evidence had non-empty ledgers and displayed past-month
+amounts, but no manifest had multiple connections. CSV, PDF, OFX, debit, and
+cross-connection behavior therefore remain deliberately unregistered or
+synthetic-only until their raw shapes are observed and contracted.
+
+The anonymous fixture mirrors the observed envelope, metadata, date-spacing,
+and amount-cell variation without copying production identifiers, hashes,
+merchant text, dates, or financial values. It also pins failed-run exclusion,
+metadata drift, ambiguous/missing amount cells, duplicate months, and repeated
+dataset ingestion. Schema v4 adds artifact key, statement state, and period;
+v2 and v3 stores migrate in place rather than weakening the strict importer.
+
 **Are SBI's `evaluationAmount` fields really JPY?** The foreign-positions
 parser assumes the unprefixed fields are JPY and the `frn*` variants are in
 `currencyCode`. This is inferred from field naming, not observed. If it is
@@ -256,10 +302,9 @@ Deciding they are related is phase 6, and no code here anticipates it.
 
 ## Not done
 
-No collector, no authentication, no network access of any kind. No D1, R2,
-or Worker deployment: `bun:sqlite` and the filesystem stand in, and the SQL
-is written to stay valid on D1 but has not been run there. No ingestion API
-and no importer CLI — `ingest.ts` is a library that a CLI would wrap. No
-migrations; a schema change is handled by deleting the state directory and
-re-ingesting, which is only acceptable because everything above the raw
-layer is re-derivable.
+The observation pipeline itself performs no collection or authentication and
+has no ingestion API. Its local store uses `bun:sqlite`; schema migrations are
+covered there, while production D1 deployment remains a separate operational
+step. Source-specific aggregate canaries are explicit read-only validation
+tools and do not make the parser process network-capable. No Worker was
+deployed and no R2 or D1 object was written for this validation.

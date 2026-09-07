@@ -151,7 +151,28 @@ export function overview(store: Store): Overview {
 export function currentTransactions(store: Store): TransactionRow[] {
   return store.db
     .query(
-      `SELECT id, source_id, source_account, as_of, amount_minor, amount_text,
+      `WITH ranked_myjcb_snapshots AS (
+         SELECT p.fetch_artifact_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY
+                    fa.source_id,
+                    substr(fa.artifact_key, 1, instr(fa.artifact_key, '/') - 1),
+                    fa.statement_state,
+                    CASE WHEN fa.statement_state = 'unconfirmed' THEN '' ELSE fa.period END
+                  ORDER BY fa.fetched_at DESC, fa.id DESC
+                ) AS snapshot_rank
+         FROM parse_runs p
+         JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+         JOIN fetch_runs f ON f.id = fa.fetch_run_id
+         WHERE ${CURRENT}
+           AND p.parser_name = 'myjcb-credit-ledger'
+           AND fa.dataset = 'credit-ledger'
+       ), current_myjcb_snapshots AS (
+         SELECT fetch_artifact_id
+         FROM ranked_myjcb_snapshots
+         WHERE snapshot_rank = 1
+       )
+       SELECT id, source_id, source_account, as_of, amount_minor, amount_text,
               currency, description, counterparty, external_id, status, parser
        FROM (
          SELECT t.id, fa.source_id, t.source_account, t.as_of,
@@ -160,7 +181,8 @@ export function currentTransactions(store: Store): TransactionRow[] {
                 p.parser_name || '@' || p.parser_version AS parser,
                 ROW_NUMBER() OVER (
                   PARTITION BY CASE
-                    WHEN p.parser_name = 'sbi-vc-executions' AND t.external_id IS NOT NULL
+                    WHEN p.parser_name IN ('sbi-vc-executions', 'myjcb-credit-ledger')
+                         AND t.external_id IS NOT NULL
                       THEN json_array(fa.source_id, t.source_account, t.external_id)
                     ELSE json_array('observation-row', t.id)
                   END
@@ -175,6 +197,10 @@ export function currentTransactions(store: Store): TransactionRow[] {
          JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
          JOIN fetch_runs f ON f.id = fa.fetch_run_id
          WHERE ${CURRENT}
+           AND (
+             p.parser_name <> 'myjcb-credit-ledger'
+             OR fa.id IN (SELECT fetch_artifact_id FROM current_myjcb_snapshots)
+           )
        )
        WHERE rank_in_identity = 1
        ORDER BY COALESCE(as_of, '') DESC, id DESC`,
@@ -195,7 +221,26 @@ export function currentTransactions(store: Store): TransactionRow[] {
 export function latestBalances(store: Store): BalanceRow[] {
   return store.db
     .query(
-      `SELECT id, source_id, source_account, metric, instrument, amount_minor,
+      `WITH ranked_myjcb_snapshots AS (
+         SELECT p.fetch_artifact_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY
+                    fa.source_id,
+                    substr(fa.artifact_key, 1, instr(fa.artifact_key, '/') - 1)
+                  ORDER BY fa.fetched_at DESC, fa.id DESC
+                ) AS snapshot_rank
+         FROM parse_runs p
+         JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+         JOIN fetch_runs f ON f.id = fa.fetch_run_id
+         WHERE ${CURRENT}
+           AND p.parser_name = 'myjcb-credit-past-month-balances'
+           AND fa.dataset = 'credit-past-months'
+       ), current_myjcb_snapshots AS (
+         SELECT fetch_artifact_id
+         FROM ranked_myjcb_snapshots
+         WHERE snapshot_rank = 1
+       )
+       SELECT id, source_id, source_account, metric, instrument, amount_minor,
               amount_text, as_of, observed_at, parser
        FROM (
          SELECT b.id, fa.source_id, b.source_account, b.metric, b.instrument,
@@ -204,13 +249,24 @@ export function latestBalances(store: Store): BalanceRow[] {
                 p.parser_name || '@' || p.parser_version AS parser,
                 ROW_NUMBER() OVER (
                   PARTITION BY fa.source_id, b.source_account, b.metric, b.instrument
-                  ORDER BY COALESCE(b.as_of, b.observed_at, '') DESC, b.id DESC
+                  ORDER BY
+                    CASE WHEN p.parser_name = 'myjcb-credit-past-month-balances'
+                      THEN CAST(json_extract(b.extra_json, '$._kogane.detailMonth') AS INTEGER)
+                    END ASC,
+                    CASE WHEN p.parser_name <> 'myjcb-credit-past-month-balances'
+                      THEN COALESCE(b.as_of, b.observed_at, '')
+                    END DESC,
+                    b.id DESC
                 ) AS rank_in_group
          FROM balance_observations b
          JOIN parse_runs p ON p.id = b.parse_run_id
          JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
          JOIN fetch_runs f ON f.id = fa.fetch_run_id
          WHERE ${CURRENT}
+           AND (
+             p.parser_name <> 'myjcb-credit-past-month-balances'
+             OR fa.id IN (SELECT fetch_artifact_id FROM current_myjcb_snapshots)
+           )
        )
        WHERE rank_in_group = 1
        ORDER BY source_id, source_account, metric, instrument`,

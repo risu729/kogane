@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "myjcb-worker-poc-v1",
+  "source": "myjcb",
+  "runId": "123e4567-e89b-42d3-a456-426614174000",
+  "startedAt": "2026-09-07T00:00:00.000Z",
+  "completedAt": "2026-09-07T00:01:00.000Z",
+  "status": "success",
+  "trigger": "manual",
+  "connections": [
+    {"connectionId":"connection-a","bootstrapMode":"session","status":"success","cardCount":1,"periodCount":2,"artifactCount":7}
+  ],
+  "artifacts": [
+    {"dataset":"credit-menu","key":"raw/myjcb/2026/09/07/123e4567-e89b-42d3-a456-426614174000/connection-a/credit-menu.html","mediaType":"text/html; charset=utf-8","sha256":"d52de24020092b3d6a70694c244aaef136d1cf394ddcc5d6c6dd1867ef03d60f","bytes":224},
+    {"dataset":"credit-past-months","key":"raw/myjcb/2026/09/07/123e4567-e89b-42d3-a456-426614174000/connection-a/credit-past-months.json","mediaType":"application/json","sha256":"d024b923f1f15713a4f7c4a860faf33991b7b10af7587382ae4122897bad156a","bytes":376},
+    {"dataset":"credit-detail","key":"raw/myjcb/2026/09/07/123e4567-e89b-42d3-a456-426614174000/connection-a/credit-detail-00.html","mediaType":"text/html; charset=utf-8","sha256":"3373eea6d4211b0b66381e8e2788adb75e84ddb4b024bca22e5de3f914b424c2","bytes":456,"statementState":"unconfirmed","period":"2026年9月お支払い分"},
+    {"dataset":"credit-ledger","key":"raw/myjcb/2026/09/07/123e4567-e89b-42d3-a456-426614174000/connection-a/credit-ledger-00.json","mediaType":"application/json","sha256":"fb59479e1a22e801ea995287167a32da91d766d52c168294f71a1b0ca2a88df9","bytes":387,"statementState":"unconfirmed","period":"2026年9月お支払い分"},
+    {"dataset":"credit-detail","key":"raw/myjcb/2026/09/07/123e4567-e89b-42d3-a456-426614174000/connection-a/credit-detail-02.html","mediaType":"text/html; charset=utf-8","sha256":"52772892c9b27e4eb530f7987a5a2970275aa66021e4f0058cf41bfa9113f308","bytes":274,"statementState":"confirmed","period":"2026年7月お支払い分"},
+    {"dataset":"credit-ledger","key":"raw/myjcb/2026/09/07/123e4567-e89b-42d3-a456-426614174000/connection-a/credit-ledger-02.json","mediaType":"application/json","sha256":"855ec5f56eb99f32bc871f1d5fa8528f302ed04a747ea6a9a880c7fbb1e167e7","bytes":571,"statementState":"confirmed","period":"2026年7月お支払い分"},
+    {"dataset":"discovery","key":"raw/myjcb/2026/09/07/123e4567-e89b-42d3-a456-426614174000/connection-a/discovery.json","mediaType":"application/json","sha256":"a83894fc80a46ae4bc70c41cf2bd1ee58555034d6384df23e652ae63bd32b55c","bytes":339}
+  ],
+  "failures": []
+}

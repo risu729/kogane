@@ -333,6 +333,16 @@ Layer Aの中央取込は`services/collector-r2-importer`に実装した。sourc
 
 同一manifestのbackfill retryは中央で冪等だが、collectorが別run IDで重複収集した場合は別runとして保存する。実R2の6 success runはpayload fingerprintが互いに異なり、content deduplicationで収集runを統合する根拠はない。既知のCron/manual overlapはcollector側lockの課題であり、raw-evidence取込でscheduled実行を追加・変更しない。
 
+## Layer B observation parser（2026-09-07）
+
+中央へ正規化済みの5 datasetのうち、金融観測を作るcanonical routeは`credit-ledger`と`credit-past-months`だけに限定した。`credit-menu`、`credit-detail`、`discovery`はstrictにshapeとmetadataを検証するが、HTMLとnormalized ledgerの二重計上を避けるため観測をemitしない。CSV/PDF/OFXとdebitは実R2成功artifactが未観測であり、Layer A同様Layer Bにも推測parserを登録していない。
+
+`credit-ledger`はmanifestのconnection、filename、statement state、periodとpayloadを相互照合する。実shapeでは日付文字列に内部空白があり、支払区分と金額がsummary cell 2/3のいずれにも現れたため、日付と金額はLayer Aと同じ空白正規化後に厳密検証し、2/3のうちexact JPY表示がちょうど1個であることを要求する。providerの利用額は債務増を正、refundを負で表すので、Layer B取引は支出負・流入正へ明示反転する。元row、採用cell位置、sign contract、period/state、由来detail HTMLを`extra`に保持する。同一行が複数回現れてもfingerprintと出現順で安定identityを作り、欠落placeholderは作らない。current viewは確定済みperiodごとの最新success artifactと、全未確定の最新success snapshotだけを選ぶため、別runの重複と後続snapshotから消えたpendingを残さない。
+
+`credit-past-months`はJSON-RPC envelope、最大18件、month重複禁止を要求し、availableかつdisplay対象の`payAmount`だけを`credit_statement_payment_amount`として記録する。これは現金残高でなくprovider表示の月次支払額であり、非表示・利用不可をzeroとして発明しない。`settlementYM`に絶対年月があれば日を発明せずyear-month精度の`asOf`へ正規化する。Layer Aが許す`detailMonth-N`等の相対fallbackはwarning付き・`asOf`なしで保持する。current balance viewは最新complete artifactを先に選び、その中の最小`detailMonth`を採用するため、absolute/fallback混在や空の最新snapshotでも古い値をcurrentに残さない。
+
+checked-in canaryはsource R2をread-onlyで184 objects / 24 manifests監査した。statusはsuccess 8 / failed 16、全manifestがLayer A strict contractを通り、success artifactは全件がLayer B registryでexactly one routeを選択してparse成功した。集計はtransaction 181、statement metric 16で、nonempty ledgerとdisplayed past monthを確認した一方、multiple connectionsは未観測だった。object key、hash、body、connection/account identifier、加盟店、日付、金融値、secretは出力・保存・commitせず、R2 write/deleteも行っていない。
+
 日次実行は`0 21 * * *`のCloudflare CronからWorker `scheduled()`を直接呼び、GitHub Actions cronを使わない。手動`POST /trigger`のBearerはSHA-256で固定長化してから`crypto.subtle.timingSafeEqual`で比較する。ただしCron/manual overlap lockは未実装で、同一IDの同時login/readを防ぐDurable Object lockまたはQueue直列化をdeploy/merge前要件とする。
 
 実装、stop条件、R2 layout、cleanup前提、synthetic test、未確認事項は`poc/myjcb-worker/README.md`に集約した。公開AGPL prior artの観測は、PR #24調査時点のOkura commit `afc6057fba78b5bfd6364654548fbfd91c76692a`とPoC照合時点の`bbf11e032aba4a380009508e91954361a3f9d658`を区別し、protocol確認だけに使った。

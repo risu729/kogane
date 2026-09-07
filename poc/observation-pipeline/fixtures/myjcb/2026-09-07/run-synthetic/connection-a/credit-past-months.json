@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":"030100601","result":{"errId":"0","errMessage":"","detailPastJsonInfo":[{"detailAvailableFlag":true,"detailMonth":"9","payAmount":"1,500円","payAmountDispFlag":true,"settlementYM":"2025年12月お支払い分"},{"detailAvailableFlag":true,"detailMonth":"10","payAmount":"700円","payAmountDispFlag":true,"settlementYM":"2025年11月お支払い分"}]}}
