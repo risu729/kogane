@@ -357,6 +357,34 @@ Deposit type is included in the source-account identity so that otherwise
 identical security codes in specific, general, and NISA holdings do not join
 to one another's valuations.
 
+### V Point Layer B validation (2026-09-07)
+
+The repeatable production canary reused the merged strict Layer-A validator and
+read the source R2 only through a local remote binding. It scanned 167 objects:
+26 manifests passed the current contract, 139 non-manifest objects were skipped,
+and two retained manifests failed strict validation. Those failures were reduced
+to one fixed aggregate category. The valid manifests were 15 success, 11 failed,
+and zero partial; failed runs produced zero Layer-B observations.
+
+All 111 financial artifacts in the 15 valid success runs parsed completely. The
+other 28 success artifacts were the non-financial collection summaries and the
+observed-empty V Money boundary. The canary produced 2,307 observations: 45
+balances and 2,262 signed point transactions. It found 1,902 positive, 360
+negative, and no zero point rows, and verified that all 2,262 transactions omit
+an invented external id. No object key, digest, response body, provider text,
+financial value, credential, or session value is returned by the audit.
+
+`balance-info` preserves each common and store-limited expiry bucket, and
+`smfg-point` keeps its two displayed fields separate without claiming what the
+numeric split means. `history-page-*` repeats Layer A's exact envelope, row,
+graph, pagination, cardinality, UTF-8, and calendar checks. The transaction
+amount and sign come directly from `point`; numeric `point_type`, `point_div`,
+and `get_month` values remain unmapped provider evidence in `extra`. The history
+response exposes no stable provider row id, so every occurrence is retained and
+no `externalId` or reconciliation link is manufactured. Current queries select
+only the newest complete V Point run, avoiding repeated full-snapshot double
+counting and preventing disappeared rows or expiry buckets from lingering.
+
 ### MyJCB Layer B validation (2026-09-07)
 
 A checked-in, aggregate-only canary replayed the production MyJCB source

@@ -53,6 +53,15 @@ partial=0
 failed_status=0
 with_reconciliation=0
 without_reconciliation=0
+financial_artifacts=0
+ignored_artifacts=0
+parsed_observations=0
+balance_observations=0
+transaction_observations=0
+external_id_observations=0
+positive_transactions=0
+negative_transactions=0
+zero_transactions=0
 cursor=""
 pages=0
 
@@ -73,7 +82,7 @@ while true; do
     }
   jq -e '
     type == "object" and
-    .schemaVersion == "vpoint-r2-aggregate-audit-v1" and
+    .schemaVersion == "vpoint-layer-b-aggregate-audit-v1" and
     (.scannedObjectCount == 0 or .scannedObjectCount == 1) and
     (.auditedManifestCount == 0 or .auditedManifestCount == 1) and
     (.skippedObjectCount == 0 or .skippedObjectCount == 1) and
@@ -84,11 +93,19 @@ while true; do
     ((.failedManifestCount == 1) == has("failureCode")) and
     ((.auditedManifestCount == 1) ==
       (has("manifestSchemaVersion") and has("manifestStatus") and
-       has("artifactCount") and has("hasReconciliation"))) and
+       has("artifactCount") and has("hasReconciliation") and
+       has("financialArtifactCount") and has("ignoredArtifactCount") and
+       has("parsedObservationCount") and has("balanceObservationCount") and
+       has("transactionObservationCount") and has("externalIdObservationCount") and
+       has("positivePointTransactionCount") and has("negativePointTransactionCount") and
+       has("zeroPointTransactionCount"))) and
     ([keys[]] - ["schemaVersion","scannedObjectCount","auditedManifestCount",
       "skippedObjectCount","failedManifestCount","nextCursor","truncated",
       "failureCode","manifestSchemaVersion","manifestStatus","artifactCount",
-      "hasReconciliation"] | length == 0)
+      "hasReconciliation","financialArtifactCount","ignoredArtifactCount",
+      "parsedObservationCount","balanceObservationCount","transactionObservationCount",
+      "externalIdObservationCount","positivePointTransactionCount",
+      "negativePointTransactionCount","zeroPointTransactionCount"] | length == 0)
   ' <<<"${page}" >/dev/null || {
     printf 'audit worker returned an invalid aggregate response\n' >&2
     exit 1
@@ -115,6 +132,15 @@ while true; do
     else
       without_reconciliation=$((without_reconciliation + 1))
     fi
+    financial_artifacts=$((financial_artifacts + $(jq -r '.financialArtifactCount' <<<"${page}")))
+    ignored_artifacts=$((ignored_artifacts + $(jq -r '.ignoredArtifactCount' <<<"${page}")))
+    parsed_observations=$((parsed_observations + $(jq -r '.parsedObservationCount' <<<"${page}")))
+    balance_observations=$((balance_observations + $(jq -r '.balanceObservationCount' <<<"${page}")))
+    transaction_observations=$((transaction_observations + $(jq -r '.transactionObservationCount' <<<"${page}")))
+    external_id_observations=$((external_id_observations + $(jq -r '.externalIdObservationCount' <<<"${page}")))
+    positive_transactions=$((positive_transactions + $(jq -r '.positivePointTransactionCount' <<<"${page}")))
+    negative_transactions=$((negative_transactions + $(jq -r '.negativePointTransactionCount' <<<"${page}")))
+    zero_transactions=$((zero_transactions + $(jq -r '.zeroPointTransactionCount' <<<"${page}")))
   fi
 
   cursor="$(jq -r '.nextCursor // ""' <<<"${page}")"
@@ -131,11 +157,27 @@ jq -nc \
   --argjson failedStatus "${failed_status}" \
   --argjson withReconciliation "${with_reconciliation}" \
   --argjson withoutReconciliation "${without_reconciliation}" \
-  '{schemaVersion:"vpoint-r2-aggregate-audit-v1",source:"v-point",
+  --argjson financialArtifacts "${financial_artifacts}" \
+  --argjson ignoredArtifacts "${ignored_artifacts}" \
+  --argjson parsedObservations "${parsed_observations}" \
+  --argjson balanceObservations "${balance_observations}" \
+  --argjson transactionObservations "${transaction_observations}" \
+  --argjson externalIdObservations "${external_id_observations}" \
+  --argjson positiveTransactions "${positive_transactions}" \
+  --argjson negativeTransactions "${negative_transactions}" \
+  --argjson zeroTransactions "${zero_transactions}" \
+  '{schemaVersion:"vpoint-layer-b-aggregate-audit-v1",source:"v-point",
     scannedObjectCount:$scanned,auditedManifestCount:$audited,
     skippedObjectCount:$skipped,failedManifestCount:$failed,
     manifestSchemaCounts:{v1:$v1,v2:$v2},
     manifestStatusCounts:{success:$success,partial:$partial,failed:$failedStatus},
-    reconciliationCounts:{present:$withReconciliation,absent:$withoutReconciliation}}'
+    reconciliationCounts:{present:$withReconciliation,absent:$withoutReconciliation},
+    layerB:{financialArtifactCount:$financialArtifacts,ignoredArtifactCount:$ignoredArtifacts,
+      parsedObservationCount:$parsedObservations,balanceObservationCount:$balanceObservations,
+      transactionObservationCount:$transactionObservations,
+      externalIdObservationCount:$externalIdObservations,
+      positivePointTransactionCount:$positiveTransactions,
+      negativePointTransactionCount:$negativeTransactions,
+      zeroPointTransactionCount:$zeroTransactions}}'
 
 (( failed == 0 ))

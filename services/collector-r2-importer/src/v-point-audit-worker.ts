@@ -1,5 +1,10 @@
 import { ImportError } from "./error";
-import { auditVPointRun } from "./v-point";
+import { validateVPointLayerBRun } from "./v-point";
+import {
+  vPointBalanceInfo,
+  vPointHistoryPage,
+  vPointSmfgPoint,
+} from "../../../poc/observation-pipeline/src/parsers/v-point";
 
 type AuditEnv = Pick<Env, "VPOINT_SNAPSHOTS" | "VPOINT_PAY_SNAPSHOTS">;
 
@@ -42,25 +47,73 @@ export default {
         });
       }
       try {
-        const audited = await auditVPointRun({
+        const audited = await validateVPointLayerBRun({
           bucket: env.VPOINT_SNAPSHOTS,
           reconciliationBucket: env.VPOINT_PAY_SNAPSHOTS,
           manifestKey: object.key,
         });
+        const shape = {
+          financialArtifactCount: 0,
+          ignoredArtifactCount: 0,
+          parsedObservationCount: 0,
+          balanceObservationCount: 0,
+          transactionObservationCount: 0,
+          externalIdObservationCount: 0,
+          positivePointTransactionCount: 0,
+          negativePointTransactionCount: 0,
+          zeroPointTransactionCount: 0,
+        };
+        if (audited.status === "success" && audited.failureCount === 0) {
+          const parsers = [vPointBalanceInfo, vPointSmfgPoint, vPointHistoryPage];
+          for (const artifact of audited.artifacts) {
+            const meta = {
+              id: 0,
+              sourceId: "v-point",
+              runStatus: audited.status,
+              runFailureCount: audited.failureCount,
+              dataset: artifact.dataset,
+              url: null,
+              mime: "application/json",
+              fetchedAt: audited.completedAt,
+              sha256: artifact.sha256,
+            } as const;
+            const selected = parsers.filter((parser) => parser.accepts(meta));
+            if (selected.length === 0) {
+              shape.ignoredArtifactCount += 1;
+              continue;
+            }
+            if (selected.length !== 1) throw new Error("parser_cardinality_invalid");
+            shape.financialArtifactCount += 1;
+            const parsed = selected[0]!.parse(artifact.bytes, meta);
+            shape.parsedObservationCount += parsed.observations.length;
+            for (const observation of parsed.observations) {
+              if (observation.kind === "balance") shape.balanceObservationCount += 1;
+              if (observation.kind !== "transaction") continue;
+              shape.transactionObservationCount += 1;
+              if (observation.externalId !== undefined) shape.externalIdObservationCount += 1;
+              const points = observation.amountMinor;
+              if (points === undefined) throw new Error("point_amount_missing");
+              if (points > 0) shape.positivePointTransactionCount += 1;
+              else if (points < 0) shape.negativePointTransactionCount += 1;
+              else shape.zeroPointTransactionCount += 1;
+            }
+          }
+        }
         return auditResponse({
           scanned: 1,
           audited: 1,
           schemaVersion: audited.schemaVersion,
           status: audited.status,
-          artifactCount: audited.artifactCount,
+          artifactCount: audited.artifacts.length,
           hasReconciliation: audited.hasReconciliation,
+          ...shape,
           nextCursor: nextCursor ?? null,
         });
-      } catch (error) {
+      } catch {
         return auditResponse({
           scanned: 1,
           failed: 1,
-          failureCode: safeCode(error),
+          failureCode: "vpoint_contract_validation_failed",
           nextCursor: nextCursor ?? null,
         });
       }
@@ -83,10 +136,19 @@ function auditResponse(input: {
   status?: "success" | "partial" | "failed";
   artifactCount?: number;
   hasReconciliation?: boolean;
+  financialArtifactCount?: number;
+  ignoredArtifactCount?: number;
+  parsedObservationCount?: number;
+  balanceObservationCount?: number;
+  transactionObservationCount?: number;
+  externalIdObservationCount?: number;
+  positivePointTransactionCount?: number;
+  negativePointTransactionCount?: number;
+  zeroPointTransactionCount?: number;
   nextCursor: string | null;
 }): Response {
   return response({
-    schemaVersion: "vpoint-r2-aggregate-audit-v1",
+    schemaVersion: "vpoint-layer-b-aggregate-audit-v1",
     scannedObjectCount: input.scanned,
     auditedManifestCount: input.audited ?? 0,
     skippedObjectCount: input.skipped ?? 0,
@@ -100,6 +162,19 @@ function auditResponse(input: {
     ...(input.hasReconciliation === undefined
       ? {}
       : { hasReconciliation: input.hasReconciliation }),
+    ...(input.financialArtifactCount === undefined
+      ? {}
+      : {
+          financialArtifactCount: input.financialArtifactCount,
+          ignoredArtifactCount: input.ignoredArtifactCount,
+          parsedObservationCount: input.parsedObservationCount,
+          balanceObservationCount: input.balanceObservationCount,
+          transactionObservationCount: input.transactionObservationCount,
+          externalIdObservationCount: input.externalIdObservationCount,
+          positivePointTransactionCount: input.positivePointTransactionCount,
+          negativePointTransactionCount: input.negativePointTransactionCount,
+          zeroPointTransactionCount: input.zeroPointTransactionCount,
+        }),
   });
 }
 

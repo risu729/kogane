@@ -1,0 +1,17 @@
+{
+  "status": { "code": "0000", "response": "" },
+  "results": {
+    "common": [
+      { "expiration": "", "point": 120, "point_type": 7 },
+      { "expiration": "20991231", "point": 30, "point_type": 12 }
+    ],
+    "get_month": 4,
+    "store": [
+      {
+        "alliance_name": "ANONYMOUS ALLIANCE",
+        "items": [{ "expiration": "20991130", "point": 20 }]
+      }
+    ],
+    "tmoney": {}
+  }
+}

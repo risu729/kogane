@@ -1,0 +1,38 @@
+{
+  "status": { "code": "0000", "response": "" },
+  "results": {
+    "graph": {
+      "monthly": [{ "label": "2099-01", "point": 25 }],
+      "yearly": [{ "label": "2099", "point": 25 }]
+    },
+    "history": [
+      {
+        "date_reflect": "20990103",
+        "date_use": "20990102",
+        "is_use_mbo": false,
+        "point": -40,
+        "point_div": 91,
+        "point_type": 37,
+        "reason": "ANONYMOUS USE",
+        "store_alliance_name": "ANONYMOUS ALLIANCE",
+        "store_category": "ANONYMOUS CATEGORY",
+        "store_company": "ANONYMOUS COMPANY",
+        "store_name": "ANONYMOUS STORE"
+      },
+      {
+        "date_reflect": "20990104",
+        "date_use": "",
+        "is_use_mbo": true,
+        "point": 65,
+        "point_div": 92,
+        "point_type": 38,
+        "reason": "ANONYMOUS AWARD",
+        "store_alliance_name": "",
+        "store_category": "",
+        "store_company": "",
+        "store_name": ""
+      }
+    ],
+    "total": 2
+  }
+}
