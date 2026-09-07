@@ -281,6 +281,14 @@ describe("Vpass R2 importer", () => {
       producerVersion: "vpass-r2-v2",
       producerStatus: "failed",
       normalizedOutcome: "failed",
+    });
+    expect(JSON.parse(runReport!.body)).not.toHaveProperty("safeFailureCode");
+    const unitReport = central.requests.find((request) =>
+      /\/units\/10\/reports$/u.test(request.path),
+    );
+    expect(JSON.parse(unitReport!.body)).toMatchObject({
+      producerStatus: "failed",
+      normalizedOutcome: "failed",
       safeFailureCode: "collector-failed",
     });
     const descriptor = central.requests.find((request) => /\/artifacts$/u.test(request.path));
