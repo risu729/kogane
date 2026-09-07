@@ -94,3 +94,48 @@ app APIのlive snapshotは存在しないため、email対app明細は未照合�
 不一致を理由にsource eventを書き換えない。後日app APIが復旧したら、email、app transaction、
 Vポイント履歴を三つの独立sourceとして照合し、authorization/settlement/refundによる差を
 reportへ追加する。matchできないeventはunknownのまま残す。
+
+## Layer A: 通知メール evidence の中央取り込み
+
+`poc/vpoint-pay-worker`のapp pollingはPR #60で停止済みであり、この取り込みでは再有効化しない。
+現存するsourceは`poc/vpoint-worker`が保存した公式通知の二つ組だけである。
+
+- `raw/v-point-pay-email/{date}/{message-sha256}.eml`: 公式送信者のInternet Message Format原本
+- `raw/v-point-pay-email/{date}/{message-sha256}.json`: `vpoint-pay-email-event-v1`正規化event
+
+Importerは同じprefixにこの2 objectだけが存在すること、keyの日付とRFC Date、raw bytesの
+SHA-256とkey ID、exact custom metadata、media type、公式sender、対象subject、JSONのstrict
+schemaを検証する。さらにEMLからeventを独立に再計算し、正規化JSONと
+完全一致する場合だけ中央へ複製する。転送メールの外側envelopeは保存時に除かれているため、
+中央のemail transportは推測せず`unknown`とする。
+
+既存履歴は保存時にR2 native SHA-256を指定していなかったため、bounded bodyから再計算した
+SHA-256をkey・pair・中央object checksumへ厳密に結び付ける。native checksumが存在するobjectは
+再計算値との一致も必須とし、新着保存ではraw/JSON両方にnative SHA-256を指定する。監査は
+native checksumの有無をaggregate件数だけで報告し、欠落を値の不一致として扱わない。
+
+中央ではexternal source ID `v-point-pay-email`をcanonical `v-point-pay`へ対応させる。
+rawは`provider_message / exact`、JSONはrawへのlineageを持つ
+`collector_derived / transformed`で、1 message unit・2 artifact・`email_batch` inventoryとして
+sealする。`producerVersion`と`sourceRunKey`は固定契約`vpoint-pay-email-r2-v1`に基づくため、
+Importerのdeployment revisionが変わっても同一pairを同じrunへ冪等replayできる。
+
+`derived/v-point-pay-email-reconciliation/...`はVポイント本体の履歴との比較から作った別の
+collector summaryであり、canonical sourceは`v-point`である。今回のメールImporterはこれを
+走査しない。app API snapshotのprefixも対象外であり、emailをapp明細の代替正本とは扱わない。
+
+historical scanはHMAC署名付きopaque cursorを用いてR2 objectを1件ずつ走査し、`.json`ごとに
+pairを取り込む。`.eml`は対応JSON側で一緒に検証されるためscan上はskipする。応答とscriptは
+件数と固定failure codeだけを出し、source object key、個別hash、本文、値、tokenを出さない。
+source R2へのwrite/deleteは行わない。
+
+```sh
+cd services/collector-r2-importer
+bun run audit:vpoint-pay-email-r2
+
+poc/vpoint-worker/scripts/backfill-vpoint-pay-email-raw-evidence.sh
+```
+
+新着メール保存後の中央取り込みはService Bindingの失敗をメール受信・Gmail転送の失敗へ
+昇格させず、`waitUntil`で試行する。失敗pairはimmutable source R2に残り、上記backfillで再送する。
+GitHub Actions cronは使わず、既存collectorのscheduleと廃止済みapp polling設定は変更しない。

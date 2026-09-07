@@ -31,6 +31,11 @@ app API collectorは停止している。Cronはなく、手動の`/trigger`、`
 R2原本、Durable Object、既存secretsは保持する。VポイントPay通知メールは
 `poc/vpoint-worker/`で引き続き収集する。以下の認証・デプロイ説明は研究記録である。
 
+Layer Aの中央取り込みも、ここに残るapp snapshotや停止中endpointは対象にしない。
+`poc/vpoint-worker`が保存した`raw/v-point-pay-email/...`のEML/JSON pairだけを専用Importerが
+read-onlyで検証する。email source、app API source、Vポイント本体から生成したreconciliationは
+別境界であり、このWorkerのCronやpollingを有効化する変更は別途live contract確認後に行う。
+
 認証不要の`/probe`による到達確認は、残高・明細取得の成功を意味しない。
 APIの認証には同じセッション由来の実UUIDとrefresh tokenが必要で、仮UUIDでは代用しない。
 端末アプリとの同時利用やtoken更新の競合は未検証であり、自動的な再登録・端末移行は行わない。

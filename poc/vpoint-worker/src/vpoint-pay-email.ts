@@ -51,6 +51,8 @@ export async function storeVPointPayEmail(options: {
   const prefix = `raw/v-point-pay-email/${date}/${event.id}`;
   const rawKey = `${prefix}.eml`;
   const normalizedKey = `${prefix}.json`;
+  const normalized = new TextEncoder().encode(JSON.stringify(event));
+  const normalizedSha256 = await sha256Hex(normalized);
   const duplicate = (await options.bucket.head(rawKey)) !== null;
   await Promise.all([
     duplicate
@@ -62,14 +64,16 @@ export async function storeVPointPayEmail(options: {
             eventType: event.eventType,
             sha256: event.id,
           },
+          sha256: event.id,
         }),
-    options.bucket.put(normalizedKey, JSON.stringify(event), {
+    options.bucket.put(normalizedKey, normalized, {
       httpMetadata: { contentType: "application/json" },
       customMetadata: {
         source: "v-point-pay-email",
         eventType: event.eventType,
         sha256: event.id,
       },
+      sha256: normalizedSha256,
     }),
   ]);
   return { event, rawKey, normalizedKey, duplicate };

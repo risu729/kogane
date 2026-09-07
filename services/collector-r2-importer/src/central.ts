@@ -106,10 +106,11 @@ export class CentralClient {
     artifacts: CentralInventoryItem[],
     externalAttemptId: string,
     startedAtMs: number,
+    declarationBasis = "producer_manifest",
   ): Promise<void> {
     const result = await this.json(`/v1/runs/${runId}/seal`, {
       artifacts,
-      declarationBasis: "producer_manifest",
+      declarationBasis,
       externalAttemptId,
       startedAtMs,
     });

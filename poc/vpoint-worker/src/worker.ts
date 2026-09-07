@@ -9,6 +9,10 @@ import {
   shouldForwardToMailbox,
   storeVPointPayEmail,
 } from "./vpoint-pay-email";
+import {
+  backfillStoredVPointPayEmails,
+  importStoredVPointPayEmail,
+} from "./vpoint-pay-raw-evidence";
 import { reconcileVPointPayEmails } from "./vpoint-pay-reconcile";
 import type { CollectionFailure, CollectionManifest, CollectionResult } from "./types";
 import { collectVPoint, VPointSessionExpiredError } from "./vpoint";
@@ -51,6 +55,37 @@ export default {
         return Response.json({ error: "raw_evidence_backfill_failed" }, { status: 502 });
       }
     }
+    if (request.method === "POST" && url.pathname === "/backfill-vpoint-pay-email-raw-evidence") {
+      if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
+        return Response.json({ error: "Unauthorized" }, { status: 401 });
+      }
+      const queryNames = [...url.searchParams.keys()];
+      if (
+        queryNames.some((name) => name !== "limit" && name !== "cursor") ||
+        url.searchParams.getAll("limit").length !== 1 ||
+        url.searchParams.getAll("cursor").length > 1 ||
+        url.searchParams.get("limit") !== "1"
+      ) {
+        return Response.json({ error: "limit_must_be_one" }, { status: 400 });
+      }
+      const cursor = url.searchParams.get("cursor") ?? undefined;
+      if (
+        cursor !== undefined &&
+        (cursor.length === 0 || cursor.length > 4_096 || /[\x00-\x20\x7f]/u.test(cursor))
+      ) {
+        return Response.json({ error: "cursor_invalid" }, { status: 400 });
+      }
+      try {
+        return Response.json(
+          await backfillStoredVPointPayEmails(env.RAW_EVIDENCE_IMPORTER, cursor),
+        );
+      } catch {
+        return Response.json(
+          { error: "vpoint_pay_email_raw_evidence_backfill_failed" },
+          { status: 502 },
+        );
+      }
+    }
     if (request.method !== "POST" || url.pathname !== "/trigger") {
       return Response.json({ error: "Not found" }, { status: 404 });
     }
@@ -71,7 +106,7 @@ export default {
     }
   },
 
-  async email(message, env): Promise<void> {
+  async email(message, env, ctx): Promise<void> {
     const emailRunId = crypto.randomUUID();
     let stage: CollectionStage = "email-receive";
     const onStage = (next: CollectionStage) => {
@@ -98,8 +133,15 @@ export default {
           runId: emailRunId,
           eventType: stored.event.eventType,
           duplicate: stored.duplicate,
-          rawKey: stored.rawKey,
         });
+        ctx.waitUntil(
+          importStoredVPointPayEmail(env.RAW_EVIDENCE_IMPORTER, stored.normalizedKey).catch(() => {
+            logEvent({
+              event: "vpoint-pay-email-raw-evidence-import-failed",
+              runId: emailRunId,
+            });
+          }),
+        );
       }
 
       let forwardError: unknown = null;

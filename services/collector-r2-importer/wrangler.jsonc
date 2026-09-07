@@ -28,6 +28,7 @@
       "RAW_EVIDENCE_TOKEN_MONEYFORWARD",
       "RAW_EVIDENCE_TOKEN_VPOINT",
       "RAW_EVIDENCE_TOKEN_VPASS",
+      "RAW_EVIDENCE_TOKEN_VPOINT_PAY_EMAIL",
       "ORIGIN_FINGERPRINT_KEY"
     ]
   },
@@ -84,6 +85,6 @@
     }
   ],
   "vars": {
-    "IMPORTER_VERSION": "collector-r2-importer-v17"
+    "IMPORTER_VERSION": "collector-r2-importer-v18"
   }
 }

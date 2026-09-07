@@ -19,6 +19,7 @@ describe("collector R2 importer deployment scripts", () => {
       "RAW_EVIDENCE_TOKEN_MONEYFORWARD",
       "RAW_EVIDENCE_TOKEN_VPOINT",
       "RAW_EVIDENCE_TOKEN_VPASS",
+      "RAW_EVIDENCE_TOKEN_VPOINT_PAY_EMAIL",
       "ORIGIN_FINGERPRINT_KEY",
     ];
 

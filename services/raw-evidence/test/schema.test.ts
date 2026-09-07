@@ -672,6 +672,22 @@ describe("0001 raw-evidence schema", () => {
         source_id: "v-point",
       },
     ]);
+    const vPointPayEmailRoute = await env.DB.prepare(`
+      SELECT ingest_client_id, producer_id, source_id FROM active_ingest_routes
+      WHERE ingest_client_id = 'collector-r2-v-point-pay-email'
+      ORDER BY producer_id, source_id
+    `).all<{
+      ingest_client_id: string;
+      producer_id: string;
+      source_id: string;
+    }>();
+    expect(vPointPayEmailRoute.results).toEqual([
+      {
+        ingest_client_id: "collector-r2-v-point-pay-email",
+        producer_id: "collector-r2-importer",
+        source_id: "v-point-pay",
+      },
+    ]);
     const sbiPolicies = await env.DB.prepare(`
       SELECT template, redaction_version, fingerprint_key_version
       FROM origin_template_policies
@@ -802,6 +818,23 @@ describe("0001 raw-evidence schema", () => {
       },
       {
         template: "raw/v-point/{date}/{run-id}/{artifact}.json",
+        redaction_version: "v1",
+        fingerprint_key_version: "collector-r2-v1",
+      },
+    ]);
+    const vPointPayEmailPolicies = await env.DB.prepare(`
+      SELECT template, redaction_version, fingerprint_key_version
+      FROM origin_template_policies
+      WHERE source_id = 'v-point-pay' AND origin_kind = 'storage' AND active = 1
+      ORDER BY template
+    `).all<{
+      template: string;
+      redaction_version: string;
+      fingerprint_key_version: string;
+    }>();
+    expect(vPointPayEmailPolicies.results).toEqual([
+      {
+        template: "raw/v-point-pay-email/{date}/{message-sha256}.{extension}",
         redaction_version: "v1",
         fingerprint_key_version: "collector-r2-v1",
       },

@@ -395,6 +395,16 @@ templates. The point collector outbox and generated reconciliation bucket are
 validated separately; neither policy grants the importer access to the raw
 V Point Pay mail source.
 
+The V Point Pay email importer has a separate least-privilege client route to
+canonical source `v-point-pay`. It accepts only the exact
+`raw/v-point-pay-email/{date}/{message-sha256}.{extension}` storage template and
+catalogues each validated EML/normalized-JSON pair as a two-artifact
+`email_batch`. It never reads the reconciliation prefix, which remains a
+`v-point` collector summary, and it never treats the disabled app polling
+prefix as email evidence. Its one-object backfill cursor is HMAC authenticated;
+public responses contain aggregate counts and fixed codes, not source keys or
+individual hashes.
+
 Financial HTTP and storage templates remain default-deny. Each importer PR must
 add a reviewed source-specific scope and exact template-policy migration from
 its checked-in manifest/docs before its backfill can start. The synthetic

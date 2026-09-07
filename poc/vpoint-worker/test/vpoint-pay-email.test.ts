@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { parseVPointPayEmail, shouldForwardToMailbox } from "../src/vpoint-pay-email";
+import {
+  parseVPointPayEmail,
+  shouldForwardToMailbox,
+  storeVPointPayEmail,
+} from "../src/vpoint-pay-email";
 
 describe("V Point Pay notification email", () => {
   test("normalizes an explicit point-funded usage without changing signs", async () => {
@@ -60,7 +64,30 @@ describe("V Point Pay notification email", () => {
     expect(await parseVPointPayEmail(new TextEncoder().encode(text))).toBeNull();
     expect(shouldForwardToMailbox(null)).toBeTrue();
   });
+
+  test("stores both evidence objects with exact native SHA-256 checksums", async () => {
+    const parsed = await parseVPointPayEmail(notification("◇利用金額：1円"));
+    expect(parsed).not.toBeNull();
+    const puts: Array<{ key: string; body: Uint8Array; options: R2PutOptions }> = [];
+    const bucket = {
+      head: async () => null,
+      put: async (key: string, body: Uint8Array, options: R2PutOptions) => {
+        puts.push({ key, body, options });
+        return null;
+      },
+    } as unknown as R2Bucket;
+    await storeVPointPayEmail({ bucket, parsed: parsed! });
+    expect(puts).toHaveLength(2);
+    for (const put of puts) {
+      expect(put.options.sha256).toBe(await sha256Hex(put.body));
+    }
+  });
 });
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
 
 function notification(text: string, subject = "【VポイントPay】ご利用のお知らせ"): Uint8Array {
   return new TextEncoder().encode(

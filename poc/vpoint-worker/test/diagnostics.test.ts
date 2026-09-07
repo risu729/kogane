@@ -188,13 +188,81 @@ describe("V Point safe diagnostics", () => {
         throw new Error(PRIVATE);
       },
     });
-    await expect(worker.email(message, env)).rejects.toThrow("stage=email-forward");
+    await expect(worker.email(message, env, context())).rejects.toThrow("stage=email-forward");
     const failures = logs
       .map((line) => JSON.parse(line))
       .filter((line) => line.event === "collector-stage-failed");
     expect(failures).toHaveLength(1);
     expect(failures[0].stage).toBe("email-forward");
     expect(logs.join()).not.toContain(PRIVATE);
+  });
+
+  test("archives a V Point Pay notification and imports the pair without blocking forwarding", async () => {
+    const logs = captureLogs();
+    const puts: string[] = [];
+    const importerPaths: string[] = [];
+    const pending: Promise<unknown>[] = [];
+    let forwards = 0;
+    const env = Object.assign({} as Env, {
+      VPOINT_EMAIL_RECIPIENT: "collector@example.invalid",
+      VPOINT_PAY_EMAIL_RECIPIENT: "pay@example.invalid",
+      VPOINT_EMAIL_FORWARD_TO: "mailbox@example.invalid",
+      VPOINT_PAY_SNAPSHOTS: {
+        head: async () => null,
+        put: async (key: string) => {
+          puts.push(key);
+          return null;
+        },
+      },
+      RAW_EVIDENCE_IMPORTER: {
+        fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+          const request = new Request(input, init);
+          importerPaths.push(new URL(request.url).pathname);
+          return Response.json({
+            source: "v-point-pay-email",
+            status: "sealed",
+            centralRunId: 1,
+            artifactCount: 2,
+            sealed: true,
+            allObjectsReused: false,
+          });
+        },
+      },
+    });
+    const raw = new TextEncoder().encode(
+      [
+        "From: V Point Pay <info@prepaid.smbc-card.com>",
+        "To: pay@example.invalid",
+        `Subject: =?UTF-8?B?${Buffer.from("【VポイントPay】ご利用のお知らせ").toString("base64")}?=`,
+        "Date: Sun, 31 Aug 2026 12:00:00 +0900",
+        "Message-ID: <synthetic@example.invalid>",
+        "MIME-Version: 1.0",
+        "Content-Type: text/plain; charset=UTF-8",
+        "Content-Transfer-Encoding: 8bit",
+        "",
+        "◇利用金額：1円",
+      ].join("\r\n"),
+    );
+    const message = Object.assign({} as ForwardableEmailMessage, {
+      to: "pay@example.invalid",
+      raw: new Blob([raw]).stream(),
+      forward: async () => {
+        forwards += 1;
+      },
+    });
+    const ctx = {
+      waitUntil(value: Promise<unknown>) {
+        pending.push(value);
+      },
+      passThroughOnException() {},
+      props: {},
+    } as unknown as ExecutionContext;
+    await worker.email(message, env, ctx);
+    await Promise.all(pending);
+    expect(puts).toHaveLength(2);
+    expect(importerPaths).toEqual(["/v1/v-point-pay-email/import-run"]);
+    expect(forwards).toBe(1);
+    expect(logs.join()).not.toContain("raw/v-point-pay-email/");
   });
 });
 
@@ -237,7 +305,15 @@ describe("logging cannot change collector behavior", () => {
         forwards++;
       },
     });
-    await expect(worker.email(message, env)).resolves.toBeUndefined();
+    await expect(worker.email(message, env, context())).resolves.toBeUndefined();
     expect(forwards).toBe(1);
   });
 });
+
+function context(): ExecutionContext {
+  return {
+    waitUntil() {},
+    passThroughOnException() {},
+    props: {},
+  } as unknown as ExecutionContext;
+}
