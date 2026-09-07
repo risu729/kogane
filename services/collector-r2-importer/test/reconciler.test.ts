@@ -12,8 +12,116 @@ import {
 const ACCOUNT = "59ea63cc00914b30ca410b062ae2bb7f";
 const RUN_ID = "123e4567-e89b-42d3-a456-426614174000";
 const MANIFEST = `raw/sbi-vc-trade/2026/09/07/${RUN_ID}/manifest.json`;
+const TERMINALS = Object.entries(RECONCILER_SOURCES).flatMap(([source, spec]) => {
+  const keys =
+    source === "vpass"
+      ? ["manifest.json", "error.json"].map(
+          (name) => `vpass/2026/09/07/2026-09-07T12-34-56-789Z/card-001/${name}`,
+        )
+      : source === "v-point-pay-email"
+        ? [`${spec.prefix}2026/09/07/${"a".repeat(64)}.json`]
+        : [`${spec.prefix}2026/09/07/${RUN_ID}/manifest.json`];
+  return keys.map((key) => ({ source, bucket: spec.bucket, key }));
+});
 
 describe("R2 outbox reconciler", () => {
+  test("all 13 terminal rules accept every official create action and reject neighboring objects", () => {
+    expect(TERMINALS).toHaveLength(13);
+    expect(new Set(TERMINALS.map(({ source }) => source)).size).toBe(12);
+    for (const { source, bucket, key } of TERMINALS) {
+      for (const action of ["PutObject", "CopyObject", "CompleteMultipartUpload"]) {
+        const notification = {
+          ...r2Notification(bucket, key),
+          action,
+          ...(action === "CopyObject"
+            ? { copySource: { bucket, object: "synthetic-original" } }
+            : {}),
+        };
+        expect(parseMessage(notification, ACCOUNT)).toMatchObject({ source, terminalKey: key });
+        for (const invalid of [
+          { ...notification, bucket: "unknown-bucket" },
+          {
+            ...notification,
+            bucket: TERMINALS.find((candidate) => candidate.bucket !== bucket)!.bucket,
+          },
+          { ...notification, object: { ...notification.object, key: `other/${key}` } },
+          { ...notification, object: { ...notification.object, key: `${key}.extra` } },
+          {
+            ...notification,
+            object: { ...notification.object, key: key.replace(/[^/]+$/u, "payload.bin") },
+          },
+          { ...notification, object: { ...notification.object, key: "x".repeat(501) } },
+        ])
+          expect(() => parseMessage(invalid, ACCOUNT)).toThrow();
+      }
+      for (const action of [["PutObject"], ["CopyObject"], {}, 1, null, "DeleteObject"]) {
+        expect(() => parseMessage({ ...r2Notification(bucket, key), action }, ACCOUNT)).toThrow();
+      }
+    }
+  });
+
+  test("rejects oversized internal fields before performing any IO", async () => {
+    const dependencies = fakeDependencies({});
+    dependencies.importTerminal = async () => {
+      throw new Error("unexpected_import");
+    };
+    dependencies.list = async () => {
+      throw new Error("unexpected_list");
+    };
+    const repair = {
+      schemaVersion: RECONCILER_SCHEMA,
+      kind: "repair",
+      source: "sbi-vc-trade",
+      cursor: "c".repeat(12_001),
+      page: 1,
+    };
+    const transfer = {
+      schemaVersion: RECONCILER_SCHEMA,
+      kind: "import",
+      source: "sbi-vc-trade",
+      terminalKey: MANIFEST,
+      step: 1,
+      progress: 8,
+      resume: "r".repeat(16_001),
+    };
+    for (const body of [
+      repair,
+      transfer,
+      { ...transfer, terminalKey: "k".repeat(501) },
+      { ...transfer, extra: "x".repeat(128_000) },
+    ]) {
+      await expect(processReconcilerMessage(body, dependencies)).rejects.toThrow(
+        "reconciler_message_invalid",
+      );
+    }
+  });
+
+  test("a full repair page stays within Queue count and serialized byte limits", async () => {
+    for (const { source, key } of TERMINALS) {
+      const sent: InternalMessage[][] = [];
+      await processReconcilerMessage(
+        { schemaVersion: RECONCILER_SCHEMA, kind: "repair", source, cursor: null, page: 0 },
+        fakeDependencies({
+          sent,
+          listed: {
+            keys: Array.from({ length: 50 }, () => key),
+            truncated: true,
+            cursor: "c".repeat(12_000),
+          },
+        }),
+      );
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toHaveLength(51);
+      expect(sent[0]!.length).toBeLessThanOrEqual(100);
+      const sizes = sent[0]!.map(
+        (body) => new TextEncoder().encode(JSON.stringify(body)).byteLength + 100,
+      );
+      expect(Math.max(...sizes)).toBeLessThan(128_000);
+      expect(sizes.reduce((sum, size) => sum + size, 0)).toBeLessThan(256_000);
+      for (const body of sent[0]!) expect(() => parseMessage(body, ACCOUNT)).not.toThrow();
+    }
+  });
+
   test("accepts only an exact R2 object-create notification for an allowlisted terminal", () => {
     const notification = r2Notification("kogane-sbi-vc-trade-poc", MANIFEST);
     expect(parseMessage(notification, ACCOUNT)).toEqual({
