@@ -4,6 +4,14 @@ import { getPlatformProxy } from "wrangler";
 import { parse } from "parse5";
 import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry.ts";
 import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types.ts";
+function isChallengeScript(value: string): boolean {
+  try {
+    const url = new URL(value, "https://diagnostic.invalid");
+    return url.protocol === "https:" && url.hostname === "challenges.cloudflare.com";
+  } catch {
+    return false;
+  }
+}
 type Node = {
   nodeName: string;
   value?: string;
@@ -57,8 +65,7 @@ try {
     ).length;
     const turnstile = nodes.some(
       (n) =>
-        attr(n, "class").split(/\s+/).includes("cf-turnstile") ||
-        attr(n, "src").includes("challenges.cloudflare.com"),
+        attr(n, "class").split(/\s+/).includes("cf-turnstile") || isChallengeScript(attr(n, "src")),
     );
     const errorMarkers = nodes.filter(
       (n) =>
