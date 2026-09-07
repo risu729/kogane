@@ -63,6 +63,7 @@ jobs:
           - poc/vpoint-pay-worker
           - poc/vpoint-worker
           - services/collector-r2-importer
+          - services/evidence-browser
           - services/raw-evidence
     steps:
       - name: Checkout

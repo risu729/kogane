@@ -10,6 +10,7 @@
     "preview": "bun run build && bun run src/serve.ts --demo",
     "dev": "vite",
     "build": "vite build",
+    "build:evidence": "vite build --mode evidence --outDir dist-evidence",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

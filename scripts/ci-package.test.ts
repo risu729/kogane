@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { CI_PACKAGES, coveredManifests, STANDALONE_TESTS } from "./ci-packages.ts";
 import {
   packagePlan,
@@ -131,10 +132,44 @@ describe("offline CI coverage", () => {
     );
     expect(plan).toContain("node node_modules/playwright/cli.js install --with-deps chromium");
     expect(plan.indexOf("bun run build")).toBeLessThan(plan.indexOf("bun run test"));
+    expect(plan.indexOf("bun run build:evidence")).toBeLessThan(plan.indexOf("bun run test"));
     const local = packagePlan("poc/observation-pipeline", { ...options, ci: false }).map((step) =>
       step.command.join(" "),
     );
     expect(local.some((command) => command.includes("playwright install"))).toBe(false);
+  });
+  test("reader CI builds reviewed frozen frontend assets before Worker checks", () => {
+    const plan = packagePlan("services/evidence-browser", options);
+    const assetBuild = plan.findIndex(
+      (step) => step.command.join(" ") === "bun run build:evidence",
+    );
+    expect(assetBuild).toBeGreaterThan(0);
+    expect(plan[assetBuild]!.cwd).toBe(join(REPO_ROOT, "poc/observation-pipeline"));
+    expect(plan[assetBuild - 1]!.command).toEqual(["bun", "install", "--frozen-lockfile"]);
+    expect(assetBuild).toBeLessThan(
+      plan.findIndex((step) => step.command.join(" ") === "bun run cf:check"),
+    );
+
+    const root = mkdtempSync(join(tmpdir(), "kogane-ci-assets-"));
+    try {
+      for (const path of ["services/evidence-browser", "poc/observation-pipeline"]) {
+        mkdirSync(join(root, path), { recursive: true });
+        writeFileSync(
+          join(root, path, "package.json"),
+          readFileSync(join(REPO_ROOT, path, "package.json")),
+        );
+        writeFileSync(join(root, path, "bun.lock"), "unused frozen-lock presence fixture");
+      }
+      const manifestPath = join(root, "poc/observation-pipeline/package.json");
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      manifest.scripts["build:evidence"] = "bun run live-collector";
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      expect(() => packagePlan("services/evidence-browser", { ...options, root })).toThrow(
+        "review the offline allowlist",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
   test("direct tool invocations cannot resolve same-named package scripts or lifecycle hooks", () => {
     for (const [name, tool, executable] of [

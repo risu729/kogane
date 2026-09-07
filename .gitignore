@@ -1,6 +1,7 @@
 **/node_modules/
 **/.wrangler/
 **/dist/
+**/dist-evidence/
 **/__pycache__/
 **/.ruff_cache/
 hk.local.pkl

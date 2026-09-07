@@ -74,6 +74,22 @@ export function packagePlan(name: string, options: PlanOptions): Step[] {
   if (!existsSync(join(cwd, "bun.lock")))
     throw new Error(`Missing frozen Bun lockfile for ${policy.path}`);
   const steps: Step[] = [{ cwd, command: ["bun", "install", "--frozen-lockfile"] }];
+  if (policy.evidenceAssets) {
+    // The separately deployed reader serves the same reviewed frontend build.
+    // Validate the asset producer before running any plan step, too.
+    const frontendPolicy = selectPolicy("poc/observation-pipeline");
+    const frontend = join(options.root, frontendPolicy.path);
+    validateScripts(
+      frontendPolicy,
+      JSON.parse(readFileSync(join(frontend, "package.json"), "utf8")),
+    );
+    if (!existsSync(join(frontend, "bun.lock")))
+      throw new Error("Missing frozen Bun lockfile for evidence assets");
+    steps.push(
+      { cwd: frontend, command: ["bun", "install", "--frozen-lockfile"] },
+      { cwd: frontend, command: ["bun", "run", "build:evidence"] },
+    );
+  }
   if (policy.container) {
     const container = join(options.root, policy.container);
     if (!existsSync(join(container, "package-lock.json")))
