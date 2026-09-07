@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { centralDescriptorSha256 } from "../src/central";
 import { importVpassRun, validateVpassRun } from "../src/vpass";
 import { backfillVpass } from "../src/worker";
 
@@ -134,7 +135,7 @@ class FakeCentral {
     if (/\/inventories$/u.test(path)) return Response.json({ inventoryId: 20 }, { status: 201 });
     if (/\/artifacts$/u.test(path)) {
       return Response.json(
-        { descriptorSha256: await descriptorSha256(JSON.parse(body)) },
+        { descriptorSha256: await centralDescriptorSha256(JSON.parse(body)) },
         { status: 201 },
       );
     }
@@ -155,8 +156,14 @@ describe("Vpass R2 importer", () => {
   test("validates, sanitizes, stages, seals, and replays across importer revisions", async () => {
     const bucket = cardSnapshotBucket();
     const central = new FakeCentral();
+    central.runIds.set(`vpass-worker-card-v1:${RUN_ID}:card-001-vpass-r2-v1`, 900);
     const first = await completeImport(bucket, central, CARD_RECORD, "collector-r2-importer-v12");
-    expect(first).toMatchObject({ status: "sealed", sealed: true, artifactCount: 6 });
+    expect(first).toMatchObject({
+      status: "sealed",
+      centralRunId: 1,
+      sealed: true,
+      artifactCount: 6,
+    });
     const centralText = [
       ...central.requests.map((request) => request.body),
       ...[...central.uploaded.values()].map((bytes) => new TextDecoder().decode(bytes)),
@@ -168,14 +175,64 @@ describe("Vpass R2 importer", () => {
     expect(centralText).toContain("<redacted-vpass-sensitive>");
     const runReport = central.requests.find((request) => /\/runs\/1\/reports$/u.test(request.path));
     expect(JSON.parse(runReport!.body)).toMatchObject({
-      producerVersion: "vpass-r2-v1",
+      producerVersion: "vpass-r2-v2",
       producerStatus: "success",
       normalizedOutcome: "success",
     });
+    const createRun = central.requests.find((request) => request.path === "/v1/runs");
+    expect(JSON.parse(createRun!.body)).toMatchObject({ sourceRunKey: "card-001-vpass-r2-v2" });
+    const descriptors = central.requests
+      .filter((request) => /\/artifacts$/u.test(request.path))
+      .map((request) => JSON.parse(request.body) as Record<string, unknown>);
+    expect(
+      descriptors.map(({ dataset, artifactRole, payloadFidelity, lineageDisposition }) => ({
+        dataset,
+        artifactRole,
+        payloadFidelity,
+        lineageDisposition,
+      })),
+    ).toEqual([
+      {
+        dataset: "card-list",
+        artifactRole: "sanitized_provider_capture",
+        payloadFidelity: "transformed",
+        lineageDisposition: "source_not_retained_for_security",
+      },
+      {
+        dataset: "card-selection",
+        artifactRole: "sanitized_provider_capture",
+        payloadFidelity: "transformed",
+        lineageDisposition: "source_not_retained_for_security",
+      },
+      {
+        dataset: "month-discovery",
+        artifactRole: "sanitized_provider_capture",
+        payloadFidelity: "transformed",
+        lineageDisposition: "source_not_retained_for_security",
+      },
+      {
+        dataset: "statement-page",
+        artifactRole: "provider_response",
+        payloadFidelity: "transformed",
+        lineageDisposition: "source_bytes_not_available",
+      },
+      {
+        dataset: "statement-page",
+        artifactRole: "provider_response",
+        payloadFidelity: "transformed",
+        lineageDisposition: "source_bytes_not_available",
+      },
+      {
+        dataset: "collector-manifest",
+        artifactRole: "collector_manifest",
+        payloadFidelity: "generated",
+        lineageDisposition: "source_bytes_not_available",
+      },
+    ]);
 
     const replay = await completeImport(bucket, central, CARD_RECORD, "collector-r2-importer-v99");
     expect(replay).toMatchObject({ status: "sealed", centralRunId: 1, sealed: true });
-    expect(central.runIds.size).toBe(1);
+    expect(central.runIds.size).toBe(2);
   });
 
   test("imports a strict legacy discrete page inventory", async () => {
@@ -221,10 +278,17 @@ describe("Vpass R2 importer", () => {
     expect(result).toMatchObject({ status: "sealed", artifactCount: 1 });
     const runReport = central.requests.find((request) => /\/runs\/1\/reports$/u.test(request.path));
     expect(JSON.parse(runReport!.body)).toMatchObject({
-      producerVersion: "vpass-r2-v1",
+      producerVersion: "vpass-r2-v2",
       producerStatus: "failed",
       normalizedOutcome: "failed",
       safeFailureCode: "collector-failed",
+    });
+    const descriptor = central.requests.find((request) => /\/artifacts$/u.test(request.path));
+    expect(JSON.parse(descriptor!.body)).toMatchObject({
+      dataset: "collector-error",
+      artifactRole: "collector_error",
+      payloadFidelity: "generated",
+      lineageDisposition: "source_bytes_not_available",
     });
   });
 
@@ -308,6 +372,13 @@ describe("Vpass R2 importer", () => {
     const first = await importVpassRun(importOptions(bucket, central, CARD_RECORD));
     expect(first.status).toBe("deferred");
     if (first.status !== "deferred") throw new Error("expected deferred");
+    expect(first.continuation.startsWith("vpass-transfer-v2.")).toBe(true);
+    await expect(
+      importVpassRun({
+        ...importOptions(bucket, central, CARD_RECORD),
+        continuation: first.continuation.replace("vpass-transfer-v2.", "vpass-transfer-v1."),
+      }),
+    ).rejects.toThrow("transfer_token_invalid");
     const tampered = `${first.continuation.slice(0, -1)}${first.continuation.endsWith("a") ? "b" : "a"}`;
     await expect(
       importVpassRun({
@@ -321,10 +392,14 @@ describe("Vpass R2 importer", () => {
     const bucket = cardSnapshotBucket();
     const central = new FakeCentral();
     const env = vpassEnv(bucket, central);
+    await expect(backfillVpass(env, "vpass-scan-v1.fixture.signature")).rejects.toThrow(
+      "cursor_invalid",
+    );
     const first = await backfillVpass(env, undefined);
     expect(first).toMatchObject({ deferredRecordCount: 1, importedRecordCount: 0 });
     expect(bucket.listCursors.every((value) => value === undefined)).toBe(true);
     let cursor = first.nextCursor as string;
+    expect(cursor.startsWith("vpass-scan-v2.")).toBe(true);
     let terminal: Record<string, unknown> | undefined;
     for (let step = 0; step < 10; step += 1) {
       const page = await backfillVpass(env, cursor);
@@ -475,32 +550,4 @@ async function completeImport(
     continuation = result.continuation;
   }
   throw new Error("import did not seal");
-}
-
-async function descriptorSha256(value: Record<string, unknown>): Promise<string> {
-  const { http, storage, file, email, ...fields } = value;
-  const normalized = {
-    ...fields,
-    origins: {
-      http: http ?? null,
-      storage: storage ?? null,
-      file: file ?? null,
-      email: email ?? null,
-    },
-  };
-  const bytes = new TextEncoder().encode(JSON.stringify(canonical(normalized)));
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-        .map(([key, child]) => [key, canonical(child)]),
-    );
-  }
-  return value;
 }

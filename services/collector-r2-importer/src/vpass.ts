@@ -1,10 +1,10 @@
-import { CentralClient } from "./central";
+import { CentralClient, centralDescriptorSha256 } from "./central";
 import { ImportError } from "./error";
 import type { CentralInventoryItem } from "./types";
 
 const SOURCE = "vpass" as const;
 const PRODUCER = "collector-r2-importer";
-const INGEST_CONTRACT_VERSION = "vpass-r2-v1";
+const INGEST_CONTRACT_VERSION = "vpass-r2-v2";
 const CENTRAL_CLIENT_ID = "collector-r2-vpass";
 const STORAGE_CONTAINER = "kogane-vpass-collector-poc";
 const STORAGE_TEMPLATE = "vpass/{date}/{run-id}/{artifact}";
@@ -15,7 +15,7 @@ const MAX_SOURCE_OBJECT_BYTES = 8 * 1024 * 1024;
 const MAX_ARTIFACTS = 512;
 const MAX_PREFIX_OBJECTS = MAX_ARTIFACTS + 1;
 export const VPASS_TRANSFER_CHUNK_SIZE = 5;
-const TRANSFER_TOKEN_PREFIX = "vpass-transfer-v1";
+const TRANSFER_TOKEN_PREFIX = "vpass-transfer-v2";
 const SHA256 = /^[0-9a-f]{64}$/u;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const MONTH = /^\d{6}$/u;
@@ -68,7 +68,7 @@ interface PageGroupReference {
 }
 
 interface TransferState {
-  v: 1;
+  v: 2;
   recordKey: string;
   centralRunId: number;
   unitId: number;
@@ -179,7 +179,7 @@ export async function importVpassRun(options: {
         new TextEncoder().encode(canonicalJson(inventory as unknown as JsonValue)),
       );
       state = {
-        v: 1,
+        v: 2,
         recordKey: options.recordKey,
         centralRunId,
         unitId,
@@ -1386,16 +1386,10 @@ async function artifactPlans(
         ? null
         : pageGroups.find((entry) => entry.key === artifact.pageGroupKey)?.id;
     if (pageGroupId === undefined) throw new ImportError(400, "transfer_page_group_mismatch");
+    const semantics = descriptorSemantics(artifact.dataset);
     const descriptor = normalizedDescriptor({
       artifactKey: artifact.artifactKey,
-      artifactRole:
-        artifact.dataset === "collector-manifest"
-          ? "collector_derived"
-          : artifact.dataset === "collector-error"
-            ? "collector_report"
-            : artifact.dataset === "statement-page"
-              ? "provider_response"
-              : "collector_context",
+      ...semantics,
       dataset: artifact.dataset,
       formatId: `vpass-${artifact.dataset}-json`,
       fetchedAtMs: Date.parse(validated.record.completedAt),
@@ -1413,7 +1407,7 @@ async function artifactPlans(
       inventory: {
         artifactKey: artifact.artifactKey,
         sha256: artifact.sha256,
-        descriptorSha256: await descriptorSha256(descriptor),
+        descriptorSha256: await centralDescriptorSha256(descriptor),
       },
     });
   }
@@ -1423,6 +1417,8 @@ async function artifactPlans(
 function normalizedDescriptor(input: {
   artifactKey: string;
   artifactRole: string;
+  payloadFidelity: "generated" | "transformed";
+  lineageDisposition: "source_bytes_not_available" | "source_not_retained_for_security";
   dataset: string;
   formatId: string;
   fetchedAtMs: number;
@@ -1437,9 +1433,9 @@ function normalizedDescriptor(input: {
   return {
     artifactKey: input.artifactKey,
     artifactRole: input.artifactRole,
-    payloadFidelity: "transformed",
+    payloadFidelity: input.payloadFidelity,
     containerKind: "single",
-    lineageDisposition: "source_not_retained_for_security",
+    lineageDisposition: input.lineageDisposition,
     dataset: input.dataset,
     formatId: input.formatId,
     formatVersion: "vpass-central-sanitized-v1",
@@ -1458,22 +1454,75 @@ function normalizedDescriptor(input: {
     file: null,
     email: null,
     ranges: [],
-    transformSteps: [
-      {
-        stepIndex: 0,
-        stepKind: "redacted",
-        transformerId: "vpass-json-sanitizer",
-        transformerVersion: "v1",
-      },
-      {
-        stepIndex: 1,
-        stepKind: "reencoded",
-        transformerId: "vpass-json-sanitizer",
-        transformerVersion: "v1",
-      },
-    ],
+    transformSteps:
+      input.payloadFidelity === "generated"
+        ? []
+        : input.artifactRole === "provider_response"
+          ? [
+              {
+                stepIndex: 0,
+                stepKind: "extracted",
+                transformerId: "vpass-json-sanitizer",
+                transformerVersion: "v1",
+              },
+            ]
+          : [
+              {
+                stepIndex: 0,
+                stepKind: "redacted",
+                transformerId: "vpass-json-sanitizer",
+                transformerVersion: "v1",
+              },
+              {
+                stepIndex: 1,
+                stepKind: "reencoded",
+                transformerId: "vpass-json-sanitizer",
+                transformerVersion: "v1",
+              },
+            ],
     relations: [],
   };
+}
+
+function descriptorSemantics(dataset: string): {
+  artifactRole:
+    | "collector_manifest"
+    | "collector_error"
+    | "provider_response"
+    | "sanitized_provider_capture";
+  payloadFidelity: "generated" | "transformed";
+  lineageDisposition: "source_bytes_not_available" | "source_not_retained_for_security";
+} {
+  switch (dataset) {
+    case "collector-manifest":
+      return {
+        artifactRole: "collector_manifest",
+        payloadFidelity: "generated",
+        lineageDisposition: "source_bytes_not_available",
+      };
+    case "collector-error":
+      return {
+        artifactRole: "collector_error",
+        payloadFidelity: "generated",
+        lineageDisposition: "source_bytes_not_available",
+      };
+    case "statement-page":
+      return {
+        artifactRole: "provider_response",
+        payloadFidelity: "transformed",
+        lineageDisposition: "source_bytes_not_available",
+      };
+    case "card-list":
+    case "card-selection":
+    case "month-discovery":
+      return {
+        artifactRole: "sanitized_provider_capture",
+        payloadFidelity: "transformed",
+        lineageDisposition: "source_not_retained_for_security",
+      };
+    default:
+      throw new ImportError(409, "source_artifact_dataset_unknown");
+  }
 }
 
 async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonObject> {
@@ -1545,7 +1594,7 @@ async function decodeTransferState(token: string, keyHex: string): Promise<Trans
     "transfer_token_invalid",
   );
   if (
-    input.v !== 1 ||
+    input.v !== 2 ||
     typeof input.recordKey !== "string" ||
     !RECORD_KEY.test(input.recordKey) ||
     !positiveInteger(input.centralRunId) ||
@@ -1578,7 +1627,7 @@ async function decodeTransferState(token: string, keyHex: string): Promise<Trans
     throw new ImportError(400, "transfer_token_invalid");
   }
   return {
-    v: 1,
+    v: 2,
     recordKey: input.recordKey,
     centralRunId: input.centralRunId as number,
     unitId: input.unitId as number,
@@ -1636,20 +1685,6 @@ function sortedInventory(plans: ArtifactPlan[]): CentralInventoryItem[] {
   return plans
     .map((plan) => plan.inventory)
     .sort((left, right) => binaryCompare(left.artifactKey, right.artifactKey));
-}
-
-function descriptorSha256(descriptor: JsonObject): Promise<string> {
-  const { http, storage, file, email, ...fields } = descriptor;
-  const normalized = {
-    ...fields,
-    origins: {
-      http: http ?? null,
-      storage: storage ?? null,
-      file: file ?? null,
-      email: email ?? null,
-    },
-  };
-  return sha256Hex(new TextEncoder().encode(canonicalJson(normalized as JsonValue)));
 }
 
 function parseJsonBytes(bytes: Uint8Array, code: string): JsonObject {

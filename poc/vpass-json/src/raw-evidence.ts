@@ -55,7 +55,7 @@ export async function importStoredRecord(
     !safeRecordKey(recordKey) ||
     !(
       continuation === undefined ||
-      (safeOpaque(continuation, 16_000) && continuation.startsWith("vpass-transfer-v1."))
+      (safeOpaque(continuation, 16_000) && continuation.startsWith("vpass-transfer-v2."))
     )
   ) {
     throw new Error("raw_evidence_import_job_invalid");
@@ -76,6 +76,11 @@ export async function backfillStoredRuns(
   importer: Fetcher,
   cursor?: string,
 ): Promise<RawEvidenceBackfillPageResult> {
+  if (
+    !(cursor === undefined || (safeOpaque(cursor, 24_000) && cursor.startsWith("vpass-scan-v2.")))
+  ) {
+    throw new Error("raw_evidence_import_job_invalid");
+  }
   const response = await importer.fetch(
     new Request("https://kogane-collector-r2-importer.internal/v1/vpass/backfill-page", {
       method: "POST",
@@ -112,7 +117,10 @@ function validateBackfillResult(value: unknown): RawEvidenceBackfillPageResult {
     !boundedInteger(input.skippedRecordCount, 1) ||
     !boundedInteger(input.deferredRecordCount, 1) ||
     !boundedInteger(input.failedRecordCount, 1) ||
-    !(input.nextCursor === null || safeOpaque(input.nextCursor, 24_000)) ||
+    !(
+      input.nextCursor === null ||
+      (safeOpaque(input.nextCursor, 24_000) && input.nextCursor.startsWith("vpass-scan-v2."))
+    ) ||
     typeof input.truncated !== "boolean" ||
     !(input.failureCode === undefined || safeCode(input.failureCode))
   )
@@ -195,7 +203,7 @@ function validateImportResult(value: unknown): RawEvidenceImportResult {
     input.reason !== "worker_invocation_limit" ||
     !boundedPositiveInteger(input.nextOffset, input.artifactCount as number) ||
     !safeOpaque(input.continuation, 16_000) ||
-    !input.continuation.startsWith("vpass-transfer-v1.")
+    !input.continuation.startsWith("vpass-transfer-v2.")
   ) {
     throw new Error("raw_evidence_importer_invalid_response");
   }
@@ -210,7 +218,7 @@ function validateImportJob(value: unknown): VpassImportJob {
     !(
       input.continuation === undefined ||
       (safeOpaque(input.continuation, 16_000) &&
-        input.continuation.startsWith("vpass-transfer-v1."))
+        input.continuation.startsWith("vpass-transfer-v2."))
     )
   )
     throw new Error("raw_evidence_import_job_invalid");
