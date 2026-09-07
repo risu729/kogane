@@ -2,24 +2,24 @@ import { chmodSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const ACCOUNT_ID = "59ea63cc00914b30ca410b062ae2bb7f";
-const QUEUE_NAME = "kogane-r2-outbox-reconciler";
-const STATE_SCHEMA = "kogane-r2-notification-state-v1";
-const CONFIRMATION = "I_UNDERSTAND_THIS_CHANGES_CLOUDFLARE";
+export const ACCOUNT_ID = "59ea63cc00914b30ca410b062ae2bb7f";
+export const QUEUE_NAME = "kogane-r2-outbox-reconciler";
+export const STATE_SCHEMA = "kogane-r2-notification-state-v1";
+export const CONFIRMATION = "I_UNDERSTAND_THIS_CHANGES_CLOUDFLARE";
 const STATE_PATH = resolve(import.meta.dirname, ".r2-reconciler-notifications.state.json");
 const WRANGLER_BIN = resolve(import.meta.dirname, "../node_modules/wrangler/bin/wrangler.js");
 const CREATE_ACTIONS = ["CompleteMultipartUpload", "CopyObject", "PutObject"] as const;
 
-type ExpectedRule = {
+export type ExpectedRule = {
   bucket: string;
   prefix: string;
   suffix: string;
   description: string;
 };
 
-type StoredRule = ExpectedRule & { ruleId: string };
+export type StoredRule = ExpectedRule & { ruleId: string };
 
-type State = {
+export type State = {
   schema: typeof STATE_SCHEMA;
   accountId: typeof ACCOUNT_ID;
   queueName: typeof QUEUE_NAME;
@@ -38,6 +38,16 @@ type ApiQueue = {
   queueId: string;
   queueName: string;
   rules: ApiRule[];
+};
+
+export type NotificationRuntime = {
+  runWrangler(args: string[], capture?: boolean): string;
+  fetch(url: string, init: RequestInit): Promise<Response>;
+  stateExists(): boolean;
+  readState(): string;
+  writeState(state: State): void;
+  removeState(): void;
+  log(message: string): void;
 };
 
 const RULE_INPUTS = [
@@ -71,7 +81,7 @@ const RULE_INPUTS = [
   ["kogane-smbc-direct-backfill-poc", "raw/smbc-direct/", "manifest.json", "smbc-direct-manifest"],
 ] as const;
 
-const RULES: readonly ExpectedRule[] = RULE_INPUTS.map(([bucket, prefix, suffix, name]) => ({
+export const RULES: readonly ExpectedRule[] = RULE_INPUTS.map(([bucket, prefix, suffix, name]) => ({
   bucket,
   prefix,
   suffix,
@@ -82,7 +92,7 @@ function fail(message: string): never {
   throw new Error(message);
 }
 
-function runWrangler(args: string[], capture = false): string {
+function runProductionWrangler(args: string[], capture = false): string {
   const result = spawnSync(process.execPath, [WRANGLER_BIN, ...args], {
     cwd: resolve(import.meta.dirname, ".."),
     encoding: "utf8",
@@ -94,10 +104,10 @@ function runWrangler(args: string[], capture = false): string {
   return result.stdout ?? "";
 }
 
-function authHeaders(): Record<string, string> {
+function authHeaders(runtime: NotificationRuntime): Record<string, string> {
   let input: unknown;
   try {
-    input = JSON.parse(runWrangler(["auth", "token", "--json"], true));
+    input = JSON.parse(runtime.runWrangler(["auth", "token", "--json"], true));
   } catch {
     fail("could not parse Wrangler authentication output");
   }
@@ -165,11 +175,15 @@ function parseApiQueue(input: unknown): ApiQueue {
   };
 }
 
-async function listRules(bucket: string, headers: Record<string, string>): Promise<ApiQueue[]> {
+async function listRules(
+  bucket: string,
+  headers: Record<string, string>,
+  runtime: NotificationRuntime,
+): Promise<ApiQueue[]> {
   const url =
     `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/event_notifications/r2/` +
     `${encodeURIComponent(bucket)}/configuration`;
-  const response = await fetch(url, { headers });
+  const response = await runtime.fetch(url, { headers });
   let envelope: unknown;
   try {
     envelope = await response.json();
@@ -258,10 +272,10 @@ function assertKnownStoredRule(input: unknown): StoredRule {
   return { ...expected, ruleId: value.ruleId };
 }
 
-function readState(): State {
+function readState(runtime: NotificationRuntime): State {
   let input: unknown;
   try {
-    input = JSON.parse(readFileSync(STATE_PATH, "utf8"));
+    input = JSON.parse(runtime.readState());
   } catch {
     fail("notification state is missing or invalid");
   }
@@ -286,11 +300,11 @@ function emptyState(): State {
   return { schema: STATE_SCHEMA, accountId: ACCOUNT_ID, queueName: QUEUE_NAME, rules: [] };
 }
 
-function writeState(state: State): void {
-  const temporary = `${STATE_PATH}.tmp`;
+export function writeStateFile(path: string, state: State): void {
+  const temporary = `${path}.tmp`;
   writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
   chmodSync(temporary, 0o600);
-  renameSync(temporary, STATE_PATH);
+  renameSync(temporary, path);
 }
 
 function requireConfirmation(value: string | undefined): void {
@@ -302,29 +316,30 @@ function requireConfirmation(value: string | undefined): void {
 async function verifyStoredRule(
   stored: StoredRule,
   headers: Record<string, string>,
+  runtime: NotificationRuntime,
 ): Promise<void> {
-  const queues = await listRules(stored.bucket, headers);
+  const queues = await listRules(stored.bucket, headers, runtime);
   const matches = exactMatches(queues, stored);
   if (matches.length !== 1 || matches[0]?.ruleId !== stored.ruleId) {
     fail("live notification rule does not exactly match local state");
   }
 }
 
-async function apply(): Promise<void> {
-  const headers = authHeaders();
-  const state = existsSync(STATE_PATH) ? readState() : emptyState();
+async function apply(runtime: NotificationRuntime): Promise<void> {
+  const headers = authHeaders(runtime);
+  const state = runtime.stateExists() ? readState(runtime) : emptyState();
 
-  for (const stored of state.rules) await verifyStoredRule(stored, headers);
+  for (const stored of state.rules) await verifyStoredRule(stored, headers, runtime);
   for (const expected of RULES) {
     if (state.rules.some((rule) => rule.description === expected.description)) continue;
-    const before = await listRules(expected.bucket, headers);
+    const before = await listRules(expected.bucket, headers, runtime);
     if (hasCollision(before, expected)) fail("unmanaged or ambiguous notification rule collision");
   }
-  writeState(state);
+  runtime.writeState(state);
 
   for (const expected of RULES) {
     if (state.rules.some((rule) => rule.description === expected.description)) continue;
-    runWrangler([
+    runtime.runWrangler([
       "r2",
       "bucket",
       "notification",
@@ -341,39 +356,39 @@ async function apply(): Promise<void> {
       "--description",
       expected.description,
     ]);
-    const matches = exactMatches(await listRules(expected.bucket, headers), expected);
+    const matches = exactMatches(await listRules(expected.bucket, headers, runtime), expected);
     if (matches.length !== 1) fail("created notification rule could not be uniquely verified");
     state.rules.push(matches[0]!);
-    writeState(state);
+    runtime.writeState(state);
   }
-  console.log(`queue=${QUEUE_NAME} rules-created-or-verified=${state.rules.length}`);
+  runtime.log(`queue=${QUEUE_NAME} rules-created-or-verified=${state.rules.length}`);
 }
 
-async function capture(): Promise<void> {
-  if (existsSync(STATE_PATH)) fail("notification state already exists");
-  const headers = authHeaders();
+async function capture(runtime: NotificationRuntime): Promise<void> {
+  if (runtime.stateExists()) fail("notification state already exists");
+  const headers = authHeaders(runtime);
   const state = emptyState();
   for (const expected of RULES) {
-    const matches = exactMatches(await listRules(expected.bucket, headers), expected);
+    const matches = exactMatches(await listRules(expected.bucket, headers, runtime), expected);
     if (matches.length > 1) fail("ambiguous live notification rules");
     if (matches[0]) state.rules.push(matches[0]);
   }
   if (state.rules.length === 0) fail("no managed notification rules found");
-  writeState(state);
-  console.log(`queue=${QUEUE_NAME} rules-captured=${state.rules.length}`);
+  runtime.writeState(state);
+  runtime.log(`queue=${QUEUE_NAME} rules-captured=${state.rules.length}`);
 }
 
-async function remove(): Promise<void> {
-  const headers = authHeaders();
-  const state = readState();
+async function remove(runtime: NotificationRuntime): Promise<void> {
+  const headers = authHeaders(runtime);
+  const state = readState(runtime);
   if (state.rules.length === 0) fail("notification state contains no rules");
 
   // Complete preflight before the first destructive call.
-  for (const stored of state.rules) await verifyStoredRule(stored, headers);
+  for (const stored of state.rules) await verifyStoredRule(stored, headers, runtime);
 
   while (state.rules.length > 0) {
     const stored = state.rules[0]!;
-    runWrangler([
+    runtime.runWrangler([
       "r2",
       "bucket",
       "notification",
@@ -384,41 +399,56 @@ async function remove(): Promise<void> {
       "--rule",
       stored.ruleId,
     ]);
-    const stillPresent = (await listRules(stored.bucket, headers)).some((queue) =>
+    const stillPresent = (await listRules(stored.bucket, headers, runtime)).some((queue) =>
       queue.rules.some((rule) => rule.ruleId === stored.ruleId),
     );
     if (stillPresent) fail("deleted notification rule is still present");
     state.rules.shift();
-    writeState(state);
+    runtime.writeState(state);
   }
-  rmSync(STATE_PATH);
-  console.log(`queue=${QUEUE_NAME} rules-removed=${RULES.length}`);
+  runtime.removeState();
+  runtime.log(`queue=${QUEUE_NAME} rules-removed=${RULES.length}`);
 }
 
-async function main(): Promise<void> {
-  const mode = process.argv[2] ?? "plan";
+export async function runNotificationCommand(
+  args: readonly string[],
+  runtime: NotificationRuntime,
+): Promise<void> {
+  const mode = args[0] ?? "plan";
   if (mode === "plan") {
-    console.log(`queue=${QUEUE_NAME} rules=${RULES.length} mode=read-only-plan`);
+    runtime.log(`queue=${QUEUE_NAME} rules=${RULES.length} mode=read-only-plan`);
     for (const rule of RULES) {
-      console.log(
+      runtime.log(
         `bucket=${rule.bucket} prefix=${rule.prefix} suffix=${rule.suffix} description=${rule.description}`,
       );
     }
     return;
   }
-  if (mode === "capture") return capture();
+  if (mode === "capture") return capture(runtime);
   if (mode === "apply") {
-    requireConfirmation(process.argv[3]);
-    return apply();
+    requireConfirmation(args[1]);
+    return apply(runtime);
   }
   if (mode === "remove") {
-    requireConfirmation(process.argv[3]);
-    return remove();
+    requireConfirmation(args[1]);
+    return remove(runtime);
   }
-  fail(`usage: ${process.argv[1]} plan|capture|apply|remove [${CONFIRMATION}]`);
+  fail(`usage: r2-reconciler-notifications.ts plan|capture|apply|remove [${CONFIRMATION}]`);
 }
 
-main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : "notification helper failed");
-  process.exitCode = 1;
-});
+const productionRuntime: NotificationRuntime = {
+  runWrangler: runProductionWrangler,
+  fetch: (url, init) => fetch(url, init),
+  stateExists: () => existsSync(STATE_PATH),
+  readState: () => readFileSync(STATE_PATH, "utf8"),
+  writeState: (state) => writeStateFile(STATE_PATH, state),
+  removeState: () => rmSync(STATE_PATH),
+  log: (message) => console.log(message),
+};
+
+if (import.meta.main) {
+  runNotificationCommand(process.argv.slice(2), productionRuntime).catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : "notification helper failed");
+    process.exitCode = 1;
+  });
+}
