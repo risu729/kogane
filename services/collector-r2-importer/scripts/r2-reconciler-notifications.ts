@@ -1,5 +1,18 @@
-import { chmodSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fchmodSync,
+  fstatSync,
+  fsyncSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 export const ACCOUNT_ID = "59ea63cc00914b30ca410b062ae2bb7f";
@@ -301,10 +314,52 @@ function emptyState(): State {
 }
 
 export function writeStateFile(path: string, state: State): void {
-  const temporary = `${path}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
-  chmodSync(temporary, 0o600);
-  renameSync(temporary, path);
+  const temporaryDirectory = mkdtempSync(join(dirname(path), ".r2-reconciler-state-"));
+  const temporary = join(temporaryDirectory, "state.json");
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(
+      temporary,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+      0o600,
+    );
+    writeFileSync(descriptor, `${JSON.stringify(state, null, 2)}\n`);
+    fchmodSync(descriptor, 0o600);
+    const metadata = fstatSync(descriptor);
+    if (
+      !metadata.isFile() ||
+      metadata.nlink !== 1 ||
+      metadata.uid !== process.getuid?.() ||
+      (metadata.mode & 0o777) !== 0o600
+    ) {
+      fail("notification state temporary file invariant failed");
+    }
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+    renameSync(temporary, path);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+    rmSync(temporaryDirectory, { force: true, recursive: true });
+  }
+}
+
+export function readStateFile(path: string): string {
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = fstatSync(descriptor);
+    if (
+      !metadata.isFile() ||
+      metadata.nlink !== 1 ||
+      metadata.uid !== process.getuid?.() ||
+      (metadata.mode & 0o777) !== 0o600
+    ) {
+      fail("notification state file invariant failed");
+    }
+    return readFileSync(descriptor, "utf8");
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function requireConfirmation(value: string | undefined): void {
@@ -440,7 +495,7 @@ const productionRuntime: NotificationRuntime = {
   runWrangler: runProductionWrangler,
   fetch: (url, init) => fetch(url, init),
   stateExists: () => existsSync(STATE_PATH),
-  readState: () => readFileSync(STATE_PATH, "utf8"),
+  readState: () => readStateFile(STATE_PATH),
   writeState: (state) => writeStateFile(STATE_PATH, state),
   removeState: () => rmSync(STATE_PATH),
   log: (message) => console.log(message),

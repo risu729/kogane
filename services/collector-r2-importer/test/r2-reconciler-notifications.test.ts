@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,6 +18,7 @@ import {
   QUEUE_NAME,
   RULES,
   STATE_SCHEMA,
+  readStateFile,
   runNotificationCommand,
   writeStateFile,
   type ExpectedRule,
@@ -286,7 +297,32 @@ describe("R2 reconciler notification lifecycle helper", () => {
     const path = join(directory, "state.json");
     const value = state([stored(RULES[0]!)]);
     writeStateFile(path, value);
-    expect(statSync(path).mode & 0o777).toBe(0o600);
-    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(value);
+    const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const metadata = fstatSync(descriptor);
+      expect(metadata.isFile()).toBeTrue();
+      if (!process.getuid) throw new Error("POSIX uid is required for this WSL helper test");
+      expect(metadata.uid).toBe(process.getuid());
+      expect(metadata.mode & 0o777).toBe(0o600);
+      expect(JSON.parse(readFileSync(descriptor, "utf8"))).toEqual(value);
+    } finally {
+      closeSync(descriptor);
+    }
+  });
+
+  test("replaces a state symlink without following it or a legacy fixed temporary symlink", () => {
+    const directory = mkdtempSync(join(tmpdir(), "kogane-r2-notification-symlink-"));
+    temporaryDirectories.push(directory);
+    const victim = join(directory, "victim.txt");
+    const path = join(directory, "state.json");
+    writeFileSync(victim, "unchanged");
+    symlinkSync(victim, path);
+    symlinkSync(victim, `${path}.tmp`);
+
+    const value = state([stored(RULES[0]!)]);
+    writeStateFile(path, value);
+
+    expect(readFileSync(victim, "utf8")).toBe("unchanged");
+    expect(JSON.parse(readStateFile(path))).toEqual(value);
   });
 });
