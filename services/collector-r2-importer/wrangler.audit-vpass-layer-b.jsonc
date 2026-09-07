@@ -10,7 +10,7 @@
     {
       "binding": "VPASS_SNAPSHOTS",
       "bucket_name": "kogane-vpass-collector-poc",
-      "remote": true,
-    },
-  ],
+      "remote": true
+    }
+  ]
 }
