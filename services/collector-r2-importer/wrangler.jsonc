@@ -89,7 +89,30 @@
       "service": "kogane-ingest"
     }
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "OUTBOX_RECONCILER_QUEUE",
+        "queue": "kogane-r2-outbox-reconciler"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "kogane-r2-outbox-reconciler",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "retry_delay": 30,
+        "dead_letter_queue": "kogane-r2-outbox-reconciler-dlq",
+        "max_concurrency": 1
+      }
+    ]
+  },
+  "triggers": {
+    "crons": ["23 19 * * 0"]
+  },
   "vars": {
-    "IMPORTER_VERSION": "collector-r2-importer-v19"
+    "IMPORTER_VERSION": "collector-r2-importer-v20",
+    "RECONCILER_ACCOUNT_ID": "59ea63cc00914b30ca410b062ae2bb7f"
   }
 }

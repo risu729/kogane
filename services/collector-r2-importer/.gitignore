@@ -1,3 +1,4 @@
 node_modules/
 .wrangler/
 worker-configuration.d.ts
+scripts/.r2-reconciler-notifications.state.json

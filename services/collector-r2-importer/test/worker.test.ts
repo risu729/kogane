@@ -1125,6 +1125,89 @@ describe("collector R2 importer routes", () => {
       code: "artifact_checksum_mismatch",
     });
   });
+
+  test("the Queue handler retries malformed messages without logging object keys", async () => {
+    const terminalKey = "private-object-key-that-must-not-be-logged";
+    let acknowledged = false;
+    const retries: (QueueRetryOptions | undefined)[] = [];
+    const logs: string[] = [];
+    const originalError = console.error;
+    console.error = (...values: unknown[]) => logs.push(values.map(String).join(" "));
+    try {
+      await worker.queue(
+        {
+          messages: [
+            {
+              body: {
+                schemaVersion: "kogane-r2-outbox-reconciler-v1",
+                kind: "import",
+                source: "vpass",
+                terminalKey,
+                step: 0,
+                progress: 0,
+                resume: null,
+              },
+              attempts: 1,
+              ack: () => {
+                acknowledged = true;
+              },
+              retry: (options?: QueueRetryOptions) => {
+                retries.push(options);
+              },
+            },
+            {
+              body: {
+                schemaVersion: "kogane-r2-outbox-reconciler-v1",
+                kind: "repair",
+                source: "sbi-vc-trade",
+                cursor: null,
+                page: 0,
+              },
+              attempts: 1,
+              ack: () => {
+                acknowledged = true;
+              },
+              retry: (options?: QueueRetryOptions) => {
+                retries.push(options);
+              },
+            },
+          ],
+        } as unknown as MessageBatch<unknown>,
+        environment({ list: async () => Promise.reject(new Error(terminalKey)) } as R2Bucket),
+      );
+    } finally {
+      console.error = originalError;
+    }
+    expect(acknowledged).toBeFalse();
+    expect(retries).toEqual([{ delaySeconds: 30 }, { delaySeconds: 30 }]);
+    expect(logs).toHaveLength(2);
+    expect(logs[0]).toContain('"source":"vpass"');
+    expect(logs[1]).toContain('"outcome":"request_failed"');
+    expect(logs.join("\n")).not.toContain(terminalKey);
+  });
+
+  test("the weekly Cron seeds every source as an independent repair message", async () => {
+    const batches: MessageSendRequest<unknown>[][] = [];
+    const env = environment({} as R2Bucket);
+    env.OUTBOX_RECONCILER_QUEUE = {
+      sendBatch: async (messages: MessageSendRequest<unknown>[]) => {
+        batches.push(messages);
+      },
+    } as unknown as Queue;
+    const originalLog = console.log;
+    console.log = () => undefined;
+    try {
+      await worker.scheduled({ cron: "23 19 * * 0" } as ScheduledController, env);
+    } finally {
+      console.log = originalLog;
+    }
+    expect(batches).toHaveLength(1);
+    expect(batches[0]).toHaveLength(12);
+    expect(
+      new Set(batches[0]!.map((message) => (message.body as { source: string }).source)).size,
+    ).toBe(12);
+    expect(batches[0]!.every((message) => message.contentType === "json")).toBeTrue();
+  });
 });
 
 function globalPassCursor(value: unknown): string {
@@ -1204,7 +1287,9 @@ function environment(
     VPASS_SNAPSHOTS: {} as R2Bucket,
     SMBC_DIRECT_SNAPSHOTS: smbcDirectBucket,
     RAW_EVIDENCE: {} as Fetcher,
-    IMPORTER_VERSION: "collector-r2-importer-v19",
+    OUTBOX_RECONCILER_QUEUE: {} as Queue,
+    IMPORTER_VERSION: "collector-r2-importer-v20",
+    RECONCILER_ACCOUNT_ID: "59ea63cc00914b30ca410b062ae2bb7f",
     RAW_EVIDENCE_TOKEN: `collector-r2-sbi.${"s".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SBI_VC: `collector-r2-sbi-vc.${"v".repeat(32)}`,
     RAW_EVIDENCE_TOKEN_SONY: `collector-r2-sony-bank.${"o".repeat(32)}`,

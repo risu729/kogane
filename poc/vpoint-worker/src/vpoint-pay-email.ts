@@ -116,12 +116,12 @@ export async function storeVPointPayEmail(options: {
   if (existingNormalized) assertExistingObject(existingNormalized, normalizedStorage);
   const duplicate = existingRaw !== null && existingNormalized !== null;
   if (!duplicate) {
-    const writes: Promise<unknown>[] = [];
-    if (!existingRaw) writes.push(putExpectedObject(options.bucket, rawKey, rawStorage));
+    // The normalized JSON is the terminal event-notification object. Persist
+    // the source EML first so a JSON notification can never race a missing pair.
+    if (!existingRaw) await putExpectedObject(options.bucket, rawKey, rawStorage);
     if (!existingNormalized) {
-      writes.push(putExpectedObject(options.bucket, normalizedKey, normalizedStorage));
+      await putExpectedObject(options.bucket, normalizedKey, normalizedStorage);
     }
-    await Promise.all(writes);
   }
   return { event, rawKey, normalizedKey, duplicate };
 }

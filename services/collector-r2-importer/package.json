@@ -32,6 +32,7 @@
     "audit:v-point-pay-layer-b-r2": "bash scripts/audit-v-point-pay-layer-b-r2.sh",
     "audit:vpass-layer-b-r2": "bash scripts/audit-vpass-layer-b-r2.sh",
     "audit:moneyforward-layer-b-r2": "bash scripts/audit-moneyforward-layer-b-r2.sh",
+    "reconciler:notifications:plan": "bun scripts/r2-reconciler-notifications.ts plan",
     "cf:deploy": "wrangler deploy"
   },
   "dependencies": {

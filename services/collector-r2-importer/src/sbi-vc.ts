@@ -1,4 +1,4 @@
-import { CentralClient } from "./central";
+import { CentralClient, centralDescriptorSha256 } from "./central";
 import { ImportError } from "./error";
 import type {
   CentralInventoryItem,
@@ -16,10 +16,10 @@ const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_ARTIFACT_BYTES = 4 * 1024 * 1024;
 const MAX_PAGE_COUNT = 100;
 const PAGE_SIZE = 30;
-// The public collector is the only caller. Its Service Binding call into this
-// importer plus every importer-to-central call all share the 32 Worker
-// invocation chain. 2n + 9 <= 32, where n excludes the manifest.
 const MAX_SYNCHRONOUS_ARTIFACTS = 11;
+export const SBI_VC_TRANSFER_CHUNK_SIZE = 8;
+const TRANSFER_TOKEN_PREFIX = "sbi-vc-transfer-v1";
+const TRANSFER_TOKEN_AAD = new TextEncoder().encode(TRANSFER_TOKEN_PREFIX);
 const STORAGE_TEMPLATE = "raw/sbi-vc-trade/{date}/{run-id}/{artifact}.json";
 const STORAGE_CONTAINER = "kogane-sbi-vc-trade-poc";
 const FINGERPRINT_VERSION = "collector-r2-v1";
@@ -39,6 +39,7 @@ const HISTORICAL_EXECUTION = /^executions-historical-page-(\d{4})$/u;
 const HISTORICAL_CASHFLOW = /^cashflows-historical-page-(\d{4})$/u;
 
 type JsonObject = Record<string, unknown>;
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 type PageGroup = "executions-historical" | "cashflows-historical";
 type IdentityGroup =
   | "position-summary"
@@ -49,8 +50,6 @@ type IdentityGroup =
 interface VerifiedArtifact {
   artifact: SbiVcArtifactManifest;
   page?: PageInfo;
-  identityGroup?: IdentityGroup;
-  identities?: string[];
   failureEvidence?: true;
 }
 
@@ -61,13 +60,48 @@ interface PageInfo {
   totalSize: number;
 }
 
-export interface ImportSbiVcRunResult {
+interface ArtifactPlan {
+  source: SbiVcArtifactManifest | null;
+  bytes: Uint8Array | null;
+  sha256: string;
+  descriptor: JsonObject;
+  inventory: CentralInventoryItem;
+}
+
+interface TransferState {
+  v: 1;
+  manifestKey: string;
+  sourceManifestSha256: string;
+  centralRunId: number;
+  unitId: number;
+  inventoryId: number;
+  inventorySha256: string;
+  offset: number;
+  allObjectsReused: boolean;
+}
+
+export type ImportSbiVcRunResult = ImportSbiVcRunDeferred | ImportSbiVcRunSealed;
+
+export interface ImportSbiVcRunDeferred {
   source: typeof SOURCE;
   manifestKey: string;
+  status: "deferred";
+  reason: "worker_invocation_limit";
+  artifactCount: number;
+  nextOffset: number;
+  continuation: string;
+  allObjectsReused?: never;
+}
+
+export interface ImportSbiVcRunSealed {
+  source: typeof SOURCE;
+  manifestKey: string;
+  status: "sealed";
   centralRunId: number;
   artifactCount: number;
   sealed: true;
   allObjectsReused: boolean;
+  finalChunkAllObjectsReused: boolean;
 }
 
 export async function importSbiVcRun(options: {
@@ -77,6 +111,7 @@ export async function importSbiVcRun(options: {
   fingerprintKey: string;
   importerVersion: string;
   manifestKey: string;
+  continuation?: string;
 }): Promise<ImportSbiVcRunResult> {
   const startedAtMs = Date.now();
   const attemptId = `attempt-${crypto.randomUUID()}`;
@@ -119,6 +154,7 @@ export async function importSbiVcRun(options: {
     // Worker never buffers a whole run of source bytes.
     phase = "artifact_validation";
     const verifiedArtifacts: VerifiedArtifact[] = [];
+    const providerIdentityDigests = new Map<IdentityGroup, Set<string>>();
     const collectFailureEvidenceIndex =
       manifest.failures.length === 1 &&
       manifest.failures[0]?.operation === "collect" &&
@@ -135,10 +171,9 @@ export async function importSbiVcRun(options: {
       }
       verifiedArtifacts.push({
         artifact,
-        ...parseStoredEnvelope(bytes, artifact.dataset),
+        ...(await parseStoredEnvelope(bytes, artifact.dataset, providerIdentityDigests)),
       });
     }
-    assertUniqueProviderIdentities(verifiedArtifacts);
     validateFailureComplement(manifest, verifiedArtifacts);
 
     // Repeat the inventory boundary immediately before creating central state.
@@ -147,85 +182,122 @@ export async function importSbiVcRun(options: {
       options.manifestKey,
     ]);
 
-    if (manifest.artifacts.length > MAX_SYNCHRONOUS_ARTIFACTS) {
-      throw new ImportError(409, "sync_import_worker_chain_limit");
-    }
-
-    phase = "central_create";
     const central = new CentralClient(
       options.centralService,
       options.centralToken,
       CENTRAL_CLIENT_ID,
     );
-    centralRunId = await central.createRun({
-      producerId: PRODUCER,
-      sourceId: SOURCE,
-      externalIdNamespace: SCHEMA_VERSION,
-      externalSessionId: manifest.runId,
-      sourceRunKey: `full-snapshot-${INGEST_CONTRACT_VERSION}`,
-    });
+    const manifestSha256 = await sha256Hex(manifestBytes);
+    let state: TransferState;
+    if (options.continuation) {
+      state = await decodeTransferState(options.continuation, options.fingerprintKey);
+      validateTransferState(state, options.manifestKey, manifestSha256, expectedArtifactCount);
+      centralRunId = state.centralRunId;
+    } else {
+      phase = "central_create";
+      centralRunId = await central.createRun({
+        producerId: PRODUCER,
+        sourceId: SOURCE,
+        externalIdNamespace: SCHEMA_VERSION,
+        externalSessionId: manifest.runId,
+        sourceRunKey: `full-snapshot-${INGEST_CONTRACT_VERSION}`,
+      });
+      phase = "unit_catalogue";
+      const unitId = await central.addUnit(centralRunId, {
+        unitKind: "collection",
+        unitKey: "account",
+        terminalReportRequired: true,
+      });
+      phase = "inventory_plan";
+      const initialPlans = await artifactPlans(
+        verifiedArtifacts,
+        manifest,
+        manifestBytes,
+        manifestSha256,
+        unitId,
+        options.manifestKey,
+        options.fingerprintKey,
+      );
+      const inventory = sortedInventory(initialPlans);
+      const inventorySha256 = await sha256Hex(
+        new TextEncoder().encode(canonicalJson(inventory as unknown as JsonValue)),
+      );
+      state = {
+        v: 1,
+        manifestKey: options.manifestKey,
+        sourceManifestSha256: manifestSha256,
+        centralRunId,
+        unitId,
+        inventoryId: await central.beginInventory(centralRunId, inventorySha256, inventory.length),
+        inventorySha256,
+        offset: 0,
+        allObjectsReused: true,
+      };
+    }
 
-    phase = "unit_catalogue";
-    const unitId = await central.addUnit(centralRunId, {
-      unitKind: "collection",
-      unitKey: "account",
-      terminalReportRequired: true,
-    });
-
-    const inventory: CentralInventoryItem[] = [];
-    for (const [sequence, verified] of verifiedArtifacts.entries()) {
+    phase = "inventory_plan";
+    const plans = await artifactPlans(
+      verifiedArtifacts,
+      manifest,
+      manifestBytes,
+      manifestSha256,
+      state.unitId,
+      options.manifestKey,
+      options.fingerprintKey,
+    );
+    const inventory = sortedInventory(plans);
+    const inventorySha256 = await sha256Hex(
+      new TextEncoder().encode(canonicalJson(inventory as unknown as JsonValue)),
+    );
+    if (inventorySha256 !== state.inventorySha256) {
+      throw new ImportError(409, "transfer_inventory_mismatch");
+    }
+    const chunkSize =
+      options.continuation === undefined && manifest.artifacts.length <= MAX_SYNCHRONOUS_ARTIFACTS
+        ? plans.length
+        : SBI_VC_TRANSFER_CHUNK_SIZE;
+    const end = Math.min(state.offset + chunkSize, plans.length);
+    if (end <= state.offset) throw new ImportError(409, "transfer_cursor_did_not_advance");
+    const chunkInventory: CentralInventoryItem[] = [];
+    for (const plan of plans.slice(state.offset, end)) {
       phase = "object_upload";
-      // A second bounded read prevents validation from retaining the source
-      // payload and rechecks hash/metadata immediately before upload.
-      const bytes = await readVerifiedArtifact(options.bucket, verified.artifact);
-      const reused = await central.uploadObject(centralRunId, verified.artifact.sha256, bytes);
+      const bytes = plan.source
+        ? await readVerifiedArtifact(options.bucket, plan.source)
+        : plan.bytes!;
+      const reused = await central.uploadObject(state.centralRunId, plan.sha256, bytes);
       if (reused) reusedArtifactCount += 1;
       else acceptedArtifactCount += 1;
 
       phase = "artifact_catalogue";
-      const descriptorSha256 = await central.addArtifact(
-        centralRunId,
-        await dataDescriptor({
-          artifact: verified.artifact,
-          sequence,
-          fetchUnitId: unitId,
-          completedAt: manifest.completedAt,
-          fingerprintKey: options.fingerprintKey,
-        }),
-      );
-      inventory.push({
-        artifactKey: `${verified.artifact.dataset}.json`,
-        sha256: verified.artifact.sha256,
-        descriptorSha256,
-      });
+      const descriptorSha256 = await central.addArtifact(state.centralRunId, plan.descriptor);
+      if (descriptorSha256 !== plan.inventory.descriptorSha256) {
+        throw new Error("central_descriptor_mismatch");
+      }
+      chunkInventory.push(plan.inventory);
+    }
+    phase = "inventory_catalogue";
+    await central.addInventoryItems(state.centralRunId, state.inventoryId, chunkInventory);
+    if (end < plans.length) {
+      return {
+        source: SOURCE,
+        manifestKey: options.manifestKey,
+        status: "deferred",
+        reason: "worker_invocation_limit",
+        artifactCount: plans.length,
+        nextOffset: end,
+        continuation: await encodeTransferState(
+          {
+            ...state,
+            offset: end,
+            allObjectsReused: state.allObjectsReused && acceptedArtifactCount === 0,
+          },
+          options.fingerprintKey,
+        ),
+      };
     }
 
-    phase = "manifest_upload";
-    const manifestSha256 = await sha256Hex(manifestBytes);
-    const manifestReused = await central.uploadObject(centralRunId, manifestSha256, manifestBytes);
-    if (manifestReused) reusedArtifactCount += 1;
-    else acceptedArtifactCount += 1;
-
-    phase = "manifest_catalogue";
-    const manifestDescriptorSha256 = await central.addArtifact(
-      centralRunId,
-      await manifestDescriptor({
-        bytes: manifestBytes.byteLength,
-        sha256: manifestSha256,
-        sequence: manifest.artifacts.length,
-        key: options.manifestKey,
-        completedAt: manifest.completedAt,
-        fingerprintKey: options.fingerprintKey,
-      }),
-    );
-    inventory.push({
-      artifactKey: "manifest.json",
-      sha256: manifestSha256,
-      descriptorSha256: manifestDescriptorSha256,
-    });
-
     phase = "unit_report";
-    await central.addUnitReport(unitId, {
+    await central.addUnitReport(state.unitId, {
       reportKey: "terminal",
       reportKind: "terminal",
       producerStatus: manifest.status,
@@ -242,7 +314,7 @@ export async function importSbiVcRun(options: {
     });
 
     phase = "run_report";
-    await central.addRunReport(centralRunId, {
+    await central.addRunReport(state.centralRunId, {
       reportKey: "terminal",
       reportKind: "terminal",
       producerVersion: INGEST_CONTRACT_VERSION,
@@ -258,14 +330,21 @@ export async function importSbiVcRun(options: {
     });
 
     phase = "seal";
-    await central.seal(centralRunId, inventory, attemptId, startedAtMs);
+    await central.sealStagedInventory(
+      state.centralRunId,
+      state.inventoryId,
+      attemptId,
+      startedAtMs,
+    );
     return {
       source: SOURCE,
       manifestKey: options.manifestKey,
-      centralRunId,
+      status: "sealed",
+      centralRunId: state.centralRunId,
       artifactCount: inventory.length,
       sealed: true,
-      allObjectsReused: acceptedArtifactCount === 0,
+      allObjectsReused: state.allObjectsReused && acceptedArtifactCount === 0,
+      finalChunkAllObjectsReused: acceptedArtifactCount === 0,
     };
   } catch (error) {
     if (centralRunId !== undefined) {
@@ -523,21 +602,26 @@ function pageDataset(group: PageGroup, index: number): string {
   return `${group}-page-${String(index).padStart(4, "0")}`;
 }
 
-function parseStoredEnvelope(
+export async function parseStoredEnvelope(
   bytes: Uint8Array,
   dataset: string,
-): { page?: PageInfo; identityGroup?: IdentityGroup; identities?: string[] } {
+  providerIdentityDigests: Map<IdentityGroup, Set<string>>,
+): Promise<{ page?: PageInfo }> {
   const envelope = storedEnvelope(bytes);
   if (dataset === "position-summary") {
-    const identities: string[] = [];
+    // Position summary has no page siblings. Check raw identities inside the
+    // bounded 4 MiB object and discard them with the parsed envelope.
+    const identities = new Set<string>();
     for (const group of Object.values(recordConflict(envelope.body, "artifact_payload_invalid"))) {
       const positions = recordConflict(group, "artifact_payload_invalid");
       for (const value of Object.values(positions)) {
         const position = recordConflict(value, "artifact_payload_invalid");
-        identities.push(nonEmptyString(position.productId, "artifact_provider_identity_invalid"));
+        const identity = nonEmptyString(position.productId, "artifact_provider_identity_invalid");
+        if (identities.has(identity)) duplicateProviderIdentity();
+        identities.add(identity);
       }
     }
-    return { identityGroup: "position-summary", identities };
+    return {};
   }
   const group = pageGroup(dataset);
   const recentExecution = dataset === "executions-recent-page-0001";
@@ -562,10 +646,8 @@ function parseStoredEnvelope(
     if (pageNumber !== 0 || totalSize > PAGE_SIZE || body.list.length !== totalSize) {
       throw new ImportError(409, "artifact_page_payload_invalid");
     }
-    return {
-      identityGroup: "executions-recent",
-      identities: executionIdentities(body.list),
-    };
+    assertUniqueLocalIdentities(executionIdentities(body.list));
+    return {};
   }
   if (!group) return {};
   const match = (
@@ -576,12 +658,14 @@ function parseStoredEnvelope(
   if (pageNumber !== index - 1) {
     throw new ImportError(409, "artifact_page_payload_invalid");
   }
+  await recordProviderIdentityDigests(
+    providerIdentityDigests,
+    group,
+    group === "executions-historical"
+      ? executionIdentities(body.list)
+      : cashflowIdentities(body.list),
+  );
   return {
-    identityGroup: group,
-    identities:
-      group === "executions-historical"
-        ? executionIdentities(body.list)
-        : cashflowIdentities(body.list),
     page: {
       group,
       index,
@@ -615,22 +699,33 @@ function nonEmptyString(value: unknown, code: string): string {
   return value;
 }
 
-function assertUniqueProviderIdentities(artifacts: VerifiedArtifact[]): void {
-  const seen = new Map<IdentityGroup, Set<string>>();
-  for (const artifact of artifacts) {
-    if (!artifact.identityGroup || !artifact.identities) continue;
-    let group = seen.get(artifact.identityGroup);
-    if (!group) {
-      group = new Set<string>();
-      seen.set(artifact.identityGroup, group);
-    }
-    for (const identity of artifact.identities) {
-      if (group.has(identity)) {
-        throw new ImportError(409, "artifact_duplicate_provider_identity");
-      }
-      group.add(identity);
-    }
+function assertUniqueLocalIdentities(identities: string[]): void {
+  const seen = new Set<string>();
+  for (const identity of identities) {
+    if (seen.has(identity)) duplicateProviderIdentity();
+    seen.add(identity);
   }
+}
+
+async function recordProviderIdentityDigests(
+  seen: Map<IdentityGroup, Set<string>>,
+  group: IdentityGroup,
+  identities: string[],
+): Promise<void> {
+  let groupDigests = seen.get(group);
+  if (!groupDigests) {
+    groupDigests = new Set<string>();
+    seen.set(group, groupDigests);
+  }
+  for (const identity of identities) {
+    const digest = await sha256Hex(new TextEncoder().encode(identity));
+    if (groupDigests.has(digest)) duplicateProviderIdentity();
+    groupDigests.add(digest);
+  }
+}
+
+function duplicateProviderIdentity(): never {
+  throw new ImportError(409, "artifact_duplicate_provider_identity");
 }
 
 function assertStoredFailureEnvelope(bytes: Uint8Array): void {
@@ -667,10 +762,21 @@ async function assertExactPrefix(
   const actual: string[] = [];
   let cursor: string | undefined;
   do {
-    const listed = await bucket.list({ prefix, limit: 1_000, ...(cursor ? { cursor } : {}) });
+    const previousCursor = cursor;
+    const listed = await bucket.list({
+      prefix,
+      limit: Math.min(expectedKeys.length + 1, 1_000),
+      ...(cursor ? { cursor } : {}),
+    });
+    if (actual.length + listed.objects.length > expectedKeys.length) {
+      throw new ImportError(409, "prefix_inventory_mismatch");
+    }
     actual.push(...listed.objects.map((object) => object.key));
     cursor = listed.truncated ? listed.cursor : undefined;
     if (listed.truncated && !cursor) throw new ImportError(409, "prefix_cursor_missing");
+    if (cursor && cursor === previousCursor) {
+      throw new ImportError(409, "prefix_cursor_did_not_advance");
+    }
   } while (cursor);
   actual.sort();
   const expected = [...expectedKeys].sort();
@@ -703,6 +809,207 @@ function assertNativeSha256(object: R2ObjectBody, expected: string): void {
   if (native && bytesHex(new Uint8Array(native)) !== expected) {
     throw new ImportError(409, "artifact_native_checksum_mismatch");
   }
+}
+
+async function artifactPlans(
+  artifacts: VerifiedArtifact[],
+  manifest: SbiVcManifest,
+  manifestBytes: Uint8Array,
+  manifestSha256: string,
+  unitId: number,
+  manifestKey: string,
+  fingerprintKey: string,
+): Promise<ArtifactPlan[]> {
+  const plans: ArtifactPlan[] = [];
+  for (const [sequence, verified] of artifacts.entries()) {
+    const descriptor = await dataDescriptor({
+      artifact: verified.artifact,
+      sequence,
+      fetchUnitId: unitId,
+      completedAt: manifest.completedAt,
+      fingerprintKey,
+    });
+    plans.push({
+      source: verified.artifact,
+      bytes: null,
+      sha256: verified.artifact.sha256,
+      descriptor,
+      inventory: {
+        artifactKey: `${verified.artifact.dataset}.json`,
+        sha256: verified.artifact.sha256,
+        descriptorSha256: await centralDescriptorSha256(descriptor),
+      },
+    });
+  }
+  const descriptor = await manifestDescriptor({
+    bytes: manifestBytes.byteLength,
+    sha256: manifestSha256,
+    sequence: manifest.artifacts.length,
+    key: manifestKey,
+    completedAt: manifest.completedAt,
+    fingerprintKey,
+  });
+  plans.push({
+    source: null,
+    bytes: manifestBytes,
+    sha256: manifestSha256,
+    descriptor,
+    inventory: {
+      artifactKey: "manifest.json",
+      sha256: manifestSha256,
+      descriptorSha256: await centralDescriptorSha256(descriptor),
+    },
+  });
+  return plans;
+}
+
+function sortedInventory(plans: ArtifactPlan[]): CentralInventoryItem[] {
+  return plans
+    .map((plan) => plan.inventory)
+    .sort((left, right) =>
+      left.artifactKey < right.artifactKey ? -1 : left.artifactKey > right.artifactKey ? 1 : 0,
+    );
+}
+
+async function encodeTransferState(state: TransferState, keyHex: string): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plaintext = new TextEncoder().encode(canonicalJson(state as unknown as JsonValue));
+  const ciphertext = await crypto.subtle.encrypt(
+    {
+      name: "AES-GCM",
+      iv: ownedArrayBuffer(iv),
+      additionalData: ownedArrayBuffer(TRANSFER_TOKEN_AAD),
+      tagLength: 128,
+    },
+    await transferEncryptionKey(keyHex),
+    ownedArrayBuffer(plaintext),
+  );
+  return `${TRANSFER_TOKEN_PREFIX}.${base64Url(iv)}.${base64Url(new Uint8Array(ciphertext))}`;
+}
+
+async function decodeTransferState(token: string, keyHex: string): Promise<TransferState> {
+  if (token.length > 8_000) throw new ImportError(400, "transfer_token_invalid");
+  const parts = token.split(".");
+  if (
+    parts.length !== 3 ||
+    parts[0] !== TRANSFER_TOKEN_PREFIX ||
+    !/^[A-Za-z0-9_-]{16}$/u.test(parts[1]!) ||
+    !/^[A-Za-z0-9_-]{22,7900}$/u.test(parts[2]!)
+  ) {
+    throw new ImportError(400, "transfer_token_invalid");
+  }
+  let parsed: unknown;
+  try {
+    const plaintext = await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: ownedArrayBuffer(fromBase64Url(parts[1]!)),
+        additionalData: ownedArrayBuffer(TRANSFER_TOKEN_AAD),
+        tagLength: 128,
+      },
+      await transferEncryptionKey(keyHex),
+      ownedArrayBuffer(fromBase64Url(parts[2]!)),
+    );
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plaintext));
+  } catch {
+    throw new ImportError(400, "transfer_token_invalid");
+  }
+  const input = record(parsed, "transfer_token_invalid");
+  const allowed = [
+    "v",
+    "manifestKey",
+    "sourceManifestSha256",
+    "centralRunId",
+    "unitId",
+    "inventoryId",
+    "inventorySha256",
+    "offset",
+    "allObjectsReused",
+  ];
+  if (Object.keys(input).length !== allowed.length) {
+    throw new ImportError(400, "transfer_token_invalid");
+  }
+  exactKeys(input, allowed);
+  if (
+    input.v !== 1 ||
+    typeof input.manifestKey !== "string" ||
+    !MANIFEST_KEY.test(input.manifestKey) ||
+    typeof input.sourceManifestSha256 !== "string" ||
+    !SHA256.test(input.sourceManifestSha256) ||
+    !positiveInteger(input.centralRunId) ||
+    !positiveInteger(input.unitId) ||
+    !positiveInteger(input.inventoryId) ||
+    typeof input.inventorySha256 !== "string" ||
+    !SHA256.test(input.inventorySha256) ||
+    !positiveInteger(input.offset) ||
+    (input.offset as number) > 205 ||
+    typeof input.allObjectsReused !== "boolean"
+  ) {
+    throw new ImportError(400, "transfer_token_invalid");
+  }
+  return input as unknown as TransferState;
+}
+
+function validateTransferState(
+  state: TransferState,
+  manifestKey: string,
+  sourceManifestSha256: string,
+  expectedArtifactCount: number,
+): void {
+  if (
+    state.manifestKey !== manifestKey ||
+    state.sourceManifestSha256 !== sourceManifestSha256 ||
+    state.offset >= expectedArtifactCount
+  ) {
+    throw new ImportError(400, "transfer_state_mismatch");
+  }
+}
+
+async function transferEncryptionKey(keyHex: string): Promise<CryptoKey> {
+  if (!SHA256.test(keyHex)) throw new ImportError(500, "fingerprint_configuration_invalid");
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${TRANSFER_TOKEN_PREFIX}\0${keyHex}`),
+  );
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+}
+
+function fromBase64Url(value: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]+$/u.test(value)) throw new Error("base64url_invalid");
+  const standard = value.replaceAll("-", "+").replaceAll("_", "/");
+  const binary = atob(standard.padEnd(Math.ceil(standard.length / 4) * 4, "="));
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  if (base64Url(bytes) !== value) throw new Error("base64url_invalid");
+  return bytes;
+}
+
+function positiveInteger(value: unknown): boolean {
+  return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
+function canonicalJson(value: JsonValue): string {
+  return JSON.stringify(canonical(value));
+}
+
+function canonical(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, child]) => [key, canonical(child)]),
+    );
+  }
+  if (typeof value === "number" && !Number.isSafeInteger(value)) {
+    throw new TypeError("canonical numbers must be safe integers");
+  }
+  return value;
 }
 
 async function dataDescriptor(options: {
