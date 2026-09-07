@@ -244,6 +244,7 @@ describe("V Point safe diagnostics", () => {
       ].join("\r\n"),
     );
     const message = Object.assign({} as ForwardableEmailMessage, {
+      from: "info@prepaid.smbc-card.com",
       to: "pay@example.invalid",
       raw: new Blob([raw]).stream(),
       forward: async () => {

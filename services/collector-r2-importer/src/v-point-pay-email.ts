@@ -7,8 +7,12 @@ const SOURCE = "v-point-pay";
 const EXTERNAL_SOURCE = "v-point-pay-email";
 const PRODUCER = "collector-r2-importer";
 const CENTRAL_CLIENT_ID = "collector-r2-v-point-pay-email";
-const INGEST_CONTRACT_VERSION = "vpoint-pay-email-r2-v1";
-const EVENT_SCHEMA = "vpoint-pay-email-event-v1";
+const INGEST_CONTRACT_VERSION = "vpoint-pay-email-r2-v2";
+const EVENT_SCHEMA_V1 = "vpoint-pay-email-event-v1";
+const EVENT_SCHEMA_V2 = "vpoint-pay-email-event-v2";
+const EXTERNAL_ID_NAMESPACE = "vpoint-pay-email-pair-v2";
+const SOURCE_PROVENANCE_SCHEMA = "vpoint-pay-email-source-provenance-v1";
+const EXPECTED_RECIPIENT = "vpointpay@takuk.me";
 const STORAGE_CONTAINER = "kogane-vpoint-pay-collector-poc";
 const STORAGE_TEMPLATE = "raw/v-point-pay-email/{date}/{message-sha256}.{extension}";
 const FINGERPRINT_VERSION = "collector-r2-v1";
@@ -23,7 +27,7 @@ type JsonObject = Record<string, unknown>;
 type EventType = "usage" | "charge" | "balance-addition" | "declined";
 
 interface EmailEvent {
-  schemaVersion: typeof EVENT_SCHEMA;
+  schemaVersion: typeof EVENT_SCHEMA_V1 | typeof EVENT_SCHEMA_V2;
   id: string;
   sourceMessageId: string | null;
   occurredAt: string;
@@ -34,6 +38,18 @@ interface EmailEvent {
   amountYen: number | null;
   usedPoints: number | null;
   balanceYen: number | null;
+  sourceProvenance?: EmailSourceProvenance;
+}
+
+interface EmailSourceProvenance {
+  schemaVersion: typeof SOURCE_PROVENANCE_SCHEMA;
+  delivery: "direct" | "forwarded-rfc822";
+  storedMessageScope: "smtp-message" | "forwarded-rfc822-part";
+  sourceVerification: "source_unverified";
+  envelopeFrom: string;
+  envelopeTo: string;
+  outerMessageSha256: string;
+  authenticationProvenance: "not-exposed-by-cloudflare-email-event";
 }
 
 interface VerifiedPair {
@@ -91,10 +107,11 @@ export async function importVPointPayEmailPair(
     centralRunId = await central.createRun({
       producerId: PRODUCER,
       sourceId: SOURCE,
-      externalIdNamespace: EVENT_SCHEMA,
+      externalIdNamespace: EXTERNAL_ID_NAMESPACE,
       externalSessionId: pair.event.id,
       sourceRunKey: `email-pair-${INGEST_CONTRACT_VERSION}`,
     });
+    phase = "unit";
     const unitId = await central.addUnit(centralRunId, {
       unitKind: "message",
       unitKey: "notification",
@@ -140,7 +157,6 @@ export async function importVPointPayEmailPair(
       sha256: pair.normalizedSha256,
       descriptorSha256: normalizedDescriptorSha256,
     });
-    phase = "terminal_reports";
     const eventAtMs = Date.parse(pair.event.occurredAt);
     const terminal = {
       reportKey: "terminal",
@@ -153,11 +169,13 @@ export async function importVPointPayEmailPair(
       completedAtBasis: "source",
       declaredArtifactCount: 2,
     };
+    phase = "unit_report";
     await central.addUnitReport(unitId, { ...terminal, artifactCountScope: "direct" });
+    phase = "run_report";
     await central.addRunReport(centralRunId, {
       ...terminal,
       producerVersion: INGEST_CONTRACT_VERSION,
-      manifestSchemaVersion: EVENT_SCHEMA,
+      manifestSchemaVersion: pair.event.schemaVersion,
       artifactCountScope: "all_catalogued",
     });
     phase = "seal";
@@ -243,11 +261,21 @@ async function readVerifiedPair(bucket: R2Bucket, normalizedKey: string): Promis
   if (event.id !== id || event.occurredAt.slice(0, 10) !== `${match[1]}-${match[2]}-${match[3]}`) {
     throw new ImportError(409, "vpoint_pay_email_identity_mismatch");
   }
-  const metadata = { source: EXTERNAL_SOURCE, eventType: event.eventType, sha256: id };
+  const metadata =
+    event.schemaVersion === EVENT_SCHEMA_V1
+      ? { source: EXTERNAL_SOURCE, eventType: event.eventType, sha256: id }
+      : {
+          source: EXTERNAL_SOURCE,
+          eventType: event.eventType,
+          sha256: id,
+          eventSchema: EVENT_SCHEMA_V2,
+          delivery: event.sourceProvenance!.delivery,
+          sourceVerification: "source_unverified",
+        };
   assertExactMetadata(rawObject.customMetadata, metadata);
   assertExactMetadata(normalizedObject.customMetadata, metadata);
   const derived = await deriveEvent(rawBytes);
-  if (canonicalJson(derived) !== canonicalJson(event)) {
+  if (canonicalJson(derived) !== canonicalJson(eventCore(event))) {
     throw new ImportError(409, "vpoint_pay_email_derivation_mismatch");
   }
   await assertExactPairInventory(bucket, prefix, expected);
@@ -278,7 +306,7 @@ function parseEvent(bytes: Uint8Array): EmailEvent {
     throw new ImportError(409, "vpoint_pay_email_json_invalid");
   }
   if (!isRecord(value)) throw new ImportError(409, "vpoint_pay_email_json_invalid");
-  const keys = [
+  const coreKeys = [
     "amountYen",
     "balanceYen",
     "detail",
@@ -290,10 +318,14 @@ function parseEvent(bytes: Uint8Array): EmailEvent {
     "sourceMessageId",
     "subject",
     "usedPoints",
-  ].sort();
+  ];
+  const keys =
+    value.schemaVersion === EVENT_SCHEMA_V2
+      ? [...coreKeys, "sourceProvenance"].sort()
+      : coreKeys.sort();
   if (
     !sameStrings(Object.keys(value).sort(), keys) ||
-    value.schemaVersion !== EVENT_SCHEMA ||
+    (value.schemaVersion !== EVENT_SCHEMA_V1 && value.schemaVersion !== EVENT_SCHEMA_V2) ||
     typeof value.id !== "string" ||
     !SHA256.test(value.id) ||
     !isNullableText(value.sourceMessageId, 1_000) ||
@@ -308,8 +340,12 @@ function parseEvent(bytes: Uint8Array): EmailEvent {
   ) {
     throw new ImportError(409, "vpoint_pay_email_event_invalid");
   }
+  const sourceProvenance =
+    value.schemaVersion === EVENT_SCHEMA_V2
+      ? parseSourceProvenance(value.sourceProvenance, value.id)
+      : undefined;
   return {
-    schemaVersion: EVENT_SCHEMA,
+    schemaVersion: value.schemaVersion,
     id: value.id,
     sourceMessageId: value.sourceMessageId,
     occurredAt: value.occurredAt,
@@ -320,7 +356,57 @@ function parseEvent(bytes: Uint8Array): EmailEvent {
     amountYen: value.amountYen,
     usedPoints: value.usedPoints,
     balanceYen: value.balanceYen,
+    ...(sourceProvenance ? { sourceProvenance } : {}),
   };
+}
+
+function parseSourceProvenance(value: unknown, messageSha256: string): EmailSourceProvenance {
+  if (!isRecord(value)) throw new ImportError(409, "vpoint_pay_email_provenance_invalid");
+  const keys = [
+    "authenticationProvenance",
+    "delivery",
+    "envelopeFrom",
+    "envelopeTo",
+    "outerMessageSha256",
+    "schemaVersion",
+    "sourceVerification",
+    "storedMessageScope",
+  ].sort();
+  const envelopeFrom = canonicalMailbox(value.envelopeFrom);
+  const envelopeTo = canonicalMailbox(value.envelopeTo);
+  const delivery = value.delivery;
+  const direct =
+    delivery === "direct" &&
+    value.storedMessageScope === "smtp-message" &&
+    envelopeFrom === SENDER &&
+    value.outerMessageSha256 === messageSha256;
+  const forwarded =
+    delivery === "forwarded-rfc822" &&
+    value.storedMessageScope === "forwarded-rfc822-part" &&
+    envelopeFrom !== null &&
+    typeof value.outerMessageSha256 === "string" &&
+    SHA256.test(value.outerMessageSha256) &&
+    value.outerMessageSha256 !== messageSha256;
+  if (
+    !sameStrings(Object.keys(value).sort(), keys) ||
+    value.schemaVersion !== SOURCE_PROVENANCE_SCHEMA ||
+    value.sourceVerification !== "source_unverified" ||
+    value.authenticationProvenance !== "not-exposed-by-cloudflare-email-event" ||
+    envelopeTo !== EXPECTED_RECIPIENT ||
+    (!direct && !forwarded)
+  ) {
+    throw new ImportError(409, "vpoint_pay_email_provenance_invalid");
+  }
+  return {
+    schemaVersion: SOURCE_PROVENANCE_SCHEMA,
+    delivery,
+    storedMessageScope: value.storedMessageScope,
+    sourceVerification: "source_unverified",
+    envelopeFrom: envelopeFrom!,
+    envelopeTo,
+    outerMessageSha256: value.outerMessageSha256,
+    authenticationProvenance: "not-exposed-by-cloudflare-email-event",
+  } as EmailSourceProvenance;
 }
 
 async function deriveEvent(raw: Uint8Array): Promise<EmailEvent> {
@@ -356,7 +442,7 @@ async function deriveEvent(raw: Uint8Array): Promise<EmailEvent> {
         ? "加算後のプリペイド残高"
         : "利用後の残高";
   return {
-    schemaVersion: EVENT_SCHEMA,
+    schemaVersion: EVENT_SCHEMA_V1,
     id: await sha256Hex(raw),
     sourceMessageId: email.messageId ?? null,
     occurredAt: occurredAt.toISOString(),
@@ -370,6 +456,22 @@ async function deriveEvent(raw: Uint8Array): Promise<EmailEvent> {
   };
 }
 
+function eventCore(event: EmailEvent): EmailEvent {
+  return {
+    schemaVersion: EVENT_SCHEMA_V1,
+    id: event.id,
+    sourceMessageId: event.sourceMessageId,
+    occurredAt: event.occurredAt,
+    eventType: event.eventType,
+    subject: event.subject,
+    merchant: event.merchant,
+    detail: event.detail,
+    amountYen: event.amountYen,
+    usedPoints: event.usedPoints,
+    balanceYen: event.balanceYen,
+  };
+}
+
 async function providerDescriptor(
   pair: VerifiedPair,
   unitId: number,
@@ -377,8 +479,8 @@ async function providerDescriptor(
 ): Promise<JsonObject> {
   return {
     artifactKey: "notification.eml",
-    artifactRole: "provider_message",
-    payloadFidelity: "exact",
+    artifactRole: "user_capture",
+    payloadFidelity: "unknown",
     containerKind: "single",
     lineageDisposition: "not_applicable",
     dataset: "notification-mail",
@@ -397,7 +499,7 @@ async function providerDescriptor(
     http: null,
     storage: await storageOrigin(pair.rawKey, key),
     file: null,
-    email: await emailOrigin(pair.event),
+    email: await emailOrigin(pair.event, pair.rawSha256),
     ranges: [],
     transformSteps: [],
     relations: [],
@@ -418,7 +520,7 @@ async function eventDescriptor(
     lineageDisposition: "linked",
     dataset: "notification-event",
     formatId: "vpoint-pay-email-event-json",
-    formatVersion: EVENT_SCHEMA,
+    formatVersion: pair.event.schemaVersion,
     declaredMediaType: "application/json",
     mediaTypeBasis: "file_metadata",
     fetchedAtMs: Date.parse(pair.event.occurredAt),
@@ -439,7 +541,7 @@ async function eventDescriptor(
         stepIndex: 0,
         stepKind: "extracted",
         transformerId: "vpoint-pay-email-parser",
-        transformerVersion: EVENT_SCHEMA,
+        transformerVersion: pair.event.schemaVersion,
       },
     ],
     relations: [
@@ -448,28 +550,39 @@ async function eventDescriptor(
         parentArtifactKey: "notification.eml",
         relation: "input",
         transformerId: "vpoint-pay-email-parser",
-        transformerVersion: EVENT_SCHEMA,
+        transformerVersion: pair.event.schemaVersion,
       },
     ],
   };
 }
 
-async function emailOrigin(event: EmailEvent): Promise<JsonObject> {
+async function emailOrigin(event: EmailEvent, rawSha256: string): Promise<JsonObject> {
+  const provenance = event.sourceProvenance;
+  const envelopeDomain = provenance ? provenance.envelopeFrom.split("@")[1]! : null;
   return {
-    transportShape: "unknown",
-    senderDomain: "prepaid.smbc-card.com",
+    transportShape:
+      provenance?.delivery === "direct" ? "direct" : provenance ? "forwarded_rfc822" : "unknown",
+    senderDomain: provenance ? envelopeDomain : null,
     receivedAtMs: Date.parse(event.occurredAt),
     receivedAtBasis: "rfc_date",
     messageIdSha256: event.sourceMessageId === null ? null : await sha256Hex(event.sourceMessageId),
     partIndex: null,
     mimePartPath: null,
-    innerMessageSha256: null,
-    innerSenderDomain: null,
+    innerMessageSha256: provenance?.delivery === "forwarded-rfc822" ? rawSha256 : null,
+    innerSenderDomain: provenance?.delivery === "forwarded-rfc822" ? "prepaid.smbc-card.com" : null,
     filenameTemplate: null,
     filenameFingerprint: null,
     fingerprintKeyVersion: null,
     redactionVersion: "v1",
   };
+}
+
+function canonicalMailbox(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const canonical = value.trim().toLowerCase();
+  return canonical.length > 0 && canonical.length <= 320 && /^[^\s@]+@[^\s@]+$/u.test(canonical)
+    ? canonical
+    : null;
 }
 
 async function storageOrigin(objectKey: string, fingerprintKey: string): Promise<JsonObject> {

@@ -18,5 +18,5 @@ INSERT INTO origin_template_policies (
   'raw/v-point-pay-email/{date}/{message-sha256}.{extension}',
   'v1',
   'collector-r2-v1',
-  'Official V Point Pay notification email and strict normalized event pair'
+  'Source-unverified V Point Pay email capture and strict normalized event pair'
 );

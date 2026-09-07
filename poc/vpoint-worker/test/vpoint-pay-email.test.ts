@@ -76,11 +76,96 @@ describe("V Point Pay notification email", () => {
         return null;
       },
     } as unknown as R2Bucket;
-    await storeVPointPayEmail({ bucket, parsed: parsed! });
+    const stored = await storeVPointPayEmail({
+      bucket,
+      parsed: parsed!,
+      envelopeFrom: "info@prepaid.smbc-card.com",
+      envelopeTo: "vpointpay@takuk.me",
+      expectedRecipient: "vpointpay@takuk.me",
+    });
     expect(puts).toHaveLength(2);
     for (const put of puts) {
       expect(put.options.sha256).toBe(await sha256Hex(put.body));
     }
+    expect(stored.event).toMatchObject({
+      schemaVersion: "vpoint-pay-email-event-v2",
+      sourceProvenance: {
+        delivery: "direct",
+        storedMessageScope: "smtp-message",
+        sourceVerification: "source_unverified",
+        envelopeFrom: "info@prepaid.smbc-card.com",
+        envelopeTo: "vpointpay@takuk.me",
+        authenticationProvenance: "not-exposed-by-cloudflare-email-event",
+      },
+    });
+  });
+
+  test("fails closed before storage when the direct SMTP envelope sender is a lookalike", async () => {
+    const parsed = await parseVPointPayEmail(notification("◇利用金額：1円"));
+    const puts: string[] = [];
+    const bucket = {
+      head: async () => null,
+      put: async (key: string) => {
+        puts.push(key);
+        return null;
+      },
+    } as unknown as R2Bucket;
+    await expect(
+      storeVPointPayEmail({
+        bucket,
+        parsed: parsed!,
+        envelopeFrom: "attacker@example.invalid",
+        envelopeTo: "vpointpay@takuk.me",
+        expectedRecipient: "vpointpay@takuk.me",
+      }),
+    ).rejects.toThrow("vpoint_pay_email_envelope_sender_invalid");
+    expect(puts).toHaveLength(0);
+  });
+
+  test("does not rewrite an immutable duplicate pair", async () => {
+    const parsed = await parseVPointPayEmail(notification("◇利用金額：1円"));
+    const bucket = {
+      head: async () => ({ key: "existing" }),
+      put: async () => {
+        throw new Error("must_not_write");
+      },
+    } as unknown as R2Bucket;
+    await expect(
+      storeVPointPayEmail({
+        bucket,
+        parsed: parsed!,
+        envelopeFrom: "info@prepaid.smbc-card.com",
+        envelopeTo: "vpointpay@takuk.me",
+        expectedRecipient: "vpointpay@takuk.me",
+      }),
+    ).resolves.toMatchObject({ duplicate: true });
+  });
+
+  test("does not treat an RFC Authentication-Results header as trusted EmailEvent provenance", async () => {
+    const raw = new TextEncoder().encode(
+      new TextDecoder()
+        .decode(notification("◇利用金額：1円"))
+        .replace(
+          "From: V Point Pay",
+          "Authentication-Results: attacker.invalid; dkim=pass header.d=prepaid.smbc-card.com\r\nFrom: V Point Pay",
+        ),
+    );
+    const parsed = await parseVPointPayEmail(raw);
+    const bucket = {
+      head: async () => null,
+      put: async () => null,
+    } as unknown as R2Bucket;
+    const stored = await storeVPointPayEmail({
+      bucket,
+      parsed: parsed!,
+      envelopeFrom: "info@prepaid.smbc-card.com",
+      envelopeTo: "vpointpay@takuk.me",
+      expectedRecipient: "vpointpay@takuk.me",
+    });
+    expect(stored.event.sourceProvenance).toMatchObject({
+      sourceVerification: "source_unverified",
+      authenticationProvenance: "not-exposed-by-cloudflare-email-event",
+    });
   });
 });
 

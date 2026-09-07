@@ -212,6 +212,58 @@ describe("collector R2 importer routes", () => {
     });
   });
 
+  test("the V Point Pay email backfill returns no continuation and retries the same failed pair", async () => {
+    const normalizedKey = `raw/v-point-pay-email/2026/08/31/${"a".repeat(64)}.json`;
+    const calls: R2ListOptions[] = [];
+    const bucket = {
+      list: async (options: R2ListOptions) => {
+        calls.push(options);
+        if (options.prefix === "raw/v-point-pay-email/") {
+          return {
+            objects: [{ key: normalizedKey }],
+            truncated: true,
+            cursor: "must-not-escape",
+          } as unknown as R2Objects;
+        }
+        return {
+          objects: [{ key: normalizedKey }],
+          truncated: false,
+        } as unknown as R2Objects;
+      },
+    } as unknown as R2Bucket;
+    const env = environment(
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      bucket,
+    );
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await worker.fetch(
+        new Request("https://importer.internal/v1/v-point-pay-email/backfill-page", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ limit: 1 }),
+        }) as Parameters<typeof worker.fetch>[0],
+        env,
+      );
+      expect(response.status).toBe(200);
+      expect((await response.json()) as unknown).toMatchObject({
+        scannedObjectCount: 1,
+        failedPairCount: 1,
+        nextCursor: null,
+        truncated: false,
+      });
+    }
+    expect(calls.filter((call) => call.prefix === "raw/v-point-pay-email/")).toEqual([
+      { prefix: "raw/v-point-pay-email/", limit: 1 },
+      { prefix: "raw/v-point-pay-email/", limit: 1 },
+    ]);
+  });
+
   test("the V Point backfill page scans exactly one source object", async () => {
     const calls: R2ListOptions[] = [];
     const bucket = {

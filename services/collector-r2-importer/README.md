@@ -379,7 +379,7 @@ Importerは専用tokenを他sourceと共有せず、collectorは既存Service Bi
 bodyから再計算したchecksumで検証し、checksumが記録済みなら一致を必須とする。次に
 `poc/vpoint-worker/scripts/backfill-vpoint-pay-email-raw-evidence.sh`を完走し、中央の
 `v-point-pay` run/seal/artifact集計だけを確認する。cursor消去後にdeployment revisionだけを変えた
-Importerで再走査しても、固定`vpoint-pay-email-r2-v1`契約によりrun・artifact・seal件数は不変で
+Importerで再走査しても、固定`vpoint-pay-email-r2-v2`契約によりrun・artifact・seal件数は不変で
 なければならない。attempt数は増えてよい。前後でsource R2のaggregate inventoryを比較し、
 変更・削除がないことを確認する。本文、値、object key、個別hash、credentialは出力しない。
 

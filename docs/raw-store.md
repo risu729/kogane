@@ -379,8 +379,10 @@ Layer A therefore catalogues the bytes as a `collector_summary` in the `v-point`
 source run that produced it; it does not claim cross-source raw lineage or a
 financial match. Any interpretation of its entries, including match confidence
 and links to V Point Pay observations, starts in phase 3. The archived direct and
-forwarded messages themselves remain `provider_message` artifacts under
-`v-point-pay`.
+forwarded messages are `user_capture / unknown` artifacts under `v-point-pay`:
+new mail records the SMTP envelope and retained-message boundary, but EmailEvent
+does not expose trusted authentication results and legacy mail has no saved
+envelope provenance. Neither path is promoted to a provider-source claim.
 
 The Layer A validator still proves every reconciliation candidate is structurally
 real: its source names a validated history page, its index is within that page's

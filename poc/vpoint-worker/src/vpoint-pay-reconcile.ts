@@ -174,7 +174,8 @@ async function hasLiveAppSnapshot(bucket: R2Bucket): Promise<boolean> {
 function isEmailEvent(value: unknown): value is VPointPayEmailEvent {
   if (!isObject(value)) return false;
   return (
-    value.schemaVersion === "vpoint-pay-email-event-v1" &&
+    (value.schemaVersion === "vpoint-pay-email-event-v1" ||
+      value.schemaVersion === "vpoint-pay-email-event-v2") &&
     typeof value.id === "string" &&
     typeof value.occurredAt === "string" &&
     ["usage", "charge", "balance-addition", "declined"].includes(

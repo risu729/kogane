@@ -115,18 +115,26 @@ export default {
     };
     onStage(stage);
     try {
+      const payRecipient = requiredSecret(
+        env.VPOINT_PAY_EMAIL_RECIPIENT,
+        "VPOINT_PAY_EMAIL_RECIPIENT",
+      );
+      const isPayTarget = isCollectorRecipient(message.to, [payRecipient]);
       const isTarget = isCollectorRecipient(message.to, [
         requiredSecret(env.VPOINT_EMAIL_RECIPIENT, "VPOINT_EMAIL_RECIPIENT"),
-        requiredSecret(env.VPOINT_PAY_EMAIL_RECIPIENT, "VPOINT_PAY_EMAIL_RECIPIENT"),
+        payRecipient,
       ]);
       const raw = isTarget ? await new Response(message.raw).arrayBuffer() : null;
       onStage("email-parse");
-      const payEmail = raw ? await parseVPointPayEmail(raw) : null;
+      const payEmail = raw && isPayTarget ? await parseVPointPayEmail(raw) : null;
       if (payEmail) {
         onStage("email-store");
         const stored = await storeVPointPayEmail({
           bucket: env.VPOINT_PAY_SNAPSHOTS,
           parsed: payEmail,
+          envelopeFrom: message.from,
+          envelopeTo: message.to,
+          expectedRecipient: payRecipient,
         });
         logEvent({
           event: "vpoint-pay-email-stored",

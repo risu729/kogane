@@ -100,14 +100,18 @@ reportへ追加する。matchできないeventはunknownのまま残す。
 `poc/vpoint-pay-worker`のapp pollingはPR #60で停止済みであり、この取り込みでは再有効化しない。
 現存するsourceは`poc/vpoint-worker`が保存した公式通知の二つ組だけである。
 
-- `raw/v-point-pay-email/{date}/{message-sha256}.eml`: 公式送信者のInternet Message Format原本
-- `raw/v-point-pay-email/{date}/{message-sha256}.json`: `vpoint-pay-email-event-v1`正規化event
+- `raw/v-point-pay-email/{date}/{message-sha256}.eml`: EmailEventまたは転送RFC822 partから保存したInternet Message Format
+- `raw/v-point-pay-email/{date}/{message-sha256}.json`: legacy `vpoint-pay-email-event-v1`またはenvelope provenance付き`vpoint-pay-email-event-v2`正規化event
 
 Importerは同じprefixにこの2 objectだけが存在すること、keyの日付とRFC Date、raw bytesの
-SHA-256とkey ID、exact custom metadata、media type、公式sender、対象subject、JSONのstrict
+SHA-256とkey ID、schema別exact custom metadata、media type、RFC5322 From、対象subject、JSONのstrict
 schemaを検証する。さらにEMLからeventを独立に再計算し、正規化JSONと
-完全一致する場合だけ中央へ複製する。転送メールの外側envelopeは保存時に除かれているため、
-中央のemail transportは推測せず`unknown`とする。
+完全一致する場合だけ中央へ複製する。v2はCloudflare EmailEventのSMTP envelope From/To、
+directかforwarded RFC822 partかという保存境界、outer message checksumを固定する。EmailEvent APIは
+信頼済みSPF/DKIM/DMARC結果を公開しないため、RFCヘッダから認証成功を推測せず
+`authenticationProvenance=not-exposed-by-cloudflare-email-event`、
+`sourceVerification=source_unverified`とする。旧v1の85 pairにはenvelope provenanceを補作せず、
+transport `unknown`のlegacy unverifiedとして扱う。
 
 既存履歴は保存時にR2 native SHA-256を指定していなかったため、bounded bodyから再計算した
 SHA-256をkey・pair・中央object checksumへ厳密に結び付ける。native checksumが存在するobjectは
@@ -115,9 +119,9 @@ SHA-256をkey・pair・中央object checksumへ厳密に結び付ける。native
 native checksumの有無をaggregate件数だけで報告し、欠落を値の不一致として扱わない。
 
 中央ではexternal source ID `v-point-pay-email`をcanonical `v-point-pay`へ対応させる。
-rawは`provider_message / exact`、JSONはrawへのlineageを持つ
+rawはprovider由来を主張しない`user_capture / unknown`、JSONはrawへのlineageを持つ
 `collector_derived / transformed`で、1 message unit・2 artifact・`email_batch` inventoryとして
-sealする。`producerVersion`と`sourceRunKey`は固定契約`vpoint-pay-email-r2-v1`に基づくため、
+sealする。`producerVersion`と`sourceRunKey`は固定契約`vpoint-pay-email-r2-v2`に基づくため、
 Importerのdeployment revisionが変わっても同一pairを同じrunへ冪等replayできる。
 
 `derived/v-point-pay-email-reconciliation/...`はVポイント本体の履歴との比較から作った別の
@@ -127,6 +131,7 @@ collector summaryであり、canonical sourceは`v-point`である。今回の�
 historical scanはHMAC署名付きopaque cursorを用いてR2 objectを1件ずつ走査し、`.json`ごとに
 pairを取り込む。`.eml`は対応JSON側で一緒に検証されるためscan上はskipする。応答とscriptは
 件数と固定failure codeだけを出し、source object key、個別hash、本文、値、tokenを出さない。
+import failure時はcontinuationを返さずcursorを進めないため、同じ入力cursorで同じpairをretryする。
 source R2へのwrite/deleteは行わない。
 
 ```sh

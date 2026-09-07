@@ -1292,7 +1292,7 @@ describe("sanitized source-usecase contract", () => {
     const { runId } = await createRun(
       "v-point-pay",
       "fixture-v-point-pay-email-pair",
-      "email-pair-vpoint-pay-email-r2-v1",
+      "email-pair-vpoint-pay-email-r2-v2",
     );
     const unitId = await unit(runId, "message", "notification");
     const rawBytes =
@@ -1320,8 +1320,8 @@ describe("sanitized source-usecase contract", () => {
     });
     const rawDescriptor = {
       artifactKey: "notification.eml",
-      artifactRole: "provider_message",
-      payloadFidelity: "exact",
+      artifactRole: "user_capture",
+      payloadFidelity: "unknown",
       containerKind: "single",
       lineageDisposition: "not_applicable",
       dataset: "notification-mail",
@@ -1342,7 +1342,7 @@ describe("sanitized source-usecase contract", () => {
       file: null,
       email: {
         transportShape: "unknown",
-        senderDomain: "prepaid.smbc-card.com",
+        senderDomain: null,
         receivedAtMs: 1_788_164_000_000,
         receivedAtBasis: "rfc_date",
         messageIdSha256: await sha256Hex(new TextEncoder().encode("fixture-message-id")),

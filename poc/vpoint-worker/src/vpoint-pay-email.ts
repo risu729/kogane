@@ -2,11 +2,12 @@ import PostalMime, { type Email } from "postal-mime";
 
 const VPOINT_PAY_SENDER = "info@prepaid.smbc-card.com";
 const MAX_RFC822_DEPTH = 2;
+const EVENT_SCHEMA_V2 = "vpoint-pay-email-event-v2";
 
 export type VPointPayEmailEventType = "usage" | "charge" | "balance-addition" | "declined";
 
 export interface VPointPayEmailEvent {
-  schemaVersion: "vpoint-pay-email-event-v1";
+  schemaVersion: "vpoint-pay-email-event-v1" | typeof EVENT_SCHEMA_V2;
   id: string;
   sourceMessageId: string | null;
   occurredAt: string;
@@ -17,12 +18,25 @@ export interface VPointPayEmailEvent {
   amountYen: number | null;
   usedPoints: number | null;
   balanceYen: number | null;
+  sourceProvenance?: VPointPayEmailSourceProvenance;
+}
+
+export interface VPointPayEmailSourceProvenance {
+  schemaVersion: "vpoint-pay-email-source-provenance-v1";
+  delivery: "direct" | "forwarded-rfc822";
+  storedMessageScope: "smtp-message" | "forwarded-rfc822-part";
+  sourceVerification: "source_unverified";
+  envelopeFrom: string;
+  envelopeTo: string;
+  outerMessageSha256: string;
+  authenticationProvenance: "not-exposed-by-cloudflare-email-event";
 }
 
 export interface ParsedVPointPayEmail {
   event: VPointPayEmailEvent;
   raw: Uint8Array;
   delivery: "direct" | "forwarded-rfc822";
+  outerMessageSha256: string;
 }
 
 export interface StoredVPointPayEmail {
@@ -35,7 +49,8 @@ export interface StoredVPointPayEmail {
 export async function parseVPointPayEmail(
   raw: ArrayBuffer | Uint8Array,
 ): Promise<ParsedVPointPayEmail | null> {
-  return parseCandidate(toBytes(raw), 0);
+  const bytes = toBytes(raw);
+  return parseCandidate(bytes, 0, await sha256Hex(bytes));
 }
 
 export function shouldForwardToMailbox(parsed: ParsedVPointPayEmail | null): boolean {
@@ -45,50 +60,92 @@ export function shouldForwardToMailbox(parsed: ParsedVPointPayEmail | null): boo
 export async function storeVPointPayEmail(options: {
   bucket: R2Bucket;
   parsed: ParsedVPointPayEmail;
+  envelopeFrom: string;
+  envelopeTo: string;
+  expectedRecipient: string;
 }): Promise<StoredVPointPayEmail> {
-  const { event, raw } = options.parsed;
+  const { raw } = options.parsed;
+  const envelopeFrom = canonicalMailbox(options.envelopeFrom);
+  const envelopeTo = canonicalMailbox(options.envelopeTo);
+  const expectedRecipient = canonicalMailbox(options.expectedRecipient);
+  if (!envelopeFrom || !envelopeTo || !expectedRecipient || envelopeTo !== expectedRecipient) {
+    throw new Error("vpoint_pay_email_envelope_invalid");
+  }
+  if (options.parsed.delivery === "direct" && envelopeFrom !== VPOINT_PAY_SENDER) {
+    throw new Error("vpoint_pay_email_envelope_sender_invalid");
+  }
+  const event: VPointPayEmailEvent = {
+    ...options.parsed.event,
+    schemaVersion: EVENT_SCHEMA_V2,
+    sourceProvenance: {
+      schemaVersion: "vpoint-pay-email-source-provenance-v1",
+      delivery: options.parsed.delivery,
+      storedMessageScope:
+        options.parsed.delivery === "direct" ? "smtp-message" : "forwarded-rfc822-part",
+      sourceVerification: "source_unverified",
+      envelopeFrom,
+      envelopeTo,
+      outerMessageSha256: options.parsed.outerMessageSha256,
+      // EmailEvent exposes the SMTP envelope and raw MIME, but no trusted SPF/DKIM result.
+      authenticationProvenance: "not-exposed-by-cloudflare-email-event",
+    },
+  };
   const date = event.occurredAt.slice(0, 10).replaceAll("-", "/");
   const prefix = `raw/v-point-pay-email/${date}/${event.id}`;
   const rawKey = `${prefix}.eml`;
   const normalizedKey = `${prefix}.json`;
   const normalized = new TextEncoder().encode(JSON.stringify(event));
   const normalizedSha256 = await sha256Hex(normalized);
-  const duplicate = (await options.bucket.head(rawKey)) !== null;
-  await Promise.all([
-    duplicate
-      ? Promise.resolve()
-      : options.bucket.put(rawKey, raw, {
-          httpMetadata: { contentType: "message/rfc822" },
-          customMetadata: {
-            source: "v-point-pay-email",
-            eventType: event.eventType,
-            sha256: event.id,
-          },
-          sha256: event.id,
-        }),
-    options.bucket.put(normalizedKey, normalized, {
-      httpMetadata: { contentType: "application/json" },
-      customMetadata: {
-        source: "v-point-pay-email",
-        eventType: event.eventType,
-        sha256: event.id,
-      },
-      sha256: normalizedSha256,
-    }),
+  const [existingRaw, existingNormalized] = await Promise.all([
+    options.bucket.head(rawKey),
+    options.bucket.head(normalizedKey),
   ]);
+  const duplicate = existingRaw !== null && existingNormalized !== null;
+  if ((existingRaw === null) !== (existingNormalized === null)) {
+    throw new Error("vpoint_pay_email_pair_incomplete");
+  }
+  if (!duplicate) {
+    await Promise.all([
+      options.bucket.put(rawKey, raw, {
+        httpMetadata: { contentType: "message/rfc822" },
+        customMetadata: {
+          source: "v-point-pay-email",
+          eventType: event.eventType,
+          sha256: event.id,
+          eventSchema: EVENT_SCHEMA_V2,
+          delivery: options.parsed.delivery,
+          sourceVerification: "source_unverified",
+        },
+        sha256: event.id,
+      }),
+      options.bucket.put(normalizedKey, normalized, {
+        httpMetadata: { contentType: "application/json" },
+        customMetadata: {
+          source: "v-point-pay-email",
+          eventType: event.eventType,
+          sha256: event.id,
+          eventSchema: EVENT_SCHEMA_V2,
+          delivery: options.parsed.delivery,
+          sourceVerification: "source_unverified",
+        },
+        sha256: normalizedSha256,
+      }),
+    ]);
+  }
   return { event, rawKey, normalizedKey, duplicate };
 }
 
 async function parseCandidate(
   raw: Uint8Array,
   depth: number,
+  outerMessageSha256: string,
 ): Promise<ParsedVPointPayEmail | null> {
   const email = await PostalMime.parse(raw, {
     attachmentEncoding: "arraybuffer",
     rfc822Attachments: true,
     forceRfc822Attachments: true,
   });
-  const direct = await normalize(email, raw, depth);
+  const direct = await normalize(email, raw, depth, outerMessageSha256);
   if (direct) return direct;
   if (depth >= MAX_RFC822_DEPTH) return null;
   for (const attachment of email.attachments) {
@@ -97,7 +154,7 @@ async function parseCandidate(
       typeof attachment.content === "string"
         ? new TextEncoder().encode(attachment.content)
         : new Uint8Array(attachment.content);
-    const nested = await parseCandidate(content, depth + 1);
+    const nested = await parseCandidate(content, depth + 1, outerMessageSha256);
     if (nested) return nested;
   }
   return null;
@@ -107,6 +164,7 @@ async function normalize(
   email: Email,
   raw: Uint8Array,
   depth: number,
+  outerMessageSha256: string,
 ): Promise<ParsedVPointPayEmail | null> {
   if (senderAddress(email) !== VPOINT_PAY_SENDER) return null;
   const subject = email.subject?.trim() ?? "";
@@ -147,7 +205,15 @@ async function normalize(
     event,
     raw,
     delivery: depth === 0 ? "direct" : "forwarded-rfc822",
+    outerMessageSha256,
   };
+}
+
+function canonicalMailbox(value: string): string | null {
+  const canonical = value.trim().toLowerCase();
+  return canonical.length > 0 && canonical.length <= 320 && /^[^\s@]+@[^\s@]+$/u.test(canonical)
+    ? canonical
+    : null;
 }
 
 function senderAddress(email: Email): string | null {

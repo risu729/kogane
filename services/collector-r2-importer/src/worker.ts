@@ -1594,7 +1594,8 @@ async function backfillVPointPayEmail(
       scannedObjectCount: 1,
       failedPairCount: 1,
       failureCode: safeCode(error),
-      nextCursor,
+      // A failed pair must be retried from the caller's unchanged cursor.
+      nextCursor: null,
     });
   }
 }
