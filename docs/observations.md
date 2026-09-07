@@ -584,14 +584,17 @@ within an institution. Reading a real account identity out of each payload
 is phase 4, and some payloads may not carry it at all. The schema comment
 should be corrected when that work lands.
 
-Two consequences hold today. `source_account` carries no institution
-identity, so every current-state view must partition by source as well:
-`src/queries.ts` keys the latest-balance window function on `(source_id,
-source_account, metric, instrument)` and matches valuations to positions
-on `(source_id, source_account, subject)`, because two institutions can
-both call an account "main" and numeric TSE security codes are shared
-across every Japanese broker. `test/api.test.ts` builds exactly that
-collision and asserts neither institution's balance hides the other's.
+Every current-state view partitions by source, even when two providers use
+the same account label. Complete balance/position/valuation containers first
+select the latest completely parsed snapshot by source, parser, dataset and
+fetch unit; empty snapshots participate in this selection. Latest balances then
+rank the rows within their source, parser family, unit, account, metric and
+instrument. Historical post-transaction balance measurements retain their
+separate event semantics. Valuations attach to positions only within the same
+parse snapshot and provider record, including market-specific records with equal
+security codes. `test/current-snapshots.test.ts` covers replacement, empty and
+incomplete captures, source/unit isolation, and valuation membership;
+`test/api.test.ts` also covers colliding account labels across institutions.
 
 ### `observed_at` is deliberately empty everywhere
 
@@ -1300,9 +1303,10 @@ artifact, and each run's warnings listed beside its observations.
 Phase 3 is done when:
 
 - Every dataset the deployed collectors emit either has a parser or an
-  explicit recorded decision not to parse it yet. Of the seven datasets
-  `poc/sbi-securities-worker` writes, three have parsers; the Vpass
-  statement datasets have none.
+  explicit recorded decision not to parse it yet. All seven SBI securities
+  datasets and Vpass statement pages now have parser routes. The current
+  registry and the source-specific evidence-only decisions are listed in
+  `poc/observation-pipeline/README.md`; MoneyForward remains pending separately.
 - Parsers have been run against the real R2 evidence, not only fixtures,
   and the results have been eyeballed against the provider's own screens
   for at least one period per source.

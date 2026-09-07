@@ -16,6 +16,7 @@
 // Formatting belongs to money.ts, which never uses floating point.
 
 import type { Store } from "./store.ts";
+import { CURRENT_SNAPSHOT, SNAPSHOT_CTES } from "./snapshot-query.ts";
 
 import type {
   ObservationKind,
@@ -287,6 +288,11 @@ export function currentTransactions(store: Store): TransactionRow[] {
                   PARTITION BY CASE
                     WHEN p.parser_name IN (
                            'sbi-vc-executions',
+                           'sbi-vc-cashflows',
+                           'mobile-suica-sf-history',
+                           'sbi-yen-detail-history',
+                           'sbi-foreign-trade-records',
+                           'sbi-domestic-trade-records',
                            'myjcb-credit-ledger',
                            'sony-bank-history-json',
                            'sony-bank-history-csv',
@@ -295,7 +301,11 @@ export function currentTransactions(store: Store): TransactionRow[] {
                            'sbi-shinsei-top-balances-and-activity',
                            'v-point-pay-notification-event'
                          ) AND t.external_id IS NOT NULL
-                      THEN json_array(fa.source_id, t.source_account, t.external_id)
+                      THEN json_array(fa.source_id, t.source_account,
+                        CASE WHEN p.parser_name IN (
+                          'sony-bank-history-json', 'sony-bank-history-csv'
+                        ) THEN 'sony-bank-deposit-history' ELSE p.parser_name END,
+                        t.external_id)
                     ELSE json_array('observation-row', t.id)
                   END
                   ORDER BY CASE json_extract(t.extra_json, '$._kogane.sourceView')
@@ -306,9 +316,7 @@ export function currentTransactions(store: Store): TransactionRow[] {
                     WHEN 'recent' THEN 1
                     ELSE 2
                   END,
-                  CASE WHEN p.parser_name = 'smbc-direct-transactions'
-                    THEN fa.fetched_at
-                  END DESC,
+                  fa.fetched_at DESC,
                   t.id DESC
                 ) AS rank_in_identity
          FROM transaction_observations t
@@ -367,7 +375,7 @@ export function currentTransactions(store: Store): TransactionRow[] {
 export function latestBalances(store: Store): BalanceRow[] {
   return store.db
     .query(
-      `WITH ranked_myjcb_snapshots AS (
+      `WITH ${SNAPSHOT_CTES}, ranked_myjcb_snapshots AS (
          SELECT p.fetch_artifact_id,
                 ROW_NUMBER() OVER (
                   PARTITION BY
@@ -425,7 +433,12 @@ export function latestBalances(store: Store): BalanceRow[] {
                 b.as_of, b.observed_at,
                 p.parser_name || '@' || p.parser_version AS parser,
                 ROW_NUMBER() OVER (
-                  PARTITION BY fa.source_id, b.source_account, b.metric, b.instrument
+                  PARTITION BY fa.source_id,
+                               CASE WHEN p.parser_name IN (
+                                 'sony-bank-history-json', 'sony-bank-history-csv'
+                               ) THEN 'sony-bank-deposit-history' ELSE p.parser_name END,
+                               fa.fetch_unit_key,
+                               b.source_account, b.metric, b.instrument
                   ORDER BY
                     CASE WHEN p.parser_name = 'myjcb-credit-past-month-balances'
                       THEN CAST(json_extract(b.extra_json, '$._kogane.detailMonth') AS INTEGER)
@@ -440,6 +453,7 @@ export function latestBalances(store: Store): BalanceRow[] {
          JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
          JOIN fetch_runs f ON f.id = fa.fetch_run_id
          WHERE ${CURRENT}
+           AND ${CURRENT_SNAPSHOT}
            AND (
              p.parser_name <> 'myjcb-credit-past-month-balances'
              OR fa.id IN (SELECT fetch_artifact_id FROM current_myjcb_snapshots)
@@ -475,14 +489,15 @@ export function balanceHistory(store: Store): BalanceHistoryRow[] {
 export function currentPositions(store: Store): PositionRow[] {
   return store.db
     .query(
-      `SELECT po.id, fa.source_id, po.source_account, po.security_code, po.security_name,
+      `WITH ${SNAPSHOT_CTES}
+       SELECT po.id, fa.source_id, po.source_account, po.security_code, po.security_name,
               po.market, po.quantity_text, po.quantity_scale, po.currency, po.as_of,
               p.parser_name || '@' || p.parser_version AS parser
        FROM position_observations po
        JOIN parse_runs p ON p.id = po.parse_run_id
        JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
        JOIN fetch_runs f ON f.id = fa.fetch_run_id
-       WHERE ${CURRENT}
+       WHERE ${CURRENT} AND ${CURRENT_SNAPSHOT}
        ORDER BY fa.source_id, po.source_account, po.security_code, po.id`,
     )
     .all() as PositionRow[];
@@ -491,7 +506,8 @@ export function currentPositions(store: Store): PositionRow[] {
 export function currentValuations(store: Store): ValuationRow[] {
   return store.db
     .query(
-      `SELECT v.id, fa.source_id, v.source_account, v.subject, v.metric,
+      `WITH ${SNAPSHOT_CTES}
+       SELECT v.id, fa.source_id, v.source_account, v.subject, v.metric,
               CAST(v.amount_minor AS TEXT) AS amount_minor,
               v.amount_text, v.currency, v.as_of,
               p.parser_name || '@' || p.parser_version AS parser
@@ -499,7 +515,7 @@ export function currentValuations(store: Store): ValuationRow[] {
        JOIN parse_runs p ON p.id = v.parse_run_id
        JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
        JOIN fetch_runs f ON f.id = fa.fetch_run_id
-       WHERE ${CURRENT}
+       WHERE ${CURRENT} AND ${CURRENT_SNAPSHOT}
        ORDER BY fa.source_id, v.source_account, v.subject, v.metric, v.id`,
     )
     .all() as ValuationRow[];
@@ -508,29 +524,43 @@ export function currentValuations(store: Store): ValuationRow[] {
 /**
  * Positions with the provider-reported valuations that describe them.
  *
- * Matched on (source, account, subject) rather than on the security code
- * alone, which is only unique within a provider. Each valuation keeps its own
+ * Matched within the same parse snapshot and provider row. Each valuation keeps its own
  * currency; they are never summed or converted, because a JPY figure and a USD
  * figure are two separate claims by the source.
  */
 export function positionsWithValuations(store: Store): PositionWithValuations[] {
-  const bySubject = new Map<string, ValuationRow[]>();
-  const key = (source: string, account: string, subject: string): string =>
-    JSON.stringify([source, account, subject]);
-  for (const valuation of currentValuations(store)) {
-    const bucket = bySubject.get(
-      key(valuation.source_id, valuation.source_account, valuation.subject),
-    );
-    if (bucket) bucket.push(valuation);
-    else
-      bySubject.set(key(valuation.source_id, valuation.source_account, valuation.subject), [
-        valuation,
-      ]);
+  const valuations = new Map(currentValuations(store).map((row) => [row.id, row]));
+  // Internal observation/parse identities never become API row fields. The
+  // source-specific locator guards also separate equal codes in two markets.
+  const pairs = store.db
+    .query(`
+    SELECT po.id AS position_id, v.id AS valuation_id
+    FROM position_observations po
+    JOIN valuation_observations v ON v.parse_run_id = po.parse_run_id
+      AND v.source_account = po.source_account AND v.subject = po.security_code
+    JOIN parse_runs p ON p.id = po.parse_run_id
+    WHERE CASE p.parser_name
+      WHEN 'sbi-foreign-cash-positions'
+        THEN v.raw_locator = po.raw_locator || '.evaluationProfitLoss'
+      WHEN 'sbi-domestic-cash-positions'
+        THEN CAST(substr(v.raw_locator, 28) AS INTEGER)
+          BETWEEN CAST(substr(po.raw_locator, 28) AS INTEGER)
+          AND CAST(substr(po.raw_locator, 28) AS INTEGER) + 422
+      ELSE 1
+    END
+  `)
+    .all() as { position_id: number; valuation_id: number }[];
+  const byPosition = new Map<number, ValuationRow[]>();
+  for (const pair of pairs) {
+    const valuation = valuations.get(pair.valuation_id);
+    if (!valuation) continue;
+    const bucket = byPosition.get(pair.position_id) ?? [];
+    bucket.push(valuation);
+    byPosition.set(pair.position_id, bucket);
   }
   return currentPositions(store).map((position) => ({
     position,
-    valuations:
-      bySubject.get(key(position.source_id, position.source_account, position.security_code)) ?? [],
+    valuations: byPosition.get(position.id) ?? [],
   }));
 }
 

@@ -182,6 +182,53 @@ only after every statement artifact in that card-month fetch unit has a current
 successful parse. A newer interrupted parse therefore cannot hide the last
 complete snapshot.
 
+Balance, position and valuation containers use the same completeness rule in
+`src/snapshot-query.ts`. Selection happens before joining observations, so a
+successful empty container removes previous rows and a missing account or
+instrument cannot survive from an older capture. The snapshot key is source,
+parser, dataset and Layer-A fetch unit; every matching artifact in a fetch run
+must have a successful current parse. Provider fetch time orders eligible runs,
+with append-only artifact order breaking ties. The current collectors write one
+artifact for each of these containers; the all-artifacts condition also prevents
+an interrupted multi-artifact parse from publishing a mixed snapshot.
+
+| Collector      | Complete container datasets                                                                            |
+| -------------- | ------------------------------------------------------------------------------------------------------ |
+| SBI securities | `domestic-cash-positions`, `foreign-cash-positions`, `account-assets-current`, `foreign-cash-balances` |
+| SBI VC Trade   | `position-summary`, `cash-balances`, `account-margin`                                                  |
+| SBI Shinsei    | `top-accounts-balance-and-activity`, `yen-deposit-account`                                             |
+| Sony Bank      | `gross-balance`                                                                                        |
+| SMBC Direct    | `balance-normalized`                                                                                   |
+
+An account or market inside one container is not a separate capture: disappearing
+rows must disappear together with that container's old snapshot. The two tolerant
+SBI foreign container parsers can skip unreadable containers, so warnings about
+unreadable rows or fields prevent a parse from establishing a complete snapshot.
+Warnings about exact decimal text without a minor-unit representation, or extra
+unmodelled fields preserved alongside all known metrics, do not imply missing
+measurements and do not block snapshot replacement. Other strict
+container parsers establish completeness on successful parsing. Position detail
+joins valuations only from the same parse and, for SBI positions, the same
+provider record locator; equal security codes in different markets cannot attach
+one another's valuations. These internal joins add no fields to the public API.
+
+Foreign positions require pagination-validating parser `0.3.0`: the collector
+captures page 1 only, so `hasNextPage` must be false and the pagination metadata
+must identify a valid first page. Earlier parser successes remain historical
+evidence and cannot establish current membership until successfully reparsed.
+An error on reparse does not resurrect an older unvalidated parse. A registry
+parity test makes future parser version changes update this eligibility rule.
+
+Historical transactions and after-transaction balances are not portfolio
+containers. Mobile Suica, SBI yen details, domestic/foreign trades and SBI VC
+cashflows collapse replayed transaction identities only in the current view.
+Identity is namespaced by source, source account and parser family. Fingerprint
+occurrence suffixes remain intact, and rows without an identity remain separate.
+Sony JSON/CSV history intentionally share one family, preserving the official CSV
+preference. An empty history capture does not erase previously observed events or
+their post-event balance measurements. MyJCB, V Point and Vpass retain their
+separate statement/run snapshot rules described above.
+
 The demo ingests 11 artifacts from 3 sources and produces 49 observations:
 14 transaction, 24 balance, 3 position, 8 valuation.
 

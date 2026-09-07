@@ -69,7 +69,7 @@ function valuationFor(options: {
 
 export const sbiForeignCashPositions: Parser = {
   name: "sbi-foreign-cash-positions",
-  version: "0.2.0",
+  version: "0.3.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "foreign-cash-positions";
@@ -81,6 +81,20 @@ export const sbiForeignCashPositions: Parser = {
     const balances = isObject(list) ? list["securitiesBalances"] : undefined;
     if (!Array.isArray(balances)) {
       throw new Error(`artifact ${artifact.sha256} is not a GetSecuritiesBalanceList data object`);
+    }
+    // The collector requests only page 1. A later page, a missing pagination
+    // contract or a has-next response cannot establish a complete portfolio.
+    const page = isObject(list) ? list["page"] : undefined;
+    if (
+      !isObject(page) ||
+      page["hasNextPage"] !== false ||
+      page["pageNum"] !== 1 ||
+      typeof page["pageSize"] !== "number" ||
+      !Number.isSafeInteger(page["pageSize"]) ||
+      page["pageSize"] < 1 ||
+      balances.length > page["pageSize"]
+    ) {
+      throw new Error("foreign-cash-positions: incomplete or invalid pagination metadata");
     }
     const warnings: string[] = [];
     const observations: Observation[] = [];
