@@ -2,6 +2,7 @@ import { ImportError } from "./error";
 import { importGlobalPassRun } from "./global-pass";
 import { importMyJcbRun } from "./myjcb";
 import { importMobileSuicaRun } from "./mobile-suica";
+import { importMoneyForwardRun } from "./moneyforward";
 import { importSbiRun } from "./sbi";
 import { importSbiShinseiRun } from "./sbi-shinsei";
 import { importSbiVcRun } from "./sbi-vc";
@@ -32,6 +33,45 @@ export default {
             : requiredString(input.continuation, "continuation_invalid", 8_000);
         const result = await importOneMyJcb(env, manifestKey, continuation);
         return json(result, result.status === "deferred" ? 202 : 200);
+      } catch (error) {
+        return errorResponse(error);
+      }
+    }
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/moneyforward/import-run" &&
+      url.search === ""
+    ) {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["manifestKey", "continuation"]);
+        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
+        const continuation =
+          input.continuation === undefined
+            ? undefined
+            : requiredString(input.continuation, "continuation_invalid", 8_000);
+        const result = await importOneMoneyForward(env, manifestKey, continuation);
+        return json(result, result.status === "deferred" ? 202 : 200);
+      } catch (error) {
+        return errorResponse(error);
+      }
+    }
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/moneyforward/backfill-page" &&
+      url.search === ""
+    ) {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["cursor", "limit"]);
+        const cursor =
+          input.cursor === undefined
+            ? undefined
+            : requiredString(input.cursor, "cursor_invalid", 12_000);
+        if (input.limit !== undefined && input.limit !== 1) {
+          throw new ImportError(400, "backfill_limit_must_be_one");
+        }
+        return json(await backfillMoneyForward(env, cursor));
       } catch (error) {
         return errorResponse(error);
       }
@@ -743,6 +783,275 @@ function constantTimeStringEqual(left: string, right: string): boolean {
     difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
   }
   return difference === 0;
+}
+
+function importOneMoneyForward(env: Env, manifestKey: string, continuation?: string) {
+  return importMoneyForwardRun({
+    bucket: env.MONEYFORWARD_SNAPSHOTS,
+    centralService: env.RAW_EVIDENCE,
+    centralToken: env.RAW_EVIDENCE_TOKEN_MONEYFORWARD,
+    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
+    importerVersion: env.IMPORTER_VERSION,
+    manifestKey,
+    ...(continuation ? { continuation } : {}),
+  });
+}
+
+interface MoneyForwardBackfillCursor {
+  v: 1;
+  scanCursor: string | null;
+  scanDone: boolean;
+  manifestKey?: string;
+  transfer?: string;
+}
+
+export async function backfillMoneyForward(
+  env: Env,
+  encodedCursor: string | undefined,
+): Promise<JsonObject> {
+  const state = encodedCursor
+    ? await decodeMoneyForwardCursor(encodedCursor, env.RAW_EVIDENCE_TOKEN_MONEYFORWARD)
+    : ({ v: 1, scanCursor: null, scanDone: false } satisfies MoneyForwardBackfillCursor);
+  if (state.manifestKey !== undefined) {
+    try {
+      const result = await importOneMoneyForward(env, state.manifestKey, state.transfer);
+      if (result.status === "deferred") {
+        const previousOffset = transferOffset(state.transfer);
+        if (result.nextOffset <= previousOffset) {
+          throw new ImportError(409, "transfer_cursor_did_not_advance");
+        }
+        return moneyForwardBackfillResponse({
+          scannedObjectCount: 0,
+          deferredManifestCount: 1,
+          nextCursor: await encodeMoneyForwardCursor(
+            { ...state, transfer: result.continuation },
+            env.RAW_EVIDENCE_TOKEN_MONEYFORWARD,
+          ),
+          result: safeMoneyForwardImportResult(result),
+        });
+      }
+      return moneyForwardBackfillResponse({
+        scannedObjectCount: 0,
+        importedManifestCount: 1,
+        nextCursor: await nextMoneyForwardScanCursor(state, env.RAW_EVIDENCE_TOKEN_MONEYFORWARD),
+        result: safeMoneyForwardImportResult(result),
+      });
+    } catch (error) {
+      return moneyForwardBackfillResponse({
+        scannedObjectCount: 0,
+        failedManifestCount: 1,
+        failureCode: safeCode(error),
+        nextCursor: encodedCursor ?? null,
+      });
+    }
+  }
+
+  const listed = await env.MONEYFORWARD_SNAPSHOTS.list({
+    prefix: "raw/moneyforward/",
+    limit: 1,
+    ...(state.scanCursor ? { cursor: state.scanCursor } : {}),
+  });
+  if (listed.objects.length > 1) throw new ImportError(409, "prefix_page_too_large");
+  const object = listed.objects[0];
+  const scanDone = !listed.truncated;
+  const scanCursor = listed.truncated ? listed.cursor : undefined;
+  if (listed.truncated && !scanCursor) throw new ImportError(409, "prefix_cursor_missing");
+  if (listed.truncated && scanCursor === state.scanCursor) {
+    throw new ImportError(409, "prefix_cursor_did_not_advance");
+  }
+  const continuation: MoneyForwardBackfillCursor = {
+    v: 1,
+    scanCursor: scanCursor ?? null,
+    scanDone,
+  };
+  if (!object) {
+    return moneyForwardBackfillResponse({
+      scannedObjectCount: 0,
+      nextCursor: await nextMoneyForwardScanCursor(
+        continuation,
+        env.RAW_EVIDENCE_TOKEN_MONEYFORWARD,
+      ),
+    });
+  }
+  if (!object.key.endsWith("/manifest.json")) {
+    return moneyForwardBackfillResponse({
+      scannedObjectCount: 1,
+      skippedManifestCount: 1,
+      nextCursor: await nextMoneyForwardScanCursor(
+        continuation,
+        env.RAW_EVIDENCE_TOKEN_MONEYFORWARD,
+      ),
+    });
+  }
+  try {
+    const result = await importOneMoneyForward(env, object.key);
+    if (result.status === "deferred") {
+      if (result.nextOffset <= 0) throw new ImportError(409, "transfer_cursor_did_not_advance");
+      return moneyForwardBackfillResponse({
+        scannedObjectCount: 1,
+        deferredManifestCount: 1,
+        nextCursor: await encodeMoneyForwardCursor(
+          { ...continuation, manifestKey: object.key, transfer: result.continuation },
+          env.RAW_EVIDENCE_TOKEN_MONEYFORWARD,
+        ),
+        result: safeMoneyForwardImportResult(result),
+      });
+    }
+    return moneyForwardBackfillResponse({
+      scannedObjectCount: 1,
+      importedManifestCount: 1,
+      nextCursor: await nextMoneyForwardScanCursor(
+        continuation,
+        env.RAW_EVIDENCE_TOKEN_MONEYFORWARD,
+      ),
+      result: safeMoneyForwardImportResult(result),
+    });
+  } catch (error) {
+    return moneyForwardBackfillResponse({
+      scannedObjectCount: 1,
+      failedManifestCount: 1,
+      failureCode: safeCode(error),
+      nextCursor: await encodeMoneyForwardCursor(state, env.RAW_EVIDENCE_TOKEN_MONEYFORWARD),
+    });
+  }
+}
+
+function safeMoneyForwardImportResult(
+  result: Awaited<ReturnType<typeof importOneMoneyForward>>,
+): JsonObject {
+  return result.status === "sealed"
+    ? {
+        source: result.source,
+        status: result.status,
+        centralRunId: result.centralRunId,
+        artifactCount: result.artifactCount,
+        sealed: result.sealed,
+        finalChunkAllObjectsReused: result.finalChunkAllObjectsReused,
+      }
+    : {
+        source: result.source,
+        status: result.status,
+        reason: result.reason,
+        artifactCount: result.artifactCount,
+        nextOffset: result.nextOffset,
+      };
+}
+
+function moneyForwardBackfillResponse(input: {
+  scannedObjectCount: number;
+  importedManifestCount?: number;
+  skippedManifestCount?: number;
+  deferredManifestCount?: number;
+  failedManifestCount?: number;
+  failureCode?: string;
+  nextCursor: string | null;
+  result?: JsonObject;
+}): JsonObject {
+  return {
+    source: "moneyforward-me",
+    scannedObjectCount: input.scannedObjectCount,
+    importedManifestCount: input.importedManifestCount ?? 0,
+    skippedManifestCount: input.skippedManifestCount ?? 0,
+    deferredManifestCount: input.deferredManifestCount ?? 0,
+    failedManifestCount: input.failedManifestCount ?? 0,
+    nextCursor: input.nextCursor,
+    truncated: input.nextCursor !== null,
+    ...(input.failureCode ? { failureCode: input.failureCode } : {}),
+    ...(input.result ? { result: input.result } : {}),
+  };
+}
+
+async function nextMoneyForwardScanCursor(
+  state: MoneyForwardBackfillCursor,
+  secret: string,
+): Promise<string | null> {
+  return state.scanDone
+    ? null
+    : encodeMoneyForwardCursor({ v: 1, scanCursor: state.scanCursor, scanDone: false }, secret);
+}
+
+async function encodeMoneyForwardCursor(
+  value: MoneyForwardBackfillCursor,
+  secret: string,
+): Promise<string> {
+  assertMoneyForwardCursor(value);
+  const payload = base64Url(new TextEncoder().encode(JSON.stringify(value)));
+  const signature = base64Url(
+    await hmacSha256(secret, new TextEncoder().encode(`moneyforward-scan-v1.${payload}`)),
+  );
+  return `moneyforward-scan-v1.${payload}.${signature}`;
+}
+
+async function decodeMoneyForwardCursor(
+  value: string,
+  secret: string,
+): Promise<MoneyForwardBackfillCursor> {
+  if (value.length > 12_000) throw new ImportError(400, "cursor_invalid");
+  const match = /^moneyforward-scan-v1\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/u.exec(value);
+  if (!match?.[1] || !match[2]) throw new ImportError(400, "cursor_invalid");
+  const expected = base64Url(
+    await hmacSha256(secret, new TextEncoder().encode(`moneyforward-scan-v1.${match[1]}`)),
+  );
+  if (!constantTimeStringEqual(expected, match[2])) throw new ImportError(400, "cursor_invalid");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(fromBase64Url(match[1])));
+  } catch {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new ImportError(400, "cursor_invalid");
+  }
+  const input = parsed as JsonObject;
+  exactKeys(input, ["v", "scanCursor", "scanDone", "manifestKey", "transfer"]);
+  const cursor = input as unknown as MoneyForwardBackfillCursor;
+  assertMoneyForwardCursor(cursor);
+  return cursor;
+}
+
+function assertMoneyForwardCursor(value: MoneyForwardBackfillCursor): void {
+  const scanStateValid = value.scanDone
+    ? value.scanCursor === null
+    : value.scanCursor === null ||
+      (typeof value.scanCursor === "string" &&
+        value.scanCursor.length > 0 &&
+        value.scanCursor.length <= 4_096 &&
+        !/[\x00-\x20\x7f]/u.test(value.scanCursor));
+  const hasManifest = value.manifestKey !== undefined;
+  const hasTransfer = value.transfer !== undefined;
+  if (
+    value.v !== 1 ||
+    typeof value.scanDone !== "boolean" ||
+    !scanStateValid ||
+    hasManifest !== hasTransfer ||
+    (hasManifest &&
+      (typeof value.manifestKey !== "string" ||
+        !/^raw\/moneyforward\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/manifest\.json$/u.test(
+          value.manifestKey,
+        ) ||
+        typeof value.transfer !== "string" ||
+        !value.transfer.startsWith("moneyforward-transfer-v1.") ||
+        value.transfer.length > 8_000 ||
+        /[\x00-\x20\x7f]/u.test(value.transfer)))
+  ) {
+    throw new ImportError(400, "cursor_invalid");
+  }
+}
+
+function transferOffset(transfer: string | undefined): number {
+  if (!transfer) return 0;
+  const parts = transfer.split(".");
+  if (parts.length !== 3) throw new ImportError(400, "cursor_invalid");
+  try {
+    const parsed = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(fromBase64Url(parts[1]!)),
+    ) as { offset?: unknown };
+    return typeof parsed.offset === "number" && Number.isSafeInteger(parsed.offset)
+      ? parsed.offset
+      : 0;
+  } catch {
+    throw new ImportError(400, "cursor_invalid");
+  }
 }
 
 interface MyJcbBackfillCursor {

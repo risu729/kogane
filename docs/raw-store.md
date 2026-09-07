@@ -115,6 +115,15 @@ seeds separate Kuebiko, collector-R2, and local-file import mechanisms. “Activ
 means evidence may be catalogued; it does not claim unattended collection is
 already implemented.
 
+`0014_moneyforward_collector_r2.sql` narrows MoneyForward collector replay to a
+dedicated `collector-r2-moneyforward` client, the `moneyforward-me` canonical
+source, and the exact storage template
+`raw/moneyforward/{date}/{run-id}/{artifact}` with an HMAC fingerprint key.
+The importer validates the complete private-R2 manifest and object inventory
+before creating central state, then transfers a bounded staged inventory and
+seals only after terminal reports are recorded. The source bucket is never
+modified or deleted by import or backfill.
+
 ### Immutable acquisition history
 
 | Entity                           | Meaning                                                                                  |
@@ -412,6 +421,11 @@ SMBC chunk resume. The same suite crosses the 1,000-item direct-seal boundary an
 seals 1,001 artifacts through the resumable staged-inventory API. All fixture
 payloads are invented and explicitly contain no credentials, real financial
 values, raw URLs, or query values.
+
+MoneyForward additionally has a real-D1 regression for the importer-shaped
+`provider_response / exact / not_applicable` descriptor, fixed contract
+`producerVersion`, unit and run terminal reports, and final seal. Its
+source-side validator tests use only invented HTML and manifest fixtures.
 
 ## Backfill order
 

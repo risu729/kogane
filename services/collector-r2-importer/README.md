@@ -1,6 +1,6 @@
 # Collector R2 importer
 
-各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suica、GLOBAL PASS、MyJCB、V Point、Vpassに対応する。
+各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suica、GLOBAL PASS、MyJCB、MoneyForward、V Point、Vpassに対応する。
 
 ## 再走査できる不変run
 
@@ -11,6 +11,43 @@ attemptの診断にだけ使う。SBI証券は`sbi-r2-v3`、SBI VC Trade・Sony�
 Mobile Suica・MyJCBは各`*-r2-v2`へ移行する。旧runは不変証跡として残し、新しい契約の
 runへ全R2を再走査する。同じ契約を別Importerデプロイから再送しても、run/report/artifact/
 sealの件数は変化しない。
+
+## MoneyForwardの境界
+
+MoneyForwardはprivate R2の`raw/moneyforward/YYYY/MM/DD/<run-id>/`をread-only
+outboxとして扱う。中央へはmigration `0014`が追加する専用credential
+`collector-r2-moneyforward`、canonical source `moneyforward-me`、exact storage policy
+`raw/moneyforward/{date}/{run-id}/{artifact}`の組合せだけを許可する。他sourceのtokenや
+routeは流用しない。source R2は取り込み成功後も変更・削除しない。
+
+Importerは中央stateを作る前に、固定schema `moneyforward-worker-poc-v1`、日付とUUIDを
+含むmanifest prefix、全prefix inventory、artifactの順序・件数・dataset/filename、statusと
+failureの補集合、content type、exact custom metadata、native checksum（存在時）と再計算
+SHA-256、UTF-8 HTMLを検証する。accounts indexの一意なdetail link数、detail pageのCSRF・
+account/service marker、月別fragmentの年月とHTML fragment境界も相互照合し、未知fieldや
+不完全な関係はfail closedにする。artifactは個別8 MiB、manifestを含むrunは合計64 MiBで
+制限し、Worker memoryへ無制限に保持しない。
+
+収集HTMLはprovider responseをtransport decode後に保存したbytesであり、中央でも再serialize
+せず`provider_response / exact / not_applicable`として保持する。ただしstorage originには
+具体的なobject keyを残さず、専用HMAC key v1で作るfingerprintだけを記録する。中央用manifest
+はfailure messageを固定codeへ正規化した生成物として別artifactにする。本文、object key、
+個別hash、金融値、認証値をログや運用出力へ出さない。
+
+一requestあたり5 artifactを転送し、開始時に完全inventoryとdigestを固定する。継続tokenは
+version、manifest、中央run/unit、inventory digest、offsetをHMACで束縛する。最終chunkだけで
+unit/run terminal reportとsealを行う。terminal reportの`producerVersion`はdeployment revision
+ではなく固定`moneyforward-r2-v1`で、同じmanifestを異なるImporter deploymentから再送しても
+immutable reportへ収束する。deployment revisionは失敗・中断attemptの診断にだけ残す。
+backfill scan cursorもversioned HMACで署名し、長さ・page数・offsetを制限し、cursorまたは
+transfer offsetが停滞した応答を拒否する。対象manifestがsealされるまでsource scan位置を
+進めない。
+
+2026-09-07にlocalhost限定の一時Workerとproduction R2のread-only bindingで全objectを集計監査
+した。10 manifests、530 data artifacts（accounts index 10、account detail 40、monthly fragment
+480）の全件がstrict validatorを通過し、statusはsuccess 10 / partial 0 / failed 0だった。
+監査出力は件数と固定failure codeだけで、本文、object key、個別hash、金融値、secretを含めず、
+source R2を変更していない。`bun run audit:moneyforward-r2`で同じ境界を再検証できる。
 
 ## Vpassの境界
 
@@ -111,6 +148,12 @@ SBI新生銀行はmanifest込み最大6 objectで、中央呼び出しは最大1
 V Pointは1 objectずつ走査し、小runはmanifest pageで同期sealする。大runは固定したstaged inventoryへ最大8 artifactずつ転送し、HMAC署名済みcursorで同じmanifestのoffsetを再開する。途中chunkではR2 scan cursorを進めず、最終chunkのseal後だけ次のsource objectへ移る。ingest契約v3への変更時にcursor envelopeも`vpoint-v4`へ更新し、旧runの非ゼロoffsetを新runへ適用できないようfail closedにした。failed manifestは自由形式messageを中央へ残さず、失敗証拠1 objectとしてsealする。scriptは管理tokenをmode 0600のローカルfileからだけ読み、opaque cursorをmode 0600で原子的に保存する。
 
 GLOBAL PASSのdaily小runは同期転送する。12 artifactを超える即時importは中央stateを作らず`202 deferred`を返す。backfillはmanifestを見つけたページでstaged inventoryを開始し、1回につき10 artifactを転送する。cursorはR2のscan cursorにmanifest keyとoffsetを加えたopaque値で、同じmanifestの続きではR2を再走査せず、最終chunkをsealしてから次のsource objectへ進む。scriptは`deferredManifestCount`を正常な進捗として数え、cursorが進まない応答を拒否する。
+
+MoneyForwardは1 manifestに最大833 data artifactsを許容するため、backfillでは完全inventoryを
+固定して5 artifactずつ転送する。署名済みcursorがscan位置と処理中manifestのtransfer tokenを
+保持し、terminal reportとsealが完了した応答だけ次のsource objectへ進む。collector側scriptは
+opaque cursorをmode 0600のlocal stateへ原子的に保存し、10万page上限とstagnation guardを
+適用する。
 
 ## 検証とデプロイ
 
@@ -290,11 +333,36 @@ poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
 poc/mobile-suica-worker/scripts/backfill-raw-evidence.sh
 poc/globalpass-worker/scripts/backfill-raw-evidence.sh
 poc/myjcb-worker/scripts/backfill-raw-evidence.sh
+poc/moneyforward-worker/scripts/backfill-raw-evidence.sh
 poc/vpoint-worker/scripts/backfill-raw-evidence.sh
 poc/vpass-json/scripts/backfill-raw-evidence.sh
 ```
 
 source R2はbackfill完了後も自動削除しない。
+
+### MoneyForwardの本番適用
+
+このPRはdeployせず、既存MoneyForward Cronも変更しない。本番適用時は次を直列に行う。
+
+1. 中央raw-evidenceへmigration `0014`を適用して`kogane-ingest`をdeployし、
+   `verify-moneyforward-route.sh`で専用route/policy/aliasが各1件であることだけを確認する。
+2. `collector-r2-moneyforward` credentialを生成し、Importerへ
+   `RAW_EVIDENCE_TOKEN_MONEYFORWARD`として同期した後、Importer v17をdeployする。他source
+   tokenは流用しない。
+3. MoneyForward collectorをService Binding追加版へdeployする。既存`15 21 * * *`は追加・
+   削除・変更せず、GitHub Actions cronも追加しない。
+4. `bun run audit:moneyforward-r2`を再実行し、strict validation failureが0であることを確認する。
+   source inventoryはobject種別件数と集約checksumだけで記録し、object key、個別hash、本文、
+   金融値、認証値を出力しない。
+5. `poc/moneyforward-worker/scripts/backfill-raw-evidence.sh`で最初のmanifestをsealするcanary後、
+   full backfillを完走する。中央D1ではMoneyForwardのrun、terminal report、sealed run、artifact
+   の件数だけを確認し、descriptorからterminal report、sealまでの関係を検証する。
+6. cursorが完了時に削除された状態から再走査し、中央run/seal/artifact件数が不変であることを
+   確認する。attempt/reuse記録は増えてよい。source R2の事前・事後inventoryは一致しなければ
+   ならない。
+
+失敗時はvalidatorやsource policyを緩和せず、そのmanifestの手前に残ったcursorから再開する。
+migrationとsource R2はrollback・削除しない。
 
 ### MyJCBの本番適用
 
