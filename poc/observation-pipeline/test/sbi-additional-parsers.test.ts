@@ -202,6 +202,20 @@ describe("sbi-domestic-cash-positions", () => {
     );
   });
 
+  test("a complete MTS response accepts its returned end cursor but not an interior cursor", () => {
+    const body = parsedFixture(meta.dataset!);
+    const payload = Uint8Array.from(atob(body["payloadBase64"] as string), (c) => c.charCodeAt(0));
+    payload.set(payload.slice(27, 30), 24);
+    body["payloadBase64"] = btoa(String.fromCharCode(...payload));
+    expect(sbiDomesticCashPositions.parse(encoded(body), meta).observations.length).toBeGreaterThan(
+      0,
+    );
+    // Cursor/total agreement alone must not admit a suffix-only response.
+    payload.set(new TextEncoder().encode("002002"), 24);
+    body["payloadBase64"] = btoa(String.fromCharCode(...payload));
+    expect(() => sbiDomesticCashPositions.parse(encoded(body), meta)).toThrow("incomplete");
+  });
+
   test("wrapper drift is rejected rather than partially parsed", () => {
     const body = { ...parsedFixture(meta.dataset!), futureField: true };
     expect(() => sbiDomesticCashPositions.parse(encoded(body), meta)).toThrow("schema drift");
@@ -261,6 +275,48 @@ describe("sbi-account-assets-current", () => {
 
 describe("sbi-yen-detail-history", () => {
   const meta = artifact("yen-detail-history");
+
+  test("legacy direct pages require complete provider metadata and retain direct raw locators", () => {
+    const bundle = parsedFixture(meta.dataset!);
+    const page = (bundle["pages"] as Record<string, unknown>[])[0]!;
+    const result = sbiYenDetailHistory.parse(encoded(page), meta);
+    expect(result.observations).toHaveLength(2);
+    expect(result.observations[0]?.rawLocator).toBe("json:$.depositRecordList[0]");
+    expect(result.observations[0]?.extra["_kogane"]).toMatchObject({
+      sourceEnvelope: "legacy-single-page",
+    });
+    for (const change of [
+      { pageCount: 2 },
+      { pageNumber: 2 },
+      { totalCount: 3 },
+      { exceededMaxCount: true },
+      { isExceededMaxCount: true },
+    ]) {
+      expect(() => sbiYenDetailHistory.parse(encoded({ ...page, ...change }), meta)).toThrow(
+        "complete single page",
+      );
+    }
+    expect(() => sbiYenDetailHistory.parse(encoded({ ...page, pageSize: 1 }), meta)).toThrow(
+      "depositRecordList",
+    );
+    expect(() => sbiYenDetailHistory.parse(encoded({ ...page, newField: true }), meta)).toThrow(
+      "fields changed",
+    );
+    const { exceededMaxCount: _alias, ...singleFlagPage } = page;
+    const singleFlag = sbiYenDetailHistory.parse(encoded(singleFlagPage), meta);
+    expect(singleFlag.observations).toHaveLength(2);
+    expect(singleFlag.observations[0]?.extra["_kogane"]).toMatchObject({
+      providerLimitFlag: "isExceededMaxCount",
+    });
+    expect(() =>
+      sbiYenDetailHistory.parse(encoded({ ...singleFlagPage, isExceededMaxCount: true }), meta),
+    ).toThrow("complete single page");
+    const { isExceededMaxCount: _required, ...noFlags } = singleFlagPage;
+    expect(() => sbiYenDetailHistory.parse(encoded(noFlags), meta)).toThrow("fields changed");
+    expect(() =>
+      sbiYenDetailHistory.parse(encoded({ ...singleFlagPage, totalCount: 3 }), meta),
+    ).toThrow("complete single page");
+  });
 
   test("maps exact provider ids, dates, directions, and transaction types", () => {
     const result = sbiYenDetailHistory.parse(fixture(meta.dataset!), meta);

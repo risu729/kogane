@@ -2,12 +2,22 @@
 // Amount strings retain exact minor units; formatting never changes these values.
 export type ObservationKind = "transaction" | "balance" | "position" | "valuation";
 
+/** Production list responses add this coverage record; local fixture APIs may omit it. */
+export interface ApiCoverage {
+  limit: number;
+  truncated: boolean;
+  /** Artifact pages use a descending, immutable artifact-id cursor. */
+  nextCursor?: string | null;
+}
+
 export interface ApiMetadata {
+  /** Registered parsing jobs only; not collector freshness or full source coverage. */
+  parsingHealth?: { pending: number; running: number; failed: number };
   apiVersion: 1;
   source: {
-    kind: "local-store";
+    kind: "local-store" | "central-store";
     /** Synthetic is an explicit assertion by an isolated fixture-only startup. */
-    classification: "unknown" | "synthetic";
+    classification: "unknown" | "synthetic" | "financial";
   };
   capabilities: {
     readOnly: true;

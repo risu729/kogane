@@ -34,11 +34,40 @@ Vpass's two suffixes are disjoint, so the two rules do not produce conflicting n
 
 ## Missed-event repair
 
-The Cloudflare Cron `23 19 * * 0` runs weekly at Sunday 19:23 UTC (Monday 04:23 JST). It seeds one repair scan per source. A repair message lists at most 50 R2 objects, emits each discovered terminal as an independent import message, and independently emits the next scan cursor. Therefore, a malformed terminal run can retry and reach the DLQ without blocking later object keys. If a repair-chain message itself is lost, the next weekly scan starts from the beginning; idempotent import makes this safe.
+The Cloudflare Cron `23 19 * * SUN` runs weekly at Sunday 19:23 UTC (Monday 04:23 JST). It seeds one repair scan per source. A repair message lists at most 50 R2 objects, emits each discovered terminal as an independent import message, and independently emits the next scan cursor. Therefore, a malformed terminal run can retry and reach the DLQ without blocking later object keys. If a repair-chain message itself is lost, the next weekly scan starts from the beginning; idempotent import makes this safe.
 
 No GitHub Actions schedule is used.
 
-## Provisioning (not performed by this change)
+## Production activation: 2026-09-07
+
+The authorized production rollout created the main queue `357f6274ad564f31807b854ebcb7d360` and DLQ `471f0074e8da498f835cfc33904ff44e`. Importer version `75cc8c7e-88f5-436f-a64b-9e796b071f0a` successfully attached the producer, one consumer, and `23 19 * * SUN` Cron. The earlier numeric Sunday expression (`0`) was rejected by Cloudflare; using the documented day name fixed deployment. No source collector schedule was changed.
+
+All 13 managed notification rules across 12 buckets were created and individually verified against their exact account/bucket/queue/filter/actions/description. Their cleanup authority is retained in the ignored mode-0600 state file described below. Exactly 12 repair seed messages were accepted by the Queue API to start the historical reconciliation. This starts an asynchronous paginated scan and is not a claim that every historical run has finished importing.
+
+Operational verification uses aggregate output only:
+
+```sh
+bun scripts/r2-reconciler-ops.ts status
+bun scripts/r2-reconciler-ops.ts watch 300
+# Only when another full repair scan is intended:
+bun scripts/r2-reconciler-ops.ts seed I_UNDERSTAND_THIS_CHANGES_CLOUDFLARE
+```
+
+`status` reads both queues and their best-effort backlog metrics. `watch` keeps raw tail events in memory and emits only validated reconciler lifecycle/source/outcome/attempt aggregates; it discards other logs, object keys, message bodies, and credentials. It stops its tail process after the requested 10–900 seconds. `seed` uses the same twelve bounded seed messages as the weekly Cron, and never modifies source R2 objects. The helper uses the official [Queue metrics](https://developers.cloudflare.com/api/resources/queues/methods/get_metrics/) and [message batch](https://developers.cloudflare.com/api/resources/queues/subresources/messages/methods/bulk_push/) APIs.
+
+Deployment validation: 280 tests passed, zero failed; generated bindings and TypeScript check passed. No cleanup or queue deletion was performed during activation.
+
+The initial 300-second tail observed 31 processed events: 13 repair pages (all twelve sources reached), five deferred import continuations, and 13 sealed import outcomes (GLOBAL PASS 9, Vpass 1, V Point 3), with zero retry outcomes in that sample. At 2026-09-07 14:22:38 UTC the queue metrics showed 127 outstanding messages and DLQ zero. The backlog includes further historical scan and import work; completion and historical poison-message status were not yet established. The consumer's live settings matched batch size 1, concurrency 1, five retries, and the dedicated DLQ. A second notification-helper invocation verified all 13 rules without creating duplicates.
+
+Follow-up at 2026-09-07 14:39:18 UTC: outstanding messages 114, DLQ zero, all 13 rules reverified, and the live Cron still `23 19 * * SUN`. The oldest-message timestamp advanced from `1788790658901` to `1788791293932` between the 14:37 and 14:39 checks, consistent with ongoing queue progress; metrics are best-effort. A bounded 120-second tail received no events and no child-process failure, so it did not establish source-specific success/error counts for that interval. No additional repair seeds were sent. Historical reconciliation is still outstanding, and a zero DLQ count is not proof that every source succeeded.
+
+The V Point Pay writer side of #105 was also deployed on 2026-09-07: `kogane-vpoint-collector-poc` version `89bcdeee-e128-42df-b936-d214c427906b` replaces `d56d1b92-7afe-4504-a9ad-e24727b31d27` (uploaded before the #105 merge). The clean merged V Point subtree writes EML before terminal JSON. All 41 V Point tests, generated types/TypeScript, and deployment dry run passed, including partial-pair failure recovery. Deployment used `--keep-vars`; its existing `15 21 * * *` collector Cron and bindings were retained. No collection, email, secret update, or route change was triggered for verification.
+
+Final bounded queue audit at 2026-09-07 15:08 UTC: backlog 112, DLQ zero, Cron and single-consumer settings unchanged. A non-destructive peek returned a 12-message sample: GLOBAL PASS imports 8, Vpass import 1 and repair page 1, V Point imports 2; every sampled attempt count was zero. The 90-second tail again received no events. These samples do not establish per-source reconciler errors or a complete drain. Serial concurrency, independent historical pages, and multi-chunk imports are expected to take time; a specific runtime bottleneck was not established, and best-effort oldest-message timestamps were not monotonic between checks. No reseeding, acknowledgements, purges, or queue changes were performed.
+
+The same audit found MoneyForward already had 10 sealed successful Layer A runs, with 480 monthly HTML artifacts, 40 account-detail artifacts, and 10 accounts-index artifacts. Its missing Layer B coverage was a separate MIME-routing mismatch: the central importer deliberately declares exact HTML bytes as `text/html`, while the parsers accepted only `text/html; charset=utf-8`. The prepared parser fix accepts both exact declarations while preserving strict UTF-8 and all metadata/body checks (monthly parser 2.0.1, evidence parser 1.0.1); 12 parser tests and an actual-workerd D1/R2 routing regression passed. This audit does not claim that all twelve sources have completed Layer B parsing. The latest successful-parse coverage still showed eleven source IDs before the fix's deployment.
+
+## Provisioning
 
 The checked-in notification helper defaults to a read-only plan. Review current resources before any change:
 
@@ -79,10 +108,10 @@ The commands and message shape follow Cloudflare's current official documentatio
 
 ## Cleanup inventory and order
 
-This PR does not create any Cloudflare resource. If the reconciler is deployed later, its complete cleanup set is:
+The complete cleanup set for the deployed reconciler is:
 
 1. 13 R2 notification rules across 12 source buckets.
-2. Cron Trigger `23 19 * * 0` on `kogane-collector-r2-importer`.
+2. Cron Trigger `23 19 * * SUN` on `kogane-collector-r2-importer`.
 3. Queue producer binding `OUTBOX_RECONCILER_QUEUE` and consumer for `kogane-r2-outbox-reconciler`.
 4. Queue `kogane-r2-outbox-reconciler`.
 5. DLQ `kogane-r2-outbox-reconciler-dlq` and any retained poison messages.

@@ -19,7 +19,7 @@ describe("production evidence contract", () => {
     for (const value of [
       { ...meta, apiVersion: 1 },
       { ...meta, source: { kind: "local-store", classification: "synthetic" } },
-      { ...meta, capabilities: { ...meta.capabilities, parsedObservations: true } },
+      { ...meta, capabilities: { ...meta.capabilities, parsedObservations: "true" } },
       { ...meta, capabilities: { ...meta.capabilities, liveCollectors: true } },
       { ...meta, sources: [meta.sources[0], meta.sources[0]] },
       { ...meta, sources: [] },

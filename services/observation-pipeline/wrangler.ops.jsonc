@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kogane-observation-ops-local",
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "compatibility_date": "2026-09-07",
+  "services": [
+    { "binding": "OBSERVATIONS", "service": "kogane-observation-pipeline", "remote": true }
+  ]
+}

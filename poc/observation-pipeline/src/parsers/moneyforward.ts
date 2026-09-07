@@ -20,7 +20,9 @@ type HtmlNode = MoneyForwardDomNode;
 type HtmlElement = MoneyForwardDomNode & { tagName: string };
 
 const SOURCE = "moneyforward-me";
-const MIME = "text/html; charset=utf-8";
+// Layer A verifies the source UTF-8 MIME, then declares its exact-byte central
+// descriptor as text/html. Both forms still pass strict UTF-8 decoding below.
+const isHtmlMime = (mime: string) => mime === "text/html" || mime === "text/html; charset=utf-8";
 const MONTHLY_KEY = /^account-(0[1-9]|[1-5]\d|6[0-4])-month-(\d{4}-(?:0[1-9]|1[0-2]))\.html$/u;
 const DETAIL_KEY = /^account-detail-(0[1-9]|[1-5]\d|6[0-4])\.html$/u;
 const ISO_DATE = /\d{4}-\d{2}-\d{2}/gu;
@@ -51,13 +53,13 @@ const EMPTY_SURFACE = [
 export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtmlParser): Parser {
   return {
     name: "moneyforward-monthly-transactions",
-    version: "2.0.0",
+    version: "2.0.1",
 
     accepts(artifact: ArtifactMeta): boolean {
       return (
         artifact.sourceId === SOURCE &&
         artifact.dataset === "monthly-transactions" &&
-        artifact.mime === MIME
+        isHtmlMime(artifact.mime)
       );
     },
 
@@ -197,13 +199,13 @@ export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtm
 export function createMoneyForwardEvidenceOnly(parseHtml: MoneyForwardHtmlParser): Parser {
   return {
     name: "moneyforward-canonical-evidence-boundary",
-    version: "1.0.0",
+    version: "1.0.1",
 
     accepts(artifact: ArtifactMeta): boolean {
       return (
         artifact.sourceId === SOURCE &&
         (artifact.dataset === "accounts-index" || artifact.dataset === "account-detail") &&
-        artifact.mime === MIME
+        isHtmlMime(artifact.mime)
       );
     },
 
@@ -280,7 +282,7 @@ function requireAccountIdentity(artifact: ArtifactMeta): string {
 function requireBaseMetadata(artifact: ArtifactMeta): void {
   if (
     artifact.sourceId !== SOURCE ||
-    artifact.mime !== MIME ||
+    !isHtmlMime(artifact.mime) ||
     artifact.statementState !== null ||
     artifact.period !== null ||
     artifact.url !== null

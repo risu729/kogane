@@ -61,10 +61,17 @@ const warnings = object<Warnings>({
   parsed: boolean,
 });
 const metadata = object<ApiMetadata>({
+  parsingHealth: optional(
+    object<NonNullable<ApiMetadata["parsingHealth"]>>({
+      pending: identifier,
+      running: identifier,
+      failed: identifier,
+    }),
+  ),
   apiVersion: literal(1),
   source: object<ApiMetadata["source"]>({
-    kind: literal("local-store"),
-    classification: literal("unknown", "synthetic"),
+    kind: literal("local-store", "central-store"),
+    classification: literal("unknown", "synthetic", "financial"),
   }),
   capabilities: object<ApiMetadata["capabilities"]>({
     readOnly: literal(true),
@@ -262,6 +269,20 @@ const endpoints: Record<string, Check<unknown>> = {
 
 /** Additive fields are allowed; required fields and their nullability are checked. */
 export function validApiResponse(path: string, value: unknown): boolean {
+  if (record(value) && Object.hasOwn(value, "coverage")) {
+    const c = value.coverage;
+    if (
+      !record(c) ||
+      !identifier(c.limit) ||
+      !boolean(c.truncated) ||
+      !(
+        c.nextCursor === undefined ||
+        c.nextCursor === null ||
+        (typeof c.nextCursor === "string" && /^[1-9]\d*$/.test(c.nextCursor))
+      )
+    )
+      return false;
+  }
   const check = Object.hasOwn(endpoints, path) ? endpoints[path] : undefined;
   if (check) return check(value);
   if (/^\/api\/artifacts\/\d+$/u.test(path)) {

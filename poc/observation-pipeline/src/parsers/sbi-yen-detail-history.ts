@@ -59,7 +59,7 @@ const RECORD_KEYS = [
 
 export const sbiYenDetailHistory: Parser = {
   name: "sbi-yen-detail-history",
-  version: "1.0.0",
+  version: "1.0.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "yen-detail-history";
@@ -67,7 +67,53 @@ export const sbiYenDetailHistory: Parser = {
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
     const body: unknown = JSON.parse(decodeUtf8(bytes));
-    const bundle = exactObject(body, BUNDLE_KEYS, "bundle");
+    const legacy =
+      isObject(body) &&
+      !Object.hasOwn(body, "schemaVersion") &&
+      Object.hasOwn(body, "depositRecordList");
+    let input = body;
+    let legacySingleLimitFlag = false;
+    if (legacy) {
+      // Earlier direct responses contain only the primary isExceededMaxCount
+      // flag. Recognize that exact schema, with an explicit false still required.
+      // Canonical bundles remain strict about both agreeing flags.
+      legacySingleLimitFlag = !Object.hasOwn(body, "exceededMaxCount");
+      const original = exactObject(
+        body,
+        legacySingleLimitFlag ? PAGE_KEYS.filter((key) => key !== "exceededMaxCount") : PAGE_KEYS,
+        "legacy page",
+      );
+      const page = legacySingleLimitFlag
+        ? { ...original, exceededMaxCount: original["isExceededMaxCount"] }
+        : original;
+      const records = page["depositRecordList"];
+      const empty = page["totalCount"] === 0;
+      if (
+        !(
+          (page["pageCount"] === 1 && page["pageNumber"] === 1) ||
+          (empty && page["pageCount"] === 0 && page["pageNumber"] === 0)
+        ) ||
+        !Array.isArray(records) ||
+        records.length !== page["totalCount"] ||
+        page["exceededMaxCount"] !== false ||
+        page["isExceededMaxCount"] !== false
+      ) {
+        throw new Error("legacy yen history is not a complete single page");
+      }
+      // Reuse all canonical page/record validation only after direct metadata
+      // proves single-page coverage. Bytes and raw locators remain the original.
+      input = {
+        schemaVersion: SCHEMA_VERSION,
+        pageCount: 1,
+        pageSize: page["pageSize"],
+        totalCount: page["totalCount"],
+        complete: true,
+        pageLimitExceeded: false,
+        rowLimitExceeded: false,
+        pages: [page],
+      };
+    }
+    const bundle = exactObject(input, BUNDLE_KEYS, "bundle");
     if (bundle["schemaVersion"] !== SCHEMA_VERSION) {
       throw new Error(`artifact ${artifact.sha256} has an unsupported yen history schema`);
     }
@@ -190,13 +236,20 @@ export const sbiYenDetailHistory: Parser = {
           currency: "JPY",
           description: description || detail,
           asOf,
-          rawLocator: `json:$.pages[${pageIndex}].depositRecordList[${recordIndex}]`,
+          rawLocator: legacy
+            ? `json:$.depositRecordList[${recordIndex}]`
+            : `json:$.pages[${pageIndex}].depositRecordList[${recordIndex}]`,
           extra: {
             ...record,
             _kogane: {
               direction: direction === "入金" ? "credit" : "debit",
               transactionType,
-              bundlePageIndex: pageIndex,
+              ...(legacy
+                ? {
+                    sourceEnvelope: "legacy-single-page",
+                    ...(legacySingleLimitFlag ? { providerLimitFlag: "isExceededMaxCount" } : {}),
+                  }
+                : { bundlePageIndex: pageIndex }),
               providerPageNumber,
             },
           },

@@ -79,11 +79,13 @@ export async function getJson<T>(path: string, signal: AbortSignal): Promise<T> 
         ? "認証が必要です。接続先でログインし直してから、再読み込みしてください。"
         : response.status === 403
           ? "このデータを表示する権限がありません。接続先のアクセス権を確認してください。"
-          : response.status === 404
-            ? "指定されたデータが見つかりません。一覧を更新して確認してください。"
-            : response.status === 429
-              ? "リクエストが集中しています。少し待ってから再試行してください。"
-              : "データを取得できませんでした。時間をおいて再試行してください。";
+          : response.status === 413
+            ? "保存記録が表示上限を超えています。この画面では一部の数字を完全な結果として表示できません。取得履歴から原本を確認してください。"
+            : response.status === 404
+              ? "指定されたデータが見つかりません。一覧を更新して確認してください。"
+              : response.status === 429
+                ? "リクエストが集中しています。少し待ってから再試行してください。"
+                : "データを取得できませんでした。時間をおいて再試行してください。";
     throw new ApiError(response.status, message);
   }
   if (
@@ -105,7 +107,7 @@ export async function getJson<T>(path: string, signal: AbortSignal): Promise<T> 
       "受信したデータを読み取れませんでした。再読み込みしてください。",
     );
   }
-  if (!validApiResponse(path, value)) {
+  if (!validApiResponse(path.split("?", 1)[0]!, value)) {
     throw new ApiError(
       response.status,
       "受信したデータの形式が対応していません。接続先を確認してください。",
@@ -162,9 +164,11 @@ export function usePositions(): UseQueryResult<{ positions: PositionWithValuatio
 }
 
 export function useArtifacts(): UseQueryResult<{ artifacts: ArtifactRow[] }, Error> {
+  const cursor = new URLSearchParams(window.location.search).get("cursor");
+  const path = `/api/artifacts${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`;
   return useQuery({
-    queryKey: ["artifacts"],
-    queryFn: ({ signal }) => getJson<{ artifacts: ArtifactRow[] }>("/api/artifacts", signal),
+    queryKey: ["artifacts", cursor],
+    queryFn: ({ signal }) => getJson<{ artifacts: ArtifactRow[] }>(path, signal),
   });
 }
 

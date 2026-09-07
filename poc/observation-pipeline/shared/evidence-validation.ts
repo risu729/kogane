@@ -111,7 +111,7 @@ const meta = object<EvidenceMeta>({
   capabilities: object<EvidenceMeta["capabilities"]>({
     readOnly: literal(true),
     rawEvidence: literal(true),
-    parsedObservations: literal(false),
+    parsedObservations: (value): value is boolean => typeof value === "boolean",
     liveCollectors: literal(false),
   }),
   sources: array(object<EvidenceMeta["sources"][number]>({ id: isEvidenceSourceId, label: text })),

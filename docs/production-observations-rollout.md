@@ -1,0 +1,102 @@
+# Production observations rollout
+
+## Scope
+
+Connect the merged collectors' stored Layer A evidence to persistent Layer B
+observations and the existing protected Workers UI. This does not implement
+Layer C cross-source reconciliation or Layer D financial calculations.
+Source R2 objects and existing Layer A records are not modified or deleted.
+
+## Deployment checks (2026-09-07 UTC)
+
+- PR #105 merged as `ceb2bf3b52ad3387137eaf12add5dcf3ade855ee`.
+- Reconciler provisioning and initial repair evidence is recorded in
+  [the reconciler runbook](../services/collector-r2-importer/docs/r2-outbox-reconciler.md).
+- Before the UI change, the existing enrolled WARP browser successfully
+  displayed the production Sony evidence list. Local WARP HTTP returned 200;
+  an HTTP request from the existing OCI `bots` host returned 403. Local HTTP
+  without an explicit cookie is not an unauthenticated test: WARP can
+  authenticate it transparently.
+- Before migration, the only pending D1 migration was
+  `0017_observation_pipeline.sql`. A pre-migration Time Travel bookmark was
+  `0000007f-00000022-000050df-10a44068989b4c7fee043c1410141f69`.
+  Restoring the entire database would also roll back concurrent collector
+  imports, so this is an emergency recovery reference, not routine rollback.
+- Existing raw-evidence tests: 54 Workers-runtime tests and all source-route
+  shell checks passed with the additive migration present locally.
+
+## Deployed services
+
+- `kogane-observation-pipeline`: private scheduled Worker, no public route or
+  workers.dev endpoint; every five minutes scans central evidence and processes
+  durable D1 jobs. Migration 0017 was applied remotely (37 commands).
+- `kogane-evidence-browser`: existing protected UI, updated to read Layer B from
+  the existing D1. Version `7abed494-1b29-4c2d-9909-fe702cbc73e1`.
+  Existing Access application, issuer/audience and independent JWT verification
+  are unchanged. The separate synthetic demo was not redeployed.
+- `kogane-collector-r2-importer`: version
+  `75cc8c7e-88f5-436f-a64b-9e796b071f0a`; 13 managed notifications across
+  12 source buckets, reconciler queue and DLQ, weekly `23 19 * * SUN` repair.
+  The original numeric Sunday expression was rejected by Cloudflare; config,
+  scheduled-handler guard and regression were corrected together.
+- `kogane-vpoint-collector-poc`: V Point Pay writer was also deployed, version
+  `89bcdeee-e128-42df-b936-d214c427906b`, so #105's EML-before-terminal-JSON
+  publication order is live. Existing variables, secrets and schedules retained.
+
+## Real-data verification
+
+At 2026-09-07 15:05 UTC, the authenticated read-only API returned 200 for metadata,
+overview, transactions, balances, positions and artifacts. Current positions
+contained 23 rows (18 domestic and 5 foreign SBI securities positions).
+The live Chrome UI showed both domestic account types and foreign holdings;
+following a position reached its parse run, original artifact and download link.
+An old rejected parse and its later successful 108-observation replacement were
+both visible in artifact history. Original provider bytes were not edited.
+
+The off-WARP OCI host returned 403 for `/api/balances` after deployment. A local
+WARP request returned 200, which is expected enrolled-device authentication, not
+evidence of public exposure. Tests additionally reject absent/invalid JWTs before
+serving assets, APIs or raw downloads.
+
+Initial real-data parsing exposed discrepancies not represented by synthetic
+fixtures. They were reproduced against size/SHA-verified raw objects in memory:
+
+- SBI domestic MTS index can equal the total count on a complete response; accept
+  only verified complete count/index and exact base/trailer lengths.
+- SBI yen history includes a legacy direct single page. Accept it only when its
+  own pagination metadata proves completeness, and preserve actual raw locators.
+- Sony date formats include ISO offsets/milliseconds and Japanese calendar dates;
+  blank optional rates do not become numeric values. WALLET's exact MIME comes from the
+  verified collector manifest, not a guessed encoding.
+- SBI Shinsei timestamps also use slash-separated local date/time, and the yen
+  response uses an explicit successful status wrapper.
+- D1 rejects LIKE patterns over 50 bytes; equivalent `instr` fixed the shared
+  current-snapshot predicate. Current position/valuation membership must be
+  selected before applying the intermediate query bound, rather than counting
+  thousands of historical snapshot pairs.
+
+## Coverage and remaining work
+
+The UI is an evidence viewer, not a complete portfolio calculation. Transactions
+and balance history currently expose a bounded 500-record window with an explicit
+coverage warning. Artifacts support server cursor paging. Cross-source matching,
+tax calculations, FX conversion and aggregate net worth are not implemented.
+
+At 15:05 UTC, Layer B had no pending/running jobs and 117 unresolved parser
+rejections (retired versions excluded). The importer repair queue still had 113
+messages and its DLQ was empty; queue provisioning and deployment do not prove
+that every source's historical import has completed. Source-specific follow-up
+results are recorded below as they are verified.
+
+## Resource and rollback inventory
+
+No public diagnostic Worker, new database, new bucket, container, or paid external
+service was created for this rollout. Local remote-binding diagnostics only read
+metadata/counters or verified bytes in memory and do not store financial bodies.
+
+To stop new parsing, remove the private parser's cron or roll back that Worker;
+retain additive D1 tables, parse history and all Layer A/R2 evidence. To revert
+the UI, deploy the previous evidence-browser version while retaining Access.
+The reconciler's exact managed queue/notification cleanup procedure is in its
+runbook; do not remove unrelated Vpass queues or source objects. No cleanup is
+required to keep these production components running.

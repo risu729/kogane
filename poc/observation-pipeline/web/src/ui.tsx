@@ -357,8 +357,22 @@ export function QueryBoundary<T>({
     return <Loading label={label} />;
   }
   const data = query.data;
+  const coverage =
+    typeof data === "object" && data !== null && "coverage" in data
+      ? (data.coverage as { truncated?: boolean; nextCursor?: string | null })
+      : undefined;
   return (
     <>
+      {coverage?.truncated ? (
+        <div className="query-notice query-warning" role="status">
+          このページは各一覧の最大500件を表示しています。絞り込み・件数は表示中の記録が対象で、全記録ではありません。
+          {coverage.nextCursor ? (
+            <a className="button" href={`?cursor=${encodeURIComponent(coverage.nextCursor)}`}>
+              次の500件
+            </a>
+          ) : null}
+        </div>
+      ) : null}
       {query.isError ? (
         <div className="query-notice query-warning" role="alert">
           <span>更新できませんでした。前回読み込んだ{label}を表示しています。</span>

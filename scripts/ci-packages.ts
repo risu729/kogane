@@ -26,6 +26,11 @@ function worker(path: string): PackagePolicy {
 
 export const CI_PACKAGES: PackagePolicy[] = [
   {
+    path: "services/observation-pipeline",
+    scripts: { test, typecheck, "cf:check": dryRun },
+    checks: ["typecheck", "test", "cf:check"],
+  },
+  {
     path: "services/evidence-browser",
     scripts: {
       test: "vitest run",

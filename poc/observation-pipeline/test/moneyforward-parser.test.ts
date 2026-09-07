@@ -39,6 +39,25 @@ const meta = (overrides: Partial<ArtifactMeta> = {}): ArtifactMeta => ({
 });
 
 describe("moneyforward Layer B parsers", () => {
+  test("routes canonical central text/html without relaxing UTF-8 or metadata validation", () => {
+    for (const [parser, dataset, artifactKey] of [
+      [moneyForwardMonthlyTransactions, "monthly-transactions", "account-01-month-2099-02.html"],
+      [moneyForwardEvidenceOnly, "accounts-index", "accounts.html"],
+      [moneyForwardEvidenceOnly, "account-detail", "account-detail-01.html"],
+    ] as const) {
+      const source = meta({ dataset, artifactKey });
+      const central = { ...source, mime: "text/html" };
+      expect(parser.accepts(central)).toBe(true);
+      expect(parser.parse(fixture(artifactKey), central)).toEqual(
+        parser.parse(fixture(artifactKey), source),
+      );
+      expect(() => parser.parse(new Uint8Array([0xff]), central)).toThrow();
+      expect(parser.accepts({ ...central, mime: "text/html; charset=shift_jis" })).toBe(false);
+      expect(() =>
+        parser.parse(fixture(artifactKey), { ...central, statementState: "confirmed" }),
+      ).toThrow();
+    }
+  });
   test("registers exactly one parser for each MoneyForward provider artifact", () => {
     const monthly = meta();
     const accounts = meta({ dataset: "accounts-index", artifactKey: "accounts.html" });

@@ -150,7 +150,7 @@ function issueName(value: string): string {
 
 export const sbiDomesticCashPositions: Parser = {
   name: "sbi-domestic-cash-positions",
-  version: "1.0.0",
+  version: "1.0.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "domestic-cash-positions";
@@ -195,7 +195,11 @@ export const sbiDomesticCashPositions: Parser = {
     ) {
       throw new Error("MTS payload length disagrees with recordCount");
     }
-    if (pageIndex !== 0 || recordCount !== totalCount)
+    // The collector requests offset 0 / limit 999 (sbi.ts F2631).
+    // The response index may be the returned end cursor, equal to totalCount.
+    // Keep exact total membership and byte/trailer checks; an interior cursor
+    // or suffix-only page is never a complete account snapshot.
+    if ((pageIndex !== 0 && pageIndex !== totalCount) || recordCount !== totalCount)
       throw new Error("MTS positions payload is incomplete");
 
     const observations: Observation[] = [];

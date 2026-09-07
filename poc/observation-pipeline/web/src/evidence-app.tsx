@@ -6,6 +6,8 @@ import { EvidenceBoundary } from "./evidence-ui.tsx";
 import { EvidenceArtifactPage, EvidenceHistory, EvidenceRunPage } from "./pages/Evidence.tsx";
 import { Link, usePath } from "./router.tsx";
 import { EmptyState } from "./ui.tsx";
+import type { ApiMetadata } from "../../shared/api-contract.ts";
+import { ParsingHealthNotice } from "./parsing-health.tsx";
 
 function routeFor(path: string) {
   const artifact = /^\/runs\/(r_[1-9]\d*)\/artifacts\/(a_[1-9]\d*)$/u.exec(path);
@@ -18,12 +20,14 @@ function routeFor(path: string) {
     };
   const run = /^\/runs\/(r_[1-9]\d*)$/u.exec(path);
   if (run) return { kind: "run" as const, runId: run[1] as EvidenceRunId, title: "収集記録の詳細" };
-  return path === "/"
+  return path === "/" || path === "/evidence"
     ? { kind: "history" as const, title: "取得履歴と原本" }
     : { kind: "missing" as const, title: "ページが見つかりません" };
 }
 
-export function EvidenceApp(): ReactNode {
+export function EvidenceApp({
+  parsingHealth,
+}: { parsingHealth?: ApiMetadata["parsingHealth"] } = {}): ReactNode {
   const path = usePath();
   const route = routeFor(path);
   const metadata = useEvidenceMeta();
@@ -60,9 +64,12 @@ export function EvidenceApp(): ReactNode {
         </Link>
         <p className="nav-label">ライブラリ</p>
         <nav className="nav" aria-label="メインナビゲーション">
-          <Link to="/" current={route.kind === "history"}>
+          <Link to="/evidence" current={route.kind === "history"}>
             取得履歴・原本
           </Link>
+          <Link to="/transactions">取引</Link>
+          <Link to="/balances">残高</Link>
+          <Link to="/positions">保有資産</Link>
         </nav>
         <div className="sidebar-note">
           <strong>記録と、その根拠。</strong>
@@ -105,9 +112,10 @@ export function EvidenceApp(): ReactNode {
           <p>接続状態は、収集結果やデータの新しさを表すものではありません。</p>
         </div>
         <main id="main" ref={main} tabIndex={-1}>
+          <ParsingHealthNotice health={parsingHealth} />
           {route.kind !== "history" ? (
             <nav className="breadcrumb" aria-label="現在の位置">
-              <Link to="/">取得履歴</Link>
+              <Link to="/evidence">取得履歴</Link>
               {route.kind === "artifact" ? (
                 <>
                   {" "}

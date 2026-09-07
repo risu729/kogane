@@ -3,8 +3,178 @@ import { base64url, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
 import { seedRegistry, seedRun } from "./fixtures";
+import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
+import { boundedCollections } from "../src/observation-api";
 
 const prefix = "/api/evidence/v1";
+describe("production observation API", () => {
+  it("reports registered parsing backlog and failures as aggregate health", async () => {
+    const run = await seedRun({ count: 1 });
+    for (const status of ["pending", "running", "failed", "done"]) {
+      await env.DB.prepare(
+        "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status) VALUES(?,?,?,?)",
+      )
+        .bind(run.artifacts[0].id, `fixture-${status}`, "1", status)
+        .run();
+    }
+    const response = await call("/api/meta");
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ parsingHealth: { pending: 1, running: 1, failed: 1 } });
+    expect(validApiResponse("/api/meta", body)).toBe(true);
+  });
+  it("clears repaired historical failures but keeps newer failures and replacement work visible", async () => {
+    const baseline = (
+      (await (await call("/api/meta")).json()) as {
+        parsingHealth: { pending: number; running: number; failed: number };
+      }
+    ).parsingHealth;
+    const run = await seedRun({ count: 1 });
+    const artifactId = run.artifacts[0].id;
+    for (const [name, status, version, retired] of [
+      ["repaired", "failed", "1", false],
+      ["new-failure", "failed", "2", false],
+      ["replacement", "pending", "2", false],
+      ["retired", "failed", "1", true],
+    ] as const) {
+      await env.DB.prepare(
+        "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,last_error_code) VALUES(?,?,?,?,?)",
+      )
+        .bind(artifactId, name, version, status, retired ? "parser_version_retired" : null)
+        .run();
+    }
+    for (const [name, version, status, date] of [
+      ["repaired", "1", "error", "2026-09-01"],
+      ["repaired", "2", "ok", "2026-09-02"],
+      ["new-failure", "1", "ok", "2026-09-01"],
+      ["new-failure", "2", "error", "2026-09-02"],
+      ["replacement", "1", "ok", "2026-09-01"],
+    ]) {
+      await env.DB.prepare(
+        "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,status,parsed_at,warnings_json) VALUES(?,?,?,?,?,'[]')",
+      )
+        .bind(artifactId, name, version, status, `${date}T00:00:00.000Z`)
+        .run();
+    }
+    expect(await (await call("/api/meta")).json()).toMatchObject({
+      parsingHealth: {
+        pending: baseline.pending + 1,
+        running: baseline.running,
+        failed: baseline.failed + 1,
+      },
+    });
+  });
+  it("bounds position matching after excluding historical failed parses", async () => {
+    const run = await seedRun({ count: 1 });
+    const failed =
+      await env.DB.prepare(`INSERT INTO parse_runs (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+      VALUES (?,'fixture-position','1','2026-09-07T00:00:00Z','error','[]') RETURNING id`)
+        .bind(run.artifacts[0].id)
+        .first<{ id: number }>();
+    await env.DB.prepare(`INSERT INTO position_observations (parse_run_id,source_account,security_code,quantity_text,quantity_scale,raw_locator,extra_json)
+      WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<5001)
+      SELECT ?,'fixture-account',CAST(x AS TEXT),'1',0,'$','{}' FROM n`)
+      .bind(failed!.id)
+      .run();
+    await env.DB.prepare(`INSERT INTO valuation_observations (parse_run_id,source_account,subject,metric,currency,raw_locator,extra_json)
+      SELECT parse_run_id,source_account,security_code,'value','JPY','$','{}' FROM position_observations WHERE parse_run_id=?`)
+      .bind(failed!.id)
+      .run();
+    const response = await call("/api/positions");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ positions: [] });
+  });
+  it("reports truncated collection coverage explicitly", async () => {
+    const response = boundedCollections({
+      transactions: Array.from({ length: 501 }, (_, id) => ({ id })),
+    });
+    const result = (await response.json()) as {
+      transactions: unknown[];
+      coverage: { limit: number; truncated: boolean };
+    };
+    expect(result.transactions).toHaveLength(500);
+    expect(result.coverage).toEqual({ limit: 500, truncated: true });
+  });
+  it("keeps every new read behind Access and rejects mutation/query input", async () => {
+    for (const path of [
+      "/api/meta",
+      "/api/overview",
+      "/api/transactions",
+      "/api/balances",
+      "/api/positions",
+      "/api/artifacts",
+      "/api/observations/balance/1",
+      `/api/raw/${"a".repeat(64)}`,
+    ]) {
+      expect((await call(path, { jwt: null })).status).toBe(401);
+      expect((await call(path, { jwt: "invalid" })).status).toBe(401);
+      expect((await call(path, { method: "POST" })).status).toBe(405);
+      expect((await call(`${path}?unsafe=1`)).status).toBe(400);
+    }
+  });
+  it("serves contract-valid production views and hides staged or subsequently excluded observations", async () => {
+    // Unique bytes: excluding this run removes the last visible reference to
+    // this hash. Shared content remains legitimately readable via other runs.
+    const run = await seedRun({
+      count: 2,
+      body: '{"synthetic":"exclusive-observation-visibility-fixture"}',
+    });
+    const artifactId = run.artifacts[0].id;
+    const parsed =
+      await env.DB.prepare(`INSERT INTO parse_runs (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+      VALUES (?,'fixture-parser','1','2026-09-07T00:00:00Z','ok','[]') RETURNING id`)
+        .bind(artifactId)
+        .first<{ id: number }>();
+    const balance =
+      await env.DB.prepare(`INSERT INTO balance_observations (parse_run_id,source_account,metric,instrument,amount_minor,raw_locator,extra_json)
+      VALUES (?,'fixture-account','cash','JPY',9007199254740993,'$','{}') RETURNING id`)
+        .bind(parsed!.id)
+        .first<{ id: number }>();
+    for (const path of [
+      "/api/meta",
+      "/api/overview",
+      "/api/transactions",
+      "/api/balances",
+      "/api/positions",
+      "/api/artifacts",
+      `/api/artifacts/${artifactId}`,
+      `/api/observations/balance/${balance!.id}`,
+    ]) {
+      const response = await call(path);
+      expect(response.status, path).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(validApiResponse(path, await response.json()), path).toBe(true);
+    }
+    const balances = (await (await call("/api/balances")).json()) as {
+      latest: { amount_minor: string }[];
+    };
+    expect(balances.latest.some((row) => row.amount_minor === "9007199254740993")).toBe(true);
+    const staged =
+      await env.DB.prepare(`INSERT INTO parse_runs (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+      VALUES (?,'fixture-parser','2','2026-09-07T00:00:00Z','pending','[]') RETURNING id`)
+        .bind(artifactId)
+        .first<{ id: number }>();
+    const stagedBalance =
+      await env.DB.prepare(`INSERT INTO balance_observations (parse_run_id,source_account,metric,instrument,amount_minor,raw_locator,extra_json)
+      VALUES (?,'fixture-account','cash','JPY',123,'$','{}') RETURNING id`)
+        .bind(staged!.id)
+        .first<{ id: number }>();
+    expect((await call(`/api/observations/balance/${stagedBalance!.id}`)).status).toBe(404);
+    const page = (await (await call(`/api/artifacts?cursor=${run.artifacts[1].id}`)).json()) as {
+      artifacts: { id: number }[];
+    };
+    expect(page.artifacts.some((row) => row.id === artifactId)).toBe(true);
+    expect(page.artifacts.every((row) => row.id < run.artifacts[1].id)).toBe(true);
+    await env.DB.prepare(
+      "INSERT INTO fetch_run_annotations VALUES (?, 'exclude_from_financial_views', 'synthetic-fixture', 0)",
+    )
+      .bind(run.id)
+      .run();
+    expect((await call(`/api/observations/balance/${balance!.id}`)).status).toBe(404);
+    expect((await call(`/api/artifacts/${artifactId}`)).status).toBe(404);
+    expect((await call(`/api/raw/${run.artifacts[0].sha256}`)).status).toBe(404);
+  });
+});
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let issuer: string;
 let jwks: { keys: unknown[] };
@@ -128,7 +298,7 @@ describe("authenticated read-only evidence", () => {
     const meta = await call(`${prefix}/meta`);
     expect(await meta.json()).toMatchObject({
       source: { kind: "central-raw-store", classification: "financial" },
-      capabilities: { parsedObservations: false, liveCollectors: false },
+      capabilities: { parsedObservations: true, liveCollectors: false },
     });
     const response = await call("/evidence/sources/sony-bank");
     expect(response.status).toBe(200);
