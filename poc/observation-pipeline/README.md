@@ -102,6 +102,8 @@ Twenty-three parsers are registered against shapes the collectors already produc
 | `sony-bank-wallet-history`          | Sony Bank WALLET monthly HTML                      | card transactions                            |
 | `smbc-direct-balance`               | SMBC Direct `balance-normalized`                   | balance                                      |
 | `smbc-direct-transactions`          | SMBC Direct `transactions-normalized`              | transactions                                 |
+| `sbi-shinsei-top-balances-and-activity` | SBI Shinsei `top-accounts-balance-and-activity`    | balances, valuations, transactions           |
+| `sbi-shinsei-yen-deposit-account`       | SBI Shinsei `yen-deposit-account`                  | source-view-scoped balances                  |
 
 Mobile Suica deliberately has one canonical Layer-B route. The collector's
 Shift-JIS `sf-history-html` is provider evidence and `collection-summary` is
@@ -241,6 +243,23 @@ remote-read-only canary. It applies the source importer validator, then every
 registered MyJCB parser, and returns only aggregate counts and shape booleans.
 It never emits object keys, hashes, bodies, provider values, account IDs, or
 financial values and contains no deploy or R2 mutation path.
+
+`fixtures/sbi-shinsei-parser-boundaries/` pins the two SBI Shinsei source
+artifacts whose monetary semantics are explicit. The raw top response is the
+canonical source for its own balances and activity; the derived `normalized`
+artifact is intentionally not registered, preventing a raw/derived duplicate.
+`yen-deposit-account` keeps `debitAccountDetails` and `savingsDetails` as
+separate metrics. Product codes remain opaque provider evidence. The
+`balance-summary-and-stage` and `exchange-rate` artifacts are validated as raw
+evidence but have no Layer-B route until their currency/unit meaning and a
+rate observation kind are established. `collector-manifest` is run metadata.
+
+The checked-in SBI Shinsei canary reads production R2 through a local Wrangler
+process with a remote read-only binding. It verifies manifests, complete run
+inventories, artifact sizes/content types/digests, all five payload schemas,
+the two parser routes, and the three explicit no-parser decisions. Its output
+contains only aggregate counts and shape booleans; object names, digests,
+response bodies, account identifiers, and financial values are never emitted.
 
 Artifacts now carry their parent fetch-run outcome and failure count. A
 non-success run is retained as evidence but is blocked before every parser,

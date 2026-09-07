@@ -1,0 +1,39 @@
+{
+  "responseParam": {
+    "postingDate": "20260907",
+    "transactionTime": "20260907090100",
+    "customerCategory": "SYNTHETIC",
+    "debitAccountDetails": [
+      {
+        "accountNo": "SYNTHETIC-001",
+        "balance": "123456",
+        "currency": "JPY",
+        "productCode": "601",
+        "accountStatus": "ACTIVE",
+        "productDescription": "Synthetic ordinary deposit"
+      }
+    ],
+    "productDetails": [{ "productCode": "601", "pdProductDetail": {} }],
+    "savingsDetails": [
+      {
+        "accountNo": "SYNTHETIC-003",
+        "balance": "555",
+        "yenEqui": "555",
+        "currency": "JPY",
+        "productCode": "603"
+      }
+    ],
+    "tdDetails": [],
+    "sdDetails": [],
+    "debuntureDetails": [],
+    "loanDetails": [],
+    "moduleDetails": [
+      {
+        "moduleCode": "SYNTHETIC",
+        "moduleDesc": "Synthetic module",
+        "moduleBalance": "124011"
+      }
+    ]
+  },
+  "header": { "adapterResultCode": "0" }
+}

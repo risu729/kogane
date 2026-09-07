@@ -213,6 +213,45 @@ and scanned 189 objects. One successful manifest contained 188 data artifacts:
 balance, and their 94 raw partners had no Layer-B parser. The canary emitted
 only aggregate counts and performed no source write or delete.
 
+### SBI Shinsei Layer B validation (2026-09-07)
+
+SBI Shinsei stores five data artifacts on a complete run. Layer B registers
+only the two independent raw sources with explicit money semantics:
+`top-accounts-balance-and-activity` and `yen-deposit-account`. The top parser
+emits provider account balances, provider-stated JPY equivalents, the activity
+snapshot balance, and signed transactions whose sign provenance is the
+mutually exclusive debit/credit field. The yen-deposit parser preserves its
+two account arrays as distinct metrics. Both reject unknown fields, excessive
+cardinality, duplicate provider identities, invalid dates/currencies, and
+known-fiat decimals that cannot be represented exactly.
+
+Three success artifacts have deliberate no-parser decisions. `normalized` is
+derived only from the top response and would duplicate observations while
+discarding provider transaction identifiers. `balance-summary-and-stage`
+does not state enough currency/unit context for its money-looking summary
+fields. `exchange-rate` cannot be represented faithfully by the existing
+money observation kinds because a quote needs numerator/denominator semantics.
+The central `collector-manifest` is metadata, not financial evidence.
+
+The production canary is aggregate-only and read-only. Its 2026-09-07 run
+scanned 93 objects: 15 manifests passed the current manifest contract and all
+15 recorded failed collection status; 13 other manifest candidates reduced to
+the fixed `contract_validation_failed` result. No successful production
+manifest was available, so the canary exited non-zero and did not use failed
+evidence as parser proof. It validates every raw and derived schema before
+exercising Layer B, requires a complete decision for all five successful
+artifacts, and emits no object name, digest, body, account identifier, or
+financial value. Partial and failed manifests remain validated raw evidence
+but never enter parsers. Anonymous fixtures cover non-empty,
+multi-currency, opaque product-code, debit/credit, duplicate-identity,
+cardinality, and unknown-field boundaries without committing production data.
+
+The source activity request exposes `fromDate` and `toDate`, but the current
+contract contains no server pagination token or total count. Layer B therefore
+records only the returned rows and does not claim that they are complete
+history. Likewise product codes are retained as provider evidence rather than
+mapped to an account taxonomy from client-side labels alone.
+
 ### Mobile Suica Layer B validation (2026-09-07)
 
 A read-only aggregate/canary against production R2 confirmed that the current

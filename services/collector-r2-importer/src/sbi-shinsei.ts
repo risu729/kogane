@@ -491,7 +491,7 @@ function validateCompleteness(
 
 function validateDatasetPayload(dataset: Dataset, value: JsonObject): void {
   if (dataset === "normalized") {
-    parseNormalized(value);
+    parseSbiShinseiNormalized(value);
     return;
   }
   validateSbiShinseiResponse(RAW_SCHEMAS[dataset], value);
@@ -508,7 +508,7 @@ function validateCrossArtifactMeaning(
     (entry) => entry.manifest.dataset === "normalized",
   )?.semantic;
   if (normalizedValue) {
-    const normalized = parseNormalized(normalizedValue);
+    const normalized = parseSbiShinseiNormalized(normalizedValue);
     if (
       normalized.capturedAt < manifest.startedAt ||
       normalized.capturedAt > manifest.completedAt
@@ -559,7 +559,7 @@ function validateLegacyWindow(
   }
 }
 
-function parseNormalized(value: unknown): NormalizedSnapshot {
+export function parseSbiShinseiNormalized(value: unknown): NormalizedSnapshot {
   const root = recordConflict(value, "normalized_schema_invalid");
   exactShapeConflict(
     root,

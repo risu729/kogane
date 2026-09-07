@@ -1,0 +1,54 @@
+{
+  "responseParam": {
+    "overview": {
+      "responseParam": {
+        "savingsDetails": [
+          {
+            "accountNo": "SYNTHETIC-001",
+            "balance": "123456",
+            "yenEqui": "123456",
+            "currency": "JPY",
+            "productCode": "601"
+          },
+          {
+            "accountNo": "SYNTHETIC-002",
+            "balance": "12.3400",
+            "yenEqui": "9876",
+            "currency": "USD",
+            "productCode": "SYNTHETIC-FCY"
+          }
+        ]
+      }
+    },
+    "activity": {
+      "responseParam": {
+        "fromDate": "20260901",
+        "toDate": "20260907",
+        "currentBalance": "123456",
+        "accountNo": "SYNTHETIC-001",
+        "currency": "JPY",
+        "activityDetails": [
+          {
+            "txnReferenceNo": "SYNTHETIC-TXN-001",
+            "description": "Synthetic debit",
+            "debit": "1200",
+            "postingDate": "20260906",
+            "balance": "122256",
+            "tradeTypeCode": "SYNTHETIC"
+          },
+          {
+            "txnReferenceNo": "SYNTHETIC-TXN-002",
+            "description": "Synthetic credit",
+            "credit": "2500",
+            "postingDate": "20260907",
+            "balance": "124756",
+            "tradeTypeCode": "SYNTHETIC"
+          }
+        ]
+      }
+    },
+    "systemResponseTime": "20260907090000",
+    "sbiHyperYokinFlg": "0"
+  },
+  "header": { "adapterResultCode": "0" }
+}

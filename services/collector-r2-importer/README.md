@@ -159,6 +159,18 @@ SBI VC TradeのmanifestはSBI証券とは共有せず、`sbi-vc-trade-worker-poc
 
 中央では`collector-r2-sbi-vc`専用credentialを使い、registryも`collector-r2-importer → sbi-vc-trade`だけを許可する。SBI証券credentialをSBI VC Trade routeへ流用できない。
 
+## SBI新生銀行 Layer B read-only監査
+
+`bun run audit:sbi-shinsei-r2`はdeployせず、localhost限定のWrangler dev
+processからremote R2 bindingをread-onlyで参照する。1 pageにつき1 objectを
+走査し、manifestを見つけた場合は完全prefix、size、JSON content type、
+SHA-256、全5 dataset schemaを再検証する。成功runでは
+`top-accounts-balance-and-activity`と`yen-deposit-account`だけをLayer B parserへ
+渡し、`balance-summary-and-stage`、`exchange-rate`、`normalized`は明示的な
+no-parser decisionとして数える。出力は件数とshape booleanだけで、object key、
+hash、本文、account identifier、金額は含めない。scriptとWorkerにはR2の
+put/delete経路がなく、元bucketを変更しない。
+
 ## backfillの分割
 
 SBI証券の完全な1 runは中央Workerを最大約23回呼ぶ。Cloudflareの1 requestに連なるWorker呼び出し上限へ抵触しないよう、`backfill-page`は1回につきR2 objectを1件だけ走査し、manifestを見つけた場合も1 runだけを転送する。SBI VC Tradeはdata artifact 11件を超えるmanifestを`sync_import_worker_chain_limit`で中央state作成前に停止する。backfillではこの既知の上限を失敗でなくdeferredとして数え、R2 cursorを先へ進めるため、後続runをpoison pillとして遮断しない。大きなrun自体は後続Queue reconcilerがartifact単位で処理する。
