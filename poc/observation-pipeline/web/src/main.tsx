@@ -6,7 +6,7 @@
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "./api.ts";
 import { App } from "./app.tsx";
 import { EvidenceApp } from "./evidence-app.tsx";
@@ -16,6 +16,15 @@ import "./styles.css";
 declare const __EVIDENCE_BROWSER__: boolean;
 
 const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError(error, query) {
+      if (error instanceof ApiError && [401, 403].includes(error.status)) {
+        // A subsequent network failure or route remount must not resurrect
+        // records whose authorization was rejected. Refetch to restore them.
+        query.setState({ data: undefined, dataUpdatedAt: 0 });
+      }
+    },
+  }),
   defaultOptions: {
     queries: {
       // Immediately eligible for refresh; this does not imply that the

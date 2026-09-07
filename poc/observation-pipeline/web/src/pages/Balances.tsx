@@ -37,26 +37,73 @@ function BalancesBody({
   history: BalanceHistoryRow[];
 }): ReactNode {
   const [filters, setFilters] = useViewState("balances.filters");
+  const [instrument, setInstrument] = useViewState("balances.instrument");
+  const [metric, setMetric] = useViewState("balances.metric");
   const rows = [...latest, ...history];
+  const instruments = [...new Set(rows.map((row) => row.instrument))].sort();
+  const metrics = [...new Set(rows.map((row) => row.metric))].sort();
+  const matches = (row: BalanceRow) =>
+    matchesSourceAccount(row, filters) &&
+    (!instrument || row.instrument === instrument) &&
+    (!metric || row.metric === metric);
+  const selectionKey = JSON.stringify([filters.source, filters.account, instrument, metric]);
   return (
     <>
       <section className="panel">
         <div className="panel-body">
           <RecordControls rows={rows} filters={filters} onChange={setFilters} />
-          <button className="button" type="button" onClick={() => setFilters(EMPTY_FILTERS)}>
+          <div className="filter-grid">
+            {[
+              {
+                label: "通貨・単位",
+                value: instrument,
+                options: instruments,
+                setValue: setInstrument,
+              },
+              { label: "残高の種類", value: metric, options: metrics, setValue: setMetric },
+            ].map(({ label, value, options, setValue }) => (
+              <label className="filter-field" key={label}>
+                {label}
+                <select
+                  aria-label={label}
+                  value={value}
+                  onChange={(event) => setValue(event.target.value)}
+                >
+                  <option value="">すべて</option>
+                  {value && !options.includes(value) ? (
+                    <option value={value}>{value}（今回の記録に含まれません）</option>
+                  ) : null}
+                  {options.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+          <button
+            className="button"
+            type="button"
+            onClick={() => {
+              setFilters(EMPTY_FILTERS);
+              setInstrument("");
+              setMetric("");
+            }}
+          >
             条件をクリア
           </button>
         </div>
       </section>
       <BalanceTable
-        key={`latest:${filters.source}:${filters.account}`}
-        rows={latest.filter((row) => matchesSourceAccount(row, filters))}
+        key={`latest:${selectionKey}`}
+        rows={latest.filter(matches)}
+        available={latest.length}
       />
       <details className="detail-disclosure">
         <summary>過去の残高・再解析の履歴</summary>
         <BalanceTable
-          key={`history:${filters.source}:${filters.account}`}
-          rows={history.filter((row) => matchesSourceAccount(row, filters))}
+          key={`history:${selectionKey}`}
+          rows={history.filter(matches)}
+          available={history.length}
           history
         />
       </details>
@@ -75,9 +122,11 @@ function BalancesBody({
 function BalanceTable({
   rows,
   history = false,
+  available,
 }: {
   rows: BalanceRow[] | BalanceHistoryRow[];
   history?: boolean;
+  available: number;
 }): ReactNode {
   const [page, setPage] = useState(0);
   const view = pageWindow<BalanceRow | BalanceHistoryRow>(rows, page);
@@ -85,7 +134,7 @@ function BalanceTable({
     <Panel
       id={history ? "balance-history" : "latest-balances"}
       title={history ? "保存された残高の履歴" : "項目ごとの最新の記録"}
-      count={`${rows.length}件`}
+      count={`${available}件中 ${rows.length}件`}
       note={
         history
           ? "旧解析の記録も、根拠を確認できるように保持しています。"
@@ -154,7 +203,9 @@ function BalanceTable({
             ) : (
               <tr>
                 <td colSpan={history ? 7 : 6}>
-                  表示できる残高がありません。口座や取得元の条件をご確認ください。
+                  {available > 0
+                    ? "条件に一致する残高がありません。条件をクリアすると保存された記録を確認できます。"
+                    : "表示対象の残高記録がまだありません。残高がゼロであることを意味しません。"}
                 </td>
               </tr>
             )}

@@ -24,7 +24,8 @@ Navigation keeps the existing small History API router. Monetary values stay
 as decimal strings and use the shared exact formatter; provider text remains
 escaped React text. The frontend never reads SQLite or R2 directly.
 
-Transaction filters, search, sort, and page selection, plus balance filters,
+Transaction filters, search, sort, and page selection, balance source/account,
+currency/unit and kind filters, plus position filters and page selection,
 survive visits to detail pages within the current tab. They reset on reload
 and are never written to URL parameters, browser history state, localStorage,
 or sessionStorage. Route changes update the document title and focus the new
@@ -34,6 +35,17 @@ Response validation requires decimal-integer minor units, safe nonnegative
 numeric identifiers, matching requested/detail identifiers, and lowercase
 64-character SHA-256 hashes. Malformed responses produce an error rather than
 displaying a different record or converting a blank amount to zero.
+
+Lists distinguish missing records from filters that match no records. Date
+range controls identify reversed ranges and report records excluded because
+their date is unknown. Counts describe only the returned records, not complete
+financial-institution coverage. These controls are available in the local
+observation preview; the deployed evidence mode still shows raw records only.
+
+Authentication failures (401/403) clear the rejected response from the in-memory
+query cache and hide its records. A failed retry cannot restore them; a successful
+response is required. Connection metadata gates observation pages as well. Other
+refresh failures retain previously authorized records with an explicit warning.
 
 ## Safe preview
 
