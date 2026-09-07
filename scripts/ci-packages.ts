@@ -14,6 +14,7 @@ export interface PackagePolicy {
   browser?: boolean;
   additionalDryRun?: boolean;
   evidenceAssets?: boolean;
+  sharedParserDependencies?: boolean;
 }
 
 function worker(path: string): PackagePolicy {
@@ -25,6 +26,12 @@ function worker(path: string): PackagePolicy {
 }
 
 export const CI_PACKAGES: PackagePolicy[] = [
+  {
+    path: "services/observation-pipeline",
+    scripts: { test, typecheck, "cf:check": dryRun },
+    checks: ["typecheck", "test", "cf:check"],
+    sharedParserDependencies: true,
+  },
   {
     path: "services/evidence-browser",
     scripts: {
@@ -185,10 +192,11 @@ export const CI_PACKAGES: PackagePolicy[] = [
       typecheck: "tsc --noEmit",
       build: "vite build",
       "build:evidence": "vite build --mode evidence --outDir dist-evidence",
+      "build:production": "vite build --mode production --outDir dist-production",
       "export:demo":
         "bun run src/export-demo.ts ../../services/evidence-browser/demo-snapshot.json",
     },
-    checks: ["typecheck", "build", "build:evidence", "test"],
+    checks: ["typecheck", "build", "build:evidence", "build:production", "test"],
     browser: true,
   },
 ];

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { useBalances, type BalanceHistoryRow, type BalanceRow } from "../api.ts";
+import { useMetadata, useBalances, type BalanceHistoryRow, type BalanceRow } from "../api.ts";
 import {
   Amount,
   Badge,
@@ -37,6 +37,7 @@ function BalancesBody({
   history: BalanceHistoryRow[];
 }): ReactNode {
   const [filters, setFilters] = useViewState("balances.filters");
+  const production = useMetadata().data?.source.kind === "central-store";
   const [instrument, setInstrument] = useViewState("balances.instrument");
   const [metric, setMetric] = useViewState("balances.metric");
   const rows = [...latest, ...history];
@@ -49,50 +50,52 @@ function BalancesBody({
   const selectionKey = JSON.stringify([filters.source, filters.account, instrument, metric]);
   return (
     <>
-      <section className="panel">
-        <div className="panel-body">
-          <RecordControls rows={rows} filters={filters} onChange={setFilters} />
-          <div className="filter-grid">
-            {[
-              {
-                label: "通貨・単位",
-                value: instrument,
-                options: instruments,
-                setValue: setInstrument,
-              },
-              { label: "残高の種類", value: metric, options: metrics, setValue: setMetric },
-            ].map(({ label, value, options, setValue }) => (
-              <label className="filter-field" key={label}>
-                {label}
-                <select
-                  aria-label={label}
-                  value={value}
-                  onChange={(event) => setValue(event.target.value)}
-                >
-                  <option value="">すべて</option>
-                  {value && !options.includes(value) ? (
-                    <option value={value}>{value}（今回の記録に含まれません）</option>
-                  ) : null}
-                  {options.map((option) => (
-                    <option key={option}>{option}</option>
-                  ))}
-                </select>
-              </label>
-            ))}
+      {!production ? (
+        <section className="panel">
+          <div className="panel-body">
+            <RecordControls rows={rows} filters={filters} onChange={setFilters} />
+            <div className="filter-grid">
+              {[
+                {
+                  label: "通貨・単位",
+                  value: instrument,
+                  options: instruments,
+                  setValue: setInstrument,
+                },
+                { label: "残高の種類", value: metric, options: metrics, setValue: setMetric },
+              ].map(({ label, value, options, setValue }) => (
+                <label className="filter-field" key={label}>
+                  {label}
+                  <select
+                    aria-label={label}
+                    value={value}
+                    onChange={(event) => setValue(event.target.value)}
+                  >
+                    <option value="">すべて</option>
+                    {value && !options.includes(value) ? (
+                      <option value={value}>{value}（今回の記録に含まれません）</option>
+                    ) : null}
+                    {options.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+            <button
+              className="button"
+              type="button"
+              onClick={() => {
+                setFilters(EMPTY_FILTERS);
+                setInstrument("");
+                setMetric("");
+              }}
+            >
+              条件をクリア
+            </button>
           </div>
-          <button
-            className="button"
-            type="button"
-            onClick={() => {
-              setFilters(EMPTY_FILTERS);
-              setInstrument("");
-              setMetric("");
-            }}
-          >
-            条件をクリア
-          </button>
-        </div>
-      </section>
+        </section>
+      ) : null}
       <BalanceTable
         key={`latest:${selectionKey}`}
         rows={latest.filter(matches)}
@@ -113,7 +116,7 @@ function BalancesBody({
           取得元・口座・残高の種類・通貨や単位が同じ記録から、基準日（as_of）、基準日がない場合は取得元での観測日時（observed_at）を使って選んでいます。同じ日時は記録番号で並べます。両日時は意味が異なるため、実際の測定時刻が最も新しいことを保証するものではありません。
         </p>
         <p>
-          過去の履歴には旧解析の記録も残っています。金額は合算・換算せず、保存値をそのまま表示します。APIの全件応答をブラウザー内で絞り込み、各表は50件ずつ表示します。金融機関の全履歴が揃っていることを表す件数ではありません。
+          過去の履歴には旧解析の記録も残っています。金額は合算・換算せず、保存値をそのまま表示します。受信したページの各表を50件ずつ表示します。金融機関の全履歴が揃っていることを表す件数ではありません。
         </p>
       </details>
     </>

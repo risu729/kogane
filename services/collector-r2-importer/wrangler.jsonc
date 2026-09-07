@@ -109,7 +109,7 @@
     ]
   },
   "triggers": {
-    "crons": ["23 19 * * 0"]
+    "crons": ["23 19 * * SUN"]
   },
   "vars": {
     "IMPORTER_VERSION": "collector-r2-importer-v20",

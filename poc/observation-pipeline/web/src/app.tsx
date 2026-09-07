@@ -14,6 +14,9 @@ import { ArtifactsPage } from "./pages/Artifacts.tsx";
 import { ArtifactDetailPage } from "./pages/ArtifactDetail.tsx";
 import { ObservationDetailPage } from "./pages/ObservationDetail.tsx";
 import { NotFoundPage } from "./pages/NotFound.tsx";
+import { EvidenceApp } from "./evidence-app.tsx";
+import { ParsingHealthNotice } from "./parsing-health.tsx";
+import { CollectionControls } from "./collection-controls.tsx";
 
 const NAV: { to: string; label: string; icon: string }[] = [
   {
@@ -91,14 +94,19 @@ export function App(): ReactNode {
   const fetching = useIsFetching() > 0;
   const connected = metadata.isSuccess;
   const synthetic = metadata.data?.source.classification === "synthetic";
+  const production = metadata.data?.source.kind === "central-store";
   const connectionLabel = metadata.isPending
     ? "接続を確認中"
     : connected
       ? synthetic
         ? "デモデータに接続"
-        : "ローカルデータに接続"
+        : production
+          ? "中央保管庫に接続"
+          : "ローカルデータに接続"
       : "接続を確認できません";
 
+  if (production && (path === "/evidence" || path.startsWith("/runs/")))
+    return <EvidenceApp observationsAvailable parsingHealth={metadata.data?.parsingHealth} />;
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">
@@ -134,6 +142,7 @@ export function App(): ReactNode {
               <span>{item.label}</span>
             </Link>
           ))}
+          {production ? <Link to="/evidence">取得履歴</Link> : null}
         </nav>
         <div className="sidebar-note">
           <span className="sidebar-note-symbol" aria-hidden="true">
@@ -181,6 +190,12 @@ export function App(): ReactNode {
                   <span className="notice-divider">·</span>
                   実際の取引・残高ではありません
                 </>
+              ) : production ? (
+                <>
+                  <strong>保存された実データ</strong>
+                  <span className="notice-divider">·</span>
+                  接続状態は収集結果やデータの新しさを表しません
+                </>
               ) : (
                 <>
                   <strong>ローカルデータ</strong>
@@ -195,8 +210,17 @@ export function App(): ReactNode {
           </p>
         </div>
         <main id="main" ref={main} tabIndex={-1}>
+          {production ? <ParsingHealthNotice health={metadata.data?.parsingHealth} /> : null}
           <QueryBoundary query={metadata} label="接続情報">
-            {() => <View route={route} />}
+            {() => (
+              <>
+                {production &&
+                ["transactions", "balances", "positions", "artifacts"].includes(route.name) ? (
+                  <CollectionControls kind={route.name} />
+                ) : null}
+                <View key={path + window.location.search} route={route} />
+              </>
+            )}
           </QueryBoundary>
         </main>
         <footer className="workspace-footer">

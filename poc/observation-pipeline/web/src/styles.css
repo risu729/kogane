@@ -483,6 +483,9 @@ tbody th {
 
 td,
 tbody th {
+  max-width: 24rem;
+  overflow-wrap: anywhere;
+  white-space: normal;
   padding: 15px 18px;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
@@ -1228,6 +1231,7 @@ pre {
 }
 .filter-field input,
 .filter-field select {
+  text-overflow: ellipsis;
   width: 100%;
   min-width: 0;
   min-height: 39px;
@@ -1386,7 +1390,7 @@ td summary {
   }
   .nav {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
     gap: 2px;
   }
   .nav a {

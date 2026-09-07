@@ -357,8 +357,47 @@ export function QueryBoundary<T>({
     return <Loading label={label} />;
   }
   const data = query.data;
+  const coverage =
+    typeof data === "object" && data !== null && "coverage" in data
+      ? (data.coverage as {
+          truncated?: boolean;
+          nextCursor?: string | null;
+          nextOffset?: number | null;
+          latestNextOffset?: number | null;
+        })
+      : undefined;
   return (
     <>
+      {coverage?.truncated ? (
+        <div className="query-notice query-warning" role="status">
+          このページは各一覧の最大500件を表示しています。続きの記録があります。表示件数は全記録の総数ではありません。
+          {coverage.nextCursor || coverage.nextOffset != null ? (
+            <Link
+              className="button"
+              to={(() => {
+                const params = new URLSearchParams(window.location.search);
+                if (coverage.nextCursor) params.set("cursor", coverage.nextCursor);
+                else params.set("offset", String(coverage.nextOffset));
+                return `${window.location.pathname}?${params}`;
+              })()}
+            >
+              {window.location.pathname === "/balances" ? "履歴の次の500件" : "次の500件"}
+            </Link>
+          ) : null}
+          {coverage.latestNextOffset != null ? (
+            <Link
+              className="button"
+              to={(() => {
+                const params = new URLSearchParams(window.location.search);
+                params.set("latestOffset", String(coverage.latestNextOffset));
+                return `${window.location.pathname}?${params}`;
+              })()}
+            >
+              最新残高の次の500件
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
       {query.isError ? (
         <div className="query-notice query-warning" role="alert">
           <span>更新できませんでした。前回読み込んだ{label}を表示しています。</span>

@@ -1186,6 +1186,25 @@ occurrence ordinal because the provider supplies no transaction id; identical
 legitimate trades remain distinct, while rerunning the same parser version is
 still idempotent at parse-run level.
 
+SBI domestic parser `1.0.1` and yen-history parser `1.0.2` also handle the verified production response forms.
+The domestic collector requests MTS offset zero and limit 999 in
+`poc/sbi-securities-worker/src/sbi.ts`; its response index can be the end cursor,
+equal to the total record count, rather than zero. The parser accepts either
+endpoint only when the emitted record count equals the total and the exact
+record/trailer byte layout passes. Interior cursors and suffix-only pages still
+fail. Legacy yen-history direct responses are accepted only as a provably
+complete single page: page 1 of 1 (or the documented empty 0/0 form), row count
+equal to total count, and explicit provider-limit flags false. The exact older
+direct-page schema with only `isExceededMaxCount` is also accepted when that
+flag is explicitly false; missing all limit evidence still fails. Its provenance
+records `providerLimitFlag: isExceededMaxCount`. Canonical bundles continue to
+require both agreeing flags. All existing bounds,
+schema, decimal, identity, and date checks still run. These observations point
+to `json:$.depositRecordList[...]` in the original bytes; bundled captures retain
+their `json:$.pages[...].depositRecordList[...]` provenance. A failed legacy parse
+alone is not evidence that collection was incomplete; inspect the latest source
+pagination and byte-layout metadata before making that conclusion.
+
 The fixtures are synthetic. The repository is public and every real
 payload is personal financial data, so committing captures is not an
 option (`docs/account-inventory.md`). What the fixtures reproduce is the
@@ -1380,3 +1399,26 @@ Phase 3 is done when:
   whether supersession should eventually be modelled append-only instead
   of as one nullable column, an alternative the repository records no
   evaluation of.
+
+### Remaining GlobalPass shape investigation (2026-09-08)
+
+A read-only replay of all 22 then-rejected `global-pass-activity@1.0.0`
+artifacts verified each object's checksum and byte count before parsing. Twenty
+have no tables and were rejected by the activity-table cardinality check. All
+22 have one month selector, no password inputs, and no identified Turnstile or
+error markup. The zero-table representative has the six-form statement-shell
+template and an empty `informationMsg` element; an explicit, audited empty-result
+marker was not established. It is an unsupported selector-only statement shape,
+not proof of an empty month or a failed collection.
+
+The other two captures contain the normal outer activity table plus nine compact
+and nine expanded transaction views, and an additional two-header, one-data-cell
+table including a `Transaction Detail` header. They fail the unclassified-table
+guard. That additional template may contain financial information and must not
+be ignored just to admit the other rows. A follow-up should map its enclosing
+row, date/status and relationships to the other views using existing stored
+evidence, then add a synthetic fixture and exact parser contract. For zero-table
+pages, establish the provider's explicit empty-state evidence or collection
+readiness signal before adding empty-snapshot support. The parser remains
+unchanged and these captures remain visible as parse failures with raw evidence.
+No live financial-institution requests were used for this diagnosis.

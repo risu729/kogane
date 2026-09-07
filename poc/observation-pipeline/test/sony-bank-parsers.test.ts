@@ -372,7 +372,9 @@ describe("Sony Bank current source views", () => {
     );
     const current = currentTransactions(store);
     expect(current).toHaveLength(2);
-    expect(current.every((row) => row.parser === "sony-bank-history-csv@1.0.0")).toBeTrue();
+    expect(
+      current.every((row) => row.parser === `sony-bank-history-csv@${sonyBankHistoryCsv.version}`),
+    ).toBeTrue();
   });
 
   test("keeps a reused WALLET approval number distinct across statement months", () => {

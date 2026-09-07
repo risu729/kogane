@@ -78,21 +78,40 @@ function OverviewBody({ data }: { data: Overview }): ReactNode {
       >
         <div className="source-grid">
           {data.sources.length ? (
-            data.sources.map((source) => (
-              <article className="source-card" key={source.id}>
-                <h3>{source.provider}</h3>
-                <p className="dim">{source.id}</p>
-                <strong>{source.artifact_count}件の原本</strong>
-                <details className="detail-disclosure">
-                  <summary>取込方法</summary>
-                  <Badge>{source.ingestion}</Badge>
-                </details>
-              </article>
-            ))
+            data.sources
+              .filter((source) => source.artifact_count > 0)
+              .map((source) => (
+                <article className="source-card" key={source.id}>
+                  <h3>{source.provider}</h3>
+                  <p className="dim">{source.id}</p>
+                  <strong>{source.artifact_count}件の原本</strong>
+                  <details className="detail-disclosure">
+                    <summary>取込方法</summary>
+                    <Badge>{source.ingestion}</Badge>
+                  </details>
+                </article>
+              ))
           ) : (
             <p className="panel-body">取得元がまだ登録されていません。</p>
           )}
         </div>
+        {data.sources.some((source) => source.artifact_count === 0) ? (
+          <details className="panel-body detail-disclosure">
+            <summary>
+              原本が未保存の取得元（
+              {data.sources.filter((source) => source.artifact_count === 0).length}件）
+            </summary>
+            <ul>
+              {data.sources
+                .filter((source) => source.artifact_count === 0)
+                .map((source) => (
+                  <li key={source.id}>
+                    {source.provider} · {source.id}
+                  </li>
+                ))}
+            </ul>
+          </details>
+        ) : null}
       </Panel>
       <Panel
         id="fetch-runs"

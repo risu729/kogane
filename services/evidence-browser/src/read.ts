@@ -154,7 +154,11 @@ export async function getArtifact(
   return row;
 }
 
-export async function raw(bucket: R2Bucket, row: ArtifactRow, head: boolean): Promise<Response> {
+export async function raw(
+  bucket: R2Bucket,
+  row: Pick<ArtifactRow, "blob_key" | "sha256" | "byte_size">,
+  head: boolean,
+): Promise<Response> {
   let object: R2Object | R2ObjectBody | null;
   try {
     object = head ? await bucket.head(row.blob_key) : await bucket.get(row.blob_key);

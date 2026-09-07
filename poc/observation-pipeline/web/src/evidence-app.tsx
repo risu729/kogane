@@ -6,6 +6,8 @@ import { EvidenceBoundary } from "./evidence-ui.tsx";
 import { EvidenceArtifactPage, EvidenceHistory, EvidenceRunPage } from "./pages/Evidence.tsx";
 import { Link, usePath } from "./router.tsx";
 import { EmptyState } from "./ui.tsx";
+import type { ApiMetadata } from "../../shared/api-contract.ts";
+import { ParsingHealthNotice } from "./parsing-health.tsx";
 
 function routeFor(path: string) {
   const artifact = /^\/runs\/(r_[1-9]\d*)\/artifacts\/(a_[1-9]\d*)$/u.exec(path);
@@ -18,12 +20,18 @@ function routeFor(path: string) {
     };
   const run = /^\/runs\/(r_[1-9]\d*)$/u.exec(path);
   if (run) return { kind: "run" as const, runId: run[1] as EvidenceRunId, title: "収集記録の詳細" };
-  return path === "/"
+  return path === "/" || path === "/evidence"
     ? { kind: "history" as const, title: "取得履歴と原本" }
     : { kind: "missing" as const, title: "ページが見つかりません" };
 }
 
-export function EvidenceApp(): ReactNode {
+export function EvidenceApp({
+  parsingHealth,
+  observationsAvailable = false,
+}: {
+  parsingHealth?: ApiMetadata["parsingHealth"];
+  observationsAvailable?: boolean;
+} = {}): ReactNode {
   const path = usePath();
   const route = routeFor(path);
   const metadata = useEvidenceMeta();
@@ -60,8 +68,17 @@ export function EvidenceApp(): ReactNode {
         </Link>
         <p className="nav-label">ライブラリ</p>
         <nav className="nav" aria-label="メインナビゲーション">
-          <Link to="/" current={route.kind === "history"}>
-            取得履歴・原本
+          {observationsAvailable ? (
+            <>
+              <Link to="/">ホーム</Link>
+              <Link to="/transactions">取引</Link>
+              <Link to="/balances">残高</Link>
+              <Link to="/positions">保有資産</Link>
+              <Link to="/artifacts">原本・証跡</Link>
+            </>
+          ) : null}
+          <Link to="/evidence" current={route.kind === "history"}>
+            {observationsAvailable ? "取得履歴" : "取得履歴・原本"}
           </Link>
         </nav>
         <div className="sidebar-note">
@@ -105,9 +122,10 @@ export function EvidenceApp(): ReactNode {
           <p>接続状態は、収集結果やデータの新しさを表すものではありません。</p>
         </div>
         <main id="main" ref={main} tabIndex={-1}>
+          <ParsingHealthNotice health={parsingHealth} />
           {route.kind !== "history" ? (
             <nav className="breadcrumb" aria-label="現在の位置">
-              <Link to="/">取得履歴</Link>
+              <Link to="/evidence">取得履歴</Link>
               {route.kind === "artifact" ? (
                 <>
                   {" "}
@@ -123,7 +141,7 @@ export function EvidenceApp(): ReactNode {
           <EvidenceBoundary query={metadata} label="接続情報">
             {(meta) => (
               <>
-                {!meta.capabilities.parsedObservations ? (
+                {!observationsAvailable && !meta.capabilities.parsedObservations ? (
                   <p className="query-notice">
                     この画面は原本・証跡の閲覧用です。取引・残高としての解析結果はまだ提供していません。
                   </p>
@@ -141,7 +159,7 @@ export function EvidenceApp(): ReactNode {
                   />
                 ) : (
                   <EmptyState>
-                    このURLに対応するページはありません。<Link to="/">取得履歴へ戻る</Link>
+                    このURLに対応するページはありません。<Link to="/evidence">取得履歴へ戻る</Link>
                   </EmptyState>
                 )}
               </>

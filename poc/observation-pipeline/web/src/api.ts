@@ -1,6 +1,7 @@
 // Shared HTTP contracts keep the UI independent of the local store implementation.
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { validApiResponse } from "../../shared/api-validation.ts";
+import { useLocation } from "./router.tsx";
 import type {
   ObservationKind,
   Overview,
@@ -79,11 +80,13 @@ export async function getJson<T>(path: string, signal: AbortSignal): Promise<T> 
         ? "認証が必要です。接続先でログインし直してから、再読み込みしてください。"
         : response.status === 403
           ? "このデータを表示する権限がありません。接続先のアクセス権を確認してください。"
-          : response.status === 404
-            ? "指定されたデータが見つかりません。一覧を更新して確認してください。"
-            : response.status === 429
-              ? "リクエストが集中しています。少し待ってから再試行してください。"
-              : "データを取得できませんでした。時間をおいて再試行してください。";
+          : response.status === 413
+            ? "保存記録が表示上限を超えています。この画面では一部の数字を完全な結果として表示できません。取得履歴から原本を確認してください。"
+            : response.status === 404
+              ? "指定されたデータが見つかりません。一覧を更新して確認してください。"
+              : response.status === 429
+                ? "リクエストが集中しています。少し待ってから再試行してください。"
+                : "データを取得できませんでした。時間をおいて再試行してください。";
     throw new ApiError(response.status, message);
   }
   if (
@@ -105,7 +108,7 @@ export async function getJson<T>(path: string, signal: AbortSignal): Promise<T> 
       "受信したデータを読み取れませんでした。再読み込みしてください。",
     );
   }
-  if (!validApiResponse(path, value)) {
+  if (!validApiResponse(path.split("?", 1)[0]!, value)) {
     throw new ApiError(
       response.status,
       "受信したデータの形式が対応していません。接続先を確認してください。",
@@ -135,10 +138,11 @@ export function useOverview(): UseQueryResult<Overview, Error> {
 }
 
 export function useTransactions(): UseQueryResult<{ transactions: TransactionRow[] }, Error> {
+  const suffix = useCollectionSearch();
   return useQuery({
-    queryKey: ["transactions"],
+    queryKey: ["transactions", suffix],
     queryFn: ({ signal }) =>
-      getJson<{ transactions: TransactionRow[] }>("/api/transactions", signal),
+      getJson<{ transactions: TransactionRow[] }>(`/api/transactions${suffix}`, signal),
   });
 }
 
@@ -146,26 +150,39 @@ export function useBalances(): UseQueryResult<
   { latest: BalanceRow[]; history: BalanceHistoryRow[] },
   Error
 > {
+  const suffix = useCollectionSearch();
   return useQuery({
-    queryKey: ["balances"],
+    queryKey: ["balances", suffix],
     queryFn: ({ signal }) =>
-      getJson<{ latest: BalanceRow[]; history: BalanceHistoryRow[] }>("/api/balances", signal),
+      getJson<{ latest: BalanceRow[]; history: BalanceHistoryRow[] }>(
+        `/api/balances${suffix}`,
+        signal,
+      ),
   });
 }
 
 export function usePositions(): UseQueryResult<{ positions: PositionWithValuations[] }, Error> {
+  const suffix = useCollectionSearch();
   return useQuery({
-    queryKey: ["positions"],
+    queryKey: ["positions", suffix],
     queryFn: ({ signal }) =>
-      getJson<{ positions: PositionWithValuations[] }>("/api/positions", signal),
+      getJson<{ positions: PositionWithValuations[] }>(`/api/positions${suffix}`, signal),
   });
 }
 
 export function useArtifacts(): UseQueryResult<{ artifacts: ArtifactRow[] }, Error> {
+  const suffix = useCollectionSearch();
+  const path = `/api/artifacts${suffix}`;
   return useQuery({
-    queryKey: ["artifacts"],
-    queryFn: ({ signal }) => getJson<{ artifacts: ArtifactRow[] }>("/api/artifacts", signal),
+    queryKey: ["artifacts", suffix],
+    queryFn: ({ signal }) => getJson<{ artifacts: ArtifactRow[] }>(path, signal),
   });
+}
+
+function useCollectionSearch(): string {
+  const location = useLocation();
+  const search = location.split("?")[1];
+  return search ? `?${search}` : "";
 }
 
 export function useArtifact(id: number): UseQueryResult<ArtifactDetail, Error> {

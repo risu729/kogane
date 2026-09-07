@@ -1197,7 +1197,7 @@ describe("collector R2 importer routes", () => {
     const originalLog = console.log;
     console.log = () => undefined;
     try {
-      await worker.scheduled({ cron: "23 19 * * 0" } as ScheduledController, env);
+      await worker.scheduled({ cron: "23 19 * * SUN" } as ScheduledController, env);
     } finally {
       console.log = originalLog;
     }

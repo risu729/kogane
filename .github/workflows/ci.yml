@@ -65,6 +65,7 @@ jobs:
           - services/collector-r2-importer
           - services/evidence-browser
           - services/raw-evidence
+          - services/observation-pipeline
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

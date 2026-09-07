@@ -13,7 +13,7 @@
     "ACCESS_AUDIENCE": "20cc9cb6173e2755bc3ffd5f43a9adf45b0c2ad8451a1b2d330cc2b75f0d85c8"
   },
   "assets": {
-    "directory": "../../poc/observation-pipeline/web/dist-evidence",
+    "directory": "../../poc/observation-pipeline/web/dist-production",
     "binding": "ASSETS",
     "run_worker_first": true,
     "not_found_handling": "single-page-application"

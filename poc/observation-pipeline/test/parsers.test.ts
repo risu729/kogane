@@ -204,13 +204,14 @@ describe("sbi-yen-detail-history", () => {
     });
   });
 
-  test("rejects legacy, incomplete, duplicate, and extra-page bundles", () => {
+  test("accepts complete legacy pages but rejects incomplete, duplicate, and extra-page bundles", () => {
     const valid = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
     const pages = valid.pages as Array<Record<string, unknown>>;
     const page = pages[0]!;
-    expect(() =>
-      sbiYenDetailHistory.parse(new TextEncoder().encode(JSON.stringify(page)), meta),
-    ).toThrow(/fields changed/u);
+    expect(
+      sbiYenDetailHistory.parse(new TextEncoder().encode(JSON.stringify(page)), meta)
+        .observations[0]?.rawLocator,
+    ).toBe("json:$.depositRecordList[0]");
     for (const mutated of [
       { ...valid, complete: false },
       { ...valid, pageLimitExceeded: true },

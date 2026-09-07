@@ -75,9 +75,13 @@ export function wrapper(value: unknown, label: string): Record<string, unknown> 
       [],
     );
     scalarFields(error, Object.keys(error), `${label}.errorInfo`);
+    const explicitSuccess =
+      error["statusID"] === "00000" &&
+      typeof error["statusMessage"] === "string" &&
+      error["statusMessage"].toLowerCase() === "success";
     for (const field of ["statusID", "statusMessage"] as const) {
       const value = error[field];
-      if (value !== undefined && value !== null && value !== "") {
+      if (!explicitSuccess && value !== undefined && value !== null && value !== "") {
         throw new Error(`${label}.errorInfo.${field}: successful wrapper contains an error`);
       }
     }
@@ -190,7 +194,9 @@ export function compactDate(value: unknown, label: string): string {
 export function providerTimestamp(value: unknown): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   if (typeof value !== "string") throw new Error("provider timestamp must be a string");
-  const match = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/u.exec(value);
+  const match =
+    /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/u.exec(value) ??
+    /^(\d{4})\/(\d{2})\/(\d{2}) (\d{2}):(\d{2}):(\d{2})$/u.exec(value);
   if (!match) throw new Error("provider timestamp format is not recognized");
   const parts = match.slice(1).map(Number);
   const [year, month, day, hour, minute, second] = parts as [

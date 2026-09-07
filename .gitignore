@@ -2,6 +2,7 @@
 **/.wrangler/
 **/dist/
 **/dist-evidence/
+**/dist-production/
 **/__pycache__/
 **/.ruff_cache/
 hk.local.pkl

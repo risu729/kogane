@@ -1,0 +1,16 @@
+{
+  "name": "kogane-observation-read-diagnostic",
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "compatibility_date": "2026-09-07",
+  "workers_dev": false,
+  "preview_urls": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "kogane-raw-evidence",
+      "database_id": "b335a887-250d-45c9-bd72-af83f35fdc60",
+      "remote": true
+    }
+  ],
+  "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "kogane-raw-evidence", "remote": true }]
+}

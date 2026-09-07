@@ -1,0 +1,6 @@
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+*.log
+worker-configuration.d.ts

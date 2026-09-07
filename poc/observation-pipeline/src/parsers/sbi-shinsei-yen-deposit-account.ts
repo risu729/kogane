@@ -31,7 +31,7 @@ const DEBIT_FIELDS = [
 
 export const sbiShinseiYenDepositAccount: Parser = {
   name: "sbi-shinsei-yen-deposit-account",
-  version: "0.1.0",
+  version: "0.1.1",
   accepts: (artifact: ArtifactMeta) => acceptsSbiShinseiDataset(artifact, DATASET),
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {

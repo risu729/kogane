@@ -61,10 +61,17 @@ const warnings = object<Warnings>({
   parsed: boolean,
 });
 const metadata = object<ApiMetadata>({
+  parsingHealth: optional(
+    object<NonNullable<ApiMetadata["parsingHealth"]>>({
+      pending: identifier,
+      running: identifier,
+      failed: identifier,
+    }),
+  ),
   apiVersion: literal(1),
   source: object<ApiMetadata["source"]>({
-    kind: literal("local-store"),
-    classification: literal("unknown", "synthetic"),
+    kind: literal("local-store", "central-store"),
+    classification: literal("unknown", "synthetic", "financial"),
   }),
   capabilities: object<ApiMetadata["capabilities"]>({
     readOnly: literal(true),
@@ -262,6 +269,47 @@ const endpoints: Record<string, Check<unknown>> = {
 
 /** Additive fields are allowed; required fields and their nullability are checked. */
 export function validApiResponse(path: string, value: unknown): boolean {
+  if (path === "/api/filter-options") {
+    return (
+      record(value) &&
+      Array.isArray(value.sources) &&
+      value.sources.every(text) &&
+      Array.isArray(value.instruments) &&
+      value.instruments.every(text) &&
+      Array.isArray(value.metrics) &&
+      value.metrics.every(text) &&
+      Array.isArray(value.accounts) &&
+      value.accounts.every((row) => record(row) && text(row.source_id) && text(row.source_account))
+    );
+  }
+  if (record(value) && Object.hasOwn(value, "coverage")) {
+    const c = value.coverage;
+    if (
+      !record(c) ||
+      !identifier(c.limit) ||
+      !boolean(c.truncated) ||
+      !(
+        c.nextOffset === undefined ||
+        c.nextOffset === null ||
+        (Number.isSafeInteger(c.nextOffset) &&
+          typeof c.nextOffset === "number" &&
+          c.nextOffset >= 0)
+      ) ||
+      !(
+        c.latestNextOffset === undefined ||
+        c.latestNextOffset === null ||
+        (Number.isSafeInteger(c.latestNextOffset) &&
+          typeof c.latestNextOffset === "number" &&
+          c.latestNextOffset >= 0)
+      ) ||
+      !(
+        c.nextCursor === undefined ||
+        c.nextCursor === null ||
+        (typeof c.nextCursor === "string" && /^[1-9]\d*$/.test(c.nextCursor))
+      )
+    )
+      return false;
+  }
   const check = Object.hasOwn(endpoints, path) ? endpoints[path] : undefined;
   if (check) return check(value);
   if (/^\/api\/artifacts\/\d+$/u.test(path)) {

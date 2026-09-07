@@ -54,7 +54,7 @@ const CUSTOMER_DISPLAY_ORDER = "customerDispOrdr";
 
 export const sonyBankGrossBalance: Parser = {
   name: "sony-bank-gross-balance",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts: (artifact) => artifact.sourceId === "sony-bank" && artifact.dataset === "gross-balance",
   parse(bytes, artifact) {
     requireSuccessfulRun(artifact);
@@ -257,7 +257,7 @@ export const sonyBankHistoryJson: Parser = {
 
 export const sonyBankHistoryCsv: Parser = {
   name: "sony-bank-history-csv",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" &&
     /^(yen-history|foreign-history-[a-z]{3})-csv$/u.test(artifact.dataset ?? ""),
@@ -285,9 +285,17 @@ export const sonyBankHistoryCsv: Parser = {
         throw new Error("Sony history CSV direction is ambiguous");
       const money = exactUnsignedMoney(credit ? deposit : withdrawal, currency, "CSV amount");
       const balanceMoney = exactMoney(after, currency, "CSV balance");
-      const asOf = normalizedDate(date, "CSV date");
+      const japaneseDate = /^(\d{4})年(\d{1,2})月(\d{1,2})日$/u.exec(date ?? "");
+      const asOf = normalizedDate(
+        japaneseDate
+          ? `${japaneseDate[1]}-${japaneseDate[2]!.padStart(2, "0")}-${japaneseDate[3]!.padStart(2, "0")}`
+          : date,
+        "CSV date",
+      );
       requireWithinWindow(asOf, window, "CSV date");
-      if (foreign) exactDecimal(rate, "CSV exchange rate");
+      // Providers leave this field blank for foreign-currency movements that
+      // do not report a conversion. Preserve the blank in extra; infer no rate.
+      if (foreign && rate !== "") exactDecimal(rate, "CSV exchange rate");
       const extra = Object.fromEntries(header.map((name, offset) => [name, row[offset]]));
       const normalizedDescription = strictString(description, "CSV description", { max: 512 });
       const signedMinor = credit ? money.minor : -money.minor;
@@ -349,12 +357,12 @@ const WALLET_HEADERS = [
 
 export const sonyBankWalletHistory: Parser = {
   name: "sony-bank-wallet-history",
-  version: "1.0.0",
+  version: "1.0.2",
   accepts: (artifact) =>
     artifact.sourceId === "sony-bank" && /^wallet-history-\d{6}$/u.test(artifact.dataset ?? ""),
   parse(bytes, artifact) {
     requireSuccessfulRun(artifact);
-    if (artifact.mime !== "text/html; charset=UTF-8") {
+    if (artifact.mime.toLowerCase() !== "text/html; charset=utf-8") {
       throw new Error("Sony WALLET media type drift");
     }
     const html = decodeUtf8(bytes);
@@ -365,10 +373,14 @@ export const sonyBankWalletHistory: Parser = {
       throw new Error("Sony WALLET month selector drift");
     }
     const optionTags = [...(selects[0]![2] ?? "").matchAll(/<option\b([^>]*)>/giu)];
-    const options = optionTags.map((match) => ({
+    const allOptions = optionTags.map((match) => ({
       value: attribute(match[1] ?? "", "value") ?? "",
       selected: /\bselected(?:\s*=|\s|$)/iu.test(match[1] ?? ""),
     }));
+    const emptyOptions = allOptions.filter((option) => option.value === "");
+    if (emptyOptions.length > 1 || emptyOptions.some((option) => option.selected))
+      throw new Error("Sony WALLET month placeholder drift");
+    const options = allOptions.filter((option) => option.value !== "");
     if (
       options.length < 1 ||
       options.length > 15 ||
@@ -390,6 +402,12 @@ export const sonyBankWalletHistory: Parser = {
       throw new Error("Sony WALLET selected month drift");
     }
     const tables = [...html.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/giu)];
+    if (
+      tables.length === 0 &&
+      [...html.matchAll(/>\s*ご利用明細はありません。\s*</gu)].length === 1
+    ) {
+      return { observations: [], warnings: [] };
+    }
     const observations: Observation[] = [];
     const warnings: string[] = [];
     const matchingTables = tables.filter((table) => {
@@ -423,14 +441,24 @@ export const sonyBankWalletHistory: Parser = {
         throw new Error("Sony WALLET transaction date is outside the selected month");
       }
       const transactionMoney = walletMoney(main[2]!, "WALLET transaction amount");
-      const usageMoney = walletMoney(supplement[0]!, "WALLET usage amount");
+      // The audited desktop rows leave the optional original-currency amount
+      // blank for these transactions. Keep the raw blank and explicit null;
+      // the separately reported transaction amount remains authoritative.
+      const usageMoney =
+        supplement[0] === "" ? null : walletMoney(supplement[0]!, "WALLET usage amount", true);
       for (const [value, label] of [
         [main[3], "local fee"],
         [main[4], "ATM fee"],
         [main[5], "overseas expense"],
         [supplement[1], "usage local fee"],
       ] as const)
-        if (value !== "" && value !== "-") walletMoney(value!, `WALLET ${label}`);
+        if (value !== "" && value !== "-") {
+          if (/^[+\-△▲]?[\d,]+(?:\.\d+)?$/u.test(value!)) {
+            // A provider fee may be a bare decimal. Validate and retain it
+            // as source text without assigning a currency or minor-unit value.
+            exactDecimal(value!.replace(/^[△▲]/u, "-"), `WALLET ${label}`);
+          } else walletMoney(value!, `WALLET ${label}`);
+        }
       if (supplement[2] !== "" && supplement[2] !== "-")
         exactDecimal(supplement[2]!.replaceAll(",", ""), "WALLET exchange rate");
       const status =
@@ -682,6 +710,20 @@ function takeOccurrence(occurrences: Map<string, number>, identity: string): num
   return occurrence;
 }
 function providerInstant(value: unknown, label: string): string {
+  if (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+09:00$/u.test(value)
+  ) {
+    normalizedDate(value.slice(0, 10), label);
+    if (
+      Number(value.slice(11, 13)) > 23 ||
+      Number(value.slice(14, 16)) > 59 ||
+      Number(value.slice(17, 19)) > 59 ||
+      !Number.isFinite(Date.parse(value))
+    )
+      throw new Error(`${label} is invalid`);
+    return value;
+  }
   const text = strictString(value, label, {
     max: 40,
     pattern: /^\d{4}[/-]\d{2}[/-]\d{2}[ T]\d{2}:\d{2}:\d{2}$/u,
@@ -708,7 +750,17 @@ function visibleText(html: string): string {
 function walletMoney(
   value: string,
   label: string,
-): { currency: string; text: string; scale: number; minor: number; explicitSign: boolean } {
+): { currency: string; text: string; scale: number; minor: number; explicitSign: boolean };
+function walletMoney(
+  value: string,
+  label: string,
+  preserveProviderCurrency: true,
+): { currency: string; text: string; scale: number; minor: number | null; explicitSign: boolean };
+function walletMoney(
+  value: string,
+  label: string,
+  preserveProviderCurrency = false,
+): { currency: string; text: string; scale: number; minor: number | null; explicitSign: boolean } {
   const text = value.trim();
   const currencyFirst = text.match(/^([A-Z]{3})[\s:]*([+\-△▲]?[\d,]+(?:\.\d+)?)$/u);
   const amountFirst = text.match(/^([+\-△▲]?[\d,]+(?:\.\d+)?)[\s:]*([A-Z]{3})$/u);
@@ -718,9 +770,16 @@ function walletMoney(
       ? { currency: amountFirst[2], amount: amountFirst[1] }
       : null;
   if (!match) throw new Error(`${label} shape drift`);
-  const currency = enumText(match.currency, CURRENCIES, `${label} currency`);
+  const currency = preserveProviderCurrency
+    ? strictString(match.currency, `${label} currency`, { pattern: /^[A-Z]{3}$/u })
+    : enumText(match.currency, CURRENCIES, `${label} currency`);
   const minor = amountToMinorUnits(match.amount!, currency);
-  if (minor === undefined) throw new Error(`${label} is not exact`);
-  const decimal = exactDecimal(match.amount!.replace(/^[△▲]/u, "-").replaceAll(",", ""), label);
-  return { currency, minor, ...decimal, explicitSign: /^[+\-△▲]/u.test(match.amount!) };
+  if (minor === undefined && !preserveProviderCurrency) throw new Error(`${label} is not exact`);
+  const decimal = exactDecimal(match.amount!.replace(/^[△▲]/u, "-"), label);
+  return {
+    currency,
+    minor: minor ?? null,
+    ...decimal,
+    explicitSign: /^[+\-△▲]/u.test(match.amount!),
+  };
 }

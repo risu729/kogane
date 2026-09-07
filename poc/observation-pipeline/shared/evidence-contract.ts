@@ -53,7 +53,7 @@ export interface EvidenceMeta {
   capabilities: {
     readOnly: true;
     rawEvidence: true;
-    parsedObservations: false;
+    parsedObservations: boolean;
     liveCollectors: false;
   };
   sources: EvidenceSource[];

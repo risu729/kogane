@@ -628,7 +628,7 @@ export default {
     }
   },
   async scheduled(controller, env): Promise<void> {
-    if (controller.cron !== "23 19 * * 0") {
+    if (controller.cron !== "23 19 * * SUN") {
       throw new ImportError(400, "reconciler_cron_invalid");
     }
     await env.OUTBOX_RECONCILER_QUEUE.sendBatch(

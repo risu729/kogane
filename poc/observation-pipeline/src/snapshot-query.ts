@@ -53,7 +53,7 @@ export const SNAPSHOT_CTES = `snapshot_policies(parser_name, dataset, required_v
         SELECT 1 FROM json_each(complete_parse.warnings_json) warning
         WHERE warning.type <> 'text' OR NOT (
           warning.value LIKE '% has no exact % minor-unit form; kept as text'
-          OR warning.value LIKE '%: fields not modelled as metrics were kept only in extra: %'
+          OR instr(warning.value, ': fields not modelled as metrics were kept only in extra: ') > 0
         )
       ))
   ) THEN 1 ELSE 0 END)
