@@ -17,6 +17,7 @@ import type { Parser } from "../src/types.ts";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
 const SBI_RUN = join(FIXTURES, "sbi-securities", "2026-08-20", "run-20260820-210000-poc01");
+const SBI_VC_RUN = join(FIXTURES, "sbi-vc-trade", "2026-09-07", "run-20260907-synthetic01");
 
 function tempStore(): Store {
   return openStore(mkdtempSync(join(tmpdir(), "kogane-poc-")));
@@ -58,6 +59,15 @@ describe("ingestion", () => {
     expect(count(store, "fetch_runs")).toBe(1);
     expect(count(store, "fetch_artifacts")).toBe(4);
     expect(count(store, "raw_objects")).toBe(4);
+  });
+
+  test("SBI VC collector run ingestion verifies all six source-separated artifacts", () => {
+    const store = tempStore();
+    const source = { id: "sbi-vc-trade", provider: "SBI VC Trade" };
+    const first = ingestRunDirectory(store, SBI_VC_RUN, source);
+    expect(first).toMatchObject({ artifacts: 6, deduplicated: 0, skippedExisting: false });
+    expect(ingestRunDirectory(store, SBI_VC_RUN, source).skippedExisting).toBe(true);
+    expect(count(store, "fetch_artifacts")).toBe(6);
   });
 
   test("identical bytes under different names store one blob", () => {

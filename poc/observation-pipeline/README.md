@@ -75,19 +75,24 @@ transaction / balance / position / valuation observations   layer B
 evidence browser (React client in web/, served by serve.ts)
 ```
 
-Nine parsers are registered against shapes the collectors already produce:
+Fourteen parsers are registered against shapes the collectors already produce:
 
-| Parser                        | Artifact                      | Emits                                        |
-| ----------------------------- | ----------------------------- | -------------------------------------------- |
-| `sbi-domestic-cash-positions` | SBI `domestic-cash-positions` | deposit-type-scoped positions and valuations |
-| `sbi-account-assets-current`  | SBI `account-assets-current`  | provider valuations by source view/category  |
-| `sbi-yen-detail-history`      | SBI `yen-detail-history`      | transactions                                 |
-| `sbi-domestic-trade-records`  | SBI `domestic-trade-records`  | transactions                                 |
-| `sbi-foreign-trade-records`   | SBI `foreign-trade-records`   | transactions                                 |
-| `sbi-foreign-cash-positions`  | SBI `foreign-cash-positions`  | positions, provider valuations               |
-| `sbi-foreign-cash-balances`   | SBI `foreign-cash-balances`   | balances                                     |
-| `paypay-csv`                  | PayPay consumer CSV export    | transactions                                 |
-| `mobile-suica-sf-history`     | Mobile Suica `sf-history`     | transactions, post-row balances              |
+| Parser                        | Artifact                                           | Emits                                        |
+| ----------------------------- | -------------------------------------------------- | -------------------------------------------- |
+| `sbi-domestic-cash-positions` | SBI `domestic-cash-positions`                      | deposit-type-scoped positions and valuations |
+| `sbi-account-assets-current`  | SBI `account-assets-current`                       | provider valuations by source view/category  |
+| `sbi-yen-detail-history`      | SBI `yen-detail-history`                           | transactions                                 |
+| `sbi-domestic-trade-records`  | SBI `domestic-trade-records`                       | transactions                                 |
+| `sbi-foreign-trade-records`   | SBI `foreign-trade-records`                        | transactions                                 |
+| `sbi-foreign-cash-positions`  | SBI `foreign-cash-positions`                       | positions, provider valuations               |
+| `sbi-foreign-cash-balances`   | SBI `foreign-cash-balances`                        | balances                                     |
+| `sbi-vc-cash-balances`        | SBI VC Trade `cash-balances`                       | balances                                     |
+| `sbi-vc-account-margin`       | SBI VC Trade `account-margin`                      | balances                                     |
+| `sbi-vc-position-summary`     | SBI VC Trade `position-summary`                    | positions                                    |
+| `sbi-vc-executions`           | SBI VC Trade recent and historical execution pages | transactions                                 |
+| `sbi-vc-cashflows`            | SBI VC Trade historical cashflow pages             | transactions, balances                       |
+| `paypay-csv`                  | PayPay consumer CSV export                         | transactions                                 |
+| `mobile-suica-sf-history`     | Mobile Suica `sf-history`                          | transactions, post-row balances              |
 
 Mobile Suica deliberately has one canonical Layer-B route. The collector's
 Shift-JIS `sf-history-html` is provider evidence and `collection-summary` is
@@ -98,8 +103,8 @@ normalized row, each row balance is a separate `sf_balance_after_transaction`
 measurement, and the most recent row is marked as the current-balance candidate
 rather than presented as a guaranteed real-time balance.
 
-The original demo manifest still ingests 4 artifacts from 2 sources and produces 28 observations:
-8 transaction, 10 balance, 2 position, 8 valuation.
+The demo ingests 11 artifacts from 3 sources and produces 49 observations:
+14 transaction, 24 balance, 3 position, 8 valuation.
 
 ## The parser contract
 
@@ -193,3 +198,10 @@ repository; their role is parser contract testing, not layer-A ingestion.
 
 This is also their limitation, and the reason `RESULTS.md` lists the
 questions only real payloads can close.
+
+The SBI VC Trade fixture set mirrors all six source-separated collector
+artifacts. Its shape was checked against the current public client models and
+with a production R2 read-only canary. The canary disclosed only aggregate
+pass/fail counts: every artifact in the latest successful run matched exactly
+one registered parser and parsed successfully. Object keys, hashes, response
+bodies, provider values, and account identifiers were not emitted.

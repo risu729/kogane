@@ -544,6 +544,10 @@ Cronは複数回実発火し、少なくとも2026-08-31 02:00 UTCの時点で�
 
 同日、WorkerへR2 bindingと日次Cronを追加し、admin認証付き`POST /collect`を1回実行した。`cash-balances`、`account-margin`、`position-summary`、`executions-recent-page-0001`、`executions-historical-page-0001`、`cashflows-historical-page-0001`の6 artifact、合計35,180 bytesとmanifestをprivate R2へ保存し、status `success`、failure 0だった。全artifactをR2から再取得し、manifestのSHA-256一致、JSON envelopeのgateway status `OK`、`meta.secureKey`非含有を確認した。金融値とbodyは表示・ログ出力していない。
 
+2026-09-07には同じ6 datasetをLayer Bへsource-separatedに正規化する5 parserを追加した。recent/historicalの約定はprovider上で同じrecord shapeと複合identityを持つため、重複実装せず`CExecutionId`と`CExecutionIdSubNo`の衝突しないtupleを使う単一parserに集約した。cashflowの方向はtype labelから推測せず、signed `cashflowAmount`を正本とする。暗号資産のquantity/amount/priceは10進textとscaleを保持し、法定通貨のような既知minor unitへ推測変換しない。全観測には固定source accountとJSON locator、sanitized gateway meta/page contextを残す。
+
+production R2へのread-only actual-shape canaryでは、最新のsuccessful runにある全6 artifactがそれぞれexactly one parserへ一致し、parse failure 0であることをaggregateだけで確認した。canaryはR2 list/get以外を行わず、object key、hash、body、金融値、account identifier、secretを出力していない。commitするfixtureはこのshapeを匿名合成したもので、production bytesではない。
+
 これによりrolling keepaliveとabsolute/session失効後の無人復旧経路の両方を実証した。未確認なのは、実際にabsolute expiryへ達した瞬間の自動fallback、credential revoke、backend schema変更、長期rate limitである。手動`/reauth`成功だけでCron fallbackの全failure modeまで証明したとは扱わない。
 
 ### 中央raw-evidence転送
@@ -552,7 +556,7 @@ private R2を削除しないdurable outboxとして維持したまま、`kogane-
 
 各artifactとmanifestのR2 putは`etagDoesNotMatch: "*"`で同一keyへの上書きを拒否し、R2 native SHA-256を指定する。UUIDのrun prefixとmanifest-lastを将来のR2 notificationでもcommit markerとして使えるため、別の`commit.json`は追加しない。既存outboxはnative SHA-256が未設定でも、manifest値・custom metadata・再計算SHA-256の一致でbackfill可能なままにする。
 
-importerはSBI VC Trade固有の順序・pagination契約を使い、manifest schema/source/run/date/status、固定dataset、履歴pageの連番・`totalSize`一貫性・page長・終了条件、失敗時に次に欠けるdataset、prefix内の全object、size、custom metadata、SHA-256を中央run作成前に検証する。artifactは最大4 MiB、最大204件なので全bytesを同時保持せず逐次検証し、転送時に再読込・再検証した元bytesを再serializeせず送る。同期Service Binding経路はdata artifact 11件までとし、12件以上は中央stateを作らずR2にdeferして後続Queue reconcilerへ委ねる。中央routeとBearer clientは`collector-r2-sbi-vc`専用で、SBI証券用clientとは分離する。
+importerはSBI VC Trade固有の順序・pagination契約を使い、manifest schema/source/run/date/status、固定dataset、履歴pageの連番・`totalSize`一貫性・page長・終了条件、失敗時に次に欠けるdataset、prefix内の全object、size、custom metadata、SHA-256を中央run作成前に検証する。collector、importer、Layer B parserはいずれもpage size 30、page番号、`totalNumOfPages`、`totalSize`、list cardinalityを検証し、recent viewが単一pageを超える場合はtruncation evidenceとしてfail closedする。artifactは最大4 MiB、最大204件なので全bytesを同時保持せず逐次検証し、転送時に再読込・再検証した元bytesを再serializeせず送る。同期Service Binding経路はdata artifact 11件までとし、12件以上は中央stateを作らずR2にdeferして後続Queue reconcilerへ委ねる。中央routeとBearer clientは`collector-r2-sbi-vc`専用で、SBI証券用clientとは分離する。
 
 `collect`がpagination異常を検出した場合、collectorは原因になった最後のprovider responseを保存してからpartial manifestを確定する。importerはその末尾artifactについてenvelope、gateway status、secret除去、R2 metadata、hash、sizeとdataset位置を検証し、正常pageとは見なさず「失敗原因のraw evidence」として中央へcatalogueする。これにより異常responseを失わず、run全体はpartial/failedのままsealされる。
 

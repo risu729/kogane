@@ -38,6 +38,7 @@ test("isolated preview identifies synthetic data and never creates the regular s
     expect(overview.sources.map((source: { id: string }) => source.id).sort()).toEqual([
       "paypay",
       "sbi-securities",
+      "sbi-vc-trade",
     ]);
     expect(existsSync(regularStore)).toBe(existedBefore);
     const forbidden = await fetch(`${origin}/api/meta`, {

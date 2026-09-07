@@ -28,7 +28,7 @@ const MANIFEST_KEY =
 const SHA256 = /^[0-9a-f]{64}$/u;
 const ERROR_CODE = /^[a-z0-9_]{1,100}$/u;
 const PAGINATION_EVIDENCE_ERROR =
-  /^(?:executions_historical|cashflows_historical)_(?:invalid_pagination|pagination_total_changed|pagination_length_mismatch)$/u;
+  /^(?:executions_recent_(?:invalid_pagination|page_limit_exceeded|pagination_length_mismatch)|(?:executions_historical|cashflows_historical)_(?:invalid_pagination|pagination_total_changed|pagination_length_mismatch))$/u;
 const STATIC_DATASETS = [
   "cash-balances",
   "account-margin",
@@ -524,17 +524,36 @@ function parseStoredEnvelope(bytes: Uint8Array, dataset: string): { page?: PageI
     throw new ImportError(409, "artifact_page_payload_invalid");
   }
   const totalSize = nonNegativeInteger(body.totalSize);
-  if (totalSize === null) throw new ImportError(409, "artifact_page_payload_invalid");
-  if (recentExecution) return {};
+  const pageNumber = nonNegativeInteger(body.pageNumber);
+  const pageSize = nonNegativeInteger(body.pageSize);
+  const totalNumOfPages = nonNegativeInteger(body.totalNumOfPages);
+  if (
+    totalSize === null ||
+    pageNumber === null ||
+    pageSize !== PAGE_SIZE ||
+    totalNumOfPages !== Math.ceil(totalSize / PAGE_SIZE)
+  ) {
+    throw new ImportError(409, "artifact_page_payload_invalid");
+  }
+  if (recentExecution) {
+    if (pageNumber !== 0 || totalSize > PAGE_SIZE || body.list.length !== totalSize) {
+      throw new ImportError(409, "artifact_page_payload_invalid");
+    }
+    return {};
+  }
   if (!group) return {};
   const match = (
     group === "executions-historical" ? HISTORICAL_EXECUTION : HISTORICAL_CASHFLOW
   ).exec(dataset);
   if (!match) throw new ImportError(409, "artifact_page_dataset_invalid");
+  const index = Number(match[1]);
+  if (pageNumber !== index - 1) {
+    throw new ImportError(409, "artifact_page_payload_invalid");
+  }
   return {
     page: {
       group,
-      index: Number(match[1]),
+      index,
       listLength: body.list.length,
       totalSize,
     },

@@ -181,6 +181,21 @@ export function ingestFixtures(store: Store, fixturesDir: string): void {
       );
     }
   }
+  const sbiVcRunsRoot = join(fixturesDir, "sbi-vc-trade");
+  for (const day of readdirSync(sbiVcRunsRoot)) {
+    for (const run of readdirSync(join(sbiVcRunsRoot, day))) {
+      const summary = ingestRunDirectory(store, join(sbiVcRunsRoot, day, run), {
+        id: "sbi-vc-trade",
+        provider: "SBI VC Trade",
+      });
+      console.log(
+        `ingest sbi-vc-trade ${day}/${run}: ` +
+          (summary.skippedExisting
+            ? "already ingested"
+            : `${summary.artifacts} artifacts (${summary.deduplicated} deduplicated)`),
+      );
+    }
+  }
   const paypayDir = join(fixturesDir, "paypay");
   for (const file of readdirSync(paypayDir)) {
     const summary = ingestFile(store, join(paypayDir, file), {

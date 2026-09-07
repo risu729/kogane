@@ -8,6 +8,11 @@ import { sbiForeignCashBalances } from "./sbi-foreign-cash-balances.ts";
 import { sbiForeignCashPositions } from "./sbi-foreign-cash-positions.ts";
 import { sbiForeignTradeRecords } from "./sbi-foreign-trade-records.ts";
 import { sbiYenDetailHistory } from "./sbi-yen-detail-history.ts";
+import { sbiVcAccountMargin } from "./sbi-vc-account-margin.ts";
+import { sbiVcCashBalances } from "./sbi-vc-cash-balances.ts";
+import { sbiVcCashflows } from "./sbi-vc-cashflows.ts";
+import { sbiVcExecutions } from "./sbi-vc-executions.ts";
+import { sbiVcPositionSummary } from "./sbi-vc-position-summary.ts";
 
 export const PARSERS: readonly Parser[] = [
   mobileSuicaSfHistory,
@@ -18,5 +23,10 @@ export const PARSERS: readonly Parser[] = [
   sbiForeignTradeRecords,
   sbiForeignCashPositions,
   sbiForeignCashBalances,
+  sbiVcCashBalances,
+  sbiVcAccountMargin,
+  sbiVcPositionSummary,
+  sbiVcExecutions,
+  sbiVcCashflows,
   paypayCsv,
 ];

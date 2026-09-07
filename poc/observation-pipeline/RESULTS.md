@@ -1,12 +1,12 @@
 # Results
 
-Recorded 2026-08-28. No captured financial data, credentials, cookies,
+Recorded 2026-08-28 and extended 2026-09-07. No captured financial data, credentials, cookies,
 account identifiers, or balances were persisted or committed; every fixture
 is synthetic.
 
-The PoC ingests 4 synthetic artifacts from 2 sources into 28 observations
-(8 transaction, 10 balance, 2 position, 8 valuation) across 4 parse runs.
-`bun test` is 80 pass across 4 files, `tsc --noEmit` is clean.
+The PoC ingests 11 synthetic artifacts from 3 sources into 49 observations
+(14 transaction, 24 balance, 3 position, 8 valuation) across 11 parse runs.
+The exact current test count is reported by CI; `tsc --noEmit` is clean.
 
 ## What it settled
 
