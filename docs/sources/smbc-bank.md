@@ -383,6 +383,23 @@ private R2をdurable outboxとして残したまま、中央`kogane-ingest`へ�
 
 読み取り専用監査では、1件のterminal manifestと189 objectsを確認し、raw/normalized data artifactは各94件だった。prefix、size、metadata、content type、宣言checksum、再計算checksumに不一致はなかった。実R2の全objectを最終validatorへ通し、中央stateを作らない即時deferまで確認した。本文、金融値、object key、個別hash、認証値は記録していない。
 
+### Layer B observation route（2026-09-07）
+
+Layer Bは相互照合済みの`balance-normalized`と
+`transactions-normalized`だけを読む。raw Shift_JIS JSONはprovider evidence
+として残すが、同じ残高・明細を二重計上しないためparserを割り当てない。
+円普通預金残高はJPYの`account_balance`、月次明細はprovider ID付きのposted
+transactionとなる。符号は説明文ではなく明示されたcredit/debitだけから決め、
+取引後残高、期間、入金・出金合計をprovenanceとともに保持する。
+
+日時の実在性・月次範囲・provider順・ID一意性・件数上限・safe integer・
+明細合計との一致を厳密に検証し、曖昧な補正はしない。再取得で同じprovider ID
+が現れた場合はcurrent viewだけを最新1件に畳み、append-only evidenceは残す。
+本番R2のread-only canaryでは189 objects、成功manifest 1件を走査し、94件の
+normalized artifactから1,069取引と1残高を完全parseした。94件のraw partnerは
+意図どおりLayer B対象外で、本文・object key・hash・金融値を出力せず、R2への
+write/deleteも行っていない。
+
 ## コストと自動化見込み
 
 | 案                                                                                                                   |  実装コスト | 自動化レベル                           | データ範囲                                  | 判断                                                                                         |

@@ -20,6 +20,7 @@ import { sbiVcCashBalances } from "./sbi-vc-cash-balances.ts";
 import { sbiVcCashflows } from "./sbi-vc-cashflows.ts";
 import { sbiVcExecutions } from "./sbi-vc-executions.ts";
 import { sbiVcPositionSummary } from "./sbi-vc-position-summary.ts";
+import { smbcDirectBalance, smbcDirectTransactions } from "./smbc-direct.ts";
 
 export const PARSERS: readonly Parser[] = [
   mobileSuicaSfHistory,
@@ -42,5 +43,7 @@ export const PARSERS: readonly Parser[] = [
   sbiVcPositionSummary,
   sbiVcExecutions,
   sbiVcCashflows,
+  smbcDirectBalance,
+  smbcDirectTransactions,
   paypayCsv,
 ];

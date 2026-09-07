@@ -318,6 +318,33 @@ exposing keys, hashes, bodies, identifiers, or financial values. Non-empty
 ledger and displayed past-month shapes are therefore observed. Multiple
 connections, CSV/PDF/OFX, and debit were not observed, so they are not claimed
 as production-validated Layer B routes.
+### SMBC Direct normalized parsing
+
+SMBC Direct stores a Shift-JIS provider response and a UTF-8 normalized partner
+for both balance and monthly transactions. The importer proves each pair is
+semantically equal before sealing, so Layer B selects only
+`balance-normalized` and `transactions-normalized`. Registering the raw partner
+would duplicate every financial fact.
+
+The balance route emits one exact JPY `account_balance`. The monthly route emits
+posted JPY transactions under `smbc-bank:ordinary-yen`, using the provider ID
+as `externalId` and the explicit credit/debit field as the sole sign source.
+The provider's unsigned amount, post-transaction balance, range, two totals and
+row fields remain in `extra`; every observation points to its JSON array index.
+
+Parsing fails closed on a non-success or failure-bearing run, media/schema drift,
+invalid calendar dates, dates outside the artifact range, changed provider
+order, duplicate/empty IDs, unsafe integers, or totals that do not equal the
+exact row sums. The current query collapses repeated refetches by
+`(source, sourceAccount, externalId)` for this parser only. Stored observations
+are not removed, so earlier evidence remains available through provenance.
+
+The checked-in local canary first calls the same Layer-A
+`validateSmbcDirectRun`, then requires exactly one parser for every normalized
+artifact and none for raw artifacts. A 2026-09-07 production read-only run
+scanned 189 objects and one successful manifest; 94 normalized artifacts
+produced 1,069 transactions and one balance, and 94 raw partners were ignored.
+Only aggregate counts were returned, with no R2 write/delete or sensitive value.
 
 ### How a parser becomes live
 
@@ -341,6 +368,8 @@ export const PARSERS: readonly Parser[] = [
   myJcbCreditLedger,
   myJcbPastMonthBalances,
   myJcbEvidenceOnly,
+  smbcDirectBalance,
+  smbcDirectTransactions,
   paypayCsv,
 ];
 ```

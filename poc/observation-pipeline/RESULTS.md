@@ -192,6 +192,27 @@ checks without returning source keys, hashes, bodies, identifiers, or values.
 The remaining questions need evidence beyond the shape audit described below;
 none is resolved by assertion here.
 
+### SMBC Direct Layer B validation (2026-09-07)
+
+SMBC Direct now has two strict parsers and no raw/normalized double-count. The
+canonical inputs are only `balance-normalized` and `transactions-normalized`;
+their Shift-JIS raw partners remain evidence. A successful, failure-free parent
+run, exact JSON media type and exact object/row shapes are required.
+
+The transaction parser requires real Tokyo calendar dates inside the declared
+monthly range, newest-first provider order, unique non-empty provider IDs,
+non-negative source amounts, and exact agreement between row sums and the two
+declared totals. Debit signs are applied from the explicit direction field,
+never inferred from text. Provider post-row balances and all normalized fields
+remain in `extra`. Re-fetches keep every append-only observation, while the
+current view collapses the same provider ID to the newest parsed evidence.
+
+A localhost-only, read-only production R2 canary reused the Layer-A validator
+and scanned 189 objects. One successful manifest contained 188 data artifacts:
+94 normalized artifacts parsed completely into 1,069 transactions and one
+balance, and their 94 raw partners had no Layer-B parser. The canary emitted
+only aggregate counts and performed no source write or delete.
+
 ### Mobile Suica Layer B validation (2026-09-07)
 
 A read-only aggregate/canary against production R2 confirmed that the current

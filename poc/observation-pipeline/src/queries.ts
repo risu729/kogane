@@ -186,7 +186,8 @@ export function currentTransactions(store: Store): TransactionRow[] {
                            'myjcb-credit-ledger',
                            'sony-bank-history-json',
                            'sony-bank-history-csv',
-                           'sony-bank-wallet-history'
+                           'sony-bank-wallet-history',
+                           'smbc-direct-transactions'
                          ) AND t.external_id IS NOT NULL
                       THEN json_array(fa.source_id, t.source_account, t.external_id)
                     ELSE json_array('observation-row', t.id)
