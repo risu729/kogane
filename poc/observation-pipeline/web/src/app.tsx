@@ -14,7 +14,7 @@ import { ArtifactsPage } from "./pages/Artifacts.tsx";
 import { ArtifactDetailPage } from "./pages/ArtifactDetail.tsx";
 import { ObservationDetailPage } from "./pages/ObservationDetail.tsx";
 import { NotFoundPage } from "./pages/NotFound.tsx";
-import { EvidenceApp } from "./evidence-app.tsx";
+import { EvidenceContent } from "./evidence-app.tsx";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
 import { CollectionControls } from "./collection-controls.tsx";
 
@@ -105,8 +105,7 @@ export function App(): ReactNode {
           : "ローカルデータに接続"
       : "接続を確認できません";
 
-  if (production && (path === "/evidence" || path.startsWith("/runs/")))
-    return <EvidenceApp observationsAvailable parsingHealth={metadata.data?.parsingHealth} />;
+  const evidenceRoute = production && (path === "/evidence" || path.startsWith("/runs/"));
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">
@@ -142,7 +141,11 @@ export function App(): ReactNode {
               <span>{item.label}</span>
             </Link>
           ))}
-          {production ? <Link to="/evidence">取得履歴</Link> : null}
+          {production ? (
+            <Link to="/evidence" current={evidenceRoute}>
+              取得履歴
+            </Link>
+          ) : null}
         </nav>
         <div className="sidebar-note">
           <span className="sidebar-note-symbol" aria-hidden="true">
@@ -218,7 +221,11 @@ export function App(): ReactNode {
                 ["transactions", "balances", "positions", "artifacts"].includes(route.name) ? (
                   <CollectionControls kind={route.name} />
                 ) : null}
-                <View key={path + window.location.search} route={route} />
+                {evidenceRoute ? (
+                  <EvidenceContent observationsAvailable />
+                ) : (
+                  <View key={path + window.location.search} route={route} />
+                )}
               </>
             )}
           </QueryBoundary>
