@@ -1,6 +1,12 @@
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
 import { decimalText, decodeUtf8 } from "./util.ts";
-import { exactKeys, exactMoney, strictObject, strictSafeInteger, strictString } from "./sbi-strict.ts";
+import {
+  exactKeys,
+  exactMoney,
+  strictObject,
+  strictSafeInteger,
+  strictString,
+} from "./sbi-strict.ts";
 
 const SOURCE_ACCOUNT = "sbi-securities:domestic";
 const WRAPPER_KEYS = [
@@ -120,12 +126,16 @@ export const sbiDomesticCashPositions: Parser = {
   parse(bytes: Uint8Array): ParseResult {
     const body = strictObject(JSON.parse(decodeUtf8(bytes)), "domestic-cash-positions");
     exactKeys(body, WRAPPER_KEYS, "domestic-cash-positions");
-    if (body["format"] !== "sbi-mts-fixed-width-shift-jis") throw new Error("unsupported MTS format");
+    if (body["format"] !== "sbi-mts-fixed-width-shift-jis")
+      throw new Error("unsupported MTS format");
     if (body["trCode"] !== "F2631") throw new Error("unexpected MTS transaction code");
     if (body["resultCode"] !== "000000") throw new Error("MTS result is not successful");
-    if (strictSafeInteger(body["httpStatus"], "httpStatus") !== 200) throw new Error("MTS HTTP status is not successful");
+    if (strictSafeInteger(body["httpStatus"], "httpStatus") !== 200)
+      throw new Error("MTS HTTP status is not successful");
     strictString(body["accountHash"], "accountHash", { max: 64, pattern: /^[a-f0-9]{20,64}$/u });
-    const payload = decodeBase64(strictString(body["payloadBase64"], "payloadBase64", { max: 10_000_000 }));
+    const payload = decodeBase64(
+      strictString(body["payloadBase64"], "payloadBase64", { max: 10_000_000 }),
+    );
     if (payload.length < PREFIX_BYTES + SUMMARY_BYTES) throw new Error("MTS payload is truncated");
     const reader = new FixedReader(payload);
     reader.skip(12, "account prefix");
@@ -152,7 +162,8 @@ export const sbiDomesticCashPositions: Parser = {
     ) {
       throw new Error("MTS payload length disagrees with recordCount");
     }
-    if (pageIndex + recordCount < totalCount) throw new Error("MTS positions payload is incomplete");
+    if (pageIndex + recordCount < totalCount)
+      throw new Error("MTS positions payload is incomplete");
 
     const observations: Observation[] = [];
     for (let index = 0; index < recordCount; index += 1) {
@@ -205,7 +216,8 @@ export const sbiDomesticCashPositions: Parser = {
       const holdingCategory = reader.text(4, `${label}.holdingCategory`);
       reader.skip(6, `${label}.reserved16`);
       const accountInformation = reader.text(20, `${label}.accountInformation`);
-      if (reader.position !== recordOffset + RECORD_BYTES) throw new Error(`${label} width invariant failed`);
+      if (reader.position !== recordOffset + RECORD_BYTES)
+        throw new Error(`${label} width invariant failed`);
 
       const locator = `mts-shift-jis:payload-byte=${recordOffset}`;
       const context = {

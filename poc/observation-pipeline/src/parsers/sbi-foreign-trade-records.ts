@@ -71,7 +71,7 @@ export const sbiForeignTradeRecords: Parser = {
         pageInfo["hasNextPage"],
         `${pageLabel}.listTradeRecords.page.hasNextPage`,
       );
-      if (hasNextPage !== (pageIndex < pages.length - 1)) {
+      if (hasNextPage !== pageIndex < pages.length - 1) {
         throw new Error(`${pageLabel} pagination is incomplete or has an extra page`);
       }
       const records = list["tradeRecords"];
@@ -84,19 +84,27 @@ export const sbiForeignTradeRecords: Parser = {
         exactKeys(record, RECORD_KEYS, label);
         const security = strictObject(record["securities"], `${label}.securities`);
         exactKeys(security, SECURITY_KEYS, `${label}.securities`);
-        const code = strictString(security["securitiesCode"], `${label}.securities.securitiesCode`, {
-          max: 32,
-          pattern: /^[A-Z0-9.:-]+$/u,
-        });
+        const code = strictString(
+          security["securitiesCode"],
+          `${label}.securities.securitiesCode`,
+          {
+            max: 32,
+            pattern: /^[A-Z0-9.:-]+$/u,
+          },
+        );
         const country = strictString(security["countryCode"], `${label}.securities.countryCode`, {
           max: 3,
           pattern: /^[A-Z]{2,3}$/u,
         });
         if (country !== "US") throw new Error(`${label} has an unsupported countryCode`);
-        const name = strictString(security["securitiesName"], `${label}.securities.securitiesName`, {
-          empty: true,
-          max: 256,
-        });
+        const name = strictString(
+          security["securitiesName"],
+          `${label}.securities.securitiesName`,
+          {
+            empty: true,
+            max: 256,
+          },
+        );
         strictString(security["securitiesShortName"], `${label}.securities.securitiesShortName`, {
           empty: true,
           max: 256,
@@ -115,16 +123,23 @@ export const sbiForeignTradeRecords: Parser = {
             pattern: CONTROL_CODE,
           });
         }
-        const tradeCurrency = strictString(record["tradeCurrencyCode"], `${label}.tradeCurrencyCode`, {
-          max: 3,
-          pattern: /^[A-Z]{3}$/u,
-        });
+        const tradeCurrency = strictString(
+          record["tradeCurrencyCode"],
+          `${label}.tradeCurrencyCode`,
+          {
+            max: 3,
+            pattern: /^[A-Z]{3}$/u,
+          },
+        );
         const settlementCurrency = strictString(
           record["settlementCurrencyCode"],
           `${label}.settlementCurrencyCode`,
           { max: 3, pattern: /^[A-Z]{3}$/u },
         );
-        if (!new Set(["JPY", "USD"]).has(tradeCurrency) || !new Set(["JPY", "USD"]).has(settlementCurrency)) {
+        if (
+          !new Set(["JPY", "USD"]).has(tradeCurrency) ||
+          !new Set(["JPY", "USD"]).has(settlementCurrency)
+        ) {
           throw new Error(`${label} has an unsupported currency`);
         }
         const amount = exactMoney(record["amount"], settlementCurrency, `${label}.amount`);

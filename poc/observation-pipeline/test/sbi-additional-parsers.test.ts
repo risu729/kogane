@@ -53,7 +53,9 @@ describe("SBI additional parser registry and determinism", () => {
   test("the same bytes and metadata always produce identical results", () => {
     for (const [dataset, parser] of CASES) {
       const bytes = fixture(dataset);
-      expect(parser.parse(bytes, artifact(dataset))).toEqual(parser.parse(bytes, artifact(dataset)));
+      expect(parser.parse(bytes, artifact(dataset))).toEqual(
+        parser.parse(bytes, artifact(dataset)),
+      );
     }
   });
 });
@@ -172,7 +174,7 @@ describe("sbi-yen-detail-history", () => {
     expect(() => sbiYenDetailHistory.parse(encoded(truncated), meta)).toThrow("truncated");
 
     const enumDrift = parsedFixture(meta.dataset!);
-    ((enumDrift["depositRecordList"] as Array<Record<string, unknown>>)[0]!)["payDepKbn"] = "他";
+    (enumDrift["depositRecordList"] as Array<Record<string, unknown>>)[0]!["payDepKbn"] = "他";
     expect(() => sbiYenDetailHistory.parse(encoded(enumDrift), meta)).toThrow("unsupported value");
 
     const countDrift = parsedFixture(meta.dataset!);
@@ -218,13 +220,13 @@ describe("sbi-foreign-trade-records", () => {
     const schema = parsedFixture(meta.dataset!);
     const schemaPage = (schema["pages"] as Array<Record<string, unknown>>)[0]!;
     const schemaList = schemaPage["listTradeRecords"] as Record<string, unknown>;
-    ((schemaList["tradeRecords"] as Array<Record<string, unknown>>)[0]!)["futureField"] = true;
+    (schemaList["tradeRecords"] as Array<Record<string, unknown>>)[0]!["futureField"] = true;
     expect(() => sbiForeignTradeRecords.parse(encoded(schema), meta)).toThrow("schema drift");
 
     const precision = parsedFixture(meta.dataset!);
     const precisionPage = (precision["pages"] as Array<Record<string, unknown>>)[0]!;
     const precisionList = precisionPage["listTradeRecords"] as Record<string, unknown>;
-    ((precisionList["tradeRecords"] as Array<Record<string, unknown>>)[0]!)["amount"] = "1.001";
+    (precisionList["tradeRecords"] as Array<Record<string, unknown>>)[0]!["amount"] = "1.001";
     expect(() => sbiForeignTradeRecords.parse(encoded(precision), meta)).toThrow(
       "not exactly representable",
     );

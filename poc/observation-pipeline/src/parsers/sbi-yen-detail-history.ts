@@ -56,7 +56,10 @@ export const sbiYenDetailHistory: Parser = {
     if (records.length > 10_000) throw new Error("depositRecordList exceeds the parser bound");
 
     const detailsConditions = body["detailsConditions"];
-    if (!Array.isArray(detailsConditions) || detailsConditions.some((entry) => typeof entry !== "string")) {
+    if (
+      !Array.isArray(detailsConditions) ||
+      detailsConditions.some((entry) => typeof entry !== "string")
+    ) {
       throw new Error("detailsConditions must be a string array");
     }
     const exceeded = strictBoolean(body["exceededMaxCount"], "exceededMaxCount");
@@ -70,9 +73,16 @@ export const sbiYenDetailHistory: Parser = {
     });
     const pageCount = strictSafeInteger(body["pageCount"], "pageCount", { minimum: 0 });
     const pageNumber = strictSafeInteger(body["pageNumber"], "pageNumber", { minimum: 0 });
-    const pageSize = strictSafeInteger(body["pageSize"], "pageSize", { minimum: 0, maximum: 10_000 });
+    const pageSize = strictSafeInteger(body["pageSize"], "pageSize", {
+      minimum: 0,
+      maximum: 10_000,
+    });
     const totalCount = strictSafeInteger(body["totalCount"], "totalCount", { minimum: 0 });
-    if (records.length !== totalCount || records.length > pageSize || (totalCount > 0 && pageCount < 1)) {
+    if (
+      records.length !== totalCount ||
+      records.length > pageSize ||
+      (totalCount > 0 && pageCount < 1)
+    ) {
       throw new Error("yen history pagination/count fields do not describe the stored rows");
     }
     if (pageNumber > pageCount) throw new Error("pageNumber exceeds pageCount");

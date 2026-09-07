@@ -77,16 +77,16 @@ evidence browser (React client in web/, served by serve.ts)
 
 Eight parsers are registered against shapes the collectors already produce:
 
-| Parser | Artifact | Emits |
-| --- | --- | --- |
-| `sbi-domestic-cash-positions` | SBI `domestic-cash-positions` | positions, provider valuations |
-| `sbi-account-assets-current` | SBI `account-assets-current` | provider valuations by source view/category |
-| `sbi-yen-detail-history` | SBI `yen-detail-history` | transactions |
-| `sbi-domestic-trade-records` | SBI `domestic-trade-records` | transactions |
-| `sbi-foreign-trade-records` | SBI `foreign-trade-records` | transactions |
-| `sbi-foreign-cash-positions` | SBI `foreign-cash-positions` | positions, provider valuations |
-| `sbi-foreign-cash-balances`  | SBI `foreign-cash-balances`  | balances                       |
-| `paypay-csv`                 | PayPay consumer CSV export   | transactions                   |
+| Parser                        | Artifact                      | Emits                                       |
+| ----------------------------- | ----------------------------- | ------------------------------------------- |
+| `sbi-domestic-cash-positions` | SBI `domestic-cash-positions` | positions, provider valuations              |
+| `sbi-account-assets-current`  | SBI `account-assets-current`  | provider valuations by source view/category |
+| `sbi-yen-detail-history`      | SBI `yen-detail-history`      | transactions                                |
+| `sbi-domestic-trade-records`  | SBI `domestic-trade-records`  | transactions                                |
+| `sbi-foreign-trade-records`   | SBI `foreign-trade-records`   | transactions                                |
+| `sbi-foreign-cash-positions`  | SBI `foreign-cash-positions`  | positions, provider valuations              |
+| `sbi-foreign-cash-balances`   | SBI `foreign-cash-balances`   | balances                                    |
+| `paypay-csv`                  | PayPay consumer CSV export    | transactions                                |
 
 The original demo manifest still ingests 4 artifacts from 2 sources and produces 28 observations:
 8 transaction, 10 balance, 2 position, 8 valuation.
