@@ -1,0 +1,70 @@
+{
+  "header": {
+    "loginFlg": "1",
+    "resultCode": "0",
+    "resultMessage": "",
+    "siteCatalystSessionBean": {},
+    "transitTo": "vp.member.pages.info2",
+    "vpSessionBean": {}
+  },
+  "body": {
+    "content": {
+      "HpSvrRoot": "",
+      "HpSvrRootUrl": "",
+      "TkAccountExplanation": "",
+      "WebMeisaiCommonDisplayServiceBean": {},
+      "WebMeisaiTopDisplayServiceBean": {
+        "adsTypeFlag": "",
+        "campaignMsgFlag": "",
+        "cardCode": "",
+        "cloApiUrl": "",
+        "cloDispUrl": "",
+        "crCampaignFlag": "",
+        "ecrmUser": "",
+        "externalId": "",
+        "formIdDispFlag": "",
+        "globalId": "",
+        "hpLinkIndicateFl": "",
+        "kaiteiFlag": "",
+        "kanjyoFlag": "",
+        "linkHanteiVo": {},
+        "meisaiList": [
+          {
+            "columnsSize": 11,
+            "columnsSizeS": "11",
+            "data": ["4K", "005", "", "26/08/15", "架空商店", "1,234", "1回払い", "", "", "", ""],
+            "maxIndex": "10",
+            "rowType": "4K",
+            "shiharaiPatternFlag": 0
+          }
+        ],
+        "menteDetailFlg": "",
+        "nextFirstRow": "",
+        "nextPageDispFlg": "",
+        "nextPageNo": "",
+        "olLinkIndicateFl": "",
+        "paramMap": {},
+        "prMsg03DispFlag": "",
+        "prMsg04DispFlag": "",
+        "prMsg05DispFlag": "",
+        "prMsg11": "",
+        "prMsg11DispFlag": "",
+        "prMsg12": "",
+        "prMsg12DispFlag": "",
+        "preEditFlag": "",
+        "prevFirstRow": "",
+        "prevPageDispFlg": "",
+        "prevPageNo": "",
+        "prmsgDispFlag": "",
+        "riyouEndFlag": "",
+        "riyouFirstFlag": "",
+        "saiseiStatus": "",
+        "seikyuYMList": [],
+        "shiharaiEndFlag": "",
+        "shiharaiFirstFlag": "",
+        "srCampaignFlag": "",
+        "webMeisaiTopK3Vo": {}
+      }
+    }
+  }
+}

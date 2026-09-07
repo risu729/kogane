@@ -1,0 +1,76 @@
+{
+  "header": {
+    "loginFlg": "1",
+    "resultCode": "0",
+    "resultMessage": "",
+    "siteCatalystSessionBean": {},
+    "transitTo": "m9454",
+    "vpSessionBean": {}
+  },
+  "body": {
+    "content": {
+      "CustomizedMeisaiAnsDisplayServiceBean": {
+        "atRevoLinkDisp": "",
+        "campaignMsgFlag": "",
+        "cardName": "card-001",
+        "crCampaignFlag": "",
+        "csvMoneyFlag": "",
+        "kanjyoFlag": "",
+        "ktmktKbn": "",
+        "pageFlg": "3",
+        "pageSize": 100,
+        "responseCnt": "2",
+        "seikyuDate": "",
+        "seikyuYM": "202608",
+        "seikyuYMList": [],
+        "shiharaiKin1": "",
+        "shiharaiKin2": "",
+        "shiharaiKin3": "",
+        "srCampaignFlag": "",
+        "sysDate": "",
+        "sysdateStringForMobile": "",
+        "total": 2,
+        "userKbn": "",
+        "userName": "",
+        "kessai1": "",
+        "meisaiList": [
+          {
+            "bunkatsuPay": "",
+            "bunkatsuYaku": "1回払い",
+            "genchiKin": "",
+            "kanzanDate": "",
+            "kanzanRate": "",
+            "kmName": "架空店舗",
+            "riyouDate": "26/08/16",
+            "riyouKin": "2,000",
+            "shiharaiDate": "",
+            "shiharaiTotal": "",
+            "tesuWariKin": "2,000",
+            "tukaRyaku": "",
+            "uketsukeKbn": "",
+            "uriageKbn": "5",
+            "zokugara": ""
+          },
+          {
+            "bunkatsuPay": "",
+            "bunkatsuYaku": "1回払い",
+            "genchiKin": "10.00",
+            "kanzanDate": "26/08/17",
+            "kanzanRate": "150.00",
+            "kmName": "架空返金",
+            "riyouDate": "26/08/17",
+            "riyouKin": "-1,500",
+            "shiharaiDate": "",
+            "shiharaiTotal": "",
+            "tesuWariKin": "1,500",
+            "tukaRyaku": "AUD",
+            "uketsukeKbn": "",
+            "uriageKbn": "6",
+            "zokugara": ""
+          }
+        ]
+      },
+      "CustomizedWebMeisaiCommonInputServiceBean": {}
+    }
+  }
+}

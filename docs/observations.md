@@ -1062,47 +1062,64 @@ a successfully imported normalized row outside that window. The parser warns
 and preserves it pending source investigation; hard rejection or silent
 truncation would both discard valid captured evidence.
 
-### Two more parsers come next, and are not in the PoC
+### Vpass JSON statement observations
 
-**Vpass card statement (CSV).** `smcc-meisai-scraper`'s `parser.ts` is
-adopted, with exactly the two changes `docs/tooling.md` names: emit
-`parser_name`/`parser_version` and a raw locator on every observation, and
-stop discarding unrecognized note lines with `log.warn` — carry them into
-`extra` instead. Its existing behaviour already matches this design: usage
-amount and payment amount stay separate fields, foreign use stays
-decomposed into amount, currency, rate, and exchange date, and the CSV
-total row is reconciled against the parsed sum with a mismatch warned
-rather than corrected. Two adaptations are Kogane-side work: the CSV is
-Shift-JIS and the scraper decodes and NFKC-normalizes before saving, where
-Kogane stores the raw bytes and decodes in the parser; and the deployed
-collector `poc/vpass-json` stores statement JSON rather than CSV, so the
-JSON path needs its own parser even where the CSV parser is reused for
-manual exports.
+`vpass-statement-page@1.0.0` is the sole financial Layer B route for the
+collector's sanitized `statement-page` JSON. CSV is not an intermediate:
+the Android member API response models expose the named unsettled fields, and
+the app's item mapping identifies the positional settled rows directly.
 
-**Vpass positional `meisaiList`.** `poc/vpass-json` records that
-`WebMeisaiTopDisplayServiceBean.meisaiList` uses positional
-`rowType`/`data` arrays, and deliberately saves those arrays losslessly
-instead of guessing their meaning. The row semantics are genuinely not
-known: which `rowType` values exist, what each position in `data` holds,
-and how the array differs between the `WebMeisaiTopDisplayServiceBean` and
-`CustomizedMeisaiAnsDisplayServiceBean` response families are all open.
-The correct sequencing is to leave that dataset without a parser until a
-small number of real statements have been read by hand — the evidence is
-already in R2 and losslessly re-parseable, so nothing is lost by waiting,
-whereas a `0.1.0` that encodes a guess would put the guess into the
-observation tables. When it is written, an unrecognized `rowType` must
-produce a warning and a row carried into `extra`, not a dropped row.
+For `WebMeisaiTopDisplayServiceBean`, provider row families `45`, `4C`, and
+`4K/002` are validated as heading/total/comment presentation rows and emit no
+transaction. `4K/005` maps date, merchant, JPY amount, and payment type from
+`data[3..6]`; `4K/007` adds the retained foreign-currency positions. For
+`CustomizedMeisaiAnsDisplayServiceBean`, the parser reads the named
+`riyouDate`, `kmName`, `riyouKin`, `uriageKbn`, payment, conversion, and
+foreign-use fields. Unknown row subtypes and unknown object-key shapes fail
+the entire artifact instead of being silently dropped.
 
-Ingesting that evidence needs one layer-A adaptation first. The SBI
-collector writes a per-run `manifest.json` listing every artifact with its
-sha256, which is what `ingestRunDirectory` verifies against before writing
-anything. `poc/vpass-json` writes a `manifest.json` per card, under
-`vpass/YYYY/MM/DD/<runId>/card-00N/`, and writes a run-level `error.json`
-when the session cannot be opened — but no run-level manifest. Its run id
-is a timestamp with separators replaced, where the SBI worker's is
-`crypto.randomUUID()`. Neither shape is wrong; the importer simply has to
-be told which one it is reading, and that decision belongs to
-`docs/raw-store.md` rather than to a parser.
+Layer B also rechecks the successful provider result code rather than trusting
+the fetch-run label alone. For every positional row, `rowType`, `columnsSize`,
+`columnsSizeS`, and `maxIndex` must agree with `data`. Production aggregates
+establish exact lengths of five for `45` and four for both `4C` and `4K/002`,
+including their required label/comment slots; a superficially familiar prefix
+with a different layout is therefore not discarded as presentation. The
+customized family is bound to `top-000` followed by positive-index `answer`
+pages. Its observed `pageFlg`, integer field types, and statement month must
+match the artifact. No unobserved meaning is inferred between its count fields
+and row cardinality.
+
+The provider expresses card liability as positive for a purchase and negative
+for a refund. Layer B applies exactly one inversion so Kogane transactions use
+outflow-negative/inflow-positive. The positional `4K/005` shape has been
+observed with an empty provider amount; that row remains an amountless
+transaction with a parse warning rather than being assigned a guessed zero.
+Both families retain the complete provider row and explicit sign/mapping
+provenance in `extra`.
+
+The card label comes from Layer A's `fetch_units.unit_key`, not from redacted
+card data. The PoC mirrors it as `fetch_artifacts.fetch_unit_key`; schema v6
+migrates existing v2-v5 stores by adding the nullable column. Its run-directory
+manifest contract accepts bounded nested artifact paths and carries each
+declared `fetchUnitKey` into the artifact, so this identity is reproducible by
+normal PoC ingestion rather than injected only by parser tests. Current Vpass
+transactions select all pages from the latest successful card-month snapshot.
+A newer empty snapshot therefore clears older current rows without deleting
+the append-only evidence or observations. Pending customized and posted web
+rows remain separate; matching them belongs to the reconciler, not Layer B.
+
+The checked-in remote read-only canary validates the source R2 manifest and
+pagination contract first, then invokes the same parser with the Layer A card
+unit. It emits only aggregate counts and structural key/code shapes; object
+keys, hashes, credentials, bodies, merchants, dates, and financial values never
+leave the audit worker, and the source bucket is never written or deleted.
+The 2026-09-07 production run scanned 379 objects and all 95 strict run records
+(92 successful and three failed) without a structural or parser failure. The
+successful records contained 2,527 statement artifacts and produced 3,302
+transactions; 90 observed amountless `4K/005` rows were retained with warnings.
+The three failed records contained 129 statement artifacts and produced zero
+observations. Presentation-only rows explain the remaining difference between
+the 4,098 validated provider rows and emitted transactions.
 
 ## Testing
 
@@ -1317,9 +1334,6 @@ Phase 3 is done when:
   and no real payload has been checked. If it is wrong, every affected
   observation is corrected by a version bump and a re-parse, which is
   precisely the operation the pipeline exists to make routine.
-- **Vpass `meisaiList` row semantics.** Unknown, as described above. Until
-  real statements are read by hand, no parser should be written for those
-  rows.
 - **PayPay CSV column set.** `docs/sources/paypay.md` carries this as an
   open acceptance gate: whether the current export still has exactly the
   13 documented columns is unverified. `paypay-csv` is built to survive

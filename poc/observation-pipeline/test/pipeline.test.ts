@@ -101,12 +101,14 @@ describe("ingestion", () => {
     });
     expect(
       (store.db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(5);
+    ).toBe(6);
   });
 
   test("migrates v3 artifact rows with nullable collector identity", () => {
     const directory = mkdtempSync(join(tmpdir(), "kogane-v3-store-"));
-    const db = new Database(join(directory, "kogane-poc.sqlite"), { create: true });
+    const db = new Database(join(directory, "kogane-poc.sqlite"), {
+      create: true,
+    });
     db.exec(`
       CREATE TABLE sources (
         id TEXT PRIMARY KEY, provider TEXT NOT NULL, ingestion TEXT NOT NULL
@@ -155,15 +157,21 @@ describe("ingestion", () => {
     const row = store.db
       .query("SELECT artifact_key, statement_state, period FROM fetch_artifacts")
       .get() as { artifact_key: null; statement_state: null; period: null };
-    expect(row).toEqual({ artifact_key: null, statement_state: null, period: null });
+    expect(row).toEqual({
+      artifact_key: null,
+      statement_state: null,
+      period: null,
+    });
     expect(
       (store.db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(5);
+    ).toBe(6);
   });
 
   test("migrates v4 collector identity without losing it when adding run windows", () => {
     const directory = mkdtempSync(join(tmpdir(), "kogane-v4-store-"));
-    const db = new Database(join(directory, "kogane-poc.sqlite"), { create: true });
+    const db = new Database(join(directory, "kogane-poc.sqlite"), {
+      create: true,
+    });
     db.exec(`
       CREATE TABLE sources (
         id TEXT PRIMARY KEY, provider TEXT NOT NULL, ingestion TEXT NOT NULL
@@ -226,7 +234,45 @@ describe("ingestion", () => {
     });
     expect(
       (store.db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(5);
+    ).toBe(6);
+  });
+
+  test("migrates a v5 store by adding the Layer-A fetch unit key", () => {
+    const directory = mkdtempSync(join(tmpdir(), "kogane-v5-store-"));
+    const db = new Database(join(directory, "kogane-poc.sqlite"), {
+      create: true,
+    });
+    db.exec(`
+      CREATE TABLE sources (
+        id TEXT PRIMARY KEY, provider TEXT NOT NULL, ingestion TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE fetch_runs (
+        id INTEGER PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id),
+        external_run_id TEXT, tool TEXT NOT NULL, started_at TEXT NOT NULL,
+        completed_at TEXT, status TEXT NOT NULL, failure_count INTEGER NOT NULL DEFAULT 0,
+        window_start TEXT, window_end TEXT, UNIQUE (source_id, external_run_id)
+      ) STRICT;
+      CREATE TABLE raw_objects (
+        sha256 TEXT PRIMARY KEY, size INTEGER NOT NULL, content_type TEXT NOT NULL,
+        blob_key TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE fetch_artifacts (
+        id INTEGER PRIMARY KEY, fetch_run_id INTEGER NOT NULL REFERENCES fetch_runs(id),
+        source_id TEXT NOT NULL REFERENCES sources(id), dataset TEXT, artifact_key TEXT,
+        statement_state TEXT, period TEXT, url TEXT, method TEXT, http_status INTEGER,
+        mime TEXT NOT NULL, fetched_at TEXT NOT NULL, sha256 TEXT NOT NULL REFERENCES raw_objects(sha256)
+      ) STRICT;
+      PRAGMA user_version = 5;
+    `);
+    db.close();
+    const store = openStore(directory);
+    const columns = store.db.query("PRAGMA table_info(fetch_artifacts)").all() as {
+      name: string;
+    }[];
+    expect(columns.some((column) => column.name === "fetch_unit_key")).toBeTrue();
+    expect(
+      (store.db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
+    ).toBe(6);
   });
 
   test("run-directory ingestion is idempotent", () => {
@@ -255,7 +301,10 @@ describe("ingestion", () => {
     };
     writeFileSync(join(directory, "manifest.json"), JSON.stringify(manifest));
     const store = tempStore();
-    ingestRunDirectory(store, directory, { id: "window-source", provider: "Window Source" });
+    ingestRunDirectory(store, directory, {
+      id: "window-source",
+      provider: "Window Source",
+    });
     expect(store.db.query("SELECT window_start, window_end FROM fetch_runs").get()).toEqual({
       window_start: "2026-09-01",
       window_end: "2026-09-30",
@@ -399,7 +448,12 @@ describe("ingestion", () => {
     expect(count(store, "fetch_runs")).toBe(0);
     expect(count(store, "fetch_artifacts")).toBe(0);
 
-    const valid = { ...base, runId: "existing-outcome", status: "success", failures: [] };
+    const valid = {
+      ...base,
+      runId: "existing-outcome",
+      status: "success",
+      failures: [],
+    };
     writeFileSync(join(directory, "manifest.json"), JSON.stringify(valid));
     expect(ingestRunDirectory(store, directory, { id: "x", provider: "X" }).artifacts).toBe(1);
     const { status: _status, ...missingStatus } = valid;
@@ -482,7 +536,11 @@ describe("parse runs", () => {
   test("partial and failed fetch runs remain raw evidence and never become observations", () => {
     for (const status of ["partial", "failed"] as const) {
       const store = tempStore();
-      upsertSource(store, { id: "fake", provider: "Fake", ingestion: "collector-r2" });
+      upsertSource(store, {
+        id: "fake",
+        provider: "Fake",
+        ingestion: "collector-r2",
+      });
       const fetchRunId = insertFetchRun(store, {
         sourceId: "fake",
         externalRunId: `run-${status}`,

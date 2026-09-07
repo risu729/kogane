@@ -234,6 +234,47 @@ export function currentTransactions(store: Store): TransactionRow[] {
          SELECT fetch_run_id
          FROM ranked_vpoint_runs
          WHERE snapshot_rank = 1
+       ), eligible_vpass_snapshots AS (
+         SELECT fa.fetch_run_id, fa.source_id, fa.fetch_unit_key,
+                CASE WHEN substr(fa.artifact_key, 1, 7) = 'months/'
+                  THEN substr(fa.artifact_key, 8, 6)
+                  ELSE substr(fa.artifact_key, 23, 6)
+                END AS statement_month,
+                MAX(fa.fetched_at) AS fetched_at
+         FROM parse_runs p
+         JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+         JOIN fetch_runs f ON f.id = fa.fetch_run_id
+         WHERE ${CURRENT}
+           AND p.parser_name = 'vpass-statement-page'
+           AND fa.dataset = 'statement-page'
+           AND fa.fetch_unit_key IS NOT NULL
+         GROUP BY fa.fetch_run_id, fa.source_id, fa.fetch_unit_key, statement_month
+         HAVING COUNT(DISTINCT fa.id) = (
+           SELECT COUNT(*)
+           FROM fetch_artifacts expected_fa
+           WHERE expected_fa.fetch_run_id = fa.fetch_run_id
+             AND expected_fa.source_id = fa.source_id
+             AND expected_fa.dataset = 'statement-page'
+             AND expected_fa.fetch_unit_key = fa.fetch_unit_key
+             AND CASE WHEN substr(expected_fa.artifact_key, 1, 7) = 'months/'
+                   THEN substr(expected_fa.artifact_key, 8, 6)
+                   ELSE substr(expected_fa.artifact_key, 23, 6)
+                 END = CASE WHEN substr(fa.artifact_key, 1, 7) = 'months/'
+                   THEN substr(fa.artifact_key, 8, 6)
+                   ELSE substr(fa.artifact_key, 23, 6)
+                 END
+         )
+       ), ranked_vpass_snapshots AS (
+         SELECT fetch_run_id, source_id, fetch_unit_key, statement_month, fetched_at,
+                ROW_NUMBER() OVER (
+                  PARTITION BY source_id, fetch_unit_key, statement_month
+                  ORDER BY fetched_at DESC, fetch_run_id DESC
+                ) AS snapshot_rank
+         FROM eligible_vpass_snapshots
+       ), current_vpass_snapshots AS (
+         SELECT fetch_run_id, source_id, fetch_unit_key, statement_month
+         FROM ranked_vpass_snapshots
+         WHERE snapshot_rank = 1
        )
        SELECT id, source_id, source_account, as_of, amount_minor, amount_text,
               currency, description, counterparty, external_id, status, parser
@@ -290,6 +331,21 @@ export function currentTransactions(store: Store): TransactionRow[] {
            AND (
              p.parser_name <> 'v-point-history-page'
              OR f.id IN (SELECT fetch_run_id FROM current_vpoint_runs)
+           )
+           AND (
+             p.parser_name <> 'vpass-statement-page'
+             OR EXISTS (
+               SELECT 1
+               FROM current_vpass_snapshots snapshot
+               WHERE snapshot.fetch_run_id = fa.fetch_run_id
+                 AND snapshot.source_id = fa.source_id
+                 AND snapshot.fetch_unit_key = fa.fetch_unit_key
+                 AND snapshot.statement_month = CASE
+                   WHEN substr(fa.artifact_key, 1, 7) = 'months/'
+                     THEN substr(fa.artifact_key, 8, 6)
+                   ELSE substr(fa.artifact_key, 23, 6)
+                 END
+             )
            )
        )
        WHERE rank_in_identity = 1

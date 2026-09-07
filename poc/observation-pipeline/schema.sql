@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS fetch_artifacts (
   source_id    TEXT NOT NULL REFERENCES sources(id),
   dataset      TEXT,                     -- collector dataset name, if any
   artifact_key TEXT,                     -- run-relative collector key, if declared
+  fetch_unit_key TEXT,                   -- stable Layer-A unit key (card/account/etc.)
   statement_state TEXT,                  -- artifact-specific provider statement state
   period       TEXT,                     -- artifact-specific provider period label
   url          TEXT,                     -- original URL for capture-style ingestion
