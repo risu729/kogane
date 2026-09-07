@@ -53,7 +53,7 @@ const EMPTY_SURFACE = [
 export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtmlParser): Parser {
   return {
     name: "moneyforward-monthly-transactions",
-    version: "2.0.1",
+    version: "2.0.2",
 
     accepts(artifact: ArtifactMeta): boolean {
       return (
@@ -152,7 +152,8 @@ export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtm
           ) {
             throw new Error("moneyforward monthly transaction row shape is invalid");
           }
-          const description = nonEmptyText(cells[0], "moneyforward monthly description");
+          const rawDescription = nonEmptyText(cells[0], "moneyforward monthly description");
+          const description = descriptionText(rawDescription);
           const amountText = nonEmptyText(cells[1], "moneyforward monthly amount");
           const amountMinor = signedJpy(amountText);
           if (!dateToken.value.startsWith(`${selectedMonth}-`)) return;
@@ -177,10 +178,12 @@ export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtm
             asOf: dateToken.value,
             rawLocator: `html:tooltip=${tableIndex}:row=${rowIndex}`,
             extra: {
-              cells: [description, amountText],
+              cells: [rawDescription, amountText],
               _kogane: {
                 canonicalDataset: "monthly-transactions",
                 sourceView: "monthly-calendar-tooltip",
+                descriptionEncoding:
+                  description === rawDescription ? "plain-text" : "static-string-concatenation",
                 accountOrdinal,
                 selectedMonth,
                 amountDirection: "provider-signed-cashflow",
@@ -373,6 +376,79 @@ function signedJpy(value: string): number {
   const amount = Number(`${sign}${magnitude.replaceAll(",", "")}`);
   if (!Number.isSafeInteger(amount)) throw new Error("moneyforward monthly amount exceeds range");
   return Object.is(amount, -0) ? 0 : amount;
+}
+
+// Monthly tooltip cells are captured inside a provider-generated HTML string.
+// Its closing/opening quote envelope remains in Layer A, just as for amounts.
+// Recognize only literal concatenation: no expressions, calls, interpolation,
+// coercion, property access, or execution of any provider code.
+function descriptionText(value: string): string {
+  if (!/^'\s*\+/u.test(value)) return value;
+  const envelope = /^'\s*\+\s*([\s\S]*?)\s*\+\s*'$/u.exec(value);
+  if (!envelope) throw new Error("moneyforward monthly description template is invalid");
+  const expression = envelope[1]!;
+  let offset = 0;
+  let result = "";
+  let terms = 0;
+  const invalid = (): never => {
+    throw new Error("moneyforward monthly description template is invalid");
+  };
+  const whitespace = () => {
+    while (/\s/u.test(expression[offset] ?? "") && offset < expression.length) offset++;
+  };
+  while (offset < expression.length) {
+    whitespace();
+    if (++terms > 16) invalid();
+    const quote = expression[offset++];
+    if (quote !== "'" && quote !== '"') invalid();
+    let closed = false;
+    while (offset < expression.length) {
+      const character = expression[offset++]!;
+      if (character === quote) {
+        closed = true;
+        break;
+      }
+      if (character === "\n" || character === "\r") invalid();
+      if (character !== "\\") {
+        result += character;
+        continue;
+      }
+      const escaped = expression[offset++];
+      const escapes: Record<string, string> = {
+        "'": "'",
+        '"': '"',
+        "\\": "\\",
+        "/": "/",
+        n: "\n",
+        r: "\r",
+        t: "\t",
+      };
+      if (escaped && Object.hasOwn(escapes, escaped)) result += escapes[escaped];
+      else if (escaped === "u" || escaped === "x") {
+        const length = escaped === "u" ? 4 : 2;
+        const digits = expression.slice(offset, offset + length);
+        if (digits.length !== length || !/^[0-9a-f]+$/iu.test(digits)) invalid();
+        result += String.fromCharCode(Number.parseInt(digits, 16));
+        offset += length;
+      } else invalid();
+    }
+    if (!closed) invalid();
+    whitespace();
+    if (offset === expression.length) break;
+    if (expression[offset++] !== "+") invalid();
+    whitespace();
+    if (offset === expression.length) invalid();
+  }
+  const normalized = result.replace(/\s+/gu, " ").trim();
+  if (
+    terms === 0 ||
+    !normalized ||
+    normalized.length > 5_000 ||
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(normalized) ||
+    /[\ud800-\udfff]/u.test(normalized)
+  )
+    invalid();
+  return normalized;
 }
 
 function nonEmptyText(element: HtmlElement | undefined, label: string): string {

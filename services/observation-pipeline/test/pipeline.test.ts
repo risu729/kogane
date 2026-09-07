@@ -592,12 +592,16 @@ test("MyJCB state and period come from sanitized central manifest", async () => 
   ).toBe(41);
 }, 30000);
 
-test("workerd discovers and parses MoneyForward canonical text/html descriptors", async () => {
-  const bytes = readFileSync(
+test("workerd decodes MoneyForward static descriptions from canonical text/html descriptors", async () => {
+  const fixture = readFileSync(
     new URL(
       "../../../poc/observation-pipeline/fixtures/moneyforward/account-01-month-2099-02.html",
       import.meta.url,
     ),
+  );
+  const rawDescription = String.raw`' + 'ANONYMOUS\x20' + 'PURCHASE' + '' + '`;
+  const bytes = new TextEncoder().encode(
+    fixture.toString("utf8").replace("ANONYMOUS PURCHASE", rawDescription),
   );
   await artifact(
     90,
@@ -619,7 +623,7 @@ test("workerd discovers and parses MoneyForward canonical text/html descriptors"
   expect(response.status).toBe(200);
   expect(
     await env.DB.prepare(
-      "SELECT status FROM observation_parse_jobs WHERE fetch_artifact_id=90 AND parser_name='moneyforward-monthly-transactions' AND parser_version='2.0.1'",
+      "SELECT status FROM observation_parse_jobs WHERE fetch_artifact_id=90 AND parser_name='moneyforward-monthly-transactions' AND parser_version='2.0.2'",
     ).first<string>("status"),
   ).toBe("done");
   expect(
@@ -627,6 +631,14 @@ test("workerd discovers and parses MoneyForward canonical text/html descriptors"
       "SELECT count(*) AS n FROM transaction_observations o JOIN parse_runs p ON p.id=o.parse_run_id WHERE p.fetch_artifact_id=90 AND p.status='ok'",
     ).first<number>("n"),
   ).toBe(2);
+  const row =
+    await env.DB.prepare(`SELECT description, json_extract(extra_json,'$.cells[0]') AS raw_description
+    FROM transaction_observations o JOIN parse_runs p ON p.id=o.parse_run_id
+    WHERE p.fetch_artifact_id=90 AND o.amount_minor=-1234`).first<{
+      description: string;
+      raw_description: string;
+    }>();
+  expect(row).toEqual({ description: "ANONYMOUS PURCHASE", raw_description: rawDescription });
 }, 30000);
 
 test("late old parser publication cannot replace a numerically newer successful version", async () => {
