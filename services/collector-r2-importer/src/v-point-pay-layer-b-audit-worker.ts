@@ -1,4 +1,4 @@
-import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry";
+import { vPointPayNotificationEvent } from "../../../poc/observation-pipeline/src/parsers/v-point-pay";
 import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types";
 import { validateVPointPayEmailPairForLayerB } from "./v-point-pay-email";
 
@@ -120,7 +120,7 @@ export default {
 };
 
 function matchingParsers(meta: ArtifactMeta) {
-  return PARSERS.filter((parser) => parser.accepts(meta));
+  return [vPointPayNotificationEvent].filter((parser) => parser.accepts(meta));
 }
 
 function auditFailureCode(
