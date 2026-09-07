@@ -436,7 +436,7 @@ describe("SBI VC Trade staged-run importer", () => {
     expect(secondCentral.requests).toHaveLength(0);
   });
 
-  test("stages and resumes a valid large partial prefix with opaque progress", async () => {
+  test("stages and resumes the maximum valid 204-artifact inventory", async () => {
     const bucket = new FakeBucket();
     const entries = [
       staticArtifact("cash-balances"),
@@ -444,21 +444,19 @@ describe("SBI VC Trade staged-run importer", () => {
       staticArtifact("position-summary"),
       staticArtifact("executions-recent-page-0001"),
       ...Array.from({ length: 100 }, (_, index) =>
-        pageArtifact(`executions-historical-page-${String(index + 1).padStart(4, "0")}`, 30, 3_001),
+        pageArtifact(`executions-historical-page-${String(index + 1).padStart(4, "0")}`, 30, 3_000),
+      ),
+      ...Array.from({ length: 100 }, (_, index) =>
+        pageArtifact(`cashflows-historical-page-${String(index + 1).padStart(4, "0")}`, 30, 3_000),
       ),
     ];
-    await storeRun(bucket, entries, [
-      {
-        operation: "collect",
-        errorCode: "executions_historical_page_limit_exceeded",
-      },
-    ]);
+    await storeRun(bucket, entries, []);
     const central = new FakeCentral();
     let result = await importRun(bucket, central);
     expect(result).toMatchObject({
       status: "deferred",
       nextOffset: 8,
-      artifactCount: 105,
+      artifactCount: 205,
     });
     expect(result.status === "deferred" ? result.continuation : "").toStartWith(
       "sbi-vc-transfer-v1.",
@@ -479,7 +477,7 @@ describe("SBI VC Trade staged-run importer", () => {
     }
     expect(result).toMatchObject({
       status: "sealed",
-      artifactCount: 105,
+      artifactCount: 205,
       sealed: true,
       allObjectsReused: false,
     });

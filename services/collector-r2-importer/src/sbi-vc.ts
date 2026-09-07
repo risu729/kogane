@@ -50,8 +50,6 @@ type IdentityGroup =
 interface VerifiedArtifact {
   artifact: SbiVcArtifactManifest;
   page?: PageInfo;
-  identityGroup?: IdentityGroup;
-  identities?: string[];
   failureEvidence?: true;
 }
 
@@ -156,6 +154,7 @@ export async function importSbiVcRun(options: {
     // Worker never buffers a whole run of source bytes.
     phase = "artifact_validation";
     const verifiedArtifacts: VerifiedArtifact[] = [];
+    const providerIdentityDigests = new Map<IdentityGroup, Set<string>>();
     const collectFailureEvidenceIndex =
       manifest.failures.length === 1 &&
       manifest.failures[0]?.operation === "collect" &&
@@ -172,10 +171,9 @@ export async function importSbiVcRun(options: {
       }
       verifiedArtifacts.push({
         artifact,
-        ...parseStoredEnvelope(bytes, artifact.dataset),
+        ...(await parseStoredEnvelope(bytes, artifact.dataset, providerIdentityDigests)),
       });
     }
-    assertUniqueProviderIdentities(verifiedArtifacts);
     validateFailureComplement(manifest, verifiedArtifacts);
 
     // Repeat the inventory boundary immediately before creating central state.
@@ -604,21 +602,26 @@ function pageDataset(group: PageGroup, index: number): string {
   return `${group}-page-${String(index).padStart(4, "0")}`;
 }
 
-function parseStoredEnvelope(
+async function parseStoredEnvelope(
   bytes: Uint8Array,
   dataset: string,
-): { page?: PageInfo; identityGroup?: IdentityGroup; identities?: string[] } {
+  providerIdentityDigests: Map<IdentityGroup, Set<string>>,
+): Promise<{ page?: PageInfo }> {
   const envelope = storedEnvelope(bytes);
   if (dataset === "position-summary") {
-    const identities: string[] = [];
+    // Position summary has no page siblings. Check raw identities inside the
+    // bounded 4 MiB object and discard them with the parsed envelope.
+    const identities = new Set<string>();
     for (const group of Object.values(recordConflict(envelope.body, "artifact_payload_invalid"))) {
       const positions = recordConflict(group, "artifact_payload_invalid");
       for (const value of Object.values(positions)) {
         const position = recordConflict(value, "artifact_payload_invalid");
-        identities.push(nonEmptyString(position.productId, "artifact_provider_identity_invalid"));
+        const identity = nonEmptyString(position.productId, "artifact_provider_identity_invalid");
+        if (identities.has(identity)) duplicateProviderIdentity();
+        identities.add(identity);
       }
     }
-    return { identityGroup: "position-summary", identities };
+    return {};
   }
   const group = pageGroup(dataset);
   const recentExecution = dataset === "executions-recent-page-0001";
@@ -643,10 +646,8 @@ function parseStoredEnvelope(
     if (pageNumber !== 0 || totalSize > PAGE_SIZE || body.list.length !== totalSize) {
       throw new ImportError(409, "artifact_page_payload_invalid");
     }
-    return {
-      identityGroup: "executions-recent",
-      identities: executionIdentities(body.list),
-    };
+    assertUniqueLocalIdentities(executionIdentities(body.list));
+    return {};
   }
   if (!group) return {};
   const match = (
@@ -657,12 +658,14 @@ function parseStoredEnvelope(
   if (pageNumber !== index - 1) {
     throw new ImportError(409, "artifact_page_payload_invalid");
   }
+  await recordProviderIdentityDigests(
+    providerIdentityDigests,
+    group,
+    group === "executions-historical"
+      ? executionIdentities(body.list)
+      : cashflowIdentities(body.list),
+  );
   return {
-    identityGroup: group,
-    identities:
-      group === "executions-historical"
-        ? executionIdentities(body.list)
-        : cashflowIdentities(body.list),
     page: {
       group,
       index,
@@ -696,22 +699,33 @@ function nonEmptyString(value: unknown, code: string): string {
   return value;
 }
 
-function assertUniqueProviderIdentities(artifacts: VerifiedArtifact[]): void {
-  const seen = new Map<IdentityGroup, Set<string>>();
-  for (const artifact of artifacts) {
-    if (!artifact.identityGroup || !artifact.identities) continue;
-    let group = seen.get(artifact.identityGroup);
-    if (!group) {
-      group = new Set<string>();
-      seen.set(artifact.identityGroup, group);
-    }
-    for (const identity of artifact.identities) {
-      if (group.has(identity)) {
-        throw new ImportError(409, "artifact_duplicate_provider_identity");
-      }
-      group.add(identity);
-    }
+function assertUniqueLocalIdentities(identities: string[]): void {
+  const seen = new Set<string>();
+  for (const identity of identities) {
+    if (seen.has(identity)) duplicateProviderIdentity();
+    seen.add(identity);
   }
+}
+
+async function recordProviderIdentityDigests(
+  seen: Map<IdentityGroup, Set<string>>,
+  group: IdentityGroup,
+  identities: string[],
+): Promise<void> {
+  let groupDigests = seen.get(group);
+  if (!groupDigests) {
+    groupDigests = new Set<string>();
+    seen.set(group, groupDigests);
+  }
+  for (const identity of identities) {
+    const digest = await sha256Hex(new TextEncoder().encode(identity));
+    if (groupDigests.has(digest)) duplicateProviderIdentity();
+    groupDigests.add(digest);
+  }
+}
+
+function duplicateProviderIdentity(): never {
+  throw new ImportError(409, "artifact_duplicate_provider_identity");
 }
 
 function assertStoredFailureEnvelope(bytes: Uint8Array): void {
@@ -748,10 +762,21 @@ async function assertExactPrefix(
   const actual: string[] = [];
   let cursor: string | undefined;
   do {
-    const listed = await bucket.list({ prefix, limit: 1_000, ...(cursor ? { cursor } : {}) });
+    const previousCursor = cursor;
+    const listed = await bucket.list({
+      prefix,
+      limit: Math.min(expectedKeys.length + 1, 1_000),
+      ...(cursor ? { cursor } : {}),
+    });
+    if (actual.length + listed.objects.length > expectedKeys.length) {
+      throw new ImportError(409, "prefix_inventory_mismatch");
+    }
     actual.push(...listed.objects.map((object) => object.key));
     cursor = listed.truncated ? listed.cursor : undefined;
     if (listed.truncated && !cursor) throw new ImportError(409, "prefix_cursor_missing");
+    if (cursor && cursor === previousCursor) {
+      throw new ImportError(409, "prefix_cursor_did_not_advance");
+    }
   } while (cursor);
   actual.sort();
   const expected = [...expectedKeys].sort();

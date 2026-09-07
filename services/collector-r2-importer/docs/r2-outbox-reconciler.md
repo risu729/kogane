@@ -44,7 +44,7 @@ The checked-in notification helper defaults to a read-only plan. Review current 
 
 ```sh
 cd services/collector-r2-importer
-bash scripts/r2-reconciler-notifications.sh plan
+bun scripts/r2-reconciler-notifications.ts plan
 npx wrangler queues list
 ```
 
@@ -58,14 +58,21 @@ bun test
 bun run typecheck
 bun run cf:check
 npx wrangler deploy
-bash scripts/r2-reconciler-notifications.sh apply I_UNDERSTAND_THIS_CHANGES_CLOUDFLARE
+bun scripts/r2-reconciler-notifications.ts apply I_UNDERSTAND_THIS_CHANGES_CLOUDFLARE
 ```
 
-After applying, use `npx wrangler r2 bucket notification list <bucket>` for every bucket in the table. Verify aggregate rule counts and the configured queue; do not copy object keys or message bodies into an issue or PR.
+The helper retrieves Wrangler's active credential only in memory and uses Cloudflare's read-only List Event Notification Rules API to verify the exact account, bucket, queue, description, prefix, suffix, actions, and unique rule ID after every creation. It atomically records those rule IDs in the ignored, mode-`0600` file `scripts/.r2-reconciler-notifications.state.json`. An interrupted `apply` resumes from the verified file. If the local file is lost, `capture` can reconstruct it only from unique, exact managed rules; inspect its rule count before removal:
+
+```sh
+bun scripts/r2-reconciler-notifications.ts capture
+```
+
+Wrangler's human-readable `notification list` output currently omits rule descriptions, so it is not a sufficient cleanup authority. The helper queries the official API response instead. Do not copy object keys or Queue message bodies into an issue or PR.
 
 The commands and message shape follow Cloudflare's current official documentation:
 
 - [R2 Event Notifications](https://developers.cloudflare.com/r2/buckets/event-notifications/)
+- [List R2 Event Notification Rules API](https://developers.cloudflare.com/api/resources/r2/subresources/buckets/subresources/event_notifications/methods/list/)
 - [Queues delivery guarantees](https://developers.cloudflare.com/queues/reference/delivery-guarantees/)
 - [Queues batching, retries, and delays](https://developers.cloudflare.com/queues/configuration/batching-retries/)
 - [Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
@@ -84,7 +91,9 @@ This PR does not create any Cloudflare resource. If the reconciler is deployed l
 Remove notifications first:
 
 ```sh
-bash scripts/r2-reconciler-notifications.sh remove I_UNDERSTAND_THIS_CHANGES_CLOUDFLARE
+bun scripts/r2-reconciler-notifications.ts remove I_UNDERSTAND_THIS_CHANGES_CLOUDFLARE
 ```
 
-Then deploy a reviewed importer configuration that removes the Cron and Queue producer/consumer. Only after delivery is stopped and any DLQ evidence has been reviewed should an operator explicitly delete the two queues. Queue deletion is destructive and is deliberately not included in the helper script.
+Before the first deletion, the helper verifies every recorded rule ID against the live description, bucket, queue, prefix, suffix, and exact three object-create actions. Missing, duplicated, ambiguous, or changed rules fail closed. It then removes only one recorded ID at a time with `wrangler ... notification delete --rule`; it never performs queue-wide notification deletion. The local state is updated after each verified deletion so an interrupted cleanup is resumable.
+
+Then deploy a reviewed importer configuration that removes the Cron and Queue producer/consumer. Only after delivery is stopped and any DLQ evidence has been reviewed should an operator explicitly delete the two queues. Queue deletion is destructive and is deliberately not included in the helper.

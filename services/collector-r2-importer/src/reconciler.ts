@@ -285,7 +285,8 @@ function parseR2Notification(
     typeof input.account !== "string" ||
     !/^[0-9a-f]{32}$/u.test(accountId) ||
     input.account !== accountId ||
-    !["PutObject", "CopyObject", "CompleteMultipartUpload"].includes(String(input.action)) ||
+    typeof input.action !== "string" ||
+    !["PutObject", "CopyObject", "CompleteMultipartUpload"].includes(input.action) ||
     typeof input.bucket !== "string" ||
     !exactIsoTime(input.eventTime)
   ) {
