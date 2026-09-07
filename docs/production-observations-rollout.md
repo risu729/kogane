@@ -119,6 +119,49 @@ that the developer checkout already had. The explicit CI plan now installs the
 parser package's frozen dependencies before Worker checks, without building the
 UI or starting a collector. A regression verifies this ordering.
 
+## Final targeted backfill
+
+The MoneyForward correction re-imported exactly the 10 resolved legacy source
+captures through the existing v2 importer. Read-only verification confirmed 10
+new sealed v2 runs, 530 provider artifacts and 10 manifests; all legacy runs and
+source R2 objects remain unchanged. The bounded replay received 120 successful
+chunk responses, including ten idempotently repeated chunks after one final-seal
+`central_500_internal_error`. A resumed pass succeeded; the original 500's cause
+was not established and is not labelled a confirmed platform incident.
+
+The old 520 MoneyForward account/monthly parse failures remain historical
+evidence: they lack stable account identity and were not silently admitted or
+deleted. New v2 runs carry verified keyed identities. Alongside these are 22
+unsupported GLOBAL PASS captures and 25 Shinsei top activity captures without a
+coverage interval. These failures are separate from current collector success
+and from the asynchronous R2 repair queue. A zero pending-job count is never
+proof that every source's raw archive or every account is fully represented.
+
+Final verification at approximately 2026-09-07 15:45 UTC:
+
+- All 530 new MoneyForward provider artifacts parsed successfully: 480 monthly
+  and 50 evidence-only artifacts. Its 10 older index artifacts also remain
+  successful, hence the source's total successful-artifact counter is 540.
+- Across 12 source IDs, 4,251 distinct artifacts have a successful unsuperseded
+  parse. There are zero pending/running parser jobs. The displayed 567 failures
+  are the 520 legacy identity failures plus 22 GLOBAL PASS and 25 Shinsei cases
+  described above; retired/replaced versions are not counted as unresolved.
+- The store retains 16,463 transaction, 7,807 balance, 1,171 position and 8,126
+  valuation observation rows, including superseded history. These are storage
+  counters, not counts of unique current financial events.
+- All six main authenticated APIs still return 200 after full targeted replay.
+  Chrome's transaction source filter displays MoneyForward records; its counts
+  remain bounded to the API's explicitly limited display window.
+- The separate historical R2 repair queue still reports 110 outstanding messages,
+  DLQ zero, with its weekly Cron and configured single consumer intact. This
+  rollout does not claim that this independent repair queue has drained.
+
+CodeQL flagged a substring host check in the read-only diagnostic script; it now
+parses the URL and compares the HTTPS hostname exactly. No access-control gate
+depended on that diagnostic. The deployed runtime code and all implementation
+checks passed on signed commit `412b874b3cffe9a2aeebe5b0326861027bd43efc`;
+the final documentation-only update records the completed rollout counters.
+
 ## Resource and rollback inventory
 
 No public diagnostic Worker, new database, new bucket, container, or paid external

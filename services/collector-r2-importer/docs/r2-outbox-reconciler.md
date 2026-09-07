@@ -67,6 +67,62 @@ Final bounded queue audit at 2026-09-07 15:08 UTC: backlog 112, DLQ zero, Cron a
 
 The same audit found MoneyForward already had 10 sealed successful Layer A runs, with 480 monthly HTML artifacts, 40 account-detail artifacts, and 10 accounts-index artifacts. Its missing Layer B coverage was a separate MIME-routing mismatch: the central importer deliberately declares exact HTML bytes as `text/html`, while the parsers accepted only `text/html; charset=utf-8`. The prepared parser fix accepts both exact declarations while preserving strict UTF-8 and all metadata/body checks (monthly parser 2.0.1, evidence parser 1.0.1); 12 parser tests and an actual-workerd D1/R2 routing regression passed. This audit does not claim that all twelve sources have completed Layer B parsing. The latest successful-parse coverage still showed eleven source IDs before the fix's deployment.
 
+After deploying that routing correction, a second, distinct MoneyForward incompatibility became visible: all ten existing runs used the legacy import contract and ordinal `account` units. Six failed bodies (three monthly and three account-detail) were checked in memory against their recorded SHA-256 and byte size; each rejected with the fixed category `moneyforward account identity metadata is invalid`. Accounts-index parsing succeeded. The parser's stable account identity requirement was not relaxed.
+
+The authorized corrective backfill resolved exactly those ten existing source terminals from integrity-verified central manifests, checked the matching source run identity read-only, and skipped any already sealed v2 counterpart. It called the current importer's private service binding with normal five-artifact continuation chunks and a bounded per-run chunk limit. The `moneyforward-r2-v2` contract derives stable keyed account identities from verified source evidence and creates separate immutable v2 runs; legacy runs and source objects remain unchanged.
+
+Final read-only verification confirmed exactly ten v2 runs, ten seals, 530 provider-response artifacts, and ten collector manifests, alongside the unchanged ten legacy seals. There were 120 successful chunk responses overall, including ten idempotent replay chunks after one `central_500_internal_error` at the seventh run's final seal. The resumed pass skipped the six already sealed runs and successfully sealed all four remaining targets; the error did not recur and its underlying cause was not established. A read-only CLI preflight failure also recovered within bounded retries; its discarded stderr did not support retrospective classification. No import process remained running after completion.
+
+At that final import check, MoneyForward successful parse coverage was 490 artifacts across 20 legacy/v2 runs (including legacy accounts-index successes). The 520 legacy identity-rejection jobs remained visible and unchanged, and downstream catch-up was still processing newly sealed v2 evidence. This verifies complete targeted Layer A v2 backfill, not complete Layer B parsing or a drained reconciler queue; the parent rollout performs the final downstream coverage check.
+
+### Targeted v2 replay interface
+
+The activation used a temporary, non-committed Node operator script and temporary local proxy configuration, not a new production endpoint or a committed private inventory. Its maintained interface is the existing private service-binding route `POST /v1/moneyforward/import-run`. Before replay, resolve and verify the exact legacy source terminal, compare its central manifest SHA-256/size and source run identity, and skip a sealed `full-snapshot-moneyforward-r2-v2` counterpart for the same acquisition session. Do not obtain targets by indiscriminate queue reseeding.
+
+A temporary local Wrangler configuration can bind `IMPORTER` to the existing `kogane-collector-r2-importer` service with `remote: true`, the verified account ID, and the current compatibility date. With that configuration, the following Node module illustrates the bounded maintained request/continuation interface (all values below are placeholders, never paste private terminal keys into logs):
+
+```js
+import { getPlatformProxy } from "wrangler";
+const proxy = await getPlatformProxy({
+  configPath: "/absolute/path/to/temporary-operator-config.jsonc",
+  persist: false,
+  remoteBindings: true,
+});
+try {
+  const manifestKey = "<verified exact source terminal key>";
+  let continuation;
+  let previousOffset = -1;
+  for (let chunk = 0; chunk < 200; chunk++) {
+    const response = await proxy.env.IMPORTER.fetch(
+      "https://importer.internal/v1/moneyforward/import-run",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ manifestKey, ...(continuation ? { continuation } : {}) }),
+      },
+    );
+    if (!response.ok) throw new Error("import request failed; inspect safe error category");
+    const result = await response.json();
+    if (result.status === "sealed") break;
+    if (
+      result.status !== "deferred" ||
+      typeof result.continuation !== "string" ||
+      !Number.isSafeInteger(result.nextOffset) ||
+      result.nextOffset <= previousOffset
+    ) {
+      throw new Error("invalid or stalled continuation");
+    }
+    continuation = result.continuation;
+    previousOffset = result.nextOffset;
+    if (chunk === 199) throw new Error("bounded chunk limit reached");
+  }
+} finally {
+  await proxy.dispose();
+}
+```
+
+Run the temporary module with Node from a workspace containing the installed Wrangler dependency. The operator's existing Wrangler authorization is used internally by the proxy; do not export or print a token. Verify sealed run and artifact-role counts read-only afterward. This replays existing evidence only; it never invokes collection or writes source R2.
+
 ## Provisioning
 
 The checked-in notification helper defaults to a read-only plan. Review current resources before any change:
