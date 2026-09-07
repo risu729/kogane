@@ -46,6 +46,25 @@ describe("V Point aggregate-only R2 audit", () => {
     expect(forbiddenFields(body)).toEqual([]);
   });
 
+  test("a valid failed run produces no financial observations", async () => {
+    const response = await auditWorker.fetch(auditRequest(), environment(await failedBucket()));
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({
+      auditedManifestCount: 1,
+      failedManifestCount: 0,
+      manifestStatus: "failed",
+      artifactCount: 0,
+      financialArtifactCount: 0,
+      ignoredArtifactCount: 0,
+      parsedObservationCount: 0,
+      balanceObservationCount: 0,
+      transactionObservationCount: 0,
+      externalIdObservationCount: 0,
+    });
+    expect(forbiddenFields(body)).toEqual([]);
+  });
+
   test("reduces manifest validation failures to a stable aggregate code", async () => {
     const bucket = {
       ...listBucket({
@@ -195,6 +214,41 @@ async function successBucket(): Promise<R2Bucket> {
         httpMetadata: { contentType: "application/json" },
         checksums: { sha256: hexBytes(item.sha256).buffer },
         arrayBuffer: async () => owned(item.body),
+      } as unknown as R2ObjectBody;
+    },
+  } as unknown as R2Bucket;
+}
+
+async function failedBucket(): Promise<R2Bucket> {
+  const runId = "123e4567-e89b-42d3-a456-426614174000";
+  const manifestKey = `raw/v-point/2099/01/05/${runId}/manifest.json`;
+  const body = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: "vpoint-worker-poc-v1",
+      source: "v-point",
+      runId,
+      startedAt: "2099-01-05T00:00:00.000Z",
+      completedAt: "2099-01-05T00:00:02.000Z",
+      status: "failed",
+      historyTotal: 0,
+      historyPageCount: 0,
+      artifacts: [],
+      failures: [{ operation: "collect", errorType: "Error", message: "anonymous failure" }],
+    }),
+  );
+  const digest = await sha256(body);
+  return {
+    list: async (_options: R2ListOptions) =>
+      ({ objects: [{ key: manifestKey }], truncated: false }) as unknown as R2Objects,
+    get: async (key: string) => {
+      if (key !== manifestKey) return null;
+      return {
+        key,
+        size: body.byteLength,
+        customMetadata: { source: "v-point", status: "failed", runId },
+        httpMetadata: { contentType: "application/json" },
+        checksums: { sha256: hexBytes(digest).buffer },
+        arrayBuffer: async () => owned(body),
       } as unknown as R2ObjectBody;
     },
   } as unknown as R2Bucket;

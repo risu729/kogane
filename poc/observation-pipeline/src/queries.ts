@@ -212,20 +212,17 @@ export function currentTransactions(store: Store): TransactionRow[] {
            AND p.parser_name IN (
              'v-point-balance-info', 'v-point-smfg-point', 'v-point-history-page'
            )
-           AND NOT EXISTS (
-             SELECT 1
-             FROM parse_runs failed_p
-             JOIN fetch_artifacts failed_fa ON failed_fa.id = failed_p.fetch_artifact_id
-             WHERE failed_fa.fetch_run_id = f.id
-               AND failed_p.superseded_by_parse_run_id IS NULL
-               AND failed_p.status <> 'ok'
-               AND (
-                 failed_fa.dataset IN ('balance-info', 'smfg-point')
-                 OR failed_fa.dataset LIKE 'history-page-%'
-               )
-           )
          GROUP BY f.id, fa.source_id, f.completed_at
          HAVING COUNT(DISTINCT p.parser_name) = 3
+            AND COUNT(DISTINCT p.fetch_artifact_id) = (
+              SELECT COUNT(*)
+              FROM fetch_artifacts expected_fa
+              WHERE expected_fa.fetch_run_id = f.id
+                AND (
+                  expected_fa.dataset IN ('balance-info', 'smfg-point')
+                  OR expected_fa.dataset LIKE 'history-page-%'
+                )
+            )
        ), ranked_vpoint_runs AS (
          SELECT fetch_run_id,
                 ROW_NUMBER() OVER (
@@ -340,20 +337,17 @@ export function latestBalances(store: Store): BalanceRow[] {
            AND p.parser_name IN (
              'v-point-balance-info', 'v-point-smfg-point', 'v-point-history-page'
            )
-           AND NOT EXISTS (
-             SELECT 1
-             FROM parse_runs failed_p
-             JOIN fetch_artifacts failed_fa ON failed_fa.id = failed_p.fetch_artifact_id
-             WHERE failed_fa.fetch_run_id = f.id
-               AND failed_p.superseded_by_parse_run_id IS NULL
-               AND failed_p.status <> 'ok'
-               AND (
-                 failed_fa.dataset IN ('balance-info', 'smfg-point')
-                 OR failed_fa.dataset LIKE 'history-page-%'
-               )
-           )
          GROUP BY f.id, fa.source_id, f.completed_at
          HAVING COUNT(DISTINCT p.parser_name) = 3
+            AND COUNT(DISTINCT p.fetch_artifact_id) = (
+              SELECT COUNT(*)
+              FROM fetch_artifacts expected_fa
+              WHERE expected_fa.fetch_run_id = f.id
+                AND (
+                  expected_fa.dataset IN ('balance-info', 'smfg-point')
+                  OR expected_fa.dataset LIKE 'history-page-%'
+                )
+            )
        ), ranked_vpoint_runs AS (
          SELECT fetch_run_id,
                 ROW_NUMBER() OVER (

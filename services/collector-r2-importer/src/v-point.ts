@@ -87,10 +87,13 @@ interface PageInfo {
 
 interface VerifiedArtifact {
   artifact: ArtifactManifest;
-  bytes: Uint8Array;
   page?: PageInfo;
   historyRows?: JsonObject[];
   summary?: SummaryInfo;
+}
+
+interface VerifiedArtifactWithBytes extends VerifiedArtifact {
+  bytes: Uint8Array;
 }
 
 interface SummaryInfo {
@@ -205,7 +208,7 @@ export async function validateVPointLayerBRun(options: {
     ...manifest.artifacts.map((artifact) => artifact.key),
     options.manifestKey,
   ]);
-  const verified: VerifiedArtifact[] = [];
+  const verified: VerifiedArtifactWithBytes[] = [];
   for (const artifact of manifest.artifacts) {
     const bytes = await readVerifiedArtifact(options.bucket, artifact);
     verified.push({ artifact, bytes, ...validateArtifactPayload(artifact.dataset, bytes) });
@@ -271,7 +274,7 @@ export async function importVPointRun(options: ImportVPointOptions): Promise<Imp
     const verified: VerifiedArtifact[] = [];
     for (const artifact of manifest.artifacts) {
       const bytes = await readVerifiedArtifact(options.bucket, artifact);
-      verified.push({ artifact, bytes, ...validateArtifactPayload(artifact.dataset, bytes) });
+      verified.push({ artifact, ...validateArtifactPayload(artifact.dataset, bytes) });
     }
     validateSemantics(manifest, verified);
 

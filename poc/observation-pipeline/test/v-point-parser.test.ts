@@ -36,7 +36,11 @@ describe("V Point Layer B routing and run gate", () => {
     for (const dataset of ["balance-info", "smfg-point", "history-page-0001"]) {
       expect(PARSERS.filter((parser) => parser.accepts(meta(dataset)))).toHaveLength(1);
     }
-    for (const dataset of ["vmoney-history-page-0001", "collection-summary"]) {
+    for (const dataset of [
+      "vmoney-history-page-0001",
+      "collection-summary",
+      "v-point-pay-email-reconciliation",
+    ]) {
       expect(PARSERS.filter((parser) => parser.accepts(meta(dataset)))).toHaveLength(0);
     }
     expect(vPointBalanceInfo.accepts(meta("balance-info", { mime: "text/json" }))).toBe(false);
@@ -59,7 +63,7 @@ describe("V Point Layer B routing and run gate", () => {
     }
   });
 
-  test("current queries use only the newest complete id-less snapshot", () => {
+  test("a newest complete empty history snapshot clears older current rows", () => {
     const store = openStore(mkdtempSync(join(tmpdir(), "kogane-v-point-current-")));
     ingestRunDirectory(store, runFixture("00000000-0000-4000-8000-000000000001", false), {
       id: "v-point",
@@ -71,12 +75,54 @@ describe("V Point Layer B routing and run gate", () => {
       provider: "V Point",
     });
     runParsers(store);
-    expect(currentTransactions(store).filter((row) => row.source_id === "v-point")).toHaveLength(1);
+    expect(currentTransactions(store).filter((row) => row.source_id === "v-point")).toHaveLength(0);
     expect(latestBalances(store).filter((row) => row.source_id === "v-point")).toHaveLength(3);
+  });
+
+  test("an incompletely parsed run cannot replace the last complete snapshot", () => {
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-v-point-incomplete-")));
+    ingestRunDirectory(store, runFixture("00000000-0000-4000-8000-000000000001", false), {
+      id: "v-point",
+      provider: "V Point",
+    });
+    runParsers(store);
+    ingestRunDirectory(store, runFixture("00000000-0000-4000-8000-000000000002", false, true), {
+      id: "v-point",
+      provider: "V Point",
+    });
+    const firstHistoryPageOnly = {
+      ...vPointHistoryPage,
+      accepts: (artifact: ArtifactMeta) =>
+        artifact.dataset === "history-page-0001" && vPointHistoryPage.accepts(artifact),
+    };
+    runParsers(store, [vPointBalanceInfo, vPointSmfgPoint, firstHistoryPageOnly]);
+    expect(currentTransactions(store).filter((row) => row.source_id === "v-point")).toHaveLength(2);
+    expect(latestBalances(store).filter((row) => row.source_id === "v-point")).toHaveLength(5);
+  });
+
+  test("a complete retry recovers after a transient parse error", () => {
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-v-point-retry-")));
+    ingestRunDirectory(store, runFixture("00000000-0000-4000-8000-000000000001", false), {
+      id: "v-point",
+      provider: "V Point",
+    });
+    const brokenHistory = {
+      ...vPointHistoryPage,
+      parse: () => {
+        throw new Error("transient");
+      },
+    };
+    runParsers(store, [vPointBalanceInfo, vPointSmfgPoint, brokenHistory]);
+    expect(currentTransactions(store).filter((row) => row.source_id === "v-point")).toHaveLength(0);
+    expect(latestBalances(store).filter((row) => row.source_id === "v-point")).toHaveLength(0);
+
+    runParsers(store, [vPointHistoryPage]);
+    expect(currentTransactions(store).filter((row) => row.source_id === "v-point")).toHaveLength(2);
+    expect(latestBalances(store).filter((row) => row.source_id === "v-point")).toHaveLength(5);
   });
 });
 
-function runFixture(runId: string, newest: boolean): string {
+function runFixture(runId: string, newest: boolean, unparsedSecondPage = false): string {
   const directory = mkdtempSync(join(tmpdir(), "kogane-v-point-run-"));
   const values: Record<string, Record<string, any>> = Object.fromEntries(
     ["balance-info", "smfg-point", "history-page-0001"].map((name) => [
@@ -87,9 +133,17 @@ function runFixture(runId: string, newest: boolean): string {
   if (newest) {
     values["balance-info"]!.results.common = values["balance-info"]!.results.common.slice(0, 1);
     values["balance-info"]!.results.store = [];
-    values["history-page-0001"]!.results.history =
-      values["history-page-0001"]!.results.history.slice(1);
-    values["history-page-0001"]!.results.total = 1;
+    values["history-page-0001"]!.results.history = [];
+    values["history-page-0001"]!.results.total = 0;
+  }
+  if (unparsedSecondPage) {
+    const rows = values["history-page-0001"]!.results.history;
+    values["history-page-0001"]!.results.history = Array.from({ length: 30 }, (_, index) =>
+      structuredClone(rows[index % rows.length]),
+    );
+    values["history-page-0001"]!.results.total = 31;
+    values["history-page-0002"] = structuredClone(values["history-page-0001"]!);
+    values["history-page-0002"]!.results.history = [structuredClone(rows[0])];
   }
   const artifacts = Object.entries(values).map(([dataset, value]) => {
     const bytes = new TextEncoder().encode(JSON.stringify(value));
