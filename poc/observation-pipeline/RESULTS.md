@@ -156,6 +156,47 @@ coverage. Neither announces itself.
 The remaining questions need evidence beyond the shape audit described below;
 none is resolved by assertion here.
 
+### Mobile Suica Layer B validation (2026-09-07)
+
+A read-only aggregate/canary against production R2 confirmed that the current
+successful Mobile Suica run stores exactly three data artifacts:
+`sf-history-html` as Shift-JIS HTML, and `sf-history` plus
+`collection-summary` as JSON. No object body, key, digest, account identifier,
+or financial value was printed, retained, or committed. The normalized history
+had the exact root fields `asOfDateJst`, `complete`, `pageCount`, `rows`, and
+`transactionCount`; its rows had the ten exact fields pinned by the anonymous
+fixture. The observed row kinds were all within the collector enum, amounts
+included both signs as well as an unavailable carryover amount, and normalized
+post-row balances were integral when present.
+
+The parser makes `sf-history` the sole canonical financial artifact. It emits a
+JPY transaction only when the normalized amount is available, takes direction
+from that sign rather than from the row kind, and emits a JPY post-transaction
+balance when available. Provider order is newest first; observations are
+written oldest first so the newest same-day balance wins the append-only id
+tie-breaker. Full normalized rows survive in `extra`, locators point to
+`json:$.rows[index]`, and `_kogane` records that the JSON derives from
+`sf-history-html`.
+
+The current collector proves only one page and treats 100 rows as an incomplete
+boundary. Current payloads therefore require `pageCount: 1`, exact
+`transactionCount === rows.length`, and `complete: true`; the legacy envelope
+without `complete` is accepted only below 100 rows and is warned. Empty history
+is an explicit valid snapshot. Rows on or after the collection date are
+rejected because the PC view is documented through the previous day.
+
+One live canary fact conflicts with the public 26-week statement: a normalized
+successful artifact contained provider-derived history older than 26 weeks.
+Layer B warns and preserves such a row instead of silently deleting evidence or
+making the whole snapshot unavailable. The source-side meaning of that
+discrepancy remains an upstream investigation item.
+
+Finally, `ArtifactMeta` now carries the owning fetch-run status and the parser
+sweep skips every accepted artifact whose run is not `success`. A parser-level
+guard provides the same boundary for direct calls. This closes the contract
+gap where sealed partial/failed evidence could otherwise become a current
+financial observation.
+
 Four previously unparsed SBI datasets now have strict semantic parsers. A
 read-only aggregate audit confirmed their source envelopes and container
 types without printing or retaining payload values. The parsers preserve

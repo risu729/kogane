@@ -44,6 +44,13 @@ export function runParsers(
   for (const artifact of artifacts) {
     for (const parser of parsers) {
       if (!parser.accepts(artifact)) continue;
+      // A partial/failed collection is evidence about the failed attempt, not
+      // a provider snapshot. Keep its raw artifact queryable, but never turn
+      // it into current financial observations.
+      if (artifact.runStatus !== "success") {
+        summary.skipped += 1;
+        continue;
+      }
       if (findParseRun(store, artifact.id, parser.name, parser.version) !== undefined) {
         summary.skipped += 1;
         continue;

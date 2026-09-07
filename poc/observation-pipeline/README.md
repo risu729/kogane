@@ -75,7 +75,7 @@ transaction / balance / position / valuation observations   layer B
 evidence browser (React client in web/, served by serve.ts)
 ```
 
-Eight parsers are registered against shapes the collectors already produce:
+Nine parsers are registered against shapes the collectors already produce:
 
 | Parser                        | Artifact                      | Emits                                        |
 | ----------------------------- | ----------------------------- | -------------------------------------------- |
@@ -87,6 +87,16 @@ Eight parsers are registered against shapes the collectors already produce:
 | `sbi-foreign-cash-positions`  | SBI `foreign-cash-positions`  | positions, provider valuations               |
 | `sbi-foreign-cash-balances`   | SBI `foreign-cash-balances`   | balances                                     |
 | `paypay-csv`                  | PayPay consumer CSV export    | transactions                                 |
+| `mobile-suica-sf-history`     | Mobile Suica `sf-history`     | transactions, post-row balances              |
+
+Mobile Suica deliberately has one canonical Layer-B route. The collector's
+Shift-JIS `sf-history-html` is provider evidence and `collection-summary` is
+run metadata; neither is parsed into observations. Only the collector-derived,
+UTF-8 normalized `sf-history` JSON is registered, so the HTML and its derivative
+cannot double-count the same rows. Each amount keeps the sign stated by the
+normalized row, each row balance is a separate `sf_balance_after_transaction`
+measurement, and the most recent row is marked as the current-balance candidate
+rather than presented as a guaranteed real-time balance.
 
 The original demo manifest still ingests 4 artifacts from 2 sources and produces 28 observations:
 8 transaction, 10 balance, 2 position, 8 valuation.
@@ -100,6 +110,8 @@ Beyond that it must:
 
 - carry a name and a version, and select the artifacts it accepts from
   metadata alone;
+- require the owning fetch run to have terminal status `success`; partial and
+  failed run artifacts remain raw evidence but never become observations;
 - record a raw locator on every observation (`json:$.records[3]`,
   `csv:row=12`) so the value can be found again in the same bytes;
 - never drop a provider field it does not model — unrecognized material is

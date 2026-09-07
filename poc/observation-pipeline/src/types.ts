@@ -8,6 +8,8 @@
 export interface ArtifactMeta {
   id: number;
   sourceId: string;
+  /** Terminal status of the layer-A fetch run that owns this artifact. */
+  runStatus: string;
   dataset: string | null;
   url: string | null;
   mime: string;
