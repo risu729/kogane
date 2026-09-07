@@ -162,6 +162,19 @@ coverage. Neither announces itself.
 
 ## Open questions
 
+Sony Bank Layer B now covers every financial artifact family acquired by the
+v2 collector: gross-balance JSON, paged yen and foreign-currency history JSON,
+official yen and foreign CSV, and monthly sanitized WALLET HTML. A read-only
+aggregate audit across seven successful production v2 runs established only
+field names, container cardinalities, enum code sets, CSV headers, and HTML
+table structure; it emitted no object key, digest, body, account identifier, or
+financial value. The parsers repeat Layer A's page-local completeness checks,
+pin observed enums and exact schemas, retain provider fields in `extra`, and
+attach a locator to every row. Collection-wide missing-page and missing-month
+inventory remains Layer A's responsibility because a Layer B parser receives
+one artifact at a time. The source currently has no holdings artifact, so no
+Sony position is inferred from balances or totals.
+
 The remaining questions need evidence beyond the shape audit described below;
 none is resolved by assertion here.
 

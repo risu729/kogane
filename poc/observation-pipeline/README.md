@@ -75,7 +75,7 @@ transaction / balance / position / valuation observations   layer B
 evidence browser (React client in web/, served by serve.ts)
 ```
 
-Seventeen parsers are registered against shapes the collectors already produce:
+Twenty-one parsers are registered against shapes the collectors already produce:
 
 | Parser                              | Artifact                                           | Emits                                        |
 | ----------------------------------- | -------------------------------------------------- | -------------------------------------------- |
@@ -96,6 +96,10 @@ Seventeen parsers are registered against shapes the collectors already produce:
 | `myjcb-canonical-evidence-boundary` | MyJCB sanitized menu/detail HTML and discovery     | no financial observations                    |
 | `paypay-csv`                        | PayPay consumer CSV export                         | transactions                                 |
 | `mobile-suica-sf-history`           | Mobile Suica `sf-history`                          | transactions, post-row balances              |
+| `sony-bank-gross-balance`           | Sony Bank gross-balance JSON                       | account-type balances and provider totals    |
+| `sony-bank-history-json`            | Sony Bank yen/foreign history pages                | transactions and after-transaction balances  |
+| `sony-bank-history-csv`             | Sony Bank official yen/foreign CSV                 | transactions and after-transaction balances  |
+| `sony-bank-wallet-history`          | Sony Bank WALLET monthly HTML                      | card transactions                            |
 
 Mobile Suica deliberately has one canonical Layer-B route. The collector's
 Shift-JIS `sf-history-html` is provider evidence and `collection-summary` is
@@ -239,3 +243,10 @@ present in both.
 The schema migrates existing v2 and v3 stores in place; old non-success rows
 are conservatively backfilled with one failure, while pre-v4 artifacts receive
 nullable collector-key and statement metadata.
+
+`fixtures/sony-bank-parser-boundaries/` likewise contains anonymous JSON, CSV,
+and sanitized HTML shaped from the merged Layer A contract and a read-only
+production structure audit. No source object name, digest, account identifier,
+or financial value was copied. Sony's current artifacts contain balances,
+transactions, and provider total valuations; they do not contain a security
+holding, so the Sony parsers deliberately emit no invented `position` rows.
