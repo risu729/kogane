@@ -280,17 +280,11 @@ describe("MoneyForward R2 importer", () => {
     ).not.toContain(MANIFEST_KEY);
     const tamperedParts = first.continuation.split(".");
     tamperedParts[1] = `${tamperedParts[1]![0] === "a" ? "b" : "a"}${tamperedParts[1]!.slice(1)}`;
+    await expect(runImport(bucket, central, tamperedParts.join("."))).rejects.toThrow(
+      "transfer_token_invalid",
+    );
     await expect(
-      runImport(bucket, central, tamperedParts.join(".")),
-    ).rejects.toThrow("transfer_token_invalid");
-    await expect(
-      runImport(
-        bucket,
-        central,
-        first.continuation,
-        "collector-r2-importer-test",
-        "cd".repeat(32),
-      ),
+      runImport(bucket, central, first.continuation, "collector-r2-importer-test", "cd".repeat(32)),
     ).rejects.toThrow("transfer_token_invalid");
     await expect(
       runImport(bucket, central, first.continuation, "collector-r2-importer-test", "invalid"),

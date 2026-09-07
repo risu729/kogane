@@ -15,12 +15,11 @@ describe("MoneyForward backfill cursor", () => {
       truncated: true,
     });
     const cursor = String(first.nextCursor);
-    expect(cursor).toMatch(
-      /^moneyforward-scan-v2\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,11800}$/u,
-    );
+    expect(cursor).toMatch(/^moneyforward-scan-v2\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,11800}$/u);
     const encodedParts = cursor.split(".").slice(1);
-    expect(encodedParts.map((part) => Buffer.from(part!, "base64url").toString()).join(""))
-      .not.toContain("opaque-scan");
+    expect(
+      encodedParts.map((part) => Buffer.from(part!, "base64url").toString()).join(""),
+    ).not.toContain("opaque-scan");
     const parts = cursor.split(".");
     parts[1] = `${parts[1]![0] === "a" ? "b" : "a"}${parts[1]!.slice(1)}`;
     await expect(backfillMoneyForward(env, parts.join("."))).rejects.toThrow("cursor_invalid");
