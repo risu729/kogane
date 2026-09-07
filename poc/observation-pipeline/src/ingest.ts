@@ -61,6 +61,7 @@ export function ingestRunDirectory(
   if ((status === "success") !== (failureCount === 0)) {
     throw new Error(`${directory}/manifest.json run status and failure evidence are inconsistent`);
   }
+  const window = manifest["window"] === undefined ? undefined : parseWindow(manifest["window"]);
 
   const existing = store.db
     .query("SELECT id FROM fetch_runs WHERE source_id = ?1 AND external_run_id = ?2")
@@ -157,6 +158,7 @@ export function ingestRunDirectory(
       ...(completedAt !== undefined ? { completedAt } : {}),
       status,
       failureCount,
+      ...(window ? { window } : {}),
     });
     for (const { dataset, artifactKey, statementState, period, mime, bytes } of pending) {
       const stored = putRawObject(store, bytes, mime);
@@ -181,6 +183,29 @@ export function ingestRunDirectory(
     deduplicated,
     skippedExisting: false,
   };
+}
+
+function parseWindow(value: unknown): { from: string; to: string } {
+  if (!isObject(value) || Object.keys(value).sort().join(",") !== "from,to") {
+    throw new Error("collection manifest window is invalid");
+  }
+  const from = value["from"];
+  const to = value["to"];
+  if (
+    typeof from !== "string" ||
+    typeof to !== "string" ||
+    !validDate(from) ||
+    !validDate(to) ||
+    from > to
+  ) {
+    throw new Error("collection manifest window is invalid");
+  }
+  return { from, to };
+}
+
+function validDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  return new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
 }
 
 export function ingestFile(

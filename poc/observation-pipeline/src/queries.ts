@@ -181,13 +181,21 @@ export function currentTransactions(store: Store): TransactionRow[] {
                 p.parser_name || '@' || p.parser_version AS parser,
                 ROW_NUMBER() OVER (
                   PARTITION BY CASE
-                    WHEN p.parser_name IN ('sbi-vc-executions', 'myjcb-credit-ledger')
-                         AND t.external_id IS NOT NULL
+                    WHEN p.parser_name IN (
+                           'sbi-vc-executions',
+                           'myjcb-credit-ledger',
+                           'sony-bank-history-json',
+                           'sony-bank-history-csv',
+                           'sony-bank-wallet-history'
+                         ) AND t.external_id IS NOT NULL
                       THEN json_array(fa.source_id, t.source_account, t.external_id)
                     ELSE json_array('observation-row', t.id)
                   END
                   ORDER BY CASE json_extract(t.extra_json, '$._kogane.sourceView')
                     WHEN 'historical' THEN 0
+                    WHEN 'official-csv' THEN 0
+                    WHEN 'wallet-monthly-html' THEN 0
+                    WHEN 'provider-json' THEN 1
                     WHEN 'recent' THEN 1
                     ELSE 2
                   END, t.id DESC

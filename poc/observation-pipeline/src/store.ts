@@ -23,7 +23,7 @@ export interface Store {
  * are required to interpret observations; other unknown versions remain
  * fail-closed.
  */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 export function openStore(stateDir?: string): Store {
   const root = stateDir ?? join(POC_ROOT, "state");
@@ -32,13 +32,13 @@ export function openStore(stateDir?: string): Store {
   const db = new Database(join(root, "kogane-poc.sqlite"), { create: true });
   db.exec("PRAGMA foreign_keys = ON;");
   const found = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-  if (found !== 0 && found !== 2 && found !== 3 && found !== SCHEMA_VERSION) {
+  if (found !== 0 && found !== 2 && found !== 3 && found !== 4 && found !== SCHEMA_VERSION) {
     throw new Error(
       `${root} was created with schema version ${found}, but this build expects ${SCHEMA_VERSION}. ` +
-        "Only schema versions 2 and 3 have in-place migrations; export or re-ingest other stores.",
+        "Only schema versions 2, 3, and 4 have in-place migrations; export or re-ingest other stores.",
     );
   }
-  if (found === 2 || found === 3) {
+  if (found === 2 || found === 3 || found === 4) {
     db.transaction(() => {
       if (found === 2) {
         db.exec(
@@ -48,12 +48,16 @@ export function openStore(stateDir?: string): Store {
         // every known non-success run has at least one failure.
         db.exec("UPDATE fetch_runs SET failure_count = 1 WHERE status <> 'success';");
       }
-      const hasArtifacts = storeTableExists(db, "fetch_artifacts");
-      if (hasArtifacts) {
-        db.exec("ALTER TABLE fetch_artifacts ADD COLUMN artifact_key TEXT;");
-        db.exec("ALTER TABLE fetch_artifacts ADD COLUMN statement_state TEXT;");
-        db.exec("ALTER TABLE fetch_artifacts ADD COLUMN period TEXT;");
+      if (found === 2 || found === 3) {
+        const hasArtifacts = storeTableExists(db, "fetch_artifacts");
+        if (hasArtifacts) {
+          db.exec("ALTER TABLE fetch_artifacts ADD COLUMN artifact_key TEXT;");
+          db.exec("ALTER TABLE fetch_artifacts ADD COLUMN statement_state TEXT;");
+          db.exec("ALTER TABLE fetch_artifacts ADD COLUMN period TEXT;");
+        }
       }
+      db.exec("ALTER TABLE fetch_runs ADD COLUMN window_start TEXT;");
+      db.exec("ALTER TABLE fetch_runs ADD COLUMN window_end TEXT;");
       db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     })();
   }
@@ -95,6 +99,7 @@ export function insertFetchRun(
     completedAt?: string;
     status: "success" | "partial" | "failed";
     failureCount?: number;
+    window?: { from: string; to: string };
   },
 ): number {
   // An empty external run id is treated as absent throughout, so that a
@@ -109,6 +114,12 @@ export function insertFetchRun(
   ) {
     throw new Error("fetch-run status and failure evidence are inconsistent");
   }
+  if (
+    run.window &&
+    (!validDate(run.window.from) || !validDate(run.window.to) || run.window.from > run.window.to)
+  ) {
+    throw new Error("fetch-run window is invalid");
+  }
   const existing = externalRunId
     ? (store.db
         .query("SELECT id FROM fetch_runs WHERE source_id = ?1 AND external_run_id = ?2")
@@ -118,8 +129,9 @@ export function insertFetchRun(
   const result = store.db
     .query(
       `INSERT INTO fetch_runs
-         (source_id, external_run_id, tool, started_at, completed_at, status, failure_count)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+         (source_id, external_run_id, tool, started_at, completed_at, status, failure_count,
+          window_start, window_end)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
     )
     .run(
       run.sourceId,
@@ -129,6 +141,8 @@ export function insertFetchRun(
       run.completedAt ?? null,
       run.status,
       failureCount,
+      run.window?.from ?? null,
+      run.window?.to ?? null,
     );
   return Number(result.lastInsertRowid);
 }
@@ -210,7 +224,7 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
   const rows = store.db
     .query(
       `SELECT a.id, a.source_id, f.status AS run_status,
-              f.failure_count AS run_failure_count,
+              f.failure_count AS run_failure_count, f.window_start, f.window_end,
               a.dataset, a.artifact_key, a.statement_state, a.period,
               a.url, a.mime, a.fetched_at, a.sha256
        FROM fetch_artifacts a
@@ -222,6 +236,8 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
     source_id: string;
     run_status: "success" | "partial" | "failed";
     run_failure_count: number;
+    window_start: string | null;
+    window_end: string | null;
     dataset: string | null;
     artifact_key: string | null;
     statement_state: string | null;
@@ -231,20 +247,42 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
     fetched_at: string;
     sha256: string;
   }[];
-  return rows.map((row) => ({
-    id: row.id,
-    sourceId: row.source_id,
-    runStatus: row.run_status,
-    runFailureCount: row.run_failure_count,
-    dataset: row.dataset,
-    artifactKey: row.artifact_key,
-    statementState: row.statement_state,
-    period: row.period,
-    url: row.url,
-    mime: row.mime,
-    fetchedAt: row.fetched_at,
-    sha256: row.sha256,
-  }));
+  return rows.map((row) => {
+    if ((row.window_start === null) !== (row.window_end === null)) {
+      throw new Error("fetch-run window is incomplete");
+    }
+    if (
+      row.window_start !== null &&
+      row.window_end !== null &&
+      (!validDate(row.window_start) ||
+        !validDate(row.window_end) ||
+        row.window_start > row.window_end)
+    ) {
+      throw new Error("fetch-run window is invalid");
+    }
+    return {
+      id: row.id,
+      sourceId: row.source_id,
+      runStatus: row.run_status,
+      runFailureCount: row.run_failure_count,
+      ...(row.window_start && row.window_end
+        ? { runWindow: { from: row.window_start, to: row.window_end } }
+        : {}),
+      dataset: row.dataset,
+      artifactKey: row.artifact_key,
+      statementState: row.statement_state,
+      period: row.period,
+      url: row.url,
+      mime: row.mime,
+      fetchedAt: row.fetched_at,
+      sha256: row.sha256,
+    };
+  });
+}
+
+function validDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  return new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
 }
 
 // ── layer B writes ─────────────────────────────────────────────────────

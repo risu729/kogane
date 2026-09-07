@@ -240,9 +240,10 @@ child-row drift rejects the whole artifact. For SBI VC executions, raw Layer B
 history keeps both recent and historical source views, while the current query
 prefers the historical record when the same composite execution identity is
 present in both.
-The schema migrates existing v2 and v3 stores in place; old non-success rows
-are conservatively backfilled with one failure, while pre-v4 artifacts receive
-nullable collector-key and statement metadata.
+The schema migrates existing v2, v3, and v4 stores in place. Old non-success
+rows are conservatively backfilled with one failure, pre-v4 artifacts receive
+nullable collector-key and statement metadata, and pre-v5 runs receive nullable
+provider query-window fields.
 
 `fixtures/sony-bank-parser-boundaries/` likewise contains anonymous JSON, CSV,
 and sanitized HTML shaped from the merged Layer A contract and a read-only
@@ -250,3 +251,23 @@ production structure audit. No source object name, digest, account identifier,
 or financial value was copied. Sony's current artifacts contain balances,
 transactions, and provider total valuations; they do not contain a security
 holding, so the Sony parsers deliberately emit no invented `position` rows.
+
+Sony history JSON and CSV cover the same provider query window. Both source
+views remain queryable, but they share an identity derived only from their
+common date, signed amount, post-transaction balance, currency, and occurrence;
+the current transaction view prefers the official CSV. Fetch windows are
+persisted on Layer A runs and every history date must fall inside that exact
+window. WALLET keeps the provider's eight-digit month option and default-first
+selection semantics. It requires exact adjacent primary/supplement row pairs,
+uses approval number plus occurrence when available, and maps `未確定` separately
+from a settlement date. Because the captured WALLET table has no independent
+credit/debit field, an unsigned display amount is retained only in `extra`; its
+signed normalized amount is omitted with a warning instead of guessing cashflow
+direction.
+
+`services/collector-r2-importer/scripts/audit-sony-layer-b-r2.sh` is the
+repeatable production canary. It starts a localhost-only Worker with a remote
+read-only R2 binding, reuses the strict Layer A manifest/metadata/checksum and
+inventory validator, invokes exactly one Layer B parser per financial artifact,
+and returns aggregate counts and shape booleans only. The harness contains no
+deploy, R2 write, or R2 delete path.
