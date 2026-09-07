@@ -1,6 +1,10 @@
 import type { Parser } from "../types.ts";
 import { paypayCsv } from "./paypay-csv.ts";
 import { mobileSuicaSfHistory } from "./mobile-suica-sf-history.ts";
+import {
+  moneyForwardEvidenceOnly,
+  moneyForwardMonthlyTransactions,
+} from "./moneyforward-parser.ts";
 import { myJcbCreditLedger, myJcbEvidenceOnly, myJcbPastMonthBalances } from "./myjcb.ts";
 import {
   sonyBankGrossBalance,
@@ -31,6 +35,8 @@ import { vpassStatementPage } from "./vpass.ts";
 export const PARSERS: readonly Parser[] = [
   globalPassActivity,
   mobileSuicaSfHistory,
+  moneyForwardMonthlyTransactions,
+  moneyForwardEvidenceOnly,
   myJcbCreditLedger,
   myJcbPastMonthBalances,
   myJcbEvidenceOnly,

@@ -463,6 +463,51 @@ fixtures share a transaction number — a payment and its later refund. That
 is correct evidence and exactly why external ids are not logical identities.
 Deciding they are related is phase 6, and no code here anticipates it.
 
+### MoneyForward ME Layer B validation (2026-09-07)
+
+MoneyForward ME now has one semantic transaction route. The monthly calendar
+fragment supplies exact provider dates, descriptions, and explicitly signed
+JPY integers; the accounts index and bounded recent account-detail view remain
+strict evidence-only inputs. The parser validates neighboring-month calendar
+rows but emits only rows whose date belongs to the month declared by the
+artifact key, avoiding both adjacent-month and recent-view duplication.
+
+Anonymous fixtures pin successful, empty, adjacent-month, invalid-date,
+unsigned-amount, header, row-shape, metadata, and failed-run boundaries. The
+current view selects the latest successful complete artifact per source,
+HMAC account unit, and month, so a later empty snapshot removes stale current
+rows without deleting append-only history. Ordinal changes preserve identity;
+underlying institution identity is deliberately not inferred.
+
+The adversarial review found and fixed incomplete fragments clearing complete
+snapshots, whitespace joining amount digits, and unstable ordinal identity.
+Layer A now supplies a domain-separated HMAC of a JSON account/service tuple via
+account fetch units; index/detail agreement and within-run uniqueness are required.
+The 64-account continuation is bounded below 8 KB. Regression coverage includes
+unit topology, partial units, legacy cursor rejection, ordinal moves, twelve-month
+overlap/refetch, duplicate row occurrences, and invalid-newer snapshot retention.
+Production structural review counted 407 nonempty and 73 empty fragments. All
+480 had exactly one calendar marker, no script element, and no non-tooltip table;
+all 73 empty fragments shared the same audited tag/attribute-name sequence.
+The final read-only reparse with HMAC/index binding and stricter empty/amount
+validation accepted all 480 monthly artifacts and emitted the same 6,880
+observations, with zero parser rejections. Template syntax may contain whitespace;
+the signed integer itself cannot contain whitespace between digits.
+
+The production read-only full canary scanned 540 objects across 10 successful
+manifests and 530 data artifacts. It validated all 480 monthly fragments and
+8,603 tooltip-body rows, emitted 6,880 selected-month observations (1,883
+inflow and 4,997 outflow), and validated but excluded 1,723 adjacent-calendar
+rows. The remaining 50 account index/detail artifacts were accepted as
+evidence-only. Layer A and Layer B failures were both zero. Only aggregate
+counts and fixed failure codes were returned; no body, object key, hash,
+identifier, or individual financial value was included.
+
+The production canary is read-only and aggregate-only. It reports only fixed
+contract outcomes and counts; it does not emit object keys, digests, account or
+transaction text, amounts, credentials, cookies, or raw bodies, and it performs
+no R2 writes or deletes.
+
 ## Not done
 
 The observation pipeline itself performs no collection or authentication and

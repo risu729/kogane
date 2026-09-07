@@ -204,6 +204,23 @@ export function currentTransactions(store: Store): TransactionRow[] {
          SELECT fetch_artifact_id
          FROM ranked_global_pass_snapshots
          WHERE snapshot_rank = 1
+       ), ranked_moneyforward_snapshots AS (
+         SELECT p.fetch_artifact_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY fa.source_id, fa.fetch_unit_key, substr(fa.artifact_key, -12, 7)
+                  ORDER BY fa.fetched_at DESC, fa.id DESC
+                ) AS snapshot_rank
+         FROM parse_runs p
+         JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+         JOIN fetch_runs f ON f.id = fa.fetch_run_id
+         WHERE ${CURRENT}
+           AND p.parser_name = 'moneyforward-monthly-transactions'
+           AND fa.dataset = 'monthly-transactions'
+           AND fa.fetch_unit_key LIKE 'moneyforward-account-v1-%'
+       ), current_moneyforward_snapshots AS (
+         SELECT fetch_artifact_id
+         FROM ranked_moneyforward_snapshots
+         WHERE snapshot_rank = 1
        ), eligible_vpoint_runs AS (
          SELECT DISTINCT f.id AS fetch_run_id, fa.source_id, f.completed_at
          FROM parse_runs p
@@ -354,6 +371,10 @@ export function currentTransactions(store: Store): TransactionRow[] {
                    ELSE substr(fa.artifact_key, 23, 6)
                  END
              )
+           )
+           AND (
+             p.parser_name <> 'moneyforward-monthly-transactions'
+             OR fa.id IN (SELECT fetch_artifact_id FROM current_moneyforward_snapshots)
            )
        )
        WHERE rank_in_identity = 1

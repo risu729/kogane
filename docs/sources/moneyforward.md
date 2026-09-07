@@ -100,7 +100,7 @@ data artifactはsource R2 bytesを再serializeせず
 `provider_response / exact / not_applicable`としてcatalogueする。中央用manifestは自由形式failure
 messageを固定codeへ置換した新規生成物なので、source manifestと同一bytesとは扱わない。
 
-中央runは固定`sourceRunKey`とcontract `producerVersion: moneyforward-r2-v1`を使う。
+中央runは固定`sourceRunKey`とcontract `producerVersion: moneyforward-r2-v2`を使う。
 deploymentごとに変わるImporter revisionをterminal reportへ入れず、失敗・中断attemptの診断に
 だけ記録する。これにより同じsource runを別deploymentからreplayしてもimmutable descriptor、
 terminal report、sealへ収束する。
@@ -129,6 +129,35 @@ success 10 / partial 0 / failed 0、内訳はaccounts index 10、account detail 
 この集計は当時取得可能だったobjectのsnapshotであり、将来のrun数を固定するものではない。
 rollout時は同じauditを再実行し、strict failure 0を確認する。source object件数と集約checksumは
 backfill前後で比較するが、object key、個別hash、本文、金融値を運用出力へ含めない。
+
+## Layer B semantic boundary
+
+`monthly-transactions`だけを取引のcanonical routeにする。`account-detail`にも直近取引が表示されるが、
+同じ取引を含むbounded recent viewであり、`accounts-index`とともにstrict evidence-only parserで
+surface markerだけを検証し、金融observationは生成しない。underlying bank/cardへsourceを付け替えず、
+source accountはverified detailのaccount/service JSON tupleを専用keyでHMAC化したaccount unitで
+分離する。sorted accounts indexの同ordinalとの一致とrun内一意性を検証し、ordinalはprovenanceに
+だけ残す。連携先追加・削除によるordinal変動はidentityを変えない。生の識別値はunit metadataや
+ログへ出さず、legacy ordinal-only artifactはLayer Bへ昇格させない。
+
+月別fragmentでは各tooltip tableの直前100 bytes以内にproviderの`YYYY-MM-DD`が一意にあり、
+table数とISO日付token数が一致する。カレンダー端には前月・翌月の日も含まれるため、それらのrow shape、
+description、明示符号付きJPY integerを検証した後、artifact filenameの宣言年月と一致する日だけを
+observationへ昇格する。これにより隣接月fragment間の重複を避ける。provider ID、pending/posted状態、
+underlying金融機関の取引identityは推測しない。
+
+current viewはsource、HMAC account unit、年月ごとに最新のsuccessful/failure-free parse artifactを選ぶ。
+新しい完全な空fragmentもsnapshotとして選ぶため、その月の旧rowを残さない。partial/failed runはraw
+evidenceとして残すだけでLayer Bへ昇格しない。
+全fragmentはcalendar marker 1個を要求する。追加構造監査ではnonempty 407件、empty 73件で、
+480件すべてscript 0・tooltip以外のtable 0だった。73 empty共通のdialog/calendar/selectのtagと
+attribute-name構造を固定し、任意div・calendar単独・途中で切れたtableで旧snapshotを消さない。
+
+同日のLayer B read-only full canaryでは540 objects、success manifest 10件、data artifact 530件を
+再走査した。monthly 480件のtooltip body 8,603 rowsを全件検証し、宣言年月内の6,880 observations
+（inflow 1,883 / outflow 4,997）だけを生成した。隣接月の1,723 rowsはshapeと金額表現を検証して
+emitせず、accounts index/detail計50件はevidence-onlyとして受理した。Layer A/Layer B failureは0件
+だった。この出力は集約件数と固定failure codeだけで、本文、key、hash、個別金融値を含まない。
 
 ## Runtime feasibility and recommendation
 
