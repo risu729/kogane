@@ -314,6 +314,7 @@ export async function importSmbcDirectRun(options: {
     phase = "inventory_plan";
     const plans = await artifactPlans(
       validated,
+      centralRunId,
       unitId,
       options.fingerprintKey,
       options.manifestKey,
@@ -975,6 +976,7 @@ function sameTransactionPayload(left: TransactionPayload, right: TransactionPayl
 
 async function artifactPlans(
   validated: ValidatedRun,
+  centralRunId: number,
   unitId: number,
   fingerprintKey: string,
   manifestKey: string,
@@ -984,6 +986,7 @@ async function artifactPlans(
     const descriptor = await dataDescriptor(
       verified,
       sequence,
+      centralRunId,
       unitId,
       validated.manifest,
       fingerprintKey,
@@ -1018,6 +1021,7 @@ async function artifactPlans(
 async function dataDescriptor(
   verified: VerifiedArtifact,
   sequence: number,
+  centralRunId: number,
   unitId: number,
   manifest: Manifest,
   fingerprintKey: string,
@@ -1055,6 +1059,7 @@ async function dataDescriptor(
     relations: rawParent
       ? [
           {
+            parentRunId: centralRunId,
             parentArtifactKey: rawParent,
             relation: "input",
             transformerId: "smbc-direct-backfill-worker",
