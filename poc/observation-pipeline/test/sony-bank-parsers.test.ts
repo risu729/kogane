@@ -374,4 +374,62 @@ describe("Sony Bank current source views", () => {
     expect(current).toHaveLength(2);
     expect(current.every((row) => row.parser === "sony-bank-history-csv@1.0.0")).toBeTrue();
   });
+
+  test("keeps a reused WALLET approval number distinct across statement months", () => {
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-sony-wallet-identity-")));
+    upsertSource(store, { id: "sony-bank", provider: "Sony Bank", ingestion: "collector-r2" });
+    const september = bytes("wallet-history-2026-09.html");
+    const august = walletBytes(
+      walletHtml()
+        .replaceAll("20260930", "SYNTHETIC-MONTH")
+        .replaceAll("20260831", "20260731")
+        .replaceAll("SYNTHETIC-MONTH", "20260831")
+        .replaceAll("2026/09/01", "2026/08/01")
+        .replaceAll("2026/09/02", "2026/08/02"),
+    );
+    const add = (runId: string, dataset: string, body: Uint8Array, fetchedAt: string) => {
+      const fetchRunId = insertFetchRun(store, {
+        sourceId: "sony-bank",
+        externalRunId: runId,
+        tool: "import-run",
+        startedAt: fetchedAt,
+        completedAt: fetchedAt,
+        status: "success",
+      });
+      const raw = putRawObject(store, body, "text/html; charset=UTF-8");
+      const artifactId = insertFetchArtifact(store, {
+        fetchRunId,
+        sourceId: "sony-bank",
+        dataset,
+        mime: "text/html; charset=UTF-8",
+        fetchedAt,
+        sha256: raw.sha256,
+      });
+      const artifact = {
+        ...meta(dataset, "text/html; charset=UTF-8"),
+        id: artifactId,
+        fetchedAt,
+        sha256: raw.sha256,
+      };
+      const parseRunId = insertParseRun(store, {
+        artifactId,
+        parserName: sonyBankWalletHistory.name,
+        parserVersion: sonyBankWalletHistory.version,
+        parsedAt: fetchedAt,
+        status: "ok",
+        warnings: [],
+      });
+      for (const observation of sonyBankWalletHistory.parse(body, artifact).observations) {
+        if (observation.kind === "transaction") insertObservation(store, parseRunId, observation);
+      }
+    };
+
+    add("wallet-september-old", "wallet-history-202609", september, "2026-09-07T00:00:00Z");
+    add("wallet-august", "wallet-history-202608", august, "2026-09-07T00:01:00Z");
+    add("wallet-september-new", "wallet-history-202609", september, "2026-09-07T00:02:00Z");
+
+    const current = currentTransactions(store);
+    expect(current).toHaveLength(2);
+    expect(current.map((row) => row.as_of).sort()).toEqual(["2026-08-01", "2026-09-01"]);
+  });
 });

@@ -449,7 +449,11 @@ export const sonyBankWalletHistory: Parser = {
       const hasApprovalNumber = main[7] !== "" && main[7] !== "-";
       const stableIdentity = stableFingerprint(
         hasApprovalNumber
-          ? { approvalNumber: main[7] }
+          ? {
+              transactionDate: main[0],
+              approvalNumber: main[7],
+              usageAmount: supplement[0],
+            }
           : {
               transactionDate: main[0],
               description: main[1],
@@ -491,7 +495,7 @@ export const sonyBankWalletHistory: Parser = {
               : "unknown",
             directionOrigin: hasDirection ? "provider-explicit-sign" : "unavailable",
             identityOrigin: hasApprovalNumber
-              ? "approval-number+occurrence"
+              ? "date+approval-number+usage-amount+occurrence"
               : "date+description+usage-amount+occurrence",
             sourceFingerprint: fingerprint,
           },

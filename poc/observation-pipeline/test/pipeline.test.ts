@@ -213,15 +213,12 @@ describe("ingestion", () => {
     `);
     db.close();
     const store = openStore(directory);
+    expect(store.db.query("SELECT window_start, window_end FROM fetch_runs").get()).toEqual({
+      window_start: null,
+      window_end: null,
+    });
     expect(
-      store.db
-        .query("SELECT window_start, window_end FROM fetch_runs")
-        .get(),
-    ).toEqual({ window_start: null, window_end: null });
-    expect(
-      store.db
-        .query("SELECT artifact_key, statement_state, period FROM fetch_artifacts")
-        .get(),
+      store.db.query("SELECT artifact_key, statement_state, period FROM fetch_artifacts").get(),
     ).toEqual({
       artifact_key: "connection/ledger.json",
       statement_state: "confirmed",
