@@ -61,9 +61,11 @@ describe("moneyforward Layer B parsers", () => {
         _kogane: { descriptionEncoding: "static-string-concatenation" },
       },
     });
-    expect(result.observations[0]!.externalId).toBe(
-      parseDescription("ANONYMOUS PURCHASE").observations[0]!.externalId,
-    );
+    const decoded = result.observations[0]!;
+    const plain = parseDescription("ANONYMOUS PURCHASE").observations[0]!;
+    if (decoded.kind !== "transaction" || plain.kind !== "transaction")
+      throw new Error("Expected transaction observations");
+    expect(decoded.externalId).toBe(plain.externalId);
     for (const [encoded, expected] of [
       [String.raw`' + 'BOOK\'S + SHOP' + '' + '`, "BOOK'S + SHOP"],
       [String.raw`' + "BOOK 'quoted'" + ' \\ shop' + '`, "BOOK 'quoted' \\ shop"],
