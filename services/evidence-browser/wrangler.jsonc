@@ -1,15 +1,16 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "kogane-evidence-browser",
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
   "main": "src/worker.ts",
   "compatibility_date": "2026-09-05",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": false,
+  "workers_dev": true,
   "preview_urls": false,
   "vars": {
     "EVIDENCE_SOURCE_ID": "sony-bank",
-    "ACCESS_ISSUER": "",
-    "ACCESS_AUDIENCE": ""
+    "ACCESS_ISSUER": "https://risu729.cloudflareaccess.com",
+    "ACCESS_AUDIENCE": "20cc9cb6173e2755bc3ffd5f43a9adf45b0c2ad8451a1b2d330cc2b75f0d85c8"
   },
   "assets": {
     "directory": "../../poc/observation-pipeline/web/dist-evidence",
