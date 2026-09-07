@@ -682,7 +682,7 @@ function normalizeHtml(bytes: Uint8Array, dataset: string): Uint8Array {
   ) {
     invalid("artifact_html_document_invalid");
   }
-  if (!/MyJCB/iu.test(html) || !/details_inquiry/iu.test(html)) {
+  if (!/MyJCB/iu.test(html)) {
     invalid("artifact_html_surface_invalid");
   }
   if (
@@ -701,13 +701,14 @@ function normalizeHtml(bytes: Uint8Array, dataset: string): Uint8Array {
   )) {
     if (match[1]?.trim() !== "[redacted]") invalid("artifact_html_textarea_redaction_invalid");
   }
-  if (
-    dataset === "credit-menu" &&
-    (!/\bdetailMonth\b/u.test(html) || !/\bgeneralJsonShikibetuId\b/u.test(html))
-  ) {
+  if (dataset === "credit-menu" && !/\bgeneralJsonShikibetuId\b/u.test(html)) {
     invalid("artifact_credit_menu_semantics_invalid");
   }
-  if (dataset === "credit-detail" && !/\/iss-pc\/member\/details_inquiry\//u.test(html)) {
+  if (
+    dataset === "credit-detail" &&
+    !/\/iss-pc\/member\/details_inquiry\/|\bdetail-list-01\b/u.test(html) &&
+    !(/ご利用/u.test(html) && /お支払い/u.test(html) && /明細/u.test(html))
+  ) {
     invalid("artifact_credit_detail_semantics_invalid");
   }
   if (dataset === "debit-menu" && !/debitDetailMenu/iu.test(html)) {
@@ -911,6 +912,9 @@ function validateLedger(bytes: Uint8Array, artifact: MyJcbArtifactManifest): voi
     ) {
       invalid("artifact_ledger_summary_cells_invalid");
     }
+    if ([row.summaryCells[2], row.summaryCells[3]].filter(isJpyDisplay).length !== 1) {
+      invalid("artifact_ledger_amount_cell_invalid");
+    }
     const expanded = record(row.expanded, "artifact_ledger_expanded_invalid");
     if (
       Object.keys(expanded).some((key) => !allowedExpanded.has(key)) ||
@@ -919,6 +923,16 @@ function validateLedger(bytes: Uint8Array, artifact: MyJcbArtifactManifest): voi
       invalid("artifact_ledger_expanded_invalid");
     }
   }
+}
+
+function isJpyDisplay(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const normalized = value
+    .normalize("NFKC")
+    .replace(/\s+/gu, "")
+    .replace(/^[¥\\]/u, "")
+    .replace(/円$/u, "");
+  return /^-?(?:0|[1-9]\d*|[1-9]\d{0,2}(?:,\d{3})+)$/u.test(normalized);
 }
 
 function validateDiscovery(bytes: Uint8Array, connection: MyJcbConnection): void {

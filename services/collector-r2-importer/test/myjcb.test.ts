@@ -360,6 +360,63 @@ describe("MyJCB R2 importer", () => {
     expect(result.status).toBe("deferred");
   });
 
+  test("accepts a redacted credit menu whose navigation markers were intentionally removed", async () => {
+    const bucket = new FakeBucket();
+    await storeSuccessRun(bucket);
+    const key = `${PREFIX}primary/credit-menu.html`;
+    const redacted = encode(
+      '<?xml version="1.0" encoding="UTF-8"?><html><body>MyJCB <input name="generalJsonShikibetuId" value="[redacted]"></body></html>',
+    );
+    const original = bucket.objects.get(key)!;
+    bucket.objects.set(
+      key,
+      await stored(redacted, original.contentType, {
+        ...original.customMetadata,
+        sha256: await sha256Hex(redacted),
+      }),
+    );
+    await rewriteArtifactHash(bucket, key, redacted);
+    await expect(
+      validateMyJcbRun(bucket as unknown as R2Bucket, MANIFEST_KEY),
+    ).resolves.toMatchObject({ artifacts: expect.any(Array) });
+
+    const missingDiscriminator = encode(
+      '<?xml version="1.0" encoding="UTF-8"?><html><body>MyJCB menu</body></html>',
+    );
+    bucket.objects.set(
+      key,
+      await stored(missingDiscriminator, original.contentType, {
+        ...original.customMetadata,
+        sha256: await sha256Hex(missingDiscriminator),
+      }),
+    );
+    await rewriteArtifactHash(bucket, key, missingDiscriminator);
+    await expect(validateMyJcbRun(bucket as unknown as R2Bucket, MANIFEST_KEY)).rejects.toThrow(
+      "artifact_credit_menu_semantics_invalid",
+    );
+  });
+
+  test("accepts a redacted credit detail identified by its retained provider labels", async () => {
+    const bucket = new FakeBucket();
+    await storeSuccessRun(bucket);
+    const key = `${PREFIX}primary/credit-detail-00.html`;
+    const redacted = encode(
+      '<?xml version="1.0" encoding="UTF-8"?><html><body>MyJCB ご利用明細 お支払い</body></html>',
+    );
+    const original = bucket.objects.get(key)!;
+    bucket.objects.set(
+      key,
+      await stored(redacted, original.contentType, {
+        ...original.customMetadata,
+        sha256: await sha256Hex(redacted),
+      }),
+    );
+    await rewriteArtifactHash(bucket, key, redacted);
+    await expect(
+      validateMyJcbRun(bucket as unknown as R2Bucket, MANIFEST_KEY),
+    ).resolves.toMatchObject({ artifacts: expect.any(Array) });
+  });
+
   test("rejects prefix, metadata, and semantic drift before creating central state", async () => {
     for (const mutate of [
       async (bucket: FakeBucket) => {

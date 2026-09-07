@@ -13,6 +13,12 @@ export interface ArtifactMeta {
   /** Number of collector failures recorded by the owning fetch run. */
   runFailureCount: number;
   dataset: string | null;
+  /** Run-relative collector artifact key, when the source manifest declares one. */
+  artifactKey?: string | null;
+  /** Provider/collector statement state attached to this specific artifact. */
+  statementState?: string | null;
+  /** Provider statement period attached to this specific artifact. */
+  period?: string | null;
   url: string | null;
   mime: string;
   fetchedAt: string;

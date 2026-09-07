@@ -75,24 +75,27 @@ transaction / balance / position / valuation observations   layer B
 evidence browser (React client in web/, served by serve.ts)
 ```
 
-Fourteen parsers are registered against shapes the collectors already produce:
+Seventeen parsers are registered against shapes the collectors already produce:
 
-| Parser                        | Artifact                                           | Emits                                        |
-| ----------------------------- | -------------------------------------------------- | -------------------------------------------- |
-| `sbi-domestic-cash-positions` | SBI `domestic-cash-positions`                      | deposit-type-scoped positions and valuations |
-| `sbi-account-assets-current`  | SBI `account-assets-current`                       | provider valuations by source view/category  |
-| `sbi-yen-detail-history`      | SBI `yen-detail-history`                           | transactions                                 |
-| `sbi-domestic-trade-records`  | SBI `domestic-trade-records`                       | transactions                                 |
-| `sbi-foreign-trade-records`   | SBI `foreign-trade-records`                        | transactions                                 |
-| `sbi-foreign-cash-positions`  | SBI `foreign-cash-positions`                       | positions, provider valuations               |
-| `sbi-foreign-cash-balances`   | SBI `foreign-cash-balances`                        | balances                                     |
-| `sbi-vc-cash-balances`        | SBI VC Trade `cash-balances`                       | balances                                     |
-| `sbi-vc-account-margin`       | SBI VC Trade `account-margin`                      | balances                                     |
-| `sbi-vc-position-summary`     | SBI VC Trade `position-summary`                    | positions                                    |
-| `sbi-vc-executions`           | SBI VC Trade recent and historical execution pages | transactions                                 |
-| `sbi-vc-cashflows`            | SBI VC Trade historical cashflow pages             | transactions, balances                       |
-| `paypay-csv`                  | PayPay consumer CSV export                         | transactions                                 |
-| `mobile-suica-sf-history`     | Mobile Suica `sf-history`                          | transactions, post-row balances              |
+| Parser                              | Artifact                                           | Emits                                        |
+| ----------------------------------- | -------------------------------------------------- | -------------------------------------------- |
+| `sbi-domestic-cash-positions`       | SBI `domestic-cash-positions`                      | deposit-type-scoped positions and valuations |
+| `sbi-account-assets-current`        | SBI `account-assets-current`                       | provider valuations by source view/category  |
+| `sbi-yen-detail-history`            | SBI `yen-detail-history`                           | transactions                                 |
+| `sbi-domestic-trade-records`        | SBI `domestic-trade-records`                       | transactions                                 |
+| `sbi-foreign-trade-records`         | SBI `foreign-trade-records`                        | transactions                                 |
+| `sbi-foreign-cash-positions`        | SBI `foreign-cash-positions`                       | positions, provider valuations               |
+| `sbi-foreign-cash-balances`         | SBI `foreign-cash-balances`                        | balances                                     |
+| `sbi-vc-cash-balances`              | SBI VC Trade `cash-balances`                       | balances                                     |
+| `sbi-vc-account-margin`             | SBI VC Trade `account-margin`                      | balances                                     |
+| `sbi-vc-position-summary`           | SBI VC Trade `position-summary`                    | positions                                    |
+| `sbi-vc-executions`                 | SBI VC Trade recent and historical execution pages | transactions                                 |
+| `sbi-vc-cashflows`                  | SBI VC Trade historical cashflow pages             | transactions, balances                       |
+| `myjcb-credit-ledger`               | MyJCB normalized credit ledger                     | transactions                                 |
+| `myjcb-credit-past-month-balances`  | MyJCB past-month JSON-RPC response                 | statement payment metrics                    |
+| `myjcb-canonical-evidence-boundary` | MyJCB sanitized menu/detail HTML and discovery     | no financial observations                    |
+| `paypay-csv`                        | PayPay consumer CSV export                         | transactions                                 |
+| `mobile-suica-sf-history`           | Mobile Suica `sf-history`                          | transactions, post-row balances              |
 
 Mobile Suica deliberately has one canonical Layer-B route. The collector's
 Shift-JIS `sf-history-html` is provider evidence and `collection-summary` is
@@ -209,6 +212,21 @@ identifiers were not emitted. The observed runs did not prove non-empty
 position/recent records, multi-page history, or cross-view overlap; those
 remain synthetic-test coverage.
 
+The MyJCB fixture is a complete anonymous `myjcb-worker-poc-v1` success run,
+including connection/cardinality metadata, repeated monthly dataset names,
+artifact keys, media types, statement state, periods, byte counts, and hashes.
+Only `credit-ledger` and displayed `credit-past-months` totals are financial
+Layer-B inputs. Sanitized menu/detail HTML and discovery are validated as
+evidence-only, so the HTML and its collector-derived ledger cannot double
+count a purchase. CSV/PDF/OFX and debit artifacts remain unregistered because
+production R2 has not established their contracts.
+
+`services/collector-r2-importer/scripts/audit-myjcb-r2.sh` is a local,
+remote-read-only canary. It applies the source importer validator, then every
+registered MyJCB parser, and returns only aggregate counts and shape booleans.
+It never emits object keys, hashes, bodies, provider values, account IDs, or
+financial values and contains no deploy or R2 mutation path.
+
 Artifacts now carry their parent fetch-run outcome and failure count. A
 non-success run is retained as evidence but is blocked before every parser,
 and current queries independently require a successful, failure-free parent.
@@ -218,5 +236,6 @@ child-row drift rejects the whole artifact. For SBI VC executions, raw Layer B
 history keeps both recent and historical source views, while the current query
 prefers the historical record when the same composite execution identity is
 present in both.
-The schema migrates existing v2 stores in place; old non-success rows are
-conservatively backfilled with one failure.
+The schema migrates existing v2 and v3 stores in place; old non-success rows
+are conservatively backfilled with one failure, while pre-v4 artifacts receive
+nullable collector-key and statement metadata.

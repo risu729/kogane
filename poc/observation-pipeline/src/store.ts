@@ -18,11 +18,12 @@ export interface Store {
 /**
  * Bumped whenever schema.sql changes shape. The DDL uses IF NOT EXISTS, so
  * without this check an existing database would silently keep an older shape
- * and fail later at an unrelated INSERT. Version 2 has an explicit compatible
- * migration because fetch-run outcome is required to interpret existing
- * observations; other unknown versions remain fail-closed.
+ * and fail later at an unrelated INSERT. Versions 2 and 3 have explicit
+ * compatible migrations because fetch-run outcome and artifact-level collector identity
+ * are required to interpret observations; other unknown versions remain
+ * fail-closed.
  */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 export function openStore(stateDir?: string): Store {
   const root = stateDir ?? join(POC_ROOT, "state");
@@ -31,26 +32,40 @@ export function openStore(stateDir?: string): Store {
   const db = new Database(join(root, "kogane-poc.sqlite"), { create: true });
   db.exec("PRAGMA foreign_keys = ON;");
   const found = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-  if (found !== 0 && found !== 2 && found !== SCHEMA_VERSION) {
+  if (found !== 0 && found !== 2 && found !== 3 && found !== SCHEMA_VERSION) {
     throw new Error(
       `${root} was created with schema version ${found}, but this build expects ${SCHEMA_VERSION}. ` +
-        "The PoC has no migrations: delete the state directory and re-ingest.",
+        "Only schema versions 2 and 3 have in-place migrations; export or re-ingest other stores.",
     );
   }
-  if (found === 2) {
+  if (found === 2 || found === 3) {
     db.transaction(() => {
-      db.exec(
-        "ALTER TABLE fetch_runs ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0 CHECK (failure_count >= 0);",
-      );
-      // v2 did not persist failure evidence. Preserve the conservative outcome:
-      // every known non-success run has at least one failure.
-      db.exec("UPDATE fetch_runs SET failure_count = 1 WHERE status <> 'success';");
+      if (found === 2) {
+        db.exec(
+          "ALTER TABLE fetch_runs ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0 CHECK (failure_count >= 0);",
+        );
+        // v2 did not persist failure evidence. Preserve the conservative outcome:
+        // every known non-success run has at least one failure.
+        db.exec("UPDATE fetch_runs SET failure_count = 1 WHERE status <> 'success';");
+      }
+      const hasArtifacts = storeTableExists(db, "fetch_artifacts");
+      if (hasArtifacts) {
+        db.exec("ALTER TABLE fetch_artifacts ADD COLUMN artifact_key TEXT;");
+        db.exec("ALTER TABLE fetch_artifacts ADD COLUMN statement_state TEXT;");
+        db.exec("ALTER TABLE fetch_artifacts ADD COLUMN period TEXT;");
+      }
       db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     })();
   }
   db.exec(readFileSync(join(POC_ROOT, "schema.sql"), "utf8"));
   if (found === 0) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   return { db, blobDir };
+}
+
+function storeTableExists(db: Database, name: string): boolean {
+  return (
+    db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1").get(name) !== null
+  );
 }
 
 export function sha256Hex(bytes: Uint8Array): string {
@@ -156,6 +171,9 @@ export function insertFetchArtifact(
     fetchRunId: number;
     sourceId: string;
     dataset?: string;
+    artifactKey?: string;
+    statementState?: string;
+    period?: string;
     url?: string;
     method?: string;
     httpStatus?: number;
@@ -167,13 +185,17 @@ export function insertFetchArtifact(
   const result = store.db
     .query(
       `INSERT INTO fetch_artifacts
-         (fetch_run_id, source_id, dataset, url, method, http_status, mime, fetched_at, sha256)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+         (fetch_run_id, source_id, dataset, artifact_key, statement_state, period,
+          url, method, http_status, mime, fetched_at, sha256)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
     )
     .run(
       artifact.fetchRunId,
       artifact.sourceId,
       artifact.dataset ?? null,
+      artifact.artifactKey ?? null,
+      artifact.statementState ?? null,
+      artifact.period ?? null,
       artifact.url ?? null,
       artifact.method ?? null,
       artifact.httpStatus ?? null,
@@ -189,7 +211,8 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
     .query(
       `SELECT a.id, a.source_id, f.status AS run_status,
               f.failure_count AS run_failure_count,
-              a.dataset, a.url, a.mime, a.fetched_at, a.sha256
+              a.dataset, a.artifact_key, a.statement_state, a.period,
+              a.url, a.mime, a.fetched_at, a.sha256
        FROM fetch_artifacts a
        JOIN fetch_runs f ON f.id = a.fetch_run_id
        ORDER BY a.id`,
@@ -200,6 +223,9 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
     run_status: "success" | "partial" | "failed";
     run_failure_count: number;
     dataset: string | null;
+    artifact_key: string | null;
+    statement_state: string | null;
+    period: string | null;
     url: string | null;
     mime: string;
     fetched_at: string;
@@ -211,6 +237,9 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
     runStatus: row.run_status,
     runFailureCount: row.run_failure_count,
     dataset: row.dataset,
+    artifactKey: row.artifact_key,
+    statementState: row.statement_state,
+    period: row.period,
     url: row.url,
     mime: row.mime,
     fetchedAt: row.fetched_at,

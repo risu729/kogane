@@ -80,7 +80,7 @@ bytes plus artifact metadata to typed observations. Its obligations:
    hash — never the bytes. Selection is therefore a database query in
    production, and a parser cannot sniff its way into a payload it was not
    registered for. In the PoC `accepts` is exact equality on `sourceId`
-   plus `dataset` for the SBI and SBI VC Trade parsers, exact
+   plus `dataset` for the SBI, SBI VC Trade, and MyJCB parsers, exact
    source/dataset/MIME for Mobile Suica, and `sourceId` plus `mime`
    for `paypay-csv`, whose artifact arrives through the file-export path
    with no dataset at all.
@@ -265,6 +265,60 @@ explicitly contain a recognized `status` and a `failures` array; absence is not
 interpreted as success. Legacy database compatibility is handled by the schema
 migration instead of weakening this import boundary.
 
+### MyJCB source-separated parsing
+
+MyJCB has three Layer B routes. `myjcb-credit-ledger` is the only route that
+emits transactions. `myjcb-credit-past-month-balances` emits the provider's
+displayed monthly statement-payment amount as a balance-like metric, not as an
+account cash balance. `myjcb-canonical-evidence-boundary` strictly validates
+sanitized credit menu/detail HTML and discovery JSON but emits nothing. This
+makes normalized ledger the canonical transaction source and prevents a
+second interpretation of the same provider HTML.
+
+Every artifact is bound to its manifest-relative
+`<connection-id>/<filename>`, statement state, and period before bytes are
+parsed. The connection id scopes `myjcb:<connection-id>:root`; card numbers,
+MyJCB IDs, names, and product labels are never join keys. The normalized ledger
+currently contains no stable subcard identity, so its rows explicitly remain
+root-statement aggregates rather than pretending to identify family, ETC, or
+QUICPay cards.
+
+Production rows demonstrated two details that synthetic assumptions could not
+safely settle: a date may contain internal Unicode whitespace, and the payment
+type and exact JPY display may occupy either summary cells 2 and 3. Layer B
+removes whitespace only for strict `YYYY/MM/DD` calendar parsing and requires
+exactly one of those two cells to parse as a bounded integral JPY display. It
+records both selected cell indexes in `extra`. Provider statement amounts use
+credit-liability-positive/refund-negative notation, so transaction observations
+invert the sign to outflow-negative/inflow-positive and preserve the original
+row beside the declared sign convention.
+
+Stable transaction identity hashes the normalized row together with period and
+statement state, then adds a deterministic same-artifact occurrence counter.
+The row locator remains its exact JSON index. Current transactions select the
+newest successful artifact for each confirmed period and the newest successful
+unconfirmed snapshot overall. This both collapses repeated collection runs and
+removes a pending row that disappears from a later complete snapshot, while
+the append-only observations remain available as evidence.
+
+Available/displayed past-month entries require unique `detailMonth` values and
+retain the JSON-RPC item and period in provenance; unavailable or hidden values
+do not become invented zeroes. Their provider settlement label is normalized to
+year-month precision in `asOf`, so the latest-balance view selects the newest
+statement rather than whichever array entry happened to be inserted last. A
+Layer-A-compatible relative fallback such as `detailMonth-N` remains an
+observation with a warning and no invented calendar value. The current view
+first selects the latest complete artifact and then its lowest provider
+`detailMonth`, so absolute and relative labels cannot mis-rank one another.
+
+The read-only aggregate canary observed 184 objects and 24 strict-valid
+manifests: 8 success and 16 failed. All success artifacts routed exactly once
+and produced 181 transaction observations and 16 statement metrics, without
+exposing keys, hashes, bodies, identifiers, or financial values. Non-empty
+ledger and displayed past-month shapes are therefore observed. Multiple
+connections, CSV/PDF/OFX, and debit were not observed, so they are not claimed
+as production-validated Layer B routes.
+
 ### How a parser becomes live
 
 `src/parsers/registry.ts` exports one flat array:
@@ -284,6 +338,9 @@ export const PARSERS: readonly Parser[] = [
   sbiVcPositionSummary,
   sbiVcExecutions,
   sbiVcCashflows,
+  myJcbCreditLedger,
+  myJcbPastMonthBalances,
+  myJcbEvidenceOnly,
   paypayCsv,
 ];
 ```

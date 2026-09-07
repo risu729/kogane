@@ -91,6 +91,12 @@ Importerは中央runを作る前に、manifestのexact schema、日付とUUIDを
 
 本文、値、object key、個別hash、secretを表示せず、読み取り専用bindingで件数とshapeだけを監査した。22 manifests、142 objectsで、statusはsuccess 6 / failed 16、triggerはmanual 17 / scheduled 5だった。6 success runsのdata artifactは計120件で、内訳はcredit menu 6、past-month JSON 6、credit detail HTML 66、parsed ledger 36、discovery 6である。manifest/artifactのkey set、prefix、run ID、件数、size、checksum、metadataに不一致はなかった。全HTMLはXML/HTML/MyJCB/detail markerを持ち、入力値はすべてredact済みだった。最終validatorを同じread-only bindingで全22 manifestsへ適用し、22件すべてがstrict source validationを通過、72 HTML artifactすべてが中央用v2 bytesへ決定的に変換されることを確認した。6 success runsのpayload fingerprintは互いに異なり、内容重複を根拠にrunを潰せないことも確認した。legacyを含むfailure/blockerの自由文は中央manifestへコピーせず、connection statusとoperationから固定codeへ置換する。
 
+### Layer B aggregate canary（2026-09-07）
+
+`wrangler.audit-myjcb.jsonc`と`scripts/audit-myjcb-r2.sh`は、localhost上の一時Workerからproduction bucketをread-only bindingで1 objectずつ走査し、source validator、中央normalizer、Layer B registryを同じ順で実行する。応答は件数、status、safeな固定failure stage、nonempty等のbooleanだけに制限し、object key、hash、body、identifier、merchant、日付、金融値、secretを返さない。source R2へのwrite/delete methodは持たず、deployも行わない。
+
+このcanaryで184 objects / 24 manifestsを監査し、failed manifest 0、status success 8 / partial 0 / failed 16だった。8 success manifestsの全artifactがexactly one parserへrouteされ、parse failure 0、集計はtransaction 181 / statement metric 16だった。nonempty ledgerとdisplayed past-monthを確認したが、multiple connectionsは未観測である。sanitizerがnavigation markerを意図的に落とすため、中央用credit menuは残存するMyJCB discriminator、credit detailは残存route markerまたはprovider label/componentで判別する。いずれもactive surfaceや個別値を復元しない。
+
 ## V Pointの境界
 
 V Pointはprivate R2の`raw/v-point/`を中央canonical source `v-point`として取り込む。manifest v1/v2、日付とrun IDを含むkey、完全一致metadata、JSON media type、R2 native checksum、宣言SHA-256とbyte size、prefix内の完全inventoryを検証してから中央runを作る。残高、SMFG内訳、履歴page、collection summaryのJSON shapeを未知fieldも含めてfail closedで検証し、manifest件数、summary件数、全pageのtotalと30行境界を相互照合する。R2保存失敗は期待datasetとの正確な補集合でなければ受理しない。
