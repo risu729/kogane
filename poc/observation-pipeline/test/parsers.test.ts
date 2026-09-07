@@ -11,6 +11,7 @@ import {
 import { sbiDomesticTradeRecords } from "../src/parsers/sbi-domestic-trade-records.ts";
 import { sbiForeignCashPositions } from "../src/parsers/sbi-foreign-cash-positions.ts";
 import { sbiForeignCashBalances } from "../src/parsers/sbi-foreign-cash-balances.ts";
+import { sbiYenDetailHistory } from "../src/parsers/sbi-yen-detail-history.ts";
 import { paypayCsv } from "../src/parsers/paypay-csv.ts";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
@@ -171,6 +172,68 @@ describe("sbi-domestic-trade-records", () => {
 
   test("wrong shape throws (parse run becomes an error)", () => {
     expect(() => sbiDomesticTradeRecords.parse(new TextEncoder().encode("{}"), meta)).toThrow();
+  });
+});
+
+describe("sbi-yen-detail-history", () => {
+  const bytes = readFileSync(join(SBI_RUN, "yen-detail-history.json"));
+  const meta = artifact({ dataset: "yen-detail-history" });
+
+  test("parses the complete bundle and locates rows through page and record indexes", () => {
+    const result = sbiYenDetailHistory.parse(bytes, meta);
+    expect(result.warnings).toEqual([]);
+    expect(result.observations).toHaveLength(2);
+    const first = result.observations[0]!;
+    if (first.kind !== "transaction") throw new Error("expected transaction");
+    expect(first).toMatchObject({
+      externalId: "sbi-yen-detail:101",
+      amountMinor: 1500,
+      amountText: "1500",
+      amountScale: 0,
+      currency: "JPY",
+      description: "テスト入金",
+      asOf: "2026-08-19",
+      rawLocator: "json:$.pages[0].depositRecordList[0]",
+    });
+    expect(first.extra).toMatchObject({
+      did: 101,
+      payDepKbn: "入金",
+      _kogane: { bundlePageIndex: 0, providerPageNumber: 1 },
+    });
+  });
+
+  test("rejects legacy, incomplete, duplicate, and extra-page bundles", () => {
+    const valid = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    const pages = valid.pages as Array<Record<string, unknown>>;
+    const page = pages[0]!;
+    expect(() =>
+      sbiYenDetailHistory.parse(new TextEncoder().encode(JSON.stringify(page)), meta),
+    ).toThrow(/fields changed/u);
+    for (const mutated of [
+      { ...valid, complete: false },
+      { ...valid, pageLimitExceeded: true },
+      { ...valid, pageCount: 2 },
+      { ...valid, totalCount: 3 },
+      {
+        ...valid,
+        pages: [
+          {
+            ...page,
+            depositRecordList: [
+              ...(page.depositRecordList as unknown[]),
+              (page.depositRecordList as unknown[])[0],
+            ],
+            totalCount: 3,
+          },
+        ],
+        totalCount: 3,
+      },
+      { ...valid, unexpected: true },
+    ]) {
+      expect(() =>
+        sbiYenDetailHistory.parse(new TextEncoder().encode(JSON.stringify(mutated)), meta),
+      ).toThrow();
+    }
   });
 });
 
@@ -459,6 +522,11 @@ describe("determinism", () => {
         parser: sbiForeignCashBalances,
         path: join(SBI_RUN, "foreign-cash-balances.json"),
         meta: artifact({ dataset: "foreign-cash-balances" }),
+      },
+      {
+        parser: sbiYenDetailHistory,
+        path: join(SBI_RUN, "yen-detail-history.json"),
+        meta: artifact({ dataset: "yen-detail-history" }),
       },
       {
         parser: paypayCsv,

@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "sbi-yen-detail-history-bundle-v1",
+  "pageCount": 1,
+  "pageSize": 100,
+  "totalCount": 2,
+  "complete": true,
+  "pageLimitExceeded": false,
+  "rowLimitExceeded": false,
+  "pages": [
+    {
+      "depositRecordList": [
+        {
+          "detailKbn": "振込入金",
+          "did": 101,
+          "dispAbstract": "テスト入金",
+          "payAmount": "1,500",
+          "payDepDate": "2026/08/19",
+          "payDepKbn": "入金"
+        },
+        {
+          "detailKbn": "振替出金",
+          "did": 102,
+          "dispAbstract": "テスト出金",
+          "payAmount": "500",
+          "payDepDate": "2026/08/20",
+          "payDepKbn": "出金"
+        }
+      ],
+      "detailsConditions": [],
+      "exceededMaxCount": false,
+      "isExceededMaxCount": false,
+      "nextBusinessDate": "20260821",
+      "pageCount": 1,
+      "pageNumber": 1,
+      "pageSize": 100,
+      "totalCount": 2,
+      "totalDepositAmount": "1,500",
+      "totalDepositCount": "1",
+      "totalPaymentAmount": "500",
+      "totalPaymentCount": "1",
+      "totalTransDepositAmount": "0",
+      "totalTransDepositCount": "0",
+      "totalTransPaymentAmount": "0",
+      "totalTransPaymentCount": "0"
+    }
+  ]
+}

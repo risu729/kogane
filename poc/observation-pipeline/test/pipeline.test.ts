@@ -25,12 +25,12 @@ describe("ingestion", () => {
     const source = { id: "sbi-securities", provider: "SBI Securities" };
     const first = ingestRunDirectory(store, SBI_RUN, source);
     expect(first.skippedExisting).toBe(false);
-    expect(first.artifacts).toBe(3);
+    expect(first.artifacts).toBe(4);
     const second = ingestRunDirectory(store, SBI_RUN, source);
     expect(second.skippedExisting).toBe(true);
     expect(count(store, "fetch_runs")).toBe(1);
-    expect(count(store, "fetch_artifacts")).toBe(3);
-    expect(count(store, "raw_objects")).toBe(3);
+    expect(count(store, "fetch_artifacts")).toBe(4);
+    expect(count(store, "raw_objects")).toBe(4);
   });
 
   test("identical bytes under different names store one blob", () => {

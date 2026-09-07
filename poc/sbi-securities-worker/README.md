@@ -11,7 +11,7 @@ SBI証券の保存済みパスキーから毎回新しいsessionを作り、国�
 ## 現在の範囲
 
 - 国内株アプリ: MTS sessionとread-only TR code `F2631`による国内現物・預り金payload
-- メインサイト: My資産の現在評価、円貨入出金明細、国内株の90日以下の履歴
+- メインサイト: My資産の現在評価、円貨入出金明細、国内株の90日以下の履歴。円貨明細はproviderの全page metadataと全fieldをpage bundleに保持し、全件性を検証してからartifact化する
 - 外国株式アプリ: 米国株現物、USD外貨預り金、90日以下の取引履歴
 - 実行: Cloudflare Cron Triggerから毎日21:00 UTC（日本時間06:00）に国内・外国を1 invocationで直列収集、または認証付き手動trigger
 - 保存: private R2をdurable outboxとして維持し、manifest確定後に内部Service Binding経由で中央raw-evidenceへ転送する。collector自身はD1を使用しない
@@ -78,6 +78,8 @@ raw/sbi-securities/YYYY/MM/DD/<run-id>/manifest.json
 ```
 
 manifestには期間、成功・部分成功・失敗、artifactのhashとbyte数、秘密を除いた短い失敗分類を記録する。access token、SID、Cookie、MTSのsession header、口座番号は保存しない。
+
+`yen-detail-history.json`は`sbi-yen-detail-history-bundle-v1`で、bundle側の件数・完了・上限flagと、`pages[]`内のprovider responseを保持する。連続した`pageNumber`、一定の`pageCount`／`pageSize`／`totalCount`、全row件数、`did`重複、provider／collector上限flagを検証する。現時点で観測済みなのはread-only `GET /banking/api/yen/detail/init`だけで、次page requestのendpoint／parameter契約は未確認である。従ってinitが複数pageまたは未収集rowを示すrunは、推測したrequestを送らず`main-site` failureとして閉じ、欠落した履歴を成功artifactとして保存しない。
 
 保存済みrunを中央へ移行する場合は、CloudflareのWorker呼び出し上限を避けるため1 top-level requestにつき1 R2 objectを走査し、cursorで反復する。
 

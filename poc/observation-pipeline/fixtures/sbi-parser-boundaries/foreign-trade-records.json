@@ -1,0 +1,27 @@
+{
+  "pages": [
+    {
+      "checkJrNisaOpen": {"opened": false},
+      "listTradeRecords": {
+        "page": {"hasNextPage": false},
+        "tradeRecords": [
+          {
+            "securities": {"countryCode":"US","securitiesCode":"SYN","securitiesName":"Synthetic Corporation","securitiesShortName":"Synthetic","ric":"SYN.O"},
+            "tradeRecordTypeCode":"BUY",
+            "tradeCurrencyCode":"USD",
+            "listedSecuritiesStatus":"LISTED",
+            "orderPriceKindCode":"LIMIT",
+            "specificAccountCode":"SPECIFIC",
+            "settlementCurrencyCode":"USD",
+            "amount":"120.50",
+            "quantity":"10",
+            "price":"12.05",
+            "tradeDate":"2026-08-18",
+            "valueDate":"2026-08-20",
+            "marginCloseLimitType":""
+          }
+        ]
+      }
+    }
+  ]
+}

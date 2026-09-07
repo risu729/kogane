@@ -1,0 +1,15 @@
+{
+  "summary": {"acquisitionCost": 140000, "assetsErrorType": null, "monthOnMonth": 10000, "monthOnMonthRatio": 6.67, "netChange": 1500, "percentChange": 1, "profitLoss": 11000, "profitLossRate": 7.91, "valuation": 151000},
+  "summaryWithoutDeposit": {"acquisitionCost": 100000, "assetsErrorType": null, "monthOnMonth": 10000, "monthOnMonthRatio": 10, "netChange": 1500, "percentChange": 1.5, "profitLoss": 11000, "profitLossRate": 11, "valuation": 111000},
+  "summaryWithoutIdeco": null,
+  "summaryWithoutDepositAndIdeco": null,
+  "summaryDetails": [
+    {"acquisitionCost": 100000, "assetsErrorType": null, "category": "DOMESTIC_STOCK", "compositionRatio": 73.51, "monthOnMonth": 10000, "monthOnMonthRatio": 10, "netChange": 1500, "percentChange": 1.5, "profitLoss": 11000, "profitLossRate": 11, "valuation": 111000},
+    {"acquisitionCost": 40000, "assetsErrorType": null, "category": "DEPOSIT", "compositionRatio": 26.49, "monthOnMonth": 0, "monthOnMonthRatio": 0, "netChange": 0, "percentChange": 0, "profitLoss": null, "profitLossRate": null, "valuation": 40000}
+  ],
+  "summaryDetailsWithoutDeposit": [
+    {"acquisitionCost": 100000, "assetsErrorType": null, "category": "DOMESTIC_STOCK", "compositionRatio": 100, "monthOnMonth": 10000, "monthOnMonthRatio": 10, "netChange": 1500, "percentChange": 1.5, "profitLoss": 11000, "profitLossRate": 11, "valuation": 111000}
+  ],
+  "summaryDetailsWithoutIdeco": [],
+  "summaryDetailsWithoutDepositAndIdeco": []
+}

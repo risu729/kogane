@@ -71,7 +71,7 @@ bytes plus artifact metadata to typed observations. Its obligations:
 2. Side-effect free. No writes, no network, no filesystem, no clock, no
    randomness, no environment lookups. The only time-like value a parser
    may use is `artifact.fetchedAt`, which is handed to it as data; none of
-   the four current parsers uses even that.
+   the current parsers uses even that.
 3. Named and versioned. `name` and `version` are fields of the parser
    object, and both are recorded on the parse run that carries its output.
 4. Selects from metadata alone. `accepts(artifact)` sees the artifact row
@@ -79,16 +79,19 @@ bytes plus artifact metadata to typed observations. Its obligations:
    hash — never the bytes. Selection is therefore a database query in
    production, and a parser cannot sniff its way into a payload it was not
    registered for. In the PoC `accepts` is exact equality on `sourceId`
-   plus `dataset` for the three SBI parsers, and `sourceId` plus `mime`
+   plus `dataset` for the seven SBI parsers, and `sourceId` plus `mime`
    for `paypay-csv`, whose artifact arrives through the file-export path
    with no dataset at all.
 5. Records a raw locator on every observation. `rawLocator` is mandatory
    in the type and `NOT NULL` in the schema.
 6. Never drops an unrecognized provider field. Everything the source said
    that the typed columns do not model goes into `extra`.
-7. Warns rather than discards, at field granularity. See the field and
-   container rule below, which is not the same rule for both.
-8. Throws only on a wrong-shape artifact. If the payload is not what this
+7. Warns rather than discards at field granularity for the original tolerant
+   parsers. A source-specific strict parser may instead reject an entire
+   artifact when a required field, enum, cardinality, page chain, or envelope
+   drifts; its versioned retryable error run is safer than an incomplete
+   portfolio that looks valid.
+8. Throws on a wrong-shape artifact or a strict source-contract violation. If the payload is not what this
    parser is for, `parse` throws; `runParsers` catches it and records a
    parse run with `status='error'` and the message. A bad artifact never
    crashes a batch and never leaves a half-written parse run.
@@ -151,8 +154,8 @@ there are.
 
 ### What goes in `extra`, and how it is namespaced
 
-The three SBI parsers and `paypay-csv` use three different `extra`
-conventions, and all three are deliberate.
+The SBI parsers and `paypay-csv` use source-appropriate `extra`
+conventions, and those differences are deliberate.
 
 Spread the element. `sbi-domestic-trade-records` and
 `sbi-foreign-cash-positions` put `{ ...record }` into `extra`, so nothing
@@ -197,7 +200,11 @@ in a future payload shows up as a warning rather than as silence.
 
 ```ts
 export const PARSERS: readonly Parser[] = [
+  sbiDomesticCashPositions,
+  sbiAccountAssetsCurrent,
+  sbiYenDetailHistory,
   sbiDomesticTradeRecords,
+  sbiForeignTradeRecords,
   sbiForeignCashPositions,
   sbiForeignCashBalances,
   paypayCsv,
@@ -922,6 +929,7 @@ fixtures/sbi-securities/2026-08-20/run-20260820-210000-poc01/
     domestic-trade-records.json
     foreign-cash-balances.json
     foreign-cash-positions.json
+    yen-detail-history.json
 fixtures/paypay/paypay-transactions-202608.csv
 ```
 
@@ -930,16 +938,43 @@ its R2 layout, and the difference is worth stating so nobody writes an
 importer against the fixture. `poc/sbi-securities-worker` writes to
 `raw/sbi-securities/YYYY/MM/DD/<runId>/` — three date segments and a UUID
 run id — where the fixture uses one date segment and a readable run name.
-The fixture also holds three of the seven datasets the collector emits
-(`account-assets-current`, `yen-detail-history`, `domestic-trade-records`,
-`domestic-cash-positions`, `foreign-cash-positions`,
-`foreign-cash-balances`, `foreign-trade-records`). What _is_ faithful is
+The ingestible demo fixture holds four of the seven datasets the collector emits:
+`yen-detail-history`, `domestic-trade-records`, `foreign-cash-positions`,
+and `foreign-cash-balances`. The other collector datasets are
+`account-assets-current`, `domestic-cash-positions`, and
+`foreign-trade-records`. What _is_ faithful is
 the manifest: it carries the collector's own `schemaVersion`
 `sbi-worker-poc-v1`, one entry per artifact with `dataset`, `key`,
 `sha256`, `bytes` and an optional `window`, and its `key` values spell out
 the real R2 layout. `ingestRunDirectory` reads `<dataset>.json` beside the
 manifest and verifies every hash before writing anything. The PayPay
 fixture is a single CSV, ingested through `ingestFile`.
+
+The remaining three dataset shapes have separate anonymous parser-boundary
+fixtures under `fixtures/sbi-parser-boundaries/`. They deliberately have no
+manifest, object key, or evidence digest. Their contracts were checked with a
+read-only aggregate audit of the live R2 source: only keys, JSON types,
+container shapes, and the fixed-width format were inspected; payload bodies
+and financial values were neither printed nor committed.
+
+`sbi-domestic-cash-positions` decodes the collector's header-stripped F2631
+payload by Shift-JIS byte widths and rejects count/length, market, account-type,
+and display-trend drift. The record-relative `+118`, `+141`, and `+390` bytes
+are the provider's strict `U` / `D` / `F` display trends; they never supply an
+amount sign. Acquisition unit price (`+119..129`), current price
+(`+130..140`), and the later provider `kaitsukePrice` (`+299..314`) remain
+separate valuation metrics. The observed two-hyphen unit-price placeholder
+is retained as provider context and emits no zero-valued valuation. The
+deposit-type code is part of `sourceAccount`,
+so the same security held in specific, general, and NISA accounts cannot collide
+when positions are joined to valuations. `sbi-account-assets-current` keeps each
+provider summary view/category distinct rather than merging similar totals.
+`sbi-yen-detail-history` uses the provider `did` as its transaction identity and
+refuses truncated or count-inconsistent pages. `sbi-foreign-trade-records` validates the complete
+GraphQL page chain and assigns a deterministic canonical-row fingerprint plus
+occurrence ordinal because the provider supplies no transaction id; identical
+legitimate trades remain distinct, while rerunning the same parser version is
+still idempotent at parse-run level.
 
 The fixtures are synthetic. The repository is public and every real
 payload is personal financial data, so committing captures is not an
