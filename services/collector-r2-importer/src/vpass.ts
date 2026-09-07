@@ -14,7 +14,8 @@ const MAX_RECORD_BYTES = 2 * 1024 * 1024;
 const MAX_SOURCE_OBJECT_BYTES = 8 * 1024 * 1024;
 const MAX_ARTIFACTS = 512;
 const MAX_PREFIX_OBJECTS = MAX_ARTIFACTS + 1;
-export const VPASS_TRANSFER_CHUNK_SIZE = 5;
+export const VPASS_INITIAL_TRANSFER_CHUNK_SIZE = 5;
+export const VPASS_RESUME_TRANSFER_CHUNK_SIZE = 12;
 const TRANSFER_TOKEN_PREFIX = "vpass-transfer-v2";
 const SHA256 = /^[0-9a-f]{64}$/u;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
@@ -204,7 +205,14 @@ export async function importVpassRun(options: {
     if (inventorySha256 !== state.inventorySha256) {
       throw new ImportError(409, "transfer_inventory_mismatch");
     }
-    const end = Math.min(state.offset + VPASS_TRANSFER_CHUNK_SIZE, plans.length);
+    // Initialization may catalogue many page groups, so keep its first chunk
+    // conservative. A resumed chunk has no setup calls; 12 artifacts use 24
+    // central calls, leaving four for inventory, both terminal reports, and
+    // seal, plus headroom for the enclosing collector-to-importer invocation.
+    const chunkSize = initialized
+      ? VPASS_INITIAL_TRANSFER_CHUNK_SIZE
+      : VPASS_RESUME_TRANSFER_CHUNK_SIZE;
+    const end = Math.min(state.offset + chunkSize, plans.length);
     const chunkInventory: CentralInventoryItem[] = [];
     for (const plan of plans.slice(state.offset, end)) {
       phase = "object_upload";

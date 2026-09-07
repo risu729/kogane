@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { centralDescriptorSha256 } from "../src/central";
-import { importVpassRun, validateVpassRun } from "../src/vpass";
+import {
+  importVpassRun,
+  VPASS_INITIAL_TRANSFER_CHUNK_SIZE,
+  VPASS_RESUME_TRANSFER_CHUNK_SIZE,
+  validateVpassRun,
+} from "../src/vpass";
 import { backfillVpass } from "../src/worker";
 
 const RUN_ID = "2026-09-05T00-00-00-000Z";
@@ -101,6 +106,7 @@ class FakeCentral {
   readonly runIds = new Map<string, number>();
   readonly terminalReports = new Map<string, string>();
   nextRunId = 1;
+  failNextSeal = false;
 
   fetch = async (request: Request): Promise<Response> => {
     const path = new URL(request.url).pathname;
@@ -147,12 +153,53 @@ class FakeCentral {
       this.terminalReports.set(path, body);
       return Response.json({ reused: previous !== undefined }, { status: previous ? 200 : 201 });
     }
-    if (/\/seal$/u.test(path)) return Response.json({ sealed: true }, { status: 201 });
+    if (/\/seal$/u.test(path)) {
+      if (this.failNextSeal) {
+        this.failNextSeal = false;
+        return Response.json({ error: "fixture_seal_failure" }, { status: 500 });
+      }
+      return Response.json({ sealed: true }, { status: 201 });
+    }
     return Response.json({ ok: true }, { status: 201 });
   };
 }
 
 describe("Vpass R2 importer", () => {
+  test("uses the full safe Service Binding budget only after initialization", () => {
+    expect(VPASS_INITIAL_TRANSFER_CHUNK_SIZE).toBe(5);
+    expect(VPASS_RESUME_TRANSFER_CHUNK_SIZE).toBe(12);
+    expect(VPASS_RESUME_TRANSFER_CHUNK_SIZE * 2 + 4).toBe(28);
+  });
+
+  test("keeps resumed terminal and failure-audit calls below the Worker invocation limit", async () => {
+    const bucket = largeCardSnapshotBucket();
+    const central = new FakeCentral();
+    const first = await importVpassRun(importOptions(bucket, central, CARD_RECORD));
+    expect(first).toMatchObject({ status: "deferred", artifactCount: 17, nextOffset: 5 });
+    if (first.status !== "deferred") throw new Error("expected deferred");
+    const requestsAfterInitialization = central.requests.length;
+    const sealed = await importVpassRun({
+      ...importOptions(bucket, central, CARD_RECORD),
+      continuation: first.continuation,
+    });
+    expect(sealed).toMatchObject({ status: "sealed", artifactCount: 17 });
+    expect(central.requests.length - requestsAfterInitialization).toBe(28);
+
+    const failingCentral = new FakeCentral();
+    const failingFirst = await importVpassRun(importOptions(bucket, failingCentral, CARD_RECORD));
+    if (failingFirst.status !== "deferred") throw new Error("expected deferred");
+    const requestsBeforeFailure = failingCentral.requests.length;
+    failingCentral.failNextSeal = true;
+    await expect(
+      importVpassRun({
+        ...importOptions(bucket, failingCentral, CARD_RECORD),
+        continuation: failingFirst.continuation,
+      }),
+    ).rejects.toThrow();
+    expect(failingCentral.requests.length - requestsBeforeFailure).toBe(29);
+    expect(failingCentral.requests.at(-1)?.path).toMatch(/\/attempts$/u);
+  });
+
   test("validates, sanitizes, stages, seals, and replays across importer revisions", async () => {
     const bucket = cardSnapshotBucket();
     const central = new FakeCentral();
@@ -481,6 +528,47 @@ function cardSnapshotBucket(): FakeBucket {
     objectCount: 2,
     status: "success",
     months: { "202609": { pages: 2, transactions: 1 } },
+  });
+  return bucket;
+}
+
+function largeCardSnapshotBucket(): FakeBucket {
+  const bucket = new FakeBucket();
+  const pages = [
+    {
+      kind: "top",
+      index: 0,
+      rawJson: JSON.stringify(customizedPageEnvelope([{ data: ["fixture", "1"] }], "13", "2")),
+    },
+    ...Array.from({ length: 12 }, (_, offset) => ({
+      kind: "answer",
+      index: offset + 1,
+      rawJson: JSON.stringify(
+        customizedPageEnvelope([{ data: ["fixture", "1"] }], "13", offset === 11 ? "3" : "2"),
+      ),
+    })),
+  ];
+  bucket.putJson(`${CARD_PREFIX}snapshot.json`, {
+    format: "kogane-vpass-r2-snapshot/v1",
+    runId: RUN_ID,
+    selectedCardIndex: 1,
+    cardListRawJson: JSON.stringify(cardListEnvelope()),
+    selectCardRawJson: JSON.stringify(okEnvelope({ selected: true })),
+    webMeisaiTopRawJson: JSON.stringify(discoveryEnvelope()),
+    months: { "202609": { pages, transactionCount: 13 } },
+  });
+  bucket.putJson(CARD_RECORD, {
+    runId: RUN_ID,
+    startedAt: "2026-09-05T00:00:00.000Z",
+    completedAt: "2026-09-05T00:01:00.000Z",
+    cardCount: 1,
+    selectedCardIndex: 1,
+    monthCount: 1,
+    pageCount: 13,
+    transactionCount: 13,
+    objectCount: 2,
+    status: "success",
+    months: { "202609": { pages: 13, transactions: 13 } },
   });
   return bucket;
 }
