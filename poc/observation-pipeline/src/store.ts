@@ -31,9 +31,7 @@ export function openStore(stateDir?: string): Store {
   mkdirSync(blobDir, { recursive: true });
   const db = new Database(join(root, "kogane-poc.sqlite"), { create: true });
   db.exec("PRAGMA foreign_keys = ON;");
-  const found = (
-    db.query("PRAGMA user_version").get() as { user_version: number }
-  ).user_version;
+  const found = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
   if (![0, 2, 3, 4, 5, SCHEMA_VERSION].includes(found)) {
     throw new Error(
       `${root} was created with schema version ${found}, but this build expects ${SCHEMA_VERSION}. ` +
@@ -48,17 +46,13 @@ export function openStore(stateDir?: string): Store {
         );
         // v2 did not persist failure evidence. Preserve the conservative outcome:
         // every known non-success run has at least one failure.
-        db.exec(
-          "UPDATE fetch_runs SET failure_count = 1 WHERE status <> 'success';",
-        );
+        db.exec("UPDATE fetch_runs SET failure_count = 1 WHERE status <> 'success';");
       }
       if (found === 2 || found === 3) {
         const hasArtifacts = storeTableExists(db, "fetch_artifacts");
         if (hasArtifacts) {
           db.exec("ALTER TABLE fetch_artifacts ADD COLUMN artifact_key TEXT;");
-          db.exec(
-            "ALTER TABLE fetch_artifacts ADD COLUMN statement_state TEXT;",
-          );
+          db.exec("ALTER TABLE fetch_artifacts ADD COLUMN statement_state TEXT;");
           db.exec("ALTER TABLE fetch_artifacts ADD COLUMN period TEXT;");
         }
       }
@@ -79,9 +73,7 @@ export function openStore(stateDir?: string): Store {
 
 function storeTableExists(db: Database, name: string): boolean {
   return (
-    db
-      .query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1")
-      .get(name) !== null
+    db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1").get(name) !== null
   );
 }
 
@@ -118,9 +110,7 @@ export function insertFetchRun(
   // An empty external run id is treated as absent throughout, so that a
   // manifest with `"runId": ""` cannot claim a distinct run identity.
   const externalRunId =
-    run.externalRunId !== undefined && run.externalRunId !== ""
-      ? run.externalRunId
-      : undefined;
+    run.externalRunId !== undefined && run.externalRunId !== "" ? run.externalRunId : undefined;
   const failureCount = run.failureCount ?? (run.status === "success" ? 0 : 1);
   if (
     !Number.isSafeInteger(failureCount) ||
@@ -131,17 +121,13 @@ export function insertFetchRun(
   }
   if (
     run.window &&
-    (!validDate(run.window.from) ||
-      !validDate(run.window.to) ||
-      run.window.from > run.window.to)
+    (!validDate(run.window.from) || !validDate(run.window.to) || run.window.from > run.window.to)
   ) {
     throw new Error("fetch-run window is invalid");
   }
   const existing = externalRunId
     ? (store.db
-        .query(
-          "SELECT id FROM fetch_runs WHERE source_id = ?1 AND external_run_id = ?2",
-        )
+        .query("SELECT id FROM fetch_runs WHERE source_id = ?1 AND external_run_id = ?2")
         .get(run.sourceId, externalRunId) as { id: number } | null)
     : null;
   if (existing) return existing.id;
@@ -183,17 +169,13 @@ export function putRawObject(
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, bytes);
   store.db
-    .query(
-      "INSERT INTO raw_objects (sha256, size, content_type, blob_key) VALUES (?1, ?2, ?3, ?4)",
-    )
+    .query("INSERT INTO raw_objects (sha256, size, content_type, blob_key) VALUES (?1, ?2, ?3, ?4)")
     .run(digest, bytes.byteLength, contentType, blobKey);
   return { sha256: digest, deduplicated: false };
 }
 
 export function readRawObject(store: Store, sha256: string): Uint8Array {
-  const row = store.db
-    .query("SELECT blob_key FROM raw_objects WHERE sha256 = ?1")
-    .get(sha256) as {
+  const row = store.db.query("SELECT blob_key FROM raw_objects WHERE sha256 = ?1").get(sha256) as {
     blob_key: string;
   } | null;
   if (!row) throw new Error(`raw object not found: ${sha256}`);
@@ -309,9 +291,7 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
 
 function validDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
-  return (
-    new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value
-  );
+  return new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value;
 }
 
 // ── layer B writes ─────────────────────────────────────────────────────
@@ -424,27 +404,20 @@ export function supersedeOlderParseRuns(
   }[];
 
   const newer = live
-    .filter(
-      (run) => compareVersions(run.parser_version, newRun.parser_version) > 0,
-    )
+    .filter((run) => compareVersions(run.parser_version, newRun.parser_version) > 0)
     .sort((a, b) => compareVersions(b.parser_version, a.parser_version))[0];
   if (newer) {
     store.db
-      .query(
-        "UPDATE parse_runs SET superseded_by_parse_run_id = ?1 WHERE id = ?2",
-      )
+      .query("UPDATE parse_runs SET superseded_by_parse_run_id = ?1 WHERE id = ?2")
       .run(newer.id, newParseRunId);
     return 0;
   }
 
   let superseded = 0;
   for (const run of live) {
-    if (compareVersions(run.parser_version, newRun.parser_version) >= 0)
-      continue;
+    if (compareVersions(run.parser_version, newRun.parser_version) >= 0) continue;
     store.db
-      .query(
-        "UPDATE parse_runs SET superseded_by_parse_run_id = ?1 WHERE id = ?2",
-      )
+      .query("UPDATE parse_runs SET superseded_by_parse_run_id = ?1 WHERE id = ?2")
       .run(newParseRunId, run.id);
     superseded += 1;
   }

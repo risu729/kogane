@@ -17,22 +17,14 @@ import {
 } from "../src/store.ts";
 import type { ArtifactMeta } from "../src/types.ts";
 
-const FIXTURES = join(
-  import.meta.dir,
-  "..",
-  "fixtures",
-  "vpass-parser-boundaries",
-);
+const FIXTURES = join(import.meta.dir, "..", "fixtures", "vpass-parser-boundaries");
 
 function fixture(name: "web" | "customized"): Uint8Array {
   return readFileSync(join(FIXTURES, `${name}.json`));
 }
 
 function json(name: "web" | "customized"): Record<string, unknown> {
-  return JSON.parse(new TextDecoder().decode(fixture(name))) as Record<
-    string,
-    unknown
-  >;
+  return JSON.parse(new TextDecoder().decode(fixture(name))) as Record<string, unknown>;
 }
 
 function encode(value: unknown): Uint8Array {
@@ -60,24 +52,16 @@ function artifact(overrides: Partial<ArtifactMeta> = {}): ArtifactMeta {
 
 describe("Vpass canonical Layer-B parser", () => {
   test("routes only the strict canonical statement-page JSON", () => {
-    expect(PARSERS.filter((parser) => parser.accepts(artifact()))).toEqual([
-      vpassStatementPage,
-    ]);
+    expect(PARSERS.filter((parser) => parser.accepts(artifact()))).toEqual([vpassStatementPage]);
     expect(
-      PARSERS.filter((parser) =>
-        parser.accepts(artifact({ dataset: "month-discovery" })),
-      ),
+      PARSERS.filter((parser) => parser.accepts(artifact({ dataset: "month-discovery" }))),
     ).toEqual([]);
     expect(
       PARSERS.filter((parser) =>
         parser.accepts(artifact({ mime: "application/json; charset=utf-8" })),
       ),
     ).toEqual([]);
-    expect(
-      PARSERS.filter((parser) =>
-        parser.accepts(artifact({ sourceId: "myjcb" })),
-      ),
-    ).toEqual([]);
+    expect(PARSERS.filter((parser) => parser.accepts(artifact({ sourceId: "myjcb" })))).toEqual([]);
   });
 
   test("maps a posted web purchase with one liability-sign inversion", () => {
@@ -94,22 +78,9 @@ describe("Vpass canonical Layer-B parser", () => {
       currency: "JPY",
       counterparty: "架空商店",
       asOf: "2026-08-15",
-      rawLocator:
-        "json:$.body.content.WebMeisaiTopDisplayServiceBean.meisaiList[0]",
+      rawLocator: "json:$.body.content.WebMeisaiTopDisplayServiceBean.meisaiList[0]",
       extra: {
-        data: [
-          "4K",
-          "005",
-          "",
-          "26/08/15",
-          "架空商店",
-          "1,234",
-          "1回払い",
-          "",
-          "",
-          "",
-          "",
-        ],
+        data: ["4K", "005", "", "26/08/15", "架空商店", "1,234", "1回払い", "", "", "", ""],
         _kogane: {
           statementFamily: "web",
           providerSubtype: "4K/005",
@@ -123,9 +94,7 @@ describe("Vpass canonical Layer-B parser", () => {
     const result = vpassStatementPage.parse(fixture("customized"), artifact());
     const transactions = result.observations.filter((entry) => entry.kind === "transaction");
     expect(transactions.map((entry) => entry.amountMinor)).toEqual([-2000, 1500]);
-    expect(
-      transactions.every((entry) => entry.status === "unconfirmed"),
-    ).toBeTrue();
+    expect(transactions.every((entry) => entry.status === "unconfirmed")).toBeTrue();
     expect(result.observations[1]).toMatchObject({
       sourceAccount: "vpass:card-001",
       counterparty: "架空返金",
@@ -143,12 +112,9 @@ describe("Vpass canonical Layer-B parser", () => {
   test("keeps an observed amountless 005 row with a warning instead of guessing", () => {
     const input = json("web");
     const row = (
-      (
-        (input["body"] as Record<string, unknown>)["content"] as Record<
-          string,
-          unknown
-        >
-      )["WebMeisaiTopDisplayServiceBean"] as Record<string, unknown>
+      ((input["body"] as Record<string, unknown>)["content"] as Record<string, unknown>)[
+        "WebMeisaiTopDisplayServiceBean"
+      ] as Record<string, unknown>
     )["meisaiList"] as Record<string, unknown>[];
     (row[0]!["data"] as string[])[5] = "";
     const result = vpassStatementPage.parse(encode(input), artifact());
@@ -164,10 +130,7 @@ describe("Vpass canonical Layer-B parser", () => {
       ),
     ).toThrow(/failure-free/u);
     expect(() =>
-      vpassStatementPage.parse(
-        fixture("web"),
-        artifact({ fetchUnitKey: null }),
-      ),
+      vpassStatementPage.parse(fixture("web"), artifact({ fetchUnitKey: null })),
     ).toThrow(/fetch unit/u);
     expect(() =>
       vpassStatementPage.parse(
@@ -178,51 +141,36 @@ describe("Vpass canonical Layer-B parser", () => {
 
     const drift = json("web");
     drift["unexpected"] = true;
-    expect(() => vpassStatementPage.parse(encode(drift), artifact())).toThrow(
-      /schema drift/u,
-    );
+    expect(() => vpassStatementPage.parse(encode(drift), artifact())).toThrow(/schema drift/u);
 
     const subtype = json("web");
     const rows = (
-      (
-        (subtype["body"] as Record<string, unknown>)["content"] as Record<
-          string,
-          unknown
-        >
-      )["WebMeisaiTopDisplayServiceBean"] as Record<string, unknown>
+      ((subtype["body"] as Record<string, unknown>)["content"] as Record<string, unknown>)[
+        "WebMeisaiTopDisplayServiceBean"
+      ] as Record<string, unknown>
     )["meisaiList"] as Record<string, unknown>[];
     (rows[0]!["data"] as string[])[1] = "999";
-    expect(() => vpassStatementPage.parse(encode(subtype), artifact())).toThrow(
-      /subtype/u,
-    );
+    expect(() => vpassStatementPage.parse(encode(subtype), artifact())).toThrow(/subtype/u);
 
     const controlType = json("web");
     const controlRows = (
-      (
-        (controlType["body"] as Record<string, unknown>)["content"] as Record<
-          string,
-          unknown
-        >
-      )["WebMeisaiTopDisplayServiceBean"] as Record<string, unknown>
+      ((controlType["body"] as Record<string, unknown>)["content"] as Record<string, unknown>)[
+        "WebMeisaiTopDisplayServiceBean"
+      ] as Record<string, unknown>
     )["meisaiList"] as Record<string, unknown>[];
     controlRows[0]!["shiharaiPatternFlag"] = "0";
-    expect(() =>
-      vpassStatementPage.parse(encode(controlType), artifact()),
-    ).toThrow(/bounded safe integer/u);
+    expect(() => vpassStatementPage.parse(encode(controlType), artifact())).toThrow(
+      /bounded safe integer/u,
+    );
 
     const date = json("customized");
     const customRows = (
-      (
-        (date["body"] as Record<string, unknown>)["content"] as Record<
-          string,
-          unknown
-        >
-      )["CustomizedMeisaiAnsDisplayServiceBean"] as Record<string, unknown>
+      ((date["body"] as Record<string, unknown>)["content"] as Record<string, unknown>)[
+        "CustomizedMeisaiAnsDisplayServiceBean"
+      ] as Record<string, unknown>
     )["meisaiList"] as Record<string, unknown>[];
     customRows[0]!["riyouDate"] = "26/02/30";
-    expect(() => vpassStatementPage.parse(encode(date), artifact())).toThrow(
-      /calendar date/u,
-    );
+    expect(() => vpassStatementPage.parse(encode(date), artifact())).toThrow(/calendar date/u);
   });
 
   test("selects every page from the latest successful card-month snapshot, including empty", () => {
@@ -234,11 +182,7 @@ describe("Vpass canonical Layer-B parser", () => {
         provider: "Vpass",
         ingestion: "collector-r2",
       });
-      const addSnapshot = (
-        id: string,
-        fetchedAt: string,
-        bytes: Uint8Array,
-      ) => {
+      const addSnapshot = (id: string, fetchedAt: string, bytes: Uint8Array) => {
         const fetchRunId = insertFetchRun(store, {
           sourceId: "vpass",
           externalRunId: id,
@@ -263,17 +207,12 @@ describe("Vpass canonical Layer-B parser", () => {
       addSnapshot("old", "2026-09-01T00:00:00.000Z", fixture("web"));
       const empty = json("web");
       const emptyBean = (
-        (empty["body"] as Record<string, unknown>)["content"] as Record<
-          string,
-          unknown
-        >
+        (empty["body"] as Record<string, unknown>)["content"] as Record<string, unknown>
       )["WebMeisaiTopDisplayServiceBean"] as Record<string, unknown>;
       emptyBean["meisaiList"] = [];
       addSnapshot("new", "2026-09-02T00:00:00.000Z", encode(empty));
       expect(runParsers(store, [vpassStatementPage]).errors).toBe(0);
-      expect(
-        currentTransactions(store).filter((row) => row.source_id === "vpass"),
-      ).toEqual([]);
+      expect(currentTransactions(store).filter((row) => row.source_id === "vpass")).toEqual([]);
 
       const incompleteRun = insertFetchRun(store, {
         sourceId: "vpass",
@@ -321,13 +260,9 @@ describe("Vpass canonical Layer-B parser", () => {
       for (const observation of partial.observations)
         insertObservation(store, partialParseRun, observation);
 
-      expect(
-        currentTransactions(store).filter((row) => row.source_id === "vpass"),
-      ).toEqual([]);
+      expect(currentTransactions(store).filter((row) => row.source_id === "vpass")).toEqual([]);
       expect(runParsers(store, [vpassStatementPage]).errors).toBe(0);
-      expect(
-        currentTransactions(store).filter((row) => row.source_id === "vpass"),
-      ).toHaveLength(2);
+      expect(currentTransactions(store).filter((row) => row.source_id === "vpass")).toHaveLength(2);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

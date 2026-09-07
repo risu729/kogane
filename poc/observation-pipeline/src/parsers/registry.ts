@@ -1,11 +1,7 @@
 import type { Parser } from "../types.ts";
 import { paypayCsv } from "./paypay-csv.ts";
 import { mobileSuicaSfHistory } from "./mobile-suica-sf-history.ts";
-import {
-  myJcbCreditLedger,
-  myJcbEvidenceOnly,
-  myJcbPastMonthBalances,
-} from "./myjcb.ts";
+import { myJcbCreditLedger, myJcbEvidenceOnly, myJcbPastMonthBalances } from "./myjcb.ts";
 import {
   sonyBankGrossBalance,
   sonyBankHistoryCsv,

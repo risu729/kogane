@@ -11,18 +11,10 @@ type Counts = Record<string, number>;
 export default {
   async fetch(request: Request, env: AuditEnv): Promise<Response> {
     const url = new URL(request.url);
-    if (
-      request.method === "GET" &&
-      url.pathname === "/health" &&
-      url.search === ""
-    ) {
+    if (request.method === "GET" && url.pathname === "/health" && url.search === "") {
       return response({ ok: true, service: "vpass-r2-layer-b-audit" });
     }
-    if (
-      request.method !== "POST" ||
-      url.pathname !== "/audit-page" ||
-      url.search !== ""
-    ) {
+    if (request.method !== "POST" || url.pathname !== "/audit-page" || url.search !== "") {
       return response({ error: "not_found" }, 404);
     }
     try {
@@ -42,8 +34,7 @@ export default {
         ...(typeof input.cursor === "string" ? { cursor: input.cursor } : {}),
       });
       const nextCursor = listed.truncated ? listed.cursor : undefined;
-      if (listed.truncated && !nextCursor)
-        throw new ImportError(409, "prefix_cursor_missing");
+      if (listed.truncated && !nextCursor) throw new ImportError(409, "prefix_cursor_missing");
       if (listed.truncated && nextCursor === input.cursor) {
         throw new ImportError(409, "prefix_cursor_did_not_advance");
       }
@@ -71,15 +62,9 @@ export default {
           mergeCounts(aggregate.webShapes, audited.webShapes);
           mergeCounts(aggregate.customizedShapes, audited.customizedShapes);
           mergeCounts(aggregate.webRowKeyShapes, audited.webRowKeyShapes);
-          mergeCounts(
-            aggregate.customizedRowKeyShapes,
-            audited.customizedRowKeyShapes,
-          );
+          mergeCounts(aggregate.customizedRowKeyShapes, audited.customizedRowKeyShapes);
           mergeCounts(aggregate.webBeanKeyShapes, audited.webBeanKeyShapes);
-          mergeCounts(
-            aggregate.customizedBeanKeyShapes,
-            audited.customizedBeanKeyShapes,
-          );
+          mergeCounts(aggregate.customizedBeanKeyShapes, audited.customizedBeanKeyShapes);
           mergeCounts(aggregate.rootKeyShapes, audited.rootKeyShapes);
           mergeCounts(aggregate.headerKeyShapes, audited.headerKeyShapes);
           mergeCounts(aggregate.bodyKeyShapes, audited.bodyKeyShapes);
@@ -121,24 +106,18 @@ async function auditRecord(bucket: R2Bucket, recordKey: string) {
   for (const artifact of validated.artifacts) {
     if (artifact.dataset !== "statement-page") continue;
     statementArtifactCount += 1;
-    const root = JSON.parse(
-      new TextDecoder("utf-8", { fatal: true }).decode(artifact.bytes),
-    );
+    const root = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(artifact.bytes));
     if (!isRecord(root)) throw new Error("statement_root_invalid");
     increment(rootKeyShapes, Object.keys(root).sort().join(","));
     const header = objectAt(root, "header");
     const body = objectAt(root, "body");
     const content = objectAt(root, "body", "content");
-    if (!header || !body || !content)
-      throw new Error("statement_content_invalid");
+    if (!header || !body || !content) throw new Error("statement_content_invalid");
     increment(headerKeyShapes, Object.keys(header).sort().join(","));
     increment(bodyKeyShapes, Object.keys(body).sort().join(","));
     increment(contentKeyShapes, Object.keys(content).sort().join(","));
     const web = objectAt(content, "WebMeisaiTopDisplayServiceBean");
-    const customized = objectAt(
-      content,
-      "CustomizedMeisaiAnsDisplayServiceBean",
-    );
+    const customized = objectAt(content, "CustomizedMeisaiAnsDisplayServiceBean");
     if ((web === undefined) === (customized === undefined)) {
       throw new Error("statement_family_invalid");
     }
@@ -187,14 +166,8 @@ async function auditRecord(bucket: R2Bucket, recordKey: string) {
         increment(webShapes, shape);
       }
     } else {
-      increment(
-        customizedBeanKeyShapes,
-        Object.keys(customized!).sort().join(","),
-      );
-      const rows = statementRows(
-        customized!.meisaiList,
-        "customized_rows_invalid",
-      );
+      increment(customizedBeanKeyShapes, Object.keys(customized!).sort().join(","));
+      const rows = statementRows(customized!.meisaiList, "customized_rows_invalid");
       customizedRowCount += rows.length;
       statementRowCount += rows.length;
       for (const value of rows) {
@@ -250,9 +223,7 @@ function statementRows(value: unknown, code: string): unknown[] {
 
 function boundedStringArray(value: unknown, code: string): string[] {
   const array = boundedArray(value, code);
-  if (
-    array.some((entry) => typeof entry !== "string" || entry.length > 5_000)
-  ) {
+  if (array.some((entry) => typeof entry !== "string" || entry.length > 5_000)) {
     throw new Error(code);
   }
   return array as string[];
@@ -263,20 +234,14 @@ function dateShape(value: unknown): string {
   if (value === "") return "empty";
   const normalized = value.normalize("NFKC").trim();
   const weekday = "(?:\\([^0-9()]{1,3}\\))?";
-  if (
-    new RegExp(`^\\d{4}/\\d{1,2}/\\d{1,2}${weekday}$`, "u").test(normalized)
-  ) {
+  if (new RegExp(`^\\d{4}/\\d{1,2}/\\d{1,2}${weekday}$`, "u").test(normalized)) {
     return "yyyy_mm_dd";
   }
-  if (new RegExp(`^\\d{1,2}/\\d{1,2}${weekday}$`, "u").test(normalized))
-    return "mm_dd";
-  if (
-    new RegExp(`^\\d{4}年\\d{1,2}月\\d{1,2}日${weekday}$`, "u").test(normalized)
-  ) {
+  if (new RegExp(`^\\d{1,2}/\\d{1,2}${weekday}$`, "u").test(normalized)) return "mm_dd";
+  if (new RegExp(`^\\d{4}年\\d{1,2}月\\d{1,2}日${weekday}$`, "u").test(normalized)) {
     return "yyyy_jp_md";
   }
-  if (new RegExp(`^\\d{1,2}月\\d{1,2}日${weekday}$`, "u").test(normalized))
-    return "jp_md";
+  if (new RegExp(`^\\d{1,2}月\\d{1,2}日${weekday}$`, "u").test(normalized)) return "jp_md";
   if (/^\d{8}$/u.test(normalized)) return "yyyymmdd";
   if (/^\d{4}$/u.test(normalized)) return "mmdd";
   return `other_${dateMask(normalized)}`;
@@ -298,8 +263,7 @@ function amountShape(value: unknown): string {
   if (typeof value !== "string") return "non_string";
   if (value === "") return "empty";
   const normalized = value.normalize("NFKC").replaceAll(",", "").trim();
-  if (/^-?\d+$/u.test(normalized))
-    return normalized.startsWith("-") ? "negative" : "unsigned";
+  if (/^-?\d+$/u.test(normalized)) return normalized.startsWith("-") ? "negative" : "unsigned";
   return "other";
 }
 
@@ -445,10 +409,7 @@ function safeCode(error: unknown): string {
       [/web row .*\.maxIndex/u, "parser_web_max_index_invalid"],
       [/web row .*\.columnsSizeS/u, "parser_web_columns_size_s_invalid"],
       [/web row .*\.rowType/u, "parser_web_row_type_invalid"],
-      [
-        /web row .*\.shiharaiPatternFlag/u,
-        "parser_web_payment_pattern_invalid",
-      ],
+      [/web row .*\.shiharaiPatternFlag/u, "parser_web_payment_pattern_invalid"],
       [/web row .*\.data must/u, "parser_web_data_container_invalid"],
       [/web row .*\.data has schema drift/u, "parser_web_data_schema_drift"],
       [/unsupported provider subtype/u, "parser_web_subtype_unknown"],

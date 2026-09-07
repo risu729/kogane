@@ -31,9 +31,7 @@ describe("Vpass aggregate-only R2 Layer-B audit", () => {
   test("reduces a missing record to one stable contract code", async () => {
     const bucket = {
       ...listBucket({
-        objects: [
-          { key: "vpass/2026/09/07/2026-09-07T00-00-00-000Z/card-001/manifest.json" },
-        ],
+        objects: [{ key: "vpass/2026/09/07/2026-09-07T00-00-00-000Z/card-001/manifest.json" }],
         truncated: false,
       }),
       get: async () => null,
