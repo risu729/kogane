@@ -41,6 +41,16 @@ and demo deployment dry runs passed. Independent reviewers checked the API and
 UI contracts, source/account identity, historical filter options, and build
 isolation. These tests use synthetic data, not exported financial records.
 
+Deployed UI repair from signed commit `d5222ce` as Worker version
+`57f7e0f6-38dd-4aa1-8423-28b572c263b0`; production asset bundle
+`index-CM6yg_Vl.js`. Six main API routes returned 200 through enrolled WARP,
+and an off-WARP request from the existing OCI host returned 403. Final browser
+verification, performed only after local fixes/tests and deployment, confirmed
+SBI source filtering (91 records), a populated transaction detail with its parse
+and raw-artifact provenance, and Back preserving the source filter. The existing
+567 parser failures are unchanged; this UI repair does not claim to resolve
+those historical ingestion/parse limitations.
+
 ## Deployment checks (2026-09-07 UTC)
 
 - PR #105 merged as `ceb2bf3b52ad3387137eaf12add5dcf3ade855ee`.
