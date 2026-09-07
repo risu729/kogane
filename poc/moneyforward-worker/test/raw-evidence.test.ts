@@ -15,7 +15,7 @@ describe("MoneyForward raw-evidence bridge", () => {
           skippedManifestCount: 0,
           deferredManifestCount: 1,
           failedManifestCount: 0,
-          nextCursor: "moneyforward-scan-v1.opaque.signature",
+          nextCursor: "moneyforward-scan-v2.encrypted.state",
           truncated: true,
           result: {
             source: "moneyforward-me",
@@ -82,7 +82,7 @@ describe("MoneyForward raw-evidence bridge", () => {
       skippedManifestCount: 0,
       deferredManifestCount: 0,
       failedManifestCount: 0,
-      nextCursor: "moneyforward-scan-v1.opaque.signature",
+      nextCursor: "moneyforward-scan-v2.encrypted.state",
       truncated: true,
     });
     await expect(backfillStoredRuns(importer)).resolves.toMatchObject({

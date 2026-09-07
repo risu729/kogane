@@ -354,12 +354,20 @@ function parseFailure(value: unknown): MoneyForwardFailure {
   if (reasonCode !== undefined && !REASON_CODES.has(reasonCode)) {
     invalid("manifest_failure_reason_invalid");
   }
+  const isR2Failure = operation.startsWith("r2:");
+  const isCredentialFailure = failureCode === "credential_configuration_required";
   if (
     (errorType === "MoneyForwardHttpError") !== (failureCode === "provider_http_failed") ||
     (errorType === "MoneyForwardProtocolError") !== (failureCode === "provider_protocol_failed") ||
     (reasonCode !== undefined && errorType !== "MoneyForwardProtocolError") ||
     (httpStatus !== undefined && !errorType.startsWith("MoneyForward")) ||
-    (operation.startsWith("r2:") && stage !== "artifact-store")
+    (isR2Failure &&
+      (stage !== "artifact-store" ||
+        failureCode !== "operation_failed" ||
+        reasonCode !== undefined ||
+        httpStatus !== undefined)) ||
+    (!isR2Failure && (stage === "artifact-store" || stage === "manifest-store")) ||
+    (!isR2Failure && (stage === "credential-load") !== isCredentialFailure)
   ) {
     invalid("manifest_failure_contract_invalid");
   }

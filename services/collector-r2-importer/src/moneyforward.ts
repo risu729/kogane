@@ -24,7 +24,8 @@ const MAX_SOURCE_ARTIFACTS = 833;
 const MAX_CENTRAL_ARTIFACTS = MAX_SOURCE_ARTIFACTS + 1;
 const MAX_PREFIX_OBJECTS = MAX_CENTRAL_ARTIFACTS;
 export const MONEYFORWARD_TRANSFER_CHUNK_SIZE = 5;
-const TRANSFER_TOKEN_PREFIX = "moneyforward-transfer-v1";
+const TRANSFER_TOKEN_PREFIX = "moneyforward-transfer-v2";
+const TRANSFER_TOKEN_AAD = new TextEncoder().encode(TRANSFER_TOKEN_PREFIX);
 const SHA256 = /^[0-9a-f]{64}$/u;
 
 type JsonObject = Record<string, unknown>;
@@ -62,7 +63,6 @@ export type MoneyForwardImportResult = MoneyForwardImportDeferred | MoneyForward
 
 export interface MoneyForwardImportDeferred {
   source: typeof SOURCE;
-  manifestKey: string;
   status: "deferred";
   reason: "worker_invocation_limit";
   artifactCount: number;
@@ -72,7 +72,6 @@ export interface MoneyForwardImportDeferred {
 
 export interface MoneyForwardImportSealed {
   source: typeof SOURCE;
-  manifestKey: string;
   status: "sealed";
   centralRunId: number;
   artifactCount: number;
@@ -215,7 +214,6 @@ export async function importMoneyForwardRun(options: {
       const nextState = { ...state, offset: end };
       return {
         source: SOURCE,
-        manifestKey: options.manifestKey,
         status: "deferred",
         reason: "worker_invocation_limit",
         artifactCount: plans.length,
@@ -264,7 +262,6 @@ export async function importMoneyForwardRun(options: {
     );
     return {
       source: SOURCE,
-      manifestKey: options.manifestKey,
       status: "sealed",
       centralRunId: state.centralRunId,
       artifactCount: plans.length,
@@ -616,29 +613,47 @@ async function assertExactPrefix(
 }
 
 async function encodeTransferState(state: TransferState, keyHex: string): Promise<string> {
-  const payload = base64Url(new TextEncoder().encode(canonicalJson(state as unknown as JsonValue)));
-  const signature = await hmacHex(
-    keyHex,
-    new TextEncoder().encode(`${TRANSFER_TOKEN_PREFIX}\0${payload}`),
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await transferEncryptionKey(keyHex);
+  const plaintext = new TextEncoder().encode(canonicalJson(state as unknown as JsonValue));
+  const ciphertext = await crypto.subtle.encrypt(
+    {
+      name: "AES-GCM",
+      iv: ownedArrayBuffer(iv),
+      additionalData: ownedArrayBuffer(TRANSFER_TOKEN_AAD),
+      tagLength: 128,
+    },
+    key,
+    ownedArrayBuffer(plaintext),
   );
-  return `${TRANSFER_TOKEN_PREFIX}.${payload}.${signature}`;
+  return `${TRANSFER_TOKEN_PREFIX}.${base64Url(iv)}.${base64Url(new Uint8Array(ciphertext))}`;
 }
 
 async function decodeTransferState(token: string, keyHex: string): Promise<TransferState> {
   if (token.length > 8_000) throw new ImportError(400, "transfer_token_invalid");
   const parts = token.split(".");
-  if (parts.length !== 3 || parts[0] !== TRANSFER_TOKEN_PREFIX || !SHA256.test(parts[2]!)) {
+  if (
+    parts.length !== 3 ||
+    parts[0] !== TRANSFER_TOKEN_PREFIX ||
+    !/^[A-Za-z0-9_-]{16}$/u.test(parts[1]!) ||
+    !/^[A-Za-z0-9_-]{22,7900}$/u.test(parts[2]!)
+  ) {
     throw new ImportError(400, "transfer_token_invalid");
   }
-  const expected = await hmacHex(
-    keyHex,
-    new TextEncoder().encode(`${TRANSFER_TOKEN_PREFIX}\0${parts[1]}`),
-  );
-  if (!timingSafeHexEqual(expected, parts[2]!))
-    throw new ImportError(400, "transfer_token_invalid");
+  const key = await transferEncryptionKey(keyHex);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(fromBase64Url(parts[1]!)));
+    const plaintext = await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: ownedArrayBuffer(fromBase64Url(parts[1]!)),
+        additionalData: ownedArrayBuffer(TRANSFER_TOKEN_AAD),
+        tagLength: 128,
+      },
+      key,
+      ownedArrayBuffer(fromBase64Url(parts[2]!)),
+    );
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plaintext));
   } catch {
     throw new ImportError(400, "transfer_token_invalid");
   }
@@ -672,6 +687,15 @@ async function decodeTransferState(token: string, keyHex: string): Promise<Trans
   return input as unknown as TransferState;
 }
 
+async function transferEncryptionKey(keyHex: string): Promise<CryptoKey> {
+  if (!SHA256.test(keyHex)) throw new ImportError(500, "fingerprint_configuration_invalid");
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${TRANSFER_TOKEN_PREFIX}\0${keyHex}`),
+  );
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
 function validateTransferState(
   state: TransferState,
   manifestKey: string,
@@ -685,35 +709,6 @@ function validateTransferState(
   ) {
     throw new ImportError(400, "transfer_state_mismatch");
   }
-}
-
-async function hmacHex(keyHex: string, bytes: Uint8Array): Promise<string> {
-  if (!SHA256.test(keyHex)) throw new ImportError(500, "fingerprint_configuration_invalid");
-  const key = await crypto.subtle.importKey(
-    "raw",
-    ownedArrayBuffer(hexBytes(keyHex)),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  return bytesHex(new Uint8Array(await crypto.subtle.sign("HMAC", key, ownedArrayBuffer(bytes))));
-}
-
-function timingSafeHexEqual(left: string, right: string): boolean {
-  const leftBytes = hexBytes(left);
-  const rightBytes = hexBytes(right);
-  if (leftBytes.byteLength !== rightBytes.byteLength) return false;
-  const subtle = crypto.subtle as SubtleCrypto & {
-    timingSafeEqual?: (a: ArrayBuffer, b: ArrayBuffer) => boolean;
-  };
-  if (typeof subtle.timingSafeEqual === "function") {
-    return subtle.timingSafeEqual(ownedArrayBuffer(leftBytes), ownedArrayBuffer(rightBytes));
-  }
-  let difference = 0;
-  for (let index = 0; index < leftBytes.length; index += 1) {
-    difference |= leftBytes[index]! ^ rightBytes[index]!;
-  }
-  return difference === 0;
 }
 
 function base64Url(bytes: Uint8Array): string {

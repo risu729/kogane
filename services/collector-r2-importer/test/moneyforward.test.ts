@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Buffer } from "node:buffer";
 import { importMoneyForwardRun, validateMoneyForwardRun } from "../src/moneyforward";
 
 const RUN_ID = "123e4567-e89b-42d3-a456-426614174000";
@@ -148,8 +149,78 @@ describe("MoneyForward R2 importer", () => {
     const central = new FakeCentral();
     const result = await runImport(bucket, central);
     expect(result).toMatchObject({ status: "sealed", artifactCount: 1, sealed: true });
+    expect(result).not.toHaveProperty("manifestKey");
     expect(central.inventoryItems).toEqual(new Set(["manifest.json"]));
     expect(central.sealCount).toBe(1);
+  });
+
+  test("rejects failure stage and code combinations the collector cannot produce", async () => {
+    const impossibleFailures = [
+      {
+        operation: "collect",
+        errorType: "Error",
+        message: "credential_configuration_required",
+        stage: "monthly-detail",
+        failureCode: "credential_configuration_required",
+      },
+      {
+        operation: "collect",
+        errorType: "Error",
+        message: "operation_failed",
+        stage: "artifact-store",
+        failureCode: "operation_failed",
+      },
+      {
+        operation: "r2:accounts-index",
+        errorType: "Error",
+        message: "credential_configuration_required",
+        stage: "artifact-store",
+        failureCode: "credential_configuration_required",
+      },
+    ];
+    for (const failure of impossibleFailures) {
+      const bucket = new FakeBucket();
+      await putManifest(bucket, {
+        schemaVersion: "moneyforward-worker-poc-v1",
+        source: "moneyforward-me",
+        runId: RUN_ID,
+        startedAt: "2026-09-05T00:00:00.000Z",
+        completedAt: "2026-09-05T00:01:00.000Z",
+        status: "failed",
+        accountDetailCount: 0,
+        monthlyFragmentCount: 0,
+        artifacts: [],
+        failures: [failure],
+      });
+      await expect(
+        validateMoneyForwardRun(bucket as unknown as R2Bucket, MANIFEST_KEY),
+      ).rejects.toThrow("manifest_failure_contract_invalid");
+    }
+
+    const validR2Failure = new FakeBucket();
+    await putManifest(validR2Failure, {
+      schemaVersion: "moneyforward-worker-poc-v1",
+      source: "moneyforward-me",
+      runId: RUN_ID,
+      startedAt: "2026-09-05T00:00:00.000Z",
+      completedAt: "2026-09-05T00:01:00.000Z",
+      status: "failed",
+      accountDetailCount: 0,
+      monthlyFragmentCount: 0,
+      artifacts: [],
+      failures: [
+        {
+          operation: "r2:accounts-index",
+          errorType: "Error",
+          message: "operation_failed",
+          stage: "artifact-store",
+          failureCode: "operation_failed",
+        },
+      ],
+    });
+    await expect(
+      validateMoneyForwardRun(validR2Failure as unknown as R2Bucket, MANIFEST_KEY),
+    ).resolves.toMatchObject({ manifest: { status: "failed" } });
   });
 
   test("rejects prefix, metadata, payload, and continuation tampering", async () => {
@@ -196,9 +267,36 @@ describe("MoneyForward R2 importer", () => {
     const central = new FakeCentral();
     const first = await runImport(bucket, central);
     if (first.status !== "deferred") throw new Error("expected deferred import");
-    const replacement = first.continuation.endsWith("a") ? "b" : "a";
+    expect(first).not.toHaveProperty("manifestKey");
+    expect(first.continuation).toMatch(
+      /^moneyforward-transfer-v2\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,7900}$/u,
+    );
+    expect(
+      first.continuation
+        .split(".")
+        .slice(1)
+        .map((part) => Buffer.from(part!, "base64url").toString())
+        .join(""),
+    ).not.toContain(MANIFEST_KEY);
+    const tamperedParts = first.continuation.split(".");
+    tamperedParts[1] = `${tamperedParts[1]![0] === "a" ? "b" : "a"}${tamperedParts[1]!.slice(1)}`;
     await expect(
-      runImport(bucket, central, `${first.continuation.slice(0, -1)}${replacement}`),
+      runImport(bucket, central, tamperedParts.join(".")),
+    ).rejects.toThrow("transfer_token_invalid");
+    await expect(
+      runImport(
+        bucket,
+        central,
+        first.continuation,
+        "collector-r2-importer-test",
+        "cd".repeat(32),
+      ),
+    ).rejects.toThrow("transfer_token_invalid");
+    await expect(
+      runImport(bucket, central, first.continuation, "collector-r2-importer-test", "invalid"),
+    ).rejects.toThrow("fingerprint_configuration_invalid");
+    await expect(
+      runImport(bucket, central, `moneyforward-transfer-v1.payload.${"0".repeat(64)}`),
     ).rejects.toThrow("transfer_token_invalid");
     expect(central.sealCount).toBe(0);
 
@@ -246,12 +344,13 @@ async function runImport(
   central: FakeCentral,
   continuation?: string,
   importerVersion = "collector-r2-importer-test",
+  fingerprintKey = FINGERPRINT_KEY,
 ) {
   return importMoneyForwardRun({
     bucket: bucket as unknown as R2Bucket,
     centralService: central as unknown as Fetcher,
     centralToken: TOKEN,
-    fingerprintKey: FINGERPRINT_KEY,
+    fingerprintKey,
     importerVersion,
     manifestKey: MANIFEST_KEY,
     ...(continuation ? { continuation } : {}),

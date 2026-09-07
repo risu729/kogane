@@ -84,13 +84,17 @@ terminal report、sealへ収束する。
 ## Bounded replay
 
 完全inventoryを固定後、1 requestあたり5 data artifactsをstaged inventoryへ転送する。
-versioned HMAC continuationはmanifest、中央run/unit、inventory digest、offsetを束縛する。
+versioned AES-256-GCM continuationはmanifest、中央run/unit、inventory digest、offsetを
+暗号化・認証する。
 artifactを各chunkで再読込し、固定inventoryとsize/hashが一致しなければ停止する。最終chunkだけ
 unit/run terminal reportを追加してsealする。
 
-backfill scan cursorもversioned HMACで保護し、R2 cursorの最大長、外側cursorの最大長、
+backfill scan cursorも専用client tokenから導出したkeyによるversioned AES-256-GCMで保護し、
+R2 cursorの最大長、外側cursorの最大長、
 最大page数、transfer token長、offset進行を制限する。処理中manifestがsealされるまでsource scan
-cursorを進めない。collector側stateにはopaque cursorだけをmode 0600で保存する。
+cursorを進めない。collector側stateには暗号化cursorだけをmode 0600で保存し、direct/backfill
+応答はsource object keyを返さない。専用client tokenまたはfingerprint keyのrotation後は旧cursorを
+拒否し、保存cursorを削除して先頭からidempotentに再走査する。
 
 ## Production R2 aggregate audit
 

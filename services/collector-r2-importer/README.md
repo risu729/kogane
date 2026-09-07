@@ -35,13 +35,15 @@ account/service marker、月別fragmentの年月とHTML fragment境界も相互�
 個別hash、金融値、認証値をログや運用出力へ出さない。
 
 一requestあたり5 artifactを転送し、開始時に完全inventoryとdigestを固定する。継続tokenは
-version、manifest、中央run/unit、inventory digest、offsetをHMACで束縛する。最終chunkだけで
+version、manifest、中央run/unit、inventory digest、offsetをAES-256-GCMで暗号化・認証する。最終chunkだけで
 unit/run terminal reportとsealを行う。terminal reportの`producerVersion`はdeployment revision
 ではなく固定`moneyforward-r2-v1`で、同じmanifestを異なるImporter deploymentから再送しても
 immutable reportへ収束する。deployment revisionは失敗・中断attemptの診断にだけ残す。
-backfill scan cursorもversioned HMACで署名し、長さ・page数・offsetを制限し、cursorまたは
+backfill scan cursorも専用client tokenから導出したkeyによるversioned AES-256-GCMで暗号化・認証し、長さ・page数・offsetを制限し、cursorまたは
 transfer offsetが停滞した応答を拒否する。対象manifestがsealされるまでsource scan位置を
-進めない。
+進めない。外部応答はmanifest keyを直接返さず、暗号化cursor/continuationからも復元できない。
+専用client tokenまたはfingerprint keyをrotationすると旧cursorはfail closedになるため、保存済み
+cursorを削除して先頭からidempotentに再走査する。
 
 2026-09-07にlocalhost限定の一時Workerとproduction R2のread-only bindingで全objectを集計監査
 した。10 manifests、530 data artifacts（accounts index 10、account detail 40、monthly fragment
@@ -150,7 +152,7 @@ V Pointは1 objectずつ走査し、小runはmanifest pageで同期sealする。
 GLOBAL PASSのdaily小runは同期転送する。12 artifactを超える即時importは中央stateを作らず`202 deferred`を返す。backfillはmanifestを見つけたページでstaged inventoryを開始し、1回につき10 artifactを転送する。cursorはR2のscan cursorにmanifest keyとoffsetを加えたopaque値で、同じmanifestの続きではR2を再走査せず、最終chunkをsealしてから次のsource objectへ進む。scriptは`deferredManifestCount`を正常な進捗として数え、cursorが進まない応答を拒否する。
 
 MoneyForwardは1 manifestに最大833 data artifactsを許容するため、backfillでは完全inventoryを
-固定して5 artifactずつ転送する。署名済みcursorがscan位置と処理中manifestのtransfer tokenを
+固定して5 artifactずつ転送する。暗号化・認証済みcursorがscan位置と処理中manifestのtransfer tokenを
 保持し、terminal reportとsealが完了した応答だけ次のsource objectへ進む。collector側scriptは
 opaque cursorをmode 0600のlocal stateへ原子的に保存し、10万page上限とstagnation guardを
 適用する。

@@ -60,9 +60,11 @@ artifactsとmanifestを持つため、5 artifactsずつ分割し、最終chunk�
 ./scripts/backfill-raw-evidence.sh
 ```
 
-scriptはopaqueな署名済みcursorだけをmode 0600のlocal stateへ保存し、10万page上限とcursor
+scriptはAES-256-GCMで暗号化・認証されたcursorだけをmode 0600のlocal stateへ保存し、10万page上限とcursor
 stagnation guardを適用します。応答とログにはsource object key、hash、本文、金融値、認証値を
-含めません。中央へsealできた後もsource R2を変更・削除しません。
+含めません。専用client tokenまたはfingerprint keyをrotationした場合は旧cursorが拒否されるため、
+cursor fileを削除して先頭からidempotentに再走査します。中央へsealできた後もsource R2を変更・
+削除しません。
 
 ## 2026-08-31の実データ検証
 

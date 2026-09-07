@@ -805,6 +805,9 @@ interface MoneyForwardBackfillCursor {
   transfer?: string;
 }
 
+const MONEYFORWARD_CURSOR_PREFIX = "moneyforward-scan-v2";
+const MONEYFORWARD_CURSOR_AAD = new TextEncoder().encode(MONEYFORWARD_CURSOR_PREFIX);
+
 export async function backfillMoneyForward(
   env: Env,
   encodedCursor: string | undefined,
@@ -975,11 +978,19 @@ async function encodeMoneyForwardCursor(
   secret: string,
 ): Promise<string> {
   assertMoneyForwardCursor(value);
-  const payload = base64Url(new TextEncoder().encode(JSON.stringify(value)));
-  const signature = base64Url(
-    await hmacSha256(secret, new TextEncoder().encode(`moneyforward-scan-v1.${payload}`)),
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const plaintext = new TextEncoder().encode(JSON.stringify(value));
+  const ciphertext = await crypto.subtle.encrypt(
+    {
+      name: "AES-GCM",
+      iv: ownedArrayBuffer(iv),
+      additionalData: ownedArrayBuffer(MONEYFORWARD_CURSOR_AAD),
+      tagLength: 128,
+    },
+    await moneyForwardCursorKey(secret),
+    ownedArrayBuffer(plaintext),
   );
-  return `moneyforward-scan-v1.${payload}.${signature}`;
+  return `${MONEYFORWARD_CURSOR_PREFIX}.${base64Url(iv)}.${base64Url(new Uint8Array(ciphertext))}`;
 }
 
 async function decodeMoneyForwardCursor(
@@ -987,15 +998,24 @@ async function decodeMoneyForwardCursor(
   secret: string,
 ): Promise<MoneyForwardBackfillCursor> {
   if (value.length > 12_000) throw new ImportError(400, "cursor_invalid");
-  const match = /^moneyforward-scan-v1\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/u.exec(value);
-  if (!match?.[1] || !match[2]) throw new ImportError(400, "cursor_invalid");
-  const expected = base64Url(
-    await hmacSha256(secret, new TextEncoder().encode(`moneyforward-scan-v1.${match[1]}`)),
+  const match = /^moneyforward-scan-v2\.([A-Za-z0-9_-]{16})\.([A-Za-z0-9_-]{22,11800})$/u.exec(
+    value,
   );
-  if (!constantTimeStringEqual(expected, match[2])) throw new ImportError(400, "cursor_invalid");
+  if (!match?.[1] || !match[2]) throw new ImportError(400, "cursor_invalid");
+  const key = await moneyForwardCursorKey(secret);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(fromBase64Url(match[1])));
+    const plaintext = await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: ownedArrayBuffer(moneyForwardCursorBytes(match[1])),
+        additionalData: ownedArrayBuffer(MONEYFORWARD_CURSOR_AAD),
+        tagLength: 128,
+      },
+      key,
+      ownedArrayBuffer(moneyForwardCursorBytes(match[2])),
+    );
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plaintext));
   } catch {
     throw new ImportError(400, "cursor_invalid");
   }
@@ -1007,6 +1027,28 @@ async function decodeMoneyForwardCursor(
   const cursor = input as unknown as MoneyForwardBackfillCursor;
   assertMoneyForwardCursor(cursor);
   return cursor;
+}
+
+function moneyForwardCursorBytes(value: string): Uint8Array {
+  const bytes = fromBase64Url(value);
+  if (base64Url(bytes) !== value) throw new ImportError(400, "cursor_invalid");
+  return bytes;
+}
+
+async function moneyForwardCursorKey(secret: string): Promise<CryptoKey> {
+  if (
+    !secret.startsWith("collector-r2-moneyforward.") ||
+    secret.slice("collector-r2-moneyforward.".length).length < 20 ||
+    secret.length > 512 ||
+    /\s/u.test(secret)
+  ) {
+    throw new ImportError(500, "cursor_configuration_invalid");
+  }
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${MONEYFORWARD_CURSOR_PREFIX}\0${secret}`),
+  );
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
 function assertMoneyForwardCursor(value: MoneyForwardBackfillCursor): void {
@@ -1030,7 +1072,7 @@ function assertMoneyForwardCursor(value: MoneyForwardBackfillCursor): void {
           value.manifestKey,
         ) ||
         typeof value.transfer !== "string" ||
-        !value.transfer.startsWith("moneyforward-transfer-v1.") ||
+        !value.transfer.startsWith("moneyforward-transfer-v2.") ||
         value.transfer.length > 8_000 ||
         /[\x00-\x20\x7f]/u.test(value.transfer)))
   ) {
