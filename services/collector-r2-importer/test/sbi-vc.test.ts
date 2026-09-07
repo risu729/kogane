@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { importSbiVcRun, parseSbiVcManifest } from "../src/sbi-vc";
+import { importSbiVcRun, parseSbiVcManifest, parseStoredEnvelope } from "../src/sbi-vc";
 import { centralDescriptorSha256 } from "../src/central";
 
 const RUN_ID = "123e4567-e89b-42d3-a456-426614174000";
@@ -87,6 +87,59 @@ class FakeCentral {
 }
 
 describe("SBI VC Trade staged-run importer", () => {
+  test("retains only a fixed-size digest after validating a near-four-MiB identity page", async () => {
+    const seen: Parameters<typeof parseStoredEnvelope>[2] = new Map();
+    const identity = "synthetic-large-identity-" + "x".repeat(4 * 1024 * 1024 - 1024);
+    const bytes = encode(
+      JSON.stringify({
+        meta: { status: "OK" },
+        body: {
+          list: [{ cashflowID: identity }],
+          totalSize: 1,
+          pageNumber: 0,
+          pageSize: 30,
+          totalNumOfPages: 1,
+        },
+      }),
+    );
+    expect(bytes.byteLength).toBeLessThanOrEqual(4 * 1024 * 1024);
+    expect(bytes.byteLength).toBeGreaterThan(4 * 1024 * 1024 - 1024);
+    const result = await parseStoredEnvelope(bytes, "cashflows-historical-page-0001", seen);
+    expect(result).toEqual({
+      page: { group: "cashflows-historical", index: 1, listLength: 1, totalSize: 1 },
+    });
+    expect(seen.size).toBe(1);
+    const digests = [...seen.get("cashflows-historical")!];
+    expect(digests).toHaveLength(1);
+    expect(digests[0]).toMatch(/^[0-9a-f]{64}$/u);
+    expect(digests[0]).toBe(await digest(encode(identity)));
+    expect(digests[0]).not.toContain("synthetic-large-identity");
+    await expect(
+      parseStoredEnvelope(bytes, "cashflows-historical-page-0001", seen),
+    ).rejects.toThrow("artifact_duplicate_provider_identity");
+  });
+
+  test("cross-page identity state is bounded to 6000 digests for the maximum inventory", async () => {
+    const seen: Parameters<typeof parseStoredEnvelope>[2] = new Map();
+    for (const group of ["executions-historical", "cashflows-historical"]) {
+      for (let page = 1; page <= 100; page += 1) {
+        const dataset = `${group}-page-${String(page).padStart(4, "0")}`;
+        const artifact = pageArtifact(dataset, 30, 3000);
+        await parseStoredEnvelope(
+          encode(JSON.stringify({ meta: { status: "OK" }, body: artifact.body })),
+          dataset,
+          seen,
+        );
+      }
+    }
+    expect(seen.size).toBe(2);
+    const groups = [...seen.values()];
+    expect(groups.map((group) => group.size)).toEqual([3000, 3000]);
+    const retained = groups.flatMap((group) => [...group]);
+    expect(retained.every((value) => /^[0-9a-f]{64}$/u.test(value))).toBeTrue();
+    expect(retained.reduce((total, value) => total + value.length, 0)).toBe(384_000);
+  });
+
   test("validates the complete run, preserves exact bytes, and replays idempotently", async () => {
     const bucket = new FakeBucket();
     const bodies = new Map<string, Uint8Array>();
@@ -470,11 +523,19 @@ describe("SBI VC Trade staged-run importer", () => {
       importRun(bucket, tamperedCentral, "test-v1", tamperedContinuation),
     ).rejects.toThrow("transfer_token_invalid");
     expect(tamperedCentral.requests).toHaveLength(0);
+    let invocations = 1;
+    const offsets: number[] = [];
     while (result.status === "deferred") {
       const previous = result.nextOffset;
+      offsets.push(previous);
+      expect(result.continuation.length).toBeLessThan(1600);
+      expect(central.requests.filter((request) => request.path.endsWith("/seal"))).toHaveLength(0);
       result = await importRun(bucket, central, "test-v1", result.continuation);
+      invocations += 1;
       if (result.status === "deferred") expect(result.nextOffset).toBeGreaterThan(previous);
     }
+    expect(invocations).toBe(26);
+    expect(offsets).toEqual(Array.from({ length: 25 }, (_, index) => (index + 1) * 8));
     expect(result).toMatchObject({
       status: "sealed",
       artifactCount: 205,

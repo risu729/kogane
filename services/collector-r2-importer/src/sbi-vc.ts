@@ -602,7 +602,7 @@ function pageDataset(group: PageGroup, index: number): string {
   return `${group}-page-${String(index).padStart(4, "0")}`;
 }
 
-async function parseStoredEnvelope(
+export async function parseStoredEnvelope(
   bytes: Uint8Array,
   dataset: string,
   providerIdentityDigests: Map<IdentityGroup, Set<string>>,
