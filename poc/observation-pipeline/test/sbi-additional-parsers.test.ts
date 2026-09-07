@@ -15,6 +15,7 @@ function artifact(dataset: string): ArtifactMeta {
     id: 1,
     sourceId: "sbi-securities",
     runStatus: "success",
+    runFailureCount: 0,
     dataset,
     url: null,
     mime: "application/json",

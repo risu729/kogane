@@ -26,6 +26,7 @@ export interface ParseSummary {
   superseded: number;
   observations: number;
   errors: number;
+  blocked: number;
 }
 
 export function runParsers(
@@ -39,6 +40,7 @@ export function runParsers(
     superseded: 0,
     observations: 0,
     errors: 0,
+    blocked: 0,
   };
   const artifacts = listArtifacts(store);
   for (const artifact of artifacts) {
@@ -47,8 +49,8 @@ export function runParsers(
       // A partial/failed collection is evidence about the failed attempt, not
       // a provider snapshot. Keep its raw artifact queryable, but never turn
       // it into current financial observations.
-      if (artifact.runStatus !== "success") {
-        summary.skipped += 1;
+      if (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) {
+        summary.blocked += 1;
         continue;
       }
       if (findParseRun(store, artifact.id, parser.name, parser.version) !== undefined) {
@@ -106,6 +108,6 @@ if (import.meta.main) {
   console.log(
     `parse: ${summary.parsed} parsed, ${summary.skipped} already current, ` +
       `${summary.superseded} superseded, ${summary.observations} observations, ` +
-      `${summary.errors} errors`,
+      `${summary.errors} errors, ${summary.blocked} blocked by fetch-run outcome`,
   );
 }

@@ -31,7 +31,15 @@ describe("Worker collector", () => {
       return new Response(
         JSON.stringify({
           meta: { status: "OK", secureKey: "next-secure", timestamp: "synthetic" },
-          body: paged ? { list: [{ synthetic: true }], totalSize: "1" } : { synthetic: true },
+          body: paged
+            ? {
+                list: [{ synthetic: true }],
+                pageNumber: Number(request.data.pageNumber),
+                pageSize: 30,
+                totalNumOfPages: 1,
+                totalSize: 1,
+              }
+            : { synthetic: true },
         }),
         { status: 200, headers: responseHeaders },
       );
@@ -90,7 +98,7 @@ describe("Worker collector", () => {
         meta: { status: "OK", secureKey: "next-secure" },
         body: isMalformedHistoricalExecution
           ? { list: [{ synthetic: true }] }
-          : { list: [], totalSize: "0" },
+          : { list: [], pageNumber: 0, pageSize: 30, totalNumOfPages: 0, totalSize: 0 },
       });
     }) as typeof fetch;
 
@@ -119,8 +127,14 @@ describe("Worker collector", () => {
       return Response.json({
         meta: { status: "OK", secureKey: "next-secure" },
         body: isHistoricalExecution
-          ? { list: [{ synthetic: true }], totalSize: "31" }
-          : { list: [], totalSize: "0" },
+          ? {
+              list: [{ synthetic: true }],
+              pageNumber: 0,
+              pageSize: 30,
+              totalNumOfPages: 2,
+              totalSize: 31,
+            }
+          : { list: [], pageNumber: 0, pageSize: 30, totalNumOfPages: 0, totalSize: 0 },
       });
     }) as typeof fetch;
 
@@ -132,5 +146,40 @@ describe("Worker collector", () => {
         onArtifact: async () => undefined,
       }),
     ).rejects.toThrow("executions-historical_pagination_length_mismatch");
+  });
+
+  test("rejects a recent view larger than its single collected page", async () => {
+    const artifacts: CollectorArtifact[] = [];
+    const fetcher = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        event: string;
+        data: Record<string, unknown>;
+      };
+      const recent = request.event === "executionList" && request.data.historical === "false";
+      return Response.json({
+        meta: { status: "OK", secureKey: "next-secure" },
+        body: recent
+          ? {
+              list: Array.from({ length: 30 }, () => ({ synthetic: true })),
+              pageNumber: 0,
+              pageSize: 30,
+              totalNumOfPages: 2,
+              totalSize: 31,
+            }
+          : { list: [], pageNumber: 0, pageSize: 30, totalNumOfPages: 0, totalSize: 0 },
+      });
+    }) as typeof fetch;
+
+    await expect(
+      collectSbiVcTrade({
+        session: seed,
+        fetcher,
+        onSession: async () => undefined,
+        onArtifact: async (artifact) => {
+          artifacts.push(artifact);
+        },
+      }),
+    ).rejects.toThrow("executions_recent_page_limit_exceeded");
+    expect(artifacts.at(-1)?.dataset).toBe("executions-recent-page-0001");
   });
 });

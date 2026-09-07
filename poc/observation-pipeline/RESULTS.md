@@ -1,12 +1,12 @@
 # Results
 
-Recorded 2026-08-28. No captured financial data, credentials, cookies,
+Recorded 2026-08-28 and extended 2026-09-07. No captured financial data, credentials, cookies,
 account identifiers, or balances were persisted or committed; every fixture
 is synthetic.
 
-The PoC ingests 4 synthetic artifacts from 2 sources into 28 observations
-(8 transaction, 10 balance, 2 position, 8 valuation) across 4 parse runs.
-`bun test` is 80 pass across 4 files, `tsc --noEmit` is clean.
+The PoC ingests 11 synthetic artifacts from 3 sources into 49 observations
+(14 transaction, 24 balance, 3 position, 8 valuation) across 11 parse runs.
+The exact current test count is reported by CI; `tsc --noEmit` is clean.
 
 ## What it settled
 
@@ -29,8 +29,10 @@ nullable and pushed the meaning into a type column.
 **Supersession works as a marker on the parse run, not on observations.**
 Re-parsing an artifact with a bumped parser version leaves both observation
 sets intact and flips one nullable column on the older run. "Current" is
-then a two-condition join, which the browser uses on every page. Nothing
-about the append-only rule had to be relaxed.
+then a current-state join, which the browser uses on every page. Nothing
+about the append-only rule had to be relaxed. Current state additionally
+requires the parent fetch run to be successful and free of failure evidence;
+partial raw evidence remains browsable but cannot replace financial state.
 
 **Provider-reported valuations sit naturally beside positions.** SBI reports
 evaluation amount and profit/loss in both JPY and the trading currency. As
@@ -60,6 +62,13 @@ each one is a trap the real implementation would otherwise walk into.
 - **A failed observation insert left a run marked `ok` with a truncated
   observation set** — indistinguishable from a source that really said less.
   Fixed: the parse run and its observations commit together.
+- **A partial collector run could still publish current observations.** A
+  pagination-total change preserved the final response correctly, but Layer B
+  had no parent-run outcome and could parse that failure evidence as account
+  state. Fixed by carrying status and failure count into `ArtifactMeta`,
+  blocking all parsers centrally, and repeating the predicate in every current
+  query. A v2-to-v3 in-place migration preserves old stores and marks legacy
+  non-success runs conservatively.
 - **PayPay columns were mapped positionally.** A swapped outgoing/incoming
   header recorded a payment as income, with no warning, and
   `docs/sources/paypay.md` explicitly lists the current column set as

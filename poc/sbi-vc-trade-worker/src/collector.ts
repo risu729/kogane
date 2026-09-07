@@ -37,7 +37,19 @@ export async function collectSbiVcTrade(options: {
   await collect("cash-balances", "cashBalanceList", { secureKey: session.secureKey });
   await collect("account-margin", "accountMargin", { secureKey: session.secureKey });
   await collect("position-summary", "positionSummaryList", { secureKey: session.secureKey });
-  await collect("executions-recent-page-0001", "executionList", executionData(session, 0, false));
+  const recent = await collect(
+    "executions-recent-page-0001",
+    "executionList",
+    executionData(session, 0, false),
+  );
+  const recentPage = pageInfo(recent, 0);
+  if (recentPage === null) throw new Error("executions_recent_invalid_pagination");
+  if (recentPage.totalSize > PAGE_SIZE) {
+    throw new Error("executions_recent_page_limit_exceeded");
+  }
+  if (recentPage.listLength !== recentPage.totalSize) {
+    throw new Error("executions_recent_pagination_length_mismatch");
+  }
 
   await collectPages({
     prefix: "executions-historical",
@@ -84,7 +96,7 @@ async function collectPages(options: {
   for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber += 1) {
     const dataset = `${options.prefix}-page-${String(pageNumber + 1).padStart(4, "0")}`;
     const body = await options.collect(dataset, pageNumber);
-    const page = pageInfo(body);
+    const page = pageInfo(body, pageNumber);
     if (page === null) throw new Error(`${options.prefix}_invalid_pagination`);
     expectedTotal ??= page.totalSize;
     if (page.totalSize !== expectedTotal) {
@@ -139,10 +151,24 @@ function sanitizeEnvelope(value: unknown): { meta: Record<string, unknown>; body
   return { meta, body: value.body };
 }
 
-function pageInfo(body: unknown): { listLength: number; totalSize: number } | null {
+function pageInfo(
+  body: unknown,
+  expectedPageNumber: number,
+): { listLength: number; totalSize: number } | null {
   if (!isRecord(body) || !Array.isArray(body.list)) return null;
+  if (body.list.length > PAGE_SIZE) return null;
   const totalSize = toNonNegativeInteger(body.totalSize);
-  if (totalSize === null) return null;
+  const pageNumber = toNonNegativeInteger(body.pageNumber);
+  const pageSize = toNonNegativeInteger(body.pageSize);
+  const totalNumOfPages = toNonNegativeInteger(body.totalNumOfPages);
+  if (
+    totalSize === null ||
+    pageNumber !== expectedPageNumber ||
+    pageSize !== PAGE_SIZE ||
+    totalNumOfPages !== Math.ceil(totalSize / PAGE_SIZE)
+  ) {
+    return null;
+  }
   return { listLength: body.list.length, totalSize };
 }
 

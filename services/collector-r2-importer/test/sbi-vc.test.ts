@@ -182,6 +182,141 @@ describe("SBI VC Trade staged-run importer", () => {
     expect(central.requests).toHaveLength(0);
   });
 
+  test("rejects page metadata that disagrees with the dataset or complete recent view", async () => {
+    for (const mutate of [
+      (body: Record<string, unknown>) => {
+        body.pageNumber = 1;
+      },
+      (body: Record<string, unknown>) => {
+        body.pageSize = 50;
+      },
+      (body: Record<string, unknown>) => {
+        body.totalNumOfPages = 2;
+      },
+      (body: Record<string, unknown>) => {
+        body.totalSize = 31;
+        body.totalNumOfPages = 2;
+      },
+    ]) {
+      const bucket = new FakeBucket();
+      const manifest = await storeRun(
+        bucket,
+        [
+          staticArtifact("cash-balances"),
+          staticArtifact("account-margin"),
+          staticArtifact("position-summary"),
+          staticArtifact("executions-recent-page-0001"),
+        ],
+        [{ operation: "collect", errorCode: "collector_http_503" }],
+      );
+      const recent = [...bucket.objects.entries()].find(([key]) =>
+        key.endsWith("/executions-recent-page-0001.json"),
+      );
+      if (!recent) throw new Error("recent fixture missing");
+      const envelope = JSON.parse(decode(recent[1].body)) as {
+        body: Record<string, unknown>;
+      };
+      mutate(envelope.body);
+      await replaceArtifact(bucket, recent[0], envelope, manifest);
+      const central = new FakeCentral();
+      await expect(importRun(bucket, central)).rejects.toMatchObject({
+        status: 409,
+        code: "artifact_page_payload_invalid",
+      });
+      expect(central.requests).toHaveLength(0);
+    }
+  });
+
+  test("accepts digit-string pagination and collector-preserved safe meta fields", async () => {
+    const bucket = new FakeBucket();
+    const manifest = await storeRun(
+      bucket,
+      [
+        staticArtifact("cash-balances"),
+        staticArtifact("account-margin"),
+        staticArtifact("position-summary"),
+        staticArtifact("executions-recent-page-0001"),
+      ],
+      [{ operation: "collect", errorCode: "collector_http_503" }],
+    );
+    const recent = [...bucket.objects.entries()].find(([key]) =>
+      key.endsWith("/executions-recent-page-0001.json"),
+    );
+    if (!recent) throw new Error("recent fixture missing");
+    const envelope = JSON.parse(decode(recent[1].body)) as {
+      meta: Record<string, unknown>;
+      body: Record<string, unknown>;
+    };
+    envelope.meta["providerTrace"] = "safe-context";
+    for (const field of ["pageNumber", "pageSize", "totalNumOfPages", "totalSize"]) {
+      envelope.body[field] = String(envelope.body[field]);
+    }
+    await replaceArtifact(bucket, recent[0], envelope, manifest);
+    await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({
+      sealed: true,
+      artifactCount: 5,
+    });
+  });
+
+  test("rejects duplicate provider identities within one page", async () => {
+    const bucket = new FakeBucket();
+    const recent = staticArtifact("executions-recent-page-0001");
+    recent.body = {
+      list: [
+        { CExecutionId: "execution-1", CExecutionIdSubNo: "1" },
+        { CExecutionId: "execution-1", CExecutionIdSubNo: "1" },
+      ],
+      pageNumber: 0,
+      pageSize: 30,
+      totalNumOfPages: 1,
+      totalSize: 2,
+    };
+    await storeRun(
+      bucket,
+      [
+        staticArtifact("cash-balances"),
+        staticArtifact("account-margin"),
+        staticArtifact("position-summary"),
+        recent,
+      ],
+      [{ operation: "collect", errorCode: "collector_http_503" }],
+    );
+    const central = new FakeCentral();
+    await expect(importRun(bucket, central)).rejects.toMatchObject({
+      status: 409,
+      code: "artifact_duplicate_provider_identity",
+    });
+    expect(central.requests).toHaveLength(0);
+  });
+
+  test("rejects duplicate provider identities across historical pages", async () => {
+    const bucket = new FakeBucket();
+    const first = pageArtifact("executions-historical-page-0001", 30, 31);
+    const second = pageArtifact("executions-historical-page-0002", 1, 31);
+    const firstList = (first.body as { list: Record<string, unknown>[] }).list;
+    const secondList = (second.body as { list: Record<string, unknown>[] }).list;
+    secondList[0] = { ...firstList[0] };
+    await storeRun(
+      bucket,
+      [
+        staticArtifact("cash-balances"),
+        staticArtifact("account-margin"),
+        staticArtifact("position-summary"),
+        staticArtifact("executions-recent-page-0001"),
+        first,
+        second,
+        pageArtifact("cashflows-historical-page-0001", 0, 0),
+      ],
+      [],
+    );
+    const central = new FakeCentral();
+    await expect(importRun(bucket, central)).rejects.toMatchObject({
+      status: 409,
+      code: "artifact_duplicate_provider_identity",
+    });
+    expect(central.requests).toHaveLength(0);
+  });
+
   test("catalogues the final response that caused a collect pagination failure", async () => {
     for (const pages of [
       [
@@ -217,6 +352,33 @@ describe("SBI VC Trade staged-run importer", () => {
       });
       expect(central.requests.some((request) => request.path.endsWith("/seal"))).toBe(true);
     }
+  });
+
+  test("catalogues a recent-page truncation response as failure evidence", async () => {
+    const bucket = new FakeBucket();
+    const recent = staticArtifact("executions-recent-page-0001");
+    recent.body = {
+      list: Array.from({ length: 30 }, (_, index) => ({ synthetic: index })),
+      pageNumber: 0,
+      pageSize: 30,
+      totalNumOfPages: 2,
+      totalSize: 31,
+    };
+    await storeRun(
+      bucket,
+      [
+        staticArtifact("cash-balances"),
+        staticArtifact("account-margin"),
+        staticArtifact("position-summary"),
+        recent,
+      ],
+      [{ operation: "collect", errorCode: "executions_recent_page_limit_exceeded" }],
+    );
+    const central = new FakeCentral();
+    await expect(importRun(bucket, central)).resolves.toMatchObject({
+      sealed: true,
+      artifactCount: 5,
+    });
   });
 
   test("does not waive semantic validation for a non-pagination collect failure", async () => {
@@ -343,22 +505,41 @@ describe("SBI VC Trade staged-run importer", () => {
   });
 });
 
-function staticArtifact(dataset: string) {
+function staticArtifact(dataset: string): { dataset: string; body: unknown } {
   return {
     dataset,
     body:
       dataset === "executions-recent-page-0001"
-        ? { list: [{ synthetic: true }], totalSize: "1" }
-        : { synthetic: true, dataset },
+        ? {
+            list: [{ CExecutionId: "recent-execution-1", CExecutionIdSubNo: "1" }],
+            pageNumber: 0,
+            pageSize: 30,
+            totalNumOfPages: 1,
+            totalSize: 1,
+          }
+        : dataset === "position-summary"
+          ? { BTC: { "0": { productId: "BTCJPY" } } }
+          : { synthetic: true, dataset },
   };
 }
 
 function pageArtifact(dataset: string, listLength: number, totalSize: number) {
+  const execution = dataset.startsWith("executions-");
   return {
     dataset,
     body: {
-      list: Array.from({ length: listLength }, (_, index) => ({ synthetic: index })),
-      totalSize: String(totalSize),
+      list: Array.from({ length: listLength }, (_, index) =>
+        execution
+          ? {
+              CExecutionId: `${dataset}-execution-${index}`,
+              CExecutionIdSubNo: "1",
+            }
+          : { cashflowID: `${dataset}-cashflow-${index}` },
+      ),
+      pageNumber: Number(dataset.slice(-4)) - 1,
+      pageSize: 30,
+      totalNumOfPages: Math.ceil(totalSize / 30),
+      totalSize,
     },
   };
 }
@@ -410,6 +591,25 @@ function replaceManifest(bucket: FakeBucket, manifest: Record<string, unknown>) 
       status: String(manifest.status),
     }),
   );
+}
+
+async function replaceArtifact(
+  bucket: FakeBucket,
+  key: string,
+  value: unknown,
+  manifest: { artifacts: Array<{ key: string; sha256: string; bytes: number }> },
+): Promise<void> {
+  const original = bucket.objects.get(key);
+  if (!original) throw new Error("artifact missing");
+  const body = encode(`${JSON.stringify(value)}\n`);
+  const sha256 = await digest(body);
+  original.body = body;
+  original.customMetadata.sha256 = sha256;
+  const entry = manifest.artifacts.find((artifact) => artifact.key === key);
+  if (!entry) throw new Error("manifest artifact missing");
+  entry.sha256 = sha256;
+  entry.bytes = body.byteLength;
+  replaceManifest(bucket, manifest as unknown as Record<string, unknown>);
 }
 
 function stored(body: Uint8Array, customMetadata: Record<string, string>): StoredObject {

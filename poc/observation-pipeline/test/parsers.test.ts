@@ -22,6 +22,7 @@ function artifact(overrides: Partial<ArtifactMeta>): ArtifactMeta {
     id: 1,
     sourceId: "sbi-securities",
     runStatus: "success",
+    runFailureCount: 0,
     dataset: null,
     url: null,
     mime: "application/json",

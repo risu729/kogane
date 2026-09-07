@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
   started_at      TEXT NOT NULL,         -- ISO 8601 UTC
   completed_at    TEXT,
   status          TEXT NOT NULL,         -- 'success' | 'partial' | 'failed'
+  failure_count   INTEGER NOT NULL DEFAULT 0
+                  CHECK (failure_count >= 0),
   UNIQUE (source_id, external_run_id)
 ) STRICT;
 

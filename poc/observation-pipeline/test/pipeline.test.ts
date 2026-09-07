@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,8 +7,16 @@ import { join } from "node:path";
 import { ingestFile, ingestRunDirectory } from "../src/ingest.ts";
 import { runParsers } from "../src/parse.ts";
 import {
+  currentPositions,
+  currentTransactions,
+  currentValuations,
+  latestBalances,
+} from "../src/queries.ts";
+import {
   insertFetchArtifact,
   insertFetchRun,
+  insertObservation,
+  insertParseRun,
   openStore,
   putRawObject,
   upsertSource,
@@ -17,6 +26,7 @@ import type { Parser } from "../src/types.ts";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
 const SBI_RUN = join(FIXTURES, "sbi-securities", "2026-08-20", "run-20260820-210000-poc01");
+const SBI_VC_RUN = join(FIXTURES, "sbi-vc-trade", "2026-09-07", "run-20260907-synthetic01");
 
 function tempStore(): Store {
   return openStore(mkdtempSync(join(tmpdir(), "kogane-poc-")));
@@ -47,6 +57,43 @@ describe("ingestion", () => {
     }
   });
 
+  test("migrates v2 fetch runs without making legacy partial output current", () => {
+    const directory = mkdtempSync(join(tmpdir(), "kogane-v2-store-"));
+    const db = new Database(join(directory, "kogane-poc.sqlite"), {
+      create: true,
+    });
+    db.exec(`
+      CREATE TABLE sources (
+        id TEXT PRIMARY KEY, provider TEXT NOT NULL, ingestion TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE fetch_runs (
+        id INTEGER PRIMARY KEY,
+        source_id TEXT NOT NULL REFERENCES sources(id),
+        external_run_id TEXT,
+        tool TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        status TEXT NOT NULL,
+        UNIQUE (source_id, external_run_id)
+      ) STRICT;
+      INSERT INTO sources VALUES ('legacy', 'Legacy', 'collector-r2');
+      INSERT INTO fetch_runs
+        (source_id, external_run_id, tool, started_at, status)
+      VALUES ('legacy', 'partial-1', 'import-run', '2026-09-01T00:00:00Z', 'partial');
+      PRAGMA user_version = 2;
+    `);
+    db.close();
+    const store = openStore(directory);
+    const row = store.db.query("SELECT status, failure_count FROM fetch_runs").get() as {
+      status: string;
+      failure_count: number;
+    };
+    expect(row).toEqual({ status: "partial", failure_count: 1 });
+    expect(
+      (store.db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
+    ).toBe(3);
+  });
+
   test("run-directory ingestion is idempotent", () => {
     const store = tempStore();
     const source = { id: "sbi-securities", provider: "SBI Securities" };
@@ -58,6 +105,19 @@ describe("ingestion", () => {
     expect(count(store, "fetch_runs")).toBe(1);
     expect(count(store, "fetch_artifacts")).toBe(4);
     expect(count(store, "raw_objects")).toBe(4);
+  });
+
+  test("SBI VC collector run ingestion verifies all six source-separated artifacts", () => {
+    const store = tempStore();
+    const source = { id: "sbi-vc-trade", provider: "SBI VC Trade" };
+    const first = ingestRunDirectory(store, SBI_VC_RUN, source);
+    expect(first).toMatchObject({
+      artifacts: 6,
+      deduplicated: 0,
+      skippedExisting: false,
+    });
+    expect(ingestRunDirectory(store, SBI_VC_RUN, source).skippedExisting).toBe(true);
+    expect(count(store, "fetch_artifacts")).toBe(6);
   });
 
   test("identical bytes under different names store one blob", () => {
@@ -89,6 +149,7 @@ describe("ingestion", () => {
         runId: "bad-run",
         startedAt: "2026-08-20T00:00:00Z",
         status: "success",
+        failures: [],
         artifacts: [{ dataset: "some-dataset", sha256, bytes: 2 }],
       });
     writeFileSync(join(directory, "manifest.json"), manifest("f".repeat(64)));
@@ -115,6 +176,7 @@ describe("ingestion", () => {
         runId: "partial-run",
         startedAt: "2026-08-20T00:00:00Z",
         status: "success",
+        failures: [],
         artifacts: [{ dataset: "present" }, { dataset: "absent" }],
       }),
     );
@@ -133,6 +195,7 @@ describe("ingestion", () => {
         runId: "dupe-run",
         startedAt: "2026-08-20T00:00:00Z",
         status: "success",
+        failures: [],
         artifacts: [{ dataset: "ds" }, { dataset: "ds" }],
       }),
     );
@@ -140,6 +203,36 @@ describe("ingestion", () => {
       /more than once/u,
     );
     expect(count(store, "fetch_runs")).toBe(0);
+  });
+
+  test("collector manifests must explicitly declare status and failure evidence", () => {
+    const store = tempStore();
+    const directory = mkdtempSync(join(tmpdir(), "kogane-manifest-outcome-"));
+    writeFileSync(join(directory, "ds.json"), "{}");
+    const base = {
+      runId: "missing-outcome",
+      startedAt: "2026-09-07T00:00:00Z",
+      artifacts: [{ dataset: "ds" }],
+    };
+    writeFileSync(join(directory, "manifest.json"), JSON.stringify({ ...base, failures: [] }));
+    expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
+      /unknown run status/u,
+    );
+    writeFileSync(join(directory, "manifest.json"), JSON.stringify({ ...base, status: "success" }));
+    expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
+      /failures must be an array/u,
+    );
+    expect(count(store, "fetch_runs")).toBe(0);
+    expect(count(store, "fetch_artifacts")).toBe(0);
+
+    const valid = { ...base, runId: "existing-outcome", status: "success", failures: [] };
+    writeFileSync(join(directory, "manifest.json"), JSON.stringify(valid));
+    expect(ingestRunDirectory(store, directory, { id: "x", provider: "X" }).artifacts).toBe(1);
+    const { status: _status, ...missingStatus } = valid;
+    writeFileSync(join(directory, "manifest.json"), JSON.stringify(missingStatus));
+    expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
+      /unknown run status/u,
+    );
   });
 
   test("re-fetching an unchanged export records a second confirmation", () => {
@@ -234,11 +327,167 @@ describe("parse runs", () => {
         sha256: raw.sha256,
       });
       const summary = runParsers(store, [fakeParser("0.1.0", "must-not-run")]);
-      expect(summary).toMatchObject({ parsed: 0, skipped: 1, observations: 0, errors: 0 });
+      expect(summary).toMatchObject({
+        parsed: 0,
+        blocked: 1,
+        observations: 0,
+        errors: 0,
+      });
       expect(count(store, "parse_runs")).toBe(0);
       expect(count(store, "transaction_observations")).toBe(0);
       expect(count(store, "fetch_artifacts")).toBe(1);
     }
+  });
+
+  test("pagination-total-changed partial runs produce zero current observations", () => {
+    const store = tempStore();
+    const directory = mkdtempSync(join(tmpdir(), "kogane-partial-page-"));
+    const dataset = "executions-historical-page-0002";
+    const bytes = new TextEncoder().encode(
+      JSON.stringify({
+        meta: { status: "OK", timestamp: "2026/09/07 09:00:06" },
+        body: {
+          list: [{ CExecutionId: "synthetic", CExecutionIdSubNo: "1" }],
+          pageNumber: 1,
+          pageSize: 30,
+          totalNumOfPages: 2,
+          totalSize: 32,
+        },
+      }),
+    );
+    writeFileSync(join(directory, `${dataset}.json`), bytes);
+    writeFileSync(
+      join(directory, "manifest.json"),
+      JSON.stringify({
+        runId: "partial-pagination-total-changed",
+        startedAt: "2026-09-07T00:00:00.000Z",
+        completedAt: "2026-09-07T00:00:06.000Z",
+        status: "partial",
+        artifacts: [
+          {
+            dataset,
+            sha256: createHash("sha256").update(bytes).digest("hex"),
+            bytes: bytes.byteLength,
+          },
+        ],
+        failures: [
+          {
+            operation: "collect",
+            errorCode: "executions_historical_pagination_total_changed",
+          },
+        ],
+      }),
+    );
+    const ingested = ingestRunDirectory(store, directory, {
+      id: "sbi-vc-trade",
+      provider: "SBI VC Trade",
+    });
+    const summary = runParsers(store);
+    expect(summary).toMatchObject({
+      parsed: 0,
+      errors: 0,
+      blocked: 1,
+      observations: 0,
+    });
+    expect(count(store, "parse_runs")).toBe(0);
+    expect(currentTransactions(store)).toEqual([]);
+
+    // Defense in depth for stores produced by the pre-policy parser: even an
+    // old successful parse attached to a partial fetch run is not current.
+    const artifactId = (store.db.query("SELECT id FROM fetch_artifacts").get() as { id: number })
+      .id;
+    const parseRunId = insertParseRun(store, {
+      artifactId,
+      parserName: "legacy-sbi-vc-executions",
+      parserVersion: "0.1.0",
+      parsedAt: "2026-09-07T00:01:00.000Z",
+      status: "ok",
+      warnings: [],
+    });
+    insertObservation(store, parseRunId, {
+      kind: "transaction",
+      sourceAccount: "sbi-vc-trade:main",
+      externalId: "legacy-partial-observation",
+      rawLocator: "json:$.body.list[0]",
+      extra: {},
+    });
+    insertObservation(store, parseRunId, {
+      kind: "balance",
+      sourceAccount: "sbi-vc-trade:main",
+      metric: "cash_balance",
+      instrument: "JPY",
+      amountMinor: 1,
+      rawLocator: "json:$.body.balance",
+      extra: {},
+    });
+    insertObservation(store, parseRunId, {
+      kind: "position",
+      sourceAccount: "sbi-vc-trade:main",
+      securityCode: "BTCJPY",
+      quantityText: "1",
+      quantityScale: 0,
+      currency: "JPY",
+      rawLocator: "json:$.body.position",
+      extra: {},
+    });
+    insertObservation(store, parseRunId, {
+      kind: "valuation",
+      sourceAccount: "sbi-vc-trade:main",
+      subject: "BTCJPY",
+      metric: "market_value",
+      currency: "JPY",
+      amountMinor: 1,
+      rawLocator: "json:$.body.valuation",
+      extra: {},
+    });
+    expect(ingested.artifacts).toBe(1);
+    expect(currentTransactions(store)).toEqual([]);
+    expect(latestBalances(store)).toEqual([]);
+    expect(currentPositions(store)).toEqual([]);
+    expect(currentValuations(store)).toEqual([]);
+  });
+
+  test("current executions collapse recent and historical overlap to historical", () => {
+    const store = tempStore();
+    const directory = mkdtempSync(join(tmpdir(), "kogane-sbi-vc-overlap-"));
+    writeFileSync(join(directory, "recent.json"), "{}");
+    writeFileSync(join(directory, "historical.json"), "{}");
+    const source = { id: "sbi-vc-trade", provider: "SBI VC Trade" };
+    ingestFile(store, join(directory, "recent.json"), {
+      source,
+      mime: "application/json",
+      fetchedAt: "2026-09-07T00:00:00Z",
+    });
+    ingestFile(store, join(directory, "historical.json"), {
+      source,
+      mime: "application/json",
+      fetchedAt: "2026-09-07T00:00:01Z",
+    });
+    const artifacts = store.db.query("SELECT id FROM fetch_artifacts ORDER BY id").all() as {
+      id: number;
+    }[];
+    for (const [index, sourceView] of ["recent", "historical"].entries()) {
+      const artifactRow = artifacts[index];
+      if (artifactRow === undefined) throw new Error("missing test artifact");
+      const parseRunId = insertParseRun(store, {
+        artifactId: artifactRow.id,
+        parserName: "sbi-vc-executions",
+        parserVersion: "0.1.0",
+        parsedAt: `2026-09-07T00:01:0${index}Z`,
+        status: "ok",
+        warnings: [],
+      });
+      insertObservation(store, parseRunId, {
+        kind: "transaction",
+        sourceAccount: "sbi-vc-trade:main",
+        externalId: '["execution","1"]',
+        description: sourceView,
+        rawLocator: "json:$.body.list[0]",
+        extra: { _kogane: { sourceView } },
+      });
+    }
+    expect(currentTransactions(store).map((row) => row.description)).toEqual(["historical"]);
+    expect(count(store, "transaction_observations")).toBe(2);
   });
 
   test("a newer parser version supersedes, never deletes", () => {
@@ -375,7 +624,9 @@ describe("parse runs", () => {
     expect(summary.parsed).toBe(0);
     // Neither a truncated observation set nor a run claiming success.
     expect(count(store, "transaction_observations")).toBe(0);
-    const run = store.db.query("SELECT status FROM parse_runs").get() as { status: string };
+    const run = store.db.query("SELECT status FROM parse_runs").get() as {
+      status: string;
+    };
     expect(run.status).toBe("error");
   });
 

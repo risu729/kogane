@@ -5,7 +5,8 @@
 //
 //   * "Current" means produced by a parse run that succeeded and that nothing
 //     has superseded. That is the predicate
-//     `p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'`, applied to
+//     `p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'`, plus a
+//     successful parent fetch run with no failure evidence, applied to
 //     every current-state view. Superseded observations are never deleted, so
 //     they stay reachable through the artifact they came from.
 //   * Nothing here writes. The browser observes the store; a handler that
@@ -72,7 +73,9 @@ const COUNTED_TABLES = [
 ] as const;
 
 /** Only a parse run that succeeded and that nothing has superseded is current. */
-const CURRENT = "p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'";
+const CURRENT =
+  "p.superseded_by_parse_run_id IS NULL AND p.status = 'ok' " +
+  "AND f.status = 'success' AND f.failure_count = 0";
 
 const SEPARATOR = " · ";
 
@@ -148,15 +151,33 @@ export function overview(store: Store): Overview {
 export function currentTransactions(store: Store): TransactionRow[] {
   return store.db
     .query(
-      `SELECT t.id, fa.source_id, t.source_account, t.as_of,
-              CAST(t.amount_minor AS TEXT) AS amount_minor, t.amount_text,
-              t.currency, t.description, t.counterparty, t.external_id, t.status,
-              p.parser_name || '@' || p.parser_version AS parser
-       FROM transaction_observations t
-       JOIN parse_runs p ON p.id = t.parse_run_id
-       JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
-       WHERE ${CURRENT}
-       ORDER BY COALESCE(t.as_of, '') DESC, t.id DESC`,
+      `SELECT id, source_id, source_account, as_of, amount_minor, amount_text,
+              currency, description, counterparty, external_id, status, parser
+       FROM (
+         SELECT t.id, fa.source_id, t.source_account, t.as_of,
+                CAST(t.amount_minor AS TEXT) AS amount_minor, t.amount_text,
+                t.currency, t.description, t.counterparty, t.external_id, t.status,
+                p.parser_name || '@' || p.parser_version AS parser,
+                ROW_NUMBER() OVER (
+                  PARTITION BY CASE
+                    WHEN p.parser_name = 'sbi-vc-executions' AND t.external_id IS NOT NULL
+                      THEN json_array(fa.source_id, t.source_account, t.external_id)
+                    ELSE json_array('observation-row', t.id)
+                  END
+                  ORDER BY CASE json_extract(t.extra_json, '$._kogane.sourceView')
+                    WHEN 'historical' THEN 0
+                    WHEN 'recent' THEN 1
+                    ELSE 2
+                  END, t.id DESC
+                ) AS rank_in_identity
+         FROM transaction_observations t
+         JOIN parse_runs p ON p.id = t.parse_run_id
+         JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+         JOIN fetch_runs f ON f.id = fa.fetch_run_id
+         WHERE ${CURRENT}
+       )
+       WHERE rank_in_identity = 1
+       ORDER BY COALESCE(as_of, '') DESC, id DESC`,
     )
     .all() as TransactionRow[];
 }
@@ -188,6 +209,7 @@ export function latestBalances(store: Store): BalanceRow[] {
          FROM balance_observations b
          JOIN parse_runs p ON p.id = b.parse_run_id
          JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+         JOIN fetch_runs f ON f.id = fa.fetch_run_id
          WHERE ${CURRENT}
        )
        WHERE rank_in_group = 1
@@ -222,6 +244,7 @@ export function currentPositions(store: Store): PositionRow[] {
        FROM position_observations po
        JOIN parse_runs p ON p.id = po.parse_run_id
        JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+       JOIN fetch_runs f ON f.id = fa.fetch_run_id
        WHERE ${CURRENT}
        ORDER BY fa.source_id, po.source_account, po.security_code, po.id`,
     )
@@ -238,6 +261,7 @@ export function currentValuations(store: Store): ValuationRow[] {
        FROM valuation_observations v
        JOIN parse_runs p ON p.id = v.parse_run_id
        JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+       JOIN fetch_runs f ON f.id = fa.fetch_run_id
        WHERE ${CURRENT}
        ORDER BY fa.source_id, v.source_account, v.subject, v.metric, v.id`,
     )

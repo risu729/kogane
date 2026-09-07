@@ -71,7 +71,7 @@ bytes plus artifact metadata to typed observations. Its obligations:
 2. Side-effect free. No writes, no network, no filesystem, no clock, no
    randomness, no environment lookups. The only time-like value a parser
    may use is `artifact.fetchedAt`, which is handed to it as data; none of
-   the current parsers uses even that.
+   the current parsers use even that.
 3. Named and versioned. `name` and `version` are fields of the parser
    object, and both are recorded on the parse run that carries its output.
 4. Selects from metadata alone. `accepts(artifact)` sees the artifact row
@@ -80,8 +80,8 @@ bytes plus artifact metadata to typed observations. Its obligations:
    hash — never the bytes. Selection is therefore a database query in
    production, and a parser cannot sniff its way into a payload it was not
    registered for. In the PoC `accepts` is exact equality on `sourceId`
-   plus `dataset` for the seven SBI parsers, exact source/dataset/MIME for
-   Mobile Suica, and `sourceId` plus `mime`
+   plus `dataset` for the SBI and SBI VC Trade parsers, exact
+   source/dataset/MIME for Mobile Suica, and `sourceId` plus `mime`
    for `paypay-csv`, whose artifact arrives through the file-export path
    with no dataset at all.
 5. Records a raw locator on every observation. `rawLocator` is mandatory
@@ -200,6 +200,71 @@ field is still preserved: the parser also lists the row keys it does not
 map to a metric and warns about them by name, so `totalBalance` appearing
 in a future payload shows up as a warning rather than as silence.
 
+### SBI VC Trade source-separated parsing
+
+The SBI VC Trade collector writes six independently hashed artifacts and
+Layer B keeps those boundaries. Five parsers cover them: cash balances,
+account margin, position summary, execution pages, and cashflow pages.
+Recent and historical execution pages intentionally share one parser because
+their provider record schema and composite identity are the same. This avoids
+two interpretations of the same dataset family. Layer B preserves both source
+views for provenance, while the current-transactions query collapses an
+overlapping composite identity to the complete historical view. A recent-only
+identity remains current.
+
+The gateway envelope is exactly `{ meta, body }`, with only the sanitized
+`sessUpdTime`, `status`, and `timestamp` metadata. Page artifacts additionally
+require page size 30, a page number matching the four-digit dataset suffix,
+`totalNumOfPages === ceil(totalSize / 30)`, exact list cardinality, and the
+collector's 100-page ceiling. The recent execution view is a single-page
+window and fails closed if `totalSize` exceeds 30. Cross-page contiguity and a
+stable `totalSize` are checked by the collector and importer, because a
+side-effect-free one-artifact parser cannot validate adjacent artifacts.
+
+Provider meaning is transcribed without hidden sign or unit guesses:
+
+- execution identity is the collision-free JSON tuple
+  `[CExecutionId, CExecutionIdSubNo]`; buy/sell is retained as direction in
+  `_kogane`, never applied as a transaction amount sign;
+- `currencyPair` supplies the base unit for exact quantity text and the quote
+  unit for exact price text; neither is flattened into `amountMinor`;
+- cashflow direction comes only from the signed `cashflowAmount`; a disagreeing
+  type label is preserved and warned about, and `cashbalance` becomes a
+  separate after-cashflow balance observation;
+- crypto balances use exact decimal text and scale. Minor units are emitted
+  only for currencies whose exponent is defined centrally; base-currency
+  fields without an explicit currency remain provider context rather than
+  being guessed as JPY;
+- position `totalAmount` becomes quantity. `evaluationPl` stays in `extra`
+  because the payload does not explicitly denominate it.
+
+All SBI VC Trade rows use `sbi-vc-trade:main` as source identity. Provider
+account identifiers remain in `extra`, never in the join key. Every row has a
+JSON locator and retains sanitized gateway/page context without copying the
+whole sibling list. The synthetic fixtures mirror the audited shape; a
+checked-in, localhost-only production R2 canary confirmed nine of nine
+successful manifests had one parser per artifact and zero parse failures
+without emitting object keys, hashes, bodies, financial values, account
+identifiers, or secrets. Those runs had empty position and recent-execution
+views and one historical page per dataset, so production evidence does not yet
+prove non-empty position/recent shapes, multi-page chains, or cross-view
+identity overlap; anonymous tests cover those contracts without relabelling
+them as observations.
+
+Cash-balance and account-margin child rows are atomic contract records. A
+non-object row, missing denomination, or unreadable exact decimal rejects the
+whole artifact; the parser never publishes the valid-looking prefix of a
+partially malformed financial response.
+
+Layer B also carries the parent fetch-run status and failure count on every
+artifact. Parsers run only for a successful parent with zero failure evidence,
+and all current-state queries repeat that predicate. A partial pagination run
+therefore remains inspectable raw evidence but cannot publish financial
+observations or supersede a prior successful state. Collector manifests must
+explicitly contain a recognized `status` and a `failures` array; absence is not
+interpreted as success. Legacy database compatibility is handled by the schema
+migration instead of weakening this import boundary.
+
 ### How a parser becomes live
 
 `src/parsers/registry.ts` exports one flat array:
@@ -214,6 +279,11 @@ export const PARSERS: readonly Parser[] = [
   sbiForeignTradeRecords,
   sbiForeignCashPositions,
   sbiForeignCashBalances,
+  sbiVcCashBalances,
+  sbiVcAccountMargin,
+  sbiVcPositionSummary,
+  sbiVcExecutions,
+  sbiVcCashflows,
   paypayCsv,
 ];
 ```

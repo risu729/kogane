@@ -28,7 +28,7 @@ const MANIFEST_KEY =
 const SHA256 = /^[0-9a-f]{64}$/u;
 const ERROR_CODE = /^[a-z0-9_]{1,100}$/u;
 const PAGINATION_EVIDENCE_ERROR =
-  /^(?:executions_historical|cashflows_historical)_(?:invalid_pagination|pagination_total_changed|pagination_length_mismatch)$/u;
+  /^(?:executions_recent_(?:invalid_pagination|page_limit_exceeded|pagination_length_mismatch)|(?:executions_historical|cashflows_historical)_(?:invalid_pagination|pagination_total_changed|pagination_length_mismatch))$/u;
 const STATIC_DATASETS = [
   "cash-balances",
   "account-margin",
@@ -40,10 +40,17 @@ const HISTORICAL_CASHFLOW = /^cashflows-historical-page-(\d{4})$/u;
 
 type JsonObject = Record<string, unknown>;
 type PageGroup = "executions-historical" | "cashflows-historical";
+type IdentityGroup =
+  | "position-summary"
+  | "executions-recent"
+  | "executions-historical"
+  | "cashflows-historical";
 
 interface VerifiedArtifact {
   artifact: SbiVcArtifactManifest;
   page?: PageInfo;
+  identityGroup?: IdentityGroup;
+  identities?: string[];
   failureEvidence?: true;
 }
 
@@ -108,7 +115,8 @@ export async function importSbiVcRun(options: {
     ]);
 
     // The largest valid run has 204 four-MiB artifacts. Validate sequentially
-    // and keep only page metadata so the Worker never buffers a whole run.
+    // and retain only bounded page metadata and provider identities so the
+    // Worker never buffers a whole run of source bytes.
     phase = "artifact_validation";
     const verifiedArtifacts: VerifiedArtifact[] = [];
     const collectFailureEvidenceIndex =
@@ -130,6 +138,7 @@ export async function importSbiVcRun(options: {
         ...parseStoredEnvelope(bytes, artifact.dataset),
       });
     }
+    assertUniqueProviderIdentities(verifiedArtifacts);
     validateFailureComplement(manifest, verifiedArtifacts);
 
     // Repeat the inventory boundary immediately before creating central state.
@@ -514,8 +523,22 @@ function pageDataset(group: PageGroup, index: number): string {
   return `${group}-page-${String(index).padStart(4, "0")}`;
 }
 
-function parseStoredEnvelope(bytes: Uint8Array, dataset: string): { page?: PageInfo } {
+function parseStoredEnvelope(
+  bytes: Uint8Array,
+  dataset: string,
+): { page?: PageInfo; identityGroup?: IdentityGroup; identities?: string[] } {
   const envelope = storedEnvelope(bytes);
+  if (dataset === "position-summary") {
+    const identities: string[] = [];
+    for (const group of Object.values(recordConflict(envelope.body, "artifact_payload_invalid"))) {
+      const positions = recordConflict(group, "artifact_payload_invalid");
+      for (const value of Object.values(positions)) {
+        const position = recordConflict(value, "artifact_payload_invalid");
+        identities.push(nonEmptyString(position.productId, "artifact_provider_identity_invalid"));
+      }
+    }
+    return { identityGroup: "position-summary", identities };
+  }
   const group = pageGroup(dataset);
   const recentExecution = dataset === "executions-recent-page-0001";
   if (!group && !recentExecution) return {};
@@ -524,21 +547,90 @@ function parseStoredEnvelope(bytes: Uint8Array, dataset: string): { page?: PageI
     throw new ImportError(409, "artifact_page_payload_invalid");
   }
   const totalSize = nonNegativeInteger(body.totalSize);
-  if (totalSize === null) throw new ImportError(409, "artifact_page_payload_invalid");
-  if (recentExecution) return {};
+  const pageNumber = nonNegativeInteger(body.pageNumber);
+  const pageSize = nonNegativeInteger(body.pageSize);
+  const totalNumOfPages = nonNegativeInteger(body.totalNumOfPages);
+  if (
+    totalSize === null ||
+    pageNumber === null ||
+    pageSize !== PAGE_SIZE ||
+    totalNumOfPages !== Math.ceil(totalSize / PAGE_SIZE)
+  ) {
+    throw new ImportError(409, "artifact_page_payload_invalid");
+  }
+  if (recentExecution) {
+    if (pageNumber !== 0 || totalSize > PAGE_SIZE || body.list.length !== totalSize) {
+      throw new ImportError(409, "artifact_page_payload_invalid");
+    }
+    return {
+      identityGroup: "executions-recent",
+      identities: executionIdentities(body.list),
+    };
+  }
   if (!group) return {};
   const match = (
     group === "executions-historical" ? HISTORICAL_EXECUTION : HISTORICAL_CASHFLOW
   ).exec(dataset);
   if (!match) throw new ImportError(409, "artifact_page_dataset_invalid");
+  const index = Number(match[1]);
+  if (pageNumber !== index - 1) {
+    throw new ImportError(409, "artifact_page_payload_invalid");
+  }
   return {
+    identityGroup: group,
+    identities:
+      group === "executions-historical"
+        ? executionIdentities(body.list)
+        : cashflowIdentities(body.list),
     page: {
       group,
-      index: Number(match[1]),
+      index,
       listLength: body.list.length,
       totalSize,
     },
   };
+}
+
+function executionIdentities(list: unknown[]): string[] {
+  return list.map((value) => {
+    const row = recordConflict(value, "artifact_payload_invalid");
+    return JSON.stringify([
+      nonEmptyString(row.CExecutionId, "artifact_provider_identity_invalid"),
+      nonEmptyString(row.CExecutionIdSubNo, "artifact_provider_identity_invalid"),
+    ]);
+  });
+}
+
+function cashflowIdentities(list: unknown[]): string[] {
+  return list.map((value) => {
+    const row = recordConflict(value, "artifact_payload_invalid");
+    return nonEmptyString(row.cashflowID, "artifact_provider_identity_invalid");
+  });
+}
+
+function nonEmptyString(value: unknown, code: string): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new ImportError(409, code);
+  }
+  return value;
+}
+
+function assertUniqueProviderIdentities(artifacts: VerifiedArtifact[]): void {
+  const seen = new Map<IdentityGroup, Set<string>>();
+  for (const artifact of artifacts) {
+    if (!artifact.identityGroup || !artifact.identities) continue;
+    let group = seen.get(artifact.identityGroup);
+    if (!group) {
+      group = new Set<string>();
+      seen.set(artifact.identityGroup, group);
+    }
+    for (const identity of artifact.identities) {
+      if (group.has(identity)) {
+        throw new ImportError(409, "artifact_duplicate_provider_identity");
+      }
+      group.add(identity);
+    }
+  }
 }
 
 function assertStoredFailureEnvelope(bytes: Uint8Array): void {

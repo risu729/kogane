@@ -9,7 +9,9 @@ export interface ArtifactMeta {
   id: number;
   sourceId: string;
   /** Terminal status of the layer-A fetch run that owns this artifact. */
-  runStatus: string;
+  runStatus: "success" | "partial" | "failed";
+  /** Number of collector failures recorded by the owning fetch run. */
+  runFailureCount: number;
   dataset: string | null;
   url: string | null;
   mime: string;

@@ -49,23 +49,34 @@ export function ingestRunDirectory(
   }
   upsertSource(store, { ...source, ingestion: "collector-r2" });
 
+  const status = manifest["status"];
+  if (status !== "success" && status !== "partial" && status !== "failed") {
+    throw new Error(`${directory}/manifest.json has an unknown run status`);
+  }
+  const failures = manifest["failures"];
+  if (!Array.isArray(failures)) {
+    throw new Error(`${directory}/manifest.json failures must be an array`);
+  }
+  const failureCount = failures.length;
+  if ((status === "success") !== (failureCount === 0)) {
+    throw new Error(`${directory}/manifest.json run status and failure evidence are inconsistent`);
+  }
+
   const existing = store.db
     .query("SELECT id FROM fetch_runs WHERE source_id = ?1 AND external_run_id = ?2")
     .get(source.id, manifest["runId"]) as { id: number } | null;
   if (existing) {
-    return { runId: existing.id, artifacts: 0, deduplicated: 0, skippedExisting: true };
+    return {
+      runId: existing.id,
+      artifacts: 0,
+      deduplicated: 0,
+      skippedExisting: true,
+    };
   }
 
   const startedAt = String(manifest["startedAt"] ?? new Date(0).toISOString());
   const completedAt =
     typeof manifest["completedAt"] === "string" ? manifest["completedAt"] : undefined;
-  if (!Object.hasOwn(manifest, "status")) {
-    throw new Error(`${directory}/manifest.json must declare an explicit run status`);
-  }
-  const status = manifest["status"];
-  if (status !== "success" && status !== "partial" && status !== "failed") {
-    throw new Error(`${directory}/manifest.json has an unknown run status`);
-  }
 
   // Read and verify every artifact BEFORE writing anything. A run row written
   // ahead of a failure would make the run look ingested, and every later
@@ -100,6 +111,7 @@ export function ingestRunDirectory(
       startedAt,
       ...(completedAt !== undefined ? { completedAt } : {}),
       status,
+      failureCount,
     });
     for (const { dataset, bytes } of pending) {
       const stored = putRawObject(store, bytes, "application/json");
@@ -115,7 +127,12 @@ export function ingestRunDirectory(
     }
     return insertedRunId;
   })();
-  return { runId, artifacts: pending.length, deduplicated, skippedExisting: false };
+  return {
+    runId,
+    artifacts: pending.length,
+    deduplicated,
+    skippedExisting: false,
+  };
 }
 
 export function ingestFile(
@@ -137,7 +154,12 @@ export function ingestFile(
     .query("SELECT id FROM fetch_runs WHERE source_id = ?1 AND external_run_id = ?2")
     .get(options.source.id, externalRunId) as { id: number } | null;
   if (existing) {
-    return { runId: existing.id, artifacts: 0, deduplicated: 0, skippedExisting: true };
+    return {
+      runId: existing.id,
+      artifacts: 0,
+      deduplicated: 0,
+      skippedExisting: true,
+    };
   }
   let deduplicated = 0;
   const runId = store.db.transaction(() => {
@@ -175,6 +197,21 @@ export function ingestFixtures(store: Store, fixturesDir: string): void {
       });
       console.log(
         `ingest sbi-securities ${day}/${run}: ` +
+          (summary.skippedExisting
+            ? "already ingested"
+            : `${summary.artifacts} artifacts (${summary.deduplicated} deduplicated)`),
+      );
+    }
+  }
+  const sbiVcRunsRoot = join(fixturesDir, "sbi-vc-trade");
+  for (const day of readdirSync(sbiVcRunsRoot)) {
+    for (const run of readdirSync(join(sbiVcRunsRoot, day))) {
+      const summary = ingestRunDirectory(store, join(sbiVcRunsRoot, day, run), {
+        id: "sbi-vc-trade",
+        provider: "SBI VC Trade",
+      });
+      console.log(
+        `ingest sbi-vc-trade ${day}/${run}: ` +
           (summary.skippedExisting
             ? "already ingested"
             : `${summary.artifacts} artifacts (${summary.deduplicated} deduplicated)`),
