@@ -22,6 +22,8 @@ describe("Vpass aggregate-only R2 Layer-B audit", () => {
       parsedTransactionCount: 0,
       parserWarningCount: 0,
       blockedStatementArtifactCount: 0,
+      observedWebPresentationShapes: {},
+      observedCustomizedPageShapes: {},
       nextCursor: null,
       truncated: false,
     });

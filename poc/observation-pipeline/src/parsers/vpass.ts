@@ -87,6 +87,8 @@ export const vpassStatementPage: Parser = {
     exactKeys(root, ROOT_KEYS, "vpass statement page");
     const header = requiredObject(root["header"], "vpass header");
     exactKeys(header, HEADER_KEYS, "vpass header");
+    if (![0, "0", "0000"].includes(header["resultCode"] as never))
+      throw new Error("vpass header.resultCode is not successful");
     boundedString(header["transitTo"], "vpass header.transitTo", false);
     const body = requiredObject(root["body"], "vpass body");
     exactKeys(body, BODY_KEYS, "vpass body");
@@ -118,15 +120,45 @@ function parseWeb(
   rows.forEach((entry, index) => {
     const row = requiredObject(entry, `vpass web row ${index}`);
     exactKeys(row, WEB_ROW_KEYS, `vpass web row ${index}`);
-    boundedSafeInteger(row["columnsSize"], `vpass web row ${index}.columnsSize`);
-    boundedString(row["maxIndex"], `vpass web row ${index}.maxIndex`, true);
-    boundedString(row["columnsSizeS"], `vpass web row ${index}.columnsSizeS`, true);
-    boundedString(row["rowType"], `vpass web row ${index}.rowType`, true);
+    const columnsSize = boundedSafeInteger(
+      row["columnsSize"],
+      `vpass web row ${index}.columnsSize`,
+    );
+    const maxIndex = boundedString(row["maxIndex"], `vpass web row ${index}.maxIndex`, false);
+    const columnsSizeText = boundedString(
+      row["columnsSizeS"],
+      `vpass web row ${index}.columnsSizeS`,
+      false,
+    );
+    const rowType = boundedString(row["rowType"], `vpass web row ${index}.rowType`, false);
     boundedSafeInteger(row["shiharaiPatternFlag"], `vpass web row ${index}.shiharaiPatternFlag`);
     const data = boundedStringArray(row["data"], `vpass web row ${index}.data`);
     const primary = data[0];
     const secondary = data[1];
-    if (primary === "45" || primary === "4C" || (primary === "4K" && secondary === "002")) return;
+    if (
+      rowType !== primary ||
+      columnsSize !== data.length ||
+      columnsSizeText !== String(data.length) ||
+      maxIndex !== String(data.length - 1)
+    ) {
+      throw new Error(`vpass web row ${index} metadata conflicts with data`);
+    }
+    if (primary === "45") {
+      exactDataLength(data, 5, `vpass web row ${index}.data`);
+      boundedString(data[1], `vpass web row ${index}.data[1]`, false);
+      return;
+    }
+    if (primary === "4C") {
+      exactDataLength(data, 4, `vpass web row ${index}.data`);
+      if (secondary !== "") throw new Error(`vpass web row ${index}.data[1] has schema drift`);
+      boundedString(data[2], `vpass web row ${index}.data[2]`, false);
+      return;
+    }
+    if (primary === "4K" && secondary === "002") {
+      exactDataLength(data, 4, `vpass web row ${index}.data`);
+      boundedString(data[3], `vpass web row ${index}.data[3]`, false);
+      return;
+    }
     if (primary !== "4K" || (secondary !== "005" && secondary !== "007"))
       throw new Error(`vpass web row ${index} has an unsupported provider subtype`);
     const expectedLength = secondary === "007" ? 14 : 11;
@@ -194,6 +226,12 @@ function parseCustomized(
   scope: Scope,
 ): ParseResult {
   exactKeys(content, CUSTOMIZED_CONTENT_KEYS, "vpass customized content");
+  if (
+    (scope.pageIndex === 0 && scope.pageKind !== "top") ||
+    (scope.pageIndex > 0 && scope.pageKind !== "answer")
+  ) {
+    throw new Error("vpass customized page kind conflicts with page index");
+  }
   const bean = requiredObject(value, "vpass customized bean");
   exactKeyVariant(
     bean,
@@ -204,6 +242,13 @@ function parseCustomized(
     bean["meisaiList"] === undefined
       ? []
       : boundedArray(bean["meisaiList"], "vpass customized meisaiList");
+  if (bean["pageFlg"] !== "3") throw new Error("vpass customized pageFlg is unsupported");
+  const pageSize = boundedSafeInteger(bean["pageSize"], "vpass customized pageSize");
+  if (pageSize === 0) throw new Error("vpass customized pageSize must be positive");
+  digitStringInteger(bean["responseCnt"], "vpass customized responseCnt");
+  boundedSafeInteger(bean["total"], "vpass customized total");
+  if (bean["seikyuYM"] !== scope.month)
+    throw new Error("vpass customized statement month conflicts with artifact key");
   const occurrences = new Map<string, number>();
   const observations: TransactionObservation[] = rows.map((entry, index) => {
     const row = requiredObject(entry, `vpass customized row ${index}`);
@@ -349,6 +394,10 @@ function boundedStringArray(value: unknown, label: string): string[] {
   return array as string[];
 }
 
+function exactDataLength(value: string[], expected: number, label: string): void {
+  if (value.length !== expected) throw new Error(`${label} has schema drift`);
+}
+
 function boundedString(value: unknown, label: string, empty: boolean): string {
   if (typeof value !== "string" || value.length > 5_000 || (!empty && value.length === 0))
     throw new Error(`${label} must be a bounded${empty ? "" : " non-empty"} string`);
@@ -359,6 +408,15 @@ function boundedSafeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > 10_000)
     throw new Error(`${label} must be a bounded safe integer`);
   return value as number;
+}
+
+function digitStringInteger(value: unknown, label: string): number {
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d*)$/u.test(value))
+    throw new Error(`${label} must be an exact non-negative integer string`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed > 10_000)
+    throw new Error(`${label} must be a bounded exact non-negative integer string`);
+  return parsed;
 }
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[], label: string): void {

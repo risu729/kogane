@@ -169,14 +169,18 @@ event time rather than import order.
 
 Vpass also has one canonical financial route: sanitized JSON
 `statement-page`. Layer A supplies the stable card unit key separately from the
-redacted payload. Known presentation-only rows are validated but not emitted;
+redacted payload, and the PoC run-manifest ingestion carries that unit through
+nested statement artifact paths. Known presentation-only rows are validated
+against exact row metadata, lengths, and required slots but not emitted;
 known settled and unsettled transaction rows retain their complete source row,
-and unknown subtypes fail closed. Purchases and refunds receive exactly one
-explicit credit-liability sign inversion. The current view chooses the latest
-successful snapshot per card and statement month, including a latest empty
-snapshot, but only after every statement artifact in that card-month fetch unit
-has a current successful parse. A newer interrupted parse therefore cannot hide
-the last complete snapshot.
+and unknown subtypes fail closed. The provider success code and customized
+top/answer index, page metadata types, and statement-month binding are checked
+again in Layer B. Purchases and refunds receive exactly one explicit
+credit-liability sign inversion. The current view chooses the latest successful
+snapshot per card and statement month, including a latest empty snapshot, but
+only after every statement artifact in that card-month fetch unit has a current
+successful parse. A newer interrupted parse therefore cannot hide the last
+complete snapshot.
 
 The demo ingests 11 artifacts from 3 sources and produces 49 observations:
 14 transaction, 24 balance, 3 position, 8 valuation.

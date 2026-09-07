@@ -1078,6 +1078,17 @@ transaction. `4K/005` maps date, merchant, JPY amount, and payment type from
 foreign-use fields. Unknown row subtypes and unknown object-key shapes fail
 the entire artifact instead of being silently dropped.
 
+Layer B also rechecks the successful provider result code rather than trusting
+the fetch-run label alone. For every positional row, `rowType`, `columnsSize`,
+`columnsSizeS`, and `maxIndex` must agree with `data`. Production aggregates
+establish exact lengths of five for `45` and four for both `4C` and `4K/002`,
+including their required label/comment slots; a superficially familiar prefix
+with a different layout is therefore not discarded as presentation. The
+customized family is bound to `top-000` followed by positive-index `answer`
+pages. Its observed `pageFlg`, integer field types, and statement month must
+match the artifact. No unobserved meaning is inferred between its count fields
+and row cardinality.
+
 The provider expresses card liability as positive for a purchase and negative
 for a refund. Layer B applies exactly one inversion so Kogane transactions use
 outflow-negative/inflow-positive. The positional `4K/005` shape has been
@@ -1088,7 +1099,10 @@ provenance in `extra`.
 
 The card label comes from Layer A's `fetch_units.unit_key`, not from redacted
 card data. The PoC mirrors it as `fetch_artifacts.fetch_unit_key`; schema v6
-migrates existing v2-v5 stores by adding the nullable column. Current Vpass
+migrates existing v2-v5 stores by adding the nullable column. Its run-directory
+manifest contract accepts bounded nested artifact paths and carries each
+declared `fetchUnitKey` into the artifact, so this identity is reproducible by
+normal PoC ingestion rather than injected only by parser tests. Current Vpass
 transactions select all pages from the latest successful card-month snapshot.
 A newer empty snapshot therefore clears older current rows without deleting
 the append-only evidence or observations. Pending customized and posted web

@@ -85,6 +85,7 @@ export function ingestRunDirectory(
   const pending: {
     dataset: string;
     artifactKey: string;
+    fetchUnitKey?: string;
     statementState?: string;
     period?: string;
     mime: string;
@@ -107,7 +108,7 @@ export function ingestRunDirectory(
         : declaredKey.startsWith(manifestPrefix)
           ? declaredKey.slice(manifestPrefix.length)
           : "";
-    if (!/^(?:[a-z0-9][a-z0-9-]{0,63}\/)?[a-z0-9][a-z0-9.-]{0,127}$/u.test(artifactKey)) {
+    if (!/^(?:[a-z0-9][a-z0-9-]{0,63}\/){0,7}[a-z0-9][a-z0-9.-]{0,127}$/u.test(artifactKey)) {
       throw new Error(`${directory}/manifest.json artifact key is outside its run prefix`);
     }
     if (seenArtifactKeys.has(artifactKey)) {
@@ -131,6 +132,14 @@ export function ingestRunDirectory(
     if (period !== undefined && (typeof period !== "string" || period.length === 0)) {
       throw new Error(`${directory}/manifest.json has a malformed statement period`);
     }
+    const fetchUnitKey = entry["fetchUnitKey"];
+    if (
+      fetchUnitKey !== undefined &&
+      (typeof fetchUnitKey !== "string" ||
+        !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(fetchUnitKey))
+    ) {
+      throw new Error(`${directory}/manifest.json has a malformed fetch unit key`);
+    }
     const bytes = readFileSync(join(directory, ...artifactKey.split("/")));
     const digest = sha256Hex(bytes);
     if (typeof entry["sha256"] === "string" && entry["sha256"] !== digest) {
@@ -141,6 +150,7 @@ export function ingestRunDirectory(
     pending.push({
       dataset,
       artifactKey,
+      ...(fetchUnitKey === undefined ? {} : { fetchUnitKey }),
       ...(statementState === undefined ? {} : { statementState }),
       ...(period === undefined ? {} : { period }),
       mime: mediaType ?? "application/json",
@@ -160,7 +170,15 @@ export function ingestRunDirectory(
       failureCount,
       ...(window ? { window } : {}),
     });
-    for (const { dataset, artifactKey, statementState, period, mime, bytes } of pending) {
+    for (const {
+      dataset,
+      artifactKey,
+      fetchUnitKey,
+      statementState,
+      period,
+      mime,
+      bytes,
+    } of pending) {
       const stored = putRawObject(store, bytes, mime);
       if (stored.deduplicated) deduplicated += 1;
       insertFetchArtifact(store, {
@@ -168,6 +186,7 @@ export function ingestRunDirectory(
         sourceId: source.id,
         dataset,
         artifactKey,
+        ...(fetchUnitKey === undefined ? {} : { fetchUnitKey }),
         ...(statementState === undefined ? {} : { statementState }),
         ...(period === undefined ? {} : { period }),
         mime,

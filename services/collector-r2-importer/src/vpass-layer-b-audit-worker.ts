@@ -61,6 +61,8 @@ export default {
           aggregate.blockedStatementArtifacts += audited.blockedStatementArtifactCount;
           mergeCounts(aggregate.webShapes, audited.webShapes);
           mergeCounts(aggregate.customizedShapes, audited.customizedShapes);
+          mergeCounts(aggregate.webPresentationShapes, audited.webPresentationShapes);
+          mergeCounts(aggregate.customizedPageShapes, audited.customizedPageShapes);
           mergeCounts(aggregate.webRowKeyShapes, audited.webRowKeyShapes);
           mergeCounts(aggregate.customizedRowKeyShapes, audited.customizedRowKeyShapes);
           mergeCounts(aggregate.webBeanKeyShapes, audited.webBeanKeyShapes);
@@ -88,6 +90,8 @@ async function auditRecord(bucket: R2Bucket, recordKey: string) {
   const validated = await validateVpassRun(bucket, recordKey);
   const webShapes: Counts = {};
   const customizedShapes: Counts = {};
+  const webPresentationShapes: Counts = {};
+  const customizedPageShapes: Counts = {};
   const webRowKeyShapes: Counts = {};
   const customizedRowKeyShapes: Counts = {};
   const webBeanKeyShapes: Counts = {};
@@ -164,12 +168,43 @@ async function auditRecord(bucket: R2Bucket, recordKey: string) {
           safeProviderCode(data[6]),
         ].join("|");
         increment(webShapes, shape);
+        if (data[0] === "45" || data[0] === "4C" || (data[0] === "4K" && data[1] === "002")) {
+          increment(
+            webPresentationShapes,
+            [
+              safeProviderCode(value.rowType),
+              safeProviderCode(data[0]),
+              safeProviderCode(data[1]),
+              String(data.length),
+              safeIntegerCode(value.columnsSize),
+              safeProviderCode(value.columnsSizeS),
+              safeProviderCode(value.maxIndex),
+              safeIntegerCode(value.shiharaiPatternFlag),
+            ].join("|"),
+          );
+        }
       }
     } else {
       increment(customizedBeanKeyShapes, Object.keys(customized!).sort().join(","));
       const rows = statementRows(customized!.meisaiList, "customized_rows_invalid");
       customizedRowCount += rows.length;
       statementRowCount += rows.length;
+      const scope = statementArtifactScope(artifact.artifactKey);
+      increment(
+        customizedPageShapes,
+        [
+          scope.kind,
+          scope.index === 0 ? "index_zero" : "index_positive",
+          rows.length === 0 ? "rows_empty" : "rows_nonempty",
+          safeProviderCode(customized!.pageFlg),
+          scalarShape(customized!.pageSize),
+          scalarShape(customized!.responseCnt),
+          scalarShape(customized!.total),
+          integerRelation(customized!.responseCnt, rows.length),
+          integerLowerBoundRelation(customized!.total, rows.length),
+          statementMonthRelation(customized!.seikyuYM, scope.month),
+        ].join("|"),
+      );
       for (const value of rows) {
         if (!isRecord(value)) throw new Error("customized_row_invalid");
         increment(customizedRowKeyShapes, Object.keys(value).sort().join(","));
@@ -201,6 +236,8 @@ async function auditRecord(bucket: R2Bucket, recordKey: string) {
       validated.record.status === "success" ? 0 : statementArtifactCount,
     webShapes,
     customizedShapes,
+    webPresentationShapes,
+    customizedPageShapes,
     webRowKeyShapes,
     customizedRowKeyShapes,
     webBeanKeyShapes,
@@ -210,6 +247,55 @@ async function auditRecord(bucket: R2Bucket, recordKey: string) {
     bodyKeyShapes,
     contentKeyShapes,
   };
+}
+
+function statementArtifactScope(artifactKey: string): {
+  month: string;
+  kind: "top" | "answer";
+  index: number;
+} {
+  const match = /^(?:cards\/card-\d{3}\/)?months\/(\d{6})\/(top|answer)-(\d{3})\.json$/u.exec(
+    artifactKey,
+  );
+  if (!match) throw new Error("statement_artifact_key_invalid");
+  return { month: match[1]!, kind: match[2] as "top" | "answer", index: Number(match[3]) };
+}
+
+function safeIntegerCode(value: unknown): string {
+  return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 10_000
+    ? String(value)
+    : "other";
+}
+
+function scalarShape(value: unknown): string {
+  if (value === "") return "empty";
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return "integer";
+  if (typeof value === "string" && /^(?:0|[1-9]\d*)$/u.test(value)) return "digit_string";
+  return "other";
+}
+
+function providerInteger(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value === "string" && /^(?:0|[1-9]\d*)$/u.test(value)) {
+    const result = Number(value);
+    if (Number.isSafeInteger(result)) return result;
+  }
+  return undefined;
+}
+
+function integerRelation(value: unknown, expected: number): string {
+  const parsed = providerInteger(value);
+  return parsed === undefined ? "invalid" : parsed === expected ? "equals_rows" : "differs_rows";
+}
+
+function integerLowerBoundRelation(value: unknown, minimum: number): string {
+  const parsed = providerInteger(value);
+  return parsed === undefined ? "invalid" : parsed >= minimum ? "covers_rows" : "below_rows";
+}
+
+function statementMonthRelation(value: unknown, month: string): string {
+  if (value === "") return "empty";
+  return value === month ? "matches_artifact" : "other";
 }
 
 function boundedArray(value: unknown, code: string): unknown[] {
@@ -302,6 +388,8 @@ function emptyAggregate() {
     blockedStatementArtifacts: 0,
     webShapes: {} as Counts,
     customizedShapes: {} as Counts,
+    webPresentationShapes: {} as Counts,
+    customizedPageShapes: {} as Counts,
     webRowKeyShapes: {} as Counts,
     customizedRowKeyShapes: {} as Counts,
     webBeanKeyShapes: {} as Counts,
@@ -344,6 +432,8 @@ function auditResponse(input: {
   blockedStatementArtifacts: number;
   webShapes: Counts;
   customizedShapes: Counts;
+  webPresentationShapes: Counts;
+  customizedPageShapes: Counts;
   webRowKeyShapes: Counts;
   customizedRowKeyShapes: Counts;
   webBeanKeyShapes: Counts;
@@ -376,6 +466,8 @@ function auditResponse(input: {
     blockedStatementArtifactCount: input.blockedStatementArtifacts,
     observedWebShapes: input.webShapes,
     observedCustomizedShapes: input.customizedShapes,
+    observedWebPresentationShapes: input.webPresentationShapes,
+    observedCustomizedPageShapes: input.customizedPageShapes,
     observedWebRowKeyShapes: input.webRowKeyShapes,
     observedCustomizedRowKeyShapes: input.customizedRowKeyShapes,
     observedWebBeanKeyShapes: input.webBeanKeyShapes,
@@ -403,6 +495,7 @@ function safeCode(error: unknown): string {
     const parserCodes: Array<[RegExp, string]> = [
       [/fetch unit/u, "parser_fetch_unit_invalid"],
       [/artifact key/u, "parser_artifact_key_invalid"],
+      [/header\.resultCode/u, "parser_result_code_invalid"],
       [/web bean has schema drift/u, "parser_web_bean_schema_drift"],
       [/web content has schema drift/u, "parser_web_content_schema_drift"],
       [/web row .*\.columnsSize/u, "parser_web_columns_size_invalid"],
@@ -412,10 +505,18 @@ function safeCode(error: unknown): string {
       [/web row .*\.shiharaiPatternFlag/u, "parser_web_payment_pattern_invalid"],
       [/web row .*\.data must/u, "parser_web_data_container_invalid"],
       [/web row .*\.data has schema drift/u, "parser_web_data_schema_drift"],
+      [/web row .* metadata conflicts/u, "parser_web_metadata_invalid"],
       [/unsupported provider subtype/u, "parser_web_subtype_unknown"],
       [/provider YY\/MM\/DD/u, "parser_date_shape_invalid"],
       [/calendar date/u, "parser_calendar_date_invalid"],
       [/exact JPY integer/u, "parser_amount_invalid"],
+      [/customized page kind/u, "parser_customized_page_kind_invalid"],
+      [/customized pageFlg/u, "parser_customized_page_flag_invalid"],
+      [/customized pageSize/u, "parser_customized_page_size_invalid"],
+      [/customized responseCnt/u, "parser_customized_response_count_invalid"],
+      [/customized total/u, "parser_customized_total_invalid"],
+      [/customized page metadata/u, "parser_customized_page_metadata_invalid"],
+      [/customized statement month/u, "parser_customized_month_invalid"],
       [/must contain exactly one supported family/u, "parser_family_invalid"],
       [/has schema drift/u, "parser_schema_drift"],
     ];

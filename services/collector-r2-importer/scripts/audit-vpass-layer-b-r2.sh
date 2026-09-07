@@ -42,7 +42,7 @@ if [[ "${ready}" != true ]]; then
   exit 1
 fi
 
-summary='{"scanned":0,"audited":0,"skipped":0,"failed":0,"statuses":{},"schemas":{},"artifacts":0,"statementArtifacts":0,"rows":0,"webRows":0,"customizedRows":0,"parsedStatementArtifacts":0,"parsedTransactions":0,"parserWarnings":0,"blockedStatementArtifacts":0,"webShapes":{},"customizedShapes":{},"webRowKeyShapes":{},"customizedRowKeyShapes":{},"webBeanKeyShapes":{},"customizedBeanKeyShapes":{},"rootKeyShapes":{},"headerKeyShapes":{},"bodyKeyShapes":{},"contentKeyShapes":{},"failures":{}}'
+summary='{"scanned":0,"audited":0,"skipped":0,"failed":0,"statuses":{},"schemas":{},"artifacts":0,"statementArtifacts":0,"rows":0,"webRows":0,"customizedRows":0,"parsedStatementArtifacts":0,"parsedTransactions":0,"parserWarnings":0,"blockedStatementArtifacts":0,"webShapes":{},"customizedShapes":{},"webPresentationShapes":{},"customizedPageShapes":{},"webRowKeyShapes":{},"customizedRowKeyShapes":{},"webBeanKeyShapes":{},"customizedBeanKeyShapes":{},"rootKeyShapes":{},"headerKeyShapes":{},"bodyKeyShapes":{},"contentKeyShapes":{},"failures":{}}'
 cursor=""
 pages=0
 while true; do
@@ -64,6 +64,7 @@ while true; do
     (.truncated == (.nextCursor != null)) and
     ([.recordStatusCounts,.recordSchemaCounts,.observedWebShapes,
       .observedCustomizedShapes,.observedWebRowKeyShapes,.observedCustomizedRowKeyShapes,
+      .observedWebPresentationShapes,.observedCustomizedPageShapes,
       .observedWebBeanKeyShapes,.observedCustomizedBeanKeyShapes,
       .observedRootKeyShapes,.observedHeaderKeyShapes,.observedBodyKeyShapes,
       .observedContentKeyShapes,
@@ -92,6 +93,8 @@ while true; do
     | .blockedStatementArtifacts += $p.blockedStatementArtifactCount
     | .webShapes = addmap(.webShapes; $p.observedWebShapes)
     | .customizedShapes = addmap(.customizedShapes; $p.observedCustomizedShapes)
+    | .webPresentationShapes = addmap(.webPresentationShapes; $p.observedWebPresentationShapes)
+    | .customizedPageShapes = addmap(.customizedPageShapes; $p.observedCustomizedPageShapes)
     | .webRowKeyShapes = addmap(.webRowKeyShapes; $p.observedWebRowKeyShapes)
     | .customizedRowKeyShapes = addmap(.customizedRowKeyShapes; $p.observedCustomizedRowKeyShapes)
     | .webBeanKeyShapes = addmap(.webBeanKeyShapes; $p.observedWebBeanKeyShapes)
@@ -115,6 +118,8 @@ jq -nc --argjson s "${summary}" '{schemaVersion:"vpass-r2-layer-b-structural-aud
   parsedTransactionCount:$s.parsedTransactions,parserWarningCount:$s.parserWarnings,
   blockedStatementArtifactCount:$s.blockedStatementArtifacts,
   observedWebShapes:$s.webShapes,observedCustomizedShapes:$s.customizedShapes,
+  observedWebPresentationShapes:$s.webPresentationShapes,
+  observedCustomizedPageShapes:$s.customizedPageShapes,
   observedWebRowKeyShapes:$s.webRowKeyShapes,
   observedCustomizedRowKeyShapes:$s.customizedRowKeyShapes,
   observedWebBeanKeyShapes:$s.webBeanKeyShapes,
