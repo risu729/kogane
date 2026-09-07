@@ -250,9 +250,11 @@ export async function importVpassRun(options: {
       completedAtBasis: "manifest",
       declaredArtifactCount: plans.length,
       artifactCountScope: "direct",
-      ...(validated.record.status === "failed" ? { safeFailureCode: "collector-failed" } : {}),
     };
-    await central.addUnitReport(state.unitId, report);
+    await central.addUnitReport(state.unitId, {
+      ...report,
+      ...(validated.record.status === "failed" ? { safeFailureCode: "collector-failed" } : {}),
+    });
     await central.addRunReport(state.centralRunId, {
       ...report,
       producerVersion: INGEST_CONTRACT_VERSION,
