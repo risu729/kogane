@@ -17,6 +17,7 @@ import {
   insertFetchRun,
   insertObservation,
   insertParseRun,
+  listArtifacts,
   openStore,
   putRawObject,
   upsertSource,
@@ -84,14 +85,23 @@ describe("ingestion", () => {
     `);
     db.close();
     const store = openStore(directory);
-    const row = store.db.query("SELECT status, failure_count FROM fetch_runs").get() as {
+    const row = store.db
+      .query("SELECT status, failure_count, window_start, window_end FROM fetch_runs")
+      .get() as {
       status: string;
       failure_count: number;
+      window_start: string | null;
+      window_end: string | null;
     };
-    expect(row).toEqual({ status: "partial", failure_count: 1 });
+    expect(row).toEqual({
+      status: "partial",
+      failure_count: 1,
+      window_start: null,
+      window_end: null,
+    });
     expect(
       (store.db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(4);
+    ).toBe(5);
   });
 
   test("migrates v3 artifact rows with nullable collector identity", () => {
@@ -148,7 +158,75 @@ describe("ingestion", () => {
     expect(row).toEqual({ artifact_key: null, statement_state: null, period: null });
     expect(
       (store.db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
-    ).toBe(4);
+    ).toBe(5);
+  });
+
+  test("migrates v4 collector identity without losing it when adding run windows", () => {
+    const directory = mkdtempSync(join(tmpdir(), "kogane-v4-store-"));
+    const db = new Database(join(directory, "kogane-poc.sqlite"), { create: true });
+    db.exec(`
+      CREATE TABLE sources (
+        id TEXT PRIMARY KEY, provider TEXT NOT NULL, ingestion TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE fetch_runs (
+        id INTEGER PRIMARY KEY,
+        source_id TEXT NOT NULL REFERENCES sources(id),
+        external_run_id TEXT,
+        tool TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        status TEXT NOT NULL,
+        failure_count INTEGER NOT NULL DEFAULT 0 CHECK (failure_count >= 0),
+        UNIQUE (source_id, external_run_id)
+      ) STRICT;
+      CREATE TABLE raw_objects (
+        sha256 TEXT PRIMARY KEY,
+        size INTEGER NOT NULL,
+        content_type TEXT NOT NULL,
+        blob_key TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE fetch_artifacts (
+        id INTEGER PRIMARY KEY,
+        fetch_run_id INTEGER NOT NULL REFERENCES fetch_runs(id),
+        source_id TEXT NOT NULL REFERENCES sources(id),
+        dataset TEXT,
+        artifact_key TEXT,
+        statement_state TEXT,
+        period TEXT,
+        url TEXT,
+        method TEXT,
+        http_status INTEGER,
+        mime TEXT NOT NULL,
+        fetched_at TEXT NOT NULL,
+        sha256 TEXT NOT NULL REFERENCES raw_objects(sha256)
+      ) STRICT;
+      INSERT INTO sources VALUES ('legacy', 'Legacy', 'collector-r2');
+      INSERT INTO fetch_runs
+        (id, source_id, external_run_id, tool, started_at, status, failure_count)
+      VALUES (1, 'legacy', 'success-1', 'import-run', '2026-09-01T00:00:00Z', 'success', 0);
+      INSERT INTO raw_objects VALUES ('${"0".repeat(64)}', 0, 'application/json', '00/zero');
+      INSERT INTO fetch_artifacts
+        (fetch_run_id, source_id, dataset, artifact_key, statement_state, period, mime, fetched_at, sha256)
+      VALUES (1, 'legacy', 'credit-ledger', 'connection/ledger.json', 'confirmed', '2026-09',
+              'application/json', '2026-09-01T00:00:00Z', '${"0".repeat(64)}');
+      PRAGMA user_version = 4;
+    `);
+    db.close();
+    const store = openStore(directory);
+    expect(store.db.query("SELECT window_start, window_end FROM fetch_runs").get()).toEqual({
+      window_start: null,
+      window_end: null,
+    });
+    expect(
+      store.db.query("SELECT artifact_key, statement_state, period FROM fetch_artifacts").get(),
+    ).toEqual({
+      artifact_key: "connection/ledger.json",
+      statement_state: "confirmed",
+      period: "2026-09",
+    });
+    expect(
+      (store.db.query("PRAGMA user_version").get() as { user_version: number }).user_version,
+    ).toBe(5);
   });
 
   test("run-directory ingestion is idempotent", () => {
@@ -162,6 +240,45 @@ describe("ingestion", () => {
     expect(count(store, "fetch_runs")).toBe(1);
     expect(count(store, "fetch_artifacts")).toBe(4);
     expect(count(store, "raw_objects")).toBe(4);
+  });
+
+  test("persists an exact collector query window and rejects invalid calendar bounds", () => {
+    const directory = mkdtempSync(join(tmpdir(), "kogane-run-window-"));
+    writeFileSync(join(directory, "artifact.json"), "{}");
+    const manifest = {
+      runId: "window-test",
+      startedAt: "2026-09-30T00:00:00Z",
+      status: "success",
+      window: { from: "2026-09-01", to: "2026-09-30" },
+      artifacts: [{ dataset: "artifact" }],
+      failures: [],
+    };
+    writeFileSync(join(directory, "manifest.json"), JSON.stringify(manifest));
+    const store = tempStore();
+    ingestRunDirectory(store, directory, { id: "window-source", provider: "Window Source" });
+    expect(store.db.query("SELECT window_start, window_end FROM fetch_runs").get()).toEqual({
+      window_start: "2026-09-01",
+      window_end: "2026-09-30",
+    });
+    store.db.exec("UPDATE fetch_runs SET window_end = NULL;");
+    expect(() => listArtifacts(store)).toThrow("window is incomplete");
+
+    const invalidDirectory = mkdtempSync(join(tmpdir(), "kogane-run-window-invalid-"));
+    writeFileSync(join(invalidDirectory, "artifact.json"), "{}");
+    writeFileSync(
+      join(invalidDirectory, "manifest.json"),
+      JSON.stringify({
+        ...manifest,
+        runId: "invalid-window",
+        window: { from: "2026-02-30", to: "2026-03-01" },
+      }),
+    );
+    expect(() =>
+      ingestRunDirectory(store, invalidDirectory, {
+        id: "window-source",
+        provider: "Window Source",
+      }),
+    ).toThrow("window is invalid");
   });
 
   test("SBI VC collector run ingestion verifies all six source-separated artifacts", () => {

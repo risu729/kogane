@@ -162,6 +162,33 @@ coverage. Neither announces itself.
 
 ## Open questions
 
+Sony Bank Layer B now covers every financial artifact family acquired by the
+v2 collector: gross-balance JSON, paged yen and foreign-currency history JSON,
+official yen and foreign CSV, and monthly sanitized WALLET HTML. A read-only
+aggregate audit across seven successful production v2 runs established only
+field names, container cardinalities, enum code sets, CSV headers, and HTML
+table structure; it emitted no object key, digest, body, account identifier, or
+financial value. The parsers repeat Layer A's page-local completeness checks,
+pin observed enums and exact schemas, retain provider fields in `extra`, and
+attach a locator to every row. Collection-wide missing-page and missing-month
+inventory remains Layer A's responsibility because a Layer B parser receives
+one artifact at a time. The source currently has no holdings artifact, so no
+Sony position is inferred from balances or totals.
+
+Review against the merged Layer A implementation found that the first synthetic
+WALLET fixture had shortened the provider's eight-digit option value and required
+an explicit `selected` marker that Layer A correctly treats as optional. It also
+found that JSON and CSV were both becoming current transactions, unsigned WALLET
+usage amounts were being treated as positive cashflow, malformed row pairings
+could pass, and dataset currency, charset, and query-window relationships were
+not bound. The fixture and parsers now use the actual selector contract, enforce
+adjacent exact rows and occurrence-aware identity, omit ambiguous WALLET signed
+amounts, and prefer the official CSV only in the current view while retaining
+both raw-derived source views. Run windows now survive ingestion and gate every
+history date. A checked-in aggregate-only canary repeats the strict source
+inventory, metadata, native/application checksum, media, parser-route, and parse
+checks without returning source keys, hashes, bodies, identifiers, or values.
+
 The remaining questions need evidence beyond the shape audit described below;
 none is resolved by assertion here.
 
@@ -267,7 +294,8 @@ and amount-cell variation without copying production identifiers, hashes,
 merchant text, dates, or financial values. It also pins failed-run exclusion,
 metadata drift, ambiguous/missing amount cells, duplicate months, and repeated
 dataset ingestion. Schema v4 adds artifact key, statement state, and period;
-v2 and v3 stores migrate in place rather than weakening the strict importer.
+schema v5 adds the provider query window needed by Sony history validation.
+v2, v3, and v4 stores migrate in place rather than weakening the strict importer.
 
 **Are SBI's `evaluationAmount` fields really JPY?** The foreign-positions
 parser assumes the unprefixed fields are JPY and the `frn*` variants are in

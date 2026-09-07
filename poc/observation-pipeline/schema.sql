@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS fetch_runs (
   status          TEXT NOT NULL,         -- 'success' | 'partial' | 'failed'
   failure_count   INTEGER NOT NULL DEFAULT 0
                   CHECK (failure_count >= 0),
+  window_start    TEXT,
+  window_end      TEXT,
   UNIQUE (source_id, external_run_id)
 ) STRICT;
 

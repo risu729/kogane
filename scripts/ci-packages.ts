@@ -53,6 +53,7 @@ export const CI_PACKAGES: PackagePolicy[] = [
       "cf:check:audit-vpoint-pay-email": `${dryRun} --config wrangler.audit-v-point-pay-email.jsonc`,
       "cf:check:audit-sbi-vc": `${dryRun} --config wrangler.audit-sbi-vc.jsonc`,
       "cf:check:audit-myjcb": `${dryRun} --config wrangler.audit-myjcb.jsonc`,
+      "cf:check:audit-sony-layer-b": `${dryRun} --config wrangler.audit-sony-layer-b.jsonc`,
     },
     checks: [
       "test",
@@ -63,6 +64,7 @@ export const CI_PACKAGES: PackagePolicy[] = [
       "cf:check:audit-vpoint-pay-email",
       "cf:check:audit-sbi-vc",
       "cf:check:audit-myjcb",
+      "cf:check:audit-sony-layer-b",
     ],
   },
   worker("mobile-suica-worker"),

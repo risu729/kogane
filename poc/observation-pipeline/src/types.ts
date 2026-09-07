@@ -12,6 +12,8 @@ export interface ArtifactMeta {
   runStatus: "success" | "partial" | "failed";
   /** Number of collector failures recorded by the owning fetch run. */
   runFailureCount: number;
+  /** Exact provider query window carried by collector manifests, when present. */
+  runWindow?: { from: string; to: string };
   dataset: string | null;
   /** Run-relative collector artifact key, when the source manifest declares one. */
   artifactKey?: string | null;

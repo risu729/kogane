@@ -2,6 +2,12 @@ import type { Parser } from "../types.ts";
 import { paypayCsv } from "./paypay-csv.ts";
 import { mobileSuicaSfHistory } from "./mobile-suica-sf-history.ts";
 import { myJcbCreditLedger, myJcbEvidenceOnly, myJcbPastMonthBalances } from "./myjcb.ts";
+import {
+  sonyBankGrossBalance,
+  sonyBankHistoryCsv,
+  sonyBankHistoryJson,
+  sonyBankWalletHistory,
+} from "./sony-bank.ts";
 import { sbiAccountAssetsCurrent } from "./sbi-account-assets-current.ts";
 import { sbiDomesticCashPositions } from "./sbi-domestic-cash-positions.ts";
 import { sbiDomesticTradeRecords } from "./sbi-domestic-trade-records.ts";
@@ -20,6 +26,10 @@ export const PARSERS: readonly Parser[] = [
   myJcbCreditLedger,
   myJcbPastMonthBalances,
   myJcbEvidenceOnly,
+  sonyBankGrossBalance,
+  sonyBankHistoryJson,
+  sonyBankHistoryCsv,
+  sonyBankWalletHistory,
   sbiDomesticCashPositions,
   sbiAccountAssetsCurrent,
   sbiYenDetailHistory,
