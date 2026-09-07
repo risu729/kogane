@@ -1,0 +1,1 @@
+{"schemaVersion":"vpoint-pay-email-event-v1","id":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","sourceMessageId":"synthetic-declined@example.invalid","occurredAt":"2026-08-04T01:02:03.000Z","eventType":"declined","subject":"V Point Pay ご利用不可のお知らせ","merchant":"匿名加盟店B","detail":"利用不可","amountYen":3000,"usedPoints":null,"balanceYen":9500}

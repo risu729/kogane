@@ -1,0 +1,1 @@
+{"schemaVersion":"vpoint-pay-email-event-v1","id":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","sourceMessageId":"synthetic-addition@example.invalid","occurredAt":"2026-08-03T01:02:03.000Z","eventType":"balance-addition","subject":"V Point Pay プリペイド残高加算のお知らせ","merchant":null,"detail":"匿名加算方法","amountYen":700,"usedPoints":700,"balanceYen":9500}

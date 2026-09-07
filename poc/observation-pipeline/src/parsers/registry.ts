@@ -25,6 +25,7 @@ import { smbcDirectBalance, smbcDirectTransactions } from "./smbc-direct.ts";
 import { sbiShinseiTopBalancesAndActivity } from "./sbi-shinsei-top-balances-and-activity.ts";
 import { sbiShinseiYenDepositAccount } from "./sbi-shinsei-yen-deposit-account.ts";
 import { vPointBalanceInfo, vPointHistoryPage, vPointSmfgPoint } from "./v-point.ts";
+import { vPointPayNotificationEvent } from "./v-point-pay.ts";
 
 export const PARSERS: readonly Parser[] = [
   globalPassActivity,
@@ -55,5 +56,6 @@ export const PARSERS: readonly Parser[] = [
   vPointBalanceInfo,
   vPointSmfgPoint,
   vPointHistoryPage,
+  vPointPayNotificationEvent,
   paypayCsv,
 ];

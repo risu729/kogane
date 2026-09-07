@@ -1,0 +1,1 @@
+{"schemaVersion":"vpoint-pay-email-event-v1","id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sourceMessageId":"synthetic-usage@example.invalid","occurredAt":"2026-08-01T01:02:03.000Z","eventType":"usage","subject":"V Point Pay ご利用のお知らせ","merchant":"匿名加盟店A","detail":"支払い","amountYen":1200,"usedPoints":200,"balanceYen":3800}

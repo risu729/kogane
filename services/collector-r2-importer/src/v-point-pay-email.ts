@@ -88,6 +88,18 @@ export async function auditVPointPayEmailPair(
   return { eventType: pair.event.eventType };
 }
 
+export async function validateVPointPayEmailPairForLayerB(
+  bucket: R2Bucket,
+  normalizedKey: string,
+): Promise<{ normalizedBytes: Uint8Array; eventType: EventType; occurredAt: string }> {
+  const pair = await readVerifiedPair(bucket, normalizedKey);
+  return {
+    normalizedBytes: pair.normalizedBytes,
+    eventType: pair.event.eventType,
+    occurredAt: pair.event.occurredAt,
+  };
+}
+
 export async function importVPointPayEmailPair(
   options: ImportVPointPayEmailOptions,
 ): Promise<VPointPayEmailImportResult> {

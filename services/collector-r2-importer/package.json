@@ -16,6 +16,7 @@
     "cf:check:audit-smbc-direct-layer-b": "wrangler deploy --dry-run --config wrangler.audit-smbc-direct-layer-b.jsonc",
     "cf:check:audit-sbi-shinsei": "wrangler deploy --dry-run --config wrangler.audit-sbi-shinsei.jsonc",
     "cf:check:audit-global-pass-layer-b": "wrangler deploy --dry-run --config wrangler.audit-global-pass-layer-b.jsonc",
+    "cf:check:audit-v-point-pay-layer-b": "wrangler deploy --dry-run --config wrangler.audit-v-point-pay-layer-b.jsonc",
     "audit:vpoint-r2": "bash scripts/audit-v-point-r2.sh",
     "audit:moneyforward-r2": "bash scripts/audit-moneyforward-r2.sh",
     "audit:vpoint-pay-email-r2": "bash scripts/audit-v-point-pay-email-r2.sh",
@@ -26,6 +27,7 @@
     "audit:smbc-direct-layer-b-r2": "bash scripts/audit-smbc-direct-layer-b-r2.sh",
     "audit:sbi-shinsei-r2": "bash scripts/audit-sbi-shinsei-r2.sh",
     "audit:global-pass-layer-b-r2": "bash scripts/audit-global-pass-layer-b-r2.sh",
+    "audit:v-point-pay-layer-b-r2": "bash scripts/audit-v-point-pay-layer-b-r2.sh",
     "cf:deploy": "wrangler deploy"
   },
   "dependencies": {
