@@ -130,6 +130,29 @@ success 10 / partial 0 / failed 0、内訳はaccounts index 10、account detail 
 rollout時は同じauditを再実行し、strict failure 0を確認する。source object件数と集約checksumは
 backfill前後で比較するが、object key、個別hash、本文、金融値を運用出力へ含めない。
 
+## Layer B semantic boundary
+
+`monthly-transactions`だけを取引のcanonical routeにする。`account-detail`にも直近取引が表示されるが、
+同じ取引を含むbounded recent viewであり、`accounts-index`とともにstrict evidence-only parserで
+surface markerだけを検証し、金融observationは生成しない。underlying bank/cardへsourceを付け替えず、
+source accountはcollectorがmanifest内で固定したaccount ordinalのまま分離する。
+
+月別fragmentでは各tooltip tableの直前100 bytes以内にproviderの`YYYY-MM-DD`が一意にあり、
+table数とISO日付token数が一致する。カレンダー端には前月・翌月の日も含まれるため、それらのrow shape、
+description、明示符号付きJPY integerを検証した後、artifact filenameの宣言年月と一致する日だけを
+observationへ昇格する。これにより隣接月fragment間の重複を避ける。provider ID、pending/posted状態、
+underlying金融機関の取引identityは推測しない。
+
+current viewはsource、account ordinal、年月ごとに最新のsuccessful/failure-free parse artifactを選ぶ。
+新しい完全な空fragmentもsnapshotとして選ぶため、その月の旧rowを残さない。partial/failed runはraw
+evidenceとして残すだけでLayer Bへ昇格しない。
+
+同日のLayer B read-only full canaryでは540 objects、success manifest 10件、data artifact 530件を
+再走査した。monthly 480件のtooltip body 8,603 rowsを全件検証し、宣言年月内の6,880 observations
+（inflow 1,883 / outflow 4,997）だけを生成した。隣接月の1,723 rowsはshapeと金額表現を検証して
+emitせず、accounts index/detail計50件はevidence-onlyとして受理した。Layer A/Layer B failureは0件
+だった。この出力は集約件数と固定failure codeだけで、本文、key、hash、個別金融値を含まない。
+
 ## Runtime feasibility and recommendation
 
 | 経路                      | 評価             | 用途                                           |

@@ -63,6 +63,18 @@ cursorを削除して先頭からidempotentに再走査する。
 監査出力は件数と固定failure codeだけで、本文、object key、個別hash、金融値、secretを含めず、
 source R2を変更していない。`bun run audit:moneyforward-r2`で同じ境界を再検証できる。
 
+Layer Bは`monthly-transactions`だけをcanonical transaction routeとしてparseし、同じ取引を含む
+`account-detail`のbounded recent viewと`accounts-index`はstrict evidence-onlyとする。月別tooltip
+の直前にあるprovider ISO日付を一対一で検証し、artifactの宣言年月外にあるcalendar端のrowは
+shapeと明示符号付きJPY額を検証した上でemitしない。current queryはaccount ordinalと年月ごとの
+最新successful artifactだけを選び、新しい完全な空fragmentで旧current rowsを消す。
+`bun run audit:moneyforward-layer-b-r2`はproduction R2をread-onlyで再走査し、parser件数と固定failure
+codeだけを集約する。deploy、R2 write/delete、本文・key・hash・個別金融値の出力は行わない。
+2026-09-07のfull canaryでは540 objects / success manifest 10件 / data artifact 530件を走査し、
+monthly 480件のtooltip body 8,603 rowsから宣言年月内6,880 observations（inflow 1,883 / outflow
+4,997）を生成した。隣接月1,723 rowsは検証後に除外し、accounts index/detail 50件はevidence-only
+として受理した。Layer A/Layer B failureは0件だった。
+
 ## Vpassの境界
 
 Vpassはprivate R2の`vpass/YYYY/MM/DD/<run-id>/`をread-only outboxとして扱う。`collector-r2-vpass`専用credentialと`vpass/{date}/{run-id}/{artifact}` policy以外では中央へ入れない。card単位のsnapshot+success manifest、cardまたはrun単位のerror-only、旧run単位のdiscrete page+success manifest、旧run単位の取得途中artifact+errorを別schemaとして検証し、未知の組合せやmanifestの`partial`は中央state作成前に拒否する。manifest/error keyと全prefix inventory、content type、空custom metadata、R2 native SHA-256（存在時）と再計算SHA-256、UTF-8 JSON、run/date/card、month一覧、page family/index/終了条件、件数、およびsuccess/errorの補集合は完全一致が必要である。旧partial failureはcardとmonthが取得順のprefixであること、完了済みpageが終端条件を満たすこと、未完了pageが最後のcard/月に限られることを確認する。

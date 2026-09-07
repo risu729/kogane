@@ -75,41 +75,43 @@ transaction / balance / position / valuation observations   layer B
 evidence browser (React client in web/, served by serve.ts)
 ```
 
-Thirty-one parsers are registered against shapes the collectors already produce:
+Thirty-three parsers are registered against shapes the collectors already produce:
 
-| Parser                                  | Artifact                                           | Emits                                        |
-| --------------------------------------- | -------------------------------------------------- | -------------------------------------------- |
-| `sbi-domestic-cash-positions`           | SBI `domestic-cash-positions`                      | deposit-type-scoped positions and valuations |
-| `sbi-account-assets-current`            | SBI `account-assets-current`                       | provider valuations by source view/category  |
-| `sbi-yen-detail-history`                | SBI `yen-detail-history`                           | transactions                                 |
-| `sbi-domestic-trade-records`            | SBI `domestic-trade-records`                       | transactions                                 |
-| `sbi-foreign-trade-records`             | SBI `foreign-trade-records`                        | transactions                                 |
-| `sbi-foreign-cash-positions`            | SBI `foreign-cash-positions`                       | positions, provider valuations               |
-| `sbi-foreign-cash-balances`             | SBI `foreign-cash-balances`                        | balances                                     |
-| `sbi-vc-cash-balances`                  | SBI VC Trade `cash-balances`                       | balances                                     |
-| `sbi-vc-account-margin`                 | SBI VC Trade `account-margin`                      | balances                                     |
-| `sbi-vc-position-summary`               | SBI VC Trade `position-summary`                    | positions                                    |
-| `sbi-vc-executions`                     | SBI VC Trade recent and historical execution pages | transactions                                 |
-| `sbi-vc-cashflows`                      | SBI VC Trade historical cashflow pages             | transactions, balances                       |
-| `myjcb-credit-ledger`                   | MyJCB normalized credit ledger                     | transactions                                 |
-| `myjcb-credit-past-month-balances`      | MyJCB past-month JSON-RPC response                 | statement payment metrics                    |
-| `myjcb-canonical-evidence-boundary`     | MyJCB sanitized menu/detail HTML and discovery     | no financial observations                    |
-| `paypay-csv`                            | PayPay consumer CSV export                         | transactions                                 |
-| `mobile-suica-sf-history`               | Mobile Suica `sf-history`                          | transactions, post-row balances              |
-| `sony-bank-gross-balance`               | Sony Bank gross-balance JSON                       | account-type balances and provider totals    |
-| `sony-bank-history-json`                | Sony Bank yen/foreign history pages                | transactions and after-transaction balances  |
-| `sony-bank-history-csv`                 | Sony Bank official yen/foreign CSV                 | transactions and after-transaction balances  |
-| `sony-bank-wallet-history`              | Sony Bank WALLET monthly HTML                      | card transactions                            |
-| `smbc-direct-balance`                   | SMBC Direct `balance-normalized`                   | balance                                      |
-| `smbc-direct-transactions`              | SMBC Direct `transactions-normalized`              | transactions                                 |
-| `sbi-shinsei-top-balances-and-activity` | SBI Shinsei `top-accounts-balance-and-activity`    | balances, valuations, transactions           |
-| `sbi-shinsei-yen-deposit-account`       | SBI Shinsei `yen-deposit-account`                  | source-view-scoped balances                  |
-| `global-pass-activity`                  | GLOBAL PASS sanitized `globalpass-activity` HTML   | transactions                                 |
-| `v-point-balance-info`                  | V Point common/store expiry buckets                | point balances                               |
-| `v-point-smfg-point`                    | V Point SMFG display breakdown                     | separately scoped point balances             |
-| `v-point-history-page`                  | V Point complete paginated history                 | signed point transactions                    |
-| `v-point-pay-notification-event`        | V Point Pay normalized notification event          | transactions and source-separated balances   |
-| `vpass-statement-page`                  | Vpass sanitized statement JSON pages               | posted/unconfirmed card transactions         |
+| Parser                                     | Artifact                                           | Emits                                        |
+| ------------------------------------------ | -------------------------------------------------- | -------------------------------------------- |
+| `sbi-domestic-cash-positions`              | SBI `domestic-cash-positions`                      | deposit-type-scoped positions and valuations |
+| `sbi-account-assets-current`               | SBI `account-assets-current`                       | provider valuations by source view/category  |
+| `sbi-yen-detail-history`                   | SBI `yen-detail-history`                           | transactions                                 |
+| `sbi-domestic-trade-records`               | SBI `domestic-trade-records`                       | transactions                                 |
+| `sbi-foreign-trade-records`                | SBI `foreign-trade-records`                        | transactions                                 |
+| `sbi-foreign-cash-positions`               | SBI `foreign-cash-positions`                       | positions, provider valuations               |
+| `sbi-foreign-cash-balances`                | SBI `foreign-cash-balances`                        | balances                                     |
+| `sbi-vc-cash-balances`                     | SBI VC Trade `cash-balances`                       | balances                                     |
+| `sbi-vc-account-margin`                    | SBI VC Trade `account-margin`                      | balances                                     |
+| `sbi-vc-position-summary`                  | SBI VC Trade `position-summary`                    | positions                                    |
+| `sbi-vc-executions`                        | SBI VC Trade recent and historical execution pages | transactions                                 |
+| `sbi-vc-cashflows`                         | SBI VC Trade historical cashflow pages             | transactions, balances                       |
+| `myjcb-credit-ledger`                      | MyJCB normalized credit ledger                     | transactions                                 |
+| `myjcb-credit-past-month-balances`         | MyJCB past-month JSON-RPC response                 | statement payment metrics                    |
+| `myjcb-canonical-evidence-boundary`        | MyJCB sanitized menu/detail HTML and discovery     | no financial observations                    |
+| `paypay-csv`                               | PayPay consumer CSV export                         | transactions                                 |
+| `mobile-suica-sf-history`                  | Mobile Suica `sf-history`                          | transactions, post-row balances              |
+| `sony-bank-gross-balance`                  | Sony Bank gross-balance JSON                       | account-type balances and provider totals    |
+| `sony-bank-history-json`                   | Sony Bank yen/foreign history pages                | transactions and after-transaction balances  |
+| `sony-bank-history-csv`                    | Sony Bank official yen/foreign CSV                 | transactions and after-transaction balances  |
+| `sony-bank-wallet-history`                 | Sony Bank WALLET monthly HTML                      | card transactions                            |
+| `smbc-direct-balance`                      | SMBC Direct `balance-normalized`                   | balance                                      |
+| `smbc-direct-transactions`                 | SMBC Direct `transactions-normalized`              | transactions                                 |
+| `sbi-shinsei-top-balances-and-activity`    | SBI Shinsei `top-accounts-balance-and-activity`    | balances, valuations, transactions           |
+| `sbi-shinsei-yen-deposit-account`          | SBI Shinsei `yen-deposit-account`                  | source-view-scoped balances                  |
+| `global-pass-activity`                     | GLOBAL PASS sanitized `globalpass-activity` HTML   | transactions                                 |
+| `v-point-balance-info`                     | V Point common/store expiry buckets                | point balances                               |
+| `v-point-smfg-point`                       | V Point SMFG display breakdown                     | separately scoped point balances             |
+| `v-point-history-page`                     | V Point complete paginated history                 | signed point transactions                    |
+| `v-point-pay-notification-event`           | V Point Pay normalized notification event          | transactions and source-separated balances   |
+| `vpass-statement-page`                     | Vpass sanitized statement JSON pages               | posted/unconfirmed card transactions         |
+| `moneyforward-monthly-transactions`        | MoneyForward ME monthly calendar fragment          | transactions                                 |
+| `moneyforward-canonical-evidence-boundary` | MoneyForward ME accounts/detail full HTML          | no financial observations                    |
 
 V Point registers only the three financial Layer-A artifact families.
 `vmoney-history-page-*` is the observed empty boundary for a separate asset,
@@ -228,6 +230,19 @@ Sony JSON/CSV history intentionally share one family, preserving the official CS
 preference. An empty history capture does not erase previously observed events or
 their post-event balance measurements. MyJCB, V Point and Vpass retain their
 separate statement/run snapshot rules described above.
+
+MoneyForward ME uses its monthly calendar fragment as the sole transaction
+route. The account detail contains a bounded recent view of the same activity,
+so both the accounts index and account detail are validated as evidence-only.
+Each tooltip table is bound to the immediately preceding provider ISO date;
+the parser validates adjacent calendar rows but emits only dates belonging to
+the artifact's declared month. This prevents both recent-view duplication and
+the same edge-of-calendar row appearing from two neighboring month artifacts.
+Amounts are emitted only when the provider displays an explicit `+` or `-` JPY
+integer. A latest successful snapshot is selected per account ordinal and
+month, including a newer complete empty fragment that clears older current
+rows. Account ordinals remain source-local collector identities; they are not
+relabelled as the underlying bank or card source.
 
 The demo ingests 11 artifacts from 3 sources and produces 49 observations:
 14 transaction, 24 balance, 3 position, 8 valuation.
