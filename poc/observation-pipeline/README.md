@@ -155,12 +155,15 @@ snapshot for each month, including an explicitly empty replacement snapshot.
 
 V Point Pay Layer B accepts only the canonical `notification-event` JSON from
 the successful, failure-free Layer A email-pair run. The paired
-`notification-mail` remains evidence-only and has no parser route. Usage is an
-outflow; charge and prepaid balance addition are inflows. A declined event is
-retained as a declined attempt without a posted cashflow amount. `balanceYen`
-becomes a balance for the separate prepaid-yen account, while `usedPoints`
-remains supporting `extra` only. Event identity collapses replayed notifications
-in the current transaction view, and current balances use the newest successful
+`notification-mail` remains evidence-only and has no parser route. The email
+does not establish settlement, so non-declined transactions use the separate
+`v-point-pay:notification-events` account and `status=notified`; usage is signed
+as an outflow notification, while charge and prepaid balance addition are signed
+as inflow notifications. A declined event is retained without a typed cashflow
+amount. `usedPoints` remains supporting `extra` and is not guessed into a
+separate funding leg. Only `balanceYen` becomes a snapshot under
+`v-point-pay:prepaid-yen`. Event identity collapses replayed notifications in
+the current transaction view, and current balances use the newest successful
 event time rather than import order.
 
 The demo ingests 11 artifacts from 3 sources and produces 49 observations:

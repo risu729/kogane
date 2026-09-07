@@ -889,7 +889,7 @@ describe("parse runs", () => {
       });
       insertObservation(store, parseRunId, {
         kind: "transaction",
-        sourceAccount: "v-point-pay:prepaid-yen",
+        sourceAccount: "v-point-pay:notification-events",
         externalId: index < 2 ? "same-event" : `event-${index}`,
         description: inputs[index]![0],
         rawLocator: "json:$",

@@ -9,7 +9,8 @@ import type {
 import { decodeUtf8, isObject } from "./util.ts";
 
 const SOURCE_ID = "v-point-pay";
-const SOURCE_ACCOUNT = "v-point-pay:prepaid-yen";
+const TRANSACTION_SOURCE_ACCOUNT = "v-point-pay:notification-events";
+const BALANCE_SOURCE_ACCOUNT = "v-point-pay:prepaid-yen";
 const DATASET = "notification-event";
 const ARTIFACT_KEY = "normalized-event.json";
 const MIME = "application/json";
@@ -78,15 +79,15 @@ export const vPointPayNotificationEvent: Parser = {
     const event = parseEvent(bytes);
     const declined = event.eventType === "declined";
     if (!declined && event.amountYen === null) {
-      throw new Error("V Point Pay posted event amountYen must not be null");
+      throw new Error("V Point Pay non-declined notification amountYen must not be null");
     }
     const magnitude = Math.abs(event.amountYen ?? 0);
     const signedAmount = event.eventType === "usage" && magnitude !== 0 ? -magnitude : magnitude;
     const transaction: TransactionObservation = {
       kind: "transaction",
-      sourceAccount: SOURCE_ACCOUNT,
+      sourceAccount: TRANSACTION_SOURCE_ACCOUNT,
       externalId: event.id,
-      status: declined ? "declined" : "posted",
+      status: declined ? "declined" : "notified",
       ...(!declined
         ? {
             amountMinor: signedAmount,
@@ -114,10 +115,14 @@ export const vPointPayNotificationEvent: Parser = {
           direction: declined
             ? "no-posted-cashflow"
             : event.eventType === "usage"
-              ? "outflow"
-              : "inflow",
-          amountDisposition: declined ? "attempted-not-posted" : "posted-cashflow",
+              ? "outflow-notified"
+              : "inflow-notified",
+          amountDisposition: declined ? "attempted-not-posted" : "notification-amount-not-settled",
           amountSignSource: "eventType",
+          settlementDisposition: declined
+            ? "declined-by-provider"
+            : "not-established-by-notification",
+          fundingSplitDisposition: "not-inferred-from-total-and-used-points",
           identityOrigin: "normalized-event-id",
           usedPointsDisposition: "extra-only",
         },
@@ -127,7 +132,7 @@ export const vPointPayNotificationEvent: Parser = {
     if (event.balanceYen !== null) {
       const balance: BalanceObservation = {
         kind: "balance",
-        sourceAccount: SOURCE_ACCOUNT,
+        sourceAccount: BALANCE_SOURCE_ACCOUNT,
         metric: "prepaid_balance_after_event",
         amountMinor: event.balanceYen,
         amountText: String(event.balanceYen),

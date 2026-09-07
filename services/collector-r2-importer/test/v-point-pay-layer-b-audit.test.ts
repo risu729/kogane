@@ -58,6 +58,20 @@ describe("V Point Pay aggregate-only R2 Layer-B audit", () => {
     expect(forbiddenFields(body)).toEqual([]);
   });
 
+  test("keeps notification transactions separate from prepaid balance snapshots", async () => {
+    const bucket = await storedPair();
+    const result = await auditWorker.fetch(auditRequest(), {
+      VPOINT_PAY_SNAPSHOTS: bucket as unknown as R2Bucket,
+    });
+    expect(result.status).toBe(200);
+    expect(await result.json()).toMatchObject({
+      auditedNormalizedObjectCount: 1,
+      failedNormalizedObjectCount: 0,
+      transactionObservationCount: 1,
+      balanceObservationCount: 1,
+    });
+  });
+
   test("reduces contract failures to one stable aggregate code", async () => {
     const key = `raw/v-point-pay-email/2026/08/31/${"a".repeat(64)}.json`;
     const bucket = {

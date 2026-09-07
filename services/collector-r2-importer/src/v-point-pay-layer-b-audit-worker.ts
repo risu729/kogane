@@ -83,12 +83,25 @@ export default {
             throw new Error("observation_cardinality_invalid");
           }
           if (validated.eventType === "declined") {
-            if (tx[0]!.status !== "declined" || tx[0]!.amountMinor !== undefined) {
+            if (
+              tx[0]!.status !== "declined" ||
+              tx[0]!.sourceAccount !== "v-point-pay:notification-events" ||
+              tx[0]!.amountMinor !== undefined
+            ) {
               throw new Error("declined_semantics_invalid");
             }
             declined += 1;
-          } else if (tx[0]!.status !== "posted" || tx[0]!.amountMinor === undefined) {
-            throw new Error("posted_semantics_invalid");
+          } else if (
+            tx[0]!.status !== "notified" ||
+            tx[0]!.sourceAccount !== "v-point-pay:notification-events" ||
+            tx[0]!.amountMinor === undefined
+          ) {
+            throw new Error("notification_semantics_invalid");
+          }
+          if (
+            balance.some((observation) => observation.sourceAccount !== "v-point-pay:prepaid-yen")
+          ) {
+            throw new Error("balance_account_scope_invalid");
           }
           audited += 1;
           transactions += tx.length;
@@ -132,8 +145,8 @@ function auditFailureCode(
   if (stage === "route") return "parser_route_failed";
   if (stage === "semantics") return "observation_semantics_failed";
   const message = error instanceof Error ? error.message : "";
-  if (message.includes("posted event amountYen must not be null")) {
-    return "posted_cashflow_missing";
+  if (message.includes("non-declined notification amountYen must not be null")) {
+    return "notification_amount_missing";
   }
   if (message.includes("amountYen must be a non-negative")) {
     return eventType === "usage"

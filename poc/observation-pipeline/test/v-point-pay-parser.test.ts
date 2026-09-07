@@ -51,24 +51,32 @@ describe("V Point Pay normalized notification-event Layer B", () => {
     }
   });
 
-  test("signs posted event types and keeps used points as extra only", () => {
+  test("signs notification amounts without claiming settlement or splitting funding legs", () => {
     const expected = [
-      ["usage", -1200, "outflow"],
-      ["charge", 5000, "inflow"],
-      ["balance-addition", 700, "inflow"],
+      ["usage", -1200, "outflow-notified"],
+      ["charge", 5000, "inflow-notified"],
+      ["balance-addition", 700, "inflow-notified"],
     ] as const;
     for (const [name, amount, direction] of expected) {
       const result = vPointPayNotificationEvent.parse(fixture(name), artifact());
       expect(result.observations).toHaveLength(2);
       expect(result.observations[0]).toMatchObject({
         kind: "transaction",
-        sourceAccount: "v-point-pay:prepaid-yen",
-        status: "posted",
+        sourceAccount: "v-point-pay:notification-events",
+        status: "notified",
         amountMinor: amount,
         amountText: String(amount),
         amountScale: 0,
         currency: "JPY",
-        extra: { _kogane: { direction, usedPointsDisposition: "extra-only" } },
+        extra: {
+          _kogane: {
+            direction,
+            amountDisposition: "notification-amount-not-settled",
+            settlementDisposition: "not-established-by-notification",
+            fundingSplitDisposition: "not-inferred-from-total-and-used-points",
+            usedPointsDisposition: "extra-only",
+          },
+        },
       });
       expect(result.observations.filter((row) => row.kind === "transaction")).toHaveLength(1);
       expect(result.observations.filter((row) => row.kind === "balance")).toHaveLength(1);
@@ -80,6 +88,7 @@ describe("V Point Pay normalized notification-event Layer B", () => {
     const transaction = result.observations[0]!;
     expect(transaction).toMatchObject({
       kind: "transaction",
+      sourceAccount: "v-point-pay:notification-events",
       status: "declined",
       externalId: "d".repeat(64),
       extra: {
@@ -121,7 +130,7 @@ describe("V Point Pay normalized notification-event Layer B", () => {
     });
   });
 
-  test("rejects unsuccessful runs, missing posted amounts, and schema or semantic drift", () => {
+  test("rejects unsuccessful runs, missing notification amounts, and schema or semantic drift", () => {
     for (const overrides of [
       { runStatus: "partial" as const, runFailureCount: 1 },
       { runStatus: "success" as const, runFailureCount: 1 },
