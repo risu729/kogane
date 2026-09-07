@@ -15,6 +15,8 @@ const bytes = (name: string) => readFileSync(join(FIXTURES, name));
 const meta = (dataset: string, mime = "application/json"): ArtifactMeta => ({
   id: 88,
   sourceId: "sony-bank",
+  runStatus: "success",
+  runFailureCount: 0,
   dataset,
   url: null,
   mime,
