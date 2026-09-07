@@ -195,7 +195,7 @@ export const sbiDomesticCashPositions: Parser = {
     ) {
       throw new Error("MTS payload length disagrees with recordCount");
     }
-    if (pageIndex + recordCount < totalCount)
+    if (pageIndex !== 0 || recordCount !== totalCount)
       throw new Error("MTS positions payload is incomplete");
 
     const observations: Observation[] = [];

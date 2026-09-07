@@ -187,6 +187,19 @@ describe("sbi-domestic-cash-positions", () => {
     );
   });
 
+  test("a suffix-only positions page cannot masquerade as a complete account state", () => {
+    const body = parsedFixture(meta.dataset!);
+    const payload = Uint8Array.from(atob(body["payloadBase64"] as string), (value) =>
+      value.charCodeAt(0),
+    );
+    payload.set(new TextEncoder().encode("001"), 24);
+    payload.set(new TextEncoder().encode("002"), 27);
+    body["payloadBase64"] = btoa(String.fromCharCode(...payload));
+    expect(() => sbiDomesticCashPositions.parse(encoded(body), meta)).toThrow(
+      "positions payload is incomplete",
+    );
+  });
+
   test("wrapper drift is rejected rather than partially parsed", () => {
     const body = { ...parsedFixture(meta.dataset!), futureField: true };
     expect(() => sbiDomesticCashPositions.parse(encoded(body), meta)).toThrow("schema drift");
