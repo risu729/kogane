@@ -16,6 +16,10 @@ interface ViewState {
   "transactions.page": number;
   "transactions.sorting": SortingState;
   "balances.filters": RecordFilters;
+  "balances.instrument": string;
+  "balances.metric": string;
+  "positions.filters": RecordFilters;
+  "positions.page": number;
 }
 const Context = createContext<{
   state: ViewState;
@@ -30,6 +34,10 @@ export function ViewStateProvider({ children }: { children: ReactNode }): ReactN
     "transactions.page": 0,
     "transactions.sorting": [],
     "balances.filters": { ...EMPTY_FILTERS },
+    "balances.instrument": "",
+    "balances.metric": "",
+    "positions.filters": { ...EMPTY_FILTERS },
+    "positions.page": 0,
   }));
   return <Context.Provider value={{ state, setState }}>{children}</Context.Provider>;
 }

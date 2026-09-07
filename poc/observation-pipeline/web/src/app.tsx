@@ -4,6 +4,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { useMetadata } from "./api.ts";
+import { QueryBoundary } from "./ui.tsx";
 import { Link, useRoute, usePath, type Route } from "./router.tsx";
 import { OverviewPage } from "./pages/Overview.tsx";
 import { TransactionsPage } from "./pages/Transactions.tsx";
@@ -73,6 +74,8 @@ export function App(): ReactNode {
   const path = usePath();
   const main = useRef<HTMLElement>(null);
   const previousPath = useRef(path);
+  const metadata = useMetadata();
+  const metadataReady = metadata.data !== undefined;
   useEffect(() => {
     const heading = main.current?.querySelector("h1");
     document.title = `${heading?.textContent ?? "記録と原本"} | kogane`;
@@ -81,10 +84,9 @@ export function App(): ReactNode {
       // Navigation starts reading at the new view. Refresh and typing never
       // move focus, and browser back/forward may restore their own scroll.
       if (previousPath.current !== path) heading.focus({ preventScroll: true });
+      previousPath.current = path;
     }
-    previousPath.current = path;
-  }, [path]);
-  const metadata = useMetadata();
+  }, [path, metadataReady]);
   const client = useQueryClient();
   const fetching = useIsFetching() > 0;
   const connected = metadata.isSuccess;
@@ -191,7 +193,9 @@ export function App(): ReactNode {
           </p>
         </div>
         <main id="main" ref={main} tabIndex={-1}>
-          <View route={route} />
+          <QueryBoundary query={metadata} label="接続情報">
+            {() => <View route={route} />}
+          </QueryBoundary>
         </main>
         <footer className="workspace-footer">
           <span>保存された証跡を、読み取り専用で表示しています。</span>

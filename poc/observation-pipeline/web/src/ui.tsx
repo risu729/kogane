@@ -342,8 +342,13 @@ export function QueryBoundary<T>({
   const retry = (): void => {
     void query.refetch();
   };
-  // Refetch errors must not hide already loaded evidence. A successful empty
-  // response, by contrast, is an actual empty state and replaces old rows.
+  // Authorization failures hide cached records; transient failures keep the
+  // previous response with a warning. An empty success replaces old rows.
+  if (query.isError && query.error instanceof ApiError && [401, 403].includes(query.error.status)) {
+    return (
+      <ErrorState error={query.error} label={label} onRetry={retry} retrying={query.isFetching} />
+    );
+  }
   if (query.data === undefined) {
     if (query.isError)
       return (

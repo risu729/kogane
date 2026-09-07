@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { usePositions, type PositionWithValuations } from "../api.ts";
-import { Amount, Badge, Nullable, ObservationLink, QueryBoundary } from "../ui.tsx";
-import { pageWindow } from "../filters.ts";
-import { Pager } from "./ViewControls.tsx";
+import { Amount, Badge, EmptyState, Nullable, ObservationLink, QueryBoundary } from "../ui.tsx";
+import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
+import { Pager, RecordControls } from "./ViewControls.tsx";
+import { useViewState } from "../view-state.tsx";
 export function PositionsPage(): ReactNode {
   const query = usePositions();
   return (
@@ -17,26 +18,56 @@ export function PositionsPage(): ReactNode {
           口座・取得元・銘柄のラベルが一致する評価額を表示しています。日付の一致や、同じ時点の評価であることは保証されません。それぞれの基準日をご確認ください。金額は取得元の報告値を保ち、合算や為替換算はしていません。
         </p>
       </details>
-      <QueryBoundary
-        query={query}
-        label="保有資産"
-        isEmpty={(data) => data.positions.length === 0}
-        empty="表示できる保有資産がまだありません。"
-      >
+      <QueryBoundary query={query} label="保有資産">
         {(data) => <PositionList entries={data.positions} />}
       </QueryBoundary>
     </>
   );
 }
 function PositionList({ entries }: { entries: PositionWithValuations[] }): ReactNode {
-  const [page, setPage] = useState(0);
-  const view = pageWindow(entries, page);
+  const [page, setPage] = useViewState("positions.page");
+  const [filters, setFilters] = useViewState("positions.filters");
+  const filtered = entries.filter((entry) => matchesSourceAccount(entry.position, filters));
+  const view = pageWindow(filtered, page);
   return (
     <>
+      <section className="panel">
+        <div className="panel-body">
+          <RecordControls
+            rows={entries.map((entry) => entry.position)}
+            filters={filters}
+            onChange={(next) => {
+              setFilters(next);
+              setPage(0);
+            }}
+          />
+          <button
+            className="button"
+            type="button"
+            onClick={() => {
+              setFilters(EMPTY_FILTERS);
+              setPage(0);
+            }}
+          >
+            条件をクリア
+          </button>
+          <p className="footnote">
+            保存された保有資産 {entries.length}件中 {filtered.length}
+            件が条件に一致しています。取得元の全保有資産が揃っていることを示す件数ではありません。
+          </p>
+        </div>
+      </section>
+      {filtered.length === 0 ? (
+        <EmptyState>
+          {entries.length > 0
+            ? "条件に一致する保有資産がありません。条件をクリアすると保存された記録を確認できます。"
+            : "表示できる保有資産の記録がまだありません。保有数量や評価額がゼロであることを意味しません。"}
+        </EmptyState>
+      ) : null}
       {view.rows.map((entry) => (
         <PositionCard key={entry.position.id} entry={entry} />
       ))}
-      <Pager {...view} total={entries.length} onChange={setPage} />
+      <Pager {...view} total={filtered.length} onChange={setPage} />
     </>
   );
 }

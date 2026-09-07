@@ -1,8 +1,7 @@
 import { useState, type ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { EvidenceOutcome, EvidenceTimeBasis } from "../../shared/evidence-contract.ts";
-import { ApiError } from "./api.ts";
-import { Badge, ErrorState, Nullable, QueryBoundary } from "./ui.tsx";
+import { Badge, Nullable, QueryBoundary } from "./ui.tsx";
 
 /** An expired authorization must not leave cached evidence on screen. */
 export function EvidenceBoundary<T>({
@@ -14,18 +13,6 @@ export function EvidenceBoundary<T>({
   label: string;
   children: (data: T) => ReactNode;
 }): ReactNode {
-  if (query.isError && query.error instanceof ApiError && [401, 403].includes(query.error.status)) {
-    return (
-      <ErrorState
-        error={query.error}
-        label={label}
-        onRetry={() => {
-          void query.refetch();
-        }}
-        retrying={query.isFetching}
-      />
-    );
-  }
   return (
     <QueryBoundary query={query} label={label}>
       {children}

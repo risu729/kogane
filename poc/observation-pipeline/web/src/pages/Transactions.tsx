@@ -9,7 +9,13 @@ import {
 } from "@tanstack/react-table";
 import { useTransactions, type TransactionRow } from "../api.ts";
 import { Amount, Nullable, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
-import { EMPTY_FILTERS, matchesDates, matchesSourceAccount, pageWindow } from "../filters.ts";
+import {
+  EMPTY_FILTERS,
+  matchesDates,
+  matchesSourceAccount,
+  pageWindow,
+  recordedDate,
+} from "../filters.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
 import { useViewState } from "../view-state.tsx";
 const features = tableFeatures({
@@ -101,12 +107,11 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
   const [search, setSearch] = useViewState("transactions.search");
   const [page, setPage] = useViewState("transactions.page");
   const [sorting, setSorting] = useViewState("transactions.sorting");
-  const filtered = useMemo(
+  const matchingRecords = useMemo(
     () =>
       rows.filter(
         (row) =>
           matchesSourceAccount(row, filters) &&
-          matchesDates(row.as_of, filters.from, filters.to) &&
           (!search.trim() ||
             [
               row.description,
@@ -120,6 +125,15 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
       ),
     [rows, filters, search],
   );
+  const filtered = useMemo(
+    () => matchingRecords.filter((row) => matchesDates(row.as_of, filters.from, filters.to)),
+    [matchingRecords, filters.from, filters.to],
+  );
+  const invalidDates = Boolean(filters.from && filters.to && filters.from > filters.to);
+  const excludedUnknownDates =
+    filters.from || filters.to
+      ? matchingRecords.filter((row) => recordedDate(row.as_of) === null).length
+      : 0;
   const table = useTable({
     features,
     columns,
@@ -171,9 +185,14 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
             条件をクリア
           </button>
         </div>
-        {filters.from && filters.to && filters.from > filters.to ? (
-          <p role="alert">開始日を終了日以前にしてください。</p>
-        ) : null}
+        <p className="dim" role="status" aria-live="polite" aria-atomic="true">
+          {invalidDates
+            ? "日付の条件を修正すると、該当する取引を表示します。"
+            : `受信した${rows.length}件のうち、条件に合う取引は${filtered.length}件です。`}
+          {!invalidDates && excludedUnknownDates > 0
+            ? ` 日付が不明な${excludedUnknownDates}件は期間指定により除外しています。`
+            : null}
+        </p>
       </div>
       <div className="table-scroll">
         <table>
@@ -237,7 +256,9 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
             ) : (
               <tr>
                 <td colSpan={columns.length}>
-                  条件に合う取引がありません。条件を変えてお試しください。
+                  {invalidDates
+                    ? "開始日と終了日を確認してください。"
+                    : "条件に合う取引がありません。条件を変えてお試しください。"}
                 </td>
               </tr>
             )}

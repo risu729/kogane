@@ -292,6 +292,12 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       expect(await rows.innerText()).toContain("Inbound transfer");
       expect(await rows.innerText()).not.toContain("BROWSER_FRESH");
       expect(await rows.innerText()).not.toContain("Coffee");
+      await page.getByLabel("開始日", { exact: true }).fill("2026-08-21");
+      expect(await page.getByLabel("開始日", { exact: true }).getAttribute("aria-invalid")).toBe(
+        "true",
+      );
+      expect(await page.getByRole("alert").innerText()).toContain("開始日を終了日以前");
+      expect(await rows.innerText()).not.toContain("Inbound transfer");
       await page.getByRole("button", { name: "条件をクリア", exact: true }).click();
       expect(await rows.innerText()).toContain("BROWSER_FRESH");
       await page.close();
@@ -403,6 +409,51 @@ describe.if(runnable)("evidence browser in a real browser", () => {
     TIMEOUT_MS,
   );
 
+  for (const endpoint of ["transactions", "meta"]) {
+    for (const status of [401, 403]) {
+      test(
+        `authorization failure on ${endpoint} (${status}) hides cached records until retry succeeds`,
+        async () => {
+          const page = await browser.newPage();
+          let fail = false;
+          let failureStatus = status;
+          await page.route(`**/api/${endpoint}`, async (route) => {
+            if (!fail) return route.continue();
+            return route.fulfill({
+              status: failureStatus,
+              contentType: "application/json",
+              body: "{}",
+            });
+          });
+          try {
+            await page.goto(`${baseUrl}/transactions`, { waitUntil: "networkidle" });
+            expect(await page.locator("tbody").innerText()).toContain("BROWSER_FRESH");
+            fail = true;
+            await page.getByRole("button", { name: "表示を更新", exact: true }).click();
+            await page.locator("main").getByRole("alert").waitFor();
+            expect(await page.locator("main").innerText()).not.toContain("BROWSER_FRESH");
+            expect(await page.locator("main tbody").count()).toBe(0);
+            failureStatus = 503;
+            await page.locator("main").getByRole("button", { name: "再試行", exact: true }).click();
+            await page
+              .locator("main")
+              .getByText(/HTTP 503/)
+              .waitFor();
+            expect(await page.locator("main").innerText()).not.toContain("BROWSER_FRESH");
+            expect(await page.locator("main tbody").count()).toBe(0);
+            fail = false;
+            await page.locator("main").getByRole("button", { name: "再試行", exact: true }).click();
+            await page.locator("tbody").waitFor();
+            expect(await page.locator("tbody").innerText()).toContain("BROWSER_FRESH");
+          } finally {
+            await page.close();
+          }
+        },
+        TIMEOUT_MS,
+      );
+    }
+  }
+
   test(
     "keyboard navigation updates the title and starts reading at the new heading",
     async () => {
@@ -460,6 +511,60 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       await page.reload({ waitUntil: "networkidle" });
       expect(await page.getByLabel("内容を検索", { exact: true }).inputValue()).toBe("");
       expect(await page.getByLabel("取得元", { exact: true }).inputValue()).toBe("");
+      await page.close();
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "balance and position filters survive provenance navigation and clear without storage",
+    async () => {
+      const page = await browser.newPage();
+      await page.goto(`${baseUrl}/balances`, { waitUntil: "networkidle" });
+      const unit = page.getByLabel("通貨・単位", { exact: true });
+      const kind = page.getByLabel("残高の種類", { exact: true });
+      await unit.selectOption("JPY");
+      await kind.selectOption("ledger");
+      const latest = page.getByRole("region", { name: "項目ごとの最新の記録", exact: true });
+      expect(await latest.locator("tbody tr").count()).toBeGreaterThan(0);
+      for (const row of await latest.locator("tbody tr").all()) {
+        expect(await row.locator("td").nth(1).innerText()).toContain("ledger");
+        expect(await row.locator("td").nth(1).innerText()).toContain("JPY");
+      }
+      await latest.getByRole("link", { name: "詳細", exact: true }).first().click();
+      await page.locator('a[href^="/api/raw/"]').first().waitFor();
+      await page.goBack({ waitUntil: "networkidle" });
+      expect(await unit.inputValue()).toBe("JPY");
+      expect(await kind.inputValue()).toBe("ledger");
+      await page.getByRole("button", { name: "条件をクリア", exact: true }).click();
+      expect(await unit.inputValue()).toBe("");
+      expect(await kind.inputValue()).toBe("");
+
+      await page
+        .getByRole("navigation")
+        .getByRole("link", { name: "保有資産", exact: true })
+        .click();
+      const source = page.getByLabel("取得元", { exact: true });
+      const account = page.getByLabel("口座", { exact: true });
+      await source.selectOption("demo-bank");
+      const accountValue = await account.locator("option").nth(1).getAttribute("value");
+      expect(accountValue).toBeTruthy();
+      await account.selectOption(accountValue!);
+      const count = await page.locator(".position-card").count();
+      expect(count).toBeGreaterThan(0);
+      await page.getByRole("link", { name: "詳細・原本を確認", exact: true }).first().click();
+      await page.locator('a[href^="/api/raw/"]').first().waitFor();
+      await page.goBack({ waitUntil: "networkidle" });
+      expect(await source.inputValue()).toBe("demo-bank");
+      expect(await account.inputValue()).toBe(accountValue!);
+      expect(await page.locator(".position-card").count()).toBe(count);
+      await page.getByRole("button", { name: "条件をクリア", exact: true }).click();
+      expect(await source.inputValue()).toBe("");
+      expect(await account.inputValue()).toBe("");
+      expect(new URL(page.url()).search).toBe("");
+      expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([
+        0, 0,
+      ]);
       await page.close();
     },
     TIMEOUT_MS,

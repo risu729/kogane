@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import {
   accountOptions,
   sourceOptions,
@@ -34,6 +34,8 @@ export function RecordControls({
   onChange: (value: RecordFilters) => void;
   dates?: boolean;
 }): ReactNode {
+  const dateErrorId = useId();
+  const invalidDates = Boolean(dates && filters.from && filters.to && filters.from > filters.to);
   const sources = sourceOptions(rows);
   const accounts = accountOptions(rows, filters.source);
   const missingSource = filters.source !== "" && !sources.includes(filters.source);
@@ -84,6 +86,8 @@ export function RecordControls({
             <input
               type="date"
               aria-label="開始日"
+              aria-invalid={invalidDates || undefined}
+              aria-describedby={invalidDates ? dateErrorId : undefined}
               value={filters.from}
               onChange={(event) => onChange({ ...filters, from: event.target.value })}
             />
@@ -93,10 +97,17 @@ export function RecordControls({
             <input
               type="date"
               aria-label="終了日"
+              aria-invalid={invalidDates || undefined}
+              aria-describedby={invalidDates ? dateErrorId : undefined}
               value={filters.to}
               onChange={(event) => onChange({ ...filters, to: event.target.value })}
             />
           </label>
+          {invalidDates ? (
+            <p id={dateErrorId} role="alert">
+              開始日を終了日以前にしてください。
+            </p>
+          ) : null}
         </>
       ) : null}
     </div>
