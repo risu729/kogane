@@ -96,43 +96,97 @@ export async function storeVPointPayEmail(options: {
   const normalizedKey = `${prefix}.json`;
   const normalized = new TextEncoder().encode(JSON.stringify(event));
   const normalizedSha256 = await sha256Hex(normalized);
+  const rawStorage = {
+    bytes: raw,
+    contentType: "message/rfc822",
+    sha256: event.id,
+    customMetadata: storageMetadata(event),
+  };
+  const normalizedStorage = {
+    bytes: normalized,
+    contentType: "application/json",
+    sha256: normalizedSha256,
+    customMetadata: storageMetadata(event),
+  };
   const [existingRaw, existingNormalized] = await Promise.all([
     options.bucket.head(rawKey),
     options.bucket.head(normalizedKey),
   ]);
+  if (existingRaw) assertExistingObject(existingRaw, rawStorage);
+  if (existingNormalized) assertExistingObject(existingNormalized, normalizedStorage);
   const duplicate = existingRaw !== null && existingNormalized !== null;
-  if ((existingRaw === null) !== (existingNormalized === null)) {
-    throw new Error("vpoint_pay_email_pair_incomplete");
-  }
   if (!duplicate) {
-    await Promise.all([
-      options.bucket.put(rawKey, raw, {
-        httpMetadata: { contentType: "message/rfc822" },
-        customMetadata: {
-          source: "v-point-pay-email",
-          eventType: event.eventType,
-          sha256: event.id,
-          eventSchema: EVENT_SCHEMA_V2,
-          delivery: options.parsed.delivery,
-          sourceVerification: "source_unverified",
-        },
-        sha256: event.id,
-      }),
-      options.bucket.put(normalizedKey, normalized, {
-        httpMetadata: { contentType: "application/json" },
-        customMetadata: {
-          source: "v-point-pay-email",
-          eventType: event.eventType,
-          sha256: event.id,
-          eventSchema: EVENT_SCHEMA_V2,
-          delivery: options.parsed.delivery,
-          sourceVerification: "source_unverified",
-        },
-        sha256: normalizedSha256,
-      }),
-    ]);
+    const writes: Promise<unknown>[] = [];
+    if (!existingRaw) writes.push(putExpectedObject(options.bucket, rawKey, rawStorage));
+    if (!existingNormalized) {
+      writes.push(putExpectedObject(options.bucket, normalizedKey, normalizedStorage));
+    }
+    await Promise.all(writes);
   }
   return { event, rawKey, normalizedKey, duplicate };
+}
+
+interface ExpectedStoredObject {
+  bytes: Uint8Array;
+  contentType: string;
+  sha256: string;
+  customMetadata: Record<string, string>;
+}
+
+function storageMetadata(event: VPointPayEmailEvent): Record<string, string> {
+  return {
+    source: "v-point-pay-email",
+    eventType: event.eventType,
+    sha256: event.id,
+    eventSchema: EVENT_SCHEMA_V2,
+    delivery: event.sourceProvenance!.delivery,
+    sourceVerification: "source_unverified",
+  };
+}
+
+function putExpectedObject(
+  bucket: R2Bucket,
+  key: string,
+  expected: ExpectedStoredObject,
+): Promise<R2Object | null> {
+  return bucket.put(key, expected.bytes, {
+    httpMetadata: { contentType: expected.contentType },
+    customMetadata: expected.customMetadata,
+    sha256: expected.sha256,
+  });
+}
+
+function assertExistingObject(object: R2Object, expected: ExpectedStoredObject): void {
+  if (object.size !== expected.bytes.byteLength) {
+    throw new Error("vpoint_pay_email_existing_object_size_mismatch");
+  }
+  if (object.httpMetadata?.contentType !== expected.contentType) {
+    throw new Error("vpoint_pay_email_existing_object_content_type_mismatch");
+  }
+  if (!exactStringRecord(object.customMetadata, expected.customMetadata)) {
+    throw new Error("vpoint_pay_email_existing_object_metadata_mismatch");
+  }
+  const nativeSha256 = object.checksums.sha256;
+  if (!nativeSha256 || bytesToHex(new Uint8Array(nativeSha256)) !== expected.sha256) {
+    throw new Error("vpoint_pay_email_existing_object_native_checksum_mismatch");
+  }
+}
+
+function exactStringRecord(
+  actual: Record<string, string> | undefined,
+  expected: Record<string, string>,
+): boolean {
+  if (!actual) return false;
+  const actualKeys = Object.keys(actual).sort();
+  const expectedKeys = Object.keys(expected).sort();
+  return (
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, index) => key === expectedKeys[index] && actual[key] === expected[key])
+  );
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return [...bytes].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
 async function parseCandidate(
