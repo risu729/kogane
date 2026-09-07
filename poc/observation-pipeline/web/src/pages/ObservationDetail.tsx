@@ -13,6 +13,7 @@ import {
   RawLink,
   Sha,
   StatusBadge,
+  TransactionStatus,
   WarningList,
 } from "../ui.tsx";
 import { KIND_LABELS } from "./ViewControls.tsx";
@@ -112,7 +113,13 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
                 <tr key={column}>
                   <th scope="row">{displayLabel(FIELD_LABELS, column)}</th>
                   <td className="wrap">
-                    <CellValue value={value} />
+                    {detail.kind === "transaction" &&
+                    column === "status" &&
+                    (typeof value === "string" || value == null) ? (
+                      <TransactionStatus status={value} />
+                    ) : (
+                      <CellValue value={value} />
+                    )}
                   </td>
                 </tr>
               ))}
