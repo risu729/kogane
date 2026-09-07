@@ -19,3 +19,4 @@ bash scripts/verify-moneyforward-route.sh
 bash scripts/verify-v-point-route.sh
 bash scripts/verify-vpass-route.sh
 bash scripts/verify-v-point-pay-email-route.sh
+bash scripts/verify-smbc-direct-route.sh

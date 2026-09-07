@@ -20,6 +20,7 @@ describe("collector R2 importer deployment scripts", () => {
       "RAW_EVIDENCE_TOKEN_VPOINT",
       "RAW_EVIDENCE_TOKEN_VPASS",
       "RAW_EVIDENCE_TOKEN_VPOINT_PAY_EMAIL",
+      "RAW_EVIDENCE_TOKEN_SMBC_DIRECT",
       "ORIGIN_FINGERPRINT_KEY",
     ];
 
@@ -30,6 +31,7 @@ describe("collector R2 importer deployment scripts", () => {
     expect(sync).toContain("wrangler secret list --format json");
     expect(sync).not.toContain("wrangler secret delete");
     expect(sync).not.toContain("wrangler secret put RAW_EVIDENCE_TOKEN");
+    expect(sync).toContain("collector-r2-smbc-direct");
     expect(config.secrets.required).toEqual(required);
   });
 });

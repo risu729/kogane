@@ -29,6 +29,7 @@
       "RAW_EVIDENCE_TOKEN_VPOINT",
       "RAW_EVIDENCE_TOKEN_VPASS",
       "RAW_EVIDENCE_TOKEN_VPOINT_PAY_EMAIL",
+      "RAW_EVIDENCE_TOKEN_SMBC_DIRECT",
       "ORIGIN_FINGERPRINT_KEY"
     ]
   },
@@ -76,6 +77,10 @@
     {
       "binding": "VPASS_SNAPSHOTS",
       "bucket_name": "kogane-vpass-collector-poc"
+    },
+    {
+      "binding": "SMBC_DIRECT_SNAPSHOTS",
+      "bucket_name": "kogane-smbc-direct-backfill-poc"
     }
   ],
   "services": [
@@ -85,6 +90,6 @@
     }
   ],
   "vars": {
-    "IMPORTER_VERSION": "collector-r2-importer-v18"
+    "IMPORTER_VERSION": "collector-r2-importer-v19"
   }
 }

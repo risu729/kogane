@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "kogane-smbc-direct-r2-contract-audit-local",
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "main": "src/smbc-direct-audit-worker.ts",
+  "compatibility_date": "2026-09-05",
+  "workers_dev": false,
+  "preview_urls": false,
+  "r2_buckets": [
+    {
+      "binding": "SMBC_DIRECT_SNAPSHOTS",
+      "bucket_name": "kogane-smbc-direct-backfill-poc",
+      "remote": true
+    }
+  ]
+}
