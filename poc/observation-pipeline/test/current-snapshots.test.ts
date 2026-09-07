@@ -7,6 +7,7 @@ import {
   insertFetchRun,
   insertObservation,
   insertParseRun,
+  listArtifacts,
   openStore,
   putRawObject,
   upsertSource,
@@ -19,7 +20,10 @@ import {
   latestBalances,
   positionsWithValuations,
 } from "../src/queries.ts";
-import { SNAPSHOT_DATASETS } from "../src/snapshot-query.ts";
+import { SNAPSHOT_DATASETS, FOREIGN_POSITION_SNAPSHOT_VERSION } from "../src/snapshot-query.ts";
+import { PARSERS } from "../src/parsers/registry.ts";
+import { sbiForeignCashBalances } from "../src/parsers/sbi-foreign-cash-balances.ts";
+import { sbiForeignCashPositions } from "../src/parsers/sbi-foreign-cash-positions.ts";
 import type {
   Observation,
   PositionObservation,
@@ -44,6 +48,7 @@ function database(): Store {
 
 interface Snapshot {
   parser: string;
+  parserVersion?: string;
   dataset: string;
   source?: string;
   unit?: string;
@@ -87,7 +92,11 @@ function snapshot(store: Store, options: Snapshot) {
   const parseId = insertParseRun(store, {
     artifactId,
     parserName: options.parser,
-    parserVersion: "0.1.0",
+    parserVersion:
+      options.parserVersion ??
+      (options.parser === "sbi-foreign-cash-positions"
+        ? FOREIGN_POSITION_SNAPSHOT_VERSION
+        : "0.1.0"),
     parsedAt: time,
     status: options.parseStatus ?? "ok",
     warnings: options.warnings ?? [],
@@ -141,6 +150,99 @@ function count(store: Store): number {
 }
 
 describe("complete container snapshots", () => {
+  test("the foreign snapshot version tracks the registered pagination-validating parser", () => {
+    expect(PARSERS.find((parser) => parser.name === "sbi-foreign-cash-positions")?.version).toBe(
+      FOREIGN_POSITION_SNAPSHOT_VERSION,
+    );
+  });
+
+  test("legacy foreign position success cannot survive a rejected pagination reparse", () => {
+    const store = database();
+    const base = { parser: "sbi-foreign-cash-positions", dataset: "foreign-cash-positions" };
+    const legacy = snapshot(store, {
+      ...base,
+      parserVersion: "0.2.0",
+      observations: [position("OLD")],
+    });
+    expect(currentPositions(store)).toEqual([]);
+    insertParseRun(store, {
+      artifactId: legacy.artifactId,
+      parserName: base.parser,
+      parserVersion: FOREIGN_POSITION_SNAPSHOT_VERSION,
+      parsedAt: "2026-09-02T00:00:00.000Z",
+      status: "error",
+      warnings: [],
+    });
+    expect(currentPositions(store)).toEqual([]);
+    snapshot(store, { ...base, observations: [position("NEW")] });
+    expect(currentPositions(store).map((row) => row.security_code)).toEqual(["NEW"]);
+    expect(store.db.query("SELECT COUNT(*) AS n FROM position_observations").get()).toEqual({
+      n: 2,
+    });
+  });
+
+  test("complete foreign snapshots with exact text and extra fields replace older rows", () => {
+    const store = database();
+    const cases = [
+      {
+        parser: sbiForeignCashPositions,
+        dataset: "foreign-cash-positions",
+        old: [position("OLD")],
+        body: {
+          listSecuritiesBalances: {
+            page: { hasNextPage: false, pageNum: 1, pageSize: 999 },
+            securitiesBalances: [
+              {
+                securities: { securitiesCode: "NEW" },
+                securitiesQuantity: "1",
+                currencyCode: "USD",
+                evaluationProfitLoss: { evaluationAmount: "1.5" },
+              },
+            ],
+          },
+        },
+      },
+      {
+        parser: sbiForeignCashBalances,
+        dataset: "foreign-cash-balances",
+        old: [balance("OLD")],
+        body: {
+          listForeignScheduleCashBalances: {
+            foreignCashBalances: [
+              {
+                currencyCashBalances: [
+                  {
+                    currencyCode: "USD",
+                    foreignScheduleCashBalances: [{ keepCash: "1.001", totalBalance: "2" }],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ];
+    for (const entry of cases) {
+      snapshot(store, {
+        parser: entry.parser.name,
+        dataset: entry.dataset,
+        observations: entry.old,
+      });
+      const meta = listArtifacts(store).at(-1)!;
+      const parsed = entry.parser.parse(new TextEncoder().encode(JSON.stringify(entry.body)), meta);
+      expect(parsed.warnings.length).toBeGreaterThan(0);
+      snapshot(store, {
+        parser: entry.parser.name,
+        dataset: entry.dataset,
+        observations: parsed.observations,
+        warnings: parsed.warnings,
+      });
+    }
+    expect(currentPositions(store).map((row) => row.security_code)).toEqual(["NEW"]);
+    expect(currentValuations(store).map((row) => row.amount_text)).toEqual(["1.5"]);
+    expect(latestBalances(store).map((row) => row.amount_text)).toEqual(["1.001"]);
+  });
+
   for (const [parser, dataset] of SNAPSHOT_DATASETS) {
     test(`${parser}: repeated, removed instrument/account, and empty snapshots replace old rows`, () => {
       const store = database();

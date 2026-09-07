@@ -272,6 +272,7 @@ describe("sbi-foreign-cash-positions", () => {
   test("an unreadable quantity warns but never loses the holding", () => {
     const body = {
       listSecuritiesBalances: {
+        page: { hasNextPage: false, pageNum: 1, pageSize: 999 },
         securitiesBalances: [
           {
             securitiesQuantity: 1.5,
@@ -302,6 +303,7 @@ describe("sbi-foreign-cash-positions", () => {
   test("a missing currencyCode warns instead of dropping the frn valuations", () => {
     const body = {
       listSecuritiesBalances: {
+        page: { hasNextPage: false, pageNum: 1, pageSize: 999 },
         securitiesBalances: [
           {
             securitiesQuantity: 3,
@@ -331,6 +333,7 @@ describe("sbi-foreign-cash-positions", () => {
   test("a missing securities code is warned about, not silently empty", () => {
     const body = {
       listSecuritiesBalances: {
+        page: { hasNextPage: false, pageNum: 1, pageSize: 999 },
         securitiesBalances: [{ securitiesQuantity: 1, securities: {}, evaluationProfitLoss: {} }],
       },
     };
@@ -339,6 +342,31 @@ describe("sbi-foreign-cash-positions", () => {
       meta,
     );
     expect(result.warnings.some((w) => w.includes("securitiesCode"))).toBe(true);
+  });
+
+  test("only a complete first page establishes foreign position membership", () => {
+    const parsePage = (page: unknown) =>
+      sbiForeignCashPositions.parse(
+        new TextEncoder().encode(
+          JSON.stringify({
+            listSecuritiesBalances: { securitiesBalances: [], page },
+          }),
+        ),
+        meta,
+      );
+    expect(parsePage({ hasNextPage: false, pageNum: 1, pageSize: 999 }).observations).toEqual([]);
+    for (const page of [
+      undefined,
+      null,
+      {},
+      { hasNextPage: true, pageNum: 1, pageSize: 999 },
+      { hasNextPage: "false", pageNum: 1, pageSize: 999 },
+      { hasNextPage: false, pageNum: 2, pageSize: 999 },
+      { hasNextPage: false, pageNum: 1, pageSize: 0 },
+      { hasNextPage: false, pageNum: 1, pageSize: "999" },
+    ]) {
+      expect(() => parsePage(page)).toThrow("pagination metadata");
+    }
   });
 });
 

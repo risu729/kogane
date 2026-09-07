@@ -202,12 +202,22 @@ an interrupted multi-artifact parse from publishing a mixed snapshot.
 
 An account or market inside one container is not a separate capture: disappearing
 rows must disappear together with that container's old snapshot. The two tolerant
-SBI foreign container parsers can skip unreadable containers, so a warned parse
-remains evidence but cannot establish a complete current snapshot. Other strict
+SBI foreign container parsers can skip unreadable containers, so warnings about
+unreadable rows or fields prevent a parse from establishing a complete snapshot.
+Warnings about exact decimal text without a minor-unit representation, or extra
+unmodelled fields preserved alongside all known metrics, do not imply missing
+measurements and do not block snapshot replacement. Other strict
 container parsers establish completeness on successful parsing. Position detail
 joins valuations only from the same parse and, for SBI positions, the same
 provider record locator; equal security codes in different markets cannot attach
 one another's valuations. These internal joins add no fields to the public API.
+
+Foreign positions require pagination-validating parser `0.3.0`: the collector
+captures page 1 only, so `hasNextPage` must be false and the pagination metadata
+must identify a valid first page. Earlier parser successes remain historical
+evidence and cannot establish current membership until successfully reparsed.
+An error on reparse does not resurrect an older unvalidated parse. A registry
+parity test makes future parser version changes update this eligibility rule.
 
 Historical transactions and after-transaction balances are not portfolio
 containers. Mobile Suica, SBI yen details, domestic/foreign trades and SBI VC
