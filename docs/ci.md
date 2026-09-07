@@ -40,7 +40,7 @@ package's locked Playwright Chromium and fails if browser tests cannot run.
 - Ruff checks and formats Python probes without executing them. Typos and hk
   hygiene checks cover spelling, whitespace, merge markers, and file integrity.
 - The package matrix runs the reviewed tests, type checks, and deployment dry
-  runs for all 19 Bun packages. Standalone diagnostics and CI-coverage tests
+  runs for all 20 Bun packages. Standalone diagnostics and CI-coverage tests
   also run. The two container packages use frozen npm installs without install
   scripts; the OCI probe receives syntax checks only.
 
@@ -60,6 +60,11 @@ CI does not run collectors, login flows, credential synchronization, historical
 backfills, or deployments. It receives no production credentials. Package
 tests use synthetic inputs and local emulators. The runner disables Wrangler
 telemetry; installation still downloads pinned dependencies and tools.
+
+The frontend job builds both the local observation browser and the production
+evidence browser before its tests. The reader Worker job also builds the
+reviewed evidence assets with frozen dependencies before its tests and dry run;
+it does not depend on another job's filesystem or retrieve production data.
 
 ## Required merge guard
 

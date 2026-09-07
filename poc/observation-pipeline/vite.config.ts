@@ -5,9 +5,10 @@ import react from "@vitejs/plugin-react";
 // In development Vite serves the client and proxies /api to the Hono server, so
 // the client talks to the same URLs in both modes and no environment switch
 // leaks into the application code.
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   root: "web",
   plugins: [react()],
+  define: { __EVIDENCE_BROWSER__: JSON.stringify(mode === "evidence") },
   build: {
     outDir: "dist",
     emptyOutDir: true,
@@ -24,4 +25,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

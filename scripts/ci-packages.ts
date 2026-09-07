@@ -13,6 +13,7 @@ export interface PackagePolicy {
   container?: string;
   browser?: boolean;
   additionalDryRun?: boolean;
+  evidenceAssets?: boolean;
 }
 
 function worker(path: string): PackagePolicy {
@@ -24,6 +25,12 @@ function worker(path: string): PackagePolicy {
 }
 
 export const CI_PACKAGES: PackagePolicy[] = [
+  {
+    path: "services/evidence-browser",
+    scripts: { test: "vitest run", typecheck, "cf:check": dryRun },
+    checks: ["typecheck", "test", "cf:check"],
+    evidenceAssets: true,
+  },
   {
     path: "services/raw-evidence",
     scripts: {
@@ -138,8 +145,13 @@ export const CI_PACKAGES: PackagePolicy[] = [
   },
   {
     path: "poc/observation-pipeline",
-    scripts: { test, typecheck: "tsc --noEmit", build: "vite build" },
-    checks: ["typecheck", "build", "test"],
+    scripts: {
+      test,
+      typecheck: "tsc --noEmit",
+      build: "vite build",
+      "build:evidence": "vite build --mode evidence --outDir dist-evidence",
+    },
+    checks: ["typecheck", "build", "build:evidence", "test"],
     browser: true,
   },
 ];

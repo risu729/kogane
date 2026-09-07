@@ -85,6 +85,13 @@ Raw-evidence D1/R2 integration remains owned by the backend work. Changes
 here neither migrate its schema nor deploy or trigger collectors. The
 read-only browser can be replaced without losing evidence or observations.
 
+The first production adapter is implemented separately in
+`services/evidence-browser`, with the same frontend built in evidence mode.
+It reads sealed Sony Bank runs and their artifacts from the central raw store;
+it does not populate the local parsed-observation endpoints. See the
+[production evidence browser](production-evidence-browser.md) for its versioned
+contract, authentication, deployment configuration, and verification.
+
 ## Verification
 
 ```sh
