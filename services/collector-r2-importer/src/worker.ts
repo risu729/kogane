@@ -549,8 +549,11 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/smbc-direct/import-run" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/smbc-direct/import-run" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["manifestKey"]);
@@ -561,14 +564,18 @@ export default {
         return errorResponse(error);
       }
     }
-    if (request.method === "POST" && url.pathname === "/v1/smbc-direct/backfill-page" &&
-        url.search === "") {
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/smbc-direct/backfill-page" &&
+      url.search === ""
+    ) {
       try {
         const input = await readJson(request);
         exactKeys(input, ["cursor", "limit"]);
-        const cursor = input.cursor === undefined
-          ? undefined
-          : requiredString(input.cursor, "cursor_invalid", 12_000);
+        const cursor =
+          input.cursor === undefined
+            ? undefined
+            : requiredString(input.cursor, "cursor_invalid", 12_000);
         if (input.limit !== undefined && input.limit !== 1) {
           throw new ImportError(400, "backfill_limit_must_be_one");
         }
@@ -2086,12 +2093,7 @@ function importOneSony(env: Env, manifestKey: string, offset: number, immediate:
   });
 }
 
-function importOneSmbcDirect(
-  env: Env,
-  manifestKey: string,
-  offset: number,
-  immediate: boolean,
-) {
+function importOneSmbcDirect(env: Env, manifestKey: string, offset: number, immediate: boolean) {
   return importSmbcDirectRun({
     bucket: env.SMBC_DIRECT_SNAPSHOTS,
     centralService: env.RAW_EVIDENCE,
@@ -2139,10 +2141,7 @@ async function backfillSmbcDirect(
     return smbcDirectBackfillResponse({
       scannedObjectCount: 0,
       importedManifestCount: 1,
-      nextCursor: await nextSmbcDirectScanCursor(
-        state,
-        env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT,
-      ),
+      nextCursor: await nextSmbcDirectScanCursor(state, env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT),
       result,
     });
   }
@@ -2173,10 +2172,7 @@ async function backfillSmbcDirect(
     return smbcDirectBackfillResponse({
       scannedObjectCount: 1,
       skippedManifestCount: 1,
-      nextCursor: await nextSmbcDirectScanCursor(
-        continuation,
-        env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT,
-      ),
+      nextCursor: await nextSmbcDirectScanCursor(continuation, env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT),
     });
   }
   try {
@@ -2202,10 +2198,7 @@ async function backfillSmbcDirect(
     return smbcDirectBackfillResponse({
       scannedObjectCount: 1,
       importedManifestCount: 1,
-      nextCursor: await nextSmbcDirectScanCursor(
-        continuation,
-        env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT,
-      ),
+      nextCursor: await nextSmbcDirectScanCursor(continuation, env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT),
       result,
     });
   } catch (error) {
@@ -2214,10 +2207,7 @@ async function backfillSmbcDirect(
       failedManifestCount: 1,
       failureCode: safeCode(error),
       failedManifestKey: object.key,
-      nextCursor: await nextSmbcDirectScanCursor(
-        continuation,
-        env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT,
-      ),
+      nextCursor: await nextSmbcDirectScanCursor(continuation, env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT),
     });
   }
 }
@@ -2252,11 +2242,16 @@ async function nextSmbcDirectScanCursor(
   state: SmbcDirectBackfillCursor,
   secret: string,
 ): Promise<string | null> {
-  return state.scanDone ? null : encodeSmbcDirectCursor({
-    v: 2,
-    scanCursor: state.scanCursor,
-    scanDone: false,
-  }, secret);
+  return state.scanDone
+    ? null
+    : encodeSmbcDirectCursor(
+        {
+          v: 2,
+          scanCursor: state.scanCursor,
+          scanDone: false,
+        },
+        secret,
+      );
 }
 
 async function encodeSmbcDirectCursor(
@@ -2274,8 +2269,11 @@ async function decodeSmbcDirectCursor(
   secret: string,
 ): Promise<SmbcDirectBackfillCursor> {
   const match = /^smbc-direct-v2\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/u.exec(value);
-  if (!match?.[1] || !match[2] ||
-      !await verifySmbcDirectCursorSignature(match[1], match[2], secret)) {
+  if (
+    !match?.[1] ||
+    !match[2] ||
+    !(await verifySmbcDirectCursorSignature(match[1], match[2], secret))
+  ) {
     throw new ImportError(400, "cursor_invalid");
   }
   let parsed: unknown;
@@ -2305,20 +2303,22 @@ function assertSmbcDirectCursor(value: SmbcDirectBackfillCursor): void {
       !/[\x00-\x20\x7f]/u.test(value.scanCursor);
   const hasManifest = value.manifestKey !== undefined;
   const hasOffset = value.offset !== undefined;
-  if (value.v !== 2 ||
-      typeof value.scanDone !== "boolean" ||
-      !scanStateValid ||
-      hasManifest !== hasOffset ||
-      (hasManifest && (
-        typeof value.manifestKey !== "string" ||
-        !/^raw\/smbc-direct\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/manifest\.json$/u
-          .test(value.manifestKey) ||
+  if (
+    value.v !== 2 ||
+    typeof value.scanDone !== "boolean" ||
+    !scanStateValid ||
+    hasManifest !== hasOffset ||
+    (hasManifest &&
+      (typeof value.manifestKey !== "string" ||
+        !/^raw\/smbc-direct\/\d{4}\/\d{2}\/\d{2}\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/manifest\.json$/u.test(
+          value.manifestKey,
+        ) ||
         typeof value.offset !== "number" ||
         !Number.isSafeInteger(value.offset) ||
         value.offset <= 0 ||
         value.offset % 10 !== 0 ||
-        value.offset >= 10_000
-      ))) {
+        value.offset >= 10_000))
+  ) {
     throw new ImportError(400, "cursor_invalid");
   }
 }
@@ -2331,11 +2331,11 @@ async function smbcDirectCursorSignature(payload: string, secret: string): Promi
     false,
     ["sign"],
   );
-  return base64UrlEncode(new Uint8Array(await crypto.subtle.sign(
-    "HMAC",
-    key,
-    new TextEncoder().encode(`smbc-direct-v2.${payload}`),
-  )));
+  return base64UrlEncode(
+    new Uint8Array(
+      await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`smbc-direct-v2.${payload}`)),
+    ),
+  );
 }
 
 async function verifySmbcDirectCursorSignature(

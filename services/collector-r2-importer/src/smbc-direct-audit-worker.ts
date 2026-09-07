@@ -14,9 +14,12 @@ export default {
       return response({ error: "not_found" }, 404);
     }
     try {
-      const input = await request.json() as unknown;
-      if (!isRecord(input) || Object.keys(input).some((key) => key !== "cursor") ||
-          !(input.cursor === undefined || safeCursor(input.cursor))) {
+      const input = (await request.json()) as unknown;
+      if (
+        !isRecord(input) ||
+        Object.keys(input).some((key) => key !== "cursor") ||
+        !(input.cursor === undefined || safeCursor(input.cursor))
+      ) {
         throw new ImportError(400, "cursor_invalid");
       }
       const listed = await env.SMBC_DIRECT_SNAPSHOTS.list({
@@ -53,8 +56,10 @@ export default {
             };
           };
           rowCount += input.response.meisai.length;
-          if (Number(input.response.accntHstCount) !== input.response.meisai.length ||
-              input.response.meisai.length !== entry.artifact.transactionCount) {
+          if (
+            Number(input.response.accntHstCount) !== input.response.meisai.length ||
+            input.response.meisai.length !== entry.artifact.transactionCount
+          ) {
             declaredCountMismatchCount += 1;
           }
           stopFlags.add(String(input.response.shoukaiServerStopFlag));
@@ -124,14 +129,21 @@ function auditResponse(input: {
 }
 
 function safeCursor(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 4_096 &&
-    !/[\x00-\x20\x7f]/u.test(value);
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 4_096 &&
+    !/[\x00-\x20\x7f]/u.test(value)
+  );
 }
 
 function safeCode(error: unknown): string {
-  const candidate = error instanceof ImportError
-    ? error.code
-    : error instanceof Error ? error.message : "request_failed";
+  const candidate =
+    error instanceof ImportError
+      ? error.code
+      : error instanceof Error
+        ? error.message
+        : "request_failed";
   return /^[a-z0-9_-]{1,100}$/u.test(candidate) ? candidate : "request_failed";
 }
 

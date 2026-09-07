@@ -669,9 +669,11 @@ export class DirectProfile {
       }
       throw new Error("transactions_rejected");
     }
-    if (typeof result.response.accntHstCount !== "string" ||
-        !/^(?:0|[1-9][0-9]{0,5})$/u.test(result.response.accntHstCount) ||
-        Number(result.response.accntHstCount) !== result.response.meisai.length) {
+    if (
+      typeof result.response.accntHstCount !== "string" ||
+      !/^(?:0|[1-9][0-9]{0,5})$/u.test(result.response.accntHstCount) ||
+      Number(result.response.accntHstCount) !== result.response.meisai.length
+    ) {
       throw new Error("transaction_count_invalid");
     }
     if (result.response.shoukaiServerStopFlag !== "0") {
@@ -687,7 +689,7 @@ export class DirectProfile {
         amount: Math.abs(parseYen(entry.amount, "transaction_amount")),
         balanceAfter: parseYen(entry.torihikigobalance, "transaction_balance"),
         description: String(entry.comment ?? ""),
-        direction: entry.depositWithdrawTypeFlag === "1" ? "debit" as const : "credit" as const,
+        direction: entry.depositWithdrawTypeFlag === "1" ? ("debit" as const) : ("credit" as const),
       };
     });
     await this.continueSession();

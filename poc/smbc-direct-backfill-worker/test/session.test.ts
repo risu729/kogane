@@ -38,8 +38,9 @@ describe("isResumable", () => {
 describe("collector failure codes", () => {
   test("keeps only fixed collection codes and bounded HTTP patterns", () => {
     expect(classifyError(new Error("transactions_http_503"))).toBe("transactions_http_503");
-    expect(classifyError(new Error("transaction_direction_invalid")))
-      .toBe("transaction_direction_invalid");
+    expect(classifyError(new Error("transaction_direction_invalid"))).toBe(
+      "transaction_direction_invalid",
+    );
     expect(classifyError(new Error("arbitrary_safe_code"))).toBe("unexpected_error");
     expect(classifyError(new Error("transactions_http_999"))).toBe("unexpected_error");
     expect(classifyError(new TypeError("arbitrary_safe_code"))).toBe("type_error");

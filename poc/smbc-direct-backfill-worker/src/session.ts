@@ -488,21 +488,25 @@ export class SmbcBackfillSession extends DurableObject<Env> {
   async #importRawEvidence(manifestKey: string, runId: string): Promise<void> {
     try {
       const result = await importStoredRun(this.env.RAW_EVIDENCE_IMPORTER, manifestKey);
-      console.log(JSON.stringify({
-        message: "smbc_raw_evidence_import",
-        runId,
-        centralStatus: result.status,
-        artifactCount: result.artifactCount,
-        ...(result.status === "sealed"
-          ? { centralRunId: result.centralRunId }
-          : { centralDeferredReason: result.reason, centralNextOffset: result.nextOffset }),
-      }));
+      console.log(
+        JSON.stringify({
+          message: "smbc_raw_evidence_import",
+          runId,
+          centralStatus: result.status,
+          artifactCount: result.artifactCount,
+          ...(result.status === "sealed"
+            ? { centralRunId: result.centralRunId }
+            : { centralDeferredReason: result.reason, centralNextOffset: result.nextOffset }),
+        }),
+      );
     } catch {
-      console.error(JSON.stringify({
-        message: "smbc_raw_evidence_import_failed",
-        runId,
-        errorCode: "raw_evidence_import_failed",
-      }));
+      console.error(
+        JSON.stringify({
+          message: "smbc_raw_evidence_import_failed",
+          runId,
+          errorCode: "raw_evidence_import_failed",
+        }),
+      );
     }
   }
 

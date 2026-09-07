@@ -1675,18 +1675,22 @@ describe("sanitized source-usecase contract", () => {
       declaredMediaType: "application/json",
       mediaTypeBasis: "manifest",
       storage: await smbcDirectStorageOrigin(normalizedKey),
-      transformSteps: [{
-        stepIndex: 0,
-        stepKind: "generated",
-        transformerId: "smbc-direct-backfill-worker",
-        transformerVersion: "smbc-direct-backfill-worker-poc-v1",
-      }],
-      relations: [{
-        parentArtifactKey: rawKey,
-        relation: "input",
-        transformerId: "smbc-direct-backfill-worker",
-        transformerVersion: "smbc-direct-backfill-worker-poc-v1",
-      }],
+      transformSteps: [
+        {
+          stepIndex: 0,
+          stepKind: "generated",
+          transformerId: "smbc-direct-backfill-worker",
+          transformerVersion: "smbc-direct-backfill-worker-poc-v1",
+        },
+      ],
+      relations: [
+        {
+          parentArtifactKey: rawKey,
+          relation: "input",
+          transformerId: "smbc-direct-backfill-worker",
+          transformerVersion: "smbc-direct-backfill-worker-poc-v1",
+        },
+      ],
     });
     const manifest = await catalogue(runId, "manifest.json", "fixture manifest bytes", {
       artifactRole: "collector_manifest",
@@ -1706,7 +1710,9 @@ describe("sanitized source-usecase contract", () => {
     const descriptors = await env.DB.prepare(`
       SELECT artifact_key, fetch_unit_id, artifact_role, payload_fidelity, lineage_disposition
       FROM fetch_artifacts WHERE fetch_run_id = ? ORDER BY artifact_key
-    `).bind(runId).all();
+    `)
+      .bind(runId)
+      .all();
     expect(descriptors.results).toEqual([
       {
         artifact_key: "manifest.json",

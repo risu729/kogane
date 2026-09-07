@@ -467,9 +467,11 @@ describe("collector R2 importer routes", () => {
           return { objects: [], truncated: false } as unknown as R2Objects;
         }
         return {
-          objects: [{
-            key: "raw/smbc-direct/2026/09/05/123e4567-e89b-42d3-a456-426614174000/balance.raw.json.sjis",
-          }],
+          objects: [
+            {
+              key: "raw/smbc-direct/2026/09/05/123e4567-e89b-42d3-a456-426614174000/balance.raw.json.sjis",
+            },
+          ],
           truncated: true,
           cursor: "next",
         } as unknown as R2Objects;
@@ -482,13 +484,20 @@ describe("collector R2 importer routes", () => {
         body: JSON.stringify({ limit: 1 }),
       }) as Parameters<typeof worker.fetch>[0],
       environment(
-        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
-        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        bucket,
       ),
     );
     expect(response.status).toBe(200);
     expect(calls).toEqual([{ prefix: "raw/smbc-direct/", limit: 1 }]);
-    const body = await response.json() as Record<string, unknown>;
+    const body = (await response.json()) as Record<string, unknown>;
     expect(body).toMatchObject({
       source: "smbc-direct",
       scannedObjectCount: 1,
@@ -507,8 +516,15 @@ describe("collector R2 importer routes", () => {
         body: JSON.stringify({ cursor: body.nextCursor, limit: 1 }),
       }) as Parameters<typeof worker.fetch>[0],
       environment(
-        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
-        {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        {} as R2Bucket,
+        bucket,
       ),
     );
     expect(resumed.status).toBe(200);
@@ -525,8 +541,7 @@ describe("collector R2 importer routes", () => {
       v: 2,
       scanCursor: null,
       scanDone: true,
-      manifestKey:
-        "raw/smbc-direct/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
+      manifestKey: "raw/smbc-direct/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
       offset: 10,
     });
     const invalidBodies = [
@@ -581,12 +596,19 @@ describe("collector R2 importer routes", () => {
           body: JSON.stringify(body),
         }) as Parameters<typeof worker.fetch>[0],
         environment(
-          {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket,
-          {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, {} as R2Bucket, bucket,
+          {} as R2Bucket,
+          {} as R2Bucket,
+          {} as R2Bucket,
+          {} as R2Bucket,
+          {} as R2Bucket,
+          {} as R2Bucket,
+          {} as R2Bucket,
+          {} as R2Bucket,
+          bucket,
         ),
       );
       expect(response.status).toBe(400);
-      expect(await response.json() as unknown).toEqual({
+      expect((await response.json()) as unknown).toEqual({
         error: body.limit === 2 ? "backfill_limit_must_be_one" : "cursor_invalid",
       });
     }
@@ -1070,24 +1092,26 @@ async function smbcDirectCursor(value: unknown): Promise<string> {
     false,
     ["sign"],
   );
-  const signature = new Uint8Array(await crypto.subtle.sign(
-    "HMAC",
-    key,
-    new TextEncoder().encode(`smbc-direct-v2.${payload}`),
-  ));
+  const signature = new Uint8Array(
+    await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`smbc-direct-v2.${payload}`)),
+  );
   return `smbc-direct-v2.${payload}.${base64Url(signature)}`;
 }
 
-function tamperSmbcDirectCursor(
-  cursor: string,
-  changes: Record<string, unknown>,
-): string {
+function tamperSmbcDirectCursor(cursor: string, changes: Record<string, unknown>): string {
   const [prefix, payload, signature] = cursor.split(".");
-  const parsed = JSON.parse(new TextDecoder().decode(base64UrlBytes(payload!))) as Record<string, unknown>;
-  return `${prefix}.${base64Url(new TextEncoder().encode(JSON.stringify({
-    ...parsed,
-    ...changes,
-  })))}.${signature}`;
+  const parsed = JSON.parse(new TextDecoder().decode(base64UrlBytes(payload!))) as Record<
+    string,
+    unknown
+  >;
+  return `${prefix}.${base64Url(
+    new TextEncoder().encode(
+      JSON.stringify({
+        ...parsed,
+        ...changes,
+      }),
+    ),
+  )}.${signature}`;
 }
 
 function base64Url(bytes: Uint8Array): string {
@@ -1097,7 +1121,9 @@ function base64Url(bytes: Uint8Array): string {
 }
 
 function base64UrlBytes(value: string): Uint8Array {
-  const padded = value.replaceAll("-", "+").replaceAll("_", "/")
+  const padded = value
+    .replaceAll("-", "+")
+    .replaceAll("_", "/")
     .padEnd(Math.ceil(value.length / 4) * 4, "=");
   return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
 }

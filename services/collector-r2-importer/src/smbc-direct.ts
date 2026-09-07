@@ -17,7 +17,8 @@ const MAX_ARTIFACT_BYTES = 8 * 1024 * 1024;
 const MAX_SOURCE_ARTIFACTS = 9_999;
 export const SMBC_DIRECT_TRANSFER_CHUNK_SIZE = 10;
 const DIRECT_ARTIFACT_LIMIT = 12;
-const MANIFEST_KEY = /^raw\/smbc-direct\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
+const MANIFEST_KEY =
+  /^raw\/smbc-direct\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const FIXED_FAILURE_CODES = new Set([
   "_formid_field_missing",
@@ -54,7 +55,8 @@ const FIXED_FAILURE_CODES = new Set([
   "unexpected_error",
   "withdrawals_total_invalid",
 ]);
-const HTTP_FAILURE_CODE = /^(?:account_detail|balance|continue_session|transactions)_http_[1-5][0-9]{2}$/u;
+const HTTP_FAILURE_CODE =
+  /^(?:account_detail|balance|continue_session|transactions)_http_[1-5][0-9]{2}$/u;
 const RAW_MEDIA_TYPE = "application/json;charset=Shift_JIS";
 const JSON_MEDIA_TYPE = "application/json; charset=utf-8";
 const BALANCE_RESPONSE_KEYS = [
@@ -224,22 +226,24 @@ export async function importSmbcDirectRun(options: {
     reason?: ImportSmbcDirectDeferred["reason"],
   ) => {
     try {
-      console[outcome === "failed" ? "error" : "log"](JSON.stringify({
-        event: "smbc-direct-import-diagnostic",
-        source: EXTERNAL_SOURCE,
-        attemptId,
-        ...(runId ? { runId } : {}),
-        phase,
-        outcome,
-        durationMs: Math.max(0, Date.now() - startedAtMs),
-        expectedArtifactCount,
-        acceptedArtifactCount,
-        reusedArtifactCount,
-        ...(centralRunId === undefined ? {} : { centralRunId }),
-        ...(nextOffset === undefined ? {} : { nextOffset }),
-        ...(reason === undefined ? {} : { reason }),
-        ...(outcome === "failed" ? { errorCode: phase + "_failed" } : {}),
-      }));
+      console[outcome === "failed" ? "error" : "log"](
+        JSON.stringify({
+          event: "smbc-direct-import-diagnostic",
+          source: EXTERNAL_SOURCE,
+          attemptId,
+          ...(runId ? { runId } : {}),
+          phase,
+          outcome,
+          durationMs: Math.max(0, Date.now() - startedAtMs),
+          expectedArtifactCount,
+          acceptedArtifactCount,
+          reusedArtifactCount,
+          ...(centralRunId === undefined ? {} : { centralRunId }),
+          ...(nextOffset === undefined ? {} : { nextOffset }),
+          ...(reason === undefined ? {} : { reason }),
+          ...(outcome === "failed" ? { errorCode: phase + "_failed" } : {}),
+        }),
+      );
     } catch {
       // Diagnostics must not interrupt evidence transfer.
     }
@@ -250,20 +254,30 @@ export async function importSmbcDirectRun(options: {
     const validated = await validateSmbcDirectRun(options.bucket, options.manifestKey);
     expectedArtifactCount = validated.artifacts.length + 1;
     const offset = options.offset ?? 0;
-    if (!Number.isSafeInteger(offset) || offset < 0 ||
-        (offset !== 0 && (
-          options.immediate !== false ||
+    if (
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      (offset !== 0 &&
+        (options.immediate !== false ||
           offset % SMBC_DIRECT_TRANSFER_CHUNK_SIZE !== 0 ||
-          offset >= expectedArtifactCount
-        ))) {
+          offset >= expectedArtifactCount))
+    ) {
       throw new ImportError(400, "transfer_offset_invalid");
     }
     if (expectedArtifactCount > 10_000) {
       log("deferred", offset, "central_inventory_limit");
-      return deferred(options.manifestKey, expectedArtifactCount, "central_inventory_limit", offset);
+      return deferred(
+        options.manifestKey,
+        expectedArtifactCount,
+        "central_inventory_limit",
+        offset,
+      );
     }
-    if (options.immediate !== false && offset === 0 &&
-        expectedArtifactCount > DIRECT_ARTIFACT_LIMIT) {
+    if (
+      options.immediate !== false &&
+      offset === 0 &&
+      expectedArtifactCount > DIRECT_ARTIFACT_LIMIT
+    ) {
       log("deferred", 0, "worker_invocation_limit");
       return deferred(options.manifestKey, expectedArtifactCount, "worker_invocation_limit", 0);
     }
@@ -304,9 +318,9 @@ export async function importSmbcDirectRun(options: {
       options.fingerprintKey,
       options.manifestKey,
     );
-    const inventory = plans.map((plan) => plan.inventory).sort((left, right) =>
-      binaryCompare(left.artifactKey, right.artifactKey)
-    );
+    const inventory = plans
+      .map((plan) => plan.inventory)
+      .sort((left, right) => binaryCompare(left.artifactKey, right.artifactKey));
     const inventorySha256 = await sha256Hex(
       new TextEncoder().encode(canonicalJson(inventory as unknown as JsonValue)),
     );
@@ -325,7 +339,7 @@ export async function importSmbcDirectRun(options: {
       const bytes = plan.source
         ? await readVerifiedArtifact(options.bucket, plan.source, validated.manifest)
         : validated.manifestBytes;
-      if (await sha256Hex(bytes) !== plan.sha256) {
+      if ((await sha256Hex(bytes)) !== plan.sha256) {
         throw new ImportError(409, "artifact_changed_during_import");
       }
       phase = "object_upload";
@@ -345,29 +359,13 @@ export async function importSmbcDirectRun(options: {
     }
     if (end < plans.length) {
       log("deferred", end, "worker_invocation_limit");
-      return deferred(
-        options.manifestKey,
-        plans.length,
-        "worker_invocation_limit",
-        end,
-      );
+      return deferred(options.manifestKey, plans.length, "worker_invocation_limit", end);
     }
 
     phase = "terminal_reports";
-    await addTerminalReports(
-      central,
-      centralRunId,
-      unitId,
-      validated.manifest,
-      plans.length,
-    );
+    await addTerminalReports(central, centralRunId, unitId, validated.manifest, plans.length);
     phase = "seal";
-    await central.sealStagedInventory(
-      centralRunId,
-      inventoryId,
-      attemptId,
-      startedAtMs,
-    );
+    await central.sealStagedInventory(centralRunId, inventoryId, attemptId, startedAtMs);
     log("sealed");
     return {
       source: EXTERNAL_SOURCE,
@@ -432,9 +430,13 @@ async function addTerminalReports(
   manifest: Manifest,
   artifactCount: number,
 ): Promise<void> {
-  const safeFailure = manifest.status === "success"
-    ? {}
-    : { safeFailureCode: manifest.status === "partial" ? "source-run-partial" : "source-run-failed" };
+  const safeFailure =
+    manifest.status === "success"
+      ? {}
+      : {
+          safeFailureCode:
+            manifest.status === "partial" ? "source-run-partial" : "source-run-failed",
+        };
   await central.addUnitReport(unitId, {
     reportKey: "terminal",
     reportKind: "terminal",
@@ -471,10 +473,7 @@ export async function validateSmbcDirectRun(
 ): Promise<ValidatedRun> {
   const loaded = await loadManifest(bucket, manifestKey);
   const prefix = manifestKey.slice(0, -"manifest.json".length);
-  const expectedKeys = [
-    ...loaded.manifest.artifacts.map((artifact) => artifact.key),
-    manifestKey,
-  ];
+  const expectedKeys = [...loaded.manifest.artifacts.map((artifact) => artifact.key), manifestKey];
   await assertExactPrefix(bucket, prefix, expectedKeys);
   const artifacts: VerifiedArtifact[] = [];
   for (const artifact of loaded.manifest.artifacts) {
@@ -513,21 +512,26 @@ export function parseSmbcDirectManifest(bytes: Uint8Array, manifestKey: string):
   const key = MANIFEST_KEY.exec(manifestKey);
   if (!key) invalid("manifest_key_invalid");
   const input = parseJson(bytes, "manifest_json_invalid", 400);
-  exactShape(input, [
-    "schemaVersion",
-    "source",
-    "runId",
-    "startedAt",
-    "completedAt",
-    "status",
-    "requestedRange",
-    "completedChunks",
-    "totalChunks",
-    "transactionCount",
-    "artifacts",
-    "failureCodes",
-    "logoutSucceeded",
-  ], "manifest_shape_invalid", 400);
+  exactShape(
+    input,
+    [
+      "schemaVersion",
+      "source",
+      "runId",
+      "startedAt",
+      "completedAt",
+      "status",
+      "requestedRange",
+      "completedChunks",
+      "totalChunks",
+      "transactionCount",
+      "artifacts",
+      "failureCodes",
+      "logoutSucceeded",
+    ],
+    "manifest_shape_invalid",
+    400,
+  );
   if (input.schemaVersion !== SCHEMA_VERSION) invalid("manifest_schema_invalid");
   if (input.source !== EXTERNAL_SOURCE || input.runId !== key[4]) {
     invalid("manifest_identity_mismatch");
@@ -576,9 +580,12 @@ export function parseSmbcDirectManifest(bytes: Uint8Array, manifestKey: string):
   }
   const prefix = manifestKey.slice(0, -"manifest.json".length);
   const artifacts = input.artifacts.map((value) => parseArtifact(value, prefix));
-  if (!Array.isArray(input.failureCodes) || input.failureCodes.length > 20 ||
-      input.failureCodes.some((value) => typeof value !== "string" || !validFailureCode(value)) ||
-      new Set(input.failureCodes as string[]).size !== input.failureCodes.length) {
+  if (
+    !Array.isArray(input.failureCodes) ||
+    input.failureCodes.length > 20 ||
+    input.failureCodes.some((value) => typeof value !== "string" || !validFailureCode(value)) ||
+    new Set(input.failureCodes as string[]).size !== input.failureCodes.length
+  ) {
     invalid("manifest_failure_codes_invalid");
   }
   if (typeof input.logoutSucceeded !== "boolean") {
@@ -605,12 +612,7 @@ function parseArtifact(value: unknown, prefix: string): Artifact {
   const input = record(value, "manifest_artifact_invalid", 400);
   const dataset = oneOf(
     input.dataset,
-    [
-      "balance-raw",
-      "balance-normalized",
-      "transactions-raw",
-      "transactions-normalized",
-    ] as const,
+    ["balance-raw", "balance-normalized", "transactions-raw", "transactions-normalized"] as const,
     "manifest_dataset_invalid",
     400,
   );
@@ -627,7 +629,11 @@ function parseArtifact(value: unknown, prefix: string): Artifact {
     ? parseRange(input.range, "manifest_artifact_range_invalid", 400)
     : undefined;
   const expectedKey = transaction
-    ? prefix + "transactions/" + compact(range!.start) + "-" + compact(range!.end) +
+    ? prefix +
+      "transactions/" +
+      compact(range!.start) +
+      "-" +
+      compact(range!.end) +
       (dataset === "transactions-raw" ? ".raw.json.sjis" : ".normalized.json")
     : prefix + (dataset === "balance-raw" ? "balance.raw.json.sjis" : "balance.normalized.json");
   if (input.key !== expectedKey) invalid("manifest_artifact_key_mismatch");
@@ -651,11 +657,7 @@ function parseArtifact(value: unknown, prefix: string): Artifact {
   };
 }
 
-function parsePayload(
-  artifact: Artifact,
-  bytes: Uint8Array,
-  manifest: Manifest,
-): VerifiedPayload {
+function parsePayload(artifact: Artifact, bytes: Uint8Array, manifest: Manifest): VerifiedPayload {
   if (artifact.dataset.endsWith("-raw")) {
     const text = decode(bytes, "shift_jis");
     const roundTrip = new Uint8Array(encode(text, "shift_jis"));
@@ -700,16 +702,21 @@ function parseRawTransactions(input: JsonObject, artifact: Artifact): Transactio
   exactShape(input, ["response", "success"], "transactions_raw_shape_invalid", 409);
   if (input.success !== true) throw new ImportError(409, "transactions_raw_unsuccessful");
   const response = record(input.response, "transactions_raw_response_invalid", 409);
-  exactShape(response, [
-    "accntHstCount",
-    "currentDate",
-    "mEndYmd",
-    "mStartYmd",
-    "meisai",
-    "nyukinGoukei",
-    "shoukaiServerStopFlag",
-    "syukkinGoukei",
-  ], "transactions_raw_response_shape_invalid", 409);
+  exactShape(
+    response,
+    [
+      "accntHstCount",
+      "currentDate",
+      "mEndYmd",
+      "mStartYmd",
+      "meisai",
+      "nyukinGoukei",
+      "shoukaiServerStopFlag",
+      "syukkinGoukei",
+    ],
+    "transactions_raw_response_shape_invalid",
+    409,
+  );
   for (const key of [
     "accntHstCount",
     "currentDate",
@@ -721,8 +728,10 @@ function parseRawTransactions(input: JsonObject, artifact: Artifact): Transactio
   ]) {
     scalar(response[key], "transactions_raw_scalar_invalid");
   }
-  if (responseBoundaryDate(response.mStartYmd) !== artifact.range!.start ||
-      responseBoundaryDate(response.mEndYmd) !== artifact.range!.end) {
+  if (
+    responseBoundaryDate(response.mStartYmd) !== artifact.range!.start ||
+    responseBoundaryDate(response.mEndYmd) !== artifact.range!.end
+  ) {
     throw new ImportError(409, "transactions_raw_range_mismatch");
   }
   if (!Array.isArray(response.meisai) || response.meisai.length > 100_000) {
@@ -737,17 +746,22 @@ function parseRawTransactions(input: JsonObject, artifact: Artifact): Transactio
   }
   const transactions = response.meisai.map((value) => {
     const entry = record(value, "transactions_raw_row_invalid", 409);
-    exactShape(entry, [
-      "amount",
-      "comment",
-      "depositWithdrawTypeFlag",
-      "detailIndex",
-      "dispDate",
-      "meisaiColorDisp",
-      "meisaiId",
-      "meisaiMemoDisp",
-      "torihikigobalance",
-    ], "transactions_raw_row_shape_invalid", 409);
+    exactShape(
+      entry,
+      [
+        "amount",
+        "comment",
+        "depositWithdrawTypeFlag",
+        "detailIndex",
+        "dispDate",
+        "meisaiColorDisp",
+        "meisaiId",
+        "meisaiMemoDisp",
+        "torihikigobalance",
+      ],
+      "transactions_raw_row_shape_invalid",
+      409,
+    );
     for (const key of Object.keys(entry)) scalar(entry[key], "transactions_raw_row_scalar_invalid");
     const direction = oneOf(
       entry.depositWithdrawTypeFlag,
@@ -760,10 +774,11 @@ function parseRawTransactions(input: JsonObject, artifact: Artifact): Transactio
       date: transactionDate(entry.dispDate, compact(artifact.range!.end)),
       amount: Math.abs(parseYen(entry.amount, "transactions_raw_amount_invalid")),
       balanceAfter: parseYen(entry.torihikigobalance, "transactions_raw_balance_invalid"),
-      description: boundedString(String(entry.comment ?? ""), "transactions_raw_description_invalid"),
-      direction: direction === "1"
-        ? "debit" as const
-        : "credit" as const,
+      description: boundedString(
+        String(entry.comment ?? ""),
+        "transactions_raw_description_invalid",
+      ),
+      direction: direction === "1" ? ("debit" as const) : ("credit" as const),
     };
   });
   if (transactions.length !== artifact.transactionCount) {
@@ -778,16 +793,13 @@ function parseRawTransactions(input: JsonObject, artifact: Artifact): Transactio
   };
 }
 
-function parseNormalizedTransactions(
-  input: JsonObject,
-  artifact: Artifact,
-): TransactionPayload {
-  exactShape(input, [
-    "depositsTotal",
-    "range",
-    "transactions",
-    "withdrawalsTotal",
-  ], "transactions_normalized_shape_invalid", 409);
+function parseNormalizedTransactions(input: JsonObject, artifact: Artifact): TransactionPayload {
+  exactShape(
+    input,
+    ["depositsTotal", "range", "transactions", "withdrawalsTotal"],
+    "transactions_normalized_shape_invalid",
+    409,
+  );
   const range = parseRange(input.range, "transactions_normalized_range_invalid", 409);
   if (!sameRange(range, artifact.range!)) {
     throw new ImportError(409, "transactions_normalized_range_mismatch");
@@ -797,14 +809,12 @@ function parseNormalizedTransactions(
   }
   const transactions = input.transactions.map((value) => {
     const row = record(value, "transactions_normalized_row_invalid", 409);
-    exactShape(row, [
-      "amount",
-      "balanceAfter",
-      "date",
-      "description",
-      "direction",
-      "id",
-    ], "transactions_normalized_row_shape_invalid", 409);
+    exactShape(
+      row,
+      ["amount", "balanceAfter", "date", "description", "direction", "id"],
+      "transactions_normalized_row_shape_invalid",
+      409,
+    );
     const dateValue = instantOffset(row.date, "transactions_normalized_date_invalid");
     return {
       id: boundedString(row.id, "transactions_normalized_id_invalid"),
@@ -869,28 +879,33 @@ function validateCompleteness(
     throw new ImportError(409, "manifest_failure_complement_mismatch");
   }
 
-  const expectedStatus: Status = manifest.failureCodes.length === 0
-    ? "success"
-    : artifacts.length > 2 ? "partial" : "failed";
+  const expectedStatus: Status =
+    manifest.failureCodes.length === 0 ? "success" : artifacts.length > 2 ? "partial" : "failed";
   if (manifest.status !== expectedStatus) {
     throw new ImportError(409, "manifest_status_mismatch");
   }
   if (manifest.status === "success") {
-    if (manifest.completedChunks !== manifest.totalChunks ||
-        expected.length !== 2 + manifest.totalChunks * 2 ||
-        !manifest.logoutSucceeded) {
+    if (
+      manifest.completedChunks !== manifest.totalChunks ||
+      expected.length !== 2 + manifest.totalChunks * 2 ||
+      !manifest.logoutSucceeded
+    ) {
       throw new ImportError(409, "manifest_success_complement_mismatch");
     }
   } else {
     if (manifest.failureCodes.length === 0) {
       throw new ImportError(409, "manifest_failure_code_missing");
     }
-    if (manifest.status === "failed" &&
-        (manifest.completedChunks !== 0 || manifest.transactionCount !== 0)) {
+    if (
+      manifest.status === "failed" &&
+      (manifest.completedChunks !== 0 || manifest.transactionCount !== 0)
+    ) {
       throw new ImportError(409, "manifest_failed_progress_mismatch");
     }
-    if (manifest.completedChunks === manifest.totalChunks &&
-        !manifest.failureCodes.includes("logout_failed")) {
+    if (
+      manifest.completedChunks === manifest.totalChunks &&
+      !manifest.failureCodes.includes("logout_failed")
+    ) {
       throw new ImportError(409, "manifest_terminal_failure_mismatch");
     }
   }
@@ -899,10 +914,13 @@ function validateCompleteness(
   const rawBalance = entries.get(balanceRaw)?.payload;
   const normalizedBalance = entries.get(balanceNormalized)?.payload;
   if (rawBalance && normalizedBalance) {
-    if (!isBalance(rawBalance) || !isBalance(normalizedBalance) ||
-        rawBalance.kind !== "balance-raw" ||
-        normalizedBalance.kind !== "balance-normalized" ||
-        rawBalance.amount !== normalizedBalance.amount) {
+    if (
+      !isBalance(rawBalance) ||
+      !isBalance(normalizedBalance) ||
+      rawBalance.kind !== "balance-raw" ||
+      normalizedBalance.kind !== "balance-normalized" ||
+      rawBalance.amount !== normalizedBalance.amount
+    ) {
       throw new ImportError(409, "balance_payload_mismatch");
     }
   }
@@ -912,10 +930,15 @@ function validateCompleteness(
     const range = ranges[index]!;
     const raw = entries.get(transactionKey(prefix, range, true))?.payload;
     const normalized = entries.get(transactionKey(prefix, range, false))?.payload;
-    if (!raw || !normalized || !isTransactions(raw) || !isTransactions(normalized) ||
-        raw.kind !== "transactions-raw" ||
-        normalized.kind !== "transactions-normalized" ||
-        !sameTransactionPayload(raw, normalized)) {
+    if (
+      !raw ||
+      !normalized ||
+      !isTransactions(raw) ||
+      !isTransactions(normalized) ||
+      raw.kind !== "transactions-raw" ||
+      normalized.kind !== "transactions-normalized" ||
+      !sameTransactionPayload(raw, normalized)
+    ) {
       throw new ImportError(409, "transactions_payload_mismatch");
     }
     transactionCount += normalized.transactions.length;
@@ -934,11 +957,13 @@ function isTransactions(value: VerifiedPayload): value is TransactionPayload {
 }
 
 function sameTransactionPayload(left: TransactionPayload, right: TransactionPayload): boolean {
-  return sameRange(left.range, right.range) &&
+  return (
+    sameRange(left.range, right.range) &&
     left.depositsTotal === right.depositsTotal &&
     left.withdrawalsTotal === right.withdrawalsTotal &&
     canonicalJson(left.transactions as unknown as JsonValue) ===
-      canonicalJson(right.transactions as unknown as JsonValue);
+      canonicalJson(right.transactions as unknown as JsonValue)
+  );
 }
 
 async function artifactPlans(
@@ -969,11 +994,7 @@ async function artifactPlans(
       },
     });
   }
-  const descriptor = await manifestDescriptor(
-    validated,
-    manifestKey,
-    fingerprintKey,
-  );
+  const descriptor = await manifestDescriptor(validated, manifestKey, fingerprintKey);
   plans.push({
     source: null,
     sha256: validated.manifestSha256,
@@ -997,9 +1018,7 @@ async function dataDescriptor(
 ): Promise<JsonObject> {
   const normalized = verified.artifact.dataset.endsWith("-normalized");
   const artifactKey = relativeArtifactKey(verified.artifact.key, manifestKey);
-  const rawParent = normalized
-    ? artifactKey.replace(".normalized.json", ".raw.json.sjis")
-    : null;
+  const rawParent = normalized ? artifactKey.replace(".normalized.json", ".raw.json.sjis") : null;
   return normalizedDescriptor({
     artifactKey,
     artifactRole: normalized ? "collector_derived" : "provider_response",
@@ -1016,18 +1035,26 @@ async function dataDescriptor(
     byteSize: verified.artifact.bytes,
     storage: await storageOrigin(verified.artifact.key, fingerprintKey),
     ranges: verified.artifact.range ? [artifactRange(verified.artifact.range)] : [],
-    transformSteps: normalized ? [{
-      stepIndex: 0,
-      stepKind: "generated",
-      transformerId: "smbc-direct-backfill-worker",
-      transformerVersion: manifest.schemaVersion,
-    }] : [],
-    relations: rawParent ? [{
-      parentArtifactKey: rawParent,
-      relation: "input",
-      transformerId: "smbc-direct-backfill-worker",
-      transformerVersion: manifest.schemaVersion,
-    }] : [],
+    transformSteps: normalized
+      ? [
+          {
+            stepIndex: 0,
+            stepKind: "generated",
+            transformerId: "smbc-direct-backfill-worker",
+            transformerVersion: manifest.schemaVersion,
+          },
+        ]
+      : [],
+    relations: rawParent
+      ? [
+          {
+            parentArtifactKey: rawParent,
+            relation: "input",
+            transformerId: "smbc-direct-backfill-worker",
+            transformerVersion: manifest.schemaVersion,
+          },
+        ]
+      : [],
   });
 }
 
@@ -1138,7 +1165,7 @@ async function readVerifiedArtifact(
   );
   const bytes = new Uint8Array(await object.arrayBuffer());
   assertNativeSha256(object, artifact.sha256);
-  if (await sha256Hex(bytes) !== artifact.sha256) {
+  if ((await sha256Hex(bytes)) !== artifact.sha256) {
     throw new ImportError(409, "artifact_checksum_mismatch");
   }
   return bytes;
@@ -1188,11 +1215,7 @@ async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonO
     false,
     ["sign"],
   );
-  const signature = await crypto.subtle.sign(
-    "HMAC",
-    cryptoKey,
-    new TextEncoder().encode(key),
-  );
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, new TextEncoder().encode(key));
   return {
     storageKind: "r2",
     containerName: STORAGE_CONTAINER,
@@ -1209,15 +1232,19 @@ async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonO
 
 async function descriptorSha256(descriptor: JsonObject): Promise<string> {
   const { http, storage, file, email, ...fields } = descriptor;
-  return sha256Hex(new TextEncoder().encode(canonicalJson({
-    ...fields,
-    origins: {
-      http: http ?? null,
-      storage: storage ?? null,
-      file: file ?? null,
-      email: email ?? null,
-    },
-  } as unknown as JsonValue)));
+  return sha256Hex(
+    new TextEncoder().encode(
+      canonicalJson({
+        ...fields,
+        origins: {
+          http: http ?? null,
+          storage: storage ?? null,
+          file: file ?? null,
+          email: email ?? null,
+        },
+      } as unknown as JsonValue),
+    ),
+  );
 }
 
 function formatId(dataset: Dataset): string {
@@ -1233,17 +1260,27 @@ function relativeArtifactKey(key: string, manifestKey: string): string {
     throw new ImportError(409, "artifact_prefix_mismatch");
   }
   const relative = key.slice(prefix.length);
-  if (relative.length === 0 || relative === "manifest.json" ||
-      relative.startsWith("/") || relative.includes("..") ||
-      /[\x00-\x20\x7f]/u.test(relative)) {
+  if (
+    relative.length === 0 ||
+    relative === "manifest.json" ||
+    relative.startsWith("/") ||
+    relative.includes("..") ||
+    /[\x00-\x20\x7f]/u.test(relative)
+  ) {
     throw new ImportError(409, "artifact_relative_key_invalid");
   }
   return relative;
 }
 
 function transactionKey(prefix: string, range: DateRange, raw: boolean): string {
-  return prefix + "transactions/" + compact(range.start) + "-" + compact(range.end) +
-    (raw ? ".raw.json.sjis" : ".normalized.json");
+  return (
+    prefix +
+    "transactions/" +
+    compact(range.start) +
+    "-" +
+    compact(range.end) +
+    (raw ? ".raw.json.sjis" : ".normalized.json")
+  );
 }
 
 function monthRanges(range: DateRange): DateRange[] {
@@ -1295,14 +1332,21 @@ function transactionDate(value: unknown, referenceDate: string): string {
     timestamp = Date.UTC(year, month - 1, day);
   }
   const parsed = new Date(timestamp);
-  if (parsed.getUTCFullYear() !== year ||
-      parsed.getUTCMonth() !== month - 1 ||
-      parsed.getUTCDate() !== day) {
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
     throw new ImportError(409, "transactions_raw_date_invalid");
   }
-  return String(year).padStart(4, "0") + "-" +
-    String(month).padStart(2, "0") + "-" +
-    String(day).padStart(2, "0") + "T00:00:00+09:00";
+  return (
+    String(year).padStart(4, "0") +
+    "-" +
+    String(month).padStart(2, "0") +
+    "-" +
+    String(day).padStart(2, "0") +
+    "T00:00:00+09:00"
+  );
 }
 
 function responseBoundaryDate(value: unknown): string {
@@ -1320,8 +1364,11 @@ function responseBoundaryDate(value: unknown): string {
   const day = Number(match[3]);
   const timestamp = Date.UTC(year, month - 1, day);
   const parsed = new Date(timestamp);
-  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 ||
-      parsed.getUTCDate() !== day) {
+  if (
+    parsed.getUTCFullYear() !== year ||
+    parsed.getUTCMonth() !== month - 1 ||
+    parsed.getUTCDate() !== day
+  ) {
     throw new ImportError(409, "transactions_raw_range_mismatch");
   }
   return parsed.toISOString().slice(0, 10);
@@ -1350,8 +1397,12 @@ function validFailureCode(value: string): boolean {
 }
 
 function scalar(value: unknown, code: string): void {
-  if (value !== null && typeof value !== "string" &&
-      typeof value !== "number" && typeof value !== "boolean") {
+  if (
+    value !== null &&
+    typeof value !== "string" &&
+    typeof value !== "number" &&
+    typeof value !== "boolean"
+  ) {
     throw new ImportError(409, code);
   }
   if (typeof value === "string" && value.length > 100_000) {
@@ -1441,9 +1492,12 @@ function instant(value: unknown, code: string, status: number): string {
 }
 
 function instantOffset(value: unknown, code: string): string {
-  if (typeof value !== "string" || value.length > 35 ||
-      !/^\d{4}-\d{2}-\d{2}T00:00:00\+09:00$/u.test(value) ||
-      Number.isNaN(Date.parse(value))) {
+  if (
+    typeof value !== "string" ||
+    value.length > 35 ||
+    !/^\d{4}-\d{2}-\d{2}T00:00:00\+09:00$/u.test(value) ||
+    Number.isNaN(Date.parse(value))
+  ) {
     throw new ImportError(409, code);
   }
   return value;
@@ -1460,15 +1514,8 @@ function date(value: unknown, code: string, status: number): string {
   return value;
 }
 
-function count(
-  value: unknown,
-  maximum: number,
-  code: string,
-  status: number,
-  minimum = 0,
-): number {
-  if (!Number.isSafeInteger(value) || (value as number) < minimum ||
-      (value as number) > maximum) {
+function count(value: unknown, maximum: number, code: string, status: number, minimum = 0): number {
+  if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) {
     throw new ImportError(status, code);
   }
   return value as number;
@@ -1483,13 +1530,13 @@ function sameRange(left: DateRange, right: DateRange): boolean {
 }
 
 function sameStrings(left: string[], right: string[]): boolean {
-  return left.length === right.length &&
-    left.every((value, index) => value === right[index]);
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
-  return left.byteLength === right.byteLength &&
-    left.every((value, index) => value === right[index]);
+  return (
+    left.byteLength === right.byteLength && left.every((value, index) => value === right[index])
+  );
 }
 
 function assertExactMetadata(
@@ -1497,8 +1544,11 @@ function assertExactMetadata(
   expected: Record<string, string>,
   code: string,
 ): void {
-  if (!actual || !sameStrings(Object.keys(actual).sort(), Object.keys(expected).sort()) ||
-      Object.entries(expected).some(([key, value]) => actual[key] !== value)) {
+  if (
+    !actual ||
+    !sameStrings(Object.keys(actual).sort(), Object.keys(expected).sort()) ||
+    Object.entries(expected).some(([key, value]) => actual[key] !== value)
+  ) {
     throw new ImportError(409, code);
   }
 }
@@ -1511,9 +1561,7 @@ function assertNativeSha256(object: R2ObjectBody, expected: string): void {
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  return bytesHex(new Uint8Array(
-    await crypto.subtle.digest("SHA-256", ownedArrayBuffer(bytes)),
-  ));
+  return bytesHex(new Uint8Array(await crypto.subtle.digest("SHA-256", ownedArrayBuffer(bytes))));
 }
 
 function canonicalJson(value: JsonValue): string {
@@ -1521,9 +1569,14 @@ function canonicalJson(value: JsonValue): string {
     return "[" + value.map(canonicalJson).join(",") + "]";
   }
   if (value !== null && typeof value === "object") {
-    return "{" + Object.keys(value).sort().map((key) =>
-      JSON.stringify(key) + ":" + canonicalJson(value[key]!)
-    ).join(",") + "}";
+    return (
+      "{" +
+      Object.keys(value)
+        .sort()
+        .map((key) => JSON.stringify(key) + ":" + canonicalJson(value[key]!))
+        .join(",") +
+      "}"
+    );
   }
   return JSON.stringify(value);
 }

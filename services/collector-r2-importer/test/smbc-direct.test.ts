@@ -89,9 +89,7 @@ class FakeBucket {
       size: stored.body.byteLength,
       customMetadata: stored.customMetadata,
       httpMetadata: { contentType: stored.contentType },
-      checksums: stored.nativeSha256
-        ? { sha256: hexBytes(stored.nativeSha256).buffer }
-        : {},
+      checksums: stored.nativeSha256 ? { sha256: hexBytes(stored.nativeSha256).buffer } : {},
       arrayBuffer: async () => ownedArrayBuffer(stored.body),
     } as unknown as R2ObjectBody;
   }
@@ -130,17 +128,24 @@ class FakeCentral {
     if (/\/artifacts$/u.test(path)) {
       const submitted = JSON.parse(requestBody) as Record<string, unknown>;
       const { http, storage, file, email, ...fields } = submitted;
-      return Response.json({
-        descriptorSha256: await digest(utf8(canonicalJson({
-          ...fields,
-          origins: {
-            http: http ?? null,
-            storage: storage ?? null,
-            file: file ?? null,
-            email: email ?? null,
-          },
-        }))),
-      }, { status: 201 });
+      return Response.json(
+        {
+          descriptorSha256: await digest(
+            utf8(
+              canonicalJson({
+                ...fields,
+                origins: {
+                  http: http ?? null,
+                  storage: storage ?? null,
+                  file: file ?? null,
+                  email: email ?? null,
+                },
+              }),
+            ),
+          ),
+        },
+        { status: 201 },
+      );
     }
     if (/\/reports$/u.test(path)) {
       const previous = this.terminalReports.get(path);
@@ -181,20 +186,24 @@ describe("SMBC Direct R2 importer", () => {
     const descriptors = central.requests
       .filter((request) => /\/artifacts$/u.test(request.path))
       .map((request) => JSON.parse(request.body) as Record<string, unknown>);
-    const normalized = descriptors.find((value) =>
-      value.artifactKey === "transactions/20260101-20260131.normalized.json"
+    const normalized = descriptors.find(
+      (value) => value.artifactKey === "transactions/20260101-20260131.normalized.json",
     )!;
     expect(normalized).toMatchObject({
       artifactRole: "collector_derived",
       payloadFidelity: "transformed",
       lineageDisposition: "linked",
-      relations: [{
-        parentArtifactKey: "transactions/20260101-20260131.raw.json.sjis",
-        relation: "input",
-      }],
+      relations: [
+        {
+          parentArtifactKey: "transactions/20260101-20260131.raw.json.sjis",
+          relation: "input",
+        },
+      ],
     });
-    expect(descriptors.find((value) => value.artifactKey === "manifest.json"))
-      .toMatchObject({ artifactRole: "collector_manifest", fetchUnitId: null });
+    expect(descriptors.find((value) => value.artifactKey === "manifest.json")).toMatchObject({
+      artifactRole: "collector_manifest",
+      fetchUnitId: null,
+    });
     const unitReport = JSON.parse(
       central.requests.find((request) => request.path === "/v1/units/10/reports")!.body,
     );
@@ -255,18 +264,22 @@ describe("SMBC Direct R2 importer", () => {
     await storeSuccessRun(bucket, 6);
     const central = new FakeCentral();
     await importRun(bucket, central, { immediate: false, importerVersion: "deploy-a" });
-    await expect(importRun(bucket, central, {
-      immediate: false,
-      offset: SMBC_DIRECT_TRANSFER_CHUNK_SIZE,
-      importerVersion: "deploy-a",
-    })).resolves.toMatchObject({ status: "sealed" });
+    await expect(
+      importRun(bucket, central, {
+        immediate: false,
+        offset: SMBC_DIRECT_TRANSFER_CHUNK_SIZE,
+        importerVersion: "deploy-a",
+      }),
+    ).resolves.toMatchObject({ status: "sealed" });
 
     await importRun(bucket, central, { immediate: false, importerVersion: "deploy-b" });
-    await expect(importRun(bucket, central, {
-      immediate: false,
-      offset: SMBC_DIRECT_TRANSFER_CHUNK_SIZE,
-      importerVersion: "deploy-b",
-    })).resolves.toMatchObject({ status: "sealed", finalChunkAllObjectsReused: true });
+    await expect(
+      importRun(bucket, central, {
+        immediate: false,
+        offset: SMBC_DIRECT_TRANSFER_CHUNK_SIZE,
+        importerVersion: "deploy-b",
+      }),
+    ).resolves.toMatchObject({ status: "sealed", finalChunkAllObjectsReused: true });
 
     expect(central.terminalReports.size).toBe(2);
     const runReport = JSON.parse(central.terminalReports.get("/v1/runs/1/reports")!);
@@ -295,8 +308,8 @@ describe("SMBC Direct R2 importer", () => {
     {
       const bucket = new FakeBucket();
       const manifest = await storeSuccessRun(bucket, 2);
-      const missing = manifest.artifacts.find((artifact) =>
-        artifact.dataset === "transactions-normalized"
+      const missing = manifest.artifacts.find(
+        (artifact) => artifact.dataset === "transactions-normalized",
       )!;
       bucket.objects.delete(missing.key);
       manifest.artifacts = manifest.artifacts.filter((artifact) => artifact !== missing);
@@ -312,8 +325,8 @@ describe("SMBC Direct R2 importer", () => {
     {
       const bucket = new FakeBucket();
       const manifest = await storeSuccessRun(bucket, 2);
-      const normalized = manifest.artifacts.find((artifact) =>
-        artifact.dataset === "transactions-normalized"
+      const normalized = manifest.artifacts.find(
+        (artifact) => artifact.dataset === "transactions-normalized",
       )!;
       const value = JSON.parse(
         new TextDecoder().decode(bucket.objects.get(normalized.key)!.body),
@@ -327,13 +340,14 @@ describe("SMBC Direct R2 importer", () => {
   test("rejects a transaction artifact unless the balance pair is complete", async () => {
     const bucket = new FakeBucket();
     const manifest = await storeSuccessRun(bucket, 1);
-    for (const artifact of manifest.artifacts.filter((candidate) =>
-      candidate.dataset.startsWith("balance-") || candidate.dataset === "transactions-normalized"
+    for (const artifact of manifest.artifacts.filter(
+      (candidate) =>
+        candidate.dataset.startsWith("balance-") || candidate.dataset === "transactions-normalized",
     )) {
       bucket.objects.delete(artifact.key);
     }
-    manifest.artifacts = manifest.artifacts.filter((artifact) =>
-      artifact.dataset === "transactions-raw"
+    manifest.artifacts = manifest.artifacts.filter(
+      (artifact) => artifact.dataset === "transactions-raw",
     );
     manifest.completedChunks = 0;
     manifest.transactionCount = 0;
@@ -445,12 +459,15 @@ describe("SMBC Direct R2 importer", () => {
     const bucket = new FakeBucket();
     const manifest = await storeSuccessRun(bucket, 1);
     const value = { ...manifest, extra: true };
-    expect(() => parseSmbcDirectManifest(utf8(JSON.stringify(value)), MANIFEST_KEY))
-      .toThrow("manifest_shape_invalid");
-    expect(() => parseSmbcDirectManifest(
-      utf8(JSON.stringify({ ...manifest, runId: crypto.randomUUID() })),
-      MANIFEST_KEY,
-    )).toThrow("manifest_identity_mismatch");
+    expect(() => parseSmbcDirectManifest(utf8(JSON.stringify(value)), MANIFEST_KEY)).toThrow(
+      "manifest_shape_invalid",
+    );
+    expect(() =>
+      parseSmbcDirectManifest(
+        utf8(JSON.stringify({ ...manifest, runId: crypto.randomUUID() })),
+        MANIFEST_KEY,
+      ),
+    ).toThrow("manifest_identity_mismatch");
   });
 });
 
@@ -467,17 +484,24 @@ async function storeSuccessRun(bucket: FakeBucket, monthCount: number): Promise<
     dataset: "balance-normalized",
     key: PREFIX + "balance.normalized.json",
     mediaType: JSON_MEDIA_TYPE,
-    body: utf8(JSON.stringify({
-      observedAt: "2026-09-05T00:00:00.000Z",
-      currency: "JPY",
-      amount: 1234,
-    })),
+    body: utf8(
+      JSON.stringify({
+        observedAt: "2026-09-05T00:00:00.000Z",
+        currency: "JPY",
+        amount: 1234,
+      }),
+    ),
   });
   for (const [index, range] of ranges.entries()) {
-    const rawKey = PREFIX + "transactions/" + compact(range.start) + "-" +
-      compact(range.end) + ".raw.json.sjis";
-    const normalizedKey = PREFIX + "transactions/" + compact(range.start) + "-" +
-      compact(range.end) + ".normalized.json";
+    const rawKey =
+      PREFIX + "transactions/" + compact(range.start) + "-" + compact(range.end) + ".raw.json.sjis";
+    const normalizedKey =
+      PREFIX +
+      "transactions/" +
+      compact(range.start) +
+      "-" +
+      compact(range.end) +
+      ".normalized.json";
     await addArtifact(bucket, artifacts, {
       dataset: "transactions-raw",
       key: rawKey,
@@ -567,29 +591,33 @@ function rawBalance(): Uint8Array {
 function rawTransactions(range: { start: string; end: string }, index: number): Uint8Array {
   const date = range.start;
   const displayDate = Number(date.slice(5, 7)) + "月" + Number(date.slice(8, 10)) + "日";
-  return shiftJis(JSON.stringify({
-    success: true,
-    response: {
-      accntHstCount: "1",
-      currentDate: compact(range.end),
-      mEndYmd: japaneseDate(range.end),
-      mStartYmd: japaneseDate(range.start),
-      meisai: [{
-        amount: "100",
-        comment: "テスト",
-        depositWithdrawTypeFlag: index % 2 === 0 ? "1" : "2",
-        detailIndex: "0",
-        dispDate: displayDate,
-        meisaiColorDisp: "",
-        meisaiId: "fixture-" + index,
-        meisaiMemoDisp: "",
-        torihikigobalance: "1,000",
-      }],
-      nyukinGoukei: index % 2 === 0 ? "0" : "100",
-      shoukaiServerStopFlag: "0",
-      syukkinGoukei: index % 2 === 0 ? "100" : "0",
-    },
-  }));
+  return shiftJis(
+    JSON.stringify({
+      success: true,
+      response: {
+        accntHstCount: "1",
+        currentDate: compact(range.end),
+        mEndYmd: japaneseDate(range.end),
+        mStartYmd: japaneseDate(range.start),
+        meisai: [
+          {
+            amount: "100",
+            comment: "テスト",
+            depositWithdrawTypeFlag: index % 2 === 0 ? "1" : "2",
+            detailIndex: "0",
+            dispDate: displayDate,
+            meisaiColorDisp: "",
+            meisaiId: "fixture-" + index,
+            meisaiMemoDisp: "",
+            torihikigobalance: "1,000",
+          },
+        ],
+        nyukinGoukei: index % 2 === 0 ? "0" : "100",
+        shoukaiServerStopFlag: "0",
+        syukkinGoukei: index % 2 === 0 ? "100" : "0",
+      },
+    }),
+  );
 }
 
 function rawTransactionPayload(
@@ -601,23 +629,24 @@ function rawTransactionPayload(
   ) as Record<string, unknown>;
 }
 
-function normalizedTransactions(
-  range: { start: string; end: string },
-  index: number,
-): Uint8Array {
-  return utf8(JSON.stringify({
-    range,
-    depositsTotal: index % 2 === 0 ? 0 : 100,
-    withdrawalsTotal: index % 2 === 0 ? 100 : 0,
-    transactions: [{
-      id: "fixture-" + index,
-      date: range.start + "T00:00:00+09:00",
-      amount: 100,
-      balanceAfter: 1000,
-      description: "テスト",
-      direction: index % 2 === 0 ? "debit" : "credit",
-    }],
-  }));
+function normalizedTransactions(range: { start: string; end: string }, index: number): Uint8Array {
+  return utf8(
+    JSON.stringify({
+      range,
+      depositsTotal: index % 2 === 0 ? 0 : 100,
+      withdrawalsTotal: index % 2 === 0 ? 100 : 0,
+      transactions: [
+        {
+          id: "fixture-" + index,
+          date: range.start + "T00:00:00+09:00",
+          amount: 100,
+          balanceAfter: 1000,
+          description: "テスト",
+          direction: index % 2 === 0 ? "debit" : "credit",
+        },
+      ],
+    }),
+  );
 }
 
 function monthRanges(count: number): Array<{ start: string; end: string }> {
@@ -688,9 +717,17 @@ async function digest(bytes: Uint8Array): Promise<string> {
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
   if (value !== null && typeof value === "object") {
-    return "{" + Object.keys(value as Record<string, unknown>).sort().map((key) =>
-      JSON.stringify(key) + ":" + canonicalJson((value as Record<string, unknown>)[key])
-    ).join(",") + "}";
+    return (
+      "{" +
+      Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map(
+          (key) =>
+            JSON.stringify(key) + ":" + canonicalJson((value as Record<string, unknown>)[key]),
+        )
+        .join(",") +
+      "}"
+    );
   }
   return JSON.stringify(value);
 }

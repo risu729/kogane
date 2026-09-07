@@ -6,6 +6,8 @@ test_dir="$(mktemp -d)"
 trap 'rm -rf -- "${test_dir}"' EXIT
 
 mock_wrangler="${test_dir}/wrangler"
+# The single quotes deliberately preserve variables for the generated mock.
+# shellcheck disable=SC2016
 printf '%s\n' \
   '#!/usr/bin/env bash' \
   'saw_command=false' \

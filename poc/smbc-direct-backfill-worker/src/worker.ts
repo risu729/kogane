@@ -12,10 +12,12 @@ export default {
       if (!(await authorized(request, env.ADMIN_TRIGGER_TOKEN))) {
         return json({ error: "Unauthorized" }, 401);
       }
-      if ([...url.searchParams.keys()].some((key) => key !== "limit" && key !== "cursor") ||
-          url.searchParams.getAll("limit").length !== 1 ||
-          url.searchParams.get("limit") !== "1" ||
-          url.searchParams.getAll("cursor").length > 1) {
+      if (
+        [...url.searchParams.keys()].some((key) => key !== "limit" && key !== "cursor") ||
+        url.searchParams.getAll("limit").length !== 1 ||
+        url.searchParams.get("limit") !== "1" ||
+        url.searchParams.getAll("cursor").length > 1
+      ) {
         return json({ error: "backfill_options_invalid" }, 400);
       }
       const cursor = url.searchParams.get("cursor") ?? undefined;
@@ -94,8 +96,12 @@ export default {
 
 async function authorized(request: Request, expected: string): Promise<boolean> {
   const header = request.headers.get("authorization");
-  if (!header?.startsWith("Bearer ") || expected.length < 20 || expected.length > 512 ||
-      /[\x00-\x20\x7f]/u.test(expected)) {
+  if (
+    !header?.startsWith("Bearer ") ||
+    expected.length < 20 ||
+    expected.length > 512 ||
+    /[\x00-\x20\x7f]/u.test(expected)
+  ) {
     return false;
   }
   const supplied = header.slice("Bearer ".length);

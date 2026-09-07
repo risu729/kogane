@@ -48,21 +48,21 @@ while (( page < 100000 )); do
   response="$(curl --config <(printf '%s\n' "${auth_config}") \
     --fail-with-body --silent --show-error --max-time 180 \
     --request POST "${url}")"
-  failed="$(jq -er '.failedManifestCount' <<<${response})"
+  failed="$(jq -er '.failedManifestCount' <<<"${response}")"
   if (( failed != 0 )); then
     jq '{page: $page, failedManifestCount, failureCode}' \
-      --argjson page "${page}" <<<${response} >&2
+      --argjson page "${page}" <<<"${response}" >&2
     exit 1
   fi
-  imported="$(jq -er '.importedManifestCount' <<<${response})"
-  deferred="$(jq -er '.deferredManifestCount' <<<${response})"
+  imported="$(jq -er '.importedManifestCount' <<<"${response}")"
+  deferred="$(jq -er '.deferredManifestCount' <<<"${response}")"
   if (( imported + deferred > 1 )); then
     printf 'backfill response has multiple manifest outcomes\n' >&2
     exit 1
   fi
   manifest_count=$((manifest_count + imported))
   deferred_chunk_count=$((deferred_chunk_count + deferred))
-  truncated="$(jq -r '.truncated' <<<${response})"
+  truncated="$(jq -r '.truncated' <<<"${response}")"
   if [[ "${truncated}" == false ]]; then
     rm -f -- "${cursor_file}"
     printf '{"complete":true,"pages":%d,"importedManifests":%d,"deferredChunks":%d}\n' \
@@ -70,7 +70,7 @@ while (( page < 100000 )); do
     exit 0
   fi
   next_cursor="$(jq -er '.nextCursor | select(type == "string" and length > 0)' \
-    <<<${response})"
+    <<<"${response}")"
   if [[ "${next_cursor}" == "${cursor}" ]]; then
     printf 'backfill cursor did not advance\n' >&2
     exit 1

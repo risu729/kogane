@@ -10,7 +10,7 @@ describe("SMBC Direct aggregate-only R2 audit", () => {
     });
     const response = await auditWorker.fetch(auditRequest(), { SMBC_DIRECT_SNAPSHOTS: bucket });
     expect(response.status).toBe(200);
-    const body = await response.json() as Record<string, unknown>;
+    const body = (await response.json()) as Record<string, unknown>;
     expect(body).toEqual({
       schemaVersion: "smbc-direct-r2-aggregate-audit-v1",
       scannedObjectCount: 1,
@@ -26,9 +26,11 @@ describe("SMBC Direct aggregate-only R2 audit", () => {
   test("reduces manifest validation failures to a stable aggregate code", async () => {
     const bucket = {
       ...listBucket({
-        objects: [{
-          key: "raw/smbc-direct/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
-        }],
+        objects: [
+          {
+            key: "raw/smbc-direct/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json",
+          },
+        ],
         truncated: false,
       }),
       get: async () => null,
@@ -46,17 +48,18 @@ describe("SMBC Direct aggregate-only R2 audit", () => {
       new URL("../scripts/audit-smbc-direct-r2.sh", import.meta.url),
       "utf8",
     );
-    const config = JSON.parse(readFileSync(
-      new URL("../wrangler.audit-smbc-direct.jsonc", import.meta.url),
-      "utf8",
-    )) as Record<string, unknown>;
+    const config = JSON.parse(
+      readFileSync(new URL("../wrangler.audit-smbc-direct.jsonc", import.meta.url), "utf8"),
+    ) as Record<string, unknown>;
     expect(script).toContain("wrangler dev");
     expect(script).toContain("--ip 127.0.0.1");
     expect(script).not.toMatch(/wrangler\s+deploy/u);
     expect(script).not.toMatch(/r2\s+object\s+(?:put|delete)/u);
     expect(config).toMatchObject({ workers_dev: false, preview_urls: false });
-    expect((config.r2_buckets as Array<Record<string, unknown>>)[0])
-      .toMatchObject({ bucket_name: "kogane-smbc-direct-backfill-poc", remote: true });
+    expect((config.r2_buckets as Array<Record<string, unknown>>)[0]).toMatchObject({
+      bucket_name: "kogane-smbc-direct-backfill-poc",
+      remote: true,
+    });
   });
 });
 

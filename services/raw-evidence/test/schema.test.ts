@@ -848,11 +848,13 @@ describe("0001 raw-evidence schema", () => {
       producer_id: string;
       source_id: string;
     }>();
-    expect(smbcDirectRoute.results).toEqual([{
-      ingest_client_id: "collector-r2-smbc-direct",
-      producer_id: "collector-r2-importer",
-      source_id: "smbc-bank",
-    }]);
+    expect(smbcDirectRoute.results).toEqual([
+      {
+        ingest_client_id: "collector-r2-smbc-direct",
+        producer_id: "collector-r2-importer",
+        source_id: "smbc-bank",
+      },
+    ]);
     const smbcDirectPolicies = await env.DB.prepare(`
       SELECT template, redaction_version, fingerprint_key_version
       FROM origin_template_policies
@@ -862,11 +864,13 @@ describe("0001 raw-evidence schema", () => {
       redaction_version: string;
       fingerprint_key_version: string;
     }>();
-    expect(smbcDirectPolicies.results).toEqual([{
-      template: "raw/smbc-direct/{date}/{run-id}/{artifact}",
-      redaction_version: "v1",
-      fingerprint_key_version: "collector-r2-v1",
-    }]);
+    expect(smbcDirectPolicies.results).toEqual([
+      {
+        template: "raw/smbc-direct/{date}/{run-id}/{artifact}",
+        redaction_version: "v1",
+        fingerprint_key_version: "collector-r2-v1",
+      },
+    ]);
     await env.DB.prepare(`
       UPDATE origin_template_policies SET active = 0
       WHERE source_id = 'kogane-synthetic' AND origin_kind = 'http'

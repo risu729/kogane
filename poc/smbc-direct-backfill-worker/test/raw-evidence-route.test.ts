@@ -2,7 +2,10 @@ import { describe, expect, mock, test } from "bun:test";
 
 mock.module("cloudflare:workers", () => ({
   DurableObject: class {
-    constructor(readonly ctx: DurableObjectState, readonly env: Env) {}
+    constructor(
+      readonly ctx: DurableObjectState,
+      readonly env: Env,
+    ) {}
   },
 }));
 
@@ -35,13 +38,17 @@ describe("SMBC Direct raw evidence backfill route", () => {
         truncated: false,
       });
     });
-    const response = await fetchRoute(env, {
-      authorization: "Bearer " + env.ADMIN_TRIGGER_TOKEN,
-    }, "?limit=1&cursor=opaque-cursor");
+    const response = await fetchRoute(
+      env,
+      {
+        authorization: "Bearer " + env.ADMIN_TRIGGER_TOKEN,
+      },
+      "?limit=1&cursor=opaque-cursor",
+    );
     expect(response.status).toBe(200);
     expect(captured).toBeDefined();
     expect(new URL(captured!.url).pathname).toBe("/v1/smbc-direct/backfill-page");
-    expect(await captured!.json() as unknown).toEqual({
+    expect((await captured!.json()) as unknown).toEqual({
       cursor: "opaque-cursor",
       limit: 1,
     });
@@ -57,9 +64,13 @@ describe("SMBC Direct raw evidence backfill route", () => {
       "?limit=1&cursor=" + "a".repeat(12_001),
       "?limit=1&cursor=has%20space",
     ]) {
-      const response = await fetchRoute(env, {
-        authorization: "Bearer " + env.ADMIN_TRIGGER_TOKEN,
-      }, suffix);
+      const response = await fetchRoute(
+        env,
+        {
+          authorization: "Bearer " + env.ADMIN_TRIGGER_TOKEN,
+        },
+        suffix,
+      );
       expect(response.status).toBe(400);
     }
   });
