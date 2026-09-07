@@ -75,7 +75,7 @@ transaction / balance / position / valuation observations   layer B
 evidence browser (React client in web/, served by serve.ts)
 ```
 
-Twenty-five parsers are registered against shapes the collectors already produce:
+Twenty-six parsers are registered against shapes the collectors already produce:
 
 | Parser                                  | Artifact                                           | Emits                                        |
 | --------------------------------------- | -------------------------------------------------- | -------------------------------------------- |
@@ -104,6 +104,7 @@ Twenty-five parsers are registered against shapes the collectors already produce
 | `smbc-direct-transactions`              | SMBC Direct `transactions-normalized`              | transactions                                 |
 | `sbi-shinsei-top-balances-and-activity` | SBI Shinsei `top-accounts-balance-and-activity`    | balances, valuations, transactions           |
 | `sbi-shinsei-yen-deposit-account`       | SBI Shinsei `yen-deposit-account`                  | source-view-scoped balances                  |
+| `global-pass-activity`              | GLOBAL PASS sanitized `globalpass-activity` HTML   | transactions                                 |
 
 Mobile Suica deliberately has one canonical Layer-B route. The collector's
 Shift-JIS `sf-history-html` is provider evidence and `collection-summary` is
@@ -122,6 +123,17 @@ ID, takes its sign only from the explicit credit/debit field, and retains the
 post-row balance, requested range, and provider totals in `extra`. A repeated
 provider ID is collapsed only in the current view; both raw observations remain
 append-only and traceable.
+
+GLOBAL PASS likewise has one financial route. A successful Layer-A artifact is
+one sanitized provider HTML page for one selected month. Its desktop and
+responsive tables are two views of the same records, so the parser requires
+their cardinalities to agree and emits each transaction once. All provider
+fields, including fees, approval/status text, remarks, local/funded amounts,
+and unmodelled conditional fields, remain in `extra`. The observed transaction
+amount is unsigned: the parser keeps its exact text, scale and ISO currency but
+does not manufacture a debit sign or `amountMinor`. Pending-to-confirmed and
+family-card identity are not inferred, and the whole provider row plus its
+occurrence supplies replay-stable evidence identity.
 
 The demo ingests 11 artifacts from 3 sources and produces 49 observations:
 14 transaction, 24 balance, 3 position, 8 valuation.
@@ -218,6 +230,11 @@ repository; their role is parser contract testing, not layer-A ingestion.
 
 This is also their limitation, and the reason `RESULTS.md` lists the
 questions only real payloads can close.
+
+`fixtures/global-pass/` is also anonymous and manifest-free. It pins the
+sanitized HTML month selector and the outer/compact/expanded table relationship
+without copying any production body, object name, digest, account identifier,
+or financial value.
 
 The SBI VC Trade fixture set mirrors all six source-separated collector
 artifacts. Its shape was checked against the current public client models and

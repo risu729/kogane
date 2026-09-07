@@ -259,6 +259,42 @@ records only the returned rows and does not claim that they are complete
 history. Likewise product codes are retained as provider evidence rather than
 mapped to an account taxonomy from client-side labels alone.
 
+### GLOBAL PASS Layer B validation (2026-09-07)
+
+The checked-in audit worker reuses the merged GLOBAL PASS Layer-A manifest,
+R2 metadata, native-checksum, sanitized-byte, and run-completeness validator.
+It lists production R2 one object at a time with a bounded, advancing cursor
+and returns aggregate counts only. It never writes or deletes R2 objects and
+does not disclose object keys, hashes, HTML bodies, account identifiers, or
+financial values.
+
+The audit scanned 66 objects. Twenty-five manifests passed the current strict
+Layer-A contract; five of those were terminal success runs with zero failure
+evidence and contained ten activity artifacts. The other twenty valid
+manifests were failed runs and produced no Layer-B observations. Six retained
+legacy manifests failed the current strict validation and were reported only
+as one fixed aggregate failure category.
+
+Across the ten eligible artifacts, the audit found one month selector per
+artifact, fifteen eight-digit month values, exactly one selected month value,
+and a selected month consistent with the artifact's manifest month. A single
+unselected non-month default option is explicitly ignored. The HTML carried
+75 logical activity records. Every record had one outer row pair and one
+compact/expanded responsive pair; the parser required those cardinalities and
+converted them into exactly 75 transactions, not 150 or 225. All 75 displayed
+transaction amounts were unsigned. Consequently the parser preserved amount
+text, scale and currency but emitted no signed minor-unit amount.
+
+The outer schema fixes the date, detail, transaction amount, three fee fields,
+status, and approval-number roles. Conditional provider fields are retained by
+their exact labels in `extra`; a missing required role, unknown table, duplicate
+header, source-view amount disagreement, invalid calendar date, date outside
+the selected month, non-contiguous selector, or row/cardinality drift rejects
+the artifact. Status, authorization, fees, pending/confirmed transitions, and
+family-card identity are not promoted beyond what the captured page explicitly
+states. In particular, no stable pending-to-posted reconciliation key is
+claimed.
+
 ### Mobile Suica Layer B validation (2026-09-07)
 
 A read-only aggregate/canary against production R2 confirmed that the current

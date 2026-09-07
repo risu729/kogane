@@ -108,7 +108,7 @@ interface Failure {
   artifactKey?: string;
 }
 
-interface Manifest {
+export interface GlobalPassManifest {
   schemaVersion: SchemaVersion;
   source: typeof EXTERNAL_SOURCE;
   runtimeRevision?: string;
@@ -126,12 +126,12 @@ interface Manifest {
 }
 
 interface LoadedManifest {
-  manifest: Manifest;
+  manifest: GlobalPassManifest;
   centralBytes: Uint8Array;
   centralSha256: string;
 }
 
-interface VerifiedArtifact {
+export interface VerifiedGlobalPassArtifact {
   artifact: Artifact;
   centralBytes: Uint8Array;
   centralSha256: string;
@@ -185,40 +185,17 @@ export async function importGlobalPassRun(options: {
   let expectedArtifactCount = 0;
   let phase = "manifest_validation";
   try {
-    const loaded = await loadManifest(options.bucket, options.manifestKey);
+    const { loaded, verified } = await validateGlobalPassRun(
+      options.bucket,
+      options.manifestKey,
+      options.legacyEmptyArtifactSha256,
+    );
     const manifest = loaded.manifest;
-    const prefix = options.manifestKey.slice(0, -"manifest.json".length);
     expectedArtifactCount = manifest.artifacts.length + 1;
     const offset = options.offset ?? 0;
     if (!Number.isSafeInteger(offset) || offset < 0 || offset > expectedArtifactCount) {
       throw new ImportError(400, "transfer_offset_invalid");
     }
-
-    phase = "prefix_validation";
-    await assertExactPrefix(options.bucket, prefix, [
-      ...manifest.artifacts.map((artifact) => artifact.key),
-      options.manifestKey,
-    ]);
-
-    phase = "artifact_validation";
-    const verified: VerifiedArtifact[] = [];
-    for (const artifact of manifest.artifacts) {
-      const sourceBytes = await readVerifiedArtifact(options.bucket, artifact, manifest);
-      const centralBytes = sanitizeGlobalPassHtml(
-        sourceBytes,
-        manifest.schemaVersion,
-        options.legacyEmptyArtifactSha256.has(artifact.sha256),
-      );
-      verified.push({
-        artifact,
-        centralBytes,
-        centralSha256: await sha256Hex(centralBytes),
-      });
-    }
-    await assertExactPrefix(options.bucket, prefix, [
-      ...manifest.artifacts.map((artifact) => artifact.key),
-      options.manifestKey,
-    ]);
 
     if (
       options.immediate !== false &&
@@ -403,7 +380,7 @@ async function addTerminalReports(
   central: CentralClient,
   centralRunId: number,
   unitId: number,
-  manifest: Manifest,
+  manifest: GlobalPassManifest,
   artifactCount: number,
 ): Promise<void> {
   await central.addUnitReport(unitId, {
@@ -469,7 +446,42 @@ async function loadManifest(bucket: R2Bucket, manifestKey: string): Promise<Load
   };
 }
 
-export function parseGlobalPassManifest(bytes: Uint8Array, manifestKey: string): Manifest {
+/** Read-only validation shared by the importer and the Layer B production canary. */
+export async function validateGlobalPassRun(
+  bucket: R2Bucket,
+  manifestKey: string,
+  legacyEmptyArtifactSha256: ReadonlySet<string>,
+): Promise<{
+  loaded: LoadedManifest;
+  verified: VerifiedGlobalPassArtifact[];
+}> {
+  const loaded = await loadManifest(bucket, manifestKey);
+  const manifest = loaded.manifest;
+  const prefix = manifestKey.slice(0, -"manifest.json".length);
+  const expectedKeys = [...manifest.artifacts.map((artifact) => artifact.key), manifestKey];
+  await assertExactPrefix(bucket, prefix, expectedKeys);
+  const verified: VerifiedGlobalPassArtifact[] = [];
+  for (const artifact of manifest.artifacts) {
+    const sourceBytes = await readVerifiedArtifact(bucket, artifact, manifest);
+    const centralBytes = sanitizeGlobalPassHtml(
+      sourceBytes,
+      manifest.schemaVersion,
+      legacyEmptyArtifactSha256.has(artifact.sha256),
+    );
+    verified.push({
+      artifact,
+      centralBytes,
+      centralSha256: await sha256Hex(centralBytes),
+    });
+  }
+  await assertExactPrefix(bucket, prefix, expectedKeys);
+  return { loaded, verified };
+}
+
+export function parseGlobalPassManifest(
+  bytes: Uint8Array,
+  manifestKey: string,
+): GlobalPassManifest {
   const key = MANIFEST_KEY.exec(manifestKey);
   if (!key) invalid("manifest_key_invalid");
   const input = parseJson(bytes, "manifest_json_invalid");
@@ -1098,7 +1110,7 @@ function visibleTableHeaders(html: string): Map<number, Set<string>> {
 async function readVerifiedArtifact(
   bucket: R2Bucket,
   artifact: Artifact,
-  manifest: Manifest,
+  manifest: GlobalPassManifest,
 ): Promise<Uint8Array> {
   const object = await bucket.get(artifact.key);
   if (!object) throw new ImportError(409, "artifact_missing");
@@ -1133,10 +1145,10 @@ async function readVerifiedArtifact(
 }
 
 async function artifactPlans(
-  verified: VerifiedArtifact[],
+  verified: VerifiedGlobalPassArtifact[],
   loaded: LoadedManifest,
   unitId: number,
-  manifest: Manifest,
+  manifest: GlobalPassManifest,
   manifestKey: string,
   fingerprintKey: string,
 ): Promise<ArtifactPlan[]> {
@@ -1189,7 +1201,7 @@ async function artifactPlans(
 async function currentCentralBytes(
   bucket: R2Bucket,
   plan: ArtifactPlan,
-  manifest: Manifest,
+  manifest: GlobalPassManifest,
   legacyEmptyArtifactSha256: ReadonlySet<string>,
 ): Promise<Uint8Array> {
   const current = plan.source
@@ -1254,7 +1266,7 @@ async function dataDescriptor(options: {
 }
 
 async function manifestDescriptor(options: {
-  manifest: Manifest;
+  manifest: GlobalPassManifest;
   key: string;
   bytes: number;
   sha256: string;
@@ -1348,7 +1360,7 @@ function normalizedDescriptor(input: {
   };
 }
 
-function sanitizeLegacyManifest(manifest: Manifest): Uint8Array {
+function sanitizeLegacyManifest(manifest: GlobalPassManifest): Uint8Array {
   return new TextEncoder().encode(
     JSON.stringify({
       schemaVersion: manifest.schemaVersion,
