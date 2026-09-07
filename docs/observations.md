@@ -929,6 +929,7 @@ fixtures/sbi-securities/2026-08-20/run-20260820-210000-poc01/
     domestic-trade-records.json
     foreign-cash-balances.json
     foreign-cash-positions.json
+    yen-detail-history.json
 fixtures/paypay/paypay-transactions-202608.csv
 ```
 
@@ -937,10 +938,11 @@ its R2 layout, and the difference is worth stating so nobody writes an
 importer against the fixture. `poc/sbi-securities-worker` writes to
 `raw/sbi-securities/YYYY/MM/DD/<runId>/` — three date segments and a UUID
 run id — where the fixture uses one date segment and a readable run name.
-The ingestible demo fixture holds three of the seven datasets the collector emits
-(`account-assets-current`, `yen-detail-history`, `domestic-trade-records`,
-`domestic-cash-positions`, `foreign-cash-positions`,
-`foreign-cash-balances`, `foreign-trade-records`). What _is_ faithful is
+The ingestible demo fixture holds four of the seven datasets the collector emits:
+`yen-detail-history`, `domestic-trade-records`, `foreign-cash-positions`,
+and `foreign-cash-balances`. The other collector datasets are
+`account-assets-current`, `domestic-cash-positions`, and
+`foreign-trade-records`. What _is_ faithful is
 the manifest: it carries the collector's own `schemaVersion`
 `sbi-worker-poc-v1`, one entry per artifact with `dataset`, `key`,
 `sha256`, `bytes` and an optional `window`, and its `key` values spell out
@@ -948,7 +950,7 @@ the real R2 layout. `ingestRunDirectory` reads `<dataset>.json` beside the
 manifest and verifies every hash before writing anything. The PayPay
 fixture is a single CSV, ingested through `ingestFile`.
 
-The remaining four dataset shapes have separate anonymous parser-boundary
+The remaining three dataset shapes have separate anonymous parser-boundary
 fixtures under `fixtures/sbi-parser-boundaries/`. They deliberately have no
 manifest, object key, or evidence digest. Their contracts were checked with a
 read-only aggregate audit of the live R2 source: only keys, JSON types,
@@ -957,10 +959,18 @@ and financial values were neither printed nor committed.
 
 `sbi-domestic-cash-positions` decodes the collector's header-stripped F2631
 payload by Shift-JIS byte widths and rejects count/length, market, account-type,
-and sign-flag drift. `sbi-account-assets-current` keeps each provider summary
-view/category distinct rather than merging similar totals. `sbi-yen-detail-history`
-uses the provider `did` as its transaction identity and refuses truncated or
-count-inconsistent pages. `sbi-foreign-trade-records` validates the complete
+and display-trend drift. The record-relative `+118`, `+141`, and `+390` bytes
+are the provider's strict `U` / `D` / `F` display trends; they never supply an
+amount sign. Acquisition unit price (`+119..129`), current price
+(`+130..140`), and the later provider `kaitsukePrice` (`+299..314`) remain
+separate valuation metrics. The observed two-hyphen unit-price placeholder
+is retained as provider context and emits no zero-valued valuation. The
+deposit-type code is part of `sourceAccount`,
+so the same security held in specific, general, and NISA accounts cannot collide
+when positions are joined to valuations. `sbi-account-assets-current` keeps each
+provider summary view/category distinct rather than merging similar totals.
+`sbi-yen-detail-history` uses the provider `did` as its transaction identity and
+refuses truncated or count-inconsistent pages. `sbi-foreign-trade-records` validates the complete
 GraphQL page chain and assigns a deterministic canonical-row fingerprint plus
 occurrence ordinal because the provider supplies no transaction id; identical
 legitimate trades remain distinct, while rerunning the same parser version is

@@ -5,7 +5,7 @@ import type { CentralInventoryItem, SbiArtifactManifest, SbiFailure, SbiManifest
 const SOURCE = "sbi-securities" as const;
 const PRODUCER = "collector-r2-importer";
 const SCHEMA_VERSION = "sbi-worker-poc-v1";
-const INGEST_CONTRACT_VERSION = "sbi-r2-v3";
+const INGEST_CONTRACT_VERSION = "sbi-r2-v4";
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const STORAGE_TEMPLATE = "raw/sbi-securities/{date}/{run-id}/{artifact}.json";
@@ -16,6 +16,47 @@ const MANIFEST_KEY =
   /^raw\/sbi-securities\/(\d{4})\/(\d{2})\/(\d{2})\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/manifest\.json$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SAFE_TEXT = /^[A-Za-z0-9._:/-]{1,200}$/u;
+const YEN_HISTORY_BUNDLE_SCHEMA = "sbi-yen-detail-history-bundle-v1";
+const MAX_YEN_HISTORY_PAGES = 200;
+const MAX_YEN_HISTORY_ROWS = 20_000;
+const MAX_YEN_HISTORY_PAGE_SIZE = 1_000;
+const YEN_HISTORY_BUNDLE_KEYS = [
+  "schemaVersion",
+  "pageCount",
+  "pageSize",
+  "totalCount",
+  "complete",
+  "pageLimitExceeded",
+  "rowLimitExceeded",
+  "pages",
+] as const;
+const YEN_HISTORY_PAGE_KEYS = [
+  "depositRecordList",
+  "detailsConditions",
+  "exceededMaxCount",
+  "isExceededMaxCount",
+  "nextBusinessDate",
+  "pageCount",
+  "pageNumber",
+  "pageSize",
+  "totalCount",
+  "totalDepositAmount",
+  "totalDepositCount",
+  "totalPaymentAmount",
+  "totalPaymentCount",
+  "totalTransDepositAmount",
+  "totalTransDepositCount",
+  "totalTransPaymentAmount",
+  "totalTransPaymentCount",
+] as const;
+const YEN_HISTORY_RECORD_KEYS = [
+  "detailKbn",
+  "did",
+  "dispAbstract",
+  "payAmount",
+  "payDepDate",
+  "payDepKbn",
+] as const;
 const DATASETS = new Set([
   "domestic-cash-positions",
   "account-assets-current",
@@ -91,10 +132,11 @@ export async function importSbiRun(options: {
 
     // Validate every source object before creating immutable central state.
     const verifiedArtifacts = await Promise.all(
-      manifest.artifacts.map(async (artifact) => ({
-        artifact,
-        bytes: await readVerifiedArtifact(options.bucket, artifact),
-      })),
+      manifest.artifacts.map(async (artifact) => {
+        const bytes = await readVerifiedArtifact(options.bucket, artifact);
+        validateSbiArtifactBytes(artifact.dataset, bytes);
+        return { artifact, bytes };
+      }),
     );
 
     phase = "central_create";
@@ -464,6 +506,117 @@ function parseWindow(value: unknown): { from: string; to: string } {
   return { from, to };
 }
 
+function validateSbiArtifactBytes(dataset: string, bytes: Uint8Array): void {
+  if (dataset === "yen-detail-history") parseSbiYenHistoryBundle(bytes);
+}
+
+export function parseSbiYenHistoryBundle(bytes: Uint8Array): JsonObject {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    invalid("yen_history_json_invalid");
+  }
+  const bundle = record(parsed, "yen_history_bundle_invalid");
+  exactArtifactKeys(bundle, YEN_HISTORY_BUNDLE_KEYS, "yen_history_bundle_fields_invalid");
+  if (bundle.schemaVersion !== YEN_HISTORY_BUNDLE_SCHEMA) {
+    invalid("yen_history_bundle_schema_invalid");
+  }
+  const pageCount = artifactCount(bundle.pageCount, 1, MAX_YEN_HISTORY_PAGES, "page_count");
+  const pageSize = artifactCount(bundle.pageSize, 1, MAX_YEN_HISTORY_PAGE_SIZE, "page_size");
+  const totalCount = artifactCount(bundle.totalCount, 0, MAX_YEN_HISTORY_ROWS, "total_count");
+  if (
+    bundle.complete !== true ||
+    bundle.pageLimitExceeded !== false ||
+    bundle.rowLimitExceeded !== false
+  ) {
+    invalid("yen_history_bundle_incomplete");
+  }
+  if (!Array.isArray(bundle.pages) || bundle.pages.length !== pageCount) {
+    invalid("yen_history_page_inventory_invalid");
+  }
+
+  const seenIds = new Set<number>();
+  let rowCount = 0;
+  for (const [pageIndex, rawPage] of bundle.pages.entries()) {
+    const page = record(rawPage, "yen_history_page_invalid");
+    exactArtifactKeys(page, YEN_HISTORY_PAGE_KEYS, "yen_history_page_fields_invalid");
+    const providerPageCount = artifactCount(
+      page.pageCount,
+      0,
+      MAX_YEN_HISTORY_PAGES,
+      "provider_page_count",
+    );
+    const providerPageNumber = artifactCount(
+      page.pageNumber,
+      0,
+      MAX_YEN_HISTORY_PAGES,
+      "provider_page_number",
+    );
+    if (page.pageSize !== pageSize || page.totalCount !== totalCount) {
+      invalid("yen_history_page_metadata_mismatch");
+    }
+    if (page.exceededMaxCount !== false || page.isExceededMaxCount !== false) {
+      invalid("yen_history_provider_limit_exceeded");
+    }
+    if (totalCount === 0) {
+      if (
+        pageIndex !== 0 ||
+        !(
+          (providerPageCount === 0 && providerPageNumber === 0) ||
+          (providerPageCount === 1 && providerPageNumber === 1)
+        )
+      ) {
+        invalid("yen_history_empty_page_metadata_invalid");
+      }
+    } else if (providerPageCount !== pageCount || providerPageNumber !== pageIndex + 1) {
+      invalid("yen_history_page_chain_invalid");
+    }
+    if (!Array.isArray(page.depositRecordList) || page.depositRecordList.length > pageSize) {
+      invalid("yen_history_records_invalid");
+    }
+    rowCount += page.depositRecordList.length;
+    if (rowCount > MAX_YEN_HISTORY_ROWS) invalid("yen_history_row_limit_exceeded");
+    for (const rawRecord of page.depositRecordList) {
+      const historyRecord = record(rawRecord, "yen_history_record_invalid");
+      exactArtifactKeys(
+        historyRecord,
+        YEN_HISTORY_RECORD_KEYS,
+        "yen_history_record_fields_invalid",
+      );
+      if (!Number.isSafeInteger(historyRecord.did) || (historyRecord.did as number) < 0) {
+        invalid("yen_history_record_id_invalid");
+      }
+      for (const field of [
+        "detailKbn",
+        "dispAbstract",
+        "payAmount",
+        "payDepDate",
+        "payDepKbn",
+      ] as const) {
+        if (typeof historyRecord[field] !== "string") invalid("yen_history_record_field_invalid");
+      }
+      const id = historyRecord.did as number;
+      if (seenIds.has(id)) invalid("yen_history_record_id_duplicate");
+      seenIds.add(id);
+    }
+  }
+  if (rowCount !== totalCount) invalid("yen_history_row_count_mismatch");
+  return bundle;
+}
+
+function exactArtifactKeys(value: JsonObject, allowed: readonly string[], code: string): void {
+  const keys = Object.keys(value);
+  if (keys.length !== allowed.length || keys.some((key) => !allowed.includes(key))) invalid(code);
+}
+
+function artifactCount(value: unknown, minimum: number, maximum: number, field: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    invalid(`yen_history_${field}_invalid`);
+  }
+  return value as number;
+}
+
 async function dataDescriptor(options: {
   artifact: SbiArtifactManifest;
   sequence: number;
@@ -475,11 +628,18 @@ async function dataDescriptor(options: {
     artifactKey: `${options.artifact.dataset}.json`,
     artifactRole: "collector_derived",
     payloadFidelity: "transformed",
-    containerKind: options.artifact.dataset === "foreign-trade-records" ? "bundle" : "single",
+    containerKind:
+      options.artifact.dataset === "foreign-trade-records" ||
+      options.artifact.dataset === "yen-detail-history"
+        ? "bundle"
+        : "single",
     lineageDisposition: "source_bytes_not_available",
     dataset: options.artifact.dataset,
     formatId: `sbi-${options.artifact.dataset}-json`,
-    formatVersion: SCHEMA_VERSION,
+    formatVersion:
+      options.artifact.dataset === "yen-detail-history"
+        ? YEN_HISTORY_BUNDLE_SCHEMA
+        : SCHEMA_VERSION,
     declaredMediaType: "application/json",
     mediaTypeBasis: "operator",
     fetchedAtMs: Date.parse(options.completedAt),
@@ -508,7 +668,10 @@ async function dataDescriptor(options: {
     transformSteps: [
       "transport_decoded",
       "extracted",
-      ...(options.artifact.dataset === "foreign-trade-records" ? ["bundled"] : []),
+      ...(options.artifact.dataset === "foreign-trade-records" ||
+      options.artifact.dataset === "yen-detail-history"
+        ? ["bundled"]
+        : []),
       "reencoded",
     ].map((stepKind, stepIndex) => ({
       stepIndex,

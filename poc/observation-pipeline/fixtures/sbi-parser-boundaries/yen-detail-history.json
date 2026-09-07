@@ -1,4 +1,12 @@
 {
+  "schemaVersion": "sbi-yen-detail-history-bundle-v1",
+  "pageCount": 1,
+  "pageSize": 100,
+  "totalCount": 2,
+  "complete": true,
+  "pageLimitExceeded": false,
+  "rowLimitExceeded": false,
+  "pages": [{
   "depositRecordList": [
     {"detailKbn":"振替入金","did":10001,"dispAbstract":"synthetic transfer","payAmount":"1200","payDepDate":"2026/08/18","payDepKbn":"入金"},
     {"detailKbn":"出金","did":10002,"dispAbstract":"synthetic withdrawal","payAmount":"300","payDepDate":"2026-08-19","payDepKbn":"出金"}
@@ -19,4 +27,5 @@
   "totalTransDepositCount": "1",
   "totalTransPaymentAmount": "300",
   "totalTransPaymentCount": "1"
+  }]
 }

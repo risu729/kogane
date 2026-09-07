@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ImportError, importSbiRun, parseSbiManifest } from "../src/sbi";
+import { ImportError, importSbiRun, parseSbiManifest, parseSbiYenHistoryBundle } from "../src/sbi";
 
 const RUN_ID = "123e4567-e89b-42d3-a456-426614174000";
 const PREFIX = `raw/sbi-securities/2026/09/03/${RUN_ID}/`;
@@ -84,7 +84,10 @@ describe("SBI staged-run importer", () => {
     const bucket = new FakeBucket();
     const artifacts = [];
     for (const [index, dataset] of datasets.entries()) {
-      const body = new TextEncoder().encode(`{ "dataset": "${dataset}", "index": ${index} }\n`);
+      const body =
+        dataset === "yen-detail-history"
+          ? yenHistoryBytes()
+          : new TextEncoder().encode(`{ "dataset": "${dataset}", "index": ${index} }\n`);
       const sha256 = await digest(body);
       const key = `${PREFIX}${dataset}.json`;
       bucket.objects.set(key, { body, customMetadata: { dataset, sha256 } });
@@ -116,7 +119,7 @@ describe("SBI staged-run importer", () => {
       (request) => new URL(request.url).pathname === "/v1/runs/1/reports",
     );
     expect(runReport ? JSON.parse(runReport.body) : undefined).toMatchObject({
-      producerVersion: "sbi-r2-v3",
+      producerVersion: "sbi-r2-v4",
     });
     expect(central.requests).toHaveLength(23);
     for (const artifact of artifacts) {
@@ -134,6 +137,13 @@ describe("SBI staged-run importer", () => {
     expect(
       artifactBodies.find((body) => body.artifactKey === "foreign-trade-records.json"),
     ).toMatchObject({ containerKind: "bundle" });
+    expect(
+      artifactBodies.find((body) => body.artifactKey === "yen-detail-history.json"),
+    ).toMatchObject({
+      containerKind: "bundle",
+      formatVersion: "sbi-yen-detail-history-bundle-v1",
+      transformSteps: expect.arrayContaining([expect.objectContaining({ stepKind: "bundled" })]),
+    });
     await expect(
       importSbiRun({
         bucket: bucket as unknown as R2Bucket,
@@ -282,6 +292,35 @@ describe("SBI staged-run importer", () => {
     ).rejects.toMatchObject({ code: "prefix_inventory_mismatch" });
     expect(central.requests).toHaveLength(0);
   });
+
+  test("strictly validates the complete yen history bundle", () => {
+    expect(parseSbiYenHistoryBundle(yenHistoryBytes())).toMatchObject({
+      schemaVersion: "sbi-yen-detail-history-bundle-v1",
+      pageCount: 1,
+      totalCount: 2,
+    });
+    const legacy = new TextEncoder().encode(JSON.stringify(yenHistoryPage()));
+    expect(() => parseSbiYenHistoryBundle(legacy)).toThrow("yen_history_bundle_fields_invalid");
+
+    const invalidCases = [
+      { complete: false },
+      { pageLimitExceeded: true },
+      { rowLimitExceeded: true },
+      { pageCount: 2 },
+      { totalCount: 3 },
+      {
+        pages: [
+          yenHistoryPage({
+            depositRecordList: [yenHistoryRecord(101), yenHistoryRecord(101)],
+          }),
+        ],
+      },
+      { pages: [yenHistoryPage({ isExceededMaxCount: true })] },
+    ];
+    for (const override of invalidCases) {
+      expect(() => parseSbiYenHistoryBundle(yenHistoryBytes(override))).toThrow(ImportError);
+    }
+  });
 });
 
 function immutableReport(reports: Map<string, string>, path: string, body: string): Response {
@@ -325,4 +364,54 @@ async function digest(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(await crypto.subtle.digest("SHA-256", copy.buffer))]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+function yenHistoryBytes(overrides: Record<string, unknown> = {}): Uint8Array {
+  return new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: "sbi-yen-detail-history-bundle-v1",
+      pageCount: 1,
+      pageSize: 100,
+      totalCount: 2,
+      complete: true,
+      pageLimitExceeded: false,
+      rowLimitExceeded: false,
+      pages: [yenHistoryPage()],
+      ...overrides,
+    }),
+  );
+}
+
+function yenHistoryPage(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    depositRecordList: [yenHistoryRecord(101), yenHistoryRecord(102)],
+    detailsConditions: [],
+    exceededMaxCount: false,
+    isExceededMaxCount: false,
+    nextBusinessDate: "20260908",
+    pageCount: 1,
+    pageNumber: 1,
+    pageSize: 100,
+    totalCount: 2,
+    totalDepositAmount: "2000",
+    totalDepositCount: "1",
+    totalPaymentAmount: "500",
+    totalPaymentCount: "1",
+    totalTransDepositAmount: "0",
+    totalTransDepositCount: "0",
+    totalTransPaymentAmount: "0",
+    totalTransPaymentCount: "0",
+    ...overrides,
+  };
+}
+
+function yenHistoryRecord(did: number): Record<string, unknown> {
+  return {
+    detailKbn: "入出金",
+    did,
+    dispAbstract: "fixture transaction",
+    payAmount: "1000",
+    payDepDate: "2026/09/01",
+    payDepKbn: "入金",
+  };
 }

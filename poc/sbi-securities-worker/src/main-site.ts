@@ -5,6 +5,48 @@ import type { Artifact, DomesticSession } from "./types";
 const MAIN_SITE_USER_AGENT =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
 const MEMBER_SITE_ORIGIN = "https://member.c.sbisec.co.jp";
+const YEN_HISTORY_BUNDLE_SCHEMA = "sbi-yen-detail-history-bundle-v1";
+const MAX_YEN_HISTORY_PAGES = 200;
+const MAX_YEN_HISTORY_ROWS = 20_000;
+const MAX_YEN_HISTORY_PAGE_SIZE = 1_000;
+const YEN_HISTORY_PAGE_KEYS = new Set([
+  "depositRecordList",
+  "detailsConditions",
+  "exceededMaxCount",
+  "isExceededMaxCount",
+  "nextBusinessDate",
+  "pageCount",
+  "pageNumber",
+  "pageSize",
+  "totalCount",
+  "totalDepositAmount",
+  "totalDepositCount",
+  "totalPaymentAmount",
+  "totalPaymentCount",
+  "totalTransDepositAmount",
+  "totalTransDepositCount",
+  "totalTransPaymentAmount",
+  "totalTransPaymentCount",
+]);
+const YEN_HISTORY_RECORD_KEYS = new Set([
+  "detailKbn",
+  "did",
+  "dispAbstract",
+  "payAmount",
+  "payDepDate",
+  "payDepKbn",
+]);
+
+export interface YenHistoryBundle {
+  schemaVersion: typeof YEN_HISTORY_BUNDLE_SCHEMA;
+  pageCount: number;
+  pageSize: number;
+  totalCount: number;
+  complete: true;
+  pageLimitExceeded: false;
+  rowLimitExceeded: false;
+  pages: Record<string, unknown>[];
+}
 
 interface ScopedCookie {
   name: string;
@@ -155,7 +197,7 @@ async function fetchAssets(auth: MainSiteAuth): Promise<Record<string, unknown>>
 async function fetchYenHistory(
   session: DomesticSession,
   auth: MainSiteAuth,
-): Promise<Record<string, unknown>> {
+): Promise<YenHistoryBundle> {
   const entryUrl = new URL("/ETGate/", auth.baseUrl);
   entryUrl.search = new URLSearchParams({
     _ControlID: "WPLETsmR001Control",
@@ -195,7 +237,172 @@ async function fetchYenHistory(
       httpStatus: response.status,
     });
   }
-  return parseJsonObject(text, "SBI yen history API");
+  const initialPage = parseJsonObject(text, "SBI yen history API");
+  // Only the init request has been observed. Do not guess a request shape for
+  // later pages: fail the collection instead of sealing a silently truncated
+  // two-year history as complete evidence.
+  return bundleYenHistoryPages([initialPage]);
+}
+
+export function bundleYenHistoryPages(pages: Record<string, unknown>[]): YenHistoryBundle {
+  if (pages.length === 0) throw new Error("SBI yen history omitted its initial page");
+  if (pages.length > MAX_YEN_HISTORY_PAGES) {
+    throw new Error(`SBI yen history exceeded ${MAX_YEN_HISTORY_PAGES} pages`);
+  }
+  const first = yenHistoryPage(pages[0]!, 1);
+  if (first.pageCount > MAX_YEN_HISTORY_PAGES) {
+    throw new Error(`SBI yen history declared more than ${MAX_YEN_HISTORY_PAGES} pages`);
+  }
+  if (first.totalCount > MAX_YEN_HISTORY_ROWS) {
+    throw new Error(`SBI yen history declared more than ${MAX_YEN_HISTORY_ROWS} rows`);
+  }
+  if (first.totalCount > 0 && pages.length !== first.pageCount) {
+    const condition = pages.length < first.pageCount ? "incomplete" : "contains extra pages";
+    throw new Error(
+      `SBI yen history pagination ${condition}: collected ${pages.length} of ${first.pageCount} pages`,
+    );
+  }
+
+  const seenIds = new Set<string>();
+  let rowCount = 0;
+  for (const [index, rawPage] of pages.entries()) {
+    const page = yenHistoryPage(rawPage, index + 1);
+    if (
+      page.pageCount !== first.pageCount ||
+      page.pageSize !== first.pageSize ||
+      page.totalCount !== first.totalCount
+    ) {
+      throw new Error(`SBI yen history page ${index + 1} changed pagination metadata`);
+    }
+    rowCount += page.records.length;
+    if (rowCount > MAX_YEN_HISTORY_ROWS) {
+      throw new Error(`SBI yen history exceeded ${MAX_YEN_HISTORY_ROWS} collected rows`);
+    }
+    for (const [recordIndex, record] of page.records.entries()) {
+      if (record === null || Array.isArray(record) || typeof record !== "object") {
+        throw new Error(
+          `SBI yen history page ${index + 1} record ${recordIndex + 1} is not an object`,
+        );
+      }
+      const recordValue = record as Record<string, unknown>;
+      const recordKeys = Object.keys(recordValue);
+      if (
+        recordKeys.length !== YEN_HISTORY_RECORD_KEYS.size ||
+        recordKeys.some((key) => !YEN_HISTORY_RECORD_KEYS.has(key))
+      ) {
+        throw new Error(
+          `SBI yen history page ${index + 1} record ${recordIndex + 1} fields changed`,
+        );
+      }
+      const id = recordValue.did;
+      if (!Number.isSafeInteger(id) || (id as number) < 0) {
+        throw new Error(
+          `SBI yen history page ${index + 1} record ${recordIndex + 1} has invalid did`,
+        );
+      }
+      for (const field of [
+        "detailKbn",
+        "dispAbstract",
+        "payAmount",
+        "payDepDate",
+        "payDepKbn",
+      ] as const) {
+        if (typeof recordValue[field] !== "string") {
+          throw new Error(
+            `SBI yen history page ${index + 1} record ${recordIndex + 1} has invalid ${field}`,
+          );
+        }
+      }
+      const key = String(id);
+      if (seenIds.has(key)) throw new Error(`SBI yen history contains duplicate did ${key}`);
+      seenIds.add(key);
+    }
+  }
+  if (rowCount !== first.totalCount) {
+    throw new Error(
+      `SBI yen history pagination is incomplete: collected ${rowCount} of ${first.totalCount} rows`,
+    );
+  }
+  return {
+    schemaVersion: YEN_HISTORY_BUNDLE_SCHEMA,
+    pageCount: pages.length,
+    pageSize: first.pageSize,
+    totalCount: first.totalCount,
+    complete: true,
+    pageLimitExceeded: false,
+    rowLimitExceeded: false,
+    pages,
+  };
+}
+
+function yenHistoryPage(
+  value: Record<string, unknown>,
+  expectedPageNumber: number,
+): { pageCount: number; pageSize: number; totalCount: number; records: unknown[] } {
+  const keys = Object.keys(value);
+  if (
+    keys.length !== YEN_HISTORY_PAGE_KEYS.size ||
+    keys.some((key) => !YEN_HISTORY_PAGE_KEYS.has(key))
+  ) {
+    throw new Error(`SBI yen history page ${expectedPageNumber} fields changed`);
+  }
+  const pageNumber = boundedInteger(
+    value.pageNumber,
+    0,
+    MAX_YEN_HISTORY_PAGES,
+    `SBI yen history page ${expectedPageNumber} has invalid pageNumber`,
+  );
+  const pageCount = boundedInteger(
+    value.pageCount,
+    0,
+    MAX_YEN_HISTORY_PAGES + 1,
+    `SBI yen history page ${expectedPageNumber} has invalid pageCount`,
+  );
+  const pageSize = boundedInteger(
+    value.pageSize,
+    1,
+    MAX_YEN_HISTORY_PAGE_SIZE,
+    `SBI yen history page ${expectedPageNumber} has invalid pageSize`,
+  );
+  const totalCount = boundedInteger(
+    value.totalCount,
+    0,
+    MAX_YEN_HISTORY_ROWS + 1,
+    `SBI yen history page ${expectedPageNumber} has invalid totalCount`,
+  );
+  if (!Array.isArray(value.depositRecordList) || value.depositRecordList.length > pageSize) {
+    throw new Error(`SBI yen history page ${expectedPageNumber} has invalid depositRecordList`);
+  }
+  if (value.isExceededMaxCount !== false) {
+    throw new Error(`SBI yen history page ${expectedPageNumber} exceeded the provider row limit`);
+  }
+  if (value.exceededMaxCount !== false) {
+    throw new Error(`SBI yen history page ${expectedPageNumber} has exceededMaxCount=true`);
+  }
+  if (totalCount === 0) {
+    if (!((pageCount === 0 && pageNumber === 0) || (pageCount === 1 && pageNumber === 1))) {
+      throw new Error(`SBI yen history empty page has inconsistent page metadata`);
+    }
+  } else if (pageNumber !== expectedPageNumber) {
+    throw new Error(
+      `SBI yen history expected pageNumber ${expectedPageNumber} but received ${pageNumber}`,
+    );
+  }
+  const expectedPageCount = Math.ceil(totalCount / pageSize);
+  if (totalCount > 0 && pageCount !== expectedPageCount) {
+    throw new Error(`SBI yen history page ${expectedPageNumber} has inconsistent pageCount`);
+  }
+  if (totalCount > 0 && pageNumber > pageCount) {
+    throw new Error(`SBI yen history page ${expectedPageNumber} exceeds pageCount`);
+  }
+  return { pageCount, pageSize, totalCount, records: value.depositRecordList };
+}
+
+function boundedInteger(value: unknown, minimum: number, maximum: number, message: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    throw new Error(message);
+  }
+  return value as number;
 }
 
 async function fetchDomesticTradeHistory(options: {

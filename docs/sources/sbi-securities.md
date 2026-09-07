@@ -64,7 +64,7 @@ SBI証券は現時点でB。現口座でパスキー利用とBitwarden保管が�
 - 預り金を含む／除く、iDeCoを含む／除く集計
 - 商品カテゴリ別の同項目と構成比
 
-同じコードには、円貨入出金明細の内部JSONから、日付、入出金区分、明細区分、摘要、金額、安定IDを取得する処理もある。ただし、現行実装が初期レスポンスだけで公式上の2年分すべてをページングできるかは未確認である。
+同じコードには、円貨入出金明細の内部JSONから、日付、入出金区分、明細区分、摘要、金額、安定IDを取得する処理もある。Kogane collectorは初期responseのpage metadataとrow cardinalityを検証し、単一pageで全件が揃う場合だけ、provider fieldを落とさないpage bundleとして保存する。次page request契約はまだ観測されていないため、複数pageを示すresponseは成功扱いせずfail closedする。
 
 ### 2. 口座管理・取引履歴・電子交付
 
@@ -335,7 +335,7 @@ Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_p
 - パスワード無効化の有無、電話番号認証、conditional UIとパスキーボタン経路の差
 - 現行sessionのidle／absolute寿命、再利用条件、IP／UA変更時の追加認証
 - 現行My資産の全endpoint、ページング、rate limit、session寿命
-- 円貨入出金内部APIがUI上の2年分を全件返す条件
+- 円貨入出金内部APIの次page request endpoint／parameterと、UI上の2年分を全件返す条件（未確認のrequestを推測して送らず、現在は複数pageを検出するとfail closedする）
 - 外国株式の注文／約定／入出金履歴の正確なオンライン保持期間
 - SBI証券Plusのendpointと、PC My資産backendとの共有範囲
 - Plus／株アプリのTLS pinning、emulator／root検知、EVERSPIN適用範囲

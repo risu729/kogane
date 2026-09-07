@@ -7,7 +7,7 @@
 中央のterminal reportは作成後に上書きできない。したがって、デプロイごとに変わる
 `IMPORTER_VERSION`をterminal reportの`producerVersion`へ入れてはならない。各sourceは
 `sourceRunKey`にも含めた固定のingest契約versionを記録し、デプロイrevisionは失敗・中断
-attemptの診断にだけ使う。SBI証券は`sbi-r2-v3`、SBI VC Trade・Sony銀行・SBI新生銀行・
+attemptの診断にだけ使う。SBI証券は円貨明細を全件検証済みpage bundleとして扱う`sbi-r2-v4`、SBI VC Trade・Sony銀行・SBI新生銀行・
 Mobile Suica・MyJCBは各`*-r2-v2`へ移行する。旧runは不変証跡として残し、新しい契約の
 runへ全R2を再走査する。同じ契約を別Importerデプロイから再送しても、run/report/artifact/
 sealの件数は変化しない。

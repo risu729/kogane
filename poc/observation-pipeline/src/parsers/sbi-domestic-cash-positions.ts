@@ -1,6 +1,7 @@
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
-import { decimalText, decodeUtf8 } from "./util.ts";
+import { decimalText, decimalToMinorUnits, decodeUtf8 } from "./util.ts";
 import {
+  exactDecimal,
   exactKeys,
   exactMoney,
   strictObject,
@@ -88,20 +89,52 @@ class FixedReader {
   }
 }
 
-function signedMoney(value: string, flag: string, label: string) {
-  if (!new Set(["", "0", "1", "2", "+", "-"]).has(flag)) {
-    throw new Error(`${label} has an unsupported sign flag`);
+function displayTrend(value: string, label: string): "U" | "D" | "F" {
+  if (value !== "U" && value !== "D" && value !== "F") {
+    throw new Error(`${label} has an unsupported display-trend flag`);
   }
-  const explicitNegative = /^(?:-|△|▲|\()/u.test(value.trim());
-  const negativeFlag = flag === "2" || flag === "-";
-  const positiveFlag = flag === "1" || flag === "+";
-  if (positiveFlag && explicitNegative) throw new Error(`${label} has conflicting sign data`);
-  const unitless = value.replace(/円$/u, "").trim();
-  return exactMoney(negativeFlag && !explicitNegative ? `-${unitless}` : unitless, "JPY", label);
+  return value;
 }
 
-function yenMoney(value: string, label: string) {
-  return exactMoney(value.replace(/円$/u, "").trim(), "JPY", label);
+function signedMoney(value: string, label: string) {
+  let unitless = value.replace(/円$/u, "").trim();
+  let negative = false;
+  if (/^\(.*\)$/u.test(unitless)) {
+    negative = true;
+    unitless = unitless.slice(1, -1).trim();
+  }
+  if (unitless.startsWith("△") || unitless.startsWith("▲")) {
+    if (negative) throw new Error(`${label} has conflicting sign data`);
+    negative = true;
+    unitless = unitless.slice(1).trim();
+  } else if (unitless.startsWith("-")) {
+    if (negative) throw new Error(`${label} has conflicting sign data`);
+    negative = true;
+    unitless = unitless.slice(1).trim();
+  } else if (unitless.startsWith("+")) {
+    unitless = unitless.slice(1).trim();
+  }
+  if (/^(?:[+\-△▲]|\(|\))/u.test(unitless)) {
+    throw new Error(`${label} has conflicting sign data`);
+  }
+  return exactMoney(`${negative ? "-" : ""}${unitless}`, "JPY", label);
+}
+
+function yenMoney(value: string, label: string, requireMinor = true) {
+  const decimal = exactDecimal(value.replace(/円$/u, "").trim(), label);
+  const minor = decimalToMinorUnits(decimal.text, "JPY");
+  if (requireMinor && minor === undefined) {
+    throw new Error(`${label} is not exactly representable in JPY minor units`);
+  }
+  return { ...decimal, minor };
+}
+
+function unitPrice(value: string, label: string) {
+  // The provider uses `--` in the eleven-byte field when no unit price is
+  // currently displayable. Preserve the source text in `extra`, but do not
+  // manufacture a zero-valued observation.
+  if (value === "--") return undefined;
+  return yenMoney(value, label, false);
 }
 
 function displayNumber(value: string, label: string): void {
@@ -187,13 +220,16 @@ export const sbiDomesticCashPositions: Parser = {
       const profitLossText = reader.text(16, `${label}.profitLoss`);
       const profitLossRateText = reader.text(11, `${label}.profitLossRate`);
       displayNumber(profitLossRateText, `${label}.profitLossRate`);
-      const profitLossFlag = reader.text(1, `${label}.profitLossFlag`);
-      const priceText = reader.text(11, `${label}.price`);
-      reader.skip(11, `${label}.reservedPrice`);
-      const presentValueFlag = reader.text(1, `${label}.presentValueFlag`);
-      if (!new Set(["", "0", "1", "2", "+", "-"]).has(presentValueFlag)) {
-        throw new Error(`${label}.presentValueFlag is unsupported`);
-      }
+      const profitLossTrend = displayTrend(
+        reader.text(1, `${label}.profitLossTrend`),
+        `${label}.profitLossTrend`,
+      );
+      const acquisitionUnitPriceText = reader.text(11, `${label}.price`);
+      const currentPriceText = reader.text(11, `${label}.presentValue`);
+      const currentPriceTrend = displayTrend(
+        reader.text(1, `${label}.presentValueTrend`),
+        `${label}.presentValueTrend`,
+      );
       reader.skip(30, `${label}.reserved01`);
       reader.skip(1, `${label}.reserved02`);
       reader.skip(2, `${label}.reserved03`);
@@ -206,11 +242,14 @@ export const sbiDomesticCashPositions: Parser = {
       reader.skip(9, `${label}.reserved10`);
       reader.skip(21, `${label}.reserved11`);
       reader.skip(36, `${label}.reserved12`);
-      const purchasePriceText = reader.text(16, `${label}.purchasePrice`);
+      const kaitsukePriceText = reader.text(16, `${label}.kaitsukePrice`);
       const valuationPriceText = reader.text(15, `${label}.valuationPrice`);
       reader.skip(30, `${label}.reserved13`);
       const valuationChangeText = reader.text(30, `${label}.valuationChange`);
-      const valuationChangeFlag = reader.text(1, `${label}.valuationChangeFlag`);
+      const valuationChangeTrend = displayTrend(
+        reader.text(1, `${label}.valuationChangeTrend`),
+        `${label}.valuationChangeTrend`,
+      );
       reader.skip(1, `${label}.reserved14`);
       reader.skip(1, `${label}.reserved15`);
       const holdingCategory = reader.text(4, `${label}.holdingCategory`);
@@ -219,23 +258,29 @@ export const sbiDomesticCashPositions: Parser = {
       if (reader.position !== recordOffset + RECORD_BYTES)
         throw new Error(`${label} width invariant failed`);
 
-      const locator = `mts-shift-jis:payload-byte=${recordOffset}`;
+      const sourceAccount = `${SOURCE_ACCOUNT}:deposit-type=${depositTypeCode}`;
+      const locator = `mts-shift-jis:payload-byte=${recordOffset},width=${RECORD_BYTES}`;
       const context = {
         depositTypeCode,
         depositTypeText,
         unexecutedQuantity,
+        profitLossText,
         profitLossRateText,
-        profitLossFlag,
-        presentValueFlag,
+        profitLossTrend,
+        acquisitionUnitPriceText,
+        currentPriceText,
+        currentPriceTrend,
+        kaitsukePriceText,
+        valuationPriceText,
         valuationChangeText,
-        valuationChangeFlag,
+        valuationChangeTrend,
         holdingCategory,
         accountInformation,
         _kogane: { accountType, marketCode },
       };
       observations.push({
         kind: "position",
-        sourceAccount: SOURCE_ACCOUNT,
+        sourceAccount,
         securityCode: code,
         securityName: issueName(rawIssueName),
         market,
@@ -246,30 +291,33 @@ export const sbiDomesticCashPositions: Parser = {
         extra: context,
       });
       const valuations = [
-        ["profit_loss", signedMoney(profitLossText, profitLossFlag, `${label}.profitLoss`)],
-        ["current_price", yenMoney(priceText, `${label}.price`)],
-        ["acquisition_price", yenMoney(purchasePriceText, `${label}.purchasePrice`)],
-        ["market_value", yenMoney(valuationPriceText, `${label}.valuationPrice`)],
+        ["profit_loss", signedMoney(profitLossText, `${label}.profitLoss`), 91, 16],
+        ["acquisition_unit_price", unitPrice(acquisitionUnitPriceText, `${label}.price`), 119, 11],
+        ["current_price", unitPrice(currentPriceText, `${label}.presentValue`), 130, 11],
+        ["kaitsuke_price", yenMoney(kaitsukePriceText, `${label}.kaitsukePrice`, false), 299, 16],
+        ["market_value", yenMoney(valuationPriceText, `${label}.valuationPrice`), 315, 15],
         [
           "valuation_change",
           signedMoney(
             valuationChangeText.split("(")[0] ?? valuationChangeText,
-            valuationChangeFlag,
             `${label}.valuationChange`,
           ),
+          360,
+          30,
         ],
       ] as const;
-      for (const [metric, amount] of valuations) {
+      for (const [metric, amount, relativeOffset, width] of valuations) {
+        if (!amount) continue;
         observations.push({
           kind: "valuation",
-          sourceAccount: SOURCE_ACCOUNT,
+          sourceAccount,
           subject: code,
           metric,
-          amountMinor: amount.minor,
+          ...(amount.minor === undefined ? {} : { amountMinor: amount.minor }),
           amountText: amount.text,
           amountScale: amount.scale,
           currency: "JPY",
-          rawLocator: locator,
+          rawLocator: `mts-shift-jis:payload-byte=${recordOffset + relativeOffset},width=${width}`,
           extra: context,
         });
       }
@@ -277,7 +325,8 @@ export const sbiDomesticCashPositions: Parser = {
     const totalProfitLoss = reader.text(17, "totalProfitLoss");
     const totalProfitLossRate = reader.text(11, "totalProfitLossRate");
     const totalProfitLossFlag = reader.text(1, "totalProfitLossFlag");
-    signedMoney(totalProfitLoss, totalProfitLossFlag, "totalProfitLoss");
+    displayTrend(totalProfitLossFlag, "totalProfitLossTrend");
+    signedMoney(totalProfitLoss, "totalProfitLoss");
     displayNumber(totalProfitLossRate, "totalProfitLossRate");
     if (reader.remaining === ERROR_BYTES) {
       reader.text(1, "trailing.status");

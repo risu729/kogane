@@ -18,6 +18,12 @@
       }
     },
     {
+      "dataset": "yen-detail-history",
+      "key": "raw/sbi-securities/2026/08/20/20260820-210000-poc01/yen-detail-history.json",
+      "sha256": "9383e79b78f66e1cc4011589187b2915b8936c23346776c751feecf9ae65dfdd",
+      "bytes": 1229
+    },
+    {
       "dataset": "foreign-cash-positions",
       "key": "raw/sbi-securities/2026/08/20/20260820-210000-poc01/foreign-cash-positions.json",
       "sha256": "1390f34c52bce921024ba6face8b616a89018e9a06daec5b3375f42d12be1afe",

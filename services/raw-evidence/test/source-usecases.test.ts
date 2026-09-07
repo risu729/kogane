@@ -554,10 +554,17 @@ describe("sanitized source-usecase contract", () => {
           fetchUnitId: dataset.startsWith("foreign-") ? foreign : domestic,
           artifactRole: "collector_derived",
           payloadFidelity: "transformed",
+          containerKind:
+            dataset === "foreign-trade-records" || dataset === "yen-detail-history"
+              ? "bundle"
+              : "single",
           lineageDisposition: "source_bytes_not_available",
           dataset,
           formatId: `sbi-${dataset}-json`,
-          formatVersion: "sbi-worker-poc-v1",
+          formatVersion:
+            dataset === "yen-detail-history"
+              ? "sbi-yen-detail-history-bundle-v1"
+              : "sbi-worker-poc-v1",
           declaredMediaType: "application/json",
           mediaTypeBasis: "operator",
           sequence,
@@ -575,7 +582,7 @@ describe("sanitized source-usecase contract", () => {
               transformerId: "sbi-securities-worker",
               transformerVersion: "sbi-worker-poc-v1",
             },
-            ...(dataset === "foreign-trade-records"
+            ...(dataset === "foreign-trade-records" || dataset === "yen-detail-history"
               ? [
                   {
                     stepIndex: 2,
@@ -586,7 +593,8 @@ describe("sanitized source-usecase contract", () => {
                 ]
               : []),
             {
-              stepIndex: dataset === "foreign-trade-records" ? 3 : 2,
+              stepIndex:
+                dataset === "foreign-trade-records" || dataset === "yen-detail-history" ? 3 : 2,
               stepKind: "reencoded",
               transformerId: "sbi-securities-worker",
               transformerVersion: "sbi-worker-poc-v1",

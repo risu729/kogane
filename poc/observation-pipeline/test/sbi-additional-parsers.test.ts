@@ -66,18 +66,115 @@ describe("sbi-domestic-cash-positions", () => {
   test("decodes fixed-width Shift-JIS positions with byte provenance", () => {
     const result = sbiDomesticCashPositions.parse(fixture(meta.dataset!), meta);
     expect(result.warnings).toEqual([]);
-    expect(result.observations).toHaveLength(6);
+    expect(result.observations).toHaveLength(7);
     const position = result.observations[0]!;
     expect(position.kind).toBe("position");
     if (position.kind !== "position") throw new Error("expected position");
     expect(position.securityCode).toBe("1234");
+    expect(position.securityName).toBe("合成株式会社");
     expect(position.market).toBe("XTKS");
     expect(position.quantityText).toBe("10");
-    expect(position.rawLocator).toBe("mts-shift-jis:payload-byte=34");
+    expect(position.sourceAccount).toBe("sbi-securities:domestic:deposit-type=0");
+    expect(position.rawLocator).toBe("mts-shift-jis:payload-byte=34,width=423");
+    expect(position.extra).toMatchObject({
+      profitLossTrend: "U",
+      currentPriceTrend: "F",
+      valuationChangeTrend: "D",
+    });
     const profitLoss = result.observations.find(
       (entry) => entry.kind === "valuation" && entry.metric === "profit_loss",
     );
-    expect(profitLoss?.kind === "valuation" ? profitLoss.amountMinor : undefined).toBe(100);
+    expect(profitLoss?.kind === "valuation" ? profitLoss.amountMinor : undefined).toBe(300);
+    const acquisition = result.observations.find(
+      (entry) => entry.kind === "valuation" && entry.metric === "acquisition_unit_price",
+    );
+    expect(acquisition?.kind === "valuation" ? acquisition.amountText : undefined).toBe("900.5");
+    expect(acquisition?.kind === "valuation" ? acquisition.amountMinor : undefined).toBeUndefined();
+    const current = result.observations.find(
+      (entry) => entry.kind === "valuation" && entry.metric === "current_price",
+    );
+    expect(current?.kind === "valuation" ? current.amountMinor : undefined).toBe(1200);
+    expect(current?.rawLocator).toBe("mts-shift-jis:payload-byte=164,width=11");
+    const kaitsuke = result.observations.find(
+      (entry) => entry.kind === "valuation" && entry.metric === "kaitsuke_price",
+    );
+    expect(kaitsuke?.kind === "valuation" ? kaitsuke.amountMinor : undefined).toBe(901);
+    const change = result.observations.find(
+      (entry) => entry.kind === "valuation" && entry.metric === "valuation_change",
+    );
+    expect(change?.kind === "valuation" ? change.amountMinor : undefined).toBe(-100);
+  });
+
+  test("display trends are strict metadata and never invent the amount sign", () => {
+    const body = parsedFixture(meta.dataset!);
+    const payload = Uint8Array.from(atob(body["payloadBase64"] as string), (value) =>
+      value.charCodeAt(0),
+    );
+    payload.set(new TextEncoder().encode("-300".padEnd(16, " ")), 34 + 91);
+    body["payloadBase64"] = btoa(String.fromCharCode(...payload));
+    const result = sbiDomesticCashPositions.parse(encoded(body), meta);
+    const profitLoss = result.observations.find(
+      (entry) => entry.kind === "valuation" && entry.metric === "profit_loss",
+    );
+    expect(profitLoss?.kind === "valuation" ? profitLoss.amountMinor : undefined).toBe(-300);
+
+    payload[34 + 118] = "1".charCodeAt(0);
+    body["payloadBase64"] = btoa(String.fromCharCode(...payload));
+    expect(() => sbiDomesticCashPositions.parse(encoded(body), meta)).toThrow(
+      "unsupported display-trend flag",
+    );
+  });
+
+  test("an unavailable current-price display does not become a zero valuation", () => {
+    const body = parsedFixture(meta.dataset!);
+    const payload = Uint8Array.from(atob(body["payloadBase64"] as string), (value) =>
+      value.charCodeAt(0),
+    );
+    payload.set(new TextEncoder().encode("--".padEnd(11, " ")), 34 + 130);
+    body["payloadBase64"] = btoa(String.fromCharCode(...payload));
+
+    const result = sbiDomesticCashPositions.parse(encoded(body), meta);
+    expect(
+      result.observations.some(
+        (entry) => entry.kind === "valuation" && entry.metric === "current_price",
+      ),
+    ).toBe(false);
+    expect(result.observations[0]?.extra).toMatchObject({ currentPriceText: "--" });
+  });
+
+  test("deposit type is part of the position/valuation join identity", () => {
+    const body = parsedFixture(meta.dataset!);
+    const payload = Uint8Array.from(atob(body["payloadBase64"] as string), (value) =>
+      value.charCodeAt(0),
+    );
+    const prefix = payload.slice(0, 34);
+    prefix.set(new TextEncoder().encode("002"), 27);
+    prefix.set(new TextEncoder().encode("0002"), 30);
+    const first = payload.slice(34, 34 + 423);
+    const second = first.slice();
+    second[48] = "H".charCodeAt(0);
+    const summary = payload.slice(34 + 423);
+    const combined = new Uint8Array(prefix.length + first.length + second.length + summary.length);
+    combined.set(prefix);
+    combined.set(first, prefix.length);
+    combined.set(second, prefix.length + first.length);
+    combined.set(summary, prefix.length + first.length + second.length);
+    body["payloadBase64"] = btoa(String.fromCharCode(...combined));
+
+    const result = sbiDomesticCashPositions.parse(encoded(body), meta);
+    const positions = result.observations.filter((entry) => entry.kind === "position");
+    expect(positions).toHaveLength(2);
+    expect(positions[0]?.sourceAccount).not.toBe(positions[1]?.sourceAccount);
+    for (const position of positions) {
+      expect(
+        result.observations.filter(
+          (entry) =>
+            entry.kind === "valuation" &&
+            entry.sourceAccount === position?.sourceAccount &&
+            entry.subject === position.securityCode,
+        ),
+      ).toHaveLength(6);
+    }
   });
 
   test("recordCount/byte-length drift fails the whole artifact", () => {
@@ -158,28 +255,41 @@ describe("sbi-yen-detail-history", () => {
       "sbi-yen-detail:10001",
     );
     expect(credit?.kind === "transaction" ? credit.asOf : undefined).toBe("2026-08-18");
-    expect(credit?.extra["_kogane"]).toEqual({ direction: "credit", transactionType: "transfer" });
-    expect(debit?.extra["_kogane"]).toEqual({ direction: "debit", transactionType: "withdrawal" });
+    expect(credit?.extra["_kogane"]).toEqual({
+      direction: "credit",
+      transactionType: "transfer",
+      bundlePageIndex: 0,
+      providerPageNumber: 1,
+    });
+    expect(debit?.extra["_kogane"]).toEqual({
+      direction: "debit",
+      transactionType: "withdrawal",
+      bundlePageIndex: 0,
+      providerPageNumber: 1,
+    });
   });
 
   test("duplicate provider ids, truncation, unknown enums, and row count drift fail closed", () => {
     const duplicate = parsedFixture(meta.dataset!);
-    const records = duplicate["depositRecordList"] as Array<Record<string, unknown>>;
+    const duplicatePage = (duplicate["pages"] as Array<Record<string, unknown>>)[0]!;
+    const records = duplicatePage["depositRecordList"] as Array<Record<string, unknown>>;
     records[1]!["did"] = records[0]!["did"];
-    expect(() => sbiYenDetailHistory.parse(encoded(duplicate), meta)).toThrow("duplicated");
+    expect(() => sbiYenDetailHistory.parse(encoded(duplicate), meta)).toThrow("duplicate");
 
     const truncated = parsedFixture(meta.dataset!);
-    truncated["exceededMaxCount"] = true;
-    truncated["isExceededMaxCount"] = true;
-    expect(() => sbiYenDetailHistory.parse(encoded(truncated), meta)).toThrow("truncated");
+    truncated["complete"] = false;
+    expect(() => sbiYenDetailHistory.parse(encoded(truncated), meta)).toThrow("incomplete");
 
     const enumDrift = parsedFixture(meta.dataset!);
-    (enumDrift["depositRecordList"] as Array<Record<string, unknown>>)[0]!["payDepKbn"] = "他";
+    const enumPage = (enumDrift["pages"] as Array<Record<string, unknown>>)[0]!;
+    (enumPage["depositRecordList"] as Array<Record<string, unknown>>)[0]!["payDepKbn"] = "他";
     expect(() => sbiYenDetailHistory.parse(encoded(enumDrift), meta)).toThrow("unsupported value");
 
     const countDrift = parsedFixture(meta.dataset!);
     countDrift["totalCount"] = 3;
-    expect(() => sbiYenDetailHistory.parse(encoded(countDrift), meta)).toThrow("count fields");
+    expect(() => sbiYenDetailHistory.parse(encoded(countDrift), meta)).toThrow(
+      "pagination metadata",
+    );
   });
 });
 
