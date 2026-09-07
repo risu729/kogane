@@ -1,4 +1,8 @@
-import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry";
+import {
+  myJcbCreditLedger,
+  myJcbEvidenceOnly,
+  myJcbPastMonthBalances,
+} from "../../../poc/observation-pipeline/src/parsers/myjcb";
 import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types";
 import {
   normalizeMyJcbArtifactPayload,
@@ -11,6 +15,7 @@ interface AuditEnv {
 }
 
 const PREFIX = "raw/myjcb/";
+const PARSERS = [myJcbCreditLedger, myJcbPastMonthBalances, myJcbEvidenceOnly] as const;
 
 export default {
   async fetch(request: Request, env: AuditEnv): Promise<Response> {

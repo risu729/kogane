@@ -1,10 +1,14 @@
-import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry";
+import {
+  smbcDirectBalance,
+  smbcDirectTransactions,
+} from "../../../poc/observation-pipeline/src/parsers/smbc-direct";
 import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types";
 import { validateSmbcDirectRun } from "./smbc-direct";
 
 type AuditEnv = Pick<Env, "SMBC_DIRECT_SNAPSHOTS">;
 
 const PREFIX = "raw/smbc-direct/";
+const PARSERS = [smbcDirectBalance, smbcDirectTransactions] as const;
 
 export default {
   async fetch(request: Request, env: AuditEnv): Promise<Response> {

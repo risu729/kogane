@@ -1,10 +1,12 @@
-import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry";
+import { sbiShinseiTopBalancesAndActivity } from "../../../poc/observation-pipeline/src/parsers/sbi-shinsei-top-balances-and-activity";
+import { sbiShinseiYenDepositAccount } from "../../../poc/observation-pipeline/src/parsers/sbi-shinsei-yen-deposit-account";
 import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types";
 import { validateSbiShinseiRun } from "./sbi-shinsei";
 
 type AuditEnv = Pick<Env, "SBI_SHINSEI_SNAPSHOTS">;
 const PREFIX = "raw/sbi-shinsei/";
 const PARSED = new Set(["top-accounts-balance-and-activity", "yen-deposit-account"]);
+const PARSERS = [sbiShinseiTopBalancesAndActivity, sbiShinseiYenDepositAccount] as const;
 
 export default {
   async fetch(request: Request, env: AuditEnv): Promise<Response> {
