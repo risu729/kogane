@@ -128,12 +128,21 @@ class FakeCentral {
     if (/\/artifacts$/u.test(path)) {
       const submitted = JSON.parse(requestBody) as Record<string, unknown>;
       const { http, storage, file, email, ...fields } = submitted;
+      const normalizedRelations = Array.isArray(fields.relations)
+        ? fields.relations.map((relation) => {
+            if (typeof relation !== "object" || relation === null || "parentRunId" in relation) {
+              return relation;
+            }
+            return { ...relation, parentRunId: 1 };
+          })
+        : fields.relations;
       return Response.json(
         {
           descriptorSha256: await digest(
             utf8(
               canonicalJson({
                 ...fields,
+                relations: normalizedRelations,
                 origins: {
                   http: http ?? null,
                   storage: storage ?? null,
