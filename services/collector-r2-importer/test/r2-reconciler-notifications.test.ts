@@ -75,8 +75,10 @@ function mockRuntime(
       }
       if (args[3] === "delete") {
         if (options.deleteFailure) throw new Error("wrangler command failed (delete)");
+        const ruleId = flag(args, "--rule");
+        if (!ruleId) throw new Error("bulk notification deletion is forbidden");
         if (!options.retainAfterDelete) {
-          const index = liveRules.findIndex((rule) => rule.ruleId === flag(args, "--rule"));
+          const index = liveRules.findIndex((rule) => rule.ruleId === ruleId);
           if (index >= 0) liveRules.splice(index, 1);
         }
         return "";
@@ -150,10 +152,49 @@ afterEach(() => {
 describe("R2 reconciler notification lifecycle helper", () => {
   test("removes only an exactly verified recorded rule ID", async () => {
     const expected = RULES[0]!;
-    const mock = mockRuntime({ liveRules: [live(expected)], state: state([stored(expected)]) });
+    const unrelated = live(
+      {
+        bucket: expected.bucket,
+        prefix: "unrelated/",
+        suffix: ".json",
+        description: "unrelated-notification",
+      },
+      "unrelated-rule",
+    );
+    const mock = mockRuntime({
+      liveRules: [live(expected), unrelated],
+      state: state([stored(expected)]),
+    });
     await runNotificationCommand(["remove", CONFIRMATION], mock.runtime);
     expect(deleteCommands(mock.commands)).toEqual([
       expect.arrayContaining(["--queue", QUEUE_NAME, "--rule", "rule-0001"]),
+    ]);
+    expect(mock.liveRules).toEqual([unrelated]);
+    expect(mock.stateText()).toBeUndefined();
+  });
+
+  test("preflights every state entry before deleting the first", async () => {
+    const first = RULES[0]!;
+    const second = RULES[1]!;
+    const mock = mockRuntime({
+      liveRules: [live(first, "rule-first"), { ...live(second, "rule-second"), suffix: "wrong" }],
+      state: state([stored(first, "rule-first"), stored(second, "rule-second")]),
+    });
+    await expect(runNotificationCommand(["remove", CONFIRMATION], mock.runtime)).rejects.toThrow(
+      "live notification rule does not exactly match local state",
+    );
+    expect(deleteCommands(mock.commands)).toHaveLength(0);
+  });
+
+  test("resumes cleanup from a state containing only the remaining rule", async () => {
+    const remaining = RULES[1]!;
+    const mock = mockRuntime({
+      liveRules: [live(remaining, "rule-remaining")],
+      state: state([stored(remaining, "rule-remaining")]),
+    });
+    await runNotificationCommand(["remove", CONFIRMATION], mock.runtime);
+    expect(deleteCommands(mock.commands)).toEqual([
+      expect.arrayContaining(["--rule", "rule-remaining"]),
     ]);
     expect(mock.stateText()).toBeUndefined();
   });
