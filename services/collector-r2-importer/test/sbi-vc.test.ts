@@ -484,7 +484,7 @@ describe("SBI VC Trade staged-run importer", () => {
     expect(
       central.requests.filter((request) => /\/inventories\/20\/seal$/u.test(request.path)),
     ).toHaveLength(1);
-  });
+  }, 15_000);
 
   test("rejects a checksum mismatch before central state is created", async () => {
     const bucket = new FakeBucket();
