@@ -75,7 +75,7 @@ export function packagePlan(name: string, options: PlanOptions): Step[] {
     throw new Error(`Missing frozen Bun lockfile for ${policy.path}`);
   const steps: Step[] = [{ cwd, command: ["bun", "install", "--frozen-lockfile"] }];
   if (policy.evidenceAssets) {
-    // The separately deployed reader serves the same reviewed frontend build.
+    // The readers serve reviewed frontend builds and a fixed synthetic snapshot.
     // Validate the asset producer before running any plan step, too.
     const frontendPolicy = selectPolicy("poc/observation-pipeline");
     const frontend = join(options.root, frontendPolicy.path);
@@ -88,6 +88,8 @@ export function packagePlan(name: string, options: PlanOptions): Step[] {
     steps.push(
       { cwd: frontend, command: ["bun", "install", "--frozen-lockfile"] },
       { cwd: frontend, command: ["bun", "run", "build:evidence"] },
+      { cwd: frontend, command: ["bun", "run", "build"] },
+      { cwd: frontend, command: ["bun", "run", "export:demo"] },
     );
   }
   if (policy.container) {

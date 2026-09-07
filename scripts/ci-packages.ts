@@ -27,7 +27,11 @@ function worker(path: string): PackagePolicy {
 export const CI_PACKAGES: PackagePolicy[] = [
   {
     path: "services/evidence-browser",
-    scripts: { test: "vitest run", typecheck, "cf:check": dryRun },
+    scripts: {
+      test: "vitest run",
+      typecheck,
+      "cf:check": `${dryRun} && ${dryRun} --config wrangler.demo.jsonc`,
+    },
     checks: ["typecheck", "test", "cf:check"],
     evidenceAssets: true,
   },
@@ -179,6 +183,8 @@ export const CI_PACKAGES: PackagePolicy[] = [
       typecheck: "tsc --noEmit",
       build: "vite build",
       "build:evidence": "vite build --mode evidence --outDir dist-evidence",
+      "export:demo":
+        "bun run src/export-demo.ts ../../services/evidence-browser/demo-snapshot.json",
     },
     checks: ["typecheck", "build", "build:evidence", "test"],
     browser: true,

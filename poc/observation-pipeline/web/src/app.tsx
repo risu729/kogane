@@ -94,7 +94,9 @@ export function App(): ReactNode {
   const connectionLabel = metadata.isPending
     ? "接続を確認中"
     : connected
-      ? "ローカルデータに接続"
+      ? synthetic
+        ? "デモデータに接続"
+        : "ローカルデータに接続"
       : "接続を確認できません";
 
   return (

@@ -6,7 +6,7 @@
     "test": "vitest run",
     "typecheck": "wrangler types && tsc --noEmit",
     "cf:types": "wrangler types",
-    "cf:check": "wrangler deploy --dry-run"
+    "cf:check": "wrangler deploy --dry-run && wrangler deploy --dry-run --config wrangler.demo.jsonc"
   },
   "dependencies": {
     "jose": "6.2.11"

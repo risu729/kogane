@@ -4,7 +4,10 @@ import { HttpError } from "./http";
 // Only public verification keys are cached. Tokens and verified claims stay request-local.
 const keySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
-export async function authenticate(request: Request, env: Env): Promise<void> {
+export async function authenticate(
+  request: Request,
+  env: Pick<Env, "ACCESS_ISSUER" | "ACCESS_AUDIENCE">,
+): Promise<void> {
   const issuer: string = env.ACCESS_ISSUER;
   const audience: string = env.ACCESS_AUDIENCE;
   if (
