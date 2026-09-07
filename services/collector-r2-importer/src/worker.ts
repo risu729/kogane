@@ -2,7 +2,7 @@ import { ImportError } from "./error";
 import { importGlobalPassRun } from "./global-pass";
 import { importMyJcbRun } from "./myjcb";
 import { importMobileSuicaRun } from "./mobile-suica";
-import { importMoneyForwardRun } from "./moneyforward";
+import { importMoneyForwardRun, moneyForwardTransferOffset } from "./moneyforward";
 import { importSbiRun } from "./sbi";
 import { importSbiShinseiRun } from "./sbi-shinsei";
 import { importSbiVcRun } from "./sbi-vc";
@@ -816,10 +816,14 @@ export async function backfillMoneyForward(
     ? await decodeMoneyForwardCursor(encodedCursor, env.RAW_EVIDENCE_TOKEN_MONEYFORWARD)
     : ({ v: 1, scanCursor: null, scanDone: false } satisfies MoneyForwardBackfillCursor);
   if (state.manifestKey !== undefined) {
+    if (state.transfer === undefined) throw new ImportError(400, "cursor_invalid");
     try {
       const result = await importOneMoneyForward(env, state.manifestKey, state.transfer);
       if (result.status === "deferred") {
-        const previousOffset = transferOffset(state.transfer);
+        const previousOffset = await moneyForwardTransferOffset(
+          state.transfer,
+          env.ORIGIN_FINGERPRINT_KEY,
+        );
         if (result.nextOffset <= previousOffset) {
           throw new ImportError(409, "transfer_cursor_did_not_advance");
         }
@@ -1076,22 +1080,6 @@ function assertMoneyForwardCursor(value: MoneyForwardBackfillCursor): void {
         value.transfer.length > 8_000 ||
         /[\x00-\x20\x7f]/u.test(value.transfer)))
   ) {
-    throw new ImportError(400, "cursor_invalid");
-  }
-}
-
-function transferOffset(transfer: string | undefined): number {
-  if (!transfer) return 0;
-  const parts = transfer.split(".");
-  if (parts.length !== 3) throw new ImportError(400, "cursor_invalid");
-  try {
-    const parsed = JSON.parse(
-      new TextDecoder("utf-8", { fatal: true }).decode(fromBase64Url(parts[1]!)),
-    ) as { offset?: unknown };
-    return typeof parsed.offset === "number" && Number.isSafeInteger(parsed.offset)
-      ? parsed.offset
-      : 0;
-  } catch {
     throw new ImportError(400, "cursor_invalid");
   }
 }

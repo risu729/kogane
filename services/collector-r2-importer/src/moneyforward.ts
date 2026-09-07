@@ -103,6 +103,10 @@ export async function auditMoneyForwardRun(options: {
   };
 }
 
+export async function moneyForwardTransferOffset(token: string, keyHex: string): Promise<number> {
+  return (await decodeTransferState(token, keyHex)).offset;
+}
+
 export async function importMoneyForwardRun(options: {
   bucket: R2Bucket;
   centralService: Fetcher;

@@ -52,6 +52,63 @@ const REASON_CODES = new Set([
   "missing-account-context",
   "session-not-authenticated",
 ]);
+const COLLECT_FAILURE_STAGES = new Map<string, ReadonlySet<string>>([
+  ["credential_configuration_required", new Set(["credential-load"])],
+  [
+    "operation_failed",
+    new Set([
+      "login-entry",
+      "passkey-options",
+      "passkey-sign",
+      "passkey-assert",
+      "auth-redirect",
+      "accounts-index",
+      "account-selector",
+      "account-detail",
+      "monthly-detail",
+    ]),
+  ],
+  [
+    "provider_http_failed",
+    new Set(["passkey-options", "passkey-assert", "account-detail", "monthly-detail"]),
+  ],
+  [
+    "provider_protocol_failed",
+    new Set([
+      "login-entry",
+      "passkey-options",
+      "passkey-assert",
+      "auth-redirect",
+      "accounts-index",
+      "account-selector",
+      "account-detail",
+    ]),
+  ],
+]);
+const PROTOCOL_REASONS_BY_STAGE = new Map<string, ReadonlySet<string>>([
+  [
+    "login-entry",
+    new Set(["unexpected-redirect", "redirect-limit", "missing-location", "missing-csrf"]),
+  ],
+  ["passkey-options", new Set(["invalid-response"])],
+  ["passkey-assert", new Set(["invalid-response"])],
+  ["auth-redirect", new Set(["unexpected-redirect", "redirect-limit", "missing-location"])],
+  [
+    "accounts-index",
+    new Set([
+      "unexpected-redirect",
+      "redirect-limit",
+      "missing-location",
+      "session-not-authenticated",
+    ]),
+  ],
+  [
+    "account-selector",
+    new Set(["unexpected-redirect", "redirect-limit", "missing-location", "invalid-response"]),
+  ],
+  ["account-detail", new Set(["missing-csrf", "missing-account-context"])],
+]);
+const PROTOCOL_HTTP_STATUS_STAGES = new Set(["login-entry", "auth-redirect", "account-selector"]);
 
 type JsonObject = Record<string, unknown>;
 type HtmlNode = DefaultTreeAdapterMap["node"];
@@ -356,17 +413,27 @@ function parseFailure(value: unknown): MoneyForwardFailure {
   }
   const isR2Failure = operation.startsWith("r2:");
   const isCredentialFailure = failureCode === "credential_configuration_required";
+  const isHttpFailure = errorType === "MoneyForwardHttpError";
+  const isProtocolFailure = errorType === "MoneyForwardProtocolError";
+  const allowedCollectStages = COLLECT_FAILURE_STAGES.get(failureCode);
+  const allowedProtocolReasons = PROTOCOL_REASONS_BY_STAGE.get(stage);
   if (
-    (errorType === "MoneyForwardHttpError") !== (failureCode === "provider_http_failed") ||
-    (errorType === "MoneyForwardProtocolError") !== (failureCode === "provider_protocol_failed") ||
-    (reasonCode !== undefined && errorType !== "MoneyForwardProtocolError") ||
-    (httpStatus !== undefined && !errorType.startsWith("MoneyForward")) ||
+    isHttpFailure !== (failureCode === "provider_http_failed") ||
+    isProtocolFailure !== (failureCode === "provider_protocol_failed") ||
+    isProtocolFailure !== (reasonCode !== undefined) ||
+    (isHttpFailure && httpStatus === undefined) ||
+    (!isHttpFailure && !isProtocolFailure && httpStatus !== undefined) ||
+    (isProtocolFailure && !allowedProtocolReasons?.has(reasonCode!)) ||
+    (isProtocolFailure &&
+      httpStatus !== undefined &&
+      (reasonCode !== "unexpected-redirect" || !PROTOCOL_HTTP_STATUS_STAGES.has(stage))) ||
+    (isCredentialFailure && errorType !== "Error") ||
     (isR2Failure &&
       (stage !== "artifact-store" ||
         failureCode !== "operation_failed" ||
         reasonCode !== undefined ||
         httpStatus !== undefined)) ||
-    (!isR2Failure && (stage === "artifact-store" || stage === "manifest-store")) ||
+    (!isR2Failure && !allowedCollectStages?.has(stage)) ||
     (!isR2Failure && (stage === "credential-load") !== isCredentialFailure)
   ) {
     invalid("manifest_failure_contract_invalid");

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Buffer } from "node:buffer";
 import { importMoneyForwardRun, validateMoneyForwardRun } from "../src/moneyforward";
+import { backfillMoneyForward } from "../src/worker";
 
 const RUN_ID = "123e4567-e89b-42d3-a456-426614174000";
 const PREFIX = `raw/moneyforward/2026/09/05/${RUN_ID}/`;
@@ -35,6 +36,20 @@ class FakeBucket {
     const keys = [...this.objects.keys()]
       .filter((key) => key.startsWith(options.prefix ?? ""))
       .sort();
+    if (options.limit === 1) {
+      const offset = options.cursor === undefined ? 0 : Number(options.cursor);
+      if (!Number.isSafeInteger(offset) || offset < 0 || offset > keys.length) {
+        throw new Error("fake cursor invalid");
+      }
+      const objects = keys.slice(offset, offset + 1).map((key) => ({ key }));
+      const nextOffset = offset + objects.length;
+      const truncated = nextOffset < keys.length;
+      return {
+        objects,
+        truncated,
+        ...(truncated ? { cursor: String(nextOffset) } : {}),
+      } as unknown as R2Objects;
+    }
     return { objects: keys.map((key) => ({ key })), truncated: false } as unknown as R2Objects;
   }
 }
@@ -110,6 +125,40 @@ describe("MoneyForward R2 importer", () => {
     });
   });
 
+  test("backfill resumes two encrypted continuations and seals the third chunk", async () => {
+    const bucket = new FakeBucket();
+    await storeSuccessRun(bucket);
+    const central = new FakeCentral();
+    const env = {
+      MONEYFORWARD_SNAPSHOTS: bucket as unknown as R2Bucket,
+      RAW_EVIDENCE: central as unknown as Fetcher,
+      RAW_EVIDENCE_TOKEN_MONEYFORWARD: TOKEN,
+      ORIGIN_FINGERPRINT_KEY: FINGERPRINT_KEY,
+      IMPORTER_VERSION: "collector-r2-importer-test",
+    } as unknown as Env;
+    let cursor: string | undefined;
+    let deferredChunks = 0;
+    let importedManifests = 0;
+    let completed = false;
+    for (let page = 0; page < 20; page += 1) {
+      const result = await backfillMoneyForward(env, cursor);
+      deferredChunks += Number(result.deferredManifestCount);
+      importedManifests += Number(result.importedManifestCount);
+      if (result.nextCursor === null) {
+        completed = true;
+        break;
+      }
+      expect(typeof result.nextCursor).toBe("string");
+      expect(result.nextCursor).not.toBe(cursor);
+      cursor = result.nextCursor as string;
+    }
+    expect(completed).toBe(true);
+    expect(deferredChunks).toBe(2);
+    expect(importedManifests).toBe(1);
+    expect(central.inventoryItems.size).toBe(15);
+    expect(central.sealCount).toBe(1);
+  });
+
   test("keeps immutable terminal reports deployment-revision independent", async () => {
     const bucket = new FakeBucket();
     await storeSuccessRun(bucket);
@@ -165,6 +214,13 @@ describe("MoneyForward R2 importer", () => {
       },
       {
         operation: "collect",
+        errorType: "UnknownError",
+        message: "credential_configuration_required",
+        stage: "credential-load",
+        failureCode: "credential_configuration_required",
+      },
+      {
+        operation: "collect",
         errorType: "Error",
         message: "operation_failed",
         stage: "artifact-store",
@@ -176,6 +232,53 @@ describe("MoneyForward R2 importer", () => {
         message: "credential_configuration_required",
         stage: "artifact-store",
         failureCode: "credential_configuration_required",
+      },
+      {
+        operation: "collect",
+        errorType: "MoneyForwardHttpError",
+        message: "provider_http_failed",
+        stage: "passkey-sign",
+        failureCode: "provider_http_failed",
+        httpStatus: 503,
+      },
+      {
+        operation: "collect",
+        errorType: "MoneyForwardProtocolError",
+        message: "provider_protocol_failed",
+        stage: "monthly-detail",
+        failureCode: "provider_protocol_failed",
+        reasonCode: "invalid-response",
+      },
+      {
+        operation: "collect",
+        errorType: "MoneyForwardHttpError",
+        message: "provider_http_failed",
+        stage: "passkey-options",
+        failureCode: "provider_http_failed",
+      },
+      {
+        operation: "collect",
+        errorType: "MoneyForwardProtocolError",
+        message: "provider_protocol_failed",
+        stage: "passkey-options",
+        failureCode: "provider_protocol_failed",
+      },
+      {
+        operation: "collect",
+        errorType: "MoneyForwardProtocolError",
+        message: "provider_protocol_failed",
+        stage: "passkey-options",
+        failureCode: "provider_protocol_failed",
+        reasonCode: "missing-csrf",
+      },
+      {
+        operation: "collect",
+        errorType: "MoneyForwardProtocolError",
+        message: "provider_protocol_failed",
+        stage: "accounts-index",
+        failureCode: "provider_protocol_failed",
+        httpStatus: 302,
+        reasonCode: "unexpected-redirect",
       },
     ];
     for (const failure of impossibleFailures) {
@@ -221,6 +324,96 @@ describe("MoneyForward R2 importer", () => {
     await expect(
       validateMoneyForwardRun(validR2Failure as unknown as R2Bucket, MANIFEST_KEY),
     ).resolves.toMatchObject({ manifest: { status: "failed" } });
+
+    const genericStages = [
+      "login-entry",
+      "passkey-options",
+      "passkey-sign",
+      "passkey-assert",
+      "auth-redirect",
+      "accounts-index",
+      "account-selector",
+      "account-detail",
+      "monthly-detail",
+    ];
+    const httpStages = ["passkey-options", "passkey-assert", "account-detail", "monthly-detail"];
+    const protocolReasonsByStage: Record<string, string[]> = {
+      "login-entry": ["unexpected-redirect", "redirect-limit", "missing-location", "missing-csrf"],
+      "passkey-options": ["invalid-response"],
+      "passkey-assert": ["invalid-response"],
+      "auth-redirect": ["unexpected-redirect", "redirect-limit", "missing-location"],
+      "accounts-index": [
+        "unexpected-redirect",
+        "redirect-limit",
+        "missing-location",
+        "session-not-authenticated",
+      ],
+      "account-selector": [
+        "unexpected-redirect",
+        "redirect-limit",
+        "missing-location",
+        "invalid-response",
+      ],
+      "account-detail": ["missing-csrf", "missing-account-context"],
+    };
+    const protocolStatusStages = new Set(["login-entry", "auth-redirect", "account-selector"]);
+    const possibleCollectFailures = [
+      {
+        operation: "collect",
+        errorType: "Error",
+        message: "credential_configuration_required",
+        stage: "credential-load",
+        failureCode: "credential_configuration_required",
+      },
+      ...genericStages.map((stage) => ({
+        operation: "collect",
+        errorType: "UnknownError",
+        message: "operation_failed",
+        stage,
+        failureCode: "operation_failed",
+      })),
+      ...httpStages.map((stage) => ({
+        operation: "collect",
+        errorType: "MoneyForwardHttpError",
+        message: "provider_http_failed",
+        stage,
+        failureCode: "provider_http_failed",
+        httpStatus: 503,
+      })),
+      ...Object.entries(protocolReasonsByStage).flatMap(([stage, reasons]) =>
+        reasons.flatMap((reasonCode) => {
+          const failure = {
+            operation: "collect",
+            errorType: "MoneyForwardProtocolError",
+            message: "provider_protocol_failed",
+            stage,
+            failureCode: "provider_protocol_failed",
+            reasonCode,
+          };
+          return reasonCode === "unexpected-redirect" && protocolStatusStages.has(stage)
+            ? [failure, { ...failure, httpStatus: 302 }]
+            : [failure];
+        }),
+      ),
+    ];
+    for (const failure of possibleCollectFailures) {
+      const bucket = new FakeBucket();
+      await putManifest(bucket, {
+        schemaVersion: "moneyforward-worker-poc-v1",
+        source: "moneyforward-me",
+        runId: RUN_ID,
+        startedAt: "2026-09-05T00:00:00.000Z",
+        completedAt: "2026-09-05T00:01:00.000Z",
+        status: "failed",
+        accountDetailCount: 0,
+        monthlyFragmentCount: 0,
+        artifacts: [],
+        failures: [failure],
+      });
+      await expect(
+        validateMoneyForwardRun(bucket as unknown as R2Bucket, MANIFEST_KEY),
+      ).resolves.toMatchObject({ manifest: { failures: [failure] } });
+    }
   });
 
   test("rejects prefix, metadata, payload, and continuation tampering", async () => {

@@ -47,6 +47,30 @@ R2 write failure時は保存済みartifactがこの順序のsubsequenceで、fai
 でなければならない。provider read failureとR2 write failureを混同せず、status、failure stage、
 failure code、保存artifact数を相互照合する。
 
+保存済みmanifestが取り得るfailure contractはcollectorの生成点に固定する。
+
+| operation      | failureCode                         | 許可stage                                                                                                                                                     | 必須detail                                               |
+| -------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `collect`      | `credential_configuration_required` | `credential-load`                                                                                                                                             | `errorType: Error`、HTTP/reasonなし                      |
+| `collect`      | `operation_failed`                  | `login-entry`, `passkey-options`, `passkey-sign`, `passkey-assert`, `auth-redirect`, `accounts-index`, `account-selector`, `account-detail`, `monthly-detail` | allowlist済みgeneric `errorType`、HTTP/reasonなし        |
+| `collect`      | `provider_http_failed`              | `passkey-options`, `passkey-assert`, `account-detail`, `monthly-detail`                                                                                       | `MoneyForwardHttpError`と`httpStatus`を必須、reasonなし  |
+| `collect`      | `provider_protocol_failed`          | `login-entry`, `passkey-options`, `passkey-assert`, `auth-redirect`, `accounts-index`, `account-selector`, `account-detail`                                   | `MoneyForwardProtocolError`とstage固有`reasonCode`を必須 |
+| `r2:{dataset}` | `operation_failed`                  | `artifact-store`                                                                                                                                              | allowlist済みgeneric `errorType`、HTTP/reasonなし        |
+
+protocol reasonも生成点どおりに限定する。
+
+| reasonCode                  | 許可stage                                                            | protocol `httpStatus`                                                                |
+| --------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `unexpected-redirect`       | `login-entry`, `auth-redirect`, `accounts-index`, `account-selector` | `login-entry`, `auth-redirect`, `account-selector`だけ任意。`accounts-index`では禁止 |
+| `redirect-limit`            | `login-entry`, `auth-redirect`, `accounts-index`, `account-selector` | 禁止                                                                                 |
+| `missing-location`          | `login-entry`, `auth-redirect`, `accounts-index`, `account-selector` | 禁止                                                                                 |
+| `invalid-response`          | `passkey-options`, `passkey-assert`, `account-selector`              | 禁止                                                                                 |
+| `missing-csrf`              | `login-entry`, `account-detail`                                      | 禁止                                                                                 |
+| `missing-account-context`   | `account-detail`                                                     | 禁止                                                                                 |
+| `session-not-authenticated` | `accounts-index`                                                     | 禁止                                                                                 |
+
+`manifest-store`失敗はmanifest自体を保存できないため、manifest内failureとしては受理しない。
+
 ## Layer A strict validation
 
 中央stateを作る前に、Importerは次をすべて検証する。
