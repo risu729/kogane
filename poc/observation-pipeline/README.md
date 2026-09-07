@@ -239,10 +239,15 @@ the parser validates adjacent calendar rows but emits only dates belonging to
 the artifact's declared month. This prevents both recent-view duplication and
 the same edge-of-calendar row appearing from two neighboring month artifacts.
 Amounts are emitted only when the provider displays an explicit `+` or `-` JPY
-integer. A latest successful snapshot is selected per account ordinal and
+integer. A latest successful snapshot is selected per HMAC account unit and
 month, including a newer complete empty fragment that clears older current
-rows. Account ordinals remain source-local collector identities; they are not
-relabelled as the underlying bank or card source.
+rows. Layer A derives the stable account unit from an exact account/service
+tuple in verified detail bytes, matched to the sorted index. Ordinals remain
+provenance only; insertion or removal of another account cannot change identity.
+Legacy ordinal-only artifacts cannot enter this semantic route. Every monthly
+fragment requires one calendar marker; empty snapshots require the audited
+dialog/calendar/select tag and attribute-name structure. Incomplete tables,
+unknown empty shapes and embedded whitespace in amounts fail closed.
 
 The demo ingests 11 artifacts from 3 sources and produces 49 observations:
 14 transaction, 24 balance, 3 position, 8 valuation.

@@ -1,5 +1,6 @@
 import { CentralClient } from "./central";
 import { ImportError } from "./error";
+import { moneyForwardAccountKeys } from "./moneyforward-account-identity";
 import {
   moneyForwardManifestKeyMatch,
   normalizeMoneyForwardManifestForCentral,
@@ -13,7 +14,7 @@ import type { CentralInventoryItem } from "./types";
 
 const SOURCE = "moneyforward-me" as const;
 const PRODUCER = "collector-r2-importer";
-const INGEST_CONTRACT_VERSION = "moneyforward-r2-v1";
+const INGEST_CONTRACT_VERSION = "moneyforward-r2-v2";
 const CENTRAL_CLIENT_ID = "collector-r2-moneyforward";
 const STORAGE_CONTAINER = "kogane-moneyforward-collector-poc";
 const STORAGE_TEMPLATE = "raw/moneyforward/{date}/{run-id}/{artifact}";
@@ -24,7 +25,7 @@ const MAX_SOURCE_ARTIFACTS = 833;
 const MAX_CENTRAL_ARTIFACTS = MAX_SOURCE_ARTIFACTS + 1;
 const MAX_PREFIX_OBJECTS = MAX_CENTRAL_ARTIFACTS;
 export const MONEYFORWARD_TRANSFER_CHUNK_SIZE = 5;
-const TRANSFER_TOKEN_PREFIX = "moneyforward-transfer-v2";
+const TRANSFER_TOKEN_PREFIX = "moneyforward-transfer-v3";
 const TRANSFER_TOKEN_AAD = new TextEncoder().encode(TRANSFER_TOKEN_PREFIX);
 const SHA256 = /^[0-9a-f]{64}$/u;
 
@@ -49,11 +50,12 @@ interface ArtifactPlan {
 }
 
 interface TransferState {
-  v: 1;
+  v: 2;
   manifestKey: string;
   sourceManifestSha256: string;
   centralRunId: number;
   unitId: number;
+  accountUnitIds: Array<[number, number]>;
   inventoryId: number;
   inventorySha256: string;
   offset: number;
@@ -125,6 +127,13 @@ export async function importMoneyForwardRun(options: {
   let phase = "source_validation";
   try {
     const validated = await validateMoneyForwardRun(options.bucket, options.manifestKey);
+    const accountKeys = await moneyForwardAccountKeys(validated.artifacts, options.fingerprintKey);
+    if (
+      validated.manifest.status === "success" &&
+      accountKeys.size !== validated.manifest.accountDetailCount
+    ) {
+      throw new ImportError(409, "account_identity_incomplete");
+    }
     expectedArtifactCount = validated.artifacts.length + 1;
     if (expectedArtifactCount > MAX_CENTRAL_ARTIFACTS) {
       throw new ImportError(409, "central_inventory_limit");
@@ -143,6 +152,12 @@ export async function importMoneyForwardRun(options: {
         validated.manifestSha256,
         expectedArtifactCount,
       );
+      if (
+        state.accountUnitIds.length !== accountKeys.size ||
+        state.accountUnitIds.some(([ordinal]) => !accountKeys.has(ordinal))
+      ) {
+        throw new ImportError(400, "transfer_state_mismatch");
+      }
       centralRunId = state.centralRunId;
     } else {
       phase = "central_create";
@@ -159,10 +174,22 @@ export async function importMoneyForwardRun(options: {
         unitKey: "account",
         terminalReportRequired: true,
       });
+      const accountUnitIds: Array<[number, number]> = [];
+      for (const [ordinal, unitKey] of accountKeys) {
+        accountUnitIds.push([
+          ordinal,
+          await central.addUnit(centralRunId, {
+            unitKind: "account",
+            unitKey,
+            terminalReportRequired: true,
+          }),
+        ]);
+      }
       phase = "inventory_plan";
       const initialPlans = await artifactPlans(
         validated,
         unitId,
+        accountUnitIds,
         options.manifestKey,
         options.fingerprintKey,
       );
@@ -171,11 +198,12 @@ export async function importMoneyForwardRun(options: {
         new TextEncoder().encode(canonicalJson(inventory as unknown as JsonValue)),
       );
       state = {
-        v: 1,
+        v: 2,
         manifestKey: options.manifestKey,
         sourceManifestSha256: validated.manifestSha256,
         centralRunId,
         unitId,
+        accountUnitIds,
         inventoryId: await central.beginInventory(centralRunId, inventorySha256, inventory.length),
         inventorySha256,
         offset: 0,
@@ -186,6 +214,7 @@ export async function importMoneyForwardRun(options: {
     const plans = await artifactPlans(
       validated,
       state.unitId,
+      state.accountUnitIds,
       options.manifestKey,
       options.fingerprintKey,
     );
@@ -227,21 +256,24 @@ export async function importMoneyForwardRun(options: {
     }
 
     phase = "unit_report";
-    await central.addUnitReport(state.unitId, {
-      reportKey: "terminal",
-      reportKind: "terminal",
-      producerStatus: validated.manifest.status,
-      normalizedOutcome: validated.manifest.status,
-      startedAtMs: Date.parse(validated.manifest.startedAt),
-      startedAtBasis: "manifest",
-      completedAtMs: Date.parse(validated.manifest.completedAt),
-      completedAtBasis: "manifest",
-      declaredArtifactCount: validated.artifacts.length,
-      artifactCountScope: "direct",
-      ...(validated.manifest.status === "success"
-        ? {}
-        : { safeFailureCode: safeFailureCode(validated.manifest) }),
-    });
+    for (const unitId of [state.unitId, ...state.accountUnitIds.map(([, id]) => id)]) {
+      await central.addUnitReport(unitId, {
+        reportKey: "terminal",
+        reportKind: "terminal",
+        producerStatus: validated.manifest.status,
+        normalizedOutcome: validated.manifest.status,
+        startedAtMs: Date.parse(validated.manifest.startedAt),
+        startedAtBasis: "manifest",
+        completedAtMs: Date.parse(validated.manifest.completedAt),
+        completedAtBasis: "manifest",
+        declaredArtifactCount: plans.filter((plan) => plan.descriptor.fetchUnitId === unitId)
+          .length,
+        artifactCountScope: "direct",
+        ...(validated.manifest.status === "success"
+          ? {}
+          : { safeFailureCode: safeFailureCode(validated.manifest) }),
+      });
+    }
     phase = "run_report";
     await central.addRunReport(state.centralRunId, {
       reportKey: "terminal",
@@ -423,6 +455,7 @@ async function requiredObject(bucket: R2Bucket, key: string): Promise<R2ObjectBo
 async function artifactPlans(
   validated: LoadedRun,
   unitId: number,
+  accountUnitIds: Array<[number, number]>,
   manifestKey: string,
   fingerprintKey: string,
 ): Promise<ArtifactPlan[]> {
@@ -430,7 +463,9 @@ async function artifactPlans(
   for (const [sequence, verified] of validated.artifacts.entries()) {
     const descriptor = await dataDescriptor({
       artifact: verified.artifact,
-      unitId,
+      unitId:
+        accountUnitIds.find(([ordinal]) => ordinal === verified.artifact.accountOrdinal)?.[1] ??
+        unitId,
       completedAt: validated.manifest.completedAt,
       sequence,
       fingerprintKey,
@@ -668,18 +703,20 @@ async function decodeTransferState(token: string, keyHex: string): Promise<Trans
     "sourceManifestSha256",
     "centralRunId",
     "unitId",
+    "accountUnitIds",
     "inventoryId",
     "inventorySha256",
     "offset",
   ]);
   if (
-    input.v !== 1 ||
+    input.v !== 2 ||
     typeof input.manifestKey !== "string" ||
     !moneyForwardManifestKeyMatch(input.manifestKey) ||
     typeof input.sourceManifestSha256 !== "string" ||
     !SHA256.test(input.sourceManifestSha256) ||
     !positiveInteger(input.centralRunId) ||
     !positiveInteger(input.unitId) ||
+    !validAccountUnitIds(input.accountUnitIds, input.unitId) ||
     !positiveInteger(input.inventoryId) ||
     typeof input.inventorySha256 !== "string" ||
     !SHA256.test(input.inventorySha256) ||
@@ -698,6 +735,27 @@ async function transferEncryptionKey(keyHex: string): Promise<CryptoKey> {
     new TextEncoder().encode(`${TRANSFER_TOKEN_PREFIX}\0${keyHex}`),
   );
   return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+function validAccountUnitIds(value: unknown, rootUnitId: unknown): boolean {
+  if (!Array.isArray(value) || value.length > 64) return false;
+  const ordinals = new Set<number>();
+  const units = new Set<unknown>([rootUnitId]);
+  return value.every((entry: unknown) => {
+    if (
+      !Array.isArray(entry) ||
+      entry.length !== 2 ||
+      !positiveInteger(entry[0]) ||
+      entry[0] > 64 ||
+      !positiveInteger(entry[1]) ||
+      ordinals.has(entry[0]) ||
+      units.has(entry[1])
+    )
+      return false;
+    ordinals.add(entry[0]);
+    units.add(entry[1]);
+    return true;
+  });
 }
 
 function validateTransferState(

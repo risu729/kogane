@@ -28,6 +28,7 @@ const meta = (overrides: Partial<ArtifactMeta> = {}): ArtifactMeta => ({
   runFailureCount: 0,
   dataset: "monthly-transactions",
   artifactKey: "account-01-month-2099-02.html",
+  fetchUnitKey: `moneyforward-account-v1-${"a".repeat(64)}`,
   statementState: null,
   period: null,
   url: null,
@@ -68,7 +69,7 @@ describe("moneyforward Layer B parsers", () => {
     ]);
     expect(result.observations[0]).toMatchObject({
       kind: "transaction",
-      sourceAccount: "moneyforward-me:account-01",
+      sourceAccount: `moneyforward-me:moneyforward-account-v1-${"a".repeat(64)}`,
       currency: "JPY",
       description: "ANONYMOUS PURCHASE",
       rawLocator: "html:tooltip=0:row=0",
@@ -180,7 +181,180 @@ describe("moneyforward Layer B parsers", () => {
     );
     store.db.close();
   });
+
+  test("rejects incomplete and unrecognized empty snapshots without clearing complete rows", () => {
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-incomplete-")));
+    upsertSource(store, {
+      id: "moneyforward-me",
+      provider: "MoneyForward ME",
+      ingestion: "collector-r2",
+    });
+    addSnapshot(store, "old", "2099-03-01T00:00:00.000Z", fixture("account-01-month-2099-02.html"));
+    const invalid = [
+      "<div>temporary error</div>",
+      '<div id="calendar"><p>temporary error</p></div>',
+      '<div id="calendar"></div><form>login</form>',
+      '<div id="calendar">',
+      tooltip("2099-02-03").replace("</tbody></table></div>", ""),
+      tooltip("2098-02-03"),
+      tooltip("2099-02-03").replace("-123", "-1 23"),
+      tooltip("2099-01-31").replace("-123", "unsigned"),
+    ];
+    invalid.forEach((html, index) => {
+      expect(() =>
+        moneyForwardMonthlyTransactions.parse(new TextEncoder().encode(html), meta()),
+      ).toThrow();
+      addSnapshot(
+        store,
+        `invalid-${index}`,
+        `2099-03-${String(index + 2).padStart(2, "0")}T00:00:00.000Z`,
+        new TextEncoder().encode(html),
+      );
+    });
+    const result = runParsers(store);
+    expect(result.errors).toBe(invalid.length);
+    expect(currentTransactions(store)).toHaveLength(2);
+    store.db.close();
+  });
+
+  test("preserves identical occurrences across twelve-month overlap and refetches", () => {
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-overlap-")));
+    upsertSource(store, {
+      id: "moneyforward-me",
+      provider: "MoneyForward ME",
+      ingestion: "collector-r2",
+    });
+    for (let month = 1; month <= 12; month += 1) {
+      const label = `2099-${String(month).padStart(2, "0")}`;
+      const previous = month === 1 ? "2098-12" : `2099-${String(month - 1).padStart(2, "0")}`;
+      const bytes = new TextEncoder().encode(
+        tooltip(`${label}-03`, 2) + tooltip(`${previous}-28`).replace(' id="calendar"', ""),
+      );
+      const artifactKey = `account-01-month-${label}.html`;
+      const first = moneyForwardMonthlyTransactions.parse(bytes, meta({ artifactKey }));
+      const second = moneyForwardMonthlyTransactions.parse(bytes, meta({ artifactKey }));
+      expect(first).toEqual(second);
+      expect(
+        new Set(
+          first.observations.map((row) => (row.kind === "transaction" ? row.externalId : null)),
+        ).size,
+      ).toBe(2);
+      addSnapshot(store, `old-${month}`, "2100-01-01T00:00:00.000Z", bytes, artifactKey);
+      addSnapshot(store, `new-${month}`, "2100-01-02T00:00:00.000Z", bytes, artifactKey);
+    }
+    expect(runParsers(store).errors).toBe(0);
+    expect(currentTransactions(store)).toHaveLength(24);
+    // A separate account's month must not supersede account 01.
+    addSnapshot(
+      store,
+      "other-account",
+      "2100-01-03T00:00:00.000Z",
+      new TextEncoder().encode(tooltip("2099-02-03")),
+      "account-02-month-2099-02.html",
+    );
+    expect(runParsers(store).errors).toBe(0);
+    expect(currentTransactions(store)).toHaveLength(25);
+    store.db.close();
+  });
+
+  test("failed and partial runs cannot emit or clear a complete month", () => {
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-failed-")));
+    upsertSource(store, {
+      id: "moneyforward-me",
+      provider: "MoneyForward ME",
+      ingestion: "collector-r2",
+    });
+    addSnapshot(store, "old", "2099-03-01T00:00:00.000Z", fixture("account-01-month-2099-02.html"));
+    for (const status of ["failed", "partial"] as const) {
+      expect(() =>
+        moneyForwardMonthlyTransactions.parse(
+          fixture("account-01-month-2099-02.html"),
+          meta({ runStatus: status, runFailureCount: 1 }),
+        ),
+      ).toThrow();
+      addSnapshot(
+        store,
+        status,
+        "2099-03-02T00:00:00.000Z",
+        fixture("account-01-month-2099-03-empty.html"),
+        undefined,
+        status,
+      );
+    }
+    const result = runParsers(store);
+    expect(result.blocked).toBe(2);
+    expect(result.observations).toBe(2);
+    expect(currentTransactions(store)).toHaveLength(2);
+    store.db.close();
+  });
+
+  test("allows whitespace around fixed template operators but never inside amount digits", () => {
+    const original = tooltip("2099-02-03");
+    const valid = new TextEncoder().encode(original.replace("-123", `' + "" + '-123' + '`));
+    expect(moneyForwardMonthlyTransactions.parse(valid, meta()).observations).toHaveLength(1);
+    const invalid = new TextEncoder().encode(original.replace("-123", `' + "" + '-1 23' + '`));
+    expect(() => moneyForwardMonthlyTransactions.parse(invalid, meta())).toThrow(/amount/u);
+  });
+
+  test("account identity survives ordinal changes and legacy ordinal metadata fails closed", () => {
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-identity-")));
+    upsertSource(store, {
+      id: "moneyforward-me",
+      provider: "MoneyForward ME",
+      ingestion: "collector-r2",
+    });
+    const bytes = new TextEncoder().encode(tooltip("2099-02-03"));
+    const identity = `moneyforward-account-v1-${"a".repeat(64)}`;
+    addSnapshot(store, "before", "2099-03-01T00:00:00.000Z", bytes);
+    addSnapshot(
+      store,
+      "after",
+      "2099-03-02T00:00:00.000Z",
+      bytes,
+      "account-02-month-2099-02.html",
+      "success",
+      identity,
+    );
+    expect(runParsers(store).errors).toBe(0);
+    expect(currentTransactions(store)).toHaveLength(1);
+    const before = moneyForwardMonthlyTransactions.parse(bytes, meta());
+    const after = moneyForwardMonthlyTransactions.parse(
+      bytes,
+      meta({ artifactKey: "account-02-month-2099-02.html" }),
+    );
+    expect(
+      before.observations[0]?.kind === "transaction" &&
+        after.observations[0]?.kind === "transaction" &&
+        before.observations[0].externalId === after.observations[0].externalId,
+    ).toBe(true);
+    const missingIdentity = meta();
+    delete missingIdentity.fetchUnitKey;
+    expect(() => moneyForwardMonthlyTransactions.parse(bytes, missingIdentity)).toThrow(
+      /identity/u,
+    );
+    for (const fetchUnitKey of [null, "account", "moneyforward-account-v1-raw"]) {
+      expect(() => moneyForwardMonthlyTransactions.parse(bytes, meta({ fetchUnitKey }))).toThrow(
+        /identity/u,
+      );
+    }
+    addSnapshot(
+      store,
+      "empty-after",
+      "2099-03-03T00:00:00.000Z",
+      fixture("account-01-month-2099-03-empty.html"),
+      "account-02-month-2099-02.html",
+      "success",
+      identity,
+    );
+    expect(runParsers(store).errors).toBe(0);
+    expect(currentTransactions(store)).toHaveLength(0);
+    store.db.close();
+  });
 });
+
+function tooltip(date: string, occurrences = 1): string {
+  return `<div id="calendar">${date}<table id="tooltip" class="calendar-tooltip-table"><thead class="orange"><tr><th>内容</th><th>金額（円）</th></tr></thead><tbody>${"<tr><td>SYNTHETIC</td><td>-123</td></tr>".repeat(occurrences)}</tbody></table></div>`;
+}
 
 function addSnapshot(
   store: ReturnType<typeof openStore>,
@@ -188,6 +362,8 @@ function addSnapshot(
   fetchedAt: string,
   bytes: Uint8Array,
   artifactKey = "account-01-month-2099-02.html",
+  status: "success" | "partial" | "failed" = "success",
+  fetchUnitKey = `moneyforward-account-v1-${(artifactKey.startsWith("account-02-") ? "b" : "a").repeat(64)}`,
 ): void {
   const runId = insertFetchRun(store, {
     sourceId: "moneyforward-me",
@@ -195,8 +371,8 @@ function addSnapshot(
     tool: "test",
     startedAt: fetchedAt,
     completedAt: fetchedAt,
-    status: "success",
-    failureCount: 0,
+    status,
+    failureCount: status === "success" ? 0 : 1,
   });
   const object = putRawObject(store, bytes, "text/html; charset=utf-8");
   insertFetchArtifact(store, {
@@ -204,6 +380,7 @@ function addSnapshot(
     sourceId: "moneyforward-me",
     dataset: "monthly-transactions",
     artifactKey,
+    fetchUnitKey,
     mime: "text/html; charset=utf-8",
     fetchedAt,
     sha256: object.sha256,

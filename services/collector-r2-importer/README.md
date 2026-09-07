@@ -49,7 +49,7 @@ account/service marker、月別fragmentの年月とHTML fragment境界も相互�
 一requestあたり5 artifactを転送し、開始時に完全inventoryとdigestを固定する。継続tokenは
 version、manifest、中央run/unit、inventory digest、offsetをAES-256-GCMで暗号化・認証する。最終chunkだけで
 unit/run terminal reportとsealを行う。terminal reportの`producerVersion`はdeployment revision
-ではなく固定`moneyforward-r2-v1`で、同じmanifestを異なるImporter deploymentから再送しても
+ではなく固定`moneyforward-r2-v2`で、同じmanifestを異なるImporter deploymentから再送しても
 immutable reportへ収束する。deployment revisionは失敗・中断attemptの診断にだけ残す。
 backfill scan cursorも専用client tokenから導出したkeyによるversioned AES-256-GCMで暗号化・認証し、長さ・page数・offsetを制限し、cursorまたは
 transfer offsetが停滞した応答を拒否する。対象manifestがsealされるまでsource scan位置を
@@ -66,8 +66,17 @@ source R2を変更していない。`bun run audit:moneyforward-r2`で同じ境�
 Layer Bは`monthly-transactions`だけをcanonical transaction routeとしてparseし、同じ取引を含む
 `account-detail`のbounded recent viewと`accounts-index`はstrict evidence-onlyとする。月別tooltip
 の直前にあるprovider ISO日付を一対一で検証し、artifactの宣言年月外にあるcalendar端のrowは
-shapeと明示符号付きJPY額を検証した上でemitしない。current queryはaccount ordinalと年月ごとの
+shapeと明示符号付きJPY額を検証した上でemitしない。current queryはHMAC account unitと年月ごとの
 最新successful artifactだけを選び、新しい完全な空fragmentで旧current rowsを消す。
+account unitはverified detailのaccount/serviceをJSON tupleでHMAC化し、sorted indexの同ordinal
+とexact一致・run内一意性を検証して作る。生の識別値はunit metadataへ出さない。detailと同口座の
+12 monthlyを同unitへ関連付け、indexはcollection unit、manifestはrun-levelにする。partialでdetail
+を欠く場合のmonthlyはcollection unitへraw evidenceとして残し、semantic routeへ昇格させない。
+最大64 accountのunit IDだけを暗号化transfer payload v2に保持する（token prefix v3、8 KB上限）。
+scan prefixもv3とし、旧cursorを拒否する。新しい`full-snapshot-moneyforward-r2-v2`namespaceで
+replayするため旧immutable runを変更せず、既存unit API/schemaを使うのでmigrationは不要。
+毎月fragmentのcalendar markerは1個必須で、空snapshotは本番73件に共通するdialog/calendar/select
+tag・attribute-name構造に限定する。未知empty、途中で切れたtable、金額内部の空白はrejectする。
 `bun run audit:moneyforward-layer-b-r2`はproduction R2をread-onlyで再走査し、parser件数と固定failure
 codeだけを集約する。deploy、R2 write/delete、本文・key・hash・個別金融値の出力は行わない。
 2026-09-07のfull canaryでは540 objects / success manifest 10件 / data artifact 530件を走査し、

@@ -876,7 +876,7 @@ interface MoneyForwardBackfillCursor {
   transfer?: string;
 }
 
-const MONEYFORWARD_CURSOR_PREFIX = "moneyforward-scan-v2";
+const MONEYFORWARD_CURSOR_PREFIX = "moneyforward-scan-v3";
 const MONEYFORWARD_CURSOR_AAD = new TextEncoder().encode(MONEYFORWARD_CURSOR_PREFIX);
 
 export async function backfillMoneyForward(
@@ -1073,7 +1073,7 @@ async function decodeMoneyForwardCursor(
   secret: string,
 ): Promise<MoneyForwardBackfillCursor> {
   if (value.length > 12_000) throw new ImportError(400, "cursor_invalid");
-  const match = /^moneyforward-scan-v2\.([A-Za-z0-9_-]{16})\.([A-Za-z0-9_-]{22,11800})$/u.exec(
+  const match = /^moneyforward-scan-v3\.([A-Za-z0-9_-]{16})\.([A-Za-z0-9_-]{22,11800})$/u.exec(
     value,
   );
   if (!match?.[1] || !match[2]) throw new ImportError(400, "cursor_invalid");
@@ -1147,7 +1147,7 @@ function assertMoneyForwardCursor(value: MoneyForwardBackfillCursor): void {
           value.manifestKey,
         ) ||
         typeof value.transfer !== "string" ||
-        !value.transfer.startsWith("moneyforward-transfer-v2.") ||
+        !value.transfer.startsWith("moneyforward-transfer-v3.") ||
         value.transfer.length > 8_000 ||
         /[\x00-\x20\x7f]/u.test(value.transfer)))
   ) {

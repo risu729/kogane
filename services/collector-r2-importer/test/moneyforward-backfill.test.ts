@@ -15,7 +15,7 @@ describe("MoneyForward backfill cursor", () => {
       truncated: true,
     });
     const cursor = String(first.nextCursor);
-    expect(cursor).toMatch(/^moneyforward-scan-v2\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,11800}$/u);
+    expect(cursor).toMatch(/^moneyforward-scan-v3\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,11800}$/u);
     const encodedParts = cursor.split(".").slice(1);
     expect(
       encodedParts.map((part) => Buffer.from(part!, "base64url").toString()).join(""),
@@ -59,7 +59,7 @@ describe("MoneyForward backfill cursor", () => {
       truncated: true,
     });
     expect(page.nextCursor).toMatch(
-      /^moneyforward-scan-v2\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,11800}$/u,
+      /^moneyforward-scan-v3\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,11800}$/u,
     );
   });
 });

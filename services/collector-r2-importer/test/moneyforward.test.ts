@@ -59,6 +59,7 @@ class FakeCentral {
   readonly uploaded = new Set<string>();
   readonly inventoryItems = new Set<string>();
   readonly reports = new Map<string, string>();
+  readonly units = new Map<string, number>();
   sealCount = 0;
 
   fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -73,7 +74,10 @@ class FakeCentral {
       return Response.json({ reused }, { status: reused ? 200 : 201 });
     }
     if (path === "/v1/runs") return Response.json({ runId: 1 }, { status: 201 });
-    if (path.endsWith("/units")) return Response.json({ unitId: 10 }, { status: 201 });
+    if (path.endsWith("/units")) {
+      if (!this.units.has(body)) this.units.set(body, 10 + this.units.size);
+      return Response.json({ unitId: this.units.get(body) }, { status: 201 });
+    }
     if (path.endsWith("/inventories")) return Response.json({ inventoryId: 20 }, { status: 201 });
     if (path.endsWith("/items")) {
       const items = (JSON.parse(body) as { items: Array<{ artifactKey: string }> }).items;
@@ -159,6 +163,64 @@ describe("MoneyForward R2 importer", () => {
     expect(central.sealCount).toBe(1);
   });
 
+  test("binds each detail and twelve monthly artifacts to one stable account unit", async () => {
+    const bucket = new FakeBucket();
+    await storeSuccessRun(bucket, 2);
+    const central = new FakeCentral();
+    await completeImport(bucket, central, "test");
+    expect(central.units.size).toBe(3);
+    const descriptors = central.requests
+      .filter((entry) => entry.path.endsWith("/artifacts"))
+      .map((entry) => JSON.parse(entry.body));
+    const accountUnitIds = new Set<number>();
+    for (const ordinal of ["01", "02"]) {
+      const detail = descriptors.find(
+        (item) => item.artifactKey === `account-detail-${ordinal}.html`,
+      );
+      accountUnitIds.add(detail.fetchUnitId);
+      const monthly = descriptors.filter((item) =>
+        item.artifactKey.startsWith(`account-${ordinal}-month-`),
+      );
+      expect(monthly.length).toBe(12);
+      expect(monthly.every((item) => item.fetchUnitId === detail.fetchUnitId)).toBe(true);
+      expect(
+        JSON.parse(central.reports.get(`/v1/units/${detail.fetchUnitId}/reports`)!),
+      ).toMatchObject({ declaredArtifactCount: 13, normalizedOutcome: "success" });
+    }
+    expect(accountUnitIds.size).toBe(2);
+    const units = [...central.units.keys()].map((body) => JSON.parse(body));
+    expect(
+      units
+        .filter((unit) => unit.unitKind === "account")
+        .every((unit) => /^moneyforward-account-v1-[0-9a-f]{64}$/u.test(unit.unitKey)),
+    ).toBe(true);
+    expect(JSON.stringify(units)).not.toContain("opaque-account");
+    expect(descriptors.find((item) => item.dataset === "accounts-index").fetchUnitId).toBe(10);
+    expect(
+      descriptors.find((item) => item.dataset === "collector-manifest").fetchUnitId,
+    ).toBeNull();
+  });
+
+  test("keeps maximum-account transfer state bounded and rejects old continuations", async () => {
+    const bucket = new FakeBucket();
+    await storeSuccessRun(bucket, 64);
+    const central = new FakeCentral();
+    const first = await runImport(bucket, central);
+    if (first.status !== "deferred") throw new Error("expected deferred import");
+    expect(central.units.size).toBe(65);
+    expect(first.continuation.length).toBeLessThan(8000);
+    const second = await runImport(bucket, central, first.continuation);
+    expect(second.status).toBe("deferred");
+    expect(central.units.size).toBe(65);
+    await expect(
+      runImport(
+        bucket,
+        central,
+        first.continuation.replace("moneyforward-transfer-v3.", "moneyforward-transfer-v2."),
+      ),
+    ).rejects.toThrow("transfer_token_invalid");
+  }, 20_000);
+
   test("keeps immutable terminal reports deployment-revision independent", async () => {
     const bucket = new FakeBucket();
     await storeSuccessRun(bucket);
@@ -168,9 +230,39 @@ describe("MoneyForward R2 importer", () => {
     await completeImport(bucket, central, "collector-r2-importer-v999");
     expect(central.reports).toEqual(firstReports);
     const runReport = JSON.parse(central.reports.get("/v1/runs/1/reports")!);
-    expect(runReport).toMatchObject({ producerVersion: "moneyforward-r2-v1" });
+    expect(runReport).toMatchObject({ producerVersion: "moneyforward-r2-v2" });
     expect(runReport).not.toHaveProperty("producerRevision");
     expect(central.sealCount).toBe(2);
+  });
+
+  test("partial snapshots report each known unit conservatively and preserve unassigned evidence", async () => {
+    for (const missingDetail of [false, true]) {
+      const bucket = new FakeBucket();
+      await storeSuccessRun(bucket);
+      const manifest = JSON.parse(new TextDecoder().decode(bucket.objects.get(MANIFEST_KEY)!.body));
+      const removed = manifest.artifacts.splice(missingDetail ? 1 : 2, 1)[0];
+      bucket.objects.delete(removed.key);
+      manifest.status = "partial";
+      manifest.failures = [
+        {
+          operation: `r2:${removed.dataset}`,
+          errorType: "Error",
+          message: "operation_failed",
+          stage: "artifact-store",
+          failureCode: "operation_failed",
+        },
+      ];
+      await putManifest(bucket, manifest);
+      const central = new FakeCentral();
+      await completeImport(bucket, central, "test");
+      expect(central.sealCount).toBe(1);
+      expect(central.units.size).toBe(missingDetail ? 1 : 2);
+      expect(
+        [...central.reports.values()].every(
+          (report) => JSON.parse(report).normalizedOutcome === "partial",
+        ),
+      ).toBe(true);
+    }
   });
 
   test("seals a manifest-only failed collection without an unusable continuation", async () => {
@@ -462,7 +554,7 @@ describe("MoneyForward R2 importer", () => {
     if (first.status !== "deferred") throw new Error("expected deferred import");
     expect(first).not.toHaveProperty("manifestKey");
     expect(first.continuation).toMatch(
-      /^moneyforward-transfer-v2\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,7900}$/u,
+      /^moneyforward-transfer-v3\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22,7900}$/u,
     );
     expect(
       first.continuation
@@ -544,33 +636,36 @@ async function runImport(
   });
 }
 
-async function storeSuccessRun(bucket: FakeBucket): Promise<void> {
+async function storeSuccessRun(bucket: FakeBucket, accountCount = 1): Promise<void> {
   const artifacts: Array<Record<string, unknown>> = [];
   artifacts.push(
     await putArtifact(
       bucket,
       "accounts-index",
       "accounts.html",
-      '<html><body><a href="/accounts/show/opaque-account?x=1">account</a></body></html>',
+      `<html><body>${Array.from({ length: accountCount }, (_, index) => `<a href="/accounts/show/${accountCount === 1 ? "opaque-account" : `opaque-account-${String(index + 1).padStart(2, "0")}`}?x=1">account</a>`).join("")}</body></html>`,
     ),
   );
-  artifacts.push(
-    await putArtifact(
-      bucket,
-      "account-detail",
-      "account-detail-01.html",
-      '<html><head><meta name="csrf-token" content="opaque-csrf"></head><body><input name="account[id_hash]" value="opaque-account"><input name="service[id]" value="opaque-service"></body></html>',
-    ),
-  );
-  for (const month of recentMonths("2026-09-05T00:00:00.000Z")) {
+  for (let ordinal = 1; ordinal <= accountCount; ordinal += 1) {
+    const label = String(ordinal).padStart(2, "0");
     artifacts.push(
       await putArtifact(
         bucket,
-        "monthly-transactions",
-        `account-01-month-${month}.html`,
-        '<div class="transaction-list"></div>',
+        "account-detail",
+        `account-detail-${label}.html`,
+        `<html><head><meta name="csrf-token" content="opaque-csrf"></head><body><input name="account[id_hash]" value="${accountCount === 1 ? "opaque-account" : `opaque-account-${label}`}"><input name="service[id]" value="opaque-service"></body></html>`,
       ),
     );
+    for (const month of recentMonths("2026-09-05T00:00:00.000Z")) {
+      artifacts.push(
+        await putArtifact(
+          bucket,
+          "monthly-transactions",
+          `account-${label}-month-${month}.html`,
+          '<div class="transaction-list"></div>',
+        ),
+      );
+    }
   }
   await putManifest(bucket, {
     schemaVersion: "moneyforward-worker-poc-v1",
@@ -579,8 +674,8 @@ async function storeSuccessRun(bucket: FakeBucket): Promise<void> {
     startedAt: "2026-09-05T00:00:00.000Z",
     completedAt: "2026-09-05T00:01:00.000Z",
     status: "success",
-    accountDetailCount: 1,
-    monthlyFragmentCount: 12,
+    accountDetailCount: accountCount,
+    monthlyFragmentCount: accountCount * 12,
     artifacts,
     failures: [],
   });

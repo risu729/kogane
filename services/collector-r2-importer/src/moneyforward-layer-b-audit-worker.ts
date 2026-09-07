@@ -5,6 +5,7 @@ import {
   type MoneyForwardDomNode,
 } from "../../../poc/observation-pipeline/src/parsers/moneyforward";
 import { validateMoneyForwardRun } from "./moneyforward";
+import { moneyForwardAccountKeys } from "./moneyforward-account-identity";
 
 type AuditEnv = Pick<Env, "MONEYFORWARD_SNAPSHOTS">;
 type HtmlNode = DefaultTreeAdapterMap["node"];
@@ -52,6 +53,8 @@ export default {
       }
       try {
         const validated = await validateMoneyForwardRun(env.MONEYFORWARD_SNAPSHOTS, object.key);
+        // Audit identities are ephemeral and never returned; central import uses its secret HMAC key.
+        const accountKeys = await moneyForwardAccountKeys(validated.artifacts, "00".repeat(32));
         let monthlyArtifactCount = 0;
         let evidenceArtifactCount = 0;
         let tooltipBodyRowCount = 0;
@@ -67,6 +70,7 @@ export default {
               runFailureCount: 0,
               dataset: verified.artifact.dataset,
               artifactKey: verified.artifact.filename,
+              fetchUnitKey: accountKeys.get(verified.artifact.accountOrdinal ?? 0) ?? null,
               statementState: null,
               period: null,
               url: null,

@@ -207,7 +207,7 @@ export function currentTransactions(store: Store): TransactionRow[] {
        ), ranked_moneyforward_snapshots AS (
          SELECT p.fetch_artifact_id,
                 ROW_NUMBER() OVER (
-                  PARTITION BY fa.source_id, fa.artifact_key
+                  PARTITION BY fa.source_id, fa.fetch_unit_key, substr(fa.artifact_key, -12, 7)
                   ORDER BY fa.fetched_at DESC, fa.id DESC
                 ) AS snapshot_rank
          FROM parse_runs p
@@ -216,6 +216,7 @@ export function currentTransactions(store: Store): TransactionRow[] {
          WHERE ${CURRENT}
            AND p.parser_name = 'moneyforward-monthly-transactions'
            AND fa.dataset = 'monthly-transactions'
+           AND fa.fetch_unit_key LIKE 'moneyforward-account-v1-%'
        ), current_moneyforward_snapshots AS (
          SELECT fetch_artifact_id
          FROM ranked_moneyforward_snapshots

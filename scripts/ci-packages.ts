@@ -63,6 +63,7 @@ export const CI_PACKAGES: PackagePolicy[] = [
       "cf:check:audit-sbi-shinsei": `${dryRun} --config wrangler.audit-sbi-shinsei.jsonc`,
       "cf:check:audit-global-pass-layer-b": `${dryRun} --config wrangler.audit-global-pass-layer-b.jsonc`,
       "cf:check:audit-v-point-pay-layer-b": `${dryRun} --config wrangler.audit-v-point-pay-layer-b.jsonc`,
+      "cf:check:audit-moneyforward-layer-b": `${dryRun} --config wrangler.audit-moneyforward-layer-b.jsonc`,
     },
     checks: [
       "test",
@@ -79,6 +80,7 @@ export const CI_PACKAGES: PackagePolicy[] = [
       "cf:check:audit-sbi-shinsei",
       "cf:check:audit-global-pass-layer-b",
       "cf:check:audit-v-point-pay-layer-b",
+      "cf:check:audit-moneyforward-layer-b",
     ],
   },
   worker("mobile-suica-worker"),

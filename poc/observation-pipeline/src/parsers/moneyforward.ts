@@ -8,7 +8,7 @@ export interface MoneyForwardDomNode {
   childNodes?: MoneyForwardDomNode[];
   content?: MoneyForwardDomNode;
   value?: string;
-  sourceCodeLocation?: { startOffset?: number };
+  sourceCodeLocation?: { startOffset?: number; endTag?: unknown };
 }
 
 export type MoneyForwardHtmlParser = (
@@ -21,17 +21,37 @@ type HtmlElement = MoneyForwardDomNode & { tagName: string };
 
 const SOURCE = "moneyforward-me";
 const MIME = "text/html; charset=utf-8";
-const MONTHLY_KEY = /^account-(\d{2})-month-(\d{4}-(?:0[1-9]|1[0-2]))\.html$/u;
-const DETAIL_KEY = /^account-detail-(\d{2})\.html$/u;
+const MONTHLY_KEY = /^account-(0[1-9]|[1-5]\d|6[0-4])-month-(\d{4}-(?:0[1-9]|1[0-2]))\.html$/u;
+const DETAIL_KEY = /^account-detail-(0[1-9]|[1-5]\d|6[0-4])\.html$/u;
 const ISO_DATE = /\d{4}-\d{2}-\d{2}/gu;
 const MAX_HTML_BYTES = 8 * 1024 * 1024;
 const MAX_TABLES = 1_000;
 const MAX_ROWS_PER_TABLE = 1_000;
+const ACCOUNT_IDENTITY = /^moneyforward-account-v1-[0-9a-f]{64}$/u;
+// The provider emits an escaped dialog template alongside the empty calendar.
+// Compare only audited tag/attribute-name structure, never provider text or values.
+const EMPTY_SURFACE = [
+  "html[]",
+  "head[]",
+  "body[]",
+  'div[class,js-transfer-switch-dialog,is-hidden\\"]',
+  "div[class]",
+  'p[class,js-transfer-switch-dialog-action-msg\\"]',
+  "div[class]",
+  'a[class,btn-default,btn-footer,js-transfer-switch-dialog-btn-cancel\\"]',
+  'a[class,btn-footer,btn-proceed,js-transfer-switch-dialog-btn-proceed\\",data-method,data-remote]',
+  "div[id]",
+  "select[]",
+  "option[]",
+  "option[]",
+  "select[]",
+  "option[]",
+].join("/");
 
 export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtmlParser): Parser {
   return {
     name: "moneyforward-monthly-transactions",
-    version: "1.0.0",
+    version: "2.0.0",
 
     accepts(artifact: ArtifactMeta): boolean {
       return (
@@ -47,14 +67,39 @@ export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtm
       const match = artifact.artifactKey?.match(MONTHLY_KEY);
       if (!match) throw new Error("moneyforward monthly artifact key is invalid");
       const accountOrdinal = match[1]!;
+      const accountIdentity = requireAccountIdentity(artifact);
       const selectedMonth = match[2]!;
       const html = strictHtml(bytes);
       if (/<(?:!doctype|html)(?:\s|>)/iu.test(html)) {
         throw new Error("moneyforward monthly artifact must be an HTML fragment");
       }
       const document = parseHtml(html, { sourceCodeLocationInfo: true });
-      const tables = allElements(document).filter(isTooltipTable);
+      const elements = allElements(document);
+      const tables = elements.filter(isTooltipTable);
+      if (
+        elements.filter(
+          (element) => element.tagName === "div" && attribute(element, "id") === "calendar",
+        ).length !== 1 ||
+        elements.some(
+          (element) =>
+            element.tagName === "script" ||
+            (element.tagName === "table" && !isTooltipTable(element)),
+        )
+      ) {
+        throw new Error("moneyforward monthly calendar surface marker is invalid");
+      }
       if (tables.length > MAX_TABLES) throw new Error("moneyforward monthly table limit exceeded");
+      if (
+        tables.length === 0 &&
+        elements
+          .map(
+            (element) =>
+              `${element.tagName}[${(element.attrs ?? []).map((attr) => attr.name).join(",")}]`,
+          )
+          .join("/") !== EMPTY_SURFACE
+      ) {
+        throw new Error("moneyforward monthly empty surface marker is invalid");
+      }
       const dateTokens = [...html.matchAll(ISO_DATE)].map((dateMatch) => ({
         value: normalizedDate(dateMatch[0], "moneyforward monthly tooltip date"),
         offset: dateMatch.index,
@@ -80,6 +125,18 @@ export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtm
           throw new Error("moneyforward monthly tooltip date binding is invalid");
         }
         usedDateOffsets.add(dateToken.offset);
+        const monthDistance =
+          Number(dateToken.value.slice(0, 4)) * 12 +
+          Number(dateToken.value.slice(5, 7)) -
+          (Number(selectedMonth.slice(0, 4)) * 12 + Number(selectedMonth.slice(5, 7)));
+        if (Math.abs(monthDistance) > 1) {
+          throw new Error(
+            "moneyforward monthly tooltip date is outside the declared calendar month",
+          );
+        }
+        if (allElements(table).some((element) => !element.sourceCodeLocation?.endTag)) {
+          throw new Error("moneyforward monthly tooltip contains an incomplete element");
+        }
         const rows = directTableRows(table);
         if (rows.length < 1 || rows.length > MAX_ROWS_PER_TABLE + 1) {
           throw new Error("moneyforward monthly tooltip row cardinality is invalid");
@@ -98,7 +155,7 @@ export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtm
           const amountMinor = signedJpy(amountText);
           if (!dateToken.value.startsWith(`${selectedMonth}-`)) return;
           const fingerprint = stableFingerprint({
-            accountOrdinal,
+            accountIdentity,
             selectedMonth,
             date: dateToken.value,
             description,
@@ -108,7 +165,7 @@ export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtm
           occurrences.set(fingerprint, occurrence + 1);
           observations.push({
             kind: "transaction",
-            sourceAccount: `moneyforward-me:account-${accountOrdinal}`,
+            sourceAccount: `moneyforward-me:${accountIdentity}`,
             externalId: `moneyforward-monthly:${fingerprint}:${occurrence}`,
             amountMinor,
             amountText: String(amountMinor),
@@ -126,7 +183,7 @@ export function createMoneyForwardMonthlyTransactions(parseHtml: MoneyForwardHtm
                 selectedMonth,
                 amountDirection: "provider-signed-cashflow",
                 adjacentCalendarRows: "validated-but-not-emitted",
-                identityOrigin: "account+month+date+description+amount+occurrence",
+                identityOrigin: "hmac-account+month+date+description+amount+occurrence",
               },
             },
           });
@@ -173,6 +230,7 @@ export function createMoneyForwardEvidenceOnly(parseHtml: MoneyForwardHtmlParser
           throw new Error("moneyforward accounts-index surface marker is invalid");
         }
       } else {
+        requireAccountIdentity(artifact);
         if (!artifact.artifactKey?.match(DETAIL_KEY)) {
           throw new Error("moneyforward account-detail artifact key is invalid");
         }
@@ -210,6 +268,13 @@ function requireSuccessfulRun(artifact: ArtifactMeta): void {
   if (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) {
     throw new Error("moneyforward observations require a successful failure-free run");
   }
+}
+
+function requireAccountIdentity(artifact: ArtifactMeta): string {
+  if (typeof artifact.fetchUnitKey !== "string" || !ACCOUNT_IDENTITY.test(artifact.fetchUnitKey)) {
+    throw new Error("moneyforward account identity metadata is invalid");
+  }
+  return artifact.fetchUnitKey;
 }
 
 function requireBaseMetadata(artifact: ArtifactMeta): void {
@@ -254,6 +319,7 @@ function directTableRows(table: HtmlElement): HtmlElement[] {
   const headerRows = childElements(sections[0]).filter((element) => element.tagName === "tr");
   const bodyRows = childElements(sections[1]).filter((element) => element.tagName === "tr");
   if (
+    headerRows.length !== 1 ||
     headerRows.length !== childElements(sections[0]).length ||
     bodyRows.length !== childElements(sections[1]).length
   ) {
@@ -283,14 +349,20 @@ function directCells(row: HtmlElement): HtmlElement[] {
 function signedJpy(value: string): number {
   const normalized = value
     .normalize("NFKC")
-    .replace(/\s+/gu, "")
+    .trim()
     .replaceAll("−", "-")
     .replaceAll("▲", "-")
     .replaceAll("△", "-");
   const digits = "(?:0|[1-9]\\d*|[1-9]\\d{0,2}(?:,\\d{3})+)";
   const direct = new RegExp(`^([+-])(${digits})$`, "u").exec(normalized);
-  const negativeTemplate = new RegExp(`^'\\+""\\+'-(${digits})'\\+'$`, "u").exec(normalized);
-  const positiveTemplate = new RegExp(`^'\\+"\\+"\\+'(${digits})'\\+'$`, "u").exec(normalized);
+  const negativeTemplate = new RegExp(
+    `^'\\s*\\+\\s*""\\s*\\+\\s*'-(${digits})'\\s*\\+\\s*'$`,
+    "u",
+  ).exec(normalized);
+  const positiveTemplate = new RegExp(
+    `^'\\s*\\+\\s*"\\+"\\s*\\+\\s*'(${digits})'\\s*\\+\\s*'$`,
+    "u",
+  ).exec(normalized);
   const sign = direct?.[1] ?? (negativeTemplate ? "-" : positiveTemplate ? "+" : undefined);
   const magnitude = direct?.[2] ?? negativeTemplate?.[1] ?? positiveTemplate?.[1];
   if (!sign || !magnitude) {

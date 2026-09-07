@@ -475,9 +475,24 @@ artifact key, avoiding both adjacent-month and recent-view duplication.
 Anonymous fixtures pin successful, empty, adjacent-month, invalid-date,
 unsigned-amount, header, row-shape, metadata, and failed-run boundaries. The
 current view selects the latest successful complete artifact per source,
-account ordinal, and month, so a later empty snapshot removes stale current
-rows without deleting append-only history. Provider account IDs and underlying
-institution identity are deliberately not inferred from the collector ordinal.
+HMAC account unit, and month, so a later empty snapshot removes stale current
+rows without deleting append-only history. Ordinal changes preserve identity;
+underlying institution identity is deliberately not inferred.
+
+The adversarial review found and fixed incomplete fragments clearing complete
+snapshots, whitespace joining amount digits, and unstable ordinal identity.
+Layer A now supplies a domain-separated HMAC of a JSON account/service tuple via
+account fetch units; index/detail agreement and within-run uniqueness are required.
+The 64-account continuation is bounded below 8 KB. Regression coverage includes
+unit topology, partial units, legacy cursor rejection, ordinal moves, twelve-month
+overlap/refetch, duplicate row occurrences, and invalid-newer snapshot retention.
+Production structural review counted 407 nonempty and 73 empty fragments. All
+480 had exactly one calendar marker, no script element, and no non-tooltip table;
+all 73 empty fragments shared the same audited tag/attribute-name sequence.
+The final read-only reparse with HMAC/index binding and stricter empty/amount
+validation accepted all 480 monthly artifacts and emitted the same 6,880
+observations, with zero parser rejections. Template syntax may contain whitespace;
+the signed integer itself cannot contain whitespace between digits.
 
 The production read-only full canary scanned 540 objects across 10 successful
 manifests and 530 data artifacts. It validated all 480 monthly fragments and
