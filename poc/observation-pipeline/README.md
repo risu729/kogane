@@ -75,16 +75,20 @@ transaction / balance / position / valuation observations   layer B
 evidence browser (React client in web/, served by serve.ts)
 ```
 
-Four parsers run against the shapes the collectors already produce:
+Eight parsers are registered against shapes the collectors already produce:
 
-| Parser                       | Artifact                     | Emits                          |
-| ---------------------------- | ---------------------------- | ------------------------------ |
-| `sbi-domestic-trade-records` | SBI `domestic-trade-records` | transactions                   |
+| Parser | Artifact | Emits |
+| --- | --- | --- |
+| `sbi-domestic-cash-positions` | SBI `domestic-cash-positions` | positions, provider valuations |
+| `sbi-account-assets-current` | SBI `account-assets-current` | provider valuations by source view/category |
+| `sbi-yen-detail-history` | SBI `yen-detail-history` | transactions |
+| `sbi-domestic-trade-records` | SBI `domestic-trade-records` | transactions |
+| `sbi-foreign-trade-records` | SBI `foreign-trade-records` | transactions |
 | `sbi-foreign-cash-positions` | SBI `foreign-cash-positions` | positions, provider valuations |
 | `sbi-foreign-cash-balances`  | SBI `foreign-cash-balances`  | balances                       |
 | `paypay-csv`                 | PayPay consumer CSV export   | transactions                   |
 
-The demo ingests 4 artifacts from 2 sources and produces 28 observations:
+The original demo manifest still ingests 4 artifacts from 2 sources and produces 28 observations:
 8 transaction, 10 balance, 2 position, 8 valuation.
 
 ## The parser contract
@@ -100,8 +104,11 @@ Beyond that it must:
   `csv:row=12`) so the value can be found again in the same bytes;
 - never drop a provider field it does not model — unrecognized material is
   carried in `extra`, by name;
-- warn rather than discard. A row it cannot fully parse is still recorded,
-  with a warning explaining what could not be read.
+- warn rather than discard when a known row has one unreadable optional field.
+  The four newer SBI parsers intentionally fail the artifact on envelope,
+  cardinality, enum, pagination, fixed-width, or required-value drift: recording
+  a plausible partial portfolio or history would be more dangerous than a
+  retryable error parse run.
 
 Re-parsing is first class. Running the same parser version again is a
 no-op; a bumped version re-parses and marks the earlier parse run
@@ -166,6 +173,11 @@ identifiers, or credentials are committed**, in line with
 `docs/account-inventory.md`. Their field names and structure come from the
 collectors' own source and from `docs/sources/`, so the parsers are written
 against real shapes rather than invented ones.
+
+`fixtures/sbi-parser-boundaries/` adds anonymous, manifest-free boundary
+fixtures for the four additional SBI shapes. Keeping them outside the demo
+run means no production object key or evidence digest is copied into the
+repository; their role is parser contract testing, not layer-A ingestion.
 
 This is also their limitation, and the reason `RESULTS.md` lists the
 questions only real payloads can close.

@@ -153,7 +153,17 @@ coverage. Neither announces itself.
 
 ## Open questions
 
-These need real payloads, and none is resolved by assertion here.
+The remaining questions need evidence beyond the shape audit described below;
+none is resolved by assertion here.
+
+Four previously unparsed SBI datasets now have strict semantic parsers. A
+read-only aggregate audit confirmed their source envelopes and container
+types without printing or retaining payload values. The parsers preserve
+provider transaction codes, currencies, dates, security identifiers, asset
+views/categories, and F2631 byte locators in versioned observations. They
+fail the artifact on schema or completeness drift rather than publishing a
+partial account state. Anonymous boundary fixtures pin the accepted shapes;
+they contain no production object names or evidence digests.
 
 **Are SBI's `evaluationAmount` fields really JPY?** The foreign-positions
 parser assumes the unprefixed fields are JPY and the `frn*` variants are in
