@@ -46,6 +46,8 @@ export interface ArtifactRow {
   blob_key: string;
 }
 
+// financial_fetch_runs (raw-evidence migration 0004) excludes synthetic sources
+// and runs annotated exclude_from_financial_views for both queries below.
 const RUN_SELECT = `SELECT r.id, r.source_id, r.producer_id, r.first_recorded_at_ms,
  s.sealed_at_ms, p.normalized_outcome, p.started_at_ms, p.completed_at_ms,
  p.started_at_basis, p.completed_at_basis, i.expected_artifact_count

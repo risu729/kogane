@@ -3,7 +3,9 @@
 The current local frontend has Japanese navigation, responsive layouts,
 explicit connection/data classification, and an isolated synthetic preview.
 See [Frontend foundation](frontend.md) for the adopted stack, commands, and
-the production API handoff. Production D1/R2 connectivity is still pending.
+the production API handoff. A separate D1/R2 reader is implemented in
+`services/evidence-browser`; Access setup, deployment, and live verification
+remain pending. See [Production evidence browser](production-evidence-browser.md).
 
 A read-only web view over layers A and B — raw evidence and observations,
 nothing above them. Its purpose is narrow: let a human check what a parser

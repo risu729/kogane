@@ -1,5 +1,5 @@
 import { env, SELF } from "cloudflare:test";
-import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { base64url, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
 import { seedRegistry, seedRun } from "./fixtures";
@@ -82,9 +82,13 @@ describe("authenticated read-only evidence", () => {
       expect((await call(path, { jwt: null })).status).toBe(401);
       expect((await SELF.fetch(`https://fixture.test${path}`)).status).toBe(401);
     }
-    expect(
-      (await call(`${prefix}/meta`, { jwt: "eyJhbGciOiJub25lIn0.eyJ0eXBlIjoiYXBwIn0." })).status,
-    ).toBe(401);
+    // Deliberately unsigned, generated synthetic input; no credential is stored.
+    const unsigned = [
+      base64url.encode(JSON.stringify({ alg: "none" })),
+      base64url.encode(JSON.stringify({ type: "app" })),
+      "",
+    ].join(".");
+    expect((await call(`${prefix}/meta`, { jwt: unsigned })).status).toBe(401);
   });
   it("verifies signature, issuer, audience, expiration, subject and application token type", async () => {
     const other = await generateKeyPair("RS256");
