@@ -845,6 +845,78 @@ describe("parse runs", () => {
     expect(count(store, "transaction_observations")).toBe(4);
   });
 
+  test("current V Point Pay views deduplicate events and keep the latest successful balance", () => {
+    const store = tempStore();
+    const directory = mkdtempSync(join(tmpdir(), "kogane-v-point-pay-current-"));
+    for (const name of ["newer", "duplicate", "stale", "failed"]) {
+      writeFileSync(join(directory, `${name}.json`), "{}");
+    }
+    const source = { id: "v-point-pay", provider: "V Point Pay" };
+    const inputs = [
+      ["newer", "2026-08-04T00:00:00.000Z", "success", 0],
+      ["duplicate", "2026-08-05T00:00:00.000Z", "success", 0],
+      ["stale", "2026-08-01T00:00:00.000Z", "success", 0],
+      ["failed", "2026-08-06T00:00:00.000Z", "failed", 1],
+    ] as const;
+    for (const [name, fetchedAt, status, failureCount] of inputs) {
+      ingestFile(store, join(directory, `${name}.json`), {
+        source,
+        mime: "application/json",
+        fetchedAt,
+      });
+      store.db
+        .query(
+          `UPDATE fetch_runs SET status = ?, failure_count = ? WHERE id = (SELECT MAX(id) FROM fetch_runs)`,
+        )
+        .run(status, failureCount);
+    }
+    store.db
+      .query(
+        `UPDATE fetch_artifacts SET dataset = 'notification-event', artifact_key = 'normalized-event.json'`,
+      )
+      .run();
+    const artifacts = store.db.query("SELECT id FROM fetch_artifacts ORDER BY id").all() as {
+      id: number;
+    }[];
+    for (const [index, row] of artifacts.entries()) {
+      const parseRunId = insertParseRun(store, {
+        artifactId: row.id,
+        parserName: "v-point-pay-notification-event",
+        parserVersion: "1.0.0",
+        parsedAt: `2026-08-07T00:00:0${index}.000Z`,
+        status: "ok",
+        warnings: [],
+      });
+      insertObservation(store, parseRunId, {
+        kind: "transaction",
+        sourceAccount: "v-point-pay:notification-events",
+        externalId: index < 2 ? "same-event" : `event-${index}`,
+        description: inputs[index]![0],
+        rawLocator: "json:$",
+        extra: {},
+      });
+      insertObservation(store, parseRunId, {
+        kind: "balance",
+        sourceAccount: "v-point-pay:prepaid-yen",
+        metric: "prepaid_balance_after_event",
+        instrument: "JPY",
+        amountMinor: index + 1,
+        asOf: inputs[index]![1],
+        observedAt: inputs[index]![1],
+        rawLocator: "json:$.balanceYen",
+        extra: {},
+      });
+    }
+    expect(
+      currentTransactions(store)
+        .map((row) => row.description)
+        .sort(),
+    ).toEqual(["duplicate", "stale"]);
+    expect(latestBalances(store)).toMatchObject([{ amount_minor: "2", as_of: inputs[1]![1] }]);
+    expect(count(store, "transaction_observations")).toBe(4);
+    expect(count(store, "balance_observations")).toBe(4);
+  });
+
   test("a newer parser version supersedes, never deletes", () => {
     const store = storeWithFakeArtifact();
     runParsers(store, [fakeParser("0.1.0", "old")]);

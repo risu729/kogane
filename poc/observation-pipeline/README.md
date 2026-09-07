@@ -75,7 +75,7 @@ transaction / balance / position / valuation observations   layer B
 evidence browser (React client in web/, served by serve.ts)
 ```
 
-Twenty-nine parsers are registered against shapes the collectors already produce:
+Thirty parsers are registered against shapes the collectors already produce:
 
 | Parser                                  | Artifact                                           | Emits                                        |
 | --------------------------------------- | -------------------------------------------------- | -------------------------------------------- |
@@ -108,6 +108,7 @@ Twenty-nine parsers are registered against shapes the collectors already produce
 | `v-point-balance-info`                  | V Point common/store expiry buckets                | point balances                               |
 | `v-point-smfg-point`                    | V Point SMFG display breakdown                     | separately scoped point balances             |
 | `v-point-history-page`                  | V Point complete paginated history                 | signed point transactions                    |
+| `v-point-pay-notification-event`        | V Point Pay normalized notification event          | transactions and source-separated balances   |
 
 V Point registers only the three financial Layer-A artifact families.
 `vmoney-history-page-*` is the observed empty boundary for a separate asset,
@@ -151,6 +152,19 @@ occurrence supplies replay-stable evidence identity. The month selector accepts
 the Layer-A range of one through fifteen contiguous months, binds the selected
 month to the artifact key, and the current view uses only the latest successful
 snapshot for each month, including an explicitly empty replacement snapshot.
+
+V Point Pay Layer B accepts only the canonical `notification-event` JSON from
+the successful, failure-free Layer A email-pair run. The paired
+`notification-mail` remains evidence-only and has no parser route. The email
+does not establish settlement, so non-declined transactions use the separate
+`v-point-pay:notification-events` account and `status=notified`; usage is signed
+as an outflow notification, while charge and prepaid balance addition are signed
+as inflow notifications. A declined event is retained without a typed cashflow
+amount. `usedPoints` remains supporting `extra` and is not guessed into a
+separate funding leg. Only `balanceYen` becomes a snapshot under
+`v-point-pay:prepaid-yen`. Event identity collapses replayed notifications in
+the current transaction view, and current balances use the newest successful
+event time rather than import order.
 
 The demo ingests 11 artifacts from 3 sources and produces 49 observations:
 14 transaction, 24 balance, 3 position, 8 valuation.
@@ -348,3 +362,9 @@ Each normalized transaction artifact is bound to its manifest-relative monthly
 range key. The current view selects the newest successfully parsed artifact for
 that range by fetch time, so a late-imported stale run cannot replace newer
 evidence and a newer empty statement removes older rows from the current view.
+
+The V Point Pay Layer-B production canary invokes the exact Layer-A pair,
+metadata, media-type, checksum, identity, and derivation validator before the
+parser. It uses a localhost Worker backed by the existing remote read-only R2
+binding, proves that mail has no parser route, and emits aggregate object and
+observation counts only. It has no deploy, R2 write, or R2 delete path.

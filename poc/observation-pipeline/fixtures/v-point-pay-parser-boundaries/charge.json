@@ -1,0 +1,1 @@
+{"schemaVersion":"vpoint-pay-email-event-v1","id":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","sourceMessageId":"synthetic-charge@example.invalid","occurredAt":"2026-08-02T01:02:03.000Z","eventType":"charge","subject":"V Point Pay チャージ受付のお知らせ","merchant":null,"detail":"匿名チャージ方法","amountYen":5000,"usedPoints":null,"balanceYen":8800}

@@ -144,3 +144,31 @@ poc/vpoint-worker/scripts/backfill-vpoint-pay-email-raw-evidence.sh
 新着メール保存後の中央取り込みはService Bindingの失敗をメール受信・Gmail転送の失敗へ
 昇格させず、`waitUntil`で試行する。失敗pairはimmutable source R2に残り、上記backfillで再送する。
 GitHub Actions cronは使わず、既存collectorのscheduleと廃止済みapp polling設定は変更しない。
+
+## Layer B: 通知eventからの金融観測
+
+Layer Bは中央で`v-point-pay`に正規化された`notification-event`の
+`normalized-event.json`だけを読む。対になる`notification-mail`は証拠専用で、parserを登録しない。
+これにより原本メールと正規化eventを同じ取引として二重計上しない。
+
+通知本文はsettlementや確定売上を主張しないため、非declined eventは
+`v-point-pay:notification-events`に`status=notified`で置く。`usage`はoutflow通知、
+`charge`と`balance-addition`はinflow通知として表示額の符号だけを正規化するが、
+確定prepaid cashflowとは扱わない。`declined`は失敗した試行として`status=declined`を残し、
+試行額をtyped cashflowにせず`extra`だけに保持する。
+
+`usedPoints`があっても、通知の利用総額をprepaid円とVポイントの二つのlegへ推測分割しない。
+表示総額とポイント数は`extra`にそのまま残す。`balanceYen`が存在する場合だけ、
+`v-point-pay:prepaid-yen`のbalance snapshotを別に作る。これによりポイント優先払いを
+prepaid円からの確定全額outflowと誤表示せず、後日のapp明細との照合余地を残す。
+
+parserはLayer Aと同じv1/v2 exact schema、event identity、canonical UTC時刻、subjectとevent type、
+v2 envelope provenance、金額の整数境界を検証し、successfulかつfailure-freeなrun以外を拒否する。
+current取引は同じevent identityのreplayをcollapseし、current残高はDB投入順ではなく
+成功runに属する最新event時刻を選ぶ。匿名fixtureは4 event type、二重route拒否、通知statusと符号、
+funding split非推測、declined amount、残高account分離、schema/provenance drift、失敗runを固定する。
+
+`services/collector-r2-importer/scripts/audit-v-point-pay-layer-b-r2.sh`は既存のLayer A pair
+validatorを通した後にLayer Bを実行する本番canaryである。localhost限定Workerとremote read-only
+R2 bindingだけを使い、object key、hash、本文、金額、残高、ポイント、認証情報を返さず、
+object種別とobservation種別のaggregate件数だけを出す。deploy、R2 write、R2 delete経路は持たない。

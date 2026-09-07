@@ -80,7 +80,7 @@ bytes plus artifact metadata to typed observations. Its obligations:
    hash — never the bytes. Selection is therefore a database query in
    production, and a parser cannot sniff its way into a payload it was not
    registered for. In the PoC `accepts` is exact equality on `sourceId`
-   plus `dataset` for the SBI, SBI VC Trade, and MyJCB parsers, exact
+   plus `dataset` for the SBI, SBI VC Trade, MyJCB, V Point, and V Point Pay parsers, exact
    source/dataset/MIME for Mobile Suica, and `sourceId` plus `mime`
    for `paypay-csv`, whose artifact arrives through the file-export path
    with no dataset at all.
