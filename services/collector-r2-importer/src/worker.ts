@@ -11,6 +11,13 @@ import { importSonyRun } from "./sony";
 import { importVPointRun } from "./v-point";
 import { importVpassRun } from "./vpass";
 import { importVPointPayEmailPair } from "./v-point-pay-email";
+import {
+  processReconcilerMessage,
+  weeklyRepairSeeds,
+  type ImportOutcome,
+  type InternalMessage,
+  type ReconcilerSource,
+} from "./reconciler";
 
 type JsonObject = Record<string, unknown>;
 
@@ -378,9 +385,14 @@ export default {
     ) {
       try {
         const input = await readJson(request);
-        exactKeys(input, ["manifestKey"]);
+        exactKeys(input, ["manifestKey", "continuation"]);
         const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
-        return json(await importOneSbiVc(env, manifestKey));
+        const continuation =
+          input.continuation === undefined
+            ? undefined
+            : requiredString(input.continuation, "continuation_invalid", 8_000);
+        const result = await importOneSbiVc(env, manifestKey, continuation);
+        return json(result, result.status === "deferred" ? 202 : 200);
       } catch (error) {
         return errorResponse(error);
       }
@@ -483,7 +495,12 @@ export default {
         if (object?.key.endsWith("/manifest.json")) {
           try {
             result = await importOneSbiVc(env, object.key);
-            importedManifestCount = 1;
+            if (result.status === "deferred") {
+              deferredManifestCount = 1;
+              deferredReason = result.reason;
+            } else {
+              importedManifestCount = 1;
+            }
           } catch (error) {
             const classification = classifySbiVcBackfillError(error);
             if (classification.deferred) {
@@ -585,6 +602,39 @@ export default {
       }
     }
     return json({ error: "not_found" }, 404);
+  },
+  async queue(batch, env): Promise<void> {
+    for (const message of batch.messages) {
+      try {
+        const result = await processReconcilerMessage(message.body, reconcilerDependencies(env));
+        safeReconcilerLog(
+          "processed",
+          result.kind,
+          result.source,
+          result.outcome,
+          message.attempts,
+        );
+        message.ack();
+      } catch (error) {
+        safeReconcilerLog(
+          "retry",
+          "unknown",
+          safeMessageSource(message.body),
+          safeReconcilerCode(error),
+          message.attempts,
+        );
+        message.retry({ delaySeconds: retryDelaySeconds(message.attempts) });
+      }
+    }
+  },
+  async scheduled(controller, env): Promise<void> {
+    if (controller.cron !== "23 19 * * 0") {
+      throw new ImportError(400, "reconciler_cron_invalid");
+    }
+    await env.OUTBOX_RECONCILER_QUEUE.sendBatch(
+      weeklyRepairSeeds().map((body) => ({ body, contentType: "json" as const })),
+    );
+    safeReconcilerLog("scheduled", "repair", undefined, "seeded", 1);
   },
 } satisfies ExportedHandler<Env>;
 
@@ -2058,7 +2108,7 @@ function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return copy.buffer;
 }
 
-function importOneSbiVc(env: Env, manifestKey: string) {
+function importOneSbiVc(env: Env, manifestKey: string, continuation?: string) {
   return importSbiVcRun({
     bucket: env.SBI_VC_SNAPSHOTS,
     centralService: env.RAW_EVIDENCE,
@@ -2066,6 +2116,7 @@ function importOneSbiVc(env: Env, manifestKey: string) {
     fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
     importerVersion: env.IMPORTER_VERSION,
     manifestKey,
+    ...(continuation ? { continuation } : {}),
   });
 }
 
@@ -2534,6 +2585,195 @@ function decodeSonyCursor(value: string): SonyBackfillCursor {
     throw new ImportError(400, "cursor_invalid");
   }
   return input as unknown as SonyBackfillCursor;
+}
+
+function reconcilerDependencies(env: Env) {
+  return {
+    accountId: env.RECONCILER_ACCOUNT_ID,
+    importTerminal: (
+      source: ReconcilerSource,
+      terminalKey: string,
+      resume: string | number | null,
+    ) => importReconcilerTerminal(env, source, terminalKey, resume),
+    list: async (
+      source: ReconcilerSource,
+      prefix: string,
+      cursor: string | null,
+      limit: number,
+    ) => {
+      const listed = await reconcilerBucket(env, source).list({
+        prefix,
+        limit,
+        ...(cursor ? { cursor } : {}),
+      });
+      return {
+        keys: listed.objects.map((object) => object.key),
+        truncated: listed.truncated,
+        cursor: listed.truncated ? (listed.cursor ?? null) : null,
+      };
+    },
+    send: async (messages: InternalMessage[]) => {
+      await env.OUTBOX_RECONCILER_QUEUE.sendBatch(
+        messages.map((body) => ({ body, contentType: "json" as const })),
+      );
+    },
+  };
+}
+
+async function importReconcilerTerminal(
+  env: Env,
+  source: ReconcilerSource,
+  terminalKey: string,
+  resume: string | number | null,
+): Promise<ImportOutcome> {
+  switch (source) {
+    case "global-pass":
+      return normalizedImportOutcome(
+        await importOneGlobalPass(env, terminalKey, numericResume(resume), false),
+      );
+    case "mobile-suica":
+      await importOneMobileSuica(env, terminalKey);
+      return { status: "sealed" };
+    case "moneyforward":
+      return normalizedImportOutcome(
+        await importOneMoneyForward(env, terminalKey, stringResume(resume)),
+      );
+    case "myjcb":
+      return normalizedImportOutcome(await importOneMyJcb(env, terminalKey, stringResume(resume)));
+    case "sbi-securities":
+      await importOne(env, terminalKey);
+      return { status: "sealed" };
+    case "sbi-shinsei":
+      await importOneSbiShinsei(env, terminalKey);
+      return { status: "sealed" };
+    case "sbi-vc-trade":
+      return normalizedImportOutcome(await importOneSbiVc(env, terminalKey, stringResume(resume)));
+    case "smbc-direct":
+      return normalizedImportOutcome(
+        await importOneSmbcDirect(env, terminalKey, numericResume(resume), false),
+      );
+    case "sony-bank":
+      return normalizedImportOutcome(
+        await importOneSony(env, terminalKey, numericResume(resume), false),
+      );
+    case "vpass":
+      return normalizedImportOutcome(await importOneVpass(env, terminalKey, stringResume(resume)));
+    case "v-point":
+      return normalizedImportOutcome(
+        await importOneVPoint(env, terminalKey, numericResume(resume), false),
+      );
+    case "v-point-pay-email":
+      await importOneVPointPayEmail(env, terminalKey);
+      return { status: "sealed" };
+  }
+}
+
+function normalizedImportOutcome(result: {
+  status: "deferred" | "sealed";
+  nextOffset?: number;
+  continuation?: string;
+}): ImportOutcome {
+  if (result.status === "sealed") return { status: "sealed" };
+  if (!Number.isSafeInteger(result.nextOffset) || (result.nextOffset ?? 0) <= 0) {
+    throw new ImportError(409, "reconciler_import_stalled");
+  }
+  const resume = result.continuation ?? result.nextOffset;
+  if (resume === undefined) throw new ImportError(409, "reconciler_continuation_missing");
+  return { status: "deferred", resume, progress: result.nextOffset! };
+}
+
+function reconcilerBucket(env: Env, source: ReconcilerSource): R2Bucket {
+  switch (source) {
+    case "global-pass":
+      return env.GLOBAL_PASS_SNAPSHOTS;
+    case "mobile-suica":
+      return env.MOBILE_SUICA_SNAPSHOTS;
+    case "moneyforward":
+      return env.MONEYFORWARD_SNAPSHOTS;
+    case "myjcb":
+      return env.MYJCB_SNAPSHOTS;
+    case "sbi-securities":
+      return env.SBI_SNAPSHOTS;
+    case "sbi-shinsei":
+      return env.SBI_SHINSEI_SNAPSHOTS;
+    case "sbi-vc-trade":
+      return env.SBI_VC_SNAPSHOTS;
+    case "smbc-direct":
+      return env.SMBC_DIRECT_SNAPSHOTS;
+    case "sony-bank":
+      return env.SONY_SNAPSHOTS;
+    case "vpass":
+      return env.VPASS_SNAPSHOTS;
+    case "v-point":
+      return env.VPOINT_SNAPSHOTS;
+    case "v-point-pay-email":
+      return env.VPOINT_PAY_SNAPSHOTS;
+  }
+}
+
+function numericResume(value: string | number | null): number {
+  if (value === null) return 0;
+  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
+    throw new ImportError(400, "reconciler_message_invalid");
+  }
+  return value as number;
+}
+
+function stringResume(value: string | number | null): string | undefined {
+  if (value === null) return undefined;
+  if (typeof value !== "string") throw new ImportError(400, "reconciler_message_invalid");
+  return value;
+}
+
+function retryDelaySeconds(attempts: number): number {
+  return Math.min(3_600, 30 * 2 ** Math.max(0, Math.min(attempts - 1, 7)));
+}
+
+function safeMessageSource(value: unknown): ReconcilerSource | undefined {
+  if (value === null || Array.isArray(value) || typeof value !== "object") return undefined;
+  const source = (value as JsonObject).source;
+  return typeof source === "string" &&
+    [
+      "global-pass",
+      "mobile-suica",
+      "moneyforward",
+      "myjcb",
+      "sbi-securities",
+      "sbi-shinsei",
+      "sbi-vc-trade",
+      "smbc-direct",
+      "sony-bank",
+      "vpass",
+      "v-point",
+      "v-point-pay-email",
+    ].includes(source)
+    ? (source as ReconcilerSource)
+    : undefined;
+}
+
+function safeReconcilerLog(
+  event: "processed" | "retry" | "scheduled",
+  kind: "import" | "repair" | "unknown",
+  source: ReconcilerSource | undefined,
+  outcome: string,
+  attempts: number,
+): void {
+  console[event === "retry" ? "error" : "log"](
+    JSON.stringify({
+      event: "r2-outbox-reconciler",
+      lifecycle: event,
+      kind,
+      ...(source ? { source } : {}),
+      outcome,
+      attempts,
+    }),
+  );
+}
+
+function safeReconcilerCode(error: unknown): string {
+  return error instanceof ImportError && /^[a-z0-9_-]{1,100}$/u.test(error.code)
+    ? error.code
+    : "request_failed";
 }
 
 async function readJson(request: Request): Promise<JsonObject> {

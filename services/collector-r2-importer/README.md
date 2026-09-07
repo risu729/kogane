@@ -1,5 +1,7 @@
 # Collector R2 importer
 
+The event-driven and weekly repair design for all merged collector outboxes is documented in [docs/r2-outbox-reconciler.md](docs/r2-outbox-reconciler.md). It is configured but not deployed by that change.
+
 各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suica、GLOBAL PASS、MyJCB、MoneyForward、V Point、Vpass、V Point Pay通知メール、SMBC Directに対応する。
 
 ## SMBC Directの境界
@@ -8,7 +10,7 @@ SMBC Directはprivate R2の`raw/smbc-direct/YYYY/MM/DD/<run-id>/`以下をcanoni
 
 Importerは中央runを作る前にmanifest/payload/failureのexact schema、日付とUUIDを含むprefix、月次range、artifact順序・件数、terminal statusとfailure補集合を検証する。全prefix inventory、content type、exact custom metadata、manifest宣言SHA-256、R2 native SHA-256（存在時）、再計算SHA-256を一致させる。Shift_JIS raw JSONはdecode後の意味だけでなく同じencodingへのround tripも検証し、残高・入出金明細・期間・件数・合計をnormalized JSONと突合する。rawの`accntHstCount`、manifest artifact件数、実row件数を三者一致させ、観測済みの入出金flag `1`/`2`と停止flag `0`以外はfail closedとする。銀行レスポンスの日付境界は実際の`YYYY年M月D日`表現とlegacy compact表現を厳密に暦日へ正規化する。raw bytesはprovider responseとしてそのまま中央へ保存し、normalized artifactは`collector_derived / transformed / linked`として対応するraw artifactへのinput lineageを付ける。manifestはrun-level artifactとし、unit terminal件数にはdata artifactだけ、run terminal件数にはmanifestを含む全artifactを宣言する。failure codeはcollectorが生成できる固定語彙とbounded HTTP status pattern以外を受理しない。
 
-manifest込み12 artifact以上の即時importは全source validation後、中央stateを作らず`202 deferred`を返す。これは12 plansを直送すると中央32回に外側のcollector→Importer hopが加わり、Cloudflareの上限を超えるためである。historical backfillは完全inventoryを先に固定し、1 request最大10 artifactを転送する。opaque cursorはversioned HMACでR2 scan位置、manifest、10-artifact境界のoffsetを束縛し、改変、manifest差替え、offset jump、旧unsigned cursorを中央書込み前に拒否する。manifest import失敗時は失敗対象より後のcursorを返さず、callerが最後に永続化した位置から同じmanifestを再試行する。最終chunkだけterminal reportとsealを行う。同じmanifestの再送は同じ中央run、artifact、inventoryへ冪等に収束する。terminal reportの`producerVersion`はdeploy revisionではなく固定のsource契約`smbc-direct-r2-v1`を使うため、Importer更新後の再走査でもimmutable reportと競合しない。deploy revisionは失敗・中断attemptの`ingestClientVersion`だけに記録する。GitHub Actions cron、Queue、追加scheduled triggerは導入せず、既存collector cronも変更しない。
+manifest込み12 artifact以上の即時importは全source validation後、中央stateを作らず`202 deferred`を返す。これは12 plansを直送すると中央32回に外側のcollector→Importer hopが加わり、Cloudflareの上限を超えるためである。historical backfillは完全inventoryを先に固定し、1 request最大10 artifactを転送する。opaque cursorはversioned HMACでR2 scan位置、manifest、10-artifact境界のoffsetを束縛し、改変、manifest差替え、offset jump、旧unsigned cursorを中央書込み前に拒否する。manifest import失敗時は失敗対象より後のcursorを返さず、callerが最後に永続化した位置から同じmanifestを再試行する。最終chunkだけterminal reportとsealを行う。同じmanifestの再送は同じ中央run、artifact、inventoryへ冪等に収束する。terminal reportの`producerVersion`はdeploy revisionではなく固定のsource契約`smbc-direct-r2-v1`を使うため、Importer更新後の再走査でもimmutable reportと競合しない。deploy revisionは失敗・中断attemptの`ingestClientVersion`だけに記録する。source collector側の既存cronは変更せず、Importer reconcilerがCloudflare Queueと週次repairを担当する。GitHub Actions cronは使用しない。
 
 ### private R2の構造監査（2026-09-05）
 
@@ -140,7 +142,7 @@ GLOBAL PASSはprivate R2の`prestia-globalpass`を、中央canonical source `glo
 
 新`globalpass-browser-poc-v2`は同じsanitizationをsource R2保存前に行う。Importerはsentinel、空値の維持、DOCTYPE、activity marker、login/password control不在、静的form action、fragmentとevent handlerのcanonical固定値、2種類の入力/form件数を再検証し、bytesがcanonical UTF-8として不変である場合だけ受理する。`srcset`、`ping`、CSSの`url()`/`@import`、meta refresh、SVG URL属性、`base`/`object`/`embed`/`iframe`を含む未監査のnetwork/navigation sinkはfail closedとし、`href`/`src`/`action`も要素種別ごとのexact inventory以外を拒否する。中央HTMLは両versionとも`sanitized_provider_capture / transformed / source_not_retained_for_security`であり、provider-original exact bytesとは扱わない。
 
-v2はavailable/selected month、daily先頭2か月またはbackfill全月、保存artifactと月別failureの補集合、status/captureCompleteを完全一致で検証する。v1のsuccessも期待月の完全一致を要求する一方、既存のpartial/failed runは成功へ昇格させず、manifestが宣言した観測inventoryとしてsealする。failed manifest-only runも0件のprovider artifactを持つ失敗証拠としてcatalogueする。dailyのHTML 2件とmanifestはdirect sealする。最大15か月のHTMLとmanifestの計16 artifactは中央Worker呼出上限を超えるため、完全inventoryを先に固定し、10 artifactずつ転送してoffset cursorから再開し、最終chunkだけterminal reportとsealを行う。Queueは使用しない。
+v2はavailable/selected month、daily先頭2か月またはbackfill全月、保存artifactと月別failureの補集合、status/captureCompleteを完全一致で検証する。v1のsuccessも期待月の完全一致を要求する一方、既存のpartial/failed runは成功へ昇格させず、manifestが宣言した観測inventoryとしてsealする。failed manifest-only runも0件のprovider artifactを持つ失敗証拠としてcatalogueする。dailyのHTML 2件とmanifestはdirect sealする。最大15か月のHTMLとmanifestの計16 artifactは中央Worker呼出上限を超えるため、完全inventoryを先に固定し、10 artifactずつ転送してoffset cursorから再開し、最終chunkだけterminal reportとsealを行う。手動backfill routeはQueueなしでも同じoffset契約を利用でき、reconcilerは各chunkを別Queue invocationとして自動継続する。
 
 ## Sony銀行の空明細と取り込みログ
 
@@ -176,7 +178,7 @@ Service Bindingは公開URLを経由しない到達経路であり、認証の�
 
 SBI VC TradeのmanifestはSBI証券とは共有せず、`sbi-vc-trade-worker-poc-v1`専用validatorで扱う。固定4 datasetの順序、約定履歴とJPY入出金履歴の1始まり連番、各pageの`list`/`totalSize`終了条件、最大100 page、失敗時の保存済みprefixと次datasetの補集合を検証する。さらにmanifestと全artifactについてkey、size、完全一致custom metadata、JSON content type、SHA-256、prefix内の完全inventoryを確認する。
 
-最大runは4 MiB artifactを204個含み得るため、全runをmemoryへ保持しない。中央run作成前に1 objectずつ全件検証してpage metadataだけを保持し、中央転送時に同じobjectを再読込・再検証して元bytesをそのまま送る。同期経路はService Bindingの32 Worker invocation上限からdata artifact 11件までに制限し、それを超えるrunは中央stateを一切作らず後続Queue reconcilerへ委ねる。R2 outboxは成功時も失敗時も削除しない。
+最大runは4 MiB artifactを204個含み得るため、全runをmemoryへ保持しない。各chunkの中央state利用前に1 objectずつ全件検証してpage metadataだけを保持し、中央転送時に同じobjectを再読込・再検証して元bytesをそのまま送る。data artifact 11件以下は従来どおり同期sealし、それを超えるrunは完全inventoryを固定して8 artifactずつ転送する。AES-GCMで認証暗号化したopaque continuationがmanifest key/checksum、中央run/unit/inventory、inventory checksum、offsetを束縛し、最終chunkだけterminal reportとsealを行う。R2 outboxは成功時も失敗時も削除しない。
 
 中央では`collector-r2-sbi-vc`専用credentialを使い、registryも`collector-r2-importer → sbi-vc-trade`だけを許可する。SBI証券credentialをSBI VC Trade routeへ流用できない。
 
@@ -196,7 +198,7 @@ put/delete経路がなく、元bucketを変更しない。partial/failed runはL
 
 ## backfillの分割
 
-SBI証券の完全な1 runは中央Workerを最大約23回呼ぶ。Cloudflareの1 requestに連なるWorker呼び出し上限へ抵触しないよう、`backfill-page`は1回につきR2 objectを1件だけ走査し、manifestを見つけた場合も1 runだけを転送する。SBI VC Tradeはdata artifact 11件を超えるmanifestを`sync_import_worker_chain_limit`で中央state作成前に停止する。backfillではこの既知の上限を失敗でなくdeferredとして数え、R2 cursorを先へ進めるため、後続runをpoison pillとして遮断しない。大きなrun自体は後続Queue reconcilerがartifact単位で処理する。
+SBI証券の完全な1 runは中央Workerを最大約23回呼ぶ。Cloudflareの1 requestに連なるWorker呼び出し上限へ抵触しないよう、`backfill-page`は1回につきR2 objectを1件だけ走査し、manifestを見つけた場合も1 runだけを転送する。SBI VC Tradeのdata artifact 11件超はstaged inventoryへ8件ずつ送り、Queue reconcilerがopaque continuationを別top-level invocationとして再投入する。offsetが進まない応答は再投入せずfail closedとする。
 
 SBI新生銀行はmanifest込み最大6 objectで、中央呼び出しは最大17回に収まる。`backfill-page`は他sourceと同様にR2 objectを1件ずつ走査し、manifestを見つけたページだけ同期転送する。cursorはcollector側のローカルstateへ原子的に保存し、失敗manifestでは進めない。
 

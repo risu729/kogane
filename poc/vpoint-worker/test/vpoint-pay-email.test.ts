@@ -88,6 +88,8 @@ describe("V Point Pay notification email", () => {
       expectedRecipient: "vpointpay@takuk.me",
     });
     expect(puts).toHaveLength(2);
+    expect(puts[0]!.key).toEndWith(".eml");
+    expect(puts[1]!.key).toEndWith(".json");
     for (const put of puts) {
       expect(put.options.sha256).toBe(await sha256Hex(put.body));
     }
@@ -142,14 +144,14 @@ describe("V Point Pay notification email", () => {
       const parsed = await parseVPointPayEmail(notification("◇利用金額：1円"));
       const memory = memoryBucket(failedSuffix);
       await expect(store(memory.bucket, parsed!)).rejects.toThrow("synthetic_put_failure");
-      expect(memory.objects).toHaveLength(1);
-      const retainedKey = memory.objects[0]!.key;
+      expect(memory.objects).toHaveLength(failedSuffix === ".eml" ? 0 : 1);
+      const retainedKey = memory.objects[0]?.key;
 
       await expect(store(memory.bucket, parsed!)).resolves.toMatchObject({
         duplicate: false,
       });
       expect(memory.objects).toHaveLength(2);
-      expect(memory.puts.filter((key) => key === retainedKey)).toHaveLength(1);
+      if (retainedKey) expect(memory.puts.filter((key) => key === retainedKey)).toHaveLength(1);
       await expect(store(memory.bucket, parsed!)).resolves.toMatchObject({
         duplicate: true,
       });

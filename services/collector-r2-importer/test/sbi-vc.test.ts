@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { importSbiVcRun, parseSbiVcManifest } from "../src/sbi-vc";
+import { centralDescriptorSha256 } from "../src/central";
 
 const RUN_ID = "123e4567-e89b-42d3-a456-426614174000";
 const PREFIX = `raw/sbi-vc-trade/2026/09/03/${RUN_ID}/`;
@@ -65,13 +66,19 @@ class FakeCentral {
       return Response.json({ unitId: this.nextUnitId++ }, { status: 201 });
     }
     if (/\/artifacts$/u.test(path)) {
-      const value = this.nextDescriptor++;
+      this.nextDescriptor += 1;
       return Response.json(
         {
-          descriptorSha256: value.toString(16).padStart(64, "0"),
+          descriptorSha256: await centralDescriptorSha256(JSON.parse(requestBody)),
         },
         { status: 201 },
       );
+    }
+    if (/\/inventories$/u.test(path)) {
+      return Response.json({ inventoryId: 20 }, { status: 201 });
+    }
+    if (/\/inventories\/\d+\/items$/u.test(path)) {
+      return Response.json({ ok: true }, { status: 201 });
     }
     if (/\/reports$/u.test(path)) return immutableReport(this.reports, path, requestBody);
     if (/\/seal$/u.test(path)) return Response.json({ sealed: true }, { status: 201 });
@@ -429,7 +436,7 @@ describe("SBI VC Trade staged-run importer", () => {
     expect(secondCentral.requests).toHaveLength(0);
   });
 
-  test("defers a valid large partial prefix before creating central state", async () => {
+  test("stages and resumes a valid large partial prefix with opaque progress", async () => {
     const bucket = new FakeBucket();
     const entries = [
       staticArtifact("cash-balances"),
@@ -447,11 +454,38 @@ describe("SBI VC Trade staged-run importer", () => {
       },
     ]);
     const central = new FakeCentral();
-    await expect(importRun(bucket, central)).rejects.toMatchObject({
-      status: 409,
-      code: "sync_import_worker_chain_limit",
+    let result = await importRun(bucket, central);
+    expect(result).toMatchObject({
+      status: "deferred",
+      nextOffset: 8,
+      artifactCount: 105,
     });
-    expect(central.requests).toHaveLength(0);
+    expect(result.status === "deferred" ? result.continuation : "").toStartWith(
+      "sbi-vc-transfer-v1.",
+    );
+    if (result.status !== "deferred") throw new Error("expected deferred SBI VC import");
+    const tamperedContinuation = `${result.continuation.slice(0, -1)}${
+      result.continuation.endsWith("A") ? "B" : "A"
+    }`;
+    const tamperedCentral = new FakeCentral();
+    await expect(
+      importRun(bucket, tamperedCentral, "test-v1", tamperedContinuation),
+    ).rejects.toThrow("transfer_token_invalid");
+    expect(tamperedCentral.requests).toHaveLength(0);
+    while (result.status === "deferred") {
+      const previous = result.nextOffset;
+      result = await importRun(bucket, central, "test-v1", result.continuation);
+      if (result.status === "deferred") expect(result.nextOffset).toBeGreaterThan(previous);
+    }
+    expect(result).toMatchObject({
+      status: "sealed",
+      artifactCount: 105,
+      sealed: true,
+      allObjectsReused: false,
+    });
+    expect(
+      central.requests.filter((request) => /\/inventories\/20\/seal$/u.test(request.path)),
+    ).toHaveLength(1);
   });
 
   test("rejects a checksum mismatch before central state is created", async () => {
@@ -616,7 +650,12 @@ function stored(body: Uint8Array, customMetadata: Record<string, string>): Store
   return { body, customMetadata, contentType: "application/json" };
 }
 
-function importRun(bucket: FakeBucket, central: FakeCentral, importerVersion = "test-v1") {
+function importRun(
+  bucket: FakeBucket,
+  central: FakeCentral,
+  importerVersion = "test-v1",
+  continuation?: string,
+) {
   return importSbiVcRun({
     bucket: bucket as unknown as R2Bucket,
     centralService: central as unknown as Fetcher,
@@ -624,6 +663,7 @@ function importRun(bucket: FakeBucket, central: FakeCentral, importerVersion = "
     fingerprintKey: FINGERPRINT_KEY,
     importerVersion,
     manifestKey: MANIFEST_KEY,
+    ...(continuation ? { continuation } : {}),
   });
 }
 
