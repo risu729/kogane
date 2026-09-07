@@ -138,6 +138,19 @@ describe("offline CI coverage", () => {
     );
     expect(local.some((command) => command.includes("playwright install"))).toBe(false);
   });
+  test("production parser CI installs shared parser dependencies before checking without building UI", () => {
+    const plan = packagePlan("services/observation-pipeline", options);
+    expect(plan[1]).toEqual({
+      cwd: join(REPO_ROOT, "poc/observation-pipeline"),
+      command: ["bun", "install", "--frozen-lockfile"],
+    });
+    expect(plan[2]?.command).toEqual(["bun", "run", "typecheck"]);
+    expect(
+      plan.some((step) =>
+        step.command.some((part) => part.startsWith("build") || part.includes("playwright")),
+      ),
+    ).toBe(false);
+  });
   test("reader CI builds both frontends and synthetic data before Worker checks", () => {
     const plan = packagePlan("services/evidence-browser", options);
     const assetBuild = plan.findIndex(

@@ -2,7 +2,8 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
-import { sweep } from "../src/worker.ts";
+import { sweep, parseJob } from "../src/worker.ts";
+import { smbcDirectBalance } from "../../../poc/observation-pipeline/src/parsers/smbc-direct.ts";
 import {
   providerTimestamp,
   wrapper,
@@ -626,4 +627,54 @@ test("workerd discovers and parses MoneyForward canonical text/html descriptors"
       "SELECT count(*) AS n FROM transaction_observations o JOIN parse_runs p ON p.id=o.parse_run_id WHERE p.fetch_artifact_id=90 AND p.status='ok'",
     ).first<number>("n"),
   ).toBe(2);
+}, 30000);
+
+test("late old parser publication cannot replace a numerically newer successful version", async () => {
+  for (const [id, existingVersion, incomingVersion] of [
+    [80, "1.10.0", "1.2.0"],
+    [81, "1.2.0", "1.10.0"],
+  ] as const) {
+    await artifact(id, "smbc-bank", "balance-normalized", "balance.normalized.json", {
+      amount: 1,
+      currency: "JPY",
+      observedAt: "2026-09-07T00:00:00.000Z",
+    });
+    const old = await env.DB.prepare(
+      "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,'smbc-direct-balance',?,'2026-01-01T00:00:00.000Z','ok','[]') RETURNING id",
+    )
+      .bind(id, existingVersion)
+      .first<{ id: number }>();
+    await env.DB.prepare(
+      "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status) VALUES(?,'smbc-direct-balance',?,'pending')",
+    )
+      .bind(id, incomingVersion)
+      .run();
+    expect(
+      await parseJob(
+        env,
+        {
+          fetch_artifact_id: id,
+          parser_name: "smbc-direct-balance",
+          parser_version: incomingVersion,
+          attempts: 0,
+        },
+        { ...smbcDirectBalance, version: incomingVersion },
+      ),
+    ).toBe("parsed");
+    const current = await env.DB.prepare(
+      "SELECT id,parser_version FROM parse_runs WHERE fetch_artifact_id=? AND status='ok' AND superseded_by_parse_run_id IS NULL",
+    )
+      .bind(id)
+      .all<{ id: number; parser_version: string }>();
+    expect(current.results).toHaveLength(1);
+    expect(current.results[0]?.parser_version).toBe("1.10.0");
+    const superseded = await env.DB.prepare(
+      "SELECT parser_version,superseded_by_parse_run_id FROM parse_runs WHERE fetch_artifact_id=? AND superseded_by_parse_run_id IS NOT NULL",
+    )
+      .bind(id)
+      .first<{ parser_version: string; superseded_by_parse_run_id: number }>();
+    expect(superseded?.parser_version).toBe("1.2.0");
+    expect(superseded?.superseded_by_parse_run_id).toBe(current.results[0]!.id);
+    if (id === 80) expect(current.results[0]!.id).toBe(old!.id);
+  }
 }, 30000);

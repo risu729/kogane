@@ -1404,10 +1404,21 @@ Phase 3 is done when:
 
 A read-only replay of all 22 then-rejected `global-pass-activity@1.0.0`
 artifacts verified each object's checksum and byte count before parsing. Twenty
-were rejected by the activity-table cardinality check and two by other parser
-checks. The newest rejected example had a valid selected-month selector but no
-tables; an explicit, audited empty-result marker was not established. This is
-an unsupported/unverified source shape, not proof of an empty month or a failed
-collection. The parser remains unchanged and these captures remain visible as
-parse failures with their raw evidence. Do not replace these failures with zero
-transactions merely because no activity table was found.
+have no tables and were rejected by the activity-table cardinality check. All
+22 have one month selector, no password inputs, and no identified Turnstile or
+error markup. The zero-table representative has the six-form statement-shell
+template and an empty `informationMsg` element; an explicit, audited empty-result
+marker was not established. It is an unsupported selector-only statement shape,
+not proof of an empty month or a failed collection.
+
+The other two captures contain the normal outer activity table plus nine compact
+and nine expanded transaction views, and an additional two-header, one-data-cell
+table including a `Transaction Detail` header. They fail the unclassified-table
+guard. That additional template may contain financial information and must not
+be ignored just to admit the other rows. A follow-up should map its enclosing
+row, date/status and relationships to the other views using existing stored
+evidence, then add a synthetic fixture and exact parser contract. For zero-table
+pages, establish the provider's explicit empty-state evidence or collection
+readiness signal before adding empty-snapshot support. The parser remains
+unchanged and these captures remain visible as parse failures with raw evidence.
+No live financial-institution requests were used for this diagnosis.

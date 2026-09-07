@@ -30,6 +30,8 @@ Source R2 objects and existing Layer A records are not modified or deleted.
 - `kogane-observation-pipeline`: private scheduled Worker, no public route or
   workers.dev endpoint; every five minutes scans central evidence and processes
   durable D1 jobs. Migration 0017 was applied remotely (37 commands).
+  Version `2d5ce979-7f21-4bd9-a39d-0525c99c0d19` includes numeric-version
+  publication guards so late older parses cannot replace newer results.
 - `kogane-evidence-browser`: existing protected UI, updated to read Layer B from
   the existing D1. Version `7abed494-1b29-4c2d-9909-fe702cbc73e1`.
   Existing Access application, issuer/audience and independent JWT verification
@@ -87,6 +89,35 @@ rejections (retired versions excluded). The importer repair queue still had 113
 messages and its DLQ was empty; queue provisioning and deployment do not prove
 that every source's historical import has completed. Source-specific follow-up
 results are recorded below as they are verified.
+
+Follow-up diagnoses distinguish a code mismatch from genuinely insufficient
+evidence. SBI yen 1.0.2 accepts the audited legacy schema with only the primary
+limit flag (still explicitly false); all 30 previously rejected captures replayed
+successfully. Sony WALLET 1.0.2 handles blank optional usage amounts and preserves
+unmodelled original-currency values without inventing currency exponents or fees;
+all 12 distinct payloads covering 40 failed artifacts replayed successfully.
+Malformed comma grouping remains rejected, including in supplemental amounts.
+
+MoneyForward already had 10 sealed successful runs in central storage: its absent
+jobs were caused by a MIME acceptance mismatch, not the remaining repair queue.
+The importer declares verified HTML as `text/html`. Monthly 2.0.1 and evidence
+1.0.1 accept that exact MIME as well as the charset-qualified form, with strict
+UTF-8 decoding and the original source/identity/body checks intact. Its subsequent
+real-data replay results must be assessed separately from this routing fix.
+
+Independent subagent review covered the persistence/publication path, protected
+UI queries, parser changes and diagnostic scripts. A review caught a malformed
+comma grouping case in optional Sony amounts; it was fixed with negative and
+positive regressions before deployment. Local full observation tests passed
+333/333, evidence-browser Workers tests 23/23, backend workerd tests 11/11,
+and CI package-registry tests 16/16. Typechecks and dry runs passed. The shared
+repository checks passed using existing GitHub authentication after unauthenticated
+action-pin verification hit the shared-IP API rate limit.
+
+The first clean GitHub runner found a missing shared-parser dependency install
+that the developer checkout already had. The explicit CI plan now installs the
+parser package's frozen dependencies before Worker checks, without building the
+UI or starting a collector. A regression verifies this ordering.
 
 ## Resource and rollback inventory
 

@@ -217,7 +217,7 @@ export function observationInsert(
     .bind(id, JSON.stringify(rows));
 }
 
-async function parseJob(
+export async function parseJob(
   env: Env,
   job: Job,
   parser: Parser,
@@ -248,6 +248,12 @@ async function parseJob(
   let parseId: number | undefined;
   let failureStage = "metadata_or_raw_read_failed";
   try {
+    const version = parser.version.split(".").map(Number);
+    if (
+      !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(parser.version) ||
+      version.some((part) => !Number.isSafeInteger(part))
+    )
+      throw new PipelineError("parser_version_invalid");
     const row = await env.DB.prepare(artifactSql + " AND a.id=?")
       .bind(job.fetch_artifact_id)
       .first<ArtifactRow>();
@@ -307,10 +313,24 @@ async function parseJob(
     // occur in one D1 transaction; empty successful parses are published too.
     const publish = await env.DB.batch([
       env.DB.prepare(
-        `UPDATE parse_runs SET status='ok' WHERE id=? AND EXISTS(SELECT 1 FROM observation_parse_jobs WHERE lease_token=? AND status='running' AND lease_until_ms>?)`,
-      ).bind(parseId, token, Date.now()),
+        `UPDATE parse_runs SET status='ok',superseded_by_parse_run_id=(
+          SELECT newer.id FROM parse_runs newer
+          WHERE newer.fetch_artifact_id=parse_runs.fetch_artifact_id
+            AND newer.parser_name=parse_runs.parser_name AND newer.status='ok'
+            AND newer.superseded_by_parse_run_id IS NULL
+            AND (
+              json_extract('['||replace(newer.parser_version,'.',',')||']','$[0]'),
+              json_extract('['||replace(newer.parser_version,'.',',')||']','$[1]'),
+              json_extract('['||replace(newer.parser_version,'.',',')||']','$[2]')
+            ) > (?,?,?)
+          ORDER BY
+            json_extract('['||replace(newer.parser_version,'.',',')||']','$[0]') DESC,
+            json_extract('['||replace(newer.parser_version,'.',',')||']','$[1]') DESC,
+            json_extract('['||replace(newer.parser_version,'.',',')||']','$[2]') DESC LIMIT 1
+        ) WHERE id=? AND EXISTS(SELECT 1 FROM observation_parse_jobs WHERE lease_token=? AND status='running' AND lease_until_ms>?)`,
+      ).bind(version[0]!, version[1]!, version[2]!, parseId, token, Date.now()),
       env.DB.prepare(
-        `UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE fetch_artifact_id=? AND parser_name=? AND id<>? AND status='ok' AND superseded_by_parse_run_id IS NULL AND EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=? AND p.status='ok')`,
+        `UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE fetch_artifact_id=? AND parser_name=? AND id<>? AND status='ok' AND superseded_by_parse_run_id IS NULL AND EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=? AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL)`,
       ).bind(parseId, row.id, parser.name, parseId, parseId),
       env.DB.prepare(
         `UPDATE observation_parse_jobs SET status='done',last_error_code=NULL WHERE lease_token=? AND EXISTS(SELECT 1 FROM parse_runs WHERE id=? AND status='ok')`,

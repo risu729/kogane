@@ -14,6 +14,7 @@ export interface PackagePolicy {
   browser?: boolean;
   additionalDryRun?: boolean;
   evidenceAssets?: boolean;
+  sharedParserDependencies?: boolean;
 }
 
 function worker(path: string): PackagePolicy {
@@ -29,6 +30,7 @@ export const CI_PACKAGES: PackagePolicy[] = [
     path: "services/observation-pipeline",
     scripts: { test, typecheck, "cf:check": dryRun },
     checks: ["typecheck", "test", "cf:check"],
+    sharedParserDependencies: true,
   },
   {
     path: "services/evidence-browser",

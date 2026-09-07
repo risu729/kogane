@@ -31,6 +31,9 @@ Observation inserts remain hidden under a pending parse run. A final atomic D1
 batch publishes success, supersedes the older parser version and completes the
 job. A parser failure never supersedes existing observations. Metadata and all
 observation rows are append-only; original raw artifacts remain authoritative.
+Publication compares numeric major/minor/patch versions: a late older parse is
+retained as superseded, never made current over a newer successful parse. Parser
+versions must be three safe nonnegative integers, with no prerelease suffix.
 MyJCB statement state and period come from the verified central manifest, whose
 artifact ID is retained as metadata provenance.
 
