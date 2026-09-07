@@ -15,6 +15,33 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## MoneyForward description-template repair (monthly parser 2.0.2)
+
+Read-only, size/SHA-256-verified inspection of an affected monthly artifact found
+plain text tooltip cells containing the provider's quoted-string concatenation
+template, not script child elements. Earlier parsers recognized that template
+for signed amounts but copied description cells literally. An in-memory replay
+of the affected artifact with 2.0.2 emitted 69 observations, normalized all 69
+descriptions, and recovered the user-reported merchant label without printing
+financial bodies.
+
+Version 2.0.2 recognizes only the exact quote/plus envelope and at most 16 quoted
+string literals, with explicitly supported escapes and a 5,000-character field
+bound. It never evaluates JavaScript; calls, variables, interpolation, malformed
+escapes, and dynamic expressions are rejected. Ordinary merchant `+` characters
+remain unchanged. `extra.cells[0]` retains the captured description text, and
+`extra._kogane.descriptionEncoding` records whether static concatenation was
+decoded. Raw evidence is not changed.
+
+Deploying the parser alone does not repair stored observations. After deployment,
+run bounded private observation sweeps through a complete discovery cycle and
+drain the new `moneyforward-monthly-transactions@2.0.2` jobs. Successful reparses
+supersede the previous version through the existing publication mechanism;
+historical parses and their raw provenance remain accessible. Unsupported legacy
+account metadata still fails closed and must not be treated as repaired merely
+because the new version was deployed. Verify current descriptions and the new
+version's job outcomes after catch-up, without logging provider values.
+
 ## What an observation is
 
 An observation is one statement of the form _source X said Y_. It is

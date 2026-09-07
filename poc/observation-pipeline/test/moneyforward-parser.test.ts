@@ -39,6 +39,58 @@ const meta = (overrides: Partial<ArtifactMeta> = {}): ArtifactMeta => ({
 });
 
 describe("moneyforward Layer B parsers", () => {
+  test("decodes only static provider description concatenation and retains the captured cell", () => {
+    const parseDescription = (description: string) =>
+      moneyForwardMonthlyTransactions.parse(
+        new TextEncoder().encode(
+          new TextDecoder()
+            .decode(fixture("account-01-month-2099-02.html"))
+            .replace("ANONYMOUS PURCHASE", description),
+        ),
+        meta(),
+      );
+    const template = "' + 'ANONYMOUS PURCHASE'+ ''+ '' + '";
+    const result = parseDescription(template);
+    expect(moneyForwardMonthlyTransactions.version).toBe("2.0.2");
+    expect(result.observations[0]).toMatchObject({
+      kind: "transaction",
+      description: "ANONYMOUS PURCHASE",
+      amountMinor: -1234,
+      extra: {
+        cells: [template, "'+\"\"+'-1,234'+'"],
+        _kogane: { descriptionEncoding: "static-string-concatenation" },
+      },
+    });
+    expect(result.observations[0]!.externalId).toBe(
+      parseDescription("ANONYMOUS PURCHASE").observations[0]!.externalId,
+    );
+    for (const [encoded, expected] of [
+      [String.raw`' + 'BOOK\'S + SHOP' + '' + '`, "BOOK'S + SHOP"],
+      [String.raw`' + "BOOK 'quoted'" + ' \\ shop' + '`, "BOOK 'quoted' \\ shop"],
+      [String.raw`' + '\u65e5\u672c' + '\x20SHOP' + '`, "日本 SHOP"],
+      [String.raw`' + '\uD83D\uDE00 SHOP' + '' + '`, "😀 SHOP"],
+      ["C++ BOOKS", "C++ BOOKS"],
+      ["+ PLUS SHOP", "+ PLUS SHOP"],
+      ["O'BRIEN + SONS", "O'BRIEN + SONS"],
+    ]) {
+      expect(parseDescription(encoded!).observations[0]).toMatchObject({ description: expected });
+    }
+    for (const invalid of [
+      "' + fetch('https://invalid.test') + '",
+      "' + 'SHOP' + variable + '",
+      "' + `SHOP` + '",
+      "' + 'SHOP' + 1 + '",
+      "' + 'SHOP' +",
+      "' + 'SHOP' + + '",
+      "' + '' + '",
+      String.raw`' + '\uD800' + '`,
+      String.raw`' + '\0SHOP' + '`,
+      String.raw`' + '\uZZZZ' + '`,
+      "' + " + Array(17).fill("'SHOP'").join("+") + " + '",
+    ])
+      expect(() => parseDescription(invalid)).toThrow(/description template/u);
+  });
+
   test("routes canonical central text/html without relaxing UTF-8 or metadata validation", () => {
     for (const [parser, dataset, artifactKey] of [
       [moneyForwardMonthlyTransactions, "monthly-transactions", "account-01-month-2099-02.html"],
