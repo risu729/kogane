@@ -732,6 +732,51 @@ describe("parse runs", () => {
     expect(count(store, "transaction_observations")).toBe(2);
   });
 
+  test("current SBI Shinsei transactions collapse refetches only within source and account", () => {
+    const store = tempStore();
+    const directory = mkdtempSync(join(tmpdir(), "kogane-sbi-shinsei-overlap-"));
+    const cases = [
+      ["sbi-shinsei-bank", "sbi-shinsei:primary", "older-refetch"],
+      ["sbi-shinsei-bank", "sbi-shinsei:primary", "newer-refetch"],
+      ["sbi-shinsei-bank", "sbi-shinsei:secondary", "other-account"],
+      ["synthetic-other-bank", "sbi-shinsei:primary", "other-source"],
+    ] as const;
+    for (const [index, [sourceId, sourceAccount, description]] of cases.entries()) {
+      const path = join(directory, `${index}.json`);
+      writeFileSync(path, "{}");
+      ingestFile(store, path, {
+        source: { id: sourceId, provider: sourceId },
+        mime: "application/json",
+        fetchedAt: `2026-09-07T00:00:0${index}Z`,
+      });
+      const artifactRow = store.db
+        .query("SELECT id FROM fetch_artifacts ORDER BY id DESC LIMIT 1")
+        .get() as { id: number };
+      const parseRunId = insertParseRun(store, {
+        artifactId: artifactRow.id,
+        parserName: "sbi-shinsei-top-balances-and-activity",
+        parserVersion: "0.1.0",
+        parsedAt: `2026-09-07T00:01:0${index}Z`,
+        status: "ok",
+        warnings: [],
+      });
+      insertObservation(store, parseRunId, {
+        kind: "transaction",
+        sourceAccount,
+        externalId: "SYNTHETIC-SHARED-REFERENCE",
+        description,
+        rawLocator: "json:$.responseParam.activity.responseParam.activityDetails[0]",
+        extra: { _kogane: { sourceView: "top_activity" } },
+      });
+    }
+    expect(currentTransactions(store).map((row) => row.description)).toEqual([
+      "other-source",
+      "other-account",
+      "newer-refetch",
+    ]);
+    expect(count(store, "transaction_observations")).toBe(4);
+  });
+
   test("a newer parser version supersedes, never deletes", () => {
     const store = storeWithFakeArtifact();
     runParsers(store, [fakeParser("0.1.0", "old")]);

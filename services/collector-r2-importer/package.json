@@ -14,6 +14,7 @@
     "cf:check:audit-myjcb": "wrangler deploy --dry-run --config wrangler.audit-myjcb.jsonc",
     "cf:check:audit-sony-layer-b": "wrangler deploy --dry-run --config wrangler.audit-sony-layer-b.jsonc",
     "cf:check:audit-smbc-direct-layer-b": "wrangler deploy --dry-run --config wrangler.audit-smbc-direct-layer-b.jsonc",
+    "cf:check:audit-sbi-shinsei": "wrangler deploy --dry-run --config wrangler.audit-sbi-shinsei.jsonc",
     "audit:vpoint-r2": "bash scripts/audit-v-point-r2.sh",
     "audit:moneyforward-r2": "bash scripts/audit-moneyforward-r2.sh",
     "audit:vpoint-pay-email-r2": "bash scripts/audit-v-point-pay-email-r2.sh",
@@ -22,6 +23,7 @@
     "audit:myjcb-r2": "bash scripts/audit-myjcb-r2.sh",
     "audit:sony-layer-b-r2": "bash scripts/audit-sony-layer-b-r2.sh",
     "audit:smbc-direct-layer-b-r2": "bash scripts/audit-smbc-direct-layer-b-r2.sh",
+    "audit:sbi-shinsei-r2": "bash scripts/audit-sbi-shinsei-r2.sh",
     "cf:deploy": "wrangler deploy"
   },
   "dependencies": {

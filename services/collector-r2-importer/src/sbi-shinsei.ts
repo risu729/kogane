@@ -53,6 +53,17 @@ interface VerifiedArtifact {
   semantic?: JsonObject;
 }
 
+export interface ValidatedSbiShinseiArtifact {
+  manifest: SbiShinseiArtifactManifest;
+  bytes: Uint8Array;
+  value: JsonObject;
+}
+
+export interface ValidatedSbiShinseiRun {
+  manifest: SbiShinseiManifest;
+  artifacts: ValidatedSbiShinseiArtifact[];
+}
+
 interface NormalizedSnapshot extends JsonObject {
   schemaVersion: "sbi-shinsei-v1";
   capturedAt: string;
@@ -86,34 +97,19 @@ export async function importSbiShinseiRun(options: {
   let phase = "manifest_validation";
 
   try {
-    const manifestObject = await options.bucket.get(options.manifestKey);
-    if (!manifestObject) throw new ImportError(404, "manifest_not_found");
-    if (manifestObject.size > MAX_MANIFEST_BYTES) {
-      throw new ImportError(413, "manifest_too_large");
-    }
-    assertJsonContentType(manifestObject, "manifest_content_type_mismatch");
-    const manifestBytes = new Uint8Array(await manifestObject.arrayBuffer());
-    const sourceManifestSha256 = await sha256Hex(manifestBytes);
-    assertNativeSha256(manifestObject, sourceManifestSha256);
-    const manifest = parseSbiShinseiManifest(manifestBytes, options.manifestKey);
-    assertManifestMetadata(manifestObject.customMetadata, manifest, sourceManifestSha256);
+    const validated = await validateSbiShinseiRun({
+      bucket: options.bucket,
+      manifestKey: options.manifestKey,
+    });
+    const { manifest } = validated;
     const centralManifestBytes = sanitizeManifest(manifest);
     const centralManifestSha256 = await sha256Hex(centralManifestBytes);
     expectedArtifactCount = manifest.artifacts.length + 1;
-    const prefix = options.manifestKey.slice(0, -"manifest.json".length);
-
-    phase = "prefix_validation";
-    await assertExactPrefix(options.bucket, prefix, [
-      ...manifest.artifacts.map((artifact) => artifact.key),
-      options.manifestKey,
-    ]);
 
     phase = "artifact_validation";
     const verified: VerifiedArtifact[] = [];
-    for (const artifact of manifest.artifacts) {
-      const bytes = await readVerifiedArtifact(options.bucket, artifact, manifest.runId);
-      const parsed = parseJson(bytes, "artifact_json_invalid");
-      validateDatasetPayload(artifact.dataset as Dataset, parsed);
+    for (const validatedArtifact of validated.artifacts) {
+      const { manifest: artifact, bytes, value: parsed } = validatedArtifact;
       const centralBytes =
         artifact.dataset === "normalized" ? bytes : sanitizeProviderResponse(parsed);
       verified.push({
@@ -126,12 +122,7 @@ export async function importSbiShinseiRun(options: {
           : {}),
       });
     }
-    validateCrossArtifactMeaning(manifest, verified);
     for (const artifact of verified) delete artifact.semantic;
-    await assertExactPrefix(options.bucket, prefix, [
-      ...manifest.artifacts.map((artifact) => artifact.key),
-      options.manifestKey,
-    ]);
 
     phase = "central_create";
     const central = new CentralClient(
@@ -297,6 +288,47 @@ export async function importSbiShinseiRun(options: {
     }
     throw error;
   }
+}
+
+export async function validateSbiShinseiRun(options: {
+  bucket: R2Bucket;
+  manifestKey: string;
+}): Promise<ValidatedSbiShinseiRun> {
+  const manifestObject = await options.bucket.get(options.manifestKey);
+  if (!manifestObject) throw new ImportError(404, "manifest_not_found");
+  if (manifestObject.size > MAX_MANIFEST_BYTES) {
+    throw new ImportError(413, "manifest_too_large");
+  }
+  assertJsonContentType(manifestObject, "manifest_content_type_mismatch");
+  const manifestBytes = new Uint8Array(await manifestObject.arrayBuffer());
+  const sourceManifestSha256 = await sha256Hex(manifestBytes);
+  assertNativeSha256(manifestObject, sourceManifestSha256);
+  const manifest = parseSbiShinseiManifest(manifestBytes, options.manifestKey);
+  assertManifestMetadata(manifestObject.customMetadata, manifest, sourceManifestSha256);
+  const prefix = options.manifestKey.slice(0, -"manifest.json".length);
+  const expectedKeys = [...manifest.artifacts.map((artifact) => artifact.key), options.manifestKey];
+  await assertExactPrefix(options.bucket, prefix, expectedKeys);
+
+  const artifacts: ValidatedSbiShinseiArtifact[] = [];
+  const semantic: VerifiedArtifact[] = [];
+  for (const artifact of manifest.artifacts) {
+    const bytes = await readVerifiedArtifact(options.bucket, artifact, manifest.runId);
+    const value = parseJson(bytes, "artifact_json_invalid");
+    validateDatasetPayload(artifact.dataset as Dataset, value);
+    artifacts.push({ manifest: artifact, bytes, value });
+    semantic.push({
+      manifest: artifact,
+      centralSha256: "",
+      centralByteSize: 0,
+      ...(artifact.dataset === "top-accounts-balance-and-activity" ||
+      artifact.dataset === "normalized"
+        ? { semantic: value }
+        : {}),
+    });
+  }
+  validateCrossArtifactMeaning(manifest, semantic);
+  await assertExactPrefix(options.bucket, prefix, expectedKeys);
+  return { manifest, artifacts };
 }
 
 export function parseSbiShinseiManifest(
@@ -491,7 +523,7 @@ function validateCompleteness(
 
 function validateDatasetPayload(dataset: Dataset, value: JsonObject): void {
   if (dataset === "normalized") {
-    parseNormalized(value);
+    parseSbiShinseiNormalized(value);
     return;
   }
   validateSbiShinseiResponse(RAW_SCHEMAS[dataset], value);
@@ -508,7 +540,7 @@ function validateCrossArtifactMeaning(
     (entry) => entry.manifest.dataset === "normalized",
   )?.semantic;
   if (normalizedValue) {
-    const normalized = parseNormalized(normalizedValue);
+    const normalized = parseSbiShinseiNormalized(normalizedValue);
     if (
       normalized.capturedAt < manifest.startedAt ||
       normalized.capturedAt > manifest.completedAt
@@ -559,7 +591,7 @@ function validateLegacyWindow(
   }
 }
 
-function parseNormalized(value: unknown): NormalizedSnapshot {
+export function parseSbiShinseiNormalized(value: unknown): NormalizedSnapshot {
   const root = recordConflict(value, "normalized_schema_invalid");
   exactShapeConflict(
     root,
@@ -711,10 +743,14 @@ async function assertExactPrefix(
   const actual: string[] = [];
   let cursor: string | undefined;
   do {
+    const previousCursor = cursor;
     const listed = await bucket.list({ prefix, limit: 1_000, ...(cursor ? { cursor } : {}) });
     actual.push(...listed.objects.map((object) => object.key));
     cursor = listed.truncated ? listed.cursor : undefined;
     if (listed.truncated && !cursor) throw new ImportError(409, "prefix_cursor_missing");
+    if (listed.truncated && cursor === previousCursor) {
+      throw new ImportError(409, "prefix_cursor_did_not_advance");
+    }
     if (actual.length > DATASETS.length + 1) {
       throw new ImportError(409, "prefix_inventory_too_large");
     }
