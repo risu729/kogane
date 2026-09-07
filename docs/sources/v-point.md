@@ -541,3 +541,25 @@ terminal run reportの`producerVersion`には固定source契約`vpoint-r2-v3`を
 実 R2を変更せずに24 manifestを監査し、v1 5件、v2 19件、成功13件、失敗11件、reconciliation参照10件がstrict contractへ適合した。`bun run audit:vpoint-r2`で同じaggregate-only監査を再実行でき、本文、値、object key、個別hash、secretを出力しない。reconciliationは旧3件と現行7件でexact policy文字列が異なるため、観測した2値だけを明示的に受理し、任意文字列への緩和はしていない。candidateは実在history page・実row count内index・`sha256(JSON.stringify(row))`へ束縛し、entry内重複を拒否する。
 
 V Moneyは同一session/APIで取得されるが別の電子マネー台帳である。現時点の監査済みaccountは全runで空pageなので、Layer AのV Point contractは空のV Money観測だけを保存可能とし、非空になった場合はfail closedする。非空履歴を自動帰属させる前に、独立source ID、asset/account境界、parser、reconciliation方針を別PRで設計する。
+
+## 追記: strict Layer B parser と本番aggregate canary（2026-09-07）
+
+Layer Bは、merged Layer Aが厳密検証した`balance-info`、`smfg-point`、
+`history-page-*`だけを金融観測へ変換する。`collection-summary`と履歴graphは
+完全性確認用で、空の`vmoney-history-page-*`は別asset境界なので観測を作らない。
+`point_type`、`point_div`、`get_month`の数値enumには名称を推測せず、元fieldと
+値を`extra`へ保持する。履歴の金額と符号は`point`値をそのまま使う。
+
+履歴行には安定したprovider IDが観測されていないため、`externalId`や行間の
+reconciliation identityを作らない。重複を削らず全occurrenceをraw locator付きで
+保存し、current query側で最新の完全runだけを一つのsnapshotとして選ぶ。これに
+より日次の全履歴再取得を二重計上せず、最新runから消えた履歴や期限bucketも
+currentに残さない。
+
+本番R2に対するlocal/read-onlyのaggregate canaryは167 objectを走査し、現行strict
+contractで26 manifestを有効、139 objectを非manifestとしてskip、2 manifestを固定の
+validation failure categoryへ縮約した。有効manifestはsuccess 15、failed 11、partial 0。
+success 15件の金融artifact 111件をすべてparseし、balance 45件とtransaction 2,262件を
+得た。failed runは0 observationで、全transactionに発明したexternal IDがないことも
+aggregateで確認した。object key、hash、body、provider text、個別金融値、credential、
+session値は出力・保存していない。監査はR2へのwrite/deleteやWorker deployを行わない。

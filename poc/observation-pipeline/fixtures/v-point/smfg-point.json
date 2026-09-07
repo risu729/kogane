@@ -1,0 +1,4 @@
+{
+  "status": { "code": "0000", "response": "" },
+  "results": { "get_point": { "point_smbc": 11, "point_smcc": 22 } }
+}

@@ -87,6 +87,7 @@ interface PageInfo {
 
 interface VerifiedArtifact {
   artifact: ArtifactManifest;
+  bytes: Uint8Array;
   page?: PageInfo;
   historyRows?: JsonObject[];
   summary?: SummaryInfo;
@@ -160,12 +161,43 @@ export interface AuditVPointResult {
   hasReconciliation: boolean;
 }
 
+export interface ValidatedVPointLayerBRun {
+  schemaVersion: SchemaVersion;
+  status: Status;
+  failureCount: number;
+  completedAt: string;
+  artifacts: Array<{
+    dataset: string;
+    bytes: Uint8Array;
+    sha256: string;
+  }>;
+}
+
 /** Read-only contract audit used before enabling a new importer revision. */
 export async function auditVPointRun(options: {
   bucket: R2Bucket;
   reconciliationBucket: R2Bucket;
   manifestKey: string;
 }): Promise<AuditVPointResult> {
+  const run = await validateVPointLayerBRun(options);
+  return {
+    source: SOURCE,
+    schemaVersion: run.schemaVersion,
+    status: run.status,
+    artifactCount: run.artifacts.length,
+    hasReconciliation: run.hasReconciliation,
+  };
+}
+
+/**
+ * Reuses the complete strict Layer-A contract before exposing artifact bytes to
+ * the local, read-only Layer-B aggregate canary.
+ */
+export async function validateVPointLayerBRun(options: {
+  bucket: R2Bucket;
+  reconciliationBucket: R2Bucket;
+  manifestKey: string;
+}): Promise<ValidatedVPointLayerBRun & { hasReconciliation: boolean }> {
   const loaded = await readManifest(options.bucket, options.manifestKey);
   const manifest = loaded.manifest;
   const prefix = options.manifestKey.slice(0, -"manifest.json".length);
@@ -176,7 +208,7 @@ export async function auditVPointRun(options: {
   const verified: VerifiedArtifact[] = [];
   for (const artifact of manifest.artifacts) {
     const bytes = await readVerifiedArtifact(options.bucket, artifact);
-    verified.push({ artifact, ...validateArtifactPayload(artifact.dataset, bytes) });
+    verified.push({ artifact, bytes, ...validateArtifactPayload(artifact.dataset, bytes) });
   }
   validateSemantics(manifest, verified);
   if (manifest.emailReconciliation) {
@@ -192,10 +224,15 @@ export async function auditVPointRun(options: {
     options.manifestKey,
   ]);
   return {
-    source: SOURCE,
     schemaVersion: manifest.schemaVersion,
     status: manifest.status,
-    artifactCount: manifest.artifacts.length,
+    failureCount: manifest.failures.length,
+    completedAt: manifest.completedAt,
+    artifacts: verified.map((entry) => ({
+      dataset: entry.artifact.dataset,
+      bytes: entry.bytes,
+      sha256: entry.artifact.sha256,
+    })),
     hasReconciliation: manifest.emailReconciliation !== undefined,
   };
 }
@@ -234,7 +271,7 @@ export async function importVPointRun(options: ImportVPointOptions): Promise<Imp
     const verified: VerifiedArtifact[] = [];
     for (const artifact of manifest.artifacts) {
       const bytes = await readVerifiedArtifact(options.bucket, artifact);
-      verified.push({ artifact, ...validateArtifactPayload(artifact.dataset, bytes) });
+      verified.push({ artifact, bytes, ...validateArtifactPayload(artifact.dataset, bytes) });
     }
     validateSemantics(manifest, verified);
 

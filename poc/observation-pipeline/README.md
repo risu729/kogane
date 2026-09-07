@@ -75,7 +75,7 @@ transaction / balance / position / valuation observations   layer B
 evidence browser (React client in web/, served by serve.ts)
 ```
 
-Twenty-six parsers are registered against shapes the collectors already produce:
+Twenty-nine parsers are registered against shapes the collectors already produce:
 
 | Parser                                  | Artifact                                           | Emits                                        |
 | --------------------------------------- | -------------------------------------------------- | -------------------------------------------- |
@@ -105,6 +105,20 @@ Twenty-six parsers are registered against shapes the collectors already produce:
 | `sbi-shinsei-top-balances-and-activity` | SBI Shinsei `top-accounts-balance-and-activity`    | balances, valuations, transactions           |
 | `sbi-shinsei-yen-deposit-account`       | SBI Shinsei `yen-deposit-account`                  | source-view-scoped balances                  |
 | `global-pass-activity`                  | GLOBAL PASS sanitized `globalpass-activity` HTML   | transactions                                 |
+| `v-point-balance-info`                  | V Point common/store expiry buckets                | point balances                               |
+| `v-point-smfg-point`                    | V Point SMFG display breakdown                     | separately scoped point balances             |
+| `v-point-history-page`                  | V Point complete paginated history                 | signed point transactions                    |
+
+V Point registers only the three financial Layer-A artifact families.
+`vmoney-history-page-*` is the observed empty boundary for a separate asset,
+and `collection-summary` plus the history graph are completeness metadata, not
+additional financial rows. Numeric `point_type`, `point_div`, and `get_month`
+values remain provider enums in `extra`; the parser assigns them no names.
+History amounts retain the sign of the provider `point` field. Since the source
+does not provide a stable row id, no `externalId` or reconciliation identity is
+created. Current transaction and balance queries select the newest complete V
+Point run as one snapshot, preventing repeated full-history captures from being
+double counted while preserving every occurrence and expiry bucket in that run.
 
 Mobile Suica deliberately has one canonical Layer-B route. The collector's
 Shift-JIS `sf-history-html` is provider evidence and `collection-summary` is

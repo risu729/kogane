@@ -203,6 +203,40 @@ export function currentTransactions(store: Store): TransactionRow[] {
          SELECT fetch_artifact_id
          FROM ranked_global_pass_snapshots
          WHERE snapshot_rank = 1
+       ), eligible_vpoint_runs AS (
+         SELECT DISTINCT f.id AS fetch_run_id, fa.source_id, f.completed_at
+         FROM parse_runs p
+         JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+         JOIN fetch_runs f ON f.id = fa.fetch_run_id
+         WHERE ${CURRENT}
+           AND p.parser_name IN (
+             'v-point-balance-info', 'v-point-smfg-point', 'v-point-history-page'
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM parse_runs failed_p
+             JOIN fetch_artifacts failed_fa ON failed_fa.id = failed_p.fetch_artifact_id
+             WHERE failed_fa.fetch_run_id = f.id
+               AND failed_p.superseded_by_parse_run_id IS NULL
+               AND failed_p.status <> 'ok'
+               AND (
+                 failed_fa.dataset IN ('balance-info', 'smfg-point')
+                 OR failed_fa.dataset LIKE 'history-page-%'
+               )
+           )
+         GROUP BY f.id, fa.source_id, f.completed_at
+         HAVING COUNT(DISTINCT p.parser_name) = 3
+       ), ranked_vpoint_runs AS (
+         SELECT fetch_run_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY source_id
+                  ORDER BY completed_at DESC, fetch_run_id DESC
+                ) AS snapshot_rank
+         FROM eligible_vpoint_runs
+       ), current_vpoint_runs AS (
+         SELECT fetch_run_id
+         FROM ranked_vpoint_runs
+         WHERE snapshot_rank = 1
        )
        SELECT id, source_id, source_account, as_of, amount_minor, amount_text,
               currency, description, counterparty, external_id, status, parser
@@ -255,6 +289,10 @@ export function currentTransactions(store: Store): TransactionRow[] {
              p.parser_name <> 'global-pass-activity'
              OR fa.id IN (SELECT fetch_artifact_id FROM current_global_pass_snapshots)
            )
+           AND (
+             p.parser_name <> 'v-point-history-page'
+             OR f.id IN (SELECT fetch_run_id FROM current_vpoint_runs)
+           )
        )
        WHERE rank_in_identity = 1
        ORDER BY COALESCE(as_of, '') DESC, id DESC`,
@@ -293,6 +331,40 @@ export function latestBalances(store: Store): BalanceRow[] {
          SELECT fetch_artifact_id
          FROM ranked_myjcb_snapshots
          WHERE snapshot_rank = 1
+       ), eligible_vpoint_runs AS (
+         SELECT DISTINCT f.id AS fetch_run_id, fa.source_id, f.completed_at
+         FROM parse_runs p
+         JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+         JOIN fetch_runs f ON f.id = fa.fetch_run_id
+         WHERE ${CURRENT}
+           AND p.parser_name IN (
+             'v-point-balance-info', 'v-point-smfg-point', 'v-point-history-page'
+           )
+           AND NOT EXISTS (
+             SELECT 1
+             FROM parse_runs failed_p
+             JOIN fetch_artifacts failed_fa ON failed_fa.id = failed_p.fetch_artifact_id
+             WHERE failed_fa.fetch_run_id = f.id
+               AND failed_p.superseded_by_parse_run_id IS NULL
+               AND failed_p.status <> 'ok'
+               AND (
+                 failed_fa.dataset IN ('balance-info', 'smfg-point')
+                 OR failed_fa.dataset LIKE 'history-page-%'
+               )
+           )
+         GROUP BY f.id, fa.source_id, f.completed_at
+         HAVING COUNT(DISTINCT p.parser_name) = 3
+       ), ranked_vpoint_runs AS (
+         SELECT fetch_run_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY source_id
+                  ORDER BY completed_at DESC, fetch_run_id DESC
+                ) AS snapshot_rank
+         FROM eligible_vpoint_runs
+       ), current_vpoint_runs AS (
+         SELECT fetch_run_id
+         FROM ranked_vpoint_runs
+         WHERE snapshot_rank = 1
        )
        SELECT id, source_id, source_account, metric, instrument, amount_minor,
               amount_text, as_of, observed_at, parser
@@ -320,6 +392,10 @@ export function latestBalances(store: Store): BalanceRow[] {
            AND (
              p.parser_name <> 'myjcb-credit-past-month-balances'
              OR fa.id IN (SELECT fetch_artifact_id FROM current_myjcb_snapshots)
+           )
+           AND (
+             p.parser_name NOT IN ('v-point-balance-info', 'v-point-smfg-point')
+             OR f.id IN (SELECT fetch_run_id FROM current_vpoint_runs)
            )
        )
        WHERE rank_in_group = 1
