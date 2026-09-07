@@ -138,7 +138,7 @@ describe("offline CI coverage", () => {
     );
     expect(local.some((command) => command.includes("playwright install"))).toBe(false);
   });
-  test("reader CI builds reviewed frozen frontend assets before Worker checks", () => {
+  test("reader CI builds both frontends and synthetic data before Worker checks", () => {
     const plan = packagePlan("services/evidence-browser", options);
     const assetBuild = plan.findIndex(
       (step) => step.command.join(" ") === "bun run build:evidence",
@@ -148,6 +148,18 @@ describe("offline CI coverage", () => {
     expect(plan[assetBuild - 1]!.command).toEqual(["bun", "install", "--frozen-lockfile"]);
     expect(assetBuild).toBeLessThan(
       plan.findIndex((step) => step.command.join(" ") === "bun run cf:check"),
+    );
+    const firstWorkerCheck = plan.findIndex(
+      (step) => step.command.join(" ") === "bun run typecheck",
+    );
+    for (const command of ["build:evidence", "build", "export:demo"]) {
+      const producer = plan.findIndex((step) => step.command.join(" ") === `bun run ${command}`);
+      expect(producer).toBeGreaterThan(0);
+      expect(producer).toBeLessThan(firstWorkerCheck);
+      expect(plan[producer]!.cwd).toBe(join(REPO_ROOT, "poc/observation-pipeline"));
+    }
+    expect(selectPolicy("services/evidence-browser").scripts["cf:check"]).toBe(
+      "wrangler deploy --dry-run && wrangler deploy --dry-run --config wrangler.demo.jsonc",
     );
 
     const root = mkdtempSync(join(tmpdir(), "kogane-ci-assets-"));
@@ -162,11 +174,14 @@ describe("offline CI coverage", () => {
       }
       const manifestPath = join(root, "poc/observation-pipeline/package.json");
       const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-      manifest.scripts["build:evidence"] = "bun run live-collector";
-      writeFileSync(manifestPath, JSON.stringify(manifest));
-      expect(() => packagePlan("services/evidence-browser", { ...options, root })).toThrow(
-        "review the offline allowlist",
-      );
+      for (const name of ["build:evidence", "build", "export:demo"]) {
+        const changed = { ...manifest, scripts: { ...manifest.scripts } };
+        changed.scripts[name] = "bun run live-collector";
+        writeFileSync(manifestPath, JSON.stringify(changed));
+        expect(() => packagePlan("services/evidence-browser", { ...options, root })).toThrow(
+          "review the offline allowlist",
+        );
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

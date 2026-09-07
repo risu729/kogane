@@ -4,3 +4,4 @@
 .env.*
 *.log
 worker-configuration.d.ts
+demo-snapshot.json
