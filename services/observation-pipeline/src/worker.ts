@@ -217,7 +217,88 @@ export function observationInsert(
     .bind(id, JSON.stringify(rows));
 }
 
+function numericVersion(value: string): number[] {
+  const parts = value.split(".").map(Number);
+  if (
+    !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(value) ||
+    parts.some((part) => !Number.isSafeInteger(part))
+  )
+    throw new PipelineError("parser_version_invalid");
+  return parts;
+}
+
+/** Retire only pending/failed or expired-lease jobs after a strictly newer
+ * deployed version has a terminal job and parse result. Done jobs and live
+ * leases remain unchanged; all parse evidence remains immutable. */
+export async function retireReplacedJobs(
+  db: D1Database,
+  parsers: readonly Pick<Parser, "name" | "version">[] = PARSERS,
+  artifactId?: number,
+): Promise<void> {
+  const registry = parsers.map((parser) => ({
+    name: parser.name,
+    version: parser.version,
+    parts: numericVersion(parser.version),
+  }));
+  await db
+    .prepare(`WITH registry AS (
+      SELECT json_extract(value,'$.name') AS name, json_extract(value,'$.version') AS version,
+        json_extract(value,'$.parts[0]') AS major, json_extract(value,'$.parts[1]') AS minor,
+        json_extract(value,'$.parts[2]') AS patch FROM json_each(?1)
+    ), candidates AS (
+      SELECT j.fetch_artifact_id, j.parser_name, j.parser_version,
+        CASE WHEN json_valid('['||replace(j.parser_version,'.',',')||']')
+          THEN '['||replace(j.parser_version,'.',',')||']' ELSE '[]' END AS parts
+      FROM observation_parse_jobs j
+      WHERE (j.status IN ('pending','failed') OR (j.status='running' AND j.lease_until_ms<=?3))
+        AND (?2 IS NULL OR j.fetch_artifact_id=?2)
+        AND j.parser_name IN (SELECT name FROM registry)
+        AND coalesce(j.last_error_code,'') <> 'parser_version_retired'
+    ), older AS (
+      SELECT * FROM candidates WHERE json_array_length(parts)=3
+        AND json_type(parts,'$[0]')='integer' AND json_type(parts,'$[1]')='integer'
+        AND json_type(parts,'$[2]')='integer'
+        AND printf('%d.%d.%d',json_extract(parts,'$[0]'),json_extract(parts,'$[1]'),json_extract(parts,'$[2]'))=parser_version
+        AND json_extract(parts,'$[0]') BETWEEN 0 AND 9007199254740991
+        AND json_extract(parts,'$[1]') BETWEEN 0 AND 9007199254740991
+        AND json_extract(parts,'$[2]') BETWEEN 0 AND 9007199254740991
+    ) UPDATE observation_parse_jobs SET status='failed',last_error_code='parser_version_retired',
+      lease_token=NULL,lease_until_ms=0
+    WHERE (fetch_artifact_id,parser_name,parser_version) IN (
+      SELECT old.fetch_artifact_id,old.parser_name,old.parser_version FROM older old
+      JOIN registry r ON r.name=old.parser_name
+      JOIN observation_parse_jobs replacement ON replacement.fetch_artifact_id=old.fetch_artifact_id
+        AND replacement.parser_name=r.name AND replacement.parser_version=r.version
+      WHERE replacement.status IN ('done','failed')
+        AND coalesce(replacement.last_error_code,'') <> 'parser_version_retired'
+        AND (json_extract(old.parts,'$[0]'),json_extract(old.parts,'$[1]'),json_extract(old.parts,'$[2]'))
+          < (r.major,r.minor,r.patch)
+        AND EXISTS (SELECT 1 FROM parse_runs p WHERE p.fetch_artifact_id=replacement.fetch_artifact_id
+          AND p.parser_name=replacement.parser_name AND p.parser_version=replacement.parser_version
+          AND p.status IN ('ok','error'))
+    )`)
+    .bind(JSON.stringify(registry), artifactId ?? null, Date.now())
+    .run();
+}
+
 export async function parseJob(
+  env: Env,
+  job: Job,
+  parser: Parser,
+): Promise<"parsed" | "error" | "skipped"> {
+  const result = await executeParseJob(env, job, parser);
+  try {
+    numericVersion(parser.version);
+  } catch {
+    return result;
+  }
+  // Keep maintenance errors outside the parser's catch: a published success
+  // must never gain a fabricated parser-error attempt if retirement fails.
+  await retireReplacedJobs(env.DB, [parser], job.fetch_artifact_id);
+  return result;
+}
+
+async function executeParseJob(
   env: Env,
   job: Job,
   parser: Parser,
@@ -248,12 +329,7 @@ export async function parseJob(
   let parseId: number | undefined;
   let failureStage = "metadata_or_raw_read_failed";
   try {
-    const version = parser.version.split(".").map(Number);
-    if (
-      !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(parser.version) ||
-      version.some((part) => !Number.isSafeInteger(part))
-    )
-      throw new PipelineError("parser_version_invalid");
+    const version = numericVersion(parser.version);
     const row = await env.DB.prepare(artifactSql + " AND a.id=?")
       .bind(job.fetch_artifact_id)
       .first<ArtifactRow>();
@@ -429,10 +505,20 @@ export async function sweep(env: Env, maxJobs = JOBS_PER_SWEEP) {
   await env.DB.prepare(
     "UPDATE parse_runs SET status='error',error='parse_interrupted' WHERE status='pending' AND EXISTS(SELECT 1 FROM observation_parse_jobs j WHERE j.fetch_artifact_id=parse_runs.fetch_artifact_id AND j.parser_name=parse_runs.parser_name AND j.parser_version=parse_runs.parser_version AND j.status='failed' AND j.last_error_code='lease_exhausted')",
   ).run();
+  // Also repairs an interrupted post-publication retirement on the next sweep.
+  await retireReplacedJobs(env.DB);
   const ready = await env.DB.prepare(
-    `SELECT * FROM observation_parse_jobs WHERE attempts<? AND ((status='pending' AND available_at_ms<=?) OR (status='running' AND lease_until_ms<=?)) ORDER BY available_at_ms,fetch_artifact_id LIMIT ?`,
+    `SELECT * FROM observation_parse_jobs j WHERE attempts<? AND ((status='pending' AND available_at_ms<=?) OR (status='running' AND lease_until_ms<=?))
+      AND EXISTS(SELECT 1 FROM json_each(?) r WHERE json_extract(r.value,'$.name')=j.parser_name AND json_extract(r.value,'$.version')=j.parser_version)
+      ORDER BY available_at_ms,fetch_artifact_id LIMIT ?`,
   )
-    .bind(MAX_ATTEMPTS, Date.now(), Date.now(), maxJobs)
+    .bind(
+      MAX_ATTEMPTS,
+      Date.now(),
+      Date.now(),
+      JSON.stringify(PARSERS.map(({ name, version }) => ({ name, version }))),
+      maxJobs,
+    )
     .all<Job>();
   const summary = { scanned: candidates.results.length, parsed: 0, error: 0, skipped: 0 };
   for (const job of ready.results) {
@@ -440,11 +526,6 @@ export async function sweep(env: Env, maxJobs = JOBS_PER_SWEEP) {
       (p) => p.name === job.parser_name && p.version === job.parser_version,
     );
     if (!parser) {
-      await env.DB.prepare(
-        "UPDATE observation_parse_jobs SET status='failed',last_error_code='parser_version_retired' WHERE fetch_artifact_id=? AND parser_name=? AND parser_version=?",
-      )
-        .bind(job.fetch_artifact_id, job.parser_name, job.parser_version)
-        .run();
       summary.skipped++;
       continue;
     }

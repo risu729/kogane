@@ -678,3 +678,51 @@ test("late old parser publication cannot replace a numerically newer successful 
     if (id === 80) expect(current.results[0]!.id).toBe(old!.id);
   }
 }, 30000);
+
+test("workerd schedules deployed versions without retiring a future or unfinished replacement", async () => {
+  await artifact(191, "smbc-bank", "balance-normalized", "balance.normalized.json", {
+    amount: 1,
+    currency: "JPY",
+    observedAt: "2026-09-07T00:00:00.000Z",
+  });
+  for (const [version, available] of [
+    ["0.0.0", -3000],
+    ["99.0.0", -2000],
+    [smbcDirectBalance.version, -1000],
+  ] as const) {
+    await env.DB.prepare(
+      "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,available_at_ms) VALUES(191,?,?, 'pending',?)",
+    )
+      .bind(smbcDirectBalance.name, version, available)
+      .run();
+  }
+  const response = await mf.dispatchFetch("https://pipeline.internal/sweep?maxJobs=1", {
+    method: "POST",
+  });
+  expect(response.status).toBe(200);
+  const states = (
+    await env.DB.prepare(
+      "SELECT parser_version,status,last_error_code FROM observation_parse_jobs WHERE fetch_artifact_id=191 ORDER BY parser_version",
+    ).all()
+  ).results;
+  expect(states).toContainEqual({
+    parser_version: "0.0.0",
+    status: "failed",
+    last_error_code: "parser_version_retired",
+  });
+  expect(states).toContainEqual({
+    parser_version: "99.0.0",
+    status: "pending",
+    last_error_code: null,
+  });
+  expect(states).toContainEqual({
+    parser_version: smbcDirectBalance.version,
+    status: "done",
+    last_error_code: null,
+  });
+  expect(
+    await env.DB.prepare(
+      "SELECT count(*) AS n FROM parse_runs WHERE fetch_artifact_id=191",
+    ).first<number>("n"),
+  ).toBe(1);
+}, 30000);
