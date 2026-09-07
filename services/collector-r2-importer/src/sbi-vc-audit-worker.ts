@@ -93,8 +93,8 @@ async function auditManifest(bucket: R2Bucket, manifestKey: string) {
     const meta: ArtifactMeta = {
       id: 0,
       sourceId: "sbi-vc-trade",
-      fetchRunStatus: "success",
-      fetchRunFailureCount: 0,
+      runStatus: "success",
+      runFailureCount: 0,
       dataset: artifact.dataset,
       url: null,
       mime: "application/json",

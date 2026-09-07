@@ -6,7 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ingestFile, ingestRunDirectory } from "../src/ingest.ts";
 import { runParsers } from "../src/parse.ts";
-import { currentTransactions } from "../src/queries.ts";
+import {
+  currentPositions,
+  currentTransactions,
+  currentValuations,
+  latestBalances,
+} from "../src/queries.ts";
 import {
   insertFetchArtifact,
   insertFetchRun,
@@ -54,7 +59,9 @@ describe("ingestion", () => {
 
   test("migrates v2 fetch runs without making legacy partial output current", () => {
     const directory = mkdtempSync(join(tmpdir(), "kogane-v2-store-"));
-    const db = new Database(join(directory, "kogane-poc.sqlite"), { create: true });
+    const db = new Database(join(directory, "kogane-poc.sqlite"), {
+      create: true,
+    });
     db.exec(`
       CREATE TABLE sources (
         id TEXT PRIMARY KEY, provider TEXT NOT NULL, ingestion TEXT NOT NULL
@@ -104,7 +111,11 @@ describe("ingestion", () => {
     const store = tempStore();
     const source = { id: "sbi-vc-trade", provider: "SBI VC Trade" };
     const first = ingestRunDirectory(store, SBI_VC_RUN, source);
-    expect(first).toMatchObject({ artifacts: 6, deduplicated: 0, skippedExisting: false });
+    expect(first).toMatchObject({
+      artifacts: 6,
+      deduplicated: 0,
+      skippedExisting: false,
+    });
     expect(ingestRunDirectory(store, SBI_VC_RUN, source).skippedExisting).toBe(true);
     expect(count(store, "fetch_artifacts")).toBe(6);
   });
@@ -138,6 +149,7 @@ describe("ingestion", () => {
         runId: "bad-run",
         startedAt: "2026-08-20T00:00:00Z",
         status: "success",
+        failures: [],
         artifacts: [{ dataset: "some-dataset", sha256, bytes: 2 }],
       });
     writeFileSync(join(directory, "manifest.json"), manifest("f".repeat(64)));
@@ -164,6 +176,7 @@ describe("ingestion", () => {
         runId: "partial-run",
         startedAt: "2026-08-20T00:00:00Z",
         status: "success",
+        failures: [],
         artifacts: [{ dataset: "present" }, { dataset: "absent" }],
       }),
     );
@@ -182,6 +195,7 @@ describe("ingestion", () => {
         runId: "dupe-run",
         startedAt: "2026-08-20T00:00:00Z",
         status: "success",
+        failures: [],
         artifacts: [{ dataset: "ds" }, { dataset: "ds" }],
       }),
     );
@@ -189,6 +203,36 @@ describe("ingestion", () => {
       /more than once/u,
     );
     expect(count(store, "fetch_runs")).toBe(0);
+  });
+
+  test("collector manifests must explicitly declare status and failure evidence", () => {
+    const store = tempStore();
+    const directory = mkdtempSync(join(tmpdir(), "kogane-manifest-outcome-"));
+    writeFileSync(join(directory, "ds.json"), "{}");
+    const base = {
+      runId: "missing-outcome",
+      startedAt: "2026-09-07T00:00:00Z",
+      artifacts: [{ dataset: "ds" }],
+    };
+    writeFileSync(join(directory, "manifest.json"), JSON.stringify({ ...base, failures: [] }));
+    expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
+      /unknown run status/u,
+    );
+    writeFileSync(join(directory, "manifest.json"), JSON.stringify({ ...base, status: "success" }));
+    expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
+      /failures must be an array/u,
+    );
+    expect(count(store, "fetch_runs")).toBe(0);
+    expect(count(store, "fetch_artifacts")).toBe(0);
+
+    const valid = { ...base, runId: "existing-outcome", status: "success", failures: [] };
+    writeFileSync(join(directory, "manifest.json"), JSON.stringify(valid));
+    expect(ingestRunDirectory(store, directory, { id: "x", provider: "X" }).artifacts).toBe(1);
+    const { status: _status, ...missingStatus } = valid;
+    writeFileSync(join(directory, "manifest.json"), JSON.stringify(missingStatus));
+    expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
+      /unknown run status/u,
+    );
   });
 
   test("re-fetching an unchanged export records a second confirmation", () => {
@@ -339,7 +383,12 @@ describe("parse runs", () => {
       provider: "SBI VC Trade",
     });
     const summary = runParsers(store);
-    expect(summary).toMatchObject({ parsed: 0, errors: 0, blocked: 1, observations: 0 });
+    expect(summary).toMatchObject({
+      parsed: 0,
+      errors: 0,
+      blocked: 1,
+      observations: 0,
+    });
     expect(count(store, "parse_runs")).toBe(0);
     expect(currentTransactions(store)).toEqual([]);
 
@@ -362,8 +411,83 @@ describe("parse runs", () => {
       rawLocator: "json:$.body.list[0]",
       extra: {},
     });
+    insertObservation(store, parseRunId, {
+      kind: "balance",
+      sourceAccount: "sbi-vc-trade:main",
+      metric: "cash_balance",
+      instrument: "JPY",
+      amountMinor: 1,
+      rawLocator: "json:$.body.balance",
+      extra: {},
+    });
+    insertObservation(store, parseRunId, {
+      kind: "position",
+      sourceAccount: "sbi-vc-trade:main",
+      securityCode: "BTCJPY",
+      quantityText: "1",
+      quantityScale: 0,
+      currency: "JPY",
+      rawLocator: "json:$.body.position",
+      extra: {},
+    });
+    insertObservation(store, parseRunId, {
+      kind: "valuation",
+      sourceAccount: "sbi-vc-trade:main",
+      subject: "BTCJPY",
+      metric: "market_value",
+      currency: "JPY",
+      amountMinor: 1,
+      rawLocator: "json:$.body.valuation",
+      extra: {},
+    });
     expect(ingested.artifacts).toBe(1);
     expect(currentTransactions(store)).toEqual([]);
+    expect(latestBalances(store)).toEqual([]);
+    expect(currentPositions(store)).toEqual([]);
+    expect(currentValuations(store)).toEqual([]);
+  });
+
+  test("current executions collapse recent and historical overlap to historical", () => {
+    const store = tempStore();
+    const directory = mkdtempSync(join(tmpdir(), "kogane-sbi-vc-overlap-"));
+    writeFileSync(join(directory, "recent.json"), "{}");
+    writeFileSync(join(directory, "historical.json"), "{}");
+    const source = { id: "sbi-vc-trade", provider: "SBI VC Trade" };
+    ingestFile(store, join(directory, "recent.json"), {
+      source,
+      mime: "application/json",
+      fetchedAt: "2026-09-07T00:00:00Z",
+    });
+    ingestFile(store, join(directory, "historical.json"), {
+      source,
+      mime: "application/json",
+      fetchedAt: "2026-09-07T00:00:01Z",
+    });
+    const artifacts = store.db.query("SELECT id FROM fetch_artifacts ORDER BY id").all() as {
+      id: number;
+    }[];
+    for (const [index, sourceView] of ["recent", "historical"].entries()) {
+      const artifactRow = artifacts[index];
+      if (artifactRow === undefined) throw new Error("missing test artifact");
+      const parseRunId = insertParseRun(store, {
+        artifactId: artifactRow.id,
+        parserName: "sbi-vc-executions",
+        parserVersion: "0.1.0",
+        parsedAt: `2026-09-07T00:01:0${index}Z`,
+        status: "ok",
+        warnings: [],
+      });
+      insertObservation(store, parseRunId, {
+        kind: "transaction",
+        sourceAccount: "sbi-vc-trade:main",
+        externalId: '["execution","1"]',
+        description: sourceView,
+        rawLocator: "json:$.body.list[0]",
+        extra: { _kogane: { sourceView } },
+      });
+    }
+    expect(currentTransactions(store).map((row) => row.description)).toEqual(["historical"]);
+    expect(count(store, "transaction_observations")).toBe(2);
   });
 
   test("a newer parser version supersedes, never deletes", () => {
@@ -500,7 +624,9 @@ describe("parse runs", () => {
     expect(summary.parsed).toBe(0);
     // Neither a truncated observation set nor a run claiming success.
     expect(count(store, "transaction_observations")).toBe(0);
-    const run = store.db.query("SELECT status FROM parse_runs").get() as { status: string };
+    const run = store.db.query("SELECT status FROM parse_runs").get() as {
+      status: string;
+    };
     expect(run.status).toBe("error");
   });
 

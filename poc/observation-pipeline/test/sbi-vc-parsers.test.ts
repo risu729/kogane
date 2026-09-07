@@ -67,7 +67,10 @@ describe("SBI VC Trade parser registry", () => {
   });
 
   test("never accepts a similarly named source", () => {
-    const wrongSource = { ...artifact("cash-balances"), sourceId: "sbi-securities" };
+    const wrongSource = {
+      ...artifact("cash-balances"),
+      sourceId: "sbi-securities",
+    };
     expect(PARSERS.filter((parser) => parser.accepts(wrongSource))).toHaveLength(0);
   });
 });
@@ -105,6 +108,69 @@ describe("SBI VC Trade envelope and balance schemas", () => {
     expect(
       result.observations.some((item) => item.kind === "balance" && item.metric === "cash_balance"),
     ).toBe(false);
+  });
+
+  test("cash balance row drift fails the whole artifact", () => {
+    type CashFixture = {
+      body: { list: unknown[]; baseCurrencyTotalAmount: unknown };
+    };
+    const mutations: ((value: CashFixture) => void)[] = [
+      (value) => {
+        value.body.list[0] = null;
+      },
+      (value) => {
+        delete (value.body.list[0] as Record<string, unknown>)["currency"];
+      },
+      (value) => {
+        (value.body.list[0] as Record<string, unknown>)["amount"] = "not-a-decimal";
+      },
+      (value) => {
+        (value.body.list[0] as Record<string, unknown>)["settlingAmount"] = 1.5;
+      },
+      (value) => {
+        value.body.baseCurrencyTotalAmount = "not-a-decimal";
+      },
+    ];
+    for (const mutate of mutations) {
+      const value = JSON.parse(new TextDecoder().decode(fixture("cash-balances"))) as CashFixture;
+      mutate(value);
+      expect(() => sbiVcCashBalances.parse(encode(value), artifact("cash-balances"))).toThrow();
+    }
+  });
+
+  test("account margin child-row drift fails the whole artifact", () => {
+    type MarginFixture = { body: Record<string, unknown> };
+    const mutations: ((value: MarginFixture) => void)[] = [
+      (value) => {
+        (value.body["receivedMarginList"] as unknown[])[0] = null;
+      },
+      (value) => {
+        delete ((value.body["receivedMarginList"] as Record<string, unknown>[])[0] ?? {})[
+          "currency"
+        ];
+      },
+      (value) => {
+        ((value.body["receivedMarginList"] as Record<string, unknown>[])[0] ?? {})["amount"] =
+          "not-a-decimal";
+      },
+      (value) => {
+        (value.body["lendingLimitList"] as unknown[])[0] = "not-an-object";
+      },
+      (value) => {
+        delete ((value.body["lendingLimitList"] as Record<string, unknown>[])[0] ?? {})["currency"];
+      },
+      (value) => {
+        ((value.body["lendingLimitList"] as Record<string, unknown>[])[0] ?? {})["lendingLimit"] =
+          "not-a-decimal";
+      },
+    ];
+    for (const mutate of mutations) {
+      const value = JSON.parse(
+        new TextDecoder().decode(fixture("account-margin")),
+      ) as MarginFixture;
+      mutate(value);
+      expect(() => sbiVcAccountMargin.parse(encode(value), artifact("account-margin"))).toThrow();
+    }
   });
 
   test("rejects unsanitized envelopes but accepts collector-preserved safe meta", () => {
@@ -226,8 +292,16 @@ describe("SBI VC Trade execution pages", () => {
     const sellKogane = sell.extra["_kogane"] as Record<string, unknown>;
     expect(buyKogane["direction"]).toBe("buy");
     expect(sellKogane["direction"]).toBe("sell");
-    expect(buyKogane["quantity"]).toEqual({ text: "0.01000000", scale: 8, currency: "BTC" });
-    expect(buyKogane["price"]).toEqual({ text: "8000000", scale: 0, currency: "JPY" });
+    expect(buyKogane["quantity"]).toEqual({
+      text: "0.01000000",
+      scale: 8,
+      currency: "BTC",
+    });
+    expect(buyKogane["price"]).toEqual({
+      text: "8000000",
+      scale: 0,
+      currency: "JPY",
+    });
 
     const sameTupleHistorical = sbiVcExecutions.parse(
       fixture("executions-recent-page-0001"),
@@ -246,7 +320,10 @@ describe("SBI VC Trade execution pages", () => {
     };
     expect(() =>
       sbiVcExecutions.parse(
-        encode({ ...page, body: { ...page.body, totalSize: 31, totalNumOfPages: 2 } }),
+        encode({
+          ...page,
+          body: { ...page.body, totalSize: 31, totalNumOfPages: 2 },
+        }),
         artifact("executions-recent-page-0001"),
       ),
     ).toThrow(/cardinality|single collected page/u);
@@ -340,7 +417,9 @@ describe("SBI VC Trade execution pages", () => {
     }
     const duplicate = JSON.parse(
       new TextDecoder().decode(fixture("executions-recent-page-0001")),
-    ) as { body: Record<string, unknown> & { list: Record<string, unknown>[] } };
+    ) as {
+      body: Record<string, unknown> & { list: Record<string, unknown>[] };
+    };
     duplicate.body.list.push({ ...duplicate.body.list[0]! });
     duplicate.body.totalSize = 2;
     expect(() =>
@@ -412,7 +491,9 @@ describe("SBI VC Trade cashflow pages", () => {
     ).toThrow(/cashflow object/u);
     const duplicate = JSON.parse(
       new TextDecoder().decode(fixture("cashflows-historical-page-0001")),
-    ) as { body: Record<string, unknown> & { list: Record<string, unknown>[] } };
+    ) as {
+      body: Record<string, unknown> & { list: Record<string, unknown>[] };
+    };
     duplicate.body.list[1]!["cashflowID"] = duplicate.body.list[0]!["cashflowID"];
     expect(() =>
       sbiVcCashflows.parse(encode(duplicate), artifact("cashflows-historical-page-0001")),

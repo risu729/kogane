@@ -144,6 +144,36 @@ export function requireNonEmptyString(
   return candidate;
 }
 
+/**
+ * Require a provider decimal before emitting any financial observation.
+ * SBI VC's Layer-A contract preserves these values as strings.  Known fiat
+ * currencies must also be exactly representable in their minor unit so a
+ * malformed row cannot degrade into an amount-less placeholder.
+ */
+export function requireExactDecimalString(
+  value: unknown,
+  locator: string,
+  instrument?: string,
+): { text: string; scale: number } {
+  if (typeof value !== "string") {
+    throw new Error(`${locator}: expected an exact decimal string`);
+  }
+  const decimal = decimalText(value);
+  if (decimal === undefined) {
+    throw new Error(`${locator}: expected an exact decimal string`);
+  }
+  if (
+    instrument !== undefined &&
+    minorUnitExponent(instrument) !== undefined &&
+    decimalToMinorUnits(decimal.text, instrument) === undefined
+  ) {
+    throw new Error(
+      `${locator}: decimal is not exactly representable in ${instrument} minor units`,
+    );
+  }
+  return decimal;
+}
+
 export function warnNonStringFields(
   value: Record<string, unknown>,
   fields: readonly string[],
@@ -211,7 +241,9 @@ export function providerExtra(
   excludedBodyFields: readonly string[],
   added: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  const providerContext: Record<string, unknown> = { meta: { ...envelope.meta } };
+  const providerContext: Record<string, unknown> = {
+    meta: { ...envelope.meta },
+  };
   for (const [field, value] of Object.entries(envelope.body)) {
     if (!excludedBodyFields.includes(field)) providerContext[field] = value;
   }

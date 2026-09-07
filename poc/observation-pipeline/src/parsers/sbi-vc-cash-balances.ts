@@ -5,8 +5,8 @@ import {
   parseSbiVcEnvelope,
   providerExtra,
   providerTimestamp,
-  requireString,
-  warnNonStringFields,
+  requireExactDecimalString,
+  requireNonEmptyString,
   warnUnknownFields,
 } from "./sbi-vc-common.ts";
 import { isObject } from "./util.ts";
@@ -29,7 +29,7 @@ const METRICS = [
 
 export const sbiVcCashBalances: Parser = {
   name: "sbi-vc-cash-balances",
-  version: "0.1.0",
+  version: "0.2.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return acceptsSbiVcDataset(artifact, DATASET);
@@ -39,33 +39,28 @@ export const sbiVcCashBalances: Parser = {
     const envelope = parseSbiVcEnvelope(bytes, DATASET);
     const warnings: string[] = [];
     warnUnknownFields(envelope.body, BODY_FIELDS, "json:$.body", warnings);
-    if (
-      typeof envelope.body["baseCurrencyTotalAmount"] !== "string" ||
-      !Array.isArray(envelope.body["list"])
-    ) {
+    if (!Array.isArray(envelope.body["list"])) {
       throw new Error(`${DATASET}: body fields do not match the provider contract`);
     }
+    requireExactDecimalString(
+      envelope.body["baseCurrencyTotalAmount"],
+      "json:$.body.baseCurrencyTotalAmount",
+    );
     const observedAt = providerTimestamp(envelope.meta["timestamp"]);
     const observations: Observation[] = [];
     envelope.body["list"].forEach((entry: unknown, index: number) => {
       const locator = `json:$.body.list[${index}]`;
       if (!isObject(entry)) {
-        warnings.push(`${locator}: expected an object; element could not be modelled`);
-        return;
+        throw new Error(`${locator}: expected a cash balance object`);
       }
       warnUnknownFields(entry, ITEM_FIELDS, locator, warnings);
-      warnNonStringFields(
-        entry,
-        ["amount", "baseCurrencyAmount", "fxAccountId", "noSettlingAmount", "settlingAmount"],
-        locator,
-        warnings,
-      );
-      const currency = requireString(entry, "currency", locator, warnings);
-      if (currency === undefined || currency === "") {
-        warnings.push(`${locator}: currency is required to denominate balances`);
-        return;
+      const currency = requireNonEmptyString(entry, "currency", locator);
+      if (typeof entry["fxAccountId"] !== "string") {
+        throw new Error(`${locator}.fxAccountId: expected a string`);
       }
+      requireExactDecimalString(entry["baseCurrencyAmount"], `${locator}.baseCurrencyAmount`);
       for (const [field, metric] of METRICS) {
+        requireExactDecimalString(entry[field], `${locator}.${field}`, currency);
         const extra = providerExtra(entry, envelope, ["list"], {
           sourceField: field,
         });

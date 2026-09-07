@@ -5,8 +5,8 @@ import {
   parseSbiVcEnvelope,
   providerExtra,
   providerTimestamp,
-  requireString,
-  warnNonStringFields,
+  requireExactDecimalString,
+  requireNonEmptyString,
   warnUnknownFields,
 } from "./sbi-vc-common.ts";
 import { isObject } from "./util.ts";
@@ -64,7 +64,7 @@ const CHILD_LIST_FIELDS = [
 
 export const sbiVcAccountMargin: Parser = {
   name: "sbi-vc-account-margin",
-  version: "0.1.0",
+  version: "0.2.0",
 
   accepts(artifact: ArtifactMeta): boolean {
     return acceptsSbiVcDataset(artifact, DATASET);
@@ -101,21 +101,17 @@ export const sbiVcAccountMargin: Parser = {
       list.forEach((entry: unknown, index: number) => {
         const locator = `json:$.body.${listField}[${index}]`;
         if (!isObject(entry)) {
-          warnings.push(`${locator}: expected an object; element could not be modelled`);
-          return;
+          throw new Error(`${locator}: expected an account margin amount object`);
         }
         warnUnknownFields(entry, AMOUNT_ITEM_FIELDS, locator, warnings);
-        warnNonStringFields(
-          entry,
-          ["amount", "baseCurrencyAmount", "baseCurrencyCollateralAmount", "collateralValueRatio"],
-          locator,
-          warnings,
+        const currency = requireNonEmptyString(entry, "currency", locator);
+        requireExactDecimalString(entry["amount"], `${locator}.amount`, currency);
+        requireExactDecimalString(entry["baseCurrencyAmount"], `${locator}.baseCurrencyAmount`);
+        requireExactDecimalString(
+          entry["baseCurrencyCollateralAmount"],
+          `${locator}.baseCurrencyCollateralAmount`,
         );
-        const currency = requireString(entry, "currency", locator, warnings);
-        if (currency === undefined || currency === "") {
-          warnings.push(`${locator}: currency is required to denominate this balance`);
-          return;
-        }
+        requireExactDecimalString(entry["collateralValueRatio"], `${locator}.collateralValueRatio`);
         observations.push(
           balanceFromDecimal({
             value: entry["amount"],
@@ -138,16 +134,11 @@ export const sbiVcAccountMargin: Parser = {
       list.forEach((entry: unknown, index: number) => {
         const locator = `json:$.body.${listField}[${index}]`;
         if (!isObject(entry)) {
-          warnings.push(`${locator}: expected an object; element could not be modelled`);
-          return;
+          throw new Error(`${locator}: expected an account margin limit object`);
         }
         warnUnknownFields(entry, ["currency", valueField], locator, warnings);
-        warnNonStringFields(entry, [valueField], locator, warnings);
-        const currency = requireString(entry, "currency", locator, warnings);
-        if (currency === undefined || currency === "") {
-          warnings.push(`${locator}: currency is required to denominate this balance`);
-          return;
-        }
+        const currency = requireNonEmptyString(entry, "currency", locator);
+        requireExactDecimalString(entry[valueField], `${locator}.${valueField}`, currency);
         observations.push(
           balanceFromDecimal({
             value: entry[valueField],

@@ -212,5 +212,11 @@ remain synthetic-test coverage.
 Artifacts now carry their parent fetch-run outcome and failure count. A
 non-success run is retained as evidence but is blocked before every parser,
 and current queries independently require a successful, failure-free parent.
+Collector manifests must explicitly declare both `status` and `failures`;
+missing outcome evidence fails closed. SBI VC cash-balance and account-margin
+child-row drift rejects the whole artifact. For SBI VC executions, raw Layer B
+history keeps both recent and historical source views, while the current query
+prefers the historical record when the same composite execution identity is
+present in both.
 The schema migrates existing v2 stores in place; old non-success rows are
 conservatively backfilled with one failure.

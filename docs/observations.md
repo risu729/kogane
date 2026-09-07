@@ -207,8 +207,10 @@ Layer B keeps those boundaries. Five parsers cover them: cash balances,
 account margin, position summary, execution pages, and cashflow pages.
 Recent and historical execution pages intentionally share one parser because
 their provider record schema and composite identity are the same. This avoids
-two interpretations of the same dataset family; a later layer can relate or
-deduplicate overlapping records without Layer B erasing either source view.
+two interpretations of the same dataset family. Layer B preserves both source
+views for provenance, while the current-transactions query collapses an
+overlapping composite identity to the complete historical view. A recent-only
+identity remains current.
 
 The gateway envelope is exactly `{ meta, body }`, with only the sanitized
 `sessUpdTime`, `status`, and `timestamp` metadata. Page artifacts additionally
@@ -249,11 +251,19 @@ prove non-empty position/recent shapes, multi-page chains, or cross-view
 identity overlap; anonymous tests cover those contracts without relabelling
 them as observations.
 
+Cash-balance and account-margin child rows are atomic contract records. A
+non-object row, missing denomination, or unreadable exact decimal rejects the
+whole artifact; the parser never publishes the valid-looking prefix of a
+partially malformed financial response.
+
 Layer B also carries the parent fetch-run status and failure count on every
 artifact. Parsers run only for a successful parent with zero failure evidence,
 and all current-state queries repeat that predicate. A partial pagination run
 therefore remains inspectable raw evidence but cannot publish financial
-observations or supersede a prior successful state.
+observations or supersede a prior successful state. Collector manifests must
+explicitly contain a recognized `status` and a `failures` array; absence is not
+interpreted as success. Legacy database compatibility is handled by the schema
+migration instead of weakening this import boundary.
 
 ### How a parser becomes live
 

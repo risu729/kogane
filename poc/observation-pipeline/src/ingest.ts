@@ -49,31 +49,34 @@ export function ingestRunDirectory(
   }
   upsertSource(store, { ...source, ingestion: "collector-r2" });
 
-  const existing = store.db
-    .query("SELECT id FROM fetch_runs WHERE source_id = ?1 AND external_run_id = ?2")
-    .get(source.id, manifest["runId"]) as { id: number } | null;
-  if (existing) {
-    return { runId: existing.id, artifacts: 0, deduplicated: 0, skippedExisting: true };
-  }
-
-  const startedAt = String(manifest["startedAt"] ?? new Date(0).toISOString());
-  const completedAt =
-    typeof manifest["completedAt"] === "string" ? manifest["completedAt"] : undefined;
-  if (!Object.hasOwn(manifest, "status")) {
-    throw new Error(`${directory}/manifest.json must declare an explicit run status`);
-  }
   const status = manifest["status"];
   if (status !== "success" && status !== "partial" && status !== "failed") {
     throw new Error(`${directory}/manifest.json has an unknown run status`);
   }
   const failures = manifest["failures"];
-  if (failures !== undefined && !Array.isArray(failures)) {
+  if (!Array.isArray(failures)) {
     throw new Error(`${directory}/manifest.json failures must be an array`);
   }
-  const failureCount = failures?.length ?? 0;
+  const failureCount = failures.length;
   if ((status === "success") !== (failureCount === 0)) {
     throw new Error(`${directory}/manifest.json run status and failure evidence are inconsistent`);
   }
+
+  const existing = store.db
+    .query("SELECT id FROM fetch_runs WHERE source_id = ?1 AND external_run_id = ?2")
+    .get(source.id, manifest["runId"]) as { id: number } | null;
+  if (existing) {
+    return {
+      runId: existing.id,
+      artifacts: 0,
+      deduplicated: 0,
+      skippedExisting: true,
+    };
+  }
+
+  const startedAt = String(manifest["startedAt"] ?? new Date(0).toISOString());
+  const completedAt =
+    typeof manifest["completedAt"] === "string" ? manifest["completedAt"] : undefined;
 
   // Read and verify every artifact BEFORE writing anything. A run row written
   // ahead of a failure would make the run look ingested, and every later
@@ -124,7 +127,12 @@ export function ingestRunDirectory(
     }
     return insertedRunId;
   })();
-  return { runId, artifacts: pending.length, deduplicated, skippedExisting: false };
+  return {
+    runId,
+    artifacts: pending.length,
+    deduplicated,
+    skippedExisting: false,
+  };
 }
 
 export function ingestFile(
@@ -146,7 +154,12 @@ export function ingestFile(
     .query("SELECT id FROM fetch_runs WHERE source_id = ?1 AND external_run_id = ?2")
     .get(options.source.id, externalRunId) as { id: number } | null;
   if (existing) {
-    return { runId: existing.id, artifacts: 0, deduplicated: 0, skippedExisting: true };
+    return {
+      runId: existing.id,
+      artifacts: 0,
+      deduplicated: 0,
+      skippedExisting: true,
+    };
   }
   let deduplicated = 0;
   const runId = store.db.transaction(() => {
