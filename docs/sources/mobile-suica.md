@@ -121,6 +121,30 @@ Official Mobile Suica details:
   with the user's live history. The client deliberately errors if one day alone
   hits 100 rows because completeness cannot then be proved.
 
+## Layer B observation route
+
+The observation pipeline registers only the collector's UTF-8 normalized
+`sf-history` JSON. The Shift-JIS `sf-history-html` is retained as sanitized
+provider evidence and the JSON records its lineage back to that dataset;
+`collection-summary` carries counts and completeness only. Neither HTML nor
+summary is independently parsed, so one provider history row cannot be counted
+twice.
+
+Each available signed row amount becomes a JPY transaction, and each available
+post-row balance becomes a JPY `sf_balance_after_transaction` observation.
+The latest PC row is only a latest-observed balance through the previous day,
+not a guaranteed current balance. Empty successful history produces no
+observations. Partial and failed runs stay in raw evidence but are excluded from
+Layer B by the owning run status.
+
+A 2026-09-07 read-only production aggregate confirmed the current three-artifact
+inventory and normalized field types without exposing or retaining any object
+body, key, digest, identifier, or financial value. It also found normalized
+provider-derived evidence older than the documented 26-week window. Until the
+source-side reason is understood, the parser warns and preserves those rows;
+it still rejects current-day/future rows, extra pages, a 100-row incomplete
+boundary, schema drift, and count/order contradictions.
+
 Official JRE POINT details:
 
 - The official guide and FAQ say the point history covers the previous one year

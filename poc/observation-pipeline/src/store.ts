@@ -165,12 +165,16 @@ export function insertFetchArtifact(
 export function listArtifacts(store: Store): ArtifactMeta[] {
   const rows = store.db
     .query(
-      `SELECT id, source_id, dataset, url, mime, fetched_at, sha256
-       FROM fetch_artifacts ORDER BY id`,
+      `SELECT a.id, a.source_id, r.status AS run_status, a.dataset, a.url,
+              a.mime, a.fetched_at, a.sha256
+       FROM fetch_artifacts AS a
+       JOIN fetch_runs AS r ON r.id = a.fetch_run_id
+       ORDER BY a.id`,
     )
     .all() as {
     id: number;
     source_id: string;
+    run_status: string;
     dataset: string | null;
     url: string | null;
     mime: string;
@@ -180,6 +184,7 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
   return rows.map((row) => ({
     id: row.id,
     sourceId: row.source_id,
+    runStatus: row.run_status,
     dataset: row.dataset,
     url: row.url,
     mime: row.mime,

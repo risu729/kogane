@@ -59,6 +59,13 @@ export function ingestRunDirectory(
   const startedAt = String(manifest["startedAt"] ?? new Date(0).toISOString());
   const completedAt =
     typeof manifest["completedAt"] === "string" ? manifest["completedAt"] : undefined;
+  if (!Object.hasOwn(manifest, "status")) {
+    throw new Error(`${directory}/manifest.json must declare an explicit run status`);
+  }
+  const status = manifest["status"];
+  if (status !== "success" && status !== "partial" && status !== "failed") {
+    throw new Error(`${directory}/manifest.json has an unknown run status`);
+  }
 
   // Read and verify every artifact BEFORE writing anything. A run row written
   // ahead of a failure would make the run look ingested, and every later
@@ -92,7 +99,7 @@ export function ingestRunDirectory(
       tool: "import-run",
       startedAt,
       ...(completedAt !== undefined ? { completedAt } : {}),
-      status: String(manifest["status"] ?? "success"),
+      status,
     });
     for (const { dataset, bytes } of pending) {
       const stored = putRawObject(store, bytes, "application/json");

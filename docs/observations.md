@@ -75,11 +75,13 @@ bytes plus artifact metadata to typed observations. Its obligations:
 3. Named and versioned. `name` and `version` are fields of the parser
    object, and both are recorded on the parse run that carries its output.
 4. Selects from metadata alone. `accepts(artifact)` sees the artifact row
-   id, source id, dataset, URL, MIME type, fetched-at, and the content
+   id, source id, owning fetch-run status, dataset, URL, MIME type,
+   fetched-at, and the content
    hash — never the bytes. Selection is therefore a database query in
    production, and a parser cannot sniff its way into a payload it was not
    registered for. In the PoC `accepts` is exact equality on `sourceId`
-   plus `dataset` for the seven SBI parsers, and `sourceId` plus `mime`
+   plus `dataset` for the seven SBI parsers, exact source/dataset/MIME for
+   Mobile Suica, and `sourceId` plus `mime`
    for `paypay-csv`, whose artifact arrives through the file-export path
    with no dataset at all.
 5. Records a raw locator on every observation. `rawLocator` is mandatory
@@ -98,6 +100,10 @@ bytes plus artifact metadata to typed observations. Its obligations:
 9. Holds no cross-artifact state. One artifact in, observations out. A
    truncated window (`hasMore: true`) is reported as a warning, not
    resolved by fetching the next page — fetching is layer A's job.
+10. Never promotes failed evidence. `runParsers` only invokes an accepting
+    parser when the artifact's owning fetch run has status `success`.
+    Partial and failed artifacts stay queryable as layer-A evidence and have
+    no parse run or observations.
 
 The contract in `poc/observation-pipeline/src/types.ts`:
 
@@ -200,6 +206,7 @@ in a future payload shows up as a warning rather than as silence.
 
 ```ts
 export const PARSERS: readonly Parser[] = [
+  mobileSuicaSfHistory,
   sbiDomesticCashPositions,
   sbiAccountAssetsCurrent,
   sbiYenDetailHistory,
@@ -871,6 +878,29 @@ transaction number are one event; the fixture deliberately contains a
 refund reusing the original payment's number, and both rows survive
 intact. It also, today, records point grants as yen — see the
 `reward_observations` discussion above.
+
+**`mobile-suica-sf-history`** consumes only the Mobile Suica collector's UTF-8
+normalized `sf-history` JSON. The Shift-JIS `sf-history-html` remains the
+sanitized provider capture and `collection-summary` remains collection
+metadata; registering neither avoids producing the same financial row twice.
+The normalized row's signed `amount` becomes a JPY transaction without
+re-inference from `kind`, and its `balance` becomes a separate
+`sf_balance_after_transaction` observation. A carryover row with no amount
+therefore contributes its reported balance but does not invent a transaction.
+
+The root envelope, one-page cardinality, 100-row boundary, row enum, date order,
+display-text/normalized-integer agreement, and previous-day boundary are exact.
+Current payloads require `complete: true`; legacy payloads without that field
+are warned and accepted only below 100 rows. Empty history is valid. Each full
+row survives in `extra`, `json:$.rows[index]` locates both observations, and
+`_kogane.derivedFromDataset` records lineage back to `sf-history-html`.
+Provider rows are newest first, but observations are emitted oldest first so
+the highest append-only id identifies the latest balance when dates tie.
+
+The public source says 26 weeks, while a read-only production aggregate found
+a successfully imported normalized row outside that window. The parser warns
+and preserves it pending source investigation; hard rejection or silent
+truncation would both discard valid captured evidence.
 
 ### Two more parsers come next, and are not in the PoC
 

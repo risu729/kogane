@@ -1,0 +1,44 @@
+{
+  "asOfDateJst": "2026-08-30",
+  "pageCount": 1,
+  "transactionCount": 3,
+  "complete": true,
+  "rows": [
+    {
+      "date": "2026-08-29",
+      "typeFrom": "物販",
+      "placeFrom": "テスト店舗",
+      "typeTo": "",
+      "placeTo": "",
+      "balanceText": "2,580",
+      "amountText": "-420",
+      "balance": 2580,
+      "amount": -420,
+      "kind": "payment"
+    },
+    {
+      "date": "2026-08-28",
+      "typeFrom": "カード",
+      "placeFrom": "モバイル",
+      "typeTo": "",
+      "placeTo": "",
+      "balanceText": "3,000",
+      "amountText": "1,000",
+      "balance": 3000,
+      "amount": 1000,
+      "kind": "charge"
+    },
+    {
+      "date": "2026-08-27",
+      "typeFrom": "繰",
+      "placeFrom": "",
+      "typeTo": "",
+      "placeTo": "",
+      "balanceText": "2,000",
+      "amountText": "",
+      "balance": 2000,
+      "amount": null,
+      "kind": "carryover"
+    }
+  ]
+}

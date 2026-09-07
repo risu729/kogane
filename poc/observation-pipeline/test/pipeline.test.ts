@@ -5,7 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ingestFile, ingestRunDirectory } from "../src/ingest.ts";
 import { runParsers } from "../src/parse.ts";
-import { openStore, type Store } from "../src/store.ts";
+import {
+  insertFetchArtifact,
+  insertFetchRun,
+  openStore,
+  putRawObject,
+  upsertSource,
+  type Store,
+} from "../src/store.ts";
 import type { Parser } from "../src/types.ts";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
@@ -20,6 +27,26 @@ function count(store: Store, table: string): number {
 }
 
 describe("ingestion", () => {
+  test("collector manifests must declare an exact terminal status", () => {
+    for (const status of [undefined, "human-required", "SUCCESS"]) {
+      const store = tempStore();
+      const directory = mkdtempSync(join(tmpdir(), "kogane-run-status-"));
+      writeFileSync(join(directory, "artifact.json"), "{}");
+      const manifest: Record<string, unknown> = {
+        runId: `bad-status-${String(status)}`,
+        startedAt: "2026-08-20T00:00:00Z",
+        artifacts: [{ dataset: "artifact" }],
+      };
+      if (status !== undefined) manifest.status = status;
+      writeFileSync(join(directory, "manifest.json"), JSON.stringify(manifest));
+      expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
+        /explicit run status|unknown run status/u,
+      );
+      expect(count(store, "fetch_runs")).toBe(0);
+      expect(count(store, "fetch_artifacts")).toBe(0);
+    }
+  });
+
   test("run-directory ingestion is idempotent", () => {
     const store = tempStore();
     const source = { id: "sbi-securities", provider: "SBI Securities" };
@@ -183,6 +210,35 @@ describe("parse runs", () => {
     expect(again.parsed).toBe(0);
     expect(again.skipped).toBe(1);
     expect(count(store, "transaction_observations")).toBe(1);
+  });
+
+  test("partial and failed fetch runs remain raw evidence and never become observations", () => {
+    for (const status of ["partial", "failed"] as const) {
+      const store = tempStore();
+      upsertSource(store, { id: "fake", provider: "Fake", ingestion: "collector-r2" });
+      const fetchRunId = insertFetchRun(store, {
+        sourceId: "fake",
+        externalRunId: `run-${status}`,
+        tool: "import-run",
+        startedAt: "2026-08-21T00:00:00Z",
+        completedAt: "2026-08-21T00:01:00Z",
+        status,
+      });
+      const raw = putRawObject(store, new TextEncoder().encode("{}"), "application/json");
+      insertFetchArtifact(store, {
+        fetchRunId,
+        sourceId: "fake",
+        dataset: "statement",
+        mime: "application/json",
+        fetchedAt: "2026-08-21T00:01:00Z",
+        sha256: raw.sha256,
+      });
+      const summary = runParsers(store, [fakeParser("0.1.0", "must-not-run")]);
+      expect(summary).toMatchObject({ parsed: 0, skipped: 1, observations: 0, errors: 0 });
+      expect(count(store, "parse_runs")).toBe(0);
+      expect(count(store, "transaction_observations")).toBe(0);
+      expect(count(store, "fetch_artifacts")).toBe(1);
+    }
   });
 
   test("a newer parser version supersedes, never deletes", () => {
