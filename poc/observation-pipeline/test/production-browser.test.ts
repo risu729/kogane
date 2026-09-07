@@ -153,7 +153,37 @@ describe.if(runnable)("combined production client", () => {
 
   test("evidence navigation preserves observation routes and does not deny available parsing", async () => {
     const page = await browser.newPage();
-    await page.goto(origin + "/evidence", { waitUntil: "networkidle" });
+    await page.goto(origin + "/transactions", { waitUntil: "networkidle" });
+    const shell = await page.locator(".app-shell").elementHandle();
+    const sidebar = await page.locator(".sidebar").elementHandle();
+    const header = await page.locator(".workspace-bar").elementHandle();
+    const footer = await page.locator(".workspace-footer").innerText();
+    const sidebarText = await page.locator(".sidebar").innerText();
+    const noticeText = await page.locator(".source-notice").innerText();
+    await page
+      .getByRole("navigation", { name: "メインナビゲーション" })
+      .getByRole("link", { name: "取得履歴", exact: true })
+      .click();
+    await page.getByRole("heading", { name: "取得履歴と原本", exact: true }).waitFor();
+    // Identical labels are insufficient: the actual shell nodes must survive.
+    expect(await shell!.evaluate((node) => node === document.querySelector(".app-shell"))).toBe(
+      true,
+    );
+    expect(await sidebar!.evaluate((node) => node === document.querySelector(".sidebar"))).toBe(
+      true,
+    );
+    expect(
+      await header!.evaluate((node) => node === document.querySelector(".workspace-bar")),
+    ).toBe(true);
+    expect(await page.locator(".sidebar").innerText()).toBe(sidebarText);
+    expect(await page.locator(".workspace-footer").innerText()).toBe(footer);
+    expect(await page.locator(".source-notice").innerText()).toBe(noticeText);
+    expect(await page.locator("main").count()).toBe(1);
+    expect(await page.locator(".nav a[aria-current='page']").innerText()).toBe("取得履歴");
+    expect(await page.title()).toBe("取得履歴と原本 | kogane");
+    expect(await page.evaluate(() => document.activeElement === document.querySelector("h1"))).toBe(
+      true,
+    );
     expect(await page.locator("body").innerText()).not.toContain("解析結果はまだ提供していません");
     for (const name of ["取引", "残高", "保有資産", "原本・証跡", "ホーム"])
       expect(

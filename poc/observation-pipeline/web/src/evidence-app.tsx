@@ -25,6 +25,62 @@ function routeFor(path: string) {
     : { kind: "missing" as const, title: "ページが見つかりません" };
 }
 
+/** Route content only. Production keeps App's navigation, refresh and connection shell. */
+export function EvidenceContent({
+  observationsAvailable = false,
+}: {
+  observationsAvailable?: boolean;
+}): ReactNode {
+  const route = routeFor(usePath());
+  const metadata = useEvidenceMeta();
+  return (
+    <>
+      {route.kind !== "history" ? (
+        <nav className="breadcrumb" aria-label="現在の位置">
+          <Link to="/evidence">取得履歴</Link>
+          {route.kind === "artifact" ? (
+            <>
+              {" "}
+              / <Link to={`/runs/${route.runId}`}>収集記録</Link>
+            </>
+          ) : null}
+        </nav>
+      ) : null}
+      <div className="page-head">
+        <h1>{route.title}</h1>
+        <p className="lede">保存済みの記録と、取得時に残されたファイルを確認できます。</p>
+      </div>
+      <EvidenceBoundary query={metadata} label="取得履歴の接続情報">
+        {(meta) => (
+          <>
+            {!observationsAvailable && !meta.capabilities.parsedObservations ? (
+              <p className="query-notice">
+                この画面は原本・証跡の閲覧用です。取引・残高としての解析結果はまだ提供していません。
+              </p>
+            ) : null}
+            {route.kind === "history" ? (
+              <EvidenceHistory sources={meta.sources} />
+            ) : route.kind === "run" ? (
+              <EvidenceRunPage key={route.runId} runId={route.runId} sources={meta.sources} />
+            ) : route.kind === "artifact" ? (
+              <EvidenceArtifactPage
+                key={`${route.runId}/${route.artifactId}`}
+                runId={route.runId}
+                artifactId={route.artifactId}
+                sources={meta.sources}
+              />
+            ) : (
+              <EmptyState>
+                このURLに対応するページはありません。<Link to="/evidence">取得履歴へ戻る</Link>
+              </EmptyState>
+            )}
+          </>
+        )}
+      </EvidenceBoundary>
+    </>
+  );
+}
+
 export function EvidenceApp({
   parsingHealth,
   observationsAvailable = false,
@@ -123,48 +179,7 @@ export function EvidenceApp({
         </div>
         <main id="main" ref={main} tabIndex={-1}>
           <ParsingHealthNotice health={parsingHealth} />
-          {route.kind !== "history" ? (
-            <nav className="breadcrumb" aria-label="現在の位置">
-              <Link to="/evidence">取得履歴</Link>
-              {route.kind === "artifact" ? (
-                <>
-                  {" "}
-                  / <Link to={`/runs/${route.runId}`}>収集記録</Link>
-                </>
-              ) : null}
-            </nav>
-          ) : null}
-          <div className="page-head">
-            <h1>{route.title}</h1>
-            <p className="lede">保存済みの記録と、取得時に残されたファイルを確認できます。</p>
-          </div>
-          <EvidenceBoundary query={metadata} label="接続情報">
-            {(meta) => (
-              <>
-                {!observationsAvailable && !meta.capabilities.parsedObservations ? (
-                  <p className="query-notice">
-                    この画面は原本・証跡の閲覧用です。取引・残高としての解析結果はまだ提供していません。
-                  </p>
-                ) : null}
-                {route.kind === "history" ? (
-                  <EvidenceHistory sources={meta.sources} />
-                ) : route.kind === "run" ? (
-                  <EvidenceRunPage key={route.runId} runId={route.runId} sources={meta.sources} />
-                ) : route.kind === "artifact" ? (
-                  <EvidenceArtifactPage
-                    key={`${route.runId}/${route.artifactId}`}
-                    runId={route.runId}
-                    artifactId={route.artifactId}
-                    sources={meta.sources}
-                  />
-                ) : (
-                  <EmptyState>
-                    このURLに対応するページはありません。<Link to="/evidence">取得履歴へ戻る</Link>
-                  </EmptyState>
-                )}
-              </>
-            )}
-          </EvidenceBoundary>
+          <EvidenceContent observationsAvailable={observationsAvailable} />
         </main>
         <footer className="workspace-footer">
           <span>保護された保存記録を、読み取り専用で表示しています。</span>
