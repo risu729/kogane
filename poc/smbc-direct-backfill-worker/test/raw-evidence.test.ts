@@ -90,6 +90,23 @@ describe("SMBC Direct raw evidence client", () => {
         }),
       ),
     ).rejects.toThrow("raw_evidence_importer_");
+
+    await expect(
+      backfillStoredRuns(
+        importer({
+          source: "smbc-direct",
+          scannedObjectCount: 1,
+          importedManifestCount: 0,
+          skippedManifestCount: 0,
+          deferredManifestCount: 0,
+          failedManifestCount: 1,
+          nextCursor: "must-not-advance",
+          truncated: true,
+          failureCode: "manifest_not_found",
+          failedManifestKey: MANIFEST,
+        }),
+      ),
+    ).rejects.toThrow("raw_evidence_importer_invalid_response");
   });
 });
 

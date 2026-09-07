@@ -2207,7 +2207,10 @@ async function backfillSmbcDirect(
       failedManifestCount: 1,
       failureCode: safeCode(error),
       failedManifestKey: object.key,
-      nextCursor: await nextSmbcDirectScanCursor(continuation, env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT),
+      // A failed manifest is a retry boundary. Do not hand callers the scan
+      // position after it; their previously persisted cursor remains the only
+      // valid resume point.
+      nextCursor: null,
     });
   }
 }

@@ -282,6 +282,11 @@ export class SmbcBackfillSession extends DurableObject<Env> {
               transactionCount: result.transactions.length,
             },
           });
+          // Preserve a successfully stored provider response even when writing
+          // its normalized counterpart fails. A terminal partial manifest can
+          // then describe the exact R2 prefix instead of leaving an unlisted
+          // raw object that no strict importer can accept.
+          upsertArtifact(artifacts, rawArtifact);
           const normalizedArtifact = await storeJson({
             bucket: this.env.SNAPSHOTS,
             key: `${prefix}/transactions/${rangeName}.normalized.json`,
@@ -297,7 +302,6 @@ export class SmbcBackfillSession extends DurableObject<Env> {
               transactionCount: result.transactions.length,
             },
           });
-          upsertArtifact(artifacts, rawArtifact);
           upsertArtifact(artifacts, normalizedArtifact);
           progress = {
             ...progress,

@@ -769,9 +769,11 @@ function parseRawTransactions(input: JsonObject, artifact: Artifact): Transactio
       "transactions_raw_direction_invalid",
       409,
     );
+    const date = transactionDate(entry.dispDate, compact(artifact.range!.end));
+    assertTransactionDateInRange(date, artifact.range!, "transactions_raw_date_out_of_range");
     return {
       id: boundedString(String(entry.meisaiId ?? ""), "transactions_raw_id_invalid"),
-      date: transactionDate(entry.dispDate, compact(artifact.range!.end)),
+      date,
       amount: Math.abs(parseYen(entry.amount, "transactions_raw_amount_invalid")),
       balanceAfter: parseYen(entry.torihikigobalance, "transactions_raw_balance_invalid"),
       description: boundedString(
@@ -816,6 +818,11 @@ function parseNormalizedTransactions(input: JsonObject, artifact: Artifact): Tra
       409,
     );
     const dateValue = instantOffset(row.date, "transactions_normalized_date_invalid");
+    assertTransactionDateInRange(
+      dateValue,
+      artifact.range!,
+      "transactions_normalized_date_out_of_range",
+    );
     return {
       id: boundedString(row.id, "transactions_normalized_id_invalid"),
       date: dateValue,
@@ -1347,6 +1354,13 @@ function transactionDate(value: unknown, referenceDate: string): string {
     String(day).padStart(2, "0") +
     "T00:00:00+09:00"
   );
+}
+
+function assertTransactionDateInRange(dateTime: string, range: DateRange, code: string): void {
+  const calendarDate = dateTime.slice(0, 10);
+  if (calendarDate < range.start || calendarDate > range.end) {
+    throw new ImportError(409, code);
+  }
 }
 
 function responseBoundaryDate(value: unknown): string {

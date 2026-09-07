@@ -259,6 +259,37 @@ describe("SMBC Direct R2 importer", () => {
     expect(manifest.artifacts.length + 1).toBe(15);
   });
 
+  test("keeps every staged request below the Service Binding invocation limit", async () => {
+    const bucket = new FakeBucket();
+    const manifest = await storeSuccessRun(bucket, 9);
+    const missingNormalized = manifest.artifacts.pop()!;
+    expect(missingNormalized.dataset).toBe("transactions-normalized");
+    bucket.objects.delete(missingNormalized.key);
+    manifest.completedChunks = 8;
+    manifest.transactionCount = 8;
+    manifest.status = "partial";
+    manifest.failureCodes = ["transactions_body_missing"];
+    manifest.logoutSucceeded = true;
+    await replaceManifest(bucket, manifest);
+
+    const central = new FakeCentral();
+    await expect(importRun(bucket, central, { immediate: false })).resolves.toMatchObject({
+      status: "deferred",
+      nextOffset: 10,
+    });
+    expect(central.requests).toHaveLength(25);
+
+    const beforeFinalChunk = central.requests.length;
+    await expect(
+      importRun(bucket, central, { immediate: false, offset: 10 }),
+    ).resolves.toMatchObject({ status: "sealed" });
+    const finalChunkInvocations = central.requests.length - beforeFinalChunk;
+    expect(finalChunkInvocations).toBe(28);
+    // The collector-to-importer hop is one additional invocation, leaving
+    // three calls of headroom under Cloudflare's limit of 32.
+    expect(finalChunkInvocations + 1).toBeLessThan(32);
+  });
+
   test("replays immutable terminal reports across importer deployments", async () => {
     const bucket = new FakeBucket();
     await storeSuccessRun(bucket, 6);
@@ -429,6 +460,83 @@ describe("SMBC Direct R2 importer", () => {
       const body = bucket.objects.get(artifact.key)!.body;
       body[0] = (body[0] ?? 0) ^ 1;
       await expectRejected(bucket, "artifact_checksum_mismatch");
+    }
+  });
+
+  test("rejects artifact transport and Shift_JIS boundary drift", async () => {
+    {
+      const bucket = new FakeBucket();
+      const manifest = await storeSuccessRun(bucket, 1);
+      manifest.artifacts[0]!.bytes += 1;
+      await replaceManifest(bucket, manifest);
+      await expectRejected(bucket, "artifact_size_mismatch");
+    }
+    {
+      const bucket = new FakeBucket();
+      const manifest = await storeSuccessRun(bucket, 1);
+      const artifact = manifest.artifacts[0]!;
+      bucket.objects.get(artifact.key)!.contentType = JSON_MEDIA_TYPE;
+      await expectRejected(bucket, "artifact_content_type_mismatch");
+    }
+    {
+      const bucket = new FakeBucket();
+      const manifest = await storeSuccessRun(bucket, 1);
+      const artifact = manifest.artifacts[0]!;
+      bucket.objects.get(artifact.key)!.customMetadata.extra = "not-allowed";
+      await expectRejected(bucket, "artifact_metadata_mismatch");
+    }
+    {
+      const bucket = new FakeBucket();
+      const manifest = await storeSuccessRun(bucket, 1);
+      const raw = manifest.artifacts.find((artifact) => artifact.dataset === "transactions-raw")!;
+      await replaceArtifact(bucket, manifest, raw, new Uint8Array([0x81]));
+      await expectRejected(bucket, "artifact_shift_jis_round_trip_failed");
+    }
+  });
+
+  test("requires transaction dates to stay within inclusive artifact boundaries", async () => {
+    {
+      const bucket = new FakeBucket();
+      const manifest = await storeSuccessRun(bucket, 1);
+      const raw = manifest.artifacts.find((artifact) => artifact.dataset === "transactions-raw")!;
+      const payload = rawTransactionPayload(bucket, raw);
+      const rows = (payload.response as { meisai: Array<Record<string, unknown>> }).meisai;
+      rows[0]!.dispDate = "12月31日";
+      await replaceArtifact(bucket, manifest, raw, shiftJis(JSON.stringify(payload)));
+      await expectRejected(bucket, "transactions_raw_date_out_of_range");
+    }
+    {
+      const bucket = new FakeBucket();
+      const manifest = await storeSuccessRun(bucket, 1);
+      const normalized = manifest.artifacts.find(
+        (artifact) => artifact.dataset === "transactions-normalized",
+      )!;
+      const payload = JSON.parse(
+        new TextDecoder().decode(bucket.objects.get(normalized.key)!.body),
+      ) as { transactions: Array<Record<string, unknown>> };
+      payload.transactions[0]!.date = "2025-12-31T00:00:00+09:00";
+      await replaceArtifact(bucket, manifest, normalized, utf8(JSON.stringify(payload)));
+      await expectRejected(bucket, "transactions_normalized_date_out_of_range");
+    }
+    {
+      const bucket = new FakeBucket();
+      const manifest = await storeSuccessRun(bucket, 1);
+      const raw = manifest.artifacts.find((artifact) => artifact.dataset === "transactions-raw")!;
+      const normalized = manifest.artifacts.find(
+        (artifact) => artifact.dataset === "transactions-normalized",
+      )!;
+      const rawPayload = rawTransactionPayload(bucket, raw);
+      const rawRows = (rawPayload.response as { meisai: Array<Record<string, unknown>> }).meisai;
+      rawRows[0]!.dispDate = "2026年1月31日";
+      await replaceArtifact(bucket, manifest, raw, shiftJis(JSON.stringify(rawPayload)));
+      const normalizedPayload = JSON.parse(
+        new TextDecoder().decode(bucket.objects.get(normalized.key)!.body),
+      ) as { transactions: Array<Record<string, unknown>> };
+      normalizedPayload.transactions[0]!.date = "2026-01-31T00:00:00+09:00";
+      await replaceArtifact(bucket, manifest, normalized, utf8(JSON.stringify(normalizedPayload)));
+      await expect(importRun(bucket, new FakeCentral())).resolves.toMatchObject({
+        status: "sealed",
+      });
     }
   });
 

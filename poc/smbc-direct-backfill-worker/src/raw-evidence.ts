@@ -177,6 +177,7 @@ function validateBackfillResult(value: unknown): RawEvidenceBackfillPageResult {
     (input.deferredManifestCount === 1) !== (result?.status === "deferred") ||
     (input.failureCode === undefined) !== (input.failedManifestKey === undefined) ||
     (input.failedManifestCount === 1) !== failureDetails ||
+    (input.failedManifestCount === 1 && (input.nextCursor !== null || input.truncated)) ||
     (input.truncated ? !safeCursor(input.nextCursor) : input.nextCursor !== null)
   ) {
     throw new Error("raw_evidence_importer_invalid_response");

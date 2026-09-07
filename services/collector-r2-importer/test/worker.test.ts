@@ -531,6 +531,57 @@ describe("collector R2 importer routes", () => {
     expect(calls[1]).toEqual({ prefix: "raw/smbc-direct/", limit: 1, cursor: "next" });
   });
 
+  test("the SMBC Direct backfill does not advance past a failed manifest", async () => {
+    const manifestKey =
+      "raw/smbc-direct/2026/09/05/123e4567-e89b-42d3-a456-426614174000/manifest.json";
+    const calls: R2ListOptions[] = [];
+    const bucket = {
+      list: async (options: R2ListOptions) => {
+        calls.push(options);
+        return {
+          objects: [{ key: manifestKey }],
+          truncated: true,
+          cursor: "after-failed-manifest",
+        } as unknown as R2Objects;
+      },
+      get: async () => null,
+    } as unknown as R2Bucket;
+    const env = environment(
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      {} as R2Bucket,
+      bucket,
+    );
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await worker.fetch(
+        new Request("https://importer.internal/v1/smbc-direct/backfill-page", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ limit: 1 }),
+        }) as Parameters<typeof worker.fetch>[0],
+        env,
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        scannedObjectCount: 1,
+        failedManifestCount: 1,
+        nextCursor: null,
+        truncated: false,
+        failedManifestKey: manifestKey,
+      });
+    }
+    expect(calls).toEqual([
+      { prefix: "raw/smbc-direct/", limit: 1 },
+      { prefix: "raw/smbc-direct/", limit: 1 },
+    ]);
+  });
+
   test("the SMBC Direct route rejects invalid limits and cursor states before listing", async () => {
     const bucket = {
       list: async () => {
