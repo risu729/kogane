@@ -278,7 +278,9 @@ as one fixed aggregate failure category.
 Across the ten eligible artifacts, the audit found one month selector per
 artifact, fifteen eight-digit month values, exactly one selected month value,
 and a selected month consistent with the artifact's manifest month. A single
-unselected non-month default option is explicitly ignored. The HTML carried
+unselected non-month default option is explicitly ignored. Layer A permits one
+through fifteen contiguous available months, so the parser accepts that same
+range and binds the selected option to the artifact key. The HTML carried
 75 logical activity records. Every record had one outer row pair and one
 compact/expanded responsive pair; the parser required those cardinalities and
 converted them into exactly 75 transactions, not 150 or 225. All 75 displayed
@@ -293,7 +295,9 @@ the selected month, non-contiguous selector, or row/cardinality drift rejects
 the artifact. Status, authorization, fees, pending/confirmed transitions, and
 family-card identity are not promoted beyond what the captured page explicitly
 states. In particular, no stable pending-to-posted reconciliation key is
-claimed.
+claimed. Append-only refetch evidence remains queryable, while the current view
+selects only the latest successful artifact for each source and month; a later
+empty month therefore clears older rows from the current view.
 
 ### Mobile Suica Layer B validation (2026-09-07)
 

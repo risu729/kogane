@@ -64,7 +64,7 @@ export function createGlobalPassActivity(
       const html = decodeUtf8(bytes);
       if (!/^\s*<!doctype\s+html\b/iu.test(html)) throw new Error("global-pass HTML doctype drift");
       const document = parseDocument(html);
-      const selectedMonth = parseMonthSelector(document);
+      const selectedMonth = parseMonthSelector(document, artifact.artifactKey);
       const tables = elements(document, "table");
       const outer = tables.filter((table) => owned(table, "th", "table").length === 12);
       const compact = tables.filter((table) => owned(table, "th", "table").length === 4);
@@ -183,12 +183,10 @@ export function createGlobalPassActivity(
   };
 }
 
-function parseMonthSelector(document: Node): string {
+function parseMonthSelector(document: Node, artifactKey: string | null | undefined): string {
   const candidates = elements(document, "select").filter((select) => {
     const options = owned(select, "option", "select");
-    return (
-      options.filter((option) => /^\d{8}$/u.test(attribute(option, "value") ?? "")).length >= 2
-    );
+    return options.some((option) => /^\d{8}$/u.test(attribute(option, "value") ?? ""));
   });
   if (candidates.length !== 1) throw new Error("global-pass month selector cardinality drift");
   const allOptions = owned(candidates[0]!, "option", "select");
@@ -197,12 +195,13 @@ function parseMonthSelector(document: Node): string {
     (option) => !/^\d{8}$/u.test(attribute(option, "value") ?? ""),
   );
   if (
-    options.length !== 15 ||
+    options.length < 1 ||
+    options.length > 15 ||
     nonMonth.length > 1 ||
     nonMonth.some((option) => hasAttribute(option, "selected"))
   ) {
     throw new Error(
-      "global-pass month selector must contain 15 months and at most one unselected default",
+      "global-pass month selector must contain between one and 15 months and at most one unselected default",
     );
   }
   const values = options.map((option) => attribute(option, "value")!);
@@ -223,9 +222,13 @@ function parseMonthSelector(document: Node): string {
   const selected = options.filter((option) => hasAttribute(option, "selected"));
   if (selected.length !== 1)
     throw new Error("global-pass month selector must have one selected option");
-  return attribute(selected[0]!, "value")!
+  const selectedMonth = attribute(selected[0]!, "value")!
     .slice(0, 6)
     .replace(/^(\d{4})(\d{2})$/u, "$1-$2");
+  if (artifactKey !== `activity-${selectedMonth}.html`) {
+    throw new Error("global-pass artifact key and selected month disagree");
+  }
+  return selectedMonth;
 }
 
 function previousMonth(month: string): string {

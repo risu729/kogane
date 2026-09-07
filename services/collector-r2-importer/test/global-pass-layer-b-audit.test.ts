@@ -45,6 +45,69 @@ describe("GLOBAL PASS aggregate-only R2 Layer B audit", () => {
     expect((await invalid.json()) as unknown).toEqual({ error: "cursor_invalid" });
   });
 
+  test("audits a valid failed run without producing financial observations", async () => {
+    const manifestKey =
+      "raw/prestia-globalpass/2099/01/01/123e4567-e89b-42d3-a456-426614174000/manifest.json";
+    const body = new TextEncoder().encode(
+      JSON.stringify({
+        schemaVersion: "globalpass-browser-poc-v2",
+        source: "prestia-globalpass",
+        runtimeRevision: "fixture-v1",
+        runId: "123e4567-e89b-42d3-a456-426614174000",
+        mode: "daily",
+        startedAt: "2099-01-01T00:00:00.000Z",
+        completedAt: "2099-01-01T00:00:01.000Z",
+        status: "failed",
+        availableMonths: [],
+        selectedMonths: [],
+        captureComplete: false,
+        paginationStatus: "unproven",
+        artifacts: [],
+        failures: [
+          {
+            operation: "browser-collection",
+            errorType: "Error",
+            errorCode: "browser_collection_failed",
+          },
+        ],
+      }),
+    );
+    const failedRunBucket = {
+      list: async (options: R2ListOptions) => {
+        expect(options.limit === 1 || options.limit === 1_000).toBe(true);
+        return { objects: [{ key: manifestKey }], truncated: false } as unknown as R2Objects;
+      },
+      get: async (key: string) => {
+        if (key !== manifestKey) return null;
+        return {
+          key,
+          size: body.byteLength,
+          customMetadata: {
+            source: "prestia-globalpass",
+            status: "failed",
+            runId: "123e4567-e89b-42d3-a456-426614174000",
+          },
+          httpMetadata: { contentType: "application/json; charset=utf-8" },
+          checksums: {},
+          arrayBuffer: async () =>
+            body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer,
+        } as unknown as R2ObjectBody;
+      },
+    } as unknown as R2Bucket;
+    const response = await auditWorker.fetch(request(), {
+      GLOBAL_PASS_SNAPSHOTS: failedRunBucket,
+    });
+    expect(await response.json()).toMatchObject({
+      auditedManifestCount: 1,
+      failedManifestCount: 0,
+      manifestStatus: "failed",
+      failureCount: 1,
+      activityArtifactCount: 0,
+      parsedObservationCount: 0,
+      unsignedObservationCount: 0,
+    });
+  });
+
   test("the harness stays local, remote-read-only, and never deploys", () => {
     const script = readFileSync(
       new URL("../scripts/audit-global-pass-layer-b-r2.sh", import.meta.url),

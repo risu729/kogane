@@ -101,9 +101,11 @@ a reliable family-card identifier from sanitized transport metadata alone.
 
 Layer B now parses only terminal-success, failure-free sanitized activity
 artifacts. It treats the desktop and responsive tables as duplicate views of
-one provider record, validates the selected 15-month selector and table/row
-cardinality, permits only one unselected non-month default option, and preserves
-conditional fields in provenance `extra`. The live
+one provider record, accepts the Layer-A contract of one through fifteen
+contiguous month options (the live page exposed all fifteen), binds the selected
+month to the artifact key, validates table/row cardinality, permits only one
+unselected non-month default option, and preserves conditional fields in
+provenance `extra`. The live
 aggregate-only canary found only unsigned transaction amounts, so normalized
 signed amounts remain unset rather than assuming every card row is a debit.
 Approval/status values remain source evidence, not a claimed cross-state or

@@ -732,6 +732,74 @@ describe("parse runs", () => {
     expect(count(store, "transaction_observations")).toBe(2);
   });
 
+  test("current GLOBAL PASS transactions use the latest fetched monthly snapshot", () => {
+    const store = tempStore();
+    const directory = mkdtempSync(join(tmpdir(), "kogane-global-pass-refetch-"));
+    writeFileSync(join(directory, "older.html"), "<!doctype html>");
+    writeFileSync(join(directory, "newer.html"), "<!doctype html>");
+    writeFileSync(join(directory, "empty.html"), "<!doctype html>");
+    const source = { id: "global-pass", provider: "GLOBAL PASS" };
+    ingestFile(store, join(directory, "older.html"), {
+      source,
+      mime: "text/html",
+      fetchedAt: "2026-09-07T00:00:01Z",
+    });
+    ingestFile(store, join(directory, "newer.html"), {
+      source,
+      mime: "text/html",
+      fetchedAt: "2026-09-07T00:00:02Z",
+    });
+    ingestFile(store, join(directory, "empty.html"), {
+      source,
+      mime: "text/html",
+      fetchedAt: "2026-09-07T00:00:03Z",
+    });
+    store.db
+      .query(
+        `UPDATE fetch_artifacts
+         SET dataset = 'globalpass-activity',
+             artifact_key = 'activity-2099-02.html'`,
+      )
+      .run();
+    const artifacts = store.db.query("SELECT id FROM fetch_artifacts ORDER BY id").all() as {
+      id: number;
+    }[];
+    for (const [index, description] of ["older", "newer"].entries()) {
+      const artifactRow = artifacts[index];
+      if (artifactRow === undefined) throw new Error("missing GLOBAL PASS test artifact");
+      const parseRunId = insertParseRun(store, {
+        artifactId: artifactRow.id,
+        parserName: "global-pass-activity",
+        parserVersion: "1.0.0",
+        parsedAt: `2026-09-07T00:01:0${index}Z`,
+        status: "ok",
+        warnings: [],
+      });
+      insertObservation(store, parseRunId, {
+        kind: "transaction",
+        sourceAccount: "global-pass:card",
+        externalId: "same-provider-evidence",
+        description,
+        rawLocator: "html:activity-record=1",
+        extra: {},
+      });
+    }
+    expect(currentTransactions(store).map((row) => row.description)).toEqual(["newer"]);
+    expect(count(store, "transaction_observations")).toBe(2);
+    const emptyArtifact = artifacts[2];
+    if (emptyArtifact === undefined) throw new Error("missing empty GLOBAL PASS test artifact");
+    insertParseRun(store, {
+      artifactId: emptyArtifact.id,
+      parserName: "global-pass-activity",
+      parserVersion: "1.0.0",
+      parsedAt: "2026-09-07T00:01:02Z",
+      status: "ok",
+      warnings: [],
+    });
+    expect(currentTransactions(store)).toEqual([]);
+    expect(count(store, "transaction_observations")).toBe(2);
+  });
+
   test("current SBI Shinsei transactions collapse refetches only within source and account", () => {
     const store = tempStore();
     const directory = mkdtempSync(join(tmpdir(), "kogane-sbi-shinsei-overlap-"));

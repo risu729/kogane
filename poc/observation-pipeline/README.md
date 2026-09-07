@@ -104,7 +104,7 @@ Twenty-six parsers are registered against shapes the collectors already produce:
 | `smbc-direct-transactions`              | SMBC Direct `transactions-normalized`              | transactions                                 |
 | `sbi-shinsei-top-balances-and-activity` | SBI Shinsei `top-accounts-balance-and-activity`    | balances, valuations, transactions           |
 | `sbi-shinsei-yen-deposit-account`       | SBI Shinsei `yen-deposit-account`                  | source-view-scoped balances                  |
-| `global-pass-activity`              | GLOBAL PASS sanitized `globalpass-activity` HTML   | transactions                                 |
+| `global-pass-activity`                  | GLOBAL PASS sanitized `globalpass-activity` HTML   | transactions                                 |
 
 Mobile Suica deliberately has one canonical Layer-B route. The collector's
 Shift-JIS `sf-history-html` is provider evidence and `collection-summary` is
@@ -133,7 +133,10 @@ and unmodelled conditional fields, remain in `extra`. The observed transaction
 amount is unsigned: the parser keeps its exact text, scale and ISO currency but
 does not manufacture a debit sign or `amountMinor`. Pending-to-confirmed and
 family-card identity are not inferred, and the whole provider row plus its
-occurrence supplies replay-stable evidence identity.
+occurrence supplies replay-stable evidence identity. The month selector accepts
+the Layer-A range of one through fifteen contiguous months, binds the selected
+month to the artifact key, and the current view uses only the latest successful
+snapshot for each month, including an explicitly empty replacement snapshot.
 
 The demo ingests 11 artifacts from 3 sources and produces 49 observations:
 14 transaction, 24 balance, 3 position, 8 valuation.

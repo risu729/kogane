@@ -108,6 +108,7 @@ export default {
               runStatus: "success",
               runFailureCount: 0,
               dataset: "globalpass-activity",
+              artifactKey: `activity-${item.artifact.month}.html`,
               url: null,
               mime: "text/html",
               fetchedAt: manifest.completedAt,

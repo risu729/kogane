@@ -13,6 +13,7 @@ const meta = (overrides: Partial<ArtifactMeta> = {}): ArtifactMeta => ({
   runStatus: "success",
   runFailureCount: 0,
   dataset: "globalpass-activity",
+  artifactKey: "activity-2099-02.html",
   url: null,
   mime: "text/html",
   fetchedAt: "2099-03-01T00:00:00Z",
@@ -96,6 +97,30 @@ describe("global-pass-activity", () => {
     expect(transactions[0]!.externalId).not.toBe(transactions[1]!.externalId);
   });
 
+  test("accepts the Layer-A one-to-fifteen-month selector range and a genuine empty month", () => {
+    const html = bytes().toString("utf8");
+    const oneMonth = html.replace(
+      /<option value="20990199">[\s\S]*?<option value="20971299">2097-12<\/option>/u,
+      "",
+    );
+    expect(
+      globalPassActivity.parse(new TextEncoder().encode(oneMonth), meta()).observations,
+    ).toHaveLength(1);
+
+    const firstNested = html.indexOf('<table data-view="compact">');
+    const outer = html.indexOf('<table data-view="activity">');
+    if (firstNested < 0 || outer < 0) throw new Error("empty fixture boundary missing");
+    const onlyOuter = html.slice(0, firstNested) + html.slice(outer);
+    const empty = onlyOuter.replace(
+      /(<table data-view="activity">[\s\S]*?<tbody>)[\s\S]*?(<\/tbody><\/table>)/u,
+      "$1\n$2",
+    );
+    expect(globalPassActivity.parse(new TextEncoder().encode(empty), meta())).toEqual({
+      observations: [],
+      warnings: [],
+    });
+  });
+
   test("rejects nonterminal runs and every strict structural boundary", () => {
     expect(() => globalPassActivity.parse(bytes(), meta({ runStatus: "failed" }))).toThrow(
       /successful failure-free/u,
@@ -137,6 +162,9 @@ describe("global-pass-activity", () => {
     expect(() => globalPassActivity.parse(mutate("2099/02/03", "2099/01/31"), meta())).toThrow(
       /selected month/u,
     );
+    expect(() =>
+      globalPassActivity.parse(bytes(), meta({ artifactKey: "activity-2099-01.html" })),
+    ).toThrow(/artifact key and selected month/u);
     expect(
       globalPassActivity.parse(mutate("<th>Remarks</th>", "<th>New Field</th>"), meta())
         .observations[0]!.extra,
