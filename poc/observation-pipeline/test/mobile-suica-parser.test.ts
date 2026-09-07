@@ -12,6 +12,13 @@ const FIXTURE = join(
   "mobile-suica-parser-boundaries",
   "sf-history.json",
 );
+const MORE_KINDS_FIXTURE = join(
+  import.meta.dir,
+  "..",
+  "fixtures",
+  "mobile-suica-parser-boundaries",
+  "sf-history-more-kinds.json",
+);
 
 function artifact(
   dataset = "sf-history",
@@ -116,6 +123,31 @@ describe("Mobile Suica history semantics", () => {
       (entry) => entry.kind === "transaction" && entry.rawLocator === "json:$.rows[0]",
     );
     expect(newest).toMatchObject({ amountMinor: 420, extra: { _kogane: { direction: "inflow" } } });
+  });
+
+  test("fixes rail, bus, and other classification, sign, and balance lineage", () => {
+    const parsed = mobileSuicaSfHistory.parse(readFileSync(MORE_KINDS_FIXTURE), artifact());
+    expect(parsed.warnings).toEqual([]);
+    const transactions = parsed.observations.filter((entry) => entry.kind === "transaction");
+    const balances = parsed.observations.filter((entry) => entry.kind === "balance");
+    expect(transactions.map((entry) => entry.amountMinor)).toEqual([100, -300, -200]);
+    expect(
+      transactions.map((entry) => (entry.extra["_kogane"] as Record<string, unknown>)["rowKind"]),
+    ).toEqual(["other", "bus", "rail"]);
+    expect(
+      transactions.map((entry) => (entry.extra["_kogane"] as Record<string, unknown>)["direction"]),
+    ).toEqual(["inflow", "outflow", "outflow"]);
+    expect(balances.map((entry) => entry.amountMinor)).toEqual([2600, 2300, 2100]);
+    expect(balances.every((entry) => entry.metric === "sf_balance_after_transaction")).toBe(true);
+    expect(
+      balances.every(
+        (entry) =>
+          (entry.extra["_kogane"] as Record<string, unknown>)["canonicalDataset"] ===
+            "sf-history" &&
+          (entry.extra["_kogane"] as Record<string, unknown>)["derivedFromDataset"] ===
+            "sf-history-html",
+      ),
+    ).toBe(true);
   });
 
   test("distinguishes duplicate provider rows by stable occurrence", () => {

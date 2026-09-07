@@ -27,6 +27,26 @@ function count(store: Store, table: string): number {
 }
 
 describe("ingestion", () => {
+  test("collector manifests must declare an exact terminal status", () => {
+    for (const status of [undefined, "human-required", "SUCCESS"]) {
+      const store = tempStore();
+      const directory = mkdtempSync(join(tmpdir(), "kogane-run-status-"));
+      writeFileSync(join(directory, "artifact.json"), "{}");
+      const manifest: Record<string, unknown> = {
+        runId: `bad-status-${String(status)}`,
+        startedAt: "2026-08-20T00:00:00Z",
+        artifacts: [{ dataset: "artifact" }],
+      };
+      if (status !== undefined) manifest.status = status;
+      writeFileSync(join(directory, "manifest.json"), JSON.stringify(manifest));
+      expect(() => ingestRunDirectory(store, directory, { id: "x", provider: "X" })).toThrow(
+        /explicit run status|unknown run status/u,
+      );
+      expect(count(store, "fetch_runs")).toBe(0);
+      expect(count(store, "fetch_artifacts")).toBe(0);
+    }
+  });
+
   test("run-directory ingestion is idempotent", () => {
     const store = tempStore();
     const source = { id: "sbi-securities", provider: "SBI Securities" };

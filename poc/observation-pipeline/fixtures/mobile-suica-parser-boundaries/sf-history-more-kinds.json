@@ -1,0 +1,44 @@
+{
+  "asOfDateJst": "2026-08-30",
+  "pageCount": 1,
+  "transactionCount": 3,
+  "complete": true,
+  "rows": [
+    {
+      "date": "2026-08-29",
+      "typeFrom": "*入",
+      "placeFrom": "テスト駅A",
+      "typeTo": "出",
+      "placeTo": "テスト駅B",
+      "balanceText": "2,100",
+      "amountText": "-200",
+      "balance": 2100,
+      "amount": -200,
+      "kind": "rail"
+    },
+    {
+      "date": "2026-08-28",
+      "typeFrom": "バス等",
+      "placeFrom": "テスト交通",
+      "typeTo": "",
+      "placeTo": "",
+      "balanceText": "2,300",
+      "amountText": "-300",
+      "balance": 2300,
+      "amount": -300,
+      "kind": "bus"
+    },
+    {
+      "date": "2026-08-27",
+      "typeFrom": "精算",
+      "placeFrom": "",
+      "typeTo": "",
+      "placeTo": "",
+      "balanceText": "2,600",
+      "amountText": "+100",
+      "balance": 2600,
+      "amount": 100,
+      "kind": "other"
+    }
+  ]
+}
