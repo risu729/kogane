@@ -75,7 +75,7 @@ transaction / balance / position / valuation observations   layer B
 evidence browser (React client in web/, served by serve.ts)
 ```
 
-Twenty-one parsers are registered against shapes the collectors already produce:
+Twenty-three parsers are registered against shapes the collectors already produce:
 
 | Parser                              | Artifact                                           | Emits                                        |
 | ----------------------------------- | -------------------------------------------------- | -------------------------------------------- |
@@ -100,6 +100,8 @@ Twenty-one parsers are registered against shapes the collectors already produce:
 | `sony-bank-history-json`            | Sony Bank yen/foreign history pages                | transactions and after-transaction balances  |
 | `sony-bank-history-csv`             | Sony Bank official yen/foreign CSV                 | transactions and after-transaction balances  |
 | `sony-bank-wallet-history`          | Sony Bank WALLET monthly HTML                      | card transactions                            |
+| `smbc-direct-balance`               | SMBC Direct `balance-normalized`                   | balance                                      |
+| `smbc-direct-transactions`          | SMBC Direct `transactions-normalized`              | transactions                                 |
 
 Mobile Suica deliberately has one canonical Layer-B route. The collector's
 Shift-JIS `sf-history-html` is provider evidence and `collection-summary` is
@@ -109,6 +111,15 @@ cannot double-count the same rows. Each amount keeps the sign stated by the
 normalized row, each row balance is a separate `sf_balance_after_transaction`
 measurement, and the most recent row is marked as the current-balance candidate
 rather than presented as a guaranteed real-time balance.
+
+SMBC Direct also has one canonical route per financial fact. Its Shift-JIS
+`balance-raw` and `transactions-raw` artifacts remain provider evidence, while
+Layer B reads only the cross-checked UTF-8 normalized partners. The balance is
+an exact JPY account-balance observation. Each transaction uses the provider
+ID, takes its sign only from the explicit credit/debit field, and retains the
+post-row balance, requested range, and provider totals in `extra`. A repeated
+provider ID is collapsed only in the current view; both raw observations remain
+append-only and traceable.
 
 The demo ingests 11 artifacts from 3 sources and produces 49 observations:
 14 transaction, 24 balance, 3 position, 8 valuation.
@@ -271,3 +282,13 @@ read-only R2 binding, reuses the strict Layer A manifest/metadata/checksum and
 inventory validator, invokes exactly one Layer B parser per financial artifact,
 and returns aggregate counts and shape booleans only. The harness contains no
 deploy, R2 write, or R2 delete path.
+
+The SMBC Direct production canary invokes the same Layer-A run validator before
+the parsers. On 2026-09-07 it scanned 189 objects and one successful manifest:
+94 canonical normalized artifacts produced 1,069 transactions and one balance,
+while all 94 raw partners were intentionally ignored by Layer B. It returned
+aggregate counts only and performed no R2 write or delete.
+Each normalized transaction artifact is bound to its manifest-relative monthly
+range key. The current view selects the newest successfully parsed artifact for
+that range by fetch time, so a late-imported stale run cannot replace newer
+evidence and a newer empty statement removes older rows from the current view.

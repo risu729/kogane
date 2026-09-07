@@ -54,6 +54,8 @@ export const CI_PACKAGES: PackagePolicy[] = [
       "cf:check:audit-sbi-vc": `${dryRun} --config wrangler.audit-sbi-vc.jsonc`,
       "cf:check:audit-myjcb": `${dryRun} --config wrangler.audit-myjcb.jsonc`,
       "cf:check:audit-sony-layer-b": `${dryRun} --config wrangler.audit-sony-layer-b.jsonc`,
+      "cf:check:audit-smbc-direct": `${dryRun} --config wrangler.audit-smbc-direct.jsonc`,
+      "cf:check:audit-smbc-direct-layer-b": `${dryRun} --config wrangler.audit-smbc-direct-layer-b.jsonc`,
     },
     checks: [
       "test",
@@ -65,6 +67,8 @@ export const CI_PACKAGES: PackagePolicy[] = [
       "cf:check:audit-sbi-vc",
       "cf:check:audit-myjcb",
       "cf:check:audit-sony-layer-b",
+      "cf:check:audit-smbc-direct",
+      "cf:check:audit-smbc-direct-layer-b",
     ],
   },
   worker("mobile-suica-worker"),
@@ -128,7 +132,11 @@ export const CI_PACKAGES: PackagePolicy[] = [
   },
   ...["cloudflare-browser-run", "tamia-tcp-bridge"].map((name): PackagePolicy => ({
     path: `poc/${name}`,
-    scripts: { typegen: "wrangler types", typecheck: "tsc --noEmit", "deploy:dry": dryRun },
+    scripts: {
+      typegen: "wrangler types",
+      typecheck: "tsc --noEmit",
+      "deploy:dry": dryRun,
+    },
     checks: ["typegen", "typecheck", "deploy:dry"],
   })),
   {

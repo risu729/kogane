@@ -171,6 +171,22 @@ export function currentTransactions(store: Store): TransactionRow[] {
          SELECT fetch_artifact_id
          FROM ranked_myjcb_snapshots
          WHERE snapshot_rank = 1
+       ), ranked_smbc_direct_snapshots AS (
+         SELECT p.fetch_artifact_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY fa.source_id, fa.artifact_key
+                  ORDER BY fa.fetched_at DESC, fa.id DESC
+                ) AS snapshot_rank
+         FROM parse_runs p
+         JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+         JOIN fetch_runs f ON f.id = fa.fetch_run_id
+         WHERE ${CURRENT}
+           AND p.parser_name = 'smbc-direct-transactions'
+           AND fa.dataset = 'transactions-normalized'
+       ), current_smbc_direct_snapshots AS (
+         SELECT fetch_artifact_id
+         FROM ranked_smbc_direct_snapshots
+         WHERE snapshot_rank = 1
        )
        SELECT id, source_id, source_account, as_of, amount_minor, amount_text,
               currency, description, counterparty, external_id, status, parser
@@ -186,7 +202,8 @@ export function currentTransactions(store: Store): TransactionRow[] {
                            'myjcb-credit-ledger',
                            'sony-bank-history-json',
                            'sony-bank-history-csv',
-                           'sony-bank-wallet-history'
+                           'sony-bank-wallet-history',
+                           'smbc-direct-transactions'
                          ) AND t.external_id IS NOT NULL
                       THEN json_array(fa.source_id, t.source_account, t.external_id)
                     ELSE json_array('observation-row', t.id)
@@ -198,7 +215,11 @@ export function currentTransactions(store: Store): TransactionRow[] {
                     WHEN 'provider-json' THEN 1
                     WHEN 'recent' THEN 1
                     ELSE 2
-                  END, t.id DESC
+                  END,
+                  CASE WHEN p.parser_name = 'smbc-direct-transactions'
+                    THEN fa.fetched_at
+                  END DESC,
+                  t.id DESC
                 ) AS rank_in_identity
          FROM transaction_observations t
          JOIN parse_runs p ON p.id = t.parse_run_id
@@ -208,6 +229,10 @@ export function currentTransactions(store: Store): TransactionRow[] {
            AND (
              p.parser_name <> 'myjcb-credit-ledger'
              OR fa.id IN (SELECT fetch_artifact_id FROM current_myjcb_snapshots)
+           )
+           AND (
+             p.parser_name <> 'smbc-direct-transactions'
+             OR fa.id IN (SELECT fetch_artifact_id FROM current_smbc_direct_snapshots)
            )
        )
        WHERE rank_in_identity = 1
