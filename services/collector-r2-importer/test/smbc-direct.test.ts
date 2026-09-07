@@ -230,6 +230,31 @@ describe("SMBC Direct R2 importer", () => {
     expect(central.requests).toHaveLength(0);
   });
 
+  test("defers a twelve-plan raw-orphan partial before the outer hop exceeds its limit", async () => {
+    const bucket = new FakeBucket();
+    const manifest = await storeSuccessRun(bucket, 5);
+    const missingNormalized = manifest.artifacts.pop()!;
+    expect(missingNormalized.dataset).toBe("transactions-normalized");
+    bucket.objects.delete(missingNormalized.key);
+    manifest.completedChunks = 4;
+    manifest.transactionCount = 4;
+    manifest.status = "partial";
+    manifest.failureCodes = ["transactions_body_missing"];
+    manifest.logoutSucceeded = true;
+    await replaceManifest(bucket, manifest);
+
+    const central = new FakeCentral();
+    await expect(importRun(bucket, central)).resolves.toEqual({
+      source: "smbc-direct",
+      manifestKey: MANIFEST_KEY,
+      status: "deferred",
+      reason: "worker_invocation_limit",
+      artifactCount: 12,
+      nextOffset: 0,
+    });
+    expect(central.requests).toHaveLength(0);
+  });
+
   test("resumes in bounded ten-object chunks and replays idempotently", async () => {
     const bucket = new FakeBucket();
     const manifest = await storeSuccessRun(bucket, 6);
