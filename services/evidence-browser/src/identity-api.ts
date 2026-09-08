@@ -1,4 +1,5 @@
 import { HttpError, json } from "./http";
+import { preferredInstrumentNames } from "./preferred-instrument-names";
 import type { IdentityOrigin } from "../../../poc/observation-pipeline/shared/identity-contract";
 import {
   IDENTITY_PAGE_LIMIT,
@@ -110,6 +111,14 @@ export async function identityApi(request: Request, env: Env, url: URL): Promise
   const result = await env.DB.prepare(sql)
     .bind(...bindings)
     .all<Record<string, unknown>>();
+  if (url.pathname.endsWith("/instruments")) {
+    const names = await preferredInstrumentNames(
+      env.DB,
+      result.results.map((row) => String(row.referenceId)),
+    );
+    for (const row of result.results)
+      row.label = names.get(String(row.referenceId))?.label ?? row.label;
+  }
   return json(
     page(url.pathname.endsWith("/coverage") ? result.results : result.results.map(origin), offset),
   );
