@@ -18,6 +18,12 @@ export function requiredIdentityPolicySql(artifactAlias: string): string {
     THEN ${IDENTITY_POLICY_VERSION} ELSE ${BASE_IDENTITY_POLICY_VERSION} END`;
 }
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
+const EMPTY_PARSE_SQL = kinds
+  .map(
+    (kind) =>
+      `NOT EXISTS(SELECT 1 FROM ${kind}_observations empty_row WHERE empty_row.parse_run_id=p.id)`,
+  )
+  .join(" AND ");
 
 export async function identityKey(prefix: string, parts: unknown[]): Promise<string> {
   const digest = await crypto.subtle.digest(
@@ -347,7 +353,9 @@ export async function identitySweep(
   if (!Number.isInteger(maxRuns) || maxRuns < 1 || maxRuns > 40)
     throw new Error("identity_batch_invalid");
   const candidates = await db
-    .prepare(`SELECT p.id,a.id AS artifact_id,a.source_id,r.producer_id,a.fetch_run_id
+    .prepare(`SELECT p.id,a.id AS artifact_id,a.source_id,r.producer_id,a.fetch_run_id,
+      ${requiredIdentityPolicySql("a")} AS required_policy,
+      (${EMPTY_PARSE_SQL}) AS is_empty
     FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN financial_fetch_runs r ON r.id=a.fetch_run_id
     JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
     WHERE p.status='ok' AND f.status='success' AND f.failure_count=0 AND (?1 IS NULL OR a.source_id=?1) AND NOT EXISTS(
@@ -355,11 +363,64 @@ export async function identitySweep(
       WHERE i.parse_run_id=p.id AND i.policy_version>=${requiredIdentityPolicySql("a")})
     ORDER BY (p.superseded_by_parse_run_id IS NOT NULL),p.id LIMIT ?2`)
     .bind(source ?? null, maxRuns)
-    .all<ParseIdentity>();
+    .all<ParseIdentity & { required_policy: number; is_empty: number }>();
   let observations = 0;
   let processedRuns = 0,
     identifiedRuns = 0;
+  const empty = candidates.results.filter((parse) => parse.is_empty === 1);
+  if (empty.length) {
+    const createdAt = new Date().toISOString();
+    const values = JSON.stringify(
+      await Promise.all(
+        empty.map(async (parse) => [
+          await identityKey("ir", [parse.id, parse.required_policy]),
+          parse.id,
+          parse.required_policy,
+        ]),
+      ),
+    );
+    // At most maxRuns (40) entries and three SQL statements. Recheck all four
+    // B tables and live eligibility inside the atomic write, not only in the
+    // candidate read. Trusted Vpass policy-2 runs get the same guarded pins.
+    const result = await db.batch([
+      db
+        .prepare(`INSERT INTO identity_runs
+        SELECT json_extract(candidate.value,'$[0]'),p.id,json_extract(candidate.value,'$[2]'),? FROM json_each(?) candidate
+        JOIN parse_runs p ON p.id=json_extract(candidate.value,'$[1]')
+        JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
+        JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
+        WHERE p.status='ok' AND f.status='success' AND f.failure_count=0
+          AND ${requiredIdentityPolicySql("a")}=json_extract(candidate.value,'$[2]') AND ${EMPTY_PARSE_SQL}
+          AND NOT EXISTS(SELECT 1 FROM identity_runs existing WHERE existing.id=json_extract(candidate.value,'$[0]'))`)
+        .bind(createdAt, values),
+      db
+        .prepare(`INSERT INTO identity_vpass_bindings
+        SELECT r.id,b.financial_unit_id,b.binding_artifact_id,b.card_token FROM json_each(?) candidate
+        JOIN identity_runs r ON r.id=json_extract(candidate.value,'$[0]')
+          AND r.policy_version=json_extract(candidate.value,'$[2]') AND r.policy_version=2
+        JOIN parse_runs p ON p.id=r.parse_run_id AND p.id=json_extract(candidate.value,'$[1]')
+        JOIN trusted_vpass_card_bindings b ON b.financial_artifact_id=p.fetch_artifact_id
+        WHERE p.status='ok' AND ${EMPTY_PARSE_SQL}
+          AND NOT EXISTS(SELECT 1 FROM identity_vpass_bindings pin WHERE pin.identity_run_id=r.id)`)
+        .bind(values),
+      db
+        .prepare(`INSERT INTO identity_run_seals
+        SELECT r.id,0,? FROM json_each(?) candidate
+        JOIN identity_runs r ON r.id=json_extract(candidate.value,'$[0]') AND r.policy_version=json_extract(candidate.value,'$[2]')
+        JOIN parse_runs p ON p.id=r.parse_run_id AND p.id=json_extract(candidate.value,'$[1]')
+        JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
+        JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
+        WHERE p.status='ok' AND f.status='success' AND f.failure_count=0
+          AND ${requiredIdentityPolicySql("a")}=json_extract(candidate.value,'$[2]') AND ${EMPTY_PARSE_SQL}
+          AND NOT EXISTS(SELECT 1 FROM identity_run_seals existing WHERE existing.identity_run_id=r.id)`)
+        .bind(createdAt, values),
+    ]);
+    processedRuns += empty.length;
+    identifiedRuns += result[2]!.meta.changes;
+  }
+  const fastIds = new Set(empty.map((parse) => parse.id));
   for (const parse of candidates.results) {
+    if (fastIds.has(parse.id)) continue;
     if (observations >= 200) break;
     observations += await identifyParse(
       db,
