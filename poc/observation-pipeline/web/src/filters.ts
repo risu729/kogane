@@ -15,14 +15,6 @@ export const EMPTY_FILTERS: RecordFilters = {
   to: "",
 };
 export const PAGE_SIZE = 50;
-/** Unknown/unparsed amounts are not zero. Never round small amounts through Number. */
-export function isRecordedZero(amountMinor: string | null, amountText?: string | null): boolean {
-  // Some foreign currencies and crypto assets retain an exact decimal string
-  // without a supported minor-unit scale. Zero needs no currency conversion.
-  // Never use Number(): tiny nonzero values must not underflow into zero.
-  if (amountMinor !== null) return /^[-+]?0+$/u.test(amountMinor);
-  return typeof amountText === "string" && /^[+-]?(?:0+(?:\.0+)?|\.0+)$/u.test(amountText.trim());
-}
 // Compare the recorded calendar date, without browser timezone conversion.
 export function recordedDate(value: string | null): string | null {
   if (!value) return null;

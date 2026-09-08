@@ -144,9 +144,11 @@ function ownProduct<T extends { id: number; organization?: ObservationOrganizati
         value.organization.product.origin.id === value.id));
 }
 import { validActivityMeaning } from "./activity-semantics.ts";
+import { validNormalizedDecimal } from "./normalized-decimal.ts";
 const transaction = ownProduct(
   "transaction",
   object<TransactionRow>({
+    normalized: optional(validNormalizedDecimal),
     interpretation: optional(validActivityMeaning),
     organization: optional(organization),
     id: identifier,
@@ -164,6 +166,7 @@ const transaction = ownProduct(
   }),
 );
 const balanceFields = {
+  normalized: optional(validNormalizedDecimal),
   interpretation: optional(validBalanceInterpretation),
   organization: optional(organization),
   id: identifier,
@@ -199,6 +202,7 @@ const balanceHistory = ownBalanceInterpretation(
 const position = ownProduct(
   "position",
   object<PositionRow>({
+    normalized: optional(validNormalizedDecimal),
     organization: optional(organization),
     id: identifier,
     source_id: text,
@@ -216,6 +220,7 @@ const position = ownProduct(
 const valuation = ownProduct(
   "valuation",
   object<ValuationRow>({
+    normalized: optional(validNormalizedDecimal),
     organization: optional(organization),
     id: identifier,
     source_id: text,
@@ -332,6 +337,7 @@ const provenance = object<Provenance>({
   artifact_id: identifier,
 });
 const observation = object<ObservationDetail>({
+  normalized: optional(validNormalizedDecimal),
   organization: optional(organization),
   kind: observationKind,
   row: (value): value is Record<string, unknown> =>

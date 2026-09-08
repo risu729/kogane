@@ -152,6 +152,32 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
         </Panel>
       ) : null}
       <OrganizationPanel organization={detail.organization} />
+      {detail.normalized ? (
+        <Panel id="normalized-value" title="DBの正規化値">
+          <div className="panel-body">
+            <p>
+              状態:{" "}
+              {
+                {
+                  exact: "正規化済み",
+                  missing: "値が未記録",
+                  unparsed: "解析不能",
+                  conflict: "原表記と整数値が不一致",
+                }[detail.normalized.status]
+              }
+            </p>
+            {detail.normalized.status === "exact" ? (
+              <p>
+                整数係数: {detail.normalized.coefficient} ／ 小数桁数: {detail.normalized.scale}
+              </p>
+            ) : null}
+            <p className="footnote">
+              規則: {detail.normalized.policyVersion}
+              。上の金額と以下の記録欄は元の表記を保持しています。ゼロ判定にはDBの正規化値を使います。
+            </p>
+          </div>
+        </Panel>
+      ) : null}
       <Panel id="stored-row" title="記録の内容">
         <div className="table-scroll">
           <table>

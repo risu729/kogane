@@ -10,7 +10,8 @@ import {
   QueryBoundary,
   StatusBadge,
 } from "../ui.tsx";
-import { EMPTY_FILTERS, isRecordedZero, matchesSourceAccount, pageWindow } from "../filters.ts";
+import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
+import { isNormalizedZero } from "../../../shared/normalized-decimal.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
 import { useViewState } from "../view-state.tsx";
 import { OrganizedInstrumentContext, OrganizedSourceAccount } from "../organization.tsx";
@@ -74,7 +75,7 @@ function BalancesBody({
     matchesSourceAccount(row, filters) &&
     (!instrument || row.instrument === instrument) &&
     (!metric || row.metric === metric) &&
-    (!hideZero || !isRecordedZero(row.amount_minor, row.amount_text));
+    (!hideZero || !isNormalizedZero(row.normalized));
   const selectionKey = JSON.stringify([
     filters.source,
     filters.account,
@@ -147,7 +148,7 @@ function BalancesBody({
             {summaries ? "0の実績・請求を除外" : "残高0を除外"}
           </label>
           <p className="footnote">
-            受信した最新・履歴の記録から、金額が0と確認できる行を除外します。未記録・読み取り不能の金額は残します。
+            DBで正規化された金額が0の行を除外します。未記録・解析不能・値の不一致・正規化情報がない行は残します。
           </p>
         </div>
       </section>
