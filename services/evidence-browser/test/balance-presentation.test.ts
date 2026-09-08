@@ -19,7 +19,7 @@ async function seedBalances(options: { conflict?: boolean; statement?: boolean }
   const run = await seedRun({
     source,
     count: 1,
-    dataset: options.statement ? "past-month-balances" : "yen-deposit-account",
+    dataset: options.statement ? "credit-past-months" : "yen-deposit-account",
   });
   const parse = await env.DB.prepare(
     "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES (?,?,'0.1.1','2099','ok','[]') RETURNING id",
@@ -42,7 +42,7 @@ async function seedBalances(options: { conflict?: boolean; statement?: boolean }
         ? "yen_deposit_account_balance"
         : "yen_deposit_savings_balance";
     const extra = options.statement
-      ? {}
+      ? { _kogane: { detailMonth: 0 } }
       : {
           accountNo: prefix,
           productCode: "601",
@@ -106,9 +106,10 @@ interface PresentedRow {
   amount_text: string;
   interpretation: BalanceInterpretation;
 }
-async function balances(source: string, metric?: string) {
+async function balances(fixture: { source: string; rawAccount: string }, metric?: string) {
   const url = new URL("https://fixture.test/api/balances");
-  url.searchParams.set("source", source);
+  url.searchParams.set("source", fixture.source);
+  url.searchParams.set("account", fixture.rawAccount);
   if (metric) url.searchParams.set("metric", metric);
   const response = await observationApi(new Request(url), env, url);
   expect(response?.status).toBe(200);
@@ -119,7 +120,7 @@ async function balances(source: string, metric?: string) {
 
 it("projects an exact Shinsei pair once in latest but preserves both historical B rows", async () => {
   const fixture = await seedBalances();
-  const body = await balances(fixture.source);
+  const body = await balances(fixture);
   expect(body.latest).toHaveLength(1);
   expect(body.history).toHaveLength(2);
   expect(body.latest[0]!.interpretation).toMatchObject({
@@ -137,14 +138,16 @@ it("projects an exact Shinsei pair once in latest but preserves both historical 
     ),
   ).toBe(true);
   expect(
-    (await env.DB.prepare("SELECT count(*) n FROM balance_observations").first<{ n: number }>())!.n,
+    (await env.DB.prepare("SELECT count(*) n FROM balance_observations WHERE source_account=?")
+      .bind(fixture.rawAccount)
+      .first<{ n: number }>())!.n,
   ).toBe(2);
 });
 
 it("either original metric filter retains the grouped latest row with both evidence refs", async () => {
   const fixture = await seedBalances();
   for (const metric of fixture.rows.map((r) => r.metric)) {
-    const body = await balances(fixture.source, metric);
+    const body = await balances(fixture, metric);
     expect(body.latest).toHaveLength(1);
     expect(body.latest[0]!.interpretation.evidence).toHaveLength(2);
     expect(body.latest[0]!.interpretation.evidence.some((r) => r.metric === metric)).toBe(true);
@@ -155,7 +158,7 @@ it("either original metric filter retains the grouped latest row with both evide
 
 it("conflicting own-view amounts remain distinct and explicitly flagged", async () => {
   const fixture = await seedBalances({ conflict: true });
-  const body = await balances(fixture.source);
+  const body = await balances(fixture);
   expect(body.latest).toHaveLength(2);
   expect(body.history).toHaveLength(2);
   expect(body.latest.map((r) => r.amount_minor).sort()).toEqual(["4567", "4568"]);
@@ -166,7 +169,7 @@ it("conflicting own-view amounts remain distinct and explicitly flagged", async 
 
 it("MyJCB billing amount stays positive and is a statement, not unpaid debt", async () => {
   const fixture = await seedBalances({ statement: true });
-  const body = await balances(fixture.source);
+  const body = await balances(fixture);
   expect(body.latest).toHaveLength(1);
   expect(body.latest[0]!.amount_minor).toBe("4567");
   expect(body.latest[0]!.amount_text).toBe("4567");
