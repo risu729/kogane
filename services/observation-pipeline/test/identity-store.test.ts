@@ -104,6 +104,7 @@ ALTER TABLE fetch_artifacts ADD COLUMN format_version TEXT;`);
     "0019_identity_seal_provenance.sql",
     "0020_vpass_identity_binding.sql",
     "0021_vpass_binding_lookup_plan.sql",
+    "0022_identity_current_run_plan.sql",
   ]) {
     for (const sql of splitSql(readFileSync(new URL(name, migrationDir), "utf8")))
       await db.prepare(sql).run();
@@ -239,6 +240,8 @@ test("trusted Vpass token survives ordinal and run changes, never consuming forg
   ).toHaveLength(2);
 });
 
+// Ten complete Miniflare provenance scenarios need more than Bun's default
+// five seconds on CI; a timeout also terminates the shared worker for later tests.
 test("Vpass binding rejects mismatched provenance, ambiguous units, and unsuccessful ownership", async () => {
   const changes = [
     "UPDATE fetch_runs SET producer_id='other-producer' WHERE id=?",
@@ -286,7 +289,7 @@ test("Vpass binding rejects mismatched provenance, ambiguous units, and unsucces
       .bind(fakeRun, `vpass-card-v1-${"a".repeat(64)}`)
       .run(),
   ).rejects.toThrow();
-});
+}, 30000);
 
 test("manual fallback decisions survive Vpass evidence upgrade and invalidated evidence is not current", async () => {
   const financial = await vpass(550);
