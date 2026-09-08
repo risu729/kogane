@@ -6,7 +6,9 @@ import "./balance-display.css";
 
 export function balanceMeaning(row: BalanceRow): BalanceSemantic {
   return (
-    row.interpretation?.semantic ??
+    (row.interpretation?.policyVersion === "financial-measures-v2"
+      ? row.interpretation.semantic
+      : undefined) ??
     classifyBalance({
       sourceId: row.source_id,
       sourceAccount: row.source_account,
@@ -38,12 +40,22 @@ export const BALANCE_GROUPS = [
     note: "請求月の支払額です。支払済みか未払いかはこの記録だけでは分かりません。資産にも負債にも加算しません。",
   },
   {
+    id: "period-totals",
+    title: "期間中の獲得実績",
+    kinds: ["period_total"],
+    note: "一定期間に獲得した量です。現在の保有残高ではなく、残高にも個々の獲得履歴にも加算しません。",
+  },
+  {
     id: "reference",
     title: "集計・参考額・その他",
     kinds: ["aggregate", "other"],
-    note: "区分集計、余力、ポイントなどの参考情報です。個別残高と重なる場合や意味が未確認の場合があるため、資産額に加算しません。",
+    note: "区分集計、余力などの参考情報です。個別残高と重なる場合や意味が未確認の場合があるため、資産額に加算しません。",
   },
 ] as const;
+
+export function isPeriodMeasure(row: BalanceRow): boolean {
+  return ["statement", "period_total"].includes(balanceMeaning(row).kind);
+}
 
 export function BalanceEvidence({ row }: { row: BalanceRow }): ReactNode {
   const interpretation = row.interpretation;

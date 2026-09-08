@@ -14,19 +14,41 @@ import { EMPTY_FILTERS, isRecordedZero, matchesSourceAccount, pageWindow } from 
 import { Pager, RecordControls } from "./ViewControls.tsx";
 import { useViewState } from "../view-state.tsx";
 import { OrganizedInstrumentContext, OrganizedSourceAccount } from "../organization.tsx";
-import { BALANCE_GROUPS, BalanceEvidence, balanceMeaning } from "../balance-display.tsx";
-export function BalancesPage(): ReactNode {
-  const query = useBalances();
+import {
+  BALANCE_GROUPS,
+  BalanceEvidence,
+  balanceMeaning,
+  isPeriodMeasure,
+} from "../balance-display.tsx";
+import { Link } from "../router.tsx";
+export function BalancesPage({
+  view = "balances",
+}: {
+  view?: "balances" | "summaries";
+}): ReactNode {
+  const query = useBalances(view);
+  const summaries = view === "summaries";
   return (
     <>
       <div className="page-head">
-        <h1>残高</h1>
+        <h1>{summaries ? "期間実績・請求" : "残高"}</h1>
         <p className="lede">
-          取得元が報告した金額を、預金などの残高・請求額・参考情報に分けて確認できます。純資産の合計ではありません。
+          {summaries
+            ? "期間中の獲得実績と請求額です。保有残高・個々の利用明細・支払い済み額とは区別します。"
+            : "ある時点の保有残高と参考額です。獲得実績・請求額は含めず、純資産として合算しません。"}
         </p>
+        <Link to={summaries ? "/balances" : "/summaries"}>
+          {summaries ? "保有残高を見る" : "期間実績・請求を見る"}
+        </Link>
       </div>
-      <QueryBoundary query={query} label="残高">
-        {(data) => <BalancesBody latest={data.latest} history={data.history} />}
+      <QueryBoundary query={query} label={summaries ? "実績・請求" : "残高"}>
+        {(data) => (
+          <BalancesBody
+            summaries={summaries}
+            latest={data.latest.filter((row) => isPeriodMeasure(row) === summaries)}
+            history={data.history.filter((row) => isPeriodMeasure(row) === summaries)}
+          />
+        )}
       </QueryBoundary>
     </>
   );
@@ -34,9 +56,11 @@ export function BalancesPage(): ReactNode {
 function BalancesBody({
   latest,
   history,
+  summaries,
 }: {
   latest: BalanceRow[];
   history: BalanceHistoryRow[];
+  summaries: boolean;
 }): ReactNode {
   const [filters, setFilters] = useViewState("balances.filters");
   const production = useMetadata().data?.source.kind === "central-store";
@@ -72,7 +96,12 @@ function BalancesBody({
                   options: instruments,
                   setValue: setInstrument,
                 },
-                { label: "残高の種類", value: metric, options: metrics, setValue: setMetric },
+                {
+                  label: summaries ? "実績・請求の種類" : "残高の種類",
+                  value: metric,
+                  options: metrics,
+                  setValue: setMetric,
+                },
               ].map(({ label, value, options, setValue }) => (
                 <label className="filter-field" key={label}>
                   {label}
@@ -107,7 +136,7 @@ function BalancesBody({
           </div>
         </section>
       ) : null}
-      <section className="panel" aria-label="残高の表示条件">
+      <section className="panel" aria-label={summaries ? "実績・請求の表示条件" : "残高の表示条件"}>
         <div className="panel-body">
           <label>
             <input
@@ -115,7 +144,7 @@ function BalancesBody({
               checked={hideZero}
               onChange={(event) => setHideZero(event.target.checked)}
             />{" "}
-            残高0を除外
+            {summaries ? "0の実績・請求を除外" : "残高0を除外"}
           </label>
           <p className="footnote">
             受信した最新・履歴の記録から、金額が0と確認できる行を除外します。未記録・読み取り不能の金額は残します。
@@ -126,18 +155,27 @@ function BalancesBody({
         key={`latest:${selectionKey}`}
         rows={latest.filter(matches)}
         available={latest.length}
+        summaries={summaries}
       />
       <details className="detail-disclosure">
-        <summary>過去の残高・再解析の履歴</summary>
+        <summary>
+          {summaries ? "実績・請求の過去の取得・再解析" : "過去の残高・再解析の履歴"}
+        </summary>
         <BalanceTable
           key={`history:${selectionKey}`}
           rows={history.filter(matches)}
           available={history.length}
           history
+          summaries={summaries}
         />
       </details>
       <details className="detail-disclosure">
         <summary>「最新」の選び方と表示範囲</summary>
+        {summaries ? (
+          <p>
+            MyJCBは最新の取得に含まれる各請求月を表示します。Vポイントは最新の完全な取得の先月分です。請求月と取得日時は別の意味で、先月分の対象年月は未特定です。
+          </p>
+        ) : null}
         <p>
           取得元・口座・残高の種類・通貨や単位が同じ記録から、基準日（as_of）、基準日がない場合は取得元での観測日時（observed_at）を使って選んでいます。同じ日時は記録番号で並べます。両日時は意味が異なるため、実際の測定時刻が最も新しいことを保証するものではありません。
         </p>
@@ -151,12 +189,22 @@ function BalancesBody({
     </>
   );
 }
-function LatestBalances({ rows, available }: { rows: BalanceRow[]; available: number }): ReactNode {
+function LatestBalances({
+  rows,
+  available,
+  summaries,
+}: {
+  rows: BalanceRow[];
+  available: number;
+  summaries: boolean;
+}): ReactNode {
   const [page, setPage] = useState(0);
   const view = pageWindow(rows, page);
   return (
-    <section aria-label="項目ごとの最新の記録">
-      <h2 id="latest-balances">項目ごとの最新の記録</h2>
+    <section aria-label={summaries ? "最新取得の期間実績・請求" : "項目ごとの最新の記録"}>
+      <h2 id="latest-balances">
+        {summaries ? "最新取得の期間実績・請求" : "項目ごとの最新の記録"}
+      </h2>
       <p className="footnote">
         受信した最新の記録 {available}件中、条件に一致する{rows.length}
         件。各区分の件数はこの表示ページ内です。
@@ -166,14 +214,20 @@ function LatestBalances({ rows, available }: { rows: BalanceRow[]; available: nu
           (group.kinds as readonly string[]).includes(balanceMeaning(row).kind),
         );
         return grouped.length ? (
-          <BalanceTable key={group.id} rows={grouped} available={grouped.length} group={group} />
+          <BalanceTable
+            key={group.id}
+            rows={grouped}
+            available={grouped.length}
+            group={group}
+            summaries={summaries}
+          />
         ) : null;
       })}
       {!rows.length ? (
         <p>
           {available
-            ? "条件に一致する残高がありません。条件をクリアすると保存された記録を確認できます。"
-            : "表示対象の残高記録がまだありません。残高がゼロであることを意味しません。"}
+            ? "条件に一致する記録がありません。条件をクリアすると保存された記録を確認できます。"
+            : "表示対象の記録がまだありません。金額がゼロであることを意味しません。"}
         </p>
       ) : null}
       <Pager {...view} total={rows.length} onChange={setPage} />
@@ -185,36 +239,40 @@ function BalanceTable({
   history = false,
   available,
   group,
+  summaries = false,
 }: {
   rows: BalanceRow[] | BalanceHistoryRow[];
   history?: boolean;
   available: number;
   group?: (typeof BALANCE_GROUPS)[number];
+  summaries?: boolean;
 }): ReactNode {
   const [page, setPage] = useState(0);
   const view = pageWindow<BalanceRow | BalanceHistoryRow>(rows, group ? 0 : page);
   return (
     <Panel
       id={history ? "balance-history" : `balance-${group?.id}`}
-      title={history ? "保存された残高の履歴" : group?.title}
+      title={history ? (summaries ? "実績・請求の取得履歴" : "保存された残高の履歴") : group?.title}
       count={group ? `このページ内 ${rows.length}件` : `${available}件中 ${rows.length}件`}
       note={history ? "旧解析の記録も、根拠を確認できるように保持しています。" : group?.note}
     >
       <div
         className="table-scroll"
         role="region"
-        aria-label={history ? "残高の履歴" : `${group?.title}の記録`}
+        aria-label={
+          history ? (summaries ? "実績・請求の履歴" : "残高の履歴") : `${group?.title}の記録`
+        }
         tabIndex={0}
       >
         <table className="balance-table">
           <caption>
-            基準日は残高が対象とする日付、観測日時は取得元で記録された日時です。それぞれ保存された表記で表示します。
+            金額・日時は保存された表記です。観測日時が取得時刻を表す場合もあり、現在残高や決済完了の保証ではありません。
           </caption>
           <thead>
             <tr>
               {[
                 { label: "取得元・口座", column: "source" },
-                { label: "残高の種類", column: "metric" },
+                { label: summaries ? "実績・請求の種類" : "残高の種類", column: "metric" },
                 { label: "金額", column: "amount" },
                 { label: "日時", column: "dates" },
                 ...(history ? [{ label: "解析・履歴", column: "lineage" }] : []),
@@ -251,6 +309,10 @@ function BalanceTable({
                   <td className="col-metric">
                     {balanceMeaning(row).label} <Badge>{row.instrument}</Badge>
                     <div className="table-secondary">{row.metric}</div>
+                    <details>
+                      <summary>金額の意味</summary>
+                      {balanceMeaning(row).reason}
+                    </details>
                     <OrganizedInstrumentContext
                       organization={row.organization}
                       role="unit"
@@ -258,15 +320,25 @@ function BalanceTable({
                     />
                   </td>
                   <td
-                    className={`col-amount num${!history && balanceMeaning(row).kind !== "asset" ? " balance-reference-amount" : ""}`}
+                    className={`col-amount num${balanceMeaning(row).kind !== "asset" ? " balance-reference-amount" : ""}`}
                   >
                     <Amount minor={row.amount_minor} unit={row.instrument} text={row.amount_text} />
                   </td>
                   <td className="col-dates">
                     <dl className="record-dates">
-                      <dt>基準日</dt>
+                      <dt>
+                        {balanceMeaning(row).kind === "statement"
+                          ? "請求月"
+                          : balanceMeaning(row).kind === "period_total"
+                            ? "対象期間"
+                            : "基準日"}
+                      </dt>
                       <dd>
-                        <Nullable value={row.as_of} />
+                        {balanceMeaning(row).kind === "period_total" ? (
+                          "先月分（対象年月は未特定）"
+                        ) : (
+                          <Nullable value={row.as_of} />
+                        )}
                       </dd>
                       <dt>取得元の観測日時</dt>
                       <dd>
@@ -292,8 +364,8 @@ function BalanceTable({
               <tr>
                 <td colSpan={history ? 6 : 5}>
                   {available > 0
-                    ? "条件に一致する残高がありません。条件をクリアすると保存された記録を確認できます。"
-                    : "表示対象の残高記録がまだありません。残高がゼロであることを意味しません。"}
+                    ? "条件に一致する記録がありません。条件をクリアすると保存された記録を確認できます。"
+                    : "表示対象の記録がまだありません。金額がゼロであることを意味しません。"}
                 </td>
               </tr>
             )}

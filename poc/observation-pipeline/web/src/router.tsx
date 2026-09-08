@@ -112,6 +112,7 @@ export type Route =
   | { name: "overview" }
   | { name: "transactions" }
   | { name: "balances" }
+  | { name: "summaries" }
   | { name: "positions" }
   | { name: "identities" }
   | { name: "artifacts" }
@@ -135,6 +136,7 @@ export function matchRoute(path: string): Route {
   if (segments.length === 1) {
     if (first === "transactions") return { name: "transactions" };
     if (first === "balances") return { name: "balances" };
+    if (first === "summaries") return { name: "summaries" };
     if (first === "positions") return { name: "positions" };
     if (first === "identities") return { name: "identities" };
     if (first === "artifacts") return { name: "artifacts" };

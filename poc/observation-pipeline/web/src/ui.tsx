@@ -469,7 +469,7 @@ export function QueryBoundary<T>({
                 return `${window.location.pathname}?${params}`;
               })()}
             >
-              最新残高の次の500件
+              最新の記録の次の500件
             </Link>
           ) : null}
         </div>

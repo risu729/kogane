@@ -1,5 +1,6 @@
 import type { BalanceRow } from "../../../poc/observation-pipeline/shared/api-contract";
 import {
+  BALANCE_INTERPRETATION_POLICY_VERSION,
   classifyBalance,
   projectBalanceRows,
   type BalanceProjectionInput,
@@ -40,7 +41,7 @@ export function presentLatestBalances(rows: readonly BalanceRow[], metric?: stri
     .map((group) => ({
       ...group.representative.row,
       interpretation: {
-        policyVersion: "balance-view-v1",
+        policyVersion: BALANCE_INTERPRETATION_POLICY_VERSION,
         semantic: classifyBalance(group.representative),
         evidence: group.members.map(({ id, metric }) => ({ id, metric })),
         duplicateCount: group.members.length - 1,
@@ -54,7 +55,7 @@ export function describeBalanceRows<T extends BalanceRow>(rows: readonly T[]): T
   return rows.map((row) => ({
     ...row,
     interpretation: {
-      policyVersion: "balance-view-v1",
+      policyVersion: BALANCE_INTERPRETATION_POLICY_VERSION,
       semantic: classifyBalance(input(row)),
       evidence: [{ id: row.id, metric: row.metric }],
       duplicateCount: 0,

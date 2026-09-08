@@ -174,11 +174,14 @@ export function useTransactions(): UseQueryResult<{ transactions: TransactionRow
   });
 }
 
-export function useBalances(): UseQueryResult<
-  { latest: BalanceRow[]; history: BalanceHistoryRow[] },
-  Error
-> {
-  const suffix = useCollectionSearch();
+export function useBalances(
+  view?: "balances" | "summaries",
+): UseQueryResult<{ latest: BalanceRow[]; history: BalanceHistoryRow[] }, Error> {
+  const search = useCollectionSearch();
+  const production = useMetadata().data?.source.kind === "central-store";
+  const params = new URLSearchParams(search);
+  if (view && production) params.set("view", view);
+  const suffix = params.size ? `?${params}` : "";
   return useQuery({
     queryKey: ["balances", suffix],
     queryFn: ({ signal }) =>

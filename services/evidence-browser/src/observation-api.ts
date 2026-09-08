@@ -49,12 +49,12 @@ export async function observationApi(
         "account",
         "offset",
         ...(path === "/api/transactions" ? ["from", "to", "q"] : []),
-        ...(path === "/api/balances" ? ["instrument", "metric", "latestOffset"] : []),
+        ...(path === "/api/balances" ? ["instrument", "metric", "latestOffset", "view"] : []),
       ]
     : path === "/api/artifacts"
       ? ["source", "cursor"]
       : path === "/api/filter-options"
-        ? ["kind"]
+        ? ["kind", "view"]
         : [];
   for (const key of url.searchParams.keys()) {
     const value = url.searchParams.get(key)!;
@@ -68,10 +68,13 @@ export async function observationApi(
       throw new HttpError(400, "invalid_query");
   }
   const offsetText = url.searchParams.get("offset") ?? "0";
+  const measureView = url.searchParams.get("view");
+  if (measureView !== null && measureView !== "balances" && measureView !== "summaries")
+    throw new HttpError(400, "invalid_query");
   const offset = Number(offsetText);
   if (!/^(0|[1-9]\d*)$/.test(offsetText) || !Number.isSafeInteger(offset) || offset > 1_000_000)
     throw new HttpError(400, "invalid_offset");
-  const filter = {
+  const filter: queries.CollectionFilter = {
     source: url.searchParams.get("source") ?? undefined,
     account: url.searchParams.get("account") ?? undefined,
     offset,
@@ -80,6 +83,7 @@ export async function observationApi(
     q: url.searchParams.get("q")?.trim() || undefined,
     instrument: url.searchParams.get("instrument") ?? undefined,
     metric: url.searchParams.get("metric") ?? undefined,
+    measureView: measureView ?? undefined,
   };
   for (const date of [filter.from, filter.to]) {
     if (
@@ -97,8 +101,13 @@ export async function observationApi(
     const kind = url.searchParams.get("kind");
     if (!kind || !["transactions", "balances", "positions", "artifacts"].includes(kind))
       throw new HttpError(400, "invalid_query");
+    if (measureView && kind !== "balances") throw new HttpError(400, "invalid_query");
     return json(
-      await organizedFilterOptions(env.DB, kind, await queries.filterOptions(store, kind)),
+      await organizedFilterOptions(
+        env.DB,
+        kind,
+        await queries.filterOptions(store, kind, filter.measureView),
+      ),
     );
   }
   if (path === "/api/meta") {

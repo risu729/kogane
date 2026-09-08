@@ -34,6 +34,10 @@ export interface CollectionFilter {
   q?: string;
   instrument?: string;
   metric?: string;
+  measureView?: "balances" | "summaries";
+}
+function periodMeasureSql(source: string, parser: string, metric: string): string {
+  return `((${source} = 'myjcb' AND ${parser} LIKE 'myjcb-credit-past-month-balances@%' AND ${metric} = 'credit_statement_payment_amount') OR (${source} = 'v-point' AND ${parser} LIKE 'v-point-smfg-point@%' AND ${metric} = 'displayed_point_balance'))`;
 }
 
 // Apply scope to the complete derived result, before paging. In particular,
@@ -49,6 +53,11 @@ function collectionStore(
       query(sql) {
         const predicates: string[] = [];
         const args: unknown[] = [];
+        if (filter.measureView) {
+          // Exact audited source/parser/metric families, applied before paging.
+          const summary = periodMeasureSql("source_id", "parser", "metric");
+          predicates.push(filter.measureView === "summaries" ? summary : `NOT ${summary}`);
+        }
         for (const [column, value] of [
           ["source_id", filter.source],
           ["source_account", filter.account],
@@ -622,7 +631,7 @@ export async function latestBalances(
              OR f.id IN (SELECT fetch_run_id FROM current_vpoint_runs)
            )
        )
-       WHERE rank_in_group = 1
+       WHERE rank_in_group = 1 ${filter.measureView === "summaries" ? "OR (source_id = 'myjcb' AND parser LIKE 'myjcb-credit-past-month-balances@%' AND metric = 'credit_statement_payment_amount')" : ""}
        ORDER BY source_id, source_account, metric, instrument`,
     )
     .all()) as BalanceRow[];
@@ -770,7 +779,14 @@ export async function artifacts(
     .all(before, source ?? null)) as ArtifactRow[];
 }
 
-export async function filterOptions(store: Store, kind: string) {
+export async function filterOptions(store: Store, kind: string, view?: "balances" | "summaries") {
+  const summary = periodMeasureSql(
+    "fa.source_id",
+    "(p.parser_name || '@' || p.parser_version)",
+    "o.metric",
+  );
+  const scope =
+    kind === "balances" && view ? (view === "summaries" ? summary : `NOT ${summary}`) : "1";
   const tables =
     kind === "transactions"
       ? ["transaction_observations"]
@@ -791,7 +807,7 @@ export async function filterOptions(store: Store, kind: string) {
     JOIN parse_runs p ON p.id=o.parse_run_id
     JOIN fetch_artifacts fa ON fa.id=p.fetch_artifact_id
     JOIN fetch_runs f ON f.id=fa.fetch_run_id
-    WHERE ${kind === "balances" ? "1" : CURRENT} ORDER BY fa.source_id, o.source_account`)
+    WHERE ${kind === "balances" ? scope : CURRENT} ORDER BY fa.source_id, o.source_account`)
           .all()) as { source_id: string; source_account: string }[]);
   const dimensions =
     kind !== "balances"
@@ -802,10 +818,13 @@ export async function filterOptions(store: Store, kind: string) {
     JOIN parse_runs p ON p.id=o.parse_run_id
     JOIN fetch_artifacts fa ON fa.id=p.fetch_artifact_id
     JOIN fetch_runs f ON f.id=fa.fetch_run_id
+    WHERE ${scope}
     `)
           .all()) as { instrument: string; metric: string }[]);
   return {
-    sources: sources.map((row) => row.source_id),
+    sources: view
+      ? [...new Set(accounts.map((row) => row.source_id))].sort()
+      : sources.map((row) => row.source_id),
     accounts,
     instruments: [...new Set(dimensions.map((row) => row.instrument))].sort(),
     metrics: [...new Set(dimensions.map((row) => row.metric))].sort(),

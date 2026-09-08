@@ -78,6 +78,11 @@ const latest = [
   interpreted(row(106, "sony-bank", "sony-bank-gross-balance", "gross_loan_balance", "7000")),
   row(107, "unknown-provider", "future-parser", "future_metric"),
   row(108, "smbc-bank", "smbc-direct-balance", "account_balance"),
+  {
+    ...row(109, "v-point", "v-point-smfg-point", "displayed_point_balance", "88"),
+    instrument: "V_POINT",
+    as_of: null,
+  },
 ];
 const history = [row(101), row(102, undefined, undefined, "yen_deposit_savings_balance")].map(
   (value) => ({ ...value, superseded_by_parse_run_id: null, parse_status: "succeeded" }),
@@ -116,12 +121,7 @@ describe.if(runnable)("balance meaning and evidence display", () => {
               : large
                 ? Array.from({ length: 60 }, (_, i) =>
                     i % 2
-                      ? row(
-                          1000 + i,
-                          "myjcb",
-                          "myjcb-credit-past-month-balances",
-                          "credit_statement_payment_amount",
-                        )
+                      ? row(1000 + i, "sony-bank", "sony-bank-gross-balance", "gross_asset_balance")
                       : row(1000 + i),
                   )
                 : latest,
@@ -155,14 +155,8 @@ describe.if(runnable)("balance meaning and evidence display", () => {
         const assets = page.locator('section[aria-labelledby="balance-assets"]');
         const statements = page.locator('section[aria-labelledby="balance-statements"]');
         const reference = page.locator('section[aria-labelledby="balance-reference"]');
-        await statements.waitFor();
-        expect(await statements.innerText()).toContain("請求額（未払残高ではありません）");
-        expect(await statements.locator("tbody .col-amount").innerText()).toBe("5,000 JPY");
-        expect(
-          await statements
-            .locator("tbody .amount")
-            .evaluate((element) => getComputedStyle(element).color),
-        ).toBe("rgb(37, 43, 41)");
+        await assets.waitFor();
+        expect(await statements.count()).toBe(0);
         expect(await assets.innerText()).not.toContain("myjcb");
         expect(await reference.innerText()).toContain("借入区分集計");
         expect(await reference.innerText()).toContain("その他の観測額");
@@ -201,6 +195,22 @@ describe.if(runnable)("balance meaning and evidence display", () => {
         ]);
         expect(await past.locator(".balance-evidence").count()).toBe(0);
         expect(await reference.locator(".balance-evidence").count()).toBe(0);
+        await page.getByRole("link", { name: "期間実績・請求を見る", exact: true }).click();
+        await statements.waitFor();
+        expect(await assets.count()).toBe(0);
+        expect(await statements.innerText()).toContain("請求額（未払残高ではありません）");
+        expect(await statements.locator("tbody .col-amount").innerText()).toBe("5,000 JPY");
+        expect(
+          await statements
+            .locator("tbody .amount")
+            .evaluate((element) => getComputedStyle(element).color),
+        ).toBe("rgb(37, 43, 41)");
+        const earned = page.locator('section[aria-labelledby="balance-period-totals"]');
+        expect(await earned.innerText()).toContain("先月の獲得ポイント");
+        expect(await earned.innerText()).toContain("先月分（対象年月は未特定）");
+        expect(await earned.locator("tbody .col-amount").innerText()).toBe(
+          "88 V_POINT (minor units)",
+        );
         if (process.env["BALANCE_REVIEW_SCREENSHOTS"])
           await page.screenshot({
             path: join(process.env["BALANCE_REVIEW_SCREENSHOTS"], `balance-semantics-${width}.png`),

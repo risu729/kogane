@@ -19,6 +19,10 @@ import {
 import { KIND_LABELS } from "./ViewControls.tsx";
 import { displayLabel } from "../labels.ts";
 import { OrganizationPanel } from "../organization.tsx";
+import {
+  classifyBalance,
+  BALANCE_INTERPRETATION_POLICY_VERSION,
+} from "../../../shared/balance-semantics.ts";
 const stringAt = (row: Record<string, unknown>, key: string): string | null =>
   typeof row[key] === "string" ? (row[key] as string) : null;
 const FIELD_LABELS: Record<string, string> = {
@@ -79,6 +83,15 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
     text = stringAt(row, "amount_text"),
     unit = stringAt(row, "currency") ?? stringAt(row, "instrument");
   const hasAmount = formatAmount(minor, unit, text) !== "";
+  const meaning =
+    detail.kind === "balance" && provenance
+      ? classifyBalance({
+          sourceId: provenance.source_id,
+          parserName: provenance.parser_name,
+          metric: stringAt(row, "metric") ?? "",
+          sourceAccount: stringAt(row, "source_account") ?? "",
+        })
+      : null;
   return (
     <>
       {provenance?.superseded_by_parse_run_id != null ? (
@@ -97,6 +110,18 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
               <Amount minor={minor} unit={unit} text={text} />
             </div>
             <p className="footnote">取得元の単位と保存された精度を保って表示しています。</p>
+          </div>
+        </Panel>
+      ) : null}
+      {meaning ? (
+        <Panel id="measurement-meaning" title="記録の意味">
+          <div className="panel-body">
+            <strong>{meaning.label}</strong>
+            <p>{meaning.reason}</p>
+            <p className="footnote">
+              解釈の版: {BALANCE_INTERPRETATION_POLICY_VERSION}
+              。保存形式の「残高」は原本から読み取った項目の格納先を表し、必ずしも保有残高を意味しません。
+            </p>
           </div>
         </Panel>
       ) : null}

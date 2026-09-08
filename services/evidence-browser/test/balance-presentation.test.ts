@@ -6,7 +6,9 @@ import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-v
 import type { BalanceInterpretation } from "../../../poc/observation-pipeline/shared/balance-semantics";
 
 beforeAll(seedRegistry);
-async function seedBalances(options: { conflict?: boolean; statement?: boolean } = {}) {
+async function seedBalances(
+  options: { conflict?: boolean; statement?: boolean; months?: number } = {},
+) {
   const source = options.statement ? "myjcb" : "sbi-shinsei-bank";
   await env.DB.batch([
     env.DB.prepare(
@@ -33,7 +35,7 @@ async function seedBalances(options: { conflict?: boolean; statement?: boolean }
   const rawAccount = options.statement ? `myjcb:${prefix}:root` : `sbi-shinsei:${prefix}`;
   const rows: Array<{ id: number; metric: string }> = [];
   for (const [index, section] of (options.statement
-    ? ["statement"]
+    ? Array.from({ length: options.months ?? 1 }, () => "statement")
     : ["debitAccountDetails", "savingsDetails"]
   ).entries()) {
     const metric = options.statement
@@ -42,7 +44,7 @@ async function seedBalances(options: { conflict?: boolean; statement?: boolean }
         ? "yen_deposit_account_balance"
         : "yen_deposit_savings_balance";
     const extra = options.statement
-      ? { _kogane: { detailMonth: 0 } }
+      ? { _kogane: { detailMonth: index } }
       : {
           accountNo: prefix,
           productCode: "601",
@@ -60,7 +62,7 @@ async function seedBalances(options: { conflict?: boolean; statement?: boolean }
         amount,
         String(amount),
         options.statement
-          ? "json:$.months[0].payAmount"
+          ? `json:$.months[${index}].payAmount`
           : `json:$.responseParam.${section}[0].balance`,
         JSON.stringify(extra),
       )
@@ -106,11 +108,16 @@ interface PresentedRow {
   amount_text: string;
   interpretation: BalanceInterpretation;
 }
-async function balances(fixture: { source: string; rawAccount: string }, metric?: string) {
+async function balances(
+  fixture: { source: string; rawAccount: string },
+  metric?: string,
+  view?: string,
+) {
   const url = new URL("https://fixture.test/api/balances");
   url.searchParams.set("source", fixture.source);
   url.searchParams.set("account", fixture.rawAccount);
   if (metric) url.searchParams.set("metric", metric);
+  if (view) url.searchParams.set("view", view);
   const response = await observationApi(new Request(url), env, url);
   expect(response?.status).toBe(200);
   const body = (await response!.json()) as { latest: PresentedRow[]; history: PresentedRow[] };
@@ -124,7 +131,7 @@ it("projects an exact Shinsei pair once in latest but preserves both historical 
   expect(body.latest).toHaveLength(1);
   expect(body.history).toHaveLength(2);
   expect(body.latest[0]!.interpretation).toMatchObject({
-    policyVersion: "balance-view-v1",
+    policyVersion: "financial-measures-v2",
     semantic: { kind: "asset", netAssetEligible: false },
     duplicateCount: 1,
     conflict: false,
@@ -178,4 +185,21 @@ it("MyJCB billing amount stays positive and is a statement, not unpaid debt", as
     duplicateCount: 0,
     conflict: false,
   });
+});
+
+it("summary view preserves all displayed MyJCB months while balance view excludes them", async () => {
+  const fixture = await seedBalances({ statement: true, months: 18 });
+  const summary = await balances(fixture, undefined, "summaries");
+  expect(summary.latest).toHaveLength(18);
+  expect(summary.history).toHaveLength(18);
+  expect(
+    summary.latest.every(
+      (row) => row.interpretation.semantic.measurementKind === "statement_amount",
+    ),
+  ).toBe(true);
+  expect(new Set(summary.latest.map((row) => row.id)).size).toBe(18);
+  const stock = await balances(fixture, undefined, "balances");
+  expect(stock.latest).toHaveLength(0);
+  expect(stock.history).toHaveLength(0);
+  expect((await balances(fixture)).latest).toHaveLength(1);
 });
