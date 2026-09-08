@@ -1,4 +1,5 @@
 import type { ObservationKind } from "../../../poc/observation-pipeline/shared/api-contract";
+import { resolveFinancialProduct } from "../../../poc/observation-pipeline/shared/financial-products";
 import { readAccountConnections } from "./account-connections";
 import { connectionAccountLabel } from "./account-connection-display";
 import {
@@ -13,6 +14,16 @@ import type {
 
 type Ref = { kind: ObservationKind; id: number };
 interface OrganizationRow {
+  parse_run_id: number;
+  parser_name: string;
+  artifact_id: number;
+  dataset: string | null;
+  raw_locator: string;
+  product_currency: string | null;
+  product_subject: string | null;
+  product_extra: string;
+  product_as_of: string | null;
+  product_observed_at: string | null;
   source: string;
   producer: string;
   source_account: string;
@@ -45,7 +56,8 @@ interface OrganizationRow {
 export const ORGANIZATION_QUERY = `WITH wanted AS MATERIALIZED (
  SELECT json_extract(value,'$.kind') kind,json_extract(value,'$.id') id FROM json_each(?1)
 ), ranked AS MATERIALIZED (
- SELECT o.*,p.superseded_by_parse_run_id IS NOT NULL historical,
+ SELECT o.*,p.id parse_run_id,p.parser_name,a.id artifact_id,a.dataset,
+ p.superseded_by_parse_run_id IS NOT NULL historical,
  row_number() OVER(PARTITION BY o.kind,o.observation_id ORDER BY r.policy_version DESC) choice
  FROM wanted w
  CROSS JOIN identity_observations o ON o.kind=w.kind AND o.observation_id=w.id
@@ -56,7 +68,13 @@ export const ORGANIZATION_QUERY = `WITH wanted AS MATERIALIZED (
  CROSS JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
  WHERE p.status='ok' AND f.status='success' AND f.failure_count=0
 )
-SELECT o.kind,o.observation_id,o.historical,
+SELECT o.kind,o.observation_id,o.historical,o.parse_run_id,o.parser_name,o.artifact_id,o.dataset,
+ coalesce(b.raw_locator,v.raw_locator,t.raw_locator,h.raw_locator) raw_locator,
+ coalesce(b.instrument,v.currency,t.currency,h.currency) product_currency,
+ v.subject product_subject,
+ coalesce(b.as_of,v.as_of,t.as_of,h.as_of) product_as_of,
+ coalesce(b.observed_at,v.observed_at,t.observed_at,h.observed_at) product_observed_at,
+ coalesce(b.extra_json,v.extra_json,t.extra_json,h.extra_json,'{}') product_extra,
  sa.source_id source,sa.producer_id producer,json_extract(sa.reference_json,'$[0]') source_account,
  am.source_account_id account_reference,am.account_id account_target,
  am.label account_label,am.status account_status,am.revision account_revision,
@@ -66,6 +84,10 @@ SELECT o.kind,o.observation_id,o.historical,
  im.method instrument_method,im.reason instrument_reason,d.namespace,d.scope,d.value
 FROM ranked o JOIN current_account_mappings am ON am.source_account_id=o.source_account_id
 JOIN source_accounts sa ON sa.id=o.source_account_id
+LEFT JOIN balance_observations b ON o.kind='balance' AND b.id=o.observation_id AND b.parse_run_id=o.parse_run_id
+LEFT JOIN valuation_observations v ON o.kind='valuation' AND v.id=o.observation_id AND v.parse_run_id=o.parse_run_id
+LEFT JOIN transaction_observations t ON o.kind='transaction' AND t.id=o.observation_id AND t.parse_run_id=o.parse_run_id
+LEFT JOIN position_observations h ON o.kind='position' AND h.id=o.observation_id AND h.parse_run_id=o.parse_run_id
 LEFT JOIN identity_instrument_uses u ON u.identity_observation_id=o.id
 LEFT JOIN instrument_identifiers d ON d.id=u.identifier_id
 LEFT JOIN current_instrument_mappings im ON im.identifier_id=d.id
@@ -112,6 +134,22 @@ export async function observationOrganizations(
         organization = {
           state: "organized",
           lineage: row.historical ? "historical" : "current",
+          product: resolveFinancialProduct({
+            kind: row.kind,
+            id: row.observation_id,
+            parseRunId: row.parse_run_id,
+            parserName: row.parser_name,
+            artifactId: row.artifact_id,
+            rawLocator: row.raw_locator,
+            sourceId: row.source,
+            dataset: row.dataset ?? "",
+            sourceAccount: row.source_account,
+            currency: row.product_currency,
+            subject: row.product_subject,
+            asOf: row.product_as_of,
+            observedAt: row.product_observed_at,
+            extra: JSON.parse(row.product_extra),
+          }),
           account: {
             referenceId: row.account_reference,
             targetId: row.account_target,

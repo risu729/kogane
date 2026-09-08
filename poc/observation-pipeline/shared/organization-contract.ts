@@ -1,5 +1,6 @@
 import type { IdentityStatus, IdentityOrigin } from "./identity-contract.ts";
 import type { AccountConnection } from "./account-connection-contract.ts";
+import type { FinancialProductClaim } from "./financial-products.ts";
 
 /** Effective interpretation alongside, never in place of, the stored source fields. */
 export interface OrganizedAccount {
@@ -23,6 +24,8 @@ export interface OrganizedInstrument extends Omit<OrganizedAccount, "connection"
   };
 }
 export interface ObservationOrganization {
+  /** Current, evidence-backed product interpretation of this observation only. */
+  product?: FinancialProductClaim;
   state: "organized" | "unavailable";
   lineage: "current" | "historical" | null;
   account: OrganizedAccount | null;

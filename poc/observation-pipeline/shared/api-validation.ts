@@ -3,6 +3,7 @@
 import { isDecimalMinorUnit } from "../src/money.ts";
 import { validIdentityResponse } from "./identity-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
+import { validFinancialProductClaim } from "./financial-products.ts";
 import type {
   ObservationOrganization,
   OrganizedAccount,
@@ -72,6 +73,7 @@ const organizationAccountFields = {
   reason: text,
 } satisfies Shape<Omit<OrganizedAccount, "connection">>;
 const organizationShape = object<ObservationOrganization>({
+  product: optional(validFinancialProductClaim),
   state: literal("organized", "unavailable"),
   lineage: nullable(literal("current", "historical")),
   account: nullable(
@@ -102,7 +104,10 @@ const organization: Check<ObservationOrganization> = (value): value is Observati
     ? value.account !== null &&
       value.lineage !== null &&
       new Set(value.instruments.map((i) => i.role)).size === value.instruments.length
-    : value.account === null && value.lineage === null && value.instruments.length === 0);
+    : value.account === null &&
+      value.lineage === null &&
+      value.instruments.length === 0 &&
+      value.product === undefined);
 const warnings = object<Warnings>({
   list: array(text),
   raw: nullableText,
