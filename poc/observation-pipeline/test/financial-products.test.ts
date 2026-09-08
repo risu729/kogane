@@ -1,4 +1,71 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { sbiShinseiYenDepositAccount } from "../src/parsers/sbi-shinsei-yen-deposit-account";
+test("actual yen account parser output binds only its own debit/savings rows", () => {
+  const parsed = sbiShinseiYenDepositAccount.parse(
+    readFileSync(
+      new URL(
+        "../fixtures/sbi-shinsei-parser-boundaries/yen-deposit-account.json",
+        import.meta.url,
+      ),
+    ),
+    {
+      id: 3,
+      sourceId: "sbi-shinsei-bank",
+      dataset: "yen-deposit-account",
+      runStatus: "success",
+      runFailureCount: 0,
+      url: null,
+      mime: "application/json",
+      fetchedAt: "2026-09-07T00:02:00.000Z",
+      sha256: "0".repeat(64),
+    },
+  );
+  expect(parsed.observations.length).toBe(2);
+  for (const observation of parsed.observations) {
+    if (observation.kind !== "balance") throw new Error("unexpected fixture kind");
+    const value: FinancialProductInput = {
+      ...input(),
+      ...observation,
+      currency: observation.instrument,
+      parserName: sbiShinseiYenDepositAccount.name,
+      dataset: "yen-deposit-account",
+    };
+    const claim = resolveFinancialProduct(value);
+    expect(claim.status).toBe("identified");
+    expect(validFinancialProductClaim(claim)).toBe(true);
+    expect(validFinancialProductClaimWire(claim)).toBe(true);
+    for (const bad of [
+      { ...value, kind: "valuation" as const },
+      { ...value, rawLocator: "json:$.responseParam.productDetails[0].balance" },
+      { ...value, parserName: "sbi-shinsei-top-balances-and-activity" },
+      { ...value, sourceAccount: "sbi-shinsei:WRONG" },
+      { ...value, extra: { ...observation.extra, currency: "USD" } },
+      { ...value, extra: { ...observation.extra, _kogane: { sourceView: "productDetails" } } },
+    ])
+      expect(resolveFinancialProduct(bad).status).not.toBe("identified");
+  }
+  for (const code of ["601", "603", "605", "621"]) {
+    const base = input(code, code === "621" ? "USD" : "JPY");
+    const value = {
+      ...base,
+      parserName: "sbi-shinsei-yen-deposit-account",
+      dataset: "yen-deposit-account",
+      rawLocator: "json:$.responseParam.savingsDetails[0].balance",
+      extra: {
+        ...(base.extra as object),
+        _kogane: { sourceView: "savingsDetails", productCode: code },
+      },
+    };
+    expect(resolveFinancialProduct(value).status).toBe("identified");
+    expect(
+      resolveFinancialProduct({
+        ...value,
+        rawLocator: "json:$.responseParam.debitAccountDetails[0].balance",
+      }).status,
+    ).toBe("conflict");
+  }
+});
 test("Sony audited ordinary history paths identify currency variants without invented names", () => {
   for (const currency of ["JPY", "USD", "CNH", "SEK"])
     for (const csv of [false, true])

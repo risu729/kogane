@@ -74,6 +74,8 @@ the catalogue or this document.
 
 # Catalogue revision 2026-09-08.2 / own-row-v2
 
+Resolver revision `own-row-v3` also supports the audited `sbi-shinsei-yen-deposit-account` parser. Only balance rows in the `yen-deposit-account` dataset qualify, with sourceView `debitAccountDetails` or `savingsDetails` and the matching `json:$.responseParam.<section>[n].balance` locator. Own-row productCode, accountNo and native currency must satisfy the same catalogue checks. Offered `productDetails` and preserved provider context never establish a holding. Real read-only diagnostics found both sections with exact code/currency/account-reference agreement; preserved context makes full extras larger than the narrowly required product metadata. The reader therefore limits projected proof fields, not unrelated provider context. No originals or persisted B records are modified.
+
 ## Persistence boundary
 
 This change does not attach product_id to accounts or instruments. The catalogue and resolver are Git-versioned; each eligible B observation receives a current runtime interpretation, not a stored historical decision. Exact replay requires the same A/B evidence, catalogue/resolver revisions and financial-evidence eligibility state. Future manual product corrections or a published-decision audit would require append-only claims with their own provenance. No database migration or backfill is required here. Manual nicknames remain independent. Account catalogues and filters describe acquisition/account scope, while official product identification is presented per record.

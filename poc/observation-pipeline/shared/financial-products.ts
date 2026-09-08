@@ -1,5 +1,5 @@
 export const FINANCIAL_PRODUCT_CATALOGUE_VERSION = "2026-09-08.2";
-export const FINANCIAL_PRODUCT_RESOLVER_VERSION = "own-row-v2";
+export const FINANCIAL_PRODUCT_RESOLVER_VERSION = "own-row-v3";
 const VERIFIED_AT = "2026-09-08";
 const BANK_APP =
   "https://bk.web.sbishinseibank.co.jp/SFC/apps/services/www/SFC/desktopbrowser/default/";
@@ -397,23 +397,34 @@ export function resolveFinancialProduct(input: FinancialProductInput): Financial
     };
   }
   if (input.sourceId !== "sbi-shinsei-bank") return claim;
+  const yen =
+    input.parserName === "sbi-shinsei-yen-deposit-account" &&
+    input.dataset === "yen-deposit-account" &&
+    input.kind === "balance" &&
+    ["debitAccountDetails", "savingsDetails"].includes(String(metadata.sourceView));
   if (
-    input.parserName !== "sbi-shinsei-top-balances-and-activity" ||
-    input.dataset !== "top-accounts-balance-and-activity" ||
-    !["balance", "valuation"].includes(input.kind) ||
-    metadata.sourceView !== "top_overview"
+    !yen &&
+    (input.parserName !== "sbi-shinsei-top-balances-and-activity" ||
+      input.dataset !== "top-accounts-balance-and-activity" ||
+      !["balance", "valuation"].includes(input.kind) ||
+      metadata.sourceView !== "top_overview")
   )
     return stop(
       "この行自身に商品を確定する対応対象の口座概要データがありません。他の行や取得回からは推定していません。",
     );
-  const locator =
-    /^json:\$\.responseParam\.overview\.responseParam\.savingsDetails\[(0|[1-9]\d*)\]\.(balance|yenEqui)$/u.exec(
-      input.rawLocator,
-    );
+  const locator = yen
+    ? /^json:\$\.responseParam\.(debitAccountDetails|savingsDetails)\[(0|[1-9]\d*)\]\.balance$/u.exec(
+        input.rawLocator,
+      )
+    : /^json:\$\.responseParam\.overview\.responseParam\.savingsDetails\[(0|[1-9]\d*)\]\.(balance|yenEqui)$/u.exec(
+        input.rawLocator,
+      );
   if (
     !locator ||
-    !Number.isSafeInteger(Number(locator[1])) ||
-    locator[2] !== (input.kind === "valuation" ? "yenEqui" : "balance")
+    !Number.isSafeInteger(Number(locator[yen ? 2 : 1])) ||
+    (yen
+      ? locator[1] !== metadata.sourceView
+      : locator[2] !== (input.kind === "valuation" ? "yenEqui" : "balance"))
   )
     return stop("商品コードと元の口座概要行の位置が一致していません。", true);
   claim.evidence.fields = [
@@ -472,7 +483,7 @@ export function resolveFinancialProduct(input: FinancialProductInput): Financial
     evidence: {
       ...claim.evidence,
       sourceIds: [...product.sourceIds, "shinsei-powerflex"],
-      rule: "shinsei-top-own-row-code-currency-v1",
+      rule: yen ? "shinsei-yen-own-row-code-currency-v1" : "shinsei-top-own-row-code-currency-v1",
     },
     reason:
       "同じ原本行の商品コード・通貨・口座参照を、銀行公開UIのコード分類と公式商品説明に対応付けました。残高の有無や過去の契約条件は示しません。",
@@ -578,9 +589,12 @@ export function validFinancialProductClaim(value: unknown): value is FinancialPr
     ...(shinsei ? ["shinsei-powerflex"] : []),
   ];
   const provenanceValid = shinsei
-    ? ["balance", "valuation"].includes(origin.kind) &&
-      origin.parserName === "sbi-shinsei-top-balances-and-activity" &&
-      evidence.rule === "shinsei-top-own-row-code-currency-v1"
+    ? (origin.kind === "balance" &&
+        origin.parserName === "sbi-shinsei-yen-deposit-account" &&
+        evidence.rule === "shinsei-yen-own-row-code-currency-v1") ||
+      (["balance", "valuation"].includes(origin.kind) &&
+        origin.parserName === "sbi-shinsei-top-balances-and-activity" &&
+        evidence.rule === "shinsei-top-own-row-code-currency-v1")
     : wallet
       ? origin.kind === "transaction" &&
         origin.parserName === "sony-bank-wallet-history" &&
