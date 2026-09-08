@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { beforeAll, expect, it } from "vitest";
+import { beforeAll, expect, it, vi } from "vitest";
 import { seedRegistry, seedRun } from "./fixtures";
 import {
   observationOrganizations,
@@ -260,4 +260,32 @@ it("does not choose one account when a raw filter scope has multiple organized t
   expect(
     (await organizedFilterOptions(env.DB, "transactions", options)).accounts[0]!.display_name,
   ).toBeNull();
+});
+
+it("rejects an oversized distinct-reference result even for one raw filter group", async () => {
+  const statement = env.DB.prepare("SELECT 1");
+  const empty = await statement.all();
+  const output = Array.from({ length: 5001 }, (_, i) => ({
+    source_id: "other-test",
+    producer_id: "evidence-test",
+    source_account: "shared-scope",
+    reference_id: `reference-${i}`,
+    label: "same label",
+    target_id: "same-target",
+    method: "rule",
+  }));
+  vi.spyOn(statement, "all").mockResolvedValue({ ...empty, results: output });
+  vi.spyOn(env.DB, "prepare").mockReturnValue(statement);
+  try {
+    await expect(
+      organizedFilterOptions(env.DB, "transactions", {
+        sources: [],
+        instruments: [],
+        metrics: [],
+        accounts: [{ source_id: "other-test", source_account: "shared-scope" }],
+      }),
+    ).rejects.toThrow("filter_organization_budget");
+  } finally {
+    vi.restoreAllMocks();
+  }
 });
