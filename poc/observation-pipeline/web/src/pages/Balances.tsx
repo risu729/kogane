@@ -10,7 +10,7 @@ import {
   QueryBoundary,
   StatusBadge,
 } from "../ui.tsx";
-import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
+import { EMPTY_FILTERS, isRecordedZero, matchesSourceAccount, pageWindow } from "../filters.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
 import { useViewState } from "../view-state.tsx";
 import { OrganizedInstrumentContext, OrganizedSourceAccount } from "../organization.tsx";
@@ -42,14 +42,22 @@ function BalancesBody({
   const production = useMetadata().data?.source.kind === "central-store";
   const [instrument, setInstrument] = useViewState("balances.instrument");
   const [metric, setMetric] = useViewState("balances.metric");
+  const [hideZero, setHideZero] = useViewState("balances.hideZero");
   const rows = [...latest, ...history];
   const instruments = [...new Set(rows.map((row) => row.instrument))].sort();
   const metrics = [...new Set(rows.map((row) => row.metric))].sort();
   const matches = (row: BalanceRow) =>
     matchesSourceAccount(row, filters) &&
     (!instrument || row.instrument === instrument) &&
-    (!metric || row.metric === metric);
-  const selectionKey = JSON.stringify([filters.source, filters.account, instrument, metric]);
+    (!metric || row.metric === metric) &&
+    (!hideZero || !isRecordedZero(row.amount_minor));
+  const selectionKey = JSON.stringify([
+    filters.source,
+    filters.account,
+    instrument,
+    metric,
+    hideZero,
+  ]);
   return (
     <>
       {!production ? (
@@ -91,6 +99,7 @@ function BalancesBody({
                 setFilters(EMPTY_FILTERS);
                 setInstrument("");
                 setMetric("");
+                setHideZero(false);
               }}
             >
               条件をクリア
@@ -98,6 +107,21 @@ function BalancesBody({
           </div>
         </section>
       ) : null}
+      <section className="panel" aria-label="残高の表示条件">
+        <div className="panel-body">
+          <label>
+            <input
+              type="checkbox"
+              checked={hideZero}
+              onChange={(event) => setHideZero(event.target.checked)}
+            />{" "}
+            残高0を除外
+          </label>
+          <p className="footnote">
+            受信した最新・履歴の記録から、金額が0と確認できる行を除外します。未記録・読み取り不能の金額は残します。
+          </p>
+        </div>
+      </section>
       <LatestBalances
         key={`latest:${selectionKey}`}
         rows={latest.filter(matches)}

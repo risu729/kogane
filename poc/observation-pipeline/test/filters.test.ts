@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   accountOptions,
+  isRecordedZero,
   matchesDates,
   matchesSourceAccount,
   pageWindow,
@@ -8,6 +9,11 @@ import {
 } from "../web/src/filters.ts";
 
 describe("record filters preserve source and date boundaries", () => {
+  test("only known integer zero is hidden, not missing or nonzero amounts", () => {
+    for (const value of ["0", "00", "-0", "+0"]) expect(isRecordedZero(value)).toBe(true);
+    for (const value of [null, "", "unknown", "0.00", "1", "-1", "9007199254740993"])
+      expect(isRecordedZero(value)).toBe(false);
+  });
   test("same account label at two sources remains two different accounts", () => {
     const rows = [
       { source_id: "bank-a", source_account: "普通" },

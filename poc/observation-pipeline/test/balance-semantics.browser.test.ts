@@ -88,6 +88,7 @@ describe.if(runnable)("balance meaning and evidence display", () => {
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
   let large = false;
+  let zeroCase = false;
   beforeAll(async () => {
     if (process.env["BALANCE_REVIEW_SCREENSHOTS"])
       mkdirSync(process.env["BALANCE_REVIEW_SCREENSHOTS"], { recursive: true });
@@ -106,19 +107,30 @@ describe.if(runnable)("balance meaning and evidence display", () => {
           return Response.json({ sources: [], accounts: [], instruments: [], metrics: [] });
         if (path === "/api/balances")
           return Response.json({
-            latest: large
-              ? Array.from({ length: 60 }, (_, i) =>
-                  i % 2
-                    ? row(
-                        1000 + i,
-                        "myjcb",
-                        "myjcb-credit-past-month-balances",
-                        "credit_statement_payment_amount",
-                      )
-                    : row(1000 + i),
-                )
-              : latest,
-            history,
+            latest: zeroCase
+              ? [
+                  row(301, undefined, undefined, undefined, "0"),
+                  row(302, undefined, undefined, undefined, "-1"),
+                  { ...row(303), amount_minor: null, amount_text: "unknown" },
+                ]
+              : large
+                ? Array.from({ length: 60 }, (_, i) =>
+                    i % 2
+                      ? row(
+                          1000 + i,
+                          "myjcb",
+                          "myjcb-credit-past-month-balances",
+                          "credit_statement_payment_amount",
+                        )
+                      : row(1000 + i),
+                  )
+                : latest,
+            history: zeroCase
+              ? [
+                  { ...history[0], id: 304, amount_minor: "0" },
+                  { ...history[1], id: 305, amount_minor: null },
+                ]
+              : history,
           });
         if (path.startsWith("/api/"))
           return Response.json({ error: "synthetic_not_found" }, { status: 404 });
@@ -214,6 +226,29 @@ describe.if(runnable)("balance meaning and evidence display", () => {
       expect(await current.innerText()).toContain("60件中 51–60件");
     } finally {
       large = false;
+      await page.close();
+    }
+  });
+  test("zero toggle preserves unknown and negative amounts and applies to history", async () => {
+    const page = await browser.newPage();
+    try {
+      zeroCase = true;
+      await page.goto(origin + "/balances");
+      const current = page.getByRole("region", { name: "項目ごとの最新の記録", exact: true });
+      await current.locator("tbody tr").first().waitFor();
+      expect(await current.locator("tbody tr").count()).toBe(3);
+      await page.getByLabel("残高0を除外", { exact: true }).check();
+      expect(await current.locator("tbody tr").count()).toBe(2);
+      expect(await current.locator('a[href="/observations/balance/301"]').count()).toBe(0);
+      expect(await current.locator('a[href="/observations/balance/302"]').count()).toBe(1);
+      expect(await current.locator('a[href="/observations/balance/303"]').count()).toBe(1);
+      await page.getByText("過去の残高・再解析の履歴", { exact: true }).click();
+      expect(await page.locator('a[href="/observations/balance/304"]').count()).toBe(0);
+      expect(await page.locator('a[href="/observations/balance/305"]').count()).toBe(1);
+      await page.getByLabel("残高0を除外", { exact: true }).uncheck();
+      expect(await current.locator("tbody tr").count()).toBe(3);
+    } finally {
+      zeroCase = false;
       await page.close();
     }
   });
