@@ -76,6 +76,16 @@ Current observations continue to show both routes and their original provenance.
 Missing attribution remains visible; this change does not implement a combined
 ledger or a combined balance.
 
+Collection filters use the same reviewed MF connection labels as lists and the
+account catalogue. Their values remain the original source/account pair. Multiple
+organized targets or conflicting labels in one raw filter scope remain explicitly
+ambiguous, even if a provider connection name is the same. Manual names win, and
+excluded proof cannot supply a current display name. The display lookup is bounded
+to 5,000 distinct mapping-reference rows as well as 5,000 raw filter options; the
+reference cap can be stricter when many references share one raw scope. An excess
+fails explicitly instead of naming a partial subset. This does not alter the
+underlying observation query or persist renamed accounts.
+
 The first production dry-run found four reviewed connections, one confirmed
 connection correspondence covering 16 exact direct references, three unresolved
 connections, and zero proven leaf-account equivalences. Publication and protected
