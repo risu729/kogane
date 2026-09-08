@@ -18,6 +18,7 @@ interface ViewState {
   "balances.filters": RecordFilters;
   "balances.instrument": string;
   "balances.metric": string;
+  "balances.hideZero": boolean;
   "positions.filters": RecordFilters;
   "positions.page": number;
   "identity.source": string;
@@ -41,6 +42,7 @@ export function ViewStateProvider({ children }: { children: ReactNode }): ReactN
     "balances.filters": { ...EMPTY_FILTERS },
     "balances.instrument": "",
     "balances.metric": "",
+    "balances.hideZero": false,
     "positions.filters": { ...EMPTY_FILTERS },
     "positions.page": 0,
     "identity.source": "",

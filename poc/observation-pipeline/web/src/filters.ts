@@ -15,6 +15,10 @@ export const EMPTY_FILTERS: RecordFilters = {
   to: "",
 };
 export const PAGE_SIZE = 50;
+/** Unknown/unparsed amounts are not zero. Never round small amounts through Number. */
+export function isRecordedZero(amountMinor: string | null): boolean {
+  return amountMinor !== null && /^[-+]?0+$/u.test(amountMinor);
+}
 // Compare the recorded calendar date, without browser timezone conversion.
 export function recordedDate(value: string | null): string | null {
   if (!value) return null;
