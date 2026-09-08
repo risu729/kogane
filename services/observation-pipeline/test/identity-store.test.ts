@@ -116,7 +116,7 @@ afterAll(async () => {
   await mf?.dispose();
 });
 
-async function vpass(id: number, ordinal = "card-001") {
+async function vpass(id: number, ordinal = "card-001", withObservation = true) {
   await seed(id, 0, "vpass");
   await db.batch([
     db.prepare("INSERT OR IGNORE INTO sources VALUES('vpass','synthetic')"),
@@ -131,15 +131,21 @@ async function vpass(id: number, ordinal = "card-001") {
       .prepare("INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'card')")
       .bind(id, id, ordinal),
     db.prepare("UPDATE fetch_artifacts SET fetch_unit_id=? WHERE id=?").bind(id, id),
-    db
-      .prepare(
-        "INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json) VALUES(?,?,'JPY','$',?)",
-      )
-      .bind(
-        id,
-        `vpass:${ordinal}`,
-        JSON.stringify({ trustedVpassBinding: { cardToken: `vpass-card-v1-${"f".repeat(64)}` } }),
-      ),
+    ...(withObservation
+      ? [
+          db
+            .prepare(
+              "INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json) VALUES(?,?,'JPY','$',?)",
+            )
+            .bind(
+              id,
+              `vpass:${ordinal}`,
+              JSON.stringify({
+                trustedVpassBinding: { cardToken: `vpass-card-v1-${"f".repeat(64)}` },
+              }),
+            ),
+        ]
+      : []),
   ]);
   return { ...parse(id, "vpass"), producer_id: "collector-r2-importer" };
 }
@@ -731,4 +737,131 @@ test("SQL cannot publish an empty identity run of a failed parse", async () => {
       .prepare("INSERT INTO identity_run_seals VALUES('failed-empty-identity',0,'synthetic')")
       .run(),
   ).rejects.toThrow();
+});
+
+test("empty Vpass projections batch at most40 runs with mandatory trusted pins and no resolver calls", async () => {
+  for (let id = 3000; id < 3043; id++) {
+    await vpass(id, "card-001", false);
+    if (id !== 3042) await sidecar(id + 1000, id);
+  }
+  const accountsBefore = await count("account_mappings");
+  const instrumentsBefore = await count("instrument_mappings");
+  let resolverCalls = 0;
+  const resolver: IdentityResolver = (input) => {
+    resolverCalls++;
+    return providerIdentity(input);
+  };
+  const batchSizes: number[] = [];
+  const measured = new Proxy(db, {
+    get(target, key) {
+      if (key === "prepare") return target.prepare.bind(target);
+      if (key === "batch")
+        return (statements: D1PreparedStatement[]) => {
+          batchSizes.push(statements.length);
+          return target.batch(statements);
+        };
+      return Reflect.get(target, key, target);
+    },
+  });
+  expect(await identitySweep(measured, resolver, 40, "vpass")).toEqual({
+    processedRuns: 40,
+    identifiedRuns: 40,
+    identifiedObservations: 0,
+  });
+  expect(batchSizes).toEqual([3]);
+  expect(
+    await count(
+      "identity_vpass_bindings",
+      "identity_run_id IN(SELECT id FROM identity_runs WHERE parse_run_id>=3000)",
+    ),
+  ).toBe(40);
+  expect(await identitySweep(db, resolver, 40, "vpass")).toEqual({
+    processedRuns: 3,
+    identifiedRuns: 3,
+    identifiedObservations: 0,
+  });
+  expect(
+    await count(
+      "identity_vpass_bindings",
+      "identity_run_id IN(SELECT id FROM identity_runs WHERE parse_run_id>=3000)",
+    ),
+  ).toBe(42);
+  expect(
+    await db
+      .prepare("SELECT policy_version FROM identity_runs WHERE parse_run_id=3042")
+      .first<number>("policy_version"),
+  ).toBe(1);
+  expect(await identitySweep(db, resolver, 40, "vpass")).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  expect(resolverCalls).toBe(0);
+  expect(await count("account_mappings")).toBe(accountsBefore);
+  expect(await count("instrument_mappings")).toBe(instrumentsBefore);
+}, 30000);
+
+test("empty batching excludes failed parses, failed acquisitions, unsealed and excluded runs", async () => {
+  await db.prepare("INSERT INTO sources VALUES('empty-fixture','synthetic')").run();
+  for (let id = 3500; id < 3505; id++) await seed(id, 0, "empty-fixture", id !== 3501);
+  await db
+    .prepare("UPDATE fetch_run_reports SET normalized_outcome='failure' WHERE fetch_run_id=3502")
+    .run();
+  await db.prepare("DELETE FROM fetch_run_seals WHERE fetch_run_id=3503").run();
+  await db
+    .prepare("INSERT INTO fetch_run_annotations VALUES(3504,'exclude_from_financial_views')")
+    .run();
+  const reject: IdentityResolver = () => {
+    throw new Error("empty resolver should not run");
+  };
+  expect(await identitySweep(db, reject, 40, "empty-fixture")).toEqual({
+    processedRuns: 1,
+    identifiedRuns: 1,
+    identifiedObservations: 0,
+  });
+  expect(await count("identity_runs", "parse_run_id BETWEEN 3501 AND 3504")).toBe(0);
+  expect(await identitySweep(db, reject, 40, "empty-fixture")).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  for (const id of [3505, 3506]) await seed(id, 0, "empty-fixture");
+  const concurrent = await Promise.all([
+    identitySweep(db, reject, 40, "empty-fixture"),
+    identitySweep(db, reject, 40, "empty-fixture"),
+  ]);
+  expect(concurrent.reduce((n, result) => n + result.identifiedRuns, 0)).toBe(2);
+  expect(
+    await count(
+      "identity_run_seals",
+      "identity_run_id IN(SELECT id FROM identity_runs WHERE parse_run_id IN(3505,3506))",
+    ),
+  ).toBe(2);
+});
+
+test("one row of any observation kind prevents the empty fast path", async () => {
+  const inserts = [
+    "INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json) VALUES(?,'fixture','JPY','$','{}')",
+    "INSERT INTO balance_observations(parse_run_id,source_account,metric,instrument,raw_locator,extra_json) VALUES(?,'fixture','balance','JPY','$','{}')",
+    "INSERT INTO position_observations(parse_run_id,source_account,security_code,quantity_text,quantity_scale,raw_locator,extra_json) VALUES(?,'fixture','EXAMPLE','1',0,'$','{}')",
+    "INSERT INTO valuation_observations(parse_run_id,source_account,subject,metric,currency,raw_locator,extra_json) VALUES(?,'fixture','EXAMPLE','value','JPY','$','{}')",
+  ];
+  for (let i = 0; i < inserts.length; i++) {
+    await seed(3600 + i, 0, "empty-fixture");
+    await db
+      .prepare(inserts[i]!)
+      .bind(3600 + i)
+      .run();
+  }
+  let calls = 0;
+  const resolver: IdentityResolver = (input) => {
+    calls++;
+    return otherIdentity(input);
+  };
+  expect(await identitySweep(db, resolver, 40, "empty-fixture")).toEqual({
+    processedRuns: 4,
+    identifiedRuns: 4,
+    identifiedObservations: 4,
+  });
+  expect(calls).toBe(4);
 });

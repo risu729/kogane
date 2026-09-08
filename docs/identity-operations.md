@@ -20,6 +20,15 @@ the immutable staging rows; an interrupted or budget-limited run skips completed
 rows on its next invocation. Only a complete run is sealed/visible. Empty
 successful parses can be sealed; failed or unsealed-A parses cannot.
 
+Proven-empty parses use one bounded D1 batch: identity runs, any mandatory
+Vpass binding pins, then completeness seals. All four observation tables,
+successful acquisition visibility and required policy are rechecked inside the
+write. Up to 40 empty parses therefore need three write statements rather than
+sequential per-parse projection calls. Nonempty parses keep the existing
+200-new-observation budget, and an empty trusted Vpass run still requires its
+verified provenance pin. The optimization never creates accounts/instruments
+for an empty parse or changes manual mappings.
+
 `processedRuns` measures touched jobs, `identifiedRuns` newly completed jobs,
 and `identifiedObservations` newly staged rows. The script stops only when there
 are no candidate runs, not merely when a large partial job has no seal yet.
