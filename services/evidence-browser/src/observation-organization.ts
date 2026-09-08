@@ -1,4 +1,8 @@
 import type { ObservationKind } from "../../../poc/observation-pipeline/shared/api-contract";
+import {
+  preferredInstrumentNames,
+  type PreferredInstrumentName,
+} from "./preferred-instrument-names";
 import type {
   ObservationOrganization,
   OrganizedAccount,
@@ -118,6 +122,33 @@ export async function observationOrganizations(
           scope: row.scope,
           value: row.value,
         });
+    }
+  }
+  // Many observations reuse the same instrument. Select each identifier once
+  // for the whole response, then distribute its name without modifying B rows.
+  const identifiers = [
+    ...new Set(
+      [...output.values()].flatMap((organization) =>
+        organization.instruments.map((instrument) => instrument.referenceId),
+      ),
+    ),
+  ];
+  const names = new Map<string, PreferredInstrumentName>();
+  for (let start = 0; start < identifiers.length; start += 500) {
+    for (const [id, name] of await preferredInstrumentNames(
+      db,
+      identifiers.slice(start, start + 500),
+    )) {
+      names.set(id, name);
+    }
+  }
+  for (const organization of output.values()) {
+    for (const instrument of organization.instruments) {
+      const name = names.get(instrument.referenceId);
+      if (name) {
+        instrument.label = name.label;
+        instrument.nameEvidence = { reason: name.reason, origin: name.origin };
+      }
     }
   }
   return output;
