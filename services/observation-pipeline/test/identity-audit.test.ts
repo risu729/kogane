@@ -1,10 +1,7 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync, readdirSync } from "node:fs";
-import {
-  IDENTITY_AUDIT_QUERIES,
-  validateIdentityAudit,
-} from "../src/identity-audit.ts";
+import { IDENTITY_AUDIT_QUERIES, validateIdentityAudit } from "../src/identity-audit.ts";
 
 function fixture() {
   const db = new Database(":memory:");
@@ -22,10 +19,7 @@ function fixture() {
     CREATE TABLE trusted_vpass_card_bindings(financial_artifact_id INTEGER);`);
   db.exec(
     readFileSync(
-      new URL(
-        "../../raw-evidence/migrations/0018_identity.sql",
-        import.meta.url,
-      ),
+      new URL("../../raw-evidence/migrations/0018_identity.sql", import.meta.url),
       "utf8",
     ),
   );
@@ -51,9 +45,7 @@ function fixture() {
 test("aggregate audit covers all forms, pending history, current claims, and hides raw values", () => {
   const db = fixture();
   try {
-    const report = validateIdentityAudit(
-      IDENTITY_AUDIT_QUERIES.map((q) => db.query(q.sql).all()),
-    );
+    const report = validateIdentityAudit(IDENTITY_AUDIT_QUERIES.map((q) => db.query(q.sql).all()));
     const coverage = report.find((s) => s.name === "coverage")!.rows;
     expect(coverage).toHaveLength(8);
     expect(coverage).toContainEqual({
@@ -72,9 +64,7 @@ test("aggregate audit covers all forms, pending history, current claims, and hid
       report
         .find((s) => s.name === "integrity")!
         .rows.every((row) =>
-          Object.values(row as Record<string, number>).every(
-            (count) => count === 0,
-          ),
+          Object.values(row as Record<string, number>).every((count) => count === 0),
         ),
     ).toBe(true);
     expect(report.find((s) => s.name === "account_status")!.rows).toEqual([
@@ -85,17 +75,13 @@ test("aggregate audit covers all forms, pending history, current claims, and hid
       issue: "other",
       count: 1,
     });
-    expect(
-      report.find((s) => s.name === "pending_parses")!.rows,
-    ).toContainEqual({
+    expect(report.find((s) => s.name === "pending_parses")!.rows).toContainEqual({
       source: "synthetic",
       lineage: "current",
       eligible_parses: 2,
       pending_parses: 1,
     });
-    expect(
-      report.find((s) => s.name === "pending_parses")!.rows,
-    ).toContainEqual({
+    expect(report.find((s) => s.name === "pending_parses")!.rows).toContainEqual({
       source: "synthetic",
       lineage: "historical",
       eligible_parses: 1,
@@ -121,9 +107,7 @@ test("audit refuses unknown output fields, unsafe counts and excess cardinality"
   const rows = empty();
   rows[0] = Array(1001).fill({ count: 0 });
   expect(() => validateIdentityAudit(rows)).toThrow();
-  expect(
-    IDENTITY_AUDIT_QUERIES.every((q) => /^(WITH|SELECT)/.test(q.sql)),
-  ).toBe(true);
+  expect(IDENTITY_AUDIT_QUERIES.every((q) => /^(WITH|SELECT)/.test(q.sql))).toBe(true);
 });
 test("pending policy matches projection: only trusted Vpass bindings require policy two", () => {
   const db = fixture();
@@ -134,9 +118,7 @@ test("pending policy matches projection: only trusted Vpass bindings require pol
       INSERT INTO trusted_vpass_card_bindings VALUES (7);
       INSERT INTO identity_runs VALUES ('vp7',7,1,'2099'),('vp8',8,1,'2099');
       INSERT INTO identity_run_seals VALUES ('vp7',0,'2099'),('vp8',0,'2099');`);
-    const query = IDENTITY_AUDIT_QUERIES.find(
-      (q) => q.name === "pending_parses",
-    )!;
+    const query = IDENTITY_AUDIT_QUERIES.find((q) => q.name === "pending_parses")!;
     expect(db.query(query.sql).all()).toContainEqual({
       source: "vpass",
       lineage: "current",
@@ -170,9 +152,7 @@ test("audit detects duplicate and ineligible exposure if a current view regresse
       CREATE VIEW current_identity_observations AS
       SELECT o.*,r.parse_run_id FROM identity_observations o JOIN identity_runs r ON r.id=o.identity_run_id
       UNION ALL SELECT o.*,r.parse_run_id FROM identity_observations o JOIN identity_runs r ON r.id=o.identity_run_id;`);
-    const report = validateIdentityAudit(
-      IDENTITY_AUDIT_QUERIES.map((q) => db.query(q.sql).all()),
-    );
+    const report = validateIdentityAudit(IDENTITY_AUDIT_QUERIES.map((q) => db.query(q.sql).all()));
     expect(report.find((s) => s.name === "integrity")!.rows[0]).toMatchObject({
       duplicate_current_observation: 7,
       ineligible_current_observation: 6,
@@ -190,16 +170,12 @@ test("all queries compile against the complete production schema without compoun
       .filter((name) => name.endsWith(".sql"))
       .sort())
       db.exec(readFileSync(new URL(name, directory), "utf8"));
-    const report = validateIdentityAudit(
-      IDENTITY_AUDIT_QUERIES.map((q) => db.query(q.sql).all()),
-    );
+    const report = validateIdentityAudit(IDENTITY_AUDIT_QUERIES.map((q) => db.query(q.sql).all()));
     expect(
       report
         .find((s) => s.name === "integrity")!
         .rows.every((row) =>
-          Object.values(row as Record<string, number>).every(
-            (count) => count === 0,
-          ),
+          Object.values(row as Record<string, number>).every((count) => count === 0),
         ),
     ).toBe(true);
   } finally {

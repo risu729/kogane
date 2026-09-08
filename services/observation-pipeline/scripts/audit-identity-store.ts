@@ -1,19 +1,14 @@
 import { getPlatformProxy } from "wrangler";
-import {
-  IDENTITY_AUDIT_QUERIES,
-  validateIdentityAudit,
-} from "../src/identity-audit.ts";
+import { IDENTITY_AUDIT_QUERIES, validateIdentityAudit } from "../src/identity-audit.ts";
 
 // A single read-only batch observes a consistent snapshot while backfill runs.
 // Catch errors without exposing provider data, SQL diagnostics, or credentials.
-let proxy:
-  Awaited<ReturnType<typeof getPlatformProxy<{ DB: D1Database }>>> | undefined;
+let proxy: Awaited<ReturnType<typeof getPlatformProxy<{ DB: D1Database }>>> | undefined;
 let stage = "setup";
 try {
   if (process.argv.length > 2) throw new Error("unexpected_arguments");
   proxy = await getPlatformProxy<{ DB: D1Database }>({
-    configPath: new URL("../wrangler.diagnostic.jsonc", import.meta.url)
-      .pathname,
+    configPath: new URL("../wrangler.diagnostic.jsonc", import.meta.url).pathname,
     persist: false,
     remoteBindings: true,
   });

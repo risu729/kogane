@@ -83,17 +83,9 @@ const COUNTS = new Set([
   "sealed_count_mismatch",
   "sealed_evidence_count_mismatch",
 ]);
-const DIMENSIONS = new Set([
-  "source",
-  "kind",
-  "status",
-  "issue",
-  "lineage",
-  "check_name",
-]);
+const DIMENSIONS = new Set(["source", "kind", "status", "issue", "lineage", "check_name"]);
 export function validateIdentityAudit(rows: unknown[][]) {
-  if (rows.length !== IDENTITY_AUDIT_QUERIES.length)
-    throw new Error("identity_audit_shape");
+  if (rows.length !== IDENTITY_AUDIT_QUERIES.length) throw new Error("identity_audit_shape");
   return rows.map((entries, index) => {
     if (entries.length > 1000) throw new Error("identity_audit_cardinality");
     for (const entry of entries) {
@@ -101,11 +93,7 @@ export function validateIdentityAudit(rows: unknown[][]) {
         throw new Error("identity_audit_shape");
       for (const [key, value] of Object.entries(entry)) {
         if (COUNTS.has(key)) {
-          if (
-            typeof value !== "number" ||
-            !Number.isSafeInteger(value) ||
-            value < 0
-          )
+          if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
             throw new Error("identity_audit_count");
         } else if (
           !DIMENSIONS.has(key) ||
