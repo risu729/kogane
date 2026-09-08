@@ -52,6 +52,34 @@ export class ApiError extends Error {
 }
 
 export async function getJson<T>(path: string, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw new DOMException("Request aborted", "AbortError");
+  const controller = new AbortController();
+  let cancel!: () => void;
+  let timer!: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    cancel = () => {
+      reject(new DOMException("Request aborted", "AbortError"));
+      controller.abort();
+    };
+    signal.addEventListener("abort", cancel, { once: true });
+    timer = setTimeout(() => {
+      reject(
+        new ApiError(408, "応答に時間がかかっています。接続状態を確認して、再試行してください。"),
+      );
+      controller.abort();
+    }, 30_000);
+  });
+  try {
+    // The deadline covers both headers and body, even if a transport stalls
+    // without honoring cancellation. Unmount cancellation remains AbortError.
+    return await Promise.race([readJson<T>(path, controller.signal), deadline]);
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", cancel);
+  }
+}
+
+async function readJson<T>(path: string, signal: AbortSignal): Promise<T> {
   let response: Response;
   try {
     response = await fetch(path, {

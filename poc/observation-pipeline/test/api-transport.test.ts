@@ -47,7 +47,8 @@ describe("browser JSON transport", () => {
     const abortSignal = signal();
     expect(await getJson<ApiMetadata>("/api/meta", abortSignal)).toEqual(metadata);
     const init = spy.mock.calls[0]?.[1];
-    expect(init?.signal).toBe(abortSignal);
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+    expect(init?.signal?.aborted).toBe(false);
     expect(init?.cache).toBe("no-store");
     expect(init?.credentials).toBe("same-origin");
     expect(init?.redirect).toBe("manual");
@@ -183,5 +184,47 @@ describe("browser JSON transport", () => {
     await expect(getJson("/api/meta", controller.signal)).rejects.toMatchObject({
       name: "AbortError",
     });
+  });
+  test("deadline covers stalled headers and body and cleans up its timer", async () => {
+    for (const bodyStall of [false, true]) {
+      let fire!: () => void;
+      const originalTimer = globalThis.setTimeout;
+      const timerSpy = spyOn(globalThis, "setTimeout").mockImplementation(((
+        callback: () => void,
+        delay: number,
+      ) => {
+        if (delay !== 30_000) return originalTimer(callback, delay);
+        fire = callback;
+        return 123;
+      }) as typeof setTimeout);
+      const clearSpy = spyOn(globalThis, "clearTimeout");
+      fetchSpy?.mockRestore();
+      const response = Response.json(metadata);
+      const jsonSpy = spyOn(response, "json").mockImplementation(() => new Promise(() => {}));
+      fetchSpy = spyOn(globalThis, "fetch").mockReturnValue(
+        bodyStall ? Promise.resolve(response) : new Promise(() => {}),
+      );
+      try {
+        const promise = getJson("/api/meta", signal());
+        await Promise.resolve();
+        fire();
+        await expect(promise).rejects.toMatchObject({ status: 408 });
+        expect(fetchSpy.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+        expect(timerSpy.mock.calls[0]?.[1]).toBe(30_000);
+        expect(clearSpy).toHaveBeenCalledWith(123);
+      } finally {
+        timerSpy.mockRestore();
+        clearSpy.mockRestore();
+        jsonSpy.mockRestore();
+      }
+    }
+  });
+  test("unmount cancels a stalled transport without being mislabeled as a timeout", async () => {
+    fetchSpy = spyOn(globalThis, "fetch").mockReturnValue(new Promise(() => {}));
+    const controller = new AbortController();
+    const promise = getJson("/api/meta", controller.signal);
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchSpy.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
   });
 });
