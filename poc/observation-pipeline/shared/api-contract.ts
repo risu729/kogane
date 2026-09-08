@@ -1,5 +1,6 @@
 // Browser-safe HTTP contracts. No database, runtime, or UI imports.
 // Amount strings retain exact minor units; formatting never changes these values.
+import type { ObservationOrganization } from "./organization-contract.ts";
 export type ObservationKind = "transaction" | "balance" | "position" | "valuation";
 
 /** Production list responses add this coverage record; local fixture APIs may omit it. */
@@ -75,6 +76,7 @@ export interface Overview {
 }
 
 export interface TransactionRow {
+  organization?: ObservationOrganization;
   id: number;
   source_id: string;
   source_account: string;
@@ -90,6 +92,7 @@ export interface TransactionRow {
 }
 
 export interface BalanceRow {
+  organization?: ObservationOrganization;
   id: number;
   source_id: string;
   source_account: string;
@@ -108,6 +111,7 @@ export interface BalanceHistoryRow extends BalanceRow {
 }
 
 export interface PositionRow {
+  organization?: ObservationOrganization;
   id: number;
   source_id: string;
   source_account: string;
@@ -122,6 +126,7 @@ export interface PositionRow {
 }
 
 export interface ValuationRow {
+  organization?: ObservationOrganization;
   id: number;
   source_id: string;
   source_account: string;
@@ -222,6 +227,7 @@ export interface Provenance {
 }
 
 export interface ObservationDetail {
+  organization?: ObservationOrganization;
   kind: ObservationKind;
   row: Record<string, unknown>;
   extra: unknown;
