@@ -4,6 +4,10 @@ import { beforeAll, expect, it } from "vitest";
 import ingest from "../../raw-evidence/src/worker";
 import { seedRegistry, seedRun } from "./fixtures";
 import { identityQuery } from "../src/identity-api";
+import {
+  preferredInstrumentNames,
+  PREFERRED_INSTRUMENT_NAMES_SQL,
+} from "../src/preferred-instrument-names";
 
 const credential = "synthetic-scale-credential-not-a-real-secret";
 const token = (card: number) => `vpass-card-v1-${String(card + 1).repeat(64)}`;
@@ -294,6 +298,20 @@ it("representative parse/run/pin cardinalities preserve current identity eligibi
       milliseconds: timings,
     }),
   );
+  const references = await env.DB.prepare("SELECT id FROM instrument_identifiers LIMIT 500").all<{
+    id: string;
+  }>();
+  started = performance.now();
+  const names = await preferredInstrumentNames(
+    env.DB,
+    references.results.map((row) => row.id),
+  );
+  expect(names.size).toBe(references.results.length);
+  expect(performance.now() - started).toBeLessThan(5000);
+  const plan = await env.DB.prepare("EXPLAIN QUERY PLAN " + PREFERRED_INSTRUMENT_NAMES_SQL)
+    .bind(JSON.stringify(references.results.map((row) => row.id)))
+    .all<{ detail: string }>();
+  expect(plan.results.filter((row) => row.detail === "MATERIALIZE eligible")).toHaveLength(1);
   // A newer unsealed policy never replaces the sealed policy-2 evidence.
   expect(
     await env.DB.prepare(
