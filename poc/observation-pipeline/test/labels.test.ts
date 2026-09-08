@@ -30,7 +30,7 @@ test("transaction state separates unconfirmed, absent and provider unknown value
     renderToStaticMarkup(createElement(TransactionStatus, { status }));
   expect(render("unconfirmed")).toContain(">未確定</span>");
   expect(render("confirmed")).toContain(">確定</span>");
-  expect(render("posted")).toContain(">記帳済み</span>");
+  expect(render("posted")).toContain(">履歴に記録</span>");
   expect(render("declined")).toContain(">利用拒否</span>");
   expect(render("notified")).toContain(">利用通知</span>");
   expect(render("unknown")).toContain(">状態不明</span>");

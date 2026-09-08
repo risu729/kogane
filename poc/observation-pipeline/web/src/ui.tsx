@@ -35,16 +35,20 @@ export function Amount({
   minor,
   unit,
   text,
+  neutral = false,
 }: {
   // A decimal string: the API sends amounts as text so that an integer past
   // 2^53 is not rounded by JSON on its way here.
   minor: string | null;
   unit: string | null;
   text: string | null;
+  neutral?: boolean;
 }): ReactNode {
   const formatted = formatAmount(minor, unit, text);
   if (formatted === "") return <span className="null">金額未記録</span>;
-  return <span className={`amount amount-${amountSign(minor)}`}>{formatted}</span>;
+  return (
+    <span className={`amount${neutral ? "" : ` amount-${amountSign(minor)}`}`}>{formatted}</span>
+  );
 }
 
 /** A nullable column. An absent value is shown as absent, never as blank. */
@@ -111,7 +115,7 @@ export function TransactionStatus({ status }: { status: string | null | undefine
   const labels: Record<string, string> = {
     confirmed: "確定",
     unconfirmed: "未確定",
-    posted: "記帳済み",
+    posted: "履歴に記録",
     declined: "利用拒否",
     notified: "利用通知",
     unknown: "状態不明",

@@ -143,9 +143,11 @@ function ownProduct<T extends { id: number; organization?: ObservationOrganizati
       (value.organization.product.origin.kind === kind &&
         value.organization.product.origin.id === value.id));
 }
+import { validActivityMeaning } from "./activity-semantics.ts";
 const transaction = ownProduct(
   "transaction",
   object<TransactionRow>({
+    interpretation: optional(validActivityMeaning),
     organization: optional(organization),
     id: identifier,
     source_id: text,

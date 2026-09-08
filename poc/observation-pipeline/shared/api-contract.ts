@@ -81,6 +81,7 @@ export interface Overview {
 }
 
 export interface TransactionRow {
+  interpretation?: import("./activity-semantics.ts").ActivityMeaning;
   organization?: ObservationOrganization;
   id: number;
   source_id: string;

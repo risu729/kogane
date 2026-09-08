@@ -8,14 +8,7 @@ import {
   useTable,
 } from "@tanstack/react-table";
 import { useMetadata, useTransactions, type TransactionRow } from "../api.ts";
-import {
-  Amount,
-  Nullable,
-  ObservationLink,
-  Panel,
-  QueryBoundary,
-  TransactionStatus,
-} from "../ui.tsx";
+import { Amount, Nullable, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
 import {
   EMPTY_FILTERS,
   matchesDates,
@@ -30,6 +23,7 @@ import {
   OrganizedSourceAccount,
   organizedInstrument,
 } from "../organization.tsx";
+import { activityMeaning, ActivityFacts } from "../activity-display.tsx";
 const features = tableFeatures({
   rowSortingFeature,
   sortedRowModel: createSortedRowModel(),
@@ -41,7 +35,12 @@ const columns = helper.columns([
     id: "date",
     header: "取引の基準日",
     sortFn: "text",
-    cell: (info) => <Nullable value={info.row.original.as_of} />,
+    cell: (info) => (
+      <>
+        <div className="dim">{activityMeaning(info.row.original).dateLabel}</div>
+        <Nullable value={info.row.original.as_of} />
+      </>
+    ),
   }),
   helper.accessor((row) => row.description ?? "", {
     id: "description",
@@ -50,6 +49,7 @@ const columns = helper.columns([
     cell: (info) => (
       <>
         <Nullable value={info.row.original.description} />
+        <ActivityFacts meaning={activityMeaning(info.row.original)} />
         <OrganizedInstrumentContext organization={info.row.original.organization} role="security" />
         {info.row.original.counterparty ? (
           <div className="dim">{info.row.original.counterparty}</div>
@@ -73,18 +73,26 @@ const columns = helper.columns([
     id: "amount",
     header: "金額",
     cell: (info) => (
-      <Amount
-        minor={info.row.original.amount_minor}
-        unit={info.row.original.currency}
-        text={info.row.original.amount_text}
-      />
+      <>
+        <div className="dim">{activityMeaning(info.row.original).amountLabel}</div>
+        <Amount
+          neutral
+          minor={info.row.original.amount_minor}
+          unit={info.row.original.currency}
+          text={info.row.original.amount_text}
+        />
+      </>
     ),
   }),
   helper.accessor((row) => row.status ?? "", {
     id: "status",
     header: "取得元の状態",
     sortFn: "text",
-    cell: (info) => <TransactionStatus status={info.row.original.status} />,
+    cell: (info) => (
+      <span title={`保存された状態: ${info.row.original.status ?? "未記録"}`}>
+        {activityMeaning(info.row.original).statusLabel}
+      </span>
+    ),
   }),
   helper.display({
     id: "detail",
@@ -102,7 +110,9 @@ export function TransactionsPage(): ReactNode {
     <>
       <div className="page-head">
         <h1>取引</h1>
-        <p className="lede">入出金の記録を、取得元・口座・日付から探せます。</p>
+        <p className="lede">
+          カード利用、口座の入出金、売買、利用通知の記録です。残高や期間合計とは分け、金額の正負だけで収入・支出とは判断しません。
+        </p>
       </div>
       <QueryBoundary
         query={query}

@@ -387,15 +387,15 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
             expect(await table.locator("th[aria-sort]").count()).toBe(1);
             expect(await table.locator("th.col-date").getAttribute("aria-sort")).toBe("ascending");
             expect(await table.locator("tbody .col-date").allTextContents()).toEqual([
-              "2026-09-06",
-              "2026-09-07",
-              "2026-09-08",
+              "記録の基準日2026-09-06",
+              "記録の基準日2026-09-07",
+              "記録の基準日2026-09-08",
             ]);
             await page.keyboard.press("Enter");
             expect(await table.locator("tbody .col-date").allTextContents()).toEqual([
-              "2026-09-08",
-              "2026-09-07",
-              "2026-09-06",
+              "記録の基準日2026-09-08",
+              "記録の基準日2026-09-07",
+              "記録の基準日2026-09-06",
             ]);
           }
           const screenshots = process.env["UI_REVIEW_SCREENSHOTS"];
