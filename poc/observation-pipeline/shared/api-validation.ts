@@ -4,6 +4,7 @@ import { isDecimalMinorUnit } from "../src/money.ts";
 import { validIdentityResponse } from "./identity-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
 import { validFinancialProductClaimWire } from "./financial-products.ts";
+import { validBalanceInterpretation } from "./balance-semantics.ts";
 import type {
   ObservationOrganization,
   OrganizedAccount,
@@ -161,6 +162,7 @@ const transaction = ownProduct(
   }),
 );
 const balanceFields = {
+  interpretation: optional(validBalanceInterpretation),
   organization: optional(organization),
   id: identifier,
   source_id: text,
@@ -173,14 +175,24 @@ const balanceFields = {
   observed_at: nullableText,
   parser: text,
 } satisfies Shape<BalanceRow>;
-const balance = ownProduct("balance", object<BalanceRow>(balanceFields));
-const balanceHistory = ownProduct(
-  "balance",
-  object<BalanceHistoryRow>({
-    ...balanceFields,
-    superseded_by_parse_run_id: nullableIdentifier,
-    parse_status: text,
-  }),
+function ownBalanceInterpretation<T extends BalanceRow>(shape: Check<T>): Check<T> {
+  return (value): value is T =>
+    shape(value) &&
+    (value.interpretation === undefined ||
+      value.interpretation.evidence.some(
+        (evidence) => evidence.id === value.id && evidence.metric === value.metric,
+      ));
+}
+const balance = ownBalanceInterpretation(ownProduct("balance", object<BalanceRow>(balanceFields)));
+const balanceHistory = ownBalanceInterpretation(
+  ownProduct(
+    "balance",
+    object<BalanceHistoryRow>({
+      ...balanceFields,
+      superseded_by_parse_run_id: nullableIdentifier,
+      parse_status: text,
+    }),
+  ),
 );
 const position = ownProduct(
   "position",

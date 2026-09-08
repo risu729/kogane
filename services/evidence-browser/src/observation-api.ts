@@ -1,5 +1,6 @@
 import * as queries from "./observations";
 import { organizedFilterOptions } from "./organized-filter-options";
+import { presentLatestBalances, describeBalanceRows } from "./balance-presentation";
 import { HttpError, json } from "./http";
 import { raw } from "./read";
 import {
@@ -148,11 +149,22 @@ export async function observationApi(
       latestOffset > 1_000_000
     )
       throw new HttpError(400, "invalid_offset");
-    const latest = await queries.latestBalances(store, { ...filter, offset: latestOffset });
+    const candidates = await queries.latestBalances(
+      store,
+      { ...filter, metric: undefined, offset: 0 },
+      true,
+    );
+    // Source/account/unit boundaries can be applied before grouping because
+    // duplicates must agree on all three. A metric can describe either witness.
+    const projected = presentLatestBalances(
+      await organizeRows(env.DB, "balance", candidates),
+      filter.metric,
+    );
+    const latest = projected.slice(latestOffset, latestOffset + 501);
     const history = await queries.balanceHistory(store, filter);
     return json({
-      latest: await organizeRows(env.DB, "balance", latest.slice(0, 500)),
-      history: await organizeRows(env.DB, "balance", history.slice(0, 500)),
+      latest: latest.slice(0, 500),
+      history: describeBalanceRows(await organizeRows(env.DB, "balance", history.slice(0, 500))),
       coverage: {
         limit: 500,
         truncated: latest.length > 500 || history.length > 500,

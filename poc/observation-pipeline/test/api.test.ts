@@ -34,6 +34,24 @@ async function json(path: string): Promise<any> {
 }
 
 describe("shared response validators", () => {
+  test("balance interpretation must retain the representative as evidence", async () => {
+    const body = await json("/api/balances");
+    const row = body.latest[0];
+    expect(row).toBeDefined();
+    const interpretation = {
+      policyVersion: "balance-view-v1",
+      semantic: { kind: "other", label: "参考額", reason: "unsupported", netAssetEligible: false },
+      evidence: [{ id: row.id, metric: row.metric }],
+      duplicateCount: 0,
+      conflict: false,
+    };
+    const payload = { ...body, latest: [{ ...row, interpretation }] };
+    expect(validApiResponse("/api/balances", payload)).toBe(true);
+    interpretation.evidence = [{ id: row.id + 10000, metric: row.metric }];
+    expect(validApiResponse("/api/balances", payload)).toBe(false);
+    interpretation.evidence = [{ id: row.id, metric: "different" }];
+    expect(validApiResponse("/api/balances", payload)).toBe(false);
+  });
   test("detail identities must match the requested safe integer, including zero", async () => {
     const artifact = await json(`/api/artifacts/${fixture.artifactId}`);
     const observation = await json(`/api/observations/transaction/${fixture.retiredObservationId}`);

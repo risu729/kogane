@@ -14,6 +14,7 @@ import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
 import { useViewState } from "../view-state.tsx";
 import { OrganizedInstrumentContext, OrganizedSourceAccount } from "../organization.tsx";
+import { BALANCE_GROUPS, BalanceEvidence, balanceMeaning } from "../balance-display.tsx";
 export function BalancesPage(): ReactNode {
   const query = useBalances();
   return (
@@ -21,7 +22,7 @@ export function BalancesPage(): ReactNode {
       <div className="page-head">
         <h1>残高</h1>
         <p className="lede">
-          口座ごとに、取得元が報告した残高を確認できます。通貨や残高の種類を分けて表示しています。
+          取得元が報告した金額を、預金などの残高・請求額・参考情報に分けて確認できます。純資産の合計ではありません。
         </p>
       </div>
       <QueryBoundary query={query} label="残高">
@@ -97,7 +98,7 @@ function BalancesBody({
           </div>
         </section>
       ) : null}
-      <BalanceTable
+      <LatestBalances
         key={`latest:${selectionKey}`}
         rows={latest.filter(matches)}
         available={latest.length}
@@ -117,38 +118,68 @@ function BalancesBody({
           取得元・口座・残高の種類・通貨や単位が同じ記録から、基準日（as_of）、基準日がない場合は取得元での観測日時（observed_at）を使って選んでいます。同じ日時は記録番号で並べます。両日時は意味が異なるため、実際の測定時刻が最も新しいことを保証するものではありません。
         </p>
         <p>
-          過去の履歴には旧解析の記録も残っています。金額は合算・換算せず、保存値をそのまま表示します。受信したページの各表を50件ずつ表示します。金融機関の全履歴が揃っていることを表す件数ではありません。
+          過去の履歴には旧解析の記録も残っています。金額は合算・換算・符号反転せず、保存値をそのまま表示します。最新の記録は受信した範囲を全区分共通で50件ずつ表示します。件数は受信範囲のもので、金融機関の全履歴を表しません。
+        </p>
+        <p>
+          同じ残高であることを確認できた最新の記録は、金額を一度だけ表示し、すべての根拠へのリンクを残します。金額や根拠が一致しない候補は別々に表示します。過去の履歴はまとめません。
         </p>
       </details>
     </>
+  );
+}
+function LatestBalances({ rows, available }: { rows: BalanceRow[]; available: number }): ReactNode {
+  const [page, setPage] = useState(0);
+  const view = pageWindow(rows, page);
+  return (
+    <section aria-label="項目ごとの最新の記録">
+      <h2 id="latest-balances">項目ごとの最新の記録</h2>
+      <p className="footnote">
+        受信した最新の記録 {available}件中、条件に一致する{rows.length}
+        件。各区分の件数はこの表示ページ内です。
+      </p>
+      {BALANCE_GROUPS.map((group) => {
+        const grouped = view.rows.filter((row) =>
+          (group.kinds as readonly string[]).includes(balanceMeaning(row).kind),
+        );
+        return grouped.length ? (
+          <BalanceTable key={group.id} rows={grouped} available={grouped.length} group={group} />
+        ) : null;
+      })}
+      {!rows.length ? (
+        <p>
+          {available
+            ? "条件に一致する残高がありません。条件をクリアすると保存された記録を確認できます。"
+            : "表示対象の残高記録がまだありません。残高がゼロであることを意味しません。"}
+        </p>
+      ) : null}
+      <Pager {...view} total={rows.length} onChange={setPage} />
+    </section>
   );
 }
 function BalanceTable({
   rows,
   history = false,
   available,
+  group,
 }: {
   rows: BalanceRow[] | BalanceHistoryRow[];
   history?: boolean;
   available: number;
+  group?: (typeof BALANCE_GROUPS)[number];
 }): ReactNode {
   const [page, setPage] = useState(0);
-  const view = pageWindow<BalanceRow | BalanceHistoryRow>(rows, page);
+  const view = pageWindow<BalanceRow | BalanceHistoryRow>(rows, group ? 0 : page);
   return (
     <Panel
-      id={history ? "balance-history" : "latest-balances"}
-      title={history ? "保存された残高の履歴" : "項目ごとの最新の記録"}
-      count={`${available}件中 ${rows.length}件`}
-      note={
-        history
-          ? "旧解析の記録も、根拠を確認できるように保持しています。"
-          : "種類や通貨が異なる残高は、それぞれ独立した記録です。"
-      }
+      id={history ? "balance-history" : `balance-${group?.id}`}
+      title={history ? "保存された残高の履歴" : group?.title}
+      count={group ? `このページ内 ${rows.length}件` : `${available}件中 ${rows.length}件`}
+      note={history ? "旧解析の記録も、根拠を確認できるように保持しています。" : group?.note}
     >
       <div
         className="table-scroll"
         role="region"
-        aria-label={history ? "残高の履歴" : "最新の残高"}
+        aria-label={history ? "残高の履歴" : `${group?.title}の記録`}
         tabIndex={0}
       >
         <table className="balance-table">
@@ -194,14 +225,17 @@ function BalanceTable({
                     />
                   </td>
                   <td className="col-metric">
-                    {row.metric} <Badge>{row.instrument}</Badge>
+                    {balanceMeaning(row).label} <Badge>{row.instrument}</Badge>
+                    <div className="table-secondary">{row.metric}</div>
                     <OrganizedInstrumentContext
                       organization={row.organization}
                       role="unit"
                       original={row.instrument}
                     />
                   </td>
-                  <td className="col-amount num">
+                  <td
+                    className={`col-amount num${!history && balanceMeaning(row).kind !== "asset" ? " balance-reference-amount" : ""}`}
+                  >
                     <Amount minor={row.amount_minor} unit={row.instrument} text={row.amount_text} />
                   </td>
                   <td className="col-dates">
@@ -226,6 +260,7 @@ function BalanceTable({
                     <ObservationLink kind="balance" id={row.id}>
                       詳細
                     </ObservationLink>
+                    {!history ? <BalanceEvidence row={row} /> : null}
                   </td>
                 </tr>
               ))
@@ -241,7 +276,7 @@ function BalanceTable({
           </tbody>
         </table>
       </div>
-      <Pager {...view} total={rows.length} onChange={setPage} />
+      {!group ? <Pager {...view} total={rows.length} onChange={setPage} /> : null}
     </Panel>
   );
 }

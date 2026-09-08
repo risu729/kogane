@@ -97,6 +97,7 @@ export interface TransactionRow {
 }
 
 export interface BalanceRow {
+  interpretation?: import("./balance-semantics.ts").BalanceInterpretation;
   organization?: ObservationOrganization;
   id: number;
   source_id: string;

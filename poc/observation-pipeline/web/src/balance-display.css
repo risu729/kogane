@@ -1,0 +1,11 @@
+/* Statements and reference figures are not positive assets or realized gains. */
+.balance-reference-amount .amount {
+  color: var(--text);
+}
+
+/* Evidence lists need a readable width inside the horizontally scrollable table. */
+.balance-table:has(.balance-evidence) .col-detail,
+.balance-table:has(.balance-conflict) .col-detail {
+  min-width: 16rem;
+  width: 16rem;
+}
