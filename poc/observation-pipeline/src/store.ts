@@ -67,6 +67,18 @@ export function openStore(stateDir?: string): Store {
     })();
   }
   db.exec(readFileSync(join(POC_ROOT, "schema.sql"), "utf8"));
+  // Additive derived schema: same SQL policy as production D1. Raw schema and
+  // existing store version remain compatible; apply once, transactionally.
+  if (!storeTableExists(db, "observation_decimal_values")) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(POC_ROOT, "../../services/raw-evidence/migrations/0024_observation_decimals.sql"),
+          "utf8",
+        ),
+      ),
+    )();
+  }
   if (found === 0) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   return { db, blobDir };
 }

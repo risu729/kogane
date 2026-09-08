@@ -9,6 +9,14 @@ import type { BalanceRow } from "../shared/api-contract.ts";
 const client = join(import.meta.dir, "../web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
+const exactDecimal = (coefficient: string, scale = 0) =>
+  ({
+    policyVersion: "decimal-v1",
+    status: "exact",
+    coefficient,
+    scale,
+    basis: "decimal_text",
+  }) as const;
 if (!runnable) {
   console.log("balance semantics browser: production build and Chromium required");
   process.exitCode = 1;
@@ -29,6 +37,7 @@ function row(
     metric,
     instrument: "JPY",
     amount_minor: amount,
+    normalized: exactDecimal(amount),
     amount_text: null,
     as_of: "2026-09-08",
     observed_at: "2026-09-08T00:00:00Z",
@@ -116,10 +125,33 @@ describe.if(runnable)("balance meaning and evidence display", () => {
               ? [
                   row(301, undefined, undefined, undefined, "0"),
                   row(302, undefined, undefined, undefined, "-1"),
-                  { ...row(303), amount_minor: null, amount_text: "unknown" },
-                  { ...row(306), instrument: "EUR", amount_minor: null, amount_text: "0.00" },
-                  { ...row(307), instrument: "BTC", amount_minor: null, amount_text: "0.00000000" },
-                  { ...row(308), instrument: "BTC", amount_minor: null, amount_text: "0.00000001" },
+                  {
+                    ...row(303),
+                    amount_minor: null,
+                    amount_text: "unknown",
+                    normalized: undefined,
+                  },
+                  {
+                    ...row(306),
+                    instrument: "EUR",
+                    amount_minor: null,
+                    amount_text: "0.00",
+                    normalized: exactDecimal("0"),
+                  },
+                  {
+                    ...row(307),
+                    instrument: "BTC",
+                    amount_minor: null,
+                    amount_text: "0.00000000",
+                    normalized: exactDecimal("0"),
+                  },
+                  {
+                    ...row(308),
+                    instrument: "BTC",
+                    amount_minor: null,
+                    amount_text: "0.00000001",
+                    normalized: exactDecimal("1", 8),
+                  },
                 ]
               : large
                 ? Array.from({ length: 60 }, (_, i) =>
@@ -130,14 +162,15 @@ describe.if(runnable)("balance meaning and evidence display", () => {
                 : latest,
             history: zeroCase
               ? [
-                  { ...history[0], id: 304, amount_minor: "0" },
-                  { ...history[1], id: 305, amount_minor: null },
+                  { ...history[0], id: 304, amount_minor: "0", normalized: exactDecimal("0") },
+                  { ...history[1], id: 305, amount_minor: null, normalized: undefined },
                   {
                     ...history[0],
                     id: 309,
                     instrument: "CAD",
                     amount_minor: null,
                     amount_text: "0.00",
+                    normalized: exactDecimal("0"),
                   },
                 ]
               : history,

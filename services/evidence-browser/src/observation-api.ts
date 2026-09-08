@@ -1,4 +1,5 @@
 import * as queries from "./observations";
+import { decimalRows } from "./normalized-decimals";
 import { describeActivities } from "./activity-presentation";
 import { organizedFilterOptions } from "./organized-filter-options";
 import { presentLatestBalances, describeBalanceRows } from "./balance-presentation";
@@ -145,7 +146,11 @@ export async function observationApi(
         transactions: await organizeRows(
           env.DB,
           "transaction",
-          await describeActivities(env.DB, await queries.currentTransactions(store, filter)),
+          await decimalRows(
+            env.DB,
+            "transaction",
+            await describeActivities(env.DB, await queries.currentTransactions(store, filter)),
+          ),
         ),
       },
       offset,
@@ -173,8 +178,12 @@ export async function observationApi(
     const latest = projected.slice(latestOffset, latestOffset + 501);
     const history = await queries.balanceHistory(store, filter);
     return json({
-      latest: latest.slice(0, 500),
-      history: describeBalanceRows(await organizeRows(env.DB, "balance", history.slice(0, 500))),
+      latest: await decimalRows(env.DB, "balance", latest.slice(0, 500)),
+      history: await decimalRows(
+        env.DB,
+        "balance",
+        describeBalanceRows(await organizeRows(env.DB, "balance", history.slice(0, 500))),
+      ),
       coverage: {
         limit: 500,
         truncated: latest.length > 500 || history.length > 500,
@@ -185,6 +194,20 @@ export async function observationApi(
   }
   if (path === "/api/positions") {
     const entries = await queries.positionsWithValuations(store, filter);
+    const normalizedPositions = await decimalRows(
+      env.DB,
+      "position",
+      entries.map((entry) => entry.position),
+    );
+    const normalizedValuations = new Map(
+      (
+        await decimalRows(
+          env.DB,
+          "valuation",
+          entries.flatMap((entry) => entry.valuations),
+        )
+      ).map((row) => [row.id, row.normalized]),
+    );
     const organizations = await observationOrganizations(
       env.DB,
       entries.flatMap((entry) => [
@@ -194,15 +217,17 @@ export async function observationApi(
     );
     return boundedCollections(
       {
-        positions: entries.map((entry) => ({
+        positions: entries.map((entry, index) => ({
           position: {
             ...entry.position,
+            normalized: normalizedPositions[index]!.normalized,
             organization: organizations.get(
               organizationKey({ kind: "position", id: entry.position.id }),
             )!,
           },
           valuations: entry.valuations.map((row) => ({
             ...row,
+            normalized: normalizedValuations.get(row.id)!,
             organization: organizations.get(organizationKey({ kind: "valuation", id: row.id }))!,
           })),
         })),
@@ -238,7 +263,12 @@ export async function observationApi(
     if (observation) {
       const ref = { kind: observation[1] as queries.ObservationKind, id };
       const organizations = await observationOrganizations(env.DB, [ref]);
-      return json({ ...result, organization: organizations.get(organizationKey(ref))! });
+      const [decimal] = await decimalRows(env.DB, ref.kind, [{ id }]);
+      return json({
+        ...result,
+        normalized: decimal!.normalized,
+        organization: organizations.get(organizationKey(ref))!,
+      });
     }
     return json(result);
   }

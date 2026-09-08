@@ -81,6 +81,7 @@ export interface Overview {
 }
 
 export interface TransactionRow {
+  normalized?: import("./normalized-decimal.ts").NormalizedDecimal;
   interpretation?: import("./activity-semantics.ts").ActivityMeaning;
   organization?: ObservationOrganization;
   id: number;
@@ -98,6 +99,7 @@ export interface TransactionRow {
 }
 
 export interface BalanceRow {
+  normalized?: import("./normalized-decimal.ts").NormalizedDecimal;
   interpretation?: import("./balance-semantics.ts").BalanceInterpretation;
   organization?: ObservationOrganization;
   id: number;
@@ -118,6 +120,7 @@ export interface BalanceHistoryRow extends BalanceRow {
 }
 
 export interface PositionRow {
+  normalized?: import("./normalized-decimal.ts").NormalizedDecimal;
   organization?: ObservationOrganization;
   id: number;
   source_id: string;
@@ -133,6 +136,7 @@ export interface PositionRow {
 }
 
 export interface ValuationRow {
+  normalized?: import("./normalized-decimal.ts").NormalizedDecimal;
   organization?: ObservationOrganization;
   id: number;
   source_id: string;
@@ -234,6 +238,7 @@ export interface Provenance {
 }
 
 export interface ObservationDetail {
+  normalized?: import("./normalized-decimal.ts").NormalizedDecimal;
   organization?: ObservationOrganization;
   kind: ObservationKind;
   row: Record<string, unknown>;

@@ -9,12 +9,13 @@
 //
 //   * Read-only. There is no route that writes, and any method other than GET
 //     or HEAD is refused before routing. The browser observes the store.
-//   * Nothing derived is stored. "Latest balance" and every other current-state
-//     view is computed per request by queries.ts and thrown away.
+//   * Current-state selection is computed per request. Exact decimal values are
+//     read from the versioned DB projection populated at ingestion/migration.
 //   * Raw evidence goes out verbatim, and is never treated as an active
 //     document. See the /api/raw handler.
 
 import { Hono } from "hono";
+import { localDecimalRows } from "./normalized-values.ts";
 import type { ApiMetadata } from "../shared/api-contract.ts";
 import { readRawObject, sha256Hex, type Store } from "./store.ts";
 import {
@@ -80,13 +81,25 @@ export function createApi(store: Store, options: ApiOptions = {}): Hono {
 
   app.get("/api/overview", (c) => c.json(overview(store)));
 
-  app.get("/api/transactions", (c) => c.json({ transactions: currentTransactions(store) }));
-
-  app.get("/api/balances", (c) =>
-    c.json({ latest: latestBalances(store), history: balanceHistory(store) }),
+  app.get("/api/transactions", (c) =>
+    c.json({ transactions: localDecimalRows(store, "transaction", currentTransactions(store)) }),
   );
 
-  app.get("/api/positions", (c) => c.json({ positions: positionsWithValuations(store) }));
+  app.get("/api/balances", (c) =>
+    c.json({
+      latest: localDecimalRows(store, "balance", latestBalances(store)),
+      history: localDecimalRows(store, "balance", balanceHistory(store)),
+    }),
+  );
+
+  app.get("/api/positions", (c) =>
+    c.json({
+      positions: positionsWithValuations(store).map((entry) => ({
+        position: localDecimalRows(store, "position", [entry.position])[0]!,
+        valuations: localDecimalRows(store, "valuation", entry.valuations),
+      })),
+    }),
+  );
 
   app.get("/api/artifacts", (c) => c.json({ artifacts: artifacts(store) }));
 
@@ -107,7 +120,10 @@ export function createApi(store: Store, options: ApiOptions = {}): Hono {
     if (id === undefined) return c.json({ error: "not an observation id" }, 404);
     const detail = observationDetail(store, kind, id);
     if (!detail) return c.json({ error: `no ${kind} observation with id ${id}` }, 404);
-    return c.json(detail);
+    return c.json({
+      ...detail,
+      normalized: localDecimalRows(store, kind, [{ id }])[0]!.normalized,
+    });
   });
 
   // Raw evidence, byte for byte.
