@@ -6,6 +6,11 @@ import { chromium, type Browser } from "playwright";
 import { createApi } from "../src/api.ts";
 import { buildFixture, HOSTILE_DESCRIPTION } from "./fixture.ts";
 import type { ObservationOrganization } from "../shared/organization-contract.ts";
+import {
+  FINANCIAL_PRODUCT_SOURCES,
+  resolveFinancialProduct,
+  type FinancialProductClaim,
+} from "../shared/financial-products.ts";
 
 const client = join(import.meta.dir, "../web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -16,7 +21,7 @@ if (!runnable) {
 }
 const accountLabel = "整理済みの証券口座";
 const securityLabel = '日本語銘柄 <img src=x onerror="alert(1)">';
-const organization: ObservationOrganization = {
+const baseOrganization: ObservationOrganization = {
   state: "organized",
   lineage: "current",
   account: {
@@ -58,6 +63,27 @@ const organization: ObservationOrganization = {
     },
   ],
 };
+let organization = baseOrganization;
+const product: FinancialProductClaim = resolveFinancialProduct({
+  kind: "balance",
+  id: 1,
+  parseRunId: 1,
+  artifactId: 1,
+  rawLocator: "json:$.responseParam.overview.responseParam.savingsDetails[0].balance",
+  sourceId: "sbi-shinsei-bank",
+  dataset: "top-accounts-balance-and-activity",
+  sourceAccount: "sbi-shinsei:SYNTHETIC_ACCOUNT",
+  currency: "USD",
+  subject: null,
+  asOf: "2026-09-08",
+  observedAt: "2026-09-08T00:00:00Z",
+  extra: {
+    accountNo: "SYNTHETIC_ACCOUNT",
+    productCode: "621",
+    currency: "USD",
+    _kogane: { sourceView: "top_overview", productCode: "621" },
+  },
+});
 
 describe.if(runnable)("organized observation labels", () => {
   const fixture = buildFixture();
@@ -261,6 +287,89 @@ describe.if(runnable)("organized observation labels", () => {
       }
     } finally {
       detailMode = "organized";
+      await page.close();
+    }
+  });
+
+  test("official product is primary only for automatic labels, with native currency and original account retained", async () => {
+    const page = await browser.newPage({ viewport: { width: 390, height: 900 } });
+    try {
+      for (const method of ["rule", "manual"] as const) {
+        organization = {
+          ...baseOrganization,
+          account: { ...baseOrganization.account!, method },
+          product,
+        };
+        await page.goto(origin + "/balances");
+        const account = page.locator(".organized-account").first();
+        await account.getByText(product.name!, { exact: false }).waitFor();
+        const text = await account.innerText();
+        expect(text).toContain("金融機関: SBI新生銀行 · 元の通貨: USD");
+        expect(text).toContain("demo-bank:main");
+        expect(text.indexOf(product.name!) < text.indexOf(accountLabel)).toBe(method === "rule");
+        expect(await page.locator("main").innerText()).toContain("248,820");
+      }
+      await page.goto(`${origin}/observations/balance/1`);
+      const details = page.locator(".financial-product-details");
+      await details.waitFor();
+      expect(await details.innerText()).toContain(
+        "当時の商品名・金利・契約条件の確認ではありません",
+      );
+      expect(await details.innerText()).toContain("過去の取引商品を推定していません");
+      await details.getByText("商品の判定根拠", { exact: true }).click();
+      expect(await details.innerText()).toContain("621");
+      expect(await details.innerText()).toContain(product.origin.rawLocator);
+      expect(await details.innerText()).toContain(product.catalogueVersion);
+      expect(
+        await details.getByRole("link", { name: "判定に使った記録" }).getAttribute("href"),
+      ).toBe("/observations/balance/1");
+      expect(await details.getByRole("link", { name: "原本 #1" }).getAttribute("href")).toBe(
+        "/artifacts/1",
+      );
+      expect(
+        await details
+          .getByRole("link", { name: FINANCIAL_PRODUCT_SOURCES[0]!.title })
+          .getAttribute("href"),
+      ).toBe(FINANCIAL_PRODUCT_SOURCES[0]!.url);
+      const stored = await page.locator('section[aria-labelledby="stored-row"]').innerText();
+      expect(stored).toContain("demo-bank:main");
+      expect(stored).not.toContain(product.name!);
+    } finally {
+      organization = baseOrganization;
+      await page.close();
+    }
+  });
+
+  test("unknown and conflicting products never promote the bank label to an official product", async () => {
+    const page = await browser.newPage();
+    try {
+      for (const status of ["unresolved", "conflict"] as const) {
+        organization = {
+          ...baseOrganization,
+          product: {
+            ...product,
+            status,
+            productId: null,
+            name: null,
+            family: null,
+            evidence: { sourceIds: [], fields: [], rule: "unresolved-own-row-v1" },
+          },
+        };
+        await page.goto(origin + "/balances");
+        const summary = page.locator(".financial-product-summary").first();
+        await summary.waitFor();
+        expect(await summary.innerText()).toContain(
+          status === "unresolved" ? "商品未特定" : "商品の根拠が競合",
+        );
+        expect(await summary.innerText()).not.toContain("商品を特定");
+        expect(await summary.innerText()).not.toContain(accountLabel);
+      }
+      organization = baseOrganization;
+      await page.goto(origin + "/transactions");
+      await page.getByText(accountLabel).first().waitFor();
+      expect(await page.locator(".financial-product-summary").count()).toBe(0);
+    } finally {
+      organization = baseOrganization;
       await page.close();
     }
   });
