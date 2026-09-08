@@ -30,7 +30,16 @@ interface Artifact {
 const projection = `SELECT a.id,a.source_id,a.dataset,a.fetch_run_id,a.fetch_unit_key,r.tool producer,a.sha256,o.byte_size,o.blob_key FROM observation_fetch_artifacts a JOIN observation_fetch_runs r ON r.id=a.fetch_run_id JOIN fetch_artifacts fa ON fa.id=a.id JOIN raw_objects o ON o.sha256=fa.sha256 AND o.byte_size=fa.byte_size WHERE r.status='success' AND r.failure_count=0`;
 async function read(artifact: Artifact): Promise<string> {
   const obj = await proxy.env.EVIDENCE.get(artifact.blob_key);
-  if (!obj || artifact.byte_size > 8 * 1024 * 1024) throw new Error("connection_evidence_missing");
+  if (!obj) throw new Error("connection_evidence_missing");
+  if (
+    !Number.isSafeInteger(artifact.byte_size) ||
+    artifact.byte_size < 1 ||
+    artifact.byte_size > 8 * 1024 * 1024 ||
+    !Number.isSafeInteger(obj.size) ||
+    obj.size !== artifact.byte_size ||
+    obj.size > 8 * 1024 * 1024
+  )
+    throw new Error("connection_evidence_size");
   const bytes = await obj.arrayBuffer();
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) =>
     b.toString(16).padStart(2, "0"),
