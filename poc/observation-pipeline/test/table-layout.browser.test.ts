@@ -4,7 +4,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { createApi } from "../src/api.ts";
-import type { TransactionRow } from "../shared/api-contract.ts";
+import type { BalanceHistoryRow, BalanceRow, TransactionRow } from "../shared/api-contract.ts";
 import { buildFixture } from "./fixture.ts";
 
 const clients = {
@@ -25,6 +25,8 @@ const description =
   "海外送金の精算・長い取引内容が金額や取得元を押し潰さずに読めることを確認するための合成記録";
 const minor = "900719925474099312345";
 const fallback = `unparsed-provider-amount-${"1234567890".repeat(8)}`;
+const basisDate = "2026-09-08T00:30:00+09:00";
+const observedDate = "2026-09-07T16:45:00Z";
 
 describe.if(runnable)("transaction columns at desktop and phone widths", () => {
   const fixture = buildFixture();
@@ -104,6 +106,59 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
               ...(central ? { coverage: { limit: 500, truncated: false, nextOffset: null } } : {}),
             });
           }
+          if (url.pathname === "/api/balances") {
+            const response = await api.fetch(new Request(new URL("/api/balances", request.url)));
+            const value = (await response.json()) as {
+              latest: BalanceRow[];
+              history: BalanceHistoryRow[];
+            };
+            const seed = value.latest[0]!;
+            const latest: BalanceRow[] = [
+              {
+                ...seed,
+                id: 1,
+                source_id: source,
+                source_account: account,
+                metric: "ledger",
+                instrument: "JPY",
+                amount_minor: minor,
+                amount_text: null,
+                as_of: basisDate,
+                observed_at: observedDate,
+              },
+              {
+                ...seed,
+                id: 2,
+                source_id: "unknown-date-bank",
+                source_account: "undated",
+                metric: "available",
+                instrument: "JPY",
+                amount_minor: "0",
+                amount_text: null,
+                as_of: null,
+                observed_at: null,
+              },
+            ];
+            return Response.json({
+              latest,
+              history: latest.map((row, index) => ({
+                ...row,
+                id: row.id + 10,
+                parse_status: "ok",
+                superseded_by_parse_run_id: index === 0 ? 9 : null,
+              })),
+              ...(central
+                ? {
+                    coverage: {
+                      limit: 500,
+                      truncated: false,
+                      nextOffset: null,
+                      latestNextOffset: null,
+                    },
+                  }
+                : {}),
+            });
+          }
           if (url.pathname.startsWith("/api/")) return api.fetch(request);
           return new Response(
             Bun.file(
@@ -128,6 +183,88 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
 
   for (const mode of ["local", "central"] as const) {
     for (const width of [390, 1280]) {
+      test(`${mode} balances at ${width}px preserve distinct dates and amounts`, async () => {
+        const page = await browser.newPage({ viewport: { width, height: 900 } });
+        try {
+          await page.goto(`${origins[mode]}/balances`, { waitUntil: "networkidle" });
+          await page.locator(".balance-table").first().waitFor();
+          await page.getByText("過去の残高・再解析の履歴", { exact: true }).click();
+          for (const [name, columns] of [
+            ["最新の残高", 5],
+            ["残高の履歴", 6],
+          ] as const) {
+            const region = page.getByRole("region", { name, exact: true });
+            const table = region.locator("table");
+            expect(await table.locator("thead th").count()).toBe(columns);
+            const row = table.locator("tbody tr").filter({ hasText: source });
+            expect(await row.locator(".col-source").innerText()).toBe(`${source}\n${account}`);
+            expect(await row.locator(".col-dates dt").allTextContents()).toEqual([
+              "基準日",
+              "取得元の観測日時",
+            ]);
+            expect(await row.locator(".col-dates dd").allTextContents()).toEqual([
+              basisDate,
+              observedDate,
+            ]);
+            const missing = table.locator("tbody tr").filter({ hasText: "unknown-date-bank" });
+            expect(await missing.locator(".col-dates dd").allTextContents()).toEqual([
+              "未記録",
+              "未記録",
+            ]);
+            expect(await row.locator(".amount").innerText()).toContain(
+              "900,719,925,474,099,312,345",
+            );
+            const geometry = await row.evaluate((element) => {
+              const amount = element.querySelector(".amount")!.getBoundingClientRect();
+              const cell = element.querySelector(".col-amount")!.getBoundingClientRect();
+              const sourceCell = element.querySelector<HTMLElement>(".col-source")!;
+              return {
+                amountLeft: amount.left,
+                amountRight: amount.right,
+                cellLeft: cell.left,
+                cellRight: cell.right,
+                sourceClipped: sourceCell.scrollWidth > sourceCell.clientWidth + 1,
+                pageOverflow:
+                  document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+              };
+            });
+            expect(geometry.amountLeft).toBeGreaterThanOrEqual(geometry.cellLeft);
+            expect(geometry.amountRight).toBeLessThanOrEqual(geometry.cellRight);
+            expect(geometry.sourceClipped).toBe(false);
+            expect(geometry.pageOverflow).toBe(false);
+            await region.focus();
+            expect(await region.evaluate((element) => document.activeElement === element)).toBe(
+              true,
+            );
+            if (width === 390) {
+              await region.evaluate((element) => {
+                element.scrollLeft = 0;
+              });
+              await page.keyboard.press("ArrowRight");
+              await page.waitForFunction(
+                (label) =>
+                  (document.querySelector(`[role="region"][aria-label="${label}"]`)?.scrollLeft ??
+                    0) > 0,
+                name,
+              );
+              expect(await region.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+            }
+          }
+          const screenshots = process.env["UI_REVIEW_SCREENSHOTS"];
+          if (screenshots) {
+            mkdirSync(screenshots, { recursive: true });
+            await page.locator(".balance-table").evaluateAll((tables) => {
+              for (const table of tables) table.parentElement!.scrollLeft = 0;
+            });
+            await page.screenshot({
+              path: join(screenshots, `balances-${mode}-${width}.png`),
+              fullPage: true,
+            });
+          }
+        } finally {
+          await page.close();
+        }
+      }, 60_000);
       test(`${mode} at ${width}px preserves identifiers, amounts and keyboard access`, async () => {
         const page = await browser.newPage({ viewport: { width, height: 900 } });
         try {

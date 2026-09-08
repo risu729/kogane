@@ -23,6 +23,12 @@ source, not the account. Other headers retain their own sort key. Amounts are no
 sorted across currencies. The description receives remaining width; identifiers
 wrap within bounded cells. Raw values remain available as text, not hover-only tips.
 
+Balances use source/account, balance kind/unit, amount, explicitly labeled dates,
+and the detail link. The history table additionally includes parse lineage. The
+date cell always identifies both the source basis date and source observation
+time, including missing values; one is never substituted for the other. Date
+labels share a column to leave space for comparing balance kinds and amounts.
+
 Do not narrow columns until words become individual characters. On small screens,
 keep a readable table and scroll only its labeled, keyboard-focusable region.
 Keep numeric values right-aligned with tabular digits. A financial amount must
