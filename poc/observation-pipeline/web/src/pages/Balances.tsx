@@ -144,20 +144,31 @@ function BalanceTable({
           : "種類や通貨が異なる残高は、それぞれ独立した記録です。"
       }
     >
-      <div className="table-scroll">
-        <table>
+      <div
+        className="table-scroll"
+        role="region"
+        aria-label={history ? "残高の履歴" : "最新の残高"}
+        tabIndex={0}
+      >
+        <table className="balance-table">
+          <caption>
+            基準日は残高が対象とする日付、観測日時は取得元で記録された日時です。それぞれ保存された表記で表示します。
+          </caption>
           <thead>
             <tr>
               {[
-                "取得元・口座",
-                "残高の種類",
-                "金額",
-                "基準日",
-                "取得元の観測日時",
-                ...(history ? ["解析・履歴"] : []),
-                "記録",
-              ].map((label) => (
-                <th scope="col" key={label} className={label === "金額" ? "num" : ""}>
+                { label: "取得元・口座", column: "source" },
+                { label: "残高の種類", column: "metric" },
+                { label: "金額", column: "amount" },
+                { label: "日時", column: "dates" },
+                ...(history ? [{ label: "解析・履歴", column: "lineage" }] : []),
+                { label: "記録", column: "detail" },
+              ].map(({ label, column }) => (
+                <th
+                  scope="col"
+                  key={column}
+                  className={`col-${column}${column === "amount" ? " num" : ""}`}
+                >
                   {label}
                 </th>
               ))}
@@ -174,29 +185,35 @@ function BalanceTable({
                       : ""
                   }
                 >
-                  <td>
+                  <td className="col-source">
                     {row.source_id}
-                    <div className="dim">{row.source_account}</div>
+                    <div className="table-secondary">{row.source_account}</div>
                   </td>
-                  <td>
+                  <td className="col-metric">
                     {row.metric} <Badge>{row.instrument}</Badge>
                   </td>
-                  <td className="num">
+                  <td className="col-amount num">
                     <Amount minor={row.amount_minor} unit={row.instrument} text={row.amount_text} />
                   </td>
-                  <td>
-                    <Nullable value={row.as_of} />
-                  </td>
-                  <td>
-                    <Nullable value={row.observed_at} />
+                  <td className="col-dates">
+                    <dl className="record-dates">
+                      <dt>基準日</dt>
+                      <dd>
+                        <Nullable value={row.as_of} />
+                      </dd>
+                      <dt>取得元の観測日時</dt>
+                      <dd>
+                        <Nullable value={row.observed_at} />
+                      </dd>
+                    </dl>
                   </td>
                   {history && "parse_status" in row ? (
-                    <td>
+                    <td className="col-lineage">
                       <StatusBadge status={row.parse_status} />
                       <LineageBadge supersededBy={row.superseded_by_parse_run_id} />
                     </td>
                   ) : null}
-                  <td>
+                  <td className="col-detail">
                     <ObservationLink kind="balance" id={row.id}>
                       詳細
                     </ObservationLink>
@@ -205,7 +222,7 @@ function BalanceTable({
               ))
             ) : (
               <tr>
-                <td colSpan={history ? 7 : 6}>
+                <td colSpan={history ? 6 : 5}>
                   {available > 0
                     ? "条件に一致する残高がありません。条件をクリアすると保存された記録を確認できます。"
                     : "表示対象の残高記録がまだありません。残高がゼロであることを意味しません。"}
