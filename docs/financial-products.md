@@ -71,3 +71,17 @@ Every claim retains observation/parse/artifact/row origin, bounded public source
 references, its code and native currency, and an explicit current-catalogue
 temporal basis. Original private identifiers and amounts are not copied into
 the catalogue or this document.
+
+# Catalogue revision 2026-09-08.2 / own-row-v2
+
+## Persistence boundary
+
+This change does not attach product_id to accounts or instruments. The catalogue and resolver are Git-versioned; each eligible B observation receives a current runtime interpretation, not a stored historical decision. Exact replay requires the same A/B evidence, catalogue/resolver revisions and financial-evidence eligibility state. Future manual product corrections or a published-decision audit would require append-only claims with their own provenance. No database migration or backfill is required here. Manual nicknames remain independent. Account catalogues and filters describe acquisition/account scope, while official product identification is presented per record.
+
+Currency-specific IDs represent catalogue variants, not separately invented marketed names. Shinsei FX variants all retain the exact official name パワーフレックス外貨普通預金; nativeCurrency is separate. PowerFlex is an umbrella family, not a substitute product. Claims include the trusted parser name and nullable observation timestamps in origin; they interpret current catalogue definitions, not historical contract terms.
+
+Sony identification is limited to audited `sony-bank-history-json` and `sony-bank-history-csv` ordinary-history paths: dedicated yen-history / foreign-history currency dataset, matching `sony-bank:deposit:{currency}`, exact transaction or after-transaction-balance locator, and the own row's currency. Transaction rows additionally require provider-json / official-csv metadata. Balance rows have no such metadata; their trusted parser, dataset, locator and original currency establish scope. JPY maps to 円普通預金 and supported foreign currencies to 外貨普通預金, with currency variants. Sony supports CNH, not Shinsei's CNY. Gross asset/loan category codes never establish a product.
+
+The dedicated `sony-bank-wallet-history` transaction parser additionally requires wallet-history-YYYYMM, `sony-bank:wallet`, HTML table/row locator and wallet-monthly-html metadata. It establishes Sony Bank WALLET only: no deposit linkage, native deposit currency, design or tier. Official source definitions, verified 2026-09-08: [円普通預金](https://sonybank.jp/products/yen/03.html), [外貨普通預金](https://sonybank.jp/products/fc/03.html), [Sony Bank WALLET](https://sonybank.jp/products/sbw/03.html).
+
+Other source boundaries remain explicit unresolved results: SMBC ordinary-yen does not select its interest variant or Olive; GLOBAL PASS activity cannot choose standard/ANA or a PRESTIA deposit; Vpass identity tokens and MyJCB inventory hints do not prove marketed card products on individual ledger rows. Securities custody/tax regimes remain distinct from instrument identity and bank products. SBI VC exchange categories, Suica SF, VポイントPay prepaid balances and Vポイント reward buckets require their own audited rules before catalogue binding. MoneyForward connection correspondence never distributes a product to every calendar row. PayPay and unknown sources have no generic fallback.

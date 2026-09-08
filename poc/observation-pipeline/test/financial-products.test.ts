@@ -1,4 +1,76 @@
 import { expect, test } from "bun:test";
+test("Sony audited ordinary history paths identify currency variants without invented names", () => {
+  for (const currency of ["JPY", "USD", "CNH", "SEK"])
+    for (const csv of [false, true])
+      for (const kind of ["transaction", "balance"] as const) {
+        const value: FinancialProductInput = {
+          ...input(),
+          sourceId: "sony-bank",
+          parserName: csv ? "sony-bank-history-csv" : "sony-bank-history-json",
+          kind,
+          dataset: `${currency === "JPY" ? "yen-history" : `foreign-history-${currency.toLowerCase()}`}-${csv ? "csv" : "page-0001"}`,
+          sourceAccount: `sony-bank:deposit:${currency}`,
+          currency,
+          rawLocator: csv
+            ? `csv:row=2${kind === "balance" ? ",column=差引残高" : ""}`
+            : `json:$.transactionHistInfo[0]${kind === "balance" ? ".transactionAftBal" : ""}`,
+          extra: {
+            ...(csv
+              ? { 通貨: currency }
+              : kind === "balance"
+                ? { transaction: { currencyCd: currency } }
+                : { currencyCd: currency }),
+            ...(kind === "transaction"
+              ? { _kogane: { sourceView: csv ? "official-csv" : "provider-json" } }
+              : {}),
+          },
+        };
+        const claim = resolveFinancialProduct(value);
+        expect(claim.status).toBe("identified");
+        expect(claim.name).toBe(currency === "JPY" ? "円普通預金" : "外貨普通預金");
+        expect(claim.nativeCurrency).toBe(currency);
+        expect(validFinancialProductClaim(claim)).toBe(true);
+        for (const bad of [
+          { ...value, currency: "EUR" },
+          { ...value, sourceAccount: "sony-bank:wallet" },
+          { ...value, parserName: null },
+          { ...value, extra: {} },
+          { ...value, sourceAccount: "sony-bank:gross:asset:001" },
+          { ...value, dataset: "foreign-history-cny-csv" },
+        ])
+          expect(resolveFinancialProduct(bad).status).not.toBe("identified");
+      }
+});
+test("Sony WALLET is a debit service, never an underlying deposit or card variant", () => {
+  const value: FinancialProductInput = {
+    ...input(),
+    sourceId: "sony-bank",
+    parserName: "sony-bank-wallet-history",
+    kind: "transaction",
+    dataset: "wallet-history-202609",
+    sourceAccount: "sony-bank:wallet",
+    rawLocator: "html:table=0,row=1",
+    extra: { _kogane: { sourceView: "wallet-monthly-html" } },
+  };
+  const claim = resolveFinancialProduct(value);
+  expect(claim.name).toBe("Sony Bank WALLET");
+  expect(claim.nativeCurrency).toBeNull();
+  expect(claim.code).toBeNull();
+  expect(validFinancialProductClaim(claim)).toBe(true);
+  for (const bad of [
+    { ...value, kind: "balance" as const },
+    { ...value, sourceAccount: "sony-bank:deposit:JPY" },
+    { ...value, dataset: "wallet-history-202613" },
+    { ...value, extra: {} },
+  ])
+    expect(resolveFinancialProduct(bad).status).not.toBe("identified");
+  expect(
+    validFinancialProductClaim({
+      ...claim,
+      origin: { ...claim.origin, parserName: "sony-bank-history-json" },
+    }),
+  ).toBe(false);
+});
 import {
   FINANCIAL_PRODUCTS,
   FINANCIAL_PRODUCT_FAMILIES,
@@ -13,6 +85,7 @@ function input(
   kind: "balance" | "valuation" = "balance",
 ): FinancialProductInput {
   return {
+    parserName: "sbi-shinsei-top-balances-and-activity",
     kind,
     id: 1,
     parseRunId: 2,
@@ -151,6 +224,7 @@ test("claims preserve origin and use current definitions without leaking extra f
   const before = JSON.stringify(original);
   const claim = resolveFinancialProduct(original);
   expect(claim.origin).toEqual({
+    parserName: "sbi-shinsei-top-balances-and-activity",
     asOf: null,
     observedAt: null,
     kind: "balance",

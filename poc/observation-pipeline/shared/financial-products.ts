@@ -1,9 +1,27 @@
-export const FINANCIAL_PRODUCT_CATALOGUE_VERSION = "2026-09-08.1";
-export const FINANCIAL_PRODUCT_RESOLVER_VERSION = "own-row-v1";
+export const FINANCIAL_PRODUCT_CATALOGUE_VERSION = "2026-09-08.2";
+export const FINANCIAL_PRODUCT_RESOLVER_VERSION = "own-row-v2";
 const VERIFIED_AT = "2026-09-08";
 const BANK_APP =
   "https://bk.web.sbishinseibank.co.jp/SFC/apps/services/www/SFC/desktopbrowser/default/";
 export const FINANCIAL_PRODUCT_SOURCES = [
+  {
+    id: "sony-yen-ordinary",
+    title: "円普通預金商品詳細説明書",
+    url: "https://sonybank.jp/products/yen/03.html",
+    verifiedAt: VERIFIED_AT,
+  },
+  {
+    id: "sony-fx-ordinary",
+    title: "外貨普通預金商品詳細説明書",
+    url: "https://sonybank.jp/products/fc/03.html",
+    verifiedAt: VERIFIED_AT,
+  },
+  {
+    id: "sony-wallet",
+    title: "Sony Bank WALLET 商品詳細説明書",
+    url: "https://sonybank.jp/products/sbw/03.html",
+    verifiedAt: VERIFIED_AT,
+  },
   {
     id: "shinsei-powerflex",
     title: "パワーフレックス口座の位置付け",
@@ -66,10 +84,18 @@ export const FINANCIAL_PRODUCT_SOURCES = [
   },
 ] as const;
 export const FINANCIAL_INSTITUTIONS = [
+  { id: "sony-bank", name: "ソニー銀行" },
   { id: "sbi-shinsei-bank", name: "SBI新生銀行" },
   { id: "smbc-bank", name: "三井住友銀行" },
 ] as const;
 export const FINANCIAL_PRODUCT_FAMILIES = [
+  {
+    id: "sony-bank:ordinary-deposits",
+    name: "普通預金",
+    institutionId: "sony-bank",
+    parentId: null,
+  },
+  { id: "sony-bank:visa-debit", name: "Visaデビット", institutionId: "sony-bank", parentId: null },
   {
     id: "sbi-shinsei:powerflex",
     name: "総合口座パワーフレックス",
@@ -88,13 +114,14 @@ interface ProductDefinition {
   name: string;
   institutionId: string;
   familyId: string;
-  code: string;
-  nativeCurrency: string;
+  code: string | null;
+  nativeCurrency: string | null;
   kind:
     | "ordinary-deposit"
     | "securities-linked-deposit"
     | "bonus-interest-special-deposit"
-    | "foreign-ordinary-deposit";
+    | "foreign-ordinary-deposit"
+    | "debit-card";
   sourceIds: string[];
 }
 const FX_CODES = [
@@ -112,7 +139,42 @@ const FX_CODES = [
   ["632", "TRY"],
   ["633", "BRL"],
 ] as const;
+const SONY_CURRENCIES = [
+  "JPY",
+  "AUD",
+  "BRL",
+  "CAD",
+  "CHF",
+  "CNH",
+  "EUR",
+  "GBP",
+  "HKD",
+  "NZD",
+  "SEK",
+  "USD",
+  "ZAR",
+] as const;
 export const FINANCIAL_PRODUCTS: readonly ProductDefinition[] = [
+  ...SONY_CURRENCIES.map((currency): ProductDefinition => ({
+    id: `sony-bank:ordinary-deposit:${currency.toLowerCase()}`,
+    name: currency === "JPY" ? "円普通預金" : "外貨普通預金",
+    institutionId: "sony-bank",
+    familyId: "sony-bank:ordinary-deposits",
+    code: null,
+    nativeCurrency: currency,
+    kind: currency === "JPY" ? "ordinary-deposit" : "foreign-ordinary-deposit",
+    sourceIds: [currency === "JPY" ? "sony-yen-ordinary" : "sony-fx-ordinary"],
+  })),
+  {
+    id: "sony-bank:wallet",
+    name: "Sony Bank WALLET",
+    institutionId: "sony-bank",
+    familyId: "sony-bank:visa-debit",
+    code: null,
+    nativeCurrency: null,
+    kind: "debit-card",
+    sourceIds: ["sony-wallet"],
+  },
   {
     id: "sbi-shinsei:powerflex-yen-ordinary",
     name: "パワーフレックス円普通預金",
@@ -151,7 +213,7 @@ export const FINANCIAL_PRODUCTS: readonly ProductDefinition[] = [
   },
   ...FX_CODES.map(([code, currency]): ProductDefinition => ({
     id: `sbi-shinsei:powerflex-fx-ordinary:${currency.toLowerCase()}`,
-    name: `パワーフレックス外貨普通預金（${currency}）`,
+    name: "パワーフレックス外貨普通預金",
     institutionId: "sbi-shinsei-bank",
     familyId: "sbi-shinsei:powerflex-fx-ordinary",
     code,
@@ -166,6 +228,7 @@ export const FINANCIAL_PRODUCTS: readonly ProductDefinition[] = [
   })),
 ];
 export interface FinancialProductInput {
+  parserName?: string | null;
   asOf?: string | null;
   observedAt?: string | null;
   kind: "transaction" | "balance" | "position" | "valuation";
@@ -193,7 +256,7 @@ export interface FinancialProductClaim {
   origin: Pick<
     FinancialProductInput,
     "kind" | "id" | "parseRunId" | "artifactId" | "rawLocator"
-  > & { asOf: string | null; observedAt: string | null };
+  > & { asOf: string | null; observedAt: string | null; parserName: string | null };
   evidence: { sourceIds: string[]; fields: string[]; rule: string };
   temporalBasis: "current-catalogue-no-historical-terms";
   reason: string;
@@ -220,6 +283,7 @@ export function resolveFinancialProduct(input: FinancialProductInput): Financial
     catalogueVersion: FINANCIAL_PRODUCT_CATALOGUE_VERSION,
     resolverVersion: FINANCIAL_PRODUCT_RESOLVER_VERSION,
     origin: {
+      parserName: input.parserName ?? null,
       asOf: input.asOf ?? null,
       observedAt: input.observedAt ?? null,
       kind: input.kind,
@@ -246,8 +310,95 @@ export function resolveFinancialProduct(input: FinancialProductInput): Financial
     return stop(
       "円普通預金の取得範囲は分かりますが、残高別金利型などの具体的な商品区分を示す原本の根拠がありません。",
     );
+  if (input.sourceId === "sony-bank") {
+    claim.code = null;
+    const wallet = input.parserName === "sony-bank-wallet-history";
+    const json = input.parserName === "sony-bank-history-json";
+    const csv = input.parserName === "sony-bank-history-csv";
+    if (!wallet && !json && !csv)
+      return stop("検証済みの個別明細パーサーによる商品根拠がありません。");
+    claim.evidence.fields = ["parserName", "dataset", "sourceAccount", "rawLocator"];
+    let product: ProductDefinition | undefined;
+    if (wallet) {
+      if (
+        input.kind !== "transaction" ||
+        !/^wallet-history-\d{4}(0[1-9]|1[0-2])$/u.test(input.dataset) ||
+        input.sourceAccount !== "sony-bank:wallet" ||
+        !/^html:table=\d+,row=\d+$/u.test(input.rawLocator) ||
+        metadata.sourceView !== "wallet-monthly-html"
+      )
+        return stop("WALLET専用明細の取得範囲・行位置が一致していません。", true);
+      product = FINANCIAL_PRODUCTS.find((p) => p.id === "sony-bank:wallet");
+      claim.evidence.fields.push("extra._kogane.sourceView");
+    } else {
+      const dataset = (
+        json
+          ? /^(yen-history|foreign-history-([a-z]{3}))-page-\d{4}$/u
+          : /^(yen-history|foreign-history-([a-z]{3}))-csv$/u
+      ).exec(input.dataset);
+      if (!dataset || !["transaction", "balance"].includes(input.kind))
+        return stop("個別の普通預金履歴ではありません。集計や他の商品には対応付けません。");
+      const currency = dataset[1] === "yen-history" ? "JPY" : dataset[2]!.toUpperCase();
+      if (
+        !(SONY_CURRENCIES as readonly string[]).includes(currency) ||
+        (dataset[2] && currency === "JPY")
+      )
+        return stop("この通貨の普通預金履歴は対応対象外です。");
+      const ownCurrency = csv
+        ? row["通貨"]
+        : input.kind === "balance"
+          ? object(row.transaction).currencyCd
+          : row.currencyCd;
+      const locator = json
+        ? input.kind === "balance"
+          ? /^json:\$\.transactionHistInfo\[\d+\]\.transactionAftBal$/u
+          : /^json:\$\.transactionHistInfo\[\d+\]$/u
+        : input.kind === "balance"
+          ? /^csv:row=\d+,column=差引残高$/u
+          : /^csv:row=\d+$/u;
+      if (
+        input.currency !== currency ||
+        ownCurrency !== currency ||
+        input.sourceAccount !== `sony-bank:deposit:${currency}` ||
+        !locator.test(input.rawLocator) ||
+        (input.kind === "transaction" &&
+          metadata.sourceView !== (json ? "provider-json" : "official-csv"))
+      )
+        return stop("普通預金履歴の通貨・取得元口座・原本行が一致していません。", true);
+      claim.nativeCurrency = currency;
+      claim.evidence.fields.push(
+        "currency",
+        csv
+          ? "extra.通貨"
+          : input.kind === "balance"
+            ? "extra.transaction.currencyCd"
+            : "extra.currencyCd",
+      );
+      if (input.kind === "transaction") claim.evidence.fields.push("extra._kogane.sourceView");
+      product = FINANCIAL_PRODUCTS.find(
+        (p) => p.id === `sony-bank:ordinary-deposit:${currency.toLowerCase()}`,
+      );
+    }
+    const family = FINANCIAL_PRODUCT_FAMILIES.find((f) => f.id === product!.familyId)!;
+    return {
+      ...claim,
+      status: "identified",
+      productId: product!.id,
+      name: product!.name,
+      family: { id: family.id, name: family.name },
+      evidence: {
+        ...claim.evidence,
+        sourceIds: [...product!.sourceIds],
+        rule: wallet ? "sony-wallet-own-row-v1" : "sony-ordinary-history-own-row-v1",
+      },
+      reason: wallet
+        ? "専用明細の原本行からVisaデビット商品を特定しました。決済元の預金口座やカードのデザイン・種類は推定していません。"
+        : "検証済みの普通預金履歴パーサー・原本行・通貨・取得元口座を公式商品説明に対応付けました。過去の契約条件は示しません。",
+    };
+  }
   if (input.sourceId !== "sbi-shinsei-bank") return claim;
   if (
+    input.parserName !== "sbi-shinsei-top-balances-and-activity" ||
     input.dataset !== "top-accounts-balance-and-activity" ||
     !["balance", "valuation"].includes(input.kind) ||
     metadata.sourceView !== "top_overview"
@@ -356,6 +507,13 @@ export function validFinancialProductClaim(value: unknown): value is FinancialPr
     return false;
   const origin = object(row.origin);
   if (
+    origin.parserName !== null &&
+    (typeof origin.parserName !== "string" ||
+      origin.parserName.length < 1 ||
+      origin.parserName.length > 128)
+  )
+    return false;
+  if (
     [origin.asOf, origin.observedAt].some(
       (time) => time !== null && (typeof time !== "string" || time.length < 1 || time.length > 128),
     )
@@ -374,6 +532,13 @@ export function validFinancialProductClaim(value: unknown): value is FinancialPr
     return false;
   const evidence = object(row.evidence);
   const fields = [
+    "parserName",
+    "dataset",
+    "sourceAccount",
+    "currency",
+    "extra.通貨",
+    "extra.transaction.currencyCd",
+    "extra.currencyCd",
     "extra.productCode",
     "extra.currency",
     "extra.accountNo",
@@ -406,7 +571,23 @@ export function validFinancialProductClaim(value: unknown): value is FinancialPr
   const product = FINANCIAL_PRODUCTS.find((p) => p.id === row.productId);
   const family = object(row.family);
   const expectedFamily = FINANCIAL_PRODUCT_FAMILIES.find((f) => f.id === product?.familyId);
-  const expectedSources = [...(product?.sourceIds ?? []), "shinsei-powerflex"];
+  const shinsei = product?.institutionId === "sbi-shinsei-bank";
+  const wallet = product?.id === "sony-bank:wallet";
+  const expectedSources = [
+    ...(product?.sourceIds ?? []),
+    ...(shinsei ? ["shinsei-powerflex"] : []),
+  ];
+  const provenanceValid = shinsei
+    ? ["balance", "valuation"].includes(origin.kind) &&
+      origin.parserName === "sbi-shinsei-top-balances-and-activity" &&
+      evidence.rule === "shinsei-top-own-row-code-currency-v1"
+    : wallet
+      ? origin.kind === "transaction" &&
+        origin.parserName === "sony-bank-wallet-history" &&
+        evidence.rule === "sony-wallet-own-row-v1"
+      : ["balance", "transaction"].includes(origin.kind) &&
+        ["sony-bank-history-json", "sony-bank-history-csv"].includes(String(origin.parserName)) &&
+        evidence.rule === "sony-ordinary-history-own-row-v1";
   return (
     product !== undefined &&
     row.name === product.name &&
@@ -415,16 +596,34 @@ export function validFinancialProductClaim(value: unknown): value is FinancialPr
     row.nativeCurrency === product.nativeCurrency &&
     family.id === product.familyId &&
     family.name === expectedFamily?.name &&
-    ["balance", "valuation"].includes(origin.kind) &&
-    evidence.rule === "shinsei-top-own-row-code-currency-v1" &&
+    provenanceValid &&
     expectedSources.length === evidence.sourceIds.length &&
     expectedSources.every((id) => (evidence.sourceIds as unknown[]).includes(id)) &&
-    [
-      "extra.productCode",
-      "extra.currency",
-      "extra.accountNo",
-      "extra._kogane.sourceView",
-      "rawLocator",
-    ].every((f) => (evidence.fields as unknown[]).includes(f))
+    (shinsei
+      ? [
+          "extra.productCode",
+          "extra.currency",
+          "extra.accountNo",
+          "extra._kogane.sourceView",
+          "rawLocator",
+        ]
+      : [
+          "parserName",
+          "dataset",
+          "sourceAccount",
+          "rawLocator",
+          ...(wallet
+            ? ["extra._kogane.sourceView"]
+            : [
+                "currency",
+                origin.parserName === "sony-bank-history-csv"
+                  ? "extra.通貨"
+                  : origin.kind === "balance"
+                    ? "extra.transaction.currencyCd"
+                    : "extra.currencyCd",
+                ...(origin.kind === "transaction" ? ["extra._kogane.sourceView"] : []),
+              ]),
+        ]
+    ).every((f) => (evidence.fields as unknown[]).includes(f))
   );
 }
