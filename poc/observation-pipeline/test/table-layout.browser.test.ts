@@ -221,7 +221,7 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
           await page.locator(".balance-table").first().waitFor();
           await page.getByText("過去の残高・再解析の履歴", { exact: true }).click();
           for (const [name, columns] of [
-            ["最新の残高", 5],
+            ["集計・参考額・その他の記録", 5],
             ["残高の履歴", 6],
           ] as const) {
             const region = page.getByRole("region", { name, exact: true });
