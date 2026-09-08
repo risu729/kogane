@@ -1,4 +1,6 @@
 import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry.ts";
+import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity/index.ts";
+import { identitySweep, reviseIdentity } from "./identity-store.ts";
 import type {
   ArtifactMeta,
   Observation,
@@ -534,12 +536,87 @@ export async function sweep(env: Env, maxJobs = JOBS_PER_SWEEP) {
   return summary;
 }
 
+async function bounded(request: Request, limit: number): Promise<string | null> {
+  if (!request.body) return null;
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let size = 0,
+    text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) {
+        await reader.cancel();
+        return null;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } catch {
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export default {
   async scheduled(_event: ScheduledController, env: Env): Promise<void> {
     console.log(JSON.stringify({ event: "observation_sweep", ...(await sweep(env)) }));
+    console.log(
+      JSON.stringify({
+        event: "identity_sweep",
+        ...(await identitySweep(env.DB, resolveIdentity)),
+      }),
+    );
   },
   async fetch(request: Request, env: Env): Promise<Response> {
     const path = new URL(request.url).pathname;
+    if (request.method === "POST" && path === "/identity-sweep") {
+      const url = new URL(request.url);
+      const source = url.searchParams.get("source") ?? undefined;
+      if (source && !/^[a-z0-9-]{1,100}$/.test(source))
+        return new Response("Invalid source", { status: 400 });
+      const maxRuns = Number(url.searchParams.get("maxRuns") ?? "8");
+      if (!Number.isInteger(maxRuns) || maxRuns < 1 || maxRuns > 40)
+        return new Response("Invalid batch", { status: 400 });
+      return Response.json(await identitySweep(env.DB, resolveIdentity, maxRuns, source));
+    }
+    if (request.method === "POST" && path === "/identity-revise") {
+      // Internal service-binding endpoint; no public route. Bound request bytes.
+      const body = await bounded(request, 4096);
+      if (body === null) return new Response("Invalid request", { status: 400 });
+      let value: unknown;
+      try {
+        value = JSON.parse(body);
+      } catch {
+        return new Response("Invalid request", { status: 400 });
+      }
+      if (!value || typeof value !== "object" || Array.isArray(value))
+        return new Response("Invalid request", { status: 400 });
+      const v = value as Record<string, unknown>;
+      if (
+        (v.kind !== "account" && v.kind !== "instrument") ||
+        typeof v.referenceId !== "string" ||
+        typeof v.targetId !== "string" ||
+        typeof v.expectedRevision !== "number" ||
+        typeof v.reason !== "string"
+      )
+        return new Response("Invalid request", { status: 400 });
+      try {
+        await reviseIdentity(env.DB, {
+          kind: v.kind,
+          referenceId: v.referenceId,
+          targetId: v.targetId,
+          expectedRevision: v.expectedRevision,
+          reason: v.reason,
+        });
+      } catch {
+        return new Response("Revision conflict or invalid identity", { status: 409 });
+      }
+      return Response.json({ revised: true });
+    }
     if (request.method === "POST" && path === "/sweep")
       return Response.json(
         await sweep(
