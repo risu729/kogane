@@ -7,6 +7,8 @@ import type {
 } from "../../shared/organization-contract.ts";
 import { Badge, Nullable, ObservationLink, Panel, SourceAccount } from "./ui.tsx";
 import { AccountConnectionDetails } from "./account-connection.tsx";
+import { FinancialProductDetails, FinancialProductSummary } from "./financial-product.tsx";
+import { isCurrentFinancialProductClaim } from "../../shared/financial-products.ts";
 
 type Organization = ObservationOrganization | undefined;
 const STATUS: Record<IdentityStatus, string> = {
@@ -49,13 +51,20 @@ export function OrganizedSourceAccount({
   organization: Organization;
 }): ReactNode {
   const organized = organization?.state === "organized" ? organization.account : null;
+  const product = organization?.state === "organized" ? organization.product : undefined;
+  const productPrimary =
+    product?.status === "identified" &&
+    isCurrentFinancialProductClaim(product) &&
+    organized?.method !== "manual";
   return (
     <div className="organized-account">
+      {productPrimary ? <FinancialProductSummary claim={product} /> : null}
       {organized ? (
-        <div>
+        <div className={productPrimary ? "table-secondary" : undefined}>
           {organized.label} <Badge>{STATUS[organized.status]}</Badge>
         </div>
       ) : null}
+      {product && !productPrimary ? <FinancialProductSummary claim={product} /> : null}
       <SourceAccount source={source} account={account} />
       {organized?.connection ? (
         <AccountConnectionDetails connection={organized.connection} />
@@ -161,6 +170,12 @@ export function OrganizationPanel({ organization }: { organization: Organization
                 </Fragment>
               ))}
             </dl>
+            {organization.product ? (
+              <>
+                <h3>金融商品</h3>
+                <FinancialProductDetails claim={organization.product} />
+              </>
+            ) : null}
           </>
         )}
       </div>

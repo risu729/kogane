@@ -12,12 +12,40 @@ import { organizedFilterOptions } from "../src/organized-filter-options";
 
 beforeAll(seedRegistry);
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
-async function seed(rawAccount = "original-account") {
-  const acquisition = await seedRun({ count: 1, source: "other-test" });
+async function seed(
+  rawAccount = "original-account",
+  product?: { code: string; currency: string; padding?: string; sony?: boolean },
+) {
+  const source = product?.sony ? "sony-bank" : product ? "sbi-shinsei-bank" : "other-test";
+  if (product)
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO producer_sources(producer_id,source_id) VALUES ('evidence-test','sbi-shinsei-bank')",
+      ),
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO ingest_client_routes(ingest_client_id,producer_id,source_id) VALUES ('evidence-test','evidence-test','sbi-shinsei-bank')",
+      ),
+    ]);
+  const acquisition = await seedRun({
+    count: 1,
+    source,
+    dataset: product?.sony
+      ? "yen-history-page-0001"
+      : product
+        ? "top-accounts-balance-and-activity"
+        : undefined,
+  });
   const parse = await env.DB.prepare(
-    `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES (?,'fixture','1','2099','ok','[]') RETURNING id`,
+    `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES (?,?,'1','2099','ok','[]') RETURNING id`,
   )
-    .bind(acquisition.artifacts[0]!.id)
+    .bind(
+      acquisition.artifacts[0]!.id,
+      product?.sony
+        ? "sony-bank-history-json"
+        : product
+          ? "sbi-shinsei-top-balances-and-activity"
+          : "fixture",
+    )
     .first<{ id: number }>();
   const prefix = `fixture-${parse!.id}-`;
   const prepare = (sql: string) =>
@@ -38,15 +66,46 @@ async function seed(rawAccount = "original-account") {
       ],
       valuation: [",subject,metric,currency", ",'SYN','market-value','JPY'"],
     }[kind];
+    const productExtra =
+      product && (kind === "balance" || kind === "valuation")
+        ? {
+            accountNo: rawAccount.replace(/^sbi-shinsei:/u, ""),
+            productCode: product.code,
+            unrelatedProviderBody: product.padding ?? "not-product-evidence",
+            currency: product.currency,
+            ...(product.sony ? { transaction: { currencyCd: product.currency } } : {}),
+            _kogane: {
+              sourceView: "top_overview",
+              productCode: product.code,
+              subjectCurrency: product.currency,
+            },
+          }
+        : {};
+    const columns =
+      product && kind === "valuation"
+        ? [",subject,metric,currency", ",?,'yen_equivalent','JPY'"]
+        : product && kind === "balance"
+          ? [",metric,instrument", ",'account_balance',?"]
+          : extra;
     const row = await env.DB.prepare(
-      `INSERT INTO ${kind}_observations(parse_run_id,source_account,raw_locator,extra_json${extra[0]}) VALUES (?,?,'row','{}'${extra[1]}) RETURNING id`,
+      `INSERT INTO ${kind}_observations(parse_run_id,source_account,raw_locator,extra_json${columns[0]}) VALUES (?,?,?,?${columns[1]}) RETURNING id`,
     )
-      .bind(parse!.id, rawAccount)
+      .bind(
+        parse!.id,
+        rawAccount,
+        product?.sony
+          ? "json:$.transactionHistInfo[0].transactionAftBal"
+          : product
+            ? `json:$.responseParam.overview.responseParam.savingsDetails[0].${kind === "valuation" ? "yenEqui" : "balance"}`
+            : "row",
+        JSON.stringify(productExtra),
+        ...(product && (kind === "balance" || kind === "valuation") ? [product.currency] : []),
+      )
       .first<{ id: number }>();
     refs.push({ kind, id: row!.id });
   }
   await env.DB.batch([
-    prepare(`INSERT INTO source_accounts VALUES ('ref','other-test','evidence-test',?)`).bind(
+    prepare(`INSERT INTO source_accounts VALUES ('ref','${source}','evidence-test',?)`).bind(
       JSON.stringify([rawAccount, parse!.id]),
     ),
     prepare(`INSERT INTO accounts VALUES ('account','Initial account','cash','provider-local')`),
@@ -103,6 +162,92 @@ it("organizes all four kinds without replacing stored fields and preserves missi
       "position:999999",
     ),
   ).toEqual({ state: "unavailable", lineage: null, account: null, instruments: [] });
+});
+
+it("binds official products only to their own snapshot evidence, including native-currency valuations", async () => {
+  const { refs, acquisition, prepare } = await seed("sbi-shinsei:synthetic-product", {
+    code: "621",
+    currency: "USD",
+  });
+  await prepare(
+    `INSERT INTO account_mappings VALUES ('am2','ref',2,'account','manual','nickname',1,'2100','旅行用','identified')`,
+  ).run();
+  const result = await observationOrganizations(env.DB, refs);
+  for (const kind of ["balance", "valuation"] as const) {
+    const ref = refs.find((r) => r.kind === kind)!;
+    const organization = result.get(`${kind}:${ref.id}`)!;
+    expect(organization.account).toMatchObject({ label: "旅行用", method: "manual" });
+    expect(organization.product).toMatchObject({ status: "identified", nativeCurrency: "USD" });
+  }
+  for (const kind of ["transaction", "position"] as const) {
+    const ref = refs.find((r) => r.kind === kind)!;
+    expect(result.get(`${kind}:${ref.id}`)!.product).toMatchObject({ status: "unresolved" });
+  }
+  const response = await observationApi(
+    new Request(`https://fixture.test/api/observations/valuation/${refs[3]!.id}`),
+    env,
+    new URL(`https://fixture.test/api/observations/valuation/${refs[3]!.id}`),
+  );
+  const body = (await response!.json()) as {
+    organization: { product: { origin: { id: number } } };
+  };
+  expect(validApiResponse(`/api/observations/valuation/${refs[3]!.id}`, body)).toBe(true);
+  body.organization.product.origin.id += 1;
+  expect(validApiResponse(`/api/observations/valuation/${refs[3]!.id}`, body)).toBe(false);
+  const projection = await env.DB.prepare(ORGANIZATION_QUERY)
+    .bind(JSON.stringify(refs))
+    .all<{ product_extra: string }>();
+  expect(
+    projection.results.every((row) => !row.product_extra.includes("unrelatedProviderBody")),
+  ).toBe(true);
+  await env.DB.prepare(
+    `INSERT INTO fetch_run_annotations VALUES (?,'exclude_from_financial_views','fixture',0)`,
+  )
+    .bind(acquisition.id)
+    .run();
+  expect(
+    [...(await observationOrganizations(env.DB, refs)).values()].every(
+      (r) => r.product === undefined,
+    ),
+  ).toBe(true);
+});
+
+it("bounds product metadata before it leaves D1 and preserves oversized source evidence", async () => {
+  const { refs } = await seed("sbi-shinsei:synthetic-large", {
+    code: "x".repeat(9000),
+    currency: "JPY",
+    padding: "x".repeat(9000),
+  });
+  const result = await observationOrganizations(env.DB, refs);
+  for (const ref of refs.filter((row) => row.kind === "balance" || row.kind === "valuation")) {
+    expect(result.get(`${ref.kind}:${ref.id}`)!.product).toMatchObject({
+      status: "unresolved",
+      productId: null,
+    });
+    expect(result.get(`${ref.kind}:${ref.id}`)!.product!.reason).toContain("読み取り上限");
+  }
+  const row = await env.DB.prepare("SELECT extra_json FROM balance_observations WHERE id=?")
+    .bind(refs[1]!.id)
+    .first<{ extra_json: string }>();
+  expect(row!.extra_json).toContain("x".repeat(9000));
+  const harmless = await seed("sbi-shinsei:synthetic-large-context", {
+    code: "601",
+    currency: "JPY",
+    padding: "x".repeat(9000),
+  });
+  const projected = await observationOrganizations(env.DB, harmless.refs);
+  expect(projected.get(`balance:${harmless.refs[1]!.id}`)!.product!.status).toBe("identified");
+  const sony = await seed("sony-bank:deposit:JPY", {
+    code: "x".repeat(9000),
+    currency: "JPY",
+    sony: true,
+  });
+  const sonyResult = await observationOrganizations(env.DB, sony.refs);
+  expect(sonyResult.get(`balance:${sony.refs[1]!.id}`)!.product).toMatchObject({
+    status: "unresolved",
+    productId: null,
+  });
+  expect(sonyResult.get(`balance:${sony.refs[1]!.id}`)!.product!.reason).toContain("読み取り上限");
 });
 
 it("uses current manual claims but does not publish an unsealed newer identity run", async () => {

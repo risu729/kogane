@@ -5,6 +5,7 @@ import ingest from "../../raw-evidence/src/worker";
 import { seedRegistry, seedRun } from "./fixtures";
 import { identityQuery } from "../src/identity-api";
 import { organizedFilterOptions } from "../src/organized-filter-options";
+import { observationOrganizations } from "../src/observation-organization";
 import {
   preferredInstrumentNames,
   PREFERRED_INSTRUMENT_NAMES_SQL,
@@ -334,6 +335,21 @@ it("representative parse/run/pin cardinalities preserve current identity eligibi
   expect(filterTime).toBeLessThan(5000);
   console.log(
     JSON.stringify({ organizedFilterMs: filterTime, parseRuns: 6000, observations: 35000 }),
+  );
+  const observed = await env.DB.prepare(
+    "SELECT id FROM transaction_observations ORDER BY id LIMIT 500",
+  ).all<{ id: number }>();
+  started = performance.now();
+  const organized = await observationOrganizations(
+    env.DB,
+    observed.results.map(({ id }) => ({ kind: "transaction", id })),
+  );
+  const productTime = Math.round(performance.now() - started);
+  expect(organized.size).toBe(500);
+  expect([...organized.values()].every((row) => row.product?.status === "unresolved")).toBe(true);
+  expect(productTime).toBeLessThan(5000);
+  console.log(
+    JSON.stringify({ productOrganizationMs: productTime, page: 500, observations: 35000 }),
   );
   // A newer unsealed policy never replaces the sealed policy-2 evidence.
   expect(

@@ -31,6 +31,8 @@ export function IdentitiesPage(): ReactNode {
       </div>
       <p className="footnote">
         「取得元内で識別」は外部の銘柄台帳との照合完了を意味しません。この整理は重複除去や資産額の合算を行いません。
+        ここや口座フィルターの名称は口座の識別用で、金融商品の正式名称ではありません。
+        商品は時期によって変わるため、各記録の詳細でその記録に基づく判定を確認できます。
       </p>
       <QueryBoundary query={connections} label="取得経路の対応">
         {(data) => <AccountConnectionInventory connections={data.connections} />}

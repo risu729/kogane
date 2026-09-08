@@ -172,6 +172,9 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
         expect(await page.locator("main").innerText()).toContain(
           "重複除去や資産額の合算を行いません",
         );
+        expect(await page.locator("main").innerText()).toContain(
+          "金融商品の正式名称ではありません",
+        );
         const region = page.getByRole("region", { name: "口座の整理状況", exact: true });
         await region.focus();
         expect(await region.evaluate((el) => document.activeElement === el)).toBe(true);
