@@ -91,7 +91,9 @@ export function CollectionControls({ kind }: { kind: string }) {
                         key={JSON.stringify([row.source_id, row.source_account])}
                         value={JSON.stringify([row.source_id, row.source_account])}
                       >
+                        {row.display_name ? `${row.display_name} · ` : ""}
                         {row.source_account} · {row.source_id}
+                        {row.organization_ambiguous ? "（複数の整理区分）" : ""}
                       </option>
                     ))}
                 </select>

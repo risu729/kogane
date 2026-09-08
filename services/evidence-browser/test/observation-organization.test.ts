@@ -8,10 +8,11 @@ import {
 } from "../src/observation-organization";
 import { observationApi } from "../src/observation-api";
 import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
+import { organizedFilterOptions } from "../src/organized-filter-options";
 
 beforeAll(seedRegistry);
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
-async function seed() {
+async function seed(rawAccount = "original-account") {
   const acquisition = await seedRun({ count: 1, source: "other-test" });
   const parse = await env.DB.prepare(
     `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES (?,'fixture','1','2099','ok','[]') RETURNING id`,
@@ -38,15 +39,15 @@ async function seed() {
       valuation: [",subject,metric,currency", ",'SYN','market-value','JPY'"],
     }[kind];
     const row = await env.DB.prepare(
-      `INSERT INTO ${kind}_observations(parse_run_id,source_account,raw_locator,extra_json${extra[0]}) VALUES (?,'original-account','row','{}'${extra[1]}) RETURNING id`,
+      `INSERT INTO ${kind}_observations(parse_run_id,source_account,raw_locator,extra_json${extra[0]}) VALUES (?,?,'row','{}'${extra[1]}) RETURNING id`,
     )
-      .bind(parse!.id)
+      .bind(parse!.id, rawAccount)
       .first<{ id: number }>();
     refs.push({ kind, id: row!.id });
   }
   await env.DB.batch([
-    prepare(
-      `INSERT INTO source_accounts VALUES ('ref','other-test','evidence-test','["original-account",${parse!.id}]')`,
+    prepare(`INSERT INTO source_accounts VALUES ('ref','other-test','evidence-test',?)`).bind(
+      JSON.stringify([rawAccount, parse!.id]),
     ),
     prepare(`INSERT INTO accounts VALUES ('account','Initial account','cash','provider-local')`),
     prepare(
@@ -183,4 +184,80 @@ it("page lookups begin with wanted observation keys, not acquisition-wide scans"
     .all<{ detail: string }>();
   expect(result.results.some((r) => r.detail.includes("identity_observation_lookup"))).toBe(true);
   expect(result.results.some((r) => /^SCAN terminal/.test(r.detail))).toBe(false);
+});
+
+it("adds current filter labels without changing source filter values or inventing absent labels", async () => {
+  const raw = "filter-unique";
+  const { prepare } = await seed(raw);
+  const options = {
+    sources: ["other-test"],
+    instruments: ["JPY"],
+    metrics: [],
+    accounts: [
+      { source_id: "other-test", source_account: raw },
+      { source_id: "other-test", source_account: "unorganized-filter" },
+    ],
+  };
+  for (const kind of ["transactions", "balances", "positions"]) {
+    const result = await organizedFilterOptions(env.DB, kind, options);
+    expect(result.accounts[0]).toEqual({
+      ...options.accounts[0],
+      display_name: "整理された口座",
+      organization_ambiguous: false,
+    });
+    expect(result.accounts[1]).toEqual({
+      ...options.accounts[1],
+      display_name: null,
+      organization_ambiguous: false,
+    });
+    expect(result.sources).toEqual(options.sources);
+    expect(validApiResponse("/api/filter-options", result)).toBe(true);
+  }
+  expect(options.accounts[0]).not.toHaveProperty("display_name");
+  await env.DB.batch([
+    prepare(
+      `INSERT INTO account_mappings VALUES ('am2','ref',2,'account','manual','correction',1,'2100','手動の絞り込み名','identified')`,
+    ),
+  ]);
+  const updated = await organizedFilterOptions(env.DB, "transactions", options);
+  expect(updated.accounts[0]!.display_name).toBe("手動の絞り込み名");
+  expect(await organizedFilterOptions(env.DB, "artifacts", options)).toBe(options);
+  expect(await organizedFilterOptions(env.DB, "constructor", options)).toBe(options);
+});
+
+it("does not choose one account when a raw filter scope has multiple organized targets", async () => {
+  const raw = "ambiguous-filter";
+  const first = await seed(raw);
+  const second = await seed(raw);
+  const options = {
+    sources: [],
+    instruments: [],
+    metrics: [],
+    accounts: [{ source_id: "other-test", source_account: raw }],
+  };
+  const result = await organizedFilterOptions(env.DB, "transactions", options);
+  expect(result.accounts[0]).toEqual({
+    ...options.accounts[0],
+    display_name: null,
+    organization_ambiguous: true,
+  });
+  // Excluded acquisition evidence must not leave a stale ambiguity or name behind.
+  await env.DB.prepare(
+    "INSERT INTO fetch_run_annotations VALUES (?,'exclude_from_financial_views','fixture',0)",
+  )
+    .bind(second.acquisition.id)
+    .run();
+  expect((await organizedFilterOptions(env.DB, "transactions", options)).accounts[0]).toEqual({
+    ...options.accounts[0],
+    display_name: "整理された口座",
+    organization_ambiguous: false,
+  });
+  await env.DB.prepare(
+    "INSERT INTO fetch_run_annotations VALUES (?,'exclude_from_financial_views','fixture',0)",
+  )
+    .bind(first.acquisition.id)
+    .run();
+  expect(
+    (await organizedFilterOptions(env.DB, "transactions", options)).accounts[0]!.display_name,
+  ).toBeNull();
 });

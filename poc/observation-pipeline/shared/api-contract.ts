@@ -16,7 +16,12 @@ export interface ApiCoverage {
 
 export interface FilterOptions {
   sources: string[];
-  accounts: { source_id: string; source_account: string }[];
+  accounts: {
+    source_id: string;
+    source_account: string;
+    display_name?: string | null;
+    organization_ambiguous?: boolean;
+  }[];
   instruments: string[];
   metrics: string[];
 }

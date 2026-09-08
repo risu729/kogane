@@ -327,7 +327,14 @@ export function validApiResponse(path: string, value: unknown): boolean {
       Array.isArray(value.metrics) &&
       value.metrics.every(text) &&
       Array.isArray(value.accounts) &&
-      value.accounts.every((row) => record(row) && text(row.source_id) && text(row.source_account))
+      value.accounts.every(
+        (row) =>
+          record(row) &&
+          text(row.source_id) &&
+          text(row.source_account) &&
+          optional(nullableText)(row.display_name) &&
+          optional(boolean)(row.organization_ambiguous),
+      )
     );
   }
   if (record(value) && Object.hasOwn(value, "coverage")) {
