@@ -194,6 +194,25 @@ test("all queries compile against the complete production schema without compoun
       coveragePlan.some((s) => s.startsWith("SEARCH current_keys ") && s.includes("AUTOMATIC")),
     ).toBe(true);
     expect(coveragePlan.some((s) => s === "SCAN current_keys")).toBe(false);
+    const pinPlan = db
+      .query<{ detail: string }, []>(
+        `EXPLAIN QUERY PLAN ${IDENTITY_AUDIT_QUERIES.find((q) => q.name === "vpass_pins")!.sql}`,
+      )
+      .all()
+      .map((r) => r.detail);
+    for (const alias of ["v", "pin", "c"])
+      expect(
+        pinPlan.some((s) =>
+          s.startsWith(`SEARCH ${alias} USING AUTOMATIC COVERING INDEX (identity_run_id=?`),
+        ),
+      ).toBe(true);
+    expect(
+      pinPlan.some((s) =>
+        s.includes(
+          "SEARCH pin USING AUTOMATIC COVERING INDEX (identity_run_id=? AND card_token=?)",
+        ),
+      ),
+    ).toBe(true);
     expect(
       report
         .find((s) => s.name === "integrity")!
