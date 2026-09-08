@@ -117,6 +117,9 @@ describe.if(runnable)("balance meaning and evidence display", () => {
                   row(301, undefined, undefined, undefined, "0"),
                   row(302, undefined, undefined, undefined, "-1"),
                   { ...row(303), amount_minor: null, amount_text: "unknown" },
+                  { ...row(306), instrument: "EUR", amount_minor: null, amount_text: "0.00" },
+                  { ...row(307), instrument: "BTC", amount_minor: null, amount_text: "0.00000000" },
+                  { ...row(308), instrument: "BTC", amount_minor: null, amount_text: "0.00000001" },
                 ]
               : large
                 ? Array.from({ length: 60 }, (_, i) =>
@@ -129,6 +132,13 @@ describe.if(runnable)("balance meaning and evidence display", () => {
               ? [
                   { ...history[0], id: 304, amount_minor: "0" },
                   { ...history[1], id: 305, amount_minor: null },
+                  {
+                    ...history[0],
+                    id: 309,
+                    instrument: "CAD",
+                    amount_minor: null,
+                    amount_text: "0.00",
+                  },
                 ]
               : history,
           });
@@ -246,17 +256,21 @@ describe.if(runnable)("balance meaning and evidence display", () => {
       await page.goto(origin + "/balances");
       const current = page.getByRole("region", { name: "項目ごとの最新の記録", exact: true });
       await current.locator("tbody tr").first().waitFor();
-      expect(await current.locator("tbody tr").count()).toBe(3);
+      expect(await current.locator("tbody tr").count()).toBe(6);
       await page.getByLabel("残高0を除外", { exact: true }).check();
-      expect(await current.locator("tbody tr").count()).toBe(2);
+      expect(await current.locator("tbody tr").count()).toBe(3);
       expect(await current.locator('a[href="/observations/balance/301"]').count()).toBe(0);
       expect(await current.locator('a[href="/observations/balance/302"]').count()).toBe(1);
       expect(await current.locator('a[href="/observations/balance/303"]').count()).toBe(1);
+      expect(await current.locator('a[href="/observations/balance/306"]').count()).toBe(0);
+      expect(await current.locator('a[href="/observations/balance/307"]').count()).toBe(0);
+      expect(await current.locator('a[href="/observations/balance/308"]').count()).toBe(1);
       await page.getByText("過去の残高・再解析の履歴", { exact: true }).click();
       expect(await page.locator('a[href="/observations/balance/304"]').count()).toBe(0);
       expect(await page.locator('a[href="/observations/balance/305"]').count()).toBe(1);
+      expect(await page.locator('a[href="/observations/balance/309"]').count()).toBe(0);
       await page.getByLabel("残高0を除外", { exact: true }).uncheck();
-      expect(await current.locator("tbody tr").count()).toBe(3);
+      expect(await current.locator("tbody tr").count()).toBe(6);
     } finally {
       zeroCase = false;
       await page.close();
