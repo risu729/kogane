@@ -4,6 +4,7 @@ import {
 } from "../../../poc/observation-pipeline/shared/evidence-contract";
 import { authenticate } from "./auth";
 import { observationApi } from "./observation-api";
+import { identityApi } from "./identity-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
 import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw } from "./read";
 
@@ -21,6 +22,8 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   await authenticate(request, env);
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
+  const identityResponse = await catalogue(() => identityApi(request, env, url));
+  if (identityResponse) return identityResponse;
   const observationResponse = await catalogue(() => observationApi(request, env, url));
   if (observationResponse) return observationResponse;
   if (env.EVIDENCE_SOURCE_ID !== "sony-bank") throw new HttpError(503, "source_not_configured");
