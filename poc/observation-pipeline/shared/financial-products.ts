@@ -478,7 +478,7 @@ export function resolveFinancialProduct(input: FinancialProductInput): Financial
       "同じ原本行の商品コード・通貨・口座参照を、銀行公開UIのコード分類と公式商品説明に対応付けました。残高の有無や過去の契約条件は示しません。",
   };
 }
-/** Network boundary guard: claims must use this catalogue and keep unresolved results unlabelled. */
+/** Exact current-catalogue semantic guard, independent of forward-compatible transport validation. */
 export function validFinancialProductClaim(value: unknown): value is FinancialProductClaim {
   const row = object(value);
   if (
@@ -626,4 +626,110 @@ export function validFinancialProductClaim(value: unknown): value is FinancialPr
         ]
     ).every((f) => (evidence.fields as unknown[]).includes(f))
   );
+}
+
+/** A version check, not a substitute for either validation guard. */
+export function isCurrentFinancialProductClaim(claim: FinancialProductClaim): boolean {
+  return (
+    claim.catalogueVersion === FINANCIAL_PRODUCT_CATALOGUE_VERSION &&
+    claim.resolverVersion === FINANCIAL_PRODUCT_RESOLVER_VERSION
+  );
+}
+
+/** Accept catalogue revisions an older client cannot interpret, without trusting their product labels. */
+export function validFinancialProductClaimWire(value: unknown): value is FinancialProductClaim {
+  const row = object(value);
+  const text = (v: unknown, max: number): v is string =>
+    typeof v === "string" && v.length > 0 && v.length <= max && !/[\u0000-\u001f\u007f]/u.test(v);
+  const identifier = (v: unknown): v is string =>
+    text(v, 128) && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/u.test(v);
+  const keys = (v: Record<string, unknown>, allowed: string[]): boolean =>
+    Object.keys(v).every((key) => allowed.includes(key));
+  const named = (v: unknown): boolean => {
+    const item = object(v);
+    return keys(item, ["id", "name"]) && identifier(item.id) && text(item.name, 256);
+  };
+  const array = (v: unknown, max: number, valid: (item: unknown) => boolean): v is string[] =>
+    Array.isArray(v) && v.length <= max && v.every(valid) && new Set(v).size === v.length;
+  if (
+    !keys(row, [
+      "status",
+      "productId",
+      "name",
+      "institution",
+      "family",
+      "nativeCurrency",
+      "code",
+      "catalogueVersion",
+      "resolverVersion",
+      "origin",
+      "evidence",
+      "temporalBasis",
+      "reason",
+    ]) ||
+    typeof row.status !== "string" ||
+    !["identified", "unresolved", "conflict"].includes(row.status) ||
+    !identifier(row.catalogueVersion) ||
+    !identifier(row.resolverVersion) ||
+    row.temporalBasis !== "current-catalogue-no-historical-terms" ||
+    !text(row.reason, 1000) ||
+    (row.code !== null && codeText(row.code) === null) ||
+    (row.nativeCurrency !== null &&
+      (typeof row.nativeCurrency !== "string" || !/^[A-Z]{3}$/u.test(row.nativeCurrency))) ||
+    (row.institution !== null && !named(row.institution))
+  )
+    return false;
+  const origin = object(row.origin);
+  if (
+    !keys(origin, [
+      "kind",
+      "id",
+      "parseRunId",
+      "artifactId",
+      "rawLocator",
+      "asOf",
+      "observedAt",
+      "parserName",
+    ]) ||
+    typeof origin.kind !== "string" ||
+    !["transaction", "balance", "position", "valuation"].includes(origin.kind) ||
+    [origin.id, origin.parseRunId, origin.artifactId].some(
+      (id) => typeof id !== "number" || !Number.isSafeInteger(id) || id < 1,
+    ) ||
+    !text(origin.rawLocator, 1024) ||
+    [origin.asOf, origin.observedAt].some((time) => time !== null && !text(time, 128)) ||
+    (origin.parserName !== null && !identifier(origin.parserName))
+  )
+    return false;
+  const evidence = object(row.evidence);
+  if (
+    !keys(evidence, ["sourceIds", "fields", "rule"]) ||
+    !identifier(evidence.rule) ||
+    !array(evidence.sourceIds, 32, identifier) ||
+    !array(evidence.fields, 32, (field) => text(field, 128) && !field.includes("://"))
+  )
+    return false;
+  if (row.status === "identified") {
+    if (
+      !identifier(row.productId) ||
+      !text(row.name, 256) ||
+      !named(row.institution) ||
+      !named(row.family) ||
+      evidence.sourceIds.length === 0 ||
+      evidence.fields.length === 0
+    )
+      return false;
+  } else if (
+    row.productId !== null ||
+    row.name !== null ||
+    row.family !== null ||
+    evidence.sourceIds.length !== 0
+  )
+    return false;
+  if (
+    row.catalogueVersion === FINANCIAL_PRODUCT_CATALOGUE_VERSION &&
+    row.resolverVersion === FINANCIAL_PRODUCT_RESOLVER_VERSION
+  )
+    return validFinancialProductClaim(value);
+  return true;
 }

@@ -77,8 +77,67 @@ import {
   FINANCIAL_PRODUCT_SOURCES,
   resolveFinancialProduct,
   validFinancialProductClaim,
+  validFinancialProductClaimWire,
+  isCurrentFinancialProductClaim,
   type FinancialProductInput,
 } from "../shared/financial-products";
+test("wire guard preserves unknown revisions without weakening current semantic validation", () => {
+  const current = resolveFinancialProduct(input());
+  const future = {
+    ...current,
+    catalogueVersion: "2099-01-01.1",
+    resolverVersion: "own-row-v99",
+    productId: "future:product",
+    name: "Future product",
+    institution: { id: "future:bank", name: "Future institution" },
+    family: { id: "future:family", name: "Future family" },
+    evidence: {
+      sourceIds: ["future-official-definition"],
+      fields: ["extra.futureCode"],
+      rule: "future-rule-v1",
+    },
+  };
+  expect(validFinancialProductClaimWire(current)).toBe(true);
+  expect(isCurrentFinancialProductClaim(current)).toBe(true);
+  expect(validFinancialProductClaimWire(future)).toBe(true);
+  expect(isCurrentFinancialProductClaim(future)).toBe(false);
+  expect(validFinancialProductClaim(future)).toBe(false);
+  expect(validFinancialProductClaimWire({ ...current, name: "invented" })).toBe(false);
+  for (const bad of [
+    { ...future, status: ["identified"] },
+    { ...future, status: "unresolved" },
+    { ...future, productId: null },
+    { ...future, institution: null },
+    { ...future, family: null },
+    { ...future, name: "x".repeat(257) },
+    { ...future, reason: "x".repeat(1001) },
+    { ...future, catalogueVersion: "x".repeat(129) },
+    { ...future, code: "!" },
+    { ...future, origin: { ...future.origin, artifactId: 0 } },
+    { ...future, origin: { ...future.origin, parserName: "https://evil.example" } },
+    { ...future, evidence: { ...future.evidence, sourceIds: ["https://evil.example"] } },
+    { ...future, evidence: { ...future.evidence, sourceIds: ["a", "a"] } },
+    {
+      ...future,
+      evidence: {
+        ...future.evidence,
+        sourceIds: Array.from({ length: 33 }, (_, i) => `source-${i}`),
+      },
+    },
+    { ...future, evidence: { ...future.evidence, fields: [] } },
+    { ...future, evidence: { ...future.evidence, url: "https://evil.example" } },
+    { ...future, institution: { ...future.institution, url: "https://evil.example" } },
+  ])
+    expect(validFinancialProductClaimWire(bad)).toBe(false);
+  const unresolved = {
+    ...resolveFinancialProduct(input("999")),
+    catalogueVersion: "future",
+    resolverVersion: "future",
+  };
+  expect(validFinancialProductClaimWire(unresolved)).toBe(true);
+  expect(validFinancialProductClaimWire({ ...unresolved, status: "conflict" })).toBe(true);
+  expect(validFinancialProductClaimWire({ ...unresolved, name: "unsupported" })).toBe(false);
+});
 function input(
   code = "601",
   currency = "JPY",
