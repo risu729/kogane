@@ -89,7 +89,11 @@ CREATE TABLE fetch_artifacts(id INTEGER PRIMARY KEY,fetch_run_id INTEGER,source_
 CREATE TABLE raw_objects(sha256 TEXT PRIMARY KEY,byte_size INTEGER,blob_key TEXT);
 CREATE TABLE fetch_run_ranges(id INTEGER PRIMARY KEY,fetch_run_id INTEGER,range_kind TEXT,start_value TEXT,end_value TEXT);
 CREATE TABLE artifact_ranges(id INTEGER PRIMARY KEY,fetch_artifact_id INTEGER,range_kind TEXT,start_value TEXT,end_value TEXT);`);
-  for (const name of ["0017_observation_pipeline.sql", "0018_identity.sql"]) {
+  for (const name of [
+    "0017_observation_pipeline.sql",
+    "0018_identity.sql",
+    "0019_identity_seal_provenance.sql",
+  ]) {
     for (const sql of splitSql(readFileSync(new URL(name, migrationDir), "utf8")))
       await db.prepare(sql).run();
   }
@@ -172,7 +176,7 @@ test("a crash after the first page resumes without publishing partial results or
   const run = await identityKey("ir", [101, 1]);
   expect(await count("identity_observations", `identity_run_id='${run}'`)).toBe(100);
   expect(await count("current_identity_observations", "parse_run_id=101")).toBe(0);
-  expect(await identifyParse(db, parse(101), otherIdentity)).toBe(101);
+  expect(await identifyParse(db, parse(101), otherIdentity)).toBe(1);
   expect(await count("identity_observations", `identity_run_id='${run}'`)).toBe(101);
   expect(await count("current_identity_observations", "parse_run_id=101")).toBe(101);
 }, 30000);
@@ -335,7 +339,7 @@ test("sweep honors source bounds, skips errors, and publishes empty successful p
   await seed(106, 0, "v-point");
   await seed(107, 1, "v-point", false);
   const result = await identitySweep(db, otherIdentity, 8, "v-point");
-  expect(result).toEqual({ identifiedRuns: 1, identifiedObservations: 0 });
+  expect(result).toEqual({ processedRuns: 1, identifiedRuns: 1, identifiedObservations: 0 });
   expect(await count("identity_runs", "parse_run_id=107")).toBe(0);
   await expect(identitySweep(db, otherIdentity, 0)).rejects.toThrow("identity_batch_invalid");
   await expect(identifyParse(db, parse(100), otherIdentity, 0)).rejects.toThrow(
@@ -439,4 +443,49 @@ test("new policy revises label and status claims without changing stable entity 
       .prepare("SELECT label FROM current_instrument_mappings WHERE policy_version=12")
       .first<string>("label"),
   ).toBe("new synthetic claim");
+  const current = await db
+    .prepare(
+      "SELECT source_account_id,account_id,revision FROM current_account_mappings WHERE label='new synthetic claim'",
+    )
+    .first<{ source_account_id: string; account_id: string; revision: number }>();
+  await reviseIdentity(db, {
+    kind: "account",
+    referenceId: current!.source_account_id,
+    targetId: current!.account_id,
+    expectedRevision: current!.revision,
+    reason: "Confirm current identity",
+  });
+  expect(
+    await db
+      .prepare("SELECT label FROM current_account_mappings WHERE source_account_id=?")
+      .bind(current!.source_account_id)
+      .first<string>("label"),
+  ).toBe("new synthetic claim");
+});
+
+test("large runs advance durable row checkpoints without repeating completed resolver work", async () => {
+  await seed(112, 401);
+  let calls = 0;
+  const resolver: IdentityResolver = (input) => {
+    calls++;
+    return otherIdentity(input);
+  };
+  expect(await identifyParse(db, parse(112), resolver)).toBe(200);
+  expect(await count("current_identity_observations", "parse_run_id=112")).toBe(0);
+  expect(await identifyParse(db, parse(112), resolver)).toBe(200);
+  expect(await identifyParse(db, parse(112), resolver)).toBe(1);
+  expect(calls).toBe(401);
+  expect(await count("current_identity_observations", "parse_run_id=112")).toBe(401);
+});
+
+test("SQL cannot publish an empty identity run of a failed parse", async () => {
+  await seed(113, 0, "smbc-bank", false);
+  await db
+    .prepare("INSERT INTO identity_runs VALUES('failed-empty-identity',113,1,'synthetic')")
+    .run();
+  await expect(
+    db
+      .prepare("INSERT INTO identity_run_seals VALUES('failed-empty-identity',0,'synthetic')")
+      .run(),
+  ).rejects.toThrow();
 });

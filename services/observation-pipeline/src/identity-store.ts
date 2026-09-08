@@ -143,8 +143,11 @@ export async function identifyParse(
   parse: ParseIdentity,
   resolver: IdentityResolver,
   version = IDENTITY_POLICY_VERSION,
+  maxRows = 200,
 ) {
   if (!Number.isSafeInteger(version) || version < 1) throw new Error("identity_version_invalid");
+  if (!Number.isInteger(maxRows) || maxRows < 1 || maxRows > 200)
+    throw new Error("identity_row_budget_invalid");
   const verified = await db
     .prepare(`SELECT p.id,a.id AS artifact_id,a.source_id,r.producer_id,a.fetch_run_id FROM parse_runs p
     JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN financial_fetch_runs r ON r.id=a.fetch_run_id
@@ -178,9 +181,11 @@ export async function identifyParse(
     for (;;) {
       const rows = await db
         .prepare(
-          `SELECT id,source_account,${columns[kind]},extra_json FROM ${kind}_observations WHERE parse_run_id=? AND id>? ORDER BY id LIMIT 100`,
+          `SELECT id,source_account,${columns[kind]},extra_json FROM ${kind}_observations b WHERE parse_run_id=? AND id>?
+            AND NOT EXISTS(SELECT 1 FROM identity_observations c WHERE c.identity_run_id=? AND c.kind=? AND c.observation_id=b.id)
+            ORDER BY id LIMIT ?`,
         )
-        .bind(parse.id, after)
+        .bind(parse.id, after, runId, kind, Math.min(50, maxRows - total))
         .all<ObservationRow>();
       if (!rows.results.length) break;
       const observations: unknown[][] = [];
@@ -249,13 +254,16 @@ export async function identifyParse(
           WHERE NOT EXISTS(SELECT 1 FROM identity_instrument_uses u WHERE u.identity_observation_id=json_extract(x.value,'$[0]') AND u.role=json_extract(x.value,'$[1]'))`)
           .bind(JSON.stringify(uses)),
       ]);
+      // Persisted pages are the checkpoint. A later invocation skips them
+      // rather than starting a large parse from the beginning indefinitely.
+      if (total >= maxRows) return total;
     }
   }
   await db
     .prepare(
-      "INSERT INTO identity_run_seals SELECT ?,?,? WHERE NOT EXISTS(SELECT 1 FROM identity_run_seals WHERE identity_run_id=?)",
+      "INSERT INTO identity_run_seals SELECT ?,(SELECT count(*) FROM identity_observations WHERE identity_run_id=?),? WHERE NOT EXISTS(SELECT 1 FROM identity_run_seals WHERE identity_run_id=?)",
     )
-    .bind(runId, total, new Date().toISOString(), runId)
+    .bind(runId, runId, new Date().toISOString(), runId)
     .run();
   return total;
 }
@@ -271,16 +279,36 @@ export async function identitySweep(
     throw new Error("identity_batch_invalid");
   const candidates = await db
     .prepare(`SELECT p.id,a.id AS artifact_id,a.source_id,r.producer_id,a.fetch_run_id
-    FROM parse_runs p JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN financial_fetch_runs r ON r.id=a.fetch_run_id
-    WHERE p.status='ok' AND (?1 IS NULL OR a.source_id=?1) AND NOT EXISTS(
+    FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN financial_fetch_runs r ON r.id=a.fetch_run_id
+    JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
+    WHERE p.status='ok' AND f.status='success' AND f.failure_count=0 AND (?1 IS NULL OR a.source_id=?1) AND NOT EXISTS(
       SELECT 1 FROM identity_runs i JOIN identity_run_seals s ON s.identity_run_id=i.id
       WHERE i.parse_run_id=p.id AND i.policy_version>=?2)
     ORDER BY (p.superseded_by_parse_run_id IS NOT NULL),p.id LIMIT ?3`)
     .bind(source ?? null, IDENTITY_POLICY_VERSION, maxRuns)
     .all<ParseIdentity>();
   let observations = 0;
-  for (const parse of candidates.results) observations += await identifyParse(db, parse, resolver);
-  return { identifiedRuns: candidates.results.length, identifiedObservations: observations };
+  let processedRuns = 0,
+    identifiedRuns = 0;
+  for (const parse of candidates.results) {
+    if (observations >= 200) break;
+    observations += await identifyParse(
+      db,
+      parse,
+      resolver,
+      IDENTITY_POLICY_VERSION,
+      200 - observations,
+    );
+    processedRuns++;
+    const sealed = await db
+      .prepare(
+        "SELECT 1 FROM identity_runs r JOIN identity_run_seals s ON s.identity_run_id=r.id WHERE r.parse_run_id=? AND r.policy_version=?",
+      )
+      .bind(parse.id, IDENTITY_POLICY_VERSION)
+      .first();
+    if (sealed) identifiedRuns++;
+  }
+  return { processedRuns, identifiedRuns, identifiedObservations: observations };
 }
 
 /** Local operator corrections use expected revision to reject stale edits.
@@ -307,9 +335,30 @@ export async function reviseIdentity(
   const reference = account ? "source_account_id" : "identifier_id";
   const target = account ? "account_id" : "instrument_id";
   const entities = account ? "accounts" : "instruments";
+  const currentView = account ? "current_account_mappings" : "current_instrument_mappings";
+  const same = await db
+    .prepare(`SELECT label,status FROM ${currentView} WHERE ${reference}=? AND ${target}=?`)
+    .bind(change.referenceId, change.targetId)
+    .first<{ label: string; status: string }>();
+  const claims = same
+    ? [same]
+    : (
+        await db
+          .prepare(`SELECT DISTINCT label,status FROM ${currentView} WHERE ${target}=? LIMIT 2`)
+          .bind(change.targetId)
+          .all<{ label: string; status: string }>()
+      ).results;
+  if (claims.length > 1) throw new Error("identity_target_metadata_ambiguous");
+  const metadata =
+    claims[0] ??
+    (await db
+      .prepare(`SELECT label,status FROM ${entities} WHERE id=?`)
+      .bind(change.targetId)
+      .first<{ label: string; status: string }>());
+  if (!metadata) throw new Error("identity_target_missing");
   const result = await db
     .prepare(`INSERT INTO ${table}(id,${reference},revision,${target},method,reason,policy_version,created_at,label,status)
-    SELECT ?,?,?,?,'manual',?,?,?,e.label,e.status FROM ${entities} e WHERE e.id=? AND (SELECT max(revision) FROM ${table} WHERE ${reference}=?)=?`)
+    SELECT ?,?,?,?,'manual',?,?,?,?,? FROM ${entities} e WHERE e.id=? AND (SELECT max(revision) FROM ${table} WHERE ${reference}=?)=?`)
     .bind(
       crypto.randomUUID(),
       change.referenceId,
@@ -318,6 +367,8 @@ export async function reviseIdentity(
       change.reason,
       IDENTITY_POLICY_VERSION,
       new Date().toISOString(),
+      metadata.label,
+      metadata.status,
       change.targetId,
       change.referenceId,
       change.expectedRevision,
