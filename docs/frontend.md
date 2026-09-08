@@ -19,7 +19,10 @@ Continue the existing, lockfile-pinned stack:
 | Verification                               | Bun tests + Playwright in Chromium            |
 | Presentation                               | Shared React components and CSS design tokens |
 
-No additional component, state, or chart library is required for this scope.
+Evidence code previews use Shiki 4 with a lazy, fine-grained JSON/XML highlighter
+and its JavaScript regex engine. Tokens become escaped React text with fixed CSS
+classes; the content security policy does not need inline styles, script execution,
+or WebAssembly permissions. No additional component, state, or chart library is required.
 Navigation keeps the existing small History API router. Monetary values stay
 as decimal strings and use the shared exact formatter; provider text remains
 escaped React text. The frontend never reads SQLite or R2 directly.

@@ -182,12 +182,18 @@ export async function observationApi(
   const hash = /^\/api\/raw\/([a-f0-9]{64})$/.exec(path);
   if (hash) {
     // A hash is downloadable only when reachable through the sealed read view.
-    const row = await env.DB.prepare(`SELECT o.sha256, o.blob_key, o.byte_size
-      FROM raw_objects o WHERE o.sha256 = ? AND EXISTS (
-        SELECT 1 FROM observation_fetch_artifacts a WHERE a.sha256 = o.sha256
-      )`)
+    const row = await env.DB.prepare(`SELECT o.sha256, o.blob_key, o.byte_size,
+        a.artifact_key, a.mime AS declared_media_type
+      FROM raw_objects o JOIN observation_fetch_artifacts a ON a.sha256 = o.sha256
+      WHERE o.sha256 = ? ORDER BY a.id ASC LIMIT 1`)
       .bind(hash[1])
-      .first<{ sha256: string; blob_key: string; byte_size: number }>();
+      .first<{
+        sha256: string;
+        blob_key: string;
+        byte_size: number;
+        artifact_key: string;
+        declared_media_type: string | null;
+      }>();
     if (!row) throw new HttpError(404, "not_found");
     return raw(env.EVIDENCE, row, request.method === "HEAD");
   }

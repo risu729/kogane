@@ -94,9 +94,8 @@ describe("hosted synthetic demo", () => {
   it("serves synthetic raw files only as protected attachments and omits HEAD bytes", async () => {
     const response = await call(rawPath);
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-disposition")).toBe(
-      'attachment; filename="synthetic-evidence.bin"',
-    );
+    expect(response.headers.get("content-disposition")).toContain(rawPath.split("/").at(-1));
+    expect(response.headers.get("content-disposition")).toMatch(/filename="[a-f0-9]{64}\.json"/);
     expect(response.headers.get("content-security-policy")).toContain("sandbox");
     expect(response.headers.get("cache-control")).toBe("no-store");
     const item = (snapshot.responses as Record<string, { bodyBase64: string }>)[rawPath]!;

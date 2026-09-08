@@ -154,9 +154,67 @@ export async function getArtifact(
   return row;
 }
 
+type DownloadArtifact = Pick<ArtifactRow, "artifact_key" | "declared_media_type" | "sha256">;
+
+const mediaExtensions: Record<string, string> = {
+  "application/json": ".json",
+  "application/ld+json": ".json",
+  "application/pdf": ".pdf",
+  "application/xml": ".xml",
+  "application/zip": ".zip",
+  "application/gzip": ".gz",
+  "text/html": ".html",
+  "text/plain": ".txt",
+  "text/csv": ".csv",
+  "text/tab-separated-values": ".tsv",
+  "text/xml": ".xml",
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/webp": ".webp",
+  "image/svg+xml": ".svg",
+  "application/vnd.ms-excel": ".xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+};
+
+export function downloadDisposition(row: DownloadArtifact): string {
+  // Artifact keys are collector paths, not trusted filenames. Never interpret
+  // percent escapes as path syntax or allow header/control characters through.
+  let name = (row.artifact_key.split(/[\\/]/).at(-1) ?? "")
+    .toWellFormed()
+    .normalize("NFC")
+    .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069<>:"|?*]/g, "_")
+    .replace(/^[. ]+|[. ]+$/g, "");
+  if (!name) name = `artifact-${row.sha256.slice(0, 16)}`;
+  if (!/\.[^.]+$/.test(name)) {
+    const mediaType = row.declared_media_type?.split(";", 1)[0].trim().toLowerCase() ?? "";
+    name += Object.hasOwn(mediaExtensions, mediaType)
+      ? mediaExtensions[mediaType]
+      : mediaType.endsWith("+json")
+        ? ".json"
+        : "";
+  }
+  if (/^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\.|$)/i.test(name)) name = `_${name}`;
+  // Bound the header while retaining the original extension, including Unicode.
+  const characters = Array.from(name);
+  if (characters.length > 120) {
+    const dot = name.lastIndexOf(".");
+    const extension = dot > 0 && name.length - dot <= 20 ? name.slice(dot) : "";
+    name = characters.slice(0, 120 - Array.from(extension).length).join("") + extension;
+  }
+  const fallback = name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const encoded = encodeURIComponent(name).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
 export async function raw(
   bucket: R2Bucket,
-  row: Pick<ArtifactRow, "blob_key" | "sha256" | "byte_size">,
+  row: Pick<
+    ArtifactRow,
+    "blob_key" | "sha256" | "byte_size" | "artifact_key" | "declared_media_type"
+  >,
   head: boolean,
 ): Promise<Response> {
   let object: R2Object | R2ObjectBody | null;
@@ -190,7 +248,7 @@ export async function raw(
     headers: {
       "content-type": "application/octet-stream",
       "content-length": String(row.byte_size),
-      "content-disposition": 'attachment; filename="evidence.bin"',
+      "content-disposition": downloadDisposition(row),
       "content-security-policy": "default-src 'none'; sandbox; frame-ancestors 'none'",
     },
   });

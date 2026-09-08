@@ -354,6 +354,16 @@ describe("production observation API", () => {
       latest: { amount_minor: string }[];
     };
     expect(balances.latest.some((row) => row.amount_minor === "9007199254740993")).toBe(true);
+    for (const method of ["GET", "HEAD"]) {
+      const download = await call(`/api/raw/${run.artifacts[0].sha256}`, { method });
+      expect(download.status).toBe(200);
+      expect(download.headers.get("content-disposition")).toBe(
+        `attachment; filename="synthetic-0.json"; filename*=UTF-8''synthetic-0.json`,
+      );
+      expect(download.headers.get("content-type")).toBe("application/octet-stream");
+      if (method === "HEAD") expect(await download.text()).toBe("");
+      else await download.arrayBuffer();
+    }
     const staged =
       await env.DB.prepare(`INSERT INTO parse_runs (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
       VALUES (?,'fixture-parser','2','2026-09-07T00:00:00Z','pending','[]') RETURNING id`)
@@ -618,10 +628,15 @@ describe("authenticated read-only evidence", () => {
     expect(response.status).toBe(200);
     expect(new TextDecoder().decode(await response.arrayBuffer())).toBe(html);
     expect(response.headers.get("content-type")).toBe("application/octet-stream");
-    expect(response.headers.get("content-disposition")).toBe('attachment; filename="evidence.bin"');
+    expect(response.headers.get("content-disposition")).toBe(
+      `attachment; filename="synthetic-0.json"; filename*=UTF-8''synthetic-0.json`,
+    );
     expect(response.headers.get("content-security-policy")).toContain("sandbox");
     const head = await call(path, { method: "HEAD", environment });
     expect(head.status).toBe(200);
+    expect(head.headers.get("content-disposition")).toBe(
+      response.headers.get("content-disposition"),
+    );
     expect(await head.text()).toBe("");
     await call(`${prefix}/sources/sony-bank/runs`, { environment });
     await call(`${prefix}/runs/r_${run.id}/artifacts`, { environment });
