@@ -74,7 +74,7 @@ function BalancesBody({
     matchesSourceAccount(row, filters) &&
     (!instrument || row.instrument === instrument) &&
     (!metric || row.metric === metric) &&
-    (!hideZero || !isRecordedZero(row.amount_minor));
+    (!hideZero || !isRecordedZero(row.amount_minor, row.amount_text));
   const selectionKey = JSON.stringify([
     filters.source,
     filters.account,

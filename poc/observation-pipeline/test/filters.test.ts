@@ -14,6 +14,27 @@ describe("record filters preserve source and date boundaries", () => {
     for (const value of [null, "", "unknown", "0.00", "1", "-1", "9007199254740993"])
       expect(isRecordedZero(value)).toBe(false);
   });
+  test("text-only exact zero works without a currency scale and never rounds tiny amounts", () => {
+    for (const text of ["0", "0.00", "-0.00000000", "+0.0", " 0.000 ", ".0"])
+      expect(isRecordedZero(null, text)).toBe(true);
+    for (const text of [
+      null,
+      undefined,
+      "",
+      " ",
+      "unknown",
+      "0 EUR",
+      "0,00",
+      "0e0",
+      "0/1",
+      "0.0001",
+      "-0.0001",
+      `0.${"0".repeat(400)}1`,
+    ])
+      expect(isRecordedZero(null, text)).toBe(false);
+    expect(isRecordedZero("1", "0.00")).toBe(false);
+    expect(isRecordedZero("invalid", "0.00")).toBe(false);
+  });
   test("same account label at two sources remains two different accounts", () => {
     const rows = [
       { source_id: "bank-a", source_account: "普通" },
