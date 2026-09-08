@@ -4,6 +4,11 @@ import { Amount, Badge, EmptyState, Nullable, ObservationLink, QueryBoundary } f
 import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
 import { useViewState } from "../view-state.tsx";
+import {
+  OrganizedInstrumentContext,
+  OrganizedSourceAccount,
+  organizedInstrument,
+} from "../organization.tsx";
 export function PositionsPage(): ReactNode {
   const query = usePositions();
   return (
@@ -76,6 +81,7 @@ function PositionList({ entries }: { entries: PositionWithValuations[] }): React
 }
 function PositionCard({ entry }: { entry: PositionWithValuations }): ReactNode {
   const { position, valuations } = entry;
+  const security = organizedInstrument(position.organization, "security");
   const currencies = [...new Set(valuations.map((value) => value.currency))];
   return (
     <article className="position-card">
@@ -85,13 +91,24 @@ function PositionCard({ entry }: { entry: PositionWithValuations }): ReactNode {
           <Badge>{position.source_id}</Badge>
         </div>
         <h2 className="security-name">
-          <Nullable value={position.security_name} placeholder="銘柄名未記録" />
+          <Nullable value={security?.label || position.security_name} placeholder="銘柄名未記録" />
         </h2>
+        {security && security.label !== position.security_name ? (
+          <div className="table-secondary">
+            取得元の銘柄名: <Nullable value={position.security_name} />
+          </div>
+        ) : null}
         <div className="quantity">{position.quantity_text}</div>
         <div className="figure-metric">保有数量（取得元の表記）</div>
         <dl className="kv">
           <dt>口座</dt>
-          <dd>{position.source_account}</dd>
+          <dd>
+            <OrganizedSourceAccount
+              source={position.source_id}
+              account={position.source_account}
+              organization={position.organization}
+            />
+          </dd>
           <dt>市場</dt>
           <dd>
             <Nullable value={position.market} />
@@ -133,6 +150,20 @@ function PositionCard({ entry }: { entry: PositionWithValuations }): ReactNode {
                   .map((value) => (
                     <div className="figure" key={value.id}>
                       <div className="figure-metric">{value.metric}</div>
+                      <OrganizedSourceAccount
+                        source={value.source_id}
+                        account={value.source_account}
+                        organization={value.organization}
+                      />
+                      <OrganizedInstrumentContext
+                        organization={value.organization}
+                        role="security"
+                      />
+                      <OrganizedInstrumentContext
+                        organization={value.organization}
+                        role="unit"
+                        original={value.currency}
+                      />
                       <div className="figure-amount">
                         <Amount
                           minor={value.amount_minor}

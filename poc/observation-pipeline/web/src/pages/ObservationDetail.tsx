@@ -18,6 +18,7 @@ import {
 } from "../ui.tsx";
 import { KIND_LABELS } from "./ViewControls.tsx";
 import { displayLabel } from "../labels.ts";
+import { OrganizationPanel } from "../organization.tsx";
 const stringAt = (row: Record<string, unknown>, key: string): string | null =>
   typeof row[key] === "string" ? (row[key] as string) : null;
 const FIELD_LABELS: Record<string, string> = {
@@ -99,6 +100,7 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
           </div>
         </Panel>
       ) : null}
+      <OrganizationPanel organization={detail.organization} />
       <Panel id="stored-row" title="記録の内容">
         <div className="table-scroll">
           <table>

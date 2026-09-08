@@ -8,12 +8,12 @@ import {
   ObservationLink,
   Panel,
   QueryBoundary,
-  SourceAccount,
   StatusBadge,
 } from "../ui.tsx";
 import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
 import { useViewState } from "../view-state.tsx";
+import { OrganizedInstrumentContext, OrganizedSourceAccount } from "../organization.tsx";
 export function BalancesPage(): ReactNode {
   const query = useBalances();
   return (
@@ -187,10 +187,19 @@ function BalanceTable({
                   }
                 >
                   <td className="col-source">
-                    <SourceAccount source={row.source_id} account={row.source_account} />
+                    <OrganizedSourceAccount
+                      source={row.source_id}
+                      account={row.source_account}
+                      organization={row.organization}
+                    />
                   </td>
                   <td className="col-metric">
                     {row.metric} <Badge>{row.instrument}</Badge>
+                    <OrganizedInstrumentContext
+                      organization={row.organization}
+                      role="unit"
+                      original={row.instrument}
+                    />
                   </td>
                   <td className="col-amount num">
                     <Amount minor={row.amount_minor} unit={row.instrument} text={row.amount_text} />

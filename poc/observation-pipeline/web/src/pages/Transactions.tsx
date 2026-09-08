@@ -14,7 +14,6 @@ import {
   ObservationLink,
   Panel,
   QueryBoundary,
-  SourceAccount,
   TransactionStatus,
 } from "../ui.tsx";
 import {
@@ -26,6 +25,11 @@ import {
 } from "../filters.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
 import { useViewState } from "../view-state.tsx";
+import {
+  OrganizedInstrumentContext,
+  OrganizedSourceAccount,
+  organizedInstrument,
+} from "../organization.tsx";
 const features = tableFeatures({
   rowSortingFeature,
   sortedRowModel: createSortedRowModel(),
@@ -46,6 +50,7 @@ const columns = helper.columns([
     cell: (info) => (
       <>
         <Nullable value={info.row.original.description} />
+        <OrganizedInstrumentContext organization={info.row.original.organization} role="security" />
         {info.row.original.counterparty ? (
           <div className="dim">{info.row.original.counterparty}</div>
         ) : null}
@@ -57,9 +62,10 @@ const columns = helper.columns([
     header: "取得元・口座",
     sortFn: "text",
     cell: (info) => (
-      <SourceAccount
+      <OrganizedSourceAccount
         source={info.row.original.source_id}
         account={info.row.original.source_account}
+        organization={info.row.original.organization}
       />
     ),
   }),
@@ -127,6 +133,8 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
               row.external_id,
               row.source_id,
               row.source_account,
+              row.organization?.state === "organized" ? row.organization.account?.label : null,
+              organizedInstrument(row.organization, "security")?.label,
             ].some((value) =>
               value?.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
             )),
