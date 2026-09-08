@@ -23,6 +23,7 @@ import {
 } from "../evidence-ui.tsx";
 import { Link } from "../router.tsx";
 import { Badge, EmptyState, KvRow, Nullable, Panel, Sha } from "../ui.tsx";
+import { EvidencePreview } from "../EvidencePreview.tsx";
 
 const ROLES: Record<EvidenceRole, string> = {
   provider_response: "取得元の応答",
@@ -280,8 +281,16 @@ export function EvidenceArtifactPage({
                 </a>
               </p>
               <p className="dim">
-                保存されたバイト列を取得します。本文はこの画面で開きません。収集側が生成・加工したファイルは、取得元の未加工データとは異なります。
+                保存されたバイト列を取得します。収集側が生成・加工したファイルは、取得元の未加工データとは異なります。
               </p>
+              <EvidencePreview
+                key={`${runId}:${artifactId}:${data.artifact.sha256}`}
+                url={evidenceRawUrl(runId, artifactId)}
+                artifactKey={data.artifact.artifactKey}
+                mediaType={data.artifact.declaredMediaType}
+                byteSize={data.artifact.byteSize}
+                sha256={data.artifact.sha256}
+              />
             </div>
           </Panel>
           <RunSummary run={data.run} sources={sources} />

@@ -1,6 +1,7 @@
 import snapshot from "../demo-snapshot.json";
 import { authenticate } from "./auth";
 import { HttpError, json, secureResponse } from "./http";
+import { downloadDisposition } from "./read";
 
 type DemoEnv = Pick<Env, "ASSETS" | "ACCESS_ISSUER" | "ACCESS_AUDIENCE">;
 const responses: Record<string, { status: number; contentType: string; bodyBase64: string }> =
@@ -26,7 +27,15 @@ export default {
         if (!item) throw new HttpError(404, "not_found");
         const headers = new Headers({ "content-type": item.contentType });
         if (url.pathname.startsWith("/api/raw/")) {
-          headers.set("content-disposition", 'attachment; filename="synthetic-evidence.bin"');
+          const sha256 = url.pathname.split("/").at(-1)!;
+          headers.set(
+            "content-disposition",
+            downloadDisposition({
+              artifact_key: sha256,
+              declared_media_type: item.contentType,
+              sha256,
+            }),
+          );
           headers.set("content-security-policy", "default-src 'none'; sandbox");
         }
         response = new Response(
