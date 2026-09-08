@@ -269,7 +269,11 @@ describe.if(runnable)("evidence browser in a real browser", () => {
           "今回の記録に含まれません",
         );
         expect(await page.locator('tbody a[href^="/observations/"]').count()).toBe(0);
-        expect(await page.locator("tbody").first().innerText()).toContain("ありません");
+        const emptyRegion =
+          path === "balances"
+            ? page.getByRole("region", { name: "項目ごとの最新の記録", exact: true })
+            : page.locator("tbody").first();
+        expect(await emptyRegion.innerText()).toContain("ありません");
         await page.getByRole("button", { name: "条件をクリア", exact: true }).click();
         expect(await source.inputValue()).toBe("");
         expect(await account.inputValue()).toBe("");
