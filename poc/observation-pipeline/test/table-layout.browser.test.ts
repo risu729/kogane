@@ -393,9 +393,9 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
             ]);
             await page.keyboard.press("Enter");
             expect(await table.locator("tbody .col-date").allTextContents()).toEqual([
-              "2026-09-08",
-              "2026-09-07",
-              "2026-09-06",
+              "記録の基準日2026-09-08",
+              "記録の基準日2026-09-07",
+              "記録の基準日2026-09-06",
             ]);
           }
           const screenshots = process.env["UI_REVIEW_SCREENSHOTS"];
