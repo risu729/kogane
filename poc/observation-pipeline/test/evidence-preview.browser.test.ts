@@ -170,7 +170,13 @@ describe.if(runnable)("inline original preview under production CSP", () => {
     const page = await open(json, "application/json");
     await page.getByRole("button", { name: "内容を表示", exact: true }).click();
     await page.locator(".preview-code span[class]").first().waitFor();
+    const formatted = await page.locator(".preview-code").textContent();
+    expect(formatted).toContain('\n  "');
+    expect(formatted).toContain("9007199254740993123456789");
+    await page.getByLabel("JSONを整形して表示").uncheck();
     expect(await page.locator(".preview-code").textContent()).toBe(json);
+    await page.getByLabel("JSONを整形して表示").check();
+    expect(await page.locator(".preview-code").textContent()).toBe(formatted);
     await page.setViewportSize({ width: 390, height: 844 });
     await screenshot(page, "preview-json-mobile");
     expect(

@@ -1,4 +1,5 @@
-import { Component, Suspense, lazy, useId, useState, type ReactNode } from "react";
+import { Component, Suspense, lazy, useId, useMemo, useState, type ReactNode } from "react";
+import { prettyJson } from "./json-format.ts";
 import { useQuery } from "@tanstack/react-query";
 import { fetchPreview, previewLanguage, PREVIEW_LIMIT } from "./preview-fetch.ts";
 import { QueryBoundary } from "./ui.tsx";
@@ -77,6 +78,7 @@ function PreviewContent({
 }: PreviewProps & { language: "json" | "xml" | "text" }): ReactNode {
   const instanceId = useId();
   const [wrap, setWrap] = useState(true);
+  const [pretty, setPretty] = useState(true);
   // Mount only after an explicit open. Closing removes the observer, aborts an
   // in-flight fetch and garbage-collects private bytes immediately.
   const query = useQuery({
@@ -85,16 +87,32 @@ function PreviewContent({
     gcTime: 0,
     retry: false,
   });
+  const formatted = useMemo(
+    () => (language === "json" && query.data !== undefined ? prettyJson(query.data) : null),
+    [language, query.data],
+  );
   return (
     <QueryBoundary query={query} label="原本の内容">
-      {(text) => {
+      {(original) => {
+        const text = pretty && formatted !== null ? formatted : original;
         const highlight =
           language !== "text" &&
           byteSize <= HIGHLIGHT_LIMIT &&
+          text.length <= HIGHLIGHT_LIMIT &&
           text.split("\n", HIGHLIGHT_LINE_LIMIT + 1).length <= HIGHLIGHT_LINE_LIMIT;
         return (
           <>
             <div className="preview-toolbar">
+              {language === "json" && formatted !== null ? (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={pretty}
+                    onChange={(event) => setPretty(event.target.checked)}
+                  />
+                  JSONを整形して表示
+                </label>
+              ) : null}
               <p className="muted">
                 保存された内容をテキストとして表示しています。HTMLは実行されません。
               </p>
@@ -107,6 +125,15 @@ function PreviewContent({
                 長い行を折り返す
               </label>
             </div>
+            {language === "json" ? (
+              <p className="muted">
+                {formatted === null
+                  ? "このJSONは整形できないため、保存された内容をそのまま表示しています。"
+                  : pretty
+                    ? "改行と字下げを整えています。ダウンロードする原本は変わりません。"
+                    : "保存された内容をそのまま表示しています。"}
+              </p>
+            ) : null}
             {language !== "text" && !highlight ? (
               <p className="muted">大きなデータのため、色分けせずに全文を表示しています。</p>
             ) : null}
