@@ -22,6 +22,7 @@ interface OrganizationRow {
   product_currency: string | null;
   product_subject: string | null;
   product_extra: string;
+  product_metadata_oversized: number;
   product_as_of: string | null;
   product_observed_at: string | null;
   source: string;
@@ -50,6 +51,26 @@ interface OrganizationRow {
   value: string;
 }
 
+// Do not widen a 500-row list into a bulk download of every provider body.
+// These fixed paths retain JSON types and missing fields (not synthetic nulls).
+// Unsupported sources need no body; oversized supported metadata fails closed.
+const PRODUCT_EXTRA = "coalesce(b.extra_json,v.extra_json,t.extra_json,h.extra_json,'{}')";
+const PRODUCT_METADATA_LIMIT = 8192;
+function productProjection(path: string, keys: readonly string[]): string {
+  return `(SELECT json_group_object(j.key,CASE j.type
+    WHEN 'object' THEN json(j.value) WHEN 'array' THEN json(j.value)
+    WHEN 'true' THEN json('true') WHEN 'false' THEN json('false') ELSE j.value END)
+    FROM json_each(${PRODUCT_EXTRA},'${path}') j WHERE j.key IN (${keys.map((key) => `'${key}'`).join(",")}))`;
+}
+const PRODUCT_PROJECTED = `json_set(
+  ${productProjection("$", ["productCode", "currency", "accountNo", "currencyCd", "通貨"])},
+  '$._kogane',json(${productProjection("$._kogane", ["sourceView", "productCode", "subjectCurrency"])}),
+  '$.transaction',json(${productProjection("$.transaction", ["currencyCd"])}))`;
+const PRODUCT_SUPPORTED = "sa.source_id IN ('sbi-shinsei-bank','sony-bank')";
+const PRODUCT_METADATA = `CASE WHEN ${PRODUCT_SUPPORTED} THEN
+  CASE WHEN length(${PRODUCT_PROJECTED})<=${PRODUCT_METADATA_LIMIT} THEN ${PRODUCT_PROJECTED} ELSE '{}' END
+  ELSE '{}' END`;
+
 // Start with the already-authorized bounded page. Keyed observation lookup avoids
 // rescanning the current catalogue per row. Historical B rows can display their
 // latest eligible sealed interpretation, explicitly marked historical.
@@ -74,7 +95,8 @@ SELECT o.kind,o.observation_id,o.historical,o.parse_run_id,o.parser_name,o.artif
  v.subject product_subject,
  coalesce(b.as_of,v.as_of,t.as_of,h.as_of) product_as_of,
  coalesce(b.observed_at,v.observed_at,t.observed_at,h.observed_at) product_observed_at,
- coalesce(b.extra_json,v.extra_json,t.extra_json,h.extra_json,'{}') product_extra,
+ ${PRODUCT_METADATA} product_extra,
+ CASE WHEN ${PRODUCT_SUPPORTED} THEN length(${PRODUCT_PROJECTED})>${PRODUCT_METADATA_LIMIT} ELSE 0 END product_metadata_oversized,
  sa.source_id source,sa.producer_id producer,json_extract(sa.reference_json,'$[0]') source_account,
  am.source_account_id account_reference,am.account_id account_target,
  am.label account_label,am.status account_status,am.revision account_revision,
@@ -161,6 +183,14 @@ export async function observationOrganizations(
           },
           instruments: [],
         };
+        if (row.product_metadata_oversized && organization.product) {
+          organization.product = {
+            ...organization.product,
+            status: "unresolved",
+            reason:
+              "商品判定用の追加情報が読み取り上限を超えたため未特定です。保存原本は変更していません。",
+          };
+        }
         output.set(key, organization);
       }
       if (row.role && row.instrument_reference)

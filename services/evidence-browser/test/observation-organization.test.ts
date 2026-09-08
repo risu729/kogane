@@ -12,7 +12,10 @@ import { organizedFilterOptions } from "../src/organized-filter-options";
 
 beforeAll(seedRegistry);
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
-async function seed(rawAccount = "original-account", product?: { code: string; currency: string }) {
+async function seed(
+  rawAccount = "original-account",
+  product?: { code: string; currency: string; padding?: string },
+) {
   const source = product ? "sbi-shinsei-bank" : "other-test";
   if (product)
     await env.DB.batch([
@@ -60,6 +63,7 @@ async function seed(rawAccount = "original-account", product?: { code: string; c
         ? {
             accountNo: rawAccount.replace(/^sbi-shinsei:/u, ""),
             productCode: product.code,
+            unrelatedProviderBody: product.padding ?? "not-product-evidence",
             currency: product.currency,
             _kogane: {
               sourceView: "top_overview",
@@ -173,8 +177,17 @@ it("binds official products only to their own snapshot evidence, including nativ
     env,
     new URL(`https://fixture.test/api/observations/valuation/${refs[3]!.id}`),
   );
+  const body = (await response!.json()) as {
+    organization: { product: { origin: { id: number } } };
+  };
+  expect(validApiResponse(`/api/observations/valuation/${refs[3]!.id}`, body)).toBe(true);
+  body.organization.product.origin.id += 1;
+  expect(validApiResponse(`/api/observations/valuation/${refs[3]!.id}`, body)).toBe(false);
+  const projection = await env.DB.prepare(ORGANIZATION_QUERY)
+    .bind(JSON.stringify(refs))
+    .all<{ product_extra: string }>();
   expect(
-    validApiResponse(`/api/observations/valuation/${refs[3]!.id}`, await response!.json()),
+    projection.results.every((row) => !row.product_extra.includes("unrelatedProviderBody")),
   ).toBe(true);
   await env.DB.prepare(
     `INSERT INTO fetch_run_annotations VALUES (?,'exclude_from_financial_views','fixture',0)`,
@@ -186,6 +199,33 @@ it("binds official products only to their own snapshot evidence, including nativ
       (r) => r.product === undefined,
     ),
   ).toBe(true);
+});
+
+it("bounds product metadata before it leaves D1 and preserves oversized source evidence", async () => {
+  const { refs } = await seed("sbi-shinsei:synthetic-large", {
+    code: "x".repeat(9000),
+    currency: "JPY",
+    padding: "x".repeat(9000),
+  });
+  const result = await observationOrganizations(env.DB, refs);
+  for (const ref of refs.filter((row) => row.kind === "balance" || row.kind === "valuation")) {
+    expect(result.get(`${ref.kind}:${ref.id}`)!.product).toMatchObject({
+      status: "unresolved",
+      productId: null,
+    });
+    expect(result.get(`${ref.kind}:${ref.id}`)!.product!.reason).toContain("読み取り上限");
+  }
+  const row = await env.DB.prepare("SELECT extra_json FROM balance_observations WHERE id=?")
+    .bind(refs[1]!.id)
+    .first<{ extra_json: string }>();
+  expect(row!.extra_json).toContain("x".repeat(9000));
+  const harmless = await seed("sbi-shinsei:synthetic-large-context", {
+    code: "601",
+    currency: "JPY",
+    padding: "x".repeat(9000),
+  });
+  const projected = await observationOrganizations(env.DB, harmless.refs);
+  expect(projected.get(`balance:${harmless.refs[1]!.id}`)!.product!.status).toBe("identified");
 });
 
 it("uses current manual claims but does not publish an unsealed newer identity run", async () => {

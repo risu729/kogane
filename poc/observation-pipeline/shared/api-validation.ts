@@ -3,7 +3,7 @@
 import { isDecimalMinorUnit } from "../src/money.ts";
 import { validIdentityResponse } from "./identity-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
-import { validFinancialProductClaim } from "./financial-products.ts";
+import { validFinancialProductClaimWire } from "./financial-products.ts";
 import type {
   ObservationOrganization,
   OrganizedAccount,
@@ -73,7 +73,7 @@ const organizationAccountFields = {
   reason: text,
 } satisfies Shape<Omit<OrganizedAccount, "connection">>;
 const organizationShape = object<ObservationOrganization>({
-  product: optional(validFinancialProductClaim),
+  product: optional(validFinancialProductClaimWire),
   state: literal("organized", "unavailable"),
   lineage: nullable(literal("current", "historical")),
   account: nullable(
@@ -132,21 +132,34 @@ const metadata = object<ApiMetadata>({
     liveCollectors: literal(false),
   }),
 });
-const transaction = object<TransactionRow>({
-  organization: optional(organization),
-  id: identifier,
-  source_id: text,
-  source_account: text,
-  as_of: nullableText,
-  amount_minor: minorUnit,
-  amount_text: nullableText,
-  currency: nullableText,
-  description: nullableText,
-  counterparty: nullableText,
-  external_id: nullableText,
-  status: nullableText,
-  parser: text,
-});
+function ownProduct<T extends { id: number; organization?: ObservationOrganization }>(
+  kind: ObservationKind,
+  shape: Check<T>,
+): Check<T> {
+  return (value): value is T =>
+    shape(value) &&
+    (value.organization?.product === undefined ||
+      (value.organization.product.origin.kind === kind &&
+        value.organization.product.origin.id === value.id));
+}
+const transaction = ownProduct(
+  "transaction",
+  object<TransactionRow>({
+    organization: optional(organization),
+    id: identifier,
+    source_id: text,
+    source_account: text,
+    as_of: nullableText,
+    amount_minor: minorUnit,
+    amount_text: nullableText,
+    currency: nullableText,
+    description: nullableText,
+    counterparty: nullableText,
+    external_id: nullableText,
+    status: nullableText,
+    parser: text,
+  }),
+);
 const balanceFields = {
   organization: optional(organization),
   id: identifier,
@@ -160,39 +173,48 @@ const balanceFields = {
   observed_at: nullableText,
   parser: text,
 } satisfies Shape<BalanceRow>;
-const balance = object<BalanceRow>(balanceFields);
-const balanceHistory = object<BalanceHistoryRow>({
-  ...balanceFields,
-  superseded_by_parse_run_id: nullableIdentifier,
-  parse_status: text,
-});
-const position = object<PositionRow>({
-  organization: optional(organization),
-  id: identifier,
-  source_id: text,
-  source_account: text,
-  security_code: text,
-  security_name: nullableText,
-  market: nullableText,
-  quantity_text: text,
-  quantity_scale: number,
-  currency: nullableText,
-  as_of: nullableText,
-  parser: text,
-});
-const valuation = object<ValuationRow>({
-  organization: optional(organization),
-  id: identifier,
-  source_id: text,
-  source_account: text,
-  subject: text,
-  metric: text,
-  amount_minor: minorUnit,
-  amount_text: nullableText,
-  currency: text,
-  as_of: nullableText,
-  parser: text,
-});
+const balance = ownProduct("balance", object<BalanceRow>(balanceFields));
+const balanceHistory = ownProduct(
+  "balance",
+  object<BalanceHistoryRow>({
+    ...balanceFields,
+    superseded_by_parse_run_id: nullableIdentifier,
+    parse_status: text,
+  }),
+);
+const position = ownProduct(
+  "position",
+  object<PositionRow>({
+    organization: optional(organization),
+    id: identifier,
+    source_id: text,
+    source_account: text,
+    security_code: text,
+    security_name: nullableText,
+    market: nullableText,
+    quantity_text: text,
+    quantity_scale: number,
+    currency: nullableText,
+    as_of: nullableText,
+    parser: text,
+  }),
+);
+const valuation = ownProduct(
+  "valuation",
+  object<ValuationRow>({
+    organization: optional(organization),
+    id: identifier,
+    source_id: text,
+    source_account: text,
+    subject: text,
+    metric: text,
+    amount_minor: minorUnit,
+    amount_text: nullableText,
+    currency: text,
+    as_of: nullableText,
+    parser: text,
+  }),
+);
 const positionWithValuations = object<PositionWithValuations>({
   position,
   valuations: array(valuation),
@@ -388,7 +410,13 @@ export function validApiResponse(path: string, value: unknown): boolean {
       identifier(id) &&
       observation(value) &&
       value.kind === path.split("/")[3] &&
-      value.row.id === id
+      value.row.id === id &&
+      (value.organization?.product === undefined ||
+        (value.organization.product.origin.kind === value.kind &&
+          value.organization.product.origin.id === id &&
+          (!value.provenance ||
+            (value.organization.product.origin.parseRunId === value.provenance.parse_run_id &&
+              value.organization.product.origin.artifactId === value.provenance.artifact_id))))
     );
   }
   return false;
