@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { otherIdentity as providerIdentity } from "../../../poc/observation-pipeline/src/identity/other.ts";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import type {
   IdentityInput,
@@ -7,6 +8,7 @@ import type {
 } from "../../../poc/observation-pipeline/src/identity/types.ts";
 import {
   identifyParse,
+  BASE_IDENTITY_POLICY_VERSION,
   identityKey,
   identitySweep,
   reviseIdentity,
@@ -79,7 +81,8 @@ beforeAll(async () => {
   await db.exec(`CREATE TABLE sources(id TEXT PRIMARY KEY,provider TEXT);
 CREATE TABLE producers(id TEXT PRIMARY KEY);
 CREATE TABLE fetch_runs(id INTEGER PRIMARY KEY,source_id TEXT,acquisition_session_id INTEGER,producer_id TEXT,first_recorded_at_ms INTEGER);
-CREATE VIEW financial_fetch_runs AS SELECT * FROM fetch_runs WHERE source_id<>'kogane-synthetic';
+CREATE TABLE fetch_run_annotations(fetch_run_id INTEGER,annotation_kind TEXT);
+CREATE VIEW financial_fetch_runs AS SELECT * FROM fetch_runs WHERE source_id<>'kogane-synthetic' AND NOT EXISTS(SELECT 1 FROM fetch_run_annotations a WHERE a.fetch_run_id=fetch_runs.id AND a.annotation_kind='exclude_from_financial_views');
 CREATE TABLE acquisition_sessions(id INTEGER PRIMARY KEY,external_session_id TEXT);
 CREATE TABLE fetch_run_seals(fetch_run_id INTEGER);
 CREATE TABLE fetch_run_reports(fetch_run_id INTEGER,report_kind TEXT,normalized_outcome TEXT,started_at_ms INTEGER,completed_at_ms INTEGER);
@@ -89,10 +92,17 @@ CREATE TABLE fetch_artifacts(id INTEGER PRIMARY KEY,fetch_run_id INTEGER,source_
 CREATE TABLE raw_objects(sha256 TEXT PRIMARY KEY,byte_size INTEGER,blob_key TEXT);
 CREATE TABLE fetch_run_ranges(id INTEGER PRIMARY KEY,fetch_run_id INTEGER,range_kind TEXT,start_value TEXT,end_value TEXT);
 CREATE TABLE artifact_ranges(id INTEGER PRIMARY KEY,fetch_artifact_id INTEGER,range_kind TEXT,start_value TEXT,end_value TEXT);`);
+  await db.exec(`ALTER TABLE fetch_runs ADD COLUMN source_run_key TEXT DEFAULT 'default';
+ALTER TABLE acquisition_sessions ADD COLUMN producer_id TEXT;
+ALTER TABLE acquisition_sessions ADD COLUMN external_id_namespace TEXT;
+ALTER TABLE fetch_units ADD COLUMN unit_kind TEXT DEFAULT 'card';
+ALTER TABLE fetch_artifacts ADD COLUMN format_id TEXT;
+ALTER TABLE fetch_artifacts ADD COLUMN format_version TEXT;`);
   for (const name of [
     "0017_observation_pipeline.sql",
     "0018_identity.sql",
     "0019_identity_seal_provenance.sql",
+    "0020_vpass_identity_binding.sql",
   ]) {
     for (const sql of splitSql(readFileSync(new URL(name, migrationDir), "utf8")))
       await db.prepare(sql).run();
@@ -106,6 +116,230 @@ afterAll(async () => {
   await mf?.dispose();
 });
 
+async function vpass(id: number, ordinal = "card-001") {
+  await seed(id, 0, "vpass");
+  await db.batch([
+    db.prepare("INSERT OR IGNORE INTO sources VALUES('vpass','synthetic')"),
+    db.prepare("INSERT OR IGNORE INTO producers VALUES('collector-r2-importer')"),
+    db.prepare("UPDATE fetch_runs SET producer_id='collector-r2-importer' WHERE id=?").bind(id),
+    db
+      .prepare(
+        "UPDATE acquisition_sessions SET producer_id='collector-r2-importer',external_id_namespace='vpass-worker-card-v1' WHERE id=?",
+      )
+      .bind(id),
+    db
+      .prepare("INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'card')")
+      .bind(id, id, ordinal),
+    db.prepare("UPDATE fetch_artifacts SET fetch_unit_id=? WHERE id=?").bind(id, id),
+    db
+      .prepare(
+        "INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json) VALUES(?,?,'JPY','$',?)",
+      )
+      .bind(
+        id,
+        `vpass:${ordinal}`,
+        JSON.stringify({ trustedVpassBinding: { cardToken: `vpass-card-v1-${"f".repeat(64)}` } }),
+      ),
+  ]);
+  return { ...parse(id, "vpass"), producer_id: "collector-r2-importer" };
+}
+async function sidecar(
+  id: number,
+  financial: number,
+  token = `vpass-card-v1-${"a".repeat(64)}`,
+  ordinal = "card-001",
+  sealed = true,
+) {
+  await db.batch([
+    db
+      .prepare(
+        "INSERT INTO fetch_runs(id,source_id,producer_id,acquisition_session_id,source_run_key) VALUES(?,'vpass','collector-r2-importer',?,?)",
+      )
+      .bind(id, financial, `${ordinal}-vpass-card-binding-v1`),
+    db
+      .prepare("INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'card')")
+      .bind(id, id, token),
+    db.prepare("INSERT INTO fetch_run_reports VALUES(?,'terminal','success',0,0)").bind(id),
+    db.prepare("INSERT INTO fetch_unit_reports VALUES(?,'terminal','success',NULL)").bind(id),
+    db
+      .prepare(
+        "INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,fetch_unit_id,artifact_role,format_id,format_version) VALUES(?,?,'vpass','card-identity-binding','card-identity-binding.json',?,'collector_derived','vpass-card-identity-binding-json','1')",
+      )
+      .bind(id, id, id),
+  ]);
+  if (sealed) await db.prepare("INSERT INTO fetch_run_seals VALUES(?)").bind(id).run();
+}
+
+test("Vpass missing sidecars complete at baseline; late sealed binding upgrades with pinned evidence", async () => {
+  const financial = await vpass(500);
+  expect(await identifyParse(db, financial, providerIdentity)).toBe(1);
+  expect(await count("identity_run_seals")).toBe(1);
+  expect(await identitySweep(db, providerIdentity, 8, "vpass")).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  const before = await db
+    .prepare(
+      "SELECT sa.reference_json FROM current_identity_observations o JOIN source_accounts sa ON sa.id=o.source_account_id WHERE parse_run_id=500",
+    )
+    .first<string>("reference_json");
+  expect(JSON.parse(before!)).toEqual(["vpass:card-001", "fetch-run", "500"]);
+  await sidecar(1500, 500, undefined, undefined, false);
+  expect(await count("trusted_vpass_card_bindings")).toBe(0);
+  await db.prepare("INSERT INTO fetch_run_seals VALUES(1500)").run();
+  expect((await identitySweep(db, providerIdentity, 8, "vpass")).identifiedRuns).toBe(1);
+  const pin = await db
+    .prepare("SELECT * FROM identity_vpass_bindings")
+    .first<{ binding_artifact_id: number; card_token: string }>();
+  expect(pin?.binding_artifact_id).toBe(1500);
+  expect(pin?.card_token).toBe(`vpass-card-v1-${"a".repeat(64)}`);
+  expect(
+    await db
+      .prepare("SELECT policy_version FROM current_identity_observations WHERE parse_run_id=500")
+      .first<number>("policy_version"),
+  ).toBe(2);
+  expect(await identifyParse(db, financial, providerIdentity)).toBe(0);
+  for (const sql of [
+    "UPDATE identity_vpass_bindings SET card_token=card_token",
+    "DELETE FROM identity_vpass_bindings",
+    "INSERT OR REPLACE INTO identity_vpass_bindings SELECT * FROM identity_vpass_bindings",
+  ])
+    await expect(db.prepare(sql).run()).rejects.toThrow();
+});
+
+test("trusted Vpass token survives ordinal and run changes, never consuming forged provider extra", async () => {
+  const next = await vpass(501, "card-002");
+  await sidecar(1501, 501, undefined, "card-002");
+  await identifyParse(db, next, providerIdentity);
+  const rows = await db
+    .prepare(
+      "SELECT DISTINCT source_account_id FROM current_identity_observations WHERE parse_run_id IN(500,501)",
+    )
+    .all();
+  expect(rows.results).toHaveLength(1);
+  const other = await vpass(502);
+  await sidecar(1502, 502, `vpass-card-v1-${"b".repeat(64)}`);
+  await identifyParse(db, other, providerIdentity);
+  expect(
+    (
+      await db
+        .prepare(
+          "SELECT DISTINCT source_account_id FROM current_identity_observations WHERE parse_run_id IN(500,502)",
+        )
+        .all()
+    ).results,
+  ).toHaveLength(2);
+});
+
+test("Vpass binding rejects mismatched provenance, ambiguous units, and unsuccessful ownership", async () => {
+  const changes = [
+    "UPDATE fetch_runs SET producer_id='other-producer' WHERE id=?",
+    "UPDATE fetch_runs SET acquisition_session_id=500 WHERE id=?",
+    "UPDATE fetch_runs SET source_run_key='card-002-vpass-card-binding-v1' WHERE id=?",
+    "UPDATE fetch_runs SET source_id='smbc-bank' WHERE id=?",
+    "UPDATE fetch_artifacts SET format_version='2' WHERE id=?",
+    "UPDATE fetch_artifacts SET fetch_unit_id=500 WHERE id=?",
+    "UPDATE fetch_unit_reports SET normalized_outcome='partial' WHERE fetch_unit_id=?",
+    "UPDATE fetch_run_reports SET normalized_outcome='failure' WHERE fetch_run_id=?",
+    "UPDATE fetch_units SET unit_key='vpass-card-v1-invalid' WHERE id=?",
+  ];
+  for (let i = 0; i < changes.length; i++) {
+    const id = 520 + i;
+    const financial = await vpass(id);
+    await sidecar(id + 1000, id);
+    await db
+      .prepare(changes[i]!)
+      .bind(id + 1000)
+      .run();
+    expect(await count("trusted_vpass_card_bindings", `financial_artifact_id=${id}`)).toBe(0);
+    await identifyParse(db, financial, providerIdentity);
+    expect(
+      await db
+        .prepare("SELECT policy_version FROM current_identity_observations WHERE parse_run_id=?")
+        .bind(id)
+        .first<number>("policy_version"),
+    ).toBe(1);
+  }
+  const ambiguous = await vpass(540);
+  await sidecar(1540, 540);
+  await db
+    .prepare(
+      "INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(2540,1540,?,'card')",
+    )
+    .bind(`vpass-card-v1-${"c".repeat(64)}`)
+    .run();
+  expect(await count("trusted_vpass_card_bindings", "financial_artifact_id=540")).toBe(0);
+  await identifyParse(db, ambiguous, providerIdentity);
+  const fakeRun = await identityKey("ir", [540, 2]);
+  await db.prepare("INSERT INTO identity_runs VALUES(?,540,2,'synthetic')").bind(fakeRun).run();
+  await expect(
+    db
+      .prepare("INSERT INTO identity_vpass_bindings VALUES(?,540,1540,?)")
+      .bind(fakeRun, `vpass-card-v1-${"a".repeat(64)}`)
+      .run(),
+  ).rejects.toThrow();
+});
+
+test("manual fallback decisions survive Vpass evidence upgrade and invalidated evidence is not current", async () => {
+  const financial = await vpass(550);
+  await identifyParse(db, financial, providerIdentity);
+  const mapping = await db
+    .prepare(
+      "SELECT m.* FROM current_account_mappings m JOIN current_identity_observations o ON o.source_account_id=m.source_account_id WHERE o.parse_run_id=550",
+    )
+    .first<{ source_account_id: string; account_id: string; revision: number }>();
+  await reviseIdentity(db, {
+    kind: "account",
+    referenceId: mapping!.source_account_id,
+    targetId: mapping!.account_id,
+    expectedRevision: mapping!.revision,
+    reason: "synthetic manual decision",
+  });
+  await sidecar(1550, 550);
+  await identifyParse(db, financial, providerIdentity);
+  expect(
+    await db
+      .prepare("SELECT source_account_id FROM current_identity_observations WHERE parse_run_id=550")
+      .first<string>("source_account_id"),
+  ).toBe(mapping!.source_account_id);
+  await db
+    .prepare(
+      "UPDATE fetch_unit_reports SET safe_failure_code='synthetic-invalidated' WHERE fetch_unit_id=1550",
+    )
+    .run();
+  expect(
+    await db
+      .prepare("SELECT policy_version FROM current_identity_observations WHERE parse_run_id=550")
+      .first<number>("policy_version"),
+  ).toBe(1);
+});
+
+test("Vpass pinned decisions resume and concurrent invocations remain idempotent", async () => {
+  const financial = await vpass(560);
+  await sidecar(1560, 560);
+  expect(await identifyParse(db, financial, providerIdentity, 2, 1)).toBe(1);
+  expect(await count("current_identity_observations", "parse_run_id=560")).toBe(0);
+  await Promise.all([
+    identifyParse(db, financial, providerIdentity),
+    identifyParse(db, financial, providerIdentity),
+  ]);
+  expect(await count("current_identity_observations", "parse_run_id=560")).toBe(1);
+  const runId = await identityKey("ir", [560, 2]);
+  expect(await count("identity_vpass_bindings", `identity_run_id='${runId}'`)).toBe(1);
+  const duplicate = await vpass(561);
+  await sidecar(1561, 561);
+  await sidecar(2561, 561, `vpass-card-v1-${"d".repeat(64)}`);
+  expect(await count("trusted_vpass_card_bindings", "financial_artifact_id=561")).toBe(0);
+  await identifyParse(db, duplicate, providerIdentity);
+  expect((await identitySweep(db, providerIdentity, 40, "vpass")).processedRuns).toBe(0);
+  await db
+    .prepare("INSERT INTO fetch_run_annotations VALUES(1560,'exclude_from_financial_views')")
+    .run();
+  expect(await count("trusted_vpass_card_bindings", "financial_artifact_id=560")).toBe(0);
+  expect(await count("current_identity_observations", "parse_run_id=560")).toBe(0);
+});
+
 function parse(id: number, source = "smbc-bank") {
   return {
     id,
@@ -117,7 +351,9 @@ function parse(id: number, source = "smbc-bank") {
 }
 async function seed(id: number, count = 1, source = "smbc-bank", success = true) {
   await db.batch([
-    db.prepare("INSERT INTO acquisition_sessions VALUES(?,?)").bind(id, `synthetic-${id}`),
+    db
+      .prepare("INSERT INTO acquisition_sessions(id,external_session_id) VALUES(?,?)")
+      .bind(id, `synthetic-${id}`),
     db
       .prepare(
         "INSERT INTO fetch_runs(id,source_id,producer_id,acquisition_session_id) VALUES(?,?,?,?)",
@@ -160,7 +396,12 @@ test("identification seals atomically and repeating a parse is a no-op", async (
   expect((await db.prepare("SELECT * FROM identity_observations").all()).results).toEqual(
     snapshot.results,
   );
-  expect(await count("identity_run_seals")).toBe(1);
+  expect(
+    await count(
+      "identity_run_seals",
+      "identity_run_id IN(SELECT id FROM identity_runs WHERE parse_run_id=100)",
+    ),
+  ).toBe(1);
 });
 
 test("a crash after the first page resumes without publishing partial results or duplicate rows", async () => {
@@ -173,7 +414,7 @@ test("a crash after the first page resumes without publishing partial results or
   await expect(identifyParse(db, parse(101), interrupted)).rejects.toThrow(
     "synthetic-interruption",
   );
-  const run = await identityKey("ir", [101, 1]);
+  const run = await identityKey("ir", [101, BASE_IDENTITY_POLICY_VERSION]);
   expect(await count("identity_observations", `identity_run_id='${run}'`)).toBe(100);
   expect(await count("current_identity_observations", "parse_run_id=101")).toBe(0);
   expect(await identifyParse(db, parse(101), otherIdentity)).toBe(1);
@@ -181,10 +422,10 @@ test("a crash after the first page resumes without publishing partial results or
   expect(await count("current_identity_observations", "parse_run_id=101")).toBe(101);
 }, 30000);
 
-test("numeric policy ordering publishes version 10 over 2 even if old worker runs later", async () => {
+test("numeric policy ordering publishes version 10 over 3 even if old worker runs later", async () => {
   await seed(102);
   await identifyParse(db, parse(102), otherIdentity, 10);
-  await identifyParse(db, parse(102), otherIdentity, 2);
+  await identifyParse(db, parse(102), otherIdentity, 3);
   expect(
     await db
       .prepare("SELECT policy_version FROM current_identity_observations WHERE parse_run_id=102")
@@ -199,7 +440,9 @@ test("numeric policy ordering publishes version 10 over 2 even if old worker run
 
 test("manual mappings are visible for existing observations, preserve historical evidence, and reject stale revision", async () => {
   const original = await db
-    .prepare("SELECT * FROM current_account_mappings LIMIT 1")
+    .prepare(
+      "SELECT m.* FROM current_account_mappings m JOIN current_identity_observations o ON o.source_account_id=m.source_account_id WHERE o.parse_run_id=100 LIMIT 1",
+    )
     .first<{ id: string; source_account_id: string; revision: number; account_id: string }>();
   const instrument = await db
     .prepare("SELECT * FROM current_instrument_mappings LIMIT 1")

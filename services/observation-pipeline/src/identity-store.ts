@@ -7,7 +7,16 @@ import type {
 import { record } from "../../../poc/observation-pipeline/src/identity/types.ts";
 
 export type IdentityResolver = (input: IdentityInput) => IdentityPlan;
-export const IDENTITY_POLICY_VERSION = 1;
+export const IDENTITY_POLICY_VERSION = 2;
+export const BASE_IDENTITY_POLICY_VERSION = 1;
+/** Shared by projection and read-only audits; alias is a SQL identifier, not user input. */
+export function requiredIdentityPolicySql(artifactAlias: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(artifactAlias))
+    throw new Error("identity_sql_alias_invalid");
+  return `CASE WHEN ${artifactAlias}.source_id='vpass' AND EXISTS(
+    SELECT 1 FROM trusted_vpass_card_bindings binding WHERE binding.financial_artifact_id=${artifactAlias}.id)
+    THEN ${IDENTITY_POLICY_VERSION} ELSE ${BASE_IDENTITY_POLICY_VERSION} END`;
+}
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
 
 export async function identityKey(prefix: string, parts: unknown[]): Promise<string> {
@@ -128,6 +137,22 @@ interface ObservationRow {
   subject: string | null;
   extra_json: string;
 }
+interface VpassBinding {
+  financial_unit_id: number;
+  financial_unit_key: string;
+  binding_artifact_id: number;
+  card_token: string;
+}
+
+async function trustedVpassBinding(db: D1Database, parse: ParseIdentity) {
+  if (parse.source_id !== "vpass") return undefined;
+  const result = await db
+    .prepare(`SELECT financial_unit_id,financial_unit_key,binding_artifact_id,card_token
+    FROM trusted_vpass_card_bindings WHERE financial_artifact_id=? LIMIT 2`)
+    .bind(parse.artifact_id)
+    .all<VpassBinding>();
+  return result.results.length === 1 ? result.results[0] : undefined;
+}
 const columns = {
   transaction:
     "currency,NULL AS instrument,NULL AS security_code,NULL AS security_name,NULL AS market,NULL AS subject",
@@ -162,6 +187,10 @@ export async function identifyParse(
     verified.fetch_run_id !== parse.fetch_run_id
   )
     throw new Error("identity_parse_provenance_invalid");
+  const binding = version >= 2 ? await trustedVpassBinding(db, parse) : undefined;
+  // Missing/ambiguous sidecars are completed baseline projections, not an
+  // eternally pending queue entry. Arrival of trusted evidence selects policy 2.
+  if (version === 2 && !binding) version = BASE_IDENTITY_POLICY_VERSION;
   const runId = await identityKey("ir", [parse.id, version]);
   if (
     await db.prepare("SELECT 1 FROM identity_run_seals WHERE identity_run_id=?").bind(runId).first()
@@ -173,6 +202,18 @@ export async function identifyParse(
     )
     .bind(runId, parse.id, version, new Date().toISOString(), runId)
     .run();
+  if (binding)
+    await db
+      .prepare(`INSERT INTO identity_vpass_bindings
+    SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM identity_vpass_bindings WHERE identity_run_id=?)`)
+      .bind(
+        runId,
+        binding.financial_unit_id,
+        binding.binding_artifact_id,
+        binding.card_token,
+        runId,
+      )
+      .run();
   const accounts = new Map<string, Awaited<ReturnType<typeof accountMapping>>>();
   const instruments = new Map<string, Awaited<ReturnType<typeof instrumentMapping>>>();
   let total = 0;
@@ -210,8 +251,36 @@ export async function identifyParse(
           market: row.market,
           subject: row.subject,
           extra: record(extra),
+          ...(binding && row.source_account === `vpass:${binding.financial_unit_key}`
+            ? {
+                trustedVpassBinding: {
+                  cardToken: binding.card_token,
+                  bindingArtifactId: binding.binding_artifact_id,
+                  financialUnitId: binding.financial_unit_id,
+                },
+              }
+            : {}),
         };
         const plan = resolver(input);
+        if (input.trustedVpassBinding) {
+          const fallbackKey = [input.sourceAccount, "fetch-run", String(input.fetchRunId)];
+          const fallbackRef = await identityKey("sa", [
+            input.sourceId,
+            input.producerId,
+            fallbackKey,
+          ]);
+          if (
+            await db
+              .prepare(
+                "SELECT 1 FROM account_mappings WHERE source_account_id=? AND method='manual' LIMIT 1",
+              )
+              .bind(fallbackRef)
+              .first()
+          ) {
+            plan.account.key = fallbackKey;
+            plan.issues.push("manual-run-scoped-account-mapping-preserved");
+          }
+        }
         const accountKey = JSON.stringify(plan.account.key);
         let account = accounts.get(accountKey);
         if (!account) {
@@ -283,9 +352,9 @@ export async function identitySweep(
     JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
     WHERE p.status='ok' AND f.status='success' AND f.failure_count=0 AND (?1 IS NULL OR a.source_id=?1) AND NOT EXISTS(
       SELECT 1 FROM identity_runs i JOIN identity_run_seals s ON s.identity_run_id=i.id
-      WHERE i.parse_run_id=p.id AND i.policy_version>=?2)
-    ORDER BY (p.superseded_by_parse_run_id IS NOT NULL),p.id LIMIT ?3`)
-    .bind(source ?? null, IDENTITY_POLICY_VERSION, maxRuns)
+      WHERE i.parse_run_id=p.id AND i.policy_version>=${requiredIdentityPolicySql("a")})
+    ORDER BY (p.superseded_by_parse_run_id IS NOT NULL),p.id LIMIT ?2`)
+    .bind(source ?? null, maxRuns)
     .all<ParseIdentity>();
   let observations = 0;
   let processedRuns = 0,
@@ -302,9 +371,11 @@ export async function identitySweep(
     processedRuns++;
     const sealed = await db
       .prepare(
-        "SELECT 1 FROM identity_runs r JOIN identity_run_seals s ON s.identity_run_id=r.id WHERE r.parse_run_id=? AND r.policy_version=?",
+        `SELECT 1 FROM identity_runs r JOIN identity_run_seals s ON s.identity_run_id=r.id
+         JOIN parse_runs p ON p.id=r.parse_run_id JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+         WHERE r.parse_run_id=? AND r.policy_version>=${requiredIdentityPolicySql("a")}`,
       )
-      .bind(parse.id, IDENTITY_POLICY_VERSION)
+      .bind(parse.id)
       .first();
     if (sealed) identifiedRuns++;
   }
