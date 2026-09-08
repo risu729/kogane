@@ -1,4 +1,5 @@
 import * as queries from "./observations";
+import { describeActivities } from "./activity-presentation";
 import { organizedFilterOptions } from "./organized-filter-options";
 import { presentLatestBalances, describeBalanceRows } from "./balance-presentation";
 import { HttpError, json } from "./http";
@@ -144,7 +145,7 @@ export async function observationApi(
         transactions: await organizeRows(
           env.DB,
           "transaction",
-          await queries.currentTransactions(store, filter),
+          await describeActivities(env.DB, await queries.currentTransactions(store, filter)),
         ),
       },
       offset,

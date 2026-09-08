@@ -19,6 +19,8 @@ import {
 import { KIND_LABELS } from "./ViewControls.tsx";
 import { displayLabel } from "../labels.ts";
 import { OrganizationPanel } from "../organization.tsx";
+import { classifyActivity } from "../../../shared/activity-semantics.ts";
+import { ActivityFacts } from "../activity-display.tsx";
 import {
   classifyBalance,
   BALANCE_INTERPRETATION_POLICY_VERSION,
@@ -83,6 +85,15 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
     text = stringAt(row, "amount_text"),
     unit = stringAt(row, "currency") ?? stringAt(row, "instrument");
   const hasAmount = formatAmount(minor, unit, text) !== "";
+  const activity =
+    detail.kind === "transaction" && provenance
+      ? classifyActivity({
+          sourceId: provenance.source_id,
+          parserName: provenance.parser_name,
+          status: stringAt(row, "status"),
+          extra: detail.extra,
+        })
+      : null;
   const meaning =
     detail.kind === "balance" && provenance
       ? classifyBalance({
@@ -107,7 +118,12 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
         <Panel id="amount" title="記録された金額">
           <div className="panel-body">
             <div className="quantity">
-              <Amount minor={minor} unit={unit} text={text} />
+              <Amount
+                minor={minor}
+                unit={unit}
+                text={text}
+                neutral={activity !== null || (meaning !== null && meaning.kind !== "asset")}
+              />
             </div>
             <p className="footnote">取得元の単位と保存された精度を保って表示しています。</p>
           </div>
@@ -122,6 +138,16 @@ function ObservationBody({ detail }: { detail: ObservationDetail }): ReactNode {
               解釈の版: {BALANCE_INTERPRETATION_POLICY_VERSION}
               。保存形式の「残高」は原本から読み取った項目の格納先を表し、必ずしも保有残高を意味しません。
             </p>
+          </div>
+        </Panel>
+      ) : null}
+      {activity ? (
+        <Panel id="activity-meaning" title="記録の意味">
+          <div className="panel-body">
+            <p>
+              {activity.amountLabel} / {activity.dateLabel} / {activity.statusLabel}
+            </p>
+            <ActivityFacts meaning={activity} />
           </div>
         </Panel>
       ) : null}
