@@ -106,3 +106,12 @@ not change; explicit future policies of 3 or higher retain numeric upgrade
 behavior. Audits use the exported `requiredIdentityPolicySql` helper, the same
 eligibility expression as the projector. Rollback must preserve migration 0020 and all pins/seals;
 older policy-1 workers cannot replace a newer sealed decision.
+
+Current-read query plans must be tested with many parse runs and pinned policies,
+not only many observations in a few parses. Migration 0022 evaluates eligible,
+sealed candidates once per current parse and selects the highest valid policy
+before observation expansion. An unsealed or revoked higher policy cannot hide
+the prior valid sealed policy; a valid sealed empty result still supersedes an
+older result. The writer's keyed eligibility view stays unchanged. This avoids
+the old plan that multiplied acquisition terminal reports by all successful
+parses, even for a direct read of the core identity view without UI joins.
