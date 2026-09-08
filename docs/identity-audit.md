@@ -2,6 +2,8 @@
 
 Run `node --experimental-strip-types services/observation-pipeline/scripts/audit-identity-store.ts` from the repository root with the existing authenticated Wrangler diagnostic environment. This uses the existing remote D1 binding and performs only SELECT queries in one batch; it does not trigger collection, interpretation, deployment, or revision.
 
+The current script requires migration `0020_vpass_identity_binding.sql` to be installed. It imports the projection's required-policy expression: trusted Vpass bindings require policy 2, while unbound or ambiguous Vpass records and other sources retain baseline policy 1. Pending counts therefore do not incorrectly request a complete non-Vpass replay after the Vpass-only policy update. Do not run this version against the pre-0020 database.
+
 Output contains aggregate counts grouped by source and observation form, current account and instrument status, allowlisted issue categories, integrity checks, and current/historical pending parse counts. Unknown issue text becomes `other` inside SQL. No account identifiers, instrument identifiers, names, monetary values, or raw payloads are selected for output. Errors use fixed safe codes. The report remains in the terminal; the script does not save it to the repository.
 
 Coverage counts eligible, successful, unsuperseded Layer B observations and completed current Layer C interpretations. The four forms are transactions, balances, positions, and valuations. Instrument status counts represent instrument uses, not distinct securities. Status claims come from current mappings, including manual revisions. Pending parse counts include successful historical parses separately, including empty parses.

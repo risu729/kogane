@@ -18,7 +18,8 @@ function fixture() {
     CREATE TABLE transaction_observations(id INTEGER PRIMARY KEY,parse_run_id INTEGER);
     CREATE TABLE balance_observations(id INTEGER PRIMARY KEY,parse_run_id INTEGER);
     CREATE TABLE position_observations(id INTEGER PRIMARY KEY,parse_run_id INTEGER);
-    CREATE TABLE valuation_observations(id INTEGER PRIMARY KEY,parse_run_id INTEGER);`);
+    CREATE TABLE valuation_observations(id INTEGER PRIMARY KEY,parse_run_id INTEGER);
+    CREATE TABLE trusted_vpass_card_bindings(financial_artifact_id INTEGER);`);
   db.exec(
     readFileSync(
       new URL(
@@ -124,6 +125,44 @@ test("audit refuses unknown output fields, unsafe counts and excess cardinality"
     IDENTITY_AUDIT_QUERIES.every((q) => /^(WITH|SELECT)/.test(q.sql)),
   ).toBe(true);
 });
+test("pending policy matches projection: only trusted Vpass bindings require policy two", () => {
+  const db = fixture();
+  try {
+    db.exec(`INSERT INTO sources VALUES ('vpass');
+      INSERT INTO fetch_artifacts VALUES (7,'vpass',1),(8,'vpass',1);
+      INSERT INTO parse_runs VALUES (7,7,'ok',NULL),(8,8,'ok',NULL);
+      INSERT INTO trusted_vpass_card_bindings VALUES (7);
+      INSERT INTO identity_runs VALUES ('vp7',7,1,'2099'),('vp8',8,1,'2099');
+      INSERT INTO identity_run_seals VALUES ('vp7',0,'2099'),('vp8',0,'2099');`);
+    const query = IDENTITY_AUDIT_QUERIES.find(
+      (q) => q.name === "pending_parses",
+    )!;
+    expect(db.query(query.sql).all()).toContainEqual({
+      source: "vpass",
+      lineage: "current",
+      eligible_parses: 2,
+      pending_parses: 1,
+    });
+    db.exec(
+      `INSERT INTO identity_runs VALUES ('vp7v2',7,2,'2099'); INSERT INTO identity_run_seals VALUES ('vp7v2',0,'2099');`,
+    );
+    expect(db.query(query.sql).all()).toContainEqual({
+      source: "vpass",
+      lineage: "current",
+      eligible_parses: 2,
+      pending_parses: 0,
+    });
+    // Other sources retain baseline one even though the latest Vpass policy is two.
+    expect(db.query(query.sql).all()).toContainEqual({
+      source: "synthetic",
+      lineage: "historical",
+      eligible_parses: 1,
+      pending_parses: 0,
+    });
+  } finally {
+    db.close();
+  }
+});
 test("audit detects duplicate and ineligible exposure if a current view regresses", () => {
   const db = fixture();
   try {
@@ -131,7 +170,9 @@ test("audit detects duplicate and ineligible exposure if a current view regresse
       CREATE VIEW current_identity_observations AS
       SELECT o.*,r.parse_run_id FROM identity_observations o JOIN identity_runs r ON r.id=o.identity_run_id
       UNION ALL SELECT o.*,r.parse_run_id FROM identity_observations o JOIN identity_runs r ON r.id=o.identity_run_id;`);
-    const report = validateIdentityAudit(IDENTITY_AUDIT_QUERIES.map((q) => db.query(q.sql).all()));
+    const report = validateIdentityAudit(
+      IDENTITY_AUDIT_QUERIES.map((q) => db.query(q.sql).all()),
+    );
     expect(report.find((s) => s.name === "integrity")!.rows[0]).toMatchObject({
       duplicate_current_observation: 7,
       ineligible_current_observation: 6,

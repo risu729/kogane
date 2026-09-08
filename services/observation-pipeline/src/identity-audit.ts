@@ -1,5 +1,5 @@
 /** Aggregate-only audit: no identifiers, labels, references, amounts, or raw issues leave SQL. */
-import { IDENTITY_POLICY_VERSION } from "./identity-store.ts";
+import { requiredIdentityPolicySql } from "./identity-store.ts";
 const BASE = `WITH b AS (
  SELECT 'transaction' kind,id,parse_run_id FROM transaction_observations UNION ALL
  SELECT 'balance',id,parse_run_id FROM balance_observations UNION ALL
@@ -62,7 +62,7 @@ export const IDENTITY_AUDIT_QUERIES = [
   {
     name: "pending_parses",
     sql: `SELECT a.source_id source,CASE WHEN p.superseded_by_parse_run_id IS NULL THEN 'current' ELSE 'historical' END lineage,count(*) eligible_parses,
-    sum(CASE WHEN EXISTS(SELECT 1 FROM identity_runs r JOIN identity_run_seals s ON s.identity_run_id=r.id WHERE r.parse_run_id=p.id AND r.policy_version>=${IDENTITY_POLICY_VERSION}) THEN 0 ELSE 1 END) pending_parses
+    sum(CASE WHEN EXISTS(SELECT 1 FROM identity_runs r JOIN identity_run_seals s ON s.identity_run_id=r.id WHERE r.parse_run_id=p.id AND r.policy_version>=(${requiredIdentityPolicySql("a")})) THEN 0 ELSE 1 END) pending_parses
     FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
     WHERE p.status='ok' AND f.status='success' AND f.failure_count=0 GROUP BY 1,2 ORDER BY 1,2 LIMIT 1001`,
   },
