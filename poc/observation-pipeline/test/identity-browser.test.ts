@@ -303,17 +303,18 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
   }, 15000);
   test("stalled identity responses reach a retryable deadline instead of endless loading", async () => {
     const page = await browser.newPage();
-    await page.addInitScript(() => {
-      window.setTimeout = new Proxy(window.setTimeout, {
-        apply(target, receiver, args) {
-          if (args[1] === 30_000) args[1] = 50;
-          return Reflect.apply(target, receiver, args);
-        },
-      });
-    });
+    await page.clock.install();
     await page.route("**/api/identity/**", () => {});
     try {
+      const metadataReady = page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/meta",
+      );
       await page.goto(`${origin}/identities`, { waitUntil: "domcontentloaded" });
+      await (await metadataReady).finished();
+      await page.getByText("口座を読み込んでいます…", { exact: true }).waitFor();
+      await page.getByText("整理状況を読み込んでいます…", { exact: true }).waitFor();
+      // Start-up latency is unrelated to the request deadline under test.
+      await page.clock.fastForward(30_001);
       await page.getByText(/口座を読み込めませんでした.*408/).waitFor();
       await page.getByText(/整理状況を読み込めませんでした.*408/).waitFor();
       expect(
