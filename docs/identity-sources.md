@@ -8,7 +8,7 @@ The planning snapshot in `data/account-inventory.csv` cannot prove a product is 
 
 | Source       | Accepted source account                            | Meaning and boundary                                                                                                         |
 | ------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Vpass        | `vpass:card-NNN`                                   | Card ordinal; additionally scoped to fetch run, unresolved durable binding                                                   |
+| Vpass        | `vpass:card-NNN`                                   | Verified importer sidecar HMAC gives provider-local card identity; absent/ambiguous evidence stays run-scoped                |
 | GLOBAL PASS  | `global-pass:card`                                 | Debit activity, separate from PRESTIA bank deposits                                                                          |
 | MyJCB        | `myjcb:{connection}:root`                          | Statement aggregate without physical/subcard assignment                                                                      |
 | SMBC         | `smbc-bank:ordinary-yen`                           | Audited ordinary JPY deposit only; not Olive credit liability or AUD deposit                                                 |
@@ -27,7 +27,7 @@ The planning snapshot in `data/account-inventory.csv` cannot prove a product is 
 | PayPay CSV   | `paypay`                                           | Export scope; does not distinguish money, money-lite or reward buckets                                                       |
 
 The classifier accepts exact patterns from the checked-in parser registry.
-Unknown source/pattern combinations remain unresolved. Vpass and reward buckets
+Unknown source/pattern combinations remain unresolved. Vpass ordinals without trusted sidecars and reward buckets
 without complete semantic evidence include fetch-run ID because enumeration is
 not durable identity. Common V Point buckets use the exact provider point type
 and expiration tuple, independent of index. Provider enum meanings are not

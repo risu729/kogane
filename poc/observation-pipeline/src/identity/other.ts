@@ -49,8 +49,20 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
   }
   switch (input.sourceId) {
     case "vpass":
-      if (/^vpass:card-\d{3}$/u.test(a))
-        snapshot("card-statement", "card-ordinal-needs-durable-provider-binding");
+      if (/^vpass:card-\d{3}$/u.test(a)) {
+        const binding = input.trustedVpassBinding;
+        if (
+          binding &&
+          /^vpass-card-v1-[0-9a-f]{64}$/u.test(binding.cardToken) &&
+          Number.isSafeInteger(binding.bindingArtifactId) &&
+          binding.bindingArtifactId > 0 &&
+          Number.isSafeInteger(binding.financialUnitId) &&
+          binding.financialUnitId > 0
+        ) {
+          account("card-statement", "verified-importer-durable-card-binding");
+          plan.account.key = ["vpass:card", binding.cardToken];
+        } else snapshot("card-statement", "card-ordinal-needs-durable-provider-binding");
+      }
       break;
     case "global-pass":
       if (a === "global-pass:card")

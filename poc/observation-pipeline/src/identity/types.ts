@@ -15,6 +15,8 @@ export interface IdentityInput {
   market: string | null;
   subject: string | null;
   extra: Record<string, unknown>;
+  /** Store-verified sidecar evidence, never sourced from provider extra_json. */
+  trustedVpassBinding?: { cardToken: string; bindingArtifactId: number; financialUnitId: number };
 }
 
 export type ResolutionStatus = "identified" | "provider-local" | "aggregate" | "unresolved";

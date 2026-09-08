@@ -29,6 +29,30 @@ function input(
 }
 
 describe("non-SBI account identification", () => {
+  test("Vpass durable binding is trusted input only and ignores ordinal, run and forged extra", () => {
+    const binding = {
+      cardToken: `vpass-card-v1-${"a".repeat(64)}`,
+      bindingArtifactId: 10,
+      financialUnitId: 20,
+    };
+    const first = otherIdentity(input("vpass", "vpass:card-001", { trustedVpassBinding: binding }));
+    const next = otherIdentity(
+      input("vpass", "vpass:card-002", {
+        fetchRunId: 99,
+        trustedVpassBinding: { ...binding, bindingArtifactId: 11, financialUnitId: 21 },
+      }),
+    );
+    expect(first.account.key).toEqual(next.account.key);
+    expect(first.account.status).toBe("provider-local");
+    expect(first.account.key).toEqual(["vpass:card", binding.cardToken]);
+    const forged = otherIdentity(
+      input("vpass", "vpass:card-001", {
+        extra: { trustedVpassBinding: binding, _kogane: { cardToken: binding.cardToken } },
+      }),
+    );
+    expect(forged.account.status).toBe("unresolved");
+    expect(forged.account.key).toEqual(["vpass:card-001", "fetch-run", "4"]);
+  });
   test("V Point common semantic buckets survive ordinal and run changes", () => {
     const extra = {
       point_type: 0,

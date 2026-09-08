@@ -63,7 +63,37 @@ metadata is rejected. Manual mappings are not overwritten by scheduled rules.
 - Roll back code/scheduling if necessary; do not delete the append-only C tables
   or roll back unrelated ongoing collector ingestion.
 
-Vpass ordinal references deliberately remain run-scoped until a verified
-durable-card sidecar is available. Product names and rotating selection tokens
-alone do not authorize a permanent card mapping. That migration is a separate
-change, not an assumption hidden in the initial projection.
+## Policy 2: trusted Vpass sidecar upgrades
+
+Apply additive migration `0020_vpass_identity_binding.sql` before deploying the
+policy-2 pipeline. The lookup uses the exact acquisition session, source,
+producer, financial card unit and sidecar run key described in
+[the Vpass binding contract](vpass-card-identity.md). Both runs must be sealed and
+successful, and the binding artifact's unit must belong to that same run with
+the exact dataset, format, version and key. Extra/malformed/conflicting sidecar
+units or binding artifacts fail closed. No field in provider `extra_json` can
+supply a trusted identity.
+
+Successful policy-2 decisions pin the sidecar artifact, financial unit and HMAC
+token in immutable `identity_vpass_bindings`. The account reference uses the
+trusted token plus the existing source/producer boundary, not ordinal, run,
+merchant name or rotating selector. It is provider-local, not global identity.
+SQL rejects mismatched pins and unproven durable account references. Read views
+recheck binding eligibility, so later run exclusions revoke its current use
+without deleting historical decisions.
+
+Missing or ambiguous sidecars complete as policy-1 run-scoped projections; they
+do not remain at the head of a pending queue. When valid sidecar evidence arrives,
+the bounded sweep selects policy 2 automatically, including already completed
+baseline parses. Run `node scripts/identity-ops.ts catchup 500 vpass` after a
+sidecar backfill and continue only if the bounded run reports more candidates.
+No financial reimport or B reparse is needed. A prior manual decision on the
+run-scoped account reference is retained instead of being silently replaced by
+the new automatic token mapping; the binding is still pinned for review.
+
+Verify baseline versus policy-2 counts and pin provenance separately from
+global identity status. Other sources remain on policy 1 because their rules did
+not change; explicit future policies of 3 or higher retain numeric upgrade
+behavior. Audits use the exported `requiredIdentityPolicySql` helper, the same
+eligibility expression as the projector. Rollback must preserve migration 0020 and all pins/seals;
+older policy-1 workers cannot replace a newer sealed decision.
