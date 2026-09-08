@@ -59,6 +59,13 @@ it("lists reviewed connections even with no parsed observations and validates ro
   expect(
     validAccountConnection({ ...(body as any).connections[0], leafBinding: "confirmed" }),
   ).toBe(false);
+  for (const invalid of [
+    { status: ["confirmed"] },
+    { relation: ["candidate"] },
+    { evidenceArtifactIds: [] },
+  ]) {
+    expect(validAccountConnection({ ...(body as any).connections[0], ...invalid })).toBe(false);
+  }
 });
 it("applies only eligible automatic MF connection names without altering originals or instrument metadata", async () => {
   const evidence = await review("observed-connection");

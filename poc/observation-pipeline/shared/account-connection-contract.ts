@@ -16,8 +16,10 @@ export function validAccountConnection(value: unknown): value is AccountConnecti
   return (
     typeof row.label === "string" &&
     typeof row.reason === "string" &&
-    ["confirmed", "unresolved", "evidence-ineligible"].includes(String(row.status)) &&
-    ["same-provider-connection", "candidate"].includes(String(row.relation)) &&
+    typeof row.status === "string" &&
+    ["confirmed", "unresolved", "evidence-ineligible"].includes(row.status) &&
+    typeof row.relation === "string" &&
+    ["same-provider-connection", "candidate"].includes(row.relation) &&
     (row.status !== "confirmed" || row.relation === "same-provider-connection") &&
     (row.status !== "unresolved" || row.relation === "candidate") &&
     (row.relatedSource === null || typeof row.relatedSource === "string") &&
@@ -25,6 +27,7 @@ export function validAccountConnection(value: unknown): value is AccountConnecti
     Number.isSafeInteger(row.revision) &&
     Number(row.revision) > 0 &&
     Array.isArray(row.evidenceArtifactIds) &&
+    row.evidenceArtifactIds.length > 0 &&
     row.evidenceArtifactIds.length <= 192 &&
     row.evidenceArtifactIds.every((id) => Number.isSafeInteger(id) && id > 0)
   );
