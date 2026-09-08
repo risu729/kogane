@@ -113,6 +113,7 @@ export type Route =
   | { name: "transactions" }
   | { name: "balances" }
   | { name: "positions" }
+  | { name: "identities" }
   | { name: "artifacts" }
   | { name: "artifact"; id: number }
   | { name: "observation"; kind: ObservationKind; id: number }
@@ -135,6 +136,7 @@ export function matchRoute(path: string): Route {
     if (first === "transactions") return { name: "transactions" };
     if (first === "balances") return { name: "balances" };
     if (first === "positions") return { name: "positions" };
+    if (first === "identities") return { name: "identities" };
     if (first === "artifacts") return { name: "artifacts" };
   }
 

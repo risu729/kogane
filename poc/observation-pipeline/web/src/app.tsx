@@ -17,6 +17,7 @@ import { NotFoundPage } from "./pages/NotFound.tsx";
 import { EvidenceContent } from "./evidence-app.tsx";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
 import { CollectionControls } from "./collection-controls.tsx";
+import { IdentitiesPage } from "./pages/Identities.tsx";
 
 const NAV: { to: string; label: string; icon: string }[] = [
   {
@@ -61,6 +62,8 @@ function View({ route }: { route: Route }): ReactNode {
       return <BalancesPage />;
     case "positions":
       return <PositionsPage />;
+    case "identities":
+      return <IdentitiesPage />;
     case "artifacts":
       return <ArtifactsPage />;
     case "artifact":
@@ -141,6 +144,11 @@ export function App(): ReactNode {
               <span>{item.label}</span>
             </Link>
           ))}
+          {production ? (
+            <Link to="/identities" current={path === "/identities"}>
+              口座・銘柄
+            </Link>
+          ) : null}
           {production ? (
             <Link to="/evidence" current={evidenceRoute}>
               取得履歴

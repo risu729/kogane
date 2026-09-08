@@ -438,6 +438,41 @@ h3 {
   outline-offset: -2px;
 }
 
+.identity-page {
+  min-width: 0;
+}
+.identity-page h2,
+.identity-page p {
+  overflow-wrap: anywhere;
+}
+.identity-page form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: end;
+}
+.identity-page form label {
+  min-width: 0;
+}
+.identity-page input {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.identity-page table {
+  min-width: 52rem;
+}
+.identity-page th {
+  white-space: nowrap;
+}
+.identity-page td:first-child {
+  overflow-wrap: anywhere;
+  max-width: 18rem;
+}
+.identity-page td:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Keep the narrative readable; identifiers must not dictate every column's width. */
 .transaction-table {
   table-layout: auto;

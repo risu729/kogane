@@ -1,6 +1,7 @@
 // Runtime checks for the shared HTTP contract; no database or UI dependencies.
 // Shape<T> requires a validator for every declared field when contracts evolve.
 import { isDecimalMinorUnit } from "../src/money.ts";
+import { validIdentityResponse } from "./identity-contract.ts";
 import type {
   ApiMetadata,
   ArtifactDetail,
@@ -269,6 +270,7 @@ const endpoints: Record<string, Check<unknown>> = {
 
 /** Additive fields are allowed; required fields and their nullability are checked. */
 export function validApiResponse(path: string, value: unknown): boolean {
+  if (path.startsWith("/api/identity/")) return validIdentityResponse(path, value);
   if (path === "/api/filter-options") {
     return (
       record(value) &&

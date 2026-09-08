@@ -20,6 +20,11 @@ interface ViewState {
   "balances.metric": string;
   "positions.filters": RecordFilters;
   "positions.page": number;
+  "identity.source": string;
+  "identity.draft": string;
+  "identity.tab": "accounts" | "instruments";
+  "identity.offset": number;
+  "identity.coverageOffset": number;
 }
 const Context = createContext<{
   state: ViewState;
@@ -38,6 +43,11 @@ export function ViewStateProvider({ children }: { children: ReactNode }): ReactN
     "balances.metric": "",
     "positions.filters": { ...EMPTY_FILTERS },
     "positions.page": 0,
+    "identity.source": "",
+    "identity.draft": "",
+    "identity.tab": "accounts",
+    "identity.offset": 0,
+    "identity.coverageOffset": 0,
   }));
   return <Context.Provider value={{ state, setState }}>{children}</Context.Provider>;
 }
