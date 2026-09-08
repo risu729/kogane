@@ -240,6 +240,8 @@ test("trusted Vpass token survives ordinal and run changes, never consuming forg
   ).toHaveLength(2);
 });
 
+// Ten complete Miniflare provenance scenarios need more than Bun's default
+// five seconds on CI; a timeout also terminates the shared worker for later tests.
 test("Vpass binding rejects mismatched provenance, ambiguous units, and unsuccessful ownership", async () => {
   const changes = [
     "UPDATE fetch_runs SET producer_id='other-producer' WHERE id=?",
@@ -287,7 +289,7 @@ test("Vpass binding rejects mismatched provenance, ambiguous units, and unsucces
       .bind(fakeRun, `vpass-card-v1-${"a".repeat(64)}`)
       .run(),
   ).rejects.toThrow();
-});
+}, 30000);
 
 test("manual fallback decisions survive Vpass evidence upgrade and invalidated evidence is not current", async () => {
   const financial = await vpass(550);
