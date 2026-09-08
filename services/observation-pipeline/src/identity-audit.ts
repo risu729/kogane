@@ -5,11 +5,11 @@ const BASE = `WITH b AS (
  SELECT 'balance',id,parse_run_id FROM balance_observations UNION ALL
  SELECT 'position',id,parse_run_id FROM position_observations UNION ALL
  SELECT 'valuation',id,parse_run_id FROM valuation_observations
-), eligible AS (
+), eligible AS MATERIALIZED (
  SELECT b.*,a.source_id FROM b JOIN parse_runs p ON p.id=b.parse_run_id
  JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
  WHERE p.status='ok' AND p.superseded_by_parse_run_id IS NULL AND f.status='success' AND f.failure_count=0
-), c AS (SELECT * FROM current_identity_observations)`;
+), c AS MATERIALIZED (SELECT * FROM current_identity_observations)`;
 const ISSUES = [
   "missing-accountKind",
   "missing-specificAccountCode",
@@ -30,10 +30,12 @@ const ISSUES = [
 export const IDENTITY_AUDIT_QUERIES = [
   {
     name: "coverage",
-    sql: `${BASE} SELECT s.id source,k.kind,count(e.id) eligible,
-    sum(CASE WHEN EXISTS(SELECT 1 FROM c WHERE c.kind=e.kind AND c.observation_id=e.id AND c.parse_run_id=e.parse_run_id) THEN 1 ELSE 0 END) organized
+    sql: `${BASE}, current_keys AS MATERIALIZED (SELECT kind,observation_id,parse_run_id FROM c GROUP BY 1,2,3)
+    SELECT s.id source,k.kind,count(e.id) eligible,
+    count(current_keys.observation_id) organized
     FROM observation_sources s CROSS JOIN (SELECT 'transaction' kind UNION ALL SELECT 'balance' UNION ALL SELECT 'position' UNION ALL SELECT 'valuation') k
-    LEFT JOIN eligible e ON e.source_id=s.id AND e.kind=k.kind GROUP BY s.id,k.kind ORDER BY 1,2 LIMIT 1001`,
+    LEFT JOIN eligible e ON e.source_id=s.id AND e.kind=k.kind
+    LEFT JOIN current_keys ON current_keys.kind=e.kind AND current_keys.observation_id=e.id AND current_keys.parse_run_id=e.parse_run_id GROUP BY s.id,k.kind ORDER BY 1,2 LIMIT 1001`,
   },
   {
     name: "integrity",
@@ -53,7 +55,8 @@ export const IDENTITY_AUDIT_QUERIES = [
   },
   {
     name: "instrument_status",
-    sql: `${BASE} SELECT e.source_id source,m.status,i.kind,count(*) count FROM c JOIN eligible e ON e.kind=c.kind AND e.id=c.observation_id AND e.parse_run_id=c.parse_run_id JOIN identity_instrument_uses u ON u.identity_observation_id=c.id JOIN current_instrument_mappings m ON m.identifier_id=u.identifier_id JOIN instruments i ON i.id=m.instrument_id GROUP BY 1,2,3 ORDER BY 1,2,3 LIMIT 1001`,
+    sql: `${BASE}, uses AS MATERIALIZED (SELECT e.source_id,u.identifier_id,count(*) n FROM c JOIN eligible e ON e.kind=c.kind AND e.id=c.observation_id AND e.parse_run_id=c.parse_run_id JOIN identity_instrument_uses u ON u.identity_observation_id=c.id GROUP BY 1,2)
+    SELECT uses.source_id source,m.status,i.kind,sum(uses.n) count FROM uses JOIN current_instrument_mappings m ON m.identifier_id=uses.identifier_id JOIN instruments i ON i.id=m.instrument_id GROUP BY 1,2,3 ORDER BY 1,2,3 LIMIT 1001`,
   },
   {
     name: "issues",
@@ -62,9 +65,30 @@ export const IDENTITY_AUDIT_QUERIES = [
   {
     name: "pending_parses",
     sql: `SELECT a.source_id source,CASE WHEN p.superseded_by_parse_run_id IS NULL THEN 'current' ELSE 'historical' END lineage,count(*) eligible_parses,
-    sum(CASE WHEN EXISTS(SELECT 1 FROM identity_runs r JOIN identity_run_seals s ON s.identity_run_id=r.id WHERE r.parse_run_id=p.id AND r.policy_version>=(${requiredIdentityPolicySql("a")})) THEN 0 ELSE 1 END) pending_parses
+    sum(CASE WHEN EXISTS(SELECT 1 FROM eligible_identity_runs r JOIN identity_run_seals s ON s.identity_run_id=r.id WHERE r.parse_run_id=p.id AND r.policy_version>=(${requiredIdentityPolicySql("a")})) THEN 0 ELSE 1 END) pending_parses
     FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
     WHERE p.status='ok' AND f.status='success' AND f.failure_count=0 GROUP BY 1,2 ORDER BY 1,2 LIMIT 1001`,
+  },
+  {
+    name: "vpass_coverage",
+    sql: `SELECT CASE WHEN p.superseded_by_parse_run_id IS NULL THEN 'current' ELSE 'historical' END lineage,
+    count(*) trusted_eligible_parses,count(DISTINCT a.id) trusted_eligible_artifacts,
+    sum(CASE WHEN EXISTS(SELECT 1 FROM eligible_identity_runs r JOIN identity_run_seals s ON s.identity_run_id=r.id JOIN identity_vpass_bindings pin ON pin.identity_run_id=r.id WHERE r.parse_run_id=p.id AND r.policy_version>=2 AND pin.financial_unit_id=b.financial_unit_id AND pin.binding_artifact_id=b.binding_artifact_id AND pin.card_token=b.card_token) THEN 1 ELSE 0 END) sealed_pinned_parses
+    FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN observation_fetch_runs f ON f.id=a.fetch_run_id JOIN trusted_vpass_card_bindings b ON b.financial_artifact_id=a.id
+    WHERE p.status='ok' AND a.source_id='vpass' AND f.status='success' AND f.failure_count=0 GROUP BY 1`,
+  },
+  {
+    name: "vpass_pins",
+    sql: `WITH valid_pins AS MATERIALIZED (SELECT pin.* FROM identity_vpass_bindings pin JOIN identity_runs r ON r.id=pin.identity_run_id JOIN parse_runs p ON p.id=r.parse_run_id JOIN trusted_vpass_card_bindings b ON b.financial_artifact_id=p.fetch_artifact_id AND b.financial_unit_id=pin.financial_unit_id AND b.binding_artifact_id=pin.binding_artifact_id AND b.card_token=pin.card_token), c AS MATERIALIZED (SELECT o.* FROM current_identity_observations o JOIN parse_runs p ON p.id=o.parse_run_id JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id WHERE a.source_id='vpass')
+    SELECT
+    (SELECT count(*) FROM trusted_vpass_card_bindings b JOIN observation_fetch_artifacts a ON a.id=b.financial_artifact_id JOIN observation_fetch_runs f ON f.id=a.fetch_run_id WHERE f.status='success' AND f.failure_count=0) trusted_eligible_artifacts,
+    (SELECT count(*) FROM identity_vpass_bindings) retained_pins,
+    (SELECT count(*) FROM identity_vpass_bindings pin WHERE NOT EXISTS(SELECT 1 FROM valid_pins v WHERE v.identity_run_id=pin.identity_run_id)) revoked_pins,
+    (SELECT count(*) FROM c JOIN parse_runs p ON p.id=c.parse_run_id WHERE EXISTS(SELECT 1 FROM trusted_vpass_card_bindings b WHERE b.financial_artifact_id=p.fetch_artifact_id)) trusted_current_observations,
+    (SELECT count(*) FROM c WHERE EXISTS(SELECT 1 FROM valid_pins pin WHERE pin.identity_run_id=c.identity_run_id)) pinned_current_observations,
+    (SELECT count(DISTINCT pin.card_token) FROM valid_pins pin WHERE EXISTS(SELECT 1 FROM c WHERE c.identity_run_id=pin.identity_run_id)) distinct_current_card_tokens,
+    (SELECT count(*) FROM c JOIN identity_vpass_bindings pin ON pin.identity_run_id=c.identity_run_id WHERE NOT EXISTS(SELECT 1 FROM valid_pins v WHERE v.identity_run_id=pin.identity_run_id)) invalid_current_pin_exposures,
+    (SELECT count(*) FROM c JOIN source_accounts a ON a.id=c.source_account_id WHERE json_extract(a.reference_json,'$[0]')='vpass:card' AND NOT EXISTS(SELECT 1 FROM valid_pins pin WHERE pin.identity_run_id=c.identity_run_id AND pin.card_token=json_extract(a.reference_json,'$[1]'))) unpinned_durable_account_exposures`,
   },
 ] as const;
 
@@ -82,6 +106,16 @@ const COUNTS = new Set([
   "orphan_instrument_mapping",
   "sealed_count_mismatch",
   "sealed_evidence_count_mismatch",
+  "trusted_eligible_parses",
+  "trusted_eligible_artifacts",
+  "sealed_pinned_parses",
+  "retained_pins",
+  "revoked_pins",
+  "trusted_current_observations",
+  "pinned_current_observations",
+  "distinct_current_card_tokens",
+  "invalid_current_pin_exposures",
+  "unpinned_durable_account_exposures",
 ]);
 const DIMENSIONS = new Set(["source", "kind", "status", "issue", "lineage", "check_name"]);
 export function validateIdentityAudit(rows: unknown[][]) {

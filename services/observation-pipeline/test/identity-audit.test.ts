@@ -16,12 +16,16 @@ function fixture() {
     CREATE TABLE balance_observations(id INTEGER PRIMARY KEY,parse_run_id INTEGER);
     CREATE TABLE position_observations(id INTEGER PRIMARY KEY,parse_run_id INTEGER);
     CREATE TABLE valuation_observations(id INTEGER PRIMARY KEY,parse_run_id INTEGER);
-    CREATE TABLE trusted_vpass_card_bindings(financial_artifact_id INTEGER);`);
+    CREATE TABLE trusted_vpass_card_bindings(financial_artifact_id INTEGER,financial_unit_id INTEGER,binding_artifact_id INTEGER,card_token TEXT);
+    CREATE TABLE identity_vpass_bindings(identity_run_id TEXT PRIMARY KEY,financial_unit_id INTEGER,binding_artifact_id INTEGER,card_token TEXT);`);
   db.exec(
     readFileSync(
       new URL("../../raw-evidence/migrations/0018_identity.sql", import.meta.url),
       "utf8",
     ),
+  );
+  db.exec(
+    `CREATE VIEW eligible_identity_runs AS SELECT r.* FROM identity_runs r WHERE NOT EXISTS(SELECT 1 FROM identity_vpass_bindings pin WHERE pin.identity_run_id=r.id AND NOT EXISTS(SELECT 1 FROM parse_runs p JOIN trusted_vpass_card_bindings b ON b.financial_artifact_id=p.fetch_artifact_id WHERE p.id=r.parse_run_id AND b.binding_artifact_id=pin.binding_artifact_id AND b.financial_unit_id=pin.financial_unit_id AND b.card_token=pin.card_token));`,
   );
   db.exec(`INSERT INTO sources VALUES ('synthetic'),('empty-source'); INSERT INTO producers VALUES ('synthetic');
     INSERT INTO fetch_runs VALUES (1,'synthetic','success',0,1),(2,'synthetic','success',0,0),(3,'synthetic','partial',1,1);
@@ -115,7 +119,7 @@ test("pending policy matches projection: only trusted Vpass bindings require pol
     db.exec(`INSERT INTO sources VALUES ('vpass');
       INSERT INTO fetch_artifacts VALUES (7,'vpass',1),(8,'vpass',1);
       INSERT INTO parse_runs VALUES (7,7,'ok',NULL),(8,8,'ok',NULL);
-      INSERT INTO trusted_vpass_card_bindings VALUES (7);
+      INSERT INTO trusted_vpass_card_bindings VALUES (7,7,17,'PRIVATE_CARD');
       INSERT INTO identity_runs VALUES ('vp7',7,1,'2099'),('vp8',8,1,'2099');
       INSERT INTO identity_run_seals VALUES ('vp7',0,'2099'),('vp8',0,'2099');`);
     const query = IDENTITY_AUDIT_QUERIES.find((q) => q.name === "pending_parses")!;
@@ -171,6 +175,25 @@ test("all queries compile against the complete production schema without compoun
       .sort())
       db.exec(readFileSync(new URL(name, directory), "utf8"));
     const report = validateIdentityAudit(IDENTITY_AUDIT_QUERIES.map((q) => db.query(q.sql).all()));
+    const plan = db
+      .query<{ detail: string }, []>(
+        `EXPLAIN QUERY PLAN ${IDENTITY_AUDIT_QUERIES.find((q) => q.name === "instrument_status")!.sql}`,
+      )
+      .all()
+      .map((r) => r.detail);
+    expect(plan).toContain("MATERIALIZE c");
+    expect(plan).toContain("MATERIALIZE eligible");
+    expect(plan).toContain("MATERIALIZE uses");
+    const coveragePlan = db
+      .query<{ detail: string }, []>(
+        `EXPLAIN QUERY PLAN ${IDENTITY_AUDIT_QUERIES.find((q) => q.name === "coverage")!.sql}`,
+      )
+      .all()
+      .map((r) => r.detail);
+    expect(
+      coveragePlan.some((s) => s.startsWith("SEARCH current_keys ") && s.includes("AUTOMATIC")),
+    ).toBe(true);
+    expect(coveragePlan.some((s) => s === "SCAN current_keys")).toBe(false);
     expect(
       report
         .find((s) => s.name === "integrity")!
@@ -178,6 +201,81 @@ test("all queries compile against the complete production schema without compoun
           Object.values(row as Record<string, number>).every((count) => count === 0),
         ),
     ).toBe(true);
+  } finally {
+    db.close();
+  }
+});
+
+test("Vpass audit separates revoked retained evidence from invalid current exposure", () => {
+  const db = fixture();
+  const rows = (name: string) =>
+    db.query(IDENTITY_AUDIT_QUERIES.find((q) => q.name === name)!.sql).all();
+  try {
+    db.exec(`INSERT INTO sources VALUES ('vpass');
+      INSERT INTO fetch_artifacts VALUES (7,'vpass',1),(8,'vpass',1);
+      INSERT INTO parse_runs VALUES (7,7,'ok',NULL),(8,8,'ok',7);
+      INSERT INTO transaction_observations VALUES (7,7),(8,8);
+      INSERT INTO trusted_vpass_card_bindings VALUES (7,7,17,'PRIVATE_CARD'),(8,8,18,'PRIVATE_CARD');
+      INSERT INTO source_accounts VALUES ('vpref','vpass','synthetic','["vpass:card","PRIVATE_CARD"]');
+      INSERT INTO account_mappings VALUES ('vpam','vpref',1,'account','rule','PRIVATE_REASON',1,'2099','PRIVATE_NAME','provider-local');
+      INSERT INTO identity_runs VALUES ('vp7',7,1,'2099'),('vp7v2',7,2,'2099'),('vp8',8,1,'2099'),('vp8v2',8,2,'2099');
+      INSERT INTO identity_vpass_bindings VALUES ('vp7v2',7,17,'PRIVATE_CARD'),('vp8v2',8,18,'PRIVATE_CARD');
+      INSERT INTO identity_observations VALUES ('vp7o','vp7','transaction',7,'vpref','vpam','[]'),('vp7v2o','vp7v2','transaction',7,'vpref','vpam','[]'),('vp8o','vp8','transaction',8,'vpref','vpam','[]'),('vp8v2o','vp8v2','transaction',8,'vpref','vpam','[]');
+      INSERT INTO identity_run_seals VALUES ('vp7',1,'2099'),('vp7v2',1,'2099'),('vp8',1,'2099'),('vp8v2',1,'2099');
+      DROP VIEW current_identity_observations;
+      CREATE VIEW current_identity_observations AS SELECT o.*,r.parse_run_id FROM identity_observations o JOIN eligible_identity_runs r ON r.id=o.identity_run_id JOIN parse_runs p ON p.id=r.parse_run_id WHERE p.superseded_by_parse_run_id IS NULL AND NOT EXISTS(SELECT 1 FROM eligible_identity_runs newer JOIN identity_run_seals s ON s.identity_run_id=newer.id WHERE newer.parse_run_id=r.parse_run_id AND newer.policy_version>r.policy_version);`);
+    expect(rows("vpass_coverage")).toEqual([
+      {
+        lineage: "current",
+        trusted_eligible_parses: 1,
+        trusted_eligible_artifacts: 1,
+        sealed_pinned_parses: 1,
+      },
+      {
+        lineage: "historical",
+        trusted_eligible_parses: 1,
+        trusted_eligible_artifacts: 1,
+        sealed_pinned_parses: 1,
+      },
+    ]);
+    expect(rows("vpass_pins")[0]).toMatchObject({
+      retained_pins: 2,
+      revoked_pins: 0,
+      trusted_current_observations: 1,
+      pinned_current_observations: 1,
+      distinct_current_card_tokens: 1,
+      invalid_current_pin_exposures: 0,
+    });
+    db.exec("DELETE FROM trusted_vpass_card_bindings WHERE financial_artifact_id=8");
+    expect(rows("vpass_pins")[0]).toMatchObject({
+      revoked_pins: 1,
+      invalid_current_pin_exposures: 0,
+    });
+    expect(rows("pending_parses")).toContainEqual({
+      source: "vpass",
+      lineage: "historical",
+      eligible_parses: 1,
+      pending_parses: 0,
+    });
+    // Same-version pin invalidated by different trusted evidence must not hide pending work.
+    db.exec(
+      "UPDATE trusted_vpass_card_bindings SET card_token='PRIVATE_REPLACEMENT' WHERE financial_artifact_id=7",
+    );
+    expect(rows("pending_parses")).toContainEqual({
+      source: "vpass",
+      lineage: "current",
+      eligible_parses: 1,
+      pending_parses: 1,
+    });
+    expect(rows("vpass_pins")[0]).toMatchObject({
+      revoked_pins: 2,
+      invalid_current_pin_exposures: 0,
+    });
+    db.exec(
+      `DROP VIEW current_identity_observations; CREATE VIEW current_identity_observations AS SELECT o.*,r.parse_run_id FROM identity_observations o JOIN identity_runs r ON r.id=o.identity_run_id WHERE r.id='vp7v2';`,
+    );
+    expect(rows("vpass_pins")[0]).toMatchObject({ invalid_current_pin_exposures: 1 });
+    expect(JSON.stringify(rows("vpass_pins"))).not.toContain("PRIVATE_");
   } finally {
     db.close();
   }
