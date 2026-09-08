@@ -67,3 +67,25 @@ The sidecar uses seven sequential central calls. Current Workers Paid limits
 allow 10,000 subrequests by default; it does not introduce a legacy 32-call cap
 or change existing financial chunking. See the
 [official Workers limits](https://developers.cloudflare.com/workers/platform/limits/#subrequests).
+
+## Production verification — 2026-09-08
+
+Only `kogane-collector-r2-importer` was deployed, from clean main `34e697a`
+(including implementation PR #119). Cloudflare version:
+`3d3e54e0-6d56-419b-891c-0210d755ccf7`. Existing required secrets,
+private bindings, queue and schedule were retained; no other Worker was deployed.
+
+Historical binding-only execution scanned 391 original objects and completed
+all 96 eligible manifests: 96 sealed, zero unavailable. Read-only D1 verification
+found 96 binding runs, 96 binding artifacts and six distinct provider-local card
+identities. All 96 had successful run/unit reports and exact original
+acquisition-session, source, producer and ordinal matches.
+
+Original nonbinding Vpass evidence remained exactly 3,227 artifacts across 101
+runs before and after the operation. No financial artifacts were duplicated.
+Layer C consumption is a separate deployment and verification step.
+
+The first CLI attempt stopped locally before sending a Service Binding request:
+Node 26's native Request is not compatible with Miniflare's Request realm.
+The script now passes `fetch(url, init)` instead; the successful 96-item execution
+verified that path. No Worker redeployment was needed for this local CLI fix.

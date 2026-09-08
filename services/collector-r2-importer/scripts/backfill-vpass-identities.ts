@@ -30,11 +30,12 @@ try {
       eligible++;
       if (!execute) continue;
       const response = await proxy.env.IMPORTER.fetch(
-        new Request("https://importer.internal/v1/vpass/import-card-binding", {
+        "https://importer.internal/v1/vpass/import-card-binding",
+        {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ recordKey: object.key }),
-        }),
+        },
       );
       if (!response.ok) throw new Error("binding-import-failed");
       const body = (await response.json()) as { status?: string; artifactCount?: number };
