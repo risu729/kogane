@@ -38,7 +38,12 @@ export interface CollectionFilter {
 
 // Apply scope to the complete derived result, before paging. In particular,
 // never filter a globally truncated set or change snapshot completeness tests.
-function collectionStore(store: Store, filter: CollectionFilter, order: string): Store {
+function collectionStore(
+  store: Store,
+  filter: CollectionFilter,
+  order: string,
+  limit: 501 | 5001 = 501,
+): Store {
   return {
     db: {
       query(sql) {
@@ -78,7 +83,7 @@ function collectionStore(store: Store, filter: CollectionFilter, order: string):
         }
         const scoped = `SELECT * FROM (${sql.replace(/\s+LIMIT 501\s*$/, "")})
       WHERE ${predicates.join(" AND ") || "1"}
-      ORDER BY ${order} LIMIT 501 OFFSET ?`;
+      ORDER BY ${order} LIMIT ${limit} OFFSET ?`;
         args.push(filter.offset ?? 0);
         return {
           all: () => store.db.query(scoped).all(...args),
@@ -517,8 +522,16 @@ export async function currentTransactions(
 export async function latestBalances(
   store: Store,
   filter: CollectionFilter = {},
+  candidates = false,
 ): Promise<BalanceRow[]> {
-  store = collectionStore(store, filter, "source_id, source_account, metric, instrument, id");
+  // Grouping callers need the complete bounded candidate set before paging.
+  // The Store rejects >5,000 rows; it never groups a silently truncated page.
+  store = collectionStore(
+    store,
+    filter,
+    "source_id, source_account, metric, instrument, id",
+    candidates ? 5001 : 501,
+  );
   return (await store.db
     .query(
       `WITH ${SNAPSHOT_CTES}, ranked_myjcb_snapshots AS (
