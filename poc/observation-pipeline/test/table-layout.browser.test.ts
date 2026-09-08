@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Locator } from "playwright";
 import { createApi } from "../src/api.ts";
 import type { BalanceHistoryRow, BalanceRow, TransactionRow } from "../shared/api-contract.ts";
 import { buildFixture } from "./fixture.ts";
@@ -27,6 +27,37 @@ const minor = "900719925474099312345";
 const fallback = `unparsed-provider-amount-${"1234567890".repeat(8)}`;
 const basisDate = "2026-09-08T00:30:00+09:00";
 const observedDate = "2026-09-07T16:45:00Z";
+
+async function verifyLongIdentity(row: Locator): Promise<void> {
+  const cell = row.locator(".col-source");
+  const summary = cell.getByText("取得元・口座の全文", { exact: true });
+  expect(await cell.locator("details[open]").count()).toBe(0);
+  expect((await row.boundingBox())!.height).toBeLessThanOrEqual(300);
+  await summary.focus();
+  await summary.press("Enter");
+  expect(await cell.locator("details[open]").count()).toBe(1);
+  for (const raw of [source, account]) {
+    const value = cell.getByText(raw, { exact: true });
+    expect(await value.isVisible()).toBe(true);
+    // The disclosure exposes real selectable text, not a title-only tooltip.
+    expect(
+      await value.evaluate((element) => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const selection = window.getSelection()!;
+        selection.removeAllRanges();
+        selection.addRange(range);
+        const selected = selection.toString();
+        selection.removeAllRanges();
+        return selected;
+      }),
+    ).toBe(raw);
+  }
+  await summary.focus();
+  await summary.press("Enter");
+  expect(await cell.locator("details[open]").count()).toBe(0);
+  expect((await row.boundingBox())!.height).toBeLessThanOrEqual(300);
+}
 
 describe.if(runnable)("transaction columns at desktop and phone widths", () => {
   const fixture = buildFixture();
@@ -197,7 +228,7 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
             const table = region.locator("table");
             expect(await table.locator("thead th").count()).toBe(columns);
             const row = table.locator("tbody tr").filter({ hasText: source });
-            expect(await row.locator(".col-source").innerText()).toBe(`${source}\n${account}`);
+            await verifyLongIdentity(row);
             expect(await row.locator(".col-dates dt").allTextContents()).toEqual([
               "基準日",
               "取得元の観測日時",
@@ -207,6 +238,10 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
               observedDate,
             ]);
             const missing = table.locator("tbody tr").filter({ hasText: "unknown-date-bank" });
+            expect(await missing.locator(".col-source details").count()).toBe(0);
+            expect(await missing.locator(".col-source").innerText()).toBe(
+              "unknown-date-bank\nundated",
+            );
             expect(await missing.locator(".col-dates dd").allTextContents()).toEqual([
               "未記録",
               "未記録",
@@ -256,6 +291,10 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
             await page.locator(".balance-table").evaluateAll((tables) => {
               for (const table of tables) table.parentElement!.scrollLeft = 0;
             });
+            await page.evaluate(() => {
+              (document.activeElement as HTMLElement)?.blur();
+              window.scrollTo(0, 0);
+            });
             await page.screenshot({
               path: join(screenshots, `balances-${mode}-${width}.png`),
               fullPage: true,
@@ -273,7 +312,13 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
           await table.waitFor();
           const row = table.locator("tbody tr").filter({ hasText: description });
           expect(await table.locator("thead th").count()).toBe(6);
-          expect(await row.locator(".col-source").innerText()).toBe(`${source}\n${account}`);
+          await verifyLongIdentity(row);
+          const shortIdentity = table
+            .locator("tbody tr")
+            .filter({ hasText: "another-synthetic-bank" })
+            .locator(".col-source");
+          expect(await shortIdentity.locator("details").count()).toBe(0);
+          expect(await shortIdentity.innerText()).toBe("another-synthetic-bank\neveryday");
           expect(await row.locator(".col-description").innerText()).toContain(description);
           expect(await row.locator(".amount").innerText()).toContain("900,719,925,474,099,312,345");
           const geometry = await row.evaluate((element) => {
@@ -320,6 +365,9 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
           await region.focus();
           expect(await region.evaluate((element) => document.activeElement === element)).toBe(true);
           if (width === 390) {
+            await region.evaluate((element) => {
+              element.scrollLeft = 0;
+            });
             const before = await region.evaluate((element) => element.scrollLeft);
             await page.keyboard.press("ArrowRight");
             await page.waitForFunction(
@@ -355,6 +403,10 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
             mkdirSync(screenshots, { recursive: true });
             await region.evaluate((element) => {
               element.scrollLeft = 0;
+            });
+            await page.evaluate(() => {
+              (document.activeElement as HTMLElement)?.blur();
+              window.scrollTo(0, 0);
             });
             await page.screenshot({
               path: join(screenshots, `transactions-${mode}-${width}.png`),

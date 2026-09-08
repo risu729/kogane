@@ -8,6 +8,7 @@ import {
   ObservationLink,
   Panel,
   QueryBoundary,
+  SourceAccount,
   StatusBadge,
 } from "../ui.tsx";
 import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
@@ -186,8 +187,7 @@ function BalanceTable({
                   }
                 >
                   <td className="col-source">
-                    {row.source_id}
-                    <div className="table-secondary">{row.source_account}</div>
+                    <SourceAccount source={row.source_id} account={row.source_account} />
                   </td>
                   <td className="col-metric">
                     {row.metric} <Badge>{row.instrument}</Badge>
