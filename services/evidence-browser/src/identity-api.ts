@@ -1,7 +1,11 @@
 import { HttpError, json } from "./http";
 import type { IdentityOrigin } from "../../../poc/observation-pipeline/shared/identity-contract";
+import {
+  IDENTITY_PAGE_LIMIT,
+  nextIdentityOffset,
+} from "../../../poc/observation-pipeline/shared/identity-contract";
 
-const LIMIT = 100;
+const LIMIT = IDENTITY_PAGE_LIMIT;
 // The denominator includes eligible B observations that have no completed C run.
 const ELIGIBLE = `WITH all_observations AS (
  SELECT 'transaction' kind,id,parse_run_id FROM transaction_observations UNION ALL
@@ -23,7 +27,7 @@ function page<T>(rows: T[], offset: number) {
     coverage: {
       limit: LIMIT,
       truncated: rows.length > LIMIT,
-      nextOffset: rows.length > LIMIT ? offset + LIMIT : null,
+      nextOffset: nextIdentityOffset(offset, rows.length > LIMIT),
     },
   };
 }
@@ -55,7 +59,7 @@ export async function identityApi(request: Request, env: Env, url: URL): Promise
   }
   const text = url.searchParams.get("offset") ?? "0";
   const offset = Number(text);
-  if (!/^(0|[1-9]\d*)$/u.test(text) || !Number.isSafeInteger(offset) || offset > 1_000_000)
+  if (!/^(0|[1-9]\d*)$/u.test(text) || !Number.isSafeInteger(offset))
     throw new HttpError(400, "invalid_offset");
   const source = url.searchParams.get("source");
   const filter = source === null ? "1" : "o.source_id=?";

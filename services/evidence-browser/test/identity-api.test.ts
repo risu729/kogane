@@ -4,6 +4,18 @@ import { identityApi } from "../src/identity-api";
 import { seedRegistry, seedRun } from "./fixtures";
 import { validIdentityResponse } from "../../../poc/observation-pipeline/shared/identity-contract";
 beforeAll(seedRegistry);
+it("accepts every safe offset beyond the former cap and rejects unsafe query values", async () => {
+  for (const offset of [1_000_000, 1_000_100, Number.MAX_SAFE_INTEGER]) {
+    const response = await call(`/api/identity/accounts?offset=${offset}`);
+    expect(await response!.json()).toMatchObject({
+      rows: [],
+      coverage: { truncated: false, nextOffset: null },
+    });
+  }
+  for (const offset of ["9007199254740992", "-1", "1.5", "01", "1e6"]) {
+    await expect(call(`/api/identity/accounts?offset=${offset}`)).rejects.toThrow("invalid_offset");
+  }
+});
 async function call(path: string, method = "GET") {
   const request = new Request(`https://fixture.test${path}`, { method });
   return identityApi(request, env, new URL(request.url));
@@ -101,7 +113,7 @@ it("rejects malformed query parameters, methods and unknown routes", async () =>
   for (const suffix of [
     "?offset=-1",
     "?offset=01",
-    "?offset=1000001",
+    "?offset=9007199254740992",
     "?source=x&source=y",
     "?q=x",
     "?source=",

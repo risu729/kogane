@@ -45,6 +45,14 @@ export interface IdentityPage<T> {
   coverage: { limit: number; nextOffset: number | null; truncated: boolean };
 }
 export type IdentityCoverage = IdentityPage<IdentityCoverageRow>;
+export const IDENTITY_PAGE_LIMIT = 100;
+export function nextIdentityOffset(offset: number, hasMore: boolean): number | null {
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new RangeError("invalid_offset");
+  if (!hasMore) return null;
+  const next = offset + IDENTITY_PAGE_LIMIT;
+  if (!Number.isSafeInteger(next)) throw new RangeError("pagination_offset_overflow");
+  return next;
+}
 const object = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === "object" && !Array.isArray(v);
 const count = (v: unknown): v is number =>
@@ -71,15 +79,21 @@ export function validIdentityResponse(path: string, value: unknown): boolean {
     return false;
   return value.rows.every((row) => {
     if (!object(row) || typeof row.source !== "string") return false;
-    if (path === "/api/identity/coverage")
-      return [
-        "eligible",
-        "organized",
-        "identified",
-        "providerLocal",
-        "aggregate",
-        "unresolved",
-      ].every((k) => count(row[k]));
+    if (path === "/api/identity/coverage") {
+      if (
+        !["eligible", "organized", "identified", "providerLocal", "aggregate", "unresolved"].every(
+          (k) => count(row[k]),
+        )
+      )
+        return false;
+      const counts = row as unknown as IdentityCoverageRow;
+      const total = counts.identified + counts.providerLocal + counts.aggregate + counts.unresolved;
+      return (
+        counts.organized <= counts.eligible &&
+        Number.isSafeInteger(total) &&
+        total === counts.organized
+      );
+    }
     const fields =
       path === "/api/identity/accounts"
         ? ["reference", "role"]
