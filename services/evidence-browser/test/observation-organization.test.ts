@@ -14,9 +14,9 @@ beforeAll(seedRegistry);
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
 async function seed(
   rawAccount = "original-account",
-  product?: { code: string; currency: string; padding?: string },
+  product?: { code: string; currency: string; padding?: string; sony?: boolean },
 ) {
-  const source = product ? "sbi-shinsei-bank" : "other-test";
+  const source = product?.sony ? "sony-bank" : product ? "sbi-shinsei-bank" : "other-test";
   if (product)
     await env.DB.batch([
       env.DB.prepare(
@@ -29,14 +29,22 @@ async function seed(
   const acquisition = await seedRun({
     count: 1,
     source,
-    dataset: product ? "top-accounts-balance-and-activity" : undefined,
+    dataset: product?.sony
+      ? "yen-history-page-0001"
+      : product
+        ? "top-accounts-balance-and-activity"
+        : undefined,
   });
   const parse = await env.DB.prepare(
     `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES (?,?,'1','2099','ok','[]') RETURNING id`,
   )
     .bind(
       acquisition.artifacts[0]!.id,
-      product ? "sbi-shinsei-top-balances-and-activity" : "fixture",
+      product?.sony
+        ? "sony-bank-history-json"
+        : product
+          ? "sbi-shinsei-top-balances-and-activity"
+          : "fixture",
     )
     .first<{ id: number }>();
   const prefix = `fixture-${parse!.id}-`;
@@ -65,6 +73,7 @@ async function seed(
             productCode: product.code,
             unrelatedProviderBody: product.padding ?? "not-product-evidence",
             currency: product.currency,
+            ...(product.sony ? { transaction: { currencyCd: product.currency } } : {}),
             _kogane: {
               sourceView: "top_overview",
               productCode: product.code,
@@ -84,9 +93,11 @@ async function seed(
       .bind(
         parse!.id,
         rawAccount,
-        product
-          ? `json:$.responseParam.overview.responseParam.savingsDetails[0].${kind === "valuation" ? "yenEqui" : "balance"}`
-          : "row",
+        product?.sony
+          ? "json:$.transactionHistInfo[0].transactionAftBal"
+          : product
+            ? `json:$.responseParam.overview.responseParam.savingsDetails[0].${kind === "valuation" ? "yenEqui" : "balance"}`
+            : "row",
         JSON.stringify(productExtra),
         ...(product && (kind === "balance" || kind === "valuation") ? [product.currency] : []),
       )
@@ -226,6 +237,17 @@ it("bounds product metadata before it leaves D1 and preserves oversized source e
   });
   const projected = await observationOrganizations(env.DB, harmless.refs);
   expect(projected.get(`balance:${harmless.refs[1]!.id}`)!.product!.status).toBe("identified");
+  const sony = await seed("sony-bank:deposit:JPY", {
+    code: "x".repeat(9000),
+    currency: "JPY",
+    sony: true,
+  });
+  const sonyResult = await observationOrganizations(env.DB, sony.refs);
+  expect(sonyResult.get(`balance:${sony.refs[1]!.id}`)!.product).toMatchObject({
+    status: "unresolved",
+    productId: null,
+  });
+  expect(sonyResult.get(`balance:${sony.refs[1]!.id}`)!.product!.reason).toContain("読み取り上限");
 });
 
 it("uses current manual claims but does not publish an unsealed newer identity run", async () => {
