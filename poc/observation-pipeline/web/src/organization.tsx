@@ -8,6 +8,7 @@ import type {
 import { Badge, Nullable, ObservationLink, Panel, SourceAccount } from "./ui.tsx";
 import { AccountConnectionDetails } from "./account-connection.tsx";
 import { FinancialProductDetails, FinancialProductSummary } from "./financial-product.tsx";
+import { isCurrentFinancialProductClaim } from "../../shared/financial-products.ts";
 
 type Organization = ObservationOrganization | undefined;
 const STATUS: Record<IdentityStatus, string> = {
@@ -51,7 +52,10 @@ export function OrganizedSourceAccount({
 }): ReactNode {
   const organized = organization?.state === "organized" ? organization.account : null;
   const product = organization?.state === "organized" ? organization.product : undefined;
-  const productPrimary = product?.status === "identified" && organized?.method !== "manual";
+  const productPrimary =
+    product?.status === "identified" &&
+    isCurrentFinancialProductClaim(product) &&
+    organized?.method !== "manual";
   return (
     <div className="organized-account">
       {productPrimary ? <FinancialProductSummary claim={product} /> : null}

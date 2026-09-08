@@ -1,13 +1,17 @@
 import type { ReactNode } from "react";
 import {
   FINANCIAL_PRODUCT_SOURCES,
+  isCurrentFinancialProductClaim,
   type FinancialProductClaim,
 } from "../../shared/financial-products.ts";
 import { ArtifactLink, Badge, ObservationLink } from "./ui.tsx";
 
 const STATUS = { identified: "商品を特定", unresolved: "商品未特定", conflict: "商品の根拠が競合" };
+const REFRESH_NOTICE = "商品情報が更新されています。再読み込みしてください。";
 
 export function FinancialProductSummary({ claim }: { claim: FinancialProductClaim }): ReactNode {
+  if (!isCurrentFinancialProductClaim(claim))
+    return <div className="financial-product-summary table-secondary">{REFRESH_NOTICE}</div>;
   return (
     <div className="financial-product-summary">
       <div>
@@ -23,6 +27,8 @@ export function FinancialProductSummary({ claim }: { claim: FinancialProductClai
 }
 
 export function FinancialProductDetails({ claim }: { claim: FinancialProductClaim }): ReactNode {
+  if (!isCurrentFinancialProductClaim(claim))
+    return <div className="financial-product-details table-secondary">{REFRESH_NOTICE}</div>;
   const sources = FINANCIAL_PRODUCT_SOURCES.filter((source) =>
     claim.evidence.sourceIds.includes(source.id),
   );
@@ -63,7 +69,10 @@ export function FinancialProductDetails({ claim }: { claim: FinancialProductClai
           <dt>取得元の観測日時</dt>
           <dd>{claim.origin.observedAt ?? "記録なし"}</dd>
           <dt>解析</dt>
-          <dd>#{claim.origin.parseRunId}</dd>
+          <dd className="wrap">
+            #{claim.origin.parseRunId}
+            {claim.origin.parserName ? ` · ${claim.origin.parserName}` : null}
+          </dd>
           <dt>参照した項目</dt>
           <dd className="wrap">{claim.evidence.fields.join(" / ") || "なし"}</dd>
           <dt>判定理由</dt>
