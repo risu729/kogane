@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
+import type {
+  IdentityInput,
+  IdentityPlan,
+} from "../../../poc/observation-pipeline/src/identity/types.ts";
 import {
   identifyParse,
   identityKey,
@@ -8,7 +12,35 @@ import {
   reviseIdentity,
   type IdentityResolver,
 } from "../src/identity-store.ts";
-import { otherIdentity } from "../../../poc/observation-pipeline/src/identity/other.ts";
+// Storage tests deliberately do not depend on a provider policy PR.
+function otherIdentity(input: IdentityInput): IdentityPlan {
+  const unit = input.instrument ?? input.currency;
+  return {
+    account: {
+      key: [input.sourceAccount],
+      label: "Synthetic account",
+      role: "deposit",
+      status: "provider-local",
+      reason: "synthetic-test-policy",
+    },
+    instruments: unit
+      ? [
+          {
+            role: "unit",
+            kind: "money",
+            namespace: "iso4217",
+            scope: "global",
+            value: unit,
+            label: unit,
+            status: "identified",
+            reason: "synthetic-test-policy",
+            details: {},
+          },
+        ]
+      : [],
+    issues: [],
+  };
+}
 
 let mf: Miniflare;
 let db: D1Database;
