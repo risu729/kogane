@@ -4,6 +4,7 @@ import { beforeAll, expect, it } from "vitest";
 import ingest from "../../raw-evidence/src/worker";
 import { seedRegistry, seedRun } from "./fixtures";
 import { identityQuery } from "../src/identity-api";
+import { organizedFilterOptions } from "../src/organized-filter-options";
 import {
   preferredInstrumentNames,
   PREFERRED_INSTRUMENT_NAMES_SQL,
@@ -312,6 +313,28 @@ it("representative parse/run/pin cardinalities preserve current identity eligibi
     .bind(JSON.stringify(references.results.map((row) => row.id)))
     .all<{ detail: string }>();
   expect(plan.results.filter((row) => row.detail === "MATERIALIZE eligible")).toHaveLength(1);
+  const filterAccounts = await env.DB.prepare(`SELECT DISTINCT s.source_id,b.source_account
+    FROM current_identity_observations o JOIN source_accounts s ON s.id=o.source_account_id
+    JOIN transaction_observations b ON b.id=o.observation_id WHERE o.kind='transaction'`).all<{
+    source_id: string;
+    source_account: string;
+  }>();
+  started = performance.now();
+  const filters = await organizedFilterOptions(env.DB, "transactions", {
+    sources: [],
+    instruments: [],
+    metrics: [],
+    accounts: filterAccounts.results,
+  });
+  const filterTime = Math.round(performance.now() - started);
+  expect(filters.accounts.length).toBe(filterAccounts.results.length);
+  expect(
+    filters.accounts.every((row) => row.display_name !== null && !row.organization_ambiguous),
+  ).toBe(true);
+  expect(filterTime).toBeLessThan(5000);
+  console.log(
+    JSON.stringify({ organizedFilterMs: filterTime, parseRuns: 6000, observations: 35000 }),
+  );
   // A newer unsealed policy never replaces the sealed policy-2 evidence.
   expect(
     await env.DB.prepare(
