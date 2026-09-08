@@ -28,7 +28,12 @@ describe("production observation API", () => {
     expect(validApiResponse("/api/filter-options", options)).toBe(true);
     expect(options).toMatchObject({
       accounts: expect.arrayContaining([
-        { source_id: "other-test", source_account: "older-account" },
+        {
+          source_id: "other-test",
+          source_account: "older-account",
+          display_name: null,
+          organization_ambiguous: false,
+        },
       ]),
     });
     const small = await (
@@ -143,7 +148,12 @@ describe("production observation API", () => {
     const historicalOptions = await (await call("/api/filter-options?kind=balances")).json();
     expect(historicalOptions).toMatchObject({
       accounts: expect.arrayContaining([
-        { source_id: "other-test", source_account: "large-balance-account" },
+        {
+          source_id: "other-test",
+          source_account: "large-balance-account",
+          display_name: null,
+          organization_ambiguous: false,
+        },
       ]),
       instruments: expect.arrayContaining(["USD"]),
       metrics: expect.arrayContaining(["metric-1003"]),

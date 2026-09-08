@@ -1,4 +1,5 @@
 import * as queries from "./observations";
+import { organizedFilterOptions } from "./organized-filter-options";
 import { HttpError, json } from "./http";
 import { raw } from "./read";
 import {
@@ -95,7 +96,9 @@ export async function observationApi(
     const kind = url.searchParams.get("kind");
     if (!kind || !["transactions", "balances", "positions", "artifacts"].includes(kind))
       throw new HttpError(400, "invalid_query");
-    return json(await queries.filterOptions(store, kind));
+    return json(
+      await organizedFilterOptions(env.DB, kind, await queries.filterOptions(store, kind)),
+    );
   }
   if (path === "/api/meta") {
     await env.DB.prepare("SELECT id FROM observation_fetch_artifacts LIMIT 1").first();

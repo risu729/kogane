@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { getJson } from "./api.ts";
 import { navigate, useLocation } from "./router.tsx";
 import { QueryBoundary } from "./ui.tsx";
+import type { FilterOptions } from "../../shared/api-contract.ts";
 
 export function CollectionControls({ kind }: { kind: string }) {
   const location = useLocation();
@@ -25,13 +26,7 @@ export function CollectionControls({ kind }: { kind: string }) {
   const invalidDates = Boolean(draft.from && draft.to && draft.from > draft.to);
   const options = useQuery({
     queryKey: ["filter-options", kind],
-    queryFn: ({ signal }) =>
-      getJson<{
-        sources: string[];
-        accounts: { source_id: string; source_account: string }[];
-        instruments?: string[];
-        metrics?: string[];
-      }>(`/api/filter-options?kind=${kind}`, signal),
+    queryFn: ({ signal }) => getJson<FilterOptions>(`/api/filter-options?kind=${kind}`, signal),
   });
   function change(source: string, account: string) {
     const next = new URLSearchParams(params);
@@ -91,7 +86,9 @@ export function CollectionControls({ kind }: { kind: string }) {
                         key={JSON.stringify([row.source_id, row.source_account])}
                         value={JSON.stringify([row.source_id, row.source_account])}
                       >
+                        {row.display_name ? `${row.display_name} · ` : ""}
                         {row.source_account} · {row.source_id}
+                        {row.organization_ambiguous ? "（複数の整理区分）" : ""}
                       </option>
                     ))}
                 </select>
