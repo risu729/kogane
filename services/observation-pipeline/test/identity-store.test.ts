@@ -103,6 +103,7 @@ ALTER TABLE fetch_artifacts ADD COLUMN format_version TEXT;`);
     "0018_identity.sql",
     "0019_identity_seal_provenance.sql",
     "0020_vpass_identity_binding.sql",
+    "0021_vpass_binding_lookup_plan.sql",
   ]) {
     for (const sql of splitSql(readFileSync(new URL(name, migrationDir), "utf8")))
       await db.prepare(sql).run();
