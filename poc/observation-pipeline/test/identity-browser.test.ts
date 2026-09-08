@@ -284,4 +284,66 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
         await page.close();
       }
     }, 60_000);
+  test("blocked client requests terminate with visible errors", async () => {
+    const page = await browser.newPage();
+    let attempts = 0;
+    await page.route("**/api/identity/**", (route) => {
+      attempts++;
+      return route.abort("blockedbyclient");
+    });
+    try {
+      await page.goto(`${origin}/identities`, { waitUntil: "domcontentloaded" });
+      await page.getByText("口座を読み込めませんでした").waitFor({ timeout: 10000 });
+      await page.getByText("整理状況を読み込めませんでした").waitFor({ timeout: 10000 });
+      expect(attempts).toBeGreaterThanOrEqual(4);
+      expect(await page.locator("main").innerText()).not.toContain("読み込んでいます");
+    } finally {
+      await page.close();
+    }
+  }, 15000);
+  test("stalled identity responses reach a retryable deadline instead of endless loading", async () => {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      window.setTimeout = new Proxy(window.setTimeout, {
+        apply(target, receiver, args) {
+          if (args[1] === 30_000) args[1] = 50;
+          return Reflect.apply(target, receiver, args);
+        },
+      });
+    });
+    await page.route("**/api/identity/**", () => {});
+    try {
+      await page.goto(`${origin}/identities`, { waitUntil: "domcontentloaded" });
+      await page.getByText(/口座を読み込めませんでした.*408/).waitFor();
+      await page.getByText(/整理状況を読み込めませんでした.*408/).waitFor();
+      expect(
+        await page.locator("main").getByRole("button", { name: "再試行", exact: true }).count(),
+      ).toBe(2);
+      expect(await page.locator("main").innerText()).not.toContain("読み込んでいます");
+    } finally {
+      await page.close();
+    }
+  }, 10000);
+  test("offline paused identity queries show an explicit connection state", async () => {
+    const page = await browser.newPage();
+    let attempts = 0;
+    await page.route("**/api/identity/**", (route) => {
+      attempts++;
+      return route.abort("failed");
+    });
+    try {
+      await page.goto(`${origin}/identities`, { waitUntil: "domcontentloaded" });
+      await page.getByText("口座を読み込んでいます…", { exact: true }).waitFor();
+      await page.evaluate(() => window.dispatchEvent(new Event("offline")));
+      await page
+        .getByText(/通信が一時停止しています/)
+        .first()
+        .waitFor({ timeout: 5000 });
+      expect(attempts).toBeGreaterThanOrEqual(2);
+      expect(await page.locator("main").getByRole("alert").count()).toBe(2);
+      expect(await page.locator("main").innerText()).not.toContain("読み込んでいます");
+    } finally {
+      await page.close();
+    }
+  }, 10000);
 });

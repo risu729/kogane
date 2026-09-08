@@ -408,6 +408,19 @@ export function QueryBoundary<T>({
     );
   }
   if (query.data === undefined) {
+    if (query.fetchStatus === "paused")
+      return (
+        <ErrorState
+          error={
+            new ApiError(
+              0,
+              "通信が一時停止しています。ネットワーク接続を確認してください。接続が戻ると再開します。",
+            )
+          }
+          label={label}
+          onRetry={retry}
+        />
+      );
     if (query.isError)
       return (
         <ErrorState error={query.error} label={label} onRetry={retry} retrying={query.isFetching} />
@@ -426,6 +439,11 @@ export function QueryBoundary<T>({
       : undefined;
   return (
     <>
+      {query.fetchStatus === "paused" ? (
+        <div className="query-notice query-warning" role="status">
+          通信が一時停止しています。接続が戻るまで、前回読み込んだ{label}を表示しています。
+        </div>
+      ) : null}
       {coverage?.truncated ? (
         <div className="query-notice query-warning" role="status">
           このページは各一覧の最大500件を表示しています。続きの記録があります。表示件数は全記録の総数ではありません。
