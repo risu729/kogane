@@ -2,6 +2,7 @@
 // Shape<T> requires a validator for every declared field when contracts evolve.
 import { isDecimalMinorUnit } from "../src/money.ts";
 import { validIdentityResponse } from "./identity-contract.ts";
+import { validAccountConnection } from "./account-connection-contract.ts";
 import type {
   ObservationOrganization,
   OrganizedAccount,
@@ -69,11 +70,16 @@ const organizationAccountFields = {
   revision: (value: unknown): value is number => identifier(value) && value > 0,
   method: literal("rule", "manual"),
   reason: text,
-} satisfies Shape<OrganizedAccount>;
+} satisfies Shape<Omit<OrganizedAccount, "connection">>;
 const organizationShape = object<ObservationOrganization>({
   state: literal("organized", "unavailable"),
   lineage: nullable(literal("current", "historical")),
-  account: nullable(object<OrganizedAccount>(organizationAccountFields)),
+  account: nullable(
+    object<OrganizedAccount>({
+      ...organizationAccountFields,
+      connection: optional(validAccountConnection),
+    }),
+  ),
   instruments: array(
     object<OrganizedInstrument>({
       ...organizationAccountFields,

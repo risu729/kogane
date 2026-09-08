@@ -43,6 +43,31 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
             capabilities: { readOnly: true, rawEvidence: true, liveCollectors: false },
           });
         if (url.pathname.startsWith("/api/identity/")) {
+          if (url.pathname.endsWith("/connections"))
+            return Response.json({
+              connections: [
+                {
+                  label: "SBI新生銀行（MoneyForward連携）",
+                  status: "confirmed",
+                  relation: "same-provider-connection",
+                  relatedSource: "sbi-shinsei-bank",
+                  reason: "保存原本の識別情報を照合しました。",
+                  leafBinding: "unresolved",
+                  evidenceArtifactIds: [1, 2, 3],
+                  revision: 1,
+                },
+                ...["三井住友銀行", "三井住友カード", "PRESTIA"].map((label) => ({
+                  label,
+                  status: "unresolved",
+                  relation: "candidate",
+                  relatedSource: null,
+                  reason: "個別口座の根拠不足",
+                  leafBinding: "unresolved",
+                  evidenceArtifactIds: [4],
+                  revision: 1,
+                })),
+              ],
+            });
           const filtered = url.searchParams.get("source");
           const second = Number(url.searchParams.get("offset") ?? "0") > 0;
           const envelope = { limit: 100, truncated: !second, nextOffset: second ? null : 100 };
@@ -131,6 +156,15 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
         await page.goto(`${origin}/identities`, { waitUntil: "networkidle" });
         const first = page.locator("article").filter({ hasText: `${freshLabel}-0` });
         await first.waitFor();
+        const inventory = page.locator("section").filter({
+          has: page.getByRole("heading", { name: "MoneyForwardと直接取得の対応", exact: true }),
+        });
+        expect(await inventory.innerText()).toMatch(/対応は要確認\s*3件/);
+        const confirmed = inventory.locator("article").filter({ hasText: "SBI新生銀行" });
+        await confirmed.locator("summary").click();
+        expect(await confirmed.innerText()).toContain("個別口座・カードとの対応は未確定");
+        expect(await confirmed.locator('a[href*="/artifacts/"]').count()).toBe(3);
+        expect(await inventory.innerText()).toContain("個別口座と取得範囲を確認できた場合に補完");
         for (const label of ["識別済み", "取得元内で識別", "集計表示", "要確認"])
           expect(
             await page.locator("article .badge").getByText(label, { exact: true }).count(),
@@ -317,9 +351,10 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
       await page.clock.fastForward(30_001);
       await page.getByText(/口座を読み込めませんでした.*408/).waitFor();
       await page.getByText(/整理状況を読み込めませんでした.*408/).waitFor();
+      await page.getByText(/取得経路の対応を読み込めませんでした.*408/).waitFor();
       expect(
         await page.locator("main").getByRole("button", { name: "再試行", exact: true }).count(),
-      ).toBe(2);
+      ).toBe(3);
       expect(await page.locator("main").innerText()).not.toContain("読み込んでいます");
     } finally {
       await page.close();
@@ -341,7 +376,7 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
         .first()
         .waitFor({ timeout: 5000 });
       expect(attempts).toBeGreaterThanOrEqual(2);
-      expect(await page.locator("main").getByRole("alert").count()).toBe(2);
+      expect(await page.locator("main").getByRole("alert").count()).toBe(3);
       expect(await page.locator("main").innerText()).not.toContain("読み込んでいます");
     } finally {
       await page.close();

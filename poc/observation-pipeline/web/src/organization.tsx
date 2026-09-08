@@ -6,6 +6,7 @@ import type {
   OrganizedInstrument,
 } from "../../shared/organization-contract.ts";
 import { Badge, Nullable, ObservationLink, Panel, SourceAccount } from "./ui.tsx";
+import { AccountConnectionDetails } from "./account-connection.tsx";
 
 type Organization = ObservationOrganization | undefined;
 const STATUS: Record<IdentityStatus, string> = {
@@ -56,6 +57,9 @@ export function OrganizedSourceAccount({
         </div>
       ) : null}
       <SourceAccount source={source} account={account} />
+      {organized?.connection ? (
+        <AccountConnectionDetails connection={organized.connection} />
+      ) : null}
       {organization?.state === "unavailable" ? (
         <div className="table-secondary">整理情報なし</div>
       ) : null}
@@ -118,7 +122,12 @@ export function OrganizationPanel({ organization }: { organization: Organization
               <dt>口座</dt>
               <dd>
                 {organization.account ? (
-                  <Interpretation item={organization.account} />
+                  <>
+                    <Interpretation item={organization.account} />
+                    {organization.account.connection ? (
+                      <AccountConnectionDetails connection={organization.account.connection} />
+                    ) : null}
+                  </>
                 ) : (
                   <Nullable value={null} placeholder="口座の整理情報なし" />
                 )}

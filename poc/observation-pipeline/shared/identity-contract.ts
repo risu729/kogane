@@ -1,9 +1,11 @@
+import { validAccountConnection, type AccountConnection } from "./account-connection-contract";
 export type IdentityStatus = "identified" | "provider-local" | "aggregate" | "unresolved";
 export type IdentityOrigin = {
   kind: "transaction" | "balance" | "position" | "valuation";
   id: number;
 };
 export interface IdentityAccountRow {
+  connection?: AccountConnection;
   referenceId: string;
   targetId: string;
   label: string;
@@ -58,6 +60,13 @@ const object = (v: unknown): v is Record<string, unknown> =>
 const count = (v: unknown): v is number =>
   typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 export function validIdentityResponse(path: string, value: unknown): boolean {
+  if (path === "/api/identity/connections")
+    return (
+      object(value) &&
+      Array.isArray(value.connections) &&
+      value.connections.length <= 64 &&
+      value.connections.every(validAccountConnection)
+    );
   if (
     !["/api/identity/accounts", "/api/identity/instruments", "/api/identity/coverage"].includes(
       path,
@@ -102,6 +111,9 @@ export function validIdentityResponse(path: string, value: unknown): boolean {
           : null;
     return (
       fields !== null &&
+      (path !== "/api/identity/accounts" ||
+        row.connection === undefined ||
+        validAccountConnection(row.connection)) &&
       [...fields, "referenceId", "targetId", "label", "reason"].every(
         (k) => typeof row[k] === "string",
       ) &&

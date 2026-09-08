@@ -1,4 +1,6 @@
 import type { ObservationKind } from "../../../poc/observation-pipeline/shared/api-contract";
+import { readAccountConnections } from "./account-connections";
+import { connectionAccountLabel } from "./account-connection-display";
 import {
   preferredInstrumentNames,
   type PreferredInstrumentName,
@@ -11,6 +13,9 @@ import type {
 
 type Ref = { kind: ObservationKind; id: number };
 interface OrganizationRow {
+  source: string;
+  producer: string;
+  source_account: string;
   kind: ObservationKind;
   observation_id: number;
   historical: number;
@@ -52,6 +57,7 @@ export const ORGANIZATION_QUERY = `WITH wanted AS MATERIALIZED (
  WHERE p.status='ok' AND f.status='success' AND f.failure_count=0
 )
 SELECT o.kind,o.observation_id,o.historical,
+ sa.source_id source,sa.producer_id producer,json_extract(sa.reference_json,'$[0]') source_account,
  am.source_account_id account_reference,am.account_id account_target,
  am.label account_label,am.status account_status,am.revision account_revision,
  am.method account_method,am.reason account_reason,
@@ -59,6 +65,7 @@ SELECT o.kind,o.observation_id,o.historical,
  im.label instrument_label,im.status instrument_status,im.revision instrument_revision,
  im.method instrument_method,im.reason instrument_reason,d.namespace,d.scope,d.value
 FROM ranked o JOIN current_account_mappings am ON am.source_account_id=o.source_account_id
+JOIN source_accounts sa ON sa.id=o.source_account_id
 LEFT JOIN identity_instrument_uses u ON u.identity_observation_id=o.id
 LEFT JOIN instrument_identifiers d ON d.id=u.identifier_id
 LEFT JOIN current_instrument_mappings im ON im.identifier_id=d.id
@@ -82,12 +89,22 @@ export async function observationOrganizations(
   if (unique.size > 5501) throw new Error("organization_reference_limit");
   const output = new Map([...unique.keys()].map((key) => [key, unavailable()]));
   const refs = [...unique.values()];
+  const accountRefs = new Map<
+    string,
+    { referenceId: string; source: string; producer: string; sourceAccount: string }
+  >();
   for (let start = 0; start < refs.length; start += 500) {
     const rows = await db
       .prepare(ORGANIZATION_QUERY)
       .bind(JSON.stringify(refs.slice(start, start + 500)))
       .all<OrganizationRow>();
     for (const row of rows.results) {
+      accountRefs.set(row.account_reference, {
+        referenceId: row.account_reference,
+        source: row.source,
+        producer: row.producer,
+        sourceAccount: row.source_account,
+      });
       const key = organizationKey({ kind: row.kind, id: row.observation_id });
       let organization = output.get(key);
       if (!organization) throw new Error("organization_unrequested_result");
@@ -142,7 +159,23 @@ export async function observationOrganizations(
       names.set(id, name);
     }
   }
+  const connections = accountRefs.size
+    ? await readAccountConnections(db, [...accountRefs.values()])
+    : new Map();
   for (const organization of output.values()) {
+    if (organization.account) {
+      const account = organization.account;
+      const connection = connections.get(account.referenceId);
+      if (connection) {
+        account.connection = connection;
+        account.label = connectionAccountLabel(
+          account.label,
+          account.method,
+          accountRefs.get(account.referenceId)!.source,
+          connection,
+        );
+      }
+    }
     for (const instrument of organization.instruments) {
       const name = names.get(instrument.referenceId);
       if (name) {
