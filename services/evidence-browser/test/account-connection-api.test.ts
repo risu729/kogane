@@ -7,6 +7,7 @@ import { identifyParse } from "../../observation-pipeline/src/identity-store";
 import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity";
 import { validIdentityResponse } from "../../../poc/observation-pipeline/shared/identity-contract";
 import { validAccountConnection } from "../../../poc/observation-pipeline/shared/account-connection-contract";
+import { organizedFilterOptions } from "../src/organized-filter-options";
 
 beforeAll(async () => {
   await seedRegistry();
@@ -95,11 +96,29 @@ it("applies only eligible automatic MF connection names without altering origina
   const get = async () =>
     (await observationOrganizations(env.DB, [ref])).get(`transaction:${ref.id}`)!;
   const initial = await get();
+  const filterInput = {
+    sources: ["moneyforward-me"],
+    instruments: [],
+    metrics: [],
+    accounts: [
+      {
+        source_id: "moneyforward-me",
+        source_account: "moneyforward-me:observed-connection",
+      },
+    ],
+  };
+  const filterName = async () =>
+    (await organizedFilterOptions(env.DB, "transactions", filterInput)).accounts[0]!;
   expect(initial.account).toMatchObject({
     label: "三井住友銀行（MoneyForward連携）（個別口座未確定）",
     connection: { status: "unresolved" },
   });
   expect(initial.instruments.every((instrument) => !("connection" in instrument))).toBe(true);
+  expect(await filterName()).toEqual({
+    ...filterInput.accounts[0],
+    display_name: initial.account!.label,
+    organization_ambiguous: false,
+  });
   const raw = await env.DB.prepare("SELECT source_account FROM transaction_observations WHERE id=?")
     .bind(ref.id)
     .first("source_account");
@@ -119,9 +138,28 @@ it("applies only eligible automatic MF connection names without altering origina
   const ineligible = await get();
   expect(ineligible.account!.connection!.status).toBe("evidence-ineligible");
   expect(ineligible.account!.label).not.toBe(initial.account!.label);
+  expect((await filterName()).display_name).toBe(ineligible.account!.label);
   await env.DB.prepare(`INSERT INTO account_mappings SELECT 'manual-connection-label',source_account_id,revision+1,account_id,
     'manual','manual correction',policy_version,'2100','手動で選んだ口座',status FROM current_account_mappings WHERE source_account_id=?`)
     .bind(initial.account!.referenceId)
     .run();
   expect((await get()).account).toMatchObject({ label: "手動で選んだ口座", method: "manual" });
+  expect((await filterName()).display_name).toBe("手動で選んだ口座");
+  expect(filterInput.accounts[0]).not.toHaveProperty("display_name");
+});
+
+it("retains manual display names even when a reviewed connection name is eligible", async () => {
+  const { connectionAccountLabel } = await import("../src/account-connection-display");
+  expect(
+    connectionAccountLabel("手動指定", "manual", "moneyforward-me", {
+      label: "三井住友銀行（MoneyForward連携）",
+      status: "unresolved",
+      relation: "candidate",
+      relatedSource: "smbc-bank",
+      reason: "個別口座の根拠不足",
+      leafBinding: "unresolved",
+      evidenceArtifactIds: [1],
+      revision: 1,
+    }),
+  ).toBe("手動指定");
 });
