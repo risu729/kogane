@@ -87,18 +87,13 @@ try {
       );
       const candidates = (
         await proxy.env.DB.prepare(
-          "SELECT id,reference_json FROM source_accounts WHERE source_id='sbi-shinsei-bank' AND producer_id=?",
+          "SELECT id FROM source_accounts WHERE source_id='sbi-shinsei-bank' AND producer_id=? AND json_extract(reference_json,'$[0]') IN (SELECT value FROM json_each(?)) ORDER BY id LIMIT 101",
         )
-          .bind(direct.producer)
-          .all<{ id: string; reference_json: string }>()
+          .bind(direct.producer, JSON.stringify(proof.directSourceAccounts))
+          .all<{ id: string }>()
       ).results;
-      references = candidates
-        .filter((c) => {
-          const ref: unknown = JSON.parse(c.reference_json);
-          return Array.isArray(ref) && proof.directSourceAccounts.includes(ref[0]);
-        })
-        .map((c) => c.id)
-        .sort();
+      if (candidates.length > 100) throw new Error("connection_direct_reference_limit");
+      references = candidates.map((c) => c.id).sort();
       if (!references.length) throw new Error("connection_direct_references_missing");
       status = "confirmed";
       reason =

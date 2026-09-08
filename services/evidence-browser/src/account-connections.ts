@@ -15,6 +15,23 @@ interface ReviewRow {
   evidence_eligible: number;
   revision: number;
 }
+export function connectionReferenceSet(json: string): Set<string> {
+  if (json.length > 26001) throw new Error("connection_direct_reference_limit");
+  let values: unknown;
+  try {
+    values = JSON.parse(json);
+  } catch {
+    throw new Error("connection_direct_reference_invalid");
+  }
+  if (
+    !Array.isArray(values) ||
+    values.length > 100 ||
+    values.some((v) => typeof v !== "string" || v.length < 1 || v.length > 256) ||
+    new Set(values).size !== values.length
+  )
+    throw new Error("connection_direct_reference_invalid");
+  return new Set(values as string[]);
+}
 function presentation(row: ReviewRow): AccountConnection {
   return {
     label: row.label,
@@ -41,7 +58,10 @@ export async function listAccountConnections(db: D1Database): Promise<AccountCon
     )
     .all<ReviewRow>();
   if (rows.results.length > 64) throw new Error("connection_inventory_limit");
-  return rows.results.map(presentation);
+  return rows.results.map((row) => {
+    connectionReferenceSet(row.direct_reference_ids_json);
+    return presentation(row);
+  });
 }
 /** Exact reference IDs determine which direct accounts a retained proof covers. */
 export async function readAccountConnections(
@@ -55,9 +75,13 @@ export async function readAccountConnections(
     )
     .all<ReviewRow>();
   if (rows.results.length > 64) throw new Error("connection_inventory_limit");
+  const parsed = rows.results.map((row) => ({
+    ...row,
+    directReferences: connectionReferenceSet(row.direct_reference_ids_json),
+  }));
   const result = new Map<string, AccountConnection>();
   for (const ref of refs) {
-    const matches = rows.results.filter(
+    const matches = parsed.filter(
       (row) =>
         (ref.source === "moneyforward-me" &&
           ref.producer === row.producer_id &&
@@ -65,7 +89,7 @@ export async function readAccountConnections(
         (row.status === "confirmed" &&
           ref.source === row.related_source_id &&
           ref.producer === row.direct_producer_id &&
-          (JSON.parse(row.direct_reference_ids_json) as string[]).includes(ref.referenceId)),
+          row.directReferences.has(ref.referenceId)),
     );
     if (matches.length === 1) result.set(ref.referenceId, presentation(matches[0]!));
     if (matches.length > 1)

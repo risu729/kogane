@@ -4,7 +4,24 @@ import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
   listAccountConnections,
   readAccountConnections,
+  connectionReferenceSet,
 } from "../../evidence-browser/src/account-connections";
+test("reader rejects malformed, duplicate and oversized reference sets before lookup", () => {
+  expect(
+    connectionReferenceSet(JSON.stringify(Array.from({ length: 100 }, (_, i) => `ref-${i}`))).size,
+  ).toBe(100);
+  for (const value of [
+    "null",
+    "{}",
+    '["duplicate","duplicate"]',
+    JSON.stringify(Array.from({ length: 101 }, (_, i) => `ref-${i}`)),
+    "[1]",
+    '[""]',
+    JSON.stringify(["x".repeat(257)]),
+    " ".repeat(26002),
+  ])
+    expect(() => connectionReferenceSet(value)).toThrow();
+});
 test("D1 retains decisions, rejects untrusted lineage/replacements, and revokes effective proof after exclusion", async () => {
   const mf = new Miniflare(
     convertV4MiniflareOptions({
@@ -52,6 +69,12 @@ INSERT INTO fetch_artifacts VALUES(1,'moneyforward-me','account-detail',1,'conne
     await expect(insert(1, 3, '["other-reference"]')).rejects.toThrow(
       "connection_evidence_invalid",
     );
+    await expect(insert(1, 3, '["direct-reference","direct-reference"]')).rejects.toThrow(
+      "connection_evidence_invalid",
+    );
+    await expect(
+      insert(1, 3, JSON.stringify(Array.from({ length: 101 }, () => "direct-reference"))),
+    ).rejects.toThrow();
     await insert(1);
     expect(await listAccountConnections(db)).toMatchObject([
       {

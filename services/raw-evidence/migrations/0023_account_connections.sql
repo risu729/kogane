@@ -13,7 +13,7 @@ CREATE TABLE account_connection_reviews (
  detail_artifact_id INTEGER NOT NULL REFERENCES fetch_artifacts(id),
  direct_artifact_id INTEGER REFERENCES fetch_artifacts(id),
  branch_artifact_id INTEGER REFERENCES fetch_artifacts(id),
- direct_reference_ids_json TEXT NOT NULL CHECK(json_valid(direct_reference_ids_json) AND json_type(direct_reference_ids_json)='array'),
+ direct_reference_ids_json TEXT NOT NULL CHECK(length(direct_reference_ids_json)<=26001 AND json_valid(direct_reference_ids_json) AND json_type(direct_reference_ids_json)='array' AND json_array_length(direct_reference_ids_json)<=100),
  created_at TEXT NOT NULL,
  UNIQUE(producer_id,connection_key,revision),
  CHECK((status='confirmed' AND related_source_id IS NOT NULL AND related_source_id='sbi-shinsei-bank' AND direct_producer_id IS NOT NULL AND direct_artifact_id IS NOT NULL AND branch_artifact_id IS NOT NULL AND json_array_length(direct_reference_ids_json)>0)
@@ -23,7 +23,9 @@ CREATE TRIGGER account_connection_revision BEFORE INSERT ON account_connection_r
 WHEN NEW.revision<>coalesce((SELECT max(revision) FROM account_connection_reviews WHERE producer_id=NEW.producer_id AND connection_key=NEW.connection_key),0)+1
 BEGIN SELECT RAISE(ABORT,'connection_revision_conflict'); END;
 CREATE TRIGGER account_connection_evidence BEFORE INSERT ON account_connection_reviews
-WHEN NOT EXISTS(SELECT 1 FROM observation_fetch_artifacts a JOIN observation_fetch_runs r ON r.id=a.fetch_run_id WHERE a.id=NEW.detail_artifact_id AND a.source_id='moneyforward-me' AND a.dataset='account-detail' AND a.fetch_unit_key=NEW.connection_key AND r.tool=NEW.producer_id AND r.status='success' AND r.failure_count=0)
+WHEN json_array_length(NEW.direct_reference_ids_json)<>(SELECT count(DISTINCT value) FROM json_each(NEW.direct_reference_ids_json))
+ OR EXISTS(SELECT 1 FROM json_each(NEW.direct_reference_ids_json) WHERE type<>'text' OR length(value) NOT BETWEEN 1 AND 256)
+ OR NOT EXISTS(SELECT 1 FROM observation_fetch_artifacts a JOIN observation_fetch_runs r ON r.id=a.fetch_run_id WHERE a.id=NEW.detail_artifact_id AND a.source_id='moneyforward-me' AND a.dataset='account-detail' AND a.fetch_unit_key=NEW.connection_key AND r.tool=NEW.producer_id AND r.status='success' AND r.failure_count=0)
  OR (NEW.status='confirmed' AND (
  NOT EXISTS(SELECT 1 FROM observation_fetch_artifacts a JOIN observation_fetch_runs r ON r.id=a.fetch_run_id WHERE a.id=NEW.direct_artifact_id AND a.source_id=NEW.related_source_id AND a.dataset='top-accounts-balance-and-activity' AND r.tool=NEW.direct_producer_id AND r.status='success' AND r.failure_count=0)
  OR NOT EXISTS(SELECT 1 FROM observation_fetch_artifacts a JOIN observation_fetch_runs r ON r.id=a.fetch_run_id JOIN fetch_artifacts d ON d.id=NEW.direct_artifact_id WHERE a.id=NEW.branch_artifact_id AND a.source_id=NEW.related_source_id AND a.dataset='balance-summary-and-stage' AND a.fetch_run_id=d.fetch_run_id AND r.tool=NEW.direct_producer_id AND r.status='success' AND r.failure_count=0)
