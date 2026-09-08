@@ -26,7 +26,11 @@ export function CollectionControls({ kind }: { kind: string }) {
   const invalidDates = Boolean(draft.from && draft.to && draft.from > draft.to);
   const options = useQuery({
     queryKey: ["filter-options", kind],
-    queryFn: ({ signal }) => getJson<FilterOptions>(`/api/filter-options?kind=${kind}`, signal),
+    queryFn: ({ signal }) =>
+      getJson<FilterOptions>(
+        `/api/filter-options?kind=${kind === "summaries" ? "balances" : kind}${kind === "balances" || kind === "summaries" ? `&view=${kind}` : ""}`,
+        signal,
+      ),
   });
   function change(source: string, account: string) {
     const next = new URLSearchParams(params);
@@ -94,11 +98,15 @@ export function CollectionControls({ kind }: { kind: string }) {
                 </select>
               </label>
             ) : null}
-            {kind === "balances"
+            {kind === "balances" || kind === "summaries"
               ? (
                   [
                     ["instrument", "通貨・単位", data.instruments ?? []],
-                    ["metric", "残高の種類", data.metrics ?? []],
+                    [
+                      "metric",
+                      kind === "summaries" ? "実績・請求の種類" : "残高の種類",
+                      data.metrics ?? [],
+                    ],
                   ] as const
                 ).map(([key, label, values]) => (
                   <label className="filter-field" key={key}>

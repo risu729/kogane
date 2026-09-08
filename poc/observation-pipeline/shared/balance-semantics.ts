@@ -1,7 +1,21 @@
 import { validFinancialProductClaim, type FinancialProductClaim } from "./financial-products";
 
 export interface BalanceSemantic {
-  kind: "asset" | "liability" | "statement" | "aggregate" | "other";
+  kind: "asset" | "liability" | "statement" | "aggregate" | "period_total" | "other";
+  measurementKind?:
+    | "balance"
+    | "aggregate_balance"
+    | "period_total"
+    | "statement_amount"
+    | "capacity"
+    | "unknown";
+  assetClass?: "cash" | "prepaid" | "reward" | "mixed" | "unknown";
+  timeBasis?:
+    | "reported_snapshot"
+    | "event_report"
+    | "previous_calendar_month"
+    | "statement_month"
+    | "unknown";
   label: string;
   netAssetEligible: false;
   reason: string;
@@ -18,7 +32,26 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
     kind: BalanceSemantic["kind"],
     label: string,
     reason: string,
-  ): BalanceSemantic => ({ kind, label, netAssetEligible: false, reason });
+    details: Partial<Pick<BalanceSemantic, "measurementKind" | "assetClass" | "timeBasis">> = {},
+  ): BalanceSemantic => ({
+    kind,
+    label,
+    netAssetEligible: false,
+    reason,
+    measurementKind:
+      kind === "asset" || kind === "liability"
+        ? "balance"
+        : kind === "aggregate"
+          ? "aggregate_balance"
+          : kind === "statement"
+            ? "statement_amount"
+            : kind === "period_total"
+              ? "period_total"
+              : "unknown",
+    assetClass: "unknown",
+    timeBasis: "unknown",
+    ...details,
+  });
   const matches = (source: string, parser: string, metrics: string[]) =>
     input.sourceId === source && input.parserName === parser && metrics.includes(input.metric);
   if (matches("myjcb", "myjcb-credit-past-month-balances", ["credit_statement_payment_amount"]))
@@ -26,6 +59,7 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
       "statement",
       "請求額",
       "請求月の支払額です。支払済みか未払いかを証明しないため、負債残高には加算しません。",
+      { timeBasis: "statement_month" },
     );
   if (
     matches("sony-bank", "sony-bank-gross-balance", ["gross_asset_balance", "gross_loan_balance"])
@@ -37,21 +71,26 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
     );
   if (matches("v-point", "v-point-smfg-point", ["displayed_point_balance"]))
     return result(
-      "aggregate",
-      "表示ポイント合計",
-      "別のポイント内訳と重なる可能性がある表示合計です。",
+      "period_total",
+      "先月の獲得ポイント",
+      "公式マイページで先月分の獲得実績として表示される項目です。保有残高ではなく、残高に加算しません。取得APIに対象年月がないため絶対年月は未特定です。",
+      { assetClass: "reward", timeBasis: "previous_calendar_month" },
     );
   if (matches("v-point", "v-point-balance-info", ["available_point_bucket"]))
     return result(
-      "other",
-      "利用可能ポイント",
-      "ポイント単位の内訳であり、通貨建ての資産額ではありません。",
+      "asset",
+      input.sourceAccount.startsWith("v-point:store-limited:")
+        ? "店舗限定ポイント残高"
+        : "保有ポイント残高",
+      "ポイント単位の保有内訳です。期限・利用先制限は原本で確認できます。円への換算や先月獲得実績との加算はしません。配列番号は継続的な口座IDではありません。",
+      { assetClass: "reward", timeBasis: "reported_snapshot" },
     );
   if (matches("v-point-pay", "v-point-pay-notification-event", ["prepaid_balance_after_event"]))
     return result(
-      "other",
+      "asset",
       "通知時のプリペイド残高",
       "通知に記載された残高です。最終決済や現在残高を保証しません。",
+      { assetClass: "prepaid", timeBasis: "event_report" },
     );
   const deposit =
     matches("sbi-shinsei-bank", "sbi-shinsei-yen-deposit-account", [
@@ -70,6 +109,7 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
       "asset",
       "預金残高",
       "取得元が示した時点の預金残高です。異なる時点や重複する表示を合計しません。",
+      { assetClass: "cash", timeBasis: "reported_snapshot" },
     );
   if (
     matches("mobile-suica", "mobile-suica-sf-history", ["sf_balance_after_transaction"]) &&
@@ -79,6 +119,7 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
       "asset",
       "SF残高",
       "取引後の電子マネー残高です。定期券や現在残高の証明ではありません。",
+      { assetClass: "prepaid", timeBasis: "event_report" },
     );
   if (
     matches("sbi-vc-trade", "sbi-vc-cash-balances", ["cash_balance"]) ||
@@ -88,18 +129,29 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
       "asset",
       "取引所現金残高",
       "取得元が報告した現金残高です。証拠金や決済内訳と重複加算しません。",
+      { assetClass: "cash", timeBasis: "reported_snapshot" },
     );
   if (matches("sbi-securities", "sbi-foreign-cash-balances", ["keep_cash"]))
     return result(
       "asset",
       "外貨預り金",
       "取得元の預り金です。買付余力・振替可能額とは区別します。",
+      { assetClass: "cash", timeBasis: "reported_snapshot" },
     );
   if (input.sourceId === "sbi-securities" && input.parserName === "sbi-foreign-cash-balances")
     return result(
       "other",
       "余力・決済関連額",
       "買付・振替の可能額や決済関連の項目であり、独立した資産として加算しません。",
+      {
+        measurementKind: [
+          "buy_possible_amount",
+          "transfer_possible_amount",
+          "remaining_buy_possible_amount",
+        ].includes(input.metric)
+          ? "capacity"
+          : "unknown",
+      },
     );
   if (
     input.sourceId === "sbi-vc-trade" &&
@@ -109,6 +161,7 @@ export function classifyBalance(input: BalanceSemanticInput): BalanceSemantic {
       "other",
       "証拠金・決済関連額",
       "証拠金・制限・決済内訳は独立した残高として自動加算しません。",
+      { measurementKind: input.metric === "withdrawal_limit" ? "capacity" : "unknown" },
     );
   // MoneyForward, Vpass, GLOBAL PASS and unknown/new metrics have no generic asset inference.
   return result(
@@ -147,13 +200,13 @@ export interface BalanceProjectionGroup<T extends BalanceProjectionInput> {
   conflict: boolean;
 }
 export interface BalanceInterpretation {
-  policyVersion: "balance-view-v1";
+  policyVersion: "balance-view-v1" | "financial-measures-v2";
   semantic: BalanceSemantic;
   evidence: Array<{ id: number; metric: string }>;
   duplicateCount: number;
   conflict: boolean;
 }
-export const BALANCE_INTERPRETATION_POLICY_VERSION = "balance-view-v1";
+export const BALANCE_INTERPRETATION_POLICY_VERSION = "financial-measures-v2";
 export function validBalanceInterpretation(value: unknown): value is BalanceInterpretation {
   const object = (v: unknown): Record<string, unknown> =>
     v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
@@ -162,11 +215,14 @@ export function validBalanceInterpretation(value: unknown): value is BalanceInte
   const row = object(value);
   const semantic = object(row.semantic);
   if (
-    row.policyVersion !== BALANCE_INTERPRETATION_POLICY_VERSION ||
+    typeof row.policyVersion !== "string" ||
+    !["balance-view-v1", BALANCE_INTERPRETATION_POLICY_VERSION].includes(row.policyVersion) ||
     typeof row.conflict !== "boolean" ||
     semantic.netAssetEligible !== false ||
     typeof semantic.kind !== "string" ||
-    !["asset", "liability", "statement", "aggregate", "other"].includes(semantic.kind) ||
+    !["asset", "liability", "statement", "aggregate", "period_total", "other"].includes(
+      semantic.kind,
+    ) ||
     !text(semantic.label, 128) ||
     !text(semantic.reason, 1000) ||
     !Array.isArray(row.evidence) ||
@@ -176,6 +232,31 @@ export function validBalanceInterpretation(value: unknown): value is BalanceInte
     (row.conflict && row.duplicateCount !== 0)
   )
     return false;
+  for (const [key, allowed] of Object.entries({
+    measurementKind: [
+      "balance",
+      "aggregate_balance",
+      "period_total",
+      "statement_amount",
+      "capacity",
+      "unknown",
+    ],
+    assetClass: ["cash", "prepaid", "reward", "mixed", "unknown"],
+    timeBasis: [
+      "reported_snapshot",
+      "event_report",
+      "previous_calendar_month",
+      "statement_month",
+      "unknown",
+    ],
+  })) {
+    if (
+      (row.policyVersion === BALANCE_INTERPRETATION_POLICY_VERSION ||
+        semantic[key] !== undefined) &&
+      (typeof semantic[key] !== "string" || !allowed.includes(semantic[key]))
+    )
+      return false;
+  }
   const ids = new Set<number>();
   for (const item of row.evidence) {
     const ref = object(item);

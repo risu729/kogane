@@ -40,6 +40,7 @@ const NAV: { to: string; label: string; icon: string }[] = [
     label: "保有資産",
     icon: "M4 21V11h4v10 M10 21V3h4v18 M16 21V7h4v14",
   },
+  { to: "/summaries", label: "期間実績・請求", icon: "M5 3h14v18H5z M8 8h8 M8 12h8 M8 16h5" },
   {
     to: "/artifacts",
     label: "原本・証跡",
@@ -60,6 +61,8 @@ function View({ route }: { route: Route }): ReactNode {
       return <TransactionsPage />;
     case "balances":
       return <BalancesPage />;
+    case "summaries":
+      return <BalancesPage view="summaries" />;
     case "positions":
       return <PositionsPage />;
     case "identities":
@@ -226,7 +229,9 @@ export function App(): ReactNode {
             {() => (
               <>
                 {production &&
-                ["transactions", "balances", "positions", "artifacts"].includes(route.name) ? (
+                ["transactions", "balances", "summaries", "positions", "artifacts"].includes(
+                  route.name,
+                ) ? (
                   <CollectionControls kind={route.name} />
                 ) : null}
                 {evidenceRoute ? (
