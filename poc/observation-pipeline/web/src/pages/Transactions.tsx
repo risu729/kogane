@@ -53,15 +53,14 @@ const columns = helper.columns([
   }),
   helper.accessor((row) => row.source_id, {
     id: "source",
-    header: "取得元",
+    header: "取得元・口座",
     sortFn: "text",
-    cell: (info) => info.row.original.source_id,
-  }),
-  helper.accessor((row) => row.source_account, {
-    id: "account",
-    header: "口座",
-    sortFn: "text",
-    cell: (info) => info.row.original.source_account,
+    cell: (info) => (
+      <>
+        <div>{info.row.original.source_id}</div>
+        <div className="table-secondary">{info.row.original.source_account}</div>
+      </>
+    ),
   }),
   helper.display({
     id: "amount",
@@ -152,6 +151,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
       setPage(0);
     },
     enableSortingRemoval: true,
+    enableMultiSort: false,
   });
   const view = pageWindow(table.getRowModel().rows, page);
   return (
@@ -204,10 +204,13 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
           </p>
         </div>
       ) : null}
-      <div className="table-scroll">
-        <table>
+      <div className="table-scroll" role="region" aria-label="取引の記録" tabIndex={0}>
+        <table className="transaction-table">
           <caption className="dim">
             解析済みの現行データです。同じ取引に由来する記録が複数含まれる場合があります。
+            {!production
+              ? "矢印のある見出しで1項目ずつ並べ替えできます。取得元・口座は取得元で並べます。"
+              : null}
           </caption>
           <thead>
             {table.getHeaderGroups().map((group) => (
@@ -218,9 +221,13 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
                     <th
                       key={header.id}
                       scope="col"
-                      className={header.column.id === "amount" ? "num" : ""}
+                      className={`col-${header.column.id}${header.column.id === "amount" ? " num" : ""}`}
                       aria-sort={
-                        sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : "none"
+                        !production && header.column.getCanSort() && sorted
+                          ? sorted === "asc"
+                            ? "ascending"
+                            : "descending"
+                          : undefined
                       }
                     >
                       {!production && header.column.getCanSort() ? (
@@ -250,13 +257,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
                   {row.getAllCells().map((cell) => (
                     <td
                       key={cell.id}
-                      className={
-                        cell.column.id === "amount"
-                          ? "num"
-                          : cell.column.id === "description"
-                            ? "wrap"
-                            : ""
-                      }
+                      className={`col-${cell.column.id}${cell.column.id === "amount" ? " num" : ""}`}
                     >
                       <table.FlexRender cell={cell} />
                     </td>

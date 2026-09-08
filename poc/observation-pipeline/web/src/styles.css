@@ -433,6 +433,63 @@ h3 {
   max-width: 100%;
 }
 
+.table-scroll[tabindex]:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+
+/* Keep the narrative readable; identifiers must not dictate every column's width. */
+.transaction-table {
+  table-layout: auto;
+  min-width: 62rem;
+}
+
+.transaction-table .col-date {
+  width: 11rem;
+}
+.transaction-table .col-description {
+  width: auto;
+}
+.transaction-table .col-source {
+  width: 13rem;
+  min-width: 11rem;
+  max-width: 13rem;
+}
+.transaction-table .col-amount {
+  width: 12rem;
+}
+.transaction-table .col-status {
+  width: 7rem;
+}
+.transaction-table .col-detail {
+  width: 5rem;
+}
+
+.transaction-table td.col-description {
+  min-width: 14rem;
+}
+.transaction-table td.col-date {
+  font-variant-numeric: tabular-nums;
+}
+.table-secondary {
+  color: var(--text-2);
+  font-size: 0.75rem;
+  margin-top: 0.35rem;
+  overflow-wrap: anywhere;
+}
+.transaction-table td.col-amount {
+  overflow-wrap: normal;
+  max-width: none;
+}
+
+.transaction-table th:has(.sort-button) {
+  padding: 0;
+}
+.transaction-table .sort-button {
+  padding: 12px 18px;
+  min-height: 44px;
+}
+
 table {
   border-collapse: collapse;
   width: 100%;
