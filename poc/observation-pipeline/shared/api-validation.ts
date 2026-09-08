@@ -3,6 +3,11 @@
 import { isDecimalMinorUnit } from "../src/money.ts";
 import { validIdentityResponse } from "./identity-contract.ts";
 import type {
+  ObservationOrganization,
+  OrganizedAccount,
+  OrganizedInstrument,
+} from "./organization-contract.ts";
+import type {
   ApiMetadata,
   ArtifactDetail,
   ArtifactRow,
@@ -56,6 +61,42 @@ const nullableNumber = nullable(number);
 const nullableIdentifier = nullable(identifier);
 const minorUnit = nullable(isDecimalMinorUnit);
 const observationKind = literal<ObservationKind>("transaction", "balance", "position", "valuation");
+const organizationAccountFields = {
+  referenceId: text,
+  targetId: text,
+  label: text,
+  status: literal("identified", "provider-local", "aggregate", "unresolved"),
+  revision: (value: unknown): value is number => identifier(value) && value > 0,
+  method: literal("rule", "manual"),
+  reason: text,
+} satisfies Shape<OrganizedAccount>;
+const organizationShape = object<ObservationOrganization>({
+  state: literal("organized", "unavailable"),
+  lineage: nullable(literal("current", "historical")),
+  account: nullable(object<OrganizedAccount>(organizationAccountFields)),
+  instruments: array(
+    object<OrganizedInstrument>({
+      ...organizationAccountFields,
+      role: literal("unit", "security", "trade-unit", "usage-unit"),
+      namespace: text,
+      scope: text,
+      value: text,
+      nameEvidence: optional(
+        object<NonNullable<OrganizedInstrument["nameEvidence"]>>({
+          reason: literal("manual", "provider-current", "observed-japanese-script"),
+          origin: nullable(object({ kind: observationKind, id: identifier })),
+        }),
+      ),
+    }),
+  ),
+});
+const organization: Check<ObservationOrganization> = (value): value is ObservationOrganization =>
+  organizationShape(value) &&
+  (value.state === "organized"
+    ? value.account !== null &&
+      value.lineage !== null &&
+      new Set(value.instruments.map((i) => i.role)).size === value.instruments.length
+    : value.account === null && value.lineage === null && value.instruments.length === 0);
 const warnings = object<Warnings>({
   list: array(text),
   raw: nullableText,
@@ -81,6 +122,7 @@ const metadata = object<ApiMetadata>({
   }),
 });
 const transaction = object<TransactionRow>({
+  organization: optional(organization),
   id: identifier,
   source_id: text,
   source_account: text,
@@ -95,6 +137,7 @@ const transaction = object<TransactionRow>({
   parser: text,
 });
 const balanceFields = {
+  organization: optional(organization),
   id: identifier,
   source_id: text,
   source_account: text,
@@ -113,6 +156,7 @@ const balanceHistory = object<BalanceHistoryRow>({
   parse_status: text,
 });
 const position = object<PositionRow>({
+  organization: optional(organization),
   id: identifier,
   source_id: text,
   source_account: text,
@@ -126,6 +170,7 @@ const position = object<PositionRow>({
   parser: text,
 });
 const valuation = object<ValuationRow>({
+  organization: optional(organization),
   id: identifier,
   source_id: text,
   source_account: text,
@@ -240,6 +285,7 @@ const provenance = object<Provenance>({
   artifact_id: identifier,
 });
 const observation = object<ObservationDetail>({
+  organization: optional(organization),
   kind: observationKind,
   row: (value): value is Record<string, unknown> =>
     record(value) &&

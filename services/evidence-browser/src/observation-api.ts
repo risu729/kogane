@@ -1,6 +1,11 @@
 import * as queries from "./observations";
 import { HttpError, json } from "./http";
 import { raw } from "./read";
+import {
+  organizeRows,
+  observationOrganizations,
+  organizationKey,
+} from "./observation-organization";
 import type { ApiMetadata } from "../../../poc/observation-pipeline/shared/api-contract";
 
 export function boundedCollections(value: Record<string, unknown>, offset?: number): Response {
@@ -122,7 +127,13 @@ export async function observationApi(
   if (path === "/api/overview") return boundedCollections({ ...(await queries.overview(store)) });
   if (path === "/api/transactions")
     return boundedCollections(
-      { transactions: await queries.currentTransactions(store, filter) },
+      {
+        transactions: await organizeRows(
+          env.DB,
+          "transaction",
+          await queries.currentTransactions(store, filter),
+        ),
+      },
       offset,
     );
   if (path === "/api/balances") {
@@ -137,8 +148,8 @@ export async function observationApi(
     const latest = await queries.latestBalances(store, { ...filter, offset: latestOffset });
     const history = await queries.balanceHistory(store, filter);
     return json({
-      latest: latest.slice(0, 500),
-      history: history.slice(0, 500),
+      latest: await organizeRows(env.DB, "balance", latest.slice(0, 500)),
+      history: await organizeRows(env.DB, "balance", history.slice(0, 500)),
       coverage: {
         limit: 500,
         truncated: latest.length > 500 || history.length > 500,
@@ -147,11 +158,33 @@ export async function observationApi(
       },
     });
   }
-  if (path === "/api/positions")
+  if (path === "/api/positions") {
+    const entries = await queries.positionsWithValuations(store, filter);
+    const organizations = await observationOrganizations(
+      env.DB,
+      entries.flatMap((entry) => [
+        { kind: "position" as const, id: entry.position.id },
+        ...entry.valuations.map(({ id }) => ({ kind: "valuation" as const, id })),
+      ]),
+    );
     return boundedCollections(
-      { positions: await queries.positionsWithValuations(store, filter) },
+      {
+        positions: entries.map((entry) => ({
+          position: {
+            ...entry.position,
+            organization: organizations.get(
+              organizationKey({ kind: "position", id: entry.position.id }),
+            )!,
+          },
+          valuations: entry.valuations.map((row) => ({
+            ...row,
+            organization: organizations.get(organizationKey({ kind: "valuation", id: row.id }))!,
+          })),
+        })),
+      },
       offset,
     );
+  }
   if (path === "/api/artifacts") {
     const cursor = url.searchParams.get("cursor");
     const before = cursor === null ? Number.MAX_SAFE_INTEGER : Number(cursor);
@@ -177,6 +210,11 @@ export async function observationApi(
       ? await queries.artifactDetail(store, id)
       : await queries.observationDetail(store, observation![1] as queries.ObservationKind, id);
     if (!result) throw new HttpError(404, "not_found");
+    if (observation) {
+      const ref = { kind: observation[1] as queries.ObservationKind, id };
+      const organizations = await observationOrganizations(env.DB, [ref]);
+      return json({ ...result, organization: organizations.get(organizationKey(ref))! });
+    }
     return json(result);
   }
   const hash = /^\/api\/raw\/([a-f0-9]{64})$/.exec(path);
