@@ -4,6 +4,7 @@ import { preferredInstrumentNames } from "../src/preferred-instrument-names";
 import { seedRegistry, seedRun } from "./fixtures";
 import { identifyParse } from "../../observation-pipeline/src/identity-store";
 import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity";
+import { observationOrganizations, organizeRows } from "../src/observation-organization";
 
 beforeAll(async () => {
   await seedRegistry();
@@ -78,7 +79,9 @@ async function seed(
         producer_id: string;
         fetch_run_id: number;
       }>();
-  await identifyParse(env.DB, verified!, resolveIdentity);
+  while (await identifyParse(env.DB, verified!, resolveIdentity)) {
+    // Resume the production writer's bounded pages until the run is sealed.
+  }
   const identifiers = await env.DB.prepare(`SELECT d.id,d.value,d.scope,m.label
     FROM instrument_identifiers d JOIN current_instrument_mappings m ON m.identifier_id=d.id
     WHERE d.namespace='mic-symbol'`).all<{
@@ -198,3 +201,70 @@ it("uses transaction and valuation name evidence with stable selection across in
     origin: { kind: "valuation" },
   });
 });
+
+it("observation organization shares preferred names and evidence while retaining source fields", async () => {
+  const data = await seed([
+    { code: "INTEGRATED", label: "Original English" },
+    { code: "INTEGRATED", label: "日本企業", kind: "transaction" },
+    { code: "INTEGRATED", label: "日本企業", kind: "valuation" },
+  ]);
+  const positions = await env.DB.prepare(
+    "SELECT id,security_name,security_code FROM position_observations WHERE parse_run_id=?",
+  )
+    .bind(data.parseId)
+    .all<{ id: number; security_name: string; security_code: string }>();
+  const rows = await organizeRows(env.DB, "position", positions.results);
+  expect(rows[0]).toMatchObject({
+    security_name: "Original English",
+    security_code: "INTEGRATED",
+    organization: { state: "organized" },
+  });
+  expect(rows[0]!.organization.instruments.find((i) => i.role === "security")).toMatchObject({
+    label: "日本企業",
+    nameEvidence: {
+      reason: "observed-japanese-script",
+      origin: { kind: "transaction", id: expect.any(Number) },
+    },
+  });
+  expect(positions.results[0]).not.toHaveProperty("organization");
+  const reference = data.identifiers.find((row) => row.value === "INTEGRATED")!.id;
+  await env.DB.prepare(`INSERT INTO instrument_mappings SELECT 'integration-manual',identifier_id,revision+1,
+    instrument_id,'manual','chosen label',policy_version,'2100','Chosen name',status
+    FROM current_instrument_mappings WHERE identifier_id=?`)
+    .bind(reference)
+    .run();
+  const manual = await observationOrganizations(env.DB, [
+    { kind: "position", id: positions.results[0]!.id },
+  ]);
+  expect(
+    manual
+      .get(`position:${positions.results[0]!.id}`)!
+      .instruments.find((i) => i.role === "security"),
+  ).toMatchObject({
+    label: "Chosen name",
+    method: "manual",
+    nameEvidence: { reason: "manual", origin: null },
+  });
+});
+
+it("organizes more than 500 distinct instruments without exceeding the name lookup budget", async () => {
+  const data = await seed(
+    Array.from({ length: 501 }, (_, i) => ({ code: `PAGE-${i}`, label: `企業${i}` })),
+  );
+  const positions = await env.DB.prepare(
+    "SELECT id FROM position_observations WHERE parse_run_id=?",
+  )
+    .bind(data.parseId)
+    .all<{ id: number }>();
+  const result = await observationOrganizations(
+    env.DB,
+    positions.results.map(({ id }) => ({ kind: "position", id })),
+  );
+  expect(result.size).toBe(501);
+  for (const organization of result.values()) {
+    expect(
+      organization.instruments.find((instrument) => instrument.role === "security")?.nameEvidence
+        ?.reason,
+    ).toBe("observed-japanese-script");
+  }
+}, 30_000);
