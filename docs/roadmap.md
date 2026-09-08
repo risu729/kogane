@@ -121,9 +121,12 @@ bytes it came from and the parser version that produced it. Re-parsing is
 a first-class operation, and an operation nobody can verify is an
 operation nobody trusts.
 
-It reads layers A and B only, computes every current-state view on
-request, and stores nothing. It is not the product UI, which stays out of
-scope — see the MVP cut below and `docs/evidence-browser.md`.
+The browser now reads A, B, and the account/instrument interpretation in C.
+It does not write financial data or mappings: corrections use the private
+operator endpoint. The displayed identity coverage includes eligible B records
+that have not yet received a sealed C projection. It remains an inspection tool,
+not an asset-total or profit-and-loss product. See `docs/evidence-browser.md`,
+`docs/identity.md`, and the dated acceptance evidence in `docs/identity-rollout.md`.
 
 ## Phase 4 — Identity
 
@@ -131,10 +134,25 @@ scope — see the MVP cut below and `docs/evidence-browser.md`.
 (canonical), with corrigible mappings. The same real account may appear via
 its own site, an aggregator, and CSV exports.
 
+Implemented storage and collector rules are described in `docs/identity.md`,
+`docs/identity-sbi.md`, and `docs/identity-sources.md`. Mapping revisions are
+append-only and preserve the original decision and evidence. Similar display
+names are not evidence that accounts from different sources are the same.
+Private correction and historical replay procedures are in
+`docs/identity-operations.md`; rollout completion is verified separately with
+`docs/identity-audit.md`, not inferred from merged PRs.
+
 ## Phase 5 — Instruments
 
 `instruments` + `instrument_identifiers` + type-specific detail tables.
 Positions become `(account, instrument, quantity)`.
+
+Existing collectors now produce stable instrument entities with namespaced
+identifiers and separate roles for settlement, trade, and usage units. Explicit
+currency identities, provider-local security/crypto references, aggregate
+products, and unresolved references remain distinct. Provider-local identity
+is not a completed global security-master crosswalk. This stage does not change
+reported quantities, deduplicate observations, or add overlapping balances.
 
 ## Phase 6 — Reconciliation
 
