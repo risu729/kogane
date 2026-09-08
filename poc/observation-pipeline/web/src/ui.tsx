@@ -61,6 +61,41 @@ export function Nullable({
   return <>{String(value)}</>;
 }
 
+/** Keep long identifiers compact while making the complete stored values accessible. */
+export function SourceAccount({ source, account }: { source: string; account: string }): ReactNode {
+  const sourcePoints = Array.from(source);
+  const accountPoints = Array.from(account);
+  const longSource = sourcePoints.length > 48;
+  const longAccount = accountPoints.length > 48;
+  return (
+    <div className="source-account" translate="no">
+      <div className="identity-preview">
+        <div>
+          {longSource ? `${sourcePoints.slice(0, 32).join("")}…` : <Nullable value={source} />}
+        </div>
+        <div className="table-secondary">
+          {longAccount ? `${accountPoints.slice(0, 32).join("")}…` : <Nullable value={account} />}
+        </div>
+      </div>
+      {longSource || longAccount ? (
+        <details className="identity-details">
+          <summary>取得元・口座の全文</summary>
+          <dl>
+            <dt>取得元</dt>
+            <dd>
+              <Nullable value={source} />
+            </dd>
+            <dt>口座</dt>
+            <dd>
+              <Nullable value={account} />
+            </dd>
+          </dl>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 /** Provider transaction state is not a collection/parse result. */
 export function TransactionStatus({ status }: { status: string | null | undefined }): ReactNode {
   if (status == null || status === "") {

@@ -21,7 +21,11 @@ state, and the detail link. Source/account is one identity context, with the sou
 primary and the full account identifier underneath; sorting this column uses the
 source, not the account. Other headers retain their own sort key. Amounts are not
 sorted across currencies. The description receives remaining width; identifiers
-wrap within bounded cells. Raw values remain available as text, not hover-only tips.
+wrap within bounded cells. Identity values longer than 48 Unicode code points use
+a 32-point preview and an explicit native disclosure containing the full, selectable
+source/account values. Short values remain fully visible. This keeps unusually long
+technical identifiers from making every row tall; the full values are never limited
+to hover-only tips, and no financial amount is shortened by this rule.
 
 Balances use source/account, balance kind/unit, amount, explicitly labeled dates,
 and the detail link. The history table additionally includes parse lineage. The

@@ -14,6 +14,7 @@ import {
   ObservationLink,
   Panel,
   QueryBoundary,
+  SourceAccount,
   TransactionStatus,
 } from "../ui.tsx";
 import {
@@ -56,10 +57,10 @@ const columns = helper.columns([
     header: "取得元・口座",
     sortFn: "text",
     cell: (info) => (
-      <>
-        <div>{info.row.original.source_id}</div>
-        <div className="table-secondary">{info.row.original.source_account}</div>
-      </>
+      <SourceAccount
+        source={info.row.original.source_id}
+        account={info.row.original.source_account}
+      />
     ),
   }),
   helper.display({

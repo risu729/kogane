@@ -477,6 +477,33 @@ h3 {
   margin-top: 0.35rem;
   overflow-wrap: anywhere;
 }
+
+.source-account {
+  overflow-wrap: anywhere;
+}
+.identity-details {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+}
+.identity-details summary {
+  cursor: pointer;
+  color: var(--text-2);
+  padding-block: 0.35rem;
+}
+.identity-details summary:hover {
+  color: var(--text);
+}
+.identity-details dl {
+  margin: 0.5rem 0 0;
+}
+.identity-details dt {
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+.identity-details dd {
+  margin: 0.15rem 0 0;
+  overflow-wrap: anywhere;
+}
 .transaction-table td.col-amount {
   overflow-wrap: normal;
   max-width: none;
