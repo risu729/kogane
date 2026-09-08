@@ -54,6 +54,8 @@ export async function seedRun(
     sealed?: boolean;
     excluded?: boolean;
     body?: string;
+    dataset?: string;
+    fetchUnitKey?: string;
   } = {},
 ) {
   const { runId } = await post("/v1/runs", {
@@ -63,6 +65,13 @@ export async function seedRun(
     externalSessionId: crypto.randomUUID(),
   });
   const artifacts = [];
+  const unit = options.fetchUnitKey
+    ? await post(`/v1/runs/${runId}/units`, {
+        unitKind: "account",
+        unitKey: options.fetchUnitKey,
+        terminalReportRequired: false,
+      })
+    : null;
   for (let i = 0; i < (options.count ?? 0); i++) {
     const bytes = new TextEncoder().encode(
       options.body ?? JSON.stringify({ synthetic: true, index: i }),
@@ -87,6 +96,8 @@ export async function seedRun(
     const artifactKey = `synthetic-${i}.json`;
     const result = await post(`/v1/runs/${runId}/artifacts`, {
       artifactKey,
+      ...(options.dataset ? { dataset: options.dataset } : {}),
+      ...(unit ? { fetchUnitId: unit.unitId } : {}),
       artifactRole: "collector_summary",
       payloadFidelity: "generated",
       containerKind: "single",

@@ -1,5 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { getJson } from "./api.ts";
+import type { AccountConnection } from "../../shared/account-connection-contract.ts";
+export function useIdentityConnections() {
+  return useQuery({
+    queryKey: ["identity-connections"],
+    queryFn: ({ signal }) =>
+      getJson<{ connections: AccountConnection[] }>("/api/identity/connections", signal),
+  });
+}
 import type {
   IdentityAccountRow,
   IdentityCoverage,

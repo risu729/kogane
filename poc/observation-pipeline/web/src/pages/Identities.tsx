@@ -4,9 +4,11 @@ import {
   useIdentityAccounts,
   useIdentityCoverage,
   useIdentityInstruments,
+  useIdentityConnections,
 } from "../identity-api.ts";
 import { Badge, EmptyState, ObservationLink, QueryBoundary } from "../ui.tsx";
 import type { IdentityStatus } from "../../../shared/identity-contract.ts";
+import { AccountConnectionDetails, AccountConnectionInventory } from "../account-connection.tsx";
 const STATUS: Record<IdentityStatus, string> = {
   identified: "識別済み",
   "provider-local": "取得元内で識別",
@@ -20,6 +22,7 @@ export function IdentitiesPage(): ReactNode {
   const [offset, setOffset] = useViewState("identity.offset");
   const [coverageOffset, setCoverageOffset] = useViewState("identity.coverageOffset");
   const coverage = useIdentityCoverage(source, coverageOffset);
+  const connections = useIdentityConnections();
   return (
     <div className="identity-page">
       <div className="page-head">
@@ -29,6 +32,9 @@ export function IdentitiesPage(): ReactNode {
       <p className="footnote">
         「取得元内で識別」は外部の銘柄台帳との照合完了を意味しません。この整理は重複除去や資産額の合算を行いません。
       </p>
+      <QueryBoundary query={connections} label="取得経路の対応">
+        {(data) => <AccountConnectionInventory connections={data.connections} />}
+      </QueryBoundary>
       <section className="panel">
         <div className="panel-body">
           <form
@@ -185,6 +191,7 @@ function Accounts({
                 <p>
                   {row.source} · 対応する記録 {row.observedCount}件
                 </p>
+                {row.connection ? <AccountConnectionDetails connection={row.connection} /> : null}
                 <details className="detail-disclosure">
                   <summary>対応の根拠・取得元の識別情報</summary>
                   <dl className="kv">

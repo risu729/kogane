@@ -1,5 +1,7 @@
 import { HttpError, json } from "./http";
 import { preferredInstrumentNames } from "./preferred-instrument-names";
+import { listAccountConnections, readAccountConnections } from "./account-connections";
+import { connectionAccountLabel } from "./account-connection-display";
 import type { IdentityOrigin } from "../../../poc/observation-pipeline/shared/identity-contract";
 import {
   IDENTITY_PAGE_LIMIT,
@@ -38,7 +40,7 @@ export function identityQuery(
     SELECT source_account_id,source_id,count(*) observedCount,min(kind||':'||observation_id) originKey
     FROM current GROUP BY source_account_id,source_id
   ) SELECT s.id referenceId,m.account_id targetId,m.label,a.role,m.status,c.source_id source,
-    s.reference_json reference,m.reason,m.revision,c.observedCount,c.originKey
+    s.reference_json reference,s.producer_id producer,json_extract(s.reference_json,'$[0]') sourceAccount,m.method,m.reason,m.revision,c.observedCount,c.originKey
     FROM counts c JOIN source_accounts s ON s.id=c.source_account_id
     JOIN current_account_mappings m ON m.source_account_id=s.id JOIN accounts a ON a.id=m.account_id
     ORDER BY c.source_id,s.id LIMIT 101 OFFSET ${offset}`;
@@ -82,6 +84,10 @@ export async function identityApi(request: Request, env: Env, url: URL): Promise
   if (!url.pathname.startsWith("/api/identity/")) return null;
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
+  if (url.pathname === "/api/identity/connections") {
+    if (url.search) throw new HttpError(400, "invalid_query");
+    return json({ connections: await listAccountConnections(env.DB) });
+  }
   if (
     !["/api/identity/accounts", "/api/identity/instruments", "/api/identity/coverage"].includes(
       url.pathname,
@@ -118,6 +124,32 @@ export async function identityApi(request: Request, env: Env, url: URL): Promise
     );
     for (const row of result.results)
       row.label = names.get(String(row.referenceId))?.label ?? row.label;
+  }
+  if (url.pathname.endsWith("/accounts")) {
+    const connections = await readAccountConnections(
+      env.DB,
+      result.results.map((row) => ({
+        referenceId: String(row.referenceId),
+        source: String(row.source),
+        producer: String(row.producer),
+        sourceAccount: String(row.sourceAccount),
+      })),
+    );
+    for (const row of result.results) {
+      const connection = connections.get(String(row.referenceId));
+      if (connection) {
+        row.connection = connection;
+        row.label = connectionAccountLabel(
+          String(row.label),
+          row.method as "rule" | "manual",
+          String(row.source),
+          connection,
+        );
+      }
+      delete row.producer;
+      delete row.sourceAccount;
+      delete row.method;
+    }
   }
   return json(
     page(url.pathname.endsWith("/coverage") ? result.results : result.results.map(origin), offset),
