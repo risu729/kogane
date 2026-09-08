@@ -10,6 +10,7 @@ import { importSmbcDirectRun } from "./smbc-direct";
 import { importSonyRun } from "./sony";
 import { importVPointRun } from "./v-point";
 import { importVpassRun } from "./vpass";
+import { importVpassCardBinding } from "./vpass-identity";
 import { importVPointPayEmailPair } from "./v-point-pay-email";
 import {
   processReconcilerMessage,
@@ -81,6 +82,23 @@ export default {
           throw new ImportError(400, "backfill_limit_must_be_one");
         }
         return json(await backfillMoneyForward(env, cursor));
+      } catch (error) {
+        return errorResponse(error);
+      }
+    }
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/vpass/import-card-binding" &&
+      url.search === ""
+    ) {
+      try {
+        const input = await readJson(request);
+        exactKeys(input, ["recordKey"]);
+        const result = await importVpassBinding(
+          env,
+          requiredString(input.recordKey, "record_key_invalid", 500),
+        );
+        return json(result);
       } catch (error) {
         return errorResponse(error);
       }
@@ -661,8 +679,8 @@ function importOneMyJcb(env: Env, manifestKey: string, continuation?: string) {
   });
 }
 
-function importOneVpass(env: Env, recordKey: string, continuation?: string) {
-  return importVpassRun({
+async function importOneVpass(env: Env, recordKey: string, continuation?: string) {
+  const result = await importVpassRun({
     bucket: env.VPASS_SNAPSHOTS,
     centralService: env.RAW_EVIDENCE,
     centralToken: env.RAW_EVIDENCE_TOKEN_VPASS,
@@ -670,6 +688,20 @@ function importOneVpass(env: Env, recordKey: string, continuation?: string) {
     importerVersion: env.IMPORTER_VERSION,
     recordKey,
     ...(continuation ? { continuation } : {}),
+  });
+  // Scheduled/outbox imports keep the durable sidecar current. A sidecar retry
+  // reuses the sealed financial run and never appends financial observations.
+  if (result.status === "sealed") await importVpassBinding(env, recordKey);
+  return result;
+}
+
+function importVpassBinding(env: Env, recordKey: string) {
+  return importVpassCardBinding({
+    bucket: env.VPASS_SNAPSHOTS,
+    centralService: env.RAW_EVIDENCE,
+    centralToken: env.RAW_EVIDENCE_TOKEN_VPASS,
+    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
+    recordKey,
   });
 }
 
