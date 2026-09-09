@@ -1,0 +1,3110 @@
+{
+  "sbi-foreign-cash-balances": {
+    "complete-empty": {
+      "observations": [],
+      "warnings": []
+    },
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-securities:foreign",
+          "metric": "buy_possible_amount",
+          "amountMinor": 5000,
+          "amountText": "50",
+          "amountScale": 0,
+          "instrument": "USD",
+          "asOf": "2026-09-07",
+          "rawLocator": "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances[0].foreignScheduleCashBalances[0].buyPossibleAmount",
+          "extra": {
+            "account": {
+              "accountKind": "GENERAL"
+            },
+            "currencyEntry": {
+              "currencyCode": "USD"
+            },
+            "row": {
+              "businessDate": "2026-09-07",
+              "daysLater": 0,
+              "keepCash": "100.25",
+              "buyPossibleAmount": "50"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-securities:foreign",
+          "metric": "keep_cash",
+          "amountMinor": 10025,
+          "amountText": "100.25",
+          "amountScale": 2,
+          "instrument": "USD",
+          "asOf": "2026-09-07",
+          "rawLocator": "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances[0].foreignScheduleCashBalances[0].keepCash",
+          "extra": {
+            "account": {
+              "accountKind": "GENERAL"
+            },
+            "currencyEntry": {
+              "currencyCode": "USD"
+            },
+            "row": {
+              "businessDate": "2026-09-07",
+              "daysLater": 0,
+              "keepCash": "100.25",
+              "buyPossibleAmount": "50"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unreadable-container": {
+      "observations": [],
+      "warnings": [
+        "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances: expected an array, got object; the whole account was skipped",
+        "json:$.listForeignScheduleCashBalances.foreignCashBalances[1]: expected an object, got object; nothing could be read from it"
+      ]
+    },
+    "partial-empty": {
+      "observations": [],
+      "warnings": [
+        "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances: expected an array, got string; the whole account was skipped"
+      ]
+    },
+    "unknown-fields": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-securities:foreign",
+          "metric": "keep_cash",
+          "amountMinor": 1000,
+          "amountText": "10.00",
+          "amountScale": 2,
+          "instrument": "USD",
+          "asOf": "2026-09-07",
+          "rawLocator": "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances[0].foreignScheduleCashBalances[0].keepCash",
+          "extra": {
+            "account": {
+              "accountKind": "GENERAL"
+            },
+            "currencyEntry": {
+              "currencyCode": "USD"
+            },
+            "row": {
+              "businessDate": "2026-09-07",
+              "daysLater": 0,
+              "keepCash": "10.00",
+              "totalBalance": "999.99"
+            }
+          }
+        }
+      ],
+      "warnings": [
+        "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances[0].foreignScheduleCashBalances[0]: fields not modelled as metrics were kept only in extra: totalBalance"
+      ]
+    },
+    "minor-units": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-securities:foreign",
+          "metric": "keep_cash",
+          "amountText": "1.001",
+          "amountScale": 3,
+          "instrument": "USD",
+          "asOf": "2026-09-07",
+          "rawLocator": "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances[0].foreignScheduleCashBalances[0].keepCash",
+          "extra": {
+            "account": {
+              "accountKind": "GENERAL"
+            },
+            "currencyEntry": {
+              "currencyCode": "USD"
+            },
+            "row": {
+              "businessDate": "2026-09-07",
+              "daysLater": 0,
+              "keepCash": "1.001"
+            }
+          }
+        }
+      ],
+      "warnings": [
+        "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances[0].foreignScheduleCashBalances[0].keepCash: 1.001 has no exact USD minor-unit form; kept as text"
+      ]
+    },
+    "unreadable-field": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-securities:foreign",
+          "metric": "buy_possible_amount",
+          "amountMinor": 500,
+          "amountText": "5",
+          "amountScale": 0,
+          "instrument": "USD",
+          "asOf": "2026-09-07",
+          "rawLocator": "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances[0].foreignScheduleCashBalances[0].buyPossibleAmount",
+          "extra": {
+            "account": {
+              "accountKind": "GENERAL"
+            },
+            "currencyEntry": {
+              "currencyCode": "USD"
+            },
+            "row": {
+              "businessDate": "2026-09-07",
+              "daysLater": 0,
+              "keepCash": "abc",
+              "buyPossibleAmount": "5"
+            }
+          }
+        }
+      ],
+      "warnings": [
+        "json:$.listForeignScheduleCashBalances.foreignCashBalances[0].currencyCashBalances[0].foreignScheduleCashBalances[0].keepCash: \"abc\" is not an exact decimal"
+      ]
+    }
+  },
+  "sbi-foreign-cash-positions": {
+    "complete-empty": {
+      "observations": [],
+      "warnings": []
+    },
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "position",
+          "sourceAccount": "sbi-securities:foreign",
+          "securityCode": "SYN",
+          "securityName": "Synthetic",
+          "market": "XSYN",
+          "quantityText": "3",
+          "quantityScale": 0,
+          "currency": "USD",
+          "rawLocator": "json:$.listSecuritiesBalances.securitiesBalances[0]",
+          "extra": {
+            "securities": {
+              "securitiesCode": "SYN",
+              "securitiesName": "Synthetic"
+            },
+            "market": {
+              "marketCode": "XSYN"
+            },
+            "securitiesQuantity": "3",
+            "currencyCode": "USD",
+            "evaluationProfitLoss": {
+              "evaluationAmount": "1500",
+              "frnEvaluationAmount": "10.50"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:foreign",
+          "subject": "SYN",
+          "metric": "evaluation_amount",
+          "amountMinor": 1500,
+          "amountText": "1500",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.listSecuritiesBalances.securitiesBalances[0].evaluationProfitLoss",
+          "extra": {
+            "securities": {
+              "securitiesCode": "SYN",
+              "securitiesName": "Synthetic"
+            },
+            "market": {
+              "marketCode": "XSYN"
+            },
+            "securitiesQuantity": "3",
+            "currencyCode": "USD",
+            "evaluationProfitLoss": {
+              "evaluationAmount": "1500",
+              "frnEvaluationAmount": "10.50"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:foreign",
+          "subject": "SYN",
+          "metric": "frn_evaluation_amount",
+          "amountMinor": 1050,
+          "amountText": "10.50",
+          "amountScale": 2,
+          "currency": "USD",
+          "rawLocator": "json:$.listSecuritiesBalances.securitiesBalances[0].evaluationProfitLoss",
+          "extra": {
+            "securities": {
+              "securitiesCode": "SYN",
+              "securitiesName": "Synthetic"
+            },
+            "market": {
+              "marketCode": "XSYN"
+            },
+            "securitiesQuantity": "3",
+            "currencyCode": "USD",
+            "evaluationProfitLoss": {
+              "evaluationAmount": "1500",
+              "frnEvaluationAmount": "10.50"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "missing-page": {
+      "error": true
+    },
+    "minor-units": {
+      "observations": [
+        {
+          "kind": "position",
+          "sourceAccount": "sbi-securities:foreign",
+          "securityCode": "SYN",
+          "quantityText": "1",
+          "quantityScale": 0,
+          "currency": "USD",
+          "rawLocator": "json:$.listSecuritiesBalances.securitiesBalances[0]",
+          "extra": {
+            "securities": {
+              "securitiesCode": "SYN"
+            },
+            "securitiesQuantity": "1",
+            "currencyCode": "USD",
+            "evaluationProfitLoss": {
+              "evaluationAmount": "1.5"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:foreign",
+          "subject": "SYN",
+          "metric": "evaluation_amount",
+          "amountText": "1.5",
+          "amountScale": 1,
+          "currency": "JPY",
+          "rawLocator": "json:$.listSecuritiesBalances.securitiesBalances[0].evaluationProfitLoss",
+          "extra": {
+            "securities": {
+              "securitiesCode": "SYN"
+            },
+            "securitiesQuantity": "1",
+            "currencyCode": "USD",
+            "evaluationProfitLoss": {
+              "evaluationAmount": "1.5"
+            }
+          }
+        }
+      ],
+      "warnings": [
+        "json:$.listSecuritiesBalances.securitiesBalances[0].evaluationProfitLoss: evaluation_amount 1.5 has no exact JPY minor-unit form; kept as text"
+      ]
+    },
+    "unreadable-row": {
+      "observations": [
+        {
+          "kind": "position",
+          "sourceAccount": "sbi-securities:foreign",
+          "securityCode": "",
+          "quantityText": "",
+          "quantityScale": 0,
+          "rawLocator": "json:$.listSecuritiesBalances.securitiesBalances[0]",
+          "extra": {
+            "_kogane": {
+              "unparsedElement": "not-an-object"
+            }
+          }
+        }
+      ],
+      "warnings": [
+        "securitiesBalances[0]: expected an object, got string; recorded verbatim"
+      ]
+    },
+    "unreadable-quantity": {
+      "observations": [
+        {
+          "kind": "position",
+          "sourceAccount": "sbi-securities:foreign",
+          "securityCode": "FRAC",
+          "quantityText": "",
+          "quantityScale": 0,
+          "currency": "USD",
+          "rawLocator": "json:$.listSecuritiesBalances.securitiesBalances[0]",
+          "extra": {
+            "securities": {
+              "securitiesCode": "FRAC"
+            },
+            "securitiesQuantity": 1.5,
+            "currencyCode": "USD",
+            "evaluationProfitLoss": {}
+          }
+        }
+      ],
+      "warnings": [
+        "json:$.listSecuritiesBalances.securitiesBalances[0]: securitiesQuantity 1.5 is not an exact decimal; the position is recorded without a quantity"
+      ]
+    },
+    "missing-code": {
+      "observations": [
+        {
+          "kind": "position",
+          "sourceAccount": "sbi-securities:foreign",
+          "securityCode": "",
+          "quantityText": "1",
+          "quantityScale": 0,
+          "rawLocator": "json:$.listSecuritiesBalances.securitiesBalances[0]",
+          "extra": {
+            "securitiesQuantity": 1,
+            "securities": {},
+            "evaluationProfitLoss": {}
+          }
+        }
+      ],
+      "warnings": [
+        "json:$.listSecuritiesBalances.securitiesBalances[0]: securities.securitiesCode is missing; the observation cannot be joined by security"
+      ]
+    },
+    "missing-currency": {
+      "observations": [
+        {
+          "kind": "position",
+          "sourceAccount": "sbi-securities:foreign",
+          "securityCode": "NOCUR",
+          "quantityText": "3",
+          "quantityScale": 0,
+          "rawLocator": "json:$.listSecuritiesBalances.securitiesBalances[0]",
+          "extra": {
+            "securities": {
+              "securitiesCode": "NOCUR"
+            },
+            "securitiesQuantity": 3,
+            "evaluationProfitLoss": {
+              "frnEvaluationAmount": "1568.40"
+            }
+          }
+        }
+      ],
+      "warnings": [
+        "json:$.listSecuritiesBalances.securitiesBalances[0]: currencyCode is missing, so the frn* valuations cannot be denominated; they remain only in extra"
+      ]
+    }
+  },
+  "sbi-domestic-cash-positions": {
+    "complete-empty": {
+      "observations": [],
+      "warnings": []
+    },
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "position",
+          "sourceAccount": "sbi-securities:domestic:deposit-type=0",
+          "securityCode": "1234",
+          "securityName": "合成株式会社",
+          "market": "XTKS",
+          "quantityText": "10",
+          "quantityScale": 0,
+          "currency": "JPY",
+          "rawLocator": "mts-shift-jis:payload-byte=34,width=423",
+          "extra": {
+            "depositTypeCode": "0",
+            "depositTypeText": "特定",
+            "unexecutedQuantity": "(2)",
+            "profitLossText": "+300",
+            "profitLossRateText": "+2.56",
+            "profitLossTrend": "U",
+            "acquisitionUnitPriceText": "900.5",
+            "currentPriceText": "1200",
+            "currentPriceTrend": "F",
+            "kaitsukePriceText": "901.0",
+            "valuationPriceText": "12000",
+            "valuationChangeText": "-100(-0.83)",
+            "valuationChangeTrend": "D",
+            "holdingCategory": "CASH",
+            "accountInformation": "TEST",
+            "_kogane": {
+              "accountType": "specific",
+              "marketCode": "TKY"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:domestic:deposit-type=0",
+          "subject": "1234",
+          "metric": "profit_loss",
+          "amountMinor": 300,
+          "amountText": "300",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "mts-shift-jis:payload-byte=125,width=16",
+          "extra": {
+            "depositTypeCode": "0",
+            "depositTypeText": "特定",
+            "unexecutedQuantity": "(2)",
+            "profitLossText": "+300",
+            "profitLossRateText": "+2.56",
+            "profitLossTrend": "U",
+            "acquisitionUnitPriceText": "900.5",
+            "currentPriceText": "1200",
+            "currentPriceTrend": "F",
+            "kaitsukePriceText": "901.0",
+            "valuationPriceText": "12000",
+            "valuationChangeText": "-100(-0.83)",
+            "valuationChangeTrend": "D",
+            "holdingCategory": "CASH",
+            "accountInformation": "TEST",
+            "_kogane": {
+              "accountType": "specific",
+              "marketCode": "TKY"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:domestic:deposit-type=0",
+          "subject": "1234",
+          "metric": "acquisition_unit_price",
+          "amountText": "900.5",
+          "amountScale": 1,
+          "currency": "JPY",
+          "rawLocator": "mts-shift-jis:payload-byte=153,width=11",
+          "extra": {
+            "depositTypeCode": "0",
+            "depositTypeText": "特定",
+            "unexecutedQuantity": "(2)",
+            "profitLossText": "+300",
+            "profitLossRateText": "+2.56",
+            "profitLossTrend": "U",
+            "acquisitionUnitPriceText": "900.5",
+            "currentPriceText": "1200",
+            "currentPriceTrend": "F",
+            "kaitsukePriceText": "901.0",
+            "valuationPriceText": "12000",
+            "valuationChangeText": "-100(-0.83)",
+            "valuationChangeTrend": "D",
+            "holdingCategory": "CASH",
+            "accountInformation": "TEST",
+            "_kogane": {
+              "accountType": "specific",
+              "marketCode": "TKY"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:domestic:deposit-type=0",
+          "subject": "1234",
+          "metric": "current_price",
+          "amountMinor": 1200,
+          "amountText": "1200",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "mts-shift-jis:payload-byte=164,width=11",
+          "extra": {
+            "depositTypeCode": "0",
+            "depositTypeText": "特定",
+            "unexecutedQuantity": "(2)",
+            "profitLossText": "+300",
+            "profitLossRateText": "+2.56",
+            "profitLossTrend": "U",
+            "acquisitionUnitPriceText": "900.5",
+            "currentPriceText": "1200",
+            "currentPriceTrend": "F",
+            "kaitsukePriceText": "901.0",
+            "valuationPriceText": "12000",
+            "valuationChangeText": "-100(-0.83)",
+            "valuationChangeTrend": "D",
+            "holdingCategory": "CASH",
+            "accountInformation": "TEST",
+            "_kogane": {
+              "accountType": "specific",
+              "marketCode": "TKY"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:domestic:deposit-type=0",
+          "subject": "1234",
+          "metric": "kaitsuke_price",
+          "amountMinor": 901,
+          "amountText": "901.0",
+          "amountScale": 1,
+          "currency": "JPY",
+          "rawLocator": "mts-shift-jis:payload-byte=333,width=16",
+          "extra": {
+            "depositTypeCode": "0",
+            "depositTypeText": "特定",
+            "unexecutedQuantity": "(2)",
+            "profitLossText": "+300",
+            "profitLossRateText": "+2.56",
+            "profitLossTrend": "U",
+            "acquisitionUnitPriceText": "900.5",
+            "currentPriceText": "1200",
+            "currentPriceTrend": "F",
+            "kaitsukePriceText": "901.0",
+            "valuationPriceText": "12000",
+            "valuationChangeText": "-100(-0.83)",
+            "valuationChangeTrend": "D",
+            "holdingCategory": "CASH",
+            "accountInformation": "TEST",
+            "_kogane": {
+              "accountType": "specific",
+              "marketCode": "TKY"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:domestic:deposit-type=0",
+          "subject": "1234",
+          "metric": "market_value",
+          "amountMinor": 12000,
+          "amountText": "12000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "mts-shift-jis:payload-byte=349,width=15",
+          "extra": {
+            "depositTypeCode": "0",
+            "depositTypeText": "特定",
+            "unexecutedQuantity": "(2)",
+            "profitLossText": "+300",
+            "profitLossRateText": "+2.56",
+            "profitLossTrend": "U",
+            "acquisitionUnitPriceText": "900.5",
+            "currentPriceText": "1200",
+            "currentPriceTrend": "F",
+            "kaitsukePriceText": "901.0",
+            "valuationPriceText": "12000",
+            "valuationChangeText": "-100(-0.83)",
+            "valuationChangeTrend": "D",
+            "holdingCategory": "CASH",
+            "accountInformation": "TEST",
+            "_kogane": {
+              "accountType": "specific",
+              "marketCode": "TKY"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:domestic:deposit-type=0",
+          "subject": "1234",
+          "metric": "valuation_change",
+          "amountMinor": -100,
+          "amountText": "-100",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "mts-shift-jis:payload-byte=394,width=30",
+          "extra": {
+            "depositTypeCode": "0",
+            "depositTypeText": "特定",
+            "unexecutedQuantity": "(2)",
+            "profitLossText": "+300",
+            "profitLossRateText": "+2.56",
+            "profitLossTrend": "U",
+            "acquisitionUnitPriceText": "900.5",
+            "currentPriceText": "1200",
+            "currentPriceTrend": "F",
+            "kaitsukePriceText": "901.0",
+            "valuationPriceText": "12000",
+            "valuationChangeText": "-100(-0.83)",
+            "valuationChangeTrend": "D",
+            "holdingCategory": "CASH",
+            "accountInformation": "TEST",
+            "_kogane": {
+              "accountType": "specific",
+              "marketCode": "TKY"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unreadable-container": {
+      "error": true
+    },
+    "unknown-fields": {
+      "error": true
+    }
+  },
+  "sbi-account-assets-current": {
+    "complete-empty": {
+      "observations": [],
+      "warnings": []
+    },
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summary",
+          "metric": "valuation",
+          "amountMinor": 151000,
+          "amountText": "151000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summary.valuation",
+          "extra": {
+            "acquisitionCost": 140000,
+            "assetsErrorType": null,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 6.67,
+            "netChange": 1500,
+            "percentChange": 1,
+            "profitLoss": 11000,
+            "profitLossRate": 7.91,
+            "valuation": 151000,
+            "_kogane": {
+              "view": "summary"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summary",
+          "metric": "net_change",
+          "amountMinor": 1500,
+          "amountText": "1500",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summary.netChange",
+          "extra": {
+            "acquisitionCost": 140000,
+            "assetsErrorType": null,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 6.67,
+            "netChange": 1500,
+            "percentChange": 1,
+            "profitLoss": 11000,
+            "profitLossRate": 7.91,
+            "valuation": 151000,
+            "_kogane": {
+              "view": "summary"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summary",
+          "metric": "month_on_month",
+          "amountMinor": 10000,
+          "amountText": "10000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summary.monthOnMonth",
+          "extra": {
+            "acquisitionCost": 140000,
+            "assetsErrorType": null,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 6.67,
+            "netChange": 1500,
+            "percentChange": 1,
+            "profitLoss": 11000,
+            "profitLossRate": 7.91,
+            "valuation": 151000,
+            "_kogane": {
+              "view": "summary"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summary",
+          "metric": "profit_loss",
+          "amountMinor": 11000,
+          "amountText": "11000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summary.profitLoss",
+          "extra": {
+            "acquisitionCost": 140000,
+            "assetsErrorType": null,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 6.67,
+            "netChange": 1500,
+            "percentChange": 1,
+            "profitLoss": 11000,
+            "profitLossRate": 7.91,
+            "valuation": 151000,
+            "_kogane": {
+              "view": "summary"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summary",
+          "metric": "acquisition_cost",
+          "amountMinor": 140000,
+          "amountText": "140000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summary.acquisitionCost",
+          "extra": {
+            "acquisitionCost": 140000,
+            "assetsErrorType": null,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 6.67,
+            "netChange": 1500,
+            "percentChange": 1,
+            "profitLoss": 11000,
+            "profitLossRate": 7.91,
+            "valuation": 151000,
+            "_kogane": {
+              "view": "summary"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryWithoutDeposit",
+          "metric": "valuation",
+          "amountMinor": 111000,
+          "amountText": "111000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryWithoutDeposit.valuation",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryWithoutDeposit"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryWithoutDeposit",
+          "metric": "net_change",
+          "amountMinor": 1500,
+          "amountText": "1500",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryWithoutDeposit.netChange",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryWithoutDeposit"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryWithoutDeposit",
+          "metric": "month_on_month",
+          "amountMinor": 10000,
+          "amountText": "10000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryWithoutDeposit.monthOnMonth",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryWithoutDeposit"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryWithoutDeposit",
+          "metric": "profit_loss",
+          "amountMinor": 11000,
+          "amountText": "11000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryWithoutDeposit.profitLoss",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryWithoutDeposit"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryWithoutDeposit",
+          "metric": "acquisition_cost",
+          "amountMinor": 100000,
+          "amountText": "100000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryWithoutDeposit.acquisitionCost",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryWithoutDeposit"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetails:DOMESTIC_STOCK",
+          "metric": "valuation",
+          "amountMinor": 111000,
+          "amountText": "111000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetails[0].valuation",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "category": "DOMESTIC_STOCK",
+            "compositionRatio": 73.51,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryDetails",
+              "category": "DOMESTIC_STOCK"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetails:DOMESTIC_STOCK",
+          "metric": "net_change",
+          "amountMinor": 1500,
+          "amountText": "1500",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetails[0].netChange",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "category": "DOMESTIC_STOCK",
+            "compositionRatio": 73.51,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryDetails",
+              "category": "DOMESTIC_STOCK"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetails:DOMESTIC_STOCK",
+          "metric": "month_on_month",
+          "amountMinor": 10000,
+          "amountText": "10000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetails[0].monthOnMonth",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "category": "DOMESTIC_STOCK",
+            "compositionRatio": 73.51,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryDetails",
+              "category": "DOMESTIC_STOCK"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetails:DOMESTIC_STOCK",
+          "metric": "profit_loss",
+          "amountMinor": 11000,
+          "amountText": "11000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetails[0].profitLoss",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "category": "DOMESTIC_STOCK",
+            "compositionRatio": 73.51,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryDetails",
+              "category": "DOMESTIC_STOCK"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetails:DOMESTIC_STOCK",
+          "metric": "acquisition_cost",
+          "amountMinor": 100000,
+          "amountText": "100000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetails[0].acquisitionCost",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "category": "DOMESTIC_STOCK",
+            "compositionRatio": 73.51,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryDetails",
+              "category": "DOMESTIC_STOCK"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetails:DEPOSIT",
+          "metric": "valuation",
+          "amountMinor": 40000,
+          "amountText": "40000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetails[1].valuation",
+          "extra": {
+            "acquisitionCost": 40000,
+            "assetsErrorType": null,
+            "category": "DEPOSIT",
+            "compositionRatio": 26.49,
+            "monthOnMonth": 0,
+            "monthOnMonthRatio": 0,
+            "netChange": 0,
+            "percentChange": 0,
+            "profitLoss": null,
+            "profitLossRate": null,
+            "valuation": 40000,
+            "_kogane": {
+              "view": "summaryDetails",
+              "category": "DEPOSIT"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetails:DEPOSIT",
+          "metric": "net_change",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetails[1].netChange",
+          "extra": {
+            "acquisitionCost": 40000,
+            "assetsErrorType": null,
+            "category": "DEPOSIT",
+            "compositionRatio": 26.49,
+            "monthOnMonth": 0,
+            "monthOnMonthRatio": 0,
+            "netChange": 0,
+            "percentChange": 0,
+            "profitLoss": null,
+            "profitLossRate": null,
+            "valuation": 40000,
+            "_kogane": {
+              "view": "summaryDetails",
+              "category": "DEPOSIT"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetails:DEPOSIT",
+          "metric": "month_on_month",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetails[1].monthOnMonth",
+          "extra": {
+            "acquisitionCost": 40000,
+            "assetsErrorType": null,
+            "category": "DEPOSIT",
+            "compositionRatio": 26.49,
+            "monthOnMonth": 0,
+            "monthOnMonthRatio": 0,
+            "netChange": 0,
+            "percentChange": 0,
+            "profitLoss": null,
+            "profitLossRate": null,
+            "valuation": 40000,
+            "_kogane": {
+              "view": "summaryDetails",
+              "category": "DEPOSIT"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetails:DEPOSIT",
+          "metric": "acquisition_cost",
+          "amountMinor": 40000,
+          "amountText": "40000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetails[1].acquisitionCost",
+          "extra": {
+            "acquisitionCost": 40000,
+            "assetsErrorType": null,
+            "category": "DEPOSIT",
+            "compositionRatio": 26.49,
+            "monthOnMonth": 0,
+            "monthOnMonthRatio": 0,
+            "netChange": 0,
+            "percentChange": 0,
+            "profitLoss": null,
+            "profitLossRate": null,
+            "valuation": 40000,
+            "_kogane": {
+              "view": "summaryDetails",
+              "category": "DEPOSIT"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetailsWithoutDeposit:DOMESTIC_STOCK",
+          "metric": "valuation",
+          "amountMinor": 111000,
+          "amountText": "111000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetailsWithoutDeposit[0].valuation",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "category": "DOMESTIC_STOCK",
+            "compositionRatio": 100,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryDetailsWithoutDeposit",
+              "category": "DOMESTIC_STOCK"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetailsWithoutDeposit:DOMESTIC_STOCK",
+          "metric": "net_change",
+          "amountMinor": 1500,
+          "amountText": "1500",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetailsWithoutDeposit[0].netChange",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "category": "DOMESTIC_STOCK",
+            "compositionRatio": 100,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryDetailsWithoutDeposit",
+              "category": "DOMESTIC_STOCK"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetailsWithoutDeposit:DOMESTIC_STOCK",
+          "metric": "month_on_month",
+          "amountMinor": 10000,
+          "amountText": "10000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetailsWithoutDeposit[0].monthOnMonth",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "category": "DOMESTIC_STOCK",
+            "compositionRatio": 100,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryDetailsWithoutDeposit",
+              "category": "DOMESTIC_STOCK"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetailsWithoutDeposit:DOMESTIC_STOCK",
+          "metric": "profit_loss",
+          "amountMinor": 11000,
+          "amountText": "11000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetailsWithoutDeposit[0].profitLoss",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "category": "DOMESTIC_STOCK",
+            "compositionRatio": 100,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryDetailsWithoutDeposit",
+              "category": "DOMESTIC_STOCK"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-securities:account-assets",
+          "subject": "portfolio:summaryDetailsWithoutDeposit:DOMESTIC_STOCK",
+          "metric": "acquisition_cost",
+          "amountMinor": 100000,
+          "amountText": "100000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "rawLocator": "json:$.summaryDetailsWithoutDeposit[0].acquisitionCost",
+          "extra": {
+            "acquisitionCost": 100000,
+            "assetsErrorType": null,
+            "category": "DOMESTIC_STOCK",
+            "compositionRatio": 100,
+            "monthOnMonth": 10000,
+            "monthOnMonthRatio": 10,
+            "netChange": 1500,
+            "percentChange": 1.5,
+            "profitLoss": 11000,
+            "profitLossRate": 11,
+            "valuation": 111000,
+            "_kogane": {
+              "view": "summaryDetailsWithoutDeposit",
+              "category": "DOMESTIC_STOCK"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unreadable-container": {
+      "error": true
+    },
+    "unknown-fields": {
+      "error": true
+    }
+  },
+  "sbi-vc-position-summary": {
+    "complete-empty": {
+      "observations": [],
+      "warnings": []
+    },
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "position",
+          "sourceAccount": "sbi-vc-trade:main",
+          "securityCode": "BTCJPY",
+          "quantityText": "0.12345678",
+          "quantityScale": 8,
+          "observedAt": "2026-09-07T09:00:03+09:00",
+          "rawLocator": "json:$.body[\"BTC\"][\"0\"]",
+          "extra": {
+            "productId": "BTCJPY",
+            "totalAmount": "0.12345678",
+            "evaluationPl": "1234",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:03"
+                }
+              },
+              "positionGroup": "BTC",
+              "positionKey": "0"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unknown-fields": {
+      "observations": [
+        {
+          "kind": "position",
+          "sourceAccount": "sbi-vc-trade:main",
+          "securityCode": "BTCJPY",
+          "quantityText": "0.5",
+          "quantityScale": 1,
+          "observedAt": "2026-09-07T09:00:03+09:00",
+          "rawLocator": "json:$.body[\"BTC\"][\"0\"]",
+          "extra": {
+            "productId": "BTCJPY",
+            "totalAmount": "0.5",
+            "evaluationPl": "1",
+            "extraField": "x",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:03"
+                }
+              },
+              "positionGroup": "BTC",
+              "positionKey": "0"
+            }
+          }
+        }
+      ],
+      "warnings": [
+        "json:$.body[\"BTC\"][\"0\"]: unmodelled fields preserved in extra: extraField"
+      ]
+    },
+    "non-string-field": {
+      "observations": [
+        {
+          "kind": "position",
+          "sourceAccount": "sbi-vc-trade:main",
+          "securityCode": "BTCJPY",
+          "quantityText": "5",
+          "quantityScale": 0,
+          "observedAt": "2026-09-07T09:00:03+09:00",
+          "rawLocator": "json:$.body[\"BTC\"][\"0\"]",
+          "extra": {
+            "productId": "BTCJPY",
+            "totalAmount": 5,
+            "evaluationPl": "1",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:03"
+                }
+              },
+              "positionGroup": "BTC",
+              "positionKey": "0"
+            }
+          }
+        }
+      ],
+      "warnings": [
+        "json:$.body[\"BTC\"][\"0\"].totalAmount: expected a string; raw value preserved"
+      ]
+    },
+    "unreadable-container": {
+      "error": true
+    }
+  },
+  "sbi-vc-cash-balances": {
+    "complete-empty": {
+      "observations": [],
+      "warnings": []
+    },
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "cash_balance",
+          "amountMinor": 123456,
+          "amountText": "123456",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "observedAt": "2026-09-07T09:00:01+09:00",
+          "rawLocator": "json:$.body.list[0].amount",
+          "extra": {
+            "amount": "123456",
+            "baseCurrencyAmount": "123456",
+            "currency": "JPY",
+            "fxAccountId": "0000000000",
+            "noSettlingAmount": "120000",
+            "settlingAmount": "3456",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:01"
+                },
+                "baseCurrencyTotalAmount": "123456"
+              },
+              "sourceField": "amount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "no_settling_amount",
+          "amountMinor": 120000,
+          "amountText": "120000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "observedAt": "2026-09-07T09:00:01+09:00",
+          "rawLocator": "json:$.body.list[0].noSettlingAmount",
+          "extra": {
+            "amount": "123456",
+            "baseCurrencyAmount": "123456",
+            "currency": "JPY",
+            "fxAccountId": "0000000000",
+            "noSettlingAmount": "120000",
+            "settlingAmount": "3456",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:01"
+                },
+                "baseCurrencyTotalAmount": "123456"
+              },
+              "sourceField": "noSettlingAmount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "settling_amount",
+          "amountMinor": 3456,
+          "amountText": "3456",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "observedAt": "2026-09-07T09:00:01+09:00",
+          "rawLocator": "json:$.body.list[0].settlingAmount",
+          "extra": {
+            "amount": "123456",
+            "baseCurrencyAmount": "123456",
+            "currency": "JPY",
+            "fxAccountId": "0000000000",
+            "noSettlingAmount": "120000",
+            "settlingAmount": "3456",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:01"
+                },
+                "baseCurrencyTotalAmount": "123456"
+              },
+              "sourceField": "settlingAmount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "cash_balance",
+          "amountText": "0.12345678",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "observedAt": "2026-09-07T09:00:01+09:00",
+          "rawLocator": "json:$.body.list[1].amount",
+          "extra": {
+            "amount": "0.12345678",
+            "baseCurrencyAmount": "78901",
+            "currency": "BTC",
+            "fxAccountId": "0000000000",
+            "noSettlingAmount": "0.12000000",
+            "settlingAmount": "0.00345678",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:01"
+                },
+                "baseCurrencyTotalAmount": "123456"
+              },
+              "sourceField": "amount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "no_settling_amount",
+          "amountText": "0.12000000",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "observedAt": "2026-09-07T09:00:01+09:00",
+          "rawLocator": "json:$.body.list[1].noSettlingAmount",
+          "extra": {
+            "amount": "0.12345678",
+            "baseCurrencyAmount": "78901",
+            "currency": "BTC",
+            "fxAccountId": "0000000000",
+            "noSettlingAmount": "0.12000000",
+            "settlingAmount": "0.00345678",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:01"
+                },
+                "baseCurrencyTotalAmount": "123456"
+              },
+              "sourceField": "noSettlingAmount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "settling_amount",
+          "amountText": "0.00345678",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "observedAt": "2026-09-07T09:00:01+09:00",
+          "rawLocator": "json:$.body.list[1].settlingAmount",
+          "extra": {
+            "amount": "0.12345678",
+            "baseCurrencyAmount": "78901",
+            "currency": "BTC",
+            "fxAccountId": "0000000000",
+            "noSettlingAmount": "0.12000000",
+            "settlingAmount": "0.00345678",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:01"
+                },
+                "baseCurrencyTotalAmount": "123456"
+              },
+              "sourceField": "settlingAmount"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unknown-fields": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "cash_balance",
+          "amountMinor": 1,
+          "amountText": "1",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "observedAt": "2026-09-07T09:00:03+09:00",
+          "rawLocator": "json:$.body.list[0].amount",
+          "extra": {
+            "amount": "1",
+            "baseCurrencyAmount": "1",
+            "currency": "JPY",
+            "fxAccountId": "0",
+            "noSettlingAmount": "1",
+            "settlingAmount": "0",
+            "extraField": "x",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:03"
+                },
+                "baseCurrencyTotalAmount": "1"
+              },
+              "sourceField": "amount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "no_settling_amount",
+          "amountMinor": 1,
+          "amountText": "1",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "observedAt": "2026-09-07T09:00:03+09:00",
+          "rawLocator": "json:$.body.list[0].noSettlingAmount",
+          "extra": {
+            "amount": "1",
+            "baseCurrencyAmount": "1",
+            "currency": "JPY",
+            "fxAccountId": "0",
+            "noSettlingAmount": "1",
+            "settlingAmount": "0",
+            "extraField": "x",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:03"
+                },
+                "baseCurrencyTotalAmount": "1"
+              },
+              "sourceField": "noSettlingAmount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "settling_amount",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "observedAt": "2026-09-07T09:00:03+09:00",
+          "rawLocator": "json:$.body.list[0].settlingAmount",
+          "extra": {
+            "amount": "1",
+            "baseCurrencyAmount": "1",
+            "currency": "JPY",
+            "fxAccountId": "0",
+            "noSettlingAmount": "1",
+            "settlingAmount": "0",
+            "extraField": "x",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:03"
+                },
+                "baseCurrencyTotalAmount": "1"
+              },
+              "sourceField": "settlingAmount"
+            }
+          }
+        }
+      ],
+      "warnings": [
+        "json:$.body.list[0]: unmodelled fields preserved in extra: extraField"
+      ]
+    },
+    "unreadable-container": {
+      "error": true
+    }
+  },
+  "sbi-vc-account-margin": {
+    "complete-empty": {
+      "observations": [],
+      "warnings": []
+    },
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "received_margin",
+          "amountText": "0.12345678",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "asOf": "2026-09-07T09:00:00+09:00",
+          "observedAt": "2026-09-07T09:00:02+09:00",
+          "rawLocator": "json:$.body.receivedMarginList[0].amount",
+          "extra": {
+            "amount": "0.12345678",
+            "baseCurrencyAmount": "78901",
+            "baseCurrencyCollateralAmount": "70000",
+            "collateralValueRatio": "80.00",
+            "currency": "BTC",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:02"
+                },
+                "cashBalance": "123456",
+                "leaveOrderCommission": "10",
+                "leaveOrderSpreadSpotPL": "-20",
+                "marginBuyingPower": "100000",
+                "minMarginShortageAmount": "",
+                "netAsset": "200000",
+                "netAssetRatio": "200.00%",
+                "orderingRequiredMargin": "3000",
+                "positionRequiredMargin": "4000",
+                "receivedMargin": "150000",
+                "registeredCashOut": {
+                  "attribute": "synthetic",
+                  "value": "100"
+                },
+                "shortageAmount": "",
+                "statusDate": "2026/09/07 09:00:00",
+                "uncollectedCommission": {
+                  "attribute": "synthetic",
+                  "value": "20"
+                },
+                "unsettledNetPL": {
+                  "attribute": "synthetic",
+                  "value": "-30"
+                },
+                "unsettledPositionPL": {
+                  "attribute": "synthetic",
+                  "value": "-40"
+                },
+                "unsettledSwapPL": {
+                  "attribute": "synthetic",
+                  "value": "10"
+                },
+                "withdrawalLimit": "90000"
+              },
+              "sourceList": "receivedMarginList",
+              "sourceField": "amount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "restricted_commission",
+          "amountText": "0.00010000",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "asOf": "2026-09-07T09:00:00+09:00",
+          "observedAt": "2026-09-07T09:00:02+09:00",
+          "rawLocator": "json:$.body.restrictedCommissionList[0].amount",
+          "extra": {
+            "amount": "0.00010000",
+            "baseCurrencyAmount": "60",
+            "baseCurrencyCollateralAmount": "50",
+            "collateralValueRatio": "80.00",
+            "currency": "BTC",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:02"
+                },
+                "cashBalance": "123456",
+                "leaveOrderCommission": "10",
+                "leaveOrderSpreadSpotPL": "-20",
+                "marginBuyingPower": "100000",
+                "minMarginShortageAmount": "",
+                "netAsset": "200000",
+                "netAssetRatio": "200.00%",
+                "orderingRequiredMargin": "3000",
+                "positionRequiredMargin": "4000",
+                "receivedMargin": "150000",
+                "registeredCashOut": {
+                  "attribute": "synthetic",
+                  "value": "100"
+                },
+                "shortageAmount": "",
+                "statusDate": "2026/09/07 09:00:00",
+                "uncollectedCommission": {
+                  "attribute": "synthetic",
+                  "value": "20"
+                },
+                "unsettledNetPL": {
+                  "attribute": "synthetic",
+                  "value": "-30"
+                },
+                "unsettledPositionPL": {
+                  "attribute": "synthetic",
+                  "value": "-40"
+                },
+                "unsettledSwapPL": {
+                  "attribute": "synthetic",
+                  "value": "10"
+                },
+                "withdrawalLimit": "90000"
+              },
+              "sourceList": "restrictedCommissionList",
+              "sourceField": "amount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "withdrawal",
+          "amountText": "0.12000000",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "asOf": "2026-09-07T09:00:00+09:00",
+          "observedAt": "2026-09-07T09:00:02+09:00",
+          "rawLocator": "json:$.body.withdrawalList[0].amount",
+          "extra": {
+            "amount": "0.12000000",
+            "baseCurrencyAmount": "70000",
+            "baseCurrencyCollateralAmount": "68000",
+            "collateralValueRatio": "80.00",
+            "currency": "BTC",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:02"
+                },
+                "cashBalance": "123456",
+                "leaveOrderCommission": "10",
+                "leaveOrderSpreadSpotPL": "-20",
+                "marginBuyingPower": "100000",
+                "minMarginShortageAmount": "",
+                "netAsset": "200000",
+                "netAssetRatio": "200.00%",
+                "orderingRequiredMargin": "3000",
+                "positionRequiredMargin": "4000",
+                "receivedMargin": "150000",
+                "registeredCashOut": {
+                  "attribute": "synthetic",
+                  "value": "100"
+                },
+                "shortageAmount": "",
+                "statusDate": "2026/09/07 09:00:00",
+                "uncollectedCommission": {
+                  "attribute": "synthetic",
+                  "value": "20"
+                },
+                "unsettledNetPL": {
+                  "attribute": "synthetic",
+                  "value": "-30"
+                },
+                "unsettledPositionPL": {
+                  "attribute": "synthetic",
+                  "value": "-40"
+                },
+                "unsettledSwapPL": {
+                  "attribute": "synthetic",
+                  "value": "10"
+                },
+                "withdrawalLimit": "90000"
+              },
+              "sourceList": "withdrawalList",
+              "sourceField": "amount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "lending_limit",
+          "amountText": "0.01000000",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "asOf": "2026-09-07T09:00:00+09:00",
+          "observedAt": "2026-09-07T09:00:02+09:00",
+          "rawLocator": "json:$.body.lendingLimitList[0].lendingLimit",
+          "extra": {
+            "currency": "BTC",
+            "lendingLimit": "0.01000000",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:02"
+                },
+                "cashBalance": "123456",
+                "leaveOrderCommission": "10",
+                "leaveOrderSpreadSpotPL": "-20",
+                "marginBuyingPower": "100000",
+                "minMarginShortageAmount": "",
+                "netAsset": "200000",
+                "netAssetRatio": "200.00%",
+                "orderingRequiredMargin": "3000",
+                "positionRequiredMargin": "4000",
+                "receivedMargin": "150000",
+                "registeredCashOut": {
+                  "attribute": "synthetic",
+                  "value": "100"
+                },
+                "shortageAmount": "",
+                "statusDate": "2026/09/07 09:00:00",
+                "uncollectedCommission": {
+                  "attribute": "synthetic",
+                  "value": "20"
+                },
+                "unsettledNetPL": {
+                  "attribute": "synthetic",
+                  "value": "-30"
+                },
+                "unsettledPositionPL": {
+                  "attribute": "synthetic",
+                  "value": "-40"
+                },
+                "unsettledSwapPL": {
+                  "attribute": "synthetic",
+                  "value": "10"
+                },
+                "withdrawalLimit": "90000"
+              },
+              "sourceList": "lendingLimitList",
+              "sourceField": "lendingLimit"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "restricted_withdrawal_amount",
+          "amountText": "0.00100000",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "asOf": "2026-09-07T09:00:00+09:00",
+          "observedAt": "2026-09-07T09:00:02+09:00",
+          "rawLocator": "json:$.body.restrictedWithdrawalAmountList[0].restrictedWithdrawalAmount",
+          "extra": {
+            "currency": "BTC",
+            "restrictedWithdrawalAmount": "0.00100000",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:02"
+                },
+                "cashBalance": "123456",
+                "leaveOrderCommission": "10",
+                "leaveOrderSpreadSpotPL": "-20",
+                "marginBuyingPower": "100000",
+                "minMarginShortageAmount": "",
+                "netAsset": "200000",
+                "netAssetRatio": "200.00%",
+                "orderingRequiredMargin": "3000",
+                "positionRequiredMargin": "4000",
+                "receivedMargin": "150000",
+                "registeredCashOut": {
+                  "attribute": "synthetic",
+                  "value": "100"
+                },
+                "shortageAmount": "",
+                "statusDate": "2026/09/07 09:00:00",
+                "uncollectedCommission": {
+                  "attribute": "synthetic",
+                  "value": "20"
+                },
+                "unsettledNetPL": {
+                  "attribute": "synthetic",
+                  "value": "-30"
+                },
+                "unsettledPositionPL": {
+                  "attribute": "synthetic",
+                  "value": "-40"
+                },
+                "unsettledSwapPL": {
+                  "attribute": "synthetic",
+                  "value": "10"
+                },
+                "withdrawalLimit": "90000"
+              },
+              "sourceList": "restrictedWithdrawalAmountList",
+              "sourceField": "restrictedWithdrawalAmount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "withdrawal_limit",
+          "amountText": "0.12000000",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "asOf": "2026-09-07T09:00:00+09:00",
+          "observedAt": "2026-09-07T09:00:02+09:00",
+          "rawLocator": "json:$.body.withdrawalLimitList[0].withdrawalLimit",
+          "extra": {
+            "currency": "BTC",
+            "withdrawalLimit": "0.12000000",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:02"
+                },
+                "cashBalance": "123456",
+                "leaveOrderCommission": "10",
+                "leaveOrderSpreadSpotPL": "-20",
+                "marginBuyingPower": "100000",
+                "minMarginShortageAmount": "",
+                "netAsset": "200000",
+                "netAssetRatio": "200.00%",
+                "orderingRequiredMargin": "3000",
+                "positionRequiredMargin": "4000",
+                "receivedMargin": "150000",
+                "registeredCashOut": {
+                  "attribute": "synthetic",
+                  "value": "100"
+                },
+                "shortageAmount": "",
+                "statusDate": "2026/09/07 09:00:00",
+                "uncollectedCommission": {
+                  "attribute": "synthetic",
+                  "value": "20"
+                },
+                "unsettledNetPL": {
+                  "attribute": "synthetic",
+                  "value": "-30"
+                },
+                "unsettledPositionPL": {
+                  "attribute": "synthetic",
+                  "value": "-40"
+                },
+                "unsettledSwapPL": {
+                  "attribute": "synthetic",
+                  "value": "10"
+                },
+                "withdrawalLimit": "90000"
+              },
+              "sourceList": "withdrawalLimitList",
+              "sourceField": "withdrawalLimit"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unknown-fields": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "received_margin",
+          "amountText": "0.12345678",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "asOf": "2026-09-07T09:00:00+09:00",
+          "observedAt": "2026-09-07T09:00:03+09:00",
+          "rawLocator": "json:$.body.receivedMarginList[0].amount",
+          "extra": {
+            "amount": "0.12345678",
+            "baseCurrencyAmount": "78901",
+            "baseCurrencyCollateralAmount": "70000",
+            "collateralValueRatio": "80.00",
+            "currency": "BTC",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:03"
+                },
+                "cashBalance": "123456",
+                "leaveOrderCommission": "10",
+                "leaveOrderSpreadSpotPL": "-20",
+                "marginBuyingPower": "100000",
+                "minMarginShortageAmount": "",
+                "netAsset": "200000",
+                "netAssetRatio": "200.00%",
+                "orderingRequiredMargin": "3000",
+                "positionRequiredMargin": "4000",
+                "receivedMargin": "150000",
+                "registeredCashOut": {
+                  "attribute": "synthetic",
+                  "value": "100"
+                },
+                "shortageAmount": "",
+                "statusDate": "2026/09/07 09:00:00",
+                "uncollectedCommission": {
+                  "attribute": "synthetic",
+                  "value": "20"
+                },
+                "unsettledNetPL": {
+                  "attribute": "synthetic",
+                  "value": "-30"
+                },
+                "unsettledPositionPL": {
+                  "attribute": "synthetic",
+                  "value": "-40"
+                },
+                "unsettledSwapPL": {
+                  "attribute": "synthetic",
+                  "value": "10"
+                },
+                "withdrawalLimit": "90000",
+                "extraField": "x"
+              },
+              "sourceList": "receivedMarginList",
+              "sourceField": "amount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "restricted_commission",
+          "amountText": "0.00010000",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "asOf": "2026-09-07T09:00:00+09:00",
+          "observedAt": "2026-09-07T09:00:03+09:00",
+          "rawLocator": "json:$.body.restrictedCommissionList[0].amount",
+          "extra": {
+            "amount": "0.00010000",
+            "baseCurrencyAmount": "60",
+            "baseCurrencyCollateralAmount": "50",
+            "collateralValueRatio": "80.00",
+            "currency": "BTC",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:03"
+                },
+                "cashBalance": "123456",
+                "leaveOrderCommission": "10",
+                "leaveOrderSpreadSpotPL": "-20",
+                "marginBuyingPower": "100000",
+                "minMarginShortageAmount": "",
+                "netAsset": "200000",
+                "netAssetRatio": "200.00%",
+                "orderingRequiredMargin": "3000",
+                "positionRequiredMargin": "4000",
+                "receivedMargin": "150000",
+                "registeredCashOut": {
+                  "attribute": "synthetic",
+                  "value": "100"
+                },
+                "shortageAmount": "",
+                "statusDate": "2026/09/07 09:00:00",
+                "uncollectedCommission": {
+                  "attribute": "synthetic",
+                  "value": "20"
+                },
+                "unsettledNetPL": {
+                  "attribute": "synthetic",
+                  "value": "-30"
+                },
+                "unsettledPositionPL": {
+                  "attribute": "synthetic",
+                  "value": "-40"
+                },
+                "unsettledSwapPL": {
+                  "attribute": "synthetic",
+                  "value": "10"
+                },
+                "withdrawalLimit": "90000",
+                "extraField": "x"
+              },
+              "sourceList": "restrictedCommissionList",
+              "sourceField": "amount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "withdrawal",
+          "amountText": "0.12000000",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "asOf": "2026-09-07T09:00:00+09:00",
+          "observedAt": "2026-09-07T09:00:03+09:00",
+          "rawLocator": "json:$.body.withdrawalList[0].amount",
+          "extra": {
+            "amount": "0.12000000",
+            "baseCurrencyAmount": "70000",
+            "baseCurrencyCollateralAmount": "68000",
+            "collateralValueRatio": "80.00",
+            "currency": "BTC",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:03"
+                },
+                "cashBalance": "123456",
+                "leaveOrderCommission": "10",
+                "leaveOrderSpreadSpotPL": "-20",
+                "marginBuyingPower": "100000",
+                "minMarginShortageAmount": "",
+                "netAsset": "200000",
+                "netAssetRatio": "200.00%",
+                "orderingRequiredMargin": "3000",
+                "positionRequiredMargin": "4000",
+                "receivedMargin": "150000",
+                "registeredCashOut": {
+                  "attribute": "synthetic",
+                  "value": "100"
+                },
+                "shortageAmount": "",
+                "statusDate": "2026/09/07 09:00:00",
+                "uncollectedCommission": {
+                  "attribute": "synthetic",
+                  "value": "20"
+                },
+                "unsettledNetPL": {
+                  "attribute": "synthetic",
+                  "value": "-30"
+                },
+                "unsettledPositionPL": {
+                  "attribute": "synthetic",
+                  "value": "-40"
+                },
+                "unsettledSwapPL": {
+                  "attribute": "synthetic",
+                  "value": "10"
+                },
+                "withdrawalLimit": "90000",
+                "extraField": "x"
+              },
+              "sourceList": "withdrawalList",
+              "sourceField": "amount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "lending_limit",
+          "amountText": "0.01000000",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "asOf": "2026-09-07T09:00:00+09:00",
+          "observedAt": "2026-09-07T09:00:03+09:00",
+          "rawLocator": "json:$.body.lendingLimitList[0].lendingLimit",
+          "extra": {
+            "currency": "BTC",
+            "lendingLimit": "0.01000000",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:03"
+                },
+                "cashBalance": "123456",
+                "leaveOrderCommission": "10",
+                "leaveOrderSpreadSpotPL": "-20",
+                "marginBuyingPower": "100000",
+                "minMarginShortageAmount": "",
+                "netAsset": "200000",
+                "netAssetRatio": "200.00%",
+                "orderingRequiredMargin": "3000",
+                "positionRequiredMargin": "4000",
+                "receivedMargin": "150000",
+                "registeredCashOut": {
+                  "attribute": "synthetic",
+                  "value": "100"
+                },
+                "shortageAmount": "",
+                "statusDate": "2026/09/07 09:00:00",
+                "uncollectedCommission": {
+                  "attribute": "synthetic",
+                  "value": "20"
+                },
+                "unsettledNetPL": {
+                  "attribute": "synthetic",
+                  "value": "-30"
+                },
+                "unsettledPositionPL": {
+                  "attribute": "synthetic",
+                  "value": "-40"
+                },
+                "unsettledSwapPL": {
+                  "attribute": "synthetic",
+                  "value": "10"
+                },
+                "withdrawalLimit": "90000",
+                "extraField": "x"
+              },
+              "sourceList": "lendingLimitList",
+              "sourceField": "lendingLimit"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "restricted_withdrawal_amount",
+          "amountText": "0.00100000",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "asOf": "2026-09-07T09:00:00+09:00",
+          "observedAt": "2026-09-07T09:00:03+09:00",
+          "rawLocator": "json:$.body.restrictedWithdrawalAmountList[0].restrictedWithdrawalAmount",
+          "extra": {
+            "currency": "BTC",
+            "restrictedWithdrawalAmount": "0.00100000",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:03"
+                },
+                "cashBalance": "123456",
+                "leaveOrderCommission": "10",
+                "leaveOrderSpreadSpotPL": "-20",
+                "marginBuyingPower": "100000",
+                "minMarginShortageAmount": "",
+                "netAsset": "200000",
+                "netAssetRatio": "200.00%",
+                "orderingRequiredMargin": "3000",
+                "positionRequiredMargin": "4000",
+                "receivedMargin": "150000",
+                "registeredCashOut": {
+                  "attribute": "synthetic",
+                  "value": "100"
+                },
+                "shortageAmount": "",
+                "statusDate": "2026/09/07 09:00:00",
+                "uncollectedCommission": {
+                  "attribute": "synthetic",
+                  "value": "20"
+                },
+                "unsettledNetPL": {
+                  "attribute": "synthetic",
+                  "value": "-30"
+                },
+                "unsettledPositionPL": {
+                  "attribute": "synthetic",
+                  "value": "-40"
+                },
+                "unsettledSwapPL": {
+                  "attribute": "synthetic",
+                  "value": "10"
+                },
+                "withdrawalLimit": "90000",
+                "extraField": "x"
+              },
+              "sourceList": "restrictedWithdrawalAmountList",
+              "sourceField": "restrictedWithdrawalAmount"
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-vc-trade:main",
+          "metric": "withdrawal_limit",
+          "amountText": "0.12000000",
+          "amountScale": 8,
+          "instrument": "BTC",
+          "asOf": "2026-09-07T09:00:00+09:00",
+          "observedAt": "2026-09-07T09:00:03+09:00",
+          "rawLocator": "json:$.body.withdrawalLimitList[0].withdrawalLimit",
+          "extra": {
+            "currency": "BTC",
+            "withdrawalLimit": "0.12000000",
+            "_kogane": {
+              "providerContext": {
+                "meta": {
+                  "sessUpdTime": "2026/09/07 09:00:00",
+                  "status": "OK",
+                  "timestamp": "2026/09/07 09:00:03"
+                },
+                "cashBalance": "123456",
+                "leaveOrderCommission": "10",
+                "leaveOrderSpreadSpotPL": "-20",
+                "marginBuyingPower": "100000",
+                "minMarginShortageAmount": "",
+                "netAsset": "200000",
+                "netAssetRatio": "200.00%",
+                "orderingRequiredMargin": "3000",
+                "positionRequiredMargin": "4000",
+                "receivedMargin": "150000",
+                "registeredCashOut": {
+                  "attribute": "synthetic",
+                  "value": "100"
+                },
+                "shortageAmount": "",
+                "statusDate": "2026/09/07 09:00:00",
+                "uncollectedCommission": {
+                  "attribute": "synthetic",
+                  "value": "20"
+                },
+                "unsettledNetPL": {
+                  "attribute": "synthetic",
+                  "value": "-30"
+                },
+                "unsettledPositionPL": {
+                  "attribute": "synthetic",
+                  "value": "-40"
+                },
+                "unsettledSwapPL": {
+                  "attribute": "synthetic",
+                  "value": "10"
+                },
+                "withdrawalLimit": "90000",
+                "extraField": "x"
+              },
+              "sourceList": "withdrawalLimitList",
+              "sourceField": "withdrawalLimit"
+            }
+          }
+        }
+      ],
+      "warnings": [
+        "json:$.body: unmodelled fields preserved in extra: extraField"
+      ]
+    },
+    "unreadable-container": {
+      "error": true
+    }
+  },
+  "sbi-shinsei-top-balances-and-activity": {
+    "complete-empty": {
+      "observations": [],
+      "warnings": []
+    },
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-shinsei:SYNTHETIC-001",
+          "metric": "account_balance",
+          "amountMinor": 123456,
+          "amountText": "123456",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T09:00:00+09:00",
+          "rawLocator": "json:$.responseParam.overview.responseParam.savingsDetails[0].balance",
+          "extra": {
+            "accountNo": "SYNTHETIC-001",
+            "balance": "123456",
+            "yenEqui": "123456",
+            "currency": "JPY",
+            "productCode": "601",
+            "_kogane": {
+              "providerContext": {},
+              "sourceView": "top_overview",
+              "productCode": "601"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-shinsei:SYNTHETIC-001",
+          "metric": "provider_yen_equivalent",
+          "amountMinor": 123456,
+          "amountText": "123456",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T09:00:00+09:00",
+          "rawLocator": "json:$.responseParam.overview.responseParam.savingsDetails[0].yenEqui",
+          "extra": {
+            "accountNo": "SYNTHETIC-001",
+            "balance": "123456",
+            "yenEqui": "123456",
+            "currency": "JPY",
+            "productCode": "601",
+            "_kogane": {
+              "providerContext": {},
+              "sourceView": "top_overview",
+              "productCode": "601",
+              "subjectCurrency": "JPY"
+            }
+          },
+          "subject": "JPY",
+          "currency": "JPY"
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-shinsei:SYNTHETIC-002",
+          "metric": "account_balance",
+          "amountMinor": 1234,
+          "amountText": "12.3400",
+          "amountScale": 4,
+          "instrument": "USD",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T09:00:00+09:00",
+          "rawLocator": "json:$.responseParam.overview.responseParam.savingsDetails[1].balance",
+          "extra": {
+            "accountNo": "SYNTHETIC-002",
+            "balance": "12.3400",
+            "yenEqui": "9876",
+            "currency": "USD",
+            "productCode": "SYNTHETIC-FCY",
+            "_kogane": {
+              "providerContext": {},
+              "sourceView": "top_overview",
+              "productCode": "SYNTHETIC-FCY"
+            }
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sbi-shinsei:SYNTHETIC-002",
+          "metric": "provider_yen_equivalent",
+          "amountMinor": 9876,
+          "amountText": "9876",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T09:00:00+09:00",
+          "rawLocator": "json:$.responseParam.overview.responseParam.savingsDetails[1].yenEqui",
+          "extra": {
+            "accountNo": "SYNTHETIC-002",
+            "balance": "12.3400",
+            "yenEqui": "9876",
+            "currency": "USD",
+            "productCode": "SYNTHETIC-FCY",
+            "_kogane": {
+              "providerContext": {},
+              "sourceView": "top_overview",
+              "productCode": "SYNTHETIC-FCY",
+              "subjectCurrency": "USD"
+            }
+          },
+          "subject": "USD",
+          "currency": "JPY"
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-shinsei:SYNTHETIC-001",
+          "metric": "activity_current_balance",
+          "amountMinor": 123456,
+          "amountText": "123456",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T09:00:00+09:00",
+          "rawLocator": "json:$.responseParam.activity.responseParam.currentBalance",
+          "extra": {
+            "_kogane": {
+              "providerContext": {
+                "fromDate": "20260901",
+                "toDate": "20260907",
+                "currentBalance": "123456",
+                "accountNo": "SYNTHETIC-001",
+                "currency": "JPY"
+              },
+              "sourceView": "top_activity",
+              "balanceContext": "current"
+            }
+          }
+        },
+        {
+          "kind": "transaction",
+          "sourceAccount": "sbi-shinsei:SYNTHETIC-001",
+          "externalId": "SYNTHETIC-TXN-001",
+          "amountMinor": -1200,
+          "amountText": "-1200",
+          "amountScale": 0,
+          "currency": "JPY",
+          "description": "Synthetic debit",
+          "asOf": "2026-09-06",
+          "observedAt": "2026-09-07T09:00:00+09:00",
+          "rawLocator": "json:$.responseParam.activity.responseParam.activityDetails[0]",
+          "extra": {
+            "txnReferenceNo": "SYNTHETIC-TXN-001",
+            "description": "Synthetic debit",
+            "debit": "1200",
+            "postingDate": "20260906",
+            "balance": "122256",
+            "tradeTypeCode": "SYNTHETIC",
+            "_kogane": {
+              "providerContext": {
+                "fromDate": "20260901",
+                "toDate": "20260907",
+                "currentBalance": "123456",
+                "accountNo": "SYNTHETIC-001",
+                "currency": "JPY"
+              },
+              "sourceView": "top_activity",
+              "amountSignSource": "debit",
+              "rowBalanceDisposition": "preserved_provider_value_semantics_unverified"
+            }
+          }
+        },
+        {
+          "kind": "transaction",
+          "sourceAccount": "sbi-shinsei:SYNTHETIC-001",
+          "externalId": "SYNTHETIC-TXN-002",
+          "amountMinor": 2500,
+          "amountText": "2500",
+          "amountScale": 0,
+          "currency": "JPY",
+          "description": "Synthetic credit",
+          "asOf": "2026-09-07",
+          "observedAt": "2026-09-07T09:00:00+09:00",
+          "rawLocator": "json:$.responseParam.activity.responseParam.activityDetails[1]",
+          "extra": {
+            "txnReferenceNo": "SYNTHETIC-TXN-002",
+            "description": "Synthetic credit",
+            "credit": "2500",
+            "postingDate": "20260907",
+            "balance": "124756",
+            "tradeTypeCode": "SYNTHETIC",
+            "_kogane": {
+              "providerContext": {
+                "fromDate": "20260901",
+                "toDate": "20260907",
+                "currentBalance": "123456",
+                "accountNo": "SYNTHETIC-001",
+                "currency": "JPY"
+              },
+              "sourceView": "top_activity",
+              "amountSignSource": "credit",
+              "rowBalanceDisposition": "preserved_provider_value_semantics_unverified"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unreadable-container": {
+      "error": true
+    },
+    "unknown-fields": {
+      "error": true
+    }
+  },
+  "sbi-shinsei-yen-deposit-account": {
+    "complete-empty": {
+      "observations": [],
+      "warnings": []
+    },
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-shinsei:SYNTHETIC-001",
+          "metric": "yen_deposit_account_balance",
+          "amountMinor": 123456,
+          "amountText": "123456",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T09:01:00+09:00",
+          "rawLocator": "json:$.responseParam.debitAccountDetails[0].balance",
+          "extra": {
+            "accountNo": "SYNTHETIC-001",
+            "balance": "123456",
+            "currency": "JPY",
+            "productCode": "601",
+            "accountStatus": "ACTIVE",
+            "productDescription": "Synthetic ordinary deposit",
+            "_kogane": {
+              "providerContext": {
+                "postingDate": "20260907",
+                "transactionTime": "20260907090100",
+                "customerCategory": "SYNTHETIC",
+                "productDetails": [
+                  {
+                    "productCode": "601",
+                    "pdProductDetail": {}
+                  }
+                ],
+                "tdDetails": [],
+                "sdDetails": [],
+                "debuntureDetails": [],
+                "loanDetails": [],
+                "moduleDetails": [
+                  {
+                    "moduleCode": "SYNTHETIC",
+                    "moduleDesc": "Synthetic module",
+                    "moduleBalance": "124011"
+                  }
+                ]
+              },
+              "sourceView": "debitAccountDetails",
+              "productCode": "601",
+              "preservedContextSections": [
+                "productDetails",
+                "moduleDetails",
+                "tdDetails",
+                "sdDetails",
+                "debuntureDetails",
+                "loanDetails"
+              ]
+            }
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sbi-shinsei:SYNTHETIC-003",
+          "metric": "yen_deposit_savings_balance",
+          "amountMinor": 555,
+          "amountText": "555",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T09:01:00+09:00",
+          "rawLocator": "json:$.responseParam.savingsDetails[0].balance",
+          "extra": {
+            "accountNo": "SYNTHETIC-003",
+            "balance": "555",
+            "yenEqui": "555",
+            "currency": "JPY",
+            "productCode": "603",
+            "_kogane": {
+              "providerContext": {
+                "postingDate": "20260907",
+                "transactionTime": "20260907090100",
+                "customerCategory": "SYNTHETIC",
+                "productDetails": [
+                  {
+                    "productCode": "601",
+                    "pdProductDetail": {}
+                  }
+                ],
+                "tdDetails": [],
+                "sdDetails": [],
+                "debuntureDetails": [],
+                "loanDetails": [],
+                "moduleDetails": [
+                  {
+                    "moduleCode": "SYNTHETIC",
+                    "moduleDesc": "Synthetic module",
+                    "moduleBalance": "124011"
+                  }
+                ]
+              },
+              "sourceView": "savingsDetails",
+              "productCode": "603",
+              "preservedContextSections": [
+                "productDetails",
+                "moduleDetails",
+                "tdDetails",
+                "sdDetails",
+                "debuntureDetails",
+                "loanDetails"
+              ]
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unreadable-container": {
+      "error": true
+    },
+    "unknown-fields": {
+      "error": true
+    }
+  },
+  "sony-bank-gross-balance": {
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:asset:001",
+          "metric": "gross_asset_balance",
+          "amountMinor": 1000,
+          "amountText": "1000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.assetBalAcTypTyp[0]",
+          "extra": {
+            "assetAcqRsltFlg": "1",
+            "assetBalance": "1000",
+            "assetGrsBalanceAccountType": "001",
+            "assetItmDispFlg": "1"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:asset:002",
+          "metric": "gross_asset_balance",
+          "amountMinor": 2000,
+          "amountText": "2000",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.assetBalAcTypTyp[1]",
+          "extra": {
+            "assetAcqRsltFlg": "1",
+            "assetBalance": "2000",
+            "assetGrsBalanceAccountType": "002",
+            "assetItmDispFlg": "1"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:asset:003",
+          "metric": "gross_asset_balance",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.assetBalAcTypTyp[2]",
+          "extra": {
+            "assetAcqRsltFlg": "0",
+            "assetBalance": "0",
+            "assetGrsBalanceAccountType": "003",
+            "assetItmDispFlg": "0"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:asset:004",
+          "metric": "gross_asset_balance",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.assetBalAcTypTyp[3]",
+          "extra": {
+            "assetAcqRsltFlg": "0",
+            "assetBalance": "0",
+            "assetGrsBalanceAccountType": "004",
+            "assetItmDispFlg": "0"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:asset:005",
+          "metric": "gross_asset_balance",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.assetBalAcTypTyp[4]",
+          "extra": {
+            "assetAcqRsltFlg": "0",
+            "assetBalance": "0",
+            "assetGrsBalanceAccountType": "005",
+            "assetItmDispFlg": "0"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:asset:006",
+          "metric": "gross_asset_balance",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.assetBalAcTypTyp[5]",
+          "extra": {
+            "assetAcqRsltFlg": "0",
+            "assetBalance": "0",
+            "assetGrsBalanceAccountType": "006",
+            "assetItmDispFlg": "0"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:asset:007",
+          "metric": "gross_asset_balance",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.assetBalAcTypTyp[6]",
+          "extra": {
+            "assetAcqRsltFlg": "0",
+            "assetBalance": "0",
+            "assetGrsBalanceAccountType": "007",
+            "assetItmDispFlg": "0"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:asset:008",
+          "metric": "gross_asset_balance",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.assetBalAcTypTyp[7]",
+          "extra": {
+            "assetAcqRsltFlg": "0",
+            "assetBalance": "0",
+            "assetGrsBalanceAccountType": "008",
+            "assetItmDispFlg": "0"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:asset:009",
+          "metric": "gross_asset_balance",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.assetBalAcTypTyp[8]",
+          "extra": {
+            "assetAcqRsltFlg": "0",
+            "assetBalance": "0",
+            "assetGrsBalanceAccountType": "009",
+            "assetItmDispFlg": "0"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:asset:010",
+          "metric": "gross_asset_balance",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.assetBalAcTypTyp[9]",
+          "extra": {
+            "assetAcqRsltFlg": "0",
+            "assetBalance": "0",
+            "assetGrsBalanceAccountType": "010",
+            "assetItmDispFlg": "0"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:asset:011",
+          "metric": "gross_asset_balance",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.assetBalAcTypTyp[10]",
+          "extra": {
+            "assetAcqRsltFlg": "0",
+            "assetBalance": "0",
+            "assetGrsBalanceAccountType": "011",
+            "assetItmDispFlg": "0"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:loan:012",
+          "metric": "gross_loan_balance",
+          "amountMinor": 500,
+          "amountText": "500",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.loanBalAcTypTyp[0]",
+          "extra": {
+            "loanAcqRsltFlg": "1",
+            "loanBalance": "500",
+            "loanGrsBalanceAccountType": "012",
+            "loanItmDispFlg": "0"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:loan:013",
+          "metric": "gross_loan_balance",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.loanBalAcTypTyp[1]",
+          "extra": {
+            "loanAcqRsltFlg": "1",
+            "loanBalance": "0",
+            "loanGrsBalanceAccountType": "013",
+            "loanItmDispFlg": "0"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:loan:014",
+          "metric": "gross_loan_balance",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.loanBalAcTypTyp[2]",
+          "extra": {
+            "loanAcqRsltFlg": "1",
+            "loanBalance": "0",
+            "loanGrsBalanceAccountType": "014",
+            "loanItmDispFlg": "0"
+          }
+        },
+        {
+          "kind": "balance",
+          "sourceAccount": "sony-bank:gross:loan:015",
+          "metric": "gross_loan_balance",
+          "amountMinor": 0,
+          "amountText": "0",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.loanBalAcTypTyp[3]",
+          "extra": {
+            "loanAcqRsltFlg": "1",
+            "loanBalance": "0",
+            "loanGrsBalanceAccountType": "015",
+            "loanItmDispFlg": "0"
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sony-bank:gross",
+          "subject": "assets",
+          "metric": "gross_asset_total",
+          "amountMinor": 3000,
+          "amountText": "3000",
+          "amountScale": 0,
+          "currency": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.assetTtl",
+          "extra": {
+            "updateDttm": "2026/09/01 12:34:56"
+          }
+        },
+        {
+          "kind": "valuation",
+          "sourceAccount": "sony-bank:gross",
+          "subject": "loans",
+          "metric": "gross_loan_total",
+          "amountMinor": 500,
+          "amountText": "500",
+          "amountScale": 0,
+          "currency": "JPY",
+          "asOf": "2026-09-01T12:34:56",
+          "rawLocator": "json:$.loanTtl",
+          "extra": {
+            "updateDttm": "2026/09/01 12:34:56"
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "empty-not-representable": {
+      "error": true
+    },
+    "unknown-fields": {
+      "error": true
+    }
+  },
+  "smbc-direct-balance": {
+    "complete-rows": {
+      "observations": [
+        {
+          "kind": "balance",
+          "sourceAccount": "smbc-bank:ordinary-yen",
+          "metric": "account_balance",
+          "amountMinor": 12345,
+          "amountText": "12345",
+          "amountScale": 0,
+          "instrument": "JPY",
+          "asOf": "2026-09-07T00:00:00.000Z",
+          "observedAt": "2026-09-07T00:00:00.000Z",
+          "rawLocator": "json:$",
+          "extra": {
+            "amount": 12345,
+            "currency": "JPY",
+            "observedAt": "2026-09-07T00:00:00.000Z",
+            "_kogane": {
+              "canonicalDataset": "balance-normalized",
+              "derivedFromDataset": "balance-raw",
+              "balanceScope": "ordinary_yen_account"
+            }
+          }
+        }
+      ],
+      "warnings": []
+    },
+    "unreadable-container": {
+      "error": true
+    },
+    "unknown-fields": {
+      "error": true
+    }
+  }
+}

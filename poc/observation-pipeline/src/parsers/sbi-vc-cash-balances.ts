@@ -9,6 +9,7 @@ import {
   requireNonEmptyString,
   warnUnknownFields,
 } from "./sbi-vc-common.ts";
+import { containerClaim, ParseDiagnostics } from "./coverage.ts";
 import { isObject } from "./util.ts";
 
 const DATASET = "cash-balances";
@@ -35,10 +36,10 @@ export const sbiVcCashBalances: Parser = {
     return acceptsSbiVcDataset(artifact, DATASET);
   },
 
-  parse(bytes: Uint8Array): ParseResult {
+  parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
     const envelope = parseSbiVcEnvelope(bytes, DATASET);
-    const warnings: string[] = [];
-    warnUnknownFields(envelope.body, BODY_FIELDS, "json:$.body", warnings);
+    const diagnostics = new ParseDiagnostics();
+    warnUnknownFields(envelope.body, BODY_FIELDS, "json:$.body", diagnostics);
     if (!Array.isArray(envelope.body["list"])) {
       throw new Error(`${DATASET}: body fields do not match the provider contract`);
     }
@@ -53,7 +54,7 @@ export const sbiVcCashBalances: Parser = {
       if (!isObject(entry)) {
         throw new Error(`${locator}: expected a cash balance object`);
       }
-      warnUnknownFields(entry, ITEM_FIELDS, locator, warnings);
+      warnUnknownFields(entry, ITEM_FIELDS, locator, diagnostics);
       const currency = requireNonEmptyString(entry, "currency", locator);
       if (typeof entry["fxAccountId"] !== "string") {
         throw new Error(`${locator}.fxAccountId: expected a string`);
@@ -72,11 +73,23 @@ export const sbiVcCashBalances: Parser = {
             locator: `${locator}.${field}`,
             extra,
             ...(observedAt !== undefined ? { observedAt } : {}),
-            warnings,
+            diagnostics,
           }),
         );
       }
     });
-    return { observations, warnings };
+    return {
+      observations,
+      warnings: diagnostics.warnings,
+      issues: diagnostics.issues,
+      coverage: [
+        containerClaim({
+          artifact,
+          issues: diagnostics.issues,
+          observedCount: observations.length,
+          evidenceRefs: ["json:$.body.list"],
+        }),
+      ],
+    };
   },
 };

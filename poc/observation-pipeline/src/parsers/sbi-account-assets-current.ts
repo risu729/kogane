@@ -5,6 +5,7 @@ import type {
   ParseResult,
   ValuationObservation,
 } from "../types.ts";
+import { containerClaim } from "./coverage.ts";
 import { decodeUtf8 } from "./util.ts";
 import { exactKeys, exactMoney, strictObject, strictString } from "./sbi-strict.ts";
 
@@ -96,7 +97,7 @@ export const sbiAccountAssetsCurrent: Parser = {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "account-assets-current";
   },
 
-  parse(bytes: Uint8Array): ParseResult {
+  parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
     const body = strictObject(JSON.parse(decodeUtf8(bytes)), "account-assets-current");
     exactKeys(body, ROOT_KEYS, "account-assets-current");
     const observations: Observation[] = [];
@@ -133,6 +134,21 @@ export const sbiAccountAssetsCurrent: Parser = {
         );
       });
     }
-    return { observations, warnings: [] };
+    // Every view is validated to its exact key set or rejected, so a parse
+    // that returns is a complete container; null summaries are the provider's
+    // own statement of absence.
+    return {
+      observations,
+      warnings: [],
+      issues: [],
+      coverage: [
+        containerClaim({
+          artifact,
+          issues: [],
+          observedCount: observations.length,
+          evidenceRefs: [...summaryViews, ...detailViews].map((view) => `json:$.${view}`),
+        }),
+      ],
+    };
   },
 };

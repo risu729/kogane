@@ -228,6 +228,18 @@ describe("sbi-domestic-cash-positions", () => {
     expect(sbiDomesticCashPositions.parse(encoded(body), meta)).toEqual({
       observations: [],
       warnings: [],
+      issues: [],
+      // Contract v2: the provider's explicit empty-result layout is a
+      // complete-empty container, distinct from an unread one.
+      coverage: [
+        expect.objectContaining({
+          completeness: "complete",
+          membershipComplete: true,
+          observedCount: 0,
+          expectedCount: 0,
+          absenceMeaning: "complete-empty",
+        }),
+      ],
     });
     body["payloadBase64"] = btoa(prefix + " ".repeat(659));
     expect(() => sbiDomesticCashPositions.parse(encoded(body), meta)).toThrow(

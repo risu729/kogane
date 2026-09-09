@@ -1,4 +1,5 @@
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
+import { containerClaim } from "./coverage.ts";
 import { decimalToMinorUnits, minorUnitExponent } from "./util.ts";
 import {
   acceptsSbiShinseiDataset,
@@ -272,6 +273,23 @@ export const sbiShinseiTopBalancesAndActivity: Parser = {
         });
       });
     }
-    return { observations, warnings: [] };
+    // Strict shapes throughout: the parse either proves the overview and the
+    // activity block or throws, so a returned result is a complete container.
+    return {
+      observations,
+      warnings: [],
+      issues: [],
+      coverage: [
+        containerClaim({
+          artifact,
+          issues: [],
+          observedCount: observations.length,
+          evidenceRefs: [
+            "json:$.responseParam.overview.responseParam.savingsDetails",
+            "json:$.responseParam.activity.responseParam.activityDetails",
+          ],
+        }),
+      ],
+    };
   },
 };
