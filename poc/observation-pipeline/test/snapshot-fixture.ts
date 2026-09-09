@@ -8,6 +8,7 @@ import {
   insertCoverageClaims,
   insertFetchArtifact,
   insertFetchRun,
+  insertFetchUnitOutcome,
   insertObservation,
   insertParseIssues,
   insertParseRun,
@@ -57,6 +58,13 @@ export interface Snapshot {
   time?: string;
   status?: "success" | "partial" | "failed";
   failureCount?: number;
+  /**
+   * Terminal outcome of this artifact's own fetch unit (D13). Recorded only
+   * when `unit` is given; production writes the equivalent
+   * `fetch_unit_reports` row. Absent means the unit reported nothing, which
+   * keeps the artifact on the run scope.
+   */
+  unitOutcome?: "success" | "partial" | "failed" | "human_required" | "cancelled" | "unknown";
   parseStatus?: "ok" | "error" | "missing";
   warnings?: string[];
   issues?: ParseIssue[];
@@ -87,6 +95,14 @@ export function snapshot(store: Store, options: Snapshot) {
         options.failureCount ??
         (options.status === undefined || options.status === "success" ? 0 : 1),
     });
+  if (options.unit !== undefined && options.unitOutcome !== undefined) {
+    insertFetchUnitOutcome(store, {
+      fetchRunId: runId,
+      unitKey: options.unit,
+      unitOutcome: options.unitOutcome,
+      ...(options.unitOutcome === "success" ? {} : { failureCode: "synthetic-unit-failure" }),
+    });
+  }
   const raw = putRawObject(store, new TextEncoder().encode("{}"), "application/json");
   const artifactId = insertFetchArtifact(store, {
     sourceId,
@@ -126,6 +142,7 @@ export function snapshot(store: Store, options: Snapshot) {
     insertCoverageClaims(store, parseId, [claim], {
       status: artifact.runStatus,
       failureCount: artifact.runFailureCount,
+      unitOutcome: options.unitOutcome ?? null,
     });
   }
   // A success is published as parse.ts does, after the contract rows of the
@@ -134,6 +151,20 @@ export function snapshot(store: Store, options: Snapshot) {
   if ((options.parseStatus ?? "ok") === "ok")
     publishParseRun(store, artifactId, options.parser, parseId);
   return { runId, artifactId, parseId };
+}
+
+/**
+ * Switch one dataset to the `unit` eligibility scope (`unit-independent-v1`).
+ * Seeded rows are all `run`; this is the operator step, and passing `run`
+ * again is the rollback.
+ */
+export function activateUnitScope(store: Store, parser: string, scope: "run" | "unit"): void {
+  const result = store.db
+    .query(
+      "UPDATE dataset_snapshot_policies SET unit_scope = ?1, updated_at_ms = 1 WHERE parser_name = ?2",
+    )
+    .run(scope, parser);
+  if (result.changes !== 1) throw new Error(`no policy row for ${parser}`);
 }
 
 /** Switch one dataset's selection policy; the operational table is mutable. */

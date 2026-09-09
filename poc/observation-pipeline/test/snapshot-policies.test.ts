@@ -14,10 +14,11 @@ import {
   LEGACY_SNAPSHOT_POLICY,
   LOCAL_SNAPSHOT_RELATIONS,
   SNAPSHOT_DATASETS,
+  snapshotCtes,
   snapshotPolicyComparisonSql,
   type SnapshotPolicyComparisonRow,
 } from "../src/snapshot-query.ts";
-import { listArtifacts, type Store } from "../src/store.ts";
+import { insertFetchRun, listArtifacts, upsertSource, type Store } from "../src/store.ts";
 import { balance, closeStores, database, facts, snapshot } from "./snapshot-fixture.ts";
 
 afterEach(closeStores);
@@ -31,6 +32,7 @@ interface PolicyRow {
   required_parser_version: string | null;
   replaces_previous_on_complete_empty: number;
   unit_scope: string;
+  snapshot_selection: number;
 }
 function policyRows(store: Store): PolicyRow[] {
   return store.db
@@ -41,7 +43,13 @@ function policyRows(store: Store): PolicyRow[] {
 describe("dataset_snapshot_policies seed", () => {
   test("mirrors SNAPSHOT_DATASETS exactly, so a new snapshot parser without a policy row fails CI", () => {
     const rows = policyRows(database());
-    const seeded = rows.map((row) => [row.parser_name, row.dataset] as const).sort();
+    // Only rows that select snapshots are the registry; a row with
+    // `snapshot_selection = 0` carries an eligibility policy for a dataset that
+    // is not a container snapshot dataset (D13/PR-14).
+    const seeded = rows
+      .filter((row) => row.snapshot_selection === 1)
+      .map((row) => [row.parser_name, row.dataset] as const)
+      .sort();
     const registry = [...SNAPSHOT_DATASETS].sort();
     expect(seeded).toEqual(registry);
     for (const [parser] of SNAPSHOT_DATASETS)
@@ -62,7 +70,11 @@ describe("dataset_snapshot_policies seed", () => {
     for (const row of policyRows(database())) {
       expect(row.policy_id).toBe(LEGACY_SNAPSHOT_POLICY);
       expect(row.policy_version).toBe(1);
+      // D13/PR-14: every seeded dataset stays on the run scope and stays a
+      // container-snapshot dataset. Enabling `unit-independent-v1` is an
+      // operator write, never a deploy.
       expect(row.unit_scope).toBe("run");
+      expect(row.snapshot_selection).toBe(1);
       expect(row.replaces_previous_on_complete_empty).toBe(1);
       expect(row.required_parser_version).toBe(
         row.parser_name === "sbi-foreign-cash-positions" ? FOREIGN_POSITION_SNAPSHOT_VERSION : null,
@@ -214,5 +226,76 @@ describe("shadow comparison of legacy-warning-compat-v1 and coverage-v1", () => 
     // The comparison is independent of which policy the table activates.
     store.db.query("UPDATE dataset_snapshot_policies SET policy_id = 'coverage-v1'").run();
     expect(differing(compare(store))).toHaveLength(2);
+  });
+});
+
+// D13/PR-14: an eligibility-only policy row. MyJCB's cards are independent
+// fetch units, but MyJCB's current-statement selection lives in the per-source
+// multi-page contract in queries.ts, not in SNAPSHOT_DATASETS. A row with
+// `snapshot_selection = 0` must therefore grant the unit scope without turning
+// the dataset into a container-snapshot dataset.
+describe("eligibility-only policy rows", () => {
+  const MYJCB = {
+    source: "myjcb",
+    dataset: "credit-ledger",
+    parser: "myjcb-credit-ledger",
+  } as const;
+
+  function enable(store: Store): void {
+    store.db
+      .query(
+        `INSERT INTO dataset_snapshot_policies
+           (source_id, dataset, parser_name, policy_id, unit_scope, snapshot_selection, updated_at_ms)
+         VALUES (?1, ?2, ?3, 'legacy-warning-compat-v1', 'unit', 0, 1)`,
+      )
+      .run(MYJCB.source, MYJCB.dataset, MYJCB.parser);
+  }
+
+  test("grants the unit scope to the proven card and to nothing else", () => {
+    const store = database();
+    upsertSource(store, { id: MYJCB.source, provider: "Synthetic", ingestion: "collector-r2" });
+    const runId = insertFetchRun(store, {
+      sourceId: MYJCB.source,
+      externalRunId: "myjcb-partial",
+      tool: "synthetic-query-test",
+      startedAt: "2026-09-05T00:00:00.000Z",
+      completedAt: "2026-09-05T00:00:00.000Z",
+      status: "partial",
+      failureCount: 1,
+    });
+    for (const [card, outcome] of [
+      ["card-a", "success"],
+      ["card-b", "failed"],
+    ] as const)
+      snapshot(store, {
+        ...MYJCB,
+        runId,
+        unit: card,
+        unitOutcome: outcome,
+        parseStatus: "missing",
+        observations: [],
+      });
+    // Before the row: no artifact of the partial run is admitted.
+    expect(listArtifacts(store).map((a) => a.unitScopeEligibility)).toEqual([null, null]);
+    enable(store);
+    expect(listArtifacts(store).map((a) => a.unitScopeEligibility)).toEqual([
+      "unit-independent-v1",
+      null,
+    ]);
+  });
+
+  test("does not make the dataset a container-snapshot dataset", () => {
+    const store = database();
+    enable(store);
+    const registry = store.db
+      .query(
+        `WITH ${snapshotCtes(LOCAL_SNAPSHOT_RELATIONS)}
+         SELECT parser_name FROM snapshot_policies ORDER BY parser_name`,
+      )
+      .all() as { parser_name: string }[];
+    expect(registry.map((row) => row.parser_name)).not.toContain(MYJCB.parser);
+    expect(registry).toHaveLength(SNAPSHOT_DATASETS.length);
+    // The shadow comparison is unchanged too: it reads the same CTEs.
+    expect(compare(store)).toEqual([]);
   });
 });
