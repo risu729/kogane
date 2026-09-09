@@ -59,6 +59,7 @@ test("harness applies every Layer B migration in order through 0037", () => {
     "0025_parse_coverage.sql",
     "0026_publication_gate.sql",
     "0029_decision_log.sql",
+    "0030_balance_read_model.sql",
     "0035_observation_job_lanes.sql",
     "0036_publication_event_guard.sql",
     "0037_unit_scope_eligibility.sql",
