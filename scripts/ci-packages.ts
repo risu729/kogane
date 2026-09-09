@@ -52,6 +52,30 @@ export const CI_PACKAGES: PackagePolicy[] = [
     checks: ["typecheck", "test"],
   },
   {
+    // Promoted from the PoC (design review D07, docs/package-layout.md): the
+    // HTTP/UI contracts and value semantics every reader shares. Pure data and
+    // predicates; no Worker, no database, no browser.
+    path: "packages/observation-shared",
+    scripts: { test, typecheck: "tsc --noEmit" },
+    checks: ["typecheck", "test"],
+  },
+  {
+    // Promoted from the PoC (design review D07). The deployed parsers and
+    // their build digests. parse5 is a real runtime dependency of two HTML
+    // parsers, so this is the one shared package with `dependencies`; the
+    // services that run the parsers install it (`sharedParserDependencies`).
+    path: "packages/parsers",
+    scripts: { test, typecheck: "tsc --noEmit" },
+    checks: ["typecheck", "test"],
+  },
+  {
+    // Promoted from the PoC (design review D07): identity resolution over
+    // stored observations. Pure functions; no Worker, no database.
+    path: "packages/identity",
+    scripts: { test, typecheck: "tsc --noEmit" },
+    checks: ["typecheck", "test"],
+  },
+  {
     path: "services/observation-pipeline",
     scripts: { test, typecheck, "cf:check": dryRun },
     checks: ["typecheck", "test", "cf:check"],
@@ -230,6 +254,7 @@ export const STANDALONE_TESTS = [
   "scripts/ci-package.test.ts",
   // Repository-wide guards live next to the CI policy they protect; every
   // scripts/*.test.ts must be listed here (scripts/ci-package.test.ts checks).
+  "scripts/import-boundaries.test.ts",
   "scripts/publication-gate-predicates.test.ts",
   "poc/collector-diagnostics/test/diagnostics.test.ts",
   "poc/sbi-securities/scripts/prepare-sbi-bitwarden-cli-secret.bun.test.ts",

@@ -48,6 +48,9 @@ jobs:
           - packages/application
           - packages/domain
           - packages/evidence-contract
+          - packages/identity
+          - packages/observation-shared
+          - packages/parsers
           - packages/read-model
           - poc/cloudflare-browser-run
           - poc/cloudflare-runtime-probe

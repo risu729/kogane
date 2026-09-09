@@ -169,7 +169,12 @@ describe("offline CI coverage", () => {
     expect(plan).toEqual(["bun install --frozen-lockfile", "bun run typecheck", "bun run test"]);
   });
   test("shared pure packages run frozen install, typecheck and bun tests without Workers tooling", () => {
-    for (const name of ["packages/read-model", "packages/application"]) {
+    for (const name of [
+      "packages/read-model",
+      "packages/application",
+      "packages/observation-shared",
+      "packages/identity",
+    ]) {
       const plan = packagePlan(name, options).map((step) => step.command.join(" "));
       expect(plan).toEqual(["bun install --frozen-lockfile", "bun run typecheck", "bun run test"]);
       expect(selectPolicy(name).scripts).toEqual({ test: "bun test", typecheck: "tsc --noEmit" });
@@ -180,16 +185,37 @@ describe("offline CI coverage", () => {
   });
   test("production parser CI installs shared parser dependencies before checking without building UI", () => {
     const plan = packagePlan("services/observation-pipeline", options);
+    // Since design review D07 the parsers live in packages/parsers, and parse5
+    // resolves from that package rather than from the PoC frontend.
     expect(plan[1]).toEqual({
-      cwd: join(REPO_ROOT, "poc/observation-pipeline"),
+      cwd: join(REPO_ROOT, "packages/parsers"),
       command: ["bun", "install", "--frozen-lockfile"],
     });
     expect(plan[2]?.command).toEqual(["bun", "run", "typecheck"]);
+    expect(plan.some((step) => step.cwd === join(REPO_ROOT, "poc/observation-pipeline"))).toBe(
+      false,
+    );
     expect(
       plan.some((step) =>
         step.command.some((part) => part.startsWith("build") || part.includes("playwright")),
       ),
     ).toBe(false);
+  });
+
+  test("the shared parser package is the only pure package with a runtime dependency", () => {
+    const policy = selectPolicy("packages/parsers");
+    expect(policy.checks).toEqual(["typecheck", "test"]);
+    expect(policy.scripts).toEqual({ test: "bun test", typecheck: "tsc --noEmit" });
+    const manifest = JSON.parse(readFileSync(join(REPO_ROOT, policy.path, "package.json"), "utf8"));
+    // Two HTML parsers import parse5 at runtime; nothing else may creep in.
+    expect(Object.keys(manifest.dependencies)).toEqual(["parse5"]);
+    const frontend = JSON.parse(
+      readFileSync(join(REPO_ROOT, "poc/observation-pipeline/package.json"), "utf8"),
+    );
+    expect(manifest.dependencies.parse5).toBe(frontend.dependencies.parse5);
+    expect(Object.keys(manifest.devDependencies).sort()).toEqual(["@types/bun", "typescript"]);
+    const plan = packagePlan(policy.path, options).map((step) => step.command.join(" "));
+    expect(plan).toEqual(["bun install --frozen-lockfile", "bun run typecheck", "bun run test"]);
   });
   test("reader CI builds all three isolated frontends and synthetic data before Worker checks", () => {
     const productionConfig = JSON.parse(
@@ -209,7 +235,10 @@ describe("offline CI coverage", () => {
     );
     expect(assetBuild).toBeGreaterThan(0);
     expect(plan[assetBuild]!.cwd).toBe(join(REPO_ROOT, "poc/observation-pipeline"));
-    expect(plan[assetBuild - 1]!.command).toEqual(["bun", "install", "--frozen-lockfile"]);
+    expect(plan[assetBuild - 1]!).toEqual({
+      cwd: join(REPO_ROOT, "poc/observation-pipeline"),
+      command: ["bun", "install", "--frozen-lockfile"],
+    });
     expect(assetBuild).toBeLessThan(
       plan.findIndex((step) => step.command.join(" ") === "bun run cf:check"),
     );
@@ -289,6 +318,7 @@ describe("offline CI coverage", () => {
     expect(result.exitCode).toBe(0);
     const guards = result.stdout.toString().split("\0").filter(Boolean).sort();
     expect(guards).toContain("scripts/publication-gate-predicates.test.ts");
+    expect(guards).toContain("scripts/import-boundaries.test.ts");
     // These suites belong to no package, so nothing else would run them: a
     // guard missing from the list is a guard CI never executes.
     expect(
