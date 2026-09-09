@@ -45,6 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         package:
+          - packages/read-model
           - poc/cloudflare-browser-run
           - poc/cloudflare-runtime-probe
           - poc/globalpass-worker

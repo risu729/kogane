@@ -575,6 +575,17 @@ counting rather than describing as a store swap:
   reads `schema.sql` from disk and executes DDL, and a Worker has no
   filesystem.
 
+The deployed Worker (`services/evidence-browser`) does not run
+`src/queries.ts`. Its reads go through the explicit read repository in
+`packages/read-model` (`src/observations.ts` binds it to D1): one named
+method per query, typed filter inputs, and SQL that names the sealed
+`observation_*` views it reads. Until PR-04 the Worker reused the PoC's SQL
+shape through an adapter that rewrote table names with a regular expression
+and stripped the trailing `LIMIT`; that adapter is gone, and a parity test
+holds the new reader to the old results. See [Read model](read-model.md)
+for the named concepts, per-query filter and grouping order, and the rule
+that no code rewrites SQL strings.
+
 This surface renders real financial data, and its API hands the same data
 as JSON to anything that can reach it. It must never be publicly
 reachable. Cloudflare Access in front of the Worker is a better fit than

@@ -1,21 +1,18 @@
 import { getPlatformProxy } from "wrangler";
-import {
-  observationStore,
-  latestBalances,
-  positionsWithValuations,
-} from "../../evidence-browser/src/observations.ts";
+import { evidenceReader } from "../../evidence-browser/src/observations.ts";
 const proxy = await getPlatformProxy<{ DB: D1Database }>({
   configPath: new URL("../wrangler.diagnostic.jsonc", import.meta.url).pathname,
   persist: false,
   remoteBindings: true,
 });
 try {
+  const reader = evidenceReader(proxy.env.DB);
   for (const [name, query] of [
-    ["balances", latestBalances],
-    ["positions", positionsWithValuations],
+    ["balances", () => reader.listLatestBalances({ offset: 0, limit: 501 })],
+    ["positions", () => reader.listPositions({ offset: 0 })],
   ] as const) {
     try {
-      const rows = await query(observationStore(proxy.env.DB));
+      const rows = await query();
       console.log(JSON.stringify({ name, status: "ok", count: rows.length }));
     } catch (error) {
       // Queries contain only code-owned SQL with no provider values. Reveal

@@ -129,7 +129,7 @@ export async function observationOrganizations(
 ): Promise<Map<string, ObservationOrganization>> {
   const unique = new Map(references.map((r) => [organizationKey(r), r]));
   // A position page can contain 501 position IDs plus up to 5,000 valuation
-  // pairs already bounded by observationStore. Do not shrink that API budget.
+  // pairs already bounded by the read-model reader. Do not shrink that API budget.
   if (unique.size > 5501) throw new Error("organization_reference_limit");
   const output = new Map([...unique.keys()].map((key) => [key, unavailable()]));
   const refs = [...unique.values()];
