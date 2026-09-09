@@ -42,6 +42,14 @@ versions must be three safe nonnegative integers, with no prerelease suffix.
 MyJCB statement state and period come from the verified central manifest, whose
 artifact ID is retained as metadata provenance.
 
+Metadata extraction is a versioned transform and every parse records the release
+it ran and the fingerprint of its input (migrations
+`0027_metadata_projections.sql` and `0028_parse_releases.sql`). Candidate
+results, release comparison, adoption and rollback are behind
+`RELEASE_CANDIDATES_ENABLED`; with the flag absent nothing a reader sees
+changes. See `docs/release-adoption.md` for the contract, the routes and both
+runbooks.
+
 ## Operations
 
 From this package, with the usual authorized Cloudflare environment:

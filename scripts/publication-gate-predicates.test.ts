@@ -35,10 +35,15 @@ import { REPO_ROOT } from "./ci-package.ts";
 const PREDICATE_ALLOW_LIST: Record<string, number> = {
   // The legacy rule, exported only for the consistency comparison.
   "packages/read-model/src/concepts.ts": 1,
-  // The projection writer, its bounded repair selection, and the module note.
-  "services/observation-pipeline/src/publication-gate.ts": 5,
+  // The projection writer's two statements and the module note. Since
+  // migration 0028 the repair selection reads publication_gate_gaps, which
+  // already excludes candidate results, so it states the rule no more.
+  "services/observation-pipeline/src/publication-gate.ts": 3,
   // The supersession batch the writer still maintains during compatibility.
   "services/observation-pipeline/src/worker.ts": 3,
+  // The candidate writer: a candidate is recorded only if the same batch left
+  // its run ok and unsuperseded. A writer decision, never a read.
+  "services/observation-pipeline/src/release-adoption.ts": 1,
   // The local PoC writer, its one-time backfill and the backfill's note.
   "poc/observation-pipeline/src/store.ts": 4,
 };
@@ -56,8 +61,12 @@ const OK_STATUS_ALLOW_LIST: Record<string, number> = {
   // Writer: publish batch, the duplicate-attempt skip, the job close, and the
   // comment that explains when contract v2 rows become visible.
   "services/observation-pipeline/src/worker.ts": 7,
-  // Writer: the projection statements, repair selection and module note.
-  "services/observation-pipeline/src/publication-gate.ts": 6,
+  // Writer: the two projection statements and the module note.
+  "services/observation-pipeline/src/publication-gate.ts": 4,
+  // Candidate writer: the run is marked ok, the candidate row is recorded only
+  // for an ok unsuperseded run, and the job is closed only for an ok run.
+  // Everything the comparison calls "published" comes from the projection.
+  "services/observation-pipeline/src/release-adoption.ts": 3,
   // Identity writer: interprets every successful run, published or not.
   "services/observation-pipeline/src/identity-store.ts": 5,
   // Identity audit: coverage over interpreted runs, not over what readers see.
