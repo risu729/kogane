@@ -64,8 +64,9 @@ const OK_STATUS_ALLOW_LIST: Record<string, number> = {
   "services/observation-pipeline/src/identity-audit.ts": 2,
   // Operator diagnostics over parse attempts per artifact; no reader path.
   "services/observation-pipeline/scripts/diagnose.ts": 1,
-  // Decorates published and superseded runs; adoption comes from the LEFT JOIN.
-  "services/evidence-browser/src/observation-organization.ts": 1,
+  // Decorates published and superseded runs; adoption comes from the LEFT JOIN
+  // on the projection, not from this status test (which only drops pending runs).
+  "packages/read-model/src/organization.ts": 1,
   // The local PoC writer and its backfill.
   "poc/observation-pipeline/src/store.ts": 5,
 };
