@@ -40,7 +40,9 @@ package's locked Playwright Chromium and fails if browser tests cannot run.
 - Ruff checks and formats Python probes without executing them. Typos and hk
   hygiene checks cover spelling, whitespace, merge markers, and file integrity.
 - The package matrix runs the reviewed tests, type checks, and deployment dry
-  runs for all 20 Bun packages. Standalone diagnostics and CI-coverage tests
+  runs for every Bun package listed in `scripts/ci-packages.ts`, including the
+  pure `packages/domain` contracts package (frozen install, `tsc --noEmit`,
+  `bun test`; no Worker dry run). Standalone diagnostics and CI-coverage tests
   also run. The two container packages use frozen npm installs without install
   scripts; the OCI probe receives syntax checks only.
 
