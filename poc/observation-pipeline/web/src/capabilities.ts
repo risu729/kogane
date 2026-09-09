@@ -29,6 +29,8 @@ export interface ClientFeatures {
   readonly identities: boolean;
   /** The sealed raw-run history route is available. */
   readonly evidenceHistory: boolean;
+  /** Summary figures come from the shared query service, not a page-local sum. */
+  readonly sharedQuery: boolean;
   /** The change lifecycle is served, so confirmation screens may act. */
   readonly commands: boolean;
 }
@@ -39,6 +41,7 @@ export const NO_FEATURES: ClientFeatures = {
   serverPaging: false,
   identities: false,
   evidenceHistory: false,
+  sharedQuery: false,
   commands: false,
 };
 
@@ -48,6 +51,7 @@ export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
     serverPaging: capabilities.paginationVersion !== "none",
     identities: capabilities.identityReadModes.includes("latest"),
     evidenceHistory: capabilities.evidenceHistory,
+    sharedQuery: capabilities.sharedQuery,
     commands: capabilities.commands,
   };
 }

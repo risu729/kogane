@@ -162,8 +162,9 @@ explicit fees + declared unresolved difference`, per unit, gap reported not
 
 - `QuerySpec` with the intents of addendum 09 §1 (holdings, reported-state,
   net-worth, liquidity, cash-flow, obligations, activity, income,
-  performance, reward-forecast), a perimeter, effective time, basis and
-  filter records.
+  performance, reward-forecast) plus `coverage` — what the authorised
+  perimeter covers, the question asked before any figure means anything
+  (addendum 10 §7) — a perimeter, effective time, basis and filter records.
 - `FinancialResult<T>` with `completeness`, `coverage` defined inside the
   authorised scope, five `QualityDimension`s (identity, freshness, numeric,
   reconciliation, valuation), cursor, explanation references and typed

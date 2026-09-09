@@ -673,13 +673,45 @@ An array of route patterns for `run_worker_first` needs Wrangler 4.20.0 or
 later. This is untested here, because nothing is deployed yet; it is
 recorded now because it is cheap to read and expensive to debug.
 
+## The agent API and the shared query service
+
+The Worker also serves a small, default-off agent API and one shared query
+route, both of which run the application service in `packages/application`
+rather than a second implementation. See [Agent API](agent-api.md) for the
+grants, tools, result contract, error codes, prompt-injection rules and the
+`AGENT_API_GRANTS` configuration; the deployment facts are:
+
+- `POST /api/agent/v1/{capabilities,context.open,financial.query,explain,reconcile.propose}`
+  and `POST /mcp` are one of the browser's two non-GET allow-lists (the other
+  is the change lifecycle's `/api/command/v1/*`). Both are registered
+  explicitly in `src/worker.ts` before the GET-only check, behind the same
+  `auth.ts` gate as every read route, with bounded bodies, `no-store` and the
+  same closed 401/403 answers. Everything outside them is refused with 405.
+- The principal on both is the subject `authenticate` returned; no route reads
+  an actor from a request body or a header.
+- With `AGENT_API_GRANTS` absent or empty — the deployed default — every one
+  of the agent routes answers 403 for every authenticated principal, and the
+  hosted synthetic demo never serves them at all. It is a different variable
+  from the change lifecycle's `AGENT_GRANTS`; see
+  [Agent API](agent-api.md) for why they must not be merged.
+- The agent API's only write is a relation _proposal_: one
+  `decision_revisions` row of kind `propose` and one `entity_relations` row
+  with status `proposed` (migration 0029). No reader adopts a proposed
+  relation, so the rule below — the browser does not edit, correct or
+  annotate anything visible — still holds for every figure it shows.
+- `GET /api/v2/query` runs the same service for the human UI under the reader
+  authority the browser already has over its GET routes, so the Overview
+  page's summary counts and an agent's `coverage` answer are one computation.
+
 ## What it deliberately does not do
 
 Each of these belongs to a later phase, and each would be a phase-boundary
 violation here:
 
-- No editing, correcting, or annotating anything. Layer A and layer B rows
-  are append-only; corrections live in layer C, which does not exist yet.
+- No editing, correcting, or annotating anything visible. Layer A and layer B
+  rows are append-only; corrections live in layer C, which does not exist
+  yet. The agent API's proposals are inert claims that no read adopts, and
+  accepting one is a human operator path this service does not have.
 - No classification or categorization (phase 16, and always as a recorded
   interpretation).
 - No reconciliation, no pending-to-posted matching, no duplicate detection
