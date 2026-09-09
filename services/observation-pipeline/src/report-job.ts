@@ -31,8 +31,10 @@ import {
   type ValuationCell,
 } from "../../../packages/domain/src/index.ts";
 import { quantityFromNormalizedDecimal } from "../../../packages/domain/src/values.ts";
-import { validNormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
-import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
+import {
+  validNormalizedDecimal,
+  type NormalizedDecimal,
+} from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import { createD1ObservationReader } from "../../../packages/read-model/src/d1";
 import type { PositionWithValuations } from "../../../packages/observation-shared/src/api-contract.ts";
 
