@@ -4,6 +4,7 @@ import { describeActivities } from "./activity-presentation";
 import { organizedFilterOptions } from "./organized-filter-options";
 import { presentLatestBalances, describeBalanceRows } from "./balance-presentation";
 import { HttpError, json } from "./http";
+import { centralStoreCapabilities } from "./capabilities";
 import { raw } from "./read";
 import {
   organizeRows,
@@ -18,9 +19,7 @@ import {
   validMeasureView,
 } from "../../../poc/observation-pipeline/shared/api-schema";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
-import { eventsV2Available } from "./events-api";
 import { identityReadMode } from "./identity-read";
-import { commandsEnabled } from "./command-api";
 
 /** Validated request scope. Each route passes only the keys its reader query accepts. */
 interface RequestScope {
@@ -67,8 +66,9 @@ export async function observationApi(
     )
   )
     return null;
-  // Accepted parameters come from the shared schema and the capabilities this
-  // Worker advertises in /api/meta, so the two cannot drift apart.
+  // Accepted parameters come from the shared schema, so a server and a client
+  // cannot drift apart. No deployment-resolved capability grants a parameter
+  // on these paths, so the static contract decides what is accepted here.
   const allowed = allowedQueryParameters(path, CENTRAL_STORE_CAPABILITIES);
   for (const key of url.searchParams.keys()) {
     const value = url.searchParams.get(key)!;
@@ -134,13 +134,9 @@ export async function observationApi(
       parsingHealth: await reader.parsingHealth(),
       source: { kind: "central-store", classification: "financial" },
       // What this server can actually serve, not what the contract defaults
-      // to: `commands` follows the deployment's flag (A09) and `eventsV2`
-      // depends on the A10 projection being present.
-      capabilities: {
-        ...CENTRAL_STORE_CAPABILITIES,
-        commands: commandsEnabled(env),
-        eventsV2: await eventsV2Available(env),
-      },
+      // to. One helper resolves all three server-computed fields, and the
+      // agent API reads the same one (src/capabilities.ts).
+      capabilities: await centralStoreCapabilities(env),
     } satisfies ApiMetadata);
   }
   if (path === "/api/overview") return boundedCollections({ ...(await reader.overview()) });

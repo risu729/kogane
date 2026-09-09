@@ -8,6 +8,7 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
+    "REWARDS_V2_ENABLED": "false",
     "EVIDENCE_SOURCE_ID": "sony-bank",
     "EVENTS_V2_ENABLED": "0",
     "ACCESS_ISSUER": "https://risu729.cloudflareaccess.com",
