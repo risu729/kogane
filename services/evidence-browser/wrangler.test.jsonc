@@ -7,6 +7,7 @@
   "preview_urls": false,
   "vars": {
     "EVIDENCE_SOURCE_ID": "sony-bank",
+    "EVENTS_V2_ENABLED": "0",
     "ACCESS_ISSUER": "https://evidence-test.cloudflareaccess.com",
     "ACCESS_AUDIENCE": "synthetic-test-audience"
   },

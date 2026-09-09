@@ -12,6 +12,7 @@ import {
 import { SNAPSHOT_RELATIONS, unitParseable } from "../../../packages/read-model/src/concepts";
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
+import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import {
   publicationConsistency,
   publicationStatements,
@@ -1303,12 +1304,15 @@ export async function snapshotPolicyComparison(env: Env): Promise<Response> {
 export interface ScheduledStages {
   parse: (env: Env) => Promise<object>;
   identity: (env: Env) => Promise<object>;
-  /** A12 report job. Only runs while REPORTS_ENABLED is on; see docs/calculation-and-reports.md. */
+  /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
+  reconcile?: (env: Env) => Promise<object>;
+  /** A12 report job. Absent stage, or the flag off, means the lane never runs. */
   reports?: (env: Env) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
   identity: (env) => identitySweep(env.DB, resolveIdentity),
+  reconcile: (env) => reconciliationSweep(env.DB),
   reports: (env) => {
     // One clock reading for both fields: the run records when it ran, and the
     // cutoff admits everything recorded up to that same instant.
@@ -1332,15 +1336,21 @@ export async function runScheduled(
   stages: ScheduledStages = defaultStages,
   log: (line: string) => void = (line) => console.log(line),
 ): Promise<void> {
-  // The report stage is added only while the flag is on, so a deployment with
-  // reports off logs and writes exactly what it did before (A12).
-  const entries: (readonly [string, (env: Env) => Promise<object>])[] = [
+  const lanes: [string, ((env: Env) => Promise<object>) | undefined][] = [
     ["observation_sweep", stages.parse],
     ["identity_sweep", stages.identity],
+    // Off unless RECONCILIATION_ENABLED is set, so a normal deploy logs and
+    // writes nothing new (docs/economic-events.md).
+    [
+      "reconciliation_sweep",
+      reconciliationEnabled(env.RECONCILIATION_ENABLED) ? stages.reconcile : undefined,
+    ],
+    // Off unless REPORTS_ENABLED is set, for the same reason
+    // (docs/calculation-and-reports.md).
+    ["report_job", reportsEnabled(env.REPORTS_ENABLED) ? stages.reports : undefined],
   ];
-  if (stages.reports && reportsEnabled(env.REPORTS_ENABLED))
-    entries.push(["report_job", stages.reports]);
-  for (const [event, stage] of entries) {
+  for (const [event, stage] of lanes) {
+    if (!stage) continue;
     try {
       log(JSON.stringify({ event, ...(await stage(env)) }));
     } catch (error) {
