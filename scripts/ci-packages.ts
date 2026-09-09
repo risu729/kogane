@@ -27,6 +27,12 @@ function worker(path: string): PackagePolicy {
 
 export const CI_PACKAGES: PackagePolicy[] = [
   {
+    // Pure shared code: no Workers tooling, no browser, no build.
+    path: "packages/read-model",
+    scripts: { test, typecheck: "tsc --noEmit" },
+    checks: ["typecheck", "test"],
+  },
+  {
     path: "services/observation-pipeline",
     scripts: { test, typecheck, "cf:check": dryRun },
     checks: ["typecheck", "test", "cf:check"],

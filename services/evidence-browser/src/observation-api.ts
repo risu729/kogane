@@ -1,4 +1,4 @@
-import * as queries from "./observations";
+import { evidenceReader, type FilterOptionsKind, type ObservationKind } from "./observations";
 import { decimalRows } from "./normalized-decimals";
 import { describeActivities } from "./activity-presentation";
 import { organizedFilterOptions } from "./organized-filter-options";
@@ -11,6 +11,19 @@ import {
   organizationKey,
 } from "./observation-organization";
 import type { ApiMetadata } from "../../../poc/observation-pipeline/shared/api-contract";
+
+/** Validated request scope. Each route passes only the keys its reader query accepts. */
+interface RequestScope {
+  source?: string;
+  account?: string;
+  offset: number;
+  from?: string;
+  to?: string;
+  q?: string;
+  instrument?: string;
+  metric?: string;
+  measureView?: "balances" | "summaries";
+}
 
 export function boundedCollections(value: Record<string, unknown>, offset?: number): Response {
   let truncated = false;
@@ -76,7 +89,7 @@ export async function observationApi(
   const offset = Number(offsetText);
   if (!/^(0|[1-9]\d*)$/.test(offsetText) || !Number.isSafeInteger(offset) || offset > 1_000_000)
     throw new HttpError(400, "invalid_offset");
-  const filter: queries.CollectionFilter = {
+  const filter: RequestScope = {
     source: url.searchParams.get("source") ?? undefined,
     account: url.searchParams.get("account") ?? undefined,
     offset,
@@ -98,7 +111,7 @@ export async function observationApi(
   }
   if (filter.from && filter.to && filter.from > filter.to)
     throw new HttpError(400, "invalid_date_range");
-  const store = queries.observationStore(env.DB);
+  const reader = evidenceReader(env.DB);
   if (path === "/api/filter-options") {
     const kind = url.searchParams.get("kind");
     if (!kind || !["transactions", "balances", "positions", "artifacts"].includes(kind))
@@ -108,38 +121,22 @@ export async function observationApi(
       await organizedFilterOptions(
         env.DB,
         kind,
-        await queries.filterOptions(store, kind, filter.measureView),
+        await reader.filterOptions({
+          kind: kind as FilterOptionsKind,
+          measureView: filter.measureView,
+        }),
       ),
     );
   }
   if (path === "/api/meta") {
-    await env.DB.prepare("SELECT id FROM observation_fetch_artifacts LIMIT 1").first();
-    const jobs =
-      await env.DB.prepare(`SELECT j.status, count(*) AS count FROM observation_parse_jobs j
-      WHERE j.status IN ('pending','running','failed')
-        AND coalesce(j.last_error_code, '') <> 'parser_version_retired'
-        AND (j.status <> 'failed' OR NOT EXISTS (
-          SELECT 1 FROM parse_runs success
-          WHERE success.fetch_artifact_id = j.fetch_artifact_id
-            AND success.parser_name = j.parser_name
-            AND success.status = 'ok' AND success.superseded_by_parse_run_id IS NULL
-            AND success.parsed_at > coalesce((
-              SELECT max(failed.parsed_at) FROM parse_runs failed
-              WHERE failed.fetch_artifact_id = j.fetch_artifact_id
-                AND failed.parser_name = j.parser_name
-                AND failed.parser_version = j.parser_version AND failed.status = 'error'
-            ), '')
-        )) GROUP BY j.status`).all<{ status: "pending" | "running" | "failed"; count: number }>();
-    const parsingHealth = { pending: 0, running: 0, failed: 0 };
-    for (const job of jobs.results) parsingHealth[job.status] = job.count;
     return json({
       apiVersion: 1,
-      parsingHealth,
+      parsingHealth: await reader.parsingHealth(),
       source: { kind: "central-store", classification: "financial" },
       capabilities: { readOnly: true, rawEvidence: true, liveCollectors: false },
     } satisfies ApiMetadata);
   }
-  if (path === "/api/overview") return boundedCollections({ ...(await queries.overview(store)) });
+  if (path === "/api/overview") return boundedCollections({ ...(await reader.overview()) });
   if (path === "/api/transactions")
     return boundedCollections(
       {
@@ -149,7 +146,17 @@ export async function observationApi(
           await decimalRows(
             env.DB,
             "transaction",
-            await describeActivities(env.DB, await queries.currentTransactions(store, filter)),
+            await describeActivities(
+              env.DB,
+              await reader.listTransactions({
+                source: filter.source,
+                account: filter.account,
+                from: filter.from,
+                to: filter.to,
+                q: filter.q,
+                offset,
+              }),
+            ),
           ),
         ),
       },
@@ -164,11 +171,16 @@ export async function observationApi(
       latestOffset > 1_000_000
     )
       throw new HttpError(400, "invalid_offset");
-    const candidates = await queries.latestBalances(
-      store,
-      { ...filter, metric: undefined, offset: 0 },
-      true,
-    );
+    // Grouping needs the complete bounded candidate set before paging; the
+    // reader refuses more than 5,000 candidates rather than grouping a page.
+    const candidates = await reader.listLatestBalances({
+      source: filter.source,
+      account: filter.account,
+      instrument: filter.instrument,
+      measureView: filter.measureView,
+      offset: 0,
+      limit: 5001,
+    });
     // Source/account/unit boundaries can be applied before grouping because
     // duplicates must agree on all three. A metric can describe either witness.
     const projected = presentLatestBalances(
@@ -176,7 +188,14 @@ export async function observationApi(
       filter.metric,
     );
     const latest = projected.slice(latestOffset, latestOffset + 501);
-    const history = await queries.balanceHistory(store, filter);
+    const history = await reader.listBalanceHistory({
+      source: filter.source,
+      account: filter.account,
+      instrument: filter.instrument,
+      metric: filter.metric,
+      measureView: filter.measureView,
+      offset,
+    });
     return json({
       latest: await decimalRows(env.DB, "balance", latest.slice(0, 500)),
       history: await decimalRows(
@@ -193,7 +212,11 @@ export async function observationApi(
     });
   }
   if (path === "/api/positions") {
-    const entries = await queries.positionsWithValuations(store, filter);
+    const entries = await reader.listPositions({
+      source: filter.source,
+      account: filter.account,
+      offset,
+    });
     const normalizedPositions = await decimalRows(
       env.DB,
       "position",
@@ -240,7 +263,7 @@ export async function observationApi(
     const before = cursor === null ? Number.MAX_SAFE_INTEGER : Number(cursor);
     if ((cursor !== null && !/^[1-9]\d*$/.test(cursor)) || !Number.isSafeInteger(before))
       throw new HttpError(400, "invalid_cursor");
-    const rows = await queries.artifacts(store, before, filter.source);
+    const rows = await reader.listArtifacts({ before, source: filter.source });
     return json({
       artifacts: rows.slice(0, 500),
       coverage: {
@@ -257,11 +280,11 @@ export async function observationApi(
     const id = Number(artifact ? artifact[1] : observation![2]);
     if (!Number.isSafeInteger(id)) throw new HttpError(400, "invalid_identifier");
     const result = artifact
-      ? await queries.artifactDetail(store, id)
-      : await queries.observationDetail(store, observation![1] as queries.ObservationKind, id);
+      ? await reader.getArtifact(id)
+      : await reader.getObservation({ kind: observation![1] as ObservationKind, id });
     if (!result) throw new HttpError(404, "not_found");
     if (observation) {
-      const ref = { kind: observation[1] as queries.ObservationKind, id };
+      const ref = { kind: observation[1] as ObservationKind, id };
       const organizations = await observationOrganizations(env.DB, [ref]);
       const [decimal] = await decimalRows(env.DB, ref.kind, [{ id }]);
       return json({
@@ -275,18 +298,8 @@ export async function observationApi(
   const hash = /^\/api\/raw\/([a-f0-9]{64})$/.exec(path);
   if (hash) {
     // A hash is downloadable only when reachable through the sealed read view.
-    const row = await env.DB.prepare(`SELECT o.sha256, o.blob_key, o.byte_size,
-        a.artifact_key, a.mime AS declared_media_type
-      FROM raw_objects o JOIN observation_fetch_artifacts a ON a.sha256 = o.sha256
-      WHERE o.sha256 = ? ORDER BY a.id ASC LIMIT 1`)
-      .bind(hash[1])
-      .first<{
-        sha256: string;
-        blob_key: string;
-        byte_size: number;
-        artifact_key: string;
-        declared_media_type: string | null;
-      }>();
+    // The reader re-checks that for this one hash, independent of list limits.
+    const row = await reader.getRawDownload({ sha256: hash[1] });
     if (!row) throw new HttpError(404, "not_found");
     return raw(env.EVIDENCE, row, request.method === "HEAD");
   }
