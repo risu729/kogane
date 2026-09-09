@@ -68,6 +68,103 @@ describe.if(runnable)("combined production client", () => {
             items: [],
             nextCursor: null,
           });
+        if (url.pathname === "/api/v2/query") {
+          // The shared query service this fixture advertises through
+          // `sharedQuery`. It answers the `coverage` intent from the same
+          // overview the page would otherwise sum itself, so the counts the
+          // client renders are the service's, not the page's arithmetic.
+          if (url.searchParams.get("intent") !== "coverage" || url.searchParams.size !== 1)
+            return Response.json(
+              {
+                schemaVersion: "financial-error-v1",
+                code: "unsupported_semantics",
+                requestId: "fixture",
+                message: "the fixture serves the coverage intent only",
+                refs: [],
+              },
+              { status: 400 },
+            );
+          const overviewUrl = new URL(url);
+          overviewUrl.pathname = "/api/overview";
+          overviewUrl.search = "";
+          const overview = (await (
+            await api.fetch(new Request(overviewUrl))
+          ).json()) as import("../shared/api-contract.ts").Overview;
+          const scopes = overview.sources.map((source) => ({
+            sourceRef: source.id,
+            provider: source.provider,
+            ingestion: source.ingestion,
+            artifactCount: source.artifact_count,
+            collectionRunCount: overview.fetchRuns.filter((run) => run.source_id === source.id)
+              .length,
+          }));
+          const gaps = scopes
+            .filter((scope) => scope.artifactCount === 0)
+            .map((scope) => ({
+              reasonCode: "no_artifacts_collected",
+              scopeRef: `source:${scope.sourceRef}`,
+            }));
+          const dimension = (state: string, reasonCodes: string[]) => ({
+            state,
+            reasonCodes,
+            evidenceRefs: [],
+          });
+          return Response.json({
+            schemaVersion: "kogane-query-response-v1",
+            contextId: `ctx_${"0".repeat(64)}`,
+            resultRef: `result:${"1".repeat(64)}`,
+            unresolvedInputs: [
+              {
+                key: "valuation",
+                question: "whether amounts are valued in a common unit",
+                chosen: "no valuation policy is adopted",
+                reasonCode: "no_valuation_policy_adopted",
+              },
+            ],
+            result: {
+              schemaVersion: "financial-result-v1",
+              contextId: `ctx_${"0".repeat(64)}`,
+              resolvedQuery: {
+                schemaVersion: "query-spec-v1",
+                intent: "coverage",
+                perimeterRef: "perimeter:sources=*;accounts=*",
+                effectiveTime: {
+                  kind: "instant",
+                  value: "2026-09-09T00:00:00Z",
+                  zone: "UTC",
+                  basis: "derived",
+                },
+                basisRefs: {},
+                filters: {},
+                limit: 100,
+              },
+              completeness: gaps.length === 0 ? "complete" : "partial",
+              data: {
+                intent: "coverage",
+                scopes,
+                sourceCount: scopes.length,
+                artifactCount: scopes.reduce((total, scope) => total + scope.artifactCount, 0),
+                collectionRunCount: overview.fetchRuns.length,
+              },
+              coverage: {
+                scopeRef: "perimeter:sources=*;accounts=*",
+                coveredRef: `covered-sources:${scopes.map((scope) => scope.sourceRef).join(",")}`,
+                gaps,
+                truncated: false,
+              },
+              quality: {
+                identity: dimension("not-applicable", ["identity_not_used_by_coverage"]),
+                freshness: dimension(gaps.length === 0 ? "verified" : "partial", ["fixture"]),
+                numeric: dimension("not-applicable", ["counts_are_exact_integers"]),
+                reconciliation: dimension("not-applicable", ["reconciliation_not_implemented"]),
+                valuation: dimension("not-applicable", ["no_valuation_policy_adopted"]),
+              },
+              nextCursor: null,
+              explanationRefs: scopes.map((scope) => `source:${scope.sourceRef}`),
+              warnings: [],
+            },
+          });
+        }
         if (url.pathname.startsWith("/api/")) {
           // Use the real observation DTOs, adding the production pagination envelope.
           const clean = new URL(url);
@@ -153,6 +250,34 @@ describe.if(runnable)("combined production client", () => {
       await page.close();
     }
   }, 60_000);
+
+  test("summary counts come from the shared query service, with its hand-off references", async () => {
+    const page = await browser.newPage();
+    const before = requests.length;
+    await page.goto(origin + "/", { waitUntil: "networkidle" });
+    const observed = requests.slice(before);
+    // The page asks the shared service, and only for the coverage intent.
+    expect(observed).toContain("/api/v2/query?intent=coverage");
+    expect(observed.filter((path) => path.startsWith("/api/v2/query"))).toEqual([
+      "/api/v2/query?intent=coverage",
+    ]);
+    // Capabilities are known before the service is asked; nothing is guessed.
+    expect(observed.indexOf("/api/meta")).toBeLessThan(
+      observed.indexOf("/api/v2/query?intent=coverage"),
+    );
+    const overview = (await (await fetch(origin + "/api/v2/query?intent=coverage")).json()) as {
+      result: { data: { artifactCount: number; sourceCount: number } };
+    };
+    const counts = await page.locator(".overview-stat-value").allInnerTexts();
+    expect(counts[0]).toBe(String(overview.result.data.sourceCount));
+    expect(counts[1]).toBe(String(overview.result.data.artifactCount));
+    // The hand-off is by reference: the ids, not the numbers, go to an agent.
+    await page.getByText("この数字の出どころ").click();
+    const text = await page.locator("body").innerText();
+    expect(text).toContain(`ctx_${"0".repeat(64)}`);
+    expect(text).toContain(`result:${"1".repeat(64)}`);
+    await page.close();
+  });
 
   test("evidence navigation preserves observation routes and does not deny available parsing", async () => {
     const page = await browser.newPage();

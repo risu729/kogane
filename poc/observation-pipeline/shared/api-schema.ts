@@ -86,6 +86,13 @@ export interface ApiCapabilities {
   /** The sealed raw-run history under `/api/evidence/v1` is served. */
   readonly evidenceHistory: boolean;
   /**
+   * `GET /api/v2/query` runs the shared query service (`@kogane/application`)
+   * that the agent API also calls, so one page and one agent compute a figure
+   * the same way. Never an authorization decision: the route keeps the same
+   * authentication gate as every other route.
+   */
+  readonly sharedQuery: boolean;
+  /**
    * The authenticated change lifecycle (`POST /api/command/v1/*`) is served
    * (A09). False everywhere the `COMMANDS_ENABLED` flag is off, so a client
    * shows the confirmation screen read-only rather than offering buttons that
@@ -114,6 +121,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   organizedDisplay: false,
   financialProducts: false,
   evidenceHistory: false,
+  sharedQuery: false,
   commands: false,
   eventsV2: false,
 } as const satisfies ApiCapabilities;
@@ -131,9 +139,10 @@ export const CENTRAL_STORE_CAPABILITIES = {
   organizedDisplay: true,
   financialProducts: true,
   evidenceHistory: true,
-  // Both are off in the shared constant: each deployment's own flag decides,
-  // and `/api/meta` overrides these fields with what the running Worker
-  // actually serves.
+  sharedQuery: true,
+  // Both `commands` and `eventsV2` are off in the shared constant: each
+  // deployment's own flag decides, and `/api/meta` overrides these fields with
+  // what the running Worker actually serves.
   commands: false,
   eventsV2: false,
 } as const satisfies ApiCapabilities;
