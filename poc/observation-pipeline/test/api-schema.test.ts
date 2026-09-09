@@ -11,6 +11,7 @@ import {
   LIST_REQUEST_SCHEMA,
   listRequestSearch,
   LOCAL_STORE_CAPABILITIES,
+  validIdentityReadMode,
   type ApiCapabilities,
 } from "../shared/api-schema.ts";
 import { capabilityState, clientFeatures, NO_FEATURES } from "../web/src/capabilities.ts";
@@ -25,6 +26,7 @@ describe("shared API schema", () => {
         to: "collectionFilters",
         q: "collectionFilters",
         offset: "paginationVersion:offset-v1",
+        identityRead: "identityReadModes",
       },
       "/api/balances": {
         source: "collectionFilters",
@@ -34,11 +36,13 @@ describe("shared API schema", () => {
         view: "measureViews",
         offset: "paginationVersion:offset-v1",
         latestOffset: "paginationVersion:offset-v1",
+        identityRead: "identityReadModes",
       },
       "/api/positions": {
         source: "collectionFilters",
         account: "collectionFilters",
         offset: "paginationVersion:offset-v1",
+        identityRead: "identityReadModes",
       },
       "/api/artifacts": { source: "collectionFilters", cursor: "paginationVersion:offset-v1" },
       "/api/filter-options": { kind: "collectionFilters", view: "measureViews" },
@@ -62,7 +66,7 @@ describe("shared API schema", () => {
       rawEvidence: true,
       liveCollectors: false,
       measureViews: ["balances", "summaries"],
-      identityReadModes: ["latest"],
+      identityReadModes: ["latest", "as-recorded"],
       paginationVersion: "offset-v1",
       collectionFilters: true,
       organizedDisplay: true,
@@ -80,11 +84,35 @@ describe("shared API schema", () => {
       "view",
       "offset",
       "latestOffset",
+      "identityRead",
     ]);
     expect(allowedQueryParameters("/api/artifacts", CENTRAL_STORE_CAPABILITIES)).toEqual([
       "source",
       "cursor",
     ]);
+    // A read mode is sent only when advertised, and only an advertised one.
+    const modes = new URLSearchParams("identityRead=as-recorded");
+    expect(listRequestSearch("/api/positions", CENTRAL_STORE_CAPABILITIES, modes)).toBe(
+      "?identityRead=as-recorded",
+    );
+    expect(
+      listRequestSearch(
+        "/api/positions",
+        { ...CENTRAL_STORE_CAPABILITIES, identityReadModes: ["latest"] },
+        modes,
+      ),
+    ).toBe("");
+    expect(
+      listRequestSearch(
+        "/api/positions",
+        CENTRAL_STORE_CAPABILITIES,
+        new URLSearchParams("identityRead=snapshot"),
+      ),
+    ).toBe("");
+    expect(listRequestSearch("/api/positions", LOCAL_STORE_CAPABILITIES, modes)).toBe("");
+    expect(validIdentityReadMode("as-recorded", CENTRAL_STORE_CAPABILITIES)).toBe(true);
+    expect(validIdentityReadMode("snapshot", CENTRAL_STORE_CAPABILITIES)).toBe(false);
+    expect(validIdentityReadMode("latest", LOCAL_STORE_CAPABILITIES)).toBe(false);
     for (const path of Object.keys(LIST_REQUEST_SCHEMA))
       expect(allowedQueryParameters(path, LOCAL_STORE_CAPABILITIES)).toEqual([]);
     for (const path of ["/api/meta", "/api/overview", "/api/artifacts/1", "/api/raw/a"])
@@ -124,7 +152,8 @@ describe("shared API schema", () => {
       { contractVersion: "observation-api-v2" },
       { measureViews: ["balances", "balances"] },
       { measureViews: ["totals"] },
-      { identityReadModes: ["as-recorded"] },
+      { identityReadModes: ["snapshot"] },
+      { identityReadModes: ["latest", "latest"] },
       { paginationVersion: "keyset-v2" },
       { collectionFilters: "yes" },
       { readOnly: false },

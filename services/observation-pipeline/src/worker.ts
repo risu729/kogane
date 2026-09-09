@@ -10,7 +10,8 @@ import {
   validParseIssue,
 } from "../../../packages/domain/src/coverage.ts";
 import { SNAPSHOT_RELATIONS, unitParseable } from "../../../packages/read-model/src/concepts";
-import { identitySweep, reviseIdentity } from "./identity-store.ts";
+import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
+import { executeIdentityCommand } from "./identity-commands.ts";
 import {
   publicationConsistency,
   publicationStatements,
@@ -1303,28 +1304,47 @@ export default {
     }
     if (request.method === "POST" && path === "/identity-revise") {
       // Internal service-binding endpoint; no public route. Bound request bytes.
+      // The body may carry an operation id and an action; the actor never
+      // comes from the body. Without the trusted-caller header the actor is
+      // the unverified legacy CLI. A09 replaces this with the authenticated
+      // command path.
       const v = await command(request);
       if (!v) return new Response("Invalid request", { status: 400 });
+      const action = v.action === undefined ? "assign" : v.action;
       if (
         (v.kind !== "account" && v.kind !== "instrument") ||
         typeof v.referenceId !== "string" ||
-        typeof v.targetId !== "string" ||
+        (action === "assign" ? typeof v.targetId !== "string" : v.targetId !== null) ||
         typeof v.expectedRevision !== "number" ||
-        typeof v.reason !== "string"
+        typeof v.reason !== "string" ||
+        (action !== "assign" && action !== "release-override") ||
+        (v.operationId !== undefined && typeof v.operationId !== "string")
       )
         return new Response("Invalid request", { status: 400 });
-      try {
-        await reviseIdentity(env.DB, {
+      const verifiedActor = request.headers.get("x-kogane-verified-actor");
+      if (verifiedActor !== null && !/^[a-z0-9][a-z0-9._:@/-]{0,127}$/u.test(verifiedActor))
+        return new Response("Invalid request", { status: 400 });
+      const result = await executeIdentityCommand(
+        env.DB,
+        {
+          operationId: v.operationId ?? crypto.randomUUID(),
+          actorId: verifiedActor ?? "legacy-cli",
+          actorVerification: verifiedActor === null ? "legacy-unknown" : "server",
+          action,
           kind: v.kind,
           referenceId: v.referenceId,
-          targetId: v.targetId,
           expectedRevision: v.expectedRevision,
+          targetId: action === "assign" ? (v.targetId as string) : null,
           reason: v.reason,
+        },
+        IDENTITY_POLICY_VERSION,
+      );
+      if (!result.ok)
+        return new Response("Revision conflict or invalid identity", {
+          status: 409,
+          headers: { "x-kogane-error": result.error },
         });
-      } catch {
-        return new Response("Revision conflict or invalid identity", { status: 409 });
-      }
-      return Response.json({ revised: true });
+      return Response.json({ revised: true, replayed: result.replayed, receipt: result.receipt });
     }
     if (request.method === "POST" && path === "/sweep") {
       const options: SweepOptions = {};
