@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it, vi } from "vitest";
-import { seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import {
   observationOrganizations,
   organizeRows,
@@ -47,6 +47,7 @@ async function seed(
           : "fixture",
     )
     .first<{ id: number }>();
+  await publishParse(parse!.id);
   const prefix = `fixture-${parse!.id}-`;
   const prepare = (sql: string) =>
     env.DB.prepare(
@@ -287,9 +288,7 @@ it("retains historical names without presenting superseded observations as curre
   )
     .bind(acquisition.artifacts[0]!.id)
     .first<{ id: number }>();
-  await env.DB.prepare(`UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE id=?`)
-    .bind(replacement!.id, parseId)
-    .run();
+  await supersedeParse(parseId, replacement!.id);
   const result = await observationOrganizations(env.DB, refs);
   expect(
     [...result.values()].every((r) => r.state === "organized" && r.lineage === "historical"),

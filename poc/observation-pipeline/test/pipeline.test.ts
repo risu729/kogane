@@ -19,11 +19,20 @@ import {
   insertParseRun,
   listArtifacts,
   openStore,
+  publishParseRun,
   putRawObject,
   upsertSource,
   type Store,
 } from "../src/store.ts";
 import type { Parser } from "../src/types.ts";
+
+/** Insert a successful parse run and publish it, as parse.ts does for every
+ * success: a bare `ok` row is an unadopted result and no current view shows it. */
+function insertPublishedParseRun(store: Store, run: Parameters<typeof insertParseRun>[1]): number {
+  const id = insertParseRun(store, run);
+  if (run.status === "ok") publishParseRun(store, run.artifactId, run.parserName, id);
+  return id;
+}
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
 const SBI_RUN = join(FIXTURES, "sbi-securities", "2026-08-20", "run-20260820-210000-poc01");
@@ -628,7 +637,7 @@ describe("parse runs", () => {
     // old successful parse attached to a partial fetch run is not current.
     const artifactId = (store.db.query("SELECT id FROM fetch_artifacts").get() as { id: number })
       .id;
-    const parseRunId = insertParseRun(store, {
+    const parseRunId = insertPublishedParseRun(store, {
       artifactId,
       parserName: "legacy-sbi-vc-executions",
       parserVersion: "0.1.0",
@@ -701,7 +710,7 @@ describe("parse runs", () => {
     for (const [index, sourceView] of ["recent", "historical"].entries()) {
       const artifactRow = artifacts[index];
       if (artifactRow === undefined) throw new Error("missing test artifact");
-      const parseRunId = insertParseRun(store, {
+      const parseRunId = insertPublishedParseRun(store, {
         artifactId: artifactRow.id,
         parserName: "sbi-vc-executions",
         parserVersion: "0.1.0",
@@ -757,7 +766,7 @@ describe("parse runs", () => {
     for (const [index, description] of ["newer", "stale"].entries()) {
       const artifactRow = artifacts[index];
       if (artifactRow === undefined) throw new Error("missing test artifact");
-      const parseRunId = insertParseRun(store, {
+      const parseRunId = insertPublishedParseRun(store, {
         artifactId: artifactRow.id,
         parserName: "smbc-direct-transactions",
         parserVersion: "1.0.0",
@@ -778,7 +787,7 @@ describe("parse runs", () => {
     expect(count(store, "transaction_observations")).toBe(2);
     const emptyArtifact = artifacts[2];
     if (emptyArtifact === undefined) throw new Error("missing empty test artifact");
-    insertParseRun(store, {
+    insertPublishedParseRun(store, {
       artifactId: emptyArtifact.id,
       parserName: "smbc-direct-transactions",
       parserVersion: "1.0.0",
@@ -825,7 +834,7 @@ describe("parse runs", () => {
     for (const [index, description] of ["older", "newer"].entries()) {
       const artifactRow = artifacts[index];
       if (artifactRow === undefined) throw new Error("missing GLOBAL PASS test artifact");
-      const parseRunId = insertParseRun(store, {
+      const parseRunId = insertPublishedParseRun(store, {
         artifactId: artifactRow.id,
         parserName: "global-pass-activity",
         parserVersion: "1.0.0",
@@ -846,7 +855,7 @@ describe("parse runs", () => {
     expect(count(store, "transaction_observations")).toBe(2);
     const emptyArtifact = artifacts[2];
     if (emptyArtifact === undefined) throw new Error("missing empty GLOBAL PASS test artifact");
-    insertParseRun(store, {
+    insertPublishedParseRun(store, {
       artifactId: emptyArtifact.id,
       parserName: "global-pass-activity",
       parserVersion: "1.0.0",
@@ -878,7 +887,7 @@ describe("parse runs", () => {
       const artifactRow = store.db
         .query("SELECT id FROM fetch_artifacts ORDER BY id DESC LIMIT 1")
         .get() as { id: number };
-      const parseRunId = insertParseRun(store, {
+      const parseRunId = insertPublishedParseRun(store, {
         artifactId: artifactRow.id,
         parserName: "sbi-shinsei-top-balances-and-activity",
         parserVersion: "0.1.0",
@@ -937,7 +946,7 @@ describe("parse runs", () => {
       id: number;
     }[];
     for (const [index, row] of artifacts.entries()) {
-      const parseRunId = insertParseRun(store, {
+      const parseRunId = insertPublishedParseRun(store, {
         artifactId: row.id,
         parserName: "v-point-pay-notification-event",
         parserVersion: "1.0.0",

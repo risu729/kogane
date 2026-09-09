@@ -31,6 +31,39 @@ export async function seedRegistry() {
     ]),
   ]);
 }
+/**
+ * Publish a successful parse run the way the pipeline writer does
+ * (docs/publication-gate.md): move the (artifact, parser) pointer and record
+ * the event. A parse run seeded directly with status 'ok' is an unadopted
+ * result until this runs, and no normal reader shows it.
+ */
+export async function publishParse(parseRunId: number, publishedAt = "2026-09-07T00:00:00Z") {
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at)
+       SELECT p.fetch_artifact_id,p.parser_name,
+         (SELECT x.parse_run_id FROM published_parse_runs x WHERE x.fetch_artifact_id=p.fetch_artifact_id AND x.parser_name=p.parser_name),
+         p.id,'normal','pipeline','parse_ok',?2 FROM parse_runs p WHERE p.id=?1`,
+    ).bind(parseRunId, publishedAt),
+    env.DB.prepare(
+      `INSERT INTO published_parse_runs(fetch_artifact_id,parser_name,parse_run_id,parser_version,published_at,publication_kind)
+       SELECT p.fetch_artifact_id,p.parser_name,p.id,p.parser_version,?2,'normal' FROM parse_runs p WHERE p.id=?1
+       ON CONFLICT(fetch_artifact_id,parser_name) DO UPDATE SET parse_run_id=excluded.parse_run_id,
+         parser_version=excluded.parser_version,published_at=excluded.published_at,publication_kind='normal',release_id=NULL`,
+    ).bind(parseRunId, publishedAt),
+  ]);
+}
+/**
+ * Replace one published run by a later run of the same artifact and parser:
+ * the supersession pointer and the publication pointer move together, as the
+ * writer's publish batch does.
+ */
+export async function supersedeParse(oldId: number, newId: number) {
+  await env.DB.prepare("UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE id=?")
+    .bind(newId, oldId)
+    .run();
+  await publishParse(newId);
+}
 async function post(path: string, body: unknown) {
   const response = await ingest.fetch(
     new Request(`https://fixture.test${path}`, {

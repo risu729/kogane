@@ -8,8 +8,8 @@ import {
   insertObservation,
   insertParseRun,
   openStore,
+  publishParseRun,
   putRawObject,
-  supersedeOlderParseRuns,
   upsertSource,
   type Store,
 } from "../src/store.ts";
@@ -177,7 +177,7 @@ export function buildFixture(): Fixture {
     extra: {},
   });
 
-  const superseded = supersedeOlderParseRuns(store, artifactId, "demo-statement", currentRunId);
+  const superseded = publishParseRun(store, artifactId, "demo-statement", currentRunId);
   expect(superseded).toBe(1);
 
   const retiredObservation = store.db
