@@ -6,7 +6,7 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ArtifactMeta, Observation } from "./types.ts";
+import type { ArtifactMeta, CoverageClaim, Observation, ParseIssue } from "./types.ts";
 
 const POC_ROOT = dirname(import.meta.dir); // poc/observation-pipeline/
 
@@ -74,6 +74,19 @@ export function openStore(stateDir?: string): Store {
       db.exec(
         readFileSync(
           join(POC_ROOT, "../../services/raw-evidence/migrations/0024_observation_decimals.sql"),
+          "utf8",
+        ),
+      ),
+    )();
+  }
+  // Parser coverage contract (0025): typed issues, coverage claims and the
+  // dataset snapshot policy table, seeded on the legacy policy exactly as in
+  // production. Additive; existing parse runs gain no synthesized claim.
+  if (!storeTableExists(db, "dataset_snapshot_policies")) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(POC_ROOT, "../../services/raw-evidence/migrations/0025_parse_coverage.sql"),
           "utf8",
         ),
       ),
@@ -378,6 +391,65 @@ export function insertParseRun(
       JSON.stringify(run.warnings),
     );
   return Number(result.lastInsertRowid);
+}
+
+/** Contract v2 diagnostics of a parse run; nothing is written for a legacy parser. */
+export function insertParseIssues(
+  store: Store,
+  parseRunId: number,
+  issues: readonly ParseIssue[],
+): void {
+  const statement = store.db.query(
+    `INSERT INTO parse_issues (parse_run_id, code, locator, severity, impact, message)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+  );
+  for (const issue of issues) {
+    statement.run(
+      parseRunId,
+      issue.code,
+      issue.locator,
+      issue.severity,
+      issue.impact,
+      issue.message,
+    );
+  }
+}
+
+/**
+ * Contract v2 coverage claims of a parse run. The parent fetch run outcome is
+ * recorded with the claim so a later unit-scoped policy can read it.
+ */
+export function insertCoverageClaims(
+  store: Store,
+  parseRunId: number,
+  claims: readonly CoverageClaim[],
+  parentRun: { status: "success" | "partial" | "failed"; failureCount: number },
+): void {
+  const statement = store.db.query(
+    `INSERT INTO parse_coverage_claims
+       (parse_run_id, claim_id, scope_key, mode, completeness, membership_complete,
+        observed_count, expected_count, evidence_refs_json, policy_version, failure_cause,
+        absence_meaning, parent_run_status, parent_run_failure_count)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`,
+  );
+  for (const claim of claims) {
+    statement.run(
+      parseRunId,
+      claim.claimId,
+      claim.scopeKey,
+      claim.mode,
+      claim.completeness,
+      claim.membershipComplete ? 1 : 0,
+      claim.observedCount,
+      claim.expectedCount,
+      JSON.stringify(claim.evidenceRefs),
+      claim.policyVersion,
+      claim.failureCause,
+      claim.absenceMeaning,
+      parentRun.status,
+      parentRun.failureCount,
+    );
+  }
 }
 
 /**

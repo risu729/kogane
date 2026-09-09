@@ -4,13 +4,19 @@
 export {
   activeStateProjection,
   completeSnapshotCandidates,
+  economicallySummable,
+  evidenceExists,
   isObservationKind,
   OBSERVATION_TABLES,
   type ObservationKind,
   type ObservationTable,
   publishedParses,
+  SNAPSHOT_RELATIONS,
+  snapshotAdoptable,
+  snapshotPolicyComparison,
   successfulFetchRuns,
   successfulParses,
+  unitParseable,
   visibleEvidence,
 } from "./concepts";
 export {

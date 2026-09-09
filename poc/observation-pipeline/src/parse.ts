@@ -10,7 +10,9 @@
 import type { Parser } from "./types.ts";
 import {
   findParseRun,
+  insertCoverageClaims,
   insertObservation,
+  insertParseIssues,
   insertParseRun,
   listArtifacts,
   openStore,
@@ -76,6 +78,14 @@ export function runParsers(
           });
           for (const observation of result.observations) {
             insertObservation(store, runId, observation);
+          }
+          // Contract v2 rows commit with the run; a legacy parser writes none.
+          if (result.issues !== undefined) insertParseIssues(store, runId, result.issues);
+          if (result.coverage !== undefined) {
+            insertCoverageClaims(store, runId, result.coverage, {
+              status: artifact.runStatus,
+              failureCount: artifact.runFailureCount,
+            });
           }
           return runId;
         })();

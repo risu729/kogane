@@ -13,13 +13,19 @@ import {
   completeSnapshotCandidates,
   createD1ObservationReader,
   createObservationReader,
+  economicallySummable,
+  evidenceExists,
   type ObservationReader,
   PAGE_LIMIT,
   parseWarnings,
   publishedParses,
   ResultLimitExceededError,
   scopePredicates,
+  snapshotAdoptable,
+  snapshotPolicyComparison,
   type SqlExecutor,
+  successfulFetchRuns,
+  unitParseable,
   visibleEvidence,
 } from "../src/index";
 import * as sql from "../src/sql";
@@ -249,6 +255,51 @@ describe("named concepts in the final SQL", () => {
       "x.superseded_by_parse_run_id IS NULL AND x.status = 'ok'",
     );
     expect(visibleEvidence.rawObjects).toContain("observation_raw_objects");
+  });
+
+  test("snapshot membership is chosen per dataset from the policy table, never from warning text alone", () => {
+    const ctes = completeSnapshotCandidates.ctes;
+    expect(ctes).toContain("FROM dataset_snapshot_policies");
+    expect(ctes).toContain("CASE policy.policy_id");
+    expect(ctes).toContain("WHEN 'coverage-v1' THEN EXISTS");
+    expect(ctes).toContain("FROM parse_coverage_claims claim");
+    expect(ctes).toContain("claim.membership_complete = 1");
+    // The legacy adapter remains, confined to the ELSE branch.
+    expect(ctes).toContain("json_each(complete_parse.warnings_json)");
+    const db = migratedDatabase();
+    expect(db.query("SELECT count(*) AS n FROM dataset_snapshot_policies").get()).toEqual({
+      n: 11,
+    });
+    expect(
+      db
+        .query(
+          "SELECT count(*) AS n FROM dataset_snapshot_policies WHERE policy_id <> 'legacy-warning-compat-v1'",
+        )
+        .get(),
+    ).toEqual({ n: 0 });
+    // The shadow comparison compiles on the production schema and reads the views.
+    expect(db.query(snapshotPolicyComparison.sql).all()).toEqual([]);
+    expect(snapshotPolicyComparison.sql).toContain("FROM observation_fetch_artifacts fa");
+    expect(snapshotPolicyComparison.sql).not.toMatch(/\bfetch_artifacts fa\b/);
+  });
+
+  test("D13 predicates are separate names with the documented defaults", () => {
+    expect(evidenceExists.predicate("a")).toBe(
+      "EXISTS (SELECT 1 FROM observation_raw_objects o WHERE o.sha256 = a.sha256)",
+    );
+    // Parse eligibility keeps the run-level rule until unit-independent-v1 is enabled.
+    expect(unitParseable.scope).toBe("run");
+    expect(unitParseable.predicate("r")).toBe(successfulFetchRuns.predicate("r"));
+    expect(unitParseable.predicate("r")).toBe("r.status = 'success' AND r.failure_count = 0");
+    expect(snapshotAdoptable.ctes).toBe(completeSnapshotCandidates.ctes);
+    expect(snapshotAdoptable.predicate).toBe(completeSnapshotCandidates.currentMember);
+    // Nothing is summable until an aggregation policy exists.
+    expect(economicallySummable.policy).toBeNull();
+    expect(economicallySummable.predicate()).toBe("0");
+    const db = migratedDatabase();
+    expect(db.query(`SELECT ${economicallySummable.predicate()} AS summable`).get()).toEqual({
+      summable: 0,
+    });
   });
 });
 
