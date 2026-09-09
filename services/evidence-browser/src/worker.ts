@@ -5,6 +5,7 @@ import {
 import { authenticate } from "./auth";
 import { agentApi, classifyAgentPath, sharedQueryApi } from "./agent-api";
 import { observationApi } from "./observation-api";
+import { eventsApi } from "./events-api";
 import { identityApi } from "./identity-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
 import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw } from "./read";
@@ -18,6 +19,7 @@ function classify(path: string): string {
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts$/.test(path)) return "run_artifacts";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+\/raw$/.test(path)) return "artifact_raw";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+$/.test(path)) return "artifact_detail";
+  if (path === "/api/v2/activity" || path === "/api/v2/obligations") return "events_v2";
   return path.startsWith("/api/") ? "unknown_api" : "assets";
 }
 
@@ -36,6 +38,9 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (identityResponse) return identityResponse;
   const observationResponse = await catalogue(() => observationApi(request, env, url));
   if (observationResponse) return observationResponse;
+  // A10 read side: 404 unless the projection exists and the reader flag is on.
+  const eventsResponse = await catalogue(() => eventsApi(env, url));
+  if (eventsResponse) return eventsResponse;
   if (env.EVIDENCE_SOURCE_ID !== "sony-bank") throw new HttpError(503, "source_not_configured");
   const source = env.EVIDENCE_SOURCE_ID;
   const path = url.pathname;

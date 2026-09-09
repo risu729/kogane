@@ -111,6 +111,13 @@ ways.
 | `kogane.explain`           | `POST /api/agent/v1/explain`           | `kogane.explain`           | `summary.read`           |
 | `kogane.reconcile.propose` | `POST /api/agent/v1/reconcile.propose` | `kogane.reconcile.propose` | `interpretation.propose` |
 
+`kogane.capabilities` reports the `ApiCapabilities` object this deployment
+_actually serves_ — the contract's defaults with the server-computed facts
+folded in, which is the same object `/api/meta` returns (today that is
+`eventsV2`, which depends on the A10 projection being present). An agent is
+never told about a route this store cannot serve, and a page and an agent read
+one description of the deployment.
+
 `POST /mcp` is a Streamable-HTTP JSON-RPC 2.0 endpoint (`initialize`, `ping`,
 `tools/list`, `tools/call`, notifications). It is hand-rolled: no MCP SDK is a
 dependency, so nothing Node-only reaches workerd. It holds no logic, no

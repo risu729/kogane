@@ -29,7 +29,11 @@ import {
   interpretationContext,
   LATEST_IDENTITY_RELEASE,
 } from "../../../packages/read-model/src/index";
-import { CENTRAL_STORE_CAPABILITIES } from "../../../poc/observation-pipeline/shared/api-schema";
+import {
+  type ApiCapabilities,
+  CENTRAL_STORE_CAPABILITIES,
+} from "../../../poc/observation-pipeline/shared/api-schema";
+import { eventsV2Available } from "./events-api";
 import { evidenceReader, type ObservationReader, type Overview } from "./observations";
 import { proposalStore } from "./proposals";
 
@@ -57,8 +61,20 @@ export interface ToolResult {
 interface ToolContext {
   reader: ObservationReader;
   db: D1Database;
+  /** Resolves what this server can actually serve; see `serverCapabilities`. */
+  env: Env;
   grant: Grant;
   now: string;
+}
+
+/**
+ * The capabilities this deployment actually serves, which is what `/api/meta`
+ * reports too: the contract's defaults with the server-computed facts folded
+ * in. An agent and a page therefore read one description of the deployment,
+ * and neither is told about a route this store cannot serve.
+ */
+async function serverCapabilities(env: Env): Promise<ApiCapabilities> {
+  return { ...CENTRAL_STORE_CAPABILITIES, eventsV2: await eventsV2Available(env) };
 }
 
 function failure(
@@ -106,7 +122,11 @@ export async function callTool(
         return failure("unsupported_semantics", "capabilities", ["body"]);
       return {
         status: 200,
-        body: capabilitiesFor(context.grant, CENTRAL_STORE_CAPABILITIES, MAX_REQUEST_BYTES),
+        body: capabilitiesFor(
+          context.grant,
+          await serverCapabilities(context.env),
+          MAX_REQUEST_BYTES,
+        ),
       };
     }
     case "kogane.context.open": {
@@ -257,5 +277,5 @@ function parseOpenBody(value: unknown):
 }
 
 export function toolContext(env: Env, grant: Grant, now: string): ToolContext {
-  return { reader: evidenceReader(env.DB), db: env.DB, grant, now };
+  return { reader: evidenceReader(env.DB), db: env.DB, env, grant, now };
 }

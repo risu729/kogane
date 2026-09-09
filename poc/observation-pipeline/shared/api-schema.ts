@@ -92,6 +92,12 @@ export interface ApiCapabilities {
    * authentication gate as every other route.
    */
   readonly sharedQuery: boolean;
+  /**
+   * `/api/v2/activity` and `/api/v2/obligations` are served. False unless the
+   * A10 projection exists in the store the server reads and the reader flag is
+   * on, so this is a server-computed fact, not a static claim.
+   */
+  readonly eventsV2: boolean;
 }
 
 /** The local PoC store and the hosted synthetic demo, which snapshots it. */
@@ -108,6 +114,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   financialProducts: false,
   evidenceHistory: false,
   sharedQuery: false,
+  eventsV2: false,
 } as const satisfies ApiCapabilities;
 
 /** The production evidence-browser Worker over the central store. */
@@ -124,6 +131,8 @@ export const CENTRAL_STORE_CAPABILITIES = {
   financialProducts: true,
   evidenceHistory: true,
   sharedQuery: true,
+  // Default off; the server replaces it with what it can actually serve.
+  eventsV2: false,
 } as const satisfies ApiCapabilities;
 
 /**

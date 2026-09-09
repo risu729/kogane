@@ -179,6 +179,23 @@ describe("the agent API is off until a grant is configured", () => {
   });
 });
 
+describe("capabilities describe this deployment, not the contract's defaults", () => {
+  it("reports the same server-computed capability object as /api/meta", async () => {
+    const environment = grants({ "agent-principal": FULL_GRANT });
+    const meta = (await (await call("/api/meta", { environment })).json()) as {
+      capabilities: Record<string, unknown>;
+    };
+    const report = (await (
+      await call("/api/agent/v1/capabilities", { body: {}, environment })
+    ).json()) as { api: Record<string, unknown>; scopes: unknown };
+    // eventsV2 is computed from the projection actually present in this store,
+    // so an agent is never told about a route this deployment cannot serve.
+    expect(report.api).toEqual(meta.capabilities);
+    expect(report.api["eventsV2"]).toBe(false);
+    expect(report.api["sharedQuery"]).toBe(true);
+  });
+});
+
 describe("grant denial matrix", () => {
   const cases: [string, string[], string, number][] = [
     ["coverage needs summary.read", [], "coverage", 403],
