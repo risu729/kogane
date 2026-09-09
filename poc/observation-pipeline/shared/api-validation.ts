@@ -10,7 +10,9 @@ import {
   MEASURE_VIEWS,
   OBSERVATION_API_CONTRACT_VERSION,
   PAGINATION_VERSIONS,
+  validInterpretationContext,
   type ApiCapabilities,
+  type InterpretationContext,
 } from "./api-schema.ts";
 import type {
   ObservationOrganization,
@@ -82,6 +84,8 @@ const organizationAccountFields = {
 } satisfies Shape<Omit<OrganizedAccount, "connection">>;
 const organizationShape = object<ObservationOrganization>({
   product: optional(validFinancialProductClaimWire),
+  mappingRevision: optional((value: unknown): value is number => identifier(value) && value > 0),
+  identityRelease: optional(text),
   state: literal("organized", "unavailable"),
   lineage: nullable(literal("current", "historical")),
   account: nullable(
@@ -365,6 +369,7 @@ const provenance = object<Provenance>({
 const observation = object<ObservationDetail>({
   normalized: optional(validNormalizedDecimal),
   organization: optional(organization),
+  interpretationContext: optional(validInterpretationContext),
   kind: observationKind,
   row: (value): value is Record<string, unknown> =>
     record(value) &&
@@ -375,19 +380,25 @@ const observation = object<ObservationDetail>({
   extraParsed: boolean,
   provenance: optional(provenance),
 });
+// A response may say which interpretation it was computed under; when it does,
+// the context must be well-formed.
+const context = optional(validInterpretationContext);
 const endpoints: Record<string, Check<unknown>> = {
   "/api/meta": metadata,
   "/api/overview": overview,
-  "/api/transactions": object<{ transactions: TransactionRow[] }>({
-    transactions: array(transaction),
-  }),
+  "/api/transactions": object<{
+    transactions: TransactionRow[];
+    interpretationContext?: InterpretationContext;
+  }>({ transactions: array(transaction), interpretationContext: context }),
   "/api/balances": object<{
     latest: BalanceRow[];
     history: BalanceHistoryRow[];
-  }>({ latest: array(balance), history: array(balanceHistory) }),
-  "/api/positions": object<{ positions: PositionWithValuations[] }>({
-    positions: array(positionWithValuations),
-  }),
+    interpretationContext?: InterpretationContext;
+  }>({ latest: array(balance), history: array(balanceHistory), interpretationContext: context }),
+  "/api/positions": object<{
+    positions: PositionWithValuations[];
+    interpretationContext?: InterpretationContext;
+  }>({ positions: array(positionWithValuations), interpretationContext: context }),
   "/api/artifacts": object<{ artifacts: ArtifactRow[] }>({
     artifacts: array(artifact),
   }),

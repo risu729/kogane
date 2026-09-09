@@ -68,6 +68,7 @@ const SAMPLE: Record<string, string> = {
   cursor: "1",
   view: "balances",
   kind: "transactions",
+  identityRead: "latest",
 };
 /** Parameters a path needs before any other parameter is meaningful. */
 const BASE: Partial<Record<ListPath, Record<string, string>>> = {
