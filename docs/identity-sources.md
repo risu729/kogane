@@ -54,7 +54,7 @@ overlapping reward displays and post-transaction historical balances retain
 their existing measurement semantics. Notification evidence does not establish
 settlement. Existing current-snapshot selection and provenance remain unchanged.
 
-Evidence: `poc/observation-pipeline/src/parsers/registry.ts` and each source parser;
+Evidence: `packages/parsers/src/parsers/registry.ts` and each source parser;
 `docs/sources/moneyforward.md` documents HMAC verification. Synthetic boundary
 tests in `poc/observation-pipeline/test/identity-other.test.ts` cover accepted and
 rejected scopes, changing ordinals, currency roles and product separation.

@@ -11,7 +11,7 @@
 // processors themselves are idempotent, so even a lost lease cannot double a
 // projection. The receipt turns `published` only when every row of its
 // operation is processed — accepted is never published (addendum 10 §5).
-import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity/index.ts";
+import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { identitySweep } from "./identity-store.ts";
 
 const LEASE_MS = 60_000;

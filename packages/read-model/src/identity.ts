@@ -8,11 +8,11 @@ import {
   IDENTITY_READ_MODES,
   type IdentityReadMode,
   type InterpretationContext,
-} from "../../../poc/observation-pipeline/shared/api-schema";
+} from "../../../packages/observation-shared/src/api-schema";
 import {
   FINANCIAL_PRODUCT_CATALOGUE_VERSION,
   FINANCIAL_PRODUCT_RESOLVER_VERSION,
-} from "../../../poc/observation-pipeline/shared/financial-products";
+} from "../../../packages/observation-shared/src/financial-products";
 
 export { IDENTITY_READ_MODES, type IdentityReadMode, type InterpretationContext };
 

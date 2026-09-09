@@ -18,7 +18,7 @@ import {
   splitSql,
   startPipeline,
 } from "./harness.ts";
-import { smbcDirectBalance } from "../../../poc/observation-pipeline/src/parsers/smbc-direct.ts";
+import { smbcDirectBalance } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
 
 let mf: Miniflare;
 let env: Env;

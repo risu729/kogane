@@ -9,7 +9,7 @@ import type {
   ParseRunDetail,
   PositionWithValuations,
   UnitUpdateSummary,
-} from "../../../poc/observation-pipeline/shared/api-contract";
+} from "../../../packages/observation-shared/src/api-contract";
 import { OBSERVATION_TABLES, type ObservationKind } from "./concepts";
 import {
   type ArtifactDetailSqlRow,

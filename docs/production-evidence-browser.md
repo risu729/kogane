@@ -14,7 +14,7 @@ outside this view. An unavailable API is an error, never an empty balance.
 
 ## Versioned read contract
 
-`poc/observation-pipeline/shared/evidence-contract.ts` defines `evidence-v1`.
+`packages/observation-shared/src/evidence-contract.ts` defines `evidence-v1`.
 Its prefixed identifiers and cursors are opaque to clients. The local PoC's
 numeric identifiers, parsed-observation API, and hash-only raw URLs retain
 their existing meanings and are not used by this Worker.

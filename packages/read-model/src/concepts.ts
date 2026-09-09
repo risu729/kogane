@@ -19,7 +19,7 @@ import {
   unitScopePolicySql,
   unitScopeSuccessSql,
   type SnapshotRelations,
-} from "../../../poc/observation-pipeline/src/snapshot-query";
+} from "../../../packages/parsers/src/snapshot-query";
 
 export type ObservationKind = "transaction" | "balance" | "position" | "valuation";
 export type ObservationTable =

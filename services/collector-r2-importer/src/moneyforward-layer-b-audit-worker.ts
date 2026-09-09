@@ -3,7 +3,7 @@ import {
   createMoneyForwardEvidenceOnly,
   createMoneyForwardMonthlyTransactions,
   type MoneyForwardDomNode,
-} from "../../../poc/observation-pipeline/src/parsers/moneyforward";
+} from "../../../packages/parsers/src/parsers/moneyforward";
 import { validateMoneyForwardRun } from "./moneyforward";
 import { moneyForwardAccountKeys } from "./moneyforward-account-identity";
 

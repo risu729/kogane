@@ -1,0 +1,274 @@
+// Parser code digests: the build identity of every deployed transformation.
+//
+// Design review D03 asks that a parser be identified by more than its display
+// `version`: the same version with different code is a different
+// transformation, and the deployment that would introduce one must be
+// refused. `parser.version` stays the human-readable change note; the digest
+// below is what `parser_releases.code_digest` records and what migration 0028
+// pins per (name, version).
+//
+// Scope of the digest, deliberately narrower than the repository commit: a
+// parser's own module and the local modules it transitively imports (shared
+// helpers such as src/parsers/util.ts, the parser types, the domain coverage
+// contract). A CSS change in web/ must not force every artifact to be
+// re-parsed; a change to util.ts must.
+//
+// Regenerate after a deliberate parser change, from packages/parsers:
+//   bun run scripts/parser-digests.ts
+// The generator refuses to record a changed digest for an unchanged
+// `version`, and test/parser-digests.test.ts fails when the checked-in file
+// no longer matches the sources.
+
+import { readFileSync, writeFileSync } from "node:fs";
+import { canonicalJson, sha256Hex } from "../../domain/src/context.ts";
+import type { Parser } from "../src/types.ts";
+
+/** Repository root, from packages/parsers/scripts/. */
+export const REPO_ROOT = new URL("../../../", import.meta.url);
+const PARSERS_DIR = new URL("packages/parsers/src/parsers/", REPO_ROOT);
+/** The file this script writes, which the registry re-exports. */
+const GENERATED_DIGESTS = new URL("digests.ts", PARSERS_DIR);
+
+export interface ParserRelease {
+  version: string;
+  codeDigest: string;
+  /** Repository-relative source files the digest covers, sorted. */
+  sources: string[];
+}
+export interface ParserDigests {
+  /** Repository-relative path -> SHA-256 of the file's bytes. */
+  sourceDigests: Record<string, string>;
+  releases: Record<string, ParserRelease>;
+}
+
+const RELATIVE_IMPORT = /(?:^|[\s;])(?:import|export)\b[^;]*?from\s*"(\.[^"]*)"/gu;
+
+/**
+ * Where a source module was when its digest was first recorded.
+ *
+ * A parser's `codeDigest` is SHA-256 over the *paths* and contents of its
+ * source closure, `parser_releases.code_digest` stores it, and migration 0028
+ * refuses to register the same parser name and version with a different
+ * digest. Moving these modules out of `poc/observation-pipeline` (design
+ * review D07) is therefore only a move if the digest input does not move with
+ * them, so a file keeps the repository path it had. Only the name is pinned:
+ * a content change still changes the digest, which is the rule the review
+ * asks for. New modules with no history here use their real path.
+ */
+const RECORDED_PATHS: readonly (readonly [string, string])[] = [
+  ["packages/parsers/src/", "poc/observation-pipeline/src/"],
+];
+
+/** The path a file is recorded under, which is not always where it lives. */
+function repoRelative(url: URL): string {
+  const path = url.href.slice(REPO_ROOT.href.length);
+  for (const [actual, recorded] of RECORDED_PATHS)
+    if (path.startsWith(actual)) return recorded + path.slice(actual.length);
+  return path;
+}
+
+/** The inverse: the file a recorded path names in the working tree. */
+function recordedSource(path: string): URL {
+  for (const [actual, recorded] of RECORDED_PATHS)
+    if (path.startsWith(recorded)) return new URL(actual + path.slice(recorded.length), REPO_ROOT);
+  return new URL(path, REPO_ROOT);
+}
+
+/** Errors that mean "this specifier does not name a source file here", as
+ * opposed to a real I/O failure that must not be swallowed. */
+const NOT_A_SOURCE_FILE = new Set(["ENOENT", "EISDIR", "ENOTDIR", "ENAMETOOLONG"]);
+function notASourceFile(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { code: unknown }).code === "string" &&
+    NOT_A_SOURCE_FILE.has((error as { code: string }).code)
+  );
+}
+
+/**
+ * The file's text, or undefined when the path names no source file. Reading
+ * and handling the failure is deliberate: testing for existence first and
+ * reading afterwards is a check-then-use race, and the answer would in any
+ * case be stale by the time the read ran.
+ */
+function readSource(file: URL): string | undefined {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (error) {
+    if (notASourceFile(error)) return undefined;
+    throw error;
+  }
+}
+
+/** Local modules `file` imports, transitively, inside this repository. */
+function moduleClosure(entry: URL, seen = new Set<string>()): Set<string> {
+  const path = repoRelative(entry);
+  if (seen.has(path)) return seen;
+  const text = readSource(entry);
+  // A relative specifier that resolves to nothing here (an extension-less
+  // import, a directory) is not part of the digest range.
+  if (text === undefined) return seen;
+  seen.add(path);
+  for (const match of text.matchAll(RELATIVE_IMPORT)) {
+    const target = new URL(match[1]!, entry);
+    if (target.href.startsWith(REPO_ROOT.href)) moduleClosure(target, seen);
+  }
+  return seen;
+}
+
+function isParser(value: unknown): value is Parser {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as Parser).name === "string" &&
+    typeof (value as Parser).version === "string" &&
+    typeof (value as Parser).accepts === "function" &&
+    typeof (value as Parser).parse === "function"
+  );
+}
+
+/**
+ * Parser name -> the module that defines it and the parser it exports, read
+ * from the registry's own import list. Import order is irrelevant: a module
+ * exporting several parsers gives each of them the same source closure, which
+ * is correct, because a change anywhere in that module can change any of them.
+ *
+ * The registry module itself is deliberately not imported: it re-exports the
+ * generated digests, so importing it would make the generator unable to run
+ * when that file is missing or being rewritten.
+ */
+export async function parserModules(): Promise<Map<string, { module: URL; parser: Parser }>> {
+  const registry = new URL("registry.ts", PARSERS_DIR);
+  const modules = new Map<string, { module: URL; parser: Parser }>();
+  for (const match of readFileSync(registry, "utf8").matchAll(RELATIVE_IMPORT)) {
+    const target = new URL(match[1]!, registry);
+    // The generated file is skipped by name, not by asking whether it exists:
+    // it may legitimately be absent while this generator rebuilds it, and any
+    // *other* unresolvable specifier is a broken registry that must throw.
+    if (target.href === GENERATED_DIGESTS.href) continue;
+    const exports: Record<string, unknown> = await import(target.href);
+    for (const value of Object.values(exports))
+      if (isParser(value) && !modules.has(value.name))
+        modules.set(value.name, { module: target, parser: value });
+  }
+  return modules;
+}
+
+/** Recompute every digest from the working tree. */
+export async function computeParserDigests(parsers: readonly Parser[]): Promise<ParserDigests> {
+  const modules = await parserModules();
+  const sourceDigests: Record<string, string> = {};
+  const releases: Record<string, ParserRelease> = {};
+  for (const parser of [...parsers].sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const entry = modules.get(parser.name);
+    if (!entry) throw new Error(`parser module not found for ${parser.name}`);
+    const sources = [...moduleClosure(entry.module)].sort();
+    for (const source of sources)
+      sourceDigests[source] ??= await sha256Hex(readFileSync(recordedSource(source), "utf8"));
+    releases[parser.name] = {
+      version: parser.version,
+      codeDigest: await sha256Hex(
+        canonicalJson({
+          files: sources.map((path) => ({ path, sha256: sourceDigests[path]! })),
+          scheme: "parser-code-digest-v1",
+        }),
+      ),
+      sources,
+    };
+  }
+  return { sourceDigests: Object.fromEntries(Object.entries(sourceDigests).sort()), releases };
+}
+
+export interface DigestViolation {
+  parser: string;
+  code: "code_digest_changed_without_version" | "version_changed" | "missing" | "unexpected";
+}
+
+/**
+ * The rule the review states as the short-term compatibility measure: the
+ * same `name/version` may never carry a different code digest. Comparing the
+ * checked-in record with the freshly computed one is the only place that can
+ * see a same-version code change, so both the generator and CI use it.
+ */
+export function digestViolations(
+  recorded: Record<string, ParserRelease>,
+  computed: Record<string, ParserRelease>,
+): DigestViolation[] {
+  const violations: DigestViolation[] = [];
+  for (const [parser, next] of Object.entries(computed)) {
+    const previous = recorded[parser];
+    if (!previous) {
+      violations.push({ parser, code: "missing" });
+      continue;
+    }
+    if (previous.version === next.version && previous.codeDigest !== next.codeDigest)
+      violations.push({ parser, code: "code_digest_changed_without_version" });
+    else if (previous.version !== next.version)
+      violations.push({ parser, code: "version_changed" });
+  }
+  for (const parser of Object.keys(recorded))
+    if (!(parser in computed)) violations.push({ parser, code: "unexpected" });
+  return violations;
+}
+
+export function renderDigests(digests: ParserDigests): string {
+  return `// Generated by scripts/parser-digests.ts. Do not edit by hand.
+//
+// \`codeDigest\` is the build identity of a parser: SHA-256 over the canonical
+// list of its own module and every local module it transitively imports, with
+// each file's own SHA-256. Migration 0028 refuses to register the same
+// parser name and version with a different digest, and
+// test/parser-digests.test.ts fails when this file no longer matches the
+// sources it describes.
+import type { ParserDigests } from "../../scripts/parser-digests.ts";
+
+export const PARSER_DIGESTS: ParserDigests = ${JSON.stringify(digests, null, 2)};
+
+/** Parser name -> build digest, the value \`parser_releases.code_digest\` stores. */
+export const PARSER_CODE_DIGESTS: Record<string, string> = Object.fromEntries(
+  Object.entries(PARSER_DIGESTS.releases).map(([name, release]) => [name, release.codeDigest]),
+);
+`;
+}
+
+/**
+ * The record this script wrote last time, or undefined when there is none yet.
+ * The load is attempted directly; only a failure that a subsequent read
+ * confirms is "the file is not there" counts as "no record", so a file that
+ * exists but does not parse still fails loudly instead of being overwritten.
+ */
+async function recordedDigests(target: URL): Promise<ParserDigests | undefined> {
+  try {
+    const loaded: { PARSER_DIGESTS?: ParserDigests } = await import(target.href);
+    return loaded.PARSER_DIGESTS;
+  } catch (error) {
+    if (readSource(target) === undefined) return undefined;
+    throw error;
+  }
+}
+
+if (import.meta.main) {
+  const computed = await computeParserDigests(
+    [...(await parserModules()).values()].map((entry) => entry.parser),
+  );
+  const recorded = await recordedDigests(GENERATED_DIGESTS);
+  if (recorded) {
+    const violations = digestViolations(recorded.releases, computed.releases).filter(
+      (violation) => violation.code === "code_digest_changed_without_version",
+    );
+    if (violations.length) {
+      console.error(
+        `Refusing to record a changed code digest for an unchanged parser version: ${violations
+          .map((violation) => violation.parser)
+          .join(", ")}. Bump the parser version first.`,
+      );
+      process.exitCode = 1;
+    }
+  }
+  if (process.exitCode !== 1) {
+    writeFileSync(GENERATED_DIGESTS, renderDigests(computed));
+    console.log(`wrote ${Object.keys(computed.releases).length} parser digests`);
+  }
+}

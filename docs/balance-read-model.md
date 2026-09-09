@@ -75,7 +75,7 @@ produce a _new_ snapshot rather than mutate the one a reader is paging.
    candidates is refused: the job seals nothing and `/api/balances` keeps
    answering 413.
 2. **Witness bundling.** `projectBalanceRows` from
-   `poc/observation-pipeline/shared/balance-semantics.ts`, unchanged. The
+   `packages/observation-shared/src/balance-semantics.ts`, unchanged. The
    strict rule (identical provider minor units _and_ identical raw text, one
    identified product, one parse) is neither relaxed nor duplicated here.
    Disagreeing evidence stays a conflict and is never collapsed.

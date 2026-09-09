@@ -1,10 +1,10 @@
-import type { BalanceRow } from "../../../poc/observation-pipeline/shared/api-contract";
+import type { BalanceRow } from "../../../packages/observation-shared/src/api-contract";
 import {
   BALANCE_INTERPRETATION_POLICY_VERSION,
   classifyBalance,
   projectBalanceRows,
   type BalanceProjectionInput,
-} from "../../../poc/observation-pipeline/shared/balance-semantics";
+} from "../../../packages/observation-shared/src/balance-semantics";
 
 function input(row: BalanceRow): BalanceProjectionInput & { row: BalanceRow } {
   const organization = row.organization;

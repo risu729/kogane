@@ -3,8 +3,8 @@ import type {
   IdentityInput,
   IdentityPlan,
   InstrumentIdentity,
-} from "../../../poc/observation-pipeline/src/identity/types.ts";
-import { record } from "../../../poc/observation-pipeline/src/identity/types.ts";
+} from "../../../packages/identity/src/types.ts";
+import { record } from "../../../packages/identity/src/types.ts";
 import { executeIdentityCommand, type IdentityCommandError } from "./identity-commands.ts";
 import { identityKey } from "./identity-keys.ts";
 import {

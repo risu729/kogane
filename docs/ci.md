@@ -39,11 +39,17 @@ package's locked Playwright Chromium and fails if browser tests cannot run.
   shell code, permissions, action pins, and unsafe workflow patterns.
 - Ruff checks and formats Python probes without executing them. Typos and hk
   hygiene checks cover spelling, whitespace, merge markers, and file integrity.
+- The standalone step also runs the repository-wide guards under `scripts/`:
+  the publication-gate predicate allow-list and the import boundaries of
+  [package layout](package-layout.md) (no deployed or shared module may import
+  `poc/`; the PoC web UI may not import a service internal or read-model SQL).
 - The package matrix runs the reviewed tests, type checks, and deployment dry
   runs for every Bun package listed in `scripts/ci-packages.ts`, including the
-  pure `packages/domain` contracts package (frozen install, `tsc --noEmit`,
-  `bun test`; no Worker dry run). Standalone diagnostics and CI-coverage tests
-  also run. The two container packages use frozen npm installs without install
+  pure shared packages under `packages/` (frozen install, `tsc --noEmit`,
+  `bun test`; no Worker dry run). `packages/parsers` is the one of them with a
+  runtime dependency, parse5, and the parser Worker installs it before its own
+  checks because that is where the parsers resolve it from. Standalone
+  diagnostics and CI-coverage tests also run. The two container packages use frozen npm installs without install
   scripts; the OCI probe receives syntax checks only.
 
 Evidence under `data/`, parser fixture directories, stored patches, and

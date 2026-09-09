@@ -3,7 +3,7 @@ import { beforeAll, expect, it } from "vitest";
 import { preferredInstrumentNames } from "../src/preferred-instrument-names";
 import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import { identifyParse } from "../../observation-pipeline/src/identity-store";
-import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity";
+import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { observationOrganizations, organizeRows } from "../src/observation-organization";
 
 beforeAll(async () => {

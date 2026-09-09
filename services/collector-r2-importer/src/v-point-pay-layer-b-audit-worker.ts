@@ -1,5 +1,5 @@
-import { vPointPayNotificationEvent } from "../../../poc/observation-pipeline/src/parsers/v-point-pay";
-import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types";
+import { vPointPayNotificationEvent } from "../../../packages/parsers/src/parsers/v-point-pay";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types";
 import { validateVPointPayEmailPairForLayerB } from "./v-point-pay-email";
 
 type AuditEnv = Pick<Env, "VPOINT_PAY_SNAPSHOTS">;

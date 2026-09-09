@@ -12,7 +12,7 @@ import {
   CENTRAL_STORE_CAPABILITIES,
   withBalancesV2,
   type ApiCapabilities,
-} from "../../../poc/observation-pipeline/shared/api-schema";
+} from "../../../packages/observation-shared/src/api-schema";
 import { balanceProjectionReader, projectionFlagOn } from "./balances-v2";
 import { commandsEnabled } from "./command-api";
 import { eventsV2Available, flagOn } from "./events-api";

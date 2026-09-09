@@ -1,9 +1,9 @@
 // Read-only: fetch selected failed objects into memory, emit structural error
 // categories only. Never log raw payloads or provider error strings.
-import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry.ts";
-import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types.ts";
-import { parseCsv } from "../../../poc/observation-pipeline/src/parsers/util.ts";
-import { decimalText } from "../../../poc/observation-pipeline/src/parsers/util.ts";
+import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
+import { parseCsv } from "../../../packages/parsers/src/parsers/util.ts";
+import { decimalText } from "../../../packages/parsers/src/parsers/util.ts";
 const cli = new URL("../node_modules/wrangler/bin/wrangler.js", import.meta.url).pathname;
 async function command(args: string[]): Promise<Uint8Array> {
   const child = Bun.spawn(["node", cli, ...args], { stdout: "pipe", stderr: "pipe" });

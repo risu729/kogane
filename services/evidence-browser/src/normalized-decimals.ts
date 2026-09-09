@@ -1,7 +1,7 @@
 import {
   validNormalizedDecimal,
   type NormalizedDecimal,
-} from "../../../poc/observation-pipeline/shared/normalized-decimal";
+} from "../../../packages/observation-shared/src/normalized-decimal";
 import { DEFAULT_DECIMAL_POLICY } from "./decimal-policy";
 type Kind = "balance" | "transaction" | "position" | "valuation";
 /**

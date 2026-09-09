@@ -36,7 +36,7 @@ import {
   CENTRAL_STORE_CAPABILITIES,
   isRewardPath,
   rewardQueryParameters,
-} from "../../../poc/observation-pipeline/shared/api-schema";
+} from "../../../packages/observation-shared/src/api-schema";
 import { rewardsV2Enabled } from "./capabilities";
 import { HttpError, json } from "./http";
 

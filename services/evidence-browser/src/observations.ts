@@ -30,7 +30,7 @@ export type {
   TransactionRow,
   ValuationRow,
   Warnings,
-} from "../../../poc/observation-pipeline/shared/api-contract.ts";
+} from "../../../packages/observation-shared/src/api-contract.ts";
 
 /**
  * The reader refuses any list past 5,000 rows. The API reports that as 413

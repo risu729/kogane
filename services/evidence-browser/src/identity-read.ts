@@ -3,7 +3,7 @@ import {
   CENTRAL_STORE_CAPABILITIES,
   type IdentityReadMode,
   validIdentityReadMode,
-} from "../../../poc/observation-pipeline/shared/api-schema";
+} from "../../../packages/observation-shared/src/api-schema";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
 
 /**

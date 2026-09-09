@@ -3,8 +3,8 @@ import {
   sonyBankHistoryCsv,
   sonyBankHistoryJson,
   sonyBankWalletHistory,
-} from "../../../poc/observation-pipeline/src/parsers/sony-bank";
-import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types";
+} from "../../../packages/parsers/src/parsers/sony-bank";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types";
 import { validateSonyRun } from "./sony";
 
 type AuditEnv = Pick<Env, "SONY_SNAPSHOTS">;

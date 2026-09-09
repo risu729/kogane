@@ -15,7 +15,7 @@ Nothing changes on deploy. Every dataset is seeded on the legacy policy; the
 new tables are written but not yet read for selection. The evidence-browser
 parity test proves the served result set is unchanged.
 
-## Contract v2 (`poc/observation-pipeline/src/types.ts`)
+## Contract v2 (`packages/parsers/src/types.ts`)
 
 ```ts
 export interface ParseResult {
@@ -46,7 +46,7 @@ runs store nothing beyond `warnings_json`, and its datasets stay on the legacy
 policy. Nothing synthesizes a `complete` claim for a legacy parse, an old
 parse, or a parse whose parser has since been converted.
 
-### Helpers (`poc/observation-pipeline/src/parsers/coverage.ts`)
+### Helpers (`packages/parsers/src/parsers/coverage.ts`)
 
 - `ParseDiagnostics` collects warnings and issues together. `report(issue)`
   records the typed issue and its message as the warning string;
@@ -226,7 +226,7 @@ inside a unit; the only relaxed predicate is `unitParseable`.
 ### The predicate
 
 One definition, `unitScopedEligibilitySql` in
-`poc/observation-pipeline/src/snapshot-query.ts`, composed by:
+`packages/parsers/src/snapshot-query.ts`, composed by:
 
 - the Worker's `artifactSql` (`services/observation-pipeline/src/worker.ts`),
   which every lane — incremental, repair, replay — uses to create jobs and
@@ -264,7 +264,7 @@ snapshot selection still joins on dataset alone, as before.
 
 Parsers state their own precondition ("the capture succeeded") and therefore
 also had to learn the difference: `unitScopeAdmitted` in
-`poc/observation-pipeline/src/parsers/util.ts` reads
+`packages/parsers/src/parsers/util.ts` reads
 `ArtifactMeta.unitScopeEligibility`, which the **caller** sets (the Worker from
 `artifactSql`, the PoC store from `listArtifacts`) after evaluating the policy.
 A parser never decides the policy, and the field is null for every artifact

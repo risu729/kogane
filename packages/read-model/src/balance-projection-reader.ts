@@ -15,7 +15,7 @@ import {
   type ProjectionInputsRow,
   type ProjectionPageRow,
 } from "./balance-projection-sql";
-import type { BalanceHistoryRow } from "../../../poc/observation-pipeline/shared/api-contract";
+import type { BalanceHistoryRow } from "../../../packages/observation-shared/src/api-contract";
 import type { CollectionScope } from "./scope";
 import type { SqlExecutor } from "./reader";
 

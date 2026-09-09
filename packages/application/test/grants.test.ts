@@ -10,7 +10,7 @@ import {
   validGrant,
 } from "../src/grants.ts";
 import { capabilitiesFor } from "../src/capabilities.ts";
-import { CENTRAL_STORE_CAPABILITIES } from "../../../poc/observation-pipeline/shared/api-schema.ts";
+import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { grant } from "./fixture.ts";
 
 describe("grants are deny-by-default", () => {

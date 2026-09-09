@@ -3,7 +3,7 @@ import { parse, type DefaultTreeAdapterMap } from "parse5";
 import {
   createGlobalPassActivity,
   type GlobalPassDomNode,
-} from "../../../poc/observation-pipeline/src/parsers/global-pass-activity";
+} from "../../../packages/parsers/src/parsers/global-pass-activity";
 
 type AuditEnv = Pick<Env, "GLOBAL_PASS_SNAPSHOTS">;
 const PREFIX = "raw/prestia-globalpass/";

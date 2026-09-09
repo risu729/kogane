@@ -2,7 +2,7 @@
 
 A financial institution, a comprehensive account relationship, and an individual
 deposit product are separate entities. The catalogue in
-`poc/observation-pipeline/shared/financial-products.ts` gives them separate stable
+`packages/observation-shared/src/financial-products.ts` gives them separate stable
 IDs. The [PowerFlex account](https://faq.sbishinseibank.co.jp/faq_detail.html?category=702&id=102&page=1)
 is the umbrella; it must not replace the identity of an ordinary deposit, Hyper
 deposit, Power deposit or currency-specific foreign ordinary deposit.

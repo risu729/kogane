@@ -1,9 +1,9 @@
 // Read-only live audit. Raw references and payloads remain in memory; output is
 // aggregate counts and fixed classifier reason codes, never financial values.
 import { getPlatformProxy } from "wrangler";
-import { otherIdentity } from "../../../poc/observation-pipeline/src/identity/other.ts";
-import { sbiIdentity } from "../../../poc/observation-pipeline/src/identity/sbi.ts";
-import type { IdentityInput } from "../../../poc/observation-pipeline/src/identity/types.ts";
+import { otherIdentity } from "../../../packages/identity/src/other.ts";
+import { sbiIdentity } from "../../../packages/identity/src/sbi.ts";
+import type { IdentityInput } from "../../../packages/identity/src/types.ts";
 
 const proxy = await getPlatformProxy<{ DB: D1Database; EVIDENCE: R2Bucket }>({
   configPath: new URL("../wrangler.diagnostic.jsonc", import.meta.url).pathname,

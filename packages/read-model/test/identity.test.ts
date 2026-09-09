@@ -10,7 +10,7 @@ import {
   type InterpretationContext,
   LOCAL_STORE_CAPABILITIES,
   validInterpretationContext,
-} from "../../../poc/observation-pipeline/shared/api-schema";
+} from "../../../packages/observation-shared/src/api-schema";
 import {
   DECIMAL_POLICY_RELEASE,
   DEFAULT_IDENTITY_READ_MODE,

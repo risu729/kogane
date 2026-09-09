@@ -14,7 +14,7 @@ import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { runBalanceProjection } from "../../observation-pipeline/src/balance-projection-job";
 import { projectionPageSql } from "../../../packages/read-model/src/index";
-import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let issuer: string;

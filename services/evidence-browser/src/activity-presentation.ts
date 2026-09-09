@@ -1,5 +1,5 @@
-import type { TransactionRow } from "../../../poc/observation-pipeline/shared/api-contract";
-import { classifyActivity } from "../../../poc/observation-pipeline/shared/activity-semantics";
+import type { TransactionRow } from "../../../packages/observation-shared/src/api-contract";
+import { classifyActivity } from "../../../packages/observation-shared/src/activity-semantics";
 
 /** Only narrowly selected parser facts from the very same B row reach the collection API. */
 export async function describeActivities(

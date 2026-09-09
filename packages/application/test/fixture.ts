@@ -5,8 +5,8 @@ import type {
   ObservationDetail,
   Overview,
   TransactionRow,
-} from "../../../poc/observation-pipeline/shared/api-contract.ts";
-import type { InterpretationContext } from "../../../poc/observation-pipeline/shared/api-schema.ts";
+} from "../../../packages/observation-shared/src/api-contract.ts";
+import type { InterpretationContext } from "../../../packages/observation-shared/src/api-schema.ts";
 import type { ContextInputs } from "../src/context/open.ts";
 import type { Grant } from "../src/grants.ts";
 import type { ExplainReader } from "../src/explain.ts";

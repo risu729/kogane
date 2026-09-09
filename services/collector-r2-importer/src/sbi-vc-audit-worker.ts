@@ -1,9 +1,9 @@
-import { sbiVcAccountMargin } from "../../../poc/observation-pipeline/src/parsers/sbi-vc-account-margin";
-import { sbiVcCashBalances } from "../../../poc/observation-pipeline/src/parsers/sbi-vc-cash-balances";
-import { sbiVcCashflows } from "../../../poc/observation-pipeline/src/parsers/sbi-vc-cashflows";
-import { sbiVcExecutions } from "../../../poc/observation-pipeline/src/parsers/sbi-vc-executions";
-import { sbiVcPositionSummary } from "../../../poc/observation-pipeline/src/parsers/sbi-vc-position-summary";
-import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types";
+import { sbiVcAccountMargin } from "../../../packages/parsers/src/parsers/sbi-vc-account-margin";
+import { sbiVcCashBalances } from "../../../packages/parsers/src/parsers/sbi-vc-cash-balances";
+import { sbiVcCashflows } from "../../../packages/parsers/src/parsers/sbi-vc-cashflows";
+import { sbiVcExecutions } from "../../../packages/parsers/src/parsers/sbi-vc-executions";
+import { sbiVcPositionSummary } from "../../../packages/parsers/src/parsers/sbi-vc-position-summary";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types";
 import { parseSbiVcManifest } from "./sbi-vc";
 
 type AuditEnv = Pick<Env, "SBI_VC_SNAPSHOTS">;

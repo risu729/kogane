@@ -38,13 +38,13 @@ import {
 import {
   projectBalanceRows,
   type BalanceProjectionInput,
-} from "../../../poc/observation-pipeline/shared/balance-semantics.ts";
-import { resolveFinancialProduct } from "../../../poc/observation-pipeline/shared/financial-products.ts";
+} from "../../../packages/observation-shared/src/balance-semantics.ts";
+import { resolveFinancialProduct } from "../../../packages/observation-shared/src/financial-products.ts";
 import {
   validNormalizedDecimal,
   type NormalizedDecimal,
-} from "../../../poc/observation-pipeline/shared/normalized-decimal.ts";
-import type { BalanceRow } from "../../../poc/observation-pipeline/shared/api-contract.ts";
+} from "../../../packages/observation-shared/src/normalized-decimal.ts";
+import type { BalanceRow } from "../../../packages/observation-shared/src/api-contract.ts";
 import type { OutboxOutcome } from "./decision-outbox.ts";
 
 /** The 5,000 candidate bound of the read model; a larger set is refused, never cut. */

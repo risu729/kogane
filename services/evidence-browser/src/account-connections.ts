@@ -1,4 +1,4 @@
-import type { AccountConnection } from "../../../poc/observation-pipeline/shared/account-connection-contract";
+import type { AccountConnection } from "../../../packages/observation-shared/src/account-connection-contract";
 export type { AccountConnection };
 interface ReviewRow {
   producer_id: string;

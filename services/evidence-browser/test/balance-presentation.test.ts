@@ -2,8 +2,8 @@ import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
 import { observationApi } from "../src/observation-api";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
-import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
-import type { BalanceInterpretation } from "../../../poc/observation-pipeline/shared/balance-semantics";
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
+import type { BalanceInterpretation } from "../../../packages/observation-shared/src/balance-semantics";
 
 beforeAll(seedRegistry);
 async function seedBalances(

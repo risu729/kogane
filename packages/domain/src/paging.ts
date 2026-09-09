@@ -18,8 +18,8 @@ import {
   isText,
   isTextOrNull,
 } from "./guards.ts";
-import { validNormalizedDecimal } from "../../../poc/observation-pipeline/shared/normalized-decimal.ts";
-import type { NormalizedDecimal } from "../../../poc/observation-pipeline/shared/normalized-decimal.ts";
+import { validNormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
+import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 
 export const KEYSET_PAGINATION_VERSION = "keyset-v2";
 export const SNAPSHOT_PAGE_SCHEMA_VERSION = "snapshot-page-v1";

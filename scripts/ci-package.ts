@@ -74,7 +74,19 @@ export function packagePlan(name: string, options: PlanOptions): Step[] {
   if (!existsSync(join(cwd, "bun.lock")))
     throw new Error(`Missing frozen Bun lockfile for ${policy.path}`);
   const steps: Step[] = [{ cwd, command: ["bun", "install", "--frozen-lockfile"] }];
-  if (policy.evidenceAssets || policy.sharedParserDependencies) {
+  if (policy.sharedParserDependencies) {
+    // Shared parsers resolve parse5 from packages/parsers, not from the
+    // node_modules of whoever imports them. Every plan that type-checks or
+    // runs a module under packages/parsers therefore needs its frozen
+    // dependencies first; none of them needs a build of it.
+    const parsersPolicy = selectPolicy("packages/parsers");
+    const parsers = join(options.root, parsersPolicy.path);
+    validateScripts(parsersPolicy, JSON.parse(readFileSync(join(parsers, "package.json"), "utf8")));
+    if (!existsSync(join(parsers, "bun.lock")))
+      throw new Error("Missing frozen Bun lockfile for shared parsers");
+    steps.push({ cwd: parsers, command: ["bun", "install", "--frozen-lockfile"] });
+  }
+  if (policy.evidenceAssets) {
     // The readers serve reviewed frontend builds and a fixed synthetic snapshot.
     // Validate the asset producer before running any plan step, too.
     const frontendPolicy = selectPolicy("poc/observation-pipeline");
@@ -85,16 +97,13 @@ export function packagePlan(name: string, options: PlanOptions): Step[] {
     );
     if (!existsSync(join(frontend, "bun.lock")))
       throw new Error("Missing frozen Bun lockfile for evidence assets");
-    steps.push({ cwd: frontend, command: ["bun", "install", "--frozen-lockfile"] });
-    // Shared parsers resolve parse5 from their own package, not the consuming
-    // Worker's node_modules. They need the frozen dependencies but no UI build.
-    if (policy.evidenceAssets)
-      steps.push(
-        { cwd: frontend, command: ["bun", "run", "build:evidence"] },
-        { cwd: frontend, command: ["bun", "run", "build:production"] },
-        { cwd: frontend, command: ["bun", "run", "build"] },
-        { cwd: frontend, command: ["bun", "run", "export:demo"] },
-      );
+    steps.push(
+      { cwd: frontend, command: ["bun", "install", "--frozen-lockfile"] },
+      { cwd: frontend, command: ["bun", "run", "build:evidence"] },
+      { cwd: frontend, command: ["bun", "run", "build:production"] },
+      { cwd: frontend, command: ["bun", "run", "build"] },
+      { cwd: frontend, command: ["bun", "run", "export:demo"] },
+    );
   }
   if (policy.container) {
     const container = join(options.root, policy.container);

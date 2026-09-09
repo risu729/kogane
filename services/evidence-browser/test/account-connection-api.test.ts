@@ -4,9 +4,9 @@ import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { identityApi } from "../src/identity-api";
 import { observationOrganizations } from "../src/observation-organization";
 import { identifyParse } from "../../observation-pipeline/src/identity-store";
-import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity";
-import { validIdentityResponse } from "../../../poc/observation-pipeline/shared/identity-contract";
-import { validAccountConnection } from "../../../poc/observation-pipeline/shared/account-connection-contract";
+import { resolveIdentity } from "../../../packages/identity/src/index.ts";
+import { validIdentityResponse } from "../../../packages/observation-shared/src/identity-contract";
+import { validAccountConnection } from "../../../packages/observation-shared/src/account-connection-contract";
 import { organizedFilterOptions } from "../src/organized-filter-options";
 
 beforeAll(async () => {

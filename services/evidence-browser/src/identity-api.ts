@@ -3,11 +3,11 @@ import { preferredInstrumentNames } from "./preferred-instrument-names";
 import { listAccountConnections, readAccountConnections } from "./account-connections";
 import { connectionAccountLabel } from "./account-connection-display";
 import { identityReadMode } from "./identity-read";
-import type { IdentityOrigin } from "../../../poc/observation-pipeline/shared/identity-contract";
+import type { IdentityOrigin } from "../../../packages/observation-shared/src/identity-contract";
 import {
   IDENTITY_PAGE_LIMIT,
   nextIdentityOffset,
-} from "../../../poc/observation-pipeline/shared/identity-contract";
+} from "../../../packages/observation-shared/src/identity-contract";
 import {
   type IdentityReadMode,
   identityReleaseFor,

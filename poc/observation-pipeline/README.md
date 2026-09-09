@@ -16,6 +16,13 @@ payload shapes the live collectors actually emit. See `docs/raw-store.md`,
 `docs/observations.md`, and `docs/evidence-browser.md` for the plans this
 implements, and `RESULTS.md` for what it settled and what it did not.
 
+The parsers, the identity resolver, the observation types and the shared HTTP
+contracts no longer live here: design review D07 moved them to
+`packages/parsers`, `packages/identity` and `packages/observation-shared`, so
+that the deployed Workers stop importing a PoC. The old paths under `src/` and
+`shared/` are one-line re-exports of those packages, and everything below
+behaves exactly as it did. See `docs/package-layout.md`.
+
 ## Running it
 
 ```sh
