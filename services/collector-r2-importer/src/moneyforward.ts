@@ -14,7 +14,7 @@ import type { CentralInventoryItem } from "./types";
 
 const SOURCE = "moneyforward-me" as const;
 const PRODUCER = "collector-r2-importer";
-const INGEST_CONTRACT_VERSION = "moneyforward-r2-v2";
+export const INGEST_CONTRACT_VERSION = "moneyforward-r2-v2";
 const CENTRAL_CLIENT_ID = "collector-r2-moneyforward";
 const STORAGE_CONTAINER = "kogane-moneyforward-collector-poc";
 const STORAGE_TEMPLATE = "raw/moneyforward/{date}/{run-id}/{artifact}";
