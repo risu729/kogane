@@ -1,5 +1,5 @@
 /** Aggregate-only audit: no identifiers, labels, references, amounts, or raw issues leave SQL. */
-import { requiredIdentityPolicySql } from "./identity-store.ts";
+import { requiredIdentityPolicySql } from "./identity-policies/index.ts";
 const BASE = `WITH b AS (
  SELECT 'transaction' kind,id,parse_run_id FROM transaction_observations UNION ALL
  SELECT 'balance',id,parse_run_id FROM balance_observations UNION ALL

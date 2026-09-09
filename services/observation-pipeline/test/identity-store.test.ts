@@ -105,6 +105,9 @@ ALTER TABLE fetch_artifacts ADD COLUMN format_version TEXT;`);
     "0020_vpass_identity_binding.sql",
     "0021_vpass_binding_lookup_plan.sql",
     "0022_identity_current_run_plan.sql",
+    "0023_account_connections.sql",
+    "0024_observation_decimals.sql",
+    "0029_decision_log.sql",
   ]) {
     for (const sql of splitSql(readFileSync(new URL(name, migrationDir), "utf8")))
       await db.prepare(sql).run();
@@ -772,7 +775,8 @@ test("empty Vpass projections batch at most40 runs with mandatory trusted pins a
     identifiedRuns: 40,
     identifiedObservations: 0,
   });
-  expect(batchSizes).toEqual([3]);
+  // Runs, their policy records, mandatory pins and seals: one batch of four.
+  expect(batchSizes).toEqual([4]);
   expect(
     await count(
       "identity_vpass_bindings",
