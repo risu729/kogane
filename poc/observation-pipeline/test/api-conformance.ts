@@ -223,6 +223,25 @@ export const CONFORMANCE_CHECKS: ConformanceCheck[] = [
     },
   },
   {
+    name: "the shared query service is served exactly when advertised",
+    async run(target) {
+      const { capabilities } = await metadata(target);
+      const response = await target.get("/api/v2/query?intent=coverage");
+      if (capabilities.sharedQuery) {
+        assert(response.status === 200, `shared query: ${response.status}`);
+        assert(
+          validApiResponse("/api/v2/query", await response.json()),
+          "shared query: fails the shared validator",
+        );
+        // An intent with no adopted semantics, and a parameter outside the
+        // spec, are both refused rather than approximated.
+        await refused(target, "/api/v2/query");
+        await refused(target, "/api/v2/query?intent=net-worth");
+        await refused(target, "/api/v2/query?intent=coverage&unexpected=1");
+      } else assert(response.status !== 200, "shared query served without the capability");
+    },
+  },
+  {
     name: "rows carry organization and products exactly when advertised",
     async run(target) {
       const { capabilities } = await metadata(target);

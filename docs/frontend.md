@@ -78,6 +78,7 @@ failure, and `no-store` apply before any capability is read.
 | `organizedDisplay`  | boolean                 | false        | true        | Rows carry `organization`                                                               |
 | `financialProducts` | boolean                 | false        | true        | Organized rows may carry a product claim                                                |
 | `evidenceHistory`   | boolean                 | false        | true        | The 取得履歴 route and link exist                                                       |
+| `sharedQuery`       | boolean                 | false        | true        | Summary counts come from `GET /api/v2/query`, not page arithmetic                       |
 
 A server refuses with 400 any query parameter its capabilities do not grant;
 the client never sends one. While metadata is loading, capabilities are
@@ -85,6 +86,37 @@ unknown: dependent list queries stay disabled and pages show their loading
 state rather than requesting with guessed defaults. Changing the schema fails
 the pinned contract tests in both `poc/observation-pipeline` and
 `services/evidence-browser`, so a one-sided edit cannot pass CI.
+
+## Shared figures and the AI hand-off
+
+A page that does its own arithmetic and an assistant that does its own can
+hand a person two different numbers from the same data, and neither can be
+shown to be wrong. Where the server advertises `sharedQuery`, the Overview
+page's summary counts therefore come from `GET /api/v2/query?intent=coverage`
+— the shared application service (`packages/application`) that the agent API
+also calls, with the same scope rules — instead of summing rows in the client.
+On a store without that capability the page keeps its own arithmetic, so the
+local PoC and the synthetic demo are unaffected.
+
+What a page may still decide for itself is unchanged: open and closed
+sections, the selected tab, display density, an in-progress input, a
+highlight. Filters, sorts, totals and the adopted set are the server's
+(addendum 11 §7).
+
+The hand-off in both directions is by reference, never by number or prose:
+
+- The page shows `contextId` and `resultRef` under a disclosure beside the
+  counts. Those are what an assistant is given; it reads them back under its
+  own permission rather than trusting a figure it was told.
+- A proposal an assistant makes is handed back as a `proposalId`, and the
+  page reads that back the same way. "Approved" or "matches the original" in
+  free text is not evidence of either.
+- Asking an assistant to work from what is on screen means sending the same
+  `QuerySpec` the page ran, not a screenshot to re-total. When the two sides
+  hold different permissions, the assistant gets the summary its own grant
+  allows — computed for that grant, not the page's numbers filtered down.
+
+See [Agent API](agent-api.md) for the grants, tools and result contract.
 
 ## Safe preview
 

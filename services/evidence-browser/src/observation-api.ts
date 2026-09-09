@@ -66,10 +66,9 @@ export async function observationApi(
     )
   )
     return null;
-  // Accepted parameters come from the shared schema and the capabilities this
-  // Worker advertises in /api/meta, so the two cannot drift apart.
-  // Neither of the deployment-resolved capabilities grants a parameter on
-  // these paths, so the static contract decides what is accepted here.
+  // Accepted parameters come from the shared schema, so a server and a client
+  // cannot drift apart. No deployment-resolved capability grants a parameter
+  // on these paths, so the static contract decides what is accepted here.
   const allowed = allowedQueryParameters(path, CENTRAL_STORE_CAPABILITIES);
   for (const key of url.searchParams.keys()) {
     const value = url.searchParams.get(key)!;
@@ -135,10 +134,8 @@ export async function observationApi(
       parsingHealth: await reader.parsingHealth(),
       source: { kind: "central-store", classification: "financial" },
       // What this server can actually serve, not what the contract defaults
-      // What this server can actually serve, not what the contract defaults
-      // to: `rewardsV2` and `commands` follow deployment flags and `eventsV2`
-      // also depends on the A10 projection being present
-      // (src/capabilities.ts).
+      // to. One helper resolves all three server-computed fields, and the
+      // agent API reads the same one (src/capabilities.ts).
       capabilities: await centralStoreCapabilities(env),
     } satisfies ApiMetadata);
   }

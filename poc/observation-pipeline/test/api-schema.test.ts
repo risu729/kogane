@@ -77,6 +77,7 @@ describe("shared API schema", () => {
       organizedDisplay: false,
       financialProducts: false,
       evidenceHistory: false,
+      sharedQuery: false,
       rewardsV2: false,
       commands: false,
       eventsV2: false,
@@ -93,8 +94,10 @@ describe("shared API schema", () => {
       organizedDisplay: true,
       financialProducts: true,
       evidenceHistory: true,
-      // All three are default off here: each deployment's own flag decides,
-      // and /api/meta reports what the running Worker actually serves.
+      sharedQuery: true,
+      // rewardsV2, commands and eventsV2 are default off here: each
+      // deployment's own flag decides, and /api/meta reports what the
+      // running Worker actually serves.
       rewardsV2: false,
       commands: false,
       eventsV2: false,
@@ -225,8 +228,10 @@ describe("client behaviour depends on capabilities, never on the connection name
       serverPaging: true,
       identities: true,
       evidenceHistory: true,
+      sharedQuery: true,
       // Off in the pinned contract; each deployment overlays its own flag.
       rewards: false,
+      // The change lifecycle is a deployment flag, not a shared constant.
       commands: false,
     });
     expect(clientFeatures({ ...CENTRAL_STORE_CAPABILITIES, rewardsV2: true }).rewards).toBe(true);
@@ -243,6 +248,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       serverPaging: false,
       identities: false,
       evidenceHistory: false,
+      sharedQuery: false,
       rewards: false,
       commands: false,
     });
