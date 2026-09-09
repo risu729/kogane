@@ -140,6 +140,22 @@ describe("offline CI coverage", () => {
     );
     expect(local.some((command) => command.includes("playwright install"))).toBe(false);
   });
+  test("pure domain package runs only frozen install, typecheck and tests; no Worker, build or browser steps", () => {
+    const policy = selectPolicy("packages/domain");
+    expect(policy.checks).toEqual(["typecheck", "test"]);
+    expect(policy.scripts).toEqual({ test: "bun test", typecheck: "tsc --noEmit" });
+    const manifest = JSON.parse(readFileSync(join(REPO_ROOT, policy.path, "package.json"), "utf8"));
+    expect(manifest.name).toBe("@kogane/domain");
+    expect(manifest.dependencies).toBeUndefined();
+    expect(Object.keys(manifest.devDependencies).sort()).toEqual(["@types/bun", "typescript"]);
+    const frontend = JSON.parse(
+      readFileSync(join(REPO_ROOT, "poc/observation-pipeline/package.json"), "utf8"),
+    );
+    for (const name of Object.keys(manifest.devDependencies))
+      expect(manifest.devDependencies[name]).toBe(frontend.devDependencies[name]);
+    const plan = packagePlan(policy.path, options).map((step) => step.command.join(" "));
+    expect(plan).toEqual(["bun install --frozen-lockfile", "bun run typecheck", "bun run test"]);
+  });
   test("production parser CI installs shared parser dependencies before checking without building UI", () => {
     const plan = packagePlan("services/observation-pipeline", options);
     expect(plan[1]).toEqual({

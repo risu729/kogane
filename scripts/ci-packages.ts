@@ -27,6 +27,12 @@ function worker(path: string): PackagePolicy {
 
 export const CI_PACKAGES: PackagePolicy[] = [
   {
+    // Pure domain contracts: no Worker, no build, no browser; tests and types only.
+    path: "packages/domain",
+    scripts: { test, typecheck: "tsc --noEmit" },
+    checks: ["typecheck", "test"],
+  },
+  {
     path: "services/observation-pipeline",
     scripts: { test, typecheck, "cf:check": dryRun },
     checks: ["typecheck", "test", "cf:check"],
