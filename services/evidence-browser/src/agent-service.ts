@@ -29,12 +29,7 @@ import {
   interpretationContext,
   LATEST_IDENTITY_RELEASE,
 } from "../../../packages/read-model/src/index";
-import {
-  type ApiCapabilities,
-  CENTRAL_STORE_CAPABILITIES,
-} from "../../../poc/observation-pipeline/shared/api-schema";
-import { commandsEnabled } from "./command-api";
-import { eventsV2Available } from "./events-api";
+import { centralStoreCapabilities } from "./capabilities";
 import { evidenceReader, type ObservationReader, type Overview } from "./observations";
 import { proposalStore } from "./proposals";
 
@@ -62,27 +57,10 @@ export interface ToolResult {
 interface ToolContext {
   reader: ObservationReader;
   db: D1Database;
-  /** Resolves what this server can actually serve; see `serverCapabilities`. */
+  /** Resolves what this server can actually serve; see `src/capabilities.ts`. */
   env: Env;
   grant: Grant;
   now: string;
-}
-
-/**
- * The capabilities this deployment actually serves, which is what `/api/meta`
- * reports too: the contract's defaults with the server-computed facts folded
- * in. An agent and a page therefore read one description of the deployment,
- * and neither is told about a route this store cannot serve.
- *
- * `commands` is only a statement that the change lifecycle is served. It is
- * not a capability of this API: no grant here reaches approve or commit.
- */
-async function serverCapabilities(env: Env): Promise<ApiCapabilities> {
-  return {
-    ...CENTRAL_STORE_CAPABILITIES,
-    commands: commandsEnabled(env),
-    eventsV2: await eventsV2Available(env),
-  };
 }
 
 function failure(
@@ -130,9 +108,13 @@ export async function callTool(
         return failure("unsupported_semantics", "capabilities", ["body"]);
       return {
         status: 200,
+        // The same helper /api/meta uses, so an agent and a page read one
+        // description of the deployment and neither is told about a route
+        // this store cannot serve. `commands` only states that the change
+        // lifecycle is served: no grant here reaches approve or commit.
         body: capabilitiesFor(
           context.grant,
-          await serverCapabilities(context.env),
+          await centralStoreCapabilities(context.env),
           MAX_REQUEST_BYTES,
         ),
       };

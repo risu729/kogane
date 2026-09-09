@@ -165,6 +165,10 @@ describe("shared contract pin", () => {
       financialProducts: true,
       evidenceHistory: true,
       sharedQuery: true,
+      // rewardsV2, commands and eventsV2 are default off here: each
+      // deployment's own flag decides, and /api/meta reports what the
+      // running Worker actually serves.
+      rewardsV2: false,
       commands: false,
       eventsV2: false,
     });

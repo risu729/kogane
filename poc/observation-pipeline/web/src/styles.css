@@ -1738,3 +1738,44 @@ td summary {
     font-size: 10px;
   }
 }
+
+/* ── reward programmes (A11) ───────────────────────────────────────── */
+
+/* A quantity always carries its unit: this number is not yen unless it says so. */
+.reward-quantity .reward-unit {
+  font-size: 0.85em;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+/* Unconfirmed is a word, never only a colour. */
+.reward-unknown {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.reward-block {
+  margin-top: 16px;
+}
+
+.reward-block h3 {
+  font-size: 0.95rem;
+  margin: 0 0 6px;
+}
+
+.reward-reasons {
+  margin: 12px 0 0;
+  padding-left: 1.2em;
+  color: var(--muted);
+}
+
+.reward-caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

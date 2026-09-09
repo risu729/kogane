@@ -99,6 +99,10 @@ describe("dataset_snapshot_policies seed", () => {
     }
   });
 
+  // On-disk SQLite: a full schema per store, then every snapshot parser over
+  // it. ~0.1s locally but an order of magnitude more on a loaded CI runner,
+  // where bun's 5s default reads the wait as a failure (#162 did the same for
+  // the two heaviest store tests). An explicit budget, no changed assertion.
   test("the SQL scope key equals the claim scope key written by parsers", () => {
     const store = database();
     const base = { parser: "sbi-vc-cash-balances", dataset: "cash-balances" };
@@ -112,7 +116,7 @@ describe("dataset_snapshot_policies seed", () => {
       .all() as { scope_key: string }[];
     expect(keys.map((row) => row.scope_key)).toEqual(artifacts.map(containerScopeKey));
     expect(keys[1]?.scope_key).toBe("synthetic-source/cash-balances/unit=card-a");
-  });
+  }, 30_000);
 });
 
 function compare(store: Store): SnapshotPolicyComparisonRow[] {
@@ -170,6 +174,8 @@ describe("shadow comparison of legacy-warning-compat-v1 and coverage-v1", () => 
     expect(rows.every((row) => row.legacy_artifact_id !== null)).toBe(true);
   });
 
+  // Same shape and the same reason: several stores, each with the full schema
+  // applied and both snapshot policies evaluated over it.
   test("lists exactly the intended corrections where the policies disagree", () => {
     const store = database();
     const foreign = { parser: sbiForeignCashBalances.name, dataset: "foreign-cash-balances" };
@@ -226,7 +232,7 @@ describe("shadow comparison of legacy-warning-compat-v1 and coverage-v1", () => 
     // The comparison is independent of which policy the table activates.
     store.db.query("UPDATE dataset_snapshot_policies SET policy_id = 'coverage-v1'").run();
     expect(differing(compare(store))).toHaveLength(2);
-  });
+  }, 30_000);
 });
 
 // D13/PR-14: an eligibility-only policy row. MyJCB's cards are independent

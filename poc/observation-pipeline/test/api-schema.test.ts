@@ -11,6 +11,8 @@ import {
   LIST_REQUEST_SCHEMA,
   listRequestSearch,
   LOCAL_STORE_CAPABILITIES,
+  REWARD_REQUEST_SCHEMA,
+  rewardQueryParameters,
   validIdentityReadMode,
   type ApiCapabilities,
 } from "../shared/api-schema.ts";
@@ -47,6 +49,22 @@ describe("shared API schema", () => {
       "/api/artifacts": { source: "collectionFilters", cursor: "paginationVersion:offset-v1" },
       "/api/filter-options": { kind: "collectionFilters", view: "measureViews" },
     });
+    expect(REWARD_REQUEST_SCHEMA).toEqual({
+      "/api/v2/rewards/holdings": ["program", "offset"],
+      "/api/v2/rewards/expiry": ["program", "offset"],
+      "/api/v2/rewards/offers/simulate": ["offer", "quantity", "unit", "goal", "depth"],
+    });
+    // The whole route group is gated: with rewardsV2 off no parameter is
+    // accepted, because the path itself is not served.
+    expect(rewardQueryParameters("/api/v2/rewards/holdings", CENTRAL_STORE_CAPABILITIES)).toEqual(
+      [],
+    );
+    expect(
+      rewardQueryParameters("/api/v2/rewards/holdings", {
+        ...CENTRAL_STORE_CAPABILITIES,
+        rewardsV2: true,
+      }),
+    ).toEqual(["program", "offset"]);
     expect(LOCAL_STORE_CAPABILITIES).toEqual({
       contractVersion: "observation-api-v1",
       readOnly: true,
@@ -60,6 +78,7 @@ describe("shared API schema", () => {
       financialProducts: false,
       evidenceHistory: false,
       sharedQuery: false,
+      rewardsV2: false,
       commands: false,
       eventsV2: false,
     });
@@ -76,6 +95,10 @@ describe("shared API schema", () => {
       financialProducts: true,
       evidenceHistory: true,
       sharedQuery: true,
+      // rewardsV2, commands and eventsV2 are default off here: each
+      // deployment's own flag decides, and /api/meta reports what the
+      // running Worker actually serves.
+      rewardsV2: false,
       commands: false,
       eventsV2: false,
     });
@@ -206,9 +229,12 @@ describe("client behaviour depends on capabilities, never on the connection name
       identities: true,
       evidenceHistory: true,
       sharedQuery: true,
+      // Off in the pinned contract; each deployment overlays its own flag.
+      rewards: false,
       // The change lifecycle is a deployment flag, not a shared constant.
       commands: false,
     });
+    expect(clientFeatures({ ...CENTRAL_STORE_CAPABILITIES, rewardsV2: true }).rewards).toBe(true);
     expect(clientFeatures({ ...CENTRAL_STORE_CAPABILITIES, commands: true }).commands).toBe(true);
     expect(local).toEqual(NO_FEATURES);
     expect(
@@ -223,6 +249,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       identities: false,
       evidenceHistory: false,
       sharedQuery: false,
+      rewards: false,
       commands: false,
     });
   });
