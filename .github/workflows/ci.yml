@@ -46,8 +46,8 @@ jobs:
       matrix:
         package:
           - packages/domain
-          - packages/read-model
           - packages/evidence-contract
+          - packages/read-model
           - poc/cloudflare-browser-run
           - poc/cloudflare-runtime-probe
           - poc/globalpass-worker
