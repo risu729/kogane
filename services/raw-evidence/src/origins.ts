@@ -1,271 +1,10 @@
-import {
-  ApiError,
-  SHA256,
-  arrayValue,
-  enumValue,
-  exactKeys,
-  integerValue,
-  object,
-  stringValue,
-  type RecordValue,
-  type WorkerEnv,
-} from "./http";
-import { binaryCompare } from "./canonical";
+// Origin schema validation moved to the shared evidence-contract package
+// (parseOrigins). This module keeps the parts that need the database: scope
+// and template-policy authorization, and the metadata inserts.
+import type { Origins } from "../../../packages/evidence-contract/src/origins";
+import { ApiError, type WorkerEnv } from "./http";
 
-export interface Origins {
-  http: RecordValue | null;
-  storage: RecordValue | null;
-  file: RecordValue | null;
-  email: RecordValue | null;
-}
-
-function safeDomain(value: unknown, field: string, optional = false): string | null {
-  const domain = stringValue(value, field, { optional, max: 253 });
-  if (domain === null) return null;
-  const normalized = domain.toLowerCase();
-  if (
-    !/^[a-z0-9.-]+$/.test(normalized) ||
-    normalized.startsWith(".") ||
-    normalized.endsWith(".") ||
-    normalized.includes("..")
-  ) {
-    throw new ApiError(400, `invalid_${field}`);
-  }
-  return normalized;
-}
-
-function safeTemplate(value: unknown, field: string, max: number, basename = false): string {
-  const template = stringValue(value, field, { max })!;
-  if (
-    /[\r\n]/.test(template) ||
-    template.includes("?") ||
-    template.includes("#") ||
-    (basename && /[\\/]/.test(template))
-  ) {
-    throw new ApiError(400, `invalid_${field}`);
-  }
-  return template;
-}
-
-function optionalObject(value: unknown, field: string): RecordValue | null {
-  if (value === undefined || value === null) return null;
-  try {
-    return object(value);
-  } catch {
-    throw new ApiError(400, `invalid_${field}`);
-  }
-}
-
-export function parseOrigins(input: RecordValue): Origins {
-  return {
-    http: parseHttp(optionalObject(input.http, "http")),
-    storage: parseStorage(optionalObject(input.storage, "storage")),
-    file: parseFile(optionalObject(input.file, "file")),
-    email: parseEmail(optionalObject(input.email, "email")),
-  };
-}
-
-function parseHttp(value: RecordValue | null): RecordValue | null {
-  if (!value) return null;
-  exactKeys(value, [
-    "method",
-    "status",
-    "scheme",
-    "host",
-    "port",
-    "pathTemplate",
-    "queryNames",
-    "redactionVersion",
-    "urlFingerprint",
-    "fingerprintKeyVersion",
-  ]);
-  const queryNames = arrayValue(value.queryNames, "query_names").map((entry) =>
-    stringValue(entry, "query_name", { max: 100 })!,
-  );
-  if (queryNames.some((name) => !/^[A-Za-z][A-Za-z0-9_.-]{0,99}$/.test(name))) {
-    throw new ApiError(400, "invalid_query_name");
-  }
-  const urlFingerprint = stringValue(value.urlFingerprint, "url_fingerprint", {
-    optional: true,
-    pattern: SHA256,
-  });
-  const fingerprintKeyVersion = stringValue(
-    value.fingerprintKeyVersion,
-    "fingerprint_key_version",
-    { optional: true, max: 100 },
-  );
-  if ((urlFingerprint === null) !== (fingerprintKeyVersion === null)) {
-    throw new ApiError(400, "http_fingerprint_pair_mismatch");
-  }
-  const method = stringValue(value.method, "http_method", { optional: true, max: 20 });
-  if (method !== null && !/^[A-Z]+$/.test(method)) throw new ApiError(400, "invalid_http_method");
-  const status = integerValue(value.status, "http_status", true);
-  if (status !== null && (status < 100 || status > 599))
-    throw new ApiError(400, "invalid_http_status");
-  const port = integerValue(value.port, "http_port", true);
-  if (port !== null && (port < 1 || port > 65535)) throw new ApiError(400, "invalid_http_port");
-  const pathTemplate = safeTemplate(value.pathTemplate, "path_template", 1000);
-  if (!pathTemplate.startsWith("/")) throw new ApiError(400, "invalid_path_template");
-  return {
-    method,
-    status,
-    scheme: enumValue(value.scheme, "http_scheme", ["http", "https"] as const),
-    host: safeDomain(value.host, "http_host"),
-    port,
-    pathTemplate,
-    queryNames: [...new Set(queryNames)].sort(binaryCompare),
-    redactionVersion: stringValue(value.redactionVersion, "redaction_version", { max: 100 }),
-    urlFingerprint,
-    fingerprintKeyVersion,
-  };
-}
-
-function parseStorage(value: RecordValue | null): RecordValue | null {
-  if (!value) return null;
-  exactKeys(value, [
-    "storageKind",
-    "containerName",
-    "objectKeyTemplate",
-    "objectKeyFingerprint",
-    "fingerprintKeyVersion",
-    "redactionVersion",
-    "objectVersion",
-    "etag",
-    "lastModifiedAtMs",
-    "lastModifiedAtBasis",
-  ]);
-  const lastModifiedAtMs = integerValue(value.lastModifiedAtMs, "last_modified_at_ms", true);
-  const lastModifiedAtBasis = enumValue(
-    value.lastModifiedAtBasis,
-    "last_modified_at_basis",
-    ["storage_metadata", "manifest"] as const,
-    true,
-  );
-  if ((lastModifiedAtMs === null) !== (lastModifiedAtBasis === null)) {
-    throw new ApiError(400, "storage_time_pair_mismatch");
-  }
-  return {
-    storageKind: stringValue(value.storageKind, "storage_kind", { max: 40 }),
-    containerName: stringValue(value.containerName, "container_name", { max: 200 }),
-    objectKeyTemplate: (() => {
-      const template = stringValue(value.objectKeyTemplate, "object_key_template", { max: 1000 })!;
-      if (template.includes("://") || /[\r\n]/.test(template)) {
-        throw new ApiError(400, "invalid_object_key_template");
-      }
-      return template;
-    })(),
-    objectKeyFingerprint: stringValue(value.objectKeyFingerprint, "object_key_fingerprint", {
-      pattern: SHA256,
-    }),
-    fingerprintKeyVersion: stringValue(value.fingerprintKeyVersion, "fingerprint_key_version", {
-      max: 100,
-    }),
-    redactionVersion: stringValue(value.redactionVersion, "redaction_version", { max: 100 }),
-    objectVersion: stringValue(value.objectVersion, "object_version", { optional: true, max: 500 }),
-    etag: stringValue(value.etag, "etag", { optional: true, max: 500 }),
-    lastModifiedAtMs,
-    lastModifiedAtBasis,
-  };
-}
-
-function parseFile(value: RecordValue | null): RecordValue | null {
-  if (!value) return null;
-  exactKeys(value, [
-    "basenameTemplate",
-    "filenameFingerprint",
-    "fingerprintKeyVersion",
-    "redactionVersion",
-    "sourceModifiedAtMs",
-  ]);
-  return {
-    basenameTemplate: safeTemplate(value.basenameTemplate, "basename_template", 500, true),
-    filenameFingerprint: stringValue(value.filenameFingerprint, "filename_fingerprint", {
-      pattern: SHA256,
-    }),
-    fingerprintKeyVersion: stringValue(value.fingerprintKeyVersion, "fingerprint_key_version", {
-      max: 100,
-    }),
-    redactionVersion: stringValue(value.redactionVersion, "redaction_version", { max: 100 }),
-    sourceModifiedAtMs: integerValue(value.sourceModifiedAtMs, "source_modified_at_ms", true),
-  };
-}
-
-function parseEmail(value: RecordValue | null): RecordValue | null {
-  if (!value) return null;
-  exactKeys(value, [
-    "transportShape",
-    "senderDomain",
-    "receivedAtMs",
-    "receivedAtBasis",
-    "messageIdSha256",
-    "partIndex",
-    "mimePartPath",
-    "innerMessageSha256",
-    "innerSenderDomain",
-    "filenameTemplate",
-    "filenameFingerprint",
-    "fingerprintKeyVersion",
-    "redactionVersion",
-  ]);
-  const receivedAtMs = integerValue(value.receivedAtMs, "received_at_ms", true);
-  const receivedAtBasis = enumValue(
-    value.receivedAtBasis,
-    "received_at_basis",
-    ["delivery_internal_date", "rfc_date", "forwarded_inner_date", "operator", "unknown"] as const,
-    true,
-  );
-  const filenameTemplate =
-    value.filenameTemplate === undefined || value.filenameTemplate === null
-      ? null
-      : safeTemplate(value.filenameTemplate, "filename_template", 500, true);
-  const filenameFingerprint = stringValue(value.filenameFingerprint, "filename_fingerprint", {
-    optional: true,
-    pattern: SHA256,
-  });
-  const fingerprintKeyVersion = stringValue(
-    value.fingerprintKeyVersion,
-    "fingerprint_key_version",
-    { optional: true, max: 100 },
-  );
-  if (
-    (receivedAtMs === null) !== (receivedAtBasis === null) ||
-    (filenameTemplate === null) !== (filenameFingerprint === null) ||
-    (filenameFingerprint === null) !== (fingerprintKeyVersion === null)
-  ) {
-    throw new ApiError(400, "email_field_pair_mismatch");
-  }
-  return {
-    transportShape: enumValue(value.transportShape, "transport_shape", [
-      "direct",
-      "forwarded_rfc822",
-      "unknown",
-    ] as const),
-    senderDomain: safeDomain(value.senderDomain, "sender_domain", true),
-    receivedAtMs,
-    receivedAtBasis,
-    messageIdSha256: stringValue(value.messageIdSha256, "message_id_sha256", {
-      optional: true,
-      pattern: SHA256,
-    }),
-    partIndex: integerValue(value.partIndex, "part_index", true),
-    mimePartPath: (() => {
-      const path = stringValue(value.mimePartPath, "mime_part_path", { optional: true, max: 200 });
-      if (path !== null && !/^\d+(\.\d+)*$/.test(path)) {
-        throw new ApiError(400, "invalid_mime_part_path");
-      }
-      return path;
-    })(),
-    innerMessageSha256: stringValue(value.innerMessageSha256, "inner_message_sha256", {
-      optional: true,
-      pattern: SHA256,
-    }),
-    innerSenderDomain: safeDomain(value.innerSenderDomain, "inner_sender_domain", true),
-    filenameTemplate,
-    filenameFingerprint,
-    fingerprintKeyVersion,
-    redactionVersion: stringValue(value.redactionVersion, "redaction_version", { max: 100 }),
-  };
-}
+export { parseOrigins, type Origins } from "../../../packages/evidence-contract/src/origins";
 
 async function httpScopeAllowed(
   env: WorkerEnv,
@@ -314,10 +53,10 @@ export async function validateOriginScope(
       !(await httpScopeAllowed(
         env,
         sourceId,
-        value.scheme as string,
-        value.host as string,
-        value.port as number | null,
-        value.pathTemplate as string,
+        value.scheme,
+        value.host,
+        value.port,
+        value.pathTemplate,
       ))
     )
       throw new ApiError(403, "http_scope_denied");
@@ -325,9 +64,9 @@ export async function validateOriginScope(
       env,
       sourceId,
       "http",
-      value.pathTemplate as string,
-      value.redactionVersion as string,
-      (value.fingerprintKeyVersion as string | null) ?? "",
+      value.pathTemplate,
+      value.redactionVersion,
+      value.fingerprintKeyVersion ?? "",
       JSON.stringify(value.queryNames),
     );
   }
@@ -337,9 +76,9 @@ export async function validateOriginScope(
       env,
       sourceId,
       "storage",
-      value.objectKeyTemplate as string,
-      value.redactionVersion as string,
-      value.fingerprintKeyVersion as string,
+      value.objectKeyTemplate,
+      value.redactionVersion,
+      value.fingerprintKeyVersion,
     );
   }
   if (origins.file) {
@@ -348,20 +87,22 @@ export async function validateOriginScope(
       env,
       sourceId,
       "file",
-      value.basenameTemplate as string,
-      value.redactionVersion as string,
-      value.fingerprintKeyVersion as string,
+      value.basenameTemplate,
+      value.redactionVersion,
+      value.fingerprintKeyVersion,
     );
   }
-  if (origins.email?.filenameTemplate) {
-    const value = origins.email;
+  const emailTemplate = origins.email?.filenameTemplate;
+  if (origins.email && emailTemplate) {
+    // The parser guarantees the template / fingerprint / key-version triple is
+    // either all present or all absent.
     await requireTemplatePolicy(
       env,
       sourceId,
       "email",
-      value.filenameTemplate as string,
-      value.redactionVersion as string,
-      value.fingerprintKeyVersion as string,
+      emailTemplate,
+      origins.email.redactionVersion,
+      origins.email.fingerprintKeyVersion as string,
     );
   }
 }

@@ -1,4 +1,5 @@
 import type { JsonValue } from "./canonical";
+import { object } from "../../../packages/evidence-contract/src/validate";
 
 export interface WorkerEnv extends Env {
   INGEST_CLIENT_KEYS: string;
@@ -16,8 +17,6 @@ export class ApiError extends Error {
   }
 }
 
-export const ID = /^[a-z0-9-]{1,100}$/;
-export const OPAQUE = /^[A-Za-z0-9._:/-]{1,500}$/;
 export const SHA256 = /^[0-9a-f]{64}$/;
 const MAX_JSON_BYTES = 256 * 1024;
 
@@ -26,69 +25,6 @@ export function json(data: JsonValue, status = 200): Response {
     status,
     headers: { "cache-control": "no-store" },
   });
-}
-
-export function object(value: unknown): RecordValue {
-  if (value === null || Array.isArray(value) || typeof value !== "object") {
-    throw new ApiError(400, "invalid_json_shape");
-  }
-  return value as RecordValue;
-}
-
-export function exactKeys(value: RecordValue, allowed: readonly string[]): void {
-  const allow = new Set(allowed);
-  if (Object.keys(value).some((key) => !allow.has(key))) {
-    throw new ApiError(400, "unknown_field");
-  }
-}
-
-export function stringValue(
-  value: unknown,
-  field: string,
-  options: { optional?: boolean; max?: number; pattern?: RegExp } = {},
-): string | null {
-  if (value === undefined || value === null) {
-    if (options.optional) return null;
-    throw new ApiError(400, `invalid_${field}`);
-  }
-  if (
-    typeof value !== "string" ||
-    value.length === 0 ||
-    value.length > (options.max ?? 500) ||
-    (options.pattern && !options.pattern.test(value))
-  ) {
-    throw new ApiError(400, `invalid_${field}`);
-  }
-  return value;
-}
-
-export function enumValue<T extends string>(
-  value: unknown,
-  field: string,
-  choices: readonly T[],
-  optional = false,
-): T | null {
-  if ((value === undefined || value === null) && optional) return null;
-  if (typeof value !== "string" || !choices.includes(value as T)) {
-    throw new ApiError(400, `invalid_${field}`);
-  }
-  return value as T;
-}
-
-export function integerValue(value: unknown, field: string, optional = false): number | null {
-  if ((value === undefined || value === null) && optional) return null;
-  if (!Number.isSafeInteger(value) || (value as number) < 0) {
-    throw new ApiError(400, `invalid_${field}`);
-  }
-  return value as number;
-}
-
-export function arrayValue(value: unknown, field: string, max = 1_000): unknown[] {
-  if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > max) {
-    throw new ApiError(400, `invalid_${field}`);
-  }
-  return value;
 }
 
 export async function readJson(request: Request): Promise<RecordValue> {
@@ -117,12 +53,13 @@ export async function readJson(request: Request): Promise<RecordValue> {
     if (error instanceof ApiError) throw error;
     throw new ApiError(400, "invalid_json_encoding");
   }
+  let parsed: unknown;
   try {
-    return object(JSON.parse(text));
-  } catch (error) {
-    if (error instanceof ApiError) throw error;
+    parsed = JSON.parse(text);
+  } catch {
     throw new ApiError(400, "invalid_json");
   }
+  return object(parsed);
 }
 
 async function equalSecret(left: string, right: string): Promise<boolean> {
