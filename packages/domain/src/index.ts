@@ -8,6 +8,7 @@ export * from "./coverage.ts";
 export * from "./context.ts";
 export * from "./decisions.ts";
 export * from "./result.ts";
+export * from "./paging.ts";
 export {
   hasExactKeys,
   isRecord,

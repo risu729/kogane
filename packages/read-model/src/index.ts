@@ -73,3 +73,52 @@ export {
   NO_RECORDED_IDENTITY_RELEASE,
 } from "./identity";
 export { organizationSql, PRODUCT_METADATA_LIMIT } from "./organization";
+export {
+  AUTHORITY_POLICY,
+  AUTHORITY_POLICY_RELEASE,
+  AUTHORITY_RANKS,
+  type AuthorityRank,
+  authorityRank,
+} from "./authority";
+export {
+  ADOPTION_SUBJECT_BOUND,
+  BALANCE_PROJECTION_RELEASE,
+  buildBalanceProjection,
+  DISJOINT_ACCOUNTS_POLICY,
+  KNOWN_ASSETS_POLICY,
+  knownAssetMetricIds,
+  type DerivedScopeRelation,
+  type EntityRelationRow,
+  type EvidenceRef,
+  PROJECTION_STATES,
+  type ProjectionBuild,
+  type ProjectionCandidate,
+  type ProjectionInputManifest,
+  type ProjectionRow,
+  type ProjectionState,
+  projectionInputManifest,
+  SCOPE_RELATION_RELEASE,
+  SUBJECT_STATUSES,
+  type SubjectStatus,
+  scopeRelationsFromEntityRelations,
+  temporalReferenceFor,
+} from "./balance-projection";
+export {
+  DEFAULT_PROJECTION_PAGE_LIMIT,
+  PROJECTION_PAGE_LIMITS,
+  type ProjectionPageLimit,
+  type ProjectionPageRow,
+  SUBTOTAL_ROW_BOUND,
+  balanceHistoryKeysetSql,
+  projectionCoverageSql,
+  projectionLegacyPageSql,
+  projectionPageSql,
+  projectionSubtotalSql,
+} from "./balance-projection-sql";
+export {
+  type BalanceProjectionReader,
+  type BalanceSnapshotRow,
+  type ProjectionCoverageRow,
+  type SubtotalRow,
+  createBalanceProjectionReader,
+} from "./balance-projection-reader";

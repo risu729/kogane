@@ -430,7 +430,7 @@ export function latestBalancesSql(
 }
 
 /** The full append-only history over visible parse results, superseded rows included and marked. */
-const BALANCE_HISTORY_SQL = `SELECT b.id, fa.source_id, b.source_account, b.metric, b.instrument,
+export const BALANCE_HISTORY_SQL = `SELECT b.id, fa.source_id, b.source_account, b.metric, b.instrument,
               CAST(b.amount_minor AS TEXT) AS amount_minor,
               b.amount_text, b.as_of, b.observed_at,
               p.parser_name || '@' || p.parser_version AS parser,
