@@ -122,19 +122,20 @@ carries fetched evidence towards the central store; this one carries accepted
 internal judgements towards the read models.
 
 `services/observation-pipeline/src/decision-outbox.ts` runs one bounded pass
-per `scheduled` invocation, as the last lane — after the projections a decision
-may have invalidated (`parse`, `identity`, `reconcile`, then `decisions`): it claims up to 20 due rows under a 60 s lease,
+per `scheduled` invocation, as the last of the seven scheduled stages — after
+the projections a decision may have invalidated
+(`docs/observation-lanes.md`): it claims up to 20 due rows under a 60 s lease,
 runs each target's processor, marks the row processed with a safe outcome code,
 and turns the operation's receipt `published` once no row of that operation is
 unprocessed. A failure records a safe code (`Error`, never an exception
 message), releases the lease and backs the row off exponentially, up to five
 attempts.
 
-| Target                | Processor today                                                                                                                                                                                                                                                                                                   |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `identity-projection` | Runs a bounded `identitySweep`. The sweep only creates identity runs that are missing and seals them once, so a duplicate delivery changes nothing. Outcome `identity_swept`.                                                                                                                                     |
-| `balance-projection`  | Probes for A07's `balance_projection_scopes`. Absent → `skipped_no_projection`. Present but with no invalidation rule in this build → `deferred_to_projection_owner`; A07 replaces the processor through `dispatchDecisionOutbox`'s `processors` argument rather than this file growing a guess about its schema. |
-| `agent-notify`        | No transport exists yet: `skipped_no_consumer`. The commit does not enqueue this target.                                                                                                                                                                                                                          |
+| Target                | Processor today                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `identity-projection` | Runs a bounded `identitySweep`. The sweep only creates identity runs that are missing and seals them once, so a duplicate delivery changes nothing. Outcome `identity_swept`.                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `balance-projection`  | A07's `balanceProjectionOutboxProcessor` (`balance-projection-job.ts`), over `balance_read_snapshots` / `current_balance_projection` / `scope_relations` from migration 0030 (`docs/balance-read-model.md`). The Worker hands it in through `dispatchDecisionOutbox`'s `processors` argument; the target has no default, so a caller that omits it gets `skipped_no_consumer` rather than a placeholder claiming a rebuild that never ran. Outcomes `balance_projection_current` / `_rebuilt` / `_rebuilding`, or `skipped_no_projection` while `BALANCE_PROJECTION_ENABLED` is off. |
+| `agent-notify`        | No transport exists yet: `skipped_no_consumer`. The commit does not enqueue this target.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 Delivery is assumed duplicated, out of order and interrupted. Nothing claims
 exactly-once from a queue id; the guarantees come from the durable row, the
@@ -285,8 +286,11 @@ already recorded is never undone by a DELETE — an undo is a new revision
 - `poc/observation-pipeline/test/confirm.browser.test.ts` (3 tests): read-only
   without the capability, no action on a stale plan, and accepted vs published
   shown distinctly.
+- `services/observation-pipeline/test/balance-projection.test.ts` "the
+  dispatcher routes the balance-projection target to that processor": a
+  `balance-projection` row reaches A07's real processor and rebuilds the
+  projection, and the same target with no processor handed in closes as
+  `skipped_no_consumer` because it has no default.
 
-Not verified: production data; the balance projection invalidation (A07's
-tables do not exist yet, so the processor records `skipped_no_projection`);
-behaviour under more than two concurrent Workers (the receipt reservation and
+Not verified: production data; behaviour under more than two concurrent Workers (the receipt reservation and
 the in-batch revision guard are the arbiters, and the tests exercise two).

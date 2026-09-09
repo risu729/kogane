@@ -9,7 +9,7 @@ import {
   currentSnapshotId,
   runBalanceProjection,
 } from "../src/balance-projection-job.ts";
-import { dispatchDecisionOutbox } from "../src/decision-outbox.ts";
+import { DEFAULT_PROCESSORS, dispatchDecisionOutbox } from "../src/decision-outbox.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 
 let mf: Miniflare;
@@ -299,4 +299,26 @@ test("the dispatcher routes the balance-projection target to that processor", as
     processors: { "balance-projection": balanceProjectionOutboxProcessor(on()) },
   });
   expect(again.claimed).toBe(0);
+
+  // Nothing stands in for A07 by default: the target has no entry in
+  // `DEFAULT_PROCESSORS`, so a caller that forgets to hand the real processor
+  // in closes the row as an honest `skipped_no_consumer` rather than a
+  // placeholder outcome that never touched the projection.
+  expect(DEFAULT_PROCESSORS["balance-projection"]).toBeUndefined();
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,
+        actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+       VALUES('dr_outbox_3','relation','rel_outbox_3',1,'accept','manual','operator:1',NULL,
+        'Synthetic: a third accepted correspondence.','[]',NULL,NULL,'2026-09-12T01:30:00Z')`,
+    ),
+    env.DB.prepare(
+      `INSERT INTO decision_outbox(decision_revision_id,principal,operation_id,target,
+        enqueued_at,available_at_ms)
+       VALUES('dr_outbox_3','operator:1','op_outbox_2','balance-projection','2026-09-12T01:30:00Z',0)`,
+    ),
+  ]);
+  const unowned = await dispatchDecisionOutbox(env.DB);
+  expect(unowned.claimed).toBe(1);
+  expect(unowned.outcomes).toEqual({ skipped_no_consumer: 1 });
 }, 60000);
