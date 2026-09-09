@@ -11,12 +11,31 @@ import worker from "../src/worker";
 import { commandsEnabled, isCommandPath, principalFor } from "../src/command-api";
 
 const issuer = "https://evidence-test.cloudflareaccess.com";
+const jwksPath = "/cdn-cgi/access/certs";
+
+/**
+ * The one request this suite serves: the issuer's Access key set. Matched on a
+ * parsed origin and path, never on a string prefix.
+ * `https://evidence-test.cloudflareaccess.com.example.invalid/certs` starts
+ * with the issuer but is a different host, and a stub that served it would let
+ * these tests pass against keys from anywhere.
+ */
+function isIssuerKeySet(input: RequestInfo | URL): boolean {
+  let url: URL;
+  try {
+    url = new URL(input instanceof Request ? input.url : String(input));
+  } catch {
+    return false;
+  }
+  return url.origin === issuer && url.pathname === jwksPath;
+}
+
 let keys: { privateKey: CryptoKey; publicKey: CryptoKey };
 beforeAll(async () => {
   keys = await generateKeyPair("RS256", { extractable: true });
   const jwk = await exportJWK(keys.publicKey);
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) =>
-    String(input).startsWith(issuer)
+    isIssuerKeySet(input)
       ? Response.json({ keys: [{ ...jwk, alg: "RS256", kid: "test" }] })
       : Promise.reject(new Error("Unexpected external request in synthetic test")),
   );
@@ -185,6 +204,23 @@ describe("the command boundary", () => {
       await call("/api/meta", { method: "GET", environment: enabled })
     ).json()) as { capabilities: { commands: boolean } };
     expect(on.capabilities.commands).toBe(true);
+  });
+
+  it("serves the key set only for the issuer's own origin", () => {
+    expect(isIssuerKeySet(`${issuer}${jwksPath}`)).toBe(true);
+    expect(isIssuerKeySet(new URL(`${issuer}${jwksPath}`))).toBe(true);
+    for (const other of [
+      // A different host that merely starts with the issuer string.
+      `${issuer}.example.invalid${jwksPath}`,
+      `${issuer}@example.invalid${jwksPath}`,
+      // Right host, wrong scheme, port or path.
+      `http://evidence-test.cloudflareaccess.com${jwksPath}`,
+      `https://evidence-test.cloudflareaccess.com:8443${jwksPath}`,
+      `${issuer}/cdn-cgi/access/certs/../../../other`,
+      `${issuer}/`,
+      "not a url",
+    ])
+      expect(isIssuerKeySet(other)).toBe(false);
   });
 
   it("derives the principal from the verified subject alone", () => {
