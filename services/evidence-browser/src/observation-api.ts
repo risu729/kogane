@@ -8,6 +8,7 @@ import { raw } from "./read";
 import {
   organizeRows,
   observationOrganizations,
+  organizationContext,
   organizationKey,
 } from "./observation-organization";
 import type { ApiMetadata } from "../../../poc/observation-pipeline/shared/api-contract";
@@ -16,6 +17,8 @@ import {
   CENTRAL_STORE_CAPABILITIES,
   validMeasureView,
 } from "../../../poc/observation-pipeline/shared/api-schema";
+import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
+import { identityReadMode } from "./identity-read";
 
 /** Validated request scope. Each route passes only the keys its reader query accepts. */
 interface RequestScope {
@@ -80,6 +83,7 @@ export async function observationApi(
   const measureView = url.searchParams.get("view");
   if (measureView !== null && !validMeasureView(measureView, CENTRAL_STORE_CAPABILITIES))
     throw new HttpError(400, "invalid_query");
+  const identityRead = identityReadMode(url);
   const offset = Number(offsetText);
   if (!/^(0|[1-9]\d*)$/.test(offsetText) || !Number.isSafeInteger(offset) || offset > 1_000_000)
     throw new HttpError(400, "invalid_offset");
@@ -131,31 +135,38 @@ export async function observationApi(
     } satisfies ApiMetadata);
   }
   if (path === "/api/overview") return boundedCollections({ ...(await reader.overview()) });
-  if (path === "/api/transactions")
+  if (path === "/api/transactions") {
+    const transactions = await organizeRows(
+      env.DB,
+      "transaction",
+      await decimalRows(
+        env.DB,
+        "transaction",
+        await describeActivities(
+          env.DB,
+          await reader.listTransactions({
+            source: filter.source,
+            account: filter.account,
+            from: filter.from,
+            to: filter.to,
+            q: filter.q,
+            offset,
+          }),
+        ),
+      ),
+      identityRead,
+    );
     return boundedCollections(
       {
-        transactions: await organizeRows(
-          env.DB,
-          "transaction",
-          await decimalRows(
-            env.DB,
-            "transaction",
-            await describeActivities(
-              env.DB,
-              await reader.listTransactions({
-                source: filter.source,
-                account: filter.account,
-                from: filter.from,
-                to: filter.to,
-                q: filter.q,
-                offset,
-              }),
-            ),
-          ),
+        transactions,
+        interpretationContext: organizationContext(
+          identityRead,
+          transactions.slice(0, 500).map((row) => row.organization),
         ),
       },
       offset,
     );
+  }
   if (path === "/api/balances") {
     const value = url.searchParams.get("latestOffset") ?? "0";
     const latestOffset = Number(value);
@@ -178,7 +189,7 @@ export async function observationApi(
     // Source/account/unit boundaries can be applied before grouping because
     // duplicates must agree on all three. A metric can describe either witness.
     const projected = presentLatestBalances(
-      await organizeRows(env.DB, "balance", candidates),
+      await organizeRows(env.DB, "balance", candidates, identityRead),
       filter.metric,
     );
     const latest = projected.slice(latestOffset, latestOffset + 501);
@@ -190,13 +201,19 @@ export async function observationApi(
       measureView: filter.measureView,
       offset,
     });
+    const organizedHistory = await organizeRows(
+      env.DB,
+      "balance",
+      history.slice(0, 500),
+      identityRead,
+    );
     return json({
       latest: await decimalRows(env.DB, "balance", latest.slice(0, 500)),
-      history: await decimalRows(
-        env.DB,
-        "balance",
-        describeBalanceRows(await organizeRows(env.DB, "balance", history.slice(0, 500))),
-      ),
+      history: await decimalRows(env.DB, "balance", describeBalanceRows(organizedHistory)),
+      interpretationContext: organizationContext(identityRead, [
+        ...latest.slice(0, 500).map((row) => row.organization),
+        ...organizedHistory.map((row) => row.organization),
+      ]),
       coverage: {
         limit: 500,
         truncated: latest.length > 500 || history.length > 500,
@@ -231,6 +248,7 @@ export async function observationApi(
         { kind: "position" as const, id: entry.position.id },
         ...entry.valuations.map(({ id }) => ({ kind: "valuation" as const, id })),
       ]),
+      identityRead,
     );
     return boundedCollections(
       {
@@ -248,6 +266,7 @@ export async function observationApi(
             organization: organizations.get(organizationKey({ kind: "valuation", id: row.id }))!,
           })),
         })),
+        interpretationContext: organizationContext(identityRead, organizations.values()),
       },
       offset,
     );
@@ -278,6 +297,7 @@ export async function observationApi(
       : await reader.getObservation({ kind: observation![1] as ObservationKind, id });
     if (!result) throw new HttpError(404, "not_found");
     if (observation) {
+      // Detail routes accept no parameters, so they always read `latest`.
       const ref = { kind: observation[1] as ObservationKind, id };
       const organizations = await observationOrganizations(env.DB, [ref]);
       const [decimal] = await decimalRows(env.DB, ref.kind, [{ id }]);
@@ -285,6 +305,10 @@ export async function observationApi(
         ...result,
         normalized: decimal!.normalized,
         organization: organizations.get(organizationKey(ref))!,
+        interpretationContext: organizationContext(
+          DEFAULT_IDENTITY_READ_MODE,
+          organizations.values(),
+        ),
       });
     }
     return json(result);

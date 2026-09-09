@@ -5,18 +5,29 @@ import type {
   InstrumentIdentity,
 } from "../../../poc/observation-pipeline/src/identity/types.ts";
 import { record } from "../../../poc/observation-pipeline/src/identity/types.ts";
+import { executeIdentityCommand, type IdentityCommandError } from "./identity-commands.ts";
+import { identityKey } from "./identity-keys.ts";
+import {
+  BASE_IDENTITY_POLICY_VERSION,
+  dependencyDigest,
+  IDENTITY_POLICY_VERSION,
+  type IdentityParseMeta,
+  type IdentityPolicySelection,
+  loadIdentityEvidence,
+  requiredIdentityPolicySql,
+  selectIdentityPolicy,
+  trustedVpassBinding,
+  VPASS_POLICY_FAMILY,
+  type VpassBinding,
+} from "./identity-policies/index.ts";
 
 export type IdentityResolver = (input: IdentityInput) => IdentityPlan;
-export const IDENTITY_POLICY_VERSION = 2;
-export const BASE_IDENTITY_POLICY_VERSION = 1;
-/** Shared by projection and read-only audits; alias is a SQL identifier, not user input. */
-export function requiredIdentityPolicySql(artifactAlias: string): string {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(artifactAlias))
-    throw new Error("identity_sql_alias_invalid");
-  return `CASE WHEN ${artifactAlias}.source_id='vpass' AND EXISTS(
-    SELECT 1 FROM trusted_vpass_card_bindings binding WHERE binding.financial_artifact_id=${artifactAlias}.id)
-    THEN ${IDENTITY_POLICY_VERSION} ELSE ${BASE_IDENTITY_POLICY_VERSION} END`;
-}
+export {
+  BASE_IDENTITY_POLICY_VERSION,
+  IDENTITY_POLICY_VERSION,
+  identityKey,
+  requiredIdentityPolicySql,
+};
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
 const EMPTY_PARSE_SQL = kinds
   .map(
@@ -25,16 +36,22 @@ const EMPTY_PARSE_SQL = kinds
   )
   .join(" AND ");
 
-export async function identityKey(prefix: string, parts: unknown[]): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(JSON.stringify(parts)),
-  );
-  return `${prefix}_${Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("")}`;
+/** Automatic policy yields to the latest effective decision (migration 0029):
+ * an active manual override, or a manual row the log does not describe. */
+const PROTECTED_SQL = (subjectKind: "account_mapping" | "instrument_mapping") =>
+  `EXISTS(SELECT 1 FROM protected_mapping_subjects protected WHERE protected.subject_kind='${subjectKind}' AND protected.subject_ref=?)`;
+
+/** The first revision keeps the historical id form; later automatic revisions
+ * (possible after a release-override) are qualified by their revision. */
+const MAPPING_ID_SQL = "CASE WHEN next.revision=1 THEN ? ELSE ?||'-r'||next.revision END";
+async function mappingIdBindings(prefix: "am" | "im", ref: string, version: number) {
+  const base = await identityKey(prefix, [ref, version]);
+  return [base, base] as const;
 }
 
-/** Appends an automatic decision only when no manual decision protects it.
- * Version comparison is numeric; old workers cannot undo newer rules. */
+/** Appends an automatic decision only when no effective manual decision
+ * protects the subject and no current automatic decision of an equal or newer
+ * policy exists. Version comparison is numeric; old workers cannot undo newer rules. */
 async function accountMapping(
   db: D1Database,
   input: IdentityInput,
@@ -54,12 +71,16 @@ async function accountMapping(
         "INSERT INTO accounts SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM accounts WHERE id=?)",
       )
       .bind(entity, account.label, account.role, account.status, entity),
+    // The id carries the revision: after a release-override the same policy
+    // version may append again, and an id derived from the version alone
+    // would collide with the earlier rule revision.
     db
-      .prepare(`INSERT INTO account_mappings SELECT ?,?,coalesce((SELECT max(revision) FROM account_mappings WHERE source_account_id=?),0)+1,?,'rule',?,?,?,?,?
-      WHERE NOT EXISTS(SELECT 1 FROM account_mappings WHERE source_account_id=? AND (method='manual' OR policy_version>=?))`)
+      .prepare(`INSERT INTO account_mappings SELECT ${MAPPING_ID_SQL},?,next.revision,?,'rule',?,?,?,?,?
+      FROM (SELECT coalesce((SELECT max(revision) FROM account_mappings WHERE source_account_id=?),0)+1 AS revision) next
+      WHERE NOT ${PROTECTED_SQL("account_mapping")}
+      AND NOT EXISTS(SELECT 1 FROM current_account_mappings current WHERE current.source_account_id=? AND current.method='rule' AND current.policy_version>=?)`)
       .bind(
-        await identityKey("am", [ref, version]),
-        ref,
+        ...(await mappingIdBindings("am", ref, version)),
         ref,
         entity,
         account.reason,
@@ -67,6 +88,8 @@ async function accountMapping(
         new Date().toISOString(),
         account.label,
         account.status,
+        ref,
+        ref,
         ref,
         version,
       ),
@@ -101,11 +124,12 @@ async function instrumentMapping(db: D1Database, instrument: InstrumentIdentity,
       )
       .bind(entity, instrument.kind, instrument.label, instrument.status, entity),
     db
-      .prepare(`INSERT INTO instrument_mappings SELECT ?,?,coalesce((SELECT max(revision) FROM instrument_mappings WHERE identifier_id=?),0)+1,?,'rule',?,?,?,?,?
-      WHERE NOT EXISTS(SELECT 1 FROM instrument_mappings WHERE identifier_id=? AND (method='manual' OR policy_version>=?))`)
+      .prepare(`INSERT INTO instrument_mappings SELECT ${MAPPING_ID_SQL},?,next.revision,?,'rule',?,?,?,?,?
+      FROM (SELECT coalesce((SELECT max(revision) FROM instrument_mappings WHERE identifier_id=?),0)+1 AS revision) next
+      WHERE NOT ${PROTECTED_SQL("instrument_mapping")}
+      AND NOT EXISTS(SELECT 1 FROM current_instrument_mappings current WHERE current.identifier_id=? AND current.method='rule' AND current.policy_version>=?)`)
       .bind(
-        await identityKey("im", [ref, version]),
-        ref,
+        ...(await mappingIdBindings("im", ref, version)),
         ref,
         entity,
         instrument.reason,
@@ -113,6 +137,8 @@ async function instrumentMapping(db: D1Database, instrument: InstrumentIdentity,
         new Date().toISOString(),
         instrument.label,
         instrument.status,
+        ref,
+        ref,
         ref,
         version,
       ),
@@ -125,13 +151,7 @@ async function instrumentMapping(db: D1Database, instrument: InstrumentIdentity,
   return { ref, mapping: mapping.id };
 }
 
-interface ParseIdentity {
-  id: number;
-  artifact_id: number;
-  source_id: string;
-  producer_id: string;
-  fetch_run_id: number;
-}
+type ParseIdentity = IdentityParseMeta;
 interface ObservationRow {
   id: number;
   source_account: string;
@@ -143,22 +163,7 @@ interface ObservationRow {
   subject: string | null;
   extra_json: string;
 }
-interface VpassBinding {
-  financial_unit_id: number;
-  financial_unit_key: string;
-  binding_artifact_id: number;
-  card_token: string;
-}
 
-async function trustedVpassBinding(db: D1Database, parse: ParseIdentity) {
-  if (parse.source_id !== "vpass") return undefined;
-  const result = await db
-    .prepare(`SELECT financial_unit_id,financial_unit_key,binding_artifact_id,card_token
-    FROM trusted_vpass_card_bindings WHERE financial_artifact_id=? LIMIT 2`)
-    .bind(parse.artifact_id)
-    .all<VpassBinding>();
-  return result.results.length === 1 ? result.results[0] : undefined;
-}
 const columns = {
   transaction:
     "currency,NULL AS instrument,NULL AS security_code,NULL AS security_name,NULL AS market,NULL AS subject",
@@ -168,6 +173,18 @@ const columns = {
   valuation:
     "currency,NULL AS instrument,NULL AS security_code,NULL AS security_name,NULL AS market,subject",
 };
+
+/** The run's policy record: family, release and the digest of its evidence set. */
+async function policyRecord(runId: string, parseId: number, selection: IdentityPolicySelection) {
+  return [
+    runId,
+    parseId,
+    selection.policyFamily,
+    selection.release,
+    await dependencyDigest(selection.dependencySet),
+    JSON.stringify(selection.dependencySet),
+  ] as const;
+}
 
 export async function identifyParse(
   db: D1Database,
@@ -193,21 +210,29 @@ export async function identifyParse(
     verified.fetch_run_id !== parse.fetch_run_id
   )
     throw new Error("identity_parse_provenance_invalid");
-  const binding = version >= 2 ? await trustedVpassBinding(db, parse) : undefined;
-  // Missing/ambiguous sidecars are completed baseline projections, not an
-  // eternally pending queue entry. Arrival of trusted evidence selects policy 2.
-  if (version === 2 && !binding) version = BASE_IDENTITY_POLICY_VERSION;
+  // The source's policy module decides the release and its evidence; the
+  // store only persists the selected plan.
+  const evidence = await loadIdentityEvidence(db, parse, version);
+  const selection = selectIdentityPolicy(parse, evidence, version);
+  version = selection.policyVersion;
+  const binding: VpassBinding | undefined =
+    selection.policyFamily === VPASS_POLICY_FAMILY ? trustedVpassBinding(evidence) : undefined;
   const runId = await identityKey("ir", [parse.id, version]);
   if (
     await db.prepare("SELECT 1 FROM identity_run_seals WHERE identity_run_id=?").bind(runId).first()
   )
     return 0;
-  await db
-    .prepare(
-      "INSERT INTO identity_runs SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM identity_runs WHERE id=?)",
-    )
-    .bind(runId, parse.id, version, new Date().toISOString(), runId)
-    .run();
+  await db.batch([
+    db
+      .prepare(
+        "INSERT INTO identity_runs SELECT ?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM identity_runs WHERE id=?)",
+      )
+      .bind(runId, parse.id, version, new Date().toISOString(), runId),
+    db
+      .prepare(`INSERT INTO identity_run_policies SELECT ?,?,?,?,?,?
+      WHERE NOT EXISTS(SELECT 1 FROM identity_run_policies WHERE identity_run_id=?)`)
+      .bind(...(await policyRecord(runId, parse.id, selection)), runId),
+  ]);
   if (binding)
     await db
       .prepare(`INSERT INTO identity_vpass_bindings
@@ -269,6 +294,8 @@ export async function identifyParse(
         };
         const plan = resolver(input);
         if (input.trustedVpassBinding) {
+          // A still-effective manual decision on the run-scoped reference is
+          // retained instead of being replaced by the automatic token mapping.
           const fallbackKey = [input.sourceAccount, "fetch-run", String(input.fetchRunId)];
           const fallbackRef = await identityKey("sa", [
             input.sourceId,
@@ -278,7 +305,7 @@ export async function identifyParse(
           if (
             await db
               .prepare(
-                "SELECT 1 FROM account_mappings WHERE source_account_id=? AND method='manual' LIMIT 1",
+                `SELECT 1 FROM protected_mapping_subjects WHERE subject_kind='account_mapping' AND subject_ref=?`,
               )
               .bind(fallbackRef)
               .first()
@@ -372,14 +399,24 @@ export async function identitySweep(
     const createdAt = new Date().toISOString();
     const values = JSON.stringify(
       await Promise.all(
-        empty.map(async (parse) => [
-          await identityKey("ir", [parse.id, parse.required_policy]),
-          parse.id,
-          parse.required_policy,
-        ]),
+        empty.map(async (parse) => {
+          // The same selector as the row path decides the release and evidence
+          // digest; the SQL below still rechecks the required version itself.
+          const selection = selectIdentityPolicy(
+            parse,
+            await loadIdentityEvidence(db, parse, parse.required_policy),
+            parse.required_policy,
+          );
+          const [runId, , family, release, digest, dependencies] = await policyRecord(
+            await identityKey("ir", [parse.id, selection.policyVersion]),
+            parse.id,
+            selection,
+          );
+          return [runId, parse.id, selection.policyVersion, family, release, digest, dependencies];
+        }),
       ),
     );
-    // At most maxRuns (40) entries and three SQL statements. Recheck all four
+    // At most maxRuns (40) entries and four SQL statements. Recheck all four
     // B tables and live eligibility inside the atomic write, not only in the
     // candidate read. Trusted Vpass policy-2 runs get the same guarded pins.
     const result = await db.batch([
@@ -393,6 +430,15 @@ export async function identitySweep(
           AND ${requiredIdentityPolicySql("a")}=json_extract(candidate.value,'$[2]') AND ${EMPTY_PARSE_SQL}
           AND NOT EXISTS(SELECT 1 FROM identity_runs existing WHERE existing.id=json_extract(candidate.value,'$[0]'))`)
         .bind(createdAt, values),
+      db
+        .prepare(`INSERT INTO identity_run_policies
+        SELECT r.id,r.parse_run_id,json_extract(candidate.value,'$[3]'),json_extract(candidate.value,'$[4]'),json_extract(candidate.value,'$[5]'),json_extract(candidate.value,'$[6]')
+        FROM json_each(?) candidate
+        JOIN identity_runs r ON r.id=json_extract(candidate.value,'$[0]')
+          AND r.parse_run_id=json_extract(candidate.value,'$[1]') AND r.policy_version=json_extract(candidate.value,'$[2]')
+        WHERE NOT EXISTS(SELECT 1 FROM identity_run_policies existing WHERE existing.identity_run_id=r.id)
+          AND NOT EXISTS(SELECT 1 FROM identity_run_seals sealed WHERE sealed.identity_run_id=r.id)`)
+        .bind(values),
       db
         .prepare(`INSERT INTO identity_vpass_bindings
         SELECT r.id,b.financial_unit_id,b.binding_artifact_id,b.card_token FROM json_each(?) candidate
@@ -416,7 +462,7 @@ export async function identitySweep(
         .bind(createdAt, values),
     ]);
     processedRuns += empty.length;
-    identifiedRuns += result[2]!.meta.changes;
+    identifiedRuns += result[3]!.meta.changes;
   }
   const fastIds = new Set(empty.map((parse) => parse.id));
   for (const parse of candidates.results) {
@@ -443,8 +489,19 @@ export async function identitySweep(
   return { processedRuns, identifiedRuns, identifiedObservations: observations };
 }
 
-/** Local operator corrections use expected revision to reject stale edits.
- * Entity creation and decisions are atomic. Never accepts amounts or edits B. */
+const LEGACY_ERRORS: Record<IdentityCommandError, string> = {
+  invalid_command: "identity_revision_invalid",
+  idempotency_conflict: "identity_operation_conflict",
+  revision_conflict: "identity_revision_conflict",
+  target_missing: "identity_target_missing",
+  target_metadata_ambiguous: "identity_target_metadata_ambiguous",
+  no_active_override: "identity_no_active_override",
+};
+
+/** Compatibility adapter for the pre-command callers: an `assign` from an
+ * unverified local operator, recorded as the `legacy-cli` actor with a fresh
+ * operation id. Expected-revision protection is unchanged. Never accepts
+ * amounts or edits B. */
 export async function reviseIdentity(
   db: D1Database,
   change: {
@@ -455,56 +512,20 @@ export async function reviseIdentity(
     reason: string;
   },
 ) {
-  if (
-    !change.reason.trim() ||
-    change.reason.length > 1000 ||
-    !Number.isSafeInteger(change.expectedRevision) ||
-    change.expectedRevision < 1
-  )
-    throw new Error("identity_revision_invalid");
-  const account = change.kind === "account";
-  const table = account ? "account_mappings" : "instrument_mappings";
-  const reference = account ? "source_account_id" : "identifier_id";
-  const target = account ? "account_id" : "instrument_id";
-  const entities = account ? "accounts" : "instruments";
-  const currentView = account ? "current_account_mappings" : "current_instrument_mappings";
-  const same = await db
-    .prepare(`SELECT label,status FROM ${currentView} WHERE ${reference}=? AND ${target}=?`)
-    .bind(change.referenceId, change.targetId)
-    .first<{ label: string; status: string }>();
-  const claims = same
-    ? [same]
-    : (
-        await db
-          .prepare(`SELECT DISTINCT label,status FROM ${currentView} WHERE ${target}=? LIMIT 2`)
-          .bind(change.targetId)
-          .all<{ label: string; status: string }>()
-      ).results;
-  if (claims.length > 1) throw new Error("identity_target_metadata_ambiguous");
-  const metadata =
-    claims[0] ??
-    (await db
-      .prepare(`SELECT label,status FROM ${entities} WHERE id=?`)
-      .bind(change.targetId)
-      .first<{ label: string; status: string }>());
-  if (!metadata) throw new Error("identity_target_missing");
-  const result = await db
-    .prepare(`INSERT INTO ${table}(id,${reference},revision,${target},method,reason,policy_version,created_at,label,status)
-    SELECT ?,?,?,?,'manual',?,?,?,?,? FROM ${entities} e WHERE e.id=? AND (SELECT max(revision) FROM ${table} WHERE ${reference}=?)=?`)
-    .bind(
-      crypto.randomUUID(),
-      change.referenceId,
-      change.expectedRevision + 1,
-      change.targetId,
-      change.reason,
-      IDENTITY_POLICY_VERSION,
-      new Date().toISOString(),
-      metadata.label,
-      metadata.status,
-      change.targetId,
-      change.referenceId,
-      change.expectedRevision,
-    )
-    .run();
-  if (result.meta.changes !== 1) throw new Error("identity_revision_conflict");
+  const result = await executeIdentityCommand(
+    db,
+    {
+      operationId: crypto.randomUUID(),
+      actorId: "legacy-cli",
+      actorVerification: "legacy-unknown",
+      action: "assign",
+      kind: change.kind,
+      referenceId: change.referenceId,
+      expectedRevision: change.expectedRevision,
+      targetId: change.targetId,
+      reason: change.reason,
+    },
+    IDENTITY_POLICY_VERSION,
+  );
+  if (!result.ok) throw new Error(LEGACY_ERRORS[result.error]);
 }
