@@ -18,6 +18,10 @@
 // `observed_at` and the position's `as_of` are left unset: this payload states
 // no time for the values it reports. See the note in
 // sbi-domestic-trade-records.ts.
+//
+// Contract v2: every warning is also a typed issue. A holding that cannot be
+// identified or measured, or a valuation that cannot be emitted, breaks the
+// container's membership; a decimal kept as text does not (coverage.ts).
 
 import type {
   ArtifactMeta,
@@ -26,9 +30,11 @@ import type {
   ParseResult,
   ValuationObservation,
 } from "../types.ts";
+import { containerClaim, ParseDiagnostics } from "./coverage.ts";
 import { decimalText, decimalToMinorUnits, decodeUtf8, isObject } from "./util.ts";
 
 const SOURCE_ACCOUNT = "sbi-securities:foreign";
+const CONTAINER = "json:$.listSecuritiesBalances.securitiesBalances";
 
 function valuationFor(options: {
   value: unknown;
@@ -37,21 +43,29 @@ function valuationFor(options: {
   subject: string;
   locator: string;
   extra: Record<string, unknown>;
-  warnings: string[];
+  diagnostics: ParseDiagnostics;
 }): ValuationObservation | undefined {
   if (options.value === undefined || options.value === null) return undefined;
   const decimal = decimalText(options.value);
   if (!decimal) {
-    options.warnings.push(
-      `${options.locator}: ${options.metric} ${JSON.stringify(options.value)} is not an exact decimal`,
-    );
+    options.diagnostics.report({
+      code: "row_unreadable",
+      locator: options.locator,
+      severity: "error",
+      impact: "membership",
+      message: `${options.locator}: ${options.metric} ${JSON.stringify(options.value)} is not an exact decimal`,
+    });
     return undefined;
   }
   const minor = decimalToMinorUnits(decimal.text, options.currency);
   if (minor === undefined) {
-    options.warnings.push(
-      `${options.locator}: ${options.metric} ${decimal.text} has no exact ${options.currency} minor-unit form; kept as text`,
-    );
+    options.diagnostics.report({
+      code: "exact_decimal_without_minor_units",
+      locator: options.locator,
+      severity: "info",
+      impact: "none",
+      message: `${options.locator}: ${options.metric} ${decimal.text} has no exact ${options.currency} minor-unit form; kept as text`,
+    });
   }
   return {
     kind: "valuation",
@@ -96,15 +110,19 @@ export const sbiForeignCashPositions: Parser = {
     ) {
       throw new Error("foreign-cash-positions: incomplete or invalid pagination metadata");
     }
-    const warnings: string[] = [];
+    const diagnostics = new ParseDiagnostics();
     const observations: Observation[] = [];
     balances.forEach((element: unknown, index: number) => {
-      const locator = `json:$.listSecuritiesBalances.securitiesBalances[${index}]`;
+      const locator = `${CONTAINER}[${index}]`;
       if (!isObject(element)) {
         // Recorded rather than dropped, and rather than failing the artifact.
-        warnings.push(
-          `securitiesBalances[${index}]: expected an object, got ${typeof element}; recorded verbatim`,
-        );
+        diagnostics.report({
+          code: "row_unreadable",
+          locator,
+          severity: "error",
+          impact: "membership",
+          message: `securitiesBalances[${index}]: expected an object, got ${typeof element}; recorded verbatim`,
+        });
         observations.push({
           kind: "position",
           sourceAccount: SOURCE_ACCOUNT,
@@ -120,18 +138,26 @@ export const sbiForeignCashPositions: Parser = {
       const market = isObject(element["market"]) ? element["market"] : {};
       const securityCode = String(securities["securitiesCode"] ?? "");
       if (securityCode === "") {
-        warnings.push(
-          `${locator}: securities.securitiesCode is missing; the observation cannot be joined by security`,
-        );
+        diagnostics.report({
+          code: "row_unreadable",
+          locator: `${locator}.securities.securitiesCode`,
+          severity: "error",
+          impact: "membership",
+          message: `${locator}: securities.securitiesCode is missing; the observation cannot be joined by security`,
+        });
       }
       const currency =
         typeof element["currencyCode"] === "string" ? element["currencyCode"] : undefined;
 
       const quantity = decimalText(element["securitiesQuantity"]);
       if (!quantity) {
-        warnings.push(
-          `${locator}: securitiesQuantity ${JSON.stringify(element["securitiesQuantity"])} is not an exact decimal; the position is recorded without a quantity`,
-        );
+        diagnostics.report({
+          code: "row_unreadable",
+          locator: `${locator}.securitiesQuantity`,
+          severity: "error",
+          impact: "membership",
+          message: `${locator}: securitiesQuantity ${JSON.stringify(element["securitiesQuantity"])} is not an exact decimal; the position is recorded without a quantity`,
+        });
       }
       // The position is emitted whether or not the quantity parsed, so that a
       // holding never disappears because one field was unreadable.
@@ -181,9 +207,13 @@ export const sbiForeignCashPositions: Parser = {
         profitLoss["frnEvaluationAmount"] !== undefined ||
         profitLoss["frnEvaluationProfitLoss"] !== undefined
       ) {
-        warnings.push(
-          `${locator}: currencyCode is missing, so the frn* valuations cannot be denominated; they remain only in extra`,
-        );
+        diagnostics.report({
+          code: "row_unreadable",
+          locator: `${locator}.evaluationProfitLoss`,
+          severity: "warning",
+          impact: "membership",
+          message: `${locator}: currencyCode is missing, so the frn* valuations cannot be denominated; they remain only in extra`,
+        });
       }
       for (const item of cases) {
         const observation = valuationFor({
@@ -193,11 +223,26 @@ export const sbiForeignCashPositions: Parser = {
           subject: securityCode,
           locator: `${locator}.evaluationProfitLoss`,
           extra: valuationExtra,
-          warnings,
+          diagnostics,
         });
         if (observation) observations.push(observation);
       }
     });
-    return { observations, warnings };
+    return {
+      observations,
+      warnings: diagnostics.warnings,
+      issues: diagnostics.issues,
+      coverage: [
+        containerClaim({
+          artifact,
+          issues: diagnostics.issues,
+          observedCount: observations.length,
+          evidenceRefs: [
+            CONTAINER,
+            `json:$.listSecuritiesBalances.page[pageNum=1,hasNextPage=false,pageSize=${page["pageSize"]}]`,
+          ],
+        }),
+      ],
+    };
   },
 };

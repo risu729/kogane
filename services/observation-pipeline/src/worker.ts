@@ -1,5 +1,15 @@
 import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry.ts";
 import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity/index.ts";
+import {
+  snapshotPolicyComparisonSql,
+  type SnapshotPolicyComparisonRow,
+} from "../../../poc/observation-pipeline/src/snapshot-query.ts";
+import {
+  coverageClaimViolations,
+  validCoverageClaim,
+  validParseIssue,
+} from "../../../packages/domain/src/coverage.ts";
+import { SNAPSHOT_RELATIONS, unitParseable } from "../../../packages/read-model/src/concepts";
 import { identitySweep, reviseIdentity } from "./identity-store.ts";
 import {
   publicationConsistency,
@@ -9,8 +19,11 @@ import {
 } from "./publication-gate.ts";
 import type {
   ArtifactMeta,
+  CoverageClaim,
   Observation,
   Parser,
+  ParseIssue,
+  ParseResult,
 } from "../../../poc/observation-pipeline/src/types.ts";
 
 const SCAN_PAGE = 200;
@@ -18,6 +31,11 @@ const JOBS_PER_SWEEP = 12;
 const MAX_BYTES = 16 * 1024 * 1024;
 const MAX_ATTEMPTS = 5;
 const LEASE_MS = 10 * 60 * 1000;
+// Contract v2 budgets: bounded like observation rows so one artifact cannot
+// flood D1 with diagnostics. A parser exceeding them is a parser bug.
+const MAX_ISSUES = 10_000;
+const ISSUE_CHUNK = 500;
+const MAX_COVERAGE_CLAIMS = 100;
 class PipelineError extends Error {}
 interface ArtifactRow {
   id: number;
@@ -33,6 +51,8 @@ interface ArtifactRow {
   byte_size: number;
   window_start: string | null;
   window_end: string | null;
+  run_status: "success" | "partial" | "failed";
+  run_failure_count: number;
 }
 interface Job {
   fetch_artifact_id: number;
@@ -40,18 +60,21 @@ interface Job {
   parser_version: string;
   attempts: number;
 }
-const artifactSql = `SELECT a.*,o.blob_key,o.byte_size,
+// Parse eligibility is the D13 `unitParseable` predicate at its default `run`
+// scope: the whole parent run succeeded with no failure evidence. The run
+// outcome is selected as well so every coverage claim records it.
+const artifactSql = `SELECT a.*,o.blob_key,o.byte_size,r.status AS run_status,r.failure_count AS run_failure_count,
  coalesce((SELECT start_value FROM artifact_ranges q WHERE q.fetch_artifact_id=a.id AND q.range_kind='requested' ORDER BY q.id LIMIT 1),r.window_start) AS window_start,
  coalesce((SELECT end_value FROM artifact_ranges q WHERE q.fetch_artifact_id=a.id AND q.range_kind='requested' ORDER BY q.id LIMIT 1),r.window_end) AS window_end
  FROM observation_fetch_artifacts a JOIN observation_fetch_runs r ON r.id=a.fetch_run_id
- JOIN raw_objects o ON o.sha256=a.sha256 WHERE r.status='success' AND r.failure_count=0`;
+ JOIN raw_objects o ON o.sha256=a.sha256 WHERE ${unitParseable.predicate("r")}`;
 
 export function artifactMeta(row: ArtifactRow): ArtifactMeta {
   return {
     id: row.id,
     sourceId: row.source_id,
-    runStatus: "success",
-    runFailureCount: 0,
+    runStatus: row.run_status,
+    runFailureCount: row.run_failure_count,
     ...(row.window_start && row.window_end
       ? { runWindow: { from: row.window_start, to: row.window_end } }
       : {}),
@@ -223,6 +246,56 @@ export function observationInsert(
       `INSERT INTO ${kind}_observations(parse_run_id,${names.map(snake).join(",")}) SELECT ?,${names.map((n) => `json_extract(value,'$.${n}')`).join(",")} FROM json_each(?)`,
     )
     .bind(id, JSON.stringify(rows));
+}
+
+/**
+ * Contract v2 output, validated against the domain contract before anything
+ * is written. A legacy parser (no issues, no coverage) yields empty lists and
+ * nothing is persisted for it; no claim is ever synthesized.
+ */
+export function contractRows(result: ParseResult): {
+  issues: ParseIssue[];
+  coverage: CoverageClaim[];
+} {
+  const issues = result.issues ?? [];
+  const coverage = result.coverage ?? [];
+  if (issues.length > MAX_ISSUES || coverage.length > MAX_COVERAGE_CLAIMS)
+    throw new PipelineError("parse_contract_invalid");
+  for (const issue of issues)
+    if (!validParseIssue(issue)) throw new PipelineError("parse_contract_invalid");
+  for (const claim of coverage) {
+    if (!validCoverageClaim(claim) || coverageClaimViolations(claim).length > 0)
+      throw new PipelineError("parse_contract_invalid");
+  }
+  if (new Set(coverage.map((claim) => claim.claimId)).size !== coverage.length)
+    throw new PipelineError("parse_contract_invalid");
+  return { issues, coverage };
+}
+
+function issueInsert(db: D1Database, id: number, rows: ParseIssue[]): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO parse_issues(parse_run_id,code,locator,severity,impact,message) SELECT ?,json_extract(value,'$.code'),json_extract(value,'$.locator'),json_extract(value,'$.severity'),json_extract(value,'$.impact'),json_extract(value,'$.message') FROM json_each(?)`,
+    )
+    .bind(id, JSON.stringify(rows));
+}
+
+function coverageInsert(
+  db: D1Database,
+  id: number,
+  rows: CoverageClaim[],
+  parent: Pick<ArtifactRow, "run_status" | "run_failure_count">,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO parse_coverage_claims(parse_run_id,claim_id,scope_key,mode,completeness,membership_complete,observed_count,expected_count,evidence_refs_json,policy_version,failure_cause,absence_meaning,parent_run_status,parent_run_failure_count)
+       SELECT ?1,json_extract(value,'$.claimId'),json_extract(value,'$.scopeKey'),json_extract(value,'$.mode'),json_extract(value,'$.completeness'),
+         CASE WHEN json_extract(value,'$.membershipComplete') THEN 1 ELSE 0 END,
+         json_extract(value,'$.observedCount'),json_extract(value,'$.expectedCount'),json_extract(value,'$.evidenceRefs'),
+         json_extract(value,'$.policyVersion'),json_extract(value,'$.failureCause'),json_extract(value,'$.absenceMeaning'),?3,?4
+       FROM json_each(?2)`,
+    )
+    .bind(id, JSON.stringify(rows), parent.run_status, parent.run_failure_count);
 }
 
 function numericVersion(value: string): number[] {
@@ -416,6 +489,7 @@ async function executeParseJob(
     // Bound D1 statement count per invocation as well as in-memory raw bytes.
     if (new TextEncoder().encode(JSON.stringify(result.observations)).length > 2 * 1024 * 1024)
       throw new PipelineError("observation_payload_too_large");
+    const contract = contractRows(result);
     failureStage = "persistence_failed";
     const inserted = await env.DB.prepare(
       `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,?,?,'pending',?) RETURNING id`,
@@ -447,6 +521,13 @@ async function executeParseJob(
       }
       if (chunk.length) await observationInsert(env.DB, parseId, kind, chunk).run();
     }
+    // Contract v2 rows belong to the same pending parse run as the
+    // observations: invisible until the publish batch below sets status='ok',
+    // and left attached to an error run if publication fails.
+    for (let offset = 0; offset < contract.issues.length; offset += ISSUE_CHUNK)
+      await issueInsert(env.DB, parseId, contract.issues.slice(offset, offset + ISSUE_CHUNK)).run();
+    if (contract.coverage.length)
+      await coverageInsert(env.DB, parseId, contract.coverage, row).run();
     // A lost lease cannot publish rows. All visibility and supersession changes
     // occur in one D1 transaction; empty successful parses are published too.
     const publish = await env.DB.batch(
@@ -479,8 +560,10 @@ async function executeParseJob(
         .bind(job.fetch_artifact_id, parser.name, parser.version, new Date().toISOString(), code)
         .run();
     }
+    // A parser that rejects its input or violates the output contract is
+    // deterministic: retrying at the same version cannot succeed.
     await env.DB.prepare(
-      `UPDATE observation_parse_jobs SET status=CASE WHEN attempts>=? OR ?='parser_rejected' THEN 'failed' ELSE 'pending' END,available_at_ms=?,last_error_code=? WHERE lease_token=? AND status='running'`,
+      `UPDATE observation_parse_jobs SET status=CASE WHEN attempts>=? OR ? IN ('parser_rejected','parse_contract_invalid') THEN 'failed' ELSE 'pending' END,available_at_ms=?,last_error_code=? WHERE lease_token=? AND status='running'`,
     )
       .bind(
         MAX_ATTEMPTS,
@@ -1113,6 +1196,66 @@ async function status(env: Env): Promise<Response> {
   });
 }
 
+interface PolicyComparison {
+  sourceId: string;
+  parserName: string;
+  dataset: string;
+  legacy: { count: number };
+  coverageV1: { count: number };
+  /** Partitions whose current snapshot artifact differs between the two policies. */
+  differences: {
+    fetchUnitKey: string | null;
+    legacyArtifactId: number | null;
+    coverageArtifactId: number | null;
+  }[];
+}
+
+/**
+ * A03 shadow comparison: the current snapshot of every container dataset
+ * under legacy-warning-compat-v1 and under coverage-v1, with the active row
+ * of each dataset. Counts and artifact ids only; never observations,
+ * warnings or raw bodies. A dataset is switched to coverage-v1 only after
+ * every difference listed here is explained as an intended correction.
+ */
+export async function snapshotPolicyComparison(env: Env): Promise<Response> {
+  const policies = await env.DB.prepare(
+    "SELECT source_id,dataset,parser_name,policy_id,policy_version,required_parser_version,replaces_previous_on_complete_empty,unit_scope,updated_at_ms FROM dataset_snapshot_policies ORDER BY parser_name,dataset",
+  ).all();
+  const rows = await env.DB.prepare(
+    snapshotPolicyComparisonSql(SNAPSHOT_RELATIONS),
+  ).all<SnapshotPolicyComparisonRow>();
+  const datasets = new Map<string, PolicyComparison>();
+  for (const row of rows.results) {
+    const key = `${row.source_id} ${row.parser_name} ${row.dataset}`;
+    let entry = datasets.get(key);
+    if (!entry) {
+      entry = {
+        sourceId: row.source_id,
+        parserName: row.parser_name,
+        dataset: row.dataset,
+        legacy: { count: 0 },
+        coverageV1: { count: 0 },
+        differences: [],
+      };
+      datasets.set(key, entry);
+    }
+    if (row.legacy_artifact_id !== null) entry.legacy.count++;
+    if (row.coverage_artifact_id !== null) entry.coverageV1.count++;
+    if (row.legacy_artifact_id !== row.coverage_artifact_id)
+      entry.differences.push({
+        fetchUnitKey: row.fetch_unit_key,
+        legacyArtifactId: row.legacy_artifact_id,
+        coverageArtifactId: row.coverage_artifact_id,
+      });
+  }
+  const comparison = [...datasets.values()];
+  return Response.json({
+    policies: policies.results,
+    datasets: comparison,
+    differingDatasets: comparison.filter((entry) => entry.differences.length > 0).length,
+  });
+}
+
 export interface ScheduledStages {
   parse: (env: Env) => Promise<object>;
   identity: (env: Env) => Promise<object>;
@@ -1204,6 +1347,9 @@ export default {
     const replay = /^\/replay\/(plan|start|pause|resume|cancel|inspect)$/.exec(path);
     if (request.method === "POST" && replay) return replayCommand(env, replay[1]!, request);
     if (request.method === "GET" && path === "/status") return status(env);
+    // Internal service-binding route, like /status: identifiers and counts only.
+    if (request.method === "GET" && path === "/snapshot-policy/compare")
+      return snapshotPolicyComparison(env);
     // Publication gate operations (docs/publication-gate.md): the consistency
     // check is read-only; repair is bounded, idempotent and records its actor.
     if (request.method === "GET" && path === "/publication/consistency")

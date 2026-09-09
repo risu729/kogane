@@ -4,6 +4,8 @@
 export {
   activeStateProjection,
   completeSnapshotCandidates,
+  economicallySummable,
+  evidenceExists,
   isObservationKind,
   legacyPublishedParses,
   OBSERVATION_TABLES,
@@ -11,8 +13,12 @@ export {
   type ObservationTable,
   publishedParses,
   recordedParses,
+  SNAPSHOT_RELATIONS,
+  snapshotAdoptable,
+  snapshotPolicyComparison,
   successfulFetchRuns,
   successfulParses,
+  unitParseable,
   visibleEvidence,
 } from "./concepts";
 export {
