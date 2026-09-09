@@ -1,4 +1,10 @@
 import { CentralClient, centralDescriptorSha256 } from "./central";
+import type {
+  AddUnitReportRequest,
+  ArtifactRequest,
+  ArtifactRole,
+  StorageOriginRequest,
+} from "../../../packages/evidence-contract/src/index";
 import { ImportError } from "./error";
 import type { CentralInventoryItem } from "./types";
 
@@ -81,7 +87,7 @@ interface TransferState {
 
 interface ArtifactPlan {
   artifact: VerifiedArtifact;
-  descriptor: JsonObject;
+  descriptor: ArtifactRequest;
   inventory: CentralInventoryItem;
 }
 
@@ -258,7 +264,7 @@ export async function importVpassRun(options: {
       completedAtBasis: "manifest",
       declaredArtifactCount: plans.length,
       artifactCountScope: "direct",
-    };
+    } satisfies AddUnitReportRequest;
     await central.addUnitReport(state.unitId, {
       ...report,
       ...(validated.record.status === "failed" ? { safeFailureCode: "collector-failed" } : {}),
@@ -1426,7 +1432,7 @@ async function artifactPlans(
 
 function normalizedDescriptor(input: {
   artifactKey: string;
-  artifactRole: string;
+  artifactRole: ArtifactRole;
   payloadFidelity: "generated" | "transformed";
   lineageDisposition: "source_bytes_not_available" | "source_not_retained_for_security";
   dataset: string;
@@ -1438,8 +1444,8 @@ function normalizedDescriptor(input: {
   sequence: number;
   sha256: string;
   byteSize: number;
-  storage: JsonObject;
-}): JsonObject {
+  storage: StorageOriginRequest;
+}): ArtifactRequest {
   return {
     artifactKey: input.artifactKey,
     artifactRole: input.artifactRole,
@@ -1535,7 +1541,7 @@ function descriptorSemantics(dataset: string): {
   }
 }
 
-async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonObject> {
+async function storageOrigin(key: string, fingerprintKey: string): Promise<StorageOriginRequest> {
   if (!SHA256.test(fingerprintKey)) throw new ImportError(500, "fingerprint_configuration_invalid");
   const cryptoKey = await crypto.subtle.importKey(
     "raw",

@@ -1,4 +1,8 @@
 import { CentralClient } from "./central";
+import type {
+  ArtifactRequest,
+  StorageOriginRequest,
+} from "../../../packages/evidence-contract/src/index";
 import { ImportError } from "./error";
 import { validateSbiShinseiResponse } from "./sbi-shinsei-schema";
 import type {
@@ -771,7 +775,7 @@ async function dataDescriptor(options: {
   completedAt: string;
   fingerprintKey: string;
   linkNormalized: boolean;
-}): Promise<JsonObject> {
+}): Promise<ArtifactRequest> {
   const filename = options.artifact.key.split("/").at(-1)!;
   const normalized = options.artifact.dataset === "normalized";
   return {
@@ -896,7 +900,7 @@ async function manifestDescriptor(options: {
   completedAt: string;
   fingerprintKey: string;
   formatVersion: string;
-}): Promise<JsonObject> {
+}): Promise<ArtifactRequest> {
   return {
     artifactKey: "manifest.json",
     artifactRole: "collector_derived",
@@ -937,7 +941,7 @@ async function manifestDescriptor(options: {
   };
 }
 
-async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonObject> {
+async function storageOrigin(key: string, fingerprintKey: string): Promise<StorageOriginRequest> {
   if (!/^[0-9a-f]{64}$/u.test(fingerprintKey)) {
     throw new ImportError(500, "fingerprint_configuration_invalid");
   }
