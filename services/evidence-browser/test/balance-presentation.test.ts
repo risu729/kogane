@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
 import { observationApi } from "../src/observation-api";
-import { seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
 import type { BalanceInterpretation } from "../../../poc/observation-pipeline/shared/balance-semantics";
 
@@ -31,6 +31,7 @@ async function seedBalances(
       options.statement ? "myjcb-credit-past-month-balances" : "sbi-shinsei-yen-deposit-account",
     )
     .first<{ id: number }>();
+  await publishParse(parse!.id);
   const prefix = `balance-${parse!.id}`;
   const rawAccount = options.statement ? `myjcb:${prefix}:root` : `sbi-shinsei:${prefix}`;
   const rows: Array<{ id: number; metric: string }> = [];

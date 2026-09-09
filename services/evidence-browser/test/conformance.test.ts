@@ -8,7 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import snapshot from "../demo-snapshot.json";
 import demo from "../src/demo-worker";
 import worker from "../src/worker";
-import { seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import {
   CENTRAL_STORE_CAPABILITIES,
   LIST_REQUEST_SCHEMA,
@@ -37,6 +37,7 @@ beforeAll(async () => {
     VALUES (?,'conformance-fixture','1','2026-09-07','ok','[]') RETURNING id`)
     .bind(run.artifacts[0].id)
     .first<{ id: number }>();
+  await publishParse(parse!.id);
   await env.DB.prepare(`INSERT INTO transaction_observations
     (parse_run_id,source_account,external_id,as_of,amount_minor,currency,raw_locator,extra_json)
     VALUES (?,'conformance-account','1','2026-09-07',1,'JPY','$','{}')`)

@@ -9,6 +9,7 @@ import {
   insertParseRun,
   listArtifacts,
   openStore,
+  publishParseRun,
   putRawObject,
   upsertSource,
   type Store,
@@ -102,6 +103,10 @@ function snapshot(store: Store, options: Snapshot) {
     warnings: options.warnings ?? [],
   });
   for (const observation of options.observations) insertObservation(store, parseId, observation);
+  // A success is published as parse.ts does; only the published run can
+  // complete a snapshot (docs/publication-gate.md).
+  if ((options.parseStatus ?? "ok") === "ok")
+    publishParseRun(store, artifactId, options.parser, parseId);
   return { runId, artifactId };
 }
 
@@ -281,7 +286,7 @@ describe("complete container snapshots", () => {
       warnings: [],
     });
     expect(currentPositions(store).map((row) => row.security_code)).toEqual(["OLD"]);
-    insertParseRun(store, {
+    const completed = insertParseRun(store, {
       artifactId: missing.artifactId,
       parserName: base.parser,
       parserVersion: "0.1.0",
@@ -289,6 +294,7 @@ describe("complete container snapshots", () => {
       status: "ok",
       warnings: [],
     });
+    publishParseRun(store, missing.artifactId, base.parser, completed);
     expect(currentPositions(store).map((row) => row.security_code)).toEqual(["NEW"]);
   });
 

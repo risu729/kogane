@@ -154,9 +154,10 @@ parser versions are live.
 
 Every current transaction observation with its source, account, `as_of`,
 formatted amount, currency, description, counterparty, `external_id`, and
-the parser that produced it. "Current" is
-`superseded_by_parse_run_id IS NULL AND status = 'ok'` on the parse run,
-which is the predicate every current view uses. The page states in place
+the parser that produced it. "Current" is membership in the publication
+projection `published_parse_runs` (`docs/publication-gate.md`; before it,
+`superseded_by_parse_run_id IS NULL AND status = 'ok'` on the parse run),
+which is the rule every current view uses. The page states in place
 that `external_id` is what the provider said and not a logical identity: a
 pending row and its posted row are related by a link, never by an update
 (`docs/design.md`).
@@ -412,8 +413,11 @@ the deployed shape. Neither is done; both are in the open questions.
 
 ### Supersession is visible, not destructive
 
-Current views require `superseded_by_parse_run_id IS NULL` and
-`status = 'ok'` on the parse run. The status test is not redundant: only a
+Current views require the parse run to be the published run of its artifact
+and parser (`published_parse_runs`, moved by `publishParseRun` together with
+the supersession below; `docs/publication-gate.md`). Before the gate they
+required `superseded_by_parse_run_id IS NULL` and
+`status = 'ok'` on the parse run. The status test was not redundant: only a
 successful run ever supersedes anything (`src/store.ts`), so an error run
 is never superseded, and checking supersession alone would leave it
 current. In the current pipeline an error parse run is written on its own

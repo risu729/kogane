@@ -2,7 +2,7 @@ import { env, SELF } from "cloudflare:test";
 import { base64url, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
-import { seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
 import { boundedCollections } from "../src/observation-api";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../poc/observation-pipeline/shared/api-schema";
@@ -16,6 +16,7 @@ describe("production observation API", () => {
       VALUES (?,'large-fixture','1','2026-09-07','ok','[]') RETURNING id`)
       .bind(run.artifacts[0].id)
       .first<{ id: number }>();
+    await publishParse(parse!.id);
     await env.DB.prepare(`INSERT INTO transaction_observations
       (parse_run_id,source_account,external_id,as_of,amount_minor,currency,raw_locator,extra_json,description)
       WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<1003)
@@ -107,6 +108,7 @@ describe("production observation API", () => {
       VALUES (?,'large-balance-fixture','1','2026-09-07','ok','[]') RETURNING id`)
       .bind(run.artifacts[0].id)
       .first<{ id: number }>();
+    await publishParse(parse!.id);
     await env.DB.prepare(`INSERT INTO balance_observations
       (parse_run_id,source_account,metric,instrument,amount_minor,as_of,raw_locator,extra_json)
       WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<1003)
@@ -143,9 +145,7 @@ describe("production observation API", () => {
       VALUES (?,'large-balance-fixture','2','2026-09-08','ok','[]') RETURNING id`)
       .bind(run.artifacts[0].id)
       .first<{ id: number }>();
-    await env.DB.prepare("UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE id=?")
-      .bind(replacement!.id, parse!.id)
-      .run();
+    await supersedeParse(parse!.id, replacement!.id);
     const historicalOptions = await (await call("/api/filter-options?kind=balances")).json();
     expect(historicalOptions).toMatchObject({
       accounts: expect.arrayContaining([
@@ -183,6 +183,7 @@ describe("production observation API", () => {
       VALUES (?,'large-position-fixture','1','2026-09-07','ok','[]') RETURNING id`)
       .bind(run.artifacts[0].id)
       .first<{ id: number }>();
+    await publishParse(parse!.id);
     await env.DB.prepare(`INSERT INTO position_observations
       (parse_run_id,source_account,security_code,quantity_text,quantity_scale,raw_locator,extra_json)
       WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<5002)
@@ -270,11 +271,12 @@ describe("production observation API", () => {
       ["new-failure", "2", "error", "2026-09-02"],
       ["replacement", "1", "ok", "2026-09-01"],
     ]) {
-      await env.DB.prepare(
-        "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,status,parsed_at,warnings_json) VALUES(?,?,?,?,?,'[]')",
+      const inserted = await env.DB.prepare(
+        "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,status,parsed_at,warnings_json) VALUES(?,?,?,?,?,'[]') RETURNING id",
       )
         .bind(artifactId, name, version, status, `${date}T00:00:00.000Z`)
-        .run();
+        .first<{ id: number }>();
+      if (status === "ok") await publishParse(inserted!.id);
     }
     expect(await (await call("/api/meta")).json()).toMatchObject({
       parsingHealth: {
@@ -345,6 +347,7 @@ describe("production observation API", () => {
       VALUES (?,'fixture-parser','1','2026-09-07T00:00:00Z','ok','[]') RETURNING id`)
         .bind(artifactId)
         .first<{ id: number }>();
+    await publishParse(parsed!.id);
     const balance =
       await env.DB.prepare(`INSERT INTO balance_observations (parse_run_id,source_account,metric,instrument,amount_minor,raw_locator,extra_json)
       VALUES (?,'fixture-account','cash','JPY',9007199254740993,'$','{}') RETURNING id`)

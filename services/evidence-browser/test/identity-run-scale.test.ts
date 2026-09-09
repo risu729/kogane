@@ -2,7 +2,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
 import ingest from "../../raw-evidence/src/worker";
-import { seedRegistry, seedRun } from "./fixtures";
+import { seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import { identityQuery } from "../src/identity-api";
 import { organizedFilterOptions } from "../src/organized-filter-options";
 import { observationOrganizations } from "../src/observation-organization";
@@ -214,6 +214,10 @@ export async function seedIdentityRunScale() {
     env.DB.prepare(
       "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) SELECT id,artifact,'scale-'||id,'1','2099','ok','[]' FROM scale_parses",
     ),
+    // Every seeded success is published, as the pipeline writer would have done.
+    env.DB.prepare(
+      "INSERT INTO published_parse_runs(fetch_artifact_id,parser_name,parse_run_id,parser_version,published_at,publication_kind) SELECT artifact,'scale-'||id,id,'1','2099','normal' FROM scale_parses",
+    ),
     env.DB.prepare(
       "WITH RECURSIVE n(v) AS (SELECT 1 UNION ALL SELECT v+1 FROM n WHERE v<10) INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json) SELECT p.id,p.source,'SYN','row-'||v,'{}' FROM scale_parses p JOIN n ON v<=p.n",
     ),
@@ -370,8 +374,12 @@ it("representative parse/run/pin cardinalities preserve current identity eligibi
   expect(
     await env.DB.prepare("SELECT count(*) n FROM current_identity_observations").first<number>("n"),
   ).toBe(35000);
-  // Supersession is append-once metadata, not an identity rewrite.
-  await env.DB.prepare("UPDATE parse_runs SET superseded_by_parse_run_id=101 WHERE id=100").run();
+  // Supersession is append-once metadata, not an identity rewrite. A later
+  // run of the same artifact and parser takes over the publication pointer.
+  const replacement = await env.DB.prepare(
+    "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) SELECT fetch_artifact_id,parser_name,'2','2100','ok','[]' FROM parse_runs WHERE id=100 RETURNING id",
+  ).first<{ id: number }>();
+  await supersedeParse(100, replacement!.id);
   expect(
     await env.DB.prepare(
       "SELECT count(*) n FROM current_identity_observations WHERE parse_run_id=100",

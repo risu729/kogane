@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
 import { identityApi } from "../src/identity-api";
-import { seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { validIdentityResponse } from "../../../poc/observation-pipeline/shared/identity-contract";
 beforeAll(seedRegistry);
 it("accepts every safe offset beyond the former cap and rejects unsafe query values", async () => {
@@ -27,6 +27,7 @@ async function seed() {
   )
     .bind(run.artifacts[0].id)
     .first<{ id: number }>();
+  await publishParse(parse!.id);
   const observation = await env.DB.prepare(
     `INSERT INTO transaction_observations (parse_run_id,source_account,currency,raw_locator,extra_json) VALUES (?,'synthetic-ref','JPY','synthetic','{}') RETURNING id`,
   )
@@ -100,6 +101,7 @@ it("includes unprocessed eligible observations in the coverage denominator", asy
   )
     .bind(run.artifacts[0].id)
     .first<{ id: number }>();
+  await publishParse(parse!.id);
   await env.DB.prepare(
     `INSERT INTO transaction_observations (parse_run_id,source_account,currency,raw_locator,extra_json) VALUES (?,'unprocessed','JPY','synthetic','{}')`,
   )
@@ -130,6 +132,7 @@ it("filters before paging without dropping the final account", async () => {
   )
     .bind(run.artifacts[0].id)
     .first<{ id: number }>();
+  await publishParse(parse!.id);
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO transaction_observations (parse_run_id,source_account,currency,raw_locator,extra_json)
       WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<101)
