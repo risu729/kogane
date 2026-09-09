@@ -35,6 +35,13 @@ repaired by building a new snapshot, never by deleting an observation.
 | `current_balance_projection` | One candidate measurement per row: its scope, quantity, metric, adopted state, reason code, temporal reference, freshness and a dense `row_seq`. |
 | `scope_relations`            | Typed relations between measurement scopes (`same`/`disjoint`/`subset`/`overlaps`/`unknown`) with the decision that produced each one.           |
 
+`scope_relations` carries no `*_no_update` / `*_no_delete` trigger on purpose:
+unlike a Layer A or Layer B fact it is rebuildable projection state, written
+per release by the projection job from the adopted `entity_relations` and from
+policy, so a release is rewritten in place rather than appended to. The record
+of truth stays in `decision_revisions` and `entity_relations`, which are
+append-only; deleting every row here loses nothing that cannot be rebuilt.
+
 ### Declared inputs
 
 The snapshot id is `sha256` of the canonical JSON of:
