@@ -10,6 +10,7 @@ import {
   validParseIssue,
 } from "../../../packages/domain/src/coverage.ts";
 import { SNAPSHOT_RELATIONS, unitParseable } from "../../../packages/read-model/src/concepts";
+import { runBalanceProjection } from "./balance-projection-job.ts";
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
 import {
@@ -1297,10 +1298,14 @@ export async function snapshotPolicyComparison(env: Env): Promise<Response> {
 export interface ScheduledStages {
   parse: (env: Env) => Promise<object>;
   identity: (env: Env) => Promise<object>;
+  balanceProjection: (env: Env) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
   identity: (env) => identitySweep(env.DB, resolveIdentity),
+  // Off unless BALANCE_PROJECTION_ENABLED is "1"; the job itself returns
+  // `skipped` rather than the caller branching on the flag.
+  balanceProjection: (env) => runBalanceProjection(env),
 };
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
@@ -1314,6 +1319,7 @@ export async function runScheduled(
   for (const [event, stage] of [
     ["observation_sweep", stages.parse],
     ["identity_sweep", stages.identity],
+    ["balance_projection", stages.balanceProjection],
   ] as const) {
     try {
       log(JSON.stringify({ event, ...(await stage(env)) }));

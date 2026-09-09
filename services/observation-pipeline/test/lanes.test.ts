@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { runScheduled, sweep } from "../src/worker.ts";
+import { runBalanceProjection } from "../src/balance-projection-job.ts";
 import { identitySweep } from "../src/identity-store.ts";
 import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity/index.ts";
 import { layerBMigrations, publishParse, seedArtifact, startPipeline } from "./harness.ts";
@@ -354,17 +355,24 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
     {
       parse: () => Promise.reject(new Error("synthetic D1 outage: amount=999999")),
       identity: (env) => identitySweep(env.DB, resolveIdentity),
+      balanceProjection: (env) => runBalanceProjection(env),
     },
     log,
   );
   expect(lines).toEqual([
     { event: "observation_sweep_failed", code: "Error" },
     expect.objectContaining({ event: "identity_sweep", processedRuns: expect.any(Number) }),
+    // The projection stage is isolated like the others and is off by default.
+    expect.objectContaining({ event: "balance_projection", enabled: false, status: "skipped" }),
   ]);
   expect(JSON.stringify(lines)).not.toContain("999999");
   lines.length = 0;
   await runScheduled(env, undefined, log);
-  expect(lines.map((line) => line.event)).toEqual(["observation_sweep", "identity_sweep"]);
+  expect(lines.map((line) => line.event)).toEqual([
+    "observation_sweep",
+    "identity_sweep",
+    "balance_projection",
+  ]);
   expect(lines[0]).toHaveProperty("lanes");
 }, 60000);
 

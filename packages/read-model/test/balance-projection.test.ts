@@ -94,8 +94,14 @@ describe("balance projection builder", () => {
       deposit("m-bank-savings", "scope:bank:savings", "60000"),
       deposit("m-bank-linked", "scope:bank:linked", "100000"),
       deposit("m-bank-total", "scope:bank:total", "160000", { subjectStatus: "aggregate" }),
+      // A second route reporting the same total, whose terminal accounts were
+      // never confirmed: a different source, an unresolved subject, and the
+      // lower authority of a restatement.
       deposit("m-route-total", "scope:route:bank-total", "160000", {
         subjectStatus: "unresolved",
+        sourceId: "sbi-shinsei-bank",
+        parser: "sbi-shinsei-top-balances-and-activity@1",
+        parserName: "sbi-shinsei-top-balances-and-activity",
         sourceAccount: "synthetic:route",
         authorityRank: AUTHORITY_RANKS.aggregator,
       }),
@@ -175,6 +181,9 @@ describe("balance projection builder", () => {
       deposit("m-direct-linked", "source_account:direct:linked-deposit", "100000"),
       deposit("m-connection-line", "source_account:mf:x:line-1", "60000", {
         subjectStatus: "unresolved",
+        sourceId: "sbi-shinsei-bank",
+        parser: "sbi-shinsei-top-balances-and-activity@1",
+        parserName: "sbi-shinsei-top-balances-and-activity",
         sourceAccount: "synthetic:mf-line",
         authorityRank: AUTHORITY_RANKS.aggregator,
       }),

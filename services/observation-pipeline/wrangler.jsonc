@@ -10,6 +10,9 @@
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "triggers": { "crons": ["*/5 * * * *"] },
   "limits": { "cpu_ms": 300000 },
+  // Off by default: the balance projection job writes nothing until an
+  // operator sets this to "1" (docs/balance-read-model.md).
+  "vars": { "BALANCE_PROJECTION_ENABLED": "0" },
   "d1_databases": [
     {
       "binding": "DB",

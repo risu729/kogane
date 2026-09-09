@@ -324,23 +324,39 @@ function valueOf(candidate: ProjectionCandidate): ValueState {
   return fromNormalizedDecimal(candidate.normalized);
 }
 
+interface Subject {
+  status: SubjectStatus;
+  sourceId: string;
+}
+
 /**
- * Which scope pairs the policy declares disjoint: two distinct scopes that
- * the identity layer resolved to identified accounts. That is the same
- * account-list evidence a bank's own screen provides; it is written as an
- * explicit relation, so it can be inspected and revoked. Anything the
- * identity layer did not identify (an aggregator line with no terminal
- * account, a provider-local label, an aggregate) is deliberately absent, so
- * its overlap stays unknown (SC01, SC06, INV06).
+ * Which scope pairs the policy declares disjoint, and on what evidence.
+ *
+ * Within one source: two distinct non-aggregate scopes, because the provider
+ * itself listed them as separate accounts or pockets. That is the same
+ * account-list evidence a bank's own screen gives, written as an explicit
+ * relation so it can be inspected and revoked.
+ *
+ * Across sources: only scopes the identity layer resolved to identified
+ * accounts, because only then is there evidence that the two are different
+ * accounts rather than two views of one.
+ *
+ * Everything else is deliberately absent. An aggregate or total scope, an
+ * aggregator line with no terminal account, and a provider-local label seen
+ * through a second route all keep an unknown overlap, which is what makes
+ * SC01 and SC06 come out as possible duplicates rather than as sums (INV06).
  */
-function policyDisjointness(subjects: Map<string, SubjectStatus>): DerivedScopeRelation[] {
-  const identified = [...subjects.entries()]
-    .filter(([, status]) => status === "identified")
-    .map(([key]) => key)
-    .sort();
+function policyDisjointness(subjects: Map<string, Subject>): DerivedScopeRelation[] {
+  const entries = [...subjects.entries()].sort(([a], [b]) => (a < b ? -1 : 1));
   const relations: DerivedScopeRelation[] = [];
-  for (const [index, left] of identified.entries())
-    for (const right of identified.slice(index + 1))
+  for (const [index, [left, leftSubject]] of entries.entries())
+    for (const [right, rightSubject] of entries.slice(index + 1)) {
+      const sameSource = leftSubject.sourceId === rightSubject.sourceId;
+      const listedApart =
+        sameSource && leftSubject.status !== "aggregate" && rightSubject.status !== "aggregate";
+      const bothIdentified =
+        leftSubject.status === "identified" && rightSubject.status === "identified";
+      if (!listedApart && !bothIdentified) continue;
       relations.push({
         fromScopeKey: left,
         toScopeKey: right,
@@ -349,6 +365,7 @@ function policyDisjointness(subjects: Map<string, SubjectStatus>): DerivedScopeR
         decisionRevisionId: null,
         release: DISJOINT_ACCOUNTS_POLICY,
       });
+    }
   return relations;
 }
 
@@ -363,9 +380,12 @@ function adoptionOutcomes(
   declared: readonly DerivedScopeRelation[],
 ): { outcomes: Map<string, Outcome>; relations: DerivedScopeRelation[] } {
   const outcomes = new Map<string, Outcome>();
-  const subjects = new Map<string, SubjectStatus>();
+  const subjects = new Map<string, Subject>();
   for (const candidate of candidates)
-    subjects.set(candidate.subjectScopeKey, candidate.subjectStatus);
+    subjects.set(candidate.subjectScopeKey, {
+      status: candidate.subjectStatus,
+      sourceId: candidate.sourceId,
+    });
   if (subjects.size > ADOPTION_SUBJECT_BOUND) {
     for (const candidate of candidates)
       outcomes.set(candidate.scopeKey, {
