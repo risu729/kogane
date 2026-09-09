@@ -194,7 +194,8 @@ export function projectionSubtotalSql(
   const { where, args } = projectionPredicates(scope);
   const placeholders = metricIds.map(() => "?").join(",");
   return {
-    sql: `SELECT unit_ref, subject_scope_key, quantity_coefficient, quantity_scale
+    sql: `SELECT unit_ref, subject_scope_key, source_id, source_account, metric_id,
+        quantity_coefficient, quantity_scale
       FROM current_balance_projection
       WHERE snapshot_id = ?1 AND state='adopted' AND value_status='exact'
         AND metric_id IN (${placeholders || "NULL"}) AND (${where})${viewPredicate(scope)}

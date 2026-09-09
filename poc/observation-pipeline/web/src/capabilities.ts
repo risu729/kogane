@@ -34,6 +34,8 @@ export interface ClientFeatures {
    * a fixed snapshot, with adoption states and reason codes.
    */
   readonly balanceReadModel: boolean;
+  /** Summary figures come from the shared query service, not a page-local sum. */
+  readonly sharedQuery: boolean;
   /** The change lifecycle is served, so confirmation screens may act. */
   readonly commands: boolean;
 }
@@ -45,6 +47,7 @@ export const NO_FEATURES: ClientFeatures = {
   identities: false,
   evidenceHistory: false,
   balanceReadModel: false,
+  sharedQuery: false,
   commands: false,
 };
 
@@ -55,6 +58,7 @@ export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
     identities: capabilities.identityReadModes.includes("latest"),
     evidenceHistory: capabilities.evidenceHistory,
     balanceReadModel: capabilities.balancesV2 && capabilities.balancesV2Pagination === "keyset-v2",
+    sharedQuery: capabilities.sharedQuery,
     commands: capabilities.commands,
   };
 }

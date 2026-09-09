@@ -12,7 +12,8 @@
     "ACCESS_ISSUER": "https://evidence-test.cloudflareaccess.com",
     "ACCESS_AUDIENCE": "synthetic-test-audience",
     "COMMANDS_ENABLED": "",
-    "AGENT_GRANTS": ""
+    "AGENT_GRANTS": "",
+    "AGENT_API_GRANTS": ""
   },
   "assets": {
     "directory": "test/assets",

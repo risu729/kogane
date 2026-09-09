@@ -37,6 +37,10 @@ export interface ProjectionCoverageRow {
 export interface SubtotalRow {
   unit_ref: string;
   subject_scope_key: string;
+  /** Carried so a caller can re-check its own scope on every row it sums. */
+  source_id: string;
+  source_account: string;
+  metric_id: string;
   quantity_coefficient: string;
   quantity_scale: number;
 }

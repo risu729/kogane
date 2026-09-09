@@ -14,27 +14,22 @@ import {
 import type { ApiMetadata } from "../../../poc/observation-pipeline/shared/api-contract";
 import {
   allowedQueryParameters,
-  CENTRAL_STORE_CAPABILITIES,
   LIST_PATH_CAPABILITY,
   capabilityGrants,
   isListPath,
   validMeasureView,
-  withBalancesV2,
-  type ApiCapabilities,
 } from "../../../poc/observation-pipeline/shared/api-schema";
 import {
   balanceHistoryPage,
-  balanceProjectionReader,
   latestBalancePage,
   legacyLatestFromProjection,
   projectionFlagOn,
   V2_HISTORY_PATH,
   V2_LATEST_PATH,
 } from "./balances-v2";
+import { serverCapabilities } from "./server-capabilities";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
-import { eventsV2Available } from "./events-api";
 import { identityReadMode } from "./identity-read";
-import { commandsEnabled } from "./command-api";
 
 /** Validated request scope. Each route passes only the keys its reader query accepts. */
 interface RequestScope {
@@ -68,27 +63,6 @@ export function boundedCollections(value: Record<string, unknown>, offset?: numb
   });
 }
 
-/**
- * What this Worker advertises. The v2 balance routes are advertised only when
- * the reader flag is on and a sealed snapshot exists, so a capability is
- * never a promise the store cannot keep.
- */
-export async function advertisedCapabilities(env: Env): Promise<ApiCapabilities> {
-  // What this server can actually serve, not what the contract defaults to:
-  // `commands` follows the deployment's flag (A09), `eventsV2` depends on the
-  // A10 projection being present, and `balancesV2` on the A07 reader flag plus
-  // a sealed snapshot. One object answers /api/meta and decides which
-  // parameters and paths exist, so the two cannot drift apart.
-  const base: ApiCapabilities = {
-    ...CENTRAL_STORE_CAPABILITIES,
-    commands: commandsEnabled(env),
-    eventsV2: await eventsV2Available(env),
-  };
-  if (!projectionFlagOn(env)) return base;
-  const snapshot = await balanceProjectionReader(env).currentSnapshot();
-  return withBalancesV2(base, snapshot !== null);
-}
-
 // Called only after the existing Access JWT gate and read-only method check.
 export async function observationApi(
   request: Request,
@@ -105,7 +79,7 @@ export async function observationApi(
   // The v2 balance routes exist only once the projection has a sealed
   // snapshot and the reader flag is on, so what /api/meta advertises and what
   // the routes accept are the same object, computed the same way per request.
-  const capabilities = await advertisedCapabilities(env);
+  const capabilities = await serverCapabilities(env);
   if (
     isListPath(path) &&
     LIST_PATH_CAPABILITY[path] &&

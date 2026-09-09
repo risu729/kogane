@@ -1,5 +1,12 @@
 import { useState, type ReactNode } from "react";
-import { useOverview, type Overview } from "../api.ts";
+import {
+  useCoverageSummary,
+  useFeatures,
+  useOverview,
+  type CoverageSummaryData,
+  type Overview,
+  type SharedQueryResponse,
+} from "../api.ts";
 import { Link } from "../router.tsx";
 import {
   Badge,
@@ -44,32 +51,90 @@ export function OverviewPage(): ReactNode {
     </>
   );
 }
-function OverviewBody({ data }: { data: Overview }): ReactNode {
-  const [page, setPage] = useState(0);
-  const view = pageWindow(
-    [...data.fetchRuns].sort((a, b) => b.id - a.id),
-    page,
-  );
-  const artifactCount = data.sources.reduce((count, source) => count + source.artifact_count, 0);
+/**
+ * The summary figures. When the server runs the shared query service, they
+ * come from `coverage` — the same service and the same scope rules an agent
+ * gets — so a person and an agent never see two different counts (AT72). The
+ * page keeps its own arithmetic only where that service is not served.
+ */
+function SummaryCounts({
+  data,
+  shared,
+}: {
+  data: Overview;
+  shared: SharedQueryResponse<CoverageSummaryData> | undefined;
+}): ReactNode {
+  const counts = shared
+    ? shared.result.data
+    : {
+        sourceCount: data.sources.length,
+        artifactCount: data.sources.reduce((count, source) => count + source.artifact_count, 0),
+        collectionRunCount: data.fetchRuns.length,
+      };
   return (
     <>
       <div className="overview-grid">
         <div className="overview-stat">
           <span className="overview-stat-label">登録されている取得元</span>
-          <strong className="overview-stat-value">{data.sources.length}</strong>
+          <strong className="overview-stat-value">{counts.sourceCount}</strong>
           <span>保存された記録の取得元</span>
         </div>
         <div className="overview-stat">
           <span className="overview-stat-label">取得した原本</span>
-          <strong className="overview-stat-value">{artifactCount}</strong>
+          <strong className="overview-stat-value">{counts.artifactCount}</strong>
           <Link to="/artifacts">原本を見る →</Link>
         </div>
         <div className="overview-stat">
           <span className="overview-stat-label">収集の記録</span>
-          <strong className="overview-stat-value">{data.fetchRuns.length}</strong>
+          <strong className="overview-stat-value">{counts.collectionRunCount}</strong>
           <span>保存済みの実行履歴</span>
         </div>
       </div>
+      {shared ? <HandOff shared={shared} /> : null}
+    </>
+  );
+}
+
+/**
+ * The hand-off references. An assistant is given these ids, not the numbers:
+ * whoever receives them reads the same context and result back under their own
+ * permission (addendum 11 section 8).
+ */
+function HandOff({ shared }: { shared: SharedQueryResponse<CoverageSummaryData> }): ReactNode {
+  const gaps = shared.result.coverage.gaps;
+  return (
+    <details className="panel-body detail-disclosure">
+      <summary>この数字の出どころ（引き継ぎ用の参照）</summary>
+      <ul>
+        <li>
+          集計の条件: <code>{shared.contextId}</code>
+        </li>
+        <li>
+          この結果: <code>{shared.resultRef}</code>
+        </li>
+        <li>
+          範囲: {shared.result.completeness === "complete" ? "許可された範囲すべて" : "一部"}
+          {gaps.length ? `（未収集: ${String(gaps.length)}件）` : ""}
+        </li>
+      </ul>
+      <p className="dim">
+        参照だけを渡してください。受け取った側は自分の権限で読み直します。数字そのものを根拠にはしません。
+      </p>
+    </details>
+  );
+}
+
+function OverviewBody({ data }: { data: Overview }): ReactNode {
+  const [page, setPage] = useState(0);
+  const features = useFeatures();
+  const shared = useCoverageSummary();
+  const view = pageWindow(
+    [...data.fetchRuns].sort((a, b) => b.id - a.id),
+    page,
+  );
+  return (
+    <>
+      <SummaryCounts data={data} shared={features.sharedQuery ? shared.data : undefined} />
       <Panel
         id="sources"
         title="取得元"

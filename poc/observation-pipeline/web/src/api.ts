@@ -11,8 +11,10 @@ import {
   type ClientFeatures,
 } from "./capabilities.ts";
 import type {
+  CoverageSummaryData,
   ObservationKind,
   Overview,
+  SharedQueryResponse,
   TransactionRow,
   BalanceRow,
   BalanceHistoryRow,
@@ -30,9 +32,11 @@ export type {
   BalanceEvidenceMember,
   BalanceHistoryItem,
   BalanceHistoryPage,
+  CoverageSummaryData,
   KnownAssetsSubtotals,
   LatestBalanceItem,
   LatestBalancePage,
+  SharedQueryResponse,
   ObservationKind,
   Warnings,
   Overview,
@@ -192,6 +196,24 @@ export function useOverview(): UseQueryResult<Overview, Error> {
   return useQuery({
     queryKey: ["overview"],
     queryFn: ({ signal }) => getJson<Overview>("/api/overview", signal),
+  });
+}
+
+/**
+ * The coverage summary, from the same service an agent calls. Disabled until
+ * capabilities are known and on stores that do not serve the shared route, so
+ * a page never guesses which path produced its figures.
+ */
+export function useCoverageSummary(): UseQueryResult<
+  SharedQueryResponse<CoverageSummaryData>,
+  Error
+> {
+  const features = useFeatures();
+  return useQuery({
+    queryKey: ["shared-query", "coverage"],
+    enabled: features.known && features.sharedQuery,
+    queryFn: ({ signal }) =>
+      getJson<SharedQueryResponse<CoverageSummaryData>>("/api/v2/query?intent=coverage", signal),
   });
 }
 

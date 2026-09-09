@@ -14,6 +14,13 @@ import {
 import { validTemporalValue, type TemporalValue } from "./time.ts";
 
 export const QUERY_INTENTS = [
+  /**
+   * What the authorised perimeter covers at all: which sources are in scope,
+   * how much evidence was collected for each, and where nothing was. It is
+   * the question that must be answerable before any figure means anything,
+   * and the one both the human UI and an agent ask first (addendum 10 §7).
+   */
+  "coverage",
   "holdings",
   "reported-state",
   "net-worth",

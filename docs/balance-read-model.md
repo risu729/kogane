@@ -230,6 +230,18 @@ adapter declines whenever the snapshot is behind the published evidence, so
 the v1 promise of current data and its 413 for an oversized candidate set are
 kept exactly.
 
+## The `holdings` query intent
+
+`packages/application`'s shared query service answers the `holdings` intent
+from this projection, so the human UI, the agent API and the MCP adapter all
+read one adopted set rather than three sums. It reads the sealed snapshot's
+adopted rows for the granted scope, sums them per unit in exact integer
+arithmetic, and reports `liabilitiesCoverage: "unknown"` with no `netWorth`
+field. Without the reader flag or a sealed snapshot it answers
+`unavailable` / `projection_not_built` instead of computing a figure from the
+observation rows behind the projection. See
+[Agent API](agent-api.md#query-intents) for the intent's contract.
+
 ## Decisions and the outbox
 
 A07 registers the real `balance-projection` processor of A09's decision outbox

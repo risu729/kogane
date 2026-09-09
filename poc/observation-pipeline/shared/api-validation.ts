@@ -1,6 +1,7 @@
 // Runtime checks for the shared HTTP contract; no database or UI dependencies.
 // Shape<T> requires a validator for every declared field when contracts evolve.
 import { isDecimalMinorUnit } from "../src/money.ts";
+import { validFinancialResult } from "../../../packages/domain/src/result.ts";
 import { validIdentityResponse } from "./identity-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
 import { validFinancialProductClaimWire } from "./financial-products.ts";
@@ -162,6 +163,7 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   organizedDisplay: boolean,
   financialProducts: boolean,
   evidenceHistory: boolean,
+  sharedQuery: boolean,
   commands: boolean,
   eventsV2: boolean,
 });
@@ -548,9 +550,35 @@ const endpoints: Record<string, Check<unknown>> = {
   "/api/v2/balances/history": balanceHistoryPage,
 };
 
+/**
+ * The shared query response (`GET /api/v2/query`, `@kogane/application`). The
+ * result itself is checked by the domain contract, so the browser and the
+ * agent API validate one definition of `financial-result-v1`.
+ */
+export function validSharedQueryResponse(value: unknown): boolean {
+  return (
+    record(value) &&
+    value.schemaVersion === "kogane-query-response-v1" &&
+    text(value.contextId) &&
+    text(value.resultRef) &&
+    Array.isArray(value.unresolvedInputs) &&
+    value.unresolvedInputs.every(
+      (entry) =>
+        record(entry) &&
+        text(entry.key) &&
+        text(entry.question) &&
+        text(entry.chosen) &&
+        text(entry.reasonCode),
+    ) &&
+    validFinancialResult(value.result, record) &&
+    value.result.contextId === value.contextId
+  );
+}
+
 /** Additive fields are allowed; required fields and their nullability are checked. */
 export function validApiResponse(path: string, value: unknown): boolean {
   if (path.startsWith("/api/identity/")) return validIdentityResponse(path, value);
+  if (path === "/api/v2/query") return validSharedQueryResponse(value);
   if (path === "/api/filter-options") {
     return (
       record(value) &&

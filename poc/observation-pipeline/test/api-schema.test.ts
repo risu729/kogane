@@ -87,6 +87,7 @@ describe("shared API schema", () => {
       organizedDisplay: false,
       financialProducts: false,
       evidenceHistory: false,
+      sharedQuery: false,
       commands: false,
       eventsV2: false,
     });
@@ -104,6 +105,7 @@ describe("shared API schema", () => {
       organizedDisplay: true,
       financialProducts: true,
       evidenceHistory: true,
+      sharedQuery: true,
       commands: false,
       eventsV2: false,
     });
@@ -249,6 +251,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       evidenceHistory: true,
       // Off until the store advertises the v2 balance routes.
       balanceReadModel: false,
+      sharedQuery: true,
       // The change lifecycle is a deployment flag, not a shared constant.
       commands: false,
     });
@@ -269,6 +272,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       identities: false,
       evidenceHistory: false,
       balanceReadModel: false,
+      sharedQuery: false,
       commands: false,
     });
   });
