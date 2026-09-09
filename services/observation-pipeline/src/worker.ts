@@ -396,8 +396,10 @@ export interface PublishInput {
  * (born superseded when a numerically newer success is already current),
  * supersede older successes if this run is current, move the publication
  * projection and record its event (0026, same decision), then close the job.
- * The first statement is fenced on the live lease; every later statement
- * depends on its effect, so an expired lease changes nothing at all.
+ * Every statement that writes is fenced on the live lease, not only the
+ * first: an expired lease changes nothing, and replaying the whole batch for
+ * a run that is already published changes nothing either, because the effect
+ * the later statements would otherwise key on is already committed.
  * Exported for the publication-gate tests only.
  */
 export function publishBatch(env: Env, input: PublishInput): D1PreparedStatement[] {
@@ -408,7 +410,7 @@ export function publishBatch(env: Env, input: PublishInput): D1PreparedStatement
           SELECT newer.id FROM parse_runs newer
           WHERE newer.fetch_artifact_id=parse_runs.fetch_artifact_id
             AND newer.parser_name=parse_runs.parser_name AND newer.status='ok'
-            AND newer.superseded_by_parse_run_id IS NULL
+            AND newer.superseded_by_parse_run_id IS NULL -- gate:writer
             AND (
               json_extract('['||replace(newer.parser_version,'.',',')||']','$[0]'),
               json_extract('['||replace(newer.parser_version,'.',',')||']','$[1]'),
@@ -421,11 +423,13 @@ export function publishBatch(env: Env, input: PublishInput): D1PreparedStatement
         ) WHERE id=? AND EXISTS(SELECT 1 FROM observation_parse_jobs WHERE lease_token=? AND status='running' AND lease_until_ms>?)`,
     ).bind(version[0]!, version[1]!, version[2]!, parseId, token, now),
     env.DB.prepare(
-      `UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE fetch_artifact_id=? AND parser_name=? AND id<>? AND status='ok' AND superseded_by_parse_run_id IS NULL AND EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=? AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL)`,
+      `UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE fetch_artifact_id=? AND parser_name=? AND id<>? AND status='ok' AND superseded_by_parse_run_id IS NULL AND EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=? AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL)`, // gate:writer
     ).bind(parseId, artifactId, parserName, parseId, parseId),
-    ...publicationStatements(env.DB, parseId, publishedAt),
+    ...publicationStatements(env.DB, parseId, publishedAt, token, now),
+    // Fenced on the live lease like the first statement: a replayed batch
+    // must not touch a job another attempt has already closed.
     env.DB.prepare(
-      `UPDATE observation_parse_jobs SET status='done',last_error_code=NULL WHERE lease_token=? AND EXISTS(SELECT 1 FROM parse_runs WHERE id=? AND status='ok')`,
+      `UPDATE observation_parse_jobs SET status='done',last_error_code=NULL WHERE lease_token=? AND status='running' AND EXISTS(SELECT 1 FROM parse_runs WHERE id=? AND status='ok')`,
     ).bind(token, parseId),
   ];
 }
@@ -1024,9 +1028,11 @@ async function planReplay(env: Env, v: Record<string, unknown>): Promise<Respons
       "id",
     )) ?? 0;
   // Parser acceptance is applied at job creation, so this is an upper bound
-  // of eligible artifacts in range, never a financial value.
+  // of eligible artifacts in range, never a financial value. "Already parsed"
+  // means published (0026): a successful run the projection does not name is
+  // not a result an operator should count as done, so replaying it is right.
   const estimate = await env.DB.prepare(
-    `SELECT count(*) AS n,coalesce(sum(EXISTS(SELECT 1 FROM parse_runs p WHERE p.fetch_artifact_id=a.id AND p.parser_name=?7 AND p.parser_version=?8 AND p.status='ok')),0) AS parsed
+    `SELECT count(*) AS n,coalesce(sum(EXISTS(SELECT 1 FROM published_parse_runs pub WHERE pub.fetch_artifact_id=a.id AND pub.parser_name=?7 AND pub.parser_version=?8)),0) AS parsed
       FROM (${artifactSql}${replayFilterSql}) a`,
   )
     .bind(source, dataset, from, highWater, fetchedFrom, fetchedTo, parser.name, parser.version)
@@ -1158,7 +1164,7 @@ async function status(env: Env): Promise<Response> {
   const freshness = await env.DB.prepare(
     `SELECT (SELECT max(sealed_at_ms) FROM fetch_run_seals) AS latest_sealed_at_ms,
       (SELECT max(coalesce(a.fetched_at_ms,a.recorded_at_ms)) FROM fetch_artifacts a JOIN fetch_run_seals s ON s.fetch_run_id=a.fetch_run_id) AS latest_sealed_artifact_fetched_at_ms,
-      (SELECT max(parsed_at) FROM parse_runs WHERE status='ok') AS latest_parsed_at`,
+      (SELECT max(parsed_at) FROM published_observation_parses) AS latest_parsed_at`,
   ).first<{
     latest_sealed_at_ms: number | null;
     latest_sealed_artifact_fetched_at_ms: number | null;
@@ -1221,7 +1227,10 @@ export async function snapshotPolicyComparison(env: Env): Promise<Response> {
   ).all<SnapshotPolicyComparisonRow>();
   const datasets = new Map<string, PolicyComparison>();
   for (const row of rows.results) {
-    const key = `${row.source_id} ${row.parser_name} ${row.dataset}`;
+    // NUL cannot occur in a source id, parser name or dataset, so it is a
+    // safe composite-key separator; written as an escape so the file stays
+    // text for grep, diff and review tooling.
+    const key = `${row.source_id}\u0000${row.parser_name}\u0000${row.dataset}`;
     let entry = datasets.get(key);
     if (!entry) {
       entry = {

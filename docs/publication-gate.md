@@ -46,6 +46,20 @@ transaction; but a reader can no longer confuse them.
 `actor` (`pipeline`, `migration:0026`, or an operator id), `reason`,
 `occurred_at`. A trigger requires the new run to be `ok`.
 
+### Event self-reference guard (migration 0036)
+
+An event records a pointer _change_, so `previous_parse_run_id` and
+`new_parse_run_id` may never be the same run: such a row records no change and
+makes the newest event of a key claim that the current run replaced itself,
+which is exactly what a rollback runbook reads. Migration 0036 is additive and
+adds one trigger, `publication_events_no_self_reference`
+(`BEFORE INSERT ... WHEN NEW.previous_parse_run_id IS NEW.new_parse_run_id` ->
+`RAISE(ABORT)`), so no writer, repair route or future backfill can append one.
+The 0026 backfill (previous is the NULL literal), the pipeline writer and
+`POST /publication/repair` (which only publishes runs the pointer does not
+already name) all satisfy it; the tests apply 0036 on top of a backfilled 0026
+and re-run the repair route to prove it.
+
 Views:
 
 - `published_observation_parses`: the adopted run of every key with its
@@ -85,14 +99,23 @@ SELECT count(*) FROM parse_runs WHERE status='ok' AND superseded_by_parse_run_id
 `services/observation-pipeline/src/publication-gate.ts` supplies two
 statements that `publishBatch` in `worker.ts` appends to the existing publish
 transaction, after the run is marked `ok` and older runs are superseded:
-append the event (naming the run it replaces), then upsert the pointer. Both
-select the run only if that same batch left it `ok` and unsuperseded, so:
+append the event (naming the run it replaces), then upsert the pointer. Each
+carries three guards — the run was left `ok` and unsuperseded by this batch,
+the lease is still live (the same predicate as the batch's first statement),
+and the run is not already the pointer of its key — so:
 
 - a run born superseded (a numerically older version completing late) is
   recorded and its rows are queryable as history, but the pointer stays on
   the newer run and no event is written;
-- a lost lease (the fenced first statement changes nothing) leaves status
-  `pending`, and therefore no pointer move and no event;
+- a lost lease leaves status `pending`, and therefore no pointer move and no
+  event. The lease fence is repeated on every statement rather than inherited
+  from the first: a batch replayed after a successful publish finds that
+  first effect already committed, so a statement that keys only on it would
+  fire again;
+- re-executing the whole batch for a run that is already published changes
+  nothing: no second `normal` event (which would name the run as replacing
+  itself), no rewritten `published_at`, and the job-close statement is fenced
+  on `status='running'` so it does not touch a job another attempt closed;
 - after every publish the legacy predicate equals the projection, which is
   what a reader that predates the gate needs during a mixed deployment.
 
@@ -123,6 +146,8 @@ Every normal read path now decides "current" by membership in
 | `services/observation-pipeline/src/identity-audit.ts` `eligible`, lineage          | legacy predicate; lineage by supersession                  | projection join; lineage by projection                                                                   |
 | `services/observation-pipeline/scripts/status.ts` coverage                         | legacy predicate                                           | projection; plus a `publication` mismatch count                                                          |
 | `services/observation-pipeline/scripts/replay-diagnostics.ts`                      | legacy predicate                                           | projection                                                                                               |
+| `services/observation-pipeline/src/worker.ts` `/replay/plan` `already_parsed`      | `EXISTS(... parse_runs ... status='ok')`                   | `EXISTS(... published_parse_runs ...)`: an unadopted success is not done work                            |
+| same file, `/status` `freshness.latestParsedAt`                                    | `max(parsed_at) FROM parse_runs WHERE status='ok'`         | `max(parsed_at) FROM published_observation_parses`                                                       |
 | `services/observation-pipeline/scripts/audit-identities.ts` (3 queries)            | legacy predicate                                           | projection                                                                                               |
 
 Not changed on purpose: `services/evidence-browser/test/legacy-read-path.ts`
@@ -131,11 +156,32 @@ statements, migrations 0018/0020/0022 (superseded by 0026's view), and the API
 contract field `superseded_by_parse_run_id`, which remains the lineage marker
 the UI shows.
 
-`scripts/publication-gate-predicates.test.ts` (run by `bun test scripts/`)
-fails CI when `superseded_by_parse_run_id IS NULL` appears in any tracked
-`.ts`/`.tsx` outside tests and four allowed files: the read model's legacy
-concept, `worker.ts` (supersession batch), `publication-gate.ts` (writer and
-repair) and the PoC `store.ts` (writer and backfill).
+`scripts/publication-gate-predicates.test.ts` fails CI when the legacy rule
+or a bare success read appears where it should not. It runs in the standalone
+offline step — `bun run scripts/ci-package.ts --standalone`, which CI invokes
+as `mise run ci:standalone`; `STANDALONE_TESTS` in `scripts/ci-packages.ts`
+lists it, and `scripts/ci-package.test.ts` fails if any `scripts/*.test.ts`
+is missing from that list (nothing else would run it).
+
+The allow-list is per occurrence, not per file, because exempting a whole
+file lets a new query inside it inherit the exemption silently — which is how
+the replay-plan estimate and `/status` freshness kept reading
+`parse_runs.status='ok'` after the gate landed. The guard checks:
+
+- every `superseded_by_parse_run_id IS NULL` in a tracked, non-test
+  `.ts`/`.tsx` sits on a line carrying the comment marker `gate:writer` (a
+  writer that maintains the supersession pointer) or `gate:comparison` (the
+  legacy rule, named as such), or on the line directly below one. `//`, SQL
+  `--` and JSDoc `*` all count as comment markers;
+- each allowed file states it exactly as many times as the table in the test
+  records: the read model's legacy concept (1), `publication-gate.ts` (5),
+  `worker.ts` supersession batch (3), the PoC `store.ts` (4). One more
+  occurrence fails until the number is changed in review;
+- `services/raw-evidence/migrations/*.sql` may state it only up to 0026, the
+  migration that introduced the projection and backfilled it from that rule;
+- `status = 'ok'` outside tests appears only in the reviewed writers and the
+  named concept, again with exact counts: it is the execution-attempt fact,
+  never the publication fact.
 
 ## Candidate invisibility (step 4 preparation)
 
@@ -170,8 +216,9 @@ candidate publication state before any candidate is written.
 
 ## Deploy order
 
-1. `services/raw-evidence`: apply 0026 (additive; the previous Workers keep
-   working, the backfill makes the projection equal to what they show).
+1. `services/raw-evidence`: apply 0026 then 0036 (both additive; the previous
+   Workers keep working, the backfill makes the projection equal to what they
+   show, and 0036 only rejects a row no correct writer produces).
 2. `services/observation-pipeline`: the writer that maintains the projection.
    Until this is live, new successes are visible to the old reader only; run
    `POST /publication/repair` after deployment to close any gap.
@@ -202,16 +249,28 @@ candidate publication state before any candidate is written.
   pipeline test passes with its expectations unchanged.
 - Legacy predicate = projection after every publish, late older version does
   not move the pointer, expired lease changes nothing, old writer gap is
-  reported and repaired idempotently, 0026 on 0017-0035 with existing rows
-  backfills exactly the legacy set and is idempotent:
+  reported and repaired idempotently, 0026 and 0036 on the earlier schema with
+  existing rows backfill exactly the legacy set and are idempotent:
   `services/observation-pipeline/test/publication-gate.test.ts`,
   `pipeline.test.ts`.
+- The publish batch is idempotent: running it twice for the same run leaves
+  every statement at zero changes, the event history unchanged and
+  `published_at` unchanged, both with an expired and with a live lease; the
+  0036 trigger rejects a hand-written self-referencing event and the repair
+  route adds nothing on a consistent key: same file
+  ("re-executing the publish batch for an already published run").
+- Operator signals read the projection, not `parse_runs.status='ok'`: the
+  replay-plan `already_parsed` estimate and `/status`
+  `freshness.latestParsedAt` (`lanes.test.ts`, and the shape assertions in
+  `scripts/publication-gate-predicates.test.ts`).
 - Projection rows only name `ok` runs of their own key and are never deleted:
   same file (trigger assertions).
 - The identity view keeps its query plan: `current-run-query-plan.test.ts`,
   `binding-query-plan.test.ts`.
-- No new legacy predicate in production reads:
-  `scripts/publication-gate-predicates.test.ts`.
+- No new legacy predicate and no new bare success read in production code,
+  and no migration after 0026 embeds the legacy rule:
+  `scripts/publication-gate-predicates.test.ts`, which
+  `scripts/ci-package.test.ts` proves the standalone CI step runs.
 
 Not verified: production data volumes and D1 statement limits for the
 backfill (see the count query above).
