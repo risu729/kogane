@@ -57,7 +57,7 @@ refresh failures retain previously authorized records with an explicit warning.
 only; every UI decision reads `capabilities`, so renaming a connection cannot
 change what the client sends or shows. The capability object, the query
 parameters each capability unlocks, and the client argument builder are one
-definition in `poc/observation-pipeline/shared/api-schema.ts`. The response
+definition in `packages/observation-shared/src/api-schema.ts`. The response
 validator (`validApiResponse`) checks the object against that schema, both
 servers derive their accepted parameters from it, and the same
 conformance checks (`test/api-conformance.ts`) run against the local store,
@@ -152,7 +152,7 @@ to the production collector database.
 ## Production API handoff
 
 The browser and local query layer share type-only response contracts in
-`poc/observation-pipeline/shared/api-contract.ts`. These describe the local
+`packages/observation-shared/src/api-contract.ts`. These describe the local
 PoC, not a frozen production database schema. Production adapters should
 map the domain to a versioned read API, with an explicit revision when
 semantics change. In particular, the PoC's numeric identifiers and raw

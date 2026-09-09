@@ -226,7 +226,7 @@ is the same operation and a lost response never commits twice.
 ## Capability
 
 `commands` is a new field of `ApiCapabilities`
-(`poc/observation-pipeline/shared/api-schema.ts`). It is `false` in both shared
+(`packages/observation-shared/src/api-schema.ts`). It is `false` in both shared
 constants; the evidence browser overrides it on `/api/meta` from the running
 deployment's `COMMANDS_ENABLED` flag, next to A10's `eventsV2`. It is a display
 capability, not an authorization decision.

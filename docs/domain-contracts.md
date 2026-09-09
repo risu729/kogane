@@ -4,8 +4,8 @@
 expose: exact quantities, role-typed time, metric definitions, scope and
 adoption, coverage, contexts, decisions and the shared result shape. It has no
 runtime dependencies, no I/O and no clock. Services import it by relative path
-(`../../../packages/domain/src/...`), the same way they import
-`poc/observation-pipeline/shared` today. The architectural decision behind it
+(`../../../packages/domain/src/...`), the same way they import the other
+shared packages ([package layout](package-layout.md)). The architectural decision behind it
 is [ADR 0001](adr/0001-domain-axes.md).
 
 Every validator in the package rejects unknown keys. A new field is a reviewed
@@ -57,7 +57,7 @@ conflict`; `Quantity { unitRef, value }`.
   domain-specific), `overlapGroup`, `sourceAuthority`, `definitionRelease`,
   and `netAssetEligible: false` for every entry, exactly as today.
 - `METRIC_REGISTRY` is seeded from the current `classifyBalance` and
-  `classifyActivity` rules in `poc/observation-pipeline/shared`. Each entry
+  `classifyActivity` rules in `packages/observation-shared`. Each entry
   records the legacy classification it came from, and
   `test/metrics.test.ts` calls the PoC functions for every selector and
   compares. The PoC behaviour is unchanged.

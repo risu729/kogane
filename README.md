@@ -8,6 +8,7 @@ different rules.
 - [Design](docs/design.md)
 - [ADR 0001: provenance classification plus domain axes](docs/adr/0001-domain-axes.md)
 - [Domain contracts (`packages/domain`)](docs/domain-contracts.md)
+- [Package layout and import boundaries](docs/package-layout.md)
 - [Evidence collection](docs/collection.md)
 - [Raw evidence store](docs/raw-store.md)
 - [Evidence ingest contract](docs/evidence-contract.md)

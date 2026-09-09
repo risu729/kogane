@@ -132,7 +132,7 @@ bytes plus artifact metadata to typed observations. Its obligations:
     Partial and failed artifacts stay queryable as layer-A evidence and have
     no parse run or observations.
 
-The contract in `poc/observation-pipeline/src/types.ts`:
+The contract in `packages/parsers/src/types.ts`:
 
 ```ts
 export interface Parser {
@@ -994,7 +994,7 @@ than merely recorded.
 
 ## The first parsers
 
-Four exist in `poc/observation-pipeline/src/parsers/`, all at version
+Four exist in `packages/parsers/src/parsers/`, all at version
 `0.2.0`.
 
 **`sbi-domestic-trade-records`** consumes the `domestic-trade-records`

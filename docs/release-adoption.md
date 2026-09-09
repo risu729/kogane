@@ -30,17 +30,23 @@ valid `observation_parse_jobs.target_release` value.
 
 ## Transform manifest and input fingerprint
 
-`poc/observation-pipeline/scripts/parser-digests.ts` hashes each parser's own
+`packages/parsers/scripts/parser-digests.ts` hashes each parser's own
 module plus every local module it transitively imports (shared helpers, the
 parser types, the domain coverage contract) and writes
 `src/parsers/digests.ts`, which the registry re-exports. The range is
 deliberately narrower than a repository commit: a UI change must not invalidate
 every historical parse, a change to `src/parsers/util.ts` must. Regenerate with
-`bun run scripts/parser-digests.ts` from `poc/observation-pipeline` after a
+`bun run scripts/parser-digests.ts` from `packages/parsers` after a
 deliberate parser change; the generator refuses to record a changed digest for
 an unchanged version, and `test/parser-digests.test.ts` fails when the
 checked-in file no longer matches the sources or a recorded version disagrees
 with the registry.
+
+The recorded source paths are the ones these modules had inside
+`poc/observation-pipeline` before design review D07 moved them, because the
+digest covers paths as well as contents and a stored `code_digest` must not
+change when a file is only relocated. See
+[package layout](package-layout.md).
 
 `services/observation-pipeline/src/releases.ts` turns a deployed parser and a
 metadata extractor release into that manifest, its digest and a release id, and
