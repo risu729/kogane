@@ -11,6 +11,14 @@ export default defineConfig({
           TEST_MIGRATIONS: await readD1Migrations(
             path.join(import.meta.dirname, "../raw-evidence/migrations"),
           ),
+          // The workers pool does not inherit the host process environment, so
+          // the opt-in load harness reads its shape from this binding
+          // (test/load.test.ts, scripts/load-fixture.ts).
+          KOGANE_LOAD_CONFIG: JSON.stringify(
+            Object.fromEntries(
+              Object.entries(process.env).filter(([name]) => name.startsWith("KOGANE_LOAD")),
+            ),
+          ),
         },
       },
     })),

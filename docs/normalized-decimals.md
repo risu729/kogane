@@ -31,6 +31,20 @@ SQLビューが方針の定義元。トリガーは `scripts/generate-decimal-tr
 
 戻す場合は旧Workerへ戻せばよい。追加されたDB表・トリガーは旧APIと互換なので残す。DB全体の復元は移行後の取得を失う可能性があるため通常のロールバック手段にしない。方針の変更は別バージョンの追加移行で行い、適用済み移行を編集しない。
 
+## 方針の選択と追加手順
+
+`InterpretationContext.decimalPolicyRelease` は、投影が存在する名前だけを取り得る。判定は `services/evidence-browser/src/decimal-policy.ts` の `DECIMAL_POLICY_PROJECTIONS` が持ち、`decimalPolicySelection(url)` が `decimalPolicy` クエリパラメータを解決する。指定が無ければ `decimal-v1`。形式が不正な値は 400 `invalid_query`、形式は正しいが投影が存在しない値は 400 `unsupported_semantics` を返す。既定の `decimal-v1` へ黙って読み替えない。`decimalRows()` は選ばれた `policy_version` で投影を読む。
+
+現在この契約を公開しているのは `GET /api/v2/reports/{id}` のみで、応答の `interpretationContext.decimalPolicyRelease` に選択結果が入る。既存の一覧API（`/api/transactions` 等）はパラメータ集合を共有スキーマの capability から導いているため、そちらへ広げる場合は `LIST_REQUEST_SCHEMA` と `ApiCapabilities` の変更（D14/A08 の担当範囲）を伴う。サーバだけが黙って追加パラメータを受け付ける状態にはしない。
+
+第二の方針を追加する手順は次の通り（根本レビュー 07 §6）。`0024_observation_decimals.sql` は編集しない。
+
+1. 新しい追加マイグレーションで、`policy_version` を鍵に含む投影を作る。新表でも互換ビューでもよいが、`decimal-v1` の行は書き換えない。
+2. 過去分の backfill は DDL と分け、再開可能な処理にする。大きな表を一度のマイグレーションで走査しない。
+3. `DECIMAL_POLICY_PROJECTIONS` に名前を登録する。ここに無い名前は API から選べない。
+4. 二方針を並べて比較するテストを追加し、既存の `decimal-v1` の結果が不変であることを確認する。
+5. 配備順はDB移行→API/UI。旧Workerは新しい名前を知らないので既定のまま動く。
+
 ## 検証
 
 任意精度、小数桁、負のゼロ、未知通貨、矛盾、欠損、原行の不変性、挿入時の原子性を検証する。3,000件の追加について過去全件走査の退行も検査する。API契約、D1実行環境、画面の外貨・暗号資産ゼロ除外を含む自動テストを実施。実データの予行はメモリ内で行い、金額や口座情報をログ・公開資料に保存しない。

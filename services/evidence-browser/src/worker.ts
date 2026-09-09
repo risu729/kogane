@@ -5,6 +5,7 @@ import {
 import { authenticate } from "./auth";
 import { observationApi } from "./observation-api";
 import { identityApi } from "./identity-api";
+import { reportsApi } from "./reports-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
 import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw } from "./read";
 
@@ -15,6 +16,7 @@ function classify(path: string): string {
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts$/.test(path)) return "run_artifacts";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+\/raw$/.test(path)) return "artifact_raw";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+$/.test(path)) return "artifact_detail";
+  if (/^\/api\/v2\/reports\/[^/]+(?:\/(?:explanation|export))?$/.test(path)) return "report";
   return path.startsWith("/api/") ? "unknown_api" : "assets";
 }
 
@@ -24,6 +26,10 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     throw new HttpError(405, "method_not_allowed");
   const identityResponse = await catalogue(() => identityApi(request, env, url));
   if (identityResponse) return identityResponse;
+  // Fixed report artifacts (A12). Re-display only; recomputing and sharing a
+  // correction are commands, not reads (docs/calculation-and-reports.md).
+  const reportResponse = await catalogue(() => reportsApi(env, url));
+  if (reportResponse) return reportResponse;
   const observationResponse = await catalogue(() => observationApi(request, env, url));
   if (observationResponse) return observationResponse;
   if (env.EVIDENCE_SOURCE_ID !== "sony-bank") throw new HttpError(503, "source_not_configured");

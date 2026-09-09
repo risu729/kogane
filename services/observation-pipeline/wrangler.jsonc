@@ -9,6 +9,9 @@
   "preview_urls": false,
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "triggers": { "crons": ["*/5 * * * *"] },
+  // A12 report job. Off by default: turning it on makes the scheduled handler
+  // write calculation runs and report artifacts (docs/calculation-and-reports.md).
+  "vars": { "REPORTS_ENABLED": "false" },
   "limits": { "cpu_ms": 300000 },
   "d1_databases": [
     {

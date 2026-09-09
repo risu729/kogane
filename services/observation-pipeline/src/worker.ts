@@ -18,6 +18,8 @@ import {
   REPAIR_LIMIT_DEFAULT,
   repairPublication,
 } from "./publication-gate.ts";
+import { reportsEnabled, runReportJob } from "./report-job.ts";
+import { DECIMAL_POLICY_RELEASE } from "../../../packages/read-model/src/identity";
 import type {
   ArtifactMeta,
   CoverageClaim,
@@ -27,6 +29,10 @@ import type {
   ParseResult,
 } from "../../../poc/observation-pipeline/src/types.ts";
 
+// The holdings report is generated in one base unit against one perimeter;
+// nothing is converted into the base unit without a price observation.
+const REPORT_BASE_UNIT = "JPY";
+const REPORT_PERIMETER = "perimeter:all-visible-evidence";
 const SCAN_PAGE = 200;
 const JOBS_PER_SWEEP = 12;
 const MAX_BYTES = 16 * 1024 * 1024;
@@ -1254,10 +1260,25 @@ export async function snapshotPolicyComparison(env: Env): Promise<Response> {
 export interface ScheduledStages {
   parse: (env: Env) => Promise<object>;
   identity: (env: Env) => Promise<object>;
+  /** A12 report job. Only runs while REPORTS_ENABLED is on; see docs/calculation-and-reports.md. */
+  reports?: (env: Env) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
   identity: (env) => identitySweep(env.DB, resolveIdentity),
+  reports: (env) => {
+    // One clock reading for both fields: the run records when it ran, and the
+    // cutoff admits everything recorded up to that same instant.
+    const now = new Date().toISOString();
+    return runReportJob(env, {
+      actor: "report-job",
+      now,
+      unitRef: REPORT_BASE_UNIT,
+      perimeterRef: REPORT_PERIMETER,
+      knowledgeCutoff: now,
+      decimalPolicyRelease: DECIMAL_POLICY_RELEASE,
+    });
+  },
 };
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
@@ -1268,10 +1289,15 @@ export async function runScheduled(
   stages: ScheduledStages = defaultStages,
   log: (line: string) => void = (line) => console.log(line),
 ): Promise<void> {
-  for (const [event, stage] of [
+  // The report stage is added only while the flag is on, so a deployment with
+  // reports off logs and writes exactly what it did before (A12).
+  const entries: (readonly [string, (env: Env) => Promise<object>])[] = [
     ["observation_sweep", stages.parse],
     ["identity_sweep", stages.identity],
-  ] as const) {
+  ];
+  if (stages.reports && reportsEnabled(env.REPORTS_ENABLED))
+    entries.push(["report_job", stages.reports]);
+  for (const [event, stage] of entries) {
     try {
       log(JSON.stringify({ event, ...(await stage(env)) }));
     } catch (error) {

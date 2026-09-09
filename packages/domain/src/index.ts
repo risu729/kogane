@@ -8,6 +8,8 @@ export * from "./coverage.ts";
 export * from "./context.ts";
 export * from "./decisions.ts";
 export * from "./result.ts";
+export * from "./calculation.ts";
+export * from "./reports.ts";
 export {
   hasExactKeys,
   isRecord,
