@@ -6,7 +6,7 @@ import type {
   TransactionObservation,
 } from "../types.ts";
 import { containerClaim } from "./coverage.ts";
-import { decodeUtf8, isObject } from "./util.ts";
+import { decodeUtf8, isObject, unitScopeAdmitted } from "./util.ts";
 
 const SOURCE_ID = "smbc-bank";
 const SOURCE_ACCOUNT = "smbc-bank:ordinary-yen";
@@ -197,7 +197,10 @@ function requireArtifactKey(artifact: ArtifactMeta, expected: string): void {
 }
 
 function requireSuccessfulRun(artifact: ArtifactMeta): void {
-  if (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) {
+  if (
+    (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) &&
+    !unitScopeAdmitted(artifact)
+  ) {
     throw new Error("SMBC Direct observations require a successful failure-free fetch run");
   }
 }

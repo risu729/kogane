@@ -10,6 +10,25 @@
 export { minorUnitExponent } from "../money.ts";
 import { minorUnitExponent } from "../money.ts";
 
+import type { ArtifactMeta } from "../types.ts";
+
+/**
+ * Design review D13: a parser's "the capture succeeded" precondition is about
+ * the range it is parsing, not necessarily about the whole fetch run. This is
+ * the one relaxation: the caller (the pipeline Worker, or the local store's
+ * artifact listing) sets `unitScopeEligibility` when the artifact's dataset
+ * names the `unit` scope in `dataset_snapshot_policies` AND the artifact's own
+ * fetch unit reported terminal success, so an independent card that succeeded
+ * is parseable even though a sibling card failed and the run is `partial`.
+ *
+ * A parser never decides the policy itself, and no dataset is seeded on the
+ * `unit` scope, so this returns false for every artifact today and every
+ * parser precondition is byte-for-byte the pre-PR-14 rule.
+ */
+export function unitScopeAdmitted(artifact: Pick<ArtifactMeta, "unitScopeEligibility">): boolean {
+  return artifact.unitScopeEligibility === "unit-independent-v1";
+}
+
 /**
  * Validate digit grouping and remove it. Commas are only accepted as
  * thousands separators in a well-formed group pattern, because a source that

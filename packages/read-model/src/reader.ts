@@ -13,6 +13,7 @@ import type {
   Overview,
   PositionWithValuations,
   TransactionRow,
+  UnitUpdateSummary,
 } from "../../../poc/observation-pipeline/shared/api-contract";
 import type { MeasureView, PageLimit } from "./scope";
 
@@ -92,6 +93,12 @@ export interface ParsingHealth {
 
 export interface ObservationReader {
   overview(): Promise<Overview>;
+  /**
+   * D13 partial-update signal: partial fetch runs that refreshed some units of
+   * a dataset on the `unit` eligibility scope. Empty for every dataset on the
+   * seeded `run` scope, which is why `overview()` omits the key entirely then.
+   */
+  unitUpdates(): Promise<UnitUpdateSummary[]>;
   /** Registered parsing backlog for `/api/meta`; also probes that visible evidence is readable. */
   parsingHealth(): Promise<ParsingHealth>;
   listTransactions(query: TransactionQuery): Promise<TransactionRow[]>;
