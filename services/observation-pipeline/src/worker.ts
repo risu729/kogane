@@ -448,55 +448,259 @@ async function executeParseJob(
   }
 }
 
-export async function sweep(env: Env, maxJobs = JOBS_PER_SWEEP) {
-  maxJobs = Math.max(1, Math.min(40, Math.trunc(maxJobs) || JOBS_PER_SWEEP));
+const LANES = ["incremental", "repair", "replay"] as const;
+export type Lane = (typeof LANES)[number];
+/** Jobs executed per sweep and lane. Incremental keeps the historical
+ * per-sweep budget; repair and replay are smaller so a large replay backlog
+ * or a slow history scan never delays freshly sealed evidence. */
+const LANE_BUDGETS: Record<Lane, number> = { incremental: JOBS_PER_SWEEP, repair: 4, replay: 8 };
+const MAX_LANE_JOBS = 40;
+const WORK_ITEMS_PER_SWEEP = 50;
+const WORK_ITEM_PAGE = 100;
+const WORK_ITEM_PAGES_PER_SWEEP = 5;
+const REPAIR_SCAN_PAGE = 100;
+const REPLAY_STEP = 200;
+const REPLAY_PLANS_PER_SWEEP = 2;
+const PLAN_STATUSES = ["planned", "running", "paused", "completed", "cancelled"] as const;
+type PlanStatus = (typeof PLAN_STATUSES)[number];
+interface PlanRow {
+  id: number;
+  created_at_ms: number;
+  updated_at_ms: number;
+  source_id: string;
+  dataset: string | null;
+  parser_name: string;
+  parser_version: string;
+  target_release: string | null;
+  artifact_id_from: number;
+  artifact_id_high_water: number;
+  fetched_from: string | null;
+  fetched_to: string | null;
+  status: PlanStatus;
+  estimated_artifacts: number;
+  already_parsed: number;
+  jobs_created: number;
+  creation_cursor: number;
+  creation_complete: number;
+  reason: string;
+}
+export interface LaneSummary {
+  created: number;
+  parsed: number;
+  error: number;
+  skipped: number;
+  scanned: number;
+  workItems: number;
+  plans: number;
+}
+export interface SweepOptions {
+  maxJobs?: number;
+  lane?: Lane;
+}
+
+function jobInsert(
+  env: Env,
+  artifactId: number,
+  parser: Pick<Parser, "name" | "version">,
+  lane: Lane,
+  now: number,
+  plan?: Pick<PlanRow, "id" | "target_release">,
+): D1PreparedStatement {
+  return env.DB.prepare(
+    "INSERT OR IGNORE INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,lane,created_at_ms,replay_plan_id,target_release) VALUES(?,?,?,'pending',?,?,?,?)",
+  ).bind(
+    artifactId,
+    parser.name,
+    parser.version,
+    lane,
+    now,
+    plan?.id ?? null,
+    plan?.target_release ?? null,
+  );
+}
+
+async function insertJobs(env: Env, inserts: D1PreparedStatement[]): Promise<number> {
+  let created = 0;
+  for (let offset = 0; offset < inserts.length; offset += 50)
+    for (const result of await env.DB.batch(inserts.slice(offset, offset + 50)))
+      created += result.meta.changes;
+  return created;
+}
+
+/** Incremental lane: sealed-run notifications appended by the D1 trigger.
+ * Each item is examined in bounded artifact pages with a durable cursor, so a
+ * staged run of thousands of artifacts progresses across sweeps without
+ * blocking other items or repeating work after an interruption. */
+async function consumeWorkItems(env: Env, limit: number) {
+  const summary = { processed: 0, created: 0, examined: 0, cursor: 0 };
+  const items = await env.DB.prepare(
+    "SELECT id,fetch_run_id,cursor_artifact_id,jobs_created FROM observation_work_items WHERE processed_at_ms IS NULL ORDER BY id LIMIT ?",
+  )
+    .bind(limit)
+    .all<{ id: number; fetch_run_id: number; cursor_artifact_id: number; jobs_created: number }>();
+  let pages = 0;
+  for (const item of items.results) {
+    let cursor = item.cursor_artifact_id;
+    let created = 0;
+    let complete = false;
+    while (pages < WORK_ITEM_PAGES_PER_SWEEP) {
+      pages++;
+      const page = await env.DB.prepare(
+        artifactSql + " AND a.fetch_run_id=? AND a.id>? ORDER BY a.id LIMIT ?",
+      )
+        .bind(item.fetch_run_id, cursor, WORK_ITEM_PAGE)
+        .all<ArtifactRow>();
+      summary.examined += page.results.length;
+      const now = Date.now();
+      const inserts: D1PreparedStatement[] = [];
+      for (const row of page.results)
+        for (const parser of PARSERS)
+          if (parser.accepts(artifactMeta(row)))
+            inserts.push(jobInsert(env, row.id, parser, "incremental", now));
+      created += await insertJobs(env, inserts);
+      const last = page.results.at(-1);
+      if (last) cursor = last.id;
+      if (page.results.length < WORK_ITEM_PAGE) {
+        complete = true;
+        break;
+      }
+    }
+    const total = item.jobs_created + created;
+    const outcome = total > 0 ? "jobs_created" : cursor > 0 ? "no_new_jobs" : "not_eligible";
+    await env.DB.prepare(
+      "UPDATE observation_work_items SET cursor_artifact_id=?,jobs_created=?,processed_at_ms=CASE WHEN ? THEN ? ELSE NULL END,outcome=CASE WHEN ? THEN ? ELSE NULL END WHERE id=? AND processed_at_ms IS NULL",
+    )
+      .bind(cursor, total, complete ? 1 : 0, Date.now(), complete ? 1 : 0, outcome, item.id)
+      .run();
+    summary.created += created;
+    if (complete) {
+      summary.processed++;
+      summary.cursor = item.id;
+    }
+    if (pages >= WORK_ITEM_PAGES_PER_SWEEP) break;
+  }
+  return summary;
+}
+
+/** Repair lane: the historical cyclic artifact cursor in observation_scan_state
+ * row 1. It recovers lost notifications and discovers work for newly deployed
+ * parser versions, one bounded page per sweep. */
+async function repairScan(env: Env) {
   const state = await env.DB.prepare("SELECT cursor FROM observation_scan_state WHERE id=1").first<{
     cursor: number;
   }>();
+  const from = state?.cursor ?? 0;
   const candidates = await env.DB.prepare(
     "SELECT id FROM fetch_artifacts WHERE id>? ORDER BY id LIMIT ?",
   )
-    .bind(state?.cursor ?? 0, SCAN_PAGE)
+    .bind(from, REPAIR_SCAN_PAGE)
     .all<{ id: number }>();
-  if (candidates.results.length) {
-    const last = candidates.results.at(-1)!.id;
-    const eligible = await env.DB.prepare(artifactSql + " AND a.id>? AND a.id<=? ORDER BY a.id")
-      .bind(state?.cursor ?? 0, last)
-      .all<ArtifactRow>();
-    const known = await env.DB.prepare(
-      "SELECT fetch_artifact_id,parser_name,parser_version FROM observation_parse_jobs WHERE fetch_artifact_id>? AND fetch_artifact_id<=?",
-    )
-      .bind(state?.cursor ?? 0, last)
-      .all<Job>();
-    const knownKeys = new Set(
-      known.results.map(
-        (job) => `${job.fetch_artifact_id}/${job.parser_name}/${job.parser_version}`,
-      ),
-    );
-    const inserts: D1PreparedStatement[] = [];
-    for (const row of eligible.results)
-      for (const parser of PARSERS) {
-        if (
-          parser.accepts(artifactMeta(row)) &&
-          !knownKeys.has(`${row.id}/${parser.name}/${parser.version}`) &&
-          inserts.length < SCAN_PAGE
-        )
-          inserts.push(
-            env.DB.prepare(
-              "INSERT OR IGNORE INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status) VALUES(?,?,?,'pending')",
-            ).bind(row.id, parser.name, parser.version),
-          );
-      }
-    for (let offset = 0; offset < inserts.length; offset += 50)
-      await env.DB.batch(inserts.slice(offset, offset + 50));
-    await env.DB.prepare("UPDATE observation_scan_state SET cursor=? WHERE id=1 AND cursor=?")
-      .bind(last, state?.cursor ?? 0)
-      .run();
-  } else {
+  const summary = { scanned: candidates.results.length, created: 0, cursor: 0 };
+  if (!candidates.results.length) {
     await env.DB.prepare("UPDATE observation_scan_state SET cursor=0 WHERE id=1 AND cursor=?")
-      .bind(state?.cursor ?? 0)
+      .bind(from)
       .run();
+    return summary;
   }
+  const last = candidates.results.at(-1)!.id;
+  const eligible = await env.DB.prepare(artifactSql + " AND a.id>? AND a.id<=? ORDER BY a.id")
+    .bind(from, last)
+    .all<ArtifactRow>();
+  const known = await env.DB.prepare(
+    "SELECT fetch_artifact_id,parser_name,parser_version FROM observation_parse_jobs WHERE fetch_artifact_id>? AND fetch_artifact_id<=?",
+  )
+    .bind(from, last)
+    .all<Job>();
+  const knownKeys = new Set(
+    known.results.map((job) => `${job.fetch_artifact_id}/${job.parser_name}/${job.parser_version}`),
+  );
+  const now = Date.now();
+  const inserts: D1PreparedStatement[] = [];
+  for (const row of eligible.results)
+    for (const parser of PARSERS) {
+      if (
+        parser.accepts(artifactMeta(row)) &&
+        !knownKeys.has(`${row.id}/${parser.name}/${parser.version}`) &&
+        inserts.length < SCAN_PAGE
+      )
+        inserts.push(jobInsert(env, row.id, parser, "repair", now));
+    }
+  summary.created = await insertJobs(env, inserts);
+  await env.DB.prepare("UPDATE observation_scan_state SET cursor=? WHERE id=1 AND cursor=?")
+    .bind(last, from)
+    .run();
+  summary.cursor = last;
+  return summary;
+}
+
+// Range filters shared by plan estimation and bounded job creation. The
+// artifact id high-water is fixed at plan time; ?3 is the creation cursor.
+const replayFilterSql = ` AND a.source_id=?1 AND (?2 IS NULL OR a.dataset=?2) AND a.id>?3 AND a.id<=?4
+ AND substr(a.fetched_at,1,10)>=coalesce(?5,'0000-00-00') AND substr(a.fetched_at,1,10)<=coalesce(?6,'9999-12-31')`;
+
+/** One bounded creation step for a running plan. Jobs that already exist at
+ * this artifact/parser/version keep their lane; a job for a version with a
+ * published success is skipped by executeParseJob exactly like any other. */
+async function replayStep(env: Env, plan: PlanRow) {
+  const parser = PARSERS.find(
+    (p) => p.name === plan.parser_name && p.version === plan.parser_version,
+  );
+  if (!parser || plan.status !== "running" || plan.creation_complete)
+    return { created: 0, examined: 0, complete: plan.creation_complete === 1 };
+  const rows = await env.DB.prepare(artifactSql + replayFilterSql + " ORDER BY a.id LIMIT ?7")
+    .bind(
+      plan.source_id,
+      plan.dataset,
+      Math.max(plan.creation_cursor, plan.artifact_id_from),
+      plan.artifact_id_high_water,
+      plan.fetched_from,
+      plan.fetched_to,
+      REPLAY_STEP,
+    )
+    .all<ArtifactRow>();
+  const now = Date.now();
+  const inserts = rows.results
+    .filter((row) => parser.accepts(artifactMeta(row)))
+    .map((row) => jobInsert(env, row.id, parser, "replay", now, plan));
+  const created = await insertJobs(env, inserts);
+  const complete = rows.results.length < REPLAY_STEP;
+  const cursor = complete ? plan.artifact_id_high_water : rows.results.at(-1)!.id;
+  await env.DB.prepare(
+    "UPDATE observation_replay_plans SET creation_cursor=?,creation_complete=?,jobs_created=jobs_created+?,updated_at_ms=? WHERE id=? AND status='running'",
+  )
+    .bind(cursor, complete ? 1 : 0, created, now, plan.id)
+    .run();
+  return { created, examined: rows.results.length, complete };
+}
+
+async function replayCreation(env: Env) {
+  const summary = { created: 0, examined: 0, plans: 0, cursor: 0 };
+  const plans = await env.DB.prepare(
+    "SELECT * FROM observation_replay_plans WHERE status='running' AND creation_complete=0 ORDER BY id LIMIT ?",
+  )
+    .bind(REPLAY_PLANS_PER_SWEEP)
+    .all<PlanRow>();
+  for (const plan of plans.results) {
+    const step = await replayStep(env, plan);
+    summary.created += step.created;
+    summary.examined += step.examined;
+    summary.plans++;
+    summary.cursor = plan.id;
+  }
+  return summary;
+}
+
+async function completeReplayPlans(env: Env): Promise<number> {
+  const result = await env.DB.prepare(
+    `UPDATE observation_replay_plans SET status='completed',updated_at_ms=? WHERE status='running' AND creation_complete=1
+      AND NOT EXISTS(SELECT 1 FROM observation_parse_jobs j WHERE j.replay_plan_id=observation_replay_plans.id AND j.status IN ('pending','running'))`,
+  )
+    .bind(Date.now())
+    .run();
+  return result.meta.changes;
+}
+
+async function maintenance(env: Env): Promise<void> {
   // An invocation terminated on its final attempt remains inspectable and does
   // not pin the work queue forever after its lease expires.
   await env.DB.prepare(
@@ -505,24 +709,57 @@ export async function sweep(env: Env, maxJobs = JOBS_PER_SWEEP) {
     .bind(MAX_ATTEMPTS, Date.now())
     .run();
   await env.DB.prepare(
-    "UPDATE parse_runs SET status='error',error='parse_interrupted' WHERE status='pending' AND EXISTS(SELECT 1 FROM observation_parse_jobs j WHERE j.fetch_artifact_id=parse_runs.fetch_artifact_id AND j.parser_name=parse_runs.parser_name AND j.parser_version=parse_runs.parser_version AND j.status='failed' AND j.last_error_code='lease_exhausted')",
+    "UPDATE parse_runs SET status='error',error='parse_interrupted' WHERE status='pending' AND EXISTS(SELECT 1 FROM observation_parse_jobs j WHERE j.fetch_artifact_id=parse_runs.fetch_artifact_id AND j.parser_name=parse_runs.parser_name AND j.parser_version=parse_runs.parser_version AND j.status='failed' AND j.last_error_code IN ('lease_exhausted','replay_cancelled'))",
   ).run();
   // Also repairs an interrupted post-publication retirement on the next sweep.
   await retireReplacedJobs(env.DB);
+}
+
+async function runLane(env: Env, lane: Lane, budget: number): Promise<LaneSummary> {
+  const summary: LaneSummary = {
+    created: 0,
+    parsed: 0,
+    error: 0,
+    skipped: 0,
+    scanned: 0,
+    workItems: 0,
+    plans: 0,
+  };
+  let cursor = 0;
+  if (lane === "incremental") {
+    const items = await consumeWorkItems(env, WORK_ITEMS_PER_SWEEP);
+    summary.created = items.created;
+    summary.workItems = items.processed;
+    summary.scanned = items.examined;
+    cursor = items.cursor;
+  } else if (lane === "repair") {
+    const scan = await repairScan(env);
+    summary.created = scan.created;
+    summary.scanned = scan.scanned;
+    cursor = scan.cursor;
+  } else {
+    const creation = await replayCreation(env);
+    summary.created = creation.created;
+    summary.scanned = creation.examined;
+    summary.plans = creation.plans;
+    cursor = creation.cursor;
+  }
+  // Paused or cancelled plans stop unclaimed replay jobs only; a claimed lease
+  // finishes through the same fenced publish path as every other job.
   const ready = await env.DB.prepare(
-    `SELECT * FROM observation_parse_jobs j WHERE attempts<? AND ((status='pending' AND available_at_ms<=?) OR (status='running' AND lease_until_ms<=?))
-      AND EXISTS(SELECT 1 FROM json_each(?) r WHERE json_extract(r.value,'$.name')=j.parser_name AND json_extract(r.value,'$.version')=j.parser_version)
-      ORDER BY available_at_ms,fetch_artifact_id LIMIT ?`,
+    `SELECT * FROM observation_parse_jobs j WHERE j.lane=?1 AND attempts<?2 AND ((status='pending' AND available_at_ms<=?3) OR (status='running' AND lease_until_ms<=?3))
+      AND EXISTS(SELECT 1 FROM json_each(?4) r WHERE json_extract(r.value,'$.name')=j.parser_name AND json_extract(r.value,'$.version')=j.parser_version)
+      AND (j.replay_plan_id IS NULL OR EXISTS(SELECT 1 FROM observation_replay_plans p WHERE p.id=j.replay_plan_id AND p.status='running'))
+      ORDER BY priority DESC,available_at_ms,fetch_artifact_id LIMIT ?5`,
   )
     .bind(
+      lane,
       MAX_ATTEMPTS,
       Date.now(),
-      Date.now(),
       JSON.stringify(PARSERS.map(({ name, version }) => ({ name, version }))),
-      maxJobs,
+      budget,
     )
     .all<Job>();
-  const summary = { scanned: candidates.results.length, parsed: 0, error: 0, skipped: 0 };
   for (const job of ready.results) {
     const parser = PARSERS.find(
       (p) => p.name === job.parser_name && p.version === job.parser_version,
@@ -533,7 +770,40 @@ export async function sweep(env: Env, maxJobs = JOBS_PER_SWEEP) {
     }
     summary[await parseJob(env, job, parser)]++;
   }
+  if (lane === "replay") summary.plans += await completeReplayPlans(env);
+  await env.DB.prepare(
+    "UPDATE observation_lane_state SET cursor=?,last_sweep_at_ms=?,last_created=?,last_executed=? WHERE lane=?",
+  )
+    .bind(cursor, Date.now(), summary.created, summary.parsed + summary.error, lane)
+    .run();
   return summary;
+}
+
+function clampJobs(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.min(MAX_LANE_JOBS, Math.trunc(value) || fallback));
+}
+
+/** Lanes consume independent budgets in order incremental → repair → replay.
+ * `maxJobs` without a lane overrides the incremental budget only (the
+ * historical meaning of the sweep budget); with `lane`, only that lane runs. */
+export async function sweep(env: Env, options: SweepOptions = {}) {
+  const budgets = { ...LANE_BUDGETS };
+  const only = options.lane;
+  budgets[only ?? "incremental"] = clampJobs(options.maxJobs, budgets[only ?? "incremental"]);
+  await maintenance(env);
+  const lanes: Partial<Record<Lane, LaneSummary>> = {};
+  const totals = { scanned: 0, parsed: 0, error: 0, skipped: 0 };
+  for (const lane of LANES) {
+    if (only && lane !== only) continue;
+    const summary = await runLane(env, lane, budgets[lane]);
+    lanes[lane] = summary;
+    totals.scanned += summary.scanned;
+    totals.parsed += summary.parsed;
+    totals.error += summary.error;
+    totals.skipped += summary.skipped;
+  }
+  return { ...totals, lanes };
 }
 
 async function bounded(request: Request, limit: number): Promise<string | null> {
@@ -561,20 +831,283 @@ async function bounded(request: Request, limit: number): Promise<string | null> 
   }
 }
 
+async function command(request: Request): Promise<Record<string, unknown> | null> {
+  const body = await bounded(request, 4096);
+  if (body === null) return null;
+  let value: unknown;
+  try {
+    value = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+const invalid = (code: string) => Response.json({ error: code }, { status: 400 });
+const conflict = (code: string) => Response.json({ error: code }, { status: 409 });
+
+function optionalText(value: unknown, pattern: RegExp): string | null | undefined {
+  if (value === undefined || value === null) return null;
+  return typeof value === "string" && pattern.test(value) ? value : undefined;
+}
+
+async function inspectPlan(env: Env, id: number): Promise<Response> {
+  const plan = await env.DB.prepare("SELECT * FROM observation_replay_plans WHERE id=?")
+    .bind(id)
+    .first<PlanRow>();
+  if (!plan) return Response.json({ error: "plan_not_found" }, { status: 404 });
+  const counts = await env.DB.prepare(
+    "SELECT status,count(*) AS count FROM observation_parse_jobs WHERE replay_plan_id=? GROUP BY status",
+  )
+    .bind(id)
+    .all<{ status: string; count: number }>();
+  const jobs = { pending: 0, running: 0, done: 0, failed: 0 };
+  for (const row of counts.results)
+    if (row.status in jobs) jobs[row.status as keyof typeof jobs] = row.count;
+  return Response.json({
+    plan,
+    jobs,
+    parserDeployed: PARSERS.some(
+      (p) => p.name === plan.parser_name && p.version === plan.parser_version,
+    ),
+  });
+}
+
+async function planReplay(env: Env, v: Record<string, unknown>): Promise<Response> {
+  const source = optionalText(v.source, /^[a-z0-9-]{1,100}$/);
+  const dataset = optionalText(v.dataset, /^[A-Za-z0-9._-]{1,200}$/);
+  const targetRelease = optionalText(v.targetRelease, /^[A-Za-z0-9._-]{1,100}$/);
+  const fetchedFrom = optionalText(v.fetchedFrom, /^\d{4}-\d{2}-\d{2}$/);
+  const fetchedTo = optionalText(v.fetchedTo, /^\d{4}-\d{2}-\d{2}$/);
+  const reason = optionalText(v.reason, /^[^\p{Cc}]{1,500}$/u);
+  const from = v.artifactIdFrom ?? 0;
+  if (!source) return invalid("source_invalid");
+  if (dataset === undefined) return invalid("dataset_invalid");
+  if (targetRelease === undefined) return invalid("target_release_invalid");
+  if (fetchedFrom === undefined || fetchedTo === undefined) return invalid("window_invalid");
+  if (!reason) return invalid("reason_required");
+  if (typeof from !== "number" || !Number.isSafeInteger(from) || from < 0)
+    return invalid("artifact_id_from_invalid");
+  // Only a deployed parser version can execute; the registry filter in the
+  // ready query would leave any other version pending forever.
+  const parser = PARSERS.find((p) => p.name === v.parser && p.version === v.version);
+  if (!parser) return invalid("parser_not_deployed");
+  const highWater =
+    (await env.DB.prepare("SELECT coalesce(max(id),0) AS id FROM fetch_artifacts").first<number>(
+      "id",
+    )) ?? 0;
+  // Parser acceptance is applied at job creation, so this is an upper bound
+  // of eligible artifacts in range, never a financial value.
+  const estimate = await env.DB.prepare(
+    `SELECT count(*) AS n,coalesce(sum(EXISTS(SELECT 1 FROM parse_runs p WHERE p.fetch_artifact_id=a.id AND p.parser_name=?7 AND p.parser_version=?8 AND p.status='ok')),0) AS parsed
+      FROM (${artifactSql}${replayFilterSql}) a`,
+  )
+    .bind(source, dataset, from, highWater, fetchedFrom, fetchedTo, parser.name, parser.version)
+    .first<{ n: number; parsed: number }>();
+  const now = Date.now();
+  const inserted = await env.DB.prepare(
+    `INSERT INTO observation_replay_plans(created_at_ms,updated_at_ms,source_id,dataset,parser_name,parser_version,target_release,artifact_id_from,artifact_id_high_water,fetched_from,fetched_to,status,estimated_artifacts,already_parsed,creation_cursor,reason)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,'planned',?,?,?,?) RETURNING id`,
+  )
+    .bind(
+      now,
+      now,
+      source,
+      dataset,
+      parser.name,
+      parser.version,
+      targetRelease,
+      from,
+      highWater,
+      fetchedFrom,
+      fetchedTo,
+      estimate?.n ?? 0,
+      estimate?.parsed ?? 0,
+      from,
+      reason,
+    )
+    .first<{ id: number }>();
+  if (!inserted) return conflict("plan_insert_failed");
+  return inspectPlan(env, inserted.id);
+}
+
+/** Idempotent status transition: reaching `to` from any of `from` or being
+ * there already succeeds; any other current status is a conflict. */
+async function transition(
+  env: Env,
+  id: number,
+  from: readonly PlanStatus[],
+  to: PlanStatus,
+): Promise<Response | null> {
+  const result = await env.DB.prepare(
+    "UPDATE observation_replay_plans SET status=?,updated_at_ms=? WHERE id=? AND status IN (SELECT value FROM json_each(?))",
+  )
+    .bind(to, Date.now(), id, JSON.stringify(from))
+    .run();
+  if (result.meta.changes) return null;
+  const current = await env.DB.prepare("SELECT status FROM observation_replay_plans WHERE id=?")
+    .bind(id)
+    .first<PlanStatus>("status");
+  if (!current) return Response.json({ error: "plan_not_found" }, { status: 404 });
+  return current === to ? null : conflict(`plan_${current}`);
+}
+
+async function replayCommand(env: Env, action: string, request: Request): Promise<Response> {
+  const v = await command(request);
+  if (!v) return invalid("request_invalid");
+  if (action === "plan") return planReplay(env, v);
+  const id = v.planId;
+  if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1)
+    return invalid("plan_id_invalid");
+  let refused: Response | null = null;
+  switch (action) {
+    case "start": {
+      refused = await transition(env, id, ["planned"], "running");
+      if (refused) return refused;
+      const plan = await env.DB.prepare("SELECT * FROM observation_replay_plans WHERE id=?")
+        .bind(id)
+        .first<PlanRow>();
+      if (plan) await replayStep(env, plan);
+      break;
+    }
+    case "pause":
+      refused = await transition(env, id, ["planned", "running"], "paused");
+      break;
+    case "resume":
+      refused = await transition(env, id, ["paused"], "running");
+      break;
+    case "cancel": {
+      refused = await transition(env, id, ["planned", "running", "paused"], "cancelled");
+      if (refused) return refused;
+      // Unclaimed work only. Live leases finish; raw and Layer B stay intact.
+      await env.DB.prepare(
+        "UPDATE observation_parse_jobs SET status='failed',last_error_code='replay_cancelled',lease_token=NULL,lease_until_ms=0 WHERE replay_plan_id=? AND (status='pending' OR (status='running' AND lease_until_ms<=?))",
+      )
+        .bind(id, Date.now())
+        .run();
+      break;
+    }
+    case "inspect":
+      break;
+    default:
+      return new Response("Not found", { status: 404 });
+  }
+  return refused ?? inspectPlan(env, id);
+}
+
+async function status(env: Env): Promise<Response> {
+  const now = Date.now();
+  const jobs = await env.DB.prepare(
+    "SELECT status,count(*) AS count FROM observation_parse_jobs GROUP BY status",
+  ).all();
+  const laneRows = await env.DB.prepare(
+    "SELECT lane,status,count(*) AS count,min(CASE WHEN status='pending' AND created_at_ms>0 THEN created_at_ms END) AS oldest FROM observation_parse_jobs GROUP BY lane,status",
+  ).all<{ lane: Lane; status: string; count: number; oldest: number | null }>();
+  const lanes: Record<
+    Lane,
+    Record<"pending" | "running" | "done" | "failed", number> & {
+      oldestPendingAgeMs: number | null;
+    }
+  > = {
+    incremental: { pending: 0, running: 0, done: 0, failed: 0, oldestPendingAgeMs: null },
+    repair: { pending: 0, running: 0, done: 0, failed: 0, oldestPendingAgeMs: null },
+    replay: { pending: 0, running: 0, done: 0, failed: 0, oldestPendingAgeMs: null },
+  };
+  for (const row of laneRows.results) {
+    const lane = lanes[row.lane];
+    if (!lane) continue;
+    if (
+      row.status === "pending" ||
+      row.status === "running" ||
+      row.status === "done" ||
+      row.status === "failed"
+    )
+      lane[row.status] = row.count;
+    if (row.oldest !== null) lane.oldestPendingAgeMs = now - row.oldest;
+  }
+  const workItems = await env.DB.prepare(
+    "SELECT count(*) AS unprocessed,min(enqueued_at_ms) AS oldest FROM observation_work_items WHERE processed_at_ms IS NULL",
+  ).first<{ unprocessed: number; oldest: number | null }>();
+  const freshness = await env.DB.prepare(
+    `SELECT (SELECT max(sealed_at_ms) FROM fetch_run_seals) AS latest_sealed_at_ms,
+      (SELECT max(coalesce(a.fetched_at_ms,a.recorded_at_ms)) FROM fetch_artifacts a JOIN fetch_run_seals s ON s.fetch_run_id=a.fetch_run_id) AS latest_sealed_artifact_fetched_at_ms,
+      (SELECT max(parsed_at) FROM parse_runs WHERE status='ok') AS latest_parsed_at`,
+  ).first<{
+    latest_sealed_at_ms: number | null;
+    latest_sealed_artifact_fetched_at_ms: number | null;
+    latest_parsed_at: string | null;
+  }>();
+  const laneState = await env.DB.prepare(
+    "SELECT lane,cursor,last_sweep_at_ms,last_created,last_executed FROM observation_lane_state ORDER BY lane",
+  ).all();
+  const plans = await env.DB.prepare(
+    `SELECT id,status,source_id,dataset,parser_name,parser_version,target_release,artifact_id_from,artifact_id_high_water,estimated_artifacts,already_parsed,jobs_created,creation_complete,updated_at_ms
+      FROM observation_replay_plans WHERE status IN ('planned','running','paused') OR updated_at_ms>? ORDER BY id DESC LIMIT 50`,
+  )
+    .bind(now - 7 * 24 * 60 * 60 * 1000)
+    .all();
+  return Response.json({
+    parsers: PARSERS.map((p) => ({ name: p.name, version: p.version })),
+    jobs: jobs.results,
+    lanes,
+    workItems: {
+      unprocessed: workItems?.unprocessed ?? 0,
+      oldestUnprocessedAgeMs: workItems?.oldest == null ? null : now - workItems.oldest,
+    },
+    freshness: {
+      latestSealedAtMs: freshness?.latest_sealed_at_ms ?? null,
+      latestSealedArtifactFetchedAtMs: freshness?.latest_sealed_artifact_fetched_at_ms ?? null,
+      latestParsedAt: freshness?.latest_parsed_at ?? null,
+    },
+    laneState: laneState.results,
+    replayPlans: plans.results,
+  });
+}
+
+export interface ScheduledStages {
+  parse: (env: Env) => Promise<object>;
+  identity: (env: Env) => Promise<object>;
+}
+const defaultStages: ScheduledStages = {
+  parse: (env) => sweep(env),
+  identity: (env) => identitySweep(env.DB, resolveIdentity),
+};
+
+/** Each stage is isolated: a parse-sweep failure is logged as its own event
+ * and never stops the identity projection. Log lines carry counts and safe
+ * codes only, never provider values or exception text. */
+export async function runScheduled(
+  env: Env,
+  stages: ScheduledStages = defaultStages,
+  log: (line: string) => void = (line) => console.log(line),
+): Promise<void> {
+  for (const [event, stage] of [
+    ["observation_sweep", stages.parse],
+    ["identity_sweep", stages.identity],
+  ] as const) {
+    try {
+      log(JSON.stringify({ event, ...(await stage(env)) }));
+    } catch (error) {
+      const code =
+        error instanceof PipelineError
+          ? error.message
+          : error instanceof Error
+            ? error.constructor.name
+            : "unknown";
+      log(JSON.stringify({ event: `${event}_failed`, code }));
+    }
+  }
+}
+
 export default {
   async scheduled(_event: ScheduledController, env: Env): Promise<void> {
-    console.log(JSON.stringify({ event: "observation_sweep", ...(await sweep(env)) }));
-    console.log(
-      JSON.stringify({
-        event: "identity_sweep",
-        ...(await identitySweep(env.DB, resolveIdentity)),
-      }),
-    );
+    await runScheduled(env);
   },
   async fetch(request: Request, env: Env): Promise<Response> {
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url);
+    const path = url.pathname;
     if (request.method === "POST" && path === "/identity-sweep") {
-      const url = new URL(request.url);
       const source = url.searchParams.get("source") ?? undefined;
       if (source && !/^[a-z0-9-]{1,100}$/.test(source))
         return new Response("Invalid source", { status: 400 });
@@ -585,17 +1118,8 @@ export default {
     }
     if (request.method === "POST" && path === "/identity-revise") {
       // Internal service-binding endpoint; no public route. Bound request bytes.
-      const body = await bounded(request, 4096);
-      if (body === null) return new Response("Invalid request", { status: 400 });
-      let value: unknown;
-      try {
-        value = JSON.parse(body);
-      } catch {
-        return new Response("Invalid request", { status: 400 });
-      }
-      if (!value || typeof value !== "object" || Array.isArray(value))
-        return new Response("Invalid request", { status: 400 });
-      const v = value as Record<string, unknown>;
+      const v = await command(request);
+      if (!v) return new Response("Invalid request", { status: 400 });
       if (
         (v.kind !== "account" && v.kind !== "instrument") ||
         typeof v.referenceId !== "string" ||
@@ -617,22 +1141,21 @@ export default {
       }
       return Response.json({ revised: true });
     }
-    if (request.method === "POST" && path === "/sweep")
-      return Response.json(
-        await sweep(
-          env,
-          Number(new URL(request.url).searchParams.get("maxJobs")) || JOBS_PER_SWEEP,
-        ),
-      );
-    if (request.method === "GET" && path === "/status") {
-      const jobs = await env.DB.prepare(
-        "SELECT status,count(*) AS count FROM observation_parse_jobs GROUP BY status",
-      ).all();
-      return Response.json({
-        parsers: PARSERS.map((p) => ({ name: p.name, version: p.version })),
-        jobs: jobs.results,
-      });
+    if (request.method === "POST" && path === "/sweep") {
+      const options: SweepOptions = {};
+      const lane = url.searchParams.get("lane");
+      if (lane !== null) {
+        if (!LANES.includes(lane as Lane)) return invalid("lane_invalid");
+        options.lane = lane as Lane;
+      }
+      const maxJobs = url.searchParams.get("maxJobs");
+      if (maxJobs !== null) options.maxJobs = Number(maxJobs);
+      return Response.json(await sweep(env, options));
     }
+    // Replay commands share the private service-binding trust level of /sweep.
+    const replay = /^\/replay\/(plan|start|pause|resume|cancel|inspect)$/.exec(path);
+    if (request.method === "POST" && replay) return replayCommand(env, replay[1]!, request);
+    if (request.method === "GET" && path === "/status") return status(env);
     return new Response("Not found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
