@@ -4,7 +4,7 @@ import type { CentralInventoryItem } from "./types";
 
 const SOURCE = "vpass" as const;
 const PRODUCER = "collector-r2-importer";
-const INGEST_CONTRACT_VERSION = "vpass-r2-v2";
+export const INGEST_CONTRACT_VERSION = "vpass-r2-v2";
 const CENTRAL_CLIENT_ID = "collector-r2-vpass";
 const STORAGE_CONTAINER = "kogane-vpass-collector-poc";
 const STORAGE_TEMPLATE = "vpass/{date}/{run-id}/{artifact}";

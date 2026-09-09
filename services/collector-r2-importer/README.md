@@ -1,6 +1,6 @@
 # Collector R2 importer
 
-The event-driven and weekly repair design for all merged collector outboxes is documented in [docs/r2-outbox-reconciler.md](docs/r2-outbox-reconciler.md). It is configured but not deployed by that change.
+The event-driven and weekly repair design for all merged collector outboxes is documented in [docs/r2-outbox-reconciler.md](docs/r2-outbox-reconciler.md). It is configured but not deployed by that change. The per-source import adapters that both the HTTP routes and the reconciler execute, and the CI check that keeps them consistent, are documented in [docs/import-adapters.md](docs/import-adapters.md).
 
 各collectorのprivate R2をdurable outboxとして読み、中央`kogane-ingest`へraw-evidence契約に従って転送する内部専用Workerである。現在はSBI証券、SBI VC Trade、Sony銀行、SBI新生銀行、Mobile Suica、GLOBAL PASS、MyJCB、MoneyForward、V Point、Vpass、V Point Pay通知メール、SMBC Directに対応する。
 

@@ -1,26 +1,51 @@
+import {
+  IMPORT_ADAPTERS,
+  backfillAdapter,
+  executeImport,
+  importAdapter,
+  importRunAdapter,
+  reconcilerOutcome,
+  type AdapterResult,
+  type ImportAdapter,
+  type ImportCommand,
+  type ImportSource,
+  type ResumeState,
+} from "./adapters";
+import { parseGlobalPassLegacyEmptyAllowlist } from "./adapters/global-pass";
+import { importVpassBinding } from "./adapters/vpass";
 import { ImportError } from "./error";
-import { importGlobalPassRun } from "./global-pass";
-import { importMyJcbRun } from "./myjcb";
-import { importMobileSuicaRun } from "./mobile-suica";
-import { importMoneyForwardRun, moneyForwardTransferOffset } from "./moneyforward";
-import { importSbiRun } from "./sbi";
-import { importSbiShinseiRun } from "./sbi-shinsei";
-import { importSbiVcRun } from "./sbi-vc";
-import { importSmbcDirectRun } from "./smbc-direct";
-import { importSonyRun } from "./sony";
-import { importVPointRun } from "./v-point";
-import { importVpassRun } from "./vpass";
-import { importVpassCardBinding } from "./vpass-identity";
-import { importVPointPayEmailPair } from "./v-point-pay-email";
+import { moneyForwardTransferOffset } from "./moneyforward";
 import {
   processReconcilerMessage,
   weeklyRepairSeeds,
-  type ImportOutcome,
   type InternalMessage,
   type ReconcilerSource,
 } from "./reconciler";
 
+export { parseGlobalPassLegacyEmptyAllowlist };
+
 type JsonObject = Record<string, unknown>;
+
+/**
+ * Backfill cursor handlers keyed by adapter id. The route path and cursor
+ * budget are declared on the adapter; the cursor encoding stays source-specific.
+ */
+const BACKFILL_HANDLERS: {
+  readonly [K in ImportSource]: (env: Env, cursor: string | undefined) => Promise<JsonObject>;
+} = {
+  "global-pass": backfillGlobalPass,
+  "mobile-suica": backfillMobileSuica,
+  moneyforward: backfillMoneyForward,
+  myjcb: backfillMyJcb,
+  "sbi-securities": backfillSbiSecurities,
+  "sbi-shinsei": backfillSbiShinsei,
+  "sbi-vc-trade": backfillSbiVc,
+  "smbc-direct": backfillSmbcDirect,
+  "sony-bank": backfillSony,
+  vpass: backfillVpass,
+  "v-point": backfillVPoint,
+  "v-point-pay-email": backfillVPointPayEmail,
+};
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -32,591 +57,23 @@ export default {
         version: env.IMPORTER_VERSION,
       });
     }
-    if (request.method === "POST" && url.pathname === "/v1/myjcb/import-run" && url.search === "") {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["manifestKey", "continuation"]);
-        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
-        const continuation =
-          input.continuation === undefined
-            ? undefined
-            : requiredString(input.continuation, "continuation_invalid", 8_000);
-        const result = await importOneMyJcb(env, manifestKey, continuation);
-        return json(result, result.status === "deferred" ? 202 : 200);
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/moneyforward/import-run" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["manifestKey", "continuation"]);
-        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
-        const continuation =
-          input.continuation === undefined
-            ? undefined
-            : requiredString(input.continuation, "continuation_invalid", 8_000);
-        const result = await importOneMoneyForward(env, manifestKey, continuation);
-        return json(result, result.status === "deferred" ? 202 : 200);
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/moneyforward/backfill-page" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["cursor", "limit"]);
-        const cursor =
-          input.cursor === undefined
-            ? undefined
-            : requiredString(input.cursor, "cursor_invalid", 12_000);
-        if (input.limit !== undefined && input.limit !== 1) {
-          throw new ImportError(400, "backfill_limit_must_be_one");
+    if (request.method === "POST" && url.search === "") {
+      const importRun = importRunAdapter(url.pathname);
+      if (importRun) return importRunResponse(env, importRun, request);
+      const backfill = backfillAdapter(url.pathname);
+      if (backfill) return backfillResponse(env, backfill, request);
+      if (url.pathname === "/v1/vpass/import-card-binding") {
+        try {
+          const input = await readJson(request);
+          exactKeys(input, ["recordKey"]);
+          const result = await importVpassBinding(
+            env,
+            requiredString(input.recordKey, "record_key_invalid", 500),
+          );
+          return json(result);
+        } catch (error) {
+          return errorResponse(error);
         }
-        return json(await backfillMoneyForward(env, cursor));
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/vpass/import-card-binding" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["recordKey"]);
-        const result = await importVpassBinding(
-          env,
-          requiredString(input.recordKey, "record_key_invalid", 500),
-        );
-        return json(result);
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (request.method === "POST" && url.pathname === "/v1/vpass/import-run" && url.search === "") {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["recordKey", "continuation"]);
-        const recordKey = requiredString(input.recordKey, "record_key_invalid", 500);
-        const continuation =
-          input.continuation === undefined
-            ? undefined
-            : requiredString(input.continuation, "continuation_invalid", 16_000);
-        const result = await importOneVpass(env, recordKey, continuation);
-        return json(result, result.status === "deferred" ? 202 : 200);
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/vpass/backfill-page" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["cursor", "limit"]);
-        const cursor =
-          input.cursor === undefined
-            ? undefined
-            : requiredString(input.cursor, "cursor_invalid", 24_000);
-        if (input.limit !== undefined && input.limit !== 1) {
-          throw new ImportError(400, "backfill_limit_must_be_one");
-        }
-        return json(await backfillVpass(env, cursor));
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/myjcb/backfill-page" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["cursor", "limit"]);
-        const cursor =
-          input.cursor === undefined
-            ? undefined
-            : requiredString(input.cursor, "cursor_invalid", 16_000);
-        if (input.limit !== undefined && input.limit !== 1) {
-          throw new ImportError(400, "backfill_limit_must_be_one");
-        }
-        return json(await backfillMyJcb(env, cursor));
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/prestia-globalpass/import-run" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["manifestKey"]);
-        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
-        const result = await importOneGlobalPass(env, manifestKey, 0, true);
-        return json(result, result.status === "deferred" ? 202 : 200);
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/prestia-globalpass/backfill-page" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["cursor", "limit"]);
-        const cursor =
-          input.cursor === undefined
-            ? undefined
-            : requiredString(input.cursor, "cursor_invalid", 12_000);
-        if (input.limit !== undefined && input.limit !== 1) {
-          throw new ImportError(400, "backfill_limit_must_be_one");
-        }
-        return json(await backfillGlobalPass(env, cursor));
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/mobile-suica/import-run" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["manifestKey"]);
-        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
-        return json(await importOneMobileSuica(env, manifestKey));
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/v-point/import-run" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["manifestKey"]);
-        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
-        const result = await importOneVPoint(env, manifestKey, 0, true);
-        return json(result, result.status === "deferred" ? 202 : 200);
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/v-point/backfill-page" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["cursor", "limit"]);
-        const cursor =
-          input.cursor === undefined
-            ? undefined
-            : requiredString(input.cursor, "cursor_invalid", 12_000);
-        if (input.limit !== undefined && input.limit !== 1) {
-          throw new ImportError(400, "backfill_limit_must_be_one");
-        }
-        return json(await backfillVPoint(env, cursor));
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/v-point-pay-email/import-run" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["normalizedKey"]);
-        const normalizedKey = requiredString(input.normalizedKey, "normalized_key_invalid", 500);
-        return json(await importOneVPointPayEmail(env, normalizedKey));
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/v-point-pay-email/backfill-page" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["cursor", "limit"]);
-        const cursor =
-          input.cursor === undefined
-            ? undefined
-            : requiredString(input.cursor, "cursor_invalid", 4_096);
-        if (input.limit !== undefined && input.limit !== 1) {
-          throw new ImportError(400, "backfill_limit_must_be_one");
-        }
-        return json(await backfillVPointPayEmail(env, cursor));
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/mobile-suica/backfill-page" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["cursor", "limit"]);
-        const cursor =
-          input.cursor === undefined
-            ? undefined
-            : requiredString(input.cursor, "cursor_invalid", 4_096);
-        if (input.limit !== undefined && input.limit !== 1) {
-          throw new ImportError(400, "backfill_limit_must_be_one");
-        }
-        const listed = await env.MOBILE_SUICA_SNAPSHOTS.list({
-          prefix: "raw/mobile-suica/",
-          limit: 1,
-          ...(cursor ? { cursor } : {}),
-        });
-        const object = listed.objects[0];
-        let importedManifestCount = 0;
-        let skippedManifestCount = 0;
-        let failedManifestCount = 0;
-        let failureCode: string | undefined;
-        let result: Awaited<ReturnType<typeof importOneMobileSuica>> | undefined;
-        if (object?.key.endsWith("/manifest.json")) {
-          try {
-            result = await importOneMobileSuica(env, object.key);
-            importedManifestCount = 1;
-          } catch (error) {
-            failedManifestCount = 1;
-            failureCode = safeCode(error);
-          }
-        } else if (object) {
-          skippedManifestCount = 1;
-        }
-        return json({
-          source: "mobile-suica",
-          scannedObjectCount: listed.objects.length,
-          importedManifestCount,
-          skippedManifestCount,
-          deferredManifestCount: 0,
-          failedManifestCount,
-          nextCursor: listed.truncated ? (listed.cursor ?? null) : null,
-          truncated: listed.truncated,
-          ...(failureCode ? { failureCode } : {}),
-          ...(failedManifestCount === 1 && object ? { failedManifestKey: object.key } : {}),
-          ...(result ? { result } : {}),
-        });
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/sbi-securities/import-run" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["manifestKey"]);
-        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
-        return json(await importOne(env, manifestKey));
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/sbi-securities/backfill-page" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["cursor", "limit"]);
-        const cursor =
-          input.cursor === undefined
-            ? undefined
-            : requiredString(input.cursor, "cursor_invalid", 4_096);
-        if (input.limit !== undefined && input.limit !== 1) {
-          throw new ImportError(400, "backfill_limit_must_be_one");
-        }
-        const listed = await env.SBI_SNAPSHOTS.list({
-          prefix: "raw/sbi-securities/",
-          limit: 1,
-          ...(cursor ? { cursor } : {}),
-        });
-        const object = listed.objects[0];
-        let importedManifestCount = 0;
-        let skippedManifestCount = 0;
-        let failedManifestCount = 0;
-        let failureCode: string | undefined;
-        let result: Awaited<ReturnType<typeof importOne>> | undefined;
-        if (object?.key.endsWith("/manifest.json")) {
-          try {
-            result = await importOne(env, object.key);
-            importedManifestCount = 1;
-          } catch (error) {
-            failedManifestCount = 1;
-            failureCode = safeCode(error);
-          }
-        } else if (object) {
-          skippedManifestCount = 1;
-        }
-        return json({
-          source: "sbi-securities",
-          scannedObjectCount: listed.objects.length,
-          importedManifestCount,
-          skippedManifestCount,
-          failedManifestCount,
-          nextCursor: listed.truncated ? (listed.cursor ?? null) : null,
-          truncated: listed.truncated,
-          ...(failureCode ? { failureCode } : {}),
-          ...(result ? { result } : {}),
-        });
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/sbi-vc-trade/import-run" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["manifestKey", "continuation"]);
-        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
-        const continuation =
-          input.continuation === undefined
-            ? undefined
-            : requiredString(input.continuation, "continuation_invalid", 8_000);
-        const result = await importOneSbiVc(env, manifestKey, continuation);
-        return json(result, result.status === "deferred" ? 202 : 200);
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/sbi-shinsei/import-run" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["manifestKey"]);
-        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
-        return json(await importOneSbiShinsei(env, manifestKey));
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/sbi-shinsei/backfill-page" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["cursor", "limit"]);
-        const cursor =
-          input.cursor === undefined
-            ? undefined
-            : requiredString(input.cursor, "cursor_invalid", 4_096);
-        if (input.limit !== undefined && input.limit !== 1) {
-          throw new ImportError(400, "backfill_limit_must_be_one");
-        }
-        const listed = await env.SBI_SHINSEI_SNAPSHOTS.list({
-          prefix: "raw/sbi-shinsei/",
-          limit: 1,
-          ...(cursor ? { cursor } : {}),
-        });
-        const object = listed.objects[0];
-        let importedManifestCount = 0;
-        let skippedManifestCount = 0;
-        let failedManifestCount = 0;
-        let failureCode: string | undefined;
-        let result: Awaited<ReturnType<typeof importOneSbiShinsei>> | undefined;
-        if (object?.key.endsWith("/manifest.json")) {
-          try {
-            result = await importOneSbiShinsei(env, object.key);
-            importedManifestCount = 1;
-          } catch (error) {
-            failedManifestCount = 1;
-            failureCode = safeCode(error);
-          }
-        } else if (object) {
-          skippedManifestCount = 1;
-        }
-        return json({
-          source: "sbi-shinsei",
-          scannedObjectCount: listed.objects.length,
-          importedManifestCount,
-          skippedManifestCount,
-          failedManifestCount,
-          nextCursor: listed.truncated ? (listed.cursor ?? null) : null,
-          truncated: listed.truncated,
-          ...(failureCode ? { failureCode } : {}),
-          ...(failedManifestCount === 1 && object ? { failedManifestKey: object.key } : {}),
-          ...(result ? { result } : {}),
-        });
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/sbi-vc-trade/backfill-page" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["cursor", "limit"]);
-        const cursor =
-          input.cursor === undefined
-            ? undefined
-            : requiredString(input.cursor, "cursor_invalid", 4_096);
-        if (input.limit !== undefined && input.limit !== 1) {
-          throw new ImportError(400, "backfill_limit_must_be_one");
-        }
-        const listed = await env.SBI_VC_SNAPSHOTS.list({
-          prefix: "raw/sbi-vc-trade/",
-          limit: 1,
-          ...(cursor ? { cursor } : {}),
-        });
-        const object = listed.objects[0];
-        let importedManifestCount = 0;
-        let skippedManifestCount = 0;
-        let deferredManifestCount = 0;
-        let failedManifestCount = 0;
-        let failureCode: string | undefined;
-        let deferredReason: string | undefined;
-        let result: Awaited<ReturnType<typeof importOneSbiVc>> | undefined;
-        if (object?.key.endsWith("/manifest.json")) {
-          try {
-            result = await importOneSbiVc(env, object.key);
-            if (result.status === "deferred") {
-              deferredManifestCount = 1;
-              deferredReason = result.reason;
-            } else {
-              importedManifestCount = 1;
-            }
-          } catch (error) {
-            const classification = classifySbiVcBackfillError(error);
-            if (classification.deferred) {
-              deferredManifestCount = 1;
-              deferredReason = classification.code;
-            } else {
-              failedManifestCount = 1;
-              failureCode = classification.code;
-            }
-          }
-        } else if (object) {
-          skippedManifestCount = 1;
-        }
-        return json({
-          source: "sbi-vc-trade",
-          scannedObjectCount: listed.objects.length,
-          importedManifestCount,
-          skippedManifestCount,
-          deferredManifestCount,
-          failedManifestCount,
-          nextCursor: listed.truncated ? (listed.cursor ?? null) : null,
-          truncated: listed.truncated,
-          ...(failureCode ? { failureCode } : {}),
-          ...(deferredReason ? { deferredReason } : {}),
-          ...(result ? { result } : {}),
-        });
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/sony-bank/import-run" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["manifestKey"]);
-        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
-        const result = await importOneSony(env, manifestKey, 0, true);
-        return json(result, result.status === "deferred" ? 202 : 200);
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/sony-bank/backfill-page" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["cursor", "limit"]);
-        const cursor =
-          input.cursor === undefined
-            ? undefined
-            : requiredString(input.cursor, "cursor_invalid", 12_000);
-        if (input.limit !== undefined && input.limit !== 1) {
-          throw new ImportError(400, "backfill_limit_must_be_one");
-        }
-        return json(await backfillSony(env, cursor));
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/smbc-direct/import-run" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["manifestKey"]);
-        const manifestKey = requiredString(input.manifestKey, "manifest_key_invalid", 500);
-        const result = await importOneSmbcDirect(env, manifestKey, 0, true);
-        return json(result, result.status === "deferred" ? 202 : 200);
-      } catch (error) {
-        return errorResponse(error);
-      }
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/smbc-direct/backfill-page" &&
-      url.search === ""
-    ) {
-      try {
-        const input = await readJson(request);
-        exactKeys(input, ["cursor", "limit"]);
-        const cursor =
-          input.cursor === undefined
-            ? undefined
-            : requiredString(input.cursor, "cursor_invalid", 12_000);
-        if (input.limit !== undefined && input.limit !== 1) {
-          throw new ImportError(400, "backfill_limit_must_be_one");
-        }
-        return json(await backfillSmbcDirect(env, cursor));
-      } catch (error) {
-        return errorResponse(error);
       }
     }
     return json({ error: "not_found" }, 404);
@@ -656,53 +113,225 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-function importOne(env: Env, manifestKey: string) {
-  return importSbiRun({
-    bucket: env.SBI_SNAPSHOTS,
-    centralService: env.RAW_EVIDENCE,
-    centralToken: env.RAW_EVIDENCE_TOKEN,
-    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
-    importerVersion: env.IMPORTER_VERSION,
-    manifestKey,
-  });
+/**
+ * The thin HTTP entry: body → adapter validation → shared executor → status.
+ * A deferred result answers 202; every other successful result answers 200.
+ */
+async function importRunResponse(
+  env: Env,
+  adapter: ImportAdapter,
+  request: Request,
+): Promise<Response> {
+  try {
+    const input = await readJson(request);
+    const command = adapter.validateCommand(input);
+    const resume = adapter.validateResume(input, command);
+    const execution = await executeImport(env, adapter.id, command, resume);
+    return json(execution.result, execution.status === "deferred" ? 202 : 200);
+  } catch (error) {
+    return errorResponse(error);
+  }
 }
 
-function importOneMyJcb(env: Env, manifestKey: string, continuation?: string) {
-  return importMyJcbRun({
-    bucket: env.MYJCB_SNAPSHOTS,
-    centralService: env.RAW_EVIDENCE,
-    centralToken: env.RAW_EVIDENCE_TOKEN_MYJCB,
-    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
-    importerVersion: env.IMPORTER_VERSION,
-    manifestKey,
-    ...(continuation ? { continuation } : {}),
-  });
+async function backfillResponse(
+  env: Env,
+  adapter: ImportAdapter,
+  request: Request,
+): Promise<Response> {
+  try {
+    const input = await readJson(request);
+    exactKeys(input, ["cursor", "limit"]);
+    const cursor =
+      input.cursor === undefined
+        ? undefined
+        : requiredString(input.cursor, "cursor_invalid", adapter.http!.backfillPage.cursorBudget);
+    if (input.limit !== undefined && input.limit !== 1) {
+      throw new ImportError(400, "backfill_limit_must_be_one");
+    }
+    return json(await BACKFILL_HANDLERS[adapter.id](env, cursor));
+  } catch (error) {
+    return errorResponse(error);
+  }
 }
 
-async function importOneVpass(env: Env, recordKey: string, continuation?: string) {
-  const result = await importVpassRun({
-    bucket: env.VPASS_SNAPSHOTS,
-    centralService: env.RAW_EVIDENCE,
-    centralToken: env.RAW_EVIDENCE_TOKEN_VPASS,
-    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
-    importerVersion: env.IMPORTER_VERSION,
-    recordKey,
-    ...(continuation ? { continuation } : {}),
-  });
-  // Scheduled/outbox imports keep the durable sidecar current. A sidecar retry
-  // reuses the sealed financial run and never appends financial observations.
-  if (result.status === "sealed") await importVpassBinding(env, recordKey);
-  return result;
+/** A backfill or reconciler step: the caller resumes by cursor, never synchronously. */
+async function stagedImport<S extends ImportSource>(
+  env: Env,
+  source: S,
+  terminalKey: string,
+  resume: ResumeState = { kind: "none" },
+): Promise<AdapterResult<S>> {
+  return (await executeImport(env, source, { source, terminalKey, mode: "staged" }, resume)).result;
 }
 
-function importVpassBinding(env: Env, recordKey: string) {
-  return importVpassCardBinding({
-    bucket: env.VPASS_SNAPSHOTS,
-    centralService: env.RAW_EVIDENCE,
-    centralToken: env.RAW_EVIDENCE_TOKEN_VPASS,
-    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
-    recordKey,
+function tokenState(token: string | undefined): ResumeState {
+  return token === undefined ? { kind: "none" } : { kind: "token", token };
+}
+
+function offsetState(offset: number): ResumeState {
+  return offset === 0 ? { kind: "none" } : { kind: "offset", offset };
+}
+
+async function backfillMobileSuica(env: Env, cursor: string | undefined): Promise<JsonObject> {
+  const listed = await env.MOBILE_SUICA_SNAPSHOTS.list({
+    prefix: "raw/mobile-suica/",
+    limit: 1,
+    ...(cursor ? { cursor } : {}),
   });
+  const object = listed.objects[0];
+  let importedManifestCount = 0;
+  let skippedManifestCount = 0;
+  let failedManifestCount = 0;
+  let failureCode: string | undefined;
+  let result: AdapterResult<"mobile-suica"> | undefined;
+  if (object?.key.endsWith("/manifest.json")) {
+    try {
+      result = await stagedImport(env, "mobile-suica", object.key);
+      importedManifestCount = 1;
+    } catch (error) {
+      failedManifestCount = 1;
+      failureCode = safeCode(error);
+    }
+  } else if (object) {
+    skippedManifestCount = 1;
+  }
+  return {
+    source: "mobile-suica",
+    scannedObjectCount: listed.objects.length,
+    importedManifestCount,
+    skippedManifestCount,
+    deferredManifestCount: 0,
+    failedManifestCount,
+    nextCursor: listed.truncated ? (listed.cursor ?? null) : null,
+    truncated: listed.truncated,
+    ...(failureCode ? { failureCode } : {}),
+    ...(failedManifestCount === 1 && object ? { failedManifestKey: object.key } : {}),
+    ...(result ? { result } : {}),
+  };
+}
+
+async function backfillSbiSecurities(env: Env, cursor: string | undefined): Promise<JsonObject> {
+  const listed = await env.SBI_SNAPSHOTS.list({
+    prefix: "raw/sbi-securities/",
+    limit: 1,
+    ...(cursor ? { cursor } : {}),
+  });
+  const object = listed.objects[0];
+  let importedManifestCount = 0;
+  let skippedManifestCount = 0;
+  let failedManifestCount = 0;
+  let failureCode: string | undefined;
+  let result: AdapterResult<"sbi-securities"> | undefined;
+  if (object?.key.endsWith("/manifest.json")) {
+    try {
+      result = await stagedImport(env, "sbi-securities", object.key);
+      importedManifestCount = 1;
+    } catch (error) {
+      failedManifestCount = 1;
+      failureCode = safeCode(error);
+    }
+  } else if (object) {
+    skippedManifestCount = 1;
+  }
+  return {
+    source: "sbi-securities",
+    scannedObjectCount: listed.objects.length,
+    importedManifestCount,
+    skippedManifestCount,
+    failedManifestCount,
+    nextCursor: listed.truncated ? (listed.cursor ?? null) : null,
+    truncated: listed.truncated,
+    ...(failureCode ? { failureCode } : {}),
+    ...(result ? { result } : {}),
+  };
+}
+
+async function backfillSbiShinsei(env: Env, cursor: string | undefined): Promise<JsonObject> {
+  const listed = await env.SBI_SHINSEI_SNAPSHOTS.list({
+    prefix: "raw/sbi-shinsei/",
+    limit: 1,
+    ...(cursor ? { cursor } : {}),
+  });
+  const object = listed.objects[0];
+  let importedManifestCount = 0;
+  let skippedManifestCount = 0;
+  let failedManifestCount = 0;
+  let failureCode: string | undefined;
+  let result: AdapterResult<"sbi-shinsei"> | undefined;
+  if (object?.key.endsWith("/manifest.json")) {
+    try {
+      result = await stagedImport(env, "sbi-shinsei", object.key);
+      importedManifestCount = 1;
+    } catch (error) {
+      failedManifestCount = 1;
+      failureCode = safeCode(error);
+    }
+  } else if (object) {
+    skippedManifestCount = 1;
+  }
+  return {
+    source: "sbi-shinsei",
+    scannedObjectCount: listed.objects.length,
+    importedManifestCount,
+    skippedManifestCount,
+    failedManifestCount,
+    nextCursor: listed.truncated ? (listed.cursor ?? null) : null,
+    truncated: listed.truncated,
+    ...(failureCode ? { failureCode } : {}),
+    ...(failedManifestCount === 1 && object ? { failedManifestKey: object.key } : {}),
+    ...(result ? { result } : {}),
+  };
+}
+
+async function backfillSbiVc(env: Env, cursor: string | undefined): Promise<JsonObject> {
+  const listed = await env.SBI_VC_SNAPSHOTS.list({
+    prefix: "raw/sbi-vc-trade/",
+    limit: 1,
+    ...(cursor ? { cursor } : {}),
+  });
+  const object = listed.objects[0];
+  let importedManifestCount = 0;
+  let skippedManifestCount = 0;
+  let deferredManifestCount = 0;
+  let failedManifestCount = 0;
+  let failureCode: string | undefined;
+  let deferredReason: string | undefined;
+  let result: AdapterResult<"sbi-vc-trade"> | undefined;
+  if (object?.key.endsWith("/manifest.json")) {
+    try {
+      result = await stagedImport(env, "sbi-vc-trade", object.key);
+      if (result.status === "deferred") {
+        deferredManifestCount = 1;
+        deferredReason = result.reason;
+      } else {
+        importedManifestCount = 1;
+      }
+    } catch (error) {
+      const classification = classifySbiVcBackfillError(error);
+      if (classification.deferred) {
+        deferredManifestCount = 1;
+        deferredReason = classification.code;
+      } else {
+        failedManifestCount = 1;
+        failureCode = classification.code;
+      }
+    }
+  } else if (object) {
+    skippedManifestCount = 1;
+  }
+  return {
+    source: "sbi-vc-trade",
+    scannedObjectCount: listed.objects.length,
+    importedManifestCount,
+    skippedManifestCount,
+    deferredManifestCount,
+    failedManifestCount,
+    nextCursor: listed.truncated ? (listed.cursor ?? null) : null,
+    truncated: listed.truncated,
+    ...(failureCode ? { failureCode } : {}),
+    ...(deferredReason ? { deferredReason } : {}),
+    ...(result ? { result } : {}),
+  };
 }
 
 interface VpassBackfillCursor {
@@ -722,7 +351,7 @@ export async function backfillVpass(
     : ({ v: 2, scanCursor: null, scanDone: false } satisfies VpassBackfillCursor);
   if (state.recordKey !== undefined) {
     try {
-      const result = await importOneVpass(env, state.recordKey, state.transfer);
+      const result = await stagedImport(env, "vpass", state.recordKey, tokenState(state.transfer));
       if (result.status === "deferred") {
         return vpassBackfillResponse({
           scannedObjectCount: 0,
@@ -778,7 +407,7 @@ export async function backfillVpass(
     });
   }
   try {
-    const result = await importOneVpass(env, object.key);
+    const result = await stagedImport(env, "vpass", object.key);
     if (result.status === "deferred") {
       return vpassBackfillResponse({
         scannedObjectCount: 1,
@@ -938,18 +567,6 @@ function constantTimeStringEqual(left: string, right: string): boolean {
   return difference === 0;
 }
 
-function importOneMoneyForward(env: Env, manifestKey: string, continuation?: string) {
-  return importMoneyForwardRun({
-    bucket: env.MONEYFORWARD_SNAPSHOTS,
-    centralService: env.RAW_EVIDENCE,
-    centralToken: env.RAW_EVIDENCE_TOKEN_MONEYFORWARD,
-    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
-    importerVersion: env.IMPORTER_VERSION,
-    manifestKey,
-    ...(continuation ? { continuation } : {}),
-  });
-}
-
 interface MoneyForwardBackfillCursor {
   v: 1;
   scanCursor: string | null;
@@ -971,7 +588,12 @@ export async function backfillMoneyForward(
   if (state.manifestKey !== undefined) {
     if (state.transfer === undefined) throw new ImportError(400, "cursor_invalid");
     try {
-      const result = await importOneMoneyForward(env, state.manifestKey, state.transfer);
+      const result = await stagedImport(
+        env,
+        "moneyforward",
+        state.manifestKey,
+        tokenState(state.transfer),
+      );
       if (result.status === "deferred") {
         const previousOffset = await moneyForwardTransferOffset(
           state.transfer,
@@ -1044,7 +666,7 @@ export async function backfillMoneyForward(
     });
   }
   try {
-    const result = await importOneMoneyForward(env, object.key);
+    const result = await stagedImport(env, "moneyforward", object.key);
     if (result.status === "deferred") {
       if (result.nextOffset <= 0) throw new ImportError(409, "transfer_cursor_did_not_advance");
       return moneyForwardBackfillResponse({
@@ -1076,9 +698,7 @@ export async function backfillMoneyForward(
   }
 }
 
-function safeMoneyForwardImportResult(
-  result: Awaited<ReturnType<typeof importOneMoneyForward>>,
-): JsonObject {
+function safeMoneyForwardImportResult(result: AdapterResult<"moneyforward">): JsonObject {
   return result.status === "sealed"
     ? {
         source: result.source,
@@ -1248,7 +868,7 @@ interface MyJcbBackfillCursor {
 async function backfillMyJcb(env: Env, encodedCursor: string | undefined): Promise<JsonObject> {
   const state = encodedCursor ? decodeMyJcbCursor(encodedCursor) : null;
   if (state?.manifestKey !== undefined) {
-    const result = await importOneMyJcb(env, state.manifestKey, state.transfer);
+    const result = await stagedImport(env, "myjcb", state.manifestKey, tokenState(state.transfer));
     if (result.status === "deferred") {
       return myJcbBackfillResponse({
         scannedObjectCount: 0,
@@ -1296,7 +916,7 @@ async function backfillMyJcb(env: Env, encodedCursor: string | undefined): Promi
     });
   }
   try {
-    const result = await importOneMyJcb(env, object.key);
+    const result = await stagedImport(env, "myjcb", object.key);
     if (result.status === "deferred") {
       return myJcbBackfillResponse({
         scannedObjectCount: 1,
@@ -1419,22 +1039,6 @@ function assertMyJcbCursor(value: MyJcbBackfillCursor): void {
   }
 }
 
-function importOneGlobalPass(env: Env, manifestKey: string, offset: number, immediate: boolean) {
-  return importGlobalPassRun({
-    bucket: env.GLOBAL_PASS_SNAPSHOTS,
-    centralService: env.RAW_EVIDENCE,
-    centralToken: env.RAW_EVIDENCE_TOKEN_GLOBAL_PASS,
-    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
-    importerVersion: env.IMPORTER_VERSION,
-    manifestKey,
-    legacyEmptyArtifactSha256: parseGlobalPassLegacyEmptyAllowlist(
-      env.GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST,
-    ),
-    offset,
-    immediate,
-  });
-}
-
 interface GlobalPassBackfillCursor {
   v: 2;
   scanCursor: string | null;
@@ -1450,7 +1054,7 @@ async function backfillGlobalPass(
   const state = encodedCursor ? decodeGlobalPassCursor(encodedCursor) : null;
   if (state?.manifestKey !== undefined) {
     const offset = state.offset ?? 0;
-    const result = await importOneGlobalPass(env, state.manifestKey, offset, false);
+    const result = await stagedImport(env, "global-pass", state.manifestKey, offsetState(offset));
     if (result.status === "deferred") {
       if (result.nextOffset <= offset) throw new ImportError(409, result.reason);
       return globalPassBackfillResponse({
@@ -1496,7 +1100,7 @@ async function backfillGlobalPass(
     });
   }
   try {
-    const result = await importOneGlobalPass(env, object.key, 0, false);
+    const result = await stagedImport(env, "global-pass", object.key);
     if (result.status === "deferred") {
       if (result.nextOffset <= 0) throw new ImportError(409, result.reason);
       return globalPassBackfillResponse({
@@ -1621,42 +1225,6 @@ function assertGlobalPassCursor(value: GlobalPassBackfillCursor): void {
   }
 }
 
-function importOneMobileSuica(env: Env, manifestKey: string) {
-  return importMobileSuicaRun({
-    bucket: env.MOBILE_SUICA_SNAPSHOTS,
-    centralService: env.RAW_EVIDENCE,
-    centralToken: env.RAW_EVIDENCE_TOKEN_MOBILE_SUICA,
-    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
-    importerVersion: env.IMPORTER_VERSION,
-    manifestKey,
-  });
-}
-
-function importOneVPoint(env: Env, manifestKey: string, offset: number, immediate: boolean) {
-  return importVPointRun({
-    bucket: env.VPOINT_SNAPSHOTS,
-    reconciliationBucket: env.VPOINT_PAY_SNAPSHOTS,
-    centralService: env.RAW_EVIDENCE,
-    centralToken: env.RAW_EVIDENCE_TOKEN_VPOINT,
-    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
-    importerVersion: env.IMPORTER_VERSION,
-    manifestKey,
-    offset,
-    immediate,
-  });
-}
-
-function importOneVPointPayEmail(env: Env, normalizedKey: string) {
-  return importVPointPayEmailPair({
-    bucket: env.VPOINT_PAY_SNAPSHOTS,
-    centralService: env.RAW_EVIDENCE,
-    centralToken: env.RAW_EVIDENCE_TOKEN_VPOINT_PAY_EMAIL,
-    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
-    importerVersion: env.IMPORTER_VERSION,
-    normalizedKey,
-  });
-}
-
 interface VPointPayEmailBackfillCursor {
   v: 1;
   scanCursor: string | null;
@@ -1705,7 +1273,7 @@ async function backfillVPointPayEmail(
       scannedObjectCount: 1,
       importedPairCount: 1,
       nextCursor,
-      result: await importOneVPointPayEmail(env, object.key),
+      result: await stagedImport(env, "v-point-pay-email", object.key),
     });
   } catch (error) {
     return vPointPayEmailBackfillResponse({
@@ -1896,7 +1464,7 @@ async function backfillVPoint(env: Env, encodedCursor: string | undefined): Prom
     : null;
   if (state?.manifestKey !== undefined) {
     const offset = state.offset ?? 0;
-    const result = await importOneVPoint(env, state.manifestKey, offset, false);
+    const result = await stagedImport(env, "v-point", state.manifestKey, offsetState(offset));
     if (result.status === "deferred") {
       if (result.nextOffset <= offset) throw new ImportError(409, result.reason);
       return vPointBackfillResponse({
@@ -1946,7 +1514,7 @@ async function backfillVPoint(env: Env, encodedCursor: string | undefined): Prom
     });
   }
   try {
-    const result = await importOneVPoint(env, object.key, 0, false);
+    const result = await stagedImport(env, "v-point", object.key);
     if (result.status === "deferred") {
       if (result.nextOffset <= 0) throw new ImportError(409, result.reason);
       return vPointBackfillResponse({
@@ -2140,55 +1708,6 @@ function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return copy.buffer;
 }
 
-function importOneSbiVc(env: Env, manifestKey: string, continuation?: string) {
-  return importSbiVcRun({
-    bucket: env.SBI_VC_SNAPSHOTS,
-    centralService: env.RAW_EVIDENCE,
-    centralToken: env.RAW_EVIDENCE_TOKEN_SBI_VC,
-    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
-    importerVersion: env.IMPORTER_VERSION,
-    manifestKey,
-    ...(continuation ? { continuation } : {}),
-  });
-}
-
-function importOneSbiShinsei(env: Env, manifestKey: string) {
-  return importSbiShinseiRun({
-    bucket: env.SBI_SHINSEI_SNAPSHOTS,
-    centralService: env.RAW_EVIDENCE,
-    centralToken: env.RAW_EVIDENCE_TOKEN_SBI_SHINSEI,
-    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
-    importerVersion: env.IMPORTER_VERSION,
-    manifestKey,
-  });
-}
-
-function importOneSony(env: Env, manifestKey: string, offset: number, immediate: boolean) {
-  return importSonyRun({
-    bucket: env.SONY_SNAPSHOTS,
-    centralService: env.RAW_EVIDENCE,
-    centralToken: env.RAW_EVIDENCE_TOKEN_SONY,
-    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
-    importerVersion: env.IMPORTER_VERSION,
-    manifestKey,
-    offset,
-    immediate,
-  });
-}
-
-function importOneSmbcDirect(env: Env, manifestKey: string, offset: number, immediate: boolean) {
-  return importSmbcDirectRun({
-    bucket: env.SMBC_DIRECT_SNAPSHOTS,
-    centralService: env.RAW_EVIDENCE,
-    centralToken: env.RAW_EVIDENCE_TOKEN_SMBC_DIRECT,
-    fingerprintKey: env.ORIGIN_FINGERPRINT_KEY,
-    importerVersion: env.IMPORTER_VERSION,
-    manifestKey,
-    offset,
-    immediate,
-  });
-}
-
 interface SmbcDirectBackfillCursor {
   v: 2;
   scanCursor: string | null;
@@ -2206,7 +1725,7 @@ async function backfillSmbcDirect(
     : null;
   if (state?.manifestKey !== undefined) {
     const offset = state.offset ?? 0;
-    const result = await importOneSmbcDirect(env, state.manifestKey, offset, false);
+    const result = await stagedImport(env, "smbc-direct", state.manifestKey, offsetState(offset));
     if (result.status === "deferred") {
       if (result.reason === "central_inventory_limit" || result.nextOffset <= offset) {
         throw new ImportError(409, result.reason);
@@ -2259,7 +1778,7 @@ async function backfillSmbcDirect(
     });
   }
   try {
-    const result = await importOneSmbcDirect(env, object.key, 0, false);
+    const result = await stagedImport(env, "smbc-direct", object.key);
     if (result.status === "deferred") {
       if (result.reason === "central_inventory_limit" || result.nextOffset <= 0) {
         throw new ImportError(409, result.reason);
@@ -2462,7 +1981,7 @@ async function backfillSony(env: Env, encodedCursor: string | undefined): Promis
   const state = encodedCursor ? decodeSonyCursor(encodedCursor) : null;
   if (state?.manifestKey !== undefined) {
     const offset = state.offset ?? 0;
-    const result = await importOneSony(env, state.manifestKey, offset, false);
+    const result = await stagedImport(env, "sony-bank", state.manifestKey, offsetState(offset));
     if (result.status === "deferred") {
       if (result.reason === "central_inventory_limit" || result.nextOffset <= offset) {
         throw new ImportError(409, result.reason);
@@ -2510,7 +2029,7 @@ async function backfillSony(env: Env, encodedCursor: string | undefined): Promis
     });
   }
   try {
-    const result = await importOneSony(env, object.key, 0, false);
+    const result = await stagedImport(env, "sony-bank", object.key);
     if (result.status === "deferred") {
       if (result.reason === "central_inventory_limit" || result.nextOffset <= 0) {
         throw new ImportError(409, result.reason);
@@ -2619,25 +2138,24 @@ function decodeSonyCursor(value: string): SonyBackfillCursor {
   return input as unknown as SonyBackfillCursor;
 }
 
-function reconcilerDependencies(env: Env) {
+export function reconcilerDependencies(env: Env) {
   return {
     accountId: env.RECONCILER_ACCOUNT_ID,
-    importTerminal: (
-      source: ReconcilerSource,
-      terminalKey: string,
-      resume: string | number | null,
-    ) => importReconcilerTerminal(env, source, terminalKey, resume),
+    importTerminal: async (command: ImportCommand, resume: ResumeState) =>
+      reconcilerOutcome((await executeImport(env, command.source, command, resume)).result),
     list: async (
       source: ReconcilerSource,
       prefix: string,
       cursor: string | null,
       limit: number,
     ) => {
-      const listed = await reconcilerBucket(env, source).list({
-        prefix,
-        limit,
-        ...(cursor ? { cursor } : {}),
-      });
+      const listed = await importAdapter(source)
+        .repairPolicy.outbox(env)
+        .list({
+          prefix,
+          limit,
+          ...(cursor ? { cursor } : {}),
+        });
       return {
         keys: listed.objects.map((object) => object.key),
         truncated: listed.truncated,
@@ -2652,111 +2170,6 @@ function reconcilerDependencies(env: Env) {
   };
 }
 
-async function importReconcilerTerminal(
-  env: Env,
-  source: ReconcilerSource,
-  terminalKey: string,
-  resume: string | number | null,
-): Promise<ImportOutcome> {
-  switch (source) {
-    case "global-pass":
-      return normalizedImportOutcome(
-        await importOneGlobalPass(env, terminalKey, numericResume(resume), false),
-      );
-    case "mobile-suica":
-      await importOneMobileSuica(env, terminalKey);
-      return { status: "sealed" };
-    case "moneyforward":
-      return normalizedImportOutcome(
-        await importOneMoneyForward(env, terminalKey, stringResume(resume)),
-      );
-    case "myjcb":
-      return normalizedImportOutcome(await importOneMyJcb(env, terminalKey, stringResume(resume)));
-    case "sbi-securities":
-      await importOne(env, terminalKey);
-      return { status: "sealed" };
-    case "sbi-shinsei":
-      await importOneSbiShinsei(env, terminalKey);
-      return { status: "sealed" };
-    case "sbi-vc-trade":
-      return normalizedImportOutcome(await importOneSbiVc(env, terminalKey, stringResume(resume)));
-    case "smbc-direct":
-      return normalizedImportOutcome(
-        await importOneSmbcDirect(env, terminalKey, numericResume(resume), false),
-      );
-    case "sony-bank":
-      return normalizedImportOutcome(
-        await importOneSony(env, terminalKey, numericResume(resume), false),
-      );
-    case "vpass":
-      return normalizedImportOutcome(await importOneVpass(env, terminalKey, stringResume(resume)));
-    case "v-point":
-      return normalizedImportOutcome(
-        await importOneVPoint(env, terminalKey, numericResume(resume), false),
-      );
-    case "v-point-pay-email":
-      await importOneVPointPayEmail(env, terminalKey);
-      return { status: "sealed" };
-  }
-}
-
-function normalizedImportOutcome(result: {
-  status: "deferred" | "sealed";
-  nextOffset?: number;
-  continuation?: string;
-}): ImportOutcome {
-  if (result.status === "sealed") return { status: "sealed" };
-  if (!Number.isSafeInteger(result.nextOffset) || (result.nextOffset ?? 0) <= 0) {
-    throw new ImportError(409, "reconciler_import_stalled");
-  }
-  const resume = result.continuation ?? result.nextOffset;
-  if (resume === undefined) throw new ImportError(409, "reconciler_continuation_missing");
-  return { status: "deferred", resume, progress: result.nextOffset! };
-}
-
-function reconcilerBucket(env: Env, source: ReconcilerSource): R2Bucket {
-  switch (source) {
-    case "global-pass":
-      return env.GLOBAL_PASS_SNAPSHOTS;
-    case "mobile-suica":
-      return env.MOBILE_SUICA_SNAPSHOTS;
-    case "moneyforward":
-      return env.MONEYFORWARD_SNAPSHOTS;
-    case "myjcb":
-      return env.MYJCB_SNAPSHOTS;
-    case "sbi-securities":
-      return env.SBI_SNAPSHOTS;
-    case "sbi-shinsei":
-      return env.SBI_SHINSEI_SNAPSHOTS;
-    case "sbi-vc-trade":
-      return env.SBI_VC_SNAPSHOTS;
-    case "smbc-direct":
-      return env.SMBC_DIRECT_SNAPSHOTS;
-    case "sony-bank":
-      return env.SONY_SNAPSHOTS;
-    case "vpass":
-      return env.VPASS_SNAPSHOTS;
-    case "v-point":
-      return env.VPOINT_SNAPSHOTS;
-    case "v-point-pay-email":
-      return env.VPOINT_PAY_SNAPSHOTS;
-  }
-}
-
-function numericResume(value: string | number | null): number {
-  if (value === null) return 0;
-  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
-    throw new ImportError(400, "reconciler_message_invalid");
-  }
-  return value as number;
-}
-
-function stringResume(value: string | number | null): string | undefined {
-  if (value === null) return undefined;
-  if (typeof value !== "string") throw new ImportError(400, "reconciler_message_invalid");
-  return value;
-}
-
 function retryDelaySeconds(attempts: number): number {
   return Math.min(3_600, 30 * 2 ** Math.max(0, Math.min(attempts - 1, 7)));
 }
@@ -2764,21 +2177,7 @@ function retryDelaySeconds(attempts: number): number {
 function safeMessageSource(value: unknown): ReconcilerSource | undefined {
   if (value === null || Array.isArray(value) || typeof value !== "object") return undefined;
   const source = (value as JsonObject).source;
-  return typeof source === "string" &&
-    [
-      "global-pass",
-      "mobile-suica",
-      "moneyforward",
-      "myjcb",
-      "sbi-securities",
-      "sbi-shinsei",
-      "sbi-vc-trade",
-      "smbc-direct",
-      "sony-bank",
-      "vpass",
-      "v-point",
-      "v-point-pay-email",
-    ].includes(source)
+  return typeof source === "string" && Object.hasOwn(IMPORT_ADAPTERS, source)
     ? (source as ReconcilerSource)
     : undefined;
 }
@@ -2858,19 +2257,6 @@ function requiredString(value: unknown, code: string, max: number): string {
     throw new ImportError(400, code);
   }
   return value;
-}
-
-export function parseGlobalPassLegacyEmptyAllowlist(value: string): ReadonlySet<string> {
-  const hashes = value.split(",");
-  if (
-    hashes.length === 0 ||
-    hashes.length > 15 ||
-    hashes.some((hash) => !/^[0-9a-f]{64}$/u.test(hash)) ||
-    new Set(hashes).size !== hashes.length
-  ) {
-    throw new ImportError(500, "global_pass_legacy_empty_allowlist_invalid");
-  }
-  return new Set(hashes);
 }
 
 function errorResponse(error: unknown): Response {

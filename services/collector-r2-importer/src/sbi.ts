@@ -5,7 +5,7 @@ import type { CentralInventoryItem, SbiArtifactManifest, SbiFailure, SbiManifest
 const SOURCE = "sbi-securities" as const;
 const PRODUCER = "collector-r2-importer";
 const SCHEMA_VERSION = "sbi-worker-poc-v1";
-const INGEST_CONTRACT_VERSION = "sbi-r2-v4";
+export const INGEST_CONTRACT_VERSION = "sbi-r2-v4";
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const STORAGE_TEMPLATE = "raw/sbi-securities/{date}/{run-id}/{artifact}.json";
