@@ -76,7 +76,9 @@ async function seedMyJcb(artifactId: number, manifestId: number) {
     "connection-a/credit-ledger-00.json",
     LEDGER,
   );
-  await env.DB.prepare("INSERT INTO fetch_units(id,fetch_run_id,unit_key) VALUES(?,?,'connection-a')")
+  await env.DB.prepare(
+    "INSERT INTO fetch_units(id,fetch_run_id,unit_key) VALUES(?,?,'connection-a')",
+  )
     .bind(artifactId, artifactId)
     .run();
   await env.DB.prepare("UPDATE fetch_artifacts SET fetch_unit_id=? WHERE id=?")
@@ -134,8 +136,9 @@ test("a stale stored value is listed for re-extraction, and old parses keep thei
   // The legacy release reproduces the pre-A04 behaviour exactly: the stored
   // value wins for 52, and 50 takes its values from the manifest.
   expect(
-    await env.DB.prepare("SELECT statement_state FROM observation_fetch_artifacts WHERE id=52")
-      .first<string>("statement_state"),
+    await env.DB.prepare(
+      "SELECT statement_state FROM observation_fetch_artifacts WHERE id=52",
+    ).first<string>("statement_state"),
   ).toBe("stale-state");
   const legacy = (await projections(50)).filter(
     (row) => row.extractor_release === LEGACY_METADATA_RELEASE,
@@ -307,14 +310,11 @@ test("a re-extraction that reads the same evidence twice records one projection"
 test("with the release flag off a targeted job publishes normally and no command route exists", async () => {
   const off = await startPipeline();
   try {
-    await seedArtifact(
-      off.env,
-      60,
-      "smbc-bank",
-      "balance-normalized",
-      "balance.normalized.json",
-      { amount: 1, currency: "JPY", observedAt: "2026-09-07T00:00:00.000Z" },
-    );
+    await seedArtifact(off.env, 60, "smbc-bank", "balance-normalized", "balance.normalized.json", {
+      amount: 1,
+      currency: "JPY",
+      observedAt: "2026-09-07T00:00:00.000Z",
+    });
     const identity = await releaseIdentity({ name: "smbc-direct-balance", version: "1.0.0" });
     await off.env.DB.prepare(
       "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,target_release) VALUES(60,'smbc-direct-balance','1.0.0','pending',?)",
@@ -376,9 +376,7 @@ test("with the release flag off a targeted job publishes normally and no command
 
 test("0027 and 0028 apply to a store that already has metadata and parses, and backfill exactly", async () => {
   const upgrade = await startPipeline(
-    layerBMigrations().filter(
-      (name) => !name.startsWith("0027_") && !name.startsWith("0028_"),
-    ),
+    layerBMigrations().filter((name) => !name.startsWith("0027_") && !name.startsWith("0028_")),
   );
   try {
     const db = upgrade.env.DB;
@@ -403,9 +401,7 @@ test("0027 and 0028 apply to a store that already has metadata and parses, and b
       )
       .run();
     await db.batch([
-      db.prepare(
-        "INSERT INTO observation_artifact_metadata VALUES(1,'confirmed','2026-09',9)",
-      ),
+      db.prepare("INSERT INTO observation_artifact_metadata VALUES(1,'confirmed','2026-09',9)"),
       db.prepare("INSERT INTO observation_artifact_metadata VALUES(2,NULL,'2026-08',NULL)"),
       db.prepare("INSERT INTO observation_artifact_metadata VALUES(3,NULL,NULL,NULL)"),
     ]);
@@ -485,10 +481,9 @@ test("0027 and 0028 apply to a store that already has metadata and parses, and b
       "release_activation_events",
       "parse_input_references",
     ])
-      expect(
-        await db.prepare(`SELECT count(*) AS n FROM ${table}`).first<number>("n"),
-        table,
-      ).toBe(0);
+      expect(await db.prepare(`SELECT count(*) AS n FROM ${table}`).first<number>("n"), table).toBe(
+        0,
+      );
     expect(
       await db.prepare("SELECT count(*) AS n FROM publication_gate_gaps").first<number>("n"),
     ).toBe(0);

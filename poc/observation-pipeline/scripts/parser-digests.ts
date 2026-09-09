@@ -137,7 +137,8 @@ export function digestViolations(
     }
     if (previous.version === next.version && previous.codeDigest !== next.codeDigest)
       violations.push({ parser, code: "code_digest_changed_without_version" });
-    else if (previous.version !== next.version) violations.push({ parser, code: "version_changed" });
+    else if (previous.version !== next.version)
+      violations.push({ parser, code: "version_changed" });
   }
   for (const parser of Object.keys(recorded))
     if (!(parser in computed)) violations.push({ parser, code: "unexpected" });

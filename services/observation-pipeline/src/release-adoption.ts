@@ -267,11 +267,13 @@ export async function compareReleases(
       role: string;
       difference: ComparisonSummary["sample"][number]["difference"];
     }>();
-  const baseReleaseId = (await activeRelease(db, {
-    sourceId: request.source,
-    dataset: request.dataset,
-    parserName: request.parser,
-  }))?.release_id;
+  const baseReleaseId = (
+    await activeRelease(db, {
+      sourceId: request.source,
+      dataset: request.dataset,
+      parserName: request.parser,
+    })
+  )?.release_id;
   const summary: ComparisonSummary = {
     scope: { sourceId: request.source, dataset: request.dataset, parserName: request.parser },
     baseReleaseId: baseReleaseId ?? null,

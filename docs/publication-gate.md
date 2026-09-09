@@ -8,7 +8,8 @@ written. A shadow or candidate run could never have existed safely. This
 change makes adoption an explicit, atomically maintained pointer, moves every
 normal reader onto it, and proves that a successful run outside the pointer
 is invisible. It does **not** add candidate runs, releases, activation or
-fingerprints; those are the next steps and stay off.
+fingerprints; those are steps 4 and 5, added by A04 behind
+`RELEASE_CANDIDATES_ENABLED` and documented in `docs/release-adoption.md`.
 
 Nothing here changes Layer A/B evidence, parser versions, supersession
 maintenance, response shapes or the set of rows readers see today. Verified
@@ -16,12 +17,12 @@ locally with synthetic data only; no production claim is made.
 
 ## Four concepts
 
-| Concept               | Question                                                   | Where it lives after this change                                                                                                                   |
-| --------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Execution attempt     | Did the parser run; where did it fail?                     | `parse_runs` (`pending` / `ok` / `error`), `observation_parse_jobs`. Append-only once terminal, as before.                                         |
-| Transformation result | What did this input and this parser version produce?       | `parse_runs` row plus its observation rows. Immutable.                                                                                             |
-| Adopted release       | Which result do normal reads use for this artifact/parser? | `published_parse_runs` (pointer, mutable through the writer only) with `publication_events` (append-only history). `release_id` is reserved, NULL. |
-| Read snapshot         | Which evidence did one report actually use?                | Unchanged: the complete-snapshot CTEs still choose the latest complete capture, now over published runs only.                                      |
+| Concept               | Question                                                   | Where it lives after this change                                                                                                                                           |
+| --------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Execution attempt     | Did the parser run; where did it fail?                     | `parse_runs` (`pending` / `ok` / `error`), `observation_parse_jobs`. Append-only once terminal, as before.                                                                 |
+| Transformation result | What did this input and this parser version produce?       | `parse_runs` row plus its observation rows. Immutable.                                                                                                                     |
+| Adopted release       | Which result do normal reads use for this artifact/parser? | `published_parse_runs` (pointer, mutable through the writer only) with `publication_events` (append-only history). `release_id` is NULL until an activation sets it (A04). |
+| Read snapshot         | Which evidence did one report actually use?                | Unchanged: the complete-snapshot CTEs still choose the latest complete capture, now over published runs only.                                                              |
 
 Success and adoption are two facts. For the compatibility period they still
 coincide for every normal parse, because the writer sets both in one
@@ -33,7 +34,8 @@ transaction; but a reader can no longer confuse them.
 
 - `parse_run_id` names the adopted run; `parser_version`, `published_at`,
   `publication_kind` (`normal` | `activation` | `rollback`) and `release_id`
-  (NULL until the adoption PR) describe the pointer.
+  (NULL for a normal publication; set by an A04 activation) describe the
+  pointer.
 - Triggers: a row may only name a run of the same artifact and parser with
   `status = 'ok'` (insert and update); rows are never deleted. A unique index
   on `parse_run_id` means a run is adopted only under its own key.
@@ -137,7 +139,7 @@ fails CI when `superseded_by_parse_run_id IS NULL` appears in any tracked
 concept, `worker.ts` (supersession batch), `publication-gate.ts` (writer and
 repair) and the PoC `store.ts` (writer and backfill).
 
-## Candidate invisibility (step 4 preparation)
+## Candidate invisibility (step 4)
 
 `services/evidence-browser/test/publication-gate.test.ts` seeds a published
 parse, then an `ok` run of the same artifact and parser that is neither
@@ -150,22 +152,32 @@ coverage/accounts, `current_identity_observations` and organization paths all
 leave it out, and that `publication_gate_mismatches` lists it. Adopting it
 through the same pointer move the writer performs flips exactly those paths.
 
-The consistency view treats such a run as `legacy_only`, and the repair route
-would publish it. That is correct for the compatibility period, when every
-`ok` unsuperseded run is a normal publication that an old writer may have
-left without a pointer, and it is why step 4 must introduce a distinct
-candidate publication state before any candidate is written.
+`publication_gate_mismatches` treats such a run as `legacy_only`. That is
+correct for the compatibility period, when every `ok` unsuperseded run is a
+normal publication an old writer may have left without a pointer - and it is
+why a distinct candidate state had to exist before any candidate was written.
+
+Migration 0028 adds that state (`parse_run_candidates`) and, with it,
+`publication_gate_gaps`: the same comparison minus candidate results and minus
+runs an adoption replaced, which are expected `ok` unsuperseded runs rather
+than gaps. `/publication/consistency` and `/publication/repair` read the gaps
+view, so the repair route can never publish a candidate; the mismatch view
+keeps its original meaning as the audit path. `release-candidates.test.ts` in
+the evidence browser proves both halves with the rows the candidate lane
+actually writes.
 
 ## Operations
 
 - `GET /publication/consistency` (observation-pipeline, private service
   binding like `/status`): `published`, `legacyOnly`, `projectionOnly`,
-  `mismatches` and a bounded `sample` of keys and run ids. No values.
+  `mismatches` and a bounded `sample` of keys and run ids, read from
+  `publication_gate_gaps` (migration 0028). No values.
 - `POST /publication/repair` `{ actor, reason, limit? }`: publishes at most
-  `limit` (default 200, max 1000) legacy-current runs the pointer does not
-  name, one `repair` event each with the operator id; returns `repaired` and
+  `limit` (default 200, max 1000) gap runs the pointer does not name, one
+  `repair` event each with the operator id; returns `repaired` and
   `remaining`. Idempotent; `actor` must match `^[a-z0-9][a-z0-9._:@-]{0,99}$`
-  and may not be `pipeline`.
+  and may not be `pipeline`. It never publishes a candidate result and never
+  re-publishes a run an activation replaced, because neither is a gap.
 - `scripts/status.ts` prints the mismatch counts next to coverage.
 
 ## Deploy order
@@ -186,12 +198,16 @@ candidate publication state before any candidate is written.
   projection is kept consistent by the writer or by repair, so rolling either
   Worker back is safe. Rolling back the migration is not needed and not
   supported: the tables are additive and nothing depends on their absence.
-- **Forbidden once candidates are enabled** (a later PR): rolling back to a
-  build that does not know the gate, because its readers would show every
-  `ok` unsuperseded run, candidates included. The release manifest must
-  record this Worker version as the lowest acceptable rollback target from
-  that point on; pointer rollback (`publication_kind = 'rollback'` events)
-  and Worker rollback are separate runbooks.
+- **Forbidden once candidates are enabled** (A04,
+  `RELEASE_CANDIDATES_ENABLED = "true"`): rolling back to a build that does not
+  know the gate, because its readers would show every `ok` unsuperseded run,
+  candidates included. A build between this change and A04 is also unsafe once
+  candidates exist, because its publish batch supersedes them, which turns a
+  candidate into replaced history that the browser's history views do show.
+  **Minimum rollback build from the first time the flag is "true": the A04
+  build.** Turning the flag off is safe and is the first step of any incident
+  response. Pointer rollback (`publication_kind = 'rollback'` events) and
+  Worker rollback stay separate runbooks; see `docs/release-adoption.md`.
 
 ## Invariants kept and how they were verified
 

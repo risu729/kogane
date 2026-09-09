@@ -128,9 +128,10 @@ describe("release candidates are invisible to every reader", () => {
     // reports nothing at all.
     expect(
       (
-        await env.DB.prepare(
-          "SELECT parse_run_id,mismatch FROM publication_gate_gaps",
-        ).all<{ parse_run_id: number; mismatch: string }>()
+        await env.DB.prepare("SELECT parse_run_id,mismatch FROM publication_gate_gaps").all<{
+          parse_run_id: number;
+          mismatch: string;
+        }>()
       ).results,
     ).toEqual([]);
     // Adopting it is a pointer move, and only that flips the reader paths.

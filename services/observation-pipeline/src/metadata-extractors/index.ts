@@ -59,11 +59,7 @@ export async function metadataInputDigest(
     inputs: [...extraction.inputs]
       .map((input) => ({ ...input }))
       .sort((a, b) =>
-        a.artifactId === b.artifactId
-          ? a.role < b.role
-            ? -1
-            : 1
-          : a.artifactId - b.artifactId,
+        a.artifactId === b.artifactId ? (a.role < b.role ? -1 : 1) : a.artifactId - b.artifactId,
       ),
     scheme: "metadata-input-v1",
   });
@@ -91,7 +87,9 @@ async function extractLegacy(
   row: MetadataArtifact,
 ): Promise<MetadataExtraction> {
   const previous = await context.db
-    .prepare("SELECT statement_state,period FROM observation_artifact_metadata WHERE fetch_artifact_id=?")
+    .prepare(
+      "SELECT statement_state,period FROM observation_artifact_metadata WHERE fetch_artifact_id=?",
+    )
     .bind(row.id)
     .first<{ statement_state: string | null; period: string | null }>();
   const output: MetadataOutput = {

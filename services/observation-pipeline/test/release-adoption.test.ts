@@ -17,7 +17,10 @@ import {
   type MetadataExtractorRelease,
 } from "../src/metadata-extractors/index.ts";
 import { layerBMigrations, seedArtifact, startPipeline } from "./harness.ts";
-import { smbcDirectBalance, smbcDirectTransactions } from "../../../poc/observation-pipeline/src/parsers/smbc-direct.ts";
+import {
+  smbcDirectBalance,
+  smbcDirectTransactions,
+} from "../../../poc/observation-pipeline/src/parsers/smbc-direct.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -83,7 +86,9 @@ const published = (artifactId: number) =>
     .bind(artifactId)
     .first<{ parse_run_id: number; publication_kind: string; release_id: string | null }>();
 const candidateRow = (parseRunId: number) =>
-  env.DB.prepare("SELECT release_id,state,fingerprint FROM parse_run_candidates WHERE parse_run_id=?")
+  env.DB.prepare(
+    "SELECT release_id,state,fingerprint FROM parse_run_candidates WHERE parse_run_id=?",
+  )
     .bind(parseRunId)
     .first<{ release_id: string; state: string; fingerprint: string }>();
 const runRow = (id: number) =>
@@ -103,13 +108,6 @@ const runIdAt = (artifactId: number, version: string) =>
   )
     .bind(artifactId, PARSER, version)
     .first<number>("id");
-/** Every balance observation a gated reader sees, in id order. */
-const visibleBalances = () =>
-  env.DB.prepare(
-    `SELECT b.id,b.parse_run_id,b.source_account,b.metric,b.amount_minor,b.instrument
-      FROM balance_observations b JOIN published_parse_runs x ON x.parse_run_id=b.parse_run_id
-      ORDER BY b.id`,
-  ).all<Record<string, unknown>>();
 async function post(path: string, body: unknown) {
   const response = await mf.dispatchFetch(`https://pipeline.internal${path}`, {
     method: "POST",
@@ -117,11 +115,6 @@ async function post(path: string, body: unknown) {
   });
   return { status: response.status, json: (await response.json()) as Record<string, any> };
 }
-async function get(path: string) {
-  const response = await mf.dispatchFetch(`https://pipeline.internal${path}`);
-  return { status: response.status, json: (await response.json()) as Record<string, any> };
-}
-
 test("a candidate result is written like any parse and published like none", async () => {
   await artifact(200);
   expect(await run(200, "1.0.0")).toBe("parsed");
@@ -410,14 +403,24 @@ test("comparison, adoption and rollback keep the visible result set exactly repr
       releaseId: candidateRelease.releaseId,
     });
     expect(partial.status).toBe(200);
-    expect(partial.json.artifacts).toEqual({ base: 2, candidate: 1, compared: 1, candidateOnly: 0 });
+    expect(partial.json.artifacts).toEqual({
+      base: 2,
+      candidate: 1,
+      compared: 1,
+      candidateOnly: 0,
+    });
     expect(await local.visible()).toEqual(before);
     expect(await local.run(211, "2.0.0", candidateRelease.releaseId)).toBe("parsed");
     const complete = await local.post("/release/compare", {
       ...target,
       releaseId: candidateRelease.releaseId,
     });
-    expect(complete.json.artifacts).toEqual({ base: 2, candidate: 2, compared: 2, candidateOnly: 0 });
+    expect(complete.json.artifacts).toEqual({
+      base: 2,
+      candidate: 2,
+      compared: 2,
+      candidateOnly: 0,
+    });
     // Identical parsers over identical evidence: every locator matches on the
     // contract's comparison key and no exact value differs.
     expect(complete.json.countsByKind).toEqual([{ kind: "balance", base: 2, candidate: 2 }]);
@@ -519,16 +522,16 @@ test("comparison, adoption and rollback keep the visible result set exactly repr
     for (const id of [baseRuns[0]!, baseRuns[1]!, (await local.runId(210, "2.0.0"))!])
       expect(
         await db
-          .prepare("SELECT status,superseded_by_parse_run_id AS superseded FROM parse_runs WHERE id=?")
+          .prepare(
+            "SELECT status,superseded_by_parse_run_id AS superseded FROM parse_runs WHERE id=?",
+          )
           .bind(id)
           .first<Record<string, unknown>>(),
       ).toEqual({ status: "ok", superseded: null });
     expect(
       (
         await db
-          .prepare(
-            "SELECT kind,count(*) AS n FROM publication_events GROUP BY kind ORDER BY kind",
-          )
+          .prepare("SELECT kind,count(*) AS n FROM publication_events GROUP BY kind ORDER BY kind")
           .all<{ kind: string; n: number }>()
       ).results,
     ).toEqual([
@@ -675,11 +678,14 @@ test("an empty candidate result is a result: it compares as empty and activates 
   });
   expect(activation.json).toMatchObject({ changed: true, pointersMoved: 0 });
   expect(
-    await env.DB.prepare("SELECT parse_run_id FROM published_parse_runs WHERE fetch_artifact_id=220")
-      .first<number>("parse_run_id"),
-  ).toBe((await env.DB.prepare(
-    "SELECT id FROM parse_runs WHERE fetch_artifact_id=220 AND parser_version='1.0.0' AND status='ok'",
-  ).first<number>("id"))!);
+    await env.DB.prepare(
+      "SELECT parse_run_id FROM published_parse_runs WHERE fetch_artifact_id=220",
+    ).first<number>("parse_run_id"),
+  ).toBe(
+    (await env.DB.prepare(
+      "SELECT id FROM parse_runs WHERE fetch_artifact_id=220 AND parser_version='1.0.0' AND status='ok'",
+    ).first<number>("id"))!,
+  );
 }, 60000);
 
 test("registering the same parser version with a different transform is refused", async () => {

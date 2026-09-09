@@ -203,10 +203,7 @@ export function resetReleaseRegistration(): void {
   registered = false;
 }
 
-export async function lookupRelease(
-  db: D1Database,
-  releaseId: string,
-): Promise<ReleaseRow | null> {
+export async function lookupRelease(db: D1Database, releaseId: string): Promise<ReleaseRow | null> {
   if (!RELEASE_ID_PATTERN.test(releaseId)) return null;
   return db
     .prepare("SELECT * FROM parser_releases WHERE release_id=?")

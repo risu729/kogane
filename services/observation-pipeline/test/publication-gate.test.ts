@@ -326,9 +326,7 @@ test("migration 0026 applies on 0017 through 0035 with existing rows and backfil
   // 0028 (release adoption) builds on 0026's tables, so the deployed schema
   // this upgrade starts from is everything except those two.
   const upgrade = await startPipeline(
-    layerBMigrations().filter(
-      (name) => !name.startsWith("0026_") && !name.startsWith("0028_"),
-    ),
+    layerBMigrations().filter((name) => !name.startsWith("0026_") && !name.startsWith("0028_")),
   );
   try {
     const db = upgrade.env.DB;

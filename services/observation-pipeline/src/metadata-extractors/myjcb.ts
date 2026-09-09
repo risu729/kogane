@@ -22,7 +22,9 @@ export async function extractMyJcb(
   const { manifest, root } = await collectorManifest(context, row);
   const matching = (root.artifacts as unknown[])
     .map(record)
-    .filter((entry) => `${String(entry.connectionId)}/${String(entry.filename)}` === row.artifact_key);
+    .filter(
+      (entry) => `${String(entry.connectionId)}/${String(entry.filename)}` === row.artifact_key,
+    );
   if (matching.length !== 1) throw new MetadataError("manifest_artifact_mismatch");
   const match = matching[0]!;
   if (match.dataset !== row.dataset) throw new MetadataError("manifest_dataset_mismatch");

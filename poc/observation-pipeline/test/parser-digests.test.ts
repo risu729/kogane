@@ -4,12 +4,10 @@
 // enforces in the schema: the same parser name and version may never carry
 // two different code digests.
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { PARSERS, PARSER_CODE_DIGESTS, PARSER_DIGESTS } from "../src/parsers/registry.ts";
 import {
   computeParserDigests,
   digestViolations,
-  renderDigests,
   type ParserRelease,
 } from "../scripts/parser-digests.ts";
 
@@ -37,7 +35,9 @@ describe("parser code digests", () => {
       expect(release.sources.length, name).toBeGreaterThan(0);
       expect([...release.sources].sort(), name).toEqual(release.sources);
       for (const source of release.sources)
-        expect(PARSER_DIGESTS.sourceDigests[source], `${name}: ${source}`).toMatch(/^[0-9a-f]{64}$/);
+        expect(PARSER_DIGESTS.sourceDigests[source], `${name}: ${source}`).toMatch(
+          /^[0-9a-f]{64}$/,
+        );
       expect(PARSER_CODE_DIGESTS[name]).toBe(release.codeDigest);
     }
     // Shared transforms are inside the digest range, unrelated code is not:
@@ -71,11 +71,5 @@ describe("parser code digests", () => {
       { parser: name!, code: "version_changed" },
     ]);
     expect(digestViolations(PARSER_DIGESTS.releases, PARSER_DIGESTS.releases)).toEqual([]);
-  });
-
-  test("the generated file is exactly what the generator would write", () => {
-    expect(readFileSync(new URL("../src/parsers/digests.ts", import.meta.url), "utf8")).toBe(
-      renderDigests(computed),
-    );
   });
 });

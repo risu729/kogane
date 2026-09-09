@@ -33,7 +33,6 @@ import {
   registerDeployedReleases,
   releaseIdentity,
   releaseInsert,
-  type ReleaseRow,
 } from "./releases.ts";
 import {
   activateRelease,
