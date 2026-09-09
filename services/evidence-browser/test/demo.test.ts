@@ -2,8 +2,8 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import snapshot from "../demo-snapshot.json";
 import worker from "../src/demo-worker";
-import { LOCAL_STORE_CAPABILITIES } from "../../../poc/observation-pipeline/shared/api-schema";
-import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
+import { LOCAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema";
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let issuer: string;

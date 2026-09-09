@@ -31,10 +31,10 @@ import {
   type ValuationCell,
 } from "../../../packages/domain/src/index.ts";
 import { quantityFromNormalizedDecimal } from "../../../packages/domain/src/values.ts";
-import { validNormalizedDecimal } from "../../../poc/observation-pipeline/shared/normalized-decimal.ts";
-import type { NormalizedDecimal } from "../../../poc/observation-pipeline/shared/normalized-decimal.ts";
+import { validNormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
+import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import { createD1ObservationReader } from "../../../packages/read-model/src/d1";
-import type { PositionWithValuations } from "../../../poc/observation-pipeline/shared/api-contract.ts";
+import type { PositionWithValuations } from "../../../packages/observation-shared/src/api-contract.ts";
 
 /** The report body version this job writes; it is the schema of the stored bytes. */
 export const REPORT_JOB_RELEASE = "report-job-v1";

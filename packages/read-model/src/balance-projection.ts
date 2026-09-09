@@ -31,7 +31,7 @@ import {
   type TemporalReference,
   type TemporalValue,
 } from "../../domain/src/time.ts";
-import type { NormalizedDecimal } from "../../../poc/observation-pipeline/shared/normalized-decimal.ts";
+import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import { AUTHORITY_POLICY_RELEASE } from "./authority";
 import type { MeasureView } from "./scope";
 

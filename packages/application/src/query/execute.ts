@@ -22,7 +22,7 @@ import type {
   BalanceRow,
   Overview,
   TransactionRow,
-} from "../../../../poc/observation-pipeline/shared/api-contract.ts";
+} from "../../../../packages/observation-shared/src/api-contract.ts";
 import {
   type BalanceProjectionReader,
   knownAssetMetricIds,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { classifyActivity } from "../../../poc/observation-pipeline/shared/activity-semantics.ts";
-import { classifyBalance } from "../../../poc/observation-pipeline/shared/balance-semantics.ts";
+import { classifyActivity } from "../../../packages/observation-shared/src/activity-semantics.ts";
+import { classifyBalance } from "../../../packages/observation-shared/src/balance-semantics.ts";
 import {
   additivityVerdict,
   METRIC_REGISTRY,

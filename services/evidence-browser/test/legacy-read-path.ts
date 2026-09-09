@@ -151,10 +151,7 @@ export function legacyObservationStore(db: D1Database): LegacyStore {
     },
   };
 }
-import {
-  CURRENT_SNAPSHOT,
-  SNAPSHOT_CTES,
-} from "../../../poc/observation-pipeline/src/snapshot-query";
+import { CURRENT_SNAPSHOT, SNAPSHOT_CTES } from "../../../packages/parsers/src/snapshot-query";
 
 import type {
   ObservationKind,
@@ -170,7 +167,7 @@ import type {
   ArtifactDetail,
   Provenance,
   ObservationDetail,
-} from "../../../poc/observation-pipeline/shared/api-contract.ts";
+} from "../../../packages/observation-shared/src/api-contract.ts";
 export type {
   ObservationKind,
   Warnings,
@@ -186,7 +183,7 @@ export type {
   ArtifactDetail,
   Provenance,
   ObservationDetail,
-} from "../../../poc/observation-pipeline/shared/api-contract.ts";
+} from "../../../packages/observation-shared/src/api-contract.ts";
 
 export const LegacyOBSERVATION_TABLES: Record<ObservationKind, string> = {
   transaction: "transaction_observations",

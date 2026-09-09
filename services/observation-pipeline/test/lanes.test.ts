@@ -4,7 +4,7 @@ import { runScheduled, sweep } from "../src/worker.ts";
 import { runBalanceProjection } from "../src/balance-projection-job.ts";
 import { dispatchDecisionOutbox } from "../src/decision-outbox.ts";
 import { identitySweep } from "../src/identity-store.ts";
-import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity/index.ts";
+import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { layerBMigrations, publishParse, seedArtifact, startPipeline } from "./harness.ts";
 
 let mf: Miniflare;

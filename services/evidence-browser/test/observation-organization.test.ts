@@ -7,7 +7,7 @@ import {
   ORGANIZATION_QUERY,
 } from "../src/observation-organization";
 import { observationApi } from "../src/observation-api";
-import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import { organizedFilterOptions } from "../src/organized-filter-options";
 
 beforeAll(seedRegistry);

@@ -14,7 +14,7 @@ import type {
   PositionWithValuations,
   TransactionRow,
   UnitUpdateSummary,
-} from "../../../poc/observation-pipeline/shared/api-contract";
+} from "../../../packages/observation-shared/src/api-contract";
 import type { MeasureView, PageLimit } from "./scope";
 
 export interface TransactionQuery {

@@ -1,8 +1,8 @@
 // Read-only, in-memory parser diagnostic. Never print raw bytes, identifiers,
 // financial values, provider keys or unfiltered exception messages.
 import { getPlatformProxy } from "wrangler";
-import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry.ts";
-import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types.ts";
+import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 import { parse } from "parse5";
 
 const proxy = await getPlatformProxy<{ DB: D1Database; EVIDENCE: R2Bucket }>({

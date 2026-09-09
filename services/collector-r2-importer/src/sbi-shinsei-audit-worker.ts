@@ -1,6 +1,6 @@
-import { sbiShinseiTopBalancesAndActivity } from "../../../poc/observation-pipeline/src/parsers/sbi-shinsei-top-balances-and-activity";
-import { sbiShinseiYenDepositAccount } from "../../../poc/observation-pipeline/src/parsers/sbi-shinsei-yen-deposit-account";
-import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types";
+import { sbiShinseiTopBalancesAndActivity } from "../../../packages/parsers/src/parsers/sbi-shinsei-top-balances-and-activity";
+import { sbiShinseiYenDepositAccount } from "../../../packages/parsers/src/parsers/sbi-shinsei-yen-deposit-account";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types";
 import { validateSbiShinseiRun } from "./sbi-shinsei";
 
 type AuditEnv = Pick<Env, "SBI_SHINSEI_SNAPSHOTS">;

@@ -5,11 +5,8 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
-import { otherIdentity as providerIdentity } from "../../../poc/observation-pipeline/src/identity/other.ts";
-import type {
-  IdentityInput,
-  IdentityPlan,
-} from "../../../poc/observation-pipeline/src/identity/types.ts";
+import { otherIdentity as providerIdentity } from "../../../packages/identity/src/other.ts";
+import type { IdentityInput, IdentityPlan } from "../../../packages/identity/src/types.ts";
 import { executeIdentityCommand, type IdentityCommand } from "../src/identity-commands.ts";
 import { dependencyDigest } from "../src/identity-policies/index.ts";
 import {

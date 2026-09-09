@@ -1,6 +1,6 @@
 import { ImportError } from "./error";
 import { validateVpassRun } from "./vpass";
-import { vpassStatementPage } from "../../../poc/observation-pipeline/src/parsers/vpass";
+import { vpassStatementPage } from "../../../packages/parsers/src/parsers/vpass";
 
 interface AuditEnv {
   VPASS_SNAPSHOTS: R2Bucket;

@@ -1,7 +1,7 @@
 import {
   EVIDENCE_API_VERSION,
   type EvidenceMeta,
-} from "../../../poc/observation-pipeline/shared/evidence-contract";
+} from "../../../packages/observation-shared/src/evidence-contract";
 import { authenticate } from "./auth";
 import { agentApi, classifyAgentPath, sharedQueryApi } from "./agent-api";
 import { commandApi, isCommandPath } from "./command-api";

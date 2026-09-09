@@ -1,9 +1,9 @@
-import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry.ts";
-import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity/index.ts";
+import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
+import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import {
   snapshotPolicyComparisonSql,
   type SnapshotPolicyComparisonRow,
-} from "../../../poc/observation-pipeline/src/snapshot-query.ts";
+} from "../../../packages/parsers/src/snapshot-query.ts";
 import {
   coverageClaimViolations,
   validCoverageClaim,
@@ -61,7 +61,7 @@ import type {
   Parser,
   ParseIssue,
   ParseResult,
-} from "../../../poc/observation-pipeline/src/types.ts";
+} from "../../../packages/parsers/src/types.ts";
 
 // The holdings report is generated in one base unit against one perimeter;
 // nothing is converted into the base unit without a price observation.

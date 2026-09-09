@@ -2,8 +2,8 @@ import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { describeActivities } from "../src/activity-presentation";
-import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
-import type { TransactionRow } from "../../../poc/observation-pipeline/shared/api-contract";
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
+import type { TransactionRow } from "../../../packages/observation-shared/src/api-contract";
 beforeAll(seedRegistry);
 it("projects only bounded same-row facts and preserves the positive withdrawal amount", async () => {
   const run = await seedRun({ count: 1 });

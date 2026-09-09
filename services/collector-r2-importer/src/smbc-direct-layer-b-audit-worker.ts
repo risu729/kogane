@@ -1,8 +1,8 @@
 import {
   smbcDirectBalance,
   smbcDirectTransactions,
-} from "../../../poc/observation-pipeline/src/parsers/smbc-direct";
-import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types";
+} from "../../../packages/parsers/src/parsers/smbc-direct";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types";
 import { validateSmbcDirectRun } from "./smbc-direct";
 
 type AuditEnv = Pick<Env, "SMBC_DIRECT_SNAPSHOTS">;

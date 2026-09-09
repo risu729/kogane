@@ -12,8 +12,8 @@
 // parser module and the local modules it imports (poc/observation-pipeline
 // scripts/parser-digests.ts computes it). A UI change must not invalidate
 // every historical parse; a change to a shared parsing helper must.
-import { PARSER_DIGESTS, PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry.ts";
-import type { ArtifactMeta, Parser } from "../../../poc/observation-pipeline/src/types.ts";
+import { PARSER_DIGESTS, PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
+import type { ArtifactMeta, Parser } from "../../../packages/parsers/src/types.ts";
 import {
   canonicalDigest,
   validTransformManifest,

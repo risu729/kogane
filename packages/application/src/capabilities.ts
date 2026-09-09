@@ -5,7 +5,7 @@
 //
 // The advertised `ApiCapabilities` object is the same one `/api/meta` serves,
 // so an agent and the human UI read one description of the deployment.
-import type { ApiCapabilities } from "../../../poc/observation-pipeline/shared/api-schema.ts";
+import type { ApiCapabilities } from "../../../packages/observation-shared/src/api-schema.ts";
 import { FINANCIAL_ERROR_CODES, type FinancialErrorCode } from "../../domain/src/result.ts";
 import { ERROR_REMEDIES } from "./errors.ts";
 import {

@@ -1,5 +1,5 @@
-import type { ObservationKind } from "../../../poc/observation-pipeline/shared/api-contract";
-import { resolveFinancialProduct } from "../../../poc/observation-pipeline/shared/financial-products";
+import type { ObservationKind } from "../../../packages/observation-shared/src/api-contract";
+import { resolveFinancialProduct } from "../../../packages/observation-shared/src/financial-products";
 import {
   DEFAULT_IDENTITY_READ_MODE,
   type IdentityReadMode,
@@ -18,7 +18,7 @@ import type {
   ObservationOrganization,
   OrganizedAccount,
   OrganizedInstrument,
-} from "../../../poc/observation-pipeline/shared/organization-contract";
+} from "../../../packages/observation-shared/src/organization-contract";
 
 type Ref = { kind: ObservationKind; id: number };
 interface OrganizationRow {

@@ -41,8 +41,8 @@ import {
 import {
   BALANCE_INTERPRETATION_POLICY_VERSION,
   classifyBalance,
-} from "../../../poc/observation-pipeline/shared/balance-semantics.ts";
-import { minorUnitExponent } from "../../../poc/observation-pipeline/src/money.ts";
+} from "../../../packages/observation-shared/src/balance-semantics.ts";
+import { minorUnitExponent } from "../../../packages/parsers/src/money.ts";
 import type {
   BalanceEvidenceMember,
   BalanceHistoryItem,
@@ -55,7 +55,7 @@ import type {
   MeasureDescriptor,
   ObservedQuantityWire,
   SnapshotDataCoverage,
-} from "../../../poc/observation-pipeline/shared/api-contract.ts";
+} from "../../../packages/observation-shared/src/api-contract.ts";
 import type { IdentityReadMode } from "../../../packages/read-model/src/index";
 import { decimalRows } from "./normalized-decimals";
 import { HttpError, json } from "./http";

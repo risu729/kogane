@@ -6,7 +6,7 @@ import {
   LOCAL_SNAPSHOT_RELATIONS,
   SNAPSHOT_CTES,
   snapshotCtes,
-} from "../../../poc/observation-pipeline/src/snapshot-query";
+} from "../../../packages/parsers/src/snapshot-query";
 import {
   activeStateProjection,
   CANDIDATE_LIMIT,

@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { decimalRows } from "../src/normalized-decimals";
-import { validNormalizedDecimal } from "../../../poc/observation-pipeline/shared/normalized-decimal";
+import { validNormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal";
 beforeAll(seedRegistry);
 it("D1 insertion triggers persist text-only exact values and API reads only selected IDs", async () => {
   const run = await seedRun({ count: 1 });

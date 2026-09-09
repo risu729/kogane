@@ -11,7 +11,7 @@ import { isRecord } from "../../../domain/src/guards.ts";
 import type { FinancialErrorCode, QuerySpec } from "../../../domain/src/result.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import type { TemporalValue } from "../../../domain/src/time.ts";
-import { MEASURE_VIEWS } from "../../../../poc/observation-pipeline/shared/api-schema.ts";
+import { MEASURE_VIEWS } from "../../../../packages/observation-shared/src/api-schema.ts";
 import { DEFAULT_QUERY_LIMIT, GRANT_LIMITS } from "../grants.ts";
 
 /**

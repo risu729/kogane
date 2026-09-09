@@ -20,7 +20,7 @@ import { layerBMigrations, seedArtifact, startPipeline } from "./harness.ts";
 import {
   smbcDirectBalance,
   smbcDirectTransactions,
-} from "../../../poc/observation-pipeline/src/parsers/smbc-direct.ts";
+} from "../../../packages/parsers/src/parsers/smbc-direct.ts";
 
 let mf: Miniflare;
 let env: Env;

@@ -12,14 +12,14 @@ import {
   organizationContext,
   organizationKey,
 } from "./observation-organization";
-import type { ApiMetadata } from "../../../poc/observation-pipeline/shared/api-contract";
+import type { ApiMetadata } from "../../../packages/observation-shared/src/api-contract";
 import {
   allowedQueryParameters,
   LIST_PATH_CAPABILITY,
   capabilityGrants,
   isListPath,
   validMeasureView,
-} from "../../../poc/observation-pipeline/shared/api-schema";
+} from "../../../packages/observation-shared/src/api-schema";
 import {
   balanceHistoryPage,
   latestBalancePage,

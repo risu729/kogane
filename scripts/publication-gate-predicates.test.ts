@@ -174,7 +174,8 @@ describe("publication gate predicate guard", () => {
     expect(concepts).toMatch(
       /export const legacyPublishedParses = \{[\s\S]*?superseded_by_parse_run_id IS NULL/u,
     );
-    expect(read("poc/observation-pipeline/src/snapshot-query.ts")).toContain("publishedParseRuns");
+    // Promoted out of the PoC by design review D07; the SQL is unchanged.
+    expect(read("packages/parsers/src/snapshot-query.ts")).toContain("publishedParseRuns");
   });
 
   test("the operator signals of the pipeline Worker read the projection", () => {

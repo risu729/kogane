@@ -4,7 +4,7 @@ import {
   vPointBalanceInfo,
   vPointHistoryPage,
   vPointSmfgPoint,
-} from "../../../poc/observation-pipeline/src/parsers/v-point";
+} from "../../../packages/parsers/src/parsers/v-point";
 
 type AuditEnv = Pick<Env, "VPOINT_SNAPSHOTS" | "VPOINT_PAY_SNAPSHOTS">;
 

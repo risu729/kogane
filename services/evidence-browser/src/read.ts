@@ -2,7 +2,7 @@ import type {
   EvidenceRun,
   EvidenceArtifact,
   EvidenceArtifactDetail,
-} from "../../../poc/observation-pipeline/shared/evidence-contract";
+} from "../../../packages/observation-shared/src/evidence-contract";
 import { HttpError } from "./http";
 
 export async function catalogue<T>(operation: () => Promise<T>): Promise<T> {

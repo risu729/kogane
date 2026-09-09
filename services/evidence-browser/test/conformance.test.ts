@@ -13,8 +13,8 @@ import {
   CENTRAL_STORE_CAPABILITIES,
   LIST_REQUEST_SCHEMA,
   LOCAL_STORE_CAPABILITIES,
-} from "../../../poc/observation-pipeline/shared/api-schema";
-import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
+} from "../../../packages/observation-shared/src/api-schema";
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import {
   CONFORMANCE_CHECKS,
   type ConformanceTarget,

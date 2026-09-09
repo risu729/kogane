@@ -4,16 +4,16 @@ import { readdirSync, readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
 import { sweep, parseJob } from "../src/worker.ts";
 import { migrationDir, publishParse, seedArtifact, startPipeline } from "./harness.ts";
-import { smbcDirectBalance } from "../../../poc/observation-pipeline/src/parsers/smbc-direct.ts";
+import { smbcDirectBalance } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
 import {
   providerTimestamp,
   wrapper,
-} from "../../../poc/observation-pipeline/src/parsers/sbi-shinsei-common.ts";
+} from "../../../packages/parsers/src/parsers/sbi-shinsei-common.ts";
 import {
   sonyBankGrossBalance,
   sonyBankHistoryCsv,
   sonyBankWalletHistory,
-} from "../../../poc/observation-pipeline/src/parsers/sony-bank.ts";
+} from "../../../packages/parsers/src/parsers/sony-bank.ts";
 
 let mf: Miniflare;
 let env: Env;

@@ -9,7 +9,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { sweep } from "../src/worker.ts";
 import { publishParse, seedUnitRun, setUnitScope, startPipeline } from "./harness.ts";
-import { snapshotCtes } from "../../../poc/observation-pipeline/src/snapshot-query.ts";
+import { snapshotCtes } from "../../../packages/parsers/src/snapshot-query.ts";
 
 // The reader's relations on the production schema (packages/read-model concepts).
 const RELATIONS = {

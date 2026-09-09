@@ -2,8 +2,8 @@ import {
   myJcbCreditLedger,
   myJcbEvidenceOnly,
   myJcbPastMonthBalances,
-} from "../../../poc/observation-pipeline/src/parsers/myjcb";
-import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types";
+} from "../../../packages/parsers/src/parsers/myjcb";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types";
 import {
   normalizeMyJcbArtifactPayload,
   parseMyJcbManifest,

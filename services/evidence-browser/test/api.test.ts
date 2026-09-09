@@ -3,9 +3,9 @@ import { base64url, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
-import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import { boundedCollections } from "../src/observation-api";
-import { CENTRAL_STORE_CAPABILITIES } from "../../../poc/observation-pipeline/shared/api-schema";
+import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema";
 
 const prefix = "/api/evidence/v1";
 describe("production observation API", () => {

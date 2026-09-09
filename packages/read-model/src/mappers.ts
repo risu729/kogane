@@ -16,7 +16,7 @@ import type {
   UnitUpdateSummary,
   ValuationRow,
   Warnings,
-} from "../../../poc/observation-pipeline/shared/api-contract";
+} from "../../../packages/observation-shared/src/api-contract";
 
 const SEPARATOR = " · ";
 

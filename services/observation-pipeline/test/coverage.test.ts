@@ -7,12 +7,9 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { parseJob, sweep } from "../src/worker.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
-import {
-  SNAPSHOT_DATASETS,
-  snapshotCtes,
-} from "../../../poc/observation-pipeline/src/snapshot-query.ts";
-import { smbcDirectBalance } from "../../../poc/observation-pipeline/src/parsers/smbc-direct.ts";
-import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types.ts";
+import { SNAPSHOT_DATASETS, snapshotCtes } from "../../../packages/parsers/src/snapshot-query.ts";
+import { smbcDirectBalance } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 
 // The reader's relations on the production schema (packages/read-model concepts).
 const RELATIONS = {

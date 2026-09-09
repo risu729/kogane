@@ -12,7 +12,7 @@ import {
   decimalProjectionExists,
 } from "../src/decimal-policy";
 import { canonicalJson, type ReportBody } from "../../../packages/domain/src/index";
-import { validInterpretationContext } from "../../../poc/observation-pipeline/shared/api-schema";
+import { validInterpretationContext } from "../../../packages/observation-shared/src/api-schema";
 
 const CONTEXT = "ctx-synthetic-1";
 const RUN = "run-synthetic-1";

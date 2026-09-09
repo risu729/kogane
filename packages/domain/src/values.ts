@@ -6,7 +6,7 @@
 import {
   validNormalizedDecimal,
   type NormalizedDecimal,
-} from "../../../poc/observation-pipeline/shared/normalized-decimal.ts";
+} from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import { hasExactKeys, isOneOf, isRecord, isSafeInt, isText } from "./guards.ts";
 
 /** `coefficient × 10^(-scale)` in the decimal-v1 canonical form: no trailing zeros, "-0" is "0". */

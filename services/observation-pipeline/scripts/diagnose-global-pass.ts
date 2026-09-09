@@ -2,8 +2,8 @@
 // raw text, account identifiers, amounts or HTML are logged or written.
 import { getPlatformProxy } from "wrangler";
 import { parse } from "parse5";
-import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry.ts";
-import type { ArtifactMeta } from "../../../poc/observation-pipeline/src/types.ts";
+import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 function isChallengeScript(value: string): boolean {
   try {
     const url = new URL(value, "https://diagnostic.invalid");

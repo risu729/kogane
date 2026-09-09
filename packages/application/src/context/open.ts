@@ -20,7 +20,7 @@
 import { canonicalDigest, type FinancialContext } from "../../../domain/src/context.ts";
 import type { QuerySpec } from "../../../domain/src/result.ts";
 import type { TemporalValue } from "../../../domain/src/time.ts";
-import type { InterpretationContext } from "../../../../poc/observation-pipeline/shared/api-schema.ts";
+import type { InterpretationContext } from "../../../../packages/observation-shared/src/api-schema.ts";
 import { type Grant, perimeterRefFor } from "../grants.ts";
 import {
   type QueryRequest,

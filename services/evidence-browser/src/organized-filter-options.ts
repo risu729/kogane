@@ -1,4 +1,4 @@
-import type { FilterOptions } from "../../../poc/observation-pipeline/shared/api-contract";
+import type { FilterOptions } from "../../../packages/observation-shared/src/api-contract";
 import { readAccountConnections } from "./account-connections";
 import { connectionAccountLabel } from "./account-connection-display";
 const KINDS = { transactions: "transaction", balances: "balance", positions: "position" } as const;

@@ -7,9 +7,9 @@ import { beforeAll, expect, it } from "vitest";
 import { identityApi } from "../src/identity-api";
 import { observationApi } from "../src/observation-api";
 import { observationOrganizations, ORGANIZATION_QUERY } from "../src/observation-organization";
-import { validInterpretationContext } from "../../../poc/observation-pipeline/shared/api-schema";
-import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
-import { validIdentityResponse } from "../../../poc/observation-pipeline/shared/identity-contract";
+import { validInterpretationContext } from "../../../packages/observation-shared/src/api-schema";
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
+import { validIdentityResponse } from "../../../packages/observation-shared/src/identity-contract";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 
 beforeAll(seedRegistry);

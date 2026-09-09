@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
 import { identityApi } from "../src/identity-api";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
-import { validIdentityResponse } from "../../../poc/observation-pipeline/shared/identity-contract";
+import { validIdentityResponse } from "../../../packages/observation-shared/src/identity-contract";
 beforeAll(seedRegistry);
 it("accepts every safe offset beyond the former cap and rejects unsafe query values", async () => {
   for (const offset of [1_000_000, 1_000_100, Number.MAX_SAFE_INTEGER]) {

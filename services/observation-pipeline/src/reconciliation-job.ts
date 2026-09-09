@@ -31,7 +31,7 @@ import {
   quantityFromNormalizedDecimal,
   type Quantity,
 } from "../../../packages/domain/src/values.ts";
-import type { NormalizedDecimal } from "../../../poc/observation-pipeline/shared/normalized-decimal.ts";
+import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import {
   DEFAULT_MATCH_OPTIONS,
