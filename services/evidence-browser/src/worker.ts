@@ -9,6 +9,7 @@ import { observationApi } from "./observation-api";
 import { rewardsApi } from "./rewards-api";
 import { eventsApi } from "./events-api";
 import { identityApi } from "./identity-api";
+import { reportsApi } from "./reports-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
 import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw } from "./read";
 
@@ -23,6 +24,7 @@ function classify(path: string): string {
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+\/raw$/.test(path)) return "artifact_raw";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+$/.test(path)) return "artifact_detail";
   if (path === "/api/v2/activity" || path === "/api/v2/obligations") return "events_v2";
+  if (/^\/api\/v2\/reports\/[^/]+(?:\/(?:explanation|export))?$/.test(path)) return "report";
   if (path.startsWith("/api/v2/rewards")) return "rewards";
   return path.startsWith("/api/") ? "unknown_api" : "assets";
 }
@@ -44,6 +46,10 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (sharedQueryResponse) return sharedQueryResponse;
   const identityResponse = await catalogue(() => identityApi(request, env, url));
   if (identityResponse) return identityResponse;
+  // Fixed report artifacts (A12). Re-display only; recomputing and sharing a
+  // correction are commands, not reads (docs/calculation-and-reports.md).
+  const reportResponse = await catalogue(() => reportsApi(env, url));
+  if (reportResponse) return reportResponse;
   // Reward reads are behind the deployment's own capability, so a Worker with
   // the flag off serves exactly the routes it served before (docs/rewards.md).
   const rewardsResponse = await catalogue(() => rewardsApi(request, env, url));

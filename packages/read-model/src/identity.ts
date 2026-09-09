@@ -51,9 +51,16 @@ export function identityReleaseFor(
   return joined.length <= 128 ? joined : MIXED_RECORDED_IDENTITY_RELEASE;
 }
 
+/**
+ * `decimalPolicyRelease` may name a policy other than `decimal-v1` only when a
+ * projection exists for that name; the reader decides that before calling here
+ * (services/evidence-browser/src/decimal-policy.ts, root review 07 section 6).
+ * The default stays `decimal-v1`, the only projection migration 0024 created.
+ */
 export function interpretationContext(
   mode: IdentityReadMode,
   identityRelease: string,
+  decimalPolicyRelease: string = DECIMAL_POLICY_RELEASE,
 ): InterpretationContext {
   return {
     mode,
@@ -62,7 +69,7 @@ export function interpretationContext(
     productCatalogueRelease: FINANCIAL_PRODUCT_CATALOGUE_VERSION,
     productResolverRelease: FINANCIAL_PRODUCT_RESOLVER_VERSION,
     measurePolicyRelease: MEASURE_POLICY_RELEASE,
-    decimalPolicyRelease: DECIMAL_POLICY_RELEASE,
+    decimalPolicyRelease,
   };
 }
 

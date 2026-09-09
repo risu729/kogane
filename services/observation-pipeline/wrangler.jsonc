@@ -9,7 +9,11 @@
   "preview_urls": false,
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "triggers": { "crons": ["*/5 * * * *"] },
-  "vars": { "RECONCILIATION_ENABLED": "0", "REWARD_CLAIMS_ENABLED": "false" },
+  "vars": {
+    "RECONCILIATION_ENABLED": "0",
+    "REWARD_CLAIMS_ENABLED": "false",
+    "REPORTS_ENABLED": "false"
+  },
   "limits": { "cpu_ms": 300000 },
   "d1_databases": [
     {
