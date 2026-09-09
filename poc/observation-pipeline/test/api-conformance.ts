@@ -19,6 +19,7 @@ import {
   LIST_REQUEST_SCHEMA,
   MEASURE_VIEWS,
   OBSERVATION_API_CONTRACT_VERSION,
+  REWARD_REQUEST_SCHEMA,
   type ListPath,
 } from "../shared/api-schema.ts";
 
@@ -233,6 +234,35 @@ export const CONFORMANCE_CHECKS: ConformanceCheck[] = [
           assert(response.status !== 200, `${path}: served without identityReadModes`);
         }
       }
+    },
+  },
+  {
+    name: "reward reads are served exactly when rewardsV2 is advertised",
+    async run(target) {
+      const { capabilities } = await metadata(target);
+      const paths = [
+        "/api/v2/rewards/holdings?offset=0",
+        "/api/v2/rewards/expiry?offset=0",
+        "/api/v2/rewards/offers/simulate?goal=points:b&quantity=1000",
+      ];
+      for (const path of paths) {
+        const response = await target.get(path);
+        if (!capabilities.rewardsV2) {
+          assert(response.status !== 200, `${path}: served without rewardsV2`);
+          // The whole group is absent, not merely parameter-refused: the bare
+          // path is a 404 rather than a 400 on an unknown parameter.
+          const bare = await target.get(path.split("?", 1)[0]!);
+          assert(bare.status === 404, `${path}: expected 404 without rewardsV2`);
+          continue;
+        }
+        assert(response.status === 200, `${path}: expected 200, got ${response.status}`);
+        assert(response.headers.get("cache-control") === "no-store", `${path}: not no-store`);
+        await refused(target, `${path.split("?", 1)[0]!}?unexpected=1`, 400);
+      }
+      // A write is refused whatever the capability says: there is no command
+      // route under /api/v2/rewards and no exchange is ever performed.
+      const write = await target.get(Object.keys(REWARD_REQUEST_SCHEMA)[0]!, "POST");
+      assert(write.status === 405 || write.status === 404, `rewards POST: ${write.status}`);
     },
   },
   {

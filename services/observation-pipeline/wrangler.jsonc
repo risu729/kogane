@@ -11,6 +11,7 @@
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
     "RECONCILIATION_ENABLED": "0",
+    "REWARD_CLAIMS_ENABLED": "false",
     "REPORTS_ENABLED": "false",
     "BALANCE_PROJECTION_ENABLED": "0"
   },

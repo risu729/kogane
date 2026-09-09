@@ -6,6 +6,7 @@ import { authenticate } from "./auth";
 import { agentApi, classifyAgentPath, sharedQueryApi } from "./agent-api";
 import { commandApi, isCommandPath } from "./command-api";
 import { observationApi } from "./observation-api";
+import { rewardsApi } from "./rewards-api";
 import { eventsApi } from "./events-api";
 import { identityApi } from "./identity-api";
 import { reportsApi } from "./reports-api";
@@ -24,6 +25,7 @@ function classify(path: string): string {
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+$/.test(path)) return "artifact_detail";
   if (path === "/api/v2/activity" || path === "/api/v2/obligations") return "events_v2";
   if (/^\/api\/v2\/reports\/[^/]+(?:\/(?:explanation|export))?$/.test(path)) return "report";
+  if (path.startsWith("/api/v2/rewards")) return "rewards";
   return path.startsWith("/api/") ? "unknown_api" : "assets";
 }
 
@@ -48,6 +50,10 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // correction are commands, not reads (docs/calculation-and-reports.md).
   const reportResponse = await catalogue(() => reportsApi(env, url));
   if (reportResponse) return reportResponse;
+  // Reward reads are behind the deployment's own capability, so a Worker with
+  // the flag off serves exactly the routes it served before (docs/rewards.md).
+  const rewardsResponse = await catalogue(() => rewardsApi(request, env, url));
+  if (rewardsResponse) return rewardsResponse;
   const observationResponse = await catalogue(() => observationApi(request, env, url));
   if (observationResponse) return observationResponse;
   // A10 read side: 404 unless the projection exists and the reader flag is on.

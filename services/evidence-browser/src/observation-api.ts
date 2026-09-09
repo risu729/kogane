@@ -4,6 +4,7 @@ import { describeActivities } from "./activity-presentation";
 import { organizedFilterOptions } from "./organized-filter-options";
 import { presentLatestBalances, describeBalanceRows } from "./balance-presentation";
 import { HttpError, json } from "./http";
+import { centralStoreCapabilities } from "./capabilities";
 import { raw } from "./read";
 import {
   organizeRows,
@@ -27,7 +28,6 @@ import {
   V2_HISTORY_PATH,
   V2_LATEST_PATH,
 } from "./balances-v2";
-import { serverCapabilities } from "./server-capabilities";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
 import { identityReadMode } from "./identity-read";
 
@@ -76,18 +76,19 @@ export async function observationApi(
     )
   )
     return null;
-  // The v2 balance routes exist only once the projection has a sealed
-  // snapshot and the reader flag is on, so what /api/meta advertises and what
-  // the routes accept are the same object, computed the same way per request.
-  const capabilities = await serverCapabilities(env);
+  // Accepted parameters come from the shared schema, so a server and a client
+  // cannot drift apart. The v2 balance routes are the one place where a
+  // deployment-resolved capability also decides whether a path exists and
+  // which parameters it accepts, so the capabilities are resolved once here
+  // and the same object answers the path check, the parameter check and
+  // /api/meta.
+  const capabilities = await centralStoreCapabilities(env);
   if (
     isListPath(path) &&
     LIST_PATH_CAPABILITY[path] &&
     !capabilityGrants(LIST_PATH_CAPABILITY[path], capabilities)
   )
     throw new HttpError(404, "not_found");
-  // Accepted parameters come from the shared schema and the capabilities this
-  // Worker advertises in /api/meta, so the two cannot drift apart.
   const allowed = allowedQueryParameters(path, capabilities);
   for (const key of url.searchParams.keys()) {
     const value = url.searchParams.get(key)!;
@@ -152,6 +153,9 @@ export async function observationApi(
       apiVersion: 1,
       parsingHealth: await reader.parsingHealth(),
       source: { kind: "central-store", classification: "financial" },
+      // What this server can actually serve, not what the contract defaults
+      // to: the object resolved above, which the agent API reads through the
+      // same helper (src/capabilities.ts).
       capabilities,
     } satisfies ApiMetadata);
   }

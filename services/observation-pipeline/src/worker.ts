@@ -25,6 +25,7 @@ import {
   REPAIR_LIMIT_DEFAULT,
   repairPublication,
 } from "./publication-gate.ts";
+import { rewardClaimsEnabled, rewardClaimsStage } from "./reward-claims-job.ts";
 import { reportsEnabled, runReportJob } from "./report-job.ts";
 import { DECIMAL_POLICY_RELEASE } from "../../../packages/read-model/src/identity";
 import type {
@@ -1318,6 +1319,8 @@ export interface ScheduledStages {
   balanceProjection: (env: Env) => Promise<object>;
   /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
   reconcile?: (env: Env) => Promise<object>;
+  /** A11 reward promotion. Absent stage, or the flag off, means the lane never runs. */
+  rewards?: (env: Env) => Promise<object>;
   /** A12 report job. Absent stage, or the flag off, means the lane never runs. */
   reports?: (env: Env) => Promise<object>;
   /**
@@ -1334,6 +1337,7 @@ const defaultStages: ScheduledStages = {
   // `skipped` rather than the caller branching on the flag.
   balanceProjection: (env) => runBalanceProjection(env),
   reconcile: (env) => reconciliationSweep(env.DB),
+  rewards: (env) => rewardClaimsStage(env),
   reports: (env) => {
     // One clock reading for both fields: the run records when it ran, and the
     // cutoff admits everything recorded up to that same instant.
@@ -1375,6 +1379,12 @@ export async function runScheduled(
     [
       "reconciliation_sweep",
       reconciliationEnabled(env.RECONCILIATION_ENABLED) ? stages.reconcile : undefined,
+    ],
+    // Off unless REWARD_CLAIMS_ENABLED is set, so a normal deploy promotes
+    // nothing and logs nothing new (docs/rewards.md).
+    [
+      "reward_claims_sweep",
+      rewardClaimsEnabled(env.REWARD_CLAIMS_ENABLED) ? stages.rewards : undefined,
     ],
     // Off unless REPORTS_ENABLED is set, for the same reason
     // (docs/calculation-and-reports.md).

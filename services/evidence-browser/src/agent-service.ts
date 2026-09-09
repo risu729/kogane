@@ -30,11 +30,8 @@ import {
   LATEST_IDENTITY_RELEASE,
 } from "../../../packages/read-model/src/index";
 import { balanceProjectionReader, projectionFlagOn } from "./balances-v2";
+import { centralStoreCapabilities } from "./capabilities";
 import { evidenceReader, type ObservationReader, type Overview } from "./observations";
-// One description of what this deployment serves, shared with /api/meta and
-// with the request validator, so an agent is never told about a route this
-// store cannot serve (see server-capabilities.ts).
-import { serverCapabilities } from "./server-capabilities";
 import { proposalStore } from "./proposals";
 
 export const AGENT_TOOL_NAMES = [
@@ -61,7 +58,7 @@ export interface ToolResult {
 interface ToolContext {
   reader: ObservationReader;
   db: D1Database;
-  /** Resolves what this server can actually serve; see `serverCapabilities`. */
+  /** Resolves what this server can actually serve; see `src/capabilities.ts`. */
   env: Env;
   grant: Grant;
   now: string;
@@ -112,9 +109,13 @@ export async function callTool(
         return failure("unsupported_semantics", "capabilities", ["body"]);
       return {
         status: 200,
+        // The same helper /api/meta uses, so an agent and a page read one
+        // description of the deployment and neither is told about a route
+        // this store cannot serve. `commands` only states that the change
+        // lifecycle is served: no grant here reaches approve or commit.
         body: capabilitiesFor(
           context.grant,
-          await serverCapabilities(context.env),
+          await centralStoreCapabilities(context.env),
           MAX_REQUEST_BYTES,
         ),
       };
