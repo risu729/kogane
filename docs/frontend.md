@@ -65,19 +65,28 @@ the hosted synthetic demo, and the production Worker. Capabilities are never
 an authorization switch: Access JWT verification, closed responses on auth
 failure, and `no-store` apply before any capability is read.
 
-| Capability          | Values                  | Local / demo | Production  | Effect in the client                                                                    |
-| ------------------- | ----------------------- | ------------ | ----------- | --------------------------------------------------------------------------------------- |
-| `contractVersion`   | `observation-api-v1`    | yes          | yes         | Validator rejects any other version                                                     |
-| `readOnly`          | `true`                  | yes          | yes         | No write control exists                                                                 |
-| `rawEvidence`       | `true`                  | yes          | yes         | `/api/raw/<sha256>` links                                                               |
-| `liveCollectors`    | `false`                 | yes          | yes         | Refresh never means a collector ran                                                     |
-| `measureViews`      | `balances`, `summaries` | none         | both        | `view=` is sent only for an advertised view                                             |
-| `identityReadModes` | `latest`, `as-recorded` | none         | both        | The 口座・銘柄 page and link exist; `identityRead=` is sent only for an advertised mode |
-| `paginationVersion` | `none`, `offset-v1`     | `none`       | `offset-v1` | Coverage record, next-page links, no client column sort                                 |
-| `collectionFilters` | boolean                 | false        | true        | Server filter controls replace client record controls                                   |
-| `organizedDisplay`  | boolean                 | false        | true        | Rows carry `organization`                                                               |
-| `financialProducts` | boolean                 | false        | true        | Organized rows may carry a product claim                                                |
-| `evidenceHistory`   | boolean                 | false        | true        | The 取得履歴 route and link exist                                                       |
+| Capability             | Values                  | Local / demo | Production                    | Effect in the client                                                                    |
+| ---------------------- | ----------------------- | ------------ | ----------------------------- | --------------------------------------------------------------------------------------- |
+| `contractVersion`      | `observation-api-v1`    | yes          | yes                           | Validator rejects any other version                                                     |
+| `readOnly`             | `true`                  | yes          | yes                           | No write control exists                                                                 |
+| `rawEvidence`          | `true`                  | yes          | yes                           | `/api/raw/<sha256>` links                                                               |
+| `liveCollectors`       | `false`                 | yes          | yes                           | Refresh never means a collector ran                                                     |
+| `measureViews`         | `balances`, `summaries` | none         | both                          | `view=` is sent only for an advertised view                                             |
+| `identityReadModes`    | `latest`, `as-recorded` | none         | both                          | The 口座・銘柄 page and link exist; `identityRead=` is sent only for an advertised mode |
+| `paginationVersion`    | `none`, `offset-v1`     | `none`       | `offset-v1`                   | Coverage record, next-page links, no client column sort                                 |
+| `balancesV2`           | boolean                 | false        | flag + snapshot               | The 最新の残高 read-model section exists; the v2 balance routes are requested           |
+| `balancesV2Pagination` | `none`, `keyset-v2`     | `none`       | `keyset-v2` when `balancesV2` | Cursor paging over one fixed snapshot, with a "read the newest snapshot" action         |
+| `collectionFilters`    | boolean                 | false        | true                          | Server filter controls replace client record controls                                   |
+| `organizedDisplay`     | boolean                 | false        | true                          | Rows carry `organization`                                                               |
+| `financialProducts`    | boolean                 | false        | true                          | Organized rows may carry a product claim                                                |
+| `evidenceHistory`      | boolean                 | false        | true                          | The 取得履歴 route and link exist                                                       |
+
+`balancesV2` is the one capability that also depends on stored state: the
+production Worker advertises it only when its reader flag is on **and** the
+balance projection has a sealed snapshot, so a capability is never a promise
+the store cannot keep (see [Balance read model](balance-read-model.md)). A
+path whose own capability is missing answers 404, not 400: there is no route
+to reject a parameter for.
 
 A server refuses with 400 any query parameter its capabilities do not grant;
 the client never sends one. While metadata is loading, capabilities are

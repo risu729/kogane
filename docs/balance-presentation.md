@@ -49,3 +49,21 @@ SMFGのAPIには絶対年月が保存されていないため「先月分（対�
 既存の残高フィールド・金額・符号は変更せず、APIに任意の `interpretation` を追加する。古いデータの画面表示は分類のみ行い、クライアント側で部分的な重複統合をしない。元行を含まない根拠配列はAPI検証で拒否する。
 
 DB移行や再解析は不要。既存のCloudflare Access保護、原本の公開制限、読み取り上限を維持する。
+
+## 読み取りモデル（v2）
+
+上記の分類・まとめ規則は変更していない。`/api/v2/balances/latest` は同じ
+`interpretation` を返し、同じ厳格な根拠一致条件で証拠を束ねる。変わったのは
+**いつ**その計算を行うかで、リクエストごとではなく入力contextごとに一度だけ
+行い、結果を投影として保存する。詳細は
+[Balance read model](balance-read-model.md)。
+
+v2の行はさらに次を持つ。採用状態（`adopted` / `excluded` / `unresolved` /
+`conflict` / `stale`）と理由コード、計算に使える正規化値
+（`ObservedQuantity`）、指標定義（`metricId` と版）、根拠付きの時点
+（`TemporalReference`）、鮮度。**根拠の件数は残高の件数ではない**ため、画面は
+両者を別々に表示する。
+
+小計は単位別の `knownAssetsSubtotal` と `liabilitiesCoverage: 'unknown'` の組で
+返す。`netWorth` フィールドは存在せず、応答検証が拒否する。未取得の負債がある
+ため、資産の部分合計は下限ですらない。
