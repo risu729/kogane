@@ -1,0 +1,29 @@
+{
+  "scenario": "SC11",
+  "slice": "V3",
+  "title": "Withdrawable balance, usable points and a status indicator",
+  "synthetic": true,
+  "definitions": {
+    "wallet.nominal-balance": { "metricId": "wallet.nominal-balance", "providerMetric": { "family": "balance", "sourceId": "synthetic-wallet", "parserName": "synthetic-wallet-balance", "metric": "balance" }, "measurementKind": "stock", "subjectKind": "account", "unitDimension": "currency", "signMeaning": "asset-positive", "timeBasis": "point-in-time", "aggregationRule": "sum-disjoint", "overlapGroup": "synthetic-wallet:nominal-vs-pocket", "sourceAuthority": "provider-reported", "definitionRelease": "fixture-v1", "netAssetEligible": false, "legacyBalance": null, "legacyActivity": null },
+    "wallet.withdrawable-amount": { "metricId": "wallet.withdrawable-amount", "providerMetric": { "family": "balance", "sourceId": "synthetic-wallet", "parserName": "synthetic-wallet-balance", "metric": "withdrawable" }, "measurementKind": "capacity", "subjectKind": "account", "unitDimension": "currency", "signMeaning": "unsigned", "timeBasis": "point-in-time", "aggregationRule": "non-additive", "overlapGroup": "synthetic-wallet:nominal-vs-pocket", "sourceAuthority": "provider-reported", "definitionRelease": "fixture-v1", "netAssetEligible": false, "legacyBalance": null, "legacyActivity": null },
+    "reward.bucket-balance": { "metricId": "reward.bucket-balance", "providerMetric": { "family": "balance", "sourceId": "synthetic-program", "parserName": "synthetic-program-buckets", "metric": "bucket" }, "measurementKind": "stock", "subjectKind": "pocket", "unitDimension": "reward", "signMeaning": "asset-positive", "timeBasis": "point-in-time", "aggregationRule": "domain-specific", "overlapGroup": null, "sourceAuthority": "provider-reported", "definitionRelease": "fixture-v1", "netAssetEligible": false, "legacyBalance": null, "legacyActivity": null },
+    "program.status-indicator": { "metricId": "program.status-indicator", "providerMetric": { "family": "balance", "sourceId": "synthetic-program", "parserName": "synthetic-program-status", "metric": "status_points" }, "measurementKind": "qualification", "subjectKind": "program", "unitDimension": "quantity", "signMeaning": "unsigned", "timeBasis": "period", "aggregationRule": "non-additive", "overlapGroup": null, "sourceAuthority": "provider-reported", "definitionRelease": "fixture-v1", "netAssetEligible": false, "legacyBalance": null, "legacyActivity": null }
+  },
+  "measures": [
+    { "ref": "m-wallet-nominal", "metricId": "wallet.nominal-balance", "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "6000", "scale": 0 }, "normalizationVersion": "decimal-v1" } } },
+    { "ref": "m-wallet-withdrawable", "metricId": "wallet.withdrawable-amount", "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "4000", "scale": 0 }, "normalizationVersion": "decimal-v1" } } },
+    { "ref": "m-wallet-non-withdrawable", "metricId": "wallet.nominal-balance", "pocketRef": "pocket:non-withdrawable", "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "2000", "scale": 0 }, "normalizationVersion": "decimal-v1" } } },
+    { "ref": "m-points-regular", "metricId": "reward.bucket-balance", "pocketRef": "bucket:regular", "quantity": { "unitRef": "points:program-a", "value": { "status": "exact", "value": { "coefficient": "300", "scale": 0 }, "normalizationVersion": "decimal-v1" } } },
+    { "ref": "m-points-restricted", "metricId": "reward.bucket-balance", "pocketRef": "bucket:restricted", "quantity": { "unitRef": "points:program-a", "value": { "status": "exact", "value": { "coefficient": "500", "scale": 0 }, "normalizationVersion": "decimal-v1" } } },
+    { "ref": "m-status-indicator", "metricId": "program.status-indicator", "quantity": { "unitRef": "status-points:program-a", "value": { "status": "exact", "value": { "coefficient": "100", "scale": 0 }, "normalizationVersion": "decimal-v1" } } }
+  ],
+  "expected": {
+    "nominalJpy": "6000",
+    "withdrawableJpy": "4000",
+    "pointsNominalWithBuckets": "800",
+    "statusIndicator": "100",
+    "forbiddenTotal": "6900",
+    "jpyPlusPointsRejected": "unit_mismatch",
+    "statusIndicatorAdditive": false
+  }
+}

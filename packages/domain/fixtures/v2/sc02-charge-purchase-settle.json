@@ -1,0 +1,44 @@
+{
+  "scenario": "SC02",
+  "slice": "V2",
+  "title": "Charge a wallet from a card, buy in a shop, settle the card from the bank",
+  "synthetic": true,
+  "unitRef": "JPY",
+  "accounts": { "bank": "asset", "wallet": "asset", "card": "liability" },
+  "opening": { "bank": "100000", "wallet": "0", "card": "0" },
+  "costRecognitionPolicy": "at-purchase",
+  "events": [
+    {
+      "eventId": "ev:charge-1",
+      "kind": "funding",
+      "legs": [
+        { "account": "wallet", "delta": "10000" },
+        { "account": "card", "delta": "10000" }
+      ],
+      "observationRefs": ["obs:card:auth-1", "obs:wallet:topup-1"]
+    },
+    {
+      "eventId": "ev:purchase-1",
+      "kind": "purchase",
+      "legs": [{ "account": "wallet", "delta": "-3000" }],
+      "purchaseCost": "3000",
+      "observationRefs": ["obs:wallet:purchase-1"]
+    },
+    {
+      "eventId": "ev:settlement-1",
+      "kind": "settlement",
+      "legs": [
+        { "account": "bank", "delta": "-10000" },
+        { "account": "card", "delta": "-10000" }
+      ],
+      "observationRefs": ["obs:card:statement-1", "obs:bank:debit-1"]
+    }
+  ],
+  "expected": [
+    { "after": "opening", "bank": "100000", "wallet": "0", "card": "0", "netAssets": "100000", "cumulativePurchases": "0" },
+    { "after": "ev:charge-1", "bank": "100000", "wallet": "10000", "card": "10000", "netAssets": "100000", "cumulativePurchases": "0" },
+    { "after": "ev:purchase-1", "bank": "100000", "wallet": "7000", "card": "10000", "netAssets": "97000", "cumulativePurchases": "3000" },
+    { "after": "ev:settlement-1", "bank": "90000", "wallet": "7000", "card": "0", "netAssets": "97000", "cumulativePurchases": "3000" }
+  ],
+  "expectedCounts": { "observations": 5, "purchases": 1 }
+}

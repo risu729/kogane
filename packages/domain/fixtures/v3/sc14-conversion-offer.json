@@ -1,0 +1,34 @@
+{
+  "scenario": "SC14",
+  "slice": "V3",
+  "title": "A good conversion rate does not make the whole balance convertible",
+  "synthetic": true,
+  "offer": {
+    "offerRef": "offer:a-to-b:standard",
+    "fromUnit": "points:a",
+    "toUnit": "points:b",
+    "minimum": "1000",
+    "increment": "1000",
+    "cap": "3000",
+    "ratio": { "numerator": "1", "denominator": "2" },
+    "fee": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "100", "scale": 0 }, "normalizationVersion": "decimal-v1" } },
+    "ruleVerified": true
+  },
+  "eligibleBalance": "2500",
+  "expected": {
+    "used": "2000",
+    "received": "1000",
+    "remaining": "500",
+    "fee": "100",
+    "naiveReceive": "1250",
+    "naiveIsRejected": true
+  },
+  "chained": {
+    "description": "A→C→B must check units, remaining balance, cap and lead time at every hop; a positive cycle is not free value.",
+    "hops": [
+      { "fromUnit": "points:a", "toUnit": "points:c", "ratio": { "numerator": "1", "denominator": "1" }, "minimum": "1000", "increment": "1000", "cap": "2000" },
+      { "fromUnit": "points:c", "toUnit": "points:b", "ratio": { "numerator": "3", "denominator": "5" }, "minimum": "500", "increment": "500", "cap": "2000" }
+    ],
+    "expected": { "receivedB": "1200", "remainingA": "500" }
+  }
+}
