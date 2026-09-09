@@ -396,9 +396,13 @@ test("a successful run outside the projection stays invisible to readers and vis
   expect(await projectionSet(905)).toEqual([published!]);
 }, 30000);
 
-test("migrations 0026 and 0036 apply on the earlier schema with existing rows and backfill exactly the legacy set", async () => {
+test("migrations 0026, 0028 and 0036 apply on the earlier schema with existing rows and backfill exactly the legacy set", async () => {
+  // 0028 (release adoption) and 0036 both build on 0026's tables, so the
+  // deployed schema this upgrade starts from is everything except those three.
   const upgrade = await startPipeline(
-    layerBMigrations().filter((name) => !name.startsWith("0026_") && !name.startsWith("0036_")),
+    layerBMigrations().filter(
+      (name) => !name.startsWith("0026_") && !name.startsWith("0028_") && !name.startsWith("0036_"),
+    ),
   );
   try {
     const db = upgrade.env.DB;
@@ -446,6 +450,7 @@ test("migrations 0026 and 0036 apply on the earlier schema with existing rows an
     ).results.map((r) => r.id);
     expect(legacy).toEqual([b, e, f, g, h]);
     await applyMigration(db, "0026_publication_gate.sql");
+    await applyMigration(db, "0028_parse_releases.sql");
     // 0036 guards the event history; it must apply on top of a backfilled 0026.
     await applyMigration(db, "0036_publication_event_guard.sql");
     const projection = (

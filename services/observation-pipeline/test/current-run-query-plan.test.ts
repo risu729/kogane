@@ -18,8 +18,15 @@ test("current identities select keyed eligible run winners before observation fa
       .sort()) {
       // 0022 fixed the plan shape and 0026 (publication gate) re-defines the
       // same view over the projection; both are applied explicitly below.
-      // 0036 only adds a trigger on a 0026 table, so it follows 0026.
-      if (file.startsWith("0022_") || file.startsWith("0026_") || file.startsWith("0036_"))
+      // 0036 only adds a trigger on a 0026 table, so it follows 0026, and
+      // 0028 (release adoption) builds on 0026's tables too. The identity view
+      // depends on neither, so 0028 is simply left out of this plan fixture.
+      if (
+        file.startsWith("0022_") ||
+        file.startsWith("0026_") ||
+        file.startsWith("0028_") ||
+        file.startsWith("0036_")
+      )
         continue;
       db.exec(readFileSync(new URL(file, dir), "utf8"));
     }

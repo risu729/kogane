@@ -108,8 +108,18 @@ Guarantees:
   signal and does use the projection.
 - Jobs that already exist for an artifact/parser/version keep their lane and
   status; replay never re-opens failed jobs or resets attempts.
-- Adoption of results (`target_release`) is a later PR; this change records the
-  value and never changes which parse run readers see.
+- `target_release` is how a plan aims its jobs at a registered candidate
+  release (A04, `docs/release-adoption.md`). With `RELEASE_CANDIDATES_ENABLED`
+  absent it is recorded and ignored, and every replay result publishes
+  normally. With the flag on, a job whose `target_release` names a registered
+  release of the same parser and version that is **not** the dataset's active
+  release is written as a candidate: `status='ok'`, marked in
+  `parse_run_candidates`, and never in `published_parse_runs`. Which parse run
+  readers see changes only through `POST /release/activate`.
+- Job creation in the incremental and repair lanes consults `active_releases`:
+  a dataset with an active release gets jobs only for that release's parser
+  version, unless the version is not deployed, in which case the deployed
+  registry decides as before.
 
 ## Budgets and overrides
 
@@ -203,8 +213,7 @@ constants in `worker.ts` and should be tuned from observed sweep durations.
 
 ## Open items for later PRs
 
-- Adoption (`target_release`, candidate versus active) and comparison of
-  replay results: PR-08 territory; this change only records the identifiers.
+- A budget of its own for candidate replays; today they share the replay lane's.
 - Per-source fairness inside a lane.
 - Identity projection as its own lane with budget and state rows; today it
   keeps its own budgets in `identity-store.ts` and is only isolated at the
