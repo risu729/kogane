@@ -141,7 +141,9 @@ has no contract cases.
 | `coverage-v1`              | `coverageV1Membership`: the parse has a `complete-container` claim whose `scope_key` equals the artifact's container scope, `completeness = 'complete'`, `membership_complete = 1`, no `failure_cause`; a zero-row claim participates unless the row sets `replaces_previous_on_complete_empty = 0`. |
 
 Both variants keep the existing rules: the parent run must be `success` with
-`failure_count = 0`, the parse must be `ok` and not superseded, every artifact
+`failure_count = 0`, the parse must be named by the publication projection
+`published_parse_runs` (migration 0026, `docs/publication-gate.md`; before that
+gate the rule was `ok` and not superseded), every artifact
 of the run's dataset/unit must have such a parse, `required_parser_version`
 applies (`0.3.0` for foreign positions), and the newest complete run wins by
 `fetched_at`, then artifact id. `unit_scope` is `run` for every row and is not
@@ -158,10 +160,13 @@ read yet; `unit-independent-v1` (PR-14) will add the `unit` scope.
 
 ## Switching a dataset to coverage-v1
 
-1. Deploy in order: migration 0025 → `services/observation-pipeline` Worker →
-   `services/evidence-browser`. The reader's SQL names
-   `dataset_snapshot_policies` and `parse_coverage_claims`, so the migration
-   must exist before the reader; the Worker must run before any claim exists.
+1. Deploy in order: migrations 0025 and 0026 →
+   `services/observation-pipeline` Worker → `services/evidence-browser`. The
+   reader's SQL names `dataset_snapshot_policies`, `parse_coverage_claims` and
+   `published_parse_runs`, so the migrations must exist before the reader; the
+   Worker must run before any claim exists. The snapshot CTEs sit on top of the
+   publication gate: a parse completes a container only when the projection
+   names it, so `docs/publication-gate.md` step 2 applies here unchanged.
 2. Let the converted parsers publish claims for the dataset (new sealed runs,
    or a replay plan for the current parser version; a replay creates new parse
    runs and never rewrites old ones).
@@ -195,8 +200,10 @@ policy reads as before.
 - INV: stored A/B rows, parser versions and warning texts are unchanged;
   observations of converted parsers are byte-identical to the frozen
   fixtures.
-- INV: a pending or error parse run's claim is never read for selection
-  (`coverage.test.ts`); claim rows publish atomically with `status = 'ok'`.
+- INV: a pending, error or unpublished parse run's claim is never read for
+  selection (`coverage.test.ts`); claim rows are written in the pending phase
+  and become readable only when the publish batch marks the run `ok` and moves
+  the publication pointer.
 - INV: an empty complete container replaces the previous snapshot under both
   policies; a partial-empty or unknown claim never does.
 - INV: the served evidence-browser result set is unchanged under the seeded
