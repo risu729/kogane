@@ -26,19 +26,37 @@ const policies = SNAPSHOT_DATASETS.map(
     `('${parser}', '${dataset}', ${parser === "sbi-foreign-cash-positions" ? `'${FOREIGN_POSITION_SNAPSHOT_VERSION}'` : "NULL"})`,
 ).join(",\n");
 
-export const SNAPSHOT_CTES = `snapshot_policies(parser_name, dataset, required_version) AS (
+/**
+ * Relations the snapshot CTEs read. The local PoC reads the base tables; the
+ * production reader passes the sealed `observation_*` views. Naming them here
+ * keeps the read boundary in the SQL text instead of in a later substitution.
+ */
+export interface SnapshotRelations {
+  fetchArtifacts: string;
+  fetchRuns: string;
+  parseRuns: string;
+}
+
+export const LOCAL_SNAPSHOT_RELATIONS: SnapshotRelations = {
+  fetchArtifacts: "fetch_artifacts",
+  fetchRuns: "fetch_runs",
+  parseRuns: "parse_runs",
+};
+
+export function snapshotCtes(relations: SnapshotRelations): string {
+  return `snapshot_policies(parser_name, dataset, required_version) AS (
   VALUES ${policies}
 ), eligible_snapshots AS (
   SELECT fa.source_id, policy.parser_name, policy.required_version, fa.dataset, fa.fetch_unit_key,
          fa.fetch_run_id, MAX(fa.fetched_at) AS fetched_at, MAX(fa.id) AS artifact_id
-  FROM fetch_artifacts fa
-  JOIN fetch_runs f ON f.id = fa.fetch_run_id
+  FROM ${relations.fetchArtifacts} fa
+  JOIN ${relations.fetchRuns} f ON f.id = fa.fetch_run_id
   JOIN snapshot_policies policy ON policy.dataset = fa.dataset
   WHERE f.status = 'success' AND f.failure_count = 0
   GROUP BY fa.source_id, policy.parser_name, policy.required_version, fa.dataset,
            fa.fetch_unit_key, fa.fetch_run_id
   HAVING COUNT(*) = SUM(CASE WHEN EXISTS (
-    SELECT 1 FROM parse_runs complete_parse
+    SELECT 1 FROM ${relations.parseRuns} complete_parse
     WHERE complete_parse.fetch_artifact_id = fa.id
       AND complete_parse.parser_name = policy.parser_name
       AND (policy.required_version IS NULL OR complete_parse.parser_version = policy.required_version)
@@ -65,6 +83,9 @@ export const SNAPSHOT_CTES = `snapshot_policies(parser_name, dataset, required_v
 ), current_snapshots AS (
   SELECT * FROM ranked_snapshots WHERE snapshot_rank = 1
 )`;
+}
+
+export const SNAPSHOT_CTES = snapshotCtes(LOCAL_SNAPSHOT_RELATIONS);
 
 // The enclosing query binds p=parser and fa=artifact. Empty successful parses
 // participate above even though there is no observation to join below.
