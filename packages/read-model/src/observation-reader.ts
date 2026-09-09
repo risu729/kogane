@@ -8,6 +8,7 @@ import type {
   Overview,
   ParseRunDetail,
   PositionWithValuations,
+  UnitUpdateSummary,
 } from "../../../poc/observation-pipeline/shared/api-contract";
 import { OBSERVATION_TABLES, type ObservationKind } from "./concepts";
 import {
@@ -34,6 +35,8 @@ import {
   provenance,
   type TransactionSqlRow,
   transactionRow,
+  type UnitUpdateSqlRow,
+  unitUpdateSummary,
   type ValuationSqlRow,
   valuationRow,
 } from "./mappers";
@@ -63,6 +66,7 @@ import {
   OVERVIEW_PARSE_RUNS_SQL,
   OVERVIEW_SOURCES_SQL,
   PARSING_HEALTH_SQL,
+  UNIT_UPDATES_SQL,
   parseRunObservationsSql,
   POSITION_VALUATIONS_SQL,
   positionsSql,
@@ -109,6 +113,10 @@ export function createObservationReader(
     return out;
   }
 
+  async function readUnitUpdates(): Promise<UnitUpdateSummary[]> {
+    return (await list<UnitUpdateSqlRow>(UNIT_UPDATES_SQL)).map(unitUpdateSummary);
+  }
+
   return {
     async overview(): Promise<Overview> {
       const counts = await Promise.all(
@@ -124,8 +132,19 @@ export function createObservationReader(
       const parseRuns = (await list<OverviewParseRunSqlRow>(OVERVIEW_PARSE_RUNS_SQL)).map(
         overviewParseRun,
       );
-      return { counts, sources, fetchRuns, parseRuns };
+      // Absent, not empty, while every dataset is on the run scope: the
+      // response shape of today's datasets is unchanged (D13/PR-14).
+      const unitUpdates = await readUnitUpdates();
+      return {
+        counts,
+        sources,
+        fetchRuns,
+        parseRuns,
+        ...(unitUpdates.length ? { unitUpdates } : {}),
+      };
     },
+
+    unitUpdates: readUnitUpdates,
 
     async parsingHealth(): Promise<ParsingHealth> {
       await one(VISIBLE_EVIDENCE_PROBE_SQL);

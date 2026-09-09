@@ -6,7 +6,7 @@ import type {
   ParseResult,
   TransactionObservation,
 } from "../types.ts";
-import { decodeUtf8, isObject } from "./util.ts";
+import { decodeUtf8, isObject, unitScopeAdmitted } from "./util.ts";
 
 const SOURCE_ID = "v-point-pay";
 const TRANSACTION_SOURCE_ACCOUNT = "v-point-pay:notification-events";
@@ -73,7 +73,10 @@ export const vPointPayNotificationEvent: Parser = {
   },
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
-    if (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) {
+    if (
+      (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) &&
+      !unitScopeAdmitted(artifact)
+    ) {
       throw new Error("V Point Pay observations require a successful failure-free fetch run");
     }
     const event = parseEvent(bytes);

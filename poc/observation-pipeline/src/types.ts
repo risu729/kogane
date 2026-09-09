@@ -15,6 +15,18 @@ export interface ArtifactMeta {
   runStatus: "success" | "partial" | "failed";
   /** Number of collector failures recorded by the owning fetch run. */
   runFailureCount: number;
+  /**
+   * Set by the caller to the eligibility policy that admitted this artifact
+   * although its run was not a clean success (design review D13): the
+   * artifact's dataset names the `unit` scope in `dataset_snapshot_policies`
+   * AND the artifact's own fetch unit reported terminal success. Absent or
+   * null means the artifact is admitted, if at all, by run success alone,
+   * which is the state of every dataset until an operator changes a policy
+   * row. Parsers read it only to decide whether their "the run succeeded"
+   * precondition is met by the unit instead; it never changes what is parsed
+   * out of the bytes.
+   */
+  unitScopeEligibility?: "unit-independent-v1" | null;
   /** Exact provider query window carried by collector manifests, when present. */
   runWindow?: { from: string; to: string };
   dataset: string | null;

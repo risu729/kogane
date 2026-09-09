@@ -290,6 +290,9 @@ describe("moneyforward Layer B parsers", () => {
     store.db.close();
   });
 
+  // Twelve on-disk stores and twelve parser passes: the slowest test in this
+  // file, ~0.4-1.0s locally but an order of magnitude more on a loaded CI
+  // runner. An explicit budget keeps that from reading as a failure.
   test("preserves identical occurrences across twelve-month overlap and refetches", () => {
     const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-overlap-")));
     upsertSource(store, {
@@ -328,7 +331,7 @@ describe("moneyforward Layer B parsers", () => {
     expect(runParsers(store).errors).toBe(0);
     expect(currentTransactions(store)).toHaveLength(25);
     store.db.close();
-  });
+  }, 30_000);
 
   test("failed and partial runs cannot emit or clear a complete month", () => {
     const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-failed-")));

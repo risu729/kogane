@@ -47,6 +47,8 @@ function count(store: Store, table: string): number {
 }
 
 describe("ingestion", () => {
+  // Three on-disk stores, each applying the whole schema: ~0.2-0.5s locally
+  // and an order of magnitude more on a loaded CI runner.
   test("collector manifests must declare an exact terminal status", () => {
     for (const status of [undefined, "human-required", "SUCCESS"]) {
       const store = tempStore();
@@ -65,7 +67,7 @@ describe("ingestion", () => {
       expect(count(store, "fetch_runs")).toBe(0);
       expect(count(store, "fetch_artifacts")).toBe(0);
     }
-  });
+  }, 20_000);
 
   test("migrates v2 fetch runs without making legacy partial output current", () => {
     const directory = mkdtempSync(join(tmpdir(), "kogane-v2-store-"));

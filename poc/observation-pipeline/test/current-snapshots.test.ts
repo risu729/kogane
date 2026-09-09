@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { insertParseRun, listArtifacts, publishParseRun, type Store } from "../src/store.ts";
+import {
+  insertFetchRun,
+  insertObservation,
+  insertParseRun,
+  listArtifacts,
+  publishParseRun,
+  upsertSource,
+  type Store,
+} from "../src/store.ts";
 import {
   currentPositions,
   currentTransactions,
@@ -19,6 +27,7 @@ import { sbiForeignCashPositions } from "../src/parsers/sbi-foreign-cash-positio
 import type { Observation, Parser, TransactionObservation } from "../src/types.ts";
 import {
   activatePolicy,
+  activateUnitScope,
   balance,
   closeStores,
   count,
@@ -466,5 +475,189 @@ describe("history event identity", () => {
       });
     }
     expect(currentTransactions(store)).toHaveLength(6);
+  });
+});
+
+// D13 / PR-14: unit-scoped partial-run eligibility (`unit-independent-v1`).
+// The dataset here is a synthetic stand-in for a per-card source; the
+// independence argument for the real dataset (MyJCB) is in
+// docs/parser-coverage.md. What these cases fix is the machinery: an
+// independent unit's failure must not stop a proven sibling, a gap inside one
+// unit must still stop adoption, and setting the policy row back to `run` must
+// reproduce today's behaviour exactly.
+describe("unit-scoped eligibility", () => {
+  // The policy row's declared owner source is a join key for eligibility (it
+  // is not one for snapshot selection), so the fixture uses the seeded row's
+  // own source id rather than the generic synthetic one.
+  const SOURCE = "smbc-bank";
+  const CARDS = { parser: "smbc-direct-balance", dataset: "balance-normalized", source: SOURCE };
+  const instruments = (store: Store) =>
+    latestBalances(store)
+      .map((row) => row.instrument)
+      .sort();
+
+  function synthetic(store: Store): void {
+    upsertSource(store, { id: SOURCE, provider: "Synthetic", ingestion: "collector-r2" });
+  }
+
+  /** One partial run: some unit of it failed, so the run is not a clean success. */
+  function partialRun(store: Store, label: string): number {
+    synthetic(store);
+    return insertFetchRun(store, {
+      sourceId: SOURCE,
+      externalRunId: `partial-${label}`,
+      tool: "synthetic-query-test",
+      startedAt: "2026-09-05T00:00:00.000Z",
+      completedAt: "2026-09-05T00:00:00.000Z",
+      status: "partial",
+      failureCount: 1,
+    });
+  }
+
+  test("a failed card does not stop the proven card, and the failed card never adopts", () => {
+    const store = database();
+    synthetic(store);
+    // Yesterday: both cards captured by a clean run.
+    for (const card of ["card-a", "card-b"])
+      snapshot(store, {
+        ...CARDS,
+        unit: card,
+        unitOutcome: "success",
+        time: "2026-09-01T00:00:00.000Z",
+        observations: [balance(`OLD-${card}`, card)],
+        coverage: {},
+      });
+    expect(instruments(store)).toEqual(["OLD-card-a", "OLD-card-b"]);
+
+    // Today: one run, card A succeeded, card B failed. Both cards produced a
+    // complete parse of what they captured; only card A's unit is proven.
+    const runId = partialRun(store, "one");
+    snapshot(store, {
+      ...CARDS,
+      runId,
+      unit: "card-a",
+      unitOutcome: "success",
+      time: "2026-09-05T00:00:00.000Z",
+      observations: [balance("NEW-card-a", "card-a")],
+      coverage: {},
+    });
+    snapshot(store, {
+      ...CARDS,
+      runId,
+      unit: "card-b",
+      unitOutcome: "failed",
+      time: "2026-09-05T00:00:00.000Z",
+      observations: [balance("NEW-card-b", "card-b")],
+      coverage: {},
+    });
+
+    // Run scope (today's default): the partial run changes nothing at all.
+    expect(instruments(store)).toEqual(["OLD-card-a", "OLD-card-b"]);
+
+    activateUnitScope(store, CARDS.parser, "unit");
+    expect(instruments(store)).toEqual(["NEW-card-a", "OLD-card-b"]);
+
+    // Rollback: back on the `run` scope the same store behaves exactly as it
+    // did before the policy row was flipped.
+    activateUnitScope(store, CARDS.parser, "run");
+    expect(instruments(store)).toEqual(["OLD-card-a", "OLD-card-b"]);
+  });
+
+  test("a page missing inside one card blocks that card even under unit scope", () => {
+    const store = database();
+    synthetic(store);
+    snapshot(store, {
+      ...CARDS,
+      unit: "card-a",
+      unitOutcome: "success",
+      time: "2026-09-01T00:00:00.000Z",
+      observations: [balance("OLD-card-a", "card-a")],
+      coverage: {},
+    });
+    activateUnitScope(store, CARDS.parser, "unit");
+
+    // Two pages of the same card in one partial run; only page 1 parsed.
+    const runId = partialRun(store, "pages");
+    snapshot(store, {
+      ...CARDS,
+      runId,
+      unit: "card-a",
+      unitOutcome: "success",
+      time: "2026-09-05T00:00:00.000Z",
+      observations: [balance("NEW-card-a", "card-a")],
+      coverage: {},
+    });
+    snapshot(store, {
+      ...CARDS,
+      runId,
+      unit: "card-a",
+      unitOutcome: "success",
+      time: "2026-09-05T00:00:00.000Z",
+      parseStatus: "missing",
+      observations: [],
+    });
+    // The unit reported success, but one of its artifacts has no complete
+    // parse: membership inside the container is still incomplete.
+    expect(instruments(store)).toEqual(["OLD-card-a"]);
+
+    // Parsing the second page completes the unit and the card advances.
+    const pending = listArtifacts(store).at(-1)!;
+    const parseId = insertParseRun(store, {
+      artifactId: pending.id,
+      parserName: CARDS.parser,
+      parserVersion: "0.1.0",
+      parsedAt: "2026-09-05T00:00:00.000Z",
+      status: "ok",
+      warnings: [],
+    });
+    insertObservation(store, parseId, balance("NEW-card-a-page2", "card-a"));
+    publishParseRun(store, pending.id, CARDS.parser, parseId);
+    expect(instruments(store)).toEqual(["NEW-card-a", "NEW-card-a-page2"]);
+  });
+
+  test("an artifact without a fetch unit is never rescued by the unit scope", () => {
+    const store = database();
+    snapshot(store, {
+      ...CARDS,
+      time: "2026-09-01T00:00:00.000Z",
+      observations: [balance("OLD")],
+      coverage: {},
+    });
+    activateUnitScope(store, CARDS.parser, "unit");
+    snapshot(store, {
+      ...CARDS,
+      status: "partial",
+      time: "2026-09-05T00:00:00.000Z",
+      observations: [balance("NEW")],
+      coverage: {},
+    });
+    expect(instruments(store)).toEqual(["OLD"]);
+  });
+
+  test("the claim of a rescued parse records the partial parent run and its unit outcome", () => {
+    const store = database();
+    activateUnitScope(store, CARDS.parser, "unit");
+    const runId = partialRun(store, "claim");
+    const rescued = snapshot(store, {
+      ...CARDS,
+      runId,
+      unit: "card-a",
+      unitOutcome: "success",
+      observations: [balance("NEW", "card-a")],
+      coverage: {},
+    });
+    expect(
+      store.db
+        .query(
+          `SELECT unit_scope, unit_report_outcome, parent_run_status, parent_run_failure_count
+             FROM parse_coverage_claims WHERE parse_run_id = ?1`,
+        )
+        .get(rescued.parseId!),
+    ).toEqual({
+      unit_scope: "unit",
+      unit_report_outcome: "success",
+      parent_run_status: "partial",
+      parent_run_failure_count: 1,
+    });
   });
 });
