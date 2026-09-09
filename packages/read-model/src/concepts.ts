@@ -58,7 +58,7 @@ export const publishedParses = {
  */
 export const legacyPublishedParses = {
   predicate: (p: string): string =>
-    `${p}.superseded_by_parse_run_id IS NULL AND ${p}.status = 'ok'`,
+    `${p}.superseded_by_parse_run_id IS NULL AND ${p}.status = 'ok'`, // gate:comparison
 } as const;
 
 /**

@@ -96,7 +96,7 @@ function storeTableExists(db: Database, name: string): boolean {
 
 /**
  * One-time backfill of the publication pointer from the legacy rule
- * (`status = 'ok' AND superseded_by_parse_run_id IS NULL`), idempotent and
+ * (`status = 'ok' AND superseded_by_parse_run_id IS NULL`, gate:comparison), idempotent and
  * recorded as 'backfill' events. Mirrors production migration 0026; this is
  * the one reader-side use of the legacy predicate outside publishParseRun.
  */
@@ -106,10 +106,10 @@ function backfillPublicationGate(db: Database): void {
        (fetch_artifact_id, parser_name, parse_run_id, parser_version, published_at, publication_kind)
      SELECT p.fetch_artifact_id, p.parser_name, p.id, p.parser_version, p.parsed_at, 'normal'
      FROM parse_runs p
-     WHERE p.status = 'ok' AND p.superseded_by_parse_run_id IS NULL
+     WHERE p.status = 'ok' AND p.superseded_by_parse_run_id IS NULL -- gate:writer
        AND NOT EXISTS (SELECT 1 FROM parse_runs q WHERE q.fetch_artifact_id = p.fetch_artifact_id
          AND q.parser_name = p.parser_name AND q.status = 'ok'
-         AND q.superseded_by_parse_run_id IS NULL AND q.id > p.id)
+         AND q.superseded_by_parse_run_id IS NULL AND q.id > p.id) -- gate:writer
        AND NOT EXISTS (SELECT 1 FROM published_parse_runs x
          WHERE x.fetch_artifact_id = p.fetch_artifact_id AND x.parser_name = p.parser_name);
      INSERT INTO publication_events
@@ -440,7 +440,8 @@ export function supersedeOlderParseRuns(
     .query(
       `SELECT id, parser_version FROM parse_runs
        WHERE fetch_artifact_id = ?1 AND parser_name = ?2 AND status = 'ok'
-         AND id <> ?3 AND superseded_by_parse_run_id IS NULL`,
+         AND id <> ?3 AND superseded_by_parse_run_id IS NULL -- gate:writer
+      `,
     )
     .all(artifactId, parserName, newParseRunId) as {
     id: number;

@@ -3,7 +3,7 @@ import type { Miniflare } from "miniflare";
 import { runScheduled, sweep } from "../src/worker.ts";
 import { identitySweep } from "../src/identity-store.ts";
 import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity/index.ts";
-import { layerBMigrations, seedArtifact, startPipeline } from "./harness.ts";
+import { layerBMigrations, publishParse, seedArtifact, startPipeline } from "./harness.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -42,10 +42,10 @@ const job = (id: number) =>
     .bind(id)
     .first<{ lane: string; status: string; replay_plan_id: number | null }>();
 
-test("harness applies every Layer B migration in order through 0035", () => {
+test("harness applies every Layer B migration in order through 0036", () => {
   const names = layerBMigrations();
   expect(names[0]).toBe("0017_observation_pipeline.sql");
-  expect(names.at(-1)).toBe("0035_observation_job_lanes.sql");
+  expect(names.at(-1)).toBe("0036_publication_event_guard.sql");
   expect([...names].sort()).toEqual(names);
 });
 
@@ -390,3 +390,44 @@ test("replay and sweep commands validate their input and stay off unknown routes
   expect((await post("/sweep?lane=bogus")).status).toBe(400);
   expect((await mf.dispatchFetch("https://pipeline.internal/replay/plan")).status).toBe(404);
 });
+
+test("operator signals count published parses, not unadopted successes", async () => {
+  await seedArtifact(
+    env,
+    1500,
+    "smbc-bank",
+    "balance-normalized",
+    "balance.normalized.json",
+    balance,
+  );
+  const freshness = async () =>
+    (
+      (await (await mf.dispatchFetch("https://pipeline.internal/status")).json()) as {
+        freshness: { latestParsedAt: string };
+      }
+    ).freshness.latestParsedAt;
+  const plan = async () =>
+    (
+      await post("/replay/plan", {
+        source: "smbc-bank",
+        dataset: "balance-normalized",
+        parser: "smbc-direct-balance",
+        version: "1.0.0",
+        artifactIdFrom: 1499,
+        reason: "synthetic publication signal",
+      })
+    ).json.plan as { estimated_artifacts: number; already_parsed: number };
+  const beforeParsedAt = await freshness();
+  expect(await plan()).toMatchObject({ estimated_artifacts: 1, already_parsed: 0 });
+  // What a candidate looks like: a successful run the gate never adopted. It
+  // is an execution attempt, not work an operator may consider done.
+  const unadopted = await env.DB.prepare(
+    "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(1500,'smbc-direct-balance','1.0.0','2099-01-01T00:00:00.000Z','ok','[]') RETURNING id",
+  ).first<{ id: number }>();
+  expect(await freshness()).toBe(beforeParsedAt);
+  expect(await plan()).toMatchObject({ estimated_artifacts: 1, already_parsed: 0 });
+  // Adopting it through the pointer flips both signals, and nothing else.
+  await publishParse(env.DB, unadopted!.id, "2099-01-01T00:00:00.000Z");
+  expect(await freshness()).toBe("2099-01-01T00:00:00.000Z");
+  expect(await plan()).toMatchObject({ estimated_artifacts: 1, already_parsed: 1 });
+}, 30000);
