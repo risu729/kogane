@@ -20,6 +20,7 @@ import {
   isListPath,
   validMeasureView,
   withBalancesV2,
+  type ApiCapabilities,
 } from "../../../poc/observation-pipeline/shared/api-schema";
 import {
   balanceHistoryPage,
@@ -31,6 +32,7 @@ import {
   V2_LATEST_PATH,
 } from "./balances-v2";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
+import { eventsV2Available } from "./events-api";
 import { identityReadMode } from "./identity-read";
 
 /** Validated request scope. Each route passes only the keys its reader query accepts. */
@@ -70,10 +72,18 @@ export function boundedCollections(value: Record<string, unknown>, offset?: numb
  * the reader flag is on and a sealed snapshot exists, so a capability is
  * never a promise the store cannot keep.
  */
-export async function advertisedCapabilities(env: Env) {
-  if (!projectionFlagOn(env)) return CENTRAL_STORE_CAPABILITIES;
+export async function advertisedCapabilities(env: Env): Promise<ApiCapabilities> {
+  // What this server can actually serve, not what the contract defaults to:
+  // eventsV2 depends on the A10 projection being present, and balancesV2 on
+  // the A07 reader flag plus a sealed snapshot. One object answers /api/meta
+  // and decides which parameters and paths exist, so the two cannot drift.
+  const base: ApiCapabilities = {
+    ...CENTRAL_STORE_CAPABILITIES,
+    eventsV2: await eventsV2Available(env),
+  };
+  if (!projectionFlagOn(env)) return base;
   const snapshot = await balanceProjectionReader(env).currentSnapshot();
-  return withBalancesV2(CENTRAL_STORE_CAPABILITIES, snapshot !== null);
+  return withBalancesV2(base, snapshot !== null);
 }
 
 // Called only after the existing Access JWT gate and read-only method check.

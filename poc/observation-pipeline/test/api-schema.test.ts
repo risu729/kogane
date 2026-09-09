@@ -87,6 +87,7 @@ describe("shared API schema", () => {
       organizedDisplay: false,
       financialProducts: false,
       evidenceHistory: false,
+      eventsV2: false,
     });
     expect(CENTRAL_STORE_CAPABILITIES).toEqual({
       contractVersion: "observation-api-v1",
@@ -102,6 +103,7 @@ describe("shared API schema", () => {
       organizedDisplay: true,
       financialProducts: true,
       evidenceHistory: true,
+      eventsV2: false,
     });
   });
 

@@ -13,6 +13,7 @@ import { SNAPSHOT_RELATIONS, unitParseable } from "../../../packages/read-model/
 import { runBalanceProjection } from "./balance-projection-job.ts";
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
+import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import {
   publicationConsistency,
   publicationStatements,
@@ -1298,7 +1299,14 @@ export async function snapshotPolicyComparison(env: Env): Promise<Response> {
 export interface ScheduledStages {
   parse: (env: Env) => Promise<object>;
   identity: (env: Env) => Promise<object>;
+  /**
+   * A07 balance projection. Always present: the job itself reports `skipped`
+   * when BALANCE_PROJECTION_ENABLED is off, so the caller never branches on
+   * the flag.
+   */
   balanceProjection: (env: Env) => Promise<object>;
+  /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
+  reconcile?: (env: Env) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
@@ -1306,6 +1314,7 @@ const defaultStages: ScheduledStages = {
   // Off unless BALANCE_PROJECTION_ENABLED is "1"; the job itself returns
   // `skipped` rather than the caller branching on the flag.
   balanceProjection: (env) => runBalanceProjection(env),
+  reconcile: (env) => reconciliationSweep(env.DB),
 };
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
@@ -1316,11 +1325,21 @@ export async function runScheduled(
   stages: ScheduledStages = defaultStages,
   log: (line: string) => void = (line) => console.log(line),
 ): Promise<void> {
-  for (const [event, stage] of [
+  const lanes: [string, ((env: Env) => Promise<object>) | undefined][] = [
     ["observation_sweep", stages.parse],
     ["identity_sweep", stages.identity],
+    // The projection lane always runs and reports itself skipped while its
+    // own flag is off (docs/balance-read-model.md).
     ["balance_projection", stages.balanceProjection],
-  ] as const) {
+    // Off unless RECONCILIATION_ENABLED is set, so a normal deploy logs and
+    // writes nothing new (docs/economic-events.md).
+    [
+      "reconciliation_sweep",
+      reconciliationEnabled(env.RECONCILIATION_ENABLED) ? stages.reconcile : undefined,
+    ],
+  ];
+  for (const [event, stage] of lanes) {
+    if (!stage) continue;
     try {
       log(JSON.stringify({ event, ...(await stage(env)) }));
     } catch (error) {

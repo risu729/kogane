@@ -9,10 +9,10 @@
   "preview_urls": false,
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "triggers": { "crons": ["*/5 * * * *"] },
+  // Both jobs are off by default: they write nothing until an operator sets
+  // the flag to "1" (docs/economic-events.md, docs/balance-read-model.md).
+  "vars": { "RECONCILIATION_ENABLED": "0", "BALANCE_PROJECTION_ENABLED": "0" },
   "limits": { "cpu_ms": 300000 },
-  // Off by default: the balance projection job writes nothing until an
-  // operator sets this to "1" (docs/balance-read-model.md).
-  "vars": { "BALANCE_PROJECTION_ENABLED": "0" },
   "d1_databases": [
     {
       "binding": "DB",

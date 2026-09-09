@@ -162,6 +162,7 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   organizedDisplay: boolean,
   financialProducts: boolean,
   evidenceHistory: boolean,
+  eventsV2: boolean,
 });
 const metadata = object<ApiMetadata>({
   parsingHealth: optional(

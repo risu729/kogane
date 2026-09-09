@@ -42,8 +42,33 @@ export const RELATION_KINDS = [
 ] as const;
 export type RelationKind = (typeof RELATION_KINDS)[number];
 
-export const RELATION_STATUSES = ["proposed", "adopted", "rejected", "superseded"] as const;
+/**
+ * Lifecycle of one typed relation. `accepted` and `released` are the words the
+ * stored `entity_relations` CHECK of migration 0029 uses; `adopted` and
+ * `superseded` are the older contract wording kept for the v1 fixtures. The
+ * domain type is the union of both so a stored row always validates, and
+ * `RELATION_STATUS_STORAGE` maps a domain value to the stored one.
+ */
+export const RELATION_STATUSES = [
+  "proposed",
+  "adopted",
+  "accepted",
+  "rejected",
+  "superseded",
+  "released",
+] as const;
 export type RelationStatus = (typeof RELATION_STATUSES)[number];
+/** The four values `entity_relations.status` accepts. */
+export const STORED_RELATION_STATUSES = ["proposed", "accepted", "rejected", "released"] as const;
+export type StoredRelationStatus = (typeof STORED_RELATION_STATUSES)[number];
+export const RELATION_STATUS_STORAGE: Record<RelationStatus, StoredRelationStatus> = {
+  proposed: "proposed",
+  adopted: "accepted",
+  accepted: "accepted",
+  rejected: "rejected",
+  superseded: "released",
+  released: "released",
+};
 
 export interface TypedRelation {
   relationId: string;
