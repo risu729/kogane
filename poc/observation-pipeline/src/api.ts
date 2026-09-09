@@ -17,6 +17,7 @@
 import { Hono } from "hono";
 import { localDecimalRows } from "./normalized-values.ts";
 import type { ApiMetadata } from "../shared/api-contract.ts";
+import { allowedQueryParameters, LOCAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
 import { readRawObject, sha256Hex, type Store } from "./store.ts";
 import {
   artifactDetail,
@@ -55,6 +56,20 @@ export function createApi(store: Store, options: ApiOptions = {}): Hono {
     if (c.req.method !== "GET" && c.req.method !== "HEAD") {
       return c.text("405 method not allowed: this browser is read-only\n", 405);
     }
+    // Query parameters are accepted only when the shared schema grants them
+    // for the capabilities this server advertises. This store implements none
+    // of the list features, so a parameter here is a client that guessed.
+    if (c.req.path.startsWith("/api/")) {
+      const allowed = allowedQueryParameters(c.req.path, LOCAL_STORE_CAPABILITIES);
+      const url = new URL(c.req.url);
+      for (const key of url.searchParams.keys()) {
+        if (!allowed.includes(key)) {
+          c.header("cache-control", "no-store");
+          c.header("x-content-type-options", "nosniff");
+          return c.json({ error: "invalid_query" }, 400);
+        }
+      }
+    }
     await next();
     // Responses carry financial evidence. The HTTP cache is a persistence path
     // the client cannot see or clear, so nothing here may be stored by it.
@@ -71,11 +86,7 @@ export function createApi(store: Store, options: ApiOptions = {}): Hono {
         kind: "local-store",
         classification: options.dataClassification ?? "unknown",
       },
-      capabilities: {
-        readOnly: true,
-        rawEvidence: true,
-        liveCollectors: false,
-      },
+      capabilities: LOCAL_STORE_CAPABILITIES,
     } satisfies ApiMetadata),
   );
 

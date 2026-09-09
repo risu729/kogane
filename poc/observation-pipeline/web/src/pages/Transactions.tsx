@@ -7,7 +7,7 @@ import {
   tableFeatures,
   useTable,
 } from "@tanstack/react-table";
-import { useMetadata, useTransactions, type TransactionRow } from "../api.ts";
+import { useFeatures, useTransactions, type TransactionRow } from "../api.ts";
 import { Amount, Nullable, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
 import {
   EMPTY_FILTERS,
@@ -126,7 +126,9 @@ export function TransactionsPage(): ReactNode {
   );
 }
 function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
-  const production = useMetadata().data?.source.kind === "central-store";
+  // Record controls only without server filters; column sorting only when the
+  // response is the complete set rather than one server page.
+  const { serverFilters, serverPaging } = useFeatures();
   const [filters, setFilters] = useViewState("transactions.filters");
   const [search, setSearch] = useViewState("transactions.search");
   const [page, setPage] = useViewState("transactions.page");
@@ -175,7 +177,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
   const view = pageWindow(table.getRowModel().rows, page);
   return (
     <Panel id="transactions" title="取引の記録" count={`受信した${rows.length}件から絞り込み`}>
-      {!production ? (
+      {!serverFilters ? (
         <div className="panel-body">
           <RecordControls
             rows={rows}
@@ -227,7 +229,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
         <table className="transaction-table">
           <caption className="dim">
             解析済みの現行データです。同じ取引に由来する記録が複数含まれる場合があります。
-            {!production
+            {!serverPaging
               ? "矢印のある見出しで1項目ずつ並べ替えできます。取得元・口座は取得元で並べます。"
               : null}
           </caption>
@@ -242,14 +244,14 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
                       scope="col"
                       className={`col-${header.column.id}${header.column.id === "amount" ? " num" : ""}`}
                       aria-sort={
-                        !production && header.column.getCanSort() && sorted
+                        !serverPaging && header.column.getCanSort() && sorted
                           ? sorted === "asc"
                             ? "ascending"
                             : "descending"
                           : undefined
                       }
                     >
-                      {!production && header.column.getCanSort() ? (
+                      {!serverPaging && header.column.getCanSort() ? (
                         <button
                           className="sort-button"
                           type="button"

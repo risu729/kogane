@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { useMetadata, useBalances, type BalanceHistoryRow, type BalanceRow } from "../api.ts";
+import { useFeatures, useBalances, type BalanceHistoryRow, type BalanceRow } from "../api.ts";
 import {
   Amount,
   Badge,
@@ -64,7 +64,8 @@ function BalancesBody({
   summaries: boolean;
 }): ReactNode {
   const [filters, setFilters] = useViewState("balances.filters");
-  const production = useMetadata().data?.source.kind === "central-store";
+  // Client-side record controls only when the server cannot filter for us.
+  const { serverFilters } = useFeatures();
   const [instrument, setInstrument] = useViewState("balances.instrument");
   const [metric, setMetric] = useViewState("balances.metric");
   const [hideZero, setHideZero] = useViewState("balances.hideZero");
@@ -85,7 +86,7 @@ function BalancesBody({
   ]);
   return (
     <>
-      {!production ? (
+      {!serverFilters ? (
         <section className="panel">
           <div className="panel-body">
             <RecordControls rows={rows} filters={filters} onChange={setFilters} />
