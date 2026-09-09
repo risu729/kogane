@@ -64,6 +64,18 @@ describe("offline CI coverage", () => {
     expect(scripts).toContain("verify-vpass-route.test.sh");
     expect(selected).toEqual(scripts);
   });
+  test("shared contract packages run only pure test and typecheck steps", () => {
+    for (const name of ["packages/evidence-contract"]) {
+      const policy = selectPolicy(name);
+      expect(policy.checks).toEqual(["test", "typecheck"]);
+      expect(policy.scripts).toEqual({ test: "bun test", typecheck: "tsc --noEmit" });
+      const plan = packagePlan(name, options).map((step) => step.command.join(" "));
+      expect(plan).toEqual(["bun install --frozen-lockfile", "bun run test", "bun run typecheck"]);
+      const manifest = JSON.parse(readFileSync(join(REPO_ROOT, name, "package.json"), "utf8"));
+      expect(manifest.dependencies).toBeUndefined();
+      expect(Object.keys(manifest.devDependencies).sort()).toEqual(["@types/bun", "typescript"]);
+    }
+  });
   test("Vpass raw integration retains its dry-run check without scheduling live backfill", () => {
     const policy = selectPolicy("poc/vpass-json");
     expect(policy.scripts["cf:check"]).toBe("wrangler deploy --dry-run");
