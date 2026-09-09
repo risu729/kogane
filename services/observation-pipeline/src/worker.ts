@@ -25,6 +25,8 @@ import {
   REPAIR_LIMIT_DEFAULT,
   repairPublication,
 } from "./publication-gate.ts";
+import { reportsEnabled, runReportJob } from "./report-job.ts";
+import { DECIMAL_POLICY_RELEASE } from "../../../packages/read-model/src/identity";
 import type {
   ArtifactMeta,
   CoverageClaim,
@@ -34,6 +36,10 @@ import type {
   ParseResult,
 } from "../../../poc/observation-pipeline/src/types.ts";
 
+// The holdings report is generated in one base unit against one perimeter;
+// nothing is converted into the base unit without a price observation.
+const REPORT_BASE_UNIT = "JPY";
+const REPORT_PERIMETER = "perimeter:all-visible-evidence";
 const SCAN_PAGE = 200;
 const JOBS_PER_SWEEP = 12;
 const MAX_BYTES = 16 * 1024 * 1024;
@@ -1312,6 +1318,8 @@ export interface ScheduledStages {
   balanceProjection: (env: Env) => Promise<object>;
   /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
   reconcile?: (env: Env) => Promise<object>;
+  /** A12 report job. Absent stage, or the flag off, means the lane never runs. */
+  reports?: (env: Env) => Promise<object>;
   /**
    * A09: accepted decisions reach the read models here, not at commit time.
    * Optional like `reconcile`, so a test may run a subset of the lanes; the
@@ -1326,6 +1334,19 @@ const defaultStages: ScheduledStages = {
   // `skipped` rather than the caller branching on the flag.
   balanceProjection: (env) => runBalanceProjection(env),
   reconcile: (env) => reconciliationSweep(env.DB),
+  reports: (env) => {
+    // One clock reading for both fields: the run records when it ran, and the
+    // cutoff admits everything recorded up to that same instant.
+    const now = new Date().toISOString();
+    return runReportJob(env, {
+      actor: "report-job",
+      now,
+      unitRef: REPORT_BASE_UNIT,
+      perimeterRef: REPORT_PERIMETER,
+      knowledgeCutoff: now,
+      decimalPolicyRelease: DECIMAL_POLICY_RELEASE,
+    });
+  },
   // A07 owns the balance-projection target: an accepted decision changes
   // which scopes overlap, so the projection rebuilds on the same tick instead
   // of waiting for the next cron (docs/balance-read-model.md).
@@ -1355,6 +1376,9 @@ export async function runScheduled(
       "reconciliation_sweep",
       reconciliationEnabled(env.RECONCILIATION_ENABLED) ? stages.reconcile : undefined,
     ],
+    // Off unless REPORTS_ENABLED is set, for the same reason
+    // (docs/calculation-and-reports.md).
+    ["report_job", reportsEnabled(env.REPORTS_ENABLED) ? stages.reports : undefined],
     // A09: the decision outbox runs last, after the projections a decision may
     // have invalidated (docs/change-lifecycle.md).
     ["decision_outbox", stages.decisions],
