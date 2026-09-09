@@ -269,6 +269,7 @@ export interface Provenance {
 export interface ObservationDetail {
   normalized?: import("./normalized-decimal.ts").NormalizedDecimal;
   organization?: ObservationOrganization;
+  interpretationContext?: import("./api-schema.ts").InterpretationContext;
   kind: ObservationKind;
   row: Record<string, unknown>;
   extra: unknown;

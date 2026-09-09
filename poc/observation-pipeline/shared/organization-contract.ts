@@ -30,4 +30,8 @@ export interface ObservationOrganization {
   lineage: "current" | "historical" | null;
   account: OrganizedAccount | null;
   instruments: OrganizedInstrument[];
+  /** Account mapping revision this row was decorated with under the response's read mode. */
+  mappingRevision?: number;
+  /** Policy release of the sealed identity run the row was recorded under. */
+  identityRelease?: string;
 }

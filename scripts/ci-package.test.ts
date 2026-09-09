@@ -285,6 +285,19 @@ describe("offline CI coverage", () => {
       expect(plan.some((step) => step.command.join(" ") === "node server.mjs")).toBe(false);
     }
   });
+  test("every repository-wide guard under scripts/ runs in the standalone step", () => {
+    const result = Bun.spawnSync(["git", "ls-files", "-z", "--", "scripts/*.test.ts"], {
+      cwd: REPO_ROOT,
+    });
+    expect(result.exitCode).toBe(0);
+    const guards = result.stdout.toString().split("\0").filter(Boolean).sort();
+    expect(guards).toContain("scripts/publication-gate-predicates.test.ts");
+    // These suites belong to no package, so nothing else would run them: a
+    // guard missing from the list is a guard CI never executes.
+    expect(
+      guards.filter((path) => !(STANDALONE_TESTS as readonly string[]).includes(path)),
+    ).toEqual([]);
+  });
   test("standalone coverage runs pure suites and syntax-checks OCI without launching it", () => {
     const plan = standalonePlan(REPO_ROOT);
     expect(plan[0]?.command).toEqual(["bun", "test", ...STANDALONE_TESTS]);

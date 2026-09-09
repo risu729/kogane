@@ -7,9 +7,8 @@
 // the strict rule exactly.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
-import { publicationStatements } from "../src/publication-gate.ts";
 import { sweep } from "../src/worker.ts";
-import { seedUnitRun, setUnitScope, startPipeline } from "./harness.ts";
+import { publishParse, seedUnitRun, setUnitScope, startPipeline } from "./harness.ts";
 import { snapshotCtes } from "../../../poc/observation-pipeline/src/snapshot-query.ts";
 
 // The reader's relations on the production schema (packages/read-model concepts).
@@ -211,7 +210,9 @@ test("one page of a two-page unit is not a complete container", async () => {
      VALUES(422,?,'1.0.0','2026-09-09T00:00:00.000Z','ok','[]') RETURNING id`,
     PARSER,
   );
-  await env.DB.batch(publicationStatements(env.DB, second!.id, "2026-09-09T00:00:00.000Z"));
+  // The writer's pointer move without its lease machinery; publicationStatements
+  // itself is fenced on a live lease (docs/publication-gate.md).
+  await publishParse(env.DB, second!.id, "2026-09-09T00:00:00.000Z");
   expect(await currentSnapshot("card-c")).toBe(422);
 }, 30000);
 

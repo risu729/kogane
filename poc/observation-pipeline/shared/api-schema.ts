@@ -15,9 +15,49 @@ export const OBSERVATION_API_CONTRACT_VERSION = "observation-api-v1" as const;
 export const MEASURE_VIEWS = ["balances", "summaries"] as const;
 export type MeasureView = (typeof MEASURE_VIEWS)[number];
 
-/** Identity read modes; a later contract adds `as-recorded` / `snapshot`. */
-export const IDENTITY_READ_MODES = ["latest"] as const;
+/**
+ * Identity read modes (review D06). `latest` decorates observations with the
+ * current mapping revisions; `as-recorded` with the mapping revisions the
+ * sealed identity run pinned when it was made. `snapshot` (a fixed release
+ * and revision set) is a later contract and is refused as unsupported.
+ */
+export const IDENTITY_READ_MODES = ["latest", "as-recorded"] as const;
 export type IdentityReadMode = (typeof IDENTITY_READ_MODES)[number];
+
+/**
+ * Which interpretation a response was computed under: the read mode and the
+ * release of every rule set that shaped it. Same shape as
+ * `InterpretationContext` in `packages/domain`, restricted to the modes this
+ * contract serves; `snapshotId` is null until snapshots exist.
+ */
+export interface InterpretationContext {
+  readonly mode: IdentityReadMode;
+  readonly snapshotId: null;
+  readonly identityRelease: string;
+  readonly productCatalogueRelease: string;
+  readonly productResolverRelease: string;
+  readonly measurePolicyRelease: string;
+  readonly decimalPolicyRelease: string;
+}
+
+const RELEASE = /^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$/u;
+export function validInterpretationContext(value: unknown): value is InterpretationContext {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const context = value as Record<string, unknown>;
+  return (
+    (IDENTITY_READ_MODES as readonly string[]).includes(String(context.mode)) &&
+    context.snapshotId === null &&
+    (
+      [
+        "identityRelease",
+        "productCatalogueRelease",
+        "productResolverRelease",
+        "measurePolicyRelease",
+        "decimalPolicyRelease",
+      ] as const
+    ).every((key) => typeof context[key] === "string" && RELEASE.test(context[key]))
+  );
+}
 
 /**
  * `none`: every list returns its complete stored result with no coverage
@@ -69,7 +109,7 @@ export const CENTRAL_STORE_CAPABILITIES = {
   rawEvidence: true,
   liveCollectors: false,
   measureViews: ["balances", "summaries"],
-  identityReadModes: ["latest"],
+  identityReadModes: ["latest", "as-recorded"],
   paginationVersion: "offset-v1",
   collectionFilters: true,
   organizedDisplay: true,
@@ -84,7 +124,8 @@ export const CENTRAL_STORE_CAPABILITIES = {
 export type CapabilityRequirement =
   | "collectionFilters"
   | "paginationVersion:offset-v1"
-  | "measureViews";
+  | "measureViews"
+  | "identityReadModes";
 
 /**
  * Every query parameter a list endpoint understands, keyed by path. Paths
@@ -98,6 +139,7 @@ export const LIST_REQUEST_SCHEMA = {
     to: "collectionFilters",
     q: "collectionFilters",
     offset: "paginationVersion:offset-v1",
+    identityRead: "identityReadModes",
   },
   "/api/balances": {
     source: "collectionFilters",
@@ -107,11 +149,13 @@ export const LIST_REQUEST_SCHEMA = {
     view: "measureViews",
     offset: "paginationVersion:offset-v1",
     latestOffset: "paginationVersion:offset-v1",
+    identityRead: "identityReadModes",
   },
   "/api/positions": {
     source: "collectionFilters",
     account: "collectionFilters",
     offset: "paginationVersion:offset-v1",
+    identityRead: "identityReadModes",
   },
   "/api/artifacts": {
     source: "collectionFilters",
@@ -139,6 +183,8 @@ export function capabilityGrants(
       return capabilities.paginationVersion === "offset-v1";
     case "measureViews":
       return capabilities.measureViews.length > 0;
+    case "identityReadModes":
+      return capabilities.identityReadModes.length > 0;
   }
 }
 
@@ -159,6 +205,13 @@ export function validMeasureView(
   return (capabilities.measureViews as readonly string[]).includes(value);
 }
 
+export function validIdentityReadMode(
+  value: string,
+  capabilities: ApiCapabilities,
+): value is IdentityReadMode {
+  return (capabilities.identityReadModes as readonly string[]).includes(value);
+}
+
 /**
  * The client's argument builder: keeps only the parameters the advertised
  * capabilities allow, in schema order, dropping empty and repeated values.
@@ -174,6 +227,7 @@ export function listRequestSearch(
     const value = params.get(name);
     if (!value) continue;
     if (name === "view" && !validMeasureView(value, capabilities)) continue;
+    if (name === "identityRead" && !validIdentityReadMode(value, capabilities)) continue;
     next.set(name, value);
   }
   return next.size ? `?${next}` : "";

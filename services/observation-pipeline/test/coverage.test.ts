@@ -5,9 +5,8 @@
 // and the shadow comparison route exposes identifiers only.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
-import { publicationStatements } from "../src/publication-gate.ts";
 import { parseJob, sweep } from "../src/worker.ts";
-import { seedArtifact, startPipeline } from "./harness.ts";
+import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 import {
   SNAPSHOT_DATASETS,
   snapshotCtes,
@@ -195,7 +194,9 @@ test("a claim on a pending parse run is invisible to coverage-v1 until the run p
   // since the publication gate (docs/publication-gate.md).
   await env.DB.prepare("UPDATE parse_runs SET status='ok' WHERE id=?").bind(pending!.id).run();
   expect(await artifact()).toBe(300);
-  await env.DB.batch(publicationStatements(env.DB, pending!.id, "2026-09-08T00:00:00.000Z"));
+  // The writer's pointer move without its lease machinery; publicationStatements
+  // itself is fenced on a live lease (docs/publication-gate.md).
+  await publishParse(env.DB, pending!.id, "2026-09-08T00:00:00.000Z");
   expect(await artifact()).toBe(303);
   await env.DB.prepare(
     "UPDATE dataset_snapshot_policies SET policy_id='legacy-warning-compat-v1' WHERE parser_name='smbc-direct-balance'",
