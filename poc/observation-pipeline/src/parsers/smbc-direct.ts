@@ -5,6 +5,7 @@ import type {
   ParseResult,
   TransactionObservation,
 } from "../types.ts";
+import { containerClaim } from "./coverage.ts";
 import { decodeUtf8, isObject } from "./util.ts";
 
 const SOURCE_ID = "smbc-bank";
@@ -71,7 +72,22 @@ export const smbcDirectBalance: Parser = {
         },
       },
     };
-    return { observations: [observation], warnings: [] };
+    // One normalized balance per artifact by contract: the container is the
+    // single object, complete whenever it validated.
+    return {
+      observations: [observation],
+      warnings: [],
+      issues: [],
+      coverage: [
+        containerClaim({
+          artifact,
+          issues: [],
+          observedCount: 1,
+          expectedCount: 1,
+          evidenceRefs: ["json:$"],
+        }),
+      ],
+    };
   },
 };
 

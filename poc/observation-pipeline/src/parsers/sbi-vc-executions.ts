@@ -12,6 +12,7 @@ import {
   warnNonStringFields,
   warnUnknownFields,
 } from "./sbi-vc-common.ts";
+import { ParseDiagnostics } from "./coverage.ts";
 import { decimalText, isObject } from "./util.ts";
 
 const RECENT_DATASET = "executions-recent-page-0001";
@@ -82,7 +83,7 @@ export const sbiVcExecutions: Parser = {
     if (sourceView === "recent" && page.totalSize > page.pageSize) {
       throw new Error(`${dataset}: recent view exceeds its single collected page`);
     }
-    const warnings: string[] = [];
+    const diagnostics = new ParseDiagnostics();
     const observations: Observation[] = [];
     const observedAt = providerTimestamp(page.meta["timestamp"]);
     const externalIds = new Set<string>();
@@ -92,7 +93,7 @@ export const sbiVcExecutions: Parser = {
       if (!isObject(entry)) {
         throw new Error(`${locator}: expected an execution object`);
       }
-      warnUnknownFields(entry, ITEM_FIELDS, locator, warnings);
+      warnUnknownFields(entry, ITEM_FIELDS, locator, diagnostics);
       warnNonStringFields(
         entry,
         ITEM_FIELDS.filter(
@@ -108,20 +109,22 @@ export const sbiVcExecutions: Parser = {
             ].includes(field),
         ),
         locator,
-        warnings,
+        diagnostics,
       );
       for (const field of ["isAuction", "isCorrectedOrderExec"] as const) {
         if (typeof entry[field] !== "boolean") {
-          warnings.push(`${locator}.${field}: expected a boolean; raw value preserved`);
+          diagnostics.warnings.push(`${locator}.${field}: expected a boolean; raw value preserved`);
         }
       }
       for (const field of ["executionNotifyId", "markup"] as const) {
         if (entry[field] !== null && typeof entry[field] !== "string") {
-          warnings.push(`${locator}.${field}: expected a string or null; raw value preserved`);
+          diagnostics.warnings.push(
+            `${locator}.${field}: expected a string or null; raw value preserved`,
+          );
         }
       }
-      warnAttributeValueObject(entry["isCloseOrder"], `${locator}.isCloseOrder`, warnings);
-      warnAttributeValueObject(entry["isExOrder"], `${locator}.isExOrder`, warnings);
+      warnAttributeValueObject(entry["isCloseOrder"], `${locator}.isCloseOrder`, diagnostics);
+      warnAttributeValueObject(entry["isExOrder"], `${locator}.isExOrder`, diagnostics);
       const executionId = requireNonEmptyString(entry, "CExecutionId", locator);
       const executionSubNumber = requireNonEmptyString(entry, "CExecutionIdSubNo", locator);
       const productId = requireNonEmptyString(entry, "productId", locator);
@@ -139,7 +142,7 @@ export const sbiVcExecutions: Parser = {
         throw new Error(`${locator}.executionPrice: expected an exact decimal`);
       }
       const buySell = entry["buySellType"];
-      const buySellValue = warnAttributeValueObject(buySell, `${locator}.buySellType`, warnings)
+      const buySellValue = warnAttributeValueObject(buySell, `${locator}.buySellType`, diagnostics)
         ? buySell["value"]
         : undefined;
       let direction: "buy" | "sell";
@@ -173,6 +176,6 @@ export const sbiVcExecutions: Parser = {
         }),
       });
     });
-    return { observations, warnings };
+    return { observations, warnings: diagnostics.warnings };
   },
 };

@@ -5,6 +5,9 @@
 // It never fetches, never reads the clock, and never drops provider fields it
 // does not recognize — unrecognized material goes into `extra`.
 
+import type { CoverageClaim, ParseIssue } from "../../../packages/domain/src/coverage.ts";
+export type { CoverageClaim, ParseIssue } from "../../../packages/domain/src/coverage.ts";
+
 export interface ArtifactMeta {
   id: number;
   sourceId: string;
@@ -96,9 +99,23 @@ export type Observation =
   | PositionObservation
   | ValuationObservation;
 
+/**
+ * Parser output. Contract v1 is `observations` plus human-readable `warnings`.
+ * Contract v2 (design review D01) adds typed `issues` and `coverage`, which are
+ * the machine-readable record of what could not be read and what scope the
+ * parse proves. Snapshot selection reads the coverage claim; it never reads
+ * warning text. A parser that omits both is a "legacy" parser: its parse runs
+ * store nothing beyond warnings, and the `legacy-warning-compat-v1` snapshot
+ * policy keeps applying to its datasets. Nothing synthesizes `complete` for it.
+ */
 export interface ParseResult {
   observations: Observation[];
+  /** For people. Text may change freely; no selection rule reads it. */
   warnings: string[];
+  /** Typed diagnostics: what was unreadable, at what locator, with what impact. */
+  issues?: ParseIssue[];
+  /** One claim per container scope the parse proves or fails to prove complete. */
+  coverage?: CoverageClaim[];
 }
 
 export interface Parser {

@@ -9,6 +9,7 @@ import {
   requireNonEmptyString,
   warnUnknownFields,
 } from "./sbi-vc-common.ts";
+import { containerClaim, ParseDiagnostics } from "./coverage.ts";
 import { isObject } from "./util.ts";
 
 const DATASET = "account-margin";
@@ -70,10 +71,10 @@ export const sbiVcAccountMargin: Parser = {
     return acceptsSbiVcDataset(artifact, DATASET);
   },
 
-  parse(bytes: Uint8Array): ParseResult {
+  parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
     const envelope = parseSbiVcEnvelope(bytes, DATASET);
-    const warnings: string[] = [];
-    warnUnknownFields(envelope.body, BODY_FIELDS, "json:$.body", warnings);
+    const diagnostics = new ParseDiagnostics();
+    warnUnknownFields(envelope.body, BODY_FIELDS, "json:$.body", diagnostics);
     for (const field of SCALAR_FIELDS) {
       if (typeof envelope.body[field] !== "string") {
         throw new Error(`${DATASET}: ${field} must be a string`);
@@ -87,7 +88,7 @@ export const sbiVcAccountMargin: Parser = {
     for (const field of ATTRIBUTE_FIELDS) {
       const value = envelope.body[field];
       if (!isObject(value)) throw new Error(`${DATASET}: ${field} must be an object`);
-      warnUnknownFields(value, ["attribute", "value"], `json:$.body.${field}`, warnings);
+      warnUnknownFields(value, ["attribute", "value"], `json:$.body.${field}`, diagnostics);
       if (typeof value["attribute"] !== "string" || typeof value["value"] !== "string") {
         throw new Error(`${DATASET}: ${field} fields must be strings`);
       }
@@ -103,7 +104,7 @@ export const sbiVcAccountMargin: Parser = {
         if (!isObject(entry)) {
           throw new Error(`${locator}: expected an account margin amount object`);
         }
-        warnUnknownFields(entry, AMOUNT_ITEM_FIELDS, locator, warnings);
+        warnUnknownFields(entry, AMOUNT_ITEM_FIELDS, locator, diagnostics);
         const currency = requireNonEmptyString(entry, "currency", locator);
         requireExactDecimalString(entry["amount"], `${locator}.amount`, currency);
         requireExactDecimalString(entry["baseCurrencyAmount"], `${locator}.baseCurrencyAmount`);
@@ -124,7 +125,7 @@ export const sbiVcAccountMargin: Parser = {
             }),
             ...(asOf !== undefined ? { asOf } : {}),
             ...(observedAt !== undefined ? { observedAt } : {}),
-            warnings,
+            diagnostics,
           }),
         );
       });
@@ -136,7 +137,7 @@ export const sbiVcAccountMargin: Parser = {
         if (!isObject(entry)) {
           throw new Error(`${locator}: expected an account margin limit object`);
         }
-        warnUnknownFields(entry, ["currency", valueField], locator, warnings);
+        warnUnknownFields(entry, ["currency", valueField], locator, diagnostics);
         const currency = requireNonEmptyString(entry, "currency", locator);
         requireExactDecimalString(entry[valueField], `${locator}.${valueField}`, currency);
         observations.push(
@@ -151,11 +152,23 @@ export const sbiVcAccountMargin: Parser = {
             }),
             ...(asOf !== undefined ? { asOf } : {}),
             ...(observedAt !== undefined ? { observedAt } : {}),
-            warnings,
+            diagnostics,
           }),
         );
       });
     }
-    return { observations, warnings };
+    return {
+      observations,
+      warnings: diagnostics.warnings,
+      issues: diagnostics.issues,
+      coverage: [
+        containerClaim({
+          artifact,
+          issues: diagnostics.issues,
+          observedCount: observations.length,
+          evidenceRefs: CHILD_LIST_FIELDS.map((field) => `json:$.body.${field}`),
+        }),
+      ],
+    };
   },
 };

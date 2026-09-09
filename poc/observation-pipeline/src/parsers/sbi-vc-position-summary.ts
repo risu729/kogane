@@ -10,6 +10,7 @@ import {
   warnNonStringFields,
   warnUnknownFields,
 } from "./sbi-vc-common.ts";
+import { containerClaim, ParseDiagnostics } from "./coverage.ts";
 import { decimalText, isObject } from "./util.ts";
 
 const DATASET = "position-summary";
@@ -23,9 +24,9 @@ export const sbiVcPositionSummary: Parser = {
     return acceptsSbiVcDataset(artifact, DATASET);
   },
 
-  parse(bytes: Uint8Array): ParseResult {
+  parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
     const envelope = parseSbiVcEnvelope(bytes, DATASET);
-    const warnings: string[] = [];
+    const diagnostics = new ParseDiagnostics();
     const observations: Observation[] = [];
     const observedAt = providerTimestamp(envelope.meta["timestamp"]);
     const productIds = new Set<string>();
@@ -40,8 +41,8 @@ export const sbiVcPositionSummary: Parser = {
         if (!isObject(entry)) {
           throw new Error(`${locator}: expected a position object`);
         }
-        warnUnknownFields(entry, ITEM_FIELDS, locator, warnings);
-        warnNonStringFields(entry, ["totalAmount", "evaluationPl"], locator, warnings);
+        warnUnknownFields(entry, ITEM_FIELDS, locator, diagnostics);
+        warnNonStringFields(entry, ["totalAmount", "evaluationPl"], locator, diagnostics);
         const productId = requireNonEmptyString(entry, "productId", locator);
         if (productIds.has(productId)) {
           throw new Error(`${locator}: duplicate position identity`);
@@ -69,6 +70,20 @@ export const sbiVcPositionSummary: Parser = {
         });
       }
     }
-    return { observations, warnings };
+    // Every group and position is validated or rejected, so a parse that
+    // returns proves the whole body; an empty body is a complete-empty book.
+    return {
+      observations,
+      warnings: diagnostics.warnings,
+      issues: diagnostics.issues,
+      coverage: [
+        containerClaim({
+          artifact,
+          issues: diagnostics.issues,
+          observedCount: observations.length,
+          evidenceRefs: ["json:$.body"],
+        }),
+      ],
+    };
   },
 };

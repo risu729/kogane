@@ -1,4 +1,5 @@
 import type { ArtifactMeta, Observation, Parser } from "../types.ts";
+import { containerClaim } from "./coverage.ts";
 import { amountToMinorUnits, decodeUtf8, parseCsv } from "./util.ts";
 import {
   exactDecimal,
@@ -154,7 +155,28 @@ export const sonyBankGrossBalance: Parser = {
         extra: { updateDttm: body.updateDttm },
       });
     }
-    return { observations, warnings: [] };
+    // The audited contract fixes the container at 11 asset rows, 4 loan rows
+    // and 2 totals; anything else is rejected above, so a returned result is
+    // always the complete container.
+    return {
+      observations,
+      warnings: [],
+      issues: [],
+      coverage: [
+        containerClaim({
+          artifact,
+          issues: [],
+          observedCount: observations.length,
+          expectedCount: 17,
+          evidenceRefs: [
+            "json:$.assetBalAcTypTyp[length=11]",
+            "json:$.loanBalAcTypTyp[length=4]",
+            "json:$.assetTtl",
+            "json:$.loanTtl",
+          ],
+        }),
+      ],
+    };
   },
 };
 

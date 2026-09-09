@@ -14,12 +14,16 @@
 //
 // Structures this parser does not recognize are never skipped quietly — each
 // one produces a warning naming its locator, because a silently dropped
-// container could be an entire account.
+// container could be an entire account. The same event is recorded as a
+// typed issue whose impact, not its wording, decides whether the container
+// still counts as a complete snapshot (contract v2, coverage.ts).
 
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
+import { containerClaim, ParseDiagnostics } from "./coverage.ts";
 import { decimalText, decimalToMinorUnits, decodeUtf8, isObject } from "./util.ts";
 
 const SOURCE_ACCOUNT = "sbi-securities:foreign";
+const CONTAINER = "json:$.listForeignScheduleCashBalances.foreignCashBalances";
 
 const METRIC_FIELDS: readonly { field: string; metric: string }[] = [
   { field: "buyPossibleAmount", metric: "buy_possible_amount" },
@@ -53,19 +57,31 @@ export const sbiForeignCashBalances: Parser = {
     if (!Array.isArray(accounts)) {
       throw new Error(`artifact ${artifact.sha256} is not a GetForeignCashBalance data object`);
     }
-    const warnings: string[] = [];
+    const diagnostics = new ParseDiagnostics();
+    // A container that cannot be walked may hide an entire account, so its
+    // loss breaks membership; an unmodelled sibling or a decimal kept as text
+    // loses nothing.
+    const skipped = (
+      code: "container_unreadable" | "row_unreadable",
+      locator: string,
+      message: string,
+    ) => diagnostics.report({ code, locator, severity: "error", impact: "membership", message });
     const observations: Observation[] = [];
     accounts.forEach((account: unknown, accountIndex: number) => {
-      const accountLocator = `json:$.listForeignScheduleCashBalances.foreignCashBalances[${accountIndex}]`;
+      const accountLocator = `${CONTAINER}[${accountIndex}]`;
       if (!isObject(account)) {
-        warnings.push(
+        skipped(
+          "container_unreadable",
+          accountLocator,
           `${accountLocator}: expected an object, got ${typeof account}; nothing could be read from it`,
         );
         return;
       }
       const currencies = account["currencyCashBalances"];
       if (!Array.isArray(currencies)) {
-        warnings.push(
+        skipped(
+          "container_unreadable",
+          `${accountLocator}.currencyCashBalances`,
           `${accountLocator}.currencyCashBalances: expected an array, got ${typeof currencies}; the whole account was skipped`,
         );
         return;
@@ -73,7 +89,9 @@ export const sbiForeignCashBalances: Parser = {
       currencies.forEach((currencyEntry: unknown, currencyIndex: number) => {
         const currencyLocator = `${accountLocator}.currencyCashBalances[${currencyIndex}]`;
         if (!isObject(currencyEntry)) {
-          warnings.push(
+          skipped(
+            "container_unreadable",
+            currencyLocator,
             `${currencyLocator}: expected an object, got ${typeof currencyEntry}; skipped`,
           );
           return;
@@ -83,12 +101,18 @@ export const sbiForeignCashBalances: Parser = {
             ? currencyEntry["currencyCode"]
             : undefined;
         if (currencyCode === undefined) {
-          warnings.push(`${currencyLocator} omitted currencyCode; skipped`);
+          skipped(
+            "container_unreadable",
+            currencyLocator,
+            `${currencyLocator} omitted currencyCode; skipped`,
+          );
           return;
         }
         const schedule = currencyEntry["foreignScheduleCashBalances"];
         if (!Array.isArray(schedule)) {
-          warnings.push(
+          skipped(
+            "container_unreadable",
+            `${currencyLocator}.foreignScheduleCashBalances`,
             `${currencyLocator}.foreignScheduleCashBalances: expected an array, got ${typeof schedule}; skipped`,
           );
           return;
@@ -96,7 +120,11 @@ export const sbiForeignCashBalances: Parser = {
         schedule.forEach((row: unknown, rowIndex: number) => {
           const locator = `${currencyLocator}.foreignScheduleCashBalances[${rowIndex}]`;
           if (!isObject(row)) {
-            warnings.push(`${locator}: expected an object, got ${typeof row}; skipped`);
+            skipped(
+              "row_unreadable",
+              locator,
+              `${locator}: expected an object, got ${typeof row}; skipped`,
+            );
             return;
           }
           const asOf = typeof row["businessDate"] === "string" ? row["businessDate"] : undefined;
@@ -115,25 +143,36 @@ export const sbiForeignCashBalances: Parser = {
               !METRIC_FIELDS.some((entry) => entry.field === key),
           );
           if (unmodelled.length > 0) {
-            warnings.push(
-              `${locator}: fields not modelled as metrics were kept only in extra: ${unmodelled.join(", ")}`,
-            );
+            diagnostics.report({
+              code: "unknown_fields_preserved",
+              locator,
+              severity: "info",
+              impact: "none",
+              message: `${locator}: fields not modelled as metrics were kept only in extra: ${unmodelled.join(", ")}`,
+            });
           }
           for (const { field, metric } of METRIC_FIELDS) {
             const value = row[field];
             if (value === undefined || value === null) continue;
             const decimal = decimalText(value);
             if (!decimal) {
-              warnings.push(
+              // The balance for this metric is missing from the container.
+              skipped(
+                "row_unreadable",
+                `${locator}.${field}`,
                 `${locator}.${field}: ${JSON.stringify(value)} is not an exact decimal`,
               );
               continue;
             }
             const minor = decimalToMinorUnits(decimal.text, currencyCode);
             if (minor === undefined) {
-              warnings.push(
-                `${locator}.${field}: ${decimal.text} has no exact ${currencyCode} minor-unit form; kept as text`,
-              );
+              diagnostics.report({
+                code: "exact_decimal_without_minor_units",
+                locator: `${locator}.${field}`,
+                severity: "info",
+                impact: "none",
+                message: `${locator}.${field}: ${decimal.text} has no exact ${currencyCode} minor-unit form; kept as text`,
+              });
             }
             observations.push({
               kind: "balance",
@@ -151,6 +190,18 @@ export const sbiForeignCashBalances: Parser = {
         });
       });
     });
-    return { observations, warnings };
+    return {
+      observations,
+      warnings: diagnostics.warnings,
+      issues: diagnostics.issues,
+      coverage: [
+        containerClaim({
+          artifact,
+          issues: diagnostics.issues,
+          observedCount: observations.length,
+          evidenceRefs: [CONTAINER],
+        }),
+      ],
+    };
   },
 };

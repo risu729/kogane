@@ -1,4 +1,5 @@
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
+import { containerClaim, ParseDiagnostics } from "./coverage.ts";
 import { decimalText, decimalToMinorUnits, decodeUtf8 } from "./util.ts";
 import {
   exactDecimal,
@@ -156,7 +157,7 @@ export const sbiDomesticCashPositions: Parser = {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "domestic-cash-positions";
   },
 
-  parse(bytes: Uint8Array): ParseResult {
+  parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
     const body = strictObject(JSON.parse(decodeUtf8(bytes)), "domestic-cash-positions");
     exactKeys(body, WRAPPER_KEYS, "domestic-cash-positions");
     if (body["format"] !== "sbi-mts-fixed-width-shift-jis")
@@ -185,7 +186,22 @@ export const sbiDomesticCashPositions: Parser = {
       }
       reader.skip(EMPTY_RESULT_BYTES, "empty-result message block");
       if (reader.remaining !== 0) throw new Error("MTS empty-result payload has trailing bytes");
-      return { observations: [], warnings: [] };
+      // The provider's explicit empty-result layout is a complete container
+      // with no holdings, not an unread one.
+      return {
+        observations: [],
+        warnings: [],
+        issues: [],
+        coverage: [
+          containerClaim({
+            artifact,
+            issues: [],
+            observedCount: 0,
+            expectedCount: 0,
+            evidenceRefs: ["mts-shift-jis:recordCount=0,totalCount=0,empty-result-block"],
+          }),
+        ],
+      };
     }
     const expectedWithoutError = PREFIX_BYTES + recordCount * RECORD_BYTES + SUMMARY_BYTES;
     if (
@@ -202,6 +218,7 @@ export const sbiDomesticCashPositions: Parser = {
     if ((pageIndex !== 0 && pageIndex !== totalCount) || recordCount !== totalCount)
       throw new Error("MTS positions payload is incomplete");
 
+    const diagnostics = new ParseDiagnostics();
     const observations: Observation[] = [];
     for (let index = 0; index < recordCount; index += 1) {
       const recordOffset = reader.position;
@@ -312,6 +329,18 @@ export const sbiDomesticCashPositions: Parser = {
       ] as const;
       for (const [metric, amount, relativeOffset, width] of valuations) {
         if (!amount) continue;
+        if (amount.minor === undefined) {
+          // Unit prices may carry sub-yen precision. The exact decimal text is
+          // the observation; recording the representation limit loses nothing
+          // and is not a warning.
+          diagnostics.note({
+            code: "exact_decimal_without_minor_units",
+            locator: `mts-shift-jis:payload-byte=${recordOffset + relativeOffset},width=${width}`,
+            severity: "info",
+            impact: "none",
+            message: `${label}.${metric}: ${amount.text} has no exact JPY minor-unit form; kept as text`,
+          });
+        }
         observations.push({
           kind: "valuation",
           sourceAccount,
@@ -341,6 +370,20 @@ export const sbiDomesticCashPositions: Parser = {
       reader.skip(OBSERVED_SUCCESS_TRAILER_BYTES, "observed success trailer");
     }
     if (reader.remaining !== 0) throw new Error("MTS payload has trailing bytes");
-    return { observations, warnings: [] };
+    return {
+      observations,
+      warnings: diagnostics.warnings,
+      issues: diagnostics.issues,
+      coverage: [
+        containerClaim({
+          artifact,
+          issues: diagnostics.issues,
+          observedCount: observations.length,
+          evidenceRefs: [
+            `mts-shift-jis:recordCount=${recordCount},totalCount=${totalCount},index=${pageIndex}`,
+          ],
+        }),
+      ],
+    };
   },
 };

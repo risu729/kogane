@@ -11,6 +11,7 @@ import {
   warnNonStringFields,
   warnUnknownFields,
 } from "./sbi-vc-common.ts";
+import { ParseDiagnostics } from "./coverage.ts";
 import { decimalText, decimalToMinorUnits, isObject } from "./util.ts";
 
 const DATASET = /^cashflows-historical-page-(\d{4})$/u;
@@ -47,7 +48,7 @@ export const sbiVcCashflows: Parser = {
       throw new Error(`${dataset}: historical page suffix is invalid`);
     }
     const page = parseSbiVcPage(bytes, dataset, expectedPageNumber);
-    const warnings: string[] = [];
+    const diagnostics = new ParseDiagnostics();
     const observations: Observation[] = [];
     const observedAt = providerTimestamp(page.meta["timestamp"]);
     const cashflowIds = new Set<string>();
@@ -57,12 +58,12 @@ export const sbiVcCashflows: Parser = {
       if (!isObject(entry)) {
         throw new Error(`${locator}: expected a cashflow object`);
       }
-      warnUnknownFields(entry, ITEM_FIELDS, locator, warnings);
+      warnUnknownFields(entry, ITEM_FIELDS, locator, diagnostics);
       warnNonStringFields(
         entry,
         ["cashbalance", "cashflowAmount", "eventDatetime", "publicMemo", "valueYmdDate"],
         locator,
-        warnings,
+        diagnostics,
       );
       const cashflowId = requireNonEmptyString(entry, "cashflowID", locator);
       if (cashflowIds.has(cashflowId)) {
@@ -99,7 +100,7 @@ export const sbiVcCashflows: Parser = {
         (cashflowType === "REMITTANCE_DEPOSIT" && direction === "outflow") ||
         (cashflowType === "REMITTANCE_WITHDRAW" && direction === "inflow")
       ) {
-        warnings.push(
+        diagnostics.warnings.push(
           `${locator}: cashflowType disagrees with cashflowAmount sign; amount sign retained`,
         );
       }
@@ -138,10 +139,10 @@ export const sbiVcCashflows: Parser = {
           }),
           asOf,
           ...(observedAt !== undefined ? { observedAt } : {}),
-          warnings,
+          diagnostics,
         }),
       );
     });
-    return { observations, warnings };
+    return { observations, warnings: diagnostics.warnings };
   },
 };
