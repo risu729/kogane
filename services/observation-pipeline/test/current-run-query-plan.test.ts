@@ -18,7 +18,10 @@ test("current identities select keyed eligible run winners before observation fa
       .sort()) {
       // 0022 fixed the plan shape and 0026 (publication gate) re-defines the
       // same view over the projection; both are applied explicitly below.
-      if (file.startsWith("0022_") || file.startsWith("0026_")) continue;
+      // 0028 (release adoption) builds on 0026's tables, so it cannot precede
+      // it here; the identity view does not depend on it.
+      if (file.startsWith("0022_") || file.startsWith("0026_") || file.startsWith("0028_"))
+        continue;
       db.exec(readFileSync(new URL(file, dir), "utf8"));
     }
     const before = plan(core);

@@ -323,8 +323,12 @@ test("a successful run outside the projection stays invisible to readers and vis
 }, 30000);
 
 test("migration 0026 applies on 0017 through 0035 with existing rows and backfills exactly the legacy set", async () => {
+  // 0028 (release adoption) builds on 0026's tables, so the deployed schema
+  // this upgrade starts from is everything except those two.
   const upgrade = await startPipeline(
-    layerBMigrations().filter((name) => !name.startsWith("0026_")),
+    layerBMigrations().filter(
+      (name) => !name.startsWith("0026_") && !name.startsWith("0028_"),
+    ),
   );
   try {
     const db = upgrade.env.DB;
@@ -372,6 +376,7 @@ test("migration 0026 applies on 0017 through 0035 with existing rows and backfil
     ).results.map((r) => r.id);
     expect(legacy).toEqual([b, e, f, g, h]);
     await applyMigration(db, "0026_publication_gate.sql");
+    await applyMigration(db, "0028_parse_releases.sql");
     const projection = (
       await db
         .prepare("SELECT parse_run_id FROM published_parse_runs ORDER BY parse_run_id")

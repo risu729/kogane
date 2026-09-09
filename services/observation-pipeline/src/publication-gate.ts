@@ -18,14 +18,17 @@
 // allows it only here, in the worker's supersession batch, in the PoC store
 // writer and in the read model's legacy comparison concept.
 
-/** Selection of a run the repair route must publish: the legacy-current run
- * of a key whose projection does not name it. `?1` bounds the batch. */
-const REPAIR_SELECTION = `SELECT p.id FROM parse_runs p
-    WHERE p.status='ok' AND p.superseded_by_parse_run_id IS NULL
-      AND NOT EXISTS(SELECT 1 FROM published_parse_runs x WHERE x.parse_run_id=p.id)
-      AND NOT EXISTS(SELECT 1 FROM parse_runs q WHERE q.fetch_artifact_id=p.fetch_artifact_id
-        AND q.parser_name=p.parser_name AND q.status='ok' AND q.superseded_by_parse_run_id IS NULL AND q.id>p.id)
-    ORDER BY p.id LIMIT ?1`;
+/** Selection of a run the repair route must publish: a genuine gap left by a
+ * writer that predates the gate, as `publication_gate_gaps` (migration 0028)
+ * defines it - an `ok`, unsuperseded run the projection does not name, that is
+ * neither a candidate result nor a run an adoption replaced. Repair must never
+ * publish either of those. `?1` bounds the batch. */
+const REPAIR_SELECTION = `SELECT g.parse_run_id AS id FROM publication_gate_gaps g
+    WHERE g.mismatch='legacy_only'
+      AND NOT EXISTS(SELECT 1 FROM publication_gate_gaps q WHERE q.mismatch='legacy_only'
+        AND q.fetch_artifact_id=g.fetch_artifact_id AND q.parser_name=g.parser_name
+        AND q.parse_run_id>g.parse_run_id)
+    ORDER BY g.parse_run_id LIMIT ?1`;
 
 const UPSERT_PROJECTION = `ON CONFLICT(fetch_artifact_id,parser_name) DO UPDATE SET
     parse_run_id=excluded.parse_run_id,parser_version=excluded.parser_version,
@@ -81,7 +84,13 @@ export interface PublicationConsistency {
   sample: PublicationMismatch[];
 }
 
-/** Compares the projection with the legacy predicate (view of migration 0026). */
+/**
+ * Publication gaps: keys the projection and the writers disagree about
+ * (`publication_gate_gaps`, migration 0028). Candidate results and runs an
+ * activation replaced are excluded on purpose - they are expected `ok`,
+ * unsuperseded runs, not gaps. The raw legacy comparison stays available as
+ * `publication_gate_mismatches` for the audit path.
+ */
 export async function publicationConsistency(
   db: D1Database,
   sampleLimit = 100,
@@ -89,13 +98,13 @@ export async function publicationConsistency(
   const counts = await db
     .prepare(
       `SELECT (SELECT count(*) FROM published_parse_runs) AS published,
-        (SELECT count(*) FROM publication_gate_mismatches WHERE mismatch='legacy_only') AS legacy_only,
-        (SELECT count(*) FROM publication_gate_mismatches WHERE mismatch='projection_only') AS projection_only`,
+        (SELECT count(*) FROM publication_gate_gaps WHERE mismatch='legacy_only') AS legacy_only,
+        (SELECT count(*) FROM publication_gate_gaps WHERE mismatch='projection_only') AS projection_only`,
     )
     .first<{ published: number; legacy_only: number; projection_only: number }>();
   const sample = await db
     .prepare(
-      "SELECT fetch_artifact_id,parser_name,parse_run_id,mismatch FROM publication_gate_mismatches ORDER BY parse_run_id LIMIT ?1",
+      "SELECT fetch_artifact_id,parser_name,parse_run_id,mismatch FROM publication_gate_gaps ORDER BY parse_run_id LIMIT ?1",
     )
     .bind(sampleLimit)
     .all<PublicationMismatch>();
@@ -164,7 +173,7 @@ export async function repairPublication(
       .bind(request.limit, now),
   ]);
   const remaining = await db
-    .prepare("SELECT count(*) AS n FROM publication_gate_mismatches")
+    .prepare("SELECT count(*) AS n FROM publication_gate_gaps")
     .first<number>("n");
   return { repaired: results[1]?.meta.changes ?? 0, remaining: remaining ?? 0 };
 }

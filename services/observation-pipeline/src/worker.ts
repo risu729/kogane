@@ -18,6 +18,33 @@ import {
   REPAIR_LIMIT_DEFAULT,
   repairPublication,
 } from "./publication-gate.ts";
+import {
+  extractMetadata,
+  isMetadataExtractorRelease,
+  LEGACY_METADATA_RELEASE,
+  MetadataError,
+  persistProjection,
+  type MetadataExtractorRelease,
+} from "./metadata-extractors/index.ts";
+import {
+  activeRelease,
+  inputFingerprint,
+  lookupRelease,
+  registerDeployedReleases,
+  releaseIdentity,
+  releaseInsert,
+  type ReleaseRow,
+} from "./releases.ts";
+import {
+  activateRelease,
+  candidateBatch,
+  candidatesEnabled,
+  compareReleases,
+  ReleaseCommandError,
+  releaseStatus,
+  rollbackRelease,
+  type AdoptionRequest,
+} from "./release-adoption.ts";
 import type {
   ArtifactMeta,
   CoverageClaim,
@@ -60,6 +87,8 @@ interface Job {
   parser_name: string;
   parser_version: string;
   attempts: number;
+  /** Release a replay plan aims this job at (0035); NULL for ordinary jobs. */
+  target_release?: string | null;
 }
 // Parse eligibility is the D13 `unitParseable` predicate at its default `run`
 // scope: the whole parent run succeeded with no failure evidence. The run
@@ -107,74 +136,44 @@ async function verifiedBytes(
   return bytes;
 }
 
-function record(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new PipelineError("manifest_shape_invalid");
-  return value as Record<string, unknown>;
+/**
+ * Metadata for one artifact, produced by a versioned extractor and recorded
+ * as a `metadata_projections` row (D02, docs/release-adoption.md). The
+ * default release `legacy-metadata-v1` applies exactly the rules this
+ * function applied before A04, including its reuse of an existing
+ * `observation_artifact_metadata` row, so nothing a reader sees changes; the
+ * projection is the append-only record of which extraction the parse read.
+ */
+async function hydrateMeta(
+  env: Env,
+  row: ArtifactRow,
+  release: MetadataExtractorRelease,
+): Promise<{ meta: ArtifactMeta; projectionId: number }> {
+  const meta = artifactMeta(row);
+  const extraction = await extractMetadata(
+    { db: env.DB, read: (manifest) => verifiedBytes(env, manifest) },
+    row,
+    release,
+  );
+  meta.statementState = extraction.output.statementState;
+  meta.period = extraction.output.period;
+  // A manifest-stated media type replaces the declared one; the extractor
+  // makes no claim when it returns null and Layer A's value stands.
+  if (extraction.output.mime !== null) meta.mime = extraction.output.mime;
+  const projectionId = await persistProjection(
+    env.DB,
+    row,
+    release,
+    extraction,
+    new Date().toISOString(),
+  );
+  return { meta, projectionId };
 }
 
-// Statement state is an artifact-specific manifest claim. Never infer it from
-// dates or from row output. This also supplies metadata to the read-side view.
-async function hydrateMeta(env: Env, row: ArtifactRow): Promise<ArtifactMeta> {
-  const meta = artifactMeta(row);
-  const previous = await env.DB.prepare(
-    "SELECT statement_state,period FROM observation_artifact_metadata WHERE fetch_artifact_id=?",
-  )
-    .bind(row.id)
-    .first<{ statement_state: string | null; period: string | null }>();
-  if (previous) {
-    meta.statementState = previous.statement_state;
-    meta.period = previous.period;
-  }
-  let manifestId: number | null = null;
-  if (row.source_id === "myjcb" && !previous) {
-    const manifest = await env.DB.prepare(
-      `SELECT a.id,o.blob_key,o.byte_size,o.sha256 FROM fetch_artifacts a JOIN raw_objects o ON o.sha256=a.sha256 WHERE a.fetch_run_id=? AND a.artifact_role='collector_manifest' AND a.artifact_key='manifest.json'`,
-    )
-      .bind(row.fetch_run_id)
-      .first<{ id: number; blob_key: string; byte_size: number; sha256: string }>();
-    if (!manifest) throw new PipelineError("metadata_manifest_missing");
-    const root = record(JSON.parse(new TextDecoder().decode(await verifiedBytes(env, manifest))));
-    if (!Array.isArray(root.artifacts)) throw new PipelineError("manifest_shape_invalid");
-    const matching = root.artifacts
-      .map(record)
-      .filter((a) => `${String(a.connectionId)}/${String(a.filename)}` === row.artifact_key);
-    if (matching.length !== 1) throw new PipelineError("manifest_artifact_mismatch");
-    const match = matching[0]!;
-    if (match.dataset !== row.dataset) throw new PipelineError("manifest_dataset_mismatch");
-    if (match.statementState !== undefined && typeof match.statementState !== "string")
-      throw new PipelineError("manifest_state_invalid");
-    if (match.period !== undefined && typeof match.period !== "string")
-      throw new PipelineError("manifest_period_invalid");
-    meta.statementState = typeof match.statementState === "string" ? match.statementState : null;
-    meta.period = typeof match.period === "string" ? match.period : null;
-    manifestId = manifest.id;
-  }
-  if (row.source_id === "sony-bank" && /^wallet-history-\d{6}$/.test(row.dataset ?? "")) {
-    const manifest = await env.DB.prepare(
-      "SELECT a.id,o.blob_key,o.byte_size,o.sha256 FROM fetch_artifacts a JOIN raw_objects o ON o.sha256=a.sha256 WHERE a.fetch_run_id=? AND a.artifact_role='collector_manifest' AND a.artifact_key='manifest.json'",
-    )
-      .bind(row.fetch_run_id)
-      .first<{ id: number; blob_key: string; byte_size: number; sha256: string }>();
-    if (!manifest) throw new PipelineError("metadata_manifest_missing");
-    const root = record(JSON.parse(new TextDecoder().decode(await verifiedBytes(env, manifest))));
-    if (!Array.isArray(root.artifacts)) throw new PipelineError("manifest_shape_invalid");
-    const matches = root.artifacts
-      .map(record)
-      .filter(
-        (a) => a.dataset === row.dataset && a.sha256 === row.sha256 && a.bytes === row.byte_size,
-      );
-    if (matches.length !== 1 || matches[0]!.mediaType !== "text/html; charset=UTF-8")
-      throw new PipelineError("manifest_media_type_mismatch");
-    meta.mime = matches[0]!.mediaType;
-    manifestId = manifest.id;
-  }
-  await env.DB.prepare(
-    `INSERT OR IGNORE INTO observation_artifact_metadata(fetch_artifact_id,statement_state,period,metadata_manifest_artifact_id) VALUES(?,?,?,?)`,
-  )
-    .bind(row.id, meta.statementState ?? null, meta.period ?? null, manifestId)
-    .run();
-  return meta;
+function extractorRelease(value: string | null | undefined): MetadataExtractorRelease {
+  if (value === null || value === undefined) return LEGACY_METADATA_RELEASE;
+  if (!isMetadataExtractorRelease(value)) throw new PipelineError("metadata_release_unknown");
+  return value;
 }
 
 const fields = {
@@ -392,12 +391,17 @@ export interface PublishInput {
 }
 
 /**
- * The publish transaction of a successful parse, in order: mark the run ok
- * (born superseded when a numerically newer success is already current),
+ * The publish transaction of a successful *adopted* parse, in order: mark the
+ * run ok (born superseded when a numerically newer success is already current),
  * supersede older successes if this run is current, move the publication
  * projection and record its event (0026, same decision), then close the job.
  * The first statement is fenced on the live lease; every later statement
  * depends on its effect, so an expired lease changes nothing at all.
+ * Candidate results (`parse_run_candidates`, migration 0028) are excluded from
+ * supersession in both directions: a candidate must not be turned into
+ * replaced history by a later normal publish, and a candidate at a higher
+ * version must not supersede the run readers actually use. With the release
+ * flag off that table is empty and this batch behaves exactly as before.
  * Exported for the publication-gate tests only.
  */
 export function publishBatch(env: Env, input: PublishInput): D1PreparedStatement[] {
@@ -409,6 +413,7 @@ export function publishBatch(env: Env, input: PublishInput): D1PreparedStatement
           WHERE newer.fetch_artifact_id=parse_runs.fetch_artifact_id
             AND newer.parser_name=parse_runs.parser_name AND newer.status='ok'
             AND newer.superseded_by_parse_run_id IS NULL
+            AND NOT EXISTS(SELECT 1 FROM parse_run_candidates c WHERE c.parse_run_id=newer.id)
             AND (
               json_extract('['||replace(newer.parser_version,'.',',')||']','$[0]'),
               json_extract('['||replace(newer.parser_version,'.',',')||']','$[1]'),
@@ -421,7 +426,9 @@ export function publishBatch(env: Env, input: PublishInput): D1PreparedStatement
         ) WHERE id=? AND EXISTS(SELECT 1 FROM observation_parse_jobs WHERE lease_token=? AND status='running' AND lease_until_ms>?)`,
     ).bind(version[0]!, version[1]!, version[2]!, parseId, token, now),
     env.DB.prepare(
-      `UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE fetch_artifact_id=? AND parser_name=? AND id<>? AND status='ok' AND superseded_by_parse_run_id IS NULL AND EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=? AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL)`,
+      `UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE fetch_artifact_id=? AND parser_name=? AND id<>? AND status='ok' AND superseded_by_parse_run_id IS NULL
+        AND NOT EXISTS(SELECT 1 FROM parse_run_candidates c WHERE c.parse_run_id=parse_runs.id)
+        AND EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=? AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL)`,
     ).bind(parseId, artifactId, parserName, parseId, parseId),
     ...publicationStatements(env.DB, parseId, publishedAt),
     env.DB.prepare(
@@ -477,7 +484,43 @@ async function executeParseJob(
         .run();
       return "skipped";
     }
-    const meta = await hydrateMeta(env, row);
+    // Which transformation is this run? A job aimed at a registered release
+    // that is not the dataset's active one is a candidate; anything else is a
+    // normal run of the deployed code. With the flag off `target_release` is
+    // ignored entirely and this is the pre-A04 path.
+    const active = await activeRelease(env.DB, {
+      sourceId: row.source_id,
+      dataset: row.dataset,
+      parserName: parser.name,
+    });
+    const target =
+      candidatesEnabled(env) && job.target_release
+        ? await lookupRelease(env.DB, job.target_release)
+        : null;
+    const candidate =
+      target !== null &&
+      target.parser_name === parser.name &&
+      target.semantic_version === parser.version &&
+      target.release_id !== (active?.release_id ?? null);
+    const release = extractorRelease(
+      candidate ? target!.metadata_extractor_release : active?.metadata_extractor_release,
+    );
+    const identity = await releaseIdentity(parser, release);
+    if (candidate && identity.releaseId !== target!.release_id)
+      throw new PipelineError("release_manifest_mismatch");
+    // Registering here is what refuses a deployment that changed a parser
+    // without changing its version: migration 0028's trigger aborts, and the
+    // attempt fails loudly instead of writing an unidentifiable result.
+    try {
+      await releaseInsert(
+        env.DB,
+        { parser, metadataExtractorRelease: release, ...identity },
+        new Date().toISOString(),
+      ).run();
+    } catch {
+      throw new PipelineError("parser_release_conflict");
+    }
+    const { meta, projectionId } = await hydrateMeta(env, row, release);
     if (!parser.accepts(meta)) throw new PipelineError("parser_no_longer_accepts");
     const bytes = await verifiedBytes(env, row);
     failureStage = "parser_rejected";
@@ -501,6 +544,22 @@ async function executeParseJob(
       .first<{ id: number }>();
     if (!inserted) throw new PipelineError("parse_run_insert_failed");
     parseId = inserted.id;
+    // The input identity of this attempt, recorded whatever the outcome:
+    // H(raw digest, parser-visible metadata, transform manifest digest).
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO parse_input_references(parse_run_id,metadata_projection_id,parser_release_id,input_fingerprint) VALUES(?,?,?,?)",
+    )
+      .bind(
+        parseId,
+        projectionId,
+        identity.releaseId,
+        await inputFingerprint({
+          rawSha256: row.sha256,
+          meta,
+          manifestDigest: identity.manifestDigest,
+        }),
+      )
+      .run();
     for (const kind of Object.keys(fields) as Observation["kind"][]) {
       let chunk: Observation[] = [];
       let bytes = 0;
@@ -527,23 +586,41 @@ async function executeParseJob(
       await coverageInsert(env.DB, parseId, contract.coverage, row).run();
     // A lost lease cannot publish rows. All visibility and supersession changes
     // occur in one D1 transaction; empty successful parses are published too.
+    // A candidate takes the other batch: it is marked ok and recorded as a
+    // candidate of its release, and never reaches the publication pointer.
     const publish = await env.DB.batch(
-      publishBatch(env, {
-        parseId,
-        token,
-        version,
-        artifactId: row.id,
-        parserName: parser.name,
-        publishedAt: new Date().toISOString(),
-        now: Date.now(),
-      }),
+      candidate
+        ? candidateBatch(env.DB, {
+            parseId,
+            token,
+            releaseId: identity.releaseId,
+            fingerprint: await inputFingerprint({
+              rawSha256: row.sha256,
+              meta,
+              manifestDigest: identity.manifestDigest,
+            }),
+            createdAt: new Date().toISOString(),
+            now: Date.now(),
+          })
+        : publishBatch(env, {
+            parseId,
+            token,
+            version,
+            artifactId: row.id,
+            parserName: parser.name,
+            publishedAt: new Date().toISOString(),
+            now: Date.now(),
+          }),
     );
     if (!publish[0]?.meta.changes) throw new PipelineError("parse_lease_expired");
     return "parsed";
   } catch (error) {
     // Parser exception strings may contain provider values; retain a safe code
     // and full provenance, never financial rows or secret-bearing error text.
-    const code = error instanceof PipelineError ? error.message : failureStage;
+    const code =
+      error instanceof PipelineError || error instanceof MetadataError
+        ? error.message
+        : failureStage;
     if (parseId !== undefined) {
       await env.DB.prepare(
         "UPDATE parse_runs SET status='error',error=? WHERE id=? AND status='pending'",
@@ -645,6 +722,51 @@ function jobInsert(
   );
 }
 
+/**
+ * The release each dataset publishes from, as a lookup for job creation:
+ * `${source}/${dataset}/${parser}` -> semantic version. Empty until an
+ * operator activates a release, which is why job creation is unchanged for
+ * every deployment that never uses the candidate lane.
+ */
+async function activeParserVersions(env: Env): Promise<Map<string, string>> {
+  const rows = await env.DB.prepare(
+    `SELECT ar.source_id,ar.dataset,ar.parser_name,r.semantic_version
+      FROM active_releases ar JOIN parser_releases r ON r.release_id=ar.release_id`,
+  ).all<{ source_id: string; dataset: string; parser_name: string; semantic_version: string }>();
+  return new Map(
+    rows.results.map((row) => [
+      `${row.source_id}/${row.dataset}/${row.parser_name}`,
+      row.semantic_version,
+    ]),
+  );
+}
+
+/**
+ * Parsers whose jobs the normal lanes create for one artifact: the deployed
+ * registry, narrowed to the active release's version where the dataset has a
+ * pointer and that version is deployed. A pointer naming a version this build
+ * does not carry falls back to the registry, so a rolled-back release never
+ * strands the incremental lane on a version nothing can execute.
+ */
+function laneParsers(
+  row: ArtifactRow,
+  active: Map<string, string>,
+  deployed: readonly Parser[] = PARSERS,
+): readonly Parser[] {
+  const meta = artifactMeta(row);
+  return deployed.filter((parser) => {
+    if (!parser.accepts(meta)) return false;
+    const pinned =
+      row.dataset === null
+        ? undefined
+        : active.get(`${row.source_id}/${row.dataset}/${parser.name}`);
+    if (pinned === undefined) return true;
+    if (!deployed.some((other) => other.name === parser.name && other.version === pinned))
+      return true;
+    return parser.version === pinned;
+  });
+}
+
 async function insertJobs(env: Env, inserts: D1PreparedStatement[]): Promise<number> {
   let created = 0;
   for (let offset = 0; offset < inserts.length; offset += 50)
@@ -659,6 +781,7 @@ async function insertJobs(env: Env, inserts: D1PreparedStatement[]): Promise<num
  * blocking other items or repeating work after an interruption. */
 async function consumeWorkItems(env: Env, limit: number) {
   const summary = { processed: 0, created: 0, examined: 0, cursor: 0 };
+  const active = await activeParserVersions(env);
   const items = await env.DB.prepare(
     "SELECT id,fetch_run_id,cursor_artifact_id,jobs_created FROM observation_work_items WHERE processed_at_ms IS NULL ORDER BY id LIMIT ?",
   )
@@ -680,9 +803,8 @@ async function consumeWorkItems(env: Env, limit: number) {
       const now = Date.now();
       const inserts: D1PreparedStatement[] = [];
       for (const row of page.results)
-        for (const parser of PARSERS)
-          if (parser.accepts(artifactMeta(row)))
-            inserts.push(jobInsert(env, row.id, parser, "incremental", now));
+        for (const parser of laneParsers(row, active))
+          inserts.push(jobInsert(env, row.id, parser, "incremental", now));
       created += await insertJobs(env, inserts);
       const last = page.results.at(-1);
       if (last) cursor = last.id;
@@ -741,11 +863,11 @@ async function repairScan(env: Env) {
     known.results.map((job) => `${job.fetch_artifact_id}/${job.parser_name}/${job.parser_version}`),
   );
   const now = Date.now();
+  const active = await activeParserVersions(env);
   const inserts: D1PreparedStatement[] = [];
   for (const row of eligible.results)
-    for (const parser of PARSERS) {
+    for (const parser of laneParsers(row, active)) {
       if (
-        parser.accepts(artifactMeta(row)) &&
         !knownKeys.has(`${row.id}/${parser.name}/${parser.version}`) &&
         inserts.length < SCAN_PAGE
       )
@@ -839,6 +961,10 @@ async function maintenance(env: Env): Promise<void> {
   ).run();
   // Also repairs an interrupted post-publication retirement on the next sweep.
   await retireReplacedJobs(env.DB);
+  // Registers the deployed transformation identities. Idempotent, and the
+  // 0028 trigger aborts here when a parser changed without a version change,
+  // which fails the sweep loudly instead of writing unidentifiable results.
+  await registerDeployedReleases(env.DB);
 }
 
 async function runLane(env: Env, lane: Lane, budget: number): Promise<LaneSummary> {
@@ -1251,6 +1377,201 @@ export async function snapshotPolicyComparison(env: Env): Promise<Response> {
   });
 }
 
+// ── release adoption routes (A04) ─────────────────────────────────────────
+//
+// Internal service-binding routes at the same trust level as /sweep. Every
+// write route is reachable only when RELEASE_CANDIDATES_ENABLED is "true";
+// with the flag absent the pipeline has no adoption surface at all. Responses
+// carry identifiers, counts and raw locators, never financial values.
+
+const REEXTRACT_LIMIT_DEFAULT = 100;
+const REEXTRACT_LIMIT_MAX = 500;
+const DIFFERENCES_LIMIT_MAX = 500;
+
+async function releaseRegister(env: Env, v: Record<string, unknown>): Promise<Response> {
+  const parser = PARSERS.find((p) => p.name === v.parser && p.version === v.version);
+  if (!parser) return invalid("parser_not_deployed");
+  const release = v.metadataExtractorRelease ?? LEGACY_METADATA_RELEASE;
+  if (typeof release !== "string" || !isMetadataExtractorRelease(release))
+    return invalid("metadata_release_unknown");
+  const identity = await releaseIdentity(parser, release);
+  try {
+    await releaseInsert(
+      env.DB,
+      { parser, metadataExtractorRelease: release, ...identity },
+      new Date().toISOString(),
+    ).run();
+  } catch {
+    // The 0028 guard: this name and version already exist with other code.
+    return conflict("parser_release_conflict");
+  }
+  return Response.json({
+    releaseId: identity.releaseId,
+    manifestDigest: identity.manifestDigest,
+    manifest: identity.manifest,
+  });
+}
+
+function adoptionRequest(v: Record<string, unknown>): AdoptionRequest | null {
+  const expected = v.expectedActiveReleaseId;
+  if (
+    typeof v.source !== "string" ||
+    typeof v.dataset !== "string" ||
+    typeof v.parser !== "string" ||
+    typeof v.releaseId !== "string" ||
+    typeof v.actor !== "string" ||
+    typeof v.reason !== "string" ||
+    (expected !== null && expected !== undefined && typeof expected !== "string")
+  )
+    return null;
+  return {
+    source: v.source,
+    dataset: v.dataset,
+    parser: v.parser,
+    releaseId: v.releaseId,
+    expectedActiveReleaseId: typeof expected === "string" ? expected : null,
+    actor: v.actor,
+    reason: v.reason,
+  };
+}
+
+async function releaseCommand(env: Env, action: string, request: Request): Promise<Response> {
+  const v = await command(request);
+  if (!v) return invalid("request_invalid");
+  try {
+    if (action === "register") return await releaseRegister(env, v);
+    if (action === "compare") {
+      if (
+        typeof v.source !== "string" ||
+        typeof v.dataset !== "string" ||
+        typeof v.parser !== "string" ||
+        typeof v.releaseId !== "string"
+      )
+        return invalid("request_invalid");
+      return Response.json(
+        await compareReleases(env.DB, {
+          source: v.source,
+          dataset: v.dataset,
+          parser: v.parser,
+          releaseId: v.releaseId,
+        }),
+      );
+    }
+    const adoption = adoptionRequest(v);
+    if (!adoption) return invalid("request_invalid");
+    return Response.json(
+      action === "activate"
+        ? await activateRelease(env.DB, adoption)
+        : await rollbackRelease(env.DB, adoption),
+    );
+  } catch (error) {
+    if (!(error instanceof ReleaseCommandError)) throw error;
+    return error.message === "release_activation_conflict"
+      ? conflict(error.message)
+      : invalid(error.message);
+  }
+}
+
+/**
+ * Bounded, explicit re-extraction. It never skips because a value already
+ * exists - that is the D02 acceptance condition - and never writes
+ * `observation_artifact_metadata`, so old projections and old parses keep
+ * exactly the inputs they had.
+ */
+async function metadataReextract(env: Env, v: Record<string, unknown>): Promise<Response> {
+  const source = optionalText(v.source, /^[a-z0-9-]{1,100}$/u);
+  const dataset = optionalText(v.dataset, /^[A-Za-z0-9._-]{1,200}$/u);
+  const release = v.extractorRelease;
+  const from = v.artifactIdFrom ?? 0;
+  const limit = v.limit ?? REEXTRACT_LIMIT_DEFAULT;
+  if (!source) return invalid("source_invalid");
+  if (dataset === undefined) return invalid("dataset_invalid");
+  if (typeof release !== "string" || !isMetadataExtractorRelease(release))
+    return invalid("metadata_release_unknown");
+  if (typeof from !== "number" || !Number.isSafeInteger(from) || from < 0)
+    return invalid("artifact_id_from_invalid");
+  if (
+    typeof limit !== "number" ||
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > REEXTRACT_LIMIT_MAX
+  )
+    return invalid("metadata_limit_invalid");
+  const rows = await env.DB.prepare(
+    `${artifactSql} AND a.source_id=?1 AND (?2 IS NULL OR a.dataset=?2) AND a.id>?3 ORDER BY a.id LIMIT ?4`,
+  )
+    .bind(source, dataset, from, limit)
+    .all<ArtifactRow>();
+  const summary = { examined: 0, ok: 0, absent: 0, errors: 0, cursor: from };
+  const now = new Date().toISOString();
+  for (const row of rows.results) {
+    const extraction = await extractMetadata(
+      { db: env.DB, read: (manifest) => verifiedBytes(env, manifest) },
+      row,
+      release,
+      true,
+    );
+    await persistProjection(env.DB, row, release, extraction, now);
+    summary.examined++;
+    if (extraction.status === "ok") summary.ok++;
+    else if (extraction.status === "absent") summary.absent++;
+    else summary.errors++;
+    summary.cursor = row.id;
+  }
+  return Response.json({
+    release,
+    ...summary,
+    complete: rows.results.length < limit,
+  });
+}
+
+/**
+ * Artifacts whose newest projection under `release` disagrees with the legacy
+ * one. Ids and changed field names only: no statement state, period or any
+ * other provider value leaves this route.
+ */
+async function metadataDifferences(env: Env, url: URL): Promise<Response> {
+  const release = url.searchParams.get("release") ?? "";
+  const limit = Number(url.searchParams.get("limit") ?? "100");
+  if (!isMetadataExtractorRelease(release) || release === LEGACY_METADATA_RELEASE)
+    return invalid("metadata_release_unknown");
+  if (!Number.isInteger(limit) || limit < 1 || limit > DIFFERENCES_LIMIT_MAX)
+    return invalid("metadata_limit_invalid");
+  const rows = await env.DB.prepare(
+    `SELECT n.fetch_artifact_id AS artifact_id,n.status AS next_status,n.output_json AS next_json,
+      l.status AS legacy_status,l.output_json AS legacy_json
+      FROM metadata_projections n
+      JOIN legacy_metadata_projections l ON l.fetch_artifact_id=n.fetch_artifact_id
+      WHERE n.extractor_release=?1 AND n.id=(SELECT max(q.id) FROM metadata_projections q
+        WHERE q.fetch_artifact_id=n.fetch_artifact_id AND q.extractor_release=?1)
+      ORDER BY n.fetch_artifact_id LIMIT ?2`,
+  )
+    .bind(release, limit)
+    .all<{
+      artifact_id: number;
+      next_status: string;
+      next_json: string;
+      legacy_status: string;
+      legacy_json: string;
+    }>();
+  const differences: { artifactId: number; changed: string[] }[] = [];
+  for (const row of rows.results) {
+    const legacy = JSON.parse(row.legacy_json) as Record<string, unknown>;
+    const next = JSON.parse(row.next_json) as Record<string, unknown>;
+    const changed = Object.keys(legacy).filter(
+      (field) => JSON.stringify(legacy[field] ?? null) !== JSON.stringify(next[field] ?? null),
+    );
+    if (row.legacy_status !== row.next_status) changed.push("status");
+    if (changed.length) differences.push({ artifactId: row.artifact_id, changed: changed.sort() });
+  }
+  return Response.json({
+    release,
+    compared: rows.results.length,
+    differing: differences.length,
+    differences,
+  });
+}
+
 export interface ScheduledStages {
   parse: (env: Env) => Promise<object>;
   identity: (env: Env) => Promise<object>;
@@ -1361,6 +1682,20 @@ export default {
     const replay = /^\/replay\/(plan|start|pause|resume|cancel|inspect)$/.exec(path);
     if (request.method === "POST" && replay) return replayCommand(env, replay[1]!, request);
     if (request.method === "GET" && path === "/status") return status(env);
+    // Release adoption (docs/release-adoption.md). The audit view is always
+    // readable; every command needs the flag.
+    if (request.method === "GET" && path === "/release/status")
+      return Response.json(await releaseStatus(env.DB));
+    if (request.method === "GET" && path === "/metadata/differences")
+      return metadataDifferences(env, url);
+    if (request.method === "POST" && candidatesEnabled(env)) {
+      const release = /^\/release\/(register|compare|activate|rollback)$/.exec(path);
+      if (release) return releaseCommand(env, release[1]!, request);
+      if (path === "/metadata/reextract") {
+        const v = await command(request);
+        return v ? metadataReextract(env, v) : invalid("request_invalid");
+      }
+    }
     // Internal service-binding route, like /status: identifiers and counts only.
     if (request.method === "GET" && path === "/snapshot-policy/compare")
       return snapshotPolicyComparison(env);

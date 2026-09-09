@@ -19,6 +19,9 @@ const ALLOWED = new Set([
   "services/observation-pipeline/src/worker.ts",
   // The projection writer, consistency check and bounded repair.
   "services/observation-pipeline/src/publication-gate.ts",
+  // The candidate writer: a candidate is recorded only if the same batch left
+  // the run ok and unsuperseded, which is a writer decision, not a read.
+  "services/observation-pipeline/src/release-adoption.ts",
   // The local PoC writer and its one-time backfill.
   "poc/observation-pipeline/src/store.ts",
 ]);
