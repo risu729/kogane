@@ -75,8 +75,10 @@ export function packagePlan(name: string, options: PlanOptions): Step[] {
     throw new Error(`Missing frozen Bun lockfile for ${policy.path}`);
   const steps: Step[] = [{ cwd, command: ["bun", "install", "--frozen-lockfile"] }];
   if (policy.sharedParserDependencies) {
-    // Shared parsers resolve parse5 from packages/parsers, not the consuming
-    // Worker's node_modules. They need the frozen dependencies but no build.
+    // Shared parsers resolve parse5 from packages/parsers, not from the
+    // node_modules of whoever imports them. Every plan that type-checks or
+    // runs a module under packages/parsers therefore needs its frozen
+    // dependencies first; none of them needs a build of it.
     const parsersPolicy = selectPolicy("packages/parsers");
     const parsers = join(options.root, parsersPolicy.path);
     validateScripts(parsersPolicy, JSON.parse(readFileSync(join(parsers, "package.json"), "utf8")));

@@ -139,9 +139,16 @@ describe("offline CI coverage", () => {
     }
   });
   test("browser CI installs locked Chromium and builds before tests; local runs do not install browsers", () => {
-    const plan = packagePlan("poc/observation-pipeline", options).map((step) =>
-      step.command.join(" "),
-    );
+    const steps = packagePlan("poc/observation-pipeline", options);
+    const plan = steps.map((step) => step.command.join(" "));
+    // The PoC re-exports the parser registry, so its type check compiles two
+    // parsers that import parse5 from packages/parsers: without that frozen
+    // install a clean checkout fails on "cannot find module 'parse5'".
+    expect(steps[1]).toEqual({
+      cwd: join(REPO_ROOT, "packages/parsers"),
+      command: ["bun", "install", "--frozen-lockfile"],
+    });
+    expect(plan.indexOf("bun run typecheck")).toBeGreaterThan(1);
     expect(plan).toContain("node node_modules/playwright/cli.js install --with-deps chromium");
     expect(plan.indexOf("bun run build")).toBeLessThan(plan.indexOf("bun run test"));
     expect(plan.indexOf("bun run build:evidence")).toBeLessThan(plan.indexOf("bun run test"));
@@ -200,6 +207,30 @@ describe("offline CI coverage", () => {
         step.command.some((part) => part.startsWith("build") || part.includes("playwright")),
       ),
     ).toBe(false);
+  });
+
+  test("every plan that compiles the shared parsers installs their frozen dependencies", () => {
+    // packages/parsers itself is where they are installed, so it must not
+    // recurse; every other consumer of its modules must declare the need.
+    expect(selectPolicy("packages/parsers").sharedParserDependencies).toBeUndefined();
+    const declared = CI_PACKAGES.filter((policy) => policy.sharedParserDependencies).map(
+      (policy) => policy.path,
+    );
+    expect(declared.sort()).toEqual(["poc/observation-pipeline", "services/observation-pipeline"]);
+    for (const name of declared) {
+      const plan = packagePlan(name, options);
+      const install = plan.findIndex((step) => step.cwd === join(REPO_ROOT, "packages/parsers"));
+      expect(install, name).toBeGreaterThan(-1);
+      expect(plan[install]!.command).toEqual(["bun", "install", "--frozen-lockfile"]);
+      // Before every check the package runs, and never a build of the parsers.
+      const firstCheck = plan.findIndex(
+        (step) => step.cwd === join(REPO_ROOT, name) && step.command[1] === "run",
+      );
+      expect(install, name).toBeLessThan(firstCheck);
+      expect(plan.filter((step) => step.cwd === join(REPO_ROOT, "packages/parsers"))).toHaveLength(
+        1,
+      );
+    }
   });
 
   test("the shared parser package is the only pure package with a runtime dependency", () => {

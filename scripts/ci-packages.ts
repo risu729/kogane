@@ -247,6 +247,11 @@ export const CI_PACKAGES: PackagePolicy[] = [
     },
     checks: ["typecheck", "build", "build:evidence", "build:production", "test"],
     browser: true,
+    // The compatibility re-export of src/parsers/registry.ts pulls the whole
+    // parser registry into this package's type check, and two of those parsers
+    // import parse5 from packages/parsers. Without its frozen install the
+    // check fails on a clean checkout with "cannot find module 'parse5'".
+    sharedParserDependencies: true,
   },
 ];
 
