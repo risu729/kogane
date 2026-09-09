@@ -59,6 +59,21 @@ metadata is taken from its current mapping claims (or initial entity metadata
 if it has no mapping), never silently from an obsolete claim. Ambiguous target
 metadata is rejected. Manual mappings are not overwritten by scheduled rules.
 
+Since migration 0029 every correction is an identity command recorded in the
+durable decision log ([decision-log.md](decision-log.md)). The JSON file may
+carry `"operationId"` (an idempotency key: resending the same file returns the
+stored receipt without a second revision, and reusing the key with a changed
+body is refused) and `"action": "release-override"` with `"targetId": null`,
+which appends a decision that lets automatic policy apply to the reference
+again from its current revision on. A release does not delete the manual
+mapping; the next scheduled sweep appends the rule's revision. Corrections
+sent through this script are recorded with the actor `legacy-cli`
+(verification `legacy-unknown`); the trusted-caller header
+`x-kogane-verified-actor` records a named actor. The response carries the
+receipt (`revision`, `mappingId`, `decisionRevisionId`); a `409` carries the
+error code in `x-kogane-error` (`revision_conflict`, `idempotency_conflict`,
+`target_missing`, `target_metadata_ambiguous`, `no_active_override`).
+
 ## Verification and rollback
 
 - `/api/identity/coverage` compares all eligible current B observations against

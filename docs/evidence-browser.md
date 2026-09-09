@@ -135,6 +135,14 @@ implementation must pass; `test/api-conformance.test.ts` runs them here and
 `services/evidence-browser/test/conformance.test.ts` runs the same module
 against the demo and the production Worker under workerd.
 
+`identityReadModes` also unlocks `?identityRead=latest|as-recorded` on the
+organized lists and on `/api/identity/*` (production only): `latest` reads
+the current mapping revisions, `as-recorded` the revisions the sealed
+identity run pinned, and every such response carries an
+`interpretationContext` naming the mode and the releases it was computed
+under. `snapshot` is refused as `unsupported_semantics` until that contract
+exists. See [decision-log.md](decision-log.md).
+
 Capabilities are not authorization. The production Worker verifies the
 Access JWT, returns closed responses on failure, and marks every response
 `no-store` before any capability is read or served. Deploy order for a

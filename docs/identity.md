@@ -56,6 +56,19 @@ eligible B parse and join current mapping revisions. Thus corrections change
 the effective organization immediately while the original decision remains
 auditable. Raw R2, Layer A and Layer B are never modified by this layer.
 
+Manual decisions are durable records in the decision log
+([decision-log.md](decision-log.md), migration 0029): an `assign` command
+appends the manual mapping revision and its decision under an idempotent
+operation id and a server-verified actor; a `release-override` appends a
+decision that lets automatic policy apply again without deleting anything.
+Automatic rules yield to the latest effective decision, not to the fact that a
+manual row once existed. Which policy family and release produced an identity
+run, and the digest of the evidence it depended on, is recorded per run
+(`identity_run_policies`); selection is per source module, not a branch in
+the store. Readers can ask for `latest` (current mapping revisions) or
+`as-recorded` (the revisions the run pinned) and every organized response
+names the interpretation it was computed under.
+
 ## Acceptance gates
 
 - All merged source patterns exercised with synthetic tests; all seven SBI
