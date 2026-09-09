@@ -39,6 +39,13 @@ export const CI_PACKAGES: PackagePolicy[] = [
     checks: ["test", "typecheck"],
   },
   {
+    // Pure application services (query and command): no Workers tooling, no
+    // database driver, no HTTP; the adapters live in the services.
+    path: "packages/application",
+    scripts: { test, typecheck: "tsc --noEmit" },
+    checks: ["typecheck", "test"],
+  },
+  {
     // Pure shared code: no Workers tooling, no browser, no build.
     path: "packages/read-model",
     scripts: { test, typecheck: "tsc --noEmit" },

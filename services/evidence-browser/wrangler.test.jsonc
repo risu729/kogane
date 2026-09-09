@@ -8,7 +8,9 @@
   "vars": {
     "EVIDENCE_SOURCE_ID": "sony-bank",
     "ACCESS_ISSUER": "https://evidence-test.cloudflareaccess.com",
-    "ACCESS_AUDIENCE": "synthetic-test-audience"
+    "ACCESS_AUDIENCE": "synthetic-test-audience",
+    "COMMANDS_ENABLED": "",
+    "AGENT_GRANTS": ""
   },
   "assets": {
     "directory": "test/assets",

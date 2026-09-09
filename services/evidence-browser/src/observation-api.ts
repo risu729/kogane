@@ -19,6 +19,7 @@ import {
 } from "../../../poc/observation-pipeline/shared/api-schema";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
 import { identityReadMode } from "./identity-read";
+import { commandsEnabled } from "./command-api";
 
 /** Validated request scope. Each route passes only the keys its reader query accepts. */
 interface RequestScope {
@@ -131,7 +132,9 @@ export async function observationApi(
       apiVersion: 1,
       parsingHealth: await reader.parsingHealth(),
       source: { kind: "central-store", classification: "financial" },
-      capabilities: CENTRAL_STORE_CAPABILITIES,
+      // The change lifecycle is advertised from the running deployment's flag,
+      // not from the shared constant (A09).
+      capabilities: { ...CENTRAL_STORE_CAPABILITIES, commands: commandsEnabled(env) },
     } satisfies ApiMetadata);
   }
   if (path === "/api/overview") return boundedCollections({ ...(await reader.overview()) });
