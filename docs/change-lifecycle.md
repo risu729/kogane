@@ -122,7 +122,8 @@ carries fetched evidence towards the central store; this one carries accepted
 internal judgements towards the read models.
 
 `services/observation-pipeline/src/decision-outbox.ts` runs one bounded pass
-per `scheduled` invocation: it claims up to 20 due rows under a 60 s lease,
+per `scheduled` invocation, as the last lane — after the projections a decision
+may have invalidated (`parse`, `identity`, `reconcile`, then `decisions`): it claims up to 20 due rows under a 60 s lease,
 runs each target's processor, marks the row processed with a safe outcome code,
 and turns the operation's receipt `published` once no row of that operation is
 unprocessed. A failure records a safe code (`Error`, never an exception
@@ -226,8 +227,8 @@ is the same operation and a lost response never commits twice.
 `commands` is a new field of `ApiCapabilities`
 (`poc/observation-pipeline/shared/api-schema.ts`). It is `false` in both shared
 constants; the evidence browser overrides it on `/api/meta` from the running
-deployment's `COMMANDS_ENABLED` flag. It is a display capability, not an
-authorization decision.
+deployment's `COMMANDS_ENABLED` flag, next to A10's `eventsV2`. It is a display
+capability, not an authorization decision.
 
 ## Flags, deploy order and rollback
 
@@ -235,7 +236,8 @@ authorization decision.
 exactly `"true"`. While off, every command path answers
 `403 commands_disabled` and `/api/meta` advertises `commands: false`.
 
-1. Apply `0031_operations.sql`. Additive, and independent of 0026/0035/0036/0037;
+1. Apply `0031_operations.sql`. Additive, and independent of
+   0026/0032/0035/0036/0037;
    0029 must already be applied (it owns `decision_revisions` and
    `entity_relations`, which 0031 references).
 2. Deploy `services/observation-pipeline` — the writer: the command routes and

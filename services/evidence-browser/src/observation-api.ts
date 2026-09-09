@@ -18,6 +18,7 @@ import {
   validMeasureView,
 } from "../../../poc/observation-pipeline/shared/api-schema";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
+import { eventsV2Available } from "./events-api";
 import { identityReadMode } from "./identity-read";
 import { commandsEnabled } from "./command-api";
 
@@ -132,9 +133,14 @@ export async function observationApi(
       apiVersion: 1,
       parsingHealth: await reader.parsingHealth(),
       source: { kind: "central-store", classification: "financial" },
-      // The change lifecycle is advertised from the running deployment's flag,
-      // not from the shared constant (A09).
-      capabilities: { ...CENTRAL_STORE_CAPABILITIES, commands: commandsEnabled(env) },
+      // What this server can actually serve, not what the contract defaults
+      // to: `commands` follows the deployment's flag (A09) and `eventsV2`
+      // depends on the A10 projection being present.
+      capabilities: {
+        ...CENTRAL_STORE_CAPABILITIES,
+        commands: commandsEnabled(env),
+        eventsV2: await eventsV2Available(env),
+      },
     } satisfies ApiMetadata);
   }
   if (path === "/api/overview") return boundedCollections({ ...(await reader.overview()) });

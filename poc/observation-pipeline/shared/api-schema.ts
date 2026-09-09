@@ -93,6 +93,12 @@ export interface ApiCapabilities {
    * authenticates, checks the grant and refuses an agent's approval.
    */
   readonly commands: boolean;
+  /**
+   * `/api/v2/activity` and `/api/v2/obligations` are served. False unless the
+   * A10 projection exists in the store the server reads and the reader flag is
+   * on, so this is a server-computed fact, not a static claim.
+   */
+  readonly eventsV2: boolean;
 }
 
 /** The local PoC store and the hosted synthetic demo, which snapshots it. */
@@ -109,6 +115,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   financialProducts: false,
   evidenceHistory: false,
   commands: false,
+  eventsV2: false,
 } as const satisfies ApiCapabilities;
 
 /** The production evidence-browser Worker over the central store. */
@@ -124,9 +131,11 @@ export const CENTRAL_STORE_CAPABILITIES = {
   organizedDisplay: true,
   financialProducts: true,
   evidenceHistory: true,
-  // Off in the shared constant: the deployment's flag decides, and `/api/meta`
-  // overrides this field with what the running Worker actually serves.
+  // Both are off in the shared constant: each deployment's own flag decides,
+  // and `/api/meta` overrides these fields with what the running Worker
+  // actually serves.
   commands: false,
+  eventsV2: false,
 } as const satisfies ApiCapabilities;
 
 /**

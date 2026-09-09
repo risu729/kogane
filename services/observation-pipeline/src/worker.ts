@@ -14,6 +14,7 @@ import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
 import { dispatchDecisionOutbox } from "./decision-outbox.ts";
+import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import {
   publicationConsistency,
   publicationStatements,
@@ -1299,12 +1300,19 @@ export async function snapshotPolicyComparison(env: Env): Promise<Response> {
 export interface ScheduledStages {
   parse: (env: Env) => Promise<object>;
   identity: (env: Env) => Promise<object>;
-  /** A09: accepted decisions reach the read models here, not at commit time. */
-  decisions: (env: Env) => Promise<object>;
+  /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
+  reconcile?: (env: Env) => Promise<object>;
+  /**
+   * A09: accepted decisions reach the read models here, not at commit time.
+   * Optional like `reconcile`, so a test may run a subset of the lanes; the
+   * default stages always wire it, which is what the deployed cron runs.
+   */
+  decisions?: (env: Env) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
   identity: (env) => identitySweep(env.DB, resolveIdentity),
+  reconcile: (env) => reconciliationSweep(env.DB),
   decisions: (env) => dispatchDecisionOutbox(env.DB),
 };
 
@@ -1316,11 +1324,21 @@ export async function runScheduled(
   stages: ScheduledStages = defaultStages,
   log: (line: string) => void = (line) => console.log(line),
 ): Promise<void> {
-  for (const [event, stage] of [
+  const lanes: [string, ((env: Env) => Promise<object>) | undefined][] = [
     ["observation_sweep", stages.parse],
     ["identity_sweep", stages.identity],
+    // Off unless RECONCILIATION_ENABLED is set, so a normal deploy logs and
+    // writes nothing new (docs/economic-events.md).
+    [
+      "reconciliation_sweep",
+      reconciliationEnabled(env.RECONCILIATION_ENABLED) ? stages.reconcile : undefined,
+    ],
+    // A09: the decision outbox runs last, after the projections a decision may
+    // have invalidated (docs/change-lifecycle.md).
     ["decision_outbox", stages.decisions],
-  ] as const) {
+  ];
+  for (const [event, stage] of lanes) {
+    if (!stage) continue;
     try {
       log(JSON.stringify({ event, ...(await stage(env)) }));
     } catch (error) {
