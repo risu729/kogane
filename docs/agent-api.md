@@ -152,10 +152,28 @@ session state and no authorization of its own.
 | `reported-state` | What the provider reported                              | `source`, `account`, `instrument`, `metric`, `view` | `records.read` |
 | `activity`       | Adopted events in a period                              | `source`, `account`, `from`, `to`, `q`              | `records.read` |
 
-`holdings` reads A07's adopted balance projection. Until that projection
-exists it answers `completeness: "unavailable"` with the gap reason
-`projection_not_built` and a blocking warning — it never computes a holding
-from the raw observation rows behind the projection.
+`holdings` reads A07's adopted balance projection and nothing else. While the
+reader flag is off or no snapshot is sealed it answers
+`completeness: "unavailable"` with the gap reason `projection_not_built` and a
+blocking warning — it never computes a holding from the raw observation rows
+behind the projection.
+
+With a sealed snapshot it returns the adopted set of that snapshot as one
+figure per unit, in exact integer arithmetic, with the number of adopted
+measurements behind each one. Only `sum-disjoint` currency stocks qualify
+(see [Balance read model](balance-read-model.md)); capacities, aggregates,
+statement amounts, period totals and reward units are excluded by their own
+registry entries. Units are never added together, the answer carries
+`liabilitiesCoverage: "unknown"`, and there is no `netWorth` field: unfetched
+liabilities mean an asset subtotal is not even a lower bound (addendum 05 §5).
+
+Every row is re-checked against the grant before it is summed, and a subject
+scope reached through two scope pairs is refused with `incomplete_evidence`
+rather than counted twice (INV06). A scope larger than the projection's
+subtotal bound is refused with `budget_exceeded`, never partially summed. An
+unresolved, conflicting or stale measure inside the scope makes the answer
+`partial` and names the reason code; it never silently disappears from the
+figure.
 
 Every other intent named in addendum 09 §1 (`net-worth`, `liquidity`,
 `cash-flow`, `obligations`, `income`, `performance`, `reward-forecast`) is

@@ -363,14 +363,23 @@ test("the scheduled lane is off unless the flag is on", async () => {
     parse: () => Promise.resolve({ parsed: 0 }),
     identity: () => Promise.resolve({ processedRuns: 0 }),
     reconcile: (target: Env) => reconciliationSweep(target.DB, { slices: [] }),
+    // The balance projection lane always runs and reports itself skipped
+    // while its own flag is off (docs/balance-read-model.md); it is here so
+    // this test observes the reconciliation lane, not that one.
+    balanceProjection: () => Promise.resolve({ enabled: false, status: "skipped" }),
   };
   await runScheduled(env, stages, log);
-  expect(lines.map((line) => line.event)).toEqual(["observation_sweep", "identity_sweep"]);
+  expect(lines.map((line) => line.event)).toEqual([
+    "observation_sweep",
+    "identity_sweep",
+    "balance_projection",
+  ]);
   lines.length = 0;
   await runScheduled({ ...env, RECONCILIATION_ENABLED: "1" } as unknown as Env, stages, log);
   expect(lines.map((line) => line.event)).toEqual([
     "observation_sweep",
     "identity_sweep",
+    "balance_projection",
     "reconciliation_sweep",
   ]);
   // Counts only: no amount, account label or provider text is logged.

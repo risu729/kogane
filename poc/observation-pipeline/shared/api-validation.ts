@@ -23,6 +23,18 @@ import type {
 import type {
   ApiMetadata,
   ArtifactDetail,
+  BalanceAdoption,
+  BalanceEvidenceMember,
+  BalanceHistoryItem,
+  BalanceHistoryPage,
+  KnownAssetsSubtotals,
+  LatestBalanceItem,
+  LatestBalancePage,
+  MeasureDescriptor,
+  ObservedQuantityWire,
+  SnapshotDataCoverage,
+  SnapshotPageInfo,
+  TemporalReferenceWire,
   ArtifactRow,
   BalanceHistoryRow,
   BalanceRow,
@@ -145,6 +157,8 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   measureViews: subset(MEASURE_VIEWS),
   identityReadModes: subset(IDENTITY_READ_MODES),
   paginationVersion: literal(...PAGINATION_VERSIONS),
+  balancesV2: boolean,
+  balancesV2Pagination: literal(...PAGINATION_VERSIONS),
   collectionFilters: boolean,
   organizedDisplay: boolean,
   financialProducts: boolean,
@@ -400,6 +414,117 @@ const observation = object<ObservationDetail>({
   extraParsed: boolean,
   provenance: optional(provenance),
 });
+
+// ── v2 balance read model ────────────────────────────────────────────────
+//
+// The envelope keeps two facts apart: `page` describes this page of the fixed
+// snapshot, `dataCoverage` describes the data behind it. A response is
+// rejected if it carries a `netWorth` field: an asset subtotal with unknown
+// liability coverage must never be presented as a completed net worth
+// (addendum 05 section 5).
+const observedQuantity = object<ObservedQuantityWire>({
+  normalized: validNormalizedDecimal,
+  unitReference: nullableText,
+  sourceRepresentation: object<ObservedQuantityWire["sourceRepresentation"]>({
+    amountText: nullableText,
+    legacyMinorUnits: minorUnit,
+    legacyMinorUnitExponent: nullable(identifier),
+  }),
+});
+const measureDescriptor = object<MeasureDescriptor>({
+  metricId: text,
+  definitionRelease: text,
+  measurementKind: text,
+  aggregationRule: text,
+});
+const evidenceMember = object<BalanceEvidenceMember>({
+  ref: text,
+  observationId: identifier,
+  metric: text,
+});
+const temporalReference = object<TemporalReferenceWire>({ role: text, time: record });
+const adoption: Check<BalanceAdoption> = (value): value is BalanceAdoption =>
+  object<BalanceAdoption>({
+    state: literal("adopted", "excluded", "unresolved", "conflict", "stale"),
+    reasonCode: nullableText,
+    memberEvidence: array(evidenceMember),
+    evidenceCount: identifier,
+  })(value) && value.evidenceCount === value.memberEvidence.length;
+const pageInfo = object<SnapshotPageInfo>({
+  limit: identifier,
+  hasMore: boolean,
+  nextCursor: nullableText,
+  snapshotId: text,
+  paginationVersion: literal("keyset-v2"),
+});
+const snapshotCoverage = object<SnapshotDataCoverage>({
+  completeness: literal("complete", "partial", "unknown"),
+  stale: boolean,
+  reasons: array(text),
+});
+const subtotals = object<KnownAssetsSubtotals>({
+  policyRelease: text,
+  knownAssetsSubtotal: nullable(
+    array(
+      object<{ unitRef: string; coefficient: string; scale: number; adoptedCount: number }>({
+        unitRef: text,
+        coefficient: text,
+        scale: identifier,
+        adoptedCount: identifier,
+      }),
+    ),
+  ),
+  liabilitiesCoverage: literal("unknown"),
+  reasonCode: nullableText,
+});
+const latestItem: Check<LatestBalanceItem> = (value): value is LatestBalanceItem =>
+  object<LatestBalanceItem>({
+    observationId: identifier,
+    row: balance,
+    quantity: observedQuantity,
+    metric: measureDescriptor,
+    adoption,
+    temporal: temporalReference,
+    freshness: object<LatestBalanceItem["freshness"]>({
+      state: literal("current", "stale", "unknown"),
+      reasonCode: nullableText,
+    }),
+  })(value) && value.row.id === value.observationId;
+const historyItem: Check<BalanceHistoryItem> = (value): value is BalanceHistoryItem =>
+  object<BalanceHistoryItem>({
+    observationId: identifier,
+    row: balanceHistory,
+    quantity: observedQuantity,
+    metric: measureDescriptor,
+    temporal: temporalReference,
+  })(value) && value.row.id === value.observationId;
+/** No response of this contract may carry a completed net worth. */
+function withoutNetWorth(value: unknown): boolean {
+  return !record(value) || !Object.hasOwn(value, "netWorth");
+}
+const latestBalancePage: Check<LatestBalancePage> = (value): value is LatestBalancePage =>
+  object<LatestBalancePage>({
+    schemaVersion: literal("snapshot-page-v1"),
+    items: array(latestItem),
+    page: pageInfo,
+    dataCoverage: snapshotCoverage,
+    subtotals,
+    interpretationContext: validInterpretationContext,
+  })(value) &&
+  withoutNetWorth(value) &&
+  withoutNetWorth(value.subtotals) &&
+  value.items.length <= value.page.limit;
+const balanceHistoryPage: Check<BalanceHistoryPage> = (value): value is BalanceHistoryPage =>
+  object<BalanceHistoryPage>({
+    schemaVersion: literal("snapshot-page-v1"),
+    items: array(historyItem),
+    page: pageInfo,
+    dataCoverage: snapshotCoverage,
+    interpretationContext: validInterpretationContext,
+  })(value) &&
+  withoutNetWorth(value) &&
+  value.items.length <= value.page.limit;
+
 // A response may say which interpretation it was computed under; when it does,
 // the context must be well-formed.
 const context = optional(validInterpretationContext);
@@ -422,6 +547,8 @@ const endpoints: Record<string, Check<unknown>> = {
   "/api/artifacts": object<{ artifacts: ArtifactRow[] }>({
     artifacts: array(artifact),
   }),
+  "/api/v2/balances/latest": latestBalancePage,
+  "/api/v2/balances/history": balanceHistoryPage,
 };
 
 /**

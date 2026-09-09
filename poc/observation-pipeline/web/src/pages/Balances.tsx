@@ -22,11 +22,16 @@ import {
   isPeriodMeasure,
 } from "../balance-display.tsx";
 import { Link } from "../router.tsx";
+import { BalancesLatestPage } from "./BalancesLatest.tsx";
 export function BalancesPage({
   view = "balances",
 }: {
   view?: "balances" | "summaries";
 }): ReactNode {
+  // The read model is used when the server advertises it, and the previous
+  // list stays in place otherwise; the page never branches on the name of the
+  // connection.
+  const { balanceReadModel } = useFeatures();
   const query = useBalances(view);
   const summaries = view === "summaries";
   return (
@@ -42,6 +47,7 @@ export function BalancesPage({
           {summaries ? "保有残高を見る" : "期間実績・請求を見る"}
         </Link>
       </div>
+      {balanceReadModel ? <BalancesLatestPage view={view} /> : null}
       <QueryBoundary query={query} label={summaries ? "実績・請求" : "残高"}>
         {(data) => (
           <BalancesBody

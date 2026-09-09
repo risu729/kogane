@@ -63,8 +63,11 @@ export function validInterpretationContext(value: unknown): value is Interpretat
  * `none`: every list returns its complete stored result with no coverage
  * record. `offset-v1`: derived lists page by deterministic offset, artifact
  * lists by descending id cursor, and every list carries a coverage record.
+ * `keyset-v2`: pages are an opaque keyset cursor over one fixed snapshot, and
+ * the envelope separates "this page is not the last" from "the data behind it
+ * is incomplete" (review 06, D10).
  */
-export const PAGINATION_VERSIONS = ["none", "offset-v1"] as const;
+export const PAGINATION_VERSIONS = ["none", "offset-v1", "keyset-v2"] as const;
 export type PaginationVersion = (typeof PAGINATION_VERSIONS)[number];
 
 export interface ApiCapabilities {
@@ -76,7 +79,12 @@ export interface ApiCapabilities {
   readonly measureViews: readonly MeasureView[];
   /** Empty when `/api/identity/*` is not implemented. */
   readonly identityReadModes: readonly IdentityReadMode[];
+  /** Pagination of the v1 list routes. */
   readonly paginationVersion: PaginationVersion;
+  /** `/api/v2/balances/latest` and `/api/v2/balances/history` are served. */
+  readonly balancesV2: boolean;
+  /** Pagination of the v2 balance routes; `none` when they are not served. */
+  readonly balancesV2Pagination: PaginationVersion;
   /** Server-side source/account/date/text filters and `/api/filter-options`. */
   readonly collectionFilters: boolean;
   /** Rows carry an `organization` record (accounts, instruments, lineage). */
@@ -124,6 +132,8 @@ export const LOCAL_STORE_CAPABILITIES = {
   measureViews: [],
   identityReadModes: [],
   paginationVersion: "none",
+  balancesV2: false,
+  balancesV2Pagination: "none",
   collectionFilters: false,
   organizedDisplay: false,
   financialProducts: false,
@@ -143,6 +153,10 @@ export const CENTRAL_STORE_CAPABILITIES = {
   measureViews: ["balances", "summaries"],
   identityReadModes: ["latest", "as-recorded"],
   paginationVersion: "offset-v1",
+  // Off until the balance projection is built and the reader flag is on; the
+  // Worker advertises the enabled variant through `withBalancesV2`.
+  balancesV2: false,
+  balancesV2Pagination: "none",
   collectionFilters: true,
   organizedDisplay: true,
   financialProducts: true,
@@ -165,7 +179,17 @@ export type CapabilityRequirement =
   | "paginationVersion:offset-v1"
   | "measureViews"
   | "identityReadModes"
+  | "balancesV2"
   | "rewardsV2";
+
+/** The v2 balance routes as this Worker advertises them when the flag is on. */
+export function withBalancesV2(capabilities: ApiCapabilities, enabled: boolean): ApiCapabilities {
+  return {
+    ...capabilities,
+    balancesV2: enabled,
+    balancesV2Pagination: enabled ? "keyset-v2" : "none",
+  };
+}
 
 /**
  * Every query parameter a list endpoint understands, keyed by path. Paths
@@ -205,8 +229,38 @@ export const LIST_REQUEST_SCHEMA = {
     kind: "collectionFilters",
     view: "measureViews",
   },
+  "/api/v2/balances/latest": {
+    source: "collectionFilters",
+    account: "collectionFilters",
+    instrument: "collectionFilters",
+    metric: "collectionFilters",
+    view: "measureViews",
+    identityRead: "identityReadModes",
+    cursor: "balancesV2",
+    limit: "balancesV2",
+  },
+  "/api/v2/balances/history": {
+    source: "collectionFilters",
+    account: "collectionFilters",
+    instrument: "collectionFilters",
+    metric: "collectionFilters",
+    view: "measureViews",
+    identityRead: "identityReadModes",
+    cursor: "balancesV2",
+    limit: "balancesV2",
+  },
 } as const satisfies Record<string, Record<string, CapabilityRequirement>>;
 export type ListPath = keyof typeof LIST_REQUEST_SCHEMA;
+
+/**
+ * Capability a whole path needs before it exists at all. A path whose
+ * capability is missing is not served: it answers 404, not 400, because there
+ * is no route to reject a parameter for.
+ */
+export const LIST_PATH_CAPABILITY: Partial<Record<ListPath, CapabilityRequirement>> = {
+  "/api/v2/balances/latest": "balancesV2",
+  "/api/v2/balances/history": "balancesV2",
+};
 
 export function isListPath(path: string): path is ListPath {
   return Object.hasOwn(LIST_REQUEST_SCHEMA, path);
@@ -225,6 +279,8 @@ export function capabilityGrants(
       return capabilities.measureViews.length > 0;
     case "identityReadModes":
       return capabilities.identityReadModes.length > 0;
+    case "balancesV2":
+      return capabilities.balancesV2;
     case "rewardsV2":
       return capabilities.rewardsV2;
   }

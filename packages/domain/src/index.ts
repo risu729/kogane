@@ -11,6 +11,7 @@ export * from "./decisions.ts";
 export * from "./events.ts";
 export * from "./reconcile.ts";
 export * from "./result.ts";
+export * from "./paging.ts";
 export * from "./calculation.ts";
 export * from "./reports.ts";
 export {

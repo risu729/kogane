@@ -355,10 +355,12 @@ test("the scheduled lane never runs while the flag is off", async () => {
   const lines: Record<string, unknown>[] = [];
   await runScheduled(env, undefined, (line) => lines.push(JSON.parse(line)));
   // The lane set every other deployment already had: the reward lane is absent,
-  // not present-and-empty.
+  // not present-and-empty. The balance projection lane always reports itself
+  // (it is `skipped` while its own flag is off), so it is present here.
   expect(lines.map((line) => line.event)).toEqual([
     "observation_sweep",
     "identity_sweep",
+    "balance_projection",
     "decision_outbox",
   ]);
 
@@ -370,11 +372,12 @@ test("the scheduled lane never runs while the flag is off", async () => {
   expect(lines.map((line) => line.event)).toEqual([
     "observation_sweep",
     "identity_sweep",
+    "balance_projection",
     "reward_claims_sweep",
     "decision_outbox",
   ]);
   // Counts and identifiers only: no amount, account label or provider text.
-  expect(Object.keys(lines[2]!).sort()).toEqual([
+  expect(Object.keys(lines[3]!).sort()).toEqual([
     "cursor",
     "enabled",
     "event",

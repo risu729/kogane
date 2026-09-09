@@ -10,6 +10,10 @@ import {
   validParseIssue,
 } from "../../../packages/domain/src/coverage.ts";
 import { SNAPSHOT_RELATIONS, unitParseable } from "../../../packages/read-model/src/concepts";
+import {
+  balanceProjectionOutboxProcessor,
+  runBalanceProjection,
+} from "./balance-projection-job.ts";
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
@@ -1625,6 +1629,12 @@ async function metadataDifferences(env: Env, url: URL): Promise<Response> {
 export interface ScheduledStages {
   parse: (env: Env) => Promise<object>;
   identity: (env: Env) => Promise<object>;
+  /**
+   * A07 balance projection. Always present: the job itself reports `skipped`
+   * when BALANCE_PROJECTION_ENABLED is off, so the caller never branches on
+   * the flag.
+   */
+  balanceProjection: (env: Env) => Promise<object>;
   /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
   reconcile?: (env: Env) => Promise<object>;
   /** A11 reward promotion. Absent stage, or the flag off, means the lane never runs. */
@@ -1641,6 +1651,9 @@ export interface ScheduledStages {
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
   identity: (env) => identitySweep(env.DB, resolveIdentity),
+  // Off unless BALANCE_PROJECTION_ENABLED is "1"; the job itself returns
+  // `skipped` rather than the caller branching on the flag.
+  balanceProjection: (env) => runBalanceProjection(env),
   reconcile: (env) => reconciliationSweep(env.DB),
   rewards: (env) => rewardClaimsStage(env),
   reports: (env) => {
@@ -1656,7 +1669,13 @@ const defaultStages: ScheduledStages = {
       decimalPolicyRelease: DECIMAL_POLICY_RELEASE,
     });
   },
-  decisions: (env) => dispatchDecisionOutbox(env.DB),
+  // A07 owns the balance-projection target: an accepted decision changes
+  // which scopes overlap, so the projection rebuilds on the same tick instead
+  // of waiting for the next cron (docs/balance-read-model.md).
+  decisions: (env) =>
+    dispatchDecisionOutbox(env.DB, {
+      processors: { "balance-projection": balanceProjectionOutboxProcessor(env) },
+    }),
 };
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
@@ -1670,6 +1689,9 @@ export async function runScheduled(
   const lanes: [string, ((env: Env) => Promise<object>) | undefined][] = [
     ["observation_sweep", stages.parse],
     ["identity_sweep", stages.identity],
+    // The projection lane always runs and reports itself skipped while its
+    // own flag is off (docs/balance-read-model.md).
+    ["balance_projection", stages.balanceProjection],
     // Off unless RECONCILIATION_ENABLED is set, so a normal deploy logs and
     // writes nothing new (docs/economic-events.md).
     [

@@ -786,3 +786,14 @@ should ever depend on it.
 - No redaction of any kind. That is acceptable for a single-operator tool
   on loopback or behind access control, and would have to be revisited
   before anyone else ever saw a page.
+
+## Balance read model (v2 routes)
+
+`/api/v2/balances/latest` and `/api/v2/balances/history` serve the latest
+balances and their history as two separately budgeted, keyset-paged routes
+over one fixed snapshot, with adoption states, reason codes and typed
+quantities. They exist only when the Worker advertises `balancesV2`, which
+needs both the reader flag and a sealed snapshot. `/api/balances` is
+unchanged and, with the flag on, is served through a compatibility adapter
+over the same projection. See [Balance read model](balance-read-model.md) for
+the contract, the cursor rules, the budgets and the rollback.

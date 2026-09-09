@@ -15,6 +15,7 @@ import { validEvidenceResponse } from "../shared/evidence-validation.ts";
 import {
   allowedQueryParameters,
   capabilityGrants,
+  LIST_PATH_CAPABILITY,
   LIST_REQUEST_SCHEMA,
   MEASURE_VIEWS,
   OBSERVATION_API_CONTRACT_VERSION,
@@ -67,6 +68,7 @@ const SAMPLE: Record<string, string> = {
   offset: "0",
   latestOffset: "0",
   cursor: "1",
+  limit: "50",
   view: "balances",
   kind: "transactions",
   identityRead: "latest",
@@ -74,6 +76,15 @@ const SAMPLE: Record<string, string> = {
 /** Parameters a path needs before any other parameter is meaningful. */
 const BASE: Partial<Record<ListPath, Record<string, string>>> = {
   "/api/filter-options": { kind: "balances" },
+};
+/**
+ * Parameters with no static sample. A keyset cursor is only meaningful when
+ * the server itself issued it for this exact filter set, so it is exercised
+ * by the cursor check below rather than by a fixed sample value.
+ */
+const UNSAMPLEABLE: Partial<Record<ListPath, readonly string[]>> = {
+  "/api/v2/balances/latest": ["cursor"],
+  "/api/v2/balances/history": ["cursor"],
 };
 const LISTS = Object.keys(LIST_REQUEST_SCHEMA) as ListPath[];
 const COLLECTIONS: ListPath[] = ["/api/transactions", "/api/balances", "/api/positions"];
@@ -142,17 +153,60 @@ export const CONFORMANCE_CHECKS: ConformanceCheck[] = [
     async run(target) {
       const { capabilities } = await metadata(target);
       for (const path of LISTS) {
+        const pathCapability = LIST_PATH_CAPABILITY[path];
+        // A path whose own capability is missing is not implemented at all:
+        // it answers something other than 200, and there is no route that
+        // could reject one of its parameters.
+        if (pathCapability && !capabilityGrants(pathCapability, capabilities)) {
+          const response = await target.get(path);
+          assert(response.status !== 200, `${path}: served without ${pathCapability}`);
+          continue;
+        }
         const schema: Record<string, string> = LIST_REQUEST_SCHEMA[path];
         const granted = allowedQueryParameters(path, capabilities);
+        const unsampleable = UNSAMPLEABLE[path] ?? [];
         const base = Object.fromEntries(
           Object.entries(BASE[path] ?? {}).filter(([name]) => granted.includes(name)),
         );
         for (const [name, requirement] of Object.entries(schema)) {
+          if (unsampleable.includes(name)) continue;
           const request = withParams(path, { ...base, [name]: SAMPLE[name]! });
           if (capabilityGrants(requirement as never, capabilities)) await ok(target, request);
           else await refused(target, request);
         }
         await refused(target, withParams(path, { ...base, unexpected: "1" }));
+      }
+    },
+  },
+  {
+    name: "v2 balance pages are keyset paged and refuse a cursor they did not issue",
+    async run(target) {
+      const { capabilities } = await metadata(target);
+      for (const path of ["/api/v2/balances/latest", "/api/v2/balances/history"] as const) {
+        if (!capabilities.balancesV2) {
+          const response = await target.get(path);
+          assert(response.status !== 200, `${path}: served without balancesV2`);
+          continue;
+        }
+        assert(
+          capabilities.balancesV2Pagination === "keyset-v2",
+          "balancesV2 must advertise keyset-v2 pagination",
+        );
+        const body = (await ok(target, path)) as {
+          page: { paginationVersion: string; snapshotId: string; nextCursor: string | null };
+          dataCoverage: unknown;
+        };
+        assert(body.page.paginationVersion === "keyset-v2", `${path}: page.paginationVersion`);
+        assert(typeof body.page.snapshotId === "string", `${path}: page.snapshotId`);
+        assert(body.dataCoverage !== undefined, `${path}: dataCoverage`);
+        // A cursor is opaque, but it is never trusted: a malformed one and a
+        // cursor for a different filter set are both refused, not ignored.
+        await refused(target, `${path}?cursor=not-a-cursor`);
+        if (body.page.nextCursor !== null)
+          await refused(
+            target,
+            `${path}?source=conformance-source&cursor=${encodeURIComponent(body.page.nextCursor)}`,
+          );
       }
     },
   },

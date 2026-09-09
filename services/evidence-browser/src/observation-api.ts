@@ -15,9 +15,19 @@ import {
 import type { ApiMetadata } from "../../../poc/observation-pipeline/shared/api-contract";
 import {
   allowedQueryParameters,
-  CENTRAL_STORE_CAPABILITIES,
+  LIST_PATH_CAPABILITY,
+  capabilityGrants,
+  isListPath,
   validMeasureView,
 } from "../../../poc/observation-pipeline/shared/api-schema";
+import {
+  balanceHistoryPage,
+  latestBalancePage,
+  legacyLatestFromProjection,
+  projectionFlagOn,
+  V2_HISTORY_PATH,
+  V2_LATEST_PATH,
+} from "./balances-v2";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
 import { identityReadMode } from "./identity-read";
 
@@ -61,15 +71,25 @@ export async function observationApi(
 ): Promise<Response | null> {
   const path = url.pathname;
   if (
-    !/^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw|filter-options)(\/|$)/.test(
+    !/^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw|filter-options|v2\/balances\/(latest|history))(\/|$)/.test(
       path,
     )
   )
     return null;
   // Accepted parameters come from the shared schema, so a server and a client
-  // cannot drift apart. No deployment-resolved capability grants a parameter
-  // on these paths, so the static contract decides what is accepted here.
-  const allowed = allowedQueryParameters(path, CENTRAL_STORE_CAPABILITIES);
+  // cannot drift apart. The v2 balance routes are the one place where a
+  // deployment-resolved capability also decides whether a path exists and
+  // which parameters it accepts, so the capabilities are resolved once here
+  // and the same object answers the path check, the parameter check and
+  // /api/meta.
+  const capabilities = await centralStoreCapabilities(env);
+  if (
+    isListPath(path) &&
+    LIST_PATH_CAPABILITY[path] &&
+    !capabilityGrants(LIST_PATH_CAPABILITY[path], capabilities)
+  )
+    throw new HttpError(404, "not_found");
+  const allowed = allowedQueryParameters(path, capabilities);
   for (const key of url.searchParams.keys()) {
     const value = url.searchParams.get(key)!;
     if (
@@ -83,7 +103,7 @@ export async function observationApi(
   }
   const offsetText = url.searchParams.get("offset") ?? "0";
   const measureView = url.searchParams.get("view");
-  if (measureView !== null && !validMeasureView(measureView, CENTRAL_STORE_CAPABILITIES))
+  if (measureView !== null && !validMeasureView(measureView, capabilities))
     throw new HttpError(400, "invalid_query");
   const identityRead = identityReadMode(url);
   const offset = Number(offsetText);
@@ -134,11 +154,13 @@ export async function observationApi(
       parsingHealth: await reader.parsingHealth(),
       source: { kind: "central-store", classification: "financial" },
       // What this server can actually serve, not what the contract defaults
-      // to. One helper resolves all three server-computed fields, and the
-      // agent API reads the same one (src/capabilities.ts).
-      capabilities: await centralStoreCapabilities(env),
+      // to: the object resolved above, which the agent API reads through the
+      // same helper (src/capabilities.ts).
+      capabilities,
     } satisfies ApiMetadata);
   }
+  if (path === V2_LATEST_PATH) return await latestBalancePage(env, url, identityRead);
+  if (path === V2_HISTORY_PATH) return await balanceHistoryPage(env, url, identityRead);
   if (path === "/api/overview") return boundedCollections({ ...(await reader.overview()) });
   if (path === "/api/transactions") {
     const transactions = await organizeRows(
@@ -181,23 +203,45 @@ export async function observationApi(
       latestOffset > 1_000_000
     )
       throw new HttpError(400, "invalid_offset");
+    // With the projection flag on, the same list comes from the sealed
+    // snapshot: identical rows, order and interpretation, but grouped once at
+    // build time instead of on every request. Without a snapshot the compat
+    // adapter declines and this route stays on the path it has today.
+    const compat = projectionFlagOn(env)
+      ? await legacyLatestFromProjection(
+          env,
+          {
+            ...(filter.source === undefined ? {} : { source: filter.source }),
+            ...(filter.account === undefined ? {} : { account: filter.account }),
+            ...(filter.instrument === undefined ? {} : { instrument: filter.instrument }),
+            ...(filter.metric === undefined ? {} : { metric: filter.metric }),
+            ...(filter.measureView === undefined ? {} : { measureView: filter.measureView }),
+          },
+          latestOffset,
+          identityRead,
+        )
+      : null;
     // Grouping needs the complete bounded candidate set before paging; the
     // reader refuses more than 5,000 candidates rather than grouping a page.
-    const candidates = await reader.listLatestBalances({
-      source: filter.source,
-      account: filter.account,
-      instrument: filter.instrument,
-      measureView: filter.measureView,
-      offset: 0,
-      limit: 5001,
-    });
+    const candidates = compat
+      ? []
+      : await reader.listLatestBalances({
+          source: filter.source,
+          account: filter.account,
+          instrument: filter.instrument,
+          measureView: filter.measureView,
+          offset: 0,
+          limit: 5001,
+        });
     // Source/account/unit boundaries can be applied before grouping because
     // duplicates must agree on all three. A metric can describe either witness.
-    const projected = presentLatestBalances(
-      await organizeRows(env.DB, "balance", candidates, identityRead),
-      filter.metric,
-    );
-    const latest = projected.slice(latestOffset, latestOffset + 501);
+    const projected =
+      compat ??
+      presentLatestBalances(
+        await organizeRows(env.DB, "balance", candidates, identityRead),
+        filter.metric,
+      );
+    const latest = compat ?? projected.slice(latestOffset, latestOffset + 501);
     const history = await reader.listBalanceHistory({
       source: filter.source,
       account: filter.account,

@@ -12,7 +12,8 @@
   "vars": {
     "RECONCILIATION_ENABLED": "0",
     "REWARD_CLAIMS_ENABLED": "false",
-    "REPORTS_ENABLED": "false"
+    "REPORTS_ENABLED": "false",
+    "BALANCE_PROJECTION_ENABLED": "0"
   },
   "limits": { "cpu_ms": 300000 },
   "d1_databases": [

@@ -138,3 +138,19 @@ vendored by relative import, so there is no separate artifact to publish.
 Verified locally with synthetic data: `bun run scripts/ci-package.ts` for
 `packages/read-model`, `services/evidence-browser`, `poc/observation-pipeline`,
 and the standalone CI inventory. Not verified: production data.
+
+## Balance projection reader
+
+`src/balance-projection.ts`, `src/balance-projection-sql.ts`,
+`src/balance-projection-reader.ts` and `src/authority.ts` add the latest-balance
+read model of design review D10/D11. The pure builder produces the rows of one
+snapshot; `BalanceProjectionReader` is the named reader over them, with the
+same rule as the rest of this package — a route calls a method with a typed
+input and never sees a table name or composes SQL.
+
+The reader's queries are one keyed range scan of
+`current_balance_projection_order` per page, plus a coverage roll-up and an
+exact-arithmetic subtotal over the filter scope. `legacyLatestPage` serves the
+v1 `/api/balances` window from the same rows in the same order, which is what
+the compatibility adapter uses. See
+[Balance read model](balance-read-model.md) for the contract.

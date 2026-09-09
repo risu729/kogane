@@ -18,6 +18,8 @@ import type {
   TransactionRow,
   BalanceRow,
   BalanceHistoryRow,
+  BalanceHistoryPage,
+  LatestBalancePage,
   PositionWithValuations,
   ArtifactRow,
   ArtifactDetail,
@@ -25,7 +27,15 @@ import type {
   ApiMetadata,
 } from "../../shared/api-contract.ts";
 export type {
+  BalanceAdoption,
+  BalanceAdoptionState,
+  BalanceEvidenceMember,
+  BalanceHistoryItem,
+  BalanceHistoryPage,
   CoverageSummaryData,
+  KnownAssetsSubtotals,
+  LatestBalanceItem,
+  LatestBalancePage,
   SharedQueryResponse,
   ObservationKind,
   Warnings,
@@ -231,6 +241,49 @@ export function useBalances(
         `/api/balances${request.suffix}`,
         signal,
       ),
+  });
+}
+
+/**
+ * The v2 latest-balance page: one fixed snapshot, keyset paged. `cursor` is
+ * opaque and comes from the previous page; passing null starts again at the
+ * newest snapshot, which is what the "refresh" action does. Disabled unless
+ * the server advertises the capability, so nothing here guesses.
+ */
+export function useLatestBalances(
+  view?: MeasureView,
+  cursor?: string | null,
+): UseQueryResult<LatestBalancePage, Error> {
+  const features = useFeatures();
+  const request = useListRequest("/api/v2/balances/latest", {
+    ...(view ? { view } : {}),
+    ...(cursor ? { cursor } : {}),
+  });
+  const enabled = request.enabled && features.balanceReadModel;
+  return useQuery({
+    queryKey: ["balances-latest", request.suffix],
+    enabled,
+    queryFn: ({ signal }) =>
+      getJson<LatestBalancePage>(`/api/v2/balances/latest${request.suffix}`, signal),
+  });
+}
+
+/** The v2 balance history page: the same fixed context, its own budget. */
+export function useBalanceHistory(
+  view?: MeasureView,
+  cursor?: string | null,
+): UseQueryResult<BalanceHistoryPage, Error> {
+  const features = useFeatures();
+  const request = useListRequest("/api/v2/balances/history", {
+    ...(view ? { view } : {}),
+    ...(cursor ? { cursor } : {}),
+  });
+  const enabled = request.enabled && features.balanceReadModel;
+  return useQuery({
+    queryKey: ["balances-history", request.suffix],
+    enabled,
+    queryFn: ({ signal }) =>
+      getJson<BalanceHistoryPage>(`/api/v2/balances/history${request.suffix}`, signal),
   });
 }
 

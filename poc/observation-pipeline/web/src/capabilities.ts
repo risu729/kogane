@@ -29,6 +29,11 @@ export interface ClientFeatures {
   readonly identities: boolean;
   /** The sealed raw-run history route is available. */
   readonly evidenceHistory: boolean;
+  /**
+   * Latest balances and balance history are separate keyset-paged routes over
+   * a fixed snapshot, with adoption states and reason codes.
+   */
+  readonly balanceReadModel: boolean;
   /** Summary figures come from the shared query service, not a page-local sum. */
   readonly sharedQuery: boolean;
   /** The reward programme pages are available. */
@@ -43,6 +48,7 @@ export const NO_FEATURES: ClientFeatures = {
   serverPaging: false,
   identities: false,
   evidenceHistory: false,
+  balanceReadModel: false,
   sharedQuery: false,
   rewards: false,
   commands: false,
@@ -54,6 +60,7 @@ export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
     serverPaging: capabilities.paginationVersion !== "none",
     identities: capabilities.identityReadModes.includes("latest"),
     evidenceHistory: capabilities.evidenceHistory,
+    balanceReadModel: capabilities.balancesV2 && capabilities.balancesV2Pagination === "keyset-v2",
     sharedQuery: capabilities.sharedQuery,
     rewards: capabilities.rewardsV2,
     commands: capabilities.commands,

@@ -43,6 +43,11 @@ export type OutboxOutcome =
   | "identity_swept"
   | "skipped_no_projection"
   | "deferred_to_projection_owner"
+  // A07's balance projection: already current, sealed on this tick, or still
+  // building within this tick's write budget.
+  | "balance_projection_current"
+  | "balance_projection_rebuilt"
+  | "balance_projection_rebuilding"
   | "skipped_no_consumer";
 
 export type OutboxProcessor = (db: D1Database, row: OutboxRow) => Promise<OutboxOutcome>;
@@ -61,12 +66,14 @@ export const identityProjectionProcessor: OutboxProcessor = async (db) => {
 export const BALANCE_PROJECTION_TABLE = "balance_projection_scopes";
 
 /**
- * A07 owns the balance projection. Until its tables exist this records
- * `skipped_no_projection`; once they do exist but this build still has no
- * invalidation rule for them, it records `deferred_to_projection_owner`
- * instead of claiming a rebuild that did not run. A07 replaces this processor
- * through `dispatchDecisionOutbox`'s `processors` argument, which is why the
- * dispatcher takes one rather than hard-coding the map.
+ * The fallback for the balance projection, used when no owner registered a
+ * processor for it. Until A07's tables exist this records
+ * `skipped_no_projection`; once they exist it records
+ * `deferred_to_projection_owner` rather than claiming a rebuild that did not
+ * run. The real processor is `balanceProjectionOutboxProcessor` in
+ * `balance-projection-job.ts`, handed in through `dispatchDecisionOutbox`'s
+ * `processors` argument, which is why the dispatcher takes one rather than
+ * hard-coding the map.
  */
 export const balanceProjectionProcessor: OutboxProcessor = async (db) => {
   const present = await db

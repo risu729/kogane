@@ -23,7 +23,13 @@ import type {
   Overview,
   TransactionRow,
 } from "../../../../poc/observation-pipeline/shared/api-contract.ts";
-import type { ObservationReader } from "../../../read-model/src/index";
+import {
+  type BalanceProjectionReader,
+  knownAssetMetricIds,
+  KNOWN_ASSETS_POLICY,
+  type ObservationReader,
+} from "../../../read-model/src/index";
+import { addDecimals, integerDecimal } from "../../../domain/src/values.ts";
 import { financialError } from "../errors.ts";
 import {
   type Grant,
@@ -87,17 +93,40 @@ export interface ActivityRow {
   status: string | null;
   parser: string;
 }
+/**
+ * One unit's adopted holding. There is deliberately no cross-unit total and
+ * no net worth: different units are not added (INV03), and an asset subtotal
+ * with unknown liability coverage is not a net worth (addendum 05 section 5).
+ */
+export interface HoldingUnit {
+  unitRef: string;
+  coefficient: string;
+  scale: number;
+  /** How many adopted measurements the figure is made of. */
+  adoptedCount: number;
+}
 export type QueryData =
   | CoverageSummary
   | { intent: "reported-state"; rows: ReportedStateRow[] }
   | { intent: "activity"; rows: ActivityRow[] }
-  | { intent: "holdings"; units: never[] };
+  | {
+      intent: "holdings";
+      units: HoldingUnit[];
+      policyRelease: string;
+      liabilitiesCoverage: "unknown";
+    };
 
 export interface QueryExecution {
   grant: Grant;
   opened: OpenedContext;
   request: QueryRequest;
   reader: QueryReader;
+  /**
+   * A07's adopted balance projection. `holdings` reads it and nothing else;
+   * without it, or before a snapshot is sealed, the intent answers
+   * `unavailable` rather than summing raw observation rows behind it.
+   */
+  projection?: BalanceProjectionReader | undefined;
   /** The overview the context was opened from; reused so a query reads it once. */
   overview: Overview;
 }
@@ -234,6 +263,14 @@ function coveredRefFor(sources: readonly string[] | null, visible: readonly stri
     : `covered-sources@count=${String(list.length)}`;
 }
 
+function dedupeGaps(
+  gaps: { reasonCode: string; scopeRef: string | null }[],
+): { reasonCode: string; scopeRef: string | null }[] {
+  return [...new Set(gaps.map((gap) => gap.reasonCode))]
+    .sort()
+    .map((reasonCode) => ({ reasonCode, scopeRef: null }));
+}
+
 export async function executeQuery(input: QueryExecution): Promise<QueryOutcome> {
   const { grant, opened, request, reader, overview } = input;
   const requestId = opened.context.contextId;
@@ -273,32 +310,129 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
     [opened.context.identityDecisionManifestRef],
   );
   const reconciliation = dimension("not-applicable", ["reconciliation_not_implemented"]);
+  const unavailableHoldings = (): QueryOutcome => ({
+    ok: true,
+    result: {
+      schemaVersion: "financial-result-v1",
+      contextId: opened.context.contextId,
+      resolvedQuery: opened.resolvedQuery,
+      completeness: "unavailable" satisfies CompletenessState,
+      data: {
+        intent: "holdings",
+        units: [],
+        policyRelease: KNOWN_ASSETS_POLICY,
+        liabilitiesCoverage: "unknown",
+      },
+      coverage: coverageOf(scopeRef, coveredRef, [
+        { reasonCode: "projection_not_built", scopeRef },
+      ]),
+      quality: {
+        identity,
+        freshness: dimension("not-applicable", ["projection_not_built"]),
+        numeric: dimension("not-applicable", ["projection_not_built"]),
+        reconciliation,
+        valuation: dimension("unresolved", ["projection_not_built"]),
+      },
+      nextCursor: null,
+      explanationRefs: [],
+      warnings: [{ code: "projection_not_built", severity: "blocking" }],
+    },
+  });
 
   if (request.intent === "holdings") {
-    // A07's adopted balance projection is what `holdings` reads. Until it
-    // exists the answer is `unavailable` with a reason, never a total this
-    // service computed from raw observation rows behind the projection.
+    // A07's adopted balance projection is what `holdings` reads. Without a
+    // sealed snapshot the answer is `unavailable` with a reason, never a total
+    // this service computed from the raw observation rows behind it.
+    const snapshot = input.projection ? await input.projection.currentSnapshot() : null;
+    if (!input.projection || !snapshot) return unavailableHoldings();
+    const holdingPairs = scopePairs(sourceScope.sources, accountScope.accounts);
+    if (holdingPairs.length > MAX_SCOPE_PAIRS)
+      return fail("budget_exceeded", [`budget:scopePairs=${String(MAX_SCOPE_PAIRS)}`]);
+    const metricIds = knownAssetMetricIds();
+    const totals = new Map<string, { coefficient: string; scale: number; adoptedCount: number }>();
+    // One subject may be adopted only once across the whole answer; a subject
+    // reached through two scope pairs would otherwise be counted twice (INV06).
+    const subjects = new Set<string>();
+    const gaps: { reasonCode: string; scopeRef: string | null }[] = [];
+    let stale = false;
+    let unresolved = false;
+    for (const pair of holdingPairs) {
+      const scope = {
+        ...(pair.source === undefined ? {} : { source: pair.source }),
+        ...(pair.account === undefined ? {} : { account: pair.account }),
+        ...(request.filters.instrument === undefined
+          ? {}
+          : { instrument: request.filters.instrument }),
+      };
+      const rows = await input.projection.summableQuantities(
+        snapshot.snapshot_id,
+        scope,
+        metricIds,
+      );
+      if (rows === null) return fail("budget_exceeded", ["budget:subtotalRows"]);
+      for (const row of rows) {
+        // The projection is read inside the grant, and every row is checked
+        // again: a query never observes a scope the grant does not allow.
+        if (!grantAllowsSource(grant, row.source_id)) continue;
+        if (!grantAllowsAccount(grant, row.source_account)) continue;
+        if (subjects.has(row.subject_scope_key)) return fail("incomplete_evidence", ["overlap"]);
+        subjects.add(row.subject_scope_key);
+        const current = totals.get(row.unit_ref) ?? { ...integerDecimal(0), adoptedCount: 0 };
+        const sum = addDecimals(
+          { coefficient: current.coefficient, scale: current.scale },
+          { coefficient: row.quantity_coefficient, scale: row.quantity_scale },
+        );
+        totals.set(row.unit_ref, { ...sum, adoptedCount: current.adoptedCount + 1 });
+      }
+      for (const row of await input.projection.coverage(snapshot.snapshot_id, scope)) {
+        if (row.state === "adopted" && row.freshness === "current") continue;
+        if (row.state === "stale" || row.freshness === "stale") stale = true;
+        if (row.state === "unresolved" || row.state === "conflict") unresolved = true;
+        if (row.reason_code !== null)
+          gaps.push({ reasonCode: `${row.state}:${row.reason_code}`, scopeRef: null });
+      }
+    }
+    const units: HoldingUnit[] = [...totals.entries()]
+      .map(([unitRef, total]) => ({ unitRef, ...total }))
+      .sort((a, b) => (a.unitRef < b.unitRef ? -1 : 1));
+    if (units.length > grant.budget.maxRows)
+      return fail("budget_exceeded", [`budget:maxRows=${String(grant.budget.maxRows)}`]);
     return {
       ok: true,
       result: {
         schemaVersion: "financial-result-v1",
         contextId: opened.context.contextId,
         resolvedQuery: opened.resolvedQuery,
-        completeness: "unavailable" satisfies CompletenessState,
-        data: { intent: "holdings", units: [] },
-        coverage: coverageOf(scopeRef, coveredRef, [
-          { reasonCode: "projection_not_built", scopeRef },
-        ]),
+        completeness: (unresolved || stale ? "partial" : "complete") satisfies CompletenessState,
+        data: {
+          intent: "holdings",
+          units,
+          policyRelease: KNOWN_ASSETS_POLICY,
+          // Unfetched liabilities mean this is not even a lower bound on net
+          // worth, so the answer says so instead of implying one.
+          liabilitiesCoverage: "unknown",
+        },
+        coverage: coverageOf(scopeRef, coveredRef, dedupeGaps(gaps)),
         quality: {
           identity,
-          freshness: dimension("not-applicable", ["projection_not_built"]),
-          numeric: dimension("not-applicable", ["projection_not_built"]),
+          freshness: dimension(
+            stale ? "partial" : "verified",
+            stale ? ["scope_not_re_observed"] : ["snapshot_current"],
+            [snapshot.snapshot_id],
+          ),
+          // Only adopted, exactly normalised values are summed; a missing,
+          // unparsed or conflicting value never became a zero.
+          numeric: dimension(
+            "verified",
+            ["exact_adopted_quantities_only"],
+            [opened.context.calculationPolicyRef],
+          ),
           reconciliation,
-          valuation: dimension("unresolved", ["projection_not_built"]),
+          valuation: dimension("not-applicable", ["quantities_are_not_valued"]),
         },
         nextCursor: null,
-        explanationRefs: [],
-        warnings: [{ code: "projection_not_built", severity: "blocking" }],
+        explanationRefs: metricIds.map((metricId) => `metric:${metricId}`),
+        warnings: unresolved ? [{ code: "measures_unresolved", severity: "warning" }] : [],
       },
     };
   }

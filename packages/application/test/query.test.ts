@@ -6,6 +6,11 @@ import { encodeCursor } from "../src/query/cursor.ts";
 import { parseQueryRequest, querySpecDigest, type QueryRequest } from "../src/query/spec.ts";
 import { CONTEXT_INPUTS, grant, HOSTILE_DESCRIPTION, OVERVIEW, reader } from "./fixture.ts";
 import type { Grant } from "../src/grants.ts";
+import type {
+  BalanceProjectionReader,
+  ProjectionCoverageRow,
+  SubtotalRow,
+} from "../../read-model/src/index";
 
 const anyData = (value: unknown): value is QueryData => value !== null && typeof value === "object";
 
@@ -13,15 +18,68 @@ function request(overrides: Partial<QueryRequest> = {}): QueryRequest {
   return { intent: "coverage", filters: {}, cursor: null, limit: null, ...overrides };
 }
 
-async function run(grantValue: Grant, body: QueryRequest, rows = reader()) {
+async function run(
+  grantValue: Grant,
+  body: QueryRequest,
+  rows = reader(),
+  projection?: BalanceProjectionReader,
+) {
   const opened = await openContext(grantValue, CONTEXT_INPUTS, { query: body });
   return executeQuery({
     grant: grantValue,
     opened,
     request: body,
     reader: rows,
+    ...(projection === undefined ? {} : { projection }),
     overview: OVERVIEW,
   });
+}
+
+/**
+ * A stand-in for A07's sealed projection. Only the three methods `holdings`
+ * uses are implemented; anything else would be a read this intent must not do.
+ */
+function projectionStub(options: {
+  snapshot?: boolean;
+  rows?: SubtotalRow[];
+  coverage?: ProjectionCoverageRow[];
+  oversized?: boolean;
+}): BalanceProjectionReader {
+  const unsupported = () => {
+    throw new Error("holdings must not read this");
+  };
+  return {
+    currentSnapshot: async () =>
+      options.snapshot === false
+        ? null
+        : {
+            snapshot_id: "a".repeat(64),
+            created_at: "2026-09-12T00:00:00Z",
+            row_count: options.rows?.length ?? 0,
+            input_manifest_json: "{}",
+            projection_release: "balance-projection-v1",
+          },
+    snapshot: unsupported,
+    projectionInputs: unsupported,
+    latestPage: unsupported,
+    legacyLatestPage: unsupported,
+    historyPage: unsupported,
+    coverage: async () => options.coverage ?? [],
+    summableQuantities: async () => (options.oversized === true ? null : (options.rows ?? [])),
+  } as unknown as BalanceProjectionReader;
+}
+
+function adopted(overrides: Partial<SubtotalRow> = {}): SubtotalRow {
+  return {
+    unit_ref: "JPY",
+    subject_scope_key: "source_account:synthetic:a",
+    source_id: "fixture-a",
+    source_account: "fixture-a:main",
+    metric_id: "deposit.balance",
+    quantity_coefficient: "60000",
+    quantity_scale: 0,
+    ...overrides,
+  };
 }
 
 describe("query spec validation", () => {
@@ -200,6 +258,133 @@ describe("holdings without the adopted projection", () => {
     expect(outcome.result.warnings).toEqual([
       { code: "projection_not_built", severity: "blocking" },
     ]);
+  });
+
+  test("a projection with no sealed snapshot yet is the same answer", async () => {
+    const outcome = await run(
+      grant(),
+      request({ intent: "holdings" }),
+      reader(),
+      projectionStub({ snapshot: false }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.completeness).toBe("unavailable");
+  });
+});
+
+describe("holdings from the adopted projection", () => {
+  test("sums the adopted set per unit, exactly, and never across units", async () => {
+    const outcome = await run(
+      grant(),
+      request({ intent: "holdings" }),
+      reader(),
+      projectionStub({
+        rows: [
+          adopted(),
+          adopted({
+            subject_scope_key: "source_account:synthetic:b",
+            quantity_coefficient: "1005",
+            quantity_scale: 1,
+          }),
+          adopted({
+            subject_scope_key: "source_account:synthetic:c",
+            unit_ref: "USD",
+            quantity_coefficient: "25",
+          }),
+        ],
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    if (outcome.result.data.intent !== "holdings") throw new Error("unreachable");
+    // 60,000 + 100.5 in JPY, 25 in USD: two units, never one number.
+    expect(outcome.result.data.units).toEqual([
+      { unitRef: "JPY", coefficient: "601005", scale: 1, adoptedCount: 2 },
+      { unitRef: "USD", coefficient: "25", scale: 0, adoptedCount: 1 },
+    ]);
+    // No net worth, and the liability coverage says it is unknown.
+    expect(outcome.result.data.liabilitiesCoverage).toBe("unknown");
+    expect(JSON.stringify(outcome.result)).not.toContain("netWorth");
+    expect(outcome.result.completeness).toBe("complete");
+    expect(outcome.result.quality.numeric.state).toBe("verified");
+    expect(outcome.result.quality.valuation.state).toBe("not-applicable");
+    expect(outcome.result.nextCursor).toBeNull();
+  });
+
+  test("an unresolved or stale measure makes the answer partial and says which", async () => {
+    const outcome = await run(
+      grant(),
+      request({ intent: "holdings" }),
+      reader(),
+      projectionStub({
+        rows: [adopted()],
+        coverage: [
+          { state: "unresolved", reason_code: "overlap_unknown", freshness: "current", count: 1 },
+          { state: "stale", reason_code: "no_new_observation", freshness: "stale", count: 1 },
+          { state: "adopted", reason_code: null, freshness: "current", count: 1 },
+        ],
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.completeness).toBe("partial");
+    expect(outcome.result.coverage.gaps.map((gap) => gap.reasonCode)).toEqual([
+      "stale:no_new_observation",
+      "unresolved:overlap_unknown",
+    ]);
+    expect(outcome.result.quality.freshness.state).toBe("partial");
+    expect(outcome.result.warnings).toEqual([{ code: "measures_unresolved", severity: "warning" }]);
+  });
+
+  test("one subject reached twice is refused rather than counted twice", async () => {
+    const outcome = await run(
+      grant(),
+      request({ intent: "holdings" }),
+      reader(),
+      projectionStub({ rows: [adopted(), adopted()] }),
+    );
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("incomplete_evidence");
+  });
+
+  test("a scope larger than the subtotal bound is refused, never partially summed", async () => {
+    const outcome = await run(
+      grant(),
+      request({ intent: "holdings" }),
+      reader(),
+      projectionStub({ oversized: true }),
+    );
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("budget_exceeded");
+  });
+
+  test("a row outside the grant is not summed, and its existence is not reported", async () => {
+    const outcome = await run(
+      grant({ scopes: { sources: ["fixture-a"], accounts: "*" } }),
+      request({ intent: "holdings" }),
+      reader(),
+      projectionStub({
+        rows: [
+          adopted(),
+          adopted({
+            subject_scope_key: "source_account:synthetic:hidden",
+            source_id: "fixture-b",
+            quantity_coefficient: "999999",
+          }),
+        ],
+      }),
+    );
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    if (outcome.result.data.intent !== "holdings") throw new Error("unreachable");
+    expect(outcome.result.data.units).toEqual([
+      { unitRef: "JPY", coefficient: "60000", scale: 0, adoptedCount: 1 },
+    ]);
+    expect(JSON.stringify(outcome.result)).not.toContain("999999");
+    expect(JSON.stringify(outcome.result)).not.toContain("fixture-b");
   });
 });
 
