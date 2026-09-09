@@ -1,5 +1,5 @@
 import type { ArtifactMeta, Parser, ParseResult, TransactionObservation } from "../types.ts";
-import { amountToMinorUnits, decodeUtf8 } from "./util.ts";
+import { amountToMinorUnits, decodeUtf8, unitScopeAdmitted } from "./util.ts";
 import { normalizedDate, stableFingerprint } from "./sbi-strict.ts";
 
 const SOURCE = "global-pass";
@@ -55,7 +55,10 @@ export function createGlobalPassActivity(
 
     parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
       if (!this.accepts(artifact)) throw new Error("global-pass artifact metadata is unsupported");
-      if (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) {
+      if (
+        (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) &&
+        !unitScopeAdmitted(artifact)
+      ) {
         throw new Error("global-pass observations require a successful failure-free fetch run");
       }
       if (bytes.byteLength === 0 || bytes.byteLength > MAX_BYTES) {

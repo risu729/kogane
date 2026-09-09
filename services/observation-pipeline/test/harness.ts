@@ -106,7 +106,9 @@ function assertBindings(value: unknown): asserts value is Env {
 /** Publish a successful parse run the way the pipeline writer does
  * (docs/publication-gate.md): move the (artifact, parser) pointer and record
  * the event. A parse run seeded directly with status 'ok' is an unadopted
- * result until this runs, and no normal reader shows it. */
+ * result until this runs, and no normal reader shows it. Like the writer it
+ * does nothing for a run that is already the pointer, so it can never append
+ * the self-referencing event migration 0036 rejects. */
 export async function publishParse(
   db: D1Database,
   parseRunId: number,
@@ -118,13 +120,15 @@ export async function publishParse(
         `INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at)
         SELECT p.fetch_artifact_id,p.parser_name,
           (SELECT x.parse_run_id FROM published_parse_runs x WHERE x.fetch_artifact_id=p.fetch_artifact_id AND x.parser_name=p.parser_name),
-          p.id,'normal','pipeline','parse_ok',?2 FROM parse_runs p WHERE p.id=?1`,
+          p.id,'normal','pipeline','parse_ok',?2 FROM parse_runs p WHERE p.id=?1
+          AND NOT EXISTS(SELECT 1 FROM published_parse_runs x WHERE x.parse_run_id=p.id)`,
       )
       .bind(parseRunId, publishedAt),
     db
       .prepare(
         `INSERT INTO published_parse_runs(fetch_artifact_id,parser_name,parse_run_id,parser_version,published_at,publication_kind)
         SELECT p.fetch_artifact_id,p.parser_name,p.id,p.parser_version,?2,'normal' FROM parse_runs p WHERE p.id=?1
+          AND NOT EXISTS(SELECT 1 FROM published_parse_runs x WHERE x.parse_run_id=p.id)
         ON CONFLICT(fetch_artifact_id,parser_name) DO UPDATE SET parse_run_id=excluded.parse_run_id,
           parser_version=excluded.parser_version,published_at=excluded.published_at,publication_kind='normal',release_id=NULL`,
       )
@@ -177,4 +181,110 @@ export async function seedArtifact(
       .bind(id, now)
       .run();
   return sha;
+}
+
+/** One fetch unit of a multi-unit run: its own terminal report and artifacts. */
+export interface SeededUnit {
+  /** Layer A unit id and unit key; MyJCB uses one unit per card connection. */
+  id: number;
+  key: string;
+  outcome: "success" | "partial" | "failed" | "human_required";
+  failureCode?: string;
+  artifacts: { id: number; key: string; payload: unknown }[];
+}
+
+/**
+ * Seed one sealed run that catalogued several independent fetch units, the way
+ * a per-card collector does (design review D13). `runOutcome` is the run's own
+ * terminal report: 'partial' is what a collector reports when one card failed,
+ * and it is what makes `observation_fetch_runs` project the run as partial with
+ * `failure_count = 1`. Every artifact is attributed to its unit, so the
+ * unit-scoped predicate can tell the units apart.
+ */
+export async function seedUnitRun(
+  env: Env,
+  run: {
+    id: number;
+    source: string;
+    dataset: string;
+    runOutcome: "success" | "partial" | "failed";
+    units: SeededUnit[];
+    fetchedAtMs?: number;
+  },
+): Promise<void> {
+  const now = run.fetchedAtMs ?? Date.now();
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare("INSERT OR IGNORE INTO sources VALUES(?,?)").bind(run.source, run.source),
+    env.DB.prepare("INSERT OR IGNORE INTO producers VALUES('collector-r2-importer')"),
+    env.DB.prepare("INSERT INTO acquisition_sessions(id,external_session_id) VALUES(?,?)").bind(
+      run.id,
+      `run-${run.id}`,
+    ),
+    env.DB.prepare(
+      "INSERT INTO fetch_runs(id,source_id,acquisition_session_id,producer_id,first_recorded_at_ms) VALUES(?,?,?,?,?)",
+    ).bind(run.id, run.source, run.id, "collector-r2-importer", now),
+    env.DB.prepare("INSERT INTO fetch_run_reports VALUES(?,'terminal',?,?,?)").bind(
+      run.id,
+      run.runOutcome,
+      now,
+      now,
+    ),
+  ];
+  for (const unit of run.units) {
+    statements.push(
+      env.DB.prepare(
+        "INSERT INTO fetch_units(id,fetch_run_id,unit_key,unit_kind) VALUES(?,?,?,'connection')",
+      ).bind(unit.id, run.id, unit.key),
+      env.DB.prepare(
+        "INSERT INTO fetch_unit_reports(fetch_unit_id,report_kind,normalized_outcome,safe_failure_code) VALUES(?,'terminal',?,?)",
+      ).bind(unit.id, unit.outcome, unit.failureCode ?? null),
+    );
+  }
+  for (const unit of run.units)
+    for (const artifact of unit.artifacts) {
+      const bytes = new TextEncoder().encode(JSON.stringify(artifact.payload));
+      const sha = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) =>
+        b.toString(16).padStart(2, "0"),
+      ).join("");
+      await env.EVIDENCE.put(sha, bytes);
+      statements.push(
+        env.DB.prepare("INSERT OR IGNORE INTO raw_objects VALUES(?,?,?)").bind(
+          sha,
+          bytes.length,
+          sha,
+        ),
+        env.DB.prepare(
+          "INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,fetch_unit_id,declared_media_type,fetched_at_ms,recorded_at_ms,sha256,artifact_role) VALUES(?,?,?,?,?,?,'application/json',?,?,?,'collector_derived')",
+        ).bind(artifact.id, run.id, run.source, run.dataset, artifact.key, unit.id, now, now, sha),
+      );
+    }
+  await env.DB.batch(statements);
+  await env.DB.prepare("INSERT INTO fetch_run_seals(fetch_run_id,sealed_at_ms) VALUES(?,?)")
+    .bind(run.id, now)
+    .run();
+}
+
+/**
+ * The operator step that enables `unit-independent-v1` for one dataset, and
+ * its rollback. `snapshotSelection = 0` names a dataset for eligibility only,
+ * without making it a container-snapshot dataset.
+ */
+export async function setUnitScope(
+  env: Env,
+  row: {
+    sourceId: string;
+    dataset: string;
+    parserName: string;
+    scope: "run" | "unit";
+    snapshotSelection?: 0 | 1;
+  },
+): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO dataset_snapshot_policies(source_id,dataset,parser_name,policy_id,unit_scope,snapshot_selection,updated_at_ms)
+     VALUES(?,?,?,'legacy-warning-compat-v1',?,?,1)
+     ON CONFLICT(parser_name,dataset) DO UPDATE SET unit_scope=excluded.unit_scope,
+       snapshot_selection=excluded.snapshot_selection,updated_at_ms=excluded.updated_at_ms`,
+  )
+    .bind(row.sourceId, row.dataset, row.parserName, row.scope, row.snapshotSelection ?? 1)
+    .run();
 }

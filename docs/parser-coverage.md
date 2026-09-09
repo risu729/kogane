@@ -104,11 +104,11 @@ them (and shows staleness, which is a display concern outside this PR).
 
 ## Persistence (migration `0025_parse_coverage.sql`)
 
-| Table                       | Rows                                                                                                                                                              | Mutability                  |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
-| `parse_issues`              | one per issue: `parse_run_id, code, locator, severity, impact, message`                                                                                           | append-only (triggers)      |
-| `parse_coverage_claims`     | one per claim: the claim fields, `evidence_refs_json`, plus `parent_run_status` and `parent_run_failure_count` recorded from the parent fetch run at parse time   | append-only (triggers)      |
-| `dataset_snapshot_policies` | one per `(parser_name, dataset)`: `source_id, policy_id, policy_version, required_parser_version, replaces_previous_on_complete_empty, unit_scope, updated_at_ms` | operational state (mutable) |
+| Table                       | Rows                                                                                                                                                                                  | Mutability                  |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| `parse_issues`              | one per issue: `parse_run_id, code, locator, severity, impact, message`                                                                                                               | append-only (triggers)      |
+| `parse_coverage_claims`     | one per claim: the claim fields, `evidence_refs_json`, plus `parent_run_status` and `parent_run_failure_count` recorded from the parent fetch run at parse time                       | append-only (triggers)      |
+| `dataset_snapshot_policies` | one per `(parser_name, dataset)`: `source_id, policy_id, policy_version, required_parser_version, replaces_previous_on_complete_empty, unit_scope, snapshot_selection, updated_at_ms` | operational state (mutable) |
 
 The Worker (`services/observation-pipeline/src/worker.ts`) validates the
 contract right after `parse` (`contractRows`): an invalid issue or claim, a
@@ -146,17 +146,18 @@ Both variants keep the existing rules: the parent run must be `success` with
 gate the rule was `ok` and not superseded), every artifact
 of the run's dataset/unit must have such a parse, `required_parser_version`
 applies (`0.3.0` for foreign positions), and the newest complete run wins by
-`fetched_at`, then artifact id. `unit_scope` is `run` for every row and is not
-read yet; `unit-independent-v1` (PR-14) will add the `unit` scope.
+`fetched_at`, then artifact id. `unit_scope` is `run` for every seeded row;
+`unit` names `unit-independent-v1` and is described under "Unit-scoped
+eligibility" below.
 
 ### D13 predicates (`packages/read-model/src/concepts.ts`)
 
-| Predicate              | Meaning                                                                                       | Today                                                                              |
-| ---------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `evidenceExists`       | a visible artifact whose raw object is reachable                                              | `EXISTS (SELECT 1 FROM observation_raw_objects o WHERE o.sha256 = a.sha256)`       |
-| `unitParseable`        | the artifact may become observations; scope `run` = the whole parent run succeeded            | `r.status = 'success' AND r.failure_count = 0`, used by the Worker's `artifactSql` |
-| `snapshotAdoptable`    | the parse is the current complete snapshot of its container under the dataset's active policy | the snapshot CTEs and `CURRENT_SNAPSHOT`                                           |
-| `economicallySummable` | the measure may enter an economic total                                                       | `0` for every row: no aggregation policy is published; nothing sums observations   |
+| Predicate              | Meaning                                                                                       | Today                                                                                                                                                                                           |
+| ---------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `evidenceExists`       | a visible artifact whose raw object is reachable                                              | `EXISTS (SELECT 1 FROM observation_raw_objects o WHERE o.sha256 = a.sha256)`                                                                                                                    |
+| `unitParseable`        | the artifact may become observations, at the scope its dataset's policy row names             | `run`: `r.status = 'success' AND r.failure_count = 0`; `unit`: that, OR the artifact's own fetch unit succeeded. Used by the Worker's `artifactSql` and by the reader's `activeStateProjection` |
+| `snapshotAdoptable`    | the parse is the current complete snapshot of its container under the dataset's active policy | the snapshot CTEs and `CURRENT_SNAPSHOT`                                                                                                                                                        |
+| `economicallySummable` | the measure may enter an economic total                                                       | `0` for every row: no aggregation policy is published; nothing sums observations                                                                                                                |
 
 ## Switching a dataset to coverage-v1
 
@@ -192,6 +193,237 @@ dataset. Claims and issues stay as evidence; no migration is edited and no
 row is deleted. Rolling the Worker back to a version that predates this
 change also works: it inserts parse runs without claims, which the legacy
 policy reads as before.
+
+## Unit-scoped eligibility (`unit-independent-v1`, D13 / PR-14)
+
+Migration `0037_unit_scope_eligibility.sql`. Additive and inert on deploy: no
+policy row is switched, so every dataset keeps the run-scoped rule and the
+served result set is unchanged (`read-model-parity.test.ts`,
+`unit-scope-api.test.ts` first case).
+
+Before this change one failed range inside a collector run made the whole run
+ineligible: the Worker parsed only artifacts of runs with
+`observation_fetch_runs.status = 'success' AND failure_count = 0`, and the
+reader showed only those. When a run collects several independent accounts or
+cards, one card's failure therefore also froze the freshness of every card that
+succeeded. `unit-independent-v1` separates "this run succeeded" from "this
+range succeeded", for datasets where the second is provable.
+
+### What the `unit` scope changes, and what it must not
+
+| Question                                            | `run` scope                                                                     | `unit` scope                                                                                                     |
+| --------------------------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| May this artifact be parsed at all?                 | the whole run succeeded                                                         | that, or its own fetch unit reported terminal success on a sealed run                                            |
+| May its parse complete the container of its unit?   | every artifact of the (dataset, unit, run) group has a published complete parse | **unchanged**                                                                                                    |
+| May a proven unit replace the whole dataset?        | n/a                                                                             | **no**: `ranked_snapshots` partitions by `fetch_unit_key`, so a rescued unit replaces only its own partition     |
+| May a page missing inside one unit still adopt?     | no                                                                              | **no**: the `HAVING COUNT(*) = SUM(...)` group is per unit and counts every artifact of that unit, parsed or not |
+| Does the reader present a partial run as a refresh? | n/a                                                                             | **no**: `/api/overview` gains `unitUpdates` with per-run `updated_units` / `stale_units`                         |
+
+The last two rows are the review's constraint that page dependence and unit
+independence must not be mixed. Nothing in this change relaxes completeness
+inside a unit; the only relaxed predicate is `unitParseable`.
+
+### The predicate
+
+One definition, `unitScopedEligibilitySql` in
+`poc/observation-pipeline/src/snapshot-query.ts`, composed by:
+
+- the Worker's `artifactSql` (`services/observation-pipeline/src/worker.ts`),
+  which every lane — incremental, repair, replay — uses to create jobs and
+  which `parseJob` re-checks before parsing, so a partial run produces jobs
+  only for its eligible units;
+- the reader's `activeStateProjection` (`packages/read-model/src/concepts.ts`)
+  and the PoC's `CURRENT` (`poc/observation-pipeline/src/queries.ts`), so a
+  rescued parse is not written and then hidden;
+- `eligible_snapshots` in the snapshot CTEs, so the rescued unit can become the
+  current snapshot of _its own_ partition.
+
+```sql
+f.status = 'success' AND f.failure_count = 0            -- run scope, unchanged
+OR (EXISTS (SELECT 1 FROM dataset_snapshot_policies unit_policy
+             WHERE unit_policy.source_id = fa.source_id
+               AND unit_policy.dataset   = fa.dataset
+               AND unit_policy.unit_scope = 'unit')
+    AND EXISTS (SELECT 1 FROM observation_fetch_artifact_units artifact_unit
+                 WHERE artifact_unit.fetch_artifact_id = fa.id
+                   AND artifact_unit.unit_status = 'success'))
+```
+
+`observation_fetch_artifact_units` (0037) is the projection of Layer A's unit
+evidence onto one artifact: it exists only for an artifact with a
+`fetch_unit_id` whose unit has a terminal report on a **sealed** run, and its
+`unit_status` is `success` only when that report says `success` with no
+`safe_failure_code` **and** no `collector_error` artifact is attributable to
+that unit or to the run as a whole. An artifact with no fetch unit has no row
+and is never rescued.
+
+The eligibility join is on `(source_id, dataset)`, not on the policy table's
+`(parser_name, dataset)` key, because eligibility is decided per artifact
+before any parser is chosen. `source_id` is a join key here and only here;
+snapshot selection still joins on dataset alone, as before.
+
+Parsers state their own precondition ("the capture succeeded") and therefore
+also had to learn the difference: `unitScopeAdmitted` in
+`poc/observation-pipeline/src/parsers/util.ts` reads
+`ArtifactMeta.unitScopeEligibility`, which the **caller** sets (the Worker from
+`artifactSql`, the PoC store from `listArtifacts`) after evaluating the policy.
+A parser never decides the policy, and the field is null for every artifact
+while every dataset is on the `run` scope, so every parser precondition is the
+pre-PR-14 rule verbatim and no parser version changed.
+
+### Which dataset is provably unit-independent: MyJCB
+
+The criteria are (a) each unit has its own terminal unit report, (b) artifacts
+carry `fetch_unit_id`, and (c) every artifact of a unit is attributed to that
+unit, so a missing page inside a unit is detectable.
+
+**MyJCB** (`services/collector-r2-importer/src/myjcb.ts`,
+`docs/sources/myjcb.md`) is the only current source with several sibling units
+in one run:
+
+- (a) The importer catalogues one `fetch_unit` per manifest connection
+  (`unitKind: "connection"`, `unitKey: connection.connectionId`,
+  `terminalReportRequired: true`) and, in its `unit_reports` phase, posts one
+  terminal report per connection carrying that connection's own status
+  (`success` / `failed` / `human-required` → `human_required`) and, when it is
+  not a success, a `safeFailureCode`. Cards therefore fail one at a time and
+  say so individually.
+- (b) Every data artifact's descriptor sets `fetchUnitId: unit.unitId` for the
+  connection it belongs to (`artifactPlans` → `dataDescriptor`). Only the
+  run-level `manifest.json` (role `collector_manifest`) has no unit, and no
+  parser turns it into observations.
+- (c) The connection's terminal report declares
+  `declaredArtifactCount: connection.artifactCount` with
+  `artifactCountScope: "direct"`. Layer A's seal trigger (migration
+  `0001_initial.sql`, `run_inventory_*`) refuses to seal a run whose unit owns
+  a different number of artifacts than its terminal report declared, so on a
+  sealed run a unit's artifact set is exactly what the collector said it was —
+  and the snapshot CTE's per-unit `HAVING` then requires a published complete
+  parse for every one of them.
+
+By contrast Vpass creates exactly one `card` unit per run (the run _is_ the
+card) and V Point one `collection` unit, so for them the unit scope and the run
+scope coincide and there is nothing to gain. Every other collector is
+single-unit or unit-less.
+
+MyJCB's credit datasets are not container-snapshot datasets: their
+current-statement selection is the per-source multi-page contract in
+`poc/observation-pipeline/src/queries.ts` (`ranked_myjcb_snapshots`), not
+`SNAPSHOT_DATASETS`. That is why `dataset_snapshot_policies` gained
+`snapshot_selection`: a row with `snapshot_selection = 0` carries the
+eligibility policy for a dataset without enrolling it into container-snapshot
+selection (`snapshot-policies.test.ts`, "eligibility-only policy rows").
+
+MyJCB's current-statement selection already partitions by connection: the
+`ranked_myjcb_snapshots` CTE partitions on the connection id it takes from the
+artifact key prefix, plus statement state and period. Unit-scoped eligibility
+therefore lines up with the selection that is already per card.
+
+**Not enabled, and not observed.** No MyJCB row is seeded. The structural
+argument above is read off the importer and the Layer A triggers, but
+`docs/sources/myjcb.md` records that the checked-in audit of the private R2
+never saw a run with more than one connection ("multiple connectionsは未観測"),
+so the multi-unit case has never occurred in real evidence. Every test here
+uses synthetic datasets and synthetic units; nothing was run against real
+MyJCB data. Step 2 of the enabling procedure below is what must be satisfied
+on live data before a MyJCB row is written.
+
+### Coverage claims of a rescued parse
+
+`parse_coverage_claims` gains `unit_scope` (`run` | `unit`) and
+`unit_report_outcome`. The Worker writes `unit` whenever the parent run was not
+a clean success — which, because `artifactSql` already refused every ineligible
+artifact, can only mean the artifact was admitted by `unit-independent-v1` —
+together with A03's `parent_run_status` (`partial`) and
+`parent_run_failure_count`. A claim therefore records both that its parent run
+was partial and which unit report allowed it.
+
+### Enabling one dataset (operator step)
+
+1. Deploy in order: migration `0037` (on top of `0025`, `0026`, `0029`, `0035`
+   and `0036`) → `services/observation-pipeline` Worker →
+   `services/evidence-browser`. Both the Worker and the reader name
+   `observation_fetch_artifact_units` and
+   `dataset_snapshot_policies.snapshot_selection`, so the migration must exist
+   before either. Nothing changes at any of the three steps.
+2. Verify the dataset against (a)–(c) above in the collector's code, and check
+   on the deployed data that every unit of the candidate source has a terminal
+   unit report and that its artifacts carry `fetch_unit_id`:
+
+   ```sql
+   SELECT u.unit_key, count(a.id) AS artifacts,
+          (SELECT r.normalized_outcome FROM fetch_unit_reports r
+            WHERE r.fetch_unit_id = u.id AND r.report_kind = 'terminal') AS terminal
+     FROM fetch_units u LEFT JOIN fetch_artifacts a ON a.fetch_unit_id = u.id
+    WHERE u.fetch_run_id = ? GROUP BY u.id;
+   ```
+
+   A unit with no terminal row, or artifacts with a NULL `fetch_unit_id`, means
+   the dataset is not ready; the predicate would silently keep it on the run
+   scope.
+
+3. Write the row. For a container-snapshot dataset, update the existing row:
+
+   ```sql
+   UPDATE dataset_snapshot_policies SET unit_scope = 'unit', updated_at_ms = ?
+    WHERE parser_name = ? AND dataset = ?;
+   ```
+
+   For a dataset that is not a container snapshot (MyJCB):
+
+   ```sql
+   INSERT INTO dataset_snapshot_policies
+     (source_id, dataset, parser_name, policy_id, unit_scope, snapshot_selection, updated_at_ms)
+   VALUES ('myjcb', 'credit-ledger', 'myjcb-credit-ledger',
+           'legacy-warning-compat-v1', 'unit', 0, ?);
+   ```
+
+4. Read `/api/overview`. A partial run that rescued units appears in
+   `unitUpdates` with `updated_units` and `stale_units`; that key is the
+   reader's statement that the dataset was refreshed in part. It is absent
+   while no dataset is on the `unit` scope. `GET /snapshot-policy/compare` on
+   the observation-pipeline Worker lists `unit_scope` and `snapshot_selection`
+   for every policy row, so the active scope of each dataset is inspectable
+   without reading the table directly.
+
+**Rollback**: set `unit_scope` back to `'run'` (or delete an
+eligibility-only row). Selection returns to the strict rule immediately and
+identically — `current-snapshots.test.ts` flips a store back and asserts the
+result set equals the pre-flip set. Parses already produced from partial runs
+stay as history: their claims record `unit_scope = 'unit'` and a partial
+parent, they are simply no longer eligible for adoption, and nothing is
+deleted. Rolling the Worker or the reader back to a build that predates 0037
+also works, because both then apply the run scope unconditionally.
+
+### Invariants
+
+- INV: no dataset is seeded on the `unit` scope, and `snapshot_selection` is 1
+  for every seeded row (`read-model.test.ts`, `snapshot-policies.test.ts`,
+  `unit-scope.test.ts` first case).
+- INV: with every row on the `run` scope, the Worker creates the same jobs,
+  parses the same artifacts and the reader serves the same rows as before
+  (`read-model-parity.test.ts`, `unit-scope.test.ts` "restores the strict
+  rule", `unit-scope-api.test.ts`).
+- INV: a rescued unit replaces only its own `fetch_unit_key` partition; a
+  failed sibling keeps its previous snapshot (`unit-scope.test.ts`,
+  `current-snapshots.test.ts`).
+- INV: a unit with an artifact that has no published complete parse adopts
+  nothing, whatever its unit report said (`unit-scope.test.ts` "one page of a
+  two-page unit", `current-snapshots.test.ts` "a page missing inside one card").
+- INV: parser versions, warning texts and stored A/B rows are unchanged; the
+  contract fixtures still match byte for byte (`coverage-contract.test.ts`).
+
+### Verified locally
+
+Synthetic data only: `bun run scripts/ci-package.ts` `--standalone` (which
+runs the publication-gate predicate guard; the unit-scope predicate adds no
+`superseded_by_parse_run_id IS NULL` and no `status = 'ok'` read, and every
+adoption test still goes through `published_parse_runs`),
+`poc/observation-pipeline`, `services/observation-pipeline`,
+`services/raw-evidence`, `services/evidence-browser`, `packages/read-model`;
+`hk check --all`. Not verified: production data, a real D1 or R2, real MyJCB
+evidence, and the effect of switching any production dataset to the `unit`
+scope (no dataset is switched by this change).
 
 ## Flags and invariants
 

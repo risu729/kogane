@@ -5,6 +5,7 @@ import {
   decodeUtf8,
   isObject,
   minorUnitExponent,
+  unitScopeAdmitted,
 } from "./util.ts";
 
 export const SBI_SHINSEI_SOURCE_ID = "sbi-shinsei-bank";
@@ -18,7 +19,10 @@ export function acceptsSbiShinseiDataset(artifact: ArtifactMeta, dataset: string
 }
 
 export function assertSuccessfulRun(artifact: ArtifactMeta): void {
-  if (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) {
+  if (
+    (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) &&
+    !unitScopeAdmitted(artifact)
+  ) {
     throw new Error("SBI Shinsei observations require a successful failure-free parent run");
   }
 }

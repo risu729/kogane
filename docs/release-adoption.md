@@ -50,6 +50,13 @@ computes
 input_fingerprint = H(raw sha256, parser-visible metadata, transform manifest digest)
 ```
 
+"Parser-visible metadata" is everything in `ArtifactMeta` a parser may read
+except the row id and the raw digest (which is a fingerprint input of its own):
+source, dataset, artifact and unit keys, fetch time, media type, statement state
+and period, the run outcome and window, and `unitScopeEligibility` - the D13
+policy that can admit an artifact whose parent run was not a clean success, and
+which a parser's own precondition reads.
+
 using the versioned canonical encoding `canonical-json-v1`. Every new parse run
 (candidate or not, successful or not) gets one `parse_input_references` row with
 its projection, its release and its fingerprint. That is what makes a later
@@ -60,6 +67,15 @@ Deployment guard: `parser_releases` has a trigger that refuses the same
 happens during maintenance and before every parse, so a build that changed a
 parser without changing its version fails loudly instead of writing results
 nobody can identify.
+
+**From the first deployment of 0028 onward, changing a parser or a shared
+module it imports requires a version bump.** Before that point the rule is only
+a CI one, which is why the digests recorded here were regenerated when PR-14
+(unit-scoped eligibility) changed eleven parser modules and `util.ts` without
+touching a version: no store had registered a release yet, so no history was
+contradicted. Once a store has registered them, the same edit would abort every
+parse of that parser with `parser_release_conflict` until the version changes -
+which is the intended behaviour, not a regression.
 
 ## Metadata as a versioned transform (D02)
 
@@ -125,7 +141,17 @@ never in it. Migration 0028 adds `publication_gate_gaps`, the operational half
 of 0026's consistency view: a candidate result, and a run an adoption replaced,
 are expected `ok` unsuperseded runs and are not gaps, so `/publication/repair`
 can never publish one. `publication_gate_mismatches` keeps its original meaning
-and is the audit path where a candidate does show.
+and is the audit path where a candidate does show. The gaps view is defined
+_over_ the mismatch view rather than restating the legacy rule, so the two can
+never drift and the predicate guard's "no migration after 0026 embeds the
+legacy rule" test keeps holding.
+
+Migration 0036 (`publication_events_no_self_reference`) admits activation and
+rollback events as they are written and needs no companion: an activation
+inserts an event only where the currently published run differs from the
+candidate, and a rollback restores the run an activation event named as
+`previous_parse_run_id`, which 0036 itself guarantees is not that event's own
+new run. No `0038` guard was required.
 
 ### Unique-key decision, and its limit
 

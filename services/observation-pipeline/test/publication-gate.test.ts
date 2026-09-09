@@ -1,7 +1,8 @@
 // Publication compatibility gate (D03, PR-05 steps 1-3): the projection the
 // writer maintains, the legacy predicate old readers still use, the
 // consistency check between them, the bounded repair for old-writer gaps,
-// lease fencing, late older versions, and the 0026 upgrade on existing rows.
+// lease fencing, replayed publish batches (0036), late older versions, and
+// the 0026 upgrade on existing rows.
 // Every fixture is synthetic; the smbc-direct balance parser is used only
 // because its input is a three-field JSON document.
 import { afterAll, beforeAll, expect, test } from "bun:test";
@@ -212,6 +213,79 @@ test("a writer whose lease expired changes nothing: no status, no projection, no
   expect(await legacySet(902)).toEqual([pending!.id]);
 }, 30000);
 
+test("re-executing the publish batch for an already published run changes nothing", async () => {
+  await artifact(906);
+  const parse = await env.DB.prepare(
+    "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(906,?,'1.0.0','2026-09-07T00:00:00.000Z','pending','[]') RETURNING id",
+  )
+    .bind(PARSER)
+    .first<{ id: number }>();
+  await env.DB.prepare(
+    "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,lease_token,lease_until_ms) VALUES(906,?,'1.0.0','running','replayed-writer',?)",
+  )
+    .bind(PARSER, Date.now() + 60_000)
+    .run();
+  const input = {
+    parseId: parse!.id,
+    token: "replayed-writer",
+    version: [1, 0, 0],
+    artifactId: 906,
+    parserName: PARSER,
+    publishedAt: "2026-09-07T00:00:00.000Z",
+    now: Date.now(),
+  };
+  const published = await env.DB.batch(publishBatch(env, input));
+  // ok, no older run to supersede, event, pointer, job closed.
+  expect(published.map((result) => result.meta.changes)).toEqual([1, 0, 1, 1, 1]);
+  const before = await events(906);
+  expect(before).toEqual([{ previous: null, next: parse!.id, kind: "normal", actor: "pipeline" }]);
+  const publishedAt = () =>
+    env.DB.prepare(
+      "SELECT published_at FROM published_parse_runs WHERE fetch_artifact_id=906",
+    ).first<string>("published_at");
+  expect(await publishedAt()).toBe("2026-09-07T00:00:00.000Z");
+  // The whole batch again, as a redelivered queue message or a retried sweep
+  // would run it. Nothing may change: the second event would be a pointer
+  // move from the run to itself, and the pointer would gain a new timestamp.
+  const replay = await env.DB.batch(
+    publishBatch(env, { ...input, publishedAt: "2026-09-09T00:00:00.000Z", now: Date.now() }),
+  );
+  expect(replay.map((result) => result.meta.changes)).toEqual([0, 0, 0, 0, 0]);
+  expect(await events(906)).toEqual(before);
+  expect(await publishedAt()).toBe("2026-09-07T00:00:00.000Z");
+  expect(await projectionSet(906)).toEqual([parse!.id]);
+  // Same batch while the lease is still live (a retry inside the lease): the
+  // lease fence cannot help there, the "already the pointer" guard must.
+  await env.DB.prepare(
+    "UPDATE observation_parse_jobs SET status='running',lease_until_ms=? WHERE lease_token='replayed-writer'",
+  )
+    .bind(Date.now() + 60_000)
+    .run();
+  const leased = await env.DB.batch(
+    publishBatch(env, { ...input, publishedAt: "2026-09-10T00:00:00.000Z", now: Date.now() }),
+  );
+  expect(leased.slice(0, 4).map((result) => result.meta.changes)).toEqual([1, 0, 0, 0]);
+  expect(await events(906)).toEqual(before);
+  expect(await publishedAt()).toBe("2026-09-07T00:00:00.000Z");
+  expect(await mismatches(906)).toEqual([]);
+  // Migration 0036 makes the corrupt row impossible for any future writer.
+  await expect(
+    env.DB.prepare(
+      `INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at)
+      VALUES(906,?,?,?,'normal','pipeline','self reference','2026-09-11T00:00:00.000Z')`,
+    )
+      .bind(PARSER, parse!.id, parse!.id)
+      .run(),
+  ).rejects.toThrow(/replacing itself/);
+  // The repair route on a consistent key adds nothing either.
+  const repair = await request("/publication/repair", {
+    actor: "operator-replay",
+    reason: "no gap expected",
+  });
+  expect(repair.status).toBe(200);
+  expect(await events(906)).toEqual(before);
+}, 30000);
+
 test("an old writer leaves gaps the consistency route reports and the bounded repair route fills", async () => {
   await artifact(903);
   await artifact(904);
@@ -322,11 +396,13 @@ test("a successful run outside the projection stays invisible to readers and vis
   expect(await projectionSet(905)).toEqual([published!]);
 }, 30000);
 
-test("migration 0026 applies on 0017 through 0035 with existing rows and backfills exactly the legacy set", async () => {
-  // 0028 (release adoption) builds on 0026's tables, so the deployed schema
-  // this upgrade starts from is everything except those two.
+test("migrations 0026, 0028 and 0036 apply on the earlier schema with existing rows and backfill exactly the legacy set", async () => {
+  // 0028 (release adoption) and 0036 both build on 0026's tables, so the
+  // deployed schema this upgrade starts from is everything except those three.
   const upgrade = await startPipeline(
-    layerBMigrations().filter((name) => !name.startsWith("0026_") && !name.startsWith("0028_")),
+    layerBMigrations().filter(
+      (name) => !name.startsWith("0026_") && !name.startsWith("0028_") && !name.startsWith("0036_"),
+    ),
   );
   try {
     const db = upgrade.env.DB;
@@ -375,6 +451,8 @@ test("migration 0026 applies on 0017 through 0035 with existing rows and backfil
     expect(legacy).toEqual([b, e, f, g, h]);
     await applyMigration(db, "0026_publication_gate.sql");
     await applyMigration(db, "0028_parse_releases.sql");
+    // 0036 guards the event history; it must apply on top of a backfilled 0026.
+    await applyMigration(db, "0036_publication_event_guard.sql");
     const projection = (
       await db
         .prepare("SELECT parse_run_id FROM published_parse_runs ORDER BY parse_run_id")

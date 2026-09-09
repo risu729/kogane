@@ -5,7 +5,7 @@ import type {
   Parser,
   ParseResult,
 } from "../types.ts";
-import { decodeUtf8 } from "./util.ts";
+import { decodeUtf8, unitScopeAdmitted } from "./util.ts";
 import {
   exactKeys,
   strictBoolean,
@@ -295,7 +295,10 @@ function requireEligible(artifact: ArtifactMeta, dataset: string): void {
 }
 
 function requireSuccessfulRun(artifact: ArtifactMeta): void {
-  if (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) {
+  if (
+    (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) &&
+    !unitScopeAdmitted(artifact)
+  ) {
     throw new Error("V Point observations require a successful failure-free fetch run");
   }
 }

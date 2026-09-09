@@ -70,20 +70,25 @@ function isParser(value: unknown): value is Parser {
 }
 
 /**
- * Parser name -> the module that defines it, read from the registry's own
- * import list. Import order is irrelevant: a module exporting several parsers
- * gives each of them the same source closure, which is correct, because a
- * change anywhere in that module can change any of them.
+ * Parser name -> the module that defines it and the parser it exports, read
+ * from the registry's own import list. Import order is irrelevant: a module
+ * exporting several parsers gives each of them the same source closure, which
+ * is correct, because a change anywhere in that module can change any of them.
+ *
+ * The registry module itself is deliberately not imported: it re-exports the
+ * generated digests, so importing it would make the generator unable to run
+ * when that file is missing or being rewritten.
  */
-export async function parserModules(): Promise<Map<string, URL>> {
+export async function parserModules(): Promise<Map<string, { module: URL; parser: Parser }>> {
   const registry = new URL("registry.ts", PARSERS_DIR);
-  const modules = new Map<string, URL>();
+  const modules = new Map<string, { module: URL; parser: Parser }>();
   for (const match of readFileSync(registry, "utf8").matchAll(RELATIVE_IMPORT)) {
     const target = new URL(match[1]!, registry);
     if (!existsSync(target)) continue;
     const exports: Record<string, unknown> = await import(target.href);
     for (const value of Object.values(exports))
-      if (isParser(value) && !modules.has(value.name)) modules.set(value.name, target);
+      if (isParser(value) && !modules.has(value.name))
+        modules.set(value.name, { module: target, parser: value });
   }
   return modules;
 }
@@ -96,7 +101,7 @@ export async function computeParserDigests(parsers: readonly Parser[]): Promise<
   for (const parser of [...parsers].sort((a, b) => (a.name < b.name ? -1 : 1))) {
     const entry = modules.get(parser.name);
     if (!entry) throw new Error(`parser module not found for ${parser.name}`);
-    const sources = [...moduleClosure(entry)].sort();
+    const sources = [...moduleClosure(entry.module)].sort();
     for (const source of sources)
       sourceDigests[source] ??= await sha256Hex(readFileSync(new URL(source, REPO_ROOT), "utf8"));
     releases[parser.name] = {
@@ -166,9 +171,10 @@ export const PARSER_CODE_DIGESTS: Record<string, string> = Object.fromEntries(
 }
 
 if (import.meta.main) {
-  const { PARSERS } = await import("../src/parsers/registry.ts");
   const target = new URL("poc/observation-pipeline/src/parsers/digests.ts", REPO_ROOT);
-  const computed = await computeParserDigests(PARSERS);
+  const computed = await computeParserDigests(
+    [...(await parserModules()).values()].map((entry) => entry.parser),
+  );
   if (existsSync(target)) {
     const { PARSER_DIGESTS } = await import(target.href);
     const violations = digestViolations(PARSER_DIGESTS.releases, computed.releases).filter(

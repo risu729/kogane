@@ -150,26 +150,26 @@ BEGIN SELECT RAISE(ABORT,'release_activation_events is append-only'); END;
 -- replaced by an activation is also `ok` and unsuperseded (adoption never
 -- rewrites supersession).
 --
--- `publication_gate_gaps` is the operational view: an `ok` unsuperseded run
--- that is not published, is not a candidate result, and was not replaced by an
--- adoption is a genuine gap left by a writer that predates the gate. The two
--- exclusions are stable under the repair route's own writes - repair appends
--- `repair` events and never an `activation`/`rollback` one - so the event
+-- `publication_gate_gaps` is the operational view. It is defined *over*
+-- `publication_gate_mismatches` on purpose, so the legacy rule is stated once,
+-- in 0026, and the two views can never drift apart: a gap is a mismatch that
+-- is not an expected one. Two kinds are expected once releases exist, and both
+-- are `ok`, unsuperseded runs the pointer does not name:
+--   * a candidate result, which must never be published by a repair;
+--   * a run an adoption replaced, because activation and rollback move the
+--     pointer without ever rewriting `superseded_by_parse_run_id`.
+-- Both exclusions are stable under the repair route's own writes - repair
+-- appends `repair` events, never `activation`/`rollback` ones - so the event
 -- statement and the pointer statement of one repair batch select exactly the
--- same runs. The `projection_only` half is the 0026 rule verbatim.
+-- same runs.
 CREATE INDEX publication_events_previous_run ON publication_events(previous_parse_run_id);
 CREATE VIEW publication_gate_gaps AS
- SELECT p.fetch_artifact_id,p.parser_name,p.id AS parse_run_id,'legacy_only' AS mismatch
- FROM parse_runs p
- WHERE p.status='ok' AND p.superseded_by_parse_run_id IS NULL
-  AND NOT EXISTS(SELECT 1 FROM published_parse_runs x WHERE x.parse_run_id=p.id)
-  AND NOT EXISTS(SELECT 1 FROM parse_run_candidates c WHERE c.parse_run_id=p.id)
-  AND NOT EXISTS(SELECT 1 FROM publication_events e WHERE e.previous_parse_run_id=p.id
-    AND e.kind IN ('activation','rollback'))
- UNION ALL
- SELECT x.fetch_artifact_id,x.parser_name,x.parse_run_id,'projection_only'
- FROM published_parse_runs x JOIN parse_runs p ON p.id=x.parse_run_id
- WHERE p.status<>'ok' OR p.superseded_by_parse_run_id IS NOT NULL;
+ SELECT m.fetch_artifact_id,m.parser_name,m.parse_run_id,m.mismatch
+ FROM publication_gate_mismatches m
+ WHERE m.mismatch<>'legacy_only'
+  OR (NOT EXISTS(SELECT 1 FROM parse_run_candidates c WHERE c.parse_run_id=m.parse_run_id)
+   AND NOT EXISTS(SELECT 1 FROM publication_events e WHERE e.previous_parse_run_id=m.parse_run_id
+     AND e.kind IN ('activation','rollback')));
 
 -- The candidate results of a release with the scope they belong to. Ids and
 -- states only; joined by the comparison and the activation routes.

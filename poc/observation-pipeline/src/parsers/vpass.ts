@@ -1,5 +1,5 @@
 import type { ArtifactMeta, Parser, ParseResult, TransactionObservation } from "../types.ts";
-import { decodeUtf8, isObject } from "./util.ts";
+import { decodeUtf8, isObject, unitScopeAdmitted } from "./util.ts";
 import { stableFingerprint } from "./sbi-strict.ts";
 
 const SOURCE = "vpass";
@@ -447,6 +447,9 @@ function canonicalInstant(value: string, label: string): string {
 }
 
 function requireSuccessfulRun(artifact: ArtifactMeta): void {
-  if (artifact.runStatus !== "success" || artifact.runFailureCount !== 0)
+  if (
+    (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) &&
+    !unitScopeAdmitted(artifact)
+  )
     throw new Error("Vpass observations require a successful failure-free fetch run");
 }

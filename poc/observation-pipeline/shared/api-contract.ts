@@ -56,8 +56,31 @@ export interface Warnings {
   parsed: boolean;
 }
 
+/**
+ * One partial fetch run that refreshed some but not all of a dataset's units
+ * (design review D13, policy `unit-independent-v1`). Counts and identifiers
+ * only: unit keys are provider-owned labels and are not reported here.
+ */
+export interface UnitUpdateSummary {
+  source_id: string;
+  dataset: string;
+  fetch_run_id: number;
+  fetched_at: string;
+  /** Units of this run whose own terminal report succeeded, so their evidence is new. */
+  updated_units: number;
+  /** Units of this run that failed; their previous snapshot still stands. */
+  stale_units: number;
+}
+
 export interface Overview {
   counts: { table: string; rows: number }[];
+  /**
+   * Present only when a partial run updated some units of a dataset on the
+   * `unit` eligibility scope, which no dataset uses until an operator enables
+   * it. A reader that sees this key must not describe the run as a complete
+   * refresh of the dataset.
+   */
+  unitUpdates?: UnitUpdateSummary[];
   sources: {
     id: string;
     provider: string;

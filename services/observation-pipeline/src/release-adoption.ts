@@ -66,7 +66,7 @@ export function candidateBatch(db: D1Database, input: CandidateInput): D1Prepare
     db
       .prepare(
         `INSERT INTO parse_run_candidates(parse_run_id,release_id,fingerprint,state,created_at)
-          SELECT p.id,?2,?3,'candidate',?4 FROM parse_runs p
+          SELECT p.id,?2,?3,'candidate',?4 FROM parse_runs p -- gate:writer
           WHERE p.id=?1 AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL`,
       )
       .bind(input.parseId, input.releaseId, input.fingerprint, input.createdAt),

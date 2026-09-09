@@ -108,6 +108,9 @@ export function parserVisibleMetadata(meta: ArtifactMeta): Record<string, unknow
     runWindow: meta.runWindow ?? null,
     sourceId: meta.sourceId,
     statementState: meta.statementState ?? null,
+    // D13 eligibility is parser-visible and can change a parser's own
+    // precondition, so it is part of the input identity.
+    unitScopeEligibility: meta.unitScopeEligibility ?? null,
     url: meta.url,
   };
 }

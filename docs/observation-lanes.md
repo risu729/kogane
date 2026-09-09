@@ -79,14 +79,14 @@ Internal `POST` routes on the pipeline Worker at the same trust level as
 `/sweep` (private service binding, no public route). Bodies are JSON, at most
 4 KiB, and responses contain identifiers and counts only.
 
-| Route             | Body                                                                                                                              | Effect                                                                                                                                                                                                                   |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `/replay/plan`    | `source`, `parser`, `version`, `reason`, optional `dataset`, `artifactIdFrom`, `fetchedFrom`/`fetchedTo` (dates), `targetRelease` | Records a plan in status `planned` with the artifact id high-water fixed to `max(fetch_artifacts.id)` now, an eligible-artifact estimate and how many already have a published success at that version. Creates no jobs. |
-| `/replay/start`   | `planId`                                                                                                                          | `planned → running`, then one bounded creation step (200 artifacts). Repeating it on a running plan performs the next step; on a completed plan it is refused.                                                           |
-| `/replay/pause`   | `planId`                                                                                                                          | `planned/running → paused`. Unclaimed replay jobs of the plan stop being selected; a held lease finishes through the normal fenced publish. Idempotent.                                                                  |
-| `/replay/resume`  | `planId`                                                                                                                          | `paused → running`. Idempotent.                                                                                                                                                                                          |
-| `/replay/cancel`  | `planId`                                                                                                                          | `→ cancelled`; pending (and expired-lease) replay jobs of the plan become `failed/replay_cancelled`. Published parse runs, observations and raw evidence are never touched.                                              |
-| `/replay/inspect` | `planId`                                                                                                                          | Plan row, job counts by status, and whether the parser version is currently deployed.                                                                                                                                    |
+| Route             | Body                                                                                                                              | Effect                                                                                                                                                                                                                                                                                        |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/replay/plan`    | `source`, `parser`, `version`, `reason`, optional `dataset`, `artifactIdFrom`, `fetchedFrom`/`fetchedTo` (dates), `targetRelease` | Records a plan in status `planned` with the artifact id high-water fixed to `max(fetch_artifacts.id)` now, an eligible-artifact estimate and how many already have a published success at that version (membership in `published_parse_runs`, not `parse_runs.status='ok'`). Creates no jobs. |
+| `/replay/start`   | `planId`                                                                                                                          | `planned → running`, then one bounded creation step (200 artifacts). Repeating it on a running plan performs the next step; on a completed plan it is refused.                                                                                                                                |
+| `/replay/pause`   | `planId`                                                                                                                          | `planned/running → paused`. Unclaimed replay jobs of the plan stop being selected; a held lease finishes through the normal fenced publish. Idempotent.                                                                                                                                       |
+| `/replay/resume`  | `planId`                                                                                                                          | `paused → running`. Idempotent.                                                                                                                                                                                                                                                               |
+| `/replay/cancel`  | `planId`                                                                                                                          | `→ cancelled`; pending (and expired-lease) replay jobs of the plan become `failed/replay_cancelled`. Published parse runs, observations and raw evidence are never touched.                                                                                                                   |
+| `/replay/inspect` | `planId`                                                                                                                          | Plan row, job counts by status, and whether the parser version is currently deployed.                                                                                                                                                                                                         |
 
 The sweep's replay lane continues creation steps for running plans (two plans
 per sweep) and marks a plan `completed` once creation is complete and no job
@@ -99,9 +99,13 @@ Guarantees:
   to the plan (verified in `test/lanes.test.ts`).
 - Only a deployed parser version can be planned, because the ready query only
   selects registered versions; anything else would sit pending forever.
-- A replay job whose artifact/version already has a published success is
-  skipped exactly like `already` today: the job is marked done, no new parse
-  run is written, and the unique success index makes a second `ok` impossible.
+- A replay job whose artifact/version already has a successful run is skipped
+  exactly like `already` today: the job is marked done, no new parse run is
+  written, and the unique success index makes a second `ok` impossible. That
+  skip is deliberately about the execution attempt, not about adoption: the
+  parser must not run twice for the same input and version even when the gate
+  has not published the result. The plan estimate above is the operator
+  signal and does use the projection.
 - Jobs that already exist for an artifact/parser/version keep their lane and
   status; replay never re-opens failed jobs or resets attempts.
 - `target_release` is how a plan aims its jobs at a registered candidate
@@ -133,15 +137,15 @@ order. Recorded as an open item.
 
 `GET /status` returns, in addition to the existing parser list and job counts:
 
-| Signal (review §2)             | Field                                                                                 |
-| ------------------------------ | ------------------------------------------------------------------------------------- |
-| Latest sealed evidence arrival | `freshness.latestSealedAtMs`, `freshness.latestSealedArtifactFetchedAtMs`             |
-| Latest published parse         | `freshness.latestParsedAt`                                                            |
-| Per-lane backlog and failure   | `lanes.<lane>.{pending,running,done,failed}`                                          |
-| Oldest pending age per lane    | `lanes.<lane>.oldestPendingAgeMs` (null when no pending job or the job predates 0035) |
-| Notification backlog           | `workItems.unprocessed`, `workItems.oldestUnprocessedAgeMs`                           |
-| Lane liveness                  | `laneState[]` (last sweep time, last created/executed counts, cursor)                 |
-| Replay progress                | `replayPlans[]` (active plans and plans updated in the last seven days)               |
+| Signal (review §2)             | Field                                                                                                                        |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| Latest sealed evidence arrival | `freshness.latestSealedAtMs`, `freshness.latestSealedArtifactFetchedAtMs`                                                    |
+| Latest published parse         | `freshness.latestParsedAt` (`max(parsed_at)` over `published_observation_parses`, so an unadopted success never advances it) |
+| Per-lane backlog and failure   | `lanes.<lane>.{pending,running,done,failed}`                                                                                 |
+| Oldest pending age per lane    | `lanes.<lane>.oldestPendingAgeMs` (null when no pending job or the job predates 0035)                                        |
+| Notification backlog           | `workItems.unprocessed`, `workItems.oldestUnprocessedAgeMs`                                                                  |
+| Lane liveness                  | `laneState[]` (last sweep time, last created/executed counts, cursor)                                                        |
+| Replay progress                | `replayPlans[]` (active plans and plans updated in the last seven days)                                                      |
 
 Eligible/unsupported/oversized reasons, parsed-B versus sealed-identity
 coverage, candidate-versus-active, and raw integrity results remain on the
