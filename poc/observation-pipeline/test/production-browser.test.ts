@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { createApi } from "../src/api.ts";
 import { buildFixture, HOSTILE_DESCRIPTION } from "./fixture.ts";
+import { CENTRAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
 
 const client = join(import.meta.dir, "../web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -20,6 +21,8 @@ describe.if(runnable)("combined production client", () => {
     .query("SELECT id FROM transaction_observations WHERE description = ?")
     .get(HOSTILE_DESCRIPTION) as { id: number };
   const requests: string[] = [];
+  // Informational only: a test below renames it and expects identical behaviour.
+  let sourceKind = "central-store";
   let server: ReturnType<typeof Bun.serve>;
   let browser: Browser;
   let origin: string;
@@ -34,8 +37,8 @@ describe.if(runnable)("combined production client", () => {
         if (url.pathname === "/api/meta")
           return Response.json({
             apiVersion: 1,
-            source: { kind: "central-store", classification: "financial" },
-            capabilities: { readOnly: true, rawEvidence: true, liveCollectors: false },
+            source: { kind: sourceKind, classification: "financial" },
+            capabilities: CENTRAL_STORE_CAPABILITIES,
             parsingHealth: { pending: 0, running: 0, failed: 1 },
           });
         if (url.pathname === "/api/filter-options")
@@ -241,6 +244,63 @@ describe.if(runnable)("combined production client", () => {
     await page.goBack();
     await page.getByText("json:$.rows[0]", { exact: true }).first().waitFor();
     expect(await page.locator("body").innerText()).toContain("json:$.rows[0]");
+    await page.close();
+  });
+
+  test("renaming the connection kind changes labels only, never requests or controls", async () => {
+    const page = await browser.newPage();
+    async function observe(kind: string) {
+      sourceKind = kind;
+      const before = requests.length;
+      await page.goto(origin + "/summaries", { waitUntil: "networkidle" });
+      const nav = page.getByRole("navigation", { name: "メインナビゲーション" });
+      return {
+        requests: requests.slice(before).filter((path) => path.startsWith("/api/balances")),
+        serverControls: await page.getByRole("region", { name: "全記録の絞り込み" }).count(),
+        clientControls: await page.getByLabel("取得元", { exact: true }).count(),
+        identities: await nav.getByRole("link", { name: "口座・銘柄", exact: true }).count(),
+        evidence: await nav.getByRole("link", { name: "取得履歴", exact: true }).count(),
+        status: await page.getByRole("status").first().innerText(),
+      };
+    }
+    try {
+      const central = await observe("central-store");
+      const renamed = await observe("archive-store");
+      expect(central.requests).toEqual(["/api/balances?view=summaries"]);
+      expect({ ...renamed, status: "" }).toEqual({ ...central, status: "" });
+      expect(central.serverControls).toBe(1);
+      expect(central.clientControls).toBe(0);
+      expect(central.identities).toBe(1);
+      expect(central.evidence).toBe(1);
+      expect(central.status).toBe("中央保管庫に接続");
+      expect(renamed.status).toBe("保存された記録に接続");
+    } finally {
+      sourceKind = "central-store";
+      await page.close();
+    }
+  });
+
+  test("no list request is sent with guessed parameters before capabilities are known", async () => {
+    const page = await browser.newPage();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/meta", async (route) => {
+      await gate;
+      await route.continue();
+    });
+    const before = requests.length;
+    await page.goto(origin + "/balances", { waitUntil: "domcontentloaded" });
+    await page.getByRole("status").filter({ hasText: "接続を確認中" }).first().waitFor();
+    expect(requests.slice(before).filter((path) => path.startsWith("/api/balances"))).toEqual([]);
+    release();
+    await page.waitForLoadState("networkidle");
+    const observed = requests.slice(before);
+    expect(observed.filter((path) => path.startsWith("/api/balances"))).toEqual([
+      "/api/balances?view=balances",
+    ]);
+    expect(observed.indexOf("/api/meta")).toBeLessThan(
+      observed.indexOf("/api/balances?view=balances"),
+    );
     await page.close();
   });
 

@@ -5,6 +5,7 @@ import worker from "../src/worker";
 import { seedRegistry, seedRun } from "./fixtures";
 import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
 import { boundedCollections } from "../src/observation-api";
+import { CENTRAL_STORE_CAPABILITIES } from "../../../poc/observation-pipeline/shared/api-schema";
 
 const prefix = "/api/evidence/v1";
 describe("production observation API", () => {
@@ -237,6 +238,10 @@ describe("production observation API", () => {
     const body = await response.json();
     expect(body).toMatchObject({ parsingHealth: { pending: 1, running: 1, failed: 1 } });
     expect(validApiResponse("/api/meta", body)).toBe(true);
+    expect(body).toMatchObject({
+      source: { kind: "central-store", classification: "financial" },
+      capabilities: CENTRAL_STORE_CAPABILITIES,
+    });
   });
   it("clears repaired historical failures but keeps newer failures and replacement work visible", async () => {
     const baseline = (

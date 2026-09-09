@@ -112,6 +112,36 @@ Every page reads exactly one endpoint and holds nothing that response did
 not carry. The endpoints mirror the page URLs under `/api`, with `/`
 reading `/api/overview`.
 
+### Metadata — `/api/meta`
+
+The first request of every session. It names the connection
+(`source.kind`, `source.classification`) and advertises explicit, versioned
+`capabilities` (`contractVersion: "observation-api-v1"`, `measureViews`,
+`identityReadModes`, `paginationVersion`, `collectionFilters`,
+`organizedDisplay`, `financialProducts`, `evidenceHistory`, plus
+`readOnly`, `rawEvidence`, `liveCollectors`). The connection name is a label;
+the client switches every behaviour on the capabilities, so the local store,
+the hosted synthetic demo, and the production Worker are told apart by what
+they implement, not by what they are called. The full table is in
+[frontend.md](frontend.md#api-metadata-and-capabilities).
+
+The schema for this object and for the query parameters each capability
+unlocks lives once, in `shared/api-schema.ts`. The local server's parameter
+rejection, the production Worker's, the response validator, and the client's
+request builder all derive from it. This local server advertises no list
+capability, so it answers 400 to any query parameter; that is the contract,
+not an omission. `test/api-conformance.ts` holds the checks every
+implementation must pass; `test/api-conformance.test.ts` runs them here and
+`services/evidence-browser/test/conformance.test.ts` runs the same module
+against the demo and the production Worker under workerd.
+
+Capabilities are not authorization. The production Worker verifies the
+Access JWT, returns closed responses on failure, and marks every response
+`no-store` before any capability is read or served. Deploy order for a
+capability change is schema (this shared module) → server → client, and each
+server can be rolled back independently because the client reads what the
+running server advertises. Verified locally with synthetic fixtures only.
+
 ### Overview — `/`
 
 Row counts for all nine tables the schema defines, the source registry
