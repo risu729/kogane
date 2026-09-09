@@ -118,7 +118,8 @@ migration 0033 が投入するrule:
 ## 7. 昇格ジョブ
 
 `services/observation-pipeline/src/reward-claims-job.ts`。flag `REWARD_CLAIMS_ENABLED`（既定 `"false"`）。
-`scheduled` から1回だけ呼ばれ、flagがoffのときは `null` を返してログ行も出さないため、
+A10のreconciliation laneと同じ扱いで、`"1"` か `"true"` のときだけ `runScheduled` の
+`reward_claims_sweep` laneが実行される。offのときlane自体が飛ばされるので、
 既存の `observation_sweep` / `identity_sweep` の出力は変わらない。
 
 - **既存parserは変更しない。** 公開済み（publication gate通過）の `balance_observations` を読み、
@@ -139,7 +140,11 @@ migration 0033 が投入するrule:
 ## 8. 読み取りAPI
 
 capability `rewardsV2`（既定 off）。`services/evidence-browser` の `REWARDS_V2_ENABLED` が
-`"true"` のときだけ `/api/meta` が `rewardsV2: true` を広告し、route群が有効になる。
+`"1"` か `"true"` のときだけ `/api/meta` が `rewardsV2: true` を広告し、route群が有効になる。
+広告と実際に応答するrouteは `services/evidence-browser/src/capabilities.ts` の
+`centralStoreCapabilities(env)` が一箇所で決める。同じ関数がA10の `eventsV2`
+（flagに加えて0032の投影が存在するかどうか）も重ね合わせるため、`/api/meta` が
+Workerの拒否するrouteを広告することはない。
 offのとき `/api/v2/rewards/*` は 404 であり、400（未知パラメータ）ではない。
 
 | route                                 | 内容                                                                       |
@@ -166,15 +171,15 @@ publication pointerの巻き戻しはreward側の表示からも同時に消え�
 
 1. `0033_reward_buckets.sql` を適用する（追加のみ。既存の表・trigger・indexに触れない）。
 2. `services/observation-pipeline` をデプロイする。`REWARD_CLAIMS_ENABLED` は `"false"` のまま。
-   問題がなければ `"true"` にして昇格を開始する。
+   問題がなければ `"1"`（または `"true"`）にして昇格を開始する。
 3. `services/evidence-browser` をデプロイする。`REWARDS_V2_ENABLED` は `"false"` のまま。
-   claimが十分に溜まってから `"true"` にする。
+   claimが十分に溜まってから `"1"`（または `"true"`）にする。
 4. UIは同じWorkerのassetsとして配られ、capabilityがoffの間はnavにもrouteにも現れない。
 
 ロールバック:
 
 - 表示を止める: `REWARDS_V2_ENABLED="false"`。routeは404へ戻り、`/api/meta` の広告も戻る。
-- 昇格を止める: `REWARD_CLAIMS_ENABLED="false"`。scheduledのログ行も消える。
+- 昇格を止める: `REWARD_CLAIMS_ENABLED="false"`。laneごと飛ばされ、ログ行も消える。
 - migrationは戻さない。`reward_bucket_claims` は追記のみで、他の表を参照するだけである。
 - `expiry_estimates` と `conversion_simulations` は再構築可能な投影なので、全削除して差し支えない。
 
@@ -189,7 +194,7 @@ publication pointerの巻き戻しはreward側の表示からも同時に消え�
   月末・閏日・日付のみ入力・タイムゾーン仮置きを実行した。
 - `services/observation-pipeline/test/reward-claims.test.ts` — migration 0033 の適用（既存行あり）、
   seedの内容、追記のみの制約、昇格の冪等性、未公開parse runの不可視、読めない期限表記の扱い、
-  flag off時に何も書かず何もログしないこと。
+  flag off時にlaneが実行されず何も書かないこと。
 - `services/evidence-browser/test/rewards-api.test.ts` — capability off時の404、認証、
   書き込み拒否、保有・期限・simulationの内容、simulationが何も書かないこと。
 - `services/evidence-browser/test/conformance.test.ts` — capabilityとrouteの対応。

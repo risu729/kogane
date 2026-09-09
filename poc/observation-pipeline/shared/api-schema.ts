@@ -92,6 +92,12 @@ export interface ApiCapabilities {
    * never guesses whether the routes exist (docs/rewards.md).
    */
   readonly rewardsV2: boolean;
+  /**
+   * `/api/v2/activity` and `/api/v2/obligations` are served. False unless the
+   * A10 projection exists in the store the server reads and the reader flag is
+   * on, so this is a server-computed fact, not a static claim.
+   */
+  readonly eventsV2: boolean;
 }
 
 /** The local PoC store and the hosted synthetic demo, which snapshots it. */
@@ -108,6 +114,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   financialProducts: false,
   evidenceHistory: false,
   rewardsV2: false,
+  eventsV2: false,
 } as const satisfies ApiCapabilities;
 
 /** The production evidence-browser Worker over the central store. */
@@ -123,9 +130,11 @@ export const CENTRAL_STORE_CAPABILITIES = {
   organizedDisplay: true,
   financialProducts: true,
   evidenceHistory: true,
-  // Default off: `centralStoreCapabilities` in the Worker overlays the
-  // deployment's flag, and this constant stays the off-by-default contract.
+  // Both are default off here: `centralStoreCapabilities` in the Worker
+  // overlays what the deployment can actually serve, and this constant stays
+  // the off-by-default contract.
   rewardsV2: false,
+  eventsV2: false,
 } as const satisfies ApiCapabilities;
 
 /**

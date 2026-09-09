@@ -4,11 +4,11 @@ import {
 } from "../../../poc/observation-pipeline/shared/evidence-contract";
 import { authenticate } from "./auth";
 import { observationApi } from "./observation-api";
-import { centralStoreCapabilities, rewardsApi } from "./rewards-api";
+import { rewardsApi } from "./rewards-api";
+import { eventsApi } from "./events-api";
 import { identityApi } from "./identity-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
 import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw } from "./read";
-import { CENTRAL_STORE_CAPABILITIES } from "../../../poc/observation-pipeline/shared/api-schema";
 
 const PREFIX = "/api/evidence/v1";
 function classify(path: string): string {
@@ -17,6 +17,7 @@ function classify(path: string): string {
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts$/.test(path)) return "run_artifacts";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+\/raw$/.test(path)) return "artifact_raw";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+$/.test(path)) return "artifact_detail";
+  if (path === "/api/v2/activity" || path === "/api/v2/obligations") return "events_v2";
   if (path.startsWith("/api/v2/rewards")) return "rewards";
   return path.startsWith("/api/") ? "unknown_api" : "assets";
 }
@@ -29,12 +30,13 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (identityResponse) return identityResponse;
   // Reward reads are behind the deployment's own capability, so a Worker with
   // the flag off serves exactly the routes it served before (docs/rewards.md).
-  const rewardsResponse = await catalogue(() =>
-    rewardsApi(request, env, url, centralStoreCapabilities(CENTRAL_STORE_CAPABILITIES, env)),
-  );
+  const rewardsResponse = await catalogue(() => rewardsApi(request, env, url));
   if (rewardsResponse) return rewardsResponse;
   const observationResponse = await catalogue(() => observationApi(request, env, url));
   if (observationResponse) return observationResponse;
+  // A10 read side: 404 unless the projection exists and the reader flag is on.
+  const eventsResponse = await catalogue(() => eventsApi(env, url));
+  if (eventsResponse) return eventsResponse;
   if (env.EVIDENCE_SOURCE_ID !== "sony-bank") throw new HttpError(503, "source_not_configured");
   const source = env.EVIDENCE_SOURCE_ID;
   const path = url.pathname;

@@ -12,13 +12,14 @@ import {
 import { SNAPSHOT_RELATIONS, unitParseable } from "../../../packages/read-model/src/concepts";
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
+import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import {
   publicationConsistency,
   publicationStatements,
   REPAIR_LIMIT_DEFAULT,
   repairPublication,
 } from "./publication-gate.ts";
-import { rewardClaimsStage } from "./reward-claims-job.ts";
+import { rewardClaimsEnabled, rewardClaimsStage } from "./reward-claims-job.ts";
 import type {
   ArtifactMeta,
   CoverageClaim,
@@ -1298,12 +1299,15 @@ export async function snapshotPolicyComparison(env: Env): Promise<Response> {
 export interface ScheduledStages {
   parse: (env: Env) => Promise<object>;
   identity: (env: Env) => Promise<object>;
-  /** A11 reward promotion; `null` means the flag is off and the stage is silent. */
-  rewards?: (env: Env) => Promise<object | null>;
+  /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
+  reconcile?: (env: Env) => Promise<object>;
+  /** A11 reward promotion. Absent stage, or the flag off, means the lane never runs. */
+  rewards?: (env: Env) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
   identity: (env) => identitySweep(env.DB, resolveIdentity),
+  reconcile: (env) => reconciliationSweep(env.DB),
   rewards: (env) => rewardClaimsStage(env),
 };
 
@@ -1315,16 +1319,26 @@ export async function runScheduled(
   stages: ScheduledStages = defaultStages,
   log: (line: string) => void = (line) => console.log(line),
 ): Promise<void> {
-  for (const [event, stage] of [
+  const lanes: [string, ((env: Env) => Promise<object>) | undefined][] = [
     ["observation_sweep", stages.parse],
     ["identity_sweep", stages.identity],
-    ["reward_claims_sweep", stages.rewards ?? defaultStages.rewards!],
-  ] as const) {
+    // Off unless RECONCILIATION_ENABLED is set, so a normal deploy logs and
+    // writes nothing new (docs/economic-events.md).
+    [
+      "reconciliation_sweep",
+      reconciliationEnabled(env.RECONCILIATION_ENABLED) ? stages.reconcile : undefined,
+    ],
+    // Off unless REWARD_CLAIMS_ENABLED is set, so a normal deploy promotes
+    // nothing and logs nothing new (docs/rewards.md).
+    [
+      "reward_claims_sweep",
+      rewardClaimsEnabled(env.REWARD_CLAIMS_ENABLED) ? stages.rewards : undefined,
+    ],
+  ];
+  for (const [event, stage] of lanes) {
+    if (!stage) continue;
     try {
-      const result = await stage(env);
-      // A stage that returns null is disabled and stays out of the log, so a
-      // deployment with the flag off emits the same lines it emitted before.
-      if (result !== null) log(JSON.stringify({ event, ...result }));
+      log(JSON.stringify({ event, ...(await stage(env)) }));
     } catch (error) {
       const code =
         error instanceof PipelineError

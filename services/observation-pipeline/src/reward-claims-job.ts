@@ -304,16 +304,12 @@ export async function promoteRewardClaims(
   };
 }
 
-/** Exact string match: anything but "true" leaves the stage off. */
-export function rewardClaimsEnabled(env: Env): boolean {
-  return String(env.REWARD_CLAIMS_ENABLED) === "true";
+/** Off unless explicitly enabled; the default deploy promotes nothing. */
+export function rewardClaimsEnabled(value: string | undefined): boolean {
+  return value === "1" || value === "true";
 }
 
-/**
- * The scheduled stage. Returns `null` while the flag is off so the disabled
- * deployment logs exactly the lines it logged before this PR.
- */
-export async function rewardClaimsStage(env: Env): Promise<object | null> {
-  if (!rewardClaimsEnabled(env)) return null;
+/** The scheduled lane. `runScheduled` skips it entirely while the flag is off. */
+export async function rewardClaimsStage(env: Env): Promise<object> {
   return await promoteRewardClaims(env.DB);
 }

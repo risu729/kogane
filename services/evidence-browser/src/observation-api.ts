@@ -4,7 +4,7 @@ import { describeActivities } from "./activity-presentation";
 import { organizedFilterOptions } from "./organized-filter-options";
 import { presentLatestBalances, describeBalanceRows } from "./balance-presentation";
 import { HttpError, json } from "./http";
-import { centralStoreCapabilities } from "./rewards-api";
+import { centralStoreCapabilities } from "./capabilities";
 import { raw } from "./read";
 import {
   organizeRows,
@@ -68,8 +68,9 @@ export async function observationApi(
     return null;
   // Accepted parameters come from the shared schema and the capabilities this
   // Worker advertises in /api/meta, so the two cannot drift apart.
-  const capabilities = centralStoreCapabilities(CENTRAL_STORE_CAPABILITIES, env);
-  const allowed = allowedQueryParameters(path, capabilities);
+  // Neither of the deployment-resolved capabilities grants a parameter on
+  // these paths, so the static contract decides what is accepted here.
+  const allowed = allowedQueryParameters(path, CENTRAL_STORE_CAPABILITIES);
   for (const key of url.searchParams.keys()) {
     const value = url.searchParams.get(key)!;
     if (
@@ -133,7 +134,10 @@ export async function observationApi(
       apiVersion: 1,
       parsingHealth: await reader.parsingHealth(),
       source: { kind: "central-store", classification: "financial" },
-      capabilities,
+      // What this server can actually serve, not what the contract defaults
+      // to: rewardsV2 follows the deployment flag and eventsV2 also depends on
+      // the A10 projection being present (src/capabilities.ts).
+      capabilities: await centralStoreCapabilities(env),
     } satisfies ApiMetadata);
   }
   if (path === "/api/overview") return boundedCollections({ ...(await reader.overview()) });

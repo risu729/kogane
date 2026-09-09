@@ -8,6 +8,8 @@ export * from "./coverage.ts";
 export * from "./rewards.ts";
 export * from "./context.ts";
 export * from "./decisions.ts";
+export * from "./events.ts";
+export * from "./reconcile.ts";
 export * from "./result.ts";
 export {
   hasExactKeys,

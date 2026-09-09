@@ -8,7 +8,6 @@ import {
   observedExpiry,
   promoteRewardClaims,
   rewardClaimsEnabled,
-  rewardClaimsStage,
   REWARD_PROMOTION_RELEASE,
 } from "../src/reward-claims-job.ts";
 import {
@@ -347,15 +346,18 @@ test("an unreadable provider expiry stays listed as unknown and is never invente
   expect(observedExpiry(undefined, "Asia/Tokyo")).toBeNull();
 });
 
-test("the scheduled stage is silent and writes nothing while the flag is off", async () => {
-  expect(rewardClaimsEnabled(env)).toBe(false);
-  expect(await rewardClaimsStage(env)).toBeNull();
+test("the scheduled lane never runs while the flag is off", async () => {
+  // Anything but an explicit "1"/"true" is off, including an absent binding.
+  expect(rewardClaimsEnabled(env.REWARD_CLAIMS_ENABLED)).toBe(false);
+  expect(rewardClaimsEnabled(undefined)).toBe(false);
+  expect(rewardClaimsEnabled("false")).toBe(false);
+  expect(rewardClaimsEnabled("1")).toBe(true);
   const lines: Record<string, unknown>[] = [];
   await runScheduled(env, undefined, (line) => lines.push(JSON.parse(line)));
   expect(lines.map((line) => line.event)).toEqual(["observation_sweep", "identity_sweep"]);
 
   const enabled = { ...env, REWARD_CLAIMS_ENABLED: "true" } as unknown as Env;
-  expect(rewardClaimsEnabled(enabled)).toBe(true);
+  expect(rewardClaimsEnabled(enabled.REWARD_CLAIMS_ENABLED)).toBe(true);
   lines.length = 0;
   await runScheduled(enabled, undefined, (line) => lines.push(JSON.parse(line)));
   expect(lines.map((line) => line.event)).toEqual([

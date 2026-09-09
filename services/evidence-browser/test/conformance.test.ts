@@ -167,6 +167,7 @@ describe("shared contract pin", () => {
       // Default off: a deployment overlays its own flag, and the pinned
       // contract stays the off-by-default one (docs/rewards.md).
       rewardsV2: false,
+      eventsV2: false,
     });
   });
 });

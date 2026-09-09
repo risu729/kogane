@@ -33,27 +33,14 @@ import {
 } from "../../../packages/read-model/src/index";
 import { d1Executor } from "../../../packages/read-model/src/d1";
 import {
+  CENTRAL_STORE_CAPABILITIES,
   isRewardPath,
   rewardQueryParameters,
-  type ApiCapabilities,
 } from "../../../poc/observation-pipeline/shared/api-schema";
+import { rewardsV2Enabled } from "./capabilities";
 import { HttpError, json } from "./http";
 
 export const REWARDS_PREFIX = "/api/v2/rewards";
-
-/** Exact string match, like the pipeline's promotion flag. */
-export function rewardsV2Enabled(env: Env): boolean {
-  return String(env.REWARDS_V2_ENABLED) === "true";
-}
-
-/**
- * The capabilities this deployment actually serves: the pinned contract with
- * the deployment's reward flag overlaid, so `/api/meta` never advertises a
- * route the Worker refuses.
- */
-export function centralStoreCapabilities(base: ApiCapabilities, env: Env): ApiCapabilities {
-  return { ...base, rewardsV2: rewardsV2Enabled(env) };
-}
 
 /**
  * The reward activity history a real V Point holding has today: none that can
@@ -187,16 +174,13 @@ function pageEnvelope<T, U>(source: Page<T>, map: (row: T) => U): Page<U> {
  * Call only after the Access gate and the read-only method check. Returns null
  * when the path is not a reward route, so the caller falls through.
  */
-export async function rewardsApi(
-  request: Request,
-  env: Env,
-  url: URL,
-  capabilities: ApiCapabilities,
-): Promise<Response | null> {
+export async function rewardsApi(request: Request, env: Env, url: URL): Promise<Response | null> {
   const path = url.pathname;
   if (path !== REWARDS_PREFIX && !path.startsWith(`${REWARDS_PREFIX}/`)) return null;
   // An unadvertised capability is a missing route, not a forbidden one: the
-  // deployment simply does not serve rewards.
+  // deployment simply does not serve rewards. The same flag decides this and
+  // what /api/meta advertises (src/capabilities.ts).
+  const capabilities = { ...CENTRAL_STORE_CAPABILITIES, rewardsV2: rewardsV2Enabled(env) };
   if (!capabilities.rewardsV2) throw new HttpError(404, "not_found");
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
