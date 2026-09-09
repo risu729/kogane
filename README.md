@@ -10,6 +10,7 @@ different rules.
 - [Domain contracts (`packages/domain`)](docs/domain-contracts.md)
 - [Evidence collection](docs/collection.md)
 - [Raw evidence store](docs/raw-store.md)
+- [Evidence ingest contract](docs/evidence-contract.md)
 - [Observation layer](docs/observations.md)
 - [Evidence browser](docs/evidence-browser.md)
 - [Frontend stack and API handoff](docs/frontend.md)

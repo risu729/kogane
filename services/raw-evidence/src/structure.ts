@@ -1,96 +1,14 @@
-import type { JsonValue } from "./canonical";
+// Run structure endpoints (ranges, page groups, units, unit reports). Request
+// bodies are validated by the shared evidence-contract parsers; this module
+// keeps only the database writes and their read-back conflict checks.
 import {
-  ApiError,
-  OPAQUE,
-  assertSame,
-  enumValue,
-  exactKeys,
-  integerValue,
-  loadRun,
-  readJson,
-  stringValue,
-  type RecordValue,
-  type WorkerEnv,
-} from "./http";
-
-const OUTCOMES = [
-  "success",
-  "partial",
-  "failed",
-  "running",
-  "human_required",
-  "cancelled",
-  "unknown",
-] as const;
-const TIME_BASES = [
-  "source",
-  "manifest",
-  "schedule",
-  "file_metadata",
-  "email",
-  "operator",
-  "unknown",
-] as const;
-
-export interface RangeFields {
-  rangeKind: string;
-  precision: string;
-  startValue: string | null;
-  endValue: string | null;
-  startInclusive: number;
-  endInclusive: number;
-  basis: string;
-}
-
-function boolInteger(value: unknown, field: string, defaultValue: number): number {
-  if (value === undefined) return defaultValue;
-  if (value === true || value === 1) return 1;
-  if (value === false || value === 0) return 0;
-  throw new ApiError(400, `invalid_${field}`);
-}
-
-function canonicalRangeValue(value: unknown, precision: string, field: string): string | null {
-  const parsed = stringValue(value, field, { optional: true, max: 35 });
-  if (parsed === null) return null;
-  if (precision === "month" && /^\d{4}-(0[1-9]|1[0-2])$/.test(parsed)) return parsed;
-  if (precision === "date" && /^\d{4}-\d{2}-\d{2}$/.test(parsed)) {
-    const date = new Date(`${parsed}T00:00:00.000Z`);
-    if (!Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === parsed) return parsed;
-  }
-  if (precision === "instant") {
-    const date = new Date(parsed);
-    if (!Number.isNaN(date.valueOf()) && date.toISOString() === parsed) return parsed;
-  }
-  throw new ApiError(400, `invalid_${field}`);
-}
-
-export function parseRangeFields(value: RecordValue): RangeFields {
-  const precision = enumValue(value.precision, "precision", ["instant", "date", "month"] as const)!;
-  const startValue = canonicalRangeValue(value.startValue, precision, "start_value");
-  const endValue = canonicalRangeValue(value.endValue, precision, "end_value");
-  if (startValue === null && endValue === null) throw new ApiError(400, "empty_range");
-  if (startValue !== null && endValue !== null && startValue > endValue) {
-    throw new ApiError(400, "reversed_range");
-  }
-  return {
-    rangeKind: enumValue(value.rangeKind, "range_kind", [
-      "requested",
-      "declared_coverage",
-      "selector",
-    ] as const)!,
-    precision,
-    startValue,
-    endValue,
-    startInclusive: boolInteger(value.startInclusive, "start_inclusive", 1),
-    endInclusive: boolInteger(value.endInclusive, "end_inclusive", 1),
-    basis: enumValue(value.basis, "range_basis", [
-      "source",
-      "request",
-      "manifest",
-      "operator",
-    ] as const)!,
-  };
-}
+  parseAddPageGroupRequest,
+  parseAddRunRangeRequest,
+  parseAddUnitReportRequest,
+  parseAddUnitRequest,
+} from "../../../packages/evidence-contract/src/requests";
+import type { JsonValue } from "./canonical";
+import { ApiError, assertSame, loadRun, readJson, type RecordValue, type WorkerEnv } from "./http";
 
 export async function addRunRange(
   request: Request,
@@ -99,19 +17,7 @@ export async function addRunRange(
   runId: number,
 ): Promise<Record<string, JsonValue>> {
   await loadRun(env, clientId, runId);
-  const input = await readJson(request);
-  exactKeys(input, [
-    "rangeKey",
-    "rangeKind",
-    "precision",
-    "startValue",
-    "endValue",
-    "startInclusive",
-    "endInclusive",
-    "basis",
-  ]);
-  const rangeKey = stringValue(input.rangeKey, "range_key", { max: 200, pattern: OPAQUE })!;
-  const fields = parseRangeFields(input);
+  const { rangeKey, ...fields } = parseAddRunRangeRequest(await readJson(request));
   const now = Date.now();
   await env.DB.prepare(`
     INSERT INTO fetch_run_ranges (
@@ -168,10 +74,7 @@ export async function addPageGroup(
   runId: number,
 ): Promise<Record<string, JsonValue>> {
   await loadRun(env, clientId, runId);
-  const input = await readJson(request);
-  exactKeys(input, ["pageGroupKey", "declaredPageCount"]);
-  const pageGroupKey = stringValue(input.pageGroupKey, "page_group_key", { pattern: OPAQUE })!;
-  const declaredPageCount = integerValue(input.declaredPageCount, "declared_page_count", true);
+  const { pageGroupKey, declaredPageCount } = parseAddPageGroupRequest(await readJson(request));
   const now = Date.now();
   await env.DB.prepare(`
     INSERT INTO fetch_page_groups (
@@ -207,9 +110,9 @@ export async function addUnit(
   runId: number,
 ): Promise<Record<string, JsonValue>> {
   await loadRun(env, clientId, runId);
-  const input = await readJson(request);
-  exactKeys(input, ["parentUnitId", "unitKind", "unitKey", "terminalReportRequired"]);
-  const parentUnitId = integerValue(input.parentUnitId, "parent_unit_id", true);
+  const { parentUnitId, unitKind, unitKey, terminalReportRequired } = parseAddUnitRequest(
+    await readJson(request),
+  );
   if (parentUnitId !== null) {
     const parent = await env.DB.prepare(
       "SELECT 1 AS ok FROM fetch_units WHERE id = ? AND fetch_run_id = ?",
@@ -218,9 +121,6 @@ export async function addUnit(
       .first<{ ok: number }>();
     if (!parent) throw new ApiError(409, "parent_unit_missing");
   }
-  const unitKind = stringValue(input.unitKind, "unit_kind", { max: 100 })!;
-  const unitKey = stringValue(input.unitKey, "unit_key", { pattern: OPAQUE })!;
-  const terminalRequired = boolInteger(input.terminalReportRequired, "terminal_report_required", 0);
   const now = Date.now();
   await env.DB.prepare(`
     INSERT INTO fetch_units (
@@ -237,7 +137,7 @@ export async function addUnit(
       parentUnitId,
       unitKind,
       unitKey,
-      terminalRequired,
+      terminalReportRequired,
       clientId,
       now,
       runId,
@@ -258,7 +158,7 @@ export async function addUnit(
   assertSame(
     row,
     {
-      terminal_report_required: terminalRequired,
+      terminal_report_required: terminalReportRequired,
       recorded_by_client_id: clientId,
     },
     "fetch_unit_conflict",
@@ -279,59 +179,19 @@ export async function addUnitReport(
     .first<{ id: number; fetch_run_id: number }>();
   if (!unit) throw new ApiError(404, "unit_not_found");
   await loadRun(env, clientId, unit.fetch_run_id);
-  const input = await readJson(request);
-  exactKeys(input, [
-    "reportKey",
-    "reportKind",
-    "producerStatus",
-    "normalizedOutcome",
-    "startedAtMs",
-    "startedAtBasis",
-    "completedAtMs",
-    "completedAtBasis",
-    "declaredArtifactCount",
-    "artifactCountScope",
-    "safeFailureCode",
-  ]);
-  const reportKey = stringValue(input.reportKey, "report_key", { pattern: OPAQUE })!;
+  const { reportKey, ...report } = parseAddUnitReportRequest(await readJson(request));
   const fields = {
-    report_kind: enumValue(input.reportKind, "report_kind", ["progress", "terminal"] as const)!,
-    producer_status: stringValue(input.producerStatus, "producer_status", {
-      optional: true,
-      max: 100,
-    }),
-    normalized_outcome: enumValue(
-      input.normalizedOutcome ?? "unknown",
-      "normalized_outcome",
-      OUTCOMES,
-    )!,
-    started_at_ms: integerValue(input.startedAtMs, "started_at_ms", true),
-    started_at_basis: enumValue(input.startedAtBasis, "started_at_basis", TIME_BASES, true),
-    completed_at_ms: integerValue(input.completedAtMs, "completed_at_ms", true),
-    completed_at_basis: enumValue(input.completedAtBasis, "completed_at_basis", TIME_BASES, true),
-    declared_artifact_count: integerValue(
-      input.declaredArtifactCount,
-      "declared_artifact_count",
-      true,
-    ),
-    artifact_count_scope: enumValue(
-      input.artifactCountScope,
-      "artifact_count_scope",
-      ["direct", "subtree", "producer_defined"] as const,
-      true,
-    ),
-    safe_failure_code: stringValue(input.safeFailureCode, "safe_failure_code", {
-      optional: true,
-      max: 100,
-    }),
+    report_kind: report.reportKind,
+    producer_status: report.producerStatus,
+    normalized_outcome: report.normalizedOutcome,
+    started_at_ms: report.startedAtMs,
+    started_at_basis: report.startedAtBasis,
+    completed_at_ms: report.completedAtMs,
+    completed_at_basis: report.completedAtBasis,
+    declared_artifact_count: report.declaredArtifactCount,
+    artifact_count_scope: report.artifactCountScope,
+    safe_failure_code: report.safeFailureCode,
   };
-  if (
-    (fields.started_at_ms === null) !== (fields.started_at_basis === null) ||
-    (fields.completed_at_ms === null) !== (fields.completed_at_basis === null) ||
-    (fields.declared_artifact_count === null) !== (fields.artifact_count_scope === null)
-  ) {
-    throw new ApiError(400, "unit_report_field_pair_mismatch");
-  }
   const now = Date.now();
   await env.DB.prepare(`
     INSERT INTO fetch_unit_reports (

@@ -64,6 +64,18 @@ describe("offline CI coverage", () => {
     expect(scripts).toContain("verify-vpass-route.test.sh");
     expect(selected).toEqual(scripts);
   });
+  test("shared contract packages run only pure test and typecheck steps", () => {
+    for (const name of ["packages/evidence-contract"]) {
+      const policy = selectPolicy(name);
+      expect(policy.checks).toEqual(["test", "typecheck"]);
+      expect(policy.scripts).toEqual({ test: "bun test", typecheck: "tsc --noEmit" });
+      const plan = packagePlan(name, options).map((step) => step.command.join(" "));
+      expect(plan).toEqual(["bun install --frozen-lockfile", "bun run test", "bun run typecheck"]);
+      const manifest = JSON.parse(readFileSync(join(REPO_ROOT, name, "package.json"), "utf8"));
+      expect(manifest.dependencies).toBeUndefined();
+      expect(Object.keys(manifest.devDependencies).sort()).toEqual(["@types/bun", "typescript"]);
+    }
+  });
   test("Vpass raw integration retains its dry-run check without scheduling live backfill", () => {
     const policy = selectPolicy("poc/vpass-json");
     expect(policy.scripts["cf:check"]).toBe("wrangler deploy --dry-run");
@@ -155,6 +167,19 @@ describe("offline CI coverage", () => {
       expect(manifest.devDependencies[name]).toBe(frontend.devDependencies[name]);
     const plan = packagePlan(policy.path, options).map((step) => step.command.join(" "));
     expect(plan).toEqual(["bun install --frozen-lockfile", "bun run typecheck", "bun run test"]);
+  });
+  test("shared pure packages run frozen install, typecheck and bun tests without Workers tooling", () => {
+    const plan = packagePlan("packages/read-model", options).map((step) => step.command.join(" "));
+    expect(plan).toEqual(["bun install --frozen-lockfile", "bun run typecheck", "bun run test"]);
+    expect(selectPolicy("packages/read-model").scripts).toEqual({
+      test: "bun test",
+      typecheck: "tsc --noEmit",
+    });
+    const manifest = JSON.parse(
+      readFileSync(join(REPO_ROOT, "packages/read-model/package.json"), "utf8"),
+    );
+    expect(Object.keys(manifest.dependencies ?? {})).toEqual([]);
+    expect(Object.keys(manifest.devDependencies)).not.toContain("wrangler");
   });
   test("production parser CI installs shared parser dependencies before checking without building UI", () => {
     const plan = packagePlan("services/observation-pipeline", options);

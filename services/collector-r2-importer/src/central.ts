@@ -1,7 +1,18 @@
-import type { CentralInventoryItem } from "./types";
+import {
+  descriptorSha256V1,
+  type AddPageGroupRequest,
+  type AddRunRangeRequest,
+  type AddRunReportRequest,
+  type AddUnitReportRequest,
+  type AddUnitRequest,
+  type ArtifactRequest,
+  type CreateRunRequest,
+  type DeclarationBasis,
+  type InventoryItem,
+  type RecordAttemptRequest,
+} from "../../../packages/evidence-contract/src/index";
 
 type JsonObject = Record<string, unknown>;
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
 export class CentralClient {
   readonly #service: Fetcher;
@@ -20,26 +31,26 @@ export class CentralClient {
     this.#token = token;
   }
 
-  async createRun(input: JsonObject): Promise<number> {
+  async createRun(input: CreateRunRequest): Promise<number> {
     const result = await this.json("/v1/runs", input);
     return requiredInteger(result.runId, "central_run_id_missing");
   }
 
-  async addUnit(runId: number, input: JsonObject): Promise<number> {
+  async addUnit(runId: number, input: AddUnitRequest): Promise<number> {
     const result = await this.json(`/v1/runs/${runId}/units`, input);
     return requiredInteger(result.unitId, "central_unit_id_missing");
   }
 
-  async addRunRange(runId: number, input: JsonObject): Promise<void> {
+  async addRunRange(runId: number, input: AddRunRangeRequest): Promise<void> {
     await this.json(`/v1/runs/${runId}/ranges`, input);
   }
 
-  async addPageGroup(runId: number, input: JsonObject): Promise<number> {
+  async addPageGroup(runId: number, input: AddPageGroupRequest): Promise<number> {
     const result = await this.json(`/v1/runs/${runId}/page-groups`, input);
     return requiredInteger(result.pageGroupId, "central_page_group_id_missing");
   }
 
-  async addUnitReport(unitId: number, input: JsonObject): Promise<void> {
+  async addUnitReport(unitId: number, input: AddUnitReportRequest): Promise<void> {
     await this.json(`/v1/units/${unitId}/reports`, input);
   }
 
@@ -58,7 +69,7 @@ export class CentralClient {
     return response.status === 200;
   }
 
-  async addArtifact(runId: number, input: JsonObject): Promise<string> {
+  async addArtifact(runId: number, input: ArtifactRequest): Promise<string> {
     const result = await this.json(`/v1/runs/${runId}/artifacts`, input);
     return requiredSha256(result.descriptorSha256, "central_descriptor_missing");
   }
@@ -79,7 +90,7 @@ export class CentralClient {
   async addInventoryItems(
     runId: number,
     inventoryId: number,
-    items: CentralInventoryItem[],
+    items: InventoryItem[],
   ): Promise<void> {
     await this.json(`/v1/runs/${runId}/inventories/${inventoryId}/items`, { items });
   }
@@ -97,16 +108,16 @@ export class CentralClient {
     if (result.sealed !== true) throw new Error("central_seal_missing");
   }
 
-  async addRunReport(runId: number, input: JsonObject): Promise<void> {
+  async addRunReport(runId: number, input: AddRunReportRequest): Promise<void> {
     await this.json(`/v1/runs/${runId}/reports`, input);
   }
 
   async seal(
     runId: number,
-    artifacts: CentralInventoryItem[],
+    artifacts: InventoryItem[],
     externalAttemptId: string,
     startedAtMs: number,
-    declarationBasis = "producer_manifest",
+    declarationBasis: DeclarationBasis = "producer_manifest",
   ): Promise<void> {
     const result = await this.json(`/v1/runs/${runId}/seal`, {
       artifacts,
@@ -117,11 +128,11 @@ export class CentralClient {
     if (result.sealed !== true) throw new Error("central_seal_missing");
   }
 
-  async recordAttempt(runId: number, input: JsonObject): Promise<void> {
+  async recordAttempt(runId: number, input: RecordAttemptRequest): Promise<void> {
     await this.json(`/v1/runs/${runId}/attempts`, input);
   }
 
-  private async json(path: string, body: JsonObject): Promise<JsonObject> {
+  private async json(path: string, body: object): Promise<JsonObject> {
     const response = await this.#service.fetch(
       new Request(`https://kogane-ingest.internal${path}`, {
         method: "POST",
@@ -140,81 +151,15 @@ export class CentralClient {
 }
 
 /**
- * Hash the exact storage-origin descriptor shape persisted by raw-evidence
- * after its schema parser has supplied optional origin fields and empty
- * collection defaults. Importers use this before staging inventory so a
- * parser-normalization drift fails closed before any terminal report or seal.
- * HTTP, file, and email importers must add their nested origin normalization
- * here before sharing this helper.
+ * descriptor-v1 digest of an artifact request, computed by the shared
+ * evidence-contract normalizer and encoder (the local copies moved there in
+ * PR A02). Importers hash before staging inventory so a normalization drift
+ * between client and raw-evidence fails closed before any terminal report or
+ * seal. The server never trusts this value: it recomputes the digest from its
+ * own validated parse and rejects inventory items that disagree.
  */
-export async function centralDescriptorSha256(descriptor: JsonObject): Promise<string> {
-  const {
-    http,
-    storage,
-    file,
-    email,
-    fetchUnitId,
-    pageGroupId,
-    pageIndex,
-    ranges,
-    transformSteps,
-    relations,
-    ...fields
-  } = descriptor;
-  const normalized = {
-    ...fields,
-    fetchUnitId: fetchUnitId ?? null,
-    pageGroupId: pageGroupId ?? null,
-    pageIndex: pageIndex ?? null,
-    origins: {
-      http: http ?? null,
-      storage: normalizedStorageOrigin(storage),
-      file: file ?? null,
-      email: email ?? null,
-    },
-    ranges: ranges ?? [],
-    transformSteps: transformSteps ?? [],
-    relations: relations ?? [],
-  };
-  const bytes = new TextEncoder().encode(canonicalJson(normalized as unknown as JsonValue));
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", ownedArrayBuffer(bytes)));
-  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-function normalizedStorageOrigin(value: unknown): JsonValue {
-  if (value === undefined || value === null) return null;
-  if (!isRecord(value)) throw new TypeError("storage origin must be an object");
-  return {
-    storageKind: value.storageKind,
-    containerName: value.containerName,
-    objectKeyTemplate: value.objectKeyTemplate,
-    objectKeyFingerprint: value.objectKeyFingerprint,
-    fingerprintKeyVersion: value.fingerprintKeyVersion,
-    redactionVersion: value.redactionVersion,
-    objectVersion: value.objectVersion ?? null,
-    etag: value.etag ?? null,
-    lastModifiedAtMs: value.lastModifiedAtMs ?? null,
-    lastModifiedAtBasis: value.lastModifiedAtBasis ?? null,
-  } as unknown as JsonValue;
-}
-
-function canonicalJson(value: JsonValue): string {
-  return JSON.stringify(canonical(value));
-}
-
-function canonical(value: JsonValue): JsonValue {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-        .map(([key, child]) => [key, canonical(child)]),
-    );
-  }
-  if (typeof value === "number" && !Number.isSafeInteger(value)) {
-    throw new TypeError("canonical numbers must be safe integers");
-  }
-  return value;
+export function centralDescriptorSha256(descriptor: ArtifactRequest): Promise<string> {
+  return descriptorSha256V1(descriptor);
 }
 
 function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
