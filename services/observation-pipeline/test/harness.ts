@@ -57,9 +57,12 @@ export async function applyMigration(db: D1Database, name: string): Promise<void
 }
 
 /** `migrations` defaults to every Layer B migration; an upgrade test passes
- * the subset that represents the deployed schema and applies the rest later. */
+ * the subset that represents the deployed schema and applies the rest later.
+ * `vars` are Worker configuration variables - `RELEASE_CANDIDATES_ENABLED` is
+ * the A04 flag, absent by default exactly as in production. */
 export async function startPipeline(
   migrations: readonly string[] = layerBMigrations(),
+  vars: Record<string, string> = {},
 ): Promise<{ mf: Miniflare; env: Env }> {
   const bundle = await Bun.build({
     entrypoints: [new URL("../src/worker.ts", import.meta.url).pathname],
@@ -74,6 +77,7 @@ export async function startPipeline(
       compatibilityDate: "2026-09-07",
       d1Databases: ["DB"],
       r2Buckets: ["EVIDENCE"],
+      bindings: vars,
     }),
   );
   const db = await mf.getD1Database("DB");
@@ -82,7 +86,7 @@ export async function startPipeline(
   for (const name of migrations) await applyMigration(db, name);
   // Miniflare and generated Workers types use distinct platform declarations;
   // validate the runtime proxy at this test boundary instead of double casts.
-  const bindings: unknown = { DB: db, EVIDENCE: bucket };
+  const bindings: unknown = { DB: db, EVIDENCE: bucket, ...vars };
   assertBindings(bindings);
   return { mf, env: bindings };
 }
