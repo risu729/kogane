@@ -340,7 +340,8 @@ was partial and which unit report allowed it.
 
 ### Enabling one dataset (operator step)
 
-1. Deploy in order: migration `0037` → `services/observation-pipeline` Worker →
+1. Deploy in order: migration `0037` (on top of `0025`, `0026`, `0029`, `0035`
+   and `0036`) → `services/observation-pipeline` Worker →
    `services/evidence-browser`. Both the Worker and the reader name
    `observation_fetch_artifact_units` and
    `dataset_snapshot_policies.snapshot_selection`, so the migration must exist
@@ -414,7 +415,10 @@ also works, because both then apply the run scope unconditionally.
 
 ### Verified locally
 
-Synthetic data only: `bun run scripts/ci-package.ts` for
+Synthetic data only: `bun run scripts/ci-package.ts` `--standalone` (which
+runs the publication-gate predicate guard; the unit-scope predicate adds no
+`superseded_by_parse_run_id IS NULL` and no `status = 'ok'` read, and every
+adoption test still goes through `published_parse_runs`),
 `poc/observation-pipeline`, `services/observation-pipeline`,
 `services/raw-evidence`, `services/evidence-browser`, `packages/read-model`;
 `hk check --all`. Not verified: production data, a real D1 or R2, real MyJCB

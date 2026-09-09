@@ -1,6 +1,6 @@
 // Unit-scoped partial-run eligibility in the production Worker (design review
 // D13, PR-14, policy `unit-independent-v1`). Migration 0037 applies on top of
-// 0017-0035; the seeded state is unchanged run-scope behaviour; a policy row on
+// 0017-0036; the seeded state is unchanged run-scope behaviour; a policy row on
 // the `unit` scope lets a proven fetch unit of a partial run be parsed and
 // adopted while its failed sibling keeps its previous evidence; a gap inside
 // one unit still blocks adoption; and setting the row back to `run` restores
