@@ -4,10 +4,15 @@ import { HttpError } from "./http";
 // Only public verification keys are cached. Tokens and verified claims stay request-local.
 const keySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
+/**
+ * Verifies the Cloudflare Access JWT and returns the subject it proved. The
+ * subject is the only identity any write path may use: request bodies and
+ * headers never name the actor (review rule 9, addendum 10 section 5).
+ */
 export async function authenticate(
   request: Request,
   env: Pick<Env, "ACCESS_ISSUER" | "ACCESS_AUDIENCE">,
-): Promise<void> {
+): Promise<string> {
   const issuer: string = env.ACCESS_ISSUER;
   const audience: string = env.ACCESS_AUDIENCE;
   if (
@@ -45,6 +50,7 @@ export async function authenticate(
     if (typeof payload.sub !== "string" || !payload.sub.trim() || payload.type !== "app") {
       throw new HttpError(401, "authentication_required");
     }
+    return payload.sub;
   } catch (error) {
     if (error instanceof HttpError) throw error;
     if (

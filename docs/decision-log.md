@@ -99,6 +99,23 @@ former `409` text and add an `x-kogane-error` header with the error code.
 `reviseIdentity` remains as a compatibility adapter: an `assign` by
 `legacy-cli` with a fresh operation id, throwing the former error strings.
 
+### A09: the same command under an authenticated lifecycle
+
+`prepareIdentityCommand` builds the statements of one identity command without
+running them; `executeIdentityCommand` is that plus the batch and the ledger
+read. The A09 change commit
+([change-lifecycle.md](change-lifecycle.md)) calls the same builder with an
+extra guard on its own receipt reservation, so the identity mutation, the
+plan-wide expected-revision check, the receipt and the decision outbox rows are
+one D1 batch. There is no second copy of what an identity command writes, and
+the ledger row (`decision_operations`) is still the precondition every later
+statement of the command is joined to.
+
+`/identity-revise` is unchanged and remains the private CLI path. The
+authenticated path is `POST /api/command/v1/*` on the evidence browser, which
+forwards to the pipeline's private `/command/v1/*` routes; the pipeline stays
+the single writer of every table on this page.
+
 ## Automatic protection
 
 `identifyParse` and the sweep append an automatic (`rule`) mapping only when
@@ -203,6 +220,11 @@ attributed to.
 2. Deploy `services/observation-pipeline` (writer: commands, protection from
    the log, policy records).
 3. Deploy `services/evidence-browser` (reader: read modes, contexts).
+
+Migration `0031_operations.sql` (A09) builds on this one:
+`decision_outbox.decision_revision_id` references `decision_revisions(id)`, and
+every A09 commit appends both a `decision_operations` ledger row and a
+`decision_revisions` row through the code above. 0029 must be applied first.
 
 Rollback: the previous pipeline and browser builds ignore the new tables and
 views; nothing they read or write changed shape (that is why the policy record
