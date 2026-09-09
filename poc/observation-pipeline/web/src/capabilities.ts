@@ -29,6 +29,11 @@ export interface ClientFeatures {
   readonly identities: boolean;
   /** The sealed raw-run history route is available. */
   readonly evidenceHistory: boolean;
+  /**
+   * Latest balances and balance history are separate keyset-paged routes over
+   * a fixed snapshot, with adoption states and reason codes.
+   */
+  readonly balanceReadModel: boolean;
 }
 
 /** Every feature is off until capabilities are known. */
@@ -37,6 +42,7 @@ export const NO_FEATURES: ClientFeatures = {
   serverPaging: false,
   identities: false,
   evidenceHistory: false,
+  balanceReadModel: false,
 };
 
 export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
@@ -45,5 +51,6 @@ export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
     serverPaging: capabilities.paginationVersion !== "none",
     identities: capabilities.identityReadModes.includes("latest"),
     evidenceHistory: capabilities.evidenceHistory,
+    balanceReadModel: capabilities.balancesV2 && capabilities.balancesV2Pagination === "keyset-v2",
   };
 }
