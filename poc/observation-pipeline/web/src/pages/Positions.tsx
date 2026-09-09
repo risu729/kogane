@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useMetadata, usePositions, type PositionWithValuations } from "../api.ts";
+import { useFeatures, usePositions, type PositionWithValuations } from "../api.ts";
 import { Amount, Badge, EmptyState, Nullable, ObservationLink, QueryBoundary } from "../ui.tsx";
 import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
@@ -30,14 +30,15 @@ export function PositionsPage(): ReactNode {
   );
 }
 function PositionList({ entries }: { entries: PositionWithValuations[] }): ReactNode {
-  const production = useMetadata().data?.source.kind === "central-store";
+  // Client-side record controls only when the server cannot filter for us.
+  const { serverFilters } = useFeatures();
   const [page, setPage] = useViewState("positions.page");
   const [filters, setFilters] = useViewState("positions.filters");
   const filtered = entries.filter((entry) => matchesSourceAccount(entry.position, filters));
   const view = pageWindow(filtered, page);
   return (
     <>
-      {!production ? (
+      {!serverFilters ? (
         <section className="panel">
           <div className="panel-body">
             <RecordControls

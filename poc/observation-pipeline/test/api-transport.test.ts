@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { ApiError, getJson } from "../web/src/api.ts";
 import type { ApiMetadata, TransactionRow } from "../shared/api-contract.ts";
+import { LOCAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
 
 let fetchSpy: ReturnType<typeof spyOn> | undefined;
 afterEach(() => {
@@ -11,7 +12,7 @@ const signal = () => new AbortController().signal;
 const metadata: ApiMetadata = {
   apiVersion: 1,
   source: { kind: "local-store", classification: "unknown" },
-  capabilities: { readOnly: true, rawEvidence: true, liveCollectors: false },
+  capabilities: LOCAL_STORE_CAPABILITIES,
 };
 const transaction: TransactionRow = {
   id: 1,

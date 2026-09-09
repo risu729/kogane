@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import type { ArtifactDetail, ArtifactRow, ObservationDetail } from "../shared/api-contract.ts";
 import { exportDemo, type DemoSnapshot } from "../src/export-demo.ts";
 import { sha256Hex } from "../src/store.ts";
+import { LOCAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
 
 function decode<T>(snapshot: DemoSnapshot, path: string): T {
   const response = snapshot.responses[path];
@@ -29,7 +30,12 @@ describe("synthetic deployment export", () => {
       expect(snapshot.classification).toBe("synthetic");
       expect(decode(snapshot, "/api/meta")).toMatchObject({
         source: { classification: "synthetic" },
-        capabilities: { readOnly: true, liveCollectors: false },
+        capabilities: LOCAL_STORE_CAPABILITIES,
+      });
+      expect(decode<unknown>(snapshot, "/api/meta")).toEqual({
+        apiVersion: 1,
+        source: { kind: "local-store", classification: "synthetic" },
+        capabilities: LOCAL_STORE_CAPABILITIES,
       });
       const listing = decode<{ artifacts: ArtifactRow[] }>(snapshot, "/api/artifacts");
       expect(listing.artifacts.length).toBeGreaterThan(0);

@@ -1,6 +1,8 @@
 // Browser-safe HTTP contracts. No database, runtime, or UI imports.
 // Amount strings retain exact minor units; formatting never changes these values.
 import type { ObservationOrganization } from "./organization-contract.ts";
+import type { ApiCapabilities } from "./api-schema.ts";
+export type { ApiCapabilities } from "./api-schema.ts";
 export type ObservationKind = "transaction" | "balance" | "position" | "valuation";
 
 /** Production list responses add this coverage record; local fixture APIs may omit it. */
@@ -26,20 +28,24 @@ export interface FilterOptions {
   metrics: string[];
 }
 
+/** Connection names the UI has labels for. Any other name is shown generically. */
+export type SourceKind = "local-store" | "central-store";
+
 export interface ApiMetadata {
   /** Registered parsing jobs only; not collector freshness or full source coverage. */
   parsingHealth?: { pending: number; running: number; failed: number };
   apiVersion: 1;
   source: {
-    kind: "local-store" | "central-store";
+    /**
+     * Informational: where the data comes from, for labels only. Behaviour
+     * switches on `capabilities`; renaming a kind must not change the UI.
+     */
+    kind: SourceKind | (string & {});
     /** Synthetic is an explicit assertion by an isolated fixture-only startup. */
     classification: "unknown" | "synthetic" | "financial";
   };
-  capabilities: {
-    readOnly: true;
-    rawEvidence: true;
-    liveCollectors: false;
-  };
+  /** Explicit, versioned capabilities; see `api-schema.ts`. Never an auth switch. */
+  capabilities: ApiCapabilities;
 }
 
 export interface Warnings {

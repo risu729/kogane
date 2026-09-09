@@ -2,6 +2,8 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import snapshot from "../demo-snapshot.json";
 import worker from "../src/demo-worker";
+import { LOCAL_STORE_CAPABILITIES } from "../../../poc/observation-pipeline/shared/api-schema";
+import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let issuer: string;
@@ -66,7 +68,13 @@ describe("hosted synthetic demo", () => {
   it("serves synthetic metadata and the SPA with no database bindings", async () => {
     const response = await call("/api/meta");
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ source: { classification: "synthetic" } });
+    const body: unknown = await response.json();
+    expect(validApiResponse("/api/meta", body)).toBe(true);
+    expect(body).toEqual({
+      apiVersion: 1,
+      source: { kind: "local-store", classification: "synthetic" },
+      capabilities: LOCAL_STORE_CAPABILITIES,
+    });
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     const shell = await call("/balances");

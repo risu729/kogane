@@ -11,6 +11,11 @@ import {
   organizationKey,
 } from "./observation-organization";
 import type { ApiMetadata } from "../../../poc/observation-pipeline/shared/api-contract";
+import {
+  allowedQueryParameters,
+  CENTRAL_STORE_CAPABILITIES,
+  validMeasureView,
+} from "../../../poc/observation-pipeline/shared/api-schema";
 
 export function boundedCollections(value: Record<string, unknown>, offset?: number): Response {
   let truncated = false;
@@ -44,20 +49,9 @@ export async function observationApi(
     )
   )
     return null;
-  const paged = ["/api/transactions", "/api/balances", "/api/positions"].includes(path);
-  const allowed = paged
-    ? [
-        "source",
-        "account",
-        "offset",
-        ...(path === "/api/transactions" ? ["from", "to", "q"] : []),
-        ...(path === "/api/balances" ? ["instrument", "metric", "latestOffset", "view"] : []),
-      ]
-    : path === "/api/artifacts"
-      ? ["source", "cursor"]
-      : path === "/api/filter-options"
-        ? ["kind", "view"]
-        : [];
+  // Accepted parameters come from the shared schema and the capabilities this
+  // Worker advertises in /api/meta, so the two cannot drift apart.
+  const allowed = allowedQueryParameters(path, CENTRAL_STORE_CAPABILITIES);
   for (const key of url.searchParams.keys()) {
     const value = url.searchParams.get(key)!;
     if (
@@ -71,7 +65,7 @@ export async function observationApi(
   }
   const offsetText = url.searchParams.get("offset") ?? "0";
   const measureView = url.searchParams.get("view");
-  if (measureView !== null && measureView !== "balances" && measureView !== "summaries")
+  if (measureView !== null && !validMeasureView(measureView, CENTRAL_STORE_CAPABILITIES))
     throw new HttpError(400, "invalid_query");
   const offset = Number(offsetText);
   if (!/^(0|[1-9]\d*)$/.test(offsetText) || !Number.isSafeInteger(offset) || offset > 1_000_000)
@@ -136,7 +130,7 @@ export async function observationApi(
       apiVersion: 1,
       parsingHealth,
       source: { kind: "central-store", classification: "financial" },
-      capabilities: { readOnly: true, rawEvidence: true, liveCollectors: false },
+      capabilities: CENTRAL_STORE_CAPABILITIES,
     } satisfies ApiMetadata);
   }
   if (path === "/api/overview") return boundedCollections({ ...(await queries.overview(store)) });
