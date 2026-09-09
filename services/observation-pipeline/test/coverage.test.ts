@@ -5,6 +5,7 @@
 // and the shadow comparison route exposes identifiers only.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
+import { publicationStatements } from "../src/publication-gate.ts";
 import { parseJob, sweep } from "../src/worker.ts";
 import { seedArtifact, startPipeline } from "./harness.ts";
 import {
@@ -19,6 +20,7 @@ const RELATIONS = {
   fetchArtifacts: "observation_fetch_artifacts",
   fetchRuns: "observation_fetch_runs",
   parseRuns: "parse_runs",
+  publishedParseRuns: "published_parse_runs",
 };
 
 let mf: Miniflare;
@@ -189,7 +191,11 @@ test("a claim on a pending parse run is invisible to coverage-v1 until the run p
       `WITH ${snapshotCtes(RELATIONS, { policy: "coverage-v1" })} SELECT artifact_id FROM current_snapshots WHERE parser_name='smbc-direct-balance'`,
     ).then((row) => row?.artifact_id);
   expect(await artifact()).toBe(300);
+  // Publishing is what makes the claim count: status alone is not adoption
+  // since the publication gate (docs/publication-gate.md).
   await env.DB.prepare("UPDATE parse_runs SET status='ok' WHERE id=?").bind(pending!.id).run();
+  expect(await artifact()).toBe(300);
+  await env.DB.batch(publicationStatements(env.DB, pending!.id, "2026-09-08T00:00:00.000Z"));
   expect(await artifact()).toBe(303);
   await env.DB.prepare(
     "UPDATE dataset_snapshot_policies SET policy_id='legacy-warning-compat-v1' WHERE parser_name='smbc-direct-balance'",
