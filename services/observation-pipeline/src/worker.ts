@@ -1226,7 +1226,10 @@ export async function snapshotPolicyComparison(env: Env): Promise<Response> {
   ).all<SnapshotPolicyComparisonRow>();
   const datasets = new Map<string, PolicyComparison>();
   for (const row of rows.results) {
-    const key = `${row.source_id} ${row.parser_name} ${row.dataset}`;
+    // NUL cannot occur in a source id, parser name or dataset, so it is a
+    // safe composite-key separator; written as an escape so the file stays
+    // text for grep, diff and review tooling.
+    const key = `${row.source_id}\u0000${row.parser_name}\u0000${row.dataset}`;
     let entry = datasets.get(key);
     if (!entry) {
       entry = {

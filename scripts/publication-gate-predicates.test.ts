@@ -53,8 +53,9 @@ const PREDICATE_ALLOW_LIST: Record<string, number> = {
 const OK_STATUS_ALLOW_LIST: Record<string, number> = {
   // successfulParses (the named execution fact) and the legacy rule.
   "packages/read-model/src/concepts.ts": 2,
-  // Writer: publish batch, the duplicate-attempt skip and the job close.
-  "services/observation-pipeline/src/worker.ts": 6,
+  // Writer: publish batch, the duplicate-attempt skip, the job close, and the
+  // comment that explains when contract v2 rows become visible.
+  "services/observation-pipeline/src/worker.ts": 7,
   // Writer: the projection statements, repair selection and module note.
   "services/observation-pipeline/src/publication-gate.ts": 6,
   // Identity writer: interprets every successful run, published or not.
