@@ -3,6 +3,7 @@ import {
   type EvidenceMeta,
 } from "../../../poc/observation-pipeline/shared/evidence-contract";
 import { authenticate } from "./auth";
+import { commandApi, isCommandPath } from "./command-api";
 import { observationApi } from "./observation-api";
 import { eventsApi } from "./events-api";
 import { identityApi } from "./identity-api";
@@ -12,6 +13,7 @@ import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw
 
 const PREFIX = "/api/evidence/v1";
 function classify(path: string): string {
+  if (isCommandPath(path)) return "command";
   if (path === `${PREFIX}/meta`) return "meta";
   if (/^\/api\/evidence\/v1\/sources\/[^/]+\/runs$/.test(path)) return "source_runs";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts$/.test(path)) return "run_artifacts";
@@ -23,7 +25,11 @@ function classify(path: string): string {
 }
 
 async function route(request: Request, env: Env, url: URL): Promise<Response> {
-  await authenticate(request, env);
+  const subject = await authenticate(request, env);
+  // The only non-GET boundary of this Worker (A09). Everything outside
+  // /api/command/v1/* stays GET-only.
+  const commandResponse = await commandApi(request, env, url, subject);
+  if (commandResponse) return commandResponse;
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
   const identityResponse = await catalogue(() => identityApi(request, env, url));
