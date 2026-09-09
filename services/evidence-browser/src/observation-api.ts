@@ -18,6 +18,7 @@ import {
   validMeasureView,
 } from "../../../poc/observation-pipeline/shared/api-schema";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
+import { eventsV2Available } from "./events-api";
 import { identityReadMode } from "./identity-read";
 
 /** Validated request scope. Each route passes only the keys its reader query accepts. */
@@ -131,7 +132,9 @@ export async function observationApi(
       apiVersion: 1,
       parsingHealth: await reader.parsingHealth(),
       source: { kind: "central-store", classification: "financial" },
-      capabilities: CENTRAL_STORE_CAPABILITIES,
+      // What this server can actually serve, not what the contract defaults to:
+      // eventsV2 depends on the A10 projection being present (A10).
+      capabilities: { ...CENTRAL_STORE_CAPABILITIES, eventsV2: await eventsV2Available(env) },
     } satisfies ApiMetadata);
   }
   if (path === "/api/overview") return boundedCollections({ ...(await reader.overview()) });

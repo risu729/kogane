@@ -164,6 +164,7 @@ describe("shared contract pin", () => {
       organizedDisplay: true,
       financialProducts: true,
       evidenceHistory: true,
+      eventsV2: false,
     });
   });
 });
