@@ -19,6 +19,9 @@ import {
   OBSERVATION_TABLES,
   type ObservationKind,
   type ObservationTable,
+  successfulFetchRuns,
+  unitScopedDataset,
+  unitSucceeded,
   visibleEvidence,
 } from "./concepts";
 import {
@@ -64,6 +67,32 @@ export const OVERVIEW_FETCH_RUNS_SQL = `SELECT id, source_id, tool, external_run
 export const OVERVIEW_PARSE_RUNS_SQL = `SELECT id, fetch_artifact_id, parser_name, parser_version, parsed_at, status,
        error, warnings_json, superseded_by_parse_run_id
   FROM ${visibleEvidence.parseRuns} ORDER BY id DESC LIMIT ${PAGE_LIMIT}`;
+
+/**
+ * D13 partial-update signal: fetch runs that did NOT succeed as a whole, on a
+ * dataset whose policy row names the `unit` scope, where at least one unit was
+ * nevertheless parseable. One row per (source, dataset, run) with how many
+ * units this run refreshed and how many it left on their previous evidence.
+ *
+ * This is what stops a partial run from being presented as a complete refresh
+ * of a dataset: the reader can say "some units updated" and name the counts.
+ * Identifiers and counts only — no unit keys, amounts or failure text, since
+ * a unit key is a provider-owned card/connection label. The list is empty for
+ * every dataset on the seeded `run` scope, so the response shape of every
+ * existing dataset is unchanged.
+ */
+export const UNIT_UPDATES_SQL = `SELECT fa.source_id, fa.dataset, fa.fetch_run_id,
+       MAX(fa.fetched_at) AS fetched_at,
+       COUNT(DISTINCT CASE WHEN au.unit_status = 'success' THEN fa.fetch_unit_key END) AS updated_units,
+       COUNT(DISTINCT CASE WHEN au.unit_status <> 'success' THEN fa.fetch_unit_key END) AS stale_units
+  FROM ${visibleEvidence.fetchArtifacts} fa
+  JOIN ${visibleEvidence.fetchRuns} f ON f.id = fa.fetch_run_id
+  JOIN ${unitSucceeded.relation} au ON au.fetch_artifact_id = fa.id
+ WHERE NOT (${successfulFetchRuns.predicate("f")})
+   AND ${unitScopedDataset.predicate("fa")}
+ GROUP BY fa.source_id, fa.dataset, fa.fetch_run_id
+HAVING updated_units > 0
+ ORDER BY fa.fetch_run_id DESC LIMIT ${PAGE_LIMIT}`;
 
 /** Confirms the sealed read view is reachable before health is reported. */
 export const VISIBLE_EVIDENCE_PROBE_SQL = `SELECT id FROM ${visibleEvidence.fetchArtifacts} LIMIT 1`;

@@ -68,6 +68,7 @@ const FULL_TRANSACTION_SCOPE = {
 function everyRead(reader: ObservationReader): Promise<unknown>[] {
   return [
     reader.overview(),
+    reader.unitUpdates(),
     reader.parsingHealth(),
     reader.listTransactions(NO_FILTER),
     reader.listTransactions(FULL_TRANSACTION_SCOPE),
@@ -114,11 +115,16 @@ describe("read model over the production schema", () => {
   test("every read compiles against the migrated views and is empty on an empty store", async () => {
     const reader = createObservationReader(sqliteExecutor(migratedDatabase()));
     const results = await Promise.all(everyRead(reader));
-    const [overview, health, ...rest] = results as [
-      { counts: { table: string; rows: number }[]; sources: unknown[] },
+    const [overview, unitUpdates, health, ...rest] = results as [
+      { counts: { table: string; rows: number }[]; sources: unknown[]; unitUpdates?: unknown },
+      unknown[],
       { pending: number; running: number; failed: number },
       ...unknown[],
     ];
+    // D13: no dataset is seeded on the unit scope, so there is no partial
+    // update to report and `overview` omits the key entirely.
+    expect(unitUpdates).toEqual([]);
+    expect(Object.hasOwn(overview, "unitUpdates")).toBe(false);
     expect(overview.counts.map((count) => count.table)).toEqual([
       "sources",
       "fetch_runs",
@@ -230,8 +236,18 @@ describe("named concepts in the final SQL", () => {
 
   test("current lists apply the active-state projection and snapshot membership", () => {
     const active = activeStateProjection.predicate;
-    expect(active).toBe(
-      "EXISTS (SELECT 1 FROM published_parse_runs published WHERE published.parse_run_id = p.id) AND f.status = 'success' AND f.failure_count = 0",
+    // D13: publication AND the dataset's eligibility scope. The run-scope half
+    // is the pre-PR-14 text verbatim; the unit-scope half can only fire for a
+    // dataset an operator named in `dataset_snapshot_policies`, and no row is
+    // seeded that way, so the served set is unchanged.
+    expect(active).toContain(
+      "EXISTS (SELECT 1 FROM published_parse_runs published WHERE published.parse_run_id = p.id) AND (f.status = 'success' AND f.failure_count = 0",
+    );
+    expect(active).toContain("unit_policy.unit_scope = 'unit'");
+    expect(active).toContain("artifact_unit.unit_status = 'success'");
+    expect(unitParseable.predicate("f")).toBe("f.status = 'success' AND f.failure_count = 0");
+    expect(unitParseable.policyPredicate("f", "fa")).toBe(
+      active.slice(active.indexOf(" AND (") + 5),
     );
     for (const name of ["transactions", "latestBalances", "positions", "positionValuations"])
       expect(texts[name], name).toContain(active);
@@ -296,6 +312,7 @@ describe("named concepts in the final SQL", () => {
     );
     // Parse eligibility keeps the run-level rule until unit-independent-v1 is enabled.
     expect(unitParseable.scope).toBe("run");
+    expect(unitParseable.unitPolicy).toBe("unit-independent-v1");
     expect(unitParseable.predicate("r")).toBe(successfulFetchRuns.predicate("r"));
     expect(unitParseable.predicate("r")).toBe("r.status = 'success' AND r.failure_count = 0");
     expect(snapshotAdoptable.ctes).toBe(completeSnapshotCandidates.ctes);
@@ -307,6 +324,27 @@ describe("named concepts in the final SQL", () => {
     expect(db.query(`SELECT ${economicallySummable.predicate()} AS summable`).get()).toEqual({
       summable: 0,
     });
+    // The unit scope compiles on the production schema and is inert: every
+    // seeded policy row is `run`, so no artifact is admitted by it (D13).
+    expect(
+      db
+        .query(
+          `SELECT COUNT(*) AS n FROM observation_fetch_artifacts fa
+             JOIN observation_fetch_runs f ON f.id = fa.fetch_run_id
+            WHERE ${unitParseable.unitPredicate("fa")}`,
+        )
+        .get(),
+    ).toEqual({ n: 0 });
+    expect(
+      db
+        .query("SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE unit_scope <> 'run'")
+        .get(),
+    ).toEqual({ n: 0 });
+    expect(
+      db
+        .query("SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE snapshot_selection <> 1")
+        .get(),
+    ).toEqual({ n: 0 });
   });
 
   test("the publication gate decides every current read and every recorded read", () => {

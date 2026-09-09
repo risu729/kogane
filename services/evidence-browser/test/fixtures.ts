@@ -89,6 +89,12 @@ export async function seedRun(
     body?: string;
     dataset?: string;
     fetchUnitKey?: string;
+    /**
+     * Several independent fetch units in one run, each with its own terminal
+     * report and its own artifacts (design review D13). `count` artifacts are
+     * created per unit; `options.count` still creates unattributed artifacts.
+     */
+    units?: { key: string; outcome: "success" | "failed"; count: number }[];
   } = {},
 ) {
   const { runId } = await post("/v1/runs", {
@@ -105,7 +111,24 @@ export async function seedRun(
         terminalReportRequired: false,
       })
     : null;
-  for (let i = 0; i < (options.count ?? 0); i++) {
+  const extraUnits: { unitId: number; spec: { key: string; outcome: string; count: number } }[] =
+    [];
+  for (const spec of options.units ?? []) {
+    const created = await post(`/v1/runs/${runId}/units`, {
+      unitKind: "connection",
+      unitKey: spec.key,
+      terminalReportRequired: true,
+    });
+    extraUnits.push({ unitId: created.unitId, spec });
+  }
+  const plan: { index: number; unitId: number | null }[] = [];
+  for (let i = 0; i < (options.count ?? 0); i++)
+    plan.push({ index: i, unitId: unit?.unitId ?? null });
+  for (const entry of extraUnits)
+    for (let i = 0; i < entry.spec.count; i++)
+      plan.push({ index: plan.length, unitId: entry.unitId });
+  for (const step of plan) {
+    const i = step.index;
     const bytes = new TextEncoder().encode(
       options.body ?? JSON.stringify({ synthetic: true, index: i }),
     );
@@ -130,7 +153,7 @@ export async function seedRun(
     const result = await post(`/v1/runs/${runId}/artifacts`, {
       artifactKey,
       ...(options.dataset ? { dataset: options.dataset } : {}),
-      ...(unit ? { fetchUnitId: unit.unitId } : {}),
+      ...(step.unitId === null ? {} : { fetchUnitId: step.unitId }),
       artifactRole: "collector_summary",
       payloadFidelity: "generated",
       containerKind: "single",
@@ -142,6 +165,17 @@ export async function seedRun(
     });
     artifacts.push({ artifactKey, sha256, descriptorSha256: result.descriptorSha256 });
   }
+  for (const entry of extraUnits)
+    await post(`/v1/units/${entry.unitId}/reports`, {
+      reportKey: "terminal",
+      reportKind: "terminal",
+      normalizedOutcome: entry.spec.outcome,
+      completedAtMs: 1_788_324_000_000,
+      completedAtBasis: "manifest",
+      declaredArtifactCount: entry.spec.count,
+      artifactCountScope: "direct",
+      ...(entry.spec.outcome === "success" ? {} : { safeFailureCode: "collector-failed" }),
+    });
   await post(`/v1/runs/${runId}/reports`, {
     reportKey: "terminal",
     reportKind: "terminal",

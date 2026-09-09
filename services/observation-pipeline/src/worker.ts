@@ -53,6 +53,10 @@ interface ArtifactRow {
   window_end: string | null;
   run_status: "success" | "partial" | "failed";
   run_failure_count: number;
+  /** The artifact's own fetch-unit terminal outcome (0037); NULL when it has no unit. */
+  unit_outcome: string | null;
+  /** 'success' when that unit is provably complete, else 'failed'; NULL when it has no unit. */
+  unit_status: "success" | "failed" | null;
 }
 interface Job {
   fetch_artifact_id: number;
@@ -60,14 +64,21 @@ interface Job {
   parser_version: string;
   attempts: number;
 }
-// Parse eligibility is the D13 `unitParseable` predicate at its default `run`
-// scope: the whole parent run succeeded with no failure evidence. The run
-// outcome is selected as well so every coverage claim records it.
+// Parse eligibility is the D13 `unitParseable` predicate, driven by the
+// dataset's `dataset_snapshot_policies.unit_scope` row: `run` (the default and
+// the only seeded value) requires the whole parent run to have succeeded;
+// `unit` also admits an artifact whose own fetch unit succeeded on a sealed
+// partial run. Every lane creates jobs through this same statement, so a
+// partial run can only ever produce jobs for its eligible units. The run
+// outcome and the unit outcome are selected so every coverage claim records
+// which of the two allowed the parse.
 const artifactSql = `SELECT a.*,o.blob_key,o.byte_size,r.status AS run_status,r.failure_count AS run_failure_count,
+ (SELECT au.unit_outcome FROM observation_fetch_artifact_units au WHERE au.fetch_artifact_id=a.id) AS unit_outcome,
+ (SELECT au.unit_status FROM observation_fetch_artifact_units au WHERE au.fetch_artifact_id=a.id) AS unit_status,
  coalesce((SELECT start_value FROM artifact_ranges q WHERE q.fetch_artifact_id=a.id AND q.range_kind='requested' ORDER BY q.id LIMIT 1),r.window_start) AS window_start,
  coalesce((SELECT end_value FROM artifact_ranges q WHERE q.fetch_artifact_id=a.id AND q.range_kind='requested' ORDER BY q.id LIMIT 1),r.window_end) AS window_end
  FROM observation_fetch_artifacts a JOIN observation_fetch_runs r ON r.id=a.fetch_run_id
- JOIN raw_objects o ON o.sha256=a.sha256 WHERE ${unitParseable.predicate("r")}`;
+ JOIN raw_objects o ON o.sha256=a.sha256 WHERE ${unitParseable.policyPredicate("r", "a")}`;
 
 export function artifactMeta(row: ArtifactRow): ArtifactMeta {
   return {
@@ -75,6 +86,11 @@ export function artifactMeta(row: ArtifactRow): ArtifactMeta {
     sourceId: row.source_id,
     runStatus: row.run_status,
     runFailureCount: row.run_failure_count,
+    // `artifactSql` already applied the policy: a row whose parent run is not
+    // a clean success can only have been admitted by `unit-independent-v1`,
+    // and the parser's own precondition may rely on the unit instead (D13).
+    unitScopeEligibility:
+      row.run_status === "success" && row.run_failure_count === 0 ? null : "unit-independent-v1",
     ...(row.window_start && row.window_end
       ? { runWindow: { from: row.window_start, to: row.window_end } }
       : {}),
@@ -280,22 +296,40 @@ function issueInsert(db: D1Database, id: number, rows: ParseIssue[]): D1Prepared
     .bind(id, JSON.stringify(rows));
 }
 
+/**
+ * The eligibility scope this parse was admitted under. `artifactSql` already
+ * refused every ineligible artifact, so an artifact whose parent run is not a
+ * clean success can only have arrived through `unit-independent-v1`.
+ */
+export function claimUnitScope(
+  parent: Pick<ArtifactRow, "run_status" | "run_failure_count">,
+): "run" | "unit" {
+  return parent.run_status === "success" && parent.run_failure_count === 0 ? "run" : "unit";
+}
+
 function coverageInsert(
   db: D1Database,
   id: number,
   rows: CoverageClaim[],
-  parent: Pick<ArtifactRow, "run_status" | "run_failure_count">,
+  parent: Pick<ArtifactRow, "run_status" | "run_failure_count" | "unit_outcome">,
 ): D1PreparedStatement {
   return db
     .prepare(
-      `INSERT INTO parse_coverage_claims(parse_run_id,claim_id,scope_key,mode,completeness,membership_complete,observed_count,expected_count,evidence_refs_json,policy_version,failure_cause,absence_meaning,parent_run_status,parent_run_failure_count)
+      `INSERT INTO parse_coverage_claims(parse_run_id,claim_id,scope_key,mode,completeness,membership_complete,observed_count,expected_count,evidence_refs_json,policy_version,failure_cause,absence_meaning,parent_run_status,parent_run_failure_count,unit_scope,unit_report_outcome)
        SELECT ?1,json_extract(value,'$.claimId'),json_extract(value,'$.scopeKey'),json_extract(value,'$.mode'),json_extract(value,'$.completeness'),
          CASE WHEN json_extract(value,'$.membershipComplete') THEN 1 ELSE 0 END,
          json_extract(value,'$.observedCount'),json_extract(value,'$.expectedCount'),json_extract(value,'$.evidenceRefs'),
-         json_extract(value,'$.policyVersion'),json_extract(value,'$.failureCause'),json_extract(value,'$.absenceMeaning'),?3,?4
+         json_extract(value,'$.policyVersion'),json_extract(value,'$.failureCause'),json_extract(value,'$.absenceMeaning'),?3,?4,?5,?6
        FROM json_each(?2)`,
     )
-    .bind(id, JSON.stringify(rows), parent.run_status, parent.run_failure_count);
+    .bind(
+      id,
+      JSON.stringify(rows),
+      parent.run_status,
+      parent.run_failure_count,
+      claimUnitScope(parent),
+      parent.unit_outcome,
+    );
 }
 
 function numericVersion(value: string): number[] {
@@ -1213,7 +1247,7 @@ interface PolicyComparison {
  */
 export async function snapshotPolicyComparison(env: Env): Promise<Response> {
   const policies = await env.DB.prepare(
-    "SELECT source_id,dataset,parser_name,policy_id,policy_version,required_parser_version,replaces_previous_on_complete_empty,unit_scope,updated_at_ms FROM dataset_snapshot_policies ORDER BY parser_name,dataset",
+    "SELECT source_id,dataset,parser_name,policy_id,policy_version,required_parser_version,replaces_previous_on_complete_empty,unit_scope,snapshot_selection,updated_at_ms FROM dataset_snapshot_policies ORDER BY parser_name,dataset",
   ).all();
   const rows = await env.DB.prepare(
     snapshotPolicyComparisonSql(SNAPSHOT_RELATIONS),

@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ArtifactMeta, CoverageClaim, Observation, ParseIssue } from "./types.ts";
+import { unitScopePolicySql, unitScopeSuccessSql } from "./snapshot-query.ts";
 
 const POC_ROOT = dirname(import.meta.dir); // poc/observation-pipeline/
 
@@ -22,6 +23,12 @@ export interface Store {
  * compatible migrations because fetch-run outcome and artifact-level collector identity
  * are required to interpret observations; other unknown versions remain
  * fail-closed.
+ *
+ * Purely additive objects do not need a bump: a new `CREATE TABLE/VIEW IF NOT
+ * EXISTS` in schema.sql appears on the next open of an existing store, and
+ * nothing already stored is reinterpreted. `fetch_unit_outcomes` and
+ * `observation_fetch_artifact_units` (D13) are added that way, empty, which
+ * leaves every existing store on the run-scoped rule.
  */
 const SCHEMA_VERSION = 6;
 
@@ -97,6 +104,21 @@ export function openStore(stateDir?: string): Store {
       ),
     )();
   }
+  // Unit-scoped eligibility (0037): the additive policy and claim columns come
+  // from the production migration, so the two schemas cannot drift. Its
+  // `observation_fetch_artifact_units` view is `CREATE VIEW IF NOT EXISTS` and
+  // schema.sql above already defined the PoC's own projection of the same
+  // shape, so applying the file here leaves that view untouched.
+  if (!storeColumnExists(db, "parse_coverage_claims", "unit_scope")) {
+    db.transaction(() =>
+      db.exec(
+        readFileSync(
+          join(POC_ROOT, "../../services/raw-evidence/migrations/0037_unit_scope_eligibility.sql"),
+          "utf8",
+        ),
+      ),
+    )();
+  }
   if (found === 0) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   return { db, blobDir };
 }
@@ -104,6 +126,13 @@ export function openStore(stateDir?: string): Store {
 function storeTableExists(db: Database, name: string): boolean {
   return (
     db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1").get(name) !== null
+  );
+}
+
+function storeColumnExists(db: Database, table: string, column: string): boolean {
+  if (!storeTableExists(db, table)) return false;
+  return (db.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).some(
+    (row) => row.name === column,
   );
 }
 
@@ -290,7 +319,9 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
       `SELECT a.id, a.source_id, f.status AS run_status,
               f.failure_count AS run_failure_count, f.window_start, f.window_end,
               a.dataset, a.artifact_key, a.fetch_unit_key, a.statement_state, a.period,
-              a.url, a.mime, a.fetched_at, a.sha256
+              a.url, a.mime, a.fetched_at, a.sha256,
+              CASE WHEN ${unitScopePolicySql("a")} AND ${unitScopeSuccessSql("a")}
+                   THEN 1 ELSE 0 END AS unit_scope_admitted
        FROM fetch_artifacts a
        JOIN fetch_runs f ON f.id = a.fetch_run_id
        ORDER BY a.id`,
@@ -311,6 +342,7 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
     mime: string;
     fetched_at: string;
     sha256: string;
+    unit_scope_admitted: number;
   }[];
   return rows.map((row) => {
     if ((row.window_start === null) !== (row.window_end === null)) {
@@ -330,6 +362,11 @@ export function listArtifacts(store: Store): ArtifactMeta[] {
       sourceId: row.source_id,
       runStatus: row.run_status,
       runFailureCount: row.run_failure_count,
+      // D13: the artifact's dataset names the `unit` scope and its own fetch
+      // unit reported terminal success, so a parser precondition about "the
+      // run succeeded" may be met by the unit instead. Null for every dataset
+      // until an operator changes a policy row.
+      unitScopeEligibility: row.unit_scope_admitted === 1 ? "unit-independent-v1" : null,
       ...(row.window_start && row.window_end
         ? { runWindow: { from: row.window_start, to: row.window_end } }
         : {}),
@@ -455,14 +492,24 @@ export function insertCoverageClaims(
   store: Store,
   parseRunId: number,
   claims: readonly CoverageClaim[],
-  parentRun: { status: "success" | "partial" | "failed"; failureCount: number },
+  parentRun: {
+    status: "success" | "partial" | "failed";
+    failureCount: number;
+    /** The artifact's own terminal unit outcome, when it has a fetch unit (D13). */
+    unitOutcome?: string | null;
+  },
 ): void {
+  // `unit_scope` records which D13 eligibility scope admitted this parse: a
+  // parent run that is not a clean success can only have been parsed under
+  // `unit-independent-v1`.
+  const unitScope = parentRun.status === "success" && parentRun.failureCount === 0 ? "run" : "unit";
   const statement = store.db.query(
     `INSERT INTO parse_coverage_claims
        (parse_run_id, claim_id, scope_key, mode, completeness, membership_complete,
         observed_count, expected_count, evidence_refs_json, policy_version, failure_cause,
-        absence_meaning, parent_run_status, parent_run_failure_count)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`,
+        absence_meaning, parent_run_status, parent_run_failure_count, unit_scope,
+        unit_report_outcome)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)`,
   );
   for (const claim of claims) {
     statement.run(
@@ -480,8 +527,42 @@ export function insertCoverageClaims(
       claim.absenceMeaning,
       parentRun.status,
       parentRun.failureCount,
+      unitScope,
+      parentRun.unitOutcome ?? null,
     );
   }
+}
+
+/** The terminal outcome of the unit an artifact belongs to, or null (D13). */
+export function fetchUnitOutcome(store: Store, artifact: { id: number }): string | null {
+  const row = store.db
+    .query("SELECT unit_outcome FROM observation_fetch_artifact_units WHERE fetch_artifact_id = ?1")
+    .get(artifact.id) as { unit_outcome: string } | null;
+  return row?.unit_outcome ?? null;
+}
+
+/**
+ * Record one fetch unit's terminal outcome (D13). Production writes this
+ * through Layer A's `fetch_unit_reports`; the PoC store has no unit hierarchy,
+ * so the outcome is attached to the run's unit key directly.
+ */
+export function insertFetchUnitOutcome(
+  store: Store,
+  outcome: {
+    fetchRunId: number;
+    unitKey: string;
+    unitOutcome: "success" | "partial" | "failed" | "human_required" | "cancelled" | "unknown";
+    failureCode?: string;
+  },
+): void {
+  store.db
+    .query(
+      `INSERT INTO fetch_unit_outcomes (fetch_run_id, unit_key, unit_outcome, unit_failure_code)
+       VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT (fetch_run_id, unit_key) DO UPDATE SET
+         unit_outcome = excluded.unit_outcome, unit_failure_code = excluded.unit_failure_code`,
+    )
+    .run(outcome.fetchRunId, outcome.unitKey, outcome.unitOutcome, outcome.failureCode ?? null);
 }
 
 /**
