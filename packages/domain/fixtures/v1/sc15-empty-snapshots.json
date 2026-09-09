@@ -1,0 +1,33 @@
+{
+  "scenario": "SC15",
+  "slice": "V1",
+  "title": "Four meanings of an empty latest fetch",
+  "synthetic": true,
+  "cases": [
+    {
+      "name": "complete holdings snapshot with zero rows",
+      "claim": { "claimId": "cov:1", "scopeKey": "broker:foreign-positions:container", "mode": "complete-container", "completeness": "complete", "membershipComplete": true, "observedCount": 0, "expectedCount": 0, "evidenceRefs": ["ev:page:1:empty-table"], "policyVersion": "coverage-v1", "failureCause": null, "absenceMeaning": "complete-empty" },
+      "expected": { "replacesPrevious": true, "reasonCode": "complete_empty_container" }
+    },
+    {
+      "name": "zero rows after fetching only part of the pages",
+      "claim": { "claimId": "cov:2", "scopeKey": "broker:foreign-positions:container", "mode": "complete-container", "completeness": "partial", "membershipComplete": false, "observedCount": 0, "expectedCount": null, "evidenceRefs": ["ev:page:1"], "policyVersion": "coverage-v1", "failureCause": "page_missing", "absenceMeaning": "not-observed" },
+      "expected": { "replacesPrevious": false, "reasonCode": "no_new_observation" }
+    },
+    {
+      "name": "authentication failed, raw not fetched",
+      "claim": { "claimId": "cov:3", "scopeKey": "broker:foreign-positions:container", "mode": "complete-container", "completeness": "unknown", "membershipComplete": false, "observedCount": 0, "expectedCount": null, "evidenceRefs": ["ev:run:terminal-report"], "policyVersion": "coverage-v1", "failureCause": "auth_failed", "absenceMeaning": "not-observed" },
+      "expected": { "replacesPrevious": false, "reasonCode": "no_new_observation" }
+    },
+    {
+      "name": "complete 30-day history window with zero events",
+      "claim": { "claimId": "cov:4", "scopeKey": "bank:history:2026-08-01..2026-08-31", "mode": "window", "completeness": "complete", "membershipComplete": true, "observedCount": 0, "expectedCount": null, "evidenceRefs": ["ev:history:empty"], "policyVersion": "coverage-v1", "failureCause": null, "absenceMeaning": "window-no-events" },
+      "expected": { "replacesPrevious": false, "reasonCode": "window_absence_only" }
+    },
+    {
+      "name": "partial pages with zero rows and no failure recorded",
+      "claim": { "claimId": "cov:5", "scopeKey": "broker:foreign-positions:container", "mode": "complete-container", "completeness": "partial", "membershipComplete": false, "observedCount": 0, "expectedCount": null, "evidenceRefs": ["ev:page:1"], "policyVersion": "coverage-v1", "failureCause": null, "absenceMeaning": "unknown" },
+      "expected": { "replacesPrevious": false, "reasonCode": "partial_membership" }
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "scenario": "SC12",
+  "slice": "V3",
+  "title": "Only some activities extend the expiry deadline",
+  "synthetic": true,
+  "program": "program-a",
+  "rule": {
+    "ruleRef": "rule:program-a:inactivity-expiry:v1",
+    "verified": true,
+    "extensionMonths": 12,
+    "qualifyingActivityKinds": ["earn", "redeem"],
+    "deadlineZone": "Asia/Tokyo",
+    "endOfMonthPolicy": "clamp"
+  },
+  "activities": [
+    { "ref": "act:1", "kind": "earn", "date": { "kind": "local-date", "value": "2026-03-01", "zone": "Asia/Tokyo", "basis": "provider" } },
+    { "ref": "act:2", "kind": "family-transfer-in", "date": { "kind": "local-date", "value": "2026-08-01", "zone": "Asia/Tokyo", "basis": "provider" } }
+  ],
+  "providerDisplayedExpiry": { "kind": "local-date", "value": "2027-08-01", "zone": "Asia/Tokyo", "basis": "provider" },
+  "historyCoverage": { "completeness": "complete", "earliestObserved": "2026-01-01" },
+  "expected": {
+    "lastQualifyingDate": "2026-03-01",
+    "computedExpiry": "2027-03-01",
+    "naiveMaxDateExpiry": "2027-08-01",
+    "providerDisplayedExpiry": "2027-08-01",
+    "providerAndComputedDiffer": true
+  },
+  "edgeCases": [
+    { "from": "2024-01-31", "months": 1, "policy": "clamp", "expect": "2024-02-29" },
+    { "from": "2023-01-31", "months": 1, "policy": "clamp", "expect": "2023-02-28" },
+    { "from": "2024-02-29", "months": 12, "policy": "clamp", "expect": "2025-02-28" },
+    { "from": "2024-02-29", "months": 1, "policy": "preserve-end-of-month", "expect": "2024-03-31" },
+    { "from": "2024-03-31", "months": -1, "policy": "clamp", "expect": "2024-02-29" },
+    { "from": "2025-12-15", "months": 3, "policy": "clamp", "expect": "2026-03-15" }
+  ],
+  "variants": {
+    "unverified-rule": { "verified": false, "expectedErrorCode": "needs_rule_verification" },
+    "partial-history": { "historyCoverage": { "completeness": "partial", "earliestObserved": "2026-06-01" }, "expectedCompleteness": "partial" }
+  }
+}

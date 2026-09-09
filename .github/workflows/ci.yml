@@ -45,6 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         package:
+          - packages/domain
           - packages/evidence-contract
           - packages/read-model
           - poc/cloudflare-browser-run

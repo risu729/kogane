@@ -1,0 +1,81 @@
+{
+  "scenario": "SC06",
+  "slice": "V1",
+  "title": "The MoneyForward connection is known but the terminal account is not",
+  "synthetic": true,
+  "typedRelations": [
+    { "relationId": "rel:conn-x:yen", "kind": "connection_contains", "left": "connection:mf:x", "right": "account:direct:yen-ordinary", "validity": null, "evidenceRefs": ["ev:mf:connection-x"], "status": "adopted", "decisionRevisionRef": "rev:conn-x:1" },
+    { "relationId": "rel:conn-x:linked", "kind": "connection_contains", "left": "connection:mf:x", "right": "account:direct:linked-deposit", "validity": null, "evidenceRefs": ["ev:mf:connection-x"], "status": "adopted", "decisionRevisionRef": "rev:conn-x:1" },
+    { "relationId": "rel:conn-x:fx", "kind": "connection_contains", "left": "connection:mf:x", "right": "account:direct:foreign-currency", "validity": null, "evidenceRefs": ["ev:mf:connection-x"], "status": "adopted", "decisionRevisionRef": "rev:conn-x:1" },
+    { "relationId": "rel:mf-line-1:same", "kind": "same_account", "left": "source-account:mf:x:line-1", "right": "account:direct:yen-ordinary", "validity": null, "evidenceRefs": [], "status": "proposed", "decisionRevisionRef": "rev:mf-line-1:1" }
+  ],
+  "decisionRevisions": [
+    {
+      "revisionId": "rev:conn-x:1",
+      "decisionId": "decision:conn-x",
+      "kind": "acceptance",
+      "actor": { "kind": "human", "id": "operator:1", "verification": "server" },
+      "method": "manual",
+      "recordedAt": "2026-09-01T09:00:00+09:00",
+      "reason": "Connection X lists exactly these three direct accounts.",
+      "targetRefs": ["rel:conn-x:yen", "rel:conn-x:linked", "rel:conn-x:fx"],
+      "evidenceRefs": ["ev:mf:connection-x"],
+      "supersedesRevisionRef": null,
+      "planDigest": "plan-digest:synthetic:conn-x:1"
+    },
+    {
+      "revisionId": "rev:mf-line-1:1",
+      "decisionId": "decision:mf-line-1",
+      "kind": "proposal",
+      "actor": { "kind": "agent", "id": "agent:reconciler", "verification": "server" },
+      "method": "heuristic",
+      "recordedAt": "2026-09-01T09:05:00+09:00",
+      "reason": "Description and amount match the yen ordinary account, but no terminal account id is present.",
+      "targetRefs": ["rel:mf-line-1:same"],
+      "evidenceRefs": [],
+      "supersedesRevisionRef": null,
+      "planDigest": null
+    }
+  ],
+  "target": { "metricId": "deposit.balance", "unitRef": "JPY" },
+  "candidates": [
+    {
+      "ref": "m-direct-yen",
+      "scopeRef": "scope:direct:yen-ordinary",
+      "metricId": "deposit.balance",
+      "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "60000", "scale": 0 }, "normalizationVersion": "decimal-v1" } },
+      "coverage": { "completeness": "complete" },
+      "ownership": { "kind": "full" },
+      "authorityRank": 0
+    },
+    {
+      "ref": "m-direct-linked",
+      "scopeRef": "scope:direct:linked-deposit",
+      "metricId": "deposit.balance",
+      "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "100000", "scale": 0 }, "normalizationVersion": "decimal-v1" } },
+      "coverage": { "completeness": "complete" },
+      "ownership": { "kind": "full" },
+      "authorityRank": 0
+    },
+    {
+      "ref": "m-mf-line-1",
+      "scopeRef": "scope:mf:x:line-1",
+      "metricId": "deposit.balance",
+      "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "60000", "scale": 0 }, "normalizationVersion": "decimal-v1" } },
+      "coverage": { "completeness": "complete" },
+      "ownership": { "kind": "full" },
+      "authorityRank": 1
+    }
+  ],
+  "scopeRelations": [
+    { "left": "scope:direct:yen-ordinary", "right": "scope:direct:linked-deposit", "relation": "disjoint", "evidenceRefs": ["ev:bank:account-list"], "decisionRef": null }
+  ],
+  "expected": {
+    "adoptedRefs": ["m-direct-linked", "m-direct-yen"],
+    "adoptedTotal": "160000",
+    "unresolved": { "m-mf-line-1": "overlap_unknown" },
+    "completeness": "partial",
+    "connectionContainsStatus": "adopted",
+    "sameAccountStatus": "proposed"
+  }
+}

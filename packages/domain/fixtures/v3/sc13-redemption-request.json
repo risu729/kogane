@@ -1,0 +1,25 @@
+{
+  "scenario": "SC13",
+  "slice": "V3",
+  "title": "Requesting a point conversion does not increase the destination wallet",
+  "synthetic": true,
+  "pointUnit": "points:program-b",
+  "walletUnit": "JPY",
+  "buckets": [
+    { "ref": "bucket:regular", "quantity": "5000", "eligibleForOffer": true },
+    { "ref": "bucket:restricted", "quantity": "3000", "eligibleForOffer": false }
+  ],
+  "offer": { "offerRef": "offer:program-b:transit-charge", "eligibleBuckets": ["bucket:regular"], "ratio": { "numerator": "1", "denominator": "1" }, "ruleVerified": true },
+  "request": { "quantity": "5000" },
+  "stages": [
+    { "stage": "requested", "pointsHeld": "8000", "walletDelta": "0", "inTransit": "0" },
+    { "stage": "debited", "pointsHeld": "3000", "walletDelta": "0", "inTransit": "5000" },
+    { "stage": "credited", "pointsHeld": "3000", "walletDelta": "5000", "inTransit": "0" }
+  ],
+  "expected": {
+    "requestable": "5000",
+    "walletIncreaseAtRequest": "0",
+    "pointsPlusInTransitPlusWalletNeverExceeds": "8000",
+    "unverifiedRuleErrorCode": "needs_rule_verification"
+  }
+}
