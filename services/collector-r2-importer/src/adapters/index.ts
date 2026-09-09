@@ -6,6 +6,7 @@ import {
   type ImportExecution,
   type ImportSource,
   type ImportStepResult,
+  type ResumeKind,
   type ResumeState,
 } from "./contract";
 import { GLOBAL_PASS_ADAPTER } from "./global-pass";
@@ -55,13 +56,24 @@ export const IMPORT_ADAPTERS = {
 export type ImportAdapters = typeof IMPORT_ADAPTERS;
 export type AdapterResult<S extends ImportSource> = Awaited<ReturnType<ImportAdapters[S]["step"]>>;
 
-const ADAPTERS: readonly ImportAdapter[] = Object.values(IMPORT_ADAPTERS);
-const IMPORT_RUN_ROUTES: ReadonlyMap<string, ImportAdapter> = new Map(
-  ADAPTERS.flatMap((adapter) => (adapter.http ? [[adapter.http.importRun, adapter]] : [])),
-);
-const BACKFILL_ROUTES: ReadonlyMap<string, ImportAdapter> = new Map(
-  ADAPTERS.flatMap((adapter) => (adapter.http ? [[adapter.http.backfillPage.path, adapter]] : [])),
-);
+type AdapterRegistry = Readonly<Record<string, ImportAdapter>>;
+
+function routeIndex(
+  registry: AdapterRegistry,
+  select: (adapter: ImportAdapter) => string | undefined,
+): ReadonlyMap<string, ImportAdapter> {
+  const index = new Map<string, ImportAdapter>();
+  for (const adapter of Object.values(registry)) {
+    const path = select(adapter);
+    if (path !== undefined) index.set(path, adapter);
+  }
+  return index;
+}
+
+const importRunPath = (adapter: ImportAdapter) => adapter.http?.importRun;
+const backfillPath = (adapter: ImportAdapter) => adapter.http?.backfillPage.path;
+const IMPORT_RUN_ROUTES = routeIndex(IMPORT_ADAPTERS, importRunPath);
+const BACKFILL_ROUTES = routeIndex(IMPORT_ADAPTERS, backfillPath);
 
 export function importAdapter<S extends ImportSource>(source: S): ImportAdapters[S] {
   return IMPORT_ADAPTERS[source];
@@ -110,27 +122,32 @@ export function reconcilerOutcome(result: ImportStepResult): ImportOutcome {
 const ROUTE_PATTERN = /^\/v1\/[a-z0-9-]+\/(?:import-run|backfill-page)$/u;
 const CONTRACT_VERSION_PATTERN = /^[a-z0-9-]+-v\d+$/u;
 
-/** Registry consistency problems; empty when adapters and reconciler sources agree. */
-export function checkImportAdapterRegistry(): string[] {
+/**
+ * Registry consistency problems; empty when adapters and reconciler sources
+ * agree. The parameters exist so tests can prove the check rejects drift.
+ */
+export function checkImportAdapterRegistry(
+  registry: AdapterRegistry = IMPORT_ADAPTERS,
+  sources: Readonly<Record<string, { readonly resume: ResumeKind }>> = RECONCILER_SOURCES,
+): string[] {
   const problems: string[] = [];
-  const registry: Record<string, ImportAdapter | undefined> = IMPORT_ADAPTERS;
-  for (const source of Object.keys(RECONCILER_SOURCES) as ImportSource[]) {
+  const importRuns = routeIndex(registry, importRunPath);
+  const backfills = routeIndex(registry, backfillPath);
+  for (const [source, spec] of Object.entries(sources)) {
     const adapter = registry[source];
     if (!adapter) {
       problems.push(`${source}: reconciler source has no import adapter`);
       continue;
     }
     if (adapter.id !== source) problems.push(`${source}: adapter id is ${adapter.id}`);
-    const expected = RECONCILER_SOURCES[source].resume;
-    if (adapter.resumeKind !== expected) {
+    if (adapter.resumeKind !== spec.resume) {
       problems.push(
-        `${source}: adapter resume kind ${adapter.resumeKind} != reconciler ${expected}`,
+        `${source}: adapter resume kind ${adapter.resumeKind} != reconciler ${spec.resume}`,
       );
     }
   }
   for (const [key, adapter] of Object.entries(registry)) {
-    if (!adapter) continue;
-    if (!Object.hasOwn(RECONCILER_SOURCES, key)) {
+    if (!Object.hasOwn(sources, key)) {
       problems.push(`${key}: adapter has no reconciler source`);
     }
     if (!CONTRACT_VERSION_PATTERN.test(adapter.contractVersion)) {
@@ -150,10 +167,10 @@ export function checkImportAdapterRegistry(): string[] {
     if (!Number.isSafeInteger(backfillPage.cursorBudget) || backfillPage.cursorBudget <= 0) {
       problems.push(`${key}: backfill cursor budget must be a positive integer`);
     }
-    if (importRunAdapter(importRun) !== adapter) {
+    if (importRuns.get(importRun) !== adapter) {
       problems.push(`${key}: import-run route is not routed to this adapter`);
     }
-    if (backfillAdapter(backfillPage.path) !== adapter) {
+    if (backfills.get(backfillPage.path) !== adapter) {
       problems.push(`${key}: backfill-page route is not routed to this adapter`);
     }
   }
