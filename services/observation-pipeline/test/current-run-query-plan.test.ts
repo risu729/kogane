@@ -18,7 +18,9 @@ test("current identities select keyed eligible run winners before observation fa
       .sort()) {
       // 0022 fixed the plan shape and 0026 (publication gate) re-defines the
       // same view over the projection; both are applied explicitly below.
-      if (file.startsWith("0022_") || file.startsWith("0026_")) continue;
+      // 0036 only adds a trigger on a 0026 table, so it follows 0026.
+      if (file.startsWith("0022_") || file.startsWith("0026_") || file.startsWith("0036_"))
+        continue;
       db.exec(readFileSync(new URL(file, dir), "utf8"));
     }
     const before = plan(core);
@@ -31,6 +33,7 @@ test("current identities select keyed eligible run winners before observation fa
     for (const migration of [
       "0022_identity_current_run_plan.sql",
       "0026_publication_gate.sql",
+      "0036_publication_event_guard.sql",
     ] as const) {
       db.exec(readFileSync(new URL(migration, dir), "utf8"));
       for (const [sql, values] of [

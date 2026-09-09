@@ -37,6 +37,14 @@ can never apply to the new one (SC17, INV09).
 
 ### Expected revisions
 
+Every impact query joins `published_parse_runs`. Since migration 0026 "current"
+is membership in that projection, not `superseded_by_parse_run_id IS NULL` and
+not `status = 'ok'` ([publication-gate.md](publication-gate.md)): a successful
+but unadopted run is a future candidate, and it must not appear in the
+difference a human approves. `change-lifecycle.test.ts` seeds an unadopted
+second run over the same reference and asserts the count does not move until
+the run is published.
+
 `expectedRevisions` is `{ subjectRef: revision }`:
 
 | Subject prefix                  | Meaning                        | "Current revision" is                                   |
@@ -56,7 +64,9 @@ and `account_mappings` before and after a failing guard.
 ## Tables (migration `0031_operations.sql`)
 
 Additive only. No existing table, view, trigger or row is altered, and a Worker
-build that predates the migration never reads or writes these tables.
+build that predates the migration never reads or writes these tables. 0031 sits
+between 0029 (which it needs for `decision_revisions` and `entity_relations`)
+and 0035/0036/0037, and applies in any of those orders.
 
 | Table                | Role                                                                                                                                                                                                                             |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -225,8 +235,9 @@ authorization decision.
 exactly `"true"`. While off, every command path answers
 `403 commands_disabled` and `/api/meta` advertises `commands: false`.
 
-1. Apply `0031_operations.sql`. Additive; independent of 0029 (which it needs
-   for `decision_revisions` and `entity_relations`) and of 0026/0035.
+1. Apply `0031_operations.sql`. Additive, and independent of 0026/0035/0036/0037;
+   0029 must already be applied (it owns `decision_revisions` and
+   `entity_relations`, which 0031 references).
 2. Deploy `services/observation-pipeline` — the writer: the command routes and
    the outbox dispatcher. The dispatcher is a no-op until rows exist.
 3. Deploy `services/evidence-browser` with `COMMANDS_ENABLED` unset. The
@@ -242,7 +253,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/observation-pipeline/test/change-lifecycle.test.ts` (15 tests):
+- `services/observation-pipeline/test/change-lifecycle.test.ts` (16 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written
@@ -258,7 +269,8 @@ already recorded is never undone by a DELETE — an undo is a new revision
   target retried with backoff, never marked processed, with the receipt staying
   `accepted`; the private routes' actor requirements; append-only enforcement
   on all four tables; migration 0031 applied on a seeded 0017–0035 schema with
-  no existing row touched.
+  no existing row touched; and an unadopted successful run kept out of the
+  simulated difference until the publication gate adopts it.
 - `services/evidence-browser/test/command-api.test.ts` (9 tests): 401 without
   a JWT, 403 with the flag off or set to anything but `"true"`, POST-only and
   404 for unknown command paths, the rest of the Worker still GET-only, an

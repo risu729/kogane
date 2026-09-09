@@ -13,6 +13,7 @@ import type {
   PositionRow,
   Provenance,
   TransactionRow,
+  UnitUpdateSummary,
   ValuationRow,
   Warnings,
 } from "../../../poc/observation-pipeline/shared/api-contract";
@@ -262,6 +263,27 @@ export function overviewParseRun(row: OverviewParseRunSqlRow): Overview["parseRu
     warnings: parseWarnings(row.warnings_json),
     error: row.error,
     superseded_by_parse_run_id: row.superseded_by_parse_run_id,
+  };
+}
+
+/** D13 partial-update signal; see `UNIT_UPDATES_SQL`. */
+export interface UnitUpdateSqlRow {
+  /** Never null: the policy join `pol.dataset = fa.dataset` excludes datasetless artifacts. */
+  source_id: string;
+  dataset: string;
+  fetch_run_id: number;
+  fetched_at: string;
+  updated_units: number;
+  stale_units: number;
+}
+export function unitUpdateSummary(row: UnitUpdateSqlRow): UnitUpdateSummary {
+  return {
+    source_id: row.source_id,
+    dataset: row.dataset,
+    fetch_run_id: row.fetch_run_id,
+    fetched_at: row.fetched_at,
+    updated_units: row.updated_units,
+    stale_units: row.stale_units,
   };
 }
 

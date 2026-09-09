@@ -9,9 +9,15 @@
 // different read contracts, so they are two different names.
 
 import {
+  ARTIFACT_UNITS_RELATION,
   CURRENT_SNAPSHOT,
   snapshotCtes,
   snapshotPolicyComparisonSql,
+  SNAPSHOT_POLICIES_TABLE,
+  UNIT_INDEPENDENT_POLICY,
+  unitScopedEligibilitySql,
+  unitScopePolicySql,
+  unitScopeSuccessSql,
   type SnapshotRelations,
 } from "../../../poc/observation-pipeline/src/snapshot-query";
 
@@ -60,7 +66,7 @@ export const publishedParses = {
  */
 export const legacyPublishedParses = {
   predicate: (p: string): string =>
-    `${p}.superseded_by_parse_run_id IS NULL AND ${p}.status = 'ok'`,
+    `${p}.superseded_by_parse_run_id IS NULL AND ${p}.status = 'ok'`, // gate:comparison
 } as const;
 
 /**
@@ -150,17 +156,65 @@ export const evidenceExists = {
 } as const;
 
 /**
- * unitParseable: the artifact may become observations. Default scope `run`:
- * the whole parent fetch run succeeded with no failure evidence, which is the
- * Worker's eligibility rule (`artifactSql`) and the reader's active-state
- * predicate. `unit-independent-v1` (PR-14) will add a `unit` scope for
- * datasets whose units are proven independent; until a policy row names it,
- * nothing reads `dataset_snapshot_policies.unit_scope`.
+ * unitParseable: the artifact may become observations.
+ *
+ * Two scopes, chosen per dataset by its `dataset_snapshot_policies.unit_scope`
+ * row (migration 0025, read since 0037):
+ *
+ * - `run` (default, every dataset until an operator says otherwise): the whole
+ *   parent fetch run succeeded with no failure evidence. `predicate` is that
+ *   rule, byte for byte what the Worker and the reader used before PR-14.
+ * - `unit` (`unit-independent-v1`, D13): the artifact's own fetch unit
+ *   reported terminal success on a sealed run, even when a sibling unit failed
+ *   and the run therefore projects as `partial`. An artifact with no fetch unit
+ *   is never rescued and falls back to the run scope.
+ *
+ * `policyPredicate` is the disjunction the Worker's `artifactSql` and every
+ * job-creating lane compose; it degrades to `predicate` exactly when no policy
+ * row names the `unit` scope, which is the seeded state.
  */
+export interface UnitScopeRelations {
+  policies?: string;
+  artifactUnits?: string;
+}
+
+/**
+ * unitScopedDataset: the artifact's dataset has a policy row naming the `unit`
+ * scope. Seeded false everywhere; an operator row is the only way to make it
+ * true (docs/parser-coverage.md, "Unit-scoped eligibility").
+ */
+export const unitScopedDataset = {
+  relation: SNAPSHOT_POLICIES_TABLE,
+  predicate: (artifact: string, policies: string = SNAPSHOT_POLICIES_TABLE): string =>
+    unitScopePolicySql(artifact, policies),
+} as const;
+
+/** unitSucceeded: the artifact's own fetch unit reported terminal success on a sealed run. */
+export const unitSucceeded = {
+  relation: ARTIFACT_UNITS_RELATION,
+  predicate: (artifact: string, units: string = ARTIFACT_UNITS_RELATION): string =>
+    unitScopeSuccessSql(artifact, units),
+} as const;
+
+/** The `unit` scope alone: the dataset opted in and this artifact's unit succeeded. */
+function unitScopePredicate(artifact: string, relations: UnitScopeRelations = {}): string {
+  return `(${unitScopedDataset.predicate(artifact, relations.policies)}
+      AND ${unitSucceeded.predicate(artifact, relations.artifactUnits)})`;
+}
+
 export const unitParseable = {
   scope: "run",
   policy: "run-success-v1",
+  unitPolicy: UNIT_INDEPENDENT_POLICY,
+  unitRelation: ARTIFACT_UNITS_RELATION,
   predicate: (fetchRun: string): string => successfulFetchRuns.predicate(fetchRun),
+  unitPredicate: unitScopePredicate,
+  /** Run scope, or the dataset's unit scope; one definition, shared with the PoC. */
+  policyPredicate: (
+    fetchRun: string,
+    artifact: string,
+    relations: UnitScopeRelations = {},
+  ): string => unitScopedEligibilitySql(fetchRun, artifact, relations),
 } as const;
 
 /**
@@ -203,7 +257,11 @@ export const snapshotPolicyComparison = {
  * them, next to this predicate rather than folded into one view.
  */
 export const activeStateProjection = {
-  predicate: `${publishedParses.predicate("p")} AND ${successfulFetchRuns.predicate("f")}`,
+  // The reader's half of `unitParseable`: the same policy-driven scope the
+  // Worker uses to decide what may be parsed decides what a "current" list may
+  // show, so a parse rescued from a partial run is not written and then hidden.
+  // Seeded state is `run` for every dataset, which is the pre-PR-14 text.
+  predicate: `${publishedParses.predicate("p")} AND ${unitParseable.policyPredicate("f", "fa")}`,
   /** Parse run → visible artifact → visible fetch run, aliased p, fa, f. */
   parseChain: `parse_runs p
     JOIN observation_fetch_artifacts fa ON fa.id = p.fetch_artifact_id

@@ -97,7 +97,7 @@ const resolver: IdentityResolver = (input: IdentityInput): IdentityPlan => ({
   issues: [],
 });
 
-async function seedParse(id: number, sourceAccount: string, observations = 2) {
+async function seedParse(id: number, sourceAccount: string, observations = 2, publish = true) {
   await seedArtifact(env, id, "smbc-bank", "synthetic", `synthetic-${id}.json`, { id });
   await db.batch([
     db
@@ -117,7 +117,7 @@ async function seedParse(id: number, sourceAccount: string, observations = 2) {
       ),
     db.prepare("UPDATE parse_runs SET status='ok' WHERE id=?").bind(id),
   ]);
-  await publishParse(db, id);
+  if (publish) await publishParse(db, id);
   await identifyParse(
     db,
     { id, artifact_id: id, source_id: "smbc-bank", producer_id: PRODUCER, fetch_run_id: id },
@@ -238,6 +238,25 @@ test("a plan records the revisions it was read at and a server-computed impact, 
   const report = await simulate(plan, store);
   expect(report.ok && report.report.stale).toBe(false);
   expect(report.ok && report.report.resimulatedPlanId).toBe(plan.planId);
+});
+
+test("an unadopted successful parse is not part of the difference an operator approves", async () => {
+  const mapping = await seedParse(220, "smbc-bank:gate", 2);
+  const before = await planFor(mapping.ref, await target("target-gate"));
+  expect(before.simulation.before.attributedObservations).toBe(2);
+  // A second successful run over the same reference that the publication gate
+  // has not adopted. It is a future candidate: no normal reader sees it, so it
+  // must not appear in the count a human approves (docs/publication-gate.md).
+  await seedParse(221, "smbc-bank:gate", 5, false);
+  const unadopted = await simulate(before, store);
+  expect(unadopted.ok && unadopted.report.simulation.before.attributedObservations).toBe(2);
+  expect(unadopted.ok && unadopted.report.stale).toBe(false);
+  // Adopting it is what brings its rows into the difference, and that is a
+  // fresh simulation: the stored plan is immutable and keeps its own numbers.
+  await publishParse(db, 221);
+  const adopted = await simulate(before, store);
+  expect(adopted.ok && adopted.report.simulation.before.attributedObservations).toBe(7);
+  expect((await loadPlan(store, before.planId))!.simulation.before.attributedObservations).toBe(2);
 });
 
 test("SC17/AT69: a plan pinned to rev7 is refused once a concurrent change made it rev8, and re-simulation is a different plan", async () => {

@@ -51,21 +51,26 @@ const INSTRUMENT_SUBJECT_SQL = `SELECT
  (SELECT max(revision) FROM instrument_mappings WHERE identifier_id=?1) AS revision,
  (SELECT m.instrument_id FROM current_instrument_mappings m WHERE m.identifier_id=?1) AS current_target`;
 
-// Only rows a normal reader can already see: the identity projection joins the
-// publication gate, so an unadopted parse contributes nothing to the diff.
+// What a normal reader can already see, and nothing else. Since migration 0026
+// "current" is membership in `published_parse_runs`, so every impact query
+// joins the projection rather than trusting the identity view's own filter
+// (docs/publication-gate.md). An unadopted successful run is a future
+// candidate: it must not appear in the difference an operator approves.
+const PUBLISHED = `EXISTS(SELECT 1 FROM published_parse_runs published WHERE published.parse_run_id=o.parse_run_id)`;
 const ACCOUNT_IMPACT_SQL = `SELECT count(*) AS observations,
  count(DISTINCT o.parse_run_id) AS parse_runs,
  sum(CASE WHEN o.kind IN ('balance','position','valuation') THEN 1 ELSE 0 END) AS measures
- FROM current_identity_observations o WHERE o.source_account_id=?1`;
+ FROM current_identity_observations o WHERE o.source_account_id=?1 AND ${PUBLISHED}`;
 const ACCOUNT_SCOPE_SQL = `SELECT DISTINCT sa.source_id AS scope FROM source_accounts sa WHERE sa.id=?1`;
 const INSTRUMENT_IMPACT_SQL = `SELECT count(*) AS observations,
  count(DISTINCT o.parse_run_id) AS parse_runs,
  sum(CASE WHEN o.kind IN ('balance','position','valuation') THEN 1 ELSE 0 END) AS measures
  FROM identity_instrument_uses u JOIN current_identity_observations o ON o.id=u.identity_observation_id
- WHERE u.identifier_id=?1`;
+ WHERE u.identifier_id=?1 AND ${PUBLISHED}`;
 const INSTRUMENT_SCOPE_SQL = `SELECT DISTINCT sa.source_id AS scope
  FROM identity_instrument_uses u JOIN current_identity_observations o ON o.id=u.identity_observation_id
- JOIN source_accounts sa ON sa.id=o.source_account_id WHERE u.identifier_id=?1 ORDER BY 1 LIMIT ${SCOPE_LIMIT}`;
+ JOIN source_accounts sa ON sa.id=o.source_account_id
+ WHERE u.identifier_id=?1 AND ${PUBLISHED} ORDER BY 1 LIMIT ${SCOPE_LIMIT}`;
 const RELATION_SQL = `SELECT count(*) AS revision,
  (SELECT r.status FROM entity_relations r WHERE r.kind=?1 AND r.from_ref=?2 AND r.to_ref=?3
    ORDER BY r.created_at DESC,r.id DESC LIMIT 1) AS current_status

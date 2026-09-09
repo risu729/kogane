@@ -14,6 +14,7 @@ import {
   insertObservation,
   insertParseIssues,
   insertParseRun,
+  fetchUnitOutcome,
   listArtifacts,
   openStore,
   publishParseRun,
@@ -85,6 +86,7 @@ export function runParsers(
             insertCoverageClaims(store, runId, result.coverage, {
               status: artifact.runStatus,
               failureCount: artifact.runFailureCount,
+              unitOutcome: fetchUnitOutcome(store, artifact),
             });
           }
           return runId;

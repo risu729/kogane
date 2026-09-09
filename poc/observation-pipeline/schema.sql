@@ -70,6 +70,32 @@ CREATE INDEX IF NOT EXISTS idx_fetch_artifacts_source
 CREATE INDEX IF NOT EXISTS idx_fetch_artifacts_sha
   ON fetch_artifacts (sha256);
 
+-- Per-unit terminal outcome. Production Layer A keeps this in `fetch_units` /
+-- `fetch_unit_reports` and projects it as `observation_fetch_artifact_units`
+-- (migration 0037); the PoC has no unit hierarchy, so it records the same fact
+-- flatly against the artifact's `fetch_unit_key` and projects the identically
+-- named view. `unit_status` carries the same meaning in both: 'success' means
+-- the unit's own terminal report succeeded, which is the only evidence
+-- `unit-independent-v1` accepts (design review D13).
+CREATE TABLE IF NOT EXISTS fetch_unit_outcomes (
+  fetch_run_id  INTEGER NOT NULL REFERENCES fetch_runs(id),
+  unit_key      TEXT NOT NULL,
+  unit_outcome  TEXT NOT NULL CHECK (unit_outcome IN (
+    'success', 'partial', 'failed', 'human_required', 'cancelled', 'unknown')),
+  unit_failure_code TEXT,
+  PRIMARY KEY (fetch_run_id, unit_key)
+) STRICT;
+
+CREATE VIEW IF NOT EXISTS observation_fetch_artifact_units AS
+  SELECT a.id AS fetch_artifact_id, a.fetch_run_id, NULL AS fetch_unit_id,
+         'unit' AS unit_kind, u.unit_key,
+         u.unit_outcome, u.unit_failure_code,
+         CASE WHEN u.unit_outcome = 'success' AND u.unit_failure_code IS NULL
+              THEN 'success' ELSE 'failed' END AS unit_status
+    FROM fetch_artifacts a
+    JOIN fetch_unit_outcomes u
+      ON u.fetch_run_id = a.fetch_run_id AND u.unit_key = a.fetch_unit_key;
+
 -- ── layer B: observations ──────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS parse_runs (
