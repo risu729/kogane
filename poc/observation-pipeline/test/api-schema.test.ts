@@ -59,6 +59,7 @@ describe("shared API schema", () => {
       organizedDisplay: false,
       financialProducts: false,
       evidenceHistory: false,
+      sharedQuery: false,
     });
     expect(CENTRAL_STORE_CAPABILITIES).toEqual({
       contractVersion: "observation-api-v1",
@@ -72,6 +73,7 @@ describe("shared API schema", () => {
       organizedDisplay: true,
       financialProducts: true,
       evidenceHistory: true,
+      sharedQuery: true,
     });
   });
 
@@ -199,6 +201,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       serverPaging: true,
       identities: true,
       evidenceHistory: true,
+      sharedQuery: true,
     });
     expect(local).toEqual(NO_FEATURES);
     expect(
@@ -212,6 +215,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       serverPaging: false,
       identities: false,
       evidenceHistory: false,
+      sharedQuery: false,
     });
   });
 });

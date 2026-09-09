@@ -85,6 +85,13 @@ export interface ApiCapabilities {
   readonly financialProducts: boolean;
   /** The sealed raw-run history under `/api/evidence/v1` is served. */
   readonly evidenceHistory: boolean;
+  /**
+   * `GET /api/v2/query` runs the shared query service (`@kogane/application`)
+   * that the agent API also calls, so one page and one agent compute a figure
+   * the same way. Never an authorization decision: the route keeps the same
+   * authentication gate as every other route.
+   */
+  readonly sharedQuery: boolean;
 }
 
 /** The local PoC store and the hosted synthetic demo, which snapshots it. */
@@ -100,6 +107,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   organizedDisplay: false,
   financialProducts: false,
   evidenceHistory: false,
+  sharedQuery: false,
 } as const satisfies ApiCapabilities;
 
 /** The production evidence-browser Worker over the central store. */
@@ -115,6 +123,7 @@ export const CENTRAL_STORE_CAPABILITIES = {
   organizedDisplay: true,
   financialProducts: true,
   evidenceHistory: true,
+  sharedQuery: true,
 } as const satisfies ApiCapabilities;
 
 /**

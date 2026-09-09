@@ -45,6 +45,12 @@ export const CI_PACKAGES: PackagePolicy[] = [
     checks: ["typecheck", "test"],
   },
   {
+    // Pure application services (query, context, grants): no Worker, no DB.
+    path: "packages/application",
+    scripts: { test, typecheck: "tsc --noEmit" },
+    checks: ["typecheck", "test"],
+  },
+  {
     path: "services/observation-pipeline",
     scripts: { test, typecheck, "cf:check": dryRun },
     checks: ["typecheck", "test", "cf:check"],

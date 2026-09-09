@@ -86,6 +86,50 @@ export interface Overview {
   }[];
 }
 
+/**
+ * `GET /api/v2/query`: the shared query service (`@kogane/application`) that
+ * the agent API also calls. `contextId` and `resultRef` are the hand-off ids
+ * between a page and an agent: each side reads them back under its own
+ * authority rather than trusting the other's figures (addendum 11 section 8).
+ * Only the fields the UI reads are declared; the server validates the whole
+ * `financial-result-v1` contract.
+ */
+export interface SharedQueryResponse<T = unknown> {
+  schemaVersion: "kogane-query-response-v1";
+  contextId: string;
+  resultRef: string;
+  unresolvedInputs: { key: string; question: string; chosen: string; reasonCode: string }[];
+  result: {
+    schemaVersion: "financial-result-v1";
+    contextId: string;
+    completeness: "complete" | "partial" | "unavailable";
+    data: T;
+    coverage: {
+      scopeRef: string;
+      coveredRef: string;
+      gaps: { reasonCode: string; scopeRef: string | null }[];
+      truncated: boolean;
+    };
+    nextCursor: string | null;
+    warnings: { code: string; severity: "info" | "warning" | "blocking" }[];
+  };
+}
+
+/** `data` of the `coverage` intent: what the authorised perimeter covers. */
+export interface CoverageSummaryData {
+  intent: "coverage";
+  scopes: {
+    sourceRef: string;
+    provider: string;
+    ingestion: string;
+    artifactCount: number;
+    collectionRunCount: number;
+  }[];
+  sourceCount: number;
+  artifactCount: number;
+  collectionRunCount: number;
+}
+
 export interface TransactionRow {
   normalized?: import("./normalized-decimal.ts").NormalizedDecimal;
   interpretation?: import("./activity-semantics.ts").ActivityMeaning;

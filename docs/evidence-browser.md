@@ -649,13 +649,40 @@ An array of route patterns for `run_worker_first` needs Wrangler 4.20.0 or
 later. This is untested here, because nothing is deployed yet; it is
 recorded now because it is cheap to read and expensive to debug.
 
+## The agent API and the shared query service
+
+The Worker also serves a small, default-off agent API and one shared query
+route, both of which run the application service in `packages/application`
+rather than a second implementation. See [Agent API](agent-api.md) for the
+grants, tools, result contract, error codes, prompt-injection rules and the
+`AGENT_GRANTS` configuration; the deployment facts are:
+
+- `POST /api/agent/v1/{capabilities,context.open,financial.query,explain,reconcile.propose}`
+  and `POST /mcp` are the browser's **only** non-GET routes. They are an
+  explicit allow-list in `src/worker.ts`, behind the unchanged `auth.ts`
+  gate, with bounded bodies, `no-store`, and the same closed 401/403 answers
+  as every GET route. Everything else is still refused with 405.
+- With `AGENT_GRANTS` absent or empty — the deployed default — every one of
+  those routes answers 403 for every authenticated principal, and the hosted
+  synthetic demo never serves them at all.
+- The only write in the whole Worker is a relation _proposal_: one
+  `decision_revisions` row of kind `propose` and one `entity_relations` row
+  with status `proposed` (migration 0029). No reader adopts a proposed
+  relation, so the rule below — the browser does not edit, correct or
+  annotate anything — still holds for every figure it shows.
+- `GET /api/v2/query` runs the same service for the human UI under the reader
+  authority the browser already has over its GET routes, so the Overview
+  page's summary counts and an agent's `coverage` answer are one computation.
+
 ## What it deliberately does not do
 
 Each of these belongs to a later phase, and each would be a phase-boundary
 violation here:
 
-- No editing, correcting, or annotating anything. Layer A and layer B rows
-  are append-only; corrections live in layer C, which does not exist yet.
+- No editing, correcting, or annotating anything visible. Layer A and layer B
+  rows are append-only; corrections live in layer C, which does not exist
+  yet. The agent API's proposals are inert claims that no read adopts, and
+  accepting one is a human operator path this service does not have.
 - No classification or categorization (phase 16, and always as a recorded
   interpretation).
 - No reconciliation, no pending-to-posted matching, no duplicate detection

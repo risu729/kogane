@@ -3,6 +3,7 @@ import {
   type EvidenceMeta,
 } from "../../../poc/observation-pipeline/shared/evidence-contract";
 import { authenticate } from "./auth";
+import { agentApi, classifyAgentPath, sharedQueryApi } from "./agent-api";
 import { observationApi } from "./observation-api";
 import { identityApi } from "./identity-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
@@ -10,6 +11,8 @@ import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw
 
 const PREFIX = "/api/evidence/v1";
 function classify(path: string): string {
+  const agent = classifyAgentPath(path);
+  if (agent !== null) return agent;
   if (path === `${PREFIX}/meta`) return "meta";
   if (/^\/api\/evidence\/v1\/sources\/[^/]+\/runs$/.test(path)) return "source_runs";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts$/.test(path)) return "run_artifacts";
@@ -20,8 +23,15 @@ function classify(path: string): string {
 
 async function route(request: Request, env: Env, url: URL): Promise<Response> {
   await authenticate(request, env);
+  // The only non-GET surface: an explicit allow-list of authenticated,
+  // grant-checked POST paths (docs/agent-api.md). Everything else stays
+  // read-only, and both sides keep the same closed 401/403 responses.
+  const agentResponse = await agentApi(request, env, url);
+  if (agentResponse) return agentResponse;
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
+  const sharedQueryResponse = await catalogue(() => sharedQueryApi(request, env, url));
+  if (sharedQueryResponse) return sharedQueryResponse;
   const identityResponse = await catalogue(() => identityApi(request, env, url));
   if (identityResponse) return identityResponse;
   const observationResponse = await catalogue(() => observationApi(request, env, url));
