@@ -11,6 +11,8 @@
 import {
   CURRENT_SNAPSHOT,
   snapshotCtes,
+  snapshotPolicyComparisonSql,
+  type SnapshotRelations,
 } from "../../../poc/observation-pipeline/src/snapshot-query";
 
 export type ObservationKind = "transaction" | "balance" | "position" | "valuation";
@@ -106,22 +108,91 @@ export const successfulFetchRuns = {
   predicate: (f: string): string => `${f}.status = 'success' AND ${f}.failure_count = 0`,
 } as const;
 
+/** The relations the snapshot policy CTEs read on the production schema. */
+export const SNAPSHOT_RELATIONS: SnapshotRelations = {
+  fetchArtifacts: visibleEvidence.fetchArtifacts,
+  fetchRuns: visibleEvidence.fetchRuns,
+  parseRuns: "parse_runs",
+  publishedParseRuns: publishedParses.relation,
+};
+
 /**
  * completeSnapshotCandidates: container datasets whose latest complete
  * capture defines the current snapshot. Built over the visible views; the
  * CTE's own `complete_parse` condition is membership in the publication
  * projection and binds `parse_runs` through a visible artifact, so the base
- * tables are the right relations there.
+ * tables are the right relations there. Which parses count as complete is
+ * decided per dataset by its row in `dataset_snapshot_policies` (migration
+ * 0025): `coverage-v1` reads the stored coverage claim,
+ * `legacy-warning-compat-v1` the confined warning-text adapter. Every row is
+ * seeded legacy.
  */
 export const completeSnapshotCandidates = {
-  ctes: snapshotCtes({
-    fetchArtifacts: visibleEvidence.fetchArtifacts,
-    fetchRuns: visibleEvidence.fetchRuns,
-    parseRuns: "parse_runs",
-    publishedParseRuns: publishedParses.relation,
-  }),
+  ctes: snapshotCtes(SNAPSHOT_RELATIONS),
   /** The enclosing query binds `p` = parse run and `fa` = artifact. */
   currentMember: CURRENT_SNAPSHOT,
+} as const;
+
+// ── D13: the four predicates behind "usable" ─────────────────────────────
+//
+// The review asked that "evidence exists", "this unit can be parsed", "this
+// parse can be adopted as the current snapshot" and "this number can be
+// summed into an economic total" be separate predicates, because they need
+// separate guarantees (root view: ownership/seal/integrity; observation:
+// unit and parser preconditions; snapshot: every required unit/page/container
+// complete; total: overlap removal, semantics, time, currency). Naming them
+// here is what lets a later policy relax one without touching the others.
+
+/** evidenceExists: a visible artifact whose raw object is reachable. */
+export const evidenceExists = {
+  predicate: (artifact: string): string =>
+    `EXISTS (SELECT 1 FROM observation_raw_objects o WHERE o.sha256 = ${artifact}.sha256)`,
+} as const;
+
+/**
+ * unitParseable: the artifact may become observations. Default scope `run`:
+ * the whole parent fetch run succeeded with no failure evidence, which is the
+ * Worker's eligibility rule (`artifactSql`) and the reader's active-state
+ * predicate. `unit-independent-v1` (PR-14) will add a `unit` scope for
+ * datasets whose units are proven independent; until a policy row names it,
+ * nothing reads `dataset_snapshot_policies.unit_scope`.
+ */
+export const unitParseable = {
+  scope: "run",
+  policy: "run-success-v1",
+  predicate: (fetchRun: string): string => successfulFetchRuns.predicate(fetchRun),
+} as const;
+
+/**
+ * snapshotAdoptable: the parse is the current complete snapshot of its
+ * container dataset under the dataset's active policy (or the dataset has no
+ * snapshot policy). Same CTEs and membership predicate as
+ * completeSnapshotCandidates, named for the D13 stage it answers.
+ */
+export const snapshotAdoptable = {
+  ctes: completeSnapshotCandidates.ctes,
+  predicate: completeSnapshotCandidates.currentMember,
+} as const;
+
+/**
+ * economicallySummable: whether a measure may enter an economic total. No
+ * aggregation policy is published (overlap groups, ownership shares, time
+ * basis and currency are not yet adjudicated by a stored decision), so this
+ * is false for every row. A later PR replaces the constant with a policy;
+ * nothing sums observations until then.
+ */
+export const economicallySummable = {
+  policy: null,
+  predicate: (): string => "0",
+} as const;
+
+/**
+ * snapshotPolicyComparison: the A03 shadow comparison, evaluating every
+ * container dataset under both policies and listing partitions where the
+ * current snapshot artifact differs. Identifiers only.
+ */
+export const snapshotPolicyComparison = {
+  sql: snapshotPolicyComparisonSql(SNAPSHOT_RELATIONS),
 } as const;
 
 /**

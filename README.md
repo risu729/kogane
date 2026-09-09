@@ -12,6 +12,7 @@ different rules.
 - [Raw evidence store](docs/raw-store.md)
 - [Evidence ingest contract](docs/evidence-contract.md)
 - [Observation layer](docs/observations.md)
+- [Parser coverage contract](docs/parser-coverage.md)
 - [Evidence browser](docs/evidence-browser.md)
 - [Frontend stack and API handoff](docs/frontend.md)
 - [Development checks and CI](docs/ci.md)

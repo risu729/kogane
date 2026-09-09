@@ -1,4 +1,5 @@
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
+import { containerClaim } from "./coverage.ts";
 import {
   acceptsSbiShinseiDataset,
   assertSuccessfulRun,
@@ -162,7 +163,22 @@ export const sbiShinseiYenDepositAccount: Parser = {
       if (response[field] !== undefined)
         exactArray(response[field], `${DATASET}.responseParam.${field}`, 0);
     }
-    return { observations, warnings: [] };
+    return {
+      observations,
+      warnings: [],
+      issues: [],
+      coverage: [
+        containerClaim({
+          artifact,
+          issues: [],
+          observedCount: observations.length,
+          evidenceRefs: [
+            "json:$.responseParam.debitAccountDetails",
+            "json:$.responseParam.savingsDetails",
+          ],
+        }),
+      ],
+    };
   },
 };
 

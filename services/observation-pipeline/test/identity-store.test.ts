@@ -108,6 +108,7 @@ ALTER TABLE fetch_artifacts ADD COLUMN format_version TEXT;`);
     "0022_identity_current_run_plan.sql",
     "0023_account_connections.sql",
     "0024_observation_decimals.sql",
+    "0025_parse_coverage.sql",
     "0026_publication_gate.sql",
     "0029_decision_log.sql",
   ]) {

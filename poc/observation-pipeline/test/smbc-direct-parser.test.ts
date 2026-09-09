@@ -101,6 +101,18 @@ describe("SMBC Direct canonical Layer-B routing", () => {
         },
       ],
       warnings: [],
+      issues: [],
+      // Contract v2: the single validated object is a complete container.
+      coverage: [
+        expect.objectContaining({
+          scopeKey: "smbc-bank/balance-normalized",
+          completeness: "complete",
+          membershipComplete: true,
+          observedCount: 1,
+          expectedCount: 1,
+          absenceMeaning: "not-applicable",
+        }),
+      ],
     });
   });
 

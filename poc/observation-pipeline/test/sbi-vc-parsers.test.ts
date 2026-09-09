@@ -229,6 +229,17 @@ describe("SBI VC Trade positions", () => {
     expect(sbiVcPositionSummary.parse(encode(empty), artifact("position-summary"))).toEqual({
       observations: [],
       warnings: [],
+      issues: [],
+      // Contract v2: zero rows in a validated body is a complete-empty claim,
+      // which is what lets an emptied book replace the previous positions.
+      coverage: [
+        expect.objectContaining({
+          completeness: "complete",
+          membershipComplete: true,
+          observedCount: 0,
+          absenceMeaning: "complete-empty",
+        }),
+      ],
     });
   });
 

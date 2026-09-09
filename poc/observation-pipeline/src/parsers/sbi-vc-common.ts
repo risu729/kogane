@@ -1,4 +1,5 @@
 import type { ArtifactMeta, BalanceObservation } from "../types.ts";
+import type { ParseDiagnostics } from "./coverage.ts";
 import {
   decimalText,
   decimalToMinorUnits,
@@ -106,17 +107,27 @@ export function parseSbiVcPage(
   };
 }
 
+// Diagnostics helpers record a typed issue and its warning text together
+// (contract v2). Unmodelled fields lose nothing; a field of unexpected type
+// is preserved verbatim but its typed column may be empty, which is a
+// field-level loss and never breaks the container's membership.
 export function warnUnknownFields(
   value: Record<string, unknown>,
   known: readonly string[],
   locator: string,
-  warnings: string[],
+  diagnostics: ParseDiagnostics,
 ): void {
   const unknown = Object.keys(value)
     .filter((key) => !known.includes(key))
     .sort();
   if (unknown.length > 0) {
-    warnings.push(`${locator}: unmodelled fields preserved in extra: ${unknown.join(", ")}`);
+    diagnostics.report({
+      code: "unknown_fields_preserved",
+      locator,
+      severity: "info",
+      impact: "none",
+      message: `${locator}: unmodelled fields preserved in extra: ${unknown.join(", ")}`,
+    });
   }
 }
 
@@ -124,11 +135,17 @@ export function requireString(
   value: Record<string, unknown>,
   field: string,
   locator: string,
-  warnings: string[],
+  diagnostics: ParseDiagnostics,
 ): string | undefined {
   const candidate = value[field];
   if (typeof candidate === "string") return candidate;
-  warnings.push(`${locator}.${field}: expected a string; raw value preserved`);
+  diagnostics.report({
+    code: "row_unreadable",
+    locator: `${locator}.${field}`,
+    severity: "warning",
+    impact: "field",
+    message: `${locator}.${field}: expected a string; raw value preserved`,
+  });
   return undefined;
 }
 
@@ -178,11 +195,17 @@ export function warnNonStringFields(
   value: Record<string, unknown>,
   fields: readonly string[],
   locator: string,
-  warnings: string[],
+  diagnostics: ParseDiagnostics,
 ): void {
   for (const field of fields) {
     if (typeof value[field] !== "string") {
-      warnings.push(`${locator}.${field}: expected a string; raw value preserved`);
+      diagnostics.report({
+        code: "row_unreadable",
+        locator: `${locator}.${field}`,
+        severity: "warning",
+        impact: "field",
+        message: `${locator}.${field}: expected a string; raw value preserved`,
+      });
     }
   }
 }
@@ -190,14 +213,20 @@ export function warnNonStringFields(
 export function warnAttributeValueObject(
   value: unknown,
   locator: string,
-  warnings: string[],
+  diagnostics: ParseDiagnostics,
 ): value is Record<string, unknown> {
   if (!isObject(value)) {
-    warnings.push(`${locator}: expected an object; raw value preserved`);
+    diagnostics.report({
+      code: "row_unreadable",
+      locator,
+      severity: "warning",
+      impact: "field",
+      message: `${locator}: expected an object; raw value preserved`,
+    });
     return false;
   }
-  warnUnknownFields(value, ["attribute", "value"], locator, warnings);
-  warnNonStringFields(value, ["attribute", "value"], locator, warnings);
+  warnUnknownFields(value, ["attribute", "value"], locator, diagnostics);
+  warnNonStringFields(value, ["attribute", "value"], locator, diagnostics);
   return true;
 }
 
@@ -209,17 +238,29 @@ export function balanceFromDecimal(options: {
   extra: Record<string, unknown>;
   asOf?: string;
   observedAt?: string;
-  warnings: string[];
+  diagnostics: ParseDiagnostics;
 }): BalanceObservation {
   const decimal = decimalText(options.value);
   if (!decimal) {
-    options.warnings.push(`${options.locator}: expected an exact decimal; raw value preserved`);
+    // The balance row is emitted without a value: a field-level loss on a
+    // row that still belongs to the container.
+    options.diagnostics.report({
+      code: "row_unreadable",
+      locator: options.locator,
+      severity: "error",
+      impact: "field",
+      message: `${options.locator}: expected an exact decimal; raw value preserved`,
+    });
   }
   const minor = decimal ? decimalToMinorUnits(decimal.text, options.instrument) : undefined;
   if (decimal && minor === undefined && minorUnitExponent(options.instrument) !== undefined) {
-    options.warnings.push(
-      `${options.locator}: exact minor-unit conversion unavailable; decimal text preserved`,
-    );
+    options.diagnostics.report({
+      code: "exact_decimal_without_minor_units",
+      locator: options.locator,
+      severity: "info",
+      impact: "none",
+      message: `${options.locator}: exact minor-unit conversion unavailable; decimal text preserved`,
+    });
   }
   return {
     kind: "balance",
