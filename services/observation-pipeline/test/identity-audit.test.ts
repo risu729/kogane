@@ -9,6 +9,7 @@ function fixture() {
     CREATE TABLE fetch_runs(id INTEGER PRIMARY KEY,producer_id TEXT,status TEXT,failure_count INTEGER,sealed INTEGER);
     CREATE TABLE fetch_artifacts(id INTEGER PRIMARY KEY,source_id TEXT,fetch_run_id INTEGER);
     CREATE TABLE parse_runs(id INTEGER PRIMARY KEY,fetch_artifact_id INTEGER,status TEXT,superseded_by_parse_run_id INTEGER);
+    CREATE TABLE published_parse_runs(fetch_artifact_id INTEGER,parser_name TEXT,parse_run_id INTEGER UNIQUE,PRIMARY KEY(fetch_artifact_id,parser_name));
     CREATE VIEW observation_sources AS SELECT * FROM sources;
     CREATE VIEW observation_fetch_runs AS SELECT * FROM fetch_runs WHERE sealed=1;
     CREATE VIEW observation_fetch_artifacts AS SELECT a.* FROM fetch_artifacts a JOIN observation_fetch_runs f ON f.id=a.fetch_run_id;
@@ -31,6 +32,7 @@ function fixture() {
     INSERT INTO fetch_runs VALUES (1,'synthetic','success',0,1),(2,'synthetic','success',0,0),(3,'synthetic','partial',1,1);
     INSERT INTO fetch_artifacts VALUES (1,'synthetic',1),(2,'synthetic',2),(3,'synthetic',3);
     INSERT INTO parse_runs VALUES (1,1,'ok',NULL),(2,1,'ok',1),(3,1,'error',NULL),(4,2,'ok',NULL),(5,3,'ok',NULL),(6,1,'ok',NULL);
+    INSERT INTO published_parse_runs SELECT fetch_artifact_id,'parser-'||id,id FROM parse_runs WHERE status='ok' AND superseded_by_parse_run_id IS NULL;
     INSERT INTO transaction_observations VALUES (1,1),(2,2),(3,3),(4,4),(5,5),(6,6);
     INSERT INTO balance_observations VALUES (1,1); INSERT INTO position_observations VALUES (1,1); INSERT INTO valuation_observations VALUES (1,1);
     INSERT INTO source_accounts VALUES ('ref','synthetic','synthetic','["PRIVATE_ACCOUNT"]');
@@ -119,6 +121,7 @@ test("pending policy matches projection: only trusted Vpass bindings require pol
     db.exec(`INSERT INTO sources VALUES ('vpass');
       INSERT INTO fetch_artifacts VALUES (7,'vpass',1),(8,'vpass',1);
       INSERT INTO parse_runs VALUES (7,7,'ok',NULL),(8,8,'ok',NULL);
+      INSERT INTO published_parse_runs VALUES (7,'parser-7',7),(8,'parser-8',8);
       INSERT INTO trusted_vpass_card_bindings VALUES (7,7,17,'PRIVATE_CARD');
       INSERT INTO identity_runs VALUES ('vp7',7,1,'2099'),('vp8',8,1,'2099');
       INSERT INTO identity_run_seals VALUES ('vp7',0,'2099'),('vp8',0,'2099');`);
@@ -233,6 +236,7 @@ test("Vpass audit separates revoked retained evidence from invalid current expos
     db.exec(`INSERT INTO sources VALUES ('vpass');
       INSERT INTO fetch_artifacts VALUES (7,'vpass',1),(8,'vpass',1);
       INSERT INTO parse_runs VALUES (7,7,'ok',NULL),(8,8,'ok',7);
+      INSERT INTO published_parse_runs VALUES (7,'parser-7',7);
       INSERT INTO transaction_observations VALUES (7,7),(8,8);
       INSERT INTO trusted_vpass_card_bindings VALUES (7,7,17,'PRIVATE_CARD'),(8,8,18,'PRIVATE_CARD');
       INSERT INTO source_accounts VALUES ('vpref','vpass','synthetic','["vpass:card","PRIVATE_CARD"]');
@@ -242,7 +246,7 @@ test("Vpass audit separates revoked retained evidence from invalid current expos
       INSERT INTO identity_observations VALUES ('vp7o','vp7','transaction',7,'vpref','vpam','[]'),('vp7v2o','vp7v2','transaction',7,'vpref','vpam','[]'),('vp8o','vp8','transaction',8,'vpref','vpam','[]'),('vp8v2o','vp8v2','transaction',8,'vpref','vpam','[]');
       INSERT INTO identity_run_seals VALUES ('vp7',1,'2099'),('vp7v2',1,'2099'),('vp8',1,'2099'),('vp8v2',1,'2099');
       DROP VIEW current_identity_observations;
-      CREATE VIEW current_identity_observations AS SELECT o.*,r.parse_run_id FROM identity_observations o JOIN eligible_identity_runs r ON r.id=o.identity_run_id JOIN parse_runs p ON p.id=r.parse_run_id WHERE p.superseded_by_parse_run_id IS NULL AND NOT EXISTS(SELECT 1 FROM eligible_identity_runs newer JOIN identity_run_seals s ON s.identity_run_id=newer.id WHERE newer.parse_run_id=r.parse_run_id AND newer.policy_version>r.policy_version);`);
+      CREATE VIEW current_identity_observations AS SELECT o.*,r.parse_run_id FROM identity_observations o JOIN eligible_identity_runs r ON r.id=o.identity_run_id JOIN published_parse_runs pub ON pub.parse_run_id=r.parse_run_id WHERE NOT EXISTS(SELECT 1 FROM eligible_identity_runs newer JOIN identity_run_seals s ON s.identity_run_id=newer.id WHERE newer.parse_run_id=r.parse_run_id AND newer.policy_version>r.policy_version);`);
     expect(rows("vpass_coverage")).toEqual([
       {
         lineage: "current",

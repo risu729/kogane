@@ -50,7 +50,17 @@ export function layerBMigrations(): string[] {
     .sort();
 }
 
-export async function startPipeline(): Promise<{ mf: Miniflare; env: Env }> {
+/** Apply one migration file through D1, statement by statement. */
+export async function applyMigration(db: D1Database, name: string): Promise<void> {
+  for (const sql of splitSql(readFileSync(new URL(name, migrationDir), "utf8")))
+    await db.prepare(sql).run();
+}
+
+/** `migrations` defaults to every Layer B migration; an upgrade test passes
+ * the subset that represents the deployed schema and applies the rest later. */
+export async function startPipeline(
+  migrations: readonly string[] = layerBMigrations(),
+): Promise<{ mf: Miniflare; env: Env }> {
   const bundle = await Bun.build({
     entrypoints: [new URL("../src/worker.ts", import.meta.url).pathname],
     target: "browser",
@@ -69,9 +79,7 @@ export async function startPipeline(): Promise<{ mf: Miniflare; env: Env }> {
   const db = await mf.getD1Database("DB");
   const bucket = await mf.getR2Bucket("EVIDENCE");
   await db.exec(LAYER_A_SQL);
-  for (const name of layerBMigrations())
-    for (const sql of splitSql(readFileSync(new URL(name, migrationDir), "utf8")))
-      await db.prepare(sql).run();
+  for (const name of migrations) await applyMigration(db, name);
   // Miniflare and generated Workers types use distinct platform declarations;
   // validate the runtime proxy at this test boundary instead of double casts.
   const bindings: unknown = { DB: db, EVIDENCE: bucket };
@@ -89,6 +97,35 @@ function assertBindings(value: unknown): asserts value is Env {
     if (!binding || typeof binding !== "object" || !(method in binding))
       throw new Error("invalid runtime binding");
   }
+}
+
+/** Publish a successful parse run the way the pipeline writer does
+ * (docs/publication-gate.md): move the (artifact, parser) pointer and record
+ * the event. A parse run seeded directly with status 'ok' is an unadopted
+ * result until this runs, and no normal reader shows it. */
+export async function publishParse(
+  db: D1Database,
+  parseRunId: number,
+  publishedAt = "2026-09-07T00:00:00.000Z",
+): Promise<void> {
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at)
+        SELECT p.fetch_artifact_id,p.parser_name,
+          (SELECT x.parse_run_id FROM published_parse_runs x WHERE x.fetch_artifact_id=p.fetch_artifact_id AND x.parser_name=p.parser_name),
+          p.id,'normal','pipeline','parse_ok',?2 FROM parse_runs p WHERE p.id=?1`,
+      )
+      .bind(parseRunId, publishedAt),
+    db
+      .prepare(
+        `INSERT INTO published_parse_runs(fetch_artifact_id,parser_name,parse_run_id,parser_version,published_at,publication_kind)
+        SELECT p.fetch_artifact_id,p.parser_name,p.id,p.parser_version,?2,'normal' FROM parse_runs p WHERE p.id=?1
+        ON CONFLICT(fetch_artifact_id,parser_name) DO UPDATE SET parse_run_id=excluded.parse_run_id,
+          parser_version=excluded.parser_version,published_at=excluded.published_at,publication_kind='normal',release_id=NULL`,
+      )
+      .bind(parseRunId, publishedAt),
+  ]);
 }
 
 /** Seed one synthetic successful run with one artifact. Sealing goes through

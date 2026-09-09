@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
 import { sweep, parseJob } from "../src/worker.ts";
-import { migrationDir, seedArtifact, startPipeline } from "./harness.ts";
+import { migrationDir, publishParse, seedArtifact, startPipeline } from "./harness.ts";
 import { smbcDirectBalance } from "../../../poc/observation-pipeline/src/parsers/smbc-direct.ts";
 import {
   providerTimestamp,
@@ -364,9 +364,10 @@ test("successful concurrent sweeps publish once, preserve provenance, supersede 
     currency: "JPY",
     observedAt: "2026-09-07T00:00:00.000Z",
   });
-  await env.DB.prepare(
-    "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(10,'smbc-direct-balance','0.9.0','2026-01-01T00:00:00.000Z','ok','[]')",
-  ).run();
+  const previous = await env.DB.prepare(
+    "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(10,'smbc-direct-balance','0.9.0','2026-01-01T00:00:00.000Z','ok','[]') RETURNING id",
+  ).first<{ id: number }>();
+  await publishParse(env.DB, previous!.id);
   await env.DB.prepare(
     "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(10,'smbc-direct-balance','1.0.0','2026-01-01T00:00:00.000Z','pending','[]')",
   ).run();
@@ -377,6 +378,24 @@ test("successful concurrent sweeps publish once, preserve provenance, supersede 
       "SELECT count(*) AS n FROM parse_runs WHERE fetch_artifact_id=10 AND status='ok' AND superseded_by_parse_run_id IS NULL",
     ).first<number>("n"),
   ).toBe(1);
+  // The publication pointer moved with the supersession, once, in the same batch.
+  expect(
+    await env.DB.prepare(
+      "SELECT p.parser_version FROM published_parse_runs x JOIN parse_runs p ON p.id=x.parse_run_id WHERE x.fetch_artifact_id=10 AND x.parser_name='smbc-direct-balance'",
+    ).first<string>("parser_version"),
+  ).toBe("1.0.0");
+  expect(
+    await env.DB.prepare(
+      "SELECT count(*) AS n FROM publication_events WHERE fetch_artifact_id=10 AND kind='normal' AND previous_parse_run_id=?",
+    )
+      .bind(previous!.id)
+      .first<number>("n"),
+  ).toBe(1);
+  expect(
+    await env.DB.prepare("SELECT count(*) AS n FROM publication_gate_mismatches").first<number>(
+      "n",
+    ),
+  ).toBe(0);
   expect(
     await env.DB.prepare(
       "SELECT error FROM parse_runs WHERE fetch_artifact_id=10 AND status='error'",
@@ -598,6 +617,7 @@ test("late old parser publication cannot replace a numerically newer successful 
     )
       .bind(id, existingVersion)
       .first<{ id: number }>();
+    await publishParse(env.DB, old!.id);
     await env.DB.prepare(
       "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status) VALUES(?,'smbc-direct-balance',?,'pending')",
     )
@@ -630,6 +650,22 @@ test("late old parser publication cannot replace a numerically newer successful 
     expect(superseded?.parser_version).toBe("1.2.0");
     expect(superseded?.superseded_by_parse_run_id).toBe(current.results[0]!.id);
     if (id === 80) expect(current.results[0]!.id).toBe(old!.id);
+    // The publication pointer follows the same decision: it names the
+    // numerically newest success whichever order the versions completed in.
+    expect(
+      await env.DB.prepare(
+        "SELECT parse_run_id FROM published_parse_runs WHERE fetch_artifact_id=? AND parser_name='smbc-direct-balance'",
+      )
+        .bind(id)
+        .first<number>("parse_run_id"),
+    ).toBe(current.results[0]!.id);
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM publication_gate_mismatches WHERE fetch_artifact_id=?",
+      )
+        .bind(id)
+        .first<number>("n"),
+    ).toBe(0);
   }
 }, 30000);
 
