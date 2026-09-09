@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
 import { preferredInstrumentNames } from "../src/preferred-instrument-names";
-import { seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import { identifyParse } from "../../observation-pipeline/src/identity-store";
 import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity";
 import { observationOrganizations, organizeRows } from "../src/observation-organization";
@@ -25,13 +25,18 @@ async function seed(
     market?: string;
     kind?: "position" | "transaction" | "valuation";
   }[],
+  // A re-parse of an existing artifact: the same publication key, so one run
+  // can supersede the other the way the pipeline writer does.
+  reparse?: { artifactId: number; version: string },
 ) {
-  const run = await seedRun({ count: 1, source: "sbi-securities" });
+  const artifactId =
+    reparse?.artifactId ?? (await seedRun({ count: 1, source: "sbi-securities" })).artifacts[0]!.id;
   const parse = await env.DB.prepare(`INSERT INTO parse_runs
     (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
-    VALUES (?,'name-fixture','1','2099-01-01','ok','[]') RETURNING id`)
-    .bind(run.artifacts[0].id)
+    VALUES (?,'name-fixture',?,'2099-01-01','ok','[]') RETURNING id`)
+    .bind(artifactId, reparse?.version ?? "1")
     .first<{ id: number }>();
+  await publishParse(parse!.id);
   for (const name of names) {
     if (name.kind === "transaction") {
       await env.DB.prepare(`INSERT INTO transaction_observations
@@ -90,7 +95,7 @@ async function seed(
     scope: string;
     label: string;
   }>();
-  return { parseId: parse!.id, identifiers: identifiers.results };
+  return { parseId: parse!.id, artifactId, identifiers: identifiers.results };
 }
 
 it("prefers an observed Japanese name for the exact listing and keeps B and mappings unchanged", async () => {
@@ -149,14 +154,17 @@ it("protects manual labels and ignores names from a superseded parse", async () 
     reason: "manual",
     origin: null,
   });
-  const stale = await seed([
-    { code: "STALE", label: "Example" },
-    { code: "STALE", label: "日本企業" },
-  ]);
+  // An older parse of the same artifact, published first and then replaced
+  // by the data parse: its names are history, not the provider's current name.
+  const stale = await seed(
+    [
+      { code: "STALE", label: "Example" },
+      { code: "STALE", label: "日本企業" },
+    ],
+    { artifactId: data.artifactId, version: "0" },
+  );
   const staleId = stale.identifiers.find((row) => row.value === "STALE")!.id;
-  await env.DB.prepare("UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE id=?")
-    .bind(data.parseId, stale.parseId)
-    .run();
+  await supersedeParse(stale.parseId, data.parseId);
   expect((await preferredInstrumentNames(env.DB, [staleId])).get(staleId)).toEqual({
     label: "Example",
     reason: "provider-current",

@@ -35,12 +35,15 @@ export interface SnapshotRelations {
   fetchArtifacts: string;
   fetchRuns: string;
   parseRuns: string;
+  /** The publication projection (docs/publication-gate.md); a parse completes a snapshot only when published. */
+  publishedParseRuns: string;
 }
 
 export const LOCAL_SNAPSHOT_RELATIONS: SnapshotRelations = {
   fetchArtifacts: "fetch_artifacts",
   fetchRuns: "fetch_runs",
   parseRuns: "parse_runs",
+  publishedParseRuns: "published_parse_runs",
 };
 
 export function snapshotCtes(relations: SnapshotRelations): string {
@@ -60,8 +63,8 @@ export function snapshotCtes(relations: SnapshotRelations): string {
     WHERE complete_parse.fetch_artifact_id = fa.id
       AND complete_parse.parser_name = policy.parser_name
       AND (policy.required_version IS NULL OR complete_parse.parser_version = policy.required_version)
-      AND complete_parse.status = 'ok'
-      AND complete_parse.superseded_by_parse_run_id IS NULL
+      AND EXISTS (SELECT 1 FROM ${relations.publishedParseRuns} published
+                  WHERE published.parse_run_id = complete_parse.id)
       -- The two legacy tolerant SBI container parsers can skip unreadable
       -- containers. Only warnings that preserve the complete measurement
       -- as decimal text or preserve extra fields are harmless for membership.

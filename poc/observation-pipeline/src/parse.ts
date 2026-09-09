@@ -14,8 +14,8 @@ import {
   insertParseRun,
   listArtifacts,
   openStore,
+  publishParseRun,
   readRawObject,
-  supersedeOlderParseRuns,
   type Store,
 } from "./store.ts";
 import { PARSERS } from "./parsers/registry.ts";
@@ -83,8 +83,9 @@ export function runParsers(
         summary.parsed += 1;
         // Only a successful run changes what is current. An error run never
         // supersedes anything, so a transient failure cannot empty the
-        // current view.
-        summary.superseded += supersedeOlderParseRuns(store, artifact.id, parser.name, parseRunId);
+        // current view. Publication moves the pointer only when the run is
+        // left current (docs/publication-gate.md).
+        summary.superseded += publishParseRun(store, artifact.id, parser.name, parseRunId);
       } catch (error) {
         insertParseRun(store, {
           artifactId: artifact.id,

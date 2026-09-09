@@ -187,3 +187,76 @@ CREATE INDEX IF NOT EXISTS idx_pos_obs_parse_run
   ON position_observations (parse_run_id);
 CREATE INDEX IF NOT EXISTS idx_val_obs_parse_run
   ON valuation_observations (parse_run_id);
+
+-- ── publication gate ───────────────────────────────────────────────────
+-- The same contract as production migration 0026 (docs/publication-gate.md):
+-- "this parse succeeded" and "readers use this parse" are two facts. The
+-- pointer per (artifact, parser) is operational state moved only by
+-- publishParseRun in store.ts; every move appends a publication_events row.
+-- Current views read the pointer, never the supersession column.
+
+CREATE TABLE IF NOT EXISTS published_parse_runs (
+  fetch_artifact_id INTEGER NOT NULL REFERENCES fetch_artifacts(id),
+  parser_name       TEXT NOT NULL,
+  parse_run_id      INTEGER NOT NULL REFERENCES parse_runs(id),
+  parser_version    TEXT NOT NULL,
+  published_at      TEXT NOT NULL,
+  publication_kind  TEXT NOT NULL CHECK(publication_kind IN ('normal','activation','rollback')),
+  release_id        TEXT,
+  PRIMARY KEY(fetch_artifact_id, parser_name)
+) STRICT;
+CREATE UNIQUE INDEX IF NOT EXISTS published_parse_runs_run
+  ON published_parse_runs (parse_run_id);
+CREATE TRIGGER IF NOT EXISTS published_parse_runs_no_delete BEFORE DELETE ON published_parse_runs
+BEGIN SELECT RAISE(ABORT,'published_parse_runs cannot be deleted'); END;
+CREATE TRIGGER IF NOT EXISTS published_parse_runs_requires_ok_insert BEFORE INSERT ON published_parse_runs
+WHEN NOT EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=NEW.parse_run_id AND p.status='ok'
+ AND p.fetch_artifact_id=NEW.fetch_artifact_id AND p.parser_name=NEW.parser_name
+ AND p.parser_version=NEW.parser_version)
+BEGIN SELECT RAISE(ABORT,'published parse run must be a successful run of the same artifact and parser'); END;
+CREATE TRIGGER IF NOT EXISTS published_parse_runs_requires_ok_update BEFORE UPDATE ON published_parse_runs
+WHEN NEW.fetch_artifact_id<>OLD.fetch_artifact_id OR NEW.parser_name<>OLD.parser_name
+ OR NOT EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=NEW.parse_run_id AND p.status='ok'
+  AND p.fetch_artifact_id=NEW.fetch_artifact_id AND p.parser_name=NEW.parser_name
+  AND p.parser_version=NEW.parser_version)
+BEGIN SELECT RAISE(ABORT,'published parse run must be a successful run of the same artifact and parser'); END;
+
+CREATE TABLE IF NOT EXISTS publication_events (
+  id                    INTEGER PRIMARY KEY,
+  fetch_artifact_id     INTEGER NOT NULL REFERENCES fetch_artifacts(id),
+  parser_name           TEXT NOT NULL,
+  previous_parse_run_id INTEGER REFERENCES parse_runs(id),
+  new_parse_run_id      INTEGER NOT NULL REFERENCES parse_runs(id),
+  kind                  TEXT NOT NULL CHECK(kind IN ('normal','activation','rollback','backfill','repair')),
+  actor                 TEXT NOT NULL,
+  reason                TEXT NOT NULL,
+  occurred_at           TEXT NOT NULL
+) STRICT;
+CREATE INDEX IF NOT EXISTS publication_events_target
+  ON publication_events (fetch_artifact_id, parser_name, id);
+CREATE TRIGGER IF NOT EXISTS publication_events_no_update BEFORE UPDATE ON publication_events
+BEGIN SELECT RAISE(ABORT,'publication_events is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS publication_events_no_delete BEFORE DELETE ON publication_events
+BEGIN SELECT RAISE(ABORT,'publication_events is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS publication_events_requires_ok BEFORE INSERT ON publication_events
+WHEN NOT EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=NEW.new_parse_run_id AND p.status='ok'
+ AND p.fetch_artifact_id=NEW.fetch_artifact_id AND p.parser_name=NEW.parser_name)
+BEGIN SELECT RAISE(ABORT,'publication_events requires a successful parse run of the same artifact and parser'); END;
+
+CREATE VIEW IF NOT EXISTS published_observation_parses AS
+ SELECT p.id, p.fetch_artifact_id, p.parser_name, p.parser_version, p.parsed_at, p.status,
+  p.error, p.warnings_json, p.superseded_by_parse_run_id,
+  x.published_at, x.publication_kind, x.release_id
+ FROM published_parse_runs x JOIN parse_runs p ON p.id = x.parse_run_id;
+
+-- Consistency between the pointer and the legacy supersession rule; empty
+-- whenever publishParseRun maintained the pointer.
+CREATE VIEW IF NOT EXISTS publication_gate_mismatches AS
+ SELECT p.fetch_artifact_id, p.parser_name, p.id AS parse_run_id, 'legacy_only' AS mismatch
+ FROM parse_runs p
+ WHERE p.status = 'ok' AND p.superseded_by_parse_run_id IS NULL
+  AND NOT EXISTS(SELECT 1 FROM published_parse_runs x WHERE x.parse_run_id = p.id)
+ UNION ALL
+ SELECT x.fetch_artifact_id, x.parser_name, x.parse_run_id, 'projection_only'
+ FROM published_parse_runs x JOIN parse_runs p ON p.id = x.parse_run_id
+ WHERE p.status <> 'ok' OR p.superseded_by_parse_run_id IS NOT NULL;

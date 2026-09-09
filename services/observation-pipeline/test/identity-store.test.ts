@@ -14,6 +14,7 @@ import {
   reviseIdentity,
   type IdentityResolver,
 } from "../src/identity-store.ts";
+import { publishParse } from "./harness.ts";
 // Storage tests deliberately do not depend on a provider policy PR.
 function otherIdentity(input: IdentityInput): IdentityPlan {
   const unit = input.instrument ?? input.currency;
@@ -107,6 +108,7 @@ ALTER TABLE fetch_artifacts ADD COLUMN format_version TEXT;`);
     "0022_identity_current_run_plan.sql",
     "0023_account_connections.sql",
     "0024_observation_decimals.sql",
+    "0026_publication_gate.sql",
     "0029_decision_log.sql",
   ]) {
     for (const sql of splitSql(readFileSync(new URL(name, migrationDir), "utf8")))
@@ -396,6 +398,9 @@ async function seed(id: number, count = 1, source = "smbc-bank", success = true)
       ),
     db.prepare("UPDATE parse_runs SET status=? WHERE id=?").bind(success ? "ok" : "error", id),
   ]);
+  // A success is published the way the pipeline writer does; the identity
+  // views read the publication projection since migration 0026.
+  if (success) await publishParse(db, id);
 }
 async function count(table: string, where = "1=1") {
   return await db.prepare(`SELECT count(*) n FROM ${table} WHERE ${where}`).first<number>("n");

@@ -100,9 +100,9 @@ try {
       }),
     );
     const points =
-      await proxy.env.DB.prepare(`SELECT o.extra_json,a.fetch_run_id FROM balance_observations o JOIN parse_runs p ON p.id=o.parse_run_id
+      await proxy.env.DB.prepare(`SELECT o.extra_json,a.fetch_run_id FROM balance_observations o JOIN published_parse_runs p ON p.parse_run_id=o.parse_run_id
       JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
-      WHERE a.source_id='v-point' AND a.dataset='balance-info' AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL AND f.status='success' AND f.failure_count=0 LIMIT 1001`).all<{
+      WHERE a.source_id='v-point' AND a.dataset='balance-info' AND f.status='success' AND f.failure_count=0 LIMIT 1001`).all<{
         extra_json: string;
         fetch_run_id: number;
       }>();
@@ -142,9 +142,9 @@ try {
     ).first<number>("n");
     const summaries = new Map<string, Summary>();
     const inventory = await proxy.env.DB.prepare(`SELECT a.source_id,count(*) successful_parses
-    FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
+    FROM published_parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
     JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
-    WHERE p.status='ok' AND p.superseded_by_parse_run_id IS NULL AND f.status='success' AND f.failure_count=0 AND p.id<=?
+    WHERE f.status='success' AND f.failure_count=0 AND p.parse_run_id<=?
     GROUP BY a.source_id`)
       .bind(maxParse)
       .all<{ source_id: string; successful_parses: number }>();
@@ -169,10 +169,10 @@ try {
       for (let page = 0; page < 4000; page++) {
         const rows =
           await proxy.env.DB.prepare(`SELECT o.id,o.parse_run_id,a.id artifact_id,a.fetch_run_id,a.source_id,r.producer_id,a.dataset,o.source_account,${columns[kind]},o.extra_json
-        FROM ${kind}_observations o JOIN parse_runs p ON p.id=o.parse_run_id
+        FROM ${kind}_observations o JOIN published_parse_runs p ON p.parse_run_id=o.parse_run_id
         JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
         JOIN observation_fetch_runs f ON f.id=a.fetch_run_id JOIN financial_fetch_runs r ON r.id=a.fetch_run_id
-        WHERE p.status='ok' AND p.superseded_by_parse_run_id IS NULL AND f.status='success' AND f.failure_count=0 AND p.id<=? AND o.id>?
+        WHERE f.status='success' AND f.failure_count=0 AND p.parse_run_id<=? AND o.id>?
         ORDER BY o.id LIMIT 250`)
             .bind(maxParse, after)
             .all<Row>();

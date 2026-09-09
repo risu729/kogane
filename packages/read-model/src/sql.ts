@@ -79,10 +79,10 @@ export const PARSING_HEALTH_SQL = `SELECT j.status, count(*) AS count FROM obser
       WHERE j.status IN ('pending','running','failed')
         AND coalesce(j.last_error_code, '') <> 'parser_version_retired'
         AND (j.status <> 'failed' OR NOT EXISTS (
-          SELECT 1 FROM parse_runs success
-          WHERE success.fetch_artifact_id = j.fetch_artifact_id
-            AND success.parser_name = j.parser_name
-            AND success.status = 'ok' AND success.superseded_by_parse_run_id IS NULL
+          SELECT 1 FROM published_parse_runs published
+          JOIN parse_runs success ON success.id = published.parse_run_id
+          WHERE published.fetch_artifact_id = j.fetch_artifact_id
+            AND published.parser_name = j.parser_name
             AND success.parsed_at > coalesce((
               SELECT max(failed.parsed_at) FROM parse_runs failed
               WHERE failed.fetch_artifact_id = j.fetch_artifact_id

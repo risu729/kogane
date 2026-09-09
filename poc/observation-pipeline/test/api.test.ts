@@ -6,12 +6,12 @@ import { createApi } from "../src/api.ts";
 import { validApiResponse } from "../shared/api-validation.ts";
 import { latestBalances } from "../src/queries.ts";
 import {
-  supersedeOlderParseRuns,
   insertFetchArtifact,
   insertFetchRun,
   insertObservation,
   insertParseRun,
   openStore,
+  publishParseRun,
   putRawObject,
   upsertSource,
 } from "../src/store.ts";
@@ -511,6 +511,7 @@ describe("invariants that a shared label could break", () => {
         status: "ok",
         warnings: [],
       });
+      publishParseRun(store, artifactId, "p", parseRunId);
       insertObservation(store, parseRunId, {
         kind: "balance",
         sourceAccount: "main", // the colliding label
@@ -636,7 +637,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
       rawLocator: "json:$",
       extra: {},
     });
-    supersedeOlderParseRuns(store, artifactId, "p", current);
+    publishParseRun(store, artifactId, "p", current);
 
     // A different parser that failed, but whose observations exist. Nothing
     // stops a row being written under a run later marked error, so the view
@@ -729,6 +730,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
       status: "ok",
       warnings: [],
     });
+    publishParseRun(store, artifactId, "p", parseRunId);
     // Written through SQL so the value never passes through a JS number.
     store.db
       .query(
@@ -772,6 +774,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
       status: "ok",
       warnings: [],
     });
+    publishParseRun(store, artifactId, "p", parseRunId);
     store.db
       .query("UPDATE parse_runs SET warnings_json = ?1 WHERE id = ?2")
       .run("{ truncated", parseRunId);

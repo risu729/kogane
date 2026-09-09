@@ -23,16 +23,20 @@ const CURRENT = `current AS MATERIALIZED (
  WHERE FILTER
 )`;
 // Only coverage needs the B denominator (including observations without C).
+// Eligibility is the publication projection (docs/publication-gate.md), the
+// same gate current_identity_observations reads since migration 0026.
 const ELIGIBLE = `all_observations AS (
  SELECT 'transaction' kind,id,parse_run_id FROM transaction_observations UNION ALL
  SELECT 'balance',id,parse_run_id FROM balance_observations UNION ALL
  SELECT 'position',id,parse_run_id FROM position_observations UNION ALL
  SELECT 'valuation',id,parse_run_id FROM valuation_observations
 ), eligible AS MATERIALIZED (
- SELECT b.*,a.source_id FROM all_observations b JOIN parse_runs p ON p.id=b.parse_run_id
+ SELECT b.*,a.source_id FROM all_observations b
+ JOIN published_parse_runs pub ON pub.parse_run_id=b.parse_run_id
+ JOIN parse_runs p ON p.id=pub.parse_run_id
  JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
  JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
- WHERE p.status='ok' AND p.superseded_by_parse_run_id IS NULL AND f.status='success' AND f.failure_count=0
+ WHERE f.status='success' AND f.failure_count=0
 )`;
 
 /**

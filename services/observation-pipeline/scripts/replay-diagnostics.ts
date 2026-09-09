@@ -18,7 +18,7 @@ const sql = `WITH ranked AS (
  (SELECT end_value FROM artifact_ranges q WHERE q.fetch_artifact_id=a.id AND q.range_kind='requested' LIMIT 1) window_end
  FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN raw_objects o ON o.sha256=a.sha256
  WHERE p.status='error' AND a.source_id IN ('sony-bank','sbi-shinsei-bank')
- AND NOT EXISTS(SELECT 1 FROM parse_runs success WHERE success.fetch_artifact_id=p.fetch_artifact_id AND success.parser_name=p.parser_name AND success.status='ok' AND success.superseded_by_parse_run_id IS NULL)
+ AND NOT EXISTS(SELECT 1 FROM published_parse_runs success WHERE success.fetch_artifact_id=p.fetch_artifact_id AND success.parser_name=p.parser_name)
 ) SELECT * FROM ranked WHERE rank=1 ORDER BY id DESC LIMIT 50`;
 const result = JSON.parse(
   new TextDecoder().decode(

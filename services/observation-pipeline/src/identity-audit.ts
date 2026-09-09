@@ -6,10 +6,14 @@ const BASE = `WITH b AS (
  SELECT 'position',id,parse_run_id FROM position_observations UNION ALL
  SELECT 'valuation',id,parse_run_id FROM valuation_observations
 ), eligible AS MATERIALIZED (
- SELECT b.*,a.source_id FROM b JOIN parse_runs p ON p.id=b.parse_run_id
+ SELECT b.*,a.source_id FROM b JOIN published_parse_runs pub ON pub.parse_run_id=b.parse_run_id
+ JOIN parse_runs p ON p.id=pub.parse_run_id
  JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
- WHERE p.status='ok' AND p.superseded_by_parse_run_id IS NULL AND f.status='success' AND f.failure_count=0
+ WHERE f.status='success' AND f.failure_count=0
 ), c AS MATERIALIZED (SELECT * FROM current_identity_observations)`;
+// Lineage follows the publication projection: a run is current when it is
+// the published run of its (artifact, parser), historical otherwise.
+const LINEAGE = `CASE WHEN EXISTS(SELECT 1 FROM published_parse_runs pub WHERE pub.parse_run_id=p.id) THEN 'current' ELSE 'historical' END lineage`;
 const ISSUES = [
   "missing-accountKind",
   "missing-specificAccountCode",
@@ -64,14 +68,14 @@ export const IDENTITY_AUDIT_QUERIES = [
   },
   {
     name: "pending_parses",
-    sql: `SELECT a.source_id source,CASE WHEN p.superseded_by_parse_run_id IS NULL THEN 'current' ELSE 'historical' END lineage,count(*) eligible_parses,
+    sql: `SELECT a.source_id source,${LINEAGE},count(*) eligible_parses,
     sum(CASE WHEN EXISTS(SELECT 1 FROM eligible_identity_runs r JOIN identity_run_seals s ON s.identity_run_id=r.id WHERE r.parse_run_id=p.id AND r.policy_version>=(${requiredIdentityPolicySql("a")})) THEN 0 ELSE 1 END) pending_parses
     FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
     WHERE p.status='ok' AND f.status='success' AND f.failure_count=0 GROUP BY 1,2 ORDER BY 1,2 LIMIT 1001`,
   },
   {
     name: "vpass_coverage",
-    sql: `SELECT CASE WHEN p.superseded_by_parse_run_id IS NULL THEN 'current' ELSE 'historical' END lineage,
+    sql: `SELECT ${LINEAGE},
     count(*) trusted_eligible_parses,count(DISTINCT a.id) trusted_eligible_artifacts,
     sum(CASE WHEN EXISTS(SELECT 1 FROM eligible_identity_runs r JOIN identity_run_seals s ON s.identity_run_id=r.id JOIN identity_vpass_bindings pin ON pin.identity_run_id=r.id WHERE r.parse_run_id=p.id AND r.policy_version>=2 AND pin.financial_unit_id=b.financial_unit_id AND pin.binding_artifact_id=b.binding_artifact_id AND pin.card_token=b.card_token) THEN 1 ELSE 0 END) sealed_pinned_parses
     FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN observation_fetch_runs f ON f.id=a.fetch_run_id JOIN trusted_vpass_card_bindings b ON b.financial_artifact_id=a.id

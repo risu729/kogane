@@ -29,8 +29,11 @@ const PRODUCT_METADATA = `CASE WHEN ${PRODUCT_SUPPORTED} THEN
  * Start with the already-authorized bounded page (`?1` is a JSON array of
  * `{kind,id}`). Keyed observation lookup avoids rescanning the current
  * catalogue per row. Historical B rows can display their latest eligible
- * sealed interpretation, explicitly marked historical. The run's policy
- * release is reported for every row so a response can say what it read.
+ * sealed interpretation, explicitly marked historical: "current" is membership
+ * in the publication projection (docs/publication-gate.md), and a successful
+ * run that is neither published nor superseded is decorated for no one. The
+ * run's policy release is reported for every row so a response can say what it
+ * read.
  */
 export function organizationSql(mode: IdentityReadMode): string {
   const mapping = MAPPING_RELATIONS[mode];
@@ -38,7 +41,7 @@ export function organizationSql(mode: IdentityReadMode): string {
  SELECT json_extract(value,'$.kind') kind,json_extract(value,'$.id') id FROM json_each(?1)
 ), ranked AS MATERIALIZED (
  SELECT o.*,p.id parse_run_id,p.parser_name,a.id artifact_id,a.dataset,
- p.superseded_by_parse_run_id IS NOT NULL historical,
+ pub.parse_run_id IS NULL historical,
  row_number() OVER(PARTITION BY o.kind,o.observation_id ORDER BY r.policy_version DESC) choice
  FROM wanted w
  CROSS JOIN identity_observations o ON o.kind=w.kind AND o.observation_id=w.id
@@ -47,7 +50,9 @@ export function organizationSql(mode: IdentityReadMode): string {
  CROSS JOIN parse_runs p ON p.id=r.parse_run_id
  CROSS JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id
  CROSS JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
+ LEFT JOIN published_parse_runs pub ON pub.parse_run_id=p.id
  WHERE p.status='ok' AND f.status='success' AND f.failure_count=0
+  AND (pub.parse_run_id IS NOT NULL OR p.superseded_by_parse_run_id IS NOT NULL)
 )
 SELECT o.kind,o.observation_id,o.historical,o.parse_run_id,o.parser_name,o.artifact_id,o.dataset,
  coalesce(b.raw_locator,v.raw_locator,t.raw_locator,h.raw_locator) raw_locator,

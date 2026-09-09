@@ -16,7 +16,9 @@ test("current identities select keyed eligible run winners before observation fa
     for (const file of readdirSync(dir)
       .filter((f) => f.endsWith(".sql"))
       .sort()) {
-      if (file.startsWith("0022_")) continue;
+      // 0022 fixed the plan shape and 0026 (publication gate) re-defines the
+      // same view over the projection; both are applied explicitly below.
+      if (file.startsWith("0022_") || file.startsWith("0026_")) continue;
       db.exec(readFileSync(new URL(file, dir), "utf8"));
     }
     const before = plan(core);
@@ -26,30 +28,54 @@ test("current identities select keyed eligible run winners before observation fa
       before.some((d) => /SCAN t USING INDEX idx_fetch_run_reports_one_terminal/.test(d)),
     ).toBe(true);
     expect(before.some((d) => /SEARCH p USING AUTOMATIC.*\(status=\?\)/.test(d))).toBe(true);
-    db.exec(readFileSync(new URL("0022_identity_current_run_plan.sql", dir), "utf8"));
-    for (const [sql, values] of [
-      [core, []],
-      [identityQuery("accounts", false), [0]],
-      [identityQuery("instruments", false), [0]],
+    for (const migration of [
+      "0022_identity_current_run_plan.sql",
+      "0026_publication_gate.sql",
     ] as const) {
-      const after = plan(sql, [...values]);
-      expect(after.filter((d) => d === "MATERIALIZE candidates")).toHaveLength(1);
-      expect(after.filter((d) => d === "MATERIALIZE latest")).toHaveLength(1);
-      expect(after.some((d) => /SCAN t\b/.test(d))).toBe(false);
-      expect(after.some((d) => /SEARCH p USING AUTOMATIC.*\(status=\?\)/.test(d))).toBe(false);
-      expect(
-        after.some((d) =>
-          /SEARCH r USING INDEX sqlite_autoindex_identity_runs_2 \(parse_run_id=\?\)/.test(d),
-        ),
-      ).toBe(true);
-      expect(
-        after.some((d) =>
-          /SEARCH o USING (COVERING )?INDEX sqlite_autoindex_identity_observations_2 \(identity_run_id=\?\)/.test(
-            d,
+      db.exec(readFileSync(new URL(migration, dir), "utf8"));
+      for (const [sql, values] of [
+        [core, []],
+        [identityQuery("accounts", false), [0]],
+        [identityQuery("instruments", false), [0]],
+      ] as const) {
+        const after = plan(sql, [...values]);
+        expect(
+          after.filter((d) => d === "MATERIALIZE candidates"),
+          migration,
+        ).toHaveLength(1);
+        expect(
+          after.filter((d) => d === "MATERIALIZE latest"),
+          migration,
+        ).toHaveLength(1);
+        expect(
+          after.some((d) => /SCAN t\b/.test(d)),
+          migration,
+        ).toBe(false);
+        expect(
+          after.some((d) => /SEARCH p USING AUTOMATIC.*\(status=\?\)/.test(d)),
+          migration,
+        ).toBe(false);
+        expect(
+          after.some((d) =>
+            /SEARCH r USING INDEX sqlite_autoindex_identity_runs_2 \(parse_run_id=\?\)/.test(d),
           ),
-        ),
-      ).toBe(true);
+          migration,
+        ).toBe(true);
+        expect(
+          after.some((d) =>
+            /SEARCH o USING (COVERING )?INDEX sqlite_autoindex_identity_observations_2 \(identity_run_id=\?\)/.test(
+              d,
+            ),
+          ),
+          migration,
+        ).toBe(true);
+      }
     }
+    // The gated view is driven by the projection: a scan of the pointer
+    // table, then keyed lookups; parse_runs is never scanned by status.
+    expect(
+      plan(core).some((d) => /SCAN pub USING COVERING INDEX published_parse_runs_run/.test(d)),
+    ).toBe(true);
   } finally {
     db.close();
   }

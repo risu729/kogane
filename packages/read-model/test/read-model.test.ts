@@ -13,10 +13,12 @@ import {
   completeSnapshotCandidates,
   createD1ObservationReader,
   createObservationReader,
+  legacyPublishedParses,
   type ObservationReader,
   PAGE_LIMIT,
   parseWarnings,
   publishedParses,
+  recordedParses,
   ResultLimitExceededError,
   scopePredicates,
   type SqlExecutor,
@@ -223,7 +225,7 @@ describe("named concepts in the final SQL", () => {
   test("current lists apply the active-state projection and snapshot membership", () => {
     const active = activeStateProjection.predicate;
     expect(active).toBe(
-      "p.superseded_by_parse_run_id IS NULL AND p.status = 'ok' AND f.status = 'success' AND f.failure_count = 0",
+      "EXISTS (SELECT 1 FROM published_parse_runs published WHERE published.parse_run_id = p.id) AND f.status = 'success' AND f.failure_count = 0",
     );
     for (const name of ["transactions", "latestBalances", "positions", "positionValuations"])
       expect(texts[name], name).toContain(active);
@@ -241,14 +243,47 @@ describe("named concepts in the final SQL", () => {
     expect(completeSnapshotCandidates.ctes).toContain("FROM observation_fetch_artifacts fa");
     expect(completeSnapshotCandidates.ctes).toContain("JOIN observation_fetch_runs f ON");
     expect(completeSnapshotCandidates.ctes).not.toMatch(/\bfetch_artifacts fa\b/);
-    expect(completeSnapshotCandidates.ctes).toContain("complete_parse.status = 'ok'");
+    // A parse completes a snapshot only when it is the published run; the
+    // supersession pointer no longer decides membership.
     expect(completeSnapshotCandidates.ctes).toContain(
-      "complete_parse.superseded_by_parse_run_id IS NULL",
+      "EXISTS (SELECT 1 FROM published_parse_runs published\n                  WHERE published.parse_run_id = complete_parse.id)",
     );
+    expect(completeSnapshotCandidates.ctes).not.toContain("superseded_by_parse_run_id");
     expect(publishedParses.predicate("x")).toBe(
+      "EXISTS (SELECT 1 FROM published_parse_runs published WHERE published.parse_run_id = x.id)",
+    );
+    expect(legacyPublishedParses.predicate("x")).toBe(
       "x.superseded_by_parse_run_id IS NULL AND x.status = 'ok'",
     );
     expect(visibleEvidence.rawObjects).toContain("observation_raw_objects");
+  });
+
+  test("the publication gate decides every current read and every recorded read", () => {
+    // Current lists: the projection, never the legacy pointer rule.
+    for (const name of ["transactions", "latestBalances", "positions", "positionValuations"]) {
+      expect(texts[name], name).toContain(publishedParses.predicate("p"));
+      expect(texts[name], name).not.toContain(legacyPublishedParses.predicate("p"));
+    }
+    // Recorded reads: an ok run that is neither published nor superseded (a
+    // future candidate) is not a visible result anywhere, ids included.
+    expect(recordedParses.predicate("p")).toBe(
+      "p.status <> 'pending' AND (p.status = 'error' OR p.superseded_by_parse_run_id IS NOT NULL OR EXISTS (SELECT 1 FROM published_parse_runs published WHERE published.parse_run_id = p.id))",
+    );
+    for (const name of [
+      "balanceHistory",
+      "artifacts",
+      "artifactParseRuns",
+      "provenance",
+      "observationDetail",
+      "parseRunObservations",
+      "overviewParseRuns",
+      "count:parse_runs",
+      "count:transaction_observations",
+    ])
+      expect(texts[name], name).toContain(recordedParses.predicate("p"));
+    // Health: a failure is repaired only by a newer published parse.
+    expect(sql.PARSING_HEALTH_SQL).toContain("FROM published_parse_runs published");
+    expect(sql.PARSING_HEALTH_SQL).not.toContain("superseded_by_parse_run_id");
   });
 });
 

@@ -3,12 +3,13 @@
 // Every query the API can run lives here, so the invariants are stated once
 // rather than in each route. Two rules govern all of them:
 //
-//   * "Current" means produced by a parse run that succeeded and that nothing
-//     has superseded. That is the predicate
-//     `p.superseded_by_parse_run_id IS NULL AND p.status = 'ok'`, plus a
-//     successful parent fetch run with no failure evidence, applied to
-//     every current-state view. Superseded observations are never deleted, so
-//     they stay reachable through the artifact they came from.
+//   * "Current" means produced by the published parse run of its artifact and
+//     parser: membership in `published_parse_runs`, the adoption pointer the
+//     writer moves when a successful parse supersedes older ones
+//     (docs/publication-gate.md), plus a successful parent fetch run with no
+//     failure evidence, applied to every current-state view. Superseded
+//     observations are never deleted, so they stay reachable through the
+//     artifact they came from.
 //   * Nothing here writes. The browser observes the store; a handler that
 //     could write would make it part of the pipeline.
 //
@@ -73,9 +74,9 @@ const COUNTED_TABLES = [
   "valuation_observations",
 ] as const;
 
-/** Only a parse run that succeeded and that nothing has superseded is current. */
+/** Only the published parse run of its (artifact, parser) is current. */
 const CURRENT =
-  "p.superseded_by_parse_run_id IS NULL AND p.status = 'ok' " +
+  "EXISTS (SELECT 1 FROM published_parse_runs published WHERE published.parse_run_id = p.id) " +
   "AND f.status = 'success' AND f.failure_count = 0";
 
 const SEPARATOR = " · ";

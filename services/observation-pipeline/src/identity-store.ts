@@ -388,7 +388,7 @@ export async function identitySweep(
     WHERE p.status='ok' AND f.status='success' AND f.failure_count=0 AND (?1 IS NULL OR a.source_id=?1) AND NOT EXISTS(
       SELECT 1 FROM identity_runs i JOIN identity_run_seals s ON s.identity_run_id=i.id
       WHERE i.parse_run_id=p.id AND i.policy_version>=${requiredIdentityPolicySql("a")})
-    ORDER BY (p.superseded_by_parse_run_id IS NOT NULL),p.id LIMIT ?2`)
+    ORDER BY NOT EXISTS(SELECT 1 FROM published_parse_runs pub WHERE pub.parse_run_id=p.id),p.id LIMIT ?2`)
     .bind(source ?? null, maxRuns)
     .all<ParseIdentity & { required_policy: number; is_empty: number }>();
   let observations = 0;

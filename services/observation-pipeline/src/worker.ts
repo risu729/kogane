@@ -2,6 +2,12 @@ import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry.
 import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity/index.ts";
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
+import {
+  publicationConsistency,
+  publicationStatements,
+  REPAIR_LIMIT_DEFAULT,
+  repairPublication,
+} from "./publication-gate.ts";
 import type {
   ArtifactMeta,
   Observation,
@@ -301,6 +307,56 @@ export async function parseJob(
   return result;
 }
 
+export interface PublishInput {
+  parseId: number;
+  /** The lease this attempt holds; nothing publishes once it has expired. */
+  token: string;
+  version: number[];
+  artifactId: number;
+  parserName: string;
+  publishedAt: string;
+  now: number;
+}
+
+/**
+ * The publish transaction of a successful parse, in order: mark the run ok
+ * (born superseded when a numerically newer success is already current),
+ * supersede older successes if this run is current, move the publication
+ * projection and record its event (0026, same decision), then close the job.
+ * The first statement is fenced on the live lease; every later statement
+ * depends on its effect, so an expired lease changes nothing at all.
+ * Exported for the publication-gate tests only.
+ */
+export function publishBatch(env: Env, input: PublishInput): D1PreparedStatement[] {
+  const { parseId, token, version, artifactId, parserName, publishedAt, now } = input;
+  return [
+    env.DB.prepare(
+      `UPDATE parse_runs SET status='ok',superseded_by_parse_run_id=(
+          SELECT newer.id FROM parse_runs newer
+          WHERE newer.fetch_artifact_id=parse_runs.fetch_artifact_id
+            AND newer.parser_name=parse_runs.parser_name AND newer.status='ok'
+            AND newer.superseded_by_parse_run_id IS NULL
+            AND (
+              json_extract('['||replace(newer.parser_version,'.',',')||']','$[0]'),
+              json_extract('['||replace(newer.parser_version,'.',',')||']','$[1]'),
+              json_extract('['||replace(newer.parser_version,'.',',')||']','$[2]')
+            ) > (?,?,?)
+          ORDER BY
+            json_extract('['||replace(newer.parser_version,'.',',')||']','$[0]') DESC,
+            json_extract('['||replace(newer.parser_version,'.',',')||']','$[1]') DESC,
+            json_extract('['||replace(newer.parser_version,'.',',')||']','$[2]') DESC LIMIT 1
+        ) WHERE id=? AND EXISTS(SELECT 1 FROM observation_parse_jobs WHERE lease_token=? AND status='running' AND lease_until_ms>?)`,
+    ).bind(version[0]!, version[1]!, version[2]!, parseId, token, now),
+    env.DB.prepare(
+      `UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE fetch_artifact_id=? AND parser_name=? AND id<>? AND status='ok' AND superseded_by_parse_run_id IS NULL AND EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=? AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL)`,
+    ).bind(parseId, artifactId, parserName, parseId, parseId),
+    ...publicationStatements(env.DB, parseId, publishedAt),
+    env.DB.prepare(
+      `UPDATE observation_parse_jobs SET status='done',last_error_code=NULL WHERE lease_token=? AND EXISTS(SELECT 1 FROM parse_runs WHERE id=? AND status='ok')`,
+    ).bind(token, parseId),
+  ];
+}
+
 async function executeParseJob(
   env: Env,
   job: Job,
@@ -390,31 +446,17 @@ async function executeParseJob(
     }
     // A lost lease cannot publish rows. All visibility and supersession changes
     // occur in one D1 transaction; empty successful parses are published too.
-    const publish = await env.DB.batch([
-      env.DB.prepare(
-        `UPDATE parse_runs SET status='ok',superseded_by_parse_run_id=(
-          SELECT newer.id FROM parse_runs newer
-          WHERE newer.fetch_artifact_id=parse_runs.fetch_artifact_id
-            AND newer.parser_name=parse_runs.parser_name AND newer.status='ok'
-            AND newer.superseded_by_parse_run_id IS NULL
-            AND (
-              json_extract('['||replace(newer.parser_version,'.',',')||']','$[0]'),
-              json_extract('['||replace(newer.parser_version,'.',',')||']','$[1]'),
-              json_extract('['||replace(newer.parser_version,'.',',')||']','$[2]')
-            ) > (?,?,?)
-          ORDER BY
-            json_extract('['||replace(newer.parser_version,'.',',')||']','$[0]') DESC,
-            json_extract('['||replace(newer.parser_version,'.',',')||']','$[1]') DESC,
-            json_extract('['||replace(newer.parser_version,'.',',')||']','$[2]') DESC LIMIT 1
-        ) WHERE id=? AND EXISTS(SELECT 1 FROM observation_parse_jobs WHERE lease_token=? AND status='running' AND lease_until_ms>?)`,
-      ).bind(version[0]!, version[1]!, version[2]!, parseId, token, Date.now()),
-      env.DB.prepare(
-        `UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE fetch_artifact_id=? AND parser_name=? AND id<>? AND status='ok' AND superseded_by_parse_run_id IS NULL AND EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=? AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL)`,
-      ).bind(parseId, row.id, parser.name, parseId, parseId),
-      env.DB.prepare(
-        `UPDATE observation_parse_jobs SET status='done',last_error_code=NULL WHERE lease_token=? AND EXISTS(SELECT 1 FROM parse_runs WHERE id=? AND status='ok')`,
-      ).bind(token, parseId),
-    ]);
+    const publish = await env.DB.batch(
+      publishBatch(env, {
+        parseId,
+        token,
+        version,
+        artifactId: row.id,
+        parserName: parser.name,
+        publishedAt: new Date().toISOString(),
+        now: Date.now(),
+      }),
+    );
     if (!publish[0]?.meta.changes) throw new PipelineError("parse_lease_expired");
     return "parsed";
   } catch (error) {
@@ -1176,6 +1218,26 @@ export default {
     const replay = /^\/replay\/(plan|start|pause|resume|cancel|inspect)$/.exec(path);
     if (request.method === "POST" && replay) return replayCommand(env, replay[1]!, request);
     if (request.method === "GET" && path === "/status") return status(env);
+    // Publication gate operations (docs/publication-gate.md): the consistency
+    // check is read-only; repair is bounded, idempotent and records its actor.
+    if (request.method === "GET" && path === "/publication/consistency")
+      return Response.json(await publicationConsistency(env.DB));
+    if (request.method === "POST" && path === "/publication/repair") {
+      const v = await command(request);
+      if (!v || typeof v.actor !== "string" || typeof v.reason !== "string")
+        return invalid("publication_request_invalid");
+      const limit = v.limit === undefined ? REPAIR_LIMIT_DEFAULT : v.limit;
+      if (typeof limit !== "number") return invalid("publication_limit_invalid");
+      try {
+        return Response.json(
+          await repairPublication(env.DB, { actor: v.actor, reason: v.reason, limit }),
+        );
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "";
+        if (code.startsWith("publication_")) return invalid(code);
+        throw error;
+      }
+    }
     return new Response("Not found", { status: 404 });
   },
 } satisfies ExportedHandler<Env>;

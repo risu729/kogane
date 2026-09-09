@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
-import { seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { decimalRows } from "../src/normalized-decimals";
 import { validNormalizedDecimal } from "../../../poc/observation-pipeline/shared/normalized-decimal";
 beforeAll(seedRegistry);
@@ -11,6 +11,7 @@ it("D1 insertion triggers persist text-only exact values and API reads only sele
   )
     .bind(run.artifacts[0]!.id)
     .first<{ id: number }>();
+  await publishParse(parse!.id);
   const ids: number[] = [];
   for (const [minor, text, unit] of [
     [null, "-0.000", "EUR"],
