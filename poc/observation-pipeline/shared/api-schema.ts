@@ -85,6 +85,13 @@ export interface ApiCapabilities {
   readonly financialProducts: boolean;
   /** The sealed raw-run history under `/api/evidence/v1` is served. */
   readonly evidenceHistory: boolean;
+  /**
+   * `/api/v2/rewards/*` is served: programme holdings with buckets, expiry
+   * estimates with their state, and a pure conversion simulation. Off by
+   * default; a deployment turns it on and then advertises it here, so a client
+   * never guesses whether the routes exist (docs/rewards.md).
+   */
+  readonly rewardsV2: boolean;
 }
 
 /** The local PoC store and the hosted synthetic demo, which snapshots it. */
@@ -100,6 +107,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   organizedDisplay: false,
   financialProducts: false,
   evidenceHistory: false,
+  rewardsV2: false,
 } as const satisfies ApiCapabilities;
 
 /** The production evidence-browser Worker over the central store. */
@@ -115,6 +123,9 @@ export const CENTRAL_STORE_CAPABILITIES = {
   organizedDisplay: true,
   financialProducts: true,
   evidenceHistory: true,
+  // Default off: `centralStoreCapabilities` in the Worker overlays the
+  // deployment's flag, and this constant stays the off-by-default contract.
+  rewardsV2: false,
 } as const satisfies ApiCapabilities;
 
 /**
@@ -125,7 +136,8 @@ export type CapabilityRequirement =
   | "collectionFilters"
   | "paginationVersion:offset-v1"
   | "measureViews"
-  | "identityReadModes";
+  | "identityReadModes"
+  | "rewardsV2";
 
 /**
  * Every query parameter a list endpoint understands, keyed by path. Paths
@@ -185,6 +197,8 @@ export function capabilityGrants(
       return capabilities.measureViews.length > 0;
     case "identityReadModes":
       return capabilities.identityReadModes.length > 0;
+    case "rewardsV2":
+      return capabilities.rewardsV2;
   }
 }
 
@@ -196,6 +210,33 @@ export function allowedQueryParameters(
   if (!isListPath(path)) return [];
   const schema: Record<string, CapabilityRequirement> = LIST_REQUEST_SCHEMA[path];
   return Object.keys(schema).filter((name) => capabilityGrants(schema[name]!, capabilities));
+}
+
+/**
+ * Reward routes (A11). They are a separate table because the whole route
+ * group exists or does not: with `rewardsV2` off the paths are 404, not a 400
+ * on an unknown parameter, exactly like `/api/identity/*` without a read mode.
+ * `/offers/simulate` is a pure GET — same parameters, same answer, no side
+ * effect and no exchange (docs/rewards.md).
+ */
+export const REWARD_REQUEST_SCHEMA = {
+  "/api/v2/rewards/holdings": ["program", "offset"],
+  "/api/v2/rewards/expiry": ["program", "offset"],
+  "/api/v2/rewards/offers/simulate": ["offer", "quantity", "unit", "goal", "depth"],
+} as const satisfies Record<string, readonly string[]>;
+export type RewardPath = keyof typeof REWARD_REQUEST_SCHEMA;
+
+export function isRewardPath(path: string): path is RewardPath {
+  return Object.hasOwn(REWARD_REQUEST_SCHEMA, path);
+}
+
+/** Parameter names a reward route accepts; empty when the capability is off. */
+export function rewardQueryParameters(
+  path: string,
+  capabilities: ApiCapabilities,
+): readonly string[] {
+  if (!capabilities.rewardsV2 || !isRewardPath(path)) return [];
+  return REWARD_REQUEST_SCHEMA[path];
 }
 
 export function validMeasureView(

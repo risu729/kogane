@@ -29,6 +29,8 @@ export interface ClientFeatures {
   readonly identities: boolean;
   /** The sealed raw-run history route is available. */
   readonly evidenceHistory: boolean;
+  /** The reward programme pages are available. */
+  readonly rewards: boolean;
 }
 
 /** Every feature is off until capabilities are known. */
@@ -37,6 +39,7 @@ export const NO_FEATURES: ClientFeatures = {
   serverPaging: false,
   identities: false,
   evidenceHistory: false,
+  rewards: false,
 };
 
 export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
@@ -45,5 +48,6 @@ export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
     serverPaging: capabilities.paginationVersion !== "none",
     identities: capabilities.identityReadModes.includes("latest"),
     evidenceHistory: capabilities.evidenceHistory,
+    rewards: capabilities.rewardsV2,
   };
 }

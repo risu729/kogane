@@ -18,6 +18,7 @@ import {
   REPAIR_LIMIT_DEFAULT,
   repairPublication,
 } from "./publication-gate.ts";
+import { rewardClaimsStage } from "./reward-claims-job.ts";
 import type {
   ArtifactMeta,
   CoverageClaim,
@@ -1254,10 +1255,13 @@ export async function snapshotPolicyComparison(env: Env): Promise<Response> {
 export interface ScheduledStages {
   parse: (env: Env) => Promise<object>;
   identity: (env: Env) => Promise<object>;
+  /** A11 reward promotion; `null` means the flag is off and the stage is silent. */
+  rewards?: (env: Env) => Promise<object | null>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
   identity: (env) => identitySweep(env.DB, resolveIdentity),
+  rewards: (env) => rewardClaimsStage(env),
 };
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
@@ -1271,9 +1275,13 @@ export async function runScheduled(
   for (const [event, stage] of [
     ["observation_sweep", stages.parse],
     ["identity_sweep", stages.identity],
+    ["reward_claims_sweep", stages.rewards ?? defaultStages.rewards!],
   ] as const) {
     try {
-      log(JSON.stringify({ event, ...(await stage(env)) }));
+      const result = await stage(env);
+      // A stage that returns null is disabled and stays out of the log, so a
+      // deployment with the flag off emits the same lines it emitted before.
+      if (result !== null) log(JSON.stringify({ event, ...result }));
     } catch (error) {
       const code =
         error instanceof PipelineError

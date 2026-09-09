@@ -164,6 +164,9 @@ describe("shared contract pin", () => {
       organizedDisplay: true,
       financialProducts: true,
       evidenceHistory: true,
+      // Default off: a deployment overlays its own flag, and the pinned
+      // contract stays the off-by-default one (docs/rewards.md).
+      rewardsV2: false,
     });
   });
 });

@@ -18,6 +18,7 @@ import { EvidenceContent } from "./evidence-app.tsx";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
 import { CollectionControls } from "./collection-controls.tsx";
 import { IdentitiesPage } from "./pages/Identities.tsx";
+import { RewardsPage } from "./pages/Rewards.tsx";
 
 const NAV: { to: string; label: string; icon: string }[] = [
   {
@@ -78,6 +79,8 @@ function View({ route }: { route: Route }): ReactNode {
       return <PositionsPage />;
     case "identities":
       return <IdentitiesPage />;
+    case "rewards":
+      return <RewardsPage />;
     case "artifacts":
       return <ArtifactsPage />;
     case "artifact":
@@ -163,6 +166,11 @@ export function App(): ReactNode {
           {features.identities ? (
             <Link to="/identities" current={path === "/identities"}>
               口座・銘柄
+            </Link>
+          ) : null}
+          {features.rewards ? (
+            <Link to="/rewards" current={path === "/rewards"}>
+              ポイント・前払式残高
             </Link>
           ) : null}
           {features.evidenceHistory ? (

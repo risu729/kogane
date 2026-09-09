@@ -11,6 +11,8 @@ import {
   LIST_REQUEST_SCHEMA,
   listRequestSearch,
   LOCAL_STORE_CAPABILITIES,
+  REWARD_REQUEST_SCHEMA,
+  rewardQueryParameters,
   validIdentityReadMode,
   type ApiCapabilities,
 } from "../shared/api-schema.ts";
@@ -47,6 +49,22 @@ describe("shared API schema", () => {
       "/api/artifacts": { source: "collectionFilters", cursor: "paginationVersion:offset-v1" },
       "/api/filter-options": { kind: "collectionFilters", view: "measureViews" },
     });
+    expect(REWARD_REQUEST_SCHEMA).toEqual({
+      "/api/v2/rewards/holdings": ["program", "offset"],
+      "/api/v2/rewards/expiry": ["program", "offset"],
+      "/api/v2/rewards/offers/simulate": ["offer", "quantity", "unit", "goal", "depth"],
+    });
+    // The whole route group is gated: with rewardsV2 off no parameter is
+    // accepted, because the path itself is not served.
+    expect(rewardQueryParameters("/api/v2/rewards/holdings", CENTRAL_STORE_CAPABILITIES)).toEqual(
+      [],
+    );
+    expect(
+      rewardQueryParameters("/api/v2/rewards/holdings", {
+        ...CENTRAL_STORE_CAPABILITIES,
+        rewardsV2: true,
+      }),
+    ).toEqual(["program", "offset"]);
     expect(LOCAL_STORE_CAPABILITIES).toEqual({
       contractVersion: "observation-api-v1",
       readOnly: true,
@@ -59,6 +77,7 @@ describe("shared API schema", () => {
       organizedDisplay: false,
       financialProducts: false,
       evidenceHistory: false,
+      rewardsV2: false,
     });
     expect(CENTRAL_STORE_CAPABILITIES).toEqual({
       contractVersion: "observation-api-v1",
@@ -72,6 +91,9 @@ describe("shared API schema", () => {
       organizedDisplay: true,
       financialProducts: true,
       evidenceHistory: true,
+      // Default off: a deployment overlays its own flag, and the pinned
+      // contract stays the off-by-default one (docs/rewards.md).
+      rewardsV2: false,
     });
   });
 
@@ -199,7 +221,10 @@ describe("client behaviour depends on capabilities, never on the connection name
       serverPaging: true,
       identities: true,
       evidenceHistory: true,
+      // Off in the pinned contract; a deployment overlays its own flag.
+      rewards: false,
     });
+    expect(clientFeatures({ ...CENTRAL_STORE_CAPABILITIES, rewardsV2: true }).rewards).toBe(true);
     expect(local).toEqual(NO_FEATURES);
     expect(
       clientFeatures({ ...CENTRAL_STORE_CAPABILITIES, identityReadModes: [] }).identities,
@@ -212,6 +237,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       serverPaging: false,
       identities: false,
       evidenceHistory: false,
+      rewards: false,
     });
   });
 });

@@ -73,3 +73,23 @@ export {
   NO_RECORDED_IDENTITY_RELEASE,
 } from "./identity";
 export { organizationSql, PRODUCT_METADATA_LIMIT } from "./organization";
+export {
+  conversionOffer,
+  CONVERSION_OFFERS_SQL,
+  createRewardReader,
+  CURRENT_REWARD_BUCKETS_SQL,
+  expiryRule,
+  EXPIRY_RULES_SQL,
+  membershipState,
+  MEMBERSHIP_SQL,
+  observedAtValue,
+  type Page,
+  page,
+  QUALIFYING_ACTIVITY_POLICIES,
+  rewardBucket,
+  rewardProgramOf,
+  REWARD_PAGE_LIMIT,
+  REWARD_READ_RELEASE,
+  type RewardHoldingView,
+  type RewardReader,
+} from "./rewards";

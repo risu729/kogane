@@ -4,6 +4,7 @@ import { describeActivities } from "./activity-presentation";
 import { organizedFilterOptions } from "./organized-filter-options";
 import { presentLatestBalances, describeBalanceRows } from "./balance-presentation";
 import { HttpError, json } from "./http";
+import { centralStoreCapabilities } from "./rewards-api";
 import { raw } from "./read";
 import {
   organizeRows,
@@ -67,7 +68,8 @@ export async function observationApi(
     return null;
   // Accepted parameters come from the shared schema and the capabilities this
   // Worker advertises in /api/meta, so the two cannot drift apart.
-  const allowed = allowedQueryParameters(path, CENTRAL_STORE_CAPABILITIES);
+  const capabilities = centralStoreCapabilities(CENTRAL_STORE_CAPABILITIES, env);
+  const allowed = allowedQueryParameters(path, capabilities);
   for (const key of url.searchParams.keys()) {
     const value = url.searchParams.get(key)!;
     if (
@@ -131,7 +133,7 @@ export async function observationApi(
       apiVersion: 1,
       parsingHealth: await reader.parsingHealth(),
       source: { kind: "central-store", classification: "financial" },
-      capabilities: CENTRAL_STORE_CAPABILITIES,
+      capabilities,
     } satisfies ApiMetadata);
   }
   if (path === "/api/overview") return boundedCollections({ ...(await reader.overview()) });
