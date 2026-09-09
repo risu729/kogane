@@ -9,7 +9,7 @@
 // what `input_fingerprint` states.
 //
 // The digest range is deliberately narrower than a repository commit: the
-// parser module and the local modules it imports (poc/observation-pipeline
+// parser module and the local modules it imports (packages/parsers
 // scripts/parser-digests.ts computes it). A UI change must not invalidate
 // every historical parse; a change to a shared parsing helper must.
 import { PARSER_DIGESTS, PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
@@ -53,7 +53,7 @@ export function transformManifest(
   // second version of the same parser (the candidate lane) reuses it and is
   // told apart by the semantic version inside the manifest. That the recorded
   // version matches the deployed one is checked in CI
-  // (poc/observation-pipeline/test/parser-digests.test.ts), not here, so a
+  // (packages/parsers/test/parser-digests.test.ts), not here, so a
   // registry carrying two versions of one parser still resolves.
   const recorded = PARSER_DIGESTS.releases[parser.name];
   if (!recorded) throw new Error("parser_release_unknown");

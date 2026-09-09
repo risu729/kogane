@@ -43,9 +43,17 @@ describe("parser code digests", () => {
     // Shared transforms are inside the digest range, unrelated code is not:
     // a change to util.ts must invalidate the parsers that use it, a change
     // to the web UI must not.
+    //
+    // These are the paths the modules had inside poc/observation-pipeline
+    // before design review D07 moved them here, and they are deliberately
+    // still the recorded ones: the digest covers paths as well as contents,
+    // `parser_releases.code_digest` stores it, and migration 0028 refuses the
+    // same parser name and version with a different digest. Repointing them at
+    // packages/parsers would silently re-identify every deployed parser.
     const sony = PARSER_DIGESTS.releases["sony-bank-gross-balance"]!;
     expect(sony.sources).toContain("poc/observation-pipeline/src/parsers/util.ts");
     expect(sony.sources).toContain("poc/observation-pipeline/src/types.ts");
+    expect(sony.sources.some((path) => path.startsWith("packages/parsers/"))).toBe(false);
     expect(sony.sources.some((path) => path.startsWith("poc/observation-pipeline/web/"))).toBe(
       false,
     );
