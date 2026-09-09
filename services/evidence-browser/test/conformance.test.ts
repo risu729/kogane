@@ -164,9 +164,10 @@ describe("shared contract pin", () => {
       organizedDisplay: true,
       financialProducts: true,
       evidenceHistory: true,
-      // Default off: a deployment overlays its own flag, and the pinned
-      // contract stays the off-by-default one (docs/rewards.md).
+      // All three are default off here: each deployment's own flag decides,
+      // and /api/meta reports what the running Worker actually serves.
       rewardsV2: false,
+      commands: false,
       eventsV2: false,
     });
   });

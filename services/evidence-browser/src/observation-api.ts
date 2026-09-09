@@ -135,8 +135,10 @@ export async function observationApi(
       parsingHealth: await reader.parsingHealth(),
       source: { kind: "central-store", classification: "financial" },
       // What this server can actually serve, not what the contract defaults
-      // to: rewardsV2 follows the deployment flag and eventsV2 also depends on
-      // the A10 projection being present (src/capabilities.ts).
+      // What this server can actually serve, not what the contract defaults
+      // to: `rewardsV2` and `commands` follow deployment flags and `eventsV2`
+      // also depends on the A10 projection being present
+      // (src/capabilities.ts).
       capabilities: await centralStoreCapabilities(env),
     } satisfies ApiMetadata);
   }

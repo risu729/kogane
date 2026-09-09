@@ -12,6 +12,8 @@ import {
 import { SNAPSHOT_RELATIONS, unitParseable } from "../../../packages/read-model/src/concepts";
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
+import { changeCommandRoute } from "./change-commands.ts";
+import { dispatchDecisionOutbox } from "./decision-outbox.ts";
 import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import {
   publicationConsistency,
@@ -1303,12 +1305,19 @@ export interface ScheduledStages {
   reconcile?: (env: Env) => Promise<object>;
   /** A11 reward promotion. Absent stage, or the flag off, means the lane never runs. */
   rewards?: (env: Env) => Promise<object>;
+  /**
+   * A09: accepted decisions reach the read models here, not at commit time.
+   * Optional like `reconcile`, so a test may run a subset of the lanes; the
+   * default stages always wire it, which is what the deployed cron runs.
+   */
+  decisions?: (env: Env) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
   identity: (env) => identitySweep(env.DB, resolveIdentity),
   reconcile: (env) => reconciliationSweep(env.DB),
   rewards: (env) => rewardClaimsStage(env),
+  decisions: (env) => dispatchDecisionOutbox(env.DB),
 };
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
@@ -1334,6 +1343,9 @@ export async function runScheduled(
       "reward_claims_sweep",
       rewardClaimsEnabled(env.REWARD_CLAIMS_ENABLED) ? stages.rewards : undefined,
     ],
+    // A09: the decision outbox runs last, after the projections a decision
+    // may have invalidated (docs/change-lifecycle.md).
+    ["decision_outbox", stages.decisions],
   ];
   for (const [event, stage] of lanes) {
     if (!stage) continue;
@@ -1367,6 +1379,12 @@ export default {
         return new Response("Invalid batch", { status: 400 });
       return Response.json(await identitySweep(env.DB, resolveIdentity, maxRuns, source));
     }
+    // A09 change lifecycle. Private service-binding routes with the same trust
+    // level as /sweep: the evidence browser authenticates the human and
+    // forwards the verified actor here, and this Worker stays the only writer
+    // of the decision, approval, receipt and outbox tables.
+    const changeResponse = await changeCommandRoute(env, request, path);
+    if (changeResponse) return changeResponse;
     if (request.method === "POST" && path === "/identity-revise") {
       // Internal service-binding endpoint; no public route. Bound request bytes.
       // The body may carry an operation id and an action; the actor never

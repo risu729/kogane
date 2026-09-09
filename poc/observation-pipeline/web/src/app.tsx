@@ -19,6 +19,7 @@ import { ParsingHealthNotice } from "./parsing-health.tsx";
 import { CollectionControls } from "./collection-controls.tsx";
 import { IdentitiesPage } from "./pages/Identities.tsx";
 import { RewardsPage } from "./pages/Rewards.tsx";
+import { ConfirmPage } from "./pages/Confirm.tsx";
 
 const NAV: { to: string; label: string; icon: string }[] = [
   {
@@ -87,6 +88,8 @@ function View({ route }: { route: Route }): ReactNode {
       return <ArtifactDetailPage id={route.id} />;
     case "observation":
       return <ObservationDetailPage kind={route.kind} id={route.id} />;
+    case "confirm":
+      return <ConfirmPage planId={route.planId} />;
     case "notFound":
       return <NotFoundPage path={route.path} />;
   }

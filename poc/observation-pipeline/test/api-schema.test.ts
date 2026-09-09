@@ -78,6 +78,7 @@ describe("shared API schema", () => {
       financialProducts: false,
       evidenceHistory: false,
       rewardsV2: false,
+      commands: false,
       eventsV2: false,
     });
     expect(CENTRAL_STORE_CAPABILITIES).toEqual({
@@ -92,9 +93,10 @@ describe("shared API schema", () => {
       organizedDisplay: true,
       financialProducts: true,
       evidenceHistory: true,
-      // Default off: a deployment overlays its own flag, and the pinned
-      // contract stays the off-by-default one (docs/rewards.md).
+      // All three are default off here: each deployment's own flag decides,
+      // and /api/meta reports what the running Worker actually serves.
       rewardsV2: false,
+      commands: false,
       eventsV2: false,
     });
   });
@@ -223,10 +225,12 @@ describe("client behaviour depends on capabilities, never on the connection name
       serverPaging: true,
       identities: true,
       evidenceHistory: true,
-      // Off in the pinned contract; a deployment overlays its own flag.
+      // Off in the pinned contract; each deployment overlays its own flag.
       rewards: false,
+      commands: false,
     });
     expect(clientFeatures({ ...CENTRAL_STORE_CAPABILITIES, rewardsV2: true }).rewards).toBe(true);
+    expect(clientFeatures({ ...CENTRAL_STORE_CAPABILITIES, commands: true }).commands).toBe(true);
     expect(local).toEqual(NO_FEATURES);
     expect(
       clientFeatures({ ...CENTRAL_STORE_CAPABILITIES, identityReadModes: [] }).identities,
@@ -240,6 +244,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       identities: false,
       evidenceHistory: false,
       rewards: false,
+      commands: false,
     });
   });
 });

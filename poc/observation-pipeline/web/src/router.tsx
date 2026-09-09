@@ -119,6 +119,8 @@ export type Route =
   | { name: "artifacts" }
   | { name: "artifact"; id: number }
   | { name: "observation"; kind: ObservationKind; id: number }
+  /** A09 change confirmation. The plan id is a 64-hex digest, nothing else. */
+  | { name: "confirm"; planId: string }
   | { name: "notFound"; path: string };
 
 /** Only plain non-negative integers, matching the API's own id rule. */
@@ -142,6 +144,10 @@ export function matchRoute(path: string): Route {
     if (first === "identities") return { name: "identities" };
     if (first === "rewards") return { name: "rewards" };
     if (first === "artifacts") return { name: "artifacts" };
+  }
+
+  if (first === "confirm" && segments.length === 2 && second !== undefined) {
+    if (/^[0-9a-f]{64}$/u.test(second)) return { name: "confirm", planId: second };
   }
 
   if (first === "artifacts" && segments.length === 2) {

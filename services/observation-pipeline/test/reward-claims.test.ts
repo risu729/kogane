@@ -354,16 +354,24 @@ test("the scheduled lane never runs while the flag is off", async () => {
   expect(rewardClaimsEnabled("1")).toBe(true);
   const lines: Record<string, unknown>[] = [];
   await runScheduled(env, undefined, (line) => lines.push(JSON.parse(line)));
-  expect(lines.map((line) => line.event)).toEqual(["observation_sweep", "identity_sweep"]);
+  // The lane set every other deployment already had: the reward lane is absent,
+  // not present-and-empty.
+  expect(lines.map((line) => line.event)).toEqual([
+    "observation_sweep",
+    "identity_sweep",
+    "decision_outbox",
+  ]);
 
   const enabled = { ...env, REWARD_CLAIMS_ENABLED: "true" } as unknown as Env;
   expect(rewardClaimsEnabled(enabled.REWARD_CLAIMS_ENABLED)).toBe(true);
   lines.length = 0;
   await runScheduled(enabled, undefined, (line) => lines.push(JSON.parse(line)));
+  // The reward lane runs before the decision outbox, which stays last.
   expect(lines.map((line) => line.event)).toEqual([
     "observation_sweep",
     "identity_sweep",
     "reward_claims_sweep",
+    "decision_outbox",
   ]);
   // Counts and identifiers only: no amount, account label or provider text.
   expect(Object.keys(lines[2]!).sort()).toEqual([

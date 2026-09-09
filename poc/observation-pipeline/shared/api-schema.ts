@@ -93,6 +93,14 @@ export interface ApiCapabilities {
    */
   readonly rewardsV2: boolean;
   /**
+   * The authenticated change lifecycle (`POST /api/command/v1/*`) is served
+   * (A09). False everywhere the `COMMANDS_ENABLED` flag is off, so a client
+   * shows the confirmation screen read-only rather than offering buttons that
+   * would be refused. It is not an authorization decision: the server still
+   * authenticates, checks the grant and refuses an agent's approval.
+   */
+  readonly commands: boolean;
+  /**
    * `/api/v2/activity` and `/api/v2/obligations` are served. False unless the
    * A10 projection exists in the store the server reads and the reader flag is
    * on, so this is a server-computed fact, not a static claim.
@@ -114,6 +122,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   financialProducts: false,
   evidenceHistory: false,
   rewardsV2: false,
+  commands: false,
   eventsV2: false,
 } as const satisfies ApiCapabilities;
 
@@ -130,10 +139,11 @@ export const CENTRAL_STORE_CAPABILITIES = {
   organizedDisplay: true,
   financialProducts: true,
   evidenceHistory: true,
-  // Both are default off here: `centralStoreCapabilities` in the Worker
-  // overlays what the deployment can actually serve, and this constant stays
-  // the off-by-default contract.
+  // All three are off in the shared constant: each deployment's own flag
+  // decides, and `/api/meta` overrides these fields with what the running
+  // Worker actually serves.
   rewardsV2: false,
+  commands: false,
   eventsV2: false,
 } as const satisfies ApiCapabilities;
 
