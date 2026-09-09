@@ -34,6 +34,7 @@ import type {
   PositionWithValuations,
   Provenance,
   TransactionRow,
+  UnitUpdateSummary,
   ValuationRow,
   Warnings,
 } from "./api-contract.ts";
@@ -294,6 +295,20 @@ const parseFields = {
 };
 const overview = object<Overview>({
   counts: array(object<Overview["counts"][number]>({ table: text, rows: number })),
+  // D13/PR-14: absent unless a partial run refreshed some units of a dataset
+  // on the `unit` eligibility scope. Counts and identifiers only.
+  unitUpdates: optional(
+    array(
+      object<UnitUpdateSummary>({
+        source_id: text,
+        dataset: text,
+        fetch_run_id: identifier,
+        fetched_at: text,
+        updated_units: identifier,
+        stale_units: identifier,
+      }),
+    ),
+  ),
   sources: array(
     object<Overview["sources"][number]>({
       id: text,

@@ -1,5 +1,5 @@
 import type { ArtifactMeta, Parser, ParseResult, TransactionObservation } from "../types.ts";
-import { decodeUtf8 } from "./util.ts";
+import { decodeUtf8, unitScopeAdmitted } from "./util.ts";
 import { normalizedDate, stableFingerprint } from "./sbi-strict.ts";
 
 export interface MoneyForwardDomNode {
@@ -270,7 +270,10 @@ export function createMoneyForwardEvidenceOnly(parseHtml: MoneyForwardHtmlParser
 }
 
 function requireSuccessfulRun(artifact: ArtifactMeta): void {
-  if (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) {
+  if (
+    (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) &&
+    !unitScopeAdmitted(artifact)
+  ) {
     throw new Error("moneyforward observations require a successful failure-free run");
   }
 }

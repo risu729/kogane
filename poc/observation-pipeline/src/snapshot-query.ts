@@ -53,6 +53,8 @@ export interface SnapshotRelations {
   publishedParseRuns: string;
   coverageClaims?: string;
   snapshotPolicies?: string;
+  /** Per-artifact fetch-unit outcome (migration 0037); see `unitScopeSuccessSql`. */
+  artifactUnits?: string;
 }
 
 export const LOCAL_SNAPSHOT_RELATIONS: SnapshotRelations = {
@@ -64,6 +66,75 @@ export const LOCAL_SNAPSHOT_RELATIONS: SnapshotRelations = {
 
 export const COVERAGE_CLAIMS_TABLE = "parse_coverage_claims";
 export const SNAPSHOT_POLICIES_TABLE = "dataset_snapshot_policies";
+export const ARTIFACT_UNITS_RELATION = "observation_fetch_artifact_units";
+
+/**
+ * Eligibility scopes a policy row may name (`dataset_snapshot_policies.unit_scope`).
+ * `run` is the default and the pre-PR-14 rule: the whole parent fetch run
+ * succeeded with no failure evidence. `unit` is `unit-independent-v1`: the
+ * artifact's own fetch unit succeeded, even when a sibling unit of the same
+ * run failed and the run therefore projects as `partial`.
+ */
+export const UNIT_SCOPES = ["run", "unit"] as const;
+export type UnitScope = (typeof UNIT_SCOPES)[number];
+export const UNIT_INDEPENDENT_POLICY = "unit-independent-v1";
+
+/**
+ * The unit half of `unit-independent-v1`: this artifact's own fetch unit
+ * reported terminal success on a sealed run (migration 0037's
+ * `observation_fetch_artifact_units`, which also refuses a unit implicated by
+ * a collector error). An artifact with no fetch unit has no row and is never
+ * rescued by this clause, so it falls back to the run scope.
+ *
+ * Page dependence is deliberately not relaxed: this says nothing about how
+ * many artifacts the unit owns. Within a unit, completeness stays the job of
+ * the seal-time `declared_artifact_count` check in Layer A and of the
+ * per-unit `HAVING COUNT(*) = SUM(...)` in `eligible_snapshots` below.
+ */
+export function unitScopeSuccessSql(artifact: string, relations: string = ARTIFACT_UNITS_RELATION) {
+  return `EXISTS (SELECT 1 FROM ${relations} artifact_unit
+        WHERE artifact_unit.fetch_artifact_id = ${artifact}.id
+          AND artifact_unit.unit_status = 'success')`;
+}
+
+/**
+ * The dataset opted into unit-scoped eligibility. The join is
+ * `(source_id, dataset)` rather than the snapshot table's `(parser_name,
+ * dataset)` primary key, because eligibility is decided per artifact before
+ * any parser is chosen; one row therefore opts the whole dataset in, whichever
+ * parser later accepts it. `source_id` is a join key here and only here.
+ */
+export function unitScopePolicySql(
+  artifact: string,
+  relations: string = SNAPSHOT_POLICIES_TABLE,
+): string {
+  return `EXISTS (SELECT 1 FROM ${relations} unit_policy
+        WHERE unit_policy.source_id = ${artifact}.source_id
+          AND unit_policy.dataset = ${artifact}.dataset
+          AND unit_policy.unit_scope = 'unit')`;
+}
+
+/** The pre-PR-14 rule and the default: the whole parent fetch run succeeded. */
+export function runScopeSuccessSql(fetchRun: string): string {
+  return `${fetchRun}.status = 'success' AND ${fetchRun}.failure_count = 0`;
+}
+
+/**
+ * The D13 `unitParseable` predicate at whichever scope the artifact's dataset
+ * names: run scope, or `unit-independent-v1` for a dataset with an opted-in
+ * policy row. One definition, used by the production Worker's job creation and
+ * parse gate, by the production reader's active-state projection, and by the
+ * PoC's `CURRENT`, so evidence can never be parsed and then hidden (or shown
+ * and never parsed) because two places disagree.
+ */
+export function unitScopedEligibilitySql(
+  fetchRun: string,
+  artifact: string,
+  relations: { policies?: string; artifactUnits?: string } = {},
+): string {
+  return `(${runScopeSuccessSql(fetchRun)} OR (${unitScopePolicySql(artifact, relations.policies ?? SNAPSHOT_POLICIES_TABLE)}
+      AND ${unitScopeSuccessSql(artifact, relations.artifactUnits ?? ARTIFACT_UNITS_RELATION)}))`;
+}
 
 /**
  * legacy-warning-compat-v1, confined to this function. The two legacy
@@ -135,19 +206,28 @@ export function snapshotCtes(
 ): string {
   const claims = relations.coverageClaims ?? COVERAGE_CLAIMS_TABLE;
   const policies = relations.snapshotPolicies ?? SNAPSHOT_POLICIES_TABLE;
+  const units = relations.artifactUnits ?? ARTIFACT_UNITS_RELATION;
   const p = options.prefix ?? "";
   // The policy id is a fixed code-owned identifier, never provider input.
   const activePolicy = options.policy === undefined ? "policy.policy_id" : `'${options.policy}'`;
-  return `${p}snapshot_policies(parser_name, dataset, required_version, policy_id, replaces_previous_on_complete_empty) AS (
-  SELECT parser_name, dataset, required_parser_version, policy_id, replaces_previous_on_complete_empty
-  FROM ${policies}
+  // `snapshot_selection = 0` rows carry an eligibility policy only (D13/PR-14);
+  // they must not make their dataset a container-snapshot dataset.
+  return `${p}snapshot_policies(parser_name, dataset, required_version, policy_id, replaces_previous_on_complete_empty, unit_scope) AS (
+  SELECT parser_name, dataset, required_parser_version, policy_id, replaces_previous_on_complete_empty, unit_scope
+  FROM ${policies} WHERE snapshot_selection = 1
 ), ${p}eligible_snapshots AS (
   SELECT fa.source_id, policy.parser_name, policy.required_version, fa.dataset, fa.fetch_unit_key,
          fa.fetch_run_id, MAX(fa.fetched_at) AS fetched_at, MAX(fa.id) AS artifact_id
   FROM ${relations.fetchArtifacts} fa
   JOIN ${relations.fetchRuns} f ON f.id = fa.fetch_run_id
   JOIN ${p}snapshot_policies policy ON policy.dataset = fa.dataset
-  WHERE f.status = 'success' AND f.failure_count = 0
+  -- Run scope (default, unchanged) or, for a dataset whose policy row names
+  -- unit-independent-v1, this artifact's own unit. The grouping below is
+  -- already per fetch_unit_key, so a rescued unit can only ever replace its
+  -- own partition; a failed sibling unit contributes no row and keeps its
+  -- previous snapshot.
+  WHERE (f.status = 'success' AND f.failure_count = 0)
+     OR (policy.unit_scope = 'unit' AND ${unitScopeSuccessSql("fa", units)})
   GROUP BY fa.source_id, policy.parser_name, policy.required_version, fa.dataset,
            fa.fetch_unit_key, fa.fetch_run_id
   HAVING COUNT(*) = SUM(CASE WHEN EXISTS (

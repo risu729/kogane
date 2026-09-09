@@ -6,7 +6,7 @@ import type {
   ParseResult,
   TransactionObservation,
 } from "../types.ts";
-import { decodeUtf8 } from "./util.ts";
+import { decodeUtf8, unitScopeAdmitted } from "./util.ts";
 import {
   exactKeys,
   normalizedDate,
@@ -75,7 +75,7 @@ export const mobileSuicaSfHistory: Parser = {
   },
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
-    if (artifact.runStatus !== "success") {
+    if (artifact.runStatus !== "success" && !unitScopeAdmitted(artifact)) {
       throw new Error("mobile-suica observations require a successful fetch run");
     }
     const body = strictObject(JSON.parse(decodeUtf8(bytes)), "sf-history");

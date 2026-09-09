@@ -1,5 +1,5 @@
 // Parser coverage contract in the production Worker (design review D01/D13,
-// PR-07): migration 0025 applies on top of 0017-0035, contract v2 rows are
+// PR-07): migration 0025 applies on top of 0017-0037, contract v2 rows are
 // written in the pending phase and published with the parse run, legacy
 // parsers write nothing, an invalid contract is a terminal parser failure,
 // and the shadow comparison route exposes identifiers only.
