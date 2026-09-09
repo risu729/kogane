@@ -3,6 +3,7 @@ import {
   type EvidenceMeta,
 } from "../../../poc/observation-pipeline/shared/evidence-contract";
 import { authenticate } from "./auth";
+import { agentApi, classifyAgentPath, sharedQueryApi } from "./agent-api";
 import { commandApi, isCommandPath } from "./command-api";
 import { observationApi } from "./observation-api";
 import { eventsApi } from "./events-api";
@@ -13,6 +14,8 @@ import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw
 
 const PREFIX = "/api/evidence/v1";
 function classify(path: string): string {
+  const agent = classifyAgentPath(path);
+  if (agent !== null) return agent;
   if (isCommandPath(path)) return "command";
   if (path === `${PREFIX}/meta`) return "meta";
   if (/^\/api\/evidence\/v1\/sources\/[^/]+\/runs$/.test(path)) return "source_runs";
@@ -26,12 +29,19 @@ function classify(path: string): string {
 
 async function route(request: Request, env: Env, url: URL): Promise<Response> {
   const subject = await authenticate(request, env);
-  // The only non-GET boundary of this Worker (A09). Everything outside
-  // /api/command/v1/* stays GET-only.
+  // The only non-GET boundary of this Worker: two explicit allow-lists of
+  // authenticated POST paths, each checking its own grant — the agent API
+  // (docs/agent-api.md) and the change lifecycle (A09). They own disjoint
+  // paths, both keep the closed 401/403 answers, and everything outside them
+  // stays GET-only.
+  const agentResponse = await agentApi(request, env, url, subject);
+  if (agentResponse) return agentResponse;
   const commandResponse = await commandApi(request, env, url, subject);
   if (commandResponse) return commandResponse;
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
+  const sharedQueryResponse = await catalogue(() => sharedQueryApi(request, env, url, subject));
+  if (sharedQueryResponse) return sharedQueryResponse;
   const identityResponse = await catalogue(() => identityApi(request, env, url));
   if (identityResponse) return identityResponse;
   // Fixed report artifacts (A12). Re-display only; recomputing and sharing a

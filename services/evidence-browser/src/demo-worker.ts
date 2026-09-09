@@ -1,5 +1,6 @@
 import snapshot from "../demo-snapshot.json";
 import { authenticate } from "./auth";
+import { isAgentPath, SHARED_QUERY_PATH } from "./agent-api";
 import { HttpError, json, secureResponse } from "./http";
 import { downloadDisposition } from "./read";
 
@@ -17,6 +18,10 @@ export default {
     let errorCode: string | null = null;
     try {
       await authenticate(request, env);
+      // The demo serves a fixed synthetic snapshot and has no read model, no
+      // grant table and no write path. The agent API is not deployed here.
+      if (isAgentPath(url.pathname) || url.pathname === SHARED_QUERY_PATH)
+        throw new HttpError(403, "agent_api_not_configured");
       if (request.method !== "GET" && request.method !== "HEAD")
         throw new HttpError(405, "method_not_allowed");
       if (snapshot.schemaVersion !== 1 || snapshot.classification !== "synthetic")
