@@ -1,5 +1,15 @@
 import { decode, encode } from "iconv-lite";
-import { CentralClient } from "./central";
+import { CentralClient, centralDescriptorSha256 } from "./central";
+import type {
+  ArtifactRangeRequest,
+  ArtifactRequest,
+  ArtifactRole,
+  LineageDisposition,
+  PayloadFidelity,
+  RelationClaimRequest,
+  StorageOriginRequest,
+  TransformStepRequest,
+} from "../../../packages/evidence-contract/src/index";
 import { ImportError } from "./error";
 import type { CentralInventoryItem } from "./types";
 
@@ -177,7 +187,7 @@ interface ValidatedRun {
 interface ArtifactPlan {
   source: Artifact | null;
   sha256: string;
-  descriptor: JsonObject;
+  descriptor: ArtifactRequest;
   inventory: CentralInventoryItem;
 }
 
@@ -1026,7 +1036,7 @@ async function dataDescriptor(
   manifest: Manifest,
   fingerprintKey: string,
   manifestKey: string,
-): Promise<JsonObject> {
+): Promise<ArtifactRequest> {
   const normalized = verified.artifact.dataset.endsWith("-normalized");
   const artifactKey = relativeArtifactKey(verified.artifact.key, manifestKey);
   const rawParent = normalized ? artifactKey.replace(".normalized.json", ".raw.json.sjis") : null;
@@ -1074,7 +1084,7 @@ async function manifestDescriptor(
   validated: ValidatedRun,
   key: string,
   fingerprintKey: string,
-): Promise<JsonObject> {
+): Promise<ArtifactRequest> {
   return normalizedDescriptor({
     artifactKey: "manifest.json",
     artifactRole: "collector_manifest",
@@ -1098,9 +1108,9 @@ async function manifestDescriptor(
 
 function normalizedDescriptor(input: {
   artifactKey: string;
-  artifactRole: string;
-  payloadFidelity: string;
-  lineageDisposition: string;
+  artifactRole: ArtifactRole;
+  payloadFidelity: PayloadFidelity;
+  lineageDisposition: LineageDisposition;
   dataset: string;
   formatId: string;
   formatVersion: string;
@@ -1110,11 +1120,11 @@ function normalizedDescriptor(input: {
   sequence: number;
   sha256: string;
   byteSize: number;
-  storage: JsonObject;
-  ranges: JsonObject[];
-  transformSteps: JsonObject[];
-  relations: JsonObject[];
-}): JsonObject {
+  storage: StorageOriginRequest;
+  ranges: ArtifactRangeRequest[];
+  transformSteps: TransformStepRequest[];
+  relations: RelationClaimRequest[];
+}): ArtifactRequest {
   return {
     artifactKey: input.artifactKey,
     artifactRole: input.artifactRole,
@@ -1144,7 +1154,7 @@ function normalizedDescriptor(input: {
   };
 }
 
-function artifactRange(range: DateRange): JsonObject {
+function artifactRange(range: DateRange): ArtifactRangeRequest {
   return {
     rangeKey: "request-window",
     rangeKind: "requested",
@@ -1216,7 +1226,7 @@ async function assertExactPrefix(
   }
 }
 
-async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonObject> {
+async function storageOrigin(key: string, fingerprintKey: string): Promise<StorageOriginRequest> {
   if (!SHA256.test(fingerprintKey)) {
     throw new ImportError(500, "fingerprint_configuration_invalid");
   }
@@ -1242,21 +1252,8 @@ async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonO
   };
 }
 
-async function descriptorSha256(descriptor: JsonObject): Promise<string> {
-  const { http, storage, file, email, ...fields } = descriptor;
-  return sha256Hex(
-    new TextEncoder().encode(
-      canonicalJson({
-        ...fields,
-        origins: {
-          http: http ?? null,
-          storage: storage ?? null,
-          file: file ?? null,
-          email: email ?? null,
-        },
-      } as unknown as JsonValue),
-    ),
-  );
+async function descriptorSha256(descriptor: ArtifactRequest): Promise<string> {
+  return centralDescriptorSha256(descriptor);
 }
 
 function formatId(dataset: Dataset): string {

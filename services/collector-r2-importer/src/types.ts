@@ -25,11 +25,7 @@ export interface SbiManifest {
   failures: SbiFailure[];
 }
 
-export interface CentralInventoryItem {
-  artifactKey: string;
-  sha256: string;
-  descriptorSha256: string;
-}
+export type { InventoryItem as CentralInventoryItem } from "../../../packages/evidence-contract/src/index";
 
 export interface SbiVcArtifactManifest {
   dataset: string;

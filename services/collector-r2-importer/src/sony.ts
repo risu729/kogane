@@ -1,4 +1,15 @@
-import { CentralClient } from "./central";
+import { CentralClient, centralDescriptorSha256 } from "./central";
+import type {
+  ArtifactRangeRequest,
+  ArtifactRequest,
+  ArtifactRole,
+  LineageDisposition,
+  MediaTypeBasis,
+  PayloadFidelity,
+  StorageOriginRequest,
+  TransformStepRequest,
+} from "../../../packages/evidence-contract/src/index";
+import { canonicalJsonV1 as canonicalJson } from "../../../packages/evidence-contract/src/index";
 import { ImportError } from "./error";
 import type {
   CentralInventoryItem,
@@ -86,7 +97,7 @@ interface ArtifactPlan {
   source: SonyArtifactManifest | null;
   bytes: number;
   sha256: string;
-  descriptor: JsonObject;
+  descriptor: ArtifactRequest;
   inventory: CentralInventoryItem;
 }
 
@@ -893,7 +904,7 @@ async function dataDescriptor(
   unitId: number,
   manifest: SonyManifest,
   fingerprintKey: string,
-): Promise<JsonObject> {
+): Promise<ArtifactRequest> {
   const dataset = verified.artifact.dataset;
   const csv = dataset.endsWith("-csv");
   const wallet = dataset.startsWith("wallet-history-");
@@ -913,7 +924,7 @@ async function dataDescriptor(
         ? "exact"
         : "transport_decoded";
   const lineage = wallet ? "source_not_retained_for_security" : "not_applicable";
-  const ranges = wallet
+  const ranges: ArtifactRangeRequest[] = wallet
     ? [
         {
           rangeKey: "statement-month",
@@ -941,7 +952,7 @@ async function dataDescriptor(
         ]
       : [];
   const transformSteps = wallet
-    ? ["transport_decoded", "redacted", "reencoded"].map((stepKind, stepIndex) => ({
+    ? (["transport_decoded", "redacted", "reencoded"] as const).map((stepKind, stepIndex) => ({
         stepIndex,
         stepKind,
         transformerId: "sony-bank-worker",
@@ -974,7 +985,7 @@ async function manifestDescriptor(
   key: string,
   unitId: number,
   fingerprintKey: string,
-): Promise<JsonObject> {
+): Promise<ArtifactRequest> {
   return normalizedDescriptor({
     artifactKey: "manifest.json",
     artifactRole: "collector_manifest",
@@ -998,23 +1009,23 @@ async function manifestDescriptor(
 
 function normalizedDescriptor(input: {
   artifactKey: string;
-  artifactRole: string;
-  payloadFidelity: string;
-  lineageDisposition: string;
+  artifactRole: ArtifactRole;
+  payloadFidelity: PayloadFidelity;
+  lineageDisposition: LineageDisposition;
   dataset: string;
   formatId: string;
   formatVersion: SonyManifest["schemaVersion"];
   declaredMediaType: string;
-  mediaTypeBasis: string;
+  mediaTypeBasis: MediaTypeBasis;
   fetchedAtMs: number;
   fetchUnitId: number;
   sequence: number;
   sha256: string;
   byteSize: number;
-  storage: JsonObject;
-  ranges: JsonObject[];
-  transformSteps: JsonObject[];
-}): JsonObject {
+  storage: StorageOriginRequest;
+  ranges: ArtifactRangeRequest[];
+  transformSteps: TransformStepRequest[];
+}): ArtifactRequest {
   return {
     artifactKey: input.artifactKey,
     artifactRole: input.artifactRole,
@@ -1044,7 +1055,7 @@ function normalizedDescriptor(input: {
   };
 }
 
-async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonObject> {
+async function storageOrigin(key: string, fingerprintKey: string): Promise<StorageOriginRequest> {
   if (!SHA256.test(fingerprintKey)) throw new ImportError(500, "fingerprint_configuration_invalid");
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
@@ -1392,37 +1403,8 @@ function binaryCompare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function canonicalJson(value: JsonValue): string {
-  return JSON.stringify(canonical(value));
-}
-
-function canonical(value: JsonValue): JsonValue {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => binaryCompare(left, right))
-        .map(([key, child]) => [key, canonical(child)]),
-    );
-  }
-  if (typeof value === "number" && !Number.isSafeInteger(value)) {
-    throw new TypeError("canonical numbers must be safe integers");
-  }
-  return value;
-}
-
-async function descriptorSha256(descriptor: JsonObject): Promise<string> {
-  const { http, storage, file, email, ...fields } = descriptor;
-  const normalized = {
-    ...fields,
-    origins: {
-      http: http ?? null,
-      storage: storage ?? null,
-      file: file ?? null,
-      email: email ?? null,
-    },
-  };
-  return sha256Hex(canonicalJson(normalized as JsonValue));
+async function descriptorSha256(descriptor: ArtifactRequest): Promise<string> {
+  return centralDescriptorSha256(descriptor);
 }
 
 async function sha256Hex(value: string | Uint8Array): Promise<string> {

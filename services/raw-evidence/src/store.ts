@@ -1,24 +1,32 @@
-import { binaryCompare, canonicalJson, hexBytes, type JsonValue, sha256Hex } from "./canonical";
+import {
+  descriptorContractV1,
+  type ArtifactRange,
+  type CanonicalDescriptorV1,
+  type RelationClaim,
+  type TransformStep,
+} from "../../../packages/evidence-contract/src/descriptor";
+import {
+  parseAddInventoryItemsRequest,
+  parseBeginInventoryRequest,
+  parseCreateRunRequest,
+  parseAddRunReportRequest,
+  parseRecordAttemptRequest,
+  parseSealRunRequest,
+  parseSealStagedInventoryRequest,
+  type InventoryItem,
+} from "../../../packages/evidence-contract/src/requests";
+import { canonicalJson, hexBytes, type JsonValue, sha256Hex } from "./canonical";
 import {
   ApiError,
-  ID,
-  OPAQUE,
   SHA256,
-  arrayValue,
   assertSame,
-  enumValue,
-  exactKeys,
-  integerValue,
   loadRun,
-  object,
   readJson,
   requireRoute,
-  stringValue,
   type RecordValue,
   type WorkerEnv,
 } from "./http";
-import { originStatements, parseOrigins, validateOriginScope, type Origins } from "./origins";
-import { parseRangeFields } from "./structure";
+import { originStatements, validateOriginScope } from "./origins";
 
 const DEFAULT_MAX_OBJECT_BYTES = 50 * 1024 * 1024;
 
@@ -200,25 +208,13 @@ export async function createRun(
   env: WorkerEnv,
   clientId: string,
 ): Promise<Record<string, JsonValue>> {
-  const input = await readJson(request);
-  exactKeys(input, [
-    "producerId",
-    "sourceId",
-    "externalIdNamespace",
-    "externalSessionId",
-    "sourceRunKey",
-  ]);
-  const producerId = stringValue(input.producerId, "producer_id", { pattern: ID })!;
-  const sourceId = stringValue(input.sourceId, "source_id", { pattern: ID })!;
-  const namespace = stringValue(input.externalIdNamespace, "external_id_namespace", {
-    pattern: ID,
-  })!;
-  const externalSessionId = stringValue(input.externalSessionId, "external_session_id", {
-    pattern: OPAQUE,
-  })!;
-  const sourceRunKey = stringValue(input.sourceRunKey ?? "default", "source_run_key", {
-    pattern: OPAQUE,
-  })!;
+  const {
+    producerId,
+    sourceId,
+    externalIdNamespace: namespace,
+    externalSessionId,
+    sourceRunKey,
+  } = parseCreateRunRequest(await readJson(request));
   await requireRoute(env, clientId, producerId, sourceId);
   const now = Date.now();
 
@@ -305,25 +301,6 @@ export async function createRun(
   return { sessionId, runId: run!.id as number };
 }
 
-const OUTCOMES = [
-  "success",
-  "partial",
-  "failed",
-  "running",
-  "human_required",
-  "cancelled",
-  "unknown",
-] as const;
-const TIME_BASES = [
-  "source",
-  "manifest",
-  "schedule",
-  "file_metadata",
-  "email",
-  "operator",
-  "unknown",
-] as const;
-
 export async function addRunReport(
   request: Request,
   env: WorkerEnv,
@@ -331,69 +308,21 @@ export async function addRunReport(
   runId: number,
 ): Promise<Record<string, JsonValue>> {
   await loadRun(env, clientId, runId);
-  const input = await readJson(request);
-  exactKeys(input, [
-    "reportKey",
-    "reportKind",
-    "producerVersion",
-    "producerRevision",
-    "manifestSchemaVersion",
-    "producerStatus",
-    "normalizedOutcome",
-    "startedAtMs",
-    "startedAtBasis",
-    "completedAtMs",
-    "completedAtBasis",
-    "declaredArtifactCount",
-    "artifactCountScope",
-  ]);
-  const reportKey = stringValue(input.reportKey, "report_key", { pattern: OPAQUE })!;
-  const reportKind = enumValue(input.reportKind, "report_kind", ["progress", "terminal"] as const)!;
+  const { reportKey, reportKind, ...report } = parseAddRunReportRequest(await readJson(request));
+  // Key order matches the INSERT column list below.
   const fields = {
-    producer_version: stringValue(input.producerVersion, "producer_version", {
-      optional: true,
-      max: 200,
-    }),
-    producer_revision: stringValue(input.producerRevision, "producer_revision", {
-      optional: true,
-      max: 200,
-    }),
-    manifest_schema_version: stringValue(input.manifestSchemaVersion, "manifest_schema_version", {
-      optional: true,
-      max: 200,
-    }),
-    producer_status: stringValue(input.producerStatus, "producer_status", {
-      optional: true,
-      max: 100,
-    }),
-    normalized_outcome: enumValue(
-      input.normalizedOutcome ?? "unknown",
-      "normalized_outcome",
-      OUTCOMES,
-    )!,
-    started_at_ms: integerValue(input.startedAtMs, "started_at_ms", true),
-    started_at_basis: enumValue(input.startedAtBasis, "started_at_basis", TIME_BASES, true),
-    completed_at_ms: integerValue(input.completedAtMs, "completed_at_ms", true),
-    completed_at_basis: enumValue(input.completedAtBasis, "completed_at_basis", TIME_BASES, true),
-    declared_artifact_count: integerValue(
-      input.declaredArtifactCount,
-      "declared_artifact_count",
-      true,
-    ),
-    artifact_count_scope: enumValue(
-      input.artifactCountScope,
-      "artifact_count_scope",
-      ["all_catalogued", "provider_artifacts", "producer_defined"] as const,
-      true,
-    ),
+    producer_version: report.producerVersion,
+    producer_revision: report.producerRevision,
+    manifest_schema_version: report.manifestSchemaVersion,
+    producer_status: report.producerStatus,
+    normalized_outcome: report.normalizedOutcome,
+    started_at_ms: report.startedAtMs,
+    started_at_basis: report.startedAtBasis,
+    completed_at_ms: report.completedAtMs,
+    completed_at_basis: report.completedAtBasis,
+    declared_artifact_count: report.declaredArtifactCount,
+    artifact_count_scope: report.artifactCountScope,
   };
-  if (
-    (fields.started_at_ms === null) !== (fields.started_at_basis === null) ||
-    (fields.completed_at_ms === null) !== (fields.completed_at_basis === null) ||
-    (fields.declared_artifact_count === null) !== (fields.artifact_count_scope === null)
-  ) {
-    throw new ApiError(400, "report_field_pair_mismatch");
-  }
   const now = Date.now();
   const values = [runId, reportKey, reportKind, clientId, ...Object.values(fields), now];
   await env.DB.prepare(`
@@ -426,262 +355,11 @@ export async function addRunReport(
   return { reportId: row!.id as number };
 }
 
-interface ArtifactInput {
-  artifactKey: string;
-  artifactRole: string;
-  payloadFidelity: string;
-  containerKind: string;
-  lineageDisposition: string;
-  dataset: string | null;
-  formatId: string | null;
-  formatVersion: string | null;
-  declaredMediaType: string | null;
-  mediaTypeBasis: string | null;
-  fetchedAtMs: number | null;
-  fetchedAtBasis: string | null;
-  fetchUnitId: number | null;
-  pageGroupId: number | null;
-  pageIndex: number | null;
-  sequence: number | null;
-  sha256: string;
-  byteSize: number;
-  origins: Origins;
-  ranges: ArtifactRange[];
-  transformSteps: TransformStep[];
-  relations: RelationClaim[];
-}
-
-interface ArtifactRange {
-  rangeKey: string;
-  rangeKind: string;
-  precision: string;
-  startValue: string | null;
-  endValue: string | null;
-  startInclusive: number;
-  endInclusive: number;
-  basis: string;
-}
-
-interface TransformStep {
-  stepIndex: number;
-  stepKind: string;
-  transformerId: string;
-  transformerVersion: string;
-}
-
-interface RelationClaim {
-  parentRunId: number;
-  parentArtifactKey: string;
-  relation: string;
-  transformerId: string;
-  transformerVersion: string;
-}
-
-function mediaTypeValue(value: unknown): string | null {
-  const mediaType = stringValue(value, "declared_media_type", { optional: true, max: 255 });
-  if (mediaType === null) return null;
-  const normalized = mediaType.toLowerCase();
-  const token = "[a-z0-9][a-z0-9!#$&^_.+-]{0,126}";
-  if (!new RegExp(`^${token}/${token}$`).test(normalized)) {
-    throw new ApiError(400, "invalid_declared_media_type");
-  }
-  return normalized;
-}
-
-function rejectDuplicate<T>(values: T[], key: (value: T) => string, code: string): void {
-  const keys = values.map(key);
-  if (new Set(keys).size !== keys.length) throw new ApiError(400, code);
-}
-
-function parseArtifact(input: RecordValue, runId: number): ArtifactInput {
-  exactKeys(input, [
-    "artifactKey",
-    "artifactRole",
-    "payloadFidelity",
-    "containerKind",
-    "lineageDisposition",
-    "dataset",
-    "formatId",
-    "formatVersion",
-    "declaredMediaType",
-    "mediaTypeBasis",
-    "fetchedAtMs",
-    "fetchedAtBasis",
-    "fetchUnitId",
-    "pageGroupId",
-    "pageIndex",
-    "sequence",
-    "sha256",
-    "byteSize",
-    "http",
-    "storage",
-    "file",
-    "email",
-    "ranges",
-    "transformSteps",
-    "relations",
-  ]);
-  const ranges = arrayValue(input.ranges, "ranges", 100).map((entry): ArtifactRange => {
-    const value = object(entry);
-    exactKeys(value, [
-      "rangeKey",
-      "rangeKind",
-      "precision",
-      "startValue",
-      "endValue",
-      "startInclusive",
-      "endInclusive",
-      "basis",
-    ]);
-    return {
-      rangeKey: stringValue(value.rangeKey, "range_key", { max: 200, pattern: OPAQUE })!,
-      ...parseRangeFields(value),
-    };
-  });
-  rejectDuplicate(ranges, (value) => value.rangeKey, "duplicate_artifact_range_key");
-  ranges.sort((left, right) => binaryCompare(left.rangeKey, right.rangeKey));
-
-  const transformSteps = arrayValue(input.transformSteps, "transform_steps", 100).map(
-    (entry): TransformStep => {
-      const value = object(entry);
-      exactKeys(value, ["stepIndex", "stepKind", "transformerId", "transformerVersion"]);
-      return {
-        stepIndex: (() => {
-          const stepIndex = integerValue(value.stepIndex, "step_index")!;
-          if (stepIndex > 1000) throw new ApiError(400, "invalid_step_index");
-          return stepIndex;
-        })(),
-        stepKind: enumValue(value.stepKind, "step_kind", [
-          "transport_decoded",
-          "decrypted",
-          "redacted",
-          "reencoded",
-          "bundled",
-          "rendered",
-          "extracted",
-          "generated",
-        ] as const)!,
-        transformerId: stringValue(value.transformerId, "transformer_id", { pattern: ID })!,
-        transformerVersion: stringValue(value.transformerVersion, "transformer_version", {
-          max: 200,
-        })!,
-      };
-    },
-  );
-  rejectDuplicate(
-    transformSteps,
-    (value) => String(value.stepIndex),
-    "duplicate_transform_step_index",
-  );
-  transformSteps.sort((left, right) => left.stepIndex - right.stepIndex);
-
-  const relations = arrayValue(input.relations, "relations", 100).map((entry): RelationClaim => {
-    const value = object(entry);
-    exactKeys(value, [
-      "parentRunId",
-      "parentArtifactKey",
-      "relation",
-      "transformerId",
-      "transformerVersion",
-    ]);
-    return {
-      parentRunId: integerValue(value.parentRunId ?? runId, "parent_run_id")!,
-      parentArtifactKey: stringValue(value.parentArtifactKey, "parent_artifact_key", {
-        pattern: OPAQUE,
-      })!,
-      relation: enumValue(value.relation, "relation", ["input", "described_by"] as const)!,
-      transformerId: stringValue(value.transformerId, "transformer_id", { pattern: ID })!,
-      transformerVersion: stringValue(value.transformerVersion, "transformer_version", {
-        max: 200,
-      })!,
-    };
-  });
-  rejectDuplicate(
-    relations,
-    (value) => `${value.parentRunId}\0${value.parentArtifactKey}\0${value.relation}`,
-    "duplicate_artifact_relation",
-  );
-  relations.sort(
-    (left, right) =>
-      left.parentRunId - right.parentRunId ||
-      binaryCompare(
-        `${left.parentArtifactKey}\0${left.relation}`,
-        `${right.parentArtifactKey}\0${right.relation}`,
-      ),
-  );
-
-  const parsed: ArtifactInput = {
-    artifactKey: stringValue(input.artifactKey, "artifact_key", { pattern: OPAQUE })!,
-    artifactRole: enumValue(input.artifactRole, "artifact_role", [
-      "provider_response",
-      "provider_export",
-      "provider_document",
-      "provider_message",
-      "collector_manifest",
-      "collector_error",
-      "collector_summary",
-      "collector_derived",
-      "sanitized_provider_capture",
-      "user_capture",
-    ] as const)!,
-    payloadFidelity: enumValue(input.payloadFidelity, "payload_fidelity", [
-      "exact",
-      "transport_decoded",
-      "transformed",
-      "generated",
-      "unknown",
-    ] as const)!,
-    containerKind: enumValue(input.containerKind ?? "single", "container_kind", [
-      "single",
-      "bundle",
-      "archive",
-      "multipart",
-      "unknown",
-    ] as const)!,
-    lineageDisposition: enumValue(input.lineageDisposition, "lineage_disposition", [
-      "linked",
-      "embedded_source_bytes",
-      "source_not_retained_for_security",
-      "source_bytes_not_available",
-      "not_applicable",
-    ] as const)!,
-    dataset: stringValue(input.dataset, "dataset", { optional: true, max: 200 }),
-    formatId: stringValue(input.formatId, "format_id", { optional: true, max: 200 }),
-    formatVersion: stringValue(input.formatVersion, "format_version", { optional: true, max: 100 }),
-    declaredMediaType: mediaTypeValue(input.declaredMediaType),
-    mediaTypeBasis: enumValue(
-      input.mediaTypeBasis,
-      "media_type_basis",
-      ["response_header", "manifest", "file_metadata", "operator", "unknown"] as const,
-      true,
-    ),
-    fetchedAtMs: integerValue(input.fetchedAtMs, "fetched_at_ms", true),
-    fetchedAtBasis: enumValue(
-      input.fetchedAtBasis,
-      "fetched_at_basis",
-      ["source", "response", "manifest", "file_metadata", "operator", "unknown"] as const,
-      true,
-    ),
-    fetchUnitId: integerValue(input.fetchUnitId, "fetch_unit_id", true),
-    pageGroupId: integerValue(input.pageGroupId, "page_group_id", true),
-    pageIndex: integerValue(input.pageIndex, "page_index", true),
-    sequence: integerValue(input.sequence, "sequence", true),
-    sha256: stringValue(input.sha256, "sha256", { pattern: SHA256 })!,
-    byteSize: integerValue(input.byteSize, "byte_size")!,
-    origins: parseOrigins(input),
-    ranges,
-    transformSteps,
-    relations,
-  };
-  if (
-    (parsed.declaredMediaType === null) !== (parsed.mediaTypeBasis === null) ||
-    (parsed.fetchedAtMs === null) !== (parsed.fetchedAtBasis === null) ||
-    (parsed.pageGroupId === null) !== (parsed.pageIndex === null)
-  ) {
-    throw new ApiError(400, "artifact_field_pair_mismatch");
-  }
-  return parsed;
-}
+/**
+ * Validated, normalized artifact descriptor: the shape whose canonical bytes
+ * are hashed into fetch_artifacts.descriptor_sha256 (descriptor-v1).
+ */
+type ArtifactInput = CanonicalDescriptorV1;
 
 export async function addArtifact(
   request: Request,
@@ -690,7 +368,11 @@ export async function addArtifact(
   runId: number,
 ): Promise<Record<string, JsonValue>> {
   const run = await loadRun(env, clientId, runId);
-  const input = parseArtifact(await readJson(request), runId);
+  // The shared contract validates the body (unknown keys rejected) and
+  // normalizes it exactly as the ingest client does.
+  const input = descriptorContractV1.normalize(
+    descriptorContractV1.parseRequest(await readJson(request), { runId }),
+  );
   const objectRow = await env.DB.prepare("SELECT byte_size FROM raw_objects WHERE sha256 = ?")
     .bind(input.sha256)
     .first<{ byte_size: number }>();
@@ -709,7 +391,10 @@ export async function addArtifact(
       throw new ApiError(409, "parent_artifact_source_mismatch");
   }
 
-  const descriptorSha256 = await sha256Hex(canonicalJson(input as unknown as JsonValue));
+  // Never trust a client-supplied descriptor hash. The digest is always
+  // recomputed here from the server's own validated parse; inventory items
+  // and seals that carry a different value are rejected as conflicts.
+  const descriptorSha256 = await descriptorContractV1.digest(descriptorContractV1.encode(input));
   const existing = await env.DB.prepare(`
     SELECT id, producer_id, source_id, first_ingested_by_client_id, fetch_unit_id,
            page_group_id, artifact_role, payload_fidelity, container_kind,
@@ -1014,24 +699,14 @@ export async function sealRun(
   runId: number,
 ): Promise<Record<string, JsonValue>> {
   const run = await loadRun(env, clientId, runId);
-  const input = await readJson(request);
-  exactKeys(input, ["artifacts", "declarationBasis", "externalAttemptId", "startedAtMs"]);
-  const submitted = arrayValue(input.artifacts, "artifacts")
-    .map((entry) => {
-      const item = object(entry);
-      exactKeys(item, ["artifactKey", "sha256", "descriptorSha256"]);
-      return {
-        artifactKey: stringValue(item.artifactKey, "artifact_key", { pattern: OPAQUE })!,
-        sha256: stringValue(item.sha256, "sha256", { pattern: SHA256 })!,
-        descriptorSha256: stringValue(item.descriptorSha256, "descriptor_sha256", {
-          pattern: SHA256,
-        })!,
-      };
-    })
-    .sort((left, right) => binaryCompare(left.artifactKey, right.artifactKey));
-  if (new Set(submitted.map((item) => item.artifactKey)).size !== submitted.length) {
-    throw new ApiError(400, "duplicate_inventory_key");
-  }
+  const {
+    artifacts: submitted,
+    declarationBasis,
+    externalAttemptId,
+    startedAtMs,
+  } = parseSealRunRequest(await readJson(request));
+  // Client-declared descriptor hashes are compared against the catalogue's
+  // own recomputed values; any difference is an inventory_mismatch conflict.
   const actual = await env.DB.prepare(`
     SELECT artifact_key, sha256, descriptor_sha256
     FROM fetch_artifacts WHERE fetch_run_id = ? ORDER BY artifact_key COLLATE BINARY
@@ -1050,18 +725,6 @@ export async function sealRun(
     throw new ApiError(409, "inventory_mismatch");
   }
   const inventorySha256 = await sha256Hex(canonicalJson(submitted as unknown as JsonValue));
-  const declarationBasis = enumValue(input.declarationBasis, "declaration_basis", [
-    "producer_manifest",
-    "directory_scan",
-    "capture_index",
-    "file_receipt",
-    "email_batch",
-    "operator",
-  ] as const)!;
-  const externalAttemptId = stringValue(input.externalAttemptId, "external_attempt_id", {
-    pattern: OPAQUE,
-  })!;
-  const startedAtMs = integerValue(input.startedAtMs, "started_at_ms", true);
   const now = Date.now();
 
   const expectedInventory = {
@@ -1377,28 +1040,6 @@ async function assertCompleteAttempt(
   );
 }
 
-interface InventoryItem {
-  artifactKey: string;
-  sha256: string;
-  descriptorSha256: string;
-}
-
-function parseInventoryItems(value: unknown, max: number): InventoryItem[] {
-  const items = arrayValue(value, "items", max).map((entry): InventoryItem => {
-    const item = object(entry);
-    exactKeys(item, ["artifactKey", "sha256", "descriptorSha256"]);
-    return {
-      artifactKey: stringValue(item.artifactKey, "artifact_key", { pattern: OPAQUE })!,
-      sha256: stringValue(item.sha256, "sha256", { pattern: SHA256 })!,
-      descriptorSha256: stringValue(item.descriptorSha256, "descriptor_sha256", {
-        pattern: SHA256,
-      })!,
-    };
-  });
-  rejectDuplicate(items, (item) => item.artifactKey, "duplicate_inventory_key");
-  return items.sort((left, right) => binaryCompare(left.artifactKey, right.artifactKey));
-}
-
 export async function beginInventory(
   request: Request,
   env: WorkerEnv,
@@ -1406,24 +1047,9 @@ export async function beginInventory(
   runId: number,
 ): Promise<Record<string, JsonValue>> {
   await loadRun(env, clientId, runId);
-  const input = await readJson(request);
-  exactKeys(input, ["inventorySha256", "expectedArtifactCount", "declarationBasis"]);
-  const inventorySha256 = stringValue(input.inventorySha256, "inventory_sha256", {
-    pattern: SHA256,
-  })!;
-  const expectedArtifactCount = integerValue(
-    input.expectedArtifactCount,
-    "expected_artifact_count",
-  )!;
-  if (expectedArtifactCount > 10_000) throw new ApiError(400, "inventory_too_large");
-  const declarationBasis = enumValue(input.declarationBasis, "declaration_basis", [
-    "producer_manifest",
-    "directory_scan",
-    "capture_index",
-    "file_receipt",
-    "email_batch",
-    "operator",
-  ] as const)!;
+  const { inventorySha256, expectedArtifactCount, declarationBasis } = parseBeginInventoryRequest(
+    await readJson(request),
+  );
   const expected = {
     expected_artifact_count: expectedArtifactCount,
     inventory_digest_version: "v1",
@@ -1469,10 +1095,7 @@ export async function addInventoryItems(
   inventoryId: number,
 ): Promise<Record<string, JsonValue>> {
   await loadRun(env, clientId, runId);
-  const input = await readJson(request);
-  exactKeys(input, ["items"]);
-  const items = parseInventoryItems(input.items, 30);
-  if (items.length === 0) throw new ApiError(400, "empty_inventory_chunk");
+  const { items } = parseAddInventoryItemsRequest(await readJson(request));
   const inventory = await env.DB.prepare(`
     SELECT 1 AS ok FROM run_inventories WHERE id = ? AND fetch_run_id = ?
   `)
@@ -1481,6 +1104,8 @@ export async function addInventoryItems(
   if (!inventory) throw new ApiError(404, "inventory_not_found");
   const newItems: InventoryItem[] = [];
   for (const item of items) {
+    // The client-declared descriptorSha256 must equal the value this server
+    // computed when the artifact was catalogued; it is never taken on trust.
     const artifact = await env.DB.prepare(`
       SELECT sha256, descriptor_sha256 FROM fetch_artifacts
       WHERE fetch_run_id = ? AND artifact_key = ?
@@ -1618,12 +1243,9 @@ export async function sealStagedInventory(
   inventoryId: number,
 ): Promise<Record<string, JsonValue>> {
   const run = await loadRun(env, clientId, runId);
-  const input = await readJson(request);
-  exactKeys(input, ["externalAttemptId", "startedAtMs"]);
-  const externalAttemptId = stringValue(input.externalAttemptId, "external_attempt_id", {
-    pattern: OPAQUE,
-  })!;
-  const startedAtMs = integerValue(input.startedAtMs, "started_at_ms", true);
+  const { externalAttemptId, startedAtMs } = parseSealStagedInventoryRequest(
+    await readJson(request),
+  );
   const inventory = await env.DB.prepare(`
     SELECT inventory_sha256, expected_artifact_count FROM run_inventories
     WHERE id = ? AND fetch_run_id = ?
@@ -1775,54 +1397,20 @@ export async function addFailedAttempt(
   runId: number,
 ): Promise<Record<string, JsonValue>> {
   const run = await loadRun(env, clientId, runId);
-  const input = await readJson(request);
-  exactKeys(input, [
-    "externalAttemptId",
-    "outcome",
-    "startedAtMs",
-    "completedAtMs",
-    "expectedArtifactCount",
-    "observedArtifactCount",
-    "acceptedArtifactCount",
-    "reusedArtifactCount",
-    "rejectedArtifactCount",
-    "errorCode",
-    "ingestClientVersion",
-  ]);
+  const attemptRequest = parseRecordAttemptRequest(await readJson(request));
   const fields = {
-    ingest_client_version: stringValue(input.ingestClientVersion, "ingest_client_version", {
-      optional: true,
-      max: 200,
-    }),
-    external_attempt_id: stringValue(input.externalAttemptId, "external_attempt_id", {
-      pattern: OPAQUE,
-    })!,
-    started_at_ms: integerValue(input.startedAtMs, "started_at_ms", true),
-    completed_at_ms: integerValue(input.completedAtMs, "completed_at_ms")!,
-    expected_artifact_count: integerValue(
-      input.expectedArtifactCount,
-      "expected_artifact_count",
-      true,
-    ),
-    observed_artifact_count: integerValue(input.observedArtifactCount, "observed_artifact_count")!,
-    accepted_artifact_count: integerValue(input.acceptedArtifactCount, "accepted_artifact_count")!,
-    reused_artifact_count: integerValue(input.reusedArtifactCount, "reused_artifact_count")!,
-    rejected_artifact_count: integerValue(input.rejectedArtifactCount, "rejected_artifact_count")!,
-    outcome: enumValue(input.outcome, "outcome", ["incomplete", "failed"] as const)!,
-    error_code: stringValue(input.errorCode, "error_code", { optional: true, max: 100 }),
+    ingest_client_version: attemptRequest.ingestClientVersion,
+    external_attempt_id: attemptRequest.externalAttemptId,
+    started_at_ms: attemptRequest.startedAtMs,
+    completed_at_ms: attemptRequest.completedAtMs,
+    expected_artifact_count: attemptRequest.expectedArtifactCount,
+    observed_artifact_count: attemptRequest.observedArtifactCount,
+    accepted_artifact_count: attemptRequest.acceptedArtifactCount,
+    reused_artifact_count: attemptRequest.reusedArtifactCount,
+    rejected_artifact_count: attemptRequest.rejectedArtifactCount,
+    outcome: attemptRequest.outcome,
+    error_code: attemptRequest.errorCode,
   };
-  if (fields.started_at_ms !== null && fields.completed_at_ms < fields.started_at_ms) {
-    throw new ApiError(400, "attempt_time_order_invalid");
-  }
-  if (
-    fields.accepted_artifact_count + fields.reused_artifact_count + fields.rejected_artifact_count >
-    fields.observed_artifact_count
-  ) {
-    throw new ApiError(400, "attempt_count_invalid");
-  }
-  if (fields.outcome === "failed" && fields.error_code === null) {
-    throw new ApiError(400, "failed_attempt_error_required");
-  }
   const now = Date.now();
   await env.DB.prepare(`
     INSERT INTO ingestion_attempts (

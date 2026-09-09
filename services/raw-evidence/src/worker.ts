@@ -1,3 +1,4 @@
+import { ContractError } from "../../../packages/evidence-contract/src/validate";
 import { ApiError, authenticate, json, type WorkerEnv } from "./http";
 import {
   addArtifact,
@@ -116,6 +117,8 @@ export default {
       return await route(request, env);
     } catch (error) {
       if (error instanceof ApiError) return json({ error: error.code }, error.status);
+      // Shared request-schema failures keep their historical 400 codes.
+      if (error instanceof ContractError) return json({ error: error.code }, 400);
       const message = error instanceof Error ? error.message : String(error);
       if (/inactive_ingest_(client|route)/.test(message)) {
         return json({ error: "inactive_ingest_route" }, 403);

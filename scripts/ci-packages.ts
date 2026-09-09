@@ -33,6 +33,12 @@ export const CI_PACKAGES: PackagePolicy[] = [
     checks: ["typecheck", "test"],
   },
   {
+    // Pure shared contract: no Worker, no network, no wrangler.
+    path: "packages/evidence-contract",
+    scripts: { test, typecheck: "tsc --noEmit" },
+    checks: ["test", "typecheck"],
+  },
+  {
     path: "services/observation-pipeline",
     scripts: { test, typecheck, "cf:check": dryRun },
     checks: ["typecheck", "test", "cf:check"],
