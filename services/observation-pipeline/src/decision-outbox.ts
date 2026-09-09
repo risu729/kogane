@@ -42,7 +42,6 @@ export interface OutboxRow {
 export type OutboxOutcome =
   | "identity_swept"
   | "skipped_no_projection"
-  | "deferred_to_projection_owner"
   // A07's balance projection: already current, sealed on this tick, or still
   // building within this tick's write budget.
   | "balance_projection_current"
@@ -62,33 +61,21 @@ export const identityProjectionProcessor: OutboxProcessor = async (db) => {
   return "identity_swept";
 };
 
-/** The table A07's balance read model (migration 0030) introduces. */
-export const BALANCE_PROJECTION_TABLE = "balance_projection_scopes";
-
-/**
- * The fallback for the balance projection, used when no owner registered a
- * processor for it. Until A07's tables exist this records
- * `skipped_no_projection`; once they exist it records
- * `deferred_to_projection_owner` rather than claiming a rebuild that did not
- * run. The real processor is `balanceProjectionOutboxProcessor` in
- * `balance-projection-job.ts`, handed in through `dispatchDecisionOutbox`'s
- * `processors` argument, which is why the dispatcher takes one rather than
- * hard-coding the map.
- */
-export const balanceProjectionProcessor: OutboxProcessor = async (db) => {
-  const present = await db
-    .prepare("SELECT count(*) AS present FROM sqlite_master WHERE type='table' AND name=?")
-    .bind(BALANCE_PROJECTION_TABLE)
-    .first<{ present: number }>();
-  return present && present.present > 0 ? "deferred_to_projection_owner" : "skipped_no_projection";
-};
-
 /** No agent notification transport exists yet; the row is closed honestly. */
 export const agentNotifyProcessor: OutboxProcessor = async () => "skipped_no_consumer";
 
-export const DEFAULT_PROCESSORS: Record<OutboxTarget, OutboxProcessor> = {
+/**
+ * `balance-projection` deliberately has no default. A07 owns that projection
+ * (`balanceProjectionOutboxProcessor` in `balance-projection-job.ts`, over
+ * `balance_read_snapshots` / `current_balance_projection` / `scope_relations`
+ * from migration 0030) and is handed in through `dispatchDecisionOutbox`'s
+ * `processors` argument — which is why the dispatcher takes one rather than
+ * hard-coding the map. A build that forgets to pass it closes the row as
+ * `skipped_no_consumer`, an honest "nobody handled this", instead of a
+ * placeholder quietly reporting a projection that never ran.
+ */
+export const DEFAULT_PROCESSORS: Partial<Record<OutboxTarget, OutboxProcessor>> = {
   "identity-projection": identityProjectionProcessor,
-  "balance-projection": balanceProjectionProcessor,
   "agent-notify": agentNotifyProcessor,
 };
 
