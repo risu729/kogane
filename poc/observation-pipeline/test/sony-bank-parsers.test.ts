@@ -17,6 +17,7 @@ import {
   insertObservation,
   insertParseRun,
   openStore,
+  publishParseRun,
   putRawObject,
   upsertSource,
 } from "../src/store.ts";
@@ -360,6 +361,7 @@ describe("Sony Bank current source views", () => {
       for (const observation of parser.parse(body, artifact).observations) {
         if (observation.kind === "transaction") insertObservation(store, parseRunId, observation);
       }
+      publishParseRun(store, artifactId, parser.name, parseRunId);
     };
 
     // Insert CSV first so source-view priority, not append order, selects it.
@@ -424,6 +426,7 @@ describe("Sony Bank current source views", () => {
       for (const observation of sonyBankWalletHistory.parse(body, artifact).observations) {
         if (observation.kind === "transaction") insertObservation(store, parseRunId, observation);
       }
+      publishParseRun(store, artifactId, sonyBankWalletHistory.name, parseRunId);
     };
 
     add("wallet-september-old", "wallet-history-202609", september, "2026-09-07T00:00:00Z");

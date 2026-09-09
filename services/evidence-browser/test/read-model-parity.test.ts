@@ -9,7 +9,7 @@ import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { HttpError } from "../src/http";
 import { evidenceReader } from "../src/observations";
-import { seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import * as legacy from "./legacy-read-path";
 
 const OT = "other-test";
@@ -36,12 +36,13 @@ async function parse(
       status === "error" ? '["kept as text"]' : "[]",
     )
     .first<{ id: number }>();
+  // The legacy adapter treats every unsuperseded success as current; the
+  // reader needs the same run published, as the pipeline writer would do.
+  if (status === "ok") await publishParse(row!.id, parsedAt);
   return row!.id;
 }
 async function supersede(oldId: number, newId: number): Promise<void> {
-  await env.DB.prepare("UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE id=?")
-    .bind(newId, oldId)
-    .run();
+  await supersedeParse(oldId, newId);
 }
 async function tx(
   parseRunId: number,

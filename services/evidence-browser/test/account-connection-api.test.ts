@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
-import { seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { identityApi } from "../src/identity-api";
 import { observationOrganizations } from "../src/observation-organization";
 import { identifyParse } from "../../observation-pipeline/src/identity-store";
@@ -76,6 +76,7 @@ it("applies only eligible automatic MF connection names without altering origina
     VALUES(?,'fixture','1','2099','ok','[]') RETURNING id`)
       .bind(financial.artifacts[0]!.id)
       .first<{ id: number }>();
+  await publishParse(parse!.id);
   const observation =
     await env.DB.prepare(`INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json)
     VALUES(?,'moneyforward-me:observed-connection','JPY','row','{}') RETURNING id`)

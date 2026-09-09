@@ -527,8 +527,11 @@ function exists:
   observation sets exist while only the `0.2.0` output is current.
 
 **No observation row is ever updated or deleted.** "Current" is therefore
-not a column, not a flag, and not a state — it is a query, and it has two
-conditions:
+not a column, not a flag, and not a state — it is a query. Since the
+publication gate (`docs/publication-gate.md`) that query is membership in
+`published_parse_runs`, the pointer `publishParseRun` moves in the same
+transaction as the supersession above; the historical form, which the gate's
+backfill and consistency check still compare against, had two conditions:
 
 ```sql
 SELECT t.*

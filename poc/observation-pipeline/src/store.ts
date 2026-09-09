@@ -66,7 +66,12 @@ export function openStore(stateDir?: string): Store {
       db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
     })();
   }
+  // The publication gate is additive (docs/publication-gate.md). A store that
+  // predates it gets the legacy current set materialised once, exactly as
+  // production migration 0026 does, so current views keep showing the same rows.
+  const hadPublicationGate = storeTableExists(db, "published_parse_runs");
   db.exec(readFileSync(join(POC_ROOT, "schema.sql"), "utf8"));
+  if (!hadPublicationGate) db.transaction(() => backfillPublicationGate(db))();
   // Additive derived schema: same SQL policy as production D1. Raw schema and
   // existing store version remain compatible; apply once, transactionally.
   if (!storeTableExists(db, "observation_decimal_values")) {
@@ -99,6 +104,33 @@ export function openStore(stateDir?: string): Store {
 function storeTableExists(db: Database, name: string): boolean {
   return (
     db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1").get(name) !== null
+  );
+}
+
+/**
+ * One-time backfill of the publication pointer from the legacy rule
+ * (`status = 'ok' AND superseded_by_parse_run_id IS NULL`), idempotent and
+ * recorded as 'backfill' events. Mirrors production migration 0026; this is
+ * the one reader-side use of the legacy predicate outside publishParseRun.
+ */
+function backfillPublicationGate(db: Database): void {
+  db.exec(
+    `INSERT INTO published_parse_runs
+       (fetch_artifact_id, parser_name, parse_run_id, parser_version, published_at, publication_kind)
+     SELECT p.fetch_artifact_id, p.parser_name, p.id, p.parser_version, p.parsed_at, 'normal'
+     FROM parse_runs p
+     WHERE p.status = 'ok' AND p.superseded_by_parse_run_id IS NULL
+       AND NOT EXISTS (SELECT 1 FROM parse_runs q WHERE q.fetch_artifact_id = p.fetch_artifact_id
+         AND q.parser_name = p.parser_name AND q.status = 'ok'
+         AND q.superseded_by_parse_run_id IS NULL AND q.id > p.id)
+       AND NOT EXISTS (SELECT 1 FROM published_parse_runs x
+         WHERE x.fetch_artifact_id = p.fetch_artifact_id AND x.parser_name = p.parser_name);
+     INSERT INTO publication_events
+       (fetch_artifact_id, parser_name, previous_parse_run_id, new_parse_run_id, kind, actor, reason, occurred_at)
+     SELECT x.fetch_artifact_id, x.parser_name, NULL, x.parse_run_id, 'backfill', 'store:schema',
+       'legacy_current_predicate', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     FROM published_parse_runs x
+     WHERE NOT EXISTS (SELECT 1 FROM publication_events e WHERE e.new_parse_run_id = x.parse_run_id);`,
   );
 }
 
@@ -506,6 +538,53 @@ export function supersedeOlderParseRuns(
     superseded += 1;
   }
   return superseded;
+}
+
+/**
+ * Publish a successful parse run: reconcile lineage, then move the
+ * publication pointer of (artifact, parser) to the new run only if that
+ * reconciliation left it current. A run born superseded (an older version
+ * completing late) never moves the pointer, so readers of the pointer and
+ * readers of the legacy rule agree. One transaction; one event per move.
+ * Returns the number of older runs superseded, as supersedeOlderParseRuns does.
+ */
+export function publishParseRun(
+  store: Store,
+  artifactId: number,
+  parserName: string,
+  parseRunId: number,
+  publishedAt: string = new Date().toISOString(),
+): number {
+  return store.db.transaction(() => {
+    const superseded = supersedeOlderParseRuns(store, artifactId, parserName, parseRunId);
+    const run = store.db
+      .query("SELECT status, superseded_by_parse_run_id FROM parse_runs WHERE id = ?1")
+      .get(parseRunId) as { status: string; superseded_by_parse_run_id: number | null } | null;
+    if (!run || run.status !== "ok" || run.superseded_by_parse_run_id !== null) return superseded;
+    store.db
+      .query(
+        `INSERT INTO publication_events
+           (fetch_artifact_id, parser_name, previous_parse_run_id, new_parse_run_id, kind, actor, reason, occurred_at)
+         SELECT p.fetch_artifact_id, p.parser_name,
+           (SELECT x.parse_run_id FROM published_parse_runs x
+             WHERE x.fetch_artifact_id = p.fetch_artifact_id AND x.parser_name = p.parser_name),
+           p.id, 'normal', 'pipeline', 'parse_ok', ?2
+         FROM parse_runs p WHERE p.id = ?1`,
+      )
+      .run(parseRunId, publishedAt);
+    store.db
+      .query(
+        `INSERT INTO published_parse_runs
+           (fetch_artifact_id, parser_name, parse_run_id, parser_version, published_at, publication_kind)
+         SELECT p.fetch_artifact_id, p.parser_name, p.id, p.parser_version, ?2, 'normal'
+         FROM parse_runs p WHERE p.id = ?1
+         ON CONFLICT (fetch_artifact_id, parser_name) DO UPDATE SET
+           parse_run_id = excluded.parse_run_id, parser_version = excluded.parser_version,
+           published_at = excluded.published_at, publication_kind = 'normal', release_id = NULL`,
+      )
+      .run(parseRunId, publishedAt);
+    return superseded;
+  })();
 }
 
 export function insertObservation(

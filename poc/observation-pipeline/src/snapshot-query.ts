@@ -49,6 +49,8 @@ export interface SnapshotRelations {
   fetchArtifacts: string;
   fetchRuns: string;
   parseRuns: string;
+  /** The publication projection (docs/publication-gate.md); a parse completes a snapshot only when published. */
+  publishedParseRuns: string;
   coverageClaims?: string;
   snapshotPolicies?: string;
 }
@@ -57,6 +59,7 @@ export const LOCAL_SNAPSHOT_RELATIONS: SnapshotRelations = {
   fetchArtifacts: "fetch_artifacts",
   fetchRuns: "fetch_runs",
   parseRuns: "parse_runs",
+  publishedParseRuns: "published_parse_runs",
 };
 
 export const COVERAGE_CLAIMS_TABLE = "parse_coverage_claims";
@@ -152,8 +155,8 @@ export function snapshotCtes(
     WHERE complete_parse.fetch_artifact_id = fa.id
       AND complete_parse.parser_name = policy.parser_name
       AND (policy.required_version IS NULL OR complete_parse.parser_version = policy.required_version)
-      AND complete_parse.status = 'ok'
-      AND complete_parse.superseded_by_parse_run_id IS NULL
+      AND EXISTS (SELECT 1 FROM ${relations.publishedParseRuns} published
+                  WHERE published.parse_run_id = complete_parse.id)
       -- Membership is decided by the dataset's active policy: the stored
       -- coverage claim under coverage-v1, the confined warning-text adapter
       -- under legacy-warning-compat-v1.

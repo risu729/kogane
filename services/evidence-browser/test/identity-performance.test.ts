@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
 import { identityQuery } from "../src/identity-api";
-import { seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry, seedRun } from "./fixtures";
 
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
 const samples: Array<{ source: string; parse: number; kind: string; count: number; run: number }> =
@@ -42,6 +42,7 @@ beforeAll(async () => {
     )
       .bind(run.artifacts[0]!.id)
       .first<{ id: number }>();
+    await publishParse(parse!.id);
     const kind = kinds[index % 4]!;
     const count = index < 8 ? 2917 : 2916;
     const required = {

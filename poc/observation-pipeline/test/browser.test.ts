@@ -16,7 +16,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { createApi } from "../src/api.ts";
-import { insertObservation, insertParseRun, supersedeOlderParseRuns } from "../src/store.ts";
+import { insertObservation, insertParseRun, publishParseRun } from "../src/store.ts";
 import { buildFixture, RETIRED_DESCRIPTION } from "./fixture.ts";
 
 const CLIENT_DIR = join(import.meta.dir, "..", "web", "dist");
@@ -110,7 +110,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       rawLocator: "json:$",
       extra: {},
     });
-    supersedeOlderParseRuns(fixture.store, fixture.artifactId, "browser-probe", freshRunId);
+    publishParseRun(fixture.store, fixture.artifactId, "browser-probe", freshRunId);
 
     const app = createApi(fixture.store, {
       serveClient: async (request) => {

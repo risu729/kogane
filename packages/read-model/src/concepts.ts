@@ -34,6 +34,48 @@ export function isObservationKind(value: string): value is ObservationKind {
   return Object.prototype.hasOwnProperty.call(OBSERVATION_TABLES, value);
 }
 
+/** successfulParses: the parser ran to completion, whether or not it is still adopted. */
+export const successfulParses = {
+  predicate: (p: string): string => `${p}.status = 'ok'`,
+} as const;
+
+/**
+ * publishedParses: adopted for normal display. Since migration 0026 that is
+ * membership in `published_parse_runs`, the adoption pointer per (artifact,
+ * parser) that the observation-pipeline writer moves in the same transaction
+ * that marks a run `ok` (docs/publication-gate.md). A successful run that is
+ * not published is not current, whatever its supersession pointer says; that
+ * is what keeps a future candidate result out of every normal read.
+ */
+export const publishedParses = {
+  relation: "published_parse_runs",
+  predicate: (p: string): string =>
+    `EXISTS (SELECT 1 FROM published_parse_runs published WHERE published.parse_run_id = ${p}.id)`,
+} as const;
+
+/**
+ * legacyPublishedParses: the rule readers used before the gate. Kept only so
+ * the consistency check and tests can compare the projection with it; no
+ * query composes it (scripts/publication-gate-predicates.test.ts enforces).
+ */
+export const legacyPublishedParses = {
+  predicate: (p: string): string =>
+    `${p}.superseded_by_parse_run_id IS NULL AND ${p}.status = 'ok'`,
+} as const;
+
+/**
+ * recordedParses: results a reader may see at all, current or historical: a
+ * published run, a run replaced by a later publication (superseded), or a
+ * failed run. A `pending` run is not a result. A successful run that is
+ * neither published nor superseded is an unadopted result (a future
+ * candidate) and is not visible on any normal path, including history,
+ * counts and detail lookups by id.
+ */
+export const recordedParses = {
+  predicate: (p: string): string =>
+    `${p}.status <> 'pending' AND (${p}.status = 'error' OR ${p}.superseded_by_parse_run_id IS NOT NULL OR ${publishedParses.predicate(p)})`,
+} as const;
+
 /**
  * visibleEvidence: what an authenticated reader may see at all.
  *
@@ -41,8 +83,8 @@ export function isObservationKind(value: string): value is ObservationKind {
  * `kogane-synthetic`, not annotated `exclude_from_financial_views`) with a
  * terminal report; `observation_fetch_artifacts` and `observation_sources`
  * follow from it. Raw objects are visible only through a visible artifact.
- * Parse runs are visible once recorded (`ok` or `error`) over a visible
- * artifact; a `pending` run is not a result and is never visible.
+ * Parse runs are visible once recorded (`recordedParses`) over a visible
+ * artifact; a `pending` run or an unadopted successful run is never visible.
  */
 export const visibleEvidence = {
   sources: "observation_sources",
@@ -52,28 +94,13 @@ export const visibleEvidence = {
     WHERE EXISTS (SELECT 1 FROM observation_fetch_artifacts a WHERE a.sha256 = o.sha256))`,
   parseRuns: `(SELECT p.* FROM parse_runs p
     JOIN observation_fetch_artifacts a ON a.id = p.fetch_artifact_id
-    WHERE p.status <> 'pending')`,
+    WHERE ${recordedParses.predicate("p")})`,
   /** Observations of visible parse runs: superseded and failed results included. */
   observations: (table: ObservationTable): string =>
     `(SELECT o.* FROM ${table} o
     JOIN parse_runs p ON p.id = o.parse_run_id
     JOIN observation_fetch_artifacts a ON a.id = p.fetch_artifact_id
-    WHERE p.status <> 'pending')`,
-} as const;
-
-/** successfulParses: the parser ran to completion, whether or not it is still adopted. */
-export const successfulParses = {
-  predicate: (p: string): string => `${p}.status = 'ok'`,
-} as const;
-
-/**
- * publishedParses: adopted for normal display. Today that is a successful
- * parse that nothing has superseded; the supersession pointer is the only
- * publication mechanism until an explicit adoption projection exists.
- */
-export const publishedParses = {
-  predicate: (p: string): string =>
-    `${p}.superseded_by_parse_run_id IS NULL AND ${p}.status = 'ok'`,
+    WHERE ${recordedParses.predicate("p")})`,
 } as const;
 
 /** A visible fetch run whose collector reported complete success and no failure evidence. */
@@ -86,17 +113,19 @@ export const SNAPSHOT_RELATIONS: SnapshotRelations = {
   fetchArtifacts: visibleEvidence.fetchArtifacts,
   fetchRuns: visibleEvidence.fetchRuns,
   parseRuns: "parse_runs",
+  publishedParseRuns: publishedParses.relation,
 };
 
 /**
  * completeSnapshotCandidates: container datasets whose latest complete
  * capture defines the current snapshot. Built over the visible views; the
- * CTE's own `complete_parse` conditions restate the published-parse predicate
- * and bind `parse_runs` through a visible artifact, so the base table is the
- * right relation there. Which parses count as complete is decided per
- * dataset by its row in `dataset_snapshot_policies` (migration 0025):
- * `coverage-v1` reads the stored coverage claim, `legacy-warning-compat-v1`
- * the confined warning-text adapter. Every row is seeded legacy.
+ * CTE's own `complete_parse` condition is membership in the publication
+ * projection and binds `parse_runs` through a visible artifact, so the base
+ * tables are the right relations there. Which parses count as complete is
+ * decided per dataset by its row in `dataset_snapshot_policies` (migration
+ * 0025): `coverage-v1` reads the stored coverage claim,
+ * `legacy-warning-compat-v1` the confined warning-text adapter. Every row is
+ * seeded legacy.
  */
 export const completeSnapshotCandidates = {
   ctes: snapshotCtes(SNAPSHOT_RELATIONS),

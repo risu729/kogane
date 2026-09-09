@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { insertParseRun, listArtifacts, type Store } from "../src/store.ts";
+import { insertParseRun, listArtifacts, publishParseRun, type Store } from "../src/store.ts";
 import {
   currentPositions,
   currentTransactions,
@@ -162,7 +162,7 @@ describe("complete container snapshots", () => {
       warnings: [],
     });
     expect(currentPositions(store).map((row) => row.security_code)).toEqual(["OLD"]);
-    insertParseRun(store, {
+    const completed = insertParseRun(store, {
       artifactId: missing.artifactId,
       parserName: base.parser,
       parserVersion: "0.1.0",
@@ -170,6 +170,7 @@ describe("complete container snapshots", () => {
       status: "ok",
       warnings: [],
     });
+    publishParseRun(store, missing.artifactId, base.parser, completed);
     expect(currentPositions(store).map((row) => row.security_code)).toEqual(["NEW"]);
   });
 

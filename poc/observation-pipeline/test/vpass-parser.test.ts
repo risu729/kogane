@@ -14,6 +14,7 @@ import {
   insertParseRun,
   listArtifacts,
   openStore,
+  publishParseRun,
   putRawObject,
   upsertSource,
 } from "../src/store.ts";
@@ -399,6 +400,7 @@ describe("Vpass canonical Layer-B parser", () => {
       });
       for (const observation of partial.observations)
         insertObservation(store, partialParseRun, observation);
+      publishParseRun(store, firstArtifact, vpassStatementPage.name, partialParseRun);
 
       expect(currentTransactions(store).filter((row) => row.source_id === "vpass")).toHaveLength(2);
       expect(runParsers(store, [vpassStatementPage]).errors).toBe(0);

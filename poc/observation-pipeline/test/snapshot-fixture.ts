@@ -13,6 +13,7 @@ import {
   insertParseRun,
   listArtifacts,
   openStore,
+  publishParseRun,
   putRawObject,
   upsertSource,
   type Store,
@@ -127,6 +128,11 @@ export function snapshot(store: Store, options: Snapshot) {
       failureCount: artifact.runFailureCount,
     });
   }
+  // A success is published as parse.ts does, after the contract rows of the
+  // pending run: only a published run can complete a snapshot
+  // (docs/publication-gate.md).
+  if ((options.parseStatus ?? "ok") === "ok")
+    publishParseRun(store, artifactId, options.parser, parseId);
   return { runId, artifactId, parseId };
 }
 

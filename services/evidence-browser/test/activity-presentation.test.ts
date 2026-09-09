@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
-import { seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { describeActivities } from "../src/activity-presentation";
 import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
 import type { TransactionRow } from "../../../poc/observation-pipeline/shared/api-contract";
@@ -12,6 +12,7 @@ it("projects only bounded same-row facts and preserves the positive withdrawal a
   )
     .bind(run.artifacts[0]!.id)
     .first<{ id: number }>();
+  await publishParse(parse!.id);
   const rows: TransactionRow[] = [];
   for (const direction of ["debit", "credit"]) {
     const raw = await env.DB.prepare(
