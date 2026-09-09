@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 import { classifyActivity } from "../shared/activity-semantics.ts";
 import type { TransactionRow } from "../shared/api-contract.ts";
+import { CENTRAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
 test("activity page distinguishes positive withdrawals, card payments, and quantity-only trades", async () => {
   const client = join(import.meta.dir, "../web/dist-production");
   const base: TransactionRow = {
@@ -74,7 +75,7 @@ test("activity page distinguishes positive withdrawals, card payments, and quant
         return Response.json({
           apiVersion: 1,
           source: { kind: "central-store", classification: "synthetic" },
-          capabilities: { readOnly: true, rawEvidence: true, liveCollectors: false },
+          capabilities: CENTRAL_STORE_CAPABILITIES,
         });
       if (path === "/api/filter-options") return Response.json({ sources: [], accounts: [] });
       if (path === "/api/transactions") return Response.json({ transactions: rows });

@@ -10,6 +10,10 @@ The Queue consumer uses one message per batch and one concurrent consumer. Every
 
 Queue payloads necessarily contain the source R2 object key so the importer can read the terminal object. Application logs contain only lifecycle, message kind, allowlisted source, outcome/error code, and attempt count; they never include an object key, hash, source body, credential, or financial value.
 
+## Entry points
+
+The reconciler and the per-source HTTP routes execute the same application command. `processReconcilerMessage` parses the Queue message or R2 notification, converts the wire `resume` value into the internal resume state for the source's declared kind, and calls `importTerminal`, which the Worker implements with `executeImport` from `src/adapters/`; the source result is mapped back to the Queue contract by `reconcilerOutcome` (`sealed`, or `deferred` with the next `resume` and `progress`). `POST /v1/<source>/import-run` calls the same `executeImport` with that source's HTTP validation, and `POST /v1/<source>/backfill-page` calls it from the source's cursor state. Repair listing reads the bucket declared by the adapter's `repairPolicy`. The contract, the per-source budgets that stay in each adapter, and the CI registry check are described in [import-adapters.md](import-adapters.md).
+
 ## Terminal notifications
 
 Only `PutObject`, `CopyObject`, and `CompleteMultipartUpload` notifications from the configured Cloudflare account, exact bucket, source prefix, and suffix are accepted. The Worker validates the complete official R2 notification shape before use.

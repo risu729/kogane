@@ -17,6 +17,7 @@ import {
 } from "../src/store.ts";
 import { formatAmount, amountSign } from "../src/money.ts";
 import { buildFixture, HOSTILE_DESCRIPTION, RETIRED_DESCRIPTION, type Fixture } from "./fixture.ts";
+import { LOCAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
 
 const fixture: Fixture = buildFixture();
 const app = createApi(fixture.store);
@@ -174,12 +175,24 @@ describe("API metadata", () => {
     expect(await response.json()).toEqual({
       apiVersion: 1,
       source: { kind: "local-store", classification: "unknown" },
-      capabilities: {
-        readOnly: true,
-        rawEvidence: true,
-        liveCollectors: false,
-      },
+      capabilities: LOCAL_STORE_CAPABILITIES,
     });
+  });
+  test("refuses every list parameter it does not advertise instead of ignoring it", async () => {
+    for (const path of [
+      "/api/transactions?view=balances",
+      "/api/balances?view=summaries",
+      "/api/balances?source=demo-bank",
+      "/api/artifacts?cursor=1",
+      "/api/positions?offset=0",
+      "/api/filter-options?kind=transactions",
+      "/api/meta?source=x",
+    ]) {
+      const response = await get(path);
+      expect(response.status, path).toBe(400);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toEqual({ error: "invalid_query" });
+    }
   });
   test("accepts explicit synthetic provenance from the isolated fixture startup only", async () => {
     const demoApi = createApi(fixture.store, {

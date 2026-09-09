@@ -6,6 +6,7 @@ import { chromium, type Browser, type Locator } from "playwright";
 import { createApi } from "../src/api.ts";
 import type { BalanceHistoryRow, BalanceRow, TransactionRow } from "../shared/api-contract.ts";
 import { buildFixture } from "./fixture.ts";
+import { CENTRAL_STORE_CAPABILITIES, LOCAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
 
 const clients = {
   local: join(import.meta.dir, "../web/dist"),
@@ -81,7 +82,7 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
                 kind: central ? "central-store" : "local-store",
                 classification: "synthetic",
               },
-              capabilities: { readOnly: true, rawEvidence: true, liveCollectors: false },
+              capabilities: central ? CENTRAL_STORE_CAPABILITIES : LOCAL_STORE_CAPABILITIES,
             });
           }
           if (url.pathname === "/api/filter-options") {

@@ -50,6 +50,42 @@ query cache and hide its records. A failed retry cannot restore them; a successf
 response is required. Connection metadata gates observation pages as well. Other
 refresh failures retain previously authorized records with an explicit warning.
 
+## API metadata and capabilities
+
+`/api/meta` describes the connection. Its `source.kind` (`local-store`,
+`central-store`, or a future name) and `source.classification` are labels
+only; every UI decision reads `capabilities`, so renaming a connection cannot
+change what the client sends or shows. The capability object, the query
+parameters each capability unlocks, and the client argument builder are one
+definition in `poc/observation-pipeline/shared/api-schema.ts`. The response
+validator (`validApiResponse`) checks the object against that schema, both
+servers derive their accepted parameters from it, and the same
+conformance checks (`test/api-conformance.ts`) run against the local store,
+the hosted synthetic demo, and the production Worker. Capabilities are never
+an authorization switch: Access JWT verification, closed responses on auth
+failure, and `no-store` apply before any capability is read.
+
+| Capability          | Values                  | Local / demo | Production  | Effect in the client                                    |
+| ------------------- | ----------------------- | ------------ | ----------- | ------------------------------------------------------- |
+| `contractVersion`   | `observation-api-v1`    | yes          | yes         | Validator rejects any other version                     |
+| `readOnly`          | `true`                  | yes          | yes         | No write control exists                                 |
+| `rawEvidence`       | `true`                  | yes          | yes         | `/api/raw/<sha256>` links                               |
+| `liveCollectors`    | `false`                 | yes          | yes         | Refresh never means a collector ran                     |
+| `measureViews`      | `balances`, `summaries` | none         | both        | `view=` is sent only for an advertised view             |
+| `identityReadModes` | `latest`                | none         | `latest`    | The 口座・銘柄 page and link exist                      |
+| `paginationVersion` | `none`, `offset-v1`     | `none`       | `offset-v1` | Coverage record, next-page links, no client column sort |
+| `collectionFilters` | boolean                 | false        | true        | Server filter controls replace client record controls   |
+| `organizedDisplay`  | boolean                 | false        | true        | Rows carry `organization`                               |
+| `financialProducts` | boolean                 | false        | true        | Organized rows may carry a product claim                |
+| `evidenceHistory`   | boolean                 | false        | true        | The 取得履歴 route and link exist                       |
+
+A server refuses with 400 any query parameter its capabilities do not grant;
+the client never sends one. While metadata is loading, capabilities are
+unknown: dependent list queries stay disabled and pages show their loading
+state rather than requesting with guessed defaults. Changing the schema fails
+the pinned contract tests in both `poc/observation-pipeline` and
+`services/evidence-browser`, so a one-sided edit cannot pass CI.
+
 ## Safe preview
 
 From `poc/observation-pipeline`:
@@ -88,9 +124,10 @@ Agree on these before the production connection is enabled:
 - Source/account/date filtering and server-side pagination, including a
   cursor and explicit coverage/completeness. Client pagination limits DOM
   rendering only; the current API still returns all matching stored rows.
-- Data classification and connection capabilities. A successful API refresh
-  means the UI reread its store, not that a collector ran or that a source is
-  current. Display source timestamps without inventing freshness thresholds.
+- Data classification and connection capabilities (the table above). A
+  successful API refresh means the UI reread its store, not that a collector
+  ran or that a source is current. Display source timestamps without
+  inventing freshness thresholds.
 - Authenticated browser access and protected raw-evidence routes. No admin
   or ingestion credential is embedded in frontend code or browser storage.
 - Parser warnings, superseded observations, partial collection, and failure

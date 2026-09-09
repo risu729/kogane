@@ -11,9 +11,14 @@ deployment. The Worker has no public workers.dev endpoint or route. The protecte
 evidence browser reads the projection views and retains the existing complete
 snapshot and pagination queries, including empty successful snapshots.
 
-Every five minutes, the Worker scans at most 200 artifact IDs and processes 12
-ready jobs. A persisted cursor wraps after reaching the current catalogue end,
-so runs sealed late and new parser versions are eventually discovered. Jobs are
+Every five minutes, the Worker runs three independently budgeted lanes (see
+`docs/observation-lanes.md`, migration `0035_observation_job_lanes.sql`):
+`incremental` consumes the durable work items a D1 trigger appends whenever a
+run is sealed and executes up to 12 jobs; `repair` advances the historical
+cyclic cursor over at most 100 artifact IDs and executes up to 4 jobs, so lost
+notifications and new parser versions are still discovered; `replay` steps
+operator-created plans and executes up to 8 jobs. A large replay never delays
+newly sealed evidence. Jobs are
 unique per artifact/parser/version. Failed attempts remain in `parse_runs`.
 Transient errors retry with exponential delay up to five attempts; deterministic
 parser rejections fail immediately and remain visible for operator inspection.
@@ -44,15 +49,22 @@ From this package, with the usual authorized Cloudflare environment:
 ```sh
 node scripts/ops.ts status
 node scripts/ops.ts catchup 100
+node scripts/ops.ts sweep replay 20
+node scripts/ops.ts replay plan '{"source":"smbc-bank","dataset":"balance-normalized","parser":"smbc-direct-balance","version":"1.0.0","reason":"..."}'
+node scripts/ops.ts replay start '{"planId":1}'
 node scripts/status.ts
 ```
 
 Use the project's pinned Node runtime: Bun's remote proxy stalled in the local
 rollout environment. `status.ts` emits only aggregate coverage/job counters.
 The catchup command makes the requested bounded number of private service-binding
-calls, at most 40 jobs per call. It does not deploy an ops Worker or expose a
-local server. Inspect grouped job status after catchup; zero new jobs in one scan
-page does not prove all history was scanned. Failed jobs require inspecting their
+calls, at most 40 incremental jobs per call plus the default repair and replay
+budgets. `sweep <lane> [maxJobs]` runs a single lane. `replay <plan|start|pause|resume|cancel|inspect> <json>`
+calls the internal replay commands; `start` performs one bounded creation step
+per call and the cron continues the rest. None of this deploys an ops Worker or
+exposes a local server. `status` reports per-lane backlog, oldest pending age,
+unprocessed work items, latest sealed versus latest parsed time and replay plan
+states, with no financial values. Failed jobs require inspecting their
 safe error code and artifact/parser/version, repairing the cause, then explicitly
 resetting that exact job or deploying a corrected parser version.
 

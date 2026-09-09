@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, type ReactNode } from "react";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
-import { useMetadata } from "./api.ts";
+import { useFeatures, useMetadata } from "./api.ts";
 import { QueryBoundary } from "./ui.tsx";
 import { Link, useRoute, usePath, type Route } from "./router.tsx";
 import { OverviewPage } from "./pages/Overview.tsx";
@@ -47,6 +47,17 @@ const NAV: { to: string; label: string; icon: string }[] = [
     icon: "M5 3h9l5 5v13H5z M14 3v6h5 M9 13h6 M9 17h6",
   },
 ];
+
+// Labels for known connection names. Text only: no feature reads these maps,
+// and a name missing here falls back to a generic label with equal behaviour.
+const SOURCE_KIND_LABELS: Record<string, string> = {
+  "local-store": "ローカルデータに接続",
+  "central-store": "中央保管庫に接続",
+};
+const SOURCE_KIND_NOTICES: Record<string, string> = {
+  "local-store": "ローカルデータ",
+  "central-store": "中央保管庫のデータ",
+};
 
 function isActive(navPath: string, currentPath: string): boolean {
   if (navPath === "/") return currentPath === "/";
@@ -99,19 +110,21 @@ export function App(): ReactNode {
   const client = useQueryClient();
   const fetching = useIsFetching() > 0;
   const connected = metadata.isSuccess;
-  const synthetic = metadata.data?.source.classification === "synthetic";
-  const production = metadata.data?.source.kind === "central-store";
+  const classification = metadata.data?.source.classification;
+  const synthetic = classification === "synthetic";
+  // Feature decisions come from advertised capabilities only. `source.kind`
+  // is a label: an unknown name gets the generic label and identical behaviour.
+  const features = useFeatures();
   const connectionLabel = metadata.isPending
     ? "接続を確認中"
     : connected
       ? synthetic
         ? "デモデータに接続"
-        : production
-          ? "中央保管庫に接続"
-          : "ローカルデータに接続"
+        : (SOURCE_KIND_LABELS[metadata.data?.source.kind ?? ""] ?? "保存された記録に接続")
       : "接続を確認できません";
 
-  const evidenceRoute = production && (path === "/evidence" || path.startsWith("/runs/"));
+  const evidenceRoute =
+    features.evidenceHistory && (path === "/evidence" || path.startsWith("/runs/"));
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main">
@@ -147,12 +160,12 @@ export function App(): ReactNode {
               <span>{item.label}</span>
             </Link>
           ))}
-          {production ? (
+          {features.identities ? (
             <Link to="/identities" current={path === "/identities"}>
               口座・銘柄
             </Link>
           ) : null}
-          {production ? (
+          {features.evidenceHistory ? (
             <Link to="/evidence" current={evidenceRoute}>
               取得履歴
             </Link>
@@ -204,7 +217,7 @@ export function App(): ReactNode {
                   <span className="notice-divider">·</span>
                   実際の取引・残高ではありません
                 </>
-              ) : production ? (
+              ) : classification === "financial" ? (
                 <>
                   <strong>保存された実データ</strong>
                   <span className="notice-divider">·</span>
@@ -212,7 +225,9 @@ export function App(): ReactNode {
                 </>
               ) : (
                 <>
-                  <strong>ローカルデータ</strong>
+                  <strong>
+                    {SOURCE_KIND_NOTICES[metadata.data.source.kind] ?? "保存された記録"}
+                  </strong>
                   <span className="notice-divider">·</span>
                   実データかどうか未確認
                 </>
@@ -224,11 +239,11 @@ export function App(): ReactNode {
           </p>
         </div>
         <main id="main" ref={main} tabIndex={-1}>
-          {production ? <ParsingHealthNotice health={metadata.data?.parsingHealth} /> : null}
+          <ParsingHealthNotice health={metadata.data?.parsingHealth} />
           <QueryBoundary query={metadata} label="接続情報">
             {() => (
               <>
-                {production &&
+                {features.serverFilters &&
                 ["transactions", "balances", "summaries", "positions", "artifacts"].includes(
                   route.name,
                 ) ? (
