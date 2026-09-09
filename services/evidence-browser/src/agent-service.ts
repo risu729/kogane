@@ -33,6 +33,7 @@ import {
   type ApiCapabilities,
   CENTRAL_STORE_CAPABILITIES,
 } from "../../../poc/observation-pipeline/shared/api-schema";
+import { commandsEnabled } from "./command-api";
 import { eventsV2Available } from "./events-api";
 import { evidenceReader, type ObservationReader, type Overview } from "./observations";
 import { proposalStore } from "./proposals";
@@ -72,9 +73,16 @@ interface ToolContext {
  * reports too: the contract's defaults with the server-computed facts folded
  * in. An agent and a page therefore read one description of the deployment,
  * and neither is told about a route this store cannot serve.
+ *
+ * `commands` is only a statement that the change lifecycle is served. It is
+ * not a capability of this API: no grant here reaches approve or commit.
  */
 async function serverCapabilities(env: Env): Promise<ApiCapabilities> {
-  return { ...CENTRAL_STORE_CAPABILITIES, eventsV2: await eventsV2Available(env) };
+  return {
+    ...CENTRAL_STORE_CAPABILITIES,
+    commands: commandsEnabled(env),
+    eventsV2: await eventsV2Available(env),
+  };
 }
 
 function failure(

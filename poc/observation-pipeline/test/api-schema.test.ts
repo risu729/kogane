@@ -60,6 +60,7 @@ describe("shared API schema", () => {
       financialProducts: false,
       evidenceHistory: false,
       sharedQuery: false,
+      commands: false,
       eventsV2: false,
     });
     expect(CENTRAL_STORE_CAPABILITIES).toEqual({
@@ -75,6 +76,7 @@ describe("shared API schema", () => {
       financialProducts: true,
       evidenceHistory: true,
       sharedQuery: true,
+      commands: false,
       eventsV2: false,
     });
   });
@@ -204,7 +206,10 @@ describe("client behaviour depends on capabilities, never on the connection name
       identities: true,
       evidenceHistory: true,
       sharedQuery: true,
+      // The change lifecycle is a deployment flag, not a shared constant.
+      commands: false,
     });
+    expect(clientFeatures({ ...CENTRAL_STORE_CAPABILITIES, commands: true }).commands).toBe(true);
     expect(local).toEqual(NO_FEATURES);
     expect(
       clientFeatures({ ...CENTRAL_STORE_CAPABILITIES, identityReadModes: [] }).identities,
@@ -218,6 +223,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       identities: false,
       evidenceHistory: false,
       sharedQuery: false,
+      commands: false,
     });
   });
 });

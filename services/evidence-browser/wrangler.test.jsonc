@@ -10,7 +10,9 @@
     "EVENTS_V2_ENABLED": "0",
     "ACCESS_ISSUER": "https://evidence-test.cloudflareaccess.com",
     "ACCESS_AUDIENCE": "synthetic-test-audience",
-    "AGENT_GRANTS": ""
+    "COMMANDS_ENABLED": "",
+    "AGENT_GRANTS": "",
+    "AGENT_API_GRANTS": ""
   },
   "assets": {
     "directory": "test/assets",

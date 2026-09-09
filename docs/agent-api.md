@@ -12,8 +12,8 @@ acceptance, no simulation, no commit, no calculation job, no collection
 request, no export, and no external money action anywhere in the code. Those
 capabilities are not disabled by a flag; they have no name in the type.
 
-**Everything here is off by default.** With `AGENT_GRANTS` absent or empty,
-every agent route answers 403 for every authenticated principal.
+**Everything here is off by default.** With `AGENT_API_GRANTS` absent or
+empty, every agent route answers 403 for every authenticated principal.
 
 ## Why the application service exists
 
@@ -34,10 +34,10 @@ answers byte for byte (AT72).
 
 ## Grants
 
-A grant is looked up **after** the existing Cloudflare Access check, by the
-verified principal: the token's `common_name` (a service token's own id) when
-present, otherwise its `sub`. `services/evidence-browser/src/auth.ts` is
-unchanged; a valid token with no grant is still refused.
+A grant is looked up **after** the Cloudflare Access check, by the subject
+`authenticate` returned. Nothing here parses the token a second time and
+nothing reads an actor from a request body or header, which is the same rule
+the change lifecycle follows. A valid token with no grant is still refused.
 
 | Capability               | Allows                                                      | Notes                                                   |
 | ------------------------ | ----------------------------------------------------------- | ------------------------------------------------------- |
@@ -76,18 +76,18 @@ Bounds a configured grant may not exceed: `maxRows` ≤ 1000,
 64 principals. One invalid entry rejects the whole table, so a typo turns the
 API off rather than half-applying it.
 
-### Configuring `AGENT_GRANTS`
+### Configuring `AGENT_API_GRANTS`
 
-`AGENT_GRANTS` is a wrangler `var` on `services/evidence-browser` holding the
-JSON object above (principal → grant, without the `principal` field, which the
-server fills in from the verified token). It ships as `""`.
+`AGENT_API_GRANTS` is a wrangler `var` on `services/evidence-browser` holding
+the JSON object above (principal → grant, without the `principal` field, which
+the server fills in from the verified subject). It ships as `""`.
 
 To enable a grant, set the variable for the deployment — as a secret if the
 principal names should not sit in the repository:
 
 ```sh
 cd services/evidence-browser
-bunx wrangler secret put AGENT_GRANTS   # paste the JSON object
+bunx wrangler secret put AGENT_API_GRANTS   # paste the JSON object
 ```
 
 To turn the API off again, set it to `""` (or remove it) and redeploy. There
@@ -97,6 +97,25 @@ feature flag.
 The hosted synthetic demo (`wrangler.demo.jsonc`) never serves these routes at
 all — `src/demo-worker.ts` answers 403 on every agent path before its method
 check — and a conformance test asserts it.
+
+### Relationship to the change lifecycle (A09)
+
+Two variables, two vocabularies, deliberately not merged:
+
+| Variable           | Shape                              | Means                                                                                                             |
+| ------------------ | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `AGENT_API_GRANTS` | JSON **object**, principal → grant | what this API lets a principal _read_, and whether it may propose                                                 |
+| `AGENT_GRANTS`     | JSON **array** of subjects         | which subjects the change lifecycle treats as _agents_, so they may plan and simulate but never approve or commit |
+
+Each parser rejects the other's shape, and that is load-bearing: putting the
+object in `AGENT_GRANTS` makes `agentSubjects` return nothing, and every agent
+subject would then be graded a human operator with the full command
+capabilities. `test/agent-api.test.ts` pins the incompatibility. A deployment
+that grants an agent read access here should also list that subject in
+`AGENT_GRANTS`, so the same principal cannot approve its own proposals.
+
+Unifying the two into one grant table is worth doing, but it means changing
+the command path's `staticGrantLoader` and belongs in its own change.
 
 ## Tools
 
@@ -114,7 +133,8 @@ ways.
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
 folded in, which is the same object `/api/meta` returns (today that is
-`eventsV2`, which depends on the A10 projection being present). An agent is
+`commands`, a deployment flag, and `eventsV2`, which depends on the A10
+projection being present). An agent is
 never told about a route this store cannot serve, and a page and an agent read
 one description of the deployment.
 
@@ -290,15 +310,15 @@ check is not a completion criterion (addendum 10 §10).
 Schema: none. Migration 0029 already provides both tables the proposal path
 writes; this change adds no migration.
 
-1. Reader/writer: deploy `services/evidence-browser` with `AGENT_GRANTS`
+1. Reader/writer: deploy `services/evidence-browser` with `AGENT_API_GRANTS`
    unset. Every agent route answers 403; the UI's Overview page picks up
    `GET /api/v2/query` through the `sharedQuery` capability and shows the same
    figures it showed before.
-2. Set `AGENT_GRANTS` for one principal with `summary.read` only, and confirm
+2. Set `AGENT_API_GRANTS` for one principal with `summary.read` only, and confirm
    `kogane.capabilities` reports the expected scope and limits.
 3. Widen one capability at a time. `interpretation.propose` last.
 
-Rollback: set `AGENT_GRANTS` to `""` (immediate, no redeploy of code needed if
+Rollback: set `AGENT_API_GRANTS` to `""` (immediate, no redeploy of code needed if
 it is a secret), or redeploy the previous Worker build. Proposals already
 written stay as `proposed` rows; they are inert, and removing the capability
 does not need to remove them.

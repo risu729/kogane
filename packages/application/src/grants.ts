@@ -140,7 +140,7 @@ export function validGrant(value: unknown): value is Grant {
 /**
  * Read the deployment's grant table. Anything unreadable, unparsable or
  * outside the bounds above yields an empty table: the agent API is then off,
- * which is the configured default (`AGENT_GRANTS` absent).
+ * which is the configured default (`AGENT_API_GRANTS` absent).
  *
  * The parsed text is configuration written by the operator, never a request
  * body, and it never names a capability outside `AGENT_CAPABILITIES`.

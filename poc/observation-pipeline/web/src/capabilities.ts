@@ -31,6 +31,8 @@ export interface ClientFeatures {
   readonly evidenceHistory: boolean;
   /** Summary figures come from the shared query service, not a page-local sum. */
   readonly sharedQuery: boolean;
+  /** The change lifecycle is served, so confirmation screens may act. */
+  readonly commands: boolean;
 }
 
 /** Every feature is off until capabilities are known. */
@@ -40,6 +42,7 @@ export const NO_FEATURES: ClientFeatures = {
   identities: false,
   evidenceHistory: false,
   sharedQuery: false,
+  commands: false,
 };
 
 export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
@@ -49,5 +52,6 @@ export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
     identities: capabilities.identityReadModes.includes("latest"),
     evidenceHistory: capabilities.evidenceHistory,
     sharedQuery: capabilities.sharedQuery,
+    commands: capabilities.commands,
   };
 }
