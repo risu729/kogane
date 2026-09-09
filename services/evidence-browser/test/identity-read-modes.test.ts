@@ -10,7 +10,7 @@ import { observationOrganizations, ORGANIZATION_QUERY } from "../src/observation
 import { validInterpretationContext } from "../../../poc/observation-pipeline/shared/api-schema";
 import { validApiResponse } from "../../../poc/observation-pipeline/shared/api-validation";
 import { validIdentityResponse } from "../../../poc/observation-pipeline/shared/identity-contract";
-import { seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry, seedRun } from "./fixtures";
 
 beforeAll(seedRegistry);
 
@@ -41,6 +41,8 @@ async function seed(tag: string) {
   )
     .bind(run.artifacts[0]!.id)
     .first<{ id: number }>();
+  // Adoption is what makes a successful run current (docs/publication-gate.md).
+  await publishParse(parse!.id);
   const account = `${tag}-account`;
   const observation = await env.DB.prepare(
     `INSERT INTO transaction_observations (parse_run_id,source_account,currency,raw_locator,extra_json) VALUES (?,?,'JPY','synthetic','{}') RETURNING id`,

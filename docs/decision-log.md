@@ -160,7 +160,13 @@ still needs a new numeric version; today evidence changes always come with one
 
 `packages/read-model` gains `IdentityReadMode = "latest" | "as-recorded"`,
 `organizationSql(mode)`, `interpretationContext(...)` and
-`identityReleaseFor(...)`. `latest` joins `current_account_mappings` /
+`identityReleaseFor(...)`. The read mode chooses which mapping revision a row
+is attributed to; it does not decide which parse run is current. That stays
+the publication projection `published_parse_runs`
+([publication-gate.md](publication-gate.md)): `organizationSql` marks a row
+`historical` when the projection does not name its run, the identity
+catalogue and coverage join the projection, and both modes read the same
+published rows. `latest` joins `current_account_mappings` /
 `current_instrument_mappings` (unchanged behaviour; the `latest` query is the
 former query plus the run's policy release column). `as-recorded` joins the
 mapping rows the sealed identity run pinned (`identity_observations.
@@ -192,7 +198,8 @@ attributed to.
 
 ## Deploy order and rollback
 
-1. Apply `0029_decision_log.sql` (schema).
+1. Apply `0029_decision_log.sql` (schema). It is additive and independent of
+   `0026_publication_gate.sql`; both are applied before the writer.
 2. Deploy `services/observation-pipeline` (writer: commands, protection from
    the log, policy records).
 3. Deploy `services/evidence-browser` (reader: read modes, contexts).
@@ -209,6 +216,11 @@ There is no feature flag: the reader's default stays `latest`, and the new
 mode is only served when requested.
 
 ## Verified locally (synthetic data only)
+
+Every test fixture publishes its successful parse runs through the projection
+the way the writer does (`publishParse` in the pipeline harness and the
+evidence-browser fixtures), because an unadopted `ok` run is current for no
+reader since migration 0026.
 
 `services/observation-pipeline`: `identity-decisions.test.ts` (lifecycle,
 resend, conflicts, nothing written on a failed guard, trigger abort of a

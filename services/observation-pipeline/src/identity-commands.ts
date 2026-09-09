@@ -298,7 +298,8 @@ export async function executeIdentityCommand(
     .prepare(`SELECT max(revision) revision FROM ${table} WHERE ${reference}=?`)
     .bind(command.referenceId)
     .first<{ revision: number | null }>();
-  if (current?.revision !== command.expectedRevision) return { ok: false, error: "revision_conflict" };
+  if (current?.revision !== command.expectedRevision)
+    return { ok: false, error: "revision_conflict" };
   if (assign) return { ok: false, error: "target_missing" };
   return { ok: false, error: "no_active_override" };
 }

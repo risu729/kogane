@@ -23,6 +23,7 @@ import {
   LAYER_A_SQL,
   layerBMigrations,
   migrationDir,
+  publishParse,
   seedArtifact,
   splitSql,
   startPipeline,
@@ -86,6 +87,8 @@ async function seedParse(
       .bind(id, sourceAccount, JSON.stringify(Array.from({ length: count }, (_, i) => i))),
     db.prepare("UPDATE parse_runs SET status='ok' WHERE id=?").bind(id),
   ]);
+  // Adoption is what makes a successful run current (docs/publication-gate.md).
+  await publishParse(db, id);
   return { id, artifact_id: id, source_id: source, producer_id: PRODUCER, fetch_run_id: id };
 }
 async function count(table: string, where = "1=1", ...bindings: unknown[]) {

@@ -58,6 +58,10 @@ function seededDatabase(): Database {
   db.exec(`INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(1,1,'synthetic','1','2026-01-01','pending','[]');
 INSERT INTO balance_observations(id,parse_run_id,source_account,metric,instrument,raw_locator,extra_json) VALUES(1,1,'smbc-bank:ordinary-yen','balance','JPY','$','{}');
 UPDATE parse_runs SET status='ok' WHERE id=1;
+-- Publish the run the way the pipeline writer does (docs/publication-gate.md);
+-- an unadopted successful run is current for no reader since migration 0026.
+INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at) VALUES(1,'synthetic',NULL,1,'normal','pipeline','parse_ok','2026-01-01');
+INSERT INTO published_parse_runs(fetch_artifact_id,parser_name,parse_run_id,parser_version,published_at,publication_kind) VALUES(1,'synthetic',1,'1','2026-01-01','normal');
 INSERT INTO source_accounts VALUES('ref','smbc-bank','synthetic-producer','["smbc-bank:ordinary-yen"]');
 INSERT INTO accounts VALUES('rule-account','規則口座','deposit','provider-local'),('manual-account','手動口座','deposit','identified');
 INSERT INTO account_mappings VALUES('am1','ref',1,'rule-account','rule','provider-scope',1,'2098-01-01','規則口座','provider-local');
