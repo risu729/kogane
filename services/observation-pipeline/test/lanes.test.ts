@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { runScheduled, sweep } from "../src/worker.ts";
 import { runBalanceProjection } from "../src/balance-projection-job.ts";
+import { dispatchDecisionOutbox } from "../src/decision-outbox.ts";
 import { identitySweep } from "../src/identity-store.ts";
 import { resolveIdentity } from "../../../poc/observation-pipeline/src/identity/index.ts";
 import { layerBMigrations, publishParse, seedArtifact, startPipeline } from "./harness.ts";
@@ -60,6 +61,7 @@ test("harness applies every Layer B migration in order through 0037", () => {
     "0026_publication_gate.sql",
     "0029_decision_log.sql",
     "0030_balance_read_model.sql",
+    "0031_operations.sql",
     "0032_economic_events.sql",
     "0035_observation_job_lanes.sql",
     "0036_publication_event_guard.sql",
@@ -358,6 +360,7 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
       parse: () => Promise.reject(new Error("synthetic D1 outage: amount=999999")),
       identity: (env) => identitySweep(env.DB, resolveIdentity),
       balanceProjection: (env) => runBalanceProjection(env),
+      decisions: (env) => dispatchDecisionOutbox(env.DB),
     },
     log,
   );
@@ -366,6 +369,7 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
     expect.objectContaining({ event: "identity_sweep", processedRuns: expect.any(Number) }),
     // The projection stage is isolated like the others and is off by default.
     expect.objectContaining({ event: "balance_projection", enabled: false, status: "skipped" }),
+    expect.objectContaining({ event: "decision_outbox", claimed: 0 }),
   ]);
   expect(JSON.stringify(lines)).not.toContain("999999");
   lines.length = 0;
@@ -374,6 +378,7 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
     "observation_sweep",
     "identity_sweep",
     "balance_projection",
+    "decision_outbox",
   ]);
   expect(lines[0]).toHaveProperty("lanes");
 }, 60000);

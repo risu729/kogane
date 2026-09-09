@@ -19,7 +19,9 @@ import {
   authorityRank,
   BALANCE_PROJECTION_RELEASE,
   buildBalanceProjection,
+  createBalanceProjectionReader,
   createD1ObservationReader,
+  d1Executor,
   DECIMAL_POLICY_RELEASE,
   ResultLimitExceededError,
   LATEST_IDENTITY_RELEASE,
@@ -43,6 +45,7 @@ import {
   type NormalizedDecimal,
 } from "../../../poc/observation-pipeline/shared/normalized-decimal.ts";
 import type { BalanceRow } from "../../../poc/observation-pipeline/shared/api-contract.ts";
+import type { OutboxOutcome } from "./decision-outbox.ts";
 
 /** The 5,000 candidate bound of the read model; a larger set is refused, never cut. */
 const CANDIDATE_LIMIT = 5001;
@@ -65,6 +68,12 @@ export interface BalanceProjectionResult {
   rowCount: number;
   retired: number;
   reasonCode: string | null;
+}
+
+/** Reads the operator flag as a plain string; the binding type pins the default. */
+function projectionFlagOn(env: Env): boolean {
+  const flag: string = env.BALANCE_PROJECTION_ENABLED;
+  return flag === "1";
 }
 
 const skipped = (reasonCode: string | null): BalanceProjectionResult => ({
@@ -457,25 +466,27 @@ export async function collectCandidates(db: D1Database): Promise<ProjectionCandi
   return [...unique.values()];
 }
 
-async function readInputs(
-  db: D1Database,
-): Promise<
-  Pick<
-    ProjectionInputs,
-    "publishedHighWaterParseRunId" | "visibleFetchRunCount" | "visibleFetchRunHighWater"
-  >
-> {
-  const published = await db
-    .prepare("SELECT coalesce(max(parse_run_id),0) AS high FROM published_parse_runs")
-    .first<{ high: number }>();
-  const visible = await db
-    .prepare("SELECT count(*) AS runs, coalesce(max(id),0) AS high FROM observation_fetch_runs")
-    .first<{ runs: number; high: number }>();
+/**
+ * The declared inputs, read through the same query the evidence browser uses
+ * to decide whether the sealed snapshot is still current. One definition, so
+ * builder and reader cannot disagree about what "behind" means.
+ */
+export async function currentProjectionInputs(db: D1Database): Promise<ProjectionInputs> {
+  const row = await createBalanceProjectionReader(d1Executor(db)).projectionInputs();
   return {
-    publishedHighWaterParseRunId: published?.high ?? 0,
-    visibleFetchRunCount: visible?.runs ?? 0,
-    visibleFetchRunHighWater: visible?.high ?? 0,
+    publishedHighWaterParseRunId: row.published_high_water,
+    visibleFetchRunCount: row.visible_runs,
+    visibleFetchRunHighWater: row.visible_high_water,
+    adoptedRelationCount: row.adopted_relations,
+    decisionRevisionCount: row.decision_revisions,
+    identityRelease: LATEST_IDENTITY_RELEASE,
+    decimalPolicyRelease: DECIMAL_POLICY_RELEASE,
   };
+}
+
+/** The snapshot id the current inputs produce; the same digest the reader compares. */
+export async function currentSnapshotId(db: D1Database): Promise<string> {
+  return await canonicalDigest(projectionInputManifest(await currentProjectionInputs(db)));
 }
 
 function insertRow(db: D1Database, snapshotId: string, row: ProjectionRow) {
@@ -605,18 +616,11 @@ export async function runBalanceProjection(
   env: Env,
   options: BalanceProjectionOptions = {},
 ): Promise<BalanceProjectionResult> {
-  // Read as a plain string: the generated binding type pins the configured
-  // default, and the flag is an operator switch, not a compile-time constant.
-  const flag: string = env.BALANCE_PROJECTION_ENABLED;
-  if (flag !== "1") return skipped("flag_off");
+  if (!projectionFlagOn(env)) return skipped("flag_off");
   const db = env.DB;
   const budget = options.writeBudget ?? PROJECTION_WRITE_BUDGET;
   const now = (options.now ?? (() => new Date().toISOString()))();
-  const manifest = projectionInputManifest({
-    ...(await readInputs(db)),
-    identityRelease: LATEST_IDENTITY_RELEASE,
-    decimalPolicyRelease: DECIMAL_POLICY_RELEASE,
-  });
+  const manifest = projectionInputManifest(await currentProjectionInputs(db));
   const snapshotId = await canonicalDigest(manifest);
   const existing = await db
     .prepare("SELECT status,row_count FROM balance_read_snapshots WHERE snapshot_id=?1")
@@ -712,5 +716,41 @@ export async function runBalanceProjection(
     rowCount: build.rows.length,
     retired,
     reasonCode: null,
+  };
+}
+
+/**
+ * The `balance-projection` decision outbox processor (A09 hands the target to
+ * A07 through `dispatchDecisionOutbox`'s `processors` argument).
+ *
+ * An accepted decision changes which scopes overlap, and therefore which
+ * candidates are adopted, without publishing a single new parse. Because the
+ * adopted relations are a declared input of the snapshot id, the sealed
+ * snapshot is already reported as behind by every reader the moment the
+ * decision lands; this processor is what makes the rebuild start on the same
+ * tick instead of waiting for the next cron.
+ *
+ * Idempotent by construction: it recomputes the current snapshot id and does
+ * nothing at all when a sealed snapshot already carries it, so a duplicated
+ * or out-of-order delivery cannot rebuild twice or undo a finished build. It
+ * is bounded like every other invocation, so a decision can never turn one
+ * outbox row into an unbounded rebuild.
+ */
+export function balanceProjectionOutboxProcessor(
+  env: Env,
+  options: BalanceProjectionOptions = {},
+): (db: D1Database) => Promise<OutboxOutcome> {
+  return async (db) => {
+    if (!projectionFlagOn(env)) return "skipped_no_projection";
+    const wanted = await currentSnapshotId(db);
+    const sealed = await db
+      .prepare("SELECT status FROM balance_read_snapshots WHERE snapshot_id=?1")
+      .bind(wanted)
+      .first<{ status: string }>();
+    if (sealed?.status === "complete") return "balance_projection_current";
+    const result = await runBalanceProjection(env, options);
+    return result.status === "complete"
+      ? "balance_projection_rebuilt"
+      : "balance_projection_rebuilding";
   };
 }

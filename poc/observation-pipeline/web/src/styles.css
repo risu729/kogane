@@ -1554,6 +1554,18 @@ td summary {
   opacity: 0.5;
 }
 
+/* Confirmation screen (A09): actions sit together, and a value the server has
+   not decided yet is muted rather than invented. */
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+.muted {
+  color: var(--text-3);
+}
+
 @media (max-width: 1150px) {
   .app-shell {
     grid-template-columns: 202px minmax(0, 1fr);

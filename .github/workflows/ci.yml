@@ -45,6 +45,7 @@ jobs:
       fail-fast: false
       matrix:
         package:
+          - packages/application
           - packages/domain
           - packages/evidence-contract
           - packages/read-model

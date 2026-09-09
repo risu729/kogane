@@ -616,6 +616,17 @@ export interface ProjectionInputs {
    */
   visibleFetchRunCount: number;
   visibleFetchRunHighWater: number;
+  /**
+   * Adopted judgements. A decision that accepts a `same_account` or a
+   * containment changes which scopes overlap, and therefore which candidates
+   * are adopted, without publishing a single new parse. Counting the adopted
+   * relations and the decision revisions makes that a declared input, so a
+   * published decision produces a new snapshot id instead of leaving the old
+   * one silently wrong. Both tables are append-only, so a count is a sound
+   * change detector.
+   */
+  adoptedRelationCount: number;
+  decisionRevisionCount: number;
   identityRelease: string;
   decimalPolicyRelease: string;
 }

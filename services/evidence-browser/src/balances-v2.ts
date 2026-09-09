@@ -26,10 +26,13 @@ import { metricById, resolveMetric, UNKNOWN_METRIC } from "../../../packages/dom
 import {
   createBalanceProjectionReader,
   d1Executor,
+  DECIMAL_POLICY_RELEASE,
   DEFAULT_PROJECTION_PAGE_LIMIT,
   KNOWN_ASSETS_POLICY,
+  LATEST_IDENTITY_RELEASE,
   knownAssetMetricIds,
   PROJECTION_PAGE_LIMITS,
+  projectionInputManifest,
   temporalReferenceFor,
   type BalanceProjectionReader,
   type BalanceSnapshotRow,
@@ -267,21 +270,35 @@ function highWaterOf(snapshot: BalanceSnapshotRow): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
-/** The newest published parse run in the store, whatever any snapshot pinned. */
-async function publishedHighWater(env: Env): Promise<number> {
-  const row = await env.DB.prepare(
-    "SELECT coalesce(max(parse_run_id),0) AS high FROM published_parse_runs",
-  ).first<{ high: number }>();
-  return row?.high ?? 0;
-}
-
 /**
- * Whether the snapshot still describes the store's current inputs. A
- * snapshot that is behind is still a valid fixed context to page, but the
- * page says so instead of presenting itself as the current state.
+ * Whether the snapshot still describes the store's current inputs.
+ *
+ * The comparison is the snapshot id itself, which is the digest of every
+ * declared input: a new publication, a run leaving the visible set, and an
+ * accepted decision all change it. That last one matters here — a decision
+ * changes which scopes overlap without publishing anything, and a snapshot
+ * built before it is wrong in a way no parse-run high-water can show.
+ *
+ * A snapshot that is behind is still a valid fixed context to page; the page
+ * says so instead of presenting itself as the current state.
  */
-async function snapshotBehind(env: Env, snapshot: BalanceSnapshotRow): Promise<boolean> {
-  return highWaterOf(snapshot) < (await publishedHighWater(env));
+async function snapshotBehind(
+  reader: BalanceProjectionReader,
+  snapshot: BalanceSnapshotRow,
+): Promise<boolean> {
+  const row = await reader.projectionInputs();
+  const current = await canonicalDigest(
+    projectionInputManifest({
+      publishedHighWaterParseRunId: row.published_high_water,
+      visibleFetchRunCount: row.visible_runs,
+      visibleFetchRunHighWater: row.visible_high_water,
+      adoptedRelationCount: row.adopted_relations,
+      decisionRevisionCount: row.decision_revisions,
+      identityRelease: LATEST_IDENTITY_RELEASE,
+      decimalPolicyRelease: DECIMAL_POLICY_RELEASE,
+    }),
+  );
+  return current !== snapshot.snapshot_id;
 }
 
 async function dataCoverage(
@@ -421,7 +438,7 @@ export async function legacyLatestFromProjection(
   // A snapshot that is behind the published evidence cannot keep that
   // promise, so the adapter declines and the caller stays on today's query,
   // which still answers 413 for an oversized candidate set.
-  if (!snapshot || (await snapshotBehind(env, snapshot))) return null;
+  if (!snapshot || (await snapshotBehind(reader, snapshot))) return null;
   const rows = await reader.legacyLatestPage(snapshot.snapshot_id, scope, latestOffset, 501);
   const organized = await organizeRows(env.DB, "balance", rows.map(balanceRowOf), mode);
   const withDecimals = await decimalRows(env.DB, "balance", organized);
@@ -502,7 +519,7 @@ export async function latestBalancePage(
       reader,
       resolved.snapshot.snapshot_id,
       scope,
-      await snapshotBehind(env, resolved.snapshot),
+      await snapshotBehind(reader, resolved.snapshot),
     ),
     subtotals: await knownAssetSubtotals(reader, resolved.snapshot.snapshot_id, scope),
     interpretationContext: organizationContext(

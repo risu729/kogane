@@ -5,12 +5,14 @@
 import {
   balanceHistoryKeysetSql,
   CURRENT_SNAPSHOT_SQL,
+  PROJECTION_INPUTS_SQL,
   projectionCoverageSql,
   projectionLegacyPageSql,
   projectionPageSql,
   projectionSubtotalSql,
   SNAPSHOT_READABLE_SQL,
   SUBTOTAL_ROW_BOUND,
+  type ProjectionInputsRow,
   type ProjectionPageRow,
 } from "./balance-projection-sql";
 import type { BalanceHistoryRow } from "../../../poc/observation-pipeline/shared/api-contract";
@@ -40,6 +42,8 @@ export interface SubtotalRow {
 }
 
 export interface BalanceProjectionReader {
+  /** The declared inputs of a build as they stand right now. */
+  projectionInputs(): Promise<ProjectionInputsRow>;
   /** The newest sealed snapshot, or null when no build has completed yet. */
   currentSnapshot(): Promise<BalanceSnapshotRow | null>;
   /** A snapshot a cursor names; null means the fixed context expired. */
@@ -78,6 +82,17 @@ export interface BalanceProjectionReader {
 
 export function createBalanceProjectionReader(sql: SqlExecutor): BalanceProjectionReader {
   return {
+    async projectionInputs() {
+      return (
+        (await sql.first<ProjectionInputsRow>(PROJECTION_INPUTS_SQL, [])) ?? {
+          published_high_water: 0,
+          visible_runs: 0,
+          visible_high_water: 0,
+          adopted_relations: 0,
+          decision_revisions: 0,
+        }
+      );
+    },
     async currentSnapshot() {
       return await sql.first<BalanceSnapshotRow>(CURRENT_SNAPSHOT_SQL, []);
     },

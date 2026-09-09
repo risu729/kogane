@@ -34,6 +34,7 @@ import {
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
 import { eventsV2Available } from "./events-api";
 import { identityReadMode } from "./identity-read";
+import { commandsEnabled } from "./command-api";
 
 /** Validated request scope. Each route passes only the keys its reader query accepts. */
 interface RequestScope {
@@ -74,11 +75,13 @@ export function boundedCollections(value: Record<string, unknown>, offset?: numb
  */
 export async function advertisedCapabilities(env: Env): Promise<ApiCapabilities> {
   // What this server can actually serve, not what the contract defaults to:
-  // eventsV2 depends on the A10 projection being present, and balancesV2 on
-  // the A07 reader flag plus a sealed snapshot. One object answers /api/meta
-  // and decides which parameters and paths exist, so the two cannot drift.
+  // `commands` follows the deployment's flag (A09), `eventsV2` depends on the
+  // A10 projection being present, and `balancesV2` on the A07 reader flag plus
+  // a sealed snapshot. One object answers /api/meta and decides which
+  // parameters and paths exist, so the two cannot drift apart.
   const base: ApiCapabilities = {
     ...CENTRAL_STORE_CAPABILITIES,
+    commands: commandsEnabled(env),
     eventsV2: await eventsV2Available(env),
   };
   if (!projectionFlagOn(env)) return base;

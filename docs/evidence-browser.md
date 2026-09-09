@@ -419,6 +419,30 @@ process cannot. Opening the connection read-only in `src/serve.ts` would
 close the gap locally, and a read-only D1 binding would close it in
 the deployed shape. Neither is done; both are in the open questions.
 
+### The one explicit POST boundary (A09)
+
+The deployed Worker (`services/evidence-browser`) gained exactly one
+non-GET path set: `POST /api/command/v1/{plan,simulate,approve,commit,operation}`
+([change-lifecycle.md](change-lifecycle.md)). It is not a relaxation of the
+boundary above — every other request that is not `GET` or `HEAD` is still
+`405`, and `test/command-api.test.ts` asserts that for `/api/meta` and
+`/api/evidence/v1/meta` while the command flag is on.
+
+Three properties hold on that path set:
+
+- It is closed by default. `COMMANDS_ENABLED` must be exactly `"true"`;
+  anything else answers `403 commands_disabled`, and `/api/meta` advertises
+  `commands: false`.
+- The Access JWT is verified first and its `sub` is the actor. No request body
+  or client header names the principal. An agent (a subject listed in
+  `AGENT_GRANTS`) may plan and simulate; `approve` and `commit` are
+  `403 approval_required`.
+- **This Worker still writes nothing.** It forwards the verified actor to the
+  observation pipeline over the `PIPELINE` service binding, which stays the
+  single writer of the decision, approval, receipt and outbox tables. With no
+  such binding the path answers `503 command_executor_unavailable` rather than
+  falling back to its own D1 binding.
+
 ### Supersession is visible, not destructive
 
 Current views require the parse run to be the published run of its artifact

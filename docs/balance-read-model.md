@@ -43,6 +43,11 @@ The snapshot id is `sha256` of the canonical JSON of:
 - `visibleFetchRunCount` / `visibleFetchRunHighWater` — the visible financial
   fetch runs, so an exclusion annotation or an unsealed run is a new context
   even though nothing was published;
+- `adoptedRelationCount` / `decisionRevisionCount` — the adopted judgements. A
+  decision that accepts a `same_account` or a containment changes which scopes
+  overlap, and therefore which candidates are adopted, without publishing a
+  single new parse. Both tables are append-only, so counting them is a sound
+  change detector;
 - `identityRelease` — `current-mappings-v1` (the `latest` read mode);
 - `metricRegistryRelease`, `decimalPolicyRelease`, `projectionRelease`,
   `authorityPolicyRelease`, `scopeRelationRelease`.
@@ -224,6 +229,33 @@ adapter over the same projection — identical rows, order, offset window and
 adapter declines whenever the snapshot is behind the published evidence, so
 the v1 promise of current data and its 413 for an oversized candidate set are
 kept exactly.
+
+## Decisions and the outbox
+
+A07 registers the real `balance-projection` processor of A09's decision outbox
+(`balanceProjectionOutboxProcessor` in
+`services/observation-pipeline/src/balance-projection-job.ts`, handed to
+`dispatchDecisionOutbox` through its `processors` argument). Two things make a
+published decision reach the read model:
+
+1. The adopted relations are a **declared input**, so the moment a decision
+   lands the sealed snapshot is no longer the snapshot the current context
+   produces. Every v2 page therefore reports `stale: true` with
+   `snapshot:behind_published_evidence`, and the v1 compatibility adapter
+   declines and falls back to the live query, which already reflects the
+   decision. Nothing serves a projection built before the decision as if it
+   were current.
+2. The outbox processor makes the rebuild start on the same tick instead of
+   waiting for the next cron. It recomputes the current snapshot id and does
+   nothing when a sealed snapshot already carries it, so a duplicated or
+   out-of-order delivery cannot rebuild twice or undo a finished build, and it
+   is bounded like every other invocation. Its outcome is recorded as
+   `balance_projection_current`, `balance_projection_rebuilt` or
+   `balance_projection_rebuilding` — never a claim that a rebuild ran when it
+   did not.
+
+The reader and the builder share one definition of "behind": both compute the
+snapshot id from `PROJECTION_INPUTS_SQL`, so they cannot disagree.
 
 ## Rebuild and invalidation
 

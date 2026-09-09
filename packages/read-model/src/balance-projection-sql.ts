@@ -98,6 +98,27 @@ export interface ProjectionPageRow {
   latest_in_group: number;
 }
 
+/**
+ * The declared inputs of a build, in one row. Both the job that builds a
+ * snapshot and the reader that decides whether the sealed one is still
+ * current read this, so "the projection is behind" is one definition rather
+ * than two that can disagree.
+ */
+export const PROJECTION_INPUTS_SQL = `SELECT
+    (SELECT coalesce(max(parse_run_id),0) FROM published_parse_runs) AS published_high_water,
+    (SELECT count(*) FROM observation_fetch_runs) AS visible_runs,
+    (SELECT coalesce(max(id),0) FROM observation_fetch_runs) AS visible_high_water,
+    (SELECT count(*) FROM entity_relations WHERE status='accepted') AS adopted_relations,
+    (SELECT count(*) FROM decision_revisions) AS decision_revisions`;
+
+export interface ProjectionInputsRow {
+  published_high_water: number;
+  visible_runs: number;
+  visible_high_water: number;
+  adopted_relations: number;
+  decision_revisions: number;
+}
+
 /** The newest sealed snapshot. A building or retired one is never a read target. */
 export const CURRENT_SNAPSHOT_SQL = `SELECT snapshot_id, created_at, row_count, input_manifest_json,
     projection_release

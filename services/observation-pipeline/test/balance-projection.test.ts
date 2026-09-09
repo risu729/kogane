@@ -4,7 +4,12 @@
 // provider body appears here.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
-import { runBalanceProjection } from "../src/balance-projection-job.ts";
+import {
+  balanceProjectionOutboxProcessor,
+  currentSnapshotId,
+  runBalanceProjection,
+} from "../src/balance-projection-job.ts";
+import { dispatchDecisionOutbox } from "../src/decision-outbox.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 
 let mf: Miniflare;
@@ -191,4 +196,107 @@ test("a build is bounded per invocation and resumes from its cursor", async () =
       result.snapshotId!,
     ),
   ).toBe(result.rowCount);
+}, 60000);
+
+/**
+ * An accepted decision changes which scopes overlap, and therefore which
+ * candidates are adopted, without publishing a single new parse. The outbox
+ * processor A09 hands to A07 is what turns "the decision was published" into
+ * "the read model was rebuilt", and it must be safe to deliver twice.
+ */
+test("a published decision rebuilds the projection through the outbox, once", async () => {
+  const before = await runBalanceProjection(on());
+  expect(before.status).toBe("unchanged");
+  const beforeId = await currentSnapshotId(env.DB);
+
+  // One accepted `same_account` relation, recorded the way a command does.
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,
+        actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+       VALUES('dr_outbox_1','relation','rel_outbox_1',1,'accept','manual','operator:1',NULL,
+        'Synthetic: the two routes report one account.','[]',NULL,NULL,'2026-09-12T00:00:00Z')`,
+    ),
+    env.DB.prepare(
+      `INSERT INTO entity_relations(id,kind,from_ref,to_ref,valid_from,valid_to,status,
+        decision_revision_id,evidence_refs_json,created_at)
+       VALUES('rel_outbox_1','same_account','source_account:synthetic:a','source_account:synthetic:b',
+        NULL,NULL,'accepted','dr_outbox_1','[]','2026-09-12T00:00:00Z')`,
+    ),
+  ]);
+
+  // The adopted relations are a declared input, so the context has moved.
+  const afterId = await currentSnapshotId(env.DB);
+  expect(afterId).not.toBe(beforeId);
+
+  const processor = balanceProjectionOutboxProcessor(on());
+  const first = await processor(env.DB);
+  expect(first).toBe("balance_projection_rebuilt");
+  expect(
+    await count(
+      "SELECT count(*) AS n FROM balance_read_snapshots WHERE snapshot_id=?1 AND status='complete'",
+      afterId,
+    ),
+  ).toBe(1);
+
+  // Delivered again: idempotent, and it does not rebuild a second time.
+  const snapshots = await count("SELECT count(*) AS n FROM balance_read_snapshots");
+  expect(await processor(env.DB)).toBe("balance_projection_current");
+  expect(await count("SELECT count(*) AS n FROM balance_read_snapshots")).toBe(snapshots);
+
+  // With the reader flag off the processor writes nothing and says so.
+  expect(await balanceProjectionOutboxProcessor(off())(env.DB)).toBe("skipped_no_projection");
+}, 60000);
+
+test("the dispatcher routes the balance-projection target to that processor", async () => {
+  // The FK chain a committed operation leaves behind, written directly: the
+  // command path itself is covered by change-lifecycle.test.ts, and what is
+  // under test here is only which processor the target reaches.
+  const planId = "b".repeat(64);
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,
+        actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+       VALUES('dr_outbox_2','relation','rel_outbox_2',1,'accept','manual','operator:1',NULL,
+        'Synthetic: a second accepted correspondence.','[]',NULL,NULL,'2026-09-12T01:00:00Z')`,
+    ),
+    env.DB.prepare(
+      `INSERT INTO entity_relations(id,kind,from_ref,to_ref,valid_from,valid_to,status,
+        decision_revision_id,evidence_refs_json,created_at)
+       VALUES('rel_outbox_2','same_account','source_account:synthetic:c','source_account:synthetic:d',
+        NULL,NULL,'accepted','dr_outbox_2','[]','2026-09-12T01:00:00Z')`,
+    ),
+    env.DB.prepare(
+      `INSERT INTO change_plans(plan_id,kind,payload_json,base_context_id,expected_revisions_json,
+        simulation_json,created_by,created_at,expires_at,status)
+       VALUES(?1,'relation.accept','{}','identity-current-v1','{}','{}','operator:1',
+        '2026-09-12T01:00:00Z','2026-09-12T02:00:00Z','committed')`,
+    ).bind(planId),
+    env.DB.prepare(
+      `INSERT INTO operation_receipts(operation_id,principal,operation_kind,payload_digest,plan_id,
+        status,result_json,created_at,published_at)
+       VALUES('op_outbox_2','operator:1','relation.accept',?2,?1,'accepted','{}',
+        '2026-09-12T01:00:00Z',NULL)`,
+    ).bind(planId, "c".repeat(64)),
+    env.DB.prepare(
+      `INSERT INTO decision_outbox(decision_revision_id,principal,operation_id,target,
+        enqueued_at,available_at_ms)
+       VALUES('dr_outbox_2','operator:1','op_outbox_2','balance-projection','2026-09-12T01:00:00Z',0)`,
+    ),
+  ]);
+  const result = await dispatchDecisionOutbox(env.DB, {
+    processors: { "balance-projection": balanceProjectionOutboxProcessor(on()) },
+  });
+  expect(result.claimed).toBe(1);
+  expect(result.processed).toBe(1);
+  expect(result.failed).toBe(0);
+  expect(Object.keys(result.outcomes)).toEqual(["balance_projection_rebuilt"]);
+  // The operation's only row is processed, so the receipt is published: the
+  // judgement was accepted long before every screen was current.
+  expect(result.published).toBe(1);
+  // A second pass finds nothing to claim: the row is processed, not repeated.
+  const again = await dispatchDecisionOutbox(env.DB, {
+    processors: { "balance-projection": balanceProjectionOutboxProcessor(on()) },
+  });
+  expect(again.claimed).toBe(0);
 }, 60000);

@@ -34,6 +34,8 @@ export interface ClientFeatures {
    * a fixed snapshot, with adoption states and reason codes.
    */
   readonly balanceReadModel: boolean;
+  /** The change lifecycle is served, so confirmation screens may act. */
+  readonly commands: boolean;
 }
 
 /** Every feature is off until capabilities are known. */
@@ -43,6 +45,7 @@ export const NO_FEATURES: ClientFeatures = {
   identities: false,
   evidenceHistory: false,
   balanceReadModel: false,
+  commands: false,
 };
 
 export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
@@ -52,5 +55,6 @@ export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
     identities: capabilities.identityReadModes.includes("latest"),
     evidenceHistory: capabilities.evidenceHistory,
     balanceReadModel: capabilities.balancesV2 && capabilities.balancesV2Pagination === "keyset-v2",
+    commands: capabilities.commands,
   };
 }
