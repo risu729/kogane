@@ -17,7 +17,7 @@
 // Formatting belongs to money.ts, which never uses floating point.
 
 import type { Store } from "./store.ts";
-import { CURRENT_SNAPSHOT, SNAPSHOT_CTES } from "./snapshot-query.ts";
+import { CURRENT_SNAPSHOT, SNAPSHOT_CTES, unitScopedEligibilitySql } from "./snapshot-query.ts";
 
 import type {
   ObservationKind,
@@ -74,10 +74,16 @@ const COUNTED_TABLES = [
   "valuation_observations",
 ] as const;
 
-/** Only the published parse run of its (artifact, parser) is current. */
+/**
+ * Only the published parse run of its (artifact, parser) is current, and only
+ * over evidence its dataset's eligibility scope admits (design review D13):
+ * `run` for every dataset until an operator flips a policy row, `unit` for a
+ * dataset whose units are proven independent. Aliases: p = parse run,
+ * fa = artifact, f = fetch run.
+ */
 const CURRENT =
   "EXISTS (SELECT 1 FROM published_parse_runs published WHERE published.parse_run_id = p.id) " +
-  "AND f.status = 'success' AND f.failure_count = 0";
+  `AND ${unitScopedEligibilitySql("f", "fa")}`;
 
 const SEPARATOR = " · ";
 

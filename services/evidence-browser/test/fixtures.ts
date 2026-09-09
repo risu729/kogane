@@ -35,7 +35,9 @@ export async function seedRegistry() {
  * Publish a successful parse run the way the pipeline writer does
  * (docs/publication-gate.md): move the (artifact, parser) pointer and record
  * the event. A parse run seeded directly with status 'ok' is an unadopted
- * result until this runs, and no normal reader shows it.
+ * result until this runs, and no normal reader shows it. Like the writer it
+ * does nothing for a run that is already the pointer, so it can never append
+ * the self-referencing event migration 0036 rejects.
  */
 export async function publishParse(parseRunId: number, publishedAt = "2026-09-07T00:00:00Z") {
   await env.DB.batch([
@@ -43,11 +45,13 @@ export async function publishParse(parseRunId: number, publishedAt = "2026-09-07
       `INSERT INTO publication_events(fetch_artifact_id,parser_name,previous_parse_run_id,new_parse_run_id,kind,actor,reason,occurred_at)
        SELECT p.fetch_artifact_id,p.parser_name,
          (SELECT x.parse_run_id FROM published_parse_runs x WHERE x.fetch_artifact_id=p.fetch_artifact_id AND x.parser_name=p.parser_name),
-         p.id,'normal','pipeline','parse_ok',?2 FROM parse_runs p WHERE p.id=?1`,
+         p.id,'normal','pipeline','parse_ok',?2 FROM parse_runs p WHERE p.id=?1
+         AND NOT EXISTS(SELECT 1 FROM published_parse_runs x WHERE x.parse_run_id=p.id)`,
     ).bind(parseRunId, publishedAt),
     env.DB.prepare(
       `INSERT INTO published_parse_runs(fetch_artifact_id,parser_name,parse_run_id,parser_version,published_at,publication_kind)
        SELECT p.fetch_artifact_id,p.parser_name,p.id,p.parser_version,?2,'normal' FROM parse_runs p WHERE p.id=?1
+         AND NOT EXISTS(SELECT 1 FROM published_parse_runs x WHERE x.parse_run_id=p.id)
        ON CONFLICT(fetch_artifact_id,parser_name) DO UPDATE SET parse_run_id=excluded.parse_run_id,
          parser_version=excluded.parser_version,published_at=excluded.published_at,publication_kind='normal',release_id=NULL`,
     ).bind(parseRunId, publishedAt),
@@ -89,6 +93,12 @@ export async function seedRun(
     body?: string;
     dataset?: string;
     fetchUnitKey?: string;
+    /**
+     * Several independent fetch units in one run, each with its own terminal
+     * report and its own artifacts (design review D13). `count` artifacts are
+     * created per unit; `options.count` still creates unattributed artifacts.
+     */
+    units?: { key: string; outcome: "success" | "failed"; count: number }[];
   } = {},
 ) {
   const { runId } = await post("/v1/runs", {
@@ -105,7 +115,24 @@ export async function seedRun(
         terminalReportRequired: false,
       })
     : null;
-  for (let i = 0; i < (options.count ?? 0); i++) {
+  const extraUnits: { unitId: number; spec: { key: string; outcome: string; count: number } }[] =
+    [];
+  for (const spec of options.units ?? []) {
+    const created = await post(`/v1/runs/${runId}/units`, {
+      unitKind: "connection",
+      unitKey: spec.key,
+      terminalReportRequired: true,
+    });
+    extraUnits.push({ unitId: created.unitId, spec });
+  }
+  const plan: { index: number; unitId: number | null }[] = [];
+  for (let i = 0; i < (options.count ?? 0); i++)
+    plan.push({ index: i, unitId: unit?.unitId ?? null });
+  for (const entry of extraUnits)
+    for (let i = 0; i < entry.spec.count; i++)
+      plan.push({ index: plan.length, unitId: entry.unitId });
+  for (const step of plan) {
+    const i = step.index;
     const bytes = new TextEncoder().encode(
       options.body ?? JSON.stringify({ synthetic: true, index: i }),
     );
@@ -130,7 +157,7 @@ export async function seedRun(
     const result = await post(`/v1/runs/${runId}/artifacts`, {
       artifactKey,
       ...(options.dataset ? { dataset: options.dataset } : {}),
-      ...(unit ? { fetchUnitId: unit.unitId } : {}),
+      ...(step.unitId === null ? {} : { fetchUnitId: step.unitId }),
       artifactRole: "collector_summary",
       payloadFidelity: "generated",
       containerKind: "single",
@@ -142,6 +169,17 @@ export async function seedRun(
     });
     artifacts.push({ artifactKey, sha256, descriptorSha256: result.descriptorSha256 });
   }
+  for (const entry of extraUnits)
+    await post(`/v1/units/${entry.unitId}/reports`, {
+      reportKey: "terminal",
+      reportKind: "terminal",
+      normalizedOutcome: entry.spec.outcome,
+      completedAtMs: 1_788_324_000_000,
+      completedAtBasis: "manifest",
+      declaredArtifactCount: entry.spec.count,
+      artifactCountScope: "direct",
+      ...(entry.spec.outcome === "success" ? {} : { safeFailureCode: "collector-failed" }),
+    });
   await post(`/v1/runs/${runId}/reports`, {
     reportKey: "terminal",
     reportKind: "terminal",

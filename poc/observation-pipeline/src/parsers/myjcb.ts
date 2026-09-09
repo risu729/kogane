@@ -1,5 +1,5 @@
 import type { ArtifactMeta, BalanceObservation, Parser, ParseResult } from "../types.ts";
-import { decodeUtf8 } from "./util.ts";
+import { decodeUtf8, unitScopeAdmitted } from "./util.ts";
 import {
   exactKeys,
   normalizedDate,
@@ -304,7 +304,10 @@ export const myJcbEvidenceOnly: Parser = {
 };
 
 function requireSuccessfulRun(artifact: ArtifactMeta): void {
-  if (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) {
+  if (
+    (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) &&
+    !unitScopeAdmitted(artifact)
+  ) {
     throw new Error("myjcb observations require a successful, failure-free fetch run");
   }
 }

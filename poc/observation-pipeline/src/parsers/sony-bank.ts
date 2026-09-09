@@ -1,6 +1,6 @@
 import type { ArtifactMeta, Observation, Parser } from "../types.ts";
 import { containerClaim } from "./coverage.ts";
-import { amountToMinorUnits, decodeUtf8, parseCsv } from "./util.ts";
+import { amountToMinorUnits, decodeUtf8, parseCsv, unitScopeAdmitted } from "./util.ts";
 import {
   exactDecimal,
   exactKeys,
@@ -678,7 +678,10 @@ function requireJson(artifact: ArtifactMeta): void {
   if (artifact.mime !== "application/json") throw new Error("Sony JSON media type drift");
 }
 function requireSuccessfulRun(artifact: ArtifactMeta): void {
-  if (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) {
+  if (
+    (artifact.runStatus !== "success" || artifact.runFailureCount !== 0) &&
+    !unitScopeAdmitted(artifact)
+  ) {
     throw new Error("Sony parser requires a successful failure-free fetch run");
   }
 }
