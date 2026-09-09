@@ -189,7 +189,27 @@ function measureOf(metricId: string, definitionRelease: string): MeasureDescript
 }
 
 function evidenceOf(row: ProjectionPageRow): BalanceEvidenceMember[] {
-  const parsed: unknown = JSON.parse(row.member_evidence_refs_json);
+  const members = storedEvidence(row);
+  // A measurement always has at least its representative; an unreadable
+  // stored list falls back to it rather than to an empty evidence array.
+  return members.length > 0
+    ? members
+    : [
+        {
+          ref: row.representative_observation_ref,
+          observationId: row.observation_id,
+          metric: row.metric,
+        },
+      ];
+}
+
+function storedEvidence(row: ProjectionPageRow): BalanceEvidenceMember[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.member_evidence_refs_json);
+  } catch {
+    return [];
+  }
   if (!Array.isArray(parsed)) return [];
   return parsed.filter(
     (item): item is BalanceEvidenceMember =>
@@ -525,8 +545,10 @@ export async function balanceHistoryPage(
     const evidence: BalanceEvidenceMember[] = [
       { ref: `balance:${String(row.id)}`, observationId: row.id, metric: row.metric },
     ];
+    // `sort_key` is the query's ordering column, not part of the contract.
+    const { sort_key: _sortKey, ...evidenceRow } = withDecimals[index]!;
     const historyRow: BalanceHistoryRow = {
-      ...(withDecimals[index] as BalanceHistoryRow),
+      ...(evidenceRow as BalanceHistoryRow),
       interpretation: {
         policyVersion: BALANCE_INTERPRETATION_POLICY_VERSION,
         semantic: classifyBalance({

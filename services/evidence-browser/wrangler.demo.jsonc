@@ -7,8 +7,6 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
-    // Reader side of the balance projection; off keeps /api/balances on
-    // today's query path (docs/balance-read-model.md).
     "BALANCE_PROJECTION_ENABLED": "0",
     "ACCESS_ISSUER": "https://risu729.cloudflareaccess.com",
     "ACCESS_AUDIENCE": "036dc6fd21306c63c9340ad9ea642f2f7fe550bce61c48a08c7719b02d94cbf9"
