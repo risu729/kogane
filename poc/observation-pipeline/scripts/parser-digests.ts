@@ -19,13 +19,15 @@
 // `version`, and test/parser-digests.test.ts fails when the checked-in file
 // no longer matches the sources.
 
-import { readFileSync, existsSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { canonicalJson, sha256Hex } from "../../../packages/domain/src/context.ts";
 import type { Parser } from "../src/types.ts";
 
 /** Repository root, from poc/observation-pipeline/scripts/. */
 export const REPO_ROOT = new URL("../../../", import.meta.url);
 const PARSERS_DIR = new URL("poc/observation-pipeline/src/parsers/", REPO_ROOT);
+/** The file this script writes, which the registry re-exports. */
+const GENERATED_DIGESTS = new URL("digests.ts", PARSERS_DIR);
 
 export interface ParserRelease {
   version: string;
@@ -45,12 +47,43 @@ function repoRelative(url: URL): string {
   return url.href.slice(REPO_ROOT.href.length);
 }
 
+/** Errors that mean "this specifier does not name a source file here", as
+ * opposed to a real I/O failure that must not be swallowed. */
+const NOT_A_SOURCE_FILE = new Set(["ENOENT", "EISDIR", "ENOTDIR", "ENAMETOOLONG"]);
+function notASourceFile(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { code: unknown }).code === "string" &&
+    NOT_A_SOURCE_FILE.has((error as { code: string }).code)
+  );
+}
+
+/**
+ * The file's text, or undefined when the path names no source file. Reading
+ * and handling the failure is deliberate: testing for existence first and
+ * reading afterwards is a check-then-use race, and the answer would in any
+ * case be stale by the time the read ran.
+ */
+function readSource(file: URL): string | undefined {
+  try {
+    return readFileSync(file, "utf8");
+  } catch (error) {
+    if (notASourceFile(error)) return undefined;
+    throw error;
+  }
+}
+
 /** Local modules `file` imports, transitively, inside this repository. */
 function moduleClosure(entry: URL, seen = new Set<string>()): Set<string> {
   const path = repoRelative(entry);
-  if (seen.has(path) || !existsSync(entry)) return seen;
+  if (seen.has(path)) return seen;
+  const text = readSource(entry);
+  // A relative specifier that resolves to nothing here (an extension-less
+  // import, a directory) is not part of the digest range.
+  if (text === undefined) return seen;
   seen.add(path);
-  const text = readFileSync(entry, "utf8");
   for (const match of text.matchAll(RELATIVE_IMPORT)) {
     const target = new URL(match[1]!, entry);
     if (target.href.startsWith(REPO_ROOT.href)) moduleClosure(target, seen);
@@ -84,7 +117,10 @@ export async function parserModules(): Promise<Map<string, { module: URL; parser
   const modules = new Map<string, { module: URL; parser: Parser }>();
   for (const match of readFileSync(registry, "utf8").matchAll(RELATIVE_IMPORT)) {
     const target = new URL(match[1]!, registry);
-    if (!existsSync(target)) continue;
+    // The generated file is skipped by name, not by asking whether it exists:
+    // it may legitimately be absent while this generator rebuilds it, and any
+    // *other* unresolvable specifier is a broken registry that must throw.
+    if (target.href === GENERATED_DIGESTS.href) continue;
     const exports: Record<string, unknown> = await import(target.href);
     for (const value of Object.values(exports))
       if (isParser(value) && !modules.has(value.name))
@@ -170,14 +206,29 @@ export const PARSER_CODE_DIGESTS: Record<string, string> = Object.fromEntries(
 `;
 }
 
+/**
+ * The record this script wrote last time, or undefined when there is none yet.
+ * The load is attempted directly; only a failure that a subsequent read
+ * confirms is "the file is not there" counts as "no record", so a file that
+ * exists but does not parse still fails loudly instead of being overwritten.
+ */
+async function recordedDigests(target: URL): Promise<ParserDigests | undefined> {
+  try {
+    const loaded: { PARSER_DIGESTS?: ParserDigests } = await import(target.href);
+    return loaded.PARSER_DIGESTS;
+  } catch (error) {
+    if (readSource(target) === undefined) return undefined;
+    throw error;
+  }
+}
+
 if (import.meta.main) {
-  const target = new URL("poc/observation-pipeline/src/parsers/digests.ts", REPO_ROOT);
   const computed = await computeParserDigests(
     [...(await parserModules()).values()].map((entry) => entry.parser),
   );
-  if (existsSync(target)) {
-    const { PARSER_DIGESTS } = await import(target.href);
-    const violations = digestViolations(PARSER_DIGESTS.releases, computed.releases).filter(
+  const recorded = await recordedDigests(GENERATED_DIGESTS);
+  if (recorded) {
+    const violations = digestViolations(recorded.releases, computed.releases).filter(
       (violation) => violation.code === "code_digest_changed_without_version",
     );
     if (violations.length) {
@@ -190,7 +241,7 @@ if (import.meta.main) {
     }
   }
   if (process.exitCode !== 1) {
-    writeFileSync(target, renderDigests(computed));
+    writeFileSync(GENERATED_DIGESTS, renderDigests(computed));
     console.log(`wrote ${Object.keys(computed.releases).length} parser digests`);
   }
 }
