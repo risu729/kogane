@@ -12,6 +12,7 @@ import {
 import { SNAPSHOT_RELATIONS, unitParseable } from "../../../packages/read-model/src/concepts";
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
+import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import {
   publicationConsistency,
   publicationStatements,
@@ -1254,10 +1255,13 @@ export async function snapshotPolicyComparison(env: Env): Promise<Response> {
 export interface ScheduledStages {
   parse: (env: Env) => Promise<object>;
   identity: (env: Env) => Promise<object>;
+  /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
+  reconcile?: (env: Env) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
   identity: (env) => identitySweep(env.DB, resolveIdentity),
+  reconcile: (env) => reconciliationSweep(env.DB),
 };
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
@@ -1268,10 +1272,18 @@ export async function runScheduled(
   stages: ScheduledStages = defaultStages,
   log: (line: string) => void = (line) => console.log(line),
 ): Promise<void> {
-  for (const [event, stage] of [
+  const lanes: [string, ((env: Env) => Promise<object>) | undefined][] = [
     ["observation_sweep", stages.parse],
     ["identity_sweep", stages.identity],
-  ] as const) {
+    // Off unless RECONCILIATION_ENABLED is set, so a normal deploy logs and
+    // writes nothing new (docs/economic-events.md).
+    [
+      "reconciliation_sweep",
+      reconciliationEnabled(env.RECONCILIATION_ENABLED) ? stages.reconcile : undefined,
+    ],
+  ];
+  for (const [event, stage] of lanes) {
+    if (!stage) continue;
     try {
       log(JSON.stringify({ event, ...(await stage(env)) }));
     } catch (error) {
