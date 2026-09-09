@@ -9,9 +9,6 @@
   "preview_urls": false,
   "observability": { "enabled": true, "head_sampling_rate": 1 },
   "triggers": { "crons": ["*/5 * * * *"] },
-  // Both scheduled extensions are off by default. REPORTS_ENABLED lets the
-  // A12 report job write calculation runs and report artifacts
-  // (docs/calculation-and-reports.md).
   "vars": { "RECONCILIATION_ENABLED": "0", "REPORTS_ENABLED": "false" },
   "limits": { "cpu_ms": 300000 },
   "d1_databases": [
