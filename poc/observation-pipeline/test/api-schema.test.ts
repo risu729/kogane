@@ -8,10 +8,12 @@ import { validApiCapabilities, validApiResponse } from "../shared/api-validation
 import {
   allowedQueryParameters,
   CENTRAL_STORE_CAPABILITIES,
+  LIST_PATH_CAPABILITY,
   LIST_REQUEST_SCHEMA,
   listRequestSearch,
   LOCAL_STORE_CAPABILITIES,
   validIdentityReadMode,
+  withBalancesV2,
   type ApiCapabilities,
 } from "../shared/api-schema.ts";
 import { capabilityState, clientFeatures, NO_FEATURES } from "../web/src/capabilities.ts";
@@ -46,6 +48,30 @@ describe("shared API schema", () => {
       },
       "/api/artifacts": { source: "collectionFilters", cursor: "paginationVersion:offset-v1" },
       "/api/filter-options": { kind: "collectionFilters", view: "measureViews" },
+      "/api/v2/balances/latest": {
+        source: "collectionFilters",
+        account: "collectionFilters",
+        instrument: "collectionFilters",
+        metric: "collectionFilters",
+        view: "measureViews",
+        identityRead: "identityReadModes",
+        cursor: "balancesV2",
+        limit: "balancesV2",
+      },
+      "/api/v2/balances/history": {
+        source: "collectionFilters",
+        account: "collectionFilters",
+        instrument: "collectionFilters",
+        metric: "collectionFilters",
+        view: "measureViews",
+        identityRead: "identityReadModes",
+        cursor: "balancesV2",
+        limit: "balancesV2",
+      },
+    });
+    expect(LIST_PATH_CAPABILITY).toEqual({
+      "/api/v2/balances/latest": "balancesV2",
+      "/api/v2/balances/history": "balancesV2",
     });
     expect(LOCAL_STORE_CAPABILITIES).toEqual({
       contractVersion: "observation-api-v1",
@@ -55,6 +81,8 @@ describe("shared API schema", () => {
       measureViews: [],
       identityReadModes: [],
       paginationVersion: "none",
+      balancesV2: false,
+      balancesV2Pagination: "none",
       collectionFilters: false,
       organizedDisplay: false,
       financialProducts: false,
@@ -68,6 +96,8 @@ describe("shared API schema", () => {
       measureViews: ["balances", "summaries"],
       identityReadModes: ["latest", "as-recorded"],
       paginationVersion: "offset-v1",
+      balancesV2: false,
+      balancesV2Pagination: "none",
       collectionFilters: true,
       organizedDisplay: true,
       financialProducts: true,
@@ -146,6 +176,18 @@ describe("shared API schema", () => {
     expect(
       validApiResponse("/api/meta", { ...metadata, capabilities: CENTRAL_STORE_CAPABILITIES }),
     ).toBe(true);
+    // The v2 balance routes are advertised only through the enabled variant.
+    expect(withBalancesV2(CENTRAL_STORE_CAPABILITIES, true)).toMatchObject({
+      balancesV2: true,
+      balancesV2Pagination: "keyset-v2",
+      paginationVersion: "offset-v1",
+    });
+    expect(
+      validApiResponse("/api/meta", {
+        ...metadata,
+        capabilities: withBalancesV2(CENTRAL_STORE_CAPABILITIES, true),
+      }),
+    ).toBe(true);
     const legacy = { readOnly: true, rawEvidence: true, liveCollectors: false };
     expect(validApiResponse("/api/meta", { ...metadata, capabilities: legacy })).toBe(false);
     for (const broken of [
@@ -154,7 +196,9 @@ describe("shared API schema", () => {
       { measureViews: ["totals"] },
       { identityReadModes: ["snapshot"] },
       { identityReadModes: ["latest", "latest"] },
-      { paginationVersion: "keyset-v2" },
+      { paginationVersion: "keyset-v3" },
+      { balancesV2: "yes" },
+      { balancesV2Pagination: "keyset-v3" },
       { collectionFilters: "yes" },
       { readOnly: false },
       { liveCollectors: true },
@@ -199,7 +243,12 @@ describe("client behaviour depends on capabilities, never on the connection name
       serverPaging: true,
       identities: true,
       evidenceHistory: true,
+      // Off until the store advertises the v2 balance routes.
+      balanceReadModel: false,
     });
+    expect(clientFeatures(withBalancesV2(CENTRAL_STORE_CAPABILITIES, true)).balanceReadModel).toBe(
+      true,
+    );
     expect(local).toEqual(NO_FEATURES);
     expect(
       clientFeatures({ ...CENTRAL_STORE_CAPABILITIES, identityReadModes: [] }).identities,
@@ -212,6 +261,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       serverPaging: false,
       identities: false,
       evidenceHistory: false,
+      balanceReadModel: false,
     });
   });
 });

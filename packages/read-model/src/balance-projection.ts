@@ -605,26 +605,32 @@ export function knownAssetMetricIds(): string[] {
 }
 
 /** The releases a snapshot id digests; a change in any of them is a new snapshot. */
-export interface ProjectionInputManifest {
+export interface ProjectionInputs {
+  /** Newest published parse run; a later publication is a new context. */
   publishedHighWaterParseRunId: number;
+  /**
+   * Visible financial fetch runs. An exclusion annotation or an unsealed run
+   * changes what a reader may see without publishing anything, so the count
+   * and the high-water id are declared inputs too; otherwise a snapshot could
+   * keep serving evidence that has since left the visible set.
+   */
+  visibleFetchRunCount: number;
+  visibleFetchRunHighWater: number;
   identityRelease: string;
-  metricRegistryRelease: string;
   decimalPolicyRelease: string;
+}
+
+export interface ProjectionInputManifest extends ProjectionInputs {
+  metricRegistryRelease: string;
   projectionRelease: string;
   authorityPolicyRelease: string;
   scopeRelationRelease: string;
 }
 
-export function projectionInputManifest(
-  publishedHighWaterParseRunId: number,
-  identityRelease: string,
-  decimalPolicyRelease: string,
-): ProjectionInputManifest {
+export function projectionInputManifest(inputs: ProjectionInputs): ProjectionInputManifest {
   return {
-    publishedHighWaterParseRunId,
-    identityRelease,
+    ...inputs,
     metricRegistryRelease: METRIC_REGISTRY_RELEASE,
-    decimalPolicyRelease,
     projectionRelease: BALANCE_PROJECTION_RELEASE,
     authorityPolicyRelease: AUTHORITY_POLICY_RELEASE,
     scopeRelationRelease: SCOPE_RELATION_RELEASE,

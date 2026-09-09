@@ -15,8 +15,21 @@ import type { ApiMetadata } from "../../../poc/observation-pipeline/shared/api-c
 import {
   allowedQueryParameters,
   CENTRAL_STORE_CAPABILITIES,
+  LIST_PATH_CAPABILITY,
+  capabilityGrants,
+  isListPath,
   validMeasureView,
+  withBalancesV2,
 } from "../../../poc/observation-pipeline/shared/api-schema";
+import {
+  balanceHistoryPage,
+  balanceProjectionReader,
+  latestBalancePage,
+  legacyLatestFromProjection,
+  projectionFlagOn,
+  V2_HISTORY_PATH,
+  V2_LATEST_PATH,
+} from "./balances-v2";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
 import { identityReadMode } from "./identity-read";
 
@@ -52,6 +65,17 @@ export function boundedCollections(value: Record<string, unknown>, offset?: numb
   });
 }
 
+/**
+ * What this Worker advertises. The v2 balance routes are advertised only when
+ * the reader flag is on and a sealed snapshot exists, so a capability is
+ * never a promise the store cannot keep.
+ */
+export async function advertisedCapabilities(env: Env) {
+  if (!projectionFlagOn(env)) return CENTRAL_STORE_CAPABILITIES;
+  const snapshot = await balanceProjectionReader(env).currentSnapshot();
+  return withBalancesV2(CENTRAL_STORE_CAPABILITIES, snapshot !== null);
+}
+
 // Called only after the existing Access JWT gate and read-only method check.
 export async function observationApi(
   request: Request,
@@ -60,14 +84,24 @@ export async function observationApi(
 ): Promise<Response | null> {
   const path = url.pathname;
   if (
-    !/^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw|filter-options)(\/|$)/.test(
+    !/^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw|filter-options|v2\/balances\/(latest|history))(\/|$)/.test(
       path,
     )
   )
     return null;
+  // The v2 balance routes exist only once the projection has a sealed
+  // snapshot and the reader flag is on, so what /api/meta advertises and what
+  // the routes accept are the same object, computed the same way per request.
+  const capabilities = await advertisedCapabilities(env);
+  if (
+    isListPath(path) &&
+    LIST_PATH_CAPABILITY[path] &&
+    !capabilityGrants(LIST_PATH_CAPABILITY[path], capabilities)
+  )
+    throw new HttpError(404, "not_found");
   // Accepted parameters come from the shared schema and the capabilities this
   // Worker advertises in /api/meta, so the two cannot drift apart.
-  const allowed = allowedQueryParameters(path, CENTRAL_STORE_CAPABILITIES);
+  const allowed = allowedQueryParameters(path, capabilities);
   for (const key of url.searchParams.keys()) {
     const value = url.searchParams.get(key)!;
     if (
@@ -81,7 +115,7 @@ export async function observationApi(
   }
   const offsetText = url.searchParams.get("offset") ?? "0";
   const measureView = url.searchParams.get("view");
-  if (measureView !== null && !validMeasureView(measureView, CENTRAL_STORE_CAPABILITIES))
+  if (measureView !== null && !validMeasureView(measureView, capabilities))
     throw new HttpError(400, "invalid_query");
   const identityRead = identityReadMode(url);
   const offset = Number(offsetText);
@@ -131,9 +165,11 @@ export async function observationApi(
       apiVersion: 1,
       parsingHealth: await reader.parsingHealth(),
       source: { kind: "central-store", classification: "financial" },
-      capabilities: CENTRAL_STORE_CAPABILITIES,
+      capabilities,
     } satisfies ApiMetadata);
   }
+  if (path === V2_LATEST_PATH) return await latestBalancePage(env, url, identityRead);
+  if (path === V2_HISTORY_PATH) return await balanceHistoryPage(env, url, identityRead);
   if (path === "/api/overview") return boundedCollections({ ...(await reader.overview()) });
   if (path === "/api/transactions") {
     const transactions = await organizeRows(
@@ -176,23 +212,45 @@ export async function observationApi(
       latestOffset > 1_000_000
     )
       throw new HttpError(400, "invalid_offset");
+    // With the projection flag on, the same list comes from the sealed
+    // snapshot: identical rows, order and interpretation, but grouped once at
+    // build time instead of on every request. Without a snapshot the compat
+    // adapter declines and this route stays on the path it has today.
+    const compat = projectionFlagOn(env)
+      ? await legacyLatestFromProjection(
+          env,
+          {
+            ...(filter.source === undefined ? {} : { source: filter.source }),
+            ...(filter.account === undefined ? {} : { account: filter.account }),
+            ...(filter.instrument === undefined ? {} : { instrument: filter.instrument }),
+            ...(filter.metric === undefined ? {} : { metric: filter.metric }),
+            ...(filter.measureView === undefined ? {} : { measureView: filter.measureView }),
+          },
+          latestOffset,
+          identityRead,
+        )
+      : null;
     // Grouping needs the complete bounded candidate set before paging; the
     // reader refuses more than 5,000 candidates rather than grouping a page.
-    const candidates = await reader.listLatestBalances({
-      source: filter.source,
-      account: filter.account,
-      instrument: filter.instrument,
-      measureView: filter.measureView,
-      offset: 0,
-      limit: 5001,
-    });
+    const candidates = compat
+      ? []
+      : await reader.listLatestBalances({
+          source: filter.source,
+          account: filter.account,
+          instrument: filter.instrument,
+          measureView: filter.measureView,
+          offset: 0,
+          limit: 5001,
+        });
     // Source/account/unit boundaries can be applied before grouping because
     // duplicates must agree on all three. A metric can describe either witness.
-    const projected = presentLatestBalances(
-      await organizeRows(env.DB, "balance", candidates, identityRead),
-      filter.metric,
-    );
-    const latest = projected.slice(latestOffset, latestOffset + 501);
+    const projected =
+      compat ??
+      presentLatestBalances(
+        await organizeRows(env.DB, "balance", candidates, identityRead),
+        filter.metric,
+      );
+    const latest = compat ?? projected.slice(latestOffset, latestOffset + 501);
     const history = await reader.listBalanceHistory({
       source: filter.source,
       account: filter.account,

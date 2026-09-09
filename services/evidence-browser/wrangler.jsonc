@@ -8,6 +8,9 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
+    // Reader side of the balance projection; off keeps /api/balances on
+    // today's query path (docs/balance-read-model.md).
+    "BALANCE_PROJECTION_ENABLED": "0",
     "EVIDENCE_SOURCE_ID": "sony-bank",
     "ACCESS_ISSUER": "https://risu729.cloudflareaccess.com",
     "ACCESS_AUDIENCE": "20cc9cb6173e2755bc3ffd5f43a9adf45b0c2ad8451a1b2d330cc2b75f0d85c8"

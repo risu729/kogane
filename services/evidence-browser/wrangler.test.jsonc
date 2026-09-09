@@ -6,6 +6,9 @@
   "workers_dev": false,
   "preview_urls": false,
   "vars": {
+    // Reader side of the balance projection; off keeps /api/balances on
+    // today's query path (docs/balance-read-model.md).
+    "BALANCE_PROJECTION_ENABLED": "0",
     "EVIDENCE_SOURCE_ID": "sony-bank",
     "ACCESS_ISSUER": "https://evidence-test.cloudflareaccess.com",
     "ACCESS_AUDIENCE": "synthetic-test-audience"

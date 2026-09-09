@@ -94,6 +94,7 @@ export {
   type ProjectionBuild,
   type ProjectionCandidate,
   type ProjectionInputManifest,
+  type ProjectionInputs,
   type ProjectionRow,
   type ProjectionState,
   projectionInputManifest,

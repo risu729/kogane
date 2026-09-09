@@ -277,3 +277,117 @@ export interface ObservationDetail {
   extraParsed: boolean;
   provenance: Provenance | undefined;
 }
+
+// ── v2 balance read model (review D10/D11) ──────────────────────────────
+//
+// `/api/v2/balances/latest` and `/api/v2/balances/history` are separate
+// budgets over one fixed snapshot. Each item keeps the v1-shaped evidence row
+// under `row`, so a display that already understands a balance row keeps
+// working, and adds the typed read-model fields next to it: the quantity a
+// calculation may use, what the measure means, whether it was adopted, and
+// what time the value refers to.
+
+export type BalanceAdoptionState = "adopted" | "excluded" | "unresolved" | "conflict" | "stale";
+
+export interface ObservedQuantityWire {
+  normalized: import("./normalized-decimal.ts").NormalizedDecimal;
+  unitReference: string | null;
+  /** Kept as evidence; never a second numeric contract. */
+  sourceRepresentation: {
+    amountText: string | null;
+    legacyMinorUnits: string | null;
+    /** Null when the currency has no exponent in the legacy parser contract. */
+    legacyMinorUnitExponent: number | null;
+  };
+}
+
+export interface MeasureDescriptor {
+  metricId: string;
+  definitionRelease: string;
+  measurementKind: string;
+  aggregationRule: string;
+}
+
+export interface BalanceEvidenceMember {
+  ref: string;
+  observationId: number;
+  metric: string;
+}
+
+export interface BalanceAdoption {
+  state: BalanceAdoptionState;
+  reasonCode: string | null;
+  /** Every witness of this one measurement; its length is the evidence count. */
+  memberEvidence: BalanceEvidenceMember[];
+  evidenceCount: number;
+}
+
+/** `TemporalReference` of packages/domain, as it travels on the wire. */
+export interface TemporalReferenceWire {
+  role: string;
+  time: Record<string, unknown>;
+}
+
+export interface LatestBalanceItem {
+  observationId: number;
+  row: BalanceRow;
+  quantity: ObservedQuantityWire;
+  metric: MeasureDescriptor;
+  adoption: BalanceAdoption;
+  temporal: TemporalReferenceWire;
+  freshness: { state: "current" | "stale" | "unknown"; reasonCode: string | null };
+}
+
+export interface BalanceHistoryItem {
+  observationId: number;
+  row: BalanceHistoryRow;
+  quantity: ObservedQuantityWire;
+  metric: MeasureDescriptor;
+  temporal: TemporalReferenceWire;
+}
+
+export interface SnapshotPageInfo {
+  limit: number;
+  hasMore: boolean;
+  nextCursor: string | null;
+  snapshotId: string;
+  paginationVersion: "keyset-v2";
+}
+
+export interface SnapshotDataCoverage {
+  completeness: "complete" | "partial" | "unknown";
+  stale: boolean;
+  reasons: string[];
+}
+
+/**
+ * Assets the adopted set accounts for, per unit. There is deliberately no
+ * `netWorth` field: unfetched liabilities mean an asset subtotal is not even
+ * a lower bound, so `liabilitiesCoverage` states that it is unknown
+ * (addendum 05 section 5).
+ */
+export interface KnownAssetsSubtotals {
+  policyRelease: string;
+  knownAssetsSubtotal:
+    | { unitRef: string; coefficient: string; scale: number; adoptedCount: number }[]
+    | null;
+  liabilitiesCoverage: "unknown";
+  reasonCode: string | null;
+}
+
+export interface LatestBalancePage {
+  schemaVersion: "snapshot-page-v1";
+  items: LatestBalanceItem[];
+  page: SnapshotPageInfo;
+  dataCoverage: SnapshotDataCoverage;
+  subtotals: KnownAssetsSubtotals;
+  interpretationContext: import("./api-schema.ts").InterpretationContext;
+}
+
+export interface BalanceHistoryPage {
+  schemaVersion: "snapshot-page-v1";
+  items: BalanceHistoryItem[];
+  page: SnapshotPageInfo;
+  dataCoverage: SnapshotDataCoverage;
+  interpretationContext: import("./api-schema.ts").InterpretationContext;
+}

@@ -21,6 +21,7 @@ import {
   buildBalanceProjection,
   createD1ObservationReader,
   DECIMAL_POLICY_RELEASE,
+  ResultLimitExceededError,
   LATEST_IDENTITY_RELEASE,
   organizationSql,
   projectionInputManifest,
@@ -28,6 +29,7 @@ import {
   type DerivedScopeRelation,
   type EntityRelationRow,
   type ProjectionCandidate,
+  type ProjectionInputs,
   type ProjectionRow,
   type SubjectStatus,
 } from "../../../packages/read-model/src/index";
@@ -103,11 +105,22 @@ type CandidateRow = BalanceRow & { measureView: "balances" | "summaries"; latest
  */
 async function readCandidates(db: D1Database): Promise<CandidateRow[] | null> {
   const reader = createD1ObservationReader(db);
-  const [latest, balances, summaries] = await Promise.all([
-    reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT }),
-    reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT, measureView: "balances" }),
-    reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT, measureView: "summaries" }),
-  ]);
+  let latest: BalanceRow[];
+  let balances: BalanceRow[];
+  let summaries: BalanceRow[];
+  try {
+    [latest, balances, summaries] = await Promise.all([
+      reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT }),
+      reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT, measureView: "balances" }),
+      reader.listLatestBalances({ offset: 0, limit: CANDIDATE_LIMIT, measureView: "summaries" }),
+    ]);
+  } catch (error) {
+    // The reader refuses more than 5,000 candidates. That bound is the read
+    // contract, so the job reports the refusal and seals nothing rather than
+    // projecting a silently partial set.
+    if (error instanceof ResultLimitExceededError) return null;
+    throw error;
+  }
   const latestIds = new Set(latest.map((row) => row.id));
   const summaryIds = new Set(summaries.map((row) => row.id));
   const union = new Map<number, CandidateRow>();
@@ -139,6 +152,36 @@ async function readOrganization(
     // and product columns repeat, so the first row of an observation is enough.
     for (const row of result.results)
       if (!found.has(row.observation_id)) found.set(row.observation_id, row);
+  }
+  return found;
+}
+
+interface OriginRow {
+  observation_id: number;
+  parse_run_id: number;
+  fetch_artifact_id: number;
+  dataset: string | null;
+}
+
+/** Parse, artifact and dataset of each candidate, straight from Layer B. */
+async function readOrigins(
+  db: D1Database,
+  ids: readonly number[],
+): Promise<Map<number, OriginRow>> {
+  const found = new Map<number, OriginRow>();
+  for (let start = 0; start < ids.length; start += ORGANIZATION_CHUNK) {
+    const page = ids.slice(start, start + ORGANIZATION_CHUNK);
+    const result = await db
+      .prepare(
+        `SELECT b.id AS observation_id, b.parse_run_id, p.fetch_artifact_id, fa.dataset
+         FROM balance_observations b
+         JOIN parse_runs p ON p.id = b.parse_run_id
+         JOIN observation_fetch_artifacts fa ON fa.id = p.fetch_artifact_id
+         WHERE b.id IN (SELECT value FROM json_each(?1))`,
+      )
+      .bind(JSON.stringify(page))
+      .all<OriginRow>();
+    for (const row of result.results) found.set(row.observation_id, row);
   }
   return found;
 }
@@ -336,8 +379,9 @@ export async function collectCandidates(db: D1Database): Promise<ProjectionCandi
   const rows = await readCandidates(db);
   if (rows === null) return null;
   const ids = rows.map((row) => row.id);
-  const [organization, decimals, coverage] = await Promise.all([
+  const [organization, origins, decimals, coverage] = await Promise.all([
     readOrganization(db, ids),
+    readOrigins(db, ids),
     readDecimals(db, ids),
     readCoverage(db),
   ]);
@@ -348,8 +392,12 @@ export async function collectCandidates(db: D1Database): Promise<ProjectionCandi
   for (const group of groups) {
     const row = group.representative.row;
     const fields = organization.get(row.id);
-    const dataset = fields?.dataset ?? null;
-    const parseRunId = fields?.parse_run_id ?? 0;
+    // Provenance comes from Layer B, not from the identity read: a row the
+    // identity pipeline has not organized still has a parse, an artifact and
+    // a dataset, and its freshness must not depend on that.
+    const origin = origins.get(row.id);
+    const dataset = origin?.dataset ?? null;
+    const parseRunId = origin?.parse_run_id ?? 0;
     const claim = coverage.byParseRun.get(parseRunId);
     const groupKey = `${row.source_id} ${dataset ?? ""} `;
     const newest = [...coverage.groups.entries()].find(([key]) => key.startsWith(groupKey))?.[1];
@@ -361,7 +409,7 @@ export async function collectCandidates(db: D1Database): Promise<ProjectionCandi
       subjectStatus: fields?.account_status ?? "unresolved",
       observationId: row.id,
       parseRunId,
-      fetchArtifactId: fields?.artifact_id ?? 0,
+      fetchArtifactId: origin?.fetch_artifact_id ?? 0,
       sourceId: row.source_id,
       sourceAccount: row.source_account,
       parser: row.parser,
@@ -409,11 +457,25 @@ export async function collectCandidates(db: D1Database): Promise<ProjectionCandi
   return [...unique.values()];
 }
 
-async function highWaterParseRun(db: D1Database): Promise<number> {
-  const row = await db
+async function readInputs(
+  db: D1Database,
+): Promise<
+  Pick<
+    ProjectionInputs,
+    "publishedHighWaterParseRunId" | "visibleFetchRunCount" | "visibleFetchRunHighWater"
+  >
+> {
+  const published = await db
     .prepare("SELECT coalesce(max(parse_run_id),0) AS high FROM published_parse_runs")
     .first<{ high: number }>();
-  return row?.high ?? 0;
+  const visible = await db
+    .prepare("SELECT count(*) AS runs, coalesce(max(id),0) AS high FROM observation_fetch_runs")
+    .first<{ runs: number; high: number }>();
+  return {
+    publishedHighWaterParseRunId: published?.high ?? 0,
+    visibleFetchRunCount: visible?.runs ?? 0,
+    visibleFetchRunHighWater: visible?.high ?? 0,
+  };
 }
 
 function insertRow(db: D1Database, snapshotId: string, row: ProjectionRow) {
@@ -550,11 +612,11 @@ export async function runBalanceProjection(
   const db = env.DB;
   const budget = options.writeBudget ?? PROJECTION_WRITE_BUDGET;
   const now = (options.now ?? (() => new Date().toISOString()))();
-  const manifest = projectionInputManifest(
-    await highWaterParseRun(db),
-    LATEST_IDENTITY_RELEASE,
-    DECIMAL_POLICY_RELEASE,
-  );
+  const manifest = projectionInputManifest({
+    ...(await readInputs(db)),
+    identityRelease: LATEST_IDENTITY_RELEASE,
+    decimalPolicyRelease: DECIMAL_POLICY_RELEASE,
+  });
   const snapshotId = await canonicalDigest(manifest);
   const existing = await db
     .prepare("SELECT status,row_count FROM balance_read_snapshots WHERE snapshot_id=?1")

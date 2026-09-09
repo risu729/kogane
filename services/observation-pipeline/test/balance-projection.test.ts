@@ -10,8 +10,8 @@ import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 let mf: Miniflare;
 let env: Env;
 /** The job reads the flag from the environment; the harness binds none. */
-const on = (): Env => ({ ...env, BALANCE_PROJECTION_ENABLED: "1" }) as Env;
-const off = (): Env => ({ ...env, BALANCE_PROJECTION_ENABLED: "0" }) as Env;
+const on = (): Env => ({ ...env, BALANCE_PROJECTION_ENABLED: "1" }) as unknown as Env;
+const off = (): Env => ({ ...env, BALANCE_PROJECTION_ENABLED: "0" }) as unknown as Env;
 
 beforeAll(async () => {
   ({ mf, env } = await startPipeline());
