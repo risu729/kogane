@@ -1,4 +1,9 @@
 import { CentralClient } from "./central";
+import type {
+  ArtifactRequest,
+  StorageOriginRequest,
+  TransformStepKind,
+} from "../../../packages/evidence-contract/src/index";
 import { ImportError } from "./error";
 import type { CentralInventoryItem, SbiArtifactManifest, SbiFailure, SbiManifest } from "./types";
 
@@ -623,7 +628,7 @@ async function dataDescriptor(options: {
   fetchUnitId: number;
   completedAt: string;
   fingerprintKey: string;
-}): Promise<JsonObject> {
+}): Promise<ArtifactRequest> {
   return {
     artifactKey: `${options.artifact.dataset}.json`,
     artifactRole: "collector_derived",
@@ -665,15 +670,17 @@ async function dataDescriptor(options: {
           ],
         }
       : {}),
-    transformSteps: [
-      "transport_decoded",
-      "extracted",
-      ...(options.artifact.dataset === "foreign-trade-records" ||
-      options.artifact.dataset === "yen-detail-history"
-        ? ["bundled"]
-        : []),
-      "reencoded",
-    ].map((stepKind, stepIndex) => ({
+    transformSteps: (
+      [
+        "transport_decoded",
+        "extracted",
+        ...(options.artifact.dataset === "foreign-trade-records" ||
+        options.artifact.dataset === "yen-detail-history"
+          ? (["bundled"] as const)
+          : []),
+        "reencoded",
+      ] satisfies TransformStepKind[]
+    ).map((stepKind, stepIndex) => ({
       stepIndex,
       stepKind,
       transformerId: "sbi-securities-worker",
@@ -719,7 +726,7 @@ async function manifestDescriptor(options: {
   key: string;
   completedAt: string;
   fingerprintKey: string;
-}): Promise<JsonObject> {
+}): Promise<ArtifactRequest> {
   return {
     artifactKey: "manifest.json",
     artifactRole: "collector_manifest",
@@ -740,7 +747,7 @@ async function manifestDescriptor(options: {
   };
 }
 
-async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonObject> {
+async function storageOrigin(key: string, fingerprintKey: string): Promise<StorageOriginRequest> {
   if (!/^[0-9a-f]{64}$/u.test(fingerprintKey)) {
     throw new ImportError(500, "fingerprint_configuration_invalid");
   }

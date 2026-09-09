@@ -1,5 +1,11 @@
 import PostalMime, { type Email } from "postal-mime";
 import { CentralClient, centralDescriptorSha256 } from "./central";
+import type {
+  AddUnitReportRequest,
+  ArtifactRequest,
+  EmailOriginRequest,
+  StorageOriginRequest,
+} from "../../../packages/evidence-contract/src/index";
 import { ImportError } from "./error";
 import type { CentralInventoryItem } from "./types";
 
@@ -180,7 +186,7 @@ export async function importVPointPayEmailPair(
       completedAtMs: eventAtMs,
       completedAtBasis: "source",
       declaredArtifactCount: 2,
-    };
+    } satisfies Omit<AddUnitReportRequest, "artifactCountScope">;
     phase = "unit_report";
     await central.addUnitReport(unitId, { ...terminal, artifactCountScope: "direct" });
     phase = "run_report";
@@ -488,7 +494,7 @@ async function providerDescriptor(
   pair: VerifiedPair,
   unitId: number,
   key: string,
-): Promise<JsonObject> {
+): Promise<ArtifactRequest> {
   return {
     artifactKey: "notification.eml",
     artifactRole: "user_capture",
@@ -523,7 +529,7 @@ async function eventDescriptor(
   runId: number,
   unitId: number,
   key: string,
-): Promise<JsonObject> {
+): Promise<ArtifactRequest> {
   return {
     artifactKey: "normalized-event.json",
     artifactRole: "collector_derived",
@@ -568,7 +574,7 @@ async function eventDescriptor(
   };
 }
 
-async function emailOrigin(event: EmailEvent, rawSha256: string): Promise<JsonObject> {
+async function emailOrigin(event: EmailEvent, rawSha256: string): Promise<EmailOriginRequest> {
   const provenance = event.sourceProvenance;
   const envelopeDomain = provenance ? provenance.envelopeFrom.split("@")[1]! : null;
   return {
@@ -597,7 +603,10 @@ function canonicalMailbox(value: unknown): string | null {
     : null;
 }
 
-async function storageOrigin(objectKey: string, fingerprintKey: string): Promise<JsonObject> {
+async function storageOrigin(
+  objectKey: string,
+  fingerprintKey: string,
+): Promise<StorageOriginRequest> {
   if (!SHA256.test(fingerprintKey)) throw new ImportError(500, "fingerprint_configuration_invalid");
   const cryptoKey = await crypto.subtle.importKey(
     "raw",

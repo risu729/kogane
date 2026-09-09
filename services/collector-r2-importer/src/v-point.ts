@@ -1,4 +1,9 @@
 import { CentralClient, centralDescriptorSha256 } from "./central";
+import type {
+  ArtifactRequest,
+  StorageOriginRequest,
+} from "../../../packages/evidence-contract/src/index";
+import { canonicalJsonV1 as canonicalJson } from "../../../packages/evidence-contract/src/index";
 import { ImportError } from "./error";
 import type { CentralInventoryItem } from "./types";
 
@@ -119,7 +124,7 @@ interface ArtifactPlan {
   source: ArtifactPlanSource;
   byteSize: number;
   sha256: string;
-  descriptor: JsonObject;
+  descriptor: ArtifactRequest;
   inventory: CentralInventoryItem;
 }
 
@@ -1434,7 +1439,7 @@ async function dataDescriptor(options: {
   completedAt: string;
   schemaVersion: SchemaVersion;
   fingerprintKey: string;
-}): Promise<JsonObject> {
+}): Promise<ArtifactRequest> {
   const summary = options.artifact.dataset === "collection-summary";
   const pageGroupId =
     options.page?.group === "history"
@@ -1474,12 +1479,14 @@ async function dataDescriptor(options: {
     ...(summary
       ? {}
       : {
-          transformSteps: ["transport_decoded", "reencoded"].map((stepKind, stepIndex) => ({
-            stepIndex,
-            stepKind,
-            transformerId: "vpoint-worker",
-            transformerVersion: options.schemaVersion,
-          })),
+          transformSteps: (["transport_decoded", "reencoded"] as const).map(
+            (stepKind, stepIndex) => ({
+              stepIndex,
+              stepKind,
+              transformerId: "vpoint-worker",
+              transformerVersion: options.schemaVersion,
+            }),
+          ),
         }),
   };
 }
@@ -1490,7 +1497,7 @@ async function reconciliationDescriptor(options: {
   fetchUnitId: number;
   completedAt: string;
   fingerprintKey: string;
-}): Promise<JsonObject> {
+}): Promise<ArtifactRequest> {
   return {
     artifactKey: "vpoint-pay-email-reconciliation.json",
     artifactRole: "collector_summary",
@@ -1525,7 +1532,7 @@ async function manifestDescriptor(options: {
   completedAt: string;
   schemaVersion: SchemaVersion;
   fingerprintKey: string;
-}): Promise<JsonObject> {
+}): Promise<ArtifactRequest> {
   return {
     artifactKey: "manifest.json",
     artifactRole: "collector_manifest",
@@ -1556,7 +1563,7 @@ async function storageOrigin(
   containerName: string,
   objectKeyTemplate: string,
   fingerprintKey: string,
-): Promise<JsonObject> {
+): Promise<StorageOriginRequest> {
   if (!SHA256.test(fingerprintKey)) {
     throw new ImportError(500, "fingerprint_configuration_invalid");
   }
@@ -1815,26 +1822,7 @@ function binaryCompare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function canonicalJson(value: JsonValue): string {
-  return JSON.stringify(canonical(value));
-}
-
-function canonical(value: JsonValue): JsonValue {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => binaryCompare(left, right))
-        .map(([key, child]) => [key, canonical(child)]),
-    );
-  }
-  if (typeof value === "number" && !Number.isSafeInteger(value)) {
-    throw new TypeError("canonical numbers must be safe integers");
-  }
-  return value;
-}
-
-export async function descriptorSha256(descriptor: JsonObject): Promise<string> {
+export async function descriptorSha256(descriptor: ArtifactRequest): Promise<string> {
   return centralDescriptorSha256(descriptor);
 }
 

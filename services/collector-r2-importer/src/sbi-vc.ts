@@ -1,4 +1,9 @@
 import { CentralClient, centralDescriptorSha256 } from "./central";
+import type {
+  ArtifactRequest,
+  StorageOriginRequest,
+} from "../../../packages/evidence-contract/src/index";
+import { canonicalJsonV1 as canonicalJson } from "../../../packages/evidence-contract/src/index";
 import { ImportError } from "./error";
 import type {
   CentralInventoryItem,
@@ -64,7 +69,7 @@ interface ArtifactPlan {
   source: SbiVcArtifactManifest | null;
   bytes: Uint8Array | null;
   sha256: string;
-  descriptor: JsonObject;
+  descriptor: ArtifactRequest;
   inventory: CentralInventoryItem;
 }
 
@@ -993,32 +998,13 @@ function positiveInteger(value: unknown): boolean {
   return Number.isSafeInteger(value) && (value as number) > 0;
 }
 
-function canonicalJson(value: JsonValue): string {
-  return JSON.stringify(canonical(value));
-}
-
-function canonical(value: JsonValue): JsonValue {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-        .map(([key, child]) => [key, canonical(child)]),
-    );
-  }
-  if (typeof value === "number" && !Number.isSafeInteger(value)) {
-    throw new TypeError("canonical numbers must be safe integers");
-  }
-  return value;
-}
-
 async function dataDescriptor(options: {
   artifact: SbiVcArtifactManifest;
   sequence: number;
   fetchUnitId: number;
   completedAt: string;
   fingerprintKey: string;
-}): Promise<JsonObject> {
+}): Promise<ArtifactRequest> {
   return {
     artifactKey: `${options.artifact.dataset}.json`,
     artifactRole: "collector_derived",
@@ -1037,12 +1023,14 @@ async function dataDescriptor(options: {
     sha256: options.artifact.sha256,
     byteSize: options.artifact.bytes,
     storage: await storageOrigin(options.artifact.key, options.fingerprintKey),
-    transformSteps: ["transport_decoded", "redacted", "reencoded"].map((stepKind, stepIndex) => ({
-      stepIndex,
-      stepKind,
-      transformerId: "sbi-vc-trade-worker",
-      transformerVersion: SCHEMA_VERSION,
-    })),
+    transformSteps: (["transport_decoded", "redacted", "reencoded"] as const).map(
+      (stepKind, stepIndex) => ({
+        stepIndex,
+        stepKind,
+        transformerId: "sbi-vc-trade-worker",
+        transformerVersion: SCHEMA_VERSION,
+      }),
+    ),
   };
 }
 
@@ -1053,7 +1041,7 @@ async function manifestDescriptor(options: {
   key: string;
   completedAt: string;
   fingerprintKey: string;
-}): Promise<JsonObject> {
+}): Promise<ArtifactRequest> {
   return {
     artifactKey: "manifest.json",
     artifactRole: "collector_manifest",
@@ -1074,7 +1062,7 @@ async function manifestDescriptor(options: {
   };
 }
 
-async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonObject> {
+async function storageOrigin(key: string, fingerprintKey: string): Promise<StorageOriginRequest> {
   if (!/^[0-9a-f]{64}$/u.test(fingerprintKey)) {
     throw new ImportError(500, "fingerprint_configuration_invalid");
   }

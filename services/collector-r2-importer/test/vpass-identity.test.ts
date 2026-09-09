@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { deriveVpassCardBinding, importVpassCardBinding } from "../src/vpass-identity";
 import { centralDescriptorSha256 } from "../src/central";
+import type { ArtifactRequest } from "../../../packages/evidence-contract/src/index";
 import worker from "../src/worker";
 
 const RUN = "2026-09-05T00-00-00-000Z",
@@ -115,7 +116,9 @@ class Central {
     if (path === "/v1/runs") return Response.json({ runId: 10 });
     if (path.endsWith("/units")) return Response.json({ unitId: 20 });
     if (path.endsWith("/artifacts"))
-      return Response.json({ descriptorSha256: await centralDescriptorSha256(body) });
+      return Response.json({
+        descriptorSha256: await centralDescriptorSha256(body as unknown as ArtifactRequest),
+      });
     if (path.endsWith("/seal")) {
       if (this.failSeal) {
         this.failSeal = false;

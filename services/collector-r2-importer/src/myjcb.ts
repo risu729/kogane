@@ -1,4 +1,16 @@
-import { CentralClient } from "./central";
+import { CentralClient, centralDescriptorSha256 } from "./central";
+import type {
+  ArtifactRequest,
+  ArtifactRole,
+  FetchedAtBasis,
+  LineageDisposition,
+  MediaTypeBasis,
+  PayloadFidelity,
+  RelationClaimRequest,
+  StorageOriginRequest,
+  TransformStepRequest,
+} from "../../../packages/evidence-contract/src/index";
+import { canonicalJsonV1 as canonicalJson } from "../../../packages/evidence-contract/src/index";
 import { ImportError } from "./error";
 import {
   myJcbManifestKeyMatch,
@@ -40,7 +52,7 @@ interface ArtifactPlan {
   source: VerifiedMyJcbArtifact | null;
   bytes: number;
   sha256: string;
-  descriptor: JsonObject;
+  descriptor: ArtifactRequest;
   inventory: CentralInventoryItem;
 }
 
@@ -434,7 +446,7 @@ async function dataDescriptor(options: {
   sequence: number;
   fingerprintKey: string;
   sourceArtifactKeys: Set<string>;
-}): Promise<JsonObject> {
+}): Promise<ArtifactRequest> {
   const artifact = options.artifact;
   const html = artifact.mediaType.startsWith("text/html");
   const ledger = artifact.dataset === "credit-ledger";
@@ -562,7 +574,7 @@ async function manifestDescriptor(options: {
   sha256: string;
   sequence: number;
   fingerprintKey: string;
-}): Promise<JsonObject> {
+}): Promise<ArtifactRequest> {
   return normalizedDescriptor({
     artifactKey: "manifest.json",
     artifactRole: "collector_manifest",
@@ -587,24 +599,24 @@ async function manifestDescriptor(options: {
 
 function normalizedDescriptor(input: {
   artifactKey: string;
-  artifactRole: string;
-  payloadFidelity: string;
-  lineageDisposition: string;
+  artifactRole: ArtifactRole;
+  payloadFidelity: PayloadFidelity;
+  lineageDisposition: LineageDisposition;
   dataset: string;
   formatId: string;
   formatVersion: string;
   declaredMediaType: string;
-  mediaTypeBasis: string;
+  mediaTypeBasis: MediaTypeBasis;
   fetchedAtMs: number;
-  fetchedAtBasis: string;
+  fetchedAtBasis: FetchedAtBasis;
   fetchUnitId: number | null;
   sequence: number;
   sha256: string;
   byteSize: number;
-  storage: JsonObject;
-  transformSteps: JsonObject[];
-  relations: JsonObject[];
-}): JsonObject {
+  storage: StorageOriginRequest;
+  transformSteps: TransformStepRequest[];
+  relations: RelationClaimRequest[];
+}): ArtifactRequest {
   return {
     artifactKey: input.artifactKey,
     artifactRole: input.artifactRole,
@@ -661,7 +673,7 @@ function safeConnectionFailureCode(connection: MyJcbConnection, manifest: MyJcbM
   return "staging-write-failed";
 }
 
-async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonObject> {
+async function storageOrigin(key: string, fingerprintKey: string): Promise<StorageOriginRequest> {
   if (!SHA256.test(fingerprintKey)) throw new ImportError(500, "fingerprint_configuration_invalid");
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
@@ -867,37 +879,8 @@ function assertNativeSha256(object: R2ObjectBody, expected: string): void {
   }
 }
 
-function descriptorSha256(descriptor: JsonObject): Promise<string> {
-  const { http, storage, file, email, ...fields } = descriptor;
-  const normalized = {
-    ...fields,
-    origins: {
-      http: http ?? null,
-      storage: storage ?? null,
-      file: file ?? null,
-      email: email ?? null,
-    },
-  };
-  return sha256Hex(new TextEncoder().encode(canonicalJson(normalized as JsonValue)));
-}
-
-function canonicalJson(value: JsonValue): string {
-  return JSON.stringify(canonical(value));
-}
-
-function canonical(value: JsonValue): JsonValue {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => binaryCompare(left, right))
-        .map(([key, child]) => [key, canonical(child)]),
-    );
-  }
-  if (typeof value === "number" && !Number.isSafeInteger(value)) {
-    throw new TypeError("canonical numbers must be safe integers");
-  }
-  return value;
+function descriptorSha256(descriptor: ArtifactRequest): Promise<string> {
+  return centralDescriptorSha256(descriptor);
 }
 
 function record(value: unknown): JsonObject {

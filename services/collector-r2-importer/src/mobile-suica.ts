@@ -1,5 +1,11 @@
 import { decode, encode } from "iconv-lite";
 import { CentralClient } from "./central";
+import type {
+  ArtifactRequest,
+  StorageOriginRequest,
+  TransformStepKind,
+  TransformStepRequest,
+} from "../../../packages/evidence-contract/src/index";
 import { ImportError } from "./error";
 import type { CentralInventoryItem } from "./types";
 
@@ -816,7 +822,7 @@ async function dataDescriptor(options: {
   htmlAvailable: boolean;
   manifest: Manifest;
   fingerprintKey: string;
-}): Promise<JsonObject> {
+}): Promise<ArtifactRequest> {
   const dataset = options.entry.manifest.dataset;
   const html = dataset === "sf-history-html";
   const normalized = dataset === "sf-history";
@@ -890,7 +896,7 @@ async function manifestDescriptor(options: {
   sequence: number;
   key: string;
   fingerprintKey: string;
-}): Promise<JsonObject> {
+}): Promise<ArtifactRequest> {
   const legacy = options.manifest.schemaVersion === V1;
   return {
     artifactKey: "manifest.json",
@@ -1030,7 +1036,7 @@ function assertNativeSha256(object: R2ObjectBody, expected: string): void {
   if (bytesHex(new Uint8Array(checksum)) !== expected) invalid("native_sha256_mismatch");
 }
 
-async function storageOrigin(key: string, fingerprintKey: string): Promise<JsonObject> {
+async function storageOrigin(key: string, fingerprintKey: string): Promise<StorageOriginRequest> {
   if (!SHA256.test(fingerprintKey)) throw new ImportError(500, "fingerprint_configuration_invalid");
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
@@ -1128,10 +1134,10 @@ function safeFailureCode(failures: Failure[]): string {
 
 function transform(
   stepIndex: number,
-  stepKind: string,
+  stepKind: TransformStepKind,
   transformerId: string,
   transformerVersion: string,
-): JsonObject {
+): TransformStepRequest {
   return { stepIndex, stepKind, transformerId, transformerVersion };
 }
 

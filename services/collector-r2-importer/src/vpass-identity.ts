@@ -1,4 +1,8 @@
 import { CentralClient, centralDescriptorSha256 } from "./central";
+import type {
+  AddUnitReportRequest,
+  ArtifactRequest,
+} from "../../../packages/evidence-contract/src/index";
 import { ImportError } from "./error";
 import { validateVpassRun } from "./vpass";
 
@@ -212,7 +216,7 @@ export async function importVpassCardBinding(options: {
   const bytes = new TextEncoder().encode(`${JSON.stringify(binding)}\n`),
     sha256 = await hash(bytes);
   await central.uploadObject(runId, sha256, bytes);
-  const descriptorBody = {
+  const descriptorBody: ArtifactRequest = {
     artifactKey: "card-identity-binding.json",
     artifactRole: "collector_derived",
     payloadFidelity: "transformed",
@@ -276,7 +280,7 @@ export async function importVpassCardBinding(options: {
     completedAtMs: Date.parse(derived.completedAt),
     completedAtBasis: "manifest",
     declaredArtifactCount: 1,
-  };
+  } satisfies Omit<AddUnitReportRequest, "artifactCountScope">;
   await central.addUnitReport(unitId, { ...report, artifactCountScope: "direct" });
   await central.addRunReport(runId, {
     ...report,
