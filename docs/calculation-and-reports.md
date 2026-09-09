@@ -199,7 +199,7 @@ would discard later collection and later decisions (docs/operations.md).
 - `packages/domain/test/reports.test.ts` — body validation and digest
   stability, storage key, event shapes, replayability and capabilities (AT66).
 - `services/observation-pipeline/test/reports.test.ts` — migration 0034 on
-  0017-0035, append-only triggers, retention-class seed, the flag, provider
+  0017-0037, append-only triggers, retention-class seed, the flag, provider
   value beside own valuation (AT30), reuse, a corrected price giving a new
   context while the submitted report keeps its digest (AT36/AT60), the
   knowledge cutoff (AT63), and the restriction purge (AT66).

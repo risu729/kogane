@@ -105,7 +105,7 @@ async function seedPrice(
 
 const FUND = "instrument:other-test:-:SYN-FUND";
 
-test("migration 0034 applies on 0017 through 0035 and seeds the seven retention classes", async () => {
+test("migration 0034 applies in order within 0017 through 0037 and seeds the seven retention classes", async () => {
   const migrations = layerBMigrations();
   expect(migrations).toContain("0034_reports.sql");
   // The harness already applied every migration in order, 0034 among them.
