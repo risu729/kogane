@@ -147,11 +147,30 @@ export interface Parser {
 export interface ParseResult {
   observations: Observation[];
   warnings: string[];
+  issues?: ParseIssue[];
+  coverage?: CoverageClaim[];
 }
 ```
 
 `Observation` is the union of the four shapes below, each of which
 requires `rawLocator` and `extra`.
+
+### Warnings are for people; issues and coverage are the contract
+
+`warnings` is the human-readable record of what a parser could not read. It
+is stored verbatim (`parse_runs.warnings_json`) and shown beside the
+observations, and its text may change freely: no selection rule reads it.
+Contract v2 adds the machine-readable form (design review D01): `issues`
+typed by code, locator, severity and impact, and `coverage`, one claim per
+container scope stating whether the parse proved the whole container. The
+snapshot policy `coverage-v1` reads the claim; the pre-existing rule that
+matched warning text in SQL survives only as the `legacy-warning-compat-v1`
+adapter, which every dataset still uses until its shadow comparison is
+clean. A parser that emits neither is a legacy parser and nothing invents a
+claim for it. The eleven snapshot-dataset parsers emit both; their
+observations and warning strings are unchanged and frozen in
+`fixtures/coverage-contract/expected.json`. See
+[Parser coverage contract](parser-coverage.md).
 
 ### Fields survive; containers do not always
 
