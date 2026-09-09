@@ -1,0 +1,38 @@
+{
+  "scenario": "SC03",
+  "slice": "V2",
+  "title": "A pending amount becomes a different posted amount, then a partial refund arrives",
+  "synthetic": true,
+  "unitRef": "JPY",
+  "observations": [
+    { "ref": "obs:card:pending-1", "providerStatus": "pending", "amount": "1200" },
+    { "ref": "obs:card:posted-1", "providerStatus": "posted", "amount": "1234" },
+    { "ref": "obs:card:refund-1", "providerStatus": "posted", "amount": "-400" }
+  ],
+  "typedRelations": [
+    { "relationId": "rel:pending-1:posted-1", "kind": "pending_to_posted", "left": "obs:card:pending-1", "right": "obs:card:posted-1", "validity": null, "evidenceRefs": ["ev:card:provider-link"], "status": "adopted", "decisionRevisionRef": "rev:pending-1:1" }
+  ],
+  "purchase": { "ref": "purchase:1", "adoptedFrom": "obs:card:posted-1" },
+  "allocations": [
+    { "allocationId": "alloc:refund-1", "sourceRef": "obs:card:refund-1", "targetRef": "purchase:1", "role": "refund", "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "400", "scale": 0 }, "normalizationVersion": "decimal-v1" } } }
+  ],
+  "expected": {
+    "adoptedPurchase": "1234",
+    "netAfterRefund": "834",
+    "reportsRetained": 3,
+    "pendingCountedAsSpend": false,
+    "refundCountedAsIncome": false
+  },
+  "variants": {
+    "refund-target-unknown": {
+      "description": "The refund's counterpart is unknown: the 400 refund is displayed, its allocation stays unresolved.",
+      "allocations": [],
+      "expected": { "adoptedPurchase": "1234", "netAfterRefund": null, "unresolvedRefundRefs": ["obs:card:refund-1"] }
+    },
+    "pending-vanished": {
+      "description": "Only the pending row disappeared; no refund is inferred.",
+      "observations": [{ "ref": "obs:card:pending-1", "providerStatus": "pending", "amount": "1200" }],
+      "expected": { "inferredRefund": null }
+    }
+  }
+}

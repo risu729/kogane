@@ -1,0 +1,99 @@
+{
+  "scenario": "SC01",
+  "slice": "V1",
+  "title": "The same linked deposit is visible on the bank screen, the broker screen and MoneyForward",
+  "synthetic": true,
+  "target": { "metricId": "deposit.balance", "unitRef": "JPY" },
+  "candidates": [
+    {
+      "ref": "m-bank-savings",
+      "scopeRef": "scope:bank:savings",
+      "metricId": "deposit.balance",
+      "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "60000", "scale": 0 }, "normalizationVersion": "decimal-v1" } },
+      "coverage": { "completeness": "complete" },
+      "ownership": { "kind": "full" },
+      "authorityRank": 0
+    },
+    {
+      "ref": "m-bank-linked",
+      "scopeRef": "scope:bank:linked",
+      "metricId": "deposit.balance",
+      "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "100000", "scale": 0 }, "normalizationVersion": "decimal-v1" } },
+      "coverage": { "completeness": "complete" },
+      "ownership": { "kind": "full" },
+      "authorityRank": 0
+    },
+    {
+      "ref": "m-bank-total",
+      "scopeRef": "scope:bank:total",
+      "metricId": "deposit.balance",
+      "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "160000", "scale": 0 }, "normalizationVersion": "decimal-v1" } },
+      "coverage": { "completeness": "complete" },
+      "ownership": { "kind": "full" },
+      "authorityRank": 0
+    },
+    {
+      "ref": "m-broker-buying-power",
+      "scopeRef": "scope:broker:buying-power",
+      "metricId": "broker.buying-power",
+      "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "100000", "scale": 0 }, "normalizationVersion": "decimal-v1" } },
+      "coverage": { "completeness": "complete" },
+      "ownership": { "kind": "full" },
+      "authorityRank": 0
+    },
+    {
+      "ref": "m-mf-total",
+      "scopeRef": "scope:mf:bank-total",
+      "metricId": "deposit.balance",
+      "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "160000", "scale": 0 }, "normalizationVersion": "decimal-v1" } },
+      "coverage": { "completeness": "complete" },
+      "ownership": { "kind": "full" },
+      "authorityRank": 1
+    }
+  ],
+  "relations": [
+    { "left": "scope:bank:savings", "right": "scope:bank:linked", "relation": "disjoint", "evidenceRefs": ["ev:bank:account-list"], "decisionRef": null },
+    { "left": "scope:bank:savings", "right": "scope:bank:total", "relation": "subset", "evidenceRefs": ["ev:bank:total-page"], "decisionRef": null },
+    { "left": "scope:bank:linked", "right": "scope:bank:total", "relation": "subset", "evidenceRefs": ["ev:bank:total-page"], "decisionRef": null }
+  ],
+  "variants": {
+    "mf-confirmed": {
+      "description": "MoneyForward's bank total was confirmed to be the same measurement as the bank's own total.",
+      "extraRelations": [
+        { "left": "scope:mf:bank-total", "right": "scope:bank:total", "relation": "same", "evidenceRefs": ["ev:mf:connection-x"], "decisionRef": "rev:mf-total-same:1" }
+      ],
+      "candidateOverrides": {},
+      "expected": {
+        "adoptedRefs": ["m-bank-linked", "m-bank-savings"],
+        "adoptedTotal": "160000",
+        "excluded": { "m-bank-total": "covered_by_breakdown", "m-broker-buying-power": "metric_mismatch", "m-mf-total": "duplicate_evidence" },
+        "unresolved": {},
+        "completeness": "complete"
+      }
+    },
+    "mf-unconfirmed": {
+      "description": "No terminal-account mapping for MoneyForward: its total is a possible duplicate, shown as unresolved and never added.",
+      "extraRelations": [],
+      "candidateOverrides": {},
+      "expected": {
+        "adoptedRefs": ["m-bank-linked", "m-bank-savings"],
+        "adoptedTotal": "160000",
+        "excluded": { "m-bank-total": "covered_by_breakdown", "m-broker-buying-power": "metric_mismatch" },
+        "unresolved": { "m-mf-total": "overlap_unknown" },
+        "completeness": "partial"
+      }
+    },
+    "total-breakdown-mismatch": {
+      "description": "The bank total disagrees with its breakdown; neither side is adopted silently.",
+      "extraRelations": [],
+      "candidateOverrides": { "m-bank-total": "150000" },
+      "expected": {
+        "adoptedRefs": [],
+        "adoptedTotal": null,
+        "excluded": { "m-broker-buying-power": "metric_mismatch" },
+        "unresolved": { "m-bank-linked": "total_breakdown_mismatch", "m-bank-savings": "total_breakdown_mismatch", "m-bank-total": "total_breakdown_mismatch", "m-mf-total": "overlap_unknown" },
+        "completeness": "unavailable"
+      }
+    }
+  }
+}

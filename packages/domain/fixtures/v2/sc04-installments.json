@@ -1,0 +1,32 @@
+{
+  "scenario": "SC04",
+  "slice": "V2",
+  "title": "One purchase billed in three instalments with a confirmed fee per instalment",
+  "synthetic": true,
+  "unitRef": "JPY",
+  "purchase": { "ref": "purchase:1", "amount": "12000" },
+  "obligation": { "ref": "obligation:1", "outstanding": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "12000", "scale": 0 }, "normalizationVersion": "decimal-v1" } } },
+  "schedule": [
+    { "instalment": 1, "principal": "4000", "fee": "100", "status": "confirmed" },
+    { "instalment": 2, "principal": "4000", "fee": "100", "status": "projected" },
+    { "instalment": 3, "principal": "4000", "fee": "100", "status": "projected" }
+  ],
+  "payments": [
+    {
+      "ref": "payment:1",
+      "cashOut": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "4100", "scale": 0 }, "normalizationVersion": "decimal-v1" } },
+      "allocations": [
+        { "allocationId": "alloc:p1:principal", "sourceRef": "payment:1", "targetRef": "obligation:1", "role": "principal", "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "4000", "scale": 0 }, "normalizationVersion": "decimal-v1" } } },
+        { "allocationId": "alloc:p1:fee", "sourceRef": "payment:1", "targetRef": "fee:instalment-1", "role": "fee", "quantity": { "unitRef": "JPY", "value": { "status": "exact", "value": { "coefficient": "100", "scale": 0 }, "normalizationVersion": "decimal-v1" } } }
+      ]
+    }
+  ],
+  "expected": {
+    "remainingPrincipal": "8000",
+    "confirmedFee": "100",
+    "projectedFee": "200",
+    "purchaseCost": "12000",
+    "cashOut": "4100",
+    "paymentFullyAllocated": true
+  }
+}
