@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
 import { validApiResponse } from "../shared/api-validation.ts";
 import { parsingHealthMessage } from "../web/src/parsing-health.tsx";
+import { LOCAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
 
 const metadata = {
   apiVersion: 1,
   source: { kind: "local-store", classification: "unknown" },
-  capabilities: { readOnly: true, rawEvidence: true, liveCollectors: false },
+  capabilities: LOCAL_STORE_CAPABILITIES,
 };
 test("parsing health remains optional for local/demo and rejects invalid counts", () => {
   expect(validApiResponse("/api/meta", metadata)).toBe(true);

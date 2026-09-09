@@ -26,7 +26,7 @@ import type { CentralInventoryItem } from "./types";
 
 const SOURCE = "myjcb" as const;
 const PRODUCER = "collector-r2-importer";
-const INGEST_CONTRACT_VERSION = "myjcb-r2-v2";
+export const INGEST_CONTRACT_VERSION = "myjcb-r2-v2";
 const CENTRAL_CLIENT_ID = "collector-r2-myjcb";
 const STORAGE_CONTAINER = "kogane-myjcb-collector-poc";
 const STORAGE_TEMPLATE = "raw/myjcb/{date}/{run-id}/{artifact}";

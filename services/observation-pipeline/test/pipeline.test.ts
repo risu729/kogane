@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
-import { Miniflare, convertV4MiniflareOptions } from "miniflare";
+import type { Miniflare } from "miniflare";
 import { sweep, parseJob } from "../src/worker.ts";
+import { migrationDir, seedArtifact, startPipeline } from "./harness.ts";
 import { smbcDirectBalance } from "../../../poc/observation-pipeline/src/parsers/smbc-direct.ts";
 import {
   providerTimestamp,
@@ -14,50 +15,12 @@ import {
   sonyBankWalletHistory,
 } from "../../../poc/observation-pipeline/src/parsers/sony-bank.ts";
 
-const migrationDir = new URL("../../raw-evidence/migrations/", import.meta.url);
-const migration = readFileSync(new URL("0017_observation_pipeline.sql", migrationDir), "utf8");
 let mf: Miniflare;
 let env: Env;
 beforeAll(async () => {
-  const bundle = await Bun.build({
-    entrypoints: [new URL("../src/worker.ts", import.meta.url).pathname],
-    target: "browser",
-    format: "esm",
-  });
-  if (!bundle.success) throw new Error("Worker test bundle failed");
-  mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: await bundle.outputs[0]!.text(),
-      compatibilityDate: "2026-09-07",
-      d1Databases: ["DB"],
-      r2Buckets: ["EVIDENCE"],
-    }),
-  );
-  const db = await mf.getD1Database("DB");
-  const bucket = await mf.getR2Bucket("EVIDENCE");
-  // Minimal Layer A fixtures; full production migrations are validated below.
-  await db.exec(`CREATE TABLE sources(id TEXT PRIMARY KEY,provider TEXT);
-CREATE TABLE fetch_runs(id INTEGER PRIMARY KEY,source_id TEXT,acquisition_session_id INTEGER,producer_id TEXT,first_recorded_at_ms INTEGER);
-CREATE VIEW financial_fetch_runs AS SELECT * FROM fetch_runs WHERE source_id<>'kogane-synthetic';
-CREATE TABLE acquisition_sessions(id INTEGER PRIMARY KEY,external_session_id TEXT);
-CREATE TABLE fetch_run_seals(fetch_run_id INTEGER);
-CREATE TABLE fetch_run_reports(fetch_run_id INTEGER,report_kind TEXT,normalized_outcome TEXT,started_at_ms INTEGER,completed_at_ms INTEGER);
-CREATE TABLE fetch_units(id INTEGER PRIMARY KEY,fetch_run_id INTEGER,unit_key TEXT);
-CREATE TABLE fetch_unit_reports(fetch_unit_id INTEGER,report_kind TEXT,normalized_outcome TEXT,safe_failure_code TEXT);
-CREATE TABLE fetch_artifacts(id INTEGER PRIMARY KEY,fetch_run_id INTEGER,source_id TEXT,dataset TEXT,artifact_key TEXT,fetch_unit_id INTEGER,declared_media_type TEXT,fetched_at_ms INTEGER,recorded_at_ms INTEGER,sha256 TEXT,artifact_role TEXT);
-CREATE TABLE raw_objects(sha256 TEXT PRIMARY KEY,byte_size INTEGER,blob_key TEXT);
-CREATE TABLE fetch_run_ranges(id INTEGER PRIMARY KEY,fetch_run_id INTEGER,range_kind TEXT,start_value TEXT,end_value TEXT);
-CREATE TABLE artifact_ranges(id INTEGER PRIMARY KEY,fetch_artifact_id INTEGER,range_kind TEXT,start_value TEXT,end_value TEXT);`);
-  // D1 exec splits statements by line; use SQLite's parser to split migration
-  // statements including triggers safely for individual D1 prepares.
-  const statements = splitSql(migration);
-  for (const sql of statements) await db.prepare(sql).run();
-  // Miniflare and generated Workers types use distinct platform declarations;
-  // validate the runtime proxy at this test boundary instead of double casts.
-  const bindings: unknown = { DB: db, EVIDENCE: bucket };
-  assertBindings(bindings);
-  env = bindings;
+  // Minimal synthetic Layer A plus every Layer B migration in order (0017 to
+  // the newest); the full production chain is validated separately below.
+  ({ mf, env } = await startPipeline());
 }, 30000);
 afterAll(async () => {
   await mf?.dispose();
@@ -293,7 +256,7 @@ test("actual workerd hydrates verified WALLET MIME and preserves blank optional 
     .bind(manifestSha, manifest.length, manifestSha)
     .run();
   await env.DB.prepare(
-    "INSERT INTO fetch_artifacts VALUES(61,60,'sony-bank','collector-manifest','manifest.json',NULL,'application/json',0,0,?,'collector_manifest')",
+    "INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,fetch_unit_id,declared_media_type,fetched_at_ms,recorded_at_ms,sha256,artifact_role) VALUES(61,60,'sony-bank','collector-manifest','manifest.json',NULL,'application/json',0,0,?,'collector_manifest')",
   )
     .bind(manifestSha)
     .run();
@@ -308,33 +271,6 @@ test("actual workerd hydrates verified WALLET MIME and preserves blank optional 
   expect(JSON.parse(row!.extra_json)._kogane.usageAmount).toBeNull();
 }, 30000);
 
-function assertBindings(value: unknown): asserts value is Env {
-  if (!value || typeof value !== "object" || !("DB" in value) || !("EVIDENCE" in value))
-    throw new Error("bindings missing");
-  for (const [binding, method] of [
-    [value.DB, "prepare"],
-    [value.EVIDENCE, "get"],
-  ] as const) {
-    if (!binding || typeof binding !== "object" || !(method in binding))
-      throw new Error("invalid runtime binding");
-  }
-}
-
-function splitSql(sql: string): string[] {
-  const statements: string[] = [];
-  let pending = "";
-  for (const line of sql.split("\n")) {
-    if (line.trimStart().startsWith("--")) continue;
-    pending += line + "\n";
-    const trigger = /CREATE TRIGGER/i.test(pending);
-    if ((!trigger && /;\s*$/.test(line)) || (trigger && /END;\s*$/.test(line))) {
-      statements.push(pending);
-      pending = "";
-    }
-  }
-  return statements.filter((s) => s.trim());
-}
-
 test("all production migrations compile and Layer B observes sealed financial runs only", () => {
   const db = new Database(":memory:");
   for (const file of readdirSync(migrationDir)
@@ -343,10 +279,41 @@ test("all production migrations compile and Layer B observes sealed financial ru
     db.exec(readFileSync(new URL(file, migrationDir), "utf8"));
   expect(db.query("SELECT count(*) AS n FROM observation_fetch_artifacts").get()).toEqual({ n: 0 });
   expect(db.query("SELECT count(*) AS n FROM parse_runs").get()).toEqual({ n: 0 });
+  // Rollback contract of 0035: the previous Worker's exact job insert still
+  // works and lands in the incremental lane; its seal trigger exists on the
+  // real fetch_run_seals shape.
+  db.exec(
+    "INSERT OR IGNORE INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status) VALUES(1,'fixture','1.0.0','pending')",
+  );
+  expect(
+    db
+      .query(
+        "SELECT lane,priority,replay_plan_id,target_release,created_at_ms FROM observation_parse_jobs",
+      )
+      .get(),
+  ).toEqual({
+    lane: "incremental",
+    priority: 0,
+    replay_plan_id: null,
+    target_release: null,
+    created_at_ms: 0,
+  });
+  expect(
+    db
+      .query(
+        "SELECT count(*) AS n FROM sqlite_master WHERE type='trigger' AND name='observation_work_items_on_seal' AND tbl_name='fetch_run_seals'",
+      )
+      .get(),
+  ).toEqual({ n: 1 });
+  expect(db.query("SELECT lane FROM observation_lane_state ORDER BY lane").all()).toEqual([
+    { lane: "incremental" },
+    { lane: "repair" },
+    { lane: "replay" },
+  ]);
   db.close();
 });
 
-async function artifact(
+function artifact(
   id: number,
   source: string,
   dataset: string,
@@ -354,36 +321,7 @@ async function artifact(
   payload: unknown,
   seal = true,
 ) {
-  const bytes =
-    payload instanceof Uint8Array
-      ? new Uint8Array(payload)
-      : new TextEncoder().encode(JSON.stringify(payload));
-  const sha = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) =>
-    b.toString(16).padStart(2, "0"),
-  ).join("");
-  await env.EVIDENCE.put(sha, bytes);
-  await env.DB.batch([
-    env.DB.prepare("INSERT OR IGNORE INTO sources VALUES(?,?)").bind(source, source),
-    env.DB.prepare("INSERT INTO acquisition_sessions VALUES(?,?)").bind(id, `run-${id}`),
-    env.DB.prepare("INSERT INTO fetch_runs VALUES(?,?,?, ?,?)").bind(
-      id,
-      source,
-      id,
-      "collector-r2-importer",
-      Date.now(),
-    ),
-    env.DB.prepare("INSERT INTO fetch_run_reports VALUES(?,'terminal','success',?,?)").bind(
-      id,
-      Date.now(),
-      Date.now(),
-    ),
-    env.DB.prepare("INSERT OR IGNORE INTO raw_objects VALUES(?,?,?)").bind(sha, bytes.length, sha),
-    env.DB.prepare(
-      "INSERT INTO fetch_artifacts VALUES(?,?,?,?,?,NULL,'application/json',?,?,?,'collector_derived')",
-    ).bind(id, id, source, dataset, key, Date.now(), Date.now(), sha),
-  ]);
-  if (seal) await env.DB.prepare("INSERT INTO fetch_run_seals VALUES(?)").bind(id).run();
-  return sha;
+  return seedArtifact(env, id, source, dataset, key, payload, seal);
 }
 
 test("sealed parsing is idempotent; missing blobs retry and unsealed artifacts do not publish", async () => {
@@ -483,7 +421,9 @@ test("empty transaction success is retained and failures/unit failures are exclu
   await env.DB.prepare(
     "UPDATE fetch_run_reports SET normalized_outcome='partial' WHERE fetch_run_id=21",
   ).run();
-  await env.DB.prepare("INSERT INTO fetch_units VALUES(22,22,'account')").run();
+  await env.DB.prepare(
+    "INSERT INTO fetch_units(id,fetch_run_id,unit_key) VALUES(22,22,'account')",
+  ).run();
   await env.DB.prepare(
     "INSERT INTO fetch_unit_reports VALUES(22,'terminal','failed','failed')",
   ).run();
@@ -549,7 +489,9 @@ test("MyJCB state and period come from sanitized central manifest", async () => 
     ),
   );
   await artifact(40, "myjcb", "credit-ledger", "connection-a/credit-ledger-00.json", payload);
-  await env.DB.prepare("INSERT INTO fetch_units VALUES(40,40,'connection-a')").run();
+  await env.DB.prepare(
+    "INSERT INTO fetch_units(id,fetch_run_id,unit_key) VALUES(40,40,'connection-a')",
+  ).run();
   await env.DB.prepare("UPDATE fetch_artifacts SET fetch_unit_id=40 WHERE id=40").run();
   const manifest = {
     artifacts: [
@@ -569,7 +511,7 @@ test("MyJCB state and period come from sanitized central manifest", async () => 
   await env.EVIDENCE.put(sha, bytes);
   await env.DB.prepare("INSERT INTO raw_objects VALUES(?,?,?)").bind(sha, bytes.length, sha).run();
   await env.DB.prepare(
-    "INSERT INTO fetch_artifacts VALUES(41,40,'myjcb',NULL,'manifest.json',NULL,'application/json',0,0,?,'collector_manifest')",
+    "INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,fetch_unit_id,declared_media_type,fetched_at_ms,recorded_at_ms,sha256,artifact_role) VALUES(41,40,'myjcb',NULL,'manifest.json',NULL,'application/json',0,0,?,'collector_manifest')",
   )
     .bind(sha)
     .run();
@@ -610,7 +552,7 @@ test("workerd decodes MoneyForward static descriptions from canonical text/html 
     "account-01-month-2099-02.html",
     bytes,
   );
-  await env.DB.prepare("INSERT INTO fetch_units VALUES(90,90,?)")
+  await env.DB.prepare("INSERT INTO fetch_units(id,fetch_run_id,unit_key) VALUES(90,90,?)")
     .bind(`moneyforward-account-v1-${"a".repeat(64)}`)
     .run();
   await env.DB.prepare(

@@ -5,6 +5,13 @@ import { validIdentityResponse } from "./identity-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
 import { validFinancialProductClaimWire } from "./financial-products.ts";
 import { validBalanceInterpretation } from "./balance-semantics.ts";
+import {
+  IDENTITY_READ_MODES,
+  MEASURE_VIEWS,
+  OBSERVATION_API_CONTRACT_VERSION,
+  PAGINATION_VERSIONS,
+  type ApiCapabilities,
+} from "./api-schema.ts";
 import type {
   ObservationOrganization,
   OrganizedAccount,
@@ -114,6 +121,29 @@ const warnings = object<Warnings>({
   raw: nullableText,
   parsed: boolean,
 });
+/** A distinct list of members drawn from a closed set of names. */
+function subset<T extends string>(choices: readonly T[]): Check<readonly T[]> {
+  return (value): value is readonly T[] =>
+    Array.isArray(value) &&
+    value.every((member) => choices.includes(member)) &&
+    new Set(value).size === value.length;
+}
+/** A connection name is an identifier for labels; it never selects behaviour. */
+const sourceKind: Check<string> = (value): value is string =>
+  typeof value === "string" && /^[a-z][a-z0-9-]{0,63}$/u.test(value);
+export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabilities>({
+  contractVersion: literal(OBSERVATION_API_CONTRACT_VERSION),
+  readOnly: literal(true),
+  rawEvidence: literal(true),
+  liveCollectors: literal(false),
+  measureViews: subset(MEASURE_VIEWS),
+  identityReadModes: subset(IDENTITY_READ_MODES),
+  paginationVersion: literal(...PAGINATION_VERSIONS),
+  collectionFilters: boolean,
+  organizedDisplay: boolean,
+  financialProducts: boolean,
+  evidenceHistory: boolean,
+});
 const metadata = object<ApiMetadata>({
   parsingHealth: optional(
     object<NonNullable<ApiMetadata["parsingHealth"]>>({
@@ -124,14 +154,10 @@ const metadata = object<ApiMetadata>({
   ),
   apiVersion: literal(1),
   source: object<ApiMetadata["source"]>({
-    kind: literal("local-store", "central-store"),
+    kind: sourceKind,
     classification: literal("unknown", "synthetic", "financial"),
   }),
-  capabilities: object<ApiMetadata["capabilities"]>({
-    readOnly: literal(true),
-    rawEvidence: literal(true),
-    liveCollectors: literal(false),
-  }),
+  capabilities: validApiCapabilities,
 });
 function ownProduct<T extends { id: number; organization?: ObservationOrganization }>(
   kind: ObservationKind,

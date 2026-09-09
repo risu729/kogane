@@ -1,7 +1,15 @@
 // Shared HTTP contracts keep the UI independent of the local store implementation.
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { validApiResponse } from "../../shared/api-validation.ts";
+import { listRequestSearch, type ListPath, type MeasureView } from "../../shared/api-schema.ts";
 import { useLocation } from "./router.tsx";
+import {
+  capabilityState,
+  clientFeatures,
+  NO_FEATURES,
+  type CapabilityState,
+  type ClientFeatures,
+} from "./capabilities.ts";
 import type {
   ObservationKind,
   Overview,
@@ -158,6 +166,18 @@ export function useMetadata(): UseQueryResult<ApiMetadata, Error> {
   });
 }
 
+/** Loading and known capabilities are distinct; nothing guesses while loading. */
+export function useCapabilities(): CapabilityState {
+  return capabilityState(useMetadata().data);
+}
+
+export function useFeatures(): ClientFeatures & { known: boolean } {
+  const state = useCapabilities();
+  return state.known
+    ? { ...clientFeatures(state.capabilities), known: true }
+    : { ...NO_FEATURES, known: false };
+}
+
 export function useOverview(): UseQueryResult<Overview, Error> {
   return useQuery({
     queryKey: ["overview"],
@@ -166,54 +186,67 @@ export function useOverview(): UseQueryResult<Overview, Error> {
 }
 
 export function useTransactions(): UseQueryResult<{ transactions: TransactionRow[] }, Error> {
-  const suffix = useCollectionSearch();
+  const request = useListRequest("/api/transactions");
   return useQuery({
-    queryKey: ["transactions", suffix],
+    queryKey: ["transactions", request.suffix],
+    enabled: request.enabled,
     queryFn: ({ signal }) =>
-      getJson<{ transactions: TransactionRow[] }>(`/api/transactions${suffix}`, signal),
+      getJson<{ transactions: TransactionRow[] }>(`/api/transactions${request.suffix}`, signal),
   });
 }
 
 export function useBalances(
-  view?: "balances" | "summaries",
+  view?: MeasureView,
 ): UseQueryResult<{ latest: BalanceRow[]; history: BalanceHistoryRow[] }, Error> {
-  const search = useCollectionSearch();
-  const production = useMetadata().data?.source.kind === "central-store";
-  const params = new URLSearchParams(search);
-  if (view && production) params.set("view", view);
-  const suffix = params.size ? `?${params}` : "";
+  // The view parameter is sent only when the server advertises that view;
+  // the schema builder drops it otherwise, and the page filters client-side.
+  const request = useListRequest("/api/balances", view ? { view } : {});
   return useQuery({
-    queryKey: ["balances", suffix],
+    queryKey: ["balances", request.suffix],
+    enabled: request.enabled,
     queryFn: ({ signal }) =>
       getJson<{ latest: BalanceRow[]; history: BalanceHistoryRow[] }>(
-        `/api/balances${suffix}`,
+        `/api/balances${request.suffix}`,
         signal,
       ),
   });
 }
 
 export function usePositions(): UseQueryResult<{ positions: PositionWithValuations[] }, Error> {
-  const suffix = useCollectionSearch();
+  const request = useListRequest("/api/positions");
   return useQuery({
-    queryKey: ["positions", suffix],
+    queryKey: ["positions", request.suffix],
+    enabled: request.enabled,
     queryFn: ({ signal }) =>
-      getJson<{ positions: PositionWithValuations[] }>(`/api/positions${suffix}`, signal),
+      getJson<{ positions: PositionWithValuations[] }>(`/api/positions${request.suffix}`, signal),
   });
 }
 
 export function useArtifacts(): UseQueryResult<{ artifacts: ArtifactRow[] }, Error> {
-  const suffix = useCollectionSearch();
-  const path = `/api/artifacts${suffix}`;
+  const request = useListRequest("/api/artifacts");
+  const path = `/api/artifacts${request.suffix}`;
   return useQuery({
-    queryKey: ["artifacts", suffix],
+    queryKey: ["artifacts", request.suffix],
+    enabled: request.enabled,
     queryFn: ({ signal }) => getJson<{ artifacts: ArtifactRow[] }>(path, signal),
   });
 }
 
-function useCollectionSearch(): string {
+/**
+ * Builds a list request from the page URL and explicit arguments using the
+ * shared schema: only parameters the advertised capabilities allow are sent.
+ * Disabled until capabilities are known, so no request carries a guess.
+ */
+export function useListRequest(
+  path: ListPath,
+  extra: Record<string, string> = {},
+): { enabled: boolean; suffix: string } {
   const location = useLocation();
-  const search = location.split("?")[1];
-  return search ? `?${search}` : "";
+  const state = useCapabilities();
+  if (!state.known) return { enabled: false, suffix: "" };
+  const params = new URLSearchParams(location.split("?")[1]);
+  for (const [key, value] of Object.entries(extra)) params.set(key, value);
+  return { enabled: true, suffix: listRequestSearch(path, state.capabilities, params) };
 }
 
 export function useArtifact(id: number): UseQueryResult<ArtifactDetail, Error> {

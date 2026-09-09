@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { getJson } from "./api.ts";
+import { getJson, useListRequest } from "./api.ts";
 import { navigate, useLocation } from "./router.tsx";
 import { QueryBoundary } from "./ui.tsx";
 import type { FilterOptions } from "../../shared/api-contract.ts";
@@ -24,13 +24,15 @@ export function CollectionControls({ kind }: { kind: string }) {
     });
   }, [location]);
   const invalidDates = Boolean(draft.from && draft.to && draft.from > draft.to);
+  // The schema builder keeps `view` only when the server advertises that view.
+  const request = useListRequest("/api/filter-options", {
+    kind: kind === "summaries" ? "balances" : kind,
+    ...(kind === "balances" || kind === "summaries" ? { view: kind } : {}),
+  });
   const options = useQuery({
-    queryKey: ["filter-options", kind],
-    queryFn: ({ signal }) =>
-      getJson<FilterOptions>(
-        `/api/filter-options?kind=${kind === "summaries" ? "balances" : kind}${kind === "balances" || kind === "summaries" ? `&view=${kind}` : ""}`,
-        signal,
-      ),
+    queryKey: ["filter-options", request.suffix],
+    enabled: request.enabled,
+    queryFn: ({ signal }) => getJson<FilterOptions>(`/api/filter-options${request.suffix}`, signal),
   });
   function change(source: string, account: string) {
     const next = new URLSearchParams(params);

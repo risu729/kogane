@@ -7,6 +7,7 @@ import {
   weeklyRepairSeeds,
   type InternalMessage,
   type ReconcilerDependencies,
+  type ReconcilerSource,
 } from "../src/reconciler";
 
 const ACCOUNT = "59ea63cc00914b30ca410b062ae2bb7f";
@@ -284,6 +285,155 @@ describe("R2 outbox reconciler", () => {
         ACCOUNT,
       ),
     ).toThrow("reconciler_message_invalid");
+  });
+
+  test("in-flight messages from the previous deployment reach the executor unchanged", async () => {
+    // Message literals exactly as the pre-adapter Worker enqueued them.
+    const calls: Array<[unknown, unknown]> = [];
+    const sent: InternalMessage[][] = [];
+    const dependencies = fakeDependencies({ sent });
+    dependencies.importTerminal = async (command, resume) => {
+      calls.push([command, resume]);
+      return { status: "sealed" };
+    };
+    const inFlight: Array<{
+      source: ReconcilerSource;
+      terminalKey: string;
+      [key: string]: unknown;
+    }> = [
+      {
+        schemaVersion: "kogane-r2-outbox-reconciler-v1",
+        kind: "import",
+        source: "myjcb",
+        terminalKey: `raw/myjcb/2026/09/07/${RUN_ID}/manifest.json`,
+        step: 3,
+        progress: 15,
+        resume: "myjcb-transfer-v1.opaque.signature",
+      },
+      {
+        schemaVersion: "kogane-r2-outbox-reconciler-v1",
+        kind: "import",
+        source: "sony-bank",
+        terminalKey: `raw/sony-bank/2026/09/07/${RUN_ID}/manifest.json`,
+        step: 2,
+        progress: 20,
+        resume: 20,
+      },
+      {
+        schemaVersion: "kogane-r2-outbox-reconciler-v1",
+        kind: "import",
+        source: "mobile-suica",
+        terminalKey: `raw/mobile-suica/2026/09/07/${RUN_ID}/manifest.json`,
+        step: 0,
+        progress: 0,
+        resume: null,
+      },
+    ];
+    for (const message of inFlight) {
+      await expect(processReconcilerMessage(message, dependencies)).resolves.toEqual({
+        kind: "import",
+        source: message.source,
+        outcome: "sealed",
+      });
+    }
+    expect(calls).toEqual([
+      [
+        { source: "myjcb", terminalKey: inFlight[0]!.terminalKey, mode: "staged" },
+        { kind: "token", token: "myjcb-transfer-v1.opaque.signature" },
+      ],
+      [
+        { source: "sony-bank", terminalKey: inFlight[1]!.terminalKey, mode: "staged" },
+        { kind: "offset", offset: 20 },
+      ],
+      [
+        { source: "mobile-suica", terminalKey: inFlight[2]!.terminalKey, mode: "staged" },
+        { kind: "none" },
+      ],
+    ]);
+    expect(sent).toEqual([]);
+  });
+
+  test("a deferred step that makes no progress fails closed without re-enqueueing", async () => {
+    const sent: InternalMessage[][] = [];
+    const inFlight = {
+      schemaVersion: RECONCILER_SCHEMA,
+      kind: "import" as const,
+      source: "sony-bank" as const,
+      terminalKey: `raw/sony-bank/2026/09/07/${RUN_ID}/manifest.json`,
+      step: 4,
+      progress: 40,
+      resume: 40,
+    };
+    for (const progress of [40, 30]) {
+      await expect(
+        processReconcilerMessage(
+          inFlight,
+          fakeDependencies({ sent, outcome: { status: "deferred", resume: progress, progress } }),
+        ),
+      ).rejects.toThrow("reconciler_import_stalled");
+    }
+    await expect(
+      processReconcilerMessage(
+        { ...inFlight, step: 1_024, progress: 1_024, resume: 1_024 },
+        fakeDependencies({ sent, outcome: { status: "deferred", resume: 2_000, progress: 2_000 } }),
+      ),
+    ).rejects.toThrow("reconciler_import_stalled");
+    expect(sent).toEqual([]);
+    await expect(
+      processReconcilerMessage(
+        inFlight,
+        fakeDependencies({ sent, outcome: { status: "deferred", resume: 50, progress: 50 } }),
+      ),
+    ).resolves.toEqual({ kind: "import", source: "sony-bank", outcome: "deferred" });
+    expect(sent).toEqual([[{ ...inFlight, step: 5, progress: 50, resume: 50 }]]);
+  });
+
+  test("a duplicated notification converges to the same command with no extra messages", async () => {
+    const commands: unknown[] = [];
+    const sent: InternalMessage[][] = [];
+    const dependencies = fakeDependencies({ sent });
+    dependencies.importTerminal = async (command, resume) => {
+      commands.push({ command, resume });
+      return { status: "sealed" };
+    };
+    const notification = r2Notification("kogane-sbi-vc-trade-poc", MANIFEST);
+    const first = await processReconcilerMessage(notification, dependencies);
+    const second = await processReconcilerMessage(structuredClone(notification), dependencies);
+    expect(second).toEqual(first);
+    expect(commands).toHaveLength(2);
+    expect(commands[1]).toEqual(commands[0]);
+    expect(commands[0]).toEqual({
+      command: { source: "sbi-vc-trade", terminalKey: MANIFEST, mode: "staged" },
+      resume: { kind: "none" },
+    });
+    expect(sent).toEqual([]);
+  });
+
+  test("a duplicated repair page emits the same independent messages twice", async () => {
+    const sent: InternalMessage[][] = [];
+    const repair = {
+      schemaVersion: RECONCILER_SCHEMA,
+      kind: "repair",
+      source: "sbi-vc-trade",
+      cursor: null,
+      page: 0,
+    };
+    const dependencies = fakeDependencies({
+      sent,
+      listed: {
+        keys: [MANIFEST, MANIFEST.replace("manifest.json", "cash-balances.json")],
+        truncated: true,
+        cursor: "next-page",
+      },
+    });
+    await processReconcilerMessage(repair, dependencies);
+    await processReconcilerMessage(structuredClone(repair), dependencies);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toEqual(sent[0]);
+    expect(sent[0]).toEqual([
+      expect.objectContaining({ kind: "import", terminalKey: MANIFEST, step: 0, resume: null }),
+      expect.objectContaining({ kind: "repair", cursor: "next-page", page: 1 }),
+    ]);
   });
 
   test("weekly repair seeds cover every configured source exactly once", () => {

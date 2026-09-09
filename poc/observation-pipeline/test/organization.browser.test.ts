@@ -11,6 +11,7 @@ import {
   resolveFinancialProduct,
   type FinancialProductClaim,
 } from "../shared/financial-products.ts";
+import { CENTRAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
 
 const client = join(import.meta.dir, "../web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -131,12 +132,15 @@ describe.if(runnable)("organized observation labels", () => {
           return Response.json({
             apiVersion: 1,
             source: { kind: "central-store", classification: "synthetic" },
-            capabilities: { readOnly: true, rawEvidence: true, liveCollectors: false },
+            capabilities: CENTRAL_STORE_CAPABILITIES,
           });
         if (url.pathname === "/api/filter-options")
           return Response.json({ sources: [], accounts: [], instruments: [], metrics: [] });
         if (url.pathname.startsWith("/api/")) {
-          const response = await api.fetch(request);
+          // Production capabilities are mocked; the local API accepts no parameters.
+          const clean = new URL(url);
+          clean.search = "";
+          const response = await api.fetch(new Request(clean));
           if (!response.ok || !response.headers.get("content-type")?.includes("json"))
             return response;
           const data = (await response.json()) as Record<string, any>;

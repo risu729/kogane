@@ -15,7 +15,7 @@ import type {
 const SOURCE = "sbi-vc-trade" as const;
 const PRODUCER = "collector-r2-importer";
 const SCHEMA_VERSION = "sbi-vc-trade-worker-poc-v1";
-const INGEST_CONTRACT_VERSION = "sbi-vc-r2-v2";
+export const INGEST_CONTRACT_VERSION = "sbi-vc-r2-v2";
 const CENTRAL_CLIENT_ID = "collector-r2-sbi-vc";
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const MAX_ARTIFACT_BYTES = 4 * 1024 * 1024;

@@ -6,6 +6,7 @@ import { chromium, type Browser } from "playwright";
 import { createApi } from "../src/api.ts";
 import { buildFixture } from "./fixture.ts";
 import type { IdentityAccountRow, IdentityInstrumentRow } from "../shared/identity-contract.ts";
+import { CENTRAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
 
 const client = join(import.meta.dir, "../web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -40,7 +41,7 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
           return Response.json({
             apiVersion: 1,
             source: { kind: "central-store", classification: "synthetic" },
-            capabilities: { readOnly: true, rawEvidence: true, liveCollectors: false },
+            capabilities: CENTRAL_STORE_CAPABILITIES,
           });
         if (url.pathname.startsWith("/api/identity/")) {
           if (url.pathname.endsWith("/connections"))
@@ -130,7 +131,13 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
             instruments: [],
             metrics: [],
           });
-        if (url.pathname.startsWith("/api/")) return api.fetch(request);
+        if (url.pathname.startsWith("/api/")) {
+          // The mocked metadata advertises production capabilities; the local
+          // API behind it advertises none, so its requests go through bare.
+          const clean = new URL(url);
+          clean.search = "";
+          return api.fetch(new Request(clean));
+        }
         return new Response(
           Bun.file(
             url.pathname.startsWith("/assets/")

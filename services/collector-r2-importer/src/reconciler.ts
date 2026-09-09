@@ -1,3 +1,9 @@
+import {
+  resumeFromWire,
+  type ImportCommand,
+  type ResumeKind,
+  type ResumeState,
+} from "./adapters/contract";
 import { ImportError } from "./error";
 
 export const RECONCILER_SCHEMA = "kogane-r2-outbox-reconciler-v1" as const;
@@ -82,10 +88,16 @@ export const RECONCILER_SOURCES = {
       /^raw\/v-point-pay-email\/20\d{2}\/(?:0[1-9]|1[0-2])\/(?:0[1-9]|[12]\d|3[01])\/[0-9a-f]{64}\.json$/u,
     resume: "none",
   },
-} as const;
+} as const satisfies Record<string, ReconcilerSourceSpec>;
+
+export interface ReconcilerSourceSpec {
+  readonly bucket: string;
+  readonly prefix: string;
+  readonly terminal: RegExp;
+  readonly resume: ResumeKind;
+}
 
 export type ReconcilerSource = keyof typeof RECONCILER_SOURCES;
-type ResumeKind = (typeof RECONCILER_SOURCES)[ReconcilerSource]["resume"];
 
 export interface ImportMessage {
   schemaVersion: typeof RECONCILER_SCHEMA;
@@ -121,11 +133,7 @@ export type ImportOutcome =
 
 export interface ReconcilerDependencies {
   accountId: string;
-  importTerminal(
-    source: ReconcilerSource,
-    terminalKey: string,
-    resume: string | number | null,
-  ): Promise<ImportOutcome>;
+  importTerminal(command: ImportCommand, resume: ResumeState): Promise<ImportOutcome>;
   list(
     source: ReconcilerSource,
     prefix: string,
@@ -146,9 +154,8 @@ export async function processReconcilerMessage(
       ? importMessage(parsed.source, parsed.terminalKey, 0, 0, null)
       : parsed;
   const outcome = await dependencies.importTerminal(
-    current.source,
-    current.terminalKey,
-    current.resume,
+    { source: current.source, terminalKey: current.terminalKey, mode: "staged" },
+    resumeFromWire(RECONCILER_SOURCES[current.source].resume, current.resume),
   );
   if (outcome.status === "sealed") {
     return { kind: "import", source: current.source, outcome: "sealed" };

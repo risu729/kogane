@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { classifyBalance } from "../shared/balance-semantics.ts";
 import type { BalanceRow } from "../shared/api-contract.ts";
+import { CENTRAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
 
 const client = join(import.meta.dir, "../web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -115,7 +116,7 @@ describe.if(runnable)("balance meaning and evidence display", () => {
           return Response.json({
             apiVersion: 1,
             source: { kind: "central-store", classification: "synthetic" },
-            capabilities: { readOnly: true, rawEvidence: true, liveCollectors: false },
+            capabilities: CENTRAL_STORE_CAPABILITIES,
           });
         if (path === "/api/filter-options")
           return Response.json({ sources: [], accounts: [], instruments: [], metrics: [] });
