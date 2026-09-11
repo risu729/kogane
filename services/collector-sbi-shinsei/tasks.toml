@@ -17,7 +17,8 @@ description = "Run the services/collector-sbi-shinsei tests."
 depends = ["sbi-shinsei-worker:types"]
 dir = "services/collector-sbi-shinsei"
 run = [
-	"bun test",
+	"bun test ./test/*.test.ts",
+	"./node_modules/.bin/vitest run",
 	"bash test/admin-token-sync.test.sh",
 	"node --test container/relay-lifecycle.node-test.mjs container/child-lifecycle.node-test.mjs",
 ]

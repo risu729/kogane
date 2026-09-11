@@ -164,3 +164,88 @@ email handler, manual upload) can use it unchanged.
    short-lived Container with only source-scoped credentials; see
    `docs/authenticated-collectors.md` and `docs/credentials.md`. Sources that
    rarely change can stay manual forever.
+
+## Shared DATA bucket per source (U09)
+
+Work item **U09** (chapter 03, decisions D7/D12/D13) switches the collectors
+one source at a time from "stage into a per-source bucket, then ask
+`kogane-collector-r2-importer` to upload it centrally" to "write the run into
+the shared `DATA` bucket and finish it with a terminal". The contract is
+`packages/collection` (`docs/collection-contract.md`); the consumer is the
+Processor (U08).
+
+Every collector gains the same two configuration items and the same switch:
+
+| Item                       | Value                                                                      |
+| -------------------------- | -------------------------------------------------------------------------- |
+| var `COLLECTION_TARGET`    | `legacy` (default) or the exact string `shared`; anything else is `legacy` |
+| R2 binding `DATA`          | `kogane-raw-evidence`, the existing central bucket                         |
+| `src/collection-target.ts` | the only place that reads the var, with no `Env` dependency                |
+
+Rules that hold for every source:
+
+- **Legacy mode is byte-for-byte unchanged.** The staging write, the manifest,
+  the central upload and every existing test are untouched.
+- **Shared mode skips the central upload** (G1-15). The Processor reads the
+  collector's own bytes; nothing copies or re-uploads an object.
+- The per-source staging bucket **keeps** its write in shared mode. It is the
+  collector's own outbox and the read source for anything that exists only
+  there (plan 03 §7); U15 retires it once nothing does.
+- **The Worker writes the run, never the container.** Container images and
+  relay protocols are unchanged by this work item.
+- Only _sanitized_ bytes reach `DATA` — the same artifacts the importer sends
+  centrally today, produced by the same sanitization rules. Session cookies,
+  credentials, container relay tokens and rotating CSRF tokens are removed
+  before an object is planned, and a per-source test asserts the bucket
+  contents contain none of them.
+- `providerOutcome` comes from the run's own outcome: `partial` stays
+  `partial`, and a failure with no artifacts is a `failed` terminal with a safe
+  error code rather than a complete observation of nothing (G1-08, G1-09).
+- A run stopped by something only a person can clear (a rejected credential, a
+  revoked session, an unapproved MFA challenge) ends `failed` with a
+  `human_required_*` code and a `waitingForHuman` signal. No collector retries
+  a login, and none gained an unattended re-authentication (G3-10, G3-11).
+- Crons, Durable Object classes and migration tags, containers, tunnels and
+  Worker names are untouched, so no source can end up collecting twice.
+
+**Deploy order** (11 §4, G5-14): the consumer first, then the producer.
+
+1. Deploy the Processor (U08) with `SHARED_R2_INGEST_ENABLED` still off, then
+   turn that flag on so terminals are read.
+2. Deploy the collector with `COLLECTION_TARGET=legacy` (this change; merged is
+   not enabled).
+3. Set `COLLECTION_TARGET=shared` for **one** source and redeploy it.
+4. Watch that source's next run, then move to the next source.
+
+**Rollback**: set `COLLECTION_TARGET` back to `legacy` and redeploy that one
+collector. Terminals already written stay valid and are picked up by the
+Processor's bounded `runs/` scan; the staging bucket still has the same run, so
+the legacy backfill route can import it if needed.
+
+### sbi-shinsei (`kogane-sbi-shinsei-collector-poc`)
+
+Container + Durable Object + `tamia` tunnel; one daily cron (`0 21 * * *`),
+unchanged. Terminal source id `sbi-shinsei` (the Processor maps it to the CORE
+source `sbi-shinsei-bank`).
+
+| Artifact                                  | Role                         | Bytes                                                             |
+| ----------------------------------------- | ---------------------------- | ----------------------------------------------------------------- |
+| `raw-<dataset>.json` (four CORE datasets) | `sanitized_provider_capture` | the provider response with `header.newToken` removed              |
+| `normalized.json`                         | `collector_derived`          | the collector's own normalized snapshot                           |
+| `manifest.json`                           | `collector_derived`          | the collector manifest with failures reduced to allowlisted codes |
+
+- `requestedScope`: `full_snapshot` — this source is a current snapshot and the
+  trigger accepts no date range. No units, ranges or reports.
+- `transformations`: one `redacted` step per provider capture
+  (`sbi-shinsei-token-sanitizer`), one `extracted` step for `normalized.json`
+  (`sbi-shinsei-normalizer`), matching the central descriptors.
+- `acquisitionSessionRef`: none. The container authenticates once per run and no
+  session survives it, so there is no generation to reference (12 §4).
+- Human-required: a rejected credential or refused login (`credential-shape`,
+  `credential-validation`, `login-rejected`, `login-failed`) ends the run
+  `failed` with `human_required_credentials`.
+- Verified with synthetic fixtures only:
+  `test/shared-collection.test.ts` (decisions, sanitization, outcomes,
+  end-to-end target switch with a mocked container) and
+  `worker-test/shared-data-bucket.test.ts` (a real Miniflare R2 `DATA` bucket).
+  No provider was contacted and no production bucket was read or written.

@@ -861,3 +861,18 @@ success and retained failure manifests/artifacts, the Container application and
 image revisions, and the explicit-tunnel VPC binding configuration. The local
 Docker test Container/image should be removed after validation; the cloud
 resources remain active for scheduled collection and evidence retention.
+
+## Shared DATA bucket (U09, 2026-09-11)
+
+The collector gained a `COLLECTION_TARGET` var (default `legacy`) and a `DATA`
+binding to the central `kogane-raw-evidence` bucket. In `shared` mode the
+Worker persists the run itself with `packages/collection` — sanitized provider
+captures, the normalized snapshot and the sanitized collector manifest, then
+the `terminal-v1` manifest last — and the upload to
+`kogane-collector-r2-importer` is skipped. Legacy mode is unchanged, the daily
+`0 21 * * *` cron is unchanged, and the Container image, relay and tunnel are
+untouched: the Worker writes the run, not the container.
+
+Deploy order, rollback, the artifact/role table and what the terminal states
+are in [`docs/collection.md`](../collection.md#sbi-shinsei-kogane-sbi-shinsei-collector-poc).
+Merged is not enabled: the var ships as `legacy`.

@@ -182,6 +182,14 @@ Kogane-owned publisher/sync step.
   refresh/manual status check.
 - After a credential sync or session refresh, run one read-only replay smoke
   collection before enabling or resuming Cron.
+- The shared `DATA` bucket (`kogane-raw-evidence`, bound as `DATA` once a
+  collector's `COLLECTION_TARGET` is `shared`) holds financial originals,
+  terminal manifests and persisted reports only. No credential, cookie,
+  encrypted session envelope, relay token or rotating CSRF token may be planned
+  into it, and every switched collector has a test asserting the bucket's
+  contents carry none (unified plan 12 §1, U09). Session generation state
+  stays in the source's own Durable Object; nothing exposes it through the
+  original-read path.
 
 ## References
 

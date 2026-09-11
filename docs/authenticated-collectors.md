@@ -414,3 +414,30 @@ stream as expected.
 - [Container-to-Worker connections](https://developers.cloudflare.com/containers/platform-details/workers-connections/)
 - [Akamai SIEM fields](https://techdocs.akamai.com/siem-integration/docs/siem-splunk-connector)
 - [Akamai protection operation purposes](https://techdocs.akamai.com/api-definitions/reference/operation-purposes)
+
+## Where a finished run is written (U09)
+
+An authenticated collector's _storage_ target is now a deployment variable,
+separate from how it authenticates. `COLLECTION_TARGET=legacy` (the default)
+keeps the per-source staging bucket plus the central importer upload;
+`COLLECTION_TARGET=shared` makes the Worker write the run and its terminal into
+the shared `DATA` bucket (`kogane-raw-evidence`) through `packages/collection`
+and skip the central upload. Nothing about authentication changes with it: the
+same secrets, the same runtime, the same Container image, the same tunnel, the
+same cron.
+
+Two rules this adds to the checklist above:
+
+- **Never store session material centrally.** Only sanitized artifacts are
+  planned into `DATA`; session cookies, encrypted session envelopes, relay
+  tokens, credentials and rotating CSRF tokens stay out of it, and each
+  collector has a test that asserts the bucket contents contain none of them
+  (12 §1, G3-07/G3-08). Session generation state stays in the source's existing
+  Durable Object.
+- **A blocked authentication is a human-required stop, not a retry.** A
+  rejected credential, a revoked session or an unapproved MFA challenge ends the
+  run `failed` with a `human_required_*` safe code and a `waitingForHuman`
+  signal for the operations API. No collector gained an unattended
+  re-authentication and none retries a login (12 §3, G3-10/G3-11).
+
+Per-source detail, deploy order and rollback: [`docs/collection.md`](collection.md#shared-data-bucket-per-source-u09).

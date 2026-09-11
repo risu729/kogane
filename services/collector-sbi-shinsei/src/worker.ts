@@ -12,10 +12,17 @@ import {
 import { Container, getContainer, type StopParams } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { collectSbiShinsei } from "./collector";
+import { collectionTarget } from "./collection-target";
 import { liveReadsEnabled } from "./read-allowlist";
 import { backfillRawEvidence, importRawEvidence, RawEvidenceImportError } from "./raw-evidence";
+import {
+  dataBucket,
+  persistSharedRun,
+  sharedRunPersisted,
+  type SharedRunSummary,
+} from "./shared-collection";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
-import type { CollectionFailure, CollectionManifest, CollectionResult } from "./types";
+import type { CollectionFailure, CollectionManifest, CollectionResult, RawArtifact } from "./types";
 
 const MAX_CONTAINER_RESPONSE_BYTES = 10 * 1024 * 1024;
 const RELAY_HOSTS = new Set([
@@ -127,12 +134,22 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-async function runCollection(env: Env): Promise<CollectionResult> {
+async function runCollection(
+  env: Env,
+  // The hook U06's operations API fills in when it dispatches a run: the
+  // operation it accepted and the attempt this invocation is. Both end up in
+  // the shared terminal so a run can be traced back to its request.
+  identity: { operationId?: string } = {},
+): Promise<CollectionResult> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
+  const attemptId = `attempt-${crypto.randomUUID()}`;
   const diagnostic = stageDiagnostics(runId);
   const prefix = runPrefix(startedAt, runId);
   const artifacts = [];
+  // The sanitized bytes of every artifact that reached the staging bucket, kept
+  // for the shared-mode terminal; they never include the container handoff.
+  const collected: RawArtifact[] = [];
   const failures: CollectionFailure[] = [];
   const container = getContainer(env.COLLECTOR_CONTAINER, `run-${runId}`);
 
@@ -201,6 +218,7 @@ async function runCollection(env: Env): Promise<CollectionResult> {
             }),
           ),
         );
+        collected.push(artifact);
       } catch (error) {
         failures.push(failure(`r2:${artifact.dataset}`, error));
       }
@@ -272,21 +290,51 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     });
   // Source collection and central import are separate outcomes.
   diagnostic.terminal(status);
-  try {
-    await diagnostic.step("raw-evidence-import", () =>
-      importRawEvidence({
-        importer: env.RAW_EVIDENCE_IMPORTER,
-        manifestKey,
+  // U09: in shared mode the run's completion record is the terminal this
+  // Worker writes into DATA, and the legacy central upload is skipped so the
+  // Processor never re-copies the bytes (G1-15). Legacy mode is unchanged.
+  const target = collectionTarget(env.COLLECTION_TARGET);
+  let shared: SharedRunSummary | undefined;
+  if (target === "shared") {
+    shared = await diagnostic.step("shared-persist", () =>
+      persistSharedRun(dataBucket(env.DATA), {
+        manifest,
+        artifacts: collected,
+        identity: {
+          attemptId,
+          ...(identity.operationId === undefined ? {} : { operationId: identity.operationId }),
+        },
       }),
     );
-  } catch (error) {
-    emitDiagnostic("error", {
-      event: "sbi-shinsei-raw-evidence-import-failed",
+    emitDiagnostic(sharedRunPersisted(shared) ? "log" : "error", {
+      event: "sbi-shinsei-shared-persist",
       runId,
-      phase: "raw-evidence-import",
-      errorCode: "raw_evidence_import_failed",
+      phase: "shared-persist",
+      outcome: shared.outcome,
+      objectCount: shared.objectCount,
+      waitingForHuman: shared.waitingForHuman,
+      ...(shared.reasonCode ? { errorCode: shared.reasonCode } : {}),
     });
-    throw error;
+    // No terminal means the run did not finish persisting; it is never
+    // reported as stored (G1-01).
+    if (!sharedRunPersisted(shared)) throw new Error("shared_persist_incomplete");
+  } else {
+    try {
+      await diagnostic.step("raw-evidence-import", () =>
+        importRawEvidence({
+          importer: env.RAW_EVIDENCE_IMPORTER,
+          manifestKey,
+        }),
+      );
+    } catch (error) {
+      emitDiagnostic("error", {
+        event: "sbi-shinsei-raw-evidence-import-failed",
+        runId,
+        phase: "raw-evidence-import",
+        errorCode: "raw_evidence_import_failed",
+      });
+      throw error;
+    }
   }
   emitDiagnostic("log", {
     event: "sbi-shinsei-collection-stored",
@@ -296,6 +344,8 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     failureCount: failures.length,
     liveReadsEnabled: manifest.liveReadsEnabled,
     manifestKey,
+    collectionTarget: target,
+    ...(shared ? { terminalKey: shared.terminalKey, terminalDigest: shared.terminalDigest } : {}),
   });
   return { ...manifest, manifestKey };
 }
