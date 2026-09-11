@@ -8371,8 +8371,8 @@
     },
     {
       "name": "ops_request_stages",
-      "classification": "unclassified-keep",
-      "planRow": "not named in 04 §2; stage progress of an accepted operations-API request (0040)",
+      "classification": "core-keep",
+      "planRow": "change plans, approvals and receipts",
       "strict": true,
       "withoutRowid": false,
       "columns": [
@@ -8462,8 +8462,8 @@
     },
     {
       "name": "ops_requests",
-      "classification": "unclassified-keep",
-      "planRow": "not named in 04 §2; accepted operations-API requests, append-only except their progress columns (0040)",
+      "classification": "core-keep",
+      "planRow": "change plans, approvals and receipts",
       "strict": true,
       "withoutRowid": false,
       "columns": [
@@ -14965,6 +14965,8 @@
         "obligation_revisions",
         "observation_decimal_values",
         "operation_receipts",
+        "ops_request_stages",
+        "ops_requests",
         "origin_template_policies",
         "parse_coverage_claims",
         "parse_input_references",
@@ -15014,8 +15016,6 @@
         "fetch_run_annotations",
         "observation_artifact_metadata",
         "observation_scan_state",
-        "ops_request_stages",
-        "ops_requests",
         "parse_issues"
       ]
     },

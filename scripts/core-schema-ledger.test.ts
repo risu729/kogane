@@ -115,10 +115,6 @@ describe("G0-01 CORE schema ledger", () => {
       "fetch_run_annotations",
       "observation_artifact_metadata",
       "observation_scan_state",
-      // The operations API's own records (0040). Kept by the same default: an
-      // accepted operator request and its stage evidence are history.
-      "ops_request_stages",
-      "ops_requests",
       "parse_issues",
     ]);
     for (const name of ledger.summary.byClassification["unclassified-keep"])

@@ -139,6 +139,14 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "core-keep",
     planRow: "change plans, approvals and receipts",
   },
+  // The operations API's own acceptance records (0040) sit in the same row:
+  // an accepted request is the promise of follow-up work, and its stage rows
+  // are the evidence that work happened. Both stay in CORE.
+  ops_requests: { classification: "core-keep", planRow: "change plans, approvals and receipts" },
+  ops_request_stages: {
+    classification: "core-keep",
+    planRow: "change plans, approvals and receipts",
+  },
   // parse jobs, replay plans, work items, lane state → CORE for now, mutable
   observation_lane_state: {
     classification: "operational-mutable",
@@ -252,15 +260,6 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
   parse_issues: {
     classification: "unclassified-keep",
     planRow: "not named in 04 §2; created with parse_coverage_claims (0025)",
-  },
-  ops_requests: {
-    classification: "unclassified-keep",
-    planRow:
-      "not named in 04 §2; accepted operations-API requests, append-only except their progress columns (0040)",
-  },
-  ops_request_stages: {
-    classification: "unclassified-keep",
-    planRow: "not named in 04 §2; stage progress of an accepted operations-API request (0040)",
   },
 };
 
