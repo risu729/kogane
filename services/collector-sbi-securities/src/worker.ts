@@ -91,7 +91,10 @@ export default {
       const window = parseWindow(url.searchParams.get("from"), url.searchParams.get("to"));
       const result = await runCollection(env, scope, window);
       const persisted = result.target === "legacy" || result.terminal.persisted;
-      return Response.json(result, {
+      // The discriminator is internal: the legacy response body stays exactly
+      // what it was, and the shared one is told apart by its `terminal`.
+      const { target: _target, ...body } = result;
+      return Response.json(body, {
         status: result.status === "failed" || !persisted ? 502 : 200,
       });
     } catch (error) {
@@ -197,7 +200,13 @@ async function runCollection(
             ),
           );
         } catch (error) {
-          failures.push(failure(datasetScope(artifact.dataset), `r2:${artifact.dataset}`, error));
+          failures.push(
+            failure(
+              artifact.dataset.startsWith("foreign") ? "foreign" : "domestic",
+              `r2:${artifact.dataset}`,
+              error,
+            ),
+          );
           safeFailures.push({
             scope: datasetScope(artifact.dataset),
             code: safeFailureCode(error),
