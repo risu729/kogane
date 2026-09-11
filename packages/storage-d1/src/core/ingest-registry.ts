@@ -22,6 +22,19 @@ export async function ingestClientActive(db: D1Like, clientId: string): Promise<
   return active !== null;
 }
 
+/**
+ * Whether the source id is declared and active. A terminal that names a
+ * source nobody declared is not authorized by any route, and the Processor
+ * refuses it before it registers anything (U08).
+ */
+export async function sourceDeclared(db: D1Like, sourceId: string): Promise<boolean> {
+  const row = await db
+    .prepare("SELECT 1 AS ok FROM sources WHERE id = ? AND active = 1")
+    .bind(sourceId)
+    .first<{ ok: number }>();
+  return row !== null;
+}
+
 /** Whether this client may record for this (producer, source) pair right now. */
 export async function ingestRouteActive(
   db: D1Like,

@@ -131,6 +131,52 @@ export async function putObject(
   return { sha256, byteSize, reused, recordedBy: clientId, authorizedByRunId: runId };
 }
 
+/**
+ * Registers bytes that are *already* in the object store, without writing
+ * anything to it.
+ *
+ * The shared DATA bucket and the object store of this registration are the
+ * same bucket, and `packages/collection` writes its objects at exactly
+ * {@link blobKeyFor}'s key with the same digest, size and content type. So a
+ * run persisted by a collector under the shared contract is registered by
+ * pointing CORE at the bytes that are there: no copy, no re-upload, no second
+ * copy of anything (unified plan 03 §1, §4; acceptance G1-15).
+ *
+ * This is deliberately not `putObject` with an empty body. There is no code
+ * path here that can write to the bucket: an object that is absent, the wrong
+ * size or the wrong digest is refused, and the caller records the reason as a
+ * failed stage instead (G1-14).
+ */
+export async function adoptStoredObject(
+  env: IngestEnv,
+  clientId: string,
+  runId: number,
+  sha256: string,
+  byteSize: number,
+): Promise<StoredObject> {
+  await loadRun(env, clientId, runId);
+  if (!SHA256.test(sha256)) throw new IngestError(400, "invalid_sha256");
+  const maxObjectBytes = Number(env.MAX_OBJECT_BYTES ?? DEFAULT_MAX_OBJECT_BYTES);
+  if (!Number.isSafeInteger(maxObjectBytes) || maxObjectBytes <= 0) {
+    throw new IngestError(503, "object_limit_configuration_invalid");
+  }
+  if (!Number.isSafeInteger(byteSize) || byteSize < 0 || byteSize > maxObjectBytes) {
+    throw new IngestError(413, "object_too_large");
+  }
+  const blobKey = blobKeyFor(sha256);
+  const stored = await env.EVIDENCE.head(blobKey);
+  // Absent is not "upload it for me": the producer claimed it had persisted
+  // these bytes, and it had not. Saying so is the whole point of the check.
+  if (!stored) throw new IngestError(409, "raw_object_not_stored");
+  verifyStoredObject(stored, sha256, byteSize);
+
+  const now = Date.now();
+  await insertRawObjectIfAbsent(env.DB, sha256, byteSize, blobKey, now);
+  const row = await readRawObjectRecord(env.DB, sha256);
+  assertSame(row, { sha256, byte_size: byteSize, blob_key: blobKey }, "raw_object_conflict");
+  return { sha256, byteSize, reused: true, recordedBy: clientId, authorizedByRunId: runId };
+}
+
 function verifyStoredObject(
   object: StoredObjectLike,
   sha256: string,

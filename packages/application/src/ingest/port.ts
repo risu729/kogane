@@ -28,7 +28,7 @@ import { requireActiveClient } from "./access.ts";
 import { addArtifact } from "./catalogue.ts";
 import type { IngestEnv, RecordValue } from "./contract.ts";
 import { addInventoryItems, beginInventory } from "./inventory.ts";
-import { putObject } from "./objects.ts";
+import { adoptStoredObject, putObject } from "./objects.ts";
 import { addRunReport, createRun } from "./registration.ts";
 import { addFailedAttempt, sealRun, sealStagedInventory } from "./seal.ts";
 import { addPageGroup, addRunRange, addUnit, addUnitReport } from "./structure.ts";
@@ -41,6 +41,14 @@ export interface RunRegistrationPort {
   addUnitReport(unitId: number, input: AddUnitReportRequest): Promise<void>;
   /** True when the bytes were already stored (the legacy API's 200 vs 201). */
   uploadObject(runId: number, sha256: string, bytes: Uint8Array): Promise<boolean>;
+  /**
+   * Registers bytes that are already in the object store, without sending or
+   * writing any. Present only on the in-process port: the legacy HTTP
+   * protocol has no such operation, and the collectors that speak it upload
+   * their bytes. A shared-R2 run takes this path, so registering it never
+   * copies an object (U08, acceptance G1-15).
+   */
+  adoptObject?(runId: number, sha256: string, byteSize: number): Promise<void>;
   /** The descriptor digest the server computed; never the client's own. */
   addArtifact(runId: number, input: ArtifactRequest): Promise<string>;
   beginInventory(
@@ -101,6 +109,9 @@ export function directRegistrationPort(env: IngestEnv, clientId: string): RunReg
         body: bytes,
       });
       return stored.reused;
+    },
+    async adoptObject(runId, sha256, byteSize) {
+      await adoptStoredObject(env, clientId, runId, sha256, byteSize);
     },
     async addArtifact(runId, input) {
       return (await addArtifact(env, clientId, runId, body(input))).descriptorSha256;

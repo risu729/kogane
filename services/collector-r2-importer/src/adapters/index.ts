@@ -1,11 +1,25 @@
-import { ImportError } from "../error";
+// The per-source import registry of this Worker.
+//
+// U08 moved the source-agnostic half — route indexing, one import step, the
+// Queue continuation mapping and the registry consistency check — to
+// `services/observation-pipeline/src/legacy-import/adapters/registry.ts`,
+// because that logic is the Processor's now. What stays here is the registry
+// literal and the twelve per-source adapters, each of which binds this
+// Worker's own R2 bindings and secrets. Nothing about this Worker's behaviour
+// changed; it keeps running until U15 retires it.
+import {
+  type AdapterRegistry,
+  checkImportAdapterRegistry as checkRegistry,
+  executeImportWith,
+  reconcilerOutcome,
+  routeIndex,
+} from "../../../observation-pipeline/src/legacy-import/adapters/registry.ts";
 import { RECONCILER_SOURCES, type ImportOutcome } from "../reconciler";
 import {
   type ImportAdapter,
   type ImportCommand,
   type ImportExecution,
   type ImportSource,
-  type ImportStepResult,
   type ResumeKind,
   type ResumeState,
 } from "./contract";
@@ -32,10 +46,11 @@ export type {
   ResumeKind,
   ResumeState,
 } from "./contract";
+export { reconcilerOutcome };
 
 /**
  * One adapter per reconciler source. Adding a source means adding its adapter
- * here and its queue spec to `RECONCILER_SOURCES`; `checkImportAdapterRegistry`
+ * here and its queue spec to `RECONCILIER_SOURCES`; `checkImportAdapterRegistry`
  * fails CI when the two disagree.
  */
 export const IMPORT_ADAPTERS = {
@@ -56,123 +71,39 @@ export const IMPORT_ADAPTERS = {
 export type ImportAdapters = typeof IMPORT_ADAPTERS;
 export type AdapterResult<S extends ImportSource> = Awaited<ReturnType<ImportAdapters[S]["step"]>>;
 
-type AdapterRegistry = Readonly<Record<string, ImportAdapter>>;
-
-function routeIndex(
-  registry: AdapterRegistry,
-  select: (adapter: ImportAdapter) => string | undefined,
-): ReadonlyMap<string, ImportAdapter> {
-  const index = new Map<string, ImportAdapter>();
-  for (const adapter of Object.values(registry)) {
-    const path = select(adapter);
-    if (path !== undefined) index.set(path, adapter);
-  }
-  return index;
-}
-
-const importRunPath = (adapter: ImportAdapter) => adapter.http?.importRun;
-const backfillPath = (adapter: ImportAdapter) => adapter.http?.backfillPage.path;
-const IMPORT_RUN_ROUTES = routeIndex(IMPORT_ADAPTERS, importRunPath);
-const BACKFILL_ROUTES = routeIndex(IMPORT_ADAPTERS, backfillPath);
+const registry = IMPORT_ADAPTERS as unknown as AdapterRegistry<Env>;
+const IMPORT_RUN_ROUTES = routeIndex(registry, (adapter) => adapter.http?.importRun);
+const BACKFILL_ROUTES = routeIndex(registry, (adapter) => adapter.http?.backfillPage.path);
 
 export function importAdapter<S extends ImportSource>(source: S): ImportAdapters[S] {
   return IMPORT_ADAPTERS[source];
 }
 
 export function importRunAdapter(pathname: string): ImportAdapter | undefined {
-  return IMPORT_RUN_ROUTES.get(pathname);
+  return IMPORT_RUN_ROUTES.get(pathname) as ImportAdapter | undefined;
 }
 
 export function backfillAdapter(pathname: string): ImportAdapter | undefined {
-  return BACKFILL_ROUTES.get(pathname);
+  return BACKFILL_ROUTES.get(pathname) as ImportAdapter | undefined;
 }
 
-/**
- * The single application command behind every entry point. HTTP routes,
- * backfill cursors, and the Queue reconciler all validate their own wire
- * shape, then call this with the internal command and resume state.
- */
-export async function executeImport<S extends ImportSource>(
+/** This Worker's entry point into the shared execution step. */
+export function executeImport<S extends ImportSource>(
   env: Env,
   source: S,
   command: ImportCommand,
   resume: ResumeState,
 ): Promise<ImportExecution<AdapterResult<S>>> {
-  const adapter: ImportAdapter = IMPORT_ADAPTERS[source];
-  if (command.source !== source) throw new ImportError(500, "import_command_source_mismatch");
-  if (resume.kind !== "none" && resume.kind !== adapter.resumeKind) {
-    throw new ImportError(500, "import_resume_kind_mismatch");
-  }
-  const result = (await adapter.step(env, command, resume)) as AdapterResult<S>;
-  const step: ImportStepResult = result;
-  return { result, status: step.status === "deferred" ? "deferred" : "sealed" };
+  const adapter = IMPORT_ADAPTERS[source] as unknown as ImportAdapter<AdapterResult<S>>;
+  return executeImportWith(adapter, env, source, command, resume);
 }
 
-/** Maps a source result to the Queue continuation contract; fails closed on non-progress. */
-export function reconcilerOutcome(result: ImportStepResult): ImportOutcome {
-  if (result.status !== "deferred") return { status: "sealed" };
-  if (!Number.isSafeInteger(result.nextOffset) || (result.nextOffset ?? 0) <= 0) {
-    throw new ImportError(409, "reconciler_import_stalled");
-  }
-  const resume = result.continuation ?? result.nextOffset;
-  if (resume === undefined) throw new ImportError(409, "reconciler_continuation_missing");
-  return { status: "deferred", resume, progress: result.nextOffset! };
-}
-
-const ROUTE_PATTERN = /^\/v1\/[a-z0-9-]+\/(?:import-run|backfill-page)$/u;
-const CONTRACT_VERSION_PATTERN = /^[a-z0-9-]+-v\d+$/u;
-
-/**
- * Registry consistency problems; empty when adapters and reconciler sources
- * agree. The parameters exist so tests can prove the check rejects drift.
- */
+/** Registry consistency, with this Worker's registry and source table. */
 export function checkImportAdapterRegistry(
-  registry: AdapterRegistry = IMPORT_ADAPTERS,
+  adapters: Readonly<Record<string, ImportAdapter>> = IMPORT_ADAPTERS,
   sources: Readonly<Record<string, { readonly resume: ResumeKind }>> = RECONCILER_SOURCES,
 ): string[] {
-  const problems: string[] = [];
-  const importRuns = routeIndex(registry, importRunPath);
-  const backfills = routeIndex(registry, backfillPath);
-  for (const [source, spec] of Object.entries(sources)) {
-    const adapter = registry[source];
-    if (!adapter) {
-      problems.push(`${source}: reconciler source has no import adapter`);
-      continue;
-    }
-    if (adapter.id !== source) problems.push(`${source}: adapter id is ${adapter.id}`);
-    if (adapter.resumeKind !== spec.resume) {
-      problems.push(
-        `${source}: adapter resume kind ${adapter.resumeKind} != reconciler ${spec.resume}`,
-      );
-    }
-  }
-  for (const [key, adapter] of Object.entries(registry)) {
-    if (!Object.hasOwn(sources, key)) {
-      problems.push(`${key}: adapter has no reconciler source`);
-    }
-    if (!CONTRACT_VERSION_PATTERN.test(adapter.contractVersion)) {
-      problems.push(`${key}: contract version is not a versioned source contract id`);
-    }
-    if (typeof adapter.repairPolicy?.outbox !== "function") {
-      problems.push(`${key}: repair policy declares no outbox binding`);
-    }
-    if (!adapter.http) continue;
-    const { importRun, backfillPage } = adapter.http;
-    if (!ROUTE_PATTERN.test(importRun) || !importRun.endsWith("/import-run")) {
-      problems.push(`${key}: import-run path is not a versioned import-run route`);
-    }
-    if (!ROUTE_PATTERN.test(backfillPage.path) || !backfillPage.path.endsWith("/backfill-page")) {
-      problems.push(`${key}: backfill-page path is not a versioned backfill-page route`);
-    }
-    if (!Number.isSafeInteger(backfillPage.cursorBudget) || backfillPage.cursorBudget <= 0) {
-      problems.push(`${key}: backfill cursor budget must be a positive integer`);
-    }
-    if (importRuns.get(importRun) !== adapter) {
-      problems.push(`${key}: import-run route is not routed to this adapter`);
-    }
-    if (backfills.get(backfillPage.path) !== adapter) {
-      problems.push(`${key}: backfill-page route is not routed to this adapter`);
-    }
-  }
-  return problems;
+  return checkRegistry(adapters as unknown as AdapterRegistry<Env>, sources);
 }
+
+export type { ImportOutcome };
