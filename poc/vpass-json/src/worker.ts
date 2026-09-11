@@ -1,4 +1,7 @@
-import { createDiagnostics, safeErrorDetails } from "../../collector-diagnostics/src/index";
+import {
+  createDiagnostics,
+  safeErrorDetails,
+} from "../../../packages/collector-diagnostics/src/index";
 import {
   AUTH_KEY_SHA256,
   CONFIG_KEY_SHA256,

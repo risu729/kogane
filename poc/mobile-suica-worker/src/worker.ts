@@ -1,4 +1,7 @@
-import { createDiagnostics, safeErrorDetails } from "../../collector-diagnostics/src/index";
+import {
+  createDiagnostics,
+  safeErrorDetails,
+} from "../../../packages/collector-diagnostics/src/index";
 import { timingSafeEqual } from "node:crypto";
 import { collectMobileSuica, parseSessionEnvelope } from "./mobile-suica";
 import { backfillStoredRuns, importStoredRun } from "./raw-evidence";

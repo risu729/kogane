@@ -1,4 +1,4 @@
-import { createDiagnostics } from "../../collector-diagnostics/src/index";
+import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
 import { DurableObject } from "cloudflare:workers";
 import { decryptJson, encryptJson, parseCredentials } from "./crypto";
 import { japanToday, monthRanges, validateDate } from "./dates";

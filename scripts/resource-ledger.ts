@@ -122,14 +122,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED (U04; EXPERIMENT.md owner risu729, expiry 2026-12-31)",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/collector-diagnostics": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-shared",
-    proposedTarget: "packages/collector-diagnostics",
-    requiredVerification: "list the real consumers and the public exports",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
   "poc/globalpass-worker": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",
@@ -329,6 +321,15 @@ export const COMPLETED_DISPOSITIONS: readonly CompletedDisposition[] = [
     lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
     liveResourceCheck:
       "no wrangler config, no Worker, no bucket, no cron, no container application; local image deleted 2026-08-26",
+  },
+  {
+    source: "poc/collector-diagnostics",
+    proposedAction: "promote-shared",
+    result:
+      "packages/collector-diagnostics (7 collector Workers; exports createDiagnostics, safeErrorDetails)",
+    lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+    liveResourceCheck:
+      "no wrangler config of its own; it is a library every collector Worker on the account links into its bundle, so it is promoted rather than retired",
   },
   {
     source: "poc/oci-browser-probe",

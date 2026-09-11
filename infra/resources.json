@@ -59,6 +59,13 @@
       "liveResourceCheck": "no wrangler config, no Worker, no bucket, no cron, no container application; local image deleted 2026-08-26"
     },
     {
+      "source": "poc/collector-diagnostics",
+      "proposedAction": "promote-shared",
+      "result": "packages/collector-diagnostics (7 collector Workers; exports createDiagnostics, safeErrorDetails)",
+      "lastCommit": "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+      "liveResourceCheck": "no wrangler config of its own; it is a library every collector Worker on the account links into its bundle, so it is promoted rather than retired"
+    },
+    {
       "source": "poc/oci-browser-probe",
       "proposedAction": "isolate-or-retire",
       "result": "docs/research/oci-browser.md (code removed; conclusions in docs/authenticated-collectors.md)",
@@ -202,20 +209,6 @@
           "unextractedKeys": []
         }
       ]
-    },
-    {
-      "directory": "poc/collector-diagnostics",
-      "workspace": "poc",
-      "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "promote-shared",
-        "proposedTarget": "packages/collector-diagnostics",
-        "requiredVerification": "list the real consumers and the public exports",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "NO_LIVE_RESOURCE"
-      },
-      "workers": []
     },
     {
       "directory": "poc/globalpass-worker",

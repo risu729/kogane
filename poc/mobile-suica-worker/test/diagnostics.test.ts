@@ -1,7 +1,7 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import worker from "../src/worker";
 import { collectMobileSuica } from "../src/mobile-suica";
-import { safeErrorDetails } from "../../collector-diagnostics/src/index";
+import { safeErrorDetails } from "../../../packages/collector-diagnostics/src/index";
 
 const restores: Array<() => void> = [];
 afterEach(() => {

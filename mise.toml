@@ -60,6 +60,7 @@ includes = [
 	"experiments/cloudflare-runtime-probe/tasks.toml",
 	"packages/application/tasks.toml",
 	"packages/collection/tasks.toml",
+	"packages/collector-diagnostics/tasks.toml",
 	"packages/domain/tasks.toml",
 	"packages/evidence-contract/tasks.toml",
 	"packages/identity/tasks.toml",

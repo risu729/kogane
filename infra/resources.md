@@ -93,6 +93,7 @@ nothing imported it).
 | was | action | result | last commit | live-resource check |
 | --- | --- | --- | --- | --- |
 | `poc/camoufox-container-probe` | `retire-candidate` | docs/research/camoufox.md (code removed) | `5fb143e0f77a` | no wrangler config, no Worker, no bucket, no cron, no container application; local image deleted 2026-08-26 |
+| `poc/collector-diagnostics` | `promote-shared` | packages/collector-diagnostics (7 collector Workers; exports createDiagnostics, safeErrorDetails) | `5fb143e0f77a` | no wrangler config of its own; it is a library every collector Worker on the account links into its bundle, so it is promoted rather than retired |
 | `poc/oci-browser-probe` | `isolate-or-retire` | docs/research/oci-browser.md (code removed; conclusions in docs/authenticated-collectors.md) | `5fb143e0f77a` | retire branch: no wrangler config, no Worker and no OCI relay — the only collector relay is the pre-existing tamia Tunnel (GLOBAL PASS, exit JP/KIX ASN 18144); the probe's own install on host bots was purged and verified on 2026-08-26 |
 | `poc/kameleo-container-probe` | `retire-candidate` | docs/research/kameleo.md (code removed) | `5fb143e0f77a` | no wrangler config, no Worker, no bucket, no cron; local container, volume and image deleted 2026-08-26 |
 
@@ -168,15 +169,6 @@ nothing imported it).
 - Assets: —
 - Vars (names only): —
 - Required secrets (names only): —
-
-### `poc/collector-diagnostics`
-
-- Disposition (poc_disposition.csv): `promote-shared` → packages/collector-diagnostics
-- Required verification: list the real consumers and the public exports
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: NO_LIVE_RESOURCE
-
-No wrangler config.
 
 ### `poc/globalpass-worker`
 

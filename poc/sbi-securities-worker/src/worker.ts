@@ -1,4 +1,7 @@
-import { createDiagnostics, safeErrorDetails } from "../../collector-diagnostics/src/index";
+import {
+  createDiagnostics,
+  safeErrorDetails,
+} from "../../../packages/collector-diagnostics/src/index";
 import { parseCredential } from "./auth";
 import { parseHandshakeKey, secretEquals } from "./crypto";
 import { collectMainSiteArtifacts } from "./main-site";
