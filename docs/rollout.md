@@ -147,6 +147,29 @@ exists.
 8. **`SESSION_REFRESH_POLICY`** last, and only for a source whose unattended
    renewal has actually been demonstrated. Never as a convenience.
 
+### What deploying a collector does not do
+
+Step 2 deploys the collectors too — every one of them is a CD target
+([ci-cd.md § Deploy order](ci-cd.md#deploy-order-g5-14-g5-15)) — and that is
+not the same as running one. **Deploying a collector starts no collection, no
+re-authentication and no backfill.** An upload replaces the script and
+re-declares the triggers the same `wrangler.jsonc` already carries:
+
+- the crons are unchanged, and nothing invokes `scheduled` at deploy time;
+- no Durable Object alarm is set at startup — the only collector that uses
+  alarms (`services/collector-smbc-direct`) sets them inside methods a request
+  or an earlier alarm reaches, and no collector's Durable Object constructor
+  writes storage or sets an alarm;
+- no collector module runs anything at import time;
+- CD writes no Worker secret and calls no provider route; the postcheck reads
+  health routes only.
+
+What changes is which code runs the next time a cron fires — with that source's
+bank credentials. That is why collector code, its dependencies, its container
+and its scripts are in the Risk Gate ledger: the owner confirms such a change on
+the exact head **before** it merges, and the deploy that follows is automatic
+(plan 12 §5).
+
 ## 5. Rollback
 
 Per flag, the table in §2. Three things hold across all of them:
@@ -257,7 +280,35 @@ migrations and every upload. Both callers of the release workflow pass
 called workflow at all; without it the values are empty strings and the release
 fails at that same step.
 
-### 6.6 First supervised run
+### 6.6 Access service token for the release postcheck
+
+The App authenticates every request through Cloudflare Access and the Processor
+is published on no hostname, so the release checks them through the App's
+authenticated health route
+([ci-cd.md § Postcheck](ci-cd.md#postcheck)). That needs a non-human caller:
+
+- [ ] Zero Trust → Access → **Service auth** → create a service token, e.g.
+      `kogane-release-postcheck`. The Client Secret is shown once.
+- [ ] Add a policy to the **`kogane-evidence-browser`** Access application:
+      action **Service Auth**, include **Service Token → that token**. Leave
+      the existing `default` Allow policy as it is. A Service Auth policy does
+      not go through the identity or WARP rules, so it must name that one token.
+- [ ] Environment **secrets** `CF_ACCESS_CLIENT_ID` and
+      `CF_ACCESS_CLIENT_SECRET` in `production`.
+- [ ] Put the token's Client ID — the value Cloudflare puts in the JWT's
+      `common_name` claim — into `HEALTH_PROBE_TOKENS` in
+      `services/app/wrangler.jsonc` as a one-element JSON array, and deploy.
+      Access decides who reaches the Worker; the Worker decides who may read
+      the health route, and an empty list means nobody.
+
+_Not configured:_ the release fails at the authenticated postcheck, **after**
+the uploads, with a message naming these secrets. Nothing is rolled back
+automatically; re-running the release after adding them is safe (the uploads
+are idempotent and the migrations are already applied). The token can read the
+health route and nothing else: it carries no subject, so every command,
+operation and evidence route still refuses it.
+
+### 6.7 First supervised run
 
 The step-by-step first deployment — dispatch the current `main` sha (a release
 covers every Worker the ledger marks `deploy`; there is no subset input), check

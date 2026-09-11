@@ -34,6 +34,12 @@ run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
+["smbc-direct-backfill-worker:bundle"]
+description = "Emit the deployable bundle of services/collector-smbc-direct for the release manifest."
+depends = ["smbc-direct-backfill-worker:types"]
+dir = "services/collector-smbc-direct"
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/smbc-direct-backfill-worker --config wrangler.jsonc"
+
 ["ci:smbc-direct-backfill-worker"]
 description = "Every check CI runs for services/collector-smbc-direct."
 depends = ["smbc-direct-backfill-worker:typecheck", "smbc-direct-backfill-worker:test"]

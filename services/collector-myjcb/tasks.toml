@@ -29,6 +29,12 @@ run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
+["myjcb-worker:bundle"]
+description = "Emit the deployable bundle of services/collector-myjcb for the release manifest."
+depends = ["myjcb-worker:types"]
+dir = "services/collector-myjcb"
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/myjcb-worker --config wrangler.jsonc"
+
 ["ci:myjcb-worker"]
 description = "Every check CI runs for services/collector-myjcb."
 depends = ["myjcb-worker:typecheck", "myjcb-worker:test"]

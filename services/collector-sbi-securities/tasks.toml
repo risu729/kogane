@@ -29,6 +29,12 @@ run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
+["sbi-securities-worker:bundle"]
+description = "Emit the deployable bundle of services/collector-sbi-securities for the release manifest."
+depends = ["sbi-securities-worker:types"]
+dir = "services/collector-sbi-securities"
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/sbi-securities-worker --config wrangler.jsonc"
+
 ["ci:sbi-securities-worker"]
 description = "Every check CI runs for services/collector-sbi-securities."
 depends = ["sbi-securities-worker:typecheck", "sbi-securities-worker:test"]

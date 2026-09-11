@@ -39,6 +39,12 @@ run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
+["sbi-shinsei-worker:bundle"]
+description = "Emit the deployable bundle of services/collector-sbi-shinsei for the release manifest."
+depends = ["sbi-shinsei-worker:types"]
+dir = "services/collector-sbi-shinsei"
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/sbi-shinsei-worker --config wrangler.jsonc"
+
 ["ci:sbi-shinsei-worker"]
 description = "Every check CI runs for services/collector-sbi-shinsei."
 depends = ["sbi-shinsei-worker:typecheck", "sbi-shinsei-worker:test", "sbi-shinsei-worker:container"]

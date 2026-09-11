@@ -6,6 +6,7 @@ import { authenticate } from "./auth";
 import { agentApi, classifyAgentPath, sharedQueryApi } from "./agent-api";
 import { commandApi, isCommandPath } from "./command-api";
 import { classifyOpsPath, opsApi } from "./ops-api";
+import { healthApi } from "./health";
 import { observationApi } from "./observation-api";
 import { rewardsApi } from "./rewards-api";
 import { eventsApi } from "./events-api";
@@ -33,6 +34,13 @@ function classify(path: string): string {
 }
 
 async function route(request: Request, env: Env, url: URL): Promise<Response> {
+  // The release postcheck's route (unified plan 11 §6, docs/ci-cd.md), before
+  // every subject-based path because it is the only route an Access *service
+  // token* may reach — a service token has no subject, so `authenticate`
+  // refuses it. Read-only, and outside `OPS_API_ENABLED`: a postcheck that
+  // needs an unrelated flag on is not a postcheck.
+  const healthResponse = await healthApi(request, env, url);
+  if (healthResponse) return healthResponse;
   const subject = await authenticate(request, env);
   // The only non-GET boundary of this Worker: three explicit allow-lists of
   // authenticated POST paths, each checking its own grant — the agent API

@@ -59,6 +59,50 @@ or `blocked`. **A 202 never means the work happened.** Queued work, a flag
 that is off, a missing processor and a `building` snapshot are never
 completion (`contracts/stages.json`, 05 §6).
 
+### `GET /api/ops/v1/health` — the release postcheck's route
+
+One more route lives under the same prefix and is **not** one of the six. It is
+authenticated like everything else here, but it is _outside_ `OPS_API_ENABLED`:
+a postcheck that only works once an unrelated flag is on is not a postcheck
+(plan 11 §6, `services/app/src/health.ts`, [ci-cd.md](ci-cd.md#postcheck)).
+
+| Field          | What it is                                                                                                                                                                                     |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`       | `ok` (HTTP 200) or `degraded` (HTTP 503)                                                                                                                                                       |
+| `releaseSha`   | the commit the deploy stamped into `RELEASE_SHA`, or `""` outside a release                                                                                                                    |
+| `worker`       | `kogane-evidence-browser`                                                                                                                                                                      |
+| `core`         | `SELECT 1` against CORE, plus the applied migration file names in order                                                                                                                        |
+| `read`         | the same for READ, with `required` — true only while a READ flag is on                                                                                                                         |
+| `data`         | one R2 `head` of the fixed key `health/release-marker`; `markerPresent` is reported, never required                                                                                            |
+| `capabilities` | this deployment's capability snapshot, the same object `/api/meta` serves                                                                                                                      |
+| `grants`       | `{ "usable": true }`, or `{ "usable": false, "problem": "<code>" }` when `OPERATOR_SUBJECTS`/`AGENT_GRANTS` cannot be read or overlap — a code, never a subject; `usable: false` is `degraded` |
+| `processor`    | the Processor's own `/internal/health`, relayed over the `PIPELINE` service binding ([processor.md](processor.md#13-internal-health-and-the-release-postcheck))                                |
+
+It is read-only: one `SELECT 1` per database, one migration list, one bucket
+`head`, one capability snapshot, one service-binding read. No write, no
+provider request, no bank access, no collection and no backfill — and no value
+of any kind in the answer.
+
+Who may read it (`services/app/src/health.ts`):
+
+- **the operator**, graded by the same loader the six routes use, so an
+  `AGENT_GRANTS` subject is refused with `403 approval_required` here too;
+- **an Access service token** whose common name (its Client ID) is listed in
+  the deployment variable `HEALTH_PROBE_TOKENS`. This is how CD calls the
+  route. A service token carries no subject — Cloudflare issues it with an
+  empty `sub` and names it in `common_name` — so it is never an actor:
+  `authenticate` still refuses it, and it can reach no other path of this
+  Worker.
+
+An empty `HEALTH_PROBE_TOKENS` means _no_ service token, which fails the
+release rather than opening the route. A `HEALTH_PROBE_TOKENS` that is present
+but cannot be read closes the route to everyone with `503 grants_misconfigured`,
+as an unreadable grant list does on the six routes. Empty subject lists are a
+_usable_ configuration (deny-all, the committed default): `grants.usable` is
+false only for a list that is present but unreadable, or a subject named in
+both lists, and then the deployment is `degraded` — a release does not certify
+a Worker that can grade nobody.
+
 ### The operation record
 
 ```jsonc

@@ -386,7 +386,44 @@ a live delivery), the CPU and D1 cost of a scan page on a real bucket, and
 anything about production. No production resource was created, read or
 changed.
 
-## 13. Seams for later work items
+## 13. Internal health and the release postcheck
+
+This Worker is published on **no hostname at all**: `workers_dev: false`, no
+routes, no custom domain. That is deliberate (every route it has is an internal
+service-binding route), and it meant CD could not check it — a broken Processor
+uploaded and the release reported success, because the postcheck only read the
+ingest Worker's public `/health` (plan 11 §6).
+
+`GET /internal/health` closes that (`src/internal-health.ts`). It is reachable
+the same way everything else here is: the App authenticates the caller through
+Cloudflare Access and asks over the `PIPELINE` service binding
+([ops-api.md](ops-api.md#get-apiopsv1health--the-release-postchecks-route)).
+A caller that did not arrive that way is **refused, not answered**: the route
+requires the `x-kogane-internal-caller` header the calling Worker sets and
+refuses any request carrying `CF-Connecting-IP`, which Cloudflare's edge
+attaches to every request that entered from the internet.
+
+What the answer carries — counts, identifiers, file names, flags and ages, and
+never a value:
+
+| Field              | What it is                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------- |
+| `ok`               | true with HTTP 200; false with HTTP 503                                               |
+| `releaseSha`       | the commit the deploy stamped into `RELEASE_SHA`, or `""` outside a release           |
+| `core`, `read`     | `SELECT 1` and the applied migration file names of each database                      |
+| `data`, `evidence` | one R2 `head` of the fixed key `health/release-marker` through each binding           |
+| `bindings`         | which of `DB`, `READ`, `EVIDENCE`, `DATA` this deployment actually has                |
+| `flags`            | the declared value of every lane flag of §9                                           |
+| `lanes`            | `observation_lane_state`: how long ago each lane last swept                           |
+| `collectionScan`   | the bounded scan's cursor: how stale it is, whether it is mid-cycle, pages and cycles |
+| `readPointer`      | the READ active pointer: present or not, and how long ago it was switched             |
+
+The queue _consumer_ cannot be introspected from inside the isolate — it is a
+property of the configuration, not of the runtime — so what is asserted is the
+binding set instead; a deploy that lost a binding is a broken deploy. Nothing
+in this route writes, runs a lane, moves a cursor or contacts a provider.
+
+## 14. Seams for later work items
 
 - **U09** (collectors to shared R2): the producer ids in
   `config/ingest-clients.json` must be what each collector writes as

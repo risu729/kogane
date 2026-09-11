@@ -223,6 +223,17 @@ jobs:
             exit 1
           fi
           echo "The production Cloudflare credentials are in scope." | tee -a "${GITHUB_STEP_SUMMARY}"
+      - name: Stamp the release sha into the deployed configurations
+        # A deployed Worker can only answer "which commit are you" if the sha is
+        # in its configuration, and the pinned deploy Action has no input for a
+        # variable. This writes it into the runner's checkout *before* the
+        # manifest is computed, so the manifest records exactly the
+        # configuration that is uploaded and the re-verification below still
+        # holds (unified plan 11 §6, docs/ci-cd.md § Postcheck).
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          SHA: ${{ inputs.sha }}
+        run: node .github/scripts/release-sha.mjs --sha "${SHA}"
       - name: Compute the release manifest
         if: steps.decide.outputs.proceed == 'true'
         env:
@@ -409,6 +420,248 @@ jobs:
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # The collectors, in the ledger's order, after every consumer of the
+      # shared contract (unified plan 11 §4). Uploading a collector replaces
+      # its script and nothing else: its crons stay as its configuration
+      # declares them, no Durable Object alarm is set at startup and no
+      # `scheduled` event is triggered by a deploy, so a release never starts a
+      # collection, a re-authentication or a backfill (docs/ci-cd.md, G5-14).
+      # Two of them build a container image, so the runner needs Docker — the
+      # same requirement `mise run dry-run` already has. A change to what a
+      # collector bundles needs the owner's approval on the head before it can
+      # merge (infra/risk-paths.json), which is where a credential-consuming
+      # change is confirmed; the upload itself is automatic.
+      - name: Deploy the GlobalPass collector
+        id: deploy-globalpass-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-globalpass
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the Mobile Suica collector
+        id: deploy-mobile-suica-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mobile-suica-worker')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-mobile-suica
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the Money Forward collector
+        id: deploy-moneyforward-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'moneyforward-worker')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-moneyforward
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the MyJCB collector
+        id: deploy-myjcb-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'myjcb-worker')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-myjcb
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the SBI Securities collector
+        id: deploy-sbi-securities-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-securities-worker')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-sbi-securities
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the SBI Shinsei collector
+        id: deploy-sbi-shinsei-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-sbi-shinsei
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the SBI VC Trade collector
+        id: deploy-sbi-vc-trade-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-vc-trade-worker')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-sbi-vc-trade
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the SMBC Direct collector
+        id: deploy-smbc-direct-backfill-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'smbc-direct-backfill-worker')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-smbc-direct
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the Sony Bank collector
+        id: deploy-sony-bank-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sony-bank-worker')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-sony-bank
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the Vpass collector
+        id: deploy-vpass-json
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpass-json')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-vpass
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the V Point Pay collector
+        id: deploy-vpoint-pay-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-pay-worker')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-vpoint-pay
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the V Point collector
+        id: deploy-vpoint-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-worker')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-vpoint
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Postcheck the public health routes
+        # The Workers this run deployed whose health route needs no
+        # authentication: the ingest adapter and every collector with a
+        # `/health`. 200 is not enough on its own — the answer must carry the
+        # identity field the ledger names, so an edge error page or an empty
+        # body is a failure rather than a pass (unified plan 11 §6,
+        # docs/ci-cd.md § Postcheck).
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          SELECTED: ${{ steps.select.outputs.selected }}
+        run: |
+          order=infra/deploy-order.json
+          subdomain=$(jq -r '.workersDevSubdomain' "${order}")
+          status=0
+          while IFS=$'\t' read -r name worker path field; do
+            if ! jq -e --arg name "${name}" 'index($name)' <<<"${SELECTED}" > /dev/null; then continue; fi
+            url="https://${worker}.${subdomain}${path}"
+            body="${RUNNER_TEMP}/health-${name}.json"
+            code=$(curl --silent --show-error --location --max-time 20 \
+              --retry 5 --retry-delay 5 --retry-all-errors \
+              --output "${body}" --write-out '%{http_code}' "${url}" || echo 000)
+            if [[ ${code} != 200 ]]; then
+              echo "${worker}${path}: ${code}" | tee -a "${GITHUB_STEP_SUMMARY}"
+              status=1
+              continue
+            fi
+            value=$(jq -r --arg field "${field}" '
+              if type == "object" and (.[$field] != null) and (.[$field] != "")
+              then (.[$field] | tostring) else "" end' "${body}" 2> /dev/null || echo "")
+            if [[ -z ${value} ]]; then
+              echo "${worker}${path}: 200 without ${field}" | tee -a "${GITHUB_STEP_SUMMARY}"
+              status=1
+              continue
+            fi
+            echo "${worker}${path}: 200 (${field}=${value})" | tee -a "${GITHUB_STEP_SUMMARY}"
+          done < <(jq -r '.workers[] | select(.deploy and .healthPath != "" and .healthAuth == "none") | [.name, .worker, .healthPath, .healthIdentity] | @tsv' "${order}")
+          exit "${status}"
+      - name: Postcheck the App and the Processor
+        # The authenticated half (unified plan 11 §6). The App authenticates
+        # every request through Cloudflare Access and the Processor is published
+        # on no hostname, so this is the only way a release can see that the
+        # pair it just uploaded is the pair that is running: CD calls the App's
+        # `/api/ops/v1/health` with an Access *service token* and asserts the
+        # build identity, the applied CORE migration the manifest expected, READ
+        # when the deployment reads it, and the Processor's own release — which
+        # the App relays over its service binding.
+        #
+        # Without the service token the release fails here rather than passing
+        # on an unchecked App: the token and its Access policy are one-time
+        # owner setup (docs/rollout.md §6.6).
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          SELECTED: ${{ steps.select.outputs.selected }}
+          SHA: ${{ inputs.sha }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          order=infra/deploy-order.json
+          mapfile -t rows < <(jq -r '.workers[] | select(.deploy and .healthAuth == "access") | [.name, .worker, .healthPath, .healthIdentity] | @tsv' "${order}")
+          if [[ ${#rows[@]} -ne 1 ]]; then
+            echo "Expected exactly one authenticated health route in ${order}, found ${#rows[@]}." >&2
+            exit 1
+          fi
+          IFS=$'\t' read -r name worker path _field <<<"${rows[0]}"
+          if ! jq -e --arg name "${name}" 'index($name)' <<<"${SELECTED}" > /dev/null; then
+            echo "${name} was not deployed by this run; nothing to postcheck." | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+          if [[ -z ${CF_ACCESS_CLIENT_ID} || -z ${CF_ACCESS_CLIENT_SECRET} ]]; then
+            echo "The production Environment holds no CF_ACCESS_CLIENT_ID/CF_ACCESS_CLIENT_SECRET, so the App's health route cannot be read; see docs/rollout.md section 6.6." >&2
+            exit 1
+          fi
+          subdomain=$(jq -r '.workersDevSubdomain' "${order}")
+          body="${RUNNER_TEMP}/health-${name}.json"
+          # No --location: an unauthenticated request is redirected to the
+          # Access login screen, and following that would turn a rejected
+          # request into a 200 with an HTML body.
+          code=$(curl --silent --show-error --max-time 30 \
+            --retry 5 --retry-delay 5 --retry-all-errors \
+            --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
+            --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
+            --output "${body}" --write-out '%{http_code}' \
+            "https://${worker}.${subdomain}${path}" || echo 000)
+          if [[ ${code} != 200 ]]; then
+            echo "${worker}${path}: ${code}" | tee -a "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          if ! jq -e 'type == "object"' "${body}" > /dev/null 2>&1; then
+            echo "${worker}${path}: 200 without a JSON object body (an edge or login page is not the App)." | tee -a "${GITHUB_STEP_SUMMARY}" >&2
+            exit 1
+          fi
+          expected=$(jq -r '.migrations.core.files[-1].file // ""' "${RUNNER_TEMP}/release-manifest.json")
+          reasons=$(jq -r --arg sha "${SHA}" --arg migration "${expected}" '
+            [ if .status != "ok" then "status=\(.status // "absent")" else empty end,
+              if .releaseSha != $sha then "releaseSha=\(.releaseSha // "absent")" else empty end,
+              if ($migration != "") and (((.core.migrationsApplied // []) | index($migration)) == null)
+                then "CORE is missing \($migration)" else empty end,
+              if (.read.required == true) and (.read.ok != true) then "READ is required and not ok" else empty end,
+              if .processor.releaseSha != $sha then "processor.releaseSha=\(.processor.releaseSha // "absent")" else empty end
+            ] | .[]' "${body}")
+          if [[ -n ${reasons} ]]; then
+            {
+              echo "${worker}${path}: 200 but the release is not healthy:"
+              echo "${reasons}"
+            } | tee -a "${GITHUB_STEP_SUMMARY}" >&2
+            exit 1
+          fi
+          {
+            echo "${worker}${path}: 200 (release ${SHA}, CORE through ${expected})"
+            jq -r '"processor: \(.processor.releaseSha // "absent"), read required=\(.read.required), marker=\(.data.markerPresent)"' "${body}"
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
       - name: Record what this run deployed
         id: progress
         # The deployment payload was fixed when the deployment was opened, so it
@@ -434,27 +687,6 @@ jobs:
           # A run that failed before the record was written has nothing to
           # upload, and that must not become a second failure.
           if-no-files-found: warn
-      - name: Postcheck the health endpoints
-        # Only the Workers this run deployed, and only those with a public
-        # unauthenticated health route: the App and the Processor have none by
-        # design (unified plan 11 §6, docs/ci-cd.md).
-        if: steps.decide.outputs.proceed == 'true'
-        env:
-          SELECTED: ${{ steps.select.outputs.selected }}
-        run: |
-          order=infra/deploy-order.json
-          subdomain=$(jq -r '.workersDevSubdomain' "${order}")
-          status=0
-          while IFS=$'\t' read -r name worker path; do
-            if ! jq -e --arg name "${name}" 'index($name)' <<<"${SELECTED}" > /dev/null; then continue; fi
-            url="https://${worker}.${subdomain}${path}"
-            code=$(curl --silent --show-error --location --max-time 20 \
-              --retry 5 --retry-delay 5 --retry-all-errors \
-              --output /dev/null --write-out '%{http_code}' "${url}" || echo 000)
-            echo "${worker}${path}: ${code}" | tee -a "${GITHUB_STEP_SUMMARY}"
-            if [[ ${code} != 200 ]]; then status=1; fi
-          done < <(jq -r '.workers[] | select(.deploy and .healthPath != "") | [.name, .worker, .healthPath] | @tsv' "${order}")
-          exit "${status}"
       - name: Record the release as successful
         if: ${{ success() && steps.deployment.outputs.deployment-id != '' }}
         env:

@@ -32,7 +32,15 @@
     "COLLECTION_ACCOUNT_ID": "59ea63cc00914b30ca410b062ae2bb7f",
     // The ingest client the Processor registers as. Its client row and its
     // per-source routes are CORE rows created per source by U09.
-    "COLLECTION_INGEST_CLIENT": "processor-shared-r2"
+    "COLLECTION_INGEST_CLIENT": "processor-shared-r2",
+    // U14 postcheck (plan 11 §6, docs/processor.md). The release stamps the
+    // deployed commit here before the upload
+    // (`.github/scripts/release-sha.mjs`), because the pinned deploy Action
+    // has no input for a variable; it is empty in the repository and in every
+    // local run. `/internal/health` reports it, and the App's health route
+    // relays it, which is how CD sees that this Worker carries the release it
+    // just uploaded.
+    "RELEASE_SHA": ""
   },
   // Queue `kogane-collection-terminals` DOES NOT EXIST YET: it is created by
   // the first deploy that carries this config (`wrangler queues create`, or

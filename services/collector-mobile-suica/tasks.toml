@@ -29,6 +29,12 @@ run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
+["mobile-suica-worker:bundle"]
+description = "Emit the deployable bundle of services/collector-mobile-suica for the release manifest."
+depends = ["mobile-suica-worker:types"]
+dir = "services/collector-mobile-suica"
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/mobile-suica-worker --config wrangler.jsonc"
+
 ["ci:mobile-suica-worker"]
 description = "Every check CI runs for services/collector-mobile-suica."
 depends = ["mobile-suica-worker:typecheck", "mobile-suica-worker:test"]

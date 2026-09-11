@@ -38,6 +38,12 @@ run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
+["globalpass-worker:bundle"]
+description = "Emit the deployable bundle of services/collector-globalpass for the release manifest."
+depends = ["globalpass-worker:types"]
+dir = "services/collector-globalpass"
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/globalpass-worker --config wrangler.jsonc"
+
 ["ci:globalpass-worker"]
 description = "Every check CI runs for services/collector-globalpass."
 depends = ["globalpass-worker:typecheck", "globalpass-worker:test", "globalpass-worker:container"]
