@@ -222,7 +222,12 @@ Sanitizer: the collector's own `sanitizeWalletHtml` (Sony Bank Wallet
 statements), which the legacy path already applies before the importer
 forwards the object verbatim. Shared mode stores exactly those bytes and
 records the step as a `redacted` transformation with no retained input,
-because the provider HTML was deliberately not kept.
+because the provider HTML was deliberately not kept. Before a byte is planned
+it is re-checked (`assertCentralSafe`) against the invariants the importer
+enforces on the way to central storage: a wallet page that still carries a
+`;jsessionid=` or a hidden-input value, or a JSON payload with a credential
+field (`loginPwd`, `password`, `csrf`, …), throws a stable code and the run
+writes no terminal instead of publishing the value (G3-08).
 
 Terminal fields: one unit `account` (`unitKind: account`); ranges
 `request-window` (the requested `from`/`to`) and, when wallet statements were
@@ -236,8 +241,13 @@ terminal's `artifacts[]` stays authoritative.
 
 Verified with synthetic fixtures in
 `services/collector-sony-bank/test/shared-collection.test.ts` (G1-01, G1-02,
-G1-08, G1-09, G1-15, G3-07, G3-08). No provider was contacted and no
-production bucket was read or written.
+G1-08, G1-09, G1-15, G3-07, G3-08) and, for parity with the importer, in
+`services/collector-r2-importer/test/shared-target-parity.test.ts`: the same
+synthetic legacy run validated by the importer and mapped by the shared plan
+names the same digest for every artifact, and the shared `manifest.json` is
+the legacy manifest byte for byte with each `raw/…` key replaced by the
+content-addressed key. No provider was contacted and no production bucket was
+read or written.
 
 ### Money Forward ME (`services/collector-moneyforward`, `kogane-moneyforward-collector-poc`)
 
@@ -253,7 +263,12 @@ these bytes and the importer forwards them verbatim, because the collector
 keeps only the rendered aggregator pages and never the request headers,
 cookies or credential exchange that produced them. The one normalization the
 central path does apply is to the manifest, whose failure message is replaced
-by its failure code; shared mode writes that normalized manifest.
+by its failure code; shared mode writes that normalized manifest. (The
+importer also re-serializes its _parsed_ view of the manifest, so the central
+bytes today additionally carry `filename`, `kind`, `accountOrdinal` and
+`month` per artifact — values derived from the artifact key, not stated by the
+collector. The shared manifest is the collector's own record and does not
+carry them; the parity test pins exactly that difference.)
 
 Terminal fields: one unit per account (`account-NN`, `unitKind: account`),
 taken from the collector's own filename grammar — the run-wide
@@ -265,8 +280,11 @@ aggregator currently shows) listing the accounts as `unitKeys`.
 
 Verified with synthetic fixtures in
 `services/collector-moneyforward/test/shared-collection.test.ts` (G1-01,
-G1-02, G1-08, G1-09, G1-15, G3-07, G3-08). No provider was contacted and no
-production bucket was read or written.
+G1-02, G1-08, G1-09, G1-15, G3-07, G3-08) and, for parity with the importer,
+in `services/collector-r2-importer/test/shared-target-parity.test.ts` (every
+page digest identical; the manifest identical field by field with the keys
+substituted). No provider was contacted and no production bucket was read or
+written.
 
 ### MyJCB (`services/collector-myjcb`, `kogane-myjcb-collector-poc`)
 
@@ -281,14 +299,24 @@ production bucket was read or written.
 Sanitizer: the collector's own `redactedStatementHtml` (parse5 tree: scripts,
 styles, textareas, embedding elements and every URL-bearing attribute removed,
 every `value=` replaced by `[redacted]`, card numbers in text replaced), which
-is what the legacy path already stores. Shared mode adds `assertRedactedHtml`,
-the invariants the central path enforces, checked again on the bytes about to
-leave the Worker: a redaction regression throws
+is what the legacy path already stores. Shared mode adds `assertRedactedHtml`
+(`src/redaction.ts`), the invariants the central path enforces, checked again
+on the bytes about to leave the Worker: a redaction regression throws
 `artifact_html_redaction_invalid` and the run writes no terminal rather than
-publishing the page. The collector manifest is written in its central shape —
-a connection blocker and a failure message become coarse codes
+publishing the page. The importer runs its own sanitizer pass over the stored
+page again on the way to central storage; the parity test proves that pass is
+the identity on collector output, so the shared bytes are the central bytes.
+Datasets the central path has never accepted (`debit-menu`, `debit-detail`,
+`credit-csv`, `credit-pdf`, `credit-ofx` — the importer refuses a manifest
+naming one with `manifest_dataset_unobserved`) are refused here the same way
+(`artifact_dataset_unobserved`): shared mode does not store centrally what the
+legacy path never let through. The collector manifest is written in its
+central shape — a connection blocker and a failure message become coarse codes
 (`human-required`, `collector-failure`, `r2-write-failure`), so upstream free
-text never reaches the shared bucket either.
+text never reaches the shared bucket either. (As for Money Forward, the
+importer's central bytes today also carry its parsed `connectionId`,
+`filename` and `ordinal` per artifact; the shared manifest keeps the
+collector's own artifact shape.)
 
 Terminal fields: one unit per connection (`<connectionId>`,
 `unitKind: connection`), so several cards in one run stay distinguishable and
@@ -305,7 +333,11 @@ login (G3-10, G3-11).
 
 Verified with synthetic fixtures in
 `services/collector-myjcb/test/shared-collection.test.ts` (G1-01, G1-02,
-G1-08, G1-09, G1-15, G1-16, G3-08, G3-11). No provider was contacted and no
+G1-08, G1-09, G1-15, G1-16, G3-08, G3-11) and, for parity with the importer,
+in `services/collector-myjcb/test/shared-parity.test.ts` (the collector's
+redacted pages validated by the importer's `validateMyJcbRun` and mapped by
+the shared plan name the same digest for every artifact, and the importer's
+central bytes equal the legacy bytes). No provider was contacted and no
 production bucket was read or written.
 
 ### Vpass (`services/collector-vpass`, `kogane-vpass-collector-poc`)
@@ -354,5 +386,9 @@ snapshot — in shared mode there is no snapshot to extract from.
 
 Verified with synthetic fixtures in
 `services/collector-vpass/test/shared-collection.test.ts` (G1-01, G1-02,
-G1-08, G1-09, G1-15, G1-16, G3-07, G3-08). No provider was contacted and no
-production bucket was read or written.
+G1-08, G1-09, G1-15, G1-16, G3-07, G3-08) and, for parity with the importer,
+in `services/collector-r2-importer/test/shared-target-parity.test.ts`: the
+importer's `validateVpassRun` over a synthetic legacy snapshot and the shared
+plan over the same raw envelopes name the same digest for all six artifacts,
+`manifest.json` included. No provider was contacted and no production bucket
+was read or written.
