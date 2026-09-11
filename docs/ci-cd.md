@@ -108,6 +108,17 @@ patterns per rule:
 | `automation`                  | `.github/workflows/**`, `.github/scripts/**`, `.github/actions/**`                                                                                            |
 | `deployment-config`           | `wrangler*.jsonc`, `wrangler*.toml`, `infra/**`                                                                                                               |
 
+Two things about the `secret-consuming-collectors` patterns are deliberate
+and dated. The `poc/*-worker/**` and `poc/sbi-securities/**` entries cover the
+collectors where they live today; the collector promotion (U04B,
+`poc/<source>-worker` → `services/collector-<source>`) is what makes them
+dead, and the item that lands it retires them together with the
+`poc/moneyforward-worker/…` rows of `scripts/automerge.test.ts`, the same way
+U15 retired the two patterns whose directories had already gone. The `bun.lock`
+entries match nothing today — U03 left one lockfile at the root — and stay
+because a per-workspace lockfile reappearing under a collector is exactly the
+dependency-closure change the rule is about.
+
 and label rules: a pull request labelled `high-risk` is treated as high risk
 even when no listed path changed. Renovate applies that label to parser, money
 and authentication dependencies (`.github/renovate.json5`), which keeps normal
