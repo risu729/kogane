@@ -200,7 +200,7 @@ describe("persistRun writes the terminal last", () => {
     const artifact = await syntheticArtifact("balance.json", '{"synthetic":true}');
     const key = objectKey(artifact.sha256);
     // A shorter body is caught by size; a same-length body only by the digest.
-    const sameLength = bytesOf('{"synthetic":tru3}');
+    const sameLength = bytesOf('{"synthetic":tree}');
     expect(sameLength.byteLength).toBe(artifact.byteSize);
     for (const [foreign, code] of [
       [bytesOf("different bytes entirely"), "object_size_mismatch"],
@@ -225,7 +225,7 @@ describe("persistRun writes the terminal last", () => {
   test("G1-07 an object race is settled by verifying the winner, never by overwriting", async () => {
     const artifact = await syntheticArtifact("balance.json", '{"synthetic":true}');
     const key = objectKey(artifact.sha256);
-    const sameLength = bytesOf('{"synthetic":tru3}');
+    const sameLength = bytesOf('{"synthetic":tree}');
     for (const [winner, expected] of [
       [bytesOf('{"synthetic":true}'), "persisted"],
       [sameLength, "incomplete"],
