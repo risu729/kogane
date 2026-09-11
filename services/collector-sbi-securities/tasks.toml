@@ -13,10 +13,13 @@ dir = "services/collector-sbi-securities"
 run = "./node_modules/.bin/tsc --noEmit"
 
 ["sbi-securities-worker:test"]
-description = "Run the services/collector-sbi-securities tests."
+description = "Run the services/collector-sbi-securities tests: the pure suite, then the Miniflare R2 suite."
 depends = ["sbi-securities-worker:types"]
 dir = "services/collector-sbi-securities"
-run = "bun test"
+run = [
+	"bun test ./test/*.test.ts",
+	"./node_modules/.bin/vitest run",
+]
 
 ["sbi-securities-worker:dry-run"]
 description = "Validate the services/collector-sbi-securities deployment without uploading it."

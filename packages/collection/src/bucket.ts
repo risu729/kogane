@@ -3,15 +3,27 @@
 // object through it, so nothing in this package depends on `@cloudflare/workers-types`.
 //
 // The shapes are structurally compatible with the Workers `R2Bucket`: a real
-// binding is assignable to `R2BucketLike` without a cast. `worker-test/`
-// asserts that against the live runtime type.
+// binding is assignable to `R2BucketLike` without a cast, including from a
+// package compiled with `exactOptionalPropertyTypes`. That is why the option
+// types below write `field?: T` and never `field?: T | undefined`: under that
+// flag an explicit `| undefined` on an option this interface hands *to* R2
+// makes the real `put`, `list` and `createMultipartUpload` signatures
+// unassignable. The result shapes R2 hands *back* keep `| undefined`, where it
+// costs nothing. Every collector's `worker-test/` suite passes its real `DATA`
+// binding straight into this interface, which is what checks it.
 
 export interface R2ChecksumsLike {
   readonly sha256?: ArrayBuffer | undefined;
 }
 
+/** What R2 reports back: a stored object may carry no content type at all. */
 export interface R2HttpMetadataLike {
   readonly contentType?: string | undefined;
+}
+
+/** What a writer declares on a put; see the note on optionality above. */
+export interface R2HttpMetadataInit {
+  readonly contentType?: string;
 }
 
 export interface R2ObjectLike {
@@ -40,23 +52,23 @@ export type R2PutValueLike = ArrayBuffer | ArrayBufferView | string | null;
 export type R2PartValueLike = ArrayBuffer | ArrayBufferView | string;
 
 export interface R2ConditionalLike {
-  readonly etagMatches?: string | undefined;
-  readonly etagDoesNotMatch?: string | undefined;
+  readonly etagMatches?: string;
+  readonly etagDoesNotMatch?: string;
 }
 
 export interface R2PutOptionsLike {
-  readonly onlyIf?: R2ConditionalLike | undefined;
+  readonly onlyIf?: R2ConditionalLike;
   /** Hex string or raw bytes; R2 rejects the write when the body does not match. */
-  readonly sha256?: string | ArrayBuffer | undefined;
-  readonly httpMetadata?: R2HttpMetadataLike | undefined;
-  readonly customMetadata?: Record<string, string> | undefined;
+  readonly sha256?: string | ArrayBuffer;
+  readonly httpMetadata?: R2HttpMetadataInit;
+  readonly customMetadata?: Record<string, string>;
 }
 
 export interface R2ListOptionsLike {
-  readonly prefix?: string | undefined;
-  readonly cursor?: string | undefined;
-  readonly limit?: number | undefined;
-  readonly delimiter?: string | undefined;
+  readonly prefix?: string;
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly delimiter?: string;
 }
 
 export interface R2ObjectsLike {
@@ -81,8 +93,8 @@ export interface R2MultipartUploadLike {
 }
 
 export interface R2MultipartOptionsLike {
-  readonly httpMetadata?: R2HttpMetadataLike | undefined;
-  readonly customMetadata?: Record<string, string> | undefined;
+  readonly httpMetadata?: R2HttpMetadataInit;
+  readonly customMetadata?: Record<string, string>;
 }
 
 export interface R2BucketLike {

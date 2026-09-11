@@ -337,3 +337,38 @@ collector proved it reached the end of the history; an unproven boundary is
 The media type in the terminal is `text/html`: `terminal-v1` media types carry
 no parameters, and `text/html` is what the central descriptor already declares
 for this artifact, with the CP932 charset a constant of the source.
+
+### `sbi-securities` (`services/collector-sbi-securities`)
+
+| Artifact key                   | Role                | Unit       |
+| ------------------------------ | ------------------- | ---------- |
+| `domestic-cash-positions.json` | `collector_derived` | `domestic` |
+| `account-assets-current.json`  | `collector_derived` | `domestic` |
+| `yen-detail-history.json`      | `collector_derived` | `domestic` |
+| `domestic-trade-records.json`  | `collector_derived` | `domestic` |
+| `foreign-cash-positions.json`  | `collector_derived` | `foreign`  |
+| `foreign-cash-balances.json`   | `collector_derived` | `foreign`  |
+| `foreign-trade-records.json`   | `collector_derived` | `foreign`  |
+
+The bytes are `JSON.stringify(artifact.body)` — the collector's re-encoded view
+of each response, exactly what it writes to the per-source bucket today and
+what the importer forwards centrally. A dataset is attributed to a unit by the
+same rule the importer uses (`foreign-` prefix → `foreign`).
+
+Sanitizer: the passkey credential, the handshake key and the MTS/GraphQL
+session ids stay in the secrets and in `src/sbi.ts`; none of them is an
+artifact. A failure reaches the terminal only as a machine code
+(`provider_http_failed`, `provider_timeout`, `provider_network_failed`,
+`credential_configuration_required`, `authentication_required`,
+`provider_response_invalid`, `operation_failed`) derived through
+`safeErrorDetails`, never as the redacted provider message the legacy manifest
+keeps (12 §6).
+
+Terminal: `source: sbi-securities`, `producer: collector-sbi-securities`,
+`producerVersion: COLLECTOR_SCHEMA_VERSION` (`sbi-worker-poc-v1`), one unit per
+requested scope (`domestic`, `foreign`, kind `scope`) carrying that scope's own
+artifact count, coverage and error code — a scope that failed does not make the
+other scope's data look incomplete, and a scope that produced nothing is
+`unknown` rather than an observation of zero. `requestedScope` is a
+`date_range` with a matching `requested-window` range when the trigger named a
+window, and `full_snapshot` with no range when it did not.
