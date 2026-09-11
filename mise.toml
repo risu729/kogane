@@ -56,6 +56,8 @@ run = "bun install --frozen-lockfile"
 includes = [
 	"tasks.toml",
 	"tasks",
+	"experiments/cloudflare-browser-run/tasks.toml",
+	"experiments/cloudflare-runtime-probe/tasks.toml",
 	"packages/application/tasks.toml",
 	"packages/collection/tasks.toml",
 	"packages/domain/tasks.toml",
@@ -64,8 +66,6 @@ includes = [
 	"packages/observation-shared/tasks.toml",
 	"packages/parsers/tasks.toml",
 	"packages/read-model/tasks.toml",
-	"poc/cloudflare-browser-run/tasks.toml",
-	"poc/cloudflare-runtime-probe/tasks.toml",
 	"poc/globalpass-worker/tasks.toml",
 	"poc/mobile-suica-worker/tasks.toml",
 	"poc/moneyforward-worker/tasks.toml",

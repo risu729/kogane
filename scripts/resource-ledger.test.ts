@@ -17,6 +17,7 @@ import {
   LEDGER_MARKDOWN_PATH,
   LIVE_INVENTORY,
   REPO_ROOT,
+  SCANNED_WORKSPACES,
   buildResourceLedger,
   renderResourceMarkdown,
 } from "./resource-ledger.ts";
@@ -52,7 +53,13 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
 
   test("every wrangler config tracked by git is in the ledger", () => {
     const result = Bun.spawnSync(
-      ["git", "ls-files", "-z", "--", "services/*/wrangler*", "poc/*/wrangler*"],
+      [
+        "git",
+        "ls-files",
+        "-z",
+        "--",
+        ...SCANNED_WORKSPACES.map((workspace) => `${workspace}/**/wrangler*`),
+      ],
       { cwd: REPO_ROOT },
     );
     expect(result.exitCode).toBe(0);
@@ -63,7 +70,7 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
     ).toEqual(tracked);
   });
 
-  test("every services/ and poc/ directory carries a plan disposition", () => {
+  test("every scanned directory carries a plan disposition", () => {
     expect(
       ledger.directories.filter((entry) => entry.disposition === null).map((e) => e.directory),
     ).toEqual([]);

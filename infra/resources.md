@@ -97,14 +97,14 @@ nothing imported it).
 
 ## Directories
 
-### `poc/cloudflare-browser-run`
+### `experiments/cloudflare-browser-run`
 
-- Disposition (poc_disposition.csv): `isolate-or-promote` → experiments/browser-run
-- Required verification: classify after checking product code and resource dependencies
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
+- Disposition (poc_disposition.csv (was poc/cloudflare-browser-run)): `isolate-or-promote` → experiments/cloudflare-browser-run (isolated; promote only on a real consumer)
+- Required verification: classified as isolate: no services/, packages/, wrangler config, task or asset outside the directory references it
+- Execution status: EXECUTED (U04; EXPERIMENT.md owner risu729, expiry 2026-12-31) (plan recorded `NOT_VERIFIED`)
 - Live resources: NO_LIVE_RESOURCE
 
-#### `kogane-vpass-browser-run-20260825` — `poc/cloudflare-browser-run/wrangler.bootstrap.jsonc`
+#### `kogane-vpass-browser-run-20260825` — `experiments/cloudflare-browser-run/wrangler.bootstrap.jsonc`
 
 - Role: not-deployed; exists in the account: no
 - Entry point: src/bootstrap.ts
@@ -123,7 +123,7 @@ nothing imported it).
 - Vars (names only): —
 - Required secrets (names only): —
 
-#### `kogane-vpass-browser-run-20260825` — `poc/cloudflare-browser-run/wrangler.jsonc`
+#### `kogane-vpass-browser-run-20260825` — `experiments/cloudflare-browser-run/wrangler.jsonc`
 
 - Role: not-deployed; exists in the account: no
 - Entry point: src/index.ts
@@ -142,14 +142,14 @@ nothing imported it).
 - Vars (names only): —
 - Required secrets (names only): PROBE_TOKEN<br>VPASS_ID<br>VPASS_PASSWORD
 
-### `poc/cloudflare-runtime-probe`
+### `experiments/cloudflare-runtime-probe`
 
-- Disposition (poc_disposition.csv): `isolate` → experiments/cloudflare-runtime
-- Required verification: set the experiment's purpose and stop condition
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
+- Disposition (poc_disposition.csv (was poc/cloudflare-runtime-probe)): `isolate` → experiments/cloudflare-runtime-probe
+- Required verification: purpose and stop condition recorded in EXPERIMENT.md
+- Execution status: EXECUTED (U04; EXPERIMENT.md owner risu729, expiry 2026-12-31) (plan recorded `NOT_VERIFIED`)
 - Live resources: NO_LIVE_RESOURCE
 
-#### `kogane-vpass-runtime-probe-20260825` — `poc/cloudflare-runtime-probe/wrangler.jsonc`
+#### `kogane-vpass-runtime-probe-20260825` — `experiments/cloudflare-runtime-probe/wrangler.jsonc`
 
 - Role: not-deployed; exists in the account: no
 - Entry point: src/index.ts

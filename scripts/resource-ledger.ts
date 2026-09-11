@@ -2,7 +2,7 @@
 // `infra/resources.md`), unified plan U01 / chapter 07 §1, §6.
 //
 // Every runtime resource this repository can deploy is declared in a
-// `wrangler*.jsonc` under `services/` or `poc/`. The upcoming directory moves
+// `wrangler*.jsonc` under `experiments/`, `services/` or `poc/`. The directory moves
 // (07 §1) must not change a single one of those identities: Worker `name`,
 // Durable Object class name and migration tag, R2 bucket, Queue, cron, D1 id.
 // The ledger is the machine-readable record of what those identities are today
@@ -97,22 +97,29 @@ export interface Disposition {
  * (raw-evidence stays deployed as the legacy ingest adapter until U15; the
  * importer is absorbed by the Processor in U08 and its Worker keeps running
  * until U15).
+ *
+ * A key is the directory as it exists *now*: an executed move re-keys its row
+ * to the new path and says so in `source`, and an executed retirement leaves
+ * this map for `COMPLETED_DISPOSITIONS` below. The map is asserted to list
+ * exactly the directories on disk, so neither can be forgotten.
  */
 export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
-  "poc/cloudflare-browser-run": {
-    source: "poc_disposition.csv",
+  "experiments/cloudflare-browser-run": {
+    source: "poc_disposition.csv (was poc/cloudflare-browser-run)",
     proposedAction: "isolate-or-promote",
-    proposedTarget: "experiments/browser-run",
-    requiredVerification: "classify after checking product code and resource dependencies",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+    proposedTarget:
+      "experiments/cloudflare-browser-run (isolated; promote only on a real consumer)",
+    requiredVerification:
+      "classified as isolate: no services/, packages/, wrangler config, task or asset outside the directory references it",
+    executionStatus: "EXECUTED (U04; EXPERIMENT.md owner risu729, expiry 2026-12-31)",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/cloudflare-runtime-probe": {
-    source: "poc_disposition.csv",
+  "experiments/cloudflare-runtime-probe": {
+    source: "poc_disposition.csv (was poc/cloudflare-runtime-probe)",
     proposedAction: "isolate",
-    proposedTarget: "experiments/cloudflare-runtime",
-    requiredVerification: "set the experiment's purpose and stop condition",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+    proposedTarget: "experiments/cloudflare-runtime-probe",
+    requiredVerification: "purpose and stop condition recorded in EXPERIMENT.md",
+    executionStatus: "EXECUTED (U04; EXPERIMENT.md owner risu729, expiry 2026-12-31)",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "poc/collector-diagnostics": {
@@ -585,9 +592,14 @@ function readWorker(root: string, configPath: string): WorkerResources {
   };
 }
 
+/** Top-level directories whose subdirectories may own a runtime resource. */
+export const SCANNED_WORKSPACES = ["experiments", "poc", "services"] as const;
+
+export type ScannedWorkspace = (typeof SCANNED_WORKSPACES)[number];
+
 export interface DirectoryEntry {
   directory: string;
-  workspace: "services" | "poc";
+  workspace: ScannedWorkspace;
   disposition: (Disposition & { liveResourceStatus: string }) | null;
   workers: WorkerResources[];
 }
@@ -617,8 +629,11 @@ export interface ResourceLedger {
   };
 }
 
-function directoriesOf(root: string, workspace: "services" | "poc"): string[] {
+function directoriesOf(root: string, workspace: ScannedWorkspace): string[] {
   const base = join(root, workspace);
+  // A scanned top-level directory disappears once its last member has moved
+  // (07 §1 empties `poc/`); that is not a reason for the generator to fail.
+  if (!existsSync(base)) return [];
   return readdirSync(base)
     .filter((entry) => statSync(join(base, entry)).isDirectory())
     .map((entry) => `${workspace}/${entry}`)
@@ -657,7 +672,7 @@ function liveResourceStatus(workers: WorkerResources[]): string {
 
 export function buildResourceLedger(root: string): ResourceLedger {
   const directories: DirectoryEntry[] = [];
-  for (const workspace of ["poc", "services"] as const) {
+  for (const workspace of SCANNED_WORKSPACES) {
     for (const directory of directoriesOf(root, workspace)) {
       const workers = configsOf(root, directory).map((config) => readWorker(root, config));
       const disposition = DISPOSITIONS[directory];

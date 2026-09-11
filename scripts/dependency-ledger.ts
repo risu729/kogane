@@ -14,14 +14,14 @@
 // it carries is the record chapter 07 §5 asks for — what the merge onto one
 // lockfile did to resolved versions.
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJsonc } from "./jsonc.ts";
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const LEDGER_MARKDOWN_PATH = "infra/dependency-resolution.md";
-const WORKSPACES = ["packages", "poc", "services"] as const;
+const WORKSPACES = ["experiments", "packages", "poc", "services"] as const;
 
 /**
  * The one-off record chapter 07 §5 asks for: what merging 28 per-package
@@ -257,6 +257,9 @@ export function readPackages(root: string): PackageRecord[] {
   const candidates: string[] = [];
   for (const workspace of WORKSPACES) {
     const base = join(root, workspace);
+    // A top-level directory disappears once its last member has moved (07 §1
+    // empties `poc/`), and `experiments/` only appears when the first one lands.
+    if (!existsSync(base)) continue;
     for (const entry of readdirSync(base).sort()) {
       if (!statSync(join(base, entry)).isDirectory()) continue;
       // `container/` holds the npm-managed image build of a collector; it is a

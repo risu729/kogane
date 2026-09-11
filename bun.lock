@@ -10,6 +10,29 @@
         "wrangler": "4.128.0",
       },
     },
+    "experiments/cloudflare-browser-run": {
+      "name": "@kogane/cloudflare-browser-run",
+      "dependencies": {
+        "@cloudflare/puppeteer": "1.4.0",
+      },
+      "devDependencies": {
+        "@types/node": "26.3.0",
+        "typescript": "5.9.3",
+        "wrangler": "4.125.0",
+      },
+    },
+    "experiments/cloudflare-runtime-probe": {
+      "name": "@kogane/cloudflare-runtime-probe",
+      "dependencies": {
+        "@cloudflare/containers": "0.3.7",
+        "impit": "0.14.3",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "typescript": "5.9.3",
+        "wrangler": "4.125.0",
+      },
+    },
     "packages/application": {
       "name": "@kogane/application",
       "devDependencies": {
@@ -70,29 +93,6 @@
       "devDependencies": {
         "@types/bun": "1.3.8",
         "typescript": "5.9.3",
-      },
-    },
-    "poc/cloudflare-browser-run": {
-      "name": "@kogane/cloudflare-browser-run",
-      "dependencies": {
-        "@cloudflare/puppeteer": "1.4.0",
-      },
-      "devDependencies": {
-        "@types/node": "26.3.0",
-        "typescript": "5.9.3",
-        "wrangler": "4.125.0",
-      },
-    },
-    "poc/cloudflare-runtime-probe": {
-      "name": "@kogane/cloudflare-runtime-probe",
-      "dependencies": {
-        "@cloudflare/containers": "0.3.7",
-        "impit": "0.14.3",
-      },
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "typescript": "5.9.3",
-        "wrangler": "4.125.0",
       },
     },
     "poc/globalpass-worker": {
@@ -473,9 +473,9 @@
 
     "@kogane/application": ["@kogane/application@workspace:packages/application"],
 
-    "@kogane/cloudflare-browser-run": ["@kogane/cloudflare-browser-run@workspace:poc/cloudflare-browser-run"],
+    "@kogane/cloudflare-browser-run": ["@kogane/cloudflare-browser-run@workspace:experiments/cloudflare-browser-run"],
 
-    "@kogane/cloudflare-runtime-probe": ["@kogane/cloudflare-runtime-probe@workspace:poc/cloudflare-runtime-probe"],
+    "@kogane/cloudflare-runtime-probe": ["@kogane/cloudflare-runtime-probe@workspace:experiments/cloudflare-runtime-probe"],
 
     "@kogane/collection": ["@kogane/collection@workspace:packages/collection"],
 

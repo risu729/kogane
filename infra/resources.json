@@ -68,20 +68,20 @@
   ],
   "directories": [
     {
-      "directory": "poc/cloudflare-browser-run",
-      "workspace": "poc",
+      "directory": "experiments/cloudflare-browser-run",
+      "workspace": "experiments",
       "disposition": {
-        "source": "poc_disposition.csv",
+        "source": "poc_disposition.csv (was poc/cloudflare-browser-run)",
         "proposedAction": "isolate-or-promote",
-        "proposedTarget": "experiments/browser-run",
-        "requiredVerification": "classify after checking product code and resource dependencies",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
+        "proposedTarget": "experiments/cloudflare-browser-run (isolated; promote only on a real consumer)",
+        "requiredVerification": "classified as isolate: no services/, packages/, wrangler config, task or asset outside the directory references it",
+        "executionStatus": "EXECUTED (U04; EXPERIMENT.md owner risu729, expiry 2026-12-31)",
         "planLiveResourceStatus": "NOT_VERIFIED",
         "liveResourceStatus": "NO_LIVE_RESOURCE"
       },
       "workers": [
         {
-          "config": "poc/cloudflare-browser-run/wrangler.bootstrap.jsonc",
+          "config": "experiments/cloudflare-browser-run/wrangler.bootstrap.jsonc",
           "name": "kogane-vpass-browser-run-20260825",
           "main": "src/bootstrap.ts",
           "role": "not-deployed",
@@ -104,7 +104,7 @@
           "unextractedKeys": []
         },
         {
-          "config": "poc/cloudflare-browser-run/wrangler.jsonc",
+          "config": "experiments/cloudflare-browser-run/wrangler.jsonc",
           "name": "kogane-vpass-browser-run-20260825",
           "main": "src/index.ts",
           "role": "not-deployed",
@@ -134,20 +134,20 @@
       ]
     },
     {
-      "directory": "poc/cloudflare-runtime-probe",
-      "workspace": "poc",
+      "directory": "experiments/cloudflare-runtime-probe",
+      "workspace": "experiments",
       "disposition": {
-        "source": "poc_disposition.csv",
+        "source": "poc_disposition.csv (was poc/cloudflare-runtime-probe)",
         "proposedAction": "isolate",
-        "proposedTarget": "experiments/cloudflare-runtime",
-        "requiredVerification": "set the experiment's purpose and stop condition",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
+        "proposedTarget": "experiments/cloudflare-runtime-probe",
+        "requiredVerification": "purpose and stop condition recorded in EXPERIMENT.md",
+        "executionStatus": "EXECUTED (U04; EXPERIMENT.md owner risu729, expiry 2026-12-31)",
         "planLiveResourceStatus": "NOT_VERIFIED",
         "liveResourceStatus": "NO_LIVE_RESOURCE"
       },
       "workers": [
         {
-          "config": "poc/cloudflare-runtime-probe/wrangler.jsonc",
+          "config": "experiments/cloudflare-runtime-probe/wrangler.jsonc",
           "name": "kogane-vpass-runtime-probe-20260825",
           "main": "src/index.ts",
           "role": "not-deployed",

@@ -14,12 +14,12 @@
     },
     {
       "name": "cloudflare-browser-run",
-      "path": "poc/cloudflare-browser-run",
+      "path": "experiments/cloudflare-browser-run",
       "config": "wrangler.jsonc"
     },
     {
       "name": "cloudflare-runtime-probe",
-      "path": "poc/cloudflare-runtime-probe",
+      "path": "experiments/cloudflare-runtime-probe",
       "config": "wrangler.jsonc"
     },
     {

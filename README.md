@@ -67,10 +67,16 @@ the CI matrices are generated, and what to do when adding a workspace.
 - [Browserless Vpass JSON collector](poc/vpass-json/README.md)
 - [SBI新生銀行 fail-closed Worker collector skeleton](poc/sbi-shinsei-worker/README.md)
 - [OCI/WSL Vpass browser comparison](poc/oci-browser-probe/README.md)
-- [Cloudflare Container runtime probe](poc/cloudflare-runtime-probe/README.md)
-- [Cloudflare Browser Rendering probe](poc/cloudflare-browser-run/README.md)
 - [Per-scraper tamia TCP bridge probe](poc/tamia-tcp-bridge/README.md)
 - [Mobile Suica JRE ID passkey collector](poc/mobile-suica-worker/README.md)
+
+## Open experiments
+
+Each one carries an `EXPERIMENT.md` with its owner, expiry and stop condition.
+Deployed code never imports them.
+
+- [Cloudflare Container runtime and egress probe](experiments/cloudflare-runtime-probe/EXPERIMENT.md)
+- [Cloudflare Browser Run probe](experiments/cloudflare-browser-run/EXPERIMENT.md)
 
 ## Finished experiments
 
