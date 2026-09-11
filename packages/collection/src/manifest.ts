@@ -11,7 +11,15 @@
 // Validation is hand-written, exactly like `packages/evidence-contract`: no
 // schema library, no new dependency, stable error codes.
 import { binaryCompare, isRecord } from "../../evidence-contract/src/json";
-import { assertRef, assertRunId, assertSha256Hex, assertSource, objectKey } from "./keys";
+import {
+  assertRef,
+  assertRelativePath,
+  assertRunId,
+  assertSha256Hex,
+  assertSource,
+  objectKey,
+  REPORT_PREFIX,
+} from "./keys";
 
 export const TERMINAL_MANIFEST_VERSION = "terminal-v1";
 
@@ -212,9 +220,12 @@ function optionalText(value: unknown, code: string, pattern = IDENT): string | u
 }
 
 function instant(value: unknown, code: string): string {
-  if (typeof value !== "string" || !ISO_INSTANT.test(value) || Number.isNaN(Date.parse(value))) {
-    fail(code);
-  }
+  if (typeof value !== "string" || !ISO_INSTANT.test(value)) fail(code);
+  // `Date.parse` rolls an impossible day over into the next month, so the
+  // instant must survive a round trip unchanged to count as a calendar date.
+  const parsed = Date.parse(value);
+  const normalized = value.length === 20 ? `${value.slice(0, 19)}.000Z` : value;
+  if (Number.isNaN(parsed) || new Date(parsed).toISOString() !== normalized) fail(code);
   return value;
 }
 
@@ -344,17 +355,32 @@ function parseReport(value: unknown): TerminalReport {
   );
   const scope = choice(entry.scope, REPORT_SCOPES, "invalid_report_scope");
   if (scope === "unit" && unitKey === undefined) fail("report_unit_key_required");
+  const reportRef = assertRef(entry.reportRef, "invalid_report_ref");
+  const ref =
+    entry.storageRef === undefined
+      ? undefined
+      : reportStorageRef(reportRef, storageRef(entry.storageRef, "invalid_report_storage_ref"));
   return {
-    reportRef: assertRef(entry.reportRef, "invalid_report_ref"),
+    reportRef,
     reportKind: text(entry.reportKind, "invalid_report_kind", SAFE_CODE),
     scope,
     outcome: choice(entry.outcome, PROVIDER_OUTCOMES, "invalid_report_outcome"),
     ...(unitKey === undefined ? {} : { unitKey }),
-    ...(entry.storageRef === undefined
-      ? {}
-      : { storageRef: storageRef(entry.storageRef, "invalid_report_storage_ref") }),
+    ...(ref === undefined ? {} : { storageRef: ref }),
     ...(safeErrorCode === undefined ? {} : { safeErrorCode }),
   };
+}
+
+/** A report lives under its own `reports/<reportRef>/` prefix and nowhere else. */
+function reportStorageRef(reportRef: string, ref: StorageRef): StorageRef {
+  const prefix = `${REPORT_PREFIX}${reportRef}/`;
+  if (!ref.key.startsWith(prefix)) fail("report_storage_ref_mismatch");
+  try {
+    assertRelativePath(ref.key.slice(prefix.length));
+  } catch {
+    fail("report_storage_ref_mismatch");
+  }
+  return ref;
 }
 
 function parseTransformation(value: unknown): TerminalTransformation {

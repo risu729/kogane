@@ -161,6 +161,79 @@ describe("terminal-v1 manifest", () => {
     expect(canonicalTerminalJson(left)).toBe(canonicalTerminalJson(right));
   });
 
+  test("the digest does not depend on the key order a caller used", async () => {
+    const forward = manifestOf();
+    const artifact = (forward.artifacts as Record<string, unknown>[])[0]!;
+    const backward = Object.fromEntries(
+      Object.entries({
+        ...forward,
+        artifacts: [Object.fromEntries(Object.entries(artifact).reverse())],
+        requestedScope: Object.fromEntries(
+          Object.entries(forward.requestedScope as Record<string, unknown>).reverse(),
+        ),
+      }).reverse(),
+    );
+    expect(Object.keys(backward)).not.toEqual(Object.keys(forward));
+    expect(canonicalTerminalJson(parseTerminalManifest(backward))).toBe(
+      canonicalTerminalJson(parseTerminalManifest(forward)),
+    );
+    expect(await terminalDigest(parseTerminalManifest(backward))).toBe(
+      await terminalDigest(parseTerminalManifest(forward)),
+    );
+  });
+
+  test("a report's storageRef must live under the report's own prefix", () => {
+    const report = (key: string): Record<string, unknown> => ({
+      reportRef: "summary-1",
+      reportKind: "summary",
+      scope: "run",
+      outcome: "success",
+      storageRef: { store: "DATA", key },
+    });
+    const parsed = parseTerminalManifest(
+      manifestOf({ reports: [report("reports/summary-1/run/summary.json")] }),
+    );
+    expect(parsed.reports[0]?.storageRef?.key).toBe("reports/summary-1/run/summary.json");
+    for (const key of [
+      objectKey(DIGEST),
+      "reports/other-report/summary.json",
+      "reports/summary-1/../other/summary.json",
+      "reports/summary-1/",
+      "reports/summary-1//summary.json",
+      "reports/summary-1/summary.json\\evil",
+    ]) {
+      expect(() => parseTerminalManifest(manifestOf({ reports: [report(key)] }))).toThrow(
+        new TerminalManifestError("report_storage_ref_mismatch"),
+      );
+    }
+  });
+
+  test("instants must be real calendar dates, not values Date.parse rolls over", () => {
+    expect(parseTerminalManifest(manifestOf({ startedAt: "2026-02-28T23:59:59Z" })).startedAt).toBe(
+      "2026-02-28T23:59:59Z",
+    );
+    for (const value of [
+      "2026-02-30T00:00:00.000Z",
+      "2026-13-01T00:00:00.000Z",
+      "2026-02-28T24:00:00.000Z",
+      "2026-02-28T00:00:00+09:00",
+    ]) {
+      expect(() =>
+        parseTerminalManifest(
+          manifestOf({ startedAt: value, completedAt: "2026-12-31T00:00:00Z" }),
+        ),
+      ).toThrow(new TerminalManifestError("invalid_started_at"));
+    }
+    expect(() =>
+      parseTerminalManifest(
+        manifestOf({
+          startedAt: "2026-09-01T00:01:00.000Z",
+          completedAt: "2026-09-01T00:00:00.000Z",
+        }),
+      ),
+    ).toThrow(new TerminalManifestError("reversed_run_window"));
+  });
+
   test("cross references must resolve inside the manifest", () => {
     expect(() =>
       parseTerminalManifest(

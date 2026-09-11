@@ -116,18 +116,23 @@ describe("terminal scan", () => {
 });
 
 describe("verifyReferencedObjects", () => {
-  test("reports each referenced object that is missing or does not match", async () => {
+  // G1-14: a referenced object that is missing or has the wrong size is
+  // reported with a code; the run is not "ok" and must not be registered.
+  test("G1-14 missing and size-mismatched objects are reported with codes", async () => {
     const bucket = new FakeR2Bucket();
     const present = await syntheticArtifact("present.json", '{"a":1}');
     const removed = await syntheticArtifact("removed.json", '{"b":2}');
-    const plan = await syntheticPlan({ artifacts: [present, removed] });
+    const truncated = await syntheticArtifact("truncated.json", '{"c":3}');
+    const plan = await syntheticPlan({ artifacts: [present, removed, truncated] });
     expect((await persistRun(bucket, plan)).outcome).toBe("persisted");
 
     bucket.entries.delete(objectKey(removed.sha256));
+    const shortened = bucket.entries.get(objectKey(truncated.sha256))!;
+    shortened.bytes = shortened.bytes.slice(0, 3);
     const manifest = planManifest(plan);
     const result = await verifyReferencedObjects(bucket, manifest);
     expect(result.outcome).toBe("blocked");
-    expect(result.checked).toBe(2);
+    expect(result.checked).toBe(3);
     expect(result.problems).toEqual([
       {
         artifactKey: "removed.json",
@@ -137,7 +142,17 @@ describe("verifyReferencedObjects", () => {
         expectedByteSize: removed.byteSize,
         observedByteSize: null,
       },
+      {
+        artifactKey: "truncated.json",
+        key: objectKey(truncated.sha256),
+        reasonCode: "object_size_mismatch",
+        expectedSha256: truncated.sha256,
+        expectedByteSize: truncated.byteSize,
+        observedByteSize: 3,
+      },
     ]);
+    // The intact object is not reported, and the problem list stops nothing else.
+    expect(result.problems.some((problem) => problem.artifactKey === "present.json")).toBe(false);
   });
 
   test("falls back to streaming the body when metadata cannot prove the digest", async () => {
