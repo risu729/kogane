@@ -1583,7 +1583,7 @@
         "requiredVerification": "confirm the Email/collection entry point and the resource identity",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-vpoint-pay-collector-poc; buckets=kogane-vpoint-pay-collector-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-vpoint-pay-collector-poc; buckets=kogane-raw-evidence,kogane-vpoint-pay-collector-poc)"
       },
       "workers": [
         {
@@ -1599,6 +1599,11 @@
             {
               "binding": "SNAPSHOTS",
               "bucket": "kogane-vpoint-pay-collector-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -1622,6 +1627,7 @@
           "vpcNetworks": [],
           "serviceBindings": [],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [
@@ -2148,7 +2154,8 @@
           "kogane-ingest",
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic",
-          "kogane-vpoint-collector-poc"
+          "kogane-vpoint-collector-poc",
+          "kogane-vpoint-pay-collector-poc"
         ]
       },
       {

@@ -274,3 +274,35 @@ equivalent of the legacy duplicate check.
 notification run, and the same value on the V Point run that the same delivered
 mail triggers through the email-code path. One session, two sources, two runs,
 neither merged into the other (G1-16, 03 §3).
+
+### `v-point-pay` (`services/collector-vpoint-pay`)
+
+| Artifact key               | Role                | Bytes                                            |
+| -------------------------- | ------------------- | ------------------------------------------------ |
+| `balance.json`             | `collector_derived` | the prepaid balance response text                |
+| `transactions-yyyyMM.json` | `collector_derived` | one statement month each, in month order         |
+| `collection-summary.json`  | `collector_summary` | the collector's own month and transaction counts |
+
+Sanitizer: the refresh token, the device UUID and the access token live in the
+Durable Object and in the request headers `collectVPointPay` builds. None of
+them is an artifact, and a failure becomes a machine code
+(`credential_configuration_required`, `authentication_required`,
+`provider_protocol_failed`, `provider_http_failed`, `operation_failed`) rather
+than the redacted provider message the legacy manifest keeps — a terminal
+states codes only (12 §6).
+
+Terminal: `source: v-point-pay`, `producer: collector-vpoint-pay`,
+`producerVersion: COLLECTOR_SCHEMA_VERSION` (`vpoint-pay-worker-poc-v1`),
+`requestedScope: month_range` from the provider's own `inquiry_period` to the
+current JST month, one matching `requested-months` range with basis `source`,
+one unit (`account`/`collection`), and `providerOutcome` from the run status.
+When the month window is unknown — a run that failed before the balance
+response — the scope is `unspecified` and no range is stated rather than a
+guessed one.
+
+This collector is **stopped**: `/trigger`, `/probe` and `/reset-credentials`
+answer 410, there is no cron, and the notification mail this source is actually
+observed through is collected by `services/collector-vpoint` as
+`v-point-pay-email`. The shared target is therefore the path a future
+re-enable writes to; the Durable Object's single-collection-in-flight exclusion
+is unchanged by it (G3-14), and switching the target adds no scheduler.

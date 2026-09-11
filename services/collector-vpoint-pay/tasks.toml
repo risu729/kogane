@@ -13,10 +13,13 @@ dir = "services/collector-vpoint-pay"
 run = "./node_modules/.bin/tsc --noEmit"
 
 ["vpoint-pay-worker:test"]
-description = "Run the services/collector-vpoint-pay tests."
+description = "Run the services/collector-vpoint-pay tests: the pure suite, then the Miniflare R2 suite."
 depends = ["vpoint-pay-worker:types"]
 dir = "services/collector-vpoint-pay"
-run = "bun test"
+run = [
+	"bun test ./test/*.test.ts",
+	"./node_modules/.bin/vitest run",
+]
 
 ["vpoint-pay-worker:dry-run"]
 description = "Validate the services/collector-vpoint-pay deployment without uploading it."

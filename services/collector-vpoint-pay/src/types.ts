@@ -42,6 +42,12 @@ export interface CollectionManifest {
 }
 
 export interface CollectionResult extends CollectionManifest {
+  /** Where the run was persisted (unified plan U09). */
+  target: "legacy" | "shared";
+  /**
+   * `legacy`: the collector manifest object key in the per-source bucket.
+   * `shared`: `runs/v-point-pay/<runId>/terminal.json` in the DATA bucket.
+   */
   manifestKey: string;
 }
 
