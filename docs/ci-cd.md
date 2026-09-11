@@ -99,13 +99,13 @@ stops), and it costs one extra review only when `main` moved in between.
 `infra/risk-paths.json` is the ledger of high-risk changes. It lists path
 patterns per rule:
 
-| Rule                          | Covers                                                                                                                                                        |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core-schema`                 | CORE migrations (today `services/raw-evidence/migrations/`, later `packages/storage-d1/migrations/`)                                                          |
-| `authorization`               | `services/evidence-browser/src/auth.ts` and its successors                                                                                                    |
-| `secret-consuming-collectors` | collector code, `package.json` and `bun.lock` of workers that run with a source's bank credentials (plan 12 §5: the dependency closure deploys with the code) |
-| `automation`                  | `.github/workflows/**`, `.github/scripts/**`, `.github/actions/**`                                                                                            |
-| `deployment-config`           | `wrangler*.jsonc`, `wrangler*.toml`, `infra/**`                                                                                                               |
+| Rule                          | Covers                                                                                                                                                                                                                                                                                                 |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `core-schema`                 | CORE migrations (today `services/raw-evidence/migrations/`, later `packages/storage-d1/migrations/`)                                                                                                                                                                                                   |
+| `authorization`               | `services/evidence-browser/src/auth.ts` and its successors                                                                                                                                                                                                                                             |
+| `secret-consuming-collectors` | collector code, `package.json` and `bun.lock` of workers that run with a source's bank credentials, plus their container images, `Dockerfile` and operator scripts, and the shared `packages/collector-diagnostics` every collector bundles (plan 12 §5: the dependency closure deploys with the code) |
+| `automation`                  | `.github/workflows/**`, `.github/scripts/**`, `.github/actions/**`                                                                                                                                                                                                                                     |
+| `deployment-config`           | `wrangler*.jsonc`, `wrangler*.toml`, `infra/**`                                                                                                                                                                                                                                                        |
 
 and label rules: a pull request labelled `high-risk` is treated as high risk
 even when no listed path changed. Renovate applies that label to parser, money
