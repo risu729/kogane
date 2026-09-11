@@ -8,7 +8,10 @@ run = "./node_modules/.bin/wrangler types"
 
 ["app:typecheck"]
 description = "Type-check services/evidence-browser."
-depends = ["app:types"]
+# `src/demo-worker.ts` imports the generated `demo-snapshot.json`, so the
+# typecheck needs the export to have run: `ci:app` runs typecheck and test in
+# parallel, and without this edge the typecheck could lose that race.
+depends = ["app:types", "local-pipeline:export-demo"]
 dir = "services/evidence-browser"
 run = "./node_modules/.bin/tsc --noEmit"
 
