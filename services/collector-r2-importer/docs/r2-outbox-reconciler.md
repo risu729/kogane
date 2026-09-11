@@ -144,8 +144,8 @@ npx wrangler queues create kogane-r2-outbox-reconciler-dlq
 npx wrangler queues create kogane-r2-outbox-reconciler
 bun install --frozen-lockfile
 bun test
-bun run typecheck
-bun run cf:check
+mise run importer:typecheck
+mise run importer:dry-run
 npx wrangler deploy
 bun scripts/r2-reconciler-notifications.ts apply I_UNDERSTAND_THIS_CHANGES_CLOUDFLARE
 ```

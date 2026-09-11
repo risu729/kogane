@@ -8,8 +8,8 @@ Every displayed observation and downloadable original is synthetic fixture data.
 The UI labels it as a demo. It has no D1, R2, collector, or production API binding.
 The existing evidence browser remains the separate real raw-evidence reader.
 
-`export:demo` in `poc/observation-pipeline` creates a fresh temporary store from
-committed fixtures, runs parsers, and exports deterministic API responses. It
+`web:export-demo` (in `poc/observation-pipeline`) creates a fresh temporary store
+from committed fixtures, runs parsers, and exports deterministic API responses. It
 cannot accept an existing store as input. The generated `demo-snapshot.json` is
 ignored by Git and must be regenerated for each build. Artifact links include
 superseded parse observations. Updating the demo requires rebuilding and deploying.
@@ -17,14 +17,12 @@ superseded parse observations. Updating the demo requires rebuilding and deployi
 From the repository root:
 
 ```sh
-cd poc/observation-pipeline
-bun install --frozen-lockfile
-bun run build
-bun run export:demo
-cd ../../services/evidence-browser
-bun install --frozen-lockfile
-bun x wrangler deploy --config wrangler.demo.jsonc --dry-run
-bun x wrangler deploy --config wrangler.demo.jsonc
+mise run install
+mise run web:build
+mise run web:export-demo
+cd services/evidence-browser
+./node_modules/.bin/wrangler deploy --config wrangler.demo.jsonc --dry-run
+./node_modules/.bin/wrangler deploy --config wrangler.demo.jsonc
 ```
 
 The Access application `Kogane synthetic demo` protects the Worker's production

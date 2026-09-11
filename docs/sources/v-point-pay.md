@@ -136,7 +136,7 @@ source R2へのwrite/deleteは行わない。
 
 ```sh
 cd services/collector-r2-importer
-bun run audit:vpoint-pay-email-r2
+bash scripts/audit-v-point-pay-email-r2.sh
 
 poc/vpoint-worker/scripts/backfill-vpoint-pay-email-raw-evidence.sh
 ```

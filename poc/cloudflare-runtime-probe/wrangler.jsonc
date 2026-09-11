@@ -18,6 +18,9 @@
     {
       "class_name": "RuntimeProbeContainer",
       "image": "./Dockerfile",
+      // The repository root, where the single Bun lockfile lives. Both paths
+      // are resolved against this file's directory.
+      "image_build_context": "../..",
       "max_instances": 1,
       "instance_type": "lite",
       "constraints": {

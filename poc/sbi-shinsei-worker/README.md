@@ -128,10 +128,10 @@ FIDO、SMS、telephone approval の値は collector secret に含めません。
 ```bash
 bun install --frozen-lockfile
 bun test
-bun run typecheck
-bun run cf:check
-bun run local:check
-bun run local:check-jsc
+mise run sbi-shinsei-worker:typecheck
+mise run sbi-shinsei-worker:dry-run
+bun src/local/cli.ts --dry-run
+bun src/local/check-jsc.ts
 ```
 
 `cf:check` は dry-run だけで、deploy しません。
@@ -140,7 +140,7 @@ bun run local:check-jsc
 
 ```bash
 credential_producer |
-  bun run local:collect -- \
+  bun src/local/cli.ts -- \
     --credential-stdin \
     --output-dir /home/risu/.local/share/kogane/raw/sbi-shinsei
 ```
@@ -217,7 +217,7 @@ Worker WebSocket still completes a normal close handshake. Worker relay events
 include only the bounded peer close code and `wasClean` flag, never close reason
 text, so platform-level disconnections can be distinguished from application
 cleanup without exposing connection details.
-Run `bun run test:relay` for loopback WebSocket tests of normal closure, delayed
+Run `node --test container/relay-lifecycle.node-test.mjs container/child-lifecycle.node-test.mjs` for loopback WebSocket tests of normal closure, delayed
 handshakes, shutdown, and timeout fallback; these require only the root dev dependency.
 
 Container lifecycle hooks retain bounded exit codes and fixed stop/error reasons.

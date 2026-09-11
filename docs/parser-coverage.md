@@ -415,7 +415,7 @@ also works, because both then apply the run scope unconditionally.
 
 ### Verified locally
 
-Synthetic data only: `bun run scripts/ci-package.ts` `--standalone` (which
+Synthetic data only: `mise run ci:root` (which
 runs the publication-gate predicate guard; the unit-scope predicate adds no
 `superseded_by_parse_run_id IS NULL` and no `status = 'ok'` read, and every
 adoption test still goes through `published_parse_runs`),
@@ -443,9 +443,10 @@ scope (no dataset is switched by this change).
 
 ## Verified locally
 
-Synthetic data only: `bun run scripts/ci-package.ts` for
+Synthetic data only: the CI checks (today `mise run ci:<short>`) of
 `poc/observation-pipeline`, `services/observation-pipeline`,
 `services/raw-evidence`, `services/evidence-browser`, `packages/read-model`,
-`packages/domain`; `bun test scripts/`; `hk check --all`. Not verified:
+`packages/domain`; the repository-wide guards (`mise run ci:root`);
+`hk check --all`. Not verified:
 production data, a real D1 or R2, and the effect of switching any production
 dataset to `coverage-v1` (no dataset is switched by this change).

@@ -107,8 +107,8 @@ Queueは不要である。
 ```bash
 bun install
 bun test
-bun run typecheck
-bun run cf:check
+mise run vpoint-worker:typecheck
+mise run vpoint-worker:dry-run
 ```
 
 必要なCloudflare resources/secrets:
@@ -145,7 +145,7 @@ poc/vpoint-worker/scripts/backfill-vpoint-pay-email-raw-evidence.sh
 新着通知のR2保存後は同じService Bindingを`waitUntil`から呼ぶ。中央が一時失敗しても通知の
 保存・転送を失敗扱いにせず、immutable R2 pairをhistorical backfillで再送できる。
 
-11件を超えるdata artifactを持つ将来runもskipしない。Importerは完全inventoryを固定し、最大8 artifactずつ転送する。HMAC署名済みcursorにscan位置・処理中manifest・offsetを保持し、sealが完了するまで次のR2 objectへ進まない。実R2 contractの再監査は`services/collector-r2-importer`で`bun run audit:vpoint-r2`を実行する。この監査はR2をread-onlyで走査し、件数だけを出力する。
+11件を超えるdata artifactを持つ将来runもskipしない。Importerは完全inventoryを固定し、最大8 artifactずつ転送する。HMAC署名済みcursorにscan位置・処理中manifest・offsetを保持し、sealが完了するまで次のR2 objectへ進まない。実R2 contractの再監査は`services/collector-r2-importer`で`bash scripts/audit-v-point-r2.sh`を実行する。この監査はR2をread-onlyで走査し、件数だけを出力する。
 
 2026-09-05のread-only contract auditではsource R2のmanifest 24件（v1 5件、v2 19件、成功13件、失敗11件）とreconciliation参照10件がすべてstrict validatorへ適合した。旧reconciliation 3件は旧exact match policy、残り7件は現行exact policyであり、両方を明示的な互換契約として扱う。
 

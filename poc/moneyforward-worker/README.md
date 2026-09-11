@@ -20,7 +20,7 @@ Workerへ置くのは、正しいMoney Forward IDに保存済みのパスキー1
 
 ```bash
 export BW_SESSION="$(bw unlock --raw)"
-bun run auth:select
+bun scripts/select-bitwarden-passkey.ts
 ./scripts/sync-local-secrets.sh
 unset BW_SESSION
 ```
@@ -37,11 +37,11 @@ unset BW_SESSION
 
 ```bash
 bun install
-bun run test
-bun run typecheck
+mise run moneyforward-worker:test
+mise run moneyforward-worker:typecheck
 bunx wrangler r2 bucket create kogane-moneyforward-collector-poc
 ./scripts/sync-local-secrets.sh
-bun run cf:deploy
+./node_modules/.bin/wrangler deploy
 ./scripts/trigger.sh https://kogane-moneyforward-collector-poc.takuanimal.workers.dev
 ```
 

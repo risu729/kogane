@@ -1,0 +1,16 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["evidence-contract:typecheck"]
+description = "Type-check packages/evidence-contract."
+dir = "packages/evidence-contract"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["evidence-contract:test"]
+description = "Run the packages/evidence-contract tests."
+dir = "packages/evidence-contract"
+run = "bun test"
+
+["ci:evidence-contract"]
+description = "Every check CI runs for packages/evidence-contract."
+depends = ["evidence-contract:typecheck", "evidence-contract:test"]

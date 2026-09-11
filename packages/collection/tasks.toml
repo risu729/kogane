@@ -1,0 +1,19 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["collection:typecheck"]
+description = "Type-check packages/collection."
+dir = "packages/collection"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["collection:test"]
+description = "Run the packages/collection tests: the pure suite, then the Miniflare R2 suite."
+dir = "packages/collection"
+run = [
+	"bun test ./test/*.test.ts",
+	"./node_modules/.bin/vitest run",
+]
+
+["ci:collection"]
+description = "Every check CI runs for packages/collection."
+depends = ["collection:typecheck", "collection:test"]

@@ -1,5 +1,10 @@
 #:schema https://mise.jdx.dev/schema/mise.json
 
+# mise 2026.9.3 is the first release whose `deps` providers this repository
+# relies on (`mise deps --explain bun`, `mise deps --force`); the CI workflow
+# pins the same version.
+min_version = "2026.9.3"
+
 [tools]
 bun = "1.4.0"
 node = "26.8.1"
@@ -26,24 +31,59 @@ lockfile_platforms = ["linux-x64", "windows-x64"]
 [settings.npm]
 package_manager = "bun"
 
-[tasks.check]
-description = "Run the shared hk linters and formatters."
-usage = '''
-flag "--lint" help="Check without changing files"
-'''
-run = "hk {% if usage.lint %}check{% else %}fix{% endif %} --all --no-progress --no-fail-fast"
+[env]
+# Root-level binaries. Bun's isolated linker keeps every workspace's own
+# binaries in `<workspace>/node_modules/.bin`, which the tasks call by relative
+# path from their `dir`; no task ever downloads a tool on demand.
+_.path = ["{{config_root}}/node_modules/.bin"]
 
-[tasks."ci:package"]
-description = "Install locked dependencies and run one package's offline checks."
-usage = '''
-arg "<package>" help="An explicitly supported package directory"
-'''
-run = "bun run scripts/ci-package.ts"
+[deps.bun]
+auto = true
+sources = [
+	"package.json",
+	"bun.lock",
+	"bunfig.toml",
+	"apps/*/package.json",
+	"experiments/*/package.json",
+	"packages/*/package.json",
+	"poc/*/package.json",
+	"services/*/package.json",
+]
+outputs = ["node_modules/.bun"]
+run = "bun install --frozen-lockfile"
 
-[tasks."ci:standalone"]
-description = "Check standalone diagnostics, CI coverage, and probe syntax without collecting."
-run = "bun run scripts/ci-package.ts --standalone"
-
-[tasks."hooks:install"]
-description = "Install the shared hk pre-commit hook using mise."
-run = "hk install --mise"
+[task_config]
+includes = [
+	"tasks.toml",
+	"tasks",
+	"packages/application/tasks.toml",
+	"packages/collection/tasks.toml",
+	"packages/domain/tasks.toml",
+	"packages/evidence-contract/tasks.toml",
+	"packages/identity/tasks.toml",
+	"packages/observation-shared/tasks.toml",
+	"packages/parsers/tasks.toml",
+	"packages/read-model/tasks.toml",
+	"poc/cloudflare-browser-run/tasks.toml",
+	"poc/cloudflare-runtime-probe/tasks.toml",
+	"poc/globalpass-worker/tasks.toml",
+	"poc/mobile-suica-worker/tasks.toml",
+	"poc/moneyforward-worker/tasks.toml",
+	"poc/myjcb-worker/tasks.toml",
+	"poc/observation-pipeline/tasks.toml",
+	"poc/oci-browser-probe/tasks.toml",
+	"poc/sbi-securities-worker/tasks.toml",
+	"poc/sbi-shinsei-worker/tasks.toml",
+	"poc/sbi-vc-trade-client/tasks.toml",
+	"poc/sbi-vc-trade-worker/tasks.toml",
+	"poc/smbc-direct-backfill-worker/tasks.toml",
+	"poc/sony-bank-worker/tasks.toml",
+	"poc/tamia-tcp-bridge/tasks.toml",
+	"poc/vpass-json/tasks.toml",
+	"poc/vpoint-pay-worker/tasks.toml",
+	"poc/vpoint-worker/tasks.toml",
+	"services/collector-r2-importer/tasks.toml",
+	"services/evidence-browser/tasks.toml",
+	"services/observation-pipeline/tasks.toml",
+	"services/raw-evidence/tasks.toml",
+]

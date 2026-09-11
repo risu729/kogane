@@ -77,8 +77,8 @@ raw/v-point-pay/YYYY/MM/DD/<run-id>/
 ```bash
 bun install
 bun test
-bun run typecheck
-bun run cf:check
+mise run vpoint-pay-worker:typecheck
+mise run vpoint-pay-worker:dry-run
 ```
 
 必要なresources/secrets:

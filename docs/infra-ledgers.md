@@ -24,9 +24,9 @@ that regenerate them and compare.
 ## Regenerating
 
 ```sh
-bun run scripts/resource-ledger.ts        # infra/resources.json, infra/resources.md
-bun run scripts/core-schema-ledger.ts     # infra/schema/core-ledger.{json,md}
-bun run scripts/dependency-ledger.ts      # infra/dependency-resolution.md
+mise run ledger:resources   # infra/resources.json, infra/resources.md
+mise run ledger:schema      # infra/schema/core-ledger.{json,md}
+mise run ledger:deps        # infra/dependency-resolution.md
 ```
 
 The generators own the exact bytes of the five generated files, so `.oxfmtrc.json` excludes them
@@ -34,11 +34,10 @@ from the formatter: regenerating is enough, there is no second formatting step, 
 compare byte for byte instead of structurally. A new generated ledger has to be added to that
 ignore list deliberately.
 
-U02 and U03 replace `scripts/` with mise tasks (decision D4); these become `ledger:resources`,
-`ledger:schema` and `ledger:deps` under the root `tasks.toml` then. Until that lands the CI entry
-point is unchanged: the two ledger suites run in `mise run ci:standalone`
-(`bun run scripts/ci-package.ts --standalone`) through `STANDALONE_TESTS` in
-`scripts/ci-packages.ts`.
+The generators keep their bodies under `scripts/`; the three tasks above are their only entry
+points (decision D4). Their test suites run in `mise run ci:root`, which the CI lint job invokes:
+the `root:test` task runs the `scripts/` and `tasks/_lib/` directories rather than a list, so a
+new ledger suite joins CI by existing.
 
 ## What the tests actually enforce
 

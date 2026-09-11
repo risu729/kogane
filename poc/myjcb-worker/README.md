@@ -81,12 +81,12 @@ Bitwarden自身の実装は`keyValue`をbase64url PKCS#8、credential IDをUUID�
 全vault exportは作らず、unlocked WSL terminalで第一項目だけを取得・検査する。既定はcheck-onlyで、秘密値をstdoutへ出さない。`--put`時だけ生成JSONをstdinでWranglerへ渡す。
 
 ```sh
-bun run bw:passkey -- \
+bun scripts/sync-bitwarden-passkey.ts -- \
   --item-id '<Bitwarden item UUID>' \
   --connection-id first-card \
   --secret-name MYJCB_ACCOUNT_FIRST_JSON
 
-bun run bw:passkey -- \
+bun scripts/sync-bitwarden-passkey.ts -- \
   --item-id '<Bitwarden item UUID>' \
   --connection-id first-card \
   --secret-name MYJCB_ACCOUNT_FIRST_JSON \
@@ -194,8 +194,8 @@ HTMLは取得時sourceをUTF-8へdecodeし、script/style/metaと埋込み要素
 ```sh
 bun install --frozen-lockfile
 bun test
-bun run typecheck
-bun run cf:check
+mise run myjcb-worker:typecheck
+mise run myjcb-worker:dry-run
 ```
 
 live PoCでは`wrangler deploy`、private R2 bucket作成、secret投入、第一connectionの実credential testまで行った。成功runは1 connection、20 artifact、failure 0で、内訳はcredit detail 11、parsed ledger 6、menu 1、過去月JSON 1、discovery 1だった。このrunでは公式CSV/PDF/OFX linkが提示されず、export artifactは0だった。従ってこのconnectionではHTML ledgerが実データsourceとして必要であり、別IDでexportが存在する場合だけ確定月をCSV中心へ最適化する。manifestとsource-preserving artifactはprivate R2へ保存し、実値やsecretはPRへ含めない。

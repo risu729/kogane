@@ -76,6 +76,6 @@ states, with no financial values. Failed jobs require inspecting their
 safe error code and artifact/parser/version, repairing the cause, then explicitly
 resetting that exact job or deploying a corrected parser version.
 
-Validation: `bun test`, `bun run typecheck`, and `bun run cf:check`. Runtime tests
+Validation: `bun test`, `mise run processor:typecheck`, and `mise run processor:dry-run`. Runtime tests
 use Miniflare D1/R2 with successful, empty, failed, missing/checksum, concurrent,
 supersession, interrupted-attempt, and MyJCB metadata cases.

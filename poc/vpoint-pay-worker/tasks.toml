@@ -1,0 +1,31 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["vpoint-pay-worker:types"]
+description = "Generate the Cloudflare Worker types of poc/vpoint-pay-worker."
+dir = "poc/vpoint-pay-worker"
+run = "./node_modules/.bin/wrangler types"
+
+["vpoint-pay-worker:typecheck"]
+description = "Type-check poc/vpoint-pay-worker."
+depends = ["vpoint-pay-worker:types"]
+dir = "poc/vpoint-pay-worker"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["vpoint-pay-worker:test"]
+description = "Run the poc/vpoint-pay-worker tests."
+depends = ["vpoint-pay-worker:types"]
+dir = "poc/vpoint-pay-worker"
+run = "bun test"
+
+["vpoint-pay-worker:dry-run"]
+description = "Validate the poc/vpoint-pay-worker deployment without uploading it."
+depends = ["vpoint-pay-worker:types"]
+dir = "poc/vpoint-pay-worker"
+run = [
+	"./node_modules/.bin/wrangler deploy --dry-run",
+]
+
+["ci:vpoint-pay-worker"]
+description = "Every check CI runs for poc/vpoint-pay-worker."
+depends = ["vpoint-pay-worker:typecheck", "vpoint-pay-worker:test"]

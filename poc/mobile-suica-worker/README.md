@@ -90,8 +90,8 @@ Bitwardenへ接続しない。
 ```sh
 cd poc/mobile-suica-worker
 export BW_SESSION="$(bw unlock --raw)"
-bun run bw:verify
-bun run bw:sync
+node scripts/verify-bitwarden-passkey.mjs
+node scripts/sync-bitwarden-passkey.mjs
 unset BW_SESSION
 ```
 
@@ -108,9 +108,9 @@ Worker側の署名検査ができる。
 ```sh
 bun install --frozen-lockfile
 bun test
-bun run typecheck
-bun run cf:check
-bun run cf:deploy
+mise run mobile-suica-worker:typecheck
+mise run mobile-suica-worker:dry-run
+./node_modules/.bin/wrangler deploy
 ```
 
 `ADMIN_TRIGGER_TOKEN`はデプロイ完了後に設定する。Secret変更とcode deployは別version

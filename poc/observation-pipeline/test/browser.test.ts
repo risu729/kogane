@@ -49,7 +49,7 @@ const runnable = executablePath !== undefined && clientBuilt;
 
 if (!runnable) {
   const reason = !clientBuilt
-    ? "the client is not built (run `bun run build`)"
+    ? "the client is not built (run `mise run web:build`)"
     : "no Chromium binary was found";
   console.log(`browser tests skipped: ${reason}`);
   // A missing Chromium is an environment fact and skipping is right. A missing

@@ -75,7 +75,7 @@ Nothing else needs to change: the route index, the Queue dispatch, the weekly re
 
 ## What CI checks
 
-`bun test` runs `test/import-adapters.test.ts`, and `bun run check:import-adapters` runs the same `checkImportAdapterRegistry` as a standalone exit status. Together they assert:
+`bun test` runs `test/import-adapters.test.ts`, and `bun scripts/check-import-adapters.ts` runs the same `checkImportAdapterRegistry` as a standalone exit status. Together they assert:
 
 - every `RECONCILER_SOURCES` entry has an adapter whose `id` and `resumeKind` match, and every adapter has a reconciler entry;
 - each declared `import-run` and `backfill-page` path is a versioned `/v1/<source>/...` route, is unique, and is routed to its own adapter; every declared route answers a malformed POST with `400 json_invalid`, and unknown paths, other methods, or a query string answer `404`;
@@ -90,5 +90,5 @@ Nothing else needs to change: the route index, the Queue dispatch, the weekly re
 
 - Wire compatibility: URLs, bodies, status and error codes, and the Queue schema are byte-for-byte those of the previous deployment (verified by the parity and registry tests with synthetic data; not verified against production traffic).
 - No change to descriptor hashing, `central.ts`, `raw-evidence`, migrations, queues, bindings, or secrets. No feature flag: the change is a refactor with identical observable behaviour.
-- Deploy order: the importer Worker alone (`bun run cf:deploy` after `bun test`, `bun run typecheck`, `bun run cf:check`). Collectors and central are untouched.
+- Deploy order: the importer Worker alone (`./node_modules/.bin/wrangler deploy` after `bun test`, `mise run importer:typecheck`, `mise run importer:dry-run`). Collectors and central are untouched.
 - Rollback: redeploy the previous importer version. In-flight Queue messages are readable by both versions because the schema is unchanged; per-source rollback is not needed because every source keeps its previous validation and import module.

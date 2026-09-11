@@ -43,6 +43,24 @@ different rules.
 - [Per-source research records](docs/sources/README.md)
 - [Roadmap](docs/roadmap.md)
 
+## Getting started
+
+One Bun workspace, one lockfile, and mise as the only task runner. There are no
+`package.json` scripts; every entry point is a mise task.
+
+```sh
+mise trust
+mise install              # pinned tools (bun, node, hk, oxlint, ...)
+mise run install          # frozen Bun install for every workspace
+mise run check --lint     # hk: lint and format check, never edits files
+mise run ci:app           # one workspace's CI checks
+mise run verify           # every workspace, then the Worker deployment dry runs
+mise tasks ls             # what else is there
+```
+
+See [Development checks and CI](docs/ci.md) for the task naming convention, how
+the CI matrices are generated, and what to do when adding a workspace.
+
 ## Proofs of concept
 
 - [Observation pipeline (ingest, parsers, evidence browser)](poc/observation-pipeline/README.md)
