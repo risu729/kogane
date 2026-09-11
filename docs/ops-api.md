@@ -40,7 +40,9 @@ in protected GitHub workflows (02 §6).
 ## Routes
 
 All six are authenticated, and all six are refused unless `OPS_API_ENABLED` is
-`"true"`.
+`"true"`. The route set is closed: any other path under `/api/ops/v1` is
+`404 not_found`, and any verb other than `POST` (accept) and `GET` (read) is
+`405 method_not_allowed`, exactly as everywhere else on this Worker.
 
 | Route                                        | Body                                                       | Answers                     | What "done" means                                                          |
 | -------------------------------------------- | ---------------------------------------------------------- | --------------------------- | -------------------------------------------------------------------------- |
@@ -118,10 +120,21 @@ is the validated request without its key.
   the operation id as the only ref. Neither request is silently dropped.
 - A key belongs to its principal: two subjects using the same key hold two
   operations, and neither can read or resend the other's.
+- Two senders racing on one key — both reading "no such operation" before
+  either writes — get the same answers as if they had arrived in order: the
+  insert is guarded on the row not existing, the loser inserts nothing, and it
+  is then checked against what the winner stored. The same payload is the same
+  record (with `replayed` set from the write, not from the earlier read); a
+  different payload is `409 idempotency_conflict`. A replay plan raced this
+  way is planned once (`packages/application/test/operations.test.ts`).
 
 The collector's side of this (G3-14) is `target_ref`: the executor writes the
 run it started once, and a second dispatch of the same operation finds it set
 and must reuse that run rather than open a second provider session.
+`recordDispatch` answers with the target the row holds and whether this call
+bound it (`{targetRef, boundHere}`); `boundHere: false` with a non-null target
+is the signal to continue the first executor's run. The 0040 trigger refuses
+any write that would re-point a bound target, even a direct one.
 
 ## Authorization
 
@@ -130,10 +143,11 @@ already does:
 
 1. the deployment flag `OPS_API_ENABLED`;
 2. the change lifecycle's principal grading (`AGENT_GRANTS`): a subject listed
-   there is an agent and is refused with `403 approval_required`. Requesting a
-   provider session, a replay or a rebuild needs `interpretation.accept`, which
-   an agent does not hold (addendum 10 §5). An agent may still _read_ its own
-   operations — it has none, because it cannot create one.
+   there is an agent and is refused with `403 approval_required` on all six
+   routes and tools, the read included. Requesting a provider session, a
+   replay or a rebuild needs `interpretation.accept`, which an agent does not
+   hold (addendum 10 §5), and an agent has no operations to read because it
+   cannot create one.
 
 Reads are scoped to the principal that accepted the operation. An operation
 belonging to someone else answers `404 receipt_not_found`, exactly like one
@@ -141,10 +155,12 @@ that does not exist: the API never confirms an id it will not show.
 
 ## Errors
 
-Codes only, with safe refs — a field path the caller sent, an operation id it
-holds, or a `source:<id>` / `parser_release:<id>` it named. The rejected value
-itself is never echoed into a response, a log or a queue (G3-08), and Zod's own
-messages are never returned.
+Codes only, with safe refs — the path of a field the caller sent (`source`,
+`scope.source`, `parserRelease`, `requestedScope`) or an operation id the
+server derived. The rejected value itself is never echoed into a response, a
+log or a queue (G3-08) — not even a source or release id that failed the
+registry lookup — and Zod's own messages are never returned. The request log
+carries the route label, the status and the code, never a ref.
 
 | Code                   | HTTP | Means                                                           |
 | ---------------------- | ---- | --------------------------------------------------------------- |
@@ -195,17 +211,29 @@ credential.
 
 Migration `0040_operations_api.sql` (CORE), additive:
 
-- `ops_requests` — one accepted request. Append-only except its progress
-  columns; a terminal request is never reopened; `target_ref` is write-once.
+- `ops_requests` — one accepted request. What was accepted (id, kind,
+  principal, key, digest, source, payload, acceptance time) is immutable and
+  the row is never deleted; the progress columns (`status`, the dispatch
+  columns, `target_ref`, `failure_code`, `updated_at`) may only move forward:
+  a terminal request is never reopened, attempts never decrease, `target_ref`
+  is write-once. Three triggers enforce this (`_no_delete`, `_no_replace`,
+  `_progress_only`).
 - `ops_request_stages` — stage progress per operation, keyed by
-  `(operation_id, stage)`. A `completed` stage is never reopened.
+  `(operation_id, stage)`, written only by the executor that reached the
+  stage. Never deleted; a `completed` stage is never reopened; attempts never
+  decrease. The operation's `status` is materialised from these rows by
+  `recordOperationStage` — `completed` only when every stage of the kind is —
+  and by `recordDispatch` (`blocked` on a failed dispatch); it is never set by
+  a caller.
 - `observation_replay_plans.operation_id` — which request a replay plan belongs
   to. The 0035 plan tables stay the only place a replay plan lives; this API
   creates a `planned` row there rather than a second copy of the plan.
 
-Both new tables are classified `unclassified-keep` in
-`infra/schema/core-ledger.md` — not named by chapter 04 §2, and therefore kept
-(G0-01, [infra-ledgers.md](infra-ledgers.md)).
+Both new tables are classified `core-keep` in `infra/schema/core-ledger.md`,
+on the chapter 04 §2 row "change_plans, approvals, operation_receipts,
+decision_outbox → CORE" (acceptance and the promise of follow-up work): an
+accepted request is that promise and its stage rows are the evidence it was
+kept ([infra-ledgers.md](infra-ledgers.md)).
 
 The 0031 tables are untouched: `operation_receipts` records a _judgement_ of
 the change lifecycle, and its `operation_kind` CHECK is that closed list. A
@@ -222,7 +250,7 @@ writing their own SQL against the tables above:
 | `requestCollection` / `requestImport` / `requestReplay` / `requestProjectionRebuild` / `requestSessionRefresh` | the six accept paths                                        |
 | `readOperation`                                                                                                | the operation record, scoped to a principal                 |
 | `pendingDispatches({store, nowMs, limit})`                                                                     | the Processor cron's queue of undispatched requests         |
-| `recordDispatch({operationId, outcome, targetRef?})`                                                           | what happened to one dispatch; binds `target_ref` once      |
+| `recordDispatch({operationId, outcome, targetRef?})`                                                           | one dispatch; binds `target_ref` once, answers who holds it |
 | `recordOperationStage({operationId, stage, state})`                                                            | stage evidence; completes the operation when all stages are |
 
 `dispatch_state='dispatch_pending'` is the hook U09 replaces with a Service
@@ -234,22 +262,42 @@ loses the request. Nothing in this change contacts a collector.
 
 Synthetic data only.
 
-- `services/evidence-browser/test/ops-api.test.ts` (25 checks over the real
-  Worker, the real migrations and the real store): flag-off behaviour,
-  `/api/meta` discovery, one record per request, re-send, idempotency
-  conflict, per-principal scoping, schema refusals of SQL / storage keys /
-  external URLs / unknown keys / impossible dates (G3-13), error bodies that
-  carry no rejected value (G3-08), the four other routes, the replay plan
-  written into the 0035 tables exactly once, `waiting_for_human` (G3-11),
-  stage progress and completion, and HTTP/MCP parity (G3-05).
-- `packages/application/test/operations.test.ts`: request identity, principal
-  binding, the stage table per kind, and the session policy's safe default.
+- `services/evidence-browser/test/ops-api.test.ts` (26 checks over the real
+  Worker, the real migrations and the real store): flag-off behaviour, the
+  closed route and verb set with the flag on, `/api/meta` discovery, one
+  record per request, re-send, idempotency conflict, per-principal scoping,
+  schema refusals of SQL / storage keys / external URLs / unknown keys /
+  impossible dates (G3-13), error bodies that carry no rejected value — not
+  the unknown source or release either (G3-08), the four other routes, the
+  replay plan written into the 0035 tables exactly once, `waiting_for_human`
+  (G3-11), stage progress and completion, the MCP tool list pinned on both
+  flag states, and HTTP/MCP parity down to the stored row (G3-05).
+- `packages/application/test/operations.test.ts` (10 checks; the SQL half
+  runs against the real migrations in `bun:sqlite`): request identity,
+  principal binding, the stage table per kind, the session policy's safe
+  default, and the deterministic races — two senders of one key with the same
+  payload (one row, one `replayed: false`), with different payloads (one row,
+  one conflict), a raced replay (one plan), and two dispatches of one
+  operation (one `target_ref`, the second told to reuse it) — plus the 0040
+  guards against delete, replacement and reopening.
 - `poc/observation-pipeline/test/api-schema.test.ts` and
   `services/evidence-browser/test/conformance.test.ts` pin the new `opsApi`
   capability off in the shared contract.
 
 Not verified: no deployed instance, no live Access policy, no collector, no
 Processor execution, no real provider or session. No MCP client has connected.
+
+Acceptance ids and the test that carries each:
+
+| Id    | Asked                                             | Test                                                                                                                        |
+| ----- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| G3-01 | absence is reported as absence, not empty success | `ops-api.test.ts` "stores one record … pending, not as success (G3-01)"                                                     |
+| G3-05 | the same request over UI/HTTP and MCP is the same | `ops-api.test.ts` "HTTP and MCP are one API (G3-05)"                                                                        |
+| G3-06 | a re-sent operation returns the existing record   | `ops-api.test.ts` "collection requests are accepted, not executed (G3-06, G3-14)"; `operations.test.ts` raced re-send tests |
+| G3-08 | a secret in the input leaves only a safe code     | `ops-api.test.ts` "the schema is the boundary (G3-08, G3-13)"                                                               |
+| G3-11 | human-required state, no login retry              | `ops-api.test.ts` "waiting_for_human … (G3-11)"; `operations.test.ts` "a session refresh needs a person … (G3-11)"          |
+| G3-13 | SQL / bucket key / URL is not executed            | `ops-api.test.ts` "refuses arbitrary SQL, storage keys and external URLs by shape"                                          |
+| G3-14 | a duplicated acceptance maps to one run           | `operations.test.ts` "a second dispatch of one operation finds the first executor's run … (G3-14)"                          |
 
 ## Flags, deploy order and rollback
 
