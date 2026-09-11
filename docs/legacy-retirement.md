@@ -256,7 +256,8 @@ before the first deactivation, because deactivating a client changes rows.
 5. Remove the `ingest` entry from `infra/deploy-order.json`, its
    `infra/workers-ci.json` entry and `services/raw-evidence/tasks.toml`, and
    delete the directory. CD stops deploying it; the Worker is still live.
-6. `wrangler delete --name kogane-ingest`. **Irreversible from this
+6. `wrangler delete kogane-ingest` (the Worker name is the positional argument;
+   `--dry-run` first shows what would go). **Irreversible from this
    repository** once step 5 landed: the previous release can no longer
    redeploy a directory that is gone. To keep a rollback target, do step 6
    before step 5 and keep the directory for one more release.
@@ -351,7 +352,7 @@ thing with a retention decision.
    `infra/workers-ci.json`, drop `services/collector-r2-importer/tasks.toml`
    from `mise.toml`, and delete the directory. The twelve audit configurations
    under that directory go with it; they are local-only and deploy nothing.
-6. `wrangler delete --name kogane-collector-r2-importer`, then
+6. `wrangler delete kogane-collector-r2-importer`, then
    `wrangler queues delete kogane-r2-outbox-reconciler` and its dead-letter
    queue. **Irreversible**: a Queue's messages are not recoverable after the
    delete, which is why step 3 pauses instead.
@@ -518,8 +519,9 @@ first release.
 
 ## 7. `kogane-globalpass-container-probe-20260827`
 
-Live in the account, created 2026-08-26 and last modified 2026-08-27, with **no
-configuration in this repository**. `infra/resources.json` lists it under
+Live in the account — created 2026-08-26 and last modified 2026-08-27 according
+to the account's Worker listing of 2026-09-11, which is not something the
+repository can re-check — with **no configuration in this repository**. `infra/resources.json` lists it under
 `liveWorkersWithoutConfig` and `scripts/resource-ledger.test.ts` asserts that
 list by name, so it cannot drop out of sight.
 
@@ -534,7 +536,7 @@ list by name, so it cannot drop out of sight.
 wrangler deployments list --name kogane-globalpass-container-probe-20260827
 wrangler tail kogane-globalpass-container-probe-20260827 --format json   # over a full day
 # then, only after the owner confirms:
-wrangler delete --name kogane-globalpass-container-probe-20260827
+wrangler delete kogane-globalpass-container-probe-20260827
 ```
 
 If it turns out to matter, the opposite action is the right one: add its

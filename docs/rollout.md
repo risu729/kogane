@@ -18,9 +18,17 @@ Each Worker reads its flags from the `vars` of its Wrangler configuration, or
 from the deployment's own variables where the owner set them by hand. Two
 conventions, both deliberate:
 
-- **Boolean flags are on only for `"1"` or `"true"`.** An absent, empty or
-  misspelled value leaves the old behaviour, so a typo never half-enables
-  something.
+- **Boolean flags are on only for the exact string the reader accepts.** An
+  absent, empty or misspelled value leaves the old behaviour, so a typo never
+  half-enables something. Which string that is differs by flag, and the
+  difference is in the code, not a convention: `"1"` or `"true"` for
+  `READ_PROJECTION_ENABLED`, `RECONCILIATION_ENABLED`, `REWARD_CLAIMS_ENABLED`,
+  `REWARD_READ_PROJECTION_ENABLED`, `EVENTS_V2_ENABLED`, `REWARDS_V2_ENABLED`,
+  `SHARED_R2_INGEST_ENABLED` and `OPS_DISPATCH_ENABLED`; exactly `"true"` for
+  `RELEASE_CANDIDATES_ENABLED`, `REPORTS_ENABLED`, `COMMANDS_ENABLED` and
+  `OPS_API_ENABLED`; exactly `"1"` for `BALANCE_PROJECTION_ENABLED` on both
+  Workers. When in doubt use the spelling of that flag's own document; `"1"` on
+  `REPORTS_ENABLED` is silently off.
 - **Grant and policy variables are off when empty.** `AGENT_GRANTS`,
   `AGENT_API_GRANTS` and `SESSION_REFRESH_POLICY` carry structured values; the
   empty string is "nobody", and an unparsable value is refused rather than
@@ -192,13 +200,16 @@ request whose CI passed on an older base can merge without re-running.
 
 ### 6.4 CodeQL triage of the rename artifact
 
-- [ ] Dismiss or triage the CodeQL alert
-      `js/insufficient-password-hash` at
-      `services/collector-vpass/src/mobile-auth.ts:36`.
+- [ ] Dismiss or triage the CodeQL alert `js/insufficient-password-hash` that
+      the collector promotion (U04B, `poc/vpass-json` →
+      `services/collector-vpass`) raises at
+      `services/collector-vpass/src/mobile-auth.ts:36`. Until that promotion
+      lands the same line is `poc/vpass-json/src/mobile-auth.ts:36` — the
+      `sha256Hex` helper the public-key pin uses.
 
 It is an artifact of a **byte-identical** file move: the same code sat at
 `poc/vpass-json/src/mobile-auth.ts` and was scanned there before. The move
-introduced no new code, and the alert is a high-severity finding that the main
+introduces no new code, and the alert is a high-severity finding that the main
 ruleset blocks on, so it stops the collector promotion from merging until a
 human triages it. Triage means one of two things and both are fine: dismiss it
 as a known accepted finding with a reason, or treat it as a real finding and
