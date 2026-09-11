@@ -11,6 +11,34 @@ byte-exact and re-processable; everything above it is disposable.** A tool
 is only adopted wholesale if it respects that boundary, and adapted (not
 adopted) if it collapses raw evidence into finished records.
 
+## Repository toolchain
+
+Separate from the collection tools below, the repository itself runs on a small,
+fixed toolchain:
+
+- **mise** pins every CLI (`mise.toml` + `mise.lock`, Linux x64 and Windows x64)
+  and is the **only task runner**. No `package.json` carries a `scripts` field;
+  each workspace declares its tasks in a `tasks.toml` the root `mise.toml`
+  includes. Dependencies are installed by the `bun` deps provider
+  (`bun install --frozen-lockfile`), never by a task that downloads a tool on
+  demand.
+- **Bun** is the package manager and the test runner for pure TypeScript. The
+  repository is one Bun workspace with a single root `bun.lock` and
+  `linker = "isolated"`, so a workspace sees only what it declares and
+  conflicting pins (TypeScript 5.9.3 and 7.0.2, five Wrangler versions) coexist
+  instead of being reconciled by hoisting.
+- **hk** runs the shared lint and format presets (oxlint, oxfmt, tombi, yamlfmt,
+  yamllint, actionlint, ShellCheck, ghalint, pinact, zizmor, ruff, typos).
+- **Vitest** with `@cloudflare/vitest-plugin` runs the Workers-runtime tests;
+  **Wrangler** generates Worker types and validates deployments with
+  `--dry-run`; in CI the dry run goes through
+  `risu729/wrangler-deploy-action`, which resolves the Wrangler the workspace
+  pins and never downloads one.
+
+[Development checks and CI](ci.md) describes the task names, the generated CI
+matrices and how to add a workspace; `infra/dependency-resolution.md` records
+how the single lockfile resolves.
+
 ## Summary
 
 ```text
