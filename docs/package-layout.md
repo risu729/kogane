@@ -98,7 +98,8 @@ tracked Wrangler `assets.directory` and fails when it resolves inside `poc/` or
 `tests/fixtures/MANIFEST.sha256` records each file's SHA-256 as
 `git show d096178:poc/observation-pipeline/fixtures/<path>` produced it, and
 `tests/fixture-manifest.test.ts` re-hashes what is on disk, asserts the
-manifest and `git ls-files` describe the same set, and pins the
+manifest, `git ls-files` and the directory on disk describe the same set (a
+fixture copied in and never pinned fails, tracked or not), and pins the
 `**/fixtures/**` exclusion in hk.pkl, oxfmt, oxlint and typos. A byte guarantee
 is only worth the tools that agree not to rewrite the bytes (acceptance test
 G0-04).
@@ -143,9 +144,16 @@ that a digest moved (acceptance test G0-05).
 
 With synthetic fixtures only, on this checkout, after U04:
 
-- `apps/web` — typecheck, the three isolated builds (byte-identical asset
-  hashes to the pre-move build) and 71 tests across 16 files, browser tests
-  included.
+- `apps/web` — typecheck, the three isolated builds and 71 tests across 16
+  files, browser tests included. Built from the same root lockfile, the
+  evidence bundle is byte-identical to the pre-move build of
+  `poc/observation-pipeline/web`; the local and production bundles differ by
+  exactly one token, the `opsApi` capability that U06 added to
+  `packages/observation-shared/src/api-schema.ts` after the move. A build of
+  `origin/main`'s PoC with its own former `bun.lock` differs further, and only
+  in the minifier's output (`while(1)` for `while(!0)`, boolean rewrites):
+  that lockfile resolved `rolldown@1.2.6` where the root lockfile resolves
+  `1.2.8`. The CSS is identical in every comparison.
 - `experiments/observation-pipeline-local` — typecheck, the demo export and
   254 tests across 18 files, browser tests included.
 - `packages/parsers` and `packages/observation-shared` — their suites, digest
@@ -161,8 +169,9 @@ Nothing was deployed and nothing was run against production data.
 ## Deployment
 
 There is no migration, no flag and no schema change, and no stored value
-changes. The deployed bundles are rebuilt from the new paths with identical
-content, so writer and reader can be deployed in any order and a rollback is
-the previous revision of each Worker. `kogane-demo` must be deployed from a
+changes. The deployed bundles are rebuilt from the new paths with the same
+content the same lockfile produced before the move (see above), so writer and
+reader can be deployed in any order and a rollback is the previous revision of
+each Worker. `kogane-demo` must be deployed from a
 checkout where `local-pipeline:export-demo` has run: its snapshot is generated,
 not committed.

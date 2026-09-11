@@ -105,7 +105,7 @@ page's summary counts therefore come from `GET /api/v2/query?intent=coverage`
 — the shared application service (`packages/application`) that the agent API
 also calls, with the same scope rules — instead of summing rows in the client.
 On a store without that capability the page keeps its own arithmetic, so the
-local PoC and the synthetic demo are unaffected.
+local pipeline experiment and the synthetic demo are unaffected.
 
 What a page may still decide for itself is unchanged: open and closed
 sections, the selected tab, display density, an in-progress input, a
@@ -153,9 +153,10 @@ to the production collector database.
 
 The browser and local query layer share type-only response contracts in
 `packages/observation-shared/src/api-contract.ts`. These describe the local
-PoC, not a frozen production database schema. Production adapters should
+pipeline experiment (`experiments/observation-pipeline-local`), not a frozen
+production database schema. Production adapters should
 map the domain to a versioned read API, with an explicit revision when
-semantics change. In particular, the PoC's numeric identifiers and raw
+semantics change. In particular, the experiment's numeric identifiers and raw
 SHA-based routes must not be assumed to match production run-scoped storage.
 
 Agree on these before the production connection is enabled:
@@ -188,13 +189,12 @@ contract, authentication, deployment configuration, and verification.
 ## Verification
 
 ```sh
-mise run web:typecheck
-mise run web:build
-bunx playwright install chromium
-bun test
+mise run ci:web              # typecheck, the three builds, unit and browser tests
+mise run ci:local-pipeline   # the experiment's suite over the built client
 ```
 
-`CHROMIUM_PATH` can select an existing Chromium/Chrome executable. CI installs
-Chromium and fails if browser tests cannot run. Tests exercise exact amounts,
+`CHROMIUM_PATH` can select an existing Chromium/Chrome executable; without it
+the browser tests use the Playwright-managed Chromium, which CI installs
+(`web:browser`) and fails on when it cannot run. Tests exercise exact amounts,
 untrusted provider text, provenance links, filtering, mobile layout, and
 request failure/retry behavior against synthetic data.
