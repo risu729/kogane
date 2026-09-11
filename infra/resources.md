@@ -246,32 +246,6 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): BRIDGE_TOKEN
 
-### `poc/vpoint-worker`
-
-- Disposition (poc_disposition.csv): `promote-service` → services/collector-vpoint
-- Required verification: keep the Email route and the DO class/tag/storage
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-vpoint-collector-poc; buckets=kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)
-
-#### `kogane-vpoint-collector-poc` — `poc/vpoint-worker/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts; has an `email()` handler
-- D1: —
-- R2: SNAPSHOTS → kogane-vpoint-collector-poc<br>VPOINT_PAY_SNAPSHOTS → kogane-vpoint-pay-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: VPOINT_SESSION → VPointSession
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
-- Crons: `15 21 * * *`
-- Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>VPOINT_PAY_EMAIL_RECIPIENT
-- Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_EMAIL_FORWARD_TO<br>VPOINT_EMAIL_RECIPIENT<br>VPOINT_MEMBER_NUMBER
-
 ### `services/collector-globalpass`
 
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-globalpass
@@ -823,6 +797,32 @@ No wrangler config.
 - Assets: —
 - Vars (names only): —
 - Required secrets (names only): —
+
+### `services/collector-vpoint`
+
+- Disposition (poc_disposition.csv): `promote-service` → services/collector-vpoint
+- Required verification: keep the Email route and the DO class/tag/storage
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-vpoint-collector-poc; buckets=kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)
+
+#### `kogane-vpoint-collector-poc` — `services/collector-vpoint/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts; has an `email()` handler
+- D1: —
+- R2: SNAPSHOTS → kogane-vpoint-collector-poc<br>VPOINT_PAY_SNAPSHOTS → kogane-vpoint-pay-collector-poc
+- KV: —
+- Queues: —
+- Durable Objects: VPOINT_SESSION → VPointSession
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Crons: `15 21 * * *`
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>VPOINT_PAY_EMAIL_RECIPIENT
+- Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_EMAIL_FORWARD_TO<br>VPOINT_EMAIL_RECIPIENT<br>VPOINT_MEMBER_NUMBER
 
 ### `services/collector-vpoint-pay`
 

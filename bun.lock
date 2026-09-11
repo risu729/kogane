@@ -263,7 +263,7 @@
         "wrangler": "4.127.1",
       },
     },
-    "poc/vpoint-worker": {
+    "services/collector-vpoint": {
       "name": "@kogane/poc-vpoint-worker",
       "dependencies": {
         "cheerio": "1.1.2",
@@ -523,7 +523,7 @@
 
     "@kogane/poc-vpoint-pay-worker": ["@kogane/poc-vpoint-pay-worker@workspace:services/collector-vpoint-pay"],
 
-    "@kogane/poc-vpoint-worker": ["@kogane/poc-vpoint-worker@workspace:poc/vpoint-worker"],
+    "@kogane/poc-vpoint-worker": ["@kogane/poc-vpoint-worker@workspace:services/collector-vpoint"],
 
     "@kogane/raw-evidence": ["@kogane/raw-evidence@workspace:services/raw-evidence"],
 

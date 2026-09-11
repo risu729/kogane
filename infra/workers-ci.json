@@ -179,7 +179,7 @@
     },
     {
       "name": "vpoint-worker",
-      "path": "poc/vpoint-worker",
+      "path": "services/collector-vpoint",
       "config": "wrangler.jsonc"
     }
   ],
