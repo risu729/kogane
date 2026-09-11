@@ -944,7 +944,7 @@ No wrangler config.
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
-- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60` (migrations_dir `../raw-evidence/migrations`)
+- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60` (migrations_dir `../../packages/storage-d1/migrations/core`)
 - R2: EVIDENCE → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -989,7 +989,7 @@ No wrangler config.
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
-- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60` (migrations_dir `migrations`)
+- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60` (migrations_dir `../../packages/storage-d1/migrations/core`)
 - R2: EVIDENCE → kogane-raw-evidence
 - KV: —
 - Queues: —

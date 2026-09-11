@@ -44,7 +44,7 @@ function otherIdentity(input: IdentityInput): IdentityPlan {
 
 let mf: Miniflare;
 let db: D1Database;
-const migrationDir = new URL("../../raw-evidence/migrations/", import.meta.url);
+const migrationDir = new URL("../../../packages/storage-d1/migrations/core/", import.meta.url);
 function splitSql(sql: string): string[] {
   const statements: string[] = [];
   let pending = "";

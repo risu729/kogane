@@ -21,7 +21,7 @@ function fixture() {
     CREATE TABLE identity_vpass_bindings(identity_run_id TEXT PRIMARY KEY,financial_unit_id INTEGER,binding_artifact_id INTEGER,card_token TEXT);`);
   db.exec(
     readFileSync(
-      new URL("../../raw-evidence/migrations/0018_identity.sql", import.meta.url),
+      new URL("../../../packages/storage-d1/migrations/core/0018_identity.sql", import.meta.url),
       "utf8",
     ),
   );
@@ -171,7 +171,7 @@ test("audit detects duplicate and ineligible exposure if a current view regresse
 });
 test("all queries compile against the complete production schema without compound-select expansion limits", () => {
   const db = new Database(":memory:");
-  const directory = new URL("../../raw-evidence/migrations/", import.meta.url);
+  const directory = new URL("../../../packages/storage-d1/migrations/core/", import.meta.url);
   try {
     for (const name of readdirSync(directory)
       .filter((name) => name.endsWith(".sql"))

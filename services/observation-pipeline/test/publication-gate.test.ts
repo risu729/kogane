@@ -8,7 +8,9 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
-import { parseJob, publishBatch } from "../src/worker.ts";
+import { parseJob } from "../src/worker.ts";
+import { publishBatch } from "../src/publication-gate.ts";
+import { runBatch } from "../../../packages/storage-d1/src/d1.ts";
 import {
   applyMigration,
   layerBMigrations,
@@ -191,7 +193,7 @@ test("a writer whose lease expired changes nothing: no status, no projection, no
     publishedAt: "2026-09-07T00:00:00.000Z",
     now: Date.now(),
   };
-  const expired = await env.DB.batch(publishBatch(env, input));
+  const expired = await runBatch(env.DB, publishBatch(env.DB, input));
   expect(expired[0]?.meta.changes).toBe(0);
   expect(
     await env.DB.prepare("SELECT status FROM parse_runs WHERE id=?")
@@ -207,7 +209,7 @@ test("a writer whose lease expired changes nothing: no status, no projection, no
   )
     .bind(Date.now() + 60_000)
     .run();
-  const live = await env.DB.batch(publishBatch(env, { ...input, now: Date.now() }));
+  const live = await runBatch(env.DB, publishBatch(env.DB, { ...input, now: Date.now() }));
   expect(live[0]?.meta.changes).toBe(1);
   expect(await projectionSet(902)).toEqual([pending!.id]);
   expect(await legacySet(902)).toEqual([pending!.id]);
@@ -234,7 +236,7 @@ test("re-executing the publish batch for an already published run changes nothin
     publishedAt: "2026-09-07T00:00:00.000Z",
     now: Date.now(),
   };
-  const published = await env.DB.batch(publishBatch(env, input));
+  const published = await runBatch(env.DB, publishBatch(env.DB, input));
   // ok, no older run to supersede, event, pointer, job closed.
   expect(published.map((result) => result.meta.changes)).toEqual([1, 0, 1, 1, 1]);
   const before = await events(906);
@@ -247,8 +249,9 @@ test("re-executing the publish batch for an already published run changes nothin
   // The whole batch again, as a redelivered queue message or a retried sweep
   // would run it. Nothing may change: the second event would be a pointer
   // move from the run to itself, and the pointer would gain a new timestamp.
-  const replay = await env.DB.batch(
-    publishBatch(env, { ...input, publishedAt: "2026-09-09T00:00:00.000Z", now: Date.now() }),
+  const replay = await runBatch(
+    env.DB,
+    publishBatch(env.DB, { ...input, publishedAt: "2026-09-09T00:00:00.000Z", now: Date.now() }),
   );
   expect(replay.map((result) => result.meta.changes)).toEqual([0, 0, 0, 0, 0]);
   expect(await events(906)).toEqual(before);
@@ -261,8 +264,9 @@ test("re-executing the publish batch for an already published run changes nothin
   )
     .bind(Date.now() + 60_000)
     .run();
-  const leased = await env.DB.batch(
-    publishBatch(env, { ...input, publishedAt: "2026-09-10T00:00:00.000Z", now: Date.now() }),
+  const leased = await runBatch(
+    env.DB,
+    publishBatch(env.DB, { ...input, publishedAt: "2026-09-10T00:00:00.000Z", now: Date.now() }),
   );
   expect(leased.slice(0, 4).map((result) => result.meta.changes)).toEqual([1, 0, 0, 0]);
   expect(await events(906)).toEqual(before);

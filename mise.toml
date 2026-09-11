@@ -65,6 +65,7 @@ includes = [
 	"packages/parsers/tasks.toml",
 	"packages/read-model/tasks.toml",
 	"packages/sbi-vc-trade-client/tasks.toml",
+	"packages/storage-d1/tasks.toml",
 	"poc/cloudflare-browser-run/tasks.toml",
 	"poc/cloudflare-runtime-probe/tasks.toml",
 	"poc/observation-pipeline/tasks.toml",

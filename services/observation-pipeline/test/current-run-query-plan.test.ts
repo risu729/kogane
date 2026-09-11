@@ -5,7 +5,7 @@ import { identityQuery } from "../../evidence-browser/src/identity-api";
 
 test("current identities select keyed eligible run winners before observation fanout", () => {
   const db = new Database(":memory:");
-  const dir = new URL("../../raw-evidence/migrations/", import.meta.url);
+  const dir = new URL("../../../packages/storage-d1/migrations/core/", import.meta.url);
   const core = "SELECT count(*) FROM current_identity_observations";
   const plan = (sql: string, values: number[] = []) =>
     db

@@ -41,38 +41,17 @@ export function relationPayload(payload: ChangePayload): RelationPayload {
   return payload as RelationPayload;
 }
 
-/**
- * "Every subject in this JSON object is still at the revision the plan
- * recorded." A mapping subject answers with its highest mapping revision; a
- * relation subject with the number of relation rows the triple already has.
- * A subject with no history answers 0, so a first-ever assignment plans
- * against revision 0 and conflicts if someone else got there first.
- *
- * `param` is the placeholder the caller binds `expected_revisions_json` to, so
- * this fragment can be spliced into a numbered statement without renumbering.
- */
-const REVISION_OF = `coalesce(
- (SELECT max(m.revision) FROM account_mappings m WHERE 'account_mapping:'||m.source_account_id=e.key),
- (SELECT max(m.revision) FROM instrument_mappings m WHERE 'instrument_mapping:'||m.identifier_id=e.key),
- CASE WHEN e.key LIKE 'relation:%' THEN
-  (SELECT count(*) FROM entity_relations r WHERE 'relation:'||r.kind||'|'||r.from_ref||'|'||r.to_ref=e.key) END,
- 0)`;
+// The SQL fragments themselves moved to packages/storage-d1 (unified plan
+// U05): the revision guard is CORE state, and the App and the Processor must
+// state it once. Re-exported here so the lifecycle keeps its import path.
+export {
+  CURRENT_REVISIONS_SQL,
+  currentRevisionsSql,
+  expectedRevisionsSql,
+  type RevisionRow,
+} from "../../../storage-d1/src/core/operations.ts";
 
-export function expectedRevisionsSql(param: string): string {
-  return `NOT EXISTS(SELECT 1 FROM json_each(${param}) e WHERE e.value<>${REVISION_OF})`;
-}
-
-/** The same check as a read, for planning and for the staleness display. */
-export function currentRevisionsSql(param: string): string {
-  return `SELECT e.key AS subject_ref,${REVISION_OF} AS revision FROM json_each(${param}) e`;
-}
-
-export const CURRENT_REVISIONS_SQL = currentRevisionsSql("?");
-
-export interface RevisionRow {
-  subject_ref: string;
-  revision: number;
-}
+import type { RevisionRow } from "../../../storage-d1/src/core/operations.ts";
 
 export function revisionsFrom(rows: readonly RevisionRow[]): ExpectedRevisions {
   const revisions: ExpectedRevisions = {};

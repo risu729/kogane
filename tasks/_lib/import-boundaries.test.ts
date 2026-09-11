@@ -27,6 +27,29 @@ describe("import boundaries", () => {
     expect(violations).toEqual([]);
   });
 
+  test("no shared package imports a service back (U05)", () => {
+    const violations = boundaryViolationsIn(REPO_ROOT, SOURCES).filter(
+      (violation) => violation.rule === "package-imports-service",
+    );
+    expect(violations).toEqual([]);
+  });
+
+  test("the extraction direction is one-way: package to service is a crossing", () => {
+    const forbidden = 'import { loadRun } from "../../../services/raw-evidence/src/http.ts";';
+    expect(
+      boundaryViolations("packages/storage-d1/src/core/fetch-runs.ts", forbidden).map(
+        (violation) => violation.rule,
+      ),
+    ).toEqual(["package-imports-service"]);
+    // The other direction — a service importing the shared package — is what
+    // U05 produced and must stay allowed.
+    const allowed =
+      'import { publishBatch } from "../../../packages/storage-d1/src/atomic/publication.ts";';
+    expect(
+      boundaryViolations("services/observation-pipeline/src/publication-gate.ts", allowed),
+    ).toEqual([]);
+  });
+
   test("the guard sees a real crossing and lets the allowed direction through", () => {
     // Positive: the import a service used to have before the parsers moved.
     const forbidden =
@@ -116,6 +139,7 @@ describe("import boundaries", () => {
   test("every rule is exercised by the repository-wide checks above", () => {
     expect(BOUNDARY_RULES.map((rule) => rule.name).sort()).toEqual([
       "deployed-code-imports-poc",
+      "package-imports-service",
       "ui-imports-database",
     ]);
     // The scopes must actually match files, or the guard would pass vacuously.

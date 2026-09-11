@@ -21,6 +21,7 @@ what, and why nothing about the pipeline's behaviour changed when they moved.
 | `packages/parsers`               | The deployed parsers (`src/parsers/**`), the parser contract (`src/types.ts`), money formatting and minor-unit rules (`src/money.ts`), the snapshot-selection SQL (`src/snapshot-query.ts`) and the build-digest generator (`scripts/parser-digests.ts`).                                                                          | `packages/domain`.                                                                        |
 | `packages/identity`              | Identity resolution over stored observations and the per-source rules.                                                                                                                                                                                                                                                             | `packages/domain`, `packages/parsers` (types only).                                       |
 | `packages/read-model`            | The explicit query repository and DTO mappers.                                                                                                                                                                                                                                                                                     | `packages/domain`, `packages/observation-shared`, `packages/parsers` (the snapshot CTEs). |
+| `packages/storage-d1`            | CORE database access: the SQL adapters (`src/core`), the column codecs (`src/codecs`), the guarded atomic commands (`src/atomic`) and the CORE and READ migration directories. See [storage-d1.md](storage-d1.md).                                                                                                                 | `packages/domain`, `packages/evidence-contract`, `packages/identity`.                     |
 | `packages/application`           | QuerySpec / command application services shared by HTTP, UI and MCP.                                                                                                                                                                                                                                                               | The packages above.                                                                       |
 | `services/*`                     | Workers: HTTP, D1, R2, queues, scheduling, authentication.                                                                                                                                                                                                                                                                         | Any package. **Never `poc/`.**                                                            |
 | `poc/observation-pipeline`       | The local entry points (`src/ingest.ts`, `src/parse.ts`, `src/store.ts`, `src/queries.ts`, `src/api.ts`, `src/serve.ts`), the synthetic fixtures, and the web UI.                                                                                                                                                                  | Any package, over the HTTP contract for the UI.                                           |
@@ -34,7 +35,7 @@ the way the services already imported the PoC. Nothing was published, no
 workspace was introduced, and no service, database or authentication path was
 added: this is a boundary change, not a topology change.
 
-## The two rules CI enforces
+## The three rules CI enforces
 
 `tasks/_lib/import-boundaries.ts` states them and
 `tasks/_lib/import-boundaries.test.ts` runs them over every tracked TypeScript
@@ -47,6 +48,11 @@ file in the repository-wide guard task (`mise run ci:root`).
    or the SQL of `packages/read-model`.** The UI reads the HTTP contract; a
    query builder in the UI would be a second, unreviewed reader in front of
    the same database.
+3. **Nothing under `packages/*/src` may import a service's `src`, `test` or
+   `scripts`.** Added by U05, when the CORE SQL and the registration use cases
+   moved out of the three services: the services depend on the packages, and a
+   single import the other way would put the cycle back. The services keep
+   re-export shims on their old module paths, which is the allowed direction.
 
 Both rules are pinned by a positive and a negative fixture string, so the
 guard fails if it ever stops recognising the crossing it exists to catch
@@ -70,6 +76,16 @@ two.
 They exist so that this change could be a move rather than a rewrite of the
 PoC. They are the obvious thing to delete once the PoC entry points are
 updated deliberately, which is not part of this change.
+
+U05 added the same kind of shim in the two services whose modules moved into
+`packages/storage-d1` and `packages/application`:
+`services/observation-pipeline/src/{publication-gate,identity-store,
+identity-commands,identity-keys,identity-audit,identity-policies/index,
+decision-outbox}.ts` and
+`services/raw-evidence/src/{store,structure,origins,canonical}.ts`. Each is a
+re-export with a note naming the new home; none carries behaviour. They exist
+so that no call site had to move in the same change as the code, and so that
+the diff of the move is readable as a move.
 
 ## Parser build identity did not move
 

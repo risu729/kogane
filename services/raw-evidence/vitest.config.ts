@@ -5,14 +5,21 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [
     cloudflareTest(async () => {
-      const migrations = await readD1Migrations(path.join(import.meta.dirname, "migrations"));
+      const migrations = await readD1Migrations(
+        path.join(import.meta.dirname, "../../packages/storage-d1/migrations/core"),
+      );
       return {
         wrangler: { configPath: "./wrangler.jsonc" },
         miniflare: {
           d1Databases: ["DB"],
           r2Buckets: ["EVIDENCE"],
           bindings: {
-            INGEST_CLIENT_KEYS: JSON.stringify({ test: "test-secret-at-least-twenty-chars" }),
+            // `parity` is the second client the U05 parity test registers with, so
+            // the HTTP path and the in-process port use the same credentials.
+            INGEST_CLIENT_KEYS: JSON.stringify({
+              test: "test-secret-at-least-twenty-chars",
+              parity: "test-secret-at-least-twenty-chars",
+            }),
             TEST_MIGRATIONS: migrations,
           },
         },
