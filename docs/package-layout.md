@@ -159,16 +159,20 @@ name, cron, queue, bucket, database id, Durable Object class and tag, bindings,
 move, so a later edit that renames a resource under cover of a directory move
 fails there rather than in production.
 
-Two references deliberately keep the old paths:
+One reference deliberately keeps an old path:
+`packages/storage-d1/migrations/core/0036_publication_event_guard.sql` names
+`services/observation-pipeline/src/publication-gate.ts` in a comment. Applied
+migrations are immutable, bytes included, and the CORE schema ledger digests
+them.
 
-- `packages/storage-d1/migrations/core/0036_publication_event_guard.sql` names
-  `services/observation-pipeline/src/publication-gate.ts` in a comment. Applied
-  migrations are immutable, bytes included, and the CORE schema ledger digests
-  them.
-- `infra/risk-paths.json` still lists `services/evidence-browser/src/auth.ts`
-  next to `services/app/src/auth.ts`, so a pull request that moves the file back
-  out, or one opened against an older base, is still high risk. The old entry is
-  dropped when U15 closes the legacy paths.
+`infra/risk-paths.json` carried `services/evidence-browser/src/auth.ts` next to
+`services/app/src/auth.ts` until U15, so that a pull request opened against an
+older base was still high risk. U15 dropped it together with
+`services/raw-evidence/migrations/**`, which U05 had already emptied: both
+directories are gone, so the patterns could only have matched a file re-created
+at an abandoned path. `scripts/automerge.test.ts` keeps one negative case over
+exactly those two paths, so a rule set that started matching everything fails
+there.
 
 The collector task short names (`<source>-worker`, `vpass-json`) and the npm
 package names (`@kogane/evidence-browser`, `@kogane/observation-pipeline`) are
