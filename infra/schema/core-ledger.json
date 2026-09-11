@@ -587,6 +587,12 @@
       "statementCount": 4,
       "insertStatements": [],
       "sha256": "9cb89c077a066a32968403169e4197582580e1af638fc97747ebda11faa82634"
+    },
+    {
+      "file": "0040_operations_api.sql",
+      "statementCount": 13,
+      "insertStatements": [],
+      "sha256": "edca64e3fc1675e463faec3b04ca90cde3ed2055269b483ee56c99f28e519002"
     }
   ],
   "tables": [
@@ -8096,6 +8102,13 @@
           "notNull": true,
           "default": null,
           "pk": 0
+        },
+        {
+          "name": "operation_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
         }
       ],
       "primaryKey": [
@@ -8103,6 +8116,14 @@
       ],
       "foreignKeys": [],
       "indexes": [
+        {
+          "name": "observation_replay_plans_operation",
+          "unique": true,
+          "partial": true,
+          "columns": [
+            "operation_id"
+          ]
+        },
         {
           "name": "observation_replay_plans_status",
           "unique": false,
@@ -8117,7 +8138,7 @@
       "noUpdateTriggers": [],
       "noDeleteTriggers": [],
       "appendOnly": false,
-      "sqlSha256": "17d0f070df4a41d9"
+      "sqlSha256": "3ef209484c5c0dfa"
     },
     {
       "name": "observation_scan_state",
@@ -8347,6 +8368,264 @@
       ],
       "appendOnly": false,
       "sqlSha256": "208c40006d2eff16"
+    },
+    {
+      "name": "ops_request_stages",
+      "classification": "unclassified-keep",
+      "planRow": "not named in 04 §2; stage progress of an accepted operations-API request (0040)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "operation_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "stage",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "evidence_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "failure_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "attempts",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "operation_id",
+        "stage"
+      ],
+      "foreignKeys": [
+        {
+          "column": "operation_id",
+          "references": "ops_requests(operation_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ops_request_stages_state",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "state",
+            "updated_at"
+          ]
+        }
+      ],
+      "triggers": [
+        "ops_request_stages_no_delete",
+        "ops_request_stages_no_reopen"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [
+        "ops_request_stages_no_delete"
+      ],
+      "appendOnly": false,
+      "sqlSha256": "545613edf22cf04d"
+    },
+    {
+      "name": "ops_requests",
+      "classification": "unclassified-keep",
+      "planRow": "not named in 04 §2; accepted operations-API requests, append-only except their progress columns (0040)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "operation_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "principal",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "idempotency_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "payload_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "dispatch_state",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "dispatch_attempts",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "available_at_ms",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "target_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "failure_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "operation_id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "source_id",
+          "references": "sources(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "ops_requests_dispatch",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "dispatch_state",
+            "available_at_ms",
+            "operation_id"
+          ]
+        },
+        {
+          "name": "ops_requests_open",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "status",
+            "kind",
+            "created_at"
+          ]
+        },
+        {
+          "name": "ops_requests_principal",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "principal",
+            "created_at"
+          ]
+        }
+      ],
+      "triggers": [
+        "ops_requests_no_delete",
+        "ops_requests_no_replace",
+        "ops_requests_progress_only"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [
+        "ops_requests_no_delete"
+      ],
+      "appendOnly": false,
+      "sqlSha256": "e2bf897d7a5c5ac2"
     },
     {
       "name": "origin_template_policies",
@@ -13555,6 +13834,41 @@
       "sqlSha256": "69fcf123ac988af0"
     },
     {
+      "name": "ops_request_stages_no_delete",
+      "table": "ops_request_stages",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "4aed88951af5136d"
+    },
+    {
+      "name": "ops_request_stages_no_reopen",
+      "table": "ops_request_stages",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "1b6b774d8d087018"
+    },
+    {
+      "name": "ops_requests_no_delete",
+      "table": "ops_requests",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "674b4a71ceb2de6f"
+    },
+    {
+      "name": "ops_requests_no_replace",
+      "table": "ops_requests",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "d8f965690b226cad"
+    },
+    {
+      "name": "ops_requests_progress_only",
+      "table": "ops_requests",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "357333b145e6261d"
+    },
+    {
       "name": "parse_coverage_claims_no_delete",
       "table": "parse_coverage_claims",
       "timing": "BEFORE",
@@ -14423,6 +14737,11 @@
       "sqlSha256": "8c38448342399fb6"
     },
     {
+      "name": "observation_replay_plans_operation",
+      "table": "observation_replay_plans",
+      "sqlSha256": "44d7fd510207d23e"
+    },
+    {
       "name": "observation_replay_plans_status",
       "table": "observation_replay_plans",
       "sqlSha256": "bb7f24ed2b70f857"
@@ -14436,6 +14755,26 @@
       "name": "operation_receipts_plan",
       "table": "operation_receipts",
       "sqlSha256": "d547040fa7865465"
+    },
+    {
+      "name": "ops_request_stages_state",
+      "table": "ops_request_stages",
+      "sqlSha256": "dfddd104c9cffe0a"
+    },
+    {
+      "name": "ops_requests_dispatch",
+      "table": "ops_requests",
+      "sqlSha256": "3afcbc613e0d81f5"
+    },
+    {
+      "name": "ops_requests_open",
+      "table": "ops_requests",
+      "sqlSha256": "a505ef5ffbdca61f"
+    },
+    {
+      "name": "ops_requests_principal",
+      "table": "ops_requests",
+      "sqlSha256": "0d66d1db844a87b1"
     },
     {
       "name": "parse_coverage_claims_parse_run",
@@ -14564,10 +14903,10 @@
     }
   ],
   "summary": {
-    "tableCount": 100,
+    "tableCount": 102,
     "viewCount": 31,
-    "triggerCount": 278,
-    "explicitIndexCount": 99,
+    "triggerCount": 283,
+    "explicitIndexCount": 104,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -14675,6 +15014,8 @@
         "fetch_run_annotations",
         "observation_artifact_metadata",
         "observation_scan_state",
+        "ops_request_stages",
+        "ops_requests",
         "parse_issues"
       ]
     },
@@ -14701,6 +15042,8 @@
       "observation_scan_state",
       "observation_work_items",
       "operation_receipts",
+      "ops_request_stages",
+      "ops_requests",
       "origin_template_policies",
       "parse_run_candidates",
       "parse_runs",
@@ -14751,6 +15094,6 @@
       "0034_reports.sql",
       "0035_observation_job_lanes.sql"
     ],
-    "schemaSha256": "c38afe6013f2b56e19f82f9f87e28f8b5e792756819b70b6cb5b63701a5ac399"
+    "schemaSha256": "75ef6b812dd6757bef77328144a1ce5044187cc4acae9428ef32072c1f25b32e"
   }
 }

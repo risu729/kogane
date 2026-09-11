@@ -10,15 +10,15 @@ confirmed, not the whole schema, and sets the rule this ledger enforces: **a tab
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `c38afe6013f2b56e19f82f9f87e28f8b5e792756819b70b6cb5b63701a5ac399`
+Schema digest: `75ef6b812dd6757bef77328144a1ce5044187cc4acae9428ef32072c1f25b32e`
 
 ## Summary
 
-- Migrations applied: 37
-- Tables: 100 (all `STRICT`: yes)
+- Migrations applied: 38
+- Tables: 102 (all `STRICT`: yes)
 - Views: 31
-- Triggers: 278
-- Explicit indexes: 99
+- Triggers: 283
+- Explicit indexes: 104
 - `WITHOUT ROWID` tables: artifact_relations, artifact_transform_steps, fetch_run_annotations, ingest_client_producers, ingest_client_routes, origin_template_policies, producer_sources, run_inventory_items, source_external_ids
 
 | classification | count | tables |
@@ -26,12 +26,12 @@ Schema digest: `c38afe6013f2b56e19f82f9f87e28f8b5e792756819b70b6cb5b63701a5ac399
 | `core-keep` | 86 | account_connection_reviews, account_mappings, accounts, acquisition_sessions, active_releases, allocations, approvals, artifact_email_metadata, artifact_file_metadata, artifact_http_metadata, artifact_ranges, artifact_relations, artifact_storage_metadata, artifact_transform_steps, balance_observations, calculation_policies, calculation_results, calculation_runs, change_plans, conversion_offers, decision_operations, decision_outbox, decision_revisions, economic_event_revisions, economic_legs, entity_relations, evidence_use_restrictions, expiry_rules, fetch_artifacts, fetch_page_groups, fetch_run_ranges, fetch_run_reports, fetch_run_seals, fetch_runs, fetch_unit_reports, fetch_units, http_scope_rules, identity_instrument_uses, identity_observations, identity_run_policies, identity_run_seals, identity_runs, identity_vpass_bindings, ingest_client_producers, ingest_client_routes, ingest_clients, ingestion_attempts, instrument_identifiers, instrument_mappings, instruments, membership_state_claims, metadata_projection_inputs, metadata_projections, obligation_revisions, observation_decimal_values, operation_receipts, origin_template_policies, parse_coverage_claims, parse_input_references, parse_run_candidates, parse_runs, parser_releases, position_observations, price_observations, producer_sources, producers, publication_events, published_parse_runs, raw_object_verification_events, raw_objects, reconciliation_proposals, release_activation_events, release_comparisons, report_artifacts, report_events, retention_classes, reward_bucket_claims, reward_programs, run_inventories, run_inventory_items, settlement_relations, source_accounts, source_external_ids, sources, transaction_observations, valuation_observations |
 | `read-candidate` | 5 | balance_read_snapshots, conversion_simulations, current_balance_projection, expiry_estimates, scope_relations |
 | `operational-mutable` | 4 | observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_work_items |
-| `unclassified-keep` | 5 | dataset_snapshot_policies, fetch_run_annotations, observation_artifact_metadata, observation_scan_state, parse_issues |
+| `unclassified-keep` | 7 | dataset_snapshot_policies, fetch_run_annotations, observation_artifact_metadata, observation_scan_state, ops_request_stages, ops_requests, parse_issues |
 
 Tables without both an append-only `*_no_update` and `*_no_delete` guard (mutable by design —
 pointers, checkpoints, leases, configuration, and the READ-side projections):
 
-active_releases, allocations, approvals, balance_read_snapshots, calculation_runs, change_plans, conversion_simulations, dataset_snapshot_policies, decision_outbox, economic_event_revisions, expiry_estimates, http_scope_rules, ingest_client_producers, ingest_client_routes, ingest_clients, obligation_revisions, observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_scan_state, observation_work_items, operation_receipts, origin_template_policies, parse_run_candidates, parse_runs, producer_sources, producers, published_parse_runs, reconciliation_proposals, retention_classes, scope_relations, settlement_relations, source_external_ids, sources
+active_releases, allocations, approvals, balance_read_snapshots, calculation_runs, change_plans, conversion_simulations, dataset_snapshot_policies, decision_outbox, economic_event_revisions, expiry_estimates, http_scope_rules, ingest_client_producers, ingest_client_routes, ingest_clients, obligation_revisions, observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_scan_state, observation_work_items, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_run_candidates, parse_runs, producer_sources, producers, published_parse_runs, reconciliation_proposals, retention_classes, scope_relations, settlement_relations, source_external_ids, sources
 
 ## Tables
 
@@ -101,10 +101,12 @@ active_releases, allocations, approvals, balance_read_snapshots, calculation_run
 | `observation_decimal_values` | core-keep | observation_decimal_values (CORE for now; columns may be copied to READ) | yes | no | yes | observation_decimals_no_update | observation_decimals_no_delete | 8 | 1 | 0 | 2 |
 | `observation_lane_state` | operational-mutable | parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out) | yes | no | no | — | — | 5 | 0 | 0 | 0 |
 | `observation_parse_jobs` | operational-mutable | parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out) | yes | no | no | — | — | 14 | 1 | 2 | 0 |
-| `observation_replay_plans` | operational-mutable | parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out) | yes | no | no | — | — | 19 | 0 | 1 | 0 |
+| `observation_replay_plans` | operational-mutable | parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out) | yes | no | no | — | — | 20 | 0 | 2 | 0 |
 | `observation_scan_state` | unclassified-keep | not named in 04 §2; single-row scan cursor (0017), same family as the checkpoint row | yes | no | no | — | — | 2 | 0 | 0 | 0 |
 | `observation_work_items` | operational-mutable | parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out) | yes | no | no | — | — | 8 | 1 | 1 | 0 |
 | `operation_receipts` | core-keep | change plans, approvals and receipts | yes | no | no | — | operation_receipts_no_delete | 9 | 1 | 1 | 3 |
+| `ops_request_stages` | unclassified-keep | not named in 04 §2; stage progress of an accepted operations-API request (0040) | yes | no | no | — | ops_request_stages_no_delete | 7 | 1 | 1 | 2 |
+| `ops_requests` | unclassified-keep | not named in 04 §2; accepted operations-API requests, append-only except their progress columns (0040) | yes | no | no | — | ops_requests_no_delete | 15 | 1 | 3 | 3 |
 | `origin_template_policies` | core-keep | sources, producers and routes | yes | yes | no | — | — | 8 | 1 | 0 | 0 |
 | `parse_coverage_claims` | core-keep | parse runs and observations | yes | no | yes | parse_coverage_claims_no_update | parse_coverage_claims_no_delete | 17 | 1 | 1 | 2 |
 | `parse_input_references` | core-keep | metadata projections | yes | no | yes | parse_input_references_no_update | parse_input_references_no_delete | 4 | 2 | 2 | 2 |
@@ -209,4 +211,4 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0034_reports.sql` | 33 | retention_classes |
 | `0035_observation_job_lanes.sql` | 13 | observation_lane_state |
 
-Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql
+Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql

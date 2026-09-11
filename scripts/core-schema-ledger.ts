@@ -253,6 +253,15 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "unclassified-keep",
     planRow: "not named in 04 §2; created with parse_coverage_claims (0025)",
   },
+  ops_requests: {
+    classification: "unclassified-keep",
+    planRow:
+      "not named in 04 §2; accepted operations-API requests, append-only except their progress columns (0040)",
+  },
+  ops_request_stages: {
+    classification: "unclassified-keep",
+    planRow: "not named in 04 §2; stage progress of an accepted operations-API request (0040)",
+  },
 };
 
 function digest(value: string): string {

@@ -199,6 +199,10 @@ Migration `0040_operations_api.sql` (CORE), additive:
   to. The 0035 plan tables stay the only place a replay plan lives; this API
   creates a `planned` row there rather than a second copy of the plan.
 
+Both new tables are classified `unclassified-keep` in
+`infra/schema/core-ledger.md` — not named by chapter 04 §2, and therefore kept
+(G0-01, [infra-ledgers.md](infra-ledgers.md)).
+
 The 0031 tables are untouched: `operation_receipts` records a _judgement_ of
 the change lifecycle, and its `operation_kind` CHECK is that closed list. A
 collection request is a different fact, and existing migrations are immutable.
