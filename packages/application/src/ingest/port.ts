@@ -24,6 +24,7 @@ import type {
   InventoryItem,
   RecordAttemptRequest,
 } from "../../../evidence-contract/src/index.ts";
+import { requireActiveClient } from "./access.ts";
 import { addArtifact } from "./catalogue.ts";
 import type { IngestEnv, RecordValue } from "./contract.ts";
 import { addInventoryItems, beginInventory } from "./inventory.ts";
@@ -77,7 +78,7 @@ function body(input: object): RecordValue {
  * idempotency are identical by construction rather than by agreement.
  */
 export function directRegistrationPort(env: IngestEnv, clientId: string): RunRegistrationPort {
-  return {
+  return activeClientOnly(env, clientId, {
     async createRun(input) {
       return (await createRun(env, clientId, body(input))).runId;
     },
@@ -135,5 +136,29 @@ export function directRegistrationPort(env: IngestEnv, clientId: string): RunReg
     async recordAttempt(runId, input) {
       await addFailedAttempt(env, clientId, runId, body(input));
     },
-  };
+  });
+}
+
+/**
+ * The HTTP adapter refuses a deactivated client before it looks at the route
+ * (`inactive_ingest_client`, not `inactive_ingest_route`). The port makes the
+ * same check before every operation, so the two paths answer a revoked client
+ * with the same code — and so a route row that outlives its client can never
+ * be reached through the port, because `active_ingest_routes` joins on the
+ * client's `active` flag as well.
+ */
+function activeClientOnly(
+  env: IngestEnv,
+  clientId: string,
+  port: RunRegistrationPort,
+): RunRegistrationPort {
+  const guarded = {} as Record<keyof RunRegistrationPort, unknown>;
+  for (const key of Object.keys(port) as (keyof RunRegistrationPort)[]) {
+    const operation = port[key] as (...args: unknown[]) => Promise<unknown>;
+    guarded[key] = async (...args: unknown[]) => {
+      await requireActiveClient(env, clientId);
+      return operation(...args);
+    };
+  }
+  return guarded as unknown as RunRegistrationPort;
 }

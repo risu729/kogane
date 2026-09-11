@@ -41,6 +41,33 @@ describe("decimal-v1 columns", () => {
     expect(decoded.status === "exact" && decoded.value.coefficient).toBe(coefficient);
   });
 
+  test("a coefficient beyond Number's safe range is carried as text, not through a number (G4-11)", () => {
+    // 2^53 + 1: the first integer a JS number cannot hold. `Number()` would
+    // silently make it 9007199254740992; the codec never converts.
+    const coefficient = "9007199254740993";
+    const columns = encodeDecimal({
+      status: "exact",
+      value: { coefficient, scale: 0 },
+      normalizationVersion: "decimal-v1",
+    });
+    expect(typeof columns.coefficient).toBe("string");
+    expect(columns.coefficient).toBe(coefficient);
+    const decoded = decodeDecimal(columns);
+    expect(decoded.status === "exact" && typeof decoded.value.coefficient).toBe("string");
+    expect(decoded.status === "exact" && decoded.value.coefficient).toBe(coefficient);
+    expect(Number(coefficient).toString()).not.toBe(coefficient);
+  });
+
+  test("a scale that is not a small non-negative integer is a conflict, not rounded (G4-11)", () => {
+    for (const scale of [1.5, Number.MAX_SAFE_INTEGER + 1, Number.NaN, 10 ** 6]) {
+      expect(decodeDecimal({ coefficient: "1", scale, status: "exact" }).status).toBe("conflict");
+    }
+    // A coefficient that is not an integer literal is never parsed leniently.
+    for (const coefficient of ["1.5", "1e3", " 1", "0x10", ""]) {
+      expect(decodeDecimal({ coefficient, scale: 0, status: "exact" }).status).toBe("conflict");
+    }
+  });
+
   test("missing, unparsed and conflicting values write NULL and never decode as zero", () => {
     for (const status of ["missing", "unparsed", "conflict"] as const) {
       const columns = encodeDecimal({ status, reasonCode: "value_not_exact" });
@@ -87,6 +114,24 @@ describe("date-only columns", () => {
     expect(decodeDateOnly(20260907)).toBeNull();
   });
 
+  test("a date-only value never becomes an instant, and NULL stays null (G4-12)", () => {
+    const date = decodeDateOnly("2026-09-07");
+    // A calendar triple with no time and no zone: not a Date, not a number of
+    // milliseconds, and nothing on it a formatter could shift by an offset.
+    expect(date).not.toBeInstanceOf(Date);
+    expect(date).toEqual({ year: 2026, month: 9, day: 7 });
+    expect(Object.keys(date as object).sort()).toEqual(["day", "month", "year"]);
+    expect(encodeDateOnly(date)).toBe("2026-09-07");
+    // The last and first day of a year round-trip unchanged: those are the
+    // days a UTC conversion moves across a year boundary.
+    for (const text of ["2025-12-31", "2026-01-01"]) {
+      expect(encodeDateOnly(decodeDateOnly(text))).toBe(text);
+    }
+    expect(decodeDateOnly(null)).toBeNull();
+    expect(decodeDateOnly(undefined)).toBeNull();
+    expect(decodeDateOnly(new Date("2026-09-07T00:00:00Z"))).toBeNull();
+  });
+
   test("a leap day is a date in a leap year and not in a common one", () => {
     expect(decodeDateOnly("2024-02-29")).toEqual({ year: 2024, month: 2, day: 29 });
     expect(decodeDateOnly("2026-02-29")).toBeNull();
@@ -122,6 +167,19 @@ describe("nullable id columns", () => {
     expect(decodeNullableId("7")).toBeNull();
     expect(decodeNullableId(7)).toBe(7);
     expect(isRowId(0)).toBe(false);
+  });
+
+  test("an id outside Number's safe range is rejected, never truncated (G4-11)", () => {
+    const unsafe = Number.MAX_SAFE_INTEGER + 2;
+    expect(isRowId(Number.MAX_SAFE_INTEGER)).toBe(true);
+    expect(isRowId(unsafe)).toBe(false);
+    expect(decodeNullableId(unsafe)).toBeNull();
+    expect(decodeNullableId(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(decodeNullableId(Number.NaN)).toBeNull();
+    expect(() => requireRowId(unsafe, "run_not_found")).toThrow("run_not_found");
+    // A bigint is what a driver hands back for a wide INTEGER; it is not a
+    // number the codec accepts silently either.
+    expect(decodeNullableId(7n)).toBeNull();
   });
 
   test("a required id throws with the caller's code instead of being invented", () => {

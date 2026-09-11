@@ -87,28 +87,45 @@ beforeAll(async () => {
   ]);
 });
 
-/** Every column of a run, minus the ones that identify which run it is. */
-async function runRow(runId: number): Promise<Record<string, unknown>> {
-  const row = await env.DB.prepare(
-    "SELECT producer_id, source_id, first_recorded_by_client_id FROM fetch_runs WHERE id = ?",
-  )
-    .bind(runId)
-    .first<Record<string, unknown>>();
-  return row!;
-}
+/**
+ * The columns that must differ between two registrations of one fixture, or
+ * that a server clock sets: row ids and the references to them, the external
+ * ids the fixture chose to tell the two apart, and recording timestamps.
+ * Everything else the two paths write is compared, column by column.
+ */
+const IDENTIFYING_COLUMNS: Record<string, readonly string[]> = {
+  acquisition_sessions: ["id", "external_session_id", "first_recorded_at_ms"],
+  fetch_runs: ["id", "acquisition_session_id", "first_recorded_at_ms"],
+  fetch_run_reports: ["id", "fetch_run_id", "recorded_at_ms"],
+  fetch_artifacts: ["id", "fetch_run_id", "recorded_at_ms"],
+  run_inventories: ["id", "fetch_run_id", "created_at_ms"],
+  run_inventory_items: ["inventory_id", "fetch_run_id"],
+  fetch_run_seals: ["inventory_id", "fetch_run_id", "sealed_at_ms"],
+  ingestion_attempts: [
+    "id",
+    "fetch_run_id",
+    "sealed_inventory_id",
+    "external_attempt_id",
+    "completed_at_ms",
+    "recorded_at_ms",
+  ],
+};
 
-/** Every column of an artifact, minus its own ids and keys. */
-async function artifactRow(runId: number): Promise<Record<string, unknown>> {
-  const row = await env.DB.prepare(
-    `SELECT producer_id, source_id, first_ingested_by_client_id, artifact_role, payload_fidelity,
-            container_kind, lineage_disposition, dataset, format_id, format_version,
-            declared_media_type, media_type_basis, fetched_at_ms, fetched_at_basis,
-            page_index, sequence, sha256, byte_size, descriptor_version, descriptor_sha256
-     FROM fetch_artifacts WHERE fetch_run_id = ?`,
-  )
+/** Every column of a table's rows for one run, minus the identifying ones. */
+async function rows(table: string, runId: number): Promise<Record<string, unknown>[]> {
+  const where =
+    table === "fetch_runs"
+      ? "id = ?1"
+      : table === "acquisition_sessions"
+        ? "id = (SELECT acquisition_session_id FROM fetch_runs WHERE id = ?1)"
+        : "fetch_run_id = ?1";
+  const result = await env.DB.prepare(`SELECT * FROM ${table} WHERE ${where}`)
     .bind(runId)
-    .first<Record<string, unknown>>();
-  return row!;
+    .all<Record<string, unknown>>();
+  const hidden = new Set(IDENTIFYING_COLUMNS[table]);
+  return result.results
+    .map((row) => Object.fromEntries(Object.entries(row).filter(([column]) => !hidden.has(column))))
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 }
 
 describe("registration parity: HTTP route vs in-process port (U05)", () => {
@@ -176,27 +193,26 @@ describe("registration parity: HTTP route vs in-process port (U05)", () => {
     // The descriptor digest is recomputed server-side from the same validated
     // parse either way, so it is the same 64 hex characters.
     expect(directDigest).toBe(httpDigest);
-    expect(await runRow(directRunId)).toEqual(await runRow(httpRunId));
-    expect(await artifactRow(directRunId)).toEqual(await artifactRow(httpRunId));
-
-    const seals = await env.DB.prepare(
-      "SELECT fetch_run_id, sealed_by_client_id FROM fetch_run_seals WHERE fetch_run_id IN (?, ?) ORDER BY fetch_run_id",
-    )
-      .bind(httpRunId, directRunId)
-      .all<{ fetch_run_id: number; sealed_by_client_id: string }>();
-    expect(seals.results.map((row) => row.sealed_by_client_id)).toEqual([CLIENT, CLIENT]);
-
-    const attempts = await env.DB.prepare(
-      `SELECT expected_artifact_count, observed_artifact_count, accepted_artifact_count,
-              reused_artifact_count, rejected_artifact_count, outcome, error_code
-       FROM ingestion_attempts WHERE fetch_run_id = ?`,
-    );
-    expect(await attempts.bind(directRunId).first()).toEqual(
-      await attempts.bind(httpRunId).first(),
-    );
+    for (const table of Object.keys(IDENTIFYING_COLUMNS)) {
+      const direct = await rows(table, directRunId);
+      // Never vacuous: each table the registration touches holds a row.
+      expect(direct.length, table).toBeGreaterThan(0);
+      expect(direct, table).toEqual(await rows(table, httpRunId));
+    }
+    // What the comparison hides is exactly the identifying set, no more: a
+    // column added to a table joins the comparison unless it is listed here.
+    for (const [table, hidden] of Object.entries(IDENTIFYING_COLUMNS)) {
+      const columns = await env.DB.prepare(`SELECT name FROM pragma_table_info(?1)`)
+        .bind(table)
+        .all<{ name: string }>();
+      expect(
+        columns.results.map((column) => column.name),
+        table,
+      ).toEqual(expect.arrayContaining([...hidden]));
+    }
   });
 
-  it("refuses an unauthorized route the same way through the port", async () => {
+  it("refuses an unauthorized route with the same code and status through the port", async () => {
     // The port performs the same CORE authorization the HTTP path does; it is
     // not a bypass of it.
     await expect(
@@ -206,7 +222,7 @@ describe("registration parity: HTTP route vs in-process port (U05)", () => {
         externalIdNamespace: "test",
         externalSessionId: "parity-denied",
       }),
-    ).rejects.toThrow("inactive_ingest_route");
+    ).rejects.toMatchObject({ status: 403, code: "inactive_ingest_route" });
     const denied = await post("/v1/runs", {
       producerId: PRODUCER,
       sourceId: "api-source",
@@ -215,5 +231,37 @@ describe("registration parity: HTTP route vs in-process port (U05)", () => {
     });
     expect(denied.status).toBe(403);
     expect(await denied.json()).toEqual({ error: "inactive_ingest_route" });
+  });
+
+  it("refuses a deactivated client with the same code and status through the port", async () => {
+    // Revocation is a row, not a key: the client still holds a valid secret
+    // and an active route row, and both paths must answer with the client's
+    // code, before either looks at the route.
+    await env.DB.prepare("UPDATE ingest_clients SET active = 0 WHERE id = ?1").bind(CLIENT).run();
+    try {
+      const request = {
+        producerId: PRODUCER,
+        sourceId: SOURCE,
+        externalIdNamespace: "test",
+        externalSessionId: "parity-revoked",
+      };
+      await expect(
+        directRegistrationPort(env as never, CLIENT).createRun(request),
+      ).rejects.toMatchObject({ status: 403, code: "inactive_ingest_client" });
+      // Not only the first operation: a port handed out earlier is refused too.
+      const port = directRegistrationPort(env as never, CLIENT);
+      await expect(port.addRunReport(1, TERMINAL_REPORT as never)).rejects.toMatchObject({
+        status: 403,
+        code: "inactive_ingest_client",
+      });
+      const denied = await post("/v1/runs", {
+        ...request,
+        externalSessionId: "parity-revoked-http",
+      });
+      expect(denied.status).toBe(403);
+      expect(await denied.json()).toEqual({ error: "inactive_ingest_client" });
+    } finally {
+      await env.DB.prepare("UPDATE ingest_clients SET active = 1 WHERE id = ?1").bind(CLIENT).run();
+    }
   });
 });

@@ -43,6 +43,22 @@ export function coreDatabase(from = "0017"): Database {
   return db;
 }
 
+/**
+ * The whole of CORE from 0001, on a database that enforces foreign keys the
+ * way D1 does: for the commands whose guards restate Layer A columns (the
+ * seal), the real registry, run and artifact tables with all their triggers.
+ */
+export function fullCoreDatabase(): Database {
+  const directory = fileURLToPath(CORE_MIGRATIONS_URL);
+  const db = new Database(":memory:");
+  db.exec("PRAGMA foreign_keys=ON");
+  for (const name of readdirSync(directory)
+    .filter((entry) => entry.endsWith(".sql"))
+    .sort())
+    db.exec(readFileSync(join(directory, name), "utf8"));
+  return db;
+}
+
 class SqliteStatement implements D1StatementLike {
   constructor(
     private readonly db: Database,

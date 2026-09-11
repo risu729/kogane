@@ -26,6 +26,10 @@ import {
   REPAIR_LIMIT_DEFAULT,
   repairPublication,
 } from "./publication-gate.ts";
+// The publish batch used to be defined here; it moved to packages/storage-d1
+// with the rest of the gate (U05). Kept exported so the historical import
+// path resolves to the one implementation.
+export { publishBatch, type PublishInput } from "./publication-gate.ts";
 import {
   extractMetadata,
   isMetadataExtractorRelease,
