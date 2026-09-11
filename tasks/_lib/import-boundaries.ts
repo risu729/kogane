@@ -5,10 +5,12 @@
 // name of a directory:
 //
 //   * nothing under `services/*/src` or `packages/*/src` may import a module
-//     inside `poc/`. The PoC is where experiments are free to change; a
-//     deployed Worker that imports one cannot be reasoned about separately
-//     from it. Parsers, identity resolution and the shared contracts were
-//     promoted into `packages/` precisely so that this rule can hold.
+//     inside `poc/` or `experiments/`. Those are where experiments are free
+//     to change; a deployed Worker that imports one cannot be reasoned about
+//     separately from it. Parsers, identity resolution and the shared
+//     contracts were promoted into `packages/` precisely so that this rule can
+//     hold, and an open experiment is promoted the same way before a service
+//     may use it (unified plan D1, `experiments/*/EXPERIMENT.md`).
 //   * nothing under `poc/observation-pipeline/web` may import a service's
 //     `src` or the SQL of `packages/read-model`. The UI reads the HTTP
 //     contract; giving it a query builder would put a second, unreviewed
@@ -31,8 +33,9 @@ export const BOUNDARY_RULES: readonly BoundaryRule[] = [
   {
     name: "deployed-code-imports-poc",
     scope: /^(?:services|packages)\/[^/]+\/src\//u,
-    forbidden: /(?:^|\/)poc\//u,
-    reason: "deployed and shared code must not import the PoC; promote the module to packages/",
+    forbidden: /(?:^|\/)(?:poc|experiments)\//u,
+    reason:
+      "deployed and shared code must not import the PoC or an experiment; promote the module to packages/",
   },
   {
     name: "ui-imports-database",
