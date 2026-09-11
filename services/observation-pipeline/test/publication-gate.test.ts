@@ -193,9 +193,7 @@ test("a writer whose lease expired changes nothing: no status, no projection, no
     publishedAt: "2026-09-07T00:00:00.000Z",
     now: Date.now(),
   };
-  const expired = await runBatch(
-    env.DB,
-    publishBatch(env.DB, input));
+  const expired = await runBatch(env.DB, publishBatch(env.DB, input));
   expect(expired[0]?.meta.changes).toBe(0);
   expect(
     await env.DB.prepare("SELECT status FROM parse_runs WHERE id=?")
@@ -211,9 +209,7 @@ test("a writer whose lease expired changes nothing: no status, no projection, no
   )
     .bind(Date.now() + 60_000)
     .run();
-  const live = await runBatch(
-    env.DB,
-    publishBatch(env.DB, { ...input, now: Date.now() }));
+  const live = await runBatch(env.DB, publishBatch(env.DB, { ...input, now: Date.now() }));
   expect(live[0]?.meta.changes).toBe(1);
   expect(await projectionSet(902)).toEqual([pending!.id]);
   expect(await legacySet(902)).toEqual([pending!.id]);
@@ -240,9 +236,7 @@ test("re-executing the publish batch for an already published run changes nothin
     publishedAt: "2026-09-07T00:00:00.000Z",
     now: Date.now(),
   };
-  const published = await runBatch(
-    env.DB,
-    publishBatch(env.DB, input));
+  const published = await runBatch(env.DB, publishBatch(env.DB, input));
   // ok, no older run to supersede, event, pointer, job closed.
   expect(published.map((result) => result.meta.changes)).toEqual([1, 0, 1, 1, 1]);
   const before = await events(906);

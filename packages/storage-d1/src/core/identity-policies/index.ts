@@ -56,10 +56,7 @@ export interface IdentityPolicyModule {
   version: number;
   /** SQL predicate over an artifact alias: true when the family's evidence exists. */
   evidenceSql(artifactAlias: string): string;
-  loadEvidence(
-    db: D1Like,
-    parse: IdentityParseMeta,
-  ): Promise<Partial<AvailableIdentityEvidence>>;
+  loadEvidence(db: D1Like, parse: IdentityParseMeta): Promise<Partial<AvailableIdentityEvidence>>;
   /** The family's selection, or the reason it does not apply to this parse. */
   select(
     parse: IdentityParseMeta,

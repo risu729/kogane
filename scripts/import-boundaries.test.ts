@@ -41,8 +41,7 @@ describe("import boundaries", () => {
   });
 
   test("the extraction direction is one-way: package to service is a crossing", () => {
-    const forbidden =
-      'import { loadRun } from "../../../services/raw-evidence/src/http.ts";';
+    const forbidden = 'import { loadRun } from "../../../services/raw-evidence/src/http.ts";';
     expect(
       boundaryViolations("packages/storage-d1/src/core/fetch-runs.ts", forbidden).map(
         (violation) => violation.rule,
@@ -50,10 +49,11 @@ describe("import boundaries", () => {
     ).toEqual(["package-imports-service"]);
     // The other direction — a service importing the shared package — is what
     // U05 produced and must stay allowed.
-    const allowed = 'import { publishBatch } from "../../../packages/storage-d1/src/atomic/publication.ts";';
-    expect(boundaryViolations("services/observation-pipeline/src/publication-gate.ts", allowed)).toEqual(
-      [],
-    );
+    const allowed =
+      'import { publishBatch } from "../../../packages/storage-d1/src/atomic/publication.ts";';
+    expect(
+      boundaryViolations("services/observation-pipeline/src/publication-gate.ts", allowed),
+    ).toEqual([]);
   });
 
   test("the guard sees a real crossing and lets the allowed direction through", () => {

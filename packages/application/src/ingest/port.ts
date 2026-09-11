@@ -76,10 +76,7 @@ function body(input: object): RecordValue {
  * use case the legacy Worker's route runs, so guards, conflicts and
  * idempotency are identical by construction rather than by agreement.
  */
-export function directRegistrationPort(
-  env: IngestEnv,
-  clientId: string,
-): RunRegistrationPort {
+export function directRegistrationPort(env: IngestEnv, clientId: string): RunRegistrationPort {
   return {
     async createRun(input) {
       return (await createRun(env, clientId, body(input))).runId;

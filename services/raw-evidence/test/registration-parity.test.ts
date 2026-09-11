@@ -125,18 +125,15 @@ describe("registration parity: HTTP route vs in-process port (U05)", () => {
     });
     expect(created.status).toBe(201);
     const httpRunId = ((await created.json()) as { runId: number }).runId;
-    const upload = await SELF.fetch(
-      `https://example.test/v1/runs/${httpRunId}/objects/${sha256}`,
-      {
-        method: "PUT",
-        headers: {
-          authorization: AUTH,
-          "content-length": String(bytes.byteLength),
-          "x-kogane-byte-size": String(bytes.byteLength),
-        },
-        body: bytes,
+    const upload = await SELF.fetch(`https://example.test/v1/runs/${httpRunId}/objects/${sha256}`, {
+      method: "PUT",
+      headers: {
+        authorization: AUTH,
+        "content-length": String(bytes.byteLength),
+        "x-kogane-byte-size": String(bytes.byteLength),
       },
-    );
+      body: bytes,
+    });
     expect([200, 201]).toContain(upload.status);
     const catalogued = await post(
       `/v1/runs/${httpRunId}/artifacts`,
@@ -146,9 +143,7 @@ describe("registration parity: HTTP route vs in-process port (U05)", () => {
     const httpDigest = ((await catalogued.json()) as { descriptorSha256: string }).descriptorSha256;
     expect((await post(`/v1/runs/${httpRunId}/reports`, TERMINAL_REPORT)).status).toBe(201);
     const sealed = await post(`/v1/runs/${httpRunId}/seal`, {
-      artifacts: [
-        { artifactKey: "parity.json", sha256, descriptorSha256: httpDigest },
-      ],
+      artifacts: [{ artifactKey: "parity.json", sha256, descriptorSha256: httpDigest }],
       declarationBasis: "producer_manifest",
       externalAttemptId: "parity-http-attempt",
       startedAtMs: 1_700_000_000_000,

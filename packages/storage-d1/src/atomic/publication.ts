@@ -168,10 +168,7 @@ export interface RepairResult {
  * selection inside one transaction, so the events name exactly the runs the
  * upsert publishes.
  */
-export async function repairPublication(
-  db: D1Like,
-  request: RepairRequest,
-): Promise<RepairResult> {
+export async function repairPublication(db: D1Like, request: RepairRequest): Promise<RepairResult> {
   if (!ACTOR_PATTERN.test(request.actor) || request.actor === "pipeline")
     throw new Error("publication_actor_invalid");
   if (request.reason.length < 1 || request.reason.length > 200)
@@ -236,8 +233,9 @@ export interface PublishInput {
 export function publishBatch(db: D1Like, input: PublishInput): D1StatementLike[] {
   const { parseId, token, version, artifactId, parserName, publishedAt, now } = input;
   return [
-    db.prepare(
-      `UPDATE parse_runs SET status='ok',superseded_by_parse_run_id=(
+    db
+      .prepare(
+        `UPDATE parse_runs SET status='ok',superseded_by_parse_run_id=(
           SELECT newer.id FROM parse_runs newer
           WHERE newer.fetch_artifact_id=parse_runs.fetch_artifact_id
             AND newer.parser_name=parse_runs.parser_name AND newer.status='ok'
@@ -253,15 +251,20 @@ export function publishBatch(db: D1Like, input: PublishInput): D1StatementLike[]
             json_extract('['||replace(newer.parser_version,'.',',')||']','$[1]') DESC,
             json_extract('['||replace(newer.parser_version,'.',',')||']','$[2]') DESC LIMIT 1
         ) WHERE id=? AND EXISTS(SELECT 1 FROM observation_parse_jobs WHERE lease_token=? AND status='running' AND lease_until_ms>?)`,
-    ).bind(version[0]!, version[1]!, version[2]!, parseId, token, now),
-    db.prepare(
-      `UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE fetch_artifact_id=? AND parser_name=? AND id<>? AND status='ok' AND superseded_by_parse_run_id IS NULL AND NOT EXISTS(SELECT 1 FROM parse_run_candidates c WHERE c.parse_run_id=parse_runs.id) AND EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=? AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL)`, // gate:writer
-    ).bind(parseId, artifactId, parserName, parseId, parseId),
+      )
+      .bind(version[0]!, version[1]!, version[2]!, parseId, token, now),
+    db
+      .prepare(
+        `UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE fetch_artifact_id=? AND parser_name=? AND id<>? AND status='ok' AND superseded_by_parse_run_id IS NULL AND NOT EXISTS(SELECT 1 FROM parse_run_candidates c WHERE c.parse_run_id=parse_runs.id) AND EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=? AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL)`, // gate:writer
+      )
+      .bind(parseId, artifactId, parserName, parseId, parseId),
     ...publicationStatements(db, parseId, publishedAt, token, now),
     // Fenced on the live lease like the first statement: a replayed batch
     // must not touch a job another attempt has already closed.
-    db.prepare(
-      `UPDATE observation_parse_jobs SET status='done',last_error_code=NULL WHERE lease_token=? AND status='running' AND EXISTS(SELECT 1 FROM parse_runs WHERE id=? AND status='ok')`,
-    ).bind(token, parseId),
+    db
+      .prepare(
+        `UPDATE observation_parse_jobs SET status='done',last_error_code=NULL WHERE lease_token=? AND status='running' AND EXISTS(SELECT 1 FROM parse_runs WHERE id=? AND status='ok')`,
+      )
+      .bind(token, parseId),
   ];
 }

@@ -96,7 +96,9 @@ function counts(): Record<string, number> {
     decisions: one("SELECT count(*) AS n FROM decision_revisions"),
     mappings: one("SELECT count(*) AS n FROM account_mappings"),
     outbox: one("SELECT count(*) AS n FROM decision_outbox"),
-    approvalUses: one(`SELECT uses_remaining AS n FROM approvals WHERE approval_id='${APPROVAL_ID}'`),
+    approvalUses: one(
+      `SELECT uses_remaining AS n FROM approvals WHERE approval_id='${APPROVAL_ID}'`,
+    ),
     committedPlans: one("SELECT count(*) AS n FROM change_plans WHERE status='committed'"),
   };
 }

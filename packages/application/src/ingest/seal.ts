@@ -347,12 +347,7 @@ export async function addFailedAttempt(
     fields,
     now,
   );
-  const attempt = await readFailedAttempt(
-    env.DB,
-    runId,
-    clientId,
-    fields.external_attempt_id,
-  );
+  const attempt = await readFailedAttempt(env.DB, runId, clientId, fields.external_attempt_id);
   assertSame(attempt, { ...fields }, "ingestion_attempt_conflict");
   return { attemptId: attempt!.id as number, outcome: fields.outcome };
 }

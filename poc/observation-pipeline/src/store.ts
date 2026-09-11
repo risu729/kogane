@@ -113,7 +113,10 @@ export function openStore(stateDir?: string): Store {
     db.transaction(() =>
       db.exec(
         readFileSync(
-          join(POC_ROOT, "../../packages/storage-d1/migrations/core/0037_unit_scope_eligibility.sql"),
+          join(
+            POC_ROOT,
+            "../../packages/storage-d1/migrations/core/0037_unit_scope_eligibility.sql",
+          ),
           "utf8",
         ),
       ),

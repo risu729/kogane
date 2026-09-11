@@ -57,7 +57,9 @@ describe("decimal-v1 columns", () => {
     );
     // Leading zeros, a negative scale and a non-canonical "-0" are all forms
     // the schema forbids; none of them may become a number.
-    expect(decodeDecimal({ coefficient: "007", scale: 0, status: "exact" }).status).toBe("conflict");
+    expect(decodeDecimal({ coefficient: "007", scale: 0, status: "exact" }).status).toBe(
+      "conflict",
+    );
     expect(decodeDecimal({ coefficient: "1", scale: -1, status: "exact" }).status).toBe("conflict");
     expect(decodeDecimal({ coefficient: "-0", scale: 0, status: "exact" }).status).toBe("conflict");
   });

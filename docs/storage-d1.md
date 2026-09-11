@@ -37,19 +37,19 @@ packages/storage-d1/
 
 ### `src/core/`
 
-| Module                                   | Owns                                                                                              | Came from                                     |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `ingest-registry.ts`                     | `ingest_clients`, `active_ingest_routes`, run lookup                                              | `services/raw-evidence/src/http.ts`           |
-| `raw-objects.ts`                         | `raw_objects`, `raw_object_verification_events`                                                   | `services/raw-evidence/src/store.ts`          |
-| `fetch-runs.ts`                          | `acquisition_sessions`, `fetch_runs`, `fetch_run_reports`                                         | `services/raw-evidence/src/store.ts`          |
-| `structure.ts`                           | `fetch_run_ranges`, `fetch_page_groups`, `fetch_units`, `fetch_unit_reports`                      | `services/raw-evidence/src/structure.ts`      |
-| `artifacts.ts`                           | `fetch_artifacts` and its ranges, transform steps and relations                                   | `services/raw-evidence/src/store.ts`          |
-| `origins.ts`                             | `http_scope_rules`, `origin_template_policies`, the four `artifact_*_metadata` tables             | `services/raw-evidence/src/origins.ts`        |
-| `inventories.ts`                         | `run_inventories`, `run_inventory_items`, `fetch_run_seals`, `ingestion_attempts`                 | `services/raw-evidence/src/store.ts`          |
-| `identity-store.ts`, `identity-commands.ts`, `identity-keys.ts`, `identity-audit.ts`, `identity-policies/` | the identity projection and its decision commands                | `services/observation-pipeline/src/`          |
-| `decision-outbox.ts`                     | `decision_outbox` dispatch and the receipt's `accepted → published` transition                    | `services/observation-pipeline/src/`          |
-| `operations.ts`                          | the expected-revision expression over `account_mappings` / `instrument_mappings` / `entity_relations` | `packages/application/src/operations/sql.ts` |
-| `command-store.ts`                       | the D1 adapter that turns a `{sql, binds}` list into one batch                                    | `packages/application/src/operations/store.ts` |
+| Module                                                                                                     | Owns                                                                                                  | Came from                                      |
+| ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `ingest-registry.ts`                                                                                       | `ingest_clients`, `active_ingest_routes`, run lookup                                                  | `services/raw-evidence/src/http.ts`            |
+| `raw-objects.ts`                                                                                           | `raw_objects`, `raw_object_verification_events`                                                       | `services/raw-evidence/src/store.ts`           |
+| `fetch-runs.ts`                                                                                            | `acquisition_sessions`, `fetch_runs`, `fetch_run_reports`                                             | `services/raw-evidence/src/store.ts`           |
+| `structure.ts`                                                                                             | `fetch_run_ranges`, `fetch_page_groups`, `fetch_units`, `fetch_unit_reports`                          | `services/raw-evidence/src/structure.ts`       |
+| `artifacts.ts`                                                                                             | `fetch_artifacts` and its ranges, transform steps and relations                                       | `services/raw-evidence/src/store.ts`           |
+| `origins.ts`                                                                                               | `http_scope_rules`, `origin_template_policies`, the four `artifact_*_metadata` tables                 | `services/raw-evidence/src/origins.ts`         |
+| `inventories.ts`                                                                                           | `run_inventories`, `run_inventory_items`, `fetch_run_seals`, `ingestion_attempts`                     | `services/raw-evidence/src/store.ts`           |
+| `identity-store.ts`, `identity-commands.ts`, `identity-keys.ts`, `identity-audit.ts`, `identity-policies/` | the identity projection and its decision commands                                                     | `services/observation-pipeline/src/`           |
+| `decision-outbox.ts`                                                                                       | `decision_outbox` dispatch and the receipt's `accepted → published` transition                        | `services/observation-pipeline/src/`           |
+| `operations.ts`                                                                                            | the expected-revision expression over `account_mappings` / `instrument_mappings` / `entity_relations` | `packages/application/src/operations/sql.ts`   |
+| `command-store.ts`                                                                                         | the D1 adapter that turns a `{sql, binds}` list into one batch                                        | `packages/application/src/operations/store.ts` |
 
 Every SQL string moved unchanged. Where a module's old path is still imported,
 the service keeps a re-export shim naming the new home
@@ -59,12 +59,12 @@ the service keeps a re-export shim naming the new home
 
 Four conversions, each with a value it must never produce (09 §4):
 
-| Codec            | Columns                                 | Must never produce                                             |
-| ---------------- | --------------------------------------- | -------------------------------------------------------------- |
-| `decimal.ts`     | `coefficient` TEXT, `scale`, `status`   | zero for a missing, unparsed or conflicting amount (INV05)      |
-| `date-only.ts`   | `YYYY-MM-DD` TEXT                       | a shifted calendar day, or a neighbouring day for `2026-02-30`  |
-| `boolean.ts`     | `0` / `1`                               | `true` for an unreadable flag — `Boolean("0")` is `true`        |
-| `nullable-id.ts` | nullable `INTEGER` references           | row `0` for a NULL reference                                    |
+| Codec            | Columns                               | Must never produce                                             |
+| ---------------- | ------------------------------------- | -------------------------------------------------------------- |
+| `decimal.ts`     | `coefficient` TEXT, `scale`, `status` | zero for a missing, unparsed or conflicting amount (INV05)     |
+| `date-only.ts`   | `YYYY-MM-DD` TEXT                     | a shifted calendar day, or a neighbouring day for `2026-02-30` |
+| `boolean.ts`     | `0` / `1`                             | `true` for an unreadable flag — `Boolean("0")` is `true`       |
+| `nullable-id.ts` | nullable `INTEGER` references         | row `0` for a NULL reference                                   |
 
 The decimal coefficient is an arbitrary-precision integer stored as TEXT. It
 is never a JS number and never a float column, and a row whose status says
@@ -78,17 +78,17 @@ through this codec so the rule is stated once.
 A guarded batch is one command, not a set of CRUD calls. These stay **native
 SQL** and will not be ported to an ORM (09 §2, decision D11):
 
-| Command                     | What it commits atomically                                                                             |
-| --------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `seal.ts`                   | the run inventory, its items, the seal and the ingestion attempt                                        |
-| `publication.ts`            | `status='ok'`, supersession, the publication event, the adoption pointer and the job close              |
-| `decision-commit.ts`        | the operation receipt reservation, the mutation, the approval use, the plan close and the outbox rows   |
+| Command              | What it commits atomically                                                                            |
+| -------------------- | ----------------------------------------------------------------------------------------------------- |
+| `seal.ts`            | the run inventory, its items, the seal and the ingestion attempt                                      |
+| `publication.ts`     | `status='ok'`, supersession, the publication event, the adoption pointer and the job close            |
+| `decision-commit.ts` | the operation receipt reservation, the mutation, the approval use, the plan close and the outbox rows |
 
 Two facts decide the shape of all three:
 
 1. **A preceding SELECT is not a guard.** Reading a revision and then writing
    is a TOCTOU: a concurrent commit can move it in between. Every precondition
-   is therefore a condition of the *writing* statement.
+   is therefore a condition of the _writing_ statement.
 2. **D1 rolls a batch back on an SQL error, not because a conditional INSERT
    matched zero rows.** A batch does not stop when its first statement writes
    nothing, so each later statement restates the guard (`EXISTS(… receipt …)`,
@@ -129,20 +129,20 @@ is what stops a job applying or resetting the wrong one.
 
 Consumers repointed by this change:
 
-| Consumer                                                | What it uses the directory for      |
-| ------------------------------------------------------- | ----------------------------------- |
-| `services/raw-evidence/wrangler.jsonc`                  | `migrations_dir`                    |
-| `services/observation-pipeline/wrangler.jsonc`          | `migrations_dir`                    |
-| `services/raw-evidence/vitest.config.ts`                | `readD1Migrations` for the test D1  |
-| `services/evidence-browser/vitest.config.ts`            | `readD1Migrations` for the test D1  |
-| `services/observation-pipeline/test/harness.ts`         | `layerBMigrations()`                |
-| five pipeline tests reading one migration file          | query-plan and schema assertions    |
-| `packages/read-model/test/{events,identity,read-model}` | applying CORE to `bun:sqlite`       |
-| `packages/observation-shared/test/normalized-decimal`   | the 0024 views                      |
-| `poc/observation-pipeline/src/store.ts` and its test    | the 0024/0025/0037 views            |
-| `scripts/publication-gate-predicates.test.ts`           | the "no legacy rule after 0026" guard |
-| `services/raw-evidence/scripts/{deploy.sh,generate-decimal-triggers.ts}` | digests and trigger generation |
-| `scripts/core-schema-ledger.ts`                         | the CORE schema ledger (U01)        |
+| Consumer                                                                 | What it uses the directory for        |
+| ------------------------------------------------------------------------ | ------------------------------------- |
+| `services/raw-evidence/wrangler.jsonc`                                   | `migrations_dir`                      |
+| `services/observation-pipeline/wrangler.jsonc`                           | `migrations_dir`                      |
+| `services/raw-evidence/vitest.config.ts`                                 | `readD1Migrations` for the test D1    |
+| `services/evidence-browser/vitest.config.ts`                             | `readD1Migrations` for the test D1    |
+| `services/observation-pipeline/test/harness.ts`                          | `layerBMigrations()`                  |
+| five pipeline tests reading one migration file                           | query-plan and schema assertions      |
+| `packages/read-model/test/{events,identity,read-model}`                  | applying CORE to `bun:sqlite`         |
+| `packages/observation-shared/test/normalized-decimal`                    | the 0024 views                        |
+| `poc/observation-pipeline/src/store.ts` and its test                     | the 0024/0025/0037 views              |
+| `scripts/publication-gate-predicates.test.ts`                            | the "no legacy rule after 0026" guard |
+| `services/raw-evidence/scripts/{deploy.sh,generate-decimal-triggers.ts}` | digests and trigger generation        |
+| `scripts/core-schema-ledger.ts`                                          | the CORE schema ledger (U01)          |
 
 Only the deploy job applies migrations to production. Tests apply them from
 the directory, never from a checked-in schema dump.
@@ -165,17 +165,17 @@ adapter decision D2 keeps deployed — routing, authentication and status codes.
 All of it with synthetic data, locally. Nothing here was run against
 production.
 
-| Claim                                                                               | Test                                                             |
-| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| G0-02: the CORE migrations kept their names, numbers and bytes                      | `packages/storage-d1/test/migrations.test.ts`                    |
-| G2-14: a guard matching 0 rows leaves no receipt, decision, approval use, plan close or outbox row | `packages/storage-d1/test/decision-commit.test.ts` |
-| G2-15: a revision that moved between approve and commit makes the whole command fail | same file                                                        |
-| G2-16: the immutability triggers still refuse a rewrite of what a commit wrote       | same file                                                        |
-| The codecs never produce zero, a shifted day, a false `true` or row 0                | `packages/storage-d1/test/codecs.test.ts`                        |
-| The HTTP route and the in-process port register identically                          | `services/raw-evidence/test/registration-parity.test.ts`         |
-| The ingest wire protocol is unchanged                                                | `services/raw-evidence/test/{api,schema,source-usecases,evidence-contract}.test.ts` and the nine route scripts |
-| The publication gate's writers and counts are unchanged                              | `scripts/publication-gate-predicates.test.ts`, `services/observation-pipeline/test/publication-gate.test.ts` |
-| No package imports a service back                                                    | `scripts/import-boundaries.test.ts`                              |
+| Claim                                                                                              | Test                                                                                                           |
+| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| G0-02: the CORE migrations kept their names, numbers and bytes                                     | `packages/storage-d1/test/migrations.test.ts`                                                                  |
+| G2-14: a guard matching 0 rows leaves no receipt, decision, approval use, plan close or outbox row | `packages/storage-d1/test/decision-commit.test.ts`                                                             |
+| G2-15: a revision that moved between approve and commit makes the whole command fail               | same file                                                                                                      |
+| G2-16: the immutability triggers still refuse a rewrite of what a commit wrote                     | same file                                                                                                      |
+| The codecs never produce zero, a shifted day, a false `true` or row 0                              | `packages/storage-d1/test/codecs.test.ts`                                                                      |
+| The HTTP route and the in-process port register identically                                        | `services/raw-evidence/test/registration-parity.test.ts`                                                       |
+| The ingest wire protocol is unchanged                                                              | `services/raw-evidence/test/{api,schema,source-usecases,evidence-contract}.test.ts` and the nine route scripts |
+| The publication gate's writers and counts are unchanged                                            | `scripts/publication-gate-predicates.test.ts`, `services/observation-pipeline/test/publication-gate.test.ts`   |
+| No package imports a service back                                                                  | `scripts/import-boundaries.test.ts`                                                                            |
 
 ## Flags, deploy order, rollback
 

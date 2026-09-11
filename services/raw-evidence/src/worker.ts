@@ -47,7 +47,9 @@ async function route(request: Request, env: WorkerEnv): Promise<Response> {
   );
   if (request.method === "POST" && verificationMatch) {
     return json(
-      { ...(await verifyObject(env, clientId, Number(verificationMatch[1]), verificationMatch[2])) },
+      {
+        ...(await verifyObject(env, clientId, Number(verificationMatch[1]), verificationMatch[2])),
+      },
       201,
     );
   }
@@ -72,12 +74,7 @@ async function route(request: Request, env: WorkerEnv): Promise<Response> {
   if (request.method === "POST" && pageGroupMatch) {
     return json(
       {
-        ...(await addPageGroup(
-          env,
-          clientId,
-          Number(pageGroupMatch[1]),
-          await readJson(request),
-        )),
+        ...(await addPageGroup(env, clientId, Number(pageGroupMatch[1]), await readJson(request))),
       },
       201,
     );
@@ -169,7 +166,12 @@ async function route(request: Request, env: WorkerEnv): Promise<Response> {
   if (request.method === "POST" && attemptMatch) {
     return json(
       {
-        ...(await addFailedAttempt(env, clientId, Number(attemptMatch[1]), await readJson(request))),
+        ...(await addFailedAttempt(
+          env,
+          clientId,
+          Number(attemptMatch[1]),
+          await readJson(request),
+        )),
       },
       201,
     );

@@ -45,7 +45,11 @@ import {
   type NormalizedDecimal,
 } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import type { BalanceRow } from "../../../packages/observation-shared/src/api-contract.ts";
-import type { OutboxOutcome } from "./decision-outbox.ts";
+import type { OutboxOutcome, OutboxRow } from "./decision-outbox.ts";
+// The structural D1 binding the shared CORE package uses (U05); a real
+// `D1Database` satisfies it, and typing the projection against it is what
+// lets `balanceProjectionOutboxProcessor` be an `OutboxProcessor`.
+import { runBatch, type D1Like } from "../../../packages/storage-d1/src/d1.ts";
 
 /** The 5,000 candidate bound of the read model; a larger set is refused, never cut. */
 const CANDIDATE_LIMIT = 5001;
@@ -112,7 +116,7 @@ type CandidateRow = BalanceRow & { measureView: "balances" | "summaries"; latest
  * today. The reader refuses more than 5,000 candidates; the job records that
  * refusal and seals nothing rather than projecting a partial set.
  */
-async function readCandidates(db: D1Database): Promise<CandidateRow[] | null> {
+async function readCandidates(db: D1Like): Promise<CandidateRow[] | null> {
   const reader = createD1ObservationReader(db);
   let latest: BalanceRow[];
   let balances: BalanceRow[];
@@ -144,7 +148,7 @@ async function readCandidates(db: D1Database): Promise<CandidateRow[] | null> {
 }
 
 async function readOrganization(
-  db: D1Database,
+  db: D1Like,
   ids: readonly number[],
 ): Promise<Map<number, OrganizationFields>> {
   const sql = organizationSql("latest");
@@ -173,10 +177,7 @@ interface OriginRow {
 }
 
 /** Parse, artifact and dataset of each candidate, straight from Layer B. */
-async function readOrigins(
-  db: D1Database,
-  ids: readonly number[],
-): Promise<Map<number, OriginRow>> {
+async function readOrigins(db: D1Like, ids: readonly number[]): Promise<Map<number, OriginRow>> {
   const found = new Map<number, OriginRow>();
   for (let start = 0; start < ids.length; start += ORGANIZATION_CHUNK) {
     const page = ids.slice(start, start + ORGANIZATION_CHUNK);
@@ -196,7 +197,7 @@ async function readOrigins(
 }
 
 async function readDecimals(
-  db: D1Database,
+  db: D1Like,
   ids: readonly number[],
 ): Promise<Map<number, NormalizedDecimal>> {
   const found = new Map<number, NormalizedDecimal>();
@@ -254,7 +255,7 @@ interface CoverageRow {
   unit: string;
 }
 
-async function readCoverage(db: D1Database): Promise<CoverageFacts> {
+async function readCoverage(db: D1Like): Promise<CoverageFacts> {
   const result = await db.prepare(COVERAGE_SQL).all<CoverageRow>();
   const groups: CoverageFacts["groups"] = new Map();
   const byParseRun: CoverageFacts["byParseRun"] = new Map();
@@ -384,7 +385,7 @@ function projectionInput(
  * parse) is unchanged: this PR does not relax it, and disagreeing evidence
  * stays a conflict rather than being collapsed.
  */
-export async function collectCandidates(db: D1Database): Promise<ProjectionCandidate[] | null> {
+export async function collectCandidates(db: D1Like): Promise<ProjectionCandidate[] | null> {
   const rows = await readCandidates(db);
   if (rows === null) return null;
   const ids = rows.map((row) => row.id);
@@ -471,7 +472,7 @@ export async function collectCandidates(db: D1Database): Promise<ProjectionCandi
  * to decide whether the sealed snapshot is still current. One definition, so
  * builder and reader cannot disagree about what "behind" means.
  */
-export async function currentProjectionInputs(db: D1Database): Promise<ProjectionInputs> {
+export async function currentProjectionInputs(db: D1Like): Promise<ProjectionInputs> {
   const row = await createBalanceProjectionReader(d1Executor(db)).projectionInputs();
   return {
     publishedHighWaterParseRunId: row.published_high_water,
@@ -485,11 +486,11 @@ export async function currentProjectionInputs(db: D1Database): Promise<Projectio
 }
 
 /** The snapshot id the current inputs produce; the same digest the reader compares. */
-export async function currentSnapshotId(db: D1Database): Promise<string> {
+export async function currentSnapshotId(db: D1Like): Promise<string> {
   return await canonicalDigest(projectionInputManifest(await currentProjectionInputs(db)));
 }
 
-function insertRow(db: D1Database, snapshotId: string, row: ProjectionRow) {
+function insertRow(db: D1Like, snapshotId: string, row: ProjectionRow) {
   return db
     .prepare(
       `INSERT OR IGNORE INTO current_balance_projection(
@@ -544,7 +545,7 @@ function insertRow(db: D1Database, snapshotId: string, row: ProjectionRow) {
 }
 
 async function writeRelations(
-  db: D1Database,
+  db: D1Like,
   relations: readonly DerivedScopeRelation[],
   now: string,
 ): Promise<void> {
@@ -578,7 +579,7 @@ async function writeRelations(
 
 /** Retire and delete builds older than the retained window; a reader on an
  * older cursor gets `context_expired` rather than a silently different list. */
-async function retireOldSnapshots(db: D1Database, keep: string): Promise<number> {
+async function retireOldSnapshots(db: D1Like, keep: string): Promise<number> {
   const stale = await db
     .prepare(
       `SELECT snapshot_id FROM balance_read_snapshots
@@ -681,7 +682,10 @@ export async function runBalanceProjection(
   const slice = pending.slice(0, budget);
   for (let start = 0; start < slice.length; start += WRITE_CHUNK) {
     const chunk = slice.slice(start, start + WRITE_CHUNK);
-    await db.batch(chunk.map((row) => insertRow(db, snapshotId, row)));
+    await runBatch(
+      db,
+      chunk.map((row) => insertRow(db, snapshotId, row)),
+    );
     await db
       .prepare("UPDATE balance_read_snapshots SET build_cursor=?2 WHERE snapshot_id=?1")
       .bind(snapshotId, String(chunk[chunk.length - 1]!.rowSeq))
@@ -739,7 +743,11 @@ export async function runBalanceProjection(
 export function balanceProjectionOutboxProcessor(
   env: Env,
   options: BalanceProjectionOptions = {},
-): (db: D1Database) => Promise<OutboxOutcome> {
+  // The dispatcher's own processor shape (packages/storage-d1 since U05): the
+  // structural D1 binding, which a real `D1Database` satisfies, and the outbox
+  // row, which this processor does not need — it rebuilds from the current
+  // inputs, not from what the row says.
+): (db: D1Like, row?: OutboxRow) => Promise<OutboxOutcome> {
   return async (db) => {
     if (!projectionFlagOn(env)) return "skipped_no_projection";
     const wanted = await currentSnapshotId(db);

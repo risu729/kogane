@@ -44,8 +44,7 @@ export function decodeDecimal(
   columns: DecimalColumns,
   normalizationVersion = "decimal-v1",
 ): ValueState {
-  if (columns.status !== "exact")
-    return { status: columns.status, reasonCode: UNKNOWN_REASON };
+  if (columns.status !== "exact") return { status: columns.status, reasonCode: UNKNOWN_REASON };
   const candidate = { coefficient: columns.coefficient, scale: columns.scale };
   if (!validExactDecimal(candidate)) return { status: "conflict", reasonCode: "invalid_decimal" };
   return { status: "exact", value: candidate, normalizationVersion };

@@ -61,11 +61,7 @@ export interface IngestEnv {
  * disagreement into a conflict. A missing row means the write is not visible,
  * which is a server fault, not a client conflict.
  */
-export function assertSame(
-  row: RecordValue | null,
-  expected: RecordValue,
-  code: string,
-): void {
+export function assertSame(row: RecordValue | null, expected: RecordValue, code: string): void {
   if (!row) throw new IngestError(500, "write_not_visible");
   for (const [key, value] of Object.entries(expected)) {
     if (row[key] !== value) throw new IngestError(409, code);

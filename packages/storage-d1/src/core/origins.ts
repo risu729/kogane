@@ -21,10 +21,7 @@ export interface HttpScopeRule {
 }
 
 /** Every rule that can bear on this source: the global ones and its own. */
-export async function readHttpScopeRules(
-  db: D1Like,
-  sourceId: string,
-): Promise<HttpScopeRule[]> {
+export async function readHttpScopeRules(db: D1Like, sourceId: string): Promise<HttpScopeRule[]> {
   const result = await db
     .prepare(
       `

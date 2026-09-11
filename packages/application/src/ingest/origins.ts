@@ -52,9 +52,7 @@ export async function validateOriginScope(
   if (origins.http) {
     const value = origins.http;
     const rules = await readHttpScopeRules(env.DB, sourceId);
-    if (
-      !httpScopeAllowed(rules, value.scheme, value.host, value.port, value.pathTemplate)
-    )
+    if (!httpScopeAllowed(rules, value.scheme, value.host, value.port, value.pathTemplate))
       throw new IngestError(403, "http_scope_denied");
     await requireTemplatePolicy(
       env,

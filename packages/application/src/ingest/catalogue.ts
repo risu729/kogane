@@ -38,12 +38,7 @@ import { readRawObjectSize } from "../../../storage-d1/src/core/raw-objects.ts";
 import type { D1StatementLike } from "../../../storage-d1/src/d1.ts";
 import { runBatch } from "../../../storage-d1/src/d1.ts";
 import { loadRun } from "./access.ts";
-import {
-  assertSame,
-  IngestError,
-  type IngestEnv,
-  type RecordValue,
-} from "./contract.ts";
+import { assertSame, IngestError, type IngestEnv, type RecordValue } from "./contract.ts";
 import { validateOriginScope } from "./origins.ts";
 
 /** Validated, normalized artifact descriptor: the shape whose canonical bytes
@@ -64,9 +59,7 @@ export async function addArtifact(
   const run = await loadRun(env, clientId, runId);
   // The shared contract validates the body (unknown keys rejected) and
   // normalizes it exactly as the ingest client does.
-  const input = descriptorContractV1.normalize(
-    descriptorContractV1.parseRequest(body, { runId }),
-  );
+  const input = descriptorContractV1.normalize(descriptorContractV1.parseRequest(body, { runId }));
   const objectRow = await readRawObjectSize(env.DB, input.sha256);
   if (!objectRow) throw new IngestError(409, "raw_object_missing");
   if (objectRow.byte_size !== input.byteSize)
