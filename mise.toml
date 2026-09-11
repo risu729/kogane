@@ -57,6 +57,7 @@ includes = [
 	"tasks.toml",
 	"tasks",
 	"packages/application/tasks.toml",
+	"packages/collection/tasks.toml",
 	"packages/domain/tasks.toml",
 	"packages/evidence-contract/tasks.toml",
 	"packages/identity/tasks.toml",

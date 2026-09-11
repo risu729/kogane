@@ -124,8 +124,10 @@ manifest grows a `scripts` field, or if any tracked file calls a package script.
   shell code, permissions, action pins, and unsafe workflow patterns.
 - Ruff checks and formats Python probes without executing them. Typos and hk
   hygiene checks cover spelling, whitespace, merge markers, and file integrity.
-- `ci:root` runs the guards under `tasks/_lib/`: the manifest and task-runner
-  guard, the publication-gate predicate allow-list, and the import boundaries of
+- `ci:root` runs the guards under `tasks/_lib/` and `scripts/`: the manifest
+  and task-runner guard, the auto-merge and risk-gate decisions of
+  [CI/CD automation](ci-cd.md), the publication-gate predicate allow-list, and
+  the import boundaries of
   [package layout](package-layout.md) (no deployed or shared module may import
   `poc/`; the PoC web UI may not import a service internal or read-model SQL).
   It also runs the [infrastructure ledgers](infra-ledgers.md) (a wrangler
