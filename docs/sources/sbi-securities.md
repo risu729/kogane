@@ -251,7 +251,7 @@ TLS pinning、root／emulator検知、PlusアプリへのEVERSPIN適用範囲は
 - `tradePassword`、取引認証callback、device registration、order payload builders、発注endpointを依存グラフと配布物から除外する。
 - runtimeのegress allowlistとmethod allowlistで、既知のread-only宛先・操作だけを許可する。
 
-実口座試験の再現用overlay、合成test、秘密管理境界は [`poc/sbi-securities/`](../../poc/sbi-securities/) に保存した。これは対象commitの `mnie/scripts/` へ配置して使うPoCであり、Koganeのproduction collectorではない。
+実口座試験の再現用overlay、合成test、秘密管理境界は [`docs/research/sbi-securities.md`](../research/sbi-securities.md) に記録した（overlayのcodeはmainから除去済みで、同documentが読み戻すcommitを示す）。これは対象commitの `mnie/scripts/` へ配置して使ったPoCであり、Koganeのproduction collectorではない。
 
 ### `azuki774/myscrapers` (`e58339122eef9273fb2566f0a867057d3219b2f6`)
 

@@ -1,12 +1,12 @@
 # OCI and WSL browser comparison for Vpass (retired)
 
-|                               |                                                                                                                                                             |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Status                        | **Retired.** The probe harness was removed from `main` by the U04 repository reorganisation; its conclusions live on in `docs/authenticated-collectors.md`. |
-| Ran                           | 2026-08-25 and 2026-08-26                                                                                                                                   |
-| Lived at                      | `poc/oci-browser-probe`                                                                                                                                     |
-| Last commit carrying the code | `5fb143e0f77a492ae9cfdbe0266fe77774b8bd30` (`Host synthetic observation demo behind WARP Access (#104)`, 2026-09-07)                                        |
-| Live resources                | None, and no relay. See "Why it stopped" below.                                                                                                             |
+|                                   |                                                                                                                                                             |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status                            | **Retired.** The probe harness was removed from `main` by the U04 repository reorganisation; its conclusions live on in `docs/authenticated-collectors.md`. |
+| Ran                               | 2026-08-25 and 2026-08-26                                                                                                                                   |
+| Lived at                          | `poc/oci-browser-probe`                                                                                                                                     |
+| Last commit that changed the code | `5fb143e0f77a492ae9cfdbe0266fe77774b8bd30` (`Host synthetic observation demo behind WARP Access (#104)`, 2026-09-07)                                        |
+| Live resources                    | None, and no relay. See "Why it stopped" below.                                                                                                             |
 
 ## Purpose
 

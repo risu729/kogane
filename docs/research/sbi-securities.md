@@ -1,12 +1,12 @@
 # SBI証券 Bitwarden CLI passkey overlay (retired)
 
-|                               |                                                                                                                                     |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Status                        | **Retired.** Superseded by the SBI Securities collector Worker, which reimplements the read-only paths without `mnie`.              |
-| Ran                           | 2026-08-26, against the real account                                                                                                |
-| Lived at                      | `poc/sbi-securities`                                                                                                                |
-| Last commit carrying the code | `5fb143e0f77a492ae9cfdbe0266fe77774b8bd30` (`Host synthetic observation demo behind WARP Access (#104)`, 2026-09-07)                |
-| Live resources                | None. It never had a wrangler config, a Worker, a bucket or a cron; it was a local overlay on a checkout of an external repository. |
+|                                   |                                                                                                                                     |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Status                            | **Retired.** Superseded by the SBI Securities collector Worker, which reimplements the read-only paths without `mnie`.              |
+| Ran                               | 2026-08-26, against the real account                                                                                                |
+| Lived at                          | `poc/sbi-securities`                                                                                                                |
+| Last commit that changed the code | `5fb143e0f77a492ae9cfdbe0266fe77774b8bd30` (`Host synthetic observation demo behind WARP Access (#104)`, 2026-09-07)                |
+| Live resources                    | None. It never had a wrangler config, a Worker, a bucket or a cron; it was a local overlay on a checkout of an external repository. |
 
 ## What it was
 

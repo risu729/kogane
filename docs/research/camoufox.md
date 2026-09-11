@@ -1,12 +1,12 @@
 # Camoufox container fingerprint probe (retired)
 
-|                               |                                                                                                                                                                                                                |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Status                        | **Retired.** The executable probe was removed from `main` by the U04 repository reorganisation.                                                                                                                |
-| Ran                           | 2026-08-26, bounded controls only                                                                                                                                                                              |
-| Lived at                      | `poc/camoufox-container-probe`                                                                                                                                                                                 |
-| Last commit carrying the code | `5fb143e0f77a492ae9cfdbe0266fe77774b8bd30` (`Host synthetic observation demo behind WARP Access (#104)`, 2026-09-07)                                                                                           |
-| Live resources                | None. No Worker, Container application, registry image, bucket or cron ever existed for it, and the local Docker image was deleted ([`vpass-probe-cleanup-2026-08-26.md`](vpass-probe-cleanup-2026-08-26.md)). |
+|                                   |                                                                                                                                                                                                                |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status                            | **Retired.** The executable probe was removed from `main` by the U04 repository reorganisation.                                                                                                                |
+| Ran                               | 2026-08-26, bounded controls only                                                                                                                                                                              |
+| Lived at                          | `poc/camoufox-container-probe`                                                                                                                                                                                 |
+| Last commit that changed the code | `5fb143e0f77a492ae9cfdbe0266fe77774b8bd30` (`Host synthetic observation demo behind WARP Access (#104)`, 2026-09-07)                                                                                           |
+| Live resources                    | None. No Worker, Container application, registry image, bucket or cron ever existed for it, and the local Docker image was deleted ([`vpass-probe-cleanup-2026-08-26.md`](vpass-probe-cleanup-2026-08-26.md)). |
 
 ## Purpose
 
