@@ -20,7 +20,7 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
-import { runRewardReadProjection } from "../../observation-pipeline/src/reward-read-projection";
+import { runRewardReadProjection } from "../../processor/src/reward-read-projection";
 import { decodeReadCursor, encodeReadCursor } from "../../../packages/storage-d1/src/read/index";
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;

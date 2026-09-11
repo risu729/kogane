@@ -37,7 +37,7 @@ export default {
     {
       name: "no-web-to-service-internals",
       comment:
-        "The shipped client (apps/web/src plus index.html) must not import a service's src. apps/web/test is deliberately outside: Vite never sees it, and one Playwright test boots services/evidence-browser's own response helper in-process precisely to prove the client survives the production CSP.",
+        "The shipped client (apps/web/src plus index.html) must not import a service's src. apps/web/test is deliberately outside: Vite never sees it, and one Playwright test boots services/app's own response helper in-process precisely to prove the client survives the production CSP.",
       severity: "error",
       from: { path: "^apps/web/", pathNot: "^apps/web/test/" },
       to: { path: "^services/[^/]+/src/" },

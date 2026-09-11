@@ -48,7 +48,7 @@ digest covers paths as well as contents and a stored `code_digest` must not
 change when a file is only relocated. See
 [package layout](package-layout.md).
 
-`services/observation-pipeline/src/releases.ts` turns a deployed parser and a
+`services/processor/src/releases.ts` turns a deployed parser and a
 metadata extractor release into that manifest, its digest and a release id, and
 computes
 
@@ -267,13 +267,13 @@ its own registered release names.
 1. `services/raw-evidence`: apply `0027_metadata_projections.sql`, then
    `0028_parse_releases.sql`. Both are additive; 0028 builds on 0026's tables,
    so it must not be applied before it. The previous Workers keep working.
-2. `services/observation-pipeline`: deploy the Worker **with the flag absent**.
+2. `services/processor`: deploy the Worker **with the flag absent**.
    It now registers releases, records metadata projections and input
    fingerprints, and publishes exactly as before.
 3. Verify: `GET /publication/consistency` reports `mismatches: 0`, and
    `GET /release/status` lists one release per deployed parser.
 4. Only then set `RELEASE_CANDIDATES_ENABLED = "true"` (a `vars` entry in
-   `services/observation-pipeline/wrangler.jsonc`, or the dashboard) to enable
+   `services/processor/wrangler.jsonc`, or the dashboard) to enable
    the candidate lane and the command routes.
 
 ## Rollback
@@ -289,7 +289,7 @@ Two separate runbooks, as the review requires.
   candidate. A build between 0026 and this change is also unsafe once
   candidates exist, because its publish batch supersedes candidates - which
   turns them into replaced history that the browser's history views do show.
-  `services/observation-pipeline/test/release-adoption.test.ts` asserts that
+  `services/processor/test/release-adoption.test.ts` asserts that
   behaviour rather than assuming it. **Minimum rollback build once
   `RELEASE_CANDIDATES_ENABLED` has ever been "true": this change.** Turning the
   flag back off is safe and is the first step of any incident response; it
@@ -299,22 +299,22 @@ Two separate runbooks, as the review requires.
 
 ## Invariants kept and how they were verified
 
-| Invariant                                                                                                        | Test                                                                                                     |
-| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| A candidate never reaches the publication pointer, any reader, or the repair route                               | `observation-pipeline/test/release-adoption.test.ts`, `evidence-browser/test/release-candidates.test.ts` |
-| Candidate and adopted run never supersede each other; a late older version is superseded by the adopted run      | `release-adoption.test.ts`                                                                               |
-| An expired lease during a candidate write records nothing                                                        | `release-adoption.test.ts`                                                                               |
-| An activation conflict changes nothing; a repeat is idempotent                                                   | `release-adoption.test.ts`                                                                               |
-| Rollback restores the previous visible row set exactly, with no update to any parse run                          | `release-adoption.test.ts` (full row-set comparison)                                                     |
-| Comparison responses carry no financial value                                                                    | `release-adoption.test.ts`                                                                               |
-| An empty candidate result and an empty candidate set are results, not errors                                     | `release-adoption.test.ts`                                                                               |
-| Same manifest and evidence give the same fingerprint; a different extractor gives another                        | `release-adoption.test.ts`, `metadata-projections.test.ts`                                               |
-| An old parse keeps its projection when a re-extraction disagrees; the difference list names fields, never values | `metadata-projections.test.ts`                                                                           |
-| With the flag off a targeted job publishes normally, writes no candidate, and the routes 404                     | `metadata-projections.test.ts`                                                                           |
-| 0027/0028 apply to a store with existing metadata rows and backfill exactly, idempotently                        | `metadata-projections.test.ts`                                                                           |
-| Registering the same parser name and version with a different code digest is refused                             | `release-adoption.test.ts`, `packages/parsers/test/parser-digests.test.ts`                               |
-| The digests describe the sources on disk                                                                         | `packages/parsers/test/parser-digests.test.ts`                                                           |
-| Normal reads are unchanged                                                                                       | every existing observation-pipeline, evidence-browser and PoC test, unchanged expectations               |
+| Invariant                                                                                                        | Test                                                                             |
+| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| A candidate never reaches the publication pointer, any reader, or the repair route                               | `processor/test/release-adoption.test.ts`, `app/test/release-candidates.test.ts` |
+| Candidate and adopted run never supersede each other; a late older version is superseded by the adopted run      | `release-adoption.test.ts`                                                       |
+| An expired lease during a candidate write records nothing                                                        | `release-adoption.test.ts`                                                       |
+| An activation conflict changes nothing; a repeat is idempotent                                                   | `release-adoption.test.ts`                                                       |
+| Rollback restores the previous visible row set exactly, with no update to any parse run                          | `release-adoption.test.ts` (full row-set comparison)                             |
+| Comparison responses carry no financial value                                                                    | `release-adoption.test.ts`                                                       |
+| An empty candidate result and an empty candidate set are results, not errors                                     | `release-adoption.test.ts`                                                       |
+| Same manifest and evidence give the same fingerprint; a different extractor gives another                        | `release-adoption.test.ts`, `metadata-projections.test.ts`                       |
+| An old parse keeps its projection when a re-extraction disagrees; the difference list names fields, never values | `metadata-projections.test.ts`                                                   |
+| With the flag off a targeted job publishes normally, writes no candidate, and the routes 404                     | `metadata-projections.test.ts`                                                   |
+| 0027/0028 apply to a store with existing metadata rows and backfill exactly, idempotently                        | `metadata-projections.test.ts`                                                   |
+| Registering the same parser name and version with a different code digest is refused                             | `release-adoption.test.ts`, `packages/parsers/test/parser-digests.test.ts`       |
+| The digests describe the sources on disk                                                                         | `packages/parsers/test/parser-digests.test.ts`                                   |
+| Normal reads are unchanged                                                                                       | every existing processor, app and PoC test, unchanged expectations               |
 
 Not verified: production data volumes (the comparison scans the observation
 tables of the runs in scope, which is bounded by the dataset, not by the

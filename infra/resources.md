@@ -588,6 +588,70 @@ No wrangler config.
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>VPOINT_PAY_EMAIL_RECIPIENT
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_EMAIL_FORWARD_TO<br>VPOINT_EMAIL_RECIPIENT<br>VPOINT_MEMBER_NUMBER
 
+### `services/app`
+
+- Disposition (plan 07 §1 + decision D1): `rename-directory` → services/app
+- Required verification: git mv only; Worker names kogane-evidence-browser and kogane-demo stay
+- Execution status: EXECUTED_RENAME (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-demo,kogane-evidence-browser; buckets=kogane-raw-evidence)
+
+#### `kogane-demo` — `services/app/wrangler.demo.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/demo-worker.ts
+- D1: —
+- R2: —
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
+- Crons: —
+- Assets: `../../apps/web/dist` → ASSETS
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>BALANCE_PROJECTION_ENABLED<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED
+- Required secrets (names only): —
+
+#### `kogane-evidence-browser` — `services/app/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`<br>READ → kogane-read `320ebe31-a031-48a1-985f-0e6fabbd517a`
+- R2: EVIDENCE → kogane-raw-evidence
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: PIPELINE → kogane-observation-pipeline
+- Crons: —
+- Assets: `../../apps/web/dist-production` → ASSETS
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED<br>REWARDS_V2_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SESSION_REFRESH_POLICY
+- Required secrets (names only): —
+
+#### `kogane-evidence-browser-test` — `services/app/wrangler.test.jsonc`
+
+- Role: test-only; exists in the account: no
+- Entry point: src/worker.ts
+- D1: DB → test `00000000-0000-0000-0000-000000000001` (not live)<br>READ → test-read `00000000-0000-0000-0000-000000000002` (not live)
+- R2: EVIDENCE → test (not live)
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
+- Crons: —
+- Assets: `test/assets` → ASSETS
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED<br>REWARDS_V2_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SESSION_REFRESH_POLICY
+- Required secrets (names only): —
+
 ### `services/collector-r2-importer`
 
 - Disposition (plan 07 §1 + decision D2): `absorb-into-processor` → services/processor (queue consumer and adapters, U08)
@@ -880,78 +944,14 @@ No wrangler config.
 - Vars (names only): IMPORTER_VERSION<br>RECONCILER_ACCOUNT_ID
 - Required secrets (names only): GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST<br>ORIGIN_FINGERPRINT_KEY<br>RAW_EVIDENCE_TOKEN<br>RAW_EVIDENCE_TOKEN_GLOBAL_PASS<br>RAW_EVIDENCE_TOKEN_MOBILE_SUICA<br>RAW_EVIDENCE_TOKEN_MONEYFORWARD<br>RAW_EVIDENCE_TOKEN_MYJCB<br>RAW_EVIDENCE_TOKEN_SBI_SHINSEI<br>RAW_EVIDENCE_TOKEN_SBI_VC<br>RAW_EVIDENCE_TOKEN_SMBC_DIRECT<br>RAW_EVIDENCE_TOKEN_SONY<br>RAW_EVIDENCE_TOKEN_VPASS<br>RAW_EVIDENCE_TOKEN_VPOINT<br>RAW_EVIDENCE_TOKEN_VPOINT_PAY_EMAIL
 
-### `services/evidence-browser`
-
-- Disposition (plan 07 §1 + decision D1): `rename-directory` → services/app
-- Required verification: git mv only; Worker names kogane-evidence-browser and kogane-demo stay
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-demo,kogane-evidence-browser; buckets=kogane-raw-evidence)
-
-#### `kogane-demo` — `services/evidence-browser/wrangler.demo.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/demo-worker.ts
-- D1: —
-- R2: —
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: `../../apps/web/dist` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>BALANCE_PROJECTION_ENABLED<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED
-- Required secrets (names only): —
-
-#### `kogane-evidence-browser` — `services/evidence-browser/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`<br>READ → kogane-read `320ebe31-a031-48a1-985f-0e6fabbd517a`
-- R2: EVIDENCE → kogane-raw-evidence
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: PIPELINE → kogane-observation-pipeline
-- Crons: —
-- Assets: `../../apps/web/dist-production` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED<br>REWARDS_V2_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SESSION_REFRESH_POLICY
-- Required secrets (names only): —
-
-#### `kogane-evidence-browser-test` — `services/evidence-browser/wrangler.test.jsonc`
-
-- Role: test-only; exists in the account: no
-- Entry point: src/worker.ts
-- D1: DB → test `00000000-0000-0000-0000-000000000001` (not live)<br>READ → test-read `00000000-0000-0000-0000-000000000002` (not live)
-- R2: EVIDENCE → test (not live)
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: `test/assets` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED<br>REWARDS_V2_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SESSION_REFRESH_POLICY
-- Required secrets (names only): —
-
-### `services/observation-pipeline`
+### `services/processor`
 
 - Disposition (plan 07 §1 + decision D1): `rename-directory` → services/processor
 - Required verification: git mv only; Worker name kogane-observation-pipeline and cron stay
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
+- Execution status: EXECUTED_RENAME (plan recorded `NOT_VERIFIED`)
 - Live resources: LIVE(workers=kogane-observation-pipeline; buckets=kogane-raw-evidence)
 
-#### `kogane-observation-read-diagnostic` — `services/observation-pipeline/wrangler.diagnostic.jsonc`
+#### `kogane-observation-read-diagnostic` — `services/processor/wrangler.diagnostic.jsonc`
 
 - Role: binding-only; exists in the account: no
 - Entry point: —
@@ -970,7 +970,7 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
-#### `kogane-observation-pipeline` — `services/observation-pipeline/wrangler.jsonc`
+#### `kogane-observation-pipeline` — `services/processor/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
@@ -989,7 +989,7 @@ No wrangler config.
 - Vars (names only): BALANCE_PROJECTION_ENABLED<br>COLLECTION_ACCOUNT_ID<br>COLLECTION_DATA_BUCKET<br>COLLECTION_INGEST_CLIENT<br>OPS_DISPATCH_ENABLED<br>READ_PROJECTION_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SHARED_R2_INGEST_ENABLED
 - Required secrets (names only): —
 
-#### `kogane-observation-ops-local` — `services/observation-pipeline/wrangler.ops.jsonc`
+#### `kogane-observation-ops-local` — `services/processor/wrangler.ops.jsonc`
 
 - Role: binding-only; exists in the account: no
 - Entry point: —
@@ -1008,7 +1008,7 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
-#### `kogane-read-migrations` — `services/observation-pipeline/wrangler.read-migrations.jsonc`
+#### `kogane-read-migrations` — `services/processor/wrangler.read-migrations.jsonc`
 
 - Role: binding-only; exists in the account: no
 - Entry point: —

@@ -1,6 +1,6 @@
 // The authenticated command boundary (A09). What is proved here is the
 // boundary itself, not the lifecycle: the lifecycle runs in the observation
-// pipeline (`services/observation-pipeline/test/change-lifecycle.test.ts`),
+// pipeline (`services/processor/test/change-lifecycle.test.ts`),
 // which stays the single writer of the decision, approval, receipt and outbox
 // tables. This Worker never writes them, so there is nothing to write here
 // even with the flag on and no pipeline binding present.

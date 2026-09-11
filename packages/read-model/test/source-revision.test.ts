@@ -274,7 +274,7 @@ test("G2-03: a write in each dependency family moves the matching revision", () 
   ).toEqual({ source: 0, visibility: 0 });
   // `fetch_run_seals` is in the ledger too; sealing needs a registered Layer A
   // run, so it is exercised against the real registration path in
-  // services/observation-pipeline/test/projection-input.test.ts.
+  // services/processor/test/projection-input.test.ts.
   // Restrictions move both: a subtotal computed before one is wrong, so the
   // affected snapshot is rebuilt rather than filtered (05 §7).
   expect(

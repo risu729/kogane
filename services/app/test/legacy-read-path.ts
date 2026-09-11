@@ -1,4 +1,4 @@
-// FROZEN COPY of services/evidence-browser/src/observations.ts as of commit
+// FROZEN COPY of services/app/src/observations.ts as of commit
 // 130912af, before PR-04 replaced its regex table-name rewrite and LIMIT
 // stripping with the explicit read repository in packages/read-model.
 //

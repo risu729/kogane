@@ -2,7 +2,7 @@
 //
 // U08 moved the source-agnostic half — route indexing, one import step, the
 // Queue continuation mapping and the registry consistency check — to
-// `services/observation-pipeline/src/legacy-import/adapters/registry.ts`,
+// `services/processor/src/legacy-import/adapters/registry.ts`,
 // because that logic is the Processor's now. What stays here is the registry
 // literal and the twelve per-source adapters, each of which binds this
 // Worker's own R2 bindings and secrets. Nothing about this Worker's behaviour
@@ -13,7 +13,7 @@ import {
   executeImportWith,
   reconcilerOutcome,
   routeIndex,
-} from "../../../observation-pipeline/src/legacy-import/adapters/registry.ts";
+} from "../../../processor/src/legacy-import/adapters/registry.ts";
 import { RECONCILER_SOURCES, type ImportOutcome } from "../reconciler";
 import {
   type ImportAdapter,

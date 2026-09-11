@@ -12,7 +12,7 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
-import { runBalanceProjection } from "../../observation-pipeline/src/balance-projection-job";
+import { runBalanceProjection } from "../../processor/src/balance-projection-job";
 import { projectionPageSql } from "../../../packages/read-model/src/index";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 

@@ -1,7 +1,7 @@
 // The pure half of the operations services (02 §4-5, U06): how a request is
 // identified, what a stage list means, and what a session policy grants. The
 // SQL half is exercised against the real migrations in
-// services/evidence-browser/test/ops-api.test.ts.
+// services/app/test/ops-api.test.ts.
 import { expect, test } from "bun:test";
 import {
   OPERATION_KINDS,

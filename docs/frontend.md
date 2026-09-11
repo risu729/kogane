@@ -94,7 +94,7 @@ the client never sends one. While metadata is loading, capabilities are
 unknown: dependent list queries stay disabled and pages show their loading
 state rather than requesting with guessed defaults. Changing the schema fails
 the pinned contract tests in both `apps/web` and
-`services/evidence-browser`, so a one-sided edit cannot pass CI.
+`services/app`, so a one-sided edit cannot pass CI.
 
 ## Shared figures and the AI hand-off
 
@@ -180,7 +180,7 @@ here neither migrate its schema nor deploy or trigger collectors. The
 read-only browser can be replaced without losing evidence or observations.
 
 The first production adapter is implemented separately in
-`services/evidence-browser`, with the same frontend built in evidence mode.
+`services/app`, with the same frontend built in evidence mode.
 It reads sealed Sony Bank runs and their artifacts from the central raw store;
 it does not populate the local parsed-observation endpoints. See the
 [production evidence browser](production-evidence-browser.md) for its versioned

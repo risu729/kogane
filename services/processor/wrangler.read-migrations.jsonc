@@ -7,7 +7,7 @@
   // to aim the CORE directory at the READ database, or the other way round:
   //
   //   wrangler d1 migrations apply kogane-read --remote \
-  //     --config services/observation-pipeline/wrangler.read-migrations.jsonc
+  //     --config services/processor/wrangler.read-migrations.jsonc
   //
   // It has no `main`, so it deploys nothing and is excluded from the dry-run
   // matrix in `infra/workers-ci.json`. `kogane-read` was created empty on

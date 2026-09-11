@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
-import { identityQuery } from "../../evidence-browser/src/identity-api";
+import { identityQuery } from "../../app/src/identity-api";
 
 test("current identities select keyed eligible run winners before observation fanout", () => {
   const db = new Database(":memory:");

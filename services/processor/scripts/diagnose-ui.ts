@@ -1,5 +1,5 @@
 import { getPlatformProxy } from "wrangler";
-import { evidenceReader } from "../../evidence-browser/src/observations.ts";
+import { evidenceReader } from "../../app/src/observations.ts";
 const proxy = await getPlatformProxy<{ DB: D1Database }>({
   configPath: new URL("../wrangler.diagnostic.jsonc", import.meta.url).pathname,
   persist: false,

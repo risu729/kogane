@@ -31,7 +31,10 @@ pipeline's behaviour changed when it moved.
 | `packages/storage-d1`                      | CORE database access: the SQL adapters (`src/core`), the column codecs (`src/codecs`), the guarded atomic commands (`src/atomic`) and the CORE and READ migration directories. See [storage-d1.md](storage-d1.md).                                                                                                                 | `packages/domain`, `packages/evidence-contract`, `packages/identity`.                                                                     |
 | `packages/application`                     | QuerySpec / command application services shared by HTTP, UI and MCP.                                                                                                                                                                                                                                                               | The packages above.                                                                                                                       |
 | `apps/web`                                 | The React client: `index.html`, `src/**`, `vite.config.ts`, the three build modes and the frontend tests.                                                                                                                                                                                                                          | The packages, over the HTTP contract. **Never a service's `src`, `packages/storage-d1`, the read model's SQL, `poc/` or `experiments/`.** |
-| `services/*`                               | Workers: HTTP, D1, R2, queues, scheduling, authentication.                                                                                                                                                                                                                                                                         | Any package. **Never `poc/`, `experiments/` or `apps/`.**                                                                                 |
+| `services/app`                             | The App Worker: UI delivery, the HTTP and MCP surface, queries and commands. Deploys `kogane-evidence-browser`, `kogane-demo` and the test configuration.                                                                                                                                                                          | Any package. **Never `poc/`, `experiments/` or `apps/`.**                                                                                 |
+| `services/processor`                       | The Processor Worker: ingest and registration, parsing, projection and the job lanes, plus the CORE and READ migration steps. Deploys `kogane-observation-pipeline`.                                                                                                                                                               | Any package. **Never `poc/`, `experiments/` or `apps/`.**                                                                                 |
+| `services/raw-evidence`                    | The legacy ingest adapter (`kogane-ingest`). Its SQL and registration use cases moved to `packages/storage-d1` and `packages/application` in U05; the Worker stays deployed until U15 (decision D2).                                                                                                                               | Any package. **Never `poc/`, `experiments/` or `apps/`.**                                                                                 |
+| `services/collector-r2-importer`           | The legacy collector importer (`kogane-collector-r2-importer`). Its queue consumer and adapters were absorbed by the Processor in U08; the Worker stays deployed until U15 (decision D2).                                                                                                                                          | Any package. **Never `poc/`, `experiments/` or `apps/`.**                                                                                 |
 | `experiments/observation-pipeline-local`   | The local SQLite store standing in for D1/R2, its read-only Hono API, `serve.ts`, `demo.ts`, `export-demo.ts` and the tests that need a store. Owner, expiry and stop condition in its `EXPERIMENT.md`.                                                                                                                            | Any package, and the built client as bytes.                                                                                               |
 | `poc/*` (collectors)                       | Per-source collection experiments.                                                                                                                                                                                                                                                                                                 | Themselves.                                                                                                                               |
 | `tests/fixtures`                           | Synthetic fixtures shared by the parser tests, the importer audit tests, the identity tests and the experiment, with `MANIFEST.sha256`.                                                                                                                                                                                            | Nothing: they are data.                                                                                                                   |
@@ -64,7 +67,7 @@ specifiers count: a fixture path is data, not a dependency.
 
 There is exactly one exception, and it is asserted by name:
 `apps/web/test/evidence-preview.browser.test.ts` imports
-`services/evidence-browser/src/http.ts` to boot the Worker's own response
+`services/app/src/http.ts` to boot the Worker's own response
 helper in-process and prove the client still renders under the production CSP.
 Vite never sees `test/`, so that edge is not in the shipped bundle — and the
 test that records the exception fails if a second file starts using it.
@@ -114,13 +117,62 @@ is no compatibility layer left to keep in step.
 
 U05 added the same kind of shim in the two services whose modules moved into
 `packages/storage-d1` and `packages/application`:
-`services/observation-pipeline/src/{publication-gate,identity-store,
+`services/processor/src/{publication-gate,identity-store,
 identity-commands,identity-keys,identity-audit,identity-policies/index,
 decision-outbox}.ts` and
 `services/raw-evidence/src/{store,structure,origins,canonical}.ts`. Each is a
 re-export with a note naming the new home; none carries behaviour. They exist
 so that no call site had to move in the same change as the code, and so that
 the diff of the move is readable as a move.
+
+## The two service directories renamed
+
+The App and the Processor now sit at the names of the target layout (chapter
+07 §1, decision D1):
+
+| Was                             | Is                   | Deploys                                  |
+| ------------------------------- | -------------------- | ---------------------------------------- |
+| `services/evidence-browser`     | `services/app`       | `kogane-evidence-browser`, `kogane-demo` |
+| `services/observation-pipeline` | `services/processor` | `kogane-observation-pipeline`            |
+
+Both moves are `git mv` and nothing else: the task short names were already
+`app` and `processor`, and **no runtime resource identity changed**. The Worker
+names, the cron `*/5 * * * *`, the `kogane-collection-terminals` queue consumer
+and its dead-letter queue, the `kogane-raw-evidence` and `kogane-read` database
+ids, the R2 buckets, the service bindings and every `var` name are what they
+were. `wrangler deploy` from the new directory updates the same scripts; it
+does not create new ones (acceptance tests G0-06, G0-07, G5-15).
+
+Nothing inside the Wrangler configurations had to change either. Both
+directories stayed two levels below the repository root, so
+`../../apps/web/dist`, `../../apps/web/dist-production`,
+`../../packages/storage-d1/migrations/core` and
+`../../packages/storage-d1/migrations/read` still resolve. Six of the seven
+configurations are therefore byte-identical to their pre-move bytes; the
+seventh, `services/processor/wrangler.read-migrations.jsonc`, differs only in
+the comment that quotes the `wrangler d1 migrations apply --config <path>`
+command whose path is the file's own.
+
+`scripts/resource-ledger.test.ts` freezes the identity line of all seven — Worker
+name, cron, queue, bucket, database id, Durable Object class and tag, bindings,
+`var` and secret names, and the configuration's SHA-256 — captured before the
+move, so a later edit that renames a resource under cover of a directory move
+fails there rather than in production.
+
+Two references deliberately keep the old paths:
+
+- `packages/storage-d1/migrations/core/0036_publication_event_guard.sql` names
+  `services/observation-pipeline/src/publication-gate.ts` in a comment. Applied
+  migrations are immutable, bytes included, and the CORE schema ledger digests
+  them.
+- `infra/risk-paths.json` still lists `services/evidence-browser/src/auth.ts`
+  next to `services/app/src/auth.ts`, so a pull request that moves the file back
+  out, or one opened against an older base, is still high risk. The old entry is
+  dropped when U15 closes the legacy paths.
+
+The collector task short names (`<source>-worker`, `vpass-json`) and the npm
+package names (`@kogane/evidence-browser`, `@kogane/observation-pipeline`) are
+not part of this change; a later item renames them.
 
 ## Parser build identity did not move
 
@@ -169,7 +221,7 @@ With synthetic fixtures only, on this checkout, after U04:
   254 tests across 18 files, browser tests included.
 - `packages/parsers` and `packages/observation-shared` — their suites, digest
   parity test and frozen coverage contract included.
-- `services/evidence-browser`, `services/observation-pipeline`,
+- `services/app`, `services/processor`,
   `services/collector-r2-importer`, `services/raw-evidence` — their CI plans,
   `wrangler deploy --dry-run` included.
 - `ci:root` — the manifest guard, the repository-wide tests and
@@ -186,3 +238,12 @@ reader can be deployed in any order and a rollback is the previous revision of
 each Worker. `kogane-demo` must be deployed from a
 checkout where `local-pipeline:export-demo` has run: its snapshot is generated,
 not committed.
+
+The same holds for the App and Processor directory rename above: it changes no
+migration, flag, schema or stored value, and no resource identity, so the
+deploy order of `infra/deploy-order.json` is unchanged and a rollback is the
+previous revision of each Worker. What the rename does change is where CD runs
+Wrangler from — `services/app` and `services/processor` — so a deploy or a
+rollback must be driven from a checkout that contains this change, or from one
+that predates it entirely; a `working-directory` from one half and a
+configuration from the other resolves to nothing and fails before any upload.

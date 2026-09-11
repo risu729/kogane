@@ -10,7 +10,7 @@ function healthy(overrides: Partial<CruiseResult["summary"]> = {}): CruiseResult
   return {
     modules: [
       {
-        source: "services/observation-pipeline/src/worker.ts",
+        source: "services/processor/src/worker.ts",
         dependencies: [
           { resolved: "packages/parsers/src/parsers/registry.ts", dependencyTypes: ["local"] },
         ],

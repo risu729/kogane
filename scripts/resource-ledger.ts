@@ -17,8 +17,9 @@
 //
 // The live column comes from a read of the Cloudflare account on 2026-09-11;
 // it is recorded here as data, not fetched, so the check stays offline.
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJsonc } from "./jsonc.ts";
 
@@ -314,6 +315,18 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
+  "services/app": {
+    source: "plan 07 §1 + decision D1",
+    proposedAction: "rename-directory",
+    proposedTarget: "services/app",
+    // Executed: the directory moved from `services/evidence-browser`. All three
+    // configs are byte-identical to what they were under the old directory, so
+    // the frozen identity lines in `scripts/resource-ledger.test.ts` still match
+    // (G0-06, G5-15). The Worker names did not move with the directory.
+    requiredVerification: "git mv only; Worker names kogane-evidence-browser and kogane-demo stay",
+    executionStatus: "EXECUTED_RENAME",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
   "services/collector-r2-importer": {
     source: "plan 07 §1 + decision D2",
     proposedAction: "absorb-into-processor",
@@ -323,20 +336,16 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "services/evidence-browser": {
-    source: "plan 07 §1 + decision D1",
-    proposedAction: "rename-directory",
-    proposedTarget: "services/app",
-    requiredVerification: "git mv only; Worker names kogane-evidence-browser and kogane-demo stay",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "services/observation-pipeline": {
+  "services/processor": {
     source: "plan 07 §1 + decision D1",
     proposedAction: "rename-directory",
     proposedTarget: "services/processor",
+    // Executed: the directory moved from `services/observation-pipeline`. The
+    // deployed config is byte-identical, cron, queue consumer and D1 ids
+    // included; only the comment in `wrangler.read-migrations.jsonc` that
+    // quotes its own path changed (G0-06, G0-07, G5-15).
     requiredVerification: "git mv only; Worker name kogane-observation-pipeline and cron stay",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+    executionStatus: "EXECUTED_RENAME",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "services/raw-evidence": {
@@ -963,6 +972,99 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
     }
   }
   return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/**
+ * One canonical line per Wrangler config naming every runtime identity it
+ * declares, plus the SHA-256 of the config file's bytes.
+ *
+ * A directory move changes the ledger's `directory` and `config` keys by
+ * design, so the ledger itself cannot answer "did this move rename a
+ * resource?". These lines deliberately drop the directory and keep only what
+ * Cloudflare addresses — Worker name, cron, Queue, R2 bucket, D1 id, Durable
+ * Object class and migration tag, container class, browser/VPC/service
+ * bindings, var and secret *names* — so the set of lines is invariant under a
+ * directory rename. The digest closes the gap the name-only fields leave
+ * (`vars` values, DO migration ordering, anything a future key adds): a move
+ * that edits a config at all shows up here.
+ *
+ * `scripts/resource-ledger.test.ts` compares the lines of the configs that
+ * moved against the bytes they had before the move (acceptance G0-06, G0-07,
+ * G5-15).
+ */
+export function resourceIdentityLines(ledger: ResourceLedger, root = REPO_ROOT): string[] {
+  const list = (entries: readonly string[]): string =>
+    entries.length === 0 ? "-" : entries.join(",");
+  return ledger.directories
+    .flatMap((entry) => entry.workers)
+    .map((worker) => {
+      const digest = createHash("sha256")
+        .update(readFileSync(join(root, worker.config)))
+        .digest("hex");
+      const migrations = worker.durableObjectMigrations.map(
+        (migration) =>
+          `${migration.tag}[${list([
+            ...migration.newSqliteClasses.map((className) => `sqlite:${className}`),
+            ...migration.newClasses.map((className) => `classic:${className}`),
+          ])}]`,
+      );
+      return [
+        worker.name,
+        `config=${basename(worker.config)}`,
+        `live=${String(worker.liveWorker)}`,
+        `role=${worker.role}`,
+        `email=${String(worker.emailHandler)}`,
+        `crons=${list(worker.crons)}`,
+        `d1=${list(
+          worker.d1.map(
+            (item) =>
+              `${item.binding}>${item.databaseName}#${item.databaseId}${
+                item.migrationsDir === undefined ? "" : `@${item.migrationsDir}`
+              }`,
+          ),
+        )}`,
+        `r2=${list(worker.r2.map((item) => `${item.binding}>${item.bucket}`))}`,
+        `kv=${list(worker.kv.map((item) => `${item.binding}#${item.id ?? "-"}`))}`,
+        `queue-producers=${list(
+          worker.queueProducers.map((item) => `${item.binding}>${item.queue}`),
+        )}`,
+        `queue-consumers=${list(
+          worker.queueConsumers.map(
+            (item) =>
+              `${item.queue}[dlq:${item.deadLetterQueue ?? "-"},batch:${item.maxBatchSize ?? "-"},retries:${item.maxRetries ?? "-"},concurrency:${item.maxConcurrency ?? "-"}]`,
+          ),
+        )}`,
+        `do=${list(
+          worker.durableObjects.map(
+            (item) =>
+              `${item.name}>${item.className}${item.scriptName === undefined ? "" : `@${item.scriptName}`}`,
+          ),
+        )}`,
+        `do-migrations=${list(migrations)}`,
+        `do-exports=${list(
+          worker.durableObjectExports.map((item) => `${item.className}:${item.storage ?? "-"}`),
+        )}`,
+        `containers=${list(
+          worker.containers.map(
+            (item) =>
+              `${item.className}:${item.image ?? "-"}:${item.instanceType ?? "-"}:${item.maxInstances ?? "-"}`,
+          ),
+        )}`,
+        `browser=${worker.browserBinding ?? "-"}`,
+        `vpc=${list(
+          worker.vpcNetworks.map(
+            (item) =>
+              `${item.binding}>${item.tunnelId === undefined ? `network:${item.networkId ?? "-"}` : `tunnel:${item.tunnelId}`}`,
+          ),
+        )}`,
+        `services=${list(worker.serviceBindings.map((item) => `${item.binding}>${item.service}`))}`,
+        `assets=${worker.assets === undefined ? "-" : `${worker.assets.directory}>${worker.assets.binding ?? "-"}`}`,
+        `vars=${list(worker.varNames)}`,
+        `secrets=${list(worker.requiredSecretNames)}`,
+        `sha256=${digest}`,
+      ].join(" ");
+    })
+    .sort();
 }
 
 export const LEDGER_JSON_PATH = "infra/resources.json";

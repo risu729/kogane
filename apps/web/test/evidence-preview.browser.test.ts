@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
-import { secureResponse } from "../../../services/evidence-browser/src/http.ts";
+import { secureResponse } from "../../../services/app/src/http.ts";
 import type {
   EvidenceArtifactDetail,
   EvidenceMeta,

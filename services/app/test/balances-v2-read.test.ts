@@ -20,7 +20,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import worker from "../src/worker";
 import { reportsApi } from "../src/reports-api";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
-import { runBalanceProjection } from "../../observation-pipeline/src/balance-projection-job";
+import { runBalanceProjection } from "../../processor/src/balance-projection-job";
 import { decodeReadCursor, encodeReadCursor } from "../../../packages/storage-d1/src/read/index";
 import { canonicalJson, type ReportBody } from "../../../packages/domain/src/index";
 

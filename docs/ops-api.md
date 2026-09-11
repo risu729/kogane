@@ -259,7 +259,7 @@ succeeds, so the cron keeps re-dispatching and a failed notification never
 loses the request. Nothing in this change contacts a collector.
 
 U08 built the cron side of that contract: the `operation_dispatch` lane of
-`services/observation-pipeline` (`docs/processor.md` §7), behind
+`services/processor` (`docs/processor.md` §7), behind
 `OPS_DISPATCH_ENABLED`, default off. It re-registers a stored terminal in
 process, starts the replay plan an acceptance created, and hands a projection
 over; `collection` and an unattended `session-refresh` stay
@@ -273,7 +273,7 @@ operation merely by handing the work over.
 
 Synthetic data only.
 
-- `services/evidence-browser/test/ops-api.test.ts` (26 checks over the real
+- `services/app/test/ops-api.test.ts` (26 checks over the real
   Worker, the real migrations and the real store): flag-off behaviour, the
   closed route and verb set with the flag on, `/api/meta` discovery, one
   record per request, re-send, idempotency conflict, per-principal scoping,
@@ -292,7 +292,7 @@ Synthetic data only.
   operation (one `target_ref`, the second told to reuse it) — plus the 0040
   guards against delete, replacement and reopening.
 - `apps/web/test/api-schema.test.ts` and
-  `services/evidence-browser/test/conformance.test.ts` pin the new `opsApi`
+  `services/app/test/conformance.test.ts` pin the new `opsApi`
   capability off in the shared contract.
 
 Not verified: no deployed instance, no live Access policy, no collector, no
@@ -323,7 +323,7 @@ Deploy order:
 
 1. Apply CORE migration `0040_operations_api.sql`. It is additive and the
    running Worker never reads the tables it creates.
-2. Deploy `services/evidence-browser` with `OPS_API_ENABLED` unset. Every
+2. Deploy `services/app` with `OPS_API_ENABLED` unset. Every
    operations path answers exactly as before (405 on POST, 404 on GET) and
    `/api/meta` reports `opsApi: false`.
 3. Set `OPS_API_ENABLED=true` for the deployment and confirm `/api/meta`. Send

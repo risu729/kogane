@@ -272,7 +272,7 @@ observation rows behind the projection. See
 
 A07 registers the real `balance-projection` processor of A09's decision outbox
 (`balanceProjectionOutboxProcessor` in
-`services/observation-pipeline/src/balance-projection-job.ts`, handed to
+`services/processor/src/balance-projection-job.ts`, handed to
 `dispatchDecisionOutbox` through its `processors` argument). Two things make a
 published decision reach the read model:
 
@@ -300,7 +300,7 @@ cannot disagree.
 
 ## Rebuild and invalidation
 
-The cron job (`services/observation-pipeline/src/balance-projection-job.ts`,
+The cron job (`services/processor/src/balance-projection-job.ts`,
 one call from `scheduled`) first continues any unfinished build from the input
 that build fixed. Otherwise it captures a new input and, if the resulting
 snapshot id is already sealed, does nothing but advance the pointer's
@@ -339,10 +339,10 @@ Named by the review, and none of them is used here:
    new tables yet. `0038` also adds the `DATA` R2 binding's prefix
    (`projection-inputs/`) to the pipeline's existing bucket; no new bucket is
    created.
-2. **Writer** — deploy `services/observation-pipeline`. The job is off; set
+2. **Writer** — deploy `services/processor`. The job is off; set
    `BALANCE_PROJECTION_ENABLED=1` when you want the first build. Watch the
    `balance_projection` line of the scheduled log for `status` and `written`.
-3. **Reader** — deploy `services/evidence-browser` with
+3. **Reader** — deploy `services/app` with
    `BALANCE_PROJECTION_ENABLED=0`. Nothing changes for any caller.
 4. **Reader flag** — set `BALANCE_PROJECTION_ENABLED=1` on the browser once a
    snapshot is `complete`. `/api/meta` starts advertising `balancesV2` and
@@ -365,15 +365,15 @@ observation, parse, publication or identity row depends on them.
 
 ## Verified locally
 
-| Check                                                                                                                                                      | Where                                                                                    |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| SC01 adopted set, SC06 unknown overlap, SC15 four empty meanings, oversized target bound                                                                   | `packages/read-model/test/balance-projection.test.ts`                                    |
-| Page envelope, cursor round-trip, mismatch and expiry, `ObservedQuantity`                                                                                  | `packages/domain/test/paging.test.ts`                                                    |
-| Seal, resume, immutability, retirement, deterministic snapshot id                                                                                          | `services/observation-pipeline/test/balance-projection.test.ts`                          |
-| Fixed input capture and resume, budgets, chunk re-send, the writer fence, the active pointer and the four outcomes (G2-02, G2-05 … G2-14)                  | `services/observation-pipeline/test/projection-input.test.ts`                            |
-| The dependency ledger, the trigger set and the 100 → 150 counter-example (G2-01, G2-03, G2-04)                                                             | `packages/read-model/test/source-revision.test.ts`                                       |
-| 1,003-row keyset paging on a fixed snapshot while new evidence lands; 5,002-row history paging; cursor mismatch; 410; v1 parity; no `netWorth`; query plan | `services/evidence-browser/test/balances-v2.test.ts`                                     |
-| Capability schema pinned on both sides                                                                                                                     | `apps/web/test/api-schema.test.ts`, `services/evidence-browser/test/conformance.test.ts` |
+| Check                                                                                                                                                      | Where                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| SC01 adopted set, SC06 unknown overlap, SC15 four empty meanings, oversized target bound                                                                   | `packages/read-model/test/balance-projection.test.ts`                       |
+| Page envelope, cursor round-trip, mismatch and expiry, `ObservedQuantity`                                                                                  | `packages/domain/test/paging.test.ts`                                       |
+| Seal, resume, immutability, retirement, deterministic snapshot id                                                                                          | `services/processor/test/balance-projection.test.ts`                        |
+| Fixed input capture and resume, budgets, chunk re-send, the writer fence, the active pointer and the four outcomes (G2-02, G2-05 … G2-14)                  | `services/processor/test/projection-input.test.ts`                          |
+| The dependency ledger, the trigger set and the 100 → 150 counter-example (G2-01, G2-03, G2-04)                                                             | `packages/read-model/test/source-revision.test.ts`                          |
+| 1,003-row keyset paging on a fixed snapshot while new evidence lands; 5,002-row history paging; cursor mismatch; 410; v1 parity; no `netWorth`; query plan | `services/app/test/balances-v2.test.ts`                                     |
+| Capability schema pinned on both sides                                                                                                                     | `apps/web/test/api-schema.test.ts`, `services/app/test/conformance.test.ts` |
 
 Not verified: behaviour on production data volumes, real query-plan timings,
 and incremental per-scope rebuild (not implemented).

@@ -10,7 +10,7 @@ The filter now checks an exact decimal-zero string when minor units are absent. 
 
 - `web/src/api.ts`, identity/evidence API modules: same-origin API requests, validated response data, visible errors. No account-balance or activity fallback arrays.
 - `web/src/pages/`, organization/product components: row values and account/security labels come from API observations and their interpretation/organization claims.
-- `services/evidence-browser/src/worker.ts`: authentication precedes API and assets. Main observations are queried from D1; original evidence is read from R2.
+- `services/app/src/worker.ts`: authentication precedes API and assets. Main observations are queried from D1; original evidence is read from R2.
 - `vite.config.ts`, `web/index.html` and the asset tree: the production entrypoint has no imported synthetic snapshot. `demo-worker.ts` is a separate Worker entrypoint and is not imported by the production Worker. Existing offline fixtures remain test/demo data, not production fallback data.
 
 No hardcoded personal balances, activity rows or fabricated holdings were found in this path. Local browser regressions exercise API-supplied values and error behavior rather than relying on screenshots of fixed financial data.

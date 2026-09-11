@@ -84,8 +84,8 @@ includes = [
 	"poc/vpass-json/tasks.toml",
 	"poc/vpoint-pay-worker/tasks.toml",
 	"poc/vpoint-worker/tasks.toml",
+	"services/app/tasks.toml",
 	"services/collector-r2-importer/tasks.toml",
-	"services/evidence-browser/tasks.toml",
-	"services/observation-pipeline/tasks.toml",
+	"services/processor/tasks.toml",
 	"services/raw-evidence/tasks.toml",
 ]

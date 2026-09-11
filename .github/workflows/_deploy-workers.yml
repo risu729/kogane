@@ -275,7 +275,7 @@ jobs:
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
-          working-directory: services/observation-pipeline
+          working-directory: services/processor
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -284,7 +284,7 @@ jobs:
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
-          working-directory: services/evidence-browser
+          working-directory: services/app
           config: wrangler.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -293,7 +293,7 @@ jobs:
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
-          working-directory: services/evidence-browser
+          working-directory: services/app
           config: wrangler.demo.jsonc
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}

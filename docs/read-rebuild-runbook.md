@@ -20,9 +20,9 @@ Confirm which database you are about to operate on.
 wrangler d1 info kogane-read
 ```
 
-The id must match the one in `services/observation-pipeline/wrangler.jsonc`,
-`services/observation-pipeline/wrangler.read-migrations.jsonc` and
-`services/evidence-browser/wrangler.jsonc` (`320ebe31-a031-48a1-985f-0e6fabbd517a`
+The id must match the one in `services/processor/wrangler.jsonc`,
+`services/processor/wrangler.read-migrations.jsonc` and
+`services/app/wrangler.jsonc` (`320ebe31-a031-48a1-985f-0e6fabbd517a`
 as of 2026-09-11, when the database was created empty). If the command reports
 no such database, or the three configs disagree, you are in section 2, not
 section 3.
@@ -40,7 +40,7 @@ old deployment cannot be mistaken for the new one.
 
 ```sh
 # Processor: stop writing to READ.
-wrangler deploy --config services/observation-pipeline/wrangler.jsonc \
+wrangler deploy --config services/processor/wrangler.jsonc \
   --var READ_PROJECTION_ENABLED:false
 ```
 
@@ -69,12 +69,12 @@ wrangler d1 create kogane-read
 # Apply the READ schema. Note the separate configuration: wrangler takes one
 # `migrations_dir` per config, and the processor's own config points at CORE.
 wrangler d1 migrations apply kogane-read --remote \
-  --config services/observation-pipeline/wrangler.read-migrations.jsonc
+  --config services/processor/wrangler.read-migrations.jsonc
 ```
 
 To empty an existing database instead, drop its tables and apply the migrations
 again. The table list is in
-`services/observation-pipeline/test/read-projection.test.ts` (`READ_TABLES`) and
+`services/processor/test/read-projection.test.ts` (`READ_TABLES`) and
 in the ledger, and the order matters because of the foreign keys:
 
 ```text
@@ -99,7 +99,7 @@ expire instead of being answered from new rows.
 ## 3. Rebuild
 
 ```sh
-wrangler deploy --config services/observation-pipeline/wrangler.jsonc \
+wrangler deploy --config services/processor/wrangler.jsonc \
   --var READ_PROJECTION_ENABLED:true
 ```
 
@@ -139,7 +139,7 @@ until the pointer switches.
 Then re-enable the reader if it was turned off:
 
 ```sh
-wrangler deploy --config services/evidence-browser/wrangler.jsonc \
+wrangler deploy --config services/app/wrangler.jsonc \
   --var READ_PROJECTION_ENABLED:true
 ```
 
@@ -171,12 +171,12 @@ A generation switch is a configuration change deployed like any other.
 
 ## What is tested, and what is not
 
-`services/observation-pipeline/test/read-projection.test.ts` runs section 2 and
+`services/processor/test/read-projection.test.ts` runs section 2 and
 section 3 against real D1 under Miniflare: it drops every READ table, applies the
 migrations again, rebuilds, and asserts that the CORE rows and digests and the
 DATA objects are exactly what they were, that the new instance differs, and that
 a cursor from the lost instance is `context_expired` (G0-09, G3-12).
-`services/evidence-browser/test/balances-v2-read.test.ts` asserts that a saved
+`services/app/test/balances-v2-read.test.ts` asserts that a saved
 report answers with every READ table dropped (G0-11).
 
 Not tested here: the platform commands themselves, the recovery time on
