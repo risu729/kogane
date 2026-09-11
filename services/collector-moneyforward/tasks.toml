@@ -2,30 +2,30 @@
 #:schema https://mise.jdx.dev/schema/mise-task.json
 
 ["moneyforward-worker:types"]
-description = "Generate the Cloudflare Worker types of poc/moneyforward-worker."
-dir = "poc/moneyforward-worker"
+description = "Generate the Cloudflare Worker types of services/collector-moneyforward."
+dir = "services/collector-moneyforward"
 run = "./node_modules/.bin/wrangler types"
 
 ["moneyforward-worker:typecheck"]
-description = "Type-check poc/moneyforward-worker."
+description = "Type-check services/collector-moneyforward."
 depends = ["moneyforward-worker:types"]
-dir = "poc/moneyforward-worker"
+dir = "services/collector-moneyforward"
 run = "./node_modules/.bin/tsc --noEmit"
 
 ["moneyforward-worker:test"]
-description = "Run the poc/moneyforward-worker tests."
+description = "Run the services/collector-moneyforward tests."
 depends = ["moneyforward-worker:types"]
-dir = "poc/moneyforward-worker"
+dir = "services/collector-moneyforward"
 run = "bun test"
 
 ["moneyforward-worker:dry-run"]
-description = "Validate the poc/moneyforward-worker deployment without uploading it."
+description = "Validate the services/collector-moneyforward deployment without uploading it."
 depends = ["moneyforward-worker:types"]
-dir = "poc/moneyforward-worker"
+dir = "services/collector-moneyforward"
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
 ["ci:moneyforward-worker"]
-description = "Every check CI runs for poc/moneyforward-worker."
+description = "Every check CI runs for services/collector-moneyforward."
 depends = ["moneyforward-worker:typecheck", "moneyforward-worker:test"]

@@ -119,7 +119,7 @@
     },
     {
       "name": "moneyforward-worker",
-      "path": "poc/moneyforward-worker",
+      "path": "services/collector-moneyforward",
       "config": "wrangler.jsonc"
     },
     {

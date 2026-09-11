@@ -174,32 +174,6 @@ No wrangler config.
 
 No wrangler config.
 
-### `poc/moneyforward-worker`
-
-- Disposition (poc_disposition.csv): `promote-service` → services/collector-moneyforward
-- Required verification: collector/importer/CORE mapping and resource identity kept
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-moneyforward-collector-poc; buckets=kogane-moneyforward-collector-poc)
-
-#### `kogane-moneyforward-collector-poc` — `poc/moneyforward-worker/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
-- R2: SNAPSHOTS → kogane-moneyforward-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
-- Crons: `15 21 * * *`
-- Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
-- Required secrets (names only): —
-
 ### `poc/myjcb-worker`
 
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-myjcb
@@ -566,6 +540,32 @@ No wrangler config.
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>JRE_ID_CREDENTIAL_JSON
+
+### `services/collector-moneyforward`
+
+- Disposition (poc_disposition.csv): `promote-service` → services/collector-moneyforward
+- Required verification: collector/importer/CORE mapping and resource identity kept
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-moneyforward-collector-poc; buckets=kogane-moneyforward-collector-poc)
+
+#### `kogane-moneyforward-collector-poc` — `services/collector-moneyforward/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: —
+- R2: SNAPSHOTS → kogane-moneyforward-collector-poc
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Crons: `15 21 * * *`
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Required secrets (names only): —
 
 ### `services/collector-r2-importer`
 
