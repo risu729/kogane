@@ -258,9 +258,7 @@ describe("risk path ledger", () => {
   });
   test("the shipped ledger classifies the paths chapter 10 calls high risk", () => {
     const highRisk = [
-      "services/raw-evidence/migrations/0001_initial.sql",
       "packages/storage-d1/migrations/core/0038_source_revision.sql",
-      "services/evidence-browser/src/auth.ts",
       "services/app/src/auth.ts",
       "poc/moneyforward-worker/src/index.ts",
       "poc/moneyforward-worker/package.json",
@@ -293,6 +291,21 @@ describe("risk path ledger", () => {
     expect(assessment.level).toBe("low");
     expect(assessment.paths).toEqual([]);
   });
+  test("the paths U15 retired are no longer matched by any rule", () => {
+    // U05 moved the CORE migrations and the rename moved the auth module; the
+    // directories are gone, so the old patterns could only ever have matched a
+    // file re-created at the abandoned path. One negative case keeps the guard
+    // honest: a rule set that matched everything would fail here.
+    for (const path of [
+      "services/raw-evidence/migrations/0001_initial.sql",
+      "services/evidence-browser/src/auth.ts",
+    ]) {
+      expect([path, assessRisk({ changedFiles: [path], ledger: LEDGER }).level]).toEqual([
+        path,
+        "low",
+      ]);
+    }
+  });
   test("a declared high-risk label raises the gate without a high-risk path", () => {
     const label = LEDGER.labels[0]?.name ?? "high-risk";
     const assessment = assessRisk({
@@ -309,11 +322,11 @@ describe("risk path ledger", () => {
   });
   test("a rename keeps both the new and the previous path, so moving out is high risk", () => {
     const files = [
-      { filename: "docs/auth.md", previous_filename: "services/evidence-browser/src/auth.ts" },
+      { filename: "docs/auth.md", previous_filename: "services/app/src/auth.ts" },
       { filename: "README.md" },
     ];
     const paths = changedPaths(files);
-    expect(paths).toEqual(["docs/auth.md", "services/evidence-browser/src/auth.ts", "README.md"]);
+    expect(paths).toEqual(["docs/auth.md", "services/app/src/auth.ts", "README.md"]);
     expect(assessRisk({ changedFiles: paths, ledger: LEDGER }).level).toBe("high");
   });
 });
@@ -362,7 +375,7 @@ describe("owner approval on the current head (G5-05)", () => {
   });
   test("the failure message lists the paths and never the pull request title", () => {
     const assessment = assessRisk({
-      changedFiles: ["services/evidence-browser/src/auth.ts"],
+      changedFiles: ["services/app/src/auth.ts"],
       ledger: LEDGER,
     });
     const message = explainFailure(assessment, {
@@ -370,7 +383,7 @@ describe("owner approval on the current head (G5-05)", () => {
       headSha: HEAD,
       approvalReason: "no review",
     });
-    expect(message).toContain("services/evidence-browser/src/auth.ts");
+    expect(message).toContain("services/app/src/auth.ts");
     expect(message).toContain("authorization");
     expect(message).toContain(HEAD);
   });

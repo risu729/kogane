@@ -123,6 +123,10 @@ from the workspace directory (`bash scripts/audit-v-point-r2.sh`,
    config that cannot be dry-run (a `wrangler dev` helper with remote bindings
    and no `main`) goes under `excluded` with the reason; a Wrangler config that
    is in neither list fails the guard.
+6. If its `src/**` imports a file that another task writes rather than one git
+   tracks, declare that file in `infra/generated-files.json` (`path` →
+   `producedBy`) and name the producing task in the `depends` of the
+   workspace's `typecheck`, `test` and `dry-run` tasks. See below.
 
 Nothing else is needed: the CI matrices are generated from the task list and
 the ledger. `tasks/_lib/check-manifests.ts` fails if a workspace directory has
@@ -130,6 +134,24 @@ no `ci:` task or two `ci:` tasks, if a `ci:` task runs nothing, if the dry-run
 tasks and `infra/workers-ci.json` disagree, if a tracked Wrangler config is
 neither listed nor excluded there, if a manifest grows a `scripts` field, or if
 any tracked file calls a package script.
+
+## Generated inputs
+
+`infra/generated-files.json` lists the files a task produces instead of the
+repository committing them, with the task that writes each one. Today there is
+one: `services/app/demo-snapshot.json`, written by `local-pipeline:export-demo`
+and imported by `services/app/src/demo-worker.ts`.
+
+A missing dependency on such a task is not a build error, which is exactly why
+it needs a guard. mise runs independent tasks in parallel, so
+`app:typecheck` without the edge does not fail — it races the export, passes on
+a machine where the snapshot happens to exist from an earlier run, and fails on
+a clean checkout. `tasks/_lib/check-manifests.ts` therefore resolves the
+relative imports of every `<workspace>/src/**` module, and for each workspace
+that reaches a declared file it requires `<short>:typecheck`, `<short>:test` and
+`<short>:dry-run` — those of them that exist — to reach the producing task
+through their `depends` closure. An entry whose path git tracks, or whose
+producing task does not exist, is a stale declaration and fails too.
 
 ## Checks and coverage
 

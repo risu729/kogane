@@ -13,13 +13,12 @@
     {
       "id": "core-schema",
       "reason": "CORE schema DDL is append-only and is applied to production by CD.",
-      "paths": ["services/raw-evidence/migrations/**", "packages/storage-d1/migrations/**"]
+      "paths": ["packages/storage-d1/migrations/**"]
     },
     {
       "id": "authorization",
       "reason": "Authentication and authorization code decides who may read evidence; the ingest-client declaration and its rendered bootstrap SQL decide which producer may register under which source.",
       "paths": [
-        "services/evidence-browser/src/auth.ts",
         "services/app/src/auth.ts",
         "packages/*/src/auth.ts",
         "config/ingest-clients.json",

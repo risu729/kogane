@@ -654,8 +654,8 @@ No wrangler config.
 
 ### `services/collector-r2-importer`
 
-- Disposition (plan 07 §1 + decision D2): `absorb-into-processor` → services/processor (queue consumer and adapters, U08)
-- Required verification: the Worker keeps running until U15; old protocol still readable; no double cron
+- Disposition (plan 07 §1 + decision D2): `retire-after-verification` → services/processor absorbed it in U08; runbook docs/legacy-retirement.md §4
+- Required verification: docs/legacy-retirement.md §4: references zero (no collector binding, no queue producer, uncoveredLegacySources empty), unprocessed zero (reconciler queue and DLQ empty, a full backfill pass importing nothing, no new collector-r2-* ingestion attempt), retention window recorded, backup confirmed
 - Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
 - Live resources: LIVE(workers=kogane-collector-r2-importer; buckets=kogane-globalpass-collector-poc,kogane-mobile-suica-collector-poc,kogane-moneyforward-collector-poc,kogane-myjcb-collector-poc,kogane-sbi-collector-poc,kogane-sbi-shinsei-collector-poc,kogane-sbi-vc-trade-poc,kogane-smbc-direct-backfill-poc,kogane-sony-bank-collector-poc,kogane-vpass-collector-poc,kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)
 
@@ -1029,8 +1029,8 @@ No wrangler config.
 
 ### `services/raw-evidence`
 
-- Disposition (plan 07 §1 + decision D2/D3): `keep-as-legacy-adapter` → packages/storage-d1 + packages/application (U05); migrations move in U05
-- Required verification: kogane-ingest stays deployed until U15; migration filenames and bytes unchanged
+- Disposition (plan 07 §1 + decision D2/D3): `retire-after-verification` → packages/storage-d1 + packages/application hold the logic (U05); runbook docs/legacy-retirement.md §3
+- Required verification: docs/legacy-retirement.md §3: references zero (the importer's RAW_EVIDENCE binding is the last caller; every source's latest ingestion_attempts row is processor-shared-r2), unprocessed zero (no unsealed fetch_run, no incomplete inventory, no unregistered collection_run), retention window recorded for the legacy ingest tokens, CORE export and Time Travel bookmark taken
 - Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
 - Live resources: LIVE(workers=kogane-ingest; buckets=kogane-raw-evidence)
 

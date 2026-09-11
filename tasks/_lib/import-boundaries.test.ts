@@ -8,6 +8,7 @@ import {
   assetViolations,
   boundaryViolations,
   boundaryViolationsIn,
+  relativeImports,
   resolveAssetDirectory,
   resolveSpecifier,
 } from "./import-boundaries.ts";
@@ -157,6 +158,22 @@ describe("import boundaries", () => {
       "services/a/src/local.ts",
     );
     expect(resolveSpecifier("services/a/src/worker.ts", "parse5")).toBeUndefined();
+  });
+
+  test("relative imports are collected, deduplicated and sorted; bare ones are dropped", () => {
+    const text = [
+      'import a from "../demo-snapshot.json";',
+      'import { b } from "./local.ts";',
+      'export { c } from "./local.ts";',
+      'const d = await import("../../../packages/domain/src/money.ts");',
+      'import parse5 from "parse5";',
+      'const e = new URL("../fixtures/x.json", import.meta.url);',
+    ].join("\n");
+    expect(relativeImports("services/a/src/worker.ts", text)).toEqual([
+      "packages/domain/src/money.ts",
+      "services/a/demo-snapshot.json",
+      "services/a/src/local.ts",
+    ]);
   });
 
   test("every rule is exercised by the repository-wide checks above", () => {

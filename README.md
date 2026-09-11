@@ -22,6 +22,7 @@ different rules.
 - [Change lifecycle: plan, simulate, approve, commit](docs/change-lifecycle.md)
 - [Balance read model](docs/balance-read-model.md)
 - [Fixed projection input, snapshot identity and completion](docs/projection-input.md)
+- [CORE storage (`packages/storage-d1`)](docs/storage-d1.md)
 - [The READ database](docs/read-model-d1.md)
 - [Runbook: rebuilding the READ database](docs/read-rebuild-runbook.md)
 - [Economic events, allocations and reconciliation](docs/economic-events.md)
@@ -30,10 +31,15 @@ different rules.
 - [Read model (`packages/read-model`)](docs/read-model.md)
 - [Evidence browser](docs/evidence-browser.md)
 - [Agent API and the shared query service](docs/agent-api.md)
+- [Operations API (`/api/ops/v1`) and MCP parity](docs/ops-api.md)
+- [The Processor: shared-R2 terminals, registration and job lanes](docs/processor.md)
 - [Frontend stack and API handoff](docs/frontend.md)
 - [Development checks and CI](docs/ci.md)
+- [CI/CD automation: auto-merge, the Risk Gate and production deploys](docs/ci-cd.md)
 - [Infrastructure ledgers: resources, CORE schema, dependencies, retention](docs/infra-ledgers.md)
 - [Operations: health signals, load, retention and drills](docs/operations.md)
+- [Rollout: every flag, its prerequisites, order and rollback](docs/rollout.md)
+- [Runbook: retiring the legacy ingest, importer and buckets](docs/legacy-retirement.md)
 - [Authenticated collectors](docs/authenticated-collectors.md)
 - [Credential delivery](docs/credentials.md)
 - [Library decisions](docs/libraries.md)
@@ -65,7 +71,25 @@ mise tasks ls             # what else is there
 See [Development checks and CI](docs/ci.md) for the task naming convention, how
 the CI matrices are generated, and what to do when adding a workspace.
 
+## Layout
+
+One Bun workspace: `apps/web` (the React client), `services/*` (the deployed
+Workers), `packages/*` (the pure shared code), `experiments/*` (time-boxed, with
+an `EXPERIMENT.md`), `poc/*` (collection and runtime probes), `tests/fixtures`
+(synthetic, byte-pinned), `config/` (declarative configuration) and `infra/`
+(the ledgers). [Package layout and import boundaries](docs/package-layout.md)
+says what may import what and where each move stands;
+[infra/resources.md](infra/resources.md) is generated and is the current answer
+for which directory deploys which Worker.
+
 ## Proofs of concept
+
+`poc/` holds what has not been promoted to a service and is not finished
+research. A probe is not deleted because nothing imports it: several are
+deployed Workers with their own cron, Queue or Email route, and each carries its
+disposition in the resource ledger.
+[poc/README.md](poc/README.md) is the collector runtime inventory — which
+collector starts a browser, for which part of a collection, and why.
 
 - [Observation pipeline PoC: what it settled](docs/research/observation-pipeline-poc.md)
 - [Browserless Vpass JSON collector](poc/vpass-json/README.md)
