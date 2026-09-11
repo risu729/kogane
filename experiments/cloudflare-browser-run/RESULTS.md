@@ -55,7 +55,7 @@ above captured the definitive 403 response; no further login was attempted.
 The combined evidence shows that neither a Japanese source IP, transport
 impersonation, nor JavaScript execution in Cloudflare's identifiable automated
 browser is sufficient on its own. The later OCI/WSL comparison in
-`../oci-browser-probe/RESULTS.md` also reproduced the rejection in Linux Chrome
+`../../docs/research/oci-browser.md` also reproduced the rejection in Linux Chrome
 over the same Cloudflare WARP route used by the Windows host, then reproduced it
 again in a completely new Windows Kuebiko profile. The evidence does not support
 treating home egress or Windows alone as the missing requirement; continuity in

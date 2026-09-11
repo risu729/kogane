@@ -66,7 +66,6 @@ the CI matrices are generated, and what to do when adding a workspace.
 - [Observation pipeline (ingest, parsers, evidence browser)](poc/observation-pipeline/README.md)
 - [Browserless Vpass JSON collector](poc/vpass-json/README.md)
 - [SBI新生銀行 fail-closed Worker collector skeleton](poc/sbi-shinsei-worker/README.md)
-- [OCI/WSL Vpass browser comparison](poc/oci-browser-probe/README.md)
 - [Per-scraper tamia TCP bridge probe](poc/tamia-tcp-bridge/README.md)
 - [Mobile Suica JRE ID passkey collector](poc/mobile-suica-worker/README.md)
 
@@ -83,5 +82,6 @@ Deployed code never imports them.
 Their code is no longer on `main`; the result, the commit that carried it and
 how to read it back are in [`docs/research/`](docs/research/).
 
+- [OCI/WSL Vpass browser comparison](docs/research/oci-browser.md)
 - [Camoufox Windows/macOS fingerprint controls](docs/research/camoufox.md)
 - [Kameleo Windows Chrome container control](docs/research/kameleo.md)

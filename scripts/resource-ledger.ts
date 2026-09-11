@@ -171,14 +171,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/oci-browser-probe": {
-    source: "poc_disposition.csv",
-    proposedAction: "isolate-or-retire",
-    proposedTarget: "experiments/oci-browser; docs/research/oci-browser.md",
-    requiredVerification: "confirm no production use of the OCI relay",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
   "poc/sbi-securities": {
     source: "poc_disposition.csv",
     proposedAction: "classify-before-delete",
@@ -337,6 +329,15 @@ export const COMPLETED_DISPOSITIONS: readonly CompletedDisposition[] = [
     lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
     liveResourceCheck:
       "no wrangler config, no Worker, no bucket, no cron, no container application; local image deleted 2026-08-26",
+  },
+  {
+    source: "poc/oci-browser-probe",
+    proposedAction: "isolate-or-retire",
+    result:
+      "docs/research/oci-browser.md (code removed; conclusions in docs/authenticated-collectors.md)",
+    lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+    liveResourceCheck:
+      "retire branch: no wrangler config, no Worker and no OCI relay — the only collector relay is the pre-existing tamia Tunnel (GLOBAL PASS, exit JP/KIX ASN 18144); the probe's own install on host bots was purged and verified on 2026-08-26",
   },
   {
     source: "poc/kameleo-container-probe",

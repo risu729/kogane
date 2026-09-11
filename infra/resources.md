@@ -93,6 +93,7 @@ nothing imported it).
 | was | action | result | last commit | live-resource check |
 | --- | --- | --- | --- | --- |
 | `poc/camoufox-container-probe` | `retire-candidate` | docs/research/camoufox.md (code removed) | `5fb143e0f77a` | no wrangler config, no Worker, no bucket, no cron, no container application; local image deleted 2026-08-26 |
+| `poc/oci-browser-probe` | `isolate-or-retire` | docs/research/oci-browser.md (code removed; conclusions in docs/authenticated-collectors.md) | `5fb143e0f77a` | retire branch: no wrangler config, no Worker and no OCI relay — the only collector relay is the pre-existing tamia Tunnel (GLOBAL PASS, exit JP/KIX ASN 18144); the probe's own install on host bots was purged and verified on 2026-08-26 |
 | `poc/kameleo-container-probe` | `retire-candidate` | docs/research/kameleo.md (code removed) | `5fb143e0f77a` | no wrangler config, no Worker, no bucket, no cron; local container, volume and image deleted 2026-08-26 |
 
 ## Directories
@@ -285,15 +286,6 @@ No wrangler config.
 
 - Disposition (poc_disposition.csv): `split-promote-retire` → apps/web; packages/application; tests/fixtures; docs/research
 - Required verification: promote UI and fixtures, move needed local operations to the App API, legacy store to test/research, drop the shims
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: NO_LIVE_RESOURCE
-
-No wrangler config.
-
-### `poc/oci-browser-probe`
-
-- Disposition (poc_disposition.csv): `isolate-or-retire` → experiments/oci-browser; docs/research/oci-browser.md
-- Required verification: confirm no production use of the OCI relay
 - Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
 - Live resources: NO_LIVE_RESOURCE
 

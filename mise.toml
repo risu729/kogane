@@ -71,7 +71,6 @@ includes = [
 	"poc/moneyforward-worker/tasks.toml",
 	"poc/myjcb-worker/tasks.toml",
 	"poc/observation-pipeline/tasks.toml",
-	"poc/oci-browser-probe/tasks.toml",
 	"poc/sbi-securities-worker/tasks.toml",
 	"poc/sbi-shinsei-worker/tasks.toml",
 	"poc/sbi-vc-trade-client/tasks.toml",
