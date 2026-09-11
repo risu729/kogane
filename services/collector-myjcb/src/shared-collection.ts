@@ -12,7 +12,7 @@
 // The collector manifest is written in the shape central storage receives:
 // connection blockers and failure messages become coarse codes, so the free
 // text of an upstream error never reaches the shared bucket either.
-import { assertRedactedHtml } from "./parsers";
+import { assertRedactedHtml } from "./redaction";
 import type {
   CollectionFailure,
   CollectionManifest,
@@ -37,6 +37,19 @@ import {
 const SOURCE = "myjcb";
 const PRODUCER = "myjcb-worker";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
+/**
+ * Datasets the central path has never accepted: the importer refuses a run
+ * that names one (`manifest_dataset_unobserved`) because no validator for
+ * their bytes exists yet. Shared mode refuses them the same way rather than
+ * storing centrally what the legacy path never let through.
+ */
+const UNOBSERVED_DATASETS = new Set([
+  "debit-menu",
+  "debit-detail",
+  "credit-csv",
+  "credit-pdf",
+  "credit-ofx",
+]);
 
 /** One connection's finished collection, as the worker saw it. */
 export interface SharedConnectionRun {
@@ -198,6 +211,9 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
   for (const connection of sources) {
     const unitKey = connection.summary.connectionId;
     for (const artifact of connection.artifacts) {
+      if (UNOBSERVED_DATASETS.has(artifact.dataset)) {
+        throw new Error("artifact_dataset_unobserved");
+      }
       const bytes = bodyBytes(artifact.body);
       const role = artifactRole(artifact);
       if (role === "sanitized_provider_capture") {

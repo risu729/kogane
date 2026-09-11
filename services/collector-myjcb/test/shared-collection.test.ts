@@ -16,7 +16,8 @@ import {
   verifyReferencedObjects,
 } from "../../../packages/collection/src/index";
 import { collectionTarget } from "../src/collection-target";
-import { assertRedactedHtml, redactedStatementHtml } from "../src/parsers";
+import { redactedStatementHtml } from "../src/parsers";
+import { assertRedactedHtml } from "../src/redaction";
 import {
   artifactRole,
   myJcbRunPlan,
@@ -194,6 +195,26 @@ describe("G3-08 nothing unredacted or free-text reaches the shared bucket", () =
     };
     await expect(myJcbRunPlan(input({ connections: [broken] }))).rejects.toThrow(
       "artifact_html_redaction_invalid",
+    );
+  });
+
+  test("a dataset the central path has never accepted is refused, not stored", async () => {
+    const base = connection("account-one");
+    const debit = {
+      ...base,
+      artifacts: [
+        ...base.artifacts,
+        {
+          dataset: "debit-menu",
+          filename: "debit-menu.html",
+          body: statementHtml,
+          mediaType: "text/html; charset=utf-8",
+          statementState: "debit" as const,
+        },
+      ],
+    };
+    await expect(myJcbRunPlan(input({ connections: [debit] }))).rejects.toThrow(
+      "artifact_dataset_unobserved",
     );
   });
 
