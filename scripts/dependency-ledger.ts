@@ -12,116 +12,22 @@
 // It is a snapshot, not a guard: it is regenerated on demand, not asserted in
 // CI, because the lockfile changes for legitimate reasons. The migration note
 // it carries is the record chapter 07 §5 asks for — what the merge onto one
-// lockfile did to resolved versions.
+// lockfile did to resolved versions. That note, and any other static block this
+// generator renders verbatim, lives in `dependency-ledger-notes.ts`: a large
+// literal in the middle of a generator merges cleanly into two declarations of
+// the same name, and U15 moved it out so that a second copy collides instead
+// (`dependency-ledger.test.ts`).
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { MIGRATION_NOTE } from "./dependency-ledger-notes.ts";
 import { parseJsonc } from "./jsonc.ts";
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const LEDGER_MARKDOWN_PATH = "infra/dependency-resolution.md";
 // `apps` and `experiments` joined the root manifest's globs in U04.
 const WORKSPACES = ["apps", "experiments", "packages", "poc", "services"] as const;
-
-/**
- * The one-off record chapter 07 §5 asks for: what merging 28 per-package
- * lockfiles into one workspace lockfile did to resolved versions. It is static
- * because it describes a migration, not the current tree; the generated tables
- * below it are the current tree.
- */
-const MIGRATION_NOTE = `## Post-workspace resolution (U03)
-
-Before: 28 independent \`bun.lock\` files, one per package, each resolved on its
-own day. After: one root \`bun.lock\` for a Bun workspace of 29 members, with
-\`bunfig.toml\` setting \`linker = "isolated"\`.
-
-**No direct dependency pin changed, and no workspace lost a version it pinned.**
-Bun records a conflicting exact pin per workspace (\`@kogane/evidence-browser/typescript\`
-→ 7.0.2 while the bare \`typescript\` is 5.9.3; five different Wrangler versions
-coexist the same way), and the isolated linker materialises each workspace's own
-\`node_modules\` from those entries. The one exception is a caret range, noted
-below.
-
-Every other difference is a **transitive** package whose parent declared a
-range: the per-package lockfiles had each pinned a different point in that range
-because they were generated on different days; a single lockfile resolves the
-range once and shares the result. 155 (workspace, package) pairs differ, over 38
-package names:
-
-| package                                      | before (across the old lockfiles) | after                                                             | workspaces affected |
-| -------------------------------------------- | --------------------------------- | ----------------------------------------------------------------- | ------------------- |
-| \`@cloudflare/workers-types\`                  | 5.20260825.1                      | 5.20260911.1                                                      | 1                   |
-| \`@jridgewell/sourcemap-codec\`                | 1.5.5                             | 1.6.0                                                             | 6                   |
-| \`@oxc-project/types\`                         | 0.147.0, 0.148.0                  | 0.149.0                                                           | 4                   |
-| \`@rolldown/binding-*\` (15 platform packages) | 1.2.6, 1.2.7                      | 1.2.8                                                             | 4                   |
-| \`@types/node\`                                | 24.3.0, 26.3.0, 26.4.0, 26.4.1, 26.5.0 | unchanged where pinned; 26.4.1 where only \`bun-types@*\` asked     | 24                  |
-| \`bare-events\`                                | 2.9.1                             | 2.9.2                                                             | 1                   |
-| \`bare-path\`                                  | 3.1.1                             | 3.1.2                                                             | 4                   |
-| \`bare-stream\`                                | 2.13.3                            | 2.13.4                                                            | 1                   |
-| \`bare-url\`                                   | 2.5.2                             | 2.5.4                                                             | 4                   |
-| \`entities\`                                   | 8.0.0                             | 8.1.0                                                             | 4                   |
-| \`ip-address\`                                 | 10.5.0                            | 10.7.0                                                            | 2                   |
-| \`nanoid\`                                     | 3.3.18                            | 3.3.19                                                            | 4                   |
-| \`obug\`                                       | 2.1.4                             | 2.2.1                                                             | 3                   |
-| \`postcss\`                                    | 8.5.26                            | 8.5.28                                                            | 3                   |
-| \`rolldown\`                                   | 1.2.6, 1.2.7                      | 1.2.8                                                             | 4                   |
-| \`socks\`                                      | 2.8.9                             | 2.8.10                                                            | 4                   |
-| \`streamx\`                                    | 2.28.0                            | 2.28.1                                                            | 1                   |
-| \`tar-stream\`                                 | 3.2.0                             | 3.2.1                                                             | 1                   |
-| \`tinyexec\`                                   | 1.3.0                             | 1.3.1                                                             | 2                   |
-| \`tldts\`, \`tldts-core\`                        | 7.4.11                            | 7.4.12                                                            | 1                   |
-| \`undici-types\`                               | 7.10.0, 8.9.0                     | follows the \`@types/node\` each workspace resolves (7.10.0, 8.3.0) | 15                  |
-| \`use-sync-external-store\`                    | 1.6.0                             | 1.7.0                                                             | 1                   |
-| \`ws\`                                         | 8.21.0                            | 8.21.0 and 8.21.3 side by side                                    | 3                   |
-
-Notes on the rows that are not purely mechanical:
-
-- **\`@cloudflare/workers-types\` in \`poc/vpass-json\`** is the only _direct_
-  dependency whose resolution moved: it is declared as \`^5.20260825.1\`, the one
-  caret range in the repository, and re-resolving it picked 5.20260911.1. Every
-  other direct dependency in every workspace is an exact pin and is unchanged.
-- **\`@types/node\`** is pinned exactly by 13 workspaces and those pins survive.
-  Where it arrived only through \`@types/bun\` → \`bun-types\` (which asks for
-  \`*\`), the shared lockfile resolves that \`*\` once, to 26.4.1, instead of to
-  whatever was current on the day each package lockfile was written. A
-  workspace that pins 24.3.0 keeps 24.3.0 in its own \`node_modules\` and sees
-  26.4.1 only nested under \`bun-types\`.
-- **\`iconv-lite\`, \`parse5\`, \`entities\` in \`poc/vpoint-worker\`**: the old
-  lockfile had duplicated copies under \`whatwg-encoding\`, \`encoding-sniffer\`
-  and \`htmlparser2\`; the shared graph deduplicates them onto the versions those
-  parents already accept. The package's own pin (\`iconv-lite\` 0.7.0) is
-  unchanged.
-- **Platform packages** (\`@rolldown/binding-*\`, \`@esbuild/*\`,
-  \`@cloudflare/workerd-*\`, \`@typescript/typescript-*\`) appear in the lockfile
-  for every platform but only one is installed per host.
-
-### Root-level tooling
-
-The root manifest declares \`typescript\` 5.9.3, \`vitest\` 4.1.11 and \`wrangler\`
-4.128.0 so that \`node_modules/.bin\` exists at the repository root: the shared
-\`risu729/wrangler-deploy-action\` resolves Wrangler by walking up from its
-working directory, and \`mise.toml\` puts that directory on \`PATH\`. Tasks still
-call \`./node_modules/.bin/<binary>\` from their own workspace, so a workspace
-that pins a different version keeps using it. Adding these three did not change
-any workspace's resolution (verified by re-running the comparison above).
-
-### How the comparison was made
-
-For every workspace, the transitive closure reachable from its declared
-dependencies was computed from the old per-package \`bun.lock\` and from the new
-root \`bun.lock\`, using the text lockfile's scoping rules (\`<parent>/<name>\`
-entries override the bare \`<name>\` entry), and the two closures were compared
-package by package.
-
-### What was deliberately not done
-
-Conflicting pins were **kept**, not reconciled: \`typescript\` 5.9.3 and 7.0.2,
-\`wrangler\` 4.125.0/4.126.0/4.127.0/4.127.1/4.128.0, \`@cloudflare/vitest-plugin\`
-1.1.2 and 1.1.3, \`@cloudflare/puppeteer\` 1.1.0 and 1.4.0, \`playwright\` 1.62.0
-and 1.62.1, \`iconv-lite\` 0.7.0 and 0.7.3, \`@types/node\` 24.3.0/26.3.0/26.4.0.
-Hoisting shared tooling to the root and aligning these versions are separate
-changes with their own test runs.`;
 
 export interface PackageRecord {
   directory: string;
