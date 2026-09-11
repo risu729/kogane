@@ -12,10 +12,16 @@ import {
   insertRawObjectIfAbsent,
   insertVerificationEvent,
   readRawObjectLocation,
-  readRawObjectRecord,
-  readRecentVerification,
   runCataloguesObject,
 } from "../../../storage-d1/src/core/raw-objects.ts";
+// The two reads are the Drizzle pilot's. The conditional insert and the
+// verification append stay native: the first is a guard expressed as
+// `INSERT ... WHERE NOT EXISTS`, and the second is a write whose failure the
+// ORM would report together with every value it bound (09 §2, docs/storage-d1.md).
+import {
+  readRawObjectRecord,
+  readRecentVerification,
+} from "../../../storage-d1/src/drizzle/raw-objects.ts";
 import { loadRun } from "./access.ts";
 import {
   assertSame,

@@ -20,9 +20,11 @@ import {
   insertRunReportIfAbsent,
   readAcquisitionSession,
   readFetchRunByKey,
-  readRunReport,
   type RunReportFields,
 } from "../../../storage-d1/src/core/fetch-runs.ts";
+// The report read-back is the Drizzle pilot's; the conditional inserts above
+// keep their guards in SQL (09 §2, decision D11).
+import { readRunReport } from "../../../storage-d1/src/drizzle/fetch-runs.ts";
 import { loadRun, requireRoute } from "./access.ts";
 import { assertSame, type IngestEnv, type RecordValue } from "./contract.ts";
 

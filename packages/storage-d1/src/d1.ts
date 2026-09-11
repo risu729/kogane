@@ -16,6 +16,14 @@ export interface D1StatementLike {
   first<T = Record<string, unknown>>(): Promise<T | null>;
   run(): Promise<D1RunResultLike>;
   all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
+  /**
+   * Rows as positional arrays, in the order of the select list. A real
+   * `D1PreparedStatement` has had this since D1 shipped; it is declared here
+   * because the Drizzle pilot's row mapper reads results positionally rather
+   * than by key (`src/drizzle/`, decision D11). Nothing in `src/core/` or
+   * `src/atomic/` uses it.
+   */
+  raw<T = unknown[]>(): Promise<T[]>;
 }
 
 /**

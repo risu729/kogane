@@ -34,6 +34,7 @@ different rules.
 - [Operations: health signals, load, retention and drills](docs/operations.md)
 - [Authenticated collectors](docs/authenticated-collectors.md)
 - [Credential delivery](docs/credentials.md)
+- [Library decisions](docs/libraries.md)
 - [Existing tools and reuse](docs/tooling.md)
 - [Prior art: self-hosted finance software](docs/prior-art.md)
 - [Vpass aggregator alternatives](docs/vpass-aggregators.md)
