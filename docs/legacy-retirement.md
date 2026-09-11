@@ -45,13 +45,13 @@ Read it together with:
 
 ## 1. What is still deployed, and what replaced it
 
-| Legacy thing                             | What now does the work                                                   | Still needed because                                                            |
-| ---------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
-| `kogane-ingest` (`services/raw-evidence`) | `packages/storage-d1` + `packages/application`, in process in the Processor | The importer still calls it over its service binding; twelve sources still import through it |
-| `kogane-collector-r2-importer`            | The Processor's `legacy-import` adapters and the shared-R2 registration   | Only `vpass` has a reviewed shared-R2 mapping; the other eleven buckets are importer-only |
-| The twelve per-source buckets             | The shared DATA bucket `kogane-raw-evidence`, key layout `objects/<2 hex>/<sha256>` | They are the only copy of everything collected before the switch                 |
-| CORE `0030` projection tables             | The READ database `kogane-read` when `READ_PROJECTION_ENABLED` is on      | The flag is off; with it off the CORE tables are the live projection             |
-| `kogane-globalpass-container-probe-20260827` | Nothing; it is a finished probe                                        | It has no configuration here, so nothing in this repository can prove what it is |
+| Legacy thing                                 | What now does the work                                                              | Still needed because                                                                         |
+| -------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `kogane-ingest` (`services/raw-evidence`)    | `packages/storage-d1` + `packages/application`, in process in the Processor         | The importer still calls it over its service binding; twelve sources still import through it |
+| `kogane-collector-r2-importer`               | The Processor's `legacy-import` adapters and the shared-R2 registration             | Only `vpass` has a reviewed shared-R2 mapping; the other eleven buckets are importer-only    |
+| The twelve per-source buckets                | The shared DATA bucket `kogane-raw-evidence`, key layout `objects/<2 hex>/<sha256>` | They are the only copy of everything collected before the switch                             |
+| CORE `0030` projection tables                | The READ database `kogane-read` when `READ_PROJECTION_ENABLED` is on                | The flag is off; with it off the CORE tables are the live projection                         |
+| `kogane-globalpass-container-probe-20260827` | Nothing; it is a finished probe                                                     | It has no configuration here, so nothing in this repository can prove what it is             |
 
 `services/raw-evidence` and `services/collector-r2-importer` keep their
 `retire-after-verification` disposition in `scripts/resource-ledger.ts`, which
@@ -62,12 +62,12 @@ deliberately still here.
 
 Four rows, filled in per resource in the sections that follow.
 
-| Row                    | What counts as evidence                                                                                           |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| **References zero**    | No tracked code, Wrangler configuration, Queue consumer/producer, cron, Email route or CORE route still names it   |
-| **Unprocessed zero**   | No message in flight, no cursor mid-scan, no CORE row waiting for it, and a full scan that finds nothing new       |
-| **Retention window**   | A written window for the affected retention class, and the date it started, recorded by the owner                  |
-| **Backup confirmed**   | For CORE: a `wrangler d1 export` file taken after the last write, plus a Time Travel bookmark. For R2: a verified second copy of every object, or an explicit decision to keep the bucket |
+| Row                  | What counts as evidence                                                                                                                                                                   |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **References zero**  | No tracked code, Wrangler configuration, Queue consumer/producer, cron, Email route or CORE route still names it                                                                          |
+| **Unprocessed zero** | No message in flight, no cursor mid-scan, no CORE row waiting for it, and a full scan that finds nothing new                                                                              |
+| **Retention window** | A written window for the affected retention class, and the date it started, recorded by the owner                                                                                         |
+| **Backup confirmed** | For CORE: a `wrangler d1 export` file taken after the last write, plus a Time Travel bookmark. For R2: a verified second copy of every object, or an explicit decision to keep the bucket |
 
 The repository half of "references zero" is the same three commands every time,
 run from the repository root:
@@ -552,11 +552,11 @@ that path deletes the unprocessed item.
 
 ## 9. Acceptance mapping, and what was not done
 
-| id        | property                                                                   | where it stands                                                                                                            |
-| --------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **G0-10** | Originals that exist only in a legacy bucket survive until the copy is verified | runbook §5; the bucket list and its readers are asserted by `scripts/resource-ledger.test.ts`, the byte check is live work |
-| **G0-12** | A PoC with a live cron is not deleted because nothing imports it            | covered: the ledger records every cron and its deployed status; §0 rule 1 and §5.1 make the cron, not the import graph, the gate |
-| **G5-18** | A late notification after the old path stops is recovered, not discarded    | §8; the recognition half is covered by `services/processor/test/legacy-import.test.ts`, the live half is a drill            |
+| id        | property                                                                        | where it stands                                                                                                                  |
+| --------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **G0-10** | Originals that exist only in a legacy bucket survive until the copy is verified | runbook §5; the bucket list and its readers are asserted by `scripts/resource-ledger.test.ts`, the byte check is live work       |
+| **G0-12** | A PoC with a live cron is not deleted because nothing imports it                | covered: the ledger records every cron and its deployed status; §0 rule 1 and §5.1 make the cron, not the import graph, the gate |
+| **G5-18** | A late notification after the old path stops is recovered, not discarded        | §8; the recognition half is covered by `services/processor/test/legacy-import.test.ts`, the live half is a drill                 |
 
 **Not done by U15, deliberately:** no bucket, Worker, Queue, cron, CORE table,
 route or row was deleted or deactivated; no legacy per-source code path was
