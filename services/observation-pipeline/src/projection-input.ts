@@ -45,17 +45,17 @@ export interface ProjectionInputContent {
  * cannot quietly evaluate the same rule at a later time (05 §3). It is outside
  * the digest because the same data captured a minute later is the same data.
  */
-export interface FixedProjectionInput {
+export interface FixedProjectionInput<Content = ProjectionInputContent> {
   contractVersion: string;
   sourceRevision: number;
   visibilityRevision: number;
   coreEpoch: string;
   capturedAt: string;
-  content: ProjectionInputContent;
+  content: Content;
 }
 
-export interface CapturedProjectionInput {
-  input: FixedProjectionInput;
+export interface CapturedProjectionInput<Content = ProjectionInputContent> {
+  input: FixedProjectionInput<Content>;
   /** Canonical JSON of the envelope; these exact bytes are stored. */
   bytes: string;
   /** sha256 of the canonical JSON of `input.content`. */
@@ -87,8 +87,17 @@ export function inputObjectKey(digest: string): string {
   return `${inputStorageRef(digest)}/input.json`;
 }
 
-/** Canonical bytes of the envelope, and the digest of the content it carries. */
-export async function captureDigest(input: FixedProjectionInput): Promise<CapturedProjectionInput> {
+/**
+ * Canonical bytes of the envelope, and the digest of the content it carries.
+ *
+ * The content type is a parameter because the balance build is not the only
+ * fixed input: U16 captures the reward rules, claims and the evaluation instant
+ * through the same protocol, the same DATA prefix and the same CORE record, and
+ * the only thing that differs is what `content` holds.
+ */
+export async function captureDigest<Content>(
+  input: FixedProjectionInput<Content>,
+): Promise<CapturedProjectionInput<Content>> {
   return {
     input,
     bytes: canonicalJson(input),
@@ -107,9 +116,9 @@ export function fixedInput(
  * unreferenced object, which the retention sweep can collect; a crash the
  * other way round would leave a build whose input cannot be read.
  */
-export async function storeProjectionInput(
+export async function storeProjectionInput<Content>(
   store: ProjectionInputStore,
-  captured: CapturedProjectionInput,
+  captured: CapturedProjectionInput<Content>,
 ): Promise<void> {
   await store.put(inputObjectKey(captured.digest), captured.bytes);
 }
@@ -120,13 +129,13 @@ export async function storeProjectionInput(
  * the ones the record pinned. A resumed build that cannot prove this refuses
  * rather than continuing from something else.
  */
-export async function loadProjectionInput(
+export async function loadProjectionInput<Content = ProjectionInputContent>(
   store: ProjectionInputStore,
   record: ProjectionInputRecordRow,
-): Promise<FixedProjectionInput | null> {
+): Promise<FixedProjectionInput<Content> | null> {
   const object = await store.get(inputObjectKey(record.input_digest));
   if (!object) return null;
-  const input = JSON.parse(await object.text()) as FixedProjectionInput;
+  const input = JSON.parse(await object.text()) as FixedProjectionInput<Content>;
   if ((await sha256Hex(canonicalJson(input.content))) !== record.input_digest) return null;
   if (
     input.contractVersion !== record.contract_version ||
@@ -165,12 +174,12 @@ export async function readInputRecord(
  * revision and epoch of the first capture — and a resumed build can prove it
  * again.
  */
-export async function restoreProjectionInput(
+export async function restoreProjectionInput<Content = ProjectionInputContent>(
   store: ProjectionInputStore,
   record: ProjectionInputRecordRow,
-  content: ProjectionInputContent,
+  content: Content,
   capturedAt: string,
-): Promise<CapturedProjectionInput> {
+): Promise<CapturedProjectionInput<Content>> {
   const captured = await captureDigest({
     contractVersion: record.contract_version,
     sourceRevision: record.source_revision,
@@ -186,9 +195,9 @@ export async function restoreProjectionInput(
 }
 
 /** The statement that records one captured input; append-only by trigger. */
-export function insertInputRecord(
+export function insertInputRecord<Content>(
   db: D1Like,
-  captured: CapturedProjectionInput,
+  captured: CapturedProjectionInput<Content>,
   jobId: string,
   now: string,
 ): D1StatementLike {

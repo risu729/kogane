@@ -1,6 +1,6 @@
 {
   "generatedBy": "scripts/core-schema-ledger.ts",
-  "plan": "unified plan U11; chapters 04 §1–§3 and 05 §4–§7; acceptance tests G0-09, G3-01",
+  "plan": "unified plan U11 and U16; chapters 04 §1–§3 and 05 §3–§7; acceptance tests G0-09, G3-01, G2-19, G2-20",
   "migrationsDir": "packages/storage-d1/migrations/read",
   "migrations": [
     {
@@ -8,6 +8,12 @@
       "statementCount": 35,
       "insertStatements": [],
       "sha256": "e3863c14043275378557b05cc9af18307f3b03804500f29a2f25251492786aa9"
+    },
+    {
+      "file": "0002_reward_read.sql",
+      "statementCount": 34,
+      "insertStatements": [],
+      "sha256": "402b9a0a3cd7e45be98abd0579760ccbf89e88922366222510389f6a34c7dec4"
     }
   ],
   "tables": [
@@ -755,6 +761,868 @@
       "sqlSha256": "2a14552d87ef39f5"
     },
     {
+      "name": "reward_build_checkpoints",
+      "classification": "read-operational",
+      "planRow": "READ: where a bounded reward build got to, committed with its chunk (05 §4)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "stage",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "position",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "rows_written",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "writer_lease",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "writer_fence",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "snapshot_id",
+        "stage"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "reward_expiry_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "reward_build_checkpoints_building_only",
+        "reward_build_checkpoints_forward_only"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "434a0f0611feb2cc"
+    },
+    {
+      "name": "reward_conversion_simulations",
+      "classification": "read-projection",
+      "planRow": "READ: saved simulations replayed under the snapshot's fixed offers (04 §2, G2-20)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "request_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "row_seq",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reproducibility",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reason_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "request_json",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "offer_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "offer_version",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "result_json",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "search_coverage",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "evaluated_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "policy_release",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "row_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "snapshot_id",
+        "request_digest"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "reward_expiry_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "reward_conversion_simulations_order",
+          "unique": true,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "row_seq"
+          ]
+        },
+        {
+          "name": "reward_conversion_simulations_state",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "reproducibility",
+            "row_seq"
+          ]
+        }
+      ],
+      "triggers": [
+        "reward_conversion_simulations_building_only",
+        "reward_conversion_simulations_chunk_conflict",
+        "reward_conversion_simulations_offer_ref",
+        "reward_conversion_simulations_sealed_no_delete",
+        "reward_conversion_simulations_sealed_no_update"
+      ],
+      "noUpdateTriggers": [
+        "reward_conversion_simulations_sealed_no_update"
+      ],
+      "noDeleteTriggers": [
+        "reward_conversion_simulations_sealed_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "76ba3cfbd10df3f8"
+    },
+    {
+      "name": "reward_expiry_estimates",
+      "classification": "read-projection",
+      "planRow": "READ: the estimated deadlines of one snapshot (04 §2, second stage)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "row_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "row_seq",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "program_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "holding_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "bucket_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "rule_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "rule_version",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "bucket_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "deadline_basis",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "expires_on",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "amount_coefficient",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "amount_scale",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "amount_status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "unit_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "provider_observed_json",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "policy_estimated_json",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reason_codes_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "uncertainty_codes_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "basis_refs_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "row_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "snapshot_id",
+        "row_key"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "reward_expiry_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "reward_expiry_estimates_deadline",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "expires_on",
+            "row_seq"
+          ]
+        },
+        {
+          "name": "reward_expiry_estimates_holding",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "program_id",
+            "holding_ref",
+            "row_seq"
+          ]
+        },
+        {
+          "name": "reward_expiry_estimates_order",
+          "unique": true,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "row_seq"
+          ]
+        }
+      ],
+      "triggers": [
+        "reward_expiry_estimates_building_only",
+        "reward_expiry_estimates_chunk_conflict",
+        "reward_expiry_estimates_rule_ref",
+        "reward_expiry_estimates_sealed_no_delete",
+        "reward_expiry_estimates_sealed_no_update"
+      ],
+      "noUpdateTriggers": [
+        "reward_expiry_estimates_sealed_no_update"
+      ],
+      "noDeleteTriggers": [
+        "reward_expiry_estimates_sealed_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "d71fc8dbe5746503"
+    },
+    {
+      "name": "reward_expiry_snapshots",
+      "classification": "read-projection",
+      "planRow": "READ: one reward build under one fixed evaluation input (04 §2, 05 §3)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "content_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "attempt",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "input_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "build_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "contract_version",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "read_instance_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "evaluated_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "calendar_rule_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "rule_set_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "rule_count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "claims_release",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "claims_high_water",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "visibility_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "estimate_count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "simulation_count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "output_digest",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "writer_lease",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "writer_lease_until_ms",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "writer_fence",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "input_manifest_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "policy_release",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "completed_at",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "snapshot_id"
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "name": "reward_expiry_snapshots_content",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "content_key",
+            "attempt"
+          ]
+        },
+        {
+          "name": "reward_expiry_snapshots_status",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "status",
+            "created_at"
+          ]
+        }
+      ],
+      "triggers": [
+        "reward_expiry_snapshots_instance",
+        "reward_expiry_snapshots_transition"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "5f5430ebf252f7d4"
+    },
+    {
+      "name": "reward_snapshot_input_refs",
+      "classification": "read-projection",
+      "planRow": "READ: rules, offers and claims copied from the fixed reward input (04 §3)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "ref_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "ref_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 3
+        },
+        {
+          "name": "ref_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "snapshot_id",
+        "ref_kind",
+        "ref_id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "reward_expiry_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "reward_snapshot_input_refs_kind",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "ref_kind",
+            "ref_id"
+          ]
+        }
+      ],
+      "triggers": [
+        "reward_snapshot_input_refs_building_only",
+        "reward_snapshot_input_refs_no_delete",
+        "reward_snapshot_input_refs_no_update"
+      ],
+      "noUpdateTriggers": [
+        "reward_snapshot_input_refs_no_update"
+      ],
+      "noDeleteTriggers": [
+        "reward_snapshot_input_refs_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "000a8eab4b22fbfd"
+    },
+    {
+      "name": "reward_snapshot_pointer",
+      "classification": "read-operational",
+      "planRow": "READ: the active reward snapshot, switched in the same batch as the seal (05 §5)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "visibility_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "read_instance_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "evaluated_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "output_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "switched_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "reward_expiry_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "reward_snapshot_pointer_complete_only",
+        "reward_snapshot_pointer_forward_only",
+        "reward_snapshot_pointer_no_delete"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [
+        "reward_snapshot_pointer_no_delete"
+      ],
+      "appendOnly": false,
+      "sqlSha256": "897691d0caf599cc"
+    },
+    {
       "name": "scope_relations",
       "classification": "read-projection",
       "planRow": "READ: the typed scope relations of one snapshot (04 §2, §3)",
@@ -1047,6 +1915,146 @@
       "sqlSha256": "9ac4fc0807ee31e4"
     },
     {
+      "name": "reward_build_checkpoints_building_only",
+      "table": "reward_build_checkpoints",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "db5b1a8c8ffe49ce"
+    },
+    {
+      "name": "reward_build_checkpoints_forward_only",
+      "table": "reward_build_checkpoints",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "6c29fb2dab883771"
+    },
+    {
+      "name": "reward_conversion_simulations_building_only",
+      "table": "reward_conversion_simulations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "c85f8f8ac56f930d"
+    },
+    {
+      "name": "reward_conversion_simulations_chunk_conflict",
+      "table": "reward_conversion_simulations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "63deb856953066a9"
+    },
+    {
+      "name": "reward_conversion_simulations_offer_ref",
+      "table": "reward_conversion_simulations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "571cbec2936941c4"
+    },
+    {
+      "name": "reward_conversion_simulations_sealed_no_delete",
+      "table": "reward_conversion_simulations",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "e00d50a1a3f1fa2c"
+    },
+    {
+      "name": "reward_conversion_simulations_sealed_no_update",
+      "table": "reward_conversion_simulations",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "f4167fdb7af1ffdf"
+    },
+    {
+      "name": "reward_expiry_estimates_building_only",
+      "table": "reward_expiry_estimates",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "ac414ecc54c282a0"
+    },
+    {
+      "name": "reward_expiry_estimates_chunk_conflict",
+      "table": "reward_expiry_estimates",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "6d891173bf58824f"
+    },
+    {
+      "name": "reward_expiry_estimates_rule_ref",
+      "table": "reward_expiry_estimates",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "d1e3c067d4a5afd1"
+    },
+    {
+      "name": "reward_expiry_estimates_sealed_no_delete",
+      "table": "reward_expiry_estimates",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "bc8be8db5cb5e468"
+    },
+    {
+      "name": "reward_expiry_estimates_sealed_no_update",
+      "table": "reward_expiry_estimates",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "040aad3e0a32034f"
+    },
+    {
+      "name": "reward_expiry_snapshots_instance",
+      "table": "reward_expiry_snapshots",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "30d4241513e15554"
+    },
+    {
+      "name": "reward_expiry_snapshots_transition",
+      "table": "reward_expiry_snapshots",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "437293ec16093e89"
+    },
+    {
+      "name": "reward_snapshot_input_refs_building_only",
+      "table": "reward_snapshot_input_refs",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "09603cc9858a87df"
+    },
+    {
+      "name": "reward_snapshot_input_refs_no_delete",
+      "table": "reward_snapshot_input_refs",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "fd936d3f4be6d979"
+    },
+    {
+      "name": "reward_snapshot_input_refs_no_update",
+      "table": "reward_snapshot_input_refs",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "55cec80c77c2e206"
+    },
+    {
+      "name": "reward_snapshot_pointer_complete_only",
+      "table": "reward_snapshot_pointer",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "2ea13f71143ab18a"
+    },
+    {
+      "name": "reward_snapshot_pointer_forward_only",
+      "table": "reward_snapshot_pointer",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "d2de7325f9d15e81"
+    },
+    {
+      "name": "reward_snapshot_pointer_no_delete",
+      "table": "reward_snapshot_pointer",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "8b4df8f7af961c43"
+    },
+    {
       "name": "scope_relations_building_only",
       "table": "scope_relations",
       "timing": "BEFORE",
@@ -1123,6 +2131,46 @@
       "sqlSha256": "c8e54064215578c8"
     },
     {
+      "name": "reward_conversion_simulations_order",
+      "table": "reward_conversion_simulations",
+      "sqlSha256": "8d2f49f226e1cd9f"
+    },
+    {
+      "name": "reward_conversion_simulations_state",
+      "table": "reward_conversion_simulations",
+      "sqlSha256": "6ae37040347825f3"
+    },
+    {
+      "name": "reward_expiry_estimates_deadline",
+      "table": "reward_expiry_estimates",
+      "sqlSha256": "f23fa04b544320b7"
+    },
+    {
+      "name": "reward_expiry_estimates_holding",
+      "table": "reward_expiry_estimates",
+      "sqlSha256": "b66ce3b1417f051a"
+    },
+    {
+      "name": "reward_expiry_estimates_order",
+      "table": "reward_expiry_estimates",
+      "sqlSha256": "ae53a32eb2ee2e63"
+    },
+    {
+      "name": "reward_expiry_snapshots_content",
+      "table": "reward_expiry_snapshots",
+      "sqlSha256": "2245d2e17eda3477"
+    },
+    {
+      "name": "reward_expiry_snapshots_status",
+      "table": "reward_expiry_snapshots",
+      "sqlSha256": "011ae76d61699158"
+    },
+    {
+      "name": "reward_snapshot_input_refs_kind",
+      "table": "reward_snapshot_input_refs",
+      "sqlSha256": "f8759c992790bebe"
+    },
+    {
       "name": "scope_relations_from",
       "table": "scope_relations",
       "sqlSha256": "0f341428020abb35"
@@ -1134,32 +2182,41 @@
     }
   ],
   "summary": {
-    "tableCount": 7,
+    "tableCount": 13,
     "viewCount": 0,
-    "triggerCount": 21,
-    "explicitIndexCount": 7,
+    "triggerCount": 41,
+    "explicitIndexCount": 15,
     "byClassification": {
       "read-projection": [
         "balance_read_snapshots",
         "current_balance_projection",
+        "reward_conversion_simulations",
+        "reward_expiry_estimates",
+        "reward_expiry_snapshots",
+        "reward_snapshot_input_refs",
         "scope_relations",
         "snapshot_input_refs"
       ],
       "read-operational": [
         "balance_snapshot_pointer",
         "read_build_checkpoints",
-        "read_instance"
+        "read_instance",
+        "reward_build_checkpoints",
+        "reward_snapshot_pointer"
       ]
     },
     "tablesWithoutAppendOnlyGuards": [
       "balance_read_snapshots",
       "balance_snapshot_pointer",
       "read_build_checkpoints",
-      "read_instance"
+      "read_instance",
+      "reward_build_checkpoints",
+      "reward_expiry_snapshots",
+      "reward_snapshot_pointer"
     ],
     "nonStrictTables": [],
     "withoutRowidTables": [],
     "migrationsWithInserts": [],
-    "schemaSha256": "b91f53919cca886851e8fa174afc005cd6f025fb85344be257b9c7e666911527"
+    "schemaSha256": "75c2db1b78a8e251cdd1084222b653dcf97e40dcf0906987a498f5bdf19f5e15"
   }
 }

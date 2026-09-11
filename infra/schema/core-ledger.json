@@ -615,6 +615,12 @@
       "statementCount": 13,
       "insertStatements": [],
       "sha256": "edca64e3fc1675e463faec3b04ca90cde3ed2055269b483ee56c99f28e519002"
+    },
+    {
+      "file": "0041_reward_revision_triggers.sql",
+      "statementCount": 15,
+      "insertStatements": [],
+      "sha256": "5265feedc75a1f084a62449ee0650fa278f62221cf77b025a11fd9cdd565faa2"
     }
   ],
   "tables": [
@@ -3515,6 +3521,9 @@
         }
       ],
       "triggers": [
+        "conversion_offers_bump_revision_delete",
+        "conversion_offers_bump_revision_insert",
+        "conversion_offers_bump_revision_update",
         "conversion_offers_no_delete",
         "conversion_offers_no_update"
       ],
@@ -5205,6 +5214,9 @@
         }
       ],
       "triggers": [
+        "expiry_rules_bump_revision_delete",
+        "expiry_rules_bump_revision_insert",
+        "expiry_rules_bump_revision_update",
         "expiry_rules_no_delete",
         "expiry_rules_no_update"
       ],
@@ -7900,6 +7912,9 @@
         }
       ],
       "triggers": [
+        "membership_state_claims_bump_revision_delete",
+        "membership_state_claims_bump_revision_insert",
+        "membership_state_claims_bump_revision_update",
         "membership_state_claims_no_delete",
         "membership_state_claims_no_update"
       ],
@@ -11672,6 +11687,9 @@
         }
       ],
       "triggers": [
+        "reward_bucket_claims_bump_revision_delete",
+        "reward_bucket_claims_bump_revision_insert",
+        "reward_bucket_claims_bump_revision_update",
         "reward_bucket_claims_no_delete",
         "reward_bucket_claims_no_update",
         "reward_bucket_claims_requires_published"
@@ -11772,6 +11790,9 @@
         }
       ],
       "triggers": [
+        "reward_programs_bump_revision_delete",
+        "reward_programs_bump_revision_insert",
+        "reward_programs_bump_revision_update",
         "reward_programs_no_delete",
         "reward_programs_no_update"
       ],
@@ -13825,6 +13846,27 @@
       "sqlSha256": "1aa2f2a8d6ef12c7"
     },
     {
+      "name": "conversion_offers_bump_revision_delete",
+      "table": "conversion_offers",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "930c56ac9499a1d0"
+    },
+    {
+      "name": "conversion_offers_bump_revision_insert",
+      "table": "conversion_offers",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "763e61f2e41f7c23"
+    },
+    {
+      "name": "conversion_offers_bump_revision_update",
+      "table": "conversion_offers",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "b15b292e06232dc3"
+    },
+    {
       "name": "conversion_offers_no_delete",
       "table": "conversion_offers",
       "timing": "BEFORE",
@@ -14138,6 +14180,27 @@
       "timing": "BEFORE",
       "event": "UPDATE",
       "sqlSha256": "5d0c402e92ce7674"
+    },
+    {
+      "name": "expiry_rules_bump_revision_delete",
+      "table": "expiry_rules",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "7e2300ecced3df0b"
+    },
+    {
+      "name": "expiry_rules_bump_revision_insert",
+      "table": "expiry_rules",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "ce76a1647fa929b9"
+    },
+    {
+      "name": "expiry_rules_bump_revision_update",
+      "table": "expiry_rules",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "46226432da4026c2"
     },
     {
       "name": "expiry_rules_no_delete",
@@ -14938,6 +15001,27 @@
       "sqlSha256": "275685f243e414ea"
     },
     {
+      "name": "membership_state_claims_bump_revision_delete",
+      "table": "membership_state_claims",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "40918efe7961e763"
+    },
+    {
+      "name": "membership_state_claims_bump_revision_insert",
+      "table": "membership_state_claims",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "d26d7a758281150e"
+    },
+    {
+      "name": "membership_state_claims_bump_revision_update",
+      "table": "membership_state_claims",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "4c755f20bd8741b2"
+    },
+    {
       "name": "membership_state_claims_no_delete",
       "table": "membership_state_claims",
       "timing": "BEFORE",
@@ -15540,6 +15624,27 @@
       "sqlSha256": "6f5d074c752b5b91"
     },
     {
+      "name": "reward_bucket_claims_bump_revision_delete",
+      "table": "reward_bucket_claims",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "004a7c987d968cb8"
+    },
+    {
+      "name": "reward_bucket_claims_bump_revision_insert",
+      "table": "reward_bucket_claims",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "eae7272e3f65853f"
+    },
+    {
+      "name": "reward_bucket_claims_bump_revision_update",
+      "table": "reward_bucket_claims",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "a5c7272edc1b0ea2"
+    },
+    {
       "name": "reward_bucket_claims_no_delete",
       "table": "reward_bucket_claims",
       "timing": "BEFORE",
@@ -15559,6 +15664,27 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "14d19757f349438e"
+    },
+    {
+      "name": "reward_programs_bump_revision_delete",
+      "table": "reward_programs",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "316c4e197df3a7ae"
+    },
+    {
+      "name": "reward_programs_bump_revision_insert",
+      "table": "reward_programs",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "0c4cfabd3e68608d"
+    },
+    {
+      "name": "reward_programs_bump_revision_update",
+      "table": "reward_programs",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "c5a59b30ab2b5ec6"
     },
     {
       "name": "reward_programs_no_delete",
@@ -16305,7 +16431,7 @@
   "summary": {
     "tableCount": 108,
     "viewCount": 31,
-    "triggerCount": 369,
+    "triggerCount": 384,
     "explicitIndexCount": 110,
     "byClassification": {
       "core-keep": [
@@ -16506,6 +16632,6 @@
       "0038_source_revision.sql",
       "0039_collection_runs.sql"
     ],
-    "schemaSha256": "6b0288607fbc892d9c09de9f3802ab054a74f1be3fc40e1f8a6adc1db7a64c2c"
+    "schemaSha256": "b4f811d5d96884e73c1a37798c7c38dcae740e89741aa941568be754d7d25966"
   }
 }

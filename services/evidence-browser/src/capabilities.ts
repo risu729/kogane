@@ -11,12 +11,14 @@
 import {
   CENTRAL_STORE_CAPABILITIES,
   withBalancesV2,
+  withRewardsV2,
   type ApiCapabilities,
 } from "../../../packages/observation-shared/src/api-schema";
 import { projectionFlagOn, readProjectionFlagOn, readTarget } from "./balances-v2";
 import { commandsEnabled } from "./command-api";
 import { eventsV2Available, flagOn } from "./events-api";
 import { opsApiEnabled } from "./ops-api";
+import { rewardReadContext, rewardReadFlagOn } from "./rewards-read";
 
 /** A11 reward reads. Off unless explicitly on; anything else, including absent, is off. */
 export function rewardsV2Enabled(env: Env): boolean {
@@ -34,15 +36,27 @@ export function rewardsV2Enabled(env: Env): boolean {
  * capability is never a promise the store cannot keep.
  */
 export async function centralStoreCapabilities(env: Env): Promise<ApiCapabilities> {
-  const base: ApiCapabilities = {
-    ...CENTRAL_STORE_CAPABILITIES,
-    commands: commandsEnabled(env),
-    rewardsV2: rewardsV2Enabled(env),
-    eventsV2: await eventsV2Available(env),
-    // The operations API follows its own flag (02 §4, docs/ops-api.md). It is
-    // advertised, never assumed: with the flag off the paths do not exist.
-    opsApi: opsApiEnabled(env),
-  };
+  const rewards = rewardsV2Enabled(env);
+  // U16: `read-d1` only when a reward snapshot is actually published and
+  // serveable, so `/api/meta` never advertises snapshot-backed rows the
+  // Worker would answer 503 for.
+  const rewardReadModel =
+    rewards && rewardReadFlagOn(env) && !("unavailable" in (await rewardReadContext(env)))
+      ? "read-d1"
+      : "none";
+  const base: ApiCapabilities = withRewardsV2(
+    {
+      ...CENTRAL_STORE_CAPABILITIES,
+      commands: commandsEnabled(env),
+      rewardsV2: rewards,
+      eventsV2: await eventsV2Available(env),
+      // The operations API follows its own flag (02 §4, docs/ops-api.md). It is
+      // advertised, never assumed: with the flag off the paths do not exist.
+      opsApi: opsApiEnabled(env),
+    },
+    rewards,
+    rewardReadModel,
+  );
   if (!projectionFlagOn(env)) return base;
   const target = await readTarget(env);
   // A READ database of another baseline publishes nothing to this contract.

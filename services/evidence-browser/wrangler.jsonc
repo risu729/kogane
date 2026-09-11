@@ -14,6 +14,10 @@
     // cursor from the other store is refused rather than reinterpreted.
     "READ_PROJECTION_ENABLED": "false",
     "REWARDS_V2_ENABLED": "false",
+    // U16: with this off the reward routes answer from CORE's rules and claims
+    // at request time; with it on they read the reward snapshot published in
+    // the READ database, and `/api/v2/rewards/simulations` is served.
+    "REWARD_READ_PROJECTION_ENABLED": "false",
     "EVIDENCE_SOURCE_ID": "sony-bank",
     "EVENTS_V2_ENABLED": "0",
     "ACCESS_ISSUER": "https://risu729.cloudflareaccess.com",

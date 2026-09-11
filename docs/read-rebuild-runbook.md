@@ -80,8 +80,16 @@ in the ledger, and the order matters because of the foreign keys:
 ```text
 read_build_checkpoints, scope_relations, snapshot_input_refs,
 current_balance_projection, balance_snapshot_pointer, balance_read_snapshots,
+reward_build_checkpoints, reward_conversion_simulations,
+reward_expiry_estimates, reward_snapshot_input_refs, reward_snapshot_pointer,
+reward_expiry_snapshots,
 read_instance
 ```
+
+The second block is the reward stage of migration 0002 (U16). It lives in the
+same database, so emptying READ empties it too; its CORE claims, rules and
+offers are untouched, and the next tick of `reward_read_projection` rebuilds
+the estimates at a new evaluation instant (`docs/rewards.md` §12).
 
 After this step the database is empty **and has no identity**: `read_instance`
 carries no row, because a migration cannot generate one. The first build claims

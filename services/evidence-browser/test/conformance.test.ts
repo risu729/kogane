@@ -187,6 +187,8 @@ describe("shared contract pin", () => {
       // U11: `none` until the routes are served, then `core-d1` or `read-d1`
       // depending on which store this deployment reads.
       balancesV2ReadModel: "none",
+      // U16: `none` until a reward snapshot is published in the READ database.
+      rewardsV2ReadModel: "none",
       collectionFilters: true,
       organizedDisplay: true,
       financialProducts: true,

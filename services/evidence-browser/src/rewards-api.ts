@@ -28,6 +28,7 @@ import {
 import {
   createRewardReader,
   REWARD_PAGE_LIMIT,
+  UNCLASSIFIED_REWARD_HISTORY,
   type Page,
   type RewardHoldingView,
 } from "../../../packages/read-model/src/index";
@@ -38,24 +39,23 @@ import {
   rewardQueryParameters,
 } from "../../../packages/observation-shared/src/api-schema";
 import { rewardsV2Enabled } from "./capabilities";
+import {
+  rewardExpiryFromRead,
+  rewardReadContext,
+  rewardReadFlagOn,
+  rewardSimulationsFromRead,
+} from "./rewards-read";
 import { HttpError, json } from "./http";
 
 export const REWARDS_PREFIX = "/api/v2/rewards";
 
 /**
  * The reward activity history a real V Point holding has today: none that can
- * be classified. The provider's `point_div` enum is deliberately unmapped
- * (docs/sources/v-point.md §4.2), so no observed row can be called a
- * qualifying activity. Reporting an empty list with `unknown` completeness is
- * what makes `estimateExpiry` return `partial` rather than inventing a
- * deadline from the newest transaction (SC12).
+ * be classified (docs/sources/v-point.md §4.2, SC12). It lives in
+ * `packages/read-model` since U16, because the READ build has to evaluate the
+ * rules under exactly the same history this route does.
  */
-const UNCLASSIFIED_HISTORY: ActivityHistory = {
-  windowRef: "window:reward-activity:unclassified",
-  completeness: "unknown",
-  earliestObserved: null,
-  activities: [],
-};
+const UNCLASSIFIED_HISTORY: ActivityHistory = UNCLASSIFIED_REWARD_HISTORY;
 
 interface BucketDto {
   bucketRef: string;
@@ -192,7 +192,10 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
       !allowed.includes(key) ||
       url.searchParams.getAll(key).length !== 1 ||
       !value ||
-      value.length > 128 ||
+      // A cursor is an opaque encoding of the snapshot, the instance and the
+      // position (U16), so it is longer than a reference; everything else
+      // keeps the reference-sized bound.
+      value.length > (key === "cursor" ? 512 : 128) ||
       /[\u0000-\u001f]/u.test(value)
     )
       throw new HttpError(400, "invalid_query");
@@ -214,6 +217,26 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
         note: "quantities are reported in each programme's own unit",
       },
     });
+  }
+
+  // U16: with a reward snapshot published, the deadlines come from it —
+  // every row carrying the instant it was evaluated at — instead of being
+  // recomputed from "now" on each request (04 §2, G2-19).
+  if (path === `${REWARDS_PREFIX}/expiry` || path === `${REWARDS_PREFIX}/simulations`) {
+    const context = rewardReadFlagOn(env) ? await rewardReadContext(env) : null;
+    if (context !== null && !("unavailable" in context)) {
+      return path === `${REWARDS_PREFIX}/expiry`
+        ? await rewardExpiryFromRead(context, url, program)
+        : await rewardSimulationsFromRead(context, url);
+    }
+    // A saved simulation exists only inside a snapshot: without one there is
+    // nothing to report, and "being rebuilt" is never an empty success.
+    if (path === `${REWARDS_PREFIX}/simulations`)
+      throw new HttpError(503, context?.unavailable ?? "reward_read_model_unavailable");
+    if (context !== null) throw new HttpError(503, context.unavailable);
+    // Without the read model a cursor names a snapshot this deployment does
+    // not have; it is refused rather than reinterpreted as an offset.
+    if (url.searchParams.get("cursor") !== null) throw new HttpError(400, "cursor_unsupported");
   }
 
   if (path === `${REWARDS_PREFIX}/expiry`) {
