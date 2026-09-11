@@ -2,7 +2,7 @@
 // `infra/schema/core-ledger.md`), unified plan U01 / chapters 04 and 06.
 //
 // The ledger is produced by applying every migration in
-// `services/raw-evidence/migrations` to an in-memory `bun:sqlite` database and
+// `packages/storage-d1/migrations/core` to an in-memory `bun:sqlite` database and
 // reading `sqlite_master` and the PRAGMAs back out, so it describes the schema
 // the migrations actually build rather than what anyone believes they build.
 //
@@ -19,7 +19,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-export const MIGRATIONS_DIR = "services/raw-evidence/migrations";
+export const MIGRATIONS_DIR = "packages/storage-d1/migrations/core";
 export const LEDGER_JSON_PATH = "infra/schema/core-ledger.json";
 export const LEDGER_MARKDOWN_PATH = "infra/schema/core-ledger.md";
 

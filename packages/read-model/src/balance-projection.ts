@@ -10,6 +10,7 @@
 // candidate with its reason code. It never sums across units, never turns a
 // missing value into zero, and never reads an unknown overlap as disjoint.
 
+import { encodeDecimal } from "../../storage-d1/src/codecs/decimal.ts";
 import { fromNormalizedDecimal, type ValueState } from "../../domain/src/values.ts";
 import {
   METRIC_REGISTRY,
@@ -509,8 +510,11 @@ export function buildBalanceProjection(
       evidenceCount: evidence.length,
       metricId: definition.metricId,
       definitionRelease: definition.definitionRelease,
-      quantityCoefficient: value.status === "exact" ? value.value.coefficient : null,
-      quantityScale: value.status === "exact" ? value.value.scale : null,
+      // One definition of the decimal-v1 columns, shared with every CORE
+      // writer (packages/storage-d1/src/codecs, U05): a non-exact value writes
+      // NULL twice and is never stored as zero.
+      quantityCoefficient: encodeDecimal(value).coefficient,
+      quantityScale: encodeDecimal(value).scale,
       valueStatus: value.status,
       unitRef: candidate.instrument,
       state: outcome.state,

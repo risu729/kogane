@@ -95,7 +95,7 @@ export function openStore(stateDir?: string): Store {
         readFileSync(
           join(
             EXPERIMENT_ROOT,
-            "../../services/raw-evidence/migrations/0024_observation_decimals.sql",
+            "../../packages/storage-d1/migrations/core/0024_observation_decimals.sql",
           ),
           "utf8",
         ),
@@ -109,7 +109,10 @@ export function openStore(stateDir?: string): Store {
     db.transaction(() =>
       db.exec(
         readFileSync(
-          join(EXPERIMENT_ROOT, "../../services/raw-evidence/migrations/0025_parse_coverage.sql"),
+          join(
+            EXPERIMENT_ROOT,
+            "../../packages/storage-d1/migrations/core/0025_parse_coverage.sql",
+          ),
           "utf8",
         ),
       ),
@@ -126,7 +129,7 @@ export function openStore(stateDir?: string): Store {
         readFileSync(
           join(
             EXPERIMENT_ROOT,
-            "../../services/raw-evidence/migrations/0037_unit_scope_eligibility.sql",
+            "../../packages/storage-d1/migrations/core/0037_unit_scope_eligibility.sql",
           ),
           "utf8",
         ),

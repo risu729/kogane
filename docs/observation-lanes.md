@@ -193,7 +193,7 @@ trigger present.
 
 ## Deploy order and rollback
 
-1. Apply `services/raw-evidence/migrations/0035_observation_job_lanes.sql`
+1. Apply `packages/storage-d1/migrations/core/0035_observation_job_lanes.sql`
    (additive: `ALTER TABLE … ADD COLUMN` with defaults, three new tables, one
    trigger, one index). The running pre-0035 Worker keeps working during and
    after the migration: its job insert names only the original columns and

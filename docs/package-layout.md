@@ -28,6 +28,7 @@ pipeline's behaviour changed when it moved.
 | `packages/parsers`                         | The deployed parsers (`src/parsers/**`), the parser contract (`src/types.ts`), money formatting and minor-unit rules (`src/money.ts`), the snapshot-selection SQL (`src/snapshot-query.ts`), the build-digest generator and the coverage-contract freezer (`scripts/`).                                                            | `packages/domain`.                                                                                                                        |
 | `packages/identity`                        | Identity resolution over stored observations and the per-source rules.                                                                                                                                                                                                                                                             | `packages/domain`, `packages/parsers` (types only).                                                                                       |
 | `packages/read-model`                      | The explicit query repository and DTO mappers.                                                                                                                                                                                                                                                                                     | `packages/domain`, `packages/observation-shared`, `packages/parsers` (the snapshot CTEs).                                                 |
+| `packages/storage-d1`                      | CORE database access: the SQL adapters (`src/core`), the column codecs (`src/codecs`), the guarded atomic commands (`src/atomic`) and the CORE and READ migration directories. See [storage-d1.md](storage-d1.md).                                                                                                                 | `packages/domain`, `packages/evidence-contract`, `packages/identity`.                                                                     |
 | `packages/application`                     | QuerySpec / command application services shared by HTTP, UI and MCP.                                                                                                                                                                                                                                                               | The packages above.                                                                                                                       |
 | `apps/web`                                 | The React client: `index.html`, `src/**`, `vite.config.ts`, the three build modes and the frontend tests.                                                                                                                                                                                                                          | The packages, over the HTTP contract. **Never a service's `src`, `packages/storage-d1`, the read model's SQL, `poc/` or `experiments/`.** |
 | `services/*`                               | Workers: HTTP, D1, R2, queues, scheduling, authentication.                                                                                                                                                                                                                                                                         | Any package. **Never `poc/`, `experiments/` or `apps/`.**                                                                                 |
@@ -110,6 +111,16 @@ The 27 one-line `export * from` modules D07 left under
 `poc/observation-pipeline/{src,shared}` were deleted in U04, together with the
 last importer of any of them. Every consumer now names the package path. There
 is no compatibility layer left to keep in step.
+
+U05 added the same kind of shim in the two services whose modules moved into
+`packages/storage-d1` and `packages/application`:
+`services/observation-pipeline/src/{publication-gate,identity-store,
+identity-commands,identity-keys,identity-audit,identity-policies/index,
+decision-outbox}.ts` and
+`services/raw-evidence/src/{store,structure,origins,canonical}.ts`. Each is a
+re-export with a note naming the new home; none carries behaviour. They exist
+so that no call site had to move in the same change as the code, and so that
+the diff of the move is readable as a move.
 
 ## Parser build identity did not move
 

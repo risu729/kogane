@@ -24,7 +24,7 @@ import {
   organizationSql,
 } from "../src/index";
 
-const MIGRATIONS = join(import.meta.dir, "../../../services/raw-evidence/migrations");
+const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
 const LAYER_A = `CREATE TABLE sources(id TEXT PRIMARY KEY,provider TEXT);
 CREATE TABLE producers(id TEXT PRIMARY KEY);
 CREATE TABLE fetch_runs(id INTEGER PRIMARY KEY,source_id TEXT,acquisition_session_id INTEGER,producer_id TEXT,first_recorded_at_ms INTEGER,source_run_key TEXT DEFAULT 'default');

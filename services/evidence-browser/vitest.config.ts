@@ -9,7 +9,7 @@ export default defineConfig({
       miniflare: {
         bindings: {
           TEST_MIGRATIONS: await readD1Migrations(
-            path.join(import.meta.dirname, "../raw-evidence/migrations"),
+            path.join(import.meta.dirname, "../../packages/storage-d1/migrations/core"),
           ),
           // The workers pool does not inherit the host process environment, so
           // the opt-in load harness reads its shape from this binding

@@ -59,7 +59,7 @@ describe("dataset_snapshot_policies seed", () => {
       ).toBe(true);
     // The migration file itself, not only the applied table, names every row.
     const sql = readFileSync(
-      join(import.meta.dir, "../../../services/raw-evidence/migrations/0025_parse_coverage.sql"),
+      join(import.meta.dir, "../../../packages/storage-d1/migrations/core/0025_parse_coverage.sql"),
       "utf8",
     );
     for (const [parser, dataset] of SNAPSHOT_DATASETS)

@@ -3,7 +3,12 @@
 // Keep whitespace around CASE/END: Wrangler's SQL splitter tokenizes these keywords.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-const path = fileURLToPath(new URL("../migrations/0024_observation_decimals.sql", import.meta.url));
+const path = fileURLToPath(
+  new URL(
+    "../../../packages/storage-d1/migrations/core/0024_observation_decimals.sql",
+    import.meta.url,
+  ),
+);
 const sql = readFileSync(path, "utf8");
 function view(name: string): string {
   const marker = `CREATE VIEW ${name} AS\n`;

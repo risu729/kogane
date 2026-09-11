@@ -74,6 +74,29 @@ describe("import boundaries", () => {
     expect(boundaryViolations("services/observation-pipeline/src/worker.ts", allowed)).toEqual([]);
   });
 
+  test("no shared package imports a service back (U05)", () => {
+    const violations = boundaryViolationsIn(REPO_ROOT, SOURCES).filter(
+      (violation) => violation.rule === "package-imports-service",
+    );
+    expect(violations).toEqual([]);
+  });
+
+  test("the extraction direction is one-way: package to service is a crossing", () => {
+    const forbidden = 'import { loadRun } from "../../../services/raw-evidence/src/http.ts";';
+    expect(
+      boundaryViolations("packages/storage-d1/src/core/fetch-runs.ts", forbidden).map(
+        (violation) => violation.rule,
+      ),
+    ).toEqual(["package-imports-service"]);
+    // The other direction — a service importing the shared package — is what
+    // U05 produced and must stay allowed.
+    const allowed =
+      'import { publishBatch } from "../../../packages/storage-d1/src/atomic/publication.ts";';
+    expect(
+      boundaryViolations("services/observation-pipeline/src/publication-gate.ts", allowed),
+    ).toEqual([]);
+  });
+
   test("the UI rules catch a query builder, a storage adapter and an experiment", () => {
     for (const [specifier, rule] of [
       ["../../../packages/read-model/src/concepts.ts", "ui-imports-database"],
@@ -141,6 +164,7 @@ describe("import boundaries", () => {
   test("every rule is exercised by the repository-wide checks above", () => {
     expect(BOUNDARY_RULES.map((rule) => rule.name).sort()).toEqual([
       "deployed-code-imports-experiment",
+      "package-imports-service",
       "ui-imports-database",
       "ui-imports-service-internals",
     ]);

@@ -104,6 +104,13 @@
         "typescript": "5.9.3",
       },
     },
+    "packages/storage-d1": {
+      "name": "@kogane/storage-d1",
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "typescript": "5.9.3",
+      },
+    },
     "poc/cloudflare-browser-run": {
       "name": "@kogane/cloudflare-browser-run",
       "dependencies": {
@@ -540,6 +547,8 @@
     "@kogane/raw-evidence": ["@kogane/raw-evidence@workspace:services/raw-evidence"],
 
     "@kogane/read-model": ["@kogane/read-model@workspace:packages/read-model"],
+
+    "@kogane/storage-d1": ["@kogane/storage-d1@workspace:packages/storage-d1"],
 
     "@kogane/tamia-tcp-bridge": ["@kogane/tamia-tcp-bridge@workspace:poc/tamia-tcp-bridge"],
 

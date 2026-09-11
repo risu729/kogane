@@ -66,6 +66,7 @@ includes = [
 	"packages/observation-shared/tasks.toml",
 	"packages/parsers/tasks.toml",
 	"packages/read-model/tasks.toml",
+	"packages/storage-d1/tasks.toml",
 	"poc/cloudflare-browser-run/tasks.toml",
 	"poc/cloudflare-runtime-probe/tasks.toml",
 	"poc/globalpass-worker/tasks.toml",

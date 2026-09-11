@@ -101,7 +101,7 @@ patterns per rule:
 
 | Rule                          | Covers                                                                                                                                                        |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core-schema`                 | CORE migrations (today `services/raw-evidence/migrations/`, later `packages/storage-d1/migrations/`)                                                          |
+| `core-schema`                 | CORE migrations (`packages/storage-d1/migrations/core/` since U05)                                                                                            |
 | `authorization`               | `services/evidence-browser/src/auth.ts` and its successors                                                                                                    |
 | `secret-consuming-collectors` | collector code, `package.json` and `bun.lock` of workers that run with a source's bank credentials (plan 12 §5: the dependency closure deploys with the code) |
 | `automation`                  | `.github/workflows/**`, `.github/scripts/**`, `.github/actions/**`                                                                                            |
