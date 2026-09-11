@@ -66,6 +66,16 @@ export async function run(
     .run();
 }
 
+/** Executes one guarded batch. Callers that hold a real `D1Database` use this
+ * rather than `db.batch(...)` directly, because the statements a command
+ * builds are typed as this package's structural statement. */
+export async function runBatch(
+  db: D1Like,
+  statements: readonly D1StatementLike[],
+): Promise<D1RunResultLike[]> {
+  return await db.batch([...statements]);
+}
+
 export function statement(
   db: D1Like,
   sql: string,

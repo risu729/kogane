@@ -35,6 +35,18 @@ export const BOUNDARY_RULES: readonly BoundaryRule[] = [
     reason: "deployed and shared code must not import the PoC; promote the module to packages/",
   },
   {
+    // U05 moved the CORE SQL and the registration use cases out of the three
+    // services into packages/. A package that imported a service back would
+    // undo that in one line and reintroduce the cycle the extraction removed:
+    // the services depend on the packages, never the other way round. The
+    // services keep re-export shims at the old module paths, which is the
+    // allowed direction.
+    name: "package-imports-service",
+    scope: /^packages\/[^/]+\/src\//u,
+    forbidden: /(?:^|\/)services\/[^/]+\/(?:src|test|scripts)(?:\/|$)/u,
+    reason: "shared packages are imported by the services, never the reverse",
+  },
+  {
     name: "ui-imports-database",
     scope: /^poc\/observation-pipeline\/web\//u,
     forbidden: /(?:^|\/)(?:packages\/read-model\/src|services\/[^/]+\/src)(?:\/|$)/u,

@@ -17,11 +17,12 @@ import {
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
+import { runBatch } from "../../../packages/storage-d1/src/d1.ts";
 import { dispatchDecisionOutbox } from "./decision-outbox.ts";
 import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import {
   publicationConsistency,
-  publicationStatements,
+  publishBatch,
   REPAIR_LIMIT_DEFAULT,
   repairPublication,
 } from "./publication-gate.ts";
@@ -426,66 +427,6 @@ export async function parseJob(
   return result;
 }
 
-export interface PublishInput {
-  parseId: number;
-  /** The lease this attempt holds; nothing publishes once it has expired. */
-  token: string;
-  version: number[];
-  artifactId: number;
-  parserName: string;
-  publishedAt: string;
-  now: number;
-}
-
-/**
- * The publish transaction of a successful *adopted* parse, in order: mark the
- * run ok (born superseded when a numerically newer success is already current),
- * supersede older successes if this run is current, move the publication
- * projection and record its event (0026, same decision), then close the job.
- * Every statement that writes is fenced on the live lease, not only the
- * first: an expired lease changes nothing, and replaying the whole batch for
- * a run that is already published changes nothing either, because the effect
- * the later statements would otherwise key on is already committed.
- * Candidate results (`parse_run_candidates`, migration 0028) are excluded from
- * supersession in both directions: a candidate must not be turned into
- * replaced history by a later normal publish, and a candidate at a higher
- * version must not supersede the run readers actually use. With the release
- * flag off that table is empty and this batch behaves exactly as before.
- * Exported for the publication-gate tests only.
- */
-export function publishBatch(env: Env, input: PublishInput): D1PreparedStatement[] {
-  const { parseId, token, version, artifactId, parserName, publishedAt, now } = input;
-  return [
-    env.DB.prepare(
-      `UPDATE parse_runs SET status='ok',superseded_by_parse_run_id=(
-          SELECT newer.id FROM parse_runs newer
-          WHERE newer.fetch_artifact_id=parse_runs.fetch_artifact_id
-            AND newer.parser_name=parse_runs.parser_name AND newer.status='ok'
-            AND newer.superseded_by_parse_run_id IS NULL -- gate:writer
-            AND NOT EXISTS(SELECT 1 FROM parse_run_candidates c WHERE c.parse_run_id=newer.id)
-            AND (
-              json_extract('['||replace(newer.parser_version,'.',',')||']','$[0]'),
-              json_extract('['||replace(newer.parser_version,'.',',')||']','$[1]'),
-              json_extract('['||replace(newer.parser_version,'.',',')||']','$[2]')
-            ) > (?,?,?)
-          ORDER BY
-            json_extract('['||replace(newer.parser_version,'.',',')||']','$[0]') DESC,
-            json_extract('['||replace(newer.parser_version,'.',',')||']','$[1]') DESC,
-            json_extract('['||replace(newer.parser_version,'.',',')||']','$[2]') DESC LIMIT 1
-        ) WHERE id=? AND EXISTS(SELECT 1 FROM observation_parse_jobs WHERE lease_token=? AND status='running' AND lease_until_ms>?)`,
-    ).bind(version[0]!, version[1]!, version[2]!, parseId, token, now),
-    env.DB.prepare(
-      `UPDATE parse_runs SET superseded_by_parse_run_id=? WHERE fetch_artifact_id=? AND parser_name=? AND id<>? AND status='ok' AND superseded_by_parse_run_id IS NULL AND NOT EXISTS(SELECT 1 FROM parse_run_candidates c WHERE c.parse_run_id=parse_runs.id) AND EXISTS(SELECT 1 FROM parse_runs p WHERE p.id=? AND p.status='ok' AND p.superseded_by_parse_run_id IS NULL)`, // gate:writer
-    ).bind(parseId, artifactId, parserName, parseId, parseId),
-    ...publicationStatements(env.DB, parseId, publishedAt, token, now),
-    // Fenced on the live lease like the first statement: a replayed batch
-    // must not touch a job another attempt has already closed.
-    env.DB.prepare(
-      `UPDATE observation_parse_jobs SET status='done',last_error_code=NULL WHERE lease_token=? AND status='running' AND EXISTS(SELECT 1 FROM parse_runs WHERE id=? AND status='ok')`,
-    ).bind(token, parseId),
-  ];
-}
-
 async function executeParseJob(
   env: Env,
   job: Job,
@@ -637,7 +578,8 @@ async function executeParseJob(
     // occur in one D1 transaction; empty successful parses are published too.
     // A candidate takes the other batch: it is marked ok and recorded as a
     // candidate of its release, and never reaches the publication pointer.
-    const publish = await env.DB.batch(
+    const publish = await runBatch(
+      env.DB,
       candidate
         ? candidateBatch(env.DB, {
             parseId,
@@ -651,7 +593,7 @@ async function executeParseJob(
             createdAt: new Date().toISOString(),
             now: Date.now(),
           })
-        : publishBatch(env, {
+        : publishBatch(env.DB, {
             parseId,
             token,
             version,
