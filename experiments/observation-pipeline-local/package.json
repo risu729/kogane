@@ -1,0 +1,13 @@
+{
+  "name": "@kogane/observation-pipeline-local",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "hono": "4.13.5"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.8",
+    "playwright": "1.62.1",
+    "typescript": "5.9.3"
+  }
+}

@@ -127,7 +127,7 @@ describe("SBI identity", () => {
       };
       const observations = parser.parse(
         readFileSync(
-          new URL(`../../../poc/observation-pipeline/fixtures/${path}`, import.meta.url),
+          new URL(`../../../tests/fixtures/observation-pipeline/${path}`, import.meta.url),
         ),
         artifact,
       ).observations;

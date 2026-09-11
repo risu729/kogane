@@ -2,9 +2,14 @@
 // `infra/resources.md`), unified plan U01 / chapter 07 §1, §6.
 //
 // Every runtime resource this repository can deploy is declared in a
-// `wrangler*.jsonc` under `services/` or `poc/`. The upcoming directory moves
-// (07 §1) must not change a single one of those identities: Worker `name`,
-// Durable Object class name and migration tag, R2 bucket, Queue, cron, D1 id.
+// `wrangler*.jsonc` under `apps/`, `experiments/`, `poc/` or `services/`. The
+// first two workspaces hold no Worker today; they are walked so that a
+// directory promoted out of `poc/` (U04 moved the PoC client and its local
+// store) still carries its disposition instead of dropping out of the ledger.
+//
+// The remaining directory moves of 07 §1 must not change a single one of those
+// identities: Worker `name`, Durable Object class name and migration tag, R2
+// bucket, Queue, cron, D1 id.
 // The ledger is the machine-readable record of what those identities are today
 // and `scripts/resource-ledger.test.ts` fails when a config and the ledger
 // disagree, so a rename cannot slip through as "just a directory move"
@@ -99,6 +104,24 @@ export interface Disposition {
  * until U15).
  */
 export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
+  "apps/web": {
+    source: "poc_disposition.csv row poc/observation-pipeline + decision D1",
+    proposedAction: "promoted-from-poc",
+    proposedTarget: "apps/web (the React client and its frontend tests)",
+    requiredVerification:
+      "U04 executed the move; the three bundles are byte-identical and the client imports no service internal",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "experiments/observation-pipeline-local": {
+    source: "poc_disposition.csv row poc/observation-pipeline + decision D1",
+    proposedAction: "isolated-as-experiment",
+    proposedTarget: "experiments/observation-pipeline-local (EXPERIMENT.md: risu729, 2026-12-31)",
+    requiredVerification:
+      "U04 executed the move; retire once the App API covers replay and status (docs/research/observation-pipeline-poc.md)",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
   "poc/camoufox-container-probe": {
     source: "poc_disposition.csv",
     proposedAction: "retire-candidate",
@@ -168,15 +191,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     proposedAction: "promote-service",
     proposedTarget: "services/collector-myjcb",
     requiredVerification: "keep the Browser Run login and fetch boundary",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/observation-pipeline": {
-    source: "poc_disposition.csv",
-    proposedAction: "split-promote-retire",
-    proposedTarget: "apps/web; packages/application; tests/fixtures; docs/research",
-    requiredVerification:
-      "promote UI and fixtures, move needed local operations to the App API, legacy store to test/research, drop the shims",
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
@@ -559,9 +573,14 @@ function readWorker(root: string, configPath: string): WorkerResources {
   };
 }
 
+/** Workspaces the ledger walks. `apps` and `experiments` joined it in U04. */
+export const WORKSPACES = ["apps", "experiments", "poc", "services"] as const;
+
+export type Workspace = (typeof WORKSPACES)[number];
+
 export interface DirectoryEntry {
   directory: string;
-  workspace: "services" | "poc";
+  workspace: Workspace;
   disposition: (Disposition & { liveResourceStatus: string }) | null;
   workers: WorkerResources[];
 }
@@ -590,7 +609,7 @@ export interface ResourceLedger {
   };
 }
 
-function directoriesOf(root: string, workspace: "services" | "poc"): string[] {
+function directoriesOf(root: string, workspace: Workspace): string[] {
   const base = join(root, workspace);
   return readdirSync(base)
     .filter((entry) => statSync(join(base, entry)).isDirectory())
@@ -630,7 +649,7 @@ function liveResourceStatus(workers: WorkerResources[]): string {
 
 export function buildResourceLedger(root: string): ResourceLedger {
   const directories: DirectoryEntry[] = [];
-  for (const workspace of ["poc", "services"] as const) {
+  for (const workspace of WORKSPACES) {
     for (const directory of directoriesOf(root, workspace)) {
       const workers = configsOf(root, directory).map((config) => readWorker(root, config));
       const disposition = DISPOSITIONS[directory];
@@ -764,7 +783,7 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
   lines.push("# Runtime resource ledger");
   lines.push("");
   lines.push(
-    "Generated from the `wrangler*.jsonc` files under `services/` and `poc/` by",
+    "Generated from the `wrangler*.jsonc` files under `apps/`, `experiments/`, `poc/` and `services/` by",
     "`scripts/resource-ledger.ts`. Do not edit by hand: `scripts/resource-ledger.test.ts`",
     "regenerates it and fails when this file and the configs disagree.",
   );

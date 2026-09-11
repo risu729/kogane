@@ -17,6 +17,14 @@ dir = "packages/parsers"
 hide = true
 run = "bun scripts/parser-digests.ts"
 
+["parsers:freeze-coverage-contract"]
+description = "Re-freeze the coverage-contract fixture from the current parsers."
+# A reviewed fixture update, never a routine step: the frozen file is what
+# proves the converted parsers still emit the same observations.
+dir = "packages/parsers"
+hide = true
+run = "bun scripts/freeze-coverage-contract.ts"
+
 ["ci:parsers"]
 description = "Every check CI runs for packages/parsers."
 depends = ["parsers:typecheck", "parsers:test"]

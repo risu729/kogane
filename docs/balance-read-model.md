@@ -332,13 +332,13 @@ observation, parse, publication or identity row depends on them.
 
 ## Verified locally
 
-| Check                                                                                                                                                      | Where                                                                                                    |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| SC01 adopted set, SC06 unknown overlap, SC15 four empty meanings, oversized target bound                                                                   | `packages/read-model/test/balance-projection.test.ts`                                                    |
-| Page envelope, cursor round-trip, mismatch and expiry, `ObservedQuantity`                                                                                  | `packages/domain/test/paging.test.ts`                                                                    |
-| Seal, resume, immutability, retirement, deterministic snapshot id                                                                                          | `services/observation-pipeline/test/balance-projection.test.ts`                                          |
-| 1,003-row keyset paging on a fixed snapshot while new evidence lands; 5,002-row history paging; cursor mismatch; 410; v1 parity; no `netWorth`; query plan | `services/evidence-browser/test/balances-v2.test.ts`                                                     |
-| Capability schema pinned on both sides                                                                                                                     | `poc/observation-pipeline/test/api-schema.test.ts`, `services/evidence-browser/test/conformance.test.ts` |
+| Check                                                                                                                                                      | Where                                                                                    |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| SC01 adopted set, SC06 unknown overlap, SC15 four empty meanings, oversized target bound                                                                   | `packages/read-model/test/balance-projection.test.ts`                                    |
+| Page envelope, cursor round-trip, mismatch and expiry, `ObservedQuantity`                                                                                  | `packages/domain/test/paging.test.ts`                                                    |
+| Seal, resume, immutability, retirement, deterministic snapshot id                                                                                          | `services/observation-pipeline/test/balance-projection.test.ts`                          |
+| 1,003-row keyset paging on a fixed snapshot while new evidence lands; 5,002-row history paging; cursor mismatch; 410; v1 parity; no `netWorth`; query plan | `services/evidence-browser/test/balances-v2.test.ts`                                     |
+| Capability schema pinned on both sides                                                                                                                     | `apps/web/test/api-schema.test.ts`, `services/evidence-browser/test/conformance.test.ts` |
 
 Not verified: behaviour on production data volumes, real query-plan timings,
 and incremental per-scope rebuild (not implemented).

@@ -1,0 +1,51 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["local-pipeline:typecheck"]
+description = "Type-check the local observation pipeline experiment."
+dir = "experiments/observation-pipeline-local"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["local-pipeline:demo"]
+description = "Ingest the synthetic fixtures into state/ and print the row counts."
+dir = "experiments/observation-pipeline-local"
+run = "bun src/demo.ts"
+
+["local-pipeline:serve"]
+description = "Serve the local read-only API and the built client on 127.0.0.1."
+dir = "experiments/observation-pipeline-local"
+run = "bun src/serve.ts"
+
+["local-pipeline:preview"]
+description = "Serve an isolated synthetic-only store; never opens state/."
+depends = ["web:build"]
+dir = "experiments/observation-pipeline-local"
+run = "bun src/serve.ts --demo"
+
+["local-pipeline:export-demo"]
+description = "Export the synthetic demo snapshot the reader Worker serves."
+# The demo Worker serves both the snapshot and the built client, so the task
+# that prepares its deployment has to produce both.
+depends = ["web:build"]
+dir = "experiments/observation-pipeline-local"
+run = "bun src/export-demo.ts ../../services/evidence-browser/demo-snapshot.json"
+
+["local-pipeline:browser"]
+description = "Install the locked Playwright Chromium in CI; never downloads locally."
+dir = "experiments/observation-pipeline-local"
+hide = true
+run = '''
+if [ "${CI:-}" = "true" ] && [ -z "${CHROMIUM_PATH:-}" ]; then
+  node node_modules/playwright/cli.js install --with-deps chromium
+fi
+'''
+
+["local-pipeline:test"]
+description = "Run the local pipeline tests, including the browser tests over the built client."
+depends = ["web:build", "web:build-production", "local-pipeline:browser"]
+dir = "experiments/observation-pipeline-local"
+run = "bun test"
+
+["ci:local-pipeline"]
+description = "Every check CI runs for experiments/observation-pipeline-local."
+depends = ["local-pipeline:typecheck", "local-pipeline:export-demo", "local-pipeline:test"]
