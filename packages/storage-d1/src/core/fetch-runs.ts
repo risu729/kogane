@@ -40,6 +40,18 @@ export async function insertAcquisitionSessionIfAbsent(
     .run();
 }
 
+/** The acquisition session a registered run belongs to, or null if it is gone. */
+export async function readFetchRunSessionId(
+  db: D1Like,
+  fetchRunId: number,
+): Promise<number | null> {
+  const row = await db
+    .prepare("SELECT acquisition_session_id FROM fetch_runs WHERE id = ?")
+    .bind(fetchRunId)
+    .first<{ acquisition_session_id: number | null }>();
+  return row?.acquisition_session_id ?? null;
+}
+
 export async function readAcquisitionSession(
   db: D1Like,
   producerId: string,

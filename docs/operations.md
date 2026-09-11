@@ -20,18 +20,19 @@ budgets, the retention classes and the drills.
 Root review 08 section 2 asks for coverage of the same subject range from
 Layer A through to the read model, not just "no failed jobs".
 
-| Signal (review 08 section 2)               | Where it is served today                                                                                | Gap                                                     |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Latest sealed artifact arrival             | pipeline `GET /status`: `freshness.latestSealedAtMs`, `freshness.latestSealedArtifactFetchedAtMs`       | -                                                       |
-| Eligible / unsupported / oversized reasons | evidence-browser metadata API (parse health); pipeline safe failure codes on jobs                       | Not aggregated into one "why is there no job" counter   |
-| Oldest pending age, per-lane backlog       | pipeline `GET /status`: `lanes.<lane>.{pending,running,done,failed}`, `lanes.<lane>.oldestPendingAgeMs` | -                                                       |
-| Parsed Layer B versus sealed identity      | identity audit (`docs/identity-audit.md`)                                                               | Not exposed as a single coverage percentage per source  |
-| Candidate versus active                    | `published_parse_runs` versus successful `parse_runs`; `GET /publication/consistency`                   | Candidate releases themselves are the next step (A04)   |
-| Latest complete snapshot                   | complete-snapshot projection used by every reader                                                       | Not surfaced as a freshness signal on `/status`         |
-| Raw integrity verification result          | raw-evidence verification tables                                                                        | Not summarised on `/status`                             |
-| Notification backlog                       | pipeline `GET /status`: `workItems.unprocessed`, `workItems.oldestUnprocessedAgeMs`                     | -                                                       |
-| Lane liveness and replay progress          | pipeline `GET /status`: `laneState[]`, `replayPlans[]`                                                  | -                                                       |
-| Report generation                          | `report_job` scheduled stage log line (only while `REPORTS_ENABLED` is on)                              | Not on `/status`; add when the flag becomes the default |
+| Signal (review 08 section 2)               | Where it is served today                                                                                | Gap                                                             |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Latest sealed artifact arrival             | pipeline `GET /status`: `freshness.latestSealedAtMs`, `freshness.latestSealedArtifactFetchedAtMs`       | -                                                               |
+| Eligible / unsupported / oversized reasons | evidence-browser metadata API (parse health); pipeline safe failure codes on jobs                       | Not aggregated into one "why is there no job" counter           |
+| Oldest pending age, per-lane backlog       | pipeline `GET /status`: `lanes.<lane>.{pending,running,done,failed}`, `lanes.<lane>.oldestPendingAgeMs` | -                                                               |
+| Parsed Layer B versus sealed identity      | identity audit (`docs/identity-audit.md`)                                                               | Not exposed as a single coverage percentage per source          |
+| Candidate versus active                    | `published_parse_runs` versus successful `parse_runs`; `GET /publication/consistency`                   | Candidate releases themselves are the next step (A04)           |
+| Latest complete snapshot                   | complete-snapshot projection used by every reader                                                       | Not surfaced as a freshness signal on `/status`                 |
+| Raw integrity verification result          | raw-evidence verification tables                                                                        | Not summarised on `/status`                                     |
+| Notification backlog                       | pipeline `GET /status`: `workItems.unprocessed`, `workItems.oldestUnprocessedAgeMs`                     | -                                                               |
+| Unregistered shared-R2 terminals           | `collection_runs` / `collection_run_stages` per run (U08, `docs/processor.md`)                          | Not summarised on `/status`; add with the first switched source |
+| Lane liveness and replay progress          | pipeline `GET /status`: `laneState[]`, `replayPlans[]`                                                  | -                                                               |
+| Report generation                          | `report_job` scheduled stage log line (only while `REPORTS_ENABLED` is on)                              | Not on `/status`; add when the flag becomes the default         |
 
 Addendum 12 section 5 also asks the operational metrics to separate freshness,
 coverage, resolution, publication and safety. Today `/status` covers freshness,
@@ -125,18 +126,30 @@ differently. A whole-database point-in-time restore is **not** a normal
 application rollback: it discards collection and decisions made since that
 point.
 
-| Drill                              | Setup                                                       | What must hold                                                                                                                                                                                                     |
-| ---------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Raw store only                     | R2 objects survive, D1 catalogue lost                       | Objects are content-addressed, so they can be re-catalogued; but runs, seals, decisions and reports are not rebuildable from bytes.                                                                                |
-| D1 only                            | D1 survives, R2 objects unreachable                         | Catalogue rows stay readable; raw download and re-parse fail loudly (`raw_object_missing`), never silently return an old parse as fresh.                                                                           |
-| Outbox unsent                      | Decision accepted, downstream notification not delivered    | The dispatcher re-sends; the decision itself is not applied twice (idempotency receipt).                                                                                                                           |
-| Corrupted publication root         | `published_parse_runs` inconsistent with `parse_runs`       | `GET /publication/consistency` lists it; `POST /publication/repair` is bounded, idempotent, records its actor.                                                                                                     |
-| Stale worker finishing late        | An old lease-holder completes after its lease expired       | Fencing rejects the late publish; the result stays an unadopted candidate.                                                                                                                                         |
-| Restore after evidence restriction | A restriction is recorded, then an older backup is restored | The restriction must be re-applied before serving: `purgeRestrictedExplanations()` re-purges cached explanation nodes and re-downgrades the affected runs. Current authorization outranks a restored past context. |
+| Drill                               | Setup                                                                       | What must hold                                                                                                                                                                                                     |
+| ----------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Raw store only                      | R2 objects survive, D1 catalogue lost                                       | Objects are content-addressed, so they can be re-catalogued; but runs, seals, decisions and reports are not rebuildable from bytes.                                                                                |
+| D1 only                             | D1 survives, R2 objects unreachable                                         | Catalogue rows stay readable; raw download and re-parse fail loudly (`raw_object_missing`), never silently return an old parse as fresh.                                                                           |
+| Outbox unsent                       | Decision accepted, downstream notification not delivered                    | The dispatcher re-sends; the decision itself is not applied twice (idempotency receipt).                                                                                                                           |
+| Corrupted publication root          | `published_parse_runs` inconsistent with `parse_runs`                       | `GET /publication/consistency` lists it; `POST /publication/repair` is bounded, idempotent, records its actor.                                                                                                     |
+| Stale worker finishing late         | An old lease-holder completes after its lease expired                       | Fencing rejects the late publish; the result stays an unadopted candidate.                                                                                                                                         |
+| Restore after evidence restriction  | A restriction is recorded, then an older backup is restored                 | The restriction must be re-applied before serving: `purgeRestrictedExplanations()` re-purges cached explanation nodes and re-downgrades the affected runs. Current authorization outranks a restored past context. |
+| Terminal written, notification lost | A run persists into the shared DATA bucket, the Queue message never arrives | The `collection_scan` lane finds the run on a later tick and registers it with no provider call and no write to the bucket (U08, G1-04). The queue is a wake-up, never the record.                                 |
+| Notification delivered twice        | The same terminal is delivered again after it was registered                | One fetch run, one seal, one completed `registered` stage. The notification id is never the idempotency key; the run identity and terminal digest are (G1-05, G1-11).                                              |
+| Poisonous terminal                  | One run's terminal is corrupt or names an object that is gone               | That run alone is blocked with its reason code and the rest of the page registers; no seal, and no `registered` stage claims completion (G1-13, G1-14). A block is write-once, so it is never quietly relabelled.  |
 
 The last drill is the one most easily got wrong: restoring a backup taken before
 a use prohibition would otherwise resurrect cached explanations of evidence that
 may no longer be used.
+
+Two operational rules come with the shared-R2 lanes (plan 15 §2). A budget that
+runs out yields with progress recorded rather than failing or looping: a
+registration short of its artifact budget stays unsealed and continues next
+tick, and a scan page that spends its registration budget leaves its cursor
+put. And a request the operations API accepted is never completed by having
+been handed over — a queued replay, a projection scheduled for the next tick
+and a collector call that does not exist yet all stay short of `completed`
+(`docs/processor.md` §7, `contracts/stages.json`).
 
 Migration order for anything in this area stays: additive tables and contracts →
 dual-read comparison → candidate verification → adoption → old path retired.

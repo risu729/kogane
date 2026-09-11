@@ -48,10 +48,11 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 ## Queues
 
-| queue | producers | consumers | dead letter |
-| --- | --- | --- | --- |
-| kogane-r2-outbox-reconciler | kogane-collector-r2-importer | kogane-collector-r2-importer | kogane-r2-outbox-reconciler-dlq |
-| kogane-vpass-raw-evidence-import | kogane-vpass-collector-poc | kogane-vpass-collector-poc | kogane-vpass-raw-evidence-import-dlq |
+| queue | producers | consumers | dead letter | exists |
+| --- | --- | --- | --- | --- |
+| kogane-collection-terminals | — | kogane-observation-pipeline | kogane-collection-terminals-dlq | to be created by the first deploy (U08) |
+| kogane-r2-outbox-reconciler | kogane-collector-r2-importer | kogane-collector-r2-importer | kogane-r2-outbox-reconciler-dlq | declared (unverified) |
+| kogane-vpass-raw-evidence-import | kogane-vpass-collector-poc | kogane-vpass-collector-poc | kogane-vpass-raw-evidence-import-dlq | declared (unverified) |
 
 ## Durable Object classes and migration tags
 
@@ -974,7 +975,7 @@ No wrangler config.
 - D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60` (migrations_dir `../../packages/storage-d1/migrations/core`)
 - R2: EVIDENCE → kogane-raw-evidence<br>DATA → kogane-raw-evidence
 - KV: —
-- Queues: —
+- Queues: consume kogane-collection-terminals (dlq kogane-collection-terminals-dlq)
 - Durable Objects: —
 - DO migration tags: —
 - Containers: —
@@ -983,7 +984,7 @@ No wrangler config.
 - Service bindings: —
 - Crons: `*/5 * * * *`
 - Assets: —
-- Vars (names only): BALANCE_PROJECTION_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED
+- Vars (names only): BALANCE_PROJECTION_ENABLED<br>COLLECTION_ACCOUNT_ID<br>COLLECTION_DATA_BUCKET<br>COLLECTION_INGEST_CLIENT<br>OPS_DISPATCH_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED<br>SHARED_R2_INGEST_ENABLED
 - Required secrets (names only): —
 
 #### `kogane-observation-ops-local` — `services/observation-pipeline/wrangler.ops.jsonc`

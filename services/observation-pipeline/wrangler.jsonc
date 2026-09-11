@@ -14,7 +14,37 @@
     "REWARD_CLAIMS_ENABLED": "false",
     "REPORTS_ENABLED": "false",
     "BALANCE_PROJECTION_ENABLED": "0",
-    "RELEASE_CANDIDATES_ENABLED": "false"
+    "RELEASE_CANDIDATES_ENABLED": "false",
+    // U08. Off: the queue below must exist and a collector must be writing
+    // the shared layout (U09) before this does anything. See docs/processor.md.
+    "SHARED_R2_INGEST_ENABLED": "false",
+    "OPS_DISPATCH_ENABLED": "false",
+    // The shared DATA bucket is the existing central bucket; the name is
+    // declared so a notification about another bucket is refused.
+    "COLLECTION_DATA_BUCKET": "kogane-raw-evidence",
+    "COLLECTION_ACCOUNT_ID": "59ea63cc00914b30ca410b062ae2bb7f",
+    // The ingest client the Processor registers as. Its client row and its
+    // per-source routes are CORE rows created per source by U09.
+    "COLLECTION_INGEST_CLIENT": "processor-shared-r2"
+  },
+  // Queue `kogane-collection-terminals` DOES NOT EXIST YET: it is created by
+  // the first deploy that carries this config (`wrangler queues create`, or
+  // the deploy workflow), together with its dead-letter queue and the R2
+  // event-notification rule on `kogane-raw-evidence` filtered to the prefix
+  // `runs/` and the suffix `/terminal.json`. Nothing is consumed until
+  // SHARED_R2_INGEST_ENABLED is turned on. See docs/processor.md.
+  "queues": {
+    "consumers": [
+      {
+        "queue": "kogane-collection-terminals",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "retry_delay": 30,
+        "dead_letter_queue": "kogane-collection-terminals-dlq",
+        "max_concurrency": 2
+      }
+    ]
   },
   "limits": { "cpu_ms": 300000 },
   "d1_databases": [

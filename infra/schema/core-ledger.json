@@ -600,6 +600,17 @@
       "sha256": "803f41c024792e46e259212558fa71e49b4caeb2c9e2632dbfee7e8540359b48"
     },
     {
+      "file": "0039_collection_runs.sql",
+      "statementCount": 14,
+      "insertStatements": [
+        {
+          "table": "collection_scan_state",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "3472b423845147a610c2051e7b3233a2bc73f7c399774e5b0ab5b2b741bdc8b8"
+    },
+    {
       "file": "0040_operations_api.sql",
       "statementCount": 13,
       "insertStatements": [],
@@ -2910,6 +2921,348 @@
       ],
       "appendOnly": false,
       "sqlSha256": "e030ea4e3a970d72"
+    },
+    {
+      "name": "collection_run_stages",
+      "classification": "core-keep",
+      "planRow": "acquisition and fetch history",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "collection_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "stage",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "evidence_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "failure_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "recorded_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "collection_run_id",
+          "references": "collection_runs(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "collection_run_stages_run",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "collection_run_id",
+            "stage",
+            "id"
+          ]
+        },
+        {
+          "name": "collection_run_stages_state",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "stage",
+            "state",
+            "id"
+          ]
+        }
+      ],
+      "triggers": [
+        "collection_run_stages_no_delete",
+        "collection_run_stages_no_update"
+      ],
+      "noUpdateTriggers": [
+        "collection_run_stages_no_update"
+      ],
+      "noDeleteTriggers": [
+        "collection_run_stages_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "022424706a1cb3e5"
+    },
+    {
+      "name": "collection_runs",
+      "classification": "core-keep",
+      "planRow": "acquisition and fetch history",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "terminal_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "terminal_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "registration_contract_version",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "provider_outcome",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "coverage_status",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "acquisition_session_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "first_seen_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "blocked_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "fetch_run_id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "acquisition_session_id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "registered_at",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "acquisition_session_id",
+          "references": "acquisition_sessions(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "fetch_run_id",
+          "references": "fetch_runs(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "collection_runs_fetch_run",
+          "unique": false,
+          "partial": true,
+          "columns": [
+            "fetch_run_id"
+          ]
+        },
+        {
+          "name": "collection_runs_open",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "blocked_code",
+            "registered_at",
+            "id"
+          ]
+        },
+        {
+          "name": "collection_runs_run",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "source",
+            "run_id"
+          ]
+        }
+      ],
+      "triggers": [
+        "collection_runs_no_delete",
+        "collection_runs_no_replace",
+        "collection_runs_progress_only"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [
+        "collection_runs_no_delete"
+      ],
+      "appendOnly": false,
+      "sqlSha256": "e7abdd919b5c2975"
+    },
+    {
+      "name": "collection_scan_state",
+      "classification": "operational-mutable",
+      "planRow": "parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "lane",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "cursor",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "last_scan_at_ms",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "pages_completed",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "cycles_completed",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "last_seen",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "last_registered",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "last_blocked",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "lane"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "e05eca08c0092d04"
     },
     {
       "name": "conversion_offers",
@@ -13437,6 +13790,41 @@
       "sqlSha256": "07007de6c9574aed"
     },
     {
+      "name": "collection_run_stages_no_delete",
+      "table": "collection_run_stages",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "af4b559e0e1e6565"
+    },
+    {
+      "name": "collection_run_stages_no_update",
+      "table": "collection_run_stages",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "d092d7be355b12c7"
+    },
+    {
+      "name": "collection_runs_no_delete",
+      "table": "collection_runs",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "a904bb81981388a3"
+    },
+    {
+      "name": "collection_runs_no_replace",
+      "table": "collection_runs",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "30ff3820c639c035"
+    },
+    {
+      "name": "collection_runs_progress_only",
+      "table": "collection_runs",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "1aa2f2a8d6ef12c7"
+    },
+    {
       "name": "conversion_offers_no_delete",
       "table": "conversion_offers",
       "timing": "BEFORE",
@@ -15409,6 +15797,31 @@
       "sqlSha256": "6d550e9d16f24464"
     },
     {
+      "name": "collection_run_stages_run",
+      "table": "collection_run_stages",
+      "sqlSha256": "8be4c0f26958b88a"
+    },
+    {
+      "name": "collection_run_stages_state",
+      "table": "collection_run_stages",
+      "sqlSha256": "3bea099c7393e54b"
+    },
+    {
+      "name": "collection_runs_fetch_run",
+      "table": "collection_runs",
+      "sqlSha256": "2a1ec030be88e35c"
+    },
+    {
+      "name": "collection_runs_open",
+      "table": "collection_runs",
+      "sqlSha256": "17d529f75595ea3b"
+    },
+    {
+      "name": "collection_runs_run",
+      "table": "collection_runs",
+      "sqlSha256": "892f4fb2668b63f0"
+    },
+    {
       "name": "conversion_offers_route",
       "table": "conversion_offers",
       "sqlSha256": "a83f575908614333"
@@ -15890,10 +16303,10 @@
     }
   ],
   "summary": {
-    "tableCount": 105,
+    "tableCount": 108,
     "viewCount": 31,
-    "triggerCount": 364,
-    "explicitIndexCount": 105,
+    "triggerCount": 369,
+    "explicitIndexCount": 110,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -15915,6 +16328,8 @@
         "calculation_results",
         "calculation_runs",
         "change_plans",
+        "collection_run_stages",
+        "collection_runs",
         "conversion_offers",
         "core_source_revision",
         "decision_operations",
@@ -15996,6 +16411,7 @@
         "scope_relations"
       ],
       "operational-mutable": [
+        "collection_scan_state",
         "observation_lane_state",
         "observation_parse_jobs",
         "observation_replay_plans",
@@ -16017,6 +16433,8 @@
       "balance_snapshot_pointer",
       "calculation_runs",
       "change_plans",
+      "collection_runs",
+      "collection_scan_state",
       "conversion_simulations",
       "core_source_revision",
       "dataset_snapshot_policies",
@@ -16085,8 +16503,9 @@
       "0033_reward_buckets.sql",
       "0034_reports.sql",
       "0035_observation_job_lanes.sql",
-      "0038_source_revision.sql"
+      "0038_source_revision.sql",
+      "0039_collection_runs.sql"
     ],
-    "schemaSha256": "58e5bbdf5a4ba65fe528917d246ed6027b953a71b5ff8bbfb66dc0b71883c273"
+    "schemaSha256": "6b0288607fbc892d9c09de9f3802ab054a74f1be3fc40e1f8a6adc1db7a64c2c"
   }
 }

@@ -1917,7 +1917,15 @@
           ],
           "kv": [],
           "queueProducers": [],
-          "queueConsumers": [],
+          "queueConsumers": [
+            {
+              "queue": "kogane-collection-terminals",
+              "deadLetterQueue": "kogane-collection-terminals-dlq",
+              "maxBatchSize": 10,
+              "maxRetries": 5,
+              "maxConcurrency": 2
+            }
+          ],
           "durableObjects": [],
           "durableObjectExports": [],
           "durableObjectMigrations": [],
@@ -1926,10 +1934,15 @@
           "serviceBindings": [],
           "varNames": [
             "BALANCE_PROJECTION_ENABLED",
+            "COLLECTION_ACCOUNT_ID",
+            "COLLECTION_DATA_BUCKET",
+            "COLLECTION_INGEST_CLIENT",
+            "OPS_DISPATCH_ENABLED",
             "RECONCILIATION_ENABLED",
             "RELEASE_CANDIDATES_ENABLED",
             "REPORTS_ENABLED",
-            "REWARD_CLAIMS_ENABLED"
+            "REWARD_CLAIMS_ENABLED",
+            "SHARED_R2_INGEST_ENABLED"
           ],
           "requiredSecretNames": [],
           "unextractedKeys": []
@@ -2088,6 +2101,17 @@
     ],
     "queues": [
       {
+        "queue": "kogane-collection-terminals",
+        "producers": [],
+        "consumers": [
+          "kogane-observation-pipeline"
+        ],
+        "deadLetterQueues": [
+          "kogane-collection-terminals-dlq"
+        ],
+        "toCreate": "to be created by the first deploy (U08)"
+      },
+      {
         "queue": "kogane-r2-outbox-reconciler",
         "producers": [
           "kogane-collector-r2-importer"
@@ -2097,7 +2121,8 @@
         ],
         "deadLetterQueues": [
           "kogane-r2-outbox-reconciler-dlq"
-        ]
+        ],
+        "toCreate": ""
       },
       {
         "queue": "kogane-vpass-raw-evidence-import",
@@ -2109,7 +2134,8 @@
         ],
         "deadLetterQueues": [
           "kogane-vpass-raw-evidence-import-dlq"
-        ]
+        ],
+        "toCreate": ""
       }
     ],
     "durableObjectClasses": [

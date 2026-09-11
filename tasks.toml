@@ -46,6 +46,10 @@ run = "bun scripts/resource-ledger.ts"
 description = "Regenerate the CORE schema ledger under infra/."
 run = "bun scripts/core-schema-ledger.ts"
 
+["bootstrap:ingest-clients"]
+description = "Render config/ingest-clients.json to the idempotent CORE bootstrap SQL under infra/bootstrap/."
+run = "bun scripts/config-bootstrap.ts"
+
 ["ledger:deps"]
 description = "Regenerate infra/dependency-resolution.md from the root bun.lock."
 run = "bun scripts/dependency-ledger.ts"

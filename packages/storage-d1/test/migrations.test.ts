@@ -56,6 +56,14 @@ const SOURCE_REVISION: HistoricalSource = {
   directory: "services/raw-evidence/migrations",
 };
 
+/**
+ * Migrations written straight into `packages/storage-d1/migrations/core/`,
+ * after the move. They have no bytes at the old path, so the history check
+ * has nothing to compare for them; the digest table below is their only
+ * anchor, and it still catches a later edit.
+ */
+const INTRODUCED_AT_THE_NEW_PATH = new Set(["0039_collection_runs.sql"]);
+
 /** sha256 of every CORE migration as `services/raw-evidence/migrations/` held it. */
 const CORE_DIGESTS: Record<string, string> = {
   "0001_initial.sql": "0dbb5f288be06b8cadff9e37708eb35628e6dbbf7a39ee9af7686ad6c40c3aae",
@@ -118,11 +126,14 @@ const CORE_DIGESTS: Record<string, string> = {
   "0037_unit_scope_eligibility.sql":
     "9cb89c077a066a32968403169e4197582580e1af638fc97747ebda11faa82634",
   "0038_source_revision.sql": "803f41c024792e46e259212558fa71e49b4caeb2c9e2632dbfee7e8540359b48",
+  "0039_collection_runs.sql": "3472b423845147a610c2051e7b3233a2bc73f7c399774e5b0ab5b2b741bdc8b8",
   "0040_operations_api.sql": "edca64e3fc1675e463faec3b04ca90cde3ed2055269b483ee56c99f28e519002",
 };
 
-/** Which commit holds each recorded file's original bytes. */
-function sourceOf(name: string): HistoricalSource {
+/** Which commit holds each recorded file's original bytes, or null when the
+ * file was never at the old path. */
+function sourceOf(name: string): HistoricalSource | null {
+  if (INTRODUCED_AT_THE_NEW_PATH.has(name)) return null;
   const number = migrationNumber(name) ?? 0;
   if (number <= 37) return BEFORE_MOVE;
   return number === 38 ? SOURCE_REVISION : OPERATIONS_API;
@@ -167,7 +178,7 @@ describe("CORE migrations (G0-02)", () => {
     ).toBe(true);
   });
 
-  test("every recorded file is byte-identical to the one the services deployed before the move", () => {
+  test("every recorded file still has the bytes this table recorded", () => {
     const actual: Record<string, string> = {};
     for (const name of Object.keys(CORE_DIGESTS)) {
       actual[name] = digest(readFileSync(new URL(name, CORE_MIGRATIONS_URL)));
@@ -183,6 +194,7 @@ describe("CORE migrations (G0-02)", () => {
     const expected: Record<string, string> = {};
     for (const [name, recorded] of Object.entries(CORE_DIGESTS)) {
       const source = sourceOf(name);
+      if (source === null) continue;
       if (blobAt(source.ref, `${source.directory}/0001_initial.sql`) === null) continue;
       const bytes = blobAt(source.ref, `${source.directory}/${name}`);
       expected[name] = recorded;

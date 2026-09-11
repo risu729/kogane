@@ -147,6 +147,23 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "core-keep",
     planRow: "change plans, approvals and receipts",
   },
+  // The shared-R2 terminal registration records (0039) sit in the same row as
+  // the rest of the acquisition history: `collection_runs` is the fact that a
+  // terminal was seen for one run under one registration contract, and its
+  // stage rows are the evidence of what happened to it (03 §5). Both are CORE
+  // and neither is derivable from a `last_success_at`.
+  collection_runs: { classification: "core-keep", planRow: "acquisition and fetch history" },
+  collection_run_stages: {
+    classification: "core-keep",
+    planRow: "acquisition and fetch history",
+  },
+  // The bounded terminal scan's R2 cursor: a checkpoint, resettable, and
+  // excluded from anything that treats a row as evidence.
+  collection_scan_state: {
+    classification: "operational-mutable",
+    planRow:
+      "parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out)",
+  },
   // parse jobs, replay plans, work items, lane state → CORE for now, mutable
   observation_lane_state: {
     classification: "operational-mutable",

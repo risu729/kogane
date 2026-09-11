@@ -27,7 +27,7 @@ end. Rollback is reverting the commits.
 
 ```
 packages/storage-d1/
-  migrations/core/      0001…0037 moved byte-for-byte from services/raw-evidence; 0040 (U06) and later land here
+  migrations/core/      0001…0037 moved byte-for-byte from services/raw-evidence; 0039 (U08), 0040 (U06) and later land here
   migrations/read/      empty; U11 adds 0001_read_baseline.sql
   src/d1.ts             D1Like, D1StatementLike, first/all/run/statement/runBatch
   src/migrations.ts     where the two directories are, named once
@@ -360,6 +360,13 @@ to `migrations/core/`. Filenames, numbers and bytes are unchanged, because D1
 records the applied history by filename: re-applying a rewritten `0001` would
 be a different database. Existing files are immutable; the move was the one
 allowed path change (09 §2, decision D3).
+
+Migrations written straight into `migrations/core/` after the move have no
+bytes at the old path, so `test/migrations.test.ts` compares them against its
+recorded digest only, and lists them in `INTRODUCED_AT_THE_NEW_PATH` so the
+git-history check knows there is nothing to compare rather than reporting them
+missing. `0039_collection_runs.sql` (U08, shared-R2 terminal registration —
+see `docs/processor.md`) is the first of them.
 
 `migrations/read/` is empty on purpose. READ is a separate database with a
 separate history starting again at `0001`; keeping the two directories apart
