@@ -23,13 +23,12 @@
 // The `IS NOT NULL` form only marks replaced history and is not a publication
 // decision. Tests and the frozen legacy adapter are out of scope.
 //
-// This file runs in the standalone offline CI step
-// (`bun run scripts/ci-package.ts --standalone`, `mise run ci:standalone`),
-// which is where scripts/ci-packages.ts lists it.
+// This file runs in the repository-wide guard task (`mise run ci:root`),
+// which is where the lint job of the CI workflow invokes it.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { REPO_ROOT } from "./ci-package.ts";
+import { REPO_ROOT } from "./repo-root.ts";
 
 /** Occurrences allowed per file, each of which must also carry a marker. */
 const PREDICATE_ALLOW_LIST: Record<string, number> = {

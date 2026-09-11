@@ -1,22 +1,16 @@
 // The CI half of the import rules in docs/package-layout.md (design review
-// D07). It runs in the standalone offline step, where scripts/ci-packages.ts
-// lists it, because it belongs to no single package.
+// D07). It runs in the repository-wide `ci:root` task, because it belongs to
+// no single workspace.
 import { describe, expect, test } from "bun:test";
-import { REPO_ROOT } from "./ci-package.ts";
 import {
   BOUNDARY_RULES,
   boundaryViolations,
   boundaryViolationsIn,
   resolveSpecifier,
 } from "./import-boundaries.ts";
+import { REPO_ROOT, trackedFiles } from "./repo-root.ts";
 
-function tracked(...patterns: string[]): string[] {
-  const result = Bun.spawnSync(["git", "ls-files", "-z", "--", ...patterns], { cwd: REPO_ROOT });
-  expect(result.exitCode).toBe(0);
-  return result.stdout.toString().split("\0").filter(Boolean).sort();
-}
-
-const SOURCES = tracked("*.ts", "*.tsx").filter((path) => !path.includes("/node_modules/"));
+const SOURCES = trackedFiles("*.ts", "*.tsx").filter((path) => !path.includes("/node_modules/"));
 
 describe("import boundaries", () => {
   test("no deployed or shared module imports the PoC", () => {
