@@ -522,8 +522,9 @@ first release.
 Live in the account — created 2026-08-26 and last modified 2026-08-27 according
 to the account's Worker listing of 2026-09-11, which is not something the
 repository can re-check — with **no configuration in this repository**. `infra/resources.json` lists it under
-`liveWorkersWithoutConfig` and `scripts/resource-ledger.test.ts` asserts that
-list by name, so it cannot drop out of sight.
+`liveWorkersWithoutConfig`, and `scripts/resource-ledger.test.ts` asserts that
+list against the inventory in `scripts/resource-ledger.ts`, so it cannot drop
+out of sight.
 
 - It cannot be redeployed from here: deleting it is not reversible by any
   release of this repository.
