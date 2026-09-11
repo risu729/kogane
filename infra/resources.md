@@ -14,7 +14,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 ## Summary
 
-- Wrangler configs: 39
+- Wrangler configs: 40
 - Distinct Workers that exist in the account: 17
 - Live Workers with no config in this repository: kogane-globalpass-container-probe-20260827
 - Live R2 buckets no config references: —
@@ -25,6 +25,8 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | database | id | live | bound by |
 | --- | --- | --- | --- |
 | test | `00000000-0000-0000-0000-000000000001` | no | kogane-evidence-browser-test |
+| test-read | `00000000-0000-0000-0000-000000000002` | no | kogane-evidence-browser-test |
+| kogane-read | `320ebe31-a031-48a1-985f-0e6fabbd517a` | yes | kogane-evidence-browser<br>kogane-observation-pipeline<br>kogane-read-migrations |
 | kogane-raw-evidence | `b335a887-250d-45c9-bd72-af83f35fdc60` | yes | kogane-evidence-browser<br>kogane-ingest<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic |
 
 ## R2 buckets
@@ -48,10 +50,11 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 ## Queues
 
-| queue | producers | consumers | dead letter |
-| --- | --- | --- | --- |
-| kogane-r2-outbox-reconciler | kogane-collector-r2-importer | kogane-collector-r2-importer | kogane-r2-outbox-reconciler-dlq |
-| kogane-vpass-raw-evidence-import | kogane-vpass-collector-poc | kogane-vpass-collector-poc | kogane-vpass-raw-evidence-import-dlq |
+| queue | producers | consumers | dead letter | exists |
+| --- | --- | --- | --- | --- |
+| kogane-collection-terminals | — | kogane-observation-pipeline | kogane-collection-terminals-dlq | to be created by the first deploy (U08) |
+| kogane-r2-outbox-reconciler | kogane-collector-r2-importer | kogane-collector-r2-importer | kogane-r2-outbox-reconciler-dlq | declared (unverified) |
+| kogane-vpass-raw-evidence-import | kogane-vpass-collector-poc | kogane-vpass-collector-poc | kogane-vpass-raw-evidence-import-dlq | declared (unverified) |
 
 ## Durable Object classes and migration tags
 
@@ -882,14 +885,14 @@ No wrangler config.
 - Service bindings: —
 - Crons: —
 - Assets: `../../apps/web/dist` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>BALANCE_PROJECTION_ENABLED<br>OPS_API_ENABLED
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>BALANCE_PROJECTION_ENABLED<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED
 - Required secrets (names only): —
 
 #### `kogane-evidence-browser` — `services/evidence-browser/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
-- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
+- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`<br>READ → kogane-read `320ebe31-a031-48a1-985f-0e6fabbd517a`
 - R2: EVIDENCE → kogane-raw-evidence
 - KV: —
 - Queues: —
@@ -901,14 +904,14 @@ No wrangler config.
 - Service bindings: PIPELINE → kogane-observation-pipeline
 - Crons: —
 - Assets: `../../apps/web/dist-production` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>REWARDS_V2_ENABLED<br>SESSION_REFRESH_POLICY
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED<br>REWARDS_V2_ENABLED<br>SESSION_REFRESH_POLICY
 - Required secrets (names only): —
 
 #### `kogane-evidence-browser-test` — `services/evidence-browser/wrangler.test.jsonc`
 
 - Role: test-only; exists in the account: no
 - Entry point: src/worker.ts
-- D1: DB → test `00000000-0000-0000-0000-000000000001` (not live)
+- D1: DB → test `00000000-0000-0000-0000-000000000001` (not live)<br>READ → test-read `00000000-0000-0000-0000-000000000002` (not live)
 - R2: EVIDENCE → test (not live)
 - KV: —
 - Queues: —
@@ -920,7 +923,7 @@ No wrangler config.
 - Service bindings: —
 - Crons: —
 - Assets: `test/assets` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>SESSION_REFRESH_POLICY
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED<br>SESSION_REFRESH_POLICY
 - Required secrets (names only): —
 
 ### `services/observation-pipeline`
@@ -953,10 +956,10 @@ No wrangler config.
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
-- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60` (migrations_dir `../../packages/storage-d1/migrations/core`)
-- R2: EVIDENCE → kogane-raw-evidence
+- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60` (migrations_dir `../../packages/storage-d1/migrations/core`)<br>READ → kogane-read `320ebe31-a031-48a1-985f-0e6fabbd517a`
+- R2: EVIDENCE → kogane-raw-evidence<br>DATA → kogane-raw-evidence
 - KV: —
-- Queues: —
+- Queues: consume kogane-collection-terminals (dlq kogane-collection-terminals-dlq)
 - Durable Objects: —
 - DO migration tags: —
 - Containers: —
@@ -965,7 +968,7 @@ No wrangler config.
 - Service bindings: —
 - Crons: `*/5 * * * *`
 - Assets: —
-- Vars (names only): BALANCE_PROJECTION_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED
+- Vars (names only): BALANCE_PROJECTION_ENABLED<br>COLLECTION_ACCOUNT_ID<br>COLLECTION_DATA_BUCKET<br>COLLECTION_INGEST_CLIENT<br>OPS_DISPATCH_ENABLED<br>READ_PROJECTION_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED<br>SHARED_R2_INGEST_ENABLED
 - Required secrets (names only): —
 
 #### `kogane-observation-ops-local` — `services/observation-pipeline/wrangler.ops.jsonc`
@@ -982,6 +985,25 @@ No wrangler config.
 - Browser binding: —
 - VPC networks: —
 - Service bindings: OBSERVATIONS → kogane-observation-pipeline
+- Crons: —
+- Assets: —
+- Vars (names only): —
+- Required secrets (names only): —
+
+#### `kogane-read-migrations` — `services/observation-pipeline/wrangler.read-migrations.jsonc`
+
+- Role: binding-only; exists in the account: no
+- Entry point: —
+- D1: READ → kogane-read `320ebe31-a031-48a1-985f-0e6fabbd517a` (migrations_dir `../../packages/storage-d1/migrations/read`)
+- R2: —
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
 - Crons: —
 - Assets: —
 - Vars (names only): —

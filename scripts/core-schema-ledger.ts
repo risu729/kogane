@@ -1,10 +1,17 @@
-// Generator for the CORE schema ledger (`infra/schema/core-ledger.json`,
-// `infra/schema/core-ledger.md`), unified plan U01 / chapters 04 and 06.
+// Generator for the schema ledgers of both databases (unified plan U01 /
+// chapters 04 and 06):
 //
-// The ledger is produced by applying every migration in
-// `packages/storage-d1/migrations/core` to an in-memory `bun:sqlite` database and
-// reading `sqlite_master` and the PRAGMAs back out, so it describes the schema
-// the migrations actually build rather than what anyone believes they build.
+//   CORE — `infra/schema/core-ledger.{json,md}` from
+//          `packages/storage-d1/migrations/core`;
+//   READ — `infra/schema/read-ledger.{json,md}` from
+//          `packages/storage-d1/migrations/read` (U11).
+//
+// A ledger is produced by applying every migration of its directory to an
+// in-memory `bun:sqlite` database and reading `sqlite_master` and the PRAGMAs
+// back out, so it describes the schema the migrations actually build rather
+// than what anyone believes they build. The two directories are never mixed:
+// each profile names its own, which is the same separation the wrangler
+// configurations keep (06 §2).
 //
 // Chapter 04 §2 divides the tables into what stays in CORE, what may move to
 // READ and what is operational state, and states the rule this file exists to
@@ -22,12 +29,18 @@ export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const MIGRATIONS_DIR = "packages/storage-d1/migrations/core";
 export const LEDGER_JSON_PATH = "infra/schema/core-ledger.json";
 export const LEDGER_MARKDOWN_PATH = "infra/schema/core-ledger.md";
+export const READ_MIGRATIONS_DIR = "packages/storage-d1/migrations/read";
+export const READ_LEDGER_JSON_PATH = "infra/schema/read-ledger.json";
+export const READ_LEDGER_MARKDOWN_PATH = "infra/schema/read-ledger.md";
 
 export type Classification =
   | "core-keep"
   | "read-candidate"
   | "operational-mutable"
-  | "unclassified-keep";
+  | "unclassified-keep"
+  // READ-side (U11): what the projection is, and the state that drives a build.
+  | "read-projection"
+  | "read-operational";
 
 interface ClassificationEntry {
   classification: Classification;
@@ -147,6 +160,23 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "core-keep",
     planRow: "change plans, approvals and receipts",
   },
+  // The shared-R2 terminal registration records (0039) sit in the same row as
+  // the rest of the acquisition history: `collection_runs` is the fact that a
+  // terminal was seen for one run under one registration contract, and its
+  // stage rows are the evidence of what happened to it (03 §5). Both are CORE
+  // and neither is derivable from a `last_success_at`.
+  collection_runs: { classification: "core-keep", planRow: "acquisition and fetch history" },
+  collection_run_stages: {
+    classification: "core-keep",
+    planRow: "acquisition and fetch history",
+  },
+  // The bounded terminal scan's R2 cursor: a checkpoint, resettable, and
+  // excluded from anything that treats a row as evidence.
+  collection_scan_state: {
+    classification: "operational-mutable",
+    planRow:
+      "parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out)",
+  },
   // parse jobs, replay plans, work items, lane state → CORE for now, mutable
   observation_lane_state: {
     classification: "operational-mutable",
@@ -231,6 +261,21 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "read-candidate",
     planRow: "READ: rebuilt per fixed input and snapshot (U11); decision FK cannot cross databases",
   },
+  // core_source_revision, projection_input_records, balance_snapshot_pointer → CORE (U10)
+  balance_snapshot_pointer: {
+    classification: "read-candidate",
+    planRow: "READ: the active snapshot pointer moves with the projection (U11)",
+  },
+  core_source_revision: {
+    classification: "core-keep",
+    planRow:
+      "CORE: the change detector every dependency write bumps (05 §2); operational in shape, but it is the ordering of CORE itself and a restore has to carry it",
+  },
+  projection_input_records: {
+    classification: "core-keep",
+    planRow:
+      "CORE: the fixed input a build was made from (05 §3), referenced by the job and kept with the evidence it names",
+  },
   // expiry_estimates, conversion_simulations → second-stage READ candidates
   conversion_simulations: {
     classification: "read-candidate",
@@ -261,6 +306,89 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "unclassified-keep",
     planRow: "not named in 04 §2; created with parse_coverage_claims (0025)",
   },
+};
+
+/**
+ * The READ database of U11. Every table here is rebuildable by definition: the
+ * projection of one fixed input, the references it was built from, and the
+ * operational state of the builds. Nothing in it is a record of what a provider
+ * reported, and nothing in it is the record of a decision (04 §1, §3).
+ */
+export const READ_CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
+  balance_read_snapshots: {
+    classification: "read-projection",
+    planRow: "READ: one build of the projection, keyed by content and attempt (05 §4)",
+  },
+  current_balance_projection: {
+    classification: "read-projection",
+    planRow: "READ: the candidate measurements of one snapshot (04 §2)",
+  },
+  scope_relations: {
+    classification: "read-projection",
+    planRow: "READ: the typed scope relations of one snapshot (04 §2, §3)",
+  },
+  snapshot_input_refs: {
+    classification: "read-projection",
+    planRow: "READ: CORE references and digests copied from the fixed input (04 §3)",
+  },
+  balance_snapshot_pointer: {
+    classification: "read-operational",
+    planRow: "READ: the active snapshot, switched in the same batch as the seal (05 §5)",
+  },
+  read_build_checkpoints: {
+    classification: "read-operational",
+    planRow: "READ: where a bounded build got to, committed with its chunk (05 §4)",
+  },
+  read_instance: {
+    classification: "read-operational",
+    planRow: "READ: the identity of this physical database; a rebuild is a new one (05 §7)",
+  },
+};
+
+/** One ledger: which migrations it describes and how its tables are classified. */
+export interface LedgerProfile {
+  name: string;
+  migrationsDir: string;
+  classification: Readonly<Record<string, ClassificationEntry>>;
+  /** The classification values this ledger reports, in order. */
+  classifications: readonly Classification[];
+  plan: string;
+  jsonPath: string;
+  markdownPath: string;
+  /** The paragraph under the heading of the markdown ledger. */
+  rule: readonly string[];
+}
+
+export const CORE_PROFILE: LedgerProfile = {
+  name: "CORE",
+  migrationsDir: MIGRATIONS_DIR,
+  classification: CLASSIFICATION,
+  classifications: ["core-keep", "read-candidate", "operational-mutable", "unclassified-keep"],
+  plan: "unified plan U01; chapters 04 §2 and 06 §1; acceptance test G0-01",
+  jsonPath: LEDGER_JSON_PATH,
+  markdownPath: LEDGER_MARKDOWN_PATH,
+  rule: [
+    "Classification follows chapter 04 §2. That chapter lists the groups whose names could be",
+    "confirmed, not the whole schema, and sets the rule this ledger exists to keep: **a table nobody",
+    "classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance",
+    "test G0-01.",
+  ],
+};
+
+export const READ_PROFILE: LedgerProfile = {
+  name: "READ",
+  migrationsDir: READ_MIGRATIONS_DIR,
+  classification: READ_CLASSIFICATION,
+  classifications: ["read-projection", "read-operational"],
+  plan: "unified plan U11; chapters 04 §1–§3 and 05 §4–§7; acceptance tests G0-09, G3-01",
+  jsonPath: READ_LEDGER_JSON_PATH,
+  markdownPath: READ_LEDGER_MARKDOWN_PATH,
+  rule: [
+    "Every table here is rebuildable: the projection of one fixed input, the CORE references it was",
+    "built from, and the operational state of the builds. No foreign key names a CORE table — two D1",
+    "databases cannot be joined and cannot commit together (04 §1) — and losing this database costs a",
+    "rebuild and every open cursor, never a piece of evidence, a decision or a receipt (G0-09).",
+  ],
 };
 
 function digest(value: string): string {
@@ -398,8 +526,11 @@ interface MasterRow {
 }
 
 /** Apply every migration in order to a fresh in-memory database. */
-export function applyMigrations(root: string): { db: Database; migrations: MigrationRecord[] } {
-  const directory = join(root, MIGRATIONS_DIR);
+export function applyMigrations(
+  root: string,
+  profile: LedgerProfile = CORE_PROFILE,
+): { db: Database; migrations: MigrationRecord[] } {
+  const directory = join(root, profile.migrationsDir);
   const db = new Database(":memory:");
   const migrations: MigrationRecord[] = [];
   for (const file of readdirSync(directory)
@@ -425,8 +556,11 @@ export function applyMigrations(root: string): { db: Database; migrations: Migra
   return { db, migrations };
 }
 
-export function buildSchemaLedger(root: string): SchemaLedger {
-  const { db, migrations } = applyMigrations(root);
+export function buildSchemaLedger(
+  root: string,
+  profile: LedgerProfile = CORE_PROFILE,
+): SchemaLedger {
+  const { db, migrations } = applyMigrations(root, profile);
   const master = db
     .query("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY name")
     .all() as MasterRow[];
@@ -475,13 +609,13 @@ export function buildSchemaLedger(root: string): SchemaLedger {
       .filter((trigger) => trigger.tbl_name === row.name)
       .map((trigger) => trigger.name)
       .sort();
-    const entry = CLASSIFICATION[row.name];
+    const entry = profile.classification[row.name];
     const noUpdateTriggers = triggers.filter((name) => name.endsWith("_no_update"));
     const noDeleteTriggers = triggers.filter((name) => name.endsWith("_no_delete"));
     return {
       name: row.name,
       classification: entry?.classification ?? "unclassified-keep",
-      planRow: entry?.planRow ?? "MISSING from scripts/core-schema-ledger.ts CLASSIFICATION",
+      planRow: entry?.planRow ?? "MISSING from scripts/core-schema-ledger.ts classification",
       strict: /\bSTRICT\b/iu.test(tail),
       withoutRowid: /WITHOUT\s+ROWID/iu.test(tail),
       columns: columns.map((column) => ({
@@ -543,19 +677,18 @@ export function buildSchemaLedger(root: string): SchemaLedger {
     .filter((row) => row.type === "index" && row.sql !== null)
     .map((row) => ({ name: row.name, table: row.tbl_name, sqlSha256: digest(row.sql ?? "") }));
 
-  const byClassification: Record<Classification, string[]> = {
-    "core-keep": [],
-    "read-candidate": [],
-    "operational-mutable": [],
-    "unclassified-keep": [],
-  };
-  for (const table of tables) byClassification[table.classification].push(table.name);
+  // Only the classifications this ledger reports, in the profile's order: the
+  // CORE ledger keeps exactly the four keys it has always had.
+  const byClassification = Object.fromEntries(
+    profile.classifications.map((classification) => [classification, [] as string[]]),
+  ) as Record<Classification, string[]>;
+  for (const table of tables) (byClassification[table.classification] ??= []).push(table.name);
 
   db.close();
   return {
     generatedBy: "scripts/core-schema-ledger.ts",
-    plan: "unified plan U01; chapters 04 §2 and 06 §1; acceptance test G0-01",
-    migrationsDir: MIGRATIONS_DIR,
+    plan: profile.plan,
+    migrationsDir: profile.migrationsDir,
     migrations,
     tables,
     views,
@@ -586,9 +719,12 @@ function list(values: readonly string[]): string {
   return values.length === 0 ? "—" : values.join(", ");
 }
 
-export function renderSchemaMarkdown(ledger: SchemaLedger): string {
+export function renderSchemaMarkdown(
+  ledger: SchemaLedger,
+  profile: LedgerProfile = CORE_PROFILE,
+): string {
   const lines: string[] = [];
-  lines.push("# CORE schema ledger");
+  lines.push(`# ${profile.name} schema ledger`);
   lines.push("");
   lines.push(
     `Generated by \`scripts/core-schema-ledger.ts\` by applying every migration in`,
@@ -597,12 +733,7 @@ export function renderSchemaMarkdown(ledger: SchemaLedger): string {
     "disagree, so a new migration has to update the ledger and the classification with it.",
   );
   lines.push("");
-  lines.push(
-    "Classification follows chapter 04 §2. That chapter lists the groups whose names could be",
-    "confirmed, not the whole schema, and sets the rule this ledger enforces: **a table nobody",
-    "classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance",
-    "test G0-01.",
-  );
+  lines.push(...profile.rule);
   lines.push("");
   lines.push(`Schema digest: \`${ledger.summary.schemaSha256}\``);
   lines.push("");
@@ -634,7 +765,7 @@ export function renderSchemaMarkdown(ledger: SchemaLedger): string {
   lines.push("## Tables");
   lines.push("");
   lines.push(
-    "| table | classification | plan row (04 §2) | STRICT | WITHOUT ROWID | append-only | `*_no_update` | `*_no_delete` | cols | FKs | idx | triggers |",
+    "| table | classification | plan row | STRICT | WITHOUT ROWID | append-only | `*_no_update` | `*_no_delete` | cols | FKs | idx | triggers |",
   );
   lines.push("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const table of ledger.tables)
@@ -644,7 +775,7 @@ export function renderSchemaMarkdown(ledger: SchemaLedger): string {
   lines.push("");
   lines.push(
     "Full column, foreign-key, index and trigger detail per table is in",
-    "`infra/schema/core-ledger.json`; the markdown keeps the retention decision readable.",
+    `\`${profile.jsonPath}\`; the markdown keeps the retention decision readable.`,
   );
   lines.push("");
 
@@ -682,12 +813,14 @@ export function renderSchemaMarkdown(ledger: SchemaLedger): string {
 }
 
 export async function main(root = REPO_ROOT): Promise<void> {
-  const ledger = buildSchemaLedger(root);
-  await Bun.write(join(root, LEDGER_JSON_PATH), `${JSON.stringify(ledger, null, 2)}\n`);
-  await Bun.write(join(root, LEDGER_MARKDOWN_PATH), renderSchemaMarkdown(ledger));
-  console.log(
-    `wrote ${LEDGER_JSON_PATH} and ${LEDGER_MARKDOWN_PATH} (${ledger.summary.tableCount} tables, ${ledger.migrations.length} migrations)`,
-  );
+  for (const profile of [CORE_PROFILE, READ_PROFILE]) {
+    const ledger = buildSchemaLedger(root, profile);
+    await Bun.write(join(root, profile.jsonPath), `${JSON.stringify(ledger, null, 2)}\n`);
+    await Bun.write(join(root, profile.markdownPath), renderSchemaMarkdown(ledger, profile));
+    console.log(
+      `wrote ${profile.jsonPath} and ${profile.markdownPath} (${ledger.summary.tableCount} tables, ${ledger.migrations.length} migrations)`,
+    );
+  }
 }
 
 if (import.meta.main) await main();

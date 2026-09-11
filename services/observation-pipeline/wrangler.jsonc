@@ -14,7 +14,41 @@
     "REWARD_CLAIMS_ENABLED": "false",
     "REPORTS_ENABLED": "false",
     "BALANCE_PROJECTION_ENABLED": "0",
-    "RELEASE_CANDIDATES_ENABLED": "false"
+    // U11: with this off the balance projection keeps writing the CORE tables
+    // of migration 0030; with it on the same build writes the READ database
+    // below and completes the CORE job only after READ is published.
+    "READ_PROJECTION_ENABLED": "false",
+    "RELEASE_CANDIDATES_ENABLED": "false",
+    // U08. Off: the queue below must exist and a collector must be writing
+    // the shared layout (U09) before this does anything. See docs/processor.md.
+    "SHARED_R2_INGEST_ENABLED": "false",
+    "OPS_DISPATCH_ENABLED": "false",
+    // The shared DATA bucket is the existing central bucket; the name is
+    // declared so a notification about another bucket is refused.
+    "COLLECTION_DATA_BUCKET": "kogane-raw-evidence",
+    "COLLECTION_ACCOUNT_ID": "59ea63cc00914b30ca410b062ae2bb7f",
+    // The ingest client the Processor registers as. Its client row and its
+    // per-source routes are CORE rows created per source by U09.
+    "COLLECTION_INGEST_CLIENT": "processor-shared-r2"
+  },
+  // Queue `kogane-collection-terminals` DOES NOT EXIST YET: it is created by
+  // the first deploy that carries this config (`wrangler queues create`, or
+  // the deploy workflow), together with its dead-letter queue and the R2
+  // event-notification rule on `kogane-raw-evidence` filtered to the prefix
+  // `runs/` and the suffix `/terminal.json`. Nothing is consumed until
+  // SHARED_R2_INGEST_ENABLED is turned on. See docs/processor.md.
+  "queues": {
+    "consumers": [
+      {
+        "queue": "kogane-collection-terminals",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "retry_delay": 30,
+        "dead_letter_queue": "kogane-collection-terminals-dlq",
+        "max_concurrency": 2
+      }
+    ]
   },
   "limits": { "cpu_ms": 300000 },
   "d1_databases": [
@@ -23,7 +57,24 @@
       "database_name": "kogane-raw-evidence",
       "database_id": "b335a887-250d-45c9-bd72-af83f35fdc60",
       "migrations_dir": "../../packages/storage-d1/migrations/core"
+    },
+    // The rebuildable read model (plan 04 §1): `kogane-read`, created empty on
+    // 2026-09-11; its migrations are applied by the deploy step. Dry runs and
+    // tests never contact it. Wrangler allows one `migrations_dir` per
+    // configuration, so the READ migrations are applied through
+    // `wrangler.read-migrations.jsonc` (docs/read-rebuild-runbook.md).
+    {
+      "binding": "READ",
+      "database_name": "kogane-read",
+      "database_id": "320ebe31-a031-48a1-985f-0e6fabbd517a"
     }
   ],
-  "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "kogane-raw-evidence" }]
+  // EVIDENCE and DATA are the same physical bucket: the shared collection
+  // layout (plan 03 §1) reuses the central raw-evidence bucket rather than
+  // creating a second original. DATA is the binding the fixed projection
+  // inputs of `projection-inputs/<digest>` are written through.
+  "r2_buckets": [
+    { "binding": "EVIDENCE", "bucket_name": "kogane-raw-evidence" },
+    { "binding": "DATA", "bucket_name": "kogane-raw-evidence" }
+  ]
 }

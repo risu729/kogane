@@ -459,11 +459,15 @@ export async function identitySweep(
         JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
         WHERE p.status='ok' AND f.status='success' AND f.failure_count=0
           AND ${requiredIdentityPolicySql("a")}=json_extract(candidate.value,'$[2]') AND ${EMPTY_PARSE_SQL}
-          AND NOT EXISTS(SELECT 1 FROM identity_run_seals existing WHERE existing.identity_run_id=r.id)`)
+          AND NOT EXISTS(SELECT 1 FROM identity_run_seals existing WHERE existing.identity_run_id=r.id)
+        RETURNING identity_run_id`)
         .bind(createdAt, values),
     ]);
     processedRuns += empty.length;
-    identifiedRuns += result[3]!.meta.changes;
+    // Sealed runs are counted from the rows the seal statement returned: D1
+    // counts rows written by triggers too, and since migration 0038 sealing an
+    // identity run also bumps the CORE revision (docs/projection-input.md).
+    identifiedRuns += result[3]!.results?.length ?? 0;
   }
   const fastIds = new Set(empty.map((parse) => parse.id));
   for (const parse of candidates.results) {

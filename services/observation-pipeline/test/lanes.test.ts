@@ -70,6 +70,8 @@ test("harness applies every Layer B migration in order through 0040", () => {
     "0035_observation_job_lanes.sql",
     "0036_publication_event_guard.sql",
     "0037_unit_scope_eligibility.sql",
+    "0038_source_revision.sql",
+    "0039_collection_runs.sql",
     "0040_operations_api.sql",
   ]);
   expect([...names].sort()).toEqual(names);
@@ -381,11 +383,66 @@ test("identity sweep still runs and is logged separately when the parse sweep fa
   await runScheduled(env, undefined, log);
   expect(lines.map((line) => line.event)).toEqual([
     "observation_sweep",
+    "collection_scan",
     "identity_sweep",
     "balance_projection",
+    "operation_dispatch",
     "decision_outbox",
   ]);
   expect(lines[0]).toHaveProperty("lanes");
+  // The two U08 lanes are wired by default and, with their flags off, say so
+  // and do nothing: no R2 list, no CORE write, no cursor movement
+  // (docs/processor.md §6).
+  expect(lines[1]).toMatchObject({ event: "collection_scan", enabled: false, status: "skipped" });
+  expect(lines[4]).toMatchObject({
+    event: "operation_dispatch",
+    enabled: false,
+    status: "skipped",
+    claimed: 0,
+  });
+}, 60000);
+
+test("U08 lanes report skipped by default and sit in their stated order", async () => {
+  const lines: Record<string, unknown>[] = [];
+  const log = (line: string) => lines.push(JSON.parse(line));
+  // The stage functions receive the environment the lane was run with, so
+  // the test can see that the same lane is called whether the flag is on or
+  // off: the flag decides what the stage does, not whether it is logged.
+  const stages = {
+    parse: () => Promise.resolve({ ok: true }),
+    identity: () => Promise.resolve({ ok: true }),
+    balanceProjection: () => Promise.resolve({ ok: true }),
+    collection: (env: Env) => Promise.resolve({ flag: env.SHARED_R2_INGEST_ENABLED ?? null }),
+    decisions: () => Promise.resolve({ ok: true }),
+    operations: (env: Env) => Promise.resolve({ flag: env.OPS_DISPATCH_ENABLED ?? null }),
+  };
+  // The order is fixed and does not depend on the flags: the terminal scan
+  // runs after the parse sweep and before identity, so a run found this tick
+  // can reach identity on the same tick; the operations dispatch runs before
+  // the decision outbox, which stays last (docs/processor.md,
+  // docs/observation-lanes.md).
+  const order = [
+    "observation_sweep",
+    "collection_scan",
+    "identity_sweep",
+    "balance_projection",
+    "operation_dispatch",
+    "decision_outbox",
+  ];
+  await runScheduled(env, stages, log);
+  expect(lines.map((line) => line.event)).toEqual(order);
+  expect(lines[1]).toEqual({ event: "collection_scan", flag: null });
+  expect(lines[4]).toEqual({ event: "operation_dispatch", flag: null });
+
+  lines.length = 0;
+  await runScheduled(
+    { ...env, SHARED_R2_INGEST_ENABLED: "true", OPS_DISPATCH_ENABLED: "true" } as unknown as Env,
+    stages,
+    log,
+  );
+  expect(lines.map((line) => line.event)).toEqual(order);
+  expect(lines[1]).toEqual({ event: "collection_scan", flag: "true" });
+  expect(lines[4]).toEqual({ event: "operation_dispatch", flag: "true" });
 }, 60000);
 
 test("replay and sweep commands validate their input and stay off unknown routes", async () => {

@@ -20,6 +20,7 @@ export { httpScopeAllowed, validateOriginScope } from "./origins.ts";
 export { addRunReport, createRun, type CreatedRun } from "./registration.ts";
 export { addPageGroup, addRunRange, addUnit, addUnitReport } from "./structure.ts";
 export {
+  adoptStoredObject,
   blobKeyFor,
   hexBytes,
   putObject,

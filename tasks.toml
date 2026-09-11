@@ -46,6 +46,10 @@ run = "bun scripts/resource-ledger.ts"
 description = "Regenerate the CORE schema ledger under infra/."
 run = "bun scripts/core-schema-ledger.ts"
 
+["bootstrap:ingest-clients"]
+description = "Render config/ingest-clients.json to the idempotent CORE bootstrap SQL under infra/bootstrap/."
+run = "bun scripts/config-bootstrap.ts"
+
 ["ledger:deps"]
 description = "Regenerate infra/dependency-resolution.md from the root bun.lock."
 run = "bun scripts/dependency-ledger.ts"
@@ -53,6 +57,13 @@ run = "bun scripts/dependency-ledger.ts"
 ["load-fixture"]
 description = "Generate the synthetic load-harness fixture (scripts/load-fixture.ts)."
 run = "bun scripts/load-fixture.ts"
+
+["bundle"]
+description = "Emit the deployable bundle of every Worker the release deploys."
+# The release manifest digests these directories (unified plan 11 section 2):
+# the deploy Action re-bundles, so identical bytes cannot be asserted against
+# the live script; a recorded pre-deploy digest is what CD can prove.
+depends = ["*:bundle"]
 
 ["dry-run"]
 description = "Validate every Worker deployment without uploading it."

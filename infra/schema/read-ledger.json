@@ -1,0 +1,1165 @@
+{
+  "generatedBy": "scripts/core-schema-ledger.ts",
+  "plan": "unified plan U11; chapters 04 §1–§3 and 05 §4–§7; acceptance tests G0-09, G3-01",
+  "migrationsDir": "packages/storage-d1/migrations/read",
+  "migrations": [
+    {
+      "file": "0001_read_baseline.sql",
+      "statementCount": 35,
+      "insertStatements": [],
+      "sha256": "e3863c14043275378557b05cc9af18307f3b03804500f29a2f25251492786aa9"
+    }
+  ],
+  "tables": [
+    {
+      "name": "balance_read_snapshots",
+      "classification": "read-projection",
+      "planRow": "READ: one build of the projection, keyed by content and attempt (05 §4)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "content_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "attempt",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "input_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "build_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "contract_version",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "read_instance_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "visibility_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "row_count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "relation_count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "output_digest",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "writer_lease",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "writer_lease_until_ms",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "writer_fence",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "input_manifest_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "projection_release",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "completed_at",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "snapshot_id"
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "name": "balance_read_snapshots_content",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "content_key",
+            "attempt"
+          ]
+        },
+        {
+          "name": "balance_read_snapshots_status",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "status",
+            "created_at"
+          ]
+        }
+      ],
+      "triggers": [
+        "balance_read_snapshots_instance",
+        "balance_read_snapshots_transition"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "8ac2a7d5e8fe2ade"
+    },
+    {
+      "name": "balance_snapshot_pointer",
+      "classification": "read-operational",
+      "planRow": "READ: the active snapshot, switched in the same batch as the seal (05 §5)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "visibility_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "read_instance_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "output_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "switched_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "balance_read_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "balance_snapshot_pointer_complete_only",
+        "balance_snapshot_pointer_forward_only",
+        "balance_snapshot_pointer_no_delete"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [
+        "balance_snapshot_pointer_no_delete"
+      ],
+      "appendOnly": false,
+      "sqlSha256": "65b7c00b8c2917a1"
+    },
+    {
+      "name": "current_balance_projection",
+      "classification": "read-projection",
+      "planRow": "READ: the candidate measurements of one snapshot (04 §2)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "scope_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "subject_scope_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "row_seq",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "representative_observation_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "member_evidence_refs_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "member_metrics_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "evidence_count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "metric_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "definition_release",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "quantity_coefficient",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "quantity_scale",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "value_status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "unit_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reason_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "as_of_role",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "as_of_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "as_of_value",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "temporal_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "freshness",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "freshness_reason",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "sort_as_of",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_account",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "metric",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "instrument",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "parser",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "observation_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "parse_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "fetch_artifact_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "amount_minor",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "amount_text",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "as_of",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "observed_at",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "measure_view",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "latest_in_group",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "row_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "snapshot_id",
+        "scope_key"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "balance_read_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "current_balance_projection_order",
+          "unique": true,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "row_seq"
+          ]
+        },
+        {
+          "name": "current_balance_projection_scope",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "source_id",
+            "source_account",
+            "instrument",
+            "metric"
+          ]
+        },
+        {
+          "name": "current_balance_projection_state",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "state",
+            "metric_id",
+            "unit_ref"
+          ]
+        }
+      ],
+      "triggers": [
+        "current_balance_projection_building_only",
+        "current_balance_projection_chunk_conflict",
+        "current_balance_projection_sealed_no_delete",
+        "current_balance_projection_sealed_no_update"
+      ],
+      "noUpdateTriggers": [
+        "current_balance_projection_sealed_no_update"
+      ],
+      "noDeleteTriggers": [
+        "current_balance_projection_sealed_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "93b9ff93d4fefa70"
+    },
+    {
+      "name": "read_build_checkpoints",
+      "classification": "read-operational",
+      "planRow": "READ: where a bounded build got to, committed with its chunk (05 §4)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "stage",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "position",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "rows_written",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "writer_lease",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "writer_fence",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "snapshot_id",
+        "stage"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "balance_read_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "read_build_checkpoints_building_only",
+        "read_build_checkpoints_forward_only"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "b63638a514652fd5"
+    },
+    {
+      "name": "read_instance",
+      "classification": "read-operational",
+      "planRow": "READ: the identity of this physical database; a rebuild is a new one (05 §7)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "read_instance_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "contract_version",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [
+        "read_instance_immutable",
+        "read_instance_no_delete",
+        "read_instance_single_row"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [
+        "read_instance_no_delete"
+      ],
+      "appendOnly": false,
+      "sqlSha256": "2a14552d87ef39f5"
+    },
+    {
+      "name": "scope_relations",
+      "classification": "read-projection",
+      "planRow": "READ: the typed scope relations of one snapshot (04 §2, §3)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "from_scope_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "to_scope_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 3
+        },
+        {
+          "name": "relation",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "decision_revision_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "release",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "snapshot_id",
+        "from_scope_key",
+        "to_scope_key"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "balance_read_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "scope_relations_from",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "from_scope_key"
+          ]
+        }
+      ],
+      "triggers": [
+        "scope_relations_building_only",
+        "scope_relations_decision_ref",
+        "scope_relations_sealed_no_delete",
+        "scope_relations_sealed_no_update"
+      ],
+      "noUpdateTriggers": [
+        "scope_relations_sealed_no_update"
+      ],
+      "noDeleteTriggers": [
+        "scope_relations_sealed_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "1fc27f1b49fdcff3"
+    },
+    {
+      "name": "snapshot_input_refs",
+      "classification": "read-projection",
+      "planRow": "READ: CORE references and digests copied from the fixed input (04 §3)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "ref_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "ref_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 3
+        },
+        {
+          "name": "ref_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "snapshot_id",
+        "ref_kind",
+        "ref_id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "balance_read_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "snapshot_input_refs_kind",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "ref_kind",
+            "ref_id"
+          ]
+        }
+      ],
+      "triggers": [
+        "snapshot_input_refs_building_only",
+        "snapshot_input_refs_no_delete",
+        "snapshot_input_refs_no_update"
+      ],
+      "noUpdateTriggers": [
+        "snapshot_input_refs_no_update"
+      ],
+      "noDeleteTriggers": [
+        "snapshot_input_refs_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "31af6e7111e87f96"
+    }
+  ],
+  "views": [],
+  "triggers": [
+    {
+      "name": "balance_read_snapshots_instance",
+      "table": "balance_read_snapshots",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "ff44abecd3764a5f"
+    },
+    {
+      "name": "balance_read_snapshots_transition",
+      "table": "balance_read_snapshots",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "28267bed92ab7d06"
+    },
+    {
+      "name": "balance_snapshot_pointer_complete_only",
+      "table": "balance_snapshot_pointer",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "9628c88caa80584b"
+    },
+    {
+      "name": "balance_snapshot_pointer_forward_only",
+      "table": "balance_snapshot_pointer",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "de1bd68a2375ca9e"
+    },
+    {
+      "name": "balance_snapshot_pointer_no_delete",
+      "table": "balance_snapshot_pointer",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "284db6378b1cd17a"
+    },
+    {
+      "name": "current_balance_projection_building_only",
+      "table": "current_balance_projection",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "dd99c3ea09b060ce"
+    },
+    {
+      "name": "current_balance_projection_chunk_conflict",
+      "table": "current_balance_projection",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "2f160c322f14e178"
+    },
+    {
+      "name": "current_balance_projection_sealed_no_delete",
+      "table": "current_balance_projection",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "23f07bfd507dd09b"
+    },
+    {
+      "name": "current_balance_projection_sealed_no_update",
+      "table": "current_balance_projection",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "1bfec57fdc76b21b"
+    },
+    {
+      "name": "read_build_checkpoints_building_only",
+      "table": "read_build_checkpoints",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "f94cb354d5c05381"
+    },
+    {
+      "name": "read_build_checkpoints_forward_only",
+      "table": "read_build_checkpoints",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "b414e2aafcc8e28c"
+    },
+    {
+      "name": "read_instance_immutable",
+      "table": "read_instance",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "27a05e42d226e4e9"
+    },
+    {
+      "name": "read_instance_no_delete",
+      "table": "read_instance",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "5c34f5c5c50fe8d6"
+    },
+    {
+      "name": "read_instance_single_row",
+      "table": "read_instance",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "9ac4fc0807ee31e4"
+    },
+    {
+      "name": "scope_relations_building_only",
+      "table": "scope_relations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "0dc888c383608c34"
+    },
+    {
+      "name": "scope_relations_decision_ref",
+      "table": "scope_relations",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "637a54caa97f8d60"
+    },
+    {
+      "name": "scope_relations_sealed_no_delete",
+      "table": "scope_relations",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "6844b3e232c297ba"
+    },
+    {
+      "name": "scope_relations_sealed_no_update",
+      "table": "scope_relations",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "3a52057a0b084458"
+    },
+    {
+      "name": "snapshot_input_refs_building_only",
+      "table": "snapshot_input_refs",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "fb616133f78b77b5"
+    },
+    {
+      "name": "snapshot_input_refs_no_delete",
+      "table": "snapshot_input_refs",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "53768747d2b1f46b"
+    },
+    {
+      "name": "snapshot_input_refs_no_update",
+      "table": "snapshot_input_refs",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "0e25d7026f4e1576"
+    }
+  ],
+  "indexes": [
+    {
+      "name": "balance_read_snapshots_content",
+      "table": "balance_read_snapshots",
+      "sqlSha256": "1f3e0244b1b4a548"
+    },
+    {
+      "name": "balance_read_snapshots_status",
+      "table": "balance_read_snapshots",
+      "sqlSha256": "3d51ce600b9db293"
+    },
+    {
+      "name": "current_balance_projection_order",
+      "table": "current_balance_projection",
+      "sqlSha256": "29f50db8606b35c2"
+    },
+    {
+      "name": "current_balance_projection_scope",
+      "table": "current_balance_projection",
+      "sqlSha256": "f239bd4a8116b92a"
+    },
+    {
+      "name": "current_balance_projection_state",
+      "table": "current_balance_projection",
+      "sqlSha256": "c8e54064215578c8"
+    },
+    {
+      "name": "scope_relations_from",
+      "table": "scope_relations",
+      "sqlSha256": "0f341428020abb35"
+    },
+    {
+      "name": "snapshot_input_refs_kind",
+      "table": "snapshot_input_refs",
+      "sqlSha256": "bd0ba542a44c58f0"
+    }
+  ],
+  "summary": {
+    "tableCount": 7,
+    "viewCount": 0,
+    "triggerCount": 21,
+    "explicitIndexCount": 7,
+    "byClassification": {
+      "read-projection": [
+        "balance_read_snapshots",
+        "current_balance_projection",
+        "scope_relations",
+        "snapshot_input_refs"
+      ],
+      "read-operational": [
+        "balance_snapshot_pointer",
+        "read_build_checkpoints",
+        "read_instance"
+      ]
+    },
+    "tablesWithoutAppendOnlyGuards": [
+      "balance_read_snapshots",
+      "balance_snapshot_pointer",
+      "read_build_checkpoints",
+      "read_instance"
+    ],
+    "nonStrictTables": [],
+    "withoutRowidTables": [],
+    "migrationsWithInserts": [],
+    "schemaSha256": "b91f53919cca886851e8fa174afc005cd6f025fb85344be257b9c7e666911527"
+  }
+}

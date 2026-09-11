@@ -14,7 +14,9 @@ import {
   parseSealRunRequest,
   parseSealStagedInventoryRequest,
 } from "../../../evidence-contract/src/requests.ts";
-import { readRunCatalogue } from "../../../storage-d1/src/core/artifacts.ts";
+// The catalogue read is the Drizzle pilot's; the seal batch below is not, and
+// will not be (09 §2, decision D11).
+import { readRunCatalogue } from "../../../storage-d1/src/drizzle/artifacts.ts";
 import {
   countEarlierCompleteAttempts,
   insertFailedAttemptIfAbsent,

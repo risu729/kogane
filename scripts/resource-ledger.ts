@@ -35,6 +35,22 @@ export const ACCOUNT_ID = "59ea63cc00914b30ca410b062ae2bb7f";
  * listable through the API this was read with, so they are derived from the
  * configs instead and marked `unverified-live` in the ledger.
  */
+/**
+ * Queues a config declares that do not exist in the account yet. They are
+ * created by the first deploy that carries the config, and the feature behind
+ * them stays flagged off until they do — so the ledger says "to be created by
+ * the first deploy" rather than letting a reader assume the resource is live.
+ *
+ * A name leaves this list when the queue exists; nothing else about the
+ * ledger changes, because a queue's identity never does (G0-06).
+ */
+export const QUEUES_TO_CREATE: Readonly<Record<string, string>> = {
+  // U08: R2 event notifications for `runs/*/terminal.json` on the shared DATA
+  // bucket reach the Processor through it. See docs/processor.md.
+  "kogane-collection-terminals": "to be created by the first deploy (U08)",
+  "kogane-collection-terminals-dlq": "to be created by the first deploy (U08)",
+};
+
 export const LIVE_INVENTORY = {
   readAt: "2026-09-11",
   accountId: ACCOUNT_ID,
@@ -76,7 +92,12 @@ export const LIVE_INVENTORY = {
     "kogane-vpoint-pay-collector-poc",
   ],
   /** D1 databases that exist in the account. */
-  d1Databases: [{ name: "kogane-raw-evidence", id: "b335a887-250d-45c9-bd72-af83f35fdc60" }],
+  d1Databases: [
+    { name: "kogane-raw-evidence", id: "b335a887-250d-45c9-bd72-af83f35fdc60" },
+    // The READ database of U11: created empty on 2026-09-11, region APAC; its
+    // migrations are applied by the deploy step, never by hand.
+    { name: "kogane-read", id: "320ebe31-a031-48a1-985f-0e6fabbd517a" },
+  ],
   /** KV namespaces: none exist. */
   kvNamespaces: [] as string[],
   /** Live Workers with no config in this repository. */
@@ -592,6 +613,8 @@ export interface ResourceLedger {
       producers: string[];
       consumers: string[];
       deadLetterQueues: string[];
+      /** Empty when the queue exists; otherwise why it does not yet. */
+      toCreate: string;
     }[];
     durableObjectClasses: { worker: string; className: string; tag: string; storage: string }[];
     r2Buckets: { bucket: string; live: boolean; readers: string[] }[];
@@ -704,6 +727,7 @@ export function buildResourceLedger(root: string): ResourceLedger {
             ),
           ),
         ].sort(),
+        toCreate: QUEUES_TO_CREATE[queue] ?? "",
       })),
       durableObjectClasses: workers
         .flatMap((worker) =>
@@ -829,11 +853,13 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
 
   lines.push("## Queues");
   lines.push("");
-  lines.push("| queue | producers | consumers | dead letter |");
-  lines.push("| --- | --- | --- | --- |");
+  lines.push("| queue | producers | consumers | dead letter | exists |");
+  lines.push("| --- | --- | --- | --- | --- |");
   for (const entry of ledger.summary.queues)
     lines.push(
-      `| ${cell(entry.queue)} | ${list(entry.producers)} | ${list(entry.consumers)} | ${list(entry.deadLetterQueues)} |`,
+      `| ${cell(entry.queue)} | ${list(entry.producers)} | ${list(entry.consumers)} | ${list(entry.deadLetterQueues)} | ${
+        entry.toCreate === "" ? "declared (unverified)" : cell(entry.toCreate)
+      } |`,
     );
   lines.push("");
 

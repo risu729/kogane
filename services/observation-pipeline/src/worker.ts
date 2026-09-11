@@ -56,6 +56,12 @@ import {
   rollbackRelease,
   type AdoptionRequest,
 } from "./release-adoption.ts";
+import {
+  collectionScan,
+  handleTerminalNotification,
+  type CollectionEnv,
+} from "./collection/index.ts";
+import { dispatchOperations } from "./operations/dispatch.ts";
 import { rewardClaimsEnabled, rewardClaimsStage } from "./reward-claims-job.ts";
 import { reportsEnabled, runReportJob } from "./report-job.ts";
 import { DECIMAL_POLICY_RELEASE } from "../../../packages/read-model/src/identity";
@@ -1581,6 +1587,13 @@ export interface ScheduledStages {
    * the flag.
    */
   balanceProjection: (env: Env) => Promise<object>;
+  /**
+   * U08 shared-R2 terminal scan. Always wired like the projection: the scan
+   * itself reports `skipped` while SHARED_R2_INGEST_ENABLED is off, so the
+   * log shows the lane exists and is off rather than nothing at all
+   * (docs/processor.md).
+   */
+  collection?: (env: Env) => Promise<object>;
   /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
   reconcile?: (env: Env) => Promise<object>;
   /** A11 reward promotion. Absent stage, or the flag off, means the lane never runs. */
@@ -1593,10 +1606,19 @@ export interface ScheduledStages {
    * default stages always wire it, which is what the deployed cron runs.
    */
   decisions?: (env: Env) => Promise<object>;
+  /**
+   * U06/U08 operations dispatch. Reports `skipped` unless OPS_DISPATCH_ENABLED
+   * is set; it runs before the decision outbox and never completes an
+   * operation merely by handing its work over (contracts/stages.json).
+   */
+  operations?: (env: Env) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
   identity: (env) => identitySweep(env.DB, resolveIdentity),
+  // Lists and registers nothing unless SHARED_R2_INGEST_ENABLED is set; the
+  // scan returns `skipped` without touching R2 or CORE (docs/processor.md).
+  collection: (env) => collectionScan(collectionEnv(env)),
   // Off unless BALANCE_PROJECTION_ENABLED is "1"; the job itself returns
   // `skipped` rather than the caller branching on the flag.
   balanceProjection: (env) => runBalanceProjection(env),
@@ -1622,7 +1644,17 @@ const defaultStages: ScheduledStages = {
     dispatchDecisionOutbox(env.DB, {
       processors: { "balance-projection": balanceProjectionOutboxProcessor(env) },
     }),
+  operations: (env) => dispatchOperations(collectionEnv(env)),
 };
+
+/**
+ * The Worker `Env` as the collection and dispatch lanes need it. The vars are
+ * optional there, so a deployment that has not been given them behaves as if
+ * the flags were off rather than failing to start.
+ */
+function collectionEnv(env: Env): CollectionEnv & { OPS_DISPATCH_ENABLED?: string } {
+  return env as unknown as CollectionEnv & { OPS_DISPATCH_ENABLED?: string };
+}
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
  * and never stops the identity projection. Log lines carry counts and safe
@@ -1634,6 +1666,12 @@ export async function runScheduled(
 ): Promise<void> {
   const lanes: [string, ((env: Env) => Promise<object>) | undefined][] = [
     ["observation_sweep", stages.parse],
+    // U08: terminals persisted in the shared DATA bucket are registered
+    // before the identity sweep, so a run found this tick can reach identity
+    // and parsing on the same tick rather than waiting for the next one.
+    // The stage reports itself `skipped` while SHARED_R2_INGEST_ENABLED is
+    // off, like the projection lane, so an operator can see it is off.
+    ["collection_scan", stages.collection],
     ["identity_sweep", stages.identity],
     // The projection lane always runs and reports itself skipped while its
     // own flag is off (docs/balance-read-model.md).
@@ -1653,6 +1691,10 @@ export async function runScheduled(
     // Off unless REPORTS_ENABLED is set, for the same reason
     // (docs/calculation-and-reports.md).
     ["report_job", reportsEnabled(env.REPORTS_ENABLED) ? stages.reports : undefined],
+    // U06/U08: accepted operations are handed to their executor before the
+    // outbox, so work this tick accepted can still reach it. Reports
+    // `skipped` unless OPS_DISPATCH_ENABLED is set.
+    ["operation_dispatch", stages.operations],
     // A09: the decision outbox runs last, after the projections a decision may
     // have invalidated (docs/change-lifecycle.md).
     ["decision_outbox", stages.decisions],
@@ -1676,6 +1718,38 @@ export async function runScheduled(
 export default {
   async scheduled(_event: ScheduledController, env: Env): Promise<void> {
     await runScheduled(env);
+  },
+  /**
+   * R2 event notifications for the shared DATA bucket (U08). The queue only
+   * wakes the Processor sooner; the terminal in R2 is the record, so a
+   * message that cannot be trusted is acknowledged and dropped rather than
+   * retried forever — the `collection_scan` lane finds the run anyway
+   * (G1-04). A registration that could not finish is retried through the
+   * queue's own retry, and is idempotent when it runs again (G1-05).
+   */
+  async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
+    for (const message of batch.messages) {
+      let event: Record<string, unknown>;
+      try {
+        const result = await handleTerminalNotification(collectionEnv(env), {
+          body: message.body,
+        });
+        event = { event: "collection_notification", ...result };
+        if (result.outcome === "retryable") message.retry();
+        else message.ack();
+      } catch (error) {
+        // Safe codes only: never the exception text, never a key or a value.
+        const code =
+          error instanceof PipelineError
+            ? error.message
+            : error instanceof Error
+              ? error.constructor.name
+              : "unknown";
+        event = { event: "collection_notification_failed", code };
+        message.retry();
+      }
+      console.log(JSON.stringify(event));
+    }
   },
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);

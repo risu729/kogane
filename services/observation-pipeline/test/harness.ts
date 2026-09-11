@@ -3,6 +3,7 @@
 // production schema including triggers. No real provider data is seeded.
 import { readdirSync, readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
+import { applyReadMigrations } from "../../../packages/storage-d1/src/migrations.ts";
 
 export const migrationDir = new URL(
   "../../../packages/storage-d1/migrations/core/",
@@ -78,28 +79,46 @@ export async function startPipeline(
       modules: true,
       script: await bundle.outputs[0]!.text(),
       compatibilityDate: "2026-09-07",
-      d1Databases: ["DB"],
-      r2Buckets: ["EVIDENCE"],
+      // READ is the second physical database of plan 04 §1. Every test binds
+      // it with the read migrations applied, so the flag decides whether the
+      // projection writes there, never whether the binding exists.
+      d1Databases: ["DB", "READ"],
+      // DATA is the shared collection bucket of plan 03 §1; in production it
+      // is the same physical bucket as EVIDENCE, and the fixed projection
+      // inputs of migration 0038 are written through it.
+      r2Buckets: ["EVIDENCE", "DATA"],
       bindings: vars,
     }),
   );
   const db = await mf.getD1Database("DB");
+  const read = await mf.getD1Database("READ");
   const bucket = await mf.getR2Bucket("EVIDENCE");
+  const data = await mf.getR2Bucket("DATA");
   await db.exec(LAYER_A_SQL);
   for (const name of migrations) await applyMigration(db, name);
+  await applyReadMigrations(read);
   // Miniflare and generated Workers types use distinct platform declarations;
   // validate the runtime proxy at this test boundary instead of double casts.
-  const bindings: unknown = { DB: db, EVIDENCE: bucket, ...vars };
+  const bindings: unknown = { DB: db, READ: read, EVIDENCE: bucket, DATA: data, ...vars };
   assertBindings(bindings);
   return { mf, env: bindings };
 }
 
 function assertBindings(value: unknown): asserts value is Env {
-  if (!value || typeof value !== "object" || !("DB" in value) || !("EVIDENCE" in value))
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("DB" in value) ||
+    !("READ" in value) ||
+    !("EVIDENCE" in value) ||
+    !("DATA" in value)
+  )
     throw new Error("bindings missing");
   for (const [binding, method] of [
     [value.DB, "prepare"],
+    [value.READ, "prepare"],
     [value.EVIDENCE, "get"],
+    [value.DATA, "get"],
   ] as const) {
     if (!binding || typeof binding !== "object" || !(method in binding))
       throw new Error("invalid runtime binding");

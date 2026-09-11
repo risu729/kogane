@@ -78,16 +78,28 @@ class SqliteStatement implements D1StatementLike {
     return { results: this.db.query(this.sql).all(...(this.binds as never[])) as T[] };
   }
 
-  async run(): Promise<D1RunResultLike> {
-    return { meta: { changes: this.execute() } };
+  /** Positional rows, as D1's `raw()` returns them (see `src/d1.ts`). */
+  async raw<T = unknown[]>(): Promise<T[]> {
+    return this.db.query(this.sql).values(...(this.binds as never[])) as T[];
   }
 
-  /** Runs the statement and reports the rows it changed. */
-  execute(): number {
+  async run(): Promise<D1RunResultLike> {
+    return this.execute();
+  }
+
+  /**
+   * Runs the statement and reports what D1 reports: the rows it changed —
+   * counted with `total_changes()`, so trigger writes are included exactly as
+   * workerd includes them — and the rows a `RETURNING` clause produced.
+   */
+  execute(): D1RunResultLike {
     const before = this.db.query("SELECT total_changes() AS n").get() as { n: number };
-    this.db.query(this.sql).run(...(this.binds as never[]));
+    const results = this.db.query(this.sql).all(...(this.binds as never[])) as Record<
+      string,
+      unknown
+    >[];
     const after = this.db.query("SELECT total_changes() AS n").get() as { n: number };
-    return after.n - before.n;
+    return { meta: { changes: after.n - before.n }, results };
   }
 }
 
@@ -99,9 +111,7 @@ export function sqliteD1(db: Database): D1Like {
     async batch(statements: D1StatementLike[]): Promise<D1RunResultLike[]> {
       db.exec("BEGIN");
       try {
-        const results = statements.map((statement) => ({
-          meta: { changes: (statement as SqliteStatement).execute() },
-        }));
+        const results = statements.map((statement) => (statement as SqliteStatement).execute());
         db.exec("COMMIT");
         return results;
       } catch (error) {

@@ -184,6 +184,9 @@ describe("shared contract pin", () => {
       paginationVersion: "offset-v1",
       balancesV2: false,
       balancesV2Pagination: "none",
+      // U11: `none` until the routes are served, then `core-d1` or `read-d1`
+      // depending on which store this deployment reads.
+      balancesV2ReadModel: "none",
       collectionFilters: true,
       organizedDisplay: true,
       financialProducts: true,

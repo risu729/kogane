@@ -56,7 +56,9 @@ const COLLECTOR_IDENTITIES_BEFORE_THE_PROMOTIONS = [
  * before U04, from the same ledger. A directory move may not add, drop or
  * rename a deployable target. Unlike the lines above, this survives the other
  * promotions of chapter 07 §1, which do edit configs: the App's asset
- * directory follows the UI to `apps/web`.
+ * directory follows the UI to `apps/web`. `kogane-read-migrations` is listed
+ * because U11 added it on main while this move was in review; it is a config
+ * this item neither moves nor touches.
  */
 const WORKER_CONFIGS_BEFORE_THE_PROMOTIONS = [
   "kogane-collector-r2-importer wrangler.jsonc",
@@ -75,6 +77,7 @@ const WORKER_CONFIGS_BEFORE_THE_PROMOTIONS = [
   "kogane-observation-ops-local wrangler.ops.jsonc",
   "kogane-observation-pipeline wrangler.jsonc",
   "kogane-observation-read-diagnostic wrangler.diagnostic.jsonc",
+  "kogane-read-migrations wrangler.read-migrations.jsonc",
   "kogane-sbi-collector-poc wrangler.jsonc",
   "kogane-sbi-shinsei-collector-poc wrangler.jsonc",
   "kogane-sbi-shinsei-r2-layer-b-audit-local wrangler.audit-sbi-shinsei.jsonc",
@@ -177,6 +180,19 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
     ]);
     expect(ledger.summary.liveBucketsWithoutConfig).toEqual([]);
     expect(ledger.summary.d1Databases.filter((entry) => entry.live)).toEqual([
+      {
+        // The READ database of U11: created empty on 2026-09-11; its
+        // migrations are applied through the processor's read-migrations
+        // configuration only.
+        databaseName: "kogane-read",
+        databaseId: "320ebe31-a031-48a1-985f-0e6fabbd517a",
+        live: true,
+        bindings: [
+          "kogane-evidence-browser",
+          "kogane-observation-pipeline",
+          "kogane-read-migrations",
+        ],
+      },
       {
         databaseName: "kogane-raw-evidence",
         databaseId: "b335a887-250d-45c9-bd72-af83f35fdc60",

@@ -258,6 +258,17 @@ Binding call to the collector: the row stays pending until a dispatch
 succeeds, so the cron keeps re-dispatching and a failed notification never
 loses the request. Nothing in this change contacts a collector.
 
+U08 built the cron side of that contract: the `operation_dispatch` lane of
+`services/observation-pipeline` (`docs/processor.md` §7), behind
+`OPS_DISPATCH_ENABLED`, default off. It re-registers a stored terminal in
+process, starts the replay plan an acceptance created, and hands a projection
+over; `collection` and an unattended `session-refresh` stay
+`dispatch_pending` with `awaiting_collector_dispatch` until U09 adds the
+Service Binding. `operationRequestPayload(store, operationId)` is the reader
+the executor uses to see what was accepted — the dispatch acts on the durable
+row, never on the contents of a notification. No branch of it completes an
+operation merely by handing the work over.
+
 ## What was verified locally, and what was not
 
 Synthetic data only.
