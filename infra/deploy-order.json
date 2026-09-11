@@ -1,6 +1,7 @@
 {
   "plan": "unified plan U14; chapter 11 sections 4 and 7; acceptance tests G5-10, G5-11, G5-12, G5-14, G5-15, G5-16",
   "maintenance": "Hand-maintained. tasks/_lib/deploy-order.test.ts keeps it in step with infra/workers-ci.json and with the deploy steps of .github/workflows/_deploy-workers.yml: one step per deploy entry, in this order, each with id deploy-<name> so the release record can report per Worker.",
+  "health": "healthPath is the route the release postcheck requests over the workers.dev hostname, or \"\" when the Worker is checked another way (the Processor answers through the App's service binding) or not at all. healthAuth says how CD authenticates it: \"access\" sends the Cloudflare Access service token of the production Environment, \"none\" is an unauthenticated route. healthIdentity is the field of the JSON answer the postcheck requires to be present and non-empty.",
   "workersDevSubdomain": "takuanimal.workers.dev",
   "schema": {
     "core": {
@@ -25,6 +26,7 @@
       "role": "consumer",
       "deploy": true,
       "healthPath": "",
+      "healthAuth": "none",
       "bundleTask": "processor:bundle",
       "bundleDir": "dist/processor"
     },
@@ -35,7 +37,9 @@
       "worker": "kogane-evidence-browser",
       "role": "consumer",
       "deploy": true,
-      "healthPath": "",
+      "healthPath": "/api/ops/v1/health",
+      "healthAuth": "access",
+      "healthIdentity": "releaseSha",
       "bundleTask": "app:bundle",
       "bundleDir": "dist/app"
     },
@@ -47,6 +51,7 @@
       "role": "consumer",
       "deploy": true,
       "healthPath": "",
+      "healthAuth": "none",
       "bundleTask": "app-demo:bundle",
       "bundleDir": "dist/app-demo"
     },
@@ -58,6 +63,8 @@
       "role": "consumer",
       "deploy": true,
       "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "schemaVersion",
       "bundleTask": "ingest:bundle",
       "bundleDir": "dist/ingest"
     },
@@ -69,6 +76,7 @@
       "role": "consumer",
       "deploy": true,
       "healthPath": "",
+      "healthAuth": "none",
       "bundleTask": "importer:bundle",
       "bundleDir": "dist/importer"
     },
@@ -79,7 +87,8 @@
       "worker": "kogane-evidence-browser-test",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer-audit-global-pass-layer-b",
@@ -88,7 +97,8 @@
       "worker": "kogane-global-pass-layer-b-audit-local",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer-audit-moneyforward",
@@ -97,7 +107,8 @@
       "worker": "kogane-moneyforward-r2-contract-audit-local",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer-audit-moneyforward-layer-b",
@@ -106,7 +117,8 @@
       "worker": "kogane-moneyforward-layer-b-audit-local",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer-audit-myjcb",
@@ -115,7 +127,8 @@
       "worker": "kogane-myjcb-r2-layer-b-audit-local",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer-audit-sbi-shinsei",
@@ -124,7 +137,8 @@
       "worker": "kogane-sbi-shinsei-r2-layer-b-audit-local",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer-audit-sbi-vc",
@@ -133,7 +147,8 @@
       "worker": "kogane-sbi-vc-r2-layer-b-audit-local",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer-audit-smbc-direct",
@@ -142,7 +157,8 @@
       "worker": "kogane-smbc-direct-r2-contract-audit-local",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer-audit-smbc-direct-layer-b",
@@ -151,7 +167,8 @@
       "worker": "kogane-smbc-direct-r2-layer-b-audit-local",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer-audit-sony-layer-b",
@@ -160,7 +177,8 @@
       "worker": "kogane-sony-bank-r2-layer-b-audit-local",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer-audit-v-point",
@@ -169,7 +187,8 @@
       "worker": "kogane-vpoint-r2-contract-audit-local",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer-audit-v-point-pay-email",
@@ -178,7 +197,8 @@
       "worker": "kogane-vpoint-pay-email-r2-contract-audit-local",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer-audit-v-point-pay-layer-b",
@@ -187,7 +207,8 @@
       "worker": "kogane-vpoint-pay-r2-layer-b-audit-local",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "importer-audit-vpass-layer-b",
@@ -196,7 +217,8 @@
       "worker": "kogane-vpass-r2-layer-b-audit-local",
       "role": "consumer",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "globalpass-worker",
@@ -204,8 +226,12 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-globalpass-collector-poc",
       "role": "producer",
-      "deploy": false,
-      "healthPath": "/health"
+      "deploy": true,
+      "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "schemaVersion",
+      "bundleTask": "globalpass-worker:bundle",
+      "bundleDir": "dist/globalpass-worker"
     },
     {
       "name": "mobile-suica-worker",
@@ -213,8 +239,12 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-mobile-suica-collector-poc",
       "role": "producer",
-      "deploy": false,
-      "healthPath": "/health"
+      "deploy": true,
+      "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "schemaVersion",
+      "bundleTask": "mobile-suica-worker:bundle",
+      "bundleDir": "dist/mobile-suica-worker"
     },
     {
       "name": "moneyforward-worker",
@@ -222,8 +252,12 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-moneyforward-collector-poc",
       "role": "producer",
-      "deploy": false,
-      "healthPath": "/health"
+      "deploy": true,
+      "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "schemaVersion",
+      "bundleTask": "moneyforward-worker:bundle",
+      "bundleDir": "dist/moneyforward-worker"
     },
     {
       "name": "myjcb-worker",
@@ -231,8 +265,12 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-myjcb-collector-poc",
       "role": "producer",
-      "deploy": false,
-      "healthPath": "/health"
+      "deploy": true,
+      "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "schemaVersion",
+      "bundleTask": "myjcb-worker:bundle",
+      "bundleDir": "dist/myjcb-worker"
     },
     {
       "name": "sbi-securities-worker",
@@ -240,8 +278,12 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-sbi-collector-poc",
       "role": "producer",
-      "deploy": false,
-      "healthPath": "/health"
+      "deploy": true,
+      "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "schemaVersion",
+      "bundleTask": "sbi-securities-worker:bundle",
+      "bundleDir": "dist/sbi-securities-worker"
     },
     {
       "name": "sbi-shinsei-worker",
@@ -249,8 +291,12 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-sbi-shinsei-collector-poc",
       "role": "producer",
-      "deploy": false,
-      "healthPath": "/health"
+      "deploy": true,
+      "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "schemaVersion",
+      "bundleTask": "sbi-shinsei-worker:bundle",
+      "bundleDir": "dist/sbi-shinsei-worker"
     },
     {
       "name": "sbi-vc-trade-worker",
@@ -258,8 +304,12 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-sbi-vc-session-poc",
       "role": "producer",
-      "deploy": false,
-      "healthPath": "/health"
+      "deploy": true,
+      "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "waitingForHuman",
+      "bundleTask": "sbi-vc-trade-worker:bundle",
+      "bundleDir": "dist/sbi-vc-trade-worker"
     },
     {
       "name": "smbc-direct-backfill-worker",
@@ -267,8 +317,11 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-smbc-direct-backfill-poc",
       "role": "producer",
-      "deploy": false,
-      "healthPath": ""
+      "deploy": true,
+      "healthPath": "",
+      "healthAuth": "none",
+      "bundleTask": "smbc-direct-backfill-worker:bundle",
+      "bundleDir": "dist/smbc-direct-backfill-worker"
     },
     {
       "name": "sony-bank-worker",
@@ -276,8 +329,12 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-sony-bank-collector-poc",
       "role": "producer",
-      "deploy": false,
-      "healthPath": "/health"
+      "deploy": true,
+      "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "schemaVersion",
+      "bundleTask": "sony-bank-worker:bundle",
+      "bundleDir": "dist/sony-bank-worker"
     },
     {
       "name": "vpass-json",
@@ -285,8 +342,12 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-vpass-collector-poc",
       "role": "producer",
-      "deploy": false,
-      "healthPath": "/health"
+      "deploy": true,
+      "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "service",
+      "bundleTask": "vpass-json:bundle",
+      "bundleDir": "dist/vpass-json"
     },
     {
       "name": "vpoint-pay-worker",
@@ -294,8 +355,12 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-vpoint-pay-collector-poc",
       "role": "producer",
-      "deploy": false,
-      "healthPath": "/health"
+      "deploy": true,
+      "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "schemaVersion",
+      "bundleTask": "vpoint-pay-worker:bundle",
+      "bundleDir": "dist/vpoint-pay-worker"
     },
     {
       "name": "vpoint-worker",
@@ -303,8 +368,12 @@
       "config": "wrangler.jsonc",
       "worker": "kogane-vpoint-collector-poc",
       "role": "producer",
-      "deploy": false,
-      "healthPath": "/health"
+      "deploy": true,
+      "healthPath": "/health",
+      "healthAuth": "none",
+      "healthIdentity": "schemaVersion",
+      "bundleTask": "vpoint-worker:bundle",
+      "bundleDir": "dist/vpoint-worker"
     },
     {
       "name": "cloudflare-browser-run",
@@ -313,7 +382,8 @@
       "worker": "kogane-vpass-browser-run-20260825",
       "role": "probe",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "cloudflare-browser-run-bootstrap",
@@ -322,7 +392,8 @@
       "worker": "kogane-vpass-browser-run-20260825",
       "role": "probe",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "cloudflare-runtime-probe",
@@ -331,7 +402,8 @@
       "worker": "kogane-vpass-runtime-probe-20260825",
       "role": "probe",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "tamia-tcp-bridge",
@@ -340,7 +412,8 @@
       "worker": "kogane-tamia-tcp-bridge-20260825",
       "role": "probe",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     },
     {
       "name": "tamia-tcp-bridge-bootstrap",
@@ -349,7 +422,8 @@
       "worker": "kogane-tamia-tcp-bridge-20260825",
       "role": "probe",
       "deploy": false,
-      "healthPath": ""
+      "healthPath": "",
+      "healthAuth": "none"
     }
   ]
 }

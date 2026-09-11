@@ -32,8 +32,23 @@
     "AGENT_GRANTS": "",
     "AGENT_API_GRANTS": "",
     "OPS_API_ENABLED": "",
-    "SESSION_REFRESH_POLICY": ""
+    "SESSION_REFRESH_POLICY": "",
+    // U14 postcheck (plan 11 §6, docs/ci-cd.md). The release stamps the
+    // deployed commit into this variable before the upload
+    // (`.github/scripts/release-sha.mjs`), because the pinned deploy Action
+    // has no input for a variable; it is empty in the repository and in every
+    // local run, and `/api/ops/v1/health` reports it as the build identity.
+    "RELEASE_SHA": "",
+    // The Access service tokens that may read `/api/ops/v1/health`, as a JSON
+    // array of the tokens' common names (their Client IDs). Empty means none:
+    // then only the operator's own session can read it and CD's postcheck
+    // fails, which is the intended direction for a list that grants access.
+    "HEALTH_PROBE_TOKENS": ""
   },
+  // The Processor is published on no hostname (`workers_dev: false`, no
+  // routes), so this binding is also how the release postcheck reaches its
+  // `/internal/health`. It is the binding the change lifecycle already used;
+  // no Worker, class, queue, bucket or cron identity changes with it.
   "services": [{ "binding": "PIPELINE", "service": "kogane-observation-pipeline" }],
   "assets": {
     "directory": "../../apps/web/dist-production",

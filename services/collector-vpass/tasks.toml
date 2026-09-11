@@ -26,6 +26,12 @@ run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
+["vpass-json:bundle"]
+description = "Emit the deployable bundle of services/collector-vpass for the release manifest."
+depends = ["vpass-json:types"]
+dir = "services/collector-vpass"
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/vpass-json --config wrangler.jsonc"
+
 ["ci:vpass-json"]
 description = "Every check CI runs for services/collector-vpass."
 depends = ["vpass-json:typecheck", "vpass-json:test"]

@@ -30,8 +30,25 @@ export interface DeployEntry {
   worker: string;
   role: "consumer" | "producer" | "probe";
   deploy: boolean;
-  /** Unauthenticated health route, or "" when the Worker has none. */
+  /**
+   * The route the release postcheck requests, or "" when CD checks the Worker
+   * another way — the Processor answers through the App's service binding
+   * (`services/processor/src/internal-health.ts`) — or not at all.
+   */
   healthPath: string;
+  /**
+   * How CD authenticates that route: `access` sends the Cloudflare Access
+   * service token of the `production` Environment, `none` is an
+   * unauthenticated route. Meaningless, and therefore `none`, when there is no
+   * route to request.
+   */
+  healthAuth: "access" | "none";
+  /**
+   * The field of the JSON answer the postcheck requires to be present and
+   * non-empty — the Worker's own identity in its health body. Absent exactly
+   * when `healthPath` is "".
+   */
+  healthIdentity?: string;
   bundleTask?: string;
   bundleDir?: string;
 }
@@ -66,6 +83,22 @@ export function entryViolations(entry: DeployEntry): string[] {
   if (typeof entry.healthPath !== "string") errors.push(`${where}: healthPath must be a string`);
   else if (entry.healthPath !== "" && !entry.healthPath.startsWith("/"))
     errors.push(`${where}: healthPath must be empty or start with "/"`);
+  if (entry.healthAuth !== "access" && entry.healthAuth !== "none")
+    errors.push(`${where}: healthAuth must be "access" or "none"`);
+  if (entry.healthPath === "") {
+    // Nothing is requested, so there is nothing to authenticate and no field to
+    // assert. An entry that names one would be describing a check CD does not
+    // make (unified plan 11 §6).
+    if (entry.healthAuth !== "none")
+      errors.push(`${where}: healthAuth must be "none" without a healthPath`);
+    if (entry.healthIdentity !== undefined)
+      errors.push(`${where}: healthIdentity needs a healthPath`);
+  } else if (
+    entry.healthIdentity === undefined ||
+    !/^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(entry.healthIdentity)
+  ) {
+    errors.push(`${where}: a health route needs a healthIdentity field name`);
+  }
   if (entry.deploy) {
     if (entry.bundleTask === undefined || entry.bundleDir === undefined)
       errors.push(`${where}: a deployed Worker needs a bundleTask and a bundleDir`);

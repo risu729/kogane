@@ -29,6 +29,12 @@ run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
+["vpoint-pay-worker:bundle"]
+description = "Emit the deployable bundle of services/collector-vpoint-pay for the release manifest."
+depends = ["vpoint-pay-worker:types"]
+dir = "services/collector-vpoint-pay"
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/vpoint-pay-worker --config wrangler.jsonc"
+
 ["ci:vpoint-pay-worker"]
 description = "Every check CI runs for services/collector-vpoint-pay."
 depends = ["vpoint-pay-worker:typecheck", "vpoint-pay-worker:test"]

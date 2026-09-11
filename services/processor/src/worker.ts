@@ -17,6 +17,7 @@ import {
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
+import { internalHealthRoute } from "./internal-health.ts";
 import { runBatch } from "../../../packages/storage-d1/src/d1.ts";
 import { dispatchDecisionOutbox } from "./decision-outbox.ts";
 import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
@@ -1774,6 +1775,12 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
+    // The release postcheck (unified plan 11 §6, docs/processor.md). This
+    // Worker is published on no hostname, so the App asks it over the
+    // `PIPELINE` service binding after authenticating the caller; a request
+    // that did not arrive that way is refused, not answered. Read-only.
+    const health = await internalHealthRoute(request, env, path);
+    if (health) return health;
     if (request.method === "POST" && path === "/identity-sweep") {
       const source = url.searchParams.get("source") ?? undefined;
       if (source && !/^[a-z0-9-]{1,100}$/.test(source))

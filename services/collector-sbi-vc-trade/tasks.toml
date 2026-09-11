@@ -29,6 +29,12 @@ run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
+["sbi-vc-trade-worker:bundle"]
+description = "Emit the deployable bundle of services/collector-sbi-vc-trade for the release manifest."
+depends = ["sbi-vc-trade-worker:types"]
+dir = "services/collector-sbi-vc-trade"
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/sbi-vc-trade-worker --config wrangler.jsonc"
+
 ["ci:sbi-vc-trade-worker"]
 description = "Every check CI runs for services/collector-sbi-vc-trade."
 depends = ["sbi-vc-trade-worker:typecheck", "sbi-vc-trade-worker:test"]

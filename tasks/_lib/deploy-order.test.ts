@@ -19,7 +19,7 @@ import {
   readDeployOrder,
   workflowSteps,
 } from "./deploy-order.ts";
-import { REPO_ROOT } from "./repo-root.ts";
+import { REPO_ROOT, trackedFiles } from "./repo-root.ts";
 
 const order = readDeployOrder();
 const ledger = JSON.parse(readFileSync(`${REPO_ROOT}/infra/workers-ci.json`, "utf8")) as {
@@ -38,6 +38,7 @@ function entry(overrides: Partial<DeployEntry> = {}): DeployEntry {
     role: "consumer",
     deploy: false,
     healthPath: "",
+    healthAuth: "none",
     ...overrides,
   };
 }
@@ -87,8 +88,53 @@ describe("the deployment ledger describes every Worker CI validates", () => {
   });
 
   test("a health path is empty or absolute", () => {
-    expect(entryViolations(entry({ healthPath: "health" }))).toHaveLength(1);
-    expect(entryViolations(entry({ healthPath: "/health" }))).toEqual([]);
+    expect(
+      entryViolations(entry({ healthPath: "health", healthIdentity: "schemaVersion" })),
+    ).toHaveLength(1);
+    expect(
+      entryViolations(entry({ healthPath: "/health", healthIdentity: "schemaVersion" })),
+    ).toEqual([]);
+  });
+
+  test("a health route says how CD authenticates it and what it must answer", () => {
+    // The postcheck reads these three fields and nothing else (plan 11 §6): a
+    // route with no identity field would be checked for 200 alone, and a route
+    // whose authentication is unstated would be requested anonymously.
+    expect(entryViolations(entry({ healthPath: "/health" }))).toHaveLength(1);
+    expect(
+      entryViolations(entry({ healthPath: "/health", healthIdentity: "not a field" })),
+    ).toHaveLength(1);
+    expect(
+      entryViolations(
+        entry({
+          healthPath: "/api/ops/v1/health",
+          healthAuth: "access",
+          healthIdentity: "releaseSha",
+        }),
+      ),
+    ).toEqual([]);
+    // And a Worker CD does not request must not claim a check it never makes.
+    expect(entryViolations(entry({ healthAuth: "access" }))).toHaveLength(1);
+    expect(entryViolations(entry({ healthIdentity: "releaseSha" }))).toHaveLength(1);
+  });
+
+  test("the App's health route is the authenticated one, and the only one", () => {
+    // Finding 4: the App authenticates every request, so its postcheck needs
+    // the Access service token; every other requested route is public.
+    const authenticated = order.workers.filter((worker) => worker.healthAuth === "access");
+    expect(authenticated.map((worker) => worker.name)).toEqual(["app"]);
+    expect(authenticated[0]?.healthPath).toBe("/api/ops/v1/health");
+    expect(authenticated[0]?.healthIdentity).toBe("releaseSha");
+    // The Processor is requested by nobody: it has no hostname, and the App's
+    // answer carries its health (services/processor/src/internal-health.ts).
+    const processor = order.workers.find((worker) => worker.name === "processor");
+    expect(processor?.healthPath).toBe("");
+    // Every collector that has a public health route is checked through it.
+    const checked = order.workers.filter(
+      (worker) => worker.role === "producer" && worker.healthPath !== "",
+    );
+    expect(checked).toHaveLength(11);
+    expect(checked.every((worker) => worker.healthAuth === "none")).toBe(true);
   });
 
   test("every path the two ledgers name exists in the checkout", () => {
@@ -142,16 +188,56 @@ describe("consumers deploy before producers (G5-14)", () => {
       "app-demo",
       "ingest",
       "importer",
+      "globalpass-worker",
+      "mobile-suica-worker",
+      "moneyforward-worker",
+      "myjcb-worker",
+      "sbi-securities-worker",
+      "sbi-shinsei-worker",
+      "sbi-vc-trade-worker",
+      "smbc-direct-backfill-worker",
+      "sony-bank-worker",
+      "vpass-json",
+      "vpoint-pay-worker",
+      "vpoint-worker",
     ]);
-    expect(deployed.every((worker) => worker.role === "consumer")).toBe(true);
+    // The five consumers of the shared contract come first, then every
+    // collector: a reader understands the contract before a writer uses it.
+    expect(deployed.slice(0, 5).every((worker) => worker.role === "consumer")).toBe(true);
+    expect(deployed.slice(5).every((worker) => worker.role === "producer")).toBe(true);
   });
 
-  test("the PoC-era collectors are not deployed by CD yet", () => {
-    // U09 flips them one source at a time, after the Processor consumes the
-    // shared contract (plan 11 §4).
+  test("every collector is a CD target, and only the experiments are not", () => {
+    // Deploying a collector replaces its script; it starts no collection, no
+    // re-authentication and no backfill, and a change to what one bundles
+    // needs the owner's approval before it merges (infra/risk-paths.json).
+    // What stays out of CD is the probe role: the experiments and the
+    // bootstrap, audit and test-harness configurations.
     const producers = order.workers.filter((worker) => worker.role === "producer");
-    expect(producers.length).toBeGreaterThan(0);
-    expect(producers.some((worker) => worker.deploy)).toBe(false);
+    expect(producers.length).toBe(12);
+    expect(producers.every((worker) => worker.deploy)).toBe(true);
+    expect(producers.every((worker) => worker.path.startsWith("services/collector-"))).toBe(true);
+    expect(order.workers.filter((worker) => worker.role === "probe").length).toBeGreaterThan(0);
+    expect(order.workers.some((worker) => worker.role === "probe" && worker.deploy)).toBe(false);
+    // Every collector directory in the checkout is in the ledger: a new one
+    // cannot be forgotten here and then never deployed. The importer is a
+    // consumer, so it is excluded from the producer count above.
+    const directories = trackedFiles("services")
+      .map((file) => /^(services\/collector-[^/]+)\//u.exec(file)?.[1] ?? "")
+      .filter((directory) => directory !== "" && directory !== "services/collector-r2-importer");
+    expect(new Set(directories).size).toBe(12);
+    for (const directory of new Set(directories))
+      expect(producers.some((worker) => worker.path === directory)).toBe(true);
+  });
+
+  test("every deployed Worker's bundle task exists in its workspace", () => {
+    // The release manifest digests `bundleDir`, which only exists if
+    // `mise run bundle` has a task that writes it (plan 11 §2).
+    for (const worker of order.workers.filter((entry) => entry.deploy)) {
+      const tasks = readFileSync(`${REPO_ROOT}/${worker.path}/tasks.toml`, "utf8");
+      expect(tasks).toContain(`["${String(worker.bundleTask)}"]`);
+      expect(tasks).toContain(`--outdir ../../${String(worker.bundleDir)}`);
+    }
   });
 });
 
@@ -266,6 +352,18 @@ describe("the deploy workflow follows the ledger", () => {
       "Deploy the demo App",
       "Deploy the legacy ingest adapter",
       "Deploy the collector importer",
+      "Deploy the GlobalPass collector",
+      "Deploy the Mobile Suica collector",
+      "Deploy the Money Forward collector",
+      "Deploy the MyJCB collector",
+      "Deploy the SBI Securities collector",
+      "Deploy the SBI Shinsei collector",
+      "Deploy the SBI VC Trade collector",
+      "Deploy the SMBC Direct collector",
+      "Deploy the Sony Bank collector",
+      "Deploy the Vpass collector",
+      "Deploy the V Point Pay collector",
+      "Deploy the V Point collector",
     ]);
   });
 
@@ -298,6 +396,35 @@ describe("the deploy workflow follows the ledger", () => {
       const body = step?.body ?? "";
       expect(body.match(/wrangler d1 migrations list /gu)?.length).toBe(2);
       expect(body.match(/wrangler d1 migrations apply /gu)?.length).toBe(1);
+    }
+  });
+
+  test("the release sha is stamped before the manifest is computed", () => {
+    // The deployed Workers report which commit they are, so the sha is written
+    // into their configurations; doing it after the manifest was computed would
+    // make the re-verification before the first upload fail (plan 11 §6).
+    const names = workflowSteps(deployWorkflow).map((step) => step.name);
+    const stamp = names.indexOf("Stamp the release sha into the deployed configurations");
+    expect(stamp).toBeGreaterThan(names.indexOf("Validate every Worker without uploading"));
+    expect(stamp).toBeLessThan(names.indexOf("Compute the release manifest"));
+  });
+
+  test("both postchecks run after the last upload, and only one holds the Access token", () => {
+    const names = workflowSteps(deployWorkflow).map((step) => step.name);
+    const lastDeploy = names.lastIndexOf("Deploy the V Point collector");
+    expect(lastDeploy).toBeGreaterThan(-1);
+    expect(names.indexOf("Postcheck the public health routes")).toBeGreaterThan(lastDeploy);
+    expect(names.indexOf("Postcheck the App and the Processor")).toBeGreaterThan(
+      names.indexOf("Postcheck the public health routes"),
+    );
+    // The Access service token is the App's postcheck credential and nothing
+    // else's: it reaches exactly one step (plan 12 §5, the same rule the
+    // Cloudflare deploy token follows).
+    for (const secret of ["CF_ACCESS_CLIENT_ID", "CF_ACCESS_CLIENT_SECRET"]) {
+      const usingToken = workflowSteps(deployWorkflow)
+        .filter((step) => step.body.includes(`secrets.${secret}`))
+        .map((step) => step.name);
+      expect(usingToken).toEqual(["Postcheck the App and the Processor"]);
     }
   });
 

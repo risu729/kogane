@@ -21,7 +21,11 @@
     "AGENT_GRANTS": "",
     "AGENT_API_GRANTS": "",
     "OPS_API_ENABLED": "",
-    "SESSION_REFRESH_POLICY": ""
+    "SESSION_REFRESH_POLICY": "",
+    // Declared so the suite has the same shape as production; the health test
+    // sets both per request (test/health.test.ts).
+    "RELEASE_SHA": "",
+    "HEALTH_PROBE_TOKENS": ""
   },
   "assets": {
     "directory": "test/assets",
