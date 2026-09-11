@@ -10,14 +10,14 @@ FROM oven/bun:1.4.0-slim
 WORKDIR /app
 
 COPY package.json bunfig.toml bun.lock ./
-COPY poc/cloudflare-runtime-probe/package.json ./poc/cloudflare-runtime-probe/
+COPY experiments/cloudflare-runtime-probe/package.json ./experiments/cloudflare-runtime-probe/
 # Only this workspace goes into the image, so hoist its dependencies into
 # /app/node_modules. The repository's isolated linker would put them under the
 # workspace path instead, where the entry point below could not resolve them.
 RUN bun install --frozen-lockfile --production --linker hoisted \
   --filter @kogane/cloudflare-runtime-probe
 
-COPY poc/cloudflare-runtime-probe/container ./container
+COPY experiments/cloudflare-runtime-probe/container ./container
 
 EXPOSE 8080
 
