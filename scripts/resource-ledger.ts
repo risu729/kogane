@@ -210,6 +210,18 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
+  "services/processor": {
+    source: "plan 07 §1 + decision D1",
+    proposedAction: "rename-directory",
+    proposedTarget: "services/processor",
+    // Executed: the directory moved from `services/observation-pipeline`. The
+    // deployed config is byte-identical, cron, queue consumer and D1 ids
+    // included; only the comment in `wrangler.read-migrations.jsonc` that
+    // quotes its own path changed (G0-06, G0-07, G5-15).
+    requiredVerification: "git mv only; Worker name kogane-observation-pipeline and cron stay",
+    executionStatus: "EXECUTED_RENAME",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
   "services/collector-globalpass": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",
@@ -240,6 +252,18 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     proposedTarget: "services/collector-myjcb",
     requiredVerification: "keep the Browser Run login and fetch boundary",
     executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/app": {
+    source: "plan 07 §1 + decision D1",
+    proposedAction: "rename-directory",
+    proposedTarget: "services/app",
+    // Executed: the directory moved from `services/evidence-browser`. All three
+    // configs are byte-identical to what they were under the old directory, so
+    // the frozen identity lines in `scripts/resource-ledger.test.ts` still match
+    // (G0-06, G5-15). The Worker names did not move with the directory.
+    requiredVerification: "git mv only; Worker names kogane-evidence-browser and kogane-demo stay",
+    executionStatus: "EXECUTED_RENAME",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "services/collector-r2-importer": {
@@ -314,22 +338,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     proposedTarget: "services/collector-vpoint-pay",
     requiredVerification: "confirm the Email/collection entry point and the resource identity",
     executionStatus: "EXECUTED_U04",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "services/evidence-browser": {
-    source: "plan 07 §1 + decision D1",
-    proposedAction: "rename-directory",
-    proposedTarget: "services/app",
-    requiredVerification: "git mv only; Worker names kogane-evidence-browser and kogane-demo stay",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "services/observation-pipeline": {
-    source: "plan 07 §1 + decision D1",
-    proposedAction: "rename-directory",
-    proposedTarget: "services/processor",
-    requiredVerification: "git mv only; Worker name kogane-observation-pipeline and cron stay",
-    executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "services/raw-evidence": {
@@ -964,16 +972,18 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
  *
  * A directory move changes the ledger's `directory` and `config` keys by
  * design, so the ledger itself cannot answer "did this move rename a
- * resource?". These lines deliberately drop both paths and keep only what
+ * resource?". These lines deliberately drop the directory and keep only what
  * Cloudflare addresses — Worker name, cron, Queue, R2 bucket, D1 id, Durable
  * Object class and migration tag, container class, browser/VPC/service
  * bindings, var and secret *names* — so the set of lines is invariant under a
- * `git mv`. The digest closes the gap the ledger's name-only fields leave
- * (`vars` values, DO migration ordering, anything a future key adds): a
- * promotion that edits a config at all shows up here.
+ * directory rename. The digest closes the gap the name-only fields leave
+ * (`vars` values, DO migration ordering, anything a future key adds): a move
+ * that edits a config at all shows up here.
  *
- * `scripts/resource-ledger.test.ts` compares them against the frozen set
- * captured before the U04 promotions (acceptance G0-06, G0-07, G5-15).
+ * `scripts/resource-ledger.test.ts` compares them two ways: the promoted
+ * collectors against the frozen set captured before the U04 promotions, and
+ * the configs that moved in the services rename against the bytes they had
+ * before that move (acceptance G0-06, G0-07, G5-15).
  */
 export function resourceIdentityLines(ledger: ResourceLedger, root = REPO_ROOT): string[] {
   const list = (entries: readonly string[]): string =>
@@ -1008,7 +1018,9 @@ export function resourceIdentityLines(ledger: ResourceLedger, root = REPO_ROOT):
         )}`,
         `r2=${list(worker.r2.map((item) => `${item.binding}>${item.bucket}`))}`,
         `kv=${list(worker.kv.map((item) => `${item.binding}#${item.id ?? "-"}`))}`,
-        `queue-producers=${list(worker.queueProducers.map((item) => `${item.binding}>${item.queue}`))}`,
+        `queue-producers=${list(
+          worker.queueProducers.map((item) => `${item.binding}>${item.queue}`),
+        )}`,
         `queue-consumers=${list(
           worker.queueConsumers.map(
             (item) =>

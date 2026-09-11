@@ -128,7 +128,7 @@ An agent therefore cannot rewrite a submission through one ambiguous
 
 ## 5. The context is the input set, not a timestamp
 
-`services/observation-pipeline/src/report-job.ts` builds a
+`services/processor/src/report-job.ts` builds a
 `ReportInputManifest` — the perimeter, the base unit, the effective knowledge
 boundary, the decimal and instrument-valuation policy ids, and the sorted ids of
 every position observation, valuation observation and price observation it used.
@@ -177,10 +177,10 @@ requires the Access gate the Worker applies before any of this runs.
 
 1. Apply migration `0034_reports.sql` (additive; no existing table, view,
    trigger or row is touched).
-2. Deploy `services/observation-pipeline` with `REPORTS_ENABLED` unset or
+2. Deploy `services/processor` with `REPORTS_ENABLED` unset or
    `"false"`. The scheduled handler then behaves exactly as before: the report
    stage is not even added to the stage list, so no extra log line and no write.
-3. Deploy `services/evidence-browser`. `/api/v2/reports/{id}` returns 404 until
+3. Deploy `services/app`. `/api/v2/reports/{id}` returns 404 until
    a report exists; every other route is unchanged.
 4. Turn the flag on (`REPORTS_ENABLED="true"`) when the report job should start
    writing.
@@ -198,13 +198,13 @@ would discard later collection and later decisions (docs/operations.md).
   both P&L policies (SYN23), the cost-basis gate (AT59), SYN11-SYN15.
 - `packages/domain/test/reports.test.ts` — body validation and digest
   stability, storage key, event shapes, replayability and capabilities (AT66).
-- `services/observation-pipeline/test/reports.test.ts` — migration 0034 on
+- `services/processor/test/reports.test.ts` — migration 0034 on
   0017-0037, append-only triggers, retention-class seed, the flag, provider
   value beside own valuation (AT30), reuse, a corrected price giving a new
   context while the submitted report keeps its digest (AT36/AT60), the
   knowledge cutoff (AT63), and the restriction purge (AT66).
-- `services/evidence-browser/test/reports-api.test.ts` — re-display, Access and
+- `services/app/test/reports-api.test.ts` — re-display, Access and
   method gates, refusal of explanation and export under a restriction, and the
   decimal policy selection contract.
-- `services/evidence-browser/test/load.test.ts` — opt-in D1 budgets
+- `services/app/test/load.test.ts` — opt-in D1 budgets
   (docs/operations.md).

@@ -258,6 +258,70 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): BRIDGE_TOKEN
 
+### `services/app`
+
+- Disposition (plan 07 §1 + decision D1): `rename-directory` → services/app
+- Required verification: git mv only; Worker names kogane-evidence-browser and kogane-demo stay
+- Execution status: EXECUTED_RENAME (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-demo,kogane-evidence-browser; buckets=kogane-raw-evidence)
+
+#### `kogane-demo` — `services/app/wrangler.demo.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/demo-worker.ts
+- D1: —
+- R2: —
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
+- Crons: —
+- Assets: `../../apps/web/dist` → ASSETS
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>BALANCE_PROJECTION_ENABLED<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED
+- Required secrets (names only): —
+
+#### `kogane-evidence-browser` — `services/app/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`<br>READ → kogane-read `320ebe31-a031-48a1-985f-0e6fabbd517a`
+- R2: EVIDENCE → kogane-raw-evidence
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: PIPELINE → kogane-observation-pipeline
+- Crons: —
+- Assets: `../../apps/web/dist-production` → ASSETS
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED<br>REWARDS_V2_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SESSION_REFRESH_POLICY
+- Required secrets (names only): —
+
+#### `kogane-evidence-browser-test` — `services/app/wrangler.test.jsonc`
+
+- Role: test-only; exists in the account: no
+- Entry point: src/worker.ts
+- D1: DB → test `00000000-0000-0000-0000-000000000001` (not live)<br>READ → test-read `00000000-0000-0000-0000-000000000002` (not live)
+- R2: EVIDENCE → test (not live)
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
+- Crons: —
+- Assets: `test/assets` → ASSETS
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED<br>REWARDS_V2_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SESSION_REFRESH_POLICY
+- Required secrets (names only): —
+
 ### `services/collector-globalpass`
 
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-globalpass
@@ -862,78 +926,14 @@ No wrangler config.
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_PAY_DEVICE_UUID<br>VPOINT_PAY_REFRESH_TOKEN
 
-### `services/evidence-browser`
-
-- Disposition (plan 07 §1 + decision D1): `rename-directory` → services/app
-- Required verification: git mv only; Worker names kogane-evidence-browser and kogane-demo stay
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-demo,kogane-evidence-browser; buckets=kogane-raw-evidence)
-
-#### `kogane-demo` — `services/evidence-browser/wrangler.demo.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/demo-worker.ts
-- D1: —
-- R2: —
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: `../../apps/web/dist` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>BALANCE_PROJECTION_ENABLED<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED
-- Required secrets (names only): —
-
-#### `kogane-evidence-browser` — `services/evidence-browser/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`<br>READ → kogane-read `320ebe31-a031-48a1-985f-0e6fabbd517a`
-- R2: EVIDENCE → kogane-raw-evidence
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: PIPELINE → kogane-observation-pipeline
-- Crons: —
-- Assets: `../../apps/web/dist-production` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED<br>REWARDS_V2_ENABLED<br>SESSION_REFRESH_POLICY
-- Required secrets (names only): —
-
-#### `kogane-evidence-browser-test` — `services/evidence-browser/wrangler.test.jsonc`
-
-- Role: test-only; exists in the account: no
-- Entry point: src/worker.ts
-- D1: DB → test `00000000-0000-0000-0000-000000000001` (not live)<br>READ → test-read `00000000-0000-0000-0000-000000000002` (not live)
-- R2: EVIDENCE → test (not live)
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: `test/assets` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED<br>SESSION_REFRESH_POLICY
-- Required secrets (names only): —
-
-### `services/observation-pipeline`
+### `services/processor`
 
 - Disposition (plan 07 §1 + decision D1): `rename-directory` → services/processor
 - Required verification: git mv only; Worker name kogane-observation-pipeline and cron stay
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
+- Execution status: EXECUTED_RENAME (plan recorded `NOT_VERIFIED`)
 - Live resources: LIVE(workers=kogane-observation-pipeline; buckets=kogane-raw-evidence)
 
-#### `kogane-observation-read-diagnostic` — `services/observation-pipeline/wrangler.diagnostic.jsonc`
+#### `kogane-observation-read-diagnostic` — `services/processor/wrangler.diagnostic.jsonc`
 
 - Role: binding-only; exists in the account: no
 - Entry point: —
@@ -952,7 +952,7 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
-#### `kogane-observation-pipeline` — `services/observation-pipeline/wrangler.jsonc`
+#### `kogane-observation-pipeline` — `services/processor/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
@@ -968,10 +968,10 @@ No wrangler config.
 - Service bindings: —
 - Crons: `*/5 * * * *`
 - Assets: —
-- Vars (names only): BALANCE_PROJECTION_ENABLED<br>COLLECTION_ACCOUNT_ID<br>COLLECTION_DATA_BUCKET<br>COLLECTION_INGEST_CLIENT<br>OPS_DISPATCH_ENABLED<br>READ_PROJECTION_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED<br>SHARED_R2_INGEST_ENABLED
+- Vars (names only): BALANCE_PROJECTION_ENABLED<br>COLLECTION_ACCOUNT_ID<br>COLLECTION_DATA_BUCKET<br>COLLECTION_INGEST_CLIENT<br>OPS_DISPATCH_ENABLED<br>READ_PROJECTION_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SHARED_R2_INGEST_ENABLED
 - Required secrets (names only): —
 
-#### `kogane-observation-ops-local` — `services/observation-pipeline/wrangler.ops.jsonc`
+#### `kogane-observation-ops-local` — `services/processor/wrangler.ops.jsonc`
 
 - Role: binding-only; exists in the account: no
 - Entry point: —
@@ -990,7 +990,7 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
-#### `kogane-read-migrations` — `services/observation-pipeline/wrangler.read-migrations.jsonc`
+#### `kogane-read-migrations` — `services/processor/wrangler.read-migrations.jsonc`
 
 - Role: binding-only; exists in the account: no
 - Entry point: —

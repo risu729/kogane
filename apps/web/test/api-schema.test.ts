@@ -1,5 +1,5 @@
 // The shared schema is the contract. Its shape is pinned here and again in
-// services/evidence-browser/test/conformance.test.ts, so a change to what a
+// services/app/test/conformance.test.ts, so a change to what a
 // server accepts or a client sends must be made in the schema and visible in
 // both packages' tests; a one-sided edit fails.
 import { describe, expect, test } from "bun:test";
@@ -80,7 +80,10 @@ describe("shared API schema", () => {
     });
     expect(REWARD_REQUEST_SCHEMA).toEqual({
       "/api/v2/rewards/holdings": ["program", "offset"],
-      "/api/v2/rewards/expiry": ["program", "offset"],
+      // U16: `cursor` and `limit` page a published reward snapshot; `offset`
+      // stays for the request-time answer of a deployment without one.
+      "/api/v2/rewards/expiry": ["program", "offset", "cursor", "limit"],
+      "/api/v2/rewards/simulations": ["cursor", "limit"],
       "/api/v2/rewards/offers/simulate": ["offer", "quantity", "unit", "goal", "depth"],
     });
     // The whole route group is gated: with rewardsV2 off no parameter is
@@ -105,6 +108,7 @@ describe("shared API schema", () => {
       balancesV2: false,
       balancesV2Pagination: "none",
       balancesV2ReadModel: "none",
+      rewardsV2ReadModel: "none",
       collectionFilters: false,
       organizedDisplay: false,
       financialProducts: false,
@@ -126,6 +130,7 @@ describe("shared API schema", () => {
       balancesV2: false,
       balancesV2Pagination: "none",
       balancesV2ReadModel: "none",
+      rewardsV2ReadModel: "none",
       collectionFilters: true,
       organizedDisplay: true,
       financialProducts: true,
@@ -248,6 +253,7 @@ describe("shared API schema", () => {
       { balancesV2: "yes" },
       { balancesV2Pagination: "keyset-v3" },
       { balancesV2ReadModel: "read-d2" },
+      { rewardsV2ReadModel: "core-d1" },
       { collectionFilters: "yes" },
       { readOnly: false },
       { liveCollectors: true },

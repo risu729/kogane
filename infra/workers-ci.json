@@ -2,19 +2,19 @@
   "workers": [
     {
       "name": "app",
-      "path": "services/evidence-browser",
+      "path": "services/app",
       "config": "wrangler.jsonc",
       "prepare": "web:build-production"
     },
     {
       "name": "app-demo",
-      "path": "services/evidence-browser",
+      "path": "services/app",
       "config": "wrangler.demo.jsonc",
       "prepare": "local-pipeline:export-demo"
     },
     {
       "name": "app-test",
-      "path": "services/evidence-browser",
+      "path": "services/app",
       "config": "wrangler.test.jsonc"
     },
     {
@@ -129,7 +129,7 @@
     },
     {
       "name": "processor",
-      "path": "services/observation-pipeline",
+      "path": "services/processor",
       "config": "wrangler.jsonc"
     },
     {
@@ -190,17 +190,17 @@
       "reason": "wrangler dev helper for scripts/backfill-vpass-identities.ts: remote bindings only, no main, so wrangler deploy --dry-run rejects it"
     },
     {
-      "path": "services/observation-pipeline",
+      "path": "services/processor",
       "config": "wrangler.diagnostic.jsonc",
       "reason": "wrangler dev helper for the diagnose scripts: remote bindings only, no main, so wrangler deploy --dry-run rejects it"
     },
     {
-      "path": "services/observation-pipeline",
+      "path": "services/processor",
       "config": "wrangler.read-migrations.jsonc",
       "reason": "READ migration step only: one migrations_dir per config, no main, so wrangler deploy --dry-run rejects it"
     },
     {
-      "path": "services/observation-pipeline",
+      "path": "services/processor",
       "config": "wrangler.ops.jsonc",
       "reason": "wrangler dev helper for scripts/ops.ts: remote bindings only, no main, so wrangler deploy --dry-run rejects it"
     }

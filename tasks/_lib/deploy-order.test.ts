@@ -2,7 +2,7 @@
 // staging lane exists), G5-14 (consumers deploy before producers), G5-15 (a
 // directory move never becomes a resource rename) and G5-17 (CD never
 // synchronises a collector secret).
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import {
   automationFiles,
@@ -31,7 +31,7 @@ const deployWorkflow = readFileSync(`${REPO_ROOT}/.github/workflows/_deploy-work
 function entry(overrides: Partial<DeployEntry> = {}): DeployEntry {
   return {
     name: "processor",
-    path: "services/observation-pipeline",
+    path: "services/processor",
     config: "wrangler.jsonc",
     worker: "kogane-observation-pipeline",
     role: "consumer",
@@ -51,10 +51,10 @@ describe("the deployment ledger describes every Worker CI validates", () => {
   });
 
   test("a configuration CI excludes may not be deployed", () => {
-    const excluded = [{ path: "services/observation-pipeline", config: "wrangler.ops.jsonc" }];
+    const excluded = [{ path: "services/processor", config: "wrangler.ops.jsonc" }];
     const violations = coverageViolations(
       [entry({ name: "ops", config: "wrangler.ops.jsonc", deploy: true })],
-      [{ name: "ops", path: "services/observation-pipeline", config: "wrangler.ops.jsonc" }],
+      [{ name: "ops", path: "services/processor", config: "wrangler.ops.jsonc" }],
       excluded,
     );
     expect(violations).toHaveLength(1);
@@ -88,6 +88,25 @@ describe("the deployment ledger describes every Worker CI validates", () => {
   test("a health path is empty or absolute", () => {
     expect(entryViolations(entry({ healthPath: "health" }))).toHaveLength(1);
     expect(entryViolations(entry({ healthPath: "/health" }))).toEqual([]);
+  });
+
+  test("every path the two ledgers name exists in the checkout", () => {
+    // A directory rename (services/evidence-browser -> services/app,
+    // services/observation-pipeline -> services/processor) that misses a
+    // ledger entry would only surface in CD, from the Worker's
+    // `working-directory` or the migration step's `--config`. CI excludes are
+    // never dry-run, so they are checked here too.
+    const named = [
+      ...Object.values(order.schema).filter((target) => target !== null),
+      ...order.workers,
+      ...ledger.workers,
+      ...(ledger.excluded ?? []),
+    ];
+    expect(named.length).toBeGreaterThan(0);
+    const missing = named
+      .flatMap((target) => [target.path, configOf(target)])
+      .filter((path) => !existsSync(`${REPO_ROOT}/${path}`));
+    expect(missing).toEqual([]);
   });
 
   test("every deployed Worker keeps the name the live account already has", () => {
@@ -166,7 +185,7 @@ describe("the deploy workflow follows the ledger", () => {
         {
           name: "Deploy",
           mode: "production",
-          workingDirectory: "services/observation-pipeline",
+          workingDirectory: "services/processor",
           config: "wrangler.jsonc",
           usesToken: false,
         },

@@ -12,6 +12,8 @@ extend-exclude = [
 	"infra/resources.md",
 	"infra/schema/core-ledger.json",
 	"infra/schema/core-ledger.md",
+	"infra/schema/read-ledger.json",
+	"infra/schema/read-ledger.md",
 ]
 
 [default.extend-words]

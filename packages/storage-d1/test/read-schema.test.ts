@@ -22,7 +22,10 @@ const schema = () => {
 
 describe("the READ baseline", () => {
   test("starts at 0001 and is the only directory the read database is built from", () => {
-    expect(migrationFiles(READ_MIGRATIONS_URL)).toEqual(["0001_read_baseline.sql"]);
+    expect(migrationFiles(READ_MIGRATIONS_URL)).toEqual([
+      "0001_read_baseline.sql",
+      "0002_reward_read.sql",
+    ]);
     expect(READ_MIGRATIONS_PATH).toBe("packages/storage-d1/migrations/read");
   });
 
@@ -38,6 +41,13 @@ describe("the READ baseline", () => {
       "current_balance_projection",
       "read_build_checkpoints",
       "read_instance",
+      // U16, migration 0002: the reward second stage, under the same rules.
+      "reward_build_checkpoints",
+      "reward_conversion_simulations",
+      "reward_expiry_estimates",
+      "reward_expiry_snapshots",
+      "reward_snapshot_input_refs",
+      "reward_snapshot_pointer",
       "scope_relations",
       "snapshot_input_refs",
     ]);

@@ -267,9 +267,9 @@ exactly `"true"`. While off, every command path answers
    0026/0032/0035/0036/0037;
    0029 must already be applied (it owns `decision_revisions` and
    `entity_relations`, which 0031 references).
-2. Deploy `services/observation-pipeline` — the writer: the command routes and
+2. Deploy `services/processor` — the writer: the command routes and
    the outbox dispatcher. The dispatcher is a no-op until rows exist.
-3. Deploy `services/evidence-browser` with `COMMANDS_ENABLED` unset. The
+3. Deploy `services/app` with `COMMANDS_ENABLED` unset. The
    command paths are closed; nothing else changed for readers.
 4. Enable by setting `COMMANDS_ENABLED=true`.
 
@@ -282,7 +282,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/observation-pipeline/test/change-lifecycle.test.ts` (16 tests):
+- `services/processor/test/change-lifecycle.test.ts` (16 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written
@@ -302,7 +302,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
   on all four tables; migration 0031 applied on a seeded 0017–0035 schema with
   no existing row touched; and an unadopted successful run kept out of the
   simulated difference until the publication gate adopts it.
-- `services/evidence-browser/test/command-api.test.ts` (9 tests): 401 without
+- `services/app/test/command-api.test.ts` (9 tests): 401 without
   a JWT, 403 with the flag off or set to anything but `"true"`, POST-only and
   404 for unknown command paths, the rest of the Worker still GET-only, an
   agent refused approve/commit before forwarding, `503` when the writer binding
@@ -314,12 +314,12 @@ already recorded is never undone by a DELETE — an undo is a new revision
 - `apps/web/test/confirm.browser.test.ts` (3 tests): read-only
   without the capability, no action on a stale plan, and accepted vs published
   shown distinctly.
-- `services/observation-pipeline/test/balance-projection.test.ts` "the
+- `services/processor/test/balance-projection.test.ts` "the
   dispatcher routes the balance-projection target to that processor": a
   `balance-projection` row reaches A07's real processor and rebuilds the
   projection, and the same target with no processor handed in is blocked with
   `no_processor` because it has no default.
-- `services/observation-pipeline/test/projection-input.test.ts` (G2-11 .. G2-13):
+- `services/processor/test/projection-input.test.ts` (G2-11 .. G2-13):
   a flag that is off and a build that has not finished both leave the row open
   and the receipt `accepted`; the completion after the read model finished
   converges without a second build and records the snapshot as its evidence; a

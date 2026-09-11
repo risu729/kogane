@@ -51,9 +51,9 @@ describe("import boundaries", () => {
     // Positive: the import a service used to have before the parsers moved.
     const forbidden =
       'import { PARSERS } from "../../../poc/observation-pipeline/src/parsers/registry.ts";';
-    expect(boundaryViolations("services/observation-pipeline/src/worker.ts", forbidden)).toEqual([
+    expect(boundaryViolations("services/processor/src/worker.ts", forbidden)).toEqual([
       {
-        path: "services/observation-pipeline/src/worker.ts",
+        path: "services/processor/src/worker.ts",
         specifier: "../../../poc/observation-pipeline/src/parsers/registry.ts",
         rule: "deployed-code-imports-experiment",
       },
@@ -65,13 +65,13 @@ describe("import boundaries", () => {
     ])
       expect(
         boundaryViolations(
-          "services/observation-pipeline/src/worker.ts",
+          "services/processor/src/worker.ts",
           `import { x } from "${specifier}";`,
         ).map((violation) => violation.rule),
       ).toEqual(["deployed-code-imports-experiment"]);
     // Negative: the import it has now.
     const allowed = 'import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";';
-    expect(boundaryViolations("services/observation-pipeline/src/worker.ts", allowed)).toEqual([]);
+    expect(boundaryViolations("services/processor/src/worker.ts", allowed)).toEqual([]);
   });
 
   test("no shared package imports a service back (U05)", () => {
@@ -92,9 +92,7 @@ describe("import boundaries", () => {
     // U05 produced and must stay allowed.
     const allowed =
       'import { publishBatch } from "../../../packages/storage-d1/src/atomic/publication.ts";';
-    expect(
-      boundaryViolations("services/observation-pipeline/src/publication-gate.ts", allowed),
-    ).toEqual([]);
+    expect(boundaryViolations("services/processor/src/publication-gate.ts", allowed)).toEqual([]);
   });
 
   test("a promoted collector is in scope: the import it had in poc/ is now a crossing", () => {
@@ -120,7 +118,7 @@ describe("import boundaries", () => {
       ["../../../packages/read-model/src/concepts.ts", "ui-imports-database"],
       ["../../../packages/storage-d1/src/core.ts", "ui-imports-database"],
       ["../../../experiments/observation-pipeline-local/src/store.ts", "ui-imports-database"],
-      ["../../../services/evidence-browser/src/http.ts", "ui-imports-service-internals"],
+      ["../../../services/app/src/http.ts", "ui-imports-service-internals"],
     ] as const)
       expect(
         boundaryViolations("apps/web/src/api.ts", `import { x } from "${specifier}";`).map(
@@ -218,28 +216,23 @@ describe("G4-08 build-closure boundaries", () => {
 
   test("the asset guard resolves the directory and sees the crossing it exists for", () => {
     expect(
-      resolveAssetDirectory(
-        "services/evidence-browser/wrangler.jsonc",
-        "../../apps/web/dist-production",
-      ),
+      resolveAssetDirectory("services/app/wrangler.jsonc", "../../apps/web/dist-production"),
     ).toBe("apps/web/dist-production");
     expect(
       assetViolations([
         {
-          path: "services/evidence-browser/wrangler.jsonc",
+          path: "services/app/wrangler.jsonc",
           directory: "../../poc/observation-pipeline/web/dist",
         },
       ]),
     ).toEqual([
       {
-        config: "services/evidence-browser/wrangler.jsonc",
+        config: "services/app/wrangler.jsonc",
         directory: "poc/observation-pipeline/web/dist",
       },
     ]);
     expect(
-      assetViolations([
-        { path: "services/evidence-browser/wrangler.jsonc", directory: "../../apps/web/dist" },
-      ]),
+      assetViolations([{ path: "services/app/wrangler.jsonc", directory: "../../apps/web/dist" }]),
     ).toEqual([]);
   });
 });

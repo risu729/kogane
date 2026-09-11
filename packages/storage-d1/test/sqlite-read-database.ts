@@ -7,7 +7,7 @@
 // batch does: the statements run in one transaction, an SQL error rolls the
 // whole thing back, and a conditional statement that matched nothing reports
 // `changes: 0` without stopping the rest. The same adapters run against real D1
-// under Miniflare in `services/observation-pipeline/test/read-projection.test.ts`;
+// under Miniflare in `services/processor/test/read-projection.test.ts`;
 // this double exists so the package can prove its own SQL without a Worker
 // runtime, never as the only evidence that a batch behaves.
 import { Database } from "bun:sqlite";

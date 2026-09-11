@@ -54,7 +54,7 @@ Run the private operator script with Node and an existing private configuration
 that binds `DB` and `EVIDENCE` to the authorized database and bucket:
 
 ```sh
-node services/observation-pipeline/scripts/review-account-connections.ts --config /absolute/path/to/wrangler.diagnostic.jsonc
+node services/processor/scripts/review-account-connections.ts --config /absolute/path/to/wrangler.diagnostic.jsonc
 ```
 
 The default is read-only and works before migration 0023 is applied. After the

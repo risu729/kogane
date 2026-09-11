@@ -1,5 +1,5 @@
 // The local PoC store runs the same conformance checks as the hosted demo and
-// the production Worker (services/evidence-browser/test/conformance.test.ts).
+// the production Worker (services/app/test/conformance.test.ts).
 import { describe, test } from "bun:test";
 import { createApi } from "../src/api.ts";
 import { LOCAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";

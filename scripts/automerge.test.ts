@@ -277,7 +277,7 @@ describe("risk path ledger", () => {
       "packages/collector-diagnostics/src/index.ts",
       ".github/workflows/ci.yml",
       ".github/scripts/automerge.mjs",
-      "services/observation-pipeline/wrangler.ops.jsonc",
+      "services/processor/wrangler.ops.jsonc",
       "infra/risk-paths.json",
     ];
     for (const path of highRisk) {
@@ -298,7 +298,7 @@ describe("risk path ledger", () => {
         "packages/collector-diagnostics/README.md",
         "poc/observation-pipeline/web/src/App.tsx",
         "apps/web/src/app.tsx",
-        "services/evidence-browser/src/routes.ts",
+        "services/app/src/routes.ts",
       ],
       ledger: LEDGER,
     });

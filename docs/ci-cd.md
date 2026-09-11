@@ -103,7 +103,7 @@ patterns per rule:
 | Rule                          | Covers                                                                                                                                                                                                                                                                                                 |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `core-schema`                 | CORE migrations (`packages/storage-d1/migrations/core/` since U05)                                                                                                                                                                                                                                     |
-| `authorization`               | `services/evidence-browser/src/auth.ts` and its successors                                                                                                                                                                                                                                             |
+| `authorization`               | `services/app/src/auth.ts`, its former path and its successors                                                                                                                                                                                                                                         |
 | `secret-consuming-collectors` | collector code, `package.json` and `bun.lock` of workers that run with a source's bank credentials, plus their container images, `Dockerfile` and operator scripts, and the shared `packages/collector-diagnostics` every collector bundles (plan 12 §5: the dependency closure deploys with the code) |
 | `automation`                  | `.github/workflows/**`, `.github/scripts/**`, `.github/actions/**`                                                                                                                                                                                                                                     |
 | `deployment-config`           | `wrangler*.jsonc`, `wrangler*.toml`, `infra/**`                                                                                                                                                                                                                                                        |
@@ -335,9 +335,9 @@ a writer starts using it. Today the deployed set is exactly the consumers:
 
 | Order | Worker                         | Directory                        | Health route |
 | ----- | ------------------------------ | -------------------------------- | ------------ |
-| 1     | `kogane-observation-pipeline`  | `services/observation-pipeline`  | none         |
-| 2     | `kogane-evidence-browser`      | `services/evidence-browser`      | none         |
-| 3     | `kogane-demo`                  | `services/evidence-browser`      | none         |
+| 1     | `kogane-observation-pipeline`  | `services/processor`             | none         |
+| 2     | `kogane-evidence-browser`      | `services/app`                   | none         |
+| 3     | `kogane-demo`                  | `services/app`                   | none         |
 | 4     | `kogane-ingest`                | `services/raw-evidence`          | `/health`    |
 | 5     | `kogane-collector-r2-importer` | `services/collector-r2-importer` | none         |
 

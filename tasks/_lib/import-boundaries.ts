@@ -16,10 +16,11 @@
 //     The UI reads the HTTP contract; giving it a query builder would put a
 //     second, unreviewed reader in front of the same database.
 //     `apps/web/test` is the single, named exception to the *service* half:
-//     one Playwright test boots `services/evidence-browser`'s own response
-//     helper in-process to prove the client still renders under the production
-//     CSP. Vite never sees `test/`, so that edge is not in the shipped bundle
-//     — and `assetBoundaryViolations` below checks what actually is.
+//     `apps/web/test/evidence-preview.browser.test.ts` boots
+//     `services/app/src/http.ts` in-process to prove the client still renders
+//     under the production CSP. Vite never sees `test/`, so that edge is not in
+//     the shipped bundle — and `assetBoundaryViolations` below checks what
+//     actually is.
 //
 // Only import specifiers are inspected. A fixture path (`new URL("../fixtures/…")`)
 // is data, not a dependency, so it is deliberately out of scope.

@@ -6,20 +6,20 @@
     "core": {
       "database": "kogane-raw-evidence",
       "binding": "DB",
-      "path": "services/observation-pipeline",
+      "path": "services/processor",
       "config": "wrangler.jsonc"
     },
     "read": {
       "database": "kogane-read",
       "binding": "READ",
-      "path": "services/observation-pipeline",
+      "path": "services/processor",
       "config": "wrangler.read-migrations.jsonc"
     }
   },
   "workers": [
     {
       "name": "processor",
-      "path": "services/observation-pipeline",
+      "path": "services/processor",
       "config": "wrangler.jsonc",
       "worker": "kogane-observation-pipeline",
       "role": "consumer",
@@ -30,7 +30,7 @@
     },
     {
       "name": "app",
-      "path": "services/evidence-browser",
+      "path": "services/app",
       "config": "wrangler.jsonc",
       "worker": "kogane-evidence-browser",
       "role": "consumer",
@@ -41,7 +41,7 @@
     },
     {
       "name": "app-demo",
-      "path": "services/evidence-browser",
+      "path": "services/app",
       "config": "wrangler.demo.jsonc",
       "worker": "kogane-demo",
       "role": "consumer",
@@ -74,7 +74,7 @@
     },
     {
       "name": "app-test",
-      "path": "services/evidence-browser",
+      "path": "services/app",
       "config": "wrangler.test.jsonc",
       "worker": "kogane-evidence-browser-test",
       "role": "consumer",
