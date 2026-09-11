@@ -249,3 +249,43 @@ source `sbi-shinsei-bank`).
   end-to-end target switch with a mocked container) and
   `worker-test/shared-data-bucket.test.ts` (a real Miniflare R2 `DATA` bucket).
   No provider was contacted and no production bucket was read or written.
+
+### prestia-globalpass (`kogane-globalpass-collector-poc`)
+
+Container + Durable Object + browser binding + `tamia`/`cf1` tunnels; one daily
+cron (`17 18 * * *`), unchanged. Terminal source id `prestia-globalpass` (the
+Processor maps it to the CORE source `global-pass`).
+
+| Artifact                  | Role                         | Bytes                                                      |
+| ------------------------- | ---------------------------- | ---------------------------------------------------------- |
+| `activity-<yyyy-mm>.html` | `sanitized_provider_capture` | the page `sanitizeGlobalPassActivityHtml` already produced |
+| `manifest.json`           | `collector_manifest`         | the exact manifest bytes written to the staging bucket     |
+
+- `requestedScope`: `month_range` over the selected months (oldest to newest),
+  `unitKeys: ["account"]`. A run whose container never reported its month list
+  states `unspecified` rather than inventing a range.
+- `units`: one `account` unit of kind `collection`, the same unit the central
+  descriptors use. `ranges`: one `requested` range plus one `declared_coverage`
+  month range per stored page.
+- **Coverage is `partial` even on success.** The provider exposes a rolling
+  window of statement months and `paginationStatus` is `unproven`, so a
+  finished run is a claim about persistence, never about the account's history.
+- `transformations`: one `redacted` step per page
+  (`globalpass-activity-sanitizer`); the unredacted page is never retained, so
+  it has no artifact key.
+- `acquisitionSessionRef`: none. The container logs in once per run and keeps no
+  session across runs (12 §4).
+- Human-required: **not distinguishable today.** The container reports every
+  login failure as the generic `browser_collection_failed`, so the terminal does
+  not claim a person must act. The collector still makes exactly one login
+  attempt per run — the cron is the only re-attempt — and nothing was added to
+  retry one. Classifying a Turnstile or credential rejection would need a
+  container change, which U09 does not make.
+- The shared persist is reported under the existing `central-import`
+  diagnostics stage; the `globalpass-collection-stored` log line carries
+  `collectionTarget`, `sharedOutcome`, `terminalKey` and `terminalDigest`.
+- Verified with synthetic data only: `test/shared-collection.test.ts`
+  (decisions, scope/ranges/units, outcomes, redaction),
+  `test/shared-worker.test.ts` (end-to-end target switch with a mocked
+  container) and `worker-test/shared-data-bucket.test.ts` (a real Miniflare R2
+  `DATA` bucket).

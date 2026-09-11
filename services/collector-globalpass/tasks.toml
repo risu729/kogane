@@ -17,7 +17,8 @@ description = "Run the services/collector-globalpass tests."
 depends = ["globalpass-worker:types"]
 dir = "services/collector-globalpass"
 run = [
-	"bun test test/diagnostics.test.ts test/worker-collection.test.ts test/model.test.ts test/sanitize.test.ts test/raw-evidence.test.ts test/backfill-script.test.ts test/analyze-turnstile-capture.test.mjs test/analyze-turnstile-debugger-capture.test.mjs test/compare-turnstile-probes.test.mjs",
+	"bun test test/diagnostics.test.ts test/worker-collection.test.ts test/model.test.ts test/sanitize.test.ts test/raw-evidence.test.ts test/backfill-script.test.ts test/shared-collection.test.ts test/shared-worker.test.ts test/analyze-turnstile-capture.test.mjs test/analyze-turnstile-debugger-capture.test.mjs test/compare-turnstile-probes.test.mjs",
+	"./node_modules/.bin/vitest run",
 	"node --test test/connect-relay.node.mjs",
 ]
 

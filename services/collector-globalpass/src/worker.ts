@@ -26,9 +26,17 @@ import {
   type StoredArtifact,
 } from "./model";
 import { runGlobalPassBrowserProbe } from "./browser-probe";
+import { collectionTarget } from "./collection-target";
 import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
 import type { RawEvidenceImportResult } from "./raw-evidence-types";
 import { sanitizeGlobalPassActivityHtml } from "./sanitize";
+import {
+  dataBucket,
+  persistSharedRun,
+  sharedRunPersisted,
+  type SharedCapture,
+  type SharedRunSummary,
+} from "./shared-collection";
 
 const GLOBALPASS_HOST = "www.debit.vpass.ne.jp";
 const TURNSTILE_HOST = "challenges.cloudflare.com";
@@ -269,17 +277,35 @@ async function runContainerProbe(env: Env, variant: ContainerProbeVariant): Prom
 
 type CollectionResult = CollectionManifest & {
   manifestKey: string;
-  central: RawEvidenceImportResult;
+  /** Legacy mode only: the central importer's answer. */
+  central?: RawEvidenceImportResult;
+  /** Shared mode only: what `persistRun` did in the DATA bucket. */
+  shared?: SharedRunSummary;
 };
 
-async function runCollection(env: Env, mode: CollectionMode): Promise<CollectionResult> {
+async function runCollection(
+  env: Env,
+  mode: CollectionMode,
+  // The hook U06's operations API fills in when it dispatches a run: the
+  // operation it accepted. It ends up in the shared terminal so a run can be
+  // traced back to its request.
+  identity: { operationId?: string } = {},
+): Promise<CollectionResult> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const container = getContainer(env.COLLECTOR_CONTAINER, CONTAINER_ID);
 
   const diagnostics = createDiagnostics("prestia-globalpass", runId);
   try {
-    const result = await collectWithContainer(env, mode, container, startedAt, runId, diagnostics);
+    const result = await collectWithContainer(
+      env,
+      mode,
+      container,
+      startedAt,
+      runId,
+      diagnostics,
+      identity,
+    );
     diagnostics.finish(result.status);
     return result;
   } catch (error) {
@@ -318,9 +344,14 @@ async function collectWithContainer(
   startedAt: string,
   runId: string,
   diagnostics: ReturnType<typeof createDiagnostics>,
+  identity: { operationId?: string },
 ): Promise<CollectionResult> {
   const prefix = runPrefix(startedAt, runId);
+  const attemptId = `attempt-${crypto.randomUUID()}`;
   const artifacts: StoredArtifact[] = [];
+  // The sanitized page of every month that reached the staging bucket, kept for
+  // the shared-mode terminal. The unredacted page is never retained.
+  const captures: SharedCapture[] = [];
   const failures: CollectionFailure[] = [];
   let availableMonths: string[] = [];
   let selectedMonths: string[] = [];
@@ -416,6 +447,7 @@ async function collectWithContainer(
             storeHtml(env.SNAPSHOTS, prefix, runId, month, sanitizedHtml),
           ),
         );
+        captures.push({ month, sanitizedHtml });
       } catch (error) {
         failures.push(collectionFailure("r2", error, "artifact_store_failed", artifactKey));
       }
@@ -469,12 +501,54 @@ async function collectWithContainer(
     failures,
   };
   const manifestKey = `${prefix}/manifest.json`;
+  const manifestJson = JSON.stringify(manifest);
   await diagnostics.step("manifest-write", () =>
-    env.SNAPSHOTS.put(manifestKey, JSON.stringify(manifest), {
+    env.SNAPSHOTS.put(manifestKey, manifestJson, {
       httpMetadata: { contentType: "application/json; charset=utf-8" },
       customMetadata: { source: manifest.source, status, runId },
     }),
   );
+  // U09: in shared mode the run's completion record is the terminal this Worker
+  // writes into DATA, and the legacy central upload is skipped so the Processor
+  // never re-copies the bytes (G1-15). Legacy mode is unchanged.
+  const target = collectionTarget(env.COLLECTION_TARGET);
+  if (target === "shared") {
+    // Reported under the existing `central-import` stage: it is the same step
+    // in the run's life, and the log line below carries `collectionTarget` and
+    // `sharedOutcome` so the two paths stay distinguishable.
+    const shared = await diagnostics.step("central-import", () =>
+      persistSharedRun(dataBucket(env.DATA), {
+        manifest,
+        manifestJson,
+        captures,
+        identity: {
+          attemptId,
+          ...(identity.operationId === undefined ? {} : { operationId: identity.operationId }),
+        },
+      }),
+    );
+    logEvent(
+      sharedRunPersisted(shared) ? "log" : "error",
+      JSON.stringify({
+        event: "globalpass-collection-stored",
+        runId,
+        mode,
+        status,
+        artifactCount: artifacts.length,
+        failureCount: failures.length,
+        manifestKey,
+        collectionTarget: target,
+        sharedOutcome: shared.outcome,
+        terminalKey: shared.terminalKey,
+        terminalDigest: shared.terminalDigest,
+        ...(shared.reasonCode ? { errorCode: shared.reasonCode } : {}),
+      }),
+    );
+    // No terminal means the run did not finish persisting; it is never reported
+    // as stored (G1-01).
+    if (!sharedRunPersisted(shared)) throw new Error("globalpass_shared_persist_incomplete");
+    return { ...manifest, manifestKey, shared };
+  }
   const central = await importStoredRun(env.RAW_EVIDENCE_IMPORTER, manifestKey);
   logEvent(
     "log",
@@ -486,6 +560,7 @@ async function collectWithContainer(
       artifactCount: artifacts.length,
       failureCount: failures.length,
       manifestKey,
+      collectionTarget: target,
       centralStatus: central.status,
       ...(central.status === "sealed"
         ? { centralRunId: central.centralRunId }
@@ -791,16 +866,31 @@ function publicCollectionResult(result: CollectionResult): object {
     artifactCount: result.artifacts.length,
     failureCount: result.failures.length,
     manifestKey: result.manifestKey,
-    central: {
-      status: result.central.status,
-      ...(result.central.status === "sealed"
-        ? { centralRunId: result.central.centralRunId, sealed: result.central.sealed }
-        : {
-            reason: result.central.reason,
-            artifactCount: result.central.artifactCount,
-            nextOffset: result.central.nextOffset,
-          }),
-    },
+    ...(result.central
+      ? {
+          central: {
+            status: result.central.status,
+            ...(result.central.status === "sealed"
+              ? { centralRunId: result.central.centralRunId, sealed: result.central.sealed }
+              : {
+                  reason: result.central.reason,
+                  artifactCount: result.central.artifactCount,
+                  nextOffset: result.central.nextOffset,
+                }),
+          },
+        }
+      : {}),
+    ...(result.shared
+      ? {
+          shared: {
+            outcome: result.shared.outcome,
+            terminalKey: result.shared.terminalKey,
+            terminalDigest: result.shared.terminalDigest,
+            objectCount: result.shared.objectCount,
+            waitingForHuman: result.shared.waitingForHuman,
+          },
+        }
+      : {}),
   };
 }
 

@@ -316,7 +316,7 @@
         "requiredVerification": "keep Container, relay, browser diagnostics and resource identity",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-globalpass-collector-poc; buckets=kogane-globalpass-collector-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-globalpass-collector-poc; buckets=kogane-globalpass-collector-poc,kogane-raw-evidence)"
       },
       "workers": [
         {
@@ -334,6 +334,11 @@
             {
               "binding": "SNAPSHOTS",
               "bucket": "kogane-globalpass-collector-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -382,6 +387,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION",
             "RELAY_PUBLIC_URL"
           ],
@@ -2145,6 +2151,7 @@
         "live": true,
         "readers": [
           "kogane-evidence-browser",
+          "kogane-globalpass-collector-poc",
           "kogane-ingest",
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic",
