@@ -2,7 +2,7 @@
 
 調査日: 2026-08-26、追試: 2026-08-31、実装検証: 2026-09-01
 
-本書は初期調査と追試の記録を含む。実装状況は下記の「Kogane Workers PoC live result（2026-09-01）」と[現行PoC README](../../poc/smbc-direct-backfill-worker/README.md)を優先する。2026-09-05の文書統合では、既存の実装・検証記録との整合性を確認した。銀行への再ログインや取得は行っていない。
+本書は初期調査と追試の記録を含む。実装状況は下記の「Kogane Workers PoC live result（2026-09-01）」と[現行PoC README](../../services/collector-smbc-direct/README.md)を優先する。2026-09-05の文書統合では、既存の実装・検証記録との整合性を確認した。銀行への再ログインや取得は行っていない。
 
 ## 結論
 
@@ -253,7 +253,7 @@ GitHub Code Searchでは、現行の `TPALTOPAjaxSavingBalance` と `LLDLDILnext
 
 ### Kogane Workers PoC live result（2026-09-01）
 
-`poc/smbc-direct-backfill-worker`へ、`mnie`をruntime dependencyにせず必要なread-only login、円普通預金残高、月次明細、logoutだけを分離した。Cloudflare AccessでUIを保護し、QR challengeと認証済みsessionをDurable ObjectへAES-256-GCM暗号化保存、raw Shift_JIS JSON・normalized JSON・manifestをprivate R2へ保存する。開始日/終了日はclientから受け付けず、Web通帳の最古日2019-01-01から日本時間の実行当日までを常に月単位で走査する。
+`services/collector-smbc-direct`へ、`mnie`をruntime dependencyにせず必要なread-only login、円普通預金残高、月次明細、logoutだけを分離した。Cloudflare AccessでUIを保護し、QR challengeと認証済みsessionをDurable ObjectへAES-256-GCM暗号化保存、raw Shift_JIS JSON・normalized JSON・manifestをprivate R2へ保存する。開始日/終了日はclientから受け付けず、Web通帳の最古日2019-01-01から日本時間の実行当日までを常に月単位で走査する。
 
 同一code・credentialsでegressだけを比較した結果:
 

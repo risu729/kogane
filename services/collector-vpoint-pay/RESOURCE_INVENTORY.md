@@ -4,7 +4,7 @@ Created 2026-08-31 for the V Point Pay collector validation.
 
 2026-09-05: app API collection disabled. Cron is removed;
 manual collection/probe/reset routes return HTTP 410. Existing R2 data, DO state
-and secrets are retained. V Point Pay email collection in `poc/vpoint-worker/`
+and secrets are retained. V Point Pay email collection in `services/collector-vpoint/`
 remains active. The retained resources are:
 
 | Resource             | Name                              | Current purpose                                                   |

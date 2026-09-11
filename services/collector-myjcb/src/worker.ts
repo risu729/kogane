@@ -1,4 +1,7 @@
-import { createDiagnostics, safeErrorDetails } from "../../../packages/collector-diagnostics/src/index";
+import {
+  createDiagnostics,
+  safeErrorDetails,
+} from "../../../packages/collector-diagnostics/src/index";
 import { collectConnection, parseCredentialSecrets } from "./collector";
 import { backfillStoredRuns } from "./raw-evidence";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";

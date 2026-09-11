@@ -90,7 +90,7 @@ APK as described in
 [`../../docs/vpass-android-reproduction.md`](../../docs/vpass-android-reproduction.md).
 
 ```powershell
-cd poc/vpass-json
+cd services/collector-vpass
 bun install
 bun src/mobile-cli.ts -- --auth-key /private/f2hKiZCtFQdbfuiVGduZ.pem --config-key /private/pubkey_relese.pem
 ```
@@ -103,7 +103,7 @@ browser-shaped `impit` experiment remains available as `bun src/cli.ts`.
 bun src/mobile-cli.ts -- --auth-key /private/auth.pem --config-key /private/config.pem --output "D:\private\kogane-vpass"
 ```
 
-The default is a timestamped directory below `poc/vpass-json/output/`, which is
+The default is a timestamped directory below `services/collector-vpass/output/`, which is
 gitignored. Output contains full financial data and must be treated as
 sensitive.
 

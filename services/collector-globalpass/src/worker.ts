@@ -1,4 +1,7 @@
-import { createDiagnostics, safeErrorDetails } from "../../../packages/collector-diagnostics/src/index";
+import {
+  createDiagnostics,
+  safeErrorDetails,
+} from "../../../packages/collector-diagnostics/src/index";
 import { logEvent, relayRunId, withRunId } from "./log-context";
 import { Container, getContainer } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";

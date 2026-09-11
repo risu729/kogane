@@ -23,7 +23,9 @@ export interface ConnectionCollection {
 }
 
 export async function collectConnection(options: {
-  diagnostic?: ReturnType<typeof import("../../../packages/collector-diagnostics/src/index").createDiagnostics>;
+  diagnostic?: ReturnType<
+    typeof import("../../../packages/collector-diagnostics/src/index").createDiagnostics
+  >;
   browserBinding: BrowserRun;
   credential: MyJcbCredential;
 }): Promise<ConnectionCollection> {

@@ -202,6 +202,26 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
   });
 });
 
+/**
+ * Where chapter 07 §1 puts each promoted collector. The Worker name on the left
+ * is the identity Cloudflare knows; the directory on the right is the only
+ * thing U04 changed about it.
+ */
+const PROMOTED_COLLECTOR_DIRECTORIES: readonly (readonly [string, string])[] = [
+  ["kogane-globalpass-collector-poc", "services/collector-globalpass"],
+  ["kogane-mobile-suica-collector-poc", "services/collector-mobile-suica"],
+  ["kogane-moneyforward-collector-poc", "services/collector-moneyforward"],
+  ["kogane-myjcb-collector-poc", "services/collector-myjcb"],
+  ["kogane-sbi-collector-poc", "services/collector-sbi-securities"],
+  ["kogane-sbi-shinsei-collector-poc", "services/collector-sbi-shinsei"],
+  ["kogane-sbi-vc-session-poc", "services/collector-sbi-vc-trade"],
+  ["kogane-smbc-direct-backfill-poc", "services/collector-smbc-direct"],
+  ["kogane-sony-bank-collector-poc", "services/collector-sony-bank"],
+  ["kogane-vpass-collector-poc", "services/collector-vpass"],
+  ["kogane-vpoint-collector-poc", "services/collector-vpoint"],
+  ["kogane-vpoint-pay-collector-poc", "services/collector-vpoint-pay"],
+];
+
 describe("G0-06/G0-07/G5-15 a moved directory keeps its resource identities", () => {
   // The promotions of chapter 07 §1 are `git mv` plus repointing, and 11 §4
   // names the failure mode they must not have: a directory move that renames
@@ -217,6 +237,18 @@ describe("G0-06/G0-07/G5-15 a moved directory keeps its resource identities", ()
     expect(identities.filter((line) => promoted.has(line.split(" ")[0] as string))).toEqual(
       COLLECTOR_IDENTITIES_BEFORE_THE_PROMOTIONS,
     );
+  });
+
+  test("each promoted collector is deployable from the directory the plan named", () => {
+    // G0-12 read forwards: the collectors are still in the repository, still
+    // have a config, and are where 07 §1 says they belong.
+    const byWorker = new Map(
+      ledger.directories.flatMap((entry) =>
+        entry.workers.map((worker) => [worker.name, entry.directory] as const),
+      ),
+    );
+    for (const [worker, directory] of PROMOTED_COLLECTOR_DIRECTORIES)
+      expect([worker, byWorker.get(worker)]).toEqual([worker, directory]);
   });
 
   test("no Worker config is added, dropped or renamed by a directory move", () => {

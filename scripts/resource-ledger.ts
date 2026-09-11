@@ -98,6 +98,14 @@ export interface Disposition {
  * (raw-evidence stays deployed as the legacy ingest adapter until U15; the
  * importer is absorbed by the Processor in U08 and its Worker keeps running
  * until U15).
+ *
+ * A directory that has been promoted keeps its row under the new key with
+ * `executionStatus: "EXECUTED_U04"`: the plan's proposal and what was actually
+ * done stay next to each other, and the key follows the directory because the
+ * ledger reads `services/` and `poc/` from disk. A directory promoted out of
+ * both — `poc/collector-diagnostics` and `poc/sbi-vc-trade-client`, which went
+ * to `packages/` — leaves the map, because nothing under `packages/` declares a
+ * runtime resource.
  */
 export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
   "poc/camoufox-container-probe": {

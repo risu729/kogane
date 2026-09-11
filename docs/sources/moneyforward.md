@@ -2,7 +2,7 @@
 
 - 調査日: 2026-08-31、2026-09-07（Asia/Tokyo）
 - canonical source: `moneyforward-me`
-- collector: `poc/moneyforward-worker`
+- collector: `services/collector-moneyforward`
 - 対象: 認証済みMoneyForward ME画面の連携先一覧、口座詳細、直近12か月の月別明細fragment
 - 対象外: 金融機関側の更新要求、連携追加・削除、振込・支払・取引、MoneyForward設定変更、
   provider公式明細と同等の完全性の主張
@@ -173,7 +173,7 @@ collectorの非公開HTML routeとfragment構造は将来変更され得る。va
 
 ## 実装・関連記録
 
-- `poc/moneyforward-worker/README.md`: authentication、read-only collection、source limitations
+- `services/collector-moneyforward/README.md`: authentication、read-only collection、source limitations
 - `services/collector-r2-importer/README.md`: strict validator、chunking、cursor、rollout order
 - `docs/sources/smbc-bank.md`: MoneyForward経由で弱化・欠落するSMBC/Vpass固有情報
 - `services/raw-evidence/migrations/0014_moneyforward_collector_r2.sql`: central route/policy

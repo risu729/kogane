@@ -51,7 +51,34 @@ new ledger suite joins CI by existing.
   binding type (KV, Vectorize, Workflows, `send_email`, …) forces the ledger to grow with it;
 - every Durable Object class has a migration tag or an explicit sqlite export (G0-07);
 - the live workers and buckets of the recorded account inventory are all accounted for, and a
-  directory is marked live exactly when one of its configs names a live Worker or bucket (G0-12).
+  directory is marked live exactly when one of its configs names a live Worker or bucket (G0-12);
+- the promoted collectors declare exactly the identities they declared before their directories
+  moved, and no Worker config was added, dropped or renamed by a move (G0-06, G0-07, G5-15).
+
+### The frozen identity lines
+
+The ledger is keyed by directory, so on its own it cannot answer the question chapter 11 §4 asks
+of a directory move: did the move rename infrastructure? `resourceIdentityLines` renders each
+Wrangler config as one line that contains no directory at all — Worker name, the config's file
+name, crons, Queues, R2 buckets, D1 ids, Durable Object bindings, migration tags and storage,
+containers, the browser/VPC/service bindings, var and secret **names**, and the SHA-256 of the
+config file itself. The digest is what closes the gap the name-only fields leave: a change to a
+`vars` value or to any key the generator does not extract yet still moves the line.
+
+`scripts/resource-ledger.test.ts` holds the twelve collector lines exactly as they read on
+`origin/main` at `d096178`, the commit before U04 promoted `poc/<source>-worker` to
+`services/collector-<source>`, together with the Worker-name/config-name pairs of all 39 configs.
+Those constants are a record of the past, not a generated file: they are never regenerated to
+make a test pass. A U09-style change that deliberately adds a binding or a var to a collector
+updates the affected lines in the same commit that adds it, and the diff then says which resource
+identity changed and why.
+
+### What is deliberately not covered
+
+`packages/parsers/src/parsers/*.ts` keeps provenance comments naming the collectors' old `poc/`
+paths. A parser's `code_digest` covers its bytes, migration 0028 refuses the same parser name and
+version with a different digest, and re-wording a comment would therefore re-identify a deployed
+release. The comments stay until a parser release is bumped for a real reason.
 
 `scripts/core-schema-ledger.test.ts`
 

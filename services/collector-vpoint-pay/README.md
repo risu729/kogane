@@ -2,7 +2,7 @@
 
 VポイントPayのプリペイド残高と取得可能な全月の利用明細を、公式Android
 アプリのfirst-party JSON APIから取得し、raw responseとmanifestをprivate R2へ
-保存する独立PoCである。Vポイント/VマネーのWeb台帳は`poc/vpoint-worker/`、
+保存する独立PoCである。Vポイント/VマネーのWeb台帳は`services/collector-vpoint/`、
 三井住友カード請求明細はVpass collectorであり、相互に混ぜない。
 
 ## 静的解析で確認したread surface
@@ -29,10 +29,10 @@ app API collectorは停止している。Cronはなく、手動の`/trigger`、`
 `/reset-credentials`はHTTP 410を返す。遅延配送されたscheduled eventも収集しない。
 `/health`は`collectionEnabled: false`と`status: "disabled"`を返す。
 R2原本、Durable Object、既存secretsは保持する。VポイントPay通知メールは
-`poc/vpoint-worker/`で引き続き収集する。以下の認証・デプロイ説明は研究記録である。
+`services/collector-vpoint/`で引き続き収集する。以下の認証・デプロイ説明は研究記録である。
 
 Layer Aの中央取り込みも、ここに残るapp snapshotや停止中endpointは対象にしない。
-`poc/vpoint-worker`が保存した`raw/v-point-pay-email/...`のEML/JSON pairだけを専用Importerが
+`services/collector-vpoint`が保存した`raw/v-point-pay-email/...`のEML/JSON pairだけを専用Importerが
 read-onlyで検証する。email source、app API source、Vポイント本体から生成したreconciliationは
 別境界であり、このWorkerのCronやpollingを有効化する変更は別途live contract確認後に行う。
 

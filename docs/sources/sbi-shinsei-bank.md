@@ -839,7 +839,7 @@ collector path.
 
 ## Implementation status (2026-08-31)
 
-[`poc/sbi-shinsei-worker`](../../poc/sbi-shinsei-worker/) now contains an
+[`services/collector-sbi-shinsei`](../../services/collector-sbi-shinsei/) now contains an
 isolated local Chrome collector and a Container/R2/Cron collector. It does
 not depend on Mnie. The local CLI accepts credentials through stdin or a
 private mode-0600 file. Both paths keep CAFIS/session material inside one
@@ -852,7 +852,7 @@ egress but completed a live run through the exact-host TAMIA/VPC relay. Captured
 core routes have strict
 synthetic fixtures and response validators; bundle-only and direct-HTTP routes
 remain unreachable. See the PoC's
-[`INVESTIGATION-2026-08-31.md`](../../poc/sbi-shinsei-worker/INVESTIGATION-2026-08-31.md)
+[`INVESTIGATION-2026-08-31.md`](../../services/collector-sbi-shinsei/INVESTIGATION-2026-08-31.md)
 for the evidence boundary and enablement checklist.
 
 The deployed schedule is `0 21 * * *`. Teardown inventory is the active Worker,

@@ -20,7 +20,7 @@ Wrangler dependency tree.
 
 ## Safe report
 
-Run from `poc/globalpass-worker`:
+Run from `services/collector-globalpass`:
 
 ```bash
 capture_run=/mnt/c/Users/risu/AppData/Local/Kuebiko/captures/2026-08-29T12-55-57

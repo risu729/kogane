@@ -262,7 +262,7 @@ SBI新生銀行を有効化する本番作業は、必ず次の順で直列実�
 
    ```sh
    (
-     cd poc/sbi-shinsei-worker
+     cd services/collector-sbi-shinsei
      bun install --frozen-lockfile
      bun test
      mise run importer:typecheck
@@ -277,13 +277,13 @@ SBI新生銀行を有効化する本番作業は、必ず次の順で直列実�
 
    ```sh
    KOGANE_STOP_AFTER_MANIFEST=1 \
-     poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
+     services/collector-sbi-shinsei/scripts/backfill-raw-evidence.sh
    ```
 
 5. canary後に中央D1のSBI新生run数、seal数、artifact数を`COUNT`だけで記録し、full backfillを実行する。
 
    ```sh
-   poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
+   services/collector-sbi-shinsei/scripts/backfill-raw-evidence.sh
    ```
 
 6. cursorが完了時に削除された後、full backfillをもう一度実行する。中央のrun数、seal数、artifact数が不変であることを確認する。再送attempt数は増えてよい。2回のscan page数も比較し、途中に新規収集がなければ同数であることを確認する。
@@ -322,7 +322,7 @@ GLOBAL PASSは次の順序で直列に適用する。backfill中はdaily cronの
 
    ```sh
    (
-     cd poc/globalpass-worker
+     cd services/collector-globalpass
      bun install --frozen-lockfile
      bun test
      mise run importer:typecheck
@@ -355,7 +355,7 @@ GLOBAL PASSは次の順序で直列に適用する。backfill中はdaily cronの
 6. canary成功後にfull backfillを完走する。
 
    ```sh
-   poc/globalpass-worker/scripts/backfill-raw-evidence.sh
+   services/collector-globalpass/scripts/backfill-raw-evidence.sh
    ```
 
    完了時にcursor fileが削除されること、`failedManifestCount`が常に0であること、全manifestが最終的にsealedされたことを確認する。事前・事後のlegacy source R2 inventoryの件数と集約checksumは同一でなければならない。
@@ -365,7 +365,7 @@ GLOBAL PASSは次の順序で直列に適用する。backfill中はdaily cronの
 8. historical replay後にv2 live canaryを手動dailyで1回だけ実行する。
 
    ```sh
-   poc/globalpass-worker/scripts/trigger.sh daily
+   services/collector-globalpass/scripts/trigger.sh daily
    ```
 
    公開結果がcollection successかつcentral sealedであること、保存manifestが`globalpass-browser-poc-v2`、selected monthが最大2件、HTMLがsanitized済みであることを値や本文を出さず確認する。daily小runがdeferredになった場合は運用開始せず調査する。
@@ -380,22 +380,22 @@ v20のmanual live canaryと次回cronが成功した後は、運用記録の現�
 
 V Pointは中央→importer→collectorの順で直列に適用する。まず`services/raw-evidence/scripts/deploy.sh`で加算migration `0012`を適用し、healthのschemaと`verify-v-point-route.sh`のroute 1件・policy 2件・alias 1件を確認する。次に`services/collector-r2-importer/scripts/deploy.sh`で専用tokenを同期し、healthが`collector-r2-importer-v15`を返すことを確認する。最後にV Point collectorをdeployしてService Bindingを有効にする。GitHub Actions cronは追加せず、既存Worker cronを維持する。
 
-historical dataは、先に`bash scripts/audit-v-point-r2.sh`を実行してfailed 0を確認し、`poc/vpoint-worker/scripts/backfill-raw-evidence.sh`で完走する。前後でsource R2のobject件数と集約checksumが不変であること、中央のV Point run/seal/artifactの件数だけが増えることを確認する。cursor削除後に再実行し、中央run/seal/artifact件数が不変なら冪等性確認完了である。失敗時はcollector/importerのrolloutを止めるが、migrationとsource R2はrollback・削除しない。
+historical dataは、先に`bash scripts/audit-v-point-r2.sh`を実行してfailed 0を確認し、`services/collector-vpoint/scripts/backfill-raw-evidence.sh`で完走する。前後でsource R2のobject件数と集約checksumが不変であること、中央のV Point run/seal/artifactの件数だけが増えることを確認する。cursor削除後に再実行し、中央run/seal/artifact件数が不変なら冪等性確認完了である。失敗時はcollector/importerのrolloutを止めるが、migrationとsource R2はrollback・削除しない。
 
 他collector側のhistorical outboxも次で再送できる。
 
 ```sh
-poc/sbi-securities-worker/scripts/backfill-raw-evidence.sh
-poc/sbi-vc-trade-worker/scripts/backfill-raw-evidence.sh
-poc/sony-bank-worker/scripts/backfill-raw-evidence.sh
-poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
-poc/mobile-suica-worker/scripts/backfill-raw-evidence.sh
-poc/globalpass-worker/scripts/backfill-raw-evidence.sh
-poc/myjcb-worker/scripts/backfill-raw-evidence.sh
-poc/moneyforward-worker/scripts/backfill-raw-evidence.sh
-poc/vpoint-worker/scripts/backfill-raw-evidence.sh
-poc/vpass-json/scripts/backfill-raw-evidence.sh
-poc/smbc-direct-backfill-worker/scripts/backfill-raw-evidence.sh
+services/collector-sbi-securities/scripts/backfill-raw-evidence.sh
+services/collector-sbi-vc-trade/scripts/backfill-raw-evidence.sh
+services/collector-sony-bank/scripts/backfill-raw-evidence.sh
+services/collector-sbi-shinsei/scripts/backfill-raw-evidence.sh
+services/collector-mobile-suica/scripts/backfill-raw-evidence.sh
+services/collector-globalpass/scripts/backfill-raw-evidence.sh
+services/collector-myjcb/scripts/backfill-raw-evidence.sh
+services/collector-moneyforward/scripts/backfill-raw-evidence.sh
+services/collector-vpoint/scripts/backfill-raw-evidence.sh
+services/collector-vpass/scripts/backfill-raw-evidence.sh
+services/collector-smbc-direct/scripts/backfill-raw-evidence.sh
 ```
 
 source R2はbackfill完了後も自動削除しない。
@@ -414,7 +414,7 @@ source R2はbackfill完了後も自動削除しない。
 4. `bash scripts/audit-moneyforward-r2.sh`を再実行し、strict validation failureが0であることを確認する。
    source inventoryはobject種別件数と集約checksumだけで記録し、object key、個別hash、本文、
    金融値、認証値を出力しない。
-5. `poc/moneyforward-worker/scripts/backfill-raw-evidence.sh`で最初のmanifestをsealするcanary後、
+5. `services/collector-moneyforward/scripts/backfill-raw-evidence.sh`で最初のmanifestをsealするcanary後、
    full backfillを完走する。中央D1ではMoneyForwardのrun、terminal report、sealed run、artifact
    の件数だけを確認し、descriptorからterminal report、sealまでの関係を検証する。
 6. cursorが完了時に削除された状態から再走査し、中央run/seal/artifact件数が不変であることを
@@ -426,8 +426,8 @@ migrationとsource R2はrollback・削除しない。
 
 ### V Point Pay通知メールの本番適用
 
-このPRはdeployせず、停止済み`poc/vpoint-pay-worker` app pollingも再有効化しない。本番適用時は
-中央migration、Importer、`poc/vpoint-worker`の順で直列に適用する。中央では
+このPRはdeployせず、停止済み`services/collector-vpoint-pay` app pollingも再有効化しない。本番適用時は
+中央migration、Importer、`services/collector-vpoint`の順で直列に適用する。中央では
 `collector-r2-v-point-pay-email`専用credential/routeと
 `raw/v-point-pay-email/{date}/{message-sha256}.{extension}`だけを許可するstorage policyを確認する。
 Importerは専用tokenを他sourceと共有せず、collectorは既存Service Bindingを使う。
@@ -435,7 +435,7 @@ Importerは専用tokenを他sourceと共有せず、collectorは既存Service Bi
 導入前に`bash scripts/audit-v-point-pay-email-r2.sh`を実行し、raw/normalized件数が一致しfailed 0である
 ことだけを確認する。native checksum有無もaggregate件数だけを出す。既存履歴の欠落はbounded
 bodyから再計算したchecksumで検証し、checksumが記録済みなら一致を必須とする。次に
-`poc/vpoint-worker/scripts/backfill-vpoint-pay-email-raw-evidence.sh`を完走し、中央の
+`services/collector-vpoint/scripts/backfill-vpoint-pay-email-raw-evidence.sh`を完走し、中央の
 `v-point-pay` run/seal/artifact集計だけを確認する。cursor消去後にdeployment revisionだけを変えた
 Importerで再走査しても、固定`vpoint-pay-email-r2-v2`契約によりrun・artifact・seal件数は不変で
 なければならない。attempt数は増えてよい。前後でsource R2のaggregate inventoryを比較し、
@@ -453,7 +453,7 @@ app snapshotは対象外である。GitHub Actions cronは追加せず、既存E
 2. `collector-r2-myjcb` credentialを生成し、Importerへ`RAW_EVIDENCE_TOKEN_MYJCB`として同期した後、`collector-r2-importer-v11`をdeployする。他source tokenは流用しない。
 3. MyJCB collectorをService Binding追加版へdeployする。この変更は既存`0 21 * * *`を追加・削除・変更しない。deploy前後でCronが1件だけであることを確認する。
 4. source R2の事前inventoryをobject件数、manifest件数、集約checksumだけで記録する。object key、個別hash、本文、値は出力しない。最初のmanifestをbounded backfillでsealし、中央のrun/seal/artifact件数だけをcanary確認する。
-5. `poc/myjcb-worker/scripts/backfill-raw-evidence.sh`を完走し、全manifestがterminal reportと完全inventoryを持ってsealされたことを確認する。failed/human-requiredのmanifest-only runもprovider成功へ昇格させず、失敗証拠としてsealする。
+5. `services/collector-myjcb/scripts/backfill-raw-evidence.sh`を完走し、全manifestがterminal reportと完全inventoryを持ってsealされたことを確認する。failed/human-requiredのmanifest-only runもprovider成功へ昇格させず、失敗証拠としてsealする。
 6. cursorが完了時に削除された状態から再走査し、中央run/seal/artifact件数が不変であることを確認する。attempt/reuse記録は増えてよい。source R2の事前・事後inventoryは一致しなければならない。
 
 backfill前後に新しいscheduled runが作られた場合は、その新規objectとImporterによる変更を混同しない。Importerはsource R2へwrite/deleteしないが、collectorの既存Cronは別途動作するためである。既知の重複実行対策はこのrolloutに便乗して推測実装せず、collector lockの独立変更として扱う。
@@ -462,7 +462,7 @@ backfill前後に新しいscheduled runが作られた場合は、その新規ob
 
 このPRはdeployしない。本hotfixにはmigrationを追加せず、既に適用済みの中央migration `0013`と`verify-vpass-route.sh`を維持する。`collector-r2-vpass` credentialを`RAW_EVIDENCE_TOKEN_VPASS`として同期してImporter v17をdeployし、health確認後にVpass collectorをdeployする。既存queueとdead-letter queueは再作成しない。consumerは1 messageにつき1 chunkだけ処理し、`deferred`の署名continuationを再enqueueして最終`sealed`まで進める。Importer failureまたは不正responseはdelivery失敗としてretryし、完了扱いにしない。GitHub Actions cronは追加せず、既存Worker cronを維持する。
 
-backfill前にsource R2をobject種別件数と集約checksumだけで監査し、本文、key、個別hash、card値、session値を出力しない。v1の永続cursorはv2 envelopeでは再開できないため、旧cursor fileだけを退避または削除して先頭から再走査する。失敗した中央v1 runは不変証跡として残す。`poc/vpass-json/scripts/backfill-raw-evidence.sh`で最初のterminal recordをsealするcanary後、全件を完走する。失敗recordでは署名cursorが対象の手前に残るため、validatorを緩和せず原因を解消して同じ位置から再開する。完了後にcursorを削除した状態から再走査し、中央run/seal/artifact件数が不変であること、source R2の事前・事後inventoryが一致することを確認する。失敗時もmigrationとsource R2は削除・rollbackしない。
+backfill前にsource R2をobject種別件数と集約checksumだけで監査し、本文、key、個別hash、card値、session値を出力しない。v1の永続cursorはv2 envelopeでは再開できないため、旧cursor fileだけを退避または削除して先頭から再走査する。失敗した中央v1 runは不変証跡として残す。`services/collector-vpass/scripts/backfill-raw-evidence.sh`で最初のterminal recordをsealするcanary後、全件を完走する。失敗recordでは署名cursorが対象の手前に残るため、validatorを緩和せず原因を解消して同じ位置から再開する。完了後にcursorを削除した状態から再走査し、中央run/seal/artifact件数が不変であること、source R2の事前・事後inventoryが一致することを確認する。失敗時もmigrationとsource R2は削除・rollbackしない。
 
 ### SMBC Directの本番適用
 
@@ -472,7 +472,7 @@ backfill前にsource R2をobject種別件数と集約checksumだけで監査し�
 2. `collector-r2-smbc-direct` credentialを生成し、Importerへ`RAW_EVIDENCE_TOKEN_SMBC_DIRECT`として同期した後、`collector-r2-importer-v19`をdeployする。他source tokenは流用しない。
 3. SMBC Direct collectorをService Binding追加版へdeployする。既存scheduled triggerは追加・削除・変更せず、deploy前後で同一であることを確認する。
 4. source R2の事前inventoryをobject件数、manifest件数、集約checksumだけで記録する。object key、個別hash、本文、金融値は出力しない。最初のmanifestをbounded backfillでsealし、中央のrun/seal/artifact件数だけをcanary確認する。
-5. `poc/smbc-direct-backfill-worker/scripts/backfill-raw-evidence.sh`を完走し、全terminal manifestが完全inventoryを持ってsealされたことを確認する。partial/failed manifestもprovider成功へ昇格させない。
+5. `services/collector-smbc-direct/scripts/backfill-raw-evidence.sh`を完走し、全terminal manifestが完全inventoryを持ってsealされたことを確認する。partial/failed manifestもprovider成功へ昇格させない。
 6. cursorが完了時に削除された状態から再走査し、中央run/seal/artifact件数が不変であること、source R2の事前・事後inventoryが一致することを確認する。attempt/reuse記録は増えてよい。
 
 ### 2026-09-05 本番検証

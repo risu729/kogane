@@ -70,14 +70,14 @@ unknown response や authentication response body は R2 に保存しません�
 manifestを最後に不変条件付きで保存した後、private Service Binding経由で中央raw-evidenceへ即時importする。中央側は元bytes、hash、metadata、schema、normalizedの再計算結果を検証してからsealする。中央が失敗してもsource R2はoutboxとして残るため、次でcursor付き再送できる。
 
 ```bash
-poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
+services/collector-sbi-shinsei/scripts/backfill-raw-evidence.sh
 ```
 
 初回本番確認は1 manifestだけで停止する。
 
 ```bash
 KOGANE_STOP_AFTER_MANIFEST=1 \
-  poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
+  services/collector-sbi-shinsei/scripts/backfill-raw-evidence.sh
 ```
 
 スクリプトはR2 objectを1件ずつ走査し、失敗manifestでは停止する。canaryと通常完了の出力は件数だけで、object key、hash、本文を含めない。canaryはmanifest page後のcursorを保存しないため、その後のfull backfillで同じmanifestを冪等再送する。完了してもsource R2を削除しない。
@@ -98,21 +98,21 @@ Cloudflare secret として設定します。値を repository、`.dev.vars`、l
 `ADMIN_TRIGGER_TOKEN`はCloudflareから値を読み戻せないため、collector専用スクリプトでローカルfileとWorker secretを同じ値へ同期する。初回作成またはrotationは次を実行する。このスクリプトは32-byteの乱数を生成し、current user所有・mode 0600のregular non-symlink fileだけを使用する。token値はstdout、stderr、Wrangler引数へ出さない。
 
 ```bash
-bash poc/sbi-shinsei-worker/scripts/sync-admin-trigger-token.sh --rotate
+bash services/collector-sbi-shinsei/scripts/sync-admin-trigger-token.sh --rotate
 ```
 
 rotationは保護されたtemporary fileから同じdirectoryの`.pending`を原子的に作り、その値をstdinで`ADMIN_TRIGGER_TOKEN`へ同期する。Wrangler成功後だけ`.pending`を既定pathへatomic renameする。同期結果が不明または失敗した場合は、既存のlocal tokenを変更せず`.pending`を残す。新しいtokenを生成せず、次で同じ値を再送して回復する。
 
 ```bash
-bash poc/sbi-shinsei-worker/scripts/sync-admin-trigger-token.sh --resume
+bash services/collector-sbi-shinsei/scripts/sync-admin-trigger-token.sh --resume
 ```
 
 既存local tokenをrotationせずWorkerへ再同期する場合だけ`--sync`を使う。`.pending`が存在する間は`--sync`と新しい`--rotate`を拒否する。成功出力はsecret名とlocal pathだけであり、直後にcanaryを実行する。
 
 ```bash
-bash poc/sbi-shinsei-worker/scripts/sync-admin-trigger-token.sh --sync
+bash services/collector-sbi-shinsei/scripts/sync-admin-trigger-token.sh --sync
 KOGANE_STOP_AFTER_MANIFEST=1 \
-  poc/sbi-shinsei-worker/scripts/backfill-raw-evidence.sh
+  services/collector-sbi-shinsei/scripts/backfill-raw-evidence.sh
 ```
 
 ローカルCLIは次の順でcredentialを読みます。

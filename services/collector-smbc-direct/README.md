@@ -36,7 +36,7 @@ R2 keyは `raw/smbc-direct/YYYY/MM/DD/<run-id>/...`。口座番号や利用者�
 Bitwarden item IDだけをローカルmetadataへ保存する。passwordやitem JSONの中間fileは作らない。
 
 ```bash
-cd poc/smbc-direct-backfill-worker
+cd services/collector-smbc-direct
 export BW_SESSION="$(bw unlock --raw)"
 printf '%s\n' '<item-id>' > /home/risu/.local/state/kogane/smbc-direct-bitwarden-item-id
 ./scripts/sync-local-secrets.sh
@@ -52,7 +52,7 @@ terminal manifestを保存した直後、`RAW_EVIDENCE_IMPORTER` Service Binding
 historical outboxはローカルのowner-only token fileとcursor fileを使って再送する。
 
 ```bash
-poc/smbc-direct-backfill-worker/scripts/backfill-raw-evidence.sh
+services/collector-smbc-direct/scripts/backfill-raw-evidence.sh
 ```
 
 scriptは1 pageずつ処理し、失敗manifestでは停止する。cursorはrepository外へ原子的に保存し、全件完了時に削除する。source R2は転送後も削除しない。GitHub Actions cron、Queue、追加scheduled triggerは使わない。

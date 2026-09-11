@@ -131,7 +131,7 @@ HTTP 502を返す。`GET /health`は秘密値や口座データを返さない�
 historical outboxは次で1 objectずつbounded scanする。管理tokenはmode 0600のローカルfileから読み、標準出力にはpage・件数・固定failure codeだけを出す。本文、値、source object key、hash、tokenは出力しない。
 
 ```bash
-poc/vpoint-worker/scripts/backfill-raw-evidence.sh
+services/collector-vpoint/scripts/backfill-raw-evidence.sh
 ```
 
 VポイントPay通知メールのhistorical pairは、Vポイント本体のmanifestとは別の専用routeで
@@ -139,7 +139,7 @@ VポイントPay通知メールのhistorical pairは、Vポイント本体のman
 `.eml`単体のscan pageはskipする。
 
 ```bash
-poc/vpoint-worker/scripts/backfill-vpoint-pay-email-raw-evidence.sh
+services/collector-vpoint/scripts/backfill-vpoint-pay-email-raw-evidence.sh
 ```
 
 新着通知のR2保存後は同じService Bindingを`waitUntil`から呼ぶ。中央が一時失敗しても通知の
@@ -172,7 +172,7 @@ Vマネー0件・1 page、9 artifact、failure 0のv2 manifestをR2から再読�
 
 VポイントPayはプリペイドJPY残高・authorization・settlement・refund・chargeの別台帳で、
 正本は`com.smbc_card.vpoint`アプリである。このWeb PoCではAPKを取得・decompileしていない。
-`poc/vpoint-pay-worker`のapp pollingは停止済みであり、このEmail Workerやraw-evidence導入で
+`services/collector-vpoint-pay`のapp pollingは停止済みであり、このEmail Workerやraw-evidence導入で
 再有効化しない。
 将来app解析を行う場合、binary/decompiled/decrypted artifactは既存private Android archive
 repositoryへ保存し、Koganeにはprovenance、hash、再現手順、sanitize済みのschemaだけを置く。

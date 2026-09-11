@@ -4,9 +4,9 @@
 
 Live追試: 2026-08-31、Kogane Capture Chromeのユーザー口座でVポイントMy Pageへloginし、
 `balance_info`、`tpoint_history`、`smfg_point`をread-onlyで検証した。値、加盟店、会員番号、
-Cookie、個人情報はrepositoryへ保存していない。PoCは`poc/vpoint-worker/`に置く。
+Cookie、個人情報はrepositoryへ保存していない。PoCは`services/collector-vpoint/`に置く。
 同日のVポイントPay app静的解析と独立Worker設計は`docs/sources/v-point-pay.md`および
-`poc/vpoint-pay-worker/`へ分離した。
+`services/collector-vpoint-pay/`へ分離した。
 
 ## 1. 対象範囲と安全境界
 

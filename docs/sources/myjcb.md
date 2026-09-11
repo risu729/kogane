@@ -97,7 +97,7 @@ Browser Run上の成功loginで、同一originの動的通信を値なしで観�
 
 Browserless化は可能性を否定しないが、現在のcaptureだけから`result`をJSON、JWT、暗号文等のどれかへ断定しない。実装は、(1) 複数の成功runでNNL SDK version、WebAuthn request/response、`result`、cookie/relay stateをprivateに対応付け、(2) challenge依存部分と固定envelope、integrity、transaction/SDK metadata、extension/risk signalを差分し、(3) WebAuthn標準部分をbyte-exact test付きでWorkers Web Cryptoへ移し、(4) 観測済みNNL/JCB serializationとendpoint state machineだけを独立adapterへ実装する順序とする。`clientDataJSON`、RP ID hash、UP/UV/BE/BS、counter、extensions、ES256署名表現のいずれも「秘密鍵が同じ」ことから推測しない。
 
-direct clientは既存Browser bootstrapと別modeにし、fresh challenge、一回利用、replay拒否、RP ID/origin不一致、session expiry、連続Cron、NNL version driftを検証する。未知のSDK／response／redirect／追加認証ではfail closedとし、同一runでBrowserへ自動fallbackして認証を二重送信しない。mypage到達後のcookie jar、strict read allowlist、明細client、R2保存は現在の実装を再利用し、Browser版とcard/period/artifact種別が一致することを確認してから別PRでBrowser bindingを除去する。解析用のchallenge、assertion、cookie、`result`、明細値はpublic repo、Worker log、R2へ保存しない。詳細な実装順と完了条件は`poc/myjcb-worker/README.md`に置く。
+direct clientは既存Browser bootstrapと別modeにし、fresh challenge、一回利用、replay拒否、RP ID/origin不一致、session expiry、連続Cron、NNL version driftを検証する。未知のSDK／response／redirect／追加認証ではfail closedとし、同一runでBrowserへ自動fallbackして認証を二重送信しない。mypage到達後のcookie jar、strict read allowlist、明細client、R2保存は現在の実装を再利用し、Browser版とcard/period/artifact種別が一致することを確認してから別PRでBrowser bindingを除去する。解析用のchallenge、assertion、cookie、`result`、明細値はpublic repo、Worker log、R2へ保存しない。詳細な実装順と完了条件は`services/collector-myjcb/README.md`に置く。
 
 ## Web 保護、WAF、Akamai
 
@@ -291,7 +291,7 @@ A は公開 API がないため不適、B は非公式 HTML と動的 login prot
 
 ## Worker PoC（2026-08-31）
 
-`poc/myjcb-worker`に、`mnie`やOkuraのsourceをreuseしない独立Cloudflare Workers PoCを追加した。Worker自体は**未deploy・未auth test**であり、実credentialを投入していない。一方、利用者のKuebiko sessionでは第一IDへの実passkey loginとread/exportを観測しており、そのroute、field名、DOM shape、formatだけを実装へ反映した。raw credential、WebAuthn assertion、cookie、明細値、取得file、hashはcommitしていない。
+`services/collector-myjcb`に、`mnie`やOkuraのsourceをreuseしない独立Cloudflare Workers PoCを追加した。Worker自体は**未deploy・未auth test**であり、実credentialを投入していない。一方、利用者のKuebiko sessionでは第一IDへの実passkey loginとread/exportを観測しており、そのroute、field名、DOM shape、formatだけを実装へ反映した。raw credential、WebAuthn assertion、cookie、明細値、取得file、hashはcommitしていない。
 
 構成は次の二段階である。
 
@@ -345,4 +345,4 @@ checked-in canaryはsource R2をread-onlyで184 objects / 24 manifests監査し�
 
 日次実行は`0 21 * * *`のCloudflare CronからWorker `scheduled()`を直接呼び、GitHub Actions cronを使わない。手動`POST /trigger`のBearerはSHA-256で固定長化してから`crypto.subtle.timingSafeEqual`で比較する。ただしCron/manual overlap lockは未実装で、同一IDの同時login/readを防ぐDurable Object lockまたはQueue直列化をdeploy/merge前要件とする。
 
-実装、stop条件、R2 layout、cleanup前提、synthetic test、未確認事項は`poc/myjcb-worker/README.md`に集約した。公開AGPL prior artの観測は、PR #24調査時点のOkura commit `afc6057fba78b5bfd6364654548fbfd91c76692a`とPoC照合時点の`bbf11e032aba4a380009508e91954361a3f9d658`を区別し、protocol確認だけに使った。
+実装、stop条件、R2 layout、cleanup前提、synthetic test、未確認事項は`services/collector-myjcb/README.md`に集約した。公開AGPL prior artの観測は、PR #24調査時点のOkura commit `afc6057fba78b5bfd6364654548fbfd91c76692a`とPoC照合時点の`bbf11e032aba4a380009508e91954361a3f9d658`を区別し、protocol確認だけに使った。

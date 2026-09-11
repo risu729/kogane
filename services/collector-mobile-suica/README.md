@@ -88,7 +88,7 @@ manifest metadataは安全な`source`, `status`, `runId`の3項目だけを保�
 Bitwardenへ接続しない。
 
 ```sh
-cd poc/mobile-suica-worker
+cd services/collector-mobile-suica
 export BW_SESSION="$(bw unlock --raw)"
 node scripts/verify-bitwarden-passkey.mjs
 node scripts/sync-bitwarden-passkey.mjs

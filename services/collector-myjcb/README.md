@@ -209,7 +209,7 @@ Cronとmanual triggerのoverlap lockは未実装である。同一IDの同時log
 historical outboxは次でbounded backfillできる。cursorはowner-only `0600` fileへ原子的に保存され、完了時に削除される。
 
 ```sh
-poc/myjcb-worker/scripts/backfill-raw-evidence.sh
+services/collector-myjcb/scripts/backfill-raw-evidence.sh
 ```
 
 ## synthetic test

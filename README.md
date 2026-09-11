@@ -61,15 +61,32 @@ mise tasks ls             # what else is there
 See [Development checks and CI](docs/ci.md) for the task naming convention, how
 the CI matrices are generated, and what to do when adding a workspace.
 
+## Collectors
+
+One deployed Worker per source, under `services/collector-<source>`. The runtime
+each of them needs, and why, is in the
+[collector runtime inventory](poc/README.md).
+
+- [SMCC Vpass](services/collector-vpass/README.md)
+- [SBI証券](services/collector-sbi-securities/README.md)
+- [SBI新生銀行](services/collector-sbi-shinsei/README.md)
+- [SBI VC TRADE](services/collector-sbi-vc-trade/README.md)
+  (and its [local read-only client](packages/sbi-vc-trade-client/README.md))
+- [Sony銀行](services/collector-sony-bank/README.md)
+- [三井住友銀行 SMBCダイレクト](services/collector-smbc-direct/README.md)
+- [PRESTIA GLOBAL PASS](services/collector-globalpass/README.md)
+- [MyJCB](services/collector-myjcb/README.md)
+- [Mobile Suica](services/collector-mobile-suica/README.md)
+- [Money Forward](services/collector-moneyforward/README.md)
+- [Vポイント](services/collector-vpoint/README.md)
+- [V Point Pay](services/collector-vpoint-pay/README.md)
+
 ## Proofs of concept
 
 - [Observation pipeline (ingest, parsers, evidence browser)](poc/observation-pipeline/README.md)
-- [Browserless Vpass JSON collector](poc/vpass-json/README.md)
-- [SBI新生銀行 fail-closed Worker collector skeleton](poc/sbi-shinsei-worker/README.md)
 - [OCI/WSL Vpass browser comparison](poc/oci-browser-probe/README.md)
 - [Camoufox Windows/macOS fingerprint controls](poc/camoufox-container-probe/README.md)
 - [Kameleo Windows Chrome container control](poc/kameleo-container-probe/README.md)
 - [Cloudflare Container runtime probe](poc/cloudflare-runtime-probe/README.md)
 - [Cloudflare Browser Rendering probe](poc/cloudflare-browser-run/README.md)
 - [Per-scraper tamia TCP bridge probe](poc/tamia-tcp-bridge/README.md)
-- [Mobile Suica JRE ID passkey collector](poc/mobile-suica-worker/README.md)
