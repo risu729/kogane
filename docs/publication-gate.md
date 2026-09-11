@@ -143,7 +143,7 @@ Every normal read path now decides "current" by membership in
 | `poc/observation-pipeline/src/queries.ts` `CURRENT`                                | legacy predicate                                           | projection membership                                                                                    |
 | `services/evidence-browser/src/identity-api.ts` `eligible`                         | legacy predicate                                           | join `published_parse_runs`                                                                              |
 | `services/evidence-browser/src/observation-organization.ts` `historical`           | `superseded_by_parse_run_id IS NOT NULL`                   | `pub.parse_run_id IS NULL` (LEFT JOIN projection); unadopted, unsuperseded runs are decorated for no one |
-| `services/raw-evidence/migrations/0026` `current_identity_observations`            | legacy predicate (0022)                                    | projection-driven, same plan shape                                                                       |
+| `packages/storage-d1/migrations/core/0026` `current_identity_observations`         | legacy predicate (0022)                                    | projection-driven, same plan shape                                                                       |
 | `services/observation-pipeline/src/identity-store.ts` `identitySweep` ordering     | current-first by `superseded IS NOT NULL`                  | published-first by projection membership (historical runs are still interpreted, as before)              |
 | `services/observation-pipeline/src/identity-audit.ts` `eligible`, lineage          | legacy predicate; lineage by supersession                  | projection join; lineage by projection                                                                   |
 | `services/observation-pipeline/scripts/status.ts` coverage                         | legacy predicate                                           | projection; plus a `publication` mismatch count                                                          |
@@ -178,7 +178,7 @@ the replay-plan estimate and `/status` freshness kept reading
   records: the read model's legacy concept (1), `publication-gate.ts` (5),
   `worker.ts` supersession batch (3), the PoC `store.ts` (4). One more
   occurrence fails until the number is changed in review;
-- `services/raw-evidence/migrations/*.sql` may state it only up to 0026, the
+- `packages/storage-d1/migrations/core/*.sql` may state it only up to 0026, the
   migration that introduced the projection and backfilled it from that rule;
 - `status = 'ok'` outside tests appears only in the reviewed writers and the
   named concept, again with exact counts: it is the execution-attempt fact,

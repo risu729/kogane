@@ -32,7 +32,7 @@ import {
 } from "../src/index";
 import * as sql from "../src/sql";
 
-const MIGRATIONS = join(import.meta.dir, "../../../services/raw-evidence/migrations");
+const MIGRATIONS = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
 
 /** The production schema, views included, on an in-memory SQLite. */
 function migratedDatabase(): Database {

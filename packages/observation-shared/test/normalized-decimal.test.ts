@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { validNormalizedDecimal, isNormalizedZero } from "../src/normalized-decimal.ts";
 const ddl = readFileSync(
   new URL(
-    "../../../services/raw-evidence/migrations/0024_observation_decimals.sql",
+    "../../../packages/storage-d1/migrations/core/0024_observation_decimals.sql",
     import.meta.url,
   ),
   "utf8",

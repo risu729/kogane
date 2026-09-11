@@ -34,12 +34,13 @@ import { REPO_ROOT } from "./repo-root.ts";
 const PREDICATE_ALLOW_LIST: Record<string, number> = {
   // The legacy rule, exported only for the consistency comparison.
   "packages/read-model/src/concepts.ts": 1,
-  // The projection writer's two statements and the module note. Since
-  // migration 0028 the repair selection reads publication_gate_gaps, which
-  // already excludes candidate results, so it states the rule no more.
-  "services/observation-pipeline/src/publication-gate.ts": 3,
-  // The supersession batch the writer still maintains during compatibility.
-  "services/observation-pipeline/src/worker.ts": 3,
+  // The publication gate (unified plan U05: CORE SQL the App and the Processor
+  // share). The projection writer's two statements and the module note, plus
+  // the supersession batch the writer still maintains during compatibility,
+  // which moved here out of the pipeline Worker. Since migration 0028 the
+  // repair selection reads publication_gate_gaps, which already excludes
+  // candidate results, so it states the rule no more.
+  "packages/storage-d1/src/atomic/publication.ts": 6,
   // The candidate writer: a candidate is recorded only if the same batch left
   // its run ok and unsuperseded. A writer decision, never a read.
   "services/observation-pipeline/src/release-adoption.ts": 1,
@@ -57,19 +58,22 @@ const PREDICATE_ALLOW_LIST: Record<string, number> = {
 const OK_STATUS_ALLOW_LIST: Record<string, number> = {
   // successfulParses (the named execution fact) and the legacy rule.
   "packages/read-model/src/concepts.ts": 2,
-  // Writer: publish batch, the duplicate-attempt skip, the job close, and the
-  // comment that explains when contract v2 rows become visible.
-  "services/observation-pipeline/src/worker.ts": 7,
-  // Writer: the two projection statements and the module note.
-  "services/observation-pipeline/src/publication-gate.ts": 4,
+  // Writer: the duplicate-attempt skip and the comment that explains when
+  // contract v2 rows become visible. The publish batch moved to
+  // packages/storage-d1 with the rest of the gate (U05).
+  "services/observation-pipeline/src/worker.ts": 2,
+  // Writer: the publish batch, the two projection statements and the module
+  // note, all now in the shared CORE package.
+  "packages/storage-d1/src/atomic/publication.ts": 9,
   // Candidate writer: the run is marked ok, the candidate row is recorded only
   // for an ok unsuperseded run, and the job is closed only for an ok run.
   // Everything the comparison calls "published" comes from the projection.
   "services/observation-pipeline/src/release-adoption.ts": 3,
   // Identity writer: interprets every successful run, published or not.
-  "services/observation-pipeline/src/identity-store.ts": 5,
+  // Moved to the shared CORE package by U05; the SQL is unchanged.
+  "packages/storage-d1/src/core/identity-store.ts": 5,
   // Identity audit: coverage over interpreted runs, not over what readers see.
-  "services/observation-pipeline/src/identity-audit.ts": 2,
+  "packages/storage-d1/src/core/identity-audit.ts": 2,
   // Operator diagnostics over parse attempts per artifact; no reader path.
   "services/observation-pipeline/scripts/diagnose.ts": 1,
   // Decorates published and superseded runs; adoption comes from the LEFT JOIN
@@ -152,7 +156,7 @@ describe("publication gate predicate guard", () => {
   });
 
   test("a migration after the gate may not embed the legacy rule", () => {
-    const migrations = tracked("services/raw-evidence/migrations/*.sql");
+    const migrations = tracked("packages/storage-d1/migrations/core/*.sql");
     expect(migrations.length).toBeGreaterThan(0);
     const offenders: string[] = [];
     const legacy: string[] = [];

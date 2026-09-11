@@ -1885,7 +1885,7 @@
               "binding": "DB",
               "databaseName": "kogane-raw-evidence",
               "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
-              "migrationsDir": "../raw-evidence/migrations",
+              "migrationsDir": "../../packages/storage-d1/migrations/core",
               "live": true
             }
           ],
@@ -1970,7 +1970,7 @@
               "binding": "DB",
               "databaseName": "kogane-raw-evidence",
               "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
-              "migrationsDir": "migrations",
+              "migrationsDir": "../../packages/storage-d1/migrations/core",
               "live": true
             }
           ],

@@ -1,8 +1,3 @@
-/** Deterministic identity row keys: a prefix and a SHA-256 over the JSON of the parts. */
-export async function identityKey(prefix: string, parts: unknown[]): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(JSON.stringify(parts)),
-  );
-  return `${prefix}_${Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("")}`;
-}
+// Moved to packages/storage-d1 with the rest of the identity CORE access
+// (unified plan U05). Historical import path only.
+export * from "../../../packages/storage-d1/src/core/identity-keys.ts";
