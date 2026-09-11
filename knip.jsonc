@@ -55,11 +55,9 @@
     },
     "poc/*": {
       // `bun test` has no knip plugin: without this every test helper reads as
-      // unused. The Worker entry and the Durable Object classes it exports come
-      // from the wrangler configs, including the bootstrap ones, which the
-      // plugin's default glob (`wrangler.{json,jsonc,toml}`) would miss.
-      "entry": ["test/**/*.test.ts", "scripts/*.ts"],
-      "wrangler": { "config": ["wrangler*.jsonc"] }
+      // unused. Only `poc/observation-pipeline` is left here (its split is a
+      // later U04 row); the block goes with it.
+      "entry": ["test/**/*.test.ts", "scripts/*.ts"]
     },
     "poc/observation-pipeline": {
       "entry": ["test/**/*.test.ts", "scripts/*.ts", "web/**/*.tsx"]

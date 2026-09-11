@@ -36,21 +36,21 @@ Generated 2026-09-11 against this commit's tree.
 
 ### Unused files (30) — all of them explained
 
-| what                                                                                                                                                                                                                              | why knip cannot see it                                                                                                    |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `experiments/cloudflare-runtime-probe/container/server.ts`, `poc/globalpass-worker/container/{server,connect-relay}.mjs`, `poc/sbi-shinsei-worker/container/{server,connect-relay,child-lifecycle,relay-lifecycle.node-test}.mjs` | Container image entry points. Each is named by its `Dockerfile` (`CMD ["node", "server.mjs"]`) and copied into the image. |
-| `poc/globalpass-worker/scripts/*.mjs`, `poc/mobile-suica-worker/scripts/*.mjs`, `poc/globalpass-worker/test/connect-relay.node.mjs`                                                                                               | Operator probes and passkey-sync scripts a human runs by hand; the `.node-test.mjs` files run under `node --test`.        |
-| `poc/observation-pipeline/src/{demo,serve}.ts`                                                                                                                                                                                    | Local entry points started by their mise tasks.                                                                           |
-| `poc/sbi-shinsei-worker/src/local/*`, `poc/sbi-vc-trade-client/src/cli.ts`, `poc/vpass-json/src/{cli,mobile-cli,live-smoke,mobile-auth-probe,fingerprint,mobile-vpass-client}.ts`                                                 | Local diagnostic CLIs. These are the files U04's remaining rows classify; none is deleted here on knip's say-so.          |
+| what                                                                                                                                                                                                                                                                        | why knip cannot see it                                                                                                                  |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `experiments/cloudflare-runtime-probe/container/server.ts`, `services/collector-globalpass/container/{server,connect-relay}.mjs`, `services/collector-sbi-shinsei/container/{server,connect-relay,child-lifecycle,child-lifecycle.node-test,relay-lifecycle.node-test}.mjs` | Container image entry points. Each is named by its `Dockerfile` (`CMD ["node", "server.mjs"]`) and copied into the image.               |
+| `services/collector-globalpass/scripts/*.mjs`, `services/collector-mobile-suica/scripts/**/*.mjs`, `services/collector-globalpass/test/connect-relay.node.mjs`                                                                                                              | Operator probes and passkey-sync scripts a human runs by hand; the `.node-test.mjs` files run under `node --test`.                      |
+| `poc/observation-pipeline/src/{demo,serve}.ts`                                                                                                                                                                                                                              | Local entry points started by their mise tasks.                                                                                         |
+| `services/collector-sbi-shinsei/src/local/*`, `packages/sbi-vc-trade-client/src/cli.ts`, `services/collector-vpass/src/{cli,mobile-cli,live-smoke,mobile-auth-probe,fingerprint,mobile-vpass-client}.ts`                                                                    | Local diagnostic CLIs. They moved with their collectors in U04 and are still classified by hand; none is deleted here on knip's say-so. |
 
-### Unused dependencies (5)
+### Unused dependencies (3) and devDependencies (2)
 
-| dependency                                                | verdict                                                                                           |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `impit` in `experiments/cloudflare-runtime-probe`         | **False positive.** Imported by `container/server.ts`, which the `Dockerfile` starts.             |
-| `ws` in `poc/globalpass-worker`, `poc/sbi-shinsei-worker` | **False positive.** Imported by the container relays and the node-test files.                     |
-| `parse5` in `poc/observation-pipeline`                    | Not checked; belongs to that workspace's own U04 row.                                             |
-| `@clack/prompts` in `poc/vpass-json`                      | Used by `src/cli.ts`, which is itself only reachable by hand — decide both together, not by tool. |
+| dependency                                                                      | verdict                                                                                           |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `impit` in `experiments/cloudflare-runtime-probe`                               | **False positive.** Imported by `container/server.ts`, which the `Dockerfile` starts.             |
+| `ws` (dev) in `services/collector-globalpass`, `services/collector-sbi-shinsei` | **False positive.** Imported by the container relays and the node-test files.                     |
+| `parse5` in `poc/observation-pipeline`                                          | Not checked; belongs to that workspace's own U04 row.                                             |
+| `@clack/prompts` in `services/collector-vpass`                                  | Used by `src/cli.ts`, which is itself only reachable by hand — decide both together, not by tool. |
 
 `wrangler`, `vitest` and `cloudflare` are in `ignoreDependencies`: the first two
 are locked binaries called from `tasks.toml` rather than a package script, and
@@ -66,25 +66,26 @@ parsers were promoted. The script cannot run today. It is listed under
 "Unresolved imports", not under anything about unused code, and fixing it
 belongs to that workspace's own work item — this report only records it.
 
-### Unused exports (149) and exported types (118)
+### Unused exports (153) and exported types (118)
 
 Highest first; the long tail is one or two per workspace.
 
-| workspace                         | exports | types |
-| --------------------------------- | ------: | ----: |
-| `services/observation-pipeline`   |      38 |    16 |
-| `services/collector-r2-importer`  |      31 |    29 |
-| `services/evidence-browser`       |      19 |    19 |
-| `packages/parsers`                |      18 |     2 |
-| `poc/observation-pipeline`        |      10 |    18 |
-| `packages/application`            |       8 |     3 |
-| `poc/vpass-json`                  |       4 |     4 |
-| `poc/sbi-shinsei-worker`          |       4 |     2 |
-| `poc/vpoint-pay-worker`           |       4 |     0 |
-| `poc/vpoint-worker`               |       0 |     4 |
-| `poc/smbc-direct-backfill-worker` |       1 |     4 |
-| `packages/observation-shared`     |       2 |     7 |
-| everything else                   |      10 |    13 |
+| workspace                        | exports | types |
+| -------------------------------- | ------: | ----: |
+| `services/collector-r2-importer` |      31 |    29 |
+| `services/observation-pipeline`  |      38 |    16 |
+| `services/evidence-browser`      |      23 |    19 |
+| `poc/observation-pipeline`       |      10 |    18 |
+| `packages/parsers`               |      18 |     2 |
+| `packages/application`           |       8 |     3 |
+| `packages/observation-shared`    |       2 |     7 |
+| `services/collector-vpass`       |       4 |     4 |
+| `services/collector-sbi-shinsei` |       4 |     2 |
+| `packages/collection`            |       2 |     3 |
+| `services/collector-smbc-direct` |       1 |     4 |
+| `services/collector-vpoint-pay`  |       4 |     0 |
+| `services/collector-vpoint`      |       0 |     4 |
+| everything else                  |       8 |     7 |
 
 Most of these are contract vocabularies that exist to be read rather than
 imported (`PRINCIPAL_KINDS`, `PLAN_STATUSES`, row and manifest types describing
@@ -93,14 +94,14 @@ genuinely exported for no reason and could become module-private. None of that
 is urgent, and none of it changes behaviour, so this is a list to work through
 during other edits — not a cleanup PR of its own.
 
-### Configuration hints (18)
+### Configuration hints (17)
 
 Knip suggests removing ignores it never needed and refining entry patterns that
 match nothing in some workspaces (`scripts/*.ts` where a workspace has no
-`scripts/`, `src/index.ts` where a package has no barrel). They are harmless: a
-pattern that matches nothing costs nothing, and one shared `packages/*` block is
-easier to reason about than a block per package. Revisit them the next time the
-config changes.
+`scripts/`, `src/index.ts` where a package has no barrel or already has an
+`exports` map). They are harmless: a pattern that matches nothing costs nothing,
+and one shared `packages/*` block is easier to reason about than a block per
+package. Revisit them the next time the config changes.
 
 ## When this report may be used to delete something
 
