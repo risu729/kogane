@@ -2,30 +2,30 @@
 #:schema https://mise.jdx.dev/schema/mise-task.json
 
 ["sbi-securities-worker:types"]
-description = "Generate the Cloudflare Worker types of poc/sbi-securities-worker."
-dir = "poc/sbi-securities-worker"
+description = "Generate the Cloudflare Worker types of services/collector-sbi-securities."
+dir = "services/collector-sbi-securities"
 run = "./node_modules/.bin/wrangler types"
 
 ["sbi-securities-worker:typecheck"]
-description = "Type-check poc/sbi-securities-worker."
+description = "Type-check services/collector-sbi-securities."
 depends = ["sbi-securities-worker:types"]
-dir = "poc/sbi-securities-worker"
+dir = "services/collector-sbi-securities"
 run = "./node_modules/.bin/tsc --noEmit"
 
 ["sbi-securities-worker:test"]
-description = "Run the poc/sbi-securities-worker tests."
+description = "Run the services/collector-sbi-securities tests."
 depends = ["sbi-securities-worker:types"]
-dir = "poc/sbi-securities-worker"
+dir = "services/collector-sbi-securities"
 run = "bun test"
 
 ["sbi-securities-worker:dry-run"]
-description = "Validate the poc/sbi-securities-worker deployment without uploading it."
+description = "Validate the services/collector-sbi-securities deployment without uploading it."
 depends = ["sbi-securities-worker:types"]
-dir = "poc/sbi-securities-worker"
+dir = "services/collector-sbi-securities"
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
 ["ci:sbi-securities-worker"]
-description = "Every check CI runs for poc/sbi-securities-worker."
+description = "Every check CI runs for services/collector-sbi-securities."
 depends = ["sbi-securities-worker:typecheck", "sbi-securities-worker:test"]

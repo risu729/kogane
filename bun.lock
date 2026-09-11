@@ -172,7 +172,7 @@
         "playwright": "1.62.0",
       },
     },
-    "poc/sbi-securities-worker": {
+    "services/collector-sbi-securities": {
       "name": "@kogane/poc-sbi-securities-worker",
       "devDependencies": {
         "@types/bun": "1.3.8",
@@ -507,7 +507,7 @@
 
     "@kogane/poc-observation-pipeline": ["@kogane/poc-observation-pipeline@workspace:poc/observation-pipeline"],
 
-    "@kogane/poc-sbi-securities-worker": ["@kogane/poc-sbi-securities-worker@workspace:poc/sbi-securities-worker"],
+    "@kogane/poc-sbi-securities-worker": ["@kogane/poc-sbi-securities-worker@workspace:services/collector-sbi-securities"],
 
     "@kogane/poc-sbi-shinsei-worker": ["@kogane/poc-sbi-shinsei-worker@workspace:poc/sbi-shinsei-worker"],
 

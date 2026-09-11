@@ -134,7 +134,7 @@
     },
     {
       "name": "sbi-securities-worker",
-      "path": "poc/sbi-securities-worker",
+      "path": "services/collector-sbi-securities",
       "config": "wrangler.jsonc"
     },
     {

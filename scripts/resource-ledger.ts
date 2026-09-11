@@ -158,14 +158,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/sbi-securities-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-sbi-securities",
-    requiredVerification: "contract tests and resource identity; secret material is not moved",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
   "poc/sbi-shinsei-worker": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",
@@ -279,6 +271,14 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     requiredVerification:
       "the Worker keeps running until U15; old protocol still readable; no double cron",
     executionStatus: "PLANNED_NOT_EXECUTED",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-sbi-securities": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-sbi-securities",
+    requiredVerification: "contract tests and resource identity; secret material is not moved",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "services/evidence-browser": {

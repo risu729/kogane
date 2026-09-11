@@ -251,59 +251,6 @@
       "workers": []
     },
     {
-      "directory": "poc/sbi-securities-worker",
-      "workspace": "poc",
-      "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "promote-service",
-        "proposedTarget": "services/collector-sbi-securities",
-        "requiredVerification": "contract tests and resource identity; secret material is not moved",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-sbi-collector-poc; buckets=kogane-sbi-collector-poc)"
-      },
-      "workers": [
-        {
-          "config": "poc/sbi-securities-worker/wrangler.jsonc",
-          "name": "kogane-sbi-collector-poc",
-          "main": "src/worker.ts",
-          "role": "deployed",
-          "liveWorker": true,
-          "crons": [
-            "0 21 * * *"
-          ],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "SNAPSHOTS",
-              "bucket": "kogane-sbi-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [
-            {
-              "binding": "RAW_EVIDENCE_IMPORTER",
-              "service": "kogane-collector-r2-importer"
-            }
-          ],
-          "varNames": [
-            "COLLECTOR_SCHEMA_VERSION"
-          ],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        }
-      ]
-    },
-    {
       "directory": "poc/sbi-shinsei-worker",
       "workspace": "poc",
       "disposition": {
@@ -1649,6 +1596,59 @@
             "RAW_EVIDENCE_TOKEN_VPOINT",
             "RAW_EVIDENCE_TOKEN_VPOINT_PAY_EMAIL"
           ],
+          "unextractedKeys": []
+        }
+      ]
+    },
+    {
+      "directory": "services/collector-sbi-securities",
+      "workspace": "services",
+      "disposition": {
+        "source": "poc_disposition.csv",
+        "proposedAction": "promote-service",
+        "proposedTarget": "services/collector-sbi-securities",
+        "requiredVerification": "contract tests and resource identity; secret material is not moved",
+        "executionStatus": "EXECUTED_U04",
+        "planLiveResourceStatus": "NOT_VERIFIED",
+        "liveResourceStatus": "LIVE(workers=kogane-sbi-collector-poc; buckets=kogane-sbi-collector-poc)"
+      },
+      "workers": [
+        {
+          "config": "services/collector-sbi-securities/wrangler.jsonc",
+          "name": "kogane-sbi-collector-poc",
+          "main": "src/worker.ts",
+          "role": "deployed",
+          "liveWorker": true,
+          "crons": [
+            "0 21 * * *"
+          ],
+          "emailHandler": false,
+          "d1": [],
+          "r2": [
+            {
+              "binding": "SNAPSHOTS",
+              "bucket": "kogane-sbi-collector-poc",
+              "live": true
+            }
+          ],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [],
+          "containers": [],
+          "vpcNetworks": [],
+          "serviceBindings": [
+            {
+              "binding": "RAW_EVIDENCE_IMPORTER",
+              "service": "kogane-collector-r2-importer"
+            }
+          ],
+          "varNames": [
+            "COLLECTOR_SCHEMA_VERSION"
+          ],
+          "requiredSecretNames": [],
           "unextractedKeys": []
         }
       ]

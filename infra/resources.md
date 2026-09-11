@@ -201,32 +201,6 @@ No wrangler config.
 
 No wrangler config.
 
-### `poc/sbi-securities-worker`
-
-- Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-securities
-- Required verification: contract tests and resource identity; secret material is not moved
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-sbi-collector-poc; buckets=kogane-sbi-collector-poc)
-
-#### `kogane-sbi-collector-poc` — `poc/sbi-securities-worker/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
-- R2: SNAPSHOTS → kogane-sbi-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
-- Crons: `0 21 * * *`
-- Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
-- Required secrets (names only): —
-
 ### `poc/sbi-shinsei-worker`
 
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-shinsei
@@ -858,6 +832,32 @@ No wrangler config.
 - Assets: —
 - Vars (names only): IMPORTER_VERSION<br>RECONCILER_ACCOUNT_ID
 - Required secrets (names only): GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST<br>ORIGIN_FINGERPRINT_KEY<br>RAW_EVIDENCE_TOKEN<br>RAW_EVIDENCE_TOKEN_GLOBAL_PASS<br>RAW_EVIDENCE_TOKEN_MOBILE_SUICA<br>RAW_EVIDENCE_TOKEN_MONEYFORWARD<br>RAW_EVIDENCE_TOKEN_MYJCB<br>RAW_EVIDENCE_TOKEN_SBI_SHINSEI<br>RAW_EVIDENCE_TOKEN_SBI_VC<br>RAW_EVIDENCE_TOKEN_SMBC_DIRECT<br>RAW_EVIDENCE_TOKEN_SONY<br>RAW_EVIDENCE_TOKEN_VPASS<br>RAW_EVIDENCE_TOKEN_VPOINT<br>RAW_EVIDENCE_TOKEN_VPOINT_PAY_EMAIL
+
+### `services/collector-sbi-securities`
+
+- Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-securities
+- Required verification: contract tests and resource identity; secret material is not moved
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-sbi-collector-poc; buckets=kogane-sbi-collector-poc)
+
+#### `kogane-sbi-collector-poc` — `services/collector-sbi-securities/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: —
+- R2: SNAPSHOTS → kogane-sbi-collector-poc
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Crons: `0 21 * * *`
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Required secrets (names only): —
 
 ### `services/evidence-browser`
 
