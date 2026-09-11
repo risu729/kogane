@@ -97,6 +97,9 @@ function environment(fetcher: (request: Request) => Promise<Response>): Env {
     RAW_EVIDENCE_IMPORTER: { fetch: fetcher } as Fetcher,
     BACKFILL_SESSION: {} as unknown as Env["BACKFILL_SESSION"],
     SNAPSHOTS: {} as R2Bucket,
+    // U09 bindings; this route never touches either of them.
+    DATA: {} as R2Bucket,
+    COLLECTION_TARGET: "legacy",
     TAMIA: {} as Fetcher,
     COLLECTOR_SCHEMA_VERSION: "smbc-direct-backfill-worker-poc-v1",
     SMBC_DIRECT_BASE_URL: "https://direct3.smbc.co.jp",

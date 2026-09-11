@@ -2,6 +2,7 @@ import { SmbcBackfillSession } from "./session";
 import { renderUi } from "./ui";
 import { accessJwtSubject } from "./access";
 import { backfillStoredRuns } from "./raw-evidence";
+import { progressWaitingForHuman } from "./shared-collection";
 
 export { SmbcBackfillSession };
 
@@ -61,7 +62,10 @@ export default {
         });
       }
       if (request.method === "GET" && url.pathname === "/api/status") {
-        return json(await stub.getStatus());
+        const progress = await stub.getStatus();
+        // U09: this source has no unattended re-authentication at all, so the
+        // operations API is told plainly when the person has to act (12 §3).
+        return json({ ...progress, waitingForHuman: progressWaitingForHuman(progress) });
       }
       if (request.method === "POST" && url.pathname === "/api/start") {
         assertSameOriginAction(request);

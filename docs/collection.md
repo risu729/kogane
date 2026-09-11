@@ -332,3 +332,56 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   `worker-test/shared-data-bucket.test.ts`, which drives the real Durable
   Object and a real Miniflare R2 `DATA` bucket (its Miniflare config binds
   `COLLECTION_TARGET=shared`; the deployed config still ships `legacy`).
+
+### smbc-direct (`kogane-smbc-direct-backfill-poc`)
+
+The only human-triggered source: a person signs in behind Cloudflare Access,
+approves a QR challenge, and the backfill then runs across many Durable Object
+alarms, one month chunk at a time. **No cron**, before or after this change.
+Terminal source id `smbc-direct` (the Processor maps it to the CORE source
+`smbc-bank`).
+
+| Artifact                                                    | Role                 | Bytes                                       |
+| ----------------------------------------------------------- | -------------------- | ------------------------------------------- |
+| `balance.raw.json.sjis`, `transactions/*.raw.json.sjis`     | `provider_response`  | the provider's own response bytes, verbatim |
+| `balance.normalized.json`, `transactions/*.normalized.json` | `collector_derived`  | the collector's normalized counterparts     |
+| `manifest.json`                                             | `collector_manifest` | the exact manifest bytes written to staging |
+
+- **One terminal per backfill run.** The run is finished exactly once — when the
+  last chunk lands, when it ends partial, or when it fails — and that is the only
+  place the terminal is written, whatever the outcome.
+- Because the chunks are written across alarms, the run's bytes are re-read from
+  the collector's own staging bucket at that point and **verified against the
+  manifest** (size and digest) before anything is planned; a byte that changed
+  or vanished stops the run with no terminal. A run larger than
+  `MAX_SHARED_RUN_BYTES` (48 MiB) is refused for the same reason rather than
+  read into memory. This is a known limit of doing the terminal write in the
+  Worker while the legacy staging bucket still exists; U15 removes the staging
+  round trip.
+- `requestedScope`: `date_range` over `DEFAULT_BACKFILL_FROM`…today,
+  `unitKeys: ["account"]`; one `account` unit of kind `collection`. `ranges`:
+  the requested range plus one `declared_coverage` range per collected month
+  (the raw and normalized artifacts of a month share it).
+- Media types lose their `charset` parameter in the terminal (`application/json`);
+  the Shift_JIS bytes themselves are stored unchanged.
+- `transformations`: one `extracted` step per normalized artifact
+  (`smbc-direct-normalizer`) naming its raw parent when that parent is in the run.
+- `acquisitionSessionRef`: **yes.** The Durable Object keeps `sessionRef` (the
+  live generation, rotated on every approved sign-in) and `runSessionRef` (the
+  generation that opened the current run, kept across a resume). The terminal
+  carries `runSessionRef`; the credential, the encrypted session envelope, the
+  challenge state and the page cookies stay in Durable Object state (12 §4).
+- Human-required: this source has **no unattended re-authentication at all**,
+  and none was added. Any run that does not reach `success` needs a person to
+  approve a new challenge before it can continue, so its terminal reports
+  `waitingForHuman`, and a run that lost its session carries
+  `human_required_approval` (G3-10, G3-11). `/api/status` reports
+  `waitingForHuman` while the person still has to act.
+- Verified with synthetic data only: `test/shared-collection.test.ts` and
+  `worker-test/shared-data-bucket.test.ts`, which stages a run into a real
+  Miniflare R2 bucket, re-reads it and writes the terminal into a real
+  Miniflare R2 `DATA` bucket.
+- Known, pre-existing and untouched: three of this package's bun tests fail
+  under bun 1.4.0 because `mock.module("cloudflare:workers")` does not resolve
+  in bare `bun test` discovery. The test task still runs `bun test ./test`, so
+  those failures stay exactly as visible as they were.

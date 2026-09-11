@@ -1333,7 +1333,7 @@
         "requiredVerification": "keep the human-required boundary; never turn it into unattended re-authentication",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-smbc-direct-backfill-poc; buckets=kogane-smbc-direct-backfill-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-smbc-direct-backfill-poc; buckets=kogane-raw-evidence,kogane-smbc-direct-backfill-poc)"
       },
       "workers": [
         {
@@ -1349,6 +1349,11 @@
             {
               "binding": "SNAPSHOTS",
               "bucket": "kogane-smbc-direct-backfill-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -1385,6 +1390,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION",
             "DEFAULT_BACKFILL_FROM",
             "SMBC_DIRECT_BASE_URL",
@@ -2162,7 +2168,8 @@
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic",
           "kogane-sbi-shinsei-collector-poc",
-          "kogane-sbi-vc-session-poc"
+          "kogane-sbi-vc-session-poc",
+          "kogane-smbc-direct-backfill-poc"
         ]
       },
       {

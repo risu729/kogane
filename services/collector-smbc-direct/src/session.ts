@@ -13,6 +13,14 @@ import {
 import { runPrefix, storeBytes, storeJson, storeManifest } from "./storage";
 import { isResumable } from "./progress";
 import { importStoredRun } from "./raw-evidence";
+import { collectionTarget } from "./collection-target";
+import {
+  dataBucket,
+  manifestBytes,
+  persistSharedRun,
+  readStagedArtifacts,
+  sharedRunPersisted,
+} from "./shared-collection";
 import type {
   AuthenticatedSession,
   BackfillManifest,
@@ -162,6 +170,10 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           session: await encryptJson(profile.export(), this.env.SESSION_ENCRYPTION_KEY),
           artifacts,
           failureCodes: [],
+          // A resume is a new authenticated session, so it opens a new
+          // generation. `runSessionRef` is not touched: the run keeps the
+          // generation that opened it (12 §4).
+          sessionRef: `session-${crypto.randomUUID()}`,
         });
         await this.ctx.storage.delete("challenge");
         await this.ctx.storage.setAlarm(Date.now());
@@ -185,11 +197,17 @@ export class SmbcBackfillSession extends DurableObject<Env> {
         totalChunks: ranges.length,
         artifactCount: 0,
       };
+      // A fresh run opens a new session generation and pins it to the run, so
+      // the terminal names the acquisition session the backfill started with
+      // even if a later resume authenticates again (12 §4).
+      const sessionRef = `session-${crypto.randomUUID()}`;
       await this.ctx.storage.put({
         progress,
         session,
         artifacts,
         failureCodes: [],
+        sessionRef,
+        runSessionRef: sessionRef,
       });
       await this.ctx.storage.delete("challenge");
       try {
@@ -350,7 +368,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           await this.ctx.storage.put({ progress: completed, artifacts, failureCodes });
           await this.ctx.storage.delete("session");
           await this.ctx.storage.deleteAlarm();
-          await this.#importRawEvidence(completed.manifestKey!, completed.runId!);
+          await this.#finishRun(completed, artifacts, failureCodes);
           diagnostic.finish(completed.phase === "success" ? "success" : "partial");
           console.log(
             JSON.stringify({
@@ -422,7 +440,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     await this.ctx.storage.delete("session");
     await this.ctx.storage.deleteAlarm();
     if (failed.manifestKey && failed.runId) {
-      await this.#importRawEvidence(failed.manifestKey, failed.runId);
+      await this.#finishRun(failed, artifacts, failureCodes);
     }
     if (failed.runId)
       createDiagnostics("smbc-direct", failed.runId).finish(
@@ -487,6 +505,66 @@ export class SmbcBackfillSession extends DurableObject<Env> {
 
   #credentials() {
     return parseCredentials(this.env.SMBC_CREDENTIAL_JSON);
+  }
+
+  /**
+   * U09: finish the run where `COLLECTION_TARGET` says. In legacy mode this is
+   * the central importer call, unchanged. In shared mode the run's own bytes
+   * are re-read from the staging bucket, verified against the manifest and
+   * written into DATA with the `terminal-v1` manifest last — one terminal per
+   * backfill run, whether it succeeded, ended partial or failed — and the
+   * importer is not called (G1-15).
+   */
+  async #finishRun(
+    progress: BackfillProgress,
+    artifacts: StoredArtifact[],
+    failureCodes: string[],
+  ): Promise<void> {
+    if (!progress.manifestKey || !progress.runId || !progress.startedAt) return;
+    if (collectionTarget(this.env.COLLECTION_TARGET) !== "shared") {
+      await this.#importRawEvidence(progress.manifestKey, progress.runId);
+      return;
+    }
+    const manifest = this.#manifest(progress, artifacts, failureCodes);
+    const prefix = runPrefix(progress.startedAt, progress.runId);
+    const acquisitionSessionRef = await this.ctx.storage.get<string>("runSessionRef");
+    try {
+      const staging = dataBucket(this.env.SNAPSHOTS);
+      const summary = await persistSharedRun(dataBucket(this.env.DATA), {
+        manifest,
+        manifestBytes: manifestBytes(manifest),
+        prefix,
+        bytesByKey: await readStagedArtifacts(staging, manifest),
+        identity: {
+          attemptId: `attempt-${crypto.randomUUID()}`,
+          ...(acquisitionSessionRef === undefined ? {} : { acquisitionSessionRef }),
+        },
+      });
+      console[sharedRunPersisted(summary) ? "log" : "error"](
+        JSON.stringify({
+          message: "smbc_shared_persist",
+          runId: progress.runId,
+          status: manifest.status,
+          collectionTarget: "shared",
+          sharedOutcome: summary.outcome,
+          terminalKey: summary.terminalKey,
+          terminalDigest: summary.terminalDigest,
+          objectCount: summary.objectCount,
+          waitingForHuman: summary.waitingForHuman,
+          ...(summary.reasonCode ? { errorCode: summary.reasonCode } : {}),
+        }),
+      );
+    } catch (error) {
+      // No terminal exists, so the run is not reported persisted (G1-01). The
+      // staging bucket still holds every byte, so a repeat finishes it.
+      console.error(
+        JSON.stringify({
+          message: "smbc_shared_persist_failed",
+          runId: progress.runId,
+          errorCode: safeSharedErrorCode(error),
+        }),
+      );
+    }
   }
 
   async #importRawEvidence(manifestKey: string, runId: string): Promise<void> {
@@ -572,6 +650,12 @@ export function classifyError(error: unknown): string {
     }
   }
   return "unexpected_error";
+}
+
+/** Only an allowlisted machine code ever reaches a log line. */
+function safeSharedErrorCode(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  return /^[a-z0-9_]{1,64}$/u.test(message) ? message : "shared_persist_failed";
 }
 
 function upsertArtifact(artifacts: StoredArtifact[], artifact: StoredArtifact): void {
