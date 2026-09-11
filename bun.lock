@@ -109,7 +109,7 @@
         "ws": "8.21.3",
       },
     },
-    "poc/mobile-suica-worker": {
+    "services/collector-mobile-suica": {
       "name": "@kogane/poc-mobile-suica-worker",
       "dependencies": {
         "iconv-lite": "0.7.0",
@@ -499,7 +499,7 @@
 
     "@kogane/poc-globalpass-worker": ["@kogane/poc-globalpass-worker@workspace:services/collector-globalpass"],
 
-    "@kogane/poc-mobile-suica-worker": ["@kogane/poc-mobile-suica-worker@workspace:poc/mobile-suica-worker"],
+    "@kogane/poc-mobile-suica-worker": ["@kogane/poc-mobile-suica-worker@workspace:services/collector-mobile-suica"],
 
     "@kogane/poc-moneyforward-worker": ["@kogane/poc-moneyforward-worker@workspace:poc/moneyforward-worker"],
 

@@ -174,32 +174,6 @@ No wrangler config.
 
 No wrangler config.
 
-### `poc/mobile-suica-worker`
-
-- Disposition (poc_disposition.csv): `promote-service` → services/collector-mobile-suica
-- Required verification: contract tests, live/secret/resource mapping confirmed
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-mobile-suica-collector-poc; buckets=kogane-mobile-suica-collector-poc)
-
-#### `kogane-mobile-suica-collector-poc` — `poc/mobile-suica-worker/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
-- R2: SNAPSHOTS → kogane-mobile-suica-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: BROWSER
-- VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
-- Crons: `10 21 * * *`
-- Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
-- Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>JRE_ID_CREDENTIAL_JSON
-
 ### `poc/moneyforward-worker`
 
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-moneyforward
@@ -566,6 +540,32 @@ No wrangler config.
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
 - Required secrets (names only): —
+
+### `services/collector-mobile-suica`
+
+- Disposition (poc_disposition.csv): `promote-service` → services/collector-mobile-suica
+- Required verification: contract tests, live/secret/resource mapping confirmed
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-mobile-suica-collector-poc; buckets=kogane-mobile-suica-collector-poc)
+
+#### `kogane-mobile-suica-collector-poc` — `services/collector-mobile-suica/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: —
+- R2: SNAPSHOTS → kogane-mobile-suica-collector-poc
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: BROWSER
+- VPC networks: —
+- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Crons: `10 21 * * *`
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>JRE_ID_CREDENTIAL_JSON
 
 ### `services/collector-r2-importer`
 

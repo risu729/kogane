@@ -114,7 +114,7 @@
     },
     {
       "name": "mobile-suica-worker",
-      "path": "poc/mobile-suica-worker",
+      "path": "services/collector-mobile-suica",
       "config": "wrangler.jsonc"
     },
     {
