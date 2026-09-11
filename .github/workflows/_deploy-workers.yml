@@ -1,0 +1,363 @@
+name: Deploy Workers
+# The one job that uploads Workers to Cloudflare. `deploy.yml` calls it after a
+# successful CI run on main; `rollback.yml` calls it with an earlier commit
+# (unified plan 11). Both callers hold the same `production-deploy` concurrency
+# group, so a release and a rollback can never overlap, and the group is held by
+# the calling job for the whole of this workflow.
+#
+# `environment: production` lives here rather than on the calling job because a
+# job that calls a reusable workflow cannot declare an environment. The
+# Cloudflare credentials are environment-scoped and are read by the migration
+# and deploy steps only (unified plan 12 §5, acceptance G5-17); no bank secret
+# is ever synchronised from CD, and the Action's `secrets-json` input is not
+# used anywhere in this repository.
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: The exact commit to release. Must be a full 40-character sha.
+        required: true
+        type: string
+      only:
+        description: Space- or comma-separated deploy-order names to limit the release to. Empty deploys every Worker marked deploy in infra/deploy-order.json.
+        required: false
+        default: ""
+        type: string
+      mode:
+        description: release (forward, applies migrations) or rollback (backward, refuses unless the schema is compatible and never applies or restores anything).
+        required: false
+        default: release
+        type: string
+permissions: {}
+defaults:
+  run:
+    shell: bash
+jobs:
+  release:
+    name: Release
+    environment: production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read # for checkout
+      deployments: write # the release ledger (unified plan 11 §3)
+    env:
+      CI: "true"
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: Check the requested commit and mode
+        env:
+          SHA: ${{ inputs.sha }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          if [[ ! ${SHA} =~ ^[0-9a-f]{40}$ ]]; then
+            echo "The release target must be a full commit sha, not '${SHA}'." >&2
+            exit 1
+          fi
+          if [[ ${MODE} != release && ${MODE} != rollback ]]; then
+            echo "Unknown mode '${MODE}'." >&2
+            exit 1
+          fi
+      - name: Confirm the commit is on the release branch
+        # Before anything from that commit is checked out, let alone run: a
+        # manual dispatch must not be able to put a branch, fork or pull request
+        # commit into production (unified plan 11 §2), and a pull request's head
+        # commit *is* fetchable from this repository. The compare API answers
+        # `identical` for the branch tip and `behind` once the branch has moved
+        # past the commit; `ahead` and `diverged` mean it is not on the branch.
+        # `gh` is the runner's own; an API error fails the step, never passes it.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          status=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BRANCH}...${SHA}" --jq '.status')
+          case "${status}" in
+            identical | behind)
+              echo "${SHA} is on ${BRANCH} (${status})." | tee -a "${GITHUB_STEP_SUMMARY}"
+              ;;
+            *)
+              echo "${SHA} is '${status}' relative to ${BRANCH}; only commits on ${BRANCH} are released." >&2
+              exit 1
+              ;;
+          esac
+      - name: Checkout the exact commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commit CI passed on, never a branch tip: a branch moves between
+          # the CI run and this one (unified plan 11 §2).
+          ref: ${{ inputs.sha }}
+          # The ledger interlock answers with `git merge-base --is-ancestor`,
+          # which needs both commits.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Confirm the checkout is that commit
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          head=$(git rev-parse HEAD)
+          if [[ ${head} != "${SHA}" ]]; then
+            echo "Checked out ${head}, expected ${SHA}." >&2
+            exit 1
+          fi
+      - name: Install node
+        # The checkout is a commit on the release branch, confirmed above, so
+        # its mise configuration and the scripts below are reviewed code.
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.3
+          # No tool cache anywhere in this job: its cache scope is shared with
+          # pull request CI, which runs pull request code, so a restored archive
+          # is not a trusted source of the interpreter that decides whether this
+          # release may proceed.
+          cache: false
+        env:
+          # The ledger steps below run before the rest of the toolchain exists;
+          # they need the pinned node, not whatever the runner image ships.
+          MISE_ENABLE_TOOLS: node
+      - name: Read the release ledger
+        id: ledger
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/release-ledger.mjs latest --record "${RUNNER_TEMP}/previous-record.json"
+      - name: Decide whether this run may deploy
+        id: decide
+        # An overtaken run ends here successfully and changes nothing
+        # (acceptance G5-12); a diverged history fails loudly.
+        env:
+          SHA: ${{ inputs.sha }}
+          MODE: ${{ inputs.mode }}
+          RECORDED: ${{ steps.ledger.outputs.sha }}
+        run: |
+          node .github/scripts/release-ledger.mjs decide \
+            --mode "${MODE}" --head "${SHA}" --recorded "${RECORDED}"
+      - name: Install the rest of the toolchain
+        if: steps.decide.outputs.proceed == 'true'
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.3
+          cache: false
+      - name: Install the locked dependencies
+        if: steps.decide.outputs.proceed == 'true'
+        run: mise run install
+      - name: Build every deployable bundle
+        if: steps.decide.outputs.proceed == 'true'
+        run: mise run bundle
+      - name: Validate every Worker without uploading
+        # No Cloudflare account or token is in scope for this step, so the
+        # whole build and validation happens before any credential is used
+        # (acceptance G5-09, G4-16).
+        if: steps.decide.outputs.proceed == 'true'
+        run: mise run dry-run
+      - name: Compute the release manifest
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          SHA: ${{ inputs.sha }}
+          MODE: ${{ inputs.mode }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node .github/scripts/release-manifest.mjs write \
+            --sha "${SHA}" \
+            --mode "${MODE}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --run-url "${RUN_URL}" \
+            --out "${RUNNER_TEMP}/release-manifest.json" \
+            --record "${RUNNER_TEMP}/release-record.json"
+      - name: Upload the release manifest
+        if: steps.decide.outputs.proceed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-manifest-${{ inputs.sha }}
+          path: ${{ runner.temp }}/release-manifest.json
+          if-no-files-found: error
+      - name: Compare the schema with the recorded release
+        id: schema
+        # Also settles what the release record says the database holds: a
+        # release applies this commit's migrations, a rollback applies none and
+        # leaves the deployed list as it is.
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          node .github/scripts/release-manifest.mjs compare \
+            --mode "${MODE}" \
+            --previous "${RUNNER_TEMP}/previous-record.json" \
+            --current "${RUNNER_TEMP}/release-record.json"
+      - name: Refuse an incompatible rollback
+        # Migrations are additive and are never reverted, so a rollback target
+        # may know fewer migrations than the database has, but never different
+        # ones. CORE is not restored from a backup by any workflow
+        # (unified plan 11 §7, acceptance G5-16).
+        if: steps.decide.outputs.proceed == 'true' && inputs.mode == 'rollback'
+        env:
+          PREFIX: ${{ steps.schema.outputs.core-prefix }}
+        run: |
+          if [[ ${PREFIX} != true ]]; then
+            echo "The rollback target's CORE migration list is not a prefix of the deployed one; refusing." >&2
+            exit 1
+          fi
+      - name: Select the Workers this run deploys
+        id: select
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          ONLY: ${{ inputs.only }}
+        run: |
+          order=infra/deploy-order.json
+          mapfile -t deployable < <(jq -r '.workers[] | select(.deploy) | .name' "${order}")
+          if [[ -z ${ONLY//[[:space:],]/} ]]; then
+            selected=("${deployable[@]}")
+          else
+            read -r -a requested <<<"${ONLY//,/ }"
+            selected=()
+            for name in "${requested[@]}"; do
+              found=false
+              for candidate in "${deployable[@]}"; do
+                if [[ ${candidate} == "${name}" ]]; then found=true; fi
+              done
+              if [[ ${found} != true ]]; then
+                echo "'${name}' is not a Worker marked deploy in ${order}." >&2
+                exit 1
+              fi
+              selected+=("${name}")
+            done
+          fi
+          printf 'Deploying: %s\n' "${selected[*]}" | tee -a "${GITHUB_STEP_SUMMARY}"
+          {
+            printf 'selected=%s\n' "$(printf '%s\n' "${selected[@]}" | jq -Rsc 'split("\n") | map(select(. != ""))')"
+            printf 'core-config=%s\n' "$(jq -r '.schema.core | "\(.path)/\(.config)"' "${order}")"
+            printf 'core-database=%s\n' "$(jq -r '.schema.core.database' "${order}")"
+            printf 'read-config=%s\n' "$(jq -r 'if .schema.read == null then "" else "\(.schema.read.path)/\(.schema.read.config)" end' "${order}")"
+            printf 'read-database=%s\n' "$(jq -r '.schema.read.database // ""' "${order}")"
+          } >> "${GITHUB_OUTPUT}"
+      - name: Open the deployment record
+        id: deployment
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DESCRIPTION: kogane ${{ inputs.mode }} ${{ inputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node .github/scripts/release-ledger.mjs create \
+            --record "${RUNNER_TEMP}/release-record.json" \
+            --description "${DESCRIPTION}" \
+            --log-url "${RUN_URL}"
+      - name: Apply the CORE migrations
+        # Runs only forward, only when this commit knows a migration the
+        # recorded release did not, and inside the non-cancellable concurrency
+        # group of the calling job, so a later push cannot interrupt it
+        # (acceptance G5-13). Wrangler reads `migrations_dir` from the same
+        # configuration, so moving the directory needs no workflow change.
+        if: steps.decide.outputs.proceed == 'true' && inputs.mode == 'release' && steps.schema.outputs.core-apply == 'true'
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          DATABASE: ${{ steps.select.outputs.core-database }}
+          CONFIG: ${{ steps.select.outputs.core-config }}
+        run: ./node_modules/.bin/wrangler d1 migrations apply "${DATABASE}" --remote --config "${CONFIG}"
+      - name: Apply the READ migrations
+        # Skipped while no READ database is declared in infra/deploy-order.json.
+        if: steps.decide.outputs.proceed == 'true' && inputs.mode == 'release' && steps.schema.outputs.read-apply == 'true' && steps.select.outputs.read-config != ''
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          DATABASE: ${{ steps.select.outputs.read-database }}
+          CONFIG: ${{ steps.select.outputs.read-config }}
+        run: ./node_modules/.bin/wrangler d1 migrations apply "${DATABASE}" --remote --config "${CONFIG}"
+      - name: Re-verify the release manifest
+        # The last check before a credential reaches Wrangler: every digest the
+        # manifest recorded is recomputed from the working tree, so a bundle,
+        # configuration, lockfile or migration that changed after the manifest
+        # was written stops the deployment (acceptance G5-11).
+        if: steps.decide.outputs.proceed == 'true'
+        run: node .github/scripts/release-manifest.mjs verify --manifest "${RUNNER_TEMP}/release-manifest.json"
+      - name: Deploy the Processor
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'processor')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/observation-pipeline
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the App
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'app')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/evidence-browser
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the demo App
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'app-demo')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/evidence-browser
+          config: wrangler.demo.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the legacy ingest adapter
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'ingest')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/raw-evidence
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy the collector importer
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'importer')
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: production
+          working-directory: services/collector-r2-importer
+          config: wrangler.jsonc
+          cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Postcheck the health endpoints
+        # Only the Workers this run deployed, and only those with a public
+        # unauthenticated health route: the App and the Processor have none by
+        # design (unified plan 11 §6, docs/ci-cd.md).
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          SELECTED: ${{ steps.select.outputs.selected }}
+        run: |
+          order=infra/deploy-order.json
+          subdomain=$(jq -r '.workersDevSubdomain' "${order}")
+          status=0
+          while IFS=$'\t' read -r name worker path; do
+            if ! jq -e --arg name "${name}" 'index($name)' <<<"${SELECTED}" > /dev/null; then continue; fi
+            url="https://${worker}.${subdomain}${path}"
+            code=$(curl --silent --show-error --location --max-time 20 \
+              --retry 5 --retry-delay 5 --retry-all-errors \
+              --output /dev/null --write-out '%{http_code}' "${url}" || echo 000)
+            echo "${worker}${path}: ${code}" | tee -a "${GITHUB_STEP_SUMMARY}"
+            if [[ ${code} != 200 ]]; then status=1; fi
+          done < <(jq -r '.workers[] | select(.deploy and .healthPath != "") | [.name, .worker, .healthPath] | @tsv' "${order}")
+          exit "${status}"
+      - name: Record the release as successful
+        if: ${{ success() && steps.deployment.outputs.deployment-id != '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment-id }}
+          DESCRIPTION: kogane ${{ inputs.mode }} ${{ inputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node .github/scripts/release-ledger.mjs status \
+            --deployment "${DEPLOYMENT_ID}" --state success \
+            --description "${DESCRIPTION}" --log-url "${RUN_URL}"
+      - name: Record the release as failed
+        # Nothing is rolled back automatically: a failed release leaves the
+        # Workers that already uploaded in place and the database as it is
+        # (unified plan 11 §7, acceptance G5-16). Recovery is a decision.
+        if: ${{ failure() && steps.deployment.outputs.deployment-id != '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment-id }}
+          DESCRIPTION: kogane ${{ inputs.mode }} ${{ inputs.sha }} failed
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |-
+          node .github/scripts/release-ledger.mjs status \
+            --deployment "${DEPLOYMENT_ID}" --state failure \
+            --description "${DESCRIPTION}" --log-url "${RUN_URL}"

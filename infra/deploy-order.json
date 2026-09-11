@@ -1,0 +1,350 @@
+{
+  "plan": "unified plan U14; chapter 11 sections 4 and 7; acceptance tests G5-10, G5-11, G5-12, G5-14, G5-15, G5-16",
+  "maintenance": "Hand-maintained. tasks/_lib/deploy-order.test.ts keeps it in step with infra/workers-ci.json and with the deploy steps of .github/workflows/_deploy-workers.yml.",
+  "workersDevSubdomain": "takuanimal.workers.dev",
+  "schema": {
+    "core": {
+      "database": "kogane-raw-evidence",
+      "binding": "DB",
+      "path": "services/observation-pipeline",
+      "config": "wrangler.jsonc"
+    },
+    "read": null
+  },
+  "workers": [
+    {
+      "name": "processor",
+      "path": "services/observation-pipeline",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-observation-pipeline",
+      "role": "consumer",
+      "deploy": true,
+      "healthPath": "",
+      "bundleTask": "processor:bundle",
+      "bundleDir": "dist/processor"
+    },
+    {
+      "name": "app",
+      "path": "services/evidence-browser",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-evidence-browser",
+      "role": "consumer",
+      "deploy": true,
+      "healthPath": "",
+      "bundleTask": "app:bundle",
+      "bundleDir": "dist/app"
+    },
+    {
+      "name": "app-demo",
+      "path": "services/evidence-browser",
+      "config": "wrangler.demo.jsonc",
+      "worker": "kogane-demo",
+      "role": "consumer",
+      "deploy": true,
+      "healthPath": "",
+      "bundleTask": "app-demo:bundle",
+      "bundleDir": "dist/app-demo"
+    },
+    {
+      "name": "ingest",
+      "path": "services/raw-evidence",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-ingest",
+      "role": "consumer",
+      "deploy": true,
+      "healthPath": "/health",
+      "bundleTask": "ingest:bundle",
+      "bundleDir": "dist/ingest"
+    },
+    {
+      "name": "importer",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-collector-r2-importer",
+      "role": "consumer",
+      "deploy": true,
+      "healthPath": "",
+      "bundleTask": "importer:bundle",
+      "bundleDir": "dist/importer"
+    },
+    {
+      "name": "app-test",
+      "path": "services/evidence-browser",
+      "config": "wrangler.test.jsonc",
+      "worker": "kogane-evidence-browser-test",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "importer-audit-global-pass-layer-b",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.audit-global-pass-layer-b.jsonc",
+      "worker": "kogane-global-pass-layer-b-audit-local",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "importer-audit-moneyforward",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.audit-moneyforward.jsonc",
+      "worker": "kogane-moneyforward-r2-contract-audit-local",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "importer-audit-moneyforward-layer-b",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.audit-moneyforward-layer-b.jsonc",
+      "worker": "kogane-moneyforward-layer-b-audit-local",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "importer-audit-myjcb",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.audit-myjcb.jsonc",
+      "worker": "kogane-myjcb-r2-layer-b-audit-local",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "importer-audit-sbi-shinsei",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.audit-sbi-shinsei.jsonc",
+      "worker": "kogane-sbi-shinsei-r2-layer-b-audit-local",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "importer-audit-sbi-vc",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.audit-sbi-vc.jsonc",
+      "worker": "kogane-sbi-vc-r2-layer-b-audit-local",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "importer-audit-smbc-direct",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.audit-smbc-direct.jsonc",
+      "worker": "kogane-smbc-direct-r2-contract-audit-local",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "importer-audit-smbc-direct-layer-b",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.audit-smbc-direct-layer-b.jsonc",
+      "worker": "kogane-smbc-direct-r2-layer-b-audit-local",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "importer-audit-sony-layer-b",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.audit-sony-layer-b.jsonc",
+      "worker": "kogane-sony-bank-r2-layer-b-audit-local",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "importer-audit-v-point",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.audit-v-point.jsonc",
+      "worker": "kogane-vpoint-r2-contract-audit-local",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "importer-audit-v-point-pay-email",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.audit-v-point-pay-email.jsonc",
+      "worker": "kogane-vpoint-pay-email-r2-contract-audit-local",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "importer-audit-v-point-pay-layer-b",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.audit-v-point-pay-layer-b.jsonc",
+      "worker": "kogane-vpoint-pay-r2-layer-b-audit-local",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "importer-audit-vpass-layer-b",
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.audit-vpass-layer-b.jsonc",
+      "worker": "kogane-vpass-r2-layer-b-audit-local",
+      "role": "consumer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "globalpass-worker",
+      "path": "poc/globalpass-worker",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-globalpass-collector-poc",
+      "role": "producer",
+      "deploy": false,
+      "healthPath": "/health"
+    },
+    {
+      "name": "mobile-suica-worker",
+      "path": "poc/mobile-suica-worker",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-mobile-suica-collector-poc",
+      "role": "producer",
+      "deploy": false,
+      "healthPath": "/health"
+    },
+    {
+      "name": "moneyforward-worker",
+      "path": "poc/moneyforward-worker",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-moneyforward-collector-poc",
+      "role": "producer",
+      "deploy": false,
+      "healthPath": "/health"
+    },
+    {
+      "name": "myjcb-worker",
+      "path": "poc/myjcb-worker",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-myjcb-collector-poc",
+      "role": "producer",
+      "deploy": false,
+      "healthPath": "/health"
+    },
+    {
+      "name": "sbi-securities-worker",
+      "path": "poc/sbi-securities-worker",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-sbi-collector-poc",
+      "role": "producer",
+      "deploy": false,
+      "healthPath": "/health"
+    },
+    {
+      "name": "sbi-shinsei-worker",
+      "path": "poc/sbi-shinsei-worker",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-sbi-shinsei-collector-poc",
+      "role": "producer",
+      "deploy": false,
+      "healthPath": "/health"
+    },
+    {
+      "name": "sbi-vc-trade-worker",
+      "path": "poc/sbi-vc-trade-worker",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-sbi-vc-session-poc",
+      "role": "producer",
+      "deploy": false,
+      "healthPath": "/health"
+    },
+    {
+      "name": "smbc-direct-backfill-worker",
+      "path": "poc/smbc-direct-backfill-worker",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-smbc-direct-backfill-poc",
+      "role": "producer",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "sony-bank-worker",
+      "path": "poc/sony-bank-worker",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-sony-bank-collector-poc",
+      "role": "producer",
+      "deploy": false,
+      "healthPath": "/health"
+    },
+    {
+      "name": "vpass-json",
+      "path": "poc/vpass-json",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-vpass-collector-poc",
+      "role": "producer",
+      "deploy": false,
+      "healthPath": "/health"
+    },
+    {
+      "name": "vpoint-pay-worker",
+      "path": "poc/vpoint-pay-worker",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-vpoint-pay-collector-poc",
+      "role": "producer",
+      "deploy": false,
+      "healthPath": "/health"
+    },
+    {
+      "name": "vpoint-worker",
+      "path": "poc/vpoint-worker",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-vpoint-collector-poc",
+      "role": "producer",
+      "deploy": false,
+      "healthPath": "/health"
+    },
+    {
+      "name": "cloudflare-browser-run",
+      "path": "poc/cloudflare-browser-run",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-vpass-browser-run-20260825",
+      "role": "probe",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "cloudflare-browser-run-bootstrap",
+      "path": "poc/cloudflare-browser-run",
+      "config": "wrangler.bootstrap.jsonc",
+      "worker": "kogane-vpass-browser-run-20260825",
+      "role": "probe",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "cloudflare-runtime-probe",
+      "path": "poc/cloudflare-runtime-probe",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-vpass-runtime-probe-20260825",
+      "role": "probe",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "tamia-tcp-bridge",
+      "path": "poc/tamia-tcp-bridge",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-tamia-tcp-bridge-20260825",
+      "role": "probe",
+      "deploy": false,
+      "healthPath": ""
+    },
+    {
+      "name": "tamia-tcp-bridge-bootstrap",
+      "path": "poc/tamia-tcp-bridge",
+      "config": "wrangler.bootstrap.jsonc",
+      "worker": "kogane-tamia-tcp-bridge-20260825",
+      "role": "probe",
+      "deploy": false,
+      "healthPath": ""
+    }
+  ]
+}
