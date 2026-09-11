@@ -8,9 +8,9 @@ import {
   parseMobileSuicaManifest,
   sanitizeHistoryHtml,
 } from "../src/mobile-suica";
-import { sanitizeHistoryHtmlText as sanitizeCollectorHistoryHtmlText } from "../../../poc/mobile-suica-worker/src/sanitize-contract";
-import { storeManifest as storeCollectorManifest } from "../../../poc/mobile-suica-worker/src/storage";
-import type { CollectionManifest } from "../../../poc/mobile-suica-worker/src/types";
+import { sanitizeHistoryHtmlText as sanitizeCollectorHistoryHtmlText } from "../../../services/collector-mobile-suica/src/sanitize-contract";
+import { storeManifest as storeCollectorManifest } from "../../../services/collector-mobile-suica/src/storage";
+import type { CollectionManifest } from "../../../services/collector-mobile-suica/src/types";
 
 const RUN_ID = "123e4567-e89b-42d3-a456-426614174000";
 const PREFIX = `raw/mobile-suica/2026/09/05/${RUN_ID}/`;

@@ -104,6 +104,13 @@
         "typescript": "5.9.3",
       },
     },
+    "packages/sbi-vc-trade-client": {
+      "name": "@kogane/poc-sbi-vc-trade-client",
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "typescript": "5.9.3",
+      },
+    },
     "packages/storage-d1": {
       "name": "@kogane/storage-d1",
       "dependencies": {
@@ -137,119 +144,10 @@
         "wrangler": "4.125.0",
       },
     },
-    "poc/globalpass-worker": {
-      "name": "@kogane/poc-globalpass-worker",
-      "dependencies": {
-        "@cloudflare/containers": "0.3.7",
-        "@cloudflare/puppeteer": "1.4.0",
-      },
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "@types/node": "26.4.0",
-        "typescript": "5.9.3",
-        "wrangler": "4.127.0",
-        "ws": "8.21.3",
-      },
-    },
-    "poc/mobile-suica-worker": {
-      "name": "@kogane/poc-mobile-suica-worker",
-      "dependencies": {
-        "iconv-lite": "0.7.0",
-      },
-      "devDependencies": {
-        "@cloudflare/puppeteer": "1.1.0",
-        "@types/bun": "1.3.8",
-        "@types/node": "24.3.0",
-        "devtools-protocol": "0.0.1299070",
-        "typescript": "5.9.3",
-        "wrangler": "4.127.1",
-      },
-    },
-    "poc/moneyforward-worker": {
-      "name": "@kogane/poc-moneyforward-worker",
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "@types/node": "24.3.0",
-        "typescript": "5.9.3",
-        "wrangler": "4.127.1",
-      },
-    },
-    "poc/myjcb-worker": {
-      "name": "@kogane/poc-myjcb-worker",
-      "dependencies": {
-        "@cloudflare/puppeteer": "1.4.0",
-        "parse5": "8.0.1",
-      },
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "typescript": "5.9.3",
-        "wrangler": "4.127.1",
-      },
-    },
     "poc/oci-browser-probe": {
       "name": "@kogane/oci-browser-probe",
       "dependencies": {
         "playwright": "1.62.0",
-      },
-    },
-    "poc/sbi-securities-worker": {
-      "name": "@kogane/poc-sbi-securities-worker",
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "@types/node": "24.3.0",
-        "typescript": "5.9.3",
-        "wrangler": "4.126.0",
-      },
-    },
-    "poc/sbi-shinsei-worker": {
-      "name": "@kogane/poc-sbi-shinsei-worker",
-      "dependencies": {
-        "@cloudflare/containers": "0.3.7",
-      },
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "@types/node": "24.3.0",
-        "typescript": "5.9.3",
-        "wrangler": "4.127.1",
-        "ws": "8.21.3",
-      },
-    },
-    "poc/sbi-vc-trade-client": {
-      "name": "@kogane/poc-sbi-vc-trade-client",
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "typescript": "5.9.3",
-      },
-    },
-    "poc/sbi-vc-trade-worker": {
-      "name": "@kogane/poc-sbi-vc-trade-worker",
-      "devDependencies": {
-        "@cloudflare/vitest-plugin": "1.1.2",
-        "@types/bun": "1.3.8",
-        "typescript": "5.9.3",
-        "vitest": "4.1.11",
-        "wrangler": "4.127.1",
-      },
-    },
-    "poc/smbc-direct-backfill-worker": {
-      "name": "@kogane/poc-smbc-direct-backfill-worker",
-      "dependencies": {
-        "iconv-lite": "0.7.3",
-        "uqr": "0.1.3",
-      },
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "typescript": "5.9.3",
-        "wrangler": "4.127.1",
-      },
-    },
-    "poc/sony-bank-worker": {
-      "name": "@kogane/poc-sony-bank-worker",
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "@types/node": "24.3.0",
-        "typescript": "5.9.3",
-        "wrangler": "4.128.0",
       },
     },
     "poc/tamia-tcp-bridge": {
@@ -258,45 +156,6 @@
         "@types/node": "26.3.0",
         "typescript": "5.9.3",
         "wrangler": "4.125.0",
-      },
-    },
-    "poc/vpass-json": {
-      "name": "@kogane/poc-vpass-json",
-      "dependencies": {
-        "@clack/prompts": "1.0.0",
-        "impit": "0.14.3",
-        "tough-cookie": "6.0.2",
-      },
-      "devDependencies": {
-        "@cloudflare/workers-types": "^5.20260825.1",
-        "@types/bun": "1.3.8",
-        "typescript": "5.9.3",
-        "wrangler": "4.126.0",
-      },
-    },
-    "poc/vpoint-pay-worker": {
-      "name": "@kogane/poc-vpoint-pay-worker",
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "@types/node": "24.3.0",
-        "typescript": "5.9.3",
-        "wrangler": "4.127.1",
-      },
-    },
-    "poc/vpoint-worker": {
-      "name": "@kogane/poc-vpoint-worker",
-      "dependencies": {
-        "cheerio": "1.1.2",
-        "iconv-lite": "0.7.0",
-        "postal-mime": "2.7.3",
-        "set-cookie-parser": "2.7.2",
-      },
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "@types/node": "24.3.0",
-        "@types/set-cookie-parser": "2.4.10",
-        "typescript": "5.9.3",
-        "wrangler": "4.126.0",
       },
     },
     "services/app": {
@@ -314,6 +173,55 @@
         "wrangler": "4.128.0",
       },
     },
+    "services/collector-globalpass": {
+      "name": "@kogane/poc-globalpass-worker",
+      "dependencies": {
+        "@cloudflare/containers": "0.3.7",
+        "@cloudflare/puppeteer": "1.4.0",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "@types/node": "26.4.0",
+        "typescript": "5.9.3",
+        "wrangler": "4.127.0",
+        "ws": "8.21.3",
+      },
+    },
+    "services/collector-mobile-suica": {
+      "name": "@kogane/poc-mobile-suica-worker",
+      "dependencies": {
+        "iconv-lite": "0.7.0",
+      },
+      "devDependencies": {
+        "@cloudflare/puppeteer": "1.1.0",
+        "@types/bun": "1.3.8",
+        "@types/node": "24.3.0",
+        "devtools-protocol": "0.0.1299070",
+        "typescript": "5.9.3",
+        "wrangler": "4.127.1",
+      },
+    },
+    "services/collector-moneyforward": {
+      "name": "@kogane/poc-moneyforward-worker",
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "@types/node": "24.3.0",
+        "typescript": "5.9.3",
+        "wrangler": "4.127.1",
+      },
+    },
+    "services/collector-myjcb": {
+      "name": "@kogane/poc-myjcb-worker",
+      "dependencies": {
+        "@cloudflare/puppeteer": "1.4.0",
+        "parse5": "8.0.1",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "typescript": "5.9.3",
+        "wrangler": "4.127.1",
+      },
+    },
     "services/collector-r2-importer": {
       "name": "@kogane/collector-r2-importer",
       "dependencies": {
@@ -325,6 +233,98 @@
         "@types/bun": "1.3.8",
         "typescript": "5.9.3",
         "wrangler": "4.128.0",
+      },
+    },
+    "services/collector-sbi-securities": {
+      "name": "@kogane/poc-sbi-securities-worker",
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "@types/node": "24.3.0",
+        "typescript": "5.9.3",
+        "wrangler": "4.126.0",
+      },
+    },
+    "services/collector-sbi-shinsei": {
+      "name": "@kogane/poc-sbi-shinsei-worker",
+      "dependencies": {
+        "@cloudflare/containers": "0.3.7",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "@types/node": "24.3.0",
+        "typescript": "5.9.3",
+        "wrangler": "4.127.1",
+        "ws": "8.21.3",
+      },
+    },
+    "services/collector-sbi-vc-trade": {
+      "name": "@kogane/poc-sbi-vc-trade-worker",
+      "devDependencies": {
+        "@cloudflare/vitest-plugin": "1.1.2",
+        "@types/bun": "1.3.8",
+        "typescript": "5.9.3",
+        "vitest": "4.1.11",
+        "wrangler": "4.127.1",
+      },
+    },
+    "services/collector-smbc-direct": {
+      "name": "@kogane/poc-smbc-direct-backfill-worker",
+      "dependencies": {
+        "iconv-lite": "0.7.3",
+        "uqr": "0.1.3",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "typescript": "5.9.3",
+        "wrangler": "4.127.1",
+      },
+    },
+    "services/collector-sony-bank": {
+      "name": "@kogane/poc-sony-bank-worker",
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "@types/node": "24.3.0",
+        "typescript": "5.9.3",
+        "wrangler": "4.128.0",
+      },
+    },
+    "services/collector-vpass": {
+      "name": "@kogane/poc-vpass-json",
+      "dependencies": {
+        "@clack/prompts": "1.0.0",
+        "impit": "0.14.3",
+        "tough-cookie": "6.0.2",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "^5.20260825.1",
+        "@types/bun": "1.3.8",
+        "typescript": "5.9.3",
+        "wrangler": "4.126.0",
+      },
+    },
+    "services/collector-vpoint": {
+      "name": "@kogane/poc-vpoint-worker",
+      "dependencies": {
+        "cheerio": "1.1.2",
+        "iconv-lite": "0.7.0",
+        "postal-mime": "2.7.3",
+        "set-cookie-parser": "2.7.2",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "@types/node": "24.3.0",
+        "@types/set-cookie-parser": "2.4.10",
+        "typescript": "5.9.3",
+        "wrangler": "4.126.0",
+      },
+    },
+    "services/collector-vpoint-pay": {
+      "name": "@kogane/poc-vpoint-pay-worker",
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "@types/node": "24.3.0",
+        "typescript": "5.9.3",
+        "wrangler": "4.127.1",
       },
     },
     "services/processor": {
@@ -521,31 +521,31 @@
 
     "@kogane/parsers": ["@kogane/parsers@workspace:packages/parsers"],
 
-    "@kogane/poc-globalpass-worker": ["@kogane/poc-globalpass-worker@workspace:poc/globalpass-worker"],
+    "@kogane/poc-globalpass-worker": ["@kogane/poc-globalpass-worker@workspace:services/collector-globalpass"],
 
-    "@kogane/poc-mobile-suica-worker": ["@kogane/poc-mobile-suica-worker@workspace:poc/mobile-suica-worker"],
+    "@kogane/poc-mobile-suica-worker": ["@kogane/poc-mobile-suica-worker@workspace:services/collector-mobile-suica"],
 
-    "@kogane/poc-moneyforward-worker": ["@kogane/poc-moneyforward-worker@workspace:poc/moneyforward-worker"],
+    "@kogane/poc-moneyforward-worker": ["@kogane/poc-moneyforward-worker@workspace:services/collector-moneyforward"],
 
-    "@kogane/poc-myjcb-worker": ["@kogane/poc-myjcb-worker@workspace:poc/myjcb-worker"],
+    "@kogane/poc-myjcb-worker": ["@kogane/poc-myjcb-worker@workspace:services/collector-myjcb"],
 
-    "@kogane/poc-sbi-securities-worker": ["@kogane/poc-sbi-securities-worker@workspace:poc/sbi-securities-worker"],
+    "@kogane/poc-sbi-securities-worker": ["@kogane/poc-sbi-securities-worker@workspace:services/collector-sbi-securities"],
 
-    "@kogane/poc-sbi-shinsei-worker": ["@kogane/poc-sbi-shinsei-worker@workspace:poc/sbi-shinsei-worker"],
+    "@kogane/poc-sbi-shinsei-worker": ["@kogane/poc-sbi-shinsei-worker@workspace:services/collector-sbi-shinsei"],
 
-    "@kogane/poc-sbi-vc-trade-client": ["@kogane/poc-sbi-vc-trade-client@workspace:poc/sbi-vc-trade-client"],
+    "@kogane/poc-sbi-vc-trade-client": ["@kogane/poc-sbi-vc-trade-client@workspace:packages/sbi-vc-trade-client"],
 
-    "@kogane/poc-sbi-vc-trade-worker": ["@kogane/poc-sbi-vc-trade-worker@workspace:poc/sbi-vc-trade-worker"],
+    "@kogane/poc-sbi-vc-trade-worker": ["@kogane/poc-sbi-vc-trade-worker@workspace:services/collector-sbi-vc-trade"],
 
-    "@kogane/poc-smbc-direct-backfill-worker": ["@kogane/poc-smbc-direct-backfill-worker@workspace:poc/smbc-direct-backfill-worker"],
+    "@kogane/poc-smbc-direct-backfill-worker": ["@kogane/poc-smbc-direct-backfill-worker@workspace:services/collector-smbc-direct"],
 
-    "@kogane/poc-sony-bank-worker": ["@kogane/poc-sony-bank-worker@workspace:poc/sony-bank-worker"],
+    "@kogane/poc-sony-bank-worker": ["@kogane/poc-sony-bank-worker@workspace:services/collector-sony-bank"],
 
-    "@kogane/poc-vpass-json": ["@kogane/poc-vpass-json@workspace:poc/vpass-json"],
+    "@kogane/poc-vpass-json": ["@kogane/poc-vpass-json@workspace:services/collector-vpass"],
 
-    "@kogane/poc-vpoint-pay-worker": ["@kogane/poc-vpoint-pay-worker@workspace:poc/vpoint-pay-worker"],
+    "@kogane/poc-vpoint-pay-worker": ["@kogane/poc-vpoint-pay-worker@workspace:services/collector-vpoint-pay"],
 
-    "@kogane/poc-vpoint-worker": ["@kogane/poc-vpoint-worker@workspace:poc/vpoint-worker"],
+    "@kogane/poc-vpoint-worker": ["@kogane/poc-vpoint-worker@workspace:services/collector-vpoint"],
 
     "@kogane/raw-evidence": ["@kogane/raw-evidence@workspace:services/raw-evidence"],
 

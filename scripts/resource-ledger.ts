@@ -129,6 +129,14 @@ export interface Disposition {
  * (raw-evidence stays deployed as the legacy ingest adapter until U15; the
  * importer is absorbed by the Processor in U08 and its Worker keeps running
  * until U15).
+ *
+ * A directory that has been promoted keeps its row under the new key with
+ * `executionStatus: "EXECUTED_U04"`: the plan's proposal and what was actually
+ * done stay next to each other, and the key follows the directory because the
+ * ledger reads `services/` and `poc/` from disk. A directory promoted out of
+ * both — `poc/collector-diagnostics` and `poc/sbi-vc-trade-client`, which went
+ * to `packages/` — leaves the map, because nothing under `packages/` declares a
+ * runtime resource.
  */
 export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
   "apps/web": {
@@ -173,51 +181,11 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/collector-diagnostics": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-shared",
-    proposedTarget: "packages/collector-diagnostics",
-    requiredVerification: "list the real consumers and the public exports",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/globalpass-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-globalpass",
-    requiredVerification: "keep Container, relay, browser diagnostics and resource identity",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
   "poc/kameleo-container-probe": {
     source: "poc_disposition.csv",
     proposedAction: "retire-candidate",
     proposedTarget: "docs/research/kameleo.md",
     requiredVerification: "stopped, zero references, source retired after the result is saved",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/mobile-suica-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-mobile-suica",
-    requiredVerification: "contract tests, live/secret/resource mapping confirmed",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/moneyforward-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-moneyforward",
-    requiredVerification: "collector/importer/CORE mapping and resource identity kept",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/myjcb-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-myjcb",
-    requiredVerification: "keep the Browser Run login and fetch boundary",
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
@@ -238,55 +206,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/sbi-securities-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-sbi-securities",
-    requiredVerification: "contract tests and resource identity; secret material is not moved",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/sbi-shinsei-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-sbi-shinsei",
-    requiredVerification: "keep the container/relay/credential operation contract",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/sbi-vc-trade-client": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-shared-if-used",
-    proposedTarget: "packages/sbi-vc-trade-client",
-    requiredVerification: "confirm whether a product consumer and its dependencies exist",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/sbi-vc-trade-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-sbi-vc-trade",
-    requiredVerification: "keep the client dependency and the resource identity",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/smbc-direct-backfill-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-smbc-direct",
-    requiredVerification:
-      "keep the human-required boundary; never turn it into unattended re-authentication",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/sony-bank-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-sony-bank",
-    requiredVerification: "keep the sanitize/HTML/CSV contract and the resource identity",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
   "poc/tamia-tcp-bridge": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service-if-used",
@@ -296,28 +215,48 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/vpass-json": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-vpass",
-    requiredVerification: "keep the Worker name and the R2/cron/auth contract",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+  "services/processor": {
+    source: "plan 07 §1 + decision D1",
+    proposedAction: "rename-directory",
+    proposedTarget: "services/processor",
+    // Executed: the directory moved from `services/observation-pipeline`. The
+    // deployed config is byte-identical, cron, queue consumer and D1 ids
+    // included; only the comment in `wrangler.read-migrations.jsonc` that
+    // quotes its own path changed (G0-06, G0-07, G5-15).
+    requiredVerification: "git mv only; Worker name kogane-observation-pipeline and cron stay",
+    executionStatus: "EXECUTED_RENAME",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/vpoint-pay-worker": {
+  "services/collector-globalpass": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",
-    proposedTarget: "services/collector-vpoint-pay",
-    requiredVerification: "confirm the Email/collection entry point and the resource identity",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+    proposedTarget: "services/collector-globalpass",
+    requiredVerification: "keep Container, relay, browser diagnostics and resource identity",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/vpoint-worker": {
+  "services/collector-mobile-suica": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",
-    proposedTarget: "services/collector-vpoint",
-    requiredVerification: "keep the Email route and the DO class/tag/storage",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+    proposedTarget: "services/collector-mobile-suica",
+    requiredVerification: "contract tests, live/secret/resource mapping confirmed",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-moneyforward": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-moneyforward",
+    requiredVerification: "collector/importer/CORE mapping and resource identity kept",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-myjcb": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-myjcb",
+    requiredVerification: "keep the Browser Run login and fetch boundary",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "services/app": {
@@ -345,16 +284,69 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "services/processor": {
-    source: "plan 07 §1 + decision D1",
-    proposedAction: "rename-directory",
-    proposedTarget: "services/processor",
-    // Executed: the directory moved from `services/observation-pipeline`. The
-    // deployed config is byte-identical, cron, queue consumer and D1 ids
-    // included; only the comment in `wrangler.read-migrations.jsonc` that
-    // quotes its own path changed (G0-06, G0-07, G5-15).
-    requiredVerification: "git mv only; Worker name kogane-observation-pipeline and cron stay",
-    executionStatus: "EXECUTED_RENAME",
+  "services/collector-sbi-securities": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-sbi-securities",
+    requiredVerification: "contract tests and resource identity; secret material is not moved",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-sbi-shinsei": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-sbi-shinsei",
+    requiredVerification: "keep the container/relay/credential operation contract",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-sbi-vc-trade": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-sbi-vc-trade",
+    requiredVerification: "keep the client dependency and the resource identity",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-smbc-direct": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-smbc-direct",
+    requiredVerification:
+      "keep the human-required boundary; never turn it into unattended re-authentication",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-sony-bank": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-sony-bank",
+    requiredVerification: "keep the sanitize/HTML/CSV contract and the resource identity",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-vpass": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-vpass",
+    requiredVerification: "keep the Worker name and the R2/cron/auth contract",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-vpoint": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-vpoint",
+    requiredVerification: "keep the Email route and the DO class/tag/storage",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-vpoint-pay": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-vpoint-pay",
+    requiredVerification: "confirm the Email/collection entry point and the resource identity",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "services/raw-evidence": {
@@ -1001,9 +993,10 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
  * (`vars` values, DO migration ordering, anything a future key adds): a move
  * that edits a config at all shows up here.
  *
- * `scripts/resource-ledger.test.ts` compares the lines of the configs that
- * moved against the bytes they had before the move (acceptance G0-06, G0-07,
- * G5-15).
+ * `scripts/resource-ledger.test.ts` compares them two ways: the promoted
+ * collectors against the frozen set captured before the U04 promotions, and
+ * the configs that moved in the services rename against the bytes they had
+ * before that move (acceptance G0-06, G0-07, G5-15).
  */
 export function resourceIdentityLines(ledger: ResourceLedger, root = REPO_ROOT): string[] {
   const list = (entries: readonly string[]): string =>

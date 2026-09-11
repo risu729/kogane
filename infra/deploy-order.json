@@ -200,7 +200,7 @@
     },
     {
       "name": "globalpass-worker",
-      "path": "poc/globalpass-worker",
+      "path": "services/collector-globalpass",
       "config": "wrangler.jsonc",
       "worker": "kogane-globalpass-collector-poc",
       "role": "producer",
@@ -209,7 +209,7 @@
     },
     {
       "name": "mobile-suica-worker",
-      "path": "poc/mobile-suica-worker",
+      "path": "services/collector-mobile-suica",
       "config": "wrangler.jsonc",
       "worker": "kogane-mobile-suica-collector-poc",
       "role": "producer",
@@ -218,7 +218,7 @@
     },
     {
       "name": "moneyforward-worker",
-      "path": "poc/moneyforward-worker",
+      "path": "services/collector-moneyforward",
       "config": "wrangler.jsonc",
       "worker": "kogane-moneyforward-collector-poc",
       "role": "producer",
@@ -227,7 +227,7 @@
     },
     {
       "name": "myjcb-worker",
-      "path": "poc/myjcb-worker",
+      "path": "services/collector-myjcb",
       "config": "wrangler.jsonc",
       "worker": "kogane-myjcb-collector-poc",
       "role": "producer",
@@ -236,7 +236,7 @@
     },
     {
       "name": "sbi-securities-worker",
-      "path": "poc/sbi-securities-worker",
+      "path": "services/collector-sbi-securities",
       "config": "wrangler.jsonc",
       "worker": "kogane-sbi-collector-poc",
       "role": "producer",
@@ -245,7 +245,7 @@
     },
     {
       "name": "sbi-shinsei-worker",
-      "path": "poc/sbi-shinsei-worker",
+      "path": "services/collector-sbi-shinsei",
       "config": "wrangler.jsonc",
       "worker": "kogane-sbi-shinsei-collector-poc",
       "role": "producer",
@@ -254,7 +254,7 @@
     },
     {
       "name": "sbi-vc-trade-worker",
-      "path": "poc/sbi-vc-trade-worker",
+      "path": "services/collector-sbi-vc-trade",
       "config": "wrangler.jsonc",
       "worker": "kogane-sbi-vc-session-poc",
       "role": "producer",
@@ -263,7 +263,7 @@
     },
     {
       "name": "smbc-direct-backfill-worker",
-      "path": "poc/smbc-direct-backfill-worker",
+      "path": "services/collector-smbc-direct",
       "config": "wrangler.jsonc",
       "worker": "kogane-smbc-direct-backfill-poc",
       "role": "producer",
@@ -272,7 +272,7 @@
     },
     {
       "name": "sony-bank-worker",
-      "path": "poc/sony-bank-worker",
+      "path": "services/collector-sony-bank",
       "config": "wrangler.jsonc",
       "worker": "kogane-sony-bank-collector-poc",
       "role": "producer",
@@ -281,7 +281,7 @@
     },
     {
       "name": "vpass-json",
-      "path": "poc/vpass-json",
+      "path": "services/collector-vpass",
       "config": "wrangler.jsonc",
       "worker": "kogane-vpass-collector-poc",
       "role": "producer",
@@ -290,7 +290,7 @@
     },
     {
       "name": "vpoint-pay-worker",
-      "path": "poc/vpoint-pay-worker",
+      "path": "services/collector-vpoint-pay",
       "config": "wrangler.jsonc",
       "worker": "kogane-vpoint-pay-collector-poc",
       "role": "producer",
@@ -299,7 +299,7 @@
     },
     {
       "name": "vpoint-worker",
-      "path": "poc/vpoint-worker",
+      "path": "services/collector-vpoint",
       "config": "wrangler.jsonc",
       "worker": "kogane-vpoint-collector-poc",
       "role": "producer",

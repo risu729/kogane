@@ -1,0 +1,43 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["sbi-shinsei-worker:types"]
+description = "Generate the Cloudflare Worker types of services/collector-sbi-shinsei."
+dir = "services/collector-sbi-shinsei"
+run = "./node_modules/.bin/wrangler types"
+
+["sbi-shinsei-worker:typecheck"]
+description = "Type-check services/collector-sbi-shinsei."
+depends = ["sbi-shinsei-worker:types"]
+dir = "services/collector-sbi-shinsei"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["sbi-shinsei-worker:test"]
+description = "Run the services/collector-sbi-shinsei tests."
+depends = ["sbi-shinsei-worker:types"]
+dir = "services/collector-sbi-shinsei"
+run = [
+	"bun test",
+	"bash test/admin-token-sync.test.sh",
+	"node --test container/relay-lifecycle.node-test.mjs container/child-lifecycle.node-test.mjs",
+]
+
+["sbi-shinsei-worker:container"]
+description = "Install the container relay's locked npm dependencies and check its syntax."
+dir = "services/collector-sbi-shinsei/container"
+run = [
+	"npm ci --ignore-scripts",
+	'for file in *.mjs *.cjs *.js; do if [ -e "$file" ]; then node --check "$file"; fi; done',
+]
+
+["sbi-shinsei-worker:dry-run"]
+description = "Validate the services/collector-sbi-shinsei deployment without uploading it."
+depends = ["sbi-shinsei-worker:types"]
+dir = "services/collector-sbi-shinsei"
+run = [
+	"./node_modules/.bin/wrangler deploy --dry-run",
+]
+
+["ci:sbi-shinsei-worker"]
+description = "Every check CI runs for services/collector-sbi-shinsei."
+depends = ["sbi-shinsei-worker:typecheck", "sbi-shinsei-worker:test", "sbi-shinsei-worker:container"]

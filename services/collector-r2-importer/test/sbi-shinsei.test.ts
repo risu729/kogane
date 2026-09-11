@@ -585,7 +585,10 @@ describe("SBI Shinsei staged-run importer", () => {
 
 async function successEntries() {
   const core = (await Bun.file(
-    new URL("../../../poc/sbi-shinsei-worker/test/fixtures/core-responses.json", import.meta.url),
+    new URL(
+      "../../../services/collector-sbi-shinsei/test/fixtures/core-responses.json",
+      import.meta.url,
+    ),
   ).json()) as Record<string, unknown>;
   const capturedAt = "2026-08-31T00:00:30.000Z";
   return [

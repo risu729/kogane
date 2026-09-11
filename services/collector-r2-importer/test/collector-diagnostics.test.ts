@@ -4,13 +4,13 @@ import { parseSbiShinseiManifest } from "../src/sbi-shinsei";
 import {
   failure as sonyFailure,
   SonyBankError,
-} from "../../../poc/sony-bank-worker/src/diagnostics";
+} from "../../../services/collector-sony-bank/src/diagnostics";
 import {
   failure as shinseiFailure,
   BrowserCollectionError,
-} from "../../../poc/sbi-shinsei-worker/src/diagnostics";
-import { storeManifest as storeSonyManifest } from "../../../poc/sony-bank-worker/src/storage";
-import { storeManifest as storeShinseiManifest } from "../../../poc/sbi-shinsei-worker/src/storage";
+} from "../../../services/collector-sbi-shinsei/src/diagnostics";
+import { storeManifest as storeSonyManifest } from "../../../services/collector-sony-bank/src/storage";
+import { storeManifest as storeShinseiManifest } from "../../../services/collector-sbi-shinsei/src/storage";
 
 const runId = "123e4567-e89b-42d3-a456-426614174000";
 const common = {

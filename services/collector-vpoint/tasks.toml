@@ -1,0 +1,31 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["vpoint-worker:types"]
+description = "Generate the Cloudflare Worker types of services/collector-vpoint."
+dir = "services/collector-vpoint"
+run = "./node_modules/.bin/wrangler types"
+
+["vpoint-worker:typecheck"]
+description = "Type-check services/collector-vpoint."
+depends = ["vpoint-worker:types"]
+dir = "services/collector-vpoint"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["vpoint-worker:test"]
+description = "Run the services/collector-vpoint tests."
+depends = ["vpoint-worker:types"]
+dir = "services/collector-vpoint"
+run = "bun test"
+
+["vpoint-worker:dry-run"]
+description = "Validate the services/collector-vpoint deployment without uploading it."
+depends = ["vpoint-worker:types"]
+dir = "services/collector-vpoint"
+run = [
+	"./node_modules/.bin/wrangler deploy --dry-run",
+]
+
+["ci:vpoint-worker"]
+description = "Every check CI runs for services/collector-vpoint."
+depends = ["vpoint-worker:typecheck", "vpoint-worker:test"]

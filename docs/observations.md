@@ -11,7 +11,7 @@ The reference implementation is `experiments/observation-pipeline-local`
 ingestion of already-collected evidence (layer A), parsers (A -> B), the
 schema for both layers, and a read-only browse layer. It deliberately
 contains no collector: collection is phases 0 and 2, and already runs in
-`poc/vpass-json` and `poc/sbi-securities-worker`. Every statement below
+`services/collector-vpass` and `services/collector-sbi-securities`. Every statement below
 about the PoC describes code on disk. Where the PoC is deliberately
 minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
@@ -1000,7 +1000,7 @@ Four exist in `packages/parsers/src/parsers/`, all at version
 `0.2.0`.
 
 **`sbi-domestic-trade-records`** consumes the `domestic-trade-records`
-dataset written by `poc/sbi-securities-worker`, whose body is
+dataset written by `services/collector-sbi-securities`, whose body is
 `{ records, hasMore }` with each record keeping the source table row in
 `rawCells`. Every record becomes one transaction observation in JPY, with
 `as_of` from `tradeDate`, `description` from `rawCells[1]` (falling back
@@ -1010,7 +1010,7 @@ kept in `amount_text` even when it does not resolve to minor units. It
 does not decide the sign from the trade type, and it does not treat the
 record `id` as a provider identity: the collector computes that id as a
 row fingerprint plus an occurrence counter
-(`poc/sbi-securities-worker/src/main-site.ts`), so the parser tags it
+(`services/collector-sbi-securities/src/main-site.ts`), so the parser tags it
 `_kogane.externalIdOrigin: "collector-fingerprint"`. A record that is not
 an object still produces a row carrying `_kogane.unparsedElement`.
 `hasMore: true` is a warning, never an invitation to fetch the next page.
@@ -1196,7 +1196,7 @@ fixtures/paypay/paypay-transactions-202608.csv
 
 The SBI fixture is shaped like the collector's output but is not a copy of
 its R2 layout, and the difference is worth stating so nobody writes an
-importer against the fixture. `poc/sbi-securities-worker` writes to
+importer against the fixture. `services/collector-sbi-securities` writes to
 `raw/sbi-securities/YYYY/MM/DD/<runId>/` — three date segments and a UUID
 run id — where the fixture uses one date segment and a readable run name.
 The ingestible demo fixture holds four of the seven datasets the collector emits:
@@ -1239,7 +1239,7 @@ still idempotent at parse-run level.
 
 SBI domestic parser `1.0.1` and yen-history parser `1.0.2` also handle the verified production response forms.
 The domestic collector requests MTS offset zero and limit 999 in
-`poc/sbi-securities-worker/src/sbi.ts`; its response index can be the end cursor,
+`services/collector-sbi-securities/src/sbi.ts`; its response index can be the end cursor,
 equal to the total record count, rather than zero. The parser accepts either
 endpoint only when the emitted record count equals the total and the exact
 record/trailer byte layout passes. Interior cursors and suffix-only pages still
@@ -1322,7 +1322,7 @@ linear in artifacts, not in observations. Storage grows by one full copy
 of that parser's observations, permanently, because nothing is deleted.
 The number of artifacts a real sweep would touch is not recorded in this
 repository; both deployed collectors run on a daily Cron
-(`0 21 * * *`), and `poc/sbi-securities-worker`'s README records a
+(`0 21 * * *`), and `services/collector-sbi-securities`'s README records a
 backfill invocation as `scripts/backfill.sh 2024-08-28 2026-05-29`. At
 that horizon a retention policy for superseded observations becomes a real
 question, and it is one this document leaves open rather than answering by

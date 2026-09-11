@@ -42,8 +42,8 @@ installs `--linker hoisted`: the repository's isolated layout would put the
 dependencies under the workspace path, where the entry point cannot resolve
 them. The root `.dockerignore` keeps evidence, credentials, `node_modules` and
 build output out of that context. Images that install with npm from their own
-`container/package-lock.json` (`poc/globalpass-worker`,
-`poc/sbi-shinsei-worker`) are unaffected and keep their workspace directory as
+`container/package-lock.json` (`services/collector-globalpass`,
+`services/collector-sbi-shinsei`) are unaffected and keep their workspace directory as
 the context.
 
 ## Local commands

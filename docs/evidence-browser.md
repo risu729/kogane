@@ -364,7 +364,7 @@ The pieces:
 
 Hono is the choice because the same app object runs on Bun now and on
 Cloudflare Workers later, which is where the rest of Kogane already lives
-(`poc/sbi-securities-worker`, `poc/vpass-json`). Only the store binding
+(`services/collector-sbi-securities`, `services/collector-vpass`). Only the store binding
 and the way static files are served differ between the two, which is what
 makes the deployment shape below a bounded piece of work rather than a
 rewrite.
@@ -757,8 +757,8 @@ should ever depend on it.
 - Server-side pagination and filtering. Every endpoint returns everything, and no
   query in `src/queries.ts` carries a `LIMIT`. The demo store is 28
   observations and a real store is not: both live collectors run daily on
-  a Cloudflare Cron trigger (`poc/sbi-securities-worker`,
-  `poc/vpass-json`), and the SBI collector's README records an initial
+  a Cloudflare Cron trigger (`services/collector-sbi-securities`,
+  `services/collector-vpass`), and the SBI collector's README records an initial
   backfill over 2024-08-28 to 2026-05-29 in windows of at most 90 days.
   The transaction list sorts and filters in the browser now, which helps a
   reader and bounds nothing: the whole result set is still serialized,

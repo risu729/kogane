@@ -65,7 +65,7 @@ The exact current test count is reported by CI; `tsc --noEmit` is clean.
 
 **The roadmap's phase-2 table sketch survives contact with real collector
 output, with two additions.** `sources` / `fetch_runs` / `raw_objects` /
-`fetch_artifacts` map onto what `poc/sbi-securities-worker` already writes
+`fetch_artifacts` map onto what `services/collector-sbi-securities` already writes
 without distortion. Two columns had to be added: `fetch_runs.external_run_id`,
 so a collector run id is the idempotency key for re-import, and
 `fetch_artifacts.dataset`, because the SBI collector's artifacts are
@@ -492,7 +492,7 @@ wrong, bumping the parser version and re-parsing corrects every historical
 observation — which is precisely the operation this PoC exists to prove, so
 the assumption is cheap to hold and cheap to withdraw.
 
-**What do the Vpass `meisaiList` rows mean?** `poc/vpass-json` deliberately
+**What do the Vpass `meisaiList` rows mean?** `services/collector-vpass` deliberately
 stores the positional `rowType`/`data` arrays losslessly rather than
 guessing, so no Vpass parser is included here. The card statement is the
 repository's most mature collector and its most valuable unparsed evidence;

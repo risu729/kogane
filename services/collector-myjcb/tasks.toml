@@ -1,0 +1,34 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["myjcb-worker:types"]
+description = "Generate the Cloudflare Worker types of services/collector-myjcb."
+dir = "services/collector-myjcb"
+run = "./node_modules/.bin/wrangler types"
+
+["myjcb-worker:typecheck"]
+description = "Type-check services/collector-myjcb."
+depends = ["myjcb-worker:types"]
+dir = "services/collector-myjcb"
+run = [
+	"./node_modules/.bin/tsc --noEmit",
+	"./node_modules/.bin/tsc --noEmit -p tsconfig.scripts.json",
+]
+
+["myjcb-worker:test"]
+description = "Run the services/collector-myjcb tests."
+depends = ["myjcb-worker:types"]
+dir = "services/collector-myjcb"
+run = "bun test"
+
+["myjcb-worker:dry-run"]
+description = "Validate the services/collector-myjcb deployment without uploading it."
+depends = ["myjcb-worker:types"]
+dir = "services/collector-myjcb"
+run = [
+	"./node_modules/.bin/wrangler deploy --dry-run",
+]
+
+["ci:myjcb-worker"]
+description = "Every check CI runs for services/collector-myjcb."
+depends = ["myjcb-worker:typecheck", "myjcb-worker:test"]

@@ -253,18 +253,25 @@ describe("risk path ledger", () => {
     expect(matchesPattern("services/app/wrangler.jsonc", "**/wrangler*.jsonc")).toBe(true);
     expect(matchesPattern("wrangler.jsonc", "**/wrangler*.jsonc")).toBe(true);
     expect(matchesPattern("docs/wrangler.md", "**/wrangler*.jsonc")).toBe(false);
-    expect(matchesPattern("poc/vpass-json/src/index.ts", "poc/*-worker/src/**")).toBe(false);
-    expect(matchesPattern("poc/vpoint-worker/src/deep/file.ts", "poc/*-worker/src/**")).toBe(true);
+    expect(matchesPattern("services/app/src/index.ts", "services/collector-*/src/**")).toBe(false);
+    expect(
+      matchesPattern("services/collector-vpoint/src/deep/file.ts", "services/collector-*/src/**"),
+    ).toBe(true);
   });
   test("the shipped ledger classifies the paths chapter 10 calls high risk", () => {
     const highRisk = [
       "packages/storage-d1/migrations/core/0038_source_revision.sql",
       "services/app/src/auth.ts",
-      "poc/moneyforward-worker/src/index.ts",
-      "poc/moneyforward-worker/package.json",
-      "poc/moneyforward-worker/bun.lock",
       "services/collector-moneyforward/src/index.ts",
       "services/collector-moneyforward/package.json",
+      // The container image and the operator scripts of a promoted collector
+      // run with the same credentials as its Worker (plan 12 §5).
+      "services/collector-globalpass/container/server.mjs",
+      "services/collector-globalpass/Dockerfile",
+      "services/collector-sbi-shinsei/scripts/set-credentials.sh",
+      // Every collector bundles the diagnostics helper; it decides what an
+      // error is allowed to leave behind in the logs.
+      "packages/collector-diagnostics/src/index.ts",
       ".github/workflows/ci.yml",
       ".github/scripts/automerge.mjs",
       "services/processor/wrangler.ops.jsonc",
@@ -282,7 +289,9 @@ describe("risk path ledger", () => {
         "packages/read-model/src/queries.ts",
         "packages/read-model/package.json",
         "apps/web/package.json",
-        "poc/moneyforward-worker/README.md",
+        "services/collector-moneyforward/README.md",
+        "services/collector-globalpass/docs/turnstile-local-analysis.md",
+        "packages/collector-diagnostics/README.md",
         "apps/web/src/app.tsx",
         "services/app/src/routes.ts",
       ],
