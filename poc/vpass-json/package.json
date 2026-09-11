@@ -2,16 +2,6 @@
   "name": "@kogane/poc-vpass-json",
   "private": true,
   "type": "module",
-  "scripts": {
-    "scrape": "bun run src/cli.ts",
-    "scrape:mobile": "bun run src/mobile-cli.ts",
-    "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "cf:types": "wrangler types",
-    "cf:check": "wrangler deploy --dry-run",
-    "backfill:raw-evidence": "bash scripts/backfill-raw-evidence.sh",
-    "cf:deploy": "wrangler deploy"
-  },
   "dependencies": {
     "@clack/prompts": "1.0.0",
     "impit": "0.14.3",

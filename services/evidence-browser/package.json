@@ -2,12 +2,6 @@
   "name": "@kogane/evidence-browser",
   "private": true,
   "type": "module",
-  "scripts": {
-    "test": "vitest run",
-    "typecheck": "wrangler types && tsc --noEmit",
-    "cf:types": "wrangler types",
-    "cf:check": "wrangler deploy --dry-run && wrangler deploy --dry-run --config wrangler.demo.jsonc"
-  },
   "dependencies": {
     "jose": "6.2.11"
   },
@@ -17,6 +11,5 @@
     "typescript": "7.0.2",
     "vitest": "4.1.11",
     "wrangler": "4.128.0"
-  },
-  "packageManager": "bun@1.4.0"
+  }
 }

@@ -2,14 +2,6 @@
   "name": "@kogane/poc-vpoint-worker",
   "private": true,
   "type": "module",
-  "scripts": {
-    "test": "bun test",
-    "typecheck": "wrangler types && tsc --noEmit",
-    "cf:types": "wrangler types",
-    "cf:check": "wrangler deploy --dry-run",
-    "cf:deploy": "wrangler deploy",
-    "live:email-login": "bun scripts/live-email-login.ts"
-  },
   "dependencies": {
     "cheerio": "1.1.2",
     "iconv-lite": "0.7.0",
