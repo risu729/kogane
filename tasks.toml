@@ -24,7 +24,7 @@ run = "bun tasks/_lib/check-manifests.ts"
 description = "Run the repository-wide guards that belong to no single workspace."
 # Directories, not a list of files: a new guard next to the one it protects
 # joins CI by existing, exactly like a new workspace does.
-run = "bun test tasks/_lib scripts poc/collector-diagnostics/test/diagnostics.test.ts poc/sbi-securities/scripts/prepare-sbi-bitwarden-cli-secret.bun.test.ts"
+run = "bun test tasks/_lib scripts packages/collector-diagnostics/test/diagnostics.test.ts poc/sbi-securities/scripts/prepare-sbi-bitwarden-cli-secret.bun.test.ts"
 
 ["ci:root"]
 description = "Every check CI runs for the repository-wide guards."

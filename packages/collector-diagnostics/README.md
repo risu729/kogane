@@ -6,4 +6,4 @@ Source and stage names, error types and domain error codes use explicit allowlis
 
 Current integrations: Mobile Suica, MyJCB, SBI Securities, SBI VC Trade, Vpass and SMBC Direct backfill; the API also supports PRESTIA GLOBAL PASS. The API does not alter manifest schemas, storage bodies, retry decisions or collection schedules. Existing source collectors outside this repository are not covered.
 
-Run tests with `bun test poc/collector-diagnostics/test`. Changes to source or stage names should update the allowlist and relevant failure-path tests together.
+Run tests with `bun test packages/collector-diagnostics/test`. Changes to source or stage names should update the allowlist and relevant failure-path tests together.

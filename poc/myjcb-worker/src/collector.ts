@@ -1,4 +1,4 @@
-import { safeErrorDetails } from "../../collector-diagnostics/src/index";
+import { safeErrorDetails } from "../../../packages/collector-diagnostics/src/index";
 import { decodeMyJcbHtml, MyJcbReadClient, type ReadResponse } from "./client";
 import { CookieJar } from "./cookie-jar";
 import { loginWithBitwardenPasskey, loginWithOfficialProtection } from "./login-protection";
@@ -23,7 +23,7 @@ export interface ConnectionCollection {
 }
 
 export async function collectConnection(options: {
-  diagnostic?: ReturnType<typeof import("../../collector-diagnostics/src/index").createDiagnostics>;
+  diagnostic?: ReturnType<typeof import("../../../packages/collector-diagnostics/src/index").createDiagnostics>;
   browserBinding: BrowserRun;
   credential: MyJcbCredential;
 }): Promise<ConnectionCollection> {

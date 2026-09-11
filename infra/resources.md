@@ -165,15 +165,6 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
-### `poc/collector-diagnostics`
-
-- Disposition (poc_disposition.csv): `promote-shared` → packages/collector-diagnostics
-- Required verification: list the real consumers and the public exports
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: NO_LIVE_RESOURCE
-
-No wrangler config.
-
 ### `poc/globalpass-worker`
 
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-globalpass

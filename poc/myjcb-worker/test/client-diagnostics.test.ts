@@ -1,7 +1,7 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { MyJcbReadClient } from "../src/client";
 import { CookieJar } from "../src/cookie-jar";
-import { safeErrorDetails } from "../../collector-diagnostics/src/index";
+import { safeErrorDetails } from "../../../packages/collector-diagnostics/src/index";
 let restore: (() => void) | undefined;
 afterEach(() => {
   restore?.();

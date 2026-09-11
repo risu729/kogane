@@ -10,7 +10,7 @@ const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export async function collectSbiVcTrade(options: {
-  diagnostic?: ReturnType<typeof import("../../collector-diagnostics/src/index").createDiagnostics>;
+  diagnostic?: ReturnType<typeof import("../../../packages/collector-diagnostics/src/index").createDiagnostics>;
   session: SessionMaterial;
   fetcher?: Fetcher;
   onSession: (session: SessionMaterial) => Promise<void>;

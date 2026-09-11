@@ -124,14 +124,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/collector-diagnostics": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-shared",
-    proposedTarget: "packages/collector-diagnostics",
-    requiredVerification: "list the real consumers and the public exports",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
   "poc/globalpass-worker": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",
