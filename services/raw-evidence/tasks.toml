@@ -42,6 +42,12 @@ run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
+["ingest:bundle"]
+description = "Emit the deployable bundle of services/raw-evidence for the release manifest."
+depends = ["ingest:types"]
+dir = "services/raw-evidence"
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/ingest --config wrangler.jsonc"
+
 ["ci:ingest"]
 description = "Every check CI runs for services/raw-evidence."
 depends = ["ingest:typecheck", "ingest:build", "ingest:test"]

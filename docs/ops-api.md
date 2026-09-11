@@ -280,7 +280,7 @@ Synthetic data only.
   one conflict), a raced replay (one plan), and two dispatches of one
   operation (one `target_ref`, the second told to reuse it) — plus the 0040
   guards against delete, replacement and reopening.
-- `poc/observation-pipeline/test/api-schema.test.ts` and
+- `apps/web/test/api-schema.test.ts` and
   `services/evidence-browser/test/conformance.test.ts` pin the new `opsApi`
   capability off in the shared contract.
 

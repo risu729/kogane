@@ -1,0 +1,63 @@
+name: Deploy
+# Continuous deployment without a preview or staging lane (unified plan 11).
+# A merge to main starts CI; a successful CI run on main starts this workflow,
+# which releases that exact commit.
+on:
+  # zizmor: ignore[dangerous-triggers]
+  # `workflow_run` is privileged by design: the release needs the production
+  # environment, which a pull request workflow must never reach. The job below
+  # runs only for a CI run that a *push* to main started in this repository —
+  # `head_branch` alone is not enough, because a pull request from a fork whose
+  # branch is also called `main` produces a successful CI run with that head
+  # branch — and the called workflow re-checks the commit against the default
+  # branch through the API before it checks anything out. It never sees a pull
+  # request ref. The definition is read from the default branch, so a branch
+  # cannot change what CD does.
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: The exact commit on main to release.
+        required: true
+        type: string
+      only:
+        description: Space- or comma-separated deploy-order names to release. Empty releases every Worker marked deploy in infra/deploy-order.json.
+        required: false
+        default: ""
+        type: string
+permissions: {}
+jobs:
+  release:
+    name: Release
+    # A failed, cancelled or skipped CI run releases nothing, and neither does a
+    # CI run that a pull request started, one on any branch but main, or one
+    # whose head lives in another repository.
+    if: >-
+      github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
+    concurrency:
+      # One production change at a time, shared with rollback.yml. Never
+      # cancellable: a run may be in the middle of applying a migration, and a
+      # later push must wait rather than interrupt it (acceptance G5-13). The
+      # group is held for the whole of the called workflow. Because GitHub keeps
+      # at most one run pending per group, an overtaken run can still start
+      # late; the release ledger is what makes that harmless (G5-12).
+      group: production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read # for checkout
+      deployments: write # the release ledger
+    # `environment: production` is declared by the called workflow: a job that
+    # calls a reusable workflow cannot declare one itself.
+    uses: ./.github/workflows/_deploy-workers.yml
+    with:
+      # Empty for a manual dispatch, set for a CI run: the sha CI passed on,
+      # never a branch tip that has moved since.
+      sha: ${{ github.event.workflow_run.head_sha || inputs.sha }}
+      only: ${{ inputs.only }}
+      mode: release

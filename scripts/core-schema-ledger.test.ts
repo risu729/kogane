@@ -124,6 +124,10 @@ describe("G0-01 CORE schema ledger", () => {
   test("only the tables chapter 04 §2 places in READ are READ candidates", () => {
     expect(ledger.summary.byClassification["read-candidate"]).toEqual([
       "balance_read_snapshots",
+      // The active snapshot pointer of migration 0038 belongs to the same
+      // rebuildable set: it names which snapshot the read model publishes, and
+      // it moves to READ with them in U11.
+      "balance_snapshot_pointer",
       "conversion_simulations",
       "current_balance_projection",
       "expiry_estimates",

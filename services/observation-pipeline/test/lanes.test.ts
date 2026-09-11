@@ -70,6 +70,7 @@ test("harness applies every Layer B migration in order through 0040", () => {
     "0035_observation_job_lanes.sql",
     "0036_publication_event_guard.sql",
     "0037_unit_scope_eligibility.sql",
+    "0038_source_revision.sql",
     "0040_operations_api.sql",
   ]);
   expect([...names].sort()).toEqual(names);

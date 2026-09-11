@@ -52,6 +52,34 @@
   },
   "directories": [
     {
+      "directory": "apps/web",
+      "workspace": "apps",
+      "disposition": {
+        "source": "poc_disposition.csv row poc/observation-pipeline + decision D1",
+        "proposedAction": "promoted-from-poc",
+        "proposedTarget": "apps/web (the React client and its frontend tests)",
+        "requiredVerification": "U04 executed the move; the three bundles are byte-identical and the client imports no service internal",
+        "executionStatus": "EXECUTED_U04",
+        "planLiveResourceStatus": "NOT_VERIFIED",
+        "liveResourceStatus": "NO_LIVE_RESOURCE"
+      },
+      "workers": []
+    },
+    {
+      "directory": "experiments/observation-pipeline-local",
+      "workspace": "experiments",
+      "disposition": {
+        "source": "poc_disposition.csv row poc/observation-pipeline + decision D1",
+        "proposedAction": "isolated-as-experiment",
+        "proposedTarget": "experiments/observation-pipeline-local (EXPERIMENT.md: risu729, 2026-12-31)",
+        "requiredVerification": "U04 executed the move; retire once the App API covers replay and status (docs/research/observation-pipeline-poc.md)",
+        "executionStatus": "EXECUTED_U04",
+        "planLiveResourceStatus": "NOT_VERIFIED",
+        "liveResourceStatus": "NO_LIVE_RESOURCE"
+      },
+      "workers": []
+    },
+    {
       "directory": "poc/camoufox-container-probe",
       "workspace": "poc",
       "disposition": {
@@ -469,20 +497,6 @@
           "unextractedKeys": []
         }
       ]
-    },
-    {
-      "directory": "poc/observation-pipeline",
-      "workspace": "poc",
-      "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "split-promote-retire",
-        "proposedTarget": "apps/web; packages/application; tests/fixtures; docs/research",
-        "requiredVerification": "promote UI and fixtures, move needed local operations to the App API, legacy store to test/research, drop the shims",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "NO_LIVE_RESOURCE"
-      },
-      "workers": []
     },
     {
       "directory": "poc/oci-browser-probe",
@@ -1700,7 +1714,7 @@
           "vpcNetworks": [],
           "serviceBindings": [],
           "assets": {
-            "directory": "../../poc/observation-pipeline/web/dist",
+            "directory": "../../apps/web/dist",
             "binding": "ASSETS"
           },
           "varNames": [
@@ -1750,7 +1764,7 @@
             }
           ],
           "assets": {
-            "directory": "../../poc/observation-pipeline/web/dist-production",
+            "directory": "../../apps/web/dist-production",
             "binding": "ASSETS"
           },
           "varNames": [
@@ -1892,6 +1906,11 @@
           "r2": [
             {
               "binding": "EVIDENCE",
+              "bucket": "kogane-raw-evidence",
+              "live": true
+            },
+            {
+              "binding": "DATA",
               "bucket": "kogane-raw-evidence",
               "live": true
             }

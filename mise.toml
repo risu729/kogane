@@ -56,6 +56,8 @@ run = "bun install --frozen-lockfile"
 includes = [
 	"tasks.toml",
 	"tasks",
+	"apps/web/tasks.toml",
+	"experiments/observation-pipeline-local/tasks.toml",
 	"packages/application/tasks.toml",
 	"packages/collection/tasks.toml",
 	"packages/domain/tasks.toml",
@@ -71,7 +73,6 @@ includes = [
 	"poc/mobile-suica-worker/tasks.toml",
 	"poc/moneyforward-worker/tasks.toml",
 	"poc/myjcb-worker/tasks.toml",
-	"poc/observation-pipeline/tasks.toml",
 	"poc/oci-browser-probe/tasks.toml",
 	"poc/sbi-securities-worker/tasks.toml",
 	"poc/sbi-shinsei-worker/tasks.toml",

@@ -97,6 +97,7 @@ export {
   type ProjectionInputs,
   type ProjectionRow,
   type ProjectionState,
+  projectionBuildDigest,
   projectionInputManifest,
   SCOPE_RELATION_RELEASE,
   SUBJECT_STATUSES,
@@ -105,6 +106,19 @@ export {
   temporalReferenceFor,
 } from "./balance-projection";
 export {
+  CORE_READ_INSTANCE_ID,
+  CORE_REVISION_SQL,
+  type CoreRevisionRow,
+  type LedgerTable,
+  PROJECTION_INPUT_CONTRACT_VERSION,
+  REVISION_EXCLUDED_TABLES,
+  revisionTriggerNames,
+  snapshotIdentity,
+  SOURCE_REVISION_LEDGER,
+  VISIBILITY_REVISION_LEDGER,
+} from "./source-revision";
+export {
+  ACTIVE_POINTER_SQL,
   DEFAULT_PROJECTION_PAGE_LIMIT,
   PROJECTION_PAGE_LIMITS,
   type ProjectionPageLimit,
@@ -119,6 +133,7 @@ export {
   projectionSubtotalSql,
 } from "./balance-projection-sql";
 export {
+  type ActivePointerRow,
   type BalanceProjectionReader,
   type BalanceSnapshotRow,
   type ProjectionCoverageRow,

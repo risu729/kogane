@@ -26,10 +26,20 @@ export interface D1StatementLike {
   raw<T = unknown[]>(): Promise<T[]>;
 }
 
-/** What a write reports back. `changes` is the guard signal: a conditional
- * INSERT/UPDATE that matched nothing reports 0 and writes nothing. */
+/**
+ * What a write reports back. `changes` is the guard signal: a conditional
+ * INSERT/UPDATE that matched nothing reports 0 and writes nothing.
+ *
+ * `changes` is **not** a count of the rows the statement itself wrote: D1
+ * counts rows written by triggers too, and since migration 0038 every write to
+ * a dependency-ledger table also bumps the CORE revision. A count that has to
+ * mean "the rows this statement wrote" therefore reads `results` from a
+ * `RETURNING` clause instead (docs/projection-input.md).
+ */
 export interface D1RunResultLike {
   meta: { changes: number };
+  /** Rows a `RETURNING` clause produced; absent when there is no such clause. */
+  results?: Record<string, unknown>[];
 }
 
 export interface D1Like {

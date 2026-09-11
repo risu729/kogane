@@ -1,0 +1,47 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["web:typecheck"]
+description = "Type-check the web client."
+dir = "apps/web"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["web:build"]
+description = "Build the local observation browser client."
+dir = "apps/web"
+run = "./node_modules/.bin/vite build"
+
+["web:build-evidence"]
+description = "Build the evidence-browser client bundle."
+dir = "apps/web"
+run = "./node_modules/.bin/vite build --mode evidence --outDir dist-evidence"
+
+["web:build-production"]
+description = "Build the production evidence-browser client bundle."
+dir = "apps/web"
+run = "./node_modules/.bin/vite build --mode production --outDir dist-production"
+
+["web:dev"]
+description = "Start the local Vite development server."
+dir = "apps/web"
+run = "./node_modules/.bin/vite"
+
+["web:browser"]
+description = "Install the locked Playwright Chromium in CI; never downloads locally."
+dir = "apps/web"
+hide = true
+run = '''
+if [ "${CI:-}" = "true" ] && [ -z "${CHROMIUM_PATH:-}" ]; then
+  node node_modules/playwright/cli.js install --with-deps chromium
+fi
+'''
+
+["web:test"]
+description = "Run the web client's unit and browser tests."
+depends = ["web:build", "web:build-evidence", "web:build-production", "web:browser"]
+dir = "apps/web"
+run = "bun test"
+
+["ci:web"]
+description = "Every check CI runs for apps/web."
+depends = ["web:typecheck", "web:build", "web:build-evidence", "web:build-production", "web:test"]

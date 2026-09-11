@@ -5,7 +5,9 @@ This document is the implementable version of that phase: what a parser
 owes the system, how versioning and supersession work, which tables the
 observations land in, and how a re-parse is run and verified.
 
-The reference implementation is `poc/observation-pipeline`. It contains
+The reference implementation is `experiments/observation-pipeline-local`
+(the local store, its read API and the CLI entry points) together with
+`packages/parsers`, `packages/identity` and `apps/web`. It contains
 ingestion of already-collected evidence (layer A), parsers (A -> B), the
 schema for both layers, and a read-only browse layer. It deliberately
 contains no collector: collection is phases 0 and 2, and already runs in
@@ -169,7 +171,7 @@ adapter, which every dataset still uses until its shadow comparison is
 clean. A parser that emits neither is a legacy parser and nothing invents a
 claim for it. The eleven snapshot-dataset parsers emit both; their
 observations and warning strings are unchanged and frozen in
-`fixtures/coverage-contract/expected.json`. See
+`tests/fixtures/observation-pipeline/coverage-contract/expected.json`. See
 [Parser coverage contract](parser-coverage.md).
 
 ### Fields survive; containers do not always
@@ -1180,7 +1182,7 @@ is clean. `bun src/demo.ts` ingests 4 artifacts from 2 sources and produces
 28 observations across 4 parse runs: 8 transaction, 10 balance, 2
 position, 8 valuation.
 
-The fixtures live under `poc/observation-pipeline/fixtures/`:
+The fixtures live under `tests/fixtures/observation-pipeline/`:
 
 ```text
 fixtures/sbi-securities/2026-08-20/run-20260820-210000-poc01/
@@ -1374,7 +1376,7 @@ Phase 3 is done when:
   explicit recorded decision not to parse it yet. All seven SBI securities
   datasets and Vpass statement pages now have parser routes. The current
   registry and the source-specific evidence-only decisions are listed in
-  `poc/observation-pipeline/README.md`; MoneyForward remains pending separately.
+  `docs/research/observation-pipeline-poc.md`; MoneyForward remains pending separately.
 - Parsers have been run against the real R2 evidence, not only fixtures,
   and the results have been eyeballed against the provider's own screens
   for at least one period per source.

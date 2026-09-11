@@ -142,3 +142,16 @@ Migration order for anything in this area stays: additive tables and contracts �
 dual-read comparison → candidate verification → adoption → old path retired.
 A cleanup must not delete the versions that a preserved report or the current
 financial view still needs.
+
+## 5. Releases and rollback
+
+Deployment is automated from `main` with no preview or staging lane. The release
+order, the interlock that stops a late run from overwriting a newer release, the
+schema-compatibility rule a rollback must satisfy, and the per-case rollback
+table are in [CI/CD automation](ci-cd.md#continuous-deployment);
+`infra/deploy-order.json` is the ledger it works from.
+
+Two things on this page are the ones a rollback cannot undo: an applied
+migration and a recovery drill. A code rollback re-deploys a Worker; it never
+restores CORE or R2, and a whole-database restore stays the separate incident
+described in section 4.

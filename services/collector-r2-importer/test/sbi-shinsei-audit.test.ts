@@ -5,7 +5,7 @@ import auditWorker from "../src/sbi-shinsei-audit-worker";
 const RUN_ID = "123e4567-e89b-42d3-a456-426614174000";
 const PREFIX = `raw/sbi-shinsei/2026/09/07/${RUN_ID}/`;
 const FIXTURE_ROOT = new URL(
-  "../../../poc/observation-pipeline/fixtures/sbi-shinsei-parser-boundaries/",
+  "../../../tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/",
   import.meta.url,
 );
 const FILENAMES = {

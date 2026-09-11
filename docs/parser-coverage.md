@@ -76,7 +76,7 @@ the Sony contract fixes the container at 17 rows (`expectedCount: 17`) and an
 empty Sony container is a schema drift, not a complete-empty snapshot.
 
 **Parser versions are unchanged.** The output contract gained fields, but
-`fixtures/coverage-contract/expected.json` freezes the observations and
+`tests/fixtures/observation-pipeline/coverage-contract/expected.json` freezes the observations and
 warning strings every synthetic case produced before the change, and
 `test/coverage-contract.test.ts` asserts the converted parsers produce them
 byte for byte (`JSON.stringify` equality) plus the expected issues and claim.
@@ -233,7 +233,8 @@ One definition, `unitScopedEligibilitySql` in
   which `parseJob` re-checks before parsing, so a partial run produces jobs
   only for its eligible units;
 - the reader's `activeStateProjection` (`packages/read-model/src/concepts.ts`)
-  and the PoC's `CURRENT` (`poc/observation-pipeline/src/queries.ts`), so a
+  and the local store's `CURRENT`
+  (`experiments/observation-pipeline-local/src/queries.ts`), so a
   rescued parse is not written and then hidden;
 - `eligible_snapshots` in the snapshot CTEs, so the rescued unit can become the
   current snapshot of _its own_ partition.
@@ -308,7 +309,7 @@ single-unit or unit-less.
 
 MyJCB's credit datasets are not container-snapshot datasets: their
 current-statement selection is the per-source multi-page contract in
-`poc/observation-pipeline/src/queries.ts` (`ranked_myjcb_snapshots`), not
+`experiments/observation-pipeline-local/src/queries.ts` (`ranked_myjcb_snapshots`), not
 `SNAPSHOT_DATASETS`. That is why `dataset_snapshot_policies` gained
 `snapshot_selection`: a row with `snapshot_selection = 0` carries the
 eligibility policy for a dataset without enrolling it into container-snapshot
@@ -419,7 +420,7 @@ Synthetic data only: `mise run ci:root` (which
 runs the publication-gate predicate guard; the unit-scope predicate adds no
 `superseded_by_parse_run_id IS NULL` and no `status = 'ok'` read, and every
 adoption test still goes through `published_parse_runs`),
-`poc/observation-pipeline`, `services/observation-pipeline`,
+`experiments/observation-pipeline-local`, `services/observation-pipeline`,
 `services/raw-evidence`, `services/evidence-browser`, `packages/read-model`;
 `hk check --all`. Not verified: production data, a real D1 or R2, real MyJCB
 evidence, and the effect of switching any production dataset to the `unit`
@@ -444,7 +445,7 @@ scope (no dataset is switched by this change).
 ## Verified locally
 
 Synthetic data only: the CI checks (today `mise run ci:<short>`) of
-`poc/observation-pipeline`, `services/observation-pipeline`,
+`experiments/observation-pipeline-local`, `services/observation-pipeline`,
 `services/raw-evidence`, `services/evidence-browser`, `packages/read-model`,
 `packages/domain`; the repository-wide guards (`mise run ci:root`);
 `hk check --all`. Not verified:

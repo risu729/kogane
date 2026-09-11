@@ -191,7 +191,8 @@ export async function repairPublication(db: D1Like, request: RepairRequest): Pro
         `INSERT INTO published_parse_runs(fetch_artifact_id,parser_name,parse_run_id,parser_version,published_at,publication_kind)
         SELECT p.fetch_artifact_id,p.parser_name,p.id,p.parser_version,?2,'normal'
         FROM parse_runs p WHERE p.id IN (${REPAIR_SELECTION})
-        ${UPSERT_PROJECTION}`,
+        ${UPSERT_PROJECTION}
+        RETURNING parse_run_id`,
       )
       .bind(request.limit, now),
   ]);
@@ -201,7 +202,11 @@ export async function repairPublication(db: D1Like, request: RepairRequest): Pro
   const remaining = await db
     .prepare("SELECT count(*) AS n FROM publication_gate_gaps")
     .first<{ n: number }>();
-  return { repaired: results[1]?.meta.changes ?? 0, remaining: remaining?.n ?? 0 };
+  // The repaired count comes from the rows the statement returned, never from
+  // `meta.changes`: D1 counts rows written by triggers too, and since migration
+  // 0038 a publication also bumps the CORE revision (docs/projection-input.md;
+  // services/observation-pipeline/test/projection-input.test.ts pins the rule).
+  return { repaired: results[1]?.results?.length ?? 0, remaining: remaining?.n ?? 0 };
 }
 
 export interface PublishInput {

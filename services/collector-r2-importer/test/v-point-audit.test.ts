@@ -138,7 +138,7 @@ async function successBucket(): Promise<R2Bucket> {
   const prefix = `raw/v-point/2099/01/05/${runId}/`;
   const fixture = (name: string): Uint8Array =>
     readFileSync(
-      new URL(`../../../poc/observation-pipeline/fixtures/v-point/${name}.json`, import.meta.url),
+      new URL(`../../../tests/fixtures/observation-pipeline/v-point/${name}.json`, import.meta.url),
     );
   const payloads = new Map<string, Uint8Array>([
     ["balance-info", fixture("balance-info")],

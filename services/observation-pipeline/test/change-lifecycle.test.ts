@@ -23,6 +23,7 @@ import {
   type CommandStore,
   type Principal,
 } from "../../../packages/application/src/index.ts";
+import { balanceProjectionOutboxProcessor } from "../src/balance-projection-job.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
 import { dispatchDecisionOutbox } from "../src/decision-outbox.ts";
 import { executeIdentityCommand } from "../src/identity-commands.ts";
@@ -591,6 +592,15 @@ test("an approval is bound to its plan digest, its expiry and its uses", async (
 });
 
 test("the outbox publishes an accepted receipt once, and a duplicate delivery changes nothing", async () => {
+  // A07 owns the balance-projection target; the dispatcher is handed the real
+  // processor exactly as the scheduled run does. Without it the row is blocked
+  // and the receipt stays accepted, which the assertions below prove first.
+  const projection = {
+    "balance-projection": balanceProjectionOutboxProcessor({
+      ...env,
+      BALANCE_PROJECTION_ENABLED: "1",
+    } as unknown as Env),
+  };
   const mapping = await seedParse(210, "smbc-bank:outbox");
   const plan = await planFor(mapping.ref, await target("target-outbox"));
   const approval = await approveFor(plan);
@@ -611,8 +621,32 @@ test("the outbox publishes an accepted receipt once, and a duplicate delivery ch
     (await getReceipt(store, operator.id, "op-outbox")) as { receipt: { status: string } },
   ).toMatchObject({ receipt: { status: "accepted", publishedAt: null } });
 
-  const first = await dispatchDecisionOutbox(db, { limit: 50 });
-  expect(first.processed).toBeGreaterThanOrEqual(2);
+  // No processor for balance-projection: that row is blocked, so the read
+  // model was not updated and the receipt is not published (05 section 6).
+  const unowned = await dispatchDecisionOutbox(db, { limit: 50 });
+  expect(unowned.blocked).toBeGreaterThanOrEqual(1);
+  expect(
+    await db
+      .prepare(
+        "SELECT count(*) n FROM decision_outbox WHERE operation_id='op-outbox' AND target='balance-projection' AND processed_at IS NULL AND blocked_code='no_processor'",
+      )
+      .first<number>("n"),
+  ).toBe(1);
+  expect(
+    (await getReceipt(store, operator.id, "op-outbox")) as { receipt: { status: string } },
+  ).toMatchObject({ receipt: { status: "accepted", publishedAt: null } });
+  // An operator clears the block once the target is deployed; the row is then
+  // claimable again and the projection really runs.
+  await db
+    .prepare(
+      `UPDATE decision_outbox SET blocked_code=NULL,available_at_ms=0
+       WHERE operation_id='op-outbox' AND processed_at IS NULL AND blocked_code IS NOT NULL`,
+    )
+    .run();
+  // The identity row completed in the pass above; what is left is the
+  // projection row, and only its completion publishes the receipt.
+  const first = await dispatchDecisionOutbox(db, { limit: 50, processors: projection });
+  expect(first.processed).toBeGreaterThanOrEqual(1);
   expect(first.published).toBeGreaterThanOrEqual(1);
   const published = await getReceipt(store, operator.id, "op-outbox");
   expect(published).toMatchObject({ ok: true });
@@ -631,7 +665,7 @@ test("the outbox publishes an accepted receipt once, and a duplicate delivery ch
       "SELECT id,processed_at,outcome,attempts FROM decision_outbox WHERE operation_id='op-outbox' ORDER BY id",
     )
     .all();
-  const second = await dispatchDecisionOutbox(db, { limit: 50 });
+  const second = await dispatchDecisionOutbox(db, { limit: 50, processors: projection });
   expect(second.claimed).toBe(0);
   expect(second.published).toBe(0);
   expect(
@@ -804,7 +838,12 @@ test("migration 0031 applies on a seeded 0017-0035 schema and touches no existin
     const migrations = layerBMigrations();
     expect(migrations).toContain("0031_operations.sql");
     expect(migrations).toContain("0029_decision_log.sql");
-    await apply(migrations.filter((name) => name !== "0031_operations.sql"));
+    // 0038 alters decision_outbox, so it follows 0031 rather than preceding it.
+    await apply(
+      migrations.filter(
+        (name) => name !== "0031_operations.sql" && name !== "0038_source_revision.sql",
+      ),
+    );
     await local1.batch([
       local1.prepare("INSERT INTO sources VALUES('smbc-bank','synthetic')"),
       local1.prepare(`INSERT INTO producers VALUES('${PRODUCER}')`),
@@ -822,7 +861,7 @@ test("migration 0031 applies on a seeded 0017-0035 schema and touches no existin
       (await local1.prepare("SELECT * FROM entity_relations ORDER BY id").all()).results,
     ];
     const before = await snapshot();
-    await apply(["0031_operations.sql"]);
+    await apply(["0031_operations.sql", "0038_source_revision.sql"]);
     expect(await snapshot()).toEqual(before);
     for (const table of ["change_plans", "approvals", "operation_receipts", "decision_outbox"])
       expect(await local1.prepare(`SELECT count(*) n FROM ${table}`).first<number>("n")).toBe(0);

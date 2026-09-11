@@ -231,6 +231,21 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "read-candidate",
     planRow: "READ: rebuilt per fixed input and snapshot (U11); decision FK cannot cross databases",
   },
+  // core_source_revision, projection_input_records, balance_snapshot_pointer → CORE (U10)
+  balance_snapshot_pointer: {
+    classification: "read-candidate",
+    planRow: "READ: the active snapshot pointer moves with the projection (U11)",
+  },
+  core_source_revision: {
+    classification: "core-keep",
+    planRow:
+      "CORE: the change detector every dependency write bumps (05 §2); operational in shape, but it is the ordering of CORE itself and a restore has to carry it",
+  },
+  projection_input_records: {
+    classification: "core-keep",
+    planRow:
+      "CORE: the fixed input a build was made from (05 §3), referenced by the job and kept with the evidence it names",
+  },
   // expiry_estimates, conversion_simulations → second-stage READ candidates
   conversion_simulations: {
     classification: "read-candidate",

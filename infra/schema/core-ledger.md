@@ -10,36 +10,36 @@ confirmed, not the whole schema, and sets the rule this ledger enforces: **a tab
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `75ef6b812dd6757bef77328144a1ce5044187cc4acae9428ef32072c1f25b32e`
+Schema digest: `58e5bbdf5a4ba65fe528917d246ed6027b953a71b5ff8bbfb66dc0b71883c273`
 
 ## Summary
 
-- Migrations applied: 38
-- Tables: 102 (all `STRICT`: yes)
+- Migrations applied: 39
+- Tables: 105 (all `STRICT`: yes)
 - Views: 31
-- Triggers: 283
-- Explicit indexes: 104
+- Triggers: 364
+- Explicit indexes: 105
 - `WITHOUT ROWID` tables: artifact_relations, artifact_transform_steps, fetch_run_annotations, ingest_client_producers, ingest_client_routes, origin_template_policies, producer_sources, run_inventory_items, source_external_ids
 
 | classification | count | tables |
 | --- | --- | --- |
-| `core-keep` | 88 | account_connection_reviews, account_mappings, accounts, acquisition_sessions, active_releases, allocations, approvals, artifact_email_metadata, artifact_file_metadata, artifact_http_metadata, artifact_ranges, artifact_relations, artifact_storage_metadata, artifact_transform_steps, balance_observations, calculation_policies, calculation_results, calculation_runs, change_plans, conversion_offers, decision_operations, decision_outbox, decision_revisions, economic_event_revisions, economic_legs, entity_relations, evidence_use_restrictions, expiry_rules, fetch_artifacts, fetch_page_groups, fetch_run_ranges, fetch_run_reports, fetch_run_seals, fetch_runs, fetch_unit_reports, fetch_units, http_scope_rules, identity_instrument_uses, identity_observations, identity_run_policies, identity_run_seals, identity_runs, identity_vpass_bindings, ingest_client_producers, ingest_client_routes, ingest_clients, ingestion_attempts, instrument_identifiers, instrument_mappings, instruments, membership_state_claims, metadata_projection_inputs, metadata_projections, obligation_revisions, observation_decimal_values, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_coverage_claims, parse_input_references, parse_run_candidates, parse_runs, parser_releases, position_observations, price_observations, producer_sources, producers, publication_events, published_parse_runs, raw_object_verification_events, raw_objects, reconciliation_proposals, release_activation_events, release_comparisons, report_artifacts, report_events, retention_classes, reward_bucket_claims, reward_programs, run_inventories, run_inventory_items, settlement_relations, source_accounts, source_external_ids, sources, transaction_observations, valuation_observations |
-| `read-candidate` | 5 | balance_read_snapshots, conversion_simulations, current_balance_projection, expiry_estimates, scope_relations |
+| `core-keep` | 90 | account_connection_reviews, account_mappings, accounts, acquisition_sessions, active_releases, allocations, approvals, artifact_email_metadata, artifact_file_metadata, artifact_http_metadata, artifact_ranges, artifact_relations, artifact_storage_metadata, artifact_transform_steps, balance_observations, calculation_policies, calculation_results, calculation_runs, change_plans, conversion_offers, core_source_revision, decision_operations, decision_outbox, decision_revisions, economic_event_revisions, economic_legs, entity_relations, evidence_use_restrictions, expiry_rules, fetch_artifacts, fetch_page_groups, fetch_run_ranges, fetch_run_reports, fetch_run_seals, fetch_runs, fetch_unit_reports, fetch_units, http_scope_rules, identity_instrument_uses, identity_observations, identity_run_policies, identity_run_seals, identity_runs, identity_vpass_bindings, ingest_client_producers, ingest_client_routes, ingest_clients, ingestion_attempts, instrument_identifiers, instrument_mappings, instruments, membership_state_claims, metadata_projection_inputs, metadata_projections, obligation_revisions, observation_decimal_values, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_coverage_claims, parse_input_references, parse_run_candidates, parse_runs, parser_releases, position_observations, price_observations, producer_sources, producers, projection_input_records, publication_events, published_parse_runs, raw_object_verification_events, raw_objects, reconciliation_proposals, release_activation_events, release_comparisons, report_artifacts, report_events, retention_classes, reward_bucket_claims, reward_programs, run_inventories, run_inventory_items, settlement_relations, source_accounts, source_external_ids, sources, transaction_observations, valuation_observations |
+| `read-candidate` | 6 | balance_read_snapshots, balance_snapshot_pointer, conversion_simulations, current_balance_projection, expiry_estimates, scope_relations |
 | `operational-mutable` | 4 | observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_work_items |
 | `unclassified-keep` | 5 | dataset_snapshot_policies, fetch_run_annotations, observation_artifact_metadata, observation_scan_state, parse_issues |
 
 Tables without both an append-only `*_no_update` and `*_no_delete` guard (mutable by design —
 pointers, checkpoints, leases, configuration, and the READ-side projections):
 
-active_releases, allocations, approvals, balance_read_snapshots, calculation_runs, change_plans, conversion_simulations, dataset_snapshot_policies, decision_outbox, economic_event_revisions, expiry_estimates, http_scope_rules, ingest_client_producers, ingest_client_routes, ingest_clients, obligation_revisions, observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_scan_state, observation_work_items, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_run_candidates, parse_runs, producer_sources, producers, published_parse_runs, reconciliation_proposals, retention_classes, scope_relations, settlement_relations, source_external_ids, sources
+active_releases, allocations, approvals, balance_read_snapshots, balance_snapshot_pointer, calculation_runs, change_plans, conversion_simulations, core_source_revision, dataset_snapshot_policies, decision_outbox, economic_event_revisions, expiry_estimates, http_scope_rules, ingest_client_producers, ingest_client_routes, ingest_clients, obligation_revisions, observation_lane_state, observation_parse_jobs, observation_replay_plans, observation_scan_state, observation_work_items, operation_receipts, ops_request_stages, ops_requests, origin_template_policies, parse_run_candidates, parse_runs, producer_sources, producers, published_parse_runs, reconciliation_proposals, retention_classes, scope_relations, settlement_relations, source_external_ids, sources
 
 ## Tables
 
 | table | classification | plan row (04 §2) | STRICT | WITHOUT ROWID | append-only | `*_no_update` | `*_no_delete` | cols | FKs | idx | triggers |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `account_connection_reviews` | core-keep | decisions and relations | yes | no | yes | account_connection_no_update | account_connection_no_delete | 15 | 6 | 0 | 5 |
-| `account_mappings` | core-keep | identity and mappings | yes | no | yes | account_mappings_no_update | account_mappings_no_delete | 10 | 2 | 0 | 4 |
-| `accounts` | core-keep | identity and mappings | yes | no | yes | accounts_no_update | accounts_no_delete | 4 | 0 | 0 | 3 |
+| `account_mappings` | core-keep | identity and mappings | yes | no | yes | account_mappings_no_update | account_mappings_no_delete | 10 | 2 | 0 | 7 |
+| `accounts` | core-keep | identity and mappings | yes | no | yes | accounts_no_update | accounts_no_delete | 4 | 0 | 0 | 6 |
 | `acquisition_sessions` | core-keep | acquisition and fetch history | yes | no | yes | acquisition_sessions_no_update | acquisition_sessions_no_delete | 6 | 3 | 1 | 4 |
 | `active_releases` | core-keep | parser releases and activations | yes | no | no | — | active_releases_no_delete | 6 | 1 | 0 | 1 |
 | `allocations` | core-keep | economic events | yes | no | no | — | allocations_no_delete | 10 | 2 | 3 | 3 |
@@ -51,54 +51,56 @@ active_releases, allocations, approvals, balance_read_snapshots, calculation_run
 | `artifact_relations` | core-keep | raw objects and origin | yes | yes | yes | artifact_relations_no_update | artifact_relations_no_delete | 7 | 3 | 1 | 7 |
 | `artifact_storage_metadata` | core-keep | raw objects and origin | yes | no | yes | artifact_storage_metadata_no_update | artifact_storage_metadata_no_delete | 11 | 1 | 0 | 4 |
 | `artifact_transform_steps` | core-keep | raw objects and origin | yes | yes | yes | artifact_transform_steps_no_update | artifact_transform_steps_no_delete | 7 | 2 | 0 | 6 |
-| `balance_observations` | core-keep | parse runs and observations | yes | no | yes | balance_observations_no_update | balance_observations_no_delete | 12 | 1 | 2 | 3 |
-| `balance_read_snapshots` | read-candidate | READ: rebuilt per fixed input and snapshot (U11) | yes | no | no | — | — | 8 | 0 | 1 | 1 |
-| `calculation_policies` | core-keep | prices and calculation policies | yes | no | yes | calculation_policies_no_update | calculation_policies_no_delete | 7 | 0 | 1 | 2 |
+| `balance_observations` | core-keep | parse runs and observations | yes | no | yes | balance_observations_no_update | balance_observations_no_delete | 12 | 1 | 2 | 6 |
+| `balance_read_snapshots` | read-candidate | READ: rebuilt per fixed input and snapshot (U11) | yes | no | no | — | — | 16 | 0 | 1 | 2 |
+| `balance_snapshot_pointer` | read-candidate | READ: the active snapshot pointer moves with the projection (U11) | yes | no | no | — | balance_snapshot_pointer_no_delete | 6 | 1 | 0 | 3 |
+| `calculation_policies` | core-keep | prices and calculation policies | yes | no | yes | calculation_policies_no_update | calculation_policies_no_delete | 7 | 0 | 1 | 5 |
 | `calculation_results` | core-keep | calculation runs and reports | yes | no | yes | calculation_results_no_update | calculation_results_no_delete | 10 | 1 | 1 | 3 |
 | `calculation_runs` | core-keep | calculation runs and reports | yes | no | no | — | calculation_runs_no_delete | 8 | 0 | 1 | 3 |
 | `change_plans` | core-keep | change plans, approvals and receipts | yes | no | no | — | change_plans_no_delete | 10 | 0 | 1 | 3 |
 | `conversion_offers` | core-keep | reward reference claims | yes | no | yes | conversion_offers_no_update | conversion_offers_no_delete | 32 | 0 | 1 | 2 |
 | `conversion_simulations` | read-candidate | second-stage READ candidate (U16): needs evaluation time, request and rule fixed | yes | no | no | — | — | 6 | 0 | 0 | 0 |
-| `current_balance_projection` | read-candidate | READ: rebuilt per fixed input and snapshot (U11) | yes | no | yes | current_balance_projection_sealed_no_update | current_balance_projection_sealed_no_delete | 37 | 1 | 3 | 3 |
-| `dataset_snapshot_policies` | unclassified-keep | not named in 04 §2; coverage policy configuration added by 0025 | yes | no | no | — | — | 10 | 0 | 0 | 0 |
+| `core_source_revision` | core-keep | CORE: the change detector every dependency write bumps (05 §2); operational in shape, but it is the ordering of CORE itself and a restore has to carry it | yes | no | no | — | core_source_revision_no_delete | 4 | 0 | 0 | 3 |
+| `current_balance_projection` | read-candidate | READ: rebuilt per fixed input and snapshot (U11) | yes | no | yes | current_balance_projection_sealed_no_update | current_balance_projection_sealed_no_delete | 38 | 1 | 3 | 4 |
+| `dataset_snapshot_policies` | unclassified-keep | not named in 04 §2; coverage policy configuration added by 0025 | yes | no | no | — | — | 10 | 0 | 0 | 3 |
 | `decision_operations` | core-keep | decisions and relations | yes | no | yes | decision_operations_no_update | decision_operations_no_delete | 7 | 0 | 0 | 3 |
-| `decision_outbox` | core-keep | change plans, approvals and receipts | yes | no | no | — | decision_outbox_no_delete | 13 | 3 | 2 | 3 |
-| `decision_revisions` | core-keep | decisions and relations | yes | no | yes | decision_revisions_no_update | decision_revisions_no_delete | 13 | 2 | 2 | 4 |
+| `decision_outbox` | core-keep | change plans, approvals and receipts | yes | no | no | — | decision_outbox_no_delete | 19 | 3 | 2 | 4 |
+| `decision_revisions` | core-keep | decisions and relations | yes | no | yes | decision_revisions_no_update | decision_revisions_no_delete | 13 | 2 | 2 | 7 |
 | `economic_event_revisions` | core-keep | economic events | yes | no | no | — | economic_event_revisions_no_delete | 11 | 1 | 3 | 4 |
 | `economic_legs` | core-keep | economic events | yes | no | yes | economic_legs_no_update | economic_legs_no_delete | 11 | 2 | 2 | 3 |
-| `entity_relations` | core-keep | decisions and relations | yes | no | yes | entity_relations_no_update | entity_relations_no_delete | 10 | 1 | 2 | 4 |
-| `evidence_use_restrictions` | core-keep | evidence use restrictions and retention | yes | no | yes | evidence_use_restrictions_no_update | evidence_use_restrictions_no_delete | 7 | 0 | 1 | 2 |
+| `entity_relations` | core-keep | decisions and relations | yes | no | yes | entity_relations_no_update | entity_relations_no_delete | 10 | 1 | 2 | 7 |
+| `evidence_use_restrictions` | core-keep | evidence use restrictions and retention | yes | no | yes | evidence_use_restrictions_no_update | evidence_use_restrictions_no_delete | 7 | 0 | 1 | 5 |
 | `expiry_estimates` | read-candidate | second-stage READ candidate (U16): needs evaluation time, request and rule fixed | yes | no | no | — | — | 11 | 0 | 1 | 0 |
 | `expiry_rules` | core-keep | reward reference claims | yes | no | yes | expiry_rules_no_update | expiry_rules_no_delete | 11 | 1 | 1 | 2 |
 | `fetch_artifacts` | core-keep | raw objects and origin | yes | no | yes | fetch_artifacts_no_update | fetch_artifacts_no_delete | 26 | 14 | 6 | 6 |
 | `fetch_page_groups` | core-keep | acquisition and fetch history | yes | no | yes | fetch_page_groups_no_update | fetch_page_groups_no_delete | 6 | 2 | 0 | 5 |
-| `fetch_run_annotations` | unclassified-keep | not named in 04 §2; run annotations that the financial views read (0003) | yes | yes | yes | fetch_run_annotations_no_update | fetch_run_annotations_no_delete | 4 | 1 | 0 | 2 |
+| `fetch_run_annotations` | unclassified-keep | not named in 04 §2; run annotations that the financial views read (0003) | yes | yes | yes | fetch_run_annotations_no_update | fetch_run_annotations_no_delete | 4 | 1 | 0 | 5 |
 | `fetch_run_ranges` | core-keep | acquisition and fetch history | yes | no | yes | fetch_run_ranges_no_update | fetch_run_ranges_no_delete | 12 | 2 | 1 | 5 |
 | `fetch_run_reports` | core-keep | acquisition and fetch history | yes | no | yes | fetch_run_reports_no_update | fetch_run_reports_no_delete | 17 | 2 | 2 | 6 |
-| `fetch_run_seals` | core-keep | inventories, seals and verification | yes | no | yes | fetch_run_seals_no_update | fetch_run_seals_no_delete | 4 | 3 | 0 | 6 |
+| `fetch_run_seals` | core-keep | inventories, seals and verification | yes | no | yes | fetch_run_seals_no_update | fetch_run_seals_no_delete | 4 | 3 | 0 | 9 |
 | `fetch_runs` | core-keep | acquisition and fetch history | yes | no | yes | fetch_runs_no_update | fetch_runs_no_delete | 7 | 7 | 1 | 4 |
 | `fetch_unit_reports` | core-keep | acquisition and fetch history | yes | no | yes | fetch_unit_reports_no_update | fetch_unit_reports_no_delete | 15 | 2 | 2 | 6 |
 | `fetch_units` | core-keep | acquisition and fetch history | yes | no | yes | fetch_units_no_update | fetch_units_no_delete | 8 | 4 | 4 | 5 |
 | `http_scope_rules` | core-keep | sources, producers and routes | yes | no | no | — | — | 9 | 1 | 2 | 0 |
-| `identity_instrument_uses` | core-keep | identity and mappings | yes | no | yes | identity_instrument_uses_no_update | identity_instrument_uses_no_delete | 4 | 3 | 0 | 4 |
-| `identity_observations` | core-keep | identity and mappings | yes | no | yes | identity_observations_no_update | identity_observations_no_delete | 7 | 3 | 2 | 5 |
+| `identity_instrument_uses` | core-keep | identity and mappings | yes | no | yes | identity_instrument_uses_no_update | identity_instrument_uses_no_delete | 4 | 3 | 0 | 7 |
+| `identity_observations` | core-keep | identity and mappings | yes | no | yes | identity_observations_no_update | identity_observations_no_delete | 7 | 3 | 2 | 8 |
 | `identity_run_policies` | core-keep | identity and mappings | yes | no | yes | identity_run_policies_no_update | identity_run_policies_no_delete | 6 | 2 | 0 | 4 |
-| `identity_run_seals` | core-keep | identity and mappings | yes | no | yes | identity_run_seals_no_update | identity_run_seals_no_delete | 3 | 1 | 0 | 6 |
-| `identity_runs` | core-keep | identity and mappings | yes | no | yes | identity_runs_no_update | identity_runs_no_delete | 4 | 1 | 0 | 3 |
+| `identity_run_seals` | core-keep | identity and mappings | yes | no | yes | identity_run_seals_no_update | identity_run_seals_no_delete | 3 | 1 | 0 | 9 |
+| `identity_runs` | core-keep | identity and mappings | yes | no | yes | identity_runs_no_update | identity_runs_no_delete | 4 | 1 | 0 | 6 |
 | `identity_vpass_bindings` | core-keep | identity and mappings | yes | no | yes | identity_vpass_bindings_no_update | identity_vpass_bindings_no_delete | 4 | 3 | 0 | 4 |
 | `ingest_client_producers` | core-keep | sources, producers and routes | yes | yes | no | — | — | 3 | 2 | 0 | 0 |
 | `ingest_client_routes` | core-keep | sources, producers and routes | yes | yes | no | — | — | 4 | 4 | 0 | 0 |
 | `ingest_clients` | core-keep | sources, producers and routes | yes | no | no | — | — | 3 | 0 | 0 | 0 |
 | `ingestion_attempts` | core-keep | inventories, seals and verification | yes | no | yes | ingestion_attempts_no_update | ingestion_attempts_no_delete | 18 | 9 | 1 | 5 |
-| `instrument_identifiers` | core-keep | identity and mappings | yes | no | yes | instrument_identifiers_no_update | instrument_identifiers_no_delete | 5 | 0 | 0 | 3 |
-| `instrument_mappings` | core-keep | identity and mappings | yes | no | yes | instrument_mappings_no_update | instrument_mappings_no_delete | 10 | 2 | 0 | 4 |
-| `instruments` | core-keep | identity and mappings | yes | no | yes | instruments_no_update | instruments_no_delete | 4 | 0 | 0 | 3 |
+| `instrument_identifiers` | core-keep | identity and mappings | yes | no | yes | instrument_identifiers_no_update | instrument_identifiers_no_delete | 5 | 0 | 0 | 6 |
+| `instrument_mappings` | core-keep | identity and mappings | yes | no | yes | instrument_mappings_no_update | instrument_mappings_no_delete | 10 | 2 | 0 | 7 |
+| `instruments` | core-keep | identity and mappings | yes | no | yes | instruments_no_update | instruments_no_delete | 4 | 0 | 0 | 6 |
 | `membership_state_claims` | core-keep | provider/self-reported claims | yes | no | yes | membership_state_claims_no_update | membership_state_claims_no_delete | 10 | 2 | 1 | 2 |
 | `metadata_projection_inputs` | core-keep | metadata projections | yes | no | yes | metadata_projection_inputs_no_update | metadata_projection_inputs_no_delete | 4 | 2 | 1 | 2 |
 | `metadata_projections` | core-keep | metadata projections | yes | no | yes | metadata_projections_no_update | metadata_projections_no_delete | 8 | 1 | 1 | 2 |
 | `obligation_revisions` | core-keep | economic events | yes | no | no | — | obligation_revisions_no_delete | 16 | 1 | 2 | 3 |
 | `observation_artifact_metadata` | unclassified-keep | not named in 04 §2; pipeline artifact metadata (0017) | yes | no | yes | observation_artifact_metadata_no_update | observation_artifact_metadata_no_delete | 4 | 2 | 0 | 2 |
-| `observation_decimal_values` | core-keep | observation_decimal_values (CORE for now; columns may be copied to READ) | yes | no | yes | observation_decimals_no_update | observation_decimals_no_delete | 8 | 1 | 0 | 2 |
+| `observation_decimal_values` | core-keep | observation_decimal_values (CORE for now; columns may be copied to READ) | yes | no | yes | observation_decimals_no_update | observation_decimals_no_delete | 8 | 1 | 0 | 5 |
 | `observation_lane_state` | operational-mutable | parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out) | yes | no | no | — | — | 5 | 0 | 0 | 0 |
 | `observation_parse_jobs` | operational-mutable | parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out) | yes | no | no | — | — | 14 | 1 | 2 | 0 |
 | `observation_replay_plans` | operational-mutable | parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out) | yes | no | no | — | — | 20 | 0 | 2 | 0 |
@@ -108,18 +110,19 @@ active_releases, allocations, approvals, balance_read_snapshots, calculation_run
 | `ops_request_stages` | core-keep | change plans, approvals and receipts | yes | no | no | — | ops_request_stages_no_delete | 7 | 1 | 1 | 2 |
 | `ops_requests` | core-keep | change plans, approvals and receipts | yes | no | no | — | ops_requests_no_delete | 15 | 1 | 3 | 3 |
 | `origin_template_policies` | core-keep | sources, producers and routes | yes | yes | no | — | — | 8 | 1 | 0 | 0 |
-| `parse_coverage_claims` | core-keep | parse runs and observations | yes | no | yes | parse_coverage_claims_no_update | parse_coverage_claims_no_delete | 17 | 1 | 1 | 2 |
+| `parse_coverage_claims` | core-keep | parse runs and observations | yes | no | yes | parse_coverage_claims_no_update | parse_coverage_claims_no_delete | 17 | 1 | 1 | 5 |
 | `parse_input_references` | core-keep | metadata projections | yes | no | yes | parse_input_references_no_update | parse_input_references_no_delete | 4 | 2 | 2 | 2 |
 | `parse_issues` | unclassified-keep | not named in 04 §2; created with parse_coverage_claims (0025) | yes | no | yes | parse_issues_no_update | parse_issues_no_delete | 7 | 1 | 1 | 2 |
 | `parse_run_candidates` | core-keep | parser releases and activations | yes | no | no | — | parse_run_candidates_no_delete | 5 | 2 | 1 | 2 |
-| `parse_runs` | core-keep | parse runs and observations | yes | no | no | — | parse_runs_no_delete | 9 | 2 | 2 | 2 |
+| `parse_runs` | core-keep | parse runs and observations | yes | no | no | — | parse_runs_no_delete | 9 | 2 | 2 | 5 |
 | `parser_releases` | core-keep | parser releases and activations | yes | no | yes | parser_releases_no_update | parser_releases_no_delete | 9 | 0 | 1 | 3 |
 | `position_observations` | core-keep | parse runs and observations | yes | no | yes | position_observations_no_update | position_observations_no_delete | 13 | 1 | 2 | 3 |
 | `price_observations` | core-keep | prices and calculation policies | yes | no | yes | price_observations_no_update | price_observations_no_delete | 13 | 0 | 1 | 2 |
 | `producer_sources` | core-keep | sources, producers and routes | yes | yes | no | — | — | 3 | 2 | 0 | 0 |
 | `producers` | core-keep | sources, producers and routes | yes | no | no | — | — | 4 | 0 | 0 | 0 |
-| `publication_events` | core-keep | publication pointer and history | yes | no | yes | publication_events_no_update | publication_events_no_delete | 9 | 3 | 3 | 4 |
-| `published_parse_runs` | core-keep | publication pointer and history | yes | no | no | — | published_parse_runs_no_delete | 7 | 2 | 1 | 3 |
+| `projection_input_records` | core-keep | CORE: the fixed input a build was made from (05 §3), referenced by the job and kept with the evidence it names | yes | no | yes | projection_input_records_no_update | projection_input_records_no_delete | 9 | 0 | 1 | 3 |
+| `publication_events` | core-keep | publication pointer and history | yes | no | yes | publication_events_no_update | publication_events_no_delete | 9 | 3 | 3 | 7 |
+| `published_parse_runs` | core-keep | publication pointer and history | yes | no | no | — | published_parse_runs_no_delete | 7 | 2 | 1 | 6 |
 | `raw_object_verification_events` | core-keep | inventories, seals and verification | yes | no | yes | raw_object_verification_events_no_update | raw_object_verification_events_no_delete | 9 | 2 | 1 | 5 |
 | `raw_objects` | core-keep | raw objects and origin | yes | no | yes | raw_objects_no_update | raw_objects_no_delete | 4 | 0 | 0 | 3 |
 | `reconciliation_proposals` | core-keep | reconciliation proposals | yes | no | no | — | reconciliation_proposals_no_delete | 13 | 1 | 2 | 4 |
@@ -134,7 +137,7 @@ active_releases, allocations, approvals, balance_read_snapshots, calculation_run
 | `run_inventory_items` | core-keep | inventories, seals and verification | yes | yes | yes | run_inventory_items_no_update | run_inventory_items_no_delete | 5 | 6 | 0 | 5 |
 | `scope_relations` | read-candidate | READ: rebuilt per fixed input and snapshot (U11); decision FK cannot cross databases | yes | no | no | — | — | 7 | 1 | 1 | 0 |
 | `settlement_relations` | core-keep | economic events | yes | no | no | — | settlement_relations_no_delete | 12 | 2 | 3 | 3 |
-| `source_accounts` | core-keep | identity and mappings | yes | no | yes | source_accounts_no_update | source_accounts_no_delete | 4 | 2 | 0 | 3 |
+| `source_accounts` | core-keep | identity and mappings | yes | no | yes | source_accounts_no_update | source_accounts_no_delete | 4 | 2 | 0 | 6 |
 | `source_external_ids` | core-keep | identity and mappings | yes | yes | no | — | — | 3 | 4 | 0 | 0 |
 | `sources` | core-keep | sources, producers and routes | yes | no | no | — | — | 4 | 0 | 0 | 0 |
 | `transaction_observations` | core-keep | parse runs and observations | yes | no | yes | transaction_observations_no_update | transaction_observations_no_delete | 15 | 1 | 2 | 3 |
@@ -210,5 +213,6 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0033_reward_buckets.sql` | 28 | expiry_rules, reward_programs |
 | `0034_reports.sql` | 33 | retention_classes |
 | `0035_observation_job_lanes.sql` | 13 | observation_lane_state |
+| `0038_source_revision.sql` | 101 | core_source_revision |
 
 Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql

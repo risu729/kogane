@@ -32,7 +32,7 @@ afterAll(async () => {
 const LEDGER = JSON.parse(
   readFileSync(
     new URL(
-      "../../../poc/observation-pipeline/fixtures/myjcb/2026-09-07/run-synthetic/connection-a/credit-ledger-00.json",
+      "../../../tests/fixtures/observation-pipeline/myjcb/2026-09-07/run-synthetic/connection-a/credit-ledger-00.json",
       import.meta.url,
     ),
     "utf8",
