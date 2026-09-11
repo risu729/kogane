@@ -142,8 +142,28 @@ src/drizzle/
 
 `src/d1.ts` gained one method on `D1StatementLike`: `raw()`, which returns rows
 as positional arrays. A real `D1PreparedStatement` has always had it; the ORM's
-row mapper reads results that way, and `test/sqlite.ts` implements it over
-`bun:sqlite`. Nothing in `src/core/` or `src/atomic/` uses it.
+row mapper reads every projected select and every `RETURNING` that way, and
+`test/sqlite.ts` implements it over `bun:sqlite`. Nothing in `src/core/` or
+`src/atomic/` uses it. Every `D1Like` a test hands to the pilot is either that
+adapter or a real D1 (the `services/raw-evidence` suite runs the switched reads
+on the Workers runtime through `@cloudflare/vitest-plugin`), so `raw()` is
+exercised on both. The mapper coerces nothing: a NULL stays `null` before any
+column type sees it, `integer()` and `text()` columns return the driver value
+untouched, and the codec-backed columns below raise on anything they cannot
+read. The `id` columns the six reads return are rowids; no column that could
+exceed 2^53 (a decimal coefficient) is read as a number on either path.
+
+`services/raw-evidence/tsconfig.json` gained `skipLibCheck: true`, which every
+package `tsconfig` in the repository already had. Without it, `tsc` on
+TypeScript 7.0.2 reports 85 errors, all inside `drizzle-orm`'s own declaration
+files (`gel-core`, `mysql-core`, `pg-core`, `singlestore*`, `sqlite-core`,
+`d1/driver.d.ts`): `Buffer` without `@types/node`, optional peer modules that
+are not installed (`gel`, `mysql2/promise`, `@miniflare/d1`) and `keyof this`
+constraints TypeScript 7 rejects — none in repository code. The Worker's own
+sources are still checked in full. `services/evidence-browser` keeps checking
+library declarations and still passes, because `packages/application/src/index.ts`
+does not export the ingest use cases; a Worker that starts importing them
+without `skipLibCheck` will meet the same 85 errors.
 
 ### The parity guard
 
@@ -156,21 +176,28 @@ column". So the mirror is not trusted — it is checked.
 `bun:sqlite` exactly as wrangler applies them, reads every declared table back
 with `PRAGMA table_info`, and compares:
 
-| Compared                                | Rule                                                                                                  |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| the table exists, as a table            | a declaration naming a view or nothing at all fails                                                   |
-| column names, both directions           | a column in SQL and not in the mirror fails; a column in the mirror and not in SQL fails              |
-| declared type, as SQLite's **affinity** | `INTEGER` and `int` are the same column; TEXT where SQL has INTEGER is not                            |
-| NOT NULL                                | equal, except an `INTEGER PRIMARY KEY`, which SQLite reports nullable and no row ever holds NULL in   |
-| the primary key and its column order    | including the composite keys of `published_parse_runs`, `ops_request_stages` and the decimal table    |
-| the declared default                    | `'default'`, `'unknown'`, `'single'`, `0`, `1` — compared at driver level, so `flag` maps `true` to 1 |
+| Compared                                | Rule                                                                                                                                         |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| the table exists, as a table            | a declaration naming a view or nothing at all fails                                                                                          |
+| the table is `STRICT`                   | so the compared affinity is the storage class the database enforces; every declared type is one STRICT accepts                               |
+| column names, both directions           | a column in SQL and not in the mirror fails; a column in the mirror and not in SQL fails                                                     |
+| declared type, as SQLite's **affinity** | `INTEGER` and `int` are the same column; TEXT where SQL has INTEGER is not                                                                   |
+| NOT NULL                                | equal, except the rowid alias — exactly `INTEGER PRIMARY KEY` on a rowid table — which SQLite reports nullable and no row ever holds NULL in |
+| the primary key and its column order    | including the composite keys of `published_parse_runs`, `ops_request_stages` and the decimal table                                           |
+| the declared default                    | `'default'`, `'unknown'`, `'single'`, `0`, `1` — compared at driver level, so `flag` maps `true` to 1                                        |
 
-Fifteen tables, 643 assertions. The tables are enumerated from the schema
+Fifteen tables, 809 assertions. The tables are enumerated from the schema
 module rather than listed, so a declaration that is added and forgotten is
 still compared; a separate assertion pins the list itself, so deleting one is a
 failure rather than a silent narrowing.
 
-What a declaration _cannot_ express is not compared and not claimed: `STRICT`,
+**Only declared tables are compared.** CORE creates 102 tables and the mirror
+declares the fifteen the pilot reads, writes or asserts immutability on. A table
+that exists in SQL without a declaration is scope, not drift, and is not a
+failure; a table that _must_ be mirrored is one the pinned list names. Widening
+the pilot means adding the declaration and the list entry together.
+
+What a declaration _cannot_ express is not compared and not claimed:
 every CHECK constraint, the triggers, the partial and unique indexes, the views
 and the foreign keys stay in SQL and are proved by behaviour
 (`test/drizzle-immutability.test.ts`, `test/seal.test.ts`,
@@ -283,11 +310,35 @@ round-trips as `{year: 2024, month: 2, day: 29}` and writes back the bytes
 | candidate rows stay unpublished             | **Not attempted** — the publication-gate views did not move                                                                                                 |
 | **bundle size**                             | **The cost.** `kogane-ingest` grew from 113.93 KiB (20.81 KiB gzip) to 305.03 KiB (57.40 KiB gzip) — a 2.7× upload for six single-table reads               |
 
-The bundle number is the finding that matters for whether this widens. It is
-comfortably inside the Workers limit, and it buys typed columns and a parity
-guard on a Worker that D2 retires at U15 anyway; it would want re-measuring
-before the ORM reaches a Worker with a tighter budget. Nothing here argues for
-replacing the native path where the native path is the guarantee.
+The bundle number is the finding that matters for whether this widens. Where
+the 191 KiB went, from an esbuild metafile of the same entry (`src/worker.ts`,
+unminified, as `wrangler deploy` builds it):
+
+| Part of the bundle                                                        | Bytes in output | Note                                                                                               |
+| ------------------------------------------------------------------------- | --------------: | -------------------------------------------------------------------------------------------------- |
+| `drizzle-orm/sqlite-core` (dialect, select/insert/update/delete builders) |          99,523 | reached statically from `drizzle-orm/d1`; the bundler cannot drop a builder the dialect references |
+| `drizzle-orm` root (`relations`, `utils`, `alias`, `subquery`, entity)    |          28,275 |                                                                                                    |
+| `drizzle-orm/sql`                                                         |          14,615 | the SQL template and parameter binding                                                             |
+| `drizzle-orm/pg-core`                                                     |          12,983 | not used here; drizzle's own `relations.js` and `sql/sql.js` import two Postgres modules           |
+| `drizzle-orm/d1`, `cache`, `query-builders`                               |           8,151 |                                                                                                    |
+| `src/drizzle/schema/core.ts` — all fifteen tables                         |           9,269 | the whole mirror                                                                                   |
+| `src/drizzle/columns.ts`, `client.ts` and the four read modules           |           4,292 |                                                                                                    |
+
+So the growth is the ORM's runtime (~160 KiB), not the schema file. Trimming
+the mirror per call site — importing only the six tables a Worker reads — would
+save under 7 KiB of 305 and was **not** done: `drizzle-orm` already declares
+`sideEffects: false`, the query builders the bundler keeps are the ones the
+dialect references, and the fifteen declarations are what the parity guard
+compares. Context for the number: a Worker script may be 3 MiB gzipped on the
+free plan and 10 MiB on paid; this one uploads 57.40 KiB gzipped. No Worker in
+this repository minifies its bundle; with `minify` the same entry is 143.8 KiB
+(36 KiB gzipped), recorded here and not enabled, because that is a deployment
+setting for every Worker and not a decision for this pilot.
+
+The increase is comfortably inside the limit, and it buys typed columns and a
+parity guard on a Worker that D2 retires at U15 anyway; it would want
+re-measuring before the ORM reaches a Worker with a tighter budget. Nothing here
+argues for replacing the native path where the native path is the guarantee.
 
 ### Rules that survive the pilot
 
