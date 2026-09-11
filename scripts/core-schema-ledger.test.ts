@@ -188,7 +188,11 @@ describe("G0-09 READ schema ledger", () => {
 
   test("it is built from its own directory, never from the CORE one", () => {
     expect(READ_PROFILE.migrationsDir).toBe("packages/storage-d1/migrations/read");
-    expect(readLedger.migrations.map((entry) => entry.file)).toEqual(["0001_read_baseline.sql"]);
+    expect(readLedger.migrations.map((entry) => entry.file)).toEqual([
+      "0001_read_baseline.sql",
+      // U16: the reward second stage of 04 §2, in the same database.
+      "0002_reward_read.sql",
+    ]);
     // No CORE table can appear here, and no READ table in the CORE ledger.
     const core = new Set(ledger.tables.map((table) => table.name));
     expect(
@@ -200,6 +204,9 @@ describe("G0-09 READ schema ledger", () => {
       // tables in different databases, and nothing joins them (04 §1).
       "balance_read_snapshots",
       "balance_snapshot_pointer",
+      // CORE's `conversion_simulations` and `expiry_estimates` of migration
+      // 0033 keep their names; the READ tables of U16 are named apart
+      // (`reward_*`) precisely so the two are never mistaken for each other.
       "current_balance_projection",
       "scope_relations",
     ]);
@@ -225,6 +232,10 @@ describe("G0-09 READ schema ledger", () => {
     expect(readLedger.summary.byClassification["read-projection"]).toEqual([
       "balance_read_snapshots",
       "current_balance_projection",
+      "reward_conversion_simulations",
+      "reward_expiry_estimates",
+      "reward_expiry_snapshots",
+      "reward_snapshot_input_refs",
       "scope_relations",
       "snapshot_input_refs",
     ]);
@@ -232,6 +243,8 @@ describe("G0-09 READ schema ledger", () => {
       "balance_snapshot_pointer",
       "read_build_checkpoints",
       "read_instance",
+      "reward_build_checkpoints",
+      "reward_snapshot_pointer",
     ]);
     // The CORE ledger keeps exactly the classifications it always had.
     expect(Object.keys(ledger.summary.byClassification)).toEqual([

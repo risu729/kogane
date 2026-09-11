@@ -19,10 +19,11 @@ import { sha256Hex } from "../../domain/src/context.ts";
 /**
  * The dependency ledger: tables whose every write bumps `source_revision`.
  *
- * This list is the source of truth for migration 0038's trigger set, and
- * `packages/read-model/test/source-revision.test.ts` asserts that the triggers
- * in a migrated database are exactly the ones this ledger declares — so a new
- * dependency table cannot be added to the schema, or to this list, alone.
+ * This list is the source of truth for the trigger set of migrations 0038 and
+ * 0041, and `packages/read-model/test/source-revision.test.ts` asserts that the
+ * triggers in a migrated database are exactly the ones this ledger declares —
+ * so a new dependency table cannot be added to the schema, or to this list,
+ * alone.
  */
 export const SOURCE_REVISION_LEDGER = [
   // What is adopted, and what the adoption replaced.
@@ -52,6 +53,15 @@ export const SOURCE_REVISION_LEDGER = [
   // Calculation policy, and the seal that makes evidence visible at all.
   "calculation_policies",
   "fetch_run_seals",
+  // Rewards (migration 0041, U16): the versioned reference claims and the
+  // provider claims a reward capture reads. A new rule version or a promoted
+  // claim changes what the reward projection computes, so the fixed-input
+  // capture of 05 §3 has to be able to see it.
+  "reward_programs",
+  "expiry_rules",
+  "conversion_offers",
+  "reward_bucket_claims",
+  "membership_state_claims",
 ] as const;
 
 /**
@@ -95,6 +105,12 @@ export const REVISION_EXCLUDED_TABLES = [
   // its stage log say what was asked, never what the projection reads.
   "ops_requests",
   "ops_request_stages",
+  // The reward projection's own output in CORE (migration 0033). Bumping the
+  // revision when a build records its result would make every build stale the
+  // moment it finished; U16 moves these to READ behind a flag and CORE keeps
+  // the tables it has.
+  "expiry_estimates",
+  "conversion_simulations",
 ] as const;
 
 export type LedgerTable =
@@ -103,7 +119,7 @@ export type LedgerTable =
 
 const TRIGGER_EVENTS = ["insert", "update", "delete"] as const;
 
-/** Every trigger name migration 0038 creates for the ledger, sorted. */
+/** Every bump trigger the ledger declares (migrations 0038 and 0041), sorted. */
 export function revisionTriggerNames(): string[] {
   return [...SOURCE_REVISION_LEDGER, ...VISIBILITY_REVISION_LEDGER]
     .flatMap((table) => TRIGGER_EVENTS.map((event) => `${table}_bump_revision_${event}`))

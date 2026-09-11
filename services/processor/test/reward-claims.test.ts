@@ -394,7 +394,12 @@ test("the scheduled lane never runs while the flag is off", async () => {
 }, 60000);
 
 test("migration 0033 applies on the earlier Layer B schema with rows already present", async () => {
-  const earlier = layerBMigrations().filter((name) => !name.startsWith("0033_"));
+  // 0041 adds the revision triggers of these very tables (U16), so it cannot
+  // be applied before 0033 creates them; the upgrade applies the pair in
+  // order below.
+  const earlier = layerBMigrations().filter(
+    (name) => !name.startsWith("0033_") && !name.startsWith("0041_"),
+  );
   const upgrade = await startPipeline(earlier);
   try {
     await seedArtifact(upgrade.env, 10, "v-point", "balance-info", "balance-info.json", {
@@ -417,6 +422,7 @@ test("migration 0033 applies on the earlier Layer B schema with rows already pre
     ).first<number>("n");
 
     await applyMigration(upgrade.env.DB, "0033_reward_buckets.sql");
+    await applyMigration(upgrade.env.DB, "0041_reward_revision_triggers.sql");
 
     // Existing evidence is untouched and the new tables start empty.
     expect(

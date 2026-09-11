@@ -1238,6 +1238,7 @@
             "OPS_API_ENABLED",
             "READ_PROJECTION_ENABLED",
             "REWARDS_V2_ENABLED",
+            "REWARD_READ_PROJECTION_ENABLED",
             "SESSION_REFRESH_POLICY"
           ],
           "requiredSecretNames": [],
@@ -1296,6 +1297,8 @@
             "EVIDENCE_SOURCE_ID",
             "OPS_API_ENABLED",
             "READ_PROJECTION_ENABLED",
+            "REWARDS_V2_ENABLED",
+            "REWARD_READ_PROJECTION_ENABLED",
             "SESSION_REFRESH_POLICY"
           ],
           "requiredSecretNames": [],
@@ -1968,6 +1971,7 @@
             "RELEASE_CANDIDATES_ENABLED",
             "REPORTS_ENABLED",
             "REWARD_CLAIMS_ENABLED",
+            "REWARD_READ_PROJECTION_ENABLED",
             "SHARED_R2_INGEST_ENABLED"
           ],
           "requiredSecretNames": [],

@@ -204,6 +204,74 @@ test("G2-03: a write in each dependency family moves the matching revision", () 
        VALUES('p1','rounding','v1','{}','verified','[]','2026-09-12T00:00:00Z')`,
     ),
   ).toEqual({ source: 1, visibility: 0 });
+  // Rewards (migration 0041): a reward capture reads the reference claims and
+  // the promoted claims, so each of them has to move the revision. A rule
+  // version that changed without moving it would be invisible to the r0/r1
+  // capture and would silently alter a "reproducible" deadline (U16, G2-19).
+  expect(
+    moved(
+      `INSERT INTO reward_programs(program_id,institution_ref,program_ref,source_id,unit_ref,
+        holding_kind,terms_evidence_refs_json,release_id,recorded_at)
+       VALUES('program:probe','institution:probe','probe','probe','points:probe','reward-points',
+         '[]','reward-model-v1','2026-09-12T00:00:00Z')`,
+    ),
+  ).toEqual({ source: 1, visibility: 0 });
+  expect(
+    moved(
+      `INSERT INTO expiry_rules(rule_id,version,family,program_id,applicability_json,
+        qualifying_activity_policy_ref,deadline_calendar_ref,priority_policy_ref,
+        evidence_refs_json,verification,recorded_at)
+       VALUES('rule:probe','v1','fixed-lot','program:probe',
+         '{"bucketKinds":["regular"],"tiers":null,"validPeriod":null}',NULL,
+         'Asia/Tokyo:end-of-day:assumed',NULL,'[]','verified','2026-09-12T00:00:00Z')`,
+    ),
+  ).toEqual({ source: 1, visibility: 0 });
+  expect(
+    moved(
+      `INSERT INTO conversion_offers(offer_id,version,source_program_ref,destination_program_ref,
+        from_unit_ref,to_unit_ref,ratio_numerator,ratio_denominator,minimum_coefficient,
+        minimum_scale,increment_coefficient,increment_scale,fixed_fees_json,
+        eligibility_policy_ref,eligible_bucket_kinds_json,eligible_restriction_refs_json,
+        valid_time_json,application_deadline_json,processing_policy_ref,processing_days,
+        rounding_policy_ref,rounding_scale,rounding_mode,evidence_refs_json,verification,
+        recorded_at)
+       VALUES('offer:probe','v1','program:probe','program:probe-cash','points:probe','JPY','1','2',
+         '100',0,'100',0,'[]','policy:probe:eligibility','["regular"]','[]',
+         '{"kind":"unknown","reasonCode":"probe"}','{"kind":"unknown","reasonCode":"probe"}',
+         'policy:probe:processing',3,'policy:probe:rounding',0,'down','[]','verified',
+         '2026-09-12T00:00:00Z')`,
+    ),
+  ).toEqual({ source: 1, visibility: 0 });
+  expect(
+    moved(
+      `INSERT INTO reward_bucket_claims(claim_digest,parse_run_id,source_fact_kind,source_fact_id,
+        program_id,holding_ref,bucket_ref,bucket_kind,restriction_refs_json,unit_ref,
+        quantity_coefficient,quantity_scale,quantity_status,observed_expiry_json,observed_at,
+        promotion_release,recorded_at)
+       VALUES('${"c".repeat(64)}',1,'balance',1,'program:probe','holding:probe','bucket:probe',
+         'regular','[]','points:probe','100',0,'exact',NULL,'2026-09-12T00:00:00Z',
+         'reward-promotion-v1','2026-09-12T00:00:00Z')`,
+    ),
+  ).toEqual({ source: 1, visibility: 0 });
+  expect(
+    moved(
+      `INSERT INTO membership_state_claims(claim_digest,parse_run_id,program_id,holding_ref,tier,
+        valid_json,source,evidence_refs_json,recorded_at)
+       VALUES('${"d".repeat(64)}',1,'program:probe','holding:probe','gold',
+         '{"kind":"unknown","reasonCode":"probe"}','provider','[]','2026-09-12T00:00:00Z')`,
+    ),
+  ).toEqual({ source: 1, visibility: 0 });
+  // The reward projection's own output stays outside the ledger: a build that
+  // recorded its result must not invalidate itself (05 §2).
+  expect(
+    moved(
+      `INSERT INTO expiry_estimates(holding_ref,rule_id,rule_version,context_id,state,
+        expiring_buckets_json,uncertainty_codes_json,source_expiry_refs_json,policy_release,
+        computed_at)
+       VALUES('holding:probe','rule:probe','v1','context:probe','computed','[]','[]','[]',
+         'reward-model-v1','2026-09-12T00:00:00Z')`,
+    ),
+  ).toEqual({ source: 0, visibility: 0 });
   // `fetch_run_seals` is in the ledger too; sealing needs a registered Layer A
   // run, so it is exercised against the real registration path in
   // services/processor/test/projection-input.test.ts.

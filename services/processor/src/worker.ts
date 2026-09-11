@@ -63,6 +63,10 @@ import {
 } from "./collection/index.ts";
 import { dispatchOperations } from "./operations/dispatch.ts";
 import { rewardClaimsEnabled, rewardClaimsStage } from "./reward-claims-job.ts";
+import {
+  rewardReadProjectionEnabled,
+  rewardReadProjectionStage,
+} from "./reward-read-projection.ts";
 import { reportsEnabled, runReportJob } from "./report-job.ts";
 import { DECIMAL_POLICY_RELEASE } from "../../../packages/read-model/src/identity";
 import type {
@@ -1598,6 +1602,12 @@ export interface ScheduledStages {
   reconcile?: (env: Env) => Promise<object>;
   /** A11 reward promotion. Absent stage, or the flag off, means the lane never runs. */
   rewards?: (env: Env) => Promise<object>;
+  /**
+   * U16: the reward expiry and simulation projection in the READ database.
+   * Absent stage, or the flag off, means the lane never runs and nothing is
+   * written to READ (docs/rewards.md).
+   */
+  rewardReadProjection?: (env: Env) => Promise<object>;
   /** A12 report job. Absent stage, or the flag off, means the lane never runs. */
   reports?: (env: Env) => Promise<object>;
   /**
@@ -1624,6 +1634,7 @@ const defaultStages: ScheduledStages = {
   balanceProjection: (env) => runBalanceProjection(env),
   reconcile: (env) => reconciliationSweep(env.DB),
   rewards: (env) => rewardClaimsStage(env),
+  rewardReadProjection: (env) => rewardReadProjectionStage(env),
   reports: (env) => {
     // One clock reading for both fields: the run records when it ran, and the
     // cutoff admits everything recorded up to that same instant.
@@ -1687,6 +1698,15 @@ export async function runScheduled(
     [
       "reward_claims_sweep",
       rewardClaimsEnabled(env.REWARD_CLAIMS_ENABLED) ? stages.rewards : undefined,
+    ],
+    // U16: the reward second stage reads the claims the sweep above promoted,
+    // so it runs after it and before the report job. Off unless
+    // REWARD_READ_PROJECTION_ENABLED is set (docs/rewards.md).
+    [
+      "reward_read_projection",
+      rewardReadProjectionEnabled(env.REWARD_READ_PROJECTION_ENABLED)
+        ? stages.rewardReadProjection
+        : undefined,
     ],
     // Off unless REPORTS_ENABLED is set, for the same reason
     // (docs/calculation-and-reports.md).

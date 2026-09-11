@@ -105,15 +105,15 @@ migration 0033 が投入するrule:
 
 ## 6. 表とその性質
 
-| 表                        | 性質                | 備考                                                     |
-| ------------------------- | ------------------- | -------------------------------------------------------- |
-| `reward_programs`         | 追記のみ            | `docs/sources` に単位の記録があるプログラムだけ投入      |
-| `expiry_rules`            | 追記のみ            | 訂正は新versionで行う。CHECKが未確認ruleの計算方式を禁止 |
-| `conversion_offers`       | 追記のみ            | 倍率は整数比。同一区間の複数offerを許す                  |
-| `reward_bucket_claims`    | 追記のみ（trigger） | `claim_digest` UNIQUE。公開済みparse runのみ（trigger）  |
-| `membership_state_claims` | 追記のみ（trigger） | `provider` の場合は parse run を要求                     |
-| `expiry_estimates`        | 再構築可能な投影    | 全削除して再計算しても内容が一致する                     |
-| `conversion_simulations`  | 再構築可能な投影    | 入力digest単位。書き込みはsimulation routeでは行わない   |
+| 表                        | 性質                | 備考                                                                                     |
+| ------------------------- | ------------------- | ---------------------------------------------------------------------------------------- |
+| `reward_programs`         | 追記のみ            | `docs/sources` に単位の記録があるプログラムだけ投入                                      |
+| `expiry_rules`            | 追記のみ            | 訂正は新versionで行う。CHECKが未確認ruleの計算方式を禁止                                 |
+| `conversion_offers`       | 追記のみ            | 倍率は整数比。同一区間の複数offerを許す                                                  |
+| `reward_bucket_claims`    | 追記のみ（trigger） | `claim_digest` UNIQUE。公開済みparse runのみ（trigger）                                  |
+| `membership_state_claims` | 追記のみ（trigger） | `provider` の場合は parse run を要求                                                     |
+| `expiry_estimates`        | 再構築可能な投影    | 全削除して再計算しても内容が一致する。U16でREADへ移設（§12）                             |
+| `conversion_simulations`  | 再構築可能な投影    | 入力digest単位。書き込みはsimulation routeでは行わない。U16でREADへ再実行分を持つ（§12） |
 
 ## 7. 昇格ジョブ
 
@@ -201,6 +201,130 @@ publication pointerの巻き戻しはreward側の表示からも同時に消え�
 
 確認していないこと: 本番D1・本番Workerでの動作、実際のプログラム規約の現在の内容、
 providerが表示する期限の実際の表記ゆれ、V Point の `point_type` / `point_div` の実値。
+
+## 12. READ second stage（U16）
+
+計画04 §2は `expiry_estimates` と `conversion_simulations` を「第2段階READ候補」とし、
+条件を一つだけ置いている。**評価日時・元依頼・ruleを固定できること**。固定していない期限は
+毎回別の答えであり、投影ではない。U16はその条件を実装にした。flag
+`REWARD_READ_PROJECTION_ENABLED`（processor / app ともに既定 `"false"`）で囲ってある。
+
+CORE側の `reward_programs` / `expiry_rules` / `conversion_offers`（版管理された参照claim）と
+`reward_bucket_claims` / `membership_state_claims`（provider・自己申告のclaim）は**移さない**。
+04 §2のとおりCOREに残る。READが全損しても、これらのclaimとruleは1行も失われない。
+
+### 固定する入力
+
+processorの `reward_read_projection` lane（`reward_claims_sweep` の後、`report_job` の前、
+`decision_outbox` は最後のまま）が、05 §3の楽観的captureを行う。
+
+```text
+revision r0 を読む
+  → rule・現在のbucket claim・会員資格・offer・保存済みsimulationを読む
+revision r1 を読む
+r0 == r1 なら固定input、そうでなければ破棄して再試行（上限3回）
+```
+
+固定inputの`content`に **評価日時 `evaluatedAt` と評価calendar** が入る。digestは`content`の
+digestなので、**評価日時が変われば別のsnapshotになる**。既存snapshotを書き換えることはない
+（G2-19）。中断して次のtickで再開したbuildは、自分のinputの日時をそのまま使う。再開時に時計を
+読み直すと、1つのsnapshotに2つの「現在」が混ざるためである。
+
+評価日時は、captureした時刻そのものではなく **その時刻が属するUTC日の開始
+（`YYYY-MM-DDT00:00:00.000Z`）** である。評価calendarは `UTC:start-of-day:assumed`
+（`REWARD_EVALUATION_CALENDAR`）で、snapshotの `calendar_rule_id` と `/api/meta` 経由の
+`evaluationCalendar` にそのまま出る。ruleが消費するのは暦日であって時刻ではないので、同じUTC日の
+2回のtickは同じinput（`unchanged`）になり、日付が変わると新しいsnapshotになる。生の時刻を使うと
+5分ごとに同一内容のsnapshotを作り続けることになる。各ruleの `deadline_calendar_ref`
+（例: `Asia/Tokyo:end-of-day:assumed`）はこれとは別で、期限が**どの日に落ちるか**を決めるもので
+あり、rule版と一緒に固定される。評価日はUTC日の境界であることに注意する（JSTの日付ではない）。
+`evaluated_at` は固定長のこの形式でしか書かれないので、pointerの「同一revisionでは評価日時が
+後退しない」比較は文字列比較で成立する。
+
+固定inputの正規bytesは残高側と同じ `projection-inputs/<digest>/input.json`（DATA R2）へ置き、
+COREの `projection_input_records` が参照する。表・prefix・記録の仕組みを増やしていない。
+
+captureが読む各集合には上限があり、超えたら**切り詰めず拒否**する（`rule_set_too_large`、
+`claim_set_too_large`、`offer_set_too_large`、`simulation_set_too_large`）。
+
+CORE migration `0041_reward_revision_triggers.sql` が上記5表を0038の依存台帳へ追加する。これが
+ないと、ruleやclaimの変更をr0/r1 captureが検知できない。投影出力である `expiry_estimates` /
+`conversion_simulations` は台帳から**除外**したままである（自分の出力で自分を陳腐化させない）。
+副作用として、reward claimの昇格は残高投影のinputも「変わったかもしれない」側に倒す。これは
+過剰検知であって見落としではなく、残高側は再captureして同じcontent digestに落ち着く。
+
+### READの表（migration `0002_reward_read.sql`）
+
+| 表                              | 内容                                                                                                                                       |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `reward_expiry_snapshots`       | 1回のbuild。content key＋attempt、固定した `evaluated_at`、評価calendar、rule集合digest、claim window、status、output digest、writer fence |
+| `reward_expiry_estimates`       | bucket×rule版ごとの期限。`expires_on` は**日付のみ**、数量はプログラム自身の単位、`row_digest` 付き                                        |
+| `reward_conversion_simulations` | 保存済みsimulationの再実行結果と、再現できたかどうか                                                                                       |
+| `reward_snapshot_input_refs`    | 使ったrule・offer・claim集合・評価時刻・calendarのref＋digest（04 §3。COREへのFKは張らない）                                               |
+| `reward_snapshot_pointer`       | 公開中のsnapshot。同一epochではrevisionが後退せず、同一revisionでは評価日時も後退しない                                                    |
+| `reward_build_checkpoints`      | 段階（estimates / simulations）ごとの再開位置。chunkと同一batchで書く                                                                      |
+
+全てSTRICT、COREへのFKなし、`building` の行はpointer経由の読者からは見えない。
+
+### 保存済みsimulationの扱い（G2-20）
+
+保存済み `conversion_simulations` の行に**元依頼が残っている場合だけ**再実行する。
+
+| 状況                                  | 記録                                                 |
+| ------------------------------------- | ---------------------------------------------------- |
+| `plan_json` に `request` が残っている | `reproduced`。固定したofferで再計算した結果を保存    |
+| digestしか残っていない                | `not_reproducible` / `simulation_input_not_retained` |
+| 依頼が指すoffer版が固定inputに無い    | `not_reproducible` / `offer_not_in_fixed_input`      |
+
+digestは入力ではない。今日のofferで計算し直した別物を「同じsimulation」とは呼ばない。
+
+### 読み取り
+
+| route                                 | flag off（既定）                            | flag on＋公開snapshotあり                        |
+| ------------------------------------- | ------------------------------------------- | ------------------------------------------------ |
+| `GET /api/v2/rewards/expiry`          | 従来どおりCOREのruleとclaimからその場で算定 | snapshotの行。`evaluatedAt` と評価calendarを併記 |
+| `GET /api/v2/rewards/simulations`     | `503 reward_read_model_unavailable`         | 保存済みsimulationと再現可否                     |
+| `GET /api/v2/rewards/holdings`        | 変更なし                                    | 変更なし                                         |
+| `GET /api/v2/rewards/offers/simulate` | 変更なし（純粋なquery、書き込みなし）       | 変更なし                                         |
+
+公開snapshotが無い・別epoch・制限改訂後は、空の成功ではなく503（`reward_read_model_unavailable` /
+`reward_read_model_context_changed` / `reward_read_model_restriction_changed`）を返す。cursorは
+U11と同じ `{snapshotId, readInstanceId, filterDigest, position}` で、別queryのcursorは400
+`cursor_mismatch`、別instance・退役snapshotのcursorは410 `context_expired`。flag offのときに
+cursorを渡すと400 `cursor_unsupported`（offsetとして読み替えたりしない）。
+
+capability `rewardsV2ReadModel`（`none` / `read-d1`）を `/api/meta` が広告する。`core-d1` は無い。
+COREはreward snapshotを公開したことがなく、都度算定の答えはsnapshotではないからである。
+
+### デプロイ順とロールバック
+
+1. CORE `0041_reward_revision_triggers.sql` を適用する（追加のみ。0033の表が前提）。
+2. READ `0002_reward_read.sql` を適用する（`wrangler.read-migrations.jsonc` 経由）。
+3. processorをデプロイする。flagは `"false"` のまま。
+4. appをデプロイする。flagは `"false"` のまま。
+5. processorで `REWARD_READ_PROJECTION_ENABLED="true"`（`REWARD_CLAIMS_ENABLED` もonであること）。
+   scheduledログの `reward_read_projection` 行で `status`・`written`・`active`・`evaluatedAt` を見る。
+6. snapshotが公開されてからappで `REWARD_READ_PROJECTION_ENABLED="true"`。
+
+ロールバックは逆順でflagをoffにするだけである。appを先に戻せばrouteは従来の算定へ戻り、
+processorを戻せばREADへの書き込みが止まる。READのreward表は削除して差し支えない（再構築可能）。
+migrationは戻さない。COREのclaim・rule・offer・保存済みsimulationは一切触っていない。
+
+### 合成データで確認したこと（U16）
+
+- `packages/storage-d1/test/reward-read-writer.test.ts` — 同じinputの再構築が完全一致し、評価日時を
+  変えると別snapshotになり、既存snapshotの評価日時・calendarは変更できないこと（G2-19）。
+  digestしか無い保存済みsimulationが `not_reproducible` になること（G2-20）。固定していないrule・
+  offerを名乗る行がtriggerで拒否されること。chunk再送、lease喪失、pointerの前進のみ。
+- `services/processor/test/reward-read-projection.test.ts` — 実D1でのlane。flag offで
+  laneが動かないこと、lane順、予算不足のbuildが公開されず自分の日時で再開すること、captureが
+  安定しないときに `pending` になること、READのreward表を全部落としてもCOREのclaim/rule/offer/
+  保存済みsimulationが1行も変わらず、古いcursorが失効すること（G0-09）。
+- `services/app/test/rewards-v2-read.test.ts` — routeの503・cursor・再現可否・
+  `/api/meta` の広告、flag offで従来どおり答えること。
+
+確認していないこと: 本番D1・本番Workerでの動作、実際のprovider規約の現在の内容、
+本番規模でのpage性能、保存済みsimulationの実データ（現状COREに書き込むwriterは無い）。
 
 [Vポイントサービス利用規約]: docs/sources/v-point.md
 
