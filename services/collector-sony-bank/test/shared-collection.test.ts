@@ -5,7 +5,9 @@
 // terminal follows every put and its references match what is stored), G1-08
 // (a partial run states its coverage gap), G1-09 (a failed run persists no
 // artifact), G1-15 (shared mode never calls the legacy importer or bucket),
-// G3-07/G3-08 (no credential or provider text in what is written or logged).
+// G3-07/G3-08 (no credential or provider text in what is written or logged,
+// and the importer's central-safety invariants are re-checked before a byte
+// is planned).
 import { describe, expect, spyOn, test } from "bun:test";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import {
@@ -17,6 +19,7 @@ import {
 import { collectionTarget } from "../src/collection-target";
 import {
   artifactRole,
+  assertCentralSafe,
   persistSharedRun,
   sharedRunDiagnostic,
   sonyBankRunPlan,
@@ -230,6 +233,64 @@ describe("G1-08/G1-09 the outcome of the run survives persistence", () => {
     // The failure mapping is what drops the artifacts; the manifest says so.
     expect(plan.artifacts).toEqual([]);
     expect(plan.run.providerOutcome).toBe("failed");
+  });
+});
+
+describe("G3-08 the central-safety invariants are re-checked before a byte is planned", () => {
+  const wallet = (body: string) => ({
+    dataset: "wallet-history-202609",
+    filename: "wallet-history-2026-09.html",
+    mediaType: "text/html; charset=UTF-8",
+    body,
+  });
+
+  test("the synthetic run passes the same checks the importer applies", () => {
+    for (const artifact of input().artifacts) {
+      expect(() =>
+        assertCentralSafe(artifact, new TextEncoder().encode(artifact.body as string)),
+      ).not.toThrow();
+    }
+  });
+
+  test("a wallet page that kept a session id or a hidden value fails the run", async () => {
+    await expect(
+      sonyBankRunPlan(
+        input({
+          artifacts: [wallet('<html><a href="/wallet;jsessionid=synthetic-session">x</a></html>')],
+        }),
+      ),
+    ).rejects.toThrow("artifact_html_redaction_invalid");
+    await expect(
+      sonyBankRunPlan(
+        input({
+          artifacts: [wallet('<html><input type="hidden" name="cc" value="synthetic"></html>')],
+        }),
+      ),
+    ).rejects.toThrow("artifact_html_redaction_invalid");
+    // The collector's own sanitizer output is what passes.
+    expect(() =>
+      assertCentralSafe(
+        wallet('<html><input type="hidden" name="cc" value=""></html>'),
+        new TextEncoder().encode('<html><input type="hidden" name="cc" value=""></html>'),
+      ),
+    ).not.toThrow();
+  });
+
+  test("a JSON payload with a credential field fails the run", async () => {
+    await expect(
+      sonyBankRunPlan(
+        input({
+          artifacts: [
+            {
+              dataset: "gross-balance",
+              filename: "gross-balance.json",
+              mediaType: "application/json",
+              body: '{"balance":1,"nested":[{"loginPwd":"synthetic"}]}',
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow("artifact_secret_field_present");
   });
 });
 
