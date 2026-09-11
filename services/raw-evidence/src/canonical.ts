@@ -7,10 +7,7 @@ export {
   type JsonValue,
 } from "../../../packages/evidence-contract/src/json";
 export { sha256Hex } from "../../../packages/evidence-contract/src/digest";
-
-export function hexBytes(value: string): Uint8Array {
-  if (!/^[0-9a-f]{64}$/.test(value)) {
-    throw new TypeError("invalid sha256");
-  }
-  return Uint8Array.from(value.match(/../g)!, (pair) => Number.parseInt(pair, 16));
-}
+// The hex decoder the object upload hands to the store moved with the upload
+// itself (U05); one definition, so the checksum the store verifies and the
+// digest the catalogue records cannot come from two different decoders.
+export { hexBytes } from "../../../packages/application/src/ingest/index.ts";

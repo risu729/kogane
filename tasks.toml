@@ -24,7 +24,15 @@ run = "bun tasks/_lib/check-manifests.ts"
 description = "Run the repository-wide guards that belong to no single workspace."
 # Directories, not a list of files: a new guard next to the one it protects
 # joins CI by existing, exactly like a new workspace does.
-run = "bun test tasks/_lib scripts"
+run = "bun test tasks/_lib scripts tests packages/collector-diagnostics/test/diagnostics.test.ts poc/sbi-securities/scripts/prepare-sbi-bitwarden-cli-secret.bun.test.ts"
+
+["root:depcruise"]
+description = "Check the resolved import graph against the boundary rules."
+# The text guard in tasks/_lib/import-boundaries.ts reads specifiers; this one
+# walks what they resolve to, which is the only way to see a bare specifier, an
+# exports map or an alias reaching an experiment (G4-07, G4-08). The runner
+# also fails when the cruise saw too little to mean anything.
+run = "bun tasks/_lib/depcruise.ts"
 
 ["root:knip"]
 description = "Report unused files, exports and dependencies (advisory; never fails on a finding)."
@@ -37,7 +45,7 @@ run = "./node_modules/.bin/knip --no-exit-code"
 
 ["ci:root"]
 description = "Every check CI runs for the repository-wide guards."
-depends = ["root:manifests", "root:test", "root:knip"]
+depends = ["root:manifests", "root:test", "root:depcruise", "root:knip"]
 
 ["ledger:resources"]
 description = "Regenerate the deployed-resource ledger under infra/."
@@ -47,6 +55,10 @@ run = "bun scripts/resource-ledger.ts"
 description = "Regenerate the CORE schema ledger under infra/."
 run = "bun scripts/core-schema-ledger.ts"
 
+["bootstrap:ingest-clients"]
+description = "Render config/ingest-clients.json to the idempotent CORE bootstrap SQL under infra/bootstrap/."
+run = "bun scripts/config-bootstrap.ts"
+
 ["ledger:deps"]
 description = "Regenerate infra/dependency-resolution.md from the root bun.lock."
 run = "bun scripts/dependency-ledger.ts"
@@ -54,6 +66,13 @@ run = "bun scripts/dependency-ledger.ts"
 ["load-fixture"]
 description = "Generate the synthetic load-harness fixture (scripts/load-fixture.ts)."
 run = "bun scripts/load-fixture.ts"
+
+["bundle"]
+description = "Emit the deployable bundle of every Worker the release deploys."
+# The release manifest digests these directories (unified plan 11 section 2):
+# the deploy Action re-bundles, so identical bytes cannot be asserted against
+# the live script; a recorded pre-deploy digest is what CD can prove.
+depends = ["*:bundle"]
 
 ["dry-run"]
 description = "Validate every Worker deployment without uploading it."

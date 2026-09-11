@@ -68,12 +68,12 @@ build that predates the migration never reads or writes these tables. 0031 sits
 between 0029 (which it needs for `decision_revisions` and `entity_relations`)
 and 0035/0036/0037, and applies in any of those orders.
 
-| Table                | Role                                                                                                                                                                                                                             |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `change_plans`       | `plan_id` (PK, = the digest), `kind`, `payload_json`, `base_context_id`, `expected_revisions_json`, `simulation_json`, `created_by`, `created_at`, `expires_at`, `status` (`planned`/`approved`/`committed`/`stale`/`rejected`). |
-| `approvals`          | `approval_id` (PK), `plan_id`, `plan_digest`, `approver_actor`, `approver_verification` (always `server`), `scope_json`, `expires_at`, `uses_remaining`, `created_at`.                                                           |
-| `operation_receipts` | `operation_id` (PK), `principal`, `operation_kind`, `payload_digest`, `plan_id`, `status` (`accepted`/`published`/`failed`), `result_json`, `created_at`, `published_at`; `UNIQUE(principal, operation_id)`.                     |
-| `decision_outbox`    | `id`, `decision_revision_id`, `principal`, `operation_id`, `target`, `enqueued_at`, `processed_at`, `attempts`, `last_error_code`, `outcome`, plus the lease/backoff columns; `UNIQUE(decision_revision_id, target)`.            |
+| Table                | Role                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `change_plans`       | `plan_id` (PK, = the digest), `kind`, `payload_json`, `base_context_id`, `expected_revisions_json`, `simulation_json`, `created_by`, `created_at`, `expires_at`, `status` (`planned`/`approved`/`committed`/`stale`/`rejected`).                                                                                                                                      |
+| `approvals`          | `approval_id` (PK), `plan_id`, `plan_digest`, `approver_actor`, `approver_verification` (always `server`), `scope_json`, `expires_at`, `uses_remaining`, `created_at`.                                                                                                                                                                                                |
+| `operation_receipts` | `operation_id` (PK), `principal`, `operation_kind`, `payload_digest`, `plan_id`, `status` (`accepted`/`published`/`failed`), `result_json`, `created_at`, `published_at`; `UNIQUE(principal, operation_id)`.                                                                                                                                                          |
+| `decision_outbox`    | `id`, `decision_revision_id`, `principal`, `operation_id`, `target`, `enqueued_at`, `processed_at`, `attempts`, `last_error_code`, `outcome`, plus the lease/backoff columns; `UNIQUE(decision_revision_id, target)`. Migration 0038 adds `progress_code`, `pending_polls`, `blocked_code`, `required_source_revision`, `evidence_ref` and `applied_source_revision`. |
 
 Triggers, following 0018/0029:
 
@@ -85,9 +85,11 @@ Triggers, following 0018/0029:
 - `operation_receipts`: only `status` (`accepted` → `published`/`failed`) and
   `published_at` move; a receipt is always inserted as `accepted`.
 - `decision_outbox`: only `processed_at`, `attempts`, `outcome`,
-  `last_error_code` and the lease columns move, `attempts` never decreases, and
-  a processed row is never reopened — which is what makes a duplicate delivery
-  a no-op rather than a rewrite.
+  `last_error_code`, the lease columns and the 0038 completion columns move,
+  `attempts` and `pending_polls` never decrease, `required_source_revision`
+  never changes once stamped, a row is never marked processed without its
+  completion evidence, and a processed row is never reopened — which is what
+  makes a duplicate delivery a no-op rather than a rewrite.
 
 `operation_id` is the primary key **and** `(principal, operation_id)` is
 unique. Idempotency lookups happen in the principal's namespace; a second
@@ -121,21 +123,45 @@ This is **not** the collector R2 import outbox (addendum 12 §3). That one
 carries fetched evidence towards the central store; this one carries accepted
 internal judgements towards the read models.
 
-`services/observation-pipeline/src/decision-outbox.ts` runs one bounded pass
+`packages/storage-d1/src/core/decision-outbox.ts` (the Processor keeps the
+historical import path) runs one bounded pass
 per `scheduled` invocation, as the last of the seven scheduled stages — after
 the projections a decision may have invalidated
 (`docs/observation-lanes.md`): it claims up to 20 due rows under a 60 s lease,
-runs each target's processor, marks the row processed with a safe outcome code,
-and turns the operation's receipt `published` once no row of that operation is
-unprocessed. A failure records a safe code (`Error`, never an exception
-message), releases the lease and backs the row off exponentially, up to five
-attempts.
+runs each target's processor, and turns the operation's receipt `published`
+once no row of that operation is unprocessed.
 
-| Target                | Processor today                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `identity-projection` | Runs a bounded `identitySweep`. The sweep only creates identity runs that are missing and seals them once, so a duplicate delivery changes nothing. Outcome `identity_swept`.                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `balance-projection`  | A07's `balanceProjectionOutboxProcessor` (`balance-projection-job.ts`), over `balance_read_snapshots` / `current_balance_projection` / `scope_relations` from migration 0030 (`docs/balance-read-model.md`). The Worker hands it in through `dispatchDecisionOutbox`'s `processors` argument; the target has no default, so a caller that omits it gets `skipped_no_consumer` rather than a placeholder claiming a rebuild that never ran. Outcomes `balance_projection_current` / `_rebuilt` / `_rebuilding`, or `skipped_no_projection` while `BALANCE_PROJECTION_ENABLED` is off. |
-| `agent-notify`        | No transport exists yet: `skipped_no_consumer`. The commit does not enqueue this target.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+### The four processor results
+
+A processor no longer returns "some outcome" the dispatcher treats as done
+(unified plan 05 §6, 01 §5). It returns one of four results, and **only one of
+them closes the row**:
+
+| Result                | What it means                                                                        | What the dispatcher does                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `pending(progress)`   | The work is running: a build that has not finished, a flag that is off.              | Records `progress_code`, counts a `pending_polls` (not an attempt), re-schedules. The row stays open.            |
+| `completed(evidence)` | The downstream effect landed, with the reference that proves it.                     | Sets `processed_at`, `outcome`, `evidence_ref` and `applied_source_revision`. Only this can publish the receipt. |
+| `retryable(code)`     | A transient failure (a lost writer fence, an unreadable stored input, an exception). | Records a safe code, backs the row off exponentially, counts an attempt; five attempts stop it.                  |
+| `blocked(code)`       | Nothing will change without an operator: no processor registered, a budget exceeded. | Records `blocked_code`; the row is not claimed again until an operator clears it.                                |
+
+`building`, an unregistered processor, a flag that is off and "the job was
+enqueued" are therefore **never** completed, and the receipt of an operation
+with such a row stays `accepted` (`contracts/stages.json`, acceptance G2-13).
+A pending poll deliberately does not burn the failure budget, so a build that
+needs many ticks cannot exhaust the retries a real failure needs.
+
+`required_source_revision` is stamped on the row at its first claim: the
+decision's own write already moved the CORE revision of migration 0038, so a
+read model that covers that revision covers the decision. That is what lets a
+lost response converge — the next delivery sees the published snapshot already
+carrying the revision and completes the row without redoing the work, and
+without re-consuming the approval (acceptance G2-11, G2-12).
+
+| Target                | Processor today                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `identity-projection` | Runs a bounded `identitySweep`. The sweep only creates identity runs that are missing and seals them once, so a duplicate delivery changes nothing. `completed(identity_swept)`, with the number of sealed runs as its evidence.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `balance-projection`  | A07's `balanceProjectionOutboxProcessor` (`balance-projection-job.ts`), over the tables of migration 0030 (`docs/balance-read-model.md`). The Worker hands it in through `dispatchDecisionOutbox`'s `processors` argument; the target has no default, so a caller that omits it leaves the row `blocked(no_processor)` rather than closing it with a placeholder claiming a rebuild that never ran. With `READ_PROJECTION_ENABLED` on, the published snapshot it asks about is the READ database's pointer under the current CORE epoch (`docs/read-model-d1.md`); the four outcomes are the same. `completed(balance_projection_active)` with the published snapshot as evidence; `pending(projection_flag_off / projection_building / projection_behind_decision / input_capture_unstable)`; `blocked(<budget>_exceeded)`; `retryable(writer_lease_lost …)`. |
+| `agent-notify`        | No transport exists and none is configured to exist, so there is no downstream state that could still become current: `completed(no_agent_transport)`. That is not the same as an unregistered processor, which is blocked. The commit does not enqueue this target.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 Delivery is assumed duplicated, out of order and interrupted. Nothing claims
 exactly-once from a queue id; the guarantees come from the durable row, the
@@ -211,7 +237,7 @@ an amount, a token or an exception string; `refs` holds safe identifiers only.
 
 ## UI
 
-`/confirm/:planId` (`poc/observation-pipeline/web/src/pages/Confirm.tsx`) shows
+`/confirm/:planId` (`apps/web/src/pages/Confirm.tsx`) shows
 the plan's targets, the server-computed diff (counts and identifiers only — no
 amounts), the staleness of the plan and the re-simulated plan id when it went
 stale, and Approve / Commit buttons. The buttons act only when the API
@@ -241,9 +267,9 @@ exactly `"true"`. While off, every command path answers
    0026/0032/0035/0036/0037;
    0029 must already be applied (it owns `decision_revisions` and
    `entity_relations`, which 0031 references).
-2. Deploy `services/observation-pipeline` — the writer: the command routes and
+2. Deploy `services/processor` — the writer: the command routes and
    the outbox dispatcher. The dispatcher is a no-op until rows exist.
-3. Deploy `services/evidence-browser` with `COMMANDS_ENABLED` unset. The
+3. Deploy `services/app` with `COMMANDS_ENABLED` unset. The
    command paths are closed; nothing else changed for readers.
 4. Enable by setting `COMMANDS_ENABLED=true`.
 
@@ -256,7 +282,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/observation-pipeline/test/change-lifecycle.test.ts` (16 tests):
+- `services/processor/test/change-lifecycle.test.ts` (16 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written
@@ -268,13 +294,15 @@ already recorded is never undone by a DELETE — an undo is a new revision
   a resent identical commit racing itself → one receipt, one mutation; typed
   relations with their own decision and no derived `same_account` (SC06); an
   agent refused approval and commit; approval digest/expiry/scope binding; the
-  outbox publishing once and a duplicate delivery changing nothing; a throwing
+  outbox publishing once and a duplicate delivery changing nothing; an
+  unregistered target leaving the row blocked and the receipt `accepted` until
+  an operator clears it; a throwing
   target retried with backoff, never marked processed, with the receipt staying
   `accepted`; the private routes' actor requirements; append-only enforcement
   on all four tables; migration 0031 applied on a seeded 0017–0035 schema with
   no existing row touched; and an unadopted successful run kept out of the
   simulated difference until the publication gate adopts it.
-- `services/evidence-browser/test/command-api.test.ts` (9 tests): 401 without
+- `services/app/test/command-api.test.ts` (9 tests): 401 without
   a JWT, 403 with the flag off or set to anything but `"true"`, POST-only and
   404 for unknown command paths, the rest of the Worker still GET-only, an
   agent refused approve/commit before forwarding, `503` when the writer binding
@@ -283,14 +311,19 @@ already recorded is never undone by a DELETE — an undo is a new revision
 - `packages/application/test/command.test.ts` (11 tests): the closed kind list,
   payloads that reject a caller-supplied impact/approval/revisions, digest
   sensitivity to every input, grants, and the error table.
-- `poc/observation-pipeline/test/confirm.browser.test.ts` (3 tests): read-only
+- `apps/web/test/confirm.browser.test.ts` (3 tests): read-only
   without the capability, no action on a stale plan, and accepted vs published
   shown distinctly.
-- `services/observation-pipeline/test/balance-projection.test.ts` "the
+- `services/processor/test/balance-projection.test.ts` "the
   dispatcher routes the balance-projection target to that processor": a
   `balance-projection` row reaches A07's real processor and rebuilds the
-  projection, and the same target with no processor handed in closes as
-  `skipped_no_consumer` because it has no default.
+  projection, and the same target with no processor handed in is blocked with
+  `no_processor` because it has no default.
+- `services/processor/test/projection-input.test.ts` (G2-11 .. G2-13):
+  a flag that is off and a build that has not finished both leave the row open
+  and the receipt `accepted`; the completion after the read model finished
+  converges without a second build and records the snapshot as its evidence; a
+  redelivery claims nothing; an unregistered processor blocks the row.
 
 Not verified: production data; behaviour under more than two concurrent Workers (the receipt reservation and
 the in-batch revision guard are the arbiters, and the tests exercise two).

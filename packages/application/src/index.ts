@@ -105,6 +105,7 @@ export {
   operationIdFor,
   operationPayloadDigest,
   type OperationReceipt,
+  operationRequestPayload,
   type OperationRequest,
   type OperationStage,
   type OperationStageReport,

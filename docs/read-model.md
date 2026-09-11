@@ -1,7 +1,7 @@
 # Read model
 
 `packages/read-model` (`@kogane/read-model`) is the explicit read repository
-of the production evidence browser (`services/evidence-browser`). It replaces
+of the production evidence browser (`services/app`). It replaces
 the adapter that rewrote table names in SQL text with a regular expression and
 stripped a trailing `LIMIT 501` before re-wrapping the query (design review
 finding D04, PR-04). Nothing else changed: the API surface, response shapes,
@@ -13,7 +13,7 @@ HTTP. It exports an `ObservationReader` interface, the named SQL concepts every
 query is built from, typed query inputs, explicit row → API contract mappers,
 and `createD1ObservationReader(db)`. The evidence browser binds it to its D1
 database in `src/observations.ts`; the local PoC keeps its own synchronous
-SQLite queries in `poc/observation-pipeline/src/queries.ts` and shares only the
+SQLite queries in `experiments/observation-pipeline-local/src/queries.ts` and shares only the
 snapshot CTE builder.
 
 ## The rule
@@ -27,7 +27,7 @@ first. Replacing identifiers inside a finished SQL string, in any form, is not
 an acceptable way to change what a query reads.
 
 The frozen copy of the old adapter in
-`services/evidence-browser/test/legacy-read-path.ts` exists only for the
+`services/app/test/legacy-read-path.ts` exists only for the
 parity test. Production code must not import it, and it must not be extended.
 
 ## Named concepts (`src/concepts.ts`)
@@ -53,7 +53,7 @@ is a complete SQL fragment that states the view it reads.
 | `snapshotPolicyComparison`   | A03 shadow comparison: every container dataset under both policies, listing partitions whose current artifact differs. Identifiers only. Served by the observation-pipeline Worker.                                                                                                                                                                                                                                                            | `snapshotPolicyComparisonSql(SNAPSHOT_RELATIONS)`                                                                                                                                                        |
 | `activeStateProjection`      | The rows a "current" list shows: a published parse of a successful visible fetch run, plus snapshot membership for snapshot datasets, plus per-source multi-page contracts stated per query.                                                                                                                                                                                                                                                   | `publishedParses AND successfulFetchRuns`; the chain `parse_runs p → observation_fetch_artifacts fa → observation_fetch_runs f`.                                                                         |
 | parsing health (`/api/meta`) | A job-level notion, not a visibility rule: a failed job counts until a newer published parse of the same parser repairs it; retired versions are ignored.                                                                                                                                                                                                                                                                                      | `PARSING_HEALTH_SQL` over `observation_parse_jobs`, `published_parse_runs` and `parse_runs`.                                                                                                             |
-| Identity eligibility         | `services/evidence-browser/src/identity-api.ts` reads `eligible_identity_runs` (migration 0020) joined to the publication projection; the organization read moved here (`src/organization.ts`).                                                                                                                                                                                                                                                | The identity catalogue queries stay in the browser over `published_parse_runs` (PR-05); the organization query is `organizationSql(mode)`.                                                               |
+| Identity eligibility         | `services/app/src/identity-api.ts` reads `eligible_identity_runs` (migration 0020) joined to the publication projection; the organization read moved here (`src/organization.ts`).                                                                                                                                                                                                                                                             | The identity catalogue queries stay in the browser over `published_parse_runs` (PR-05); the organization query is `organizationSql(mode)`.                                                               |
 | Identity read mode           | `src/identity.ts`: `latest` joins the current mapping revisions; `as-recorded` joins the mapping rows the sealed identity run pinned. `interpretationContext` names the releases a response was computed under. See [decision-log.md](decision-log.md).                                                                                                                                                                                        | `MAPPING_RELATIONS[mode]`; the run's policy release comes from `identity_run_contexts` (migration 0029).                                                                                                 |
 
 The snapshot CTE builder takes its relations as explicit parameters
@@ -104,7 +104,7 @@ checks in `src/read.ts` are unchanged.
 
 ## Parity proof
 
-`services/evidence-browser/test/read-model-parity.test.ts` seeds one
+`services/app/test/read-model-parity.test.ts` seeds one
 synthetic D1 fixture through the ingest Worker with: an unsealed run, a
 pending parse, a failed parse, a superseded parse, a `kogane-synthetic` run,
 an excluded run whose raw object is therefore unreachable, one raw object
@@ -136,8 +136,8 @@ rollback rules are in `docs/publication-gate.md`. `packages/read-model` is
 vendored by relative import, so there is no separate artifact to publish.
 
 Verified locally with synthetic data: the CI checks (today
-`mise run ci:<short>`) of `packages/read-model`, `services/evidence-browser`,
-`poc/observation-pipeline`, and the repository-wide guards (`mise run ci:root`). Not verified: production data.
+`mise run ci:<short>`) of `packages/read-model`, `services/app`,
+`experiments/observation-pipeline-local`, and the repository-wide guards (`mise run ci:root`). Not verified: production data.
 
 ## Balance projection reader
 

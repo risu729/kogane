@@ -576,6 +576,31 @@ export async function pendingDispatches(input: {
   return rows.map((row) => receiptOf(row, []));
 }
 
+/**
+ * The validated request an operation was accepted with. The executor needs it
+ * — a re-registration names a run, a replay names a scope — and it is read
+ * back from the row rather than passed along, so a dispatch always acts on
+ * what was durably accepted rather than on a message that could differ.
+ */
+export async function operationRequestPayload(
+  store: CommandStore,
+  operationId: string,
+): Promise<Record<string, unknown> | null> {
+  const row = await store.first<{ request_json: string }>(
+    "SELECT request_json FROM ops_requests WHERE operation_id=?1",
+    [operationId],
+  );
+  if (!row) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(row.request_json);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  return parsed as Record<string, unknown>;
+}
+
 export interface DispatchResult {
   store: CommandStore;
   operationId: string;

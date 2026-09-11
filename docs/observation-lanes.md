@@ -153,17 +153,34 @@ evidence-browser metadata API and identity audit; they are not duplicated here.
 No field carries an amount, a raw body, a token or a provider URL.
 
 The scheduled handler logs each stage as its own JSON event with counts only,
-in this order (`runScheduled` in `services/observation-pipeline/src/worker.ts`):
+in this order (`runScheduled` in `services/processor/src/worker.ts`):
 
-| #   | Event                  | Gate                                                                                                                                  |
-| --- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | `observation_sweep`    | Always. The candidate lane inside it is gated by `RELEASE_CANDIDATES_ENABLED = "true"` (A04, `docs/release-adoption.md`).             |
-| 2   | `identity_sweep`       | Always (`docs/identity.md`).                                                                                                          |
-| 3   | `balance_projection`   | Always runs and reports itself `skipped` while `BALANCE_PROJECTION_ENABLED` is anything but `"1"` (`docs/balance-read-model.md`).     |
-| 4   | `reconciliation_sweep` | Only when `RECONCILIATION_ENABLED` is `"1"` or `"true"`; otherwise the stage is not run and logs nothing (`docs/economic-events.md`). |
-| 5   | `reward_claims_sweep`  | Only when `REWARD_CLAIMS_ENABLED` is `"1"` or `"true"` (`docs/rewards.md`).                                                           |
-| 6   | `report_job`           | Only when `REPORTS_ENABLED` is `"true"` (`docs/calculation-and-reports.md`).                                                          |
-| 7   | `decision_outbox`      | Always, and last: it runs after the projections a decision may have invalidated (A09, `docs/change-lifecycle.md`).                    |
+| #   | Event                    | Gate                                                                                                                                                                                                                                                                                                                             |
+| --- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `observation_sweep`      | Always. The candidate lane inside it is gated by `RELEASE_CANDIDATES_ENABLED = "true"` (A04, `docs/release-adoption.md`).                                                                                                                                                                                                        |
+| 2   | `collection_scan`        | Always; lists and registers only when `SHARED_R2_INGEST_ENABLED` is `"1"` or `"true"`, otherwise logs `status: "skipped"` (U08, `docs/processor.md`).                                                                                                                                                                            |
+| 3   | `identity_sweep`         | Always (`docs/identity.md`).                                                                                                                                                                                                                                                                                                     |
+| 4   | `balance_projection`     | Always runs and reports itself `skipped` while `BALANCE_PROJECTION_ENABLED` is anything but `"1"` (`docs/balance-read-model.md`). With `READ_PROJECTION_ENABLED` on it writes the READ database instead of the CORE tables of migration 0030, and completes the CORE job only after READ is published (`docs/read-model-d1.md`). |
+| 5   | `reconciliation_sweep`   | Only when `RECONCILIATION_ENABLED` is `"1"` or `"true"`; otherwise the stage is not run and logs nothing (`docs/economic-events.md`).                                                                                                                                                                                            |
+| 6   | `reward_claims_sweep`    | Only when `REWARD_CLAIMS_ENABLED` is `"1"` or `"true"` (`docs/rewards.md`).                                                                                                                                                                                                                                                      |
+| 7   | `reward_read_projection` | Only when `REWARD_READ_PROJECTION_ENABLED` is `"1"` or `"true"` (U16, `docs/rewards.md` §12).                                                                                                                                                                                                                                    |
+| 8   | `report_job`             | Only when `REPORTS_ENABLED` is `"true"` (`docs/calculation-and-reports.md`).                                                                                                                                                                                                                                                     |
+| 9   | `operation_dispatch`     | Always; dispatches only when `OPS_DISPATCH_ENABLED` is `"1"` or `"true"`, otherwise logs `status: "skipped"` (U06/U08, `docs/processor.md`, `docs/ops-api.md`).                                                                                                                                                                  |
+| 10  | `decision_outbox`        | Always, and last: it runs after the projections a decision may have invalidated (A09, `docs/change-lifecycle.md`).                                                                                                                                                                                                               |
+
+Why those positions. `collection_scan` registers terminals the shared DATA
+bucket already holds, so it runs before `identity_sweep`: a run it finds this
+tick can reach identity and parsing on the same tick instead of waiting for the
+next one. `reward_read_projection` builds from the claims
+`reward_claims_sweep` promotes, so it follows it. `operation_dispatch` hands
+accepted operations to their executor, so it runs before the outbox — work
+accepted this tick can still reach it — while `decision_outbox` keeps its
+place at the end.
+
+Neither is a parse lane: they create no `observation_parse_jobs` rows and have
+no job budget. `collection_scan` is bounded by one R2 list page and a
+registration count per tick; its cursor lives in `collection_scan_state`, not
+in `observation_lane_state`.
 
 Each stage is isolated: a failure is logged as its own `<event>_failed` line
 and never stops the stages after it, so a parse-sweep failure does not prevent
@@ -174,7 +191,7 @@ load budgets and the recovery drills for these stages are in
 
 ## Invariants kept and how they were verified
 
-Synthetic fixtures only, under Miniflare D1/R2 (`services/observation-pipeline/test`):
+Synthetic fixtures only, under Miniflare D1/R2 (`services/processor/test`):
 
 | Invariant                                                                                                            | Test                                                                                                   |
 | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -193,7 +210,7 @@ trigger present.
 
 ## Deploy order and rollback
 
-1. Apply `services/raw-evidence/migrations/0035_observation_job_lanes.sql`
+1. Apply `packages/storage-d1/migrations/core/0035_observation_job_lanes.sql`
    (additive: `ALTER TABLE … ADD COLUMN` with defaults, three new tables, one
    trigger, one index). The running pre-0035 Worker keeps working during and
    after the migration: its job insert names only the original columns and

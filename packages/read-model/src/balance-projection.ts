@@ -1,5 +1,5 @@
 // The latest-balance read model (review D10/D11, addendum A07). Pure: no D1,
-// no clock, no HTTP. The job in services/observation-pipeline supplies the
+// no clock, no HTTP. The job in services/processor supplies the
 // candidates and writes the rows; everything that decides a state lives here
 // so it can be tested against the scenario fixtures in packages/domain.
 //
@@ -10,6 +10,7 @@
 // candidate with its reason code. It never sums across units, never turns a
 // missing value into zero, and never reads an unknown overlap as disjoint.
 
+import { encodeDecimal } from "../../storage-d1/src/codecs/decimal.ts";
 import { fromNormalizedDecimal, type ValueState } from "../../domain/src/values.ts";
 import {
   METRIC_REGISTRY,
@@ -32,6 +33,7 @@ import {
   type TemporalValue,
 } from "../../domain/src/time.ts";
 import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
+import { canonicalDigest } from "../../domain/src/context.ts";
 import { AUTHORITY_POLICY_RELEASE } from "./authority";
 import type { MeasureView } from "./scope";
 
@@ -509,8 +511,11 @@ export function buildBalanceProjection(
       evidenceCount: evidence.length,
       metricId: definition.metricId,
       definitionRelease: definition.definitionRelease,
-      quantityCoefficient: value.status === "exact" ? value.value.coefficient : null,
-      quantityScale: value.status === "exact" ? value.value.scale : null,
+      // One definition of the decimal-v1 columns, shared with every CORE
+      // writer (packages/storage-d1/src/codecs, U05): a non-exact value writes
+      // NULL twice and is never stored as zero.
+      quantityCoefficient: encodeDecimal(value).coefficient,
+      quantityScale: encodeDecimal(value).scale,
       valueStatus: value.status,
       unitRef: candidate.instrument,
       state: outcome.state,
@@ -646,4 +651,23 @@ export function projectionInputManifest(inputs: ProjectionInputs): ProjectionInp
     authorityPolicyRelease: AUTHORITY_POLICY_RELEASE,
     scopeRelationRelease: SCOPE_RELATION_RELEASE,
   };
+}
+
+/**
+ * The build's own identity: the releases and bounds that decide what the
+ * captured input becomes. It is the second half of
+ * `snapshotId = sha256(inputContentDigest ‖ projectionBuildDigest ‖ contractVersion)`
+ * (05 §4), so a code change that would produce different rows from the same
+ * input produces a different snapshot instead of overwriting the old one.
+ */
+export async function projectionBuildDigest(): Promise<string> {
+  return await canonicalDigest({
+    projectionRelease: BALANCE_PROJECTION_RELEASE,
+    metricRegistryRelease: METRIC_REGISTRY_RELEASE,
+    authorityPolicyRelease: AUTHORITY_POLICY_RELEASE,
+    scopeRelationRelease: SCOPE_RELATION_RELEASE,
+    disjointnessPolicy: DISJOINT_ACCOUNTS_POLICY,
+    knownAssetsPolicy: KNOWN_ASSETS_POLICY,
+    adoptionSubjectBound: ADOPTION_SUBJECT_BOUND,
+  });
 }

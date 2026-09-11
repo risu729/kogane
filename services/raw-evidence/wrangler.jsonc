@@ -21,7 +21,7 @@
       "binding": "DB",
       "database_name": "kogane-raw-evidence",
       "database_id": "b335a887-250d-45c9-bd72-af83f35fdc60",
-      "migrations_dir": "migrations"
+      "migrations_dir": "../../packages/storage-d1/migrations/core"
     }
   ],
   "r2_buckets": [

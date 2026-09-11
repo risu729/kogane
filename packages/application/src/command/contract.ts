@@ -141,21 +141,14 @@ export interface GrantLoader {
 // ── store port ──────────────────────────────────────────────────────────
 
 /** One statement of a batch. The application layer never runs raw caller text. */
-export interface PreparedWrite {
-  sql: string;
-  binds: readonly unknown[];
-}
+// Statement execution lives with the driver (packages/storage-d1, U05); the
+// lifecycle only names it. One definition, so a write list this package builds
+// and a batch that package runs cannot drift apart.
+import type { SqlWrite } from "../../../storage-d1/src/core/operations.ts";
+import type { BatchOutcome, CommandStore } from "../../../storage-d1/src/core/command-store.ts";
 
-export interface BatchOutcome {
-  changes: number;
-}
-
-export interface CommandStore {
-  first<T>(sql: string, binds?: readonly unknown[]): Promise<T | null>;
-  all<T>(sql: string, binds?: readonly unknown[]): Promise<T[]>;
-  /** One transaction. Every statement after the first is guarded on its effect. */
-  batch(writes: readonly PreparedWrite[]): Promise<readonly BatchOutcome[]>;
-}
+export type PreparedWrite = SqlWrite;
+export type { BatchOutcome, CommandStore };
 
 // ── plans, simulations, approvals, receipts ─────────────────────────────
 

@@ -1,0 +1,26 @@
+{
+  "version": "ingest-clients-v1",
+  "description": "Declared ingest clients and their routes (plan 06 section 3). `mise run bootstrap:ingest-clients` renders this file to infra/bootstrap/ingest-clients.sql, which is idempotent and is applied to CORE by an operator (docs/processor.md section 10). A route's `source` is the CORE sources.id; its `producer` is the producer the shared-R2 collector names in its terminal, collector-<collector id>, where the collector id is the terminal's own source id (COLLECTOR_SOURCE_IDS in packages/application/src/collection/descriptors.ts maps it to the CORE id). Producers are created here because they do not exist before U09. No credential: the Processor's client is used in process only and has no HTTP token.",
+  "clients": [
+    {
+      "id": "processor-shared-r2",
+      "displayName": "Processor shared-R2 registration (in-process, U08)",
+      "active": true,
+      "routes": [
+        { "source": "global-pass", "producer": "collector-prestia-globalpass", "active": true },
+        { "source": "mobile-suica", "producer": "collector-mobile-suica", "active": true },
+        { "source": "moneyforward-me", "producer": "collector-moneyforward-me", "active": true },
+        { "source": "myjcb", "producer": "collector-myjcb", "active": true },
+        { "source": "sbi-securities", "producer": "collector-sbi-securities", "active": true },
+        { "source": "sbi-shinsei-bank", "producer": "collector-sbi-shinsei", "active": true },
+        { "source": "sbi-vc-trade", "producer": "collector-sbi-vc-trade", "active": true },
+        { "source": "smbc-bank", "producer": "collector-smbc-direct", "active": true },
+        { "source": "sony-bank", "producer": "collector-sony-bank", "active": true },
+        { "source": "v-point", "producer": "collector-v-point", "active": true },
+        { "source": "v-point-pay", "producer": "collector-v-point-pay", "active": true },
+        { "source": "v-point-pay", "producer": "collector-v-point-pay-email", "active": true },
+        { "source": "vpass", "producer": "collector-vpass", "active": true }
+      ]
+    }
+  ]
+}

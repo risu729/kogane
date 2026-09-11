@@ -1,6 +1,6 @@
 # Production identity audit
 
-Run `node --experimental-strip-types services/observation-pipeline/scripts/audit-identity-store.ts` from the repository root with the existing authenticated Wrangler diagnostic environment. This uses the existing remote D1 binding and performs only SELECT queries in one batch; it does not trigger collection, interpretation, deployment, or revision.
+Run `node --experimental-strip-types services/processor/scripts/audit-identity-store.ts` from the repository root with the existing authenticated Wrangler diagnostic environment. This uses the existing remote D1 binding and performs only SELECT queries in one batch; it does not trigger collection, interpretation, deployment, or revision.
 
 The current script requires migrations `0021_vpass_binding_lookup_plan.sql` and `0022_identity_current_run_plan.sql` for bounded correlated lookups and many-run current-view selection. It imports the projection's required-policy expression: trusted Vpass bindings require policy 2, while unbound or ambiguous Vpass records and other sources retain baseline policy 1. Pending counts use eligible identity runs, so revoked pins cannot hide outstanding work. They do not incorrectly request a complete non-Vpass replay after the Vpass-only policy update. Do not run the full-scale audit against the pre-0022 database.
 
