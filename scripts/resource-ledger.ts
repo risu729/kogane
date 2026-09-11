@@ -100,7 +100,12 @@ export const LIVE_INVENTORY = {
   ],
   /** KV namespaces: none exist. */
   kvNamespaces: [] as string[],
-  /** Live Workers with no config in this repository. */
+  /**
+   * Live Workers with no config in this repository. Nothing here can redeploy
+   * them, so deleting one is not reversible by any release of this repository.
+   * Disposition (U15): delete manually after the owner confirms — see
+   * `docs/legacy-retirement.md` §7 and `infra/protection.md` §1.
+   */
   workersWithoutConfig: ["kogane-globalpass-container-probe-20260827"],
 } as const;
 
@@ -329,10 +334,14 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
   },
   "services/collector-r2-importer": {
     source: "plan 07 §1 + decision D2",
-    proposedAction: "absorb-into-processor",
-    proposedTarget: "services/processor (queue consumer and adapters, U08)",
+    // U08 absorbed the queue consumer and the adapters. The Worker itself is
+    // not retired by a repository change: eleven of the twelve legacy buckets
+    // have no shared-R2 mapping yet, so it is still the only reader of them.
+    // The checklist and the commands are docs/legacy-retirement.md §4.
+    proposedAction: "retire-after-verification",
+    proposedTarget: "services/processor absorbed it in U08; runbook docs/legacy-retirement.md §4",
     requiredVerification:
-      "the Worker keeps running until U15; old protocol still readable; no double cron",
+      "docs/legacy-retirement.md §4: references zero (no collector binding, no queue producer, uncoveredLegacySources empty), unprocessed zero (reconciler queue and DLQ empty, a full backfill pass importing nothing, no new collector-r2-* ingestion attempt), retention window recorded, backup confirmed",
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
@@ -350,10 +359,14 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
   },
   "services/raw-evidence": {
     source: "plan 07 §1 + decision D2/D3",
-    proposedAction: "keep-as-legacy-adapter",
-    proposedTarget: "packages/storage-d1 + packages/application (U05); migrations move in U05",
+    // U05 moved the SQL and the registration use cases out; what is deployed is
+    // a thin adapter over them. Its only caller is the importer's RAW_EVIDENCE
+    // service binding, so it cannot be retired before that one (15 §5).
+    proposedAction: "retire-after-verification",
+    proposedTarget:
+      "packages/storage-d1 + packages/application hold the logic (U05); runbook docs/legacy-retirement.md §3",
     requiredVerification:
-      "kogane-ingest stays deployed until U15; migration filenames and bytes unchanged",
+      "docs/legacy-retirement.md §3: references zero (the importer's RAW_EVIDENCE binding is the last caller; every source's latest ingestion_attempts row is processor-shared-r2), unprocessed zero (no unsealed fetch_run, no incomplete inventory, no unregistered collection_run), retention window recorded for the legacy ingest tokens, CORE export and Time Travel bookmark taken",
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },

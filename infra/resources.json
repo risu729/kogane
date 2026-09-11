@@ -1311,9 +1311,9 @@
       "workspace": "services",
       "disposition": {
         "source": "plan 07 §1 + decision D2",
-        "proposedAction": "absorb-into-processor",
-        "proposedTarget": "services/processor (queue consumer and adapters, U08)",
-        "requiredVerification": "the Worker keeps running until U15; old protocol still readable; no double cron",
+        "proposedAction": "retire-after-verification",
+        "proposedTarget": "services/processor absorbed it in U08; runbook docs/legacy-retirement.md §4",
+        "requiredVerification": "docs/legacy-retirement.md §4: references zero (no collector binding, no queue producer, uncoveredLegacySources empty), unprocessed zero (reconciler queue and DLQ empty, a full backfill pass importing nothing, no new collector-r2-* ingestion attempt), retention window recorded, backup confirmed",
         "executionStatus": "PLANNED_NOT_EXECUTED",
         "planLiveResourceStatus": "NOT_VERIFIED",
         "liveResourceStatus": "LIVE(workers=kogane-collector-r2-importer; buckets=kogane-globalpass-collector-poc,kogane-mobile-suica-collector-poc,kogane-moneyforward-collector-poc,kogane-myjcb-collector-poc,kogane-sbi-collector-poc,kogane-sbi-shinsei-collector-poc,kogane-sbi-vc-trade-poc,kogane-smbc-direct-backfill-poc,kogane-sony-bank-collector-poc,kogane-vpass-collector-poc,kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)"
@@ -2041,9 +2041,9 @@
       "workspace": "services",
       "disposition": {
         "source": "plan 07 §1 + decision D2/D3",
-        "proposedAction": "keep-as-legacy-adapter",
-        "proposedTarget": "packages/storage-d1 + packages/application (U05); migrations move in U05",
-        "requiredVerification": "kogane-ingest stays deployed until U15; migration filenames and bytes unchanged",
+        "proposedAction": "retire-after-verification",
+        "proposedTarget": "packages/storage-d1 + packages/application hold the logic (U05); runbook docs/legacy-retirement.md §3",
+        "requiredVerification": "docs/legacy-retirement.md §3: references zero (the importer's RAW_EVIDENCE binding is the last caller; every source's latest ingestion_attempts row is processor-shared-r2), unprocessed zero (no unsealed fetch_run, no incomplete inventory, no unregistered collection_run), retention window recorded for the legacy ingest tokens, CORE export and Time Travel bookmark taken",
         "executionStatus": "PLANNED_NOT_EXECUTED",
         "planLiveResourceStatus": "NOT_VERIFIED",
         "liveResourceStatus": "LIVE(workers=kogane-ingest; buckets=kogane-raw-evidence)"
