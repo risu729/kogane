@@ -164,3 +164,77 @@ email handler, manual upload) can use it unchanged.
    short-lived Container with only source-scoped credentials; see
    `docs/authenticated-collectors.md` and `docs/credentials.md`. Sources that
    rarely change can stay manual forever.
+
+## Shared DATA target per collector (U09)
+
+Unified plan U09 (chapters 03, 12, 13; decisions D12/D13). Each collector
+gains a var `COLLECTION_TARGET` and an R2 binding `DATA` to the central
+bucket `kogane-raw-evidence`:
+
+- `COLLECTION_TARGET=legacy` (the deployed default) is the existing path,
+  byte for byte: artifacts and the per-source manifest go to the collector's
+  own bucket and the importer service binding copies them centrally.
+- `COLLECTION_TARGET=shared` persists the run through
+  `packages/collection` (`docs/collection-contract.md`): content-addressed
+  objects under `objects/<2 hex>/<sha256>` and, written last, the run's
+  `terminal-v1` manifest at `runs/<source>/<runId>/terminal.json`. The
+  per-source bucket is not written and the importer is not called, so the
+  same bytes are never stored twice (G1-15).
+
+Only the exact string `shared` switches a collector; anything else — unset,
+misspelled, a half-applied deploy — stays on the legacy path. The legacy
+bucket binding stays in the config because it is the rollback target.
+
+Rules that hold for every collector below:
+
+- The stored bytes are the ones that already reach central storage: the
+  collector's own sanitizer output. A provider response that carries
+  credentials, cookies or session material is never stored as it is.
+- `providerOutcome` is the run's own outcome (`success`/`partial`/`failed`)
+  and is never widened; a `partial` run keeps its coverage gap (G1-08) and a
+  `failed` run persists no artifact, so it cannot read downstream like an
+  observation of zero (G1-09).
+- A failed put returns `incomplete` with a checkpoint and no terminal: the
+  run is not reported as complete, and only codes and counts are logged
+  (G1-01, G3-08).
+- `operationId`/`attemptId` are carried when an operation requested the run.
+  U08 dispatches collection operations; today the cron and the admin trigger
+  leave them unset.
+- Deploy order, per source: the Processor (U08) with
+  `SHARED_R2_INGEST_ENABLED` first, so a terminal is never written before
+  something can read it; then `COLLECTION_TARGET=shared` on this collector.
+  Rollback: set the var back to `legacy` and redeploy nothing else —
+  terminals already written stay valid and are picked up by the Processor's
+  bounded `runs/` scan. The collector keeps exactly one cron either way, so
+  switching a source never doubles provider access (11 §4).
+
+### Sony Bank (`services/collector-sony-bank`, `kogane-sony-bank-collector-poc`)
+
+| Artifact key                                     | Role                         |
+| ------------------------------------------------ | ---------------------------- |
+| `gross-balance.json`, `*-history-page-NNNN.json` | `provider_response`          |
+| `yen-history.csv`, `foreign-history-<ccy>.csv`   | `provider_export`            |
+| `wallet-history-YYYY-MM.html`                    | `sanitized_provider_capture` |
+| `collection-summary.json`                        | `collector_summary`          |
+| `manifest.json`                                  | `collector_manifest`         |
+
+Sanitizer: the collector's own `sanitizeWalletHtml` (Sony Bank Wallet
+statements), which the legacy path already applies before the importer
+forwards the object verbatim. Shared mode stores exactly those bytes and
+records the step as a `redacted` transformation with no retained input,
+because the provider HTML was deliberately not kept.
+
+Terminal fields: one unit `account` (`unitKind: account`); ranges
+`request-window` (the requested `from`/`to`) and, when wallet statements were
+collected, `wallet-months`; one `terminal` report carrying the outcome;
+`requestedScope.scopeKind = date_range` over the same window;
+`coverageStatus` `complete` for a successful window, `partial` for a partial
+run, `unknown` for a failure. `manifest.json` is the collector manifest with
+the central-safe failure messages (`manifestFailure`) and each artifact's
+`key` pointing at the content-addressed object that was actually written; the
+terminal's `artifacts[]` stays authoritative.
+
+Verified with synthetic fixtures in
+`services/collector-sony-bank/test/shared-collection.test.ts` (G1-01, G1-02,
+G1-08, G1-09, G1-15, G3-07, G3-08). No provider was contacted and no
+production bucket was read or written.

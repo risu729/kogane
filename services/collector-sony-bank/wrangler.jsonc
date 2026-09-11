@@ -19,6 +19,10 @@
     {
       "binding": "SNAPSHOTS",
       "bucket_name": "kogane-sony-bank-collector-poc"
+    },
+    {
+      "binding": "DATA",
+      "bucket_name": "kogane-raw-evidence"
     }
   ],
   "services": [
@@ -28,7 +32,8 @@
     }
   ],
   "vars": {
-    "COLLECTOR_SCHEMA_VERSION": "sony-bank-worker-poc-v2"
+    "COLLECTOR_SCHEMA_VERSION": "sony-bank-worker-poc-v2",
+    "COLLECTION_TARGET": "legacy"
   },
   "triggers": {
     "crons": ["0 21 * * *"]

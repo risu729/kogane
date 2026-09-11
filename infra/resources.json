@@ -1387,7 +1387,7 @@
         "requiredVerification": "keep the sanitize/HTML/CSV contract and the resource identity",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-sony-bank-collector-poc; buckets=kogane-sony-bank-collector-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-sony-bank-collector-poc; buckets=kogane-raw-evidence,kogane-sony-bank-collector-poc)"
       },
       "workers": [
         {
@@ -1406,6 +1406,11 @@
               "binding": "SNAPSHOTS",
               "bucket": "kogane-sony-bank-collector-poc",
               "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
+              "live": true
             }
           ],
           "kv": [],
@@ -1423,6 +1428,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [],
@@ -2141,7 +2147,8 @@
           "kogane-evidence-browser",
           "kogane-ingest",
           "kogane-observation-pipeline",
-          "kogane-observation-read-diagnostic"
+          "kogane-observation-read-diagnostic",
+          "kogane-sony-bank-collector-poc"
         ]
       },
       {
