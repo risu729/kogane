@@ -3,7 +3,7 @@
 //
 // Every runtime resource this repository can deploy is declared in a
 // `wrangler*.jsonc` under `apps/`, `experiments/`, `poc/` or `services/`. The
-// last two workspaces hold no Worker today; they are walked so that a
+// first two workspaces hold no Worker today; they are walked so that a
 // directory promoted out of `poc/` (U04 moved the PoC client and its local
 // store) still carries its disposition instead of dropping out of the ledger.
 //

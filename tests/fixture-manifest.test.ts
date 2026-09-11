@@ -6,15 +6,17 @@
 // they were before the move — and rewritten to the new path only. This suite
 // hashes what is on disk now and compares, so a formatter, an editor's newline
 // handling or a well-meant "fix" to a fixture fails here instead of silently
-// changing what every parser test asserts.
+// changing what every parser test asserts. It also compares the manifest with
+// what git tracks *and* with what is on disk, so a fixture that was added but
+// never pinned — committed or not — fails the same way a changed one does.
 //
 // It also pins the formatter exclusions: the manifest is only a guarantee if
 // the tools that rewrite files are told to leave these ones alone, and the new
 // location has to keep matching the same `**/fixtures/**` glob the old one did.
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import { REPO_ROOT, trackedFiles } from "../tasks/_lib/repo-root.ts";
 
 const MANIFEST = "tests/fixtures/MANIFEST.sha256";
@@ -32,6 +34,20 @@ function readManifest(): { path: string; sha256: string }[] {
     });
 }
 
+/** Every regular file under `directory`, tracked by git or not, repository-relative and sorted. */
+function filesOnDisk(directory: string): string[] {
+  const found: string[] = [];
+  const walk = (current: string): void => {
+    for (const name of readdirSync(current)) {
+      const path = join(current, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else found.push(relative(REPO_ROOT, path));
+    }
+  };
+  walk(join(REPO_ROOT, directory));
+  return found.sort();
+}
+
 const entries = readManifest();
 const tracked = trackedFiles(FIXTURES);
 
@@ -41,6 +57,13 @@ describe("G0-04 moved fixtures keep their bytes", () => {
     expect(entries.map((entry) => entry.path).sort()).toEqual(tracked);
     expect(new Set(entries.map((entry) => entry.path)).size).toBe(entries.length);
     for (const entry of entries) expect(entry.path.startsWith(`${FIXTURES}/`)).toBe(true);
+  });
+
+  test("nothing sits in the fixture directory that the manifest does not pin", () => {
+    // `git ls-files` cannot see a file that was copied in and never added; a
+    // parser test could still read it. The directory on disk has to be the
+    // manifest, no more and no less.
+    expect(filesOnDisk(FIXTURES)).toEqual(entries.map((entry) => entry.path).sort());
   });
 
   test("every fixture still hashes to the value recorded before the move", () => {

@@ -155,7 +155,14 @@ describe("import boundaries", () => {
 
 describe("G4-08 build-closure boundaries", () => {
   /** Every `assets.directory` a tracked Wrangler configuration declares. */
-  const assets = trackedFiles("services/*/wrangler*.jsonc", "poc/*/wrangler*.jsonc").map((path) => {
+  // The same four workspaces the resource ledger walks: a Worker config that
+  // appears under apps/ or experiments/ is checked from the day it exists.
+  const assets = trackedFiles(
+    "apps/*/wrangler*.jsonc",
+    "experiments/*/wrangler*.jsonc",
+    "poc/*/wrangler*.jsonc",
+    "services/*/wrangler*.jsonc",
+  ).map((path) => {
     const config = parseJsonc(readFileSync(`${REPO_ROOT}/${path}`, "utf8"), path) as {
       assets?: { directory?: string };
     };
