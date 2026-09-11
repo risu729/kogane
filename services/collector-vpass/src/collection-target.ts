@@ -11,7 +11,7 @@
 // where financial evidence is written.
 export type CollectionTarget = "legacy" | "shared";
 
-export const SHARED_COLLECTION_TARGET = "shared";
+const SHARED_COLLECTION_TARGET = "shared";
 
 export function collectionTarget(value: string | undefined): CollectionTarget {
   return value === SHARED_COLLECTION_TARGET ? "shared" : "legacy";

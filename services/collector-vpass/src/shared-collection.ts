@@ -40,11 +40,11 @@ import {
 const SOURCE = "vpass";
 const PRODUCER = "vpass-json";
 /** The schema version central storage records for a card-scoped Vpass run. */
-export const VPASS_CARD_SCHEMA_VERSION = "vpass-worker-card-v1";
+const VPASS_CARD_SCHEMA_VERSION = "vpass-worker-card-v1";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 const MONTH = /^\d{6}$/u;
 
-export interface VpassPageCapture {
+interface VpassPageCapture {
   readonly kind: "top" | "answer";
   readonly index: number;
   readonly rawJson: string;
@@ -281,7 +281,7 @@ export async function vpassCardRunPlan(run: VpassCardRun): Promise<PersistRunPla
  * of zero (G1-09), and it carries a machine code rather than the provider's
  * message.
  */
-export function vpassFailedRunPlan(run: VpassFailedRun): PersistRunPlan {
+function vpassFailedRunPlan(run: VpassFailedRun): PersistRunPlan {
   const operationId = identifier(run.operationId, "shared_operation_id_invalid");
   return {
     run: {

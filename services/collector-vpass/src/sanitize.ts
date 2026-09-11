@@ -28,7 +28,7 @@ export type JsonValue =
   | string
   | JsonValue[]
   | { [key: string]: JsonValue };
-export type JsonObject = Record<string, unknown>;
+type JsonObject = Record<string, unknown>;
 
 export class VpassSanitizeError extends Error {
   constructor(readonly code: string) {
@@ -40,7 +40,7 @@ export class VpassSanitizeError extends Error {
 const REDACTED_VALUE = "<redacted-vpass-sensitive>";
 const REDACTED_CARD = "<redacted-card-reference>";
 
-export function isRecord(value: unknown): value is JsonObject {
+function isRecord(value: unknown): value is JsonObject {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -145,7 +145,7 @@ function assertSanitized(value: JsonValue, cardList: boolean): void {
  * inventory's display names by their ordinal labels and its values by a
  * placeholder, because a card reference addresses the card itself.
  */
-export function sanitizeEnvelope(envelope: JsonObject, cardList = false): JsonValue {
+function sanitizeEnvelope(envelope: JsonObject, cardList = false): JsonValue {
   const sanitized = sanitizeJson(envelope, false);
   if (!isRecord(sanitized)) throw new VpassSanitizeError("sanitizer_output_invalid");
   if (cardList) {
@@ -168,7 +168,7 @@ export function sanitizeEnvelope(envelope: JsonObject, cardList = false): JsonVa
 }
 
 /** Parse a captured response body and check it is a successful envelope. */
-export function parseEnvelope(rawJson: string, code: string): JsonObject {
+function parseEnvelope(rawJson: string, code: string): JsonObject {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawJson);
