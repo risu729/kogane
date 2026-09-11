@@ -133,7 +133,12 @@ INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kin
 
     const results = await d1CommandStore(sqliteD1(db)).batch(commitWrites({ [SUBJECT]: 0 }));
 
-    expect(results.map((result) => result.changes)).toEqual([1, 1, 1, 1, 1, 1]);
+    // Every statement wrote. The decision and the mapping report two rows
+    // each: their own, and the CORE revision bump migration 0038's trigger
+    // writes in the same transaction — D1 counts rows written by triggers, so
+    // a count that has to mean "rows this statement wrote" reads a RETURNING
+    // clause instead (docs/projection-input.md).
+    expect(results.map((result) => result.changes)).toEqual([1, 2, 2, 1, 1, 1]);
     expect(counts()).toEqual({
       receipts: 1,
       decisions: 1,

@@ -210,7 +210,12 @@ test("a writer whose lease expired changes nothing: no status, no projection, no
     .bind(Date.now() + 60_000)
     .run();
   const live = await runBatch(env.DB, publishBatch(env.DB, { ...input, now: Date.now() }));
-  expect(live[0]?.meta.changes).toBe(1);
+  // Two rows: the parse run, and the CORE revision bump migration 0038's
+  // trigger writes in the same transaction. D1 counts rows written by triggers
+  // ("D1 counts the revision bump in meta.changes" in
+  // test/projection-input.test.ts pins the rule), which is why nothing derives
+  // a business count from `changes`.
+  expect(live[0]?.meta.changes).toBe(2);
   expect(await projectionSet(902)).toEqual([pending!.id]);
   expect(await legacySet(902)).toEqual([pending!.id]);
 }, 30000);
@@ -237,8 +242,11 @@ test("re-executing the publish batch for an already published run changes nothin
     now: Date.now(),
   };
   const published = await runBatch(env.DB, publishBatch(env.DB, input));
-  // ok, no older run to supersede, event, pointer, job closed.
-  expect(published.map((result) => result.meta.changes)).toEqual([1, 0, 1, 1, 1]);
+  // ok, no older run to supersede, event, pointer, job closed. The three
+  // statements that write a dependency-ledger table count one extra row each:
+  // the CORE revision bump of migration 0038 (see the changes-count test in
+  // test/projection-input.test.ts).
+  expect(published.map((result) => result.meta.changes)).toEqual([2, 0, 2, 2, 1]);
   const before = await events(906);
   expect(before).toEqual([{ previous: null, next: parse!.id, kind: "normal", actor: "pipeline" }]);
   const publishedAt = () =>
@@ -268,7 +276,7 @@ test("re-executing the publish batch for an already published run changes nothin
     env.DB,
     publishBatch(env.DB, { ...input, publishedAt: "2026-09-10T00:00:00.000Z", now: Date.now() }),
   );
-  expect(leased.slice(0, 4).map((result) => result.meta.changes)).toEqual([1, 0, 0, 0]);
+  expect(leased.slice(0, 4).map((result) => result.meta.changes)).toEqual([2, 0, 0, 0]);
   expect(await events(906)).toEqual(before);
   expect(await publishedAt()).toBe("2026-09-07T00:00:00.000Z");
   expect(await mismatches(906)).toEqual([]);
@@ -401,11 +409,16 @@ test("a successful run outside the projection stays invisible to readers and vis
 }, 30000);
 
 test("migrations 0026, 0028 and 0036 apply on the earlier schema with existing rows and backfill exactly the legacy set", async () => {
-  // 0028 (release adoption) and 0036 both build on 0026's tables, so the
-  // deployed schema this upgrade starts from is everything except those three.
+  // 0028 (release adoption) and 0036 both build on 0026's tables, and 0038
+  // puts revision triggers on them, so the deployed schema this upgrade starts
+  // from is everything except those four.
   const upgrade = await startPipeline(
     layerBMigrations().filter(
-      (name) => !name.startsWith("0026_") && !name.startsWith("0028_") && !name.startsWith("0036_"),
+      (name) =>
+        !name.startsWith("0026_") &&
+        !name.startsWith("0028_") &&
+        !name.startsWith("0036_") &&
+        !name.startsWith("0038_"),
     ),
   );
   try {
@@ -457,6 +470,7 @@ test("migrations 0026, 0028 and 0036 apply on the earlier schema with existing r
     await applyMigration(db, "0028_parse_releases.sql");
     // 0036 guards the event history; it must apply on top of a backfilled 0026.
     await applyMigration(db, "0036_publication_event_guard.sql");
+    await applyMigration(db, "0038_source_revision.sql");
     const projection = (
       await db
         .prepare("SELECT parse_run_id FROM published_parse_runs ORDER BY parse_run_id")

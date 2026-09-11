@@ -25,7 +25,10 @@ test("current identities select keyed eligible run winners before observation fa
         file.startsWith("0022_") ||
         file.startsWith("0026_") ||
         file.startsWith("0028_") ||
-        file.startsWith("0036_")
+        file.startsWith("0036_") ||
+        // 0038 puts revision triggers on 0026's tables; the identity view this
+        // fixture measures does not depend on it either way.
+        file.startsWith("0038_")
       )
         continue;
       db.exec(readFileSync(new URL(file, dir), "utf8"));

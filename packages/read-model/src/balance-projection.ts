@@ -33,6 +33,7 @@ import {
   type TemporalValue,
 } from "../../domain/src/time.ts";
 import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
+import { canonicalDigest } from "../../domain/src/context.ts";
 import { AUTHORITY_POLICY_RELEASE } from "./authority";
 import type { MeasureView } from "./scope";
 
@@ -650,4 +651,23 @@ export function projectionInputManifest(inputs: ProjectionInputs): ProjectionInp
     authorityPolicyRelease: AUTHORITY_POLICY_RELEASE,
     scopeRelationRelease: SCOPE_RELATION_RELEASE,
   };
+}
+
+/**
+ * The build's own identity: the releases and bounds that decide what the
+ * captured input becomes. It is the second half of
+ * `snapshotId = sha256(inputContentDigest ‖ projectionBuildDigest ‖ contractVersion)`
+ * (05 §4), so a code change that would produce different rows from the same
+ * input produces a different snapshot instead of overwriting the old one.
+ */
+export async function projectionBuildDigest(): Promise<string> {
+  return await canonicalDigest({
+    projectionRelease: BALANCE_PROJECTION_RELEASE,
+    metricRegistryRelease: METRIC_REGISTRY_RELEASE,
+    authorityPolicyRelease: AUTHORITY_POLICY_RELEASE,
+    scopeRelationRelease: SCOPE_RELATION_RELEASE,
+    disjointnessPolicy: DISJOINT_ACCOUNTS_POLICY,
+    knownAssetsPolicy: KNOWN_ASSETS_POLICY,
+    adoptionSubjectBound: ADOPTION_SUBJECT_BOUND,
+  });
 }

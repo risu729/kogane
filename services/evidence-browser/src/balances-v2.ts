@@ -26,13 +26,10 @@ import { metricById, resolveMetric, UNKNOWN_METRIC } from "../../../packages/dom
 import {
   createBalanceProjectionReader,
   d1Executor,
-  DECIMAL_POLICY_RELEASE,
   DEFAULT_PROJECTION_PAGE_LIMIT,
   KNOWN_ASSETS_POLICY,
-  LATEST_IDENTITY_RELEASE,
   knownAssetMetricIds,
   PROJECTION_PAGE_LIMITS,
-  projectionInputManifest,
   temporalReferenceFor,
   type BalanceProjectionReader,
   type BalanceSnapshotRow,
@@ -273,32 +270,30 @@ function highWaterOf(snapshot: BalanceSnapshotRow): number {
 /**
  * Whether the snapshot still describes the store's current inputs.
  *
- * The comparison is the snapshot id itself, which is the digest of every
- * declared input: a new publication, a run leaving the visible set, and an
- * accepted decision all change it. That last one matters here — a decision
- * changes which scopes overlap without publishing anything, and a snapshot
- * built before it is wrong in a way no parse-run high-water can show.
+ * Since migration 0038 the comparison is the CORE revision, not a digest of
+ * counts: the revision is bumped inside the same transaction as every write
+ * the projection depends on, so a publication, a run leaving the visible set
+ * and an accepted decision all move it — including the decision, which changes
+ * which scopes overlap without publishing anything and which no parse-run
+ * high-water can show. The active pointer carries the revision the published
+ * snapshot was last verified against, so "current" is one integer comparison.
  *
  * A snapshot that is behind is still a valid fixed context to page; the page
- * says so instead of presenting itself as the current state.
+ * says so instead of presenting itself as the current state. A snapshot that
+ * is not the published one, or a database with no pointer yet, is behind by
+ * definition rather than by assumption.
  */
 async function snapshotBehind(
   reader: BalanceProjectionReader,
   snapshot: BalanceSnapshotRow,
 ): Promise<boolean> {
-  const row = await reader.projectionInputs();
-  const current = await canonicalDigest(
-    projectionInputManifest({
-      publishedHighWaterParseRunId: row.published_high_water,
-      visibleFetchRunCount: row.visible_runs,
-      visibleFetchRunHighWater: row.visible_high_water,
-      adoptedRelationCount: row.adopted_relations,
-      decisionRevisionCount: row.decision_revisions,
-      identityRelease: LATEST_IDENTITY_RELEASE,
-      decimalPolicyRelease: DECIMAL_POLICY_RELEASE,
-    }),
+  const [pointer, revision] = await Promise.all([reader.activePointer(), reader.coreRevision()]);
+  return (
+    pointer === null ||
+    pointer.snapshot_id !== snapshot.snapshot_id ||
+    pointer.source_revision !== revision.source_revision ||
+    pointer.core_epoch !== revision.core_epoch
   );
-  return current !== snapshot.snapshot_id;
 }
 
 async function dataCoverage(

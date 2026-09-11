@@ -79,27 +79,38 @@ export async function startPipeline(
       script: await bundle.outputs[0]!.text(),
       compatibilityDate: "2026-09-07",
       d1Databases: ["DB"],
-      r2Buckets: ["EVIDENCE"],
+      // DATA is the shared collection bucket of plan 03 §1; in production it
+      // is the same physical bucket as EVIDENCE, and the fixed projection
+      // inputs of migration 0038 are written through it.
+      r2Buckets: ["EVIDENCE", "DATA"],
       bindings: vars,
     }),
   );
   const db = await mf.getD1Database("DB");
   const bucket = await mf.getR2Bucket("EVIDENCE");
+  const data = await mf.getR2Bucket("DATA");
   await db.exec(LAYER_A_SQL);
   for (const name of migrations) await applyMigration(db, name);
   // Miniflare and generated Workers types use distinct platform declarations;
   // validate the runtime proxy at this test boundary instead of double casts.
-  const bindings: unknown = { DB: db, EVIDENCE: bucket, ...vars };
+  const bindings: unknown = { DB: db, EVIDENCE: bucket, DATA: data, ...vars };
   assertBindings(bindings);
   return { mf, env: bindings };
 }
 
 function assertBindings(value: unknown): asserts value is Env {
-  if (!value || typeof value !== "object" || !("DB" in value) || !("EVIDENCE" in value))
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("DB" in value) ||
+    !("EVIDENCE" in value) ||
+    !("DATA" in value)
+  )
     throw new Error("bindings missing");
   for (const [binding, method] of [
     [value.DB, "prepare"],
     [value.EVIDENCE, "get"],
+    [value.DATA, "get"],
   ] as const) {
     if (!binding || typeof binding !== "object" || !(method in binding))
       throw new Error("invalid runtime binding");

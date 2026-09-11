@@ -454,7 +454,8 @@ export async function activateRelease(
             AND c.state<>'rejected' AND ${ACTIVE_FENCE}
           ON CONFLICT(fetch_artifact_id,parser_name) DO UPDATE SET parse_run_id=excluded.parse_run_id,
             parser_version=excluded.parser_version,published_at=excluded.published_at,
-            publication_kind='activation',release_id=excluded.release_id`,
+            publication_kind='activation',release_id=excluded.release_id
+          RETURNING parse_run_id`,
       )
       .bind(...scope, now),
     db
@@ -487,7 +488,10 @@ export async function activateRelease(
     releaseId: request.releaseId,
     previousReleaseId,
     changed: true,
-    pointersMoved: results[2]?.meta.changes ?? 0,
+    // Counted from the rows the pointer statement returned, not from
+    // `meta.changes`: D1 counts rows written by triggers too, and every
+    // publication now also bumps the CORE revision of migration 0038.
+    pointersMoved: results[2]?.results.length ?? 0,
     retained: 0,
   };
 }
@@ -561,7 +565,8 @@ export async function rollbackRelease(
           WHERE r.previous_run IS NOT NULL AND ${ACTIVE_FENCE}
           ON CONFLICT(fetch_artifact_id,parser_name) DO UPDATE SET parse_run_id=excluded.parse_run_id,
             parser_version=excluded.parser_version,published_at=excluded.published_at,
-            publication_kind='rollback',release_id=excluded.release_id`,
+            publication_kind='rollback',release_id=excluded.release_id
+          RETURNING parse_run_id`,
       )
       .bind(...scope, now),
     db
@@ -587,7 +592,10 @@ export async function rollbackRelease(
     releaseId: request.releaseId,
     previousReleaseId,
     changed: true,
-    pointersMoved: results[2]?.meta.changes ?? 0,
+    // Counted from the rows the pointer statement returned, not from
+    // `meta.changes`: D1 counts rows written by triggers too, and every
+    // publication now also bumps the CORE revision of migration 0038.
+    pointersMoved: results[2]?.results.length ?? 0,
     retained: retained ?? 0,
   };
 }

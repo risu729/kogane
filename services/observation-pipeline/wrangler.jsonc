@@ -25,5 +25,12 @@
       "migrations_dir": "../../packages/storage-d1/migrations/core"
     }
   ],
-  "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "kogane-raw-evidence" }]
+  // EVIDENCE and DATA are the same physical bucket: the shared collection
+  // layout (plan 03 §1) reuses the central raw-evidence bucket rather than
+  // creating a second original. DATA is the binding the fixed projection
+  // inputs of `projection-inputs/<digest>` are written through.
+  "r2_buckets": [
+    { "binding": "EVIDENCE", "bucket_name": "kogane-raw-evidence" },
+    { "binding": "DATA", "bucket_name": "kogane-raw-evidence" }
+  ]
 }

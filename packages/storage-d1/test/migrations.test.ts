@@ -49,6 +49,13 @@ const OPERATIONS_API: HistoricalSource = {
   directory: "services/raw-evidence/migrations",
 };
 
+/** 0038 was written at the old path while this move was in review (U10), and
+ * git relocated it with the rest of the directory. */
+const SOURCE_REVISION: HistoricalSource = {
+  ref: "38c7f51",
+  directory: "services/raw-evidence/migrations",
+};
+
 /** sha256 of every CORE migration as `services/raw-evidence/migrations/` held it. */
 const CORE_DIGESTS: Record<string, string> = {
   "0001_initial.sql": "0dbb5f288be06b8cadff9e37708eb35628e6dbbf7a39ee9af7686ad6c40c3aae",
@@ -110,12 +117,15 @@ const CORE_DIGESTS: Record<string, string> = {
     "0f56c0fb0ed45b9ab689725bc7a02a5fa6d1839a99cd1791227f68c1d8ac0f25",
   "0037_unit_scope_eligibility.sql":
     "9cb89c077a066a32968403169e4197582580e1af638fc97747ebda11faa82634",
+  "0038_source_revision.sql": "803f41c024792e46e259212558fa71e49b4caeb2c9e2632dbfee7e8540359b48",
   "0040_operations_api.sql": "edca64e3fc1675e463faec3b04ca90cde3ed2055269b483ee56c99f28e519002",
 };
 
 /** Which commit holds each recorded file's original bytes. */
 function sourceOf(name: string): HistoricalSource {
-  return (migrationNumber(name) ?? 0) <= 37 ? BEFORE_MOVE : OPERATIONS_API;
+  const number = migrationNumber(name) ?? 0;
+  if (number <= 37) return BEFORE_MOVE;
+  return number === 38 ? SOURCE_REVISION : OPERATIONS_API;
 }
 
 const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));

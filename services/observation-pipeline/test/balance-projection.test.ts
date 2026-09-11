@@ -6,10 +6,15 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import {
   balanceProjectionOutboxProcessor,
+  currentCoreRevision,
   currentSnapshotId,
   runBalanceProjection,
 } from "../src/balance-projection-job.ts";
-import { DEFAULT_PROCESSORS, dispatchDecisionOutbox } from "../src/decision-outbox.ts";
+import {
+  DEFAULT_PROCESSORS,
+  dispatchDecisionOutbox,
+  type OutboxRow,
+} from "../src/decision-outbox.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 
 let mf: Miniflare;
@@ -52,6 +57,19 @@ async function balance(
     .bind(parseRunId, account, metric, amountMinor, asOf, locator)
     .first<{ id: number }>();
   return row!.id;
+}
+
+/** The row the dispatcher hands a processor, with the revision it stamps. */
+async function outboxRow(): Promise<OutboxRow> {
+  return {
+    id: 1,
+    decision_revision_id: "dr_probe",
+    principal: "operator:1",
+    operation_id: "op_probe",
+    target: "balance-projection",
+    attempts: 1,
+    required_source_revision: (await currentCoreRevision(env.DB)).source_revision,
+  };
 }
 
 const count = async (sql: string, ...args: unknown[]): Promise<number> =>
@@ -230,8 +248,14 @@ test("a published decision rebuilds the projection through the outbox, once", as
   expect(afterId).not.toBe(beforeId);
 
   const processor = balanceProjectionOutboxProcessor(on());
-  const first = await processor(env.DB);
-  expect(first).toBe("balance_projection_rebuilt");
+  const row = await outboxRow();
+  const first = await processor(env.DB, row);
+  // Completed carries the evidence: the snapshot the read model publishes,
+  // not "a rebuild was started".
+  expect(first).toEqual({
+    status: "completed",
+    evidence: { code: "balance_projection_active", ref: afterId },
+  });
   expect(
     await count(
       "SELECT count(*) AS n FROM balance_read_snapshots WHERE snapshot_id=?1 AND status='complete'",
@@ -239,13 +263,22 @@ test("a published decision rebuilds the projection through the outbox, once", as
     ),
   ).toBe(1);
 
-  // Delivered again: idempotent, and it does not rebuild a second time.
+  // Delivered again: idempotent, and it does not rebuild a second time. The
+  // active pointer already covers the revision, so the second delivery answers
+  // from it without touching the projection (05 section 5).
   const snapshots = await count("SELECT count(*) AS n FROM balance_read_snapshots");
-  expect(await processor(env.DB)).toBe("balance_projection_current");
+  expect(await processor(env.DB, row)).toEqual({
+    status: "completed",
+    evidence: { code: "balance_projection_active", ref: afterId },
+  });
   expect(await count("SELECT count(*) AS n FROM balance_read_snapshots")).toBe(snapshots);
 
-  // With the reader flag off the processor writes nothing and says so.
-  expect(await balanceProjectionOutboxProcessor(off())(env.DB)).toBe("skipped_no_projection");
+  // With the flag off nothing is written and nothing is completed: the row
+  // stays open, because no read model was updated (05 section 6).
+  expect(await balanceProjectionOutboxProcessor(off())(env.DB, row)).toEqual({
+    status: "pending",
+    progress: "projection_flag_off",
+  });
 }, 60000);
 
 test("the dispatcher routes the balance-projection target to that processor", async () => {
@@ -290,7 +323,7 @@ test("the dispatcher routes the balance-projection target to that processor", as
   expect(result.claimed).toBe(1);
   expect(result.processed).toBe(1);
   expect(result.failed).toBe(0);
-  expect(Object.keys(result.outcomes)).toEqual(["balance_projection_rebuilt"]);
+  expect(Object.keys(result.outcomes)).toEqual(["balance_projection_active"]);
   // The operation's only row is processed, so the receipt is published: the
   // judgement was accepted long before every screen was current.
   expect(result.published).toBe(1);
@@ -302,8 +335,8 @@ test("the dispatcher routes the balance-projection target to that processor", as
 
   // Nothing stands in for A07 by default: the target has no entry in
   // `DEFAULT_PROCESSORS`, so a caller that forgets to hand the real processor
-  // in closes the row as an honest `skipped_no_consumer` rather than a
-  // placeholder outcome that never touched the projection.
+  // in leaves the row blocked rather than closing it with a placeholder
+  // outcome that never touched the projection (05 section 6).
   expect(DEFAULT_PROCESSORS["balance-projection"]).toBeUndefined();
   await env.DB.batch([
     env.DB.prepare(
@@ -320,5 +353,12 @@ test("the dispatcher routes the balance-projection target to that processor", as
   ]);
   const unowned = await dispatchDecisionOutbox(env.DB);
   expect(unowned.claimed).toBe(1);
-  expect(unowned.outcomes).toEqual({ skipped_no_consumer: 1 });
+  expect(unowned.blocked).toBe(1);
+  expect(unowned.processed).toBe(0);
+  expect(unowned.outcomes).toEqual({ "blocked:no_processor": 1 });
+  expect(
+    await count(
+      "SELECT count(*) AS n FROM decision_outbox WHERE decision_revision_id='dr_outbox_3' AND processed_at IS NULL AND blocked_code='no_processor'",
+    ),
+  ).toBe(1);
 }, 60000);
