@@ -128,7 +128,9 @@ manifest grows a `scripts` field, or if any tracked file calls a package script.
   guard, the publication-gate predicate allow-list, and the import boundaries of
   [package layout](package-layout.md) (no deployed or shared module may import
   `poc/`; the PoC web UI may not import a service internal or read-model SQL).
-  It also runs the two PoC tests that belong to no workspace.
+  It also runs the [infrastructure ledgers](infra-ledgers.md) (a wrangler
+  config or a CORE migration that changes without its committed ledger fails
+  here) and the two PoC tests that belong to no workspace.
 - The workspace matrix runs each `ci:<short>`: type generation, `tsc --noEmit`,
   the tests, and the build steps the workspace needs. The two container
   packages use frozen npm installs without install scripts; the OCI probe
@@ -155,7 +157,7 @@ telemetry; installation still downloads pinned dependencies and tools.
 | `Lint`                      | `mise run check --lint`, then `mise run ci:root`                                                                                                                          |
 | `Plan`                      | emits the workspace matrix from `mise tasks ls --json` (every name starting with `ci:`) and the Worker matrix from `infra/workers-ci.json`; fails if either list is empty |
 | `Workspace (<short>)`       | `mise run "ci:<short>"`                                                                                                                                                   |
-| `Worker (<name>)`           | the entry's `prepare` task (frozen `install` by default), then the shared Wrangler action in `dry-run` mode                                                                                                         |
+| `Worker (<name>)`           | the entry's `prepare` task (frozen `install` by default), then the shared Wrangler action in `dry-run` mode                                                               |
 | `CI Check`                  | `if: always()`, fails unless every needed result is exactly `success`                                                                                                     |
 | `Generate Actions Timeline` | run summary                                                                                                                                                               |
 

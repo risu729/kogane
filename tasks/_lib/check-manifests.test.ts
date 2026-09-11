@@ -146,9 +146,7 @@ describe("the CI worker ledger (G4-09, G5-09)", () => {
         prepare: "web:build-nothing",
       },
     ];
-    expect(
-      ledgerMismatches(["services/app/wrangler.jsonc"], workers, ["web:build"]),
-    ).toEqual([
+    expect(ledgerMismatches(["services/app/wrangler.jsonc"], workers, ["web:build"])).toEqual([
       'infra/workers-ci.json: app names the prepare task "web:build-nothing", which does not exist',
     ]);
   });
