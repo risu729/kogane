@@ -82,6 +82,7 @@ Deployed code never imports them.
 Their code is no longer on `main`; the result, the commit that carried it and
 how to read it back are in [`docs/research/`](docs/research/).
 
+- [SBI証券 Bitwarden CLI passkey overlay](docs/research/sbi-securities.md)
 - [OCI/WSL Vpass browser comparison](docs/research/oci-browser.md)
 - [Camoufox Windows/macOS fingerprint controls](docs/research/camoufox.md)
 - [Kameleo Windows Chrome container control](docs/research/kameleo.md)

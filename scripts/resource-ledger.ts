@@ -163,15 +163,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/sbi-securities": {
-    source: "poc_disposition.csv",
-    proposedAction: "classify-before-delete",
-    proposedTarget: "docs/research/sbi-securities.md; services/collector-sbi-securities",
-    requiredVerification:
-      "check the overlap with the worker version; diagnostics to API/source, finished research to docs, no new operational CLI",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
   "poc/sbi-securities-worker": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",
@@ -330,6 +321,15 @@ export const COMPLETED_DISPOSITIONS: readonly CompletedDisposition[] = [
     lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
     liveResourceCheck:
       "no wrangler config of its own; it is a library every collector Worker on the account links into its bundle, so it is promoted rather than retired",
+  },
+  {
+    source: "poc/sbi-securities",
+    proposedAction: "classify-before-delete",
+    result:
+      "docs/research/sbi-securities.md (code removed; no operational CLI added to the collector)",
+    lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+    liveResourceCheck:
+      "no wrangler config, Worker, bucket or cron; a local overlay on an external checkout, superseded by poc/sbi-securities-worker (kogane-sbi-collector-poc), which reimplements the same read-only paths without mnie",
   },
   {
     source: "poc/oci-browser-probe",
