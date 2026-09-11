@@ -28,8 +28,16 @@ export interface R2ObjectBodyLike extends R2ObjectLike {
   arrayBuffer(): Promise<ArrayBuffer>;
 }
 
-/** Bytes a caller may hand to `put`/`uploadPart`; a subset of the R2 value union. */
+/** Bytes a caller may hand to `put`; a subset of the R2 value union. */
 export type R2PutValueLike = ArrayBuffer | ArrayBufferView | string | null;
+
+/**
+ * Bytes a caller may hand to `uploadPart`. Deliberately narrower than
+ * {@link R2PutValueLike}: the Workers `R2MultipartUpload.uploadPart` has no
+ * null form, so keeping null here would make a real `R2Bucket` unassignable to
+ * `R2BucketLike` — the one thing this interface exists to allow.
+ */
+export type R2PartValueLike = ArrayBuffer | ArrayBufferView | string;
 
 export interface R2ConditionalLike {
   readonly etagMatches?: string | undefined;
@@ -67,7 +75,7 @@ export interface R2UploadedPartLike {
 export interface R2MultipartUploadLike {
   readonly key: string;
   readonly uploadId: string;
-  uploadPart(partNumber: number, value: R2PutValueLike): Promise<R2UploadedPartLike>;
+  uploadPart(partNumber: number, value: R2PartValueLike): Promise<R2UploadedPartLike>;
   complete(uploadedParts: R2UploadedPartLike[]): Promise<R2ObjectLike>;
   abort(): Promise<void>;
 }

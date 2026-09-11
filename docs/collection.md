@@ -164,3 +164,113 @@ email handler, manual upload) can use it unchanged.
    short-lived Container with only source-scoped credentials; see
    `docs/authenticated-collectors.md` and `docs/credentials.md`. Sources that
    rarely change can stay manual forever.
+
+## Shared DATA R2 switchover, per source (U09)
+
+Unified plan work item **U09** (chapter 03, decisions D7/D12/D13). Each
+collector gains one var and one binding:
+
+| Name                | Value                                                  |
+| ------------------- | ------------------------------------------------------ |
+| `COLLECTION_TARGET` | `legacy` (default) or `shared`                         |
+| `DATA`              | R2 binding to the central bucket `kogane-raw-evidence` |
+
+`legacy` is the deployed path, byte for byte: sanitized artifacts and the
+collector manifest into the per-source bucket, then the central importer over
+the Service Binding. Only the exact string `shared` switches a collector to
+`packages/collection`: the same sanitized bytes, content-addressed under
+`objects/<2 hex>/<sha256>`, and the run's `terminal-v1` manifest written last
+to `runs/<source>/<runId>/terminal.json`. In `shared` mode the collector makes
+no importer call and writes nothing to its per-source bucket, so an object is
+never copied between buckets (G1-15). The legacy buckets stay readable; nothing
+is deleted or migrated by this change (03 §7).
+
+What the switch never touches: the Worker name, its cron, its Email route, its
+Durable Object classes and migration tags, its per-source secrets and its
+per-source bucket bindings (G5-15). A source keeps exactly one scheduler, so
+there is no second cron and no double provider access during the switch
+(G3-14).
+
+**Deploy order** (11 §4, G5-14) — the consumer before the producer:
+
+1. Deploy the Processor's terminal consumer (U08) with
+   `SHARED_R2_INGEST_ENABLED` on, so a terminal can be read before one exists.
+2. Then set `COLLECTION_TARGET=shared` on one collector and watch that source's
+   runs.
+3. Repeat per source. A source whose Processor path is not yet enabled stays on
+   `legacy`.
+
+**Rollback**: set `COLLECTION_TARGET` back to `legacy` (or unset it) and
+redeploy that collector. Terminals already written stay valid and are still
+picked up by the Processor's bounded `runs/` scan; the legacy path resumes
+writing to the per-source bucket and the importer. No schema or data migration
+is involved either way.
+
+**What a terminal does not claim**: `providerOutcome` stays `partial` when the
+acquisition was partial, and a `failed` run with zero artifacts stays a failure
+rather than an observation of zero (G1-08, G1-09). A run whose objects could
+not all be written produces no terminal at all and is not reported as stored
+(G1-01, G1-03); the failure is a machine code in the log, never provider text
+(12 §6).
+
+### `v-point` (`services/collector-vpoint`)
+
+| Artifact key                 | Role                | Bytes                                                   |
+| ---------------------------- | ------------------- | ------------------------------------------------------- |
+| `balance-info.json`          | `collector_derived` | the API response text, transport-decoded and re-encoded |
+| `smfg-point.json`            | `collector_derived` | same                                                    |
+| `history-page-NNNN.json`     | `collector_derived` | one history page each, in page order                    |
+| `vmoney-history-page-*.json` | `collector_derived` | one V Money history page each                           |
+| `collection-summary.json`    | `collector_summary` | the collector's own page/total counts                   |
+
+Sanitizer: the collector never stores a request, a header or a cookie — it
+stores the decoded JSON response text it already writes to the legacy bucket
+today, and those are the bytes the importer forwards to the central store. The
+session cookie lives in the `VPointSession` Durable Object and appears in no
+artifact. The collector manifest itself is _not_ stored as an artifact in
+shared mode: the terminal is the run record, so `manifest.json` (role
+`collector_manifest` centrally) has no shared-mode equivalent.
+
+Terminal: `source: v-point`, `producer: collector-vpoint`, `producerVersion:
+COLLECTOR_SCHEMA_VERSION` (`vpoint-worker-poc-v2`), `runId` the collector's own
+run UUID, `attemptId: attempt-<runId>`, `requestedScope: full_snapshot` over
+unit `account`, one unit (`account`/`collection`) whose `artifactCount` is the
+stored artifact count, `providerOutcome` from the run status, `coverageStatus`
+`complete`/`partial`/`unknown` for `success`/`partial`/`failed`, and
+`safeErrorCode` from the run's first safe failure code (`collector_failed` when
+a failure carried none). `ranges`, `reports` and `transformations` are empty.
+
+Not carried over to shared mode: the V Point Pay email reconciliation report.
+It is built by listing the legacy `raw/v-point-pay-email/` prefix, and in
+shared mode those notifications are content-addressed runs that no prefix
+enumerates — a report built from the legacy bucket alone would silently
+under-count them. Cross-source reconciliation belongs to the Processor, which
+reads terminals (03 §4). In `legacy` mode it is produced exactly as before.
+
+### `v-point-pay-email` (Email route of `services/collector-vpoint`)
+
+| Artifact key            | Role                | Bytes                                          |
+| ----------------------- | ------------------- | ---------------------------------------------- |
+| `notification.eml`      | `user_capture`      | the notification message exactly as it arrived |
+| `normalized-event.json` | `collector_derived` | the parsed event with its source provenance    |
+
+Sanitizer: the existing email handling is unchanged — the envelope recipient
+must match `VPOINT_PAY_EMAIL_RECIPIENT`, a directly delivered message must come
+from the V Point Pay sender, and the stored event records
+`sourceVerification: source_unverified` because the Email event exposes no
+trusted SPF/DKIM result. The V Point _login code_ mail is never stored in
+either mode: it is parsed for the code and dropped.
+
+Terminal: `source: v-point-pay-email`, `runId` the SHA-256 of the stored
+message, `attemptId: message-<that digest>`, run window the message's own date,
+`providerOutcome: success`, `coverageStatus: complete`, one unit
+(`notification`/`message`), and one transformation (`extracted`,
+`vpoint-pay-email-parser`) from `notification.eml` to `normalized-event.json`.
+Every field is derived from the message, so a redelivery produces the same
+terminal digest and is answered `already_persisted` — the shared-target
+equivalent of the legacy duplicate check.
+
+`acquisitionSessionRef` is `email-<sha256 of the message as it arrived>` on the
+notification run, and the same value on the V Point run that the same delivered
+mail triggers through the email-code path. One session, two sources, two runs,
+neither merged into the other (G1-16, 03 §3).

@@ -1503,7 +1503,7 @@
         "requiredVerification": "keep the Email route and the DO class/tag/storage",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-vpoint-collector-poc; buckets=kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-vpoint-collector-poc; buckets=kogane-raw-evidence,kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)"
       },
       "workers": [
         {
@@ -1526,6 +1526,11 @@
             {
               "binding": "VPOINT_PAY_SNAPSHOTS",
               "bucket": "kogane-vpoint-pay-collector-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -1554,6 +1559,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION",
             "VPOINT_PAY_EMAIL_RECIPIENT"
           ],
@@ -2141,7 +2147,8 @@
           "kogane-evidence-browser",
           "kogane-ingest",
           "kogane-observation-pipeline",
-          "kogane-observation-read-diagnostic"
+          "kogane-observation-read-diagnostic",
+          "kogane-vpoint-collector-poc"
         ]
       },
       {
