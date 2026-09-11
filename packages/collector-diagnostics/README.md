@@ -17,21 +17,19 @@ Source and stage names, error types and domain error codes use explicit allowlis
 
 ## Consumers
 
-Every consumer is a collector Worker; nothing in `services/` or `apps/` uses it.
+Every consumer is a collector Worker; nothing in `services/app`, `services/processor` or `apps/` uses it.
 
-| consumer                          | uses                                    |
-| --------------------------------- | --------------------------------------- |
-| `poc/globalpass-worker`           | `createDiagnostics`, `safeErrorDetails` |
-| `poc/mobile-suica-worker`         | `createDiagnostics`, `safeErrorDetails` |
-| `poc/myjcb-worker`                | `createDiagnostics`, `safeErrorDetails` |
-| `poc/sbi-securities-worker`       | `createDiagnostics`, `safeErrorDetails` |
-| `poc/sbi-vc-trade-worker`         | `createDiagnostics`                     |
-| `poc/smbc-direct-backfill-worker` | `createDiagnostics`                     |
-| `poc/vpass-json`                  | `createDiagnostics`, `safeErrorDetails` |
+| consumer                            | uses                                    |
+| ----------------------------------- | --------------------------------------- |
+| `services/collector-globalpass`     | `createDiagnostics`, `safeErrorDetails` |
+| `services/collector-mobile-suica`   | `createDiagnostics`, `safeErrorDetails` |
+| `services/collector-myjcb`          | `createDiagnostics`, `safeErrorDetails` |
+| `services/collector-sbi-securities` | `createDiagnostics`, `safeErrorDetails` |
+| `services/collector-sbi-vc-trade`   | `createDiagnostics`                     |
+| `services/collector-smbc-direct`    | `createDiagnostics`                     |
+| `services/collector-vpass`          | `createDiagnostics`, `safeErrorDetails` |
 
 The API also supports PRESTIA GLOBAL PASS stages that the GLOBAL PASS Worker does not emit yet. Collectors outside this repository are not covered.
-
-The consumer directories move to `services/collector-<source>` as the plan's promote-service rows are executed; because they import this package by a repository-relative path from `<workspace>/src` or `<workspace>/test`, the specifier is the same before and after that move.
 
 ## Boundaries
 

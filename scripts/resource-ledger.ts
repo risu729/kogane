@@ -12,8 +12,9 @@
 //
 // The live column comes from a read of the Cloudflare account on 2026-09-11;
 // it is recorded here as data, not fetched, so the check stays offline.
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJsonc } from "./jsonc.ts";
 
@@ -98,10 +99,16 @@ export interface Disposition {
  * importer is absorbed by the Processor in U08 and its Worker keeps running
  * until U15).
  *
- * A key is the directory as it exists *now*: an executed move re-keys its row
- * to the new path and says so in `source`, and an executed retirement leaves
- * this map for `COMPLETED_DISPOSITIONS` below. The map is asserted to list
- * exactly the directories on disk, so neither can be forgotten.
+ * A directory that has been promoted keeps its row under the new key with
+ * `executionStatus: "EXECUTED_U04"`: the plan's proposal and what was actually
+ * done stay next to each other, and the key follows the directory because the
+ * ledger reads `experiments/`, `services/` and `poc/` from disk. A directory
+ * that leaves all three — `poc/collector-diagnostics` and
+ * `poc/sbi-vc-trade-client` went to `packages/`, and the finished experiments
+ * went to `docs/research/` with their code removed — leaves this map too, and
+ * is recorded in `COMPLETED_DISPOSITIONS` below instead. Without that second
+ * list, "retired on purpose" and "never had a plan row" would be
+ * indistinguishable a month later.
  */
 export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
   "experiments/cloudflare-browser-run": {
@@ -111,7 +118,7 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
       "experiments/cloudflare-browser-run (isolated; promote only on a real consumer)",
     requiredVerification:
       "classified as isolate: no services/, packages/, wrangler config, task or asset outside the directory references it",
-    executionStatus: "EXECUTED (U04; EXPERIMENT.md owner risu729, expiry 2026-12-31)",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "experiments/cloudflare-runtime-probe": {
@@ -119,39 +126,7 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     proposedAction: "isolate",
     proposedTarget: "experiments/cloudflare-runtime-probe",
     requiredVerification: "purpose and stop condition recorded in EXPERIMENT.md",
-    executionStatus: "EXECUTED (U04; EXPERIMENT.md owner risu729, expiry 2026-12-31)",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/globalpass-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-globalpass",
-    requiredVerification: "keep Container, relay, browser diagnostics and resource identity",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/mobile-suica-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-mobile-suica",
-    requiredVerification: "contract tests, live/secret/resource mapping confirmed",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/moneyforward-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-moneyforward",
-    requiredVerification: "collector/importer/CORE mapping and resource identity kept",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/myjcb-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-myjcb",
-    requiredVerification: "keep the Browser Run login and fetch boundary",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "poc/observation-pipeline": {
@@ -160,55 +135,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     proposedTarget: "apps/web; packages/application; tests/fixtures; docs/research",
     requiredVerification:
       "promote UI and fixtures, move needed local operations to the App API, legacy store to test/research, drop the shims",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/sbi-securities-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-sbi-securities",
-    requiredVerification: "contract tests and resource identity; secret material is not moved",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/sbi-shinsei-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-sbi-shinsei",
-    requiredVerification: "keep the container/relay/credential operation contract",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/sbi-vc-trade-client": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-shared-if-used",
-    proposedTarget: "packages/sbi-vc-trade-client",
-    requiredVerification: "confirm whether a product consumer and its dependencies exist",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/sbi-vc-trade-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-sbi-vc-trade",
-    requiredVerification: "keep the client dependency and the resource identity",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/smbc-direct-backfill-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-smbc-direct",
-    requiredVerification:
-      "keep the human-required boundary; never turn it into unattended re-authentication",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/sony-bank-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-sony-bank",
-    requiredVerification: "keep the sanitize/HTML/CSV contract and the resource identity",
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
@@ -221,28 +147,36 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/vpass-json": {
+  "services/collector-globalpass": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",
-    proposedTarget: "services/collector-vpass",
-    requiredVerification: "keep the Worker name and the R2/cron/auth contract",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+    proposedTarget: "services/collector-globalpass",
+    requiredVerification: "keep Container, relay, browser diagnostics and resource identity",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/vpoint-pay-worker": {
+  "services/collector-mobile-suica": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",
-    proposedTarget: "services/collector-vpoint-pay",
-    requiredVerification: "confirm the Email/collection entry point and the resource identity",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+    proposedTarget: "services/collector-mobile-suica",
+    requiredVerification: "contract tests, live/secret/resource mapping confirmed",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/vpoint-worker": {
+  "services/collector-moneyforward": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",
-    proposedTarget: "services/collector-vpoint",
-    requiredVerification: "keep the Email route and the DO class/tag/storage",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+    proposedTarget: "services/collector-moneyforward",
+    requiredVerification: "collector/importer/CORE mapping and resource identity kept",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-myjcb": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-myjcb",
+    requiredVerification: "keep the Browser Run login and fetch boundary",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "services/collector-r2-importer": {
@@ -252,6 +186,71 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     requiredVerification:
       "the Worker keeps running until U15; old protocol still readable; no double cron",
     executionStatus: "PLANNED_NOT_EXECUTED",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-sbi-securities": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-sbi-securities",
+    requiredVerification: "contract tests and resource identity; secret material is not moved",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-sbi-shinsei": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-sbi-shinsei",
+    requiredVerification: "keep the container/relay/credential operation contract",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-sbi-vc-trade": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-sbi-vc-trade",
+    requiredVerification: "keep the client dependency and the resource identity",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-smbc-direct": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-smbc-direct",
+    requiredVerification:
+      "keep the human-required boundary; never turn it into unattended re-authentication",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-sony-bank": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-sony-bank",
+    requiredVerification: "keep the sanitize/HTML/CSV contract and the resource identity",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-vpass": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-vpass",
+    requiredVerification: "keep the Worker name and the R2/cron/auth contract",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-vpoint": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-vpoint",
+    requiredVerification: "keep the Email route and the DO class/tag/storage",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-vpoint-pay": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-vpoint-pay",
+    requiredVerification: "confirm the Email/collection entry point and the resource identity",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "services/evidence-browser": {
@@ -294,12 +293,11 @@ export interface CompletedDisposition {
 }
 
 /**
- * Plan rows this repository has already executed.
+ * Plan rows whose directory has left `DISPOSITIONS` entirely.
  *
- * `DISPOSITIONS` is asserted to describe exactly the directories that exist, so
- * a row has to leave it the moment its directory is retired or moved. Without
- * this second list, "retired on purpose, result in `docs/research/`" and "never
- * had a plan row" would be indistinguishable a month later. Each entry records
+ * `DISPOSITIONS` is asserted to describe exactly the directories that exist
+ * under the scanned workspaces, so a row has to leave it the moment its
+ * directory is retired or promoted into `packages/`. Each entry here records
  * the live-resource check that allowed the row to be executed, because no
  * directory may be retired for the sole reason that nothing imports it
  * (acceptance test G0-12).
@@ -323,13 +321,12 @@ export const COMPLETED_DISPOSITIONS: readonly CompletedDisposition[] = [
       "no wrangler config of its own; it is a library every collector Worker on the account links into its bundle, so it is promoted rather than retired",
   },
   {
-    source: "poc/sbi-securities",
-    proposedAction: "classify-before-delete",
-    result:
-      "docs/research/sbi-securities.md (code removed; no operational CLI added to the collector)",
+    source: "poc/kameleo-container-probe",
+    proposedAction: "retire-candidate",
+    result: "docs/research/kameleo.md (code removed)",
     lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
     liveResourceCheck:
-      "no wrangler config, Worker, bucket or cron; a local overlay on an external checkout, superseded by poc/sbi-securities-worker (kogane-sbi-collector-poc), which reimplements the same read-only paths without mnie",
+      "no wrangler config, no Worker, no bucket, no cron; local container, volume and image deleted 2026-08-26",
   },
   {
     source: "poc/oci-browser-probe",
@@ -341,12 +338,21 @@ export const COMPLETED_DISPOSITIONS: readonly CompletedDisposition[] = [
       "retire branch: no wrangler config, no Worker and no OCI relay — the only collector relay is the pre-existing tamia Tunnel (GLOBAL PASS, exit JP/KIX ASN 18144); the probe's own install on host bots was purged and verified on 2026-08-26",
   },
   {
-    source: "poc/kameleo-container-probe",
-    proposedAction: "retire-candidate",
-    result: "docs/research/kameleo.md (code removed)",
+    source: "poc/sbi-securities",
+    proposedAction: "classify-before-delete",
+    result:
+      "docs/research/sbi-securities.md (code removed; no operational CLI added to the collector)",
     lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
     liveResourceCheck:
-      "no wrangler config, no Worker, no bucket, no cron; local container, volume and image deleted 2026-08-26",
+      "no wrangler config, Worker, bucket or cron; a local overlay on an external checkout, superseded by services/collector-sbi-securities (kogane-sbi-collector-poc), which reimplements the same read-only paths without mnie",
+  },
+  {
+    source: "poc/sbi-vc-trade-client",
+    proposedAction: "promote-shared-if-used",
+    result: "packages/sbi-vc-trade-client",
+    lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+    liveResourceCheck:
+      "no wrangler config of its own; services/collector-sbi-vc-trade links it into the bundle of kogane-sbi-vc-session-poc, so it is promoted rather than retired",
   },
 ];
 
@@ -809,7 +815,7 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
   lines.push("# Runtime resource ledger");
   lines.push("");
   lines.push(
-    "Generated from the `wrangler*.jsonc` files under `services/` and `poc/` by",
+    "Generated from the `wrangler*.jsonc` files under `experiments/`, `services/` and `poc/` by",
     "`scripts/resource-ledger.ts`. Do not edit by hand: `scripts/resource-ledger.test.ts`",
     "regenerates it and fails when this file and the configs disagree.",
   );
@@ -888,13 +894,14 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
     lines.push(`| ${cell(entry.worker)} | \`${entry.cron}\` | ${entry.live ? "yes" : "no"} |`);
   lines.push("");
 
-  lines.push("## Executed plan rows");
+  lines.push("## Executed plan rows that left the table");
   lines.push("");
   lines.push(
-    "Directories the plan's dispositions have already retired or moved. They are listed here",
-    "because they are no longer in the table below; the commit column is what `git show` needs to",
-    "read the removed code back (acceptance test G0-12: none of these was retired merely because",
-    "nothing imported it).",
+    "Directories the plan's dispositions retired, or promoted into `packages/`, where no runtime",
+    "resource is declared. They are listed here because they are no longer in the table below; the",
+    "commit column is what `git show` needs to read removed code back (acceptance test G0-12: none",
+    "of these was retired merely because nothing imported it). A directory promoted *within* the",
+    "scanned workspaces keeps its row below with `EXECUTED_U04`.",
   );
   lines.push("");
   lines.push("| was | action | result | last commit | live-resource check |");
@@ -980,6 +987,96 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
     }
   }
   return `${lines.join("\n").trimEnd()}\n`;
+}
+
+/**
+ * One canonical line per Wrangler config naming every runtime identity it
+ * declares, plus the SHA-256 of the config file's bytes.
+ *
+ * A directory move changes the ledger's `directory` and `config` keys by
+ * design, so the ledger itself cannot answer "did this move rename a
+ * resource?". These lines deliberately drop both paths and keep only what
+ * Cloudflare addresses — Worker name, cron, Queue, R2 bucket, D1 id, Durable
+ * Object class and migration tag, container class, browser/VPC/service
+ * bindings, var and secret *names* — so the set of lines is invariant under a
+ * `git mv`. The digest closes the gap the ledger's name-only fields leave
+ * (`vars` values, DO migration ordering, anything a future key adds): a
+ * promotion that edits a config at all shows up here.
+ *
+ * `scripts/resource-ledger.test.ts` compares them against the frozen set
+ * captured before the U04 promotions (acceptance G0-06, G0-07, G5-15).
+ */
+export function resourceIdentityLines(ledger: ResourceLedger, root = REPO_ROOT): string[] {
+  const list = (entries: readonly string[]): string =>
+    entries.length === 0 ? "-" : entries.join(",");
+  return ledger.directories
+    .flatMap((entry) => entry.workers)
+    .map((worker) => {
+      const digest = createHash("sha256")
+        .update(readFileSync(join(root, worker.config)))
+        .digest("hex");
+      const migrations = worker.durableObjectMigrations.map(
+        (migration) =>
+          `${migration.tag}[${list([
+            ...migration.newSqliteClasses.map((className) => `sqlite:${className}`),
+            ...migration.newClasses.map((className) => `classic:${className}`),
+          ])}]`,
+      );
+      return [
+        worker.name,
+        `config=${basename(worker.config)}`,
+        `live=${String(worker.liveWorker)}`,
+        `role=${worker.role}`,
+        `email=${String(worker.emailHandler)}`,
+        `crons=${list(worker.crons)}`,
+        `d1=${list(
+          worker.d1.map(
+            (item) =>
+              `${item.binding}>${item.databaseName}#${item.databaseId}${
+                item.migrationsDir === undefined ? "" : `@${item.migrationsDir}`
+              }`,
+          ),
+        )}`,
+        `r2=${list(worker.r2.map((item) => `${item.binding}>${item.bucket}`))}`,
+        `kv=${list(worker.kv.map((item) => `${item.binding}#${item.id ?? "-"}`))}`,
+        `queue-producers=${list(worker.queueProducers.map((item) => `${item.binding}>${item.queue}`))}`,
+        `queue-consumers=${list(
+          worker.queueConsumers.map(
+            (item) =>
+              `${item.queue}[dlq:${item.deadLetterQueue ?? "-"},batch:${item.maxBatchSize ?? "-"},retries:${item.maxRetries ?? "-"},concurrency:${item.maxConcurrency ?? "-"}]`,
+          ),
+        )}`,
+        `do=${list(
+          worker.durableObjects.map(
+            (item) =>
+              `${item.name}>${item.className}${item.scriptName === undefined ? "" : `@${item.scriptName}`}`,
+          ),
+        )}`,
+        `do-migrations=${list(migrations)}`,
+        `do-exports=${list(
+          worker.durableObjectExports.map((item) => `${item.className}:${item.storage ?? "-"}`),
+        )}`,
+        `containers=${list(
+          worker.containers.map(
+            (item) =>
+              `${item.className}:${item.image ?? "-"}:${item.instanceType ?? "-"}:${item.maxInstances ?? "-"}`,
+          ),
+        )}`,
+        `browser=${worker.browserBinding ?? "-"}`,
+        `vpc=${list(
+          worker.vpcNetworks.map(
+            (item) =>
+              `${item.binding}>${item.tunnelId === undefined ? `network:${item.networkId ?? "-"}` : `tunnel:${item.tunnelId}`}`,
+          ),
+        )}`,
+        `services=${list(worker.serviceBindings.map((item) => `${item.binding}>${item.service}`))}`,
+        `assets=${worker.assets === undefined ? "-" : `${worker.assets.directory}>${worker.assets.binding ?? "-"}`}`,
+        `vars=${list(worker.varNames)}`,
+        `secrets=${list(worker.requiredSecretNames)}`,
+        `sha256=${digest}`,
+      ].join(" ");
+    })
+    .sort();
 }
 
 export const LEDGER_JSON_PATH = "infra/resources.json";

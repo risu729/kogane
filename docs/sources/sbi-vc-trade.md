@@ -410,7 +410,7 @@ Cloudflare Workers Web Cryptoで、上記browser assertionと同じRP ID/origin�
 
 ## 13. read-only gateway PoC
 
-[`poc/sbi-vc-trade-client`](../../poc/sbi-vc-trade-client/)に、認証済みsessionから上記4 eventだけを呼ぶローカルBun clientを追加した。
+[`packages/sbi-vc-trade-client`](../../packages/sbi-vc-trade-client/)に、認証済みsessionから上記4 eventだけを呼ぶローカルBun clientを追加した。
 
 設計上の制限:
 
@@ -498,7 +498,7 @@ login responseの属性では、`vct_bff_sid`と`__cf_bm`の`Expires`が約30分
 
 ### read-only collectorの実データ検証
 
-`poc/sbi-vc-trade-client`へCookieと`secureKey`をmode 600のtmpfs fileで渡し、次の固定allowlistだけを実行した。
+`packages/sbi-vc-trade-client`へCookieと`secureKey`をmode 600のtmpfs fileで渡し、次の固定allowlistだけを実行した。
 
 - `cashBalanceList`
 - `accountMargin`
@@ -512,7 +512,7 @@ login responseの属性では、`vct_bff_sid`と`__cf_bm`の`Expires`が約30分
 
 ## 15. Cloudflare Workers session・passkey PoC
 
-[`poc/sbi-vc-trade-worker`](../../poc/sbi-vc-trade-worker/)へ、一時Worker `kogane-sbi-vc-session-poc`を追加した。Cloudflareの有料plan上でDurable Objectと15分Cronを使う。GitHub Actionsはtriggerに使わない。
+[`services/collector-sbi-vc-trade`](../../services/collector-sbi-vc-trade/)へ、一時Worker `kogane-sbi-vc-session-poc`を追加した。Cloudflareの有料plan上でDurable Objectと15分Cronを使う。GitHub Actionsはtriggerに使わない。
 
 ### 構成
 
@@ -597,4 +597,4 @@ runがcurrent observation 0になるend-to-end regressionで固定している�
 - Cron: `*/15 * * * *`, `5 21 * * *`
 - Secrets: `SESSION_SEED`, `SESSION_ENCRYPTION_KEY`, `ADMIN_TOKEN`, `PASSKEY_CREDENTIAL`
 
-検証終了時は`poc/sbi-vc-trade-worker`から`npx wrangler delete --name kogane-sbi-vc-session-poc`でWorker、DO binding、Cron、Secretsを削除する。R2 dataが不要になったことを別途確認した後だけ、objectsとbucket `kogane-sbi-vc-trade-poc`を削除する。現時点では日次収集の継続検証のためすべて残す。
+検証終了時は`services/collector-sbi-vc-trade`から`npx wrangler delete --name kogane-sbi-vc-session-poc`でWorker、DO binding、Cron、Secretsを削除する。R2 dataが不要になったことを別途確認した後だけ、objectsとbucket `kogane-sbi-vc-trade-poc`を削除する。現時点では日次収集の継続検証のためすべて残す。

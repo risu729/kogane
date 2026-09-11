@@ -34,7 +34,7 @@
     },
     {
       "name": "globalpass-worker",
-      "path": "poc/globalpass-worker",
+      "path": "services/collector-globalpass",
       "config": "wrangler.jsonc"
     },
     {
@@ -114,17 +114,17 @@
     },
     {
       "name": "mobile-suica-worker",
-      "path": "poc/mobile-suica-worker",
+      "path": "services/collector-mobile-suica",
       "config": "wrangler.jsonc"
     },
     {
       "name": "moneyforward-worker",
-      "path": "poc/moneyforward-worker",
+      "path": "services/collector-moneyforward",
       "config": "wrangler.jsonc"
     },
     {
       "name": "myjcb-worker",
-      "path": "poc/myjcb-worker",
+      "path": "services/collector-myjcb",
       "config": "wrangler.jsonc"
     },
     {
@@ -134,27 +134,27 @@
     },
     {
       "name": "sbi-securities-worker",
-      "path": "poc/sbi-securities-worker",
+      "path": "services/collector-sbi-securities",
       "config": "wrangler.jsonc"
     },
     {
       "name": "sbi-shinsei-worker",
-      "path": "poc/sbi-shinsei-worker",
+      "path": "services/collector-sbi-shinsei",
       "config": "wrangler.jsonc"
     },
     {
       "name": "sbi-vc-trade-worker",
-      "path": "poc/sbi-vc-trade-worker",
+      "path": "services/collector-sbi-vc-trade",
       "config": "wrangler.jsonc"
     },
     {
       "name": "smbc-direct-backfill-worker",
-      "path": "poc/smbc-direct-backfill-worker",
+      "path": "services/collector-smbc-direct",
       "config": "wrangler.jsonc"
     },
     {
       "name": "sony-bank-worker",
-      "path": "poc/sony-bank-worker",
+      "path": "services/collector-sony-bank",
       "config": "wrangler.jsonc"
     },
     {
@@ -169,17 +169,17 @@
     },
     {
       "name": "vpass-json",
-      "path": "poc/vpass-json",
+      "path": "services/collector-vpass",
       "config": "wrangler.jsonc"
     },
     {
       "name": "vpoint-pay-worker",
-      "path": "poc/vpoint-pay-worker",
+      "path": "services/collector-vpoint-pay",
       "config": "wrangler.jsonc"
     },
     {
       "name": "vpoint-worker",
-      "path": "poc/vpoint-worker",
+      "path": "services/collector-vpoint",
       "config": "wrangler.jsonc"
     }
   ],

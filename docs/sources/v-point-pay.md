@@ -13,7 +13,7 @@ VポイントPayは、Vポイント/VマネーMy PageやVpassとは別のプリ�
 ブラウザやAndroidを毎回動かす必要はない。初回の正規アプリ登録からrefresh tokenと
 random device UUIDを安全に引き継げれば、標準Cloudflare Workers `fetch()`でtoken更新、
 残高取得、全利用可能月の明細取得を行える構造である。PoCは
-`poc/vpoint-pay-worker/`に実装した。
+`services/collector-vpoint-pay/`に実装した。
 
 確認したAPI:
 
@@ -78,7 +78,7 @@ balance、transactionを個別に検証する。
 
 app sessionがない期間も、公式通知メールから利用・チャージ・残高加算・利用不可eventを
 取得できる。これはapp API明細の代替正本ではなく、欠落期間を補う独立sourceとして扱う。
-`poc/vpoint-worker/`の既存Email Workerへ取り込みを追加し、原本EMLと正規化JSONを
+`services/collector-vpoint/`の既存Email Workerへ取り込みを追加し、原本EMLと正規化JSONを
 VポイントPay用private R2へ保存する。Gmail転送は原本をinline `message/rfc822`にするため、
 外側のGmail送信者ではなく内側の公式送信者を検証する必要がある。
 
@@ -97,8 +97,8 @@ reportへ追加する。matchできないeventはunknownのまま残す。
 
 ## Layer A: 通知メール evidence の中央取り込み
 
-`poc/vpoint-pay-worker`のapp pollingはPR #60で停止済みであり、この取り込みでは再有効化しない。
-現存するsourceは`poc/vpoint-worker`が保存した公式通知の二つ組だけである。
+`services/collector-vpoint-pay`のapp pollingはPR #60で停止済みであり、この取り込みでは再有効化しない。
+現存するsourceは`services/collector-vpoint`が保存した公式通知の二つ組だけである。
 
 - `raw/v-point-pay-email/{date}/{message-sha256}.eml`: EmailEventまたは転送RFC822 partから保存したInternet Message Format
 - `raw/v-point-pay-email/{date}/{message-sha256}.json`: legacy `vpoint-pay-email-event-v1`またはenvelope provenance付き`vpoint-pay-email-event-v2`正規化event
@@ -138,7 +138,7 @@ source R2へのwrite/deleteは行わない。
 cd services/collector-r2-importer
 bash scripts/audit-v-point-pay-email-r2.sh
 
-poc/vpoint-worker/scripts/backfill-vpoint-pay-email-raw-evidence.sh
+services/collector-vpoint/scripts/backfill-vpoint-pay-email-raw-evidence.sh
 ```
 
 新着メール保存後の中央取り込みはService Bindingの失敗をメール受信・Gmail転送の失敗へ

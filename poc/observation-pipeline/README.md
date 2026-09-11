@@ -5,8 +5,8 @@ artifact is ingested, parsed into typed observations by deterministic
 versioned parsers, and browsed read-only with full provenance.
 
 This PoC deliberately contains **no collector**. Authentication, anti-bot
-handling, and session management are the subject of `poc/vpass-json` and
-`poc/sbi-securities-worker`, which already write raw evidence to R2 daily.
+handling, and session management are the subject of `services/collector-vpass` and
+`services/collector-sbi-securities`, which already write raw evidence to R2 daily.
 The question here is the one nothing in the repository had yet answered:
 once the bytes exist, what turns them into observations without ever
 becoming a finished ledger?

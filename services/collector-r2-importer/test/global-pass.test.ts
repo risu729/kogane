@@ -4,7 +4,7 @@ import {
   parseGlobalPassManifest,
   sanitizeGlobalPassHtml,
 } from "../src/global-pass";
-import { sanitizeGlobalPassActivityHtml } from "../../../poc/globalpass-worker/src/sanitize";
+import { sanitizeGlobalPassActivityHtml } from "../../../services/collector-globalpass/src/sanitize";
 
 const RUN_ID = "123e4567-e89b-42d3-a456-426614174000";
 const PREFIX = `raw/prestia-globalpass/2026/09/05/${RUN_ID}/`;

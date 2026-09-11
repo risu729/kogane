@@ -76,7 +76,7 @@ package names:
 
 Notes on the rows that are not purely mechanical:
 
-- **\`@cloudflare/workers-types\` in \`poc/vpass-json\`** is the only _direct_
+- **\`@cloudflare/workers-types\` in \`services/collector-vpass\`** is the only _direct_
   dependency whose resolution moved: it is declared as \`^5.20260825.1\`, the one
   caret range in the repository, and re-resolving it picked 5.20260911.1. Every
   other direct dependency in every workspace is an exact pin and is unchanged.
@@ -86,7 +86,7 @@ Notes on the rows that are not purely mechanical:
   whatever was current on the day each package lockfile was written. A
   workspace that pins 24.3.0 keeps 24.3.0 in its own \`node_modules\` and sees
   26.4.1 only nested under \`bun-types\`.
-- **\`iconv-lite\`, \`parse5\`, \`entities\` in \`poc/vpoint-worker\`**: the old
+- **\`iconv-lite\`, \`parse5\`, \`entities\` in \`services/collector-vpoint\`**: the old
   lockfile had duplicated copies under \`whatwg-encoding\`, \`encoding-sniffer\`
   and \`htmlparser2\`; the shared graph deduplicates them onto the versions those
   parents already accept. The package's own pin (\`iconv-lite\` 0.7.0) is

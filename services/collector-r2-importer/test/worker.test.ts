@@ -4,7 +4,7 @@ import worker, {
   parseGlobalPassLegacyEmptyAllowlist,
 } from "../src/worker";
 import { ImportError } from "../src/error";
-import { backfillStoredRuns } from "../../../poc/mobile-suica-worker/src/raw-evidence";
+import { backfillStoredRuns } from "../../../services/collector-mobile-suica/src/raw-evidence";
 
 describe("collector R2 importer routes", () => {
   test("the GLOBAL PASS legacy empty allowlist is exact and bounded", () => {

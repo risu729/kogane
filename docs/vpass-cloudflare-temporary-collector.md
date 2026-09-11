@@ -51,7 +51,7 @@ GitHub Actions workflow for this collector.
 
 ## Deploy and inspect
 
-Run from `poc/vpass-json` in WSL. Secrets must be supplied through
+Run from `services/collector-vpass` in WSL. Secrets must be supplied through
 `wrangler secret put`; never place them in `.dev.vars`, shell history, or this
 repository. The two public-key secrets are base64 encodings of the exact APK
 assets so that line-ending normalization cannot change their pinned SHA-256

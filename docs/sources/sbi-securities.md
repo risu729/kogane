@@ -19,7 +19,7 @@ Koganeでは、取引機能を絶対に有効化しない。`pnsk-lab/mnie` のS
 
 ### 2026-08-27: 独立Cloudflare Worker PoC
 
-上記方針を具体化し、[`poc/sbi-securities-worker`](../../poc/sbi-securities-worker/) にWorkers専用の独立実装を追加した。Mnieをruntime dependency、submodule、設定源として再利用せず、必要なpasskey署名、SBI固有のRSA token復号、国内MTS、外国株式REST／GraphQL、メインサイトSSOのread-only部分だけを移植した。公開接続先はKogane側へhardcodeし、Mnieの「base URLを実行時変数にする」というrepo ruleは持ち込んでいない。
+上記方針を具体化し、[`services/collector-sbi-securities`](../../services/collector-sbi-securities/) にWorkers専用の独立実装を追加した。Mnieをruntime dependency、submodule、設定源として再利用せず、必要なpasskey署名、SBI固有のRSA token復号、国内MTS、外国株式REST／GraphQL、メインサイトSSOのread-only部分だけを移植した。公開接続先はKogane側へhardcodeし、Mnieの「base URLを実行時変数にする」というrepo ruleは持ち込んでいない。
 
 このPoCでは、Cloudflare secretにSBI専用passkeyの最小6項目と、token復号用の固定RSA transport鍵だけを置き、ログインID／パスワード、取引パスワード、Bitwarden item全体は置かない。access token、SID、Cookie、MTS session header、口座番号をR2や通常ログへ保存せず、データartifactとredacted manifestだけをprivate R2へ保存する。D1は使わない。実Cloudflareで外国scopeは約7秒、国内scopeは約15秒で成功したが、両方を同じinvocationで実行するとError 1102になった。
 

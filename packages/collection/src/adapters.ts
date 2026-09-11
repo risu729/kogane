@@ -123,7 +123,7 @@ function requiredIso(value: unknown, code: string): string {
 // ---------------------------------------------------------------------------
 // Vpass: the worked example.
 //
-// `poc/vpass-json` writes
+// `services/collector-vpass` writes
 //   vpass/<yyyy>/<mm>/<dd>/<runId>/<card-NNN>/snapshot.json
 //   vpass/<yyyy>/<mm>/<dd>/<runId>/<card-NNN>/manifest.json   (success)
 //   vpass/<yyyy>/<mm>/<dd>/<runId>/<card-NNN>/error.json      (failure)

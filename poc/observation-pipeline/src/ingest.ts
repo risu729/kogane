@@ -3,7 +3,7 @@
 //
 // Two paths, both converging on the same tables:
 //   * ingestRunDirectory — a collector run directory shaped like the R2
-//     layout poc/sbi-securities-worker actually writes: manifest.json
+//     layout services/collector-sbi-securities actually writes: manifest.json
 //     (schemaVersion sbi-worker-poc-v1) plus one JSON file per dataset.
 //     Artifact hashes are verified against the manifest before anything is
 //     recorded.
