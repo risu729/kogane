@@ -139,6 +139,14 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "core-keep",
     planRow: "change plans, approvals and receipts",
   },
+  // The operations API's own acceptance records (0040) sit in the same row:
+  // an accepted request is the promise of follow-up work, and its stage rows
+  // are the evidence that work happened. Both stay in CORE.
+  ops_requests: { classification: "core-keep", planRow: "change plans, approvals and receipts" },
+  ops_request_stages: {
+    classification: "core-keep",
+    planRow: "change plans, approvals and receipts",
+  },
   // parse jobs, replay plans, work items, lane state → CORE for now, mutable
   observation_lane_state: {
     classification: "operational-mutable",

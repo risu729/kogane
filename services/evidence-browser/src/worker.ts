@@ -5,6 +5,7 @@ import {
 import { authenticate } from "./auth";
 import { agentApi, classifyAgentPath, sharedQueryApi } from "./agent-api";
 import { commandApi, isCommandPath } from "./command-api";
+import { classifyOpsPath, opsApi } from "./ops-api";
 import { observationApi } from "./observation-api";
 import { rewardsApi } from "./rewards-api";
 import { eventsApi } from "./events-api";
@@ -17,6 +18,8 @@ const PREFIX = "/api/evidence/v1";
 function classify(path: string): string {
   const agent = classifyAgentPath(path);
   if (agent !== null) return agent;
+  const ops = classifyOpsPath(path);
+  if (ops !== null) return ops;
   if (isCommandPath(path)) return "command";
   if (path === `${PREFIX}/meta`) return "meta";
   if (/^\/api\/evidence\/v1\/sources\/[^/]+\/runs$/.test(path)) return "source_runs";
@@ -31,15 +34,19 @@ function classify(path: string): string {
 
 async function route(request: Request, env: Env, url: URL): Promise<Response> {
   const subject = await authenticate(request, env);
-  // The only non-GET boundary of this Worker: two explicit allow-lists of
+  // The only non-GET boundary of this Worker: three explicit allow-lists of
   // authenticated POST paths, each checking its own grant — the agent API
-  // (docs/agent-api.md) and the change lifecycle (A09). They own disjoint
-  // paths, both keep the closed 401/403 answers, and everything outside them
-  // stays GET-only.
+  // (docs/agent-api.md), the change lifecycle (A09) and the operations API
+  // (docs/ops-api.md). They own disjoint paths, all keep the closed 401/403
+  // answers, and everything outside them stays GET-only.
   const agentResponse = await agentApi(request, env, url, subject);
   if (agentResponse) return agentResponse;
   const commandResponse = await commandApi(request, env, url, subject);
   if (commandResponse) return commandResponse;
+  // Off by default: with `OPS_API_ENABLED` unset this returns null and the
+  // paths fall through to exactly the answers they give today.
+  const opsResponse = await opsApi(request, env, url, subject);
+  if (opsResponse) return opsResponse;
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
   const sharedQueryResponse = await catalogue(() => sharedQueryApi(request, env, url, subject));
@@ -120,7 +127,8 @@ export default {
     } catch (error) {
       const known = error instanceof HttpError;
       errorCode = known ? error.code : "internal_error";
-      response = json({ error: errorCode, requestId }, known ? error.status : 500);
+      const refs = known && error.refs.length > 0 ? { refs: error.refs } : {};
+      response = json({ error: errorCode, requestId, ...refs }, known ? error.status : 500);
     }
     try {
       console.log(

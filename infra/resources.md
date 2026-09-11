@@ -861,7 +861,7 @@ No wrangler config.
 - Service bindings: —
 - Crons: —
 - Assets: `../../poc/observation-pipeline/web/dist` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>BALANCE_PROJECTION_ENABLED
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>BALANCE_PROJECTION_ENABLED<br>OPS_API_ENABLED
 - Required secrets (names only): —
 
 #### `kogane-evidence-browser` — `services/evidence-browser/wrangler.jsonc`
@@ -880,7 +880,7 @@ No wrangler config.
 - Service bindings: PIPELINE → kogane-observation-pipeline
 - Crons: —
 - Assets: `../../poc/observation-pipeline/web/dist-production` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>REWARDS_V2_ENABLED
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>REWARDS_V2_ENABLED<br>SESSION_REFRESH_POLICY
 - Required secrets (names only): —
 
 #### `kogane-evidence-browser-test` — `services/evidence-browser/wrangler.test.jsonc`
@@ -899,7 +899,7 @@ No wrangler config.
 - Service bindings: —
 - Crons: —
 - Assets: `test/assets` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>SESSION_REFRESH_POLICY
 - Required secrets (names only): —
 
 ### `services/observation-pipeline`

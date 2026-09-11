@@ -121,6 +121,15 @@ export interface ApiCapabilities {
    * on, so this is a server-computed fact, not a static claim.
    */
   readonly eventsV2: boolean;
+  /**
+   * The authenticated operations API (`/api/ops/v1/*`) is served (02 §4):
+   * collection, re-registration, replay, rebuild, session refresh and the
+   * progress of one accepted operation. False everywhere the
+   * `OPS_API_ENABLED` flag is off, so a client discovers the routes instead
+   * of probing for them. Not an authorization decision: the server still
+   * authenticates, grades the principal and refuses an agent's request.
+   */
+  readonly opsApi: boolean;
 }
 
 /** The local PoC store and the hosted synthetic demo, which snapshots it. */
@@ -142,6 +151,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   rewardsV2: false,
   commands: false,
   eventsV2: false,
+  opsApi: false,
 } as const satisfies ApiCapabilities;
 
 /** The production evidence-browser Worker over the central store. */
@@ -162,12 +172,13 @@ export const CENTRAL_STORE_CAPABILITIES = {
   financialProducts: true,
   evidenceHistory: true,
   sharedQuery: true,
-  // `rewardsV2`, `commands` and `eventsV2` are off in the shared constant:
-  // each deployment's own flag decides, and `/api/meta` overrides these
-  // fields with what the running Worker actually serves.
+  // `rewardsV2`, `commands`, `eventsV2` and `opsApi` are off in the shared
+  // constant: each deployment's own flag decides, and `/api/meta` overrides
+  // these fields with what the running Worker actually serves.
   rewardsV2: false,
   commands: false,
   eventsV2: false,
+  opsApi: false,
 } as const satisfies ApiCapabilities;
 
 /**
