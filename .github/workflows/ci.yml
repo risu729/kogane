@@ -1,4 +1,6 @@
 name: CI
+# No path filters: CI Check is a required status check, and a workflow skipped
+# by a path filter leaves it pending forever instead of reporting success.
 on:
   pull_request:
   push:
@@ -21,7 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: read
+      contents: read # for checkout
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -30,49 +32,58 @@ jobs:
       - name: Install mise
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          version: 2026.9.1
+          version: 2026.9.3
       - name: Run lint
         run: mise run check --lint
         env:
           GITHUB_TOKEN: ${{ github.token }}
-  packages:
-    name: Package (${{ matrix.package }})
+      - name: Run the repository-wide guards
+        run: mise run ci:root
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # for checkout
+    outputs:
+      workspaces: ${{ steps.plan.outputs.workspaces }}
+      workers: ${{ steps.plan.outputs.workers }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install mise
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.3
+      - name: Collect the workspace CI tasks and the Worker ledger
+        id: plan
+        # Every workspace declares one ci:<short> task and a test asserts that
+        # none is missing, so a new workspace joins the matrix by existing.
+        run: |
+          workspaces=$(mise tasks ls --json |
+            jq -c '[.[] | select(.name | startswith("ci:")) | .name[3:]] | sort')
+          workers=$(jq -c '.workers | sort_by(.name)' infra/workers-ci.json)
+          if [[ $(jq 'length' <<<"${workspaces}") -eq 0 ]] ||
+            [[ $(jq 'length' <<<"${workers}") -eq 0 ]]; then
+            echo "Matrix generation produced an empty list." >&2
+            exit 1
+          fi
+          echo "workspaces=${workspaces}" >> "${GITHUB_OUTPUT}"
+          echo "workers=${workers}" >> "${GITHUB_OUTPUT}"
+  workspaces:
+    name: Workspace (${{ matrix.short }})
+    needs:
+      - plan
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
-      contents: read
+      contents: read # for checkout
     strategy:
       fail-fast: false
       matrix:
-        package:
-          - packages/application
-          - packages/domain
-          - packages/evidence-contract
-          - packages/identity
-          - packages/observation-shared
-          - packages/parsers
-          - packages/read-model
-          - poc/cloudflare-browser-run
-          - poc/cloudflare-runtime-probe
-          - poc/globalpass-worker
-          - poc/mobile-suica-worker
-          - poc/moneyforward-worker
-          - poc/myjcb-worker
-          - poc/observation-pipeline
-          - poc/sbi-securities-worker
-          - poc/sbi-shinsei-worker
-          - poc/sbi-vc-trade-client
-          - poc/sbi-vc-trade-worker
-          - poc/smbc-direct-backfill-worker
-          - poc/sony-bank-worker
-          - poc/tamia-tcp-bridge
-          - poc/vpass-json
-          - poc/vpoint-pay-worker
-          - poc/vpoint-worker
-          - services/collector-r2-importer
-          - services/evidence-browser
-          - services/raw-evidence
-          - services/observation-pipeline
+        short: ${{ fromJson(needs.plan.outputs.workspaces) }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,17 +92,24 @@ jobs:
       - name: Install mise
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          version: 2026.9.1
-      - name: Install frozen dependencies and run offline package checks
-        run: mise run ci:package "${CI_PACKAGE}"
+          version: 2026.9.3
+      - name: Run the workspace checks
+        run: mise run "ci:${SHORT}"
         env:
-          CI_PACKAGE: ${{ matrix.package }}
-  standalone:
-    name: Standalone checks
+          SHORT: ${{ matrix.short }}
+          WRANGLER_SEND_METRICS: "false"
+  workers:
+    name: Worker (${{ matrix.worker.name }})
+    needs:
+      - plan
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
-      contents: read
+      contents: read # for checkout
+    strategy:
+      fail-fast: false
+      matrix:
+        worker: ${{ fromJson(needs.plan.outputs.workers) }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -100,26 +118,51 @@ jobs:
       - name: Install mise
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          version: 2026.9.1
-      - name: Test shared helpers and CI inventory; check OCI probe syntax
-        run: mise run ci:standalone
+          version: 2026.9.3
+      - name: Install the locked dependencies
+        # The action resolves the Wrangler the workspace pins; it never
+        # downloads one, so the frozen install has to happen first.
+        run: mise run install
+      - name: Validate without uploading
+        # dry-run mode passes no Cloudflare account or token, so this job never
+        # reaches the Cloudflare API.
+        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        with:
+          mode: dry-run
+          working-directory: ${{ matrix.worker.path }}
+          config: ${{ matrix.worker.config }}
   ci-check:
     name: CI Check
     needs:
       - lint
-      - packages
-      - standalone
-    if: ${{ !cancelled() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+      - plan
+      - workspaces
+      - workers
+    if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions: {}
     steps:
-      - run: exit 1
+      - name: Require every needed job to have succeeded
+        # Explicit equality, so failure, cancellation, an unexpected skip and a
+        # matrix that never expanded all fail the check.
+        run: |
+          status=0
+          for job in lint plan workspaces workers; do
+            result=$(jq -r --arg job "${job}" '.[$job].result' <<<"${NEEDS}")
+            echo "${job}: ${result}"
+            if [[ ${result} != success ]]; then
+              status=1
+            fi
+          done
+          exit "${status}"
+        env:
+          NEEDS: ${{ toJson(needs) }}
   actions-timeline:
     name: Generate Actions Timeline
     needs:
       - ci-check
-    if: always() && !cancelled()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
