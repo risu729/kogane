@@ -67,9 +67,15 @@ the CI matrices are generated, and what to do when adding a workspace.
 - [Browserless Vpass JSON collector](poc/vpass-json/README.md)
 - [SBI新生銀行 fail-closed Worker collector skeleton](poc/sbi-shinsei-worker/README.md)
 - [OCI/WSL Vpass browser comparison](poc/oci-browser-probe/README.md)
-- [Camoufox Windows/macOS fingerprint controls](poc/camoufox-container-probe/README.md)
-- [Kameleo Windows Chrome container control](poc/kameleo-container-probe/README.md)
 - [Cloudflare Container runtime probe](poc/cloudflare-runtime-probe/README.md)
 - [Cloudflare Browser Rendering probe](poc/cloudflare-browser-run/README.md)
 - [Per-scraper tamia TCP bridge probe](poc/tamia-tcp-bridge/README.md)
 - [Mobile Suica JRE ID passkey collector](poc/mobile-suica-worker/README.md)
+
+## Finished experiments
+
+Their code is no longer on `main`; the result, the commit that carried it and
+how to read it back are in [`docs/research/`](docs/research/).
+
+- [Camoufox Windows/macOS fingerprint controls](docs/research/camoufox.md)
+- [Kameleo Windows Chrome container control](docs/research/kameleo.md)

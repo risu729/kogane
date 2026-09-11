@@ -83,16 +83,19 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | kogane-vpass-collector-poc | `0 21 * * *` | yes |
 | kogane-vpoint-collector-poc | `15 21 * * *` | yes |
 
+## Executed plan rows
+
+Directories the plan's dispositions have already retired or moved. They are listed here
+because they are no longer in the table below; the commit column is what `git show` needs to
+read the removed code back (acceptance test G0-12: none of these was retired merely because
+nothing imported it).
+
+| was | action | result | last commit | live-resource check |
+| --- | --- | --- | --- | --- |
+| `poc/camoufox-container-probe` | `retire-candidate` | docs/research/camoufox.md (code removed) | `5fb143e0f77a` | no wrangler config, no Worker, no bucket, no cron, no container application; local image deleted 2026-08-26 |
+| `poc/kameleo-container-probe` | `retire-candidate` | docs/research/kameleo.md (code removed) | `5fb143e0f77a` | no wrangler config, no Worker, no bucket, no cron; local container, volume and image deleted 2026-08-26 |
+
 ## Directories
-
-### `poc/camoufox-container-probe`
-
-- Disposition (poc_disposition.csv): `retire-candidate` → docs/research/camoufox.md
-- Required verification: stopped, zero references, source retired after the result is saved
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: NO_LIVE_RESOURCE
-
-No wrangler config.
 
 ### `poc/cloudflare-browser-run`
 
@@ -199,15 +202,6 @@ No wrangler config.
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
 - Required secrets (names only): —
-
-### `poc/kameleo-container-probe`
-
-- Disposition (poc_disposition.csv): `retire-candidate` → docs/research/kameleo.md
-- Required verification: stopped, zero references, source retired after the result is saved
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: NO_LIVE_RESOURCE
-
-No wrangler config.
 
 ### `poc/mobile-suica-worker`
 

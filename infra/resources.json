@@ -50,21 +50,23 @@
       "kogane-globalpass-container-probe-20260827"
     ]
   },
-  "directories": [
+  "completedDispositions": [
     {
-      "directory": "poc/camoufox-container-probe",
-      "workspace": "poc",
-      "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "retire-candidate",
-        "proposedTarget": "docs/research/camoufox.md",
-        "requiredVerification": "stopped, zero references, source retired after the result is saved",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "NO_LIVE_RESOURCE"
-      },
-      "workers": []
+      "source": "poc/camoufox-container-probe",
+      "proposedAction": "retire-candidate",
+      "result": "docs/research/camoufox.md (code removed)",
+      "lastCommit": "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+      "liveResourceCheck": "no wrangler config, no Worker, no bucket, no cron, no container application; local image deleted 2026-08-26"
     },
+    {
+      "source": "poc/kameleo-container-probe",
+      "proposedAction": "retire-candidate",
+      "result": "docs/research/kameleo.md (code removed)",
+      "lastCommit": "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+      "liveResourceCheck": "no wrangler config, no Worker, no bucket, no cron; local container, volume and image deleted 2026-08-26"
+    }
+  ],
+  "directories": [
     {
       "directory": "poc/cloudflare-browser-run",
       "workspace": "poc",
@@ -291,20 +293,6 @@
           "unextractedKeys": []
         }
       ]
-    },
-    {
-      "directory": "poc/kameleo-container-probe",
-      "workspace": "poc",
-      "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "retire-candidate",
-        "proposedTarget": "docs/research/kameleo.md",
-        "requiredVerification": "stopped, zero references, source retired after the result is saved",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "NO_LIVE_RESOURCE"
-      },
-      "workers": []
     },
     {
       "directory": "poc/mobile-suica-worker",

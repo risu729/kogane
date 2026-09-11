@@ -1,1 +1,0 @@
-camoufox[geoip]==0.5.5

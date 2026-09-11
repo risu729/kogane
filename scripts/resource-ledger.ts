@@ -99,14 +99,6 @@ export interface Disposition {
  * until U15).
  */
 export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
-  "poc/camoufox-container-probe": {
-    source: "poc_disposition.csv",
-    proposedAction: "retire-candidate",
-    proposedTarget: "docs/research/camoufox.md",
-    requiredVerification: "stopped, zero references, source retired after the result is saved",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
   "poc/cloudflare-browser-run": {
     source: "poc_disposition.csv",
     proposedAction: "isolate-or-promote",
@@ -136,14 +128,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     proposedAction: "promote-service",
     proposedTarget: "services/collector-globalpass",
     requiredVerification: "keep Container, relay, browser diagnostics and resource identity",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/kameleo-container-probe": {
-    source: "poc_disposition.csv",
-    proposedAction: "retire-candidate",
-    proposedTarget: "docs/research/kameleo.md",
-    requiredVerification: "stopped, zero references, source retired after the result is saved",
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
@@ -314,6 +298,48 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     planLiveResourceStatus: "NOT_VERIFIED",
   },
 };
+
+export interface CompletedDisposition {
+  /** Directory the plan named, as it was before the move. */
+  source: string;
+  proposedAction: string;
+  /** Where the content is now: a directory, a document, or both. */
+  result: string;
+  /** Commit that last carried the code, so `git show <commit>:<source>` works. */
+  lastCommit: string;
+  /** What the live-resource check found before the row was executed. */
+  liveResourceCheck: string;
+}
+
+/**
+ * Plan rows this repository has already executed.
+ *
+ * `DISPOSITIONS` is asserted to describe exactly the directories that exist, so
+ * a row has to leave it the moment its directory is retired or moved. Without
+ * this second list, "retired on purpose, result in `docs/research/`" and "never
+ * had a plan row" would be indistinguishable a month later. Each entry records
+ * the live-resource check that allowed the row to be executed, because no
+ * directory may be retired for the sole reason that nothing imports it
+ * (acceptance test G0-12).
+ */
+export const COMPLETED_DISPOSITIONS: readonly CompletedDisposition[] = [
+  {
+    source: "poc/camoufox-container-probe",
+    proposedAction: "retire-candidate",
+    result: "docs/research/camoufox.md (code removed)",
+    lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+    liveResourceCheck:
+      "no wrangler config, no Worker, no bucket, no cron, no container application; local image deleted 2026-08-26",
+  },
+  {
+    source: "poc/kameleo-container-probe",
+    proposedAction: "retire-candidate",
+    result: "docs/research/kameleo.md (code removed)",
+    lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+    liveResourceCheck:
+      "no wrangler config, no Worker, no bucket, no cron; local container, volume and image deleted 2026-08-26",
+  },
+];
 
 /** Config keys that carry no runtime resource identity. */
 const COSMETIC_KEYS = new Set([
@@ -570,6 +596,7 @@ export interface ResourceLedger {
   generatedBy: string;
   plan: string;
   liveInventory: typeof LIVE_INVENTORY;
+  completedDispositions: readonly CompletedDisposition[];
   directories: DirectoryEntry[];
   summary: {
     configCount: number;
@@ -664,6 +691,7 @@ export function buildResourceLedger(root: string): ResourceLedger {
     generatedBy: "scripts/resource-ledger.ts",
     plan: "unified plan U01; chapters 07 §1 and §6; acceptance tests G0-06, G0-07, G0-12",
     liveInventory: LIVE_INVENTORY,
+    completedDispositions: COMPLETED_DISPOSITIONS,
     directories,
     summary: {
       configCount: workers.length,
@@ -841,6 +869,23 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
   lines.push("| --- | --- | --- |");
   for (const entry of ledger.summary.crons)
     lines.push(`| ${cell(entry.worker)} | \`${entry.cron}\` | ${entry.live ? "yes" : "no"} |`);
+  lines.push("");
+
+  lines.push("## Executed plan rows");
+  lines.push("");
+  lines.push(
+    "Directories the plan's dispositions have already retired or moved. They are listed here",
+    "because they are no longer in the table below; the commit column is what `git show` needs to",
+    "read the removed code back (acceptance test G0-12: none of these was retired merely because",
+    "nothing imported it).",
+  );
+  lines.push("");
+  lines.push("| was | action | result | last commit | live-resource check |");
+  lines.push("| --- | --- | --- | --- | --- |");
+  for (const entry of ledger.completedDispositions)
+    lines.push(
+      `| \`${entry.source}\` | \`${entry.proposedAction}\` | ${cell(entry.result)} | \`${entry.lastCommit.slice(0, 12)}\` | ${cell(entry.liveResourceCheck)} |`,
+    );
   lines.push("");
 
   lines.push("## Directories");
