@@ -267,3 +267,43 @@ Verified with synthetic fixtures in
 `services/collector-moneyforward/test/shared-collection.test.ts` (G1-01,
 G1-02, G1-08, G1-09, G1-15, G3-07, G3-08). No provider was contacted and no
 production bucket was read or written.
+
+### MyJCB (`services/collector-myjcb`, `kogane-myjcb-collector-poc`)
+
+| Artifact key                                                                   | Role                         |
+| ------------------------------------------------------------------------------ | ---------------------------- |
+| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/debit-*.html` | `sanitized_provider_capture` |
+| `<connectionId>/credit-past-months.json`                                       | `provider_response`          |
+| `<connectionId>/credit-csv                                                     | pdf                          | ofx` | `provider_export` |
+| `<connectionId>/credit-ledger-*.json`, `…/discovery.json`                      | `collector_derived`          |
+| `manifest.json`                                                                | `collector_manifest`         |
+
+Sanitizer: the collector's own `redactedStatementHtml` (parse5 tree: scripts,
+styles, textareas, embedding elements and every URL-bearing attribute removed,
+every `value=` replaced by `[redacted]`, card numbers in text replaced), which
+is what the legacy path already stores. Shared mode adds `assertRedactedHtml`,
+the invariants the central path enforces, checked again on the bytes about to
+leave the Worker: a redaction regression throws
+`artifact_html_redaction_invalid` and the run writes no terminal rather than
+publishing the page. The collector manifest is written in its central shape —
+a connection blocker and a failure message become coarse codes
+(`human-required`, `collector-failure`, `r2-write-failure`), so upstream free
+text never reaches the shared bucket either.
+
+Terminal fields: one unit per connection (`<connectionId>`,
+`unitKind: connection`), so several cards in one run stay distinguishable and
+are never merged into one (G1-16); no ranges, because the statement periods are
+provider labels rather than machine ranges and stay in the manifest artifact;
+one `terminal` report carrying the outcome; `requestedScope.scopeKind =
+full_snapshot` over the connections. `coverageStatus` is `partial` even for a
+successful run — a MyJCB card exposes a rolling set of statement periods, so a
+finished run is not a claim about the card's whole history. A connection that
+needs a human is a `human-required` state on its own unit with
+`safeErrorCode: human_required`, and the run-level code is `human_required`
+when every blocked connection is waiting for a person: nothing here retries a
+login (G3-10, G3-11).
+
+Verified with synthetic fixtures in
+`services/collector-myjcb/test/shared-collection.test.ts` (G1-01, G1-02,
+G1-08, G1-09, G1-15, G1-16, G3-08, G3-11). No provider was contacted and no
+production bucket was read or written.

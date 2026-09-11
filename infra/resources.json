@@ -516,7 +516,7 @@
         "requiredVerification": "keep the Browser Run login and fetch boundary",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-myjcb-collector-poc; buckets=kogane-myjcb-collector-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-myjcb-collector-poc; buckets=kogane-myjcb-collector-poc,kogane-raw-evidence)"
       },
       "workers": [
         {
@@ -534,6 +534,11 @@
             {
               "binding": "SNAPSHOTS",
               "bucket": "kogane-myjcb-collector-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -553,6 +558,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [],
@@ -2153,6 +2159,7 @@
           "kogane-evidence-browser",
           "kogane-ingest",
           "kogane-moneyforward-collector-poc",
+          "kogane-myjcb-collector-poc",
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic",
           "kogane-sony-bank-collector-poc"

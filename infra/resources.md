@@ -35,7 +35,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | kogane-mobile-suica-collector-poc | yes | kogane-collector-r2-importer<br>kogane-mobile-suica-collector-poc |
 | kogane-moneyforward-collector-poc | yes | kogane-collector-r2-importer<br>kogane-moneyforward-collector-poc<br>kogane-moneyforward-layer-b-audit-local<br>kogane-moneyforward-r2-contract-audit-local |
 | kogane-myjcb-collector-poc | yes | kogane-collector-r2-importer<br>kogane-myjcb-collector-poc<br>kogane-myjcb-r2-layer-b-audit-local |
-| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-ingest<br>kogane-moneyforward-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sony-bank-collector-poc |
+| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-ingest<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sony-bank-collector-poc |
 | kogane-sbi-collector-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-collector-poc |
 | kogane-sbi-shinsei-collector-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-shinsei-r2-layer-b-audit-local |
 | kogane-sbi-vc-trade-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-vc-r2-layer-b-audit-local<br>kogane-sbi-vc-session-poc |
@@ -310,14 +310,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-myjcb
 - Required verification: keep the Browser Run login and fetch boundary
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-myjcb-collector-poc; buckets=kogane-myjcb-collector-poc)
+- Live resources: LIVE(workers=kogane-myjcb-collector-poc; buckets=kogane-myjcb-collector-poc,kogane-raw-evidence)
 
 #### `kogane-myjcb-collector-poc` — `services/collector-myjcb/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-myjcb-collector-poc
+- R2: SNAPSHOTS → kogane-myjcb-collector-poc<br>DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: —
@@ -328,7 +328,7 @@ No wrangler config.
 - Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
 - Crons: `0 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
 ### `services/collector-r2-importer`
