@@ -871,7 +871,9 @@ captures, the normalized snapshot and the sanitized collector manifest, then
 the `terminal-v1` manifest last — and the upload to
 `kogane-collector-r2-importer` is skipped. Legacy mode is unchanged, the daily
 `0 21 * * *` cron is unchanged, and the Container image, relay and tunnel are
-untouched: the Worker writes the run, not the container.
+untouched: the Worker writes the run, not the container. The per-source
+staging bucket is not written in shared mode: the run is stored once, in
+`DATA` (plan 00).
 
 Deploy order, rollback, the artifact/role table and what the terminal states
 are in [`docs/collection.md`](../collection.md#sbi-shinsei-kogane-sbi-shinsei-collector-poc).

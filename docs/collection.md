@@ -188,9 +188,22 @@ Rules that hold for every source:
   the central upload and every existing test are untouched.
 - **Shared mode skips the central upload** (G1-15). The Processor reads the
   collector's own bytes; nothing copies or re-uploads an object.
-- The per-source staging bucket **keeps** its write in shared mode. It is the
-  collector's own outbox and the read source for anything that exists only
-  there (plan 03 §7); U15 retires it once nothing does.
+- **One copy** (plan 00: the original is stored once; no standing
+  collector-side → central double copy). In shared mode the run is written
+  only into `DATA`. sbi-shinsei, globalpass and sbi-vc-trade hold every
+  artifact of a run in memory until the terminal is written, so nothing
+  structural depends on a staging object and the per-source staging bucket is
+  **not written** in shared mode; their end-to-end tests assert zero staging
+  puts. The one bounded exception is smbc-direct, whose chunks span Durable
+  Object alarms (see its section). The `SNAPSHOTS` binding stays declared for
+  legacy mode and for the legacy runs already in it (plan 03 §7) until U15
+  retires it.
+- In shared mode the collector manifest's own `artifacts[].key` values are the
+  run-relative names of the legacy layout (`raw/<source>/<date>/<runId>/…`), so
+  the manifest keeps one shape in both modes for the Processor's adapters; no
+  staging object exists at them. The terminal's `storageRef` is the only
+  location claim, and the run's public `manifestKey` is the collector
+  manifest's own content-addressed key in `DATA` (`objects/<2 hex>/<sha256>`).
 - **The Worker writes the run, never the container.** Container images and
   relay protocols are unchanged by this work item.
 - Only _sanitized_ bytes reach `DATA` — the same artifacts the importer sends
@@ -219,8 +232,24 @@ Rules that hold for every source:
 
 **Rollback**: set `COLLECTION_TARGET` back to `legacy` and redeploy that one
 collector. Terminals already written stay valid and are picked up by the
-Processor's bounded `runs/` scan; the staging bucket still has the same run, so
-the legacy backfill route can import it if needed.
+Processor's bounded `runs/` scan. A run written in shared mode exists only in
+`DATA` (smbc-direct excepted): the legacy backfill route cannot import it, and
+the Processor is what registers it. Rolling back changes where the _next_ run
+goes; it does not move or duplicate anything already stored.
+
+### Terminal `source` ids and CORE source ids
+
+A terminal names the collector's own source id, the same `EXTERNAL_SOURCE` the
+importer's adapter has always read from a staged manifest. The CORE source id
+is the importer adapter's `CENTRAL_SOURCE`. The Processor (U08) owns the
+mapping from this one table; no collector carries the CORE id.
+
+| Collector Worker                   | Terminal `source` (`runs/<source>/…`) | CORE source id     |
+| ---------------------------------- | ------------------------------------- | ------------------ |
+| `kogane-sbi-shinsei-collector-poc` | `sbi-shinsei`                         | `sbi-shinsei-bank` |
+| `kogane-globalpass-collector-poc`  | `prestia-globalpass`                  | `global-pass`      |
+| `kogane-sbi-vc-session-poc`        | `sbi-vc-trade`                        | `sbi-vc-trade`     |
+| `kogane-smbc-direct-backfill-poc`  | `smbc-direct`                         | `smbc-bank`        |
 
 ### sbi-shinsei (`kogane-sbi-shinsei-collector-poc`)
 
@@ -244,6 +273,14 @@ source `sbi-shinsei-bank`).
 - Human-required: a rejected credential or refused login (`credential-shape`,
   `credential-validation`, `login-rejected`, `login-failed`) ends the run
   `failed` with `human_required_credentials`.
+- Staging: **not written** in shared mode. The four provider responses and the
+  normalized snapshot are held in memory until the terminal is written; the
+  `r2:<dataset>` failure operation then means "not admitted to the run"
+  (validation), not a staging put. `test/storage.test.ts` proves the described
+  manifest entry equals the one the legacy put returns.
+- Parity: `test/shared-collection.test.ts` digest-compares the shared bytes
+  against the importer's own `sanitizeProviderResponse` / `sanitizeManifest`
+  for the same synthetic fixture.
 - Verified with synthetic fixtures only:
   `test/shared-collection.test.ts` (decisions, sanitization, outcomes,
   end-to-end target switch with a mocked container) and
@@ -259,7 +296,7 @@ Processor maps it to the CORE source `global-pass`).
 | Artifact                  | Role                         | Bytes                                                      |
 | ------------------------- | ---------------------------- | ---------------------------------------------------------- |
 | `activity-<yyyy-mm>.html` | `sanitized_provider_capture` | the page `sanitizeGlobalPassActivityHtml` already produced |
-| `manifest.json`           | `collector_manifest`         | the exact manifest bytes written to the staging bucket     |
+| `manifest.json`           | `collector_manifest`         | the collector manifest, the bytes legacy mode stages       |
 
 - `requestedScope`: `month_range` over the selected months (oldest to newest),
   `unitKeys: ["account"]`. A run whose container never reported its month list
@@ -284,6 +321,12 @@ Processor maps it to the CORE source `global-pass`).
 - The shared persist is reported under the existing `central-import`
   diagnostics stage; the `globalpass-collection-stored` log line carries
   `collectionTarget`, `sharedOutcome`, `terminalKey` and `terminalDigest`.
+- Staging: **not written** in shared mode. Every sanitized page is held in
+  memory until the terminal is written. `GET /latest` reads the staging bucket
+  and therefore shows legacy runs only.
+- Parity: `test/shared-worker.test.ts` runs the importer's own
+  `sanitizeGlobalPassHtml` (v2) over every page in `DATA` and asserts it
+  returns the bytes unchanged with the digest the terminal states.
 - Verified with synthetic data only: `test/shared-collection.test.ts`
   (decisions, scope/ranges/units, outcomes, redaction),
   `test/shared-worker.test.ts` (end-to-end target switch with a mocked
@@ -299,7 +342,7 @@ keep-alive and the daily collection — both unchanged. Terminal source id
 | Artifact         | Role                 | Bytes                                                       |
 | ---------------- | -------------------- | ----------------------------------------------------------- |
 | `<dataset>.json` | `collector_derived`  | the gateway envelope with `meta.secureKey` already stripped |
-| `manifest.json`  | `collector_manifest` | the exact manifest bytes written to the staging bucket      |
+| `manifest.json`  | `collector_manifest` | the collector manifest, the bytes legacy mode stages        |
 
 - `requestedScope`: `full_snapshot`, `unitKeys: ["account"]`; one `account` unit
   of kind `collection`, the same unit the central descriptors use. No ranges.
@@ -326,6 +369,14 @@ keep-alive and the daily collection — both unchanged. Terminal source id
 - Shared mode removes the legacy path's deferral: with no service binding in
   the chain there is no Worker invocation limit, so a run with more than eleven
   artifacts finishes in place instead of being handed to the backfill route.
+- Staging: **not written** in shared mode. Every sanitized envelope is held in
+  memory until the terminal is written; the create-only terminal put in `DATA`
+  is the duplicate guard the staging `onlyIf` put used to be.
+- Parity: `test/shared-collection.test.ts` asserts the `DATA` bytes are the
+  staged encoding of the same sanitized body (the importer forwards this
+  source's staged bytes verbatim after checking `meta.secureKey` is absent),
+  and that an envelope still carrying `meta.secureKey` is refused with
+  `shared_secure_key_present` rather than planned.
 - Duplicate dispatch is still one run: the Durable Object's existing
   single-flight `runCollection` returns the in-flight summary (G3-14).
 - Verified with synthetic data only: `test/shared-collection.test.ts` and
@@ -347,17 +398,40 @@ Terminal source id `smbc-direct` (the Processor maps it to the CORE source
 | `balance.normalized.json`, `transactions/*.normalized.json` | `collector_derived`  | the collector's normalized counterparts     |
 | `manifest.json`                                             | `collector_manifest` | the exact manifest bytes written to staging |
 
+**Bounded exception to one-copy.** This is the only source whose shared mode
+still writes the per-source staging bucket, and the reason is structural, not
+convenience: the chunks are collected across many Durable Object alarms and the
+Durable Object keeps only their manifest entries, so the bytes of a finished run
+exist nowhere else until the terminal is written. Legacy mode is byte-for-byte
+unchanged; shared mode re-reads the run from staging at the end. What bounds
+the exception:
+
+- the staging write happens only where legacy already writes it (no new keys);
+- the terminal is written by `persistRun`, last, after every content-addressed
+  object in `DATA` has been put and verified, exactly like the other sources;
+- every re-read byte is verified against the manifest (size and digest) before
+  it is planned, and a run larger than `MAX_SHARED_RUN_BYTES` is refused.
+
+**U15 removal path**: write each chunk's bytes content-addressed into `DATA`
+from the alarm that collected it (`persistRun` verifies and reuses an object
+that is already there), keep only the manifest entries in Durable Object state
+as today, and delete `readStagedArtifacts` and the staging round trip; the
+`SNAPSHOTS` binding then retires with the other legacy buckets. No terminal
+format change is needed for that step.
+
 - **One terminal per backfill run.** The run is finished exactly once — when the
   last chunk lands, when it ends partial, or when it fails — and that is the only
   place the terminal is written, whatever the outcome.
-- Because the chunks are written across alarms, the run's bytes are re-read from
-  the collector's own staging bucket at that point and **verified against the
-  manifest** (size and digest) before anything is planned; a byte that changed
-  or vanished stops the run with no terminal. A run larger than
-  `MAX_SHARED_RUN_BYTES` (48 MiB) is refused for the same reason rather than
-  read into memory. This is a known limit of doing the terminal write in the
-  Worker while the legacy staging bucket still exists; U15 removes the staging
-  round trip.
+- The run's bytes are re-read from the staging bucket at that point (the
+  bounded exception above) and **verified against the manifest** (size and
+  digest) before anything is planned; a byte that changed or vanished stops the
+  run with no terminal. A run larger than `MAX_SHARED_RUN_BYTES` (48 MiB) is
+  refused for the same reason rather than read into memory.
+- Parity: `test/shared-collection.test.ts` stores a Shift_JIS provider body
+  through the staging re-read and asserts `DATA` holds the identical bytes
+  (the importer forwards this source's provider bytes verbatim after a
+  Shift_JIS round-trip check), and that the `manifest.json` object equals the
+  bytes `storeManifest` stages.
 - `requestedScope`: `date_range` over `DEFAULT_BACKFILL_FROM`…today,
   `unitKeys: ["account"]`; one `account` unit of kind `collection`. `ranges`:
   the requested range plus one `declared_coverage` range per collected month

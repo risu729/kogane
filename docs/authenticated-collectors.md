@@ -422,7 +422,9 @@ separate from how it authenticates. `COLLECTION_TARGET=legacy` (the default)
 keeps the per-source staging bucket plus the central importer upload;
 `COLLECTION_TARGET=shared` makes the Worker write the run and its terminal into
 the shared `DATA` bucket (`kogane-raw-evidence`) through `packages/collection`
-and skip the central upload. Nothing about authentication changes with it: the
+and skip the central upload; except for smbc-direct (a bounded, documented
+exception) the per-source staging bucket is then not written at all, so the
+run is stored once. Nothing about authentication changes with it: the
 same secrets, the same runtime, the same Container image, the same tunnel, the
 same cron.
 

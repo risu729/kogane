@@ -479,7 +479,10 @@ with the `terminal-v1` manifest last — one terminal per backfill run, whether
 it succeeded, ended partial or failed — instead of calling
 `kogane-collector-r2-importer`. Legacy mode is unchanged. There is no cron
 before or after this change: the run is still started by a person behind
-Cloudflare Access with an approved QR challenge.
+Cloudflare Access with an approved QR challenge. This is the one bounded
+exception to "stored once": because the chunks span alarms, shared mode still
+writes the staging bucket and re-reads it at the end; `docs/collection.md`
+records the bound and the U15 removal path.
 
 The Durable Object now also keeps two session generation ids: `sessionRef`, the
 live generation rotated on every approved sign-in, and `runSessionRef`, the

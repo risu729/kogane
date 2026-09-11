@@ -608,7 +608,8 @@ sanitized gateway envelopes and the collector manifest, then the `terminal-v1`
 manifest last — and the upload to `kogane-collector-r2-importer` is skipped,
 which also removes the eleven-artifact deferral of the legacy path. Legacy mode
 is unchanged and both crons (`*/15 * * * *` keep-alive, `5 21 * * *`
-collection) are unchanged.
+collection) are unchanged. The per-source staging bucket is not written in
+shared mode: the run is stored once, in `DATA` (plan 00).
 
 The Durable Object now also keeps a **session generation id** (`sessionRef`),
 minted when a session is seeded and rotated when re-authentication replaces it,

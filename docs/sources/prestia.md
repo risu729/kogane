@@ -878,7 +878,8 @@ already-sanitized monthly activity pages and the collector manifest, then the
 `kogane-collector-r2-importer` is skipped. Legacy mode is unchanged, the daily
 `17 18 * * *` cron is unchanged, and the Container image, relay, browser
 binding and tunnels are untouched: the Worker writes the run, not the
-container.
+container. The per-source staging bucket is not written in shared mode: the
+run is stored once, in `DATA` (plan 00).
 
 A successful run still declares `coverageStatus: partial`, because the provider
 exposes a rolling window of statement months and pagination remains unproven.
