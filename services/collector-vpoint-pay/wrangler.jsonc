@@ -33,9 +33,14 @@
     {
       "binding": "SNAPSHOTS",
       "bucket_name": "kogane-vpoint-pay-collector-poc"
+    },
+    {
+      "binding": "DATA",
+      "bucket_name": "kogane-raw-evidence"
     }
   ],
   "vars": {
+    "COLLECTION_TARGET": "legacy",
     "COLLECTOR_SCHEMA_VERSION": "vpoint-pay-worker-poc-v1"
   },
   "secrets": {

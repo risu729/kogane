@@ -12,7 +12,13 @@
     "strict": true,
     "skipLibCheck": true,
     "target": "ES2023",
-    "types": ["node", "bun"]
+    "types": ["node", "bun", "@cloudflare/vitest-plugin/types"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "worker-configuration.d.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "worker-test/**/*.ts",
+    "vitest.config.ts",
+    "worker-configuration.d.ts"
+  ]
 }

@@ -3,21 +3,45 @@ import {
   safeErrorDetails,
 } from "../../../packages/collector-diagnostics/src/index";
 import { timingSafeEqual } from "node:crypto";
+import { collectionTarget } from "./collection-target";
 import { collectMobileSuica, parseSessionEnvelope } from "./mobile-suica";
 import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
+import { persistMobileSuicaRun } from "./shared-run";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import type {
   CollectionFailure,
   CollectionManifest,
   CollectionResult,
+  RawArtifact,
   StoredArtifact,
 } from "./types";
+import type { PersistRunResult } from "../../../packages/collection/src/index";
 import { checkStoredJreCredential, parseStoredJreCredential } from "./webauthn";
 import {
   bootstrapMobileSuicaSessionWithBrowser,
   checkBrowserPasskeyLogin,
   inspectBrowserBootstrap,
 } from "./browser-bootstrap";
+
+/** What the shared target recorded about the run's terminal (03 §2). */
+interface SharedTerminalSummary {
+  outcome: PersistRunResult["outcome"];
+  /** True only for `persisted` and `already_persisted`; nothing else is a finished run. */
+  persisted: boolean;
+  terminalKey: string;
+  terminalDigest: string;
+  objectCount: number;
+  reasonCode?: string;
+}
+
+/**
+ * A finished run, in the shape its storage target produced: the legacy path
+ * ends at the collector manifest plus the central import, the shared path at
+ * the terminal in the DATA bucket.
+ */
+type CollectionOutcome =
+  | { target: "legacy"; result: CollectionResult }
+  | { target: "shared"; manifest: CollectionManifest; terminal: SharedTerminalSummary };
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -147,27 +171,36 @@ export default {
     if (!validDate(asOfDateJst)) {
       return Response.json({ error: "asOf must be a valid YYYY-MM-DD" }, { status: 400 });
     }
-    const result = await runCollection(env, asOfDateJst);
-    return Response.json(publicResult(result), {
-      status: result.status === "success" ? 200 : 502,
+    const outcome = await runCollection(env, asOfDateJst);
+    const manifest = outcomeManifest(outcome);
+    const persisted = outcome.target === "legacy" || outcome.terminal.persisted;
+    return Response.json(publicResult(outcome), {
+      status: manifest.status === "success" && persisted ? 200 : 502,
     });
   },
 
   async scheduled(_controller, env): Promise<void> {
-    const result = await runCollection(env, tokyoDate(new Date()));
-    if (result.status !== "success") {
-      throw new Error(`Mobile Suica collection incomplete; manifest=${result.manifestKey}`);
+    const outcome = await runCollection(env, tokyoDate(new Date()));
+    const manifest = outcomeManifest(outcome);
+    if (manifest.status !== "success") {
+      throw new Error(`Mobile Suica collection incomplete; ${runReference(outcome)}`);
+    }
+    // A run whose terminal was not written is not a stored run (G1-01).
+    if (outcome.target === "shared" && !outcome.terminal.persisted) {
+      throw new Error(`Mobile Suica run was not persisted; ${runReference(outcome)}`);
     }
   },
 } satisfies ExportedHandler<Env>;
 
-async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionResult> {
+async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionOutcome> {
+  const target = collectionTarget(env.COLLECTION_TARGET);
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const diagnostic = createDiagnostics("mobile-suica", runId);
   try {
     const prefix = runPrefix(startedAt, runId);
     const artifacts: StoredArtifact[] = [];
+    const collected: RawArtifact[] = [];
     const failures: CollectionFailure[] = [];
     let transactionCount = 0;
     let pageCount = 0;
@@ -200,15 +233,20 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionR
           errorCode: "history_boundary_unproven",
         });
       }
-      for (const artifact of collection.artifacts) {
-        try {
-          artifacts.push(
-            await diagnostic.step("artifact-write", () =>
-              storeArtifact({ bucket: env.SNAPSHOTS, prefix, runId, artifact }),
-            ),
-          );
-        } catch (error) {
-          failures.push(failure("r2", error, "artifact_store_failed", artifact.filename));
+      if (target === "shared") {
+        // One terminal-last run replaces the per-artifact writes below.
+        collected.push(...collection.artifacts);
+      } else {
+        for (const artifact of collection.artifacts) {
+          try {
+            artifacts.push(
+              await diagnostic.step("artifact-write", () =>
+                storeArtifact({ bucket: env.SNAPSHOTS, prefix, runId, artifact }),
+              ),
+            );
+          } catch (error) {
+            failures.push(failure("r2", error, "artifact_store_failed", artifact.filename));
+          }
         }
       }
     } catch (error) {
@@ -216,8 +254,8 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionR
     }
 
     const completedAt = new Date().toISOString();
-    const status =
-      failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
+    const storedCount = target === "shared" ? collected.length : artifacts.length;
+    const status = failures.length === 0 ? "success" : storedCount === 0 ? "failed" : "partial";
     const manifest: CollectionManifest = {
       schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       source: "mobile-suica",
@@ -233,6 +271,67 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionR
       artifacts,
       failures,
     };
+    if (target === "shared") {
+      const persisted = await diagnostic.step("terminal-write", () =>
+        persistMobileSuicaRun(env.DATA, {
+          runId,
+          producerVersion: manifest.schemaVersion,
+          attemptId: `attempt-${runId}`,
+          startedAt,
+          completedAt,
+          status,
+          asOfDateJst,
+          complete,
+          artifacts: collected,
+          failureCodes: failures.map((entry) => entry.errorCode),
+        }),
+      );
+      const succeeded =
+        persisted.outcome === "persisted" || persisted.outcome === "already_persisted";
+      const objects = persisted.outcome === "conflict" ? [] : persisted.objects;
+      const described = new Map(collected.map((artifact) => [artifact.filename, artifact]));
+      const terminal: SharedTerminalSummary = {
+        outcome: persisted.outcome,
+        persisted: succeeded,
+        terminalKey: persisted.terminalKey,
+        terminalDigest: persisted.terminalDigest,
+        objectCount: objects.length,
+        ...(succeeded ? {} : { reasonCode: reasonCodeOf(persisted) }),
+      };
+      console.log(
+        JSON.stringify({
+          event: "mobile-suica-collection-persisted",
+          runId,
+          status,
+          transactionCount,
+          pageCount,
+          artifactCount: collected.length,
+          failureCount: failures.length,
+          terminalOutcome: terminal.outcome,
+          terminalKey: terminal.terminalKey,
+          terminalDigest: terminal.terminalDigest,
+          objectCount: terminal.objectCount,
+          ...(terminal.reasonCode === undefined ? {} : { reasonCode: terminal.reasonCode }),
+        }),
+      );
+      diagnostic.finish(succeeded ? status : "failed");
+      return {
+        target: "shared",
+        manifest: {
+          ...manifest,
+          artifacts: succeeded
+            ? objects.map((object) => ({
+                dataset: described.get(object.artifactKey)?.dataset ?? object.artifactKey,
+                key: object.key,
+                mediaType: described.get(object.artifactKey)?.mediaType ?? "application/json",
+                sha256: object.sha256,
+                bytes: object.byteSize,
+              }))
+            : [],
+        },
+        terminal,
+      };
+    }
     const manifestKey = await diagnostic.step("manifest-write", () =>
       storeManifest({ bucket: env.SNAPSHOTS, prefix, manifest }),
     );
@@ -254,11 +353,28 @@ async function runCollection(env: Env, asOfDateJst: string): Promise<CollectionR
       }),
     );
     diagnostic.finish(status);
-    return { ...manifest, manifestKey, central };
+    return { target: "legacy", result: { ...manifest, manifestKey, central } };
   } catch (error) {
     diagnostic.finish("failed");
     throw error;
   }
+}
+
+function outcomeManifest(outcome: CollectionOutcome): CollectionManifest {
+  return outcome.target === "legacy" ? outcome.result : outcome.manifest;
+}
+
+/** How a message names the run without quoting anything a provider sent. */
+function runReference(outcome: CollectionOutcome): string {
+  return outcome.target === "legacy"
+    ? `manifest=${outcome.result.manifestKey}`
+    : `terminal=${outcome.terminal.terminalKey}; outcome=${outcome.terminal.outcome}`;
+}
+
+function reasonCodeOf(result: PersistRunResult): string {
+  return result.outcome === "conflict" || result.outcome === "incomplete"
+    ? result.reasonCode
+    : "persisted";
 }
 
 function authorized(request: Request, expected: string | undefined): boolean {
@@ -311,20 +427,36 @@ function publicError(error: unknown): string {
     .slice(0, 300);
 }
 
-function publicResult(result: CollectionResult): object {
+function publicResult(outcome: CollectionOutcome): object {
+  const manifest = outcomeManifest(outcome);
   return {
-    runId: result.runId,
-    status: result.status,
-    asOfDateJst: result.asOfDateJst,
-    transactionCount: result.transactionCount,
-    pageCount: result.pageCount,
-    artifactCount: result.artifacts.length,
-    failureCount: result.failures.length,
-    manifestKey: result.manifestKey,
-    central: {
-      status: result.central.status,
-      centralRunId: result.central.centralRunId,
-      sealed: result.central.sealed,
-    },
+    runId: manifest.runId,
+    status: manifest.status,
+    asOfDateJst: manifest.asOfDateJst,
+    transactionCount: manifest.transactionCount,
+    pageCount: manifest.pageCount,
+    artifactCount: manifest.artifacts.length,
+    failureCount: manifest.failures.length,
+    ...(outcome.target === "legacy"
+      ? {
+          manifestKey: outcome.result.manifestKey,
+          central: {
+            status: outcome.result.central.status,
+            centralRunId: outcome.result.central.centralRunId,
+            sealed: outcome.result.central.sealed,
+          },
+        }
+      : {
+          terminal: {
+            outcome: outcome.terminal.outcome,
+            persisted: outcome.terminal.persisted,
+            terminalKey: outcome.terminal.terminalKey,
+            terminalDigest: outcome.terminal.terminalDigest,
+            objectCount: outcome.terminal.objectCount,
+            ...(outcome.terminal.reasonCode === undefined
+              ? {}
+              : { reasonCode: outcome.terminal.reasonCode }),
+          },
+        }),
   };
 }

@@ -37,7 +37,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | kogane-mobile-suica-collector-poc | yes | kogane-collector-r2-importer<br>kogane-mobile-suica-collector-poc |
 | kogane-moneyforward-collector-poc | yes | kogane-collector-r2-importer<br>kogane-moneyforward-collector-poc<br>kogane-moneyforward-layer-b-audit-local<br>kogane-moneyforward-r2-contract-audit-local |
 | kogane-myjcb-collector-poc | yes | kogane-collector-r2-importer<br>kogane-myjcb-collector-poc<br>kogane-myjcb-r2-layer-b-audit-local |
-| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-ingest<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sony-bank-collector-poc<br>kogane-vpass-collector-poc |
+| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-ingest<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sbi-collector-poc<br>kogane-sony-bank-collector-poc<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc<br>kogane-vpoint-pay-collector-poc |
 | kogane-sbi-collector-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-collector-poc |
 | kogane-sbi-shinsei-collector-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-shinsei-r2-layer-b-audit-local |
 | kogane-sbi-vc-trade-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-vc-r2-layer-b-audit-local<br>kogane-sbi-vc-session-poc |
@@ -334,14 +334,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-mobile-suica
 - Required verification: contract tests, live/secret/resource mapping confirmed
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-mobile-suica-collector-poc; buckets=kogane-mobile-suica-collector-poc)
+- Live resources: LIVE(workers=kogane-mobile-suica-collector-poc; buckets=kogane-mobile-suica-collector-poc,kogane-raw-evidence)
 
 #### `kogane-mobile-suica-collector-poc` — `services/collector-mobile-suica/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-mobile-suica-collector-poc
+- R2: SNAPSHOTS → kogane-mobile-suica-collector-poc<br>DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: —
@@ -352,7 +352,7 @@ No wrangler config.
 - Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
 - Crons: `10 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>JRE_ID_CREDENTIAL_JSON
 
 ### `services/collector-moneyforward`
@@ -704,14 +704,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-securities
 - Required verification: contract tests and resource identity; secret material is not moved
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-sbi-collector-poc; buckets=kogane-sbi-collector-poc)
+- Live resources: LIVE(workers=kogane-sbi-collector-poc; buckets=kogane-raw-evidence,kogane-sbi-collector-poc)
 
 #### `kogane-sbi-collector-poc` — `services/collector-sbi-securities/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-sbi-collector-poc
+- R2: SNAPSHOTS → kogane-sbi-collector-poc<br>DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: —
@@ -722,7 +722,7 @@ No wrangler config.
 - Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
 - Crons: `0 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
 ### `services/collector-sbi-shinsei`
@@ -860,14 +860,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-vpoint
 - Required verification: keep the Email route and the DO class/tag/storage
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-vpoint-collector-poc; buckets=kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)
+- Live resources: LIVE(workers=kogane-vpoint-collector-poc; buckets=kogane-raw-evidence,kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)
 
 #### `kogane-vpoint-collector-poc` — `services/collector-vpoint/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts; has an `email()` handler
 - D1: —
-- R2: SNAPSHOTS → kogane-vpoint-collector-poc<br>VPOINT_PAY_SNAPSHOTS → kogane-vpoint-pay-collector-poc
+- R2: SNAPSHOTS → kogane-vpoint-collector-poc<br>VPOINT_PAY_SNAPSHOTS → kogane-vpoint-pay-collector-poc<br>DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: VPOINT_SESSION → VPointSession
@@ -878,7 +878,7 @@ No wrangler config.
 - Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
 - Crons: `15 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>VPOINT_PAY_EMAIL_RECIPIENT
+- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION<br>VPOINT_PAY_EMAIL_RECIPIENT
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_EMAIL_FORWARD_TO<br>VPOINT_EMAIL_RECIPIENT<br>VPOINT_MEMBER_NUMBER
 
 ### `services/collector-vpoint-pay`
@@ -886,14 +886,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-vpoint-pay
 - Required verification: confirm the Email/collection entry point and the resource identity
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-vpoint-pay-collector-poc; buckets=kogane-vpoint-pay-collector-poc)
+- Live resources: LIVE(workers=kogane-vpoint-pay-collector-poc; buckets=kogane-raw-evidence,kogane-vpoint-pay-collector-poc)
 
 #### `kogane-vpoint-pay-collector-poc` — `services/collector-vpoint-pay/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-vpoint-pay-collector-poc
+- R2: SNAPSHOTS → kogane-vpoint-pay-collector-poc<br>DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: VPOINT_PAY_STATE → VPointPayCredentialState
@@ -904,7 +904,7 @@ No wrangler config.
 - Service bindings: —
 - Crons: —
 - Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_PAY_DEVICE_UUID<br>VPOINT_PAY_REFRESH_TOKEN
 
 ### `services/processor`

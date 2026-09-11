@@ -1,11 +1,14 @@
 import { logEvent, logFailure, logStage, type CollectionStage } from "./diagnostics";
 import { timingSafeEqual } from "node:crypto";
+import { collectionTarget } from "./collection-target";
 import { extractVPointEmailCode, isCollectorRecipient } from "./email";
 import { VPointSession } from "./session";
+import { emailSessionRefFor, persistVPointPayEmailRun, persistVPointRun } from "./shared-run";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
 import {
   parseVPointPayEmail,
+  prepareVPointPayEmail,
   shouldForwardToMailbox,
   storeVPointPayEmail,
 } from "./vpoint-pay-email";
@@ -14,10 +17,37 @@ import {
   importStoredVPointPayEmail,
 } from "./vpoint-pay-raw-evidence";
 import { reconcileVPointPayEmails } from "./vpoint-pay-reconcile";
-import type { CollectionFailure, CollectionManifest, CollectionResult } from "./types";
+import type {
+  CollectionFailure,
+  CollectionManifest,
+  CollectionResult,
+  RawArtifact,
+  StoredArtifact,
+} from "./types";
 import { collectVPoint, VPointSessionExpiredError } from "./vpoint";
+import type { PersistRunResult } from "../../../packages/collection/src/index";
 
 export { VPointSession };
+
+/** What the shared target recorded about the run's terminal (03 §2). */
+interface SharedTerminalSummary {
+  outcome: PersistRunResult["outcome"];
+  /** True only for `persisted` and `already_persisted`; nothing else is a finished run. */
+  persisted: boolean;
+  terminalKey: string;
+  terminalDigest: string;
+  objectCount: number;
+  reasonCode?: string;
+}
+
+/**
+ * A finished run, in the shape its storage target produced: the legacy path
+ * ends at the collector manifest plus the central import, the shared path at
+ * the terminal in the DATA bucket.
+ */
+type CollectionOutcome =
+  | { target: "legacy"; result: CollectionResult }
+  | { target: "shared"; manifest: CollectionManifest; terminal: SharedTerminalSummary };
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -92,22 +122,32 @@ export default {
     if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const result = await runCollection(env);
-    const pending = awaitingReauthentication(result);
-    return Response.json(publicResult(result), {
-      status: pending ? 202 : result.status === "failed" ? 502 : 200,
+    const outcome = await runCollection(env);
+    const manifest = outcomeManifest(outcome);
+    const pending = awaitingReauthentication(manifest);
+    const persisted = outcome.target === "legacy" || outcome.terminal.persisted;
+    return Response.json(publicResult(outcome), {
+      status: pending ? 202 : manifest.status === "failed" || !persisted ? 502 : 200,
     });
   },
 
   async scheduled(_controller, env): Promise<void> {
-    const result = await runCollection(env);
-    if (result.status === "failed" && !awaitingReauthentication(result)) {
-      throw new Error(`V Point collection failed; manifest=${result.manifestKey}`);
+    const outcome = await runCollection(env);
+    const manifest = outcomeManifest(outcome);
+    if (manifest.status === "failed" && !awaitingReauthentication(manifest)) {
+      throw new Error(`V Point collection failed; ${runReference(outcome)}`);
+    }
+    // A run whose terminal was not written is not a stored run, whatever the
+    // provider outcome was (G1-01).
+    if (outcome.target === "shared" && !outcome.terminal.persisted) {
+      throw new Error(`V Point run was not persisted; ${runReference(outcome)}`);
     }
   },
 
   async email(message, env, ctx): Promise<void> {
+    const target = collectionTarget(env.COLLECTION_TARGET);
     const emailRunId = crypto.randomUUID();
+    let persistFailure: string | null = null;
     let stage: CollectionStage = "email-receive";
     const onStage = (next: CollectionStage) => {
       stage = next;
@@ -129,27 +169,57 @@ export default {
       const payEmail = raw && isPayTarget ? await parseVPointPayEmail(raw) : null;
       if (payEmail) {
         onStage("email-store");
-        const stored = await storeVPointPayEmail({
-          bucket: env.VPOINT_PAY_SNAPSHOTS,
-          parsed: payEmail,
-          envelopeFrom: message.from,
-          envelopeTo: message.to,
-          expectedRecipient: payRecipient,
-        });
-        logEvent({
-          event: "vpoint-pay-email-stored",
-          runId: emailRunId,
-          eventType: stored.event.eventType,
-          duplicate: stored.duplicate,
-        });
-        ctx.waitUntil(
-          importStoredVPointPayEmail(env.RAW_EVIDENCE_IMPORTER, stored.normalizedKey).catch(() => {
-            logEvent({
-              event: "vpoint-pay-email-raw-evidence-import-failed",
-              runId: emailRunId,
-            });
-          }),
-        );
+        if (target === "shared") {
+          const prepared = await prepareVPointPayEmail({
+            parsed: payEmail,
+            envelopeFrom: message.from,
+            envelopeTo: message.to,
+            expectedRecipient: payRecipient,
+          });
+          const persisted = await persistVPointPayEmailRun(
+            env.DATA,
+            prepared,
+            env.COLLECTOR_SCHEMA_VERSION,
+          );
+          logEvent({
+            event: "vpoint-pay-email-persisted",
+            runId: emailRunId,
+            eventType: prepared.event.eventType,
+            terminalOutcome: persisted.outcome,
+            terminalKey: persisted.terminalKey,
+            terminalDigest: persisted.terminalDigest,
+          });
+          // A redelivered notification is the same run with the same digest,
+          // so `already_persisted` is the expected duplicate answer; anything
+          // else wrote no terminal and must not pass as archived.
+          if (persisted.outcome !== "persisted" && persisted.outcome !== "already_persisted") {
+            persistFailure = persisted.outcome;
+          }
+        } else {
+          const stored = await storeVPointPayEmail({
+            bucket: env.VPOINT_PAY_SNAPSHOTS,
+            parsed: payEmail,
+            envelopeFrom: message.from,
+            envelopeTo: message.to,
+            expectedRecipient: payRecipient,
+          });
+          logEvent({
+            event: "vpoint-pay-email-stored",
+            runId: emailRunId,
+            eventType: stored.event.eventType,
+            duplicate: stored.duplicate,
+          });
+          ctx.waitUntil(
+            importStoredVPointPayEmail(env.RAW_EVIDENCE_IMPORTER, stored.normalizedKey).catch(
+              () => {
+                logEvent({
+                  event: "vpoint-pay-email-raw-evidence-import-failed",
+                  runId: emailRunId,
+                });
+              },
+            ),
+          );
+        }
       }
 
       let forwardError: unknown = null;
@@ -174,11 +244,17 @@ export default {
             onStage("email-auth-complete");
             await session.completeEmailCode(code, emailRunId);
             onStage("post-auth-collection");
-            const result = await runCollection(env, emailRunId);
-            if (result.status === "failed") {
-              throw new Error(
-                `V Point post-auth collection failed; manifest=${result.manifestKey}`,
-              );
+            // One delivered mail, two sources: the notification run and this
+            // V Point run stay separate runs that name the same acquisition
+            // session, derived from the message bytes (03 §3, G1-16).
+            const outcome = await runCollection(env, {
+              parentRunId: emailRunId,
+              ...(target === "shared"
+                ? { acquisitionSessionRef: await emailSessionRefFor(new Uint8Array(raw)) }
+                : {}),
+            });
+            if (outcomeManifest(outcome).status === "failed") {
+              throw new Error(`V Point post-auth collection failed; ${runReference(outcome)}`);
             }
           }
         }
@@ -187,6 +263,10 @@ export default {
       if (forwardError) {
         stage = "email-forward";
         throw forwardError;
+      }
+      if (persistFailure) {
+        stage = "email-store";
+        throw new Error(`V Point Pay notification was not persisted; outcome=${persistFailure}`);
       }
       logEvent({ event: "vpoint-email-handled", runId: emailRunId, status: "success" });
     } catch (error) {
@@ -197,11 +277,16 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-async function runCollection(env: Env, parentRunId?: string): Promise<CollectionResult> {
+async function runCollection(
+  env: Env,
+  acquisition?: { parentRunId?: string; acquisitionSessionRef?: string },
+): Promise<CollectionOutcome> {
+  const target = collectionTarget(env.COLLECTION_TARGET);
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const prefix = runPrefix(startedAt, runId);
-  const artifacts = [];
+  const artifacts: StoredArtifact[] = [];
+  const collected: RawArtifact[] = [];
   const failures: CollectionFailure[] = [];
   let historyTotal = 0;
   let historyPageCount = 0;
@@ -215,7 +300,13 @@ async function runCollection(env: Env, parentRunId?: string): Promise<Collection
     logStage(runId, stage);
   };
   onStage(stage);
-  if (parentRunId) logEvent({ event: "vpoint-post-auth-collection", runId, parentRunId });
+  if (acquisition?.parentRunId) {
+    logEvent({
+      event: "vpoint-post-auth-collection",
+      runId,
+      parentRunId: acquisition.parentRunId,
+    });
+  }
 
   try {
     const sessionCookie = await session.getSession();
@@ -233,29 +324,43 @@ async function runCollection(env: Env, parentRunId?: string): Promise<Collection
     vMoneyHistoryTotal = collection.vMoneyHistoryTotal;
     vMoneyHistoryPageCount = collection.vMoneyHistoryPageCount;
     onStage("artifact-store");
-    for (const artifact of collection.artifacts) {
-      try {
-        artifacts.push(
-          await storeArtifact({
-            bucket: env.SNAPSHOTS,
-            prefix,
-            artifact,
-          }),
-        );
-      } catch (error) {
-        failures.push(failure(`r2:${artifact.dataset}`, error, runId, stage));
+    if (target === "shared") {
+      // The shared target stores every artifact in one terminal-last run, so
+      // there is nothing to write here; `persistRun` does the writing below.
+      collected.push(...collection.artifacts);
+    } else {
+      for (const artifact of collection.artifacts) {
+        try {
+          artifacts.push(
+            await storeArtifact({
+              bucket: env.SNAPSHOTS,
+              prefix,
+              artifact,
+            }),
+          );
+        } catch (error) {
+          failures.push(failure(`r2:${artifact.dataset}`, error, runId, stage));
+        }
       }
     }
-    try {
-      onStage("email-reconcile");
-      emailReconciliation = await reconcileVPointPayEmails({
-        bucket: env.VPOINT_PAY_SNAPSHOTS,
-        vPointArtifacts: collection.artifacts,
-        runId,
-        completedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      failures.push(failure("reconcile:vpoint-pay-email", error, runId, stage));
+    if (target === "legacy") {
+      // The reconciliation lists the legacy V Point Pay email prefix. On the
+      // shared target those notifications are content-addressed runs that no
+      // prefix enumerates, so a report built from the legacy bucket alone
+      // would under-count them; cross-source reconciliation belongs to the
+      // Processor (03 §4, U08) rather than to a terminal artifact that would
+      // state a coverage it does not have.
+      try {
+        onStage("email-reconcile");
+        emailReconciliation = await reconcileVPointPayEmails({
+          bucket: env.VPOINT_PAY_SNAPSHOTS,
+          vPointArtifacts: collection.artifacts,
+          runId,
+          completedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        failures.push(failure("reconcile:vpoint-pay-email", error, runId, stage));
+      }
     }
   } catch (error) {
     failures.push(failure("collect", error, runId, stage));
@@ -272,7 +377,8 @@ async function runCollection(env: Env, parentRunId?: string): Promise<Collection
   }
 
   const completedAt = new Date().toISOString();
-  const status = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
+  const storedCount = target === "shared" ? collected.length : artifacts.length;
+  const status = failures.length === 0 ? "success" : storedCount === 0 ? "failed" : "partial";
   const manifest: CollectionManifest = {
     schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
     source: "v-point",
@@ -288,6 +394,17 @@ async function runCollection(env: Env, parentRunId?: string): Promise<Collection
     failures,
     emailReconciliation,
   };
+  if (target === "shared") {
+    return await persistSharedRun({
+      env,
+      manifest,
+      collected,
+      onStage,
+      ...(acquisition?.acquisitionSessionRef === undefined
+        ? {}
+        : { acquisitionSessionRef: acquisition.acquisitionSessionRef }),
+    });
+  }
   onStage("manifest-store");
   let manifestKey: string;
   try {
@@ -314,7 +431,80 @@ async function runCollection(env: Env, parentRunId?: string): Promise<Collection
     centralStatus: "sealed",
     centralRunId: central.centralRunId,
   });
-  return { ...manifest, manifestKey, central };
+  return { target: "legacy", result: { ...manifest, manifestKey, central } };
+}
+
+/**
+ * Writes the run into the shared DATA bucket: every artifact first, the
+ * terminal last (03 §2). A run that could not be finished writes no terminal
+ * and is never reported as persisted (G1-01); the reason is a machine code and
+ * the pending artifact keys are a count, never provider text.
+ */
+async function persistSharedRun(options: {
+  env: Env;
+  manifest: CollectionManifest;
+  collected: RawArtifact[];
+  onStage: (stage: CollectionStage) => void;
+  acquisitionSessionRef?: string;
+}): Promise<CollectionOutcome> {
+  const { env, manifest } = options;
+  options.onStage("terminal-store");
+  const persisted = await persistVPointRun(env.DATA, {
+    runId: manifest.runId,
+    producerVersion: manifest.schemaVersion,
+    attemptId: `attempt-${manifest.runId}`,
+    startedAt: manifest.startedAt,
+    completedAt: manifest.completedAt,
+    status: manifest.status,
+    artifacts: options.collected,
+    failureCodes: manifest.failures.map((entry) => entry.failureCode ?? ""),
+    ...(options.acquisitionSessionRef === undefined
+      ? {}
+      : { acquisitionSessionRef: options.acquisitionSessionRef }),
+  });
+  const succeeded = persisted.outcome === "persisted" || persisted.outcome === "already_persisted";
+  const objects = persisted.outcome === "conflict" ? [] : persisted.objects;
+  const terminal: SharedTerminalSummary = {
+    outcome: persisted.outcome,
+    persisted: succeeded,
+    terminalKey: persisted.terminalKey,
+    terminalDigest: persisted.terminalDigest,
+    objectCount: objects.length,
+    ...(succeeded ? {} : { reasonCode: reasonCodeOf(persisted) }),
+  };
+  const described = new Map(options.collected.map((artifact) => [artifact.filename, artifact]));
+  const stored: StoredArtifact[] = succeeded
+    ? objects.map((object) => ({
+        dataset: described.get(object.artifactKey)?.dataset ?? object.artifactKey,
+        key: object.key,
+        mediaType: described.get(object.artifactKey)?.mediaType ?? "application/json",
+        sha256: object.sha256,
+        bytes: object.byteSize,
+      }))
+    : [];
+  logEvent({
+    event: "vpoint-collection-persisted",
+    runId: manifest.runId,
+    status: manifest.status,
+    historyTotal: manifest.historyTotal,
+    historyPageCount: manifest.historyPageCount,
+    vMoneyHistoryTotal: manifest.vMoneyHistoryTotal,
+    vMoneyHistoryPageCount: manifest.vMoneyHistoryPageCount,
+    artifactCount: options.collected.length,
+    failureCount: manifest.failures.length,
+    terminalOutcome: terminal.outcome,
+    terminalKey: terminal.terminalKey,
+    terminalDigest: terminal.terminalDigest,
+    objectCount: terminal.objectCount,
+    ...(terminal.reasonCode === undefined ? {} : { reasonCode: terminal.reasonCode }),
+  });
+  return { target: "shared", manifest: { ...manifest, artifacts: stored }, terminal };
+}
+
+function reasonCodeOf(result: PersistRunResult): string {
+  return result.outcome === "conflict" || result.outcome === "incomplete"
+    ? result.reasonCode
+    : "persisted";
 }
 
 function sessionStub(env: Env): DurableObjectStub<VPointSession> {
@@ -344,30 +534,57 @@ function failure(
   return { operation, ...detail, message: detail.failureCode, stage };
 }
 
-function publicResult(result: CollectionResult): object {
+function outcomeManifest(outcome: CollectionOutcome): CollectionManifest {
+  return outcome.target === "legacy" ? outcome.result : outcome.manifest;
+}
+
+/** How a message names the run without quoting anything a provider sent. */
+function runReference(outcome: CollectionOutcome): string {
+  return outcome.target === "legacy"
+    ? `manifest=${outcome.result.manifestKey}`
+    : `terminal=${outcome.terminal.terminalKey}; outcome=${outcome.terminal.outcome}`;
+}
+
+function publicResult(outcome: CollectionOutcome): object {
+  const manifest = outcomeManifest(outcome);
   return {
-    runId: result.runId,
-    status: result.status,
-    historyTotal: result.historyTotal,
-    historyPageCount: result.historyPageCount,
-    artifactCount: result.artifacts.length,
-    failureCount: result.failures.length,
-    emailReconciliation: result.emailReconciliation,
-    reauthenticationPending: awaitingReauthentication(result),
-    manifestKey: result.manifestKey,
-    central: {
-      centralRunId: result.central.centralRunId,
-      sealed: result.central.sealed,
-    },
+    runId: manifest.runId,
+    status: manifest.status,
+    historyTotal: manifest.historyTotal,
+    historyPageCount: manifest.historyPageCount,
+    artifactCount: manifest.artifacts.length,
+    failureCount: manifest.failures.length,
+    emailReconciliation: manifest.emailReconciliation,
+    reauthenticationPending: awaitingReauthentication(manifest),
+    ...(outcome.target === "legacy"
+      ? {
+          manifestKey: outcome.result.manifestKey,
+          central: {
+            centralRunId: outcome.result.central.centralRunId,
+            sealed: outcome.result.central.sealed,
+          },
+        }
+      : {
+          terminal: {
+            outcome: outcome.terminal.outcome,
+            persisted: outcome.terminal.persisted,
+            terminalKey: outcome.terminal.terminalKey,
+            terminalDigest: outcome.terminal.terminalDigest,
+            objectCount: outcome.terminal.objectCount,
+            ...(outcome.terminal.reasonCode === undefined
+              ? {}
+              : { reasonCode: outcome.terminal.reasonCode }),
+          },
+        }),
   };
 }
 
-function awaitingReauthentication(result: CollectionResult): boolean {
+function awaitingReauthentication(manifest: CollectionManifest): boolean {
   return (
-    result.status === "failed" &&
-    result.failures.length === 1 &&
+    manifest.status === "failed" &&
+    manifest.failures.length === 1 &&
     ["VPointReauthenticationPendingError", "VPointSessionExpiredError"].includes(
-      result.failures[0]?.errorType ?? "",
+      manifest.failures[0]?.errorType ?? "",
     )
   );
 }

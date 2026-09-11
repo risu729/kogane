@@ -3,18 +3,22 @@ import {
   safeErrorDetails,
 } from "../../../packages/collector-diagnostics/src/index";
 import { parseCredential } from "./auth";
+import { collectionTarget } from "./collection-target";
 import { parseHandshakeKey, secretEquals } from "./crypto";
 import { collectMainSiteArtifacts } from "./main-site";
 import { collectDomesticArtifacts, collectForeignArtifacts } from "./sbi";
+import { datasetScope, persistSbiRun, safeFailureCode, type SharedFailure } from "./shared-run";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
 import { backfillStoredRuns, importStoredRun, type ImportRunResult } from "./raw-evidence";
 import type {
   Artifact,
+  ArtifactManifest,
   CollectionFailure,
   CollectionManifest,
   CollectionScope,
   SbiEndpoints,
 } from "./types";
+import type { PersistRunResult } from "../../../packages/collection/src/index";
 
 const SBI_ENDPOINTS: SbiEndpoints = {
   authEntryUrl: "https://login.sbisec.co.jp/login/entry",
@@ -22,6 +26,29 @@ const SBI_ENDPOINTS: SbiEndpoints = {
   foreignStockBaseUrl: "https://fstockapp.sbisec.co.jp",
   mainSiteBaseUrl: "https://www.sbisec.co.jp",
 };
+
+/** What the shared target recorded about the run's terminal (03 §2). */
+interface SharedTerminalSummary {
+  outcome: PersistRunResult["outcome"];
+  /** True only for `persisted` and `already_persisted`; nothing else is a finished run. */
+  persisted: boolean;
+  terminalKey: string;
+  terminalDigest: string;
+  objectCount: number;
+  reasonCode?: string;
+}
+
+/**
+ * A finished run, in the shape its storage target produced: the legacy path
+ * ends at the collector manifest plus the central import, the shared path at
+ * the terminal in the DATA bucket.
+ */
+type CollectionOutcome =
+  | ({ target: "legacy" } & CollectionManifest & {
+        manifestKey: string;
+        central: ImportRunResult;
+      })
+  | ({ target: "shared" } & CollectionManifest & { terminal: SharedTerminalSummary });
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -63,8 +90,12 @@ export default {
       const scope = parseScope(url.searchParams.get("scope"));
       const window = parseWindow(url.searchParams.get("from"), url.searchParams.get("to"));
       const result = await runCollection(env, scope, window);
-      return Response.json(result, {
-        status: result.status === "failed" ? 502 : 200,
+      const persisted = result.target === "legacy" || result.terminal.persisted;
+      // The discriminator is internal: the legacy response body stays exactly
+      // what it was, and the shared one is told apart by its `terminal`.
+      const { target: _target, ...body } = result;
+      return Response.json(body, {
+        status: result.status === "failed" || !persisted ? 502 : 200,
       });
     } catch (error) {
       return Response.json(
@@ -86,12 +117,8 @@ async function runCollection(
   env: Env,
   scope: CollectionScope,
   window?: { from: string; to: string },
-): Promise<
-  CollectionManifest & {
-    manifestKey: string;
-    central: ImportRunResult;
-  }
-> {
+): Promise<CollectionOutcome> {
+  const target = collectionTarget(env.COLLECTION_TARGET);
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const diagnostic = createDiagnostics("sbi-securities", runId);
@@ -106,6 +133,7 @@ async function runCollection(
     );
     const artifacts: Artifact[] = [];
     const failures: CollectionFailure[] = [];
+    const safeFailures: SharedFailure[] = [];
 
     if (scope === "all" || scope === "domestic") {
       try {
@@ -131,10 +159,12 @@ async function runCollection(
             );
           } catch (error) {
             failures.push(failure("domestic", "main-site", error));
+            safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
           }
         }
       } catch (error) {
         failures.push(failure("domestic", "passkey-mts", error));
+        safeFailures.push({ scope: "domestic", code: safeFailureCode(error) });
       }
     }
 
@@ -152,34 +182,43 @@ async function runCollection(
         );
       } catch (error) {
         failures.push(failure("foreign", "passkey-graphql", error));
+        safeFailures.push({ scope: "foreign", code: safeFailureCode(error) });
       }
     }
 
-    const artifactManifests = [];
-    for (const artifact of artifacts) {
-      try {
-        artifactManifests.push(
-          await diagnostic.step("artifact-write", () =>
-            storeArtifact({
-              bucket: env.SNAPSHOTS,
-              prefix,
-              artifact,
-            }),
-          ),
-        );
-      } catch (error) {
-        failures.push(
-          failure(
-            artifact.dataset.startsWith("foreign") ? "foreign" : "domestic",
-            `r2:${artifact.dataset}`,
-            error,
-          ),
-        );
+    const artifactManifests: ArtifactManifest[] = [];
+    if (target === "legacy") {
+      for (const artifact of artifacts) {
+        try {
+          artifactManifests.push(
+            await diagnostic.step("artifact-write", () =>
+              storeArtifact({
+                bucket: env.SNAPSHOTS,
+                prefix,
+                artifact,
+              }),
+            ),
+          );
+        } catch (error) {
+          failures.push(
+            failure(
+              artifact.dataset.startsWith("foreign") ? "foreign" : "domestic",
+              `r2:${artifact.dataset}`,
+              error,
+            ),
+          );
+          safeFailures.push({
+            scope: datasetScope(artifact.dataset),
+            code: safeFailureCode(error),
+          });
+        }
       }
     }
     const completedAt = new Date().toISOString();
-    const status =
-      failures.length === 0 ? "success" : artifactManifests.length === 0 ? "failed" : "partial";
+    // The shared target stores every collected artifact in one terminal-last
+    // run, so what it collected is what it will store.
+    const storedCount = target === "shared" ? artifacts.length : artifactManifests.length;
+    const status = failures.length === 0 ? "success" : storedCount === 0 ? "failed" : "partial";
     const manifest: CollectionManifest = {
       schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       source: "sbi-securities",
@@ -191,6 +230,69 @@ async function runCollection(
       artifacts: artifactManifests,
       failures,
     };
+    if (target === "shared") {
+      const persisted = await diagnostic.step("terminal-write", () =>
+        persistSbiRun(env.DATA, {
+          runId,
+          producerVersion: manifest.schemaVersion,
+          attemptId: `attempt-${runId}`,
+          startedAt,
+          completedAt,
+          status,
+          scope,
+          ...(window === undefined ? {} : { window }),
+          artifacts,
+          failures: safeFailures,
+        }),
+      );
+      const succeeded =
+        persisted.outcome === "persisted" || persisted.outcome === "already_persisted";
+      const objects = persisted.outcome === "conflict" ? [] : persisted.objects;
+      const described = new Map<string, Artifact>(
+        artifacts.map((artifact) => [`${artifact.dataset}.json`, artifact]),
+      );
+      const terminal: SharedTerminalSummary = {
+        outcome: persisted.outcome,
+        persisted: succeeded,
+        terminalKey: persisted.terminalKey,
+        terminalDigest: persisted.terminalDigest,
+        objectCount: objects.length,
+        ...(succeeded ? {} : { reasonCode: reasonCodeOf(persisted) }),
+      };
+      console.log(
+        JSON.stringify({
+          event: "sbi-collection-persisted",
+          runId,
+          scope,
+          status,
+          artifactCount: artifacts.length,
+          failureCount: failures.length,
+          terminalOutcome: terminal.outcome,
+          terminalKey: terminal.terminalKey,
+          terminalDigest: terminal.terminalDigest,
+          objectCount: terminal.objectCount,
+          ...(terminal.reasonCode === undefined ? {} : { reasonCode: terminal.reasonCode }),
+        }),
+      );
+      diagnostic.finish(succeeded ? status : "failed");
+      return {
+        target: "shared",
+        ...manifest,
+        artifacts: succeeded
+          ? objects.map((object) => {
+              const source = described.get(object.artifactKey);
+              return {
+                dataset: source?.dataset ?? object.artifactKey,
+                key: object.key,
+                sha256: object.sha256,
+                bytes: object.byteSize,
+                ...(source?.window ? { window: source.window } : {}),
+              };
+            })
+          : [],
+        terminal,
+      };
+    }
     const manifestKey = await diagnostic.step("manifest-write", () =>
       storeManifest({
         bucket: env.SNAPSHOTS,
@@ -215,11 +317,17 @@ async function runCollection(
       }),
     );
     diagnostic.finish(status);
-    return { ...manifest, manifestKey, central };
+    return { target: "legacy", ...manifest, manifestKey, central };
   } catch (error) {
     diagnostic.finish("failed");
     throw error;
   }
+}
+
+function reasonCodeOf(result: PersistRunResult): string {
+  return result.outcome === "conflict" || result.outcome === "incomplete"
+    ? result.reasonCode
+    : "persisted";
 }
 
 function authorized(request: Request, expected: string | undefined): boolean {

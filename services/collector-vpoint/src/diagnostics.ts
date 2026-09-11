@@ -2,6 +2,7 @@ export type CollectionStage =
   | "balance-read"
   | "artifact-store"
   | "manifest-store"
+  | "terminal-store"
   | "central-import"
   | "session-load"
   | "email-challenge-request"

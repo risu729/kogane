@@ -4,12 +4,19 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["ES2022", "WebWorker"],
-    "types": ["node", "bun"],
+    "types": ["node", "bun", "@cloudflare/vitest-plugin/types"],
     "strict": true,
     "noEmit": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "env.d.ts", "worker-configuration.d.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "worker-test/**/*.ts",
+    "vitest.config.ts",
+    "env.d.ts",
+    "worker-configuration.d.ts"
+  ]
 }

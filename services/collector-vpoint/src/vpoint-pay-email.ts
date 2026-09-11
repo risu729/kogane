@@ -46,6 +46,25 @@ export interface StoredVPointPayEmail {
   duplicate: boolean;
 }
 
+/**
+ * The pair this collector keeps for one notification: the message as it
+ * arrived and the normalized event derived from it, with the digests and the
+ * legacy object keys. Both storage targets persist exactly these bytes —
+ * `storeVPointPayEmail` into the per-source bucket, the shared target into the
+ * common DATA bucket — so switching the target cannot change what is kept.
+ */
+export interface PreparedVPointPayEmail {
+  event: VPointPayEmailEvent;
+  raw: Uint8Array;
+  rawSha256: string;
+  rawKey: string;
+  normalized: Uint8Array;
+  normalizedSha256: string;
+  normalizedKey: string;
+  delivery: "direct" | "forwarded-rfc822";
+  outerMessageSha256: string;
+}
+
 export async function parseVPointPayEmail(
   raw: ArrayBuffer | Uint8Array,
 ): Promise<ParsedVPointPayEmail | null> {
@@ -57,13 +76,12 @@ export function shouldForwardToMailbox(parsed: ParsedVPointPayEmail | null): boo
   return parsed === null || parsed.delivery === "direct";
 }
 
-export async function storeVPointPayEmail(options: {
-  bucket: R2Bucket;
+export async function prepareVPointPayEmail(options: {
   parsed: ParsedVPointPayEmail;
   envelopeFrom: string;
   envelopeTo: string;
   expectedRecipient: string;
-}): Promise<StoredVPointPayEmail> {
+}): Promise<PreparedVPointPayEmail> {
   const { raw } = options.parsed;
   const envelopeFrom = canonicalMailbox(options.envelopeFrom);
   const envelopeTo = canonicalMailbox(options.envelopeTo);
@@ -96,6 +114,28 @@ export async function storeVPointPayEmail(options: {
   const normalizedKey = `${prefix}.json`;
   const normalized = new TextEncoder().encode(JSON.stringify(event));
   const normalizedSha256 = await sha256Hex(normalized);
+  return {
+    event,
+    raw,
+    rawSha256: event.id,
+    rawKey,
+    normalized,
+    normalizedSha256,
+    normalizedKey,
+    delivery: options.parsed.delivery,
+    outerMessageSha256: options.parsed.outerMessageSha256,
+  };
+}
+
+export async function storeVPointPayEmail(options: {
+  bucket: R2Bucket;
+  parsed: ParsedVPointPayEmail;
+  envelopeFrom: string;
+  envelopeTo: string;
+  expectedRecipient: string;
+}): Promise<StoredVPointPayEmail> {
+  const { event, raw, rawKey, normalized, normalizedSha256, normalizedKey } =
+    await prepareVPointPayEmail(options);
   const rawStorage = {
     bytes: raw,
     contentType: "message/rfc822",

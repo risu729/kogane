@@ -392,3 +392,166 @@ importer's `validateVpassRun` over a synthetic legacy snapshot and the shared
 plan over the same raw envelopes name the same digest for all six artifacts,
 `manifest.json` included. No provider was contacted and no production bucket
 was read or written.
+
+### `v-point` (`services/collector-vpoint`)
+
+| Artifact key                 | Role                | Bytes                                                   |
+| ---------------------------- | ------------------- | ------------------------------------------------------- |
+| `balance-info.json`          | `collector_derived` | the API response text, transport-decoded and re-encoded |
+| `smfg-point.json`            | `collector_derived` | same                                                    |
+| `history-page-NNNN.json`     | `collector_derived` | one history page each, in page order                    |
+| `vmoney-history-page-*.json` | `collector_derived` | one V Money history page each                           |
+| `collection-summary.json`    | `collector_summary` | the collector's own page/total counts                   |
+
+Sanitizer: the collector never stores a request, a header or a cookie — it
+stores the decoded JSON response text it already writes to the legacy bucket
+today, and those are the bytes the importer forwards to the central store. The
+session cookie lives in the `VPointSession` Durable Object and appears in no
+artifact. The collector manifest itself is _not_ stored as an artifact in
+shared mode: the terminal is the run record, so `manifest.json` (role
+`collector_manifest` centrally) has no shared-mode equivalent.
+
+Terminal: `source: v-point`, `producer: collector-vpoint`, `producerVersion:
+COLLECTOR_SCHEMA_VERSION` (`vpoint-worker-poc-v2`), `runId` the collector's own
+run UUID, `attemptId: attempt-<runId>`, `requestedScope: full_snapshot` over
+unit `account`, one unit (`account`/`collection`) whose `artifactCount` is the
+stored artifact count, `providerOutcome` from the run status, `coverageStatus`
+`complete`/`partial`/`unknown` for `success`/`partial`/`failed`, and
+`safeErrorCode` from the run's first safe failure code (`collector_failed` when
+a failure carried none). `ranges`, `reports` and `transformations` are empty.
+
+Not carried over to shared mode: the V Point Pay email reconciliation report.
+It is built by listing the legacy `raw/v-point-pay-email/` prefix, and in
+shared mode those notifications are content-addressed runs that no prefix
+enumerates — a report built from the legacy bucket alone would silently
+under-count them. Cross-source reconciliation belongs to the Processor, which
+reads terminals (03 §4). In `legacy` mode it is produced exactly as before.
+
+### `v-point-pay-email` (Email route of `services/collector-vpoint`)
+
+| Artifact key            | Role                | Bytes                                          |
+| ----------------------- | ------------------- | ---------------------------------------------- |
+| `notification.eml`      | `user_capture`      | the notification message exactly as it arrived |
+| `normalized-event.json` | `collector_derived` | the parsed event with its source provenance    |
+
+Sanitizer: the existing email handling is unchanged — the envelope recipient
+must match `VPOINT_PAY_EMAIL_RECIPIENT`, a directly delivered message must come
+from the V Point Pay sender, and the stored event records
+`sourceVerification: source_unverified` because the Email event exposes no
+trusted SPF/DKIM result. The V Point _login code_ mail is never stored in
+either mode: it is parsed for the code and dropped.
+
+Terminal: `source: v-point-pay-email`, `runId` the SHA-256 of the stored
+message, `attemptId: message-<that digest>`, run window the message's own date,
+`providerOutcome: success`, `coverageStatus: complete`, one unit
+(`notification`/`message`), and one transformation (`extracted`,
+`vpoint-pay-email-parser`) from `notification.eml` to `normalized-event.json`.
+Every field is derived from the message, so a redelivery produces the same
+terminal digest and is answered `already_persisted` — the shared-target
+equivalent of the legacy duplicate check. `producerVersion` is part of that
+digest: a mail redelivered after a `COLLECTOR_SCHEMA_VERSION` bump is a
+`conflict`, and the handler then fails the delivery rather than overwrite the
+terminal already written for that message.
+
+`acquisitionSessionRef` is `email-<sha256 of the message as it arrived>` on the
+notification run, and the same value on the V Point run that the same delivered
+mail triggers through the email-code path. One session, two sources, two runs,
+neither merged into the other (G1-16, 03 §3).
+
+### `v-point-pay` (`services/collector-vpoint-pay`)
+
+| Artifact key               | Role                | Bytes                                            |
+| -------------------------- | ------------------- | ------------------------------------------------ |
+| `balance.json`             | `collector_derived` | the prepaid balance response text                |
+| `transactions-yyyyMM.json` | `collector_derived` | one statement month each, in month order         |
+| `collection-summary.json`  | `collector_summary` | the collector's own month and transaction counts |
+
+Sanitizer: the refresh token, the device UUID and the access token live in the
+Durable Object and in the request headers `collectVPointPay` builds. None of
+them is an artifact, and a failure becomes a machine code
+(`credential_configuration_required`, `authentication_required`,
+`provider_protocol_failed`, `provider_http_failed`, `operation_failed`) rather
+than the redacted provider message the legacy manifest keeps — a terminal
+states codes only (12 §6).
+
+Terminal: `source: v-point-pay`, `producer: collector-vpoint-pay`,
+`producerVersion: COLLECTOR_SCHEMA_VERSION` (`vpoint-pay-worker-poc-v1`),
+`requestedScope: month_range` from the provider's own `inquiry_period` to the
+current JST month, one matching `requested-months` range with basis `source`,
+one unit (`account`/`collection`), and `providerOutcome` from the run status.
+When the month window is unknown — a run that failed before the balance
+response — the scope is `unspecified` and no range is stated rather than a
+guessed one.
+
+This collector is **stopped**: `/trigger`, `/probe` and `/reset-credentials`
+answer 410, there is no cron, and the notification mail this source is actually
+observed through is collected by `services/collector-vpoint` as
+`v-point-pay-email`. The shared target is therefore the path a future
+re-enable writes to; the Durable Object's single-collection-in-flight exclusion
+is unchanged by it (G3-14), and switching the target adds no scheduler.
+
+### `mobile-suica` (`services/collector-mobile-suica`)
+
+| Artifact key                | Role                         | Bytes                                           |
+| --------------------------- | ---------------------------- | ----------------------------------------------- |
+| `sf-history-page-0001.html` | `sanitized_provider_capture` | the CP932 history page, `baseVariable` redacted |
+| `sf-history.json`           | `collector_derived`          | the rows parsed from that page                  |
+| `collection-summary.json`   | `collector_summary`          | the collector's own counts and cookie names     |
+
+Sanitizer: `src/sanitize.ts` (`sanitizeHistoryHtml`) replaces the hidden
+`baseVariable` session field with the redaction sentinel and proves the CP932
+round trip before anything is stored — the same bytes the importer verifies and
+forwards centrally today. The session envelope, the cookie header and the
+browser bootstrap never become artifacts.
+
+Terminal: `source: mobile-suica`, `producer: collector-mobile-suica`,
+`producerVersion: COLLECTOR_SCHEMA_VERSION` (`mobile-suica-worker-poc-v2`),
+`requestedScope: full_snapshot` over unit `account` with the requested day as
+an `as-of-selector` range (`selector`/`date`/`request`) — the date selects the
+page, it is not the extent of what came back. Two transformations are stated:
+`redacted` by `mobile-suica-history-sanitizer` producing the HTML (with no
+input artifact, because the unredacted page is deliberately not retained) and
+`extracted` by `mobile-suica-history-normalizer` from the HTML to
+`sf-history.json`.
+
+`coverageStatus` is `complete` only when the run succeeded **and** the
+collector proved it reached the end of the history; an unproven boundary is
+`partial` with `history_boundary_unproven`, however clean the transport was.
+The media type in the terminal is `text/html`: `terminal-v1` media types carry
+no parameters, and `text/html` is what the central descriptor already declares
+for this artifact, with the CP932 charset a constant of the source.
+
+### `sbi-securities` (`services/collector-sbi-securities`)
+
+| Artifact key                   | Role                | Unit       |
+| ------------------------------ | ------------------- | ---------- |
+| `domestic-cash-positions.json` | `collector_derived` | `domestic` |
+| `account-assets-current.json`  | `collector_derived` | `domestic` |
+| `yen-detail-history.json`      | `collector_derived` | `domestic` |
+| `domestic-trade-records.json`  | `collector_derived` | `domestic` |
+| `foreign-cash-positions.json`  | `collector_derived` | `foreign`  |
+| `foreign-cash-balances.json`   | `collector_derived` | `foreign`  |
+| `foreign-trade-records.json`   | `collector_derived` | `foreign`  |
+
+The bytes are `JSON.stringify(artifact.body)` — the collector's re-encoded view
+of each response, exactly what it writes to the per-source bucket today and
+what the importer forwards centrally. A dataset is attributed to a unit by the
+same rule the importer uses (`foreign-` prefix → `foreign`).
+
+Sanitizer: the passkey credential, the handshake key and the MTS/GraphQL
+session ids stay in the secrets and in `src/sbi.ts`; none of them is an
+artifact. A failure reaches the terminal only as a machine code
+(`provider_http_failed`, `provider_timeout`, `provider_network_failed`,
+`credential_configuration_required`, `authentication_required`,
+`provider_response_invalid`, `operation_failed`) derived through
+`safeErrorDetails`, never as the redacted provider message the legacy manifest
+keeps (12 §6).
+
+Terminal: `source: sbi-securities`, `producer: collector-sbi-securities`,
+`producerVersion: COLLECTOR_SCHEMA_VERSION` (`sbi-worker-poc-v1`), one unit per
+requested scope (`domestic`, `foreign`, kind `scope`) carrying that scope's own
+artifact count, coverage and error code — a scope that failed does not make the
+other scope's data look incomplete, and a scope that produced nothing is
+`unknown` rather than an observation of zero. `requestedScope` is a
+`date_range` with a matching `requested-window` range when the trigger named a
+window, and `full_snapshot` with no range when it did not.

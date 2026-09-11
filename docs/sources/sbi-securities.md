@@ -390,3 +390,23 @@ Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_p
 - [Cloudflare Containers outbound制御](https://developers.cloudflare.com/containers/platform-details/outbound-traffic/)
 - [Cloudflare Containers概要](https://developers.cloudflare.com/containers/get-started/)
 - [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
+
+## 追記: 共通DATA R2への切替（U09）
+
+`services/collector-sbi-securities`にvar `COLLECTION_TARGET`（既定`legacy`）と
+binding `DATA`（`kogane-raw-evidence`）を追加した。`legacy`は現行経路のままで、
+per-source bucketとImporter service bindingを変更しない。`shared`では
+同じ`JSON.stringify(body)` bytesを`objects/<2hex>/<sha256>`へ保存し、
+`runs/sbi-securities/<runId>/terminal.json`を最後に書き、旧APIへのuploadは行わない。
+
+artifactは全て role `collector_derived`で、dataset名の`foreign-` prefixにより
+`domestic`/`foreign` unitへ割り当てる（Importerと同じ規則）。terminalは要求scopeごとに
+unitを持ち、そのscopeのartifact数・coverage・safe codeを個別に記録する。
+片方のscopeの失敗がもう片方を不完全に見せず、artifact 0件のscopeは
+`unknown`であって残高0の観測ではない。triggerが期間を指定した場合のみ
+`requested-window` rangeと`date_range`を記録する。
+
+passkey credential、handshake key、session idはartifactにもterminalにも出さず、
+失敗は`safeErrorDetails`由来の機械codeだけを残す。Worker名、cron、secretは変更しない。
+切替順はProcessor（`SHARED_R2_INGEST_ENABLED`）を先に有効化し、その後で
+`COLLECTION_TARGET=shared`。rollbackは`legacy`へ戻すだけである。詳細は`docs/collection.md`。

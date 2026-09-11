@@ -591,7 +591,7 @@
         "requiredVerification": "contract tests, live/secret/resource mapping confirmed",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-mobile-suica-collector-poc; buckets=kogane-mobile-suica-collector-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-mobile-suica-collector-poc; buckets=kogane-mobile-suica-collector-poc,kogane-raw-evidence)"
       },
       "workers": [
         {
@@ -609,6 +609,11 @@
             {
               "binding": "SNAPSHOTS",
               "bucket": "kogane-mobile-suica-collector-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -628,6 +633,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [
@@ -1319,7 +1325,7 @@
         "requiredVerification": "contract tests and resource identity; secret material is not moved",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-sbi-collector-poc; buckets=kogane-sbi-collector-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-sbi-collector-poc; buckets=kogane-raw-evidence,kogane-sbi-collector-poc)"
       },
       "workers": [
         {
@@ -1338,6 +1344,11 @@
               "binding": "SNAPSHOTS",
               "bucket": "kogane-sbi-collector-poc",
               "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
+              "live": true
             }
           ],
           "kv": [],
@@ -1355,6 +1366,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [],
@@ -1719,7 +1731,7 @@
         "requiredVerification": "keep the Email route and the DO class/tag/storage",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-vpoint-collector-poc; buckets=kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-vpoint-collector-poc; buckets=kogane-raw-evidence,kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)"
       },
       "workers": [
         {
@@ -1742,6 +1754,11 @@
             {
               "binding": "VPOINT_PAY_SNAPSHOTS",
               "bucket": "kogane-vpoint-pay-collector-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -1770,6 +1787,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION",
             "VPOINT_PAY_EMAIL_RECIPIENT"
           ],
@@ -1793,7 +1811,7 @@
         "requiredVerification": "confirm the Email/collection entry point and the resource identity",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-vpoint-pay-collector-poc; buckets=kogane-vpoint-pay-collector-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-vpoint-pay-collector-poc; buckets=kogane-raw-evidence,kogane-vpoint-pay-collector-poc)"
       },
       "workers": [
         {
@@ -1809,6 +1827,11 @@
             {
               "binding": "SNAPSHOTS",
               "bucket": "kogane-vpoint-pay-collector-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -1832,6 +1855,7 @@
           "vpcNetworks": [],
           "serviceBindings": [],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [
@@ -2270,12 +2294,16 @@
         "readers": [
           "kogane-evidence-browser",
           "kogane-ingest",
+          "kogane-mobile-suica-collector-poc",
           "kogane-moneyforward-collector-poc",
           "kogane-myjcb-collector-poc",
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic",
+          "kogane-sbi-collector-poc",
           "kogane-sony-bank-collector-poc",
-          "kogane-vpass-collector-poc"
+          "kogane-vpass-collector-poc",
+          "kogane-vpoint-collector-poc",
+          "kogane-vpoint-pay-collector-poc"
         ]
       },
       {

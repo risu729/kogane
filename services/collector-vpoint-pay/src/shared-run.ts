@@ -1,0 +1,161 @@
+// Shared DATA-bucket persistence for the V Point Pay app collector (unified
+// plan U09, chapter 03, decisions D7/D12).
+//
+// With `COLLECTION_TARGET=shared` the Durable Object writes the run through
+// `packages/collection` — every artifact content-addressed under `objects/`,
+// the `terminal-v1` manifest last — instead of writing artifacts and a
+// collector manifest into the per-source bucket. The bytes are identical: the
+// same decoded API response text the legacy path stores.
+//
+// The app collector is stopped (`/trigger`, `/probe` and `/reset-credentials`
+// answer 410 and there is no cron), so this is the target a future re-enable
+// writes to; the exclusion that keeps one collection in flight per Durable
+// Object is unchanged by it.
+//
+// Nothing here logs. The refresh token, the device UUID and the access token
+// stay in the Durable Object and in the request headers `collectVPointPay`
+// builds; none of them is an artifact and none reaches this module.
+import {
+  persistRun,
+  sha256Hex,
+  type CoverageStatus,
+  type PersistArtifact,
+  type PersistRunPlan,
+  type PersistRunResult,
+  type ProviderOutcome,
+  type R2BucketLike,
+  type TerminalRange,
+  type TerminalRunFields,
+} from "../../../packages/collection/src/index";
+import type { RawArtifact } from "./types";
+
+export const VPOINT_PAY_SOURCE = "v-point-pay";
+export const SHARED_PRODUCER = "collector-vpoint-pay";
+const UNIT_KEY = "account";
+const UNIT_KIND = "collection";
+const FALLBACK_ERROR_CODE = "collector_failed";
+/** The manifest's own machine-code charset; a code that fails it is replaced. */
+const SAFE_CODE = /^[a-z0-9][a-z0-9_-]{0,99}$/u;
+const MONTH = /^\d{4}(0[1-9]|1[0-2])$/u;
+
+export interface VPointPaySharedRun {
+  readonly runId: string;
+  readonly producerVersion: string;
+  readonly attemptId: string;
+  readonly operationId?: string;
+  readonly acquisitionSessionRef?: string;
+  readonly startedAt: string;
+  readonly completedAt: string;
+  readonly status: "success" | "partial" | "failed";
+  /** The artifacts `collectVPointPay` produced, in collection order. */
+  readonly artifacts: readonly RawArtifact[];
+  /** First and last statement month the run asked for, `yyyyMM`, when known. */
+  readonly earliestMonth: string | null;
+  readonly latestMonth: string | null;
+  /** Safe failure codes of the run, most significant first; never provider text. */
+  readonly failureCodes: readonly string[];
+}
+
+/** Builds the plan without writing anything, so a test can read the manifest. */
+export async function vPointPayRunPlan(run: VPointPaySharedRun): Promise<PersistRunPlan> {
+  const artifacts = await Promise.all(
+    run.artifacts.map((artifact) => plannedArtifact(artifact, role(artifact.dataset))),
+  );
+  const providerOutcome: ProviderOutcome = run.status;
+  const coverageStatus = coverageFor(providerOutcome);
+  const safeErrorCode = providerOutcome === "success" ? undefined : failureCode(run.failureCodes);
+  // The month window the provider itself declares (`inquiry_period`) through
+  // the current JST month; a range is only stated when both ends are known.
+  const startValue = month(run.earliestMonth);
+  const endValue = month(run.latestMonth);
+  const ranges: TerminalRange[] =
+    startValue === null || endValue === null
+      ? []
+      : [
+          {
+            rangeKey: "requested-months",
+            rangeKind: "requested",
+            precision: "month",
+            basis: "source",
+            startValue,
+            endValue,
+            unitKey: UNIT_KEY,
+          },
+        ];
+  const fields: TerminalRunFields = {
+    source: VPOINT_PAY_SOURCE,
+    producer: SHARED_PRODUCER,
+    producerVersion: run.producerVersion,
+    runId: run.runId,
+    attemptId: run.attemptId,
+    ...(run.operationId === undefined ? {} : { operationId: run.operationId }),
+    ...(run.acquisitionSessionRef === undefined
+      ? {}
+      : { acquisitionSessionRef: run.acquisitionSessionRef }),
+    requestedScope: {
+      scopeKind: startValue === null || endValue === null ? "unspecified" : "month_range",
+      startValue,
+      endValue,
+      unitKeys: [UNIT_KEY],
+    },
+    startedAt: run.startedAt,
+    completedAt: run.completedAt,
+    providerOutcome,
+    coverageStatus,
+    persistenceComplete: true,
+    ...(safeErrorCode === undefined ? {} : { safeErrorCode }),
+    units: [
+      {
+        unitKey: UNIT_KEY,
+        unitKind: UNIT_KIND,
+        artifactCount: artifacts.length,
+        coverageStatus,
+        ...(safeErrorCode === undefined ? {} : { safeErrorCode }),
+      },
+    ],
+    ranges,
+    reports: [],
+    transformations: [],
+  };
+  return { run: fields, artifacts };
+}
+
+export async function persistVPointPayRun(
+  bucket: R2BucketLike,
+  run: VPointPaySharedRun,
+): Promise<PersistRunResult> {
+  return await persistRun(bucket, await vPointPayRunPlan(run));
+}
+
+/** `collection-summary` is generated by the collector; the rest is provider data. */
+function role(dataset: string): string {
+  return dataset === "collection-summary" ? "collector_summary" : "collector_derived";
+}
+
+function coverageFor(outcome: ProviderOutcome): CoverageStatus {
+  return outcome === "success" ? "complete" : outcome === "partial" ? "partial" : "unknown";
+}
+
+function month(value: string | null): string | null {
+  return value !== null && MONTH.test(value) ? value : null;
+}
+
+function failureCode(codes: readonly string[]): string {
+  return codes.find((candidate) => SAFE_CODE.test(candidate)) ?? FALLBACK_ERROR_CODE;
+}
+
+async function plannedArtifact(
+  artifact: RawArtifact,
+  artifactRole: string,
+): Promise<PersistArtifact> {
+  const bytes = new TextEncoder().encode(artifact.body);
+  return {
+    artifactKey: artifact.filename,
+    sha256: await sha256Hex(bytes),
+    byteSize: bytes.byteLength,
+    mediaType: artifact.mediaType,
+    role: artifactRole,
+    unitKey: UNIT_KEY,
+    body: { kind: "bytes", bytes },
+  };
+}

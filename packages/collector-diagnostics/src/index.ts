@@ -16,6 +16,9 @@ const STAGES = new Set([
   "pagination",
   "artifact-write",
   "manifest-write",
+  // U09: the shared DATA target writes the run's terminal manifest instead of
+  // a per-source collector manifest and a central import.
+  "terminal-write",
   "central-import",
   "connection-collection",
   "domestic-collection",
