@@ -149,7 +149,7 @@
     },
     {
       "name": "smbc-direct-backfill-worker",
-      "path": "poc/smbc-direct-backfill-worker",
+      "path": "services/collector-smbc-direct",
       "config": "wrangler.jsonc"
     },
     {

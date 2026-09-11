@@ -201,32 +201,6 @@ No wrangler config.
 
 No wrangler config.
 
-### `poc/smbc-direct-backfill-worker`
-
-- Disposition (poc_disposition.csv): `promote-service` → services/collector-smbc-direct
-- Required verification: keep the human-required boundary; never turn it into unattended re-authentication
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-smbc-direct-backfill-poc; buckets=kogane-smbc-direct-backfill-poc)
-
-#### `kogane-smbc-direct-backfill-poc` — `poc/smbc-direct-backfill-worker/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
-- R2: SNAPSHOTS → kogane-smbc-direct-backfill-poc
-- KV: —
-- Queues: —
-- Durable Objects: BACKFILL_SESSION → SmbcBackfillSession
-- DO migration tags: v1: SmbcBackfillSession
-- Containers: —
-- Browser binding: —
-- VPC networks: TAMIA → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
-- Crons: —
-- Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>DEFAULT_BACKFILL_FROM<br>SMBC_DIRECT_BASE_URL<br>SMBC_DIRECT_LOGIN_BASE_URL
-- Required secrets (names only): —
-
 ### `poc/sony-bank-worker`
 
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-sony-bank
@@ -848,6 +822,32 @@ No wrangler config.
 - Crons: `*/15 * * * *`<br>`5 21 * * *`
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Required secrets (names only): —
+
+### `services/collector-smbc-direct`
+
+- Disposition (poc_disposition.csv): `promote-service` → services/collector-smbc-direct
+- Required verification: keep the human-required boundary; never turn it into unattended re-authentication
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-smbc-direct-backfill-poc; buckets=kogane-smbc-direct-backfill-poc)
+
+#### `kogane-smbc-direct-backfill-poc` — `services/collector-smbc-direct/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: —
+- R2: SNAPSHOTS → kogane-smbc-direct-backfill-poc
+- KV: —
+- Queues: —
+- Durable Objects: BACKFILL_SESSION → SmbcBackfillSession
+- DO migration tags: v1: SmbcBackfillSession
+- Containers: —
+- Browser binding: —
+- VPC networks: TAMIA → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33
+- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Crons: —
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>DEFAULT_BACKFILL_FROM<br>SMBC_DIRECT_BASE_URL<br>SMBC_DIRECT_LOGIN_BASE_URL
 - Required secrets (names only): —
 
 ### `services/evidence-browser`

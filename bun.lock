@@ -211,7 +211,7 @@
         "wrangler": "4.127.1",
       },
     },
-    "poc/smbc-direct-backfill-worker": {
+    "services/collector-smbc-direct": {
       "name": "@kogane/poc-smbc-direct-backfill-worker",
       "dependencies": {
         "iconv-lite": "0.7.3",
@@ -515,7 +515,7 @@
 
     "@kogane/poc-sbi-vc-trade-worker": ["@kogane/poc-sbi-vc-trade-worker@workspace:services/collector-sbi-vc-trade"],
 
-    "@kogane/poc-smbc-direct-backfill-worker": ["@kogane/poc-smbc-direct-backfill-worker@workspace:poc/smbc-direct-backfill-worker"],
+    "@kogane/poc-smbc-direct-backfill-worker": ["@kogane/poc-smbc-direct-backfill-worker@workspace:services/collector-smbc-direct"],
 
     "@kogane/poc-sony-bank-worker": ["@kogane/poc-sony-bank-worker@workspace:poc/sony-bank-worker"],
 

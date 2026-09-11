@@ -158,15 +158,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/smbc-direct-backfill-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-smbc-direct",
-    requiredVerification:
-      "keep the human-required boundary; never turn it into unattended re-authentication",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
   "poc/sony-bank-worker": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",
@@ -270,6 +261,15 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     proposedAction: "promote-service",
     proposedTarget: "services/collector-sbi-vc-trade",
     requiredVerification: "keep the client dependency and the resource identity",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-smbc-direct": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-smbc-direct",
+    requiredVerification:
+      "keep the human-required boundary; never turn it into unattended re-authentication",
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
