@@ -47,7 +47,7 @@ INSERT INTO runs VALUES(1,'mf-test','success',0,0),(2,'direct-test','success',0,
 INSERT INTO fetch_artifacts VALUES(1,'moneyforward-me','account-detail',1,'connection-test'),(2,'sbi-shinsei-bank','top-accounts-balance-and-activity',2,'bank'),(3,'sbi-shinsei-bank','balance-summary-and-stage',2,'bank'),(4,'sbi-shinsei-bank','balance-summary-and-stage',3,'bank');`);
     let pending = "";
     const sql = readFileSync(
-      new URL("../../raw-evidence/migrations/0023_account_connections.sql", import.meta.url),
+      new URL("../../../packages/storage-d1/migrations/core/0023_account_connections.sql", import.meta.url),
       "utf8",
     );
     for (const line of sql.split("\n")) {

@@ -179,6 +179,7 @@ describe("offline CI coverage", () => {
     for (const name of [
       "packages/read-model",
       "packages/application",
+      "packages/storage-d1",
       "packages/observation-shared",
       "packages/identity",
     ]) {

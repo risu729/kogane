@@ -4,7 +4,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 
-export const migrationDir = new URL("../../raw-evidence/migrations/", import.meta.url);
+export const migrationDir = new URL("../../../packages/storage-d1/migrations/core/", import.meta.url);
 export const LAYER_A_SQL = `CREATE TABLE sources(id TEXT PRIMARY KEY,provider TEXT);
 CREATE TABLE producers(id TEXT PRIMARY KEY);
 CREATE TABLE fetch_runs(id INTEGER PRIMARY KEY,source_id TEXT,acquisition_session_id INTEGER,producer_id TEXT,first_recorded_at_ms INTEGER);

@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 
 test("trusted binding lookup flattens to artifact primary key with the complete production schema", () => {
   const db = new Database(":memory:");
-  const dir = new URL("../../raw-evidence/migrations/", import.meta.url);
+  const dir = new URL("../../../packages/storage-d1/migrations/core/", import.meta.url);
   const query =
     "EXPLAIN QUERY PLAN SELECT * FROM trusted_vpass_card_bindings WHERE financial_artifact_id=123";
   const correlated =

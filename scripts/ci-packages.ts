@@ -46,6 +46,15 @@ export const CI_PACKAGES: PackagePolicy[] = [
     checks: ["typecheck", "test"],
   },
   {
+    // CORE database access (unified plan U05, docs/storage-d1.md): the SQL the
+    // services used to keep each to themselves, the row codecs and the guarded
+    // atomic commands, plus the CORE and READ migration directories. Pure data
+    // access over a structural D1 interface; no Worker, no wrangler, no HTTP.
+    path: "packages/storage-d1",
+    scripts: { test, typecheck: "tsc --noEmit" },
+    checks: ["typecheck", "test"],
+  },
+  {
     // Pure shared code: no Workers tooling, no browser, no build.
     path: "packages/read-model",
     scripts: { test, typecheck: "tsc --noEmit" },

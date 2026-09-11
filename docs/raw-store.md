@@ -87,7 +87,7 @@ idea, but not enough to preserve the cases already documented in this repo:
 - a producer reporting `success` is different from the central importer proving
   that it received every declared artifact.
 
-The schema in `services/raw-evidence/migrations/0001_initial.sql` encodes these
+The schema in `packages/storage-d1/migrations/core/0001_initial.sql` encodes these
 differences rather than hiding them in JSON blobs.
 
 ## Entity model

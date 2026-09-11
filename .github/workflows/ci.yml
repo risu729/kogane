@@ -52,6 +52,7 @@ jobs:
           - packages/observation-shared
           - packages/parsers
           - packages/read-model
+          - packages/storage-d1
           - poc/cloudflare-browser-run
           - poc/cloudflare-runtime-probe
           - poc/globalpass-worker

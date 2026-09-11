@@ -153,7 +153,7 @@ describe("publication gate predicate guard", () => {
   });
 
   test("a migration after the gate may not embed the legacy rule", () => {
-    const migrations = tracked("services/raw-evidence/migrations/*.sql");
+    const migrations = tracked("packages/storage-d1/migrations/core/*.sql");
     expect(migrations.length).toBeGreaterThan(0);
     const offenders: string[] = [];
     const legacy: string[] = [];

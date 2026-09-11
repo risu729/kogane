@@ -6,7 +6,7 @@ bun run typecheck
 bun run check:importer
 bun run test
 bun run cf:check
-sha256sum migrations/*.sql
+sha256sum ../../packages/storage-d1/migrations/core/*.sql
 npx wrangler d1 migrations list kogane-raw-evidence --remote
 npx wrangler d1 migrations apply kogane-raw-evidence --remote
 npx wrangler deploy
