@@ -6,14 +6,19 @@
 //
 // Two independent checks, so neither can quietly pass alone:
 //
-//   * every number 0001…0037 is present exactly once and the digest of each
-//     file equals the value recorded below, which was taken from
-//     `git show origin/main:services/raw-evidence/migrations/<name>` when the
-//     directory moved;
-//   * when the pre-move history is reachable in this checkout (it is in a full
-//     clone; a shallow CI checkout may not have `origin/main`), the same bytes
-//     are read back out of git and compared again, so the table cannot drift
-//     away from what history holds.
+//   * every recorded file is present, every number is unique and ascending,
+//     and the digest of each recorded file equals the value below, which was
+//     taken from `git show <ref>:services/raw-evidence/migrations/<name>` at
+//     the commit named beside it;
+//   * when that commit is reachable in this checkout (it is in a full clone; a
+//     shallow CI checkout may not have it), the same bytes are read back out
+//     of git and compared again, so the table cannot drift away from what
+//     history holds. The refs are commit ids, not branch names: a branch
+//     moves on and stops holding the old path, a commit does not.
+//
+// A migration that lands after this table was written may exist beyond it
+// (numbers above every recorded one, following the naming rule); once it is
+// on main, record its digest here so a later edit is caught.
 import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -23,6 +28,26 @@ import {
   READ_MIGRATIONS_URL,
   migrationNumber,
 } from "../src/migrations.ts";
+
+/** Where git holds the bytes of a recorded file: the last commit that carried
+ * it at the old path, before the directory moved (or, for a later number, the
+ * commit that added it there before this move was merged). */
+interface HistoricalSource {
+  ref: string;
+  directory: string;
+}
+
+/** The commit before the move: the parent of the `git mv` commit. */
+const BEFORE_MOVE: HistoricalSource = {
+  ref: "e5372d6",
+  directory: "services/raw-evidence/migrations",
+};
+
+/** 0040 landed on main at the old path while this move was in review (U06). */
+const OPERATIONS_API: HistoricalSource = {
+  ref: "3bb3a5e",
+  directory: "services/raw-evidence/migrations",
+};
 
 /** sha256 of every CORE migration as `services/raw-evidence/migrations/` held it. */
 const CORE_DIGESTS: Record<string, string> = {
@@ -85,10 +110,14 @@ const CORE_DIGESTS: Record<string, string> = {
     "0f56c0fb0ed45b9ab689725bc7a02a5fa6d1839a99cd1791227f68c1d8ac0f25",
   "0037_unit_scope_eligibility.sql":
     "9cb89c077a066a32968403169e4197582580e1af638fc97747ebda11faa82634",
+  "0040_operations_api.sql": "edca64e3fc1675e463faec3b04ca90cde3ed2055269b483ee56c99f28e519002",
 };
 
-/** The path the files had before the move, for the history comparison. */
-const HISTORICAL_DIRECTORY = "services/raw-evidence/migrations";
+/** Which commit holds each recorded file's original bytes. */
+function sourceOf(name: string): HistoricalSource {
+  return (migrationNumber(name) ?? 0) <= 37 ? BEFORE_MOVE : OPERATIONS_API;
+}
+
 const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
 function coreFiles(): string[] {
@@ -108,35 +137,48 @@ function blobAt(ref: string, path: string): Uint8Array | null {
 }
 
 describe("CORE migrations (G0-02)", () => {
-  test("the directory holds 0001…0037 once each, in order, correctly named", () => {
+  test("the directory holds every recorded file, numbered uniquely and in order", () => {
     const files = coreFiles();
     expect(files.every((name) => MIGRATION_FILENAME.test(name))).toBe(true);
-    expect(files.map((name) => migrationNumber(name))).toEqual(
-      Array.from({ length: 37 }, (_, index) => index + 1),
-    );
-    expect(files).toEqual(Object.keys(CORE_DIGESTS).sort());
+    const numbers = files.map((name) => migrationNumber(name) as number);
+    // Unique and ascending: wrangler applies by number, and two files sharing
+    // one would be applied in an order nobody chose.
+    expect(numbers).toEqual([...new Set(numbers)].sort((a, b) => a - b));
+    // 0001…0037 are the contiguous moved set; nothing may be missing from it.
+    expect(numbers.slice(0, 37)).toEqual(Array.from({ length: 37 }, (_, index) => index + 1));
+    const recorded = Object.keys(CORE_DIGESTS).sort();
+    expect(files.filter((name) => name in CORE_DIGESTS)).toEqual(recorded);
+    // Anything beyond the table is a later, additive migration.
+    const last = Math.max(...recorded.map((name) => migrationNumber(name) as number));
+    expect(
+      files
+        .filter((name) => !(name in CORE_DIGESTS))
+        .every((name) => (migrationNumber(name) as number) > last),
+    ).toBe(true);
   });
 
-  test("every file is byte-identical to the one the services deployed before the move", () => {
+  test("every recorded file is byte-identical to the one the services deployed before the move", () => {
     const actual: Record<string, string> = {};
-    for (const name of coreFiles()) {
+    for (const name of Object.keys(CORE_DIGESTS)) {
       actual[name] = digest(readFileSync(new URL(name, CORE_MIGRATIONS_URL)));
     }
     expect(actual).toEqual(CORE_DIGESTS);
   });
 
   test("the recorded digests are the bytes git history holds at the old path", () => {
-    // A shallow checkout may not have the pre-move commit; then this check has
-    // nothing to compare and the digest table above still stands on its own.
-    const reachable = blobAt("origin/main", `${HISTORICAL_DIRECTORY}/0001_initial.sql`);
-    if (reachable === null) return;
+    // A shallow checkout may not have the pre-move commits; then this check
+    // has nothing to compare and the digest table above still stands on its
+    // own. When a commit is reachable, every file it should hold must match.
     const historical: Record<string, string> = {};
-    for (const name of Object.keys(CORE_DIGESTS)) {
-      const bytes = blobAt("origin/main", `${HISTORICAL_DIRECTORY}/${name}`);
-      if (bytes === null) continue;
-      historical[name] = digest(bytes);
+    const expected: Record<string, string> = {};
+    for (const [name, recorded] of Object.entries(CORE_DIGESTS)) {
+      const source = sourceOf(name);
+      if (blobAt(source.ref, `${source.directory}/0001_initial.sql`) === null) continue;
+      const bytes = blobAt(source.ref, `${source.directory}/${name}`);
+      expected[name] = recorded;
+      historical[name] = bytes === null ? "missing from history" : digest(bytes);
     }
-    expect(historical).toEqual(CORE_DIGESTS);
+    expect(historical).toEqual(expected);
   });
 
   test("the READ directory exists and holds no migration yet (U11 fills it)", () => {

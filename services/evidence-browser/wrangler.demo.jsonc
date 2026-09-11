@@ -9,7 +9,10 @@
   "vars": {
     "BALANCE_PROJECTION_ENABLED": "0",
     "ACCESS_ISSUER": "https://risu729.cloudflareaccess.com",
-    "ACCESS_AUDIENCE": "036dc6fd21306c63c9340ad9ea642f2f7fe550bce61c48a08c7719b02d94cbf9"
+    "ACCESS_AUDIENCE": "036dc6fd21306c63c9340ad9ea642f2f7fe550bce61c48a08c7719b02d94cbf9",
+    // The demo serves a fixed synthetic snapshot and has no store to accept an
+    // operation into; the flag is declared here only to state that it is off.
+    "OPS_API_ENABLED": ""
   },
   "assets": {
     "directory": "../../poc/observation-pipeline/web/dist",

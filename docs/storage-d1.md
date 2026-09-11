@@ -26,7 +26,7 @@ end. Rollback is reverting the commits.
 
 ```
 packages/storage-d1/
-  migrations/core/      0001…0037, moved byte-for-byte from services/raw-evidence
+  migrations/core/      0001…0037 moved byte-for-byte from services/raw-evidence; 0040 (U06) and later land here
   migrations/read/      empty; U11 adds 0001_read_baseline.sql
   src/d1.ts             D1Like, D1StatementLike, first/all/run/statement/runBatch
   src/migrations.ts     where the two directories are, named once
@@ -138,6 +138,7 @@ Consumers repointed by this change:
 | `services/observation-pipeline/test/harness.ts`                          | `layerBMigrations()`                  |
 | five pipeline tests reading one migration file                           | query-plan and schema assertions      |
 | `packages/read-model/test/{events,identity,read-model}`                  | applying CORE to `bun:sqlite`         |
+| `packages/application/test/sqlite-store.ts`                              | applying CORE to `bun:sqlite` (U06)   |
 | `packages/observation-shared/test/normalized-decimal`                    | the 0024 views                        |
 | `poc/observation-pipeline/src/store.ts` and its test                     | the 0024/0025/0037 views              |
 | `tasks/_lib/publication-gate-predicates.test.ts`                         | the "no legacy rule after 0026" guard |

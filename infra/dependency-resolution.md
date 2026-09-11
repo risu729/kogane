@@ -112,6 +112,7 @@ each consumer is the requirement; where that is impossible the change must be ca
 | `@cloudflare/puppeteer` | 1.1.0, 1.4.0 | poc/cloudflare-browser-run: `1.4.0` → 1.4.0<br>poc/globalpass-worker: `1.4.0` → 1.4.0<br>poc/mobile-suica-worker: `1.1.0` → 1.1.0<br>poc/myjcb-worker: `1.4.0` → 1.4.0 |
 | `@cloudflare/vitest-plugin` | 1.1.2, 1.1.3 | packages/collection: `1.1.3` → 1.1.3<br>poc/sbi-vc-trade-worker: `1.1.2` → 1.1.2<br>services/evidence-browser: `1.1.3` → 1.1.3<br>services/raw-evidence: `1.1.3` → 1.1.3 |
 | `@types/node` | 24.3.0, 26.3.0, 26.4.0, 26.4.1 | poc/cloudflare-browser-run: `26.3.0` → 26.3.0<br>poc/globalpass-worker: `26.4.0` → 26.4.0<br>poc/mobile-suica-worker: `24.3.0` → 24.3.0<br>poc/moneyforward-worker: `24.3.0` → 24.3.0<br>poc/sbi-securities-worker: `24.3.0` → 24.3.0<br>poc/sbi-shinsei-worker: `24.3.0` → 24.3.0<br>poc/sony-bank-worker: `24.3.0` → 24.3.0<br>poc/tamia-tcp-bridge: `26.3.0` → 26.3.0<br>poc/vpoint-pay-worker: `24.3.0` → 24.3.0<br>poc/vpoint-worker: `24.3.0` → 24.3.0<br>services/evidence-browser: `26.4.1` → 26.4.1<br>services/raw-evidence: `26.4.1` → 26.4.1 |
+| `hono` | 4.13.5, 4.13.7 | poc/observation-pipeline: `4.13.5` → 4.13.5<br>services/evidence-browser: `4.13.7` → 4.13.7 |
 | `iconv-lite` | 0.7.0, 0.7.3 | poc/mobile-suica-worker: `0.7.0` → 0.7.0<br>poc/smbc-direct-backfill-worker: `0.7.3` → 0.7.3<br>poc/vpoint-worker: `0.7.0` → 0.7.0<br>services/collector-r2-importer: `0.7.0` → 0.7.0 |
 | `playwright` | 1.62.0, 1.62.1 | poc/globalpass-worker/container: `1.62.1` → 1.62.1<br>poc/observation-pipeline: `1.62.1` → 1.62.1<br>poc/oci-browser-probe: `1.62.0` → 1.62.0<br>poc/sbi-shinsei-worker/container: `1.62.1` → 1.62.1 |
 | `typescript` | 5.9.3, 7.0.2 | packages/application: `5.9.3` → 5.9.3<br>packages/collection: `5.9.3` → 5.9.3<br>packages/domain: `5.9.3` → 5.9.3<br>packages/evidence-contract: `5.9.3` → 5.9.3<br>packages/identity: `5.9.3` → 5.9.3<br>packages/observation-shared: `5.9.3` → 5.9.3<br>packages/parsers: `5.9.3` → 5.9.3<br>packages/read-model: `5.9.3` → 5.9.3<br>packages/storage-d1: `5.9.3` → 5.9.3<br>poc/cloudflare-browser-run: `5.9.3` → 5.9.3<br>poc/cloudflare-runtime-probe: `5.9.3` → 5.9.3<br>poc/globalpass-worker: `5.9.3` → 5.9.3<br>poc/mobile-suica-worker: `5.9.3` → 5.9.3<br>poc/moneyforward-worker: `5.9.3` → 5.9.3<br>poc/myjcb-worker: `5.9.3` → 5.9.3<br>poc/observation-pipeline: `5.9.3` → 5.9.3<br>poc/sbi-securities-worker: `5.9.3` → 5.9.3<br>poc/sbi-shinsei-worker: `5.9.3` → 5.9.3<br>poc/sbi-vc-trade-client: `5.9.3` → 5.9.3<br>poc/sbi-vc-trade-worker: `5.9.3` → 5.9.3<br>poc/smbc-direct-backfill-worker: `5.9.3` → 5.9.3<br>poc/sony-bank-worker: `5.9.3` → 5.9.3<br>poc/tamia-tcp-bridge: `5.9.3` → 5.9.3<br>poc/vpass-json: `5.9.3` → 5.9.3<br>poc/vpoint-pay-worker: `5.9.3` → 5.9.3<br>poc/vpoint-worker: `5.9.3` → 5.9.3<br>services/collector-r2-importer: `5.9.3` → 5.9.3<br>services/evidence-browser: `7.0.2` → 7.0.2<br>services/observation-pipeline: `5.9.3` → 5.9.3<br>services/raw-evidence: `7.0.2` → 7.0.2 |
@@ -467,10 +468,12 @@ Lockfile: `bun.lock`.
 | --- | --- | --- | --- |
 | `@cloudflare/vitest-plugin` | devDependencies | `1.1.3` | 1.1.3 |
 | `@types/node` | devDependencies | `26.4.1` | 26.4.1 |
+| `hono` | dependencies | `4.13.7` | 4.13.7 |
 | `jose` | dependencies | `6.2.11` | 6.2.11 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
 | `vitest` | devDependencies | `4.1.11` | 4.1.11 |
 | `wrangler` | devDependencies | `4.128.0` | 4.128.0 |
+| `zod` | dependencies | `4.6.2` | 4.6.2 |
 
 ### `services/observation-pipeline` — `@kogane/observation-pipeline`
 
@@ -553,6 +556,6 @@ a changed digest has to be explained dependency by dependency.
 | `poc/vpoint-pay-worker` | bun.lock | 96 | `7c84035be351ec8c1b8d1881d4e1d3fead9e030d83db667ca80e1dfab3bf012b` |
 | `poc/vpoint-worker` | bun.lock | 119 | `65e1673026087f99bb541519eede37d4777b9359a5ee4fd663cbe600b6a520d5` |
 | `services/collector-r2-importer` | bun.lock | 101 | `eb9639e01571c023f140af773eece37284b1878c5c958041171658263366dc27` |
-| `services/evidence-browser` | bun.lock | 183 | `07b1141e09b0d4de4d97cf0095df39c42700ab0818772cd5a7f588c5a79a506f` |
+| `services/evidence-browser` | bun.lock | 184 | `f8b01a053accfab4b3fb5731399e854a036828f08bdd0f135dcb369389062d78` |
 | `services/observation-pipeline` | bun.lock | 98 | `da2becbd2f056eddacb22cf543f2548f50aa85d04ed630a9e094efaa7d3e7c7b` |
 | `services/raw-evidence` | bun.lock | 182 | `59c7b5ed1231258dd5e8f2696bd45df8d436af915049fb32b6493f988861373a` |

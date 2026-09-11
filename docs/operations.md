@@ -10,6 +10,11 @@ or a provider URL. Operational monitoring gets ids, routes, safe codes, counts
 and durations; the numbers themselves are read through the authorized audit
 path.
 
+Operator _actions_ — request a collection, re-register a run, replay a parse,
+rebuild the read model, refresh a session, read what happened — are the
+operations API: [ops-api.md](ops-api.md). This page is about the signals, the
+budgets, the retention classes and the drills.
+
 ## 1. Health signals
 
 Root review 08 section 2 asks for coverage of the same subject range from
