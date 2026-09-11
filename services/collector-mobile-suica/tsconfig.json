@@ -7,8 +7,14 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
-    "types": ["node", "bun"],
+    "types": ["node", "bun", "@cloudflare/vitest-plugin/types"],
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "worker-configuration.d.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "worker-test/**/*.ts",
+    "vitest.config.ts",
+    "worker-configuration.d.ts"
+  ]
 }

@@ -306,3 +306,34 @@ observed through is collected by `services/collector-vpoint` as
 `v-point-pay-email`. The shared target is therefore the path a future
 re-enable writes to; the Durable Object's single-collection-in-flight exclusion
 is unchanged by it (G3-14), and switching the target adds no scheduler.
+
+### `mobile-suica` (`services/collector-mobile-suica`)
+
+| Artifact key                | Role                         | Bytes                                           |
+| --------------------------- | ---------------------------- | ----------------------------------------------- |
+| `sf-history-page-0001.html` | `sanitized_provider_capture` | the CP932 history page, `baseVariable` redacted |
+| `sf-history.json`           | `collector_derived`          | the rows parsed from that page                  |
+| `collection-summary.json`   | `collector_summary`          | the collector's own counts and cookie names     |
+
+Sanitizer: `src/sanitize.ts` (`sanitizeHistoryHtml`) replaces the hidden
+`baseVariable` session field with the redaction sentinel and proves the CP932
+round trip before anything is stored — the same bytes the importer verifies and
+forwards centrally today. The session envelope, the cookie header and the
+browser bootstrap never become artifacts.
+
+Terminal: `source: mobile-suica`, `producer: collector-mobile-suica`,
+`producerVersion: COLLECTOR_SCHEMA_VERSION` (`mobile-suica-worker-poc-v2`),
+`requestedScope: full_snapshot` over unit `account` with the requested day as
+an `as-of-selector` range (`selector`/`date`/`request`) — the date selects the
+page, it is not the extent of what came back. Two transformations are stated:
+`redacted` by `mobile-suica-history-sanitizer` producing the HTML (with no
+input artifact, because the unredacted page is deliberately not retained) and
+`extracted` by `mobile-suica-history-normalizer` from the HTML to
+`sf-history.json`.
+
+`coverageStatus` is `complete` only when the run succeeded **and** the
+collector proved it reached the end of the history; an unproven boundary is
+`partial` with `history_boundary_unproven`, however clean the transport was.
+The media type in the terminal is `text/html`: `terminal-v1` media types carry
+no parameters, and `text/html` is what the central descriptor already declares
+for this artifact, with the CP932 charset a constant of the source.

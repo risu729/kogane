@@ -22,6 +22,10 @@
     {
       "binding": "SNAPSHOTS",
       "bucket_name": "kogane-mobile-suica-collector-poc"
+    },
+    {
+      "binding": "DATA",
+      "bucket_name": "kogane-raw-evidence"
     }
   ],
   "services": [
@@ -35,6 +39,7 @@
     "remote": true
   },
   "vars": {
+    "COLLECTION_TARGET": "legacy",
     "COLLECTOR_SCHEMA_VERSION": "mobile-suica-worker-poc-v2"
   },
   "triggers": {

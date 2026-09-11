@@ -773,3 +773,23 @@ longer-lived, lossy rewards path.
 - Whether app history is solely device/FeliCa-derived plus server enrichment,
   and whether any app endpoint shares transport or records with the PC member
   website. Static path similarity is not sufficient evidence.
+
+## 追記: 共通DATA R2への切替（U09）
+
+`services/collector-mobile-suica`にvar `COLLECTION_TARGET`（既定`legacy`）と
+binding `DATA`（`kogane-raw-evidence`）を追加した。`legacy`は現行経路のままで、
+per-source bucketとImporter service bindingを変更しない。`shared`では
+sanitize済みbytesをそのまま`objects/<2hex>/<sha256>`へ保存し、
+`runs/mobile-suica/<runId>/terminal.json`を最後に書き、旧APIへのuploadは行わない。
+
+artifactは`sf-history-page-0001.html`（role `sanitized_provider_capture`、
+`baseVariable`をsentinelへ置換したCP932 HTML）、`sf-history.json`
+（role `collector_derived`）、`collection-summary.json`（role `collector_summary`）。
+terminalは`as-of-selector` range（selector/date/request）と、sanitizer・normalizerの
+transformationを記録する。`coverageStatus`が`complete`になるのは成功かつ
+履歴終端を証明できた場合だけで、証明できない場合は`history_boundary_unproven`付きの
+`partial`である。cookie・session envelope・browser bootstrapはartifactにしない。
+
+Worker名、cron、Browser binding、secretは変更しない。切替順はProcessor
+（`SHARED_R2_INGEST_ENABLED`）を先に有効化し、その後で`COLLECTION_TARGET=shared`。
+rollbackは`legacy`へ戻すだけである。詳細は`docs/collection.md`。
