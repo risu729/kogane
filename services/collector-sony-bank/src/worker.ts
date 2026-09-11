@@ -1,9 +1,11 @@
 import { atStage, emitDiagnostic, failure } from "./diagnostics";
 import { timingSafeEqual } from "node:crypto";
+import { collectionTarget } from "./collection-target";
 import { collectSonyBank, parseCredential } from "./sony-bank";
 import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
+import { persistSharedRun, sharedBucket, sharedRunDiagnostic } from "./shared-collection";
 import { runPrefix, storeArtifact, storeManifest } from "./storage";
-import type { CollectionFailure, CollectionManifest, CollectionResult } from "./types";
+import type { CollectionFailure, CollectionManifest, CollectionResult, RawArtifact } from "./types";
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -37,6 +39,10 @@ export default {
     }
     try {
       const window = parseWindow(url.searchParams.get("from"), url.searchParams.get("to"));
+      if (collectionTarget(env.COLLECTION_TARGET) === "shared") {
+        const shared = await runSharedCollection(env, window);
+        return Response.json(shared, { status: sharedRunFailed(shared) ? 502 : 200 });
+      }
       const result = await runCollection(env, window);
       return Response.json(publicResult(result), {
         status: result.status === "failed" ? 502 : 200,
@@ -47,12 +53,109 @@ export default {
   },
 
   async scheduled(_controller, env): Promise<void> {
-    const result = await runCollection(env, defaultWindow(new Date()));
+    const window = defaultWindow(new Date());
+    if (collectionTarget(env.COLLECTION_TARGET) === "shared") {
+      const shared = await runSharedCollection(env, window);
+      // A run whose terminal was not written is not a finished run (G1-01).
+      if (sharedRunFailed(shared)) {
+        throw new Error(`Sony Bank shared collection did not complete; run=${shared.runId}`);
+      }
+      return;
+    }
+    const result = await runCollection(env, window);
     if (result.status === "failed") {
       throw new Error(`Sony Bank collection failed; manifest=${result.manifestKey}`);
     }
   },
 } satisfies ExportedHandler<Env>;
+
+interface SharedResult {
+  readonly runId: string;
+  readonly status: CollectionManifest["status"];
+  readonly window: { from: string; to: string };
+  readonly transactionCount: number;
+  readonly artifactCount: number;
+  readonly failureCount: number;
+  readonly persistence: string;
+  readonly terminalKey: string;
+}
+
+function sharedRunFailed(result: SharedResult): boolean {
+  return (
+    result.status === "failed" ||
+    (result.persistence !== "persisted" && result.persistence !== "already_persisted")
+  );
+}
+
+/**
+ * The shared-target run (unified plan U09): the same collection, persisted to
+ * the common DATA bucket through `packages/collection` with the terminal
+ * written last. Nothing is written to the per-source bucket and the importer
+ * is never called, so the run's bytes exist once (G1-15).
+ */
+async function runSharedCollection(
+  env: Env,
+  window: { from: string; to: string },
+): Promise<SharedResult> {
+  const startedAt = new Date().toISOString();
+  const runId = crypto.randomUUID();
+  const failures: CollectionFailure[] = [];
+  let artifacts: readonly RawArtifact[] = [];
+  let transactionCount = 0;
+  try {
+    const credential = await atStage("credential", async () =>
+      parseCredential(requiredSecret(env.SONY_BANK_CREDENTIAL_JSON, "SONY_BANK_CREDENTIAL_JSON")),
+    );
+    const collection = await collectSonyBank({
+      credential,
+      from: window.from,
+      to: window.to,
+      runId,
+    });
+    transactionCount = collection.transactionCount;
+    artifacts = collection.artifacts;
+  } catch (error) {
+    failures.push(failure("collect", error));
+  }
+  for (const entry of failures) {
+    emitDiagnostic("error", {
+      event: "sony-bank-collection-failure",
+      runId,
+      phase: "collection",
+      ...entry,
+    });
+  }
+  const completedAt = new Date().toISOString();
+  const status = failures.length === 0 ? "success" : artifacts.length === 0 ? "failed" : "partial";
+  const input = {
+    schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
+    runId,
+    startedAt,
+    completedAt,
+    status,
+    window,
+    transactionCount,
+    artifacts,
+    failures,
+  } as const;
+  const outcome = await persistSharedRun(sharedBucket(env.DATA), input);
+  emitDiagnostic(
+    outcome.result.outcome === "persisted" || outcome.result.outcome === "already_persisted"
+      ? "log"
+      : "error",
+    sharedRunDiagnostic(input, outcome),
+  );
+  return {
+    runId,
+    status,
+    window,
+    transactionCount,
+    artifactCount: outcome.artifactCount,
+    failureCount: failures.length,
+    persistence: outcome.result.outcome,
+    terminalKey: outcome.result.terminalKey,
+  };
+}
 
 async function runCollection(
   env: Env,

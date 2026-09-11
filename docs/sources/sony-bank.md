@@ -764,3 +764,12 @@ boolean と schema metadata に限定する。
 - [`mktakuya/puppeteer-sonybank-scraper` commit `3e59a37`](https://github.com/mktakuya/puppeteer-sonybank-scraper/blob/3e59a37d6e339c7d2e6bbba63e1581d983d6d07f/index.js)
 - [`nakaomote/financial` `sony_download.py` at `44e1d43`](https://github.com/nakaomote/financial/blob/44e1d43b5c010ee692234777baf9a9fc20be83be/sony_download.py)
 - [`nakaomote/financial` 2025 CSV schema update](https://github.com/nakaomote/financial/commit/44e1d43b5c010ee692234777baf9a9fc20be83be)
+
+## 共通 DATA R2 への切替 (U09)
+
+Collector は `COLLECTION_TARGET` var を持つ。既定の `legacy` は現行どおり
+per-source bucket + importer 経由。`shared` にすると run は `packages/collection`
+経由で共通 bucket `kogane-raw-evidence` に保存され、terminal manifest を最後に
+書く。保存する bytes は現在中央へ送っているものと同じで、Wallet 明細は collector
+自身の `sanitizeWalletHtml` 済み HTML である。artifact と role の対応、terminal の
+項目、deploy 順と rollback は `docs/collection.md` の該当節を参照。
