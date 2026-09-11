@@ -194,7 +194,7 @@
         "ws": "8.21.3",
       },
     },
-    "poc/sbi-vc-trade-client": {
+    "packages/sbi-vc-trade-client": {
       "name": "@kogane/poc-sbi-vc-trade-client",
       "devDependencies": {
         "@types/bun": "1.3.8",
@@ -511,7 +511,7 @@
 
     "@kogane/poc-sbi-shinsei-worker": ["@kogane/poc-sbi-shinsei-worker@workspace:services/collector-sbi-shinsei"],
 
-    "@kogane/poc-sbi-vc-trade-client": ["@kogane/poc-sbi-vc-trade-client@workspace:poc/sbi-vc-trade-client"],
+    "@kogane/poc-sbi-vc-trade-client": ["@kogane/poc-sbi-vc-trade-client@workspace:packages/sbi-vc-trade-client"],
 
     "@kogane/poc-sbi-vc-trade-worker": ["@kogane/poc-sbi-vc-trade-worker@workspace:poc/sbi-vc-trade-worker"],
 

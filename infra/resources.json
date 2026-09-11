@@ -251,20 +251,6 @@
       "workers": []
     },
     {
-      "directory": "poc/sbi-vc-trade-client",
-      "workspace": "poc",
-      "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "promote-shared-if-used",
-        "proposedTarget": "packages/sbi-vc-trade-client",
-        "requiredVerification": "confirm whether a product consumer and its dependencies exist",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "NO_LIVE_RESOURCE"
-      },
-      "workers": []
-    },
-    {
       "directory": "poc/sbi-vc-trade-worker",
       "workspace": "poc",
       "disposition": {

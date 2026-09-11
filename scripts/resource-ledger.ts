@@ -158,14 +158,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/sbi-vc-trade-client": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-shared-if-used",
-    proposedTarget: "packages/sbi-vc-trade-client",
-    requiredVerification: "confirm whether a product consumer and its dependencies exist",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
   "poc/sbi-vc-trade-worker": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service",

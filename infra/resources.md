@@ -201,15 +201,6 @@ No wrangler config.
 
 No wrangler config.
 
-### `poc/sbi-vc-trade-client`
-
-- Disposition (poc_disposition.csv): `promote-shared-if-used` → packages/sbi-vc-trade-client
-- Required verification: confirm whether a product consumer and its dependencies exist
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: NO_LIVE_RESOURCE
-
-No wrangler config.
-
 ### `poc/sbi-vc-trade-worker`
 
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-vc-trade
