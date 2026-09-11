@@ -1,7 +1,7 @@
 {
   "generatedBy": "scripts/core-schema-ledger.ts",
   "plan": "unified plan U01; chapters 04 §2 and 06 §1; acceptance test G0-01",
-  "migrationsDir": "services/raw-evidence/migrations",
+  "migrationsDir": "packages/storage-d1/migrations/core",
   "migrations": [
     {
       "file": "0001_initial.sql",
@@ -589,10 +589,38 @@
       "sha256": "9cb89c077a066a32968403169e4197582580e1af638fc97747ebda11faa82634"
     },
     {
+      "file": "0038_source_revision.sql",
+      "statementCount": 101,
+      "insertStatements": [
+        {
+          "table": "core_source_revision",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "803f41c024792e46e259212558fa71e49b4caeb2c9e2632dbfee7e8540359b48"
+    },
+    {
+      "file": "0039_collection_runs.sql",
+      "statementCount": 14,
+      "insertStatements": [
+        {
+          "table": "collection_scan_state",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "3472b423845147a610c2051e7b3233a2bc73f7c399774e5b0ab5b2b741bdc8b8"
+    },
+    {
       "file": "0040_operations_api.sql",
       "statementCount": 13,
       "insertStatements": [],
       "sha256": "edca64e3fc1675e463faec3b04ca90cde3ed2055269b483ee56c99f28e519002"
+    },
+    {
+      "file": "0041_reward_revision_triggers.sql",
+      "statementCount": 15,
+      "insertStatements": [],
+      "sha256": "5265feedc75a1f084a62449ee0650fa278f62221cf77b025a11fd9cdd565faa2"
     }
   ],
   "tables": [
@@ -865,6 +893,9 @@
       "indexes": [],
       "triggers": [
         "account_mapping_revision",
+        "account_mappings_bump_revision_delete",
+        "account_mappings_bump_revision_insert",
+        "account_mappings_bump_revision_update",
         "account_mappings_no_delete",
         "account_mappings_no_replace",
         "account_mappings_no_update"
@@ -920,6 +951,9 @@
       "foreignKeys": [],
       "indexes": [],
       "triggers": [
+        "accounts_bump_revision_delete",
+        "accounts_bump_revision_insert",
+        "accounts_bump_revision_update",
         "accounts_no_delete",
         "accounts_no_replace",
         "accounts_no_update"
@@ -2260,6 +2294,9 @@
       ],
       "triggers": [
         "balance_decimals_v1",
+        "balance_observations_bump_revision_delete",
+        "balance_observations_bump_revision_insert",
+        "balance_observations_bump_revision_update",
         "balance_observations_no_delete",
         "balance_observations_no_update"
       ],
@@ -2334,6 +2371,62 @@
           "notNull": false,
           "default": null,
           "pk": 0
+        },
+        {
+          "name": "input_digest",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_revision",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "visibility_revision",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "read_instance_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "writer_lease",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "writer_lease_until_ms",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "writer_fence",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
         }
       ],
       "primaryKey": [
@@ -2352,12 +2445,87 @@
         }
       ],
       "triggers": [
+        "balance_read_snapshots_identity_immutable",
         "balance_read_snapshots_transition"
       ],
       "noUpdateTriggers": [],
       "noDeleteTriggers": [],
       "appendOnly": false,
-      "sqlSha256": "f1510e2f1233c0e9"
+      "sqlSha256": "0dabefda13c37bc0"
+    },
+    {
+      "name": "balance_snapshot_pointer",
+      "classification": "read-candidate",
+      "planRow": "READ: the active snapshot pointer moves with the projection (U11)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "read_instance_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "switched_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "balance_read_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "balance_snapshot_pointer_complete_only",
+        "balance_snapshot_pointer_forward_only",
+        "balance_snapshot_pointer_no_delete"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [
+        "balance_snapshot_pointer_no_delete"
+      ],
+      "appendOnly": false,
+      "sqlSha256": "45bcfaada412fadc"
     },
     {
       "name": "calculation_policies",
@@ -2432,6 +2600,9 @@
         }
       ],
       "triggers": [
+        "calculation_policies_bump_revision_delete",
+        "calculation_policies_bump_revision_insert",
+        "calculation_policies_bump_revision_update",
         "calculation_policies_no_delete",
         "calculation_policies_no_update"
       ],
@@ -2758,6 +2929,348 @@
       "sqlSha256": "e030ea4e3a970d72"
     },
     {
+      "name": "collection_run_stages",
+      "classification": "core-keep",
+      "planRow": "acquisition and fetch history",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "collection_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "stage",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "evidence_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "failure_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "recorded_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "collection_run_id",
+          "references": "collection_runs(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "collection_run_stages_run",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "collection_run_id",
+            "stage",
+            "id"
+          ]
+        },
+        {
+          "name": "collection_run_stages_state",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "stage",
+            "state",
+            "id"
+          ]
+        }
+      ],
+      "triggers": [
+        "collection_run_stages_no_delete",
+        "collection_run_stages_no_update"
+      ],
+      "noUpdateTriggers": [
+        "collection_run_stages_no_update"
+      ],
+      "noDeleteTriggers": [
+        "collection_run_stages_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "022424706a1cb3e5"
+    },
+    {
+      "name": "collection_runs",
+      "classification": "core-keep",
+      "planRow": "acquisition and fetch history",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "source",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "run_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "terminal_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "terminal_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "registration_contract_version",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "provider_outcome",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "coverage_status",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "acquisition_session_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "first_seen_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "blocked_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "fetch_run_id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "acquisition_session_id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "registered_at",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "acquisition_session_id",
+          "references": "acquisition_sessions(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "fetch_run_id",
+          "references": "fetch_runs(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "collection_runs_fetch_run",
+          "unique": false,
+          "partial": true,
+          "columns": [
+            "fetch_run_id"
+          ]
+        },
+        {
+          "name": "collection_runs_open",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "blocked_code",
+            "registered_at",
+            "id"
+          ]
+        },
+        {
+          "name": "collection_runs_run",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "source",
+            "run_id"
+          ]
+        }
+      ],
+      "triggers": [
+        "collection_runs_no_delete",
+        "collection_runs_no_replace",
+        "collection_runs_progress_only"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [
+        "collection_runs_no_delete"
+      ],
+      "appendOnly": false,
+      "sqlSha256": "e7abdd919b5c2975"
+    },
+    {
+      "name": "collection_scan_state",
+      "classification": "operational-mutable",
+      "planRow": "parse jobs, replay plans, work items, lane state (CORE until checkpoints are split out)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "lane",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "cursor",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "last_scan_at_ms",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "pages_completed",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "cycles_completed",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "last_seen",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "last_registered",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "last_blocked",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "lane"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "e05eca08c0092d04"
+    },
+    {
       "name": "conversion_offers",
       "classification": "core-keep",
       "planRow": "reward reference claims",
@@ -3008,6 +3521,9 @@
         }
       ],
       "triggers": [
+        "conversion_offers_bump_revision_delete",
+        "conversion_offers_bump_revision_insert",
+        "conversion_offers_bump_revision_update",
         "conversion_offers_no_delete",
         "conversion_offers_no_update"
       ],
@@ -3080,6 +3596,59 @@
       "noDeleteTriggers": [],
       "appendOnly": false,
       "sqlSha256": "a4b72772745a683b"
+    },
+    {
+      "name": "core_source_revision",
+      "classification": "core-keep",
+      "planRow": "CORE: the change detector every dependency write bumps (05 §2); operational in shape, but it is the ordering of CORE itself and a restore has to carry it",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "source_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "visibility_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [
+        "core_source_revision_forward_only",
+        "core_source_revision_no_delete",
+        "core_source_revision_single_row"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [
+        "core_source_revision_no_delete"
+      ],
+      "appendOnly": false,
+      "sqlSha256": "fc34755864bfbf2d"
     },
     {
       "name": "current_balance_projection",
@@ -3346,6 +3915,13 @@
           "notNull": true,
           "default": null,
           "pk": 0
+        },
+        {
+          "name": "row_digest",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
         }
       ],
       "primaryKey": [
@@ -3396,6 +3972,7 @@
       ],
       "triggers": [
         "current_balance_projection_building_only",
+        "current_balance_projection_chunk_conflict",
         "current_balance_projection_sealed_no_delete",
         "current_balance_projection_sealed_no_update"
       ],
@@ -3406,7 +3983,7 @@
         "current_balance_projection_sealed_no_delete"
       ],
       "appendOnly": true,
-      "sqlSha256": "ebd4fb869b20143e"
+      "sqlSha256": "91b5a588b5699be2"
     },
     {
       "name": "dataset_snapshot_policies",
@@ -3492,7 +4069,11 @@
       ],
       "foreignKeys": [],
       "indexes": [],
-      "triggers": [],
+      "triggers": [
+        "dataset_snapshot_policies_bump_revision_delete",
+        "dataset_snapshot_policies_bump_revision_insert",
+        "dataset_snapshot_policies_bump_revision_update"
+      ],
       "noUpdateTriggers": [],
       "noDeleteTriggers": [],
       "appendOnly": false,
@@ -3671,6 +4252,48 @@
           "notNull": true,
           "default": "0",
           "pk": 0
+        },
+        {
+          "name": "progress_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "pending_polls",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
+        },
+        {
+          "name": "blocked_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "required_source_revision",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "evidence_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "applied_source_revision",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
         }
       ],
       "primaryKey": [
@@ -3718,6 +4341,7 @@
         }
       ],
       "triggers": [
+        "decision_outbox_completion_guard",
         "decision_outbox_no_delete",
         "decision_outbox_no_replace",
         "decision_outbox_progress_only"
@@ -3727,7 +4351,7 @@
         "decision_outbox_no_delete"
       ],
       "appendOnly": false,
-      "sqlSha256": "da2dc71d61114dc6"
+      "sqlSha256": "85ae93c904a0c7d7"
     },
     {
       "name": "decision_revisions",
@@ -3866,6 +4490,9 @@
         }
       ],
       "triggers": [
+        "decision_revisions_bump_revision_delete",
+        "decision_revisions_bump_revision_insert",
+        "decision_revisions_bump_revision_update",
         "decision_revisions_no_delete",
         "decision_revisions_no_replace",
         "decision_revisions_no_update",
@@ -4266,6 +4893,9 @@
         }
       ],
       "triggers": [
+        "entity_relations_bump_revision_delete",
+        "entity_relations_bump_revision_insert",
+        "entity_relations_bump_revision_update",
         "entity_relations_no_delete",
         "entity_relations_no_replace",
         "entity_relations_no_update",
@@ -4353,6 +4983,9 @@
         }
       ],
       "triggers": [
+        "evidence_use_restrictions_bump_revision_delete",
+        "evidence_use_restrictions_bump_revision_insert",
+        "evidence_use_restrictions_bump_revision_update",
         "evidence_use_restrictions_no_delete",
         "evidence_use_restrictions_no_update"
       ],
@@ -4581,6 +5214,9 @@
         }
       ],
       "triggers": [
+        "expiry_rules_bump_revision_delete",
+        "expiry_rules_bump_revision_insert",
+        "expiry_rules_bump_revision_update",
         "expiry_rules_no_delete",
         "expiry_rules_no_update"
       ],
@@ -5083,6 +5719,9 @@
       ],
       "indexes": [],
       "triggers": [
+        "fetch_run_annotations_bump_revision_delete",
+        "fetch_run_annotations_bump_revision_insert",
+        "fetch_run_annotations_bump_revision_update",
         "fetch_run_annotations_no_delete",
         "fetch_run_annotations_no_update"
       ],
@@ -5476,6 +6115,9 @@
       "triggers": [
         "fetch_run_seal_requires_active_route",
         "fetch_run_seal_requires_complete_inventory",
+        "fetch_run_seals_bump_revision_delete",
+        "fetch_run_seals_bump_revision_insert",
+        "fetch_run_seals_bump_revision_update",
         "fetch_run_seals_no_delete",
         "fetch_run_seals_no_update",
         "fetch_run_seals_reject_duplicate_insert",
@@ -6117,6 +6759,9 @@
       ],
       "indexes": [],
       "triggers": [
+        "identity_instrument_uses_bump_revision_delete",
+        "identity_instrument_uses_bump_revision_insert",
+        "identity_instrument_uses_bump_revision_update",
         "identity_instrument_uses_no_delete",
         "identity_instrument_uses_no_replace",
         "identity_instrument_uses_no_update",
@@ -6232,6 +6877,9 @@
       ],
       "triggers": [
         "identity_observation_provenance",
+        "identity_observations_bump_revision_delete",
+        "identity_observations_bump_revision_insert",
+        "identity_observations_bump_revision_update",
         "identity_observations_no_delete",
         "identity_observations_no_replace",
         "identity_observations_no_update",
@@ -6371,6 +7019,9 @@
       ],
       "indexes": [],
       "triggers": [
+        "identity_run_seals_bump_revision_delete",
+        "identity_run_seals_bump_revision_insert",
+        "identity_run_seals_bump_revision_update",
         "identity_run_seals_no_delete",
         "identity_run_seals_no_replace",
         "identity_run_seals_no_update",
@@ -6436,6 +7087,9 @@
       ],
       "indexes": [],
       "triggers": [
+        "identity_runs_bump_revision_delete",
+        "identity_runs_bump_revision_insert",
+        "identity_runs_bump_revision_update",
         "identity_runs_no_delete",
         "identity_runs_no_replace",
         "identity_runs_no_update"
@@ -6962,6 +7616,9 @@
       "foreignKeys": [],
       "indexes": [],
       "triggers": [
+        "instrument_identifiers_bump_revision_delete",
+        "instrument_identifiers_bump_revision_insert",
+        "instrument_identifiers_bump_revision_update",
         "instrument_identifiers_no_delete",
         "instrument_identifiers_no_replace",
         "instrument_identifiers_no_update"
@@ -7073,6 +7730,9 @@
       "indexes": [],
       "triggers": [
         "instrument_mapping_revision",
+        "instrument_mappings_bump_revision_delete",
+        "instrument_mappings_bump_revision_insert",
+        "instrument_mappings_bump_revision_update",
         "instrument_mappings_no_delete",
         "instrument_mappings_no_replace",
         "instrument_mappings_no_update"
@@ -7128,6 +7788,9 @@
       "foreignKeys": [],
       "indexes": [],
       "triggers": [
+        "instruments_bump_revision_delete",
+        "instruments_bump_revision_insert",
+        "instruments_bump_revision_update",
         "instruments_no_delete",
         "instruments_no_replace",
         "instruments_no_update"
@@ -7249,6 +7912,9 @@
         }
       ],
       "triggers": [
+        "membership_state_claims_bump_revision_delete",
+        "membership_state_claims_bump_revision_insert",
+        "membership_state_claims_bump_revision_update",
         "membership_state_claims_no_delete",
         "membership_state_claims_no_update"
       ],
@@ -7750,6 +8416,9 @@
       ],
       "indexes": [],
       "triggers": [
+        "observation_decimal_values_bump_revision_delete",
+        "observation_decimal_values_bump_revision_insert",
+        "observation_decimal_values_bump_revision_update",
         "observation_decimals_no_delete",
         "observation_decimals_no_update"
       ],
@@ -8864,6 +9533,9 @@
         }
       ],
       "triggers": [
+        "parse_coverage_claims_bump_revision_delete",
+        "parse_coverage_claims_bump_revision_insert",
+        "parse_coverage_claims_bump_revision_update",
         "parse_coverage_claims_no_delete",
         "parse_coverage_claims_no_update"
       ],
@@ -9245,6 +9917,9 @@
         }
       ],
       "triggers": [
+        "parse_runs_bump_revision_delete",
+        "parse_runs_bump_revision_insert",
+        "parse_runs_bump_revision_update",
         "parse_runs_no_delete",
         "parse_runs_preserve_identity"
       ],
@@ -9729,6 +10404,105 @@
       "sqlSha256": "127d8215a738dc9f"
     },
     {
+      "name": "projection_input_records",
+      "classification": "core-keep",
+      "planRow": "CORE: the fixed input a build was made from (05 §3), referenced by the job and kept with the evidence it names",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "input_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "job_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "visibility_revision",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "contract_version",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "storage_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "byte_size",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "input_digest"
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "name": "projection_input_records_job",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "job_id"
+          ]
+        }
+      ],
+      "triggers": [
+        "projection_input_records_no_delete",
+        "projection_input_records_no_replace",
+        "projection_input_records_no_update"
+      ],
+      "noUpdateTriggers": [
+        "projection_input_records_no_update"
+      ],
+      "noDeleteTriggers": [
+        "projection_input_records_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "24bec0cb15efef46"
+    },
+    {
       "name": "publication_events",
       "classification": "core-keep",
       "planRow": "publication pointer and history",
@@ -9851,6 +10625,9 @@
         }
       ],
       "triggers": [
+        "publication_events_bump_revision_delete",
+        "publication_events_bump_revision_insert",
+        "publication_events_bump_revision_update",
         "publication_events_no_delete",
         "publication_events_no_self_reference",
         "publication_events_no_update",
@@ -9951,6 +10728,9 @@
         }
       ],
       "triggers": [
+        "published_parse_runs_bump_revision_delete",
+        "published_parse_runs_bump_revision_insert",
+        "published_parse_runs_bump_revision_update",
         "published_parse_runs_no_delete",
         "published_parse_runs_requires_ok_insert",
         "published_parse_runs_requires_ok_update"
@@ -10907,6 +11687,9 @@
         }
       ],
       "triggers": [
+        "reward_bucket_claims_bump_revision_delete",
+        "reward_bucket_claims_bump_revision_insert",
+        "reward_bucket_claims_bump_revision_update",
         "reward_bucket_claims_no_delete",
         "reward_bucket_claims_no_update",
         "reward_bucket_claims_requires_published"
@@ -11007,6 +11790,9 @@
         }
       ],
       "triggers": [
+        "reward_programs_bump_revision_delete",
+        "reward_programs_bump_revision_insert",
+        "reward_programs_bump_revision_update",
         "reward_programs_no_delete",
         "reward_programs_no_update"
       ],
@@ -11526,6 +12312,9 @@
       ],
       "indexes": [],
       "triggers": [
+        "source_accounts_bump_revision_delete",
+        "source_accounts_bump_revision_insert",
+        "source_accounts_bump_revision_update",
         "source_accounts_no_delete",
         "source_accounts_no_replace",
         "source_accounts_no_update"
@@ -12441,6 +13230,27 @@
       "sqlSha256": "f633e06e06cf1042"
     },
     {
+      "name": "account_mappings_bump_revision_delete",
+      "table": "account_mappings",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "84f6ef221b2f7d1a"
+    },
+    {
+      "name": "account_mappings_bump_revision_insert",
+      "table": "account_mappings",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "ba88a8835f7e285f"
+    },
+    {
+      "name": "account_mappings_bump_revision_update",
+      "table": "account_mappings",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "39793010ec578af8"
+    },
+    {
       "name": "account_mappings_no_delete",
       "table": "account_mappings",
       "timing": "BEFORE",
@@ -12460,6 +13270,27 @@
       "timing": "BEFORE",
       "event": "UPDATE",
       "sqlSha256": "ae8685f47b42df85"
+    },
+    {
+      "name": "accounts_bump_revision_delete",
+      "table": "accounts",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "3bbb084d6605c207"
+    },
+    {
+      "name": "accounts_bump_revision_insert",
+      "table": "accounts",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "1fe090fb309b6a3f"
+    },
+    {
+      "name": "accounts_bump_revision_update",
+      "table": "accounts",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "8b94c3b1b022f1ae"
     },
     {
       "name": "accounts_no_delete",
@@ -12812,6 +13643,27 @@
       "sqlSha256": "c6d8990a25f9c997"
     },
     {
+      "name": "balance_observations_bump_revision_delete",
+      "table": "balance_observations",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "28e66ae75627c91b"
+    },
+    {
+      "name": "balance_observations_bump_revision_insert",
+      "table": "balance_observations",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "893a4156d2e5b5cf"
+    },
+    {
+      "name": "balance_observations_bump_revision_update",
+      "table": "balance_observations",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "61dabc8ba753cd4e"
+    },
+    {
       "name": "balance_observations_no_delete",
       "table": "balance_observations",
       "timing": "BEFORE",
@@ -12826,11 +13678,60 @@
       "sqlSha256": "c97e7a3c8c3d6c0d"
     },
     {
+      "name": "balance_read_snapshots_identity_immutable",
+      "table": "balance_read_snapshots",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "32028840c8b8a461"
+    },
+    {
       "name": "balance_read_snapshots_transition",
       "table": "balance_read_snapshots",
       "timing": "BEFORE",
       "event": "UPDATE",
       "sqlSha256": "4f50df5c6dd24e68"
+    },
+    {
+      "name": "balance_snapshot_pointer_complete_only",
+      "table": "balance_snapshot_pointer",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "a6edef4b9fd7f254"
+    },
+    {
+      "name": "balance_snapshot_pointer_forward_only",
+      "table": "balance_snapshot_pointer",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "9bd780225ed6ece4"
+    },
+    {
+      "name": "balance_snapshot_pointer_no_delete",
+      "table": "balance_snapshot_pointer",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "284db6378b1cd17a"
+    },
+    {
+      "name": "calculation_policies_bump_revision_delete",
+      "table": "calculation_policies",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "0d3ae91241c4fe4d"
+    },
+    {
+      "name": "calculation_policies_bump_revision_insert",
+      "table": "calculation_policies",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "8091e8aa1a26715f"
+    },
+    {
+      "name": "calculation_policies_bump_revision_update",
+      "table": "calculation_policies",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "783abec271fcf9d3"
     },
     {
       "name": "calculation_policies_no_delete",
@@ -12910,6 +13811,62 @@
       "sqlSha256": "07007de6c9574aed"
     },
     {
+      "name": "collection_run_stages_no_delete",
+      "table": "collection_run_stages",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "af4b559e0e1e6565"
+    },
+    {
+      "name": "collection_run_stages_no_update",
+      "table": "collection_run_stages",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "d092d7be355b12c7"
+    },
+    {
+      "name": "collection_runs_no_delete",
+      "table": "collection_runs",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "a904bb81981388a3"
+    },
+    {
+      "name": "collection_runs_no_replace",
+      "table": "collection_runs",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "30ff3820c639c035"
+    },
+    {
+      "name": "collection_runs_progress_only",
+      "table": "collection_runs",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "1aa2f2a8d6ef12c7"
+    },
+    {
+      "name": "conversion_offers_bump_revision_delete",
+      "table": "conversion_offers",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "930c56ac9499a1d0"
+    },
+    {
+      "name": "conversion_offers_bump_revision_insert",
+      "table": "conversion_offers",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "763e61f2e41f7c23"
+    },
+    {
+      "name": "conversion_offers_bump_revision_update",
+      "table": "conversion_offers",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "b15b292e06232dc3"
+    },
+    {
       "name": "conversion_offers_no_delete",
       "table": "conversion_offers",
       "timing": "BEFORE",
@@ -12924,11 +13881,39 @@
       "sqlSha256": "c292a42eeea23c0c"
     },
     {
+      "name": "core_source_revision_forward_only",
+      "table": "core_source_revision",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "d7e8641c1bd86e4c"
+    },
+    {
+      "name": "core_source_revision_no_delete",
+      "table": "core_source_revision",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "625710f99a072476"
+    },
+    {
+      "name": "core_source_revision_single_row",
+      "table": "core_source_revision",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "92527a56780178e3"
+    },
+    {
       "name": "current_balance_projection_building_only",
       "table": "current_balance_projection",
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "5c0c35cf8083e37a"
+    },
+    {
+      "name": "current_balance_projection_chunk_conflict",
+      "table": "current_balance_projection",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "2f160c322f14e178"
     },
     {
       "name": "current_balance_projection_sealed_no_delete",
@@ -12943,6 +13928,27 @@
       "timing": "BEFORE",
       "event": "UPDATE",
       "sqlSha256": "6b4c9df6397294dd"
+    },
+    {
+      "name": "dataset_snapshot_policies_bump_revision_delete",
+      "table": "dataset_snapshot_policies",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "a2d01aa081140ff4"
+    },
+    {
+      "name": "dataset_snapshot_policies_bump_revision_insert",
+      "table": "dataset_snapshot_policies",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "084534abab2c3d9e"
+    },
+    {
+      "name": "dataset_snapshot_policies_bump_revision_update",
+      "table": "dataset_snapshot_policies",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "82b0cf3adbb41c3d"
     },
     {
       "name": "decision_operations_no_delete",
@@ -12966,6 +13972,13 @@
       "sqlSha256": "a627bdec015ed92c"
     },
     {
+      "name": "decision_outbox_completion_guard",
+      "table": "decision_outbox",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "c3f7494d94e74d82"
+    },
+    {
       "name": "decision_outbox_no_delete",
       "table": "decision_outbox",
       "timing": "BEFORE",
@@ -12985,6 +13998,27 @@
       "timing": "BEFORE",
       "event": "UPDATE",
       "sqlSha256": "e8588ae6df9d84ae"
+    },
+    {
+      "name": "decision_revisions_bump_revision_delete",
+      "table": "decision_revisions",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "ddd7cb1127792449"
+    },
+    {
+      "name": "decision_revisions_bump_revision_insert",
+      "table": "decision_revisions",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "cbe4abef57bba7d3"
+    },
+    {
+      "name": "decision_revisions_bump_revision_update",
+      "table": "decision_revisions",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "c28f7371c08195a3"
     },
     {
       "name": "decision_revisions_no_delete",
@@ -13064,6 +14098,27 @@
       "sqlSha256": "9fccbdafafc34f39"
     },
     {
+      "name": "entity_relations_bump_revision_delete",
+      "table": "entity_relations",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "87a90d5e64fc891c"
+    },
+    {
+      "name": "entity_relations_bump_revision_insert",
+      "table": "entity_relations",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "88614006fd72193a"
+    },
+    {
+      "name": "entity_relations_bump_revision_update",
+      "table": "entity_relations",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "b23d17a1295a2b5a"
+    },
+    {
       "name": "entity_relations_no_delete",
       "table": "entity_relations",
       "timing": "BEFORE",
@@ -13092,6 +14147,27 @@
       "sqlSha256": "79e06ed98f9b7815"
     },
     {
+      "name": "evidence_use_restrictions_bump_revision_delete",
+      "table": "evidence_use_restrictions",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "dcb73cbb3687356e"
+    },
+    {
+      "name": "evidence_use_restrictions_bump_revision_insert",
+      "table": "evidence_use_restrictions",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "14e87866ef082601"
+    },
+    {
+      "name": "evidence_use_restrictions_bump_revision_update",
+      "table": "evidence_use_restrictions",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "6e82bb90f3e53351"
+    },
+    {
       "name": "evidence_use_restrictions_no_delete",
       "table": "evidence_use_restrictions",
       "timing": "BEFORE",
@@ -13104,6 +14180,27 @@
       "timing": "BEFORE",
       "event": "UPDATE",
       "sqlSha256": "5d0c402e92ce7674"
+    },
+    {
+      "name": "expiry_rules_bump_revision_delete",
+      "table": "expiry_rules",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "7e2300ecced3df0b"
+    },
+    {
+      "name": "expiry_rules_bump_revision_insert",
+      "table": "expiry_rules",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "ce76a1647fa929b9"
+    },
+    {
+      "name": "expiry_rules_bump_revision_update",
+      "table": "expiry_rules",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "46226432da4026c2"
     },
     {
       "name": "expiry_rules_no_delete",
@@ -13195,6 +14292,27 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "9084ca853e43c9b1"
+    },
+    {
+      "name": "fetch_run_annotations_bump_revision_delete",
+      "table": "fetch_run_annotations",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "ca23d96f141eedf4"
+    },
+    {
+      "name": "fetch_run_annotations_bump_revision_insert",
+      "table": "fetch_run_annotations",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "43bdd33ea0ffb298"
+    },
+    {
+      "name": "fetch_run_annotations_bump_revision_update",
+      "table": "fetch_run_annotations",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "36bff529ff81afc4"
     },
     {
       "name": "fetch_run_annotations_no_delete",
@@ -13307,6 +14425,27 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "c79524f1e8b9fe6f"
+    },
+    {
+      "name": "fetch_run_seals_bump_revision_delete",
+      "table": "fetch_run_seals",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "f557a647071db940"
+    },
+    {
+      "name": "fetch_run_seals_bump_revision_insert",
+      "table": "fetch_run_seals",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "d6647ccb59653c35"
+    },
+    {
+      "name": "fetch_run_seals_bump_revision_update",
+      "table": "fetch_run_seals",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "2562f3da280635a5"
     },
     {
       "name": "fetch_run_seals_no_delete",
@@ -13428,6 +14567,27 @@
       "sqlSha256": "dd96dfbf3ad7da18"
     },
     {
+      "name": "identity_instrument_uses_bump_revision_delete",
+      "table": "identity_instrument_uses",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "67b7cd1af5903b0d"
+    },
+    {
+      "name": "identity_instrument_uses_bump_revision_insert",
+      "table": "identity_instrument_uses",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "2ad8381dfb7e8c40"
+    },
+    {
+      "name": "identity_instrument_uses_bump_revision_update",
+      "table": "identity_instrument_uses",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "c6cd06db6f2ecf9c"
+    },
+    {
       "name": "identity_instrument_uses_no_delete",
       "table": "identity_instrument_uses",
       "timing": "BEFORE",
@@ -13454,6 +14614,27 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "8ecae5c511475299"
+    },
+    {
+      "name": "identity_observations_bump_revision_delete",
+      "table": "identity_observations",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "555c2c1f7a5ef64a"
+    },
+    {
+      "name": "identity_observations_bump_revision_insert",
+      "table": "identity_observations",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "04d526735fc44e62"
+    },
+    {
+      "name": "identity_observations_bump_revision_update",
+      "table": "identity_observations",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "8d813a07282f757c"
     },
     {
       "name": "identity_observations_no_delete",
@@ -13505,6 +14686,27 @@
       "sqlSha256": "25b69957a3eb6124"
     },
     {
+      "name": "identity_run_seals_bump_revision_delete",
+      "table": "identity_run_seals",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "9076b54a1079a62c"
+    },
+    {
+      "name": "identity_run_seals_bump_revision_insert",
+      "table": "identity_run_seals",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "5d810f9f46d64922"
+    },
+    {
+      "name": "identity_run_seals_bump_revision_update",
+      "table": "identity_run_seals",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "04cf374272ae73d2"
+    },
+    {
       "name": "identity_run_seals_no_delete",
       "table": "identity_run_seals",
       "timing": "BEFORE",
@@ -13524,6 +14726,27 @@
       "timing": "BEFORE",
       "event": "UPDATE",
       "sqlSha256": "132572adeaa355d0"
+    },
+    {
+      "name": "identity_runs_bump_revision_delete",
+      "table": "identity_runs",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "c5f01fb96fed6a7f"
+    },
+    {
+      "name": "identity_runs_bump_revision_insert",
+      "table": "identity_runs",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "f07321231e9ef9bb"
+    },
+    {
+      "name": "identity_runs_bump_revision_update",
+      "table": "identity_runs",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "226e3182dc521ca0"
     },
     {
       "name": "identity_runs_no_delete",
@@ -13645,6 +14868,27 @@
       "sqlSha256": "4206a0c7ff2dbe6a"
     },
     {
+      "name": "instrument_identifiers_bump_revision_delete",
+      "table": "instrument_identifiers",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "ff24cbe1603a23a9"
+    },
+    {
+      "name": "instrument_identifiers_bump_revision_insert",
+      "table": "instrument_identifiers",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "ef4f4b0c370d07a7"
+    },
+    {
+      "name": "instrument_identifiers_bump_revision_update",
+      "table": "instrument_identifiers",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "f183d80cc3a89dd1"
+    },
+    {
       "name": "instrument_identifiers_no_delete",
       "table": "instrument_identifiers",
       "timing": "BEFORE",
@@ -13673,6 +14917,27 @@
       "sqlSha256": "d65451a6c8444cd1"
     },
     {
+      "name": "instrument_mappings_bump_revision_delete",
+      "table": "instrument_mappings",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "e7bc43f58eb3b3d1"
+    },
+    {
+      "name": "instrument_mappings_bump_revision_insert",
+      "table": "instrument_mappings",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "9d7901dfe7275c6a"
+    },
+    {
+      "name": "instrument_mappings_bump_revision_update",
+      "table": "instrument_mappings",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "00ea929f5f8cee19"
+    },
+    {
       "name": "instrument_mappings_no_delete",
       "table": "instrument_mappings",
       "timing": "BEFORE",
@@ -13694,6 +14959,27 @@
       "sqlSha256": "46669a681790937b"
     },
     {
+      "name": "instruments_bump_revision_delete",
+      "table": "instruments",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "5a213dd187c9845f"
+    },
+    {
+      "name": "instruments_bump_revision_insert",
+      "table": "instruments",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "53eaad3d9fc7951c"
+    },
+    {
+      "name": "instruments_bump_revision_update",
+      "table": "instruments",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "1cf77fc36b26f4e6"
+    },
+    {
       "name": "instruments_no_delete",
       "table": "instruments",
       "timing": "BEFORE",
@@ -13713,6 +14999,27 @@
       "timing": "BEFORE",
       "event": "UPDATE",
       "sqlSha256": "275685f243e414ea"
+    },
+    {
+      "name": "membership_state_claims_bump_revision_delete",
+      "table": "membership_state_claims",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "40918efe7961e763"
+    },
+    {
+      "name": "membership_state_claims_bump_revision_insert",
+      "table": "membership_state_claims",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "d26d7a758281150e"
+    },
+    {
+      "name": "membership_state_claims_bump_revision_update",
+      "table": "membership_state_claims",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "4c755f20bd8741b2"
     },
     {
       "name": "membership_state_claims_no_delete",
@@ -13792,6 +15099,27 @@
       "sqlSha256": "1b4e885415f389b7"
     },
     {
+      "name": "observation_decimal_values_bump_revision_delete",
+      "table": "observation_decimal_values",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "a7a1e7583745f29b"
+    },
+    {
+      "name": "observation_decimal_values_bump_revision_insert",
+      "table": "observation_decimal_values",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "c54f4ea091990c50"
+    },
+    {
+      "name": "observation_decimal_values_bump_revision_update",
+      "table": "observation_decimal_values",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "1c5ada95f5515541"
+    },
+    {
       "name": "observation_decimals_no_delete",
       "table": "observation_decimal_values",
       "timing": "BEFORE",
@@ -13869,6 +15197,27 @@
       "sqlSha256": "357333b145e6261d"
     },
     {
+      "name": "parse_coverage_claims_bump_revision_delete",
+      "table": "parse_coverage_claims",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "09ce46d02f6330e9"
+    },
+    {
+      "name": "parse_coverage_claims_bump_revision_insert",
+      "table": "parse_coverage_claims",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "d581fed887de5dfb"
+    },
+    {
+      "name": "parse_coverage_claims_bump_revision_update",
+      "table": "parse_coverage_claims",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "9b52a472c7c7271c"
+    },
+    {
       "name": "parse_coverage_claims_no_delete",
       "table": "parse_coverage_claims",
       "timing": "BEFORE",
@@ -13923,6 +15272,27 @@
       "timing": "BEFORE",
       "event": "UPDATE",
       "sqlSha256": "ac7f60ec4197155c"
+    },
+    {
+      "name": "parse_runs_bump_revision_delete",
+      "table": "parse_runs",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "b95b6e0aa2106b4a"
+    },
+    {
+      "name": "parse_runs_bump_revision_insert",
+      "table": "parse_runs",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "24da1921eb81c129"
+    },
+    {
+      "name": "parse_runs_bump_revision_update",
+      "table": "parse_runs",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "139989c3b4c82e20"
     },
     {
       "name": "parse_runs_no_delete",
@@ -13995,6 +15365,48 @@
       "sqlSha256": "77aecea2f90ffa97"
     },
     {
+      "name": "projection_input_records_no_delete",
+      "table": "projection_input_records",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "7d1c95ef40a2c60a"
+    },
+    {
+      "name": "projection_input_records_no_replace",
+      "table": "projection_input_records",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "4e9bc22602381d27"
+    },
+    {
+      "name": "projection_input_records_no_update",
+      "table": "projection_input_records",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "11b35b094aa1a325"
+    },
+    {
+      "name": "publication_events_bump_revision_delete",
+      "table": "publication_events",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "0a1ecf0cd6566e83"
+    },
+    {
+      "name": "publication_events_bump_revision_insert",
+      "table": "publication_events",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "22f74a214615b2d4"
+    },
+    {
+      "name": "publication_events_bump_revision_update",
+      "table": "publication_events",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "7fc6b58ff0e0e8d2"
+    },
+    {
       "name": "publication_events_no_delete",
       "table": "publication_events",
       "timing": "BEFORE",
@@ -14021,6 +15433,27 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "7b60138f5811d835"
+    },
+    {
+      "name": "published_parse_runs_bump_revision_delete",
+      "table": "published_parse_runs",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "113ff87891b564c9"
+    },
+    {
+      "name": "published_parse_runs_bump_revision_insert",
+      "table": "published_parse_runs",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "bdb588d452575543"
+    },
+    {
+      "name": "published_parse_runs_bump_revision_update",
+      "table": "published_parse_runs",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "dff38db534abbad1"
     },
     {
       "name": "published_parse_runs_no_delete",
@@ -14191,6 +15624,27 @@
       "sqlSha256": "6f5d074c752b5b91"
     },
     {
+      "name": "reward_bucket_claims_bump_revision_delete",
+      "table": "reward_bucket_claims",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "004a7c987d968cb8"
+    },
+    {
+      "name": "reward_bucket_claims_bump_revision_insert",
+      "table": "reward_bucket_claims",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "eae7272e3f65853f"
+    },
+    {
+      "name": "reward_bucket_claims_bump_revision_update",
+      "table": "reward_bucket_claims",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "a5c7272edc1b0ea2"
+    },
+    {
       "name": "reward_bucket_claims_no_delete",
       "table": "reward_bucket_claims",
       "timing": "BEFORE",
@@ -14210,6 +15664,27 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "14d19757f349438e"
+    },
+    {
+      "name": "reward_programs_bump_revision_delete",
+      "table": "reward_programs",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "316c4e197df3a7ae"
+    },
+    {
+      "name": "reward_programs_bump_revision_insert",
+      "table": "reward_programs",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "0c4cfabd3e68608d"
+    },
+    {
+      "name": "reward_programs_bump_revision_update",
+      "table": "reward_programs",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "c5a59b30ab2b5ec6"
     },
     {
       "name": "reward_programs_no_delete",
@@ -14315,6 +15790,27 @@
       "timing": "BEFORE",
       "event": "UPDATE",
       "sqlSha256": "d4a77cccb58cff57"
+    },
+    {
+      "name": "source_accounts_bump_revision_delete",
+      "table": "source_accounts",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "927015716071e967"
+    },
+    {
+      "name": "source_accounts_bump_revision_insert",
+      "table": "source_accounts",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "eaff97ab791324e2"
+    },
+    {
+      "name": "source_accounts_bump_revision_update",
+      "table": "source_accounts",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "52efcb2dc5497d5f"
     },
     {
       "name": "source_accounts_no_delete",
@@ -14425,6 +15921,31 @@
       "name": "change_plans_status",
       "table": "change_plans",
       "sqlSha256": "6d550e9d16f24464"
+    },
+    {
+      "name": "collection_run_stages_run",
+      "table": "collection_run_stages",
+      "sqlSha256": "8be4c0f26958b88a"
+    },
+    {
+      "name": "collection_run_stages_state",
+      "table": "collection_run_stages",
+      "sqlSha256": "3bea099c7393e54b"
+    },
+    {
+      "name": "collection_runs_fetch_run",
+      "table": "collection_runs",
+      "sqlSha256": "2a1ec030be88e35c"
+    },
+    {
+      "name": "collection_runs_open",
+      "table": "collection_runs",
+      "sqlSha256": "17d529f75595ea3b"
+    },
+    {
+      "name": "collection_runs_run",
+      "table": "collection_runs",
+      "sqlSha256": "892f4fb2668b63f0"
     },
     {
       "name": "conversion_offers_route",
@@ -14812,6 +16333,11 @@
       "sqlSha256": "7a316700ff52f118"
     },
     {
+      "name": "projection_input_records_job",
+      "table": "projection_input_records",
+      "sqlSha256": "bdd312bec3b263b4"
+    },
+    {
       "name": "publication_events_new_run",
       "table": "publication_events",
       "sqlSha256": "384b7702f30f524f"
@@ -14903,10 +16429,10 @@
     }
   ],
   "summary": {
-    "tableCount": 102,
+    "tableCount": 108,
     "viewCount": 31,
-    "triggerCount": 283,
-    "explicitIndexCount": 104,
+    "triggerCount": 384,
+    "explicitIndexCount": 110,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -14928,7 +16454,10 @@
         "calculation_results",
         "calculation_runs",
         "change_plans",
+        "collection_run_stages",
+        "collection_runs",
         "conversion_offers",
+        "core_source_revision",
         "decision_operations",
         "decision_outbox",
         "decision_revisions",
@@ -14977,6 +16506,7 @@
         "price_observations",
         "producer_sources",
         "producers",
+        "projection_input_records",
         "publication_events",
         "published_parse_runs",
         "raw_object_verification_events",
@@ -15000,12 +16530,14 @@
       ],
       "read-candidate": [
         "balance_read_snapshots",
+        "balance_snapshot_pointer",
         "conversion_simulations",
         "current_balance_projection",
         "expiry_estimates",
         "scope_relations"
       ],
       "operational-mutable": [
+        "collection_scan_state",
         "observation_lane_state",
         "observation_parse_jobs",
         "observation_replay_plans",
@@ -15024,9 +16556,13 @@
       "allocations",
       "approvals",
       "balance_read_snapshots",
+      "balance_snapshot_pointer",
       "calculation_runs",
       "change_plans",
+      "collection_runs",
+      "collection_scan_state",
       "conversion_simulations",
+      "core_source_revision",
       "dataset_snapshot_policies",
       "decision_outbox",
       "economic_event_revisions",
@@ -15092,8 +16628,10 @@
       "0029_decision_log.sql",
       "0033_reward_buckets.sql",
       "0034_reports.sql",
-      "0035_observation_job_lanes.sql"
+      "0035_observation_job_lanes.sql",
+      "0038_source_revision.sql",
+      "0039_collection_runs.sql"
     ],
-    "schemaSha256": "75ef6b812dd6757bef77328144a1ce5044187cc4acae9428ef32072c1f25b32e"
+    "schemaSha256": "b4f811d5d96884e73c1a37798c7c38dcae740e89741aa941568be754d7d25966"
   }
 }

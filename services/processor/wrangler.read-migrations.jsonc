@@ -1,0 +1,29 @@
+{
+  // The READ migration step, and nothing else (unified plan 06 §2, U11).
+  //
+  // Wrangler takes one `migrations_dir` per configuration, and the processor's
+  // own config already points at the CORE directory. A second configuration is
+  // therefore the only way to apply the READ migrations without ever being able
+  // to aim the CORE directory at the READ database, or the other way round:
+  //
+  //   wrangler d1 migrations apply kogane-read --remote \
+  //     --config services/processor/wrangler.read-migrations.jsonc
+  //
+  // It has no `main`, so it deploys nothing and is excluded from the dry-run
+  // matrix in `infra/workers-ci.json`. `kogane-read` was created empty on
+  // 2026-09-11; nothing applies its migrations but this step, run by the
+  // deploy job. See docs/read-rebuild-runbook.md.
+  "name": "kogane-read-migrations",
+  "account_id": "59ea63cc00914b30ca410b062ae2bb7f",
+  "compatibility_date": "2026-09-07",
+  "workers_dev": false,
+  "preview_urls": false,
+  "d1_databases": [
+    {
+      "binding": "READ",
+      "database_name": "kogane-read",
+      "database_id": "320ebe31-a031-48a1-985f-0e6fabbd517a",
+      "migrations_dir": "../../packages/storage-d1/migrations/read"
+    }
+  ]
+}

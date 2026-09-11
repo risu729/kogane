@@ -43,6 +43,10 @@
       {
         "name": "kogane-raw-evidence",
         "id": "b335a887-250d-45c9-bd72-af83f35fdc60"
+      },
+      {
+        "name": "kogane-read",
+        "id": "320ebe31-a031-48a1-985f-0e6fabbd517a"
       }
     ],
     "kvNamespaces": [],
@@ -95,6 +99,20 @@
     }
   ],
   "directories": [
+    {
+      "directory": "apps/web",
+      "workspace": "apps",
+      "disposition": {
+        "source": "poc_disposition.csv row poc/observation-pipeline + decision D1",
+        "proposedAction": "promoted-from-poc",
+        "proposedTarget": "apps/web (the React client and its frontend tests)",
+        "requiredVerification": "U04 executed the move; the three bundles are byte-identical and the client imports no service internal",
+        "executionStatus": "EXECUTED_U04",
+        "planLiveResourceStatus": "NOT_VERIFIED",
+        "liveResourceStatus": "NO_LIVE_RESOURCE"
+      },
+      "workers": []
+    },
     {
       "directory": "experiments/cloudflare-browser-run",
       "workspace": "experiments",
@@ -225,6 +243,20 @@
       ]
     },
     {
+      "directory": "experiments/observation-pipeline-local",
+      "workspace": "experiments",
+      "disposition": {
+        "source": "poc_disposition.csv row poc/observation-pipeline + decision D1",
+        "proposedAction": "isolated-as-experiment",
+        "proposedTarget": "experiments/observation-pipeline-local (EXPERIMENT.md: risu729, 2026-12-31)",
+        "requiredVerification": "U04 executed the move; retire once the App API covers replay and status (docs/research/observation-pipeline-poc.md)",
+        "executionStatus": "EXECUTED_U04",
+        "planLiveResourceStatus": "NOT_VERIFIED",
+        "liveResourceStatus": "NO_LIVE_RESOURCE"
+      },
+      "workers": []
+    },
+    {
       "directory": "experiments/tamia-tcp-bridge",
       "workspace": "experiments",
       "disposition": {
@@ -293,18 +325,177 @@
       ]
     },
     {
-      "directory": "poc/observation-pipeline",
-      "workspace": "poc",
+      "directory": "services/app",
+      "workspace": "services",
       "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "split-promote-retire",
-        "proposedTarget": "apps/web; packages/application; tests/fixtures; docs/research",
-        "requiredVerification": "promote UI and fixtures, move needed local operations to the App API, legacy store to test/research, drop the shims",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
+        "source": "plan 07 §1 + decision D1",
+        "proposedAction": "rename-directory",
+        "proposedTarget": "services/app",
+        "requiredVerification": "git mv only; Worker names kogane-evidence-browser and kogane-demo stay",
+        "executionStatus": "EXECUTED_RENAME",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "NO_LIVE_RESOURCE"
+        "liveResourceStatus": "LIVE(workers=kogane-demo,kogane-evidence-browser; buckets=kogane-raw-evidence)"
       },
-      "workers": []
+      "workers": [
+        {
+          "config": "services/app/wrangler.demo.jsonc",
+          "name": "kogane-demo",
+          "main": "src/demo-worker.ts",
+          "role": "deployed",
+          "liveWorker": true,
+          "crons": [],
+          "emailHandler": false,
+          "d1": [],
+          "r2": [],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [],
+          "containers": [],
+          "vpcNetworks": [],
+          "serviceBindings": [],
+          "assets": {
+            "directory": "../../apps/web/dist",
+            "binding": "ASSETS"
+          },
+          "varNames": [
+            "ACCESS_AUDIENCE",
+            "ACCESS_ISSUER",
+            "BALANCE_PROJECTION_ENABLED",
+            "OPS_API_ENABLED",
+            "READ_PROJECTION_ENABLED"
+          ],
+          "requiredSecretNames": [],
+          "unextractedKeys": []
+        },
+        {
+          "config": "services/app/wrangler.jsonc",
+          "name": "kogane-evidence-browser",
+          "main": "src/worker.ts",
+          "role": "deployed",
+          "liveWorker": true,
+          "crons": [],
+          "emailHandler": false,
+          "d1": [
+            {
+              "binding": "DB",
+              "databaseName": "kogane-raw-evidence",
+              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            },
+            {
+              "binding": "READ",
+              "databaseName": "kogane-read",
+              "databaseId": "320ebe31-a031-48a1-985f-0e6fabbd517a",
+              "live": true
+            }
+          ],
+          "r2": [
+            {
+              "binding": "EVIDENCE",
+              "bucket": "kogane-raw-evidence",
+              "live": true
+            }
+          ],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [],
+          "containers": [],
+          "vpcNetworks": [],
+          "serviceBindings": [
+            {
+              "binding": "PIPELINE",
+              "service": "kogane-observation-pipeline"
+            }
+          ],
+          "assets": {
+            "directory": "../../apps/web/dist-production",
+            "binding": "ASSETS"
+          },
+          "varNames": [
+            "ACCESS_AUDIENCE",
+            "ACCESS_ISSUER",
+            "AGENT_API_GRANTS",
+            "AGENT_GRANTS",
+            "BALANCE_PROJECTION_ENABLED",
+            "COMMANDS_ENABLED",
+            "EVENTS_V2_ENABLED",
+            "EVIDENCE_SOURCE_ID",
+            "OPS_API_ENABLED",
+            "READ_PROJECTION_ENABLED",
+            "REWARDS_V2_ENABLED",
+            "REWARD_READ_PROJECTION_ENABLED",
+            "SESSION_REFRESH_POLICY"
+          ],
+          "requiredSecretNames": [],
+          "unextractedKeys": []
+        },
+        {
+          "config": "services/app/wrangler.test.jsonc",
+          "name": "kogane-evidence-browser-test",
+          "main": "src/worker.ts",
+          "role": "test-only",
+          "liveWorker": false,
+          "crons": [],
+          "emailHandler": false,
+          "d1": [
+            {
+              "binding": "DB",
+              "databaseName": "test",
+              "databaseId": "00000000-0000-0000-0000-000000000001",
+              "live": false
+            },
+            {
+              "binding": "READ",
+              "databaseName": "test-read",
+              "databaseId": "00000000-0000-0000-0000-000000000002",
+              "live": false
+            }
+          ],
+          "r2": [
+            {
+              "binding": "EVIDENCE",
+              "bucket": "test",
+              "live": false
+            }
+          ],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [],
+          "containers": [],
+          "vpcNetworks": [],
+          "serviceBindings": [],
+          "assets": {
+            "directory": "test/assets",
+            "binding": "ASSETS"
+          },
+          "varNames": [
+            "ACCESS_AUDIENCE",
+            "ACCESS_ISSUER",
+            "AGENT_API_GRANTS",
+            "AGENT_GRANTS",
+            "BALANCE_PROJECTION_ENABLED",
+            "COMMANDS_ENABLED",
+            "EVENTS_V2_ENABLED",
+            "EVIDENCE_SOURCE_ID",
+            "OPS_API_ENABLED",
+            "READ_PROJECTION_ENABLED",
+            "REWARDS_V2_ENABLED",
+            "REWARD_READ_PROJECTION_ENABLED",
+            "SESSION_REFRESH_POLICY"
+          ],
+          "requiredSecretNames": [],
+          "unextractedKeys": []
+        }
+      ]
     },
     {
       "directory": "services/collector-globalpass",
@@ -1628,175 +1819,20 @@
       ]
     },
     {
-      "directory": "services/evidence-browser",
-      "workspace": "services",
-      "disposition": {
-        "source": "plan 07 §1 + decision D1",
-        "proposedAction": "rename-directory",
-        "proposedTarget": "services/app",
-        "requiredVerification": "git mv only; Worker names kogane-evidence-browser and kogane-demo stay",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-demo,kogane-evidence-browser; buckets=kogane-raw-evidence)"
-      },
-      "workers": [
-        {
-          "config": "services/evidence-browser/wrangler.demo.jsonc",
-          "name": "kogane-demo",
-          "main": "src/demo-worker.ts",
-          "role": "deployed",
-          "liveWorker": true,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "assets": {
-            "directory": "../../poc/observation-pipeline/web/dist",
-            "binding": "ASSETS"
-          },
-          "varNames": [
-            "ACCESS_AUDIENCE",
-            "ACCESS_ISSUER",
-            "BALANCE_PROJECTION_ENABLED",
-            "OPS_API_ENABLED"
-          ],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/evidence-browser/wrangler.jsonc",
-          "name": "kogane-evidence-browser",
-          "main": "src/worker.ts",
-          "role": "deployed",
-          "liveWorker": true,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [
-            {
-              "binding": "DB",
-              "databaseName": "kogane-raw-evidence",
-              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
-              "live": true
-            }
-          ],
-          "r2": [
-            {
-              "binding": "EVIDENCE",
-              "bucket": "kogane-raw-evidence",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [
-            {
-              "binding": "PIPELINE",
-              "service": "kogane-observation-pipeline"
-            }
-          ],
-          "assets": {
-            "directory": "../../poc/observation-pipeline/web/dist-production",
-            "binding": "ASSETS"
-          },
-          "varNames": [
-            "ACCESS_AUDIENCE",
-            "ACCESS_ISSUER",
-            "AGENT_API_GRANTS",
-            "AGENT_GRANTS",
-            "BALANCE_PROJECTION_ENABLED",
-            "COMMANDS_ENABLED",
-            "EVENTS_V2_ENABLED",
-            "EVIDENCE_SOURCE_ID",
-            "OPS_API_ENABLED",
-            "REWARDS_V2_ENABLED",
-            "SESSION_REFRESH_POLICY"
-          ],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/evidence-browser/wrangler.test.jsonc",
-          "name": "kogane-evidence-browser-test",
-          "main": "src/worker.ts",
-          "role": "test-only",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [
-            {
-              "binding": "DB",
-              "databaseName": "test",
-              "databaseId": "00000000-0000-0000-0000-000000000001",
-              "live": false
-            }
-          ],
-          "r2": [
-            {
-              "binding": "EVIDENCE",
-              "bucket": "test",
-              "live": false
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "assets": {
-            "directory": "test/assets",
-            "binding": "ASSETS"
-          },
-          "varNames": [
-            "ACCESS_AUDIENCE",
-            "ACCESS_ISSUER",
-            "AGENT_API_GRANTS",
-            "AGENT_GRANTS",
-            "BALANCE_PROJECTION_ENABLED",
-            "COMMANDS_ENABLED",
-            "EVENTS_V2_ENABLED",
-            "EVIDENCE_SOURCE_ID",
-            "OPS_API_ENABLED",
-            "SESSION_REFRESH_POLICY"
-          ],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        }
-      ]
-    },
-    {
-      "directory": "services/observation-pipeline",
+      "directory": "services/processor",
       "workspace": "services",
       "disposition": {
         "source": "plan 07 §1 + decision D1",
         "proposedAction": "rename-directory",
         "proposedTarget": "services/processor",
         "requiredVerification": "git mv only; Worker name kogane-observation-pipeline and cron stay",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
+        "executionStatus": "EXECUTED_RENAME",
         "planLiveResourceStatus": "NOT_VERIFIED",
         "liveResourceStatus": "LIVE(workers=kogane-observation-pipeline; buckets=kogane-raw-evidence)"
       },
       "workers": [
         {
-          "config": "services/observation-pipeline/wrangler.diagnostic.jsonc",
+          "config": "services/processor/wrangler.diagnostic.jsonc",
           "name": "kogane-observation-read-diagnostic",
           "role": "binding-only",
           "liveWorker": false,
@@ -1831,7 +1867,7 @@
           "unextractedKeys": []
         },
         {
-          "config": "services/observation-pipeline/wrangler.jsonc",
+          "config": "services/processor/wrangler.jsonc",
           "name": "kogane-observation-pipeline",
           "main": "src/worker.ts",
           "role": "deployed",
@@ -1845,7 +1881,13 @@
               "binding": "DB",
               "databaseName": "kogane-raw-evidence",
               "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
-              "migrationsDir": "../raw-evidence/migrations",
+              "migrationsDir": "../../packages/storage-d1/migrations/core",
+              "live": true
+            },
+            {
+              "binding": "READ",
+              "databaseName": "kogane-read",
+              "databaseId": "320ebe31-a031-48a1-985f-0e6fabbd517a",
               "live": true
             }
           ],
@@ -1854,11 +1896,24 @@
               "binding": "EVIDENCE",
               "bucket": "kogane-raw-evidence",
               "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
+              "live": true
             }
           ],
           "kv": [],
           "queueProducers": [],
-          "queueConsumers": [],
+          "queueConsumers": [
+            {
+              "queue": "kogane-collection-terminals",
+              "deadLetterQueue": "kogane-collection-terminals-dlq",
+              "maxBatchSize": 10,
+              "maxRetries": 5,
+              "maxConcurrency": 2
+            }
+          ],
           "durableObjects": [],
           "durableObjectExports": [],
           "durableObjectMigrations": [],
@@ -1867,16 +1922,23 @@
           "serviceBindings": [],
           "varNames": [
             "BALANCE_PROJECTION_ENABLED",
+            "COLLECTION_ACCOUNT_ID",
+            "COLLECTION_DATA_BUCKET",
+            "COLLECTION_INGEST_CLIENT",
+            "OPS_DISPATCH_ENABLED",
+            "READ_PROJECTION_ENABLED",
             "RECONCILIATION_ENABLED",
             "RELEASE_CANDIDATES_ENABLED",
             "REPORTS_ENABLED",
-            "REWARD_CLAIMS_ENABLED"
+            "REWARD_CLAIMS_ENABLED",
+            "REWARD_READ_PROJECTION_ENABLED",
+            "SHARED_R2_INGEST_ENABLED"
           ],
           "requiredSecretNames": [],
           "unextractedKeys": []
         },
         {
-          "config": "services/observation-pipeline/wrangler.ops.jsonc",
+          "config": "services/processor/wrangler.ops.jsonc",
           "name": "kogane-observation-ops-local",
           "role": "binding-only",
           "liveWorker": false,
@@ -1898,6 +1960,36 @@
               "service": "kogane-observation-pipeline"
             }
           ],
+          "varNames": [],
+          "requiredSecretNames": [],
+          "unextractedKeys": []
+        },
+        {
+          "config": "services/processor/wrangler.read-migrations.jsonc",
+          "name": "kogane-read-migrations",
+          "role": "binding-only",
+          "liveWorker": false,
+          "crons": [],
+          "emailHandler": false,
+          "d1": [
+            {
+              "binding": "READ",
+              "databaseName": "kogane-read",
+              "databaseId": "320ebe31-a031-48a1-985f-0e6fabbd517a",
+              "migrationsDir": "../../packages/storage-d1/migrations/read",
+              "live": true
+            }
+          ],
+          "r2": [],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [],
+          "containers": [],
+          "vpcNetworks": [],
+          "serviceBindings": [],
           "varNames": [],
           "requiredSecretNames": [],
           "unextractedKeys": []
@@ -1930,7 +2022,7 @@
               "binding": "DB",
               "databaseName": "kogane-raw-evidence",
               "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
-              "migrationsDir": "migrations",
+              "migrationsDir": "../../packages/storage-d1/migrations/core",
               "live": true
             }
           ],
@@ -1958,7 +2050,7 @@
     }
   ],
   "summary": {
-    "configCount": 39,
+    "configCount": 40,
     "deployedWorkerCount": 17,
     "crons": [
       {
@@ -2029,6 +2121,17 @@
     ],
     "queues": [
       {
+        "queue": "kogane-collection-terminals",
+        "producers": [],
+        "consumers": [
+          "kogane-observation-pipeline"
+        ],
+        "deadLetterQueues": [
+          "kogane-collection-terminals-dlq"
+        ],
+        "toCreate": "to be created by the first deploy (U08)"
+      },
+      {
         "queue": "kogane-r2-outbox-reconciler",
         "producers": [
           "kogane-collector-r2-importer"
@@ -2038,7 +2141,8 @@
         ],
         "deadLetterQueues": [
           "kogane-r2-outbox-reconciler-dlq"
-        ]
+        ],
+        "toCreate": ""
       },
       {
         "queue": "kogane-vpass-raw-evidence-import",
@@ -2050,7 +2154,8 @@
         ],
         "deadLetterQueues": [
           "kogane-vpass-raw-evidence-import-dlq"
-        ]
+        ],
+        "toCreate": ""
       }
     ],
     "durableObjectClasses": [
@@ -2235,6 +2340,24 @@
         "live": false,
         "bindings": [
           "kogane-evidence-browser-test"
+        ]
+      },
+      {
+        "databaseName": "test-read",
+        "databaseId": "00000000-0000-0000-0000-000000000002",
+        "live": false,
+        "bindings": [
+          "kogane-evidence-browser-test"
+        ]
+      },
+      {
+        "databaseName": "kogane-read",
+        "databaseId": "320ebe31-a031-48a1-985f-0e6fabbd517a",
+        "live": true,
+        "bindings": [
+          "kogane-evidence-browser",
+          "kogane-observation-pipeline",
+          "kogane-read-migrations"
         ]
       },
       {

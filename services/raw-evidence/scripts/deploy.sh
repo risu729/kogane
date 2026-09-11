@@ -6,7 +6,7 @@ mise run ingest:typecheck
 mise run ingest:build
 mise run ingest:test
 mise run ingest:dry-run
-sha256sum migrations/*.sql
+sha256sum ../../packages/storage-d1/migrations/core/*.sql
 ./node_modules/.bin/wrangler d1 migrations list kogane-raw-evidence --remote
 ./node_modules/.bin/wrangler d1 migrations apply kogane-raw-evidence --remote
 ./node_modules/.bin/wrangler deploy

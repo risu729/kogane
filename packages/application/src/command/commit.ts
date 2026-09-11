@@ -25,7 +25,6 @@ import {
   type CommitGuard,
   type MutationPlanners,
   type OperationReceiptStatus,
-  type OutboxTarget,
   type PreparedWrite,
   type Principal,
   principalCan,
@@ -33,7 +32,15 @@ import {
 import { commandError, type CommandResult } from "./errors.ts";
 import { loadPlan } from "./plan.ts";
 import { currentRevisions } from "./simulate.ts";
-import { expectedRevisionsJson, expectedRevisionsSql } from "../operations/sql.ts";
+import { expectedRevisionsJson } from "../operations/sql.ts";
+import {
+  approvalConsumptionWrite,
+  outboxWrite,
+  planCommittedWrite,
+  planStaleWrite,
+  receiptExistsGuard,
+  receiptReservationWrite,
+} from "../../../storage-d1/src/atomic/decision-commit.ts";
 
 const OPERATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/u;
 
@@ -166,10 +173,7 @@ export async function commit(
   if (!planner) return commandError("unsupported_semantics", [plan.kind]);
 
   const expectedJson = expectedRevisionsJson(plan.expectedRevisions);
-  const guard: CommitGuard = {
-    sql: "EXISTS(SELECT 1 FROM operation_receipts WHERE operation_id=? AND principal=?)",
-    binds: [operationId, principal.id],
-  };
+  const guard: CommitGuard = receiptExistsGuard(operationId, principal.id);
   const mutation = await planner({
     store,
     plan,
@@ -198,37 +202,20 @@ export async function commit(
   };
 
   const writes: PreparedWrite[] = [
-    {
-      sql: `INSERT INTO operation_receipts(operation_id,principal,operation_kind,payload_digest,plan_id,status,result_json,created_at,published_at)
-        SELECT ?1,?2,?3,?4,?5,'accepted',?6,?7,NULL
-        WHERE NOT EXISTS(SELECT 1 FROM operation_receipts WHERE operation_id=?1)
-        AND EXISTS(SELECT 1 FROM change_plans WHERE plan_id=?5 AND status IN ('planned','approved') AND expires_at>?7)
-        AND EXISTS(SELECT 1 FROM approvals WHERE approval_id=?8 AND plan_id=?5 AND plan_digest=?5
-          AND approver_actor=?2 AND uses_remaining>0 AND expires_at>?7)
-        AND ${expectedRevisionsSql("?9")}`,
-      binds: [
-        operationId,
-        principal.id,
-        plan.kind,
-        payloadDigest,
-        plan.planId,
-        JSON.stringify(receipt),
-        input.now,
-        approval.approval_id,
-        expectedJson,
-      ],
-    },
+    receiptReservationWrite({
+      operationId,
+      principal: principal.id,
+      operationKind: plan.kind,
+      payloadDigest,
+      planId: plan.planId,
+      receiptJson: JSON.stringify(receipt),
+      now: input.now,
+      approvalId: approval.approval_id,
+      expectedRevisionsJson: expectedJson,
+    }),
     ...mutation.writes,
-    {
-      sql: `UPDATE approvals SET uses_remaining=uses_remaining-1 WHERE approval_id=?1 AND uses_remaining>0
-        AND EXISTS(SELECT 1 FROM operation_receipts WHERE operation_id=?2 AND principal=?3)`,
-      binds: [approval.approval_id, operationId, principal.id],
-    },
-    {
-      sql: `UPDATE change_plans SET status='committed' WHERE plan_id=?1 AND status IN ('planned','approved')
-        AND EXISTS(SELECT 1 FROM operation_receipts WHERE operation_id=?2 AND principal=?3)`,
-      binds: [plan.planId, operationId, principal.id],
-    },
+    approvalConsumptionWrite(approval.approval_id, operationId, principal.id),
+    planCommittedWrite(plan.planId, operationId, principal.id),
     ...outboxTargets.map((target) =>
       outboxWrite(mutation.decisionRevisionId, principal.id, operationId, target, input.now),
     ),
@@ -245,22 +232,6 @@ export async function commit(
     payloadDigest,
     input.now,
   );
-}
-
-function outboxWrite(
-  decisionRevisionId: string,
-  principal: string,
-  operationId: string,
-  target: OutboxTarget,
-  now: string,
-): PreparedWrite {
-  return {
-    sql: `INSERT INTO decision_outbox(decision_revision_id,principal,operation_id,target,enqueued_at,available_at_ms)
-      SELECT ?1,?2,?3,?4,?5,0 WHERE EXISTS(SELECT 1 FROM decision_revisions WHERE id=?1)
-      AND EXISTS(SELECT 1 FROM operation_receipts WHERE operation_id=?3 AND principal=?2)
-      AND NOT EXISTS(SELECT 1 FROM decision_outbox WHERE decision_revision_id=?1 AND target=?4)`,
-    binds: [decisionRevisionId, principal, operationId, target, now],
-  };
 }
 
 /** Nothing was written. Name the precondition that failed without guessing. */
@@ -283,12 +254,7 @@ async function failureReason(
     ([ref, revision]) => current[ref] !== revision,
   );
   if (moved.length > 0) {
-    await store.batch([
-      {
-        sql: "UPDATE change_plans SET status='stale' WHERE plan_id=?1 AND status IN ('planned','approved')",
-        binds: [plan.planId],
-      },
-    ]);
+    await store.batch([planStaleWrite(plan.planId)]);
     return commandError("stale_context", [plan.planId, ...moved.map(([ref]) => ref)]);
   }
   const approval = await store.first<ApprovalRow>(

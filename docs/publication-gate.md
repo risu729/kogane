@@ -98,7 +98,7 @@ SELECT count(*) FROM parse_runs WHERE status='ok' AND superseded_by_parse_run_id
 
 ## Writer
 
-`services/observation-pipeline/src/publication-gate.ts` supplies two
+`services/processor/src/publication-gate.ts` supplies two
 statements that `publishBatch` in `worker.ts` appends to the existing publish
 transaction, after the run is marked `ok` and older runs are superseded:
 append the event (naming the run it replaces), then upsert the pointer. Each
@@ -140,19 +140,19 @@ Every normal read path now decides "current" by membership in
 | same file, `recordedParses` (new) used by `visibleEvidence.parseRuns/observations` | `p.status <> 'pending'`                                    | not pending AND (error OR superseded OR published): an unadopted `ok` run is not a visible result at all |
 | `packages/read-model/src/sql.ts` `PARSING_HEALTH_SQL`                              | newer `ok` unsuperseded parse repairs a failed job         | newer published parse repairs it                                                                         |
 | `packages/parsers/src/snapshot-query.ts` `complete_parse`                          | `status = 'ok' AND superseded_by_parse_run_id IS NULL`     | `EXISTS (... published_parse_runs ...)`; relation named by `SnapshotRelations.publishedParseRuns`        |
-| `poc/observation-pipeline/src/queries.ts` `CURRENT`                                | legacy predicate                                           | projection membership                                                                                    |
-| `services/evidence-browser/src/identity-api.ts` `eligible`                         | legacy predicate                                           | join `published_parse_runs`                                                                              |
-| `services/evidence-browser/src/observation-organization.ts` `historical`           | `superseded_by_parse_run_id IS NOT NULL`                   | `pub.parse_run_id IS NULL` (LEFT JOIN projection); unadopted, unsuperseded runs are decorated for no one |
-| `services/raw-evidence/migrations/0026` `current_identity_observations`            | legacy predicate (0022)                                    | projection-driven, same plan shape                                                                       |
-| `services/observation-pipeline/src/identity-store.ts` `identitySweep` ordering     | current-first by `superseded IS NOT NULL`                  | published-first by projection membership (historical runs are still interpreted, as before)              |
-| `services/observation-pipeline/src/identity-audit.ts` `eligible`, lineage          | legacy predicate; lineage by supersession                  | projection join; lineage by projection                                                                   |
-| `services/observation-pipeline/scripts/status.ts` coverage                         | legacy predicate                                           | projection; plus a `publication` mismatch count                                                          |
-| `services/observation-pipeline/scripts/replay-diagnostics.ts`                      | legacy predicate                                           | projection                                                                                               |
-| `services/observation-pipeline/src/worker.ts` `/replay/plan` `already_parsed`      | `EXISTS(... parse_runs ... status='ok')`                   | `EXISTS(... published_parse_runs ...)`: an unadopted success is not done work                            |
+| `experiments/observation-pipeline-local/src/queries.ts` `CURRENT`                  | legacy predicate                                           | projection membership                                                                                    |
+| `services/app/src/identity-api.ts` `eligible`                                      | legacy predicate                                           | join `published_parse_runs`                                                                              |
+| `services/app/src/observation-organization.ts` `historical`                        | `superseded_by_parse_run_id IS NOT NULL`                   | `pub.parse_run_id IS NULL` (LEFT JOIN projection); unadopted, unsuperseded runs are decorated for no one |
+| `packages/storage-d1/migrations/core/0026` `current_identity_observations`         | legacy predicate (0022)                                    | projection-driven, same plan shape                                                                       |
+| `services/processor/src/identity-store.ts` `identitySweep` ordering                | current-first by `superseded IS NOT NULL`                  | published-first by projection membership (historical runs are still interpreted, as before)              |
+| `services/processor/src/identity-audit.ts` `eligible`, lineage                     | legacy predicate; lineage by supersession                  | projection join; lineage by projection                                                                   |
+| `services/processor/scripts/status.ts` coverage                                    | legacy predicate                                           | projection; plus a `publication` mismatch count                                                          |
+| `services/processor/scripts/replay-diagnostics.ts`                                 | legacy predicate                                           | projection                                                                                               |
+| `services/processor/src/worker.ts` `/replay/plan` `already_parsed`                 | `EXISTS(... parse_runs ... status='ok')`                   | `EXISTS(... published_parse_runs ...)`: an unadopted success is not done work                            |
 | same file, `/status` `freshness.latestParsedAt`                                    | `max(parsed_at) FROM parse_runs WHERE status='ok'`         | `max(parsed_at) FROM published_observation_parses`                                                       |
-| `services/observation-pipeline/scripts/audit-identities.ts` (3 queries)            | legacy predicate                                           | projection                                                                                               |
+| `services/processor/scripts/audit-identities.ts` (3 queries)                       | legacy predicate                                           | projection                                                                                               |
 
-Not changed on purpose: `services/evidence-browser/test/legacy-read-path.ts`
+Not changed on purpose: `services/app/test/legacy-read-path.ts`
 (the frozen adapter of the PR-04 parity test), the writer's supersession
 statements, migrations 0018/0020/0022 (superseded by 0026's view), and the API
 contract field `superseded_by_parse_run_id`, which remains the lineage marker
@@ -178,7 +178,7 @@ the replay-plan estimate and `/status` freshness kept reading
   records: the read model's legacy concept (1), `publication-gate.ts` (5),
   `worker.ts` supersession batch (3), the PoC `store.ts` (4). One more
   occurrence fails until the number is changed in review;
-- `services/raw-evidence/migrations/*.sql` may state it only up to 0026, the
+- `packages/storage-d1/migrations/core/*.sql` may state it only up to 0026, the
   migration that introduced the projection and backfilled it from that rule;
 - `status = 'ok'` outside tests appears only in the reviewed writers and the
   named concept, again with exact counts: it is the execution-attempt fact,
@@ -186,7 +186,7 @@ the replay-plan estimate and `/status` freshness kept reading
 
 ## Candidate invisibility (step 4)
 
-`services/evidence-browser/test/publication-gate.test.ts` seeds a published
+`services/app/test/publication-gate.test.ts` seeds a published
 parse, then an `ok` run of the same artifact and parser that is neither
 published nor superseded (what a future candidate looks like), plus a later
 capture of the same snapshot dataset whose only parse is such a run, plus a
@@ -231,10 +231,10 @@ actually writes.
 1. `services/raw-evidence`: apply 0026 then 0036 (both additive; the previous
    Workers keep working, the backfill makes the projection equal to what they
    show, and 0036 only rejects a row no correct writer produces).
-2. `services/observation-pipeline`: the writer that maintains the projection.
+2. `services/processor`: the writer that maintains the projection.
    Until this is live, new successes are visible to the old reader only; run
    `POST /publication/repair` after deployment to close any gap.
-3. `services/evidence-browser`: the reader of the projection.
+3. `services/app`: the reader of the projection.
 4. `GET /publication/consistency` must report `mismatches: 0`. If not, repair,
    then look for a writer that predates step 2.
 
@@ -267,7 +267,7 @@ actually writes.
   not move the pointer, expired lease changes nothing, old writer gap is
   reported and repaired idempotently, 0026 and 0036 on the earlier schema with
   existing rows backfill exactly the legacy set and are idempotent:
-  `services/observation-pipeline/test/publication-gate.test.ts`,
+  `services/processor/test/publication-gate.test.ts`,
   `pipeline.test.ts`.
 - The publish batch is idempotent: running it twice for the same run leaves
   every statement at zero changes, the event history unchanged and

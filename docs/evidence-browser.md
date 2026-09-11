@@ -4,7 +4,7 @@ The current local frontend has Japanese navigation, responsive layouts,
 explicit connection/data classification, and an isolated synthetic preview.
 See [Frontend foundation](frontend.md) for the adopted stack, commands, and
 the production API handoff. A separate D1/R2 reader is implemented in
-`services/evidence-browser` and deployed behind the existing WARP access policy.
+`services/app` and deployed behind the existing WARP access policy.
 Authenticated live verification remains pending. See
 [Production evidence browser](production-evidence-browser.md).
 
@@ -14,7 +14,8 @@ produced against the exact bytes it produced them from, and walk the
 provenance chain in both directions.
 
 It is implemented in the observation-pipeline proof of concept
-(`poc/observation-pipeline`): a read-only JSON API in `src/api.ts` over the
+(`experiments/observation-pipeline-local`): a read-only JSON API in
+`src/api.ts` over the
 queries in `src/queries.ts`, and a React client in `web/` that renders it,
 served together by `bun src/serve.ts`. This document records what it is for,
 the rules that keep it small, what the code enforces today, and what is
@@ -66,7 +67,7 @@ a currency the parser silently treated as JPY, a metric that is
 provider-reported rather than derived, a date that is `observed_at` and
 not `as_of`.
 
-`poc/observation-pipeline/RESULTS.md` records eight defects an adversarial
+`docs/research/observation-pipeline-poc.md` records eight defects an adversarial
 review found in the first implementation, and every one of them failed
 silently and in the direction of looking correct. That is the argument in
 one line. The cost of getting layer B wrong is not lost data — evidence is
@@ -132,7 +133,7 @@ request builder all derive from it. This local server advertises no list
 capability, so it answers 400 to any query parameter; that is the contract,
 not an omission. `test/api-conformance.ts` holds the checks every
 implementation must pass; `test/api-conformance.test.ts` runs them here and
-`services/evidence-browser/test/conformance.test.ts` runs the same module
+`services/app/test/conformance.test.ts` runs the same module
 against the demo and the production Worker under workerd.
 
 `identityReadModes` also unlocks `?identityRead=latest|as-recorded` on the
@@ -421,7 +422,7 @@ the deployed shape. Neither is done; both are in the open questions.
 
 ### The one explicit POST boundary (A09)
 
-The deployed Worker (`services/evidence-browser`) gained exactly one
+The deployed Worker (`services/app`) gained exactly one
 non-GET path set: `POST /api/command/v1/{plan,simulate,approve,commit,operation}`
 ([change-lifecycle.md](change-lifecycle.md)). It is not a relaxation of the
 boundary above — every other request that is not `GET` or `HEAD` is still
@@ -611,7 +612,7 @@ counting rather than describing as a store swap:
   reads `schema.sql` from disk and executes DDL, and a Worker has no
   filesystem.
 
-The deployed Worker (`services/evidence-browser`) does not run
+The deployed Worker (`services/app`) does not run
 `src/queries.ts`. Its reads go through the explicit read repository in
 `packages/read-model` (`src/observations.ts` binds it to D1): one named
 method per query, typed filter inputs, and SQL that names the sealed

@@ -258,11 +258,22 @@ Binding call to the collector: the row stays pending until a dispatch
 succeeds, so the cron keeps re-dispatching and a failed notification never
 loses the request. Nothing in this change contacts a collector.
 
+U08 built the cron side of that contract: the `operation_dispatch` lane of
+`services/processor` (`docs/processor.md` §7), behind
+`OPS_DISPATCH_ENABLED`, default off. It re-registers a stored terminal in
+process, starts the replay plan an acceptance created, and hands a projection
+over; `collection` and an unattended `session-refresh` stay
+`dispatch_pending` with `awaiting_collector_dispatch` until U09 adds the
+Service Binding. `operationRequestPayload(store, operationId)` is the reader
+the executor uses to see what was accepted — the dispatch acts on the durable
+row, never on the contents of a notification. No branch of it completes an
+operation merely by handing the work over.
+
 ## What was verified locally, and what was not
 
 Synthetic data only.
 
-- `services/evidence-browser/test/ops-api.test.ts` (26 checks over the real
+- `services/app/test/ops-api.test.ts` (26 checks over the real
   Worker, the real migrations and the real store): flag-off behaviour, the
   closed route and verb set with the flag on, `/api/meta` discovery, one
   record per request, re-send, idempotency conflict, per-principal scoping,
@@ -280,8 +291,8 @@ Synthetic data only.
   one conflict), a raced replay (one plan), and two dispatches of one
   operation (one `target_ref`, the second told to reuse it) — plus the 0040
   guards against delete, replacement and reopening.
-- `poc/observation-pipeline/test/api-schema.test.ts` and
-  `services/evidence-browser/test/conformance.test.ts` pin the new `opsApi`
+- `apps/web/test/api-schema.test.ts` and
+  `services/app/test/conformance.test.ts` pin the new `opsApi`
   capability off in the shared contract.
 
 Not verified: no deployed instance, no live Access policy, no collector, no
@@ -312,7 +323,7 @@ Deploy order:
 
 1. Apply CORE migration `0040_operations_api.sql`. It is additive and the
    running Worker never reads the tables it creates.
-2. Deploy `services/evidence-browser` with `OPS_API_ENABLED` unset. Every
+2. Deploy `services/app` with `OPS_API_ENABLED` unset. Every
    operations path answers exactly as before (405 on POST, 404 on GET) and
    `/api/meta` reports `opsApi: false`.
 3. Set `OPS_API_ENABLED=true` for the deployment and confirm `/api/meta`. Send

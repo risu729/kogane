@@ -70,6 +70,31 @@ export function validInterpretationContext(value: unknown): value is Interpretat
 export const PAGINATION_VERSIONS = ["none", "offset-v1", "keyset-v2"] as const;
 export type PaginationVersion = (typeof PAGINATION_VERSIONS)[number];
 
+/**
+ * Which store the v2 balance routes read (unified plan 04 §1, U11).
+ * `core-d1`: the projection tables that live beside the evidence (migration
+ * 0030). `read-d1`: the separate, rebuildable READ database, whose cursors
+ * carry its instance and expire when it is rebuilt. `none`: the routes are not
+ * served. A client never guesses which one answered; a cursor from the other
+ * one is refused, not reinterpreted.
+ */
+export const BALANCE_READ_MODELS = ["none", "core-d1", "read-d1"] as const;
+export type BalanceReadModel = (typeof BALANCE_READ_MODELS)[number];
+
+/**
+ * Which store the reward expiry and simulation routes read (unified plan
+ * 04 §2, U16). `read-d1`: the rebuildable READ database publishes a reward
+ * snapshot, so every row carries the evaluation instant it was computed at and
+ * a cursor belongs to that physical database. `none`: the snapshot-backed
+ * routes are not served — the expiry route answers from CORE's rules and
+ * claims at request time, and the saved-simulation route answers
+ * `503 reward_read_model_unavailable` rather than an empty list.
+ * There is deliberately no `core-d1`: CORE never published a reward snapshot,
+ * and a computed-on-request answer is not one.
+ */
+export const REWARD_READ_MODELS = ["none", "read-d1"] as const;
+export type RewardReadModel = (typeof REWARD_READ_MODELS)[number];
+
 export interface ApiCapabilities {
   readonly contractVersion: typeof OBSERVATION_API_CONTRACT_VERSION;
   readonly readOnly: true;
@@ -85,6 +110,19 @@ export interface ApiCapabilities {
   readonly balancesV2: boolean;
   /** Pagination of the v2 balance routes; `none` when they are not served. */
   readonly balancesV2Pagination: PaginationVersion;
+  /**
+   * The store the v2 balance routes read. `none` when they are not served;
+   * `read-d1` says the pages come from the separate READ database, so a cursor
+   * survives only as long as that database does (U11).
+   */
+  readonly balancesV2ReadModel: BalanceReadModel;
+  /**
+   * The store the reward expiry and simulation routes read. `read-d1` says a
+   * reward snapshot is published in the READ database: the rows carry the
+   * instant they were evaluated at, `/api/v2/rewards/simulations` is served,
+   * and a cursor survives only as long as that database does (U16).
+   */
+  readonly rewardsV2ReadModel: RewardReadModel;
   /** Server-side source/account/date/text filters and `/api/filter-options`. */
   readonly collectionFilters: boolean;
   /** Rows carry an `organization` record (accounts, instruments, lineage). */
@@ -143,6 +181,8 @@ export const LOCAL_STORE_CAPABILITIES = {
   paginationVersion: "none",
   balancesV2: false,
   balancesV2Pagination: "none",
+  balancesV2ReadModel: "none",
+  rewardsV2ReadModel: "none",
   collectionFilters: false,
   organizedDisplay: false,
   financialProducts: false,
@@ -167,6 +207,8 @@ export const CENTRAL_STORE_CAPABILITIES = {
   // Worker advertises the enabled variant through `withBalancesV2`.
   balancesV2: false,
   balancesV2Pagination: "none",
+  balancesV2ReadModel: "none",
+  rewardsV2ReadModel: "none",
   collectionFilters: true,
   organizedDisplay: true,
   financialProducts: true,
@@ -193,12 +235,38 @@ export type CapabilityRequirement =
   | "balancesV2"
   | "rewardsV2";
 
-/** The v2 balance routes as this Worker advertises them when the flag is on. */
-export function withBalancesV2(capabilities: ApiCapabilities, enabled: boolean): ApiCapabilities {
+/**
+ * The reward routes as this Worker advertises them. `readModel` says whether a
+ * reward snapshot is published; it is `none` while the routes are off, so the
+ * two fields can never disagree.
+ */
+export function withRewardsV2(
+  capabilities: ApiCapabilities,
+  enabled: boolean,
+  readModel: Exclude<RewardReadModel, "none"> | "none" = "none",
+): ApiCapabilities {
+  return {
+    ...capabilities,
+    rewardsV2: enabled,
+    rewardsV2ReadModel: enabled ? readModel : "none",
+  };
+}
+
+/**
+ * The v2 balance routes as this Worker advertises them when the flag is on.
+ * `readModel` says which store answered; it is `none` while the routes are
+ * off, so the three fields can never disagree.
+ */
+export function withBalancesV2(
+  capabilities: ApiCapabilities,
+  enabled: boolean,
+  readModel: Exclude<BalanceReadModel, "none"> = "core-d1",
+): ApiCapabilities {
   return {
     ...capabilities,
     balancesV2: enabled,
     balancesV2Pagination: enabled ? "keyset-v2" : "none",
+    balancesV2ReadModel: enabled ? readModel : "none",
   };
 }
 
@@ -316,7 +384,13 @@ export function allowedQueryParameters(
  */
 export const REWARD_REQUEST_SCHEMA = {
   "/api/v2/rewards/holdings": ["program", "offset"],
-  "/api/v2/rewards/expiry": ["program", "offset"],
+  // `cursor` and `limit` page a published reward snapshot (U16); `offset`
+  // stays for the request-time answer a deployment without one still gives.
+  "/api/v2/rewards/expiry": ["program", "offset", "cursor", "limit"],
+  // The saved simulations of a published snapshot, with their reproducibility
+  // (U16, G2-20). Served only where `rewardsV2ReadModel` is `read-d1`; without
+  // a snapshot it is `503`, never an empty success.
+  "/api/v2/rewards/simulations": ["cursor", "limit"],
   "/api/v2/rewards/offers/simulate": ["offer", "quantity", "unit", "goal", "depth"],
 } as const satisfies Record<string, readonly string[]>;
 export type RewardPath = keyof typeof REWARD_REQUEST_SCHEMA;
