@@ -8,7 +8,9 @@ run = "./node_modules/.bin/wrangler types"
 
 ["app:typecheck"]
 description = "Type-check services/evidence-browser."
-depends = ["app:types"]
+# src/demo-worker.ts imports ../demo-snapshot.json, which only web:export-demo
+# writes, so the type check needs it exactly as app:test and app:dry-run do.
+depends = ["app:types", "web:export-demo"]
 dir = "services/evidence-browser"
 run = "./node_modules/.bin/tsc --noEmit"
 

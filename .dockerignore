@@ -1,0 +1,28 @@
+# Build context for the container images whose `image_build_context` is the
+# repository root — the one Bun lockfile lives there, so an image that runs a
+# frozen install has to see it (poc/cloudflare-runtime-probe).
+#
+# Docker sends the whole context to the daemon, so keep evidence, credentials,
+# installed dependencies and build output out of it. The Dockerfiles copy only
+# the manifests, the lockfile and their own sources, so nothing here is needed
+# by a build; excluding a path can only make the context smaller.
+#
+# Every pattern excludes: there are no `!` re-inclusions, so the order of the
+# lines does not matter and a new source directory is included by default
+# rather than silently dropped.
+.git/
+.github/
+.claude/
+data/
+**/node_modules/
+**/.wrangler/
+**/dist/
+**/dist-evidence/
+**/dist-production/
+**/__pycache__/
+**/.ruff_cache/
+# Local secrets never reach an image layer, even when one is left in a checkout.
+**/.dev.vars
+**/*.cred
+**/*.pem
+**/*.key
