@@ -433,13 +433,13 @@ parser is therefore: write the module, add it to `PARSERS`, run the suite.
 The runnable entry points are `package.json` scripts:
 
 ```text
-bun run demo        ingest the fixtures, parse them, print row counts
-bun run ingest      ingestion only
-bun run parse       every registered parser over every artifact
-bun run build       build the evidence browser's client
-bun run serve       the read-only browser on 127.0.0.1:8787
+bun src/demo.ts        ingest the fixtures, parse them, print row counts
+bun src/ingest.ts      ingestion only
+bun src/parse.ts       every registered parser over every artifact
+mise run web:build       build the evidence browser's client
+bun src/serve.ts       the read-only browser on 127.0.0.1:8787
 bun test            the suite
-bun run typecheck   tsc --noEmit
+mise run web:typecheck   tsc --noEmit
 ```
 
 ## Versioning and supersession
@@ -1176,7 +1176,7 @@ the 4,098 validated provider rows and emitted transactions.
 ## Testing
 
 `bun test` is 63 pass, 0 fail across three files, and `bunx tsc --noEmit`
-is clean. `bun run demo` ingests 4 artifacts from 2 sources and produces
+is clean. `bun src/demo.ts` ingests 4 artifacts from 2 sources and produces
 28 observations across 4 parse runs: 8 transaction, 10 balance, 2
 position, 8 valuation.
 
@@ -1308,7 +1308,7 @@ Re-parsing all historical evidence with a newer parser is a routine
 operation, not a migration.
 
 **What an operator runs.** In the PoC: edit the parser, bump its `version`
-constant, run `bun run parse`. In production the same loop lives in a
+constant, run `bun src/parse.ts`. In production the same loop lives in a
 Worker or queue consumer reading blobs from R2 and writing to D1, over a
 selected set of artifacts — by source, dataset, or date range. That
 selection does not exist yet: `src/parse.ts` loops over every artifact and
@@ -1362,7 +1362,7 @@ Finally, compare current observation counts per shape against the previous
 version's counts. A difference is expected when the parser changed, and
 its direction should match the change that was made; an unexplained
 difference is the signal that the bump did something other than intended.
-`bun run serve` shows the same thing by hand: the new parse run current, the
+`bun src/serve.ts` shows the same thing by hand: the new parse run current, the
 old one marked superseded, both readings still reachable from the
 artifact, and each run's warnings listed beside its observations.
 

@@ -2,13 +2,6 @@
   "name": "@kogane/cloudflare-runtime-probe",
   "private": true,
   "type": "module",
-  "scripts": {
-    "typegen": "wrangler types",
-    "typecheck": "tsc --noEmit",
-    "typecheck:container": "tsc -p tsconfig.container.json --noEmit",
-    "deploy:dry": "wrangler deploy --dry-run",
-    "deploy": "wrangler deploy"
-  },
   "dependencies": {
     "@cloudflare/containers": "0.3.7",
     "impit": "0.14.3"

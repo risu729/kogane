@@ -119,8 +119,8 @@ one means adding a package, not calling something already installed. The
 same holds for a component library, a CSS framework, and an icon pack — the
 client is React, TanStack Query, TanStack Table, and one plain stylesheet.
 
-**It cost a build step and a layer of restatement.** `bun run serve`
-renders nothing until `bun run build` has run, though the dev server builds
+**It cost a build step and a layer of restatement.** `bun src/serve.ts`
+renders nothing until `mise run web:build` has run, though the dev server builds
 as it goes. The client restates every response shape in
 `web/src/api.ts` rather than importing it from `src/queries.ts`, because
 that file reaches `bun:sqlite`. A column added to an observation table now

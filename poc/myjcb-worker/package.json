@@ -2,14 +2,6 @@
   "name": "@kogane/poc-myjcb-worker",
   "private": true,
   "type": "module",
-  "scripts": {
-    "test": "bun test",
-    "typecheck": "wrangler types && tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
-    "cf:types": "wrangler types",
-    "cf:check": "wrangler deploy --dry-run",
-    "cf:deploy": "wrangler deploy",
-    "bw:passkey": "bun run scripts/sync-bitwarden-passkey.ts"
-  },
   "dependencies": {
     "@cloudflare/puppeteer": "1.4.0",
     "parse5": "8.0.1"

@@ -2,14 +2,14 @@
 set -euo pipefail
 export CLOUDFLARE_ACCOUNT_ID="59ea63cc00914b30ca410b062ae2bb7f"
 
-bun run typecheck
-bun run check:importer
-bun run test
-bun run cf:check
+mise run ingest:typecheck
+mise run ingest:build
+mise run ingest:test
+mise run ingest:dry-run
 sha256sum ../../packages/storage-d1/migrations/core/*.sql
-npx wrangler d1 migrations list kogane-raw-evidence --remote
-npx wrangler d1 migrations apply kogane-raw-evidence --remote
-npx wrangler deploy
+./node_modules/.bin/wrangler d1 migrations list kogane-raw-evidence --remote
+./node_modules/.bin/wrangler d1 migrations apply kogane-raw-evidence --remote
+./node_modules/.bin/wrangler deploy
 bash scripts/verify-production.sh
 bash scripts/verify-sbi-shinsei-route.sh
 bash scripts/verify-mobile-suica-route.sh

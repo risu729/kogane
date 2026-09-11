@@ -1,0 +1,9 @@
+# ref: https://bun.com/docs/runtime/bunfig
+
+[install]
+# Isolated installs give every workspace its own node_modules tree, so the
+# packages that pin different TypeScript, Wrangler or Playwright versions keep
+# exactly the versions they resolved before the workspace migration.
+linker = "isolated"
+# One text lockfile at the repository root; there are no per-package lockfiles.
+saveTextLockfile = true

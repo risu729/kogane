@@ -16,7 +16,7 @@ provenance chain in both directions.
 It is implemented in the observation-pipeline proof of concept
 (`poc/observation-pipeline`): a read-only JSON API in `src/api.ts` over the
 queries in `src/queries.ts`, and a React client in `web/` that renders it,
-served together by `bun run serve`. This document records what it is for,
+served together by `bun src/serve.ts`. This document records what it is for,
 the rules that keep it small, what the code enforces today, and what is
 still open.
 
@@ -58,7 +58,7 @@ everything" is a button no one will press on real data.
 The same argument applies to writing the first parser at all. A parser is
 a claim that a specific byte range in a specific artifact means a specific
 typed value. Verifying that claim requires holding both ends at once: the
-observation and the bytes. Reading rows out of `bun run parse` output and
+observation and the bytes. Reading rows out of `bun src/parse.ts` output and
 opening the raw JSON in an editor does this badly, one row at a time, with
 the mapping held in the operator's head. Tests pin the cases someone
 already thought of; the browser is how the unthought-of cases are found —
@@ -104,7 +104,7 @@ The boundary is written as rules, not intentions:
 
 The pages below are implemented and covered by the 25 tests in
 `test/api.test.ts` and the 5 real-browser tests in `test/browser.test.ts`,
-of the PoC's 73 passing tests. Against the demo store that `bun run demo`
+of the PoC's 73 passing tests. Against the demo store that `bun src/demo.ts`
 builds — 2 sources, 4 artifacts, 4 parse runs, 28 observations — they
 render the whole dataset.
 
@@ -412,7 +412,7 @@ What does not: the process is not read-only. The entrypoint calls the same
 `openStore()` as the ingesting and parsing tools, and `openStore()`
 (`src/store.ts`) creates the state directory, opens the database with
 `create: true`, and executes `schema.sql`. Pointed at a directory with no
-store in it, `bun run serve` creates an empty one rather than failing.
+store in it, `bun src/serve.ts` creates an empty one rather than failing.
 
 So the accurate statement is that the handler cannot write, not that the
 process cannot. Opening the connection read-only in `src/serve.ts` would
@@ -576,7 +576,7 @@ convenience: the API validates independently of anything the client did.
 
 ### The local server is loopback-only
 
-`bun run serve` binds `hostname: "127.0.0.1"` (port 8787 unless `PORT`
+`bun src/serve.ts` binds `hostname: "127.0.0.1"` (port 8787 unless `PORT`
 says otherwise). It has no authentication of any kind, and the exit
 criteria below ask for real captures to be read through it, so binding all
 interfaces would put real financial data on whatever network the machine
@@ -584,7 +584,7 @@ is attached to. Loopback is the whole of the local protection: it must
 never be run behind a port forward or on a shared interface, and it is not
 a substitute for the access control a deployed instance needs.
 
-`bun run dev` is a second surface with the same store behind it: Vite
+`mise run web:dev` is a second surface with the same store behind it: Vite
 serves the client on port 5173 and proxies `/api` to the same server.
 Vite binds localhost unless it is passed `--host`, so the default is
 right; passing `--host` would expose the whole dataset on the network and

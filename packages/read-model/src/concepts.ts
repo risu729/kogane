@@ -62,7 +62,7 @@ export const publishedParses = {
 /**
  * legacyPublishedParses: the rule readers used before the gate. Kept only so
  * the consistency check and tests can compare the projection with it; no
- * query composes it (scripts/publication-gate-predicates.test.ts enforces).
+ * query composes it (tasks/_lib/publication-gate-predicates.test.ts enforces).
  */
 export const legacyPublishedParses = {
   predicate: (p: string): string =>

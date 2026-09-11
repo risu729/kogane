@@ -2,10 +2,6 @@
   "name": "@kogane/parsers",
   "private": true,
   "type": "module",
-  "scripts": {
-    "test": "bun test",
-    "typecheck": "tsc --noEmit"
-  },
   "dependencies": {
     "parse5": "8.0.1"
   },

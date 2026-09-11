@@ -124,7 +124,7 @@ const app = createApi(store, {
       });
     }
     return new Response(
-      "The client has not been built yet. Run `bun run build` (or `bun run dev` for the Vite dev server).\n",
+      "The client has not been built yet. Run `mise run web:build` (or `mise run web:dev` for the Vite dev server).\n",
       { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } },
     );
   },
@@ -165,5 +165,5 @@ for (const host of ["127.0.0.1", "localhost", "[::1]"]) {
 
 console.log(`kogane evidence browser on http://${HOSTNAME}:${server.port}/`);
 if (!existsSync(CLIENT_DIR)) {
-  console.log("client not built: run `bun run build`, or `bun run dev` for hot reload");
+  console.log("client not built: run `mise run web:build`, or `mise run web:dev` for hot reload");
 }

@@ -59,8 +59,8 @@ hashes.
 
 ```sh
 bun install
-bun run cf:types
-bun run cf:deploy
+mise run vpass-json:types
+./node_modules/.bin/wrangler deploy
 ```
 
 Inspect objects in the private R2 dashboard, or fetch a known manifest key with

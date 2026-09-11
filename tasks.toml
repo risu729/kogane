@@ -1,0 +1,56 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+[install]
+description = "Install the locked workspace dependencies."
+run = "mise deps install"
+
+[check]
+description = "Run the shared hk linters and formatters."
+usage = '''
+flag "--lint" help="Check without changing files"
+'''
+run = "hk {% if usage.lint %}check{% else %}fix{% endif %} --all --no-progress --no-fail-fast"
+
+["hooks:install"]
+description = "Install the shared hk pre-commit hook using mise."
+run = "hk install --mise"
+
+["root:manifests"]
+description = "Check that no manifest carries scripts and that every workspace has a CI task."
+run = "bun tasks/_lib/check-manifests.ts"
+
+["root:test"]
+description = "Run the repository-wide guards that belong to no single workspace."
+# Directories, not a list of files: a new guard next to the one it protects
+# joins CI by existing, exactly like a new workspace does.
+run = "bun test tasks/_lib scripts poc/collector-diagnostics/test/diagnostics.test.ts poc/sbi-securities/scripts/prepare-sbi-bitwarden-cli-secret.bun.test.ts"
+
+["ci:root"]
+description = "Every check CI runs for the repository-wide guards."
+depends = ["root:manifests", "root:test"]
+
+["ledger:resources"]
+description = "Regenerate the deployed-resource ledger under infra/."
+run = "bun scripts/resource-ledger.ts"
+
+["ledger:schema"]
+description = "Regenerate the CORE schema ledger under infra/."
+run = "bun scripts/core-schema-ledger.ts"
+
+["ledger:deps"]
+description = "Regenerate infra/dependency-resolution.md from the root bun.lock."
+run = "bun scripts/dependency-ledger.ts"
+
+["load-fixture"]
+description = "Generate the synthetic load-harness fixture (scripts/load-fixture.ts)."
+run = "bun scripts/load-fixture.ts"
+
+["dry-run"]
+description = "Validate every Worker deployment without uploading it."
+depends = ["*:dry-run"]
+
+[verify]
+description = "Run the linters and every workspace's CI checks, then the deployment dry runs."
+depends = ["check", "ci:*"]
+depends_post = ["dry-run"]

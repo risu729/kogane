@@ -1,0 +1,31 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["sony-bank-worker:types"]
+description = "Generate the Cloudflare Worker types of poc/sony-bank-worker."
+dir = "poc/sony-bank-worker"
+run = "./node_modules/.bin/wrangler types"
+
+["sony-bank-worker:typecheck"]
+description = "Type-check poc/sony-bank-worker."
+depends = ["sony-bank-worker:types"]
+dir = "poc/sony-bank-worker"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["sony-bank-worker:test"]
+description = "Run the poc/sony-bank-worker tests."
+depends = ["sony-bank-worker:types"]
+dir = "poc/sony-bank-worker"
+run = "bun test"
+
+["sony-bank-worker:dry-run"]
+description = "Validate the poc/sony-bank-worker deployment without uploading it."
+depends = ["sony-bank-worker:types"]
+dir = "poc/sony-bank-worker"
+run = [
+	"./node_modules/.bin/wrangler deploy --dry-run",
+]
+
+["ci:sony-bank-worker"]
+description = "Every check CI runs for poc/sony-bank-worker."
+depends = ["sony-bank-worker:typecheck", "sony-bank-worker:test"]

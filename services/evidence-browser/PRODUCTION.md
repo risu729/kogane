@@ -12,9 +12,9 @@ JWTs fail closed. Responses remain no-store, logs contain no values or URLs, and
 raw bytes remain checksum-verified downloads with sandbox headers.
 
 Apply raw-evidence migration 0017 and deploy the parser before switching the UI.
-From `poc/observation-pipeline`, run `bun run build:production`; this writes the
+Run `mise run web:build-production`; this writes the
 isolated `web/dist-production` asset directory. Deploy only the existing production
-evidence-browser config. `build:evidence` retains the older raw-only UI build;
+evidence-browser config. `web:build-evidence` retains the older raw-only UI build;
 the isolated synthetic demo continues to use its separate config and snapshot.
 These three builds have separate output directories; running the legacy tests
 cannot replace the deployable production application. CI builds all three before

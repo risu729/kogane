@@ -133,7 +133,7 @@ From `poc/observation-pipeline`:
 
 ```sh
 bun install --frozen-lockfile
-bun run preview
+mise run web:build && bun src/serve.ts --demo
 ```
 
 Preview builds the UI, creates a new temporary database, and populates it
@@ -143,7 +143,7 @@ regular `state/` database. A normal shutdown removes its temporary store.
 An abrupt process termination can leave a temporary `kogane-preview-*`
 directory; it contains only synthetic data.
 
-`bun run serve` continues to read the regular local store. Its metadata
+`bun src/serve.ts` continues to read the regular local store. Its metadata
 reports the data classification as unknown: an operator may have ingested
 real evidence, synthetic evidence, or both. An existing store must never be
 labelled synthetic merely because it is local. Neither mode is a connection
@@ -188,8 +188,8 @@ contract, authentication, deployment configuration, and verification.
 ## Verification
 
 ```sh
-bun run typecheck
-bun run build
+mise run web:typecheck
+mise run web:build
 bunx playwright install chromium
 bun test
 ```

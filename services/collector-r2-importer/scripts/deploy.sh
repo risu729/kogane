@@ -6,9 +6,9 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 service_dir="$(cd -- "${script_dir}/.." && pwd)"
 cd -- "${service_dir}"
 
-bun install --frozen-lockfile
+mise run install
 bun test
-bun run typecheck
-bun run cf:check
+mise run importer:typecheck
+mise run importer:dry-run
 bash scripts/sync-secrets.sh
-npx wrangler deploy
+./node_modules/.bin/wrangler deploy

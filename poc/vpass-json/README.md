@@ -67,7 +67,7 @@ importer are healthy. This repository change does not create queues or deploy.
 Historical records are resumed one object at a time with:
 
 ```sh
-bun run backfill:raw-evidence
+bash scripts/backfill-raw-evidence.sh
 ```
 
 The script reads the collector admin token from a user-owned mode-0600 file,
@@ -92,15 +92,15 @@ APK as described in
 ```powershell
 cd poc/vpass-json
 bun install
-bun run scrape:mobile -- --auth-key /private/f2hKiZCtFQdbfuiVGduZ.pem --config-key /private/pubkey_relese.pem
+bun src/mobile-cli.ts -- --auth-key /private/f2hKiZCtFQdbfuiVGduZ.pem --config-key /private/pubkey_relese.pem
 ```
 
 The password prompt is masked. Credentials and cookies are neither printed nor
 written to disk. To choose an output directory, add `--output`. The older
-browser-shaped `impit` experiment remains available as `bun run scrape`.
+browser-shaped `impit` experiment remains available as `bun src/cli.ts`.
 
 ```powershell
-bun run scrape:mobile -- --auth-key /private/auth.pem --config-key /private/config.pem --output "D:\private\kogane-vpass"
+bun src/mobile-cli.ts -- --auth-key /private/auth.pem --config-key /private/config.pem --output "D:\private\kogane-vpass"
 ```
 
 The default is a timestamped directory below `poc/vpass-json/output/`, which is

@@ -22,14 +22,14 @@ Use the exact locked dependencies:
 
 ```bash
 bun install --frozen-lockfile
-bun run typegen
-bun run typecheck
-bun run typecheck:container
-bun run deploy:dry
-bun run deploy
+mise run cloudflare-runtime-probe:types
+mise run cloudflare-runtime-probe:typecheck
+mise run cloudflare-runtime-probe:typecheck-container
+mise run cloudflare-runtime-probe:dry-run
+./node_modules/.bin/wrangler deploy
 ```
 
-`bun run deploy` uploads the Worker version before Cloudflare attempts the
+`./node_modules/.bin/wrangler deploy` uploads the Worker version before Cloudflare attempts the
 Container image. On the current Free plan the command therefore ends with an
 expected `Unauthorized` error after leaving the Worker/VPC probe deployed.
 

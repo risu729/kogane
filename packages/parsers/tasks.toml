@@ -1,0 +1,22 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["parsers:typecheck"]
+description = "Type-check packages/parsers."
+dir = "packages/parsers"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["parsers:test"]
+description = "Run the packages/parsers tests."
+dir = "packages/parsers"
+run = "bun test"
+
+["parsers:digests"]
+description = "Print the deployed parser digests."
+dir = "packages/parsers"
+hide = true
+run = "bun scripts/parser-digests.ts"
+
+["ci:parsers"]
+description = "Every check CI runs for packages/parsers."
+depends = ["parsers:typecheck", "parsers:test"]

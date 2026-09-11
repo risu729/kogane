@@ -181,7 +181,7 @@ once; until then, everything degrades safely (see below).
 
 ## Acceptance coverage
 
-`scripts/automerge.test.ts` (run by `mise run ci:standalone`) unit-tests the
+`scripts/automerge.test.ts` (run by `mise run ci:root`) unit-tests the
 decision functions in `.github/scripts/automerge-policy.mjs` and
 `.github/scripts/risk-paths.mjs` against fixtures. The workflow wiring itself
 cannot be proven offline and is verified on the first live pull request.

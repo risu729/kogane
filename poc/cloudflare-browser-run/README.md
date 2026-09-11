@@ -20,10 +20,10 @@ with the Japanese home IP.
 
 ```bash
 bun install
-bun run typegen
-bun run typecheck
-bun run deploy:dry
-bun run deploy:bootstrap
+mise run cloudflare-browser-run:types
+mise run cloudflare-browser-run:typecheck
+mise run cloudflare-browser-run:dry-run
+./node_modules/.bin/wrangler deploy -c wrangler.bootstrap.jsonc
 ```
 
 Set secrets interactively only after the disabled bootstrap Worker exists:

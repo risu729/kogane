@@ -28,8 +28,8 @@ Requires Bun, Python, `curl_cffi`, and `websocket-client`.
 
 ```bash
 bun install
-bun run typegen
-bun run typecheck
+mise run tamia-tcp-bridge:types
+mise run tamia-tcp-bridge:typecheck
 python -m pip install -r requirements.txt curl_cffi==0.16.1
 python scripts/bridge_proxy.py
 ```

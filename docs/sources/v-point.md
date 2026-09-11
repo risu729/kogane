@@ -538,7 +538,7 @@ V Point web collectorは現在、browserなしのWorkers fetchとEmail Worker再
 
 terminal run reportの`producerVersion`には固定source契約`vpoint-r2-v3`を使う。Importerのdeploy revisionをimmutable reportへ混ぜないため、異なる`IMPORTER_VERSION`で同じrunを再走査してもreport本文は変化しない。v3ではcollectorがtransport decode後に再encodeしたJSONを`collector_derived/transformed`、自由形式failure textを除いた中央manifestを`collector_manifest/generated`として登録し、中央が補うnullable fieldと空arrayを含むdescriptor hashまで実D1契約へ一致させる。deploy revisionは失敗・incomplete attemptの診断に限って保持する。
 
-実 R2を変更せずに24 manifestを監査し、v1 5件、v2 19件、成功13件、失敗11件、reconciliation参照10件がstrict contractへ適合した。`bun run audit:vpoint-r2`で同じaggregate-only監査を再実行でき、本文、値、object key、個別hash、secretを出力しない。reconciliationは旧3件と現行7件でexact policy文字列が異なるため、観測した2値だけを明示的に受理し、任意文字列への緩和はしていない。candidateは実在history page・実row count内index・`sha256(JSON.stringify(row))`へ束縛し、entry内重複を拒否する。
+実 R2を変更せずに24 manifestを監査し、v1 5件、v2 19件、成功13件、失敗11件、reconciliation参照10件がstrict contractへ適合した。`bash scripts/audit-v-point-r2.sh`で同じaggregate-only監査を再実行でき、本文、値、object key、個別hash、secretを出力しない。reconciliationは旧3件と現行7件でexact policy文字列が異なるため、観測した2値だけを明示的に受理し、任意文字列への緩和はしていない。candidateは実在history page・実row count内index・`sha256(JSON.stringify(row))`へ束縛し、entry内重複を拒否する。
 
 V Moneyは同一session/APIで取得されるが別の電子マネー台帳である。現時点の監査済みaccountは全runで空pageなので、Layer AのV Point contractは空のV Money観測だけを保存可能とし、非空になった場合はfail closedする。非空履歴を自動帰属させる前に、独立source ID、asset/account境界、parser、reconciliation方針を別PRで設計する。
 

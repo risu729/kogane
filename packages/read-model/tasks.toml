@@ -1,0 +1,16 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["read-model:typecheck"]
+description = "Type-check packages/read-model."
+dir = "packages/read-model"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["read-model:test"]
+description = "Run the packages/read-model tests."
+dir = "packages/read-model"
+run = "bun test"
+
+["ci:read-model"]
+description = "Every check CI runs for packages/read-model."
+depends = ["read-model:typecheck", "read-model:test"]

@@ -1,0 +1,42 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["globalpass-worker:types"]
+description = "Generate the Cloudflare Worker types of poc/globalpass-worker."
+dir = "poc/globalpass-worker"
+run = "./node_modules/.bin/wrangler types"
+
+["globalpass-worker:typecheck"]
+description = "Type-check poc/globalpass-worker."
+depends = ["globalpass-worker:types"]
+dir = "poc/globalpass-worker"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["globalpass-worker:test"]
+description = "Run the poc/globalpass-worker tests."
+depends = ["globalpass-worker:types"]
+dir = "poc/globalpass-worker"
+run = [
+	"bun test test/diagnostics.test.ts test/worker-collection.test.ts test/model.test.ts test/sanitize.test.ts test/raw-evidence.test.ts test/backfill-script.test.ts test/analyze-turnstile-capture.test.mjs test/analyze-turnstile-debugger-capture.test.mjs test/compare-turnstile-probes.test.mjs",
+	"node --test test/connect-relay.node.mjs",
+]
+
+["globalpass-worker:container"]
+description = "Install the container relay's locked npm dependencies and check its syntax."
+dir = "poc/globalpass-worker/container"
+run = [
+	"npm ci --ignore-scripts",
+	'for file in *.mjs *.cjs *.js; do if [ -e "$file" ]; then node --check "$file"; fi; done',
+]
+
+["globalpass-worker:dry-run"]
+description = "Validate the poc/globalpass-worker deployment without uploading it."
+depends = ["globalpass-worker:types"]
+dir = "poc/globalpass-worker"
+run = [
+	"./node_modules/.bin/wrangler deploy --dry-run",
+]
+
+["ci:globalpass-worker"]
+description = "Every check CI runs for poc/globalpass-worker."
+depends = ["globalpass-worker:typecheck", "globalpass-worker:test", "globalpass-worker:container"]

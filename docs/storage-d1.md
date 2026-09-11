@@ -140,7 +140,7 @@ Consumers repointed by this change:
 | `packages/read-model/test/{events,identity,read-model}`                  | applying CORE to `bun:sqlite`         |
 | `packages/observation-shared/test/normalized-decimal`                    | the 0024 views                        |
 | `poc/observation-pipeline/src/store.ts` and its test                     | the 0024/0025/0037 views              |
-| `scripts/publication-gate-predicates.test.ts`                            | the "no legacy rule after 0026" guard |
+| `tasks/_lib/publication-gate-predicates.test.ts`                         | the "no legacy rule after 0026" guard |
 | `services/raw-evidence/scripts/{deploy.sh,generate-decimal-triggers.ts}` | digests and trigger generation        |
 | `scripts/core-schema-ledger.ts`                                          | the CORE schema ledger (U01)          |
 
@@ -165,17 +165,17 @@ adapter decision D2 keeps deployed — routing, authentication and status codes.
 All of it with synthetic data, locally. Nothing here was run against
 production.
 
-| Claim                                                                                              | Test                                                                                                           |
-| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| G0-02: the CORE migrations kept their names, numbers and bytes                                     | `packages/storage-d1/test/migrations.test.ts`                                                                  |
-| G2-14: a guard matching 0 rows leaves no receipt, decision, approval use, plan close or outbox row | `packages/storage-d1/test/decision-commit.test.ts`                                                             |
-| G2-15: a revision that moved between approve and commit makes the whole command fail               | same file                                                                                                      |
-| G2-16: the immutability triggers still refuse a rewrite of what a commit wrote                     | same file                                                                                                      |
-| The codecs never produce zero, a shifted day, a false `true` or row 0                              | `packages/storage-d1/test/codecs.test.ts`                                                                      |
-| The HTTP route and the in-process port register identically                                        | `services/raw-evidence/test/registration-parity.test.ts`                                                       |
-| The ingest wire protocol is unchanged                                                              | `services/raw-evidence/test/{api,schema,source-usecases,evidence-contract}.test.ts` and the nine route scripts |
-| The publication gate's writers and counts are unchanged                                            | `scripts/publication-gate-predicates.test.ts`, `services/observation-pipeline/test/publication-gate.test.ts`   |
-| No package imports a service back                                                                  | `scripts/import-boundaries.test.ts`                                                                            |
+| Claim                                                                                              | Test                                                                                                            |
+| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| G0-02: the CORE migrations kept their names, numbers and bytes                                     | `packages/storage-d1/test/migrations.test.ts`                                                                   |
+| G2-14: a guard matching 0 rows leaves no receipt, decision, approval use, plan close or outbox row | `packages/storage-d1/test/decision-commit.test.ts`                                                              |
+| G2-15: a revision that moved between approve and commit makes the whole command fail               | same file                                                                                                       |
+| G2-16: the immutability triggers still refuse a rewrite of what a commit wrote                     | same file                                                                                                       |
+| The codecs never produce zero, a shifted day, a false `true` or row 0                              | `packages/storage-d1/test/codecs.test.ts`                                                                       |
+| The HTTP route and the in-process port register identically                                        | `services/raw-evidence/test/registration-parity.test.ts`                                                        |
+| The ingest wire protocol is unchanged                                                              | `services/raw-evidence/test/{api,schema,source-usecases,evidence-contract}.test.ts` and the nine route scripts  |
+| The publication gate's writers and counts are unchanged                                            | `tasks/_lib/publication-gate-predicates.test.ts`, `services/observation-pipeline/test/publication-gate.test.ts` |
+| No package imports a service back                                                                  | `tasks/_lib/import-boundaries.test.ts`                                                                          |
 
 ## Flags, deploy order, rollback
 

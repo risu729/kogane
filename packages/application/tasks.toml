@@ -1,0 +1,16 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["application:typecheck"]
+description = "Type-check packages/application."
+dir = "packages/application"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["application:test"]
+description = "Run the packages/application tests."
+dir = "packages/application"
+run = "bun test"
+
+["ci:application"]
+description = "Every check CI runs for packages/application."
+depends = ["application:typecheck", "application:test"]

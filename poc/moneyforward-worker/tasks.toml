@@ -1,0 +1,31 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["moneyforward-worker:types"]
+description = "Generate the Cloudflare Worker types of poc/moneyforward-worker."
+dir = "poc/moneyforward-worker"
+run = "./node_modules/.bin/wrangler types"
+
+["moneyforward-worker:typecheck"]
+description = "Type-check poc/moneyforward-worker."
+depends = ["moneyforward-worker:types"]
+dir = "poc/moneyforward-worker"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["moneyforward-worker:test"]
+description = "Run the poc/moneyforward-worker tests."
+depends = ["moneyforward-worker:types"]
+dir = "poc/moneyforward-worker"
+run = "bun test"
+
+["moneyforward-worker:dry-run"]
+description = "Validate the poc/moneyforward-worker deployment without uploading it."
+depends = ["moneyforward-worker:types"]
+dir = "poc/moneyforward-worker"
+run = [
+	"./node_modules/.bin/wrangler deploy --dry-run",
+]
+
+["ci:moneyforward-worker"]
+description = "Every check CI runs for poc/moneyforward-worker."
+depends = ["moneyforward-worker:typecheck", "moneyforward-worker:test"]

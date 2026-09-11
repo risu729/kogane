@@ -158,12 +158,11 @@ statements, migrations 0018/0020/0022 (superseded by 0026's view), and the API
 contract field `superseded_by_parse_run_id`, which remains the lineage marker
 the UI shows.
 
-`scripts/publication-gate-predicates.test.ts` fails CI when the legacy rule
+`tasks/_lib/publication-gate-predicates.test.ts` fails CI when the legacy rule
 or a bare success read appears where it should not. It runs in the standalone
-offline step — `bun run scripts/ci-package.ts --standalone`, which CI invokes
-as `mise run ci:standalone`; `STANDALONE_TESTS` in `scripts/ci-packages.ts`
-lists it, and `scripts/ci-package.test.ts` fails if any `scripts/*.test.ts`
-is missing from that list (nothing else would run it).
+offline step — `mise run ci:root`, which the CI lint job invokes; `root:test` in `tasks.toml`
+runs every test under `tasks/_lib/` and `scripts/` by directory, so a new
+guard joins CI by existing.
 
 The allow-list is per occurrence, not per file, because exempting a whole
 file lets a new query inside it inherit the exemption silently — which is how
@@ -279,15 +278,15 @@ actually writes.
 - Operator signals read the projection, not `parse_runs.status='ok'`: the
   replay-plan `already_parsed` estimate and `/status`
   `freshness.latestParsedAt` (`lanes.test.ts`, and the shape assertions in
-  `scripts/publication-gate-predicates.test.ts`).
+  `tasks/_lib/publication-gate-predicates.test.ts`).
 - Projection rows only name `ok` runs of their own key and are never deleted:
   same file (trigger assertions).
 - The identity view keeps its query plan: `current-run-query-plan.test.ts`,
   `binding-query-plan.test.ts`.
 - No new legacy predicate and no new bare success read in production code,
   and no migration after 0026 embeds the legacy rule:
-  `scripts/publication-gate-predicates.test.ts`, which
-  `scripts/ci-package.test.ts` proves the standalone CI step runs.
+  `tasks/_lib/publication-gate-predicates.test.ts`, which `root:test`
+  runs with every other test under `tasks/_lib/`.
 
 Not verified: production data volumes and D1 statement limits for the
 backfill (see the count query above).

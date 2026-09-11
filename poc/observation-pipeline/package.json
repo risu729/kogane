@@ -2,20 +2,6 @@
   "name": "@kogane/poc-observation-pipeline",
   "private": true,
   "type": "module",
-  "scripts": {
-    "demo": "bun run src/demo.ts",
-    "ingest": "bun run src/ingest.ts",
-    "parse": "bun run src/parse.ts",
-    "serve": "bun run src/serve.ts",
-    "preview": "bun run build && bun run src/serve.ts --demo",
-    "dev": "vite",
-    "build": "vite build",
-    "build:evidence": "vite build --mode evidence --outDir dist-evidence",
-    "build:production": "vite build --mode production --outDir dist-production",
-    "export:demo": "bun run src/export-demo.ts ../../services/evidence-browser/demo-snapshot.json",
-    "test": "bun test",
-    "typecheck": "tsc --noEmit"
-  },
   "dependencies": {
     "@tanstack/react-query": "5.102.8",
     "@tanstack/react-table": "9.2.3",

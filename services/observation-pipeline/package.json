@@ -2,12 +2,6 @@
   "name": "@kogane/observation-pipeline",
   "private": true,
   "type": "module",
-  "scripts": {
-    "test": "bun test",
-    "typecheck": "wrangler types && tsc --noEmit",
-    "cf:check": "wrangler deploy --dry-run",
-    "cf:deploy": "wrangler deploy"
-  },
   "dependencies": {
     "parse5": "8.0.1"
   },

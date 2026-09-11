@@ -14,7 +14,7 @@
 //     (one that predates the gate) published without the projection.
 //
 // The legacy predicate `status='ok' AND superseded_by_parse_run_id IS NULL` (gate:comparison)
-// appears in this file on purpose; scripts/publication-gate-predicates.test.ts
+// appears in this file on purpose; tasks/_lib/publication-gate-predicates.test.ts
 // allows it only on lines marked `gate:writer` or `gate:comparison`, and only
 // in this file, the worker's supersession batch, the candidate writer, the PoC
 // store writer and the read model's legacy comparison concept. Since migration

@@ -23,7 +23,7 @@ import {
   ownerApprovalForHead,
 } from "../.github/scripts/risk-paths.mjs";
 import renovate from "../.github/renovate.json5";
-import { REPO_ROOT } from "./ci-package.ts";
+import { REPO_ROOT } from "../tasks/_lib/repo-root.ts";
 
 const OWNER = "risu729";
 const HEAD = "1111111111111111111111111111111111111111";
