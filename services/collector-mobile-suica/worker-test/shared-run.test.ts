@@ -5,7 +5,7 @@
 // without a provider response. No account, balance or session value from a
 // real site appears here.
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   objectKey,
   readTerminal,
@@ -201,5 +201,14 @@ describe("G1-01 a failed object write writes no terminal", () => {
     if (result.outcome !== "incomplete") return;
     expect(result.failedArtifactKey).toBe("sf-history-page-0001.html");
     expect(await env.DATA.head(terminalKey("mobile-suica", input.runId))).toBeNull();
+  });
+});
+
+describe("R2BucketLike is what packages/collection claims it is", () => {
+  it("accepts the Workers R2Bucket binding without a cast", () => {
+    // Checked by `tsc --noEmit` over this suite: the deployed `DATA` binding
+    // type must be assignable to the contract's minimal interface.
+    expectTypeOf<R2Bucket>().toExtend<R2BucketLike>();
+    expectTypeOf(env.DATA).toExtend<R2BucketLike>();
   });
 });

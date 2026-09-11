@@ -6,7 +6,7 @@
 // states the month window the run asked for, and a run that could not be
 // finished leaves no terminal.
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   objectKey,
   readTerminal,
@@ -179,5 +179,14 @@ describe("G1-01 a failed object write writes no terminal", () => {
     expect(result.failedArtifactKey).toBe("transactions-202607.json");
     expect(result.checkpoint.pendingArtifactKeys).toContain("transactions-202607.json");
     expect(await env.DATA.head(terminalKey("v-point-pay", input.runId))).toBeNull();
+  });
+});
+
+describe("R2BucketLike is what packages/collection claims it is", () => {
+  it("accepts the Workers R2Bucket binding without a cast", () => {
+    // Checked by `tsc --noEmit` over this suite: the deployed `DATA` binding
+    // type must be assignable to the contract's minimal interface.
+    expectTypeOf<R2Bucket>().toExtend<R2BucketLike>();
+    expectTypeOf(env.DATA).toExtend<R2BucketLike>();
   });
 });

@@ -6,7 +6,7 @@
 // what the run actually was, and a run that could not be finished leaves no
 // terminal at all.
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   objectKey,
   readTerminal,
@@ -306,5 +306,14 @@ describe("G1-16 one delivered mail, two sources, one session", () => {
     expect(ledger.outcome === "found" && ledger.manifest.source).toBe("v-point");
     expect(plan.run.source).toBe("v-point-pay-email");
     expect(plan.run.runId).not.toBe(input.runId);
+  });
+});
+
+describe("R2BucketLike is what packages/collection claims it is", () => {
+  it("accepts the Workers R2Bucket binding without a cast", () => {
+    // Checked by `tsc --noEmit` over this suite: the deployed `DATA` binding
+    // type must be assignable to the contract's minimal interface.
+    expectTypeOf<R2Bucket>().toExtend<R2BucketLike>();
+    expectTypeOf(env.DATA).toExtend<R2BucketLike>();
   });
 });

@@ -268,7 +268,10 @@ message, `attemptId: message-<that digest>`, run window the message's own date,
 `vpoint-pay-email-parser`) from `notification.eml` to `normalized-event.json`.
 Every field is derived from the message, so a redelivery produces the same
 terminal digest and is answered `already_persisted` — the shared-target
-equivalent of the legacy duplicate check.
+equivalent of the legacy duplicate check. `producerVersion` is part of that
+digest: a mail redelivered after a `COLLECTOR_SCHEMA_VERSION` bump is a
+`conflict`, and the handler then fails the delivery rather than overwrite the
+terminal already written for that message.
 
 `acquisitionSessionRef` is `email-<sha256 of the message as it arrived>` on the
 notification run, and the same value on the V Point run that the same delivered
