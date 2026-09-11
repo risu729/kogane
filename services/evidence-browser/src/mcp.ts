@@ -15,7 +15,7 @@
 // URL, a host, a table name, an ordering or SQL text.
 import { SUPPORTED_QUERY_INTENTS } from "../../../packages/application/src/index";
 import { RELATION_KINDS } from "../../../packages/domain/src/decisions.ts";
-import { type AgentToolName, isAgentToolName, type ToolResult } from "./agent-service";
+import type { ToolResult } from "./agent-service";
 
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
 export const MCP_SERVER_INFO = { name: "kogane-evidence-browser", version: "1" } as const;
@@ -192,10 +192,16 @@ function rpcError(
 /**
  * Handle one JSON-RPC message. Returns `null` for a notification, which the
  * transport answers with 202 and no body.
+ *
+ * `tools` is what this deployment publishes — the five read/propose tools,
+ * plus the operations tools while their flag is on — and `run` is the one
+ * dispatcher for all of them. The adapter never decides which tools exist: a
+ * name `run` does not know is `unknown_tool`, not a route of its own.
  */
 export async function handleMcp(
   value: unknown,
-  run: (name: AgentToolName, body: unknown) => Promise<ToolResult>,
+  run: (name: string, body: unknown) => Promise<ToolResult | null>,
+  tools: readonly { name: string }[] = MCP_TOOLS,
 ): Promise<Record<string, unknown> | null> {
   const request = parseRpc(value);
   if (!request) return rpcError(null, -32600, "invalid_request");
@@ -206,13 +212,13 @@ export async function handleMcp(
     case "ping":
       return { jsonrpc: "2.0", id: request.id, result: {} };
     case "tools/list":
-      return { jsonrpc: "2.0", id: request.id, result: { tools: MCP_TOOLS } };
+      return { jsonrpc: "2.0", id: request.id, result: { tools } };
     case "tools/call": {
       const name = request.params["name"];
-      if (typeof name !== "string" || !isAgentToolName(name))
-        return rpcError(request.id, -32602, "unknown_tool");
+      if (typeof name !== "string") return rpcError(request.id, -32602, "unknown_tool");
       const args = request.params["arguments"] ?? {};
       const outcome = await run(name, args);
+      if (outcome === null) return rpcError(request.id, -32602, "unknown_tool");
       return {
         jsonrpc: "2.0",
         id: request.id,
@@ -221,7 +227,8 @@ export async function handleMcp(
           // `structuredContent.data`; `content` is the same object serialised.
           content: [{ type: "text", text: JSON.stringify(outcome.body) }],
           structuredContent: outcome.body,
-          isError: outcome.status !== 200,
+          // A refusal is an error; an acceptance (202) is not.
+          isError: outcome.status >= 400,
         },
       };
     }

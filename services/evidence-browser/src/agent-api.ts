@@ -32,7 +32,9 @@ import {
   queryResponse,
   toolContext,
 } from "./agent-service";
-import { handleMcp } from "./mcp";
+import { handleMcp, MCP_TOOLS } from "./mcp";
+import { opsApiEnabled } from "./ops-api";
+import { callOpsTool, isOpsToolName, OPS_MCP_TOOLS } from "./ops-tools";
 import { HttpError, json } from "./http";
 
 const AGENT_PREFIX = "/api/agent/v1/";
@@ -143,8 +145,21 @@ export async function agentApi(
   const context = toolContext(env, grant, now);
 
   if (path === MCP_PATH) {
-    const message = await handleMcp(await boundedJson(request), (name, body) =>
-      callTool(name, body, context),
+    // One transport, two tool sets, one authorisation rule each: the read and
+    // propose tools are graded by this API's grant (already resolved above),
+    // and the operations tools are graded by the change lifecycle's principal
+    // inside `callOpsTool`, exactly as their HTTP routes are. With
+    // `OPS_API_ENABLED` off they are neither listed nor callable, so the MCP
+    // surface matches the routes this deployment actually serves.
+    const ops = opsApiEnabled(env);
+    const message = await handleMcp(
+      await boundedJson(request),
+      async (name, body) => {
+        if (isAgentToolName(name)) return callTool(name, body, context);
+        if (ops && isOpsToolName(name)) return callOpsTool(name, body, env, subject);
+        return null;
+      },
+      ops ? [...MCP_TOOLS, ...OPS_MCP_TOOLS] : MCP_TOOLS,
     );
     if (message === null) return new Response(null, { status: 202 });
     return json(message);

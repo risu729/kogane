@@ -9,8 +9,13 @@ This implements A08 and review findings AR13, AR14 and D14 (agent side).
 It is the MVP gate of `architecture-addendum/10_agent_api_and_permissions.md`
 §10: summary, query, explain and propose — and nothing else. There is no
 acceptance, no simulation, no commit, no calculation job, no collection
-request, no export, and no external money action anywhere in the code. Those
-capabilities are not disabled by a flag; they have no name in the type.
+request, no export, and no external money action in _this_ API. Those
+capabilities are not disabled by a flag; they have no name in the grant type.
+
+The operations API ([ops-api.md](ops-api.md)) shares this Worker's `/mcp`
+transport and nothing else: it is a different tool set, graded by the change
+lifecycle's operator capability rather than by a grant here, published only
+while its own flag is on, and no capability in the table below reaches it.
 
 **Everything here is off by default.** With `AGENT_API_GRANTS` absent or
 empty, every agent route answers 403 for every authenticated principal.
@@ -47,10 +52,12 @@ the change lifecycle follows. A valid token with no grant is still refused.
 | `interpretation.propose` | `reconcile.propose`                                         | Proposals only; never adoption                          |
 
 Capabilities that appear in the addendum's table and deliberately **do not**
-exist in this code: `interpretation.accept`, `calculation.run`,
+exist in this vocabulary: `interpretation.accept`, `calculation.run`,
 `collection.request`, `report.export`, `policy.admin`, `retention.admin`,
 `external-money-action`. `packages/application/test/grants.test.ts` asserts
-that no configuration can name one.
+that no configuration can name one, and the operations API does not read this
+vocabulary at all — it asks the change lifecycle whether the subject is an
+operator or an agent.
 
 A grant also carries a scope and a budget:
 
@@ -133,15 +140,20 @@ ways.
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
 folded in, which is the same object `/api/meta` returns (today that is
-`commands`, a deployment flag, and `eventsV2`, which depends on the A10
-projection being present). An agent is
+`commands` and `opsApi`, both deployment flags, and `eventsV2`, which depends
+on the A10 projection being present). An agent is
 never told about a route this store cannot serve, and a page and an agent read
 one description of the deployment.
 
 `POST /mcp` is a Streamable-HTTP JSON-RPC 2.0 endpoint (`initialize`, `ping`,
 `tools/list`, `tools/call`, notifications). It is hand-rolled: no MCP SDK is a
 dependency, so nothing Node-only reaches workerd. It holds no logic, no
-session state and no authorization of its own.
+session state and no authorization of its own — including which tools exist:
+the adapter publishes the list it is handed and dispatches by name, so a tool
+set that is off is neither listed nor callable. With `OPS_API_ENABLED` on, the
+six `kogane.ops.*` tools of [ops-api.md](ops-api.md) are appended to the five
+above; with it off, `tools/list` is exactly the five and an operations tool
+name is `unknown_tool`.
 
 ### Intents
 
