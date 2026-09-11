@@ -17,10 +17,18 @@
 // What is compared is what a table declaration can express: the table exists
 // and is a table, its column names, each column's storage class as SQLite's
 // affinity rules resolve it, NOT NULL, the primary key and its order, and the
-// declared default. Everything else about these tables — `STRICT`, the CHECK
+// declared default. Everything else about these tables — the CHECK
 // constraints, the triggers, the partial and unique indexes, the foreign keys
 // — a declaration cannot express, so it is left to SQL and proved by
-// behaviour (`drizzle-immutability.test.ts`, `seal.test.ts`).
+// behaviour (`drizzle-immutability.test.ts`, `seal.test.ts`). One property
+// that a declaration cannot express *is* asserted here: every mirrored table
+// is `STRICT`, because that is what turns the affinity comparison into a
+// statement about the storage class the database enforces.
+//
+// Only declared tables are compared. CORE has over a hundred tables and the
+// mirror declares the fifteen the pilot touches; a table that exists in SQL
+// without a declaration is not drift, it is scope. The list assertion below
+// is what pins that scope.
 import type { Database } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { is, Table } from "drizzle-orm";
@@ -71,15 +79,28 @@ const declared = new Map(
     .map((table) => [getTableConfig(table).name, table] as const),
 );
 
+/** The tail of a CREATE TABLE statement, after the column list: where
+ * SQLite puts `STRICT` and `WITHOUT ROWID` (sqlite.org/lang_createtable). */
+function tableOptions(createSql: string): string {
+  return createSql.slice(createSql.lastIndexOf(")") + 1).toUpperCase();
+}
+
+/** The type names a `STRICT` table accepts (sqlite.org/stricttables). */
+const STRICT_TYPES = new Set(["INT", "INTEGER", "REAL", "TEXT", "BLOB", "ANY"]);
+
 let db: Database;
-let tables: Set<string>;
+/** Every table the migrations create, with its CREATE statement. */
+let tables: Map<string, string>;
 
 beforeAll(() => {
   db = fullCoreDatabase();
-  tables = new Set(
-    (db.query("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map(
-      (row) => row.name,
-    ),
+  tables = new Map(
+    (
+      db.query("SELECT name, sql FROM sqlite_master WHERE type='table'").all() as {
+        name: string;
+        sql: string;
+      }[]
+    ).map((row) => [row.name, row.sql]),
   );
 });
 
@@ -113,6 +134,17 @@ describe("the Drizzle schema mirrors the SQL migrations (G2-17)", () => {
         expect(tables.has(name)).toBe(true);
       });
 
+      test("is STRICT, so the compared affinity is the enforced storage class", () => {
+        // In a STRICT table a TEXT column refuses an integer and an INTEGER
+        // column refuses text; in an ordinary table either is stored as
+        // given. The mirror's column types only mean what they say because
+        // of this, and every type the mirror declares must be one STRICT
+        // accepts.
+        expect(tableOptions(tables.get(name) ?? "")).toContain("STRICT");
+        for (const column of getTableConfig(table).columns)
+          expect(STRICT_TYPES.has(column.getSQLType().toUpperCase()), column.name).toBe(true);
+      });
+
       test("declares exactly the columns SQL has", () => {
         const info = db.query(`PRAGMA table_info(${name})`).all() as ColumnInfo[];
         const config = getTableConfig(table);
@@ -135,11 +167,14 @@ describe("the Drizzle schema mirrors the SQL migrations (G2-17)", () => {
           // `INTEGER PRIMARY KEY` is the rowid alias: SQLite reports it as
           // nullable because inserting NULL asks for the next id, yet no row
           // ever holds NULL there. Drizzle declares it not-null, which is what
-          // a reader needs; every other column must match exactly.
+          // a reader needs; every other column must match exactly. The alias
+          // is exactly that spelling — `INT PRIMARY KEY` is an ordinary,
+          // genuinely nullable column — on a table that has a rowid.
           const rowidAlias =
             actual.pk === 1 &&
-            affinity(actual.type) === "INTEGER" &&
-            info.filter((other) => other.pk > 0).length === 1;
+            actual.type.toUpperCase() === "INTEGER" &&
+            info.filter((other) => other.pk > 0).length === 1 &&
+            !tableOptions(tables.get(name) ?? "").includes("WITHOUT ROWID");
           expect(column.notNull, `${name}.${column.name} NOT NULL`).toBe(
             rowidAlias ? true : actual.notnull === 1,
           );
