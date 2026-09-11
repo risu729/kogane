@@ -34,6 +34,8 @@ different rules.
 - [Development checks and CI](docs/ci.md)
 - [Infrastructure ledgers: resources, CORE schema, dependencies, retention](docs/infra-ledgers.md)
 - [Operations: health signals, load, retention and drills](docs/operations.md)
+- [Rollout: every flag, its prerequisites, order and rollback](docs/rollout.md)
+- [Runbook: retiring the legacy ingest, importer and buckets](docs/legacy-retirement.md)
 - [Authenticated collectors](docs/authenticated-collectors.md)
 - [Credential delivery](docs/credentials.md)
 - [Library decisions](docs/libraries.md)
