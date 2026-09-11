@@ -9,6 +9,15 @@
     "allowImportingTsExtensions": true,
     "strict": true,
     "noEmit": true,
+    // This Worker reaches CORE through packages/application, whose ingest use
+    // cases now include the Drizzle pilot's reads (U12). drizzle-orm 0.45.2
+    // ships very large declaration files that do not type-check under
+    // TypeScript 7 on their own — they name `Buffer` without `@types/node` and
+    // carry a handful of variance errors in builders this code never calls —
+    // so library declarations are trusted here, exactly as every package
+    // tsconfig in this repository already trusts them. Repository code is
+    // still checked in full.
+    "skipLibCheck": true,
     "types": []
   },
   "include": ["worker-configuration.d.ts", "src/**/*.ts"]

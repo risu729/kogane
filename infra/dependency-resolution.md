@@ -203,6 +203,7 @@ Lockfile: `bun.lock`.
 | dependency | kind | declared | resolved |
 | --- | --- | --- | --- |
 | `@types/bun` | devDependencies | `1.3.8` | 1.3.8 |
+| `drizzle-orm` | dependencies | `0.45.2` | 0.45.2 |
 | `typescript` | devDependencies | `5.9.3` | 5.9.3 |
 
 ### `poc/cloudflare-browser-run` — `@kogane/cloudflare-browser-run`
@@ -534,7 +535,7 @@ a changed digest has to be explained dependency by dependency.
 | `packages/observation-shared` | bun.lock | 5 | `bb01989186af1e9deb86c2a49f930f3eae14b6929a527e0914d88f6c4ef7f909` |
 | `packages/parsers` | bun.lock | 7 | `131ba3cbea7454a7d94d030ae3b9309445300e432a9d2fbc6bb9efe2ad6b0d20` |
 | `packages/read-model` | bun.lock | 5 | `bb01989186af1e9deb86c2a49f930f3eae14b6929a527e0914d88f6c4ef7f909` |
-| `packages/storage-d1` | bun.lock | 5 | `bb01989186af1e9deb86c2a49f930f3eae14b6929a527e0914d88f6c4ef7f909` |
+| `packages/storage-d1` | bun.lock | 6 | `de5c5ef35fafc39fb5b9ecdddeb1a5b7ebc924a86c0319da75726875f81c02fb` |
 | `poc/cloudflare-browser-run` | bun.lock | 169 | `4e438324a694d2463ee0555ababe70d300eea51d1b236a1b170483dae5e8acc1` |
 | `poc/cloudflare-runtime-probe` | bun.lock | 106 | `90d201da33ef0fbc2e8199aa72b92b5b0d20a4d665bc6464a1338bc9019020c0` |
 | `poc/globalpass-worker` | bun.lock | 172 | `be5d38d8506bfd044edb95232373425d1a9b50a32eac84a9558d6d303eaa5cc1` |

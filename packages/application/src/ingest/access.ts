@@ -4,11 +4,18 @@
 // registering a run directly makes exactly the checks the legacy HTTP path
 // makes (unified plan 02 §3).
 import {
-  ingestClientActive,
   ingestRouteActive,
-  readFetchRun,
   type FetchRunRow,
 } from "../../../storage-d1/src/core/ingest-registry.ts";
+// Two of the three reads below are the Drizzle pilot's (unified plan 09 §2,
+// decision D11): single-table lookups whose rows, ordering and query plan the
+// equivalence test proves identical to the native statements they replaced
+// (packages/storage-d1/test/drizzle-equivalence.test.ts, G2-17). The route
+// check stays native: `active_ingest_routes` is a view.
+import {
+  ingestClientActive,
+  readFetchRun,
+} from "../../../storage-d1/src/drizzle/ingest-registry.ts";
 import { IngestError, type IngestEnv } from "./contract.ts";
 
 /** A client whose row was deactivated cannot record, whatever key it holds. */

@@ -78,6 +78,11 @@ class SqliteStatement implements D1StatementLike {
     return { results: this.db.query(this.sql).all(...(this.binds as never[])) as T[] };
   }
 
+  /** Positional rows, as D1's `raw()` returns them (see `src/d1.ts`). */
+  async raw<T = unknown[]>(): Promise<T[]> {
+    return this.db.query(this.sql).values(...(this.binds as never[])) as T[];
+  }
+
   async run(): Promise<D1RunResultLike> {
     return { meta: { changes: this.execute() } };
   }
