@@ -463,6 +463,15 @@ and is recorded in `evidence_use_restrictions`, not done silently.
 `infra/schema/core-ledger.md`. U11 gave the same build a second home — the READ
 database `kogane-read` — selected by `READ_PROJECTION_ENABLED`.
 
+The second-stage pair `expiry_estimates` and `conversion_simulations` is the
+same shape one step later: U16 put its READ side in `0002_reward_read.sql`
+behind `REWARD_READ_PROJECTION_ENABLED`. Everything below applies to it word for
+word, with that flag in place of the first one. What is **not** a candidate for
+either treatment is the CORE claim and rule side — `reward_programs`,
+`expiry_rules`, `conversion_offers`, `reward_bucket_claims`,
+`membership_state_claims` — which 04 §2 keeps in CORE and which losing READ must
+not cost a single row of.
+
 **U15 writes no DDL for them and this section proposes none.** What it records
 is the supersession:
 
@@ -494,6 +503,8 @@ wrangler d1 execute kogane-raw-evidence --remote \
 # is a code question, not an account one.
 git grep -n -- 'current_balance_projection'
 git grep -n -- 'balance_read_snapshots'
+git grep -n -- 'expiry_estimates'
+git grep -n -- 'conversion_simulations'
 ```
 
 Removal, when it is proposed, is a **new** migration and its own work item: the
