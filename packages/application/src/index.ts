@@ -92,6 +92,7 @@ export { resolveAndSimulate } from "./operations/targets.ts";
 export {
   type AcceptedOperation,
   type CollectionRequest,
+  type DispatchRecord,
   type DispatchResult,
   DISPATCH_STATES,
   type DispatchState,

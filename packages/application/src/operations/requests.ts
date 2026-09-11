@@ -326,7 +326,9 @@ interface AcceptInput extends OperationContext {
 /**
  * The one write path. It stores the request, then reads the stored row back
  * and answers from *that*, so a first request and a re-send under the same key
- * return the same record even when the second request raced the first.
+ * return the same record even when the second request raced the first — and a
+ * raced request whose payload differs from what the winner stored is refused
+ * exactly as it would have been without the race.
  */
 async function accept(input: AcceptInput): Promise<CommandResult<AcceptedOperation>> {
   const { store, principal, now, kind, request } = input;
@@ -339,8 +341,9 @@ async function accept(input: AcceptInput): Promise<CommandResult<AcceptedOperati
   // break the key's promise. Both are refused, with the id and nothing else.
   if (existing && existing.payload_digest !== payloadDigest)
     return commandError("idempotency_conflict", [operationId]);
+  let replayed = existing !== null;
   if (!existing) {
-    await store.batch([
+    const outcomes = await store.batch([
       {
         sql: INSERT_REQUEST,
         binds: [
@@ -358,12 +361,22 @@ async function accept(input: AcceptInput): Promise<CommandResult<AcceptedOperati
       },
       ...(input.extraWrites?.(operationId) ?? []),
     ]);
+    // The insert is guarded on the row not existing, so a request that lost a
+    // race to another sender of the same key inserts nothing — and *that*, not
+    // the earlier read, is what says whether this call created the record.
+    replayed = (outcomes[0]?.changes ?? 0) === 0;
   }
-  const receipt = await loadReceipt(store, operationId, principal.id);
+  const row = await store.first<OpsRow>(SELECT_ROW, [operationId, principal.id]);
   // The row is written and read in the same request; its absence is a store
   // failure, never a silent success.
-  if (!receipt) return commandError("commit_failed", [operationId]);
-  return { ok: true, receipt, replayed: existing !== null };
+  if (!row) return commandError("commit_failed", [operationId]);
+  // What the winner of a race stored is checked the same way an earlier row
+  // was: a different payload under this key is a conflict, never a quiet
+  // answer with someone else's request.
+  if (row.payload_digest !== payloadDigest)
+    return commandError("idempotency_conflict", [operationId]);
+  const receipt = receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId]));
+  return { ok: true, receipt, replayed };
 }
 
 // ── source and release registries ───────────────────────────────────────
@@ -371,7 +384,12 @@ async function accept(input: AcceptInput): Promise<CommandResult<AcceptedOperati
 const DECLARED_SOURCE = `SELECT id FROM sources WHERE id=?1 AND active=1`;
 const PARSER_RELEASE = `SELECT release_id FROM parser_releases WHERE release_id=?1`;
 
-/** A source exists for this API only if the registry declares it active. */
+/**
+ * A source exists for this API only if the registry declares it active. A
+ * refusal names the *field* that held the unknown id, never the id itself:
+ * the caller already has its own value, and a value never travels back in an
+ * error, a log or a queue (G3-08).
+ */
 async function declaredSource(store: CommandStore, source: string): Promise<boolean> {
   return (await store.first<{ id: string }>(DECLARED_SOURCE, [source])) !== null;
 }
@@ -388,7 +406,7 @@ export async function requestCollection(
 ): Promise<CommandResult<AcceptedOperation>> {
   const { request } = input;
   if (!(await declaredSource(input.store, request.source)))
-    return commandError("target_missing", [`source:${request.source}`]);
+    return commandError("target_missing", ["source"]);
   return accept({
     ...input,
     kind: "collection",
@@ -411,7 +429,7 @@ export async function requestImport(
 ): Promise<CommandResult<AcceptedOperation>> {
   const { request } = input;
   if (!(await declaredSource(input.store, request.source)))
-    return commandError("target_missing", [`source:${request.source}`]);
+    return commandError("target_missing", ["source"]);
   return accept({
     ...input,
     kind: "import",
@@ -446,13 +464,13 @@ export async function requestReplay(
 ): Promise<CommandResult<AcceptedOperation>> {
   const { request, store } = input;
   if (!(await declaredSource(store, request.scope.source)))
-    return commandError("target_missing", [`source:${request.scope.source}`]);
+    return commandError("target_missing", ["scope.source"]);
   // A release is a registered transformation identity (0028), never free text:
   // an unknown release would leave jobs that no deployed parser can execute.
   const release = await store.first<{ release_id: string }>(PARSER_RELEASE, [
     request.parserRelease,
   ]);
-  if (!release) return commandError("target_missing", [`parser_release:${request.parserRelease}`]);
+  if (!release) return commandError("target_missing", ["parserRelease"]);
   return accept({
     ...input,
     kind: "replay",
@@ -509,7 +527,7 @@ export async function requestSessionRefresh(
 ): Promise<CommandResult<AcceptedOperation>> {
   const { request } = input;
   if (!(await declaredSource(input.store, request.source)))
-    return commandError("target_missing", [`source:${request.source}`]);
+    return commandError("target_missing", ["source"]);
   const human = input.policy(request.source) === "human";
   return accept({
     ...input,
@@ -571,13 +589,27 @@ export interface DispatchResult {
   targetRef?: string;
 }
 
+/** What one dispatch left behind. */
+export interface DispatchRecord {
+  /** The target the operation is bound to after this call, or null. */
+  targetRef: string | null;
+  /**
+   * True when the target this call named is the one the row holds. False with
+   * a non-null `targetRef` means another dispatch bound the operation first:
+   * the executor must continue *that* run and never open a second provider
+   * session for the same acceptance (G3-14).
+   */
+  boundHere: boolean;
+}
+
 /**
  * Records what happened to one dispatch. `dispatched` does not complete the
  * operation: completion is stage evidence, recorded by `recordOperationStage`.
- * `target_ref` is write-once, so a second dispatch of the same operation finds
- * the first executor's run and must reuse it (G3-14).
+ * `target_ref` is write-once — the update keeps the first value and the 0040
+ * trigger refuses any re-pointing — so a second dispatch of the same operation
+ * is told which run the first executor bound and must reuse it (G3-14).
  */
-export async function recordDispatch(input: DispatchResult): Promise<void> {
+export async function recordDispatch(input: DispatchResult): Promise<DispatchRecord> {
   const state =
     input.outcome === "dispatched"
       ? "dispatched"
@@ -601,6 +633,12 @@ export async function recordDispatch(input: DispatchResult): Promise<void> {
       ],
     },
   ]);
+  const row = await input.store.first<{ target_ref: string | null }>(
+    "SELECT target_ref FROM ops_requests WHERE operation_id=?1",
+    [input.operationId],
+  );
+  const targetRef = row?.target_ref ?? null;
+  return { targetRef, boundHere: targetRef !== null && targetRef === input.targetRef };
 }
 
 export interface StageReport {
