@@ -2,6 +2,12 @@ export class HttpError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
+    /**
+     * Safe identifiers the caller may act on — a field path it sent, an
+     * operation id it holds. Never a rejected value, a provider string, an
+     * amount or an exception message (addendum 10 §9, G3-08).
+     */
+    readonly refs: readonly string[] = [],
   ) {
     super(code);
   }

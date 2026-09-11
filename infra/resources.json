@@ -1678,7 +1678,8 @@
           "varNames": [
             "ACCESS_AUDIENCE",
             "ACCESS_ISSUER",
-            "BALANCE_PROJECTION_ENABLED"
+            "BALANCE_PROJECTION_ENABLED",
+            "OPS_API_ENABLED"
           ],
           "requiredSecretNames": [],
           "unextractedKeys": []
@@ -1733,7 +1734,9 @@
             "COMMANDS_ENABLED",
             "EVENTS_V2_ENABLED",
             "EVIDENCE_SOURCE_ID",
-            "REWARDS_V2_ENABLED"
+            "OPS_API_ENABLED",
+            "REWARDS_V2_ENABLED",
+            "SESSION_REFRESH_POLICY"
           ],
           "requiredSecretNames": [],
           "unextractedKeys": []
@@ -1782,7 +1785,9 @@
             "BALANCE_PROJECTION_ENABLED",
             "COMMANDS_ENABLED",
             "EVENTS_V2_ENABLED",
-            "EVIDENCE_SOURCE_ID"
+            "EVIDENCE_SOURCE_ID",
+            "OPS_API_ENABLED",
+            "SESSION_REFRESH_POLICY"
           ],
           "requiredSecretNames": [],
           "unextractedKeys": []

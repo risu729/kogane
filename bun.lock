@@ -72,6 +72,13 @@
         "typescript": "5.9.3",
       },
     },
+    "packages/sbi-vc-trade-client": {
+      "name": "@kogane/poc-sbi-vc-trade-client",
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "typescript": "5.9.3",
+      },
+    },
     "poc/cloudflare-browser-run": {
       "name": "@kogane/cloudflare-browser-run",
       "dependencies": {
@@ -91,6 +98,42 @@
       },
       "devDependencies": {
         "@types/bun": "1.3.8",
+        "typescript": "5.9.3",
+        "wrangler": "4.125.0",
+      },
+    },
+    "poc/observation-pipeline": {
+      "name": "@kogane/poc-observation-pipeline",
+      "dependencies": {
+        "@tanstack/react-query": "5.102.8",
+        "@tanstack/react-table": "9.2.3",
+        "hono": "4.13.5",
+        "jsonc-parser": "3.3.1",
+        "parse5": "8.0.1",
+        "react": "19.2.8",
+        "react-dom": "19.2.8",
+        "shiki": "4.4.3",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "@types/react": "19.2.18",
+        "@types/react-dom": "19.2.5",
+        "@vitejs/plugin-react": "6.1.0",
+        "playwright": "1.62.1",
+        "typescript": "5.9.3",
+        "vite": "8.2.2",
+      },
+    },
+    "poc/oci-browser-probe": {
+      "name": "@kogane/oci-browser-probe",
+      "dependencies": {
+        "playwright": "1.62.0",
+      },
+    },
+    "poc/tamia-tcp-bridge": {
+      "name": "@kogane/tamia-tcp-bridge",
+      "devDependencies": {
+        "@types/node": "26.3.0",
         "typescript": "5.9.3",
         "wrangler": "4.125.0",
       },
@@ -144,32 +187,17 @@
         "wrangler": "4.127.1",
       },
     },
-    "poc/observation-pipeline": {
-      "name": "@kogane/poc-observation-pipeline",
+    "services/collector-r2-importer": {
+      "name": "@kogane/collector-r2-importer",
       "dependencies": {
-        "@tanstack/react-query": "5.102.8",
-        "@tanstack/react-table": "9.2.3",
-        "hono": "4.13.5",
-        "jsonc-parser": "3.3.1",
+        "iconv-lite": "0.7.0",
         "parse5": "8.0.1",
-        "react": "19.2.8",
-        "react-dom": "19.2.8",
-        "shiki": "4.4.3",
+        "postal-mime": "2.7.3",
       },
       "devDependencies": {
         "@types/bun": "1.3.8",
-        "@types/react": "19.2.18",
-        "@types/react-dom": "19.2.5",
-        "@vitejs/plugin-react": "6.1.0",
-        "playwright": "1.62.1",
         "typescript": "5.9.3",
-        "vite": "8.2.2",
-      },
-    },
-    "poc/oci-browser-probe": {
-      "name": "@kogane/oci-browser-probe",
-      "dependencies": {
-        "playwright": "1.62.0",
+        "wrangler": "4.128.0",
       },
     },
     "services/collector-sbi-securities": {
@@ -192,13 +220,6 @@
         "typescript": "5.9.3",
         "wrangler": "4.127.1",
         "ws": "8.21.3",
-      },
-    },
-    "packages/sbi-vc-trade-client": {
-      "name": "@kogane/poc-sbi-vc-trade-client",
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "typescript": "5.9.3",
       },
     },
     "services/collector-sbi-vc-trade": {
@@ -232,14 +253,6 @@
         "wrangler": "4.128.0",
       },
     },
-    "poc/tamia-tcp-bridge": {
-      "name": "@kogane/tamia-tcp-bridge",
-      "devDependencies": {
-        "@types/node": "26.3.0",
-        "typescript": "5.9.3",
-        "wrangler": "4.125.0",
-      },
-    },
     "services/collector-vpass": {
       "name": "@kogane/poc-vpass-json",
       "dependencies": {
@@ -252,15 +265,6 @@
         "@types/bun": "1.3.8",
         "typescript": "5.9.3",
         "wrangler": "4.126.0",
-      },
-    },
-    "services/collector-vpoint-pay": {
-      "name": "@kogane/poc-vpoint-pay-worker",
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "@types/node": "24.3.0",
-        "typescript": "5.9.3",
-        "wrangler": "4.127.1",
       },
     },
     "services/collector-vpoint": {
@@ -279,23 +283,21 @@
         "wrangler": "4.126.0",
       },
     },
-    "services/collector-r2-importer": {
-      "name": "@kogane/collector-r2-importer",
-      "dependencies": {
-        "iconv-lite": "0.7.0",
-        "parse5": "8.0.1",
-        "postal-mime": "2.7.3",
-      },
+    "services/collector-vpoint-pay": {
+      "name": "@kogane/poc-vpoint-pay-worker",
       "devDependencies": {
         "@types/bun": "1.3.8",
+        "@types/node": "24.3.0",
         "typescript": "5.9.3",
-        "wrangler": "4.128.0",
+        "wrangler": "4.127.1",
       },
     },
     "services/evidence-browser": {
       "name": "@kogane/evidence-browser",
       "dependencies": {
+        "hono": "4.13.7",
         "jose": "6.2.11",
+        "zod": "4.6.2",
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.1.3",
@@ -831,7 +833,7 @@
 
     "hast-util-whitespace": ["hast-util-whitespace@3.0.0", "", { "dependencies": { "@types/hast": "^3.0.0" } }, "sha512-88JUN06ipLwsnv+dVn+OIYOvAuvBMy/Qoi6O7mQHxdPXpjy+Cd6xRkWwux7DKO+4sYILtLBRIKgsdpS2gQc7qw=="],
 
-    "hono": ["hono@4.13.5", "", {}, "sha512-O6+/eCYRkzzzy0rPWwKLiGBR1nFuUPZynnwjxN1MBA62NNqbT0wQEzQyK2gSO5yDIDB336sXQleAhOHrzlYyKw=="],
+    "hono": ["hono@4.13.7", "", {}, "sha512-c8/gF9ac8Y78/agExVocyLevgR+JlpNB444Py0FSX8pJoPdYUfUzRcXtYEYGwt6l19qIlVZPN5Mfsw9jFShmQQ=="],
 
     "html-void-elements": ["html-void-elements@3.0.0", "", {}, "sha512-bEqo66MRXsUGxWHV5IP0PUiAWwoEjba4VCzg0LjFJBpchPaTfyfCKTG6bc5F8ucKec3q5y6qOdGyYTSBEvhCrg=="],
 
@@ -1113,9 +1115,11 @@
 
     "youch-core": ["youch-core@0.3.3", "", { "dependencies": { "@poppinss/exception": "^1.2.2", "error-stack-parser-es": "^1.0.5" } }, "sha512-ho7XuGjLaJ2hWHoK8yFnsUGy2Y5uDpqSTq1FkHLK4/oqKtyUU1AFbOOxY4IpC9f0fTLjwYbslUz0Po5BpD1wrA=="],
 
-    "zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
+    "zod": ["zod@4.6.2", "", {}, "sha512-lh5RCAGFa1Cm2hjtNwLQhSs/AsqdWnTQaBER9fEwN/88pSh7KOtJavtBx/0VlkN/uFd61SwYmljLMDAsHlvzBQ=="],
 
     "zwitch": ["zwitch@2.0.4", "", {}, "sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A=="],
+
+    "@cloudflare/vitest-plugin/zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
 
     "@kogane/cloudflare-browser-run/wrangler": ["wrangler@4.125.0", "", { "dependencies": { "@cloudflare/kv-asset-handler": "0.5.0", "@cloudflare/unenv-preset": "2.16.1", "blake3-wasm": "2.1.5", "esbuild": "0.28.1", "miniflare": "5.20260820.0-alpha", "path-to-regexp": "6.3.0", "unenv": "2.0.0-rc.24", "workerd": "1.20260820.1" }, "optionalDependencies": { "fsevents": "2.3.3" }, "peerDependencies": { "@cloudflare/workers-types": "^5.20260820.1" }, "optionalPeers": ["@cloudflare/workers-types"], "bin": { "wrangler": "bin/wrangler.js", "wrangler2": "bin/wrangler.js", "cf-wrangler": "bin/cf-wrangler.js" } }, "sha512-yFpvggu+xk1Hdm/Uxwaqa19bb7GArME4CrCS3Vov68a2TZq2MPO+wLocKbbnIC9K0oLowcdau7/ycxbbNHKCEg=="],
 
@@ -1140,6 +1144,8 @@
     "@kogane/poc-moneyforward-worker/wrangler": ["wrangler@4.127.1", "", { "dependencies": { "@cloudflare/kv-asset-handler": "0.5.0", "@cloudflare/unenv-preset": "2.16.1", "blake3-wasm": "2.1.5", "esbuild": "0.28.1", "miniflare": "5.20260828.0-alpha", "path-to-regexp": "6.3.0", "unenv": "2.0.0-rc.24", "workerd": "1.20260828.1" }, "optionalDependencies": { "fsevents": "2.3.3" }, "peerDependencies": { "@cloudflare/workers-types": "^5.20260828.1" }, "optionalPeers": ["@cloudflare/workers-types"], "bin": { "wrangler": "bin/wrangler.js", "wrangler2": "bin/wrangler.js", "cf-wrangler": "bin/cf-wrangler.js" } }, "sha512-OzsiNgaI8i681L/+KnAKc+uEZ5D57xK5JuNvCOpRKICF4/5Q3Cu1oTGuUiT/f3GDUqQb3gzXNT0tfOHGMEtknw=="],
 
     "@kogane/poc-myjcb-worker/wrangler": ["wrangler@4.127.1", "", { "dependencies": { "@cloudflare/kv-asset-handler": "0.5.0", "@cloudflare/unenv-preset": "2.16.1", "blake3-wasm": "2.1.5", "esbuild": "0.28.1", "miniflare": "5.20260828.0-alpha", "path-to-regexp": "6.3.0", "unenv": "2.0.0-rc.24", "workerd": "1.20260828.1" }, "optionalDependencies": { "fsevents": "2.3.3" }, "peerDependencies": { "@cloudflare/workers-types": "^5.20260828.1" }, "optionalPeers": ["@cloudflare/workers-types"], "bin": { "wrangler": "bin/wrangler.js", "wrangler2": "bin/wrangler.js", "cf-wrangler": "bin/cf-wrangler.js" } }, "sha512-OzsiNgaI8i681L/+KnAKc+uEZ5D57xK5JuNvCOpRKICF4/5Q3Cu1oTGuUiT/f3GDUqQb3gzXNT0tfOHGMEtknw=="],
+
+    "@kogane/poc-observation-pipeline/hono": ["hono@4.13.5", "", {}, "sha512-O6+/eCYRkzzzy0rPWwKLiGBR1nFuUPZynnwjxN1MBA62NNqbT0wQEzQyK2gSO5yDIDB336sXQleAhOHrzlYyKw=="],
 
     "@kogane/poc-observation-pipeline/playwright": ["playwright@1.62.1", "", { "dependencies": { "playwright-core": "1.62.1" }, "optionalDependencies": { "fsevents": "2.3.2" }, "bin": { "playwright": "cli.js" } }, "sha512-0M+L3LAD8/nm554LOla9Ayx0j0tmFZ0FBcoQ7F1VuVHpM/XpiC8RcDzBQB8W5+hA8L22THxELzeF+2WcUzvcLg=="],
 
@@ -1246,6 +1252,8 @@
     "@kogane/poc-sbi-shinsei-worker/wrangler/workerd": ["workerd@1.20260828.1", "", { "optionalDependencies": { "@cloudflare/workerd-darwin-64": "1.20260828.1", "@cloudflare/workerd-darwin-arm64": "1.20260828.1", "@cloudflare/workerd-linux-64": "1.20260828.1", "@cloudflare/workerd-linux-arm64": "1.20260828.1", "@cloudflare/workerd-windows-64": "1.20260828.1" }, "bin": { "workerd": "bin/workerd" } }, "sha512-pB9yvt0kkwZDAGZHmpY59r0o3hM0DzdW6BJERqwZOhunZ3ssOyDSgQxOQer2cSZW4YCFeOTIQYN1qwhK5wv/Cw=="],
 
     "@kogane/poc-sbi-vc-trade-worker/@cloudflare/vitest-plugin/miniflare": ["miniflare@5.20260828.0-alpha", "", { "dependencies": { "@cspotcode/source-map-support": "0.8.1", "sharp": "0.35.2", "undici": "7.29.0", "workerd": "1.20260828.1", "ws": "8.21.0", "youch": "4.1.0-beta.10" } }, "sha512-6nbxhZEcz/UET3Y1OnYPsrAUjUmuFoib3ynUqteRdn1YnDxsLg8cwgZJZCk9QmtOmGzXwzXzgE/d/C0dJAPtVw=="],
+
+    "@kogane/poc-sbi-vc-trade-worker/@cloudflare/vitest-plugin/zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
 
     "@kogane/poc-sbi-vc-trade-worker/wrangler/miniflare": ["miniflare@5.20260828.0-alpha", "", { "dependencies": { "@cspotcode/source-map-support": "0.8.1", "sharp": "0.35.2", "undici": "7.29.0", "workerd": "1.20260828.1", "ws": "8.21.0", "youch": "4.1.0-beta.10" } }, "sha512-6nbxhZEcz/UET3Y1OnYPsrAUjUmuFoib3ynUqteRdn1YnDxsLg8cwgZJZCk9QmtOmGzXwzXzgE/d/C0dJAPtVw=="],
 
