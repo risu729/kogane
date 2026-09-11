@@ -20,11 +20,14 @@ run = "./node_modules/.bin/vitest run"
 
 ["app:dry-run"]
 description = "Validate the services/evidence-browser deployment without uploading it."
-depends = ["app:types"]
+# The production and demo configs serve built assets, so the dry run builds
+# them first; in CI the ledger's `prepare` task does the same before the action.
+depends = ["app:types", "web:build-production", "web:export-demo"]
 dir = "services/evidence-browser"
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 	"./node_modules/.bin/wrangler deploy --dry-run --config wrangler.demo.jsonc",
+	"./node_modules/.bin/wrangler deploy --dry-run --config wrangler.test.jsonc",
 ]
 
 ["ci:app"]

@@ -35,7 +35,7 @@ added: this is a boundary change, not a topology change.
 
 `tasks/_lib/import-boundaries.ts` states them and
 `tasks/_lib/import-boundaries.test.ts` runs them over every tracked TypeScript
-file in the standalone offline step (`mise run ci:standalone`).
+file in the repository-wide guard task (`mise run ci:root`).
 
 1. **Nothing under `services/*/src` or `packages/*/src` may import a module
    inside `poc/`.** A deployed Worker that imports an experiment cannot be
