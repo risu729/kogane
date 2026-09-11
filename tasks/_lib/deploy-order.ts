@@ -145,6 +145,8 @@ export function orderViolations(order: readonly DeployEntry[]): string[] {
 /** One `risu729/wrangler-deploy-action` step of a workflow. */
 export interface DeployStep {
   name: string;
+  /** Step id, which `release-ledger.mjs progress` reads per Worker. */
+  id: string;
   mode: string;
   workingDirectory: string;
   config: string;
@@ -171,6 +173,7 @@ export function deploySteps(text: string): DeployStep[] {
     .filter((step) => step.body.includes("risu729/wrangler-deploy-action@"))
     .map((step) => ({
       name: step.name,
+      id: field(step.body, "id"),
       mode: field(step.body, "mode"),
       workingDirectory: field(step.body, "working-directory"),
       config: field(step.body, "config"),
@@ -180,7 +183,9 @@ export function deploySteps(text: string): DeployStep[] {
 
 /**
  * The deploy steps against the ledger: same configurations, same order, every
- * one in `production` mode with the environment token.
+ * one in `production` mode with the environment token, and each one identified
+ * as `deploy-<ledger name>` so the release record can say what happened to that
+ * Worker.
  */
 export function deployStepMismatches(
   order: readonly DeployEntry[],
@@ -209,6 +214,41 @@ export function deployStepMismatches(
     if (!step.usesToken)
       errors.push(
         `.github/workflows/_deploy-workers.yml: step ${String(index + 1)} passes no deploy token`,
+      );
+    if (step.id !== `deploy-${entry.name}`)
+      errors.push(
+        `.github/workflows/_deploy-workers.yml: step ${String(index + 1)} must set "id: deploy-${entry.name}", not "${step.id}"; release-ledger.mjs reads that id to record what happened to ${entry.name}`,
+      );
+  }
+  return errors;
+}
+
+/** The reusable workflow that owns the production credentials. */
+export const DEPLOY_WORKFLOW = ".github/workflows/_deploy-workers.yml";
+
+/**
+ * Every caller of the release workflow must pass `secrets: inherit`.
+ *
+ * The Cloudflare credentials are scoped to the `production` Environment, which
+ * only the called workflow's job declares. GitHub resolves a called workflow's
+ * `secrets.*` from what the caller passed, and an unpassed secret is an empty
+ * string, not an error — so a caller without `secrets: inherit` produces a
+ * release that builds everything, opens a deployment record and then fails on
+ * `wrangler`'s "necessary to set a CLOUDFLARE_API_TOKEN environment variable"
+ * with nothing applied (run 34635388395). Named pass-through is not an
+ * alternative: it resolves in the caller, where the environment is not in
+ * scope.
+ */
+export function credentialWiringViolations(
+  files: readonly { file: string; text: string }[],
+): string[] {
+  const errors: string[] = [];
+  for (const { file, text } of files) {
+    if (file === DEPLOY_WORKFLOW) continue;
+    if (!/^[ \t]*uses:[ \t]*\.\/\.github\/workflows\/_deploy-workers\.yml\b/mu.test(text)) continue;
+    if (!/^[ \t]*secrets:[ \t]*inherit[ \t]*$/mu.test(text))
+      errors.push(
+        `${file}: calls ${DEPLOY_WORKFLOW} without "secrets: inherit"; the production environment secret would be empty`,
       );
   }
   return errors;

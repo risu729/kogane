@@ -251,13 +251,19 @@ that reads that collector's secrets at runtime (plan 12 §5), which is why
 collector paths are in the Risk Gate ledger.
 
 _Not configured:_ merging keeps working and only the deployment fails, at its
-first upload rather than halfway.
+credential preflight — after the build, before the deployment record, the
+migrations and every upload. Both callers of the release workflow pass
+`secrets: inherit`, which is what makes an environment secret reachable from a
+called workflow at all; without it the values are empty strings and the release
+fails at that same step.
 
 ### 6.6 First supervised run
 
-The step-by-step first deployment — dispatch `only: ingest`, check the release
-record, re-dispatch to prove the interlock, dispatch an older sha to prove the
-"newer release already recorded" refusal, then a rollback and back — is
+The step-by-step first deployment — dispatch the current `main` sha (a release
+covers every Worker the ledger marks `deploy`; there is no subset input), check
+the per-Worker release record, re-dispatch to prove the interlock, dispatch an
+older sha to prove the "newer release already recorded" refusal, then a
+`targets: ingest` rollback and back — is
 [ci-cd.md § Enabling it the first time](ci-cd.md#enabling-it-the-first-time-under-supervision).
 Do it before letting the automatic `CI` → `Deploy` chain run.
 
