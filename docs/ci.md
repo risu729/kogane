@@ -106,12 +106,17 @@ from the workspace directory (`bash scripts/audit-v-point-r2.sh`,
 5. If it deploys a Worker, add each of its Wrangler configs to
    `infra/workers-ci.json` and give it a `<short>:dry-run` task listing the same
    configs. A config that serves built assets also names the task that produces
-   them in the entry's `prepare` field; without it the job only installs.
+   them in the entry's `prepare` field; without it the job only installs. A
+   config that cannot be dry-run (a `wrangler dev` helper with remote bindings
+   and no `main`) goes under `excluded` with the reason; a Wrangler config that
+   is in neither list fails the guard.
 
 Nothing else is needed: the CI matrices are generated from the task list and
 the ledger. `tasks/_lib/check-manifests.ts` fails if a workspace directory has
-no `ci:` task, if the dry-run tasks and `infra/workers-ci.json` disagree, if a
-manifest grows a `scripts` field, or if any tracked file calls a package script.
+no `ci:` task or two `ci:` tasks, if a `ci:` task runs nothing, if the dry-run
+tasks and `infra/workers-ci.json` disagree, if a tracked Wrangler config is
+neither listed nor excluded there, if a manifest grows a `scripts` field, or if
+any tracked file calls a package script.
 
 ## Checks and coverage
 

@@ -18,6 +18,7 @@ depends = ["cloudflare-browser-run:types"]
 dir = "poc/cloudflare-browser-run"
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
+	"./node_modules/.bin/wrangler deploy --dry-run --config wrangler.bootstrap.jsonc",
 ]
 
 ["ci:cloudflare-browser-run"]
