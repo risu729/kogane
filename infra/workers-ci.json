@@ -139,7 +139,7 @@
     },
     {
       "name": "sbi-shinsei-worker",
-      "path": "poc/sbi-shinsei-worker",
+      "path": "services/collector-sbi-shinsei",
       "config": "wrangler.jsonc"
     },
     {

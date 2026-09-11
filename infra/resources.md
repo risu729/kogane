@@ -201,32 +201,6 @@ No wrangler config.
 
 No wrangler config.
 
-### `poc/sbi-shinsei-worker`
-
-- Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-shinsei
-- Required verification: keep the container/relay/credential operation contract
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-sbi-shinsei-collector-poc; buckets=kogane-sbi-shinsei-collector-poc)
-
-#### `kogane-sbi-shinsei-collector-poc` — `poc/sbi-shinsei-worker/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
-- R2: SNAPSHOTS → kogane-sbi-shinsei-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: COLLECTOR_CONTAINER → SbiShinseiCollectorContainer
-- DO migration tags: v1: SbiShinseiCollectorContainer
-- Containers: SbiShinseiCollectorContainer (./Dockerfile, basic, max 2)
-- Browser binding: —
-- VPC networks: MESH → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
-- Crons: `0 21 * * *`
-- Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
-- Required secrets (names only): —
-
 ### `poc/sbi-vc-trade-client`
 
 - Disposition (poc_disposition.csv): `promote-shared-if-used` → packages/sbi-vc-trade-client
@@ -857,6 +831,32 @@ No wrangler config.
 - Crons: `0 21 * * *`
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Required secrets (names only): —
+
+### `services/collector-sbi-shinsei`
+
+- Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-shinsei
+- Required verification: keep the container/relay/credential operation contract
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-sbi-shinsei-collector-poc; buckets=kogane-sbi-shinsei-collector-poc)
+
+#### `kogane-sbi-shinsei-collector-poc` — `services/collector-sbi-shinsei/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: —
+- R2: SNAPSHOTS → kogane-sbi-shinsei-collector-poc
+- KV: —
+- Queues: —
+- Durable Objects: COLLECTOR_CONTAINER → SbiShinseiCollectorContainer
+- DO migration tags: v1: SbiShinseiCollectorContainer
+- Containers: SbiShinseiCollectorContainer (./Dockerfile, basic, max 2)
+- Browser binding: —
+- VPC networks: MESH → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33
+- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Crons: `0 21 * * *`
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
 - Required secrets (names only): —
 
 ### `services/evidence-browser`

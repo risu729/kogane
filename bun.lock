@@ -181,7 +181,7 @@
         "wrangler": "4.126.0",
       },
     },
-    "poc/sbi-shinsei-worker": {
+    "services/collector-sbi-shinsei": {
       "name": "@kogane/poc-sbi-shinsei-worker",
       "dependencies": {
         "@cloudflare/containers": "0.3.7",
@@ -509,7 +509,7 @@
 
     "@kogane/poc-sbi-securities-worker": ["@kogane/poc-sbi-securities-worker@workspace:services/collector-sbi-securities"],
 
-    "@kogane/poc-sbi-shinsei-worker": ["@kogane/poc-sbi-shinsei-worker@workspace:poc/sbi-shinsei-worker"],
+    "@kogane/poc-sbi-shinsei-worker": ["@kogane/poc-sbi-shinsei-worker@workspace:services/collector-sbi-shinsei"],
 
     "@kogane/poc-sbi-vc-trade-client": ["@kogane/poc-sbi-vc-trade-client@workspace:poc/sbi-vc-trade-client"],
 
