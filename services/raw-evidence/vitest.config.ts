@@ -12,7 +12,12 @@ export default defineConfig({
           d1Databases: ["DB"],
           r2Buckets: ["EVIDENCE"],
           bindings: {
-            INGEST_CLIENT_KEYS: JSON.stringify({ test: "test-secret-at-least-twenty-chars" }),
+            // `parity` is the second client the U05 parity test registers with, so
+            // the HTTP path and the in-process port use the same credentials.
+            INGEST_CLIENT_KEYS: JSON.stringify({
+              test: "test-secret-at-least-twenty-chars",
+              parity: "test-secret-at-least-twenty-chars",
+            }),
             TEST_MIGRATIONS: migrations,
           },
         },
