@@ -137,7 +137,13 @@ any tracked file calls a package script.
   `poc/`; the PoC web UI may not import a service internal or read-model SQL).
   It also runs the [infrastructure ledgers](infra-ledgers.md) (a wrangler
   config or a CORE migration that changes without its committed ledger fails
-  here) and the two PoC tests that belong to no workspace.
+  here).
+- `ci:root` finally runs `root:knip`, which reports unused files, exports and
+  dependencies with `--no-exit-code`. It is advisory and cannot fail the build:
+  almost every entry point here is a wrangler `main`, a `Dockerfile` `CMD`, a
+  cron, a Queue consumer or a mise task, none of which a static analyser
+  follows. See [the unused-code report](unused-report.md) for what the current
+  findings mean and the four conditions under which one may be acted on.
 - The workspace matrix runs each `ci:<short>`: type generation, `tsc --noEmit`,
   the tests, and the build steps the workspace needs. The two container
   packages use frozen npm installs without install scripts; the OCI probe
