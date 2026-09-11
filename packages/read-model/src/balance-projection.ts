@@ -1,5 +1,5 @@
 // The latest-balance read model (review D10/D11, addendum A07). Pure: no D1,
-// no clock, no HTTP. The job in services/observation-pipeline supplies the
+// no clock, no HTTP. The job in services/processor supplies the
 // candidates and writes the rows; everything that decides a state lives here
 // so it can be tested against the scenario fixtures in packages/domain.
 //

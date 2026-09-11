@@ -3,7 +3,7 @@ import { beforeAll, expect, it } from "vitest";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { identityApi } from "../src/identity-api";
 import { observationOrganizations } from "../src/observation-organization";
-import { identifyParse } from "../../observation-pipeline/src/identity-store";
+import { identifyParse } from "../../processor/src/identity-store";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { validIdentityResponse } from "../../../packages/observation-shared/src/identity-contract";
 import { validAccountConnection } from "../../../packages/observation-shared/src/account-connection-contract";

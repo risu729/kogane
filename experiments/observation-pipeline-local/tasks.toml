@@ -28,7 +28,7 @@ description = "Export the synthetic demo snapshot the reader Worker serves."
 # that prepares its deployment has to produce both.
 depends = ["web:build"]
 dir = "experiments/observation-pipeline-local"
-run = "bun src/export-demo.ts ../../services/evidence-browser/demo-snapshot.json"
+run = "bun src/export-demo.ts ../../services/app/demo-snapshot.json"
 
 ["local-pipeline:browser"]
 description = "Install the locked Playwright Chromium in CI; never downloads locally."

@@ -31,7 +31,7 @@ const deployWorkflow = readFileSync(`${REPO_ROOT}/.github/workflows/_deploy-work
 function entry(overrides: Partial<DeployEntry> = {}): DeployEntry {
   return {
     name: "processor",
-    path: "services/observation-pipeline",
+    path: "services/processor",
     config: "wrangler.jsonc",
     worker: "kogane-observation-pipeline",
     role: "consumer",
@@ -51,10 +51,10 @@ describe("the deployment ledger describes every Worker CI validates", () => {
   });
 
   test("a configuration CI excludes may not be deployed", () => {
-    const excluded = [{ path: "services/observation-pipeline", config: "wrangler.ops.jsonc" }];
+    const excluded = [{ path: "services/processor", config: "wrangler.ops.jsonc" }];
     const violations = coverageViolations(
       [entry({ name: "ops", config: "wrangler.ops.jsonc", deploy: true })],
-      [{ name: "ops", path: "services/observation-pipeline", config: "wrangler.ops.jsonc" }],
+      [{ name: "ops", path: "services/processor", config: "wrangler.ops.jsonc" }],
       excluded,
     );
     expect(violations).toHaveLength(1);
@@ -166,7 +166,7 @@ describe("the deploy workflow follows the ledger", () => {
         {
           name: "Deploy",
           mode: "production",
-          workingDirectory: "services/observation-pipeline",
+          workingDirectory: "services/processor",
           config: "wrangler.jsonc",
           usesToken: false,
         },

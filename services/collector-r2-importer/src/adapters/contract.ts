@@ -10,7 +10,7 @@ import type {
   ImportAdapter as GenericImportAdapter,
   ImportStepResult,
   RepairPolicy as GenericRepairPolicy,
-} from "../../../observation-pipeline/src/legacy-import/adapters/contract.ts";
+} from "../../../processor/src/legacy-import/adapters/contract.ts";
 
 export {
   assertNoResume,
@@ -30,7 +30,7 @@ export {
   type ResumeKind,
   type ResumeState,
   type TerminalKeyField,
-} from "../../../observation-pipeline/src/legacy-import/adapters/contract.ts";
+} from "../../../processor/src/legacy-import/adapters/contract.ts";
 
 /** The generic adapter, bound to this Worker's environment. */
 export type ImportAdapter<TResult extends ImportStepResult = ImportStepResult> =

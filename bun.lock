@@ -299,20 +299,7 @@
         "wrangler": "4.126.0",
       },
     },
-    "services/collector-r2-importer": {
-      "name": "@kogane/collector-r2-importer",
-      "dependencies": {
-        "iconv-lite": "0.7.0",
-        "parse5": "8.0.1",
-        "postal-mime": "2.7.3",
-      },
-      "devDependencies": {
-        "@types/bun": "1.3.8",
-        "typescript": "5.9.3",
-        "wrangler": "4.128.0",
-      },
-    },
-    "services/evidence-browser": {
+    "services/app": {
       "name": "@kogane/evidence-browser",
       "dependencies": {
         "hono": "4.13.7",
@@ -327,7 +314,20 @@
         "wrangler": "4.128.0",
       },
     },
-    "services/observation-pipeline": {
+    "services/collector-r2-importer": {
+      "name": "@kogane/collector-r2-importer",
+      "dependencies": {
+        "iconv-lite": "0.7.0",
+        "parse5": "8.0.1",
+        "postal-mime": "2.7.3",
+      },
+      "devDependencies": {
+        "@types/bun": "1.3.8",
+        "typescript": "5.9.3",
+        "wrangler": "4.128.0",
+      },
+    },
+    "services/processor": {
       "name": "@kogane/observation-pipeline",
       "dependencies": {
         "parse5": "8.0.1",
@@ -505,13 +505,13 @@
 
     "@kogane/domain": ["@kogane/domain@workspace:packages/domain"],
 
-    "@kogane/evidence-browser": ["@kogane/evidence-browser@workspace:services/evidence-browser"],
+    "@kogane/evidence-browser": ["@kogane/evidence-browser@workspace:services/app"],
 
     "@kogane/evidence-contract": ["@kogane/evidence-contract@workspace:packages/evidence-contract"],
 
     "@kogane/identity": ["@kogane/identity@workspace:packages/identity"],
 
-    "@kogane/observation-pipeline": ["@kogane/observation-pipeline@workspace:services/observation-pipeline"],
+    "@kogane/observation-pipeline": ["@kogane/observation-pipeline@workspace:services/processor"],
 
     "@kogane/observation-pipeline-local": ["@kogane/observation-pipeline-local@workspace:experiments/observation-pipeline-local"],
 

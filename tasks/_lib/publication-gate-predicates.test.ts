@@ -43,7 +43,7 @@ const PREDICATE_ALLOW_LIST: Record<string, number> = {
   "packages/storage-d1/src/atomic/publication.ts": 6,
   // The candidate writer: a candidate is recorded only if the same batch left
   // its run ok and unsuperseded. A writer decision, never a read.
-  "services/observation-pipeline/src/release-adoption.ts": 1,
+  "services/processor/src/release-adoption.ts": 1,
   // The local store experiment's writer, its one-time backfill and the
   // backfill's note (unified plan U04 moved it out of poc/).
   "experiments/observation-pipeline-local/src/store.ts": 4,
@@ -62,21 +62,21 @@ const OK_STATUS_ALLOW_LIST: Record<string, number> = {
   // Writer: the duplicate-attempt skip and the comment that explains when
   // contract v2 rows become visible. The publish batch moved to
   // packages/storage-d1 with the rest of the gate (U05).
-  "services/observation-pipeline/src/worker.ts": 2,
+  "services/processor/src/worker.ts": 2,
   // Writer: the publish batch, the two projection statements and the module
   // note, all now in the shared CORE package.
   "packages/storage-d1/src/atomic/publication.ts": 9,
   // Candidate writer: the run is marked ok, the candidate row is recorded only
   // for an ok unsuperseded run, and the job is closed only for an ok run.
   // Everything the comparison calls "published" comes from the projection.
-  "services/observation-pipeline/src/release-adoption.ts": 3,
+  "services/processor/src/release-adoption.ts": 3,
   // Identity writer: interprets every successful run, published or not.
   // Moved to the shared CORE package by U05; the SQL is unchanged.
   "packages/storage-d1/src/core/identity-store.ts": 5,
   // Identity audit: coverage over interpreted runs, not over what readers see.
   "packages/storage-d1/src/core/identity-audit.ts": 2,
   // Operator diagnostics over parse attempts per artifact; no reader path.
-  "services/observation-pipeline/scripts/diagnose.ts": 1,
+  "services/processor/scripts/diagnose.ts": 1,
   // Decorates published and superseded runs; adoption comes from the LEFT JOIN
   // on the projection, not from this status test (which only drops pending runs).
   "packages/read-model/src/organization.ts": 1,
@@ -183,7 +183,7 @@ describe("publication gate predicate guard", () => {
   });
 
   test("the operator signals of the pipeline Worker read the projection", () => {
-    const worker = read("services/observation-pipeline/src/worker.ts");
+    const worker = read("services/processor/src/worker.ts");
     // Replay planning: "already parsed" is "already published".
     expect(worker).toContain(
       "EXISTS(SELECT 1 FROM published_parse_runs pub WHERE pub.fetch_artifact_id=a.id",

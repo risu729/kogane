@@ -5,7 +5,7 @@ import {
   listAccountConnections,
   readAccountConnections,
   connectionReferenceSet,
-} from "../../evidence-browser/src/account-connections";
+} from "../../app/src/account-connections";
 test("reader rejects malformed, duplicate and oversized reference sets before lookup", () => {
   expect(
     connectionReferenceSet(JSON.stringify(Array.from({ length: 100 }, (_, i) => `ref-${i}`))).size,

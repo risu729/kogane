@@ -205,7 +205,7 @@ export async function repairPublication(db: D1Like, request: RepairRequest): Pro
   // The repaired count comes from the rows the statement returned, never from
   // `meta.changes`: D1 counts rows written by triggers too, and since migration
   // 0038 a publication also bumps the CORE revision (docs/projection-input.md;
-  // services/observation-pipeline/test/projection-input.test.ts pins the rule).
+  // services/processor/test/projection-input.test.ts pins the rule).
   return { repaired: results[1]?.results?.length ?? 0, remaining: remaining?.n ?? 0 };
 }
 

@@ -1,5 +1,5 @@
 // The shared schema is the contract. Its shape is pinned here and again in
-// services/evidence-browser/test/conformance.test.ts, so a change to what a
+// services/app/test/conformance.test.ts, so a change to what a
 // server accepts or a client sends must be made in the schema and visible in
 // both packages' tests; a one-sided edit fails.
 import { describe, expect, test } from "bun:test";

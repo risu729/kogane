@@ -18,4 +18,4 @@ export {
   type ReconcilerSource,
   type ReconcilerSourceSpec,
   type RepairMessage,
-} from "../../observation-pipeline/src/legacy-import/reconciler.ts";
+} from "../../processor/src/legacy-import/reconciler.ts";
