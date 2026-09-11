@@ -5,12 +5,12 @@
     "apps/*",
     "services/*",
     "packages/*",
-    "experiments/*",
-    "poc/*"
+    "experiments/*"
   ],
   "type": "module",
   "devDependencies": {
     "dependency-cruiser": "18.2.0",
+    "knip": "6.35.1",
     "typescript": "5.9.3",
     "vitest": "4.1.11",
     "wrangler": "4.128.0"

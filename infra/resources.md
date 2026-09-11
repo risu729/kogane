@@ -86,6 +86,23 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | kogane-vpass-collector-poc | `0 21 * * *` | yes |
 | kogane-vpoint-collector-poc | `15 21 * * *` | yes |
 
+## Executed plan rows that left the table
+
+Directories the plan's dispositions retired, or promoted into `packages/`, where no runtime
+resource is declared. They are listed here because they are no longer in the table below; the
+commit column is what `git show` needs to read removed code back (acceptance test G0-12: none
+of these was retired merely because nothing imported it). A directory promoted *within* the
+scanned workspaces keeps its row below with `EXECUTED_U04`.
+
+| was | action | result | last commit | live-resource check |
+| --- | --- | --- | --- | --- |
+| `poc/camoufox-container-probe` | `retire-candidate` | docs/research/camoufox.md (code removed) | `5fb143e0f77a` | no wrangler config, no Worker, no bucket, no cron, no container application; local image deleted 2026-08-26 |
+| `poc/collector-diagnostics` | `promote-shared` | packages/collector-diagnostics (7 collector Workers; exports createDiagnostics, safeErrorDetails) | `5fb143e0f77a` | no wrangler config of its own; it is a library every collector Worker on the account links into its bundle, so it is promoted rather than retired |
+| `poc/kameleo-container-probe` | `retire-candidate` | docs/research/kameleo.md (code removed) | `5fb143e0f77a` | no wrangler config, no Worker, no bucket, no cron; local container, volume and image deleted 2026-08-26 |
+| `poc/oci-browser-probe` | `isolate-or-retire` | docs/research/oci-browser.md (code removed; conclusions in docs/authenticated-collectors.md) | `5fb143e0f77a` | retire branch: no wrangler config, no Worker and no OCI relay — the only collector relay is the pre-existing tamia Tunnel (GLOBAL PASS, exit JP/KIX ASN 18144); the probe's own install on host bots was purged and verified on 2026-08-26 |
+| `poc/sbi-securities` | `classify-before-delete` | docs/research/sbi-securities.md (code removed; no operational CLI added to the collector) | `5fb143e0f77a` | no wrangler config, Worker, bucket or cron; a local overlay on an external checkout, superseded by services/collector-sbi-securities (kogane-sbi-collector-poc), which reimplements the same read-only paths without mnie |
+| `poc/sbi-vc-trade-client` | `promote-shared-if-used` | packages/sbi-vc-trade-client | `5fb143e0f77a` | no wrangler config of its own; services/collector-sbi-vc-trade links it into the bundle of kogane-sbi-vc-session-poc, so it is promoted rather than retired |
+
 ## Directories
 
 ### `apps/web`
@@ -97,32 +114,14 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 No wrangler config.
 
-### `experiments/observation-pipeline-local`
+### `experiments/cloudflare-browser-run`
 
-- Disposition (poc_disposition.csv row poc/observation-pipeline + decision D1): `isolated-as-experiment` → experiments/observation-pipeline-local (EXPERIMENT.md: risu729, 2026-12-31)
-- Required verification: U04 executed the move; retire once the App API covers replay and status (docs/research/observation-pipeline-poc.md)
+- Disposition (poc_disposition.csv (was poc/cloudflare-browser-run)): `isolate-or-promote` → experiments/cloudflare-browser-run (isolated; promote only on a real consumer)
+- Required verification: classified as isolate: no services/, packages/, wrangler config, task or asset outside the directory references it
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
 - Live resources: NO_LIVE_RESOURCE
 
-No wrangler config.
-
-### `poc/camoufox-container-probe`
-
-- Disposition (poc_disposition.csv): `retire-candidate` → docs/research/camoufox.md
-- Required verification: stopped, zero references, source retired after the result is saved
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: NO_LIVE_RESOURCE
-
-No wrangler config.
-
-### `poc/cloudflare-browser-run`
-
-- Disposition (poc_disposition.csv): `isolate-or-promote` → experiments/browser-run
-- Required verification: classify after checking product code and resource dependencies
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: NO_LIVE_RESOURCE
-
-#### `kogane-vpass-browser-run-20260825` — `poc/cloudflare-browser-run/wrangler.bootstrap.jsonc`
+#### `kogane-vpass-browser-run-20260825` — `experiments/cloudflare-browser-run/wrangler.bootstrap.jsonc`
 
 - Role: not-deployed; exists in the account: no
 - Entry point: src/bootstrap.ts
@@ -141,7 +140,7 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
-#### `kogane-vpass-browser-run-20260825` — `poc/cloudflare-browser-run/wrangler.jsonc`
+#### `kogane-vpass-browser-run-20260825` — `experiments/cloudflare-browser-run/wrangler.jsonc`
 
 - Role: not-deployed; exists in the account: no
 - Entry point: src/index.ts
@@ -160,14 +159,14 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): PROBE_TOKEN<br>VPASS_ID<br>VPASS_PASSWORD
 
-### `poc/cloudflare-runtime-probe`
+### `experiments/cloudflare-runtime-probe`
 
-- Disposition (poc_disposition.csv): `isolate` → experiments/cloudflare-runtime
-- Required verification: set the experiment's purpose and stop condition
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
+- Disposition (poc_disposition.csv (was poc/cloudflare-runtime-probe)): `isolate` → experiments/cloudflare-runtime-probe
+- Required verification: purpose and stop condition recorded in EXPERIMENT.md
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
 - Live resources: NO_LIVE_RESOURCE
 
-#### `kogane-vpass-runtime-probe-20260825` — `poc/cloudflare-runtime-probe/wrangler.jsonc`
+#### `kogane-vpass-runtime-probe-20260825` — `experiments/cloudflare-runtime-probe/wrangler.jsonc`
 
 - Role: not-deployed; exists in the account: no
 - Entry point: src/index.ts
@@ -186,41 +185,23 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
-### `poc/kameleo-container-probe`
+### `experiments/observation-pipeline-local`
 
-- Disposition (poc_disposition.csv): `retire-candidate` → docs/research/kameleo.md
-- Required verification: stopped, zero references, source retired after the result is saved
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
+- Disposition (poc_disposition.csv row poc/observation-pipeline + decision D1): `isolated-as-experiment` → experiments/observation-pipeline-local (EXPERIMENT.md: risu729, 2026-12-31)
+- Required verification: U04 executed the move; retire once the App API covers replay and status (docs/research/observation-pipeline-poc.md)
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
 - Live resources: NO_LIVE_RESOURCE
 
 No wrangler config.
 
-### `poc/oci-browser-probe`
+### `experiments/tamia-tcp-bridge`
 
-- Disposition (poc_disposition.csv): `isolate-or-retire` → experiments/oci-browser; docs/research/oci-browser.md
-- Required verification: confirm no production use of the OCI relay
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
+- Disposition (poc_disposition.csv (was poc/tamia-tcp-bridge)): `promote-service-if-used` → experiments/tamia-tcp-bridge (not used by any collector; promote to services/tamia-tcp-bridge only when one routes through it)
+- Required verification: checked: GLOBAL PASS binds the tamia Tunnel directly by tunnel_id and relays through its own /tcp, no config, binding, var, secret or task names kogane-tamia-tcp-bridge-20260825, and that Worker is not in the account inventory
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
 - Live resources: NO_LIVE_RESOURCE
 
-No wrangler config.
-
-### `poc/sbi-securities`
-
-- Disposition (poc_disposition.csv): `classify-before-delete` → docs/research/sbi-securities.md; services/collector-sbi-securities
-- Required verification: check the overlap with the worker version; diagnostics to API/source, finished research to docs, no new operational CLI
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: NO_LIVE_RESOURCE
-
-No wrangler config.
-
-### `poc/tamia-tcp-bridge`
-
-- Disposition (poc_disposition.csv): `promote-service-if-used` → services/tamia-tcp-bridge
-- Required verification: do not delete before checking whether Globalpass and others depend on it
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: NO_LIVE_RESOURCE
-
-#### `kogane-tamia-tcp-bridge-20260825` — `poc/tamia-tcp-bridge/wrangler.bootstrap.jsonc`
+#### `kogane-tamia-tcp-bridge-20260825` — `experiments/tamia-tcp-bridge/wrangler.bootstrap.jsonc`
 
 - Role: not-deployed; exists in the account: no
 - Entry point: src/bootstrap.ts
@@ -239,7 +220,7 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
-#### `kogane-tamia-tcp-bridge-20260825` — `poc/tamia-tcp-bridge/wrangler.jsonc`
+#### `kogane-tamia-tcp-bridge-20260825` — `experiments/tamia-tcp-bridge/wrangler.jsonc`
 
 - Role: not-deployed; exists in the account: no
 - Entry point: src/index.ts
@@ -428,8 +409,8 @@ No wrangler config.
 
 ### `services/collector-r2-importer`
 
-- Disposition (plan 07 §1 + decision D2): `retire-after-verification` → services/processor absorbed it in U08; runbook docs/legacy-retirement.md §4
-- Required verification: docs/legacy-retirement.md §4: references zero (no collector binding, no queue producer, uncoveredLegacySources empty), unprocessed zero (reconciler queue and DLQ empty, a full backfill pass importing nothing, no new collector-r2-* ingestion attempt), retention window recorded, backup confirmed
+- Disposition (plan 07 §1 + decision D2): `absorb-into-processor` → services/processor (queue consumer and adapters, U08)
+- Required verification: the Worker keeps running until U15; old protocol still readable; no double cron
 - Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
 - Live resources: LIVE(workers=kogane-collector-r2-importer; buckets=kogane-globalpass-collector-poc,kogane-mobile-suica-collector-poc,kogane-moneyforward-collector-poc,kogane-myjcb-collector-poc,kogane-sbi-collector-poc,kogane-sbi-shinsei-collector-poc,kogane-sbi-vc-trade-poc,kogane-smbc-direct-backfill-poc,kogane-sony-bank-collector-poc,kogane-vpass-collector-poc,kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)
 
@@ -1011,8 +992,8 @@ No wrangler config.
 
 ### `services/raw-evidence`
 
-- Disposition (plan 07 §1 + decision D2/D3): `retire-after-verification` → packages/storage-d1 + packages/application hold the logic (U05); runbook docs/legacy-retirement.md §3
-- Required verification: docs/legacy-retirement.md §3: references zero (the importer's RAW_EVIDENCE binding is the last caller; every source's latest ingestion_attempts row is processor-shared-r2), unprocessed zero (no unsealed fetch_run, no incomplete inventory, no unregistered collection_run), retention window recorded for the legacy ingest tokens, CORE export and Time Travel bookmark taken
+- Disposition (plan 07 §1 + decision D2/D3): `keep-as-legacy-adapter` → packages/storage-d1 + packages/application (U05); migrations move in U05
+- Required verification: kogane-ingest stays deployed until U15; migration filenames and bytes unchanged
 - Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
 - Live resources: LIVE(workers=kogane-ingest; buckets=kogane-raw-evidence)
 

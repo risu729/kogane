@@ -13,6 +13,8 @@ SBI証券は **実装コスト3/5、条件付きで定期自動化可能（現�
 
 既存実装により、保存したパスキーを用いた無人ログインと、Web／アプリ内部通信の直接呼出しは技術的に実現済みである。2026-08-26の実口座試験では、Bitwarden CLIからSBI証券に必要な最小credentialだけをprocess内へ渡し、`mnie` の既存署名関数とpasskey sessionを接続した。entry 200、challenge 200、assertion 302、callback 200、MTS login 200、現物保有照会 200となり、server totalと解析件数が一致した。件数以外の口座データ、token、SID、credential識別子は記録していない。一方で、2026年6月に認証方式が変更され、ログイン入口にはEverspin系の防御がある。現時点ではブラウザなしのHTTP経路が受理されたが、安定運用にはsession失効検知、公式画面との継続的な値照合が必要になる。
 
+この`mnie` overlayの実行コードは2026-09のrepository整理でmainから除去した。確認済みの範囲、90日windowの根拠、円貨入出金明細に銘柄コードが無いという制約、MTS originをrepoへ保存しない理由と検証手順、Bitwarden CLIからSBI専用の最小credentialだけを抽出するときの判定規則は[`../research/sbi-securities.md`](../research/sbi-securities.md)に残した。
+
 Koganeでは、取引機能を絶対に有効化しない。`pnsk-lab/mnie` のSBI providerは有用な仕様資料だが、注文発注・訂正・取消まで公開するため、そのまま依存・登録してはならない。読取部分だけを別パッケージへ抽出し、取引パスワードを設定・保管せず、注文系コードと宛先をビルドに含めない方針とする。
 
 ### 2026-08-27: 独立Cloudflare Worker PoC
@@ -249,7 +251,7 @@ TLS pinning、root／emulator検知、PlusアプリへのEVERSPIN適用範囲は
 - `tradePassword`、取引認証callback、device registration、order payload builders、発注endpointを依存グラフと配布物から除外する。
 - runtimeのegress allowlistとmethod allowlistで、既知のread-only宛先・操作だけを許可する。
 
-実口座試験の再現用overlay、合成test、秘密管理境界は [`poc/sbi-securities/`](../../poc/sbi-securities/) に保存した。これは対象commitの `mnie/scripts/` へ配置して使うPoCであり、Koganeのproduction collectorではない。
+実口座試験の再現用overlay、合成test、秘密管理境界は [`docs/research/sbi-securities.md`](../research/sbi-securities.md) に記録した（overlayのcodeはmainから除去済みで、同documentが読み戻すcommitを示す）。これは対象commitの `mnie/scripts/` へ配置して使ったPoCであり、Koganeのproduction collectorではない。
 
 ### `azuki774/myscrapers` (`e58339122eef9273fb2566f0a867057d3219b2f6`)
 

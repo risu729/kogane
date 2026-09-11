@@ -308,7 +308,7 @@
     },
     {
       "name": "cloudflare-browser-run",
-      "path": "poc/cloudflare-browser-run",
+      "path": "experiments/cloudflare-browser-run",
       "config": "wrangler.jsonc",
       "worker": "kogane-vpass-browser-run-20260825",
       "role": "probe",
@@ -317,7 +317,7 @@
     },
     {
       "name": "cloudflare-browser-run-bootstrap",
-      "path": "poc/cloudflare-browser-run",
+      "path": "experiments/cloudflare-browser-run",
       "config": "wrangler.bootstrap.jsonc",
       "worker": "kogane-vpass-browser-run-20260825",
       "role": "probe",
@@ -326,7 +326,7 @@
     },
     {
       "name": "cloudflare-runtime-probe",
-      "path": "poc/cloudflare-runtime-probe",
+      "path": "experiments/cloudflare-runtime-probe",
       "config": "wrangler.jsonc",
       "worker": "kogane-vpass-runtime-probe-20260825",
       "role": "probe",
@@ -335,7 +335,7 @@
     },
     {
       "name": "tamia-tcp-bridge",
-      "path": "poc/tamia-tcp-bridge",
+      "path": "experiments/tamia-tcp-bridge",
       "config": "wrangler.jsonc",
       "worker": "kogane-tamia-tcp-bridge-20260825",
       "role": "probe",
@@ -344,7 +344,7 @@
     },
     {
       "name": "tamia-tcp-bridge-bootstrap",
-      "path": "poc/tamia-tcp-bridge",
+      "path": "experiments/tamia-tcp-bridge",
       "config": "wrangler.bootstrap.jsonc",
       "worker": "kogane-tamia-tcp-bridge-20260825",
       "role": "probe",

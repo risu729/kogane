@@ -194,6 +194,29 @@ describe("import boundaries", () => {
     ]);
   });
 
+  test("an open experiment is on the PoC side of the boundary", () => {
+    // U04 isolated the runtime probes under experiments/; EXPERIMENT.md
+    // promises that no service or package imports them, and the guard is
+    // what keeps the promise.
+    const forbidden =
+      'import { RuntimeProbeContainer } from "../../../experiments/cloudflare-runtime-probe/src/index.ts";';
+    expect(
+      boundaryViolations("services/collector-globalpass/src/worker.ts", forbidden).map(
+        (violation) => violation.rule,
+      ),
+    ).toEqual(["deployed-code-imports-experiment"]);
+    expect(
+      boundaryViolations("packages/collection/src/adapters.ts", forbidden).map(
+        (violation) => violation.rule,
+      ),
+    ).toEqual(["deployed-code-imports-experiment"]);
+    // An experiment may import a shared package: the dependency points the
+    // allowed way.
+    const allowed =
+      'import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";';
+    expect(boundaryViolations("experiments/tamia-tcp-bridge/src/index.ts", allowed)).toEqual([]);
+  });
+
   test("every rule is exercised by the repository-wide checks above", () => {
     expect(BOUNDARY_RULES.map((rule) => rule.name).sort()).toEqual([
       "deployed-code-imports-experiment",

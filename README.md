@@ -71,22 +71,11 @@ mise tasks ls             # what else is there
 See [Development checks and CI](docs/ci.md) for the task naming convention, how
 the CI matrices are generated, and what to do when adding a workspace.
 
-## Layout
-
-One Bun workspace: `apps/web` (the React client), `services/*` (the deployed
-Workers), `packages/*` (the pure shared code), `experiments/*` (time-boxed, with
-an `EXPERIMENT.md`), `poc/*` (collection and runtime probes), `tests/fixtures`
-(synthetic, byte-pinned), `config/` (declarative configuration) and `infra/`
-(the ledgers). [Package layout and import boundaries](docs/package-layout.md)
-says what may import what and where each move stands;
-[infra/resources.md](infra/resources.md) is generated and is the current answer
-for which directory deploys which Worker.
-
 ## Collectors
 
 One deployed Worker per source, under `services/collector-<source>`. The runtime
 each of them needs, and why, is in the
-[collector runtime inventory](poc/README.md).
+[collector runtime inventory](docs/collector-runtime-profiles.md).
 
 - [SMCC Vpass](services/collector-vpass/README.md)
 - [SBI証券](services/collector-sbi-securities/README.md)
@@ -102,19 +91,21 @@ each of them needs, and why, is in the
 - [Vポイント](services/collector-vpoint/README.md)
 - [V Point Pay](services/collector-vpoint-pay/README.md)
 
-## Proofs of concept
+## Open experiments
 
-`poc/` holds what has not been promoted to a service and is not finished
-research. A probe is not deleted because nothing imports it: several are
-deployed Workers with their own cron, Queue or Email route, and each carries its
-disposition in the resource ledger.
-[poc/README.md](poc/README.md) is the collector runtime inventory — which
-collector starts a browser, for which part of a collection, and why.
+Each one carries an `EXPERIMENT.md` with its owner, expiry and stop condition.
+Deployed code never imports them.
 
-- [Observation pipeline PoC: what it settled](docs/research/observation-pipeline-poc.md)
-- [OCI/WSL Vpass browser comparison](poc/oci-browser-probe/README.md)
-- [Camoufox Windows/macOS fingerprint controls](poc/camoufox-container-probe/README.md)
-- [Kameleo Windows Chrome container control](poc/kameleo-container-probe/README.md)
-- [Cloudflare Container runtime probe](poc/cloudflare-runtime-probe/README.md)
-- [Cloudflare Browser Rendering probe](poc/cloudflare-browser-run/README.md)
-- [Per-scraper tamia TCP bridge probe](poc/tamia-tcp-bridge/README.md)
+- [Cloudflare Container runtime and egress probe](experiments/cloudflare-runtime-probe/EXPERIMENT.md)
+- [Cloudflare Browser Run probe](experiments/cloudflare-browser-run/EXPERIMENT.md)
+- [TAMIA raw TCP bridge](experiments/tamia-tcp-bridge/EXPERIMENT.md)
+
+## Finished experiments
+
+Their code is no longer on `main`; the result, the commit that carried it and
+how to read it back are in [`docs/research/`](docs/research/).
+
+- [SBI証券 Bitwarden CLI passkey overlay](docs/research/sbi-securities.md)
+- [OCI/WSL Vpass browser comparison](docs/research/oci-browser.md)
+- [Camoufox Windows/macOS fingerprint controls](docs/research/camoufox.md)
+- [Kameleo Windows Chrome container control](docs/research/kameleo.md)

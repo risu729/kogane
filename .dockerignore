@@ -1,6 +1,6 @@
 # Build context for the container images whose `image_build_context` is the
 # repository root — the one Bun lockfile lives there, so an image that runs a
-# frozen install has to see it (poc/cloudflare-runtime-probe).
+# frozen install has to see it (experiments/cloudflare-runtime-probe).
 #
 # Docker sends the whole context to the daemon, so keep evidence, credentials,
 # installed dependencies and build output out of it. The Dockerfiles copy only

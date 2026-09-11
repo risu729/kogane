@@ -92,9 +92,9 @@ Every source PR records:
 - a 1-5 implementation-cost score and a recommended next experiment;
 - a strict read-only allowlist when the upstream surface also exposes writes.
 
-Deployable PoCs also place the standardized `Runtime profile` near the top of
-their README and update the central [`poc/README.md`](../poc/README.md)
-inventory. Research-time browser capture and production runtime dependency are
+Deployable collectors also place the standardized `Runtime profile` near the top
+of their README and update the central
+[`collector-runtime-profiles.md`](collector-runtime-profiles.md) inventory. Research-time browser capture and production runtime dependency are
 recorded separately.
 
 Multiple official routes to the same value are compared explicitly. For

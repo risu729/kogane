@@ -148,6 +148,24 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
+  "experiments/cloudflare-browser-run": {
+    source: "poc_disposition.csv (was poc/cloudflare-browser-run)",
+    proposedAction: "isolate-or-promote",
+    proposedTarget:
+      "experiments/cloudflare-browser-run (isolated; promote only on a real consumer)",
+    requiredVerification:
+      "classified as isolate: no services/, packages/, wrangler config, task or asset outside the directory references it",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "experiments/cloudflare-runtime-probe": {
+    source: "poc_disposition.csv (was poc/cloudflare-runtime-probe)",
+    proposedAction: "isolate",
+    proposedTarget: "experiments/cloudflare-runtime-probe",
+    requiredVerification: "purpose and stop condition recorded in EXPERIMENT.md",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
   "experiments/observation-pipeline-local": {
     source: "poc_disposition.csv row poc/observation-pipeline + decision D1",
     proposedAction: "isolated-as-experiment",
@@ -157,73 +175,25 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/camoufox-container-probe": {
-    source: "poc_disposition.csv",
-    proposedAction: "retire-candidate",
-    proposedTarget: "docs/research/camoufox.md",
-    requiredVerification: "stopped, zero references, source retired after the result is saved",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/cloudflare-browser-run": {
-    source: "poc_disposition.csv",
-    proposedAction: "isolate-or-promote",
-    proposedTarget: "experiments/browser-run",
-    requiredVerification: "classify after checking product code and resource dependencies",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/cloudflare-runtime-probe": {
-    source: "poc_disposition.csv",
-    proposedAction: "isolate",
-    proposedTarget: "experiments/cloudflare-runtime",
-    requiredVerification: "set the experiment's purpose and stop condition",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/kameleo-container-probe": {
-    source: "poc_disposition.csv",
-    proposedAction: "retire-candidate",
-    proposedTarget: "docs/research/kameleo.md",
-    requiredVerification: "stopped, zero references, source retired after the result is saved",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/oci-browser-probe": {
-    source: "poc_disposition.csv",
-    proposedAction: "isolate-or-retire",
-    proposedTarget: "experiments/oci-browser; docs/research/oci-browser.md",
-    requiredVerification: "confirm no production use of the OCI relay",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/sbi-securities": {
-    source: "poc_disposition.csv",
-    proposedAction: "classify-before-delete",
-    proposedTarget: "docs/research/sbi-securities.md; services/collector-sbi-securities",
-    requiredVerification:
-      "check the overlap with the worker version; diagnostics to API/source, finished research to docs, no new operational CLI",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "poc/tamia-tcp-bridge": {
-    source: "poc_disposition.csv",
+  "experiments/tamia-tcp-bridge": {
+    source: "poc_disposition.csv (was poc/tamia-tcp-bridge)",
     proposedAction: "promote-service-if-used",
-    proposedTarget: "services/tamia-tcp-bridge",
+    proposedTarget:
+      "experiments/tamia-tcp-bridge (not used by any collector; promote to services/tamia-tcp-bridge only when one routes through it)",
     requiredVerification:
-      "do not delete before checking whether Globalpass and others depend on it",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+      "checked: GLOBAL PASS binds the tamia Tunnel directly by tunnel_id and relays through its own /tcp, no config, binding, var, secret or task names kogane-tamia-tcp-bridge-20260825, and that Worker is not in the account inventory",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "services/processor": {
+  "services/app": {
     source: "plan 07 §1 + decision D1",
     proposedAction: "rename-directory",
-    proposedTarget: "services/processor",
-    // Executed: the directory moved from `services/observation-pipeline`. The
-    // deployed config is byte-identical, cron, queue consumer and D1 ids
-    // included; only the comment in `wrangler.read-migrations.jsonc` that
-    // quotes its own path changed (G0-06, G0-07, G5-15).
-    requiredVerification: "git mv only; Worker name kogane-observation-pipeline and cron stay",
+    proposedTarget: "services/app",
+    // Executed: the directory moved from `services/evidence-browser`. All three
+    // configs are byte-identical to what they were under the old directory, so
+    // the frozen identity lines in `scripts/resource-ledger.test.ts` still match
+    // (G0-06, G5-15). The Worker names did not move with the directory.
+    requiredVerification: "git mv only; Worker names kogane-evidence-browser and kogane-demo stay",
     executionStatus: "EXECUTED_RENAME",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
@@ -259,28 +229,12 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "services/app": {
-    source: "plan 07 §1 + decision D1",
-    proposedAction: "rename-directory",
-    proposedTarget: "services/app",
-    // Executed: the directory moved from `services/evidence-browser`. All three
-    // configs are byte-identical to what they were under the old directory, so
-    // the frozen identity lines in `scripts/resource-ledger.test.ts` still match
-    // (G0-06, G5-15). The Worker names did not move with the directory.
-    requiredVerification: "git mv only; Worker names kogane-evidence-browser and kogane-demo stay",
-    executionStatus: "EXECUTED_RENAME",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
   "services/collector-r2-importer": {
     source: "plan 07 §1 + decision D2",
-    // U08 absorbed the queue consumer and the adapters. The Worker itself is
-    // not retired by a repository change: eleven of the twelve legacy buckets
-    // have no shared-R2 mapping yet, so it is still the only reader of them.
-    // The checklist and the commands are docs/legacy-retirement.md §4.
-    proposedAction: "retire-after-verification",
-    proposedTarget: "services/processor absorbed it in U08; runbook docs/legacy-retirement.md §4",
+    proposedAction: "absorb-into-processor",
+    proposedTarget: "services/processor (queue consumer and adapters, U08)",
     requiredVerification:
-      "docs/legacy-retirement.md §4: references zero (no collector binding, no queue producer, uncoveredLegacySources empty), unprocessed zero (reconciler queue and DLQ empty, a full backfill pass importing nothing, no new collector-r2-* ingestion attempt), retention window recorded, backup confirmed",
+      "the Worker keeps running until U15; old protocol still readable; no double cron",
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
@@ -349,20 +303,104 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
+  "services/processor": {
+    source: "plan 07 §1 + decision D1",
+    proposedAction: "rename-directory",
+    proposedTarget: "services/processor",
+    // Executed: the directory moved from `services/observation-pipeline`. The
+    // deployed config is byte-identical, cron, queue consumer and D1 ids
+    // included; only the comment in `wrangler.read-migrations.jsonc` that
+    // quotes its own path changed (G0-06, G0-07, G5-15).
+    requiredVerification: "git mv only; Worker name kogane-observation-pipeline and cron stay",
+    executionStatus: "EXECUTED_RENAME",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
   "services/raw-evidence": {
     source: "plan 07 §1 + decision D2/D3",
-    // U05 moved the SQL and the registration use cases out; what is deployed is
-    // a thin adapter over them. Its only caller is the importer's RAW_EVIDENCE
-    // service binding, so it cannot be retired before that one (15 §5).
-    proposedAction: "retire-after-verification",
-    proposedTarget:
-      "packages/storage-d1 + packages/application hold the logic (U05); runbook docs/legacy-retirement.md §3",
+    proposedAction: "keep-as-legacy-adapter",
+    proposedTarget: "packages/storage-d1 + packages/application (U05); migrations move in U05",
     requiredVerification:
-      "docs/legacy-retirement.md §3: references zero (the importer's RAW_EVIDENCE binding is the last caller; every source's latest ingestion_attempts row is processor-shared-r2), unprocessed zero (no unsealed fetch_run, no incomplete inventory, no unregistered collection_run), retention window recorded for the legacy ingest tokens, CORE export and Time Travel bookmark taken",
+      "kogane-ingest stays deployed until U15; migration filenames and bytes unchanged",
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
 };
+
+export interface CompletedDisposition {
+  /** Directory the plan named, as it was before the move. */
+  source: string;
+  proposedAction: string;
+  /** Where the content is now: a directory, a document, or both. */
+  result: string;
+  /** Commit that last carried the code, so `git show <commit>:<source>` works. */
+  lastCommit: string;
+  /** What the live-resource check found before the row was executed. */
+  liveResourceCheck: string;
+}
+
+/**
+ * Plan rows whose directory has left `DISPOSITIONS` entirely.
+ *
+ * `DISPOSITIONS` is asserted to describe exactly the directories that exist
+ * under the scanned workspaces, so a row has to leave it the moment its
+ * directory is retired or promoted into `packages/`. Each entry here records
+ * the live-resource check that allowed the row to be executed, because no
+ * directory may be retired for the sole reason that nothing imports it
+ * (acceptance test G0-12).
+ */
+export const COMPLETED_DISPOSITIONS: readonly CompletedDisposition[] = [
+  {
+    source: "poc/camoufox-container-probe",
+    proposedAction: "retire-candidate",
+    result: "docs/research/camoufox.md (code removed)",
+    lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+    liveResourceCheck:
+      "no wrangler config, no Worker, no bucket, no cron, no container application; local image deleted 2026-08-26",
+  },
+  {
+    source: "poc/collector-diagnostics",
+    proposedAction: "promote-shared",
+    result:
+      "packages/collector-diagnostics (7 collector Workers; exports createDiagnostics, safeErrorDetails)",
+    lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+    liveResourceCheck:
+      "no wrangler config of its own; it is a library every collector Worker on the account links into its bundle, so it is promoted rather than retired",
+  },
+  {
+    source: "poc/kameleo-container-probe",
+    proposedAction: "retire-candidate",
+    result: "docs/research/kameleo.md (code removed)",
+    lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+    liveResourceCheck:
+      "no wrangler config, no Worker, no bucket, no cron; local container, volume and image deleted 2026-08-26",
+  },
+  {
+    source: "poc/oci-browser-probe",
+    proposedAction: "isolate-or-retire",
+    result:
+      "docs/research/oci-browser.md (code removed; conclusions in docs/authenticated-collectors.md)",
+    lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+    liveResourceCheck:
+      "retire branch: no wrangler config, no Worker and no OCI relay — the only collector relay is the pre-existing tamia Tunnel (GLOBAL PASS, exit JP/KIX ASN 18144); the probe's own install on host bots was purged and verified on 2026-08-26",
+  },
+  {
+    source: "poc/sbi-securities",
+    proposedAction: "classify-before-delete",
+    result:
+      "docs/research/sbi-securities.md (code removed; no operational CLI added to the collector)",
+    lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+    liveResourceCheck:
+      "no wrangler config, Worker, bucket or cron; a local overlay on an external checkout, superseded by services/collector-sbi-securities (kogane-sbi-collector-poc), which reimplements the same read-only paths without mnie",
+  },
+  {
+    source: "poc/sbi-vc-trade-client",
+    proposedAction: "promote-shared-if-used",
+    result: "packages/sbi-vc-trade-client",
+    lastCommit: "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+    liveResourceCheck:
+      "no wrangler config of its own; services/collector-sbi-vc-trade links it into the bundle of kogane-sbi-vc-session-poc, so it is promoted rather than retired",
+  },
+];
 
 /** Config keys that carry no runtime resource identity. */
 const COSMETIC_KEYS = new Set([
@@ -609,7 +647,7 @@ function readWorker(root: string, configPath: string): WorkerResources {
 }
 
 /** Workspaces the ledger walks. `apps` and `experiments` joined it in U04. */
-export const WORKSPACES = ["apps", "experiments", "poc", "services"] as const;
+export const WORKSPACES = ["apps", "experiments", "services"] as const;
 
 export type Workspace = (typeof WORKSPACES)[number];
 
@@ -624,6 +662,7 @@ export interface ResourceLedger {
   generatedBy: string;
   plan: string;
   liveInventory: typeof LIVE_INVENTORY;
+  completedDispositions: readonly CompletedDisposition[];
   directories: DirectoryEntry[];
   summary: {
     configCount: number;
@@ -720,6 +759,7 @@ export function buildResourceLedger(root: string): ResourceLedger {
     generatedBy: "scripts/resource-ledger.ts",
     plan: "unified plan U01; chapters 07 §1 and §6; acceptance tests G0-06, G0-07, G0-12",
     liveInventory: LIVE_INVENTORY,
+    completedDispositions: COMPLETED_DISPOSITIONS,
     directories,
     summary: {
       configCount: workers.length,
@@ -900,6 +940,24 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
   lines.push("| --- | --- | --- |");
   for (const entry of ledger.summary.crons)
     lines.push(`| ${cell(entry.worker)} | \`${entry.cron}\` | ${entry.live ? "yes" : "no"} |`);
+  lines.push("");
+
+  lines.push("## Executed plan rows that left the table");
+  lines.push("");
+  lines.push(
+    "Directories the plan's dispositions retired, or promoted into `packages/`, where no runtime",
+    "resource is declared. They are listed here because they are no longer in the table below; the",
+    "commit column is what `git show` needs to read removed code back (acceptance test G0-12: none",
+    "of these was retired merely because nothing imported it). A directory promoted *within* the",
+    "scanned workspaces keeps its row below with `EXECUTED_U04`.",
+  );
+  lines.push("");
+  lines.push("| was | action | result | last commit | live-resource check |");
+  lines.push("| --- | --- | --- | --- | --- |");
+  for (const entry of ledger.completedDispositions)
+    lines.push(
+      `| \`${entry.source}\` | \`${entry.proposedAction}\` | ${cell(entry.result)} | \`${entry.lastCommit.slice(0, 12)}\` | ${cell(entry.liveResourceCheck)} |`,
+    );
   lines.push("");
 
   lines.push("## Directories");

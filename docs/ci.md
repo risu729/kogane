@@ -37,7 +37,7 @@ A container image that runs a frozen Bun install has to see that one lockfile,
 so its container entry sets `image_build_context` to the repository root and its
 Dockerfile copies the root `package.json`, `bunfig.toml` and `bun.lock` plus its
 own workspace manifest, then installs with `--filter <workspace name>`
-(`poc/cloudflare-runtime-probe`). Only one workspace ends up in the image, so it
+(`experiments/cloudflare-runtime-probe`). Only one workspace ends up in the image, so it
 installs `--linker hoisted`: the repository's isolated layout would put the
 dependencies under the workspace path, where the entry point cannot resolve
 them. The root `.dockerignore` keeps evidence, credentials, `node_modules` and
@@ -89,11 +89,11 @@ Each workspace owns a `tasks.toml` that the root `mise.toml` lists under
 | `dry-run`   | `wrangler deploy --dry-run` for every config the workspace owns |
 | `dev`       | a local development server                                      |
 
-`<short>` is the workspace's short name: `app` (`services/app`), `processor`
-(`services/processor`), `ingest` (`services/raw-evidence`), `importer`
-(`services/collector-r2-importer`), `web` (`apps/web`), `local-pipeline`
-(`experiments/observation-pipeline-local`), the package name for `packages/*`,
-and the directory name for the remaining PoC workers.
+`<short>` is the workspace's short name: `app` (`services/app`),
+`processor` (`services/processor`), `ingest`
+(`services/raw-evidence`), `importer` (`services/collector-r2-importer`), `web`
+(`poc/observation-pipeline`), the package name for `packages/*`, and the
+directory name for the remaining PoC workers.
 
 Every workspace also declares one aggregate `ci:<short>` task — the exact set
 of checks CI runs for it. `ci:root` holds the repository-wide guards that
@@ -123,10 +123,6 @@ from the workspace directory (`bash scripts/audit-v-point-r2.sh`,
    config that cannot be dry-run (a `wrangler dev` helper with remote bindings
    and no `main`) goes under `excluded` with the reason; a Wrangler config that
    is in neither list fails the guard.
-6. If its `src/**` imports a file that another task writes rather than one git
-   tracks, declare that file in `infra/generated-files.json` (`path` →
-   `producedBy`) and name the producing task in the `depends` of the
-   workspace's `typecheck`, `test` and `dry-run` tasks. See below.
 
 Nothing else is needed: the CI matrices are generated from the task list and
 the ledger. `tasks/_lib/check-manifests.ts` fails if a workspace directory has
@@ -134,24 +130,6 @@ no `ci:` task or two `ci:` tasks, if a `ci:` task runs nothing, if the dry-run
 tasks and `infra/workers-ci.json` disagree, if a tracked Wrangler config is
 neither listed nor excluded there, if a manifest grows a `scripts` field, or if
 any tracked file calls a package script.
-
-## Generated inputs
-
-`infra/generated-files.json` lists the files a task produces instead of the
-repository committing them, with the task that writes each one. Today there is
-one: `services/app/demo-snapshot.json`, written by `local-pipeline:export-demo`
-and imported by `services/app/src/demo-worker.ts`.
-
-A missing dependency on such a task is not a build error, which is exactly why
-it needs a guard. mise runs independent tasks in parallel, so
-`app:typecheck` without the edge does not fail — it races the export, passes on
-a machine where the snapshot happens to exist from an earlier run, and fails on
-a clean checkout. `tasks/_lib/check-manifests.ts` therefore resolves the
-relative imports of every `<workspace>/src/**` module, and for each workspace
-that reaches a declared file it requires `<short>:typecheck`, `<short>:test` and
-`<short>:dry-run` — those of them that exist — to reach the producing task
-through their `depends` closure. An entry whose path git tracks, or whose
-producing task does not exist, is a stale declaration and fails too.
 
 ## Checks and coverage
 
@@ -172,7 +150,13 @@ producing task does not exist, is a stale declaration and fails too.
   `poc/`; the PoC web UI may not import a service internal or read-model SQL).
   It also runs the [infrastructure ledgers](infra-ledgers.md) (a wrangler
   config or a CORE migration that changes without its committed ledger fails
-  here) and the two PoC tests that belong to no workspace.
+  here).
+- `ci:root` finally runs `root:knip`, which reports unused files, exports and
+  dependencies with `--no-exit-code`. It is advisory and cannot fail the build:
+  almost every entry point here is a wrangler `main`, a `Dockerfile` `CMD`, a
+  cron, a Queue consumer or a mise task, none of which a static analyser
+  follows. See [the unused-code report](unused-report.md) for what the current
+  findings mean and the four conditions under which one may be acted on.
 - The workspace matrix runs each `ci:<short>`: type generation, `tsc --noEmit`,
   the tests, and the build steps the workspace needs. The two container
   packages use frozen npm installs without install scripts; the OCI probe

@@ -18,7 +18,7 @@
 // the same name, and U15 moved it out so that a second copy collides instead
 // (`dependency-ledger.test.ts`).
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MIGRATION_NOTE } from "./dependency-ledger-notes.ts";
@@ -27,7 +27,7 @@ import { parseJsonc } from "./jsonc.ts";
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const LEDGER_MARKDOWN_PATH = "infra/dependency-resolution.md";
 // `apps` and `experiments` joined the root manifest's globs in U04.
-const WORKSPACES = ["apps", "experiments", "packages", "poc", "services"] as const;
+const WORKSPACES = ["apps", "experiments", "packages", "services"] as const;
 
 export interface PackageRecord {
   directory: string;
@@ -164,6 +164,9 @@ export function readPackages(root: string): PackageRecord[] {
   const candidates: string[] = [];
   for (const workspace of WORKSPACES) {
     const base = join(root, workspace);
+    // A top-level directory disappears once its last member has moved (07 §1
+    // empties `poc/`), and `experiments/` only appears when the first one lands.
+    if (!existsSync(base)) continue;
     for (const entry of readdirSync(base).sort()) {
       if (!statSync(join(base, entry)).isDirectory()) continue;
       // `container/` holds the npm-managed image build of a collector; it is a

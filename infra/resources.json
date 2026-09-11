@@ -54,6 +54,50 @@
       "kogane-globalpass-container-probe-20260827"
     ]
   },
+  "completedDispositions": [
+    {
+      "source": "poc/camoufox-container-probe",
+      "proposedAction": "retire-candidate",
+      "result": "docs/research/camoufox.md (code removed)",
+      "lastCommit": "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+      "liveResourceCheck": "no wrangler config, no Worker, no bucket, no cron, no container application; local image deleted 2026-08-26"
+    },
+    {
+      "source": "poc/collector-diagnostics",
+      "proposedAction": "promote-shared",
+      "result": "packages/collector-diagnostics (7 collector Workers; exports createDiagnostics, safeErrorDetails)",
+      "lastCommit": "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+      "liveResourceCheck": "no wrangler config of its own; it is a library every collector Worker on the account links into its bundle, so it is promoted rather than retired"
+    },
+    {
+      "source": "poc/kameleo-container-probe",
+      "proposedAction": "retire-candidate",
+      "result": "docs/research/kameleo.md (code removed)",
+      "lastCommit": "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+      "liveResourceCheck": "no wrangler config, no Worker, no bucket, no cron; local container, volume and image deleted 2026-08-26"
+    },
+    {
+      "source": "poc/oci-browser-probe",
+      "proposedAction": "isolate-or-retire",
+      "result": "docs/research/oci-browser.md (code removed; conclusions in docs/authenticated-collectors.md)",
+      "lastCommit": "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+      "liveResourceCheck": "retire branch: no wrangler config, no Worker and no OCI relay — the only collector relay is the pre-existing tamia Tunnel (GLOBAL PASS, exit JP/KIX ASN 18144); the probe's own install on host bots was purged and verified on 2026-08-26"
+    },
+    {
+      "source": "poc/sbi-securities",
+      "proposedAction": "classify-before-delete",
+      "result": "docs/research/sbi-securities.md (code removed; no operational CLI added to the collector)",
+      "lastCommit": "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+      "liveResourceCheck": "no wrangler config, Worker, bucket or cron; a local overlay on an external checkout, superseded by services/collector-sbi-securities (kogane-sbi-collector-poc), which reimplements the same read-only paths without mnie"
+    },
+    {
+      "source": "poc/sbi-vc-trade-client",
+      "proposedAction": "promote-shared-if-used",
+      "result": "packages/sbi-vc-trade-client",
+      "lastCommit": "5fb143e0f77a492ae9cfdbe0266fe77774b8bd30",
+      "liveResourceCheck": "no wrangler config of its own; services/collector-sbi-vc-trade links it into the bundle of kogane-sbi-vc-session-poc, so it is promoted rather than retired"
+    }
+  ],
   "directories": [
     {
       "directory": "apps/web",
@@ -70,48 +114,20 @@
       "workers": []
     },
     {
-      "directory": "experiments/observation-pipeline-local",
+      "directory": "experiments/cloudflare-browser-run",
       "workspace": "experiments",
       "disposition": {
-        "source": "poc_disposition.csv row poc/observation-pipeline + decision D1",
-        "proposedAction": "isolated-as-experiment",
-        "proposedTarget": "experiments/observation-pipeline-local (EXPERIMENT.md: risu729, 2026-12-31)",
-        "requiredVerification": "U04 executed the move; retire once the App API covers replay and status (docs/research/observation-pipeline-poc.md)",
-        "executionStatus": "EXECUTED_U04",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "NO_LIVE_RESOURCE"
-      },
-      "workers": []
-    },
-    {
-      "directory": "poc/camoufox-container-probe",
-      "workspace": "poc",
-      "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "retire-candidate",
-        "proposedTarget": "docs/research/camoufox.md",
-        "requiredVerification": "stopped, zero references, source retired after the result is saved",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "NO_LIVE_RESOURCE"
-      },
-      "workers": []
-    },
-    {
-      "directory": "poc/cloudflare-browser-run",
-      "workspace": "poc",
-      "disposition": {
-        "source": "poc_disposition.csv",
+        "source": "poc_disposition.csv (was poc/cloudflare-browser-run)",
         "proposedAction": "isolate-or-promote",
-        "proposedTarget": "experiments/browser-run",
-        "requiredVerification": "classify after checking product code and resource dependencies",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
+        "proposedTarget": "experiments/cloudflare-browser-run (isolated; promote only on a real consumer)",
+        "requiredVerification": "classified as isolate: no services/, packages/, wrangler config, task or asset outside the directory references it",
+        "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
         "liveResourceStatus": "NO_LIVE_RESOURCE"
       },
       "workers": [
         {
-          "config": "poc/cloudflare-browser-run/wrangler.bootstrap.jsonc",
+          "config": "experiments/cloudflare-browser-run/wrangler.bootstrap.jsonc",
           "name": "kogane-vpass-browser-run-20260825",
           "main": "src/bootstrap.ts",
           "role": "not-deployed",
@@ -134,7 +150,7 @@
           "unextractedKeys": []
         },
         {
-          "config": "poc/cloudflare-browser-run/wrangler.jsonc",
+          "config": "experiments/cloudflare-browser-run/wrangler.jsonc",
           "name": "kogane-vpass-browser-run-20260825",
           "main": "src/index.ts",
           "role": "not-deployed",
@@ -164,20 +180,20 @@
       ]
     },
     {
-      "directory": "poc/cloudflare-runtime-probe",
-      "workspace": "poc",
+      "directory": "experiments/cloudflare-runtime-probe",
+      "workspace": "experiments",
       "disposition": {
-        "source": "poc_disposition.csv",
+        "source": "poc_disposition.csv (was poc/cloudflare-runtime-probe)",
         "proposedAction": "isolate",
-        "proposedTarget": "experiments/cloudflare-runtime",
-        "requiredVerification": "set the experiment's purpose and stop condition",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
+        "proposedTarget": "experiments/cloudflare-runtime-probe",
+        "requiredVerification": "purpose and stop condition recorded in EXPERIMENT.md",
+        "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
         "liveResourceStatus": "NO_LIVE_RESOURCE"
       },
       "workers": [
         {
-          "config": "poc/cloudflare-runtime-probe/wrangler.jsonc",
+          "config": "experiments/cloudflare-runtime-probe/wrangler.jsonc",
           "name": "kogane-vpass-runtime-probe-20260825",
           "main": "src/index.ts",
           "role": "not-deployed",
@@ -227,62 +243,34 @@
       ]
     },
     {
-      "directory": "poc/kameleo-container-probe",
-      "workspace": "poc",
+      "directory": "experiments/observation-pipeline-local",
+      "workspace": "experiments",
       "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "retire-candidate",
-        "proposedTarget": "docs/research/kameleo.md",
-        "requiredVerification": "stopped, zero references, source retired after the result is saved",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
+        "source": "poc_disposition.csv row poc/observation-pipeline + decision D1",
+        "proposedAction": "isolated-as-experiment",
+        "proposedTarget": "experiments/observation-pipeline-local (EXPERIMENT.md: risu729, 2026-12-31)",
+        "requiredVerification": "U04 executed the move; retire once the App API covers replay and status (docs/research/observation-pipeline-poc.md)",
+        "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
         "liveResourceStatus": "NO_LIVE_RESOURCE"
       },
       "workers": []
     },
     {
-      "directory": "poc/oci-browser-probe",
-      "workspace": "poc",
+      "directory": "experiments/tamia-tcp-bridge",
+      "workspace": "experiments",
       "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "isolate-or-retire",
-        "proposedTarget": "experiments/oci-browser; docs/research/oci-browser.md",
-        "requiredVerification": "confirm no production use of the OCI relay",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "NO_LIVE_RESOURCE"
-      },
-      "workers": []
-    },
-    {
-      "directory": "poc/sbi-securities",
-      "workspace": "poc",
-      "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "classify-before-delete",
-        "proposedTarget": "docs/research/sbi-securities.md; services/collector-sbi-securities",
-        "requiredVerification": "check the overlap with the worker version; diagnostics to API/source, finished research to docs, no new operational CLI",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "NO_LIVE_RESOURCE"
-      },
-      "workers": []
-    },
-    {
-      "directory": "poc/tamia-tcp-bridge",
-      "workspace": "poc",
-      "disposition": {
-        "source": "poc_disposition.csv",
+        "source": "poc_disposition.csv (was poc/tamia-tcp-bridge)",
         "proposedAction": "promote-service-if-used",
-        "proposedTarget": "services/tamia-tcp-bridge",
-        "requiredVerification": "do not delete before checking whether Globalpass and others depend on it",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
+        "proposedTarget": "experiments/tamia-tcp-bridge (not used by any collector; promote to services/tamia-tcp-bridge only when one routes through it)",
+        "requiredVerification": "checked: GLOBAL PASS binds the tamia Tunnel directly by tunnel_id and relays through its own /tcp, no config, binding, var, secret or task names kogane-tamia-tcp-bridge-20260825, and that Worker is not in the account inventory",
+        "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
         "liveResourceStatus": "NO_LIVE_RESOURCE"
       },
       "workers": [
         {
-          "config": "poc/tamia-tcp-bridge/wrangler.bootstrap.jsonc",
+          "config": "experiments/tamia-tcp-bridge/wrangler.bootstrap.jsonc",
           "name": "kogane-tamia-tcp-bridge-20260825",
           "main": "src/bootstrap.ts",
           "role": "not-deployed",
@@ -305,7 +293,7 @@
           "unextractedKeys": []
         },
         {
-          "config": "poc/tamia-tcp-bridge/wrangler.jsonc",
+          "config": "experiments/tamia-tcp-bridge/wrangler.jsonc",
           "name": "kogane-tamia-tcp-bridge-20260825",
           "main": "src/index.ts",
           "role": "not-deployed",
@@ -762,9 +750,9 @@
       "workspace": "services",
       "disposition": {
         "source": "plan 07 §1 + decision D2",
-        "proposedAction": "retire-after-verification",
-        "proposedTarget": "services/processor absorbed it in U08; runbook docs/legacy-retirement.md §4",
-        "requiredVerification": "docs/legacy-retirement.md §4: references zero (no collector binding, no queue producer, uncoveredLegacySources empty), unprocessed zero (reconciler queue and DLQ empty, a full backfill pass importing nothing, no new collector-r2-* ingestion attempt), retention window recorded, backup confirmed",
+        "proposedAction": "absorb-into-processor",
+        "proposedTarget": "services/processor (queue consumer and adapters, U08)",
+        "requiredVerification": "the Worker keeps running until U15; old protocol still readable; no double cron",
         "executionStatus": "PLANNED_NOT_EXECUTED",
         "planLiveResourceStatus": "NOT_VERIFIED",
         "liveResourceStatus": "LIVE(workers=kogane-collector-r2-importer; buckets=kogane-globalpass-collector-poc,kogane-mobile-suica-collector-poc,kogane-moneyforward-collector-poc,kogane-myjcb-collector-poc,kogane-sbi-collector-poc,kogane-sbi-shinsei-collector-poc,kogane-sbi-vc-trade-poc,kogane-smbc-direct-backfill-poc,kogane-sony-bank-collector-poc,kogane-vpass-collector-poc,kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)"
@@ -2013,9 +2001,9 @@
       "workspace": "services",
       "disposition": {
         "source": "plan 07 §1 + decision D2/D3",
-        "proposedAction": "retire-after-verification",
-        "proposedTarget": "packages/storage-d1 + packages/application hold the logic (U05); runbook docs/legacy-retirement.md §3",
-        "requiredVerification": "docs/legacy-retirement.md §3: references zero (the importer's RAW_EVIDENCE binding is the last caller; every source's latest ingestion_attempts row is processor-shared-r2), unprocessed zero (no unsealed fetch_run, no incomplete inventory, no unregistered collection_run), retention window recorded for the legacy ingest tokens, CORE export and Time Travel bookmark taken",
+        "proposedAction": "keep-as-legacy-adapter",
+        "proposedTarget": "packages/storage-d1 + packages/application (U05); migrations move in U05",
+        "requiredVerification": "kogane-ingest stays deployed until U15; migration filenames and bytes unchanged",
         "executionStatus": "PLANNED_NOT_EXECUTED",
         "planLiveResourceStatus": "NOT_VERIFIED",
         "liveResourceStatus": "LIVE(workers=kogane-ingest; buckets=kogane-raw-evidence)"

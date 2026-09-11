@@ -34,9 +34,18 @@ description = "Check the resolved import graph against the boundary rules."
 # also fails when the cruise saw too little to mean anything.
 run = "bun tasks/_lib/depcruise.ts"
 
+["root:knip"]
+description = "Report unused files, exports and dependencies (advisory; never fails on a finding)."
+# `--no-exit-code` is the point (unified plan 07 §6, acceptance G4-13): a
+# runtime entry point knip cannot see — a cron, a Queue consumer, an Email
+# route, a Durable Object — is the normal case in this repository, so its
+# findings are read by a human against the resource ledger and never acted on
+# automatically. `docs/unused-report.md` holds the committed summary.
+run = "./node_modules/.bin/knip --no-exit-code"
+
 ["ci:root"]
 description = "Every check CI runs for the repository-wide guards."
-depends = ["root:manifests", "root:test", "root:depcruise"]
+depends = ["root:manifests", "root:test", "root:depcruise", "root:knip"]
 
 ["ledger:resources"]
 description = "Regenerate the deployed-resource ledger under infra/."
