@@ -64,10 +64,20 @@ and transformations:
 
 `parseTerminalManifest` validates it by hand, exactly as
 `packages/evidence-contract` validates the ingest descriptor: no schema
-library, no new dependency, stable error codes, unknown keys rejected. It also
-enforces the cross-references — an artifact's `storageRef.key` must be
-`objectKey(sha256)`, and every `unitKey` and `outputArtifactKey` must resolve
-inside the manifest.
+library, no new dependency, stable error codes. **Unknown keys are rejected**
+(`unknown_field`) at every level, not preserved: a field the contract does not
+name cannot ride along into a digest. It also enforces the cross-references —
+an artifact's `storageRef.key` must be `objectKey(sha256)`, a report's
+`storageRef.key` must be `reports/<its own reportRef>/<safe path>`
+(`report_storage_ref_mismatch`), and every `unitKey` and `outputArtifactKey`
+must resolve inside the manifest. Instants must be `Z`-suffixed ISO strings
+that survive a `Date` round trip, so `2026-02-30` is refused rather than
+rolled into March. Identifiers are charset-restricted (`source` is the same
+charset as the ingest contract's source ids; `role`, `unitKind`, `producer`,
+`reportKind` and every `safeErrorCode` are `[a-z0-9_-]` machine codes), so
+there is no free-text field in which provider text, an amount or a credential
+could be recorded. `units[].artifactCount` is the collector's declaration and
+is not cross-checked against `artifacts[]`.
 
 This is **not** a replacement for the ingest descriptor contract. The Processor
 derives descriptors from a terminal; the descriptor schema, its normalization
@@ -116,6 +126,16 @@ stored: the size, the native `checksums.sha256` when R2 recorded one, and the
 have no native checksum). A multipart artifact is `complete`d before anything
 else continues, so no terminal can observe a half-uploaded object.
 
+Bodies are hashed client-side before the put (`verifyBodyDigest`, default on),
+so a declared digest that does not describe the bytes stops the run with
+`artifact_digest_mismatch` and writes nothing. Single-part puts are additionally
+checked by R2 itself through the `sha256` put option. Multipart bodies are
+**always** hashed here whatever the option says: R2 cannot check a multipart
+digest server-side, and the post-upload verification of a multipart object can
+only read back the metadata this writer declared. A failed verification after
+a put — including a `complete`d multipart — is `incomplete` with a checkpoint,
+never a terminal.
+
 Content-addressed objects are stored as `application/octet-stream`; the
 declared `mediaType` stays in the manifest. Two artifacts with identical bytes
 therefore share one object, and re-verification does not depend on which role
@@ -141,7 +161,11 @@ under the same content key.
 
 The writer HEADs the terminal key first and compares digests, then issues the
 put with `onlyIf: { etagDoesNotMatch: "*" }`. If the runtime returns `null` it
-re-reads the winner and compares digests again. Both halves are deliberate:
+re-reads the winner and compares digests again. The comparison uses the
+reader's own `readTerminalAt`, so a stored terminal the Processor would block
+(not canonical bytes, identity that does not match the key, corrupt JSON) is a
+`conflict` carrying that reason code — never `already_persisted`, and never
+overwritten. Both halves are deliberate:
 the conditional put closes the race between the HEAD and the write, and the
 digest comparison keeps the helper correct on an R2 implementation that does
 not honour the wildcard condition. The public Workers R2 reference does not
@@ -160,9 +184,13 @@ production in `services/raw-evidence/src/store.ts`.
 - `verifyReferencedObjects(bucket, manifest)` re-checks existence, size and
   digest for every artifact and reports each problem
   (`object_missing`, `object_size_mismatch`, `object_hash_mismatch`,
-  `object_digest_unverifiable`). With `{ streamHash: true }` it reads and
-  hashes an object whose metadata cannot prove the digest. This is what lets
-  the Processor register the collector's own bytes without copying them.
+  `object_digest_unverifiable`). The native `checksums.sha256` is R2's proof
+  for single-part objects; for a multipart object the check is against the
+  `customMetadata.sha256` the writer declared, which the writer computed over
+  the bytes it uploaded but is still a declaration. With `{ streamHash: true }`
+  the object is read and hashed when metadata cannot prove the digest. This is
+  what lets the Processor register the collector's own bytes without copying
+  them.
 - `listTerminals(bucket, { source?, cursor, limit })` is a **bounded scan of
   the whole `runs/` prefix**, paged by the R2 cursor. It is never a time window
   and never a lexicographic watermark: a run whose terminal is confirmed after
@@ -201,17 +229,35 @@ be re-persisted under this contract: the terminal suffixes, a `matchTerminalKey`
 that derives run identity from a key, the object keys the run needs, and a
 `toPersistPlan` that maps already-read bytes to a `terminal-v1` plan. It is a
 pure mapping: it reads no bucket, calls no service, and does not modify
-`services/collector-r2-importer`.
+`services/collector-r2-importer`, whose import path is unchanged.
 
-`VPASS_LEGACY_ADAPTER` is the worked example, over the layout the importer
-already recognises (`vpass/<yyyy>/<mm>/<dd>/<runId>/[card-NNN/]{manifest,error}.json`).
-One Vpass session visits several cards under one run timestamp, so each card
-becomes its own run (`<runId>-card-NNN`) and all of them carry the session
-timestamp as `acquisitionSessionRef`: the cards stay distinguishable instead of
-collapsing into one run whose provenance is lost. A successful card run maps to
-`providerOutcome: success` with `coverageStatus: partial`, because a card
-exposes a rolling window of statement months and a finished run is not a claim
-about the card's whole history.
+**It stores no legacy byte verbatim.** Legacy responses carry the session
+envelope the importer strips before anything reaches central storage, and that
+sanitizer lives in the importer, not in this package. So every object in a plan
+is one the caller has already passed through a named sanitizer
+(`LegacyObject.sanitizer = { transformerId, transformerVersion }`), and the plan
+records that step as a `redacted` transformation whose input is the legacy key
+and whose output is the stored artifact. The legacy terminal record itself
+(`manifest.json` / `error.json`) is parsed for identity, timestamps, outcome and
+the declared statement months and is not stored; an error record's free-text
+`message` is never copied anywhere.
+
+`VPASS_LEGACY_ADAPTER` is the worked example, over the key grammar the importer
+already recognises (`vpass/<yyyy>/<mm>/<dd>/<runId>/[card-NNN/]{manifest,error}.json`,
+path date agreeing with the run id). One Vpass session visits several cards
+under one run timestamp, so each card becomes its own run (`<runId>-card-NNN`)
+and all of them carry the session timestamp as `acquisitionSessionRef`: the
+cards stay distinguishable instead of collapsing into one run whose provenance
+is lost (G1-16). A successful card run maps to `providerOutcome: success` with
+`coverageStatus: partial`, because a card exposes a rolling window of statement
+months and a finished run is not a claim about the card's whole history; an
+error record maps to `failed` / `unknown` / `collector_failed`.
+
+What it does **not** map: the importer's snapshot schema checks, its card and
+month inventory cross-checks, its legacy partial-error object layout
+(`session/`, `cards/`) and its sanitizer. Those stay in the importer until U08
+moves them behind the Processor; this adapter gives such a move one target
+shape, nothing more.
 
 Legacy buckets are not decommissioned by this change (plan 03 §7). They stay
 readable until nothing exists only there.
@@ -237,19 +283,20 @@ Verified locally with synthetic data only. No provider was contacted, no
 production bucket was read or written, and no fixture contains a real account,
 name, balance or token.
 
-| Acceptance                                                        | Covered by                                                    |
-| ----------------------------------------------------------------- | ------------------------------------------------------------- |
-| G1-01 last put fails → no terminal, resumable checkpoint          | `test/persist-run.test.ts`                                    |
-| G1-02 terminal after every put, references match storage          | `test/persist-run.test.ts`                                    |
-| G1-03 unfinished multipart never reaches the terminal             | `test/persist-run.test.ts`                                    |
-| G1-05 same run + digest is a no-op                                | `test/persist-run.test.ts`, `worker-test/r2-terminal.test.ts` |
-| G1-06 different manifest for the same run conflicts, no overwrite | `test/persist-run.test.ts`, `worker-test/r2-terminal.test.ts` |
-| G1-07 lost put response → verify and reuse, never different bytes | `test/persist-run.test.ts`                                    |
-| G1-08 partial stays partial with its coverage gap                 | `test/manifest.test.ts`                                       |
-| G1-09 failed with zero artifacts stays a failure                  | `test/manifest.test.ts`                                       |
-| G1-12 a late terminal for an older run is still found             | `test/reader.test.ts`                                         |
-| G1-13 a corrupt terminal is blocked without stopping the scan     | `test/reader.test.ts`                                         |
-| G1-16 a multi-source session keeps one run per source             | `test/manifest.test.ts`, `test/adapters.test.ts`              |
+| Acceptance                                                                         | Covered by                                                    |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| G1-01 last put fails → no terminal, resumable checkpoint                           | `test/persist-run.test.ts`                                    |
+| G1-02 terminal after every put, references match storage                           | `test/persist-run.test.ts`                                    |
+| G1-03 unfinished multipart never reaches the terminal                              | `test/persist-run.test.ts`                                    |
+| G1-05 same run + digest is a no-op (also when the create-only put loses the race)  | `test/persist-run.test.ts`, `worker-test/r2-terminal.test.ts` |
+| G1-06 different manifest for the same run conflicts, no overwrite (also as a race) | `test/persist-run.test.ts`, `worker-test/r2-terminal.test.ts` |
+| G1-07 lost put response → verify and reuse; different bytes (size or hash) refused | `test/persist-run.test.ts`                                    |
+| G1-08 partial stays partial with its coverage gap                                  | `test/manifest.test.ts`                                       |
+| G1-09 failed with zero artifacts stays a failure                                   | `test/manifest.test.ts`                                       |
+| G1-12 a late terminal for an older run is still found                              | `test/reader.test.ts`                                         |
+| G1-13 a corrupt terminal is blocked without stopping the scan                      | `test/reader.test.ts`                                         |
+| G1-14 missing / size-mismatched objects reported with codes, not ok                | `test/reader.test.ts`                                         |
+| G1-16 a multi-source session keeps one run per source                              | `test/manifest.test.ts`, `test/adapters.test.ts`              |
 
 Real R2 semantics (create-only conditional put, checksum rejection, native
 checksum presence, the whole persist/read/verify/list path through
@@ -257,8 +304,11 @@ checksum presence, the whole persist/read/verify/list path through
 `worker-test/r2-terminal.test.ts` via Miniflare.
 
 Not verified: behaviour against production R2 at scale, multipart objects
-larger than the Workers memory limit, and any end-to-end path into CORE or
-READ — those belong to U08.
+larger than the Workers memory limit (the writer holds a multipart body in
+memory to hash it), whether production R2 honours `etagDoesNotMatch: "*"` the
+way Miniflare does (the HEAD-then-compare path covers it either way), and any
+end-to-end path into CORE or READ — those belong to U08. G1-04, G1-10, G1-11
+and G1-15 need the Processor and are not claimed here.
 
 ## Flags, deploy order, rollback
 
