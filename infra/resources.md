@@ -201,32 +201,6 @@ No wrangler config.
 
 No wrangler config.
 
-### `poc/sony-bank-worker`
-
-- Disposition (poc_disposition.csv): `promote-service` → services/collector-sony-bank
-- Required verification: keep the sanitize/HTML/CSV contract and the resource identity
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-sony-bank-collector-poc; buckets=kogane-sony-bank-collector-poc)
-
-#### `kogane-sony-bank-collector-poc` — `poc/sony-bank-worker/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
-- R2: SNAPSHOTS → kogane-sony-bank-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
-- Crons: `0 21 * * *`
-- Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
-- Required secrets (names only): —
-
 ### `poc/tamia-tcp-bridge`
 
 - Disposition (poc_disposition.csv): `promote-service-if-used` → services/tamia-tcp-bridge
@@ -848,6 +822,32 @@ No wrangler config.
 - Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>DEFAULT_BACKFILL_FROM<br>SMBC_DIRECT_BASE_URL<br>SMBC_DIRECT_LOGIN_BASE_URL
+- Required secrets (names only): —
+
+### `services/collector-sony-bank`
+
+- Disposition (poc_disposition.csv): `promote-service` → services/collector-sony-bank
+- Required verification: keep the sanitize/HTML/CSV contract and the resource identity
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-sony-bank-collector-poc; buckets=kogane-sony-bank-collector-poc)
+
+#### `kogane-sony-bank-collector-poc` — `services/collector-sony-bank/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: —
+- R2: SNAPSHOTS → kogane-sony-bank-collector-poc
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Crons: `0 21 * * *`
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
 ### `services/evidence-browser`

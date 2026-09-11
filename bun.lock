@@ -223,7 +223,7 @@
         "wrangler": "4.127.1",
       },
     },
-    "poc/sony-bank-worker": {
+    "services/collector-sony-bank": {
       "name": "@kogane/poc-sony-bank-worker",
       "devDependencies": {
         "@types/bun": "1.3.8",
@@ -517,7 +517,7 @@
 
     "@kogane/poc-smbc-direct-backfill-worker": ["@kogane/poc-smbc-direct-backfill-worker@workspace:services/collector-smbc-direct"],
 
-    "@kogane/poc-sony-bank-worker": ["@kogane/poc-sony-bank-worker@workspace:poc/sony-bank-worker"],
+    "@kogane/poc-sony-bank-worker": ["@kogane/poc-sony-bank-worker@workspace:services/collector-sony-bank"],
 
     "@kogane/poc-vpass-json": ["@kogane/poc-vpass-json@workspace:poc/vpass-json"],
 

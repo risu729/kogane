@@ -158,14 +158,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/sony-bank-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-sony-bank",
-    requiredVerification: "keep the sanitize/HTML/CSV contract and the resource identity",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
   "poc/tamia-tcp-bridge": {
     source: "poc_disposition.csv",
     proposedAction: "promote-service-if-used",
@@ -270,6 +262,14 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     proposedTarget: "services/collector-smbc-direct",
     requiredVerification:
       "keep the human-required boundary; never turn it into unattended re-authentication",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-sony-bank": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-sony-bank",
+    requiredVerification: "keep the sanitize/HTML/CSV contract and the resource identity",
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },

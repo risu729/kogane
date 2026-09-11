@@ -154,7 +154,7 @@
     },
     {
       "name": "sony-bank-worker",
-      "path": "poc/sony-bank-worker",
+      "path": "services/collector-sony-bank",
       "config": "wrangler.jsonc"
     },
     {
