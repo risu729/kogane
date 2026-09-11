@@ -54,7 +54,7 @@ package names:
 | \`@jridgewell/sourcemap-codec\`                | 1.5.5                             | 1.6.0                                                             | 6                   |
 | \`@oxc-project/types\`                         | 0.147.0, 0.148.0                  | 0.149.0                                                           | 4                   |
 | \`@rolldown/binding-*\` (15 platform packages) | 1.2.6, 1.2.7                      | 1.2.8                                                             | 4                   |
-| \`@types/node\`                                | 24.3.0, 26.3.0, 26.4.0, 26.5.0    | unchanged where pinned; 26.4.1 where only \`bun-types@*\` asked     | 24                  |
+| \`@types/node\`                                | 24.3.0, 26.3.0, 26.4.0, 26.4.1, 26.5.0 | unchanged where pinned; 26.4.1 where only \`bun-types@*\` asked     | 24                  |
 | \`bare-events\`                                | 2.9.1                             | 2.9.2                                                             | 1                   |
 | \`bare-path\`                                  | 3.1.1                             | 3.1.2                                                             | 4                   |
 | \`bare-stream\`                                | 2.13.3                            | 2.13.4                                                            | 1                   |

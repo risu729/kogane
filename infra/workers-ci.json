@@ -13,9 +13,19 @@
       "prepare": "web:export-demo"
     },
     {
+      "name": "app-test",
+      "path": "services/evidence-browser",
+      "config": "wrangler.test.jsonc"
+    },
+    {
       "name": "cloudflare-browser-run",
       "path": "experiments/cloudflare-browser-run",
       "config": "wrangler.jsonc"
+    },
+    {
+      "name": "cloudflare-browser-run-bootstrap",
+      "path": "poc/cloudflare-browser-run",
+      "config": "wrangler.bootstrap.jsonc"
     },
     {
       "name": "cloudflare-runtime-probe",
@@ -153,6 +163,11 @@
       "config": "wrangler.jsonc"
     },
     {
+      "name": "tamia-tcp-bridge-bootstrap",
+      "path": "poc/tamia-tcp-bridge",
+      "config": "wrangler.bootstrap.jsonc"
+    },
+    {
       "name": "vpass-json",
       "path": "poc/vpass-json",
       "config": "wrangler.jsonc"
@@ -166,6 +181,23 @@
       "name": "vpoint-worker",
       "path": "poc/vpoint-worker",
       "config": "wrangler.jsonc"
+    }
+  ],
+  "excluded": [
+    {
+      "path": "services/collector-r2-importer",
+      "config": "wrangler.identity-backfill.jsonc",
+      "reason": "wrangler dev helper for scripts/backfill-vpass-identities.ts: remote bindings only, no main, so wrangler deploy --dry-run rejects it"
+    },
+    {
+      "path": "services/observation-pipeline",
+      "config": "wrangler.diagnostic.jsonc",
+      "reason": "wrangler dev helper for the diagnose scripts: remote bindings only, no main, so wrangler deploy --dry-run rejects it"
+    },
+    {
+      "path": "services/observation-pipeline",
+      "config": "wrangler.ops.jsonc",
+      "reason": "wrangler dev helper for scripts/ops.ts: remote bindings only, no main, so wrangler deploy --dry-run rejects it"
     }
   ]
 }

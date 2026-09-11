@@ -161,8 +161,8 @@ the UI shows.
 `tasks/_lib/publication-gate-predicates.test.ts` fails CI when the legacy rule
 or a bare success read appears where it should not. It runs in the standalone
 offline step — `mise run ci:root`, which the CI lint job invokes; `root:test` in `tasks.toml`
-lists it, and `scripts/ci-package.test.ts` fails if any `scripts/*.test.ts`
-is missing from that list (nothing else would run it).
+runs every test under `tasks/_lib/` and `scripts/` by directory, so a new
+guard joins CI by existing.
 
 The allow-list is per occurrence, not per file, because exempting a whole
 file lets a new query inside it inherit the exemption silently — which is how
@@ -285,8 +285,8 @@ actually writes.
   `binding-query-plan.test.ts`.
 - No new legacy predicate and no new bare success read in production code,
   and no migration after 0026 embeds the legacy rule:
-  `tasks/_lib/publication-gate-predicates.test.ts`, which
-  `scripts/ci-package.test.ts` proves the standalone CI step runs.
+  `tasks/_lib/publication-gate-predicates.test.ts`, which `root:test`
+  runs with every other test under `tasks/_lib/`.
 
 Not verified: production data volumes and D1 statement limits for the
 backfill (see the count query above).

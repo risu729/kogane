@@ -4,11 +4,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   check,
+  ciTaskMismatches,
   dryRunTargets,
   ledgerMismatches,
   manifestViolations,
   scriptInvocations,
   toolDownloads,
+  unaccountedConfigs,
   uncoveredWorkspaces,
   workspaceDirectories,
 } from "./check-manifests.ts";
@@ -110,6 +112,51 @@ describe("workspace CI coverage (G4-09)", () => {
   });
 });
 
+describe("one ci: task per workspace (G4-09)", () => {
+  const directories = ["packages/domain", "poc/thing"];
+
+  test("a ci: task whose family runs in one workspace, a subdirectory included, passes", () => {
+    const tasks = [
+      { name: "thing:test", dir: "/repo/poc/thing" },
+      { name: "thing:container", dir: "/repo/poc/thing/container" },
+      { name: "ci:thing", depends: ["thing:test", "thing:container"], dir: null },
+      { name: "ci:root", depends: ["root:test"], dir: null },
+    ];
+    expect(ciTaskMismatches(directories, tasks, "/repo")).toEqual([]);
+  });
+
+  test("a ci: task that depends on nothing or reaches no workspace is reported", () => {
+    const tasks = [{ name: "ci:package", dir: null }];
+    expect(ciTaskMismatches(directories, tasks, "/repo")).toEqual([
+      "ci:package: depends on nothing; a ci: task must run the workspace's checks",
+      "ci:package: the package:* tasks run in no workspace; a ci: task belongs to exactly one",
+    ]);
+  });
+
+  test("two ci: tasks for the same workspace are reported", () => {
+    const tasks = [
+      { name: "thing:test", dir: "/repo/poc/thing" },
+      { name: "other:test", dir: "/repo/poc/thing" },
+      { name: "ci:thing", depends: ["thing:test"], dir: null },
+      { name: "ci:other", depends: ["other:test"], dir: null },
+    ];
+    expect(ciTaskMismatches(directories, tasks, "/repo")).toEqual([
+      "ci:other: poc/thing already has ci:thing; one ci: task per workspace",
+    ]);
+  });
+
+  test("a family spread over two workspaces is reported", () => {
+    const tasks = [
+      { name: "thing:test", dir: "/repo/poc/thing" },
+      { name: "thing:build", dir: "/repo/packages/domain" },
+      { name: "ci:thing", depends: ["thing:test", "thing:build"], dir: null },
+    ];
+    expect(ciTaskMismatches(directories, tasks, "/repo")).toEqual([
+      "ci:thing: the thing:* tasks run in packages/domain, poc/thing; a ci: task belongs to exactly one",
+    ]);
+  });
+});
+
 describe("the CI worker ledger (G4-09, G5-09)", () => {
   const tasks = [
     {
@@ -157,10 +204,41 @@ describe("the CI worker ledger (G4-09, G5-09)", () => {
       "infra/workers-ci.json: services/ghost/wrangler.jsonc is listed but has no dry-run task",
     ]);
   });
+
+  const configs = [
+    "services/app/wrangler.jsonc",
+    "services/app/wrangler.ops.jsonc",
+    "poc/thing/wrangler.toml",
+  ];
+  const workers = [{ name: "app", path: "services/app", config: "wrangler.jsonc" }];
+  const excluded = [
+    { path: "services/app", config: "wrangler.ops.jsonc", reason: "wrangler dev helper, no main" },
+  ];
+
+  test("every tracked wrangler config is a worker entry or an excluded one", () => {
+    expect(unaccountedConfigs(configs, workers, excluded)).toEqual([
+      "infra/workers-ci.json: poc/thing/wrangler.toml is neither a worker entry nor excluded with a reason",
+    ]);
+    expect(unaccountedConfigs(configs.slice(0, 2), workers, excluded)).toEqual([]);
+  });
+
+  test("an exclusion that is listed anyway, gone from disk or unexplained is reported", () => {
+    expect(
+      unaccountedConfigs(configs.slice(0, 2), workers, [
+        { path: "services/app", config: "wrangler.jsonc", reason: "x" },
+        { path: "services/app", config: "wrangler.ops.jsonc", reason: " " },
+        { path: "services/gone", config: "wrangler.jsonc", reason: "x" },
+      ]),
+    ).toEqual([
+      "infra/workers-ci.json: the exclusion of services/app/wrangler.jsonc is stale or has no reason",
+      "infra/workers-ci.json: the exclusion of services/app/wrangler.ops.jsonc is stale or has no reason",
+      "infra/workers-ci.json: the exclusion of services/gone/wrangler.jsonc is stale or has no reason",
+    ]);
+  });
 });
 
 describe("this repository", () => {
-  test("has no package scripts, no package-script callers and no uncovered workspace", () => {
+  test("has no package scripts, no package-script callers, one ci: task per workspace and every wrangler config accounted for", () => {
     expect(check()).toEqual([]);
   });
 });

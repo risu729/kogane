@@ -443,9 +443,10 @@ scope (no dataset is switched by this change).
 
 ## Verified locally
 
-Synthetic data only: `bun run scripts/ci-package.ts` for
+Synthetic data only: the CI checks (today `mise run ci:<short>`) of
 `poc/observation-pipeline`, `services/observation-pipeline`,
 `services/raw-evidence`, `services/evidence-browser`, `packages/read-model`,
-`packages/domain`; `bun test scripts/`; `hk check --all`. Not verified:
+`packages/domain`; the repository-wide guards (`mise run ci:root`);
+`hk check --all`. Not verified:
 production data, a real D1 or R2, and the effect of switching any production
 dataset to `coverage-v1` (no dataset is switched by this change).
