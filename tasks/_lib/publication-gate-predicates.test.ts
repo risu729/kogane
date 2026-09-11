@@ -44,8 +44,9 @@ const PREDICATE_ALLOW_LIST: Record<string, number> = {
   // The candidate writer: a candidate is recorded only if the same batch left
   // its run ok and unsuperseded. A writer decision, never a read.
   "services/observation-pipeline/src/release-adoption.ts": 1,
-  // The local PoC writer, its one-time backfill and the backfill's note.
-  "poc/observation-pipeline/src/store.ts": 4,
+  // The local store experiment's writer, its one-time backfill and the
+  // backfill's note (unified plan U04 moved it out of poc/).
+  "experiments/observation-pipeline-local/src/store.ts": 4,
 };
 
 /**
@@ -79,8 +80,8 @@ const OK_STATUS_ALLOW_LIST: Record<string, number> = {
   // Decorates published and superseded runs; adoption comes from the LEFT JOIN
   // on the projection, not from this status test (which only drops pending runs).
   "packages/read-model/src/organization.ts": 1,
-  // The local PoC writer and its backfill.
-  "poc/observation-pipeline/src/store.ts": 5,
+  // The local store experiment's writer and its backfill.
+  "experiments/observation-pipeline-local/src/store.ts": 5,
 };
 
 /** Migrations that may state the legacy rule: those up to the gate itself. */

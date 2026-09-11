@@ -56,6 +56,8 @@ run = "bun install --frozen-lockfile"
 includes = [
 	"tasks.toml",
 	"tasks",
+	"apps/web/tasks.toml",
+	"experiments/observation-pipeline-local/tasks.toml",
 	"packages/application/tasks.toml",
 	"packages/collection/tasks.toml",
 	"packages/domain/tasks.toml",
@@ -68,7 +70,6 @@ includes = [
 	"packages/storage-d1/tasks.toml",
 	"poc/cloudflare-browser-run/tasks.toml",
 	"poc/cloudflare-runtime-probe/tasks.toml",
-	"poc/observation-pipeline/tasks.toml",
 	"poc/oci-browser-probe/tasks.toml",
 	"poc/tamia-tcp-bridge/tasks.toml",
 	"services/collector-globalpass/tasks.toml",

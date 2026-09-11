@@ -112,13 +112,44 @@ each consumer is the requirement; where that is impossible the change must be ca
 | `@cloudflare/puppeteer` | 1.1.0, 1.4.0 | poc/cloudflare-browser-run: `1.4.0` → 1.4.0<br>services/collector-globalpass: `1.4.0` → 1.4.0<br>services/collector-mobile-suica: `1.1.0` → 1.1.0<br>services/collector-myjcb: `1.4.0` → 1.4.0 |
 | `@cloudflare/vitest-plugin` | 1.1.2, 1.1.3 | packages/collection: `1.1.3` → 1.1.3<br>services/collector-sbi-vc-trade: `1.1.2` → 1.1.2<br>services/evidence-browser: `1.1.3` → 1.1.3<br>services/raw-evidence: `1.1.3` → 1.1.3 |
 | `@types/node` | 24.3.0, 26.3.0, 26.4.0, 26.4.1 | poc/cloudflare-browser-run: `26.3.0` → 26.3.0<br>poc/tamia-tcp-bridge: `26.3.0` → 26.3.0<br>services/collector-globalpass: `26.4.0` → 26.4.0<br>services/collector-mobile-suica: `24.3.0` → 24.3.0<br>services/collector-moneyforward: `24.3.0` → 24.3.0<br>services/collector-sbi-securities: `24.3.0` → 24.3.0<br>services/collector-sbi-shinsei: `24.3.0` → 24.3.0<br>services/collector-sony-bank: `24.3.0` → 24.3.0<br>services/collector-vpoint: `24.3.0` → 24.3.0<br>services/collector-vpoint-pay: `24.3.0` → 24.3.0<br>services/evidence-browser: `26.4.1` → 26.4.1<br>services/raw-evidence: `26.4.1` → 26.4.1 |
-| `hono` | 4.13.5, 4.13.7 | poc/observation-pipeline: `4.13.5` → 4.13.5<br>services/evidence-browser: `4.13.7` → 4.13.7 |
+| `hono` | 4.13.5, 4.13.7 | experiments/observation-pipeline-local: `4.13.5` → 4.13.5<br>services/evidence-browser: `4.13.7` → 4.13.7 |
 | `iconv-lite` | 0.7.0, 0.7.3 | services/collector-mobile-suica: `0.7.0` → 0.7.0<br>services/collector-r2-importer: `0.7.0` → 0.7.0<br>services/collector-smbc-direct: `0.7.3` → 0.7.3<br>services/collector-vpoint: `0.7.0` → 0.7.0 |
-| `playwright` | 1.62.0, 1.62.1 | poc/observation-pipeline: `1.62.1` → 1.62.1<br>poc/oci-browser-probe: `1.62.0` → 1.62.0<br>services/collector-globalpass/container: `1.62.1` → 1.62.1<br>services/collector-sbi-shinsei/container: `1.62.1` → 1.62.1 |
-| `typescript` | 5.9.3, 7.0.2 | packages/application: `5.9.3` → 5.9.3<br>packages/collection: `5.9.3` → 5.9.3<br>packages/domain: `5.9.3` → 5.9.3<br>packages/evidence-contract: `5.9.3` → 5.9.3<br>packages/identity: `5.9.3` → 5.9.3<br>packages/observation-shared: `5.9.3` → 5.9.3<br>packages/parsers: `5.9.3` → 5.9.3<br>packages/read-model: `5.9.3` → 5.9.3<br>packages/sbi-vc-trade-client: `5.9.3` → 5.9.3<br>packages/storage-d1: `5.9.3` → 5.9.3<br>poc/cloudflare-browser-run: `5.9.3` → 5.9.3<br>poc/cloudflare-runtime-probe: `5.9.3` → 5.9.3<br>poc/observation-pipeline: `5.9.3` → 5.9.3<br>poc/tamia-tcp-bridge: `5.9.3` → 5.9.3<br>services/collector-globalpass: `5.9.3` → 5.9.3<br>services/collector-mobile-suica: `5.9.3` → 5.9.3<br>services/collector-moneyforward: `5.9.3` → 5.9.3<br>services/collector-myjcb: `5.9.3` → 5.9.3<br>services/collector-r2-importer: `5.9.3` → 5.9.3<br>services/collector-sbi-securities: `5.9.3` → 5.9.3<br>services/collector-sbi-shinsei: `5.9.3` → 5.9.3<br>services/collector-sbi-vc-trade: `5.9.3` → 5.9.3<br>services/collector-smbc-direct: `5.9.3` → 5.9.3<br>services/collector-sony-bank: `5.9.3` → 5.9.3<br>services/collector-vpass: `5.9.3` → 5.9.3<br>services/collector-vpoint: `5.9.3` → 5.9.3<br>services/collector-vpoint-pay: `5.9.3` → 5.9.3<br>services/evidence-browser: `7.0.2` → 7.0.2<br>services/observation-pipeline: `5.9.3` → 5.9.3<br>services/raw-evidence: `7.0.2` → 7.0.2 |
+| `playwright` | 1.62.0, 1.62.1 | apps/web: `1.62.1` → 1.62.1<br>experiments/observation-pipeline-local: `1.62.1` → 1.62.1<br>poc/oci-browser-probe: `1.62.0` → 1.62.0<br>services/collector-globalpass/container: `1.62.1` → 1.62.1<br>services/collector-sbi-shinsei/container: `1.62.1` → 1.62.1 |
+| `typescript` | 5.9.3, 7.0.2 | apps/web: `5.9.3` → 5.9.3<br>experiments/observation-pipeline-local: `5.9.3` → 5.9.3<br>packages/application: `5.9.3` → 5.9.3<br>packages/collection: `5.9.3` → 5.9.3<br>packages/domain: `5.9.3` → 5.9.3<br>packages/evidence-contract: `5.9.3` → 5.9.3<br>packages/identity: `5.9.3` → 5.9.3<br>packages/observation-shared: `5.9.3` → 5.9.3<br>packages/parsers: `5.9.3` → 5.9.3<br>packages/read-model: `5.9.3` → 5.9.3<br>packages/sbi-vc-trade-client: `5.9.3` → 5.9.3<br>packages/storage-d1: `5.9.3` → 5.9.3<br>poc/cloudflare-browser-run: `5.9.3` → 5.9.3<br>poc/cloudflare-runtime-probe: `5.9.3` → 5.9.3<br>poc/tamia-tcp-bridge: `5.9.3` → 5.9.3<br>services/collector-globalpass: `5.9.3` → 5.9.3<br>services/collector-mobile-suica: `5.9.3` → 5.9.3<br>services/collector-moneyforward: `5.9.3` → 5.9.3<br>services/collector-myjcb: `5.9.3` → 5.9.3<br>services/collector-r2-importer: `5.9.3` → 5.9.3<br>services/collector-sbi-securities: `5.9.3` → 5.9.3<br>services/collector-sbi-shinsei: `5.9.3` → 5.9.3<br>services/collector-sbi-vc-trade: `5.9.3` → 5.9.3<br>services/collector-smbc-direct: `5.9.3` → 5.9.3<br>services/collector-sony-bank: `5.9.3` → 5.9.3<br>services/collector-vpass: `5.9.3` → 5.9.3<br>services/collector-vpoint: `5.9.3` → 5.9.3<br>services/collector-vpoint-pay: `5.9.3` → 5.9.3<br>services/evidence-browser: `7.0.2` → 7.0.2<br>services/observation-pipeline: `5.9.3` → 5.9.3<br>services/raw-evidence: `7.0.2` → 7.0.2 |
 | `wrangler` | 4.125.0, 4.126.0, 4.127.0, 4.127.1, 4.128.0 | packages/collection: `4.128.0` → 4.128.0<br>poc/cloudflare-browser-run: `4.125.0` → 4.125.0<br>poc/cloudflare-runtime-probe: `4.125.0` → 4.125.0<br>poc/tamia-tcp-bridge: `4.125.0` → 4.125.0<br>services/collector-globalpass: `4.127.0` → 4.127.0<br>services/collector-mobile-suica: `4.127.1` → 4.127.1<br>services/collector-moneyforward: `4.127.1` → 4.127.1<br>services/collector-myjcb: `4.127.1` → 4.127.1<br>services/collector-r2-importer: `4.128.0` → 4.128.0<br>services/collector-sbi-securities: `4.126.0` → 4.126.0<br>services/collector-sbi-shinsei: `4.127.1` → 4.127.1<br>services/collector-sbi-vc-trade: `4.127.1` → 4.127.1<br>services/collector-smbc-direct: `4.127.1` → 4.127.1<br>services/collector-sony-bank: `4.128.0` → 4.128.0<br>services/collector-vpass: `4.126.0` → 4.126.0<br>services/collector-vpoint: `4.126.0` → 4.126.0<br>services/collector-vpoint-pay: `4.127.1` → 4.127.1<br>services/evidence-browser: `4.128.0` → 4.128.0<br>services/observation-pipeline: `4.128.0` → 4.128.0<br>services/raw-evidence: `4.128.0` → 4.128.0 |
 
 ## Declared dependencies and resolved versions
+
+### `apps/web` — `@kogane/web`
+
+Lockfile: `bun.lock`.
+
+| dependency | kind | declared | resolved |
+| --- | --- | --- | --- |
+| `@tanstack/react-query` | dependencies | `5.102.8` | 5.102.8 |
+| `@tanstack/react-table` | dependencies | `9.2.3` | 9.2.3 |
+| `@types/bun` | devDependencies | `1.3.8` | 1.3.8 |
+| `@types/react` | devDependencies | `19.2.18` | 19.2.18 |
+| `@types/react-dom` | devDependencies | `19.2.5` | 19.2.5 |
+| `@vitejs/plugin-react` | devDependencies | `6.1.0` | 6.1.0 |
+| `jsonc-parser` | dependencies | `3.3.1` | 3.3.1 |
+| `playwright` | devDependencies | `1.62.1` | 1.62.1 |
+| `react` | dependencies | `19.2.8` | 19.2.8 |
+| `react-dom` | dependencies | `19.2.8` | 19.2.8 |
+| `shiki` | dependencies | `4.4.3` | 4.4.3 |
+| `typescript` | devDependencies | `5.9.3` | 5.9.3 |
+| `vite` | devDependencies | `8.2.2` | 8.2.2 |
+
+### `experiments/observation-pipeline-local` — `@kogane/observation-pipeline-local`
+
+Lockfile: `bun.lock`.
+
+| dependency | kind | declared | resolved |
+| --- | --- | --- | --- |
+| `@types/bun` | devDependencies | `1.3.8` | 1.3.8 |
+| `hono` | dependencies | `4.13.5` | 4.13.5 |
+| `playwright` | devDependencies | `1.62.1` | 1.62.1 |
+| `typescript` | devDependencies | `5.9.3` | 5.9.3 |
 
 ### `packages/application` — `@kogane/application`
 
@@ -236,28 +267,6 @@ Lockfile: `bun.lock`.
 | `impit` | dependencies | `0.14.3` | 0.14.3 |
 | `typescript` | devDependencies | `5.9.3` | 5.9.3 |
 | `wrangler` | devDependencies | `4.125.0` | 4.125.0 |
-
-### `poc/observation-pipeline` — `@kogane/poc-observation-pipeline`
-
-Lockfile: `bun.lock`.
-
-| dependency | kind | declared | resolved |
-| --- | --- | --- | --- |
-| `@tanstack/react-query` | dependencies | `5.102.8` | 5.102.8 |
-| `@tanstack/react-table` | dependencies | `9.2.3` | 9.2.3 |
-| `@types/bun` | devDependencies | `1.3.8` | 1.3.8 |
-| `@types/react` | devDependencies | `19.2.18` | 19.2.18 |
-| `@types/react-dom` | devDependencies | `19.2.5` | 19.2.5 |
-| `@vitejs/plugin-react` | devDependencies | `6.1.0` | 6.1.0 |
-| `hono` | dependencies | `4.13.5` | 4.13.5 |
-| `jsonc-parser` | dependencies | `3.3.1` | 3.3.1 |
-| `parse5` | dependencies | `8.0.1` | 8.0.1 |
-| `playwright` | devDependencies | `1.62.1` | 1.62.1 |
-| `react` | dependencies | `19.2.8` | 19.2.8 |
-| `react-dom` | dependencies | `19.2.8` | 19.2.8 |
-| `shiki` | dependencies | `4.4.3` | 4.4.3 |
-| `typescript` | devDependencies | `5.9.3` | 5.9.3 |
-| `vite` | devDependencies | `8.2.2` | 8.2.2 |
 
 ### `poc/oci-browser-probe` — `@kogane/oci-browser-probe`
 
@@ -512,10 +521,10 @@ has to decide and record rather than absorb silently.
 | `@cloudflare/workerd-linux-64` | 1.20260820.1, 1.20260825.1, 1.20260826.1, 1.20260828.1, 1.20260831.1 | packages/collection: 1.20260831.1<br>poc/cloudflare-browser-run: 1.20260820.1<br>poc/cloudflare-runtime-probe: 1.20260820.1<br>poc/tamia-tcp-bridge: 1.20260820.1<br>services/collector-globalpass: 1.20260826.1<br>services/collector-mobile-suica: 1.20260828.1<br>services/collector-moneyforward: 1.20260828.1<br>services/collector-myjcb: 1.20260828.1<br>services/collector-r2-importer: 1.20260831.1<br>services/collector-sbi-securities: 1.20260825.1<br>services/collector-sbi-shinsei: 1.20260828.1<br>services/collector-sbi-vc-trade: 1.20260828.1<br>services/collector-smbc-direct: 1.20260828.1<br>services/collector-sony-bank: 1.20260831.1<br>services/collector-vpass: 1.20260825.1<br>services/collector-vpoint: 1.20260825.1<br>services/collector-vpoint-pay: 1.20260828.1<br>services/evidence-browser: 1.20260831.1<br>services/observation-pipeline: 1.20260831.1<br>services/raw-evidence: 1.20260831.1 |
 | `@cloudflare/workerd-linux-arm64` | 1.20260820.1, 1.20260825.1, 1.20260826.1, 1.20260828.1, 1.20260831.1 | packages/collection: 1.20260831.1<br>poc/cloudflare-browser-run: 1.20260820.1<br>poc/cloudflare-runtime-probe: 1.20260820.1<br>poc/tamia-tcp-bridge: 1.20260820.1<br>services/collector-globalpass: 1.20260826.1<br>services/collector-mobile-suica: 1.20260828.1<br>services/collector-moneyforward: 1.20260828.1<br>services/collector-myjcb: 1.20260828.1<br>services/collector-r2-importer: 1.20260831.1<br>services/collector-sbi-securities: 1.20260825.1<br>services/collector-sbi-shinsei: 1.20260828.1<br>services/collector-sbi-vc-trade: 1.20260828.1<br>services/collector-smbc-direct: 1.20260828.1<br>services/collector-sony-bank: 1.20260831.1<br>services/collector-vpass: 1.20260825.1<br>services/collector-vpoint: 1.20260825.1<br>services/collector-vpoint-pay: 1.20260828.1<br>services/evidence-browser: 1.20260831.1<br>services/observation-pipeline: 1.20260831.1<br>services/raw-evidence: 1.20260831.1 |
 | `@cloudflare/workerd-windows-64` | 1.20260820.1, 1.20260825.1, 1.20260826.1, 1.20260828.1, 1.20260831.1 | packages/collection: 1.20260831.1<br>poc/cloudflare-browser-run: 1.20260820.1<br>poc/cloudflare-runtime-probe: 1.20260820.1<br>poc/tamia-tcp-bridge: 1.20260820.1<br>services/collector-globalpass: 1.20260826.1<br>services/collector-mobile-suica: 1.20260828.1<br>services/collector-moneyforward: 1.20260828.1<br>services/collector-myjcb: 1.20260828.1<br>services/collector-r2-importer: 1.20260831.1<br>services/collector-sbi-securities: 1.20260825.1<br>services/collector-sbi-shinsei: 1.20260828.1<br>services/collector-sbi-vc-trade: 1.20260828.1<br>services/collector-smbc-direct: 1.20260828.1<br>services/collector-sony-bank: 1.20260831.1<br>services/collector-vpass: 1.20260825.1<br>services/collector-vpoint: 1.20260825.1<br>services/collector-vpoint-pay: 1.20260828.1<br>services/evidence-browser: 1.20260831.1<br>services/observation-pipeline: 1.20260831.1<br>services/raw-evidence: 1.20260831.1 |
-| `entities` | 6.0.1, 8.1.0 | packages/parsers: 8.1.0<br>poc/observation-pipeline: 8.1.0<br>services/collector-myjcb: 8.1.0<br>services/collector-r2-importer: 8.1.0<br>services/collector-vpoint: 6.0.1<br>services/observation-pipeline: 8.1.0 |
-| `fsevents` | 2.3.2, 2.3.3 | packages/collection: 2.3.3<br>poc/cloudflare-browser-run: 2.3.3<br>poc/cloudflare-runtime-probe: 2.3.3<br>poc/observation-pipeline: 2.3.3<br>poc/oci-browser-probe: 2.3.2<br>poc/tamia-tcp-bridge: 2.3.3<br>services/collector-globalpass: 2.3.3<br>services/collector-globalpass/container: 2.3.2<br>services/collector-mobile-suica: 2.3.3<br>services/collector-moneyforward: 2.3.3<br>services/collector-myjcb: 2.3.3<br>services/collector-r2-importer: 2.3.3<br>services/collector-sbi-securities: 2.3.3<br>services/collector-sbi-shinsei: 2.3.3<br>services/collector-sbi-shinsei/container: 2.3.2<br>services/collector-sbi-vc-trade: 2.3.3<br>services/collector-smbc-direct: 2.3.3<br>services/collector-sony-bank: 2.3.3<br>services/collector-vpass: 2.3.3<br>services/collector-vpoint: 2.3.3<br>services/collector-vpoint-pay: 2.3.3<br>services/evidence-browser: 2.3.3<br>services/observation-pipeline: 2.3.3<br>services/raw-evidence: 2.3.3 |
-| `playwright-core` | 1.62.0, 1.62.1 | poc/observation-pipeline: 1.62.1<br>poc/oci-browser-probe: 1.62.0<br>services/collector-globalpass/container: 1.62.1<br>services/collector-sbi-shinsei/container: 1.62.1 |
-| `undici-types` | 7.10.0, 8.3.0 | packages/application: 8.3.0<br>packages/collection: 8.3.0<br>packages/domain: 8.3.0<br>packages/evidence-contract: 8.3.0<br>packages/identity: 8.3.0<br>packages/observation-shared: 8.3.0<br>packages/parsers: 8.3.0<br>packages/read-model: 8.3.0<br>packages/sbi-vc-trade-client: 8.3.0<br>packages/storage-d1: 8.3.0<br>poc/cloudflare-browser-run: 8.3.0<br>poc/cloudflare-runtime-probe: 8.3.0<br>poc/observation-pipeline: 8.3.0<br>poc/tamia-tcp-bridge: 8.3.0<br>services/collector-globalpass: 8.3.0<br>services/collector-mobile-suica: 7.10.0<br>services/collector-moneyforward: 7.10.0<br>services/collector-myjcb: 8.3.0<br>services/collector-r2-importer: 8.3.0<br>services/collector-sbi-securities: 7.10.0<br>services/collector-sbi-shinsei: 7.10.0<br>services/collector-sbi-vc-trade: 8.3.0<br>services/collector-smbc-direct: 8.3.0<br>services/collector-sony-bank: 7.10.0<br>services/collector-vpass: 8.3.0<br>services/collector-vpoint: 8.3.0<br>services/collector-vpoint-pay: 7.10.0<br>services/evidence-browser: 8.3.0<br>services/observation-pipeline: 8.3.0<br>services/raw-evidence: 8.3.0 |
+| `entities` | 6.0.1, 8.1.0 | packages/parsers: 8.1.0<br>services/collector-myjcb: 8.1.0<br>services/collector-r2-importer: 8.1.0<br>services/collector-vpoint: 6.0.1<br>services/observation-pipeline: 8.1.0 |
+| `fsevents` | 2.3.2, 2.3.3 | apps/web: 2.3.3<br>experiments/observation-pipeline-local: 2.3.2<br>packages/collection: 2.3.3<br>poc/cloudflare-browser-run: 2.3.3<br>poc/cloudflare-runtime-probe: 2.3.3<br>poc/oci-browser-probe: 2.3.2<br>poc/tamia-tcp-bridge: 2.3.3<br>services/collector-globalpass: 2.3.3<br>services/collector-globalpass/container: 2.3.2<br>services/collector-mobile-suica: 2.3.3<br>services/collector-moneyforward: 2.3.3<br>services/collector-myjcb: 2.3.3<br>services/collector-r2-importer: 2.3.3<br>services/collector-sbi-securities: 2.3.3<br>services/collector-sbi-shinsei: 2.3.3<br>services/collector-sbi-shinsei/container: 2.3.2<br>services/collector-sbi-vc-trade: 2.3.3<br>services/collector-smbc-direct: 2.3.3<br>services/collector-sony-bank: 2.3.3<br>services/collector-vpass: 2.3.3<br>services/collector-vpoint: 2.3.3<br>services/collector-vpoint-pay: 2.3.3<br>services/evidence-browser: 2.3.3<br>services/observation-pipeline: 2.3.3<br>services/raw-evidence: 2.3.3 |
+| `playwright-core` | 1.62.0, 1.62.1 | apps/web: 1.62.1<br>experiments/observation-pipeline-local: 1.62.1<br>poc/oci-browser-probe: 1.62.0<br>services/collector-globalpass/container: 1.62.1<br>services/collector-sbi-shinsei/container: 1.62.1 |
+| `undici-types` | 7.10.0, 8.3.0 | apps/web: 8.3.0<br>experiments/observation-pipeline-local: 8.3.0<br>packages/application: 8.3.0<br>packages/collection: 8.3.0<br>packages/domain: 8.3.0<br>packages/evidence-contract: 8.3.0<br>packages/identity: 8.3.0<br>packages/observation-shared: 8.3.0<br>packages/parsers: 8.3.0<br>packages/read-model: 8.3.0<br>packages/sbi-vc-trade-client: 8.3.0<br>packages/storage-d1: 8.3.0<br>poc/cloudflare-browser-run: 8.3.0<br>poc/cloudflare-runtime-probe: 8.3.0<br>poc/tamia-tcp-bridge: 8.3.0<br>services/collector-globalpass: 8.3.0<br>services/collector-mobile-suica: 7.10.0<br>services/collector-moneyforward: 7.10.0<br>services/collector-myjcb: 8.3.0<br>services/collector-r2-importer: 8.3.0<br>services/collector-sbi-securities: 7.10.0<br>services/collector-sbi-shinsei: 7.10.0<br>services/collector-sbi-vc-trade: 8.3.0<br>services/collector-smbc-direct: 8.3.0<br>services/collector-sony-bank: 7.10.0<br>services/collector-vpass: 8.3.0<br>services/collector-vpoint: 8.3.0<br>services/collector-vpoint-pay: 7.10.0<br>services/evidence-browser: 8.3.0<br>services/observation-pipeline: 8.3.0<br>services/raw-evidence: 8.3.0 |
 | `workerd` | 1.20260820.1, 1.20260825.1, 1.20260826.1, 1.20260828.1, 1.20260831.1 | packages/collection: 1.20260831.1<br>poc/cloudflare-browser-run: 1.20260820.1<br>poc/cloudflare-runtime-probe: 1.20260820.1<br>poc/tamia-tcp-bridge: 1.20260820.1<br>services/collector-globalpass: 1.20260826.1<br>services/collector-mobile-suica: 1.20260828.1<br>services/collector-moneyforward: 1.20260828.1<br>services/collector-myjcb: 1.20260828.1<br>services/collector-r2-importer: 1.20260831.1<br>services/collector-sbi-securities: 1.20260825.1<br>services/collector-sbi-shinsei: 1.20260828.1<br>services/collector-sbi-vc-trade: 1.20260828.1<br>services/collector-smbc-direct: 1.20260828.1<br>services/collector-sony-bank: 1.20260831.1<br>services/collector-vpass: 1.20260825.1<br>services/collector-vpoint: 1.20260825.1<br>services/collector-vpoint-pay: 1.20260828.1<br>services/evidence-browser: 1.20260831.1<br>services/observation-pipeline: 1.20260831.1<br>services/raw-evidence: 1.20260831.1 |
 
 ## Closure digest per package
@@ -526,6 +535,8 @@ a changed digest has to be explained dependency by dependency.
 
 | package | lockfile | packages | closure sha256 |
 | --- | --- | --- | --- |
+| `apps/web` | bun.lock | 107 | `e756ad628195b8dbcc177ececff6265878c5d6a46f9c3e6b22567de83650c06a` |
+| `experiments/observation-pipeline-local` | bun.lock | 9 | `3f3de308a4fd2e7f4a8a01f571cb15cb338505a104db5025c54621bf51b15cbc` |
 | `packages/application` | bun.lock | 5 | `bb01989186af1e9deb86c2a49f930f3eae14b6929a527e0914d88f6c4ef7f909` |
 | `packages/collection` | bun.lock | 164 | `1e90ba277818f5b604381c1537bb64a781b720cd6e113d041c5952d74f544211` |
 | `packages/domain` | bun.lock | 5 | `bb01989186af1e9deb86c2a49f930f3eae14b6929a527e0914d88f6c4ef7f909` |
@@ -538,7 +549,6 @@ a changed digest has to be explained dependency by dependency.
 | `packages/storage-d1` | bun.lock | 5 | `bb01989186af1e9deb86c2a49f930f3eae14b6929a527e0914d88f6c4ef7f909` |
 | `poc/cloudflare-browser-run` | bun.lock | 169 | `4e438324a694d2463ee0555ababe70d300eea51d1b236a1b170483dae5e8acc1` |
 | `poc/cloudflare-runtime-probe` | bun.lock | 106 | `90d201da33ef0fbc2e8199aa72b92b5b0d20a4d665bc6464a1338bc9019020c0` |
-| `poc/observation-pipeline` | bun.lock | 110 | `34b851eabd2d8b0e7494e929dba8868382ed7bfc1b972e1c54635cdd4c43aea2` |
 | `poc/oci-browser-probe` | bun.lock | 3 | `3a2e88e686c4b60ccd5805bec1ae2678df0c3e68ea3f67198e655950c9ae824d` |
 | `poc/tamia-tcp-bridge` | bun.lock | 94 | `598ced1b4abbd755d5a6d9357d507816d6500a41db5a6ab3cea79f6a32965a32` |
 | `services/collector-globalpass` | bun.lock | 172 | `be5d38d8506bfd044edb95232373425d1a9b50a32eac84a9558d6d303eaa5cc1` |

@@ -83,7 +83,7 @@ each of them needs, and why, is in the
 
 ## Proofs of concept
 
-- [Observation pipeline (ingest, parsers, evidence browser)](poc/observation-pipeline/README.md)
+- [Observation pipeline PoC: what it settled](docs/research/observation-pipeline-poc.md)
 - [OCI/WSL Vpass browser comparison](poc/oci-browser-probe/README.md)
 - [Camoufox Windows/macOS fingerprint controls](poc/camoufox-container-probe/README.md)
 - [Kameleo Windows Chrome container control](poc/kameleo-container-probe/README.md)

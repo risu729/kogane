@@ -1,6 +1,6 @@
 # Collector runtime inventory
 
-この表は、Cloudflareへdeploy可能な金融source collector（`services/collector-<source>/`）だけを対象にする。`poc/`に残る調査専用のBrowser Run、OCI、Camoufox、Kameleo、runtime probeと、observation pipelineのUI testはcollectorではないため含めない。HTMLを取得・parseするだけでは「browser使用」と数えず、実行時にChrome／Chromiumを起動するかで分類する。
+この表は、Cloudflareへdeploy可能な金融source collector（`services/collector-<source>/`）だけを対象にする。`poc/`に残る調査専用のBrowser Run、OCI、Camoufox、Kameleo、runtime probeはcollectorではないため含めない。observation pipelineのUIとlocal storeは`apps/web`と`experiments/observation-pipeline-local`へ移り、`poc/`には無い（[docs/research/observation-pipeline-poc.md](../docs/research/observation-pipeline-poc.md)）。HTMLを取得・parseするだけでは「browser使用」と数えず、実行時にChrome／Chromiumを起動するかで分類する。
 
 | Collector                                                         | Browser使用      | Runtime                                        | 使用区間と目的                                                                               | Browser外の処理                                   |
 | ----------------------------------------------------------------- | ---------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------- |

@@ -22,7 +22,7 @@
   },
   "services": [{ "binding": "PIPELINE", "service": "kogane-observation-pipeline" }],
   "assets": {
-    "directory": "../../poc/observation-pipeline/web/dist-production",
+    "directory": "../../apps/web/dist-production",
     "binding": "ASSETS",
     "run_worker_first": true,
     "not_found_handling": "single-page-application"

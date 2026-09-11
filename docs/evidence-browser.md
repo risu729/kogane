@@ -14,7 +14,8 @@ produced against the exact bytes it produced them from, and walk the
 provenance chain in both directions.
 
 It is implemented in the observation-pipeline proof of concept
-(`poc/observation-pipeline`): a read-only JSON API in `src/api.ts` over the
+(`experiments/observation-pipeline-local`): a read-only JSON API in
+`src/api.ts` over the
 queries in `src/queries.ts`, and a React client in `web/` that renders it,
 served together by `bun src/serve.ts`. This document records what it is for,
 the rules that keep it small, what the code enforces today, and what is
@@ -66,7 +67,7 @@ a currency the parser silently treated as JPY, a metric that is
 provider-reported rather than derived, a date that is `observed_at` and
 not `as_of`.
 
-`poc/observation-pipeline/RESULTS.md` records eight defects an adversarial
+`docs/research/observation-pipeline-poc.md` records eight defects an adversarial
 review found in the first implementation, and every one of them failed
 silently and in the direction of looking correct. That is the argument in
 one line. The cost of getting layer B wrong is not lost data — evidence is
