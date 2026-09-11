@@ -12,11 +12,18 @@ on:
       - ready_for_review
       - synchronize
       - labeled
+      - unlabeled
   pull_request_review:
     types:
       - submitted
+      - dismissed
+  # A merge moves main, so every armed pull request is behind the ruleset's
+  # up-to-date requirement; the sweep updates the oldest eligible one (G5-02).
+  push:
+    branches:
+      - main
 concurrency:
-  group: automerge-${{ github.event.pull_request.number }}
+  group: automerge-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 permissions: {}
 defaults:
@@ -57,6 +64,9 @@ jobs:
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           version: 2026.9.1
+          # No tool cache in a privileged job: node comes from the lockfile
+          # checksums of the trusted checkout, never from a restored archive.
+          cache: false
         env:
           MISE_ENABLE_TOOLS: node
       - name: Create an installation token
@@ -77,6 +87,8 @@ jobs:
         run: node .github/scripts/automerge.mjs
         env:
           # Pull request metadata reaches the script only as environment values.
+          # PR_NUMBER is empty on push, which selects the sweep mode.
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+          AUTOMATION_APP_SLUG: ${{ steps.token.outputs.app-slug }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY_OWNER: ${{ github.event.repository.owner.login }}

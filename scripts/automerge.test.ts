@@ -7,10 +7,14 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
   AUTOMERGE_LABEL,
+  appBotLogin,
+  armedByApp,
   evaluateAutomerge,
   labelApprovedByOwner,
+  pickBranchUpdate,
   trustedAuthor,
 } from "../.github/scripts/automerge-policy.mjs";
+import { nextLink, paginate } from "../.github/scripts/github-api.mjs";
 import {
   assessRisk,
   changedPaths,
@@ -18,6 +22,7 @@ import {
   matchesPattern,
   ownerApprovalForHead,
 } from "../.github/scripts/risk-paths.mjs";
+import renovate from "../.github/renovate.json5";
 import { REPO_ROOT } from "./ci-package.ts";
 
 const OWNER = "risu729";
@@ -63,33 +68,110 @@ describe("auto-merge eligibility", () => {
     expect(decision.eligible).toBe(false);
     expect(decision.reason).toContain(AUTOMERGE_LABEL);
   });
+  const external = pullRequest({
+    user: { login: "someone-else", type: "User" },
+    labels: [{ name: AUTOMERGE_LABEL }],
+  });
+  const labeledByOwner = {
+    event: "labeled",
+    label: { name: AUTOMERGE_LABEL },
+    actor: { login: OWNER },
+  };
+  const labeledByStranger = {
+    event: "labeled",
+    label: { name: AUTOMERGE_LABEL },
+    actor: { login: "someone-else" },
+  };
+  const unlabeled = {
+    event: "unlabeled",
+    label: { name: AUTOMERGE_LABEL },
+    actor: { login: OWNER },
+  };
+  const ownerApprovedHead = { state: "APPROVED", commit_id: HEAD, user: { login: OWNER } };
+
   test("the approval label counts only when the owner applied it last", () => {
-    const external = pullRequest({
-      user: { login: "someone-else", type: "User" },
-      labels: [{ name: AUTOMERGE_LABEL }],
-    });
-    const byOwner = [
-      { event: "labeled", label: { name: AUTOMERGE_LABEL }, actor: { login: OWNER } },
-    ];
-    const byStranger = [
-      { event: "labeled", label: { name: AUTOMERGE_LABEL }, actor: { login: "someone-else" } },
-    ];
-    const removedAgain = [
-      ...byOwner,
-      { event: "unlabeled", label: { name: AUTOMERGE_LABEL }, actor: { login: OWNER } },
-    ];
-    expect(
-      evaluateAutomerge({ pullRequest: external, ownerLogin: OWNER, labelEvents: byOwner })
-        .eligible,
-    ).toBe(true);
-    expect(
-      evaluateAutomerge({ pullRequest: external, ownerLogin: OWNER, labelEvents: byStranger })
-        .eligible,
-    ).toBe(false);
-    expect(labelApprovedByOwner(removedAgain, { label: AUTOMERGE_LABEL, ownerLogin: OWNER })).toBe(
-      false,
-    );
+    const byOwner = [labeledByOwner];
+    const byStranger = [labeledByStranger];
+    const removedAgain = [labeledByOwner, unlabeled];
+    // Applied by a stranger, removed, applied by the owner: in force. Then a
+    // stranger removes and re-applies it: no longer in force.
+    const relabelledByOwner = [labeledByStranger, unlabeled, labeledByOwner];
+    const relabelledByStranger = [...relabelledByOwner, unlabeled, labeledByStranger];
+    const options = { label: AUTOMERGE_LABEL, ownerLogin: OWNER };
+    expect(labelApprovedByOwner(byOwner, options)).toBe(true);
+    expect(labelApprovedByOwner(byStranger, options)).toBe(false);
+    expect(labelApprovedByOwner(removedAgain, options)).toBe(false);
+    expect(labelApprovedByOwner(relabelledByOwner, options)).toBe(true);
+    expect(labelApprovedByOwner(relabelledByStranger, options)).toBe(false);
     expect(labelApprovedByOwner(byOwner, { label: "other-label", ownerLogin: OWNER })).toBe(false);
+    expect(
+      evaluateAutomerge({
+        pullRequest: external,
+        ownerLogin: OWNER,
+        labelEvents: byStranger,
+        reviews: [ownerApprovedHead],
+      }).eligible,
+    ).toBe(false);
+  });
+  test("the label path is bound to the head the owner approved (G5-05)", () => {
+    const labelled = { pullRequest: external, ownerLogin: OWNER, labelEvents: [labeledByOwner] };
+    // Label alone: not enough, it would carry over to whatever is pushed next.
+    const unreviewed = evaluateAutomerge(labelled);
+    expect(unreviewed.eligible).toBe(false);
+    expect(unreviewed.reason).toContain(HEAD);
+    // Label plus the owner's approval of this exact head: eligible.
+    const reviewed = evaluateAutomerge({ ...labelled, reviews: [ownerApprovedHead] });
+    expect(reviewed.eligible).toBe(true);
+    expect(reviewed.trustedBy).toBe("label");
+    // The author pushed again after the approval (synchronize): not eligible.
+    const stale = evaluateAutomerge({
+      ...labelled,
+      reviews: [{ ...ownerApprovedHead, commit_id: STALE }],
+    });
+    expect(stale.eligible).toBe(false);
+    expect(stale.reason).toContain("no review by");
+    // A stranger's approval of the head does not count.
+    expect(
+      evaluateAutomerge({
+        ...labelled,
+        reviews: [{ ...ownerApprovedHead, user: { login: "someone-else" } }],
+      }).eligible,
+    ).toBe(false);
+    // The owner's own pull requests need neither the label nor a review.
+    expect(evaluateAutomerge({ pullRequest: pullRequest(), ownerLogin: OWNER }).eligible).toBe(
+      true,
+    );
+  });
+  test("only what the app armed may the app disarm", () => {
+    const appLogin = appBotLogin("kogane-automation");
+    expect(appLogin).toBe("kogane-automation[bot]");
+    expect(appBotLogin(undefined)).toBeUndefined();
+    const armed = pullRequest({ auto_merge: { enabled_by: { login: appLogin } } });
+    const armedByOwner = pullRequest({ auto_merge: { enabled_by: { login: OWNER } } });
+    expect(armedByApp(armed, { appLogin })).toBe(true);
+    expect(armedByApp(armedByOwner, { appLogin })).toBe(false);
+    expect(armedByApp(pullRequest({ auto_merge: null }), { appLogin })).toBe(false);
+    // Without a known app login nothing is ever disarmed.
+    expect(armedByApp(armed, { appLogin: undefined })).toBe(false);
+  });
+  test("the sweep after a push updates the oldest armed, eligible, behind pull request", () => {
+    const candidate = (number: number, overrides: Record<string, unknown>) => ({
+      number,
+      armed: true,
+      decision: { eligible: true, shouldUpdateBranch: true },
+      ...overrides,
+    });
+    expect(
+      pickBranchUpdate([
+        candidate(1, { decision: { eligible: true, shouldUpdateBranch: false } }),
+        candidate(2, { armed: false }),
+        candidate(3, { decision: { eligible: false, shouldUpdateBranch: true } }),
+        candidate(4, {}),
+        candidate(5, {}),
+      ]),
+    ).toBe(4);
+    expect(pickBranchUpdate([candidate(1, { armed: false })])).toBeUndefined();
+    expect(pickBranchUpdate([])).toBeUndefined();
   });
   test("draft, closed and conflicted pull requests never auto-merge (G5-04)", () => {
     for (const overrides of [
@@ -126,6 +208,45 @@ describe("auto-merge eligibility", () => {
   });
 });
 
+describe("GitHub API pagination fails closed", () => {
+  const page = (items: unknown[], next?: string) =>
+    new Response(JSON.stringify(items), {
+      status: 200,
+      headers: next ? { link: `<${next}>; rel="next"` } : {},
+    });
+  test("Link headers are followed to the end", async () => {
+    const pages = new Map([
+      ["https://api/a?page=1", page([1, 2], "https://api/a?page=2")],
+      ["https://api/a?page=2", page([3])],
+    ]);
+    const fetchImpl = ((url: string) => Promise.resolve(pages.get(url)!)) as typeof fetch;
+    const items = await paginate("https://api/a?page=1", { token: "t", fetchImpl });
+    expect(items).toEqual([1, 2, 3]);
+    expect(nextLink('<https://api/a?page=2>; rel="next", <https://api/a?page=9>; rel="last"')).toBe(
+      "https://api/a?page=2",
+    );
+    expect(nextLink(null)).toBeUndefined();
+  });
+  test("a collection longer than the page limit throws instead of returning a prefix", async () => {
+    // The latest label event or review is what decides; a silent prefix would
+    // hide an `unlabeled` or a CHANGES_REQUESTED that came after page 1.
+    const fetchImpl = ((url: string) =>
+      Promise.resolve(page([url], "https://api/a?next"))) as typeof fetch;
+    await expect(paginate("https://api/a", { token: "t", limit: 2, fetchImpl })).rejects.toThrow(
+      "more than 2 pages",
+    );
+  });
+  test("a non-list body is an error, not an empty collection", async () => {
+    const fetchImpl = (() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ message: "x" }), { status: 200 }),
+      )) as typeof fetch;
+    await expect(paginate("https://api/a", { token: "t", fetchImpl })).rejects.toThrow(
+      "did not return a list",
+    );
+  });
+});
+
 describe("risk path ledger", () => {
   test("patterns match by segment and support ** and *", () => {
     expect(matchesPattern("infra/risk-paths.json", "infra/**")).toBe(true);
@@ -142,7 +263,10 @@ describe("risk path ledger", () => {
       "services/evidence-browser/src/auth.ts",
       "services/app/src/auth.ts",
       "poc/moneyforward-worker/src/index.ts",
+      "poc/moneyforward-worker/package.json",
+      "poc/moneyforward-worker/bun.lock",
       "services/collector-moneyforward/src/index.ts",
+      "services/collector-moneyforward/package.json",
       ".github/workflows/ci.yml",
       ".github/scripts/automerge.mjs",
       "services/observation-pipeline/wrangler.ops.jsonc",
@@ -158,6 +282,9 @@ describe("risk path ledger", () => {
       changedFiles: [
         "docs/ci-cd.md",
         "packages/read-model/src/queries.ts",
+        "packages/read-model/package.json",
+        "poc/observation-pipeline/package.json",
+        "poc/moneyforward-worker/README.md",
         "poc/observation-pipeline/web/src/App.tsx",
         "services/evidence-browser/src/routes.ts",
       ],
@@ -246,5 +373,34 @@ describe("owner approval on the current head (G5-05)", () => {
     expect(message).toContain("services/evidence-browser/src/auth.ts");
     expect(message).toContain("authorization");
     expect(message).toContain(HEAD);
+  });
+});
+
+describe("Renovate configuration", () => {
+  const rules = renovate.packageRules as {
+    matchPackageNames?: string[];
+    matchFileNames?: string[];
+    groupName?: string;
+    addLabels?: string[];
+  }[];
+  test("extends the shared preset at the pinned tag and parses as JSON5", () => {
+    expect(renovate.extends).toEqual(["github>risu729/renovate-config#3.19.0"]);
+    expect(rules.length).toBeGreaterThan(0);
+  });
+  test("the typescript group name matches the preset's, so the rules merge instead of competing", () => {
+    // risu729/renovate-config 3.19.0 declares `matchDepNames: ["typescript",
+    // "npm:typescript"], groupName: "typescript"`; a different local name would
+    // split one update into two branches.
+    const localGroup = rules.find((rule) =>
+      rule.matchPackageNames?.includes("typescript"),
+    )?.groupName;
+    expect(localGroup).toBe("typescript");
+  });
+  test("the high-risk label Renovate adds is the one the ledger gates on", () => {
+    const labelled = rules.filter((rule) => rule.addLabels?.includes("high-risk"));
+    expect(labelled.length).toBe(1);
+    expect(LEDGER.labels.map((label) => label.name)).toContain("high-risk");
+    const groups = rules.map((rule) => rule.groupName).filter(Boolean);
+    expect(new Set(groups).size).toBe(groups.length);
   });
 });

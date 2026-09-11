@@ -36,11 +36,14 @@ export function requireEnv(env, name) {
 
 /**
  * @param {string} url
- * @param {{token: string, method?: string, body?: unknown, allowStatuses?: readonly number[]}} options
+ * @param {{token: string, method?: string, body?: unknown, allowStatuses?: readonly number[], fetchImpl?: typeof fetch}} options
  * @returns {Promise<{status: number, data: any, next?: string}>}
  */
-export async function request(url, { token, method = "GET", body, allowStatuses = [] }) {
-  const response = await fetch(url, {
+export async function request(
+  url,
+  { token, method = "GET", body, allowStatuses = [], fetchImpl = fetch },
+) {
+  const response = await fetchImpl(url, {
     method,
     headers: {
       accept: "application/vnd.github+json",
@@ -74,20 +77,28 @@ export function nextLink(link) {
 }
 
 /**
- * Follow `Link: rel="next"` until the collection is exhausted.
+ * Follow `Link: rel="next"` until the collection is exhausted. Fails closed: a
+ * collection longer than `limit` pages throws instead of returning a prefix,
+ * because every caller decides on the *latest* entries (the last label event,
+ * the last review) and a silently truncated list would hide exactly those.
  *
  * @param {string} url
- * @param {{token: string, limit?: number}} options
+ * @param {{token: string, limit?: number, fetchImpl?: typeof fetch}} options
  * @returns {Promise<any[]>}
  */
-export async function paginate(url, { token, limit = 20 }) {
+export async function paginate(url, { token, limit = 20, fetchImpl }) {
   const items = [];
   let next = url;
   for (let page = 0; next && page < limit; page += 1) {
-    const response = await request(next, { token });
-    if (!Array.isArray(response.data)) break;
+    const response = await request(next, { token, fetchImpl });
+    if (!Array.isArray(response.data)) {
+      throw new Error(`GET ${next} did not return a list`);
+    }
     items.push(...response.data);
     next = response.next;
+  }
+  if (next) {
+    throw new Error(`GET ${url} has more than ${String(limit)} pages; refusing a partial list`);
   }
   return items;
 }

@@ -26,8 +26,16 @@
     },
     {
       "id": "secret-consuming-collectors",
-      "reason": "Collector code runs with the bank credentials of its source; whoever can deploy it can also read and send them.",
-      "paths": ["poc/*-worker/src/**", "poc/sbi-securities/**", "services/collector-*/src/**"]
+      "reason": "Collector code and its dependency closure run with the bank credentials of its source; whoever can deploy or change what it bundles can also read and send them.",
+      "paths": [
+        "poc/*-worker/src/**",
+        "poc/*-worker/package.json",
+        "poc/*-worker/bun.lock",
+        "poc/sbi-securities/**",
+        "services/collector-*/src/**",
+        "services/collector-*/package.json",
+        "services/collector-*/bun.lock"
+      ]
     },
     {
       "id": "automation",

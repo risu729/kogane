@@ -10,8 +10,9 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { clientFromEnv, paginate, request, requireEnv } from "./github-api.mjs";
 import { assessRisk, changedPaths, explainFailure, ownerApprovalForHead } from "./risk-paths.mjs";
 
-// The compare API returns at most 300 entries in `files`; beyond that the gate
-// must fail closed instead of classifying a partial list.
+// The compare API returns at most 300 entries in `files` and says nothing when
+// it truncates. At that size the gate switches to the paginated pull request
+// file list, which fails closed (paginate throws) past its own 3000-file cap.
 const COMPARE_FILE_LIMIT = 300;
 
 /**
@@ -35,22 +36,18 @@ async function changedFiles(client, { baseSha, headSha, number }) {
     allowStatuses: [404, 422],
   });
   const compared = compare.status === 200 ? (compare.data?.files ?? []) : undefined;
-  if (compared) {
-    return {
-      files: changedPaths(compared),
-      truncated: compared.length >= COMPARE_FILE_LIMIT,
-    };
+  if (compared && compared.length < COMPARE_FILE_LIMIT) {
+    return { files: changedPaths(compared), truncated: false };
   }
   // Forks and force-pushed heads can leave the compare endpoint without a
-  // merge base; the pull request file list is then the authoritative source.
+  // merge base, and large changes overflow it; the pull request file list is
+  // then the authoritative source. Beyond its 3000-file cap paginate throws,
+  // so an unreadable list can never classify as low risk.
   const files = await paginate(`${base}/pulls/${String(number)}/files?per_page=100`, {
     token: client.token,
     limit: 30,
   });
-  return {
-    files: changedPaths(files),
-    truncated: false,
-  };
+  return { files: changedPaths(files), truncated: false };
 }
 
 async function main() {
