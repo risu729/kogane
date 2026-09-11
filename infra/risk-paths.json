@@ -34,7 +34,11 @@
         "poc/sbi-securities/**",
         "services/collector-*/src/**",
         "services/collector-*/package.json",
-        "services/collector-*/bun.lock"
+        "services/collector-*/bun.lock",
+        "services/collector-*/container/**",
+        "services/collector-*/scripts/**",
+        "services/collector-*/Dockerfile",
+        "packages/collector-diagnostics/src/**"
       ]
     },
     {
