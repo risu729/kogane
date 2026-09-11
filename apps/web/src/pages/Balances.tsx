@@ -11,7 +11,7 @@ import {
   StatusBadge,
 } from "../ui.tsx";
 import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
-import { isNormalizedZero } from "../../../shared/normalized-decimal.ts";
+import { isNormalizedZero } from "../../../../packages/observation-shared/src/normalized-decimal.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
 import { useViewState } from "../view-state.tsx";
 import { OrganizedInstrumentContext, OrganizedSourceAccount } from "../organization.tsx";

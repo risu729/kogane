@@ -24,7 +24,7 @@ import {
   upsertSource,
   type Store,
 } from "./store.ts";
-import { isObject } from "./parsers/util.ts";
+import { isObject } from "../../../packages/parsers/src/parsers/util.ts";
 
 export interface IngestSummary {
   runId: number;
@@ -327,5 +327,5 @@ export function ingestFixtures(store: Store, fixturesDir: string): void {
 
 if (import.meta.main) {
   const store = openStore();
-  ingestFixtures(store, join(import.meta.dir, "..", "fixtures"));
+  ingestFixtures(store, join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline"));
 }

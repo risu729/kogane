@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PARSERS } from "../src/parsers/registry.ts";
-import { vPointPayNotificationEvent } from "../src/parsers/v-point-pay.ts";
-import type { ArtifactMeta } from "../src/types.ts";
+import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
+import { vPointPayNotificationEvent } from "../../../packages/parsers/src/parsers/v-point-pay.ts";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 
-const FIXTURE_DIR = join(import.meta.dir, "..", "fixtures", "v-point-pay-parser-boundaries");
+const FIXTURE_DIR = join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline", "v-point-pay-parser-boundaries");
 
 function artifact(overrides: Partial<ArtifactMeta> = {}): ArtifactMeta {
   return {

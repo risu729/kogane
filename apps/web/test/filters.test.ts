@@ -5,7 +5,7 @@ import {
   matchesSourceAccount,
   pageWindow,
   recordedDate,
-} from "../web/src/filters.ts";
+} from "../src/filters.ts";
 
 describe("record filters preserve source and date boundaries", () => {
   test("same account label at two sources remains two different accounts", () => {

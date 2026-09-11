@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApi } from "../src/api.ts";
-import { validApiResponse } from "../shared/api-validation.ts";
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
 import { latestBalances } from "../src/queries.ts";
 import {
   insertFetchArtifact,
@@ -15,9 +15,9 @@ import {
   putRawObject,
   upsertSource,
 } from "../src/store.ts";
-import { formatAmount, amountSign } from "../src/money.ts";
+import { formatAmount, amountSign } from "../../../packages/parsers/src/money.ts";
 import { buildFixture, HOSTILE_DESCRIPTION, RETIRED_DESCRIPTION, type Fixture } from "./fixture.ts";
-import { LOCAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
+import { LOCAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 
 const fixture: Fixture = buildFixture();
 const app = createApi(fixture.store);

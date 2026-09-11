@@ -17,7 +17,7 @@
 // Formatting belongs to money.ts, which never uses floating point.
 
 import type { Store } from "./store.ts";
-import { CURRENT_SNAPSHOT, SNAPSHOT_CTES, unitScopedEligibilitySql } from "./snapshot-query.ts";
+import { CURRENT_SNAPSHOT, SNAPSHOT_CTES, unitScopedEligibilitySql } from "../../../packages/parsers/src/snapshot-query.ts";
 
 import type {
   ObservationKind,
@@ -33,7 +33,7 @@ import type {
   ArtifactDetail,
   Provenance,
   ObservationDetail,
-} from "../shared/api-contract.ts";
+} from "../../../packages/observation-shared/src/api-contract.ts";
 export type {
   ObservationKind,
   Warnings,
@@ -49,7 +49,7 @@ export type {
   ArtifactDetail,
   Provenance,
   ObservationDetail,
-} from "../shared/api-contract.ts";
+} from "../../../packages/observation-shared/src/api-contract.ts";
 
 export const OBSERVATION_TABLES: Record<ObservationKind, string> = {
   transaction: "transaction_observations",

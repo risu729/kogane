@@ -1,7 +1,7 @@
 // Shared HTTP contracts keep the UI independent of the local store implementation.
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { validApiResponse } from "../../shared/api-validation.ts";
-import { listRequestSearch, type ListPath, type MeasureView } from "../../shared/api-schema.ts";
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
+import { listRequestSearch, type ListPath, type MeasureView } from "../../../packages/observation-shared/src/api-schema.ts";
 import { useLocation } from "./router.tsx";
 import {
   capabilityState,
@@ -25,7 +25,7 @@ import type {
   ArtifactDetail,
   ObservationDetail,
   ApiMetadata,
-} from "../../shared/api-contract.ts";
+} from "../../../packages/observation-shared/src/api-contract.ts";
 export type {
   BalanceAdoption,
   BalanceAdoptionState,
@@ -53,7 +53,7 @@ export type {
   Provenance,
   ObservationDetail,
   ApiMetadata,
-} from "../../shared/api-contract.ts";
+} from "../../../packages/observation-shared/src/api-contract.ts";
 
 // ── transport ────────────────────────────────────────────────────────
 

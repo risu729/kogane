@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { classifyActivity } from "../shared/activity-semantics.ts";
-import type { TransactionRow } from "../shared/api-contract.ts";
-import { CENTRAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
+import { classifyActivity } from "../../../packages/observation-shared/src/activity-semantics.ts";
+import type { TransactionRow } from "../../../packages/observation-shared/src/api-contract.ts";
+import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 test("activity page distinguishes positive withdrawals, card payments, and quantity-only trades", async () => {
-  const client = join(import.meta.dir, "../web/dist-production");
+  const client = join(import.meta.dir, "../dist-production");
   const base: TransactionRow = {
     id: 1,
     source_id: "sbi-securities",

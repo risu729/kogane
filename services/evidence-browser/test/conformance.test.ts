@@ -1,7 +1,9 @@
 // The production Worker and the hosted synthetic demo run the same
-// conformance checks as the local PoC store (poc/observation-pipeline/test/
-// api-conformance.test.ts). Authentication is exercised by the fixture JWT
-// below and is never a capability: the checks only run authenticated.
+// conformance checks as the local store experiment
+// (experiments/observation-pipeline-local/test/api-conformance.test.ts); both
+// import the checks from packages/observation-shared/test-support.
+// Authentication is exercised by the fixture JWT below and is never a
+// capability: the checks only run authenticated.
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +20,7 @@ import { validApiResponse } from "../../../packages/observation-shared/src/api-v
 import {
   CONFORMANCE_CHECKS,
   type ConformanceTarget,
-} from "../../../poc/observation-pipeline/test/api-conformance";
+} from "../../../packages/observation-shared/test-support/api-conformance";
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let issuer: string;

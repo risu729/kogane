@@ -3,7 +3,7 @@ import type {
   EvidenceArtifactList,
   EvidenceMeta,
   EvidenceRunList,
-} from "../shared/evidence-contract.ts";
+} from "../../../packages/observation-shared/src/evidence-contract.ts";
 
 // Entirely synthetic DTOs; no captured production data or credentials.
 export function evidenceFixture(): {

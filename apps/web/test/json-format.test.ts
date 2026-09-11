@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { prettyJson } from "../web/src/json-format.ts";
+import { prettyJson } from "../src/json-format.ts";
 
 test("formats whitespace while preserving numeric lexemes, escapes and duplicate keys", () => {
   const input =

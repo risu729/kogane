@@ -3,7 +3,7 @@ import {
   FINANCIAL_PRODUCT_SOURCES,
   isCurrentFinancialProductClaim,
   type FinancialProductClaim,
-} from "../../shared/financial-products.ts";
+} from "../../../packages/observation-shared/src/financial-products.ts";
 import { ArtifactLink, Badge, ObservationLink } from "./ui.tsx";
 
 const STATUS = { identified: "商品を特定", unresolved: "商品未特定", conflict: "商品の根拠が競合" };

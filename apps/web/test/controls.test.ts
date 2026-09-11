@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { RecordControls } from "../web/src/pages/ViewControls.tsx";
-import { EMPTY_FILTERS, type RecordFilters, type SourceAccount } from "../web/src/filters.ts";
+import { RecordControls } from "../src/pages/ViewControls.tsx";
+import { EMPTY_FILTERS, type RecordFilters, type SourceAccount } from "../src/filters.ts";
 
 function selectedLabels(rows: SourceAccount[], filters: RecordFilters): string[] {
   const markup = renderToStaticMarkup(

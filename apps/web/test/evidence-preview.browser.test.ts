@@ -5,9 +5,9 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 import { secureResponse } from "../../../services/evidence-browser/src/http.ts";
-import type { EvidenceArtifactDetail, EvidenceMeta } from "../shared/evidence-contract.ts";
+import type { EvidenceArtifactDetail, EvidenceMeta } from "../../../packages/observation-shared/src/evidence-contract.ts";
 
-const CLIENT = join(import.meta.dir, "..", "web", "dist-evidence");
+const CLIENT = join(import.meta.dir, "..", "dist-evidence");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(CLIENT, "index.html")) && existsSync(executablePath);
 if (!runnable && process.env["CI"] === "true") process.exitCode = 1;

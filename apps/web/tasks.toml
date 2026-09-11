@@ -2,39 +2,33 @@
 #:schema https://mise.jdx.dev/schema/mise-task.json
 
 ["web:typecheck"]
-description = "Type-check the PoC observation pipeline and web UI."
-dir = "poc/observation-pipeline"
+description = "Type-check the web client."
+dir = "apps/web"
 run = "./node_modules/.bin/tsc --noEmit"
 
 ["web:build"]
 description = "Build the local observation browser client."
-dir = "poc/observation-pipeline"
+dir = "apps/web"
 run = "./node_modules/.bin/vite build"
 
 ["web:build-evidence"]
 description = "Build the evidence-browser client bundle."
-dir = "poc/observation-pipeline"
+dir = "apps/web"
 run = "./node_modules/.bin/vite build --mode evidence --outDir dist-evidence"
 
 ["web:build-production"]
 description = "Build the production evidence-browser client bundle."
-dir = "poc/observation-pipeline"
+dir = "apps/web"
 run = "./node_modules/.bin/vite build --mode production --outDir dist-production"
-
-["web:export-demo"]
-description = "Export the synthetic demo snapshot the reader Worker serves."
-depends = ["web:build"]
-dir = "poc/observation-pipeline"
-run = "bun src/export-demo.ts ../../services/evidence-browser/demo-snapshot.json"
 
 ["web:dev"]
 description = "Start the local Vite development server."
-dir = "poc/observation-pipeline"
+dir = "apps/web"
 run = "./node_modules/.bin/vite"
 
 ["web:browser"]
 description = "Install the locked Playwright Chromium in CI; never downloads locally."
-dir = "poc/observation-pipeline"
+dir = "apps/web"
 hide = true
 run = '''
 if [ "${CI:-}" = "true" ] && [ -z "${CHROMIUM_PATH:-}" ]; then
@@ -43,11 +37,11 @@ fi
 '''
 
 ["web:test"]
-description = "Run the PoC pipeline and browser tests."
+description = "Run the web client's unit and browser tests."
 depends = ["web:build", "web:build-evidence", "web:build-production", "web:browser"]
-dir = "poc/observation-pipeline"
+dir = "apps/web"
 run = "bun test"
 
 ["ci:web"]
-description = "Every check CI runs for poc/observation-pipeline."
-depends = ["web:typecheck", "web:build", "web:build-evidence", "web:build-production", "web:export-demo", "web:test"]
+description = "Every check CI runs for apps/web."
+depends = ["web:typecheck", "web:build", "web:build-evidence", "web:build-production", "web:test"]

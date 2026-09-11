@@ -3,7 +3,7 @@
 //
 // `source.kind` never appears here. It is a label (see app.tsx); renaming a
 // connection must leave every feature decision below unchanged.
-import type { ApiCapabilities, ApiMetadata } from "../../shared/api-contract.ts";
+import type { ApiCapabilities, ApiMetadata } from "../../../packages/observation-shared/src/api-contract.ts";
 
 /**
  * "Capabilities loading" and "capabilities known" are distinct states. While

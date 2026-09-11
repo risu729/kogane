@@ -9,9 +9,9 @@
 //     not grant is refused with 400.
 //   * Authentication is not a capability. The target's `get` carries its own
 //     credentials; nothing here weakens or replaces that gate.
-import type { ApiCapabilities, ApiMetadata } from "../shared/api-contract.ts";
-import { validApiResponse } from "../shared/api-validation.ts";
-import { validEvidenceResponse } from "../shared/evidence-validation.ts";
+import type { ApiCapabilities, ApiMetadata } from "../src/api-contract.ts";
+import { validApiResponse } from "../src/api-validation.ts";
+import { validEvidenceResponse } from "../src/evidence-validation.ts";
 import {
   allowedQueryParameters,
   capabilityGrants,
@@ -21,7 +21,7 @@ import {
   OBSERVATION_API_CONTRACT_VERSION,
   REWARD_REQUEST_SCHEMA,
   type ListPath,
-} from "../shared/api-schema.ts";
+} from "../src/api-schema.ts";
 
 export interface ConformanceTarget {
   /** An authenticated request; credentials are the target's concern. */

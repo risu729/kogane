@@ -50,7 +50,7 @@ test("audited provider date forms preserve timezone, validate calendar, and allo
   const gross = JSON.parse(
     readFileSync(
       new URL(
-        "../../../poc/observation-pipeline/fixtures/sony-bank-parser-boundaries/gross-balance.json",
+        "../../../tests/fixtures/observation-pipeline/sony-bank-parser-boundaries/gross-balance.json",
         import.meta.url,
       ),
       "utf8",
@@ -78,7 +78,7 @@ test("audited provider date forms preserve timezone, validate calendar, and allo
   ).toThrow();
   const csv = readFileSync(
     new URL(
-      "../../../poc/observation-pipeline/fixtures/sony-bank-parser-boundaries/yen-history.csv",
+      "../../../tests/fixtures/observation-pipeline/sony-bank-parser-boundaries/yen-history.csv",
       import.meta.url,
     ),
     "utf8",
@@ -116,7 +116,7 @@ test("audited provider date forms preserve timezone, validate calendar, and allo
   ).toThrow();
   const walletRows = readFileSync(
     new URL(
-      "../../../poc/observation-pipeline/fixtures/sony-bank-parser-boundaries/wallet-history-2026-09.html",
+      "../../../tests/fixtures/observation-pipeline/sony-bank-parser-boundaries/wallet-history-2026-09.html",
       import.meta.url,
     ),
     "utf8",
@@ -188,7 +188,7 @@ test("actual workerd bundle parses SBI fixtures and executes the entire D1/R2 pa
     let payload = JSON.parse(
       readFileSync(
         new URL(
-          `../../../poc/observation-pipeline/fixtures/sbi-parser-boundaries/${dataset}.json`,
+          `../../../tests/fixtures/observation-pipeline/sbi-parser-boundaries/${dataset}.json`,
           import.meta.url,
         ),
         "utf8",
@@ -219,7 +219,7 @@ test("actual workerd bundle parses SBI fixtures and executes the entire D1/R2 pa
 test("actual workerd hydrates verified WALLET MIME and preserves blank optional usage amount", async () => {
   const html = readFileSync(
     new URL(
-      "../../../poc/observation-pipeline/fixtures/sony-bank-parser-boundaries/wallet-history-2026-09.html",
+      "../../../tests/fixtures/observation-pipeline/sony-bank-parser-boundaries/wallet-history-2026-09.html",
       import.meta.url,
     ),
     "utf8",
@@ -501,7 +501,7 @@ test("MyJCB state and period come from sanitized central manifest", async () => 
   const payload = JSON.parse(
     readFileSync(
       new URL(
-        "../../../poc/observation-pipeline/fixtures/myjcb/2026-09-07/run-synthetic/connection-a/credit-ledger-00.json",
+        "../../../tests/fixtures/observation-pipeline/myjcb/2026-09-07/run-synthetic/connection-a/credit-ledger-00.json",
         import.meta.url,
       ),
       "utf8",
@@ -556,7 +556,7 @@ test("MyJCB state and period come from sanitized central manifest", async () => 
 test("workerd decodes MoneyForward static descriptions from canonical text/html descriptors", async () => {
   const fixture = readFileSync(
     new URL(
-      "../../../poc/observation-pipeline/fixtures/moneyforward/account-01-month-2099-02.html",
+      "../../../tests/fixtures/observation-pipeline/moneyforward/account-01-month-2099-02.html",
       import.meta.url,
     ),
   );

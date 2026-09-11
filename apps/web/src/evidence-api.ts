@@ -7,14 +7,14 @@ import {
   isEvidenceRunId,
   isEvidenceSourceId,
   validEvidenceResponse,
-} from "../../shared/evidence-validation.ts";
+} from "../../../packages/observation-shared/src/evidence-validation.ts";
 import type {
   EvidenceArtifactDetail,
   EvidenceArtifactList,
   EvidenceMeta,
   EvidenceRunList,
-} from "../../shared/evidence-contract.ts";
-export type * from "../../shared/evidence-contract.ts";
+} from "../../../packages/observation-shared/src/evidence-contract.ts";
+export type * from "../../../packages/observation-shared/src/evidence-contract.ts";
 
 const BASE = "/api/evidence/v1";
 const invalidRequest = (): ApiError =>

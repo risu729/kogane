@@ -24,7 +24,7 @@ import {
   upsertSource,
   type Store,
 } from "../src/store.ts";
-import type { Parser } from "../src/types.ts";
+import type { Parser } from "../../../packages/parsers/src/types.ts";
 
 /** Insert a successful parse run and publish it, as parse.ts does for every
  * success: a bare `ok` row is an unadopted result and no current view shows it. */
@@ -34,7 +34,7 @@ function insertPublishedParseRun(store: Store, run: Parameters<typeof insertPars
   return id;
 }
 
-const FIXTURES = join(import.meta.dir, "..", "fixtures");
+const FIXTURES = join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline");
 const SBI_RUN = join(FIXTURES, "sbi-securities", "2026-08-20", "run-20260820-210000-poc01");
 const SBI_VC_RUN = join(FIXTURES, "sbi-vc-trade", "2026-09-07", "run-20260907-synthetic01");
 

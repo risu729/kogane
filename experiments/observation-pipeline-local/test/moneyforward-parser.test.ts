@@ -5,8 +5,8 @@ import { describe, expect, test } from "bun:test";
 import {
   moneyForwardEvidenceOnly,
   moneyForwardMonthlyTransactions,
-} from "../src/parsers/moneyforward-parser.ts";
-import { PARSERS } from "../src/parsers/registry.ts";
+} from "../../../packages/parsers/src/parsers/moneyforward-parser.ts";
+import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import { currentTransactions } from "../src/queries.ts";
 import {
   insertFetchArtifact,
@@ -16,10 +16,10 @@ import {
   upsertSource,
 } from "../src/store.ts";
 import { runParsers } from "../src/parse.ts";
-import type { ArtifactMeta } from "../src/types.ts";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 
 const fixture = (name: string): Uint8Array =>
-  readFileSync(join(import.meta.dir, "..", "fixtures", "moneyforward", name));
+  readFileSync(join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline", "moneyforward", name));
 
 const meta = (overrides: Partial<ArtifactMeta> = {}): ArtifactMeta => ({
   id: 1,

@@ -1,4 +1,4 @@
-import type { ApiMetadata } from "../../shared/api-contract.ts";
+import type { ApiMetadata } from "../../../packages/observation-shared/src/api-contract.ts";
 
 export function parsingHealthMessage(health: ApiMetadata["parsingHealth"]): string | null {
   if (!health || health.pending + health.running + health.failed === 0) return null;

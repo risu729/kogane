@@ -13,7 +13,7 @@ import {
   type LatestBalanceItem,
   type LatestBalancePage,
 } from "../api.ts";
-import type { MeasureView } from "../../../shared/api-schema.ts";
+import type { MeasureView } from "../../../../packages/observation-shared/src/api-schema.ts";
 import { Amount, Badge, Nullable, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
 import { OrganizedSourceAccount } from "../organization.tsx";
 import { balanceMeaning } from "../balance-display.tsx";

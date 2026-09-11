@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { getJson } from "./api.ts";
-import type { AccountConnection } from "../../shared/account-connection-contract.ts";
+import type { AccountConnection } from "../../../packages/observation-shared/src/account-connection-contract.ts";
 export function useIdentityConnections() {
   return useQuery({
     queryKey: ["identity-connections"],
@@ -13,7 +13,7 @@ import type {
   IdentityCoverage,
   IdentityInstrumentRow,
   IdentityPage,
-} from "../../shared/identity-contract.ts";
+} from "../../../packages/observation-shared/src/identity-contract.ts";
 export function useIdentityAccounts(source: string, offset: number) {
   return useQuery({
     queryKey: ["identity-accounts", source, offset],

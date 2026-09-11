@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { validApiResponse } from "../shared/api-validation.ts";
-import { parsingHealthMessage } from "../web/src/parsing-health.tsx";
-import { LOCAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
+import { parsingHealthMessage } from "../src/parsing-health.tsx";
+import { LOCAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 
 const metadata = {
   apiVersion: 1,

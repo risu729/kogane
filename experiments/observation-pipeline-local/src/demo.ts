@@ -7,7 +7,7 @@ import { runParsers } from "./parse.ts";
 import { openStore } from "./store.ts";
 
 const store = openStore();
-ingestFixtures(store, join(import.meta.dir, "..", "fixtures"));
+ingestFixtures(store, join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline"));
 const summary = runParsers(store);
 console.log(
   `parse: ${summary.parsed} parsed, ${summary.skipped} already current, ` +

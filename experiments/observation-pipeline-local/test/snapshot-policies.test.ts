@@ -5,9 +5,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PARSERS } from "../src/parsers/registry.ts";
-import { containerScopeKey } from "../src/parsers/coverage.ts";
-import { sbiForeignCashBalances } from "../src/parsers/sbi-foreign-cash-balances.ts";
+import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
+import { containerScopeKey } from "../../../packages/parsers/src/parsers/coverage.ts";
+import { sbiForeignCashBalances } from "../../../packages/parsers/src/parsers/sbi-foreign-cash-balances.ts";
 import {
   containerScopeKeySql,
   FOREIGN_POSITION_SNAPSHOT_VERSION,
@@ -17,7 +17,7 @@ import {
   snapshotCtes,
   snapshotPolicyComparisonSql,
   type SnapshotPolicyComparisonRow,
-} from "../src/snapshot-query.ts";
+} from "../../../packages/parsers/src/snapshot-query.ts";
 import { insertFetchRun, listArtifacts, upsertSource, type Store } from "../src/store.ts";
 import { balance, closeStores, database, facts, snapshot } from "./snapshot-fixture.ts";
 

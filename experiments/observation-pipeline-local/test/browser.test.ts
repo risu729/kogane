@@ -19,7 +19,7 @@ import { createApi } from "../src/api.ts";
 import { insertObservation, insertParseRun, publishParseRun } from "../src/store.ts";
 import { buildFixture, RETIRED_DESCRIPTION } from "./fixture.ts";
 
-const CLIENT_DIR = join(import.meta.dir, "..", "web", "dist");
+const CLIENT_DIR = join(import.meta.dir, "..", "..", "..", "apps", "web", "dist");
 
 function chromiumPath(): string | undefined {
   const explicit = process.env["CHROMIUM_PATH"];

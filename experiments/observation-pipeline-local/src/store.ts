@@ -6,10 +6,10 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ArtifactMeta, CoverageClaim, Observation, ParseIssue } from "./types.ts";
-import { unitScopePolicySql, unitScopeSuccessSql } from "./snapshot-query.ts";
+import type { ArtifactMeta, CoverageClaim, Observation, ParseIssue } from "../../../packages/parsers/src/types.ts";
+import { unitScopePolicySql, unitScopeSuccessSql } from "../../../packages/parsers/src/snapshot-query.ts";
 
-const POC_ROOT = dirname(import.meta.dir); // poc/observation-pipeline/
+const EXPERIMENT_ROOT = dirname(import.meta.dir); // experiments/observation-pipeline-local/
 
 export interface Store {
   db: Database;
@@ -33,7 +33,7 @@ export interface Store {
 const SCHEMA_VERSION = 6;
 
 export function openStore(stateDir?: string): Store {
-  const root = stateDir ?? join(POC_ROOT, "state");
+  const root = stateDir ?? join(EXPERIMENT_ROOT, "state");
   const blobDir = join(root, "blobs");
   mkdirSync(blobDir, { recursive: true });
   const db = new Database(join(root, "kogane-poc.sqlite"), { create: true });
@@ -77,7 +77,7 @@ export function openStore(stateDir?: string): Store {
   // predates it gets the legacy current set materialised once, exactly as
   // production migration 0026 does, so current views keep showing the same rows.
   const hadPublicationGate = storeTableExists(db, "published_parse_runs");
-  db.exec(readFileSync(join(POC_ROOT, "schema.sql"), "utf8"));
+  db.exec(readFileSync(join(EXPERIMENT_ROOT, "schema.sql"), "utf8"));
   if (!hadPublicationGate) db.transaction(() => backfillPublicationGate(db))();
   // Additive derived schema: same SQL policy as production D1. Raw schema and
   // existing store version remain compatible; apply once, transactionally.
@@ -85,7 +85,7 @@ export function openStore(stateDir?: string): Store {
     db.transaction(() =>
       db.exec(
         readFileSync(
-          join(POC_ROOT, "../../services/raw-evidence/migrations/0024_observation_decimals.sql"),
+          join(EXPERIMENT_ROOT, "../../services/raw-evidence/migrations/0024_observation_decimals.sql"),
           "utf8",
         ),
       ),
@@ -98,7 +98,7 @@ export function openStore(stateDir?: string): Store {
     db.transaction(() =>
       db.exec(
         readFileSync(
-          join(POC_ROOT, "../../services/raw-evidence/migrations/0025_parse_coverage.sql"),
+          join(EXPERIMENT_ROOT, "../../services/raw-evidence/migrations/0025_parse_coverage.sql"),
           "utf8",
         ),
       ),
@@ -113,7 +113,7 @@ export function openStore(stateDir?: string): Store {
     db.transaction(() =>
       db.exec(
         readFileSync(
-          join(POC_ROOT, "../../services/raw-evidence/migrations/0037_unit_scope_eligibility.sql"),
+          join(EXPERIMENT_ROOT, "../../services/raw-evidence/migrations/0037_unit_scope_eligibility.sql"),
           "utf8",
         ),
       ),

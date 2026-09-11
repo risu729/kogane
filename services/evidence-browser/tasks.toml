@@ -14,7 +14,13 @@ run = "./node_modules/.bin/tsc --noEmit"
 
 ["app:test"]
 description = "Run the services/evidence-browser tests."
-depends = ["app:types", "web:build", "web:build-evidence", "web:build-production", "web:export-demo"]
+depends = [
+	"app:types",
+	"web:build",
+	"web:build-evidence",
+	"web:build-production",
+	"local-pipeline:export-demo",
+]
 dir = "services/evidence-browser"
 run = "./node_modules/.bin/vitest run"
 

@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { RecordControls } from "../web/src/pages/ViewControls.tsx";
-import { EMPTY_FILTERS } from "../web/src/filters.ts";
+import { RecordControls } from "../src/pages/ViewControls.tsx";
+import { EMPTY_FILTERS } from "../src/filters.ts";
 
 function renderDates(from: string, to: string): string {
   return renderToStaticMarkup(

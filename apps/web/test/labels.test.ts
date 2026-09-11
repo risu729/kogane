@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { displayLabel } from "../web/src/labels.ts";
-import { StatusBadge, TransactionStatus } from "../web/src/ui.tsx";
+import { displayLabel } from "../src/labels.ts";
+import { StatusBadge, TransactionStatus } from "../src/ui.tsx";
 
 test("prototype-shaped source values render as their original text", () => {
   const labels = { success: "成功" };

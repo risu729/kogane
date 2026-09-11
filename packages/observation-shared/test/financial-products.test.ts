@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { sbiShinseiYenDepositAccount } from "../src/parsers/sbi-shinsei-yen-deposit-account";
+import { sbiShinseiYenDepositAccount } from "../../parsers/src/parsers/sbi-shinsei-yen-deposit-account.ts";
 test("actual yen account parser output binds only its own debit/savings rows", () => {
   const parsed = sbiShinseiYenDepositAccount.parse(
     readFileSync(
       new URL(
-        "../fixtures/sbi-shinsei-parser-boundaries/yen-deposit-account.json",
+        "../../../tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/yen-deposit-account.json",
         import.meta.url,
       ),
     ),
@@ -147,7 +147,7 @@ import {
   validFinancialProductClaimWire,
   isCurrentFinancialProductClaim,
   type FinancialProductInput,
-} from "../shared/financial-products";
+} from "../src/financial-products.ts";
 test("wire guard preserves unknown revisions without weakening current semantic validation", () => {
   const current = resolveFinancialProduct(input());
   const future = {

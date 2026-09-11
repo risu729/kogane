@@ -3,8 +3,8 @@
 // server accepts or a client sends must be made in the schema and visible in
 // both packages' tests; a one-sided edit fails.
 import { describe, expect, test } from "bun:test";
-import type { ApiMetadata } from "../shared/api-contract.ts";
-import { validApiCapabilities, validApiResponse } from "../shared/api-validation.ts";
+import type { ApiMetadata } from "../../../packages/observation-shared/src/api-contract.ts";
+import { validApiCapabilities, validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
 import {
   allowedQueryParameters,
   CENTRAL_STORE_CAPABILITIES,
@@ -17,8 +17,8 @@ import {
   validIdentityReadMode,
   withBalancesV2,
   type ApiCapabilities,
-} from "../shared/api-schema.ts";
-import { capabilityState, clientFeatures, NO_FEATURES } from "../web/src/capabilities.ts";
+} from "../../../packages/observation-shared/src/api-schema.ts";
+import { capabilityState, clientFeatures, NO_FEATURES } from "../src/capabilities.ts";
 
 describe("shared API schema", () => {
   test("the request schema and capability objects match their pinned contract", () => {

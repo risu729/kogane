@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { ApiError } from "../web/src/api.ts";
-import { evidenceRawUrl, getEvidenceJson } from "../web/src/evidence-api.ts";
+import { ApiError } from "../src/api.ts";
+import { evidenceRawUrl, getEvidenceJson } from "../src/evidence-api.ts";
 import { evidenceFixture } from "./evidence-client-fixture.ts";
 
 let fetchSpy: ReturnType<typeof spyOn> | undefined;

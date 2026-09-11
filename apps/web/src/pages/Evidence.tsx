@@ -7,7 +7,7 @@ import type {
   EvidenceRun,
   EvidenceRunId,
   EvidenceSource,
-} from "../../../shared/evidence-contract.ts";
+} from "../../../../packages/observation-shared/src/evidence-contract.ts";
 import {
   evidenceRawUrl,
   useEvidenceArtifact,

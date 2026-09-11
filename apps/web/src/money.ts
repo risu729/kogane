@@ -7,4 +7,4 @@
 // Nothing in this client may use Intl.NumberFormat, parseFloat, or arithmetic
 // on an amount. Re-exporting keeps that rule enforceable by grep.
 
-export { amountSign, formatAmount, minorUnitExponent } from "../../src/money.ts";
+export { amountSign, formatAmount, minorUnitExponent } from "../../../packages/parsers/src/money.ts";

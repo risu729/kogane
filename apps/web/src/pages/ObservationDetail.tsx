@@ -19,12 +19,12 @@ import {
 import { KIND_LABELS } from "./ViewControls.tsx";
 import { displayLabel } from "../labels.ts";
 import { OrganizationPanel } from "../organization.tsx";
-import { classifyActivity } from "../../../shared/activity-semantics.ts";
+import { classifyActivity } from "../../../../packages/observation-shared/src/activity-semantics.ts";
 import { ActivityFacts } from "../activity-display.tsx";
 import {
   classifyBalance,
   BALANCE_INTERPRETATION_POLICY_VERSION,
-} from "../../../shared/balance-semantics.ts";
+} from "../../../../packages/observation-shared/src/balance-semantics.ts";
 const stringAt = (row: Record<string, unknown>, key: string): string | null =>
   typeof row[key] === "string" ? (row[key] as string) : null;
 const FIELD_LABELS: Record<string, string> = {

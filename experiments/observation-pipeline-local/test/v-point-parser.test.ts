@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { ingestRunDirectory } from "../src/ingest.ts";
 import { runParsers } from "../src/parse.ts";
-import { PARSERS } from "../src/parsers/registry.ts";
+import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import { currentTransactions, latestBalances } from "../src/queries.ts";
 import { openStore } from "../src/store.ts";
-import { vPointBalanceInfo, vPointHistoryPage, vPointSmfgPoint } from "../src/parsers/v-point.ts";
-import type { ArtifactMeta } from "../src/types.ts";
+import { vPointBalanceInfo, vPointHistoryPage, vPointSmfgPoint } from "../../../packages/parsers/src/parsers/v-point.ts";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 
 const fixture = (name: string): Uint8Array =>
-  readFileSync(join(import.meta.dir, "..", "fixtures", "v-point", `${name}.json`));
+  readFileSync(join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline", "v-point", `${name}.json`));
 const meta = (dataset: string, overrides: Partial<ArtifactMeta> = {}): ArtifactMeta => ({
   id: 1,
   sourceId: "v-point",

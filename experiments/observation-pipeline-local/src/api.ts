@@ -16,8 +16,8 @@
 
 import { Hono } from "hono";
 import { localDecimalRows } from "./normalized-values.ts";
-import type { ApiMetadata } from "../shared/api-contract.ts";
-import { allowedQueryParameters, LOCAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
+import type { ApiMetadata } from "../../../packages/observation-shared/src/api-contract.ts";
+import { allowedQueryParameters, LOCAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { readRawObject, sha256Hex, type Store } from "./store.ts";
 import {
   artifactDetail,

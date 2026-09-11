@@ -20,11 +20,11 @@ import {
   FOREIGN_POSITION_SNAPSHOT_VERSION,
   LEGACY_SNAPSHOT_POLICY,
   SNAPSHOT_DATASETS,
-} from "../src/snapshot-query.ts";
-import { PARSERS } from "../src/parsers/registry.ts";
-import { sbiForeignCashBalances } from "../src/parsers/sbi-foreign-cash-balances.ts";
-import { sbiForeignCashPositions } from "../src/parsers/sbi-foreign-cash-positions.ts";
-import type { Observation, Parser, TransactionObservation } from "../src/types.ts";
+} from "../../../packages/parsers/src/snapshot-query.ts";
+import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
+import { sbiForeignCashBalances } from "../../../packages/parsers/src/parsers/sbi-foreign-cash-balances.ts";
+import { sbiForeignCashPositions } from "../../../packages/parsers/src/parsers/sbi-foreign-cash-positions.ts";
+import type { Observation, Parser, TransactionObservation } from "../../../packages/parsers/src/types.ts";
 import {
   activatePolicy,
   activateUnitScope,

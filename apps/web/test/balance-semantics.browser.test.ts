@@ -3,11 +3,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
-import { classifyBalance } from "../shared/balance-semantics.ts";
-import type { BalanceRow } from "../shared/api-contract.ts";
-import { CENTRAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
+import { classifyBalance } from "../../../packages/observation-shared/src/balance-semantics.ts";
+import type { BalanceRow } from "../../../packages/observation-shared/src/api-contract.ts";
+import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 
-const client = join(import.meta.dir, "../web/dist-production");
+const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
 const exactDecimal = (coefficient: string, scale = 0) =>

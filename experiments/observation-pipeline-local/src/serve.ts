@@ -13,7 +13,7 @@ import { openStore } from "./store.ts";
 import { ingestFixtures } from "./ingest.ts";
 import { runParsers } from "./parse.ts";
 
-const CLIENT_DIR = join(import.meta.dir, "..", "web", "dist");
+const CLIENT_DIR = join(import.meta.dir, "..", "..", "..", "apps", "web", "dist");
 const HOSTNAME = "127.0.0.1";
 
 /**
@@ -103,7 +103,7 @@ if (previewDir !== undefined) {
   });
   process.on("SIGINT", () => process.exit(0));
   process.on("SIGTERM", () => process.exit(0));
-  ingestFixtures(store, join(import.meta.dir, "..", "fixtures"));
+  ingestFixtures(store, join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline"));
   runParsers(store);
 }
 // Defence in depth for the read-only rule. The API refuses a write method

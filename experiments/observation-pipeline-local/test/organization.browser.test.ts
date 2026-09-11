@@ -5,15 +5,15 @@ import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { createApi } from "../src/api.ts";
 import { buildFixture, HOSTILE_DESCRIPTION } from "./fixture.ts";
-import type { ObservationOrganization } from "../shared/organization-contract.ts";
+import type { ObservationOrganization } from "../../../packages/observation-shared/src/organization-contract.ts";
 import {
   FINANCIAL_PRODUCT_SOURCES,
   resolveFinancialProduct,
   type FinancialProductClaim,
-} from "../shared/financial-products.ts";
-import { CENTRAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
+} from "../../../packages/observation-shared/src/financial-products.ts";
+import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 
-const client = join(import.meta.dir, "../web/dist-production");
+const client = join(import.meta.dir, "../../../apps/web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
 if (!runnable) {

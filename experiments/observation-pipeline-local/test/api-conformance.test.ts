@@ -2,8 +2,8 @@
 // the production Worker (services/evidence-browser/test/conformance.test.ts).
 import { describe, test } from "bun:test";
 import { createApi } from "../src/api.ts";
-import { LOCAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
-import { CONFORMANCE_CHECKS, type ConformanceTarget } from "./api-conformance.ts";
+import { LOCAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { CONFORMANCE_CHECKS, type ConformanceTarget } from "../../../packages/observation-shared/test-support/api-conformance.ts";
 import { buildFixture } from "./fixture.ts";
 
 describe("observation API conformance: local PoC store", () => {

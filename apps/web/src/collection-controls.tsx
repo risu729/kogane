@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { getJson, useListRequest } from "./api.ts";
 import { navigate, useLocation } from "./router.tsx";
 import { QueryBoundary } from "./ui.tsx";
-import type { FilterOptions } from "../../shared/api-contract.ts";
+import type { FilterOptions } from "../../../packages/observation-shared/src/api-contract.ts";
 
 export function CollectionControls({ kind }: { kind: string }) {
   const location = useLocation();

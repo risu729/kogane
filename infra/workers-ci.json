@@ -10,7 +10,7 @@
       "name": "app-demo",
       "path": "services/evidence-browser",
       "config": "wrangler.demo.jsonc",
-      "prepare": "web:export-demo"
+      "prepare": "local-pipeline:export-demo"
     },
     {
       "name": "cloudflare-browser-run",

@@ -7,7 +7,7 @@ import {
   useIdentityConnections,
 } from "../identity-api.ts";
 import { Badge, EmptyState, ObservationLink, QueryBoundary } from "../ui.tsx";
-import type { IdentityStatus } from "../../../shared/identity-contract.ts";
+import type { IdentityStatus } from "../../../../packages/observation-shared/src/identity-contract.ts";
 import { AccountConnectionDetails, AccountConnectionInventory } from "../account-connection.tsx";
 const STATUS: Record<IdentityStatus, string> = {
   identified: "識別済み",

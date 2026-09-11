@@ -4,7 +4,7 @@ import {
   isEvidenceArtifactId,
   isEvidenceRunId,
   validEvidenceResponse,
-} from "../shared/evidence-validation.ts";
+} from "../../../packages/observation-shared/src/evidence-validation.ts";
 import { evidenceFixture } from "./evidence-client-fixture.ts";
 
 const base = "/api/evidence/v1";

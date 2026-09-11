@@ -20,8 +20,8 @@ import {
   type Store,
 } from "../src/store.ts";
 import { currentPositions, currentValuations, latestBalances } from "../src/queries.ts";
-import { containerClaim } from "../src/parsers/coverage.ts";
-import { FOREIGN_POSITION_SNAPSHOT_VERSION, type SnapshotPolicyId } from "../src/snapshot-query.ts";
+import { containerClaim } from "../../../packages/parsers/src/parsers/coverage.ts";
+import { FOREIGN_POSITION_SNAPSHOT_VERSION, type SnapshotPolicyId } from "../../../packages/parsers/src/snapshot-query.ts";
 import type {
   BalanceObservation,
   CoverageClaim,
@@ -29,7 +29,7 @@ import type {
   ParseIssue,
   PositionObservation,
   ValuationObservation,
-} from "../src/types.ts";
+} from "../../../packages/parsers/src/types.ts";
 
 const cleanup: (() => void)[] = [];
 /** Call from afterEach: closes and deletes every store opened by `database`. */

@@ -7,7 +7,7 @@
 // This is the "re-parse everything with a newer parser" first-class operation
 // from docs/roadmap.md phase 3.
 
-import type { Parser } from "./types.ts";
+import type { Parser } from "../../../packages/parsers/src/types.ts";
 import {
   findParseRun,
   insertCoverageClaims,
@@ -21,7 +21,7 @@ import {
   readRawObject,
   type Store,
 } from "./store.ts";
-import { PARSERS } from "./parsers/registry.ts";
+import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 
 export interface ParseSummary {
   parsed: number;

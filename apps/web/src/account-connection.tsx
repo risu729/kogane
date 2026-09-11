@@ -1,4 +1,4 @@
-import type { AccountConnection } from "../../shared/account-connection-contract.ts";
+import type { AccountConnection } from "../../../packages/observation-shared/src/account-connection-contract.ts";
 import { ArtifactLink, Badge } from "./ui.tsx";
 
 const STATUS = {

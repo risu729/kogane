@@ -11,9 +11,9 @@ import type {
   EvidenceMeta,
   EvidenceRun,
   EvidenceRunList,
-} from "../shared/evidence-contract.ts";
+} from "../../../packages/observation-shared/src/evidence-contract.ts";
 
-const CLIENT = join(import.meta.dir, "..", "web", "dist-evidence");
+const CLIENT = join(import.meta.dir, "..", "dist-evidence");
 const configuredBrowser = process.env["CHROMIUM_PATH"];
 const executablePath =
   configuredBrowser && existsSync(configuredBrowser)

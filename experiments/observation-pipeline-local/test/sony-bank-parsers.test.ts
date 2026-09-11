@@ -2,14 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PARSERS } from "../src/parsers/registry.ts";
+import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import {
   sonyBankGrossBalance,
   sonyBankHistoryCsv,
   sonyBankHistoryJson,
   sonyBankWalletHistory,
-} from "../src/parsers/sony-bank.ts";
-import type { ArtifactMeta, Parser } from "../src/types.ts";
+} from "../../../packages/parsers/src/parsers/sony-bank.ts";
+import type { ArtifactMeta, Parser } from "../../../packages/parsers/src/types.ts";
 import { currentTransactions } from "../src/queries.ts";
 import {
   insertFetchArtifact,
@@ -22,7 +22,7 @@ import {
   upsertSource,
 } from "../src/store.ts";
 
-const FIXTURES = join(import.meta.dir, "..", "fixtures", "sony-bank-parser-boundaries");
+const FIXTURES = join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline", "sony-bank-parser-boundaries");
 const bytes = (name: string) => readFileSync(join(FIXTURES, name));
 const meta = (dataset: string, mime = "application/json"): ArtifactMeta => ({
   id: 88,

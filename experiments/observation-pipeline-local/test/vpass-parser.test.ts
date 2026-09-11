@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runParsers } from "../src/parse.ts";
 import { ingestRunDirectory } from "../src/ingest.ts";
-import { PARSERS } from "../src/parsers/registry.ts";
-import { vpassStatementPage } from "../src/parsers/vpass.ts";
+import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
+import { vpassStatementPage } from "../../../packages/parsers/src/parsers/vpass.ts";
 import { currentTransactions } from "../src/queries.ts";
 import {
   insertFetchArtifact,
@@ -18,9 +18,9 @@ import {
   putRawObject,
   upsertSource,
 } from "../src/store.ts";
-import type { ArtifactMeta } from "../src/types.ts";
+import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 
-const FIXTURES = join(import.meta.dir, "..", "fixtures", "vpass-parser-boundaries");
+const FIXTURES = join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline", "vpass-parser-boundaries");
 
 function fixture(name: "web" | "customized"): Uint8Array {
   return readFileSync(join(FIXTURES, `${name}.json`));

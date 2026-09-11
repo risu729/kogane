@@ -5,10 +5,10 @@ import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { createApi } from "../src/api.ts";
 import { buildFixture } from "./fixture.ts";
-import type { IdentityAccountRow, IdentityInstrumentRow } from "../shared/identity-contract.ts";
-import { CENTRAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
+import type { IdentityAccountRow, IdentityInstrumentRow } from "../../../packages/observation-shared/src/identity-contract.ts";
+import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 
-const client = join(import.meta.dir, "../web/dist-production");
+const client = join(import.meta.dir, "../../../apps/web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
 if (!runnable) {

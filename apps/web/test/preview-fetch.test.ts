@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { fetchPreview, PREVIEW_LIMIT, previewLanguage } from "../web/src/preview-fetch.ts";
+import { fetchPreview, PREVIEW_LIMIT, previewLanguage } from "../src/preview-fetch.ts";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {

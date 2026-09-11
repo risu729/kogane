@@ -1,14 +1,14 @@
 import { Fragment, type ReactNode } from "react";
-import type { IdentityStatus } from "../../shared/identity-contract.ts";
+import type { IdentityStatus } from "../../../packages/observation-shared/src/identity-contract.ts";
 import type {
   ObservationOrganization,
   OrganizedAccount,
   OrganizedInstrument,
-} from "../../shared/organization-contract.ts";
+} from "../../../packages/observation-shared/src/organization-contract.ts";
 import { Badge, Nullable, ObservationLink, Panel, SourceAccount } from "./ui.tsx";
 import { AccountConnectionDetails } from "./account-connection.tsx";
 import { FinancialProductDetails, FinancialProductSummary } from "./financial-product.tsx";
-import { isCurrentFinancialProductClaim } from "../../shared/financial-products.ts";
+import { isCurrentFinancialProductClaim } from "../../../packages/observation-shared/src/financial-products.ts";
 
 type Organization = ObservationOrganization | undefined;
 const STATUS: Record<IdentityStatus, string> = {

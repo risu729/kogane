@@ -1,12 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// The client lives in web/ and builds to web/dist, which src/serve.ts serves.
-// In development Vite serves the client and proxies /api to the Hono server, so
-// the client talks to the same URLs in both modes and no environment switch
-// leaks into the application code.
+// The client is this workspace and builds to `dist/`, which the local pipeline
+// experiment's `src/serve.ts` and the two evidence-browser Worker configs
+// serve. In development Vite serves the client and proxies /api to the Hono
+// server, so the client talks to the same URLs in both modes and no
+// environment switch leaks into the application code.
 export default defineConfig(({ mode }) => ({
-  root: "web",
+  root: ".",
   plugins: [react()],
   define: { __EVIDENCE_BROWSER__: JSON.stringify(mode === "evidence") },
   build: {

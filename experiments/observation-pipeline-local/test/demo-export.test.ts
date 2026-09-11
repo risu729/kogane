@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import type { ArtifactDetail, ArtifactRow, ObservationDetail } from "../shared/api-contract.ts";
+import type { ArtifactDetail, ArtifactRow, ObservationDetail } from "../../../packages/observation-shared/src/api-contract.ts";
 import { exportDemo, type DemoSnapshot } from "../src/export-demo.ts";
 import { sha256Hex } from "../src/store.ts";
-import { LOCAL_STORE_CAPABILITIES } from "../shared/api-schema.ts";
+import { LOCAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 
 function decode<T>(snapshot: DemoSnapshot, path: string): T {
   const response = snapshot.responses[path];
