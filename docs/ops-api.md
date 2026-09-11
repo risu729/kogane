@@ -85,8 +85,12 @@ completion (`contracts/stages.json`, 05 §6).
 ```
 
 Stages are the vocabulary of `contracts/stages.json` — `persisted`,
-`registered`, `parsed`, `adopted`, `projected` — and each kind reports only the
-stages it can reach:
+`registered`, `parsed`, `adopted`, `projected` — defined once in
+`packages/collection/src/stages.ts` (03 §5) and imported here, so an operation
+and the run behind it cannot name the same stage differently. Recording a
+stage goes through that module's `stageRecord`, which refuses `completed` for
+the four reasons that are never completion (`queued`, `building`, `flag_off`,
+`no_processor`). Each kind reports only the stages it can reach:
 
 | Kind              | Stages                                                |
 | ----------------- | ----------------------------------------------------- |

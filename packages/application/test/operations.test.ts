@@ -8,9 +8,12 @@ import {
   OPERATION_STAGES,
   operationIdFor,
   operationPayloadDigest,
+  recordOperationStage,
   sessionRefreshPolicy,
+  STAGE_STATES,
   STAGES_BY_KIND,
 } from "../src/index.ts";
+import { COLLECTION_STAGES, JOB_OUTCOMES, NEVER_COMPLETE_ON } from "../../collection/src/stages.ts";
 
 const COLLECTION = {
   source: "sony-bank",
@@ -69,6 +72,31 @@ test("every kind reports the stages it can actually reach, in contract order", (
   expect(STAGES_BY_KIND.replay).toEqual(["parsed", "adopted", "projected"]);
   expect(STAGES_BY_KIND.projection).toEqual(["projected"]);
   expect(STAGES_BY_KIND["session-refresh"]).toEqual([]);
+});
+
+test("the stage vocabulary is the shared one, and completion is refused for the four reasons", async () => {
+  // One definition (packages/collection, 03 §5), not a second copy that can
+  // drift from the run the operation is about.
+  expect(OPERATION_STAGES).toBe(COLLECTION_STAGES);
+  expect(STAGE_STATES).toBe(JOB_OUTCOMES);
+  // A store that would fail loudly if the guard let a call through.
+  const store = {
+    first: () => Promise.reject(new Error("the store must not be reached")),
+    all: () => Promise.reject(new Error("the store must not be reached")),
+    batch: () => Promise.reject(new Error("the store must not be reached")),
+  };
+  for (const reason of NEVER_COMPLETE_ON) {
+    await expect(
+      recordOperationStage({
+        store,
+        operationId: "op_" + "0".repeat(64),
+        stage: "projected",
+        state: "completed",
+        failureCode: reason,
+        now: "2026-09-11T00:00:00Z",
+      }),
+    ).rejects.toThrow("stage_cannot_complete_on_reason");
+  }
 });
 
 test("a session refresh needs a person unless the deployment says otherwise (G3-11)", () => {

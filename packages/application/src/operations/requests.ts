@@ -23,6 +23,13 @@
 //
 // Pure: no Cloudflare `Env`, no database driver, no HTTP, no clock. The store
 // is the same structural port the change lifecycle uses.
+import {
+  COLLECTION_STAGES,
+  type CollectionStage,
+  JOB_OUTCOMES,
+  type JobOutcome,
+  stageRecord,
+} from "../../../collection/src/stages.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import type { CommandStore, PreparedWrite, Principal } from "../command/contract.ts";
 import { commandError, type CommandResult } from "../command/errors.ts";
@@ -36,15 +43,15 @@ export const OPERATION_KINDS = [
 ] as const;
 export type OperationKind = (typeof OPERATION_KINDS)[number];
 
-/** contracts/stages.json, in order. A stage is evidence, not a progress bar. */
-export const OPERATION_STAGES = [
-  "persisted",
-  "registered",
-  "parsed",
-  "adopted",
-  "projected",
-] as const;
-export type OperationStage = (typeof OPERATION_STAGES)[number];
+/**
+ * contracts/stages.json, in order. A stage is evidence, not a progress bar.
+ * One vocabulary, defined once in `packages/collection` (03 §5) and used here
+ * so an operation and the run behind it cannot name the same stage
+ * differently. Only that module is imported: it has no dependencies of its
+ * own, so nothing of the R2 contract reaches this package.
+ */
+export const OPERATION_STAGES = COLLECTION_STAGES;
+export type OperationStage = CollectionStage;
 
 /**
  * Which stages a kind can reach. A re-registration starts from evidence that
@@ -80,9 +87,9 @@ export const DISPATCH_STATES = [
 ] as const;
 export type DispatchState = (typeof DISPATCH_STATES)[number];
 
-/** contracts/stages.json `jobOutcome`, per stage. */
-export const STAGE_STATES = ["pending", "completed", "retryable", "blocked"] as const;
-export type StageState = (typeof STAGE_STATES)[number];
+/** contracts/stages.json `jobOutcome`, per stage. The same list. */
+export const STAGE_STATES = JOB_OUTCOMES;
+export type StageState = JobOutcome;
 
 // ── request shapes ──────────────────────────────────────────────────────
 //
@@ -613,6 +620,10 @@ export interface StageReport {
  * completed stage is never reopened (the 0040 trigger enforces it).
  */
 export async function recordOperationStage(input: StageReport): Promise<void> {
+  // The shared stage contract refuses `completed` for the four reasons that
+  // are never completion (queued, building, flag_off, no_processor), so an
+  // executor cannot record one of them as done through this path either.
+  stageRecord(input.stage, input.state, input.failureCode);
   const row = await input.store.first<{ kind: string }>(
     "SELECT kind FROM ops_requests WHERE operation_id=?1",
     [input.operationId],
