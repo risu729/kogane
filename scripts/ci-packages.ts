@@ -39,6 +39,21 @@ export const CI_PACKAGES: PackagePolicy[] = [
     checks: ["test", "typecheck"],
   },
   {
+    // The shared DATA bucket contract (unified plan 03, U07): key layout,
+    // terminal-v1 manifest, digest, writer, reader. Pure TypeScript over a
+    // minimal R2BucketLike, plus one Workers-runtime suite that checks real R2
+    // conditional-write semantics through Miniflare. It installs the test
+    // tooling but has no wrangler configuration and deploys nothing.
+    path: "packages/collection",
+    scripts: {
+      test: "bun run test:unit && bun run test:workers",
+      "test:unit": "bun test ./test/*.test.ts",
+      "test:workers": "vitest run",
+      typecheck: "tsc --noEmit",
+    },
+    checks: ["typecheck", "test"],
+  },
+  {
     // Pure application services (query A08, command A09): no Workers tooling,
     // no database driver, no HTTP; the adapters live in the services.
     path: "packages/application",

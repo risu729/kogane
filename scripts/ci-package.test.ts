@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { CI_PACKAGES, coveredManifests, STANDALONE_TESTS } from "./ci-packages.ts";
@@ -190,6 +198,33 @@ describe("offline CI coverage", () => {
       expect(Object.keys(manifest.devDependencies)).not.toContain("wrangler");
     }
   });
+  test("the collection contract runs its pure suite and one Workers-runtime R2 suite, and deploys nothing", () => {
+    const policy = selectPolicy("packages/collection");
+    expect(policy.checks).toEqual(["typecheck", "test"]);
+    // The Miniflare suite proves the R2 conditional-write semantics the
+    // terminal-last rule depends on; it is a test, not a deployment.
+    expect(policy.scripts.test).toBe("bun run test:unit && bun run test:workers");
+    expect(policy.scripts["test:unit"]).toBe("bun test ./test/*.test.ts");
+    expect(policy.scripts["test:workers"]).toBe("vitest run");
+    expect(Object.keys(policy.scripts)).not.toContain("cf:check");
+    expect(policy.additionalDryRun).toBeUndefined();
+    const plan = packagePlan(policy.path, options).map((step) => step.command.join(" "));
+    expect(plan).toEqual(["bun install --frozen-lockfile", "bun run typecheck", "bun run test"]);
+    const manifest = JSON.parse(readFileSync(join(REPO_ROOT, policy.path, "package.json"), "utf8"));
+    expect(manifest.name).toBe("@kogane/collection");
+    expect(manifest.dependencies).toBeUndefined();
+    expect(Object.keys(manifest.devDependencies).sort()).toEqual([
+      "@cloudflare/vitest-plugin",
+      "@types/bun",
+      "typescript",
+      "vitest",
+      "wrangler",
+    ]);
+    // A wrangler configuration here would make a pure package look deployable.
+    for (const name of ["wrangler.jsonc", "wrangler.toml", "src/worker.ts"])
+      expect(existsSync(join(REPO_ROOT, policy.path, name)), name).toBe(false);
+  });
+
   test("production parser CI installs shared parser dependencies before checking without building UI", () => {
     const plan = packagePlan("services/observation-pipeline", options);
     // Since design review D07 the parsers live in packages/parsers, and parse5
