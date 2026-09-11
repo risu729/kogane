@@ -135,9 +135,9 @@ writer that maintains it, and since A03 on migration 0025
 rollback rules are in `docs/publication-gate.md`. `packages/read-model` is
 vendored by relative import, so there is no separate artifact to publish.
 
-Verified locally with synthetic data: `bun run scripts/ci-package.ts` for
-`packages/read-model`, `services/evidence-browser`, `poc/observation-pipeline`,
-and the standalone CI inventory. Not verified: production data.
+Verified locally with synthetic data: the CI checks (today
+`mise run ci:<short>`) of `packages/read-model`, `services/evidence-browser`,
+`poc/observation-pipeline`, and the repository-wide guards (`mise run ci:root`). Not verified: production data.
 
 ## Balance projection reader
 

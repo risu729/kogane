@@ -18,6 +18,7 @@ depends = ["tamia-tcp-bridge:types"]
 dir = "poc/tamia-tcp-bridge"
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
+	"./node_modules/.bin/wrangler deploy --dry-run --config wrangler.bootstrap.jsonc",
 ]
 
 ["ci:tamia-tcp-bridge"]

@@ -11,7 +11,12 @@
 //     not an entry point that has to be declared twice;
 //   * every workspace directory must be reachable from a `ci:<short>` task, so
 //     a new workspace cannot be added without joining the CI matrix, which is
-//     generated from exactly these task names.
+//     generated from exactly these task names; and every `ci:<short>` other
+//     than `ci:root` must belong to exactly one workspace, so a matrix entry
+//     that runs nothing cannot pass vacuously;
+//   * every tracked Wrangler configuration is either validated by a dry-run
+//     task and listed in `infra/workers-ci.json`, or excluded there with a
+//     reason. A config can not simply be forgotten.
 //
 // It validates what this repository declares, never what a dependency ships:
 // node_modules is out of scope because git does not track it.
@@ -25,6 +30,8 @@ export interface TaskRecord {
   depends?: string[];
   dir?: string | null;
   run?: string[];
+  /** The file that defines the task, absolute. */
+  source?: string | null;
 }
 
 /** One Wrangler configuration the CI `workers` matrix validates. */
@@ -34,6 +41,13 @@ export interface WorkerEntry {
   config: string;
   /** Task that builds what the config serves; defaults to the frozen install. */
   prepare?: string;
+}
+
+/** A tracked Wrangler configuration that deliberately has no dry run. */
+export interface ExcludedConfig {
+  path: string;
+  config: string;
+  reason: string;
 }
 
 export function manifestViolations(manifest: unknown, file: string): string[] {
@@ -114,6 +128,85 @@ export function uncoveredWorkspaces(
   return directories.filter((directory) => !reached.has(directory));
 }
 
+/** The workspace directory a task runs in, or undefined when it runs elsewhere. */
+function workspaceOf(directory: string, directories: readonly string[]): string | undefined {
+  return directories.find(
+    (candidate) => directory === candidate || directory.startsWith(`${candidate}/`),
+  );
+}
+
+/**
+ * Every `ci:<short>` task other than `ci:root` stands for exactly one workspace:
+ * the tasks named `<short>:*` run inside it and no other `ci:` task claims it.
+ * The CI matrix is `[.name[3:]]`, so a `ci:` task that reaches no workspace
+ * would be a matrix entry that passes without running anything.
+ */
+export function ciTaskMismatches(
+  directories: readonly string[],
+  tasks: readonly TaskRecord[],
+  root: string = REPO_ROOT,
+): string[] {
+  const errors: string[] = [];
+  const claimed = new Map<string, string>();
+  for (const task of tasks) {
+    if (!task.name.startsWith("ci:") || task.name === "ci:root") continue;
+    const short = task.name.slice("ci:".length);
+    const workspaces = new Set<string>();
+    for (const member of tasks) {
+      if (!member.name.startsWith(`${short}:`) || member.dir == null) continue;
+      const workspace = workspaceOf(relative(root, member.dir), directories);
+      if (workspace !== undefined) workspaces.add(workspace);
+    }
+    if ((task.depends ?? []).length === 0) {
+      errors.push(`${task.name}: depends on nothing; a ci: task must run the workspace's checks`);
+    }
+    if (workspaces.size !== 1) {
+      errors.push(
+        `${task.name}: the ${short}:* tasks run in ${workspaces.size === 0 ? "no workspace" : [...workspaces].sort().join(", ")}; a ci: task belongs to exactly one`,
+      );
+      continue;
+    }
+    const workspace = [...workspaces][0] as string;
+    const other = claimed.get(workspace);
+    if (other !== undefined) {
+      errors.push(`${task.name}: ${workspace} already has ${other}; one ci: task per workspace`);
+    } else {
+      claimed.set(workspace, task.name);
+    }
+  }
+  return errors;
+}
+
+/**
+ * Every tracked Wrangler configuration is accounted for: listed as a worker
+ * (and so validated by the CI matrix) or excluded with a reason. Bootstrap,
+ * test-harness and `wrangler dev` helper configs are the excluded kind.
+ */
+export function unaccountedConfigs(
+  configs: readonly string[],
+  workers: readonly WorkerEntry[],
+  excluded: readonly ExcludedConfig[],
+): string[] {
+  const listed = new Set(workers.map((worker) => `${worker.path}/${worker.config}`));
+  const skipped = new Map(excluded.map((entry) => [`${entry.path}/${entry.config}`, entry.reason]));
+  const tracked = new Set(configs);
+  return [
+    ...configs
+      .filter((config) => !listed.has(config) && !skipped.has(config))
+      .map(
+        (config) =>
+          `infra/workers-ci.json: ${config} is neither a worker entry nor excluded with a reason`,
+      ),
+    ...[...skipped]
+      .filter(
+        ([config, reason]) => listed.has(config) || !tracked.has(config) || reason.trim() === "",
+      )
+      .map(
+        ([config]) => `infra/workers-ci.json: the exclusion of ${config} is stale or has no reason`,
+      ),
+  ];
+}
+
 /**
  * The `<path>/<config>` pairs the `*:dry-run` tasks validate. `infra/workers-ci.json`
  * must list exactly these, because the CI `workers` matrix is built from the
@@ -184,7 +277,11 @@ function miseTasks(): TaskRecord[] {
   });
   if (result.exitCode !== 0)
     throw new Error(`mise tasks ls failed: ${result.stderr.toString().trim()}`);
-  return JSON.parse(result.stdout.toString()) as TaskRecord[];
+  // mise also lists tasks from parent and global configs; only this checkout's
+  // task files define what CI runs.
+  return (JSON.parse(result.stdout.toString()) as TaskRecord[]).filter(
+    (task) => task.source != null && task.source.startsWith(`${REPO_ROOT}/`),
+  );
 }
 
 export function check(): string[] {
@@ -222,14 +319,21 @@ export function check(): string[] {
       `${directory}: no ci:<short> task runs in this workspace; add ${directory}/tasks.toml and list it in mise.toml`,
     );
   }
+  errors.push(...ciTaskMismatches(directories, tasks));
   const ledger = JSON.parse(readFileSync(`${REPO_ROOT}/infra/workers-ci.json`, "utf8")) as {
     workers: WorkerEntry[];
+    excluded?: ExcludedConfig[];
   };
   errors.push(
     ...ledgerMismatches(
       dryRunTargets(tasks),
       ledger.workers,
       tasks.map((task) => task.name),
+    ),
+    ...unaccountedConfigs(
+      trackedFiles("**/wrangler*.json", "**/wrangler*.jsonc", "**/wrangler*.toml"),
+      ledger.workers,
+      ledger.excluded ?? [],
     ),
   );
   return errors;
