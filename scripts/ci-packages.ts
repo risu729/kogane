@@ -283,6 +283,7 @@ export const STANDALONE_TESTS = [
   "scripts/ci-package.test.ts",
   // Repository-wide guards live next to the CI policy they protect; every
   // scripts/*.test.ts must be listed here (scripts/ci-package.test.ts checks).
+  "scripts/automerge.test.ts",
   "scripts/core-schema-ledger.test.ts",
   "scripts/import-boundaries.test.ts",
   "scripts/publication-gate-predicates.test.ts",

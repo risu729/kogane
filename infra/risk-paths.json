@@ -1,0 +1,51 @@
+{
+  "version": "risk-paths-v1",
+  "documentation": "docs/ci-cd.md",
+  "description": "High-risk change ledger for the Risk Gate check. A pull request that touches any listed path, or carries any listed label, passes only with an approving review by the repository owner on the exact current head commit.",
+  "labels": [
+    {
+      "id": "declared-high-risk",
+      "name": "high-risk",
+      "reason": "Renovate and humans mark dependency updates that reach parsers, money handling, or authentication with this label."
+    }
+  ],
+  "rules": [
+    {
+      "id": "core-schema",
+      "reason": "CORE schema DDL is append-only and is applied to production by CD.",
+      "paths": ["services/raw-evidence/migrations/**", "packages/storage-d1/migrations/**"]
+    },
+    {
+      "id": "authorization",
+      "reason": "Authentication and authorization code decides who may read evidence.",
+      "paths": [
+        "services/evidence-browser/src/auth.ts",
+        "services/app/src/auth.ts",
+        "packages/*/src/auth.ts"
+      ]
+    },
+    {
+      "id": "secret-consuming-collectors",
+      "reason": "Collector code and its dependency closure run with the bank credentials of its source; whoever can deploy or change what it bundles can also read and send them.",
+      "paths": [
+        "poc/*-worker/src/**",
+        "poc/*-worker/package.json",
+        "poc/*-worker/bun.lock",
+        "poc/sbi-securities/**",
+        "services/collector-*/src/**",
+        "services/collector-*/package.json",
+        "services/collector-*/bun.lock"
+      ]
+    },
+    {
+      "id": "automation",
+      "reason": "Workflows and their trusted scripts hold the merge, deploy, and gate decisions themselves.",
+      "paths": [".github/workflows/**", ".github/scripts/**", ".github/actions/**"]
+    },
+    {
+      "id": "deployment-config",
+      "reason": "Worker configuration and the resource ledgers decide which production resources a deploy writes to.",
+      "paths": ["**/wrangler*.jsonc", "**/wrangler*.toml", "infra/**"]
+    }
+  ]
+}
