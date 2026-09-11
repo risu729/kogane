@@ -39,6 +39,21 @@ export const CI_PACKAGES: PackagePolicy[] = [
     checks: ["test", "typecheck"],
   },
   {
+    // The shared DATA bucket contract (unified plan 03, U07): key layout,
+    // terminal-v1 manifest, digest, writer, reader. Pure TypeScript over a
+    // minimal R2BucketLike, plus one Workers-runtime suite that checks real R2
+    // conditional-write semantics through Miniflare. It installs the test
+    // tooling but has no wrangler configuration and deploys nothing.
+    path: "packages/collection",
+    scripts: {
+      test: "bun run test:unit && bun run test:workers",
+      "test:unit": "bun test ./test/*.test.ts",
+      "test:workers": "vitest run",
+      typecheck: "tsc --noEmit",
+    },
+    checks: ["typecheck", "test"],
+  },
+  {
     // Pure application services (query A08, command A09): no Workers tooling,
     // no database driver, no HTTP; the adapters live in the services.
     path: "packages/application",
@@ -260,8 +275,10 @@ export const STANDALONE_TESTS = [
   // Repository-wide guards live next to the CI policy they protect; every
   // scripts/*.test.ts must be listed here (scripts/ci-package.test.ts checks).
   "scripts/automerge.test.ts",
+  "scripts/core-schema-ledger.test.ts",
   "scripts/import-boundaries.test.ts",
   "scripts/publication-gate-predicates.test.ts",
+  "scripts/resource-ledger.test.ts",
   "poc/collector-diagnostics/test/diagnostics.test.ts",
   "poc/sbi-securities/scripts/prepare-sbi-bitwarden-cli-secret.bun.test.ts",
 ] as const;

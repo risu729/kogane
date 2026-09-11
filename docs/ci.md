@@ -41,9 +41,11 @@ package's locked Playwright Chromium and fails if browser tests cannot run.
   hygiene checks cover spelling, whitespace, merge markers, and file integrity.
 - The standalone step also runs the repository-wide guards under `scripts/`:
   the auto-merge and risk-gate decisions of [CI/CD automation](ci-cd.md),
-  the publication-gate predicate allow-list and the import boundaries of
+  the publication-gate predicate allow-list, the import boundaries of
   [package layout](package-layout.md) (no deployed or shared module may import
-  `poc/`; the PoC web UI may not import a service internal or read-model SQL).
+  `poc/`; the PoC web UI may not import a service internal or read-model SQL),
+  and the [infrastructure ledgers](infra-ledgers.md) (a wrangler config or a
+  CORE migration that changes without its committed ledger fails here).
 - The package matrix runs the reviewed tests, type checks, and deployment dry
   runs for every Bun package listed in `scripts/ci-packages.ts`, including the
   pure shared packages under `packages/` (frozen install, `tsc --noEmit`,

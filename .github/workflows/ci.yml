@@ -46,6 +46,7 @@ jobs:
       matrix:
         package:
           - packages/application
+          - packages/collection
           - packages/domain
           - packages/evidence-contract
           - packages/identity

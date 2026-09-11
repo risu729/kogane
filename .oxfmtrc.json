@@ -8,6 +8,13 @@
     }
   ],
   "ignorePatterns": [
+    // Generated ledgers: `scripts/*-ledger.ts` owns their exact bytes, and the
+    // tests in scripts/ compare the committed file with a fresh render.
+    "infra/dependency-resolution.md",
+    "infra/resources.json",
+    "infra/resources.md",
+    "infra/schema/core-ledger.json",
+    "infra/schema/core-ledger.md",
     "data/**",
     "**/fixtures/**",
     "**/worker-configuration.d.ts",
