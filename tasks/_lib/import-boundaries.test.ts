@@ -43,6 +43,24 @@ describe("import boundaries", () => {
     expect(boundaryViolations("services/observation-pipeline/src/worker.ts", allowed)).toEqual([]);
   });
 
+  test("a promoted collector is in scope: the import it had in poc/ is now a crossing", () => {
+    // U04 moved the collectors to services/collector-* and their diagnostics
+    // helper to packages/; the relative import they used to share would now
+    // point back into poc/, and the first rule has to see it.
+    const path = "services/collector-vpass/src/worker.ts";
+    const before =
+      'import { createDiagnostics } from "../../../poc/collector-diagnostics/src/index";';
+    expect(boundaryViolations(path, before).map((violation) => violation.rule)).toEqual([
+      "deployed-code-imports-poc",
+    ]);
+    const after =
+      'import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";';
+    expect(boundaryViolations(path, after)).toEqual([]);
+    expect(
+      SOURCES.filter((source) => source.startsWith("services/collector-")).length,
+    ).toBeGreaterThan(0);
+  });
+
   test("the UI rule catches a query builder and allows the shared contract", () => {
     const forbidden =
       'import { snapshotCtes } from "../../../../packages/read-model/src/concepts.ts";';
