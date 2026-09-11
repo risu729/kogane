@@ -21,7 +21,7 @@ From the repository root:
 mise run install
 mise run web:build
 mise run local-pipeline:export-demo
-cd services/evidence-browser
+cd services/app
 ./node_modules/.bin/wrangler deploy --config wrangler.demo.jsonc --dry-run
 ./node_modules/.bin/wrangler deploy --config wrangler.demo.jsonc
 ```

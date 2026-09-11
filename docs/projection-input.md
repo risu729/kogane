@@ -84,7 +84,7 @@ and `packages/storage-d1`'s `bun:sqlite` double counts the same way (it reads
 count from `meta.changes` on a ledger table. The three places that did now
 count the rows their statement returns instead (`RETURNING`): the repaired
 publications in `packages/storage-d1/src/atomic/publication.ts`,
-`pointersMoved` in `services/observation-pipeline/src/release-adoption.ts`, and
+`pointersMoved` in `services/processor/src/release-adoption.ts`, and
 the sealed runs in `packages/storage-d1/src/core/identity-store.ts`. Guards that
 only ask "did this match a row?" are unaffected, and no guard that requires
 exactly one row sits on a ledger table. `projection-input.test.ts` ("D1 counts
@@ -114,7 +114,7 @@ are `INSERT … WHERE NOT EXISTS` followed by a read.
 ## Capturing the input once
 
 `captureFixedInput` in
-`services/observation-pipeline/src/balance-projection-job.ts`:
+`services/processor/src/balance-projection-job.ts`:
 
 ```text
 read revision r0
@@ -276,11 +276,11 @@ and its outbox rows stay pending, exactly as "nothing was updated" should read.
    (`packages/storage-d1/migrations/core/`). It is additive: new tables, new
    columns with defaults, and new triggers. A Worker build that predates it
    keeps working, because it never names any of them.
-2. **Writer** — deploy `services/observation-pipeline`. Its wrangler config
+2. **Writer** — deploy `services/processor`. Its wrangler config
    gains the `DATA` R2 binding, which points at the same physical bucket as
    `EVIDENCE` (`kogane-raw-evidence`); no new bucket is created, and no runtime
    resource identity changes.
-3. **Reader** — deploy `services/evidence-browser`. "Is the snapshot behind?"
+3. **Reader** — deploy `services/app`. "Is the snapshot behind?"
    becomes a revision comparison against the active pointer instead of a digest
    of counts.
 
@@ -293,14 +293,14 @@ stays inflated, which is why the three counting call sites were changed to
 
 ## Verified locally (synthetic data only)
 
-| Acceptance                                                                                                                                                                                                                                                                            | Where                                                                                                             |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| G2-01 the 100 → 150 counter-example, the trigger ledger, the snapshot identity                                                                                                                                                                                                        | `packages/read-model/test/source-revision.test.ts`                                                                |
-| G2-03 a write in each dependency family, G2-04 checkpoints excluded and no silent rewind                                                                                                                                                                                              | `packages/read-model/test/source-revision.test.ts`, `services/observation-pipeline/test/projection-input.test.ts` |
-| G2-02 capture discarded and bounded; G2-05 resume from the stored input and the shared record after a build-digest change; G2-06 budget refusals; G2-07/G2-08 chunk re-send and rollback; G2-09/G2-14 the fence writes nothing; G2-10 no pointer regression; G2-11 … G2-13 completion | `services/observation-pipeline/test/projection-input.test.ts`                                                     |
-| The projection job end to end, the outbox routing and the sealed-snapshot invariants                                                                                                                                                                                                  | `services/observation-pipeline/test/balance-projection.test.ts`                                                   |
-| The receipt that stays `accepted` while a target is blocked                                                                                                                                                                                                                           | `services/observation-pipeline/test/change-lifecycle.test.ts`                                                     |
-| The v2 pages, cursors and the v1 parity over the new identity                                                                                                                                                                                                                         | `services/evidence-browser/test/balances-v2.test.ts`                                                              |
+| Acceptance                                                                                                                                                                                                                                                                            | Where                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| G2-01 the 100 → 150 counter-example, the trigger ledger, the snapshot identity                                                                                                                                                                                                        | `packages/read-model/test/source-revision.test.ts`                                                     |
+| G2-03 a write in each dependency family, G2-04 checkpoints excluded and no silent rewind                                                                                                                                                                                              | `packages/read-model/test/source-revision.test.ts`, `services/processor/test/projection-input.test.ts` |
+| G2-02 capture discarded and bounded; G2-05 resume from the stored input and the shared record after a build-digest change; G2-06 budget refusals; G2-07/G2-08 chunk re-send and rollback; G2-09/G2-14 the fence writes nothing; G2-10 no pointer regression; G2-11 … G2-13 completion | `services/processor/test/projection-input.test.ts`                                                     |
+| The projection job end to end, the outbox routing and the sealed-snapshot invariants                                                                                                                                                                                                  | `services/processor/test/balance-projection.test.ts`                                                   |
+| The receipt that stays `accepted` while a target is blocked                                                                                                                                                                                                                           | `services/processor/test/change-lifecycle.test.ts`                                                     |
+| The v2 pages, cursors and the v1 parity over the new identity                                                                                                                                                                                                                         | `services/app/test/balances-v2.test.ts`                                                                |
 
 Not verified: production data volumes, a real concurrent second Worker (the
 lease and the fence are exercised by simulating the displaced writer), R2

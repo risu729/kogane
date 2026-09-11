@@ -1,7 +1,7 @@
 # Processor: shared-R2 terminals, registration, lanes and operations dispatch
 
 Unified plan U08 (chapters 02 §1-3 and §5, 03 §4-§7, 05 §6, 15 §2). What the
-Processor (`services/observation-pipeline`, Worker `kogane-observation-pipeline`)
+Processor (`services/processor`, Worker `kogane-observation-pipeline`)
 does with a collection run that a collector persisted into the shared DATA
 bucket, how it stays exactly-once, what it records per stage, and what it took
 over from `services/collector-r2-importer`.
@@ -179,7 +179,7 @@ all — an object that is absent, the wrong size or the wrong digest is refused
 (G1-15). The collection contract's bucket interface has no copy operation, so
 there is none to call.
 
-`services/observation-pipeline/test/collection.test.ts` asserts this by
+`services/processor/test/collection.test.ts` asserts this by
 comparing the bucket's put log before and after registration.
 
 ## 5. Stage records
@@ -306,7 +306,7 @@ client the Processor registers as.
 
 The Queue **does not exist yet**. `infra/resources.md` says so per queue
 ("to be created by the first deploy"), and the first deploy that carries
-`services/observation-pipeline/wrangler.jsonc` creates it:
+`services/processor/wrangler.jsonc` creates it:
 
 1. `kogane-collection-terminals` and `kogane-collection-terminals-dlq`;
 2. an R2 event-notification rule on `kogane-raw-evidence` for object creation,
@@ -321,7 +321,7 @@ The Queue **does not exist yet**. `infra/resources.md` says so per queue
    re-applied after any change to the declaration, with:
 
    ```sh
-   wrangler d1 execute kogane-raw-evidence --remote --file infra/bootstrap/ingest-clients.sql --config services/observation-pipeline/wrangler.jsonc
+   wrangler d1 execute kogane-raw-evidence --remote --file infra/bootstrap/ingest-clients.sql --config services/processor/wrangler.jsonc
    ```
 
    It is not a migration: it creates no schema, and it is applied by an
@@ -366,7 +366,7 @@ already registered.
 ## 12. Verified locally / not verified
 
 Verified with synthetic data only
-(`services/observation-pipeline/test/collection.test.ts`,
+(`services/processor/test/collection.test.ts`,
 `operation-dispatch.test.ts`, `legacy-import.test.ts`, `lanes.test.ts`;
 `packages/storage-d1/test/migrations.test.ts`;
 `scripts/config-bootstrap.test.ts`): the acceptance rows of §3 and §4, the

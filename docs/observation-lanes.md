@@ -153,7 +153,7 @@ evidence-browser metadata API and identity audit; they are not duplicated here.
 No field carries an amount, a raw body, a token or a provider URL.
 
 The scheduled handler logs each stage as its own JSON event with counts only,
-in this order (`runScheduled` in `services/observation-pipeline/src/worker.ts`):
+in this order (`runScheduled` in `services/processor/src/worker.ts`):
 
 | #   | Event                  | Gate                                                                                                                                                                                                                                                                                                                             |
 | --- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -188,7 +188,7 @@ load budgets and the recovery drills for these stages are in
 
 ## Invariants kept and how they were verified
 
-Synthetic fixtures only, under Miniflare D1/R2 (`services/observation-pipeline/test`):
+Synthetic fixtures only, under Miniflare D1/R2 (`services/processor/test`):
 
 | Invariant                                                                                                            | Test                                                                                                   |
 | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |

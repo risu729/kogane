@@ -165,10 +165,10 @@ One D1 database named **`kogane-read`**, id
 created **empty** on 2026-09-11: no migration has been applied to it, and none
 is applied by anything but the deploy step below. It is bound as `READ` in:
 
-- `services/observation-pipeline/wrangler.jsonc`;
-- `services/observation-pipeline/wrangler.read-migrations.jsonc` (also
+- `services/processor/wrangler.jsonc`;
+- `services/processor/wrangler.read-migrations.jsonc` (also
   `migrations_dir` `../../packages/storage-d1/migrations/read`);
-- `services/evidence-browser/wrangler.jsonc`.
+- `services/app/wrangler.jsonc`.
 
 Dry runs and tests never contact the account: the tests bind a local D1 and
 apply the read migrations from the directory. The demo Worker deliberately gets
@@ -187,7 +187,7 @@ find this configuration; it is not on this branch yet.
 1. **Create the database.** Done: `kogane-read` exists, empty, and its id is
    in the three configs above.
 2. **Apply the READ migrations.**
-   `wrangler d1 migrations apply kogane-read --remote --config services/observation-pipeline/wrangler.read-migrations.jsonc`.
+   `wrangler d1 migrations apply kogane-read --remote --config services/processor/wrangler.read-migrations.jsonc`.
    The database is empty afterwards: `read_instance` has no row yet, because a
    migration cannot generate an identity. The first build claims it.
 3. **Deploy the processor.** Both flags still off; it writes nothing new.
@@ -220,18 +220,18 @@ database and applies the read migrations, the Processor rebuilds from CORE and
 the fixed inputs, and the old cursors are `context_expired`. CORE rows, CORE
 digests and the DATA objects are untouched — that is the property the whole
 separation exists for, and it is tested in
-`services/observation-pipeline/test/read-projection.test.ts` (G0-09, G3-12).
+`services/processor/test/read-projection.test.ts` (G0-09, G3-12).
 
 ## Verified locally (synthetic data only)
 
-| Acceptance                                                                                                                 | Where                                                        |
-| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| The schema: STRICT, no CORE foreign key, the instance guard                                                                | `packages/storage-d1/test/read-schema.test.ts`               |
-| Identity, the retired-content rebuild, the racing start, G2-07, G2-08, G2-09 (late seal after a successor), G2-10          | `packages/storage-d1/test/read-writer.test.ts`               |
-| The cursor codec and the pointer-only reader (G3-01, G3-03)                                                                | `packages/storage-d1/test/read-cursor.test.ts`               |
-| The lane end to end on real D1: G2-05, G2-07, G2-11, G2-12, the attempt rebuild, and the total loss (G0-09, G3-12)         | `services/observation-pipeline/test/read-projection.test.ts` |
-| The routes: G3-01, G3-02, G3-03, G3-04, another baseline refused, and a saved report with every READ table dropped (G0-11) | `services/evidence-browser/test/balances-v2-read.test.ts`    |
-| The READ schema ledger is the generator's output and is built from its own directory                                       | `scripts/core-schema-ledger.test.ts`                         |
+| Acceptance                                                                                                                 | Where                                             |
+| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| The schema: STRICT, no CORE foreign key, the instance guard                                                                | `packages/storage-d1/test/read-schema.test.ts`    |
+| Identity, the retired-content rebuild, the racing start, G2-07, G2-08, G2-09 (late seal after a successor), G2-10          | `packages/storage-d1/test/read-writer.test.ts`    |
+| The cursor codec and the pointer-only reader (G3-01, G3-03)                                                                | `packages/storage-d1/test/read-cursor.test.ts`    |
+| The lane end to end on real D1: G2-05, G2-07, G2-11, G2-12, the attempt rebuild, and the total loss (G0-09, G3-12)         | `services/processor/test/read-projection.test.ts` |
+| The routes: G3-01, G3-02, G3-03, G3-04, another baseline refused, and a saved report with every READ table dropped (G0-11) | `services/app/test/balances-v2-read.test.ts`      |
+| The READ schema ledger is the generator's output and is built from its own directory                                       | `scripts/core-schema-ledger.test.ts`              |
 
 Not verified: production volumes, a real second Worker racing the lease (the
 displaced writer is simulated), R2 failure injection, and the retention of

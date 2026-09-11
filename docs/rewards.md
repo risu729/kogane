@@ -117,7 +117,7 @@ migration 0033 が投入するrule:
 
 ## 7. 昇格ジョブ
 
-`services/observation-pipeline/src/reward-claims-job.ts`。flag `REWARD_CLAIMS_ENABLED`（既定 `"false"`）。
+`services/processor/src/reward-claims-job.ts`。flag `REWARD_CLAIMS_ENABLED`（既定 `"false"`）。
 A10のreconciliation laneと同じ扱いで、`"1"` か `"true"` のときだけ `runScheduled` の
 `reward_claims_sweep` laneが実行される。offのときlane自体が飛ばされるので、
 既存の `observation_sweep` / `identity_sweep` の出力は変わらない。
@@ -139,9 +139,9 @@ A10のreconciliation laneと同じ扱いで、`"1"` か `"true"` のときだけ
 
 ## 8. 読み取りAPI
 
-capability `rewardsV2`（既定 off）。`services/evidence-browser` の `REWARDS_V2_ENABLED` が
+capability `rewardsV2`（既定 off）。`services/app` の `REWARDS_V2_ENABLED` が
 `"1"` か `"true"` のときだけ `/api/meta` が `rewardsV2: true` を広告し、route群が有効になる。
-広告と実際に応答するrouteは `services/evidence-browser/src/capabilities.ts` の
+広告と実際に応答するrouteは `services/app/src/capabilities.ts` の
 `centralStoreCapabilities(env)` が一箇所で決める。同じ関数がA10の `eventsV2`
 （flagに加えて0032の投影が存在するかどうか）も重ね合わせるため、`/api/meta` が
 Workerの拒否するrouteを広告することはない。
@@ -170,9 +170,9 @@ publication pointerの巻き戻しはreward側の表示からも同時に消え�
 ## 10. デプロイ順とロールバック
 
 1. `0033_reward_buckets.sql` を適用する（追加のみ。既存の表・trigger・indexに触れない）。
-2. `services/observation-pipeline` をデプロイする。`REWARD_CLAIMS_ENABLED` は `"false"` のまま。
+2. `services/processor` をデプロイする。`REWARD_CLAIMS_ENABLED` は `"false"` のまま。
    問題がなければ `"1"`（または `"true"`）にして昇格を開始する。
-3. `services/evidence-browser` をデプロイする。`REWARDS_V2_ENABLED` は `"false"` のまま。
+3. `services/app` をデプロイする。`REWARDS_V2_ENABLED` は `"false"` のまま。
    claimが十分に溜まってから `"1"`（または `"true"`）にする。
 4. UIは同じWorkerのassetsとして配られ、capabilityがoffの間はnavにもrouteにも現れない。
 
@@ -192,12 +192,12 @@ publication pointerの巻き戻しはreward側の表示からも同時に消え�
   retroactive根拠のないtier変更、キャンペーン/会員限定の複数offer、期限を跨ぐ完了、
   返却先bucketと期限が変わる取消、循環経路・共有quota・深さ上限・着金前再利用の棄却）、
   月末・閏日・日付のみ入力・タイムゾーン仮置きを実行した。
-- `services/observation-pipeline/test/reward-claims.test.ts` — migration 0033 の適用（既存行あり）、
+- `services/processor/test/reward-claims.test.ts` — migration 0033 の適用（既存行あり）、
   seedの内容、追記のみの制約、昇格の冪等性、未公開parse runの不可視、読めない期限表記の扱い、
   flag off時にlaneが実行されず何も書かないこと。
-- `services/evidence-browser/test/rewards-api.test.ts` — capability off時の404、認証、
+- `services/app/test/rewards-api.test.ts` — capability off時の404、認証、
   書き込み拒否、保有・期限・simulationの内容、simulationが何も書かないこと。
-- `services/evidence-browser/test/conformance.test.ts` — capabilityとrouteの対応。
+- `services/app/test/conformance.test.ts` — capabilityとrouteの対応。
 
 確認していないこと: 本番D1・本番Workerでの動作、実際のプログラム規約の現在の内容、
 providerが表示する期限の実際の表記ゆれ、V Point の `point_type` / `point_div` の実値。

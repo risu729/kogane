@@ -59,12 +59,12 @@ bun run scripts/load-fixture.ts
 KOGANE_LOAD_DAYS=30 KOGANE_LOAD_UNITS=8 bun run scripts/load-fixture.ts
 ```
 
-`services/evidence-browser/test/load.test.ts` measures the reader with it. It is
+`services/app/test/load.test.ts` measures the reader with it. It is
 opt-in, because building the fixture through the real ingest path is slow and
 the numbers only mean something when the shape was chosen deliberately:
 
 ```sh
-cd services/evidence-browser
+cd services/app
 KOGANE_LOAD=1 KOGANE_LOAD_DAYS=8 KOGANE_LOAD_UNITS=4 KOGANE_LOAD_OBSERVATIONS=5 \
   bunx vitest run test/load.test.ts --silent=false
 ```

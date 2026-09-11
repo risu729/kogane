@@ -110,7 +110,7 @@ them (and shows staleness, which is a display concern outside this PR).
 | `parse_coverage_claims`     | one per claim: the claim fields, `evidence_refs_json`, plus `parent_run_status` and `parent_run_failure_count` recorded from the parent fetch run at parse time                       | append-only (triggers)      |
 | `dataset_snapshot_policies` | one per `(parser_name, dataset)`: `source_id, policy_id, policy_version, required_parser_version, replaces_previous_on_complete_empty, unit_scope, snapshot_selection, updated_at_ms` | operational state (mutable) |
 
-The Worker (`services/observation-pipeline/src/worker.ts`) validates the
+The Worker (`services/processor/src/worker.ts`) validates the
 contract right after `parse` (`contractRows`): an invalid issue or claim, a
 duplicate claim id, more than 10,000 issues or 100 claims is
 `parse_contract_invalid`, a terminal job failure like `parser_rejected`, and
@@ -162,7 +162,7 @@ eligibility" below.
 ## Switching a dataset to coverage-v1
 
 1. Deploy in order: migrations 0025 and 0026 →
-   `services/observation-pipeline` Worker → `services/evidence-browser`. The
+   `services/processor` Worker → `services/app`. The
    reader's SQL names `dataset_snapshot_policies`, `parse_coverage_claims` and
    `published_parse_runs`, so the migrations must exist before the reader; the
    Worker must run before any claim exists. The snapshot CTEs sit on top of the
@@ -228,7 +228,7 @@ inside a unit; the only relaxed predicate is `unitParseable`.
 One definition, `unitScopedEligibilitySql` in
 `packages/parsers/src/snapshot-query.ts`, composed by:
 
-- the Worker's `artifactSql` (`services/observation-pipeline/src/worker.ts`),
+- the Worker's `artifactSql` (`services/processor/src/worker.ts`),
   which every lane — incremental, repair, replay — uses to create jobs and
   which `parseJob` re-checks before parsing, so a partial run produces jobs
   only for its eligible units;
@@ -342,8 +342,8 @@ was partial and which unit report allowed it.
 ### Enabling one dataset (operator step)
 
 1. Deploy in order: migration `0037` (on top of `0025`, `0026`, `0029`, `0035`
-   and `0036`) → `services/observation-pipeline` Worker →
-   `services/evidence-browser`. Both the Worker and the reader name
+   and `0036`) → `services/processor` Worker →
+   `services/app`. Both the Worker and the reader name
    `observation_fetch_artifact_units` and
    `dataset_snapshot_policies.snapshot_selection`, so the migration must exist
    before either. Nothing changes at any of the three steps.
@@ -420,8 +420,8 @@ Synthetic data only: `mise run ci:root` (which
 runs the publication-gate predicate guard; the unit-scope predicate adds no
 `superseded_by_parse_run_id IS NULL` and no `status = 'ok'` read, and every
 adoption test still goes through `published_parse_runs`),
-`experiments/observation-pipeline-local`, `services/observation-pipeline`,
-`services/raw-evidence`, `services/evidence-browser`, `packages/read-model`;
+`experiments/observation-pipeline-local`, `services/processor`,
+`services/raw-evidence`, `services/app`, `packages/read-model`;
 `hk check --all`. Not verified: production data, a real D1 or R2, real MyJCB
 evidence, and the effect of switching any production dataset to the `unit`
 scope (no dataset is switched by this change).
@@ -445,8 +445,8 @@ scope (no dataset is switched by this change).
 ## Verified locally
 
 Synthetic data only: the CI checks (today `mise run ci:<short>`) of
-`experiments/observation-pipeline-local`, `services/observation-pipeline`,
-`services/raw-evidence`, `services/evidence-browser`, `packages/read-model`,
+`experiments/observation-pipeline-local`, `services/processor`,
+`services/raw-evidence`, `services/app`, `packages/read-model`,
 `packages/domain`; the repository-wide guards (`mise run ci:root`);
 `hk check --all`. Not verified:
 production data, a real D1 or R2, and the effect of switching any production

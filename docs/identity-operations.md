@@ -6,7 +6,7 @@ remains GET/HEAD-only behind the existing Access gate.
 
 ## Bounded catchup
 
-From `services/observation-pipeline` in the authenticated WSL environment:
+From `services/processor` in the authenticated WSL environment:
 
 ```sh
 node scripts/identity-ops.ts catchup 500 sbi-securities

@@ -1,11 +1,11 @@
 # Experiment: local observation pipeline
 
-|                        |                                                                                                                                                                                                                                                                                                                                                           |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Owner**              | risu729                                                                                                                                                                                                                                                                                                                                                   |
-| **Expiry**             | 2026-12-31                                                                                                                                                                                                                                                                                                                                                |
-| **Stop condition**     | The App API covers replay and status. When `services/evidence-browser` (later `services/app`) can re-run a parse over stored evidence and report pipeline freshness through `/api/ops/v1/*`, this directory is deleted and what it settled is appended to [`docs/research/observation-pipeline-poc.md`](../../docs/research/observation-pipeline-poc.md). |
-| **Deployed resources** | None. No Worker, no bucket, no queue, no cron. It runs on a developer's machine against a local SQLite file.                                                                                                                                                                                                                                              |
+|                        |                                                                                                                                                                                                                                                                                                                       |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Owner**              | risu729                                                                                                                                                                                                                                                                                                               |
+| **Expiry**             | 2026-12-31                                                                                                                                                                                                                                                                                                            |
+| **Stop condition**     | The App API covers replay and status. When `services/app` can re-run a parse over stored evidence and report pipeline freshness through `/api/ops/v1/*`, this directory is deleted and what it settled is appended to [`docs/research/observation-pipeline-poc.md`](../../docs/research/observation-pipeline-poc.md). |
+| **Deployed resources** | None. No Worker, no bucket, no queue, no cron. It runs on a developer's machine against a local SQLite file.                                                                                                                                                                                                          |
 
 ## What it is
 
@@ -17,7 +17,7 @@ the deployed parsers, and served read-only with full provenance.
   standing in for D1 and R2. The SQL is written to stay valid on D1.
 - `src/ingest.ts`, `src/parse.ts` — the ingest and parse entry points.
 - `src/queries.ts` — the read queries, including the `CURRENT` snapshot rule
-  that `packages/read-model` and `services/observation-pipeline` are compared
+  that `packages/read-model` and `services/processor` are compared
   against.
 - `src/api.ts` — the read-only Hono API, the same contract the production
   Worker serves (`packages/observation-shared`).
@@ -37,7 +37,7 @@ the dependency is a decision rather than an accident:
 
 1. **The synthetic demo.** `local-pipeline:export-demo` ingests only the
    committed fixtures into a throwaway store, captures the API responses and
-   writes `services/evidence-browser/demo-snapshot.json`, which the
+   writes `services/app/demo-snapshot.json`, which the
    `kogane-demo` Worker serves. `infra/workers-ci.json` names that task as the
    demo Worker's prepare step.
 2. **A second implementation of the read rules.** The snapshot-selection and
