@@ -319,69 +319,6 @@
       ]
     },
     {
-      "directory": "poc/vpass-json",
-      "workspace": "poc",
-      "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "promote-service",
-        "proposedTarget": "services/collector-vpass",
-        "requiredVerification": "keep the Worker name and the R2/cron/auth contract",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-vpass-collector-poc; buckets=kogane-vpass-collector-poc)"
-      },
-      "workers": [
-        {
-          "config": "poc/vpass-json/wrangler.jsonc",
-          "name": "kogane-vpass-collector-poc",
-          "main": "src/worker.ts",
-          "role": "deployed",
-          "liveWorker": true,
-          "crons": [
-            "0 21 * * *"
-          ],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "SNAPSHOTS",
-              "bucket": "kogane-vpass-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [
-            {
-              "binding": "RAW_EVIDENCE_QUEUE",
-              "queue": "kogane-vpass-raw-evidence-import"
-            }
-          ],
-          "queueConsumers": [
-            {
-              "queue": "kogane-vpass-raw-evidence-import",
-              "deadLetterQueue": "kogane-vpass-raw-evidence-import-dlq",
-              "maxBatchSize": 1,
-              "maxRetries": 10
-            }
-          ],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [
-            {
-              "binding": "RAW_EVIDENCE_IMPORTER",
-              "service": "kogane-collector-r2-importer"
-            }
-          ],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        }
-      ]
-    },
-    {
       "directory": "poc/vpoint-pay-worker",
       "workspace": "poc",
       "disposition": {
@@ -1634,6 +1571,69 @@
           "varNames": [
             "COLLECTOR_SCHEMA_VERSION"
           ],
+          "requiredSecretNames": [],
+          "unextractedKeys": []
+        }
+      ]
+    },
+    {
+      "directory": "services/collector-vpass",
+      "workspace": "services",
+      "disposition": {
+        "source": "poc_disposition.csv",
+        "proposedAction": "promote-service",
+        "proposedTarget": "services/collector-vpass",
+        "requiredVerification": "keep the Worker name and the R2/cron/auth contract",
+        "executionStatus": "EXECUTED_U04",
+        "planLiveResourceStatus": "NOT_VERIFIED",
+        "liveResourceStatus": "LIVE(workers=kogane-vpass-collector-poc; buckets=kogane-vpass-collector-poc)"
+      },
+      "workers": [
+        {
+          "config": "services/collector-vpass/wrangler.jsonc",
+          "name": "kogane-vpass-collector-poc",
+          "main": "src/worker.ts",
+          "role": "deployed",
+          "liveWorker": true,
+          "crons": [
+            "0 21 * * *"
+          ],
+          "emailHandler": false,
+          "d1": [],
+          "r2": [
+            {
+              "binding": "SNAPSHOTS",
+              "bucket": "kogane-vpass-collector-poc",
+              "live": true
+            }
+          ],
+          "kv": [],
+          "queueProducers": [
+            {
+              "binding": "RAW_EVIDENCE_QUEUE",
+              "queue": "kogane-vpass-raw-evidence-import"
+            }
+          ],
+          "queueConsumers": [
+            {
+              "queue": "kogane-vpass-raw-evidence-import",
+              "deadLetterQueue": "kogane-vpass-raw-evidence-import-dlq",
+              "maxBatchSize": 1,
+              "maxRetries": 10
+            }
+          ],
+          "durableObjects": [],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [],
+          "containers": [],
+          "vpcNetworks": [],
+          "serviceBindings": [
+            {
+              "binding": "RAW_EVIDENCE_IMPORTER",
+              "service": "kogane-collector-r2-importer"
+            }
+          ],
+          "varNames": [],
           "requiredSecretNames": [],
           "unextractedKeys": []
         }

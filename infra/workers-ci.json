@@ -169,7 +169,7 @@
     },
     {
       "name": "vpass-json",
-      "path": "poc/vpass-json",
+      "path": "services/collector-vpass",
       "config": "wrangler.jsonc"
     },
     {

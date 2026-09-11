@@ -2,30 +2,30 @@
 #:schema https://mise.jdx.dev/schema/mise-task.json
 
 ["vpass-json:types"]
-description = "Generate the Cloudflare Worker types of poc/vpass-json."
-dir = "poc/vpass-json"
+description = "Generate the Cloudflare Worker types of services/collector-vpass."
+dir = "services/collector-vpass"
 run = "./node_modules/.bin/wrangler types"
 
 ["vpass-json:typecheck"]
-description = "Type-check poc/vpass-json."
+description = "Type-check services/collector-vpass."
 depends = ["vpass-json:types"]
-dir = "poc/vpass-json"
+dir = "services/collector-vpass"
 run = "./node_modules/.bin/tsc --noEmit"
 
 ["vpass-json:test"]
-description = "Run the poc/vpass-json tests."
+description = "Run the services/collector-vpass tests."
 depends = ["vpass-json:types"]
-dir = "poc/vpass-json"
+dir = "services/collector-vpass"
 run = "bun test"
 
 ["vpass-json:dry-run"]
-description = "Validate the poc/vpass-json deployment without uploading it."
+description = "Validate the services/collector-vpass deployment without uploading it."
 depends = ["vpass-json:types"]
-dir = "poc/vpass-json"
+dir = "services/collector-vpass"
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
 ["ci:vpass-json"]
-description = "Every check CI runs for poc/vpass-json."
+description = "Every check CI runs for services/collector-vpass."
 depends = ["vpass-json:typecheck", "vpass-json:test"]

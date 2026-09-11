@@ -240,7 +240,7 @@
         "wrangler": "4.125.0",
       },
     },
-    "poc/vpass-json": {
+    "services/collector-vpass": {
       "name": "@kogane/poc-vpass-json",
       "dependencies": {
         "@clack/prompts": "1.0.0",
@@ -519,7 +519,7 @@
 
     "@kogane/poc-sony-bank-worker": ["@kogane/poc-sony-bank-worker@workspace:services/collector-sony-bank"],
 
-    "@kogane/poc-vpass-json": ["@kogane/poc-vpass-json@workspace:poc/vpass-json"],
+    "@kogane/poc-vpass-json": ["@kogane/poc-vpass-json@workspace:services/collector-vpass"],
 
     "@kogane/poc-vpoint-pay-worker": ["@kogane/poc-vpoint-pay-worker@workspace:poc/vpoint-pay-worker"],
 

@@ -246,32 +246,6 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): BRIDGE_TOKEN
 
-### `poc/vpass-json`
-
-- Disposition (poc_disposition.csv): `promote-service` → services/collector-vpass
-- Required verification: keep the Worker name and the R2/cron/auth contract
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-vpass-collector-poc; buckets=kogane-vpass-collector-poc)
-
-#### `kogane-vpass-collector-poc` — `poc/vpass-json/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
-- R2: SNAPSHOTS → kogane-vpass-collector-poc
-- KV: —
-- Queues: produce RAW_EVIDENCE_QUEUE → kogane-vpass-raw-evidence-import<br>consume kogane-vpass-raw-evidence-import (dlq kogane-vpass-raw-evidence-import-dlq)
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
-- Crons: `0 21 * * *`
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
 ### `poc/vpoint-pay-worker`
 
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-vpoint-pay
@@ -848,6 +822,32 @@ No wrangler config.
 - Crons: `0 21 * * *`
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Required secrets (names only): —
+
+### `services/collector-vpass`
+
+- Disposition (poc_disposition.csv): `promote-service` → services/collector-vpass
+- Required verification: keep the Worker name and the R2/cron/auth contract
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-vpass-collector-poc; buckets=kogane-vpass-collector-poc)
+
+#### `kogane-vpass-collector-poc` — `services/collector-vpass/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: —
+- R2: SNAPSHOTS → kogane-vpass-collector-poc
+- KV: —
+- Queues: produce RAW_EVIDENCE_QUEUE → kogane-vpass-raw-evidence-import<br>consume kogane-vpass-raw-evidence-import (dlq kogane-vpass-raw-evidence-import-dlq)
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Crons: `0 21 * * *`
+- Assets: —
+- Vars (names only): —
 - Required secrets (names only): —
 
 ### `services/evidence-browser`
