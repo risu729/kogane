@@ -23,7 +23,7 @@ import {
   sharedOutcome,
   waitingForHuman,
 } from "../src/shared-collection";
-import { runPrefix, sha256Hex } from "../src/storage";
+import { runPrefix, sha256Hex, storeManifest } from "../src/storage";
 import type { BackfillManifest, BackfillProgress, StoredArtifact } from "../src/types";
 
 const RUN_ID = "00000000-0000-4000-8000-000000000000";
@@ -327,5 +327,53 @@ describe("re-reading a run out of the staging bucket", () => {
     await expect(readStagedArtifacts(new FakeR2Bucket(), oversized)).rejects.toThrow(
       "shared_run_too_large",
     );
+  });
+});
+
+// Parity with the legacy path: the importer forwards this source's staged bytes
+// verbatim (it only checks the Shift_JIS round trip), so the shared path must
+// store exactly the staged bytes — provider responses and the manifest alike.
+describe("provider bytes are stored verbatim", () => {
+  test("Shift_JIS provider bytes reach DATA unchanged, not re-encoded", async () => {
+    // `{"k":"あ"}` in Shift_JIS: valid for the provider, not valid UTF-8, so
+    // any decode/re-encode on the way would change it.
+    const raw = Uint8Array.from([0x7b, 0x22, 0x6b, 0x22, 0x3a, 0x22, 0x82, 0xa0, 0x22, 0x7d]);
+    const key = `${PREFIX}/balance.raw.json.sjis`;
+    const manifest = await manifestOf({
+      artifacts: [
+        {
+          dataset: "balance-raw",
+          key,
+          mediaType: "application/json; charset=Shift_JIS",
+          bytes: raw.byteLength,
+          sha256: await sha256Hex(raw),
+        },
+      ],
+    });
+    const staging = new FakeR2Bucket();
+    await staging.seed(key, raw);
+    const data = new FakeR2Bucket();
+    const summary = await persistSharedRun(data, {
+      ...inputOf(manifest),
+      bytesByKey: await readStagedArtifacts(staging, manifest),
+    });
+    expect(summary.outcome).toBe("persisted");
+    const read = await readTerminal(data, "smbc-direct", RUN_ID);
+    if (read.outcome !== "found") throw new Error("unreachable");
+    const stored = read.manifest.artifacts.find(
+      (entry) => entry.artifactKey === "balance.raw.json.sjis",
+    );
+    expect(stored?.mediaType).toBe("application/json");
+    expect(stored?.role).toBe("provider_response");
+    const object = await data.get(stored!.storageRef.key);
+    expect([...new Uint8Array(await object!.arrayBuffer())]).toEqual([...raw]);
+  });
+
+  test("the collector manifest in DATA is the exact bytes legacy mode stages", async () => {
+    const manifest = await manifestOf();
+    const staging = new FakeR2Bucket();
+    const key = await storeManifest(staging as unknown as R2Bucket, PREFIX, manifest);
+    const staged = await staging.get(key);
+    expect([...new Uint8Array(await staged!.arrayBuffer())]).toEqual([...manifestBytes(manifest)]);
   });
 });

@@ -159,3 +159,37 @@ describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () =
     expect(everything).not.toContain("private-relay-token");
   });
 });
+
+// Parity with the legacy path: every page a shared-mode terminal names passes
+// the importer's own sanitizer unchanged, so the bytes in DATA are the bytes
+// `kogane-collector-r2-importer` would have sent centrally for the same run.
+const { sanitizeGlobalPassHtml } = await import("../../collector-r2-importer/src/global-pass");
+
+describe("sanitization parity with the legacy importer", () => {
+  test("every stored page is byte-identical to what the importer sends centrally", async () => {
+    const { result, data } = await trigger("shared");
+    const read = await readTerminal(data, "prestia-globalpass", String(result.runId));
+    if (read.outcome !== "found") throw new Error("unreachable");
+    const pages = read.manifest.artifacts.filter(
+      (entry) => entry.role === "sanitized_provider_capture",
+    );
+    expect(pages).toHaveLength(2);
+    for (const page of pages) {
+      const stored = await data.get(page.storageRef.key);
+      const bytes = new Uint8Array(await stored!.arrayBuffer());
+      // The importer validates a v2 page and returns it byte-for-byte or
+      // refuses it; identical bytes here mean the shared path stored exactly
+      // the legacy central bytes.
+      const legacy = sanitizeGlobalPassHtml(bytes, GLOBALPASS_SCHEMA_VERSION);
+      expect([...legacy]).toEqual([...bytes]);
+      expect(page.sha256).toBe(await digestOf(legacy));
+    }
+  });
+});
+
+async function digestOf(bytes: Uint8Array): Promise<string> {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const digest = await crypto.subtle.digest("SHA-256", copy.buffer);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}

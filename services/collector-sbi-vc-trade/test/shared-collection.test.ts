@@ -274,3 +274,36 @@ describe("one copy: shared mode names what legacy mode would have staged", () =>
     expect([...new Uint8Array(await shared!.arrayBuffer())]).toEqual([...described.encoded]);
   });
 });
+
+describe("G3-07 session material never reaches DATA", () => {
+  test("an envelope that still carries the session key is refused, not stored", async () => {
+    // The synthetic shape of a gateway response *before* `collectSbiVcTrade`
+    // strips `meta.secureKey`; it must never be plannable.
+    const leaked = JSON.stringify({
+      meta: { status: "OK", secureKey: "synthetic-session-key" },
+      body: { list: [] },
+    });
+    const manifest = manifestOf({ artifacts: [storedArtifact("cash-balances")] });
+    const bucket = new FakeR2Bucket();
+    await expect(
+      persistSharedRun(bucket, {
+        ...inputOf(manifest),
+        captures: [{ dataset: "cash-balances", body: leaked }],
+      }),
+    ).rejects.toThrow("shared_secure_key_present");
+    expect(bucket.putKeys).toEqual([]);
+  });
+
+  test("the acquisition session ref is the opaque generation id, never session material", async () => {
+    const bucket = new FakeR2Bucket();
+    await persistSharedRun(bucket, inputOf(manifestOf()));
+    const read = await readTerminal(bucket, "sbi-vc-trade", RUN_ID);
+    if (read.outcome !== "found") throw new Error("unreachable");
+    expect(read.manifest.acquisitionSessionRef).toMatch(/^session-[0-9a-f-]{36}$/u);
+    const everything = [...bucket.entries.values()]
+      .map((entry) => new TextDecoder().decode(entry.bytes))
+      .join("\n");
+    expect(everything).not.toContain("secureKey");
+    expect(everything).not.toContain("cookies");
+  });
+});

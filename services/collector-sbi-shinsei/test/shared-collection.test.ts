@@ -391,3 +391,69 @@ describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () =
     expect(everything).not.toContain("synthetic-secret");
   });
 });
+
+// Parity with the legacy path: the bytes a shared-mode terminal names are the
+// bytes `kogane-collector-r2-importer` derives from the staged run today, so
+// switching the target changes where the original lives, not what it is.
+const { parseSbiShinseiManifest, sanitizeManifest, sanitizeProviderResponse } =
+  await import("../../collector-r2-importer/src/sbi-shinsei");
+const { manifestFailure } = await import("../src/diagnostics");
+
+async function digestOf(bytes: Uint8Array): Promise<string> {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const digest = await crypto.subtle.digest("SHA-256", copy.buffer);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+describe("sanitization parity with the legacy importer", () => {
+  test("a provider capture is byte-identical to what the importer sends centrally", async () => {
+    const shared = sanitizeProviderCapture(PROVIDER_BODY);
+    const legacy = sanitizeProviderResponse(JSON.parse(PROVIDER_BODY));
+    expect(await digestOf(shared)).toBe(await digestOf(legacy));
+  });
+
+  test("a failed run's manifest is byte-identical to what the importer sends centrally", async () => {
+    const manifest = manifestOf({
+      status: "failed",
+      failures: [
+        {
+          operation: "collect",
+          errorType: "BrowserCollectionError",
+          message: "collector_request_failed",
+          diagnostics: { stage: "login-rejected", authenticationAttempted: true },
+        },
+      ],
+    });
+    // Legacy: the bytes `storeManifest` stages, parsed and sanitized by the importer.
+    const staged = new TextEncoder().encode(
+      JSON.stringify({ ...manifest, failures: manifest.failures.map(manifestFailure) }),
+    );
+    const legacy = sanitizeManifest(
+      parseSbiShinseiManifest(staged, `raw/sbi-shinsei/2026/08/31/${RUN_ID}/manifest.json`),
+    );
+    expect(await digestOf(sharedManifestBytes(manifest))).toBe(await digestOf(legacy));
+  });
+
+  test("a successful run's manifest is byte-identical to what the importer sends centrally", async () => {
+    const prefix = `raw/sbi-shinsei/2026/08/31/${RUN_ID}/`;
+    const manifest = manifestOf({
+      artifacts: [
+        "top-accounts-balance-and-activity",
+        "balance-summary-and-stage",
+        "exchange-rate",
+        "yen-deposit-account",
+        "normalized",
+      ].map((dataset) => ({
+        dataset,
+        key: `${prefix}${dataset === "normalized" ? "normalized.json" : `raw-${dataset}.json`}`,
+        mediaType: "application/json",
+        sha256: "a".repeat(64),
+        bytes: 10,
+      })),
+    });
+    const staged = new TextEncoder().encode(JSON.stringify(manifest));
+    const legacy = sanitizeManifest(parseSbiShinseiManifest(staged, `${prefix}manifest.json`));
+    expect(await digestOf(sharedManifestBytes(manifest))).toBe(await digestOf(legacy));
+  });
+});

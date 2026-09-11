@@ -140,6 +140,28 @@ function safeFailureCode(failure: CollectionFailure | undefined): string {
   return failure?.errorCode ?? "collector_run_incomplete";
 }
 
+/**
+ * Defence in depth for 12 §1: `collectSbiVcTrade` strips `meta.secureKey`
+ * before a body exists, and the importer refuses a staged envelope that still
+ * carries it (`artifact_secure_key_present`). The shared path refuses to plan
+ * one for the same reason, so a regression upstream cannot reach DATA.
+ */
+function assertNoSessionKey(body: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error("shared_artifact_json_invalid");
+  }
+  const meta =
+    typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>).meta
+      : undefined;
+  if (typeof meta === "object" && meta !== null && Object.hasOwn(meta, "secureKey")) {
+    throw new Error("shared_secure_key_present");
+  }
+}
+
 function runFields(input: SharedRunInput, transformations: TerminalTransformation[]) {
   const outcome = sharedOutcome(input.manifest);
   const fields: TerminalRunFields = {
@@ -195,6 +217,7 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
   for (const entry of input.manifest.artifacts) {
     const body = staged.get(entry.dataset);
     if (body === undefined) throw new Error("shared_capture_missing");
+    assertNoSessionKey(body);
     const artifactKey = `${entry.dataset}.json`;
     artifacts.push(
       await artifactOf({
