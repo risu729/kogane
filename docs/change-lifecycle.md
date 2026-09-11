@@ -210,13 +210,66 @@ POST /api/command/v1/operation  { operationId }                     -> { receipt
 
 ### Grants
 
-`AGENT_GRANTS` is a JSON array of verified subjects that are **agents**: they
-hold `interpretation.propose` and may plan and simulate. Every other
-authenticated subject is the human operator and holds
-`interpretation.accept` as well. An agent's `approve`/`commit` is
-`403 approval_required`; an agent sending `approved: true` is not an approval
-(addendum 10 §5). A malformed or absent list yields no agents, which only ever
-_removes_ capabilities from listed subjects.
+Two variables, both **JSON arrays of verified Access subjects**, both empty in
+the committed configuration, and both allow-lists:
+
+| Variable            | Names              | Capabilities                                      |
+| ------------------- | ------------------ | ------------------------------------------------- |
+| `OPERATOR_SUBJECTS` | the human operator | `interpretation.propose`, `interpretation.accept` |
+| `AGENT_GRANTS`      | agents             | `interpretation.propose`                          |
+
+One resolver reads them — `resolvePrincipal` in
+`packages/application/src/command/grants.ts`, through the Worker's adapter
+`services/app/src/grants.ts` — and it is the only grading on any command
+surface: the five command routes, the six `/api/ops/v1` routes and the six
+operations MCP tools all call it.
+
+- A subject in `OPERATOR_SUBJECTS` is the human operator.
+- A subject in `AGENT_GRANTS` is an agent. Its `approve`/`commit` is
+  `403 approval_required`; an agent sending `approved: true` is not an
+  approval (addendum 10 §5).
+- **A subject in neither list holds nothing**: `403 subject_not_granted`, on
+  every command route, every operations route and every operations MCP tool.
+  It never becomes a `Principal`, so no capability-less principal reaches the
+  forwarded actor headers or a decision row.
+
+**Empty means nobody, and that is intended.** With both variables empty — the
+shipped default — no authenticated subject can plan, simulate, approve or
+commit, and nothing can be requested through `/api/ops/v1`. A deployment gains
+an operator by naming one in `OPERATOR_SUBJECTS`, not by authenticating
+someone. Until then `COMMANDS_ENABLED=true` opens the paths and every one of
+them answers `subject_not_granted`.
+
+#### A configuration this Worker cannot read grants nobody anything
+
+Absent, empty or whitespace is the readable empty list. Anything _present_ but
+unreadable makes the whole deployment **misconfigured**, and then every
+command and operations request — from the named operator, from a named agent
+and from a stranger alike — answers `503 grants_misconfigured`:
+
+- either variable is not a string (a JSON var declared as an array or object
+  rather than the string that carries one), is not JSON, or is not a JSON
+  array (an object, a bare string, a number);
+- an entry is not a non-empty string of at most 256 characters;
+- a list carries more than 64 entries;
+- the same subject appears in both lists, so its role is undefined. This is a
+  refusal rather than a precedence rule: picking one would be a guess.
+
+The refusal is logged as `{"event":"grants_misconfigured","problem":<code>}`
+with `problem` one of `operator_subjects_invalid`, `agent_grants_invalid`,
+`subject_in_both_lists`. The configured value never reaches the log or the
+response: a grant list can carry an identity.
+
+`503` rather than `403` on purpose: a misconfiguration is the deployment's
+fault, not the caller's, which is the same distinction
+`command_executor_unavailable` already makes. `subject_not_granted` stays a
+`403`, because that request was answered correctly.
+
+This direction is the correction of a real defect. The earlier loader graded
+every unlisted subject as the human operator and parsed `AGENT_GRANTS`
+leniently, so an absent, malformed or mis-shaped list (the A08 grant _object_
+in this variable, for instance) silently gave every agent — and everyone else
+Access let through — `interpretation.accept`.
 
 ### Error codes
 
@@ -224,16 +277,21 @@ The nine machine-useful codes of addendum 10 §9 —
 `needs_scope_resolution`, `incomplete_evidence`, `unsupported_semantics`,
 `needs_rule_verification`, `stale_context`, `approval_required`,
 `idempotency_conflict`, `budget_exceeded`, `evidence_restricted` — plus the
-lifecycle codes `invalid_command`, `commands_disabled`, `plan_not_found`,
-`plan_expired`, `plan_not_open`, `approval_not_found`, `approval_expired`,
-`approval_exhausted`, `approval_scope_mismatch`, `receipt_not_found`,
-`target_missing`, `target_ambiguous`, `commit_failed`.
+lifecycle codes `invalid_command`, `commands_disabled`, `subject_not_granted`,
+`grants_misconfigured`, `plan_not_found`, `plan_expired`, `plan_not_open`,
+`approval_not_found`, `approval_expired`, `approval_exhausted`,
+`approval_scope_mismatch`, `receipt_not_found`, `target_missing`,
+`target_ambiguous`, `commit_failed`.
 
 Statuses: 400 invalid input, 403 refusal (`approval_required`,
-`commands_disabled`, `evidence_restricted`), 404 not found, 409 conflict
-(`stale_context`, `idempotency_conflict`, approval/plan state), 429
-`budget_exceeded`, 500 `commit_failed`. No error text carries provider content,
-an amount, a token or an exception string; `refs` holds safe identifiers only.
+`commands_disabled`, `subject_not_granted`, `actor_not_supported`,
+`evidence_restricted`), 404 not found, 409 conflict (`stale_context`,
+`idempotency_conflict`, approval/plan state), 429 `budget_exceeded`, 500
+`commit_failed`, 503 this deployment cannot serve the request at all
+(`grants_misconfigured`, `command_executor_unavailable`). No error text
+carries provider content, an amount, a token or an exception string; `refs`
+holds safe identifiers only, and neither authorization code carries a subject
+or a configured value.
 
 ## UI
 

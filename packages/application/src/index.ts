@@ -8,6 +8,8 @@
 // `HUMAN_CAPABILITIES`, `CommandCapability`); the query path grades a *grant*
 // looked up per principal (`QUERY_GRANT_CAPABILITIES`, `AgentCapability`).
 // They answer different questions, so a caller must name the one it means.
+// Both are allow-lists: `resolvePrincipal` refuses a subject the deployment
+// does not name, and `grantFor` answers `null` for one it has no grant for.
 
 // ── command services (A09) ───────────────────────────────────────────
 export { APPROVAL_TTL_SECONDS_DEFAULT, approve, type ApproveInput } from "./command/approve.ts";
@@ -25,6 +27,8 @@ export {
   type CommandStore,
   type CommitGuard,
   type ExpectedRevisions,
+  GRANT_CONFIG_PROBLEMS,
+  type GrantConfigProblem,
   type GrantLoader,
   type IdentityAssignPayload,
   type IdentityReleasePayload,
@@ -42,10 +46,15 @@ export {
   type PlanTarget,
   type PreparedWrite,
   type Principal,
+  type PrincipalDenied,
+  type PrincipalGranted,
   type PrincipalKind,
+  type PrincipalResolution,
   principalCan,
   type RelationPayload,
   type Simulation,
+  SUBJECT_DENIAL_CODES,
+  type SubjectDenialCode,
   validPayload,
 } from "./command/contract.ts";
 export {
@@ -57,10 +66,20 @@ export {
   statusForCommandError,
 } from "./command/errors.ts";
 export {
-  agentSubjects,
+  ACTOR_PATTERN,
   AGENT_CAPABILITIES,
+  configuredGrantLoader,
+  type GrantConfigError,
   HUMAN_CAPABILITIES,
-  staticGrantLoader,
+  MAX_SUBJECT_LENGTH,
+  MAX_SUBJECTS_PER_LIST,
+  parseSubjectList,
+  principalIn,
+  resolvePrincipal,
+  type SubjectGrants,
+  type SubjectGrantTable,
+  type SubjectGrantVars,
+  subjectGrantTable,
 } from "./command/grants.ts";
 export {
   createPlan,

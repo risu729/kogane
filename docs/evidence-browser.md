@@ -435,9 +435,16 @@ Three properties hold on that path set:
   anything else answers `403 commands_disabled`, and `/api/meta` advertises
   `commands: false`.
 - The Access JWT is verified first and its `sub` is the actor. No request body
-  or client header names the principal. An agent (a subject listed in
-  `AGENT_GRANTS`) may plan and simulate; `approve` and `commit` are
-  `403 approval_required`.
+  or client header names the principal. Authentication is not authorization:
+  the subject is then graded against two allow-lists. The human operator
+  (`OPERATOR_SUBJECTS`) holds every command; an agent (`AGENT_GRANTS`) may
+  plan and simulate, and its `approve`/`commit` is `403 approval_required`; a
+  subject in **neither** list holds nothing and gets `403 subject_not_granted`.
+  Both lists are empty in the committed configuration, so nothing can be
+  approved or committed until a deployment names its operator — that is
+  intended, and while either list is present but unreadable every command
+  answers `503 grants_misconfigured` rather than falling back to a default
+  role ([change-lifecycle.md](change-lifecycle.md), "Grants").
 - **This Worker still writes nothing.** It forwards the verified actor to the
   observation pipeline over the `PIPELINE` service binding, which stays the
   single writer of the decision, approval, receipt and outbox tables. With no
@@ -693,8 +700,9 @@ grants, tools, result contract, error codes, prompt-injection rules and the
 - With `AGENT_API_GRANTS` absent or empty — the deployed default — every one
   of the agent routes answers 403 for every authenticated principal, and the
   hosted synthetic demo never serves them at all. It is a different variable
-  from the change lifecycle's `AGENT_GRANTS`; see
-  [Agent API](agent-api.md) for why they must not be merged.
+  from the change lifecycle's `AGENT_GRANTS` and `OPERATOR_SUBJECTS`; see
+  [Agent API](agent-api.md) for why they must not be merged. All three are
+  allow-lists, so none of them grants anything by being absent.
 - The agent API's only write is a relation _proposal_: one
   `decision_revisions` row of kind `propose` and one `entity_relations` row
   with status `proposed` (migration 0029). No reader adopts a proposed

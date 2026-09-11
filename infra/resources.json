@@ -363,7 +363,9 @@
           "varNames": [
             "ACCESS_AUDIENCE",
             "ACCESS_ISSUER",
+            "AGENT_GRANTS",
             "BALANCE_PROJECTION_ENABLED",
+            "OPERATOR_SUBJECTS",
             "OPS_API_ENABLED",
             "READ_PROJECTION_ENABLED"
           ],
@@ -426,6 +428,7 @@
             "COMMANDS_ENABLED",
             "EVENTS_V2_ENABLED",
             "EVIDENCE_SOURCE_ID",
+            "OPERATOR_SUBJECTS",
             "OPS_API_ENABLED",
             "READ_PROJECTION_ENABLED",
             "REWARDS_V2_ENABLED",
@@ -486,6 +489,7 @@
             "COMMANDS_ENABLED",
             "EVENTS_V2_ENABLED",
             "EVIDENCE_SOURCE_ID",
+            "OPERATOR_SUBJECTS",
             "OPS_API_ENABLED",
             "READ_PROJECTION_ENABLED",
             "REWARDS_V2_ENABLED",

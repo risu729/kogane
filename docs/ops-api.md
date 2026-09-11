@@ -142,12 +142,32 @@ Two gates in order, after the Access check that every route of this Worker
 already does:
 
 1. the deployment flag `OPS_API_ENABLED`;
-2. the change lifecycle's principal grading (`AGENT_GRANTS`): a subject listed
-   there is an agent and is refused with `403 approval_required` on all six
-   routes and tools, the read included. Requesting a provider session, a
+2. the change lifecycle's principal grading (`OPERATOR_SUBJECTS` +
+   `AGENT_GRANTS`, resolved by the one resolver described in
+   [change-lifecycle.md](change-lifecycle.md), "Grants"). Both are allow-lists:
+
+   | Verified subject                    | All six routes and tools                     |
+   | ----------------------------------- | -------------------------------------------- |
+   | listed in `OPERATOR_SUBJECTS`       | served                                       |
+   | listed in `AGENT_GRANTS`            | `403 approval_required`                      |
+   | in neither list                     | `403 subject_not_granted`                    |
+   | (a list is unreadable, or overlaps) | `503 grants_misconfigured`, for **everyone** |
+
+   An agent is refused on the read too: requesting a provider session, a
    replay or a rebuild needs `interpretation.accept`, which an agent does not
-   hold (addendum 10 §5), and an agent has no operations to read because it
-   cannot create one.
+   hold (addendum 10 §5), and it has no operations to read because it cannot
+   create one. A subject in neither list is refused for the same reason, one
+   step earlier — the operator role is granted here, never inferred from being
+   authenticated. **With `OPERATOR_SUBJECTS` empty — the committed default —
+   `OPS_API_ENABLED=true` serves the routes and every one of them answers
+   `subject_not_granted` until a deployment names its operator. That is
+   intended.**
+
+   Both transports go through the same resolver, so a misconfigured deployment
+   cannot serve one and refuse the other. While the lists are unreadable the
+   six MCP tools are not published either (a deployment that grades nobody can
+   authorize none of them) and remain callable only to answer
+   `grants_misconfigured`.
 
 Reads are scoped to the principal that accepted the operation. An operation
 belonging to someone else answers `404 receipt_not_found`, exactly like one
@@ -168,16 +188,22 @@ carries the route label, the status and the code, never a ref.
 | `invalid_query`        | 400  | These routes take no query string                               |
 | `target_missing`       | 400  | The source or parser release is not declared in the registry    |
 | `approval_required`    | 403  | An agent asked for work only an operator may request            |
+| `subject_not_granted`  | 403  | The verified subject is in neither grant list                   |
 | `actor_not_supported`  | 403  | The verified subject is not a shape the decision log can record |
 | `not_found`            | 404  | No such operations route                                        |
 | `receipt_not_found`    | 404  | No such operation for this principal                            |
 | `idempotency_conflict` | 409  | The same key was reused for a different payload                 |
 | `request_too_large`    | 413  | The body exceeds 16 KiB                                         |
+| `grants_misconfigured` | 503  | This deployment's grant lists cannot be read; nobody is graded  |
+
+Neither authorization code carries a subject, a list or a configured value. A
+misconfiguration is logged once as
+`{"event":"grants_misconfigured","problem":<code>}` and nowhere else.
 
 ## MCP
 
 The same six operations are MCP tools on the existing `POST /mcp` endpoint,
-published **only while the flag is on**:
+published **only while the flag is on and the grant lists are readable**:
 
 | Tool                            | Route                                        |
 | ------------------------------- | -------------------------------------------- |

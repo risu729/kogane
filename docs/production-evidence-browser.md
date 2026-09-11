@@ -45,12 +45,23 @@ The change lifecycle adds one authenticated POST path set,
 `POST /api/command/v1/*` ([change-lifecycle.md](change-lifecycle.md)). It is
 closed unless `COMMANDS_ENABLED` is exactly `"true"`, which the committed
 configuration does not set; every other request that is not `GET` or `HEAD`
-still gets 405. `AGENT_GRANTS` (a JSON array of verified Access subjects) marks
-subjects that may plan and simulate but never approve or commit; it is empty in
-the committed configuration. The Worker itself writes nothing: it forwards the
-verified subject to `kogane-observation-pipeline` through the `PIPELINE`
-service binding, which stays the only writer of the decision, approval, receipt
-and outbox tables.
+still gets 405.
+
+Who may act is a separate decision from who is signed in, and it is two
+allow-lists of verified Access subjects, both **empty** in the committed
+configuration: `OPERATOR_SUBJECTS` marks the human operator, who may approve
+and commit, and `AGENT_GRANTS` marks subjects that may plan and simulate but
+never approve or commit. A subject in neither list is refused with
+`403 subject_not_granted`, so with the committed configuration nobody can
+approve or commit even with the flag on — naming the operator is a deliberate
+deployment step ([rollout.md](rollout.md)). A list that is present but
+unreadable, or the same subject in both, refuses everyone with
+`503 grants_misconfigured`; no configuration mistake widens anybody's
+capabilities.
+
+The Worker itself writes nothing: it forwards the verified subject to
+`kogane-observation-pipeline` through the `PIPELINE` service binding, which
+stays the only writer of the decision, approval, receipt and outbox tables.
 
 The committed configuration enables the production `workers.dev` route and
 keeps preview URLs disabled. Preserve these settings and the Access application

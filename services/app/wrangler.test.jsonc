@@ -15,6 +15,9 @@
     "ACCESS_ISSUER": "https://evidence-test.cloudflareaccess.com",
     "ACCESS_AUDIENCE": "synthetic-test-audience",
     "COMMANDS_ENABLED": "",
+    // Empty like the production config: every suite that needs an operator or
+    // an agent declares it per request, so no test inherits a grant.
+    "OPERATOR_SUBJECTS": "",
     "AGENT_GRANTS": "",
     "AGENT_API_GRANTS": "",
     "OPS_API_ENABLED": "",

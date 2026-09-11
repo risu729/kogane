@@ -8,11 +8,14 @@
 // non-GET request with 405.
 //
 // Three gates in order: the feature flag, the Access identity, and the grant.
-// An agent (a subject listed in AGENT_GRANTS) may plan and simulate; approve
-// and commit answer `approval_required` before anything is forwarded, because
-// an agent asserting its own approval is not an approval (addendum 10 §5).
-import { agentSubjects, staticGrantLoader } from "../../../packages/application/src/command/grants";
-import { principalCan, type Principal } from "../../../packages/application/src/command/contract";
+// The grant is an allow-list on both sides (`src/grants.ts`): a subject listed
+// in OPERATOR_SUBJECTS is the human operator, a subject listed in AGENT_GRANTS
+// is an agent and may plan and simulate, and a subject in neither reaches
+// nothing — `approve` and `commit` answer `approval_required` for an agent
+// before anything is forwarded, because an agent asserting its own approval is
+// not an approval (addendum 10 §5).
+import { principalCan } from "../../../packages/application/src/command/contract";
+import { principalFor } from "./grants";
 import { HttpError, json } from "./http";
 
 const PREFIX = "/api/command/v1/";
@@ -35,10 +38,6 @@ export function commandsEnabled(env: { COMMANDS_ENABLED?: string }): boolean {
   return env.COMMANDS_ENABLED === "true";
 }
 
-export function principalFor(env: { AGENT_GRANTS?: string }, subject: string): Principal {
-  return staticGrantLoader(agentSubjects(env.AGENT_GRANTS)).principalFor(subject);
-}
-
 /**
  * Handles a command request. `subject` is the Access JWT subject the caller
  * already verified; nothing in the request body can change it.
@@ -59,10 +58,10 @@ export async function commandApi(
   // Flag before identity detail: a deployment with commands off says so and
   // does nothing else.
   if (!commandsEnabled(env)) throw new HttpError(403, "commands_disabled");
-  // The verified subject is also the actor the writer records, so it must fit
-  // the actor shape the decision log accepts.
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/u.test(subject))
-    throw new HttpError(403, "actor_not_supported");
+  // Grades the verified subject, checking the actor shape the decision log
+  // accepts on the way. A subject this deployment grants nothing, and a
+  // deployment whose grant lists cannot be read, both refuse here — before a
+  // body is read and before anything is forwarded.
   const principal = principalFor(env, subject);
   if (ACCEPTING.includes(operation) && !principalCan(principal, "interpretation.accept"))
     return json({ error: "approval_required" }, 403);

@@ -8,7 +8,9 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
-import { commandsEnabled, isCommandPath, principalFor } from "../src/command-api";
+import { commandsEnabled, isCommandPath } from "../src/command-api";
+import { grantsUsable, principalFor } from "../src/grants";
+import { HttpError } from "../src/http";
 
 const issuer = "https://evidence-test.cloudflareaccess.com";
 const jwksPath = "/cdn-cgi/access/certs";
@@ -41,7 +43,12 @@ beforeAll(async () => {
   );
 });
 
-async function token(subject = "operator@synthetic.test"): Promise<string> {
+/** The one subject this deployment grants the operator role. */
+const OPERATOR = "operator@synthetic.test";
+/** A verified subject in neither list: authenticated, granted nothing. */
+const STRANGER = "stranger@synthetic.test";
+
+async function token(subject = OPERATOR): Promise<string> {
   return new SignJWT({ type: "app" })
     .setProtectedHeader({ alg: "RS256", kid: "test" })
     .setIssuer(issuer)
@@ -82,7 +89,13 @@ async function call(
 }
 
 const COMMANDS = ["plan", "simulate", "approve", "commit", "operation"] as const;
-const enabled = { COMMANDS_ENABLED: "true" };
+/**
+ * The flag on *and* an operator named. Both halves are needed: the grant lists
+ * are allow-lists, so a deployment with the flag on and no operator grants
+ * nobody anything (docs/change-lifecycle.md, "Grants"). Every suite that wants
+ * the operator role says so here rather than inheriting it from being unknown.
+ */
+const enabled = { COMMANDS_ENABLED: "true", OPERATOR_SUBJECTS: JSON.stringify([OPERATOR]) };
 
 describe("the command boundary", () => {
   it("requires Access before it looks at anything else", async () => {
@@ -126,7 +139,7 @@ describe("the command boundary", () => {
   });
 
   it("refuses an agent's approval and commit before anything is forwarded", async () => {
-    const agents = { ...enabled, AGENT_GRANTS: '["agent-proposer"]' };
+    const agents = { ...enabled, AGENT_GRANTS: JSON.stringify(["agent-proposer"]) };
     for (const command of ["approve", "commit"] as const) {
       const response = await call(`/api/command/v1/${command}`, {
         jwt: await token("agent-proposer"),
@@ -226,9 +239,144 @@ describe("the command boundary", () => {
   it("derives the principal from the verified subject alone", () => {
     expect(isCommandPath("/api/command/v1/plan")).toBe(true);
     expect(isCommandPath("/api/commands/v1/plan")).toBe(false);
-    const agent = principalFor({ AGENT_GRANTS: '["bot"]' }, "bot");
-    expect(agent).toMatchObject({ id: "bot", kind: "agent", verification: "server" });
-    expect(principalFor({ AGENT_GRANTS: '["bot"]' }, "human@test").kind).toBe("human");
-    expect(principalFor({ AGENT_GRANTS: "" }, "bot").kind).toBe("human");
+    const both = { OPERATOR_SUBJECTS: '["human@test"]', AGENT_GRANTS: '["bot"]' };
+    expect(principalFor(both, "bot")).toMatchObject({
+      id: "bot",
+      kind: "agent",
+      verification: "server",
+      capabilities: ["interpretation.propose"],
+    });
+    expect(principalFor(both, "human@test")).toMatchObject({
+      id: "human@test",
+      kind: "human",
+      verification: "server",
+    });
+  });
+});
+
+/**
+ * The grant lists are allow-lists in both directions. The finding this suite
+ * exists for: an authenticated subject that neither list named used to be
+ * graded the human operator, so an absent, malformed or mis-shaped
+ * `AGENT_GRANTS` handed approve and commit to an agent — and to anyone else
+ * Access let through. Nothing is granted by *not* being listed now, and a
+ * configuration this Worker cannot read grants nobody anything at all.
+ */
+describe("the command grant lists fail closed", () => {
+  const agentOnly = { ...enabled, AGENT_GRANTS: JSON.stringify(["agent-proposer"]) };
+
+  it("refuses a subject neither list names, on every command", async () => {
+    for (const command of COMMANDS) {
+      const response = await call(`/api/command/v1/${command}`, {
+        jwt: await token(STRANGER),
+        body: {},
+        environment: agentOnly,
+      });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ error: "subject_not_granted" });
+    }
+  });
+
+  it("grants the operator nothing until OPERATOR_SUBJECTS names one", async () => {
+    // Flag on, no operator configured: the deployed default. Approve and
+    // commit are unreachable for everyone, which is the intended state.
+    for (const command of COMMANDS) {
+      const response = await call(`/api/command/v1/${command}`, {
+        body: {},
+        environment: { COMMANDS_ENABLED: "true" },
+      });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ error: "subject_not_granted" });
+    }
+    // And with the operator named, the same subject reaches the writer gate.
+    const named = await call("/api/command/v1/approve", { body: {}, environment: enabled });
+    expect(named.status).toBe(503);
+    expect(await named.json()).toMatchObject({ error: "command_executor_unavailable" });
+  });
+
+  // Every way a deployment can get these two variables wrong. In each case the
+  // *whole* deployment stops grading subjects: the named agent, the named
+  // operator and a stranger are all refused, and none of them can approve.
+  const misconfigured: [string, Record<string, string>][] = [
+    [
+      "OPERATOR_SUBJECTS is not JSON",
+      { OPERATOR_SUBJECTS: "{", AGENT_GRANTS: '["agent-proposer"]' },
+    ],
+    [
+      "OPERATOR_SUBJECTS is an object, not an array",
+      { OPERATOR_SUBJECTS: '{"operator@synthetic.test":true}' },
+    ],
+    [
+      "OPERATOR_SUBJECTS holds a non-string",
+      { OPERATOR_SUBJECTS: '["operator@synthetic.test",7]' },
+    ],
+    [
+      "AGENT_GRANTS is not JSON",
+      { OPERATOR_SUBJECTS: JSON.stringify([OPERATOR]), AGENT_GRANTS: "not json" },
+    ],
+    [
+      "AGENT_GRANTS is an object, not an array",
+      {
+        OPERATOR_SUBJECTS: JSON.stringify([OPERATOR]),
+        AGENT_GRANTS: '{"agent-proposer":{"capabilities":[]}}',
+      },
+    ],
+    [
+      "AGENT_GRANTS holds a non-string",
+      { OPERATOR_SUBJECTS: JSON.stringify([OPERATOR]), AGENT_GRANTS: '["agent-proposer",null]' },
+    ],
+    [
+      "a subject is in both lists",
+      {
+        OPERATOR_SUBJECTS: JSON.stringify([OPERATOR, "agent-proposer"]),
+        AGENT_GRANTS: JSON.stringify(["agent-proposer"]),
+      },
+    ],
+  ];
+
+  for (const [label, vars] of misconfigured) {
+    it(`denies everyone when ${label}`, async () => {
+      for (const subject of [OPERATOR, "agent-proposer", STRANGER]) {
+        for (const command of ["approve", "commit", "plan"] as const) {
+          const response = await call(`/api/command/v1/${command}`, {
+            jwt: await token(subject),
+            body: {},
+            environment: { COMMANDS_ENABLED: "true", ...vars },
+          });
+          expect(response.status, `${subject} ${command}`).toBe(503);
+          expect(await response.json()).toMatchObject({ error: "grants_misconfigured" });
+        }
+      }
+      expect(grantsUsable(vars)).toBe(false);
+    });
+  }
+
+  it("reports a misconfiguration as a code and never as the configured value", () => {
+    const secret = "operator-identity-that-must-not-be-logged";
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+      lines.push(String(line));
+    });
+    try {
+      expect(() => principalFor({ OPERATOR_SUBJECTS: `[${secret}` }, OPERATOR)).toThrow(HttpError);
+      expect(grantsUsable({ AGENT_GRANTS: `{"${secret}":1}` })).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      expect(line).not.toContain(secret);
+      expect(JSON.parse(line)).toEqual({
+        event: "grants_misconfigured",
+        problem: expect.stringMatching(/^[a-z_]{1,40}$/u),
+      });
+    }
+  });
+
+  it("refuses a subject that is not an actor the decision log accepts", () => {
+    for (const subject of ["Bad Actor", "", "-leading"])
+      expect(() => principalFor({ OPERATOR_SUBJECTS: JSON.stringify([subject]) }, subject)).toThrow(
+        HttpError,
+      );
   });
 });
