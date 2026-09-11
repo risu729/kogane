@@ -1,6 +1,6 @@
 # Frontend foundation
 
-The Japanese evidence browser in `poc/observation-pipeline/web` can be
+The Japanese evidence browser in `apps/web` can be
 developed while production raw-evidence ingestion continues. It displays
 source observations and their provenance. It does not calculate net worth,
 cross-currency totals, reconciled transactions, or P&L.
@@ -93,7 +93,7 @@ A server refuses with 400 any query parameter its capabilities do not grant;
 the client never sends one. While metadata is loading, capabilities are
 unknown: dependent list queries stay disabled and pages show their loading
 state rather than requesting with guessed defaults. Changing the schema fails
-the pinned contract tests in both `poc/observation-pipeline` and
+the pinned contract tests in both `apps/web` and
 `services/evidence-browser`, so a one-sided edit cannot pass CI.
 
 ## Shared figures and the AI hand-off
@@ -129,11 +129,11 @@ See [Agent API](agent-api.md) for the grants, tools and result contract.
 
 ## Safe preview
 
-From `poc/observation-pipeline`:
+From the repository root:
 
 ```sh
-bun install --frozen-lockfile
-mise run web:build && bun src/serve.ts --demo
+mise run install
+mise run local-pipeline:preview
 ```
 
 Preview builds the UI, creates a new temporary database, and populates it
@@ -143,7 +143,7 @@ regular `state/` database. A normal shutdown removes its temporary store.
 An abrupt process termination can leave a temporary `kogane-preview-*`
 directory; it contains only synthetic data.
 
-`bun src/serve.ts` continues to read the regular local store. Its metadata
+`mise run local-pipeline:serve` continues to read the regular local store. Its metadata
 reports the data classification as unknown: an operator may have ingested
 real evidence, synthetic evidence, or both. An existing store must never be
 labelled synthetic merely because it is local. Neither mode is a connection

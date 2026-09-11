@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { ApiError, getJson } from "../src/api.ts";
-import type { ApiMetadata, TransactionRow } from "../../../packages/observation-shared/src/api-contract.ts";
+import type {
+  ApiMetadata,
+  TransactionRow,
+} from "../../../packages/observation-shared/src/api-contract.ts";
 import { LOCAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 
 let fetchSpy: ReturnType<typeof spyOn> | undefined;

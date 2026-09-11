@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { createApi } from "../src/api.ts";
 import { buildFixture } from "./fixture.ts";
-import type { IdentityAccountRow, IdentityInstrumentRow } from "../../../packages/observation-shared/src/identity-contract.ts";
+import type {
+  IdentityAccountRow,
+  IdentityInstrumentRow,
+} from "../../../packages/observation-shared/src/identity-contract.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 
 const client = join(import.meta.dir, "../../../apps/web/dist-production");

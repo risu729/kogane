@@ -20,7 +20,7 @@
 5. VPointPayの通知は決済完了ではない。拒否や金額未記録をゼロに置き換えない。通知内残高は、その通知が報告した時点の量。
 6. 銀行出金は費用、入金は収入とは限らない。振替・カード引落し・返金・証券資金移動は対応根拠なしに合算・相殺・統合しない。
 
-監査元は `src/parsers/myjcb.ts`, `sbi-yen-detail-history.ts`, `sbi-foreign-trade-records.ts`, `sbi-vc-executions.ts`, `v-point.ts`, `v-point-pay.ts`, `mobile-suica-sf-history.ts`（`poc/observation-pipeline/`配下）および既存の設計・各ソース資料。
+監査元は `src/parsers/myjcb.ts`, `sbi-yen-detail-history.ts`, `sbi-foreign-trade-records.ts`, `sbi-vc-executions.ts`, `v-point.ts`, `v-point-pay.ts`, `mobile-suica-sf-history.ts`（現在は`packages/parsers/src/parsers/`配下）および既存の設計・各ソース資料。
 
 ## 未証明の境界
 

@@ -34,7 +34,15 @@ function insertPublishedParseRun(store: Store, run: Parameters<typeof insertPars
   return id;
 }
 
-const FIXTURES = join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline");
+const FIXTURES = join(
+  import.meta.dir,
+  "..",
+  "..",
+  "..",
+  "tests",
+  "fixtures",
+  "observation-pipeline",
+);
 const SBI_RUN = join(FIXTURES, "sbi-securities", "2026-08-20", "run-20260820-210000-poc01");
 const SBI_VC_RUN = join(FIXTURES, "sbi-vc-trade", "2026-09-07", "run-20260907-synthetic01");
 

@@ -13,7 +13,7 @@ HTTP. It exports an `ObservationReader` interface, the named SQL concepts every
 query is built from, typed query inputs, explicit row → API contract mappers,
 and `createD1ObservationReader(db)`. The evidence browser binds it to its D1
 database in `src/observations.ts`; the local PoC keeps its own synchronous
-SQLite queries in `poc/observation-pipeline/src/queries.ts` and shares only the
+SQLite queries in `experiments/observation-pipeline-local/src/queries.ts` and shares only the
 snapshot CTE builder.
 
 ## The rule
@@ -137,7 +137,7 @@ vendored by relative import, so there is no separate artifact to publish.
 
 Verified locally with synthetic data: the CI checks (today
 `mise run ci:<short>`) of `packages/read-model`, `services/evidence-browser`,
-`poc/observation-pipeline`, and the repository-wide guards (`mise run ci:root`). Not verified: production data.
+`experiments/observation-pipeline-local`, and the repository-wide guards (`mise run ci:root`). Not verified: production data.
 
 ## Balance projection reader
 

@@ -312,8 +312,8 @@ Two separate runbooks, as the review requires.
 | An old parse keeps its projection when a re-extraction disagrees; the difference list names fields, never values | `metadata-projections.test.ts`                                                                           |
 | With the flag off a targeted job publishes normally, writes no candidate, and the routes 404                     | `metadata-projections.test.ts`                                                                           |
 | 0027/0028 apply to a store with existing metadata rows and backfill exactly, idempotently                        | `metadata-projections.test.ts`                                                                           |
-| Registering the same parser name and version with a different code digest is refused                             | `release-adoption.test.ts`, `poc/observation-pipeline/test/parser-digests.test.ts`                       |
-| The digests describe the sources on disk                                                                         | `poc/observation-pipeline/test/parser-digests.test.ts`                                                   |
+| Registering the same parser name and version with a different code digest is refused                             | `release-adoption.test.ts`, `packages/parsers/test/parser-digests.test.ts`                               |
+| The digests describe the sources on disk                                                                         | `packages/parsers/test/parser-digests.test.ts`                                                           |
 | Normal reads are unchanged                                                                                       | every existing observation-pipeline, evidence-browser and PoC test, unchanged expectations               |
 
 Not verified: production data volumes (the comparison scans the observation

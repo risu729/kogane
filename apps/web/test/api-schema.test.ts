@@ -4,7 +4,10 @@
 // both packages' tests; a one-sided edit fails.
 import { describe, expect, test } from "bun:test";
 import type { ApiMetadata } from "../../../packages/observation-shared/src/api-contract.ts";
-import { validApiCapabilities, validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
+import {
+  validApiCapabilities,
+  validApiResponse,
+} from "../../../packages/observation-shared/src/api-validation.ts";
 import {
   allowedQueryParameters,
   CENTRAL_STORE_CAPABILITIES,

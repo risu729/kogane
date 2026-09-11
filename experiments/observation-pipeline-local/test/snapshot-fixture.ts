@@ -21,7 +21,10 @@ import {
 } from "../src/store.ts";
 import { currentPositions, currentValuations, latestBalances } from "../src/queries.ts";
 import { containerClaim } from "../../../packages/parsers/src/parsers/coverage.ts";
-import { FOREIGN_POSITION_SNAPSHOT_VERSION, type SnapshotPolicyId } from "../../../packages/parsers/src/snapshot-query.ts";
+import {
+  FOREIGN_POSITION_SNAPSHOT_VERSION,
+  type SnapshotPolicyId,
+} from "../../../packages/parsers/src/snapshot-query.ts";
 import type {
   BalanceObservation,
   CoverageClaim,

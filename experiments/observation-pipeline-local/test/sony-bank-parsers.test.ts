@@ -22,7 +22,16 @@ import {
   upsertSource,
 } from "../src/store.ts";
 
-const FIXTURES = join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline", "sony-bank-parser-boundaries");
+const FIXTURES = join(
+  import.meta.dir,
+  "..",
+  "..",
+  "..",
+  "tests",
+  "fixtures",
+  "observation-pipeline",
+  "sony-bank-parser-boundaries",
+);
 const bytes = (name: string) => readFileSync(join(FIXTURES, name));
 const meta = (dataset: string, mime = "application/json"): ArtifactMeta => ({
   id: 88,

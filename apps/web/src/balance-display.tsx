@@ -1,5 +1,8 @@
 import type { ReactNode } from "react";
-import { classifyBalance, type BalanceSemantic } from "../../../packages/observation-shared/src/balance-semantics.ts";
+import {
+  classifyBalance,
+  type BalanceSemantic,
+} from "../../../packages/observation-shared/src/balance-semantics.ts";
 import type { BalanceRow } from "./api.ts";
 import { ObservationLink } from "./ui.tsx";
 import "./balance-display.css";

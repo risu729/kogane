@@ -103,7 +103,10 @@ if (previewDir !== undefined) {
   });
   process.on("SIGINT", () => process.exit(0));
   process.on("SIGTERM", () => process.exit(0));
-  ingestFixtures(store, join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline"));
+  ingestFixtures(
+    store,
+    join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline"),
+  );
   runParsers(store);
 }
 // Defence in depth for the read-only rule. The API refuses a write method

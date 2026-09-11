@@ -327,5 +327,8 @@ export function ingestFixtures(store: Store, fixturesDir: string): void {
 
 if (import.meta.main) {
   const store = openStore();
-  ingestFixtures(store, join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline"));
+  ingestFixtures(
+    store,
+    join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline"),
+  );
 }

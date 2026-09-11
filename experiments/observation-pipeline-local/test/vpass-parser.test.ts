@@ -20,7 +20,16 @@ import {
 } from "../src/store.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 
-const FIXTURES = join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline", "vpass-parser-boundaries");
+const FIXTURES = join(
+  import.meta.dir,
+  "..",
+  "..",
+  "..",
+  "tests",
+  "fixtures",
+  "observation-pipeline",
+  "vpass-parser-boundaries",
+);
 
 function fixture(name: "web" | "customized"): Uint8Array {
   return readFileSync(join(FIXTURES, `${name}.json`));

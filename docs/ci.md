@@ -79,7 +79,7 @@ Each workspace owns a `tasks.toml` that the root `mise.toml` lists under
 `<short>` is the workspace's short name: `app` (`services/evidence-browser`),
 `processor` (`services/observation-pipeline`), `ingest`
 (`services/raw-evidence`), `importer` (`services/collector-r2-importer`), `web`
-(`poc/observation-pipeline`), the package name for `packages/*`, and the
+(`apps/web`), the package name for `packages/*`, and the
 directory name for the remaining PoC workers.
 
 Every workspace also declares one aggregate `ci:<short>` task — the exact set

@@ -15,7 +15,18 @@ import { currentTransactions, latestBalances } from "../src/queries.ts";
 import { openStore } from "../src/store.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 
-const RUN = join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline", "myjcb", "2026-09-07", "run-synthetic");
+const RUN = join(
+  import.meta.dir,
+  "..",
+  "..",
+  "..",
+  "tests",
+  "fixtures",
+  "observation-pipeline",
+  "myjcb",
+  "2026-09-07",
+  "run-synthetic",
+);
 
 function artifact(
   dataset: string,

@@ -46,7 +46,9 @@ describe("G0-04 moved fixtures keep their bytes", () => {
   test("every fixture still hashes to the value recorded before the move", () => {
     const actual = entries.map((entry) => ({
       path: entry.path,
-      sha256: createHash("sha256").update(readFileSync(join(REPO_ROOT, entry.path))).digest("hex"),
+      sha256: createHash("sha256")
+        .update(readFileSync(join(REPO_ROOT, entry.path)))
+        .digest("hex"),
     }));
     expect(actual).toEqual(entries);
   });

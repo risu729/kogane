@@ -1,6 +1,6 @@
 # Runtime resource ledger
 
-Generated from the `wrangler*.jsonc` files under `services/` and `poc/` by
+Generated from the `wrangler*.jsonc` files under `apps/`, `experiments/`, `poc/` and `services/` by
 `scripts/resource-ledger.ts`. Do not edit by hand: `scripts/resource-ledger.test.ts`
 regenerates it and fails when this file and the configs disagree.
 
@@ -84,6 +84,24 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | kogane-vpoint-collector-poc | `15 21 * * *` | yes |
 
 ## Directories
+
+### `apps/web`
+
+- Disposition (poc_disposition.csv row poc/observation-pipeline + decision D1): `promoted-from-poc` → apps/web (the React client and its frontend tests)
+- Required verification: U04 executed the move; the three bundles are byte-identical and the client imports no service internal
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: NO_LIVE_RESOURCE
+
+No wrangler config.
+
+### `experiments/observation-pipeline-local`
+
+- Disposition (poc_disposition.csv row poc/observation-pipeline + decision D1): `isolated-as-experiment` → experiments/observation-pipeline-local (EXPERIMENT.md: risu729, 2026-12-31)
+- Required verification: U04 executed the move; retire once the App API covers replay and status (docs/research/observation-pipeline-poc.md)
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: NO_LIVE_RESOURCE
+
+No wrangler config.
 
 ### `poc/camoufox-container-probe`
 
@@ -286,15 +304,6 @@ No wrangler config.
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
-
-### `poc/observation-pipeline`
-
-- Disposition (poc_disposition.csv): `split-promote-retire` → apps/web; packages/application; tests/fixtures; docs/research
-- Required verification: promote UI and fixtures, move needed local operations to the App API, legacy store to test/research, drop the shims
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: NO_LIVE_RESOURCE
-
-No wrangler config.
 
 ### `poc/oci-browser-probe`
 
@@ -890,7 +899,7 @@ No wrangler config.
 - VPC networks: —
 - Service bindings: —
 - Crons: —
-- Assets: `../../poc/observation-pipeline/web/dist` → ASSETS
+- Assets: `../../apps/web/dist` → ASSETS
 - Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>BALANCE_PROJECTION_ENABLED
 - Required secrets (names only): —
 
@@ -909,7 +918,7 @@ No wrangler config.
 - VPC networks: —
 - Service bindings: PIPELINE → kogane-observation-pipeline
 - Crons: —
-- Assets: `../../poc/observation-pipeline/web/dist-production` → ASSETS
+- Assets: `../../apps/web/dist-production` → ASSETS
 - Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>REWARDS_V2_ENABLED
 - Required secrets (names only): —
 

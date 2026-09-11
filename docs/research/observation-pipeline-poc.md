@@ -1,4 +1,57 @@
-# Results
+# Observation pipeline PoC — retired
+
+`poc/observation-pipeline` no longer exists. It was the experiment that
+answered the question nothing in the repository had answered before it: once
+the bytes of a collected artifact exist, what turns them into observations
+without ever becoming a finished ledger? It deliberately contained no
+collector; authentication and anti-bot handling were, and remain, the subject
+of the per-source experiments under `poc/`.
+
+**Why it ended.** Not because it failed. It succeeded, and then the things it
+proved had to stop being experimental. Design review D07 (#172) promoted the
+parsers, the identity resolver, the observation types and the shared HTTP
+contracts into `packages/`, leaving 27 one-line compatibility re-exports
+behind. Unified plan U04 finished it: an experiment that a deployed Worker
+serves assets from, that production tests read fixtures from, and that four
+workspaces import through a compatibility shim is not an experiment any more —
+it is unreviewed product with an experimental label.
+
+**Where the code went.** Moved with `git mv`, no content change. The base
+commit before the move is `d096178`, where every path in the left column still
+reads as it did.
+
+| Was                                                                                                                      | Is                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| `web/**`, `vite.config.ts`, the three build modes, the frontend tests                                                    | `apps/web`                                                               |
+| `fixtures/**`                                                                                                            | `tests/fixtures/observation-pipeline` (`MANIFEST.sha256` pins the bytes) |
+| `src/{store,queries,ingest,parse,api,serve,demo,export-demo,normalized-values}.ts`, `schema.sql`, the store-backed tests | `experiments/observation-pipeline-local` (see its `EXPERIMENT.md`)       |
+| `test/api-conformance.ts`                                                                                                | `packages/observation-shared/test-support/api-conformance.ts`            |
+| `test/financial-products.test.ts`                                                                                        | `packages/observation-shared/test`                                       |
+| `scripts/freeze-coverage-contract.ts`                                                                                    | `packages/parsers/scripts`                                               |
+| `src/parsers/**`, `src/{types,money,snapshot-query}.ts`, `shared/**`                                                     | `packages/parsers`, `packages/observation-shared` (D07, #172)            |
+| the 27 compatibility re-exports                                                                                          | deleted                                                                  |
+| `RESULTS.md`                                                                                                             | this file                                                                |
+
+**How to reproduce what is recorded below.** Every number here was produced by
+the code as it stood at `d096178` or earlier, against the committed synthetic
+fixtures — which are byte-identical in `tests/fixtures/observation-pipeline`
+and proved so by `tests/fixture-manifest.test.ts`. The parser digests are
+unchanged (`packages/parsers/test/parser-digests.test.ts`), so a re-parse of
+those fixtures still produces the same observations. To run the pipeline
+itself: `mise run ci:local-pipeline`, or `mise run local-pipeline:preview` for
+the browsable synthetic store. For the code exactly as it was, check out
+`d096178`.
+
+**What is still live.** `experiments/observation-pipeline-local` keeps the
+local store, its read API and the CLI entry points, with an owner, an expiry
+of 2026-12-31 and a stop condition (the App API covering replay and status).
+It is not part of any deployment and no production runtime imports it; the one
+remaining coupling is that the synthetic `kogane-demo` snapshot is exported
+from it, which `infra/workers-ci.json` names explicitly.
+
+---
+
+## Results
 
 Recorded 2026-08-28 and extended 2026-09-07. No captured financial data, credentials, cookies,
 account identifiers, or balances were persisted or committed; every fixture

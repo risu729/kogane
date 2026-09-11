@@ -153,9 +153,7 @@ if (import.meta.main) {
       console.error(problems.join("\n"));
       process.exitCode = 1;
     } else {
-      console.error(
-        `depcruise: ${result.summary.totalCruised} modules, no boundary violations`,
-      );
+      console.error(`depcruise: ${result.summary.totalCruised} modules, no boundary violations`);
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : "depcruise failed");

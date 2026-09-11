@@ -21,7 +21,8 @@ import { parseJsonc } from "./jsonc.ts";
 
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const LEDGER_MARKDOWN_PATH = "infra/dependency-resolution.md";
-const WORKSPACES = ["packages", "poc", "services"] as const;
+// `apps` and `experiments` joined the root manifest's globs in U04.
+const WORKSPACES = ["apps", "experiments", "packages", "poc", "services"] as const;
 
 /**
  * The one-off record chapter 07 §5 asks for: what merging 28 per-package

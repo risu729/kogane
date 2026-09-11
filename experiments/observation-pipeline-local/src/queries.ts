@@ -17,7 +17,11 @@
 // Formatting belongs to money.ts, which never uses floating point.
 
 import type { Store } from "./store.ts";
-import { CURRENT_SNAPSHOT, SNAPSHOT_CTES, unitScopedEligibilitySql } from "../../../packages/parsers/src/snapshot-query.ts";
+import {
+  CURRENT_SNAPSHOT,
+  SNAPSHOT_CTES,
+  unitScopedEligibilitySql,
+} from "../../../packages/parsers/src/snapshot-query.ts";
 
 import type {
   ObservationKind,

@@ -211,7 +211,7 @@ an amount, a token or an exception string; `refs` holds safe identifiers only.
 
 ## UI
 
-`/confirm/:planId` (`poc/observation-pipeline/web/src/pages/Confirm.tsx`) shows
+`/confirm/:planId` (`apps/web/src/pages/Confirm.tsx`) shows
 the plan's targets, the server-computed diff (counts and identifiers only — no
 amounts), the staleness of the plan and the re-simulated plan id when it went
 stale, and Approve / Commit buttons. The buttons act only when the API
@@ -283,7 +283,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 - `packages/application/test/command.test.ts` (11 tests): the closed kind list,
   payloads that reject a caller-supplied impact/approval/revisions, digest
   sensitivity to every input, grants, and the error table.
-- `poc/observation-pipeline/test/confirm.browser.test.ts` (3 tests): read-only
+- `apps/web/test/confirm.browser.test.ts` (3 tests): read-only
   without the capability, no action on a stale plan, and accepted vs published
   shown distinctly.
 - `services/observation-pipeline/test/balance-projection.test.ts` "the

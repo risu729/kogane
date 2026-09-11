@@ -19,7 +19,19 @@ import { runParsers } from "../src/parse.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 
 const fixture = (name: string): Uint8Array =>
-  readFileSync(join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline", "moneyforward", name));
+  readFileSync(
+    join(
+      import.meta.dir,
+      "..",
+      "..",
+      "..",
+      "tests",
+      "fixtures",
+      "observation-pipeline",
+      "moneyforward",
+      name,
+    ),
+  );
 
 const meta = (overrides: Partial<ArtifactMeta> = {}): ArtifactMeta => ({
   id: 1,

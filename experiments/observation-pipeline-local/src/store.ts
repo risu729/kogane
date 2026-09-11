@@ -6,8 +6,16 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ArtifactMeta, CoverageClaim, Observation, ParseIssue } from "../../../packages/parsers/src/types.ts";
-import { unitScopePolicySql, unitScopeSuccessSql } from "../../../packages/parsers/src/snapshot-query.ts";
+import type {
+  ArtifactMeta,
+  CoverageClaim,
+  Observation,
+  ParseIssue,
+} from "../../../packages/parsers/src/types.ts";
+import {
+  unitScopePolicySql,
+  unitScopeSuccessSql,
+} from "../../../packages/parsers/src/snapshot-query.ts";
 
 const EXPERIMENT_ROOT = dirname(import.meta.dir); // experiments/observation-pipeline-local/
 
@@ -85,7 +93,10 @@ export function openStore(stateDir?: string): Store {
     db.transaction(() =>
       db.exec(
         readFileSync(
-          join(EXPERIMENT_ROOT, "../../services/raw-evidence/migrations/0024_observation_decimals.sql"),
+          join(
+            EXPERIMENT_ROOT,
+            "../../services/raw-evidence/migrations/0024_observation_decimals.sql",
+          ),
           "utf8",
         ),
       ),
@@ -113,7 +124,10 @@ export function openStore(stateDir?: string): Store {
     db.transaction(() =>
       db.exec(
         readFileSync(
-          join(EXPERIMENT_ROOT, "../../services/raw-evidence/migrations/0037_unit_scope_eligibility.sql"),
+          join(
+            EXPERIMENT_ROOT,
+            "../../services/raw-evidence/migrations/0037_unit_scope_eligibility.sql",
+          ),
           "utf8",
         ),
       ),

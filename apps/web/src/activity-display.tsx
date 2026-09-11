@@ -1,6 +1,9 @@
 import type { ReactNode } from "react";
 import type { TransactionRow } from "./api.ts";
-import { classifyActivity, type ActivityMeaning } from "../../../packages/observation-shared/src/activity-semantics.ts";
+import {
+  classifyActivity,
+  type ActivityMeaning,
+} from "../../../packages/observation-shared/src/activity-semantics.ts";
 
 export function activityMeaning(row: TransactionRow): ActivityMeaning {
   return (

@@ -3,7 +3,10 @@
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import type { ArtifactDetail, ArtifactRow } from "../../../packages/observation-shared/src/api-contract.ts";
+import type {
+  ArtifactDetail,
+  ArtifactRow,
+} from "../../../packages/observation-shared/src/api-contract.ts";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
 import { createApi } from "./api.ts";
 import { ingestFixtures } from "./ingest.ts";
@@ -29,7 +32,10 @@ export async function exportDemo(output: string): Promise<DemoSnapshot> {
   let store: Store | undefined;
   try {
     store = openStore(directory);
-    ingestFixtures(store, join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline"));
+    ingestFixtures(
+      store,
+      join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline"),
+    );
     const parsed = runParsers(store, undefined, () => "2026-09-08T00:00:00.000Z");
     if (parsed.errors !== 0) throw new Error("Synthetic fixture parsing failed");
     store.db.exec("PRAGMA query_only = ON");

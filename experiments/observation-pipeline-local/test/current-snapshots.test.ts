@@ -24,7 +24,11 @@ import {
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import { sbiForeignCashBalances } from "../../../packages/parsers/src/parsers/sbi-foreign-cash-balances.ts";
 import { sbiForeignCashPositions } from "../../../packages/parsers/src/parsers/sbi-foreign-cash-positions.ts";
-import type { Observation, Parser, TransactionObservation } from "../../../packages/parsers/src/types.ts";
+import type {
+  Observation,
+  Parser,
+  TransactionObservation,
+} from "../../../packages/parsers/src/types.ts";
 import {
   activatePolicy,
   activateUnitScope,

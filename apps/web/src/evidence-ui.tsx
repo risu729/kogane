@@ -1,6 +1,9 @@
 import { useState, type ReactNode } from "react";
 import type { UseQueryResult } from "@tanstack/react-query";
-import type { EvidenceOutcome, EvidenceTimeBasis } from "../../../packages/observation-shared/src/evidence-contract.ts";
+import type {
+  EvidenceOutcome,
+  EvidenceTimeBasis,
+} from "../../../packages/observation-shared/src/evidence-contract.ts";
 import { Badge, Nullable, QueryBoundary } from "./ui.tsx";
 
 /** An expired authorization must not leave cached evidence on screen. */

@@ -5,7 +5,16 @@ import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import { vPointPayNotificationEvent } from "../../../packages/parsers/src/parsers/v-point-pay.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
 
-const FIXTURE_DIR = join(import.meta.dir, "..", "..", "..", "tests", "fixtures", "observation-pipeline", "v-point-pay-parser-boundaries");
+const FIXTURE_DIR = join(
+  import.meta.dir,
+  "..",
+  "..",
+  "..",
+  "tests",
+  "fixtures",
+  "observation-pipeline",
+  "v-point-pay-parser-boundaries",
+);
 
 function artifact(overrides: Partial<ArtifactMeta> = {}): ArtifactMeta {
   return {

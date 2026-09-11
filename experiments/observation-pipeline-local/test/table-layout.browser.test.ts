@@ -4,9 +4,16 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Locator } from "playwright";
 import { createApi } from "../src/api.ts";
-import type { BalanceHistoryRow, BalanceRow, TransactionRow } from "../../../packages/observation-shared/src/api-contract.ts";
+import type {
+  BalanceHistoryRow,
+  BalanceRow,
+  TransactionRow,
+} from "../../../packages/observation-shared/src/api-contract.ts";
 import { buildFixture } from "./fixture.ts";
-import { CENTRAL_STORE_CAPABILITIES, LOCAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import {
+  CENTRAL_STORE_CAPABILITIES,
+  LOCAL_STORE_CAPABILITIES,
+} from "../../../packages/observation-shared/src/api-schema.ts";
 
 const clients = {
   local: join(import.meta.dir, "../../../apps/web/dist"),
