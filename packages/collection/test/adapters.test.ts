@@ -22,26 +22,32 @@ const LEGACY_MANIFEST = JSON.stringify({
   status: "success",
   months: { "202608": { pages: 1, transactions: 0 }, "202607": { pages: 1, transactions: 0 } },
 });
-const LEGACY_SNAPSHOT = JSON.stringify({ format: "kogane-vpass-r2-snapshot/v1", runId: RUN });
+// What the caller hands over is the sanitizer's output, never the raw
+// snapshot; the raw one would carry the session envelope the importer strips.
+const SANITIZED_SNAPSHOT = JSON.stringify({
+  format: "kogane-vpass-r2-snapshot/v1",
+  runId: RUN,
+  sanitized: true,
+});
+const SANITIZER = {
+  transformerId: "vpass-importer-sanitizer",
+  transformerVersion: "vpass-central-sanitized-v1",
+};
 
-async function legacyInput(): ReturnType<typeof buildInput> {
-  return buildInput();
-}
-
-async function buildInput() {
+async function legacyInput() {
   const identity = VPASS_LEGACY_ADAPTER.matchTerminalKey(CARD_KEY)!;
-  const terminalBytes = bytesOf(LEGACY_MANIFEST);
-  const snapshot = bytesOf(LEGACY_SNAPSHOT);
+  const snapshot = bytesOf(SANITIZED_SNAPSHOT);
   return {
     identity,
     terminalKey: CARD_KEY,
-    terminalBytes,
-    terminalSha256: await fakeSha256Hex(terminalBytes),
+    terminalBytes: bytesOf(LEGACY_MANIFEST),
     objects: [
       {
         legacyKey: `${identity.legacyPrefix}snapshot.json`,
         bytes: snapshot,
         sha256: await fakeSha256Hex(snapshot),
+        role: "provider_response",
+        sanitizer: SANITIZER,
       },
     ],
   };
@@ -92,12 +98,20 @@ describe("legacy layout adapters", () => {
     // A card exposes a rolling window of statement months, so a successful run
     // is not a claim about the whole history.
     expect(manifest.coverageStatus).toBe("partial");
-    expect(manifest.artifacts.map((entry) => entry.artifactKey)).toEqual([
-      "manifest.json",
-      "snapshot.json",
-    ]);
+    expect(manifest.artifacts.map((entry) => entry.artifactKey)).toEqual(["snapshot.json"]);
     expect(manifest.units).toEqual([
-      { unitKey: "card-001", unitKind: "card", artifactCount: 2, coverageStatus: "partial" },
+      { unitKey: "card-001", unitKind: "card", artifactCount: 1, coverageStatus: "partial" },
+    ]);
+    // The stored artifact is the sanitizer's output over the legacy object.
+    expect(manifest.transformations).toEqual([
+      {
+        transformationId: "redacted:snapshot.json",
+        stepKind: "redacted",
+        transformerId: SANITIZER.transformerId,
+        transformerVersion: SANITIZER.transformerVersion,
+        inputArtifactKeys: [`vpass/2026/09/01/${RUN}/card-001/snapshot.json`],
+        outputArtifactKey: "snapshot.json",
+      },
     ]);
     expect(manifest.ranges[0]).toEqual({
       rangeKey: "statement-months",
@@ -128,15 +142,40 @@ describe("legacy layout adapters", () => {
       identity,
       terminalKey: key,
       terminalBytes: bytes,
-      terminalSha256: await fakeSha256Hex(bytes),
       objects: [],
     });
     const manifest = planManifest(plan);
     expect(manifest.providerOutcome).toBe("failed");
     expect(manifest.coverageStatus).toBe("unknown");
     expect(manifest.safeErrorCode).toBe("collector_failed");
-    expect(manifest.artifacts.map((entry) => entry.role)).toEqual(["collector_error"]);
+    // The error record's free-text `message` is provider text; it is read
+    // for the outcome and not stored.
+    expect(manifest.artifacts).toEqual([]);
+    expect(manifest.units[0]?.artifactCount).toBe(0);
     expect(manifest.ranges).toEqual([]);
+  });
+
+  test("no legacy byte is stored verbatim; every artifact is a named sanitizer's output", async () => {
+    const bucket = new FakeR2Bucket();
+    const input = await legacyInput();
+    const plan = VPASS_LEGACY_ADAPTER.toPersistPlan(input);
+    const result = await persistRun(bucket, plan);
+    expect(result.outcome).toBe("persisted");
+    const legacyDigest = await fakeSha256Hex(input.terminalBytes);
+    const storedDigests = await Promise.all(
+      [...bucket.entries.values()].map((entry) => fakeSha256Hex(entry.bytes)),
+    );
+    expect(storedDigests).not.toContain(legacyDigest);
+    const manifest = planManifest(plan);
+    const outputs = new Set(manifest.transformations.map((step) => step.outputArtifactKey));
+    for (const artifact of manifest.artifacts) {
+      expect(outputs.has(artifact.artifactKey)).toBe(true);
+      const step = manifest.transformations.find(
+        (entry) => entry.outputArtifactKey === artifact.artifactKey,
+      );
+      expect(step?.stepKind).toBe("redacted");
+      expect(step?.inputArtifactKeys[0]?.startsWith(input.identity.legacyPrefix)).toBe(true);
+    }
   });
 
   test("the mapped plan persists through the shared writer", async () => {
@@ -164,6 +203,8 @@ describe("legacy layout adapters", () => {
             legacyKey: "vpass/elsewhere/snapshot.json",
             bytes: bytesOf("{}"),
             sha256: "0".repeat(64),
+            role: "provider_response",
+            sanitizer: SANITIZER,
           },
         ],
       }),

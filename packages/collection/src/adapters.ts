@@ -11,11 +11,21 @@
 // This is a pure mapping. It reads no bucket, calls no service, and does not
 // modify the importer: the adapter's caller supplies the bytes it already
 // read, and `persistRun` does the writing.
+//
+// It stores nothing verbatim. Legacy responses carry session material the
+// importer strips before anything reaches central storage (plan 03 §2:
+// responses that contain credentials never flow into the object area as
+// they are), and that sanitizer lives in the importer, not here. So every
+// byte the adapter puts in a plan is one the caller has already passed
+// through a named sanitizer, and the plan records that step as a `redacted`
+// transformation from the legacy key. The legacy terminal record itself is
+// parsed for identity, timestamps and outcome and is not stored either.
 import {
   type CoverageStatus,
   type ProviderOutcome,
   type TerminalRange,
   type TerminalReport,
+  type TerminalTransformation,
   type TerminalUnit,
 } from "./manifest";
 import type { PersistArtifact, PersistRunPlan } from "./writer";
@@ -41,20 +51,33 @@ export interface LegacyRunIdentity {
   readonly unitKey?: string;
 }
 
+/** The sanitizer a caller ran over a legacy object before handing it over. */
+export interface LegacySanitizer {
+  readonly transformerId: string;
+  readonly transformerVersion: string;
+}
+
 export interface LegacyObject {
+  /** Key of the raw object in the legacy bucket; recorded as the transformation input. */
   readonly legacyKey: string;
+  /** The *sanitized* bytes to store, and their digest. Never the raw response. */
   readonly bytes: Uint8Array;
   readonly sha256: string;
   readonly mediaType?: string;
+  readonly role: string;
+  readonly sanitizer: LegacySanitizer;
 }
 
 export interface LegacyRunInput {
   readonly identity: LegacyRunIdentity;
-  /** The legacy terminal object (manifest/record) key and bytes. */
+  /**
+   * The legacy terminal record (manifest/error) key and bytes. They are read
+   * for identity, timestamps and outcome only; the record is not stored. A
+   * caller that wants it kept passes a sanitized copy through `objects`.
+   */
   readonly terminalKey: string;
   readonly terminalBytes: Uint8Array;
-  readonly terminalSha256: string;
-  /** Every other object of the run, already read and hashed by the caller. */
+  /** The run's other objects, already read, sanitized and hashed by the caller. */
   readonly objects: readonly LegacyObject[];
 }
 
@@ -185,29 +208,31 @@ export const VPASS_LEGACY_ADAPTER: LegacyCollectionAdapter = {
     // fully successful run is not a claim about the card's whole history.
     const coverageStatus: CoverageStatus = kind === "error" ? "unknown" : "partial";
 
-    const artifacts: PersistArtifact[] = [
-      {
-        artifactKey: `${kind}.json`,
-        sha256: input.terminalSha256,
-        byteSize: input.terminalBytes.byteLength,
-        mediaType: "application/json",
-        role: kind === "error" ? "collector_error" : "collector_manifest",
-        unitKey: identity.unitKey ?? "run",
-        body: { kind: "bytes", bytes: input.terminalBytes },
-      },
-    ];
+    const artifacts: PersistArtifact[] = [];
+    const transformations: TerminalTransformation[] = [];
     for (const object of input.objects) {
       if (!object.legacyKey.startsWith(identity.legacyPrefix)) {
         throw new LegacyAdapterError("vpass_object_outside_run");
       }
+      const artifactKey = object.legacyKey.slice(identity.legacyPrefix.length);
       artifacts.push({
-        artifactKey: object.legacyKey.slice(identity.legacyPrefix.length),
+        artifactKey,
         sha256: object.sha256,
         byteSize: object.bytes.byteLength,
         mediaType: object.mediaType ?? "application/json",
-        role: "provider_response",
+        role: object.role,
         unitKey: identity.unitKey ?? "run",
         body: { kind: "bytes", bytes: object.bytes },
+      });
+      // Provenance: the stored bytes are the sanitizer's output over the
+      // legacy object, which is not itself among the artifacts.
+      transformations.push({
+        transformationId: `redacted:${artifactKey.replaceAll("/", ":")}`,
+        stepKind: "redacted",
+        transformerId: object.sanitizer.transformerId,
+        transformerVersion: object.sanitizer.transformerVersion,
+        inputArtifactKeys: [object.legacyKey],
+        outputArtifactKey: artifactKey,
       });
     }
 
@@ -270,7 +295,7 @@ export const VPASS_LEGACY_ADAPTER: LegacyCollectionAdapter = {
         units,
         ranges,
         reports,
-        transformations: [],
+        transformations,
       },
       artifacts,
     };
