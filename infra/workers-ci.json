@@ -24,7 +24,7 @@
     },
     {
       "name": "cloudflare-browser-run-bootstrap",
-      "path": "poc/cloudflare-browser-run",
+      "path": "experiments/cloudflare-browser-run",
       "config": "wrangler.bootstrap.jsonc"
     },
     {
