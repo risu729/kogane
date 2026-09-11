@@ -11,6 +11,7 @@ different rules.
 - [Package layout and import boundaries](docs/package-layout.md)
 - [Evidence collection](docs/collection.md)
 - [Raw evidence store](docs/raw-store.md)
+- [Collection contract (`packages/collection`)](docs/collection-contract.md)
 - [Evidence ingest contract](docs/evidence-contract.md)
 - [Observation layer](docs/observations.md)
 - [Parser coverage contract](docs/parser-coverage.md)
