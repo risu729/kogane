@@ -251,73 +251,6 @@
       "workers": []
     },
     {
-      "directory": "poc/sbi-vc-trade-worker",
-      "workspace": "poc",
-      "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "promote-service",
-        "proposedTarget": "services/collector-sbi-vc-trade",
-        "requiredVerification": "keep the client dependency and the resource identity",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-sbi-vc-session-poc; buckets=kogane-sbi-vc-trade-poc)"
-      },
-      "workers": [
-        {
-          "config": "poc/sbi-vc-trade-worker/wrangler.jsonc",
-          "name": "kogane-sbi-vc-session-poc",
-          "main": "src/worker.ts",
-          "role": "deployed",
-          "liveWorker": true,
-          "crons": [
-            "*/15 * * * *",
-            "5 21 * * *"
-          ],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "SNAPSHOTS",
-              "bucket": "kogane-sbi-vc-trade-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [
-            {
-              "name": "SESSION_STATE",
-              "className": "SbiVcSessionState"
-            }
-          ],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [
-            {
-              "tag": "v1",
-              "newSqliteClasses": [
-                "SbiVcSessionState"
-              ],
-              "newClasses": []
-            }
-          ],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [
-            {
-              "binding": "RAW_EVIDENCE_IMPORTER",
-              "service": "kogane-collector-r2-importer"
-            }
-          ],
-          "varNames": [
-            "COLLECTOR_SCHEMA_VERSION"
-          ],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        }
-      ]
-    },
-    {
       "directory": "poc/smbc-direct-backfill-worker",
       "workspace": "poc",
       "disposition": {
@@ -1633,6 +1566,73 @@
           "varNames": [
             "COLLECTOR_SCHEMA_VERSION",
             "RELAY_PUBLIC_URL"
+          ],
+          "requiredSecretNames": [],
+          "unextractedKeys": []
+        }
+      ]
+    },
+    {
+      "directory": "services/collector-sbi-vc-trade",
+      "workspace": "services",
+      "disposition": {
+        "source": "poc_disposition.csv",
+        "proposedAction": "promote-service",
+        "proposedTarget": "services/collector-sbi-vc-trade",
+        "requiredVerification": "keep the client dependency and the resource identity",
+        "executionStatus": "EXECUTED_U04",
+        "planLiveResourceStatus": "NOT_VERIFIED",
+        "liveResourceStatus": "LIVE(workers=kogane-sbi-vc-session-poc; buckets=kogane-sbi-vc-trade-poc)"
+      },
+      "workers": [
+        {
+          "config": "services/collector-sbi-vc-trade/wrangler.jsonc",
+          "name": "kogane-sbi-vc-session-poc",
+          "main": "src/worker.ts",
+          "role": "deployed",
+          "liveWorker": true,
+          "crons": [
+            "*/15 * * * *",
+            "5 21 * * *"
+          ],
+          "emailHandler": false,
+          "d1": [],
+          "r2": [
+            {
+              "binding": "SNAPSHOTS",
+              "bucket": "kogane-sbi-vc-trade-poc",
+              "live": true
+            }
+          ],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [
+            {
+              "name": "SESSION_STATE",
+              "className": "SbiVcSessionState"
+            }
+          ],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [
+            {
+              "tag": "v1",
+              "newSqliteClasses": [
+                "SbiVcSessionState"
+              ],
+              "newClasses": []
+            }
+          ],
+          "containers": [],
+          "vpcNetworks": [],
+          "serviceBindings": [
+            {
+              "binding": "RAW_EVIDENCE_IMPORTER",
+              "service": "kogane-collector-r2-importer"
+            }
+          ],
+          "varNames": [
+            "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [],
           "unextractedKeys": []

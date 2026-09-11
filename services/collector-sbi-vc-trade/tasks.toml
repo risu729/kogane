@@ -2,33 +2,33 @@
 #:schema https://mise.jdx.dev/schema/mise-task.json
 
 ["sbi-vc-trade-worker:types"]
-description = "Generate the Cloudflare Worker types of poc/sbi-vc-trade-worker."
-dir = "poc/sbi-vc-trade-worker"
+description = "Generate the Cloudflare Worker types of services/collector-sbi-vc-trade."
+dir = "services/collector-sbi-vc-trade"
 run = "./node_modules/.bin/wrangler types worker-configuration.d.ts --env-file .dev.vars.example --strict-vars false"
 
 ["sbi-vc-trade-worker:typecheck"]
-description = "Type-check poc/sbi-vc-trade-worker."
+description = "Type-check services/collector-sbi-vc-trade."
 depends = ["sbi-vc-trade-worker:types"]
-dir = "poc/sbi-vc-trade-worker"
+dir = "services/collector-sbi-vc-trade"
 run = "./node_modules/.bin/tsc --noEmit"
 
 ["sbi-vc-trade-worker:test"]
-description = "Run the poc/sbi-vc-trade-worker tests."
+description = "Run the services/collector-sbi-vc-trade tests."
 depends = ["sbi-vc-trade-worker:types"]
-dir = "poc/sbi-vc-trade-worker"
+dir = "services/collector-sbi-vc-trade"
 run = [
 	"bun test ./test/*.test.ts",
 	"./node_modules/.bin/vitest run",
 ]
 
 ["sbi-vc-trade-worker:dry-run"]
-description = "Validate the poc/sbi-vc-trade-worker deployment without uploading it."
+description = "Validate the services/collector-sbi-vc-trade deployment without uploading it."
 depends = ["sbi-vc-trade-worker:types"]
-dir = "poc/sbi-vc-trade-worker"
+dir = "services/collector-sbi-vc-trade"
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
 ["ci:sbi-vc-trade-worker"]
-description = "Every check CI runs for poc/sbi-vc-trade-worker."
+description = "Every check CI runs for services/collector-sbi-vc-trade."
 depends = ["sbi-vc-trade-worker:typecheck", "sbi-vc-trade-worker:test"]

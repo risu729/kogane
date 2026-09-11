@@ -36,6 +36,6 @@ bun src/cli.ts -- \
   --output /secure/sbi-vc-output
 ```
 
-outputは実残高・履歴を含むためprivateであり、commit、CI artifact、stdoutへ送らない。出力directoryはmode 700、各fileは作成時からmode 600とし、既存fileやsymlinkを上書きしない。このlocal client自身はsession更新や再認証を行わない。それらと定期収集は隣接する`poc/sbi-vc-trade-worker`へ分離している。公開UIが送らない任意date filterはformatを推測せず実装していない。
+outputは実残高・履歴を含むためprivateであり、commit、CI artifact、stdoutへ送らない。出力directoryはmode 700、各fileは作成時からmode 600とし、既存fileやsymlinkを上書きしない。このlocal client自身はsession更新や再認証を行わない。それらと定期収集は隣接する`services/collector-sbi-vc-trade`へ分離している。公開UIが送らない任意date filterはformatを推測せず実装していない。
 
 `tradeReportList`はtyped methodだけを用意し、現行UIが使うstatement typeの意味を値なしで検証できていないためdefault collectionへ入れていない。PDF/ZIP payload取得はread statusを更新する可能性が未確認なので実装しない。

@@ -144,7 +144,7 @@
     },
     {
       "name": "sbi-vc-trade-worker",
-      "path": "poc/sbi-vc-trade-worker",
+      "path": "services/collector-sbi-vc-trade",
       "config": "wrangler.jsonc"
     },
     {

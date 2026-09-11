@@ -201,32 +201,6 @@ No wrangler config.
 
 No wrangler config.
 
-### `poc/sbi-vc-trade-worker`
-
-- Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-vc-trade
-- Required verification: keep the client dependency and the resource identity
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-sbi-vc-session-poc; buckets=kogane-sbi-vc-trade-poc)
-
-#### `kogane-sbi-vc-session-poc` — `poc/sbi-vc-trade-worker/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
-- R2: SNAPSHOTS → kogane-sbi-vc-trade-poc
-- KV: —
-- Queues: —
-- Durable Objects: SESSION_STATE → SbiVcSessionState
-- DO migration tags: v1: SbiVcSessionState
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
-- Crons: `*/15 * * * *`<br>`5 21 * * *`
-- Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
-- Required secrets (names only): —
-
 ### `poc/smbc-direct-backfill-worker`
 
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-smbc-direct
@@ -848,6 +822,32 @@ No wrangler config.
 - Crons: `0 21 * * *`
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
+- Required secrets (names only): —
+
+### `services/collector-sbi-vc-trade`
+
+- Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-vc-trade
+- Required verification: keep the client dependency and the resource identity
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-sbi-vc-session-poc; buckets=kogane-sbi-vc-trade-poc)
+
+#### `kogane-sbi-vc-session-poc` — `services/collector-sbi-vc-trade/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: —
+- R2: SNAPSHOTS → kogane-sbi-vc-trade-poc
+- KV: —
+- Queues: —
+- Durable Objects: SESSION_STATE → SbiVcSessionState
+- DO migration tags: v1: SbiVcSessionState
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Crons: `*/15 * * * *`<br>`5 21 * * *`
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
 ### `services/evidence-browser`
