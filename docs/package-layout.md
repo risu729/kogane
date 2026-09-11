@@ -32,8 +32,8 @@ added: this is a boundary change, not a topology change.
 
 ## The two rules CI enforces
 
-`scripts/import-boundaries.ts` states them and
-`scripts/import-boundaries.test.ts` runs them over every tracked TypeScript
+`tasks/_lib/import-boundaries.ts` states them and
+`tasks/_lib/import-boundaries.test.ts` runs them over every tracked TypeScript
 file in the standalone offline step (`mise run ci:standalone`).
 
 1. **Nothing under `services/*/src` or `packages/*/src` may import a module

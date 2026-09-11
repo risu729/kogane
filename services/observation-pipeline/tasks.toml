@@ -1,0 +1,31 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["processor:types"]
+description = "Generate the Cloudflare Worker types of services/observation-pipeline."
+dir = "services/observation-pipeline"
+run = "./node_modules/.bin/wrangler types"
+
+["processor:typecheck"]
+description = "Type-check services/observation-pipeline."
+depends = ["processor:types"]
+dir = "services/observation-pipeline"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["processor:test"]
+description = "Run the services/observation-pipeline tests."
+depends = ["processor:types"]
+dir = "services/observation-pipeline"
+run = "bun test"
+
+["processor:dry-run"]
+description = "Validate the services/observation-pipeline deployment without uploading it."
+depends = ["processor:types"]
+dir = "services/observation-pipeline"
+run = [
+	"./node_modules/.bin/wrangler deploy --dry-run",
+]
+
+["ci:processor"]
+description = "Every check CI runs for services/observation-pipeline."
+depends = ["processor:typecheck", "processor:test"]

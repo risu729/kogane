@@ -27,13 +27,13 @@ behaves exactly as it did. See `docs/package-layout.md`.
 
 ```sh
 bun install
-bun run preview       # build + isolated synthetic-data browser (no existing state access)
-bun run demo          # ingest the fixtures, parse them, print row counts
-bun run build         # build the client into web/dist
-bun run serve         # API + built client on http://127.0.0.1:8787/
-bun run dev           # Vite dev server on 5173, proxying /api to 8787
+mise run web:build && bun src/serve.ts --demo       # build + isolated synthetic-data browser (no existing state access)
+bun src/demo.ts          # ingest the fixtures, parse them, print row counts
+mise run web:build         # build the client into web/dist
+bun src/serve.ts         # API + built client on http://127.0.0.1:8787/
+mise run web:dev           # Vite dev server on 5173, proxying /api to 8787
 bun test              # pipeline/API tests; browser tests require Chromium and a build
-bun run typecheck
+mise run web:typecheck
 ```
 
 The frontend now provides Japanese navigation, responsive layouts, source
@@ -43,27 +43,27 @@ production API handoff. `/api/meta` distinguishes a verified synthetic
 preview from a normal local store whose data classification is unknown.
 Neither is connected to the production D1/R2 store yet.
 
-`bun run preview` uses only committed synthetic fixtures in a fresh temporary
+`mise run web:build && bun src/serve.ts --demo` uses only committed synthetic fixtures in a fresh temporary
 store and removes that store on normal shutdown. Use it to review the UI
-without opening `state/` or running a collector. `bun run demo` retains its
+without opening `state/` or running a collector. `bun src/demo.ts` retains its
 older behavior of ingesting fixtures into `state/`, so it is not a data-mode
 switch and does not mark that store synthetic.
 
-`bun run serve` binds loopback only and has no authentication: it renders
+`bun src/serve.ts` binds loopback only and has no authentication: it renders
 real financial evidence and must never be reachable from a network. The
 same holds for the dev server, which binds localhost unless it is given
 `--host`. `bun test` runs 5 of its tests in a real Chromium when one is
 available and the client has been built; without either it reports why it
 skipped them.
 
-`bun run demo` is idempotent. Running it twice ingests nothing new and
+`bun src/demo.ts` is idempotent. Running it twice ingests nothing new and
 parses nothing new, because runs are keyed by their external run id, blobs
 by their SHA-256, and parse runs by (artifact, parser, version).
 
 State lives in `state/` (gitignored): `kogane-poc.sqlite` stands in for D1,
 and `state/blobs/` stands in for R2. Deleting the directory and re-running
 is always safe — that is the point of the architecture. The client build
-output in `web/dist/` is gitignored too, and `bun run serve` says so
+output in `web/dist/` is gitignored too, and `bun src/serve.ts` says so
 rather than 404-ing silently when it is missing.
 
 ## What it does

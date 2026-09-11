@@ -184,7 +184,7 @@ From addendum 13 §1 (right column) and §6:
 
 ## Verification
 
-Locally with synthetic data only: `bun run typecheck` and `bun test` in
+Locally with synthetic data only: `mise run domain:typecheck` and `bun test` in
 `packages/domain` (SYN01–SYN24 and per-module unit tests),
-`bun run scripts/ci-package.ts packages/domain`, `bun test scripts/`, and
+`mise run ci:domain`, `mise run ci:root`, and
 repository lint via `hk`. No production data, D1 or Workers were involved.

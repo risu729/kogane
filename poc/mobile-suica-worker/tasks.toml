@@ -1,0 +1,31 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["mobile-suica-worker:types"]
+description = "Generate the Cloudflare Worker types of poc/mobile-suica-worker."
+dir = "poc/mobile-suica-worker"
+run = "./node_modules/.bin/wrangler types"
+
+["mobile-suica-worker:typecheck"]
+description = "Type-check poc/mobile-suica-worker."
+depends = ["mobile-suica-worker:types"]
+dir = "poc/mobile-suica-worker"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["mobile-suica-worker:test"]
+description = "Run the poc/mobile-suica-worker tests."
+depends = ["mobile-suica-worker:types"]
+dir = "poc/mobile-suica-worker"
+run = "bun test"
+
+["mobile-suica-worker:dry-run"]
+description = "Validate the poc/mobile-suica-worker deployment without uploading it."
+depends = ["mobile-suica-worker:types"]
+dir = "poc/mobile-suica-worker"
+run = [
+	"./node_modules/.bin/wrangler deploy --dry-run",
+]
+
+["ci:mobile-suica-worker"]
+description = "Every check CI runs for poc/mobile-suica-worker."
+depends = ["mobile-suica-worker:typecheck", "mobile-suica-worker:test"]

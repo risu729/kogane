@@ -192,7 +192,7 @@ addendum 14 §7 against them and the helpers.
 
 ## Verified locally
 
-With synthetic data only: `bun run typecheck` and `bun test` in
+With synthetic data only: `mise run domain:typecheck` and `bun test` in
 `packages/domain`, the offline CI plan `bun run scripts/ci-package.ts
 packages/domain`, `bun test scripts/`, and `hk check`. Not verified: any
 service integration, D1, Workers, production data or load.

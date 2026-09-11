@@ -74,7 +74,7 @@ exact replayが冪等であることを確認した。さらに旧v1 manifestを
 
 ```sh
 SONY_BANK_CREDENTIAL_FILE=/secure/path/sony-bank.json \
-  bun run smoke:live -- 2025-01-01 2026-08-31
+  bun scripts/live-smoke.ts -- 2025-01-01 2026-08-31
 ```
 
 ## Secret
@@ -89,8 +89,8 @@ Secret値をsource、Wrangler config、shell履歴、標準出力へ置かない
 ```sh
 bun install --frozen-lockfile
 bun test
-bun run typecheck
-bun run cf:check
+mise run sony-bank-worker:typecheck
+mise run sony-bank-worker:dry-run
 wrangler r2 bucket create kogane-sony-bank-collector-poc
 wrangler deploy
 wrangler secret put SONY_BANK_CREDENTIAL_JSON

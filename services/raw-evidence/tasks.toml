@@ -1,0 +1,47 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["ingest:types"]
+description = "Generate the Cloudflare Worker types of services/raw-evidence."
+dir = "services/raw-evidence"
+run = "./node_modules/.bin/wrangler types"
+
+["ingest:typecheck"]
+description = "Type-check services/raw-evidence."
+depends = ["ingest:types"]
+dir = "services/raw-evidence"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["ingest:test"]
+description = "Run the services/raw-evidence tests."
+depends = ["ingest:types"]
+dir = "services/raw-evidence"
+run = [
+	"./node_modules/.bin/vitest run",
+	"bash test/verify-sbi-shinsei-route.test.sh",
+	"bash test/verify-mobile-suica-route.test.sh",
+	"bash test/verify-global-pass-route.test.sh",
+	"bash test/verify-myjcb-route.test.sh",
+	"bash test/verify-moneyforward-route.test.sh",
+	"bash test/verify-v-point-route.test.sh",
+	"bash test/verify-vpass-route.test.sh",
+	"bash test/verify-v-point-pay-email-route.test.sh",
+	"bash test/verify-smbc-direct-route.test.sh",
+]
+
+["ingest:build"]
+description = "Bundle the local ingest helper to prove it still builds."
+dir = "services/raw-evidence"
+run = "bun build scripts/ingest-file.ts --target=bun --outfile=.wrangler/ingest-file-check.js"
+
+["ingest:dry-run"]
+description = "Validate the services/raw-evidence deployment without uploading it."
+depends = ["ingest:types"]
+dir = "services/raw-evidence"
+run = [
+	"./node_modules/.bin/wrangler deploy --dry-run",
+]
+
+["ci:ingest"]
+description = "Every check CI runs for services/raw-evidence."
+depends = ["ingest:typecheck", "ingest:build", "ingest:test"]

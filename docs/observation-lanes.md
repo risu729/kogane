@@ -218,7 +218,7 @@ creates one through the internal route; the cron never starts a plan.
 
 ## Verified locally / not verified
 
-Verified with synthetic data: everything in the table above, `bun run typecheck`,
+Verified with synthetic data: everything in the table above, `mise run processor:typecheck`,
 `wrangler deploy --dry-run`, the raw-evidence suite with 0035 present. Not
 verified: production throughput of the per-lane budgets, D1 query cost of
 `/status` on the real catalogue, and the CPU cost of a 24-job worst-case sweep

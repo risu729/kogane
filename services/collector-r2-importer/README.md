@@ -14,7 +14,7 @@ manifest込み12 artifact以上の即時importは全source validation後、中�
 
 ### private R2の構造監査（2026-09-05）
 
-本文、金融値、object key、個別hash、secretを表示せず、読み取り専用bindingで構造だけを監査した。1 manifest、189 objectsで、data artifactはraw 94件とnormalized 94件だった。うちraw transaction artifactは93件、rowは合計1,069件で、`accntHstCount`・manifest宣言・実row件数の不一致は0件、観測した入出金flagは`1`/`2`、停止flagは`0`だけだった。manifest/artifactのprefix、size、宣言SHA-256、custom metadata、content type、完全inventoryに不一致はなく、legacy objectにnative SHA-256がないことも明示的に確認した。最終validatorを同じread-only bindingで適用し、全189 objectsのstrict validation後に中央stateを作らず、想定どおりstaged backfill待ちへ遷移した。source R2へのwrite/deleteは行っていない。再実行は`bun run audit:smbc-direct-r2`で行い、local-only workerがremote R2を読み取って集約結果だけを出す。
+本文、金融値、object key、個別hash、secretを表示せず、読み取り専用bindingで構造だけを監査した。1 manifest、189 objectsで、data artifactはraw 94件とnormalized 94件だった。うちraw transaction artifactは93件、rowは合計1,069件で、`accntHstCount`・manifest宣言・実row件数の不一致は0件、観測した入出金flagは`1`/`2`、停止flagは`0`だけだった。manifest/artifactのprefix、size、宣言SHA-256、custom metadata、content type、完全inventoryに不一致はなく、legacy objectにnative SHA-256がないことも明示的に確認した。最終validatorを同じread-only bindingで適用し、全189 objectsのstrict validation後に中央stateを作らず、想定どおりstaged backfill待ちへ遷移した。source R2へのwrite/deleteは行っていない。再実行は`bash scripts/audit-smbc-direct-r2.sh`で行い、local-only workerがremote R2を読み取って集約結果だけを出す。
 
 ## 再走査できる不変run
 
@@ -63,7 +63,7 @@ cursorを削除して先頭からidempotentに再走査する。
 した。10 manifests、530 data artifacts（accounts index 10、account detail 40、monthly fragment
 480）の全件がstrict validatorを通過し、statusはsuccess 10 / partial 0 / failed 0だった。
 監査出力は件数と固定failure codeだけで、本文、object key、個別hash、金融値、secretを含めず、
-source R2を変更していない。`bun run audit:moneyforward-r2`で同じ境界を再検証できる。
+source R2を変更していない。`bash scripts/audit-moneyforward-r2.sh`で同じ境界を再検証できる。
 
 Layer Bは`monthly-transactions`だけをcanonical transaction routeとしてparseし、同じ取引を含む
 `account-detail`のbounded recent viewと`accounts-index`はstrict evidence-onlyとする。月別tooltip
@@ -79,7 +79,7 @@ scan prefixもv3とし、旧cursorを拒否する。新しい`full-snapshot-mone
 replayするため旧immutable runを変更せず、既存unit API/schemaを使うのでmigrationは不要。
 毎月fragmentのcalendar markerは1個必須で、空snapshotは本番73件に共通するdialog/calendar/select
 tag・attribute-name構造に限定する。未知empty、途中で切れたtable、金額内部の空白はrejectする。
-`bun run audit:moneyforward-layer-b-r2`はproduction R2をread-onlyで再走査し、parser件数と固定failure
+`bash scripts/audit-moneyforward-layer-b-r2.sh`はproduction R2をread-onlyで再走査し、parser件数と固定failure
 codeだけを集約する。deploy、R2 write/delete、本文・key・hash・個別金融値の出力は行わない。
 2026-09-07のfull canaryでは540 objects / success manifest 10件 / data artifact 530件を走査し、
 monthly 480件のtooltip body 8,603 rowsから宣言年月内6,880 observations（inflow 1,883 / outflow
@@ -132,7 +132,7 @@ v2 manifestが参照するV Point Pay email reconciliationは、別bucketから�
 
 `POST /v1/v-point/import-run`はmanifest 1件を同期importし、`POST /v1/v-point/backfill-page`は1 requestにつきsource R2 objectを1件だけ走査する。現存runの最大はdata artifact 10件とreconciliation 1件で同期呼出上限内である。将来data artifactが11件を超えた即時runは中央state作成前に`202 deferred`とし、backfillでは完全inventoryを先に固定して最大8 artifactずつ冪等転送する。HMAC署名済みcursorがR2 scan位置、処理中manifest、artifact offsetを保持し、最終chunkのseal成功後だけscan位置を進める。専用credential `collector-r2-v-point`だけがrouteを利用でき、他source tokenと共有しない。
 
-2026-09-05の本番R2読み取り専用監査ではmanifest 24件、成功13件、失敗11件を検査し、本文・値・object key・個別hashを出力せず、全24件がstrict contractへ適合した。内訳はv1 5件、v2 19件、reconciliation参照10件である。`bun run audit:vpoint-r2`はlocalhostだけで動く一時Workerとremote read-only R2 bindingを使い、この集約監査を再実行する。標準出力は件数だけで、source R2を更新・削除せず、恒久Workerもdeployしない。
+2026-09-05の本番R2読み取り専用監査ではmanifest 24件、成功13件、失敗11件を検査し、本文・値・object key・個別hashを出力せず、全24件がstrict contractへ適合した。内訳はv1 5件、v2 19件、reconciliation参照10件である。`bash scripts/audit-v-point-r2.sh`はlocalhostだけで動く一時Workerとremote read-only R2 bindingを使い、この集約監査を再実行する。標準出力は件数だけで、source R2を更新・削除せず、恒久Workerもdeployしない。
 
 ## GLOBAL PASSの境界
 
@@ -184,7 +184,7 @@ SBI VC TradeのmanifestはSBI証券とは共有せず、`sbi-vc-trade-worker-poc
 
 ## SBI新生銀行 Layer B read-only監査
 
-`bun run audit:sbi-shinsei-r2`はdeployせず、localhost限定のWrangler dev
+`bash scripts/audit-sbi-shinsei-r2.sh`はdeployせず、localhost限定のWrangler dev
 processからremote R2 bindingをread-onlyで参照する。1 pageにつき1 objectを
 走査し、manifestを見つけた場合はimporter本体と同じLayer A validatorで
 manifest上限、完全prefix、stagnant cursor、exact metadata、native/recomputed
@@ -217,8 +217,8 @@ opaque cursorをmode 0600のlocal stateへ原子的に保存し、10万page上�
 ```sh
 bun install --frozen-lockfile
 bun test
-bun run typecheck
-bun run cf:check
+mise run importer:typecheck
+mise run importer:dry-run
 ```
 
 SBI新生銀行を有効化する本番作業は、必ず次の順で直列実行する。Service Bindingのtargetをcallerより先にdeployし、collector deployが有効化するdaily cronより前に依存先を検証する。
@@ -265,8 +265,8 @@ SBI新生銀行を有効化する本番作業は、必ず次の順で直列実�
      cd poc/sbi-shinsei-worker
      bun install --frozen-lockfile
      bun test
-     bun run typecheck
-     bun run cf:check
+     mise run importer:typecheck
+     mise run importer:dry-run
      npx wrangler deploy
    )
    curl --fail-with-body --silent --show-error \
@@ -325,9 +325,9 @@ GLOBAL PASSは次の順序で直列に適用する。backfill中はdaily cronの
      cd poc/globalpass-worker
      bun install --frozen-lockfile
      bun test
-     bun run typecheck
-     bun run deploy:dry
-     bun run deploy
+     mise run importer:typecheck
+     mise run importer:dry-run
+     ./node_modules/.bin/wrangler deploy
    )
    ```
 
@@ -380,7 +380,7 @@ v20のmanual live canaryと次回cronが成功した後は、運用記録の現�
 
 V Pointは中央→importer→collectorの順で直列に適用する。まず`services/raw-evidence/scripts/deploy.sh`で加算migration `0012`を適用し、healthのschemaと`verify-v-point-route.sh`のroute 1件・policy 2件・alias 1件を確認する。次に`services/collector-r2-importer/scripts/deploy.sh`で専用tokenを同期し、healthが`collector-r2-importer-v15`を返すことを確認する。最後にV Point collectorをdeployしてService Bindingを有効にする。GitHub Actions cronは追加せず、既存Worker cronを維持する。
 
-historical dataは、先に`bun run audit:vpoint-r2`を実行してfailed 0を確認し、`poc/vpoint-worker/scripts/backfill-raw-evidence.sh`で完走する。前後でsource R2のobject件数と集約checksumが不変であること、中央のV Point run/seal/artifactの件数だけが増えることを確認する。cursor削除後に再実行し、中央run/seal/artifact件数が不変なら冪等性確認完了である。失敗時はcollector/importerのrolloutを止めるが、migrationとsource R2はrollback・削除しない。
+historical dataは、先に`bash scripts/audit-v-point-r2.sh`を実行してfailed 0を確認し、`poc/vpoint-worker/scripts/backfill-raw-evidence.sh`で完走する。前後でsource R2のobject件数と集約checksumが不変であること、中央のV Point run/seal/artifactの件数だけが増えることを確認する。cursor削除後に再実行し、中央run/seal/artifact件数が不変なら冪等性確認完了である。失敗時はcollector/importerのrolloutを止めるが、migrationとsource R2はrollback・削除しない。
 
 他collector側のhistorical outboxも次で再送できる。
 
@@ -411,7 +411,7 @@ source R2はbackfill完了後も自動削除しない。
    tokenは流用しない。
 3. MoneyForward collectorをService Binding追加版へdeployする。既存`15 21 * * *`は追加・
    削除・変更せず、GitHub Actions cronも追加しない。
-4. `bun run audit:moneyforward-r2`を再実行し、strict validation failureが0であることを確認する。
+4. `bash scripts/audit-moneyforward-r2.sh`を再実行し、strict validation failureが0であることを確認する。
    source inventoryはobject種別件数と集約checksumだけで記録し、object key、個別hash、本文、
    金融値、認証値を出力しない。
 5. `poc/moneyforward-worker/scripts/backfill-raw-evidence.sh`で最初のmanifestをsealするcanary後、
@@ -432,7 +432,7 @@ migrationとsource R2はrollback・削除しない。
 `raw/v-point-pay-email/{date}/{message-sha256}.{extension}`だけを許可するstorage policyを確認する。
 Importerは専用tokenを他sourceと共有せず、collectorは既存Service Bindingを使う。
 
-導入前に`bun run audit:vpoint-pay-email-r2`を実行し、raw/normalized件数が一致しfailed 0である
+導入前に`bash scripts/audit-v-point-pay-email-r2.sh`を実行し、raw/normalized件数が一致しfailed 0である
 ことだけを確認する。native checksum有無もaggregate件数だけを出す。既存履歴の欠落はbounded
 bodyから再計算したchecksumで検証し、checksumが記録済みなら一致を必須とする。次に
 `poc/vpoint-worker/scripts/backfill-vpoint-pay-email-raw-evidence.sh`を完走し、中央の

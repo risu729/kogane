@@ -1,0 +1,30 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise-task.json
+
+["cloudflare-runtime-probe:types"]
+description = "Generate the Cloudflare Worker types of poc/cloudflare-runtime-probe."
+dir = "poc/cloudflare-runtime-probe"
+run = "./node_modules/.bin/wrangler types"
+
+["cloudflare-runtime-probe:typecheck"]
+description = "Type-check poc/cloudflare-runtime-probe."
+depends = ["cloudflare-runtime-probe:types"]
+dir = "poc/cloudflare-runtime-probe"
+run = "./node_modules/.bin/tsc --noEmit"
+
+["cloudflare-runtime-probe:typecheck-container"]
+description = "Type-check the container side of poc/cloudflare-runtime-probe."
+dir = "poc/cloudflare-runtime-probe"
+run = "./node_modules/.bin/tsc -p tsconfig.container.json --noEmit"
+
+["cloudflare-runtime-probe:dry-run"]
+description = "Validate the poc/cloudflare-runtime-probe deployment without uploading it."
+depends = ["cloudflare-runtime-probe:types"]
+dir = "poc/cloudflare-runtime-probe"
+run = [
+	"./node_modules/.bin/wrangler deploy --dry-run",
+]
+
+["ci:cloudflare-runtime-probe"]
+description = "Every check CI runs for poc/cloudflare-runtime-probe."
+depends = ["cloudflare-runtime-probe:typecheck", "cloudflare-runtime-probe:typecheck-container"]

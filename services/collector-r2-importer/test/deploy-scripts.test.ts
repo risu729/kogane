@@ -25,7 +25,7 @@ describe("collector R2 importer deployment scripts", () => {
     ];
 
     expect(deploy.indexOf("bash scripts/sync-secrets.sh")).toBeLessThan(
-      deploy.indexOf("npx wrangler deploy"),
+      deploy.indexOf("./node_modules/.bin/wrangler deploy"),
     );
     expect(sync).toContain("wrangler secret bulk");
     expect(sync).toContain("wrangler secret list --format json");

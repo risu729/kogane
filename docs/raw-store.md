@@ -416,7 +416,7 @@ redacted template plus a separate-key HMAC fingerprint.
 
 ## Deployment order
 
-Run `bun run cf:deploy` from `services/raw-evidence`. The checked-in deployment
+Run `bash scripts/deploy.sh` from `services/raw-evidence`. The checked-in deployment
 script lists and applies pending remote D1 migrations first, deploys the Worker
 second, then runs the authenticated synthetic round trip. `0003` is additive;
 the prior Worker remains compatible if Worker deployment fails after migration.

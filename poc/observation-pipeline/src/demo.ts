@@ -1,5 +1,5 @@
 // End-to-end demo: ingest the fixtures, run every parser, print what the
-// store now contains. Run with `bun run demo` (then `bun run ui` to browse).
+// store now contains. Run with `bun src/demo.ts` (then `mise run web:dev` to browse).
 
 import { join } from "node:path";
 import { ingestFixtures } from "./ingest.ts";

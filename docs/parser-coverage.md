@@ -415,7 +415,7 @@ also works, because both then apply the run scope unconditionally.
 
 ### Verified locally
 
-Synthetic data only: `bun run scripts/ci-package.ts` `--standalone` (which
+Synthetic data only: `mise run ci:root` (which
 runs the publication-gate predicate guard; the unit-scope predicate adds no
 `superseded_by_parse_run_id IS NULL` and no `status = 'ok'` read, and every
 adoption test still goes through `published_parse_runs`),

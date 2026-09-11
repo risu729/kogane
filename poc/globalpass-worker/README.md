@@ -263,8 +263,8 @@ validationとログインまで自動化できる。明細取得はこのbounded
 ```sh
 bun install --frozen-lockfile
 bun test
-bun run typecheck
-bun run deploy:dry
+mise run globalpass-worker:typecheck
+mise run globalpass-worker:dry-run
 ```
 
 手動実行:
