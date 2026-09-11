@@ -40,6 +40,7 @@ package's locked Playwright Chromium and fails if browser tests cannot run.
 - Ruff checks and formats Python probes without executing them. Typos and hk
   hygiene checks cover spelling, whitespace, merge markers, and file integrity.
 - The standalone step also runs the repository-wide guards under `scripts/`:
+  the auto-merge and risk-gate decisions of [CI/CD automation](ci-cd.md),
   the publication-gate predicate allow-list and the import boundaries of
   [package layout](package-layout.md) (no deployed or shared module may import
   `poc/`; the PoC web UI may not import a service internal or read-model SQL).

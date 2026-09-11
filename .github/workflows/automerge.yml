@@ -1,0 +1,82 @@
+name: Auto-merge
+on:
+  # zizmor: ignore[dangerous-triggers]
+  # Privileged on purpose: registering native auto-merge needs a token that a
+  # fork's pull request workflow cannot have. The job never checks out or runs
+  # pull request code. It checks out the default branch, runs a reviewed script
+  # from there, and passes every pull request string as data through env.
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+      - synchronize
+      - labeled
+  pull_request_review:
+    types:
+      - submitted
+concurrency:
+  group: automerge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+permissions: {}
+defaults:
+  run:
+    shell: bash
+jobs:
+  automerge:
+    name: Enable auto-merge
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # Checkout of the default branch only; never the pull request head.
+    steps:
+      - name: Check automation app configuration
+        id: config
+        env:
+          AUTOMATION_APP_ID: ${{ vars.KOGANE_AUTOMATION_APP_ID }}
+        run: |
+          if [[ -z ${AUTOMATION_APP_ID} ]]; then
+            echo "automation app not configured; see docs/ci-cd.md" | tee -a "${GITHUB_STEP_SUMMARY}"
+            echo "configured=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "configured=true" >> "${GITHUB_OUTPUT}"
+          fi
+      - name: Checkout the default branch
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Trusted code only. The pull request head is never fetched here.
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: |
+            .github/scripts
+            mise.toml
+            mise.lock
+          persist-credentials: false
+      - name: Install mise
+        if: steps.config.outputs.configured == 'true'
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.1
+        env:
+          MISE_ENABLE_TOOLS: node
+      - name: Create an installation token
+        id: token
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.KOGANE_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.KOGANE_AUTOMATION_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          # Narrower than the installation: enough to update the branch and to
+          # merge, nothing else. The app has no ruleset bypass.
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Register native auto-merge
+        if: steps.config.outputs.configured == 'true'
+        run: node .github/scripts/automerge.mjs
+        env:
+          # Pull request metadata reaches the script only as environment values.
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY_OWNER: ${{ github.event.repository.owner.login }}
