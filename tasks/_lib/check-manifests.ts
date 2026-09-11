@@ -16,12 +16,20 @@
 //     that runs nothing cannot pass vacuously;
 //   * every tracked Wrangler configuration is either validated by a dry-run
 //     task and listed in `infra/workers-ci.json`, or excluded there with a
-//     reason. A config can not simply be forgotten.
+//     reason. A config can not simply be forgotten;
+//   * a workspace whose `src/**` imports a generated file declares the task
+//     that writes it in the `depends` of its `typecheck`, `test` and `dry-run`
+//     tasks. `infra/generated-files.json` is the declaration of which files
+//     those are. A missing edge is not a build error but a race: mise runs
+//     independent tasks in parallel, so the check passes whenever the export
+//     happens to have run first and fails on a clean checkout (unified plan
+//     U15, the U02/U03 follow-up).
 //
 // It validates what this repository declares, never what a dependency ships:
 // node_modules is out of scope because git does not track it.
 import { readFileSync } from "node:fs";
 import { relative } from "node:path";
+import { relativeImports } from "./import-boundaries.ts";
 import { REPO_ROOT, trackedFiles } from "./repo-root.ts";
 
 /** A mise task as `mise tasks ls --json` reports it. */
@@ -49,6 +57,28 @@ export interface ExcludedConfig {
   config: string;
   reason: string;
 }
+
+/** One entry of `infra/generated-files.json`. */
+export interface GeneratedFile {
+  /** Repository-relative path of the file the producing task writes. */
+  path: string;
+  /** The mise task that writes it. */
+  producedBy: string;
+  reason?: string;
+}
+
+/** A `<workspace>/src/**` module and what its relative specifiers resolve to. */
+export interface SourceImports {
+  file: string;
+  imports: readonly string[];
+}
+
+/**
+ * The task kinds that must reach the producer. `types` and `build` are not on
+ * the list on purpose: neither reads the generated file, and a dependency they
+ * do not need would serialise work that can run in parallel.
+ */
+const GENERATED_INPUT_TASKS = ["typecheck", "test", "dry-run"] as const;
 
 export function manifestViolations(manifest: unknown, file: string): string[] {
   if (manifest === null || typeof manifest !== "object" || Array.isArray(manifest))
@@ -251,6 +281,132 @@ export function ledgerMismatches(
   ];
 }
 
+/**
+ * The `<short>` each workspace's task family uses, taken from the `ci:<short>`
+ * tasks. `ciTaskMismatches` already fails when that mapping is not one to one,
+ * so an ambiguous entry is left out here rather than reported twice.
+ */
+export function workspaceShortNames(
+  directories: readonly string[],
+  tasks: readonly TaskRecord[],
+  root: string = REPO_ROOT,
+): Map<string, string> {
+  const shorts = new Map<string, string>();
+  for (const task of tasks) {
+    if (!task.name.startsWith("ci:") || task.name === "ci:root") continue;
+    const short = task.name.slice("ci:".length);
+    const workspaces = new Set<string>();
+    for (const member of tasks) {
+      if (!member.name.startsWith(`${short}:`) || member.dir == null) continue;
+      const workspace = workspaceOf(relative(root, member.dir), directories);
+      if (workspace !== undefined) workspaces.add(workspace);
+    }
+    if (workspaces.size === 1) shorts.set([...workspaces][0] as string, short);
+  }
+  return shorts;
+}
+
+/** Every task name reachable from `name` through `depends`, itself included. */
+function dependencyClosure(name: string, byName: ReadonlyMap<string, TaskRecord>): Set<string> {
+  const seen = new Set<string>();
+  const queue = [name];
+  while (queue.length > 0) {
+    const current = queue.pop() as string;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    queue.push(...(byName.get(current)?.depends ?? []));
+  }
+  return seen;
+}
+
+/**
+ * Whether a resolved specifier names the generated file. An extension-less
+ * specifier resolves to the path without its suffix, which is how a `.ts`
+ * module would be imported; a `.json` one is named in full.
+ */
+function namesGenerated(resolved: string, path: string): boolean {
+  return resolved === path || path.startsWith(`${resolved}.`);
+}
+
+/**
+ * Workspaces whose `src/**` imports a generated file without their checks
+ * depending on the task that writes it.
+ *
+ * The dependency is not optional and it is not cosmetic: mise runs independent
+ * tasks in parallel, so a missing edge does not fail — it races. It passes on a
+ * machine where the export ran once and fails on a clean checkout, which is the
+ * worst shape a CI failure can have.
+ *
+ * The whole `depends` closure counts, not just the direct list: a task that
+ * depends on the workspace's build, which depends on the export, has declared
+ * it.
+ */
+export function generatedInputViolations(
+  generated: readonly GeneratedFile[],
+  sources: readonly SourceImports[],
+  directories: readonly string[],
+  tasks: readonly TaskRecord[],
+  root: string = REPO_ROOT,
+): string[] {
+  const errors: string[] = [];
+  const byName = new Map(tasks.map((task) => [task.name, task]));
+  for (const file of generated) {
+    if (!byName.has(file.producedBy))
+      errors.push(
+        `infra/generated-files.json: ${file.path} names the producing task "${file.producedBy}", which does not exist`,
+      );
+  }
+  const shorts = workspaceShortNames(directories, tasks, root);
+  const importedBy = new Map<string, GeneratedFile[]>();
+  for (const source of sources) {
+    const workspace = workspaceOf(source.file, directories);
+    if (workspace === undefined) continue;
+    for (const file of generated) {
+      if (!source.imports.some((resolved) => namesGenerated(resolved, file.path))) continue;
+      const listed = importedBy.get(workspace) ?? [];
+      if (!listed.includes(file)) listed.push(file);
+      importedBy.set(workspace, listed);
+    }
+  }
+  const ordered = [...importedBy].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  for (const [workspace, files] of ordered) {
+    // A workspace with no single `ci:` task is already `ciTaskMismatches`'s
+    // failure; reporting it a second time here would only hide that one.
+    const short = shorts.get(workspace);
+    if (short === undefined) continue;
+    for (const file of files) {
+      if (!byName.has(file.producedBy)) continue;
+      for (const kind of GENERATED_INPUT_TASKS) {
+        const name = `${short}:${kind}`;
+        if (!byName.has(name)) continue;
+        if (dependencyClosure(name, byName).has(file.producedBy)) continue;
+        errors.push(
+          `${name}: ${workspace}/src imports the generated ${file.path}; add "${file.producedBy}", which writes it, to this task's depends`,
+        );
+      }
+    }
+  }
+  return errors;
+}
+
+/**
+ * Declared generated files that git tracks. Either the file stopped being
+ * generated or someone committed an export; both make the declaration a lie,
+ * and a lie here relaxes the check above for everyone.
+ */
+export function trackedGeneratedFiles(
+  generated: readonly GeneratedFile[],
+  tracked: readonly string[],
+): string[] {
+  const set = new Set(tracked);
+  return generated
+    .filter((file) => set.has(file.path))
+    .map(
+      (file) =>
+        `infra/generated-files.json: ${file.path} is tracked by git, so it is not generated; drop the entry or stop committing the file`,
+    );
+}
+
 const SCANNED = [
   "*.md",
   "*.yml",
@@ -335,6 +491,30 @@ export function check(): string[] {
       ledger.workers,
       ledger.excluded ?? [],
     ),
+  );
+  const generated = (
+    JSON.parse(readFileSync(`${REPO_ROOT}/infra/generated-files.json`, "utf8")) as {
+      files: GeneratedFile[];
+    }
+  ).files;
+  const sources = trackedFiles(
+    "apps/*/src/**",
+    "experiments/*/src/**",
+    "packages/*/src/**",
+    "poc/*/src/**",
+    "services/*/src/**",
+  )
+    .filter((file) => /\.[cm]?[jt]sx?$/u.test(file))
+    .map((file) => ({
+      file,
+      imports: relativeImports(file, readFileSync(`${REPO_ROOT}/${file}`, "utf8")),
+    }));
+  errors.push(
+    ...trackedGeneratedFiles(
+      generated,
+      generated.length === 0 ? [] : trackedFiles(...generated.map((file) => file.path)),
+    ),
+    ...generatedInputViolations(generated, sources, directories, tasks),
   );
   return errors;
 }
