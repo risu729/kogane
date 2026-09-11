@@ -37,6 +37,20 @@ describe("SQL statement splitter", () => {
     ]);
   });
 
+  test("a CASE … END inside a trigger body does not end the trigger", () => {
+    // `END` closes both a CASE expression and a trigger body. The first inner
+    // statement below ends with a CASE's END, and the string literal carries the
+    // words BEGIN and END; neither may cut the trigger in two.
+    expect(
+      splitSqlStatements(
+        "CREATE TRIGGER t_ai AFTER INSERT ON t\nBEGIN\n  INSERT INTO log(v) SELECT CASE WHEN NEW.a IS NULL THEN 0 ELSE 1 END;\n  SELECT RAISE(ABORT, 'BEGIN END; -- x');\nEND;\nCREATE TABLE u(a TEXT DEFAULT 'it''s; ok') STRICT;",
+      ),
+    ).toEqual([
+      "CREATE TRIGGER t_ai AFTER INSERT ON t\nBEGIN\n  INSERT INTO log(v) SELECT CASE WHEN NEW.a IS NULL THEN 0 ELSE 1 END;\n  SELECT RAISE(ABORT, 'BEGIN END; -- x');\nEND",
+      "CREATE TABLE u(a TEXT DEFAULT 'it''s; ok') STRICT",
+    ]);
+  });
+
   test("splitting a migration and replaying it statement by statement rebuilds the schema", () => {
     // Proof that the INSERT inventory below is not reading a mis-split file: a
     // trigger body cut at an inner `;` fails to execute, and a missed statement

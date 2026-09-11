@@ -260,6 +260,31 @@ function digest(value: string): string {
 }
 
 /**
+ * True while a `CREATE TRIGGER … BEGIN` body has not reached its closing `END`.
+ *
+ * `END` also closes a `CASE` expression, so the body is open until the `END`
+ * that balances `BEGIN` once every `CASE … END` in between is paired off.
+ * Quoted text is dropped before counting, so a string that says BEGIN or END
+ * cannot open or close anything.
+ */
+function insideTriggerBody(statement: string): boolean {
+  if (!/^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TRIGGER\b/iu.test(statement)) return false;
+  const bare = statement.replaceAll(/'[^']*'|"[^"]*"|`[^`]*`|\[[^\]]*\]/gu, " ");
+  const words = (bare.match(/[A-Za-z_]+/gu) ?? []).map((word) => word.toUpperCase());
+  const begin = words.indexOf("BEGIN");
+  if (begin === -1) return true;
+  let openCases = 0;
+  for (const word of words.slice(begin + 1)) {
+    if (word === "CASE") openCases += 1;
+    else if (word === "END") {
+      if (openCases === 0) return false;
+      openCases -= 1;
+    }
+  }
+  return true;
+}
+
+/**
  * Split a migration into top-level statements.
  *
  * The only subtlety is `CREATE TRIGGER … BEGIN … END;`: the semicolons inside
@@ -292,10 +317,7 @@ export function splitSqlStatements(sql: string): string[] {
       continue;
     }
     if (character === ";") {
-      const isTriggerBody =
-        /^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TRIGGER\b/iu.test(current) &&
-        !/\bEND\s*$/iu.test(current);
-      if (isTriggerBody) {
+      if (insideTriggerBody(current)) {
         current += character;
         index += 1;
         continue;
