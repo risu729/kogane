@@ -19,6 +19,10 @@
     {
       "binding": "SNAPSHOTS",
       "bucket_name": "kogane-sbi-collector-poc"
+    },
+    {
+      "binding": "DATA",
+      "bucket_name": "kogane-raw-evidence"
     }
   ],
   "services": [
@@ -28,6 +32,7 @@
     }
   ],
   "vars": {
+    "COLLECTION_TARGET": "legacy",
     "COLLECTOR_SCHEMA_VERSION": "sbi-worker-poc-v1"
   },
   "triggers": {

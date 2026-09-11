@@ -56,5 +56,5 @@ settlement. Existing current-snapshot selection and provenance remain unchanged.
 
 Evidence: `packages/parsers/src/parsers/registry.ts` and each source parser;
 `docs/sources/moneyforward.md` documents HMAC verification. Synthetic boundary
-tests in `poc/observation-pipeline/test/identity-other.test.ts` cover accepted and
+tests in `packages/identity/test/identity-other.test.ts` cover accepted and
 rejected scopes, changing ordinals, currency roles and product separation.

@@ -242,4 +242,4 @@ a real cost and the reason the boundary is stated as rules in
 
 A worked implementation of phases 2 and 3 and the browser, against the
 payload shapes the live collectors already emit, is in
-`poc/observation-pipeline`.
+`experiments/observation-pipeline-local` and `apps/web`.

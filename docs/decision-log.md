@@ -41,7 +41,7 @@ for a mapping subject must name a mapping row that exists at that revision
 with the matching method, and a `release-override` must have an active
 override to release; the trigger aborts the whole D1 batch otherwise.
 
-## Command contract (`services/observation-pipeline/src/identity-commands.ts`)
+## Command contract (`services/processor/src/identity-commands.ts`)
 
 ```ts
 interface IdentityCommand {
@@ -217,9 +217,9 @@ attributed to.
 
 1. Apply `0029_decision_log.sql` (schema). It is additive and independent of
    `0026_publication_gate.sql`; both are applied before the writer.
-2. Deploy `services/observation-pipeline` (writer: commands, protection from
+2. Deploy `services/processor` (writer: commands, protection from
    the log, policy records).
-3. Deploy `services/evidence-browser` (reader: read modes, contexts).
+3. Deploy `services/app` (reader: read modes, contexts).
 
 Migration `0031_operations.sql` (A09) builds on this one:
 `decision_outbox.decision_revision_id` references `decision_revisions(id)`, and
@@ -244,13 +244,13 @@ the way the writer does (`publishParse` in the pipeline harness and the
 evidence-browser fixtures), because an unadopted `ok` run is current for no
 reader since migration 0026.
 
-`services/observation-pipeline`: `identity-decisions.test.ts` (lifecycle,
+`services/processor`: `identity-decisions.test.ts` (lifecycle,
 resend, conflicts, nothing written on a failed guard, trigger abort of a
 batch, guard comparison, policy records, Vpass evidence arrival, private route,
 append-only rows, migration 0029 on 0017–0035 with seeded rows, relation
 CHECK and SC06), `identity-policies.test.ts` (selector), and the pre-existing
 identity suites. `packages/read-model`: `identity.test.ts`.
-`services/evidence-browser`: `identity-read-modes.test.ts`, conformance and the
+`services/app`: `identity-read-modes.test.ts`, conformance and the
 pre-existing organization and identity API tests. Not verified: production
 data, and the transitive behaviour of concurrent commands from several
 Workers (the ledger and revision triggers are the arbiter; see the tests).

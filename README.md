@@ -21,18 +21,28 @@ different rules.
 - [Decision log, identity commands and read modes](docs/decision-log.md)
 - [Change lifecycle: plan, simulate, approve, commit](docs/change-lifecycle.md)
 - [Balance read model](docs/balance-read-model.md)
+- [Fixed projection input, snapshot identity and completion](docs/projection-input.md)
+- [CORE storage (`packages/storage-d1`)](docs/storage-d1.md)
+- [The READ database](docs/read-model-d1.md)
+- [Runbook: rebuilding the READ database](docs/read-rebuild-runbook.md)
 - [Economic events, allocations and reconciliation](docs/economic-events.md)
 - [Points, miles and prepaid balances](docs/rewards.md)
 - [Prices, calculation policies and report artifacts](docs/calculation-and-reports.md)
 - [Read model (`packages/read-model`)](docs/read-model.md)
 - [Evidence browser](docs/evidence-browser.md)
 - [Agent API and the shared query service](docs/agent-api.md)
+- [Operations API (`/api/ops/v1`) and MCP parity](docs/ops-api.md)
+- [The Processor: shared-R2 terminals, registration and job lanes](docs/processor.md)
 - [Frontend stack and API handoff](docs/frontend.md)
 - [Development checks and CI](docs/ci.md)
+- [CI/CD automation: auto-merge, the Risk Gate and production deploys](docs/ci-cd.md)
 - [Infrastructure ledgers: resources, CORE schema, dependencies, retention](docs/infra-ledgers.md)
 - [Operations: health signals, load, retention and drills](docs/operations.md)
+- [Rollout: every flag, its prerequisites, order and rollback](docs/rollout.md)
+- [Runbook: retiring the legacy ingest, importer and buckets](docs/legacy-retirement.md)
 - [Authenticated collectors](docs/authenticated-collectors.md)
 - [Credential delivery](docs/credentials.md)
+- [Library decisions](docs/libraries.md)
 - [Existing tools and reuse](docs/tooling.md)
 - [Prior art: self-hosted finance software](docs/prior-art.md)
 - [Vpass aggregator alternatives](docs/vpass-aggregators.md)
@@ -80,10 +90,6 @@ each of them needs, and why, is in the
 - [Money Forward](services/collector-moneyforward/README.md)
 - [Vポイント](services/collector-vpoint/README.md)
 - [V Point Pay](services/collector-vpoint-pay/README.md)
-
-## Proofs of concept
-
-- [Observation pipeline (ingest, parsers, evidence browser)](poc/observation-pipeline/README.md)
 
 ## Open experiments
 

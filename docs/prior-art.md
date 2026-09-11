@@ -539,4 +539,4 @@ walked it.
 Read that as a mild warning rather than a reason to change course: the
 financial-domain problems, money formatting and large tables and Shift-JIS
 among them, have no community answers waiting. Several of them are already
-recorded in `poc/observation-pipeline/RESULTS.md`.
+recorded in `docs/research/observation-pipeline-poc.md`.

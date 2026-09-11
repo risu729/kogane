@@ -1,3 +1,8 @@
+// The registration port U05 extracted (packages/application/src/ingest):
+// this class is its HTTP implementation, and `directRegistrationPort` is
+// the in-process one the Processor will use (U08). Declaring the interface
+// here is what keeps the two from drifting apart while both exist.
+import type { RunRegistrationPort } from "../../../packages/application/src/ingest/port.ts";
 import {
   descriptorSha256V1,
   type AddPageGroupRequest,
@@ -14,7 +19,7 @@ import {
 
 type JsonObject = Record<string, unknown>;
 
-export class CentralClient {
+export class CentralClient implements RunRegistrationPort {
   readonly #service: Fetcher;
   readonly #token: string;
 

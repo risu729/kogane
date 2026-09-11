@@ -7,7 +7,7 @@ const PREFIX = `raw/sony-bank/2026/09/07/${RUN_ID}/`;
 const MANIFEST_KEY = `${PREFIX}manifest.json`;
 const WINDOW = { from: "2026-09-01", to: "2026-09-30" };
 const FIXTURES = new URL(
-  "../../../poc/observation-pipeline/fixtures/sony-bank-parser-boundaries/",
+  "../../../tests/fixtures/observation-pipeline/sony-bank-parser-boundaries/",
   import.meta.url,
 );
 const FOREIGN_CURRENCIES = [

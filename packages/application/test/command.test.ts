@@ -1,7 +1,7 @@
 // Pure contract tests: what a payload may contain, what a digest depends on,
 // what a grant allows, and how an error maps to a status. Everything that
 // needs the schema is tested against real migrations in
-// `services/observation-pipeline/test/change-lifecycle.test.ts`.
+// `services/processor/test/change-lifecycle.test.ts`.
 import { describe, expect, test } from "bun:test";
 import {
   agentSubjects,

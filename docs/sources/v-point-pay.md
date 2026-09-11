@@ -172,3 +172,22 @@ funding split非推測、declined amount、残高account分離、schema/provenan
 validatorを通した後にLayer Bを実行する本番canaryである。localhost限定Workerとremote read-only
 R2 bindingだけを使い、object key、hash、本文、金額、残高、ポイント、認証情報を返さず、
 object種別とobservation種別のaggregate件数だけを出す。deploy、R2 write、R2 delete経路は持たない。
+
+## 追記: 共通DATA R2への切替（U09）
+
+`services/collector-vpoint-pay`にvar `COLLECTION_TARGET`（既定`legacy`）と
+binding `DATA`（`kogane-raw-evidence`）を追加した。`legacy`は現行どおり
+per-source bucketへartifactとmanifestを書く。`shared`ではDurable Objectが
+`packages/collection`経由で`objects/<2hex>/<sha256>`へ保存し、
+`runs/v-point-pay/<runId>/terminal.json`を最後に書く。artifactは
+`balance.json`・`transactions-yyyyMM.json`（role `collector_derived`）と
+`collection-summary.json`（role `collector_summary`）で、bytesは現行と同一である。
+terminalの`requestedScope`は`inquiry_period`から当月までの`month_range`で、
+失敗して月範囲が不明な場合は範囲を推測せず`unspecified`とする。
+refresh token・device UUID・access tokenはartifactにもlogにも出さず、
+失敗は機械codeだけを残す。
+
+app API collectorは停止したままで、Cronもtriggerも追加しない。Durable Objectの
+二重収集防止（in-flight排他）とclass/tag、Worker名、既存bucket bindingは変更しない。
+VポイントPay通知mailの収集は引き続き`services/collector-vpoint`側の
+`v-point-pay-email` runである。切替順とrollbackは`docs/collection.md`。

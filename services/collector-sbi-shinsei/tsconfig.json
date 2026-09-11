@@ -3,6 +3,10 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    // The shared-target code and its tests import the R2 importer's modules
+    // directly, and those sources use `.ts` import paths, which the importer's
+    // own tsconfig and every package in the workspace allow.
+    "allowImportingTsExtensions": true,
     "lib": ["ES2022", "WebWorker"],
     "types": ["node", "bun", "@cloudflare/vitest-plugin/types"],
     "strict": true,

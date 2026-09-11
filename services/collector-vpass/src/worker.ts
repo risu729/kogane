@@ -9,12 +9,21 @@ import {
   buildConfigAuth,
   buildFirstLoginAuth,
 } from "./mobile-auth";
+import { collectionTarget } from "./collection-target";
 import {
   backfillStoredRuns,
   continueStoredRecord,
   enqueueStoredRecord,
   type VpassImportJob,
 } from "./raw-evidence";
+import {
+  persistCardRun,
+  persistFailedRun,
+  sharedBucket,
+  sharedRunDiagnostic,
+  sharedRunPersisted,
+  type VpassMonthCapture,
+} from "./shared-collection";
 
 const AUTH_URL = "https://spap.smbc-card.com/api/v3/Fauth";
 const CONFIG_URL = "https://spap.smbc-card.com/api/v3/common/Config";
@@ -32,6 +41,9 @@ const MOBILE_UA =
 
 interface Env {
   SNAPSHOTS: R2Bucket;
+  /** The central bucket; written only when COLLECTION_TARGET is `shared`. */
+  DATA: R2Bucket;
+  COLLECTION_TARGET: string;
   RAW_EVIDENCE_IMPORTER: Fetcher;
   RAW_EVIDENCE_QUEUE: Queue<VpassImportJob>;
   VPASS_ID: string;
@@ -84,6 +96,9 @@ interface MonthCapture {
   pages: Array<{ kind: "top" | "answer"; index: number; rawJson: string }>;
   transactionCount: number;
 }
+
+/** The captures a card collected, in the shape the shared plan reads. */
+type SharedMonths = Record<string, VpassMonthCapture>;
 
 class CookieBag {
   readonly #values = new Map<string, string>();
@@ -487,6 +502,26 @@ async function captureCard(
       transactionCount,
       objectCount: 2,
     };
+    if (collectionTarget(env.COLLECTION_TARGET) === "shared") {
+      // The shared target stores the sanitized artifact set directly and
+      // writes the terminal last; nothing goes to the per-source bucket and
+      // the importer is never called (G1-15).
+      stage = "shared-persist";
+      const outcome = await persistCardRun(sharedBucket(env.DATA), {
+        sessionRunId: runId,
+        cardLabel,
+        startedAt: started.toISOString(),
+        completedAt: summary.completedAt,
+        cardListRawJson: cardList.rawText,
+        selectCardRawJson: selection.rawText,
+        webMeisaiTopRawJson: top.rawText,
+        months: captures as SharedMonths,
+      });
+      console.log(JSON.stringify(sharedRunDiagnostic(runId, cardLabel, outcome)));
+      // A run whose terminal was not written is not a finished run (G1-01).
+      if (!sharedRunPersisted(outcome)) throw new Error("shared_persist_incomplete");
+      return summary;
+    }
     stage = "artifact-write";
     await putJson(
       env,
@@ -512,6 +547,17 @@ async function captureCard(
     return summary;
   } catch (error) {
     diagnostic.failure(stage, error);
+    if (collectionTarget(env.COLLECTION_TARGET) === "shared") {
+      // A card that collected nothing is a failed run with no artifact, never
+      // an empty success (G1-09). A persist failure here is reported as the
+      // original failure: the terminal is simply absent.
+      if (stage !== "shared-persist") {
+        await persistFailedCard(env, runId, cardLabel, started).catch(() => {
+          // The card failure below is the outcome that matters.
+        });
+      }
+      throw error;
+    }
     if (stage !== "central-import") {
       await putCardError(env, prefix, runId, started, selectedCardZeroBased, error);
       try {
@@ -522,6 +568,23 @@ async function captureCard(
     }
     throw error;
   }
+}
+
+/** The failed-run terminal for one card or, with `run`, for a session that
+ * failed before a card was selected. */
+async function persistFailedCard(
+  env: Env,
+  runId: string,
+  unitKey: string,
+  started: Date,
+): Promise<void> {
+  const outcome = await persistFailedRun(sharedBucket(env.DATA), {
+    sessionRunId: runId,
+    unitKey,
+    startedAt: started.toISOString(),
+    failedAt: new Date().toISOString(),
+  });
+  console.log(JSON.stringify(sharedRunDiagnostic(runId, unitKey, outcome)));
 }
 
 async function collectOneCard(
@@ -539,6 +602,12 @@ async function collectOneCard(
     session = await diagnostic.step("session-open", () => openSession(env));
   } catch (error) {
     diagnostic.finish("failed");
+    if (collectionTarget(env.COLLECTION_TARGET) === "shared") {
+      await persistFailedCard(env, runId, cardLabel, started).catch(() => {
+        // The session failure below is the outcome that matters.
+      });
+      throw error;
+    }
     await putCardError(env, prefix, runId, started, selectedCardZeroBased, error);
     try {
       await enqueueStoredRecord(env.RAW_EVIDENCE_QUEUE, `${prefix}/error.json`);
@@ -569,6 +638,12 @@ async function collectAllCards(env: Env, scheduledTime: number): Promise<AllCard
     session = await diagnostic.step("session-open", () => openSession(env));
   } catch (error) {
     diagnostic.finish("failed");
+    if (collectionTarget(env.COLLECTION_TARGET) === "shared") {
+      await persistFailedCard(env, runId, "run", started).catch(() => {
+        // The session failure below is the outcome that matters.
+      });
+      throw error;
+    }
     await putJson(
       env,
       `${runPrefix}/error.json`,

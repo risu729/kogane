@@ -99,10 +99,15 @@ export interface ProjectionPageRow {
 }
 
 /**
- * The declared inputs of a build, in one row. Both the job that builds a
- * snapshot and the reader that decides whether the sealed one is still
- * current read this, so "the projection is behind" is one definition rather
- * than two that can disagree.
+ * Monitoring values of the store, in one row.
+ *
+ * These used to BE the snapshot identity, and they cannot carry it: moving an
+ * artifact's adopted parse from 100 to 150 leaves `max(parse_run_id)` alone
+ * while some unrelated run 900 exists, and two opposite changes leave a count
+ * alone (01 §5). Since migration 0038 the change detector is
+ * `core_source_revision` and the identity is the digest of the captured input;
+ * these values stay as a cheap operational summary, and
+ * `publishedHighWaterParseRunId` still pins the history window of a snapshot.
  */
 export const PROJECTION_INPUTS_SQL = `SELECT
     (SELECT coalesce(max(parse_run_id),0) FROM published_parse_runs) AS published_high_water,
@@ -119,15 +124,31 @@ export interface ProjectionInputsRow {
   decision_revisions: number;
 }
 
-/** The newest sealed snapshot. A building or retired one is never a read target. */
-export const CURRENT_SNAPSHOT_SQL = `SELECT snapshot_id, created_at, row_count, input_manifest_json,
-    projection_release
-  FROM balance_read_snapshots WHERE status='complete' ORDER BY created_at DESC, snapshot_id DESC LIMIT 1`;
+const SNAPSHOT_COLUMNS = `snapshot_id, created_at, row_count, input_manifest_json,
+    projection_release, input_digest, source_revision, visibility_revision, core_epoch,
+    read_instance_id`;
+
+/**
+ * The active sealed snapshot. A building or retired one is never a read target.
+ *
+ * Since migration 0038 "active" is the pointer the build switches in the same
+ * batch that seals the snapshot, so a build that finishes late cannot become
+ * the list a reader sees. A database whose pointer has never been switched
+ * (every snapshot predates 0038) falls back to the newest sealed build, which
+ * is what this query returned before.
+ */
+export const CURRENT_SNAPSHOT_SQL = `SELECT ${SNAPSHOT_COLUMNS}
+  FROM balance_read_snapshots WHERE status='complete'
+  ORDER BY (snapshot_id=(SELECT p.snapshot_id FROM balance_snapshot_pointer p WHERE p.id=1)) DESC,
+    created_at DESC, snapshot_id DESC LIMIT 1`;
 
 /** Whether a snapshot a cursor names is still readable; absent or retired means expired. */
-export const SNAPSHOT_READABLE_SQL = `SELECT snapshot_id, created_at, row_count, input_manifest_json,
-    projection_release
+export const SNAPSHOT_READABLE_SQL = `SELECT ${SNAPSHOT_COLUMNS}
   FROM balance_read_snapshots WHERE snapshot_id=?1 AND status='complete'`;
+
+/** The active pointer itself: what the read model currently publishes. */
+export const ACTIVE_POINTER_SQL = `SELECT snapshot_id, source_revision, read_instance_id,
+    core_epoch, switched_at FROM balance_snapshot_pointer WHERE id=1`;
 
 /**
  * One page: `snapshot_id` and `row_seq > cursor` are the leading columns of

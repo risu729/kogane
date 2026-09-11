@@ -1,0 +1,36 @@
+name: Rollback
+# Re-deploy an earlier commit that is still schema-compatible (unified plan
+# 11 §7, acceptance G5-16). It is the same job as a release, in `rollback` mode:
+# it applies no migration, restores no database and never turns a partial
+# failure into a silent success. What a code rollback cannot undo — applied
+# migrations, objects already written, decisions already recorded — stays, and
+# docs/ci-cd.md says so per case.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: The exact commit on main to go back to. It must be an ancestor of the recorded release.
+        required: true
+        type: string
+      targets:
+        description: Space- or comma-separated deploy-order names to roll back. Empty rolls back every Worker marked deploy in infra/deploy-order.json.
+        required: false
+        default: ""
+        type: string
+permissions: {}
+jobs:
+  rollback:
+    name: Rollback
+    concurrency:
+      # The same group as deploy.yml, so a rollback and a release can never run
+      # against Cloudflare at the same time.
+      group: production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read # for checkout
+      deployments: write # the release ledger
+    uses: ./.github/workflows/_deploy-workers.yml
+    with:
+      sha: ${{ inputs.sha }}
+      only: ${{ inputs.targets }}
+      mode: rollback

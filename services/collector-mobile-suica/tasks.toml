@@ -13,10 +13,13 @@ dir = "services/collector-mobile-suica"
 run = "./node_modules/.bin/tsc --noEmit"
 
 ["mobile-suica-worker:test"]
-description = "Run the services/collector-mobile-suica tests."
+description = "Run the services/collector-mobile-suica tests: the pure suite, then the Miniflare R2 suite."
 depends = ["mobile-suica-worker:types"]
 dir = "services/collector-mobile-suica"
-run = "bun test"
+run = [
+	"bun test ./test/*.test.ts",
+	"./node_modules/.bin/vitest run",
+]
 
 ["mobile-suica-worker:dry-run"]
 description = "Validate the services/collector-mobile-suica deployment without uploading it."

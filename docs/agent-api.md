@@ -85,7 +85,7 @@ API off rather than half-applying it.
 
 ### Configuring `AGENT_API_GRANTS`
 
-`AGENT_API_GRANTS` is a wrangler `var` on `services/evidence-browser` holding
+`AGENT_API_GRANTS` is a wrangler `var` on `services/app` holding
 the JSON object above (principal → grant, without the `principal` field, which
 the server fills in from the verified subject). It ships as `""`.
 
@@ -93,7 +93,7 @@ To enable a grant, set the variable for the deployment — as a secret if the
 principal names should not sit in the repository:
 
 ```sh
-cd services/evidence-browser
+cd services/app
 bunx wrangler secret put AGENT_API_GRANTS   # paste the JSON object
 ```
 
@@ -325,7 +325,7 @@ Requests are bounded at 64 KiB; a larger body is 413 before it reaches a tool.
 ## What was verified locally, and what was not
 
 Verified with synthetic data only, in `packages/application/test/**` (41
-assertions of the pure service) and `services/evidence-browser/test/agent-api.test.ts`
+assertions of the pure service) and `services/app/test/agent-api.test.ts`
 (26 checks over the real Worker, real D1 migrations and the real read model):
 default-off, the grant denial matrix, scope isolation and non-leakage, the
 cursor and budget rules, proposal validation and non-adoption, the MCP tool
@@ -340,7 +340,7 @@ check is not a completion criterion (addendum 10 §10).
 Schema: none. Migration 0029 already provides both tables the proposal path
 writes; this change adds no migration.
 
-1. Reader/writer: deploy `services/evidence-browser` with `AGENT_API_GRANTS`
+1. Reader/writer: deploy `services/app` with `AGENT_API_GRANTS`
    unset. Every agent route answers 403; the UI's Overview page picks up
    `GET /api/v2/query` through the `sharedQuery` capability and shows the same
    figures it showed before.

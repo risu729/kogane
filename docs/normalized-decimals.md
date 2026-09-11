@@ -33,7 +33,7 @@ SQLビューが方針の定義元。トリガーは `scripts/generate-decimal-tr
 
 ## 方針の選択と追加手順
 
-`InterpretationContext.decimalPolicyRelease` は、投影が存在する名前だけを取り得る。判定は `services/evidence-browser/src/decimal-policy.ts` の `DECIMAL_POLICY_PROJECTIONS` が持ち、`decimalPolicySelection(url)` が `decimalPolicy` クエリパラメータを解決する。指定が無ければ `decimal-v1`。形式が不正な値は 400 `invalid_query`、形式は正しいが投影が存在しない値は 400 `unsupported_semantics` を返す。既定の `decimal-v1` へ黙って読み替えない。`decimalRows()` は選ばれた `policy_version` で投影を読む。
+`InterpretationContext.decimalPolicyRelease` は、投影が存在する名前だけを取り得る。判定は `services/app/src/decimal-policy.ts` の `DECIMAL_POLICY_PROJECTIONS` が持ち、`decimalPolicySelection(url)` が `decimalPolicy` クエリパラメータを解決する。指定が無ければ `decimal-v1`。形式が不正な値は 400 `invalid_query`、形式は正しいが投影が存在しない値は 400 `unsupported_semantics` を返す。既定の `decimal-v1` へ黙って読み替えない。`decimalRows()` は選ばれた `policy_version` で投影を読む。
 
 現在この契約を公開しているのは `GET /api/v2/reports/{id}` のみで、応答の `interpretationContext.decimalPolicyRelease` に選択結果が入る。既存の一覧API（`/api/transactions` 等）はパラメータ集合を共有スキーマの capability から導いているため、そちらへ広げる場合は `LIST_REQUEST_SCHEMA` と `ApiCapabilities` の変更（D14/A08 の担当範囲）を伴う。サーバだけが黙って追加パラメータを受け付ける状態にはしない。
 

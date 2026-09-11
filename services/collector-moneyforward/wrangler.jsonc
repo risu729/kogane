@@ -19,6 +19,10 @@
     {
       "binding": "SNAPSHOTS",
       "bucket_name": "kogane-moneyforward-collector-poc"
+    },
+    {
+      "binding": "DATA",
+      "bucket_name": "kogane-raw-evidence"
     }
   ],
   "services": [
@@ -28,7 +32,8 @@
     }
   ],
   "vars": {
-    "COLLECTOR_SCHEMA_VERSION": "moneyforward-worker-poc-v1"
+    "COLLECTOR_SCHEMA_VERSION": "moneyforward-worker-poc-v1",
+    "COLLECTION_TARGET": "legacy"
   },
   "triggers": {
     "crons": ["15 21 * * *"]
