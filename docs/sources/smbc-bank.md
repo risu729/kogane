@@ -468,3 +468,34 @@ write/deleteも行っていない。
 
 - 一時cloneと認証済みsessionは検証プロセス終了に伴い消滅しており、再利用できるCookieや資格情報は残していない。
 - 期限切れのSafety Pass QRを描画したSVGだけが一時artifactとして残存している。QR内のchallengeは失効済みだが、検証用Cloudflare Worker/R2等のcleanupと同じ一覧で削除対象として追跡する。
+
+## Shared DATA bucket (U09, 2026-09-11)
+
+The backfill collector gained a `COLLECTION_TARGET` var (default `legacy`) and
+a `DATA` binding to the central `kogane-raw-evidence` bucket. In `shared` mode
+the Durable Object finishes a backfill run by re-reading its own staged
+artifacts, verifying each against the manifest, and writing them into `DATA`
+with the `terminal-v1` manifest last — one terminal per backfill run, whether
+it succeeded, ended partial or failed — instead of calling
+`kogane-collector-r2-importer`. Legacy mode is unchanged. There is no cron
+before or after this change: the run is still started by a person behind
+Cloudflare Access with an approved QR challenge. This is the one bounded
+exception to "stored once": because the chunks span alarms, shared mode still
+writes the staging bucket and re-reads it at the end; `docs/collection.md`
+records the bound and the U15 removal path.
+
+The Durable Object now also keeps two session generation ids: `sessionRef`, the
+live generation rotated on every approved sign-in, and `runSessionRef`, the
+generation that opened the current run and which a resume keeps. The terminal
+carries `runSessionRef` as `acquisitionSessionRef`; the SMBC credential, the
+encrypted session envelope, the challenge state and the page cookies never
+leave Durable Object state.
+
+Because this source has no unattended re-authentication, any run that does not
+reach `success` needs a person to approve a new challenge: its terminal reports
+`waitingForHuman`, a lost session maps to `human_required_approval`, and
+`/api/status` reports the same signal.
+
+Deploy order, rollback, the artifact/role table and the run-size limit are in
+[`docs/collection.md`](../collection.md#smbc-direct-kogane-smbc-direct-backfill-poc).
+Merged is not enabled: the var ships as `legacy`.

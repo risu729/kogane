@@ -26,9 +26,17 @@ import {
   type StoredArtifact,
 } from "./model";
 import { runGlobalPassBrowserProbe } from "./browser-probe";
+import { collectionTarget } from "./collection-target";
 import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
 import type { RawEvidenceImportResult } from "./raw-evidence-types";
 import { sanitizeGlobalPassActivityHtml } from "./sanitize";
+import {
+  dataBucket,
+  persistSharedRun,
+  sharedRunPersisted,
+  type SharedCapture,
+  type SharedRunSummary,
+} from "./shared-collection";
 
 const GLOBALPASS_HOST = "www.debit.vpass.ne.jp";
 const TURNSTILE_HOST = "challenges.cloudflare.com";
@@ -269,17 +277,35 @@ async function runContainerProbe(env: Env, variant: ContainerProbeVariant): Prom
 
 type CollectionResult = CollectionManifest & {
   manifestKey: string;
-  central: RawEvidenceImportResult;
+  /** Legacy mode only: the central importer's answer. */
+  central?: RawEvidenceImportResult;
+  /** Shared mode only: what `persistRun` did in the DATA bucket. */
+  shared?: SharedRunSummary;
 };
 
-async function runCollection(env: Env, mode: CollectionMode): Promise<CollectionResult> {
+async function runCollection(
+  env: Env,
+  mode: CollectionMode,
+  // The hook U06's operations API fills in when it dispatches a run: the
+  // operation it accepted. It ends up in the shared terminal so a run can be
+  // traced back to its request.
+  identity: { operationId?: string } = {},
+): Promise<CollectionResult> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
   const container = getContainer(env.COLLECTOR_CONTAINER, CONTAINER_ID);
 
   const diagnostics = createDiagnostics("prestia-globalpass", runId);
   try {
-    const result = await collectWithContainer(env, mode, container, startedAt, runId, diagnostics);
+    const result = await collectWithContainer(
+      env,
+      mode,
+      container,
+      startedAt,
+      runId,
+      diagnostics,
+      identity,
+    );
     diagnostics.finish(result.status);
     return result;
   } catch (error) {
@@ -318,9 +344,19 @@ async function collectWithContainer(
   startedAt: string,
   runId: string,
   diagnostics: ReturnType<typeof createDiagnostics>,
+  identity: { operationId?: string },
 ): Promise<CollectionResult> {
   const prefix = runPrefix(startedAt, runId);
+  const attemptId = `attempt-${crypto.randomUUID()}`;
+  // U09: decided once per run. `shared` writes the run only into DATA — the
+  // staging bucket is not written at all — and skips the central upload
+  // (plan 00: one canonical copy; G1-15). `legacy` is byte-for-byte the path
+  // this collector has always taken.
+  const target = collectionTarget(env.COLLECTION_TARGET);
   const artifacts: StoredArtifact[] = [];
+  // The sanitized page of every month admitted to the run, kept in memory for
+  // the shared-mode terminal. The unredacted page is never retained.
+  const captures: SharedCapture[] = [];
   const failures: CollectionFailure[] = [];
   let availableMonths: string[] = [];
   let selectedMonths: string[] = [];
@@ -412,10 +448,15 @@ async function collectWithContainer(
       }
       try {
         artifacts.push(
-          await diagnostics.step("artifact-write", () =>
-            storeHtml(env.SNAPSHOTS, prefix, runId, month, sanitizedHtml),
-          ),
+          target === "shared"
+            ? // The manifest entry only: the bytes reach DATA content-addressed
+              // when the terminal is written, and nothing is staged.
+              (await describeHtml(prefix, month, sanitizedHtml)).record
+            : await diagnostics.step("artifact-write", () =>
+                storeHtml(env.SNAPSHOTS, prefix, runId, month, sanitizedHtml),
+              ),
         );
+        captures.push({ month, sanitizedHtml });
       } catch (error) {
         failures.push(collectionFailure("r2", error, "artifact_store_failed", artifactKey));
       }
@@ -468,9 +509,54 @@ async function collectWithContainer(
     artifacts,
     failures,
   };
+  const manifestJson = JSON.stringify(manifest);
+  if (target === "shared") {
+    // U09: the run's completion record is the terminal this Worker writes into
+    // DATA, after the content-addressed objects; the staging bucket is not
+    // written and the central upload is skipped, so exactly one copy exists
+    // and the Processor reads it (G1-15). Reported under the existing
+    // `central-import` stage: it is the same step in the run's life, and the
+    // log line below carries `collectionTarget` and `sharedOutcome` so the two
+    // paths stay distinguishable.
+    const shared = await diagnostics.step("central-import", () =>
+      persistSharedRun(dataBucket(env.DATA), {
+        manifest,
+        manifestJson,
+        captures,
+        identity: {
+          attemptId,
+          ...(identity.operationId === undefined ? {} : { operationId: identity.operationId }),
+        },
+      }),
+    );
+    // The collector manifest lives in DATA, content-addressed, like every
+    // other artifact of the run.
+    const manifestKey = shared.manifestObjectKey;
+    logEvent(
+      sharedRunPersisted(shared) ? "log" : "error",
+      JSON.stringify({
+        event: "globalpass-collection-stored",
+        runId,
+        mode,
+        status,
+        artifactCount: artifacts.length,
+        failureCount: failures.length,
+        manifestKey,
+        collectionTarget: target,
+        sharedOutcome: shared.outcome,
+        terminalKey: shared.terminalKey,
+        terminalDigest: shared.terminalDigest,
+        ...(shared.reasonCode ? { errorCode: shared.reasonCode } : {}),
+      }),
+    );
+    // No terminal means the run did not finish persisting; it is never reported
+    // as stored (G1-01).
+    if (!sharedRunPersisted(shared)) throw new Error("globalpass_shared_persist_incomplete");
+    return { ...manifest, manifestKey, shared };
+  }
   const manifestKey = `${prefix}/manifest.json`;
   await diagnostics.step("manifest-write", () =>
-    env.SNAPSHOTS.put(manifestKey, JSON.stringify(manifest), {
+    env.SNAPSHOTS.put(manifestKey, manifestJson, {
       httpMetadata: { contentType: "application/json; charset=utf-8" },
       customMetadata: { source: manifest.source, status, runId },
     }),
@@ -486,6 +572,7 @@ async function collectWithContainer(
       artifactCount: artifacts.length,
       failureCount: failures.length,
       manifestKey,
+      collectionTarget: target,
       centralStatus: central.status,
       ...(central.status === "sealed"
         ? { centralRunId: central.centralRunId }
@@ -498,6 +585,33 @@ async function collectWithContainer(
   return { ...manifest, manifestKey, central };
 }
 
+/**
+ * The manifest entry of one month's page — hashed and keyed inside its run —
+ * without writing it anywhere. `storeHtml` is this plus the staging put; in
+ * shared mode (U09) the entry is all the run needs, because the bytes go to
+ * DATA content-addressed and the staging bucket is not written.
+ */
+async function describeHtml(
+  prefix: string,
+  month: string,
+  html: string,
+): Promise<{ record: StoredArtifact; body: Uint8Array }> {
+  const body = new TextEncoder().encode(html);
+  const sha256 = hex(await crypto.subtle.digest("SHA-256", body));
+  const key = `${prefix}/${artifactFilename(month)}`;
+  return {
+    record: {
+      dataset: GLOBALPASS_DATASET,
+      month,
+      key,
+      mediaType: GLOBALPASS_MEDIA_TYPE,
+      bytes: body.byteLength,
+      sha256,
+    },
+    body,
+  };
+}
+
 async function storeHtml(
   bucket: R2Bucket,
   prefix: string,
@@ -505,26 +619,17 @@ async function storeHtml(
   month: string,
   html: string,
 ): Promise<StoredArtifact> {
-  const body = new TextEncoder().encode(html);
-  const sha256 = hex(await crypto.subtle.digest("SHA-256", body));
-  const key = `${prefix}/${artifactFilename(month)}`;
-  await bucket.put(key, body, {
+  const { record, body } = await describeHtml(prefix, month, html);
+  await bucket.put(record.key, body, {
     httpMetadata: { contentType: "text/html; charset=utf-8" },
     customMetadata: {
       source: "prestia-globalpass",
       runId,
       dataset: GLOBALPASS_DATASET,
-      sha256,
+      sha256: record.sha256,
     },
   });
-  return {
-    dataset: GLOBALPASS_DATASET,
-    month,
-    key,
-    mediaType: GLOBALPASS_MEDIA_TYPE,
-    bytes: body.byteLength,
-    sha256,
-  };
+  return record;
 }
 
 async function* readNdjson(stream: ReadableStream<Uint8Array>): AsyncGenerator<ContainerRecord> {
@@ -791,16 +896,31 @@ function publicCollectionResult(result: CollectionResult): object {
     artifactCount: result.artifacts.length,
     failureCount: result.failures.length,
     manifestKey: result.manifestKey,
-    central: {
-      status: result.central.status,
-      ...(result.central.status === "sealed"
-        ? { centralRunId: result.central.centralRunId, sealed: result.central.sealed }
-        : {
-            reason: result.central.reason,
-            artifactCount: result.central.artifactCount,
-            nextOffset: result.central.nextOffset,
-          }),
-    },
+    ...(result.central
+      ? {
+          central: {
+            status: result.central.status,
+            ...(result.central.status === "sealed"
+              ? { centralRunId: result.central.centralRunId, sealed: result.central.sealed }
+              : {
+                  reason: result.central.reason,
+                  artifactCount: result.central.artifactCount,
+                  nextOffset: result.central.nextOffset,
+                }),
+          },
+        }
+      : {}),
+    ...(result.shared
+      ? {
+          shared: {
+            outcome: result.shared.outcome,
+            terminalKey: result.shared.terminalKey,
+            terminalDigest: result.shared.terminalDigest,
+            objectCount: result.shared.objectCount,
+            waitingForHuman: result.shared.waitingForHuman,
+          },
+        }
+      : {}),
   };
 }
 

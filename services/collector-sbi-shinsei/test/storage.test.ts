@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { runPrefix, storeArtifact, storeManifest } from "../src/storage";
+import { describeArtifact, runPrefix, storeArtifact, storeManifest } from "../src/storage";
 import type { CollectionManifest } from "../src/types";
 
 interface PutCall {
@@ -57,6 +57,19 @@ describe("SBI Shinsei raw storage", () => {
       dataset: "exchange-rate",
       sha256: artifact.sha256,
     });
+    // U09: the shared path takes the same manifest entry without the staging
+    // put, so what a shared-mode terminal names is what legacy mode stored.
+    const described = await describeArtifact({
+      prefix,
+      artifact: {
+        dataset: "exchange-rate",
+        filename: "raw-exchange-rate.json",
+        mediaType: "application/json",
+        body: '{"fixture":true}',
+      },
+    });
+    expect(described.record).toEqual(artifact);
+    expect(calls).toHaveLength(1);
 
     const manifest: CollectionManifest = {
       schemaVersion: "sbi-shinsei-worker-poc-v1",

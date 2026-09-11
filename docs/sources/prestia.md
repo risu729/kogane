@@ -867,3 +867,23 @@ limit, card-control, registration, or settings screen except to leave it.
 - [OpenSSH dynamic forwarding (`ssh -D`)](https://man.openbsd.org/ssh#D)
 - [Bank API policy](https://www.smbctb.co.jp/eaea/)
 - [Contracted API operators](https://www.smbctb.co.jp/dendai/detail.html)
+
+## Shared DATA bucket (U09, 2026-09-11)
+
+The GLOBAL PASS collector gained a `COLLECTION_TARGET` var (default `legacy`)
+and a `DATA` binding to the central `kogane-raw-evidence` bucket. In `shared`
+mode the Worker persists the run itself with `packages/collection` — the
+already-sanitized monthly activity pages and the collector manifest, then the
+`terminal-v1` manifest last — and the upload to
+`kogane-collector-r2-importer` is skipped. Legacy mode is unchanged, the daily
+`17 18 * * *` cron is unchanged, and the Container image, relay, browser
+binding and tunnels are untouched: the Worker writes the run, not the
+container. The per-source staging bucket is not written in shared mode: the
+run is stored once, in `DATA` (plan 00).
+
+A successful run still declares `coverageStatus: partial`, because the provider
+exposes a rolling window of statement months and pagination remains unproven.
+
+Deploy order, rollback and the artifact/role table are in
+[`docs/collection.md`](../collection.md#prestia-globalpass-kogane-globalpass-collector-poc).
+Merged is not enabled: the var ships as `legacy`.

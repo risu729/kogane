@@ -12,10 +12,17 @@ import {
 import { Container, getContainer, type StopParams } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { collectSbiShinsei } from "./collector";
+import { collectionTarget } from "./collection-target";
 import { liveReadsEnabled } from "./read-allowlist";
 import { backfillRawEvidence, importRawEvidence, RawEvidenceImportError } from "./raw-evidence";
-import { runPrefix, storeArtifact, storeManifest } from "./storage";
-import type { CollectionFailure, CollectionManifest, CollectionResult } from "./types";
+import {
+  dataBucket,
+  persistSharedRun,
+  sharedRunPersisted,
+  type SharedRunSummary,
+} from "./shared-collection";
+import { describeArtifact, runPrefix, storeArtifact, storeManifest } from "./storage";
+import type { CollectionFailure, CollectionManifest, CollectionResult, RawArtifact } from "./types";
 
 const MAX_CONTAINER_RESPONSE_BYTES = 10 * 1024 * 1024;
 const RELAY_HOSTS = new Set([
@@ -127,12 +134,27 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-async function runCollection(env: Env): Promise<CollectionResult> {
+async function runCollection(
+  env: Env,
+  // The hook U06's operations API fills in when it dispatches a run: the
+  // operation it accepted and the attempt this invocation is. Both end up in
+  // the shared terminal so a run can be traced back to its request.
+  identity: { operationId?: string } = {},
+): Promise<CollectionResult> {
   const startedAt = new Date().toISOString();
   const runId = crypto.randomUUID();
+  const attemptId = `attempt-${crypto.randomUUID()}`;
   const diagnostic = stageDiagnostics(runId);
   const prefix = runPrefix(startedAt, runId);
+  // U09: decided once per run. `shared` writes the run only into DATA — the
+  // staging bucket is not written at all — and skips the central upload
+  // (plan 00: one canonical copy; G1-15). `legacy` is byte-for-byte the path
+  // this collector has always taken.
+  const target = collectionTarget(env.COLLECTION_TARGET);
   const artifacts = [];
+  // Every artifact admitted to this run, kept in memory for the shared-mode
+  // terminal; they never include the container handoff.
+  const collected: RawArtifact[] = [];
   const failures: CollectionFailure[] = [];
   const container = getContainer(env.COLLECTOR_CONTAINER, `run-${runId}`);
 
@@ -192,16 +214,24 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     for (const artifact of output.artifacts) {
       try {
         artifacts.push(
-          await diagnostic.step("staging-write", () =>
-            storeArtifact({
-              bucket: env.SNAPSHOTS,
-              prefix,
-              runId,
-              artifact,
-            }),
-          ),
+          target === "shared"
+            ? // The manifest entry only: the bytes reach DATA content-addressed
+              // when the terminal is written, and nothing is staged.
+              (await describeArtifact({ prefix, artifact })).record
+            : await diagnostic.step("staging-write", () =>
+                storeArtifact({
+                  bucket: env.SNAPSHOTS,
+                  prefix,
+                  runId,
+                  artifact,
+                }),
+              ),
         );
+        collected.push(artifact);
       } catch (error) {
+        // `r2:<dataset>` is the manifest's operation name for "this artifact
+        // was not admitted to the run"; in shared mode that is a validation
+        // failure of the artifact itself rather than a staging put.
         failures.push(failure(`r2:${artifact.dataset}`, error));
       }
     }
@@ -253,40 +283,76 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     artifacts,
     failures,
   };
-  const manifestKey = await diagnostic
-    .step("manifest-write", () =>
-      storeManifest({
-        bucket: env.SNAPSHOTS,
-        prefix,
+  let manifestKey: string;
+  let shared: SharedRunSummary | undefined;
+  if (target === "shared") {
+    // U09: the run's completion record is the terminal this Worker writes into
+    // DATA, after the content-addressed objects; the staging bucket is not
+    // written and the central upload is skipped, so exactly one copy exists
+    // and the Processor reads it (G1-15). Source collection and persistence
+    // are separate outcomes.
+    diagnostic.terminal(status);
+    shared = await diagnostic.step("shared-persist", () =>
+      persistSharedRun(dataBucket(env.DATA), {
         manifest,
-      }),
-    )
-    .catch(() => {
-      emitDiagnostic("error", {
-        event: "sbi-shinsei-manifest-write-failed",
-        runId,
-        phase: "manifest-write",
-      });
-      diagnostic.terminal("failed");
-      throw new Error("manifest_write_failed");
-    });
-  // Source collection and central import are separate outcomes.
-  diagnostic.terminal(status);
-  try {
-    await diagnostic.step("raw-evidence-import", () =>
-      importRawEvidence({
-        importer: env.RAW_EVIDENCE_IMPORTER,
-        manifestKey,
+        artifacts: collected,
+        identity: {
+          attemptId,
+          ...(identity.operationId === undefined ? {} : { operationId: identity.operationId }),
+        },
       }),
     );
-  } catch (error) {
-    emitDiagnostic("error", {
-      event: "sbi-shinsei-raw-evidence-import-failed",
+    emitDiagnostic(sharedRunPersisted(shared) ? "log" : "error", {
+      event: "sbi-shinsei-shared-persist",
       runId,
-      phase: "raw-evidence-import",
-      errorCode: "raw_evidence_import_failed",
+      phase: "shared-persist",
+      outcome: shared.outcome,
+      objectCount: shared.objectCount,
+      waitingForHuman: shared.waitingForHuman,
+      ...(shared.reasonCode ? { errorCode: shared.reasonCode } : {}),
     });
-    throw error;
+    // No terminal means the run did not finish persisting; it is never
+    // reported as stored (G1-01).
+    if (!sharedRunPersisted(shared)) throw new Error("shared_persist_incomplete");
+    // The collector manifest lives in DATA, content-addressed, like every
+    // other artifact of the run.
+    manifestKey = shared.manifestObjectKey;
+  } else {
+    manifestKey = await diagnostic
+      .step("manifest-write", () =>
+        storeManifest({
+          bucket: env.SNAPSHOTS,
+          prefix,
+          manifest,
+        }),
+      )
+      .catch(() => {
+        emitDiagnostic("error", {
+          event: "sbi-shinsei-manifest-write-failed",
+          runId,
+          phase: "manifest-write",
+        });
+        diagnostic.terminal("failed");
+        throw new Error("manifest_write_failed");
+      });
+    // Source collection and central import are separate outcomes.
+    diagnostic.terminal(status);
+    try {
+      await diagnostic.step("raw-evidence-import", () =>
+        importRawEvidence({
+          importer: env.RAW_EVIDENCE_IMPORTER,
+          manifestKey,
+        }),
+      );
+    } catch (error) {
+      emitDiagnostic("error", {
+        event: "sbi-shinsei-raw-evidence-import-failed",
+        runId,
+        phase: "raw-evidence-import",
+        errorCode: "raw_evidence_import_failed",
+      });
+      throw error;
+    }
   }
   emitDiagnostic("log", {
     event: "sbi-shinsei-collection-stored",
@@ -296,6 +362,8 @@ async function runCollection(env: Env): Promise<CollectionResult> {
     failureCount: failures.length,
     liveReadsEnabled: manifest.liveReadsEnabled,
     manifestKey,
+    collectionTarget: target,
+    ...(shared ? { terminalKey: shared.terminalKey, terminalDigest: shared.terminalDigest } : {}),
   });
   return { ...manifest, manifestKey };
 }

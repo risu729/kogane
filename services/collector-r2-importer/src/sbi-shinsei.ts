@@ -848,7 +848,8 @@ async function dataDescriptor(options: {
   };
 }
 
-function sanitizeProviderResponse(value: JsonObject): Uint8Array {
+/** Exported so a collector can prove its shared-mode bytes equal this (U09). */
+export function sanitizeProviderResponse(value: JsonObject): Uint8Array {
   const clean: JsonObject = { ...value };
   if (value.header !== null && typeof value.header === "object" && !Array.isArray(value.header)) {
     const header = { ...(value.header as JsonObject) };
@@ -858,7 +859,8 @@ function sanitizeProviderResponse(value: JsonObject): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(clean));
 }
 
-function sanitizeManifest(manifest: SbiShinseiManifest): Uint8Array {
+/** Exported so a collector can prove its shared-mode bytes equal this (U09). */
+export function sanitizeManifest(manifest: SbiShinseiManifest): Uint8Array {
   return new TextEncoder().encode(
     JSON.stringify({
       schemaVersion: manifest.schemaVersion,

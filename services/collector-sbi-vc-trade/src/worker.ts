@@ -4,8 +4,19 @@ import { collectSbiVcTrade } from "./collector";
 import { decryptSession, encryptSession } from "./crypto";
 import { createPasskeySession, parsePasskeyCredential } from "./passkey";
 import { applySessionUpdates, cookieHeader, parseGatewayMeta, parseSession } from "./session";
-import { runPrefix, storeArtifact, storeManifest } from "./storage";
+import { describeArtifact, runPrefix, storeArtifact, storeManifest } from "./storage";
 import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
+import { collectionTarget } from "./collection-target";
+import {
+  blockedErrorCode,
+  blockedRunManifest,
+  dataBucket,
+  persistSharedRun,
+  sharedRunPersisted,
+  waitingForHuman,
+  type SharedCapture,
+  type SharedRunSummary,
+} from "./shared-collection";
 import type {
   CollectionFailure,
   CollectionManifest,
@@ -77,13 +88,78 @@ export class SbiVcSessionState extends DurableObject<Env> {
     }
   }
 
+  /**
+   * U09: record a collection that could not start because the session was
+   * unusable. In legacy mode nothing is written — the caller's 502 and the
+   * health record are the whole story, exactly as before. In shared mode the
+   * blocked attempt becomes a `failed` terminal so the operations API can see
+   * that the scheduled collection did not happen and whether a person has to
+   * act (G3-10, G3-11). No login is retried here.
+   */
+  async recordBlockedCollection(): Promise<SharedRunSummary | null> {
+    if (collectionTarget(this.env.COLLECTION_TARGET) !== "shared") return null;
+    const health = await this.getHealth();
+    const startedAt = new Date().toISOString();
+    const runId = crypto.randomUUID();
+    const manifest = blockedRunManifest({
+      schemaVersion: this.env.COLLECTOR_SCHEMA_VERSION,
+      runId,
+      startedAt,
+      completedAt: new Date().toISOString(),
+      errorCode: blockedErrorCode(health),
+    });
+    const summary = await persistSharedRun(
+      dataBucket(this.env.DATA),
+      {
+        manifest,
+        manifestJson: JSON.stringify(manifest),
+        captures: [],
+        identity: {
+          attemptId: `attempt-${crypto.randomUUID()}`,
+          ...(await this.#acquisitionSessionRef()),
+        },
+      },
+      { waitingForHuman: waitingForHuman(health) },
+    );
+    console.error(
+      JSON.stringify({
+        message: "sbi_vc_collection_blocked",
+        runId,
+        errorCode: manifest.failures[0]?.errorCode,
+        waitingForHuman: summary.waitingForHuman,
+        sharedOutcome: summary.outcome,
+      }),
+    );
+    return summary;
+  }
+
+  /**
+   * The generation of the stored session, as an opaque id. It is minted when a
+   * session is established and rotated when a new one replaces it; cookie
+   * rotation inside a live session keeps the same generation. Only the id ever
+   * leaves the Durable Object — never the session itself (12 §4).
+   */
+  async #acquisitionSessionRef(): Promise<{ acquisitionSessionRef?: string }> {
+    const stored = await this.ctx.storage.get<string>("sessionRef");
+    return stored === undefined ? {} : { acquisitionSessionRef: stored };
+  }
+
   async #performCollection(): Promise<CollectionSummary> {
     const startedAt = new Date().toISOString();
     const runId = crypto.randomUUID();
+    const attemptId = `attempt-${crypto.randomUUID()}`;
     const diagnostic = createDiagnostics("sbi-vc-trade", runId);
     try {
       const prefix = runPrefix(startedAt, runId);
+      // U09: decided once per run. `shared` writes the run only into DATA — the
+      // staging bucket is not written at all — and skips the central upload
+      // (plan 00: one canonical copy; G1-15). `legacy` is byte-for-byte the
+      // path this collector has always taken.
+      const target = collectionTarget(this.env.COLLECTION_TARGET);
       const artifacts: StoredArtifact[] = [];
+      // The sanitized body of every artifact admitted to the run, kept in
+      // memory for the shared-mode terminal.
+      const captures: SharedCapture[] = [];
       const failures: CollectionFailure[] = [];
       let operation = "load_session";
       try {
@@ -106,15 +182,21 @@ export class SbiVcSessionState extends DurableObject<Env> {
             onArtifact: async (artifact) => {
               operation = `r2_${artifact.dataset}`;
               artifacts.push(
-                await diagnostic.step("artifact-write", () =>
-                  storeArtifact({
-                    bucket: this.env.SNAPSHOTS,
-                    prefix,
-                    runId,
-                    artifact,
-                  }),
-                ),
+                target === "shared"
+                  ? // The manifest entry only: the bytes reach DATA
+                    // content-addressed when the terminal is written, and
+                    // nothing is staged.
+                    (await describeArtifact({ prefix, artifact })).record
+                  : await diagnostic.step("artifact-write", () =>
+                      storeArtifact({
+                        bucket: this.env.SNAPSHOTS,
+                        prefix,
+                        runId,
+                        artifact,
+                      }),
+                    ),
               );
+              captures.push({ dataset: artifact.dataset, body: artifact.body });
               operation = "collect";
             },
           }),
@@ -135,6 +217,52 @@ export class SbiVcSessionState extends DurableObject<Env> {
         artifacts,
         failures,
       };
+      if (target === "shared") {
+        // U09: the run's completion record is the terminal this Durable Object
+        // writes into DATA, after the content-addressed objects; the staging
+        // bucket is not written and the central upload is skipped, so exactly
+        // one copy exists and the Processor reads it (G1-15). There is no
+        // service binding in the chain, so a run with many historical pages
+        // finishes here instead of deferring to the backfill route.
+        const identity = { attemptId, ...(await this.#acquisitionSessionRef()) };
+        const shared = await diagnostic.step("central-import", () =>
+          persistSharedRun(dataBucket(this.env.DATA), {
+            manifest,
+            manifestJson: JSON.stringify(manifest),
+            captures,
+            identity,
+          }),
+        );
+        // The collector manifest lives in DATA, content-addressed, like every
+        // other artifact of the run.
+        const manifestKey = shared.manifestObjectKey;
+        console.log(
+          JSON.stringify({
+            message: "sbi_vc_collection",
+            runId,
+            status,
+            artifactCount: artifacts.length,
+            failureCount: failures.length,
+            manifestKey,
+            collectionTarget: "shared",
+            sharedOutcome: shared.outcome,
+            terminalKey: shared.terminalKey,
+            terminalDigest: shared.terminalDigest,
+          }),
+        );
+        // No terminal means the run did not finish persisting; it is never
+        // reported as stored (G1-01).
+        if (!sharedRunPersisted(shared)) throw new Error("shared_persist_incomplete");
+        diagnostic.finish(status);
+        return {
+          runId,
+          status,
+          artifactCount: artifacts.length,
+          failureCount: failures.length,
+          manifestKey,
+          shared,
+        };
+      }
       const manifestKey = await diagnostic.step("manifest-write", () =>
         storeManifest({ bucket: this.env.SNAPSHOTS, prefix, manifest }),
       );
@@ -156,6 +284,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
           artifactCount: artifacts.length,
           failureCount: failures.length,
           manifestKey,
+          collectionTarget: "legacy",
           ...("deferred" in central
             ? { centralDeferred: true, centralDeferredReason: central.reason }
             : { centralRunId: central.centralRunId, centralSealed: central.sealed }),
@@ -197,7 +326,14 @@ export class SbiVcSessionState extends DurableObject<Env> {
         lastReauthSuccessAt: attemptAt,
         lastReauthErrorCode: null,
       };
-      await this.ctx.storage.put({ session: encrypted, health });
+      // New session, new generation — written in the same batch as the session
+      // it names, so a failed re-authentication above leaves the previous
+      // generation and its session intact (12 §4, G3-09).
+      await this.ctx.storage.put({
+        session: encrypted,
+        health,
+        sessionRef: `session-${crypto.randomUUID()}`,
+      });
       console.log(JSON.stringify({ message: "sbi_vc_reauth", outcome: "success" }));
       return health;
     } catch (error) {
@@ -320,10 +456,16 @@ export class SbiVcSessionState extends DurableObject<Env> {
       throw new Error(classifyCryptoError(error));
     }
     const health = await this.getHealth();
+    // Seeding is also a new session, so it opens a new generation (12 §4).
+    const sessionRef = `session-${crypto.randomUUID()}`;
     if (!health.initializedAt) {
-      await this.ctx.storage.put({ session: stored, health: { ...health, initializedAt } });
+      await this.ctx.storage.put({
+        session: stored,
+        health: { ...health, initializedAt },
+        sessionRef,
+      });
     } else {
-      await this.ctx.storage.put("session", stored);
+      await this.ctx.storage.put({ session: stored, sessionRef });
     }
     return session;
   }
@@ -382,12 +524,26 @@ export default {
     }
     if (request.method === "POST" && path === "/collect") {
       const health = await ensureHealthySession(stub);
-      if (health.lastErrorCode !== null) return Response.json(health, { status: 502 });
+      if (health.lastErrorCode !== null) {
+        // U09: in shared mode the blocked attempt is recorded as a failed run
+        // so the operations API sees it; no login is retried here.
+        const blocked = await stub.recordBlockedCollection();
+        return Response.json(
+          {
+            ...health,
+            waitingForHuman: waitingForHuman(health),
+            ...(blocked ? { blockedRun: blocked } : {}),
+          },
+          { status: 502 },
+        );
+      }
       const result = await stub.runCollection();
       return Response.json(result, { status: result.status === "success" ? 200 : 502 });
     }
-    if (request.method === "GET" && path === "/health")
-      return Response.json(await stub.getHealth());
+    if (request.method === "GET" && path === "/health") {
+      const health = await stub.getHealth();
+      return Response.json({ ...health, waitingForHuman: waitingForHuman(health) });
+    }
     return new Response(null, { status: 404 });
   },
 
@@ -400,7 +556,12 @@ export default {
     }
     if (controller.cron === COLLECTION_CRON) {
       const health = await ensureHealthySession(stub);
-      if (health.lastErrorCode !== null) throw new Error("scheduled_collection_session_failed");
+      if (health.lastErrorCode !== null) {
+        // The daily collection did not happen: record it as a failed run in
+        // shared mode before failing the cron invocation.
+        await stub.recordBlockedCollection();
+        throw new Error("scheduled_collection_session_failed");
+      }
       const result = await stub.runCollection();
       if (result.status !== "success") throw new Error("scheduled_collection_failed");
       return;

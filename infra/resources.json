@@ -507,7 +507,7 @@
         "requiredVerification": "keep Container, relay, browser diagnostics and resource identity",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-globalpass-collector-poc; buckets=kogane-globalpass-collector-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-globalpass-collector-poc; buckets=kogane-globalpass-collector-poc,kogane-raw-evidence)"
       },
       "workers": [
         {
@@ -525,6 +525,11 @@
             {
               "binding": "SNAPSHOTS",
               "bucket": "kogane-globalpass-collector-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -573,6 +578,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION",
             "RELAY_PUBLIC_URL"
           ],
@@ -1384,7 +1390,7 @@
         "requiredVerification": "keep the container/relay/credential operation contract",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-sbi-shinsei-collector-poc; buckets=kogane-sbi-shinsei-collector-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-sbi-shinsei-collector-poc; buckets=kogane-raw-evidence,kogane-sbi-shinsei-collector-poc)"
       },
       "workers": [
         {
@@ -1402,6 +1408,11 @@
             {
               "binding": "SNAPSHOTS",
               "bucket": "kogane-sbi-shinsei-collector-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -1445,6 +1456,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION",
             "RELAY_PUBLIC_URL"
           ],
@@ -1463,7 +1475,7 @@
         "requiredVerification": "keep the client dependency and the resource identity",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-sbi-vc-session-poc; buckets=kogane-sbi-vc-trade-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-sbi-vc-session-poc; buckets=kogane-raw-evidence,kogane-sbi-vc-trade-poc)"
       },
       "workers": [
         {
@@ -1482,6 +1494,11 @@
             {
               "binding": "SNAPSHOTS",
               "bucket": "kogane-sbi-vc-trade-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -1513,6 +1530,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [],
@@ -1530,7 +1548,7 @@
         "requiredVerification": "keep the human-required boundary; never turn it into unattended re-authentication",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-smbc-direct-backfill-poc; buckets=kogane-smbc-direct-backfill-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-smbc-direct-backfill-poc; buckets=kogane-raw-evidence,kogane-smbc-direct-backfill-poc)"
       },
       "workers": [
         {
@@ -1546,6 +1564,11 @@
             {
               "binding": "SNAPSHOTS",
               "bucket": "kogane-smbc-direct-backfill-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -1582,6 +1605,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION",
             "DEFAULT_BACKFILL_FROM",
             "SMBC_DIRECT_BASE_URL",
@@ -2293,6 +2317,7 @@
         "live": true,
         "readers": [
           "kogane-evidence-browser",
+          "kogane-globalpass-collector-poc",
           "kogane-ingest",
           "kogane-mobile-suica-collector-poc",
           "kogane-moneyforward-collector-poc",
@@ -2300,6 +2325,9 @@
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic",
           "kogane-sbi-collector-poc",
+          "kogane-sbi-shinsei-collector-poc",
+          "kogane-sbi-vc-session-poc",
+          "kogane-smbc-direct-backfill-poc",
           "kogane-sony-bank-collector-poc",
           "kogane-vpass-collector-poc",
           "kogane-vpoint-collector-poc",

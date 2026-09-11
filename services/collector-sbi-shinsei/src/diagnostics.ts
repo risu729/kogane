@@ -61,6 +61,8 @@ const WORKER_STAGES = new Set([
   "staging-write",
   "manifest-write",
   "raw-evidence-import",
+  // U09: writing the run and its terminal into the shared DATA bucket.
+  "shared-persist",
   "teardown",
   "relay-read",
   "relay-write",

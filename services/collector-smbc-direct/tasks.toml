@@ -16,7 +16,15 @@ run = "./node_modules/.bin/tsc --noEmit"
 description = "Run the services/collector-smbc-direct tests."
 depends = ["smbc-direct-backfill-worker:types"]
 dir = "services/collector-smbc-direct"
-run = "bun test"
+# The Miniflare suite runs first: `bun test ./test` still fails on the three
+# pre-existing `cloudflare:workers` mock failures under bun 1.4.0, which this
+# work item neither fixes nor hides. The directory argument keeps that failure
+# exactly as it was and keeps `worker-test/` (a vitest suite) out of bun's
+# discovery.
+run = [
+	"./node_modules/.bin/vitest run",
+	"bun test ./test",
+]
 
 ["smbc-direct-backfill-worker:dry-run"]
 description = "Validate the services/collector-smbc-direct deployment without uploading it."

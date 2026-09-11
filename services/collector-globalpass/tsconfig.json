@@ -4,6 +4,10 @@
     "lib": ["ES2022", "WebWorker", "DOM"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    // The shared-target code and its tests import the R2 importer's modules
+    // directly, and those sources use `.ts` import paths, which the importer's
+    // own tsconfig and every package in the workspace allow.
+    "allowImportingTsExtensions": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
@@ -11,7 +15,14 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "skipLibCheck": true,
-    "types": ["node", "bun"]
+    "types": ["node", "bun", "@cloudflare/vitest-plugin/types"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "env.d.ts", "worker-configuration.d.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "worker-test/**/*.ts",
+    "vitest.config.ts",
+    "env.d.ts",
+    "worker-configuration.d.ts"
+  ]
 }
