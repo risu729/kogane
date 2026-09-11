@@ -238,3 +238,32 @@ Verified with synthetic fixtures in
 `services/collector-sony-bank/test/shared-collection.test.ts` (G1-01, G1-02,
 G1-08, G1-09, G1-15, G3-07, G3-08). No provider was contacted and no
 production bucket was read or written.
+
+### Money Forward ME (`services/collector-moneyforward`, `kogane-moneyforward-collector-poc`)
+
+| Artifact key                    | Role                 |
+| ------------------------------- | -------------------- |
+| `accounts.html`                 | `provider_response`  |
+| `account-detail-NN.html`        | `provider_response`  |
+| `account-NN-month-YYYY-MM.html` | `provider_response`  |
+| `manifest.json`                 | `collector_manifest` |
+
+Sanitizer: none is applied to the pages — the legacy path stores exactly
+these bytes and the importer forwards them verbatim, because the collector
+keeps only the rendered aggregator pages and never the request headers,
+cookies or credential exchange that produced them. The one normalization the
+central path does apply is to the manifest, whose failure message is replaced
+by its failure code; shared mode writes that normalized manifest.
+
+Terminal fields: one unit per account (`account-NN`, `unitKind: account`),
+taken from the collector's own filename grammar — the run-wide
+`accounts.html` index belongs to no unit; a `months-account-NN`
+`declared_coverage` range per account covering the monthly fragments that were
+actually captured; one `terminal` report carrying the outcome;
+`requestedScope.scopeKind = full_snapshot` (the run asks for whatever the
+aggregator currently shows) listing the accounts as `unitKeys`.
+
+Verified with synthetic fixtures in
+`services/collector-moneyforward/test/shared-collection.test.ts` (G1-01,
+G1-02, G1-08, G1-09, G1-15, G3-07, G3-08). No provider was contacted and no
+production bucket was read or written.

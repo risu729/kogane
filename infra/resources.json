@@ -457,7 +457,7 @@
         "requiredVerification": "collector/importer/CORE mapping and resource identity kept",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-moneyforward-collector-poc; buckets=kogane-moneyforward-collector-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-moneyforward-collector-poc; buckets=kogane-moneyforward-collector-poc,kogane-raw-evidence)"
       },
       "workers": [
         {
@@ -476,6 +476,11 @@
               "binding": "SNAPSHOTS",
               "bucket": "kogane-moneyforward-collector-poc",
               "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
+              "live": true
             }
           ],
           "kv": [],
@@ -493,6 +498,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [],
@@ -2146,6 +2152,7 @@
         "readers": [
           "kogane-evidence-browser",
           "kogane-ingest",
+          "kogane-moneyforward-collector-poc",
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic",
           "kogane-sony-bank-collector-poc"
