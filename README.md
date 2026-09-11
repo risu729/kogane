@@ -28,6 +28,7 @@ different rules.
 - [Agent API and the shared query service](docs/agent-api.md)
 - [Frontend stack and API handoff](docs/frontend.md)
 - [Development checks and CI](docs/ci.md)
+- [Infrastructure ledgers: resources, CORE schema, dependencies, retention](docs/infra-ledgers.md)
 - [Operations: health signals, load, retention and drills](docs/operations.md)
 - [Authenticated collectors](docs/authenticated-collectors.md)
 - [Credential delivery](docs/credentials.md)
