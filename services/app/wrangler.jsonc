@@ -23,6 +23,12 @@
     "ACCESS_ISSUER": "https://risu729.cloudflareaccess.com",
     "ACCESS_AUDIENCE": "20cc9cb6173e2755bc3ffd5f43a9adf45b0c2ad8451a1b2d330cc2b75f0d85c8",
     "COMMANDS_ENABLED": "",
+    // The command/operations allow-lists (docs/change-lifecycle.md §Grants).
+    // Both are JSON arrays of verified Access subjects and both are empty
+    // here, which is the intended shipped state: nobody can approve or commit
+    // until a deployment names its operator in `OPERATOR_SUBJECTS`, and a
+    // subject in neither list is refused with `subject_not_granted`.
+    "OPERATOR_SUBJECTS": "",
     "AGENT_GRANTS": "",
     "AGENT_API_GRANTS": "",
     "OPS_API_ENABLED": "",

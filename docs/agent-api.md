@@ -101,28 +101,48 @@ To turn the API off again, set it to `""` (or remove it) and redeploy. There
 is no other switch, and there is no per-route flag: the grant table _is_ the
 feature flag.
 
+This read table was already fail-closed and its semantics are unchanged: a
+principal it does not name has no grant, and every agent route answers
+`403 agent_api_not_configured`. It never carried the "unknown = human operator"
+default that the command path did, and it cannot: `AgentCapability` has no
+`interpretation.accept` in it, so no value here grants an approval. The one
+read path that is not graded by this table is `GET /api/v2/query`, which runs
+under the reader authority a signed-in browser already has over every other
+GET route (`readerGrant`: full read scope, no proposal, no acceptance) — the
+Access boundary is that route's gate, exactly as it is for `/api/overview`.
+
 The hosted synthetic demo (`wrangler.demo.jsonc`) never serves these routes at
 all — `src/demo-worker.ts` answers 403 on every agent path before its method
 check — and a conformance test asserts it.
 
 ### Relationship to the change lifecycle (A09)
 
-Two variables, two vocabularies, deliberately not merged:
+Three variables, two vocabularies, deliberately not merged:
 
-| Variable           | Shape                              | Means                                                                                                             |
-| ------------------ | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `AGENT_API_GRANTS` | JSON **object**, principal → grant | what this API lets a principal _read_, and whether it may propose                                                 |
-| `AGENT_GRANTS`     | JSON **array** of subjects         | which subjects the change lifecycle treats as _agents_, so they may plan and simulate but never approve or commit |
+| Variable            | Shape                              | Means                                                                                                             |
+| ------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `AGENT_API_GRANTS`  | JSON **object**, principal → grant | what this API lets a principal _read_, and whether it may propose                                                 |
+| `AGENT_GRANTS`      | JSON **array** of subjects         | which subjects the change lifecycle treats as _agents_, so they may plan and simulate but never approve or commit |
+| `OPERATOR_SUBJECTS` | JSON **array** of subjects         | which subjects the change lifecycle treats as the _human operator_, so they may approve and commit                |
 
-Each parser rejects the other's shape, and that is load-bearing: putting the
-object in `AGENT_GRANTS` makes `agentSubjects` return nothing, and every agent
-subject would then be graded a human operator with the full command
-capabilities. `test/agent-api.test.ts` pins the incompatibility. A deployment
-that grants an agent read access here should also list that subject in
-`AGENT_GRANTS`, so the same principal cannot approve its own proposals.
+All three are allow-lists, so all three deny by default, and each parser
+rejects the others' shape. That used to be dangerous: putting the grant object
+in `AGENT_GRANTS` made the old `agentSubjects` return nothing, and every
+subject — agent or not — was then graded a human operator with the full
+command capabilities. Both command lists are explicit now, so a value in the
+wrong variable refuses instead of promoting anyone: the command path reports
+`503 grants_misconfigured` for everybody and the agent API answers
+`403 agent_api_not_configured`. `test/agent-api.test.ts` pins that.
 
-Unifying the two into one grant table is worth doing, but it means changing
-the command path's `staticGrantLoader` and belongs in its own change.
+A deployment that grants an agent read access here should also list that
+subject in `AGENT_GRANTS` and **not** in `OPERATOR_SUBJECTS`, so the same
+principal cannot approve its own proposals. A subject in both command lists is
+a misconfiguration, not a promotion (see
+[change-lifecycle.md](change-lifecycle.md), "Grants").
+
+Unifying the read table and the command lists into one grant registry is
+still worth doing (A08's registry satisfies the same `GrantLoader` contract),
+and it belongs in its own change.
 
 ## Tools
 
@@ -150,10 +170,14 @@ one description of the deployment.
 dependency, so nothing Node-only reaches workerd. It holds no logic, no
 session state and no authorization of its own — including which tools exist:
 the adapter publishes the list it is handed and dispatches by name, so a tool
-set that is off is neither listed nor callable. With `OPS_API_ENABLED` on, the
-six `kogane.ops.*` tools of [ops-api.md](ops-api.md) are appended to the five
-above; with it off, `tools/list` is exactly the five and an operations tool
-name is `unknown_tool`.
+set that is off is neither listed nor callable. With `OPS_API_ENABLED` on **and
+this deployment's command grant lists readable**, the six `kogane.ops.*` tools
+of [ops-api.md](ops-api.md) are appended to the five above; with the flag off,
+`tools/list` is exactly the five and an operations tool name is
+`unknown_tool`. While the grant lists cannot be read, they are not published
+either — a deployment that grades nobody can authorize none of them — but they
+stay callable, so a client that asks anyway is told
+`grants_misconfigured` rather than that the tool does not exist.
 
 ### Intents
 

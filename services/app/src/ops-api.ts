@@ -45,7 +45,7 @@ import {
   type SessionRefreshRequest,
   statusForCommandError,
 } from "../../../packages/application/src/index";
-import { principalFor } from "./command-api";
+import { principalFor } from "./grants";
 import { HttpError, json } from "./http";
 
 export const OPS_PREFIX = "/api/ops/v1";
@@ -192,14 +192,16 @@ export interface OpsContext extends OperationContext {
 
 /**
  * Builds the context for a verified subject. The principal is graded by the
- * change lifecycle's own loader, so one deployment has one answer to "is this
- * subject an agent": an agent may propose and simulate, and an operations
- * request — a real provider session, a replay, a rebuild — needs the
- * capability an agent does not have (addendum 10 §5).
+ * change lifecycle's own resolver (`src/grants.ts`), so one deployment has one
+ * answer to "what is this subject" on every command surface: the operator
+ * named in `OPERATOR_SUBJECTS` may accept, an agent named in `AGENT_GRANTS`
+ * may propose and simulate — and an operations request (a real provider
+ * session, a replay, a rebuild) needs the capability an agent does not have
+ * (addendum 10 §5) — and a subject in neither list is refused with
+ * `403 subject_not_granted` before a schema is reached. A deployment whose
+ * lists cannot be read refuses everyone with `503 grants_misconfigured`.
  */
 export function opsContext(env: Env, subject: string): OpsContext {
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/u.test(subject))
-    throw new HttpError(403, "actor_not_supported");
   const principal = principalFor(env, subject);
   if (!principalCan(principal, "interpretation.accept"))
     throw new HttpError(403, "approval_required");

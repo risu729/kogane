@@ -17,6 +17,12 @@ export const COMMAND_ERROR_CODES = [
   // usable. Kept separate from the nine above so the table stays readable.
   "invalid_command",
   "commands_disabled",
+  // Authorization codes. `subject_not_granted` is the caller's answer: the
+  // deployment is configured and its allow-lists do not name this subject.
+  // `grants_misconfigured` is the deployment's own fault — the grant
+  // configuration cannot be read, so nobody is graded at all (grants.ts).
+  "subject_not_granted",
+  "grants_misconfigured",
   "plan_not_found",
   "plan_expired",
   "plan_not_open",
@@ -51,7 +57,13 @@ export function statusForCommandError(code: CommandErrorCode): number {
     case "evidence_restricted":
       return 403;
     case "commands_disabled":
+    case "subject_not_granted":
       return 403;
+    // Not the caller's fault and not a refusal of this caller: this
+    // deployment's grant configuration cannot be read, so it grades nobody.
+    // Same status as a missing writer binding, for the same reason.
+    case "grants_misconfigured":
+      return 503;
     case "plan_not_found":
     case "approval_not_found":
     case "receipt_not_found":

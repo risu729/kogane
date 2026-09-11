@@ -131,11 +131,53 @@ export function principalCan(principal: Principal, capability: CommandCapability
 }
 
 /**
- * Where grants come from. A08 replaces the placeholder loader with its grant
+ * How a verified subject is refused. `subject_not_granted` is the caller's
+ * answer — the deployment is configured and its allow-lists do not name this
+ * subject. `grants_misconfigured` is the deployment's own: the grant
+ * configuration cannot be read, so it grades nobody. Both are
+ * `CommandErrorCode`s, so one status table serves every adapter.
+ */
+export const SUBJECT_DENIAL_CODES = ["subject_not_granted", "grants_misconfigured"] as const;
+export type SubjectDenialCode = (typeof SUBJECT_DENIAL_CODES)[number];
+
+export interface PrincipalGranted {
+  ok: true;
+  principal: Principal;
+}
+export interface PrincipalDenied {
+  ok: false;
+  code: SubjectDenialCode;
+  /** Set only for `grants_misconfigured`; a code, never a configured value. */
+  problem?: GrantConfigProblem;
+}
+export type PrincipalResolution = PrincipalGranted | PrincipalDenied;
+
+/**
+ * Why a deployment's grant configuration cannot be used. A code only: no
+ * variable value, no subject and no parser message ever leaves the resolver,
+ * because these codes are logged and the caller-facing one is returned.
+ */
+export const GRANT_CONFIG_PROBLEMS = [
+  /** `OPERATOR_SUBJECTS` is not a JSON array of non-empty bounded strings. */
+  "operator_subjects_invalid",
+  /** `AGENT_GRANTS` is not a JSON array of non-empty bounded strings. */
+  "agent_grants_invalid",
+  /** A subject appears in both lists, so its role is undefined. */
+  "subject_in_both_lists",
+] as const;
+export type GrantConfigProblem = (typeof GRANT_CONFIG_PROBLEMS)[number];
+
+/**
+ * Where grants come from. A08 replaces the configured loader with its grant
  * registry; the contract it must satisfy is this one function.
+ *
+ * It answers a *resolution*, not a principal: a subject the deployment does
+ * not grant, and a deployment whose grant configuration cannot be read, both
+ * have to be refusals. A loader that had to return a `Principal` would have to
+ * invent a default role for them, which is the widening `grants.ts` describes.
  */
 export interface GrantLoader {
-  principalFor(subject: string): Principal;
+  principalFor(subject: string): PrincipalResolution;
 }
 
 // ── store port ──────────────────────────────────────────────────────────

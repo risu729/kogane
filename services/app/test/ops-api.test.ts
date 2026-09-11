@@ -30,14 +30,27 @@ import { d1CommandStore, recordOperationStage } from "../../../packages/applicat
 
 const OPS = "/api/ops/v1";
 const OPERATOR = "ops-operator";
+/** A second operator, so "one operation per principal" has two of them. */
+const SECOND_OPERATOR = "second-operator";
+/** A subject the deployment grades an agent: it may propose, never accept. */
+const AGENT = "ops-agent";
+/** A verified subject in neither list: authenticated, granted nothing. */
+const STRANGER = "ops-stranger";
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let issuer: string;
 let jwks: { keys: unknown[] };
 let sequence = 0;
 
-/** The flag on, and a grant that lets the same subject reach `/mcp`. */
+/**
+ * The flag on, the two operators named, and a read grant that lets the same
+ * subject reach `/mcp`. `OPERATOR_SUBJECTS` has to be explicit: the command
+ * path's grant lists are allow-lists, so an authenticated subject that neither
+ * names is refused with `subject_not_granted` rather than graded the operator
+ * (docs/ops-api.md, "Authorization").
+ */
 const ENABLED = {
   OPS_API_ENABLED: "true",
+  OPERATOR_SUBJECTS: JSON.stringify([OPERATOR, SECOND_OPERATOR]),
   AGENT_API_GRANTS: JSON.stringify({
     [OPERATOR]: {
       scopes: { sources: "*", accounts: "*" },
@@ -120,10 +133,12 @@ async function mcp(
   method: string,
   params: Record<string, unknown> = {},
   environment: Record<string, unknown> = {},
+  subject: string = OPERATOR,
 ) {
   const response = await call("/mcp", {
     body: { jsonrpc: "2.0", id: 1, method, params },
     environment: { ...ENABLED, ...environment },
+    subject,
   });
   return (await response.json()) as Record<string, any>;
 }
@@ -265,7 +280,7 @@ describe("collection requests are accepted, not executed (G3-06, G3-14)", () => 
     const mine = await ops("/collections", { ...COLLECTION, idempotencyKey: "shared-key" });
     const theirs = await call(`${OPS}/collections`, {
       body: { ...COLLECTION, idempotencyKey: "shared-key" },
-      subject: "second-operator",
+      subject: SECOND_OPERATOR,
       environment: ENABLED,
     });
     const other = (await theirs.json()) as Record<string, any>;
@@ -357,10 +372,61 @@ describe("the schema is the boundary (G3-08, G3-13)", () => {
   it("keeps an agent out: requesting work is not a capability an agent holds", async () => {
     const response = await call(`${OPS}/collections`, {
       body: COLLECTION,
-      environment: { ...ENABLED, AGENT_GRANTS: JSON.stringify([OPERATOR]) },
+      subject: AGENT,
+      environment: { ...ENABLED, AGENT_GRANTS: JSON.stringify([AGENT]) },
     });
     expect(response.status).toBe(403);
     expect((await response.json()).error).toBe("approval_required");
+  });
+
+  // The operator role is granted, never inferred. A subject the deployment
+  // never named is authenticated and nothing else: it used to be graded the
+  // human operator and could accept every one of these operations.
+  it("keeps an unnamed subject out with a safe code, not with the operator role", async () => {
+    for (const environment of [ENABLED, { ...ENABLED, OPERATOR_SUBJECTS: "" }]) {
+      const response = await call(`${OPS}/collections`, {
+        body: COLLECTION,
+        subject: STRANGER,
+        environment,
+      });
+      expect(response.status).toBe(403);
+      expect((await response.json()).error).toBe("subject_not_granted");
+    }
+    // A read is refused the same way: nothing confirms that an id exists.
+    const read = await call(`${OPS}/operations/op_${"0".repeat(64)}`, {
+      subject: STRANGER,
+      environment: ENABLED,
+    });
+    expect(read.status).toBe(403);
+    expect((await read.json()).error).toBe("subject_not_granted");
+  });
+
+  // Whatever the two lists are wrong about, every operations route answers the
+  // same way: nobody is graded, so nothing is accepted.
+  it("refuses everyone while the grant lists cannot be read", async () => {
+    const broken: Record<string, string>[] = [
+      { OPERATOR_SUBJECTS: "{" },
+      { OPERATOR_SUBJECTS: JSON.stringify({ [OPERATOR]: true }) },
+      { OPERATOR_SUBJECTS: JSON.stringify([OPERATOR, 7]) },
+      { AGENT_GRANTS: "not json" },
+      { AGENT_GRANTS: JSON.stringify({ [AGENT]: { capabilities: [] } }) },
+      { AGENT_GRANTS: JSON.stringify([AGENT, null]) },
+      { AGENT_GRANTS: JSON.stringify([OPERATOR]) },
+    ];
+    const before = await rowCount("collection");
+    for (const vars of broken) {
+      for (const subject of [OPERATOR, AGENT, STRANGER]) {
+        const response = await call(`${OPS}/collections`, {
+          body: COLLECTION,
+          subject,
+          environment: { ...ENABLED, ...vars },
+        });
+        expect(response.status, `${JSON.stringify(vars)} ${subject}`).toBe(503);
+        expect((await response.json()).error).toBe("grants_misconfigured");
+      }
+    }
+    // A refusal accepts nothing: no operation record was written by any of them.
+    expect(await rowCount("collection")).toBe(before);
   });
 });
 
@@ -622,13 +688,58 @@ describe("HTTP and MCP are one API (G3-05)", () => {
       arguments: { source: "sony-bank", extra: "no" },
     });
     expect(invalid.result.structuredContent).toMatchObject({ error: "invalid_request" });
-    // An agent is refused on this transport too.
+    // An agent is refused on this transport too — and so is a subject the
+    // deployment never named, with the code its HTTP route gives.
+    const readable = JSON.stringify({
+      [AGENT]: {
+        scopes: { sources: "*", accounts: "*" },
+        capabilities: ["summary.read"],
+        budget: { maxRows: 100, maxProposalTargets: 1, maxExplainDepth: 3 },
+      },
+      [STRANGER]: {
+        scopes: { sources: "*", accounts: "*" },
+        capabilities: ["summary.read"],
+        budget: { maxRows: 100, maxProposalTargets: 1, maxExplainDepth: 3 },
+      },
+    });
     const agent = await mcp(
       "tools/call",
       { name: "kogane.ops.projection.request", arguments: { reason: "agent attempt" } },
-      { AGENT_GRANTS: JSON.stringify([OPERATOR]) },
+      { AGENT_GRANTS: JSON.stringify([AGENT]), AGENT_API_GRANTS: readable },
+      AGENT,
     );
     expect(agent.result.structuredContent).toEqual({ error: "approval_required" });
+    const stranger = await mcp(
+      "tools/call",
+      { name: "kogane.ops.projection.request", arguments: { reason: "stranger attempt" } },
+      { AGENT_API_GRANTS: readable },
+      STRANGER,
+    );
+    expect(stranger.result.structuredContent).toEqual({ error: "subject_not_granted" });
+  });
+
+  // One resolver, so a misconfiguration cannot make MCP and HTTP disagree.
+  // The tools are not even published while the lists are unreadable: a
+  // deployment that grades nobody cannot authorize any of them.
+  it("agrees with the routes while the grant lists cannot be read", async () => {
+    const broken = { AGENT_GRANTS: JSON.stringify({ [AGENT]: 1 }) };
+    const listed = await mcp("tools/list", {}, broken);
+    expect((listed.result.tools as { name: string }[]).map((tool) => tool.name)).toEqual(
+      MCP_TOOLS.map((tool) => tool.name),
+    );
+    const called = await mcp(
+      "tools/call",
+      { name: "kogane.ops.projection.request", arguments: { reason: "misconfigured" } },
+      broken,
+    );
+    expect(called.result.isError).toBe(true);
+    expect(called.result.structuredContent).toEqual({ error: "grants_misconfigured" });
+    const overHttp = await call(`${OPS}/projections`, {
+      body: { reason: "misconfigured" },
+      environment: { ...ENABLED, ...broken },
+    });
+    expect(overHttp.status).toBe(503);
+    expect((await overHttp.json()).error).toBe("grants_misconfigured");
   });
 
   it("reads an operation through the tool of the same name", async () => {

@@ -32,6 +32,7 @@ import {
   queryResponse,
   toolContext,
 } from "./agent-service";
+import { grantsUsable } from "./grants";
 import { handleMcp, MCP_TOOLS } from "./mcp";
 import { opsApiEnabled } from "./ops-api";
 import { callOpsTool, isOpsToolName, OPS_MCP_TOOLS } from "./ops-tools";
@@ -96,14 +97,18 @@ async function boundedJson(request: Request): Promise<unknown> {
 }
 
 /**
- * The grant of the caller, or `null`. Absent configuration grants nothing.
+ * The grant of the caller, or `null`. Absent configuration grants nothing:
+ * this table is an allow-list, and a principal it does not name reads nothing
+ * here (`403 agent_api_not_configured`).
  *
  * `AGENT_API_GRANTS` is this API's table (principal -> grant). It is a
- * different variable from A09's `AGENT_GRANTS`, which is a JSON *array* of
- * subjects the change lifecycle treats as agents. Keeping them apart is not
- * tidiness: the two parsers reject each other's shape, so one variable
- * carrying both meanings would silently give an agent the human command
- * capabilities (docs/agent-api.md, "Relationship to the change lifecycle").
+ * different variable from the command path's `AGENT_GRANTS`, which is a JSON
+ * *array* of subjects that path treats as agents, and from `OPERATOR_SUBJECTS`,
+ * which is the array of subjects it treats as the human operator. Keeping them
+ * apart is not tidiness: the parsers reject each other's shape, and since the
+ * command path is now an allow-list on both sides, a value in the wrong
+ * variable refuses rather than promoting anyone
+ * (docs/agent-api.md, "Relationship to the change lifecycle").
  */
 export function agentGrant(env: Env, principal: string): Grant | null {
   return grantFor(parseGrants(env.AGENT_API_GRANTS), principal);
@@ -152,6 +157,12 @@ export async function agentApi(
     // `OPS_API_ENABLED` off they are neither listed nor callable, so the MCP
     // surface matches the routes this deployment actually serves.
     const ops = opsApiEnabled(env);
+    // A deployment whose command grant lists cannot be read grades nobody, so
+    // it can authorize none of the operations tools; publishing them would
+    // describe a capability this deployment does not have. They stay callable,
+    // so a client that asks anyway is told `grants_misconfigured` rather than
+    // "no such tool".
+    const listOps = ops && grantsUsable(env);
     const message = await handleMcp(
       await boundedJson(request),
       async (name, body) => {
@@ -159,7 +170,7 @@ export async function agentApi(
         if (ops && isOpsToolName(name)) return callOpsTool(name, body, env, subject);
         return null;
       },
-      ops ? [...MCP_TOOLS, ...OPS_MCP_TOOLS] : MCP_TOOLS,
+      listOps ? [...MCP_TOOLS, ...OPS_MCP_TOOLS] : MCP_TOOLS,
     );
     if (message === null) return new Response(null, { status: 202 });
     return json(message);
