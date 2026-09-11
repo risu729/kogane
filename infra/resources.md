@@ -165,32 +165,6 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
-### `poc/globalpass-worker`
-
-- Disposition (poc_disposition.csv): `promote-service` → services/collector-globalpass
-- Required verification: keep Container, relay, browser diagnostics and resource identity
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-globalpass-collector-poc; buckets=kogane-globalpass-collector-poc)
-
-#### `kogane-globalpass-collector-poc` — `poc/globalpass-worker/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
-- R2: SNAPSHOTS → kogane-globalpass-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: COLLECTOR_CONTAINER → GlobalPassCollectorContainer
-- DO migration tags: v1: GlobalPassCollectorContainer
-- Containers: GlobalPassCollectorContainer (./Dockerfile, basic, max 2)
-- Browser binding: BROWSER
-- VPC networks: MESH → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33<br>CF_EGRESS → cf1:network
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
-- Crons: `17 18 * * *`
-- Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
-- Required secrets (names only): —
-
 ### `poc/kameleo-container-probe`
 
 - Disposition (poc_disposition.csv): `retire-candidate` → docs/research/kameleo.md
@@ -566,6 +540,32 @@ No wrangler config.
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>VPOINT_PAY_EMAIL_RECIPIENT
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_EMAIL_FORWARD_TO<br>VPOINT_EMAIL_RECIPIENT<br>VPOINT_MEMBER_NUMBER
+
+### `services/collector-globalpass`
+
+- Disposition (poc_disposition.csv): `promote-service` → services/collector-globalpass
+- Required verification: keep Container, relay, browser diagnostics and resource identity
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-globalpass-collector-poc; buckets=kogane-globalpass-collector-poc)
+
+#### `kogane-globalpass-collector-poc` — `services/collector-globalpass/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: —
+- R2: SNAPSHOTS → kogane-globalpass-collector-poc
+- KV: —
+- Queues: —
+- Durable Objects: COLLECTOR_CONTAINER → GlobalPassCollectorContainer
+- DO migration tags: v1: GlobalPassCollectorContainer
+- Containers: GlobalPassCollectorContainer (./Dockerfile, basic, max 2)
+- Browser binding: BROWSER
+- VPC networks: MESH → 6b0ccf30-68b2-494e-baa8-f4f9f3e46b33<br>CF_EGRESS → cf1:network
+- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Crons: `17 18 * * *`
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION<br>RELAY_PUBLIC_URL
+- Required secrets (names only): —
 
 ### `services/collector-r2-importer`
 

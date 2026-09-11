@@ -124,14 +124,6 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/globalpass-worker": {
-    source: "poc_disposition.csv",
-    proposedAction: "promote-service",
-    proposedTarget: "services/collector-globalpass",
-    requiredVerification: "keep Container, relay, browser diagnostics and resource identity",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
   "poc/kameleo-container-probe": {
     source: "poc_disposition.csv",
     proposedAction: "retire-candidate",
@@ -270,6 +262,14 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     proposedTarget: "services/collector-vpoint",
     requiredVerification: "keep the Email route and the DO class/tag/storage",
     executionStatus: "PLANNED_NOT_EXECUTED",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/collector-globalpass": {
+    source: "poc_disposition.csv",
+    proposedAction: "promote-service",
+    proposedTarget: "services/collector-globalpass",
+    requiredVerification: "keep Container, relay, browser diagnostics and resource identity",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "services/collector-r2-importer": {

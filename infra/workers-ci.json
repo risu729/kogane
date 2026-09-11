@@ -24,7 +24,7 @@
     },
     {
       "name": "globalpass-worker",
-      "path": "poc/globalpass-worker",
+      "path": "services/collector-globalpass",
       "config": "wrangler.jsonc"
     },
     {

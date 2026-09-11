@@ -95,7 +95,7 @@
         "wrangler": "4.125.0",
       },
     },
-    "poc/globalpass-worker": {
+    "services/collector-globalpass": {
       "name": "@kogane/poc-globalpass-worker",
       "dependencies": {
         "@cloudflare/containers": "0.3.7",
@@ -497,7 +497,7 @@
 
     "@kogane/parsers": ["@kogane/parsers@workspace:packages/parsers"],
 
-    "@kogane/poc-globalpass-worker": ["@kogane/poc-globalpass-worker@workspace:poc/globalpass-worker"],
+    "@kogane/poc-globalpass-worker": ["@kogane/poc-globalpass-worker@workspace:services/collector-globalpass"],
 
     "@kogane/poc-mobile-suica-worker": ["@kogane/poc-mobile-suica-worker@workspace:poc/mobile-suica-worker"],
 
