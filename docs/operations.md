@@ -164,6 +164,16 @@ schema-compatibility rule a rollback must satisfy, and the per-case rollback
 table are in [CI/CD automation](ci-cd.md#continuous-deployment);
 `infra/deploy-order.json` is the ledger it works from.
 
+Merging is not enabling. Every feature the change programme added is behind a
+flag that is off in the configuration that ships, and
+[Rollout](rollout.md) is the single table of those flags: owner Worker, default,
+what turning each one on changes, the resources it needs first, the order they
+go on in, how each comes back off, and the one-time GitHub and Cloudflare
+settings the owner has to create by hand. Retiring what a flag replaced is the
+separate, later decision in
+[Legacy path retirement](legacy-retirement.md), which is a checklist of evidence
+rather than a set of steps to run.
+
 Two things on this page are the ones a rollback cannot undo: an applied
 migration and a recovery drill. A code rollback re-deploys a Worker; it never
 restores CORE or R2, and a whole-database restore stays the separate incident

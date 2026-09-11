@@ -13,13 +13,12 @@
     {
       "id": "core-schema",
       "reason": "CORE schema DDL is append-only and is applied to production by CD.",
-      "paths": ["services/raw-evidence/migrations/**", "packages/storage-d1/migrations/**"]
+      "paths": ["packages/storage-d1/migrations/**"]
     },
     {
       "id": "authorization",
       "reason": "Authentication and authorization code decides who may read evidence; the ingest-client declaration and its rendered bootstrap SQL decide which producer may register under which source.",
       "paths": [
-        "services/evidence-browser/src/auth.ts",
         "services/app/src/auth.ts",
         "packages/*/src/auth.ts",
         "config/ingest-clients.json",
@@ -31,10 +30,6 @@
       "id": "secret-consuming-collectors",
       "reason": "Collector code and its dependency closure run with the bank credentials of its source; whoever can deploy or change what it bundles can also read and send them.",
       "paths": [
-        "poc/*-worker/src/**",
-        "poc/*-worker/package.json",
-        "poc/*-worker/bun.lock",
-        "poc/sbi-securities/**",
         "services/collector-*/src/**",
         "services/collector-*/package.json",
         "services/collector-*/bun.lock",

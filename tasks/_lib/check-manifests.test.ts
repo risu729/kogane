@@ -6,13 +6,16 @@ import {
   check,
   ciTaskMismatches,
   dryRunTargets,
+  generatedInputViolations,
   ledgerMismatches,
   manifestViolations,
   scriptInvocations,
   toolDownloads,
+  trackedGeneratedFiles,
   unaccountedConfigs,
   uncoveredWorkspaces,
   workspaceDirectories,
+  workspaceShortNames,
 } from "./check-manifests.ts";
 
 describe("package manifests (G4-01)", () => {
@@ -234,6 +237,110 @@ describe("the CI worker ledger (G4-09, G5-09)", () => {
       "infra/workers-ci.json: the exclusion of services/app/wrangler.ops.jsonc is stale or has no reason",
       "infra/workers-ci.json: the exclusion of services/gone/wrangler.jsonc is stale or has no reason",
     ]);
+  });
+});
+
+describe("generated files a workspace imports (unified plan U15)", () => {
+  const directories = ["experiments/local", "services/app"];
+  const generated = [
+    { path: "services/app/demo-snapshot.json", producedBy: "local-pipeline:export-demo" },
+  ];
+  const sources = [
+    {
+      file: "services/app/src/demo-worker.ts",
+      imports: ["services/app/demo-snapshot.json", "packages/domain/src/money.ts"],
+    },
+  ];
+  const producer = { name: "local-pipeline:export-demo", dir: "/repo/experiments/local" };
+  const family = [
+    { name: "app:types", dir: "/repo/services/app" },
+    { name: "ci:app", depends: ["app:typecheck", "app:test"], dir: null },
+    { name: "ci:local-pipeline", depends: ["local-pipeline:export-demo"], dir: null },
+  ];
+
+  test("a workspace short name comes from its ci: task", () => {
+    expect([
+      ...workspaceShortNames(
+        directories,
+        [...family, producer, { name: "app:test", dir: "/repo/services/app" }],
+        "/repo",
+      ),
+    ]).toEqual([
+      ["services/app", "app"],
+      ["experiments/local", "local-pipeline"],
+    ]);
+  });
+
+  test("the three checks that read the file must declare the task that writes it", () => {
+    const tasks = [
+      ...family,
+      producer,
+      { name: "app:typecheck", depends: ["app:types"], dir: "/repo/services/app" },
+      { name: "app:test", depends: ["app:types"], dir: "/repo/services/app" },
+      { name: "app:dry-run", depends: ["app:types"], dir: "/repo/services/app" },
+    ];
+    expect(generatedInputViolations(generated, sources, directories, tasks, "/repo")).toEqual([
+      'app:typecheck: services/app/src imports the generated services/app/demo-snapshot.json; add "local-pipeline:export-demo", which writes it, to this task\'s depends',
+      'app:test: services/app/src imports the generated services/app/demo-snapshot.json; add "local-pipeline:export-demo", which writes it, to this task\'s depends',
+      'app:dry-run: services/app/src imports the generated services/app/demo-snapshot.json; add "local-pipeline:export-demo", which writes it, to this task\'s depends',
+    ]);
+  });
+
+  test("an indirect dependency counts, and a task that does not exist is not demanded", () => {
+    // `app:test` reaches the export through `app:build`; there is no
+    // `app:dry-run` at all, and a package without one must not fail here.
+    const tasks = [
+      ...family,
+      producer,
+      {
+        name: "app:typecheck",
+        depends: ["app:types", "local-pipeline:export-demo"],
+        dir: "/repo/services/app",
+      },
+      { name: "app:build", depends: ["local-pipeline:export-demo"], dir: "/repo/services/app" },
+      { name: "app:test", depends: ["app:build"], dir: "/repo/services/app" },
+    ];
+    expect(generatedInputViolations(generated, sources, directories, tasks, "/repo")).toEqual([]);
+  });
+
+  test("a workspace that does not import the file is not asked to depend on it", () => {
+    const tasks = [
+      ...family,
+      producer,
+      { name: "app:typecheck", dir: "/repo/services/app" },
+      { name: "app:test", dir: "/repo/services/app" },
+    ];
+    const unrelated = [
+      { file: "services/app/src/routes.ts", imports: ["packages/application/src/index.ts"] },
+    ];
+    expect(generatedInputViolations(generated, unrelated, directories, tasks, "/repo")).toEqual([]);
+  });
+
+  test("an extension-less specifier for a generated module still counts", () => {
+    const tasks = [...family, producer, { name: "app:test", dir: "/repo/services/app" }];
+    const module = [{ file: "services/app/src/a.ts", imports: ["services/app/generated"] }];
+    expect(
+      generatedInputViolations(
+        [{ path: "services/app/generated.ts", producedBy: "local-pipeline:export-demo" }],
+        module,
+        directories,
+        tasks,
+        "/repo",
+      ),
+    ).toEqual([
+      'app:test: services/app/src imports the generated services/app/generated.ts; add "local-pipeline:export-demo", which writes it, to this task\'s depends',
+    ]);
+  });
+
+  test("a producing task that does not exist is reported once", () => {
+    expect(generatedInputViolations(generated, sources, directories, family, "/repo")).toEqual([
+      'infra/generated-files.json: services/app/demo-snapshot.json names the producing task "local-pipeline:export-demo", which does not exist',
+    ]);
+  });
+
+  test("a declared file that git tracks is a stale declaration", () => {
+    expect(trackedGeneratedFiles(generated, ["README.md"])).toEqual([]);
+    expect(trackedGeneratedFiles(generated, ["services/app/demo-snapshot.json"])).toHaveLength(1);
   });
 });
 

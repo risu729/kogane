@@ -102,11 +102,22 @@ patterns per rule:
 
 | Rule                          | Covers                                                                                                                                                                                                                                                                                                 |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `core-schema`                 | CORE migrations (`packages/storage-d1/migrations/core/` since U05)                                                                                                                                                                                                                                     |
-| `authorization`               | `services/app/src/auth.ts`, its former path and its successors                                                                                                                                                                                                                                         |
+| `core-schema`                 | CORE and READ migrations (`packages/storage-d1/migrations/**`; the pre-U05 ingest path was dropped in U15)                                                                                                                                                                                             |
+| `authorization`               | `services/app/src/auth.ts` and any `packages/*/src/auth.ts`, the ingest-client declaration and its rendered bootstrap SQL                                                                                                                                                                              |
 | `secret-consuming-collectors` | collector code, `package.json` and `bun.lock` of workers that run with a source's bank credentials, plus their container images, `Dockerfile` and operator scripts, and the shared `packages/collector-diagnostics` every collector bundles (plan 12 §5: the dependency closure deploys with the code) |
 | `automation`                  | `.github/workflows/**`, `.github/scripts/**`, `.github/actions/**`                                                                                                                                                                                                                                     |
 | `deployment-config`           | `wrangler*.jsonc`, `wrangler*.toml`, `infra/**`                                                                                                                                                                                                                                                        |
+
+One thing about the `secret-consuming-collectors` patterns is deliberate. The
+`services/collector-*/bun.lock` entry matches nothing today — U03 left one
+lockfile at the root — and stays because a per-workspace lockfile reappearing
+under a collector is exactly the dependency-closure change the rule is about.
+
+The `poc/*-worker/**` and `poc/sbi-securities/**` entries U15 dated are gone:
+the collector promotion (U04B, `poc/<source>-worker` →
+`services/collector-<source>`) made them dead, and the item that landed it
+retired them together with the `poc/moneyforward-worker/…` rows of
+`scripts/automerge.test.ts`, as U15 said it should.
 
 and label rules: a pull request labelled `high-risk` is treated as high risk
 even when no listed path changed. Renovate applies that label to parser, money

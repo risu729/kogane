@@ -166,3 +166,23 @@ export function assetViolations(
       directory: resolveAssetDirectory(config.path, config.directory as string),
     }));
 }
+
+/**
+ * The repository-relative paths a file's *relative* import specifiers name,
+ * deduplicated and sorted. A bare specifier (an npm package) resolves to
+ * nothing, so what comes back is the in-repository half of the file's imports.
+ *
+ * The manifest guard uses it to find the workspaces that import a generated
+ * file, which is a build-closure dependency in the same way that the asset
+ * directory above is.
+ */
+export function relativeImports(path: string, text: string): string[] {
+  const found = new Set<string>();
+  for (const match of text.matchAll(SPECIFIER)) {
+    const specifier = match.groups?.["spec"] ?? match.groups?.["rspec"];
+    if (specifier === undefined) continue;
+    const resolved = resolveSpecifier(path, specifier);
+    if (resolved !== undefined) found.add(resolved);
+  }
+  return [...found].sort();
+}
