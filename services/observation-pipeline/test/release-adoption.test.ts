@@ -259,7 +259,9 @@ test("a candidate write whose lease expired records nothing at all", async () =>
     .bind(Date.now() + 60_000)
     .run();
   const live = await env.DB.batch(candidateBatch(env.DB, { ...input, now: Date.now() }));
-  expect(live[0]?.meta.changes).toBe(1);
+  // The parse run plus the CORE revision bump of migration 0038's trigger:
+  // D1 counts rows written by triggers too.
+  expect(live[0]?.meta.changes).toBe(2);
   expect(await candidateRow(pending!.id)).toMatchObject({ state: "candidate" });
   expect(await published(201)).toMatchObject({ parse_run_id: adopted });
 }, 30000);

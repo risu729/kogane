@@ -1908,6 +1908,11 @@
               "binding": "EVIDENCE",
               "bucket": "kogane-raw-evidence",
               "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
+              "live": true
             }
           ],
           "kv": [],
