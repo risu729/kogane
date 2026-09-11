@@ -1,7 +1,7 @@
 {
   "generatedBy": "scripts/core-schema-ledger.ts",
   "plan": "unified plan U01; chapters 04 §2 and 06 §1; acceptance test G0-01",
-  "migrationsDir": "services/raw-evidence/migrations",
+  "migrationsDir": "packages/storage-d1/migrations/core",
   "migrations": [
     {
       "file": "0001_initial.sql",
