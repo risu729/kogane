@@ -246,32 +246,6 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): BRIDGE_TOKEN
 
-### `poc/vpoint-pay-worker`
-
-- Disposition (poc_disposition.csv): `promote-service` → services/collector-vpoint-pay
-- Required verification: confirm the Email/collection entry point and the resource identity
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-vpoint-pay-collector-poc; buckets=kogane-vpoint-pay-collector-poc)
-
-#### `kogane-vpoint-pay-collector-poc` — `poc/vpoint-pay-worker/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
-- R2: SNAPSHOTS → kogane-vpoint-pay-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: VPOINT_PAY_STATE → VPointPayCredentialState
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
-- Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_PAY_DEVICE_UUID<br>VPOINT_PAY_REFRESH_TOKEN
-
 ### `poc/vpoint-worker`
 
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-vpoint
@@ -849,6 +823,32 @@ No wrangler config.
 - Assets: —
 - Vars (names only): —
 - Required secrets (names only): —
+
+### `services/collector-vpoint-pay`
+
+- Disposition (poc_disposition.csv): `promote-service` → services/collector-vpoint-pay
+- Required verification: confirm the Email/collection entry point and the resource identity
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-vpoint-pay-collector-poc; buckets=kogane-vpoint-pay-collector-poc)
+
+#### `kogane-vpoint-pay-collector-poc` — `services/collector-vpoint-pay/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: —
+- R2: SNAPSHOTS → kogane-vpoint-pay-collector-poc
+- KV: —
+- Queues: —
+- Durable Objects: VPOINT_PAY_STATE → VPointPayCredentialState
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
+- Crons: —
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_PAY_DEVICE_UUID<br>VPOINT_PAY_REFRESH_TOKEN
 
 ### `services/evidence-browser`
 

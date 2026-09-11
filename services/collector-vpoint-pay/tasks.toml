@@ -2,30 +2,30 @@
 #:schema https://mise.jdx.dev/schema/mise-task.json
 
 ["vpoint-pay-worker:types"]
-description = "Generate the Cloudflare Worker types of poc/vpoint-pay-worker."
-dir = "poc/vpoint-pay-worker"
+description = "Generate the Cloudflare Worker types of services/collector-vpoint-pay."
+dir = "services/collector-vpoint-pay"
 run = "./node_modules/.bin/wrangler types"
 
 ["vpoint-pay-worker:typecheck"]
-description = "Type-check poc/vpoint-pay-worker."
+description = "Type-check services/collector-vpoint-pay."
 depends = ["vpoint-pay-worker:types"]
-dir = "poc/vpoint-pay-worker"
+dir = "services/collector-vpoint-pay"
 run = "./node_modules/.bin/tsc --noEmit"
 
 ["vpoint-pay-worker:test"]
-description = "Run the poc/vpoint-pay-worker tests."
+description = "Run the services/collector-vpoint-pay tests."
 depends = ["vpoint-pay-worker:types"]
-dir = "poc/vpoint-pay-worker"
+dir = "services/collector-vpoint-pay"
 run = "bun test"
 
 ["vpoint-pay-worker:dry-run"]
-description = "Validate the poc/vpoint-pay-worker deployment without uploading it."
+description = "Validate the services/collector-vpoint-pay deployment without uploading it."
 depends = ["vpoint-pay-worker:types"]
-dir = "poc/vpoint-pay-worker"
+dir = "services/collector-vpoint-pay"
 run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
 ["ci:vpoint-pay-worker"]
-description = "Every check CI runs for poc/vpoint-pay-worker."
+description = "Every check CI runs for services/collector-vpoint-pay."
 depends = ["vpoint-pay-worker:typecheck", "vpoint-pay-worker:test"]

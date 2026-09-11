@@ -254,7 +254,7 @@
         "wrangler": "4.126.0",
       },
     },
-    "poc/vpoint-pay-worker": {
+    "services/collector-vpoint-pay": {
       "name": "@kogane/poc-vpoint-pay-worker",
       "devDependencies": {
         "@types/bun": "1.3.8",
@@ -521,7 +521,7 @@
 
     "@kogane/poc-vpass-json": ["@kogane/poc-vpass-json@workspace:services/collector-vpass"],
 
-    "@kogane/poc-vpoint-pay-worker": ["@kogane/poc-vpoint-pay-worker@workspace:poc/vpoint-pay-worker"],
+    "@kogane/poc-vpoint-pay-worker": ["@kogane/poc-vpoint-pay-worker@workspace:services/collector-vpoint-pay"],
 
     "@kogane/poc-vpoint-worker": ["@kogane/poc-vpoint-worker@workspace:poc/vpoint-worker"],
 

@@ -174,7 +174,7 @@
     },
     {
       "name": "vpoint-pay-worker",
-      "path": "poc/vpoint-pay-worker",
+      "path": "services/collector-vpoint-pay",
       "config": "wrangler.jsonc"
     },
     {
