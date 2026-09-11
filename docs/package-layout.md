@@ -38,9 +38,70 @@ pipeline's behaviour changed when it moved.
 | `experiments/observation-pipeline-local`   | The local SQLite store standing in for D1/R2, its read-only Hono API, `serve.ts`, `demo.ts`, `export-demo.ts` and the tests that need a store. Owner, expiry and stop condition in its `EXPERIMENT.md`.                                                                                                                            | Any package, and the built client as bytes.                                                                                               |
 | `poc/*` (collectors)                       | Per-source collection experiments.                                                                                                                                                                                                                                                                                                 | Themselves.                                                                                                                               |
 | `tests/fixtures`                           | Synthetic fixtures shared by the parser tests, the importer audit tests, the identity tests and the experiment, with `MANIFEST.sha256`.                                                                                                                                                                                            | Nothing: they are data.                                                                                                                   |
+| `tests/`                                   | The repository-wide tests that belong to no workspace, and `tests/fixtures`.                                                                                                                                                                                                                                                      | Anything; it is test code.                                                                                                                |
+| `config/`                                  | Declarative source and operational configuration that is data, not code: today `ingest-clients.json`, the ingest clients, producers and routes (decision D1).                                                                                                                                                                     | Nothing: it is data, rendered by `scripts/config-bootstrap.ts`.                                                                          |
+| `infra/`                                   | The resource, CORE/READ schema, dependency, deploy-order, CI-worker, risk-path, generated-file and retention ledgers, and the rendered bootstrap SQL. See [infra-ledgers.md](infra-ledgers.md).                                                                                                                                   | Nothing: generated or hand-maintained data.                                                                                              |
+| `scripts/`, `tasks/_lib/`                  | The generators behind the ledgers and the repository-wide guards, with their tests. `tasks/_lib` holds what a mise task runs; `scripts/` holds what a ledger task runs.                                                                                                                                                           | Each other and the packages; never a service's `src`.                                                                                    |
 
 Packages are imported by relative path (`../../../packages/parsers/src/...`).
 Everything is one Bun workspace with one root `bun.lock`; nothing is published.
+
+## Where the layout stands
+
+Chapter 07 §1 (decision D1) names five moves. Four are done, and the directory
+that proves it is always `infra/resources.md`: it is generated from the Wrangler
+configurations on disk, so it says which directory each deployed Worker is
+built from today, whatever this prose says.
+
+| Move                                                     | State                                                                                  |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| PoC client → `apps/web`, fixtures → `tests/fixtures`     | done (U04)                                                                             |
+| Local store → `experiments/observation-pipeline-local`   | done (U04), with an `EXPERIMENT.md` carrying owner, expiry and stop condition           |
+| New packages `collection` and `storage-d1`               | done (U07, U05); CORE and READ migrations live in `packages/storage-d1/migrations`      |
+| `services/evidence-browser` → `services/app`, `services/observation-pipeline` → `services/processor` | done, `git mv` only (see below) |
+| `poc/<source>-worker` → `services/collector-<source>`    | the collector promotion; each collector moves with its Worker name, cron, Email route, bucket and secrets unchanged |
+
+Two directories stay where they are on purpose:
+
+- **`services/raw-evidence`** and **`services/collector-r2-importer`**. Their
+  logic moved into the packages and into the Processor (U05, U08); the Workers
+  stay deployed as the legacy adapters until each is retired against the
+  checklist in [legacy-retirement.md](legacy-retirement.md). They carry the
+  `retire-after-verification` disposition in the resource ledger, which is the
+  record that the code is deliberately still here.
+- **`poc/`**, for everything that is not a collector: the probes. A probe is
+  not deleted because nothing imports it (07 §6, acceptance G0-12) — several
+  are deployed Workers with their own resources, and each carries its
+  disposition in the ledger. `poc/README.md` is the collector runtime
+  inventory (which collector starts a browser, and where), and
+  `poc/CLEANUP-2026-08-26.md` records what an earlier pass removed.
+
+There is no `tools/` directory and there will not be one (decision D1): a
+generator belongs next to the ledger it writes (`scripts/`), and anything a
+developer runs is a mise task (`tasks/`).
+
+### `experiments/`
+
+One experiment, and the rule that keeps the list short: an experiment carries
+an `EXPERIMENT.md` with an owner, an expiry and a stop condition, and when it
+stops it becomes a `docs/research/<name>.md` with its code removed — not a
+directory nobody dares delete.
+
+| Experiment                               | Owner   | Expiry     | Stop condition                                                                         |
+| ---------------------------------------- | ------- | ---------- | ---------------------------------------------------------------------------------------- |
+| `experiments/observation-pipeline-local` | risu729 | 2026-12-31 | The App API covers replay and status through `/api/ops/v1/*`; what it settled is appended to `docs/research/observation-pipeline-poc.md` |
+
+It declares no Cloudflare resource. Two things still depend on it and both are
+named rather than accidental: `local-pipeline:export-demo` writes the
+synthetic snapshot the `kogane-demo` Worker serves (declared in
+`infra/generated-files.json`, so the tasks that read it must depend on the task
+that writes it), and its SQLite queries are the independent second
+implementation the D1 reader's snapshot and publication-gate tests are compared
+against.
+
+`docs/research/observation-pipeline-poc.md` is the finished half of the same
+rule: the PoC that produced the pipeline is written down there and its code is
+gone.
 
 ## The rules CI enforces
 

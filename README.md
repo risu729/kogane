@@ -67,7 +67,25 @@ mise tasks ls             # what else is there
 See [Development checks and CI](docs/ci.md) for the task naming convention, how
 the CI matrices are generated, and what to do when adding a workspace.
 
+## Layout
+
+One Bun workspace: `apps/web` (the React client), `services/*` (the deployed
+Workers), `packages/*` (the pure shared code), `experiments/*` (time-boxed, with
+an `EXPERIMENT.md`), `poc/*` (collection and runtime probes), `tests/fixtures`
+(synthetic, byte-pinned), `config/` (declarative configuration) and `infra/`
+(the ledgers). [Package layout and import boundaries](docs/package-layout.md)
+says what may import what and where each move stands;
+[infra/resources.md](infra/resources.md) is generated and is the current answer
+for which directory deploys which Worker.
+
 ## Proofs of concept
+
+`poc/` holds what has not been promoted to a service and is not finished
+research. A probe is not deleted because nothing imports it: several are
+deployed Workers with their own cron, Queue or Email route, and each carries its
+disposition in the resource ledger.
+[poc/README.md](poc/README.md) is the collector runtime inventory — which
+collector starts a browser, for which part of a collection, and why.
 
 - [Observation pipeline PoC: what it settled](docs/research/observation-pipeline-poc.md)
 - [Browserless Vpass JSON collector](poc/vpass-json/README.md)
