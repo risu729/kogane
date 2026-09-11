@@ -1,12 +1,12 @@
 # Kameleo Chroma container fingerprint probe (retired)
 
-|                               |                                                                                                                                                                                     |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Status                        | **Retired.** The executable probe was removed from `main` by the U04 repository reorganisation.                                                                                     |
-| Ran                           | 2026-08-26, bounded controls only                                                                                                                                                   |
-| Lived at                      | `poc/kameleo-container-probe`                                                                                                                                                       |
-| Last commit carrying the code | `5fb143e0f77a492ae9cfdbe0266fe77774b8bd30` (`Host synthetic observation demo behind WARP Access (#104)`, 2026-09-07)                                                                |
-| Live resources                | None. The probe ran against a locally started official image; the container, the Docker volume, the image and the controller virtualenv were deleted (`poc/CLEANUP-2026-08-26.md`). |
+|                               |                                                                                                                                                                                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status                        | **Retired.** The executable probe was removed from `main` by the U04 repository reorganisation.                                                                                                                                  |
+| Ran                           | 2026-08-26, bounded controls only                                                                                                                                                                                                |
+| Lived at                      | `poc/kameleo-container-probe`                                                                                                                                                                                                    |
+| Last commit carrying the code | `5fb143e0f77a492ae9cfdbe0266fe77774b8bd30` (`Host synthetic observation demo behind WARP Access (#104)`, 2026-09-07)                                                                                                             |
+| Live resources                | None. The probe ran against a locally started official image; the container, the Docker volume, the image and the controller virtualenv were deleted ([`vpass-probe-cleanup-2026-08-26.md`](vpass-probe-cleanup-2026-08-26.md)). |
 
 ## Purpose
 
