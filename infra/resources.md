@@ -174,32 +174,6 @@ No wrangler config.
 
 No wrangler config.
 
-### `poc/myjcb-worker`
-
-- Disposition (poc_disposition.csv): `promote-service` → services/collector-myjcb
-- Required verification: keep the Browser Run login and fetch boundary
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-myjcb-collector-poc; buckets=kogane-myjcb-collector-poc)
-
-#### `kogane-myjcb-collector-poc` — `poc/myjcb-worker/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
-- R2: SNAPSHOTS → kogane-myjcb-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: BROWSER
-- VPC networks: —
-- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
-- Crons: `0 21 * * *`
-- Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
-- Required secrets (names only): —
-
 ### `poc/observation-pipeline`
 
 - Disposition (poc_disposition.csv): `split-promote-retire` → apps/web; packages/application; tests/fixtures; docs/research
@@ -563,6 +537,32 @@ No wrangler config.
 - VPC networks: —
 - Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
 - Crons: `15 21 * * *`
+- Assets: —
+- Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Required secrets (names only): —
+
+### `services/collector-myjcb`
+
+- Disposition (poc_disposition.csv): `promote-service` → services/collector-myjcb
+- Required verification: keep the Browser Run login and fetch boundary
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-myjcb-collector-poc; buckets=kogane-myjcb-collector-poc)
+
+#### `kogane-myjcb-collector-poc` — `services/collector-myjcb/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: —
+- R2: SNAPSHOTS → kogane-myjcb-collector-poc
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: BROWSER
+- VPC networks: —
+- Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
+- Crons: `0 21 * * *`
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —

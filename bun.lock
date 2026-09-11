@@ -132,7 +132,7 @@
         "wrangler": "4.127.1",
       },
     },
-    "poc/myjcb-worker": {
+    "services/collector-myjcb": {
       "name": "@kogane/poc-myjcb-worker",
       "dependencies": {
         "@cloudflare/puppeteer": "1.4.0",
@@ -503,7 +503,7 @@
 
     "@kogane/poc-moneyforward-worker": ["@kogane/poc-moneyforward-worker@workspace:services/collector-moneyforward"],
 
-    "@kogane/poc-myjcb-worker": ["@kogane/poc-myjcb-worker@workspace:poc/myjcb-worker"],
+    "@kogane/poc-myjcb-worker": ["@kogane/poc-myjcb-worker@workspace:services/collector-myjcb"],
 
     "@kogane/poc-observation-pipeline": ["@kogane/poc-observation-pipeline@workspace:poc/observation-pipeline"],
 

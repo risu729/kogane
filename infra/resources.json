@@ -209,60 +209,6 @@
       "workers": []
     },
     {
-      "directory": "poc/myjcb-worker",
-      "workspace": "poc",
-      "disposition": {
-        "source": "poc_disposition.csv",
-        "proposedAction": "promote-service",
-        "proposedTarget": "services/collector-myjcb",
-        "requiredVerification": "keep the Browser Run login and fetch boundary",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-myjcb-collector-poc; buckets=kogane-myjcb-collector-poc)"
-      },
-      "workers": [
-        {
-          "config": "poc/myjcb-worker/wrangler.jsonc",
-          "name": "kogane-myjcb-collector-poc",
-          "main": "src/worker.ts",
-          "role": "deployed",
-          "liveWorker": true,
-          "crons": [
-            "0 21 * * *"
-          ],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "SNAPSHOTS",
-              "bucket": "kogane-myjcb-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "browserBinding": "BROWSER",
-          "vpcNetworks": [],
-          "serviceBindings": [
-            {
-              "binding": "RAW_EVIDENCE_IMPORTER",
-              "service": "kogane-collector-r2-importer"
-            }
-          ],
-          "varNames": [
-            "COLLECTOR_SCHEMA_VERSION"
-          ],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        }
-      ]
-    },
-    {
       "directory": "poc/observation-pipeline",
       "workspace": "poc",
       "disposition": {
@@ -1086,6 +1032,60 @@
           "durableObjectExports": [],
           "durableObjectMigrations": [],
           "containers": [],
+          "vpcNetworks": [],
+          "serviceBindings": [
+            {
+              "binding": "RAW_EVIDENCE_IMPORTER",
+              "service": "kogane-collector-r2-importer"
+            }
+          ],
+          "varNames": [
+            "COLLECTOR_SCHEMA_VERSION"
+          ],
+          "requiredSecretNames": [],
+          "unextractedKeys": []
+        }
+      ]
+    },
+    {
+      "directory": "services/collector-myjcb",
+      "workspace": "services",
+      "disposition": {
+        "source": "poc_disposition.csv",
+        "proposedAction": "promote-service",
+        "proposedTarget": "services/collector-myjcb",
+        "requiredVerification": "keep the Browser Run login and fetch boundary",
+        "executionStatus": "EXECUTED_U04",
+        "planLiveResourceStatus": "NOT_VERIFIED",
+        "liveResourceStatus": "LIVE(workers=kogane-myjcb-collector-poc; buckets=kogane-myjcb-collector-poc)"
+      },
+      "workers": [
+        {
+          "config": "services/collector-myjcb/wrangler.jsonc",
+          "name": "kogane-myjcb-collector-poc",
+          "main": "src/worker.ts",
+          "role": "deployed",
+          "liveWorker": true,
+          "crons": [
+            "0 21 * * *"
+          ],
+          "emailHandler": false,
+          "d1": [],
+          "r2": [
+            {
+              "binding": "SNAPSHOTS",
+              "bucket": "kogane-myjcb-collector-poc",
+              "live": true
+            }
+          ],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [],
+          "containers": [],
+          "browserBinding": "BROWSER",
           "vpcNetworks": [],
           "serviceBindings": [
             {

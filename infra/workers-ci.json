@@ -124,7 +124,7 @@
     },
     {
       "name": "myjcb-worker",
-      "path": "poc/myjcb-worker",
+      "path": "services/collector-myjcb",
       "config": "wrangler.jsonc"
     },
     {
