@@ -289,3 +289,46 @@ Processor maps it to the CORE source `global-pass`).
   `test/shared-worker.test.ts` (end-to-end target switch with a mocked
   container) and `worker-test/shared-data-bucket.test.ts` (a real Miniflare R2
   `DATA` bucket).
+
+### sbi-vc-trade (`kogane-sbi-vc-session-poc`)
+
+A session Durable Object (`SbiVcSessionState`) with two crons — the 15-minute
+keep-alive and the daily collection — both unchanged. Terminal source id
+`sbi-vc-trade`, the same id CORE uses.
+
+| Artifact         | Role                 | Bytes                                                       |
+| ---------------- | -------------------- | ----------------------------------------------------------- |
+| `<dataset>.json` | `collector_derived`  | the gateway envelope with `meta.secureKey` already stripped |
+| `manifest.json`  | `collector_manifest` | the exact manifest bytes written to the staging bucket      |
+
+- `requestedScope`: `full_snapshot`, `unitKeys: ["account"]`; one `account` unit
+  of kind `collection`, the same unit the central descriptors use. No ranges.
+- A successful run declares `coverageStatus: complete`: the collector walks
+  every historical execution and cash-flow page to exhaustion and verifies the
+  provider's own pagination totals before finishing.
+- `transformations`: one `redacted` step per dataset (`sbi-vc-trade-worker`);
+  the unredacted envelope carried the session key and is not retained.
+- `acquisitionSessionRef`: **yes.** The Durable Object now keeps a session
+  generation id under the storage key `sessionRef`, minted when a session is
+  seeded and rotated when re-authentication replaces it, in the same storage
+  batch as the session itself — so a failed re-authentication cannot lose the
+  previous generation (12 §4, G3-09). Cookie rotation inside a live session
+  keeps the generation. Only the opaque id reaches the terminal; the cookies,
+  the encryption key and the passkey credential never do.
+- Human-required: a collection that cannot start because re-authentication
+  failed, or because the session was refused (401/403) and has never
+  re-authenticated, is recorded as a **`failed` run with its own terminal**
+  carrying `human_required_reauth`, and `waitingForHuman` is reported on
+  `/health`, on the `/collect` 502 body and in the summary. A recoverable
+  session error uses `session_unhealthy` instead. Nothing retries a login: the
+  existing single, 6-hour-cooled-down re-authentication attempt is unchanged
+  (G3-10, G3-11).
+- Shared mode removes the legacy path's deferral: with no service binding in
+  the chain there is no Worker invocation limit, so a run with more than eleven
+  artifacts finishes in place instead of being handed to the backfill route.
+- Duplicate dispatch is still one run: the Durable Object's existing
+  single-flight `runCollection` returns the in-flight summary (G3-14).
+- Verified with synthetic data only: `test/shared-collection.test.ts` and
+  `worker-test/shared-data-bucket.test.ts`, which drives the real Durable
+  Object and a real Miniflare R2 `DATA` bucket (its Miniflare config binds
+  `COLLECTION_TARGET=shared`; the deployed config still ships `legacy`).

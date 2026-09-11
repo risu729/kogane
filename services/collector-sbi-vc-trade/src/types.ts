@@ -85,7 +85,26 @@ export interface CollectionSummary {
   artifactCount: number;
   failureCount: number;
   manifestKey: string;
-  central: RawEvidenceImportResult | RawEvidenceDeferredResult;
+  /** Legacy mode only: the central importer's answer, or why it was deferred. */
+  central?: RawEvidenceImportResult | RawEvidenceDeferredResult;
+  /** Shared mode only (U09): what `persistRun` did in the DATA bucket. */
+  shared?: SharedRunSummary;
+}
+
+/**
+ * U09: the outcome of writing one run into the shared DATA bucket. It lives
+ * here rather than in `shared-collection.ts` so the summary type and the
+ * collection types stay one module, with no import cycle through the worker.
+ */
+export interface SharedRunSummary {
+  readonly target: "shared";
+  readonly outcome: "persisted" | "already_persisted" | "conflict" | "incomplete";
+  readonly terminalKey: string;
+  readonly terminalDigest: string;
+  readonly objectCount: number;
+  /** True when only a person can clear what stopped the run (12 §3). */
+  readonly waitingForHuman: boolean;
+  readonly reasonCode?: string;
 }
 
 export interface RawEvidenceDeferredResult {

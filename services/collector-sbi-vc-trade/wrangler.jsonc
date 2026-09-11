@@ -19,6 +19,13 @@
     {
       "binding": "SNAPSHOTS",
       "bucket_name": "kogane-sbi-vc-trade-poc"
+    },
+    // U09: the shared DATA bucket this collector writes runs and terminals to
+    // once COLLECTION_TARGET is "shared". The legacy SNAPSHOTS staging bucket
+    // stays bound and unchanged until U15 retires it.
+    {
+      "binding": "DATA",
+      "bucket_name": "kogane-raw-evidence"
     }
   ],
   "services": [
@@ -28,6 +35,9 @@
     }
   ],
   "vars": {
+    // "legacy" (default) keeps the per-source bucket plus the central importer
+    // upload; "shared" writes the run to DATA and skips the importer (D12).
+    "COLLECTION_TARGET": "legacy",
     "COLLECTOR_SCHEMA_VERSION": "sbi-vc-trade-worker-poc-v1"
   },
   "durable_objects": {

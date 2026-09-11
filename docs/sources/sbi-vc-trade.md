@@ -598,3 +598,28 @@ runがcurrent observation 0になるend-to-end regressionで固定している�
 - Secrets: `SESSION_SEED`, `SESSION_ENCRYPTION_KEY`, `ADMIN_TOKEN`, `PASSKEY_CREDENTIAL`
 
 検証終了時は`services/collector-sbi-vc-trade`から`npx wrangler delete --name kogane-sbi-vc-session-poc`でWorker、DO binding、Cron、Secretsを削除する。R2 dataが不要になったことを別途確認した後だけ、objectsとbucket `kogane-sbi-vc-trade-poc`を削除する。現時点では日次収集の継続検証のためすべて残す。
+
+## Shared DATA bucket (U09, 2026-09-11)
+
+The collector gained a `COLLECTION_TARGET` var (default `legacy`) and a `DATA`
+binding to the central `kogane-raw-evidence` bucket. In `shared` mode the
+session Durable Object persists the run itself with `packages/collection` — the
+sanitized gateway envelopes and the collector manifest, then the `terminal-v1`
+manifest last — and the upload to `kogane-collector-r2-importer` is skipped,
+which also removes the eleven-artifact deferral of the legacy path. Legacy mode
+is unchanged and both crons (`*/15 * * * *` keep-alive, `5 21 * * *`
+collection) are unchanged.
+
+The Durable Object now also keeps a **session generation id** (`sessionRef`),
+minted when a session is seeded and rotated when re-authentication replaces it,
+written in the same storage batch as the session so a failed re-authentication
+cannot lose the previous generation. The terminal carries that opaque id as
+`acquisitionSessionRef`; no cookie, encryption key or passkey credential is
+ever written to `DATA`.
+
+A collection blocked on re-authentication is recorded as a `failed` run with
+`human_required_reauth` and a `waitingForHuman` signal, never as a retry.
+
+Deploy order, rollback and the artifact/role table are in
+[`docs/collection.md`](../collection.md#sbi-vc-trade-kogane-sbi-vc-session-poc).
+Merged is not enabled: the var ships as `legacy`.

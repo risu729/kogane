@@ -1260,7 +1260,7 @@
         "requiredVerification": "keep the client dependency and the resource identity",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-sbi-vc-session-poc; buckets=kogane-sbi-vc-trade-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-sbi-vc-session-poc; buckets=kogane-raw-evidence,kogane-sbi-vc-trade-poc)"
       },
       "workers": [
         {
@@ -1279,6 +1279,11 @@
             {
               "binding": "SNAPSHOTS",
               "bucket": "kogane-sbi-vc-trade-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -1310,6 +1315,7 @@
             }
           ],
           "varNames": [
+            "COLLECTION_TARGET",
             "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [],
@@ -2155,7 +2161,8 @@
           "kogane-ingest",
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic",
-          "kogane-sbi-shinsei-collector-poc"
+          "kogane-sbi-shinsei-collector-poc",
+          "kogane-sbi-vc-session-poc"
         ]
       },
       {

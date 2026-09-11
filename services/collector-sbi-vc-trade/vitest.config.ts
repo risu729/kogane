@@ -6,6 +6,10 @@ export default defineConfig({
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
+        // U09: the runtime suite exercises the shared path, so the var the
+        // deployed config ships as "legacy" is overridden here. The legacy
+        // path is covered by the `test/` suite and by the unchanged code.
+        bindings: { COLLECTION_TARGET: "shared" },
         serviceBindings: {
           RAW_EVIDENCE_IMPORTER: () =>
             Response.json({ error: "not_used_in_runtime_tests" }, { status: 503 }),
