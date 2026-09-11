@@ -191,7 +191,7 @@ export async function readTerminalPage(
 export interface ObjectProblem {
   readonly artifactKey: string;
   readonly key: string;
-  readonly reasonCode: ObjectProblemCode | "object_hash_mismatch";
+  readonly reasonCode: ObjectProblemCode;
   readonly expectedSha256: string;
   readonly expectedByteSize: number;
   readonly observedByteSize: number | null;

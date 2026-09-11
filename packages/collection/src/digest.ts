@@ -5,9 +5,10 @@
 // means the terminal digest and the persisted descriptor digests are produced
 // by one frozen encoder rather than two that drift.
 //
-// `terminalDigest` is taken over the *validated* manifest, not over whatever
-// bytes happen to be in the bucket, so a terminal that was stored with
-// different whitespace still compares equal to the same run.
+// `terminalDigest` is taken over the *validated* manifest. The writer stores
+// exactly `encodeTerminal(manifest)`, so for a terminal this package wrote the
+// digest of the stored bytes and the digest of the manifest are one value; the
+// reader checks that equality and blocks a terminal where it does not hold.
 import { sha256Hex } from "../../evidence-contract/src/digest";
 import {
   canonicalJsonV1,

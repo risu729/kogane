@@ -90,6 +90,12 @@ export interface FakeBucketFaults {
   readonly failPut?: ReadonlySet<string>;
   /** Keys whose multipart `complete` throws, leaving the upload unfinished. */
   readonly failMultipartComplete?: ReadonlySet<string>;
+  /**
+   * Runs just before a put is applied: a competing writer that lands between
+   * the caller's HEAD and its conditional put. Seeding the same key here makes
+   * the create-only put lose the race and return null.
+   */
+  readonly beforePut?: (key: string) => Promise<void> | void;
 }
 
 export class FakeR2Bucket implements R2BucketLike {
@@ -134,6 +140,7 @@ export class FakeR2Bucket implements R2BucketLike {
     options: R2PutOptionsLike = {},
   ): Promise<R2ObjectLike | null> {
     if (this.faults.failPut?.has(key)) throw new Error("simulated R2 put failure");
+    await this.faults.beforePut?.(key);
     const bytes = toBytes(value);
     const digest = await sha256Hex(bytes);
     if (options.sha256 !== undefined && hexOf(options.sha256) !== digest) {

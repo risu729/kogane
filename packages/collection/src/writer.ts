@@ -22,16 +22,16 @@ import {
   type R2ObjectLike,
   type R2UploadedPartLike,
 } from "./bucket";
-import { encodeTerminal, sha256Hex, terminalDigest } from "./digest";
+import { encodeTerminal, sha256Hex } from "./digest";
 import { objectKey, terminalKey } from "./keys";
 import {
   parseTerminalManifest,
   TERMINAL_MANIFEST_VERSION,
-  tryParseTerminalManifest,
   type TerminalArtifact,
   type TerminalManifest,
   type TerminalRunFields,
 } from "./manifest";
+import { readTerminalAt } from "./reader";
 import {
   objectMetadata,
   OBJECT_CONTENT_TYPE,
@@ -116,9 +116,13 @@ export type PersistRunResult =
 
 export interface PersistRunOptions {
   /**
-   * Hash every body before writing it. On by default: it is the only check
-   * that catches a collector whose declared digest does not describe the bytes
-   * it is about to store under that digest's key.
+   * Hash every single-part body before writing it. On by default: it is the
+   * only client-side check that catches a collector whose declared digest does
+   * not describe the bytes it is about to store under that digest's key. Off,
+   * R2 still rejects a single-part put whose bytes do not match the `sha256`
+   * option. Multipart bodies are always hashed here, whatever this says: R2
+   * cannot check a multipart digest on the server, and the post-upload
+   * verification can only read back the metadata this writer itself declared.
    */
   readonly verifyBodyDigest?: boolean;
 }
@@ -282,24 +286,15 @@ interface StoredTerminal {
   readonly reasonCode: string | null;
 }
 
+// The reader decides what an existing terminal is worth, so the writer and
+// the Processor reach the same verdict: a terminal the reader would block
+// (not canonical, wrong identity, corrupt) is a conflict here, never a resend
+// and never something to overwrite.
 async function readStoredTerminal(bucket: R2BucketLike, key: string): Promise<StoredTerminal> {
-  const body = await bucket.get(key);
-  if (!body) return { digest: null, reasonCode: "terminal_vanished" };
-  let text: string;
-  try {
-    text = new TextDecoder().decode(new Uint8Array(await body.arrayBuffer()));
-  } catch {
-    return { digest: null, reasonCode: "terminal_unreadable" };
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    return { digest: null, reasonCode: "terminal_not_json" };
-  }
-  const parsed = tryParseTerminalManifest(value);
-  if (!parsed.ok) return { digest: null, reasonCode: parsed.code };
-  return { digest: await terminalDigest(parsed.manifest), reasonCode: null };
+  const read = await readTerminalAt(bucket, key);
+  if (read.outcome === "found") return { digest: read.terminalDigest, reasonCode: null };
+  if (read.outcome === "missing") return { digest: null, reasonCode: "terminal_vanished" };
+  return { digest: null, reasonCode: read.reasonCode };
 }
 
 /**
@@ -358,7 +353,8 @@ export async function persistRun(
         artifact.artifactKey,
       );
     }
-    if (options.verifyBodyDigest !== false && (await sha256Hex(body)) !== artifact.sha256) {
+    const hashBody = options.verifyBodyDigest !== false || source.body.kind === "multipart";
+    if (hashBody && (await sha256Hex(body)) !== artifact.sha256) {
       return incomplete(
         manifest,
         digest,

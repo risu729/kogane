@@ -197,19 +197,151 @@ describe("persistRun writes the terminal last", () => {
   });
 
   test("G1-07 different bytes under the same content key are refused, not overwritten", async () => {
-    const bucket = new FakeR2Bucket();
     const artifact = await syntheticArtifact("balance.json", '{"synthetic":true}');
     const key = objectKey(artifact.sha256);
-    const foreign = bytesOf("different bytes entirely");
-    await bucket.seed(key, foreign);
+    // A shorter body is caught by size; a same-length body only by the digest.
+    const sameLength = bytesOf('{"synthetic":tru3}');
+    expect(sameLength.byteLength).toBe(artifact.byteSize);
+    for (const [foreign, code] of [
+      [bytesOf("different bytes entirely"), "object_size_mismatch"],
+      [sameLength, "object_hash_mismatch"],
+    ] as const) {
+      const bucket = new FakeR2Bucket();
+      await bucket.seed(key, foreign);
 
-    const result = await persistRun(bucket, await syntheticPlan({ artifacts: [artifact] }));
+      const result = await persistRun(bucket, await syntheticPlan({ artifacts: [artifact] }));
+      expect(result.outcome).toBe("incomplete");
+      if (result.outcome !== "incomplete") throw new Error("unreachable");
+      expect(result.reasonCode).toBe(code);
+      expect(result.failedArtifactKey).toBe("balance.json");
+      expect(await bucket.head(terminalKey(SYNTHETIC_SOURCE, "run-001"))).toBeNull();
+      const stored = await bucket.get(key);
+      expect([...new Uint8Array(await stored!.arrayBuffer())]).toEqual([...foreign]);
+    }
+  });
+
+  // G1-07 as a race: the object appears between the writer's HEAD and its
+  // create-only put. The put returns null, the writer verifies the winner.
+  test("G1-07 an object race is settled by verifying the winner, never by overwriting", async () => {
+    const artifact = await syntheticArtifact("balance.json", '{"synthetic":true}');
+    const key = objectKey(artifact.sha256);
+    const sameLength = bytesOf('{"synthetic":tru3}');
+    for (const [winner, expected] of [
+      [bytesOf('{"synthetic":true}'), "persisted"],
+      [sameLength, "incomplete"],
+    ] as const) {
+      const bucket = new FakeR2Bucket();
+      bucket.faults = {
+        beforePut: async (putKey) => {
+          if (putKey === key && !bucket.entries.has(key)) await bucket.seed(key, winner);
+        },
+      };
+      const result = await persistRun(bucket, await syntheticPlan({ artifacts: [artifact] }));
+      expect(result.outcome).toBe(expected);
+      const stored = await bucket.get(key);
+      expect([...new Uint8Array(await stored!.arrayBuffer())]).toEqual([...winner]);
+      if (result.outcome === "persisted") {
+        expect(result.objects[0]?.reused).toBe(true);
+        // The writer's own put lost; only the terminal was written by it.
+        expect(bucket.putKeys).toEqual([terminalKey(SYNTHETIC_SOURCE, "run-001")]);
+      } else {
+        if (result.outcome !== "incomplete") throw new Error("unreachable");
+        expect(result.reasonCode).toBe("object_hash_mismatch");
+        expect(bucket.putKeys).toEqual([]);
+        expect(await bucket.head(terminalKey(SYNTHETIC_SOURCE, "run-001"))).toBeNull();
+      }
+    }
+  });
+
+  // G1-05 / G1-06 as a race: a second writer creates the terminal between
+  // this writer's HEAD and its create-only put. The null result is re-read
+  // and compared, so the same digest is a resend and any other is a conflict.
+  test("G1-05 losing the terminal race to the same digest is a resend", async () => {
+    const bucket = new FakeR2Bucket();
+    const plan = await syntheticPlan();
+    const key = terminalKey(SYNTHETIC_SOURCE, "run-001");
+    const canonical = encodeTerminal(planManifest(plan));
+    bucket.faults = {
+      beforePut: async (putKey) => {
+        if (putKey === key) await bucket.seed(key, canonical, { contentType: "application/json" });
+      },
+    };
+    const result = await persistRun(bucket, plan);
+    expect(result.outcome).toBe("already_persisted");
+    if (result.outcome !== "already_persisted") throw new Error("unreachable");
+    expect(result.terminalDigest).toBe(await terminalDigest(planManifest(plan)));
+    expect(result.checkpoint.persistedKeys).toContain(key);
+    // The objects were written by this writer; the terminal was not.
+    expect(bucket.putKeys).not.toContain(key);
+    expect(bucket.putKeys).toHaveLength(2);
+    const stored = await bucket.get(key);
+    expect([...new Uint8Array(await stored!.arrayBuffer())]).toEqual([...canonical]);
+  });
+
+  test("G1-06 losing the terminal race to a different manifest is a conflict", async () => {
+    const bucket = new FakeR2Bucket();
+    const plan = await syntheticPlan();
+    const other = await syntheticPlan({
+      artifacts: [await syntheticArtifact("balance.json", '{"synthetic":"other"}')],
+    });
+    const key = terminalKey(SYNTHETIC_SOURCE, "run-001");
+    const otherBytes = encodeTerminal(planManifest(other));
+    bucket.faults = {
+      beforePut: async (putKey) => {
+        if (putKey === key) await bucket.seed(key, otherBytes, { contentType: "application/json" });
+      },
+    };
+    const result = await persistRun(bucket, plan);
+    expect(result.outcome).toBe("conflict");
+    if (result.outcome !== "conflict") throw new Error("unreachable");
+    expect(result.storedDigest).toBe(await terminalDigest(planManifest(other)));
+    expect(result.reasonCode).toBe("terminal_digest_mismatch");
+    expect(bucket.putKeys).not.toContain(key);
+    const stored = await bucket.get(key);
+    expect([...new Uint8Array(await stored!.arrayBuffer())]).toEqual([...otherBytes]);
+  });
+
+  test("a stored terminal the reader would block is a conflict, not a resend", async () => {
+    // Same manifest, but stored as pretty-printed JSON by something that is
+    // not this writer. The reader blocks it; the writer must agree and never
+    // report the run as already persisted.
+    const bucket = new FakeR2Bucket();
+    const plan = await syntheticPlan();
+    const key = terminalKey(SYNTHETIC_SOURCE, "run-001");
+    const pretty = bytesOf(JSON.stringify(planManifest(plan), null, 2));
+    await bucket.seed(key, pretty, { contentType: "application/json" });
+    const result = await persistRun(bucket, plan);
+    expect(result.outcome).toBe("conflict");
+    if (result.outcome !== "conflict") throw new Error("unreachable");
+    expect(result.reasonCode).toBe("terminal_not_canonical");
+    expect(result.storedDigest).toBeNull();
+    const read = await readTerminal(bucket, SYNTHETIC_SOURCE, "run-001");
+    expect(read.outcome).toBe("blocked");
+    if (read.outcome !== "blocked") throw new Error("unreachable");
+    expect(read.reasonCode).toBe("terminal_not_canonical");
+    expect(bucket.putKeys).toEqual([]);
+  });
+
+  test("a multipart body is hashed even when single-part hashing is switched off", async () => {
+    // R2 cannot check a multipart digest server-side, so the writer must.
+    const parts = [bytesOf("part-one-"), bytesOf("part-two")];
+    const lying = {
+      artifactKey: "large.bin",
+      sha256: "1".repeat(64),
+      byteSize: 17,
+      mediaType: "application/octet-stream",
+      role: "provider_export",
+      body: { kind: "multipart" as const, parts },
+    };
+    const bucket = new FakeR2Bucket();
+    const result = await persistRun(bucket, await syntheticPlan({ artifacts: [lying] }), {
+      verifyBodyDigest: false,
+    });
     expect(result.outcome).toBe("incomplete");
     if (result.outcome !== "incomplete") throw new Error("unreachable");
-    expect(result.reasonCode).toBe("object_size_mismatch");
-    expect(await bucket.head(terminalKey(SYNTHETIC_SOURCE, "run-001"))).toBeNull();
-    const stored = await bucket.get(key);
-    expect([...new Uint8Array(await stored!.arrayBuffer())]).toEqual([...foreign]);
+    expect(result.reasonCode).toBe("artifact_digest_mismatch");
+    expect(bucket.putKeys).toEqual([]);
+    expect(bucket.entries.size).toBe(0);
   });
 
   test("a body that does not match its declared digest is never stored", async () => {
