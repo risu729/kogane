@@ -167,6 +167,7 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   rewardsV2: boolean,
   commands: boolean,
   eventsV2: boolean,
+  opsApi: boolean,
 });
 const metadata = object<ApiMetadata>({
   parsingHealth: optional(
