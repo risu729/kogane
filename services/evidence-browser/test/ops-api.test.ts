@@ -24,6 +24,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import demo from "../src/demo-worker";
 import worker from "../src/worker";
 import { seedRegistry } from "./fixtures";
+import { MCP_TOOLS } from "../src/mcp";
 import { OPS_TOOL_NAMES } from "../src/ops-tools";
 import { d1CommandStore, recordOperationStage } from "../../../packages/application/src/index";
 
@@ -163,6 +164,18 @@ describe("the operations API does not exist until its flag is on", () => {
       ).toBe(405);
   });
 
+  it("keeps a closed route set while the flag is on: no other path, no other verb", async () => {
+    const unknown = await call(`${OPS}/purge`, { body: {}, environment: ENABLED });
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toMatchObject({ error: "not_found" });
+    for (const method of ["PUT", "DELETE", "PATCH"]) {
+      const verb = await call(`${OPS}/collections`, { method, environment: ENABLED });
+      expect(verb.status, method).toBe(405);
+      expect(await verb.json()).toMatchObject({ error: "method_not_allowed" });
+    }
+    expect(await rowCount("collection")).toBe(0);
+  });
+
   it("advertises opsApi on /api/meta so a client discovers the routes", async () => {
     const off = await call("/api/meta");
     expect((await off.json()).capabilities.opsApi).toBe(false);
@@ -182,7 +195,7 @@ describe("the operations API does not exist until its flag is on", () => {
 });
 
 describe("collection requests are accepted, not executed (G3-06, G3-14)", () => {
-  it("stores one record and answers 202 accepted", async () => {
+  it("stores one record and answers 202 accepted; nothing done is reported as pending, not as success (G3-01)", async () => {
     const first = await ops("/collections", COLLECTION);
     expect(first.status).toBe(202);
     expect(first.json).toEqual({
@@ -310,7 +323,9 @@ describe("the schema is the boundary (G3-08, G3-13)", () => {
   it("refuses a source the registry does not declare", async () => {
     const outcome = await ops("/collections", { ...COLLECTION, source: "not-a-source" });
     expect(outcome.status).toBe(400);
-    expect(outcome.json).toMatchObject({ error: "target_missing", refs: ["source:not-a-source"] });
+    // The refusal names the field, never the id the caller sent (G3-08).
+    expect(outcome.json).toMatchObject({ error: "target_missing", refs: ["source"] });
+    expect(JSON.stringify(outcome.json)).not.toContain("not-a-source");
   });
 
   it("refuses a parser release the registry does not know", async () => {
@@ -318,7 +333,8 @@ describe("the schema is the boundary (G3-08, G3-13)", () => {
       scope: { source: "sony-bank", from: null, to: null },
       parserRelease: "never-registered",
     });
-    expect(outcome.json).toMatchObject({ error: "target_missing" });
+    expect(outcome.json).toMatchObject({ error: "target_missing", refs: ["parserRelease"] });
+    expect(JSON.stringify(outcome.json)).not.toContain("never-registered");
   });
 
   it("refuses a body larger than the bound before it reaches a schema", async () => {
@@ -513,13 +529,11 @@ describe("stage progress is evidence, not a guess", () => {
 });
 
 describe("HTTP and MCP are one API (G3-05)", () => {
-  it("lists the operations tools only while the flag is on", async () => {
+  it("lists exactly the five tools with the flag off and exactly eleven with it on", async () => {
+    const five = MCP_TOOLS.map((tool) => tool.name);
+    expect(five).toHaveLength(5);
     const off = await mcp("tools/list", {}, { OPS_API_ENABLED: "" });
-    expect(
-      off.result.tools
-        .map((tool: any) => tool.name)
-        .filter((name: string) => name.startsWith("kogane.ops.")),
-    ).toEqual([]);
+    expect(off.result.tools.map((tool: any) => tool.name)).toEqual(five);
     const called = await mcp(
       "tools/call",
       { name: "kogane.ops.collection.request", arguments: COLLECTION },
@@ -529,7 +543,15 @@ describe("HTTP and MCP are one API (G3-05)", () => {
 
     const on = await mcp("tools/list");
     const names = on.result.tools.map((tool: any) => tool.name);
-    expect(names.slice(-OPS_TOOL_NAMES.length)).toEqual([...OPS_TOOL_NAMES]);
+    expect(names).toEqual([...five, ...OPS_TOOL_NAMES]);
+    expect(OPS_TOOL_NAMES).toEqual([
+      "kogane.ops.collection.request",
+      "kogane.ops.import.request",
+      "kogane.ops.replay.request",
+      "kogane.ops.projection.request",
+      "kogane.ops.session.refresh",
+      "kogane.ops.operation.get",
+    ]);
     for (const tool of on.result.tools) {
       const schema = JSON.stringify(tool.inputSchema);
       expect(schema).toContain('"additionalProperties":false');
@@ -554,24 +576,34 @@ describe("HTTP and MCP are one API (G3-05)", () => {
         .first<number>("n"),
     ).toBe(1);
 
-    // And two requests that differ only by their key produce records that are
-    // identical in every field that describes what was asked for.
+    // And two requests that differ only by their key produce stored rows that
+    // are byte-identical in every column except the key, the id derived from
+    // it and the clock — and read back as the same receipt but for those.
     const httpOnly = await ops("/collections", { ...COLLECTION, idempotencyKey: "parity-http" });
     const mcpOnly = await mcp("tools/call", {
       name: "kogane.ops.collection.request",
       arguments: { ...COLLECTION, idempotencyKey: "parity-mcp" },
     });
-    const describing = (record: Record<string, any>) => ({
-      kind: record.kind,
-      principal: record.principal,
-      payload_digest: record.payload_digest,
-      source_id: record.source_id,
-      request_json: record.request_json,
-      status: record.status,
-      dispatch_state: record.dispatch_state,
-    });
-    expect(describing((await row(httpOnly.json.operationId)) as Record<string, any>)).toEqual(
-      describing((await row(mcpOnly.result.structuredContent.operationId)) as Record<string, any>),
+    const KEYED = new Set(["operation_id", "idempotency_key", "created_at", "updated_at"]);
+    const unkeyed = (record: Record<string, any>) =>
+      Object.fromEntries(Object.entries(record).filter(([column]) => !KEYED.has(column)));
+    const httpRow = (await row(httpOnly.json.operationId)) as Record<string, any>;
+    const mcpRow = (await row(mcpOnly.result.structuredContent.operationId)) as Record<string, any>;
+    expect(Object.keys(httpRow).sort()).toEqual(Object.keys(mcpRow).sort());
+    expect(JSON.stringify(unkeyed(httpRow))).toBe(JSON.stringify(unkeyed(mcpRow)));
+    const receipt = async (operationId: string) => {
+      const {
+        operationId: _id,
+        acceptedAt: _a,
+        updatedAt: _u,
+        ...rest
+      } = (await (
+        await call(`${OPS}/operations/${operationId}`, { environment: ENABLED })
+      ).json()) as Record<string, any>;
+      return JSON.stringify(rest);
+    };
+    expect(await receipt(httpOnly.json.operationId)).toBe(
+      await receipt(mcpOnly.result.structuredContent.operationId),
     );
   });
 
@@ -583,7 +615,7 @@ describe("HTTP and MCP are one API (G3-05)", () => {
     expect(refused.result.isError).toBe(true);
     expect(refused.result.structuredContent).toEqual({
       error: "target_missing",
-      refs: ["source:not-a-source"],
+      refs: ["source"],
     });
     const invalid = await mcp("tools/call", {
       name: "kogane.ops.session.refresh",

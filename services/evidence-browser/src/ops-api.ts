@@ -342,6 +342,11 @@ export async function opsApi(
 ): Promise<Response | null> {
   if (!isOpsPath(url.pathname)) return null;
   if (!opsApiEnabled(env)) return null;
+  // Two verbs exist here: POST to accept, GET to read. Anything else is the
+  // same 405 the Worker gives every other non-GET request, not a 404 that
+  // would suggest a different path might take it.
+  if (request.method !== "POST" && request.method !== "GET")
+    throw new HttpError(405, "method_not_allowed");
   if (url.search) throw new HttpError(400, "invalid_query");
   return app.fetch(request, { ...env, VERIFIED_SUBJECT: subject });
 }
