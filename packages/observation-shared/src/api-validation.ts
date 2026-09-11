@@ -8,6 +8,7 @@ import { validFinancialProductClaimWire } from "./financial-products.ts";
 import { validBalanceInterpretation } from "./balance-semantics.ts";
 import {
   BALANCE_READ_MODELS,
+  REWARD_READ_MODELS,
   IDENTITY_READ_MODES,
   MEASURE_VIEWS,
   OBSERVATION_API_CONTRACT_VERSION,
@@ -161,6 +162,7 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   balancesV2: boolean,
   balancesV2Pagination: literal(...PAGINATION_VERSIONS),
   balancesV2ReadModel: literal(...BALANCE_READ_MODELS),
+  rewardsV2ReadModel: literal(...REWARD_READ_MODELS),
   collectionFilters: boolean,
   organizedDisplay: boolean,
   financialProducts: boolean,

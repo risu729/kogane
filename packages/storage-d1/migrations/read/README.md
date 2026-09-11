@@ -12,6 +12,11 @@ that exists only for this step, because wrangler takes one `migrations_dir` per
 configuration and the processor's own points at CORE. See
 `docs/read-model-d1.md` and `docs/read-rebuild-runbook.md`.
 
+`0002_reward_read.sql` adds the second stage of chapter 04 §2 (U16): the reward
+expiry estimates and the replay of saved conversion simulations, built from an
+input that fixes the evaluation instant. Same rules, same database, its own
+flag (`docs/rewards.md` §12).
+
 Rules that already hold:
 
 - CORE migrations live in `../core/` and are immutable once applied. READ

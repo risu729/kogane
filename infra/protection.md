@@ -37,7 +37,13 @@ candidates `expiry_estimates`, `conversion_simulations` are the `read-candidate`
 first three now exist on both sides: CORE still carries the projection of migration 0030, and U11
 added the READ database (`kogane-read`,
 `packages/storage-d1/migrations/read`, `infra/schema/read-ledger.md`) that the same build writes
-instead when `READ_PROJECTION_ENABLED` is on. Losing READ must leave everything in §1 untouched
+instead when `READ_PROJECTION_ENABLED` is on. U16 did the same for the second-stage pair: READ
+migration `0002_reward_read.sql` holds `reward_expiry_estimates` and
+`reward_conversion_simulations`, built from an input that fixes the evaluation instant, under
+`REWARD_READ_PROJECTION_ENABLED`. The CORE tables of migration 0033 keep their rows, and the
+reward reference and provider claims (`reward_programs`, `expiry_rules`, `conversion_offers`,
+`reward_bucket_claims`, `membership_state_claims`) stay in §1's CORE column: losing READ costs
+the estimates and the replays, never a claim or a rule. Losing READ must leave everything in §1 untouched
 (G0-09), and a rebuild is a READ-side operation only:
 
 - A READ rebuild never issues a DROP against CORE or against the DATA bucket (15 §3 step 2).

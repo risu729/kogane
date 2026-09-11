@@ -62,7 +62,11 @@ const SOURCE_REVISION: HistoricalSource = {
  * has nothing to compare for them; the digest table below is their only
  * anchor, and it still catches a later edit.
  */
-const INTRODUCED_AT_THE_NEW_PATH = new Set(["0039_collection_runs.sql"]);
+const INTRODUCED_AT_THE_NEW_PATH = new Set([
+  "0039_collection_runs.sql",
+  // U16: the reward tables join the revision ledger of 0038.
+  "0041_reward_revision_triggers.sql",
+]);
 
 /** sha256 of every CORE migration as `services/raw-evidence/migrations/` held it. */
 const CORE_DIGESTS: Record<string, string> = {
@@ -128,6 +132,8 @@ const CORE_DIGESTS: Record<string, string> = {
   "0038_source_revision.sql": "803f41c024792e46e259212558fa71e49b4caeb2c9e2632dbfee7e8540359b48",
   "0039_collection_runs.sql": "3472b423845147a610c2051e7b3233a2bc73f7c399774e5b0ab5b2b741bdc8b8",
   "0040_operations_api.sql": "edca64e3fc1675e463faec3b04ca90cde3ed2055269b483ee56c99f28e519002",
+  "0041_reward_revision_triggers.sql":
+    "5265feedc75a1f084a62449ee0650fa278f62221cf77b025a11fd9cdd565faa2",
 };
 
 /** Which commit holds each recorded file's original bytes, or null when the
@@ -204,13 +210,14 @@ describe("CORE migrations (G0-02)", () => {
   });
 
   test("the READ directory holds its own baseline, under the same naming rule", () => {
-    // U11 filled it. The READ database is built from its final schema rather
-    // than migrated forward from CORE, so it starts at 0001 and shares nothing
-    // with the numbers above; the two directories are never applied to the
-    // same database (06 §2).
+    // U11 filled it and U16 added the reward second stage. The READ database is
+    // built from its final schema rather than migrated forward from CORE, so it
+    // starts at 0001 and shares nothing with the numbers above; the two
+    // directories are never applied to the same database (06 §2).
     const entries = readdirSync(fileURLToPath(READ_MIGRATIONS_URL));
-    expect(entries.filter((name) => MIGRATION_FILENAME.test(name))).toEqual([
+    expect(entries.filter((name) => MIGRATION_FILENAME.test(name)).sort()).toEqual([
       "0001_read_baseline.sql",
+      "0002_reward_read.sql",
     ]);
     expect(entries).toContain("README.md");
   });

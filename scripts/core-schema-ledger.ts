@@ -343,6 +343,32 @@ export const READ_CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> 
     classification: "read-operational",
     planRow: "READ: the identity of this physical database; a rebuild is a new one (05 §7)",
   },
+  // The second stage of 04 §2: the reward tables, admitted to READ once the
+  // evaluation time, the original request and the rule are fixed (U16).
+  reward_expiry_snapshots: {
+    classification: "read-projection",
+    planRow: "READ: one reward build under one fixed evaluation input (04 §2, 05 §3)",
+  },
+  reward_expiry_estimates: {
+    classification: "read-projection",
+    planRow: "READ: the estimated deadlines of one snapshot (04 §2, second stage)",
+  },
+  reward_conversion_simulations: {
+    classification: "read-projection",
+    planRow: "READ: saved simulations replayed under the snapshot's fixed offers (04 §2, G2-20)",
+  },
+  reward_snapshot_input_refs: {
+    classification: "read-projection",
+    planRow: "READ: rules, offers and claims copied from the fixed reward input (04 §3)",
+  },
+  reward_snapshot_pointer: {
+    classification: "read-operational",
+    planRow: "READ: the active reward snapshot, switched in the same batch as the seal (05 §5)",
+  },
+  reward_build_checkpoints: {
+    classification: "read-operational",
+    planRow: "READ: where a bounded reward build got to, committed with its chunk (05 §4)",
+  },
 };
 
 /** One ledger: which migrations it describes and how its tables are classified. */
@@ -380,7 +406,7 @@ export const READ_PROFILE: LedgerProfile = {
   migrationsDir: READ_MIGRATIONS_DIR,
   classification: READ_CLASSIFICATION,
   classifications: ["read-projection", "read-operational"],
-  plan: "unified plan U11; chapters 04 §1–§3 and 05 §4–§7; acceptance tests G0-09, G3-01",
+  plan: "unified plan U11 and U16; chapters 04 §1–§3 and 05 §3–§7; acceptance tests G0-09, G3-01, G2-19, G2-20",
   jsonPath: READ_LEDGER_JSON_PATH,
   markdownPath: READ_LEDGER_MARKDOWN_PATH,
   rule: [
