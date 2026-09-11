@@ -138,13 +138,14 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "PLANNED_NOT_EXECUTED",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/tamia-tcp-bridge": {
-    source: "poc_disposition.csv",
+  "experiments/tamia-tcp-bridge": {
+    source: "poc_disposition.csv (was poc/tamia-tcp-bridge)",
     proposedAction: "promote-service-if-used",
-    proposedTarget: "services/tamia-tcp-bridge",
+    proposedTarget:
+      "experiments/tamia-tcp-bridge (not used by any collector; promote to services/tamia-tcp-bridge only when one routes through it)",
     requiredVerification:
-      "do not delete before checking whether Globalpass and others depend on it",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+      "checked: GLOBAL PASS binds the tamia Tunnel directly by tunnel_id and relays through its own /tcp, no config, binding, var, secret or task names kogane-tamia-tcp-bridge-20260825, and that Worker is not in the account inventory",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "services/collector-globalpass": {

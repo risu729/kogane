@@ -173,23 +173,14 @@ scanned workspaces keeps its row below with `EXECUTED_U04`.
 - Vars (names only): —
 - Required secrets (names only): —
 
-### `poc/observation-pipeline`
+### `experiments/tamia-tcp-bridge`
 
-- Disposition (poc_disposition.csv): `split-promote-retire` → apps/web; packages/application; tests/fixtures; docs/research
-- Required verification: promote UI and fixtures, move needed local operations to the App API, legacy store to test/research, drop the shims
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
+- Disposition (poc_disposition.csv (was poc/tamia-tcp-bridge)): `promote-service-if-used` → experiments/tamia-tcp-bridge (not used by any collector; promote to services/tamia-tcp-bridge only when one routes through it)
+- Required verification: checked: GLOBAL PASS binds the tamia Tunnel directly by tunnel_id and relays through its own /tcp, no config, binding, var, secret or task names kogane-tamia-tcp-bridge-20260825, and that Worker is not in the account inventory
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
 - Live resources: NO_LIVE_RESOURCE
 
-No wrangler config.
-
-### `poc/tamia-tcp-bridge`
-
-- Disposition (poc_disposition.csv): `promote-service-if-used` → services/tamia-tcp-bridge
-- Required verification: do not delete before checking whether Globalpass and others depend on it
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: NO_LIVE_RESOURCE
-
-#### `kogane-tamia-tcp-bridge-20260825` — `poc/tamia-tcp-bridge/wrangler.bootstrap.jsonc`
+#### `kogane-tamia-tcp-bridge-20260825` — `experiments/tamia-tcp-bridge/wrangler.bootstrap.jsonc`
 
 - Role: not-deployed; exists in the account: no
 - Entry point: src/bootstrap.ts
@@ -208,7 +199,7 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
-#### `kogane-tamia-tcp-bridge-20260825` — `poc/tamia-tcp-bridge/wrangler.jsonc`
+#### `kogane-tamia-tcp-bridge-20260825` — `experiments/tamia-tcp-bridge/wrangler.jsonc`
 
 - Role: not-deployed; exists in the account: no
 - Entry point: src/index.ts
@@ -226,6 +217,15 @@ No wrangler config.
 - Assets: —
 - Vars (names only): —
 - Required secrets (names only): BRIDGE_TOKEN
+
+### `poc/observation-pipeline`
+
+- Disposition (poc_disposition.csv): `split-promote-retire` → apps/web; packages/application; tests/fixtures; docs/research
+- Required verification: promote UI and fixtures, move needed local operations to the App API, legacy store to test/research, drop the shims
+- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
+- Live resources: NO_LIVE_RESOURCE
+
+No wrangler config.
 
 ### `services/collector-globalpass`
 

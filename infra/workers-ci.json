@@ -159,12 +159,12 @@
     },
     {
       "name": "tamia-tcp-bridge",
-      "path": "poc/tamia-tcp-bridge",
+      "path": "experiments/tamia-tcp-bridge",
       "config": "wrangler.jsonc"
     },
     {
       "name": "tamia-tcp-bridge-bootstrap",
-      "path": "poc/tamia-tcp-bridge",
+      "path": "experiments/tamia-tcp-bridge",
       "config": "wrangler.bootstrap.jsonc"
     },
     {

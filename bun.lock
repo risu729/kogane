@@ -34,6 +34,14 @@
         "wrangler": "4.125.0",
       },
     },
+    "experiments/tamia-tcp-bridge": {
+      "name": "@kogane/tamia-tcp-bridge",
+      "devDependencies": {
+        "@types/node": "26.3.0",
+        "typescript": "5.9.3",
+        "wrangler": "4.125.0",
+      },
+    },
     "packages/application": {
       "name": "@kogane/application",
       "devDependencies": {
@@ -130,14 +138,6 @@
         "playwright": "1.62.1",
         "typescript": "5.9.3",
         "vite": "8.2.2",
-      },
-    },
-    "poc/tamia-tcp-bridge": {
-      "name": "@kogane/tamia-tcp-bridge",
-      "devDependencies": {
-        "@types/node": "26.3.0",
-        "typescript": "5.9.3",
-        "wrangler": "4.125.0",
       },
     },
     "services/collector-globalpass": {
@@ -537,7 +537,7 @@
 
     "@kogane/read-model": ["@kogane/read-model@workspace:packages/read-model"],
 
-    "@kogane/tamia-tcp-bridge": ["@kogane/tamia-tcp-bridge@workspace:poc/tamia-tcp-bridge"],
+    "@kogane/tamia-tcp-bridge": ["@kogane/tamia-tcp-bridge@workspace:experiments/tamia-tcp-bridge"],
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.2.4", "", { "dependencies": { "@tybys/wasm-util": "^0.10.3" }, "peerDependencies": { "@emnapi/core": "^1.7.1 || ^2.0.0-alpha.4", "@emnapi/runtime": "^1.7.1 || ^2.0.0-alpha.4" } }, "sha512-AJxoUD2/15ESHbvpcyjU274nsAPLuOtPHCk0vKJM5pj//Fg/B1FXNWjPnXTT9PymCYYiHo4zPj0ZomXBKhoy7g=="],
 
