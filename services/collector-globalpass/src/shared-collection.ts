@@ -259,6 +259,12 @@ export interface SharedRunSummary {
   readonly terminalKey: string;
   readonly terminalDigest: string;
   readonly objectCount: number;
+  /**
+   * Where the collector manifest is in DATA (`objects/<2 hex>/<sha256>`). It
+   * takes the place of the staging manifest key in shared mode, where nothing
+   * is staged. Empty until a terminal exists.
+   */
+  readonly manifestObjectKey: string;
   readonly waitingForHuman: boolean;
   readonly reasonCode?: string;
 }
@@ -280,6 +286,10 @@ export async function persistSharedRun(
     terminalKey: result.terminalKey,
     terminalDigest: result.terminalDigest,
     objectCount: result.outcome === "conflict" ? 0 : result.objects.length,
+    manifestObjectKey:
+      result.outcome === "persisted" || result.outcome === "already_persisted"
+        ? (result.objects.find((object) => object.artifactKey === MANIFEST_ARTIFACT_KEY)?.key ?? "")
+        : "",
     waitingForHuman: waitingForHuman(input.manifest),
     ...(result.outcome === "conflict" || result.outcome === "incomplete"
       ? { reasonCode: result.reasonCode }

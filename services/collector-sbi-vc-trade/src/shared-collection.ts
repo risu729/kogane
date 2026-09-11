@@ -242,6 +242,10 @@ export async function persistSharedRun(
     terminalKey: result.terminalKey,
     terminalDigest: result.terminalDigest,
     objectCount: result.outcome === "conflict" ? 0 : result.objects.length,
+    manifestObjectKey:
+      result.outcome === "persisted" || result.outcome === "already_persisted"
+        ? (result.objects.find((object) => object.artifactKey === MANIFEST_ARTIFACT_KEY)?.key ?? "")
+        : "",
     waitingForHuman: options.waitingForHuman === true,
     ...(result.outcome === "conflict" || result.outcome === "incomplete"
       ? { reasonCode: result.reasonCode }

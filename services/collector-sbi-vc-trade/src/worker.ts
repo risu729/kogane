@@ -4,7 +4,7 @@ import { collectSbiVcTrade } from "./collector";
 import { decryptSession, encryptSession } from "./crypto";
 import { createPasskeySession, parsePasskeyCredential } from "./passkey";
 import { applySessionUpdates, cookieHeader, parseGatewayMeta, parseSession } from "./session";
-import { runPrefix, storeArtifact, storeManifest } from "./storage";
+import { describeArtifact, runPrefix, storeArtifact, storeManifest } from "./storage";
 import { backfillStoredRuns, importStoredRun } from "./raw-evidence";
 import { collectionTarget } from "./collection-target";
 import {
@@ -151,9 +151,14 @@ export class SbiVcSessionState extends DurableObject<Env> {
     const diagnostic = createDiagnostics("sbi-vc-trade", runId);
     try {
       const prefix = runPrefix(startedAt, runId);
+      // U09: decided once per run. `shared` writes the run only into DATA — the
+      // staging bucket is not written at all — and skips the central upload
+      // (plan 00: one canonical copy; G1-15). `legacy` is byte-for-byte the
+      // path this collector has always taken.
+      const target = collectionTarget(this.env.COLLECTION_TARGET);
       const artifacts: StoredArtifact[] = [];
-      // The sanitized body of every artifact that reached the staging bucket,
-      // kept for the shared-mode terminal.
+      // The sanitized body of every artifact admitted to the run, kept in
+      // memory for the shared-mode terminal.
       const captures: SharedCapture[] = [];
       const failures: CollectionFailure[] = [];
       let operation = "load_session";
@@ -177,14 +182,19 @@ export class SbiVcSessionState extends DurableObject<Env> {
             onArtifact: async (artifact) => {
               operation = `r2_${artifact.dataset}`;
               artifacts.push(
-                await diagnostic.step("artifact-write", () =>
-                  storeArtifact({
-                    bucket: this.env.SNAPSHOTS,
-                    prefix,
-                    runId,
-                    artifact,
-                  }),
-                ),
+                target === "shared"
+                  ? // The manifest entry only: the bytes reach DATA
+                    // content-addressed when the terminal is written, and
+                    // nothing is staged.
+                    (await describeArtifact({ prefix, artifact })).record
+                  : await diagnostic.step("artifact-write", () =>
+                      storeArtifact({
+                        bucket: this.env.SNAPSHOTS,
+                        prefix,
+                        runId,
+                        artifact,
+                      }),
+                    ),
               );
               captures.push({ dataset: artifact.dataset, body: artifact.body });
               operation = "collect";
@@ -207,16 +217,13 @@ export class SbiVcSessionState extends DurableObject<Env> {
         artifacts,
         failures,
       };
-      const manifestKey = await diagnostic.step("manifest-write", () =>
-        storeManifest({ bucket: this.env.SNAPSHOTS, prefix, manifest }),
-      );
-      // U09: in shared mode the run's completion record is the terminal this
-      // Durable Object writes into DATA, and the legacy central upload is
-      // skipped so the Processor never re-copies the bytes (G1-15). There is no
-      // service binding in the chain, so a run with many historical pages
-      // finishes here instead of deferring to the backfill route. Legacy mode
-      // is unchanged.
-      if (collectionTarget(this.env.COLLECTION_TARGET) === "shared") {
+      if (target === "shared") {
+        // U09: the run's completion record is the terminal this Durable Object
+        // writes into DATA, after the content-addressed objects; the staging
+        // bucket is not written and the central upload is skipped, so exactly
+        // one copy exists and the Processor reads it (G1-15). There is no
+        // service binding in the chain, so a run with many historical pages
+        // finishes here instead of deferring to the backfill route.
         const identity = { attemptId, ...(await this.#acquisitionSessionRef()) };
         const shared = await diagnostic.step("central-import", () =>
           persistSharedRun(dataBucket(this.env.DATA), {
@@ -226,6 +233,9 @@ export class SbiVcSessionState extends DurableObject<Env> {
             identity,
           }),
         );
+        // The collector manifest lives in DATA, content-addressed, like every
+        // other artifact of the run.
+        const manifestKey = shared.manifestObjectKey;
         console.log(
           JSON.stringify({
             message: "sbi_vc_collection",
@@ -253,6 +263,9 @@ export class SbiVcSessionState extends DurableObject<Env> {
           shared,
         };
       }
+      const manifestKey = await diagnostic.step("manifest-write", () =>
+        storeManifest({ bucket: this.env.SNAPSHOTS, prefix, manifest }),
+      );
       const central =
         artifacts.length <= MAX_SYNCHRONOUS_RAW_EVIDENCE_ARTIFACTS
           ? await diagnostic.step("central-import", () =>

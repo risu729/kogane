@@ -125,18 +125,32 @@ describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () =
     expect(data.putKeys).toEqual([]);
   });
 
-  test("shared mode writes the terminal to DATA and skips the central upload", async () => {
+  test("shared mode writes one copy: DATA only, no staging, no central upload", async () => {
     const { response, result, data, importerCalls, staged } = await trigger("shared");
     expect(response.status).toBe(200);
     expect(result.status).toBe("success");
     expect(importerCalls).toEqual([]);
-    // The per-source staging bucket is still the collector's own outbox.
-    expect(staged.length).toBeGreaterThan(0);
+    // Plan 00: the original is stored once. Nothing structural depends on a
+    // staging object for this source, so shared mode never writes one.
+    expect(staged).toEqual([]);
     const read = await readTerminal(data, "prestia-globalpass", String(result.runId));
     if (read.outcome !== "found") throw new Error("unreachable");
     expect(read.manifest.providerOutcome).toBe("success");
     expect(read.manifest.coverageStatus).toBe("partial");
     expect(data.putKeys.at(-1)).toBe(terminalKey("prestia-globalpass", String(result.runId)));
+    // Both months are in the terminal even though no staging put happened.
+    expect(read.manifest.artifacts.map((entry) => entry.artifactKey)).toEqual([
+      "activity-2099-01.html",
+      "activity-2099-02.html",
+      "manifest.json",
+    ]);
+    // The manifest key the caller sees is the collector manifest's own
+    // content-addressed object in DATA.
+    const manifestArtifact = read.manifest.artifacts.find(
+      (entry) => entry.artifactKey === "manifest.json",
+    );
+    expect(manifestArtifact?.storageRef.key).toBe(String(result.manifestKey));
+    expect(String(result.manifestKey).startsWith("objects/")).toBe(true);
     const everything = [...data.entries.values()]
       .map((entry) => new TextDecoder().decode(entry.bytes))
       .join("\n");

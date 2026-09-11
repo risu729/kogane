@@ -6,12 +6,16 @@ export function runPrefix(startedAt: string, runId: string): string {
   return `raw/sbi-shinsei/${date}/${runId}`;
 }
 
-export async function storeArtifact(options: {
-  bucket: R2Bucket;
+/**
+ * The manifest entry of an artifact — validated, hashed and keyed inside its
+ * run — without writing it anywhere. `storeArtifact` is this plus the staging
+ * put; in shared mode (U09) the entry is all the run needs, because the bytes
+ * go to DATA content-addressed and the staging bucket is not written.
+ */
+export async function describeArtifact(options: {
   prefix: string;
-  runId: string;
   artifact: RawArtifact;
-}): Promise<StoredArtifact> {
+}): Promise<{ record: StoredArtifact; bytes: Uint8Array }> {
   if (!/^[a-z0-9-]+$/u.test(options.artifact.dataset)) {
     throw new Error("SBI Shinsei artifact dataset contains unsafe characters");
   }
@@ -27,25 +31,38 @@ export async function storeArtifact(options: {
       : new Uint8Array(options.artifact.body);
   const sha256 = await sha256Hex(bytes);
   const key = `${options.prefix}/${options.artifact.filename}`;
-  const stored = await options.bucket.put(key, options.artifact.body, {
+  return {
+    record: {
+      dataset: options.artifact.dataset,
+      key,
+      mediaType: options.artifact.mediaType,
+      sha256,
+      bytes: bytes.byteLength,
+    },
+    bytes,
+  };
+}
+
+export async function storeArtifact(options: {
+  bucket: R2Bucket;
+  prefix: string;
+  runId: string;
+  artifact: RawArtifact;
+}): Promise<StoredArtifact> {
+  const { record, bytes } = await describeArtifact(options);
+  const stored = await options.bucket.put(record.key, options.artifact.body, {
     onlyIf: { etagDoesNotMatch: "*" },
-    sha256: hexBytes(sha256),
+    sha256: hexBytes(record.sha256),
     httpMetadata: { contentType: options.artifact.mediaType },
     customMetadata: {
       source: "sbi-shinsei",
       runId: options.runId,
       dataset: options.artifact.dataset,
-      sha256,
+      sha256: record.sha256,
     },
   });
-  assertStored(stored, bytes.byteLength, sha256);
-  return {
-    dataset: options.artifact.dataset,
-    key,
-    mediaType: options.artifact.mediaType,
-    sha256,
-    bytes: bytes.byteLength,
-  };
+  assertStored(stored, bytes.byteLength, record.sha256);
+  return record;
 }
 
 export async function storeManifest(options: {

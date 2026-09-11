@@ -19,6 +19,7 @@ import {
   sharedOutcome,
   waitingForHuman,
 } from "../src/shared-collection";
+import { describeArtifact, storeArtifact } from "../src/storage";
 import type { CollectionManifest, HealthState, StoredArtifact } from "../src/types";
 
 const RUN_ID = "00000000-0000-4000-8000-000000000000";
@@ -246,5 +247,30 @@ describe("G1-01/G1-02 persisting a run", () => {
     expect(second.outcome).toBe("already_persisted");
     expect(second.terminalDigest).toBe(first.terminalDigest);
     expect(bucket.putKeys.length).toBe(putCount);
+  });
+});
+
+describe("one copy: shared mode names what legacy mode would have staged", () => {
+  test("the manifest entry is the same whether or not the staging put happens", async () => {
+    const prefix = `raw/sbi-vc-trade/2026/09/01/${RUN_ID}`;
+    const artifact = { dataset: "cash-balances", body: BODY };
+    const described = await describeArtifact({ prefix, artifact });
+    const staging = new FakeR2Bucket();
+    const stored = await storeArtifact({
+      bucket: staging as unknown as R2Bucket,
+      prefix,
+      runId: RUN_ID,
+      artifact,
+    });
+    expect(described.record).toEqual(stored);
+    // The staged bytes and the DATA bytes are the same encoding of the same
+    // sanitized body, so the importer's verbatim forward and the shared path
+    // store identical bytes.
+    const staged = await staging.get(stored.key);
+    expect([...new Uint8Array(await staged!.arrayBuffer())]).toEqual([...described.encoded]);
+    const data = new FakeR2Bucket();
+    await persistSharedRun(data, inputOf(manifestOf({ artifacts: [stored] })));
+    const shared = await data.get(`objects/${stored.sha256.slice(0, 2)}/${stored.sha256}`);
+    expect([...new Uint8Array(await shared!.arrayBuffer())]).toEqual([...described.encoded]);
   });
 });

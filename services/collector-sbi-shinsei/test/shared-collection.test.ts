@@ -332,7 +332,7 @@ async function trigger(target: string | undefined) {
     );
     return {
       response,
-      result: (await response.json()) as { runId: string; status: string },
+      result: (await response.json()) as { runId: string; status: string; manifestKey: string },
       data,
       importerCalls,
       staged,
@@ -352,17 +352,37 @@ describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () =
     expect(data.putKeys).toEqual([]);
   });
 
-  test("shared mode writes the terminal to DATA and skips the central upload", async () => {
-    const { response, result, data, importerCalls } = await trigger("shared");
+  test("shared mode writes one copy: DATA only, no staging, no central upload", async () => {
+    const { response, result, data, importerCalls, staged } = await trigger("shared");
     expect(response.status).toBe(200);
     expect(result.status).toBe("success");
     expect(importerCalls).toEqual([]);
+    // Plan 00: the original is stored once. Nothing structural depends on a
+    // staging object for this source, so shared mode never writes one.
+    expect(staged).toEqual([]);
     const read = await readTerminal(data, "sbi-shinsei", result.runId);
     expect(read.outcome).toBe("found");
     if (read.outcome !== "found") throw new Error("unreachable");
     expect(read.manifest.providerOutcome).toBe("success");
     expect(read.manifest.attemptId.startsWith("attempt-")).toBe(true);
     expect(data.putKeys.at(-1)).toBe(terminalKey("sbi-shinsei", result.runId));
+    // The manifest key the caller sees is the collector manifest's own
+    // content-addressed object in DATA.
+    const manifestArtifact = read.manifest.artifacts.find(
+      (entry) => entry.artifactKey === "manifest.json",
+    );
+    expect(manifestArtifact?.storageRef.key).toBe(result.manifestKey);
+    expect(result.manifestKey.startsWith("objects/")).toBe(true);
+    // Every dataset the container returned is in the terminal even though no
+    // staging put happened for it.
+    expect(read.manifest.artifacts.map((entry) => entry.artifactKey).sort()).toEqual([
+      "manifest.json",
+      "normalized.json",
+      "raw-balance-summary-and-stage.json",
+      "raw-exchange-rate.json",
+      "raw-top-accounts-balance-and-activity.json",
+      "raw-yen-deposit-account.json",
+    ]);
     const everything = [...data.entries.values()]
       .map((entry) => new TextDecoder().decode(entry.bytes))
       .join("\n");

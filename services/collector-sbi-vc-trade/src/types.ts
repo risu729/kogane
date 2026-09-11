@@ -102,6 +102,12 @@ export interface SharedRunSummary {
   readonly terminalKey: string;
   readonly terminalDigest: string;
   readonly objectCount: number;
+  /**
+   * Where the collector manifest is in DATA (`objects/<2 hex>/<sha256>`). It
+   * takes the place of the staging manifest key in shared mode, where nothing
+   * is staged. Empty until a terminal exists.
+   */
+  readonly manifestObjectKey: string;
   /** True when only a person can clear what stopped the run (12 §3). */
   readonly waitingForHuman: boolean;
   readonly reasonCode?: string;
