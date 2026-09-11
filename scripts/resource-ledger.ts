@@ -2,9 +2,14 @@
 // `infra/resources.md`), unified plan U01 / chapter 07 §1, §6.
 //
 // Every runtime resource this repository can deploy is declared in a
-// `wrangler*.jsonc` under `experiments/`, `services/` or `poc/`. The directory moves
-// (07 §1) must not change a single one of those identities: Worker `name`,
-// Durable Object class name and migration tag, R2 bucket, Queue, cron, D1 id.
+// `wrangler*.jsonc` under `apps/`, `experiments/`, `poc/` or `services/`. The
+// first two workspaces hold no Worker today; they are walked so that a
+// directory promoted out of `poc/` (U04 moved the PoC client and its local
+// store) still carries its disposition instead of dropping out of the ledger.
+//
+// The remaining directory moves of 07 §1 must not change a single one of those
+// identities: Worker `name`, Durable Object class name and migration tag, R2
+// bucket, Queue, cron, D1 id.
 // The ledger is the machine-readable record of what those identities are today
 // and `scripts/resource-ledger.test.ts` fails when a config and the ledger
 // disagree, so a rename cannot slip through as "just a directory move"
@@ -30,6 +35,22 @@ export const ACCOUNT_ID = "59ea63cc00914b30ca410b062ae2bb7f";
  * listable through the API this was read with, so they are derived from the
  * configs instead and marked `unverified-live` in the ledger.
  */
+/**
+ * Queues a config declares that do not exist in the account yet. They are
+ * created by the first deploy that carries the config, and the feature behind
+ * them stays flagged off until they do — so the ledger says "to be created by
+ * the first deploy" rather than letting a reader assume the resource is live.
+ *
+ * A name leaves this list when the queue exists; nothing else about the
+ * ledger changes, because a queue's identity never does (G0-06).
+ */
+export const QUEUES_TO_CREATE: Readonly<Record<string, string>> = {
+  // U08: R2 event notifications for `runs/*/terminal.json` on the shared DATA
+  // bucket reach the Processor through it. See docs/processor.md.
+  "kogane-collection-terminals": "to be created by the first deploy (U08)",
+  "kogane-collection-terminals-dlq": "to be created by the first deploy (U08)",
+};
+
 export const LIVE_INVENTORY = {
   readAt: "2026-09-11",
   accountId: ACCOUNT_ID,
@@ -71,10 +92,20 @@ export const LIVE_INVENTORY = {
     "kogane-vpoint-pay-collector-poc",
   ],
   /** D1 databases that exist in the account. */
-  d1Databases: [{ name: "kogane-raw-evidence", id: "b335a887-250d-45c9-bd72-af83f35fdc60" }],
+  d1Databases: [
+    { name: "kogane-raw-evidence", id: "b335a887-250d-45c9-bd72-af83f35fdc60" },
+    // The READ database of U11: created empty on 2026-09-11, region APAC; its
+    // migrations are applied by the deploy step, never by hand.
+    { name: "kogane-read", id: "320ebe31-a031-48a1-985f-0e6fabbd517a" },
+  ],
   /** KV namespaces: none exist. */
   kvNamespaces: [] as string[],
-  /** Live Workers with no config in this repository. */
+  /**
+   * Live Workers with no config in this repository. Nothing here can redeploy
+   * them, so deleting one is not reversible by any release of this repository.
+   * Disposition (U15): delete manually after the owner confirms — see
+   * `docs/legacy-retirement.md` §7 and `infra/protection.md` §1.
+   */
   workersWithoutConfig: ["kogane-globalpass-container-probe-20260827"],
 } as const;
 
@@ -102,15 +133,21 @@ export interface Disposition {
  * A directory that has been promoted keeps its row under the new key with
  * `executionStatus: "EXECUTED_U04"`: the plan's proposal and what was actually
  * done stay next to each other, and the key follows the directory because the
- * ledger reads `experiments/`, `services/` and `poc/` from disk. A directory
- * that leaves all three — `poc/collector-diagnostics` and
- * `poc/sbi-vc-trade-client` went to `packages/`, and the finished experiments
- * went to `docs/research/` with their code removed — leaves this map too, and
- * is recorded in `COMPLETED_DISPOSITIONS` below instead. Without that second
- * list, "retired on purpose" and "never had a plan row" would be
- * indistinguishable a month later.
+ * ledger reads `services/` and `poc/` from disk. A directory promoted out of
+ * both — `poc/collector-diagnostics` and `poc/sbi-vc-trade-client`, which went
+ * to `packages/` — leaves the map, because nothing under `packages/` declares a
+ * runtime resource.
  */
 export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
+  "apps/web": {
+    source: "poc_disposition.csv row poc/observation-pipeline + decision D1",
+    proposedAction: "promoted-from-poc",
+    proposedTarget: "apps/web (the React client and its frontend tests)",
+    requiredVerification:
+      "U04 executed the move; the three bundles are byte-identical and the client imports no service internal",
+    executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
   "experiments/cloudflare-browser-run": {
     source: "poc_disposition.csv (was poc/cloudflare-browser-run)",
     proposedAction: "isolate-or-promote",
@@ -129,13 +166,13 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "poc/observation-pipeline": {
-    source: "poc_disposition.csv",
-    proposedAction: "split-promote-retire",
-    proposedTarget: "apps/web; packages/application; tests/fixtures; docs/research",
+  "experiments/observation-pipeline-local": {
+    source: "poc_disposition.csv row poc/observation-pipeline + decision D1",
+    proposedAction: "isolated-as-experiment",
+    proposedTarget: "experiments/observation-pipeline-local (EXPERIMENT.md: risu729, 2026-12-31)",
     requiredVerification:
-      "promote UI and fixtures, move needed local operations to the App API, legacy store to test/research, drop the shims",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+      "U04 executed the move; retire once the App API covers replay and status (docs/research/observation-pipeline-poc.md)",
+    executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "experiments/tamia-tcp-bridge": {
@@ -146,6 +183,18 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     requiredVerification:
       "checked: GLOBAL PASS binds the tamia Tunnel directly by tunnel_id and relays through its own /tcp, no config, binding, var, secret or task names kogane-tamia-tcp-bridge-20260825, and that Worker is not in the account inventory",
     executionStatus: "EXECUTED_U04",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
+  "services/app": {
+    source: "plan 07 §1 + decision D1",
+    proposedAction: "rename-directory",
+    proposedTarget: "services/app",
+    // Executed: the directory moved from `services/evidence-browser`. All three
+    // configs are byte-identical to what they were under the old directory, so
+    // the frozen identity lines in `scripts/resource-ledger.test.ts` still match
+    // (G0-06, G5-15). The Worker names did not move with the directory.
+    requiredVerification: "git mv only; Worker names kogane-evidence-browser and kogane-demo stay",
+    executionStatus: "EXECUTED_RENAME",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "services/collector-globalpass": {
@@ -254,20 +303,16 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
-  "services/evidence-browser": {
-    source: "plan 07 §1 + decision D1",
-    proposedAction: "rename-directory",
-    proposedTarget: "services/app",
-    requiredVerification: "git mv only; Worker names kogane-evidence-browser and kogane-demo stay",
-    executionStatus: "PLANNED_NOT_EXECUTED",
-    planLiveResourceStatus: "NOT_VERIFIED",
-  },
-  "services/observation-pipeline": {
+  "services/processor": {
     source: "plan 07 §1 + decision D1",
     proposedAction: "rename-directory",
     proposedTarget: "services/processor",
+    // Executed: the directory moved from `services/observation-pipeline`. The
+    // deployed config is byte-identical, cron, queue consumer and D1 ids
+    // included; only the comment in `wrangler.read-migrations.jsonc` that
+    // quotes its own path changed (G0-06, G0-07, G5-15).
     requiredVerification: "git mv only; Worker name kogane-observation-pipeline and cron stay",
-    executionStatus: "PLANNED_NOT_EXECUTED",
+    executionStatus: "EXECUTED_RENAME",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
   "services/raw-evidence": {
@@ -601,14 +646,14 @@ function readWorker(root: string, configPath: string): WorkerResources {
   };
 }
 
-/** Top-level directories whose subdirectories may own a runtime resource. */
-export const SCANNED_WORKSPACES = ["experiments", "poc", "services"] as const;
+/** Workspaces the ledger walks. `apps` and `experiments` joined it in U04. */
+export const WORKSPACES = ["apps", "experiments", "services"] as const;
 
-export type ScannedWorkspace = (typeof SCANNED_WORKSPACES)[number];
+export type Workspace = (typeof WORKSPACES)[number];
 
 export interface DirectoryEntry {
   directory: string;
-  workspace: ScannedWorkspace;
+  workspace: Workspace;
   disposition: (Disposition & { liveResourceStatus: string }) | null;
   workers: WorkerResources[];
 }
@@ -628,6 +673,8 @@ export interface ResourceLedger {
       producers: string[];
       consumers: string[];
       deadLetterQueues: string[];
+      /** Empty when the queue exists; otherwise why it does not yet. */
+      toCreate: string;
     }[];
     durableObjectClasses: { worker: string; className: string; tag: string; storage: string }[];
     r2Buckets: { bucket: string; live: boolean; readers: string[] }[];
@@ -638,11 +685,8 @@ export interface ResourceLedger {
   };
 }
 
-function directoriesOf(root: string, workspace: ScannedWorkspace): string[] {
+function directoriesOf(root: string, workspace: Workspace): string[] {
   const base = join(root, workspace);
-  // A scanned top-level directory disappears once its last member has moved
-  // (07 §1 empties `poc/`); that is not a reason for the generator to fail.
-  if (!existsSync(base)) return [];
   return readdirSync(base)
     .filter((entry) => statSync(join(base, entry)).isDirectory())
     .map((entry) => `${workspace}/${entry}`)
@@ -681,7 +725,7 @@ function liveResourceStatus(workers: WorkerResources[]): string {
 
 export function buildResourceLedger(root: string): ResourceLedger {
   const directories: DirectoryEntry[] = [];
-  for (const workspace of SCANNED_WORKSPACES) {
+  for (const workspace of WORKSPACES) {
     for (const directory of directoriesOf(root, workspace)) {
       const workers = configsOf(root, directory).map((config) => readWorker(root, config));
       const disposition = DISPOSITIONS[directory];
@@ -744,6 +788,7 @@ export function buildResourceLedger(root: string): ResourceLedger {
             ),
           ),
         ].sort(),
+        toCreate: QUEUES_TO_CREATE[queue] ?? "",
       })),
       durableObjectClasses: workers
         .flatMap((worker) =>
@@ -816,7 +861,7 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
   lines.push("# Runtime resource ledger");
   lines.push("");
   lines.push(
-    "Generated from the `wrangler*.jsonc` files under `experiments/`, `services/` and `poc/` by",
+    "Generated from the `wrangler*.jsonc` files under `apps/`, `experiments/`, `poc/` and `services/` by",
     "`scripts/resource-ledger.ts`. Do not edit by hand: `scripts/resource-ledger.test.ts`",
     "regenerates it and fails when this file and the configs disagree.",
   );
@@ -869,11 +914,13 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
 
   lines.push("## Queues");
   lines.push("");
-  lines.push("| queue | producers | consumers | dead letter |");
-  lines.push("| --- | --- | --- | --- |");
+  lines.push("| queue | producers | consumers | dead letter | exists |");
+  lines.push("| --- | --- | --- | --- | --- |");
   for (const entry of ledger.summary.queues)
     lines.push(
-      `| ${cell(entry.queue)} | ${list(entry.producers)} | ${list(entry.consumers)} | ${list(entry.deadLetterQueues)} |`,
+      `| ${cell(entry.queue)} | ${list(entry.producers)} | ${list(entry.consumers)} | ${list(entry.deadLetterQueues)} | ${
+        entry.toCreate === "" ? "declared (unverified)" : cell(entry.toCreate)
+      } |`,
     );
   lines.push("");
 
@@ -996,16 +1043,18 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
  *
  * A directory move changes the ledger's `directory` and `config` keys by
  * design, so the ledger itself cannot answer "did this move rename a
- * resource?". These lines deliberately drop both paths and keep only what
+ * resource?". These lines deliberately drop the directory and keep only what
  * Cloudflare addresses — Worker name, cron, Queue, R2 bucket, D1 id, Durable
  * Object class and migration tag, container class, browser/VPC/service
  * bindings, var and secret *names* — so the set of lines is invariant under a
- * `git mv`. The digest closes the gap the ledger's name-only fields leave
- * (`vars` values, DO migration ordering, anything a future key adds): a
- * promotion that edits a config at all shows up here.
+ * directory rename. The digest closes the gap the name-only fields leave
+ * (`vars` values, DO migration ordering, anything a future key adds): a move
+ * that edits a config at all shows up here.
  *
- * `scripts/resource-ledger.test.ts` compares them against the frozen set
- * captured before the U04 promotions (acceptance G0-06, G0-07, G5-15).
+ * `scripts/resource-ledger.test.ts` compares them two ways: the promoted
+ * collectors against the frozen set captured before the U04 promotions, and
+ * the configs that moved in the services rename against the bytes they had
+ * before that move (acceptance G0-06, G0-07, G5-15).
  */
 export function resourceIdentityLines(ledger: ResourceLedger, root = REPO_ROOT): string[] {
   const list = (entries: readonly string[]): string =>
@@ -1040,7 +1089,9 @@ export function resourceIdentityLines(ledger: ResourceLedger, root = REPO_ROOT):
         )}`,
         `r2=${list(worker.r2.map((item) => `${item.binding}>${item.bucket}`))}`,
         `kv=${list(worker.kv.map((item) => `${item.binding}#${item.id ?? "-"}`))}`,
-        `queue-producers=${list(worker.queueProducers.map((item) => `${item.binding}>${item.queue}`))}`,
+        `queue-producers=${list(
+          worker.queueProducers.map((item) => `${item.binding}>${item.queue}`),
+        )}`,
         `queue-consumers=${list(
           worker.queueConsumers.map(
             (item) =>

@@ -17,7 +17,6 @@ import {
   LEDGER_MARKDOWN_PATH,
   LIVE_INVENTORY,
   REPO_ROOT,
-  SCANNED_WORKSPACES,
   buildResourceLedger,
   renderResourceMarkdown,
   resourceIdentityLines,
@@ -48,14 +47,14 @@ const ledger = buildResourceLedger(REPO_ROOT);
 const COLLECTOR_IDENTITIES_BEFORE_THE_PROMOTIONS = [
   "kogane-globalpass-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=17 18 * * * d1=- r2=SNAPSHOTS>kogane-globalpass-collector-poc kv=- queue-producers=- queue-consumers=- do=COLLECTOR_CONTAINER>GlobalPassCollectorContainer do-migrations=v1[sqlite:GlobalPassCollectorContainer] do-exports=- containers=GlobalPassCollectorContainer:./Dockerfile:basic:2 browser=BROWSER vpc=MESH>tunnel:6b0ccf30-68b2-494e-baa8-f4f9f3e46b33,CF_EGRESS>network:cf1:network services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTOR_SCHEMA_VERSION,RELAY_PUBLIC_URL secrets=- sha256=9fdc9afbf599a5ee2985f59da30cbbce17ef360ca4951c03b8c65587d7ff5886",
   "kogane-mobile-suica-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=10 21 * * * d1=- r2=SNAPSHOTS>kogane-mobile-suica-collector-poc,DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=BROWSER vpc=- services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTION_TARGET,COLLECTOR_SCHEMA_VERSION secrets=ADMIN_TRIGGER_TOKEN,JRE_ID_CREDENTIAL_JSON sha256=023583bf0368d2e2b9f1288b4ed8da34145828ed6add9d698619c77c3ecbfe0c",
-  "kogane-moneyforward-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=15 21 * * * d1=- r2=SNAPSHOTS>kogane-moneyforward-collector-poc kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTOR_SCHEMA_VERSION secrets=- sha256=ad007eb7c3ef7581d66e3b16d5bb6d07e29b47dacfc181185ef1b4855d071c53",
-  "kogane-myjcb-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=0 21 * * * d1=- r2=SNAPSHOTS>kogane-myjcb-collector-poc kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=BROWSER vpc=- services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTOR_SCHEMA_VERSION secrets=- sha256=1f0480817f8af50ca4dce3b1ea719f4006d478272394d6f380ebb12f93ecfa5a",
+  "kogane-moneyforward-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=15 21 * * * d1=- r2=SNAPSHOTS>kogane-moneyforward-collector-poc,DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTION_TARGET,COLLECTOR_SCHEMA_VERSION secrets=- sha256=429d195b1d9b46150b84a4b5374d5fb2b1eeb7dc0cd6d992874b2c7a07851b98",
+  "kogane-myjcb-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=0 21 * * * d1=- r2=SNAPSHOTS>kogane-myjcb-collector-poc,DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=BROWSER vpc=- services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTION_TARGET,COLLECTOR_SCHEMA_VERSION secrets=- sha256=db0981e3f7f6214619be3a1918c298d87079f7643dd0406d1d461f1ea1b86538",
   "kogane-sbi-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=0 21 * * * d1=- r2=SNAPSHOTS>kogane-sbi-collector-poc,DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTION_TARGET,COLLECTOR_SCHEMA_VERSION secrets=- sha256=d08d4503fecbeec9db5813c6fc046a375083cf7b28bc5f67a26119d0ba11be12",
   "kogane-sbi-shinsei-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=0 21 * * * d1=- r2=SNAPSHOTS>kogane-sbi-shinsei-collector-poc kv=- queue-producers=- queue-consumers=- do=COLLECTOR_CONTAINER>SbiShinseiCollectorContainer do-migrations=v1[sqlite:SbiShinseiCollectorContainer] do-exports=- containers=SbiShinseiCollectorContainer:./Dockerfile:basic:2 browser=- vpc=MESH>tunnel:6b0ccf30-68b2-494e-baa8-f4f9f3e46b33 services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTOR_SCHEMA_VERSION,RELAY_PUBLIC_URL secrets=- sha256=e18e123aa61d961ad2bf082f8a9538948f82fe17082ef27a00bf1edead4b959c",
   "kogane-sbi-vc-session-poc config=wrangler.jsonc live=true role=deployed email=false crons=*/15 * * * *,5 21 * * * d1=- r2=SNAPSHOTS>kogane-sbi-vc-trade-poc kv=- queue-producers=- queue-consumers=- do=SESSION_STATE>SbiVcSessionState do-migrations=v1[sqlite:SbiVcSessionState] do-exports=- containers=- browser=- vpc=- services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTOR_SCHEMA_VERSION secrets=- sha256=c1c85fb18c6c6f36f81dd2b907e5d9c6e22d2c6ecf74acd1e87623a435cd55b8",
   "kogane-smbc-direct-backfill-poc config=wrangler.jsonc live=true role=deployed email=false crons=- d1=- r2=SNAPSHOTS>kogane-smbc-direct-backfill-poc kv=- queue-producers=- queue-consumers=- do=BACKFILL_SESSION>SmbcBackfillSession do-migrations=v1[sqlite:SmbcBackfillSession] do-exports=- containers=- browser=- vpc=TAMIA>tunnel:6b0ccf30-68b2-494e-baa8-f4f9f3e46b33 services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTOR_SCHEMA_VERSION,DEFAULT_BACKFILL_FROM,SMBC_DIRECT_BASE_URL,SMBC_DIRECT_LOGIN_BASE_URL secrets=- sha256=8f1d284ca0bfa705b30fb10272c73d0ddf09c1a497375e2456c898539072d31f",
-  "kogane-sony-bank-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=0 21 * * * d1=- r2=SNAPSHOTS>kogane-sony-bank-collector-poc kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTOR_SCHEMA_VERSION secrets=- sha256=57d87ffdb7a47fc81fd197da11d319dd74c26708d4ed5d89378c6bc65ad11976",
-  "kogane-vpass-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=0 21 * * * d1=- r2=SNAPSHOTS>kogane-vpass-collector-poc kv=- queue-producers=RAW_EVIDENCE_QUEUE>kogane-vpass-raw-evidence-import queue-consumers=kogane-vpass-raw-evidence-import[dlq:kogane-vpass-raw-evidence-import-dlq,batch:1,retries:10,concurrency:-] do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=- secrets=- sha256=2a1963ae7ef7085b6b964b82315359d5dc92c1eff84345e359b32a822c58c859",
+  "kogane-sony-bank-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=0 21 * * * d1=- r2=SNAPSHOTS>kogane-sony-bank-collector-poc,DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTION_TARGET,COLLECTOR_SCHEMA_VERSION secrets=- sha256=7d0b583daf9a29e8148e9bacb8b32674c1f81c2bedf5bb1914ec45c7a83ccb3b",
+  "kogane-vpass-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=0 21 * * * d1=- r2=SNAPSHOTS>kogane-vpass-collector-poc,DATA>kogane-raw-evidence kv=- queue-producers=RAW_EVIDENCE_QUEUE>kogane-vpass-raw-evidence-import queue-consumers=kogane-vpass-raw-evidence-import[dlq:kogane-vpass-raw-evidence-import-dlq,batch:1,retries:10,concurrency:-] do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTION_TARGET secrets=- sha256=a421c91728468b813788f7d09d27eef57209cc2a24616368abe5514967aa91d7",
   "kogane-vpoint-collector-poc config=wrangler.jsonc live=true role=deployed email=true crons=15 21 * * * d1=- r2=SNAPSHOTS>kogane-vpoint-collector-poc,VPOINT_PAY_SNAPSHOTS>kogane-vpoint-pay-collector-poc,DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=VPOINT_SESSION>VPointSession do-migrations=- do-exports=VPointSession:sqlite containers=- browser=- vpc=- services=RAW_EVIDENCE_IMPORTER>kogane-collector-r2-importer assets=- vars=COLLECTION_TARGET,COLLECTOR_SCHEMA_VERSION,VPOINT_PAY_EMAIL_RECIPIENT secrets=ADMIN_TRIGGER_TOKEN,VPOINT_EMAIL_FORWARD_TO,VPOINT_EMAIL_RECIPIENT,VPOINT_MEMBER_NUMBER sha256=11e545004cff76729e781ae5de55d04e90db0a59a5e6ec645d6072011f4a6dc1",
   "kogane-vpoint-pay-collector-poc config=wrangler.jsonc live=true role=deployed email=false crons=- d1=- r2=SNAPSHOTS>kogane-vpoint-pay-collector-poc,DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=VPOINT_PAY_STATE>VPointPayCredentialState do-migrations=- do-exports=VPointPayCredentialState:sqlite containers=- browser=- vpc=- services=- assets=- vars=COLLECTION_TARGET,COLLECTOR_SCHEMA_VERSION secrets=ADMIN_TRIGGER_TOKEN,VPOINT_PAY_DEVICE_UUID,VPOINT_PAY_REFRESH_TOKEN sha256=6483411d1557fe8ad7f5f8e00fb2edaafae9f904fffbf082c4114017a60d4dea",
 ];
@@ -65,7 +64,9 @@ const COLLECTOR_IDENTITIES_BEFORE_THE_PROMOTIONS = [
  * before U04, from the same ledger. A directory move may not add, drop or
  * rename a deployable target. Unlike the lines above, this survives the other
  * promotions of chapter 07 §1, which do edit configs: the App's asset
- * directory follows the UI to `apps/web`.
+ * directory follows the UI to `apps/web`. `kogane-read-migrations` is listed
+ * because U11 added it on main while this move was in review; it is a config
+ * this item neither moves nor touches.
  */
 const WORKER_CONFIGS_BEFORE_THE_PROMOTIONS = [
   "kogane-collector-r2-importer wrangler.jsonc",
@@ -84,6 +85,7 @@ const WORKER_CONFIGS_BEFORE_THE_PROMOTIONS = [
   "kogane-observation-ops-local wrangler.ops.jsonc",
   "kogane-observation-pipeline wrangler.jsonc",
   "kogane-observation-read-diagnostic wrangler.diagnostic.jsonc",
+  "kogane-read-migrations wrangler.read-migrations.jsonc",
   "kogane-sbi-collector-poc wrangler.jsonc",
   "kogane-sbi-shinsei-collector-poc wrangler.jsonc",
   "kogane-sbi-shinsei-r2-layer-b-audit-local wrangler.audit-sbi-shinsei.jsonc",
@@ -143,7 +145,10 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
         "ls-files",
         "-z",
         "--",
-        ...SCANNED_WORKSPACES.map((workspace) => `${workspace}/**/wrangler*`),
+        "apps/*/wrangler*",
+        "experiments/*/wrangler*",
+        "poc/*/wrangler*",
+        "services/*/wrangler*",
       ],
       { cwd: REPO_ROOT },
     );
@@ -155,7 +160,7 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
     ).toEqual(tracked);
   });
 
-  test("every scanned directory carries a plan disposition", () => {
+  test("every walked workspace directory carries a plan disposition", () => {
     expect(
       ledger.directories.filter((entry) => entry.disposition === null).map((e) => e.directory),
     ).toEqual([]);
@@ -183,6 +188,19 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
     ]);
     expect(ledger.summary.liveBucketsWithoutConfig).toEqual([]);
     expect(ledger.summary.d1Databases.filter((entry) => entry.live)).toEqual([
+      {
+        // The READ database of U11: created empty on 2026-09-11; its
+        // migrations are applied through the processor's read-migrations
+        // configuration only.
+        databaseName: "kogane-read",
+        databaseId: "320ebe31-a031-48a1-985f-0e6fabbd517a",
+        live: true,
+        bindings: [
+          "kogane-evidence-browser",
+          "kogane-observation-pipeline",
+          "kogane-read-migrations",
+        ],
+      },
       {
         databaseName: "kogane-raw-evidence",
         databaseId: "b335a887-250d-45c9-bd72-af83f35fdc60",
@@ -213,6 +231,75 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
     for (const entry of ledger.summary.durableObjectClasses) {
       expect(entry.className).not.toBe("");
       expect(entry.storage).toBe("sqlite");
+    }
+  });
+});
+
+/**
+ * The identity lines of every Wrangler config that moved when
+ * `services/evidence-browser` became `services/app` and
+ * `services/observation-pipeline` became `services/processor`, captured from
+ * the configs' bytes **before** the move.
+ *
+ * Six of the seven digests are the bytes as they stood on the old path: the
+ * move was a rename and nothing inside the configs had to change, because both
+ * directories stayed two levels below the repository root and every relative
+ * path in them (`../../apps/web/dist`, `../../apps/web/dist-production`,
+ * `../../packages/storage-d1/migrations/core`,
+ * `../../packages/storage-d1/migrations/read`) still resolves.
+ *
+ * The exception is `kogane-read-migrations`, whose digest is
+ * e5c9c269… rather than the pre-move 2146336c…: its header comment quotes the
+ * `wrangler d1 migrations apply --config <path>` command that runs it, and that
+ * path is the file's own. Nothing it declares changed — same binding, same
+ * database id, same `migrations_dir` — which is exactly what the rest of the
+ * line asserts.
+ *
+ * Three lines were refreshed when U16 landed on main while this move was in
+ * review: `kogane-evidence-browser`, `kogane-evidence-browser-test` and
+ * `kogane-observation-pipeline` gain `REWARD_READ_PROJECTION_ENABLED` (and the
+ * test config `REWARDS_V2_ENABLED`) in `vars=`, with the digest that follows
+ * from it. Only those two fields moved on each line — the Worker names, D1 and
+ * R2 bindings, the queue consumer, the cron and the asset directories are the
+ * pre-move values still, which is what this list exists to prove about the
+ * rename. A var added by another change is not a rename changing an identity.
+ */
+const FROZEN_MOVED_IDENTITIES = [
+  "kogane-demo config=wrangler.demo.jsonc live=true role=deployed email=false crons=- d1=- r2=- kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=- assets=../../apps/web/dist>ASSETS vars=ACCESS_AUDIENCE,ACCESS_ISSUER,BALANCE_PROJECTION_ENABLED,OPS_API_ENABLED,READ_PROJECTION_ENABLED secrets=- sha256=6185fc69201cbece8b600c389794fa1b573e8b8ae3680196733f0150140a431a",
+  "kogane-evidence-browser config=wrangler.jsonc live=true role=deployed email=false crons=- d1=DB>kogane-raw-evidence#b335a887-250d-45c9-bd72-af83f35fdc60,READ>kogane-read#320ebe31-a031-48a1-985f-0e6fabbd517a r2=EVIDENCE>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=PIPELINE>kogane-observation-pipeline assets=../../apps/web/dist-production>ASSETS vars=ACCESS_AUDIENCE,ACCESS_ISSUER,AGENT_API_GRANTS,AGENT_GRANTS,BALANCE_PROJECTION_ENABLED,COMMANDS_ENABLED,EVENTS_V2_ENABLED,EVIDENCE_SOURCE_ID,OPS_API_ENABLED,READ_PROJECTION_ENABLED,REWARDS_V2_ENABLED,REWARD_READ_PROJECTION_ENABLED,SESSION_REFRESH_POLICY secrets=- sha256=b620e5f8a95c2034d9daeab72af626b8e8d5d5a6c8625973d0b6dd27e7aca24b",
+  "kogane-evidence-browser-test config=wrangler.test.jsonc live=false role=test-only email=false crons=- d1=DB>test#00000000-0000-0000-0000-000000000001,READ>test-read#00000000-0000-0000-0000-000000000002 r2=EVIDENCE>test kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=- assets=test/assets>ASSETS vars=ACCESS_AUDIENCE,ACCESS_ISSUER,AGENT_API_GRANTS,AGENT_GRANTS,BALANCE_PROJECTION_ENABLED,COMMANDS_ENABLED,EVENTS_V2_ENABLED,EVIDENCE_SOURCE_ID,OPS_API_ENABLED,READ_PROJECTION_ENABLED,REWARDS_V2_ENABLED,REWARD_READ_PROJECTION_ENABLED,SESSION_REFRESH_POLICY secrets=- sha256=05e2bac7e49d655ed2a46905a9266e119a21f5a833f846b0ebc8c732ebb141b2",
+  "kogane-observation-ops-local config=wrangler.ops.jsonc live=false role=binding-only email=false crons=- d1=- r2=- kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=OBSERVATIONS>kogane-observation-pipeline assets=- vars=- secrets=- sha256=902d4629a87b356b9fbecc55e816a13de9f008add7b5d911b61c0908cbb8cfbf",
+  "kogane-observation-pipeline config=wrangler.jsonc live=true role=deployed email=false crons=*/5 * * * * d1=DB>kogane-raw-evidence#b335a887-250d-45c9-bd72-af83f35fdc60@../../packages/storage-d1/migrations/core,READ>kogane-read#320ebe31-a031-48a1-985f-0e6fabbd517a r2=EVIDENCE>kogane-raw-evidence,DATA>kogane-raw-evidence kv=- queue-producers=- queue-consumers=kogane-collection-terminals[dlq:kogane-collection-terminals-dlq,batch:10,retries:5,concurrency:2] do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=- assets=- vars=BALANCE_PROJECTION_ENABLED,COLLECTION_ACCOUNT_ID,COLLECTION_DATA_BUCKET,COLLECTION_INGEST_CLIENT,OPS_DISPATCH_ENABLED,READ_PROJECTION_ENABLED,RECONCILIATION_ENABLED,RELEASE_CANDIDATES_ENABLED,REPORTS_ENABLED,REWARD_CLAIMS_ENABLED,REWARD_READ_PROJECTION_ENABLED,SHARED_R2_INGEST_ENABLED secrets=- sha256=7905d5bdf083756d0ba94f1b7e2794aef0dfa0c148d05f7da3b239e7006fdede",
+  "kogane-observation-read-diagnostic config=wrangler.diagnostic.jsonc live=false role=binding-only email=false crons=- d1=DB>kogane-raw-evidence#b335a887-250d-45c9-bd72-af83f35fdc60 r2=EVIDENCE>kogane-raw-evidence kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=- assets=- vars=- secrets=- sha256=7256ac0f0d3807296d2c7c532ced593a2495ecc3e7dc8086a4f396b055f621ba",
+  "kogane-read-migrations config=wrangler.read-migrations.jsonc live=false role=binding-only email=false crons=- d1=READ>kogane-read#320ebe31-a031-48a1-985f-0e6fabbd517a@../../packages/storage-d1/migrations/read r2=- kv=- queue-producers=- queue-consumers=- do=- do-migrations=- do-exports=- containers=- browser=- vpc=- services=- assets=- vars=- secrets=- sha256=e5c9c2695790db0a397980644d222574a8006302aec28aee7a379ca5330ede89",
+];
+
+describe("G0-06/G0-07/G5-15 the directory rename changed no runtime identity", () => {
+  test("the moved configs declare what they declared before the move", () => {
+    const moved = new Set(
+      ledger.directories
+        .filter(
+          (entry) => entry.directory === "services/app" || entry.directory === "services/processor",
+        )
+        .flatMap((entry) => entry.workers.map((worker) => worker.name)),
+    );
+    // Seven configs moved; a missing one would make the assertion below pass by
+    // comparing nothing.
+    expect(moved.size).toBe(7);
+    expect(
+      resourceIdentityLines(ledger).filter((line) => moved.has(line.split(" ")[0] as string)),
+    ).toEqual(FROZEN_MOVED_IDENTITIES);
+  });
+
+  test("no Worker name, bucket, queue or database id mentions the new directory names", () => {
+    // A directory rename that leaked into a resource name is the failure G0-06
+    // and G5-15 are about: `wrangler deploy` would create a second Worker and
+    // leave the live one running.
+    for (const line of FROZEN_MOVED_IDENTITIES) {
+      const [name = "", ...rest] = line.split(" ");
+      expect(name.startsWith("kogane-")).toBe(true);
+      expect(rest.join(" ")).not.toContain("services/app");
+      expect(rest.join(" ")).not.toContain("services/processor");
     }
   });
 });

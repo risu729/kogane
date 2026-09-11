@@ -165,53 +165,233 @@ email handler, manual upload) can use it unchanged.
    `docs/authenticated-collectors.md` and `docs/credentials.md`. Sources that
    rarely change can stay manual forever.
 
-## Shared DATA R2 switchover, per source (U09)
+## Shared DATA target per collector (U09)
 
-Unified plan work item **U09** (chapter 03, decisions D7/D12/D13). Each
-collector gains one var and one binding:
+Unified plan U09 (chapters 03, 12, 13; decisions D12/D13). Each collector
+gains a var `COLLECTION_TARGET` and an R2 binding `DATA` to the central
+bucket `kogane-raw-evidence`:
 
-| Name                | Value                                                  |
-| ------------------- | ------------------------------------------------------ |
-| `COLLECTION_TARGET` | `legacy` (default) or `shared`                         |
-| `DATA`              | R2 binding to the central bucket `kogane-raw-evidence` |
+- `COLLECTION_TARGET=legacy` (the deployed default) is the existing path,
+  byte for byte: artifacts and the per-source manifest go to the collector's
+  own bucket and the importer service binding copies them centrally.
+- `COLLECTION_TARGET=shared` persists the run through
+  `packages/collection` (`docs/collection-contract.md`): content-addressed
+  objects under `objects/<2 hex>/<sha256>` and, written last, the run's
+  `terminal-v1` manifest at `runs/<source>/<runId>/terminal.json`. The
+  per-source bucket is not written and the importer is not called, so the
+  same bytes are never stored twice (G1-15).
 
-`legacy` is the deployed path, byte for byte: sanitized artifacts and the
-collector manifest into the per-source bucket, then the central importer over
-the Service Binding. Only the exact string `shared` switches a collector to
-`packages/collection`: the same sanitized bytes, content-addressed under
-`objects/<2 hex>/<sha256>`, and the run's `terminal-v1` manifest written last
-to `runs/<source>/<runId>/terminal.json`. In `shared` mode the collector makes
-no importer call and writes nothing to its per-source bucket, so an object is
-never copied between buckets (G1-15). The legacy buckets stay readable; nothing
-is deleted or migrated by this change (03 §7).
+Only the exact string `shared` switches a collector; anything else — unset,
+misspelled, a half-applied deploy — stays on the legacy path. The legacy
+bucket binding stays in the config because it is the rollback target.
 
-What the switch never touches: the Worker name, its cron, its Email route, its
-Durable Object classes and migration tags, its per-source secrets and its
-per-source bucket bindings (G5-15). A source keeps exactly one scheduler, so
-there is no second cron and no double provider access during the switch
-(G3-14).
+Rules that hold for every collector below:
 
-**Deploy order** (11 §4, G5-14) — the consumer before the producer:
+- The stored bytes are the ones that already reach central storage: the
+  collector's own sanitizer output. A provider response that carries
+  credentials, cookies or session material is never stored as it is.
+- `providerOutcome` is the run's own outcome (`success`/`partial`/`failed`)
+  and is never widened; a `partial` run keeps its coverage gap (G1-08) and a
+  `failed` run persists no artifact, so it cannot read downstream like an
+  observation of zero (G1-09).
+- A failed put returns `incomplete` with a checkpoint and no terminal: the
+  run is not reported as complete, and only codes and counts are logged
+  (G1-01, G3-08).
+- `operationId`/`attemptId` are carried when an operation requested the run.
+  U08 dispatches collection operations; today the cron and the admin trigger
+  leave them unset.
+- Deploy order, per source: the Processor (U08) with
+  `SHARED_R2_INGEST_ENABLED` first, so a terminal is never written before
+  something can read it; then `COLLECTION_TARGET=shared` on this collector.
+  Rollback: set the var back to `legacy` and redeploy nothing else —
+  terminals already written stay valid and are picked up by the Processor's
+  bounded `runs/` scan. The collector keeps exactly one cron either way, so
+  switching a source never doubles provider access (11 §4).
 
-1. Deploy the Processor's terminal consumer (U08) with
-   `SHARED_R2_INGEST_ENABLED` on, so a terminal can be read before one exists.
-2. Then set `COLLECTION_TARGET=shared` on one collector and watch that source's
-   runs.
-3. Repeat per source. A source whose Processor path is not yet enabled stays on
-   `legacy`.
+### Sony Bank (`services/collector-sony-bank`, `kogane-sony-bank-collector-poc`)
 
-**Rollback**: set `COLLECTION_TARGET` back to `legacy` (or unset it) and
-redeploy that collector. Terminals already written stay valid and are still
-picked up by the Processor's bounded `runs/` scan; the legacy path resumes
-writing to the per-source bucket and the importer. No schema or data migration
-is involved either way.
+| Artifact key                                     | Role                         |
+| ------------------------------------------------ | ---------------------------- |
+| `gross-balance.json`, `*-history-page-NNNN.json` | `provider_response`          |
+| `yen-history.csv`, `foreign-history-<ccy>.csv`   | `provider_export`            |
+| `wallet-history-YYYY-MM.html`                    | `sanitized_provider_capture` |
+| `collection-summary.json`                        | `collector_summary`          |
+| `manifest.json`                                  | `collector_manifest`         |
 
-**What a terminal does not claim**: `providerOutcome` stays `partial` when the
-acquisition was partial, and a `failed` run with zero artifacts stays a failure
-rather than an observation of zero (G1-08, G1-09). A run whose objects could
-not all be written produces no terminal at all and is not reported as stored
-(G1-01, G1-03); the failure is a machine code in the log, never provider text
-(12 §6).
+Sanitizer: the collector's own `sanitizeWalletHtml` (Sony Bank Wallet
+statements), which the legacy path already applies before the importer
+forwards the object verbatim. Shared mode stores exactly those bytes and
+records the step as a `redacted` transformation with no retained input,
+because the provider HTML was deliberately not kept. Before a byte is planned
+it is re-checked (`assertCentralSafe`) against the invariants the importer
+enforces on the way to central storage: a wallet page that still carries a
+`;jsessionid=` or a hidden-input value, or a JSON payload with a credential
+field (`loginPwd`, `password`, `csrf`, …), throws a stable code and the run
+writes no terminal instead of publishing the value (G3-08).
+
+Terminal fields: one unit `account` (`unitKind: account`); ranges
+`request-window` (the requested `from`/`to`) and, when wallet statements were
+collected, `wallet-months`; one `terminal` report carrying the outcome;
+`requestedScope.scopeKind = date_range` over the same window;
+`coverageStatus` `complete` for a successful window, `partial` for a partial
+run, `unknown` for a failure. `manifest.json` is the collector manifest with
+the central-safe failure messages (`manifestFailure`) and each artifact's
+`key` pointing at the content-addressed object that was actually written; the
+terminal's `artifacts[]` stays authoritative.
+
+Verified with synthetic fixtures in
+`services/collector-sony-bank/test/shared-collection.test.ts` (G1-01, G1-02,
+G1-08, G1-09, G1-15, G3-07, G3-08) and, for parity with the importer, in
+`services/collector-r2-importer/test/shared-target-parity.test.ts`: the same
+synthetic legacy run validated by the importer and mapped by the shared plan
+names the same digest for every artifact, and the shared `manifest.json` is
+the legacy manifest byte for byte with each `raw/…` key replaced by the
+content-addressed key. No provider was contacted and no production bucket was
+read or written.
+
+### Money Forward ME (`services/collector-moneyforward`, `kogane-moneyforward-collector-poc`)
+
+| Artifact key                    | Role                 |
+| ------------------------------- | -------------------- |
+| `accounts.html`                 | `provider_response`  |
+| `account-detail-NN.html`        | `provider_response`  |
+| `account-NN-month-YYYY-MM.html` | `provider_response`  |
+| `manifest.json`                 | `collector_manifest` |
+
+Sanitizer: none is applied to the pages — the legacy path stores exactly
+these bytes and the importer forwards them verbatim, because the collector
+keeps only the rendered aggregator pages and never the request headers,
+cookies or credential exchange that produced them. The one normalization the
+central path does apply is to the manifest, whose failure message is replaced
+by its failure code; shared mode writes that normalized manifest. (The
+importer also re-serializes its _parsed_ view of the manifest, so the central
+bytes today additionally carry `filename`, `kind`, `accountOrdinal` and
+`month` per artifact — values derived from the artifact key, not stated by the
+collector. The shared manifest is the collector's own record and does not
+carry them; the parity test pins exactly that difference.)
+
+Terminal fields: one unit per account (`account-NN`, `unitKind: account`),
+taken from the collector's own filename grammar — the run-wide
+`accounts.html` index belongs to no unit; a `months-account-NN`
+`declared_coverage` range per account covering the monthly fragments that were
+actually captured; one `terminal` report carrying the outcome;
+`requestedScope.scopeKind = full_snapshot` (the run asks for whatever the
+aggregator currently shows) listing the accounts as `unitKeys`.
+
+Verified with synthetic fixtures in
+`services/collector-moneyforward/test/shared-collection.test.ts` (G1-01,
+G1-02, G1-08, G1-09, G1-15, G3-07, G3-08) and, for parity with the importer,
+in `services/collector-r2-importer/test/shared-target-parity.test.ts` (every
+page digest identical; the manifest identical field by field with the keys
+substituted). No provider was contacted and no production bucket was read or
+written.
+
+### MyJCB (`services/collector-myjcb`, `kogane-myjcb-collector-poc`)
+
+| Artifact key                                                                   | Role                         |
+| ------------------------------------------------------------------------------ | ---------------------------- |
+| `<connectionId>/credit-menu.html`, `…/credit-detail-NN.html`, `…/debit-*.html` | `sanitized_provider_capture` |
+| `<connectionId>/credit-past-months.json`                                       | `provider_response`          |
+| `<connectionId>/credit-csv                                                     | pdf                          | ofx` | `provider_export` |
+| `<connectionId>/credit-ledger-*.json`, `…/discovery.json`                      | `collector_derived`          |
+| `manifest.json`                                                                | `collector_manifest`         |
+
+Sanitizer: the collector's own `redactedStatementHtml` (parse5 tree: scripts,
+styles, textareas, embedding elements and every URL-bearing attribute removed,
+every `value=` replaced by `[redacted]`, card numbers in text replaced), which
+is what the legacy path already stores. Shared mode adds `assertRedactedHtml`
+(`src/redaction.ts`), the invariants the central path enforces, checked again
+on the bytes about to leave the Worker: a redaction regression throws
+`artifact_html_redaction_invalid` and the run writes no terminal rather than
+publishing the page. The importer runs its own sanitizer pass over the stored
+page again on the way to central storage; the parity test proves that pass is
+the identity on collector output, so the shared bytes are the central bytes.
+Datasets the central path has never accepted (`debit-menu`, `debit-detail`,
+`credit-csv`, `credit-pdf`, `credit-ofx` — the importer refuses a manifest
+naming one with `manifest_dataset_unobserved`) are refused here the same way
+(`artifact_dataset_unobserved`): shared mode does not store centrally what the
+legacy path never let through. The collector manifest is written in its
+central shape — a connection blocker and a failure message become coarse codes
+(`human-required`, `collector-failure`, `r2-write-failure`), so upstream free
+text never reaches the shared bucket either. (As for Money Forward, the
+importer's central bytes today also carry its parsed `connectionId`,
+`filename` and `ordinal` per artifact; the shared manifest keeps the
+collector's own artifact shape.)
+
+Terminal fields: one unit per connection (`<connectionId>`,
+`unitKind: connection`), so several cards in one run stay distinguishable and
+are never merged into one (G1-16); no ranges, because the statement periods are
+provider labels rather than machine ranges and stay in the manifest artifact;
+one `terminal` report carrying the outcome; `requestedScope.scopeKind =
+full_snapshot` over the connections. `coverageStatus` is `partial` even for a
+successful run — a MyJCB card exposes a rolling set of statement periods, so a
+finished run is not a claim about the card's whole history. A connection that
+needs a human is a `human-required` state on its own unit with
+`safeErrorCode: human_required`, and the run-level code is `human_required`
+when every blocked connection is waiting for a person: nothing here retries a
+login (G3-10, G3-11).
+
+Verified with synthetic fixtures in
+`services/collector-myjcb/test/shared-collection.test.ts` (G1-01, G1-02,
+G1-08, G1-09, G1-15, G1-16, G3-08, G3-11) and, for parity with the importer,
+in `services/collector-myjcb/test/shared-parity.test.ts` (the collector's
+redacted pages validated by the importer's `validateMyJcbRun` and mapped by
+the shared plan name the same digest for every artifact, and the importer's
+central bytes equal the legacy bytes). No provider was contacted and no
+production bucket was read or written.
+
+### Vpass (`services/collector-vpass`, `kogane-vpass-collector-poc`)
+
+| Artifact key                             | Role                         |
+| ---------------------------------------- | ---------------------------- |
+| `card-list.json`                         | `sanitized_provider_capture` |
+| `select-card.json`                       | `sanitized_provider_capture` |
+| `web-meisai-top.json`                    | `sanitized_provider_capture` |
+| `months/<yyyymm>/<top\|answer>-NNN.json` | `provider_response`          |
+| `manifest.json`                          | `collector_manifest`         |
+
+Sanitizer: `vpass-json-sanitizer` v1 (`src/sanitize.ts`). Unlike the other
+collectors, the legacy Vpass path stores the raw response envelopes in its own
+bucket and the importer sanitizes them on the way to central storage — so a
+collector writing the shared bucket has to sanitize first. `src/sanitize.ts` is
+that transformation, with the same id, version and rules the importer applies
+today: every key naming authentication, a session, a device, a CSRF token or a
+card identify key is replaced wholesale; the card inventory keeps ordinal
+labels (`card-001`) and a placeholder reference instead of names and keys; the
+result is canonically encoded (sorted keys, trailing newline) and then
+re-checked, so output that still holds a sensitive value fails the run instead
+of being stored. The artifact keys are the ones central storage already uses,
+so the same run registers the same way.
+
+Terminal fields: one run **per card**, `runId = <session run id>-card-NNN`,
+all cards of one session carrying that session id as `acquisitionSessionRef`,
+so several cards stay distinguishable instead of collapsing into one run
+(G1-16) — the same mapping `VPASS_LEGACY_ADAPTER` uses when a legacy run is
+re-persisted. One unit per card (`unitKind: card`), a `statement-months`
+declared-coverage range over the months that were captured, one `terminal`
+report, `requestedScope.scopeKind = full_snapshot`. `coverageStatus` is
+`partial` even on success: a card exposes a rolling window of statement months,
+so a finished run is not a claim about the card's whole history.
+`producerVersion` is `vpass-worker-card-v1`, the schema version central
+storage records for a card-scoped Vpass run, and `manifest.json` holds exactly
+the summary central storage holds today.
+
+A card (or a session that failed before a card was selected, as unit `run`)
+that collected nothing persists a `failed` terminal with no artifact at all
+(G1-09). Every stored object carries a `redacted` transformation with no
+retained input, because the provider envelope that held the session was
+deliberately not kept; note that this differs from the legacy central
+descriptors, which record a statement page as `extracted` from the stored
+snapshot — in shared mode there is no snapshot to extract from.
+
+Verified with synthetic fixtures in
+`services/collector-vpass/test/shared-collection.test.ts` (G1-01, G1-02,
+G1-08, G1-09, G1-15, G1-16, G3-07, G3-08) and, for parity with the importer,
+in `services/collector-r2-importer/test/shared-target-parity.test.ts`: the
+importer's `validateVpassRun` over a synthetic legacy snapshot and the shared
+plan over the same raw envelopes name the same digest for all six artifacts,
+`manifest.json` included. No provider was contacted and no production bucket
+was read or written.
 
 ### `v-point` (`services/collector-vpoint`)
 

@@ -29,11 +29,22 @@ declared input context, plus paging that is fixed to one build of it.
 rebuildable; no Layer A or Layer B row is touched, and a wrong projection is
 repaired by building a new snapshot, never by deleting an observation.
 
-| Table                        | What it holds                                                                                                                                    |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `balance_read_snapshots`     | One build. `snapshot_id` is the digest of the declared inputs; `status` moves `building` → `complete` → `retired` and never back.                |
-| `current_balance_projection` | One candidate measurement per row: its scope, quantity, metric, adopted state, reason code, temporal reference, freshness and a dense `row_seq`. |
-| `scope_relations`            | Typed relations between measurement scopes (`same`/`disjoint`/`subset`/`overlaps`/`unknown`) with the decision that produced each one.           |
+| Table                        | What it holds                                                                                                                                                                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `balance_read_snapshots`     | One build. `snapshot_id` is the digest of its fixed input and build; `status` moves `building` → `complete` → `retired` and never back. Migration 0038 adds its input digest, revision, epoch, read instance and writer fence. |
+| `current_balance_projection` | One candidate measurement per row: its scope, quantity, metric, adopted state, reason code, temporal reference, freshness and a dense `row_seq`.                                                                               |
+| `scope_relations`            | Typed relations between measurement scopes (`same`/`disjoint`/`subset`/`overlaps`/`unknown`) with the decision that produced each one.                                                                                         |
+| `balance_snapshot_pointer`   | Migration 0038: which complete snapshot the read model publishes, and the revision that snapshot was last verified against. It switches in the same batch that seals a build, and never moves to an older revision.            |
+
+Since U11 the same projection can be built into a **separate READ database**
+instead, under `READ_PROJECTION_ENABLED`. The tables above then live in
+`packages/storage-d1/migrations/read/0001_read_baseline.sql` with a snapshot id
+that carries an attempt, snapshot-scoped relations and the copied CORE
+references of 04 §3; everything this document says about what a row means, how
+adoption is decided, what the API returns and what a cursor is stays true, and
+the contract of the second database is [The READ database](read-model-d1.md).
+With the flag off — the default everywhere — the tables below are the ones that
+are written and read.
 
 `scope_relations` carries no `*_no_update` / `*_no_delete` trigger on purpose:
 unlike a Layer A or Layer B fact it is rebuildable projection state, written
@@ -42,26 +53,34 @@ policy, so a release is rewritten in place rather than appended to. The record
 of truth stays in `decision_revisions` and `entity_relations`, which are
 append-only; deleting every row here loses nothing that cannot be rebuilt.
 
-### Declared inputs
+### The fixed input and the snapshot id
 
-The snapshot id is `sha256` of the canonical JSON of:
+Since migration `0038` a build **captures its input once**, at a CORE revision
+that did not move while it was reading, stores the canonical bytes in the DATA
+bucket under `projection-inputs/<digest>/input.json`, records them in
+`projection_input_records`, and every later invocation resumes from those bytes
+rather than from CORE's current state. The identity is
 
-- `publishedHighWaterParseRunId` — the newest published parse run;
-- `visibleFetchRunCount` / `visibleFetchRunHighWater` — the visible financial
-  fetch runs, so an exclusion annotation or an unsealed run is a new context
-  even though nothing was published;
-- `adoptedRelationCount` / `decisionRevisionCount` — the adopted judgements. A
-  decision that accepts a `same_account` or a containment changes which scopes
-  overlap, and therefore which candidates are adopted, without publishing a
-  single new parse. Both tables are append-only, so counting them is a sound
-  change detector;
-- `identityRelease` — `current-mappings-v1` (the `latest` read mode);
-- `metricRegistryRelease`, `decimalPolicyRelease`, `projectionRelease`,
-  `authorityPolicyRelease`, `scopeRelationRelease`.
+```text
+snapshotId = sha256(inputContentDigest ‖ projectionBuildDigest ‖ contractVersion)
+```
 
-Same inputs ⇒ same id ⇒ same rows. That is what makes a partially written
-build safe to resume instead of restart, and what makes a new publication
-produce a _new_ snapshot rather than mutate the one a reader is paging.
+and "did anything I depend on change?" is one integer comparison against
+`core_source_revision`, which a trigger bumps inside the same transaction as
+every dependency write. The counting query this section used to describe
+(`max(parse_run_id)` plus four counts) could not see an artifact's adopted
+parse moving from 100 to 150 while an unrelated run 900 existed; it is kept as
+an operational summary, and its `publishedHighWaterParseRunId` still pins the
+snapshot's history window.
+
+The full contract — the dependency ledger and what is deliberately outside it,
+the capture protocol, the budgets, the writer fence, the active pointer and the
+four outcomes — is [Fixed projection input](projection-input.md).
+
+Same input content ⇒ same id ⇒ same rows. That is what makes a partially
+written build safe to resume instead of restart, and what makes a new
+publication produce a _new_ snapshot rather than mutate the one a reader is
+paging.
 
 ## How a row gets its state
 
@@ -117,7 +136,7 @@ observe" is never rendered as "the balance is gone".
 
 | Budget                    | Value | Why                                                                                                                                                                  |
 | ------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Candidate bound           | 5,000 | The existing read bound; above it the build is refused, not cut.                                                                                                     |
+| Candidate bound           | 5,000 | The existing read bound; above it the build is refused, not cut. Coverage claims and declared relations have the same bound and the same refusal.                    |
 | `ADOPTION_SUBJECT_BOUND`  | 250   | Adoption compares scopes pairwise. A larger target records every candidate `unresolved`/`adoption_target_oversized` — never silently adopted, never silently summed. |
 | `PROJECTION_WRITE_BUDGET` | 1,000 | Rows written per cron invocation; the rest resume from the stored build cursor.                                                                                      |
 
@@ -253,7 +272,7 @@ observation rows behind the projection. See
 
 A07 registers the real `balance-projection` processor of A09's decision outbox
 (`balanceProjectionOutboxProcessor` in
-`services/observation-pipeline/src/balance-projection-job.ts`, handed to
+`services/processor/src/balance-projection-job.ts`, handed to
 `dispatchDecisionOutbox` through its `processors` argument). Two things make a
 published decision reach the read model:
 
@@ -265,27 +284,34 @@ published decision reach the read model:
    decision. Nothing serves a projection built before the decision as if it
    were current.
 2. The outbox processor makes the rebuild start on the same tick instead of
-   waiting for the next cron. It recomputes the current snapshot id and does
-   nothing when a sealed snapshot already carries it, so a duplicated or
+   waiting for the next cron. It asks one question — does the snapshot the read
+   model publishes cover the revision the decision moved? — so a duplicated or
    out-of-order delivery cannot rebuild twice or undo a finished build, and it
-   is bounded like every other invocation. Its outcome is recorded as
-   `balance_projection_current`, `balance_projection_rebuilt` or
-   `balance_projection_rebuilding` — never a claim that a rebuild ran when it
-   did not.
+   is bounded like every other invocation. It answers
+   `completed(balance_projection_active)` with that snapshot as its evidence,
+   or `pending` / `retryable` / `blocked` with a safe code. It never reports
+   completion because a rebuild was started, and the CORE side of a decision is
+   completed only after the read model is
+   ([Fixed projection input](projection-input.md)).
 
-The reader and the builder share one definition of "behind": both compute the
-snapshot id from `PROJECTION_INPUTS_SQL`, so they cannot disagree.
+The reader and the builder share one definition of "behind": the active
+pointer's `source_revision` against the current `core_source_revision`, so they
+cannot disagree.
 
 ## Rebuild and invalidation
 
-The cron job (`services/observation-pipeline/src/balance-projection-job.ts`,
-one call from `scheduled`) recomputes the input manifest each tick. If the
-digest matches a sealed snapshot it does nothing. Otherwise it builds, writing
-at most `PROJECTION_WRITE_BUDGET` rows per invocation and storing its resume
-position; the snapshot is sealed in one statement after the last row, so a
-reader that selects `status='complete'` never observes a partial build. Two
-complete snapshots are retained so a reader with an open cursor survives one
-rebuild; older builds are retired first and only then lose their rows.
+The cron job (`services/processor/src/balance-projection-job.ts`,
+one call from `scheduled`) first continues any unfinished build from the input
+that build fixed. Otherwise it captures a new input and, if the resulting
+snapshot id is already sealed, does nothing but advance the pointer's
+watermark. A build writes at most `PROJECTION_WRITE_BUDGET` rows per
+invocation, committing each chunk with its checkpoint in one batch; after the
+last row the written rows are verified against the build, and the snapshot is
+sealed and published in one further batch, so a reader that selects
+`status='complete'` never observes a partial build. Two complete snapshots are
+retained so a reader with an open cursor survives one rebuild; older builds are
+retired first and only then lose their rows, and the published one is never
+retired.
 
 Rebuild is currently whole-context, not per scope: the snapshot id changes on
 any published parse, and the build recomputes every candidate. That is bounded
@@ -309,18 +335,25 @@ Named by the review, and none of them is used here:
 
 ## Deploy order
 
-1. **Schema** — apply migration `0030`. Nothing reads or writes the new tables
-   yet.
-2. **Writer** — deploy `services/observation-pipeline`. The job is off; set
+1. **Schema** — apply migrations `0030` and `0038`. Nothing reads or writes the
+   new tables yet. `0038` also adds the `DATA` R2 binding's prefix
+   (`projection-inputs/`) to the pipeline's existing bucket; no new bucket is
+   created.
+2. **Writer** — deploy `services/processor`. The job is off; set
    `BALANCE_PROJECTION_ENABLED=1` when you want the first build. Watch the
    `balance_projection` line of the scheduled log for `status` and `written`.
-3. **Reader** — deploy `services/evidence-browser` with
+3. **Reader** — deploy `services/app` with
    `BALANCE_PROJECTION_ENABLED=0`. Nothing changes for any caller.
 4. **Reader flag** — set `BALANCE_PROJECTION_ENABLED=1` on the browser once a
    snapshot is `complete`. `/api/meta` starts advertising `balancesV2` and
    `/api/balances` moves to the compat adapter.
 5. **UI** — the frontend switches on the advertised capability, not on the
    name of the connection; no separate step is needed.
+
+With `READ_PROJECTION_ENABLED` on, steps 1–5 gain the READ database in front of
+them: create `kogane-read`, apply its migrations, then deploy and flag the
+processor and the app in that order. The whole order and its rollback are in
+[The READ database](read-model-d1.md).
 
 ## Rollback
 
@@ -332,13 +365,15 @@ observation, parse, publication or identity row depends on them.
 
 ## Verified locally
 
-| Check                                                                                                                                                      | Where                                                                                                    |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| SC01 adopted set, SC06 unknown overlap, SC15 four empty meanings, oversized target bound                                                                   | `packages/read-model/test/balance-projection.test.ts`                                                    |
-| Page envelope, cursor round-trip, mismatch and expiry, `ObservedQuantity`                                                                                  | `packages/domain/test/paging.test.ts`                                                                    |
-| Seal, resume, immutability, retirement, deterministic snapshot id                                                                                          | `services/observation-pipeline/test/balance-projection.test.ts`                                          |
-| 1,003-row keyset paging on a fixed snapshot while new evidence lands; 5,002-row history paging; cursor mismatch; 410; v1 parity; no `netWorth`; query plan | `services/evidence-browser/test/balances-v2.test.ts`                                                     |
-| Capability schema pinned on both sides                                                                                                                     | `poc/observation-pipeline/test/api-schema.test.ts`, `services/evidence-browser/test/conformance.test.ts` |
+| Check                                                                                                                                                      | Where                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| SC01 adopted set, SC06 unknown overlap, SC15 four empty meanings, oversized target bound                                                                   | `packages/read-model/test/balance-projection.test.ts`                       |
+| Page envelope, cursor round-trip, mismatch and expiry, `ObservedQuantity`                                                                                  | `packages/domain/test/paging.test.ts`                                       |
+| Seal, resume, immutability, retirement, deterministic snapshot id                                                                                          | `services/processor/test/balance-projection.test.ts`                        |
+| Fixed input capture and resume, budgets, chunk re-send, the writer fence, the active pointer and the four outcomes (G2-02, G2-05 … G2-14)                  | `services/processor/test/projection-input.test.ts`                          |
+| The dependency ledger, the trigger set and the 100 → 150 counter-example (G2-01, G2-03, G2-04)                                                             | `packages/read-model/test/source-revision.test.ts`                          |
+| 1,003-row keyset paging on a fixed snapshot while new evidence lands; 5,002-row history paging; cursor mismatch; 410; v1 parity; no `netWorth`; query plan | `services/app/test/balances-v2.test.ts`                                     |
+| Capability schema pinned on both sides                                                                                                                     | `apps/web/test/api-schema.test.ts`, `services/app/test/conformance.test.ts` |
 
 Not verified: behaviour on production data volumes, real query-plan timings,
 and incremental per-scope rebuild (not implemented).

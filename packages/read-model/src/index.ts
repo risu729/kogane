@@ -97,6 +97,7 @@ export {
   type ProjectionInputs,
   type ProjectionRow,
   type ProjectionState,
+  projectionBuildDigest,
   projectionInputManifest,
   SCOPE_RELATION_RELEASE,
   SUBJECT_STATUSES,
@@ -105,6 +106,19 @@ export {
   temporalReferenceFor,
 } from "./balance-projection";
 export {
+  CORE_READ_INSTANCE_ID,
+  CORE_REVISION_SQL,
+  type CoreRevisionRow,
+  type LedgerTable,
+  PROJECTION_INPUT_CONTRACT_VERSION,
+  REVISION_EXCLUDED_TABLES,
+  revisionTriggerNames,
+  snapshotIdentity,
+  SOURCE_REVISION_LEDGER,
+  VISIBILITY_REVISION_LEDGER,
+} from "./source-revision";
+export {
+  ACTIVE_POINTER_SQL,
   DEFAULT_PROJECTION_PAGE_LIMIT,
   PROJECTION_PAGE_LIMITS,
   type ProjectionPageLimit,
@@ -119,6 +133,7 @@ export {
   projectionSubtotalSql,
 } from "./balance-projection-sql";
 export {
+  type ActivePointerRow,
   type BalanceProjectionReader,
   type BalanceSnapshotRow,
   type ProjectionCoverageRow,
@@ -142,9 +157,32 @@ export {
   rewardProgramOf,
   REWARD_PAGE_LIMIT,
   REWARD_READ_RELEASE,
+  type ConversionOfferSqlRow,
+  type ExpiryRuleSqlRow,
+  type MembershipSqlRow,
+  type RewardBucketSqlRow,
   type RewardHoldingView,
   type RewardReader,
 } from "./rewards";
+export {
+  buildRewardProjection,
+  evaluationClock,
+  REWARD_EVALUATION_CALENDAR,
+  REWARD_PROJECTION_CONTRACT_VERSION,
+  REWARD_PROJECTION_PROMOTION_RELEASE,
+  REWARD_PROJECTION_RELEASE,
+  rewardProjectionBuildDigest,
+  ruleSetDigest,
+  savedSimulationRequest,
+  UNCLASSIFIED_REWARD_HISTORY,
+  type RewardExpiryProjectionRow,
+  type RewardProjection,
+  type RewardProjectionInputContent,
+  type RewardProjectionManifest,
+  type RewardSimulationProjectionRow,
+  type SavedSimulationRequest,
+  type SavedSimulationSqlRow,
+} from "./reward-projection";
 export {
   ACTIVITY_BASES,
   type ActivityBasis,

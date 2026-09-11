@@ -3,6 +3,7 @@
 // input, and no caller ever hands the reader SQL text.
 
 import {
+  ACTIVE_POINTER_SQL,
   balanceHistoryKeysetSql,
   CURRENT_SNAPSHOT_SQL,
   PROJECTION_INPUTS_SQL,
@@ -15,6 +16,7 @@ import {
   type ProjectionInputsRow,
   type ProjectionPageRow,
 } from "./balance-projection-sql";
+import { CORE_REVISION_SQL, type CoreRevisionRow } from "./source-revision";
 import type { BalanceHistoryRow } from "../../../packages/observation-shared/src/api-contract";
 import type { CollectionScope } from "./scope";
 import type { SqlExecutor } from "./reader";
@@ -25,6 +27,20 @@ export interface BalanceSnapshotRow {
   row_count: number;
   input_manifest_json: string;
   projection_release: string;
+  /** Migration 0038; null on a snapshot built before the fixed-input protocol. */
+  input_digest: string | null;
+  source_revision: number | null;
+  visibility_revision: number | null;
+  core_epoch: string | null;
+  read_instance_id: string | null;
+}
+
+export interface ActivePointerRow {
+  snapshot_id: string;
+  source_revision: number;
+  read_instance_id: string;
+  core_epoch: string;
+  switched_at: string;
 }
 
 export interface ProjectionCoverageRow {
@@ -46,8 +62,16 @@ export interface SubtotalRow {
 }
 
 export interface BalanceProjectionReader {
-  /** The declared inputs of a build as they stand right now. */
+  /** Operational summary of the store; never the snapshot identity (0038). */
   projectionInputs(): Promise<ProjectionInputsRow>;
+  /**
+   * The CORE change detector: one integer per kind of change plus the epoch.
+   * A snapshot describes the current context exactly when its recorded
+   * `source_revision` still equals this one.
+   */
+  coreRevision(): Promise<CoreRevisionRow>;
+  /** The snapshot the read model currently publishes, or null before the first switch. */
+  activePointer(): Promise<ActivePointerRow | null>;
   /** The newest sealed snapshot, or null when no build has completed yet. */
   currentSnapshot(): Promise<BalanceSnapshotRow | null>;
   /** A snapshot a cursor names; null means the fixed context expired. */
@@ -96,6 +120,21 @@ export function createBalanceProjectionReader(sql: SqlExecutor): BalanceProjecti
           decision_revisions: 0,
         }
       );
+    },
+    async coreRevision() {
+      // A database that has not applied migration 0038 has no revision row;
+      // revision 0 is then "older than every recorded snapshot", which keeps
+      // a reader honest instead of reporting a snapshot as current.
+      return (
+        (await sql.first<CoreRevisionRow>(CORE_REVISION_SQL, [])) ?? {
+          source_revision: 0,
+          visibility_revision: 0,
+          core_epoch: "unknown",
+        }
+      );
+    },
+    async activePointer() {
+      return await sql.first<ActivePointerRow>(ACTIVE_POINTER_SQL, []);
     },
     async currentSnapshot() {
       return await sql.first<BalanceSnapshotRow>(CURRENT_SNAPSHOT_SQL, []);

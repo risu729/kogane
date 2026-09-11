@@ -310,6 +310,12 @@ way Miniflare does (the HEAD-then-compare path covers it either way), and any
 end-to-end path into CORE or READ — those belong to U08. G1-04, G1-10, G1-11
 and G1-15 need the Processor and are not claimed here.
 
+U08 has since built that consumer: `docs/processor.md` describes the Queue
+consumer, the bounded `collection_scan` lane, the idempotency records of
+migration `0039_collection_runs.sql`, and the registration that adopts the
+objects in place rather than copying them. The acceptance rows listed above as
+needing the Processor are covered there.
+
 ## Flags, deploy order, rollback
 
 - Flags: none in this package. The consumers add `SHARED_R2_INGEST_ENABLED`

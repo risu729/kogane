@@ -5,7 +5,7 @@ import auditWorker from "../src/sbi-vc-audit-worker";
 const RUN_ID = "123e4567-e89b-42d3-a456-426614174000";
 const PREFIX = `raw/sbi-vc-trade/2026/09/07/${RUN_ID}/`;
 const FIXTURE_ROOT = new URL(
-  "../../../poc/observation-pipeline/fixtures/sbi-vc-trade/2026-09-07/run-20260907-synthetic01/",
+  "../../../tests/fixtures/observation-pipeline/sbi-vc-trade/2026-09-07/run-20260907-synthetic01/",
   import.meta.url,
 );
 const DATASETS = [

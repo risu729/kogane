@@ -5,14 +5,13 @@
 // else, and no test here inserts an amount, a credential or a provider string.
 import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CORE_MIGRATIONS_URL } from "../../storage-d1/src/migrations.ts";
 import type { BatchOutcome, CommandStore, PreparedWrite } from "../src/command/contract.ts";
 
-const MIGRATIONS = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../../services/raw-evidence/migrations",
-);
+// The CORE directory is named once, in packages/storage-d1 (U05, decision D3).
+const MIGRATIONS = fileURLToPath(CORE_MIGRATIONS_URL);
 
 /** Every migration, in order, on a fresh in-memory database with FKs on (as D1 has). */
 export function migratedDatabase(): Database {

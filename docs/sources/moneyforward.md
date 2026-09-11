@@ -176,7 +176,7 @@ collectorの非公開HTML routeとfragment構造は将来変更され得る。va
 - `services/collector-moneyforward/README.md`: authentication、read-only collection、source limitations
 - `services/collector-r2-importer/README.md`: strict validator、chunking、cursor、rollout order
 - `docs/sources/smbc-bank.md`: MoneyForward経由で弱化・欠落するSMBC/Vpass固有情報
-- `services/raw-evidence/migrations/0014_moneyforward_collector_r2.sql`: central route/policy
+- `packages/storage-d1/migrations/core/0014_moneyforward_collector_r2.sql`: central route/policy
 
 ## 未確認事項
 
@@ -187,3 +187,12 @@ collectorの非公開HTML routeとfragment構造は将来変更され得る。va
 
 これらを推測で補完せず、MoneyForward snapshotのprovenanceと取得時刻を保持し、金融機関公式source
 と同等の完全性は宣言しない。
+
+## 共通 DATA R2 への切替 (U09)
+
+Collector は `COLLECTION_TARGET` var を持つ。既定の `legacy` は現行どおり
+per-source bucket + importer 経由。`shared` にすると run は `packages/collection`
+経由で共通 bucket `kogane-raw-evidence` に保存され、terminal manifest を最後に
+書く。保存する HTML は現在中央へ送っているものと同じ bytes で、account ごとの
+unit と取得できた月の range を terminal に持つ。artifact と role の対応、deploy 順
+と rollback は `docs/collection.md` の該当節を参照。

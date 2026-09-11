@@ -1,6 +1,6 @@
 # Runtime resource ledger
 
-Generated from the `wrangler*.jsonc` files under `experiments/`, `services/` and `poc/` by
+Generated from the `wrangler*.jsonc` files under `apps/`, `experiments/`, `poc/` and `services/` by
 `scripts/resource-ledger.ts`. Do not edit by hand: `scripts/resource-ledger.test.ts`
 regenerates it and fails when this file and the configs disagree.
 
@@ -14,7 +14,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 ## Summary
 
-- Wrangler configs: 39
+- Wrangler configs: 40
 - Distinct Workers that exist in the account: 17
 - Live Workers with no config in this repository: kogane-globalpass-container-probe-20260827
 - Live R2 buckets no config references: —
@@ -25,6 +25,8 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | database | id | live | bound by |
 | --- | --- | --- | --- |
 | test | `00000000-0000-0000-0000-000000000001` | no | kogane-evidence-browser-test |
+| test-read | `00000000-0000-0000-0000-000000000002` | no | kogane-evidence-browser-test |
+| kogane-read | `320ebe31-a031-48a1-985f-0e6fabbd517a` | yes | kogane-evidence-browser<br>kogane-observation-pipeline<br>kogane-read-migrations |
 | kogane-raw-evidence | `b335a887-250d-45c9-bd72-af83f35fdc60` | yes | kogane-evidence-browser<br>kogane-ingest<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic |
 
 ## R2 buckets
@@ -35,7 +37,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | kogane-mobile-suica-collector-poc | yes | kogane-collector-r2-importer<br>kogane-mobile-suica-collector-poc |
 | kogane-moneyforward-collector-poc | yes | kogane-collector-r2-importer<br>kogane-moneyforward-collector-poc<br>kogane-moneyforward-layer-b-audit-local<br>kogane-moneyforward-r2-contract-audit-local |
 | kogane-myjcb-collector-poc | yes | kogane-collector-r2-importer<br>kogane-myjcb-collector-poc<br>kogane-myjcb-r2-layer-b-audit-local |
-| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-ingest<br>kogane-mobile-suica-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sbi-collector-poc<br>kogane-vpoint-collector-poc<br>kogane-vpoint-pay-collector-poc |
+| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-ingest<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sbi-collector-poc<br>kogane-sony-bank-collector-poc<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc<br>kogane-vpoint-pay-collector-poc |
 | kogane-sbi-collector-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-collector-poc |
 | kogane-sbi-shinsei-collector-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-shinsei-r2-layer-b-audit-local |
 | kogane-sbi-vc-trade-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-vc-r2-layer-b-audit-local<br>kogane-sbi-vc-session-poc |
@@ -48,10 +50,11 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 ## Queues
 
-| queue | producers | consumers | dead letter |
-| --- | --- | --- | --- |
-| kogane-r2-outbox-reconciler | kogane-collector-r2-importer | kogane-collector-r2-importer | kogane-r2-outbox-reconciler-dlq |
-| kogane-vpass-raw-evidence-import | kogane-vpass-collector-poc | kogane-vpass-collector-poc | kogane-vpass-raw-evidence-import-dlq |
+| queue | producers | consumers | dead letter | exists |
+| --- | --- | --- | --- | --- |
+| kogane-collection-terminals | — | kogane-observation-pipeline | kogane-collection-terminals-dlq | to be created by the first deploy (U08) |
+| kogane-r2-outbox-reconciler | kogane-collector-r2-importer | kogane-collector-r2-importer | kogane-r2-outbox-reconciler-dlq | declared (unverified) |
+| kogane-vpass-raw-evidence-import | kogane-vpass-collector-poc | kogane-vpass-collector-poc | kogane-vpass-raw-evidence-import-dlq | declared (unverified) |
 
 ## Durable Object classes and migration tags
 
@@ -101,6 +104,15 @@ scanned workspaces keeps its row below with `EXECUTED_U04`.
 | `poc/sbi-vc-trade-client` | `promote-shared-if-used` | packages/sbi-vc-trade-client | `5fb143e0f77a` | no wrangler config of its own; services/collector-sbi-vc-trade links it into the bundle of kogane-sbi-vc-session-poc, so it is promoted rather than retired |
 
 ## Directories
+
+### `apps/web`
+
+- Disposition (poc_disposition.csv row poc/observation-pipeline + decision D1): `promoted-from-poc` → apps/web (the React client and its frontend tests)
+- Required verification: U04 executed the move; the three bundles are byte-identical and the client imports no service internal
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: NO_LIVE_RESOURCE
+
+No wrangler config.
 
 ### `experiments/cloudflare-browser-run`
 
@@ -173,6 +185,15 @@ scanned workspaces keeps its row below with `EXECUTED_U04`.
 - Vars (names only): —
 - Required secrets (names only): —
 
+### `experiments/observation-pipeline-local`
+
+- Disposition (poc_disposition.csv row poc/observation-pipeline + decision D1): `isolated-as-experiment` → experiments/observation-pipeline-local (EXPERIMENT.md: risu729, 2026-12-31)
+- Required verification: U04 executed the move; retire once the App API covers replay and status (docs/research/observation-pipeline-poc.md)
+- Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
+- Live resources: NO_LIVE_RESOURCE
+
+No wrangler config.
+
 ### `experiments/tamia-tcp-bridge`
 
 - Disposition (poc_disposition.csv (was poc/tamia-tcp-bridge)): `promote-service-if-used` → experiments/tamia-tcp-bridge (not used by any collector; promote to services/tamia-tcp-bridge only when one routes through it)
@@ -218,14 +239,69 @@ scanned workspaces keeps its row below with `EXECUTED_U04`.
 - Vars (names only): —
 - Required secrets (names only): BRIDGE_TOKEN
 
-### `poc/observation-pipeline`
+### `services/app`
 
-- Disposition (poc_disposition.csv): `split-promote-retire` → apps/web; packages/application; tests/fixtures; docs/research
-- Required verification: promote UI and fixtures, move needed local operations to the App API, legacy store to test/research, drop the shims
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: NO_LIVE_RESOURCE
+- Disposition (plan 07 §1 + decision D1): `rename-directory` → services/app
+- Required verification: git mv only; Worker names kogane-evidence-browser and kogane-demo stay
+- Execution status: EXECUTED_RENAME (plan recorded `NOT_VERIFIED`)
+- Live resources: LIVE(workers=kogane-demo,kogane-evidence-browser; buckets=kogane-raw-evidence)
 
-No wrangler config.
+#### `kogane-demo` — `services/app/wrangler.demo.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/demo-worker.ts
+- D1: —
+- R2: —
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
+- Crons: —
+- Assets: `../../apps/web/dist` → ASSETS
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>BALANCE_PROJECTION_ENABLED<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED
+- Required secrets (names only): —
+
+#### `kogane-evidence-browser` — `services/app/wrangler.jsonc`
+
+- Role: deployed; exists in the account: yes
+- Entry point: src/worker.ts
+- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`<br>READ → kogane-read `320ebe31-a031-48a1-985f-0e6fabbd517a`
+- R2: EVIDENCE → kogane-raw-evidence
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: PIPELINE → kogane-observation-pipeline
+- Crons: —
+- Assets: `../../apps/web/dist-production` → ASSETS
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED<br>REWARDS_V2_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SESSION_REFRESH_POLICY
+- Required secrets (names only): —
+
+#### `kogane-evidence-browser-test` — `services/app/wrangler.test.jsonc`
+
+- Role: test-only; exists in the account: no
+- Entry point: src/worker.ts
+- D1: DB → test `00000000-0000-0000-0000-000000000001` (not live)<br>READ → test-read `00000000-0000-0000-0000-000000000002` (not live)
+- R2: EVIDENCE → test (not live)
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
+- Crons: —
+- Assets: `test/assets` → ASSETS
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>READ_PROJECTION_ENABLED<br>REWARDS_V2_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SESSION_REFRESH_POLICY
+- Required secrets (names only): —
 
 ### `services/collector-globalpass`
 
@@ -284,14 +360,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-moneyforward
 - Required verification: collector/importer/CORE mapping and resource identity kept
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-moneyforward-collector-poc; buckets=kogane-moneyforward-collector-poc)
+- Live resources: LIVE(workers=kogane-moneyforward-collector-poc; buckets=kogane-moneyforward-collector-poc,kogane-raw-evidence)
 
 #### `kogane-moneyforward-collector-poc` — `services/collector-moneyforward/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-moneyforward-collector-poc
+- R2: SNAPSHOTS → kogane-moneyforward-collector-poc<br>DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: —
@@ -302,7 +378,7 @@ No wrangler config.
 - Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
 - Crons: `15 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
 ### `services/collector-myjcb`
@@ -310,14 +386,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-myjcb
 - Required verification: keep the Browser Run login and fetch boundary
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-myjcb-collector-poc; buckets=kogane-myjcb-collector-poc)
+- Live resources: LIVE(workers=kogane-myjcb-collector-poc; buckets=kogane-myjcb-collector-poc,kogane-raw-evidence)
 
 #### `kogane-myjcb-collector-poc` — `services/collector-myjcb/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-myjcb-collector-poc
+- R2: SNAPSHOTS → kogane-myjcb-collector-poc<br>DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: —
@@ -328,7 +404,7 @@ No wrangler config.
 - Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
 - Crons: `0 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
 ### `services/collector-r2-importer`
@@ -732,14 +808,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-sony-bank
 - Required verification: keep the sanitize/HTML/CSV contract and the resource identity
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-sony-bank-collector-poc; buckets=kogane-sony-bank-collector-poc)
+- Live resources: LIVE(workers=kogane-sony-bank-collector-poc; buckets=kogane-raw-evidence,kogane-sony-bank-collector-poc)
 
 #### `kogane-sony-bank-collector-poc` — `services/collector-sony-bank/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-sony-bank-collector-poc
+- R2: SNAPSHOTS → kogane-sony-bank-collector-poc<br>DATA → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: —
@@ -750,7 +826,7 @@ No wrangler config.
 - Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
 - Crons: `0 21 * * *`
 - Assets: —
-- Vars (names only): COLLECTOR_SCHEMA_VERSION
+- Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
 ### `services/collector-vpass`
@@ -758,14 +834,14 @@ No wrangler config.
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-vpass
 - Required verification: keep the Worker name and the R2/cron/auth contract
 - Execution status: EXECUTED_U04 (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-vpass-collector-poc; buckets=kogane-vpass-collector-poc)
+- Live resources: LIVE(workers=kogane-vpass-collector-poc; buckets=kogane-raw-evidence,kogane-vpass-collector-poc)
 
 #### `kogane-vpass-collector-poc` — `services/collector-vpass/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
 - D1: —
-- R2: SNAPSHOTS → kogane-vpass-collector-poc
+- R2: SNAPSHOTS → kogane-vpass-collector-poc<br>DATA → kogane-raw-evidence
 - KV: —
 - Queues: produce RAW_EVIDENCE_QUEUE → kogane-vpass-raw-evidence-import<br>consume kogane-vpass-raw-evidence-import (dlq kogane-vpass-raw-evidence-import-dlq)
 - Durable Objects: —
@@ -776,7 +852,7 @@ No wrangler config.
 - Service bindings: RAW_EVIDENCE_IMPORTER → kogane-collector-r2-importer
 - Crons: `0 21 * * *`
 - Assets: —
-- Vars (names only): —
+- Vars (names only): COLLECTION_TARGET
 - Required secrets (names only): —
 
 ### `services/collector-vpoint`
@@ -831,78 +907,14 @@ No wrangler config.
 - Vars (names only): COLLECTION_TARGET<br>COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_PAY_DEVICE_UUID<br>VPOINT_PAY_REFRESH_TOKEN
 
-### `services/evidence-browser`
-
-- Disposition (plan 07 §1 + decision D1): `rename-directory` → services/app
-- Required verification: git mv only; Worker names kogane-evidence-browser and kogane-demo stay
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-demo,kogane-evidence-browser; buckets=kogane-raw-evidence)
-
-#### `kogane-demo` — `services/evidence-browser/wrangler.demo.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/demo-worker.ts
-- D1: —
-- R2: —
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: `../../poc/observation-pipeline/web/dist` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>BALANCE_PROJECTION_ENABLED<br>OPS_API_ENABLED
-- Required secrets (names only): —
-
-#### `kogane-evidence-browser` — `services/evidence-browser/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60`
-- R2: EVIDENCE → kogane-raw-evidence
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: PIPELINE → kogane-observation-pipeline
-- Crons: —
-- Assets: `../../poc/observation-pipeline/web/dist-production` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>REWARDS_V2_ENABLED<br>SESSION_REFRESH_POLICY
-- Required secrets (names only): —
-
-#### `kogane-evidence-browser-test` — `services/evidence-browser/wrangler.test.jsonc`
-
-- Role: test-only; exists in the account: no
-- Entry point: src/worker.ts
-- D1: DB → test `00000000-0000-0000-0000-000000000001` (not live)
-- R2: EVIDENCE → test (not live)
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: `test/assets` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>OPS_API_ENABLED<br>SESSION_REFRESH_POLICY
-- Required secrets (names only): —
-
-### `services/observation-pipeline`
+### `services/processor`
 
 - Disposition (plan 07 §1 + decision D1): `rename-directory` → services/processor
 - Required verification: git mv only; Worker name kogane-observation-pipeline and cron stay
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
+- Execution status: EXECUTED_RENAME (plan recorded `NOT_VERIFIED`)
 - Live resources: LIVE(workers=kogane-observation-pipeline; buckets=kogane-raw-evidence)
 
-#### `kogane-observation-read-diagnostic` — `services/observation-pipeline/wrangler.diagnostic.jsonc`
+#### `kogane-observation-read-diagnostic` — `services/processor/wrangler.diagnostic.jsonc`
 
 - Role: binding-only; exists in the account: no
 - Entry point: —
@@ -921,14 +933,14 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
-#### `kogane-observation-pipeline` — `services/observation-pipeline/wrangler.jsonc`
+#### `kogane-observation-pipeline` — `services/processor/wrangler.jsonc`
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
-- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60` (migrations_dir `../raw-evidence/migrations`)
-- R2: EVIDENCE → kogane-raw-evidence
+- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60` (migrations_dir `../../packages/storage-d1/migrations/core`)<br>READ → kogane-read `320ebe31-a031-48a1-985f-0e6fabbd517a`
+- R2: EVIDENCE → kogane-raw-evidence<br>DATA → kogane-raw-evidence
 - KV: —
-- Queues: —
+- Queues: consume kogane-collection-terminals (dlq kogane-collection-terminals-dlq)
 - Durable Objects: —
 - DO migration tags: —
 - Containers: —
@@ -937,10 +949,10 @@ No wrangler config.
 - Service bindings: —
 - Crons: `*/5 * * * *`
 - Assets: —
-- Vars (names only): BALANCE_PROJECTION_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED
+- Vars (names only): BALANCE_PROJECTION_ENABLED<br>COLLECTION_ACCOUNT_ID<br>COLLECTION_DATA_BUCKET<br>COLLECTION_INGEST_CLIENT<br>OPS_DISPATCH_ENABLED<br>READ_PROJECTION_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SHARED_R2_INGEST_ENABLED
 - Required secrets (names only): —
 
-#### `kogane-observation-ops-local` — `services/observation-pipeline/wrangler.ops.jsonc`
+#### `kogane-observation-ops-local` — `services/processor/wrangler.ops.jsonc`
 
 - Role: binding-only; exists in the account: no
 - Entry point: —
@@ -959,6 +971,25 @@ No wrangler config.
 - Vars (names only): —
 - Required secrets (names only): —
 
+#### `kogane-read-migrations` — `services/processor/wrangler.read-migrations.jsonc`
+
+- Role: binding-only; exists in the account: no
+- Entry point: —
+- D1: READ → kogane-read `320ebe31-a031-48a1-985f-0e6fabbd517a` (migrations_dir `../../packages/storage-d1/migrations/read`)
+- R2: —
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
+- Crons: —
+- Assets: —
+- Vars (names only): —
+- Required secrets (names only): —
+
 ### `services/raw-evidence`
 
 - Disposition (plan 07 §1 + decision D2/D3): `keep-as-legacy-adapter` → packages/storage-d1 + packages/application (U05); migrations move in U05
@@ -970,7 +1001,7 @@ No wrangler config.
 
 - Role: deployed; exists in the account: yes
 - Entry point: src/worker.ts
-- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60` (migrations_dir `migrations`)
+- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60` (migrations_dir `../../packages/storage-d1/migrations/core`)
 - R2: EVIDENCE → kogane-raw-evidence
 - KV: —
 - Queues: —

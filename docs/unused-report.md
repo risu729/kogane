@@ -73,8 +73,8 @@ Highest first; the long tail is one or two per workspace.
 | workspace                        | exports | types |
 | -------------------------------- | ------: | ----: |
 | `services/collector-r2-importer` |      31 |    29 |
-| `services/observation-pipeline`  |      38 |    16 |
-| `services/evidence-browser`      |      23 |    19 |
+| `services/processor`             |      38 |    16 |
+| `services/app`                   |      23 |    19 |
 | `poc/observation-pipeline`       |      10 |    18 |
 | `packages/parsers`               |      18 |     2 |
 | `packages/application`           |       8 |     3 |

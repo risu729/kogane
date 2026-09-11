@@ -46,7 +46,6 @@ sources = [
 	"apps/*/package.json",
 	"experiments/*/package.json",
 	"packages/*/package.json",
-	"poc/*/package.json",
 	"services/*/package.json",
 ]
 outputs = ["node_modules/.bun"]
@@ -56,8 +55,10 @@ run = "bun install --frozen-lockfile"
 includes = [
 	"tasks.toml",
 	"tasks",
+	"apps/web/tasks.toml",
 	"experiments/cloudflare-browser-run/tasks.toml",
 	"experiments/cloudflare-runtime-probe/tasks.toml",
+	"experiments/observation-pipeline-local/tasks.toml",
 	"experiments/tamia-tcp-bridge/tasks.toml",
 	"packages/application/tasks.toml",
 	"packages/collection/tasks.toml",
@@ -69,7 +70,8 @@ includes = [
 	"packages/parsers/tasks.toml",
 	"packages/read-model/tasks.toml",
 	"packages/sbi-vc-trade-client/tasks.toml",
-	"poc/observation-pipeline/tasks.toml",
+	"packages/storage-d1/tasks.toml",
+	"services/app/tasks.toml",
 	"services/collector-globalpass/tasks.toml",
 	"services/collector-mobile-suica/tasks.toml",
 	"services/collector-moneyforward/tasks.toml",
@@ -83,7 +85,6 @@ includes = [
 	"services/collector-vpass/tasks.toml",
 	"services/collector-vpoint-pay/tasks.toml",
 	"services/collector-vpoint/tasks.toml",
-	"services/evidence-browser/tasks.toml",
-	"services/observation-pipeline/tasks.toml",
+	"services/processor/tasks.toml",
 	"services/raw-evidence/tasks.toml",
 ]

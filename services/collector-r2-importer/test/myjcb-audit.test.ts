@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import auditWorker from "../src/myjcb-audit-worker";
 
 const FIXTURE_ROOT = new URL(
-  "../../../poc/observation-pipeline/fixtures/myjcb/2026-09-07/run-synthetic/",
+  "../../../tests/fixtures/observation-pipeline/myjcb/2026-09-07/run-synthetic/",
   import.meta.url,
 );
 

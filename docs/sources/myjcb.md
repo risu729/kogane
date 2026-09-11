@@ -346,3 +346,13 @@ checked-in canaryはsource R2をread-onlyで184 objects / 24 manifests監査し�
 日次実行は`0 21 * * *`のCloudflare CronからWorker `scheduled()`を直接呼び、GitHub Actions cronを使わない。手動`POST /trigger`のBearerはSHA-256で固定長化してから`crypto.subtle.timingSafeEqual`で比較する。ただしCron/manual overlap lockは未実装で、同一IDの同時login/readを防ぐDurable Object lockまたはQueue直列化をdeploy/merge前要件とする。
 
 実装、stop条件、R2 layout、cleanup前提、synthetic test、未確認事項は`services/collector-myjcb/README.md`に集約した。公開AGPL prior artの観測は、PR #24調査時点のOkura commit `afc6057fba78b5bfd6364654548fbfd91c76692a`とPoC照合時点の`bbf11e032aba4a380009508e91954361a3f9d658`を区別し、protocol確認だけに使った。
+
+## 共通 DATA R2 への切替 (U09)
+
+Collector は `COLLECTION_TARGET` var を持つ。既定の `legacy` は現行どおり
+per-source bucket + importer 経由。`shared` にすると run は `packages/collection`
+経由で共通 bucket `kogane-raw-evidence` に保存され、terminal manifest を最後に
+書く。保存する HTML は collector の `redactedStatementHtml` 済み bytes で、保存前に
+中央と同じ redaction 不変条件を再検査する。connection は terminal の unit として
+分離され、human-required は unit の状態として記録するだけで再 login はしない。
+deploy 順と rollback は `docs/collection.md` の該当節を参照。

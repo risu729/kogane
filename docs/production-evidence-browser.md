@@ -1,6 +1,6 @@
 # Production evidence browser
 
-The read-only Worker in `services/evidence-browser` serves the existing React
+The read-only Worker in `services/app` serves the existing React
 frontend in evidence mode and reads the central raw-evidence D1/R2 store. The
 first enabled source is `sony-bank`. It introduces no migrations, parsed
 observations, collector calls, or writes to the evidence store.

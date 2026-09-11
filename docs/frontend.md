@@ -1,6 +1,6 @@
 # Frontend foundation
 
-The Japanese evidence browser in `poc/observation-pipeline/web` can be
+The Japanese evidence browser in `apps/web` can be
 developed while production raw-evidence ingestion continues. It displays
 source observations and their provenance. It does not calculate net worth,
 cross-currency totals, reconciled transactions, or P&L.
@@ -93,8 +93,8 @@ A server refuses with 400 any query parameter its capabilities do not grant;
 the client never sends one. While metadata is loading, capabilities are
 unknown: dependent list queries stay disabled and pages show their loading
 state rather than requesting with guessed defaults. Changing the schema fails
-the pinned contract tests in both `poc/observation-pipeline` and
-`services/evidence-browser`, so a one-sided edit cannot pass CI.
+the pinned contract tests in both `apps/web` and
+`services/app`, so a one-sided edit cannot pass CI.
 
 ## Shared figures and the AI hand-off
 
@@ -105,7 +105,7 @@ page's summary counts therefore come from `GET /api/v2/query?intent=coverage`
 — the shared application service (`packages/application`) that the agent API
 also calls, with the same scope rules — instead of summing rows in the client.
 On a store without that capability the page keeps its own arithmetic, so the
-local PoC and the synthetic demo are unaffected.
+local pipeline experiment and the synthetic demo are unaffected.
 
 What a page may still decide for itself is unchanged: open and closed
 sections, the selected tab, display density, an in-progress input, a
@@ -129,11 +129,11 @@ See [Agent API](agent-api.md) for the grants, tools and result contract.
 
 ## Safe preview
 
-From `poc/observation-pipeline`:
+From the repository root:
 
 ```sh
-bun install --frozen-lockfile
-mise run web:build && bun src/serve.ts --demo
+mise run install
+mise run local-pipeline:preview
 ```
 
 Preview builds the UI, creates a new temporary database, and populates it
@@ -143,7 +143,7 @@ regular `state/` database. A normal shutdown removes its temporary store.
 An abrupt process termination can leave a temporary `kogane-preview-*`
 directory; it contains only synthetic data.
 
-`bun src/serve.ts` continues to read the regular local store. Its metadata
+`mise run local-pipeline:serve` continues to read the regular local store. Its metadata
 reports the data classification as unknown: an operator may have ingested
 real evidence, synthetic evidence, or both. An existing store must never be
 labelled synthetic merely because it is local. Neither mode is a connection
@@ -153,9 +153,10 @@ to the production collector database.
 
 The browser and local query layer share type-only response contracts in
 `packages/observation-shared/src/api-contract.ts`. These describe the local
-PoC, not a frozen production database schema. Production adapters should
+pipeline experiment (`experiments/observation-pipeline-local`), not a frozen
+production database schema. Production adapters should
 map the domain to a versioned read API, with an explicit revision when
-semantics change. In particular, the PoC's numeric identifiers and raw
+semantics change. In particular, the experiment's numeric identifiers and raw
 SHA-based routes must not be assumed to match production run-scoped storage.
 
 Agree on these before the production connection is enabled:
@@ -179,7 +180,7 @@ here neither migrate its schema nor deploy or trigger collectors. The
 read-only browser can be replaced without losing evidence or observations.
 
 The first production adapter is implemented separately in
-`services/evidence-browser`, with the same frontend built in evidence mode.
+`services/app`, with the same frontend built in evidence mode.
 It reads sealed Sony Bank runs and their artifacts from the central raw store;
 it does not populate the local parsed-observation endpoints. See the
 [production evidence browser](production-evidence-browser.md) for its versioned
@@ -188,13 +189,12 @@ contract, authentication, deployment configuration, and verification.
 ## Verification
 
 ```sh
-mise run web:typecheck
-mise run web:build
-bunx playwright install chromium
-bun test
+mise run ci:web              # typecheck, the three builds, unit and browser tests
+mise run ci:local-pipeline   # the experiment's suite over the built client
 ```
 
-`CHROMIUM_PATH` can select an existing Chromium/Chrome executable. CI installs
-Chromium and fails if browser tests cannot run. Tests exercise exact amounts,
+`CHROMIUM_PATH` can select an existing Chromium/Chrome executable; without it
+the browser tests use the Playwright-managed Chromium, which CI installs
+(`web:browser`) and fails on when it cannot run. Tests exercise exact amounts,
 untrusted provider text, provenance links, filtering, mobile layout, and
 request failure/retry behavior against synthetic data.

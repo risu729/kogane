@@ -111,3 +111,14 @@ The Worker deletion removes its Cron Trigger and secrets with the Worker. The
 R2 deletion is intentionally separate and destructive. If the legacy Free-plan
 Queue still exists, remove it separately with
 `npx wrangler queues delete kogane-vpass-collector-poc`.
+
+## 共通 DATA R2 への切替 (U09)
+
+Collector は `COLLECTION_TARGET` var を持つ。既定の `legacy` は現行どおり
+per-source bucket へ raw envelope を保存し、importer が sanitize して中央へ送る。
+`shared` にすると collector 自身が `src/sanitize.ts`（importer と同じ
+`vpass-json-sanitizer` v1）で sanitize した bytes を共通 bucket
+`kogane-raw-evidence` へ content-addressed に保存し、terminal manifest を最後に
+書く。card ごとに 1 run（`<runId>-card-NNN`、`acquisitionSessionRef` は session の
+runId）で、raw envelope・cookie・card identify key は保存しない。artifact と role の
+対応、deploy 順と rollback は `docs/collection.md` の該当節を参照。

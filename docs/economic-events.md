@@ -115,7 +115,7 @@ widening that closed list. Settlement is not one of them: it is a first-class
 
 ## The vertical slice that runs
 
-`services/observation-pipeline/src/reconciliation-job.ts` runs stage A and
+`services/processor/src/reconciliation-job.ts` runs stage A and
 stage B over **one** source pair: **pending against posted inside the Vpass
 statement page**. That parser emits two provider displays of the same card and
 statement month — the `customized` family with provider status `unconfirmed`
@@ -147,7 +147,7 @@ guarded, and is covered by a test with a synthetic source that does report one.
 
 ### Acceptance
 
-`services/observation-pipeline/src/reconciliation-commands.ts` exposes
+`services/processor/src/reconciliation-commands.ts` exposes
 `decideProposal` / `acceptProposal`, guarded exactly like `identity-commands.ts`:
 a caller-chosen `operationId` makes a resend idempotent, the actor is the
 principal the server verified, and `expectedStatus` is the state the caller saw.
@@ -185,7 +185,7 @@ computed by casting a coefficient to a SQLite INTEGER.
 
 ### HTTP
 
-`services/evidence-browser/src/events-api.ts` serves, behind the existing Access
+`services/app/src/events-api.ts` serves, behind the existing Access
 gate and the GET-only boundary:
 
 - `GET /api/v2/activity?basis=cash-movement|purchase-recognition&offset=N`
@@ -204,10 +204,10 @@ the server replaces it with what it can actually serve.
 
 ## Flags
 
-| Flag                     | Where                                | Default | Effect when on                                                        |
-| ------------------------ | ------------------------------------ | ------- | --------------------------------------------------------------------- |
-| `RECONCILIATION_ENABLED` | `services/observation-pipeline` vars | `"0"`   | The scheduled `reconciliation_sweep` lane runs and writes candidates. |
-| `EVENTS_V2_ENABLED`      | `services/evidence-browser` vars     | `"0"`   | `/api/v2/*` is served if the projection exists.                       |
+| Flag                     | Where                     | Default | Effect when on                                                        |
+| ------------------------ | ------------------------- | ------- | --------------------------------------------------------------------- |
+| `RECONCILIATION_ENABLED` | `services/processor` vars | `"0"`   | The scheduled `reconciliation_sweep` lane runs and writes candidates. |
+| `EVENTS_V2_ENABLED`      | `services/app` vars       | `"0"`   | `/api/v2/*` is served if the projection exists.                       |
 
 With both off, the scheduled worker logs no new event, writes nothing, and the
 browser serves no new route.
@@ -215,9 +215,9 @@ browser serves no new route.
 ## Deploy order and rollback
 
 1. Apply migration `0032_economic_events.sql` (schema; additive, writes no rows).
-2. Deploy `services/observation-pipeline` with `RECONCILIATION_ENABLED="0"`;
+2. Deploy `services/processor` with `RECONCILIATION_ENABLED="0"`;
    turn it on when the candidates should start being produced.
-3. Deploy `services/evidence-browser` with `EVENTS_V2_ENABLED="0"`; turn it on
+3. Deploy `services/app` with `EVENTS_V2_ENABLED="0"`; turn it on
    to expose the read routes.
 
 Rollback: set the flags back to `"0"`. The lane stops and the routes disappear;
@@ -253,14 +253,14 @@ migration 0026.
   unknown, provider-against-derived difference with reasons, a wrong merge
   undone by a new revision with the old revision retained, double allocation
   rejected, append-only triggers).
-- `services/observation-pipeline`: `test/reconciliation.test.ts` (the Vpass
+- `services/processor`: `test/reconciliation.test.ts` (the Vpass
   slice, idempotent re-runs, unpublished parses producing nothing, two
   same-amount candidates never merged, acceptance and rejection through the
   decision log with resend and conflicts, the provider-link auto-acceptance path
   on a synthetic source, the scheduled lane off by default, and migration 0032
   on 0017–0035 with seeded rows including its closed enums and append-only
   triggers).
-- `services/evidence-browser`: `test/events-api.test.ts` (capability gate, Access
+- `services/app`: `test/events-api.test.ts` (capability gate, Access
   gate, GET-only, both routes, query validation) plus the pre-existing suites.
 
 Not verified: production data, and the behaviour of concurrent acceptances from

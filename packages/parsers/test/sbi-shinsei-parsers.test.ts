@@ -6,7 +6,7 @@ import { sbiShinseiYenDepositAccount } from "../src/parsers/sbi-shinsei-yen-depo
 import type { ArtifactMeta, Parser } from "../src/types.ts";
 
 const ROOT = new URL(
-  "../../../poc/observation-pipeline/fixtures/sbi-shinsei-parser-boundaries/",
+  "../../../tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/",
   import.meta.url,
 );
 function artifact(dataset: string, sourceId = "sbi-shinsei-bank"): ArtifactMeta {

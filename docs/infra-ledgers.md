@@ -112,6 +112,16 @@ four labels:
 A separate `appendOnly` flag per table is derived from the triggers rather than from the label, so
 the ledger reports the schema's actual mutability instead of an intention.
 
+`infra/schema/read-ledger.md` uses two labels of its own, because every table in that database is
+rebuildable and the CORE vocabulary does not apply:
+
+- `read-projection` — the projection of one fixed input and the CORE references it was built from.
+- `read-operational` — the state that drives a build: the published pointer, the checkpoints, and
+  the identity of the physical database.
+
+Neither is a retention decision. Losing the whole READ database costs a rebuild and every open
+cursor, and nothing else (`docs/read-rebuild-runbook.md`, G0-09).
+
 ## Limits
 
 - The live column of the resource ledger is a recorded read of the Cloudflare account from
