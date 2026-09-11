@@ -88,6 +88,47 @@ export {
 } from "./operations/sql.ts";
 export { resolveAndSimulate } from "./operations/targets.ts";
 
+// ── operations services (02 §4, U06) ─────────────────────────────────
+export {
+  type AcceptedOperation,
+  type CollectionRequest,
+  type DispatchResult,
+  DISPATCH_STATES,
+  type DispatchState,
+  type ImportRequest,
+  OPERATION_KINDS,
+  OPERATION_STAGES,
+  OPERATION_STATUSES,
+  type OperationContext,
+  type OperationKind,
+  operationIdFor,
+  operationPayloadDigest,
+  type OperationReceipt,
+  type OperationRequest,
+  type OperationStage,
+  type OperationStageReport,
+  type OperationStatus,
+  pendingDispatches,
+  type ProjectionRequest,
+  readOperation,
+  recordDispatch,
+  recordOperationStage,
+  type ReplayRequest,
+  requestCollection,
+  requestImport,
+  requestProjectionRebuild,
+  requestReplay,
+  requestSessionRefresh,
+  SESSION_REFRESH_MODES,
+  type SessionRefreshMode,
+  sessionRefreshPolicy,
+  type SessionRefreshRequest,
+  STAGE_STATES,
+  STAGES_BY_KIND,
+  type StageReport,
+  type StageState,
+} from "./operations/requests.ts";
+
 // ── query services (A08) ─────────────────────────────────────────────
 export {
   AGENT_CAPABILITIES as QUERY_GRANT_CAPABILITIES,

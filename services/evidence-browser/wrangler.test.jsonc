@@ -13,7 +13,9 @@
     "ACCESS_AUDIENCE": "synthetic-test-audience",
     "COMMANDS_ENABLED": "",
     "AGENT_GRANTS": "",
-    "AGENT_API_GRANTS": ""
+    "AGENT_API_GRANTS": "",
+    "OPS_API_ENABLED": "",
+    "SESSION_REFRESH_POLICY": ""
   },
   "assets": {
     "directory": "test/assets",
