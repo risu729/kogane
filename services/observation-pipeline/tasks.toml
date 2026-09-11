@@ -26,6 +26,12 @@ run = [
 	"./node_modules/.bin/wrangler deploy --dry-run",
 ]
 
+["processor:bundle"]
+description = "Emit the deployable bundle of services/observation-pipeline for the release manifest."
+depends = ["processor:types"]
+dir = "services/observation-pipeline"
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/processor --config wrangler.jsonc"
+
 ["ci:processor"]
 description = "Every check CI runs for services/observation-pipeline."
 depends = ["processor:typecheck", "processor:test"]

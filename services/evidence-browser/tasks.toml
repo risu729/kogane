@@ -39,6 +39,18 @@ run = [
 	"./node_modules/.bin/wrangler deploy --dry-run --config wrangler.test.jsonc",
 ]
 
+["app:bundle"]
+description = "Emit the deployable bundle of services/evidence-browser for the release manifest."
+depends = ["app:types", "web:build-production"]
+dir = "services/evidence-browser"
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/app --config wrangler.jsonc"
+
+["app-demo:bundle"]
+description = "Emit the deployable bundle of the demo Worker for the release manifest."
+depends = ["app:types", "local-pipeline:export-demo"]
+dir = "services/evidence-browser"
+run = "./node_modules/.bin/wrangler deploy --dry-run --outdir ../../dist/app-demo --config wrangler.demo.jsonc"
+
 ["ci:app"]
 description = "Every check CI runs for services/evidence-browser."
 depends = ["app:typecheck", "app:test"]
