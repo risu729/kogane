@@ -1,6 +1,6 @@
 {
   "plan": "unified plan U14; chapter 11 sections 4 and 7; acceptance tests G5-10, G5-11, G5-12, G5-14, G5-15, G5-16",
-  "maintenance": "Hand-maintained. tasks/_lib/deploy-order.test.ts keeps it in step with infra/workers-ci.json and with the deploy steps of .github/workflows/_deploy-workers.yml.",
+  "maintenance": "Hand-maintained. tasks/_lib/deploy-order.test.ts keeps it in step with infra/workers-ci.json and with the deploy steps of .github/workflows/_deploy-workers.yml: one step per deploy entry, in this order, each with id deploy-<name> so the release record can report per Worker.",
   "workersDevSubdomain": "takuanimal.workers.dev",
   "schema": {
     "core": {

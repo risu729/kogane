@@ -10,6 +10,7 @@ import {
   collectorSecretNames,
   configOf,
   coverageViolations,
+  credentialWiringViolations,
   type DeployEntry,
   deploySteps,
   deployStepMismatches,
@@ -167,6 +168,7 @@ describe("the deploy workflow follows the ledger", () => {
       [
         {
           name: "Deploy",
+          id: "deploy-processor",
           mode: "production",
           workingDirectory: "services/app",
           config: "wrangler.jsonc",
@@ -184,6 +186,7 @@ describe("the deploy workflow follows the ledger", () => {
       [
         {
           name: "Deploy",
+          id: "deploy-processor",
           mode: "production",
           workingDirectory: "services/processor",
           config: "wrangler.jsonc",
@@ -195,11 +198,67 @@ describe("the deploy workflow follows the ledger", () => {
     expect(violations[0]).toContain("passes no deploy token");
   });
 
-  test("only the deploy and migration steps see the Cloudflare token (G5-17)", () => {
+  test("a step without the id the release record reads is reported", () => {
+    // `release-ledger.mjs progress` looks each Worker up by `deploy-<name>` in
+    // the job's `steps` context; a step without that id would drop out of the
+    // record silently (finding 2).
+    const violations = deployStepMismatches(
+      [entry({ deploy: true, bundleTask: "processor:bundle", bundleDir: "dist/processor" })],
+      [
+        {
+          name: "Deploy",
+          id: "",
+          mode: "production",
+          workingDirectory: "services/processor",
+          config: "wrangler.jsonc",
+          usesToken: true,
+        },
+      ],
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("id: deploy-processor");
+  });
+
+  test("the record of what the run did comes after every upload", () => {
+    const names = workflowSteps(deployWorkflow).map((step) => step.name);
+    const progress = names.indexOf("Record what this run deployed");
+    expect(progress).toBeGreaterThan(-1);
+    const lastDeploy = Math.max(
+      ...steps.map((step) => names.indexOf(step.name)),
+      names.indexOf("Apply the CORE migrations"),
+    );
+    expect(progress).toBeGreaterThan(lastDeploy);
+  });
+
+  test("the migration steps carry the ids the record reads", () => {
+    for (const [name, id] of [
+      ["Apply the CORE migrations", "migrate-core"],
+      ["Apply the READ migrations", "migrate-read"],
+    ]) {
+      const step = workflowSteps(deployWorkflow).find((candidate) => candidate.name === name);
+      expect(step?.body).toContain(`id: ${String(id)}`);
+    }
+  });
+
+  test("a release deploys the whole set: no workflow offers a subset input", () => {
+    // A partial release used to complete the commit in the ledger, so the next
+    // full release of the same commit was skipped and the Workers it had not
+    // deployed stayed behind (finding 2). Narrowing the set is a rollback.
+    expect(deployWorkflow).not.toContain("inputs.only");
+    expect(readFileSync(`${REPO_ROOT}/.github/workflows/deploy.yml`, "utf8")).not.toMatch(
+      /^\s+(only|targets):/mu,
+    );
+    expect(readFileSync(`${REPO_ROOT}/.github/workflows/rollback.yml`, "utf8")).toMatch(
+      /^\s+targets: \$\{\{ inputs\.targets \}\}$/mu,
+    );
+  });
+
+  test("only the preflight, migration and deploy steps see the Cloudflare token (G5-17)", () => {
     const usingToken = workflowSteps(deployWorkflow)
       .filter((step) => step.body.includes("secrets.CLOUDFLARE_API_TOKEN"))
       .map((step) => step.name);
     expect(usingToken).toEqual([
+      "Confirm the production credentials reached this job",
       "Apply the CORE migrations",
       "Apply the READ migrations",
       "Deploy the Processor",
@@ -213,9 +272,33 @@ describe("the deploy workflow follows the ledger", () => {
   test("the build and validation steps run before any credential is in scope (G5-09)", () => {
     const names = workflowSteps(deployWorkflow).map((step) => step.name);
     const validate = names.indexOf("Validate every Worker without uploading");
-    const firstCredential = names.indexOf("Apply the CORE migrations");
+    const firstCredential = names.indexOf("Confirm the production credentials reached this job");
     expect(validate).toBeGreaterThan(-1);
-    expect(firstCredential).toBeGreaterThan(validate);
+    expect(firstCredential).toBe(validate + 1);
+  });
+
+  test("the credentials are checked before a deployment record or a migration", () => {
+    // The preflight exists so that a missing environment secret costs one
+    // failed step instead of an open deployment record and an unexplained
+    // wrangler error (run 34635388395).
+    const names = workflowSteps(deployWorkflow).map((step) => step.name);
+    const preflight = names.indexOf("Confirm the production credentials reached this job");
+    expect(preflight).toBeGreaterThan(-1);
+    expect(preflight).toBeLessThan(names.indexOf("Open the deployment record"));
+    expect(preflight).toBeLessThan(names.indexOf("Apply the CORE migrations"));
+  });
+
+  test("each migration step lists the pending migrations before and after it applies", () => {
+    // The release log has to say which migrations a run applied; wrangler only
+    // reports that per invocation, so the step brackets the apply with the
+    // list of what is still pending (finding 5).
+    for (const name of ["Apply the CORE migrations", "Apply the READ migrations"]) {
+      const step = workflowSteps(deployWorkflow).find((candidate) => candidate.name === name);
+      expect(step).toBeDefined();
+      const body = step?.body ?? "";
+      expect(body.match(/wrangler d1 migrations list /gu)?.length).toBe(2);
+      expect(body.match(/wrangler d1 migrations apply /gu)?.length).toBe(1);
+    }
   });
 
   test("the manifest is re-verified immediately before the first upload (G5-11)", () => {
@@ -223,6 +306,39 @@ describe("the deploy workflow follows the ledger", () => {
     expect(names.indexOf("Re-verify the release manifest")).toBe(
       names.indexOf("Deploy the Processor") - 1,
     );
+  });
+});
+
+describe("the release job can reach the production credentials", () => {
+  const files = automationFiles();
+
+  test("every caller of the release workflow inherits the environment secrets", () => {
+    // Release 34635388395 built everything, opened a deployment record and
+    // then failed inside `wrangler d1 migrations apply` because
+    // `secrets.CLOUDFLARE_API_TOKEN` was the empty string: a called workflow
+    // sees only the secrets its caller passed, and `deploy.yml` passed none.
+    expect(credentialWiringViolations(files)).toEqual([]);
+    expect(files.some(({ file }) => file === ".github/workflows/deploy.yml")).toBe(true);
+  });
+
+  test("a caller that passes no secrets is reported", () => {
+    const text = [
+      "jobs:",
+      "  release:",
+      "    uses: ./.github/workflows/_deploy-workers.yml",
+      "    with:",
+      "      sha: x",
+      "",
+    ].join("\n");
+    const violations = credentialWiringViolations([{ file: "x.yml", text }]);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("secrets: inherit");
+  });
+
+  test("a workflow that does not call the release job is not asked to", () => {
+    expect(
+      credentialWiringViolations([{ file: "x.yml", text: "jobs:\n  x:\n    steps: []\n" }]),
+    ).toEqual([]);
   });
 });
 

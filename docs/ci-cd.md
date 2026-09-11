@@ -207,11 +207,11 @@ under supervision.
 
 Three workflows implement it:
 
-| Workflow                                | Trigger                                                  | What it does                                                                                   |
-| --------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `.github/workflows/deploy.yml`          | `workflow_run` of `CI` on `main`, or `workflow_dispatch` | Guards the CI result and calls the release job with `github.event.workflow_run.head_sha`.      |
-| `.github/workflows/rollback.yml`        | `workflow_dispatch` (`sha`, `targets`)                   | Calls the same release job in `rollback` mode.                                                 |
-| `.github/workflows/_deploy-workers.yml` | `workflow_call`                                          | The single release job: the guards, the migrations, the uploads, the postcheck and the record. |
+| Workflow                                | Trigger                                                          | What it does                                                                                                                                                                               |
+| --------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `.github/workflows/deploy.yml`          | `workflow_run` of `CI` on `main`, or `workflow_dispatch` (`sha`) | Guards the CI result and calls the release job with `github.event.workflow_run.head_sha`. It has no way to narrow the set: a release always covers every Worker the ledger marks `deploy`. |
+| `.github/workflows/rollback.yml`        | `workflow_dispatch` (`sha`, `targets`)                           | Calls the same release job in `rollback` mode, for every Worker or for the ones `targets` names.                                                                                           |
+| `.github/workflows/_deploy-workers.yml` | `workflow_call`                                                  | The single release job: the guards, the migrations, the uploads, the postcheck and the record.                                                                                             |
 
 `deploy.yml` releases only for a CI run whose `conclusion` is `success`, whose
 `event` is `push`, whose `head_branch` is `main` and whose `head_repository`
@@ -227,6 +227,22 @@ later merge waits instead of interrupting a migration (G5-13). The group is
 held by the calling job for the whole of the called workflow, which is also why
 `environment: production` is declared inside `_deploy-workers.yml`: a job that
 calls a reusable workflow cannot declare an environment itself.
+
+Both callers pass `secrets: inherit`, and that is not optional. The Cloudflare
+credentials are scoped to the `production` Environment; only the _called_
+workflow's job declares that environment, and GitHub resolves a called
+workflow's `secrets.*` from what the caller passed — an unpassed secret is the
+empty string, not an error. Passing the token by name does not help either: the
+name resolves in the caller, where the environment is not in scope. The first
+real release (run 34635388395) therefore built everything, opened a deployment
+record and then failed inside `wrangler d1 migrations apply` with _"In a
+non-interactive environment, it's necessary to set a `CLOUDFLARE_API_TOKEN`
+environment variable"_, having applied nothing. `secrets: inherit` is the only
+route for an environment secret into a called workflow, so `ghalint`'s
+`deny_inherit_secrets` is excluded for exactly these two jobs in `ghalint.yaml`
+and `zizmor`'s `secrets-inherit` is ignored on exactly these two `uses:` lines;
+`credentialWiringViolations` in `tasks/_lib/deploy-order.test.ts` fails if a
+caller ever drops it again.
 
 ### What the release job does, in order
 
@@ -244,8 +260,10 @@ calls a reusable workflow cannot declare an environment itself.
    (plan 11 §2).
 4. **Installs the pinned `node`** through mise, so the ledger steps never run
    on whatever interpreter the runner image happens to ship, then **reads the
-   release ledger** and **decides** (below). An overtaken run stops here,
-   successfully, having changed nothing.
+   release ledger** and **decides, per Worker** (below), writing the plan every
+   later step reads. A run with nothing left to do stops here, successfully,
+   having changed nothing; a run that finds the ledger cannot account for some
+   Workers deploys exactly those.
 5. **Installs the rest of the toolchain**, then `mise run install`,
    `mise run bundle` and `mise run dry-run`. Everything is built and validated
    before any credential exists in the job (G5-09). `mise run dry-run` covers
@@ -254,20 +272,38 @@ calls a reusable workflow cannot declare an environment itself.
    CI's `Worker` jobs already have. The tool cache is off in every step of this
    job: its cache scope is shared with pull request CI, which runs pull request
    code, and `node` decides the guards.
-6. **Computes the release manifest**, uploads it as a run artifact, and derives
-   the compact release record that becomes the deployment payload.
-7. **Compares the schema** with the record of the last successful release.
-8. **Refuses an incompatible rollback** (below).
-9. **Opens a GitHub deployment** in state `in_progress`.
-10. **Applies the CORE migrations** — forward only, and only when this commit
+6. **Confirms the production credentials reached this job.** The first step in
+   which `secrets.CLOUDFLARE_API_TOKEN` and `vars.CLOUDFLARE_ACCOUNT_ID` exist;
+   it reads neither value and prints neither, it only fails the run when either
+   is empty and says what to create. Everything before it is credential-free
+   (G5-09, G4-16), and everything after it would otherwise fail later and less
+   clearly — an empty secret is not an error in Actions, so without this step a
+   missing setting looks like a Wrangler bug halfway through a release.
+7. **Computes the release manifest**, uploads it as a run artifact, and derives
+   the release record that becomes the deployment payload.
+8. **Compares the schema** with the record of the last successful release.
+9. **Refuses an incompatible rollback** (below).
+10. **Opens a GitHub deployment** in state `in_progress`.
+11. **Applies the CORE migrations** — forward only, and only when this commit
     knows a migration the recorded release did not. Then the READ migrations,
-    once a READ database exists.
-11. **Re-verifies the release manifest** against the working tree. This is the
-    last step before a credential reaches Wrangler.
-12. **Uploads the Workers** in the ledger's order, one
-    `risu729/wrangler-deploy-action` step each, `mode: production`.
-13. **Postchecks** the health routes of what it deployed.
-14. **Records** the deployment as `success`, or as `failure` and stops.
+    once a READ database exists. Each step brackets the apply with
+    `wrangler d1 migrations list --remote`, so the release log names the
+    migrations that were pending before it ran and shows none pending after:
+    Wrangler reports what it applied per invocation only, and a release record
+    is not a substitute for the database's own answer.
+12. **Re-verifies the release manifest** against the working tree. This is the
+    last step before a credential reaches a Worker upload.
+13. **Uploads the Workers** the plan selected, in the ledger's order, one
+    `risu729/wrangler-deploy-action` step each, `mode: production`. Re-uploading
+    a Worker that is already at this commit is harmless — Wrangler creates a new
+    version of the same code — so a resume never has to reason about whether a
+    particular upload happened.
+14. **Records what it actually did**, from its own step outcomes, and uploads
+    that as the `release-progress-<sha>` artifact. This step runs even when
+    something failed: that is the run that most needs an account of itself.
+15. **Postchecks** the health routes of what it deployed.
+16. **Records** the deployment as `success`, or as `failure` and stops, with the
+    progress summary in the status description either way.
 
 ### The release ledger, and why a late run is harmless (G5-12)
 
@@ -280,29 +316,119 @@ Concurrency alone would not be enough. GitHub keeps at most one run _pending_
 per group and states that ordering is not guaranteed, so with rapid merges an
 intermediate run is cancelled and a run that started earlier can still reach
 the deploy steps after a newer one finished. The decision is therefore made
-against the ledger, by `git merge-base --is-ancestor`:
+against the ledger, by `git merge-base --is-ancestor` — and it is made **per
+Worker**, because the environment is not one thing that is at one commit:
 
-| This commit versus the recorded release | Outcome                                                    |
-| --------------------------------------- | ---------------------------------------------------------- |
-| nothing recorded                        | deploy (the first release)                                 |
-| a descendant                            | deploy, and move the record forward                        |
-| the same commit                         | nothing to do, run succeeds                                |
-| an ancestor                             | **nothing to do**, run succeeds — the newer release stands |
-| neither (diverged)                      | fail; `main` is linear, so this means something is wrong   |
+| The commit the ledger records for a Worker | What the run does with that Worker           |
+| ------------------------------------------ | -------------------------------------------- |
+| nothing recorded                           | deploy it                                    |
+| an ancestor of this commit                 | deploy it, moving it forward                 |
+| this commit                                | leave it alone, and record it as still here  |
+| a descendant of this commit                | **leave it alone** — a newer release owns it |
+
+The run itself proceeds when that leaves at least one Worker to deploy, reports
+_"nothing to do"_ and succeeds when it does not, and fails when this commit and
+the recorded one have diverged (`main` is linear, so that means something is
+wrong). An overtaken run is still harmless — every Worker of the newer release
+is at a descendant of its commit, so it deploys none of them — but it is no
+longer blind: if the newer release never reached some Worker, the older run
+finishes that one rather than reporting success over a half-deployed
+environment.
+
+That per-Worker rule is what makes a re-run a **resume**. The bug it replaces:
+a release that deployed one Worker recorded the whole commit as released, so a
+later full release of the same commit answered _"already the recorded release;
+nothing to do"_ and the Workers it had never deployed stayed behind for good.
 
 A run that is cancelled or fails leaves its deployment without a `success`
-status, so the next run keeps reading the one before it. The ledger is read
-from the newest page of deployments; if that whole page failed and the list
-goes on, the read is an error rather than an empty ledger, because an empty
-ledger means "deploy anything". Nothing is rolled back automatically, and CORE
-is never restored from a backup by a workflow (G5-16).
+status, so the next run keeps reading the one before it — a failed deployment is
+never the environment's state. A re-run of that commit therefore deploys every
+Worker the last _successful_ record does not place at it, including any the
+failed run had already uploaded: that re-upload is harmless (above), whereas
+believing a failed run's account of itself would not be — a Worker whose upload
+succeeded but whose postcheck failed is exactly the one that must be deployed
+and checked again. The failed deployment is not ignored either: the next run reads its
+payload and prints it as _"it is not the environment's state, and it may have
+applied…"_, with the migrations and the Workers that run was working through,
+because a half-finished release is exactly the situation where the log has to
+say what might already be out there. The ledger is read from the newest page of
+deployments; if that whole page failed and the list goes on, the read is an
+error rather than an empty ledger, because an empty ledger means "deploy
+anything".
 
-The record's migration lists say what the database holds once the deployment
-is done, not what the commit knows. For a release the two are the same. For a
+Only a deployment whose payload is a release record counts. Not every
+`production` deployment is one: a job that declares `environment: production`
+makes GitHub open a deployment of its own, with an empty payload, and close it
+with the job's result — so a release job that correctly decides it has nothing
+to do leaves behind a **successful** production deployment that names no Worker
+and no migration. The repository's ledger already holds a pile of those from the
+failed first attempts. Reading one as the state would be the same mistake as
+reading a partial release as a complete one, so the read skips any payload
+without a `manifestVersion`. Nothing is rolled back automatically, and CORE is never restored
+from a backup by a workflow (G5-16).
+
+The record's migration lists say what the database holds once the deployment is
+done, not what the commit knows. For a release the two are the same. For a
 rollback the record keeps the deployed list: the rollback applied nothing, so
 the database still has every migration the recorded release had, and a later
 rollback to a commit in between is judged against the list that is actually
 applied.
+
+### What a release record holds, and what a run says it did
+
+The deployment payload is the record. It carries the commit, the manifest
+digest, the CORE and READ migration lists the database holds afterwards, the two
+database names, and one entry per deployable Worker:
+
+```jsonc
+{
+  "manifestVersion": "release-manifest-v2",
+  "mode": "release",
+  "sha": "<40 hex>",
+  "manifestSha256": "<64 hex>",
+  "coreDatabase": "kogane-raw-evidence",
+  "coreMigrations": ["0001_….sql", "…"],
+  "readDatabase": "kogane-read",
+  "readMigrations": null,
+  "workers": [
+    {
+      "name": "ingest", // the deploy-ledger name
+      "worker": "kogane-ingest", // the Cloudflare script name
+      "config": "services/raw-evidence/wrangler.jsonc",
+      "sha": "<the commit this Worker is at>",
+      "outcome": "planned", // or "kept": this run did not touch it
+    },
+  ],
+}
+```
+
+A record written by the previous scheme (`release-manifest-v1`, a list of
+Worker names) is still read: every Worker it names is taken to be at the
+record's own commit.
+
+`outcome` is a plan, not a result, and that is a property of the API rather than
+a choice: `POST /deployments` fixes the payload when the deployment is created,
+which is before the first upload, and there is no way to amend it afterwards.
+What makes `planned` true is the `success` status, which is only posted when
+every step of the run succeeded. What a run actually did is recorded twice
+over, from the job's own step outcomes: as a one-line summary in the deployment
+status description (`3/5 deployed at abc123…, CORE migrations done, failed:
+app-demo`) and in full in the `release-progress-<sha>` artifact, which
+distinguishes `deployed`, `failed` and `skipped` per Worker (Actions records a
+step whose condition was not met as skipped, so a planned upload that never ran
+because an earlier step failed shows as `skipped`; `not reached` appears only
+when the step id is absent from the job's context altogether) and carries the
+deploy Action's `deployment-targets` for the ones that uploaded. The `success`
+status is refused by the ledger script itself while any planned Worker is not
+`deployed`, on top of the workflow's own `success()` condition.
+Each deploy step is identified as `deploy-<ledger name>` for exactly that
+reason, and a test fails if a new one omits it.
+
+Not the Wrangler version id, though: the pinned Action reports the `targets` of
+its deploy entry and nothing else, and asking Cloudflare for the id afterwards
+would mean another credentialed step per Worker for a value nothing here
+decides on. What identifies what was deployed is the commit and the manifest
+digest; the version id is one dashboard lookup away when a human needs it.
 
 ### The release manifest, and what it can and cannot prove (G5-11)
 
@@ -379,12 +505,24 @@ the operations API (U06) and the READ projection (U11).
 ### Rollback (plan 11 §7)
 
 `rollback.yml` re-deploys an earlier commit with `sha` and an optional
-`targets` list. It refuses unless the commit is an ancestor of the recorded
-release, and unless the commit's CORE migration list is a **prefix** of the
-deployed one: migrations are additive and are never reverted, so an older
-commit may run against a database that has more migrations applied than it
-knows about, but never against one that is missing migrations it needs. The
-rollback applies no migration and restores no database.
+`targets` list — the one place where a subset is deliberate, and the reason
+`deploy.yml` has no such input. It is judged per target, against the commit the
+ledger records for _that_ Worker (after one Worker has been rolled back, the
+recorded release's own sha is the older commit while the others are still at
+the newer one): a target recorded ahead of the commit is rolled back, one
+already at it is left alone, and one recorded behind it or never recorded at
+all refuses the run, because that would be a roll forward and a roll forward
+goes through `deploy.yml`. It also refuses unless the commit's CORE migration
+list is a **prefix** of the deployed one: migrations are additive and are never reverted,
+so an older commit may run against a database that has more migrations applied
+than it knows about, but never against one that is missing migrations it needs.
+The rollback applies no migration and restores no database.
+
+Its record is per target: the Workers it rolled back are recorded at the older
+commit and the others keep the commit the previous record gave them. So the next
+release sees a mixed environment for what it is and moves each Worker forward
+from where it actually is, instead of treating one rolled-back Worker as proof
+that the whole commit is live.
 
 | Problem                      | What to do                                                                                                    |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -424,6 +562,12 @@ The integrator cannot create any of these. The repository owner must, once:
 3. **Environment (or repository) variable** `CLOUDFLARE_ACCOUNT_ID` — the
    account id, already recorded in `infra/resources.json`.
 
+Both must be reachable from the _called_ workflow, which is why both callers
+pass `secrets: inherit` (above). The release job's preflight step fails
+immediately, before any migration or upload, if either resolves to an empty
+string — which is what a secret that exists only at another scope, or a caller
+that stopped inheriting, looks like from inside the job.
+
 Bank credentials stay where they are, per source, and are never placed in
 GitHub. The deploy Action's `secrets-json` input is not used anywhere in this
 repository and a test fails if it appears (G5-17). Note what this does _not_
@@ -433,23 +577,34 @@ in the Risk Gate ledger.
 
 ### Enabling it the first time, under supervision
 
-1. Create the environment, the secret and the variable above. Until the secret
-   exists, the deploy job fails at its first upload rather than doing something
-   partial — so create them before the next merge, or expect one red run.
-2. Run `Deploy` manually (`workflow_dispatch`) with the current `main` sha and
-   `only: ingest`. `kogane-ingest` is the one Worker with a health route, so
-   this exercises the whole path — ledger, manifest, deployment record,
-   migrations, upload, postcheck — with the smallest blast radius.
-3. Check the run summary: the recorded release, the migration decision, the
-   selected Workers, the health result. Check the Deployments tab shows one
-   `production` deployment with the release record as its payload.
-4. Re-run the same dispatch. It must report _"is already the recorded release;
-   nothing to do"_ and deploy nothing.
+1. Create the environment, the secret and the variable above. Until both
+   exist, the release fails at the preflight step — after the build, before the
+   deployment record, the migrations and every upload — so create them before
+   the next merge, or expect one red run that changed nothing.
+2. Run `Deploy` manually (`workflow_dispatch`) with the current `main` sha. It
+   deploys every Worker the ledger marks `deploy` — there is no `only` input,
+   because a partial release used to record the whole commit as live and leave
+   the rest behind (above). All five are already dry-run on every commit, and
+   the run stops before its first upload if anything about the checkout, the
+   credentials or the manifest is wrong. If a smaller first blast radius is
+   wanted anyway, the honest way is a reviewed change: set `deploy: false` for
+   the others in `infra/deploy-order.json` and remove their deploy steps (the
+   ledger test requires the two to agree), release, then revert that change.
+3. Check the run summary: the recorded release, what the ledger could and could
+   not account for per Worker, the migration listings before and after the
+   apply, the health result, and the `N/N deployed` line. Check the Deployments
+   tab shows one `production` deployment whose payload names every Worker with
+   the commit it is at, and download the `release-progress-<sha>` artifact once
+   to see what the run recorded about itself.
+4. Re-run the same dispatch. It must report _"every deployable Worker is already
+   recorded at …; nothing to do"_ and deploy nothing.
 5. Dispatch `Deploy` with the previous `main` sha. It must report _"a newer
-   release is already recorded"_ and deploy nothing (G5-12).
+   release … covers every deployable Worker"_ and deploy nothing (G5-12).
 6. Run `Rollback` with the previous `main` sha and `targets: ingest`, confirm
-   the Worker version changed in the Cloudflare dashboard, then run `Deploy`
-   with the current sha again.
+   the Worker version changed in the Cloudflare dashboard and that the new
+   record shows `ingest` at the older commit and the other four at the newer
+   one, then run `Deploy` with the current sha again — it must deploy `ingest`
+   alone, because that is the only Worker that is behind.
 7. Only then let the automatic path run: merge something small and watch
    `CI` → `Deploy` (G5-07).
 
@@ -458,14 +613,20 @@ in the Risk Gate ledger.
 Verified in CI on every commit, with synthetic data only:
 
 - the ledger interlock and the rollback prefix rule, against a real git history
-  in a temporary repository (`scripts/release.test.ts`);
+  in a temporary repository, including the per-Worker decisions — a covering
+  record skips, a partial one resumes with exactly the missing Workers, a
+  Worker at a newer commit is left alone, a diverged history fails — the two
+  record versions, the per-target rollback record, and what a run records about
+  itself from its step outcomes (`scripts/release.test.ts`);
 - the manifest: determinism over the same tree, `migrations_dir` read from the
   Wrangler configuration, bundle digests that ignore source maps, secret
   **names** only, and a changed input reported by field name;
 - the deploy ledger against `infra/workers-ci.json`, the deploy steps against
-  the ledger's order, the absence of a preview lane or a second environment,
-  and the absence of any collector secret name in an Actions file
-  (`tasks/_lib/deploy-order.test.ts`);
+  the ledger's order and each one's `deploy-<name>` id, the absence of a subset
+  input on the release path, that every caller inherits the environment
+  secrets, that the credentials are checked before anything is applied, the
+  absence of a preview lane or a second environment, and the absence of any
+  collector secret name in an Actions file (`tasks/_lib/deploy-order.test.ts`);
 - `actionlint`, `ghalint` and `zizmor --pedantic` on every workflow.
 
 Not verifiable without a live deployment, and therefore listed as such: that
@@ -481,26 +642,26 @@ decision functions in `.github/scripts/automerge-policy.mjs` and
 `.github/scripts/risk-paths.mjs` against fixtures. The workflow wiring itself
 cannot be proven offline and is verified on the first live pull request.
 
-| Acceptance | Covered by                                                                                                                                                                  |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| G5-01      | Tests: pending/blocked states are left to the ruleset. Live: a failing `CI Check` keeps auto-merge waiting.                                                                 |
-| G5-02      | Tests: a `behind` branch stays eligible and requests an update; the sweep picks the oldest armed one. Live: strict up-to-date + update starts CI before the merge.          |
-| G5-03      | Tests: owner and `renovate[bot]` eligibility. Live: the app merges without a bypass entry.                                                                                  |
-| G5-04      | Tests: draft, closed, merged and `dirty` pull requests are refused.                                                                                                         |
-| G5-05      | Tests: approval matching on `commit_id`, supersession, non-owner reviews, and the label path bound to the approved head. Live: push after approval re-gates.                |
-| G5-06      | Live only: the App token update starts CI, no human approval loop. Not provable offline.                                                                                    |
-| G5-07      | Live only: the merge push starts `CI`, whose successful run on `main` starts `Deploy` (push event, this repository, `main`). Proven by the first merge after enabling CD.   |
-| G5-08      | Workflows pass pull request strings through `env` only; zizmor, ghalint and actionlint enforce the shape. Tests: pagination fails closed.                                   |
-| G5-09      | CI runs the deploy Action in `dry-run` mode with no account or token, and the release job builds and dry-runs before any credential is in scope. Both asserted.             |
-| G5-10      | Tests: no workflow declares an environment other than `production`, uses a preview mode or a preview alias. The deploy ledger carries no preview target.                    |
-| G5-11      | Tests: a changed lockfile, configuration, migration or bundle is reported by field name. The workflow re-verifies the manifest immediately before the first upload.         |
-| G5-12      | Tests: an older or already-recorded commit stops without deploying; a diverged history fails. Live: the Deployments API is the record it reads.                             |
-| G5-13      | `production-deploy` with `cancel-in-progress: false` on both callers, and a migration step that only a run holding that group can reach. Live only.                         |
-| G5-14      | Tests: the ledger is ordered consumer-before-producer and the workflow's deploy steps follow it. The PoC collectors stay `deploy: false` until U09.                         |
-| G5-15      | Tests: every ledger entry still carries the Wrangler `name` its configuration declares, so a directory move cannot create a new resource.                                   |
-| G5-16      | Tests: the rollback refuses a target that is not an ancestor, or whose migration list is not a prefix; its record keeps the deployed list. No workflow restores a database. |
-| G5-17      | Tests: only the migration and deploy steps reference the Cloudflare token, `secrets-json` is never used, and no collector secret name appears in an Actions file.           |
-| G5-18      | Out of scope here: the legacy Worker and its notification path stay deployed (plan D2) until U15 retires them with its own audit.                                           |
+| Acceptance | Covered by                                                                                                                                                                                                                                                     |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G5-01      | Tests: pending/blocked states are left to the ruleset. Live: a failing `CI Check` keeps auto-merge waiting.                                                                                                                                                    |
+| G5-02      | Tests: a `behind` branch stays eligible and requests an update; the sweep picks the oldest armed one. Live: strict up-to-date + update starts CI before the merge.                                                                                             |
+| G5-03      | Tests: owner and `renovate[bot]` eligibility. Live: the app merges without a bypass entry.                                                                                                                                                                     |
+| G5-04      | Tests: draft, closed, merged and `dirty` pull requests are refused.                                                                                                                                                                                            |
+| G5-05      | Tests: approval matching on `commit_id`, supersession, non-owner reviews, and the label path bound to the approved head. Live: push after approval re-gates.                                                                                                   |
+| G5-06      | Live only: the App token update starts CI, no human approval loop. Not provable offline.                                                                                                                                                                       |
+| G5-07      | Live only: the merge push starts `CI`, whose successful run on `main` starts `Deploy` (push event, this repository, `main`). Proven by the first merge after enabling CD.                                                                                      |
+| G5-08      | Workflows pass pull request strings through `env` only; zizmor, ghalint and actionlint enforce the shape. Tests: pagination fails closed.                                                                                                                      |
+| G5-09      | CI runs the deploy Action in `dry-run` mode with no account or token, and the release job builds and dry-runs before any credential is in scope. Both asserted.                                                                                                |
+| G5-10      | Tests: no workflow declares an environment other than `production`, uses a preview mode or a preview alias. The deploy ledger carries no preview target.                                                                                                       |
+| G5-11      | Tests: a changed lockfile, configuration, migration or bundle is reported by field name. The workflow re-verifies the manifest immediately before the first upload.                                                                                            |
+| G5-12      | Tests: a commit every Worker is already recorded at stops without deploying, a partial record resumes with the missing Workers only, a Worker at a newer commit is left alone, and a diverged history fails. Live: the Deployments API is the record it reads. |
+| G5-13      | `production-deploy` with `cancel-in-progress: false` on both callers, and a migration step that only a run holding that group can reach. Live only.                                                                                                            |
+| G5-14      | Tests: the ledger is ordered consumer-before-producer and the workflow's deploy steps follow it. The PoC collectors stay `deploy: false` until U09.                                                                                                            |
+| G5-15      | Tests: every ledger entry still carries the Wrangler `name` its configuration declares, so a directory move cannot create a new resource.                                                                                                                      |
+| G5-16      | Tests: the rollback refuses a target that is not an ancestor, or whose migration list is not a prefix; its record keeps the deployed migration list and is per target. No workflow restores a database.                                                        |
+| G5-17      | Tests: only the credential preflight, the migration steps and the deploy steps reference the Cloudflare token, `secrets-json` is never used, and no collector secret name appears in an Actions file.                                                          |
+| G5-18      | Out of scope here: the legacy Worker and its notification path stay deployed (plan D2) until U15 retires them with its own audit.                                                                                                                              |
 
 ## Renovate
 

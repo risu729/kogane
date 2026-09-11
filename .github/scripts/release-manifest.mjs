@@ -31,7 +31,9 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJsonc } from "../../scripts/jsonc.ts";
 
-export const MANIFEST_VERSION = "release-manifest-v1";
+// v2 records one entry per deployable Worker with the commit it is at; v1
+// listed Worker names only (see `normalizeRecord` in release-ledger.mjs).
+export const MANIFEST_VERSION = "release-manifest-v2";
 
 /** Relative path of the file that carries the parser build identity. */
 export const PARSER_DIGESTS_PATH = "packages/parsers/src/parsers/digests.ts";
@@ -214,24 +216,52 @@ export function buildManifest({ root, sha, bundles = true }) {
 }
 
 /**
- * The compact record attached to the GitHub deployment as its payload. It holds
- * what the *next* run needs to decide without fetching an artefact: which
- * commit is live, which migrations the database holds once this deployment is
- * done (see `appliedMigrations`), and where to look.
+ * The record attached to the GitHub deployment as its payload. It holds what
+ * the *next* run needs to decide without fetching an artefact: which commit
+ * each deployable Worker is at once this deployment is done, which migrations
+ * the database holds (see `appliedMigrations`), and where to look.
+ *
+ * It is per Worker, because a release is per Worker. A run that deploys a
+ * subset — a rollback with `targets`, or a resume after a partial release —
+ * must not record the whole commit as live: the Workers it did not touch keep
+ * the commit the previous record gave them (`kept`), and the next run sees
+ * exactly which ones are still behind (finding 2).
+ *
+ * `outcome` is `planned` for the Workers this run uploads and `kept` for the
+ * others. The Deployments API fixes a payload when the deployment is created,
+ * which is before the first upload, so a payload cannot hold an outcome; what
+ * makes `planned` true is the deployment's `success` status, which is only
+ * posted when every step succeeded. What a run actually did, step by step, is
+ * `releaseProgress` in release-ledger.mjs, recorded in the status description
+ * and uploaded as an artefact.
  *
  * @param {Record<string, any>} manifest
- * @param {{runId?: string, runUrl?: string, mode?: string}} context
+ * @param {{runId?: string, runUrl?: string, mode?: string, plan?: {selected?: readonly string[], kept?: readonly {name: string, sha: string}[]} | null}} context
  * @returns {Record<string, unknown>}
  */
-export function releaseRecord(manifest, { runId = "", runUrl = "", mode = "release" } = {}) {
+export function releaseRecord(
+  manifest,
+  { runId = "", runUrl = "", mode = "release", plan = null } = {},
+) {
+  const selected =
+    plan === null ? manifest.workers.map((worker) => worker.name) : (plan.selected ?? []);
+  const kept = new Map((plan?.kept ?? []).map((entry) => [entry.name, entry.sha]));
   return {
     manifestVersion: MANIFEST_VERSION,
     mode,
     sha: manifest.sha,
     manifestSha256: sha256(canonicalJson(manifest)),
+    coreDatabase: manifest.migrations.core?.database ?? "",
+    readDatabase: manifest.migrations.read?.database ?? "",
     coreMigrations: manifest.migrations.core?.files.map((entry) => entry.file) ?? [],
     readMigrations: manifest.migrations.read?.files.map((entry) => entry.file) ?? null,
-    workers: manifest.workers.map((worker) => worker.worker),
+    workers: manifest.workers.map((worker) => ({
+      name: worker.name,
+      worker: worker.worker,
+      config: `${worker.path}/${worker.config}`,
+      sha: selected.includes(worker.name) ? manifest.sha : (kept.get(worker.name) ?? ""),
+      outcome: selected.includes(worker.name) ? "planned" : "kept",
+    })),
     runId,
     runUrl,
   };
@@ -342,10 +372,16 @@ export async function main(argv, env) {
     const sha = options["sha"] ?? "";
     if (!/^[0-9a-f]{40}$/u.test(sha)) throw new Error("--sha must be a full commit sha");
     const manifest = buildManifest({ root, sha });
+    // The plan says which Workers this run uploads and which commit the others
+    // keep; without one the record covers every deployable Worker at this sha.
+    const planFile = options["plan"] ?? "";
+    const plan =
+      planFile === "" || !existsSync(planFile) ? null : JSON.parse(readFileSync(planFile, "utf8"));
     const record = releaseRecord(manifest, {
       runId: options["run-id"] ?? "",
       runUrl: options["run-url"] ?? "",
       mode: options["mode"] ?? "release",
+      plan,
     });
     writeFileSync(options["out"] ?? "release-manifest.json", canonicalJson(manifest));
     writeFileSync(options["record"] ?? "release-record.json", canonicalJson(record));

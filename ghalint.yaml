@@ -1,0 +1,24 @@
+# ghalint policy exclusions. One entry per deliberate exception, with the reason
+# it exists; the default policy set is otherwise in force for every workflow.
+excludes:
+  # `deny_inherit_secrets` asks for the secrets a called workflow needs to be
+  # passed by name. That is not available here: the production Cloudflare
+  # credentials are scoped to the `production` GitHub Environment, only the
+  # *called* workflow's job can declare that environment (a job that calls a
+  # reusable workflow cannot), and GitHub resolves a called workflow's
+  # `secrets.*` from what the caller passed — where the environment is not in
+  # scope, so a named pass-through silently yields an empty string. Release
+  # 34635388395 failed that way. `secrets: inherit` is therefore the only route
+  # for an environment secret into the release job (see the comment on both
+  # jobs, docs/ci-cd.md and actions/runner#4453). The called workflow
+  # references exactly one secret, `CLOUDFLARE_API_TOKEN`;
+  # `tasks/_lib/deploy-order.test.ts` asserts which of its steps may read it
+  # and that no collector secret is named in any Actions file (acceptance
+  # G5-17), and its preflight step fails the run early when the token or the
+  # account id is empty.
+  - policy_name: deny_inherit_secrets
+    workflow_file_path: .github/workflows/deploy.yml
+    job_name: release
+  - policy_name: deny_inherit_secrets
+    workflow_file_path: .github/workflows/rollback.yml
+    job_name: rollback

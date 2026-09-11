@@ -29,8 +29,26 @@ jobs:
     permissions:
       contents: read # for checkout
       deployments: write # the release ledger
-    uses: ./.github/workflows/_deploy-workers.yml
+    uses: ./.github/workflows/_deploy-workers.yml # zizmor: ignore[secrets-inherit]
+    # The Cloudflare credentials live in the `production` Environment and are
+    # read by the called workflow's job, which is where `environment:
+    # production` is declared. GitHub resolves `secrets.*` inside a called
+    # workflow from what the caller passed, and a caller that invokes a
+    # reusable workflow cannot declare an environment of its own, so an
+    # environment secret is reachable only through `secrets: inherit`. Without
+    # it every `secrets.*` in the called workflow is the empty string and
+    # nothing says so: that is how release 34635388395 reached `wrangler d1
+    # migrations apply` with no token and no account id
+    # (docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows,
+    # "Environment secrets cannot be passed from the caller workflow";
+    # actions/runner#4453). The called workflow lives in this repository and is
+    # read from the default branch; it references exactly one secret, and a
+    # test asserts which of its steps may read it (G5-17). Its preflight step
+    # fails the run before anything is applied if the token or the account id
+    # is still empty. The exclusion of ghalint's `deny_inherit_secrets` for
+    # this job is recorded in `ghalint.yaml`.
+    secrets: inherit
     with:
       sha: ${{ inputs.sha }}
-      only: ${{ inputs.targets }}
+      targets: ${{ inputs.targets }}
       mode: rollback
