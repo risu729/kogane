@@ -139,6 +139,13 @@ export interface KeysetCursor {
   k: string;
   /** Opaque, order-compatible tie-break position; never a business identifier. */
   t: number;
+  /**
+   * The physical read model the snapshot was read from (unified plan 05 §7,
+   * U11). Absent when the page came from the CORE projection. A rebuilt READ
+   * database is a new instance, so a cursor from the lost one expires instead
+   * of being answered from rows that only look like its list.
+   */
+  r?: string;
 }
 
 export const CURSOR_REJECTIONS = ["cursor_invalid", "cursor_mismatch", "context_expired"] as const;
@@ -168,7 +175,16 @@ function base64urlDecode(text: string): Uint8Array | null {
  * cursor can only be rejected, never widen a scope.
  */
 export function encodeKeysetCursor(cursor: Omit<KeysetCursor, "v">): string {
-  const value: KeysetCursor = { v: CURSOR_VERSION, ...cursor };
+  // `r` is written only when there is one, so a CORE page keeps the exact
+  // five-key shape it has today and a stored cursor stays comparable.
+  const value: KeysetCursor = {
+    v: CURSOR_VERSION,
+    s: cursor.s,
+    f: cursor.f,
+    k: cursor.k,
+    t: cursor.t,
+    ...(cursor.r === undefined ? {} : { r: cursor.r }),
+  };
   return base64urlEncode(new TextEncoder().encode(JSON.stringify(value)));
 }
 
@@ -183,13 +199,17 @@ export function decodeKeysetCursor(text: string): KeysetCursor | null {
   }
   if (
     !isRecord(parsed) ||
-    !hasExactKeys(parsed, ["v", "s", "f", "k", "t"]) ||
+    !(
+      hasExactKeys(parsed, ["v", "s", "f", "k", "t"]) ||
+      hasExactKeys(parsed, ["v", "s", "f", "k", "t", "r"])
+    ) ||
     parsed.v !== CURSOR_VERSION ||
     !isText(parsed.s, 128) ||
     !isText(parsed.f, 128) ||
     typeof parsed.k !== "string" ||
     parsed.k.length > 256 ||
-    !isSafeInt(parsed.t, 0, 2_000_000_000)
+    !isSafeInt(parsed.t, 0, 2_000_000_000) ||
+    (Object.hasOwn(parsed, "r") && !isText(parsed.r, 128))
   )
     return null;
   return parsed as unknown as KeysetCursor;
@@ -213,9 +233,19 @@ export function checkKeysetCursor(
     requestedSnapshotId?: string | null;
     /** Whether the cursor's snapshot is still readable (present and complete). */
     snapshotReadable: boolean;
+    /**
+     * The physical read model serving this request: a string when the page
+     * comes from a READ database (the cursor must name the same instance),
+     * `null` when it comes from the CORE projection (the cursor must name no
+     * instance at all), and absent when the caller does not track one. A
+     * cursor from another instance is expired, never reinterpreted (U11).
+     */
+    readInstanceId?: string | null;
   },
 ): CursorRejection | null {
   if (cursor.f !== expected.filterDigest) return "cursor_mismatch";
+  if (expected.readInstanceId !== undefined && cursor.r !== (expected.readInstanceId ?? undefined))
+    return "context_expired";
   if (
     expected.requestedSnapshotId !== undefined &&
     expected.requestedSnapshotId !== null &&

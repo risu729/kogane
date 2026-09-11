@@ -203,9 +203,15 @@ describe("CORE migrations (G0-02)", () => {
     expect(historical).toEqual(expected);
   });
 
-  test("the READ directory exists and holds no migration yet (U11 fills it)", () => {
+  test("the READ directory holds its own baseline, under the same naming rule", () => {
+    // U11 filled it. The READ database is built from its final schema rather
+    // than migrated forward from CORE, so it starts at 0001 and shares nothing
+    // with the numbers above; the two directories are never applied to the
+    // same database (06 §2).
     const entries = readdirSync(fileURLToPath(READ_MIGRATIONS_URL));
-    expect(entries.filter((name) => MIGRATION_FILENAME.test(name))).toEqual([]);
+    expect(entries.filter((name) => MIGRATION_FILENAME.test(name))).toEqual([
+      "0001_read_baseline.sql",
+    ]);
     expect(entries).toContain("README.md");
   });
 });

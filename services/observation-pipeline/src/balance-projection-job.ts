@@ -86,6 +86,11 @@ import {
   type FixedProjectionInput,
   type ProjectionInputStore,
 } from "./projection-input.ts";
+import {
+  readProjectionEnabled,
+  readPublishedSnapshotAt,
+  runReadProjection,
+} from "./read-projection.ts";
 
 /** The 5,000 candidate bound of the read model; a larger set is refused, never cut. */
 const CANDIDATE_LIMIT = 5001;
@@ -947,7 +952,23 @@ export function activePointerStatement(
     .bind(snapshotId, sourceRevision, CORE_READ_INSTANCE_ID, coreEpoch, now);
 }
 
-/** The snapshot the read model publishes, when it covers `required`. */
+/**
+ * The snapshot the read model publishes, when it covers `required`, whichever
+ * database publishes it. With the READ flag on the answer comes from the READ
+ * pointer under this CORE epoch; a restored CORE is another context, so its
+ * revision numbers alone never complete a decision (05 §2, G3-02).
+ */
+async function publishedSnapshotFor(
+  env: Env,
+  db: D1Like,
+  required: number | null,
+): Promise<string | null> {
+  if (!readProjectionEnabled(env)) return await activeSnapshotAt(db, required);
+  const revision = await currentCoreRevision(db);
+  return await readPublishedSnapshotAt(env, required, revision.core_epoch);
+}
+
+/** The snapshot the CORE read model publishes, when it covers `required`. */
 async function activeSnapshotAt(db: D1Like, required: number | null): Promise<string | null> {
   const row = await db
     .prepare(
@@ -993,6 +1014,22 @@ async function projectionStep(
   const budget = options.writeBudget ?? PROJECTION_WRITE_BUDGET;
   const now = (options.now ?? (() => new Date().toISOString()))();
   const lease = options.writerToken ?? crypto.randomUUID();
+
+  // The READ database is the target when the deployment says so (U11). The
+  // capture protocol, the input digest, the budgets and the four outcomes are
+  // the ones below; only the rows land in another physical database, so
+  // turning the flag off puts this deployment back on the CORE tables.
+  if (readProjectionEnabled(env))
+    return await runReadProjection(
+      env,
+      {
+        capture: captureFixedInput,
+        buildDigest: async () => options.buildDigest ?? (await projectionBuildDigest()),
+      },
+      options,
+      store,
+      budget,
+    );
 
   // 1. An unfinished build continues from its own input, never from CORE.
   const resumed = await resumeFixedBuild(db, store, now);
@@ -1239,13 +1276,13 @@ export function balanceProjectionOutboxProcessor(
   return async (db, row) => {
     if (!projectionFlagOn(env)) return pendingOutcome("projection_flag_off");
     const required = row.required_source_revision;
-    const already = await activeSnapshotAt(db, required);
+    const already = await publishedSnapshotFor(env, db, required);
     if (already) return completedOutcome("balance_projection_active", already);
     const result = await runBalanceProjection(env, options);
     switch (result.status) {
       case "complete":
       case "unchanged": {
-        const active = await activeSnapshotAt(db, required);
+        const active = await publishedSnapshotFor(env, db, required);
         return active
           ? completedOutcome("balance_projection_active", active)
           : pendingOutcome("projection_behind_decision");

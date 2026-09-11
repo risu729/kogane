@@ -196,6 +196,11 @@
     },
     {
       "path": "services/observation-pipeline",
+      "config": "wrangler.read-migrations.jsonc",
+      "reason": "READ migration step only: one migrations_dir per config, no main, so wrangler deploy --dry-run rejects it"
+    },
+    {
+      "path": "services/observation-pipeline",
       "config": "wrangler.ops.jsonc",
       "reason": "wrangler dev helper for scripts/ops.ts: remote bindings only, no main, so wrangler deploy --dry-run rejects it"
     }

@@ -104,6 +104,7 @@ describe("shared API schema", () => {
       paginationVersion: "none",
       balancesV2: false,
       balancesV2Pagination: "none",
+      balancesV2ReadModel: "none",
       collectionFilters: false,
       organizedDisplay: false,
       financialProducts: false,
@@ -124,6 +125,7 @@ describe("shared API schema", () => {
       paginationVersion: "offset-v1",
       balancesV2: false,
       balancesV2Pagination: "none",
+      balancesV2ReadModel: "none",
       collectionFilters: true,
       organizedDisplay: true,
       financialProducts: true,
@@ -214,7 +216,19 @@ describe("shared API schema", () => {
     expect(withBalancesV2(CENTRAL_STORE_CAPABILITIES, true)).toMatchObject({
       balancesV2: true,
       balancesV2Pagination: "keyset-v2",
+      balancesV2ReadModel: "core-d1",
       paginationVersion: "offset-v1",
+    });
+    // U11: which store answered is advertised, never guessed, and it is
+    // `none` while the routes are off so the three fields cannot disagree.
+    expect(withBalancesV2(CENTRAL_STORE_CAPABILITIES, true, "read-d1")).toMatchObject({
+      balancesV2: true,
+      balancesV2ReadModel: "read-d1",
+    });
+    expect(withBalancesV2(CENTRAL_STORE_CAPABILITIES, false, "read-d1")).toMatchObject({
+      balancesV2: false,
+      balancesV2Pagination: "none",
+      balancesV2ReadModel: "none",
     });
     expect(
       validApiResponse("/api/meta", {
@@ -233,6 +247,7 @@ describe("shared API schema", () => {
       { paginationVersion: "keyset-v3" },
       { balancesV2: "yes" },
       { balancesV2Pagination: "keyset-v3" },
+      { balancesV2ReadModel: "read-d2" },
       { collectionFilters: "yes" },
       { readOnly: false },
       { liveCollectors: true },

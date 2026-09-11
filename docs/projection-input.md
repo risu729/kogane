@@ -185,8 +185,11 @@ write that changes nothing the projection reads still moves it. Two captures of
 the same data at two revisions produce the same snapshot, and the second is
 recognised as already built.
 
-Each snapshot also records `read_instance_id` (`core-d1` until U11 moves the
-projection to the READ database) and `core_epoch`.
+Each snapshot also records `read_instance_id` and `core_epoch`. On the CORE
+path the instance is the constant `core-d1`; in the READ database it is that
+physical database's own id, generated when the first build claims it, so a
+rebuilt database is never mistaken for the one whose cursors are still in flight
+(U11).
 
 ## Writing, verifying and publishing
 
@@ -258,7 +261,11 @@ READ (05 §5).
 
 ## Flags
 
-**None are added.** This replaces the internals of the existing
+**None are added by this change.** U11 adds `READ_PROJECTION_ENABLED` (default
+off) beside the flag below, which chooses the database the same build writes to;
+see [The READ database](read-model-d1.md).
+
+The original text: **none are added.** This replaces the internals of the existing
 `BALANCE_PROJECTION_ENABLED` path, which is off by default in both the pipeline
 and the evidence browser. With the flag off the job returns `skipped(flag_off)`
 and its outbox rows stay pending, exactly as "nothing was updated" should read.
@@ -302,13 +309,21 @@ collection is left to a later maintenance workflow).
 
 ## Known limits
 
-- **A retired snapshot id is final.** Migration 0030 lets a snapshot leave
+- **A retired snapshot id was final — fixed in U11 for the READ database.** Migration 0030 lets a snapshot leave
   `retired` for nothing, and `projection_input_records` is append-only with
   one record per job. A capture whose content digests to a snapshot that was
   retired (the exact content of an earlier build coming back) is reported as
   `skipped(snapshot_retired)` and the pointer's watermark does not advance,
   so an outbox row waiting on that revision keeps polling
   `projection_behind_decision` until the content changes again. This predates
-  0038 (the old identity had the same skip); U11's move to READ, where the
-  projection tables are rebuildable, is the place to let a retired id be built
-  again or to key the input record by capture rather than by digest.
+  0038 (the old identity had the same skip) and still describes the CORE path
+  of this document.
+
+  U11 fixes it where the projection is rebuildable. In the READ database the
+  content identity and the row identity are separated: `content_key` is the id
+  above, and `snapshot_id` carries an attempt that is allocated only when no
+  `building` or `complete` build of that content exists. A build already under
+  way or already published is reused; content whose builds were all retired
+  starts a new attempt, so it is always buildable again. `retired` stays
+  terminal, and the input record stays keyed by digest and shared. See
+  [The READ database](read-model-d1.md).

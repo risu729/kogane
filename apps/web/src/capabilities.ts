@@ -63,7 +63,12 @@ export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
     serverPaging: capabilities.paginationVersion !== "none",
     identities: capabilities.identityReadModes.includes("latest"),
     evidenceHistory: capabilities.evidenceHistory,
-    balanceReadModel: capabilities.balancesV2 && capabilities.balancesV2Pagination === "keyset-v2",
+    // Either store serves the same contract, so the UI feature follows the
+    // routes and their paging, not which database answered (U11).
+    balanceReadModel:
+      capabilities.balancesV2 &&
+      capabilities.balancesV2Pagination === "keyset-v2" &&
+      capabilities.balancesV2ReadModel !== "none",
     sharedQuery: capabilities.sharedQuery,
     rewards: capabilities.rewardsV2,
     commands: capabilities.commands,

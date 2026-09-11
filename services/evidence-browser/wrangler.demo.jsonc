@@ -12,7 +12,12 @@
     "ACCESS_AUDIENCE": "036dc6fd21306c63c9340ad9ea642f2f7fe550bce61c48a08c7719b02d94cbf9",
     // The demo serves a fixed synthetic snapshot and has no store to accept an
     // operation into; the flag is declared here only to state that it is off.
-    "OPS_API_ENABLED": ""
+    "OPS_API_ENABLED": "",
+    // The demo has no database binding at all, by design: it answers from a
+    // committed synthetic snapshot. The READ flag is declared to state that it
+    // is off, and no READ binding is added — a public demo is not given a
+    // handle on the production read model (U11, docs/read-model-d1.md).
+    "READ_PROJECTION_ENABLED": "false"
   },
   "assets": {
     "directory": "../../apps/web/dist",

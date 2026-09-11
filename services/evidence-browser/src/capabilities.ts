@@ -13,7 +13,7 @@ import {
   withBalancesV2,
   type ApiCapabilities,
 } from "../../../packages/observation-shared/src/api-schema";
-import { balanceProjectionReader, projectionFlagOn } from "./balances-v2";
+import { projectionFlagOn, readProjectionFlagOn, readTarget } from "./balances-v2";
 import { commandsEnabled } from "./command-api";
 import { eventsV2Available, flagOn } from "./events-api";
 import { opsApiEnabled } from "./ops-api";
@@ -44,6 +44,10 @@ export async function centralStoreCapabilities(env: Env): Promise<ApiCapabilitie
     opsApi: opsApiEnabled(env),
   };
   if (!projectionFlagOn(env)) return base;
-  const snapshot = await balanceProjectionReader(env).currentSnapshot();
-  return withBalancesV2(base, snapshot !== null);
+  const target = await readTarget(env);
+  // A READ database of another baseline publishes nothing to this contract.
+  const snapshot = target.contractMismatch ? null : await target.reader.currentSnapshot();
+  // Which store answered is part of the capability: a client that holds a
+  // cursor needs to know it belongs to a rebuildable database (U11).
+  return withBalancesV2(base, snapshot !== null, readProjectionFlagOn(env) ? "read-d1" : "core-d1");
 }

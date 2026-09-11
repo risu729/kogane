@@ -7,6 +7,7 @@
   "preview_urls": false,
   "vars": {
     "BALANCE_PROJECTION_ENABLED": "0",
+    "READ_PROJECTION_ENABLED": "false",
     "EVIDENCE_SOURCE_ID": "sony-bank",
     "EVENTS_V2_ENABLED": "0",
     "ACCESS_ISSUER": "https://evidence-test.cloudflareaccess.com",
@@ -28,6 +29,13 @@
       "binding": "DB",
       "database_name": "test",
       "database_id": "00000000-0000-0000-0000-000000000001"
+    },
+    // A local READ database for the suite; the read migrations are applied to
+    // it in test/apply-migrations.ts, so no test depends on the account.
+    {
+      "binding": "READ",
+      "database_name": "test-read",
+      "database_id": "00000000-0000-0000-0000-000000000002"
     }
   ],
   "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "test" }]

@@ -1,4 +1,4 @@
-// The CORE schema ledger must describe the migrations that are on disk.
+// The schema ledgers must describe the migrations that are on disk.
 //
 // Unified plan U01, acceptance test G0-01: a table nobody classified is kept
 // and never enters a cleanup. The check that makes that real is mechanical —
@@ -15,6 +15,8 @@ import {
   LEDGER_JSON_PATH,
   LEDGER_MARKDOWN_PATH,
   MIGRATIONS_DIR,
+  READ_CLASSIFICATION,
+  READ_PROFILE,
   REPO_ROOT,
   applyMigrations,
   buildSchemaLedger,
@@ -23,6 +25,7 @@ import {
 } from "./core-schema-ledger.ts";
 
 const ledger = buildSchemaLedger(REPO_ROOT);
+const readLedger = buildSchemaLedger(REPO_ROOT, READ_PROFILE);
 
 describe("SQL statement splitter", () => {
   test("keeps a trigger body together and splits on real statement ends", () => {
@@ -167,5 +170,75 @@ describe("G0-01 CORE schema ledger", () => {
     expect(ledger.summary.migrationsWithInserts).toContain("0024_observation_decimals.sql");
     expect(ledger.summary.migrationsWithInserts).toContain("0029_decision_log.sql");
     expect(ledger.summary.migrationsWithInserts).not.toContain("0001_initial.sql");
+  });
+});
+
+describe("G0-09 READ schema ledger", () => {
+  test("infra/schema/read-ledger.json is the current generator output", () => {
+    expect(readFileSync(join(REPO_ROOT, READ_PROFILE.jsonPath), "utf8")).toBe(
+      `${JSON.stringify(readLedger, null, 2)}\n`,
+    );
+  });
+
+  test("infra/schema/read-ledger.md is the current generator output", () => {
+    expect(readFileSync(join(REPO_ROOT, READ_PROFILE.markdownPath), "utf8")).toBe(
+      renderSchemaMarkdown(readLedger, READ_PROFILE),
+    );
+  });
+
+  test("it is built from its own directory, never from the CORE one", () => {
+    expect(READ_PROFILE.migrationsDir).toBe("packages/storage-d1/migrations/read");
+    expect(readLedger.migrations.map((entry) => entry.file)).toEqual(["0001_read_baseline.sql"]);
+    // No CORE table can appear here, and no READ table in the CORE ledger.
+    const core = new Set(ledger.tables.map((table) => table.name));
+    expect(
+      readLedger.tables.filter((table) => core.has(table.name)).map((table) => table.name),
+    ).toEqual([
+      // These three names exist in both databases on purpose while U11 is
+      // behind its flag: CORE still carries the projection of migration 0030,
+      // and READ carries the snapshot-scoped rebuild of it. They are different
+      // tables in different databases, and nothing joins them (04 §1).
+      "balance_read_snapshots",
+      "balance_snapshot_pointer",
+      "current_balance_projection",
+      "scope_relations",
+    ]);
+  });
+
+  test("every READ table is classified, STRICT, and free of foreign keys to CORE", () => {
+    expect(
+      readLedger.tables.filter((table) => table.planRow.startsWith("MISSING")).map((t) => t.name),
+    ).toEqual([]);
+    expect(Object.keys(READ_CLASSIFICATION).toSorted((a, b) => a.localeCompare(b))).toEqual(
+      readLedger.tables.map((table) => table.name).toSorted((a, b) => a.localeCompare(b)),
+    );
+    expect(readLedger.summary.nonStrictTables).toEqual([]);
+    const local = new Set(readLedger.tables.map((table) => table.name));
+    for (const table of readLedger.tables)
+      for (const key of table.foreignKeys)
+        expect(`${table.name} -> ${key.references}`).toBe(
+          `${table.name} -> ${local.has(key.references.split("(")[0] ?? "") ? key.references : "a CORE table"}`,
+        );
+  });
+
+  test("the projection and the operational state are told apart", () => {
+    expect(readLedger.summary.byClassification["read-projection"]).toEqual([
+      "balance_read_snapshots",
+      "current_balance_projection",
+      "scope_relations",
+      "snapshot_input_refs",
+    ]);
+    expect(readLedger.summary.byClassification["read-operational"]).toEqual([
+      "balance_snapshot_pointer",
+      "read_build_checkpoints",
+      "read_instance",
+    ]);
+    // The CORE ledger keeps exactly the classifications it always had.
+    expect(Object.keys(ledger.summary.byClassification)).toEqual([
+      "core-keep",
+      "read-candidate",
+      "operational-mutable",
+      "unclassified-keep",
+    ]);
   });
 });

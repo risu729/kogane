@@ -9,6 +9,10 @@
   "preview_urls": false,
   "vars": {
     "BALANCE_PROJECTION_ENABLED": "0",
+    // U11: with this off the v2 balance routes read the CORE projection of
+    // migration 0030; with it on they read the READ database below, and a
+    // cursor from the other store is refused rather than reinterpreted.
+    "READ_PROJECTION_ENABLED": "false",
     "REWARDS_V2_ENABLED": "false",
     "EVIDENCE_SOURCE_ID": "sony-bank",
     "EVENTS_V2_ENABLED": "0",
@@ -37,6 +41,15 @@
       "binding": "DB",
       "database_name": "kogane-raw-evidence",
       "database_id": "b335a887-250d-45c9-bd72-af83f35fdc60"
+    },
+    // The rebuildable read model (plan 04 §1): `kogane-read`, created empty on
+    // 2026-09-11; its migrations are applied by the deploy step. This Worker
+    // only reads it, and never applies its migrations: that is the processor's
+    // `wrangler.read-migrations.jsonc` step.
+    {
+      "binding": "READ",
+      "database_name": "kogane-read",
+      "database_id": "320ebe31-a031-48a1-985f-0e6fabbd517a"
     }
   ],
   "r2_buckets": [{ "binding": "EVIDENCE", "bucket_name": "kogane-raw-evidence" }]

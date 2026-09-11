@@ -19,12 +19,14 @@ import {
   capabilityGrants,
   isListPath,
   validMeasureView,
+  withBalancesV2,
 } from "../../../packages/observation-shared/src/api-schema";
 import {
   balanceHistoryPage,
   latestBalancePage,
   legacyLatestFromProjection,
   projectionFlagOn,
+  readProjectionFlagOn,
   V2_HISTORY_PATH,
   V2_LATEST_PATH,
 } from "./balances-v2";
@@ -83,13 +85,22 @@ export async function observationApi(
   // and the same object answers the path check, the parameter check and
   // /api/meta.
   const capabilities = await centralStoreCapabilities(env);
+  // U11: with the READ database as the store, the v2 balance paths exist as
+  // soon as this deployment reads one, so "the read model is being rebuilt"
+  // answers 503 with a code instead of a 404 that reads like "this deployment
+  // has no such route" (05 §7, G3-01). `/api/meta` still reports the capability
+  // as false until a snapshot is actually published: the route existing and
+  // the route being able to answer are different statements.
+  const routing = readProjectionFlagOn(env)
+    ? withBalancesV2(capabilities, true, "read-d1")
+    : capabilities;
   if (
     isListPath(path) &&
     LIST_PATH_CAPABILITY[path] &&
-    !capabilityGrants(LIST_PATH_CAPABILITY[path], capabilities)
+    !capabilityGrants(LIST_PATH_CAPABILITY[path], routing)
   )
     throw new HttpError(404, "not_found");
-  const allowed = allowedQueryParameters(path, capabilities);
+  const allowed = allowedQueryParameters(path, routing);
   for (const key of url.searchParams.keys()) {
     const value = url.searchParams.get(key)!;
     if (

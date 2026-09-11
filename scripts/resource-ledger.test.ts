@@ -101,6 +101,19 @@ describe("G0-06/G0-07/G0-12 resource ledger", () => {
     expect(ledger.summary.liveBucketsWithoutConfig).toEqual([]);
     expect(ledger.summary.d1Databases.filter((entry) => entry.live)).toEqual([
       {
+        // The READ database of U11: created empty on 2026-09-11; its
+        // migrations are applied through the processor's read-migrations
+        // configuration only.
+        databaseName: "kogane-read",
+        databaseId: "320ebe31-a031-48a1-985f-0e6fabbd517a",
+        live: true,
+        bindings: [
+          "kogane-evidence-browser",
+          "kogane-observation-pipeline",
+          "kogane-read-migrations",
+        ],
+      },
+      {
         databaseName: "kogane-raw-evidence",
         databaseId: "b335a887-250d-45c9-bd72-af83f35fdc60",
         live: true,

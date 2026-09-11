@@ -18,6 +18,8 @@ that regenerate them and compare.
 | `infra/resources.md`             | The same content, readable: summary tables for D1, R2, Queues, DO classes and crons, then a section per directory                                                                                                                                                                                                                                                                                                           | same test (exact text comparison)                                |
 | `infra/schema/core-ledger.json`  | Machine ledger of the CORE schema produced by applying every migration in `packages/storage-d1/migrations/core` to `bun:sqlite`: tables with columns, primary keys, foreign keys, indexes, triggers, `STRICT` and `WITHOUT ROWID` flags; views; triggers; indexes; per-migration statement counts and top-level `INSERT`s                                                                                                   | `scripts/core-schema-ledger.test.ts`                             |
 | `infra/schema/core-ledger.md`    | The same content, readable: the 04 §2 classification per table with its `*_no_update` / `*_no_delete` guards, and the list of migrations that write rows                                                                                                                                                                                                                                                                    | same test (exact text comparison)                                |
+| `infra/schema/read-ledger.json`  | The same, for the READ database of U11, produced from `packages/storage-d1/migrations/read`. The two directories are never mixed: each profile in the generator names its own                                                                                                                                                                                                                                               | `scripts/core-schema-ledger.test.ts`                             |
+| `infra/schema/read-ledger.md`    | The readable READ ledger: which tables are the projection and which are the state of a build, and the proof that no foreign key names a CORE table                                                                                                                                                                                                                                                                          | same test (exact text comparison)                                |
 | `infra/dependency-resolution.md` | The pre-workspace baseline: declared ranges and resolved versions per package, the dependencies that resolve to more than one version, and a closure digest per package                                                                                                                                                                                                                                                     | snapshot; regenerate on demand                                   |
 | `infra/protection.md`            | The retention ledger: what must never be deleted, what may be rebuilt inside READ only, the D1 Time Travel and export runbook, the R2 rules, and the G0 acceptance-test mapping                                                                                                                                                                                                                                             | prose; the rows it points at are asserted by the two tests above |
 
@@ -25,7 +27,7 @@ that regenerate them and compare.
 
 ```sh
 mise run ledger:resources   # infra/resources.json, infra/resources.md
-mise run ledger:schema      # infra/schema/core-ledger.{json,md}
+mise run ledger:schema      # infra/schema/core-ledger.{json,md} and read-ledger.{json,md}
 mise run ledger:deps        # infra/dependency-resolution.md
 ```
 
@@ -81,6 +83,16 @@ four labels:
 
 A separate `appendOnly` flag per table is derived from the triggers rather than from the label, so
 the ledger reports the schema's actual mutability instead of an intention.
+
+`infra/schema/read-ledger.md` uses two labels of its own, because every table in that database is
+rebuildable and the CORE vocabulary does not apply:
+
+- `read-projection` — the projection of one fixed input and the CORE references it was built from.
+- `read-operational` — the state that drives a build: the published pointer, the checkpoints, and
+  the identity of the physical database.
+
+Neither is a retention decision. Losing the whole READ database costs a rebuild and every open
+cursor, and nothing else (`docs/read-rebuild-runbook.md`, G0-09).
 
 ## Limits
 
