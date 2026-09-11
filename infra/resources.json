@@ -1458,7 +1458,7 @@
         "requiredVerification": "keep the Worker name and the R2/cron/auth contract",
         "executionStatus": "EXECUTED_U04",
         "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-vpass-collector-poc; buckets=kogane-vpass-collector-poc)"
+        "liveResourceStatus": "LIVE(workers=kogane-vpass-collector-poc; buckets=kogane-raw-evidence,kogane-vpass-collector-poc)"
       },
       "workers": [
         {
@@ -1476,6 +1476,11 @@
             {
               "binding": "SNAPSHOTS",
               "bucket": "kogane-vpass-collector-poc",
+              "live": true
+            },
+            {
+              "binding": "DATA",
+              "bucket": "kogane-raw-evidence",
               "live": true
             }
           ],
@@ -1505,7 +1510,9 @@
               "service": "kogane-collector-r2-importer"
             }
           ],
-          "varNames": [],
+          "varNames": [
+            "COLLECTION_TARGET"
+          ],
           "requiredSecretNames": [],
           "unextractedKeys": []
         }
@@ -2162,7 +2169,8 @@
           "kogane-myjcb-collector-poc",
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic",
-          "kogane-sony-bank-collector-poc"
+          "kogane-sony-bank-collector-poc",
+          "kogane-vpass-collector-poc"
         ]
       },
       {

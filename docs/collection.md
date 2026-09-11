@@ -307,3 +307,52 @@ Verified with synthetic fixtures in
 `services/collector-myjcb/test/shared-collection.test.ts` (G1-01, G1-02,
 G1-08, G1-09, G1-15, G1-16, G3-08, G3-11). No provider was contacted and no
 production bucket was read or written.
+
+### Vpass (`services/collector-vpass`, `kogane-vpass-collector-poc`)
+
+| Artifact key                             | Role                         |
+| ---------------------------------------- | ---------------------------- |
+| `card-list.json`                         | `sanitized_provider_capture` |
+| `select-card.json`                       | `sanitized_provider_capture` |
+| `web-meisai-top.json`                    | `sanitized_provider_capture` |
+| `months/<yyyymm>/<top\|answer>-NNN.json` | `provider_response`          |
+| `manifest.json`                          | `collector_manifest`         |
+
+Sanitizer: `vpass-json-sanitizer` v1 (`src/sanitize.ts`). Unlike the other
+collectors, the legacy Vpass path stores the raw response envelopes in its own
+bucket and the importer sanitizes them on the way to central storage — so a
+collector writing the shared bucket has to sanitize first. `src/sanitize.ts` is
+that transformation, with the same id, version and rules the importer applies
+today: every key naming authentication, a session, a device, a CSRF token or a
+card identify key is replaced wholesale; the card inventory keeps ordinal
+labels (`card-001`) and a placeholder reference instead of names and keys; the
+result is canonically encoded (sorted keys, trailing newline) and then
+re-checked, so output that still holds a sensitive value fails the run instead
+of being stored. The artifact keys are the ones central storage already uses,
+so the same run registers the same way.
+
+Terminal fields: one run **per card**, `runId = <session run id>-card-NNN`,
+all cards of one session carrying that session id as `acquisitionSessionRef`,
+so several cards stay distinguishable instead of collapsing into one run
+(G1-16) — the same mapping `VPASS_LEGACY_ADAPTER` uses when a legacy run is
+re-persisted. One unit per card (`unitKind: card`), a `statement-months`
+declared-coverage range over the months that were captured, one `terminal`
+report, `requestedScope.scopeKind = full_snapshot`. `coverageStatus` is
+`partial` even on success: a card exposes a rolling window of statement months,
+so a finished run is not a claim about the card's whole history.
+`producerVersion` is `vpass-worker-card-v1`, the schema version central
+storage records for a card-scoped Vpass run, and `manifest.json` holds exactly
+the summary central storage holds today.
+
+A card (or a session that failed before a card was selected, as unit `run`)
+that collected nothing persists a `failed` terminal with no artifact at all
+(G1-09). Every stored object carries a `redacted` transformation with no
+retained input, because the provider envelope that held the session was
+deliberately not kept; note that this differs from the legacy central
+descriptors, which record a statement page as `extracted` from the stored
+snapshot — in shared mode there is no snapshot to extract from.
+
+Verified with synthetic fixtures in
+`services/collector-vpass/test/shared-collection.test.ts` (G1-01, G1-02,
+G1-08, G1-09, G1-15, G1-16, G3-07, G3-08). No provider was contacted and no
+production bucket was read or written.
