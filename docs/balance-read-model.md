@@ -36,6 +36,16 @@ repaired by building a new snapshot, never by deleting an observation.
 | `scope_relations`            | Typed relations between measurement scopes (`same`/`disjoint`/`subset`/`overlaps`/`unknown`) with the decision that produced each one.                                                                                         |
 | `balance_snapshot_pointer`   | Migration 0038: which complete snapshot the read model publishes, and the revision that snapshot was last verified against. It switches in the same batch that seals a build, and never moves to an older revision.            |
 
+Since U11 the same projection can be built into a **separate READ database**
+instead, under `READ_PROJECTION_ENABLED`. The tables above then live in
+`packages/storage-d1/migrations/read/0001_read_baseline.sql` with a snapshot id
+that carries an attempt, snapshot-scoped relations and the copied CORE
+references of 04 §3; everything this document says about what a row means, how
+adoption is decided, what the API returns and what a cursor is stays true, and
+the contract of the second database is [The READ database](read-model-d1.md).
+With the flag off — the default everywhere — the tables below are the ones that
+are written and read.
+
 `scope_relations` carries no `*_no_update` / `*_no_delete` trigger on purpose:
 unlike a Layer A or Layer B fact it is rebuildable projection state, written
 per release by the projection job from the adopted `entity_relations` and from
@@ -339,6 +349,11 @@ Named by the review, and none of them is used here:
    `/api/balances` moves to the compat adapter.
 5. **UI** — the frontend switches on the advertised capability, not on the
    name of the connection; no separate step is needed.
+
+With `READ_PROJECTION_ENABLED` on, steps 1–5 gain the READ database in front of
+them: create `kogane-read`, apply its migrations, then deploy and flag the
+processor and the app in that order. The whole order and its rollback are in
+[The READ database](read-model-d1.md).
 
 ## Rollback
 

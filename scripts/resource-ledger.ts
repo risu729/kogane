@@ -91,7 +91,12 @@ export const LIVE_INVENTORY = {
     "kogane-vpoint-pay-collector-poc",
   ],
   /** D1 databases that exist in the account. */
-  d1Databases: [{ name: "kogane-raw-evidence", id: "b335a887-250d-45c9-bd72-af83f35fdc60" }],
+  d1Databases: [
+    { name: "kogane-raw-evidence", id: "b335a887-250d-45c9-bd72-af83f35fdc60" },
+    // The READ database of U11: created empty on 2026-09-11, region APAC; its
+    // migrations are applied by the deploy step, never by hand.
+    { name: "kogane-read", id: "320ebe31-a031-48a1-985f-0e6fabbd517a" },
+  ],
   /** KV namespaces: none exist. */
   kvNamespaces: [] as string[],
   /** Live Workers with no config in this repository. */

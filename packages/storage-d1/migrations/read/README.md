@@ -4,9 +4,13 @@ The READ database (`kogane-read`, binding `READ`) is built from its own
 versioned SQL, kept apart from CORE so that no job can apply or reset the
 wrong database (unified plan 06 §2, 09 §2, decision D3).
 
-This directory is empty on purpose. The first READ migration,
-`0001_read_baseline.sql`, lands with the read/write split (U11); until then the
-projection keeps living in CORE and there is nothing to apply here.
+`0001_read_baseline.sql` is that schema: the rebuildable balance projection of
+U11, its snapshot-scoped relations and copied CORE references, and the
+operational state of the builds. It is applied through
+`services/observation-pipeline/wrangler.read-migrations.jsonc`, a configuration
+that exists only for this step, because wrangler takes one `migrations_dir` per
+configuration and the processor's own points at CORE. See
+`docs/read-model-d1.md` and `docs/read-rebuild-runbook.md`.
 
 Rules that already hold:
 

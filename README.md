@@ -22,6 +22,8 @@ different rules.
 - [Change lifecycle: plan, simulate, approve, commit](docs/change-lifecycle.md)
 - [Balance read model](docs/balance-read-model.md)
 - [Fixed projection input, snapshot identity and completion](docs/projection-input.md)
+- [The READ database](docs/read-model-d1.md)
+- [Runbook: rebuilding the READ database](docs/read-rebuild-runbook.md)
 - [Economic events, allocations and reconciliation](docs/economic-events.md)
 - [Points, miles and prepaid balances](docs/rewards.md)
 - [Prices, calculation policies and report artifacts](docs/calculation-and-reports.md)

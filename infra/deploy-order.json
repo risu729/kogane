@@ -9,7 +9,12 @@
       "path": "services/observation-pipeline",
       "config": "wrangler.jsonc"
     },
-    "read": null
+    "read": {
+      "database": "kogane-read",
+      "binding": "READ",
+      "path": "services/observation-pipeline",
+      "config": "wrangler.read-migrations.jsonc"
+    }
   },
   "workers": [
     {

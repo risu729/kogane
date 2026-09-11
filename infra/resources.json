@@ -43,6 +43,10 @@
       {
         "name": "kogane-raw-evidence",
         "id": "b335a887-250d-45c9-bd72-af83f35fdc60"
+      },
+      {
+        "name": "kogane-read",
+        "id": "320ebe31-a031-48a1-985f-0e6fabbd517a"
       }
     ],
     "kvNamespaces": [],
@@ -1721,7 +1725,8 @@
             "ACCESS_AUDIENCE",
             "ACCESS_ISSUER",
             "BALANCE_PROJECTION_ENABLED",
-            "OPS_API_ENABLED"
+            "OPS_API_ENABLED",
+            "READ_PROJECTION_ENABLED"
           ],
           "requiredSecretNames": [],
           "unextractedKeys": []
@@ -1739,6 +1744,12 @@
               "binding": "DB",
               "databaseName": "kogane-raw-evidence",
               "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
+              "live": true
+            },
+            {
+              "binding": "READ",
+              "databaseName": "kogane-read",
+              "databaseId": "320ebe31-a031-48a1-985f-0e6fabbd517a",
               "live": true
             }
           ],
@@ -1777,6 +1788,7 @@
             "EVENTS_V2_ENABLED",
             "EVIDENCE_SOURCE_ID",
             "OPS_API_ENABLED",
+            "READ_PROJECTION_ENABLED",
             "REWARDS_V2_ENABLED",
             "SESSION_REFRESH_POLICY"
           ],
@@ -1796,6 +1808,12 @@
               "binding": "DB",
               "databaseName": "test",
               "databaseId": "00000000-0000-0000-0000-000000000001",
+              "live": false
+            },
+            {
+              "binding": "READ",
+              "databaseName": "test-read",
+              "databaseId": "00000000-0000-0000-0000-000000000002",
               "live": false
             }
           ],
@@ -1829,6 +1847,7 @@
             "EVENTS_V2_ENABLED",
             "EVIDENCE_SOURCE_ID",
             "OPS_API_ENABLED",
+            "READ_PROJECTION_ENABLED",
             "SESSION_REFRESH_POLICY"
           ],
           "requiredSecretNames": [],
@@ -1901,6 +1920,12 @@
               "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
               "migrationsDir": "../../packages/storage-d1/migrations/core",
               "live": true
+            },
+            {
+              "binding": "READ",
+              "databaseName": "kogane-read",
+              "databaseId": "320ebe31-a031-48a1-985f-0e6fabbd517a",
+              "live": true
             }
           ],
           "r2": [
@@ -1938,6 +1963,7 @@
             "COLLECTION_DATA_BUCKET",
             "COLLECTION_INGEST_CLIENT",
             "OPS_DISPATCH_ENABLED",
+            "READ_PROJECTION_ENABLED",
             "RECONCILIATION_ENABLED",
             "RELEASE_CANDIDATES_ENABLED",
             "REPORTS_ENABLED",
@@ -1970,6 +1996,36 @@
               "service": "kogane-observation-pipeline"
             }
           ],
+          "varNames": [],
+          "requiredSecretNames": [],
+          "unextractedKeys": []
+        },
+        {
+          "config": "services/observation-pipeline/wrangler.read-migrations.jsonc",
+          "name": "kogane-read-migrations",
+          "role": "binding-only",
+          "liveWorker": false,
+          "crons": [],
+          "emailHandler": false,
+          "d1": [
+            {
+              "binding": "READ",
+              "databaseName": "kogane-read",
+              "databaseId": "320ebe31-a031-48a1-985f-0e6fabbd517a",
+              "migrationsDir": "../../packages/storage-d1/migrations/read",
+              "live": true
+            }
+          ],
+          "r2": [],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [],
+          "containers": [],
+          "vpcNetworks": [],
+          "serviceBindings": [],
           "varNames": [],
           "requiredSecretNames": [],
           "unextractedKeys": []
@@ -2030,7 +2086,7 @@
     }
   ],
   "summary": {
-    "configCount": 39,
+    "configCount": 40,
     "deployedWorkerCount": 17,
     "crons": [
       {
@@ -2320,6 +2376,24 @@
         "live": false,
         "bindings": [
           "kogane-evidence-browser-test"
+        ]
+      },
+      {
+        "databaseName": "test-read",
+        "databaseId": "00000000-0000-0000-0000-000000000002",
+        "live": false,
+        "bindings": [
+          "kogane-evidence-browser-test"
+        ]
+      },
+      {
+        "databaseName": "kogane-read",
+        "databaseId": "320ebe31-a031-48a1-985f-0e6fabbd517a",
+        "live": true,
+        "bindings": [
+          "kogane-evidence-browser",
+          "kogane-observation-pipeline",
+          "kogane-read-migrations"
         ]
       },
       {
