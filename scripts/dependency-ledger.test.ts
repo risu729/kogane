@@ -67,10 +67,17 @@ describe("a duplicate top-level declaration is rejected by the linter", () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
+  // The binary mise pins (`mise.toml`), found on PATH the way hk finds it. A
+  // missing binary is a failure with a reason, never a skipped assertion.
+  const oxlint = Bun.which("oxlint");
+
   function lint(name: string, code: string): { exitCode: number; output: string } {
+    if (oxlint === null) {
+      throw new Error("oxlint is not on PATH; run this suite through `mise run root:test`");
+    }
     const file = join(directory, name);
     writeFileSync(file, code);
-    const result = Bun.spawnSync(["oxlint", "--config", join(REPO_ROOT, ".oxlintrc.json"), file], {
+    const result = Bun.spawnSync([oxlint, "--config", join(REPO_ROOT, ".oxlintrc.json"), file], {
       cwd: directory,
     });
     if (result.exitCode === null) {
