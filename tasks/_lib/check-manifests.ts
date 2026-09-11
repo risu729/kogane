@@ -32,6 +32,8 @@ export interface WorkerEntry {
   name: string;
   path: string;
   config: string;
+  /** Task that builds what the config serves; defaults to the frozen install. */
+  prepare?: string;
 }
 
 export function manifestViolations(manifest: unknown, file: string): string[] {
@@ -134,10 +136,18 @@ export function dryRunTargets(tasks: readonly TaskRecord[], root: string = REPO_
 export function ledgerMismatches(
   targets: readonly string[],
   workers: readonly WorkerEntry[],
+  taskNames: readonly string[] = [],
 ): string[] {
   const listed = new Set(workers.map((worker) => `${worker.path}/${worker.config}`));
   const declared = new Set(targets);
+  const known = new Set(taskNames);
   return [
+    ...workers
+      .filter((worker) => worker.prepare !== undefined && !known.has(worker.prepare))
+      .map(
+        (worker) =>
+          `infra/workers-ci.json: ${worker.name} names the prepare task "${worker.prepare}", which does not exist`,
+      ),
     ...targets
       .filter((target) => !listed.has(target))
       .map((target) => `infra/workers-ci.json: ${target} has a dry-run task but is not listed`),
@@ -215,7 +225,13 @@ export function check(): string[] {
   const ledger = JSON.parse(readFileSync(`${REPO_ROOT}/infra/workers-ci.json`, "utf8")) as {
     workers: WorkerEntry[];
   };
-  errors.push(...ledgerMismatches(dryRunTargets(tasks), ledger.workers));
+  errors.push(
+    ...ledgerMismatches(
+      dryRunTargets(tasks),
+      ledger.workers,
+      tasks.map((task) => task.name),
+    ),
+  );
   return errors;
 }
 

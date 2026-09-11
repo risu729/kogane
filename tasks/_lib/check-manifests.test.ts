@@ -137,6 +137,22 @@ describe("the CI worker ledger (G4-09, G5-09)", () => {
     ]);
   });
 
+  test("a prepare task that does not exist is reported", () => {
+    const workers = [
+      {
+        name: "app",
+        path: "services/app",
+        config: "wrangler.jsonc",
+        prepare: "web:build-nothing",
+      },
+    ];
+    expect(
+      ledgerMismatches(["services/app/wrangler.jsonc"], workers, ["web:build"]),
+    ).toEqual([
+      'infra/workers-ci.json: app names the prepare task "web:build-nothing", which does not exist',
+    ]);
+  });
+
   test("a ledger entry with no dry-run task is reported", () => {
     const workers = [{ name: "ghost", path: "services/ghost", config: "wrangler.jsonc" }];
     expect(ledgerMismatches([], workers)).toEqual([

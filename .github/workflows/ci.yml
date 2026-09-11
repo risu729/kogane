@@ -119,10 +119,13 @@ jobs:
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           version: 2026.9.3
-      - name: Install the locked dependencies
+      - name: Install the locked dependencies and build what the config needs
         # The action resolves the Wrangler the workspace pins; it never
-        # downloads one, so the frozen install has to happen first.
-        run: mise run install
+        # downloads one, so the frozen install has to happen first. A config
+        # that serves built assets names the task that produces them.
+        run: mise run "${PREPARE}"
+        env:
+          PREPARE: ${{ matrix.worker.prepare || 'install' }}
       - name: Validate without uploading
         # dry-run mode passes no Cloudflare account or token, so this job never
         # reaches the Cloudflare API.

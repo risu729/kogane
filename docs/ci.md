@@ -105,7 +105,8 @@ from the workspace directory (`bash scripts/audit-v-point-r2.sh`,
 4. List `<dir>/tasks.toml` in `[task_config] includes` of `mise.toml`.
 5. If it deploys a Worker, add each of its Wrangler configs to
    `infra/workers-ci.json` and give it a `<short>:dry-run` task listing the same
-   configs.
+   configs. A config that serves built assets also names the task that produces
+   them in the entry's `prepare` field; without it the job only installs.
 
 Nothing else is needed: the CI matrices are generated from the task list and
 the ledger. `tasks/_lib/check-manifests.ts` fails if a workspace directory has
@@ -154,7 +155,7 @@ telemetry; installation still downloads pinned dependencies and tools.
 | `Lint`                      | `mise run check --lint`, then `mise run ci:root`                                                                                                                          |
 | `Plan`                      | emits the workspace matrix from `mise tasks ls --json` (every name starting with `ci:`) and the Worker matrix from `infra/workers-ci.json`; fails if either list is empty |
 | `Workspace (<short>)`       | `mise run "ci:<short>"`                                                                                                                                                   |
-| `Worker (<name>)`           | frozen install, then the shared Wrangler action in `dry-run` mode                                                                                                         |
+| `Worker (<name>)`           | the entry's `prepare` task (frozen `install` by default), then the shared Wrangler action in `dry-run` mode                                                                                                         |
 | `CI Check`                  | `if: always()`, fails unless every needed result is exactly `success`                                                                                                     |
 | `Generate Actions Timeline` | run summary                                                                                                                                                               |
 

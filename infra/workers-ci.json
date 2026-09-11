@@ -3,12 +3,14 @@
     {
       "name": "app",
       "path": "services/evidence-browser",
-      "config": "wrangler.jsonc"
+      "config": "wrangler.jsonc",
+      "prepare": "web:build-production"
     },
     {
       "name": "app-demo",
       "path": "services/evidence-browser",
-      "config": "wrangler.demo.jsonc"
+      "config": "wrangler.demo.jsonc",
+      "prepare": "web:export-demo"
     },
     {
       "name": "cloudflare-browser-run",
