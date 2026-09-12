@@ -1,7 +1,7 @@
 // Synthetic full-schema cardinalities. No remote bindings or disabled guards.
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
-import ingest from "../../raw-evidence/src/worker";
+import { seedFixturePost, seedFixtureObject } from "./ingest-fixtures";
 import { seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import { identityQuery } from "../src/identity-api";
 import { organizedFilterOptions } from "../src/organized-filter-options";
@@ -11,26 +11,9 @@ import {
   PREFERRED_INSTRUMENT_NAMES_SQL,
 } from "../src/preferred-instrument-names";
 
-const credential = "synthetic-scale-credential-not-a-real-secret";
 const token = (card: number) => `vpass-card-v1-${String(card + 1).repeat(64)}`;
 const bytes = new TextEncoder().encode('{"synthetic":true}');
-const keys = { "collector-r2-vpass": credential };
-async function post(path: string, body: unknown) {
-  const response = await ingest.fetch(
-    new Request(`https://fixture.test${path}`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer collector-r2-vpass.${credential}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-    }),
-    { ...env, INGEST_CLIENT_KEYS: JSON.stringify(keys) },
-  );
-  if (response.status !== 201)
-    throw new Error(`synthetic scale ${path}: ${response.status} ${await response.text()}`);
-  return response.json() as Promise<Record<string, any>>;
-}
+const post = (path: string, body: unknown) => seedFixturePost("collector-r2-vpass", path, body);
 async function rawCard(index: number, binding: boolean, sha256: string) {
   const ordinal = `card-${String((index % 6) + 1).padStart(3, "0")}`;
   const { runId } = await post("/v1/runs", {
@@ -45,19 +28,7 @@ async function rawCard(index: number, binding: boolean, sha256: string) {
     unitKey: binding ? token(index % 6) : ordinal,
     terminalReportRequired: true,
   });
-  const uploaded = await ingest.fetch(
-    new Request(`https://fixture.test/v1/runs/${runId}/objects/${sha256}`, {
-      method: "PUT",
-      headers: {
-        authorization: `Bearer collector-r2-vpass.${credential}`,
-        "content-length": String(bytes.length),
-        "x-kogane-byte-size": String(bytes.length),
-      },
-      body: bytes,
-    }),
-    { ...env, INGEST_CLIENT_KEYS: JSON.stringify(keys) },
-  );
-  expect([200, 201]).toContain(uploaded.status);
+  await seedFixtureObject("collector-r2-vpass", runId, sha256, bytes);
   const artifactKey = binding ? "card-identity-binding.json" : "statement.json";
   const descriptor = await post(`/v1/runs/${runId}/artifacts`, {
     artifactKey,

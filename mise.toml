@@ -76,7 +76,6 @@ includes = [
 	"services/collector-mobile-suica/tasks.toml",
 	"services/collector-moneyforward/tasks.toml",
 	"services/collector-myjcb/tasks.toml",
-	"services/collector-r2-importer/tasks.toml",
 	"services/collector-sbi-securities/tasks.toml",
 	"services/collector-sbi-shinsei/tasks.toml",
 	"services/collector-sbi-vc-trade/tasks.toml",
@@ -86,5 +85,4 @@ includes = [
 	"services/collector-vpoint-pay/tasks.toml",
 	"services/collector-vpoint/tasks.toml",
 	"services/processor/tasks.toml",
-	"services/raw-evidence/tasks.toml",
 ]

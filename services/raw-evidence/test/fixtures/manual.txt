@@ -1,1 +1,0 @@
-synthetic local-file importer fixture

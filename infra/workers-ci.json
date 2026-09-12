@@ -38,81 +38,6 @@
       "config": "wrangler.jsonc"
     },
     {
-      "name": "importer",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.jsonc"
-    },
-    {
-      "name": "importer-audit-global-pass-layer-b",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.audit-global-pass-layer-b.jsonc"
-    },
-    {
-      "name": "importer-audit-moneyforward",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.audit-moneyforward.jsonc"
-    },
-    {
-      "name": "importer-audit-moneyforward-layer-b",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.audit-moneyforward-layer-b.jsonc"
-    },
-    {
-      "name": "importer-audit-myjcb",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.audit-myjcb.jsonc"
-    },
-    {
-      "name": "importer-audit-sbi-shinsei",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.audit-sbi-shinsei.jsonc"
-    },
-    {
-      "name": "importer-audit-sbi-vc",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.audit-sbi-vc.jsonc"
-    },
-    {
-      "name": "importer-audit-smbc-direct",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.audit-smbc-direct.jsonc"
-    },
-    {
-      "name": "importer-audit-smbc-direct-layer-b",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.audit-smbc-direct-layer-b.jsonc"
-    },
-    {
-      "name": "importer-audit-sony-layer-b",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.audit-sony-layer-b.jsonc"
-    },
-    {
-      "name": "importer-audit-v-point",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.audit-v-point.jsonc"
-    },
-    {
-      "name": "importer-audit-v-point-pay-email",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.audit-v-point-pay-email.jsonc"
-    },
-    {
-      "name": "importer-audit-v-point-pay-layer-b",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.audit-v-point-pay-layer-b.jsonc"
-    },
-    {
-      "name": "importer-audit-vpass-layer-b",
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.audit-vpass-layer-b.jsonc"
-    },
-    {
-      "name": "ingest",
-      "path": "services/raw-evidence",
-      "config": "wrangler.jsonc"
-    },
-    {
       "name": "mobile-suica-worker",
       "path": "services/collector-mobile-suica",
       "config": "wrangler.jsonc"
@@ -184,11 +109,6 @@
     }
   ],
   "excluded": [
-    {
-      "path": "services/collector-r2-importer",
-      "config": "wrangler.identity-backfill.jsonc",
-      "reason": "wrangler dev helper for scripts/backfill-vpass-identities.ts: remote bindings only, no main, so wrangler deploy --dry-run rejects it"
-    },
     {
       "path": "services/processor",
       "config": "wrangler.diagnostic.jsonc",

@@ -17,7 +17,6 @@ import { describe, expect, test } from "bun:test";
 import { encode } from "iconv-lite";
 import { sha256Hex, terminalKey } from "../../../packages/collection/src/index";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
-import { sanitizeHistoryHtml as importerSanitizeHistoryHtml } from "../../collector-r2-importer/src/mobile-suica";
 import { collectMobileSuica } from "../src/mobile-suica";
 import { REDACTED_BASE_VARIABLE } from "../src/sanitize";
 import { persistMobileSuicaRun } from "../src/shared-run";
@@ -161,17 +160,12 @@ describe("mobile-suica: the shared target persists the legacy bytes (U09 parity,
       "the terminal",
     );
 
-    // Leg 3: the importer's v2 sanitizer accepts the legacy page and forwards
-    // it unchanged, so the central bytes today are the shared bytes tomorrow.
     const html = result.manifest.artifacts.find(
       (entry) => entry.artifactKey === "sf-history-page-0001.html",
     )!;
-    const central = importerSanitizeHistoryHtml(
-      legacyByName.get(html.artifactKey)!,
-      "mobile-suica-worker-poc-v2",
+    expect(Buffer.from(legacyByName.get(html.artifactKey)!).toString("latin1")).toContain(
+      REDACTED_BASE_VARIABLE,
     );
-    expect(await sha256Hex(central)).toBe(html.sha256);
-    expect(Buffer.from(central).toString("latin1")).toContain(REDACTED_BASE_VARIABLE);
     expect(html.role).toBe("sanitized_provider_capture");
   });
 });

@@ -1,12 +1,6 @@
 import { env } from "cloudflare:test";
-import { expect } from "vitest";
-import ingest from "../../raw-evidence/src/worker";
+import { seedFixturePost, seedFixtureObject } from "./ingest-fixtures";
 
-const secret = "synthetic-test-secret-at-least-twenty-characters";
-const ingestEnv = () => ({
-  ...env,
-  INGEST_CLIENT_KEYS: JSON.stringify({ "evidence-test": secret }),
-});
 export async function seedRegistry() {
   await env.DB.batch([
     env.DB.prepare(
@@ -68,21 +62,7 @@ export async function supersedeParse(oldId: number, newId: number) {
     .run();
   await publishParse(newId);
 }
-async function post(path: string, body: unknown) {
-  const response = await ingest.fetch(
-    new Request(`https://fixture.test${path}`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer evidence-test.${secret}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-    }),
-    ingestEnv(),
-  );
-  expect(response.status, `synthetic seed ${path}: ${await response.clone().text()}`).toBe(201);
-  return response.json() as Promise<Record<string, any>>;
-}
+const post = (path: string, body: unknown) => seedFixturePost("evidence-test", path, body);
 export async function seedRun(
   options: {
     source?: string;
@@ -140,19 +120,7 @@ export async function seedRun(
     const sha256 = Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join(
       "",
     );
-    const put = await ingest.fetch(
-      new Request(`https://fixture.test/v1/runs/${runId}/objects/${sha256}`, {
-        method: "PUT",
-        headers: {
-          authorization: `Bearer evidence-test.${secret}`,
-          "content-length": String(bytes.length),
-          "x-kogane-byte-size": String(bytes.length),
-        },
-        body: bytes,
-      }),
-      ingestEnv(),
-    );
-    expect([200, 201]).toContain(put.status);
+    await seedFixtureObject("evidence-test", runId, sha256, bytes);
     const artifactKey = `synthetic-${i}.json`;
     const result = await post(`/v1/runs/${runId}/artifacts`, {
       artifactKey,
