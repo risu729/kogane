@@ -332,7 +332,9 @@ describe("reward reads", () => {
       await env.DB.prepare("SELECT count(*) AS n FROM reward_bucket_claims").first<number>("n"),
     ).toBe(before);
     expect(
-      await env.DB.prepare("SELECT count(*) AS n FROM conversion_simulations").first<number>("n"),
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='conversion_simulations'",
+      ).first<number>("n"),
     ).toBe(0);
   });
 

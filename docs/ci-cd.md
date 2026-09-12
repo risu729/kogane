@@ -326,8 +326,8 @@ database names, and one entry per deployable Worker:
   "workers": [
     {
       "name": "ingest", // the deploy-ledger name
-      "worker": "kogane-ingest", // the Cloudflare script name
-      "config": "services/raw-evidence/wrangler.jsonc",
+      "worker": "kogane-observation-pipeline", // the Cloudflare script name
+      "config": "services/processor/wrangler.jsonc",
       "sha": "<the commit this Worker is at>",
       "outcome": "planned", // or "kept": this run did not touch it
     },
@@ -401,27 +401,25 @@ and a health route. `tasks/_lib/deploy-order.test.ts` keeps it in step with
 cannot drift into a second, different order.
 
 Consumers deploy before producers: a reader must understand the contract before
-a writer starts using it. The five consumers come first, then every collector:
+a writer starts using it. The three consumers come first, then every collector:
 
 | Order | Worker                            | Directory                           | Health route                | Reachable by    |
 | ----- | --------------------------------- | ----------------------------------- | --------------------------- | --------------- |
 | 1     | `kogane-observation-pipeline`     | `services/processor`                | `/internal/health`, binding | through the App |
 | 2     | `kogane-evidence-browser`         | `services/app`                      | `/api/ops/v1/health`        | Access token    |
 | 3     | `kogane-demo`                     | `services/app`                      | none                        | —               |
-| 4     | `kogane-ingest`                   | `services/raw-evidence`             | `/health`                   | unauthenticated |
-| 5     | `kogane-collector-r2-importer`    | `services/collector-r2-importer`    | none                        | —               |
-| 6     | `kogane-globalpass-collector-poc` | `services/collector-globalpass`     | `/health`                   | unauthenticated |
-| 7     | `kogane-mobile-suica-...-poc`     | `services/collector-mobile-suica`   | `/health`                   | unauthenticated |
-| 8     | `kogane-moneyforward-...-poc`     | `services/collector-moneyforward`   | `/health`                   | unauthenticated |
-| 9     | `kogane-myjcb-collector-poc`      | `services/collector-myjcb`          | `/health`                   | unauthenticated |
-| 10    | `kogane-sbi-collector-poc`        | `services/collector-sbi-securities` | `/health`                   | unauthenticated |
-| 11    | `kogane-sbi-shinsei-...-poc`      | `services/collector-sbi-shinsei`    | `/health`                   | unauthenticated |
-| 12    | `kogane-sbi-vc-session-poc`       | `services/collector-sbi-vc-trade`   | `/healthz`                  | unauthenticated |
-| 13    | `kogane-smbc-direct-backfill-poc` | `services/collector-smbc-direct`    | none                        | —               |
-| 14    | `kogane-sony-bank-collector-poc`  | `services/collector-sony-bank`      | `/health`                   | unauthenticated |
-| 15    | `kogane-vpass-collector-poc`      | `services/collector-vpass`          | `/health`                   | unauthenticated |
-| 16    | `kogane-vpoint-pay-...-poc`       | `services/collector-vpoint-pay`     | `/health`                   | unauthenticated |
-| 17    | `kogane-vpoint-collector-poc`     | `services/collector-vpoint`         | `/health`                   | unauthenticated |
+| 4     | `kogane-globalpass-collector-poc` | `services/collector-globalpass`     | `/health`                   | unauthenticated |
+| 5     | `kogane-mobile-suica-...-poc`     | `services/collector-mobile-suica`   | `/health`                   | unauthenticated |
+| 6     | `kogane-moneyforward-...-poc`     | `services/collector-moneyforward`   | `/health`                   | unauthenticated |
+| 7     | `kogane-myjcb-collector-poc`      | `services/collector-myjcb`          | `/health`                   | unauthenticated |
+| 8     | `kogane-sbi-collector-poc`        | `services/collector-sbi-securities` | `/health`                   | unauthenticated |
+| 9     | `kogane-sbi-shinsei-...-poc`      | `services/collector-sbi-shinsei`    | `/health`                   | unauthenticated |
+| 10    | `kogane-sbi-vc-session-poc`       | `services/collector-sbi-vc-trade`   | `/healthz`                  | unauthenticated |
+| 11    | `kogane-smbc-direct-backfill-poc` | `services/collector-smbc-direct`    | none                        | —               |
+| 12    | `kogane-sony-bank-collector-poc`  | `services/collector-sony-bank`      | `/health`                   | unauthenticated |
+| 13    | `kogane-vpass-collector-poc`      | `services/collector-vpass`          | `/health`                   | unauthenticated |
+| 14    | `kogane-vpoint-pay-...-poc`       | `services/collector-vpoint-pay`     | `/health`                   | unauthenticated |
+| 15    | `kogane-vpoint-collector-poc`     | `services/collector-vpoint`         | `/health`                   | unauthenticated |
 
 Every collector is a CD target: leaving them out meant a merged collector
 change was live in the repository and not in production, which is a worse
@@ -455,10 +453,6 @@ invocation. What was checked, in the code as it is:
 - **No module-level side effect.** No collector entry point runs code at import
   time: the modules export a handler, the container classes only set ports and
   log lifecycle callbacks.
-- **The one queue consumer among the collectors** (`services/collector-vpass`)
-  re-imports artifacts that are already stored into `kogane-ingest`; it contacts
-  no provider. A deploy does not enqueue anything, and a backlog would have been
-  delivered to the previous version anyway.
 - **No credential is touched.** CD never writes a Worker secret, never calls a
   re-authentication route and never runs a backfill; the release postcheck reads
   health routes only (below).
@@ -481,8 +475,8 @@ the route, `healthAuth` is how CD authenticates it (`access` or `none`), and
 with an empty `healthPath` is not requested at all, and the ledger says so
 rather than pretending to check something.
 
-**The public half.** `kogane-ingest` and each declared public health route are
-requested over their `workers.dev` hostname, unauthenticated, and must answer
+**The public half.** Each declared collector public health route is
+requested over its `workers.dev` hostname, unauthenticated, and must answer
 200 **with** the identity field the ledger names (`schemaVersion` for most,
 `service` for Vpass). SBI VC Trade uses `/healthz`, a static liveness answer;
 its existing `/health` remains protected by the collector admin token. 200 alone is not a
@@ -750,7 +744,7 @@ cannot be proven offline and is verified on the first live pull request.
 | G5-15      | Tests: every ledger entry still carries the Wrangler `name` its configuration declares, so a directory move cannot create a new resource.                                                                                                                      |
 | G5-16      | Tests: the rollback refuses a target that is not an ancestor, or whose migration list is not a prefix; its record keeps the deployed migration list and is per target. No workflow restores a database.                                                        |
 | G5-17      | Tests: only the credential preflight, the migration steps and the deploy steps reference the Cloudflare token, `secrets-json` is never used, and no collector secret name appears in an Actions file.                                                          |
-| G5-18      | Out of scope here: the legacy Worker and its notification path stay deployed (plan D2) until U15 retires them with its own audit.                                                                                                                              |
+| G5-18      | Completed: legacy Workers and notification paths were retired after archival and empty-backlog verification; see legacy-retirement.md.                                                                                                                         |
 
 ## Renovate
 

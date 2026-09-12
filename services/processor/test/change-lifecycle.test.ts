@@ -841,7 +841,8 @@ test("migration 0031 applies on a seeded 0017-0035 schema and touches no existin
     // 0038 alters decision_outbox, so it follows 0031 rather than preceding it.
     await apply(
       migrations.filter(
-        (name) => name !== "0031_operations.sql" && name !== "0038_source_revision.sql",
+        (name) =>
+          name < "0042" && name !== "0031_operations.sql" && name !== "0038_source_revision.sql",
       ),
     );
     await local1.batch([

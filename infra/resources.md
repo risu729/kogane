@@ -14,8 +14,8 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 ## Summary
 
-- Wrangler configs: 40
-- Distinct Workers that exist in the account: 17
+- Wrangler configs: 24
+- Distinct Workers that exist in the account: 15
 - Live Workers with no config in this repository: —
 - Live R2 buckets no config references: —
 - Workers with an `email()` handler (Email routes are configured outside this repository): kogane-vpoint-collector-poc
@@ -27,25 +27,13 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | test | `00000000-0000-0000-0000-000000000001` | no | kogane-evidence-browser-test |
 | test-read | `00000000-0000-0000-0000-000000000002` | no | kogane-evidence-browser-test |
 | kogane-read | `320ebe31-a031-48a1-985f-0e6fabbd517a` | yes | kogane-evidence-browser<br>kogane-observation-pipeline<br>kogane-read-migrations |
-| kogane-raw-evidence | `b335a887-250d-45c9-bd72-af83f35fdc60` | yes | kogane-evidence-browser<br>kogane-ingest<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic |
+| kogane-raw-evidence | `b335a887-250d-45c9-bd72-af83f35fdc60` | yes | kogane-evidence-browser<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic |
 
 ## R2 buckets
 
 | bucket | live | bound by |
 | --- | --- | --- |
-| kogane-globalpass-collector-poc | yes | kogane-collector-r2-importer<br>kogane-global-pass-layer-b-audit-local |
-| kogane-mobile-suica-collector-poc | yes | kogane-collector-r2-importer |
-| kogane-moneyforward-collector-poc | yes | kogane-collector-r2-importer<br>kogane-moneyforward-layer-b-audit-local<br>kogane-moneyforward-r2-contract-audit-local |
-| kogane-myjcb-collector-poc | yes | kogane-collector-r2-importer<br>kogane-myjcb-r2-layer-b-audit-local |
-| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-globalpass-collector-poc<br>kogane-ingest<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sbi-collector-poc<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-vc-session-poc<br>kogane-smbc-direct-backfill-poc<br>kogane-sony-bank-collector-poc<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc<br>kogane-vpoint-pay-collector-poc |
-| kogane-sbi-collector-poc | yes | kogane-collector-r2-importer |
-| kogane-sbi-shinsei-collector-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-shinsei-r2-layer-b-audit-local |
-| kogane-sbi-vc-trade-poc | yes | kogane-collector-r2-importer<br>kogane-sbi-vc-r2-layer-b-audit-local |
-| kogane-smbc-direct-backfill-poc | yes | kogane-collector-r2-importer<br>kogane-smbc-direct-r2-contract-audit-local<br>kogane-smbc-direct-r2-layer-b-audit-local |
-| kogane-sony-bank-collector-poc | yes | kogane-collector-r2-importer<br>kogane-sony-bank-r2-layer-b-audit-local |
-| kogane-vpass-collector-poc | yes | kogane-collector-r2-importer<br>kogane-vpass-identity-backfill-local<br>kogane-vpass-r2-layer-b-audit-local |
-| kogane-vpoint-collector-poc | yes | kogane-collector-r2-importer<br>kogane-vpoint-r2-contract-audit-local |
-| kogane-vpoint-pay-collector-poc | yes | kogane-collector-r2-importer<br>kogane-vpoint-pay-email-r2-contract-audit-local<br>kogane-vpoint-pay-r2-layer-b-audit-local<br>kogane-vpoint-r2-contract-audit-local |
+| kogane-raw-evidence | yes | kogane-evidence-browser<br>kogane-globalpass-collector-poc<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-sbi-collector-poc<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-vc-session-poc<br>kogane-smbc-direct-backfill-poc<br>kogane-sony-bank-collector-poc<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc<br>kogane-vpoint-pay-collector-poc |
 | test | no | kogane-evidence-browser-test |
 
 ## Queues
@@ -53,7 +41,6 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | queue | producers | consumers | dead letter | exists |
 | --- | --- | --- | --- | --- |
 | kogane-collection-terminals | — | kogane-observation-pipeline | kogane-collection-terminals-dlq | declared (unverified) |
-| kogane-r2-outbox-reconciler | kogane-collector-r2-importer | kogane-collector-r2-importer | kogane-r2-outbox-reconciler-dlq | declared (unverified) |
 
 ## Durable Object classes and migration tags
 
@@ -71,7 +58,6 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 | worker | cron (UTC) | deployed |
 | --- | --- | --- |
-| kogane-collector-r2-importer | `23 19 * * SUN` | yes |
 | kogane-globalpass-collector-poc | `17 18 * * *` | yes |
 | kogane-mobile-suica-collector-poc | `10 21 * * *` | yes |
 | kogane-moneyforward-collector-poc | `15 21 * * *` | yes |
@@ -95,6 +81,8 @@ scanned workspaces keeps its row below with `EXECUTED_U04`.
 
 | was | action | result | last commit | live-resource check |
 | --- | --- | --- | --- | --- |
+| `services/raw-evidence` | `retire-legacy-service` | packages/application in-process registration; central R2 retirement archive | `bdee142d49f8` | 2026-09-13: old Worker, old queues and per-source buckets deleted and absence verified; 2989 original objects preserved and hash-verified in central R2 |
+| `services/collector-r2-importer` | `retire-legacy-service` | packages/application in-process registration; central R2 retirement archive | `bdee142d49f8` | 2026-09-13: old Worker, old queues and per-source buckets deleted and absence verified; 2989 original objects preserved and hash-verified in central R2 |
 | `poc/camoufox-container-probe` | `retire-candidate` | docs/research/camoufox.md (code removed) | `5fb143e0f77a` | no wrangler config, no Worker, no bucket, no cron, no container application; local image deleted 2026-08-26 |
 | `poc/collector-diagnostics` | `promote-shared` | packages/collector-diagnostics (7 collector Workers; exports createDiagnostics, safeErrorDetails) | `5fb143e0f77a` | no wrangler config of its own; it is a library every collector Worker on the account links into its bundle, so it is promoted rather than retired |
 | `poc/kameleo-container-probe` | `retire-candidate` | docs/research/kameleo.md (code removed) | `5fb143e0f77a` | no wrangler config, no Worker, no bucket, no cron; local container, volume and image deleted 2026-08-26 |
@@ -406,298 +394,6 @@ No wrangler config.
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
 - Required secrets (names only): —
 
-### `services/collector-r2-importer`
-
-- Disposition (plan 07 §1 + decision D2): `absorb-into-processor` → services/processor (queue consumer and adapters, U08)
-- Required verification: the Worker keeps running until U15; old protocol still readable; no double cron
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-collector-r2-importer; buckets=kogane-globalpass-collector-poc,kogane-mobile-suica-collector-poc,kogane-moneyforward-collector-poc,kogane-myjcb-collector-poc,kogane-sbi-collector-poc,kogane-sbi-shinsei-collector-poc,kogane-sbi-vc-trade-poc,kogane-smbc-direct-backfill-poc,kogane-sony-bank-collector-poc,kogane-vpass-collector-poc,kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)
-
-#### `kogane-global-pass-layer-b-audit-local` — `services/collector-r2-importer/wrangler.audit-global-pass-layer-b.jsonc`
-
-- Role: local-audit; exists in the account: no
-- Entry point: src/global-pass-layer-b-audit-worker.ts
-- D1: —
-- R2: GLOBAL_PASS_SNAPSHOTS → kogane-globalpass-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-moneyforward-layer-b-audit-local` — `services/collector-r2-importer/wrangler.audit-moneyforward-layer-b.jsonc`
-
-- Role: local-audit; exists in the account: no
-- Entry point: src/moneyforward-layer-b-audit-worker.ts
-- D1: —
-- R2: MONEYFORWARD_SNAPSHOTS → kogane-moneyforward-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-moneyforward-r2-contract-audit-local` — `services/collector-r2-importer/wrangler.audit-moneyforward.jsonc`
-
-- Role: local-audit; exists in the account: no
-- Entry point: src/moneyforward-audit-worker.ts
-- D1: —
-- R2: MONEYFORWARD_SNAPSHOTS → kogane-moneyforward-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-myjcb-r2-layer-b-audit-local` — `services/collector-r2-importer/wrangler.audit-myjcb.jsonc`
-
-- Role: local-audit; exists in the account: no
-- Entry point: src/myjcb-audit-worker.ts
-- D1: —
-- R2: MYJCB_SNAPSHOTS → kogane-myjcb-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-sbi-shinsei-r2-layer-b-audit-local` — `services/collector-r2-importer/wrangler.audit-sbi-shinsei.jsonc`
-
-- Role: local-audit; exists in the account: no
-- Entry point: src/sbi-shinsei-audit-worker.ts
-- D1: —
-- R2: SBI_SHINSEI_SNAPSHOTS → kogane-sbi-shinsei-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-sbi-vc-r2-layer-b-audit-local` — `services/collector-r2-importer/wrangler.audit-sbi-vc.jsonc`
-
-- Role: local-audit; exists in the account: no
-- Entry point: src/sbi-vc-audit-worker.ts
-- D1: —
-- R2: SBI_VC_SNAPSHOTS → kogane-sbi-vc-trade-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-smbc-direct-r2-layer-b-audit-local` — `services/collector-r2-importer/wrangler.audit-smbc-direct-layer-b.jsonc`
-
-- Role: local-audit; exists in the account: no
-- Entry point: src/smbc-direct-layer-b-audit-worker.ts
-- D1: —
-- R2: SMBC_DIRECT_SNAPSHOTS → kogane-smbc-direct-backfill-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-smbc-direct-r2-contract-audit-local` — `services/collector-r2-importer/wrangler.audit-smbc-direct.jsonc`
-
-- Role: local-audit; exists in the account: no
-- Entry point: src/smbc-direct-audit-worker.ts
-- D1: —
-- R2: SMBC_DIRECT_SNAPSHOTS → kogane-smbc-direct-backfill-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-sony-bank-r2-layer-b-audit-local` — `services/collector-r2-importer/wrangler.audit-sony-layer-b.jsonc`
-
-- Role: local-audit; exists in the account: no
-- Entry point: src/sony-layer-b-audit-worker.ts
-- D1: —
-- R2: SONY_SNAPSHOTS → kogane-sony-bank-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-vpoint-pay-email-r2-contract-audit-local` — `services/collector-r2-importer/wrangler.audit-v-point-pay-email.jsonc`
-
-- Role: local-audit; exists in the account: no
-- Entry point: src/v-point-pay-email-audit-worker.ts
-- D1: —
-- R2: VPOINT_PAY_SNAPSHOTS → kogane-vpoint-pay-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-vpoint-pay-r2-layer-b-audit-local` — `services/collector-r2-importer/wrangler.audit-v-point-pay-layer-b.jsonc`
-
-- Role: local-audit; exists in the account: no
-- Entry point: src/v-point-pay-layer-b-audit-worker.ts
-- D1: —
-- R2: VPOINT_PAY_SNAPSHOTS → kogane-vpoint-pay-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-vpoint-r2-contract-audit-local` — `services/collector-r2-importer/wrangler.audit-v-point.jsonc`
-
-- Role: local-audit; exists in the account: no
-- Entry point: src/v-point-audit-worker.ts
-- D1: —
-- R2: VPOINT_SNAPSHOTS → kogane-vpoint-collector-poc<br>VPOINT_PAY_SNAPSHOTS → kogane-vpoint-pay-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-vpass-r2-layer-b-audit-local` — `services/collector-r2-importer/wrangler.audit-vpass-layer-b.jsonc`
-
-- Role: local-audit; exists in the account: no
-- Entry point: src/vpass-layer-b-audit-worker.ts
-- D1: —
-- R2: VPASS_SNAPSHOTS → kogane-vpass-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-vpass-identity-backfill-local` — `services/collector-r2-importer/wrangler.identity-backfill.jsonc`
-
-- Role: binding-only; exists in the account: no
-- Entry point: —
-- D1: —
-- R2: VPASS_SNAPSHOTS → kogane-vpass-collector-poc
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: IMPORTER → kogane-collector-r2-importer
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-#### `kogane-collector-r2-importer` — `services/collector-r2-importer/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: —
-- R2: SBI_SNAPSHOTS → kogane-sbi-collector-poc<br>SBI_VC_SNAPSHOTS → kogane-sbi-vc-trade-poc<br>SONY_SNAPSHOTS → kogane-sony-bank-collector-poc<br>SBI_SHINSEI_SNAPSHOTS → kogane-sbi-shinsei-collector-poc<br>MOBILE_SUICA_SNAPSHOTS → kogane-mobile-suica-collector-poc<br>GLOBAL_PASS_SNAPSHOTS → kogane-globalpass-collector-poc<br>MYJCB_SNAPSHOTS → kogane-myjcb-collector-poc<br>MONEYFORWARD_SNAPSHOTS → kogane-moneyforward-collector-poc<br>VPOINT_SNAPSHOTS → kogane-vpoint-collector-poc<br>VPOINT_PAY_SNAPSHOTS → kogane-vpoint-pay-collector-poc<br>VPASS_SNAPSHOTS → kogane-vpass-collector-poc<br>SMBC_DIRECT_SNAPSHOTS → kogane-smbc-direct-backfill-poc
-- KV: —
-- Queues: produce OUTBOX_RECONCILER_QUEUE → kogane-r2-outbox-reconciler<br>consume kogane-r2-outbox-reconciler (dlq kogane-r2-outbox-reconciler-dlq)
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: RAW_EVIDENCE → kogane-ingest
-- Crons: `23 19 * * SUN`
-- Assets: —
-- Vars (names only): IMPORTER_VERSION<br>RECONCILER_ACCOUNT_ID
-- Required secrets (names only): GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST<br>ORIGIN_FINGERPRINT_KEY<br>RAW_EVIDENCE_TOKEN<br>RAW_EVIDENCE_TOKEN_GLOBAL_PASS<br>RAW_EVIDENCE_TOKEN_MOBILE_SUICA<br>RAW_EVIDENCE_TOKEN_MONEYFORWARD<br>RAW_EVIDENCE_TOKEN_MYJCB<br>RAW_EVIDENCE_TOKEN_SBI_SHINSEI<br>RAW_EVIDENCE_TOKEN_SBI_VC<br>RAW_EVIDENCE_TOKEN_SMBC_DIRECT<br>RAW_EVIDENCE_TOKEN_SONY<br>RAW_EVIDENCE_TOKEN_VPASS<br>RAW_EVIDENCE_TOKEN_VPOINT<br>RAW_EVIDENCE_TOKEN_VPOINT_PAY_EMAIL
-
 ### `services/collector-sbi-securities`
 
 - Disposition (poc_disposition.csv): `promote-service` → services/collector-sbi-securities
@@ -976,32 +672,6 @@ No wrangler config.
 - Entry point: —
 - D1: READ → kogane-read `320ebe31-a031-48a1-985f-0e6fabbd517a` (migrations_dir `../../packages/storage-d1/migrations/read`)
 - R2: —
-- KV: —
-- Queues: —
-- Durable Objects: —
-- DO migration tags: —
-- Containers: —
-- Browser binding: —
-- VPC networks: —
-- Service bindings: —
-- Crons: —
-- Assets: —
-- Vars (names only): —
-- Required secrets (names only): —
-
-### `services/raw-evidence`
-
-- Disposition (plan 07 §1 + decision D2/D3): `keep-as-legacy-adapter` → packages/storage-d1 + packages/application (U05); migrations move in U05
-- Required verification: kogane-ingest stays deployed until U15; migration filenames and bytes unchanged
-- Execution status: PLANNED_NOT_EXECUTED (plan recorded `NOT_VERIFIED`)
-- Live resources: LIVE(workers=kogane-ingest; buckets=kogane-raw-evidence)
-
-#### `kogane-ingest` — `services/raw-evidence/wrangler.jsonc`
-
-- Role: deployed; exists in the account: yes
-- Entry point: src/worker.ts
-- D1: DB → kogane-raw-evidence `b335a887-250d-45c9-bd72-af83f35fdc60` (migrations_dir `../../packages/storage-d1/migrations/core`)
-- R2: EVIDENCE → kogane-raw-evidence
 - KV: —
 - Queues: —
 - Durable Objects: —

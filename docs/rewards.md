@@ -207,7 +207,8 @@ providerが表示する期限の実際の表記ゆれ、V Point の `point_type`
 計画04 §2は `expiry_estimates` と `conversion_simulations` を「第2段階READ候補」とし、
 条件を一つだけ置いている。**評価日時・元依頼・ruleを固定できること**。固定していない期限は
 毎回別の答えであり、投影ではない。U16はその条件を実装にした。flag
-`REWARD_READ_PROJECTION_ENABLED`（processor / app ともに既定 `"false"`）で囲ってある。
+`REWARD_READ_PROJECTION_ENABLED`（processorのみ、既定 `"false"`）がwriterを制御する。
+本番では有効。Appの期限・simulation投影は常にREADを使い、旧CORE投影は0042で削除する。
 
 CORE側の `reward_programs` / `expiry_rules` / `conversion_offers`（版管理された参照claim）と
 `reward_bucket_claims` / `membership_state_claims`（provider・自己申告のclaim）は**移さない**。
@@ -290,25 +291,21 @@ digestは入力ではない。今日のofferで計算し直した別物を「同
 公開snapshotが無い・別epoch・制限改訂後は、空の成功ではなく503（`reward_read_model_unavailable` /
 `reward_read_model_context_changed` / `reward_read_model_restriction_changed`）を返す。cursorは
 U11と同じ `{snapshotId, readInstanceId, filterDigest, position}` で、別queryのcursorは400
-`cursor_mismatch`、別instance・退役snapshotのcursorは410 `context_expired`。flag offのときに
-cursorを渡すと400 `cursor_unsupported`（offsetとして読み替えたりしない）。
+`cursor_mismatch`、別instance・退役snapshotのcursorは410 `context_expired`。異なるcursorをoffsetとして読み替えることはない。
 
 capability `rewardsV2ReadModel`（`none` / `read-d1`）を `/api/meta` が広告する。`core-d1` は無い。
 COREはreward snapshotを公開したことがなく、都度算定の答えはsnapshotではないからである。
 
-### デプロイ順とロールバック
+### デプロイ順と復旧
 
-1. CORE `0041_reward_revision_triggers.sql` を適用する（追加のみ。0033の表が前提）。
-2. READ `0002_reward_read.sql` を適用する（`wrangler.read-migrations.jsonc` 経由）。
-3. processorをデプロイする。flagは `"false"` のまま。
-4. appをデプロイする。flagは `"false"` のまま。
-5. processorで `REWARD_READ_PROJECTION_ENABLED="true"`（`REWARD_CLAIMS_ENABLED` もonであること）。
-   scheduledログの `reward_read_projection` 行で `status`・`written`・`active`・`evaluatedAt` を見る。
-6. snapshotが公開されてからappで `REWARD_READ_PROJECTION_ENABLED="true"`。
+GitHub ActionsがCORE・READのmigrationを適用し、processor、appの順で配備する。
+processorの `REWARD_CLAIMS_ENABLED` と `REWARD_READ_PROJECTION_ENABLED` は本番で有効。
+公開済みREAD snapshotをAppが読む。App側のREAD切替flagとCORE投影へのfallbackは削除済み。
 
-ロールバックは逆順でflagをoffにするだけである。appを先に戻せばrouteは従来の算定へ戻り、
-processorを戻せばREADへの書き込みが止まる。READのreward表は削除して差し支えない（再構築可能）。
-migrationは戻さない。COREのclaim・rule・offer・保存済みsimulationは一切触っていない。
+writerを止める場合はprocessorの `REWARD_READ_PROJECTION_ENABLED=false` を配備する。
+画面を停止する場合はAppの `REWARDS_V2_ENABLED=false` を使う。旧COREへの切り戻しは行わず、
+READの破損は[再構築手順](read-rebuild-runbook.md)で復旧する。
+COREのclaim・rule・offer、保存済み入力と原本は維持する。
 
 ### 合成データで確認したこと（U16）
 
@@ -319,9 +316,9 @@ migrationは戻さない。COREのclaim・rule・offer・保存済みsimulation�
 - `services/processor/test/reward-read-projection.test.ts` — 実D1でのlane。flag offで
   laneが動かないこと、lane順、予算不足のbuildが公開されず自分の日時で再開すること、captureが
   安定しないときに `pending` になること、READのreward表を全部落としてもCOREのclaim/rule/offer/
-  保存済みsimulationが1行も変わらず、古いcursorが失効すること（G0-09）。
+  保存済み入力が1行も変わらず、古いcursorが失効すること（G0-09）。
 - `services/app/test/rewards-v2-read.test.ts` — routeの503・cursor・再現可否・
-  `/api/meta` の広告、flag offで従来どおり答えること。
+  `/api/meta` の広告、READがなければ503を返すこと。
 
 確認していないこと: 本番D1・本番Workerでの動作、実際のprovider規約の現在の内容、
 本番規模でのpage性能、保存済みsimulationの実データ（現状COREに書き込むwriterは無い）。

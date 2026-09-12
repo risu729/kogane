@@ -5,11 +5,9 @@
     "readAt": "2026-09-13",
     "accountId": "59ea63cc00914b30ca410b062ae2bb7f",
     "workers": [
-      "kogane-collector-r2-importer",
       "kogane-demo",
       "kogane-evidence-browser",
       "kogane-globalpass-collector-poc",
-      "kogane-ingest",
       "kogane-mobile-suica-collector-poc",
       "kogane-moneyforward-collector-poc",
       "kogane-myjcb-collector-poc",
@@ -24,19 +22,7 @@
       "kogane-vpoint-pay-collector-poc"
     ],
     "buckets": [
-      "kogane-globalpass-collector-poc",
-      "kogane-mobile-suica-collector-poc",
-      "kogane-moneyforward-collector-poc",
-      "kogane-myjcb-collector-poc",
-      "kogane-raw-evidence",
-      "kogane-sbi-collector-poc",
-      "kogane-sbi-shinsei-collector-poc",
-      "kogane-sbi-vc-trade-poc",
-      "kogane-smbc-direct-backfill-poc",
-      "kogane-sony-bank-collector-poc",
-      "kogane-vpass-collector-poc",
-      "kogane-vpoint-collector-poc",
-      "kogane-vpoint-pay-collector-poc"
+      "kogane-raw-evidence"
     ],
     "d1Databases": [
       {
@@ -52,6 +38,20 @@
     "workersWithoutConfig": []
   },
   "completedDispositions": [
+    {
+      "source": "services/raw-evidence",
+      "proposedAction": "retire-legacy-service",
+      "result": "packages/application in-process registration; central R2 retirement archive",
+      "lastCommit": "bdee142d49f840f8c53603702d783d2421eda5e6",
+      "liveResourceCheck": "2026-09-13: old Worker, old queues and per-source buckets deleted and absence verified; 2989 original objects preserved and hash-verified in central R2"
+    },
+    {
+      "source": "services/collector-r2-importer",
+      "proposedAction": "retire-legacy-service",
+      "result": "packages/application in-process registration; central R2 retirement archive",
+      "lastCommit": "bdee142d49f840f8c53603702d783d2421eda5e6",
+      "liveResourceCheck": "2026-09-13: old Worker, old queues and per-source buckets deleted and absence verified; 2989 original objects preserved and hash-verified in central R2"
+    },
     {
       "source": "poc/camoufox-container-probe",
       "proposedAction": "retire-candidate",
@@ -726,558 +726,6 @@
       ]
     },
     {
-      "directory": "services/collector-r2-importer",
-      "workspace": "services",
-      "disposition": {
-        "source": "plan 07 §1 + decision D2",
-        "proposedAction": "absorb-into-processor",
-        "proposedTarget": "services/processor (queue consumer and adapters, U08)",
-        "requiredVerification": "the Worker keeps running until U15; old protocol still readable; no double cron",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-collector-r2-importer; buckets=kogane-globalpass-collector-poc,kogane-mobile-suica-collector-poc,kogane-moneyforward-collector-poc,kogane-myjcb-collector-poc,kogane-sbi-collector-poc,kogane-sbi-shinsei-collector-poc,kogane-sbi-vc-trade-poc,kogane-smbc-direct-backfill-poc,kogane-sony-bank-collector-poc,kogane-vpass-collector-poc,kogane-vpoint-collector-poc,kogane-vpoint-pay-collector-poc)"
-      },
-      "workers": [
-        {
-          "config": "services/collector-r2-importer/wrangler.audit-global-pass-layer-b.jsonc",
-          "name": "kogane-global-pass-layer-b-audit-local",
-          "main": "src/global-pass-layer-b-audit-worker.ts",
-          "role": "local-audit",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "GLOBAL_PASS_SNAPSHOTS",
-              "bucket": "kogane-globalpass-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.audit-moneyforward-layer-b.jsonc",
-          "name": "kogane-moneyforward-layer-b-audit-local",
-          "main": "src/moneyforward-layer-b-audit-worker.ts",
-          "role": "local-audit",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "MONEYFORWARD_SNAPSHOTS",
-              "bucket": "kogane-moneyforward-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.audit-moneyforward.jsonc",
-          "name": "kogane-moneyforward-r2-contract-audit-local",
-          "main": "src/moneyforward-audit-worker.ts",
-          "role": "local-audit",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "MONEYFORWARD_SNAPSHOTS",
-              "bucket": "kogane-moneyforward-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.audit-myjcb.jsonc",
-          "name": "kogane-myjcb-r2-layer-b-audit-local",
-          "main": "src/myjcb-audit-worker.ts",
-          "role": "local-audit",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "MYJCB_SNAPSHOTS",
-              "bucket": "kogane-myjcb-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.audit-sbi-shinsei.jsonc",
-          "name": "kogane-sbi-shinsei-r2-layer-b-audit-local",
-          "main": "src/sbi-shinsei-audit-worker.ts",
-          "role": "local-audit",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "SBI_SHINSEI_SNAPSHOTS",
-              "bucket": "kogane-sbi-shinsei-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.audit-sbi-vc.jsonc",
-          "name": "kogane-sbi-vc-r2-layer-b-audit-local",
-          "main": "src/sbi-vc-audit-worker.ts",
-          "role": "local-audit",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "SBI_VC_SNAPSHOTS",
-              "bucket": "kogane-sbi-vc-trade-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.audit-smbc-direct-layer-b.jsonc",
-          "name": "kogane-smbc-direct-r2-layer-b-audit-local",
-          "main": "src/smbc-direct-layer-b-audit-worker.ts",
-          "role": "local-audit",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "SMBC_DIRECT_SNAPSHOTS",
-              "bucket": "kogane-smbc-direct-backfill-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.audit-smbc-direct.jsonc",
-          "name": "kogane-smbc-direct-r2-contract-audit-local",
-          "main": "src/smbc-direct-audit-worker.ts",
-          "role": "local-audit",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "SMBC_DIRECT_SNAPSHOTS",
-              "bucket": "kogane-smbc-direct-backfill-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.audit-sony-layer-b.jsonc",
-          "name": "kogane-sony-bank-r2-layer-b-audit-local",
-          "main": "src/sony-layer-b-audit-worker.ts",
-          "role": "local-audit",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "SONY_SNAPSHOTS",
-              "bucket": "kogane-sony-bank-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.audit-v-point-pay-email.jsonc",
-          "name": "kogane-vpoint-pay-email-r2-contract-audit-local",
-          "main": "src/v-point-pay-email-audit-worker.ts",
-          "role": "local-audit",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "VPOINT_PAY_SNAPSHOTS",
-              "bucket": "kogane-vpoint-pay-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.audit-v-point-pay-layer-b.jsonc",
-          "name": "kogane-vpoint-pay-r2-layer-b-audit-local",
-          "main": "src/v-point-pay-layer-b-audit-worker.ts",
-          "role": "local-audit",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "VPOINT_PAY_SNAPSHOTS",
-              "bucket": "kogane-vpoint-pay-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.audit-v-point.jsonc",
-          "name": "kogane-vpoint-r2-contract-audit-local",
-          "main": "src/v-point-audit-worker.ts",
-          "role": "local-audit",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "VPOINT_SNAPSHOTS",
-              "bucket": "kogane-vpoint-collector-poc",
-              "live": true
-            },
-            {
-              "binding": "VPOINT_PAY_SNAPSHOTS",
-              "bucket": "kogane-vpoint-pay-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.audit-vpass-layer-b.jsonc",
-          "name": "kogane-vpass-r2-layer-b-audit-local",
-          "main": "src/vpass-layer-b-audit-worker.ts",
-          "role": "local-audit",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "VPASS_SNAPSHOTS",
-              "bucket": "kogane-vpass-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.identity-backfill.jsonc",
-          "name": "kogane-vpass-identity-backfill-local",
-          "role": "binding-only",
-          "liveWorker": false,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "VPASS_SNAPSHOTS",
-              "bucket": "kogane-vpass-collector-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [
-            {
-              "binding": "IMPORTER",
-              "service": "kogane-collector-r2-importer"
-            }
-          ],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        },
-        {
-          "config": "services/collector-r2-importer/wrangler.jsonc",
-          "name": "kogane-collector-r2-importer",
-          "main": "src/worker.ts",
-          "role": "deployed",
-          "liveWorker": true,
-          "crons": [
-            "23 19 * * SUN"
-          ],
-          "emailHandler": false,
-          "d1": [],
-          "r2": [
-            {
-              "binding": "SBI_SNAPSHOTS",
-              "bucket": "kogane-sbi-collector-poc",
-              "live": true
-            },
-            {
-              "binding": "SBI_VC_SNAPSHOTS",
-              "bucket": "kogane-sbi-vc-trade-poc",
-              "live": true
-            },
-            {
-              "binding": "SONY_SNAPSHOTS",
-              "bucket": "kogane-sony-bank-collector-poc",
-              "live": true
-            },
-            {
-              "binding": "SBI_SHINSEI_SNAPSHOTS",
-              "bucket": "kogane-sbi-shinsei-collector-poc",
-              "live": true
-            },
-            {
-              "binding": "MOBILE_SUICA_SNAPSHOTS",
-              "bucket": "kogane-mobile-suica-collector-poc",
-              "live": true
-            },
-            {
-              "binding": "GLOBAL_PASS_SNAPSHOTS",
-              "bucket": "kogane-globalpass-collector-poc",
-              "live": true
-            },
-            {
-              "binding": "MYJCB_SNAPSHOTS",
-              "bucket": "kogane-myjcb-collector-poc",
-              "live": true
-            },
-            {
-              "binding": "MONEYFORWARD_SNAPSHOTS",
-              "bucket": "kogane-moneyforward-collector-poc",
-              "live": true
-            },
-            {
-              "binding": "VPOINT_SNAPSHOTS",
-              "bucket": "kogane-vpoint-collector-poc",
-              "live": true
-            },
-            {
-              "binding": "VPOINT_PAY_SNAPSHOTS",
-              "bucket": "kogane-vpoint-pay-collector-poc",
-              "live": true
-            },
-            {
-              "binding": "VPASS_SNAPSHOTS",
-              "bucket": "kogane-vpass-collector-poc",
-              "live": true
-            },
-            {
-              "binding": "SMBC_DIRECT_SNAPSHOTS",
-              "bucket": "kogane-smbc-direct-backfill-poc",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [
-            {
-              "binding": "OUTBOX_RECONCILER_QUEUE",
-              "queue": "kogane-r2-outbox-reconciler"
-            }
-          ],
-          "queueConsumers": [
-            {
-              "queue": "kogane-r2-outbox-reconciler",
-              "deadLetterQueue": "kogane-r2-outbox-reconciler-dlq",
-              "maxBatchSize": 1,
-              "maxRetries": 5,
-              "maxConcurrency": 1
-            }
-          ],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [
-            {
-              "binding": "RAW_EVIDENCE",
-              "service": "kogane-ingest"
-            }
-          ],
-          "varNames": [
-            "IMPORTER_VERSION",
-            "RECONCILER_ACCOUNT_ID"
-          ],
-          "requiredSecretNames": [
-            "GLOBAL_PASS_LEGACY_EMPTY_SHA256_ALLOWLIST",
-            "ORIGIN_FINGERPRINT_KEY",
-            "RAW_EVIDENCE_TOKEN",
-            "RAW_EVIDENCE_TOKEN_GLOBAL_PASS",
-            "RAW_EVIDENCE_TOKEN_MOBILE_SUICA",
-            "RAW_EVIDENCE_TOKEN_MONEYFORWARD",
-            "RAW_EVIDENCE_TOKEN_MYJCB",
-            "RAW_EVIDENCE_TOKEN_SBI_SHINSEI",
-            "RAW_EVIDENCE_TOKEN_SBI_VC",
-            "RAW_EVIDENCE_TOKEN_SMBC_DIRECT",
-            "RAW_EVIDENCE_TOKEN_SONY",
-            "RAW_EVIDENCE_TOKEN_VPASS",
-            "RAW_EVIDENCE_TOKEN_VPOINT",
-            "RAW_EVIDENCE_TOKEN_VPOINT_PAY_EMAIL"
-          ],
-          "unextractedKeys": []
-        }
-      ]
-    },
-    {
       "directory": "services/collector-sbi-securities",
       "workspace": "services",
       "disposition": {
@@ -1923,69 +1371,12 @@
           "unextractedKeys": []
         }
       ]
-    },
-    {
-      "directory": "services/raw-evidence",
-      "workspace": "services",
-      "disposition": {
-        "source": "plan 07 §1 + decision D2/D3",
-        "proposedAction": "keep-as-legacy-adapter",
-        "proposedTarget": "packages/storage-d1 + packages/application (U05); migrations move in U05",
-        "requiredVerification": "kogane-ingest stays deployed until U15; migration filenames and bytes unchanged",
-        "executionStatus": "PLANNED_NOT_EXECUTED",
-        "planLiveResourceStatus": "NOT_VERIFIED",
-        "liveResourceStatus": "LIVE(workers=kogane-ingest; buckets=kogane-raw-evidence)"
-      },
-      "workers": [
-        {
-          "config": "services/raw-evidence/wrangler.jsonc",
-          "name": "kogane-ingest",
-          "main": "src/worker.ts",
-          "role": "deployed",
-          "liveWorker": true,
-          "crons": [],
-          "emailHandler": false,
-          "d1": [
-            {
-              "binding": "DB",
-              "databaseName": "kogane-raw-evidence",
-              "databaseId": "b335a887-250d-45c9-bd72-af83f35fdc60",
-              "migrationsDir": "../../packages/storage-d1/migrations/core",
-              "live": true
-            }
-          ],
-          "r2": [
-            {
-              "binding": "EVIDENCE",
-              "bucket": "kogane-raw-evidence",
-              "live": true
-            }
-          ],
-          "kv": [],
-          "queueProducers": [],
-          "queueConsumers": [],
-          "durableObjects": [],
-          "durableObjectExports": [],
-          "durableObjectMigrations": [],
-          "containers": [],
-          "vpcNetworks": [],
-          "serviceBindings": [],
-          "varNames": [],
-          "requiredSecretNames": [],
-          "unextractedKeys": []
-        }
-      ]
     }
   ],
   "summary": {
-    "configCount": 40,
-    "deployedWorkerCount": 17,
+    "configCount": 24,
+    "deployedWorkerCount": 15,
     "crons": [
-      {
-        "worker": "kogane-collector-r2-importer",
-        "cron": "23 19 * * SUN",
-        "live": true
-      },
       {
         "worker": "kogane-globalpass-collector-poc",
         "cron": "17 18 * * *",
@@ -2058,19 +1449,6 @@
           "kogane-collection-terminals-dlq"
         ],
         "toCreate": ""
-      },
-      {
-        "queue": "kogane-r2-outbox-reconciler",
-        "producers": [
-          "kogane-collector-r2-importer"
-        ],
-        "consumers": [
-          "kogane-collector-r2-importer"
-        ],
-        "deadLetterQueues": [
-          "kogane-r2-outbox-reconciler-dlq"
-        ],
-        "toCreate": ""
       }
     ],
     "durableObjectClasses": [
@@ -2119,44 +1497,11 @@
     ],
     "r2Buckets": [
       {
-        "bucket": "kogane-globalpass-collector-poc",
-        "live": true,
-        "readers": [
-          "kogane-collector-r2-importer",
-          "kogane-global-pass-layer-b-audit-local"
-        ]
-      },
-      {
-        "bucket": "kogane-mobile-suica-collector-poc",
-        "live": true,
-        "readers": [
-          "kogane-collector-r2-importer"
-        ]
-      },
-      {
-        "bucket": "kogane-moneyforward-collector-poc",
-        "live": true,
-        "readers": [
-          "kogane-collector-r2-importer",
-          "kogane-moneyforward-layer-b-audit-local",
-          "kogane-moneyforward-r2-contract-audit-local"
-        ]
-      },
-      {
-        "bucket": "kogane-myjcb-collector-poc",
-        "live": true,
-        "readers": [
-          "kogane-collector-r2-importer",
-          "kogane-myjcb-r2-layer-b-audit-local"
-        ]
-      },
-      {
         "bucket": "kogane-raw-evidence",
         "live": true,
         "readers": [
           "kogane-evidence-browser",
           "kogane-globalpass-collector-poc",
-          "kogane-ingest",
           "kogane-mobile-suica-collector-poc",
           "kogane-moneyforward-collector-poc",
           "kogane-myjcb-collector-poc",
@@ -2170,73 +1515,6 @@
           "kogane-vpass-collector-poc",
           "kogane-vpoint-collector-poc",
           "kogane-vpoint-pay-collector-poc"
-        ]
-      },
-      {
-        "bucket": "kogane-sbi-collector-poc",
-        "live": true,
-        "readers": [
-          "kogane-collector-r2-importer"
-        ]
-      },
-      {
-        "bucket": "kogane-sbi-shinsei-collector-poc",
-        "live": true,
-        "readers": [
-          "kogane-collector-r2-importer",
-          "kogane-sbi-shinsei-r2-layer-b-audit-local"
-        ]
-      },
-      {
-        "bucket": "kogane-sbi-vc-trade-poc",
-        "live": true,
-        "readers": [
-          "kogane-collector-r2-importer",
-          "kogane-sbi-vc-r2-layer-b-audit-local"
-        ]
-      },
-      {
-        "bucket": "kogane-smbc-direct-backfill-poc",
-        "live": true,
-        "readers": [
-          "kogane-collector-r2-importer",
-          "kogane-smbc-direct-r2-contract-audit-local",
-          "kogane-smbc-direct-r2-layer-b-audit-local"
-        ]
-      },
-      {
-        "bucket": "kogane-sony-bank-collector-poc",
-        "live": true,
-        "readers": [
-          "kogane-collector-r2-importer",
-          "kogane-sony-bank-r2-layer-b-audit-local"
-        ]
-      },
-      {
-        "bucket": "kogane-vpass-collector-poc",
-        "live": true,
-        "readers": [
-          "kogane-collector-r2-importer",
-          "kogane-vpass-identity-backfill-local",
-          "kogane-vpass-r2-layer-b-audit-local"
-        ]
-      },
-      {
-        "bucket": "kogane-vpoint-collector-poc",
-        "live": true,
-        "readers": [
-          "kogane-collector-r2-importer",
-          "kogane-vpoint-r2-contract-audit-local"
-        ]
-      },
-      {
-        "bucket": "kogane-vpoint-pay-collector-poc",
-        "live": true,
-        "readers": [
-          "kogane-collector-r2-importer",
-          "kogane-vpoint-pay-email-r2-contract-audit-local",
-          "kogane-vpoint-pay-r2-layer-b-audit-local",
-          "kogane-vpoint-r2-contract-audit-local"
         ]
       },
       {
@@ -2280,7 +1558,6 @@
         "live": true,
         "bindings": [
           "kogane-evidence-browser",
-          "kogane-ingest",
           "kogane-observation-pipeline",
           "kogane-observation-read-diagnostic"
         ]

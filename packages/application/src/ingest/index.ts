@@ -1,10 +1,5 @@
-// Registration use cases (unified plan U05, 02 §3).
-//
-// The legacy ingest Worker (`kogane-ingest`) is now a thin adapter over these
-// functions: it authenticates, parses the request body, and turns an
-// `IngestError` into the status code it has always returned. The Processor
-// will call the same functions directly when it registers a terminal run,
-// with no HTTP hop and no second copy of the SQL.
+// Registration use cases used in-process by the Processor.
+// Contract validation, conflict detection and idempotency live here.
 export {
   assertSame,
   IngestError,

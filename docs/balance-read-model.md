@@ -25,7 +25,7 @@ declared input context, plus paging that is fixed to one build of it.
 
 ## What is built
 
-`migration 0030` adds three derived tables. All three are deletable and
+READ baseline `0001` holds the following derived tables. They are deletable and
 rebuildable; no Layer A or Layer B row is touched, and a wrong projection is
 repaired by building a new snapshot, never by deleting an observation.
 
@@ -36,51 +36,10 @@ repaired by building a new snapshot, never by deleting an observation.
 | `scope_relations`            | Typed relations between measurement scopes (`same`/`disjoint`/`subset`/`overlaps`/`unknown`) with the decision that produced each one.                                                                                         |
 | `balance_snapshot_pointer`   | Migration 0038: which complete snapshot the read model publishes, and the revision that snapshot was last verified against. It switches in the same batch that seals a build, and never moves to an older revision.            |
 
-Since U11 the same projection can be built into a **separate READ database**
-instead, under `READ_PROJECTION_ENABLED`. The tables above then live in
-`packages/storage-d1/migrations/read/0001_read_baseline.sql` with a snapshot id
-that carries an attempt, snapshot-scoped relations and the copied CORE
-references of 04 §3; everything this document says about what a row means, how
-adoption is decided, what the API returns and what a cursor is stays true, and
-the contract of the second database is [The READ database](read-model-d1.md).
-With the flag off — the default everywhere — the tables below are the ones that
-are written and read.
-
-`scope_relations` carries no `*_no_update` / `*_no_delete` trigger on purpose:
-unlike a Layer A or Layer B fact it is rebuildable projection state, written
-per release by the projection job from the adopted `entity_relations` and from
-policy, so a release is rewritten in place rather than appended to. The record
-of truth stays in `decision_revisions` and `entity_relations`, which are
-append-only; deleting every row here loses nothing that cannot be rebuilt.
-
-### The fixed input and the snapshot id
-
-Since migration `0038` a build **captures its input once**, at a CORE revision
-that did not move while it was reading, stores the canonical bytes in the DATA
-bucket under `projection-inputs/<digest>/input.json`, records them in
-`projection_input_records`, and every later invocation resumes from those bytes
-rather than from CORE's current state. The identity is
-
-```text
-snapshotId = sha256(inputContentDigest ‖ projectionBuildDigest ‖ contractVersion)
-```
-
-and "did anything I depend on change?" is one integer comparison against
-`core_source_revision`, which a trigger bumps inside the same transaction as
-every dependency write. The counting query this section used to describe
-(`max(parse_run_id)` plus four counts) could not see an artifact's adopted
-parse moving from 100 to 150 while an unrelated run 900 existed; it is kept as
-an operational summary, and its `publishedHighWaterParseRunId` still pins the
-snapshot's history window.
-
-The full contract — the dependency ledger and what is deliberately outside it,
-the capture protocol, the budgets, the writer fence, the active pointer and the
-four outcomes — is [Fixed projection input](projection-input.md).
-
-Same input content ⇒ same id ⇒ same rows. That is what makes a partially
-written build safe to resume instead of restart, and what makes a new
-publication produce a _new_ snapshot rather than mutate the one a reader is
-paging.
+The projection lives exclusively in the separate READ database. Migration 0042
+removes its former CORE tables. The READ baseline adds snapshot-scoped relations,
+writer fencing and captured CORE references; the contract is in
+[The READ database](read-model-d1.md). No flag restores the CORE target.
 
 ## How a row gets its state
 
@@ -335,25 +294,10 @@ Named by the review, and none of them is used here:
 
 ## Deploy order
 
-1. **Schema** — apply migrations `0030` and `0038`. Nothing reads or writes the
-   new tables yet. `0038` also adds the `DATA` R2 binding's prefix
-   (`projection-inputs/`) to the pipeline's existing bucket; no new bucket is
-   created.
-2. **Writer** — deploy `services/processor`. The job is off; set
-   `BALANCE_PROJECTION_ENABLED=1` when you want the first build. Watch the
-   `balance_projection` line of the scheduled log for `status` and `written`.
-3. **Reader** — deploy `services/app` with
-   `BALANCE_PROJECTION_ENABLED=0`. Nothing changes for any caller.
-4. **Reader flag** — set `BALANCE_PROJECTION_ENABLED=1` on the browser once a
-   snapshot is `complete`. `/api/meta` starts advertising `balancesV2` and
-   `/api/balances` moves to the compat adapter.
-5. **UI** — the frontend switches on the advertised capability, not on the
-   name of the connection; no separate step is needed.
-
-With `READ_PROJECTION_ENABLED` on, steps 1–5 gain the READ database in front of
-them: create `kogane-read`, apply its migrations, then deploy and flag the
-processor and the app in that order. The whole order and its rollback are in
-[The READ database](read-model-d1.md).
+GitHub Actions applies the CORE and READ schemas, then deploys Processor before
+App. Processor `BALANCE_PROJECTION_ENABLED=1` builds into READ; the App's same
+flag exposes the published snapshot. Production enables both. The full procedure
+and recovery controls are in [The READ database](read-model-d1.md).
 
 ## Rollback
 

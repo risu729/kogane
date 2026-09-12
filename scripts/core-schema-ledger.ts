@@ -248,24 +248,7 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
   producer_sources: { classification: "core-keep", planRow: "sources, producers and routes" },
   producers: { classification: "core-keep", planRow: "sources, producers and routes" },
   sources: { classification: "core-keep", planRow: "sources, producers and routes" },
-  // balance_read_snapshots, current_balance_projection, scope_relations → READ
-  balance_read_snapshots: {
-    classification: "read-candidate",
-    planRow: "READ: rebuilt per fixed input and snapshot (U11)",
-  },
-  current_balance_projection: {
-    classification: "read-candidate",
-    planRow: "READ: rebuilt per fixed input and snapshot (U11)",
-  },
-  scope_relations: {
-    classification: "read-candidate",
-    planRow: "READ: rebuilt per fixed input and snapshot (U11); decision FK cannot cross databases",
-  },
-  // core_source_revision, projection_input_records, balance_snapshot_pointer → CORE (U10)
-  balance_snapshot_pointer: {
-    classification: "read-candidate",
-    planRow: "READ: the active snapshot pointer moves with the projection (U11)",
-  },
+  // Canonical revision and captured inputs remain in CORE.
   core_source_revision: {
     classification: "core-keep",
     planRow:
@@ -275,15 +258,6 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "core-keep",
     planRow:
       "CORE: the fixed input a build was made from (05 §3), referenced by the job and kept with the evidence it names",
-  },
-  // expiry_estimates, conversion_simulations → second-stage READ candidates
-  conversion_simulations: {
-    classification: "read-candidate",
-    planRow: "second-stage READ candidate (U16): needs evaluation time, request and rule fixed",
-  },
-  expiry_estimates: {
-    classification: "read-candidate",
-    planRow: "second-stage READ candidate (U16): needs evaluation time, request and rule fixed",
   },
   // Not named in 04 §2. Default: keep (G0-01).
   dataset_snapshot_policies: {

@@ -1,18 +1,15 @@
-# Rollout: every flag the programme added, and the settings it needs once
+# Production rollout and feature controls
 
-Unified plan **U15**; decision **D13** (flags stay off by default — merged is
-not enabled); chapters 11 §4 and §7, 12 §1–§2, 13, 15.
-
-Sixteen work items each added their own flags, prerequisites and rollback
-paragraph to their own document. This page is the single table those paragraphs
-add up to, plus the one-time GitHub and Cloudflare settings the repository
-owner has to create by hand.
+The committed Wrangler configurations are the deployment authority. Production
+features were enabled on 2026-09-12 and the legacy path retired on 2026-09-13.
+See [the retirement record](legacy-retirement.md) for resource and data verification.
 
 ## Production enablement — 2026-09-12
 
 The owner requested activation of every feature flag. Production configurations
-now enable all boolean App/Processor flags and set the twelve collectors to
-`COLLECTION_TARGET=shared`. Safe fallbacks for absent flags remain in code.
+enable all remaining boolean App/Processor flags. All twelve collectors always
+write shared DATA. `COLLECTION_TARGET` and `READ_PROJECTION_ENABLED` are removed;
+App reward reads always use READ. Remaining off switches pause features.
 The Access user directory identifies the sole human operator; agent grants stay
 empty and session refresh remains `human` until a source has a demonstrated
 unattended renewal path. These are identity/policy settings, not boolean flags.
@@ -24,7 +21,8 @@ append-only repair events; the resulting consistency check had zero mismatches.
 Writer activation precedes App reader activation; snapshot and CD verification
 are recorded with the rollout PR. Collection target activation does not itself
 start a provider login, and does not prove every source's next scheduled run.
-Legacy retirement and a destructive READ-loss exercise remain separate work.
+Legacy retirement is recorded separately; a destructive production READ-loss
+exercise is not implied by successful deployment.
 
 Initial production observation also exposed a reward-promotion stall: an
 ineligible first page never advanced the claim-derived cursor. The job now
@@ -32,7 +30,7 @@ selects eligible, unpromoted facts before applying its batch limit. Stored
 claims are the completion record, including for facts published out of ID
 order; no migration or claim rewrite is needed.
 
-The table below retains the original **safe default** column for rollback; the
+The table below retains the original **safe default** column for feature suspension; the
 production settings in `services/*/wrangler.jsonc` are the deployment authority.
 
 ## 1. How a flag is read
@@ -42,10 +40,10 @@ from the deployment's own variables where the owner set them by hand. Two
 conventions, both deliberate:
 
 - **Boolean flags are on only for the exact string the reader accepts.** An
-  absent, empty or misspelled value leaves the old behaviour, so a typo never
+  absent, empty or misspelled value leaves the feature disabled, so a typo never
   half-enables something. Which string that is differs by flag, and the
   difference is in the code, not a convention: `"1"` or `"true"` for
-  `READ_PROJECTION_ENABLED`, `RECONCILIATION_ENABLED`, `REWARD_CLAIMS_ENABLED`,
+  `RECONCILIATION_ENABLED`, `REWARD_CLAIMS_ENABLED`,
   `REWARD_READ_PROJECTION_ENABLED`, `EVENTS_V2_ENABLED`, `REWARDS_V2_ENABLED`,
   `SHARED_R2_INGEST_ENABLED` and `OPS_DISPATCH_ENABLED`; exactly `"true"` for
   `RELEASE_CANDIDATES_ENABLED`, `REPORTS_ENABLED`, `COMMANDS_ENABLED` and
@@ -80,8 +78,7 @@ below is read by a migration.
 | Flag / var                       | Owner                 | Default                 | What turning it on changes                                                                                                                                                                                                                                                   | Prerequisite resources                                                                                                                                              | Rollback                                                                                                                                                         |
 | -------------------------------- | --------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `RELEASE_CANDIDATES_ENABLED`     | processor             | `"false"`               | The candidate parse lane writes `parse_run_candidates` and the release command routes are routed. Published results are unaffected.                                                                                                                                          | CORE `0027` and `0028` (both on `0026`); `GET /publication/consistency` reports `mismatches: 0`                                                                     | Set `"false"`. New candidates stop; the ones already written stay. **Once it has ever been on, the minimum rollback build is the release that introduced it**    |
-| `BALANCE_PROJECTION_ENABLED`     | processor **and** app | `"0"`                   | Processor: the balance projection is built. App: the v2 balance routes serve it. Both halves are needed for a reader to see anything.                                                                                                                                        | CORE `0030` (and `0038` for the pointer)                                                                                                                            | Set `"0"` on the app first, then the processor. The tables stay                                                                                                  |
-| `READ_PROJECTION_ENABLED`        | processor **and** app | `"false"`               | Processor: the same build writes the `READ` database instead of the CORE tables of `0030`, and completes the CORE job only after READ publishes. App: the v2 routes read `READ`, and a cursor from the other store is refused with `410`, not reinterpreted                  | D1 `kogane-read` (`320ebe31-…`) bound as `READ`, with `packages/storage-d1/migrations/read` applied                                                                 | Set `"false"` on the app, then the processor. CORE `0030` is still maintained by the same job, so the previous answers come back; READ cursors expire            |
+| `BALANCE_PROJECTION_ENABLED`     | processor **and** app | `"0"`                   | Processor: the balance projection is built. App: the v2 balance routes serve it. Both halves are needed for a reader to see anything.                                                                                                                                        | READ migrations through `0002`                                                                                                                                      | Set `"0"` on the app first, then the processor. The tables stay                                                                                                  |
 | `RECONCILIATION_ENABLED`         | processor             | `"0"`                   | The scheduled `reconciliation_sweep` lane runs and writes **candidates**. A candidate is never an accepted link: acceptance stays a recorded decision (INV07)                                                                                                                | CORE `0032`                                                                                                                                                         | Set `"0"`. The lane is skipped; the candidates stay                                                                                                              |
 | `REWARD_CLAIMS_ENABLED`          | processor             | `"false"`               | The `reward_claims_sweep` lane promotes published balance observations to typed reward claims for the three sources with recorded units                                                                                                                                      | CORE `0033`                                                                                                                                                         | Set `"false"`. The lane and its log line disappear                                                                                                               |
 | `REPORTS_ENABLED`                | processor             | `"false"`               | The report stage joins the stage list and report artifacts are written                                                                                                                                                                                                       | CORE `0034`                                                                                                                                                         | Set `"false"`. Existing artifacts stay readable — a stored report keeps its fixed body                                                                           |
@@ -98,12 +95,7 @@ below is read by a migration.
 | `COLLECTION_DATA_BUCKET`         | processor             | `"kogane-raw-evidence"` | Not a switch: the bucket the Processor will accept a notification for. A notification naming another bucket is refused                                                                                                                                                       | the shared DATA bucket                                                                                                                                              | n/a — changing it is a resource change, not a rollout step                                                                                                       |
 | `COLLECTION_ACCOUNT_ID`          | processor             | `"59ea63cc…"`           | Same: a notification from another account is refused                                                                                                                                                                                                                         | none                                                                                                                                                                | n/a                                                                                                                                                              |
 | `COLLECTION_INGEST_CLIENT`       | processor             | `"processor-shared-r2"` | The ingest client the Processor registers as. Until its CORE rows exist, registration answers `retryable` with `inactive_ingest_client` and records it as a stage rather than blocking the run                                                                               | `infra/bootstrap/ingest-clients.sql` applied                                                                                                                        | n/a                                                                                                                                                              |
-| `COLLECTION_TARGET` (per source) | collector             | `"legacy"`              | `"shared"` makes the collector write the central bucket through `packages/collection` and stop uploading to the legacy ingest API. `"legacy"` is byte-for-byte what it does today (decision D12)                                                                             | the queue and the notification rule above; the source's route in `config/ingest-clients.json` active                                                                | Set back to `"legacy"` for that one source. Runs already written to the shared bucket stay                                                                       |
-| `REWARD_READ_PROJECTION_ENABLED` | processor **and** app | `"false"`               | The `reward_read_projection` lane builds the second-stage READ projection over a fixed evaluation time, and the reward routes answer from it. A stored simulation that carries only a digest reads `not_reproducible`; CORE claims, rules and offers are never moved (04 §2) | CORE `0041`, READ `0002`; `REWARD_CLAIMS_ENABLED` on, or there is nothing to project                                                                                | Set `"false"` on the app, then the processor. The routes go back to per-request calculation; the READ reward tables are rebuildable and may be dropped           |
-
-`COLLECTION_TARGET` arrives with **U09**, one entry per collector; it is in this
-table because the table is the whole programme's list, not one branch's. Every
-other row is in the configuration on `main` today.
+| `REWARD_READ_PROJECTION_ENABLED` | processor             | `"false"`               | The `reward_read_projection` lane builds the second-stage READ projection over a fixed evaluation time, and the reward routes answer from it. A stored simulation that carries only a digest reads `not_reproducible`; CORE claims, rules and offers are never moved (04 §2) | CORE `0041`, READ `0002`; `REWARD_CLAIMS_ENABLED` on, or there is nothing to project                                                                                | Set `"false"` on Processor to pause new reward snapshots; App continues to require READ                                                                          |
 
 Two variables in `services/app/wrangler.jsonc` look like flags and are not:
 `EVIDENCE_SOURCE_ID`, `ACCESS_ISSUER` and `ACCESS_AUDIENCE` are deployment
@@ -123,56 +115,26 @@ the deploy that carries the configuration creates the queues.
 | Ingest client, producers and routes                                       | applied; all 13 routes verified active  | `mise run bootstrap:ingest-clients`, then `wrangler d1 execute kogane-raw-evidence --remote --file infra/bootstrap/ingest-clients.sql --config services/processor/wrangler.jsonc`. Idempotent, safe to re-apply, and **not** a migration |
 
 The bootstrap SQL creates no schema and issues no credential: the Processor's
-client registers in process and cannot authenticate to the legacy ingest
-Worker, which is intended. To retire a route, set its `active` to `false`,
+client registers in process. To retire a route, set its `active` to `false`,
 re-render and re-apply; the Processor then answers `retryable` with
 `inactive_ingest_route` for that source.
 
-## 4. Order of enablement
+## 4. Deployment order
 
-The rule under every row is the same one: **schema, then writer, then reader,
-then the flag** — and a producer is never switched on before its consumer
-exists.
+GitHub Actions applies CORE and READ migrations, deploys Processor, App and demo,
+then the twelve collectors, and performs authenticated health checks. Consumers
+precede producers. The migration introducing CORE table deletion requires the
+READ-only release to be live first; [the retirement record](legacy-retirement.md)
+records that verification.
 
-1. **Migrations.** CD applies CORE and then READ. Every migration this
-   programme added is additive and inert: a Worker that predates it never reads
-   what it adds, which is what makes step 2 safe in either order.
-2. **Deploy every Worker with the flags off.** This is where the queues are
-   created. Nothing changes for any reader.
-3. **Create the account-side resources of §3** that the deploy did not: the
-   notification rule and the ingest-client rows.
-4. **Processor flags, one at a time**, each left alone long enough to read its
-   log line before the next:
-   `SHARED_R2_INGEST_ENABLED` (with no collector switched yet, the scan lists
-   nothing and the consumer receives nothing — that is the safe way to prove
-   the lane runs) → `BALANCE_PROJECTION_ENABLED` → `READ_PROJECTION_ENABLED`
-   → `RELEASE_CANDIDATES_ENABLED` → `RECONCILIATION_ENABLED` →
-   `REWARD_CLAIMS_ENABLED` → `REPORTS_ENABLED`.
-   `REWARD_READ_PROJECTION_ENABLED` comes after `REWARD_CLAIMS_ENABLED` and
-   `READ_PROJECTION_ENABLED`, never before either.
-5. **App read flags**, each only once its writer has produced something:
-   `BALANCE_PROJECTION_ENABLED`, then `READ_PROJECTION_ENABLED` once a snapshot
-   is published, then `EVENTS_V2_ENABLED`, `REWARDS_V2_ENABLED`, then
-   `REWARD_READ_PROJECTION_ENABLED` once a reward snapshot is published.
-6. **App write flags**, which are the ones a person can act through:
-   `COMMANDS_ENABLED`, `OPS_API_ENABLED`, then the grants for the principals
-   that need them — `OPERATOR_SUBJECTS` (the operator, without which nothing
-   can be approved, committed or requested at all), then `AGENT_GRANTS` and
-   `AGENT_API_GRANTS`. Name a subject in `OPERATOR_SUBJECTS` **or**
-   `AGENT_GRANTS`, never both: the overlap is a refusal, not a promotion.
-   `OPS_DISPATCH_ENABLED` on the processor comes after `OPS_API_ENABLED`, not
-   before: dispatching nothing is pointless and dispatching before the API
-   exists is impossible.
-7. **Collectors, one source at a time** (`COLLECTION_TARGET=shared`), each
-   verified against `collection_runs` before the next. This is the step that
-   eventually makes the legacy path retirable — see
-   [legacy-retirement.md](legacy-retirement.md).
-8. **`SESSION_REFRESH_POLICY`** last, and only for a source whose unattended
-   renewal has actually been demonstrated. Never as a convenience.
+For a new environment, create the resources in §3 and grants in §6. Enable the
+Processor lanes before exposing their App features. Projection readers require
+a published READ snapshot. There is no collector legacy mode or CORE projection
+fallback. `SESSION_REFRESH_POLICY` remains a separate per-source decision.
 
 ### What deploying a collector does not do
 
-Step 2 deploys the collectors too — every one of them is a CD target
+The release deploys the collectors too — every one of them is a CD target
 ([ci-cd.md § Deploy order](ci-cd.md#deploy-order-g5-14-g5-15)) — and that is
 not the same as running one. **Deploying a collector starts no collection, no
 re-authentication and no backfill.** An upload replaces the script and
@@ -191,28 +153,17 @@ What changes is which code runs the next time a cron fires — with that source'
 bank credentials. Collector code, dependencies, containers and scripts are
 subject to the same CI and branch rules before automatic deployment.
 
-## 5. Rollback
+## 5. Incident controls and rollback
 
-Per flag, the table in §2. Three things hold across all of them:
-
-- **Turning a flag off is always the first step of an incident response**, and
-  it is always safe: no flag's "off" path reads or requires anything the "on"
-  path wrote.
-- **No migration is rolled back.** They are additive, and rolling one back
-  would drop the record of what the enabled path already did.
-- **A code rollback does not undo an applied migration, a recovery drill or a
-  deletion** (plan 11 §7, [operations.md §5](operations.md#5-releases-and-rollback)).
-  Once something on [legacy-retirement.md](legacy-retirement.md) is executed,
-  the release that preceded it stops being a rollback target for that resource.
-
-The per-case table for the other failure modes — a bad App/Processor build, a
-bad collector, a wrong READ calculation, a total READ loss, a CORE data problem,
-a credential update — is
-[ci-cd.md § Rollback](ci-cd.md#rollback-plan-11-7).
+Remaining feature flags can pause a lane or hide a route. They do not change the
+storage backend. A code rollback does not undo migrations or resource deletion;
+select a release compatible with the current schema and resource ledger.
+Releases requiring retired resources or CORE projections are no longer targets.
+Repair READ using [the rebuild runbook](read-rebuild-runbook.md).
 
 ## 6. One-time GitHub and Cloudflare settings
 
-The integrator cannot create any of these; the repository owner must, once.
+These settings are maintained in the repository owner’s GitHub and Cloudflare accounts.
 Until each is done the corresponding automation degrades safely rather than
 doing something partial. The authoritative text is
 [ci-cd.md](ci-cd.md#required-github-settings); this is the checklist form.
@@ -325,21 +276,16 @@ are idempotent and the migrations are already applied). The token can read the
 health route and nothing else: it carries no subject, so every command,
 operation and evidence route still refuses it.
 
-### 6.7 First supervised run
+### 6.7 Release verification
 
-The step-by-step first deployment — dispatch the current `main` sha (a release
-covers every Worker the ledger marks `deploy`; there is no subset input), check
-the per-Worker release record, re-dispatch to prove the interlock, dispatch an
-older sha to prove the "newer release already recorded" refusal, then a
-`targets: ingest` rollback and back — is
-[ci-cd.md § Enabling it the first time](ci-cd.md#enabling-it-the-first-time-under-supervision).
-Do it before letting the automatic `CI` → `Deploy` chain run.
+Dispatch the current main commit through Deploy and check the per-Worker release
+record, migration list and both postchecks. A release covers all 15 current
+Workers. The credentials and service token are configured in production; do not
+recreate them as part of routine deployment.
 
-## 7. What this page is not
+## 7. Verification boundary
 
-It is not a claim that anything was rolled out. No flag has been turned on, no
-resource in §3 has been created except the empty `kogane-read` database, no
-setting in §6 has been made by this repository's automation, and no command on
-this page has been run against the account. Everything here was verified only
-in the sense that the defaults, the prerequisites and the rollback statements
-match the configuration and the tests that are committed.
+Current release and retirement evidence is recorded in
+[legacy-retirement.md](legacy-retirement.md). A successful deploy verifies the
+health contracts, not every provider's next scheduled collection or a
+production READ-loss exercise.

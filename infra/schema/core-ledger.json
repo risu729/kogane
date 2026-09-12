@@ -621,6 +621,12 @@
       "statementCount": 15,
       "insertStatements": [],
       "sha256": "5265feedc75a1f084a62449ee0650fa278f62221cf77b025a11fd9cdd565faa2"
+    },
+    {
+      "file": "0042_retire_legacy_projections.sql",
+      "statementCount": 7,
+      "insertStatements": [],
+      "sha256": "a575e051cec76f0a9fb9cbf3715e7031bbbce338bc27a004ed9bf55f97966f74"
     }
   ],
   "tables": [
@@ -2310,224 +2316,6 @@
       "sqlSha256": "666c239d5623aae6"
     },
     {
-      "name": "balance_read_snapshots",
-      "classification": "read-candidate",
-      "planRow": "READ: rebuilt per fixed input and snapshot (U11)",
-      "strict": true,
-      "withoutRowid": false,
-      "columns": [
-        {
-          "name": "snapshot_id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 1
-        },
-        {
-          "name": "created_at",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "input_manifest_json",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "status",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "row_count",
-          "type": "INTEGER",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "projection_release",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "build_cursor",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "sealed_at",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "input_digest",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "source_revision",
-          "type": "INTEGER",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "visibility_revision",
-          "type": "INTEGER",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "core_epoch",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "read_instance_id",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "writer_lease",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "writer_lease_until_ms",
-          "type": "INTEGER",
-          "notNull": true,
-          "default": "0",
-          "pk": 0
-        },
-        {
-          "name": "writer_fence",
-          "type": "INTEGER",
-          "notNull": true,
-          "default": "0",
-          "pk": 0
-        }
-      ],
-      "primaryKey": [
-        "snapshot_id"
-      ],
-      "foreignKeys": [],
-      "indexes": [
-        {
-          "name": "balance_read_snapshots_status",
-          "unique": false,
-          "partial": false,
-          "columns": [
-            "status",
-            "created_at"
-          ]
-        }
-      ],
-      "triggers": [
-        "balance_read_snapshots_identity_immutable",
-        "balance_read_snapshots_transition"
-      ],
-      "noUpdateTriggers": [],
-      "noDeleteTriggers": [],
-      "appendOnly": false,
-      "sqlSha256": "0dabefda13c37bc0"
-    },
-    {
-      "name": "balance_snapshot_pointer",
-      "classification": "read-candidate",
-      "planRow": "READ: the active snapshot pointer moves with the projection (U11)",
-      "strict": true,
-      "withoutRowid": false,
-      "columns": [
-        {
-          "name": "id",
-          "type": "INTEGER",
-          "notNull": false,
-          "default": null,
-          "pk": 1
-        },
-        {
-          "name": "snapshot_id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "source_revision",
-          "type": "INTEGER",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "read_instance_id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "core_epoch",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "switched_at",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        }
-      ],
-      "primaryKey": [
-        "id"
-      ],
-      "foreignKeys": [
-        {
-          "column": "snapshot_id",
-          "references": "balance_read_snapshots(snapshot_id)",
-          "onDelete": "NO ACTION",
-          "onUpdate": "NO ACTION"
-        }
-      ],
-      "indexes": [],
-      "triggers": [
-        "balance_snapshot_pointer_complete_only",
-        "balance_snapshot_pointer_forward_only",
-        "balance_snapshot_pointer_no_delete"
-      ],
-      "noUpdateTriggers": [],
-      "noDeleteTriggers": [
-        "balance_snapshot_pointer_no_delete"
-      ],
-      "appendOnly": false,
-      "sqlSha256": "45bcfaada412fadc"
-    },
-    {
       "name": "calculation_policies",
       "classification": "core-keep",
       "planRow": "prices and calculation policies",
@@ -3537,67 +3325,6 @@
       "sqlSha256": "8643ee1d79982638"
     },
     {
-      "name": "conversion_simulations",
-      "classification": "read-candidate",
-      "planRow": "second-stage READ candidate (U16): needs evaluation time, request and rule fixed",
-      "strict": true,
-      "withoutRowid": false,
-      "columns": [
-        {
-          "name": "id",
-          "type": "INTEGER",
-          "notNull": false,
-          "default": null,
-          "pk": 1
-        },
-        {
-          "name": "input_digest",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "plan_json",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "search_coverage",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "policy_release",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "computed_at",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        }
-      ],
-      "primaryKey": [
-        "id"
-      ],
-      "foreignKeys": [],
-      "indexes": [],
-      "triggers": [],
-      "noUpdateTriggers": [],
-      "noDeleteTriggers": [],
-      "appendOnly": false,
-      "sqlSha256": "a4b72772745a683b"
-    },
-    {
       "name": "core_source_revision",
       "classification": "core-keep",
       "planRow": "CORE: the change detector every dependency write bumps (05 §2); operational in shape, but it is the ordering of CORE itself and a restore has to carry it",
@@ -3649,341 +3376,6 @@
       ],
       "appendOnly": false,
       "sqlSha256": "fc34755864bfbf2d"
-    },
-    {
-      "name": "current_balance_projection",
-      "classification": "read-candidate",
-      "planRow": "READ: rebuilt per fixed input and snapshot (U11)",
-      "strict": true,
-      "withoutRowid": false,
-      "columns": [
-        {
-          "name": "snapshot_id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 1
-        },
-        {
-          "name": "scope_key",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 2
-        },
-        {
-          "name": "subject_scope_key",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "row_seq",
-          "type": "INTEGER",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "representative_observation_ref",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "member_evidence_refs_json",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "member_metrics_json",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "evidence_count",
-          "type": "INTEGER",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "metric_id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "definition_release",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "quantity_coefficient",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "quantity_scale",
-          "type": "INTEGER",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "value_status",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "unit_ref",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "state",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "reason_code",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "as_of_role",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "as_of_kind",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "as_of_value",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "temporal_json",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "freshness",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "freshness_reason",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "sort_as_of",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "source_id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "source_account",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "metric",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "instrument",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "parser",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "observation_id",
-          "type": "INTEGER",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "parse_run_id",
-          "type": "INTEGER",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "fetch_artifact_id",
-          "type": "INTEGER",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "amount_minor",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "amount_text",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "as_of",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "observed_at",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "measure_view",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "latest_in_group",
-          "type": "INTEGER",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "row_digest",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        }
-      ],
-      "primaryKey": [
-        "snapshot_id",
-        "scope_key"
-      ],
-      "foreignKeys": [
-        {
-          "column": "snapshot_id",
-          "references": "balance_read_snapshots(snapshot_id)",
-          "onDelete": "NO ACTION",
-          "onUpdate": "NO ACTION"
-        }
-      ],
-      "indexes": [
-        {
-          "name": "current_balance_projection_order",
-          "unique": true,
-          "partial": false,
-          "columns": [
-            "snapshot_id",
-            "row_seq"
-          ]
-        },
-        {
-          "name": "current_balance_projection_scope",
-          "unique": false,
-          "partial": false,
-          "columns": [
-            "snapshot_id",
-            "source_id",
-            "source_account",
-            "instrument",
-            "metric"
-          ]
-        },
-        {
-          "name": "current_balance_projection_state",
-          "unique": false,
-          "partial": false,
-          "columns": [
-            "snapshot_id",
-            "state",
-            "metric_id",
-            "unit_ref"
-          ]
-        }
-      ],
-      "triggers": [
-        "current_balance_projection_building_only",
-        "current_balance_projection_chunk_conflict",
-        "current_balance_projection_sealed_no_delete",
-        "current_balance_projection_sealed_no_update"
-      ],
-      "noUpdateTriggers": [
-        "current_balance_projection_sealed_no_update"
-      ],
-      "noDeleteTriggers": [
-        "current_balance_projection_sealed_no_delete"
-      ],
-      "appendOnly": true,
-      "sqlSha256": "91b5a588b5699be2"
     },
     {
       "name": "dataset_snapshot_policies",
@@ -4997,112 +4389,6 @@
       ],
       "appendOnly": true,
       "sqlSha256": "3d9548aae2937f4a"
-    },
-    {
-      "name": "expiry_estimates",
-      "classification": "read-candidate",
-      "planRow": "second-stage READ candidate (U16): needs evaluation time, request and rule fixed",
-      "strict": true,
-      "withoutRowid": false,
-      "columns": [
-        {
-          "name": "id",
-          "type": "INTEGER",
-          "notNull": false,
-          "default": null,
-          "pk": 1
-        },
-        {
-          "name": "holding_ref",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "rule_id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "rule_version",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "context_id",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "state",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "expiring_buckets_json",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "uncertainty_codes_json",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "source_expiry_refs_json",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "policy_release",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "computed_at",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        }
-      ],
-      "primaryKey": [
-        "id"
-      ],
-      "foreignKeys": [],
-      "indexes": [
-        {
-          "name": "expiry_estimates_holding",
-          "unique": false,
-          "partial": false,
-          "columns": [
-            "holding_ref",
-            "id"
-          ]
-        }
-      ],
-      "triggers": [],
-      "noUpdateTriggers": [],
-      "noDeleteTriggers": [],
-      "appendOnly": false,
-      "sqlSha256": "6f8c92bbea4c81f6"
     },
     {
       "name": "expiry_rules",
@@ -12023,93 +11309,6 @@
       "sqlSha256": "2fbe8139ce2f86cd"
     },
     {
-      "name": "scope_relations",
-      "classification": "read-candidate",
-      "planRow": "READ: rebuilt per fixed input and snapshot (U11); decision FK cannot cross databases",
-      "strict": true,
-      "withoutRowid": false,
-      "columns": [
-        {
-          "name": "from_scope_key",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 1
-        },
-        {
-          "name": "to_scope_key",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 2
-        },
-        {
-          "name": "relation",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "source",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "decision_revision_id",
-          "type": "TEXT",
-          "notNull": false,
-          "default": null,
-          "pk": 0
-        },
-        {
-          "name": "release",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 3
-        },
-        {
-          "name": "created_at",
-          "type": "TEXT",
-          "notNull": true,
-          "default": null,
-          "pk": 0
-        }
-      ],
-      "primaryKey": [
-        "from_scope_key",
-        "to_scope_key",
-        "release"
-      ],
-      "foreignKeys": [
-        {
-          "column": "decision_revision_id",
-          "references": "decision_revisions(id)",
-          "onDelete": "NO ACTION",
-          "onUpdate": "NO ACTION"
-        }
-      ],
-      "indexes": [
-        {
-          "name": "scope_relations_release",
-          "unique": false,
-          "partial": false,
-          "columns": [
-            "release",
-            "from_scope_key"
-          ]
-        }
-      ],
-      "triggers": [],
-      "noUpdateTriggers": [],
-      "noDeleteTriggers": [],
-      "appendOnly": false,
-      "sqlSha256": "dea22859ef34d4d1"
-    },
-    {
       "name": "settlement_relations",
       "classification": "core-keep",
       "planRow": "economic events",
@@ -13678,41 +12877,6 @@
       "sqlSha256": "c97e7a3c8c3d6c0d"
     },
     {
-      "name": "balance_read_snapshots_identity_immutable",
-      "table": "balance_read_snapshots",
-      "timing": "BEFORE",
-      "event": "UPDATE",
-      "sqlSha256": "32028840c8b8a461"
-    },
-    {
-      "name": "balance_read_snapshots_transition",
-      "table": "balance_read_snapshots",
-      "timing": "BEFORE",
-      "event": "UPDATE",
-      "sqlSha256": "4f50df5c6dd24e68"
-    },
-    {
-      "name": "balance_snapshot_pointer_complete_only",
-      "table": "balance_snapshot_pointer",
-      "timing": "BEFORE",
-      "event": "INSERT",
-      "sqlSha256": "a6edef4b9fd7f254"
-    },
-    {
-      "name": "balance_snapshot_pointer_forward_only",
-      "table": "balance_snapshot_pointer",
-      "timing": "BEFORE",
-      "event": "UPDATE",
-      "sqlSha256": "9bd780225ed6ece4"
-    },
-    {
-      "name": "balance_snapshot_pointer_no_delete",
-      "table": "balance_snapshot_pointer",
-      "timing": "BEFORE",
-      "event": "DELETE",
-      "sqlSha256": "284db6378b1cd17a"
-    },
-    {
       "name": "calculation_policies_bump_revision_delete",
       "table": "calculation_policies",
       "timing": "AFTER",
@@ -13900,34 +13064,6 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "92527a56780178e3"
-    },
-    {
-      "name": "current_balance_projection_building_only",
-      "table": "current_balance_projection",
-      "timing": "BEFORE",
-      "event": "INSERT",
-      "sqlSha256": "5c0c35cf8083e37a"
-    },
-    {
-      "name": "current_balance_projection_chunk_conflict",
-      "table": "current_balance_projection",
-      "timing": "BEFORE",
-      "event": "INSERT",
-      "sqlSha256": "2f160c322f14e178"
-    },
-    {
-      "name": "current_balance_projection_sealed_no_delete",
-      "table": "current_balance_projection",
-      "timing": "BEFORE",
-      "event": "DELETE",
-      "sqlSha256": "23f07bfd507dd09b"
-    },
-    {
-      "name": "current_balance_projection_sealed_no_update",
-      "table": "current_balance_projection",
-      "timing": "BEFORE",
-      "event": "UPDATE",
-      "sqlSha256": "6b4c9df6397294dd"
     },
     {
       "name": "dataset_snapshot_policies_bump_revision_delete",
@@ -15898,11 +15034,6 @@
       "sqlSha256": "089100c983ade003"
     },
     {
-      "name": "balance_read_snapshots_status",
-      "table": "balance_read_snapshots",
-      "sqlSha256": "3d51ce600b9db293"
-    },
-    {
       "name": "calculation_policies_kind",
       "table": "calculation_policies",
       "sqlSha256": "e102a322423238e1"
@@ -15951,21 +15082,6 @@
       "name": "conversion_offers_route",
       "table": "conversion_offers",
       "sqlSha256": "a83f575908614333"
-    },
-    {
-      "name": "current_balance_projection_order",
-      "table": "current_balance_projection",
-      "sqlSha256": "29f50db8606b35c2"
-    },
-    {
-      "name": "current_balance_projection_scope",
-      "table": "current_balance_projection",
-      "sqlSha256": "f239bd4a8116b92a"
-    },
-    {
-      "name": "current_balance_projection_state",
-      "table": "current_balance_projection",
-      "sqlSha256": "c8e54064215578c8"
     },
     {
       "name": "decision_outbox_operation",
@@ -16026,11 +15142,6 @@
       "name": "evidence_use_restrictions_ref",
       "table": "evidence_use_restrictions",
       "sqlSha256": "bd8f2d38f083e723"
-    },
-    {
-      "name": "expiry_estimates_holding",
-      "table": "expiry_estimates",
-      "sqlSha256": "0ff43008ac54866b"
     },
     {
       "name": "expiry_rules_program",
@@ -16408,11 +15519,6 @@
       "sqlSha256": "2fe5e243ea0a9dff"
     },
     {
-      "name": "scope_relations_release",
-      "table": "scope_relations",
-      "sqlSha256": "2f6c47dd17299cc4"
-    },
-    {
       "name": "settlement_relations_component",
       "table": "settlement_relations",
       "sqlSha256": "8475ed864d92cb4c"
@@ -16429,10 +15535,10 @@
     }
   ],
   "summary": {
-    "tableCount": 108,
+    "tableCount": 102,
     "viewCount": 31,
-    "triggerCount": 384,
-    "explicitIndexCount": 110,
+    "triggerCount": 375,
+    "explicitIndexCount": 104,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -16528,14 +15634,7 @@
         "transaction_observations",
         "valuation_observations"
       ],
-      "read-candidate": [
-        "balance_read_snapshots",
-        "balance_snapshot_pointer",
-        "conversion_simulations",
-        "current_balance_projection",
-        "expiry_estimates",
-        "scope_relations"
-      ],
+      "read-candidate": [],
       "operational-mutable": [
         "collection_scan_state",
         "observation_lane_state",
@@ -16555,18 +15654,14 @@
       "active_releases",
       "allocations",
       "approvals",
-      "balance_read_snapshots",
-      "balance_snapshot_pointer",
       "calculation_runs",
       "change_plans",
       "collection_runs",
       "collection_scan_state",
-      "conversion_simulations",
       "core_source_revision",
       "dataset_snapshot_policies",
       "decision_outbox",
       "economic_event_revisions",
-      "expiry_estimates",
       "http_scope_rules",
       "ingest_client_producers",
       "ingest_client_routes",
@@ -16588,7 +15683,6 @@
       "published_parse_runs",
       "reconciliation_proposals",
       "retention_classes",
-      "scope_relations",
       "settlement_relations",
       "source_external_ids",
       "sources"
@@ -16632,6 +15726,6 @@
       "0038_source_revision.sql",
       "0039_collection_runs.sql"
     ],
-    "schemaSha256": "b4f811d5d96884e73c1a37798c7c38dcae740e89741aa941568be754d7d25966"
+    "schemaSha256": "c62cf12fa235c852d78a7806d95b82f380baeb0b1730dcdf04f5847edc635c69"
   }
 }

@@ -110,27 +110,6 @@ beforeAll(async () => {
        'policy:synthetic:processing',3,'policy:synthetic:rounding',0,'down','[]','verified',
        '2026-09-08T00:00:00.000Z')`,
   ).run();
-  await env.DB.prepare(
-    `INSERT INTO conversion_simulations(input_digest,plan_json,search_coverage,policy_release,computed_at)
-     VALUES(?1,?2,'bounded','conversion-search-v1','2026-09-09T00:00:00.000Z')`,
-  )
-    .bind(
-      "a".repeat(64),
-      JSON.stringify({
-        request: {
-          offerId: "offer:synthetic",
-          offerVersion: "v1",
-          quantity: { coefficient: "1000", scale: 0, unitRef: "points:v-point" },
-        },
-      }),
-    )
-    .run();
-  await env.DB.prepare(
-    `INSERT INTO conversion_simulations(input_digest,plan_json,search_coverage,policy_release,computed_at)
-     VALUES(?1,'{"offerRef":"offer:forgotten@v1"}','bounded','conversion-search-v1','2026-09-09T00:00:00.000Z')`,
-  )
-    .bind("b".repeat(64))
-    .run();
 }, 30000);
 
 afterAll(async () => {
@@ -220,7 +199,9 @@ test("G2-19: a build fixes its evaluation instant, publishes it, and writes noth
   // CORE's own reward projections are untouched: the flag moves where the rows
   // are written, never what CORE holds.
   expect(
-    await env.DB.prepare("SELECT count(*) AS n FROM expiry_estimates").first<{ n: number }>(),
+    await env.DB.prepare(
+      "SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='expiry_estimates'",
+    ).first<{ n: number }>(),
   ).toMatchObject({ n: 0 });
   // The fixed input is on record in CORE and in DATA.
   expect(await readInputRecord(env.DB, built.inputDigest!)).not.toBeNull();
@@ -421,7 +402,7 @@ test("G0-09: dropping the reward READ tables leaves every CORE claim intact and 
       "SELECT offer_id,version,ratio_numerator,ratio_denominator FROM conversion_offers ORDER BY offer_id",
     ).all<Record<string, unknown>>();
     const saved = await env.DB.prepare(
-      "SELECT input_digest,plan_json FROM conversion_simulations ORDER BY input_digest",
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='conversion_simulations'",
     ).all<Record<string, unknown>>();
     return await sha256Hex(
       JSON.stringify({

@@ -353,7 +353,7 @@ describe("v2 balance read model", () => {
 
   it("reads a page through the projection order index, not a re-grouping scan", async () => {
     const query = projectionPageSql("a".repeat(64), { account: "v2-parity-account" }, 100, -1);
-    const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${query.sql}`)
+    const plan = await env.READ.prepare(`EXPLAIN QUERY PLAN ${query.sql}`)
       .bind(...query.args)
       .all<{ detail: string }>();
     const detail = plan.results.map((row) => row.detail).join(" | ");

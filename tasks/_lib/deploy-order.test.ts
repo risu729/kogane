@@ -470,7 +470,7 @@ describe("no preview lane and no collector secret in automation (G5-10, G5-17)",
   const secrets = collectorSecretNames(resources);
 
   test("the resource ledger yields the collector secret names", () => {
-    expect(secrets).toContain("RAW_EVIDENCE_TOKEN");
+    expect(secrets).not.toContain("RAW_EVIDENCE_TOKEN");
     expect(secrets).toContain("VPASS_PASSWORD");
   });
 

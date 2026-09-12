@@ -3,6 +3,8 @@ import { seedFixturePost, seedFixtureObject } from "./ingest-fixtures";
 
 export async function seedRegistry() {
   await env.DB.batch([
+    // Historical Vpass fixtures are synthetic and explicitly re-enable their test client.
+    env.DB.prepare("UPDATE ingest_clients SET active=1 WHERE id='collector-r2-vpass'"),
     env.DB.prepare(
       "INSERT INTO producers (id,kind,display_name) VALUES ('evidence-test','collector','Synthetic fixture')",
     ),
