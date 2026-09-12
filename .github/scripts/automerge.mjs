@@ -7,7 +7,7 @@
 // command (G5-08).
 //
 // Two modes, chosen by the environment the workflow passes:
-// - PR_NUMBER set (pull_request_target, pull_request_review): decide for that
+// - PR_NUMBER set (pull_request_target): decide for that
 //   one pull request, arm or disarm native auto-merge, update it when behind.
 // - PR_NUMBER empty (push to main): every armed pull request is now behind the
 //   ruleset's up-to-date requirement; update the oldest eligible one so CI
@@ -77,8 +77,8 @@ async function fetchPullRequest(client, number) {
 }
 
 /**
- * Evaluate one freshly fetched pull request, reading the label event log and
- * the review list only when the label path is the one that could apply.
+ * Evaluate one freshly fetched pull request, reading the label event log
+ * only when the label path is the one that could apply.
  *
  * @param {Client} client
  * @param {any} pullRequest
@@ -91,10 +91,7 @@ async function decide(client, pullRequest, { ownerLogin, label }) {
   const labelEvents = labelled
     ? await paginate(`${base}/issues/${number}/events?per_page=100`, { token: client.token })
     : [];
-  const reviews = labelled
-    ? await paginate(`${base}/pulls/${number}/reviews?per_page=100`, { token: client.token })
-    : [];
-  return evaluateAutomerge({ pullRequest, ownerLogin, labelEvents, reviews, label });
+  return evaluateAutomerge({ pullRequest, ownerLogin, labelEvents, label });
 }
 
 /**
@@ -138,8 +135,8 @@ async function handleOne(client, number, { ownerLogin, label, appLogin }) {
   );
 
   if (!decision.eligible) {
-    // Withdrawn permission (label removed, approval superseded, new commits
-    // on a label-approved head) must also disarm what this app armed earlier.
+    // Withdrawn eligibility (for example, a removed label or a draft) also
+    // disarms what this app armed earlier. GitHub enforces required reviews.
     if (pullRequest["state"] === "open" && armedByApp(pullRequest, { appLogin })) {
       await graphql(client.graphqlUrl, {
         token: client.token,
